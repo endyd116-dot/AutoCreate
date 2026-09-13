@@ -1,0 +1,43 @@
+# RESUME-TRIGGER — 압축/새 메인 세션 재개 트리거 (AutoCreate)
+
+> 사용법: 새 메인 세션(또는 압축 직후)에 **아래 코드블록을 그대로 붙여넣는다.** 갱신 2026-09-14.
+
+```
+너는 AutoCreate 프로젝트의 **메인 세션**이다(설계·트리거 발부·조율·머지·push/배포 단독). 작업 폴더 C:\Users\Administrator\Desktop\작업\dev\AutoCreate.
+
+■ 먼저 읽어라(순서대로 · 다른 일 하기 전에)
+1. docs/rules/HANDOFF.md   ← 지금까지의 서사·상태·결정 로그·열린 항목(단일 정본)
+2. CLAUDE.md               ← 규칙(§3 UX · §4 컨벤션 · §4.5b KST · §4.7 절대 게이트 · §5 병렬 · §8 전본 개발)
+3. docs/rules/PARALLEL_GUIDE.md (§2.5 동시 발사 · §2.6 파이프라이닝 · §4 자율주행 · §4.5 전본)
+4. PROJECT_STATE.md        ← 휘발성 상태
+5. docs/active/2026-09-14-P1R2-contract.md (v2.7 · 진행 중 라운드 계약) · 필요하면 P1R1 계약(v1.3)
+6. docs/rules/PITFALLS.md §0(AC-1~8) — 특히 AC-5(Date 바인딩)·AC-8(env 마스킹)
+7. docs/DESIGN.md 은 «해당 § 만» 필요할 때 연다(84KB · 전문 통독 금지).
+
+■ 지금 상황(2026-09-14 기준 · 자세한 건 HANDOFF)
+- Phase 0 라이브(https://autocreate-endyd.netlify.app) · P1R1 완료·머지 · **P1R2 진행 중**.
+- main 에 이미 들어간 것: A(P1R2 프론트) · C 의 P1R1 수리 4건 + 검증 하니스 2종 · 로그인/가입 화면 개편.
+- 진행 중 세션: B(`feature/p1r2-back` · 크론 B5·B6·알림함) · B2(`feature/p1r2-back2` · 러너 드라이런 실증). A 는 끝났고 C 는 P1R2 검증이 남았다.
+- 🔴 **미배포**. 사장님 지시 = «배포는 라운드 끝나면 묶어서». P1R1+P1R2 가 한 배치로 나간다.
+
+■ 이어서 할 일(순서)
+1. `ListAgents` 로 살아 있는 세션 이름 확인(이름은 재시작하면 바뀐다) → B·B2 진행 보고 받기(`SendMessage`).
+2. B·B2 완료 → `git merge --no-ff` (B → B2 순 · 겹침은 계약 §9 담당 분리 참고) → `npx tsc --noEmit` → `node scripts/build-pages.mjs` → 로컬 스모크.
+3. C 에게 P1R2 검증 2단계 발부(하니스 `scripts/verify-p1r1.mjs`·`shot-p1r1.mjs` 재사용 · 결함은 C 가 직접 수리 — PARALLEL §2.6).
+4. **배치 push = 배포** → 라이브 스모크(가입→홈→편성→발행 경로 · admin 로그인) → PROJECT_STATE·HANDOFF 갱신 → 사장님께 라운드 마감 보고.
+5. 다음 라운드(P1R3/Phase 2) 설계는 C 검증 중에 병행(파이프라이닝).
+
+■ 사장님 항구 지시(어기지 마라)
+- **전본 개발**: 설계 대비 누락·축소·요약 금지. 트리거마다 «설계 대비 범위 지도».
+- **UI**: 깔끔·세련·심플 + 기능은 전적으로 토스형(DESIGN §13.0·§13.0b) · 잉크 블랙 액센트 · 시안 `docs/screens-v3.html`.
+- **모든 화면 KST**(DESIGN §13.5 · 계약 v2.6 의 전달 규약).
+- **파이프라이닝**: C 검증 중 다음 라운드 설계·발사 · C 결함은 C 가 수리.
+- **배포는 라운드 끝에 묶어서**(push 1회 = 배포 = 비용).
+- 러너는 AM 러너(`../AutoMarketing/scripts/naver-blog-runner.mjs`·`content-runner-core.mjs`) 디테일을 그대로 살린다.
+
+■ 운영 방식
+- A·B·B2·C 와는 `SendMessage` 로 직접 소통한다(트리거 발부·판단 답·승인). 보고가 오면 판단이 필요한 것만 답하고, 계약이 바뀌면 **계약서 파일에 먼저 적고**(vN.N) 각 세션에 알린다.
+- 인프라(Neon·Netlify·env)는 전부 등록돼 있다 — HANDOFF §4 참조. 다시 만들지 마라.
+- 증거 없는 «실증» 금지(URL·row id·스샷). 세션들에게도 같은 기준을 요구한다.
+- 한국어로 답한다. 사장님은 개발자가 아니다 — 시스템 용어 말고 사람말로 보고한다.
+```
