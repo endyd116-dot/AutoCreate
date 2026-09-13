@@ -33,9 +33,13 @@ import { publisherStep } from "./publisher";
 import { learnStep } from "./learn";
 import { reapStep } from "./reap";
 
-/** 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유. */
-const TICK_BUDGET_MS = 20_000;
-/** 한 스텝에 최소한 이만큼은 준다(예산이 거의 없어도 테넌트 1~2집은 돈다). */
+/**
+ * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
+ *   `CRON_BUDGET_MS` 로 덮을 수 있다 — **로컬 검증 전용**이다(내 PC → Neon 은 질의당 ~300ms 라 같은 일이 수십 배 걸린다).
+ *   프로덕션에는 설정하지 않는다: 26초를 넘기면 함수가 통째로 죽어 **그 틱의 감사·집계가 같이 사라진다**(무슨 일이 있었는지도 못 본다).
+ */
+const TICK_BUDGET_MS = Math.max(3_000, Math.min(600_000, Number(process.env.CRON_BUDGET_MS) || 20_000));
+/** 뒤 스텝에 반드시 남겨 두는 몫(스텝당). 앞 스텝이 예산을 다 먹어도 뒤 스텝이 «한 건은» 해 볼 수 있게. */
 const MIN_STEP_MS = 1_500;
 
 /** 🔴 스텝 등록기 — 계약 §1 표 그대로. 순서 = 의존 순서(roll → assign → produce → review → learn). */
@@ -136,9 +140,16 @@ export async function runTick(every: Every, req: Request, opts: RunTickOpts = {}
   const ran: StepReport[] = [];
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
+    /* 예산 배분 — «남은 예산 ÷ 남은 스텝»(균등 분할)은 틀렸다.
+       균등 분할은 **일이 있는 스텝을 정확히 그만큼 굶긴다**: 5스텝이면 한 스텝의 몫이 20초 중 4초뿐이라,
+       한 자리에 그보다 오래 걸리는 `slots.produce` 가 매 틱 «시작도 못 하고 deferred» 가 된다
+       (2026-09-14 로컬 실측: 3자리 전건 유예 · 원인은 이 식이었다).
+       그래서 «뒤 스텝 몫만 떼고 나머지는 다 쓰라»로 바꾼다 — 한가한 스텝은 일이 없으면 즉시 끝나 예산을 쥐고 있지 않고,
+       일이 있는 스텝은 실제로 일할 수 있다. 뒤 스텝은 최소 `MIN_STEP_MS` 를 보장받는다(완전 기아 0). */
     const stepsLeft = steps.length - i;
     const remain = Math.max(0, deadline - Date.now());
-    const stepDeadline = Date.now() + Math.max(MIN_STEP_MS, Math.floor(remain / stepsLeft));
+    const reserve = (stepsLeft - 1) * MIN_STEP_MS;
+    const stepDeadline = Date.now() + Math.max(MIN_STEP_MS, remain - reserve);
     const rep: StepReport = { step: step.key, tenants: 0, changed: 0, skipped: 0, errors: 0 };
     const budgetSkipped: number[] = [];
     const autoOff: number[] = [];

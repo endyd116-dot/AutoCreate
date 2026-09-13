@@ -22,7 +22,24 @@
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";
 import { writeAudit } from "./audit";
-import { enqueueRunnerJob } from "./cron/publish-port";
+
+/**
+ * 🔴 **순환 import 차단** — 러너 잡 적재기는 **부를 때** 가져온다(최상단 import 금지).
+ *   고리: `account-health` → `cron/publish-port` → `publish/index` → `runner-jobs` → `account-health`(B2 가 전이표를 쓰려고 부른다).
+ *   최상단에서 묶으면 모듈 초기화 순서가 엉켜 한쪽이 `undefined` 로 보이고, **함수 로드 시점에** 터진다
+ *   (2026-09-14 로컬 실측: `cron-run`·`slots` 두 함수가 `TypeError: Cannot convert undefined or null to object` 로 500 —
+ *    런타임 크래시라 우리 에러 핸들러도 못 잡는다).
+ *   경로는 **문자열 리터럴**이어야 한다 — 변수로 두면 esbuild 가 번들에 담지 못해 배포본에서 «없는 모듈»이 된다(같은 날 실측).
+ */
+async function enqueueRunnerJob(tid: number, input: { kind: "session.login" | "session.verify" | "verify.post_alive" | "revenue.stats" | "publish.naver_blog" | "publish.tistory"; accountId?: number | null; pieceId?: number | null; payload?: Record<string, unknown>; priority?: number }): Promise<{ ok: boolean; unavailable?: boolean }> {
+  try {
+    const port = await import("./cron/publish-port");
+    return await port.enqueueRunnerJob(tid, input);
+  } catch (e) {
+    console.error("[account-health] 러너 잡 적재기 로드 실패", String((e as Error)?.message ?? e).slice(0, 200));
+    return { ok: false, unavailable: true };
+  }
+}
 
 const n = (v: unknown) => Number(v || 0);
 

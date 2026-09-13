@@ -36,6 +36,9 @@ async function oneSlot(tid: number, slotId: number, date: string): Promise<Slot 
   return rows.find((s) => s.id === slotId) ?? null;
 }
 
+/* 🔴 교차 테넌트(IDOR) 차단은 **구조로** 한다: 아래 모든 경로가 `auth.tid` 로만 슬롯을 찾는다
+   (`WHERE tenant_id = ${tid} AND id = ${slotId}`). 남의 자리 id 를 실어도 행이 안 잡혀 404 로 끝난다 —
+   본문의 tenantId 를 믿는 자리가 한 군데도 없다(CLAUDE §4.3·§4.6). */
 export default async (req: Request): Promise<Response> => {
   const auth = requireUser(req); if (!auth.ok) return auth.res;
   const tid = auth.tid;

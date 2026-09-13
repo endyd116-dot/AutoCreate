@@ -60,28 +60,27 @@ export interface ReapResult { released: number; failed: number }
 export type ReapStaleJobsFn = (staleMin?: number) => Promise<ReapResult>;
 
 /* ───────── 결합 ───────── */
+/* 🔴 **B2 머지 완료(2026-09-14) — 정적 import 로 꿰었다.**
+   머지 전에는 모듈이 없어 «변수 지정자 동적 import» 로 두었는데, 그 형태는 esbuild 가 번들에 담지 못해
+   **모듈이 생긴 뒤에도 런타임에 여전히 «missing» 으로 보였다**(로컬 스모크 실측: `publisher` 가 `connector:"missing"` 보고 · 발행 0건).
+   «있는데 연결 안 된 커넥터»는 조용한 실패라 제일 나쁘다 — 모듈이 존재하는 지금은 정적 import 가 정답이다.
+   포트는 이제 **타입 경계 + 미구현 정직 반환**만 맡는다(러너/API 판단·잡 적재는 여전히 전부 B2 안 · 계약 §10). */
+import { publishPieceById as b2PublishPieceById, publishViaOf as b2PublishViaOf, enqueueJob as b2EnqueueJob, reapStaleJobs as b2ReapStaleJobs } from "../publish/index";
+
 interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn; reapStaleJobs?: ReapStaleJobsFn; fetchStats?: FetchStatsFn }
-let bound: Bound | null = null;
-let probed = false;
 
-/** 🔴 머지 시 한 줄 — `bindPublish({ publishPieceById, publishViaOf })`. 이후 포트는 그대로 그 구현을 쓴다. */
-export function bindPublish(impl: Bound): void { bound = impl; probed = true; console.log("[publish-port] 커넥터 연결됨(bindPublish)"); }
+let bound: Bound | null = {
+  publishPieceById: b2PublishPieceById as unknown as PublishPieceByIdFn,
+  publishViaOf: b2PublishViaOf as unknown as PublishViaOfFn,
+  enqueueJob: b2EnqueueJob as unknown as EnqueueJobFn,
+  reapStaleJobs: b2ReapStaleJobs as unknown as ReapStaleJobsFn,
+  // fetchStats: B2 미제공 — API 채널 통계는 `learn` 이 «못 물어봤다»로 센다(조회 0 으로 적지 않는다).
+};
 
-/** B2 모듈이 이미 있으면 자동 연결(머지 직후 배선을 잊어도 돌게 — 그래도 bindPublish 가 정본이다). */
-async function ensureBound(): Promise<Bound | null> {
-  if (bound || probed) return bound;
-  probed = true;
-  // 지정자를 변수로 둔다 — 모듈이 없는 지금 TS·번들러가 «없는 모듈»로 죽지 않게. 머지 후에는 런타임에 찾아진다.
-  const spec = "../publish/index";
-  try {
-    const mod = await import(/* @vite-ignore */ spec) as Partial<Bound>;
-    if (typeof mod?.publishPieceById === "function") {
-      bound = { publishPieceById: mod.publishPieceById, publishViaOf: mod.publishViaOf, enqueueJob: mod.enqueueJob, reapStaleJobs: mod.reapStaleJobs, fetchStats: mod.fetchStats };
-      console.log("[publish-port] 커넥터 자동 연결됨(lib/publish/index)");
-    }
-  } catch { /* 아직 없다 — unavailable 로 정직하게 */ }
-  return bound;
-}
+/** 구현을 갈아끼울 때만 쓴다(테스트·예외 상황). 평상시엔 위 정적 결합이 정본이다. */
+export function bindPublish(impl: Bound | null): void { bound = impl; }
+
+async function ensureBound(): Promise<Bound | null> { return bound; }
 
 const UNAVAILABLE: PublishFail = {
   ok: false, reason: "config", retriable: true, unavailable: true,
