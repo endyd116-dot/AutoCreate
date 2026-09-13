@@ -109,7 +109,7 @@ async function grantCoins(tenantKey, coins) {
     const g = await call(oj, "/api/ops-coins-grant", { body: { id: t.id, coins, reason: "C2 하니스" } });
     return rec("coins grant(ops)", g.json?.ok === true, `tenant ${t.id} +${coins} → balance ${g.json?.balance ?? g.json?.coins ?? "?"}`, `ops-coins-grant tenant=${t.id}`);
   }
-  if (IS_LIVE) return rec("coins grant", false, "라이브인데 OPS_USER/OPS_PASS 없음 — 운영센터 «코인 지급»으로 수동 지급 후 재실행");
+  if (IS_LIVE) return rec("coins grant", false, "라이브 코인 부족 — 메인에 «지급 요청»(운영센터 ops-coins-grant · 테넌트 id 3) 후 재실행");
   const url = process.env.NETLIFY_DATABASE_URL_UNPOOLED || process.env.NETLIFY_DATABASE_URL;
   if (!url) return rec("coins grant(db)", false, "NETLIFY_DATABASE_URL 없음");
   const { default: postgres } = await import("postgres");
