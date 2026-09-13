@@ -4,23 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>운영센터 로그인 · AutoCreate</title>
+<meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=1">
+<link rel="stylesheet" href="/css/ac.css?v=4">
 </head>
 <body>
-<main class="page white auth">
-  <div class="logo">AutoCreate <span class="pill ink">운영센터</span></div>
-  <div class="step-h"><h1>운영자 로그인</h1><p>싸이렌 MIS 계정이면 SSO로, 아니면 아이디로 들어와요.</p></div>
-  <div id="ssoErr" class="banner" hidden></div>
-  <form id="f" novalidate>
-    <div class="field"><label for="email">아이디 또는 이메일</label><input class="input" id="email" name="email" type="text" autocomplete="username" required placeholder="admin"><div class="help"></div></div>
-    <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required><div class="help"></div></div>
-    <div class="cta nobar"><button class="btn primary" type="submit">로그인</button></div>
-  </form>
-  <div class="divider"></div>
-  <a class="btn secondary" href="https://tbfa.co.kr/admin-hub.html" style="width:100%">싸이렌 MIS 허브에서 SSO로 들어가기</a>
+<main class="page auth">
+  <div class="auth-in">
+    <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 12 6l5 11"/><path d="M9.5 13.5h5"/></svg></i><b>AutoCreate</b> <span class="pill ink">운영센터</span></div>
+    <h1>운영자 로그인</h1>
+    <p class="sub">싸이렌 MIS 계정이면 SSO로, 아니면 아이디로 들어와요.</p>
+    <div id="ssoErr" class="banner" hidden style="margin-bottom:12px"></div>
+    <form id="f" novalidate>
+      <div class="field"><label for="email">아이디 또는 이메일</label><input class="input" id="email" name="email" type="text" autocomplete="username" required placeholder="admin"><div class="help"></div></div>
+      <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="비밀번호"><div class="help"></div></div>
+      <div class="cta"><button class="btn primary" type="submit">로그인</button></div>
+    </form>
+    <div class="divider" style="margin:20px 0 16px"></div>
+    <a class="btn secondary" href="https://tbfa.co.kr/admin-hub.html" style="width:100%;height:50px">싸이렌 MIS 허브에서 들어가기</a>
+  </div>
 </main>
-<script src="/js/ui.js?v=1"></script>
+<script src="/js/ui.js?v=4"></script>
 <script>
   const MSG = { invalid: "SSO 토큰이 유효하지 않아요(60초 안에 다시 시도).", noemail: "MIS 계정에 이메일이 없어요.", not_allowed: "운영진으로 등록되지 않은 계정이에요.", inactive: "비활성 운영자 계정이에요.", server: "잠시 후 다시 시도해 주세요." };
   const e = UI.qs.get("sso_error"); if (e) { const b = UI.$("#ssoErr"); b.hidden = false; b.textContent = MSG[e] || e; }

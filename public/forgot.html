@@ -3,28 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>비밀번호 찾기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=1">
-<title>비밀번호 찾기 · AutoCreate</title>
+<link rel="stylesheet" href="/css/ac.css?v=4">
 </head>
 <body>
-<main class="page white auth">
-  <div class="logo">AutoCreate</div>
-  <div class="step-h"><h1>비밀번호를 잊으셨나요?</h1><p>가입한 이메일로 새 비밀번호 만들기 링크를 보내드려요.</p></div>
-  <form id="f" novalidate>
-    <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
-    <div class="cta nobar"><button class="btn primary" type="submit">링크 보내기</button></div>
-  </form>
-  <div class="links"><a href="/login.html">로그인으로</a></div>
+<main class="page auth">
+  <div class="auth-in">
+    <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 12 6l5 11"/><path d="M9.5 13.5h5"/></svg></i><b>AutoCreate</b></div>
+    <h1>비밀번호를<br>잊으셨나요?</h1>
+    <p class="sub">가입한 이메일로 새 비밀번호를 만드는 링크를 보내드려요.</p>
+    <form id="f" novalidate>
+      <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="username" required placeholder="you@example.com"><div class="help"></div></div>
+      <div class="cta"><button class="btn primary" type="submit">링크 보내기</button></div>
+    </form>
+    <div class="links"><a href="/login.html">로그인으로 돌아가기</a></div>
+  </div>
 </main>
-<script src="/js/ui.js?v=1"></script>
+<script src="/js/ui.js?v=4"></script>
 <script>
   const f = UI.$("#f");
   UI.form(f, async (d) => {
     const r = await UI.api("/api/auth-forgot", { body: { email: d.email }, noRedirect: true });
     if (!r.ok) { UI.fieldError(f, "email", r.error || "이메일을 확인해 주세요."); return; }
-    f.innerHTML = '<div class="empty"><span class="mk money">✓</span><h3>메일을 보냈어요</h3><p>30분 안에 메일의 버튼을 눌러 주세요. 안 오면 스팸함도 확인해 주세요.</p></div>';
+    f.innerHTML = '<div class="empty" style="padding:24px 0"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><h3>메일을 보냈어요</h3><p>30분 안에 메일 속 버튼을 눌러 주세요. 안 오면 스팸함도 확인해 주세요.</p></div>';
   });
 </script>
 </body>

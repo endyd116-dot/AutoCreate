@@ -6,7 +6,7 @@
 <title>계정 연결 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=2">
+<link rel="stylesheet" href="/css/ac.css?v=4">
 </head>
 <body>
 <div class="shell">
@@ -19,13 +19,14 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=2"></script>
-<script src="/js/mock.js?v=1"></script>
+<script src="/js/ui.js?v=4"></script>
+<script src="/js/mock.js?v=3"></script>
 <script>
 (async () => {
 await UI.boot("account");
 const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
-const ERR = { login_fail: "로그인 실패", captcha: "보안 문자 확인 필요", rate_limited: "발행 제한에 걸림", suspended: "채널에서 정지됨", selector_changed: "채널 화면이 바뀜", network: "네트워크 오류" };
+/* 오류 사람말은 UI.ERRK 한 벌(발행함과 공용) */
+const HEALTH = (n) => (n >= 80 ? "좋아요" : n >= 50 ? "조금 지쳤어요" : "쉬어야 해요");
 const HOURS = [[6,"06시"],[7,"07시"],[9,"09시"],[12,"12시"],[15,"15시"],[18,"18시"],[20,"20시"],[21,"21시"],[23,"23시"]];
 let D = { accounts: [], channels: [] }, personas = [];
 const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
@@ -38,9 +39,15 @@ async function load() {
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => connectSheet(chs.find((c) => c.key === b.dataset.k)));
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
-    ? D.accounts.map((a) => `<button type="button" class="row tap" data-id="${a.id}">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d">오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</button>`).join("")
+    ? D.accounts.map((a) => { const relogin = a.status === "pending_login";
+        const sub = relogin ? UI.errk(a.lastErrorKind || "login_fail") : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요" : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
+        const head = `${UI.mark(a.channel)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
+        return relogin
+          ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">다시 로그인</button></div>`
+          : `<div class="row">${head}${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</div>`; }).join("")
     : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">아직 연결한 계정이 없어요</h3><p>위에서 채널 마크를 누르면 바로 연결할 수 있어요.</p></div>`);
-  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
+  UI.$$("#list [data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
+  UI.$$("#list [data-relogin]").forEach((b) => b.onclick = () => reloginSheet(D.accounts.find((a) => a.id === Number(b.dataset.relogin))));
 }
 
 /* ── 연결 시트(채널 방식별 · 계약 §1) ── */
@@ -79,11 +86,63 @@ async function submitAdd(body, f, close) {
   close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
 }
 
+/* ── 다시 로그인(§7.2 · 내 PC 프로그램이 로그인 창을 연다) ── */
+const RELOGIN_STEPS = [["내 PC 프로그램에 부탁해요", "queued"], ["PC에서 로그인 창이 열려요", "running"], ["로그인을 마치면 바로 이어서 올려요", "done"]];
+function reloginSteps(status) {
+  const i = Math.max(0, RELOGIN_STEPS.findIndex(([, k]) => k === status));
+  return `<div class="steps">${RELOGIN_STEPS.map(([l], n) => `<div class="st ${status === "done" || n < i ? "done" : status && n === i ? "on" : ""}"><i>${status === "done" || n < i ? "✓" : n + 1}</i>${l}</div>`).join("")}</div>`;
+}
+async function reloginSheet(a) {
+  if (!a) return;
+  const rl = await UI.api("/api/runner-list");
+  const online = rl.ok && (rl.devices || []).some((d) => d.status === "online");
+  if (!online) return UI.sheet(`<p class="muted" style="margin:0 0 4px">내 PC 프로그램이 채널 로그인 창을 열어 줘요. 지금은 꺼져 있어서 열 수 없어요.</p>
+    <p class="muted" style="margin:0 0 16px;font-size:13px">켜 두면 이 계정뿐 아니라 기다리던 글도 함께 올라가요.</p>
+    <div class="cta"><a class="btn primary" href="/app/runner.html">내 PC 프로그램 켜기</a></div>`, { title: "먼저 프로그램을 켜 주세요" });
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">@${UI.esc(a.handle)} 의 로그인이 풀렸어요. 내 PC 프로그램이 ${UI.esc(UI.chLabel(a.channel))} 로그인 창을 열어요.</p>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">보안 문자가 나오면 그 창에서 직접 입력해 주세요. 비밀번호는 저장된 것을 씁니다.</p>
+    <div id="rst">${reloginSteps(null)}</div><div id="rerr"></div>
+    <div class="cta" id="rcta"><button class="btn primary" type="button" id="go">로그인 창 열기</button></div>`,
+    { title: "다시 로그인", onOpen: (sh, close) => {
+      const st = sh.querySelector("#rst"), box = sh.querySelector("#rerr"), cta = sh.querySelector("#rcta");
+      sh.querySelector("#go").onclick = async (e) => {
+        e.target.disabled = true;
+        const r = await UI.api("/api/accounts-relogin", { body: { id: a.id } });
+        if (!r.ok && r.step === "runner_offline") { e.target.disabled = false; box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>${UI.esc(r.error)}</span><a href="/app/runner.html">켜러 가기</a></div>`; return; }
+        cta.hidden = true;
+        let status = r.ok && r.job ? r.job.status : null;
+        st.innerHTML = reloginSteps(status || "queued");
+        const t0 = Date.now();
+        const tick = async () => {
+          if (!document.body.contains(sh)) return;                       // 시트 닫히면 폴링도 끝
+          const g = await UI.api(`/api/accounts-relogin?id=${a.id}`);
+          const acc = g.ok ? g.account : null;
+          status = g.ok && g.job ? g.job.status : status;
+          if (!g.ok || (!g.job && acc)) {                                 // 폴백: 잡을 못 보면 계정 상태로만 판정
+            const al = await UI.api("/api/accounts-list");
+            const me2 = al.ok ? (al.accounts || []).find((x) => x.id === a.id) : null;
+            if (me2 && me2.status === "active") status = "done";
+          } else if (acc && acc.status === "active") status = "done";
+          st.innerHTML = reloginSteps(status === "failed" ? "running" : status || "queued");
+          if (status === "done") { close(); UI.done(`@${a.handle} 다시 로그인했어요`, load); return; }
+          if (status === "failed") { box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>로그인 창에서 끝내지 못했어요</span></div>`; cta.hidden = false; e.target.disabled = false; return; }
+          if (Date.now() - t0 > 120000) { box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>아직 끝나지 않았어요 · PC 화면을 확인해 주세요</span></div>`; cta.hidden = false; e.target.disabled = false; return; }
+          setTimeout(tick, 2000);
+        };
+        setTimeout(tick, 1500);
+      };
+    } });
+}
+
 /* ── 계정 상세 시트(DESIGN §7.1 필드 전부) ── */
 async function detailSheet(a) {
   if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
-  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · 건강 ${a.healthScore} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
-  ${a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>마지막 오류: ${UI.esc(ERR[a.lastErrorKind] || a.lastErrorKind)}</span></div>` : ""}
+  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
+  ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(a.lastErrorKind || "login_fail"))}</span><button type="button" id="relogin">다시 로그인</button></div>`
+    : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
+    : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
+  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
+  <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
   <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
@@ -102,6 +161,7 @@ async function detailSheet(a) {
   UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
+    const rb = sh.querySelector("#relogin"); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
     sh.querySelector("#save").onclick = async () => {
       const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), dailyCap: UI.stepVal(sh, "cap"), minGapMin: Number(UI.chipVal(sh, "gap") || 180), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
       const m = {}; const v = (id) => sh.querySelector(id).value.trim();

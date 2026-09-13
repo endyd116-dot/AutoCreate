@@ -180,3 +180,56 @@ export async function exchangeCode(channel: OAuthChannel, code: string): Promise
     }
   } catch (e) { return { ok: false, reason: `exchange_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}` }; }
 }
+
+/* ───────── 토큰 갱신(B2-5 · 2026-09-14) ─────────
+ *   access token 만료 시 재발급. 저장·재암호화는 `lib/publish/tokens.ts` 가 한다(이 파일은 순수 — DB 접근 0).
+ *   · Google(blogger·youtube): refresh_token 으로 재발급(refresh_token 은 그대로 유지 — 응답에 없다).
+ *   · Meta/Threads: refresh_token 이 없다. 장기 토큰을 **만료 전에 교환**해 연장한다(threads th_refresh_token · meta fb_exchange_token).
+ *   · TikTok: refresh_token 회전(새 refresh_token 이 응답에 온다 — 반드시 저장).
+ *   graceful: throw 금지. 실패 { ok:false, reason } — 호출자가 계정 disconnected + 알림.
+ */
+export type RefreshResult = { ok: true; token: OAuthToken } | { ok: false; reason: string };
+
+/** 만료까지 이 시간보다 적게 남았으면 갱신한다(클록 스큐·왕복 여유). */
+export const TOKEN_REFRESH_MARGIN_MS = 10 * 60_000;
+export function tokenNeedsRefresh(token: { expiresAt?: string } | null | undefined): boolean {
+  const e = String(token?.expiresAt ?? "").trim();
+  if (!e) return false;                       // 만료를 모르면 그냥 써 본다(401 이면 그때 갱신)
+  const t = Date.parse(e);
+  return Number.isFinite(t) && t - Date.now() < TOKEN_REFRESH_MARGIN_MS;
+}
+
+export async function refreshAccessToken(channel: OAuthChannel, token: OAuthToken): Promise<RefreshResult> {
+  const p = PROVIDER_OF[channel];
+  const app = appCreds(p);
+  if (!app) return { ok: false, reason: "provider_not_configured" };
+  try {
+    switch (p) {
+      case "google": {
+        if (!token.refreshToken) return { ok: false, reason: "no_refresh_token" };
+        const t = await jfetch("https://oauth2.googleapis.com/token", form({ client_id: app.id, client_secret: app.secret, refresh_token: token.refreshToken, grant_type: "refresh_token" }));
+        if (!t.ok || !t.json?.access_token) return { ok: false, reason: `google_refresh_${t.status}: ${JSON.stringify(t.json ?? "").slice(0, 120)}` };
+        // refresh_token 은 응답에 없다 — 기존 것을 유지한다(지우면 다음 갱신이 영영 불가).
+        return { ok: true, token: { ...token, accessToken: String(t.json.access_token), expiresAt: isoIn(t.json.expires_in), refreshToken: t.json.refresh_token ? String(t.json.refresh_token) : token.refreshToken } };
+      }
+      case "meta": {
+        const q = new URLSearchParams({ grant_type: "fb_exchange_token", client_id: app.id, client_secret: app.secret, fb_exchange_token: token.accessToken });
+        const t = await jfetch(`https://graph.facebook.com/v21.0/oauth/access_token?${q}`);
+        if (!t.ok || !t.json?.access_token) return { ok: false, reason: `meta_refresh_${t.status}: ${JSON.stringify(t.json ?? "").slice(0, 120)}` };
+        return { ok: true, token: { ...token, accessToken: String(t.json.access_token), expiresAt: isoIn(t.json.expires_in) } };
+      }
+      case "threads": {
+        const t = await jfetch(`https://graph.threads.net/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(token.accessToken)}`);
+        if (!t.ok || !t.json?.access_token) return { ok: false, reason: `threads_refresh_${t.status}: ${JSON.stringify(t.json ?? "").slice(0, 120)}` };
+        return { ok: true, token: { ...token, accessToken: String(t.json.access_token), expiresAt: isoIn(t.json.expires_in) } };
+      }
+      case "tiktok": {
+        if (!token.refreshToken) return { ok: false, reason: "no_refresh_token" };
+        const t = await jfetch("https://open.tiktokapis.com/v2/oauth/token/", form({ client_key: app.id, client_secret: app.secret, grant_type: "refresh_token", refresh_token: token.refreshToken }));
+        if (!t.ok || !t.json?.access_token) return { ok: false, reason: `tiktok_refresh_${t.status}: ${JSON.stringify(t.json ?? "").slice(0, 120)}` };
+        // ⚠️ TikTok 은 refresh_token 이 회전한다 — 새 값을 저장하지 않으면 다음 갱신이 실패한다.
+        return { ok: true, token: { ...token, accessToken: String(t.json.access_token), refreshToken: t.json.refresh_token ? String(t.json.refresh_token) : token.refreshToken, expiresAt: isoIn(t.json.expires_in) } };
+      }
+    }
+  } catch (e) { return { ok: false, reason: `refresh_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}` }; }
+}

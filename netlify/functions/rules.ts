@@ -24,6 +24,16 @@ export const config = { path: ["/api/rules-list", "/api/rules-save", "/api/rules
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 
+/**
+ * 규칙이 꺼지거나 지워질 때 그 규칙이 잡아 둔 «앞으로의» 빈 슬롯을 치운다.
+ *   ★C4 fix: status='planned' 만 지우면 편성자가 소재를 배정한 뒤(topic_assigned)·소재를 못 찾은 뒤(no_topic)·코인이 모자란(coin_short) 슬롯이 남아,
+ *   새 규칙이 만든 슬롯과 같은 날에 겹쳐 중복 편성이 된다(실측 2026-09-14: 09-17·09-19 각 2건). 글이 붙은 슬롯(piece_id)과 지난 날짜는 건드리지 않는다.
+ */
+function clearFutureSlots(tid: number, ruleId: number) {
+  return sql`DELETE FROM slots WHERE tenant_id = ${tid} AND rule_id = ${ruleId} AND piece_id IS NULL
+    AND slot_date >= CURRENT_DATE AND status IN ('planned','topic_assigned','no_topic','coin_short')`;
+}
+
 async function maxRulesOf(tid: number): Promise<number | null> {
   const [t] = await q(sql`SELECT plan_key FROM tenants WHERE id = ${tid}`);
   const plan = await planOf(String(t?.plan_key || "trial"));
@@ -92,10 +102,10 @@ export default async (req: Request): Promise<Response> => {
       // 없는 id 는 비활성 + 그 규칙의 미래 planned 슬롯 정리
       for (const e of existing) if (!keep.has(e.id)) {
         await q(sql`UPDATE cadence_rules SET active = false WHERE tenant_id = ${tid} AND id = ${e.id}`);
-        await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND rule_id = ${e.id} AND status = 'planned' AND piece_id IS NULL`);
+        await q(clearFutureSlots(tid, e.id));
       }
       // 비활성으로 바뀐 규칙의 미래 planned 슬롯도 정리(«주 0회로 뒀는데 계속» 방지 · AC-2)
-      for (const r of clean) if (r.id && !r.active) await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND rule_id = ${r.id} AND status = 'planned' AND piece_id IS NULL`);
+      for (const r of clean) if (r.id && !r.active) await q(clearFutureSlots(tid, r.id));
       const [chk] = await q(sql`SELECT jsonb_typeof(weekdays) AS t FROM cadence_rules WHERE tenant_id = ${tid} AND weekdays IS NOT NULL ORDER BY id DESC LIMIT 1`);
       if (chk && chk.t !== "array") console.error("[rules-save] weekdays jsonb_typeof !== array", chk);
       const settings = await readScheduleSettings(tid);
@@ -113,7 +123,11 @@ export default async (req: Request): Promise<Response> => {
       const settings = scheduleSettingsOf(merged);
       // horizon·quietDays 가 바뀌면 달력을 다시 채운다(멱등)
       if ("horizonDays" in patch || "quietDays" in patch || "bestTimeMode" in patch) {
-        if ("quietDays" in patch && settings.quietDays.length) await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND status = 'planned' AND piece_id IS NULL AND slot_date = ANY(${settings.quietDays}::date[])`);
+        // ★C4 fix: JS 배열을 `= ANY(${arr}::date[])` 로 바인딩하면 postgres-js 가 문자열 하나로 보내 22P02(malformed array literal)로 죽는다 — 날짜를 하나씩 캐스팅해 IN 으로.
+        if ("quietDays" in patch && settings.quietDays.length) {
+          await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND status = 'planned' AND piece_id IS NULL
+            AND slot_date IN (${sql.join(settings.quietDays.map((d) => sql`${d}::date`), sql`, `)})`);
+        }
         await rollSlots(tid, settings.horizonDays);
       }
       await writeAudit({ tenantId: tid, action: "rules_settings", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: patch });

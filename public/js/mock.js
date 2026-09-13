@@ -1,7 +1,8 @@
-/* mock.js — P1R1 계약(docs/active/2026-09-14-P1R1-contract.md)의 모양대로 가짜 응답을 돌려주는 개발용 층.
+/* mock.js — P1R1·P1R2 계약(docs/active/2026-09-14-P1R1-contract.md · -P1R2-contract.md)의 모양대로 가짜 응답을 돌려주는 개발용 층.
    🔴 `location.search` 에 `mock=1` 이 없으면 즉시 return — 운영 코드 무접촉. 키 이름은 계약서 글자 그대로.
    상태는 sessionStorage(acMockState)에 남겨 화면 왕복 중 유지 · `?mock=1&fresh=1` 이면 빈 상태(계정 0·규칙 0)로 초기화.
-   내부 링크 클릭·UI.go 는 mock=1 을 이어 붙인다(전 화면 왕복용). */
+   내부 링크 클릭·UI.go 는 mock=1 을 이어 붙인다(전 화면 왕복용).
+   [P1R2] `?runner=on|off` 로 내 PC 프로그램 온·오프 두 상태를 왕복한다(기본 off — 오프라인 경고 경로가 보이도록). */
 (function () {
   const qs = new URLSearchParams(location.search);
   if (qs.get("mock") !== "1" || !window.UI) return;
@@ -53,11 +54,14 @@
     { key: "disclosure", label: "제휴 고지 첫 블록", pass: ok }, { key: "banned_words", label: "금칙어", pass: true, detail: "0건" }, { key: "similarity", label: "다른 계정 글과 유사도", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 수", pass: true, detail: "1개" } ] });
 
   const fresh = qs.get("fresh") === "1";
+  const runnerOn = qs.get("runner") === "on";
+  const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     coins: 30, refreshCount: 0, autoSchedule: false, nextId: 100,
     accounts: fresh ? [] : [
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
-      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 100, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
+      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
+      { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
@@ -74,6 +78,8 @@
       { id: 502, channel: "tistory", accountHandle: "tips_b", kind: "post", format: "compare", title: "에어프라이어 청소, 3분 요약(비교표)", status: "in_review", stage: "done", scheduledFor: kst(1, 13, 0), gateOk: false, createdAt: iso(now - 3000e3), topicTitle: "에어프라이어 청소법", regenCount: 1, bodyHtml: BODY_TISTORY, meta: { tags: ["에어프라이어"], disclosure: null }, gate: gate(false) },
       { id: 503, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "guide", title: "가을 이불 세탁, 이것만", status: "scheduled", stage: "done", scheduledFor: kst(2, 7, 30), gateOk: true, createdAt: iso(now - 86400e3), topicTitle: "가을 이불 세탁", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true) },
       { id: 504, channel: "tistory", accountHandle: "tips_b", kind: "post", format: "info", title: "전기요금 아끼는 콘센트", status: "published", stage: "done", publishedAt: iso(now - 2 * 86400e3), externalUrl: "https://tips-b.tistory.com/12", gateOk: true, createdAt: iso(now - 3 * 86400e3), topicTitle: "전기요금", regenCount: 0, bodyHtml: BODY_TISTORY, meta: { tags: [], disclosure: null }, gate: gate(true) },
+      { id: 505, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "story", title: "에어프라이어 청소, 눌어붙은 기름 3분 컷", status: "published", stage: "done", publishedAt: iso(now - 26 * 3600e3), externalUrl: "https://blog.naver.com/cook_a/223456789", gateOk: true, createdAt: iso(now - 3 * 86400e3), topicTitle: "에어프라이어 청소법", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["에어프라이어청소"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece505" } }, gate: gate(true) },
+      { id: 506, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "guide", title: "가을 이불 세탁, 건조기 없이 뽀송하게", status: "awaiting_manual", stage: "done", scheduledFor: iso(now - 4 * 3600e3), gateOk: true, createdAt: iso(now - 2 * 86400e3), topicTitle: "가을 이불 세탁", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["이불세탁"], disclosure: null }, gate: gate(true) },
     ],
     rules: fresh ? [] : [
       { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, active: true },
@@ -81,9 +87,25 @@
     ],
     settings: { autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
+    /* ── [P1R2] 러너 기기(계약 §2) · 발행함(§6) · 재로그인 잡(§7.2) · 알림함 ── */
+    devices: fresh ? [] : [{ id: 901, name: "집 PC", kind: "own", online: runnerOn, lastSeenAt: iso(now - 2 * 3600e3), version: "1.0.3", jobsWaiting: 2 }],
+    posts: fresh ? [] : [
+      { id: 701, pieceId: 504, channel: "tistory", accountHandle: "tips_b", title: "전기요금 아끼는 콘센트", externalUrl: "https://tips-b.tistory.com/12", publishedVia: "api", publishedAt: iso(now - 2 * 86400e3), status: "published", stats: { views: 1240, likes: 8, comments: 2, lastSyncAt: iso(now - 6 * 3600e3) }, alive: true },
+      { id: 702, pieceId: 505, channel: "naver_blog", accountHandle: "cook_a", title: "에어프라이어 청소, 눌어붙은 기름 3분 컷", externalUrl: "https://blog.naver.com/cook_a/223456789", publishedVia: "runner", publishedAt: iso(now - 26 * 3600e3), status: "published", stats: { views: 318, likes: 21, lastSyncAt: iso(now - 3 * 3600e3) }, alive: true },
+      { id: 703, pieceId: 506, channel: "naver_blog", accountHandle: "cook_a", title: "가을 이불 세탁, 건조기 없이 뽀송하게", status: "awaiting_manual", stats: {}, alive: false, errorKind: "selector_changed", failReason: "임시저장까지는 됐는데 발행 버튼을 찾지 못했어요" }, // [v2.1] publishedVia·publishedAt 없음(post 행이 없는 실패 행)
+    ],
+    reloginJobs: {},
+    notifications: fresh ? [] : [
+      { id: 801, kind: "reassign", title: "@life_c 계정이 정지됐어요", desc: "예약된 글 3건을 @cook_a 로 옮겼어요", link: "/app/accounts.html", tone: "warn", createdAt: iso(now - 5 * 3600e3) },
+      { id: 802, kind: "publish", title: "글 1건이 올라가지 못했어요", desc: "«가을 이불 세탁» · 채널 화면이 바뀌었어요", link: "/app/posts.html", tone: "warn", createdAt: iso(now - 4 * 3600e3) },
+      { id: 803, kind: "publish", title: "@cook_a 에 글이 올라갔어요", desc: "에어프라이어 청소, 눌어붙은 기름 3분 컷", link: "/app/posts.html", tone: "info", createdAt: iso(now - 26 * 3600e3), readAt: iso(now - 20 * 3600e3) },
+    ],
+    reassigned: fresh ? null : { fromHandle: "life_c", toHandle: "cook_a", moved: 3, at: iso(now - 5 * 3600e3) },
+    topicsRefresh: null, // [v2.9] { startedAt, finishedAt?, added?, error? } — tenants.settings.topicsRefresh 자리
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1") { S = seed(); if (!fresh) rollSlots(); save(); }
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
   /* 슬롯 생성(규칙대로 · 멱등) — 계약 §5 slots.roll 모양 */
@@ -103,14 +125,41 @@
       }
     }
   }
-  const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (1 + ({ naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }[r.channel] || 2)), 0);
+  /* [P1R2] 슬롯 상태기계(§5B.6) 전 상태를 화면에서 볼 수 있게 심는다 — 소재 없음·코인 부족·PC 대기·확인 필요 */
+  function scenarios() {
+    const free = S.slots.filter((s) => !s.pieceId && s.status === "planned").sort((a, b) => a.date.localeCompare(b.date));
+    const nt = free.find((s) => s.date >= ymd(4)); if (nt) { nt.status = "no_topic"; delete nt.topicTitle; }
+    const cs = free.find((s) => s.date >= ymd(5) && s !== nt); if (cs) { cs.status = "coin_short"; cs.topicTitle = cs.topicTitle || S.topics[2]?.title; }
+    const ar = S.slots.find((s) => s.date === todayYmd && s.channel === "naver_blog");
+    if (ar) { ar.status = "awaiting_runner"; ar.topicTitle = ar.topicTitle || S.topics[0]?.title; }
+    // 오늘 «확인 필요» 한 건(발행함 703·piece 506 과 같은 글) — 없으면 만들어 둔다
+    S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "awaiting_manual", publishAt: kst(0, 11, 0), topicTitle: "가을 이불 세탁, 건조기 없이 뽀송하게", pieceId: 506, origin: "auto" });
+  }
+  const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (1 + (IMG[r.channel] || 2)), 0);
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, ...row } = p; return row; };
+  /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
+  const devRow = (d) => { const o = { id: d.id, name: d.name, kind: d.kind, status: d.online ? "online" : "offline", jobsWaiting: d.jobsWaiting || 0 };
+    const seen = d.online ? iso(Date.now() - 21e3) : d.lastSeenAt; if (seen) o.lastSeenAt = seen; if (d.version) o.version = d.version; return o; };
+  /* 재로그인 잡 — 4초 대기 → 10초 창 열림 → 완료(계정 active 승격) */
+  const reloginJob = (accountId) => { const j = S.reloginJobs[accountId]; if (!j) return null; const age = Date.now() - j._t0;
+    const status = age > 10000 ? "done" : age > 4000 ? "running" : "queued";
+    if (status === "done") { const a = S.accounts.find((x) => x.id === accountId); if (a) { a.status = "active"; delete a.lastErrorKind; } }
+    return { id: j.id, status, updatedAt: iso(Date.now()) }; };
   const bodyToBlocks = (p) => [{ type: "disclosure", text: p.meta.disclosure || "" }, { type: "hook", text: "주말에 에어프라이어를 열었더니…" }, { type: "toc", items: ["바스켓 담그기", "베이킹소다 반죽", "건조"] }, { type: "summary", text: "담그기 10분 · 베이킹소다 5분 · 건조 30분이면 끝나요." }, { type: "h2", text: "1. 바스켓은 물에 10분만 담가요" }, { type: "image", imageIndex: 0, caption: "10분 담가 둔 바스켓" }, { type: "checklist", items: ["바스켓 10분 담그기", "베이킹소다 반죽 5분"] }, p.channel === "tistory" ? { type: "adsense" } : { type: "affiliate", affiliate: { productName: "에어프라이어 세척솔 3종", url: "https://link.coupang.com/a/mock", price: 8900 } }, { type: "hashtags", items: p.meta.tags || [] }].filter((b) => b.type !== "disclosure" || b.text);
   const tick = () => { // 만드는 중 → 8초 후 draft → 16초 후 in_review
     for (const p of S.pieces) { if (!p._t0) continue; const age = Date.now() - p._t0; // [v1.1] stage: writing → images → checking → done
       if (age > 18000) { p.status = "in_review"; p.stage = "done"; p.gateOk = true; delete p._t0; } else if (age > 12000) { p.stage = "checking"; p.status = "draft"; } else if (age > 6000) p.stage = "images"; else p.stage = "writing"; }
-    for (const s of S.slots) { const p = S.pieces.find((x) => x.id === s.pieceId); if (p && (p.status === "in_review" || p.status === "scheduled" || p.status === "published")) s.status = p.status; }
+    const KEEP = ["no_topic", "coin_short", "awaiting_runner", "awaiting_manual", "skipped"]; // 사람이 봐야 하는 상태는 piece 가 덮지 않는다
+    for (const s of S.slots) { if (KEEP.includes(s.status)) continue; const p = S.pieces.find((x) => x.id === s.pieceId); if (p && (p.status === "in_review" || p.status === "scheduled" || p.status === "published")) s.status = p.status; }
+    for (const d of S.devices) if (d._t0 && Date.now() - d._t0 > 8000) { d.online = true; d.version = d.version || "1.0.3"; delete d._t0; } // 등록 후 첫 하트비트
   };
+  /* [v2.9] 소재 뽑기 배경 작업 흉내 — 2초 뒤 완료 · startedAt 10분 초과면 고아로 보고 running 해제(계약 §6D) */
+  const isRefreshing = () => { const t = S.topicsRefresh; return !!(t && t.startedAt && !t.finishedAt && Date.now() - new Date(t.startedAt).getTime() < 600000); };
+  const refreshTick = () => { const t = S.topicsRefresh; if (!t || !t.startedAt || t.finishedAt) return;
+    if (Date.now() - new Date(t.startedAt).getTime() < (Number(qs.get("refreshMs")) || 2000)) return; // ?refreshMs= 로 오래 도는 경우도 본다
+    if (qs.get("refreshFail") === "1") { t.finishedAt = iso(Date.now()); t.error = "지금은 소재를 뽑지 못했어요. 잠시 후 다시 해 주세요."; return; }
+    const add = [{ id: S.nextId++, title: "환절기 아이 기침, 가습기보다 먼저 볼 것", angle: "소아과 다녀온 후기", channelHint: "naver_blog", score: 73, status: "candidate", factors: { volume: 12100, growthPct: 55, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) }, { id: S.nextId++, title: "다이소 수납 3천원 조합", angle: "서랍 한 칸 비포·애프터", channelHint: "naver_blog", score: 68, status: "candidate", factors: { volume: 26000, competition: "high", intent: "commercial" }, expiresAt: iso(now + 6 * 86400e3) }];
+    S.topics.unshift(...add); t.finishedAt = iso(Date.now()); t.added = add.length; };
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const delay = (ms = 260) => new Promise((r) => setTimeout(r, ms));
 
@@ -119,12 +168,21 @@
     "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: true, mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: "trial", status: "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: null }),
     "auth-refresh": () => ({ ok: true }),
     "home-summary": () => { tick(); const review = S.pieces.filter((p) => p.status === "in_review").length; const todo = [];
-      for (const a of S.accounts.filter((a) => ["pending_login", "suspended", "disconnected"].includes(a.status))) todo.push({ kind: "account", title: `@${a.handle} 다시 연결이 필요해요`, desc: UI.chLabel(a.channel), link: "/app/accounts.html", tone: "warn" });
-      if (review) todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: "/app/schedule.html", tone: "info" });
+      const online = S.devices.filter((d) => d.online).length;
+      const RUNNER_CH = CHANNELS.filter((c) => c.publishVia === "runner").map((c) => c.key);
+      const runnerDue = S.slots.filter((s) => RUNNER_CH.includes(s.channel) && s.date >= todayYmd && !["skipped", "published"].includes(s.status)).length;
+      // 정지 계정은 아래 «승계» 한 줄로만 알린다(같은 사건을 두 줄로 쓰지 않는다)
+      for (const a of S.accounts.filter((a) => ["pending_login", "disconnected"].includes(a.status)))
+        todo.push({ kind: "account", title: a.status === "pending_login" ? `@${a.handle} 다시 로그인이 필요해요` : `@${a.handle} 연결이 끊겼어요`, desc: UI.chLabel(a.channel), link: "/app/accounts.html", tone: "warn" });
+      if (!online && runnerDue) todo.push({ kind: "runner", title: "내 PC 프로그램이 꺼져 있어요", desc: `네이버·티스토리 예약 ${runnerDue}건은 이 프로그램이 올려요`, link: "/app/runner.html", tone: "warn" });
+      const stuck = S.posts.filter((p) => p.status === "awaiting_manual" || p.status === "failed").length;
+      if (stuck) todo.push({ kind: "publish", title: `글 ${stuck}건이 올라가지 못했어요`, desc: "직접 올리거나 다시 올려 주세요", link: "/app/posts.html", tone: "warn" });
+      if (S.reassigned) todo.push({ kind: "reassign", title: `@${S.reassigned.fromHandle} 계정이 정지됐어요`, desc: `글 ${S.reassigned.moved}건을 @${S.reassigned.toHandle} 로 옮겼어요`, link: "/app/accounts.html", tone: "warn" });
+      if (review) todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: "/app/pieces.html", tone: "info" });
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
-      const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => ({ id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }));
-      return { ok: true, revenue: { today: 12400, month: 284100, lastMonthSameDay: 216800 }, todaySlots, todo, notices: [], unread: 0, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online: 0, total: 0 }, trial: { status: "trial", daysLeft: 9, planKey: "trial" }, coins: S.coins, impersonation: null }; },
+      const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
+      return { ok: true, revenue: { today: 12400, month: 284100, lastMonthSameDay: 216800 }, todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: { status: "trial", daysLeft: 9, planKey: "trial" }, coins: S.coins, impersonation: null }; },
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule; return { ok: true, settings: S.settings }; },
     "plans": () => ({ ok: true, plans: [], coins: { packs: [{ coins: 100, krw: 50000, bonusPct: 0 }, { coins: 220, krw: 100000, bonusPct: 10 }], table: { blog: 1, image: 1, cardnews: 3, video_15: 5, video_30: 8, video_60: 12, persona: 0 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* §1 계정 */
@@ -147,11 +205,16 @@
     "accounts-oauth-start": (b) => { const c = CHANNELS.find((x) => x.key === b.channel); if (!c || !c.configured) return err("provider_not_configured", "준비 중이에요"); return { ok: true, url: `/app/accounts.html?connected=${b.channel}&mock=1` }; },
     "personas-list": () => ({ ok: true, personas: S.personas }),
     "personas-save": (b) => { let p = S.personas.find((x) => x.id === Number(b.id)); if (p) Object.assign(p, { name: b.name, profile: b.profile }); else { p = { id: S.nextId++, name: b.name, profile: b.profile || {} }; S.personas.push(p); } return { ok: true, persona: p }; },
-    /* §2 소재 */
-    "topics-list": () => ({ ok: true, topics: S.topics.filter((t) => t.status === "candidate"), refreshedAt: iso(now - 7200e3) }),
-    "topics-refresh": () => { if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요."); S.refreshCount++;
-      const add = [{ id: S.nextId++, title: "환절기 아이 기침, 가습기보다 먼저 볼 것", angle: "소아과 다녀온 후기", channelHint: "naver_blog", score: 73, status: "candidate", factors: { volume: 12100, growthPct: 55, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) }, { id: S.nextId++, title: "다이소 수납 3천원 조합", angle: "서랍 한 칸 비포·애프터", channelHint: "naver_blog", score: 68, status: "candidate", factors: { volume: 26000, competition: "high", intent: "commercial" }, expiresAt: iso(now + 6 * 86400e3) }];
-      S.topics.unshift(...add); return { ok: true, added: add.length, topics: S.topics.filter((t) => t.status === "candidate") }; },
+    /* §2 소재 — [v2.9] 뽑기는 배경 작업(POST 는 즉시 202 · 진행 상태는 topics-list.refresh 로 본다) */
+    "topics-list": () => { refreshTick(); const t = S.topicsRefresh;
+      const refresh = { running: isRefreshing() };
+      if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
+      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate"), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; },
+    "topics-refresh": () => { refreshTick();
+      if (isRefreshing()) return { ok: true, started: false, running: true };
+      if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
+      S.refreshCount++; S.topicsRefresh = { startedAt: iso(Date.now()) };
+      return { ok: true, started: true, status: 202 }; },
     "topics-pick": (b) => { const t = S.topics.find((x) => x.id === Number(b.id)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 }); t.status = "picked"; return { ok: true, topic: t }; },
     "topics-skip": (b) => { const t = S.topics.find((x) => x.id === Number(b.id)); if (t) t.status = "expired"; return { ok: true }; },
     /* §3 디렉터 */
@@ -189,6 +252,47 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "rules-settings": (b) => { for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999"; return { ok: true, slots: S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")) }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
+    /* ── [P1R2] §6 슬롯 3동작 ── */
+    "slots-assign-topic": (b) => { tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
+      const t = S.topics.find((x) => x.id === Number(b.topicId)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
+      if (s.pieceId) return err("stage", "이미 글을 만들기 시작해서 소재를 바꿀 수 없어요.");
+      if (S.slots.some((x) => x !== s && x.topicTitle === t.title && x.date >= ymd(-30))) return err("duplicate", "최근 30일 안에 같은 소재로 나간 편성이 있어요.");
+      s.topicTitle = t.title; s.status = "topic_assigned"; t.status = "picked"; return { ok: true, slot: { ...s } }; },
+    "slots-reschedule": (b) => { tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
+      if (!b.at) return err("at", "시각을 골라 주세요.");
+      if (["published", "publishing", "skipped"].includes(s.status)) return err("stage", "이미 나간 편성은 시각을 바꿀 수 없어요.");
+      const at = new Date(b.at).getTime();
+      const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < 30 * 60e3);
+      if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. 30분 이상 떨어뜨려 주세요.`);
+      s.publishAt = b.at; s.date = new Date(at + 9 * 3600e3).toISOString().slice(0, 10); return { ok: true, slot: { ...s } }; },
+    "slots-produce-now": (b) => { tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
+      if (!s.topicTitle) return err("no_topic", "먼저 소재를 정해 주세요.");
+      if (s.pieceId) return err("exists", "이 편성은 이미 글이 있어요.");
+      const need = 1 + (IMG[s.channel] ?? 2); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
+      S.coins -= need; const id = S.nextId++;
+      S.pieces.push({ id, channel: s.channel, accountHandle: s.accountHandle, kind: "post", format: "story", title: s.topicTitle, status: "generating", stage: "writing", scheduledFor: s.publishAt, gateOk: false, createdAt: iso(Date.now()), topicTitle: s.topicTitle, regenCount: 0, bodyHtml: s.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true), _t0: Date.now() });
+      s.pieceId = id; s.status = "producing"; return { ok: true, pieceId: id }; },
+    /* ── [P1R2] §6 발행함 ── */
+    "posts-list": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999", st = q.get("status") || "all";
+      const day = (p) => p.publishedAt ? new Date(new Date(p.publishedAt).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : null;
+      return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p })) }; },
+    /* ── [P1R2] §2 러너 기기(내 PC 프로그램) ── */
+    "runner-list": () => { tick(); return { ok: true, devices: S.devices.map(devRow) }; },
+    "runner-register": (b) => { const name = String(b.name || "").trim(); if (!name) return err("name", "기기 이름을 적어 주세요.");
+      if (S.devices.length >= 3) return err("limit", "이 요금제에서는 기기를 3대까지 연결할 수 있어요.");
+      const token = "acr_" + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+      const d = { id: S.nextId++, name, kind: b.kind || "own", online: false, jobsWaiting: 0, _t0: Date.now() }; S.devices.push(d);
+      return { ok: true, device: { id: d.id, name: d.name, token }, install: { url: "https://autocreate-endyd.netlify.app/runner/ac-runner.zip", cmd: `npx ac-runner --token ${token}` } }; },
+    "runner-remove": (b) => { S.devices = S.devices.filter((d) => d.id !== Number(b.id)); return { ok: true }; },
+    /* ── [P1R2] §7.2 계정 다시 로그인(POST=요청 · GET=폴링) ── */
+    "accounts-relogin": (b, q) => { tick(); const id = Number(b.id || q.get("id")); const a = S.accounts.find((x) => x.id === id);
+      if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
+      if (b.id) { if (!S.devices.some((d) => d.online)) return err("runner_offline", "먼저 내 PC 프로그램을 켜 주세요.");
+        S.reloginJobs[id] = { id: S.nextId++, _t0: Date.now() }; return { ok: true, job: reloginJob(id) }; }
+      const job = reloginJob(id); return job ? { ok: true, job, account: { ...a } } : { ok: true, job: null, account: { ...a } }; },
+    /* ── [P1R2] 알림함 ── */
+    "notifications-list": () => ({ ok: true, notifications: S.notifications.map((n) => ({ ...n })).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")), unread: S.notifications.filter((n) => !n.readAt).length }),
+    "notifications-read": (b) => { for (const n of S.notifications) if (!b.id || n.id === Number(b.id)) n.readAt = n.readAt || iso(Date.now()); return { ok: true, unread: S.notifications.filter((n) => !n.readAt).length }; },
     /* §6 코인 */
     "coins-balance": () => ({ ok: true, balance: S.coins, included: S.coins, purchased: 0, recent: [{ kind: "grant", delta: 30, reason: "운영 지급", createdAt: iso(now - 86400e3) }] }),
   };
@@ -201,7 +305,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; return { ...r, status, ok: !!r.ok };
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); return u.pathname + u.search + u.hash; } catch { return href; } };
+  const KEEP = ["runner", "refreshMs", "refreshFail"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);
   const badge = document.createElement("div"); badge.textContent = "모의 데이터"; badge.style.cssText = "position:fixed;bottom:calc(var(--tab-h) + 6px);left:8px;z-index:99;font-size:10px;font-weight:700;color:var(--muted);background:var(--press);border-radius:6px;padding:2px 6px;pointer-events:none"; document.body.appendChild(badge);

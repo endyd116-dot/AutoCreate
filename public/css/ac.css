@@ -168,7 +168,7 @@ input,textarea,select{font:inherit;color:inherit}
 .cal .dd{height:38px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:12px;font-variant-numeric:tabular-nums;font-weight:500;border:0;width:100%}
 .cal .dd.today{background:var(--brand);color:var(--on-brand);font-weight:700} .cal .dd.sel{outline:2px solid var(--sel);outline-offset:-2px} .cal .dd.dim{color:var(--faint)}
 .cal .dots{display:flex;gap:2px;height:4px} .cal .dots i{width:4px;height:4px;border-radius:50%;background:var(--faint);display:block}
-.cal .dots i.ok{background:var(--money)} .cal .dots i.warn{background:var(--warn)} .cal .dd.today .dots i{background:currentColor;opacity:.7}
+.cal .dots i.ok{background:var(--money)} .cal .dots i.warn{background:var(--warn)} .cal .dots i.danger{background:var(--danger)} .cal .dd.today .dots i{background:currentColor;opacity:.7}
 
 /* 5 BottomSheet */
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);opacity:0;transition:opacity var(--dur) var(--ease);z-index:20}
@@ -201,13 +201,34 @@ input,textarea,select{font:inherit;color:inherit}
 .banner.info{background:var(--brand-soft);color:var(--ink)}
 .banner button{font-weight:700;text-decoration:underline}
 
-/* 인증 화면(흰 바탕) */
-.auth{max-width:440px;margin:0 auto;padding:8px 0 40px}
-.auth .logo{font-weight:800;font-size:18px;letter-spacing:-.02em;padding:24px 4px 8px}
-.auth .links{display:flex;justify-content:center;gap:16px;font-size:13px;color:var(--muted);padding:16px 0}
-.auth .links a{color:var(--sub);font-weight:500}
-.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub);padding:8px 4px}
-.chk input{width:20px;height:20px;accent-color:var(--money)}
+/* ── 인증 화면(2026-09-14 개편) — 폰: 전면 흰 화면 · 데스크톱: 회색 바탕 위 «카드 한 장»(그룹 섹션과 같은 결) ── */
+.page.auth{max-width:none;padding:0;background:var(--surface);display:flex;flex-direction:column;justify-content:center;min-height:100dvh;gap:0}
+.auth-in{width:100%;max-width:400px;margin:0 auto;padding:24px var(--gutter) 32px;display:flex;flex-direction:column}
+.auth .brand{display:flex;align-items:center;gap:10px;padding:0 0 28px}
+.auth .brand i{width:34px;height:34px;border-radius:11px;background:var(--brand);display:grid;place-items:center;flex:none}
+.auth .brand i svg{width:19px;height:19px;color:var(--on-brand)}
+.auth .brand b{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.auth h1{font-size:26px;font-weight:800;letter-spacing:-.025em;line-height:1.28;margin:0;text-wrap:balance}
+.auth .sub{margin:8px 0 20px;color:var(--muted);font-size:14.5px}
+.auth form{display:flex;flex-direction:column;gap:2px}
+.auth .cta{position:static;padding:16px 0 0;background:none;justify-content:stretch}
+.auth .cta .btn{flex:1;width:100%;min-width:0;height:54px}
+.auth .links{display:flex;justify-content:center;gap:18px;font-size:13.5px;padding:20px 0 0}
+.auth .links a{color:var(--muted);font-weight:500}
+.auth .links a:hover{color:var(--ink)}
+.auth .foot{margin-top:auto;padding-top:28px;text-align:center;font-size:12px;color:var(--faint)}
+@media (min-width:641px){
+  .page.auth{background:var(--ground);padding:40px 16px}
+  .auth-in{background:var(--surface);border-radius:24px;padding:36px 32px 32px;max-width:420px}
+  .auth .foot{margin-top:24px}
+}
+/* 체크박스 — 잉크 계열 커스텀(기본 accent 색 제거) */
+.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub);padding:10px 2px;cursor:pointer;user-select:none}
+.chk input{appearance:none;-webkit-appearance:none;width:22px;height:22px;border-radius:7px;background:var(--ground);border:2px solid var(--line);flex:none;display:grid;place-items:center;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.chk input:checked{background:var(--brand);border-color:var(--brand)}
+.chk input:checked::after{content:"";width:11px;height:6px;border-left:2.5px solid var(--on-brand);border-bottom:2.5px solid var(--on-brand);transform:rotate(-45deg) translate(1px,-1px)}
+.chk input:focus-visible{outline:2px solid var(--sel);outline-offset:2px}
+.chk a{text-decoration:underline;text-underline-offset:2px}
 .divider{height:1px;background:var(--line);margin:12px 0}
 .muted{color:var(--muted)} .tnum{font-variant-numeric:tabular-nums} .center{text-align:center}
 
@@ -231,6 +252,10 @@ input,textarea,select{font:inherit;color:inherit}
 .row.swipe{position:relative;transition:transform 200ms var(--ease);touch-action:pan-y}
 .gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
 [contenteditable="true"]{outline:none;border-radius:8px;transition:box-shadow var(--dur) var(--ease)} [contenteditable="true"]:focus{box-shadow:0 0 0 2px var(--sel)}
+
+/* ── P1R2 추가(2026-09-14) — 프리미티브 2개(.input 과 같은 급 · 컴포넌트 아님): 토큰·설치 명령 상자 · 행 우측 외부 링크 자국 ── */
+.code{background:var(--ground);border-radius:12px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--ink);user-select:all;display:block}
+.ext{width:15px;height:15px;color:var(--faint);flex:none}
 
 /* 검수 미리보기 — 채널 렌더(콘텐츠 스타일 · 컴포넌트 아님) */
 .preview{background:var(--surface);border-radius:var(--r-sec);padding:20px 20px 24px;font-size:15px;line-height:1.8;color:var(--ink);word-break:keep-all;overflow-wrap:anywhere}

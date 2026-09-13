@@ -34,3 +34,12 @@ deno.lock
 
 # per-worktree overrides
 .claude/settings.local.json
+
+# 검증 산출물(PITFALLS #16 · _* 커밋 금지)
+_verify/
+_shots/
+runner/_shots/
+runner/profiles/
+runner/.token
+runner/node_modules/
+runner/tmp/
