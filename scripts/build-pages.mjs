@@ -7,8 +7,8 @@ const FONT = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncact
 const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?history.back():location.assign('${fallback}')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>`;
 
 const TARGETS = [
-  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=1"], back: ["accounts.html", "settings.html", "plans.html", "coins.html", "notifications.html", "support.html"], fallback: "/app/account.html", manifest: true, robots: false },
-  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=1", "/js/ops.js?v=1"], back: ["tenant.html", "password.html"], fallback: "/ops/", manifest: false, robots: true },
+  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=2", "/js/mock.js?v=1"], back: ["accounts.html", "settings.html", "plans.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html" }, manifest: true, robots: false },
+  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=2", "/js/ops.js?v=1"], back: ["tenant.html", "password.html"], fallback: "/ops/", manifest: false, robots: true },
 ];
 
 for (const t of TARGETS) {
@@ -25,13 +25,13 @@ for (const t of TARGETS) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title} · ${t.suffix}</title>
 ${t.robots ? `<meta name="robots" content="noindex">\n` : ""}${t.manifest ? `<link rel="manifest" href="/manifest.webmanifest">\n` : ""}${FONT}
-<link rel="stylesheet" href="/css/ac.css?v=1">
+<link rel="stylesheet" href="/css/ac.css?v=2">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar">${t.back.includes(file) ? BACK(t.fallback) : ""}<span class="ttl">${title}</span><span class="sp"></span></div>
+    <div class="appbar">${t.back.includes(file) ? BACK((t.fallbacks || {})[file] || t.fallback) : ""}<span class="ttl">${title}</span><span class="sp"></span></div>
 ${html.trim()}
   </main>
 </div>
