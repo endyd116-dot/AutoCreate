@@ -1,0 +1,107 @@
+/**
+ * lib/publish/gate.ts — 발행 직전 본문 준비 + 최종 게이트(DESIGN §16B.4 «발행 직전 재검사» · 계약 §3).
+ *   AC 신규 2026-09-14(B2). 순수에 가깝다 — DB·네트워크 접근 0(호출자가 저장한다).
+ *
+ *   왜 «또» 검사하나: 검수창에서 사람이 본문을 고칠 수 있고(고지 삭제 포함), 승인 후 발행까지 시간이 뜬다.
+ *   **남의 서버로 나가기 직전**이 마지막 기회다 — 여기서 막지 못하면 쿠팡은 수익 몰수, 애드센스는 계정 정지가 현실이다(§16B 머리말).
+ *
+ *   하는 일 3가지
+ *     ① 고지 복원 — 제휴 글인데 `<div class="disclosure">` 가 첫 요소가 아니면 **정본 문구로 다시 넣는다**(§16B.1 본문 첫머리).
+ *     ② 애드센스 자리 실체화 — `<div class="adsense"></div>` 를 계정의 애드센스 코드로 바꾸고 «광고» 라벨을 붙인다(§16B.3
+ *        «광고 자리 본문과 혼동 금지»). 애드센스 키가 없으면 빈 자리를 **지운다**(빈 div 를 남기지 않는다).
+ *     ③ 세는 것 3가지 — 고지·광고법 금칙어·제휴 링크 ≤2. 하나라도 실패면 **발행 금지**(경고 아님).
+ */
+import { GATE_LABEL, type GateCheck, type GateReport } from "../ai-tell-gate";
+import { checkDisclosureHtml, disclosureTextFor } from "../disclosure";
+import { findBannedWords, BLOG_EXTRA_BANNED } from "../banned-words";
+import { htmlToPlain } from "../blocks";
+
+export interface GateSubject {
+  channel: string;
+  title: string;
+  bodyHtml: string;
+  /** 제휴가 붙은 글인가(meta.affiliate 또는 meta.adDisclosure). */
+  affiliate?: { provider?: string } | null;
+  adDisclosure?: boolean;
+}
+export interface GateAccountHints {
+  /** 애드센스 게시자 ID(`ca-pub-…`) — 있으면 adsense 블록을 실제 코드로. */
+  adsensePub?: string;
+}
+
+export interface PublishGateResult {
+  ok: boolean;
+  report: GateReport;
+  /** 준비가 끝난 본문(고지 복원·애드센스 실체화 반영). 실패해도 준비분은 돌려준다(저장은 호출자 판단). */
+  bodyHtml: string;
+  /** 본문이 실제로 바뀌었나(바뀌었으면 호출자가 pieces.body 를 갱신한다 — «올린 것 = 저장된 것»). */
+  changed: boolean;
+}
+
+const DISCLOSURE_RE = /<div[^>]*class="[^"]*\bdisclosure\b[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi;
+const ADSENSE_SLOT_RE = /<div[^>]*class="[^"]*\badsense\b[^"]*"[^>]*>\s*<\/div>/gi;
+
+/** 고지를 본문 첫 요소로 강제(있던 것은 전부 제거하고 정본 하나만 둔다). pieces.ts 의 ensureDisclosureHtml 과 같은 규칙. */
+export function ensureDisclosureFirstHtml(html: string, provider: string | null | undefined): string {
+  const text = disclosureTextFor(provider);
+  const stripped = String(html || "").replace(DISCLOSURE_RE, "");
+  return `<div class="disclosure">${text}</div>\n${stripped}`;
+}
+
+/**
+ * 애드센스 자리 실체화(§4B «실제 코드 삽입은 발행 커넥터 R2»).
+ *   키가 있으면 ins 태그 + 라벨 · 없으면 빈 자리 제거.
+ *   ⚠️ 네이버 블로그는 애드센스를 붙일 수 없다(애드포스트) — 채널에서 걸러 호출한다.
+ */
+export function materializeAdsense(html: string, adsensePub?: string): string {
+  const pub = String(adsensePub ?? "").trim();
+  if (!pub) return String(html || "").replace(ADSENSE_SLOT_RE, "");
+  const unit = `<div class="adsense"><span class="ad-label">광고</span>`
+    + `<ins class="adsbygoogle" style="display:block" data-ad-client="${pub}" data-ad-format="auto" data-full-width-responsive="true"></ins>`
+    + `<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(pub)}" crossorigin="anonymous"></script>`
+    + `<script>(adsbygoogle = window.adsbygoogle || []).push({});</script></div>`;
+  return String(html || "").replace(ADSENSE_SLOT_RE, unit);
+}
+
+/** 제휴 링크 수 — 렌더 계약의 `class="affiliate"` + 쿠팡 도메인 직링크(사람이 손으로 붙인 것까지 센다). */
+export function countAffiliateLinks(html: string): number {
+  const s = String(html || "");
+  return (s.match(/class="affiliate"/g) || []).length
+    + (s.match(/href="https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/g) || []).length;
+}
+
+/** 애드센스를 붙일 수 있는 채널(네이버 블로그는 애드포스트라 제외). */
+export const ADSENSE_CHANNELS: ReadonlySet<string> = new Set(["tistory", "blogger", "wordpress"]);
+
+/**
+ * runPublishGate — 발행 직전 준비 + 검사. 실패면 발행 금지(`{ ok:false }` → 호출자가 awaiting_manual).
+ *   검사 키는 §4 GateKey 어휘 그대로 3개(disclosure·banned_words·affiliate_count) — A 화면이 같은 label 로 그린다.
+ */
+export function runPublishGate(subject: GateSubject, account?: GateAccountHints): PublishGateResult {
+  const before = String(subject.bodyHtml || "");
+  const needDisclosure = !!subject.affiliate || subject.adDisclosure === true || /class="affiliate"/.test(before);
+  const provider = subject.affiliate?.provider ?? "coupang";
+
+  // ① 고지 복원 — 사람이 지웠어도 다시 넣는다(§16B.4 «삭제 불가»).
+  let html = before;
+  if (needDisclosure && !checkDisclosureHtml(html, true).ok) html = ensureDisclosureFirstHtml(html, provider);
+
+  // ② 애드센스 자리 실체화(채널이 받을 수 있을 때만).
+  html = ADSENSE_CHANNELS.has(subject.channel) ? materializeAdsense(html, account?.adsensePub) : materializeAdsense(html, undefined);
+
+  // ③ 센다.
+  const checks: GateCheck[] = [];
+
+  const dis = checkDisclosureHtml(html, needDisclosure);
+  checks.push({ key: "disclosure", label: GATE_LABEL.disclosure, pass: dis.ok, ...(dis.detail ? { detail: dis.detail } : {}) });
+
+  const plain = `${subject.title}\n${htmlToPlain(html)}`;
+  const banned = findBannedWords(plain, BLOG_EXTRA_BANNED);
+  checks.push({ key: "banned_words", label: GATE_LABEL.banned_words, pass: banned.length === 0, ...(banned.length ? { detail: `«${banned.slice(0, 3).join("», «")}»` } : {}) });
+
+  const links = countAffiliateLinks(html);
+  checks.push({ key: "affiliate_count", label: GATE_LABEL.affiliate_count, pass: links <= 2, ...(links > 2 ? { detail: `제휴 링크 ${links}개(2개 이하)` } : {}) });
+
+  const ok = checks.every((c) => c.pass);
+  return { ok, report: { ok, checks, rewritten: html !== before }, bodyHtml: html, changed: html !== before };
+}
