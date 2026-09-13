@@ -42,7 +42,11 @@ const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 };
 const today = KST(); let view = new Date(today.getFullYear(), today.getMonth(), 1); let sel = ymd(today);
 let D = { rules: [], settings: {}, coinsPerWeek: 0, maxRules: null }, accounts = [], slots = [];
 const gear = document.createElement("button"); gear.type = "button"; gear.className = "ic"; gear.setAttribute("aria-label", "편성 설정"); gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>'; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(gear);
-const dotCls = (s) => s === "published" ? "ok" : s === "in_review" ? "warn" : "";
+const dotCls = (s) => UI.slotDot(s); // [P1R2] 상태 점 = 알약과 같은 자(§5B.6 전 상태)
+const TIMES = [["07:30", "07:30"], ["09:00", "09:00"], ["12:00", "12:00"], ["15:00", "15:00"], ["18:00", "18:00"], ["21:00", "21:00"]];
+const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
+const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 
 async function load() {
   const [r, a] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list")]);
@@ -56,7 +60,10 @@ async function loadSlots() {
 function render() {
   UI.$("#mon").textContent = `${view.getMonth() + 1}월${view.getFullYear() !== today.getFullYear() ? " " + view.getFullYear() : ""}`;
   const active = D.rules.filter((r) => r.active);
-  if (active.length) { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); const we = new Date(ws); we.setDate(ws.getDate() + 6); const n = slots.filter((s) => s.date >= ymd(ws) && s.date <= ymd(we) && s.status !== "skipped").length; UI.$("#stat").textContent = `이번 주 ${n}건 · 주 ${D.coinsPerWeek}코인`; } else UI.$("#stat").textContent = "";
+  if (active.length || slots.length) { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); const we = new Date(ws); we.setDate(ws.getDate() + 6);
+    const n = slots.filter((s) => s.date >= ymd(ws) && s.date <= ymd(we) && s.status !== "skipped").length;
+    const t = slots.filter((s) => s.date === ymd(today) && !["skipped", "published"].includes(s.status)).length;
+    UI.$("#stat").textContent = `이번 주 ${n}건 · ${t ? `오늘 ${t}건 나가요` : "오늘은 없어요"}`; } else UI.$("#stat").textContent = "";
   // 달력(상태 점 ≤3)
   const first = new Date(view.getFullYear(), view.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
   let h = WD.map((w) => `<span class="wd">${w}</span>`).join("");
@@ -68,7 +75,7 @@ function render() {
   // 그날 목록 · 규칙 없으면 빈 상태
   const day = UI.$("#day"); const sd = new Date(sel + "T00:00:00"); const list = slots.filter((s) => s.date === sel).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
   if (!active.length && !slots.length) { day.innerHTML = `<div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
-  day.innerHTML = `<div class="gt">${sd.getDate()}일 ${WD[sd.getDay()]}요일${list.length ? ` · ${list.length}건` : ""}</div>` + (list.length ? list.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("")
+  day.innerHTML = `<div class="gt">${sd.getDate()}일 ${WD[sd.getDay()]}요일${list.length ? ` · ${list.length}건` : ""} <a href="/app/posts.html">올라간 글</a></div>` + (list.length ? list.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("")
     : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">이날은 나갈 글이 없어요</span><span class="d">${active.length ? "규칙에 없는 요일이거나 쉬는 날이에요" : "자동 편성을 켜면 채워져요"}</span></div></div>`);
   UI.$$("#day .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id))));
   // 주 보기 = 선택한 날이 든 주의 날짜별 리스트(DESIGN §5B.8)
@@ -79,17 +86,102 @@ function render() {
     UI.$$("#week .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id)))); }
 }
 UI.$$("#mode button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mode button").forEach((x) => x.classList.toggle("on", x === b)); render(); });
-/* ── 슬롯 시트(R1: 정보 + 건너뛰기) ── */
+/* ── 슬롯 시트(DESIGN §5B.8 4동작: 소재 바꾸기 · 시각 바꾸기 · 지금 만들기 · 건너뛰기) ── */
+const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
+const topicSub = (t) => { const f = t.factors || {}; const p = []; if (f.volume != null) p.push(`검색 ${UI.num(f.volume)}`); if (f.growthPct != null) p.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) p.push(COMP[f.competition] || f.competition); if (f.seasonal) p.push(f.seasonal); return p.join(" · ") || (t.angle || ""); };
+const coinOf = (ch) => 1 + (IMG[ch] ?? 2);
+async function reload(close) { if (close) close(); await loadSlots(); render(); }
+
 function slotSheet(s) {
-  const p = s.pieceId ? `<a class="btn secondary" href="/app/piece.html?id=${s.pieceId}">글 보기</a>` : "";
-  const canSkip = !["published", "skipped", "publishing"].includes(s.status);
+  if (!s) return;
+  const done = ["published", "skipped"].includes(s.status);
+  const busy = ["publishing", "producing"].includes(s.status);
+  const can = { topic: !s.pieceId && !done && !busy, time: !done && !busy, make: !s.pieceId && !!s.topicTitle && !done && !busy, skip: !done && !busy };
+  const H = {
+    no_topic: ["아직 소재가 없어요", "소재를 고르면 예정대로 만들어요", "소재 고르기", "topic"],
+    coin_short: ["코인이 모자라 못 만들었어요", "충전하면 다음 만드는 시각에 이어서 만들어요", "충전하기", "/app/coins.html"],
+    awaiting_runner: ["내 PC 프로그램이 꺼져 있어요", "켜 두면 기다리던 이 글이 바로 올라가요", "켜는 법 보기", "/app/runner.html"],
+    awaiting_manual: ["올리지 못했어요", "본문을 복사해 직접 올릴 수 있어요", "직접 올리기", "/app/posts.html?status=awaiting_manual"],
+    in_review: ["봐 주실 글이 있어요", "그냥 두면 예정대로 나가요", "글 보러 가기", s.pieceId ? "/app/piece.html?id=" + s.pieceId : null],
+    published: ["올라갔어요", "", "올라간 글 보기", "/app/posts.html"],
+  }[s.status] || (s.pieceId ? [null, null, "글 보기", "/app/piece.html?id=" + s.pieceId] : null);
+  const warn = ["coin_short", "awaiting_runner", "awaiting_manual"].includes(s.status);
+  const dTopic = can.topic ? (s.topicTitle ? "다른 소재로 바꿔요" : "소재를 골라요") : s.pieceId ? "글을 이미 만들어서 바꿀 수 없어요" : "이미 지나간 편성이에요";
+  const dTime = can.time ? (s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간") : "이미 지나간 편성이에요";
+  const dMake = !s.topicTitle ? "먼저 소재를 정해 주세요" : s.pieceId ? "이 편성은 이미 글이 있어요" : `${coinOf(s.channel)}코인이 들어요 · 다시 만들기는 무료`;
+  const dSkip = can.skip ? "이날은 쉬고 다음 편성은 그대로 나가요" : "이미 지나간 편성이에요";
+  const act = (id, t, d, ok) => `<button type="button" class="row tap" data-act="${id}" ${ok ? "" : 'disabled style="opacity:.4"'}><div class="l"><span class="t">${t}</span><span class="d wrap">${UI.esc(d)}</span></div>${ok ? UI.chev : ""}</button>`;
+  const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</div>
+    ${H && H[0] ? `<div class="banner ${warn ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(H[0])}${H[1] ? " · " + UI.esc(H[1]) : ""}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정</span><span class="v">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "건강한 계정 순으로 자동"}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">발행</span><span class="v">${s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간"}</span></div>
     ${s.reviewDeadline ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">검수 마감</span><span class="v">${UI.dateKST(s.reviewDeadline)} ${UI.timeKST(s.reviewDeadline)}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">편성</span><span class="v">${s.origin === "manual" ? "직접 만든 글" : "자동 편성"}</span></div>
-    <div class="cta" style="flex-direction:column">${p}${canSkip ? `<button class="btn ghost" type="button" id="skip" style="color:var(--danger)">이날은 건너뛰기</button>` : ""}</div><div id="sc"></div>`, { title: `${new Date(s.date + "T00:00:00").getDate()}일 편성`, onOpen: (sh, close) => {
-      const b = sh.querySelector("#skip"); if (b) b.onclick = () => UI.confirmRow(sh.querySelector("#sc"), "이 편성을 건너뛸까요? 다음 편성은 그대로 나가요.", async () => { const r = await UI.api("/api/slots-skip", { body: { id: s.id } }); if (!r.ok) return UI.toast(r.error || "건너뛰지 못했어요"); close(); UI.toast("건너뛰었어요"); await loadSlots(); render(); });
+    <div class="sec">이 편성을</div>
+    ${act("topic", "소재 바꾸기", dTopic, can.topic)}${act("time", "시각 바꾸기", dTime, can.time)}${act("make", "지금 만들기", dMake, can.make)}${act("skip", "이날은 건너뛰기", dSkip, can.skip)}
+    <div class="cta" id="slotCta" style="flex-direction:column">${cta}</div><div id="sc"></div>`,
+    { title: `${dayLabel(s.date)} 편성`, onOpen: (sh, close) => {
+      const host = sh.querySelector("#sc"); const bar = sh.querySelector("#slotCta");
+      sh.querySelectorAll("[data-act]").forEach((b) => b.onclick = () => {
+        host.innerHTML = "";
+        if (b.dataset.act === "topic") return topicSheet(s, close);
+        if (b.dataset.act === "time") return timeSheet(s, close);
+        if (b.dataset.act === "make") {
+          bar.hidden = true;
+          host.innerHTML = `<p class="muted" style="margin:8px 0 12px">지금 만들면 ${coinOf(s.channel)}코인을 써요. 다시 만들기와 수정은 코인이 안 들어요.</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn primary" type="button" data-yes>지금 만들기</button></div>`;
+          host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; bar.hidden = false; };
+          host.querySelector("[data-yes]").onclick = async (e) => { e.target.disabled = true;
+            const r = await UI.api("/api/slots-produce-now", { body: { slotId: s.id } }); e.target.disabled = false;
+            if (!r.ok) {
+              if (r.step === "coin_short") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? 0}코인이 있고 ${r.need ?? coinOf(s.channel)}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: "코인이 모자라요" }); }
+              return UI.toast(r.error || "만들기를 시작하지 못했어요");
+            }
+            close(); UI.done("만들기 시작했어요", () => UI.go("/app/pieces.html?tab=generating"));
+          };
+          return;
+        }
+        bar.hidden = true;
+        UI.confirmRow(host, "이 편성을 건너뛸까요? 다음 편성은 그대로 나가요.", async () => {
+          const r = await UI.api("/api/slots-skip", { body: { id: s.id } }); if (!r.ok) { bar.hidden = false; return UI.toast(r.error || "건너뛰지 못했어요"); }
+          UI.toast("건너뛰었어요"); await reload(close);
+        });
+      });
+    } });
+}
+/* ① 소재 바꾸기 */
+async function topicSheet(s, closeParent) {
+  const r = await UI.api("/api/topics-list?status=candidate");
+  const list = (r.ok ? r.topics : []).filter((t) => t.title !== s.topicTitle);
+  const used = new Set(slots.filter((x) => x.id !== s.id && x.topicTitle).map((x) => x.topicTitle)); // 30일 중복 회피 — 서버도 같은 자로 거른다
+  UI.sheet(list.length
+    ? list.map((t) => { const dup = used.has(t.title); return `<button type="button" class="row tap" data-t="${t.id}" ${dup ? 'disabled style="opacity:.4"' : ""}>${UI.mark(t.channelHint || s.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${dup ? "다른 날에 이미 편성됐어요" : UI.esc(topicSub(t))}</span></div>${dup ? "" : UI.chev}</button>`; }).join("")
+    : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">고를 소재가 없어요</h3><p>«만들기»에서 새로 뽑으면 여기에도 나와요.</p><a class="btn primary sm" href="/app/create.html">소재 뽑으러 가기</a></div>`,
+    { title: "어떤 소재로 바꿀까요", onOpen: (sh, close) => {
+      sh.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
+        const rr = await UI.api("/api/slots-assign-topic", { body: { slotId: s.id, topicId: Number(b.dataset.t) } });
+        if (!rr.ok) return UI.toast(rr.error || "소재를 바꾸지 못했어요");
+        close(); UI.toast("소재를 바꿨어요"); await reload(closeParent);
+      });
+    } });
+}
+/* ② 시각 바꾸기 */
+function timeSheet(s, closeParent) {
+  const cur = s.publishAt ? UI.timeKST(s.publishAt) : "09:30";
+  const times = TIMES.some(([v]) => v === cur) ? TIMES : [[cur, cur], ...TIMES];
+  const days = [[0, dayLabel(s.date)], [1, dayLabel(plusDays(s.date, 1))], [2, dayLabel(plusDays(s.date, 2))]];
+  UI.sheet(`<div class="sec">어느 날</div>${UI.seg("d", days, 0)}<div class="sec">몇 시에</div>${UI.chips("t", times, cur)}
+    <p class="muted" style="margin:10px 0 0;font-size:13px">같은 채널 글끼리는 30분 이상 떨어뜨려야 해요.</p>
+    <div class="cta"><button class="btn primary" type="button" id="ok">이 시각으로</button></div>`,
+    { title: "시각 바꾸기", onOpen: (sh, close) => {
+      UI.bindChips(sh);
+      sh.querySelector("#ok").onclick = async (e) => {
+        e.target.disabled = true;
+        const at = atKST(plusDays(s.date, Number(UI.chipVal(sh, "d") || 0)), UI.chipVal(sh, "t") || cur);
+        const r = await UI.api("/api/slots-reschedule", { body: { slotId: s.id, at } }); e.target.disabled = false;
+        if (!r.ok) return UI.toast(r.error || "시각을 바꾸지 못했어요");
+        close(); UI.toast("시각을 바꿨어요"); await reload(closeParent);
+      };
     } });
 }
 /* ── 자동 편성 켜기 · 3스텝(한 화면 한 질문) ── */
@@ -167,6 +259,11 @@ const r = await UI.api("/api/home-summary"); if (r.ok) { UI.$("#say").textConten
 <div class="hl"><div class="say">안녕하세요</div><div class="num" id="name">…</div><div class="tip" id="plan"></div></div>
 <div class="group" id="accounts"><div class="gt">연결한 계정 <a href="/app/accounts.html">관리</a></div><div class="empty"><span class="mk soft">+</span><h3>첫 계정을 연결해 보세요</h3><p>네이버 블로그·티스토리·유튜브 중 하나면 시작할 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div></div>
 <div class="group">
+  <div class="gt">올린 글 · 내 PC</div>
+  <a class="row tap" href="/app/posts.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span><div class="l"><span class="t">올라간 글</span><span class="d" id="postsDesc">채널에 올라간 글과 조회수</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/runner.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">내 PC 프로그램</span><span class="d" id="runnerDesc">네이버·티스토리 글을 대신 올려요</span></div><span id="runnerPill"></span><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
+<div class="group">
   <div class="gt">요금제 · 코인</div>
   <a class="row tap" href="/app/plans.html"><span class="mk soft">₩</span><div class="l"><span class="t" id="planName">체험</span><span class="d" id="planDesc"></span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/coins.html"><span class="mk money">C</span><div class="l"><span class="t">코인 <span id="coins">0</span>개</span><span class="d">1코인 = 500원 · 충전분은 1년</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
@@ -184,6 +281,14 @@ UI.$("#planName").textContent = P[me.tenant.planKey] || me.tenant.planKey;
 UI.$("#planDesc").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남음` : me.tenant.status === "active" ? "이용 중" : "이용 정지";
 UI.$("#plan").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남았어요` : "";
 UI.$("#coins").textContent = UI.num(me.coins);
+// 내 PC 프로그램 상태(켜짐/꺼짐) · 올라간 글 수
+UI.api("/api/runner-list").then((rl) => {
+  if (!rl.ok) return;
+  const on = (rl.devices || []).filter((d) => d.status === "online").length; const total = (rl.devices || []).length;
+  UI.$("#runnerPill").outerHTML = total ? `<span class="pill ${on ? "ok" : "off"}">${on ? "켜짐" : "꺼짐"}</span>` : `<span class="pill off">연결 전</span>`;
+  UI.$("#runnerDesc").textContent = !total ? "연결하면 네이버·티스토리 글이 자동으로 올라가요" : on ? `${total}대 연결됨 · 지금 켜져 있어요` : `${total}대 연결됨 · 지금 꺼져 있어요`;
+});
+UI.api("/api/posts-list?status=published").then((pl) => { if (pl.ok && pl.posts) UI.$("#postsDesc").textContent = pl.posts.length ? `지금까지 ${UI.num(pl.posts.length)}건 올라갔어요` : "아직 올라간 글이 없어요"; });
 // 연결한 계정(실데이터 · A1 과 같은 행) — 채널별 그룹
 const al = await UI.api("/api/accounts-list");
 if (al.ok && al.accounts.length) {
@@ -197,7 +302,8 @@ if (al.ok && al.accounts.length) {
 --- script ---
 await UI.boot("account");
 const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
-const ERR = { login_fail: "로그인 실패", captcha: "보안 문자 확인 필요", rate_limited: "발행 제한에 걸림", suspended: "채널에서 정지됨", selector_changed: "채널 화면이 바뀜", network: "네트워크 오류" };
+/* 오류 사람말은 UI.ERRK 한 벌(발행함과 공용) */
+const HEALTH = (n) => (n >= 80 ? "좋아요" : n >= 50 ? "조금 지쳤어요" : "쉬어야 해요");
 const HOURS = [[6,"06시"],[7,"07시"],[9,"09시"],[12,"12시"],[15,"15시"],[18,"18시"],[20,"20시"],[21,"21시"],[23,"23시"]];
 let D = { accounts: [], channels: [] }, personas = [];
 const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
@@ -210,9 +316,15 @@ async function load() {
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => connectSheet(chs.find((c) => c.key === b.dataset.k)));
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
-    ? D.accounts.map((a) => `<button type="button" class="row tap" data-id="${a.id}">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d">오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</button>`).join("")
+    ? D.accounts.map((a) => { const relogin = a.status === "pending_login";
+        const sub = relogin ? UI.errk(a.lastErrorKind || "login_fail") : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요" : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
+        const head = `${UI.mark(a.channel)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
+        return relogin
+          ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">다시 로그인</button></div>`
+          : `<div class="row">${head}${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</div>`; }).join("")
     : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">아직 연결한 계정이 없어요</h3><p>위에서 채널 마크를 누르면 바로 연결할 수 있어요.</p></div>`);
-  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
+  UI.$$("#list [data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
+  UI.$$("#list [data-relogin]").forEach((b) => b.onclick = () => reloginSheet(D.accounts.find((a) => a.id === Number(b.dataset.relogin))));
 }
 
 /* ── 연결 시트(채널 방식별 · 계약 §1) ── */
@@ -251,11 +363,63 @@ async function submitAdd(body, f, close) {
   close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
 }
 
+/* ── 다시 로그인(§7.2 · 내 PC 프로그램이 로그인 창을 연다) ── */
+const RELOGIN_STEPS = [["내 PC 프로그램에 부탁해요", "queued"], ["PC에서 로그인 창이 열려요", "running"], ["로그인을 마치면 바로 이어서 올려요", "done"]];
+function reloginSteps(status) {
+  const i = Math.max(0, RELOGIN_STEPS.findIndex(([, k]) => k === status));
+  return `<div class="steps">${RELOGIN_STEPS.map(([l], n) => `<div class="st ${status === "done" || n < i ? "done" : status && n === i ? "on" : ""}"><i>${status === "done" || n < i ? "✓" : n + 1}</i>${l}</div>`).join("")}</div>`;
+}
+async function reloginSheet(a) {
+  if (!a) return;
+  const rl = await UI.api("/api/runner-list");
+  const online = rl.ok && (rl.devices || []).some((d) => d.status === "online");
+  if (!online) return UI.sheet(`<p class="muted" style="margin:0 0 4px">내 PC 프로그램이 채널 로그인 창을 열어 줘요. 지금은 꺼져 있어서 열 수 없어요.</p>
+    <p class="muted" style="margin:0 0 16px;font-size:13px">켜 두면 이 계정뿐 아니라 기다리던 글도 함께 올라가요.</p>
+    <div class="cta"><a class="btn primary" href="/app/runner.html">내 PC 프로그램 켜기</a></div>`, { title: "먼저 프로그램을 켜 주세요" });
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">@${UI.esc(a.handle)} 의 로그인이 풀렸어요. 내 PC 프로그램이 ${UI.esc(UI.chLabel(a.channel))} 로그인 창을 열어요.</p>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">보안 문자가 나오면 그 창에서 직접 입력해 주세요. 비밀번호는 저장된 것을 씁니다.</p>
+    <div id="rst">${reloginSteps(null)}</div><div id="rerr"></div>
+    <div class="cta" id="rcta"><button class="btn primary" type="button" id="go">로그인 창 열기</button></div>`,
+    { title: "다시 로그인", onOpen: (sh, close) => {
+      const st = sh.querySelector("#rst"), box = sh.querySelector("#rerr"), cta = sh.querySelector("#rcta");
+      sh.querySelector("#go").onclick = async (e) => {
+        e.target.disabled = true;
+        const r = await UI.api("/api/accounts-relogin", { body: { id: a.id } });
+        if (!r.ok && r.step === "runner_offline") { e.target.disabled = false; box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>${UI.esc(r.error)}</span><a href="/app/runner.html">켜러 가기</a></div>`; return; }
+        cta.hidden = true;
+        let status = r.ok && r.job ? r.job.status : null;
+        st.innerHTML = reloginSteps(status || "queued");
+        const t0 = Date.now();
+        const tick = async () => {
+          if (!document.body.contains(sh)) return;                       // 시트 닫히면 폴링도 끝
+          const g = await UI.api(`/api/accounts-relogin?id=${a.id}`);
+          const acc = g.ok ? g.account : null;
+          status = g.ok && g.job ? g.job.status : status;
+          if (!g.ok || (!g.job && acc)) {                                 // 폴백: 잡을 못 보면 계정 상태로만 판정
+            const al = await UI.api("/api/accounts-list");
+            const me2 = al.ok ? (al.accounts || []).find((x) => x.id === a.id) : null;
+            if (me2 && me2.status === "active") status = "done";
+          } else if (acc && acc.status === "active") status = "done";
+          st.innerHTML = reloginSteps(status === "failed" ? "running" : status || "queued");
+          if (status === "done") { close(); UI.done(`@${a.handle} 다시 로그인했어요`, load); return; }
+          if (status === "failed") { box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>로그인 창에서 끝내지 못했어요</span></div>`; cta.hidden = false; e.target.disabled = false; return; }
+          if (Date.now() - t0 > 120000) { box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>아직 끝나지 않았어요 · PC 화면을 확인해 주세요</span></div>`; cta.hidden = false; e.target.disabled = false; return; }
+          setTimeout(tick, 2000);
+        };
+        setTimeout(tick, 1500);
+      };
+    } });
+}
+
 /* ── 계정 상세 시트(DESIGN §7.1 필드 전부) ── */
 async function detailSheet(a) {
   if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
-  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · 건강 ${a.healthScore} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
-  ${a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>마지막 오류: ${UI.esc(ERR[a.lastErrorKind] || a.lastErrorKind)}</span></div>` : ""}
+  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
+  ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(a.lastErrorKind || "login_fail"))}</span><button type="button" id="relogin">다시 로그인</button></div>`
+    : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
+    : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
+  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
+  <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
   <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
@@ -274,6 +438,7 @@ async function detailSheet(a) {
   UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
+    const rb = sh.querySelector("#relogin"); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
     sh.querySelector("#save").onclick = async () => {
       const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), dailyCap: UI.stepVal(sh, "cap"), minGapMin: Number(UI.chipVal(sh, "gap") || 180), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
       const m = {}; const v = (id) => sh.querySelector(id).value.trim();
@@ -349,10 +514,25 @@ UI.$("#packs").innerHTML = r.coins.packs.map((p) => `<button type="button" class
 const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"];
 UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(r.coins.labels[k])}</span><span class="v">${r.coins.table[k]}코인</span></div>`).join("");
 === notifications.html | home | 알림 ===
-<div class="step-h"><h1>알림</h1></div>
-<div class="group"><div class="empty"><span class="mk soft">○</span><h3>아직 알림이 없어요</h3><p>발행·검수·계정 상태가 바뀌면 여기에 쌓여요.</p></div></div>
+<div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 await UI.boot("home");
+const EMPTY = `<div class="empty"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></span><h3>아직 알림이 없어요</h3><p>발행·검수·계정 상태가 바뀌면 여기에 쌓여요.</p></div>`;
+const row = (n) => `<a class="row tap" href="${n.link ? UI.esc(n.link) : "javascript:void 0"}" ${n.readAt ? 'style="opacity:.55"' : ""}>${UI.kindMark(n.kind, n.tone)}<div class="l"><span class="t wrap">${UI.esc(n.title)}</span><span class="d wrap">${UI.esc(n.desc || "")}</span></div><span class="r mut">${UI.esc(UI.ago(n.createdAt))}</span>${n.link ? UI.chev : ""}</a>`;
+async function load() {
+  const r = await UI.api("/api/notifications-list?limit=50");
+  let list = r.ok ? (r.notifications || []) : null;
+  if (list === null) { // 폴백 — 알림 목록이 아직 없으면 홈의 «해야 할 일»을 그대로 보여 준다(빈 화면 금지)
+    const h = await UI.api("/api/home-summary");
+    list = h.ok ? (h.todo || []).map((t, i) => ({ id: "todo-" + i, kind: t.kind, title: t.title, desc: t.desc, link: t.link, tone: t.tone, createdAt: null })) : [];
+  }
+  const unread = list.filter((n) => !n.readAt).length;
+  UI.$("#list").innerHTML = list.length
+    ? `<div class="gt">알림 ${list.length}개${unread ? ` · 안 읽음 ${unread}` : ""}${unread && r.ok ? ` <button type="button" id="readAll" style="color:var(--ink);font-weight:600;font-size:12.5px">모두 읽음</button>` : ""}</div>` + list.map(row).join("")
+    : EMPTY;
+  const b = UI.$("#readAll"); if (b) b.onclick = async () => { const rr = await UI.api("/api/notifications-read", { body: {} }); if (!rr.ok) return UI.toast(rr.error || "읽음으로 바꾸지 못했어요"); load(); };
+}
+await load();
 === support.html | account | 문의하기 ===
 <div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·계정·최근 오류는 자동으로 같이 보내져요.</p></div>
 <form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
@@ -535,4 +715,159 @@ more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
     sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
     sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
   } });
+await load();
+=== runner.html | account | 내 PC 프로그램 ===
+<div class="hl"><div class="say">내 PC 프로그램이</div><div class="num" id="num"><span class="sk" style="display:inline-block;width:60%"></span></div><div class="tip" id="tip"></div></div>
+<div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="why"><div class="gt">왜 필요한가요</div><div class="reasons"><p>네이버 블로그·티스토리는 프로그램이 대신 올려요. 이 두 곳은 바깥에서 글을 넣는 길이 없어서예요.</p><p>켜 두기만 하면 돼요. 꺼져 있으면 그 시각을 지나도 글을 버리지 않고 기다려요.</p><p>로그인 정보는 암호로 잠가 두고, 올릴 때만 이 프로그램이 열어요.</p></div></div>
+<div class="cta"><button class="btn primary" type="button" id="add">내 PC에서 켜기</button></div>
+--- script ---
+await UI.boot("account");
+let devices = [], timer = null;
+const DL = { url: "", cmd: "" };
+const PC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';
+
+function render() {
+  const on = devices.filter((d) => d.status === "online");
+  const last = devices.map((d) => d.lastSeenAt).filter(Boolean).sort().pop();
+  const waiting = devices.reduce((a, d) => a + (d.jobsWaiting || 0), 0);
+  UI.$("#num").textContent = !devices.length ? "아직 없어요" : on.length ? "지금 켜져 있어요" : "꺼져 있어요";
+  UI.$("#tip").textContent = !devices.length ? "네이버·티스토리 글은 이 프로그램이 올려요"
+    : on.length ? `${UI.ago(last) || "방금 전"} 응답${waiting ? ` · 올릴 글 ${waiting}건` : " · 올릴 글 없음"}`
+    : `마지막 응답 ${UI.ago(last) || "오래전"}${waiting ? ` · 글 ${waiting}건이 기다려요` : ""}`;
+  const list = UI.$("#list");
+  list.innerHTML = devices.length
+    ? `<div class="gt">연결한 PC ${devices.length}대</div>` + devices.map((d) => `<button type="button" class="row tap" data-id="${d.id}"><span class="mk ${d.status === "online" ? "money" : "soft"}">${PC}</span><div class="l"><span class="t">${UI.esc(d.name)}</span><span class="d">${d.version ? "버전 " + UI.esc(d.version) + " · " : ""}${d.status === "online" ? (d.jobsWaiting ? `올릴 글 ${d.jobsWaiting}건` : "올릴 글 없음") : "마지막 응답 " + UI.esc(UI.ago(d.lastSeenAt) || "오래전")}</span></div><span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status === "online" ? "켜짐" : "꺼짐"}</span>${UI.chev}</button>`).join("")
+    : `<div class="empty"><span class="mk soft">${PC}</span><h3>아직 연결한 PC가 없어요</h3><p>늘 켜 두는 PC 한 대면 돼요. 아래에서 3분이면 끝나요.</p></div>`;
+  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => deviceSheet(devices.find((d) => d.id === Number(b.dataset.id))));
+  const wait = devices.some((d) => d.status !== "online");
+  if (wait && !timer) timer = setInterval(load, 5000); if (!wait && timer) { clearInterval(timer); timer = null; }
+}
+async function load() { const r = await UI.api("/api/runner-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } devices = r.devices || []; render(); }
+
+/* 기기 시트(상태 + 해제) */
+function deviceSheet(d) {
+  if (!d) return;
+  UI.sheet(`<div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v">${d.status === "online" ? '<span class="pill ok">켜짐</span>' : '<span class="pill off">꺼짐</span>'}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">마지막 응답</span><span class="v">${UI.esc(UI.ago(d.lastSeenAt) || "아직 없음")}</span></div>
+    ${d.version ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">버전</span><span class="v">${UI.esc(d.version)}</span></div>` : ""}
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">기다리는 글</span><span class="v">${d.jobsWaiting || 0}건</span></div>
+    ${d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
+    <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
+      sh.querySelector("#rm").onclick = () => UI.confirmRow(sh.querySelector("#rc"), `${d.name} 연결을 해제할까요? 이 PC로는 더 이상 글을 올리지 않아요.`, async () => {
+        const r = await UI.api("/api/runner-remove", { body: { id: d.id } }); if (!r.ok) return UI.toast(r.error || "해제하지 못했어요");
+        close(); UI.toast("연결을 해제했어요"); load(); });
+    } });
+}
+
+/* 켜기 3스텝(한 화면 한 질문 · 열쇠는 1회만 보여 준다) */
+function addSheet() {
+  let step = 1, name = "", token = "";
+  const view = (sh, close) => {
+    const body = sh.querySelector(".sheet-body");
+    const prog = `<div class="prog" style="padding:0 0 8px"><i class="on"></i><i class="${step >= 2 ? "on" : ""}"></i><i class="${step >= 3 ? "on" : ""}"></i></div>`;
+    if (step === 1) {
+      body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>이 PC를 뭐라고 부를까요?</h2><p>나중에 어느 PC인지 알아보기 위한 이름이에요.</p></div>
+        <div class="field"><input class="input" id="nm" value="${UI.esc(name)}" placeholder="예: 집 PC" maxlength="20" autocomplete="off"><div class="help"></div></div>
+        <div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
+      body.querySelector("#nx").onclick = async () => {
+        name = body.querySelector("#nm").value.trim();
+        if (!name) { body.querySelector(".help").textContent = "이름을 적어 주세요."; return; }
+        const btn = body.querySelector("#nx"); btn.disabled = true;
+        const r = await UI.api("/api/runner-register", { body: { name, kind: "own" } }); btn.disabled = false;
+        if (!r.ok) {
+          if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+          body.querySelector(".help").textContent = r.error || "등록하지 못했어요"; return;
+        }
+        token = r.device.token; DL.url = (r.install || {}).url || ""; DL.cmd = (r.install || {}).cmd || ""; step = 2; view(sh, close);
+      };
+      setTimeout(() => { const el = body.querySelector("#nm"); if (el) el.focus(); }, 60);
+    } else if (step === 2) {
+      body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>열쇠를 복사해 두세요</h2><p>이 열쇠로 내 PC와 연결해요.</p></div>
+        <code class="code" id="tk">${UI.esc(token)}</code>
+        <div class="banner" style="margin:12px 0 0"><span>이 화면을 닫으면 다시 볼 수 없어요</span></div>
+        <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="cp">열쇠 복사하기</button><button class="btn ghost" type="button" id="nx">복사했어요 · 다음</button></div>`;
+      body.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(token)) ? "복사했어요" : "복사하지 못했어요 · 길게 눌러 복사해 주세요");
+      body.querySelector("#nx").onclick = () => { step = 3; view(sh, close); };
+    } else {
+      body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>세 가지만 하면 끝나요</h2><p>PC에서 한 번만 하면 돼요.</p></div>
+        <div class="steps" style="padding:8px 0 4px"><div class="st on"><i>1</i>프로그램 내려받기</div></div>
+        <div style="padding:0 0 12px">${DL.url ? `<a class="btn secondary sm" href="${UI.esc(DL.url)}" target="_blank" rel="noopener" style="width:100%">프로그램 내려받기</a>` : `<p class="muted" style="margin:0;font-size:13.5px">받는 곳 주소는 준비되면 여기에 나와요.</p>`}</div>
+        <div class="steps" style="padding:4px 0"><div class="st on"><i>2</i>열쇠 붙여넣기</div></div>
+        <div style="padding:0 0 8px">${DL.cmd ? `<code class="code">${UI.esc(DL.cmd)}</code><button class="btn ghost" type="button" id="cp2" style="width:100%">이 줄 복사하기</button>` : ""}</div>
+        <div class="steps" style="padding:4px 0"><div class="st on"><i>3</i>켜 둔 채로 두기</div></div>
+        <p class="muted" style="margin:0 0 4px;font-size:13.5px">창을 닫지 말고 켜 두면, 예약한 시각에 알아서 올라가요.</p>
+        <div class="cta"><button class="btn primary" type="button" id="fin">다 했어요</button></div>`;
+      const cp2 = body.querySelector("#cp2"); if (cp2) cp2.onclick = async () => UI.toast((await UI.copy(DL.cmd)) ? "복사했어요" : "복사하지 못했어요");
+      body.querySelector("#fin").onclick = () => { close(); UI.done(`${name} 을(를) 연결했어요`, load); };
+    }
+  };
+  UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => view(sh, close) });
+}
+UI.$("#add").onclick = addSheet;
+await load();
+=== posts.html | schedule | 올라간 글 ===
+<div class="seg" id="seg"><button type="button" data-tab="all" class="on">전체</button><button type="button" data-tab="published">올라감</button><button type="button" data-tab="awaiting_manual">직접 올리기</button></div>
+<div id="list"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+--- script ---
+await UI.boot("schedule");
+const EXT = '<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
+let tab = UI.qs.get("status") || "all", posts = [];
+const stuckOf = (p) => p.status === "awaiting_manual" || p.status === "failed";
+const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(x).toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); const d = k(UI.utc(p.publishedAt)), t0 = k(new Date()), y = k(new Date(Date.now() - 86400e3)); return d === t0 ? "오늘" : d === y ? "어제" : UI.dateKST(p.publishedAt, { weekday: "short" }); };
+
+function row(p) {
+  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
+  const sub = stuckOf(p) ? UI.errk(p.errorKind) : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
+  return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
+}
+function render() {
+  const shown = posts.filter((p) => tab === "all" || p.status === tab);
+  UI.$$("#seg button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  const host = UI.$("#list");
+  if (!shown.length) {
+    const E = { all: ["아직 올라간 글이 없어요", "편성표를 확인해 보세요", "/app/schedule.html", "편성표 보기"], published: ["아직 올라간 글이 없어요", "예약한 시각이 되면 여기에 쌓여요", "/app/schedule.html", "편성표 보기"], awaiting_manual: ["직접 올릴 글이 없어요", "올리지 못한 글이 생기면 여기에 모아 드려요", null, null] }[tab];
+    host.innerHTML = `<div class="group"><div class="empty"><h3>${E[0]}</h3><p>${E[1]}</p>${E[2] ? `<a class="btn primary sm" href="${E[2]}">${E[3]}</a>` : ""}</div></div>`;
+    return;
+  }
+  const stuck = shown.filter(stuckOf), rest = shown.filter((p) => !stuckOf(p));
+  const days = [];
+  for (const p of rest) { const k = dayOf(p); let g = days.find((x) => x.k === k); if (!g) { g = { k, list: [] }; days.push(g); } g.list.push(p); }
+  host.innerHTML = (stuck.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">직접 올려야 해요 ${stuck.length}건</div>${stuck.map(row).join("")}</div>` : "")
+    + days.map((g) => `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(g.k)} · ${g.list.length}건</div>${g.list.map(row).join("")}</div>`).join("");
+  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => postSheet(posts.find((p) => p.id === Number(b.dataset.id))));
+}
+async function load() { const r = await UI.api(`/api/posts-list?status=${tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = r.posts || []; render(); }
+
+/* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유) */
+function postSheet(p) {
+  if (!p) return;
+  const s = p.stats || {};
+  const stat = [s.views != null ? `조회 ${UI.num(s.views)}` : null, s.likes != null ? `좋아요 ${UI.num(s.likes)}` : null, s.comments != null ? `댓글 ${UI.num(s.comments)}` : null].filter(Boolean).join(" · ");
+  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${UI.pill(UI.POST_STATUS, p.status)}</div>
+    ${stuckOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(p.errorKind))}${p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div>` : ""}
+    ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
+    ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : "채널 연동"}</span></div>` : ""}
+    ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
+    ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(s.lastSyncAt))} ${UI.esc(UI.timeKST(s.lastSyncAt))} 기준이에요</p>` : ""}
+    ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
+    <div class="cta" style="flex-direction:column">
+      ${p.externalUrl ? `<a class="btn primary" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">올라간 글 열기</a>` : ""}
+      ${stuckOf(p) ? `<button class="btn ${p.externalUrl ? "secondary" : "primary"}" type="button" id="cp">본문 복사하기</button>` : ""}
+      ${p.pieceId ? `<a class="btn ghost" href="/app/piece.html?id=${p.pieceId}">글 보기</a>` : ""}
+    </div>
+    ${stuckOf(p) ? `<p class="muted" style="margin:4px 0 0;font-size:13px">복사한 본문을 ${UI.esc(UI.chLabel(p.channel))} 에 붙여 넣으면 그대로 올라가요.</p>` : ""}`,
+    { title: "", onOpen: (sh) => {
+      const cp = sh.querySelector("#cp"); if (!cp) return;
+      cp.onclick = async () => {
+        cp.disabled = true; const r = await UI.api(`/api/pieces-get?id=${p.pieceId}`); cp.disabled = false;
+        if (!r.ok) return UI.toast(r.error || "본문을 가져오지 못했어요");
+        const el = document.createElement("div"); el.innerHTML = r.piece.bodyHtml || "";
+        el.querySelectorAll(".disclosure small").forEach((x) => x.remove());
+        const text = `${r.piece.title || ""}\n\n${(el.innerText || el.textContent || "").trim()}`;
+        UI.toast((await UI.copy(text)) ? "본문을 복사했어요" : "복사하지 못했어요");
+      };
+    } });
+}
+UI.$$("#seg button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; load(); });
 await load();
