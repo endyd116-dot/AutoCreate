@@ -32,6 +32,8 @@
   UI.utc = (v) => { if (!v) return null; const s = String(v); return /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(s) && !/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? new Date(s.replace(" ", "T") + "Z") : new Date(s); };
   UI.timeKST = (iso) => { if (!iso) return ""; const d = UI.utc(iso); return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" }); };
   UI.dateKST = (iso, o = {}) => { if (!iso) return ""; return UI.utc(iso).toLocaleDateString("ko-KR", { month: "long", day: "numeric", timeZone: "Asia/Seoul", ...o }); };
+  /* 큰 수는 만·억으로 줄여 쓴다 — «2,140,000 / 10,000,000» 은 한 줄에 안 들어간다 */
+  UI.numShort = (n) => { n = Number(n) || 0; if (n >= 1e8) return (n / 1e8).toFixed(n % 1e8 ? 1 : 0).replace(/\.0$/, "") + "억"; if (n >= 1e4) return UI.num(Math.round(n / 1e4)) + "만"; return UI.num(n); };
   UI.esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   /* ── 채널 ── */
@@ -160,6 +162,17 @@
   };
   UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스" };
   UI.EMOTION = { warm: "친근·따뜻", neutral: "담백·정리", witty: "재치", urgent: "급함·해결", calm: "차분" };
+  /* [P1R3] 수익 소스 사람말(계약 v3.1 source enum 13종) · 신선도 배지 — 수익·매체·계정 화면 공용 한 벌 */
+  UI.SRC = { adsense: "애드센스", youtube: "유튜브", coupang: "쿠팡 파트너스", aliexpress: "알리 어필리에이트", linkprice: "링크프라이스", adpost: "애드포스트", adfit: "카카오 애드핏", clip: "네이버 클립", meta: "메타", tiktok: "틱톡", x: "엑스", sponsor: "협찬·광고비", manual: "그 외" };
+  UI.srcLabel = (s) => UI.SRC[s] || s;
+  /* 소스 마크는 한 글자로 «겹치지 않게» 고른다 — 애드«센»스/애드«포»스트가 둘 다 «애»가 되면 줄이 구분되지 않는다 */
+  UI.SRCMARK = { adsense: "센", youtube: "유", coupang: "쿠", aliexpress: "알", linkprice: "링", adpost: "포", adfit: "핏", clip: "클", meta: "메", tiktok: "틱", x: "엑", sponsor: "협", manual: "기" };
+  UI.srcMark = (s, cls = "") => `<span class="mk soft ${cls}" aria-hidden="true">${UI.esc(UI.SRCMARK[s] || (UI.srcLabel(s) || "?").slice(0, 1))}</span>`;
+  UI.FRESH = { api: "자동", runner: "내 PC", manual: "직접 입력" }; // «러너»는 고객 화면 금지어(§13.0)
+  UI.freshPill = (f) => `<span class="pill off">${UI.esc(UI.FRESH[f] || f || "")}</span>`;
+  /* 수익 매체 상태 — not_configured 는 «오류»가 아니다(PITFALLS AC-10) */
+  UI.SRC_STATUS = { connected: ["ok", "연결됨"], not_configured: ["off", "키 필요"], error: ["warn", "연결 끊김"], disconnected: ["off", "끊음"] };
+  UI.SRC_ERR = { auth: "다시 연결해 주세요", not_configured: "키를 넣으면 바로 가져와요", parse: "저희가 확인하고 있어요", provider: "저희가 확인하고 있어요", network: "네트워크가 불안정했어요" };
   /* [P1R2] 해야 할 일·알림 마크 — kind 하나에 아이콘 하나(홈·알림함 공용 · 이모지 0) */
   UI.KIND = {
     runner: ["warn", '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>'],

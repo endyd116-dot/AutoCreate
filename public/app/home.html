@@ -6,7 +6,7 @@
 <title>홈 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=4">
+<link rel="stylesheet" href="/css/ac.css?v=5">
 </head>
 <body>
 <div class="shell">
@@ -14,11 +14,11 @@
   <main class="page" id="page">
     <div class="appbar"><span class="sp"></span><a class="ic" href="/app/notifications.html" aria-label="알림"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></a></div>
     <div id="trialBanner" hidden></div>
-    <div class="hl">
+    <a class="hl" href="/app/revenue.html" style="display:block">
       <div class="say">오늘</div>
-      <div class="num"><em id="today">0원</em> 벌었어요</div>
+      <div class="num" id="hlnum"><span class="sk" style="display:inline-block;width:60%"></span></div>
       <div class="tip" id="tip"><span class="sk" style="display:inline-block;width:160px"></span></div>
-    </div>
+    </a>
     <div class="group" id="todo"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
     <div class="group" id="slots"><div class="gt">오늘 편성</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
     <div class="group">
@@ -28,8 +28,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=4"></script>
-<script src="/js/mock.js?v=2"></script>
+<script src="/js/ui.js?v=5"></script>
+<script src="/js/mock.js?v=4"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
@@ -37,11 +37,23 @@
   if (v === "ok") UI.toast("이메일 인증이 끝났어요"); else if (v === "used") UI.toast("이미 인증된 링크예요"); else if (v) UI.toast("인증 링크가 유효하지 않아요");
   const r = await UI.api("/api/home-summary");
   if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
-  UI.countUp(UI.$("#today"), r.revenue.today);
-  const diff = r.revenue.month - r.revenue.lastMonthSameDay;
-  UI.$("#tip").innerHTML = r.revenue.month || r.revenue.lastMonthSameDay
-    ? `이번 달 ${UI.won(r.revenue.month)} · 지난달 같은 날보다 <b>${diff >= 0 ? "+" : "−"}${UI.won(Math.abs(diff))}</b>`
-    : "수익 매체를 연결하면 여기에 매일 쌓여요";
+  // [P1R3] 오늘 번 돈 — 확정은 진하게, 예상은 회색 작게. 🔴 둘을 합쳐서 한 숫자로 그리지 않는다(§9.3)
+  const rev = r.revenue || {};
+  const conf = rev.todayConfirmedKrw != null ? rev.todayConfirmedKrw : (rev.today || 0);
+  const est = rev.todayEstimatedKrw || 0;
+  const yst = rev.yesterdayKrw;
+  const mon = rev.monthKrw != null ? rev.monthKrw : (rev.month || 0);
+  const numEl = UI.$("#hlnum");
+  if (conf || est) {
+    numEl.innerHTML = `<em id="today">0원</em> 벌었어요${est ? ` <span class="est">예상 ${UI.won(est)}</span>` : ""}`;
+    UI.countUp(UI.$("#today"), conf);
+  } else numEl.textContent = (mon || yst) ? "오늘은 아직이에요" : "아직 연결된 곳이 없어요";
+  const tip = UI.$("#tip");
+  if (yst != null && (conf || est || mon)) { const d = conf - yst;
+    tip.innerHTML = yst ? `이번 달 ${UI.won(mon)} · 어제보다 <b>${d >= 0 ? "+" : "−"}${UI.won(Math.abs(d))}</b>` : `이번 달 ${UI.won(mon)}`;
+  } else if (mon || rev.lastMonthSameDay) { const d2 = mon - (rev.lastMonthSameDay || 0);
+    tip.innerHTML = `이번 달 ${UI.won(mon)} · 지난달 같은 날보다 <b>${d2 >= 0 ? "+" : "−"}${UI.won(Math.abs(d2))}</b>`;
+  } else tip.textContent = "수익 매체를 연결하면 여기에 매일 쌓여요";
   // 체험 배너
   if (r.trial.status === "trial") { const b = UI.$("#trialBanner"); b.hidden = false; b.className = "banner info"; b.innerHTML = `<span>무료 체험 ${r.trial.daysLeft}일 남았어요 · 코인 ${UI.num(r.coins)}개</span><a href="/app/plans.html">요금제 보기</a>`; }
   else if (r.trial.status === "readonly") { const b = UI.$("#trialBanner"); b.hidden = false; b.className = "banner"; b.innerHTML = `<span>체험이 끝났어요. 이어서 쓰려면 요금제를 골라 주세요</span><a href="/app/plans.html">요금제</a>`; }

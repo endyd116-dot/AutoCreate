@@ -68,6 +68,7 @@ input,textarea,select{font:inherit;color:inherit}
 .hl .say{font-size:15px;color:var(--sub);font-weight:500}
 .hl .num{font-size:30px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.2;margin-top:2px;text-wrap:balance}
 .hl .num em{font-style:normal;color:var(--money)}
+.hl .num .est{font-size:15px;font-weight:600;color:var(--muted);letter-spacing:0;white-space:nowrap}
 .hl .tip{font-size:13px;color:var(--muted);margin-top:6px}
 .hl .tip b{color:var(--money);font-weight:700}
 @media (min-width:641px){ .hl .num{font-size:40px} }
@@ -163,6 +164,18 @@ input,textarea,select{font:inherit;color:inherit}
 .bar .n{width:96px;flex:none;color:var(--sub);font-weight:500;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .bar .n .mk{flex:none}
 .bar .track{flex:1;height:10px;border-radius:999px;background:var(--ground);overflow:hidden} .bar .fill{height:100%;border-radius:999px;background:var(--faint);transition:width 600ms var(--ease)} .bar.top .fill{background:var(--ink)}
 .bar .v{width:64px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+/* [P1R3] 일별 수익 — .bars 와 같은 급의 차트(단색 + 강조 1 · 다색 금지). 빗금 = 수집 못 한 날(«0원»이 아니다 · AC-9) */
+.spark{display:flex;align-items:flex-end;gap:3px;height:92px;padding:12px 16px 4px}
+.spark button{flex:1;min-width:3px;align-self:flex-end;border-radius:3px 3px 0 0;background:var(--faint);display:block;transition:background var(--dur) var(--ease)}
+.spark button.top{background:var(--ink)} .spark button.on{outline:2px solid var(--sel);outline-offset:1px}
+.spark button.zero{height:2px!important;background:var(--line);border-radius:2px}
+.spark button.none{height:100%!important;background:repeating-linear-gradient(45deg,var(--line) 0 3px,transparent 3px 6px);border-radius:3px}
+.spark-x{display:flex;justify-content:space-between;padding:0 16px 2px;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.spark-l{padding:2px 16px 12px;font-size:12px;color:var(--muted)}
+/* [P1R3] 조건 게이지(애드포스트 글·방문 / YPP 구독·조회) — 단색 · 충족 시 초록 */
+.gauge{padding:2px 0 6px} .gauge+.gauge{padding-top:6px}
+.gauge .gl{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--sub);margin-bottom:5px;white-space:nowrap} .gauge .gl b{font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
+.gauge .gt2{height:6px;border-radius:999px;background:var(--ground);overflow:hidden} .gauge .gf{height:100%;border-radius:999px;background:var(--faint);transition:width 600ms var(--ease)} .gauge.done .gf{background:var(--money)}
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:8px 10px 10px;text-align:center;font-size:12px}
 .cal .wd{color:var(--muted);font-weight:600;font-size:11px;padding-bottom:2px}
 .cal .dd{height:38px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:12px;font-variant-numeric:tabular-nums;font-weight:500;border:0;width:100%}
