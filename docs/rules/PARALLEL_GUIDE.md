@@ -54,6 +54,10 @@ AutoCreate          메인   main
 > ★ **% 지도 의무**: 메인은 트리거의 각 섹션 제목에 % 구간을 직접 배정한다(`## B1 (0→25%)`). % 지도 없는 트리거 = 메인의 작성 미준수.
 > push/배포: `main` push(=실배포)는 메인 단독. A·B·C settings는 routine 도구 allow + `main` push deny.
 
+## 4.5 🔴 전본 개발(CLAUDE §8)
+- 트리거에 «설계 대비 범위 지도» 필수. A·B·C 보고에 «설계 대비 못 만든 것(사유)» 항목 필수(없으면 «0»이라고 쓴다).
+- «축소판·간단히·폴백 대체·이번엔 생략» 금지어. 막히면 사유 보고.
+
 ## 5. 자체 검증 (메인 보고 전)
 - **B**: `npx tsc --noEmit` 통과 / schema import 누락 점검 / `export const config = { path }` / DDL 멱등 / jsonb `sql.json` / tenant 스코프.
 - **A**: 화면 진입·동작 / 캐시버스터 갱신 / 콘솔 에러 0 / **`ac.css` 토큰·12 컴포넌트만 사용** / 헌장 §13.0 체크(색 3·숫자 1·Primary 1) / 폰 400px·데스크톱 1280px 둘 다.
