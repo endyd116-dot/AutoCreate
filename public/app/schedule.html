@@ -14,7 +14,9 @@
   <main class="page" id="page">
     <div class="appbar"><span class="ttl">편성표</span><span class="sp"></span></div>
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
+<div class="seg" id="mode"><button type="button" data-m="week">주</button><button type="button" data-m="month" class="on">월</button></div>
 <div class="group" id="cal"></div>
+<div id="week" hidden></div>
 <div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
@@ -24,6 +26,7 @@
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
+let mode = "month";
 const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -60,7 +63,14 @@ function render() {
   day.innerHTML = `<div class="gt">${sd.getDate()}일 ${WD[sd.getDay()]}요일${list.length ? ` · ${list.length}건` : ""}</div>` + (list.length ? list.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("")
     : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">이날은 나갈 글이 없어요</span><span class="d">${active.length ? "규칙에 없는 요일이거나 쉬는 날이에요" : "자동 편성을 켜면 채워져요"}</span></div></div>`);
   UI.$$("#day .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id))));
+  // 주 보기 = 선택한 날이 든 주의 날짜별 리스트(DESIGN §5B.8)
+  UI.$("#cal").hidden = mode !== "month"; UI.$("#day").hidden = mode !== "month"; const wk = UI.$("#week"); wk.hidden = mode !== "week";
+  if (mode === "week") { const ws = new Date(sd); ws.setDate(sd.getDate() - sd.getDay()); wk.innerHTML = "";
+    for (let i = 0; i < 7; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); const k = ymd(d); const ls = slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
+      wk.insertAdjacentHTML("beforeend", `<div class="group" style="margin-bottom:12px"><div class="gt">${d.getDate()}일 ${WD[d.getDay()]}요일${k === ymd(today) ? ' <span class="pill ink">오늘</span>' : ""}</div>${ls.length ? ls.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("") : `<div class="row" style="min-height:40px"><span class="d muted">나갈 글 없음</span></div>`}</div>`); }
+    UI.$$("#week .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id)))); }
 }
+UI.$$("#mode button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mode button").forEach((x) => x.classList.toggle("on", x === b)); render(); });
 /* ── 슬롯 시트(R1: 정보 + 건너뛰기) ── */
 function slotSheet(s) {
   const p = s.pieceId ? `<a class="btn secondary" href="/app/piece.html?id=${s.pieceId}">글 보기</a>` : "";
