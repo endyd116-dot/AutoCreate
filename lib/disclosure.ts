@@ -55,10 +55,10 @@ export function checkDisclosure(blocks: Block[], meta: { affiliate?: unknown; ad
 /** HTML 본문에서도 재검사(사람 수정 후 bodyHtml 이 정본일 때). 첫 의미 블록이 고지인가. */
 export function checkDisclosureHtml(html: string, need: boolean): DisclosureCheck {
   if (!need) return { ok: true };
-  const m = /<(p|div|blockquote|section)[^>]*class="[^"]*ac-disclosure[^"]*"[^>]*>([\s\S]*?)<\/\1>/i.exec(html);
+  const m = /<div[^>]*class="[^"]*\bdisclosure\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(html);
   if (!m) return { ok: false, detail: "제휴 고지가 본문에 없어요." };
   const before = html.slice(0, m.index).replace(/<[^>]+>/g, "").trim();
   if (before.length > 0) return { ok: false, detail: "제휴 고지가 본문 첫머리가 아니에요." };
-  if (!isDisclosureText(m[2].replace(/<[^>]+>/g, ""))) return { ok: false, detail: "고지 문구가 정본과 달라요." };
+  if (!isDisclosureText(m[1].replace(/<[^>]+>/g, ""))) return { ok: false, detail: "고지 문구가 정본과 달라요." };
   return { ok: true };
 }

@@ -1,7 +1,7 @@
 /**
  * lib/blocks.ts — Block 타입(계약 §4 v1.1) + renderBlocksHtml(blocks, channel, images) + 평문 추출. AM 원본: ../AutoMarketing/lib/content-images.ts figureHtml · content-tone toPlainText (관례 2026-09-14)
- *   HTML 은 «미리보기·러너 변환» 공용 정본 한 벌. 블록마다 `class="ac-<type>"` 를 달아 러너가 에디터 실요소(인용구·구분선·체크리스트)로 되돌린다(R2).
- *   adsense 블록은 «광고» 라벨을 렌더에 박는다(§16B.3 «광고 자리 본문과 혼동 금지»). disclosure 는 `ac-disclosure` 인용 박스(본문과 같은 크기 이상).
+ *   🔴 HTML class 는 계약 §4B(v1.3) 글자 그대로: div.disclosure(첫 요소) · nav.toc>ol>li · p.summary · a.affiliate>img+span>b.name/em.price+span.go · div.adsense(빈 박스 · «광고» 라벨은 A CSS ::before)
+ *   · dl.faq>dt/dd · p.tip · ul.check>li · p.tags · blockquote · hr · figure>img+figcaption · table · h2/h3/p/ul 표준. 러너는 이 class 로 에디터 실요소로 되돌린다(R2).
  */
 export type BlockType = "hook" | "para" | "h2" | "h3" | "quote" | "list" | "checklist" | "table" | "image" | "divider" | "tip" | "faq" | "hashtags" | "disclosure" | "adsense" | "toc" | "summary" | "affiliate";
 export interface Block {
@@ -26,45 +26,46 @@ export function renderBlocksHtml(blocks: Block[], channel: string, images: Rende
   const h2s = blocks.filter((b) => b.type === "h2" && b.text).map((b) => String(b.text));
   for (const b of blocks) {
     switch (b.type) {
-      case "hook": out.push(`<p class="ac-hook"><strong>${inline(b.text)}</strong></p>`); break;
-      case "para": out.push(`<p class="ac-para">${inline(b.text)}</p>`); break;
-      case "h2": out.push(`<h2 class="ac-h2">${inline(b.text)}</h2>`); break;
-      case "h3": out.push(`<h3 class="ac-h3">${inline(b.text)}</h3>`); break;
-      case "quote": out.push(`<blockquote class="ac-quote">${inline(b.text)}</blockquote>`); break;
-      case "list": out.push(`<ul class="ac-list">${(b.items ?? []).map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); break;
-      case "checklist": out.push(`<ul class="ac-checklist">${(b.items ?? []).map((i) => `<li>☑ ${inline(i)}</li>`).join("")}</ul>`); break;
+      case "hook": out.push(`<p class="hook"><strong>${inline(b.text)}</strong></p>`); break;
+      case "para": out.push(`<p>${inline(b.text)}</p>`); break;
+      case "h2": out.push(`<h2>${inline(b.text)}</h2>`); break;
+      case "h3": out.push(`<h3>${inline(b.text)}</h3>`); break;
+      case "quote": out.push(`<blockquote>${inline(b.text)}</blockquote>`); break;
+      case "list": out.push(`<ul>${(b.items ?? []).map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); break;
+      case "checklist": out.push(`<ul class="check">${(b.items ?? []).map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); break;
       case "table": {
         const rows = b.rows ?? []; if (!rows.length) break;
         const [head, ...body] = rows;
-        out.push(`<table class="ac-table"><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+        out.push(`<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
         break;
       }
       case "image": {
         const img = typeof b.imageIndex === "number" ? images[b.imageIndex] : undefined;
         const cap = b.caption || img?.caption || "";
-        if (img?.url) out.push(`<figure class="ac-figure" data-image-index="${b.imageIndex ?? ""}"><img src="${esc(img.url)}" alt="${esc(img.alt || cap)}" loading="lazy"><figcaption>${inline(cap)}</figcaption></figure>`);
-        else out.push(`<figure class="ac-figure ac-figure--pending" data-image-index="${b.imageIndex ?? ""}"><figcaption>${inline(cap)}</figcaption></figure>`);
+        if (img?.url) out.push(`<figure data-image-index="${b.imageIndex ?? ""}"><img src="${esc(img.url)}" alt="${esc(img.alt || cap)}" loading="lazy"><figcaption>${inline(cap)}</figcaption></figure>`);
+        else out.push(`<figure class="pending" data-image-index="${b.imageIndex ?? ""}"><figcaption>${inline(cap)}</figcaption></figure>`);
         break;
       }
-      case "divider": out.push(`<hr class="ac-divider">`); break;
-      case "tip": out.push(`<div class="ac-tip"><p>${inline(b.text)}</p>${b.items?.length ? `<ul>${b.items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>` : ""}</div>`); break;
+      case "divider": out.push(`<hr>`); break;
+      case "tip": out.push(`<p class="tip">${inline(b.text)}${b.items?.length ? "<br>" + b.items.map((i) => inline(i)).join("<br>") : ""}</p>`); break;
       case "faq": {
         const items = b.items ?? [];
-        out.push(`<div class="ac-faq">${items.map((qa) => { const [qq, ...aa] = String(qa).split(/\n|\s*\|\s*/); return `<div class="ac-faq-item"><p class="ac-faq-q"><strong>Q. ${inline(qq)}</strong></p><p class="ac-faq-a">${inline(aa.join(" ").trim())}</p></div>`; }).join("")}</div>`);
+        out.push(`<dl class="faq">${items.map((qa) => { const [qq, ...aa] = String(qa).split(/\n|\s*\|\s*/); return `<dt>${inline(qq.replace(/^Q[.:：]?\s*/i, ""))}</dt><dd>${inline(aa.join(" ").trim().replace(/^A[.:：]?\s*/i, ""))}</dd>`; }).join("")}</dl>`);
         break;
       }
-      case "hashtags": out.push(`<p class="ac-hashtags">${(b.items ?? []).map((t) => `#${esc(String(t).replace(/^#/, "").replace(/\s+/g, ""))}`).join(" ")}</p>`); break;
-      case "disclosure": out.push(`<blockquote class="ac-disclosure">${esc(b.text)}</blockquote>`); break;
-      case "adsense": out.push(`<div class="ac-adsense" data-label="광고"><span class="ac-adsense-label">광고</span></div>`); break;
+      case "hashtags": out.push(`<p class="tags">${(b.items ?? []).map((t) => `#${esc(String(t).replace(/^#/, "").replace(/\s+/g, ""))}`).join(" ")}</p>`); break;
+      case "disclosure": out.push(`<div class="disclosure">${esc(b.text)}</div>`); break;
+      case "adsense": out.push(`<div class="adsense"></div>`); break;
       case "toc": {
         const items = b.items?.length ? b.items : h2s;
-        out.push(`<nav class="ac-toc"><p><strong>목차</strong></p><ol>${items.map((t) => `<li>${inline(t)}</li>`).join("")}</ol></nav>`);
+        out.push(`<nav class="toc"><ol>${items.map((t) => `<li>${inline(t)}</li>`).join("")}</ol></nav>`);
         break;
       }
-      case "summary": out.push(`<div class="ac-summary"><p><strong>요약</strong></p>${b.text ? `<p>${inline(b.text)}</p>` : ""}${b.items?.length ? `<ul>${b.items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>` : ""}</div>`); break;
+      case "summary": out.push(`<p class="summary">${inline(b.text)}${b.items?.length ? (b.text ? "<br>" : "") + b.items.map((i) => inline(i)).join("<br>") : ""}</p>`); break;
       case "affiliate": {
         const a = b.affiliate; if (!a?.url) break;
-        out.push(`<div class="ac-affiliate"><a href="${esc(a.url)}" target="_blank" rel="nofollow sponsored noopener">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="${esc(a.productName)}" loading="lazy">` : ""}<span class="ac-affiliate-name">${esc(a.productName)}</span>${typeof a.price === "number" && a.price > 0 ? `<span class="ac-affiliate-price">${a.price.toLocaleString("ko-KR")}원</span>` : ""}</a>${b.text ? `<p>${inline(b.text)}</p>` : ""}</div>`);
+        out.push(`<a class="affiliate" href="${esc(a.url)}" rel="nofollow sponsored noopener" target="_blank">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : ""}<span><b class="name">${esc(a.productName)}</b>${typeof a.price === "number" && a.price > 0 ? `<em class="price">${a.price.toLocaleString("ko-KR")}원</em>` : ""}</span><span class="go">보러가기</span></a>`);
+        if (b.text) out.push(`<p>${inline(b.text)}</p>`);
         break;
       }
     }
