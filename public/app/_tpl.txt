@@ -271,11 +271,155 @@ UI.$("#prev").onclick = async () => { view = new Date(view.getFullYear(), view.g
 UI.$("#next").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); await loadSlots(); render(); };
 await load();
 === revenue.html | revenue | 수익 ===
-<div class="hl"><div class="say" id="say">이번 달</div><div class="num" id="num">0원 벌었어요</div><div class="tip" id="tip">수익 매체를 연결하면 매일 자동으로 모아요</div></div>
-<div class="group"><div class="gt">어디서</div><div class="empty"><span class="mk money">₩</span><h3>아직 연결된 수익 매체가 없어요</h3><p>애드센스·쿠팡 파트너스·유튜브는 연결하면 자동으로, 애드포스트는 러너가 가져와요.</p><a class="btn primary sm" href="/app/accounts.html">수익 매체 연결</a></div></div>
+<div style="display:flex;align-items:center;gap:2px;padding:6px 0 0">
+  <button type="button" class="ic" id="prev" aria-label="지난달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <span id="mon" style="font-weight:700;font-size:15px"></span>
+  <button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button>
+</div>
+<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div></div>
+<div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 --- script ---
 await UI.boot("revenue");
-const r = await UI.api("/api/home-summary"); if (r.ok) { UI.$("#say").textContent = `${new Date().getMonth() + 1}월에`; UI.$("#num").innerHTML = `<em>${UI.won(r.revenue.month)}</em> 벌었어요`; }
+const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+const today = KST(); const todayYmd = today.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+let view = { y: today.getFullYear(), m: today.getMonth() + 1 };
+let SUM = null, DAYS = [], SRC = [], accounts = [];
+const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
+const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
+const won = (n) => UI.won(n);
+const dayLabel = (d) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
+
+/* 상단 우측 = 수익 매체로 */
+const link = document.createElement("a"); link.className = "ic"; link.href = "/app/ad-media.html"; link.setAttribute("aria-label", "수익 매체");
+link.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>';
+const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(link);
+
+async function load() {
+  const from = `${mkey()}-01`; const last = new Date(view.y, view.m, 0).getDate(); const to = `${mkey()}-${String(last).padStart(2, "0")}`;
+  const [s, d, v, a] = await Promise.all([
+    UI.api(`/api/revenue-summary?month=${mkey()}`), UI.api(`/api/revenue-daily?from=${from}&to=${to}`),
+    UI.api("/api/revenue-sources"), UI.api("/api/accounts-list"),
+  ]);
+  if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; }
+  SUM = s; DAYS = d.ok ? (d.days || []) : []; SRC = v.ok ? (v.sources || []) : []; accounts = a.ok ? (a.accounts || []) : [];
+  render();
+}
+
+function render() {
+  UI.$("#mon").textContent = view.y === today.getFullYear() ? `${view.m}월` : `${view.y}년 ${view.m}월`;
+  UI.$("#next").disabled = isThisMonth();
+  const connected = SRC.filter((x) => x.status === "connected").length;
+  const body = UI.$("#body");
+  // 🔴 0원을 큰 숫자로 자랑하지 않는다 — 번 적이 없으면 빈 상태가 기본
+  if (!SUM.monthKrw && !DAYS.some((x) => x.krw > 0)) {
+    UI.$("#hl").hidden = true;
+    body.innerHTML = `<div class="group"><div class="empty"><span class="mk money">₩</span><h3>${connected ? "이번 달은 아직 들어온 게 없어요" : "아직 연결된 곳이 없어요"}</h3><p>${connected ? "매체에서 정산이 올라오면 여기에 쌓여요." : "애드포스트부터 해볼까요? 조건이 되는지 먼저 확인해 드려요."}</p><a class="btn primary sm" href="/app/ad-media.html">${connected ? "수익 매체 보기" : "수익 매체 연결하기"}</a></div></div>`
+      + manualGroup();
+    bindManual(); return;
+  }
+  UI.$("#hl").hidden = false;
+  UI.$("#say").textContent = `${view.m}월에`;
+  UI.$("#num").innerHTML = `<em id="big">0원</em> 벌었어요`;
+  UI.countUp(UI.$("#big"), SUM.monthKrw, won);
+  const diff = SUM.monthKrw - (SUM.prevMonthKrw || 0);
+  UI.$("#tip").innerHTML = SUM.prevMonthKrw
+    ? `지난달 ${won(SUM.prevMonthKrw)} · <b>${diff >= 0 ? "+" : "−"}${won(Math.abs(diff))}</b>`
+    : "지난달에는 기록이 없어요";
+  body.innerHTML = dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  bindDaily(); bindManual();
+}
+
+/* ① 일별 — 단색 막대 · 빗금 = 수집 못 한 날(0원 아님) */
+function dailyGroup() {
+  const last = new Date(view.y, view.m, 0).getDate();
+  const upto = isThisMonth() ? Number(todayYmd.slice(8, 10)) : last;
+  const by = Object.fromEntries(DAYS.map((x) => [x.day, x]));
+  const max = Math.max(1, ...DAYS.map((x) => x.krw));
+  const miss = [];
+  let bars = "";
+  for (let i = 1; i <= upto; i++) {
+    const day = `${mkey()}-${String(i).padStart(2, "0")}`; const r = by[day];
+    if (!r) { miss.push(i); bars += `<button type="button" class="none" data-d="${day}" aria-label="${dayLabel(day)} 아직 못 가져왔어요"></button>`; continue; }
+    if (!r.krw) { bars += `<button type="button" class="zero" data-d="${day}" aria-label="${dayLabel(day)} 0원"></button>`; continue; }
+    const h = Math.max(8, Math.round((r.krw / max) * 100));
+    bars += `<button type="button" class="${r.krw === max ? "top" : ""}" data-d="${day}" style="height:${h}%" aria-label="${dayLabel(day)} ${won(r.krw)}"></button>`;
+  }
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">날마다 ${miss.length ? `<span class="muted" style="font-weight:500">못 가져온 날 ${miss.length}일</span>` : ""}</div>
+    <div class="spark">${bars}</div><div class="spark-x"><span>1일</span><span>${upto}일</span></div>
+    ${miss.length ? `<div class="spark-l">빗금 친 날은 아직 못 가져온 날이에요 · 0원이 아니에요</div>` : ""}</div>`;
+}
+function bindDaily() {
+  UI.$$("#body .spark button").forEach((b) => b.onclick = () => {
+    UI.$$("#body .spark button").forEach((x) => x.classList.toggle("on", x === b));
+    const day = b.dataset.d; const r = DAYS.find((x) => x.day === day);
+    UI.toast(r ? `${dayLabel(day)} · ${won(r.krw)}${r.freshness ? " · " + (UI.FRESH[r.freshness] || "") : ""}` : `${dayLabel(day)} · 아직 못 가져왔어요`);
+  });
+}
+
+/* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */
+function sourceGroup() {
+  const list = SUM.bySource || []; if (!list.length) return "";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">매체 관리</a></div>` + list.map((s) => {
+    const src = SRC.find((x) => x.source === s.source);
+    const bad = src && (src.status === "error" || src.status === "not_configured");
+    const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span></div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+  }).join("") + "</div>";
+}
+
+/* ③ 계정별 — 마크 달린 단색 막대(1등만 잉크) */
+function accountGroup() {
+  const list = SUM.byAccount || []; if (!list.length) return "";
+  const max = Math.max(1, ...list.map((x) => x.krw));
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(a.channel, "sm")}@${UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+}
+
+/* ④ 글·영상별 TOP 5 */
+function pieceGroup() {
+  const list = SUM.topPieces || []; if (!list.length) return "";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글 ${list.length}개</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">이 글이 ${view.m}월에</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
+}
+
+/* ⑤ 직접 입력 */
+function manualGroup() {
+  return `<div class="group"><button type="button" class="row tap" id="manual"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 받은 수익 넣기</span><span class="d">협찬비·메타·틱톡처럼 자동으로 못 가져오는 것</span></div>${UI.chev}</button></div>`;
+}
+function bindManual() { const b = UI.$("#manual"); if (b) b.onclick = manualSheet; }
+
+async function manualSheet() {
+  const MSRC = [["sponsor", "협찬·광고비"], ["meta", "메타"], ["tiktok", "틱톡"], ["x", "엑스"], ["manual", "그 외"]];
+  const DAYS3 = [[todayYmd, "오늘"], [ymdOff(-1), "어제"], [ymdOff(-2), "그제"]];
+  const pl = await UI.api("/api/pieces-list?status=published");
+  const pieces = pl.ok ? (pl.pieces || []).slice(0, 8) : [];
+  UI.sheet(`<div class="sec">어디서 받았나요</div>${UI.chips("src", MSRC, "sponsor")}
+    <div class="sec">언제 (KST)</div>${UI.chips("day", DAYS3, todayYmd)}
+    <div class="field"><label>다른 날이면 직접</label><input class="input" id="d2" placeholder="2026-09-01" inputmode="numeric" maxlength="10" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>얼마</label><input class="input" id="amt" inputmode="numeric" placeholder="예: 120000" autocomplete="off"><div class="help"></div></div>
+    <div class="sec">어느 계정 <span class="muted" style="font-weight:500">· 선택</span></div>${UI.chips("acc", [["", "안 고름"], ...accounts.map((a) => [a.id, "@" + a.handle])], "")}
+    ${pieces.length ? `<div class="sec">어느 글 <span class="muted" style="font-weight:500">· 선택</span></div>${UI.chips("pc", [["", "안 고름"], ...pieces.map((p) => [p.id, p.title.length > 14 ? p.title.slice(0, 14) + "…" : p.title])], "")}` : ""}
+    <div class="cta"><button class="btn primary" type="button" id="ok">넣기</button></div>`,
+    { title: "직접 받은 수익", onOpen: (sh, close) => {
+      UI.bindChips(sh, (n, v) => { if (n === "day") sh.querySelector("#d2").value = ""; });
+      sh.querySelector("#ok").onclick = async (e) => {
+        const typed = sh.querySelector("#d2").value.trim();
+        const day = typed || UI.chipVal(sh, "day");
+        const amountKrw = Number(String(sh.querySelector("#amt").value).replace(/[^\d]/g, ""));
+        if (!/^\d{4}-\d\d-\d\d$/.test(day)) { sh.querySelector("#d2").classList.add("err"); sh.querySelectorAll(".help")[0].textContent = "2026-09-01 처럼 적어 주세요."; return; }
+        if (!amountKrw) { sh.querySelector("#amt").classList.add("err"); sh.querySelectorAll(".help")[1].textContent = "금액을 숫자로 넣어 주세요."; return; }
+        const body = { source: UI.chipVal(sh, "src") || "manual", day, amountKrw };
+        const acc = UI.chipVal(sh, "acc"); if (acc) body.accountId = Number(acc);
+        const pc = UI.chipVal(sh, "pc"); if (pc) body.pieceId = Number(pc);
+        e.target.disabled = true; const r = await UI.api("/api/revenue-manual", { body }); e.target.disabled = false;
+        if (!r.ok) { UI.toast(r.error || "넣지 못했어요"); return; }
+        close(); UI.done(`${won(amountKrw)} 넣었어요`, load);
+      };
+    } });
+}
+function ymdOff(n) { const d = new Date(today); d.setDate(today.getDate() + n); return d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); }
+
+UI.$("#prev").onclick = () => { view.m--; if (view.m < 1) { view.m = 12; view.y--; } load(); };
+UI.$("#next").onclick = () => { if (isThisMonth()) return; view.m++; if (view.m > 12) { view.m = 1; view.y++; } load(); };
+await load();
 === account.html | account | 내 계정 ===
 <div class="hl"><div class="say">안녕하세요</div><div class="num" id="name">…</div><div class="tip" id="plan"></div></div>
 <div class="group" id="accounts"><div class="gt">연결한 계정 <a href="/app/accounts.html">관리</a></div><div class="empty"><span class="mk soft">+</span><h3>첫 계정을 연결해 보세요</h3><p>네이버 블로그·티스토리·유튜브 중 하나면 시작할 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div></div>
@@ -435,12 +579,23 @@ async function reloginSheet(a) {
 /* ── 계정 상세 시트(DESIGN §7.1 필드 전부) ── */
 async function detailSheet(a) {
   if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
+  // [P1R3] 이 계정의 수익 — 매체 상태 한 줄 + 이달 수익
+  const [rs, rv] = await Promise.all([UI.api("/api/revenue-sources"), UI.api("/api/revenue-summary")]);
+  const mySrc = rs.ok ? (rs.sources || []).filter((s) => s.accountId === a.id) : [];
+  const myKrw = rv.ok ? ((rv.byAccount || []).find((x) => x.accountId === a.id) || {}).krw || 0 : 0;
+  const okSrc = mySrc.filter((s) => s.status === "connected");
+  const badSrc = mySrc.filter((s) => s.status === "error");
+  const srcLine = !mySrc.length ? "아직 연결한 곳이 없어요"
+    : badSrc.length ? `${okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") || "연결됨 없음"} · ${UI.srcLabel(badSrc[0].source)} 끊김`
+    : okSrc.length ? okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") : "키를 넣으면 바로 가져와요";
   const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
   ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(a.lastErrorKind || "login_fail"))}</span><button type="button" id="relogin">다시 로그인</button></div>`
     : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
     : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
+  <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
+  <a class="row tap" href="/app/ad-media.html" style="padding-left:0;padding-right:0"><div class="l"><span class="t" style="font-size:14px">수익 매체</span><span class="d wrap">${UI.esc(srcLine)}</span></div>${badSrc.length ? '<span class="pill warn">연결 끊김</span>' : okSrc.length ? '<span class="pill ok">' + okSrc.length + '곳</span>' : ""}${UI.chev}</a>
   <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
   <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
@@ -891,4 +1046,156 @@ function postSheet(p) {
     } });
 }
 UI.$$("#seg button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; load(); });
+await load();
+=== ad-media.html | revenue | 수익 매체 ===
+<div class="step-h"><h1>어디서 돈이 들어오나요?</h1><p>가입은 본인 이름으로 해야 해요. 연결과 수집은 저희가 할게요.</p></div>
+<div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+--- script ---
+await UI.boot("revenue");
+/* 신청 주소는 서버가 준다(계약 v3.1 §1.4b) · 못 받으면 공개 주소로 떨어진다 */
+const FALLBACK_LINKS = { adpost: "https://adpost.naver.com/", adsense: "https://www.google.com/adsense/start/", ypp: "https://www.youtube.com/creators/how-things-work/monetization/", coupang: "https://partners.coupang.com/", clip: "https://creators.naver.com/" };
+const HOW = {
+  adpost: ["애드포스트에 가입해요", "내 블로그를 «미디어»로 등록해요", "심사를 기다려요 · 승인되면 네이버가 광고를 자동으로 넣어요"],
+  adsense: ["애드센스에 가입해요", "티스토리·블로거·워드프레스 사이트를 추가해요", "심사를 기다려요 · 승인되면 글 안 «광고 자리»에 자동으로 들어가요"],
+  ypp: ["구독 1,000명·쇼츠 조회를 채워요", "유튜브 스튜디오에서 수익 창출을 신청해요", "승인되면 수익을 매일 가져와요"],
+  coupang: ["쿠팡 파트너스에 가입해요", "승인 후 API 키(2개)를 발급받아요", "여기에 키를 넣으면 링크와 수익이 자동이에요"],
+  clip: ["클립 크리에이터 모집 기간에 지원해요", "선정되면 알려 주세요", "인센티브를 매일 가져와요"],
+};
+const KEYED = { coupang: [["accessKey", "Access Key"], ["secretKey", "Secret Key"]], aliexpress: [["appKey", "앱 키"]], linkprice: [["merchantKey", "머천트 키"]] };
+let EL = { accounts: [], thresholds: null, links: {} }, SRC = [], accounts = [];
+const linkOf = (k) => (EL.links && EL.links[k]) || FALLBACK_LINKS[k] || "";
+const srcOf = (source, accountId) => SRC.find((s) => s.source === source && (accountId == null || s.accountId === accountId));
+
+async function load() {
+  const [e, v, a] = await Promise.all([UI.api("/api/ad-eligibility"), UI.api("/api/revenue-sources"), UI.api("/api/accounts-list")]);
+  if (e.ok) EL = { accounts: e.accounts || [], thresholds: e.thresholds || null, links: e.links || {} };
+  SRC = v.ok ? (v.sources || []) : []; accounts = a.ok ? (a.accounts || []) : [];
+  render();
+}
+
+/* 조건 게이지 — 분모는 서버가 준 thresholds 에서만 온다. 없으면 게이지 대신 현재값만(v3.1) */
+function gauge(label, now, need, unit) {
+  if (need == null) return `<div class="gauge"><div class="gl"><span>${UI.esc(label)}</span><b>${UI.numShort(now)}${UI.esc(unit)}</b></div></div>`;
+  const pct = Math.min(100, Math.round((now / need) * 100));
+  return `<div class="gauge ${now >= need ? "done" : ""}"><div class="gl"><span>${UI.esc(label)}</span><b>${UI.numShort(now)} / ${UI.numShort(need)}${UI.esc(unit)}</b></div><div class="gt2"><div class="gf" style="width:${pct}%"></div></div></div>`;
+}
+const STATE_PILL = { none: ["off", "아직 신청 전"], pending: ["warn", "심사 중"], approved: ["ok", "승인됨"] };
+
+function card(key, title, desc, inner) {
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(title)}</div><p class="muted" style="margin:0 16px 6px;font-size:13px">${UI.esc(desc)}</p>${inner}</div>`;
+}
+function rowBtns(key, accountId, state) {
+  const how = `<button type="button" class="btn ghost sm" data-how="${key}" data-acc="${accountId ?? ""}">신청 방법</button>`;
+  const done = state !== "approved" ? `<button type="button" class="btn sm secondary" data-done="${key}" data-acc="${accountId ?? ""}">가입 완료했어요</button>` : "";
+  return `<div style="display:flex;gap:8px;padding:2px 16px 10px">${how}${done}</div>`;
+}
+
+function render() {
+  const th = EL.thresholds || {};
+  let h = "";
+
+  /* ① 애드포스트 — 네이버 블로그 계정마다 */
+  const np = EL.accounts.filter((a) => a.adpost);
+  if (np.length) h += card("adpost", "네이버 애드포스트", "네이버 블로그에 네이버가 광고를 넣어 줘요. 글 수와 방문이 기준을 넘으면 신청할 수 있어요.",
+    np.map((a) => { const st = STATE_PILL[a.adpost.state] || STATE_PILL.none;
+      return `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span>
+        <div style="padding:6px 0 0">${gauge("올린 글", a.adpost.posts, th.adpost?.posts, "편")}${gauge("방문", a.adpost.visitors, th.adpost?.visitors, "명")}</div></div><span class="pill ${st[0]}">${st[1]}</span></div>`
+        + (a.adpost.ready || a.adpost.state !== "none" ? rowBtns("adpost", a.accountId, a.adpost.state)
+          : `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기준을 넘으면 여기서 바로 알려드릴게요.</p>`); }).join(""));
+
+  /* ② 애드센스 — 티스토리·블로거·워드프레스 계정 */
+  const ad = accounts.filter((a) => ["tistory", "blogger", "wordpress"].includes(a.channel));
+  if (ad.length) h += card("adsense", "구글 애드센스", "티스토리·블로거·워드프레스 글에 광고를 넣어요. 글 안 «광고 자리»는 미리 비워 두고 있어요.",
+    ad.map((a) => { const s = srcOf("adsense", a.id); const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured;
+      return `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${s && s.lastSyncAt ? UI.esc(UI.ago(s.lastSyncAt)) + " 가져옴" : UI.esc(UI.SRC_ERR[(s && s.lastError) || "not_configured"])}</span></div><span class="pill ${st[0]}">${st[1]}</span></div>`
+        + rowBtns("adsense", a.id, s && s.status === "connected" ? "approved" : "none"); }).join(""));
+
+  /* ③ 유튜브 YPP */
+  const yt = EL.accounts.filter((a) => a.ypp);
+  if (yt.length) h += card("ypp", "유튜브 수익 창출", "구독과 조회가 기준을 넘으면 신청할 수 있어요.",
+    yt.map((a) => `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span>
+      <div style="padding:6px 0 0">${gauge("구독", a.ypp.subs, th.ypp?.subs, "명")}${gauge("쇼츠 조회", a.ypp.views, th.ypp?.views, "회")}</div></div><span class="pill ${a.ypp.ready ? "ok" : "off"}">${a.ypp.ready ? "신청 가능" : "모으는 중"}</span></div>`
+      + (a.ypp.ready ? rowBtns("ypp", a.accountId, "none") : `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기준을 넘으면 여기서 바로 알려드릴게요.</p>`)).join(""));
+
+  /* ④ 키를 넣는 매체 */
+  for (const [key, fields] of Object.entries(KEYED)) {
+    const s = srcOf(key); const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured;
+    h += card(key, UI.srcLabel(key), key === "coupang" ? "가입하고 키를 넣으면 글마다 제휴 링크를 자동으로 넣고 수익을 가져와요." : "키를 넣으면 수익을 매일 가져와요.",
+      `<div class="row">${UI.srcMark(key)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(key))}</span><span class="d">${s && s.lastSyncAt ? UI.esc(UI.ago(s.lastSyncAt)) + " 가져옴" : UI.esc(UI.SRC_ERR[(s && s.lastError) || "not_configured"])}</span></div><span class="pill ${st[0]}">${st[1]}</span></div>
+       <div style="display:flex;gap:8px;padding:2px 16px 10px">${HOW[key] ? `<button type="button" class="btn ghost sm" data-how="${key}" data-acc="">신청 방법</button>` : ""}<button type="button" class="btn sm secondary" data-key="${key}">${s && s.status === "connected" ? "키 바꾸기" : "키 넣기"}</button>${s && s.status === "connected" ? `<button type="button" class="btn ghost sm" data-off="${key}" style="color:var(--danger)">끊기</button>` : ""}</div>`);
+  }
+
+  /* ⑤ 네이버 클립 */
+  const cl = EL.accounts.find((a) => a.clip);
+  h += card("clip", "네이버 클립 인센티브", cl && cl.clip.open ? "지금 모집 중이에요." : "모집이 열리면 알려드릴게요.",
+    `<div class="row"><span class="mk soft">C</span><div class="l"><span class="t">클립 크리에이터</span><span class="d">${cl && cl.clip.open ? (cl.clip.deadline ? UI.esc(UI.dateKST(cl.clip.deadline)) + "까지 지원할 수 있어요" : "지원할 수 있어요") : "아직 모집 전이에요"}</span></div><span class="pill ${cl && cl.clip.open ? "ok" : "off"}">${cl && cl.clip.open ? "모집 중" : "대기"}</span></div>`
+    + (cl && cl.clip.open ? rowBtns("clip", cl.accountId, "none") : ""));
+
+  /* ⑥ 자동으로 못 가져오는 것 */
+  h += card("manual", "그 밖에 받은 돈", "메타·틱톡·협찬비처럼 자동으로 못 가져오는 건 수익 화면에서 직접 넣을 수 있어요.",
+    `<a class="row tap" href="/app/revenue.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 넣으러 가기</span><span class="d">협찬·광고비 · 메타 · 틱톡 · 엑스</span></div>${UI.chev}</a>`);
+
+  UI.$("#body").innerHTML = h;
+  UI.$$("#body [data-how]").forEach((b) => b.onclick = () => howSheet(b.dataset.how, b.dataset.acc ? Number(b.dataset.acc) : null));
+  UI.$$("#body [data-done]").forEach((b) => b.onclick = () => claimSheet(b.dataset.done, b.dataset.acc ? Number(b.dataset.acc) : null));
+  UI.$$("#body [data-key]").forEach((b) => b.onclick = () => keySheet(b.dataset.key));
+  UI.$$("#body [data-off]").forEach((b) => b.onclick = () => disconnect(b.dataset.off));
+}
+
+/* 한 화면 한 단계 — 신청 방법 3단계 + 외부 새 창 */
+function howSheet(key, accountId) {
+  const steps = HOW[key] || []; const url = linkOf(key);
+  UI.sheet(`<div class="steps" style="padding:4px 0 8px">${steps.map((s, i) => `<div class="st ${i === 0 ? "on" : ""}"><i>${i + 1}</i>${UI.esc(s)}</div>`).join("")}</div>
+    <p class="muted" style="margin:0 0 4px;font-size:13px">가입은 본인 이름으로만 할 수 있어요. 새 창에서 하고 돌아와 주세요.</p>
+    <div class="cta" style="flex-direction:column">${url ? `<a class="btn primary" href="${UI.esc(url)}" target="_blank" rel="noopener" id="go">신청하러 가기</a>` : ""}<button type="button" class="btn ghost" id="did">가입 완료했어요</button></div>`,
+    { title: `${UI.srcLabel(key === "ypp" ? "youtube" : key)} 신청`, onOpen: (sh, close) => {
+      sh.querySelector("#did").onclick = () => { close(); setTimeout(() => claimSheet(key, accountId), 300); };
+    } });
+}
+/* «가입 완료했어요» 1탭 — 자기 신고라 다음 수집에서 서버 판정이 이긴다고 정직하게 적는다 */
+function claimSheet(key, accountId) {
+  if (key !== "adpost" && key !== "ypp" && key !== "adsense" && key !== "clip") return keySheet(key);
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">신청까지 마치셨다면 여기서 알려 주세요. 상태를 «심사 중»으로 바꿔 둘게요.</p>
+    <p class="muted" style="margin:0 0 16px;font-size:13px">승인 여부는 다음 수집 때 저희가 다시 확인해요. 아직이면 원래대로 돌아갈 수 있어요.</p>
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-a="applied">신청까지 했어요</button><button class="btn ghost" type="button" data-a="approved">이미 승인됐어요</button></div>`,
+    { title: "어디까지 하셨나요", onOpen: (sh, close) => {
+      sh.querySelectorAll("[data-a]").forEach((b) => b.onclick = async () => {
+        b.disabled = true;
+        const r = await UI.api("/api/ad-eligibility", { body: { action: b.dataset.a, source: key, accountId } });
+        b.disabled = false;
+        if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
+        if (r.accounts) EL.accounts = r.accounts;
+        close(); UI.done(b.dataset.a === "approved" ? "승인으로 바꿨어요" : "심사 중으로 바꿨어요", load);
+      });
+    } });
+}
+/* 키 입력 = 바텀시트 */
+function keySheet(key) {
+  const fields = KEYED[key] || [["key", "키"]]; const url = linkOf(key);
+  UI.sheet(`<p class="muted" style="margin:0 0 8px">키는 암호로 잠가서 보관하고, 수익을 가져올 때만 써요.</p>
+    ${fields.map(([n, l]) => `<div class="field"><label>${UI.esc(l)}</label><input class="input" data-f="${n}" autocomplete="off" type="password"><div class="help"></div></div>`).join("")}
+    ${url ? `<p class="muted" style="margin:0 0 4px;font-size:12.5px">키는 <a href="${UI.esc(url)}" target="_blank" rel="noopener" style="text-decoration:underline">${UI.esc(UI.srcLabel(key))}</a> 에서 발급받아요.</p>` : ""}
+    <div class="cta"><button class="btn primary" type="button" id="ok">연결하기</button></div>`,
+    { title: `${UI.srcLabel(key)} 키`, onOpen: (sh, close) => {
+      sh.querySelector("#ok").onclick = async (e) => {
+        const vals = [...sh.querySelectorAll("[data-f]")].map((i) => i.value.trim());
+        if (vals.some((v) => !v)) { sh.querySelector(".help").textContent = "키를 모두 넣어 주세요."; return; }
+        e.target.disabled = true;
+        const r = await UI.api("/api/revenue-sources", { body: { action: "key", source: key, key: vals.join(":") } });
+        sh.querySelectorAll("[data-f]").forEach((i) => i.value = ""); // 🔴 키는 요청 후 즉시 비운다
+        e.target.disabled = false;
+        if (!r.ok) { sh.querySelector(".help").textContent = r.error || "연결하지 못했어요"; return; }
+        close(); UI.done("연결했어요", load);
+      };
+    } });
+}
+async function disconnect(key) {
+  UI.sheet(`<div id="dc"></div>`, { title: `${UI.srcLabel(key)} 끊기`, onOpen: (sh, close) => {
+    UI.confirmRow(sh.querySelector("#dc"), `${UI.srcLabel(key)} 연결을 끊을까요? 지금까지 모은 수익은 그대로 남아요.`, async () => {
+      const r = await UI.api("/api/revenue-sources", { body: { action: "disconnect", source: key } });
+      if (!r.ok) return UI.toast(r.error || "끊지 못했어요");
+      close(); UI.toast("연결을 끊었어요"); load();
+    });
+  } });
+}
 await load();

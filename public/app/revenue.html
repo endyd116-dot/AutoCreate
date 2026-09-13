@@ -6,24 +6,168 @@
 <title>수익 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=4">
+<link rel="stylesheet" href="/css/ac.css?v=5">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ttl">수익</span><span class="sp"></span></div>
-<div class="hl"><div class="say" id="say">이번 달</div><div class="num" id="num">0원 벌었어요</div><div class="tip" id="tip">수익 매체를 연결하면 매일 자동으로 모아요</div></div>
-<div class="group"><div class="gt">어디서</div><div class="empty"><span class="mk money">₩</span><h3>아직 연결된 수익 매체가 없어요</h3><p>애드센스·쿠팡 파트너스·유튜브는 연결하면 자동으로, 애드포스트는 러너가 가져와요.</p><a class="btn primary sm" href="/app/accounts.html">수익 매체 연결</a></div></div>
+<div style="display:flex;align-items:center;gap:2px;padding:6px 0 0">
+  <button type="button" class="ic" id="prev" aria-label="지난달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <span id="mon" style="font-weight:700;font-size:15px"></span>
+  <button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button>
+</div>
+<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div></div>
+<div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=4"></script>
-<script src="/js/mock.js?v=3"></script>
+<script src="/js/ui.js?v=5"></script>
+<script src="/js/mock.js?v=4"></script>
 <script>
 (async () => {
 await UI.boot("revenue");
-const r = await UI.api("/api/home-summary"); if (r.ok) { UI.$("#say").textContent = `${new Date().getMonth() + 1}월에`; UI.$("#num").innerHTML = `<em>${UI.won(r.revenue.month)}</em> 벌었어요`; }
+const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+const today = KST(); const todayYmd = today.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+let view = { y: today.getFullYear(), m: today.getMonth() + 1 };
+let SUM = null, DAYS = [], SRC = [], accounts = [];
+const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
+const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
+const won = (n) => UI.won(n);
+const dayLabel = (d) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
+
+/* 상단 우측 = 수익 매체로 */
+const link = document.createElement("a"); link.className = "ic"; link.href = "/app/ad-media.html"; link.setAttribute("aria-label", "수익 매체");
+link.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>';
+const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(link);
+
+async function load() {
+  const from = `${mkey()}-01`; const last = new Date(view.y, view.m, 0).getDate(); const to = `${mkey()}-${String(last).padStart(2, "0")}`;
+  const [s, d, v, a] = await Promise.all([
+    UI.api(`/api/revenue-summary?month=${mkey()}`), UI.api(`/api/revenue-daily?from=${from}&to=${to}`),
+    UI.api("/api/revenue-sources"), UI.api("/api/accounts-list"),
+  ]);
+  if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; }
+  SUM = s; DAYS = d.ok ? (d.days || []) : []; SRC = v.ok ? (v.sources || []) : []; accounts = a.ok ? (a.accounts || []) : [];
+  render();
+}
+
+function render() {
+  UI.$("#mon").textContent = view.y === today.getFullYear() ? `${view.m}월` : `${view.y}년 ${view.m}월`;
+  UI.$("#next").disabled = isThisMonth();
+  const connected = SRC.filter((x) => x.status === "connected").length;
+  const body = UI.$("#body");
+  // 🔴 0원을 큰 숫자로 자랑하지 않는다 — 번 적이 없으면 빈 상태가 기본
+  if (!SUM.monthKrw && !DAYS.some((x) => x.krw > 0)) {
+    UI.$("#hl").hidden = true;
+    body.innerHTML = `<div class="group"><div class="empty"><span class="mk money">₩</span><h3>${connected ? "이번 달은 아직 들어온 게 없어요" : "아직 연결된 곳이 없어요"}</h3><p>${connected ? "매체에서 정산이 올라오면 여기에 쌓여요." : "애드포스트부터 해볼까요? 조건이 되는지 먼저 확인해 드려요."}</p><a class="btn primary sm" href="/app/ad-media.html">${connected ? "수익 매체 보기" : "수익 매체 연결하기"}</a></div></div>`
+      + manualGroup();
+    bindManual(); return;
+  }
+  UI.$("#hl").hidden = false;
+  UI.$("#say").textContent = `${view.m}월에`;
+  UI.$("#num").innerHTML = `<em id="big">0원</em> 벌었어요`;
+  UI.countUp(UI.$("#big"), SUM.monthKrw, won);
+  const diff = SUM.monthKrw - (SUM.prevMonthKrw || 0);
+  UI.$("#tip").innerHTML = SUM.prevMonthKrw
+    ? `지난달 ${won(SUM.prevMonthKrw)} · <b>${diff >= 0 ? "+" : "−"}${won(Math.abs(diff))}</b>`
+    : "지난달에는 기록이 없어요";
+  body.innerHTML = dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  bindDaily(); bindManual();
+}
+
+/* ① 일별 — 단색 막대 · 빗금 = 수집 못 한 날(0원 아님) */
+function dailyGroup() {
+  const last = new Date(view.y, view.m, 0).getDate();
+  const upto = isThisMonth() ? Number(todayYmd.slice(8, 10)) : last;
+  const by = Object.fromEntries(DAYS.map((x) => [x.day, x]));
+  const max = Math.max(1, ...DAYS.map((x) => x.krw));
+  const miss = [];
+  let bars = "";
+  for (let i = 1; i <= upto; i++) {
+    const day = `${mkey()}-${String(i).padStart(2, "0")}`; const r = by[day];
+    if (!r) { miss.push(i); bars += `<button type="button" class="none" data-d="${day}" aria-label="${dayLabel(day)} 아직 못 가져왔어요"></button>`; continue; }
+    if (!r.krw) { bars += `<button type="button" class="zero" data-d="${day}" aria-label="${dayLabel(day)} 0원"></button>`; continue; }
+    const h = Math.max(8, Math.round((r.krw / max) * 100));
+    bars += `<button type="button" class="${r.krw === max ? "top" : ""}" data-d="${day}" style="height:${h}%" aria-label="${dayLabel(day)} ${won(r.krw)}"></button>`;
+  }
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">날마다 ${miss.length ? `<span class="muted" style="font-weight:500">못 가져온 날 ${miss.length}일</span>` : ""}</div>
+    <div class="spark">${bars}</div><div class="spark-x"><span>1일</span><span>${upto}일</span></div>
+    ${miss.length ? `<div class="spark-l">빗금 친 날은 아직 못 가져온 날이에요 · 0원이 아니에요</div>` : ""}</div>`;
+}
+function bindDaily() {
+  UI.$$("#body .spark button").forEach((b) => b.onclick = () => {
+    UI.$$("#body .spark button").forEach((x) => x.classList.toggle("on", x === b));
+    const day = b.dataset.d; const r = DAYS.find((x) => x.day === day);
+    UI.toast(r ? `${dayLabel(day)} · ${won(r.krw)}${r.freshness ? " · " + (UI.FRESH[r.freshness] || "") : ""}` : `${dayLabel(day)} · 아직 못 가져왔어요`);
+  });
+}
+
+/* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */
+function sourceGroup() {
+  const list = SUM.bySource || []; if (!list.length) return "";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">매체 관리</a></div>` + list.map((s) => {
+    const src = SRC.find((x) => x.source === s.source);
+    const bad = src && (src.status === "error" || src.status === "not_configured");
+    const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span></div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+  }).join("") + "</div>";
+}
+
+/* ③ 계정별 — 마크 달린 단색 막대(1등만 잉크) */
+function accountGroup() {
+  const list = SUM.byAccount || []; if (!list.length) return "";
+  const max = Math.max(1, ...list.map((x) => x.krw));
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(a.channel, "sm")}@${UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+}
+
+/* ④ 글·영상별 TOP 5 */
+function pieceGroup() {
+  const list = SUM.topPieces || []; if (!list.length) return "";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글 ${list.length}개</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">이 글이 ${view.m}월에</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
+}
+
+/* ⑤ 직접 입력 */
+function manualGroup() {
+  return `<div class="group"><button type="button" class="row tap" id="manual"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 받은 수익 넣기</span><span class="d">협찬비·메타·틱톡처럼 자동으로 못 가져오는 것</span></div>${UI.chev}</button></div>`;
+}
+function bindManual() { const b = UI.$("#manual"); if (b) b.onclick = manualSheet; }
+
+async function manualSheet() {
+  const MSRC = [["sponsor", "협찬·광고비"], ["meta", "메타"], ["tiktok", "틱톡"], ["x", "엑스"], ["manual", "그 외"]];
+  const DAYS3 = [[todayYmd, "오늘"], [ymdOff(-1), "어제"], [ymdOff(-2), "그제"]];
+  const pl = await UI.api("/api/pieces-list?status=published");
+  const pieces = pl.ok ? (pl.pieces || []).slice(0, 8) : [];
+  UI.sheet(`<div class="sec">어디서 받았나요</div>${UI.chips("src", MSRC, "sponsor")}
+    <div class="sec">언제 (KST)</div>${UI.chips("day", DAYS3, todayYmd)}
+    <div class="field"><label>다른 날이면 직접</label><input class="input" id="d2" placeholder="2026-09-01" inputmode="numeric" maxlength="10" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>얼마</label><input class="input" id="amt" inputmode="numeric" placeholder="예: 120000" autocomplete="off"><div class="help"></div></div>
+    <div class="sec">어느 계정 <span class="muted" style="font-weight:500">· 선택</span></div>${UI.chips("acc", [["", "안 고름"], ...accounts.map((a) => [a.id, "@" + a.handle])], "")}
+    ${pieces.length ? `<div class="sec">어느 글 <span class="muted" style="font-weight:500">· 선택</span></div>${UI.chips("pc", [["", "안 고름"], ...pieces.map((p) => [p.id, p.title.length > 14 ? p.title.slice(0, 14) + "…" : p.title])], "")}` : ""}
+    <div class="cta"><button class="btn primary" type="button" id="ok">넣기</button></div>`,
+    { title: "직접 받은 수익", onOpen: (sh, close) => {
+      UI.bindChips(sh, (n, v) => { if (n === "day") sh.querySelector("#d2").value = ""; });
+      sh.querySelector("#ok").onclick = async (e) => {
+        const typed = sh.querySelector("#d2").value.trim();
+        const day = typed || UI.chipVal(sh, "day");
+        const amountKrw = Number(String(sh.querySelector("#amt").value).replace(/[^\d]/g, ""));
+        if (!/^\d{4}-\d\d-\d\d$/.test(day)) { sh.querySelector("#d2").classList.add("err"); sh.querySelectorAll(".help")[0].textContent = "2026-09-01 처럼 적어 주세요."; return; }
+        if (!amountKrw) { sh.querySelector("#amt").classList.add("err"); sh.querySelectorAll(".help")[1].textContent = "금액을 숫자로 넣어 주세요."; return; }
+        const body = { source: UI.chipVal(sh, "src") || "manual", day, amountKrw };
+        const acc = UI.chipVal(sh, "acc"); if (acc) body.accountId = Number(acc);
+        const pc = UI.chipVal(sh, "pc"); if (pc) body.pieceId = Number(pc);
+        e.target.disabled = true; const r = await UI.api("/api/revenue-manual", { body }); e.target.disabled = false;
+        if (!r.ok) { UI.toast(r.error || "넣지 못했어요"); return; }
+        close(); UI.done(`${won(amountKrw)} 넣었어요`, load);
+      };
+    } });
+}
+function ymdOff(n) { const d = new Date(today); d.setDate(today.getDate() + n); return d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); }
+
+UI.$("#prev").onclick = () => { view.m--; if (view.m < 1) { view.m = 12; view.y--; } load(); };
+UI.$("#next").onclick = () => { if (isThisMonth()) return; view.m++; if (view.m > 12) { view.m = 1; view.y++; } load(); };
+await load();
 })();
 </script>
 </body>

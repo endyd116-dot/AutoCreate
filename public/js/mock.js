@@ -55,6 +55,24 @@
 
   const fresh = qs.get("fresh") === "1";
   const runnerOn = qs.get("runner") === "on";
+  const revEmpty = qs.get("revEmpty") === "1";                 // 수익 빈 상태(연결 0·행 0)
+  const revError = qs.get("revError") || "";                   // ?revError=adsense — 그 소스를 연결 끊김으로
+  /* revenue_daily 씨앗 — 75일치. d === -6 은 수집 실패라 «행이 없고», d === -11 은 진짜 0원이라 «행이 있다»(AC-9) */
+  function revSeed() {
+    const rows = []; const rhythm = [3900, 5200, 4400, 6100, 3300, 7400, 5800];
+    for (let d = -74; d <= 0; d++) {
+      if (d === -6) continue;
+      const day = ymd(d); const k = rhythm[new Date(day + "T00:00:00Z").getUTCDay()] * (d > -15 ? 1 : 0.72);
+      const zero = d === -11;
+      const put = (source, accountId, amountKrw, freshness, pieceId) => { const r = { day, source, accountId, amountKrw: Math.max(0, Math.round(amountKrw)), freshness }; if (pieceId) r.pieceId = pieceId; rows.push(r); };
+      put("adsense", 2, zero ? 0 : k * 0.40, "api", 504);
+      put("adpost", 1, zero ? 0 : k * 0.31, "runner", 505);
+      put("coupang", 1, zero ? 0 : k * 0.22, "api", 501);
+      if (d % 3 === 0) put("youtube", 4, zero ? 0 : k * 0.14, "api");
+      if (d === -4) put("sponsor", 1, 45000, "manual");        // 직접 입력 한 건
+    }
+    return rows;
+  }
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     coins: 30, refreshCount: 0, autoSchedule: false, nextId: 100,
@@ -62,6 +80,7 @@
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
+      { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
@@ -102,9 +121,19 @@
     ],
     reassigned: fresh ? null : { fromHandle: "life_c", toHandle: "cook_a", moved: 3, at: iso(now - 5 * 3600e3) },
     topicsRefresh: null, // [v2.9] { startedAt, finishedAt?, added?, error? } — tenants.settings.topicsRefresh 자리
+    /* ── [P1R3] 수익(계약 §1.4 · DESIGN §9) ── */
+    revRows: revEmpty ? [] : revSeed(),          // revenue_daily 행 — 수집 못 한 날은 «행 자체가 없다»(AC-9)
+    revSources: revEmpty ? [] : [
+      { id: 1, source: "adsense", accountId: 2, method: "api", status: "connected", lastSyncAt: iso(now - 6 * 3600e3) },
+      { id: 2, source: "adpost", accountId: 1, method: "runner", status: "connected", lastSyncAt: iso(now - 11 * 3600e3) },
+      { id: 3, source: "coupang", accountId: 1, method: "api", status: "connected", lastSyncAt: iso(now - 3 * 3600e3) },
+      { id: 4, source: "youtube", accountId: 4, method: "api", status: "not_configured" },
+      { id: 5, source: "adfit", accountId: 2, method: "runner", status: "error", lastSyncAt: iso(now - 3 * 86400e3), lastError: "auth" },
+    ],
+    adState: revEmpty ? {} : { 1: "none", 3: "approved" },  // 계정별 애드포스트 신청 상태(«가입 완료했어요» 로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1" || !S.posts) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
@@ -160,6 +189,31 @@
     if (qs.get("refreshFail") === "1") { t.finishedAt = iso(Date.now()); t.error = "지금은 소재를 뽑지 못했어요. 잠시 후 다시 해 주세요."; return; }
     const add = [{ id: S.nextId++, title: "환절기 아이 기침, 가습기보다 먼저 볼 것", angle: "소아과 다녀온 후기", channelHint: "naver_blog", score: 73, status: "candidate", factors: { volume: 12100, growthPct: 55, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) }, { id: S.nextId++, title: "다이소 수납 3천원 조합", angle: "서랍 한 칸 비포·애프터", channelHint: "naver_blog", score: 68, status: "candidate", factors: { volume: 26000, competition: "high", intent: "commercial" }, expiresAt: iso(now + 6 * 86400e3) }];
     S.topics.unshift(...add); t.finishedAt = iso(Date.now()); t.added = add.length; };
+  /* ── [P1R3] 수익 집계 도우미 ── */
+  const groupKrw = (rows, key) => { const m = new Map(); for (const r of rows) m.set(String(r[key]), (m.get(String(r[key])) || 0) + r.amountKrw); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  const topBy = (rows) => { const m = new Map(); for (const r of rows) m.set(r.freshness, (m.get(r.freshness) || 0) + r.amountKrw); return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "api"; };
+  const srcFreshness = (source) => topBy(S.revRows.filter((r) => r.source === source));
+  const dayFreshness = (day) => topBy(S.revRows.filter((r) => r.day === day));
+  const prevMonth = (m) => { const [y, mo] = m.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1, 1)); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); };
+  /* 하루치가 «확정»으로 내려오는 소스와, 오늘은 «부분 수집»뿐인 소스를 가른다(§9.3 확정/예상) */
+  const CONFIRMED_SRC = ["adsense", "coupang", "aliexpress", "linkprice", "manual", "meta", "tiktok", "x", "sponsor"];
+  const revSum = (f) => S.revRows.filter(f).reduce((a, r) => a + r.amountKrw, 0);
+  const todayConfirmed = () => revSum((r) => r.day === todayYmd && CONFIRMED_SRC.includes(r.source));
+  const todayEstimated = () => revSum((r) => r.day === todayYmd && !CONFIRMED_SRC.includes(r.source));
+  /* [v3.1] home-summary.revenue — 새 키 4개 + 옛 키 3개 동거(화면은 새 키를 먼저 본다) */
+  const revSummaryForHome = () => { const m = todayYmd.slice(0, 7); const monthKrw = revSum((r) => r.day.slice(0, 7) === m);
+    return { todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(), yesterdayKrw: revSum((r) => r.day === ymd(-1)), monthKrw,
+      today: todayConfirmed(), month: monthKrw, lastMonthSameDay: revSum((r) => r.day.slice(0, 7) === prevMonth(m) && r.day.slice(8) <= todayYmd.slice(8)) }; };
+  /* 조건 수치·신청 주소는 서버가 내려보낸다(계약 v3.1 §1.4b — 화면은 분모를 갖지 않는다) */
+  const AD_THRESHOLDS = { adpost: { posts: 50, visitors: 300 }, ypp: { subs: 1000, views: 10000000 } };
+  const AD_LINKS = { adpost: "https://adpost.naver.com/", adsense: "https://www.google.com/adsense/start/", ypp: "https://www.youtube.com/creators/how-things-work/monetization/", coupang: "https://partners.coupang.com/", clip: "https://creators.naver.com/" };
+  const eligibility = () => S.accounts.filter((a) => a.status !== "disconnected").map((a) => {
+    const o = { accountId: a.id, handle: a.handle, channel: a.channel };
+    if (a.channel === "naver_blog") { const posts = a.id === 1 ? 38 : 61, visitors = a.id === 1 ? 214 : 520;
+      o.adpost = { state: S.adState[a.id] || "none", posts, visitors, ready: posts >= AD_THRESHOLDS.adpost.posts && visitors >= AD_THRESHOLDS.adpost.visitors }; }
+    if (a.channel === "youtube_shorts") { const subs = 640, views = 2140000; o.ypp = { subs, views, ready: subs >= AD_THRESHOLDS.ypp.subs && views >= AD_THRESHOLDS.ypp.views }; }
+    if (a.channel === "naver_clip") o.clip = { open: true, deadline: iso(now + 12 * 86400e3) };
+    return o; });
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const delay = (ms = 260) => new Promise((r) => setTimeout(r, ms));
 
@@ -182,7 +236,7 @@
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
-      return { ok: true, revenue: { today: 12400, month: 284100, lastMonthSameDay: 216800 }, todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: { status: "trial", daysLeft: 9, planKey: "trial" }, coins: S.coins, impersonation: null }; },
+      return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: { status: "trial", daysLeft: 9, planKey: "trial" }, coins: S.coins, impersonation: null }; },
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule; return { ok: true, settings: S.settings }; },
     "plans": () => ({ ok: true, plans: [], coins: { packs: [{ coins: 100, krw: 50000, bonusPct: 0 }, { coins: 220, krw: 100000, bonusPct: 10 }], table: { blog: 1, image: 1, cardnews: 3, video_15: 5, video_30: 8, video_60: 12, persona: 0 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* §1 계정 */
@@ -293,6 +347,50 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     /* ── [P1R2] 알림함 ── */
     "notifications-list": () => ({ ok: true, notifications: S.notifications.map((n) => ({ ...n })).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")), unread: S.notifications.filter((n) => !n.readAt).length }),
     "notifications-read": (b) => { for (const n of S.notifications) if (!b.id || n.id === Number(b.id)) n.readAt = n.readAt || iso(Date.now()); return { ok: true, unread: S.notifications.filter((n) => !n.readAt).length }; },
+    /* ── [P1R3] §1.4 수익 ── */
+    "revenue-summary": (_b, q) => {
+      const month = q.get("month") || todayYmd.slice(0, 7);
+      const inM = (r, m) => r.day.slice(0, 7) === m;
+      const sum = (rs) => rs.reduce((a, r) => a + r.amountKrw, 0);
+      const mine = S.revRows.filter((r) => inM(r, month));
+      const bySource = groupKrw(mine, "source").map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
+        const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt; return o; });
+      const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
+        return { accountId: Number(id), handle: a.handle || "", channel: a.channel || "", krw }; });
+      const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
+        return { pieceId: Number(id), title: p.title || "제목 없음", channel: p.channel || "naver_blog", krw }; });
+      return { ok: true, monthKrw: sum(mine), todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(),
+        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces }; },
+    "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
+      const days = groupKrw(S.revRows.filter((r) => r.day >= from && r.day <= to), "day").sort((a, b) => a[0].localeCompare(b[0]));
+      return { ok: true, days: days.map(([day, krw]) => ({ day, krw, freshness: dayFreshness(day) })) }; },
+    "revenue-sources": (b) => {
+      if (b && b.action) {
+        const s = S.revSources.find((x) => x.source === b.source && (b.accountId == null || x.accountId === Number(b.accountId)));
+        if (b.action === "disconnect") { if (s) { s.status = "disconnected"; delete s.lastError; } return { ok: true }; }
+        if (b.action === "key" && !String(b.key || "").trim()) return err("key", "키를 붙여넣어 주세요.");
+        if (s) { s.status = "connected"; s.lastSyncAt = iso(Date.now()); delete s.lastError; }
+        else S.revSources.push({ id: S.nextId++, source: b.source, accountId: b.accountId ? Number(b.accountId) : undefined, method: b.action === "key" ? "api" : "api", status: "connected", lastSyncAt: iso(Date.now()) });
+        return { ok: true };
+      }
+      return { ok: true, sources: S.revSources.map((s) => { const o = { id: s.id, source: s.source, method: s.method, status: revError === s.source ? "error" : s.status };
+        if (s.accountId) o.accountId = s.accountId; if (s.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
+        const le = revError === s.source ? "auth" : s.lastError; if (le) o.lastError = le; return o; }) }; },
+    "revenue-manual": (b) => {
+      if (!b.source) return err("source", "어디서 번 돈인지 골라 주세요.");
+      if (!/^\d{4}-\d\d-\d\d$/.test(b.day || "")) return err("day", "날짜를 골라 주세요.");
+      if (b.day > todayYmd) return err("day", "오늘보다 뒤 날짜는 넣을 수 없어요.");
+      const krw = Number(b.amountKrw); if (!Number.isFinite(krw) || krw <= 0) return err("amountKrw", "금액을 숫자로 넣어 주세요.");
+      const row = { day: b.day, source: b.source, amountKrw: Math.round(krw), freshness: "manual" };
+      if (b.accountId) row.accountId = Number(b.accountId); if (b.pieceId) row.pieceId = Number(b.pieceId);
+      const same = S.revRows.find((r) => r.day === row.day && r.source === row.source && r.accountId === row.accountId && r.pieceId === row.pieceId);
+      if (same) same.amountKrw = row.amountKrw; else S.revRows.push(row);   // 멱등 — 같은 (소스·계정·글·날) 은 1행
+      return { ok: true }; },
+    /* ── [P1R3] §1.5 신청 조건 ── */
+    "ad-eligibility": (b) => {
+      if (b && b.action) { const id = Number(b.accountId); if (!id) return err("accountId", "계정을 골라 주세요.");
+        S.adState[id] = b.action === "approved" ? "approved" : "pending"; return { ok: true, accounts: eligibility() }; }
+      return { ok: true, thresholds: AD_THRESHOLDS, links: AD_LINKS, accounts: eligibility() }; },
     /* §6 코인 */
     "coins-balance": () => ({ ok: true, balance: S.coins, included: S.coins, purchased: 0, recent: [{ kind: "grant", delta: 30, reason: "운영 지급", createdAt: iso(now - 86400e3) }] }),
   };
@@ -305,7 +403,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; return { ...r, status, ok: !!r.ok };
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);
