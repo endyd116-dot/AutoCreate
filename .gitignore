@@ -34,3 +34,8 @@ deno.lock
 
 # per-worktree overrides
 .claude/settings.local.json
+runner/_shots/
+runner/profiles/
+runner/.token
+runner/node_modules/
+runner/tmp/

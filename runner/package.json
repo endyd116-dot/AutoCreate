@@ -1,0 +1,17 @@
+{
+  "name": "ac-runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AutoCreate 내 PC 러너 — 서버 큐에서 발행 잡을 받아 브라우저로 글을 올린다.",
+  "bin": { "ac-runner": "./ac-runner.mjs" },
+  "scripts": {
+    "start": "node ac-runner.mjs",
+    "peek": "node ac-runner.mjs --peek",
+    "once": "node ac-runner.mjs --once --headed",
+    "canary": "node ac-runner.mjs --canary --headed",
+    "setup": "playwright install chromium"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": { "playwright": "^1.48.0" }
+}
