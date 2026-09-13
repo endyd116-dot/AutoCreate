@@ -13,8 +13,9 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">계정 연결</span><span class="sp"></span></div>
-<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 지금은 목록만 보여드려요 — 실제 연결은 곧 열려요.</p></div>
-<div class="cg" id="cg"></div>
+<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 마크를 누르면 바로 연결해요.</p></div>
+<div class="cg" id="cg"><span class="sk" style="height:96px;grid-column:1/-1"></span></div>
+<div class="group" id="list"><div class="gt">연결한 계정</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -24,8 +25,111 @@
 (async () => {
 await UI.boot("account");
 const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
-UI.$("#cg").innerHTML = Object.keys(UI.CH).map((k) => `<button type="button" class="cgi" data-k="${k}">${UI.mark(k)}${UI.chLabel(k)}<small>${SUB[k] || ""}</small></button>`).join("");
-UI.$$("#cg .cgi").forEach((b) => b.onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.chLabel(b.dataset.k)} 연결은 다음 업데이트에서 열려요. 준비되면 홈 «해야 할 일»에 알려드릴게요.</p><button class="btn primary" type="button" onclick="this.closest('.sheet').previousSibling.click()">알겠어요</button>`, { title: UI.chLabel(b.dataset.k) }));
+const ERR = { login_fail: "로그인 실패", captcha: "보안 문자 확인 필요", rate_limited: "발행 제한에 걸림", suspended: "채널에서 정지됨", selector_changed: "채널 화면이 바뀜", network: "네트워크 오류" };
+const HOURS = [[6,"06시"],[7,"07시"],[9,"09시"],[12,"12시"],[15,"15시"],[18,"18시"],[20,"20시"],[21,"21시"],[23,"23시"]];
+let D = { accounts: [], channels: [] }, personas = [];
+const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
+
+async function load() {
+  const r = await UI.api("/api/accounts-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
+  const chs = D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false }));
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : (SUB[c.key] || "")}</small></button>`).join("");
+  UI.$$("#cg .cgi").forEach((b) => b.onclick = () => connectSheet(chs.find((c) => c.key === b.dataset.k)));
+  const list = UI.$("#list");
+  list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
+    ? D.accounts.map((a) => `<button type="button" class="row tap" data-id="${a.id}">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d">오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</button>`).join("")
+    : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">아직 연결한 계정이 없어요</h3><p>위에서 채널 마크를 누르면 바로 연결할 수 있어요.</p></div>`);
+  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
+}
+
+/* ── 연결 시트(채널 방식별 · 계약 §1) ── */
+function connectSheet(c) {
+  const k = c.key, label = c.label || UI.chLabel(k);
+  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 발행할 때만 러너가 열어요.</p>
+    <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
+    <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="off" required><div class="help"></div></div>
+    <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off" placeholder="예: 요리하는 A"></div>
+    <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => submitAdd({ channel: k, handle: d.loginId, loginId: d.loginId, password: d.password, displayName: d.displayName || undefined }, f, close)) });
+  if (c.connectMethod === "app_password") return UI.sheet(`<form id="cf" autocomplete="off">
+    <div class="field"><label>사이트 주소</label><input class="input" name="siteUrl" type="url" required placeholder="https://myblog.com"><div class="help"></div></div>
+    <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required><div class="help"></div></div>
+    <div class="field"><label>앱 비밀번호</label><input class="input" name="appPassword" type="password" autocomplete="off" required><div class="help"></div></div>
+    <p class="muted" style="margin:0;font-size:12.5px">앱 비밀번호 만드는 법: 워드프레스 관리자 → 사용자 → 프로필 → «응용 프로그램 비밀번호»에서 새로 만들어요.</p>
+    <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off"></div>
+    <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => { let handle = d.siteUrl; try { handle = new URL(d.siteUrl).hostname; } catch { /* empty */ } submitAdd({ channel: k, handle, siteUrl: d.siteUrl, loginId: d.loginId, appPassword: d.appPassword, displayName: d.displayName || undefined }, f, close); }) });
+  // OAuth
+  UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(label)} 로그인 창으로 이동해요. 허용하면 여기로 돌아와요.</p><div class="cta"><button class="btn primary" type="button" id="go">${UI.esc(label)} 계정으로 연결</button></div>`, { title: `${label} 연결`, onOpen: (sh, close) => {
+    sh.querySelector("#go").onclick = async () => {
+      const r = await UI.api("/api/accounts-oauth-start", { body: { channel: k } });
+      if (r.ok && r.url) { location.href = r.url; return; }
+      if (r.step === "provider_not_configured") { sh.querySelector(".sheet-body").innerHTML = `<p style="margin:0 0 4px;font-size:16px;font-weight:700">준비 중이에요</p><p class="muted" style="margin:0 0 16px">${UI.esc(label)} 연결이 준비되면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`; sh.querySelector("#ok").onclick = close; return; }
+      UI.toast(r.error || "연결을 시작하지 못했어요");
+    }; } });
+}
+async function submitAdd(body, f, close) {
+  const r = await UI.api("/api/accounts-add", { body });
+  const pw = f.querySelector('[name="password"],[name="appPassword"]'); if (pw) pw.value = ""; // 🔴 자격은 요청 후 즉시 비운다
+  if (!r.ok) {
+    if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+    if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
+    if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
+    return UI.toast(r.error || "연결하지 못했어요");
+  }
+  close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
+}
+
+/* ── 계정 상세 시트(DESIGN §7.1 필드 전부) ── */
+async function detailSheet(a) {
+  if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
+  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · 건강 ${a.healthScore} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
+  ${a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>마지막 오류: ${UI.esc(ERR[a.lastErrorKind] || a.lastErrorKind)}</span></div>` : ""}
+  <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
+  <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">활동 시간대<small>여러 개 골라도 돼요 · 안 고르면 채널 기본 시간</small></div>${UI.chips("hours", HOURS, a.goldenHours || [], true)}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div></div>
+  <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
+  <div class="sec">수익 매체</div>
+  <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
+  <div style="padding:0 0 8px"><input class="input" id="cpA" placeholder="Access Key" autocomplete="off" style="margin-bottom:6px"><input class="input" id="cpS" placeholder="Secret Key" type="password" autocomplete="off"></div>
+  <div class="fr"><div class="fl">애드포스트<small>네이버 블로그 광고 수익</small></div>${a.monetize?.adpost ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
+  <div style="padding:0 0 8px"><input class="input" id="ap" placeholder="미디어 ID" autocomplete="off"></div>
+  <div class="fr"><div class="fl">애드센스<small>티스토리·블로거·워드프레스</small></div>${a.monetize?.adsense ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
+  <div style="padding:0 0 8px"><input class="input" id="as" placeholder="pub-0000000000000000" autocomplete="off"></div>
+  <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>
+  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rmc"></div></div>`;
+  UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
+    UI.bindSteppers(sh); UI.bindChips(sh);
+    bindPersona(sh, a);
+    sh.querySelector("#save").onclick = async () => {
+      const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), dailyCap: UI.stepVal(sh, "cap"), minGapMin: Number(UI.chipVal(sh, "gap") || 180), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
+      const m = {}; const v = (id) => sh.querySelector(id).value.trim();
+      if (v("#cpA") && v("#cpS")) { m.coupangAccessKey = v("#cpA"); m.coupangSecretKey = v("#cpS"); } if (v("#ap")) m.adpostMediaId = v("#ap"); if (v("#as")) m.adsensePub = v("#as");
+      if (Object.keys(m).length) body.monetize = m;
+      const r = await UI.api("/api/accounts-update", { body });
+      ["#cpA", "#cpS", "#ap", "#as"].forEach((id) => sh.querySelector(id).value = ""); // 🔴 비밀 값은 요청 후 즉시 비운다
+      if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
+      close(); UI.toast("저장했어요"); load();
+    };
+    sh.querySelector("#rm").onclick = () => UI.confirmRow(sh.querySelector("#rmc"), `@${a.handle} 연결을 해제할까요? 예약된 글은 다른 계정으로 넘어가요.`, async () => { const r = await UI.api("/api/accounts-remove", { body: { id: a.id } }); if (!r.ok) return UI.toast(r.error || "해제하지 못했어요"); close(); UI.toast("연결을 해제했어요"); load(); });
+  } });
+}
+function personaChips(sel) { return UI.chips("persona", [...personas.map((p) => [p.id, p.name]), ["new", "+ 새로 만들기"]], sel ?? ""); }
+function bindPersona(sh, a) {
+  UI.bindChips(sh, (name, v) => { if (name === "persona" && v === "new") personaSheet(sh, a); });
+}
+function personaSheet(parent, a) {
+  const F = [["region", "지역", "예: 경기 남부"], ["family", "가족", "예: 아이 둘"], ["job", "직업", "예: 회사원"], ["home", "집", "예: 아파트 25평"], ["brands", "쓰는 브랜드", "쉼표로 여러 개"], ["tone", "말투", "예: 친근한 구어 «~했어요»"], ["interests", "관심사", "쉼표로 여러 개"], ["banned", "금지어", "쉼표로 여러 개"], ["signature", "서명", "글 끝에 붙는 한 줄"]];
+  UI.sheet(`<form id="pf" autocomplete="off"><p class="muted" style="margin:0 0 8px">넓게 적어도 돼요. 글마다 이 재료를 조금씩 섞어요.</p><div class="field"><label>이름</label><input class="input" name="name" required placeholder="예: 30대 맞벌이 주부"></div>${F.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input class="input" name="${k}" placeholder="${ph}"></div>`).join("")}<div class="cta"><button class="btn primary" type="submit">만들기</button></div></form>`, { title: "새 페르소나", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d) => {
+    const list = (s) => s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined;
+    const profile = { region: d.region || undefined, family: d.family || undefined, job: d.job || undefined, home: d.home || undefined, brands: list(d.brands), tone: d.tone || undefined, interests: list(d.interests), banned: list(d.banned), signature: d.signature || undefined };
+    const r = await UI.api("/api/personas-save", { body: { name: d.name, profile } }); if (!r.ok) return UI.toast(r.error || "만들지 못했어요");
+    personas.push(r.persona); close(); UI.toast("페르소나를 만들었어요");
+    const pz = parent.querySelector("#pz"); pz.innerHTML = personaChips(r.persona.id); bindPersona(parent, a);
+  }) });
+}
+await load();
 })();
 </script>
 </body>

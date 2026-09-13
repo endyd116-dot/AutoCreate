@@ -137,6 +137,30 @@
     if (f) f.classList.toggle("err", !!msg); if (help) help.textContent = msg || "";
   };
   UI.qs = new URLSearchParams(location.search);
+
+  /* ── 상태 어휘(계약 §1·§4·§5 → 사람말 알약) ── */
+  UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
+  UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약됨"], scheduled: ["off", "예약됨"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
+  UI.SLOT_STATUS = { planned: ["off", "소재 정하는 중"], assigned: ["off", "예정"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], scheduled: ["off", "예약됨"], published: ["ok", "발행됨"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"], coin_short: ["warn", "코인 부족"] };
+  UI.pill = (map, s) => { const p = map[s] || ["off", s]; return `<span class="pill ${p[0]}">${UI.esc(p[1])}</span>`; };
+  UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스" };
+  UI.EMOTION = { warm: "친근·따뜻", neutral: "담백·정리", witty: "재치", urgent: "급함·해결", calm: "차분" };
+  UI.chev = '<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg>';
+  UI.dots = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
+
+  /* ── 폼 프리미티브: 스테퍼·칩(시트 안 옵션은 칩/세그먼트/토글만 — 입력창 최소) ── */
+  UI.stepper = (name, val, min, max, suffix = "") => `<span class="stepper" data-stepper="${name}" data-min="${min}" data-max="${max}" data-suffix="${UI.esc(suffix)}"><button type="button" data-dec aria-label="줄이기">−</button><span class="val" data-val="${val}">${val}${UI.esc(suffix)}</span><button type="button" data-inc aria-label="늘리기">+</button></span>`;
+  UI.bindSteppers = (root, onChange) => $$("[data-stepper]", root).forEach((st) => {
+    const v = $(".val", st); const set = (n) => { n = Math.min(+st.dataset.max, Math.max(+st.dataset.min, n)); v.dataset.val = n; v.textContent = n + (st.dataset.suffix || ""); $("[data-dec]", st).disabled = n <= +st.dataset.min; $("[data-inc]", st).disabled = n >= +st.dataset.max; if (onChange) onChange(st.dataset.stepper, n); };
+    $("[data-dec]", st).onclick = () => set(+v.dataset.val - 1); $("[data-inc]", st).onclick = () => set(+v.dataset.val + 1);
+  });
+  UI.stepVal = (root, name) => Number($(`[data-stepper="${name}"] .val`, root)?.dataset.val || 0);
+  /* opts = [[value,label]] · sel = value | [values](multi) */
+  UI.chips = (name, opts, sel, multi = false) => `<div class="chips" data-chips="${name}" ${multi ? 'data-multi="1"' : ""}>${opts.map(([v, l]) => `<button type="button" class="chip ${(multi ? (sel || []).map(String).includes(String(v)) : String(sel) === String(v)) ? "on" : ""}" data-v="${UI.esc(v)}">${UI.esc(l)}</button>`).join("")}</div>`;
+  UI.bindChips = (root, onChange) => $$("[data-chips]", root).forEach((g) => $$("[data-v]", g).forEach((c) => c.onclick = () => { if (g.dataset.multi) c.classList.toggle("on"); else $$("[data-v]", g).forEach((x) => x.classList.toggle("on", x === c)); if (onChange) onChange(g.dataset.chips, UI.chipVal(root, g.dataset.chips)); }));
+  UI.chipVal = (root, name) => { const g = $(`[data-chips="${name}"]`, root); if (!g) return null; const on = $$("[data-v].on", g).map((c) => c.dataset.v); return g.dataset.multi ? on : (on[0] ?? null); };
+  /* 세그먼트(SegmentedTabs 컴포넌트 · 값 읽기는 chipVal 과 같다) */
+  UI.seg = (name, opts, sel) => `<div class="seg" data-chips="${name}" style="margin:0">${opts.map(([v, l]) => `<button type="button" class="${String(sel) === String(v) ? "on" : ""}" data-v="${UI.esc(v)}">${UI.esc(l)}</button>`).join("")}</div>`;
   /* ── 화면 이동(개발용 mock.js 가 감싸 mock=1 을 이어 붙인다) ── */
   UI.go = (href) => location.assign(href);
   /* ── 바텀시트 폼 안 «확인 한 번 더»(팝업 모달 금지 · 시트 안 인라인 확인) ── */

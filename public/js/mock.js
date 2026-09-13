@@ -41,17 +41,19 @@
 <p>정리하면, 주 1회 10분이면 냄새와 연기 없이 쓸 수 있다.</p>`;
 
   const DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
+  // [v1.1] GateKey 12 · 순서 고정(5C.2 8검사 + 16B 4검사)
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
-    { key: "ai_tell", label: "AI 티 나는 표현", pass: true, detail: "0건" }, { key: "disclosure", label: "제휴 고지 첫 블록", pass: true },
-    { key: "banned", label: "금칙어", pass: true, detail: "0건" }, { key: "length", label: "분량", pass: ok, detail: ok ? "1,420자" : "820자 · 짧아요" },
-    { key: "similarity", label: "다른 계정 글과 유사도", pass: true, detail: "12%" }, { key: "images", label: "사진 수", pass: true, detail: "8장" } ] });
+    { key: "cliche", label: "상투적 표현", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작 반복", pass: true }, { key: "bullet_ratio", label: "글머리표 비율", pass: true, detail: "18%" },
+    { key: "sentence_variance", label: "문장 길이 변화", pass: true }, { key: "translationese", label: "번역투", pass: true, detail: "0건" }, { key: "superlative", label: "과장 표현", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
+    { key: "persona", label: "페르소나 재료", pass: true, detail: "3곳" }, { key: "visual_min", label: "사진 수", pass: true, detail: "8장" },
+    { key: "disclosure", label: "제휴 고지 첫 블록", pass: ok }, { key: "banned_words", label: "금칙어", pass: true, detail: "0건" }, { key: "similarity", label: "다른 계정 글과 유사도", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 수", pass: true, detail: "1개" } ] });
 
   const fresh = qs.get("fresh") === "1";
   const seed = () => ({
     coins: 30, refreshCount: 0, autoSchedule: false, nextId: 100,
     accounts: fresh ? [] : [
-      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
-      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", status: "pending_login", healthScore: 100, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
+      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 100, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
@@ -64,16 +66,16 @@
     ],
     briefs: {},
     pieces: fresh ? [] : [
-      { id: 501, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "story", title: "에어프라이어 청소법, 눌어붙은 기름 3분 컷", status: "in_review", scheduledFor: kst(1, 7, 30), coverUrl: "", gateOk: true, createdAt: iso(now - 3600e3), topicTitle: "에어프라이어 청소법", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["에어프라이어청소", "베이킹소다"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece501" } }, gate: gate(true) },
-      { id: 502, channel: "tistory", accountHandle: "tips_b", kind: "post", format: "compare", title: "에어프라이어 청소, 3분 요약(비교표)", status: "in_review", scheduledFor: kst(1, 13, 0), gateOk: false, createdAt: iso(now - 3000e3), topicTitle: "에어프라이어 청소법", regenCount: 1, bodyHtml: BODY_TISTORY, meta: { tags: ["에어프라이어"], disclosure: null }, gate: gate(false) },
-      { id: 503, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "guide", title: "가을 이불 세탁, 이것만", status: "scheduled", scheduledFor: kst(2, 7, 30), gateOk: true, createdAt: iso(now - 86400e3), topicTitle: "가을 이불 세탁", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true) },
-      { id: 504, channel: "tistory", accountHandle: "tips_b", kind: "post", format: "info", title: "전기요금 아끼는 콘센트", status: "published", publishedAt: iso(now - 2 * 86400e3), externalUrl: "https://tips-b.tistory.com/12", gateOk: true, createdAt: iso(now - 3 * 86400e3), topicTitle: "전기요금", regenCount: 0, bodyHtml: BODY_TISTORY, meta: { tags: [], disclosure: null }, gate: gate(true) },
+      { id: 501, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "story", title: "에어프라이어 청소법, 눌어붙은 기름 3분 컷", status: "in_review", stage: "done", scheduledFor: kst(1, 7, 30), coverUrl: "", gateOk: true, createdAt: iso(now - 3600e3), topicTitle: "에어프라이어 청소법", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["에어프라이어청소", "베이킹소다"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece501" } }, gate: gate(true) },
+      { id: 502, channel: "tistory", accountHandle: "tips_b", kind: "post", format: "compare", title: "에어프라이어 청소, 3분 요약(비교표)", status: "in_review", stage: "done", scheduledFor: kst(1, 13, 0), gateOk: false, createdAt: iso(now - 3000e3), topicTitle: "에어프라이어 청소법", regenCount: 1, bodyHtml: BODY_TISTORY, meta: { tags: ["에어프라이어"], disclosure: null }, gate: gate(false) },
+      { id: 503, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "guide", title: "가을 이불 세탁, 이것만", status: "scheduled", stage: "done", scheduledFor: kst(2, 7, 30), gateOk: true, createdAt: iso(now - 86400e3), topicTitle: "가을 이불 세탁", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true) },
+      { id: 504, channel: "tistory", accountHandle: "tips_b", kind: "post", format: "info", title: "전기요금 아끼는 콘센트", status: "published", stage: "done", publishedAt: iso(now - 2 * 86400e3), externalUrl: "https://tips-b.tistory.com/12", gateOk: true, createdAt: iso(now - 3 * 86400e3), topicTitle: "전기요금", regenCount: 0, bodyHtml: BODY_TISTORY, meta: { tags: [], disclosure: null }, gate: gate(true) },
     ],
     rules: fresh ? [] : [
       { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, active: true },
       { id: 2, channel: "tistory", kind: "post", accountMode: "fixed", accountId: 2, every: "week", count: 2, weekdays: [2, 4], preferredHour: 13, active: true },
     ],
-    settings: { autoSchedule: !fresh, produceLeadDays: 3, reviewPolicy: "silence_approves", horizonDays: 14 },
+    settings: { autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
@@ -85,6 +87,7 @@
     const H = S.settings.horizonDays || 14;
     for (let d = 0; d < H; d++) {
       const date = ymd(d); const wd = new Date(date + "T00:00:00Z").getUTCDay();
+      if ((S.settings.quietDays || []).includes(date)) continue;
       for (const r of S.rules) {
         if (!r.active || !(r.weekdays || []).includes(wd)) continue;
         if (S.slots.some((s) => s.date === date && s.channel === r.channel && s.origin === "auto")) continue;
@@ -97,9 +100,10 @@
   }
   const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (1 + ({ naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }[r.channel] || 2)), 0);
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, ...row } = p; return row; };
-  const bodyToBlocks = (p) => [{ type: "disclosure", text: p.meta.disclosure || "" }, { type: "hook", text: "주말에 에어프라이어를 열었더니…" }, { type: "h2", text: "1. 바스켓은 물에 10분만 담가요" }, { type: "image", imageIndex: 0, caption: "10분 담가 둔 바스켓" }, { type: "checklist", items: ["바스켓 10분 담그기", "베이킹소다 반죽 5분"] }, { type: "hashtags", items: p.meta.tags || [] }].filter((b) => b.type !== "disclosure" || b.text);
+  const bodyToBlocks = (p) => [{ type: "disclosure", text: p.meta.disclosure || "" }, { type: "hook", text: "주말에 에어프라이어를 열었더니…" }, { type: "toc", items: ["바스켓 담그기", "베이킹소다 반죽", "건조"] }, { type: "summary", text: "담그기 10분 · 베이킹소다 5분 · 건조 30분이면 끝나요." }, { type: "h2", text: "1. 바스켓은 물에 10분만 담가요" }, { type: "image", imageIndex: 0, caption: "10분 담가 둔 바스켓" }, { type: "checklist", items: ["바스켓 10분 담그기", "베이킹소다 반죽 5분"] }, p.channel === "tistory" ? { type: "adsense" } : { type: "affiliate", affiliate: { productName: "에어프라이어 세척솔 3종", url: "https://link.coupang.com/a/mock", price: 8900 } }, { type: "hashtags", items: p.meta.tags || [] }].filter((b) => b.type !== "disclosure" || b.text);
   const tick = () => { // 만드는 중 → 8초 후 draft → 16초 후 in_review
-    for (const p of S.pieces) { if (!p._t0) continue; const age = Date.now() - p._t0; if (age > 16000 && p.status !== "in_review") { p.status = "in_review"; p.gateOk = true; delete p._t0; } else if (age > 8000 && p.status === "generating") p.status = "draft"; }
+    for (const p of S.pieces) { if (!p._t0) continue; const age = Date.now() - p._t0; // [v1.1] stage: writing → images → checking → done
+      if (age > 18000) { p.status = "in_review"; p.stage = "done"; p.gateOk = true; delete p._t0; } else if (age > 12000) { p.stage = "checking"; p.status = "draft"; } else if (age > 6000) p.stage = "images"; else p.stage = "writing"; }
     for (const s of S.slots) { const p = S.pieces.find((x) => x.id === s.pieceId); if (p && (p.status === "in_review" || p.status === "scheduled" || p.status === "published")) s.status = p.status; }
   };
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
@@ -121,12 +125,14 @@
     /* §1 계정 */
     "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS }),
     "accounts-add": (b) => {
+      if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
       if (S.accounts.length >= 5) return err("limit", "이 요금제에서는 계정을 5개까지 연결할 수 있어요.");
       if (S.accounts.some((a) => a.channel === b.channel && a.handle === b.handle)) return err("duplicate", "이미 연결한 계정이에요.");
+      if (b.channel === "wordpress" && b.appPassword === "wrong") return err("wp_auth", "워드프레스 로그인 정보를 확인해 주세요.");
       if (["naver_blog", "tistory", "naver_clip"].includes(b.channel) && (!b.loginId || !b.password)) return err("creds", "아이디와 비밀번호를 입력해 주세요.");
       if (b.channel === "wordpress" && (!b.siteUrl || !b.loginId || !b.appPassword)) return err("creds", "사이트 주소·아이디·앱 비밀번호를 입력해 주세요.");
-      const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", status: "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [], hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } };
-      S.accounts.push(a); return { ok: true, account: { id: a.id, channel: a.channel, handle: a.handle, status: a.status } }; },
+      const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", avatar: null, status: b.channel === "wordpress" ? "active" : "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [], browserProfileKey: "acc-" + S.nextId, hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } };
+      S.accounts.push(a); return { ok: true, account: { ...a } }; },
     "accounts-remove": (b) => { S.accounts = S.accounts.filter((a) => a.id !== Number(b.id)); return { ok: true }; },
     "accounts-update": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
       for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours"]) if (b[k] !== undefined) a[k] = b[k];
@@ -158,20 +164,20 @@
       const need = pieces.reduce((a, p) => a + p.coinCost, 0); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
       if (br._charged) return { ok: true, briefId: br.id, pieceIds: br._pieceIds, coinsCharged: 0, coinsLeft: S.coins, status: 202 };
       S.coins -= need; const ids = []; const t = S.topics.find((x) => x.id === br.topicId);
-      for (const p of pieces) { const id = S.nextId++; ids.push(id); S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "post", format: p.format, title: t?.title || "새 글", status: "generating", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, bodyHtml: p.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: ["에어프라이어청소"], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined }, gate: gate(true), _t0: Date.now() });
+      for (const p of pieces) { const id = S.nextId++; ids.push(id); S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "post", format: p.format, title: t?.title || "새 글", status: "generating", stage: "writing", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, bodyHtml: p.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: ["에어프라이어청소"], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined }, gate: gate(true), _t0: Date.now() });
         S.slots.push({ id: S.nextId++, date: p.schedule.at ? new Date(new Date(p.schedule.at).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : todayYmd, channel: p.channel, kind: "post", accountId: p.accountId, accountHandle: p.accountHandle, status: "producing", publishAt: p.schedule.at, topicTitle: t?.title, pieceId: id, origin: "manual" }); }
       if (t) t.status = "picked"; br._charged = true; br._pieceIds = ids; return { ok: true, briefId: br.id, pieceIds: ids, coinsCharged: need, coinsLeft: S.coins, status: 202 }; },
     /* §4 글 */
-    "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "in_review" && p.status === "in_review")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
+    "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); return { ok: true, piece: { ...pieceRow(p), bodyHtml: p.bodyHtml, blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
-    "pieces-approve": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
+    "pieces-approve": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
-    "pieces-regenerate": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; p._t0 = Date.now(); return { ok: true, status: "generating" }; },
-    "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title; if (b.bodyHtml) p.bodyHtml = b.bodyHtml; p.gate = gate(true); p.gateOk = true; return { ok: true, gate: p.gate }; },
+    "pieces-regenerate": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; },
+    "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title; if (b.bodyHtml) p.bodyHtml = b.bodyHtml; p.gate = gate(true); p.gateOk = true; return { ok: true, gate: p.gate, bodyHtml: p.bodyHtml }; },
     /* §5 규칙·슬롯 */
-    "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek() }),
-    "rules-save": (b) => { const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
-    "rules-settings": (b) => { for (const k of ["autoSchedule", "produceLeadDays", "reviewPolicy", "horizonDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; return { ok: true, settings: S.settings }; },
+    "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3 }),
+    "rules-save": (b) => { if ((b.rules || []).filter((r) => r.active !== false).length > 3) return err("limit", "이 요금제에서는 규칙을 3개까지 만들 수 있어요."); const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
+    "rules-settings": (b) => { for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999"; return { ok: true, slots: S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")) }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* §6 코인 */
