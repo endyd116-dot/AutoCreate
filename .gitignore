@@ -1,37 +1,48 @@
-
-!.env.example
-# build output
 # dependencies
+node_modules/
+
 # env / secrets
-# logs
-# netlify
-# netlify dev artifacts
-# os / editor
-# per-worktree overrides
-# runner local state
-# 검증 산출물(PITFALLS #16 · _* 커밋 금지)
-*.log
-.DS_Store
-.claude/settings.local.json
 .env
 .env.*
-.idea/
+!.env.example
+
+# netlify
 .netlify/
-.next/
-.vscode/
-Thumbs.db
-_shots/
-_verify/
-build/
-deno.lock
+
+# build output
 dist/
-node_modules/
-npm-debug.log*
+build/
+.next/
 out/
-runner/.env
-runner/.token
-runner/_shots/
-runner/node_modules/
+
+# logs
+*.log
+npm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# runner local state
 runner/profiles/
+runner/.env
+
+# netlify dev artifacts
+deno.lock
+
+# per-worktree overrides
+.claude/settings.local.json
+
+# 검증 산출물(PITFALLS #16 · _* 커밋 금지)
+_verify/
+_shots/
+runner/_shots/
+runner/profiles/
+runner/.token
+runner/node_modules/
 runner/tmp/
+
+# 로컬 스모크·검증 스크립트(PITFALLS #16 — _* 는 커밋하지 않는다)
 scripts/_smoke/
