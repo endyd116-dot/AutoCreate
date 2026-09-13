@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+<title>새 비밀번호 · AutoCreate</title>
+</head>
+<body>
+<main class="page white auth">
+  <div class="logo">AutoCreate</div>
+  <div class="step-h"><h1>새 비밀번호를 정해요</h1><p>8자 이상, 영문과 숫자를 섞어 주세요.</p></div>
+  <form id="f" novalidate>
+    <div class="field"><label for="password">새 비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required><div class="help"></div></div>
+    <div class="field"><label for="password2">한 번 더</label><input class="input" id="password2" name="password2" type="password" autocomplete="new-password" required><div class="help"></div></div>
+    <div class="cta nobar"><button class="btn primary" type="submit">바꾸기</button></div>
+  </form>
+</main>
+<script src="/js/ui.js?v=1"></script>
+<script>
+  const f = UI.$("#f");
+  UI.form(f, async (d) => {
+    if (d.password !== d.password2) { UI.fieldError(f, "password2", "비밀번호가 서로 달라요."); return; }
+    const r = await UI.api("/api/auth-reset", { body: { t: UI.qs.get("t") || "", password: d.password }, noRedirect: true });
+    if (!r.ok) { UI.fieldError(f, "password", r.error || "실패했어요."); return; }
+    UI.done("바꿨어요", () => { location.href = "/login.html"; });
+  });
+</script>
+</body>
+</html>

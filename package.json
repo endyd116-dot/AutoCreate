@@ -1,0 +1,32 @@
+{
+  "name": "autocreate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AutoCreate — 다계정 글·영상 자동 생성·발행 + 수익 통합 SaaS (토스형). AutoMarketing 엔진 이식.",
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "typecheck": "tsc --noEmit",
+    "migrate": "node scripts/neon-migrate.mjs",
+    "seed:admin": "node scripts/seed-admin.mjs",
+    "seed:plans": "node scripts/seed-plans.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1068.0",
+    "@aws-sdk/s3-request-presigner": "^3.1075.0",
+    "@netlify/functions": "^2.8.2",
+    "bcryptjs": "^2.4.3",
+    "drizzle-orm": "^0.36.4",
+    "jsonwebtoken": "^9.0.3",
+    "postgres": "^3.4.9",
+    "resend": "^6.12.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.19.17",
+    "typescript": "^5.9.3"
+  },
+  "engines": { "node": "20" }
+}

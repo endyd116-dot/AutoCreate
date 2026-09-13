@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>편성표 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ttl">편성표</span><span class="sp"></span></div>
+<div class="hl" style="padding-bottom:0"><div class="num" style="font-size:22px" id="mon">편성표</div></div>
+<div class="group" id="cal"></div>
+<div class="group" id="day"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+await UI.boot("schedule");
+const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+UI.$("#mon").textContent = `${now.getMonth() + 1}월`;
+const first = new Date(now.getFullYear(), now.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
+let h = ["일","월","화","수","목","금","토"].map((w) => `<span class="wd">${w}</span>`).join("");
+for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); if (i >= 35 && d.getMonth() !== now.getMonth()) break;
+  const dim = d.getMonth() !== now.getMonth(); const today = d.toDateString() === now.toDateString();
+  h += `<button type="button" class="dd ${dim ? "dim" : ""} ${today ? "today" : ""}">${d.getDate()}<span class="dots"></span></button>`; }
+UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
+UI.$("#mkRule").onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">편성 규칙 만들기는 다음 업데이트에서 열려요. 지금은 계정 연결을 먼저 해 두세요.</p><a class="btn primary" href="/app/accounts.html">계정 연결하기</a>`, { title: "자동 편성" });
+})();
+</script>
+</body>
+</html>

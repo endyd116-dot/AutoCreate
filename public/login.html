@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>로그인 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<main class="page white auth">
+  <div class="logo">AutoCreate</div>
+  <div class="step-h"><h1>다시 만나서 반가워요</h1><p>이메일로 로그인해요.</p></div>
+  <form id="f" novalidate>
+    <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
+    <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="8자 이상"><div class="help"></div></div>
+    <label class="chk"><input type="checkbox" name="remember" id="remember" checked> 로그인 유지 (30일)</label>
+    <div class="cta nobar"><button class="btn primary" type="submit">로그인</button></div>
+  </form>
+  <div class="links"><a href="/register.html">처음이에요 · 14일 무료</a><a href="/forgot.html">비밀번호를 잊었어요</a></div>
+</main>
+<script src="/js/ui.js?v=1"></script>
+<script>
+  const f = UI.$("#f");
+  UI.form(f, async (d) => {
+    UI.fieldError(f, "email", ""); UI.fieldError(f, "password", "");
+    const r = await UI.api("/api/auth-login", { body: { email: d.email, password: d.password, remember: !!d.remember }, noRedirect: true });
+    if (!r.ok) { UI.fieldError(f, "password", r.error || "로그인에 실패했어요."); return; }
+    location.href = UI.qs.get("next") || "/app/home.html";
+  });
+  if (UI.qs.get("out")) UI.toast("로그아웃했어요");
+</script>
+</body>
+</html>

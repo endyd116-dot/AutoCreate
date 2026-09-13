@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>문의하기 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">문의하기</span><span class="sp"></span></div>
+<div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·계정·최근 오류는 자동으로 같이 보내져요.</p></div>
+<form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
+<div class="field"><label for="body">자세히</label><textarea class="input" id="body" name="body" rows="5" style="height:auto;padding:14px 16px" required></textarea><div class="help"></div></div>
+<div class="cta"><button class="btn primary" type="submit">보내기</button></div></form>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+await UI.boot("account");
+const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/support-ticket-create", { body: d }); if (!r.ok) { UI.toast(r.error || "보내지 못했어요"); return; } UI.done("보냈어요", () => location.href = "/app/account.html"); });
+})();
+</script>
+</body>
+</html>

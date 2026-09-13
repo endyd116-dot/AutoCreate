@@ -1,0 +1,102 @@
+=== index.html | dash | 매출 ===
+<div class="hl"><div class="say" id="say">이번 달</div><div class="num"><em id="rev">0원</em> 벌었어요</div><div class="tip" id="tip"></div></div>
+<div class="group"><div class="gt">구독 · 코인</div>
+  <div class="kv"><span class="k">구독 매출</span><span class="v" id="sub">—</span></div>
+  <div class="kv"><span class="k">코인 매출</span><span class="v" id="coin">—</span></div>
+  <div class="kv"><span class="k">MRR · ARR</span><span class="v" id="mrr">—</span></div>
+  <div class="kv"><span class="k">AI 원가(이달)</span><span class="v" id="ai">—</span></div>
+  <div class="kv"><span class="k">마진</span><span class="v" id="margin">—</span></div>
+</div>
+<div class="group"><div class="gt">고객</div>
+  <div class="kv"><span class="k">전체 · 체험 · 유료</span><span class="v" id="tenants">—</span></div>
+  <div class="kv"><span class="k">이달 신규 · 오늘</span><span class="v" id="new">—</span></div>
+  <div class="kv"><span class="k">위험(미납·읽기전용)</span><span class="v" id="risk">—</span></div>
+  <div class="kv"><span class="k">플랜별 유료</span><span class="v" id="byplan">—</span></div>
+</div>
+<div class="group"><div class="gt">운영</div>
+  <div class="kv"><span class="k">이달 발행</span><span class="v" id="pub">—</span></div>
+  <div class="kv"><span class="k">고객 수익 회수(이달)</span><span class="v" id="crev">—</span></div>
+  <div class="kv"><span class="k">열린 CS 티켓</span><span class="v" id="tk">—</span></div>
+  <div class="kv"><span class="k">코인 판매 · 소비(이달)</span><span class="v" id="coins">—</span></div>
+</div>
+--- script ---
+const op = await OPS.boot("dash"); if (!op) return;
+const r = await UI.api("/api/ops-dashboard", { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
+const m = r.month, t = r.tenants;
+UI.$("#say").textContent = `${new Date().getMonth() + 1}월에`; UI.countUp(UI.$("#rev"), m.revenue);
+UI.$("#tip").textContent = `오늘 ${UI.won(m.today)}`;
+UI.$("#sub").textContent = UI.won(m.subscription); UI.$("#coin").textContent = UI.won(m.coin);
+UI.$("#mrr").textContent = `${UI.won(m.mrr)} · ${UI.won(m.arr)}`; UI.$("#ai").textContent = UI.won(m.aiCostKrw);
+UI.$("#margin").innerHTML = `<span style="color:var(--money)">${UI.won(m.marginKrw)}</span>`;
+UI.$("#tenants").textContent = `${t.total} · ${t.trial} · ${t.active}`; UI.$("#new").textContent = `${t.newMonth} · ${t.newToday}`; UI.$("#risk").textContent = t.atRisk;
+UI.$("#byplan").textContent = t.byPlan.length ? t.byPlan.map((p) => `${p.planKey} ${p.count}`).join(" · ") : "—";
+UI.$("#pub").textContent = UI.num(m.published) + "건"; UI.$("#crev").textContent = UI.won(m.customerRevenueKrw); UI.$("#tk").textContent = m.openTickets + "건";
+UI.$("#coins").textContent = `${UI.num(m.coinsSold)} · ${UI.num(m.coinsConsumed)}`;
+=== tenants.html | tenants | 고객 ===
+<div class="field"><input class="input" id="q" type="search" placeholder="이름·이메일·키로 찾기"></div>
+<div class="seg" id="seg"><button class="on" data-s="">전체</button><button data-s="trial">체험</button><button data-s="active">유료</button><button data-s="readonly">읽기전용</button></div>
+<div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+--- script ---
+const op = await OPS.boot("tenants"); if (!op) return;
+let status = "";
+async function load() {
+  const q = UI.$("#q").value.trim();
+  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
+  const list = UI.$("#list");
+  list.innerHTML = r.tenants.length ? `<div class="gt">${r.tenants.length}곳</div>` + r.tenants.map((t) => { const s = OPS.status(t.status); return `<a class="row tap" href="/ops/tenant.html?id=${t.id}"><span class="mk soft">${UI.esc((t.name || "?").slice(0, 1))}</span><div class="l"><span class="t">${UI.esc(t.name)} <span class="muted" style="font-weight:400;font-size:12px">${UI.esc(t.ownerEmail || "")}</span></span><span class="d">${t.planKey} · 계정 ${t.accounts} · ${UI.num(t.coins)}코인 · 마지막 발행 ${OPS.dt(t.lastPostAt)}</span></div><span class="pill ${s[0]}">${s[1]}</span></a>`; }).join("")
+    : `<div class="empty"><h3>아직 고객이 없어요</h3><p>가입이 생기면 여기에 쌓여요.</p></div>`;
+}
+UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(load, 250); });
+UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.s; load(); });
+load();
+=== tenant.html | tenants | 고객 상세 ===
+<div class="hl"><div class="say" id="key"></div><div class="num" id="name" style="font-size:24px">…</div><div class="tip" id="meta"></div></div>
+<div class="group"><div class="gt">셋업 체크리스트</div><div id="setup"></div></div>
+<div class="group"><div class="gt">빠른 작업</div>
+  <button class="row tap" type="button" id="imp"><span class="mk soft">→</span><div class="l"><span class="t">원격접속</span><span class="d">고객 화면 그대로 보고 설정을 도와줘요(감사 기록·결제 차단)</span></div></button>
+  <button class="row tap" type="button" id="grant"><span class="mk money">C</span><div class="l"><span class="t">코인 지급 · 회수</span><span class="d" id="coins">잔액 —</span></div></button>
+  <button class="row tap" type="button" id="plan"><span class="mk soft">₩</span><div class="l"><span class="t">플랜 · 상태 · 체험 연장</span><span class="d" id="planD"></span></div></button>
+</div>
+<div class="group"><div class="gt">계정</div><div id="accounts"></div></div>
+<div class="group"><div class="gt">사용자 · 러너</div><div id="users"></div><div id="runners"></div></div>
+<div class="group"><div class="gt">최근 기록</div><div id="audit"></div></div>
+--- script ---
+const op = await OPS.boot("tenants"); if (!op) return;
+const id = UI.qs.get("id"); let T;
+async function load() {
+  const r = await UI.api(`/api/ops-tenant?id=${id}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } T = r;
+  const t = r.tenant, s = OPS.status(t.status);
+  UI.$("#key").textContent = t.key; UI.$("#name").textContent = t.name;
+  UI.$("#meta").innerHTML = `<span class="pill ${s[0]}">${s[1]}</span> ${t.plan_key} · 가입 ${OPS.dt(t.created_at)} · 체험 종료 ${OPS.dt(t.trial_ends_at)}`;
+  const st = r.setup; const chk = (ok, l) => `<div class="kv"><span class="k">${l}</span><span class="v">${ok ? '<span class="pill ok">완료</span>' : '<span class="pill off">아직</span>'}</span></div>`;
+  UI.$("#setup").innerHTML = chk(st.accountsConnected, "계정 연결") + chk(st.revenueSource, "수익 매체") + chk(st.rule, "편성 규칙") + chk(st.firstPublish, "첫 발행");
+  UI.$("#coins").textContent = `잔액 ${UI.num(r.coins)}코인`; UI.$("#planD").textContent = `${t.plan_key} · ${t.status}`;
+  UI.$("#accounts").innerHTML = r.accounts.length ? r.accounts.map((a) => `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">건강 ${a.health_score} · 오늘 ${a.posts_today}/${a.daily_cap}</span></div><span class="pill ${a.status === "active" ? "ok" : a.status === "suspended" ? "danger" : "warn"}">${a.status}</span></div>`).join("") : `<div class="kv"><span class="k muted">연결된 계정 없음</span></div>`;
+  UI.$("#users").innerHTML = r.users.map((u) => `<div class="kv"><span class="k">${UI.esc(u.email)} <span class="pill off">${u.role}</span></span><span class="v">${u.email_verified_at ? "인증" : "미인증"} · ${OPS.dt(u.last_login_at)}</span></div>`).join("");
+  UI.$("#runners").innerHTML = r.runners.length ? r.runners.map((d) => `<div class="kv"><span class="k">러너 ${UI.esc(d.name)}</span><span class="v"><span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status}</span> ${OPS.dt(d.last_seen_at)}</span></div>`).join("") : `<div class="kv"><span class="k muted">러너 없음</span></div>`;
+  UI.$("#audit").innerHTML = r.audit.length ? r.audit.map((a) => `<div class="kv"><span class="k">${UI.esc(a.action)} <span class="muted">${a.actor_type}#${a.actor_id ?? ""}</span></span><span class="v muted" style="font-weight:500">${OPS.dt(a.created_at)}</span></div>`).join("") : `<div class="kv"><span class="k muted">기록 없음</span></div>`;
+}
+UI.$("#imp").onclick = async () => { const r = await UI.api("/api/ops-impersonate", { body: { id: Number(id) }, noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } location.href = r.redirect; };
+UI.$("#grant").onclick = () => UI.sheet(`<form id="gf"><div class="field"><label>코인(음수 = 회수)</label><input class="input" name="coins" type="number" required value="10"></div><div class="field"><label>사유</label><input class="input" name="reason" required placeholder="예: 온보딩 지원"></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">적용</button></div></form>`, { title: "코인 지급", onOpen: (sh, close) => UI.form(sh.querySelector("#gf"), async (d) => { const r = await UI.api("/api/ops-coins-grant", { body: { id: Number(id), coins: Number(d.coins), reason: d.reason }, noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } close(); UI.toast(`잔액 ${UI.num(r.balance)}코인`); load(); }) });
+UI.$("#plan").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>플랜</label><select class="input" name="planKey"><option value="">그대로</option><option>trial</option><option>starter</option><option>pro</option><option>agency</option></select></div><div class="field"><label>상태</label><select class="input" name="status"><option value="">그대로</option><option>trial</option><option>active</option><option>past_due</option><option>readonly</option><option>closed</option></select></div><div class="field"><label>체험 종료일</label><input class="input" name="trialEndsAt" type="date"></div><div class="field"><label>메모</label><input class="input" name="note"></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">저장</button></div></form>`, { title: "플랜 · 상태", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d) => { const body = { id: Number(id) }; for (const k of ["planKey", "status", "trialEndsAt", "note"]) if (d[k]) body[k] = d[k]; const r = await UI.api("/api/ops-tenant-update", { body, noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } close(); UI.toast("저장했어요"); load(); }) });
+load();
+=== audit.html | audit | 감사 ===
+<div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+--- script ---
+const op = await OPS.boot("audit"); if (!op) return;
+const r = await UI.api("/api/ops-audit?limit=100", { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
+UI.$("#list").innerHTML = `<div class="gt">최근 ${r.rows.length}건</div>` + r.rows.map((a) => `<div class="row"><span class="dot ${a.risk_level === "high" || a.risk_level === "critical" ? "danger" : a.risk_level === "medium" ? "warn" : "off"}"></span><div class="l"><span class="t">${UI.esc(a.action)}</span><span class="d">테넌트 ${a.tenant_id ?? "—"} · ${a.actor_type}#${a.actor_id ?? ""} · ${UI.esc(a.ip || "")}</span></div><span class="r mut">${OPS.dt(a.created_at)}</span></div>`).join("");
+=== password.html | operators | 비밀번호 ===
+<div class="step-h"><h1 id="h">비밀번호를 바꿔요</h1><p id="p">첫 로그인이라 기본 비밀번호는 더 쓸 수 없어요.</p></div>
+<form id="f"><div class="field" id="curF"><label>현재 비밀번호</label><input class="input" name="current" type="password" autocomplete="current-password"><div class="help"></div></div>
+<div class="field"><label>새 비밀번호</label><input class="input" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div>
+<div class="cta nobar"><button class="btn primary" type="submit">바꾸기</button></div></form>
+--- script ---
+const op = await OPS.boot("operators"); if (!op) return;
+if (UI.qs.get("first")) UI.$("#curF").hidden = true;
+const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/ops-change-password", { body: { current: d.current || undefined, password: d.password }, noRedirect: true }); if (!r.ok) { UI.fieldError(f, r.step === "current" ? "current" : "password", r.error); return; } UI.done("바꿨어요", () => location.href = "/ops/"); });
+=== soon.html | dash | 준비 중 ===
+<div class="group"><div class="empty"><span class="mk soft">…</span><h3 id="m">준비 중</h3><p>Phase 4(상용)에서 열려요. 지금은 매출·고객·감사만 씁니다.</p><a class="btn secondary sm" href="/ops/">매출로</a></div></div>
+--- script ---
+const op = await OPS.boot(""); if (!op) return;
+UI.$("#m").textContent = (UI.qs.get("m") || "이 메뉴") + "는 곧 열려요";

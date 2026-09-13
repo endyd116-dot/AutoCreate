@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>감사 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ttl">감사</span><span class="sp"></span></div>
+<div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script src="/js/ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("audit"); if (!op) return;
+const r = await UI.api("/api/ops-audit?limit=100", { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
+UI.$("#list").innerHTML = `<div class="gt">최근 ${r.rows.length}건</div>` + r.rows.map((a) => `<div class="row"><span class="dot ${a.risk_level === "high" || a.risk_level === "critical" ? "danger" : a.risk_level === "medium" ? "warn" : "off"}"></span><div class="l"><span class="t">${UI.esc(a.action)}</span><span class="d">테넌트 ${a.tenant_id ?? "—"} · ${a.actor_type}#${a.actor_id ?? ""} · ${UI.esc(a.ip || "")}</span></div><span class="r mut">${OPS.dt(a.created_at)}</span></div>`).join("");
+})();
+</script>
+</body>
+</html>

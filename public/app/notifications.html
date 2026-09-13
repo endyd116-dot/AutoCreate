@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>알림 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">알림</span><span class="sp"></span></div>
+<div class="step-h"><h1>알림</h1></div>
+<div class="group"><div class="empty"><span class="mk soft">○</span><h3>아직 알림이 없어요</h3><p>발행·검수·계정 상태가 바뀌면 여기에 쌓여요.</p></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+await UI.boot("home");
+})();
+</script>
+</body>
+</html>

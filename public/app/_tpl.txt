@@ -1,0 +1,115 @@
+PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스크립트 입력. 형식: === 파일명 | 탭키 | 제목 ===  본문HTML  --- script ---  JS
+=== create.html | create | 만들기 ===
+<div class="step-h"><h1>무엇으로 벌까요?</h1><p>소재를 고르면 디렉터가 채널·계정·구성을 정해 드려요.</p></div>
+<div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="empty"><span class="mk soft">✎</span><h3>소재 뽑기는 곧 열려요</h3><p>먼저 계정을 연결해 두면 연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결하기</a></div></div>
+--- script ---
+await UI.boot("create");
+=== schedule.html | schedule | 편성표 ===
+<div class="hl" style="padding-bottom:0"><div class="num" style="font-size:22px" id="mon">편성표</div></div>
+<div class="group" id="cal"></div>
+<div class="group" id="day"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>
+--- script ---
+await UI.boot("schedule");
+const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+UI.$("#mon").textContent = `${now.getMonth() + 1}월`;
+const first = new Date(now.getFullYear(), now.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
+let h = ["일","월","화","수","목","금","토"].map((w) => `<span class="wd">${w}</span>`).join("");
+for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); if (i >= 35 && d.getMonth() !== now.getMonth()) break;
+  const dim = d.getMonth() !== now.getMonth(); const today = d.toDateString() === now.toDateString();
+  h += `<button type="button" class="dd ${dim ? "dim" : ""} ${today ? "today" : ""}">${d.getDate()}<span class="dots"></span></button>`; }
+UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
+UI.$("#mkRule").onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">편성 규칙 만들기는 다음 업데이트에서 열려요. 지금은 계정 연결을 먼저 해 두세요.</p><a class="btn primary" href="/app/accounts.html">계정 연결하기</a>`, { title: "자동 편성" });
+=== revenue.html | revenue | 수익 ===
+<div class="hl"><div class="say" id="say">이번 달</div><div class="num" id="num">0원 벌었어요</div><div class="tip" id="tip">수익 매체를 연결하면 매일 자동으로 모아요</div></div>
+<div class="group"><div class="gt">어디서</div><div class="empty"><span class="mk money">₩</span><h3>아직 연결된 수익 매체가 없어요</h3><p>애드센스·쿠팡 파트너스·유튜브는 연결하면 자동으로, 애드포스트는 러너가 가져와요.</p><a class="btn primary sm" href="/app/accounts.html">수익 매체 연결</a></div></div>
+--- script ---
+await UI.boot("revenue");
+const r = await UI.api("/api/home-summary"); if (r.ok) { UI.$("#say").textContent = `${new Date().getMonth() + 1}월에`; UI.$("#num").innerHTML = `<em>${UI.won(r.revenue.month)}</em> 벌었어요`; }
+=== account.html | account | 내 계정 ===
+<div class="hl"><div class="say">안녕하세요</div><div class="num" id="name">…</div><div class="tip" id="plan"></div></div>
+<div class="group" id="accounts"><div class="gt">연결한 계정 <a href="/app/accounts.html">관리</a></div><div class="empty"><span class="mk soft">+</span><h3>첫 계정을 연결해 보세요</h3><p>네이버 블로그·티스토리·유튜브 중 하나면 시작할 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div></div>
+<div class="group">
+  <div class="gt">요금제 · 코인</div>
+  <a class="row tap" href="/app/plans.html"><span class="mk soft">₩</span><div class="l"><span class="t" id="planName">체험</span><span class="d" id="planDesc"></span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/coins.html"><span class="mk money">C</span><div class="l"><span class="t">코인 <span id="coins">0</span>개</span><span class="d">1코인 = 500원 · 충전분은 1년</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
+<div class="group">
+  <div class="gt">설정</div>
+  <a class="row tap" href="/app/settings.html"><div class="l"><span class="t">계정 · 보안</span><span class="d">비밀번호 · 기기 · 로그아웃</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/support.html"><div class="l"><span class="t">문의하기</span><span class="d">막히는 게 있으면 바로 알려 주세요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
+--- script ---
+const me = await UI.boot("account"); if (!me) return;
+UI.$("#name").textContent = `${me.user.name || me.user.email}님`;
+const P = { trial: "체험", starter: "Starter", pro: "Pro", agency: "Agency" };
+UI.$("#planName").textContent = P[me.tenant.planKey] || me.tenant.planKey;
+UI.$("#planDesc").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남음` : me.tenant.status === "active" ? "이용 중" : "이용 정지";
+UI.$("#plan").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남았어요` : "";
+UI.$("#coins").textContent = UI.num(me.coins);
+=== accounts.html | account | 계정 연결 ===
+<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 지금은 목록만 보여드려요 — 실제 연결은 곧 열려요.</p></div>
+<div class="cg" id="cg"></div>
+--- script ---
+await UI.boot("account");
+const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
+UI.$("#cg").innerHTML = Object.keys(UI.CH).map((k) => `<button type="button" class="cgi" data-k="${k}">${UI.mark(k)}${UI.chLabel(k)}<small>${SUB[k] || ""}</small></button>`).join("");
+UI.$$("#cg .cgi").forEach((b) => b.onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.chLabel(b.dataset.k)} 연결은 다음 업데이트에서 열려요. 준비되면 홈 «해야 할 일»에 알려드릴게요.</p><button class="btn primary" type="button" onclick="this.closest('.sheet').previousSibling.click()">알겠어요</button>`, { title: UI.chLabel(b.dataset.k) }));
+=== settings.html | account | 계정 · 보안 ===
+<div class="step-h"><h1>계정 · 보안</h1></div>
+<div class="group">
+  <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
+  <div class="kv"><span class="k">이메일 인증</span><span class="v" id="verified"></span></div>
+</div>
+<div class="group">
+  <button class="row tap" type="button" id="pw"><div class="l"><span class="t">비밀번호 바꾸기</span><span class="d">바꾸면 다른 기기는 로그아웃돼요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
+  <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
+</div>
+--- script ---
+const me = await UI.boot("account"); if (!me) return;
+UI.$("#email").textContent = me.user.email;
+UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
+UI.$("#out").onclick = async () => { await UI.api("/api/auth-logout", { method: "POST" }); location.href = "/login.html?out=1"; };
+UI.$("#outAll").onclick = async () => { const r = await UI.api("/api/auth-logout-all", { method: "POST" }); location.href = "/login.html?out=1"; };
+UI.$("#pw").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>현재 비밀번호</label><input class="input" name="current" type="password" autocomplete="current-password" required><div class="help"></div></div><div class="field"><label>새 비밀번호</label><input class="input" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "비밀번호 바꾸기", onOpen: (sh, close) => {
+  const f = sh.querySelector("#pf"); UI.form(f, async (d) => { const r = await UI.api("/api/auth-change-password", { body: d }); if (!r.ok) { UI.fieldError(f, r.step === "current" ? "current" : "password", r.error); return; } close(); UI.toast("비밀번호를 바꿨어요"); }); } });
+=== plans.html | account | 요금제 ===
+<div class="step-h"><h1>이어서 쓸 요금제를 골라요</h1><p>구독은 기능 이용료예요. 글·영상을 만들 때 쓰는 코인은 따로 충전해요.</p></div>
+<div id="plans"><div class="sk" style="height:120px"></div></div>
+--- script ---
+await UI.boot("account");
+const r = await UI.api("/api/plans"); if (!r.ok) return;
+UI.$("#plans").innerHTML = r.plans.map((p) => `<div class="group" style="margin-bottom:12px;${p.recommended ? "outline:2px solid var(--sel);outline-offset:-2px" : ""}">
+  <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}</div>
+  <div class="hl" style="padding-top:0"><div class="num" style="font-size:24px">${UI.won(p.priceMonth)}<small class="muted" style="font-size:13px;font-weight:500"> /월</small></div><div class="tip">연납 ${UI.won(p.priceYear)} · 2개월 무료</div></div>
+  <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
+  <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
+  <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
+  <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>
+  <div class="kv"><span class="k">계정 정지 시 승계</span><span class="v">${p.features.failover ? "자동" : "—"}</span></div>
+  <div class="cta nobar" style="position:static;padding:12px 12px 8px"><button class="btn primary" type="button" onclick="UI.toast('결제는 곧 열려요 · 지금은 체험 기간을 쓰세요')">이 플랜으로</button></div>
+</div>`).join("");
+=== coins.html | account | 코인 ===
+<div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip">1코인 = 500원 · 충전분은 1년 동안 써요</div></div>
+<div class="group"><div class="gt">충전하기</div><div id="packs"></div></div>
+<div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
+--- script ---
+const me = await UI.boot("account"); if (!me) return;
+UI.countUp(UI.$("#bal"), me.coins, UI.num);
+const r = await UI.api("/api/plans"); if (!r.ok) return;
+UI.$("#packs").innerHTML = r.coins.packs.map((p) => `<button type="button" class="row tap" onclick="UI.toast('결제는 곧 열려요')"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(p.coins)}코인${p.bonusPct ? ` <span class="pill ok">+${p.bonusPct}%</span>` : ""}${p.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}</span><span class="d">${UI.won(p.krw)}</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`).join("");
+const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"];
+UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(r.coins.labels[k])}</span><span class="v">${r.coins.table[k]}코인</span></div>`).join("");
+=== notifications.html | home | 알림 ===
+<div class="step-h"><h1>알림</h1></div>
+<div class="group"><div class="empty"><span class="mk soft">○</span><h3>아직 알림이 없어요</h3><p>발행·검수·계정 상태가 바뀌면 여기에 쌓여요.</p></div></div>
+--- script ---
+await UI.boot("home");
+=== support.html | account | 문의하기 ===
+<div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·계정·최근 오류는 자동으로 같이 보내져요.</p></div>
+<form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
+<div class="field"><label for="body">자세히</label><textarea class="input" id="body" name="body" rows="5" style="height:auto;padding:14px 16px" required></textarea><div class="help"></div></div>
+<div class="cta"><button class="btn primary" type="submit">보내기</button></div></form>
+--- script ---
+await UI.boot("account");
+const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/support-ticket-create", { body: d }); if (!r.ok) { UI.toast(r.error || "보내지 못했어요"); return; } UI.done("보냈어요", () => location.href = "/app/account.html"); });

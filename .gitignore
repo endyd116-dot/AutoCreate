@@ -24,3 +24,7 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# runner local state
+runner/profiles/
+runner/.env

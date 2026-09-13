@@ -1,0 +1,2 @@
+{ "name": "AutoCreate", "short_name": "AutoCreate", "start_url": "/app/home.html", "display": "standalone", "background_color": "#F2F4F6", "theme_color": "#191F28", "lang": "ko",
+  "icons": [ { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" } ] }

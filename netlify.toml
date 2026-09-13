@@ -1,0 +1,24 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+# AM 관례(2026-07-24 실측) — 후처리 스킵·devDep 미설치·docs 시크릿 스캔 제외.
+[build.processing]
+  skip_processing = true
+
+[build.environment]
+  NODE_VERSION = "20"
+  SECRETS_SCAN_OMIT_PATHS = "docs/**"
+  NPM_FLAGS = "--omit=dev --no-audit --no-fund --prefer-offline --progress=false"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["postgres", "drizzle-orm", "jsonwebtoken", "bcryptjs", "@aws-sdk/client-s3", "resend"]
+
+# SPA 아님 — 정적 HTML 직접 서빙. /app/* 는 파일 그대로.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

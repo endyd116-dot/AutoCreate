@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>계정 연결 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">계정 연결</span><span class="sp"></span></div>
+<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 지금은 목록만 보여드려요 — 실제 연결은 곧 열려요.</p></div>
+<div class="cg" id="cg"></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+await UI.boot("account");
+const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
+UI.$("#cg").innerHTML = Object.keys(UI.CH).map((k) => `<button type="button" class="cgi" data-k="${k}">${UI.mark(k)}${UI.chLabel(k)}<small>${SUB[k] || ""}</small></button>`).join("");
+UI.$$("#cg .cgi").forEach((b) => b.onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.chLabel(b.dataset.k)} 연결은 다음 업데이트에서 열려요. 준비되면 홈 «해야 할 일»에 알려드릴게요.</p><button class="btn primary" type="button" onclick="this.closest('.sheet').previousSibling.click()">알겠어요</button>`, { title: UI.chLabel(b.dataset.k) }));
+})();
+</script>
+</body>
+</html>

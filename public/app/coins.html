@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>코인 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">코인</span><span class="sp"></span></div>
+<div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip">1코인 = 500원 · 충전분은 1년 동안 써요</div></div>
+<div class="group"><div class="gt">충전하기</div><div id="packs"></div></div>
+<div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+const me = await UI.boot("account"); if (!me) return;
+UI.countUp(UI.$("#bal"), me.coins, UI.num);
+const r = await UI.api("/api/plans"); if (!r.ok) return;
+UI.$("#packs").innerHTML = r.coins.packs.map((p) => `<button type="button" class="row tap" onclick="UI.toast('결제는 곧 열려요')"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(p.coins)}코인${p.bonusPct ? ` <span class="pill ok">+${p.bonusPct}%</span>` : ""}${p.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}</span><span class="d">${UI.won(p.krw)}</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`).join("");
+const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"];
+UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(r.coins.labels[k])}</span><span class="v">${r.coins.table[k]}코인</span></div>`).join("");
+})();
+</script>
+</body>
+</html>

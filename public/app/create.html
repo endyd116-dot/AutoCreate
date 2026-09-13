@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>만들기 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ttl">만들기</span><span class="sp"></span></div>
+<div class="step-h"><h1>무엇으로 벌까요?</h1><p>소재를 고르면 디렉터가 채널·계정·구성을 정해 드려요.</p></div>
+<div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="empty"><span class="mk soft">✎</span><h3>소재 뽑기는 곧 열려요</h3><p>먼저 계정을 연결해 두면 연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결하기</a></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+await UI.boot("create");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>계정 · 보안 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=1">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">계정 · 보안</span><span class="sp"></span></div>
+<div class="step-h"><h1>계정 · 보안</h1></div>
+<div class="group">
+  <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
+  <div class="kv"><span class="k">이메일 인증</span><span class="v" id="verified"></span></div>
+</div>
+<div class="group">
+  <button class="row tap" type="button" id="pw"><div class="l"><span class="t">비밀번호 바꾸기</span><span class="d">바꾸면 다른 기기는 로그아웃돼요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
+  <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
+</div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=1"></script>
+<script>
+(async () => {
+const me = await UI.boot("account"); if (!me) return;
+UI.$("#email").textContent = me.user.email;
+UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
+UI.$("#out").onclick = async () => { await UI.api("/api/auth-logout", { method: "POST" }); location.href = "/login.html?out=1"; };
+UI.$("#outAll").onclick = async () => { const r = await UI.api("/api/auth-logout-all", { method: "POST" }); location.href = "/login.html?out=1"; };
+UI.$("#pw").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>현재 비밀번호</label><input class="input" name="current" type="password" autocomplete="current-password" required><div class="help"></div></div><div class="field"><label>새 비밀번호</label><input class="input" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "비밀번호 바꾸기", onOpen: (sh, close) => {
+  const f = sh.querySelector("#pf"); UI.form(f, async (d) => { const r = await UI.api("/api/auth-change-password", { body: d }); if (!r.ok) { UI.fieldError(f, r.step === "current" ? "current" : "password", r.error); return; } close(); UI.toast("비밀번호를 바꿨어요"); }); } });
+})();
+</script>
+</body>
+</html>
