@@ -3,22 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>새 비밀번호 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=1">
-<title>새 비밀번호 · AutoCreate</title>
+<link rel="stylesheet" href="/css/ac.css?v=4">
 </head>
 <body>
-<main class="page white auth">
-  <div class="logo">AutoCreate</div>
-  <div class="step-h"><h1>새 비밀번호를 정해요</h1><p>8자 이상, 영문과 숫자를 섞어 주세요.</p></div>
-  <form id="f" novalidate>
-    <div class="field"><label for="password">새 비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required><div class="help"></div></div>
-    <div class="field"><label for="password2">한 번 더</label><input class="input" id="password2" name="password2" type="password" autocomplete="new-password" required><div class="help"></div></div>
-    <div class="cta nobar"><button class="btn primary" type="submit">바꾸기</button></div>
-  </form>
+<main class="page auth">
+  <div class="auth-in">
+    <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 12 6l5 11"/><path d="M9.5 13.5h5"/></svg></i><b>AutoCreate</b></div>
+    <h1>새 비밀번호를<br>정해요</h1>
+    <p class="sub">8자 이상, 영문과 숫자를 섞어 주세요.</p>
+    <form id="f" novalidate>
+      <div class="field"><label for="password">새 비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div>
+      <div class="field"><label for="password2">한 번 더</label><input class="input" id="password2" name="password2" type="password" autocomplete="new-password" required placeholder="같은 비밀번호"><div class="help"></div></div>
+      <div class="cta"><button class="btn primary" type="submit">바꾸기</button></div>
+    </form>
+  </div>
 </main>
-<script src="/js/ui.js?v=1"></script>
+<script src="/js/ui.js?v=4"></script>
 <script>
   const f = UI.$("#f");
   UI.form(f, async (d) => {

@@ -6,22 +6,25 @@
 <title>가입 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=1">
+<link rel="stylesheet" href="/css/ac.css?v=4">
 </head>
 <body>
-<main class="page white auth">
-  <div class="logo">AutoCreate</div>
-  <div class="step-h"><h1>14일 동안<br>무료로 써 보세요</h1><p>카드 없이 시작해요. 글·영상 제작에 쓰는 코인만 따로 충전해요.</p></div>
-  <form id="f" novalidate>
-    <div class="field"><label for="name">이름 또는 닉네임</label><input class="input" id="name" name="name" type="text" autocomplete="nickname" maxlength="80" placeholder="예: 두현"><div class="help"></div></div>
-    <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
-    <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div>
-    <label class="chk"><input type="checkbox" name="agree" id="agree" required> <span><a href="/terms.html" target="_blank" rel="noopener" style="text-decoration:underline">이용약관</a>과 <a href="/privacy.html" target="_blank" rel="noopener" style="text-decoration:underline">개인정보처리방침</a>에 동의해요</span></label>
-    <div class="cta nobar"><button class="btn primary" type="submit">시작하기</button></div>
-  </form>
-  <div class="links"><a href="/login.html">이미 계정이 있어요</a></div>
+<main class="page auth">
+  <div class="auth-in">
+    <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 12 6l5 11"/><path d="M9.5 13.5h5"/></svg></i><b>AutoCreate</b></div>
+    <h1>14일 동안<br>무료로 써 보세요</h1>
+    <p class="sub">카드 없이 시작해요. 글·영상을 만들 때 쓰는 코인만 따로 충전해요.</p>
+    <form id="f" novalidate>
+      <div class="field"><label for="name">이름 또는 닉네임</label><input class="input" id="name" name="name" type="text" autocomplete="nickname" maxlength="80" placeholder="예: 두현"><div class="help"></div></div>
+      <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
+      <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div>
+      <label class="chk"><input type="checkbox" name="agree" id="agree" required> <span><a href="/terms.html" target="_blank" rel="noopener">이용약관</a>과 <a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>에 동의해요</span></label>
+      <div class="cta"><button class="btn primary" type="submit">시작하기</button></div>
+    </form>
+    <div class="links"><a href="/login.html">이미 계정이 있어요</a></div>
+  </div>
 </main>
-<script src="/js/ui.js?v=1"></script>
+<script src="/js/ui.js?v=4"></script>
 <script>
   const f = UI.$("#f");
   UI.form(f, async (d) => {
