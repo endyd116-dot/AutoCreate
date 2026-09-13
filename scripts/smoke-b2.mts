@@ -162,6 +162,56 @@ async function main() {
     const rel = await latestSessionJob(tid, accountId);
     ok("§6B — 세션 잡 상태 매핑", !!rel && ["queued", "running", "done", "failed"].includes(rel.status), `status=${rel?.status}`);
 
+    /* ── 9B. API 채널 — 키 없는 상태의 «정직한 실패»(B2-5) ── */
+    const mkApiPiece = async (channel: string, accId: number) => {
+      const [p] = await q(sql`INSERT INTO pieces (tenant_id, account_id, channel, kind, format, title, body, blocks, meta, status)
+        VALUES (${tid}, ${accId}, ${channel}, 'post', 'info', ${"API 채널 시험"}, ${"<p>본문입니다.</p>"}, ${jsonb([])}, ${jsonb({ tags: [] })}, 'scheduled') RETURNING id`);
+      return n(p?.id);
+    };
+    const [bAcc] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key)
+      VALUES (${tid}, 'blogger', ${"b2smoke.blogspot.com"}, 'oauth', 'active', ${`t${tid}-blogger`}) RETURNING id`);
+    const bAccId = n(bAcc?.id);
+    const bPieceId = await mkApiPiece("blogger", bAccId);
+    const rNoCred = await publish((await loadPublishPiece(tid, bPieceId))!, (await loadPublishAccount(tid, bAccId))!, {});
+    ok("블로거 — 토큰 없으면 no_creds(코드는 완성 · 조용한 성공 0)", rNoCred.ok === false && rNoCred.reason === "no_creds", !rNoCred.ok ? rNoCred.reason : "");
+
+    // 앱 키가 없을 때의 «준비 중» 경로 — 토큰은 있는데 provider 미설정.
+    await q(sql`INSERT INTO account_creds (tenant_id, account_id, kind, enc, expires_at)
+      VALUES (${tid}, ${bAccId}, 'oauth', ${encryptObj({ accessToken: "fake-at", refreshToken: "fake-rt", externalId: "b1", handle: "b", expiresAt: new Date(Date.now() - 60_000).toISOString(), extra: { blogId: "b1" } })},
+              ${new Date(Date.now() - 60_000).toISOString()}::timestamptz AT TIME ZONE 'UTC')`);
+    const hadGoogleKey = !!process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const rNotConfigured = await publish((await loadPublishPiece(tid, bPieceId))!, (await loadPublishAccount(tid, bAccId))!, {});
+    ok("블로거 — 앱 키 없으면 provider_not_configured(키 꽂으면 가동 · CLAUDE §8)",
+      hadGoogleKey || (rNotConfigured.ok === false && rNotConfigured.reason === "provider_not_configured"),
+      hadGoogleKey ? "(키 있음 — 이 검사 건너뜀)" : "");
+
+    /* 🔴 «갱신 실패 → disconnected + 알림» 은 실제로 돌려 본다 — 가짜 앱 키로 Google 토큰 엔드포인트를 진짜 때린다
+       (400 이 정답이다). 남의 계정·데이터에 닿지 않는다. */
+    if (!hadGoogleKey) {
+      process.env.GOOGLE_OAUTH_CLIENT_ID = "b2smoke-not-a-real-client.apps.googleusercontent.com";
+      process.env.GOOGLE_OAUTH_CLIENT_SECRET = "b2smoke-not-a-real-secret";
+      const rRefreshFail = await publish((await loadPublishPiece(tid, bPieceId))!, (await loadPublishAccount(tid, bAccId))!, {});
+      delete process.env.GOOGLE_OAUTH_CLIENT_ID; delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+      ok("블로거 — 토큰 갱신 실패는 auth_failed(재시도 금지)", rRefreshFail.ok === false && rRefreshFail.reason === "auth_failed" && rRefreshFail.retriable === false,
+        !rRefreshFail.ok ? String(rRefreshFail.detail ?? "").slice(0, 40) : "");
+      const [bAccAfter] = await q(sql`SELECT status FROM accounts WHERE id = ${bAccId}`);
+      ok("블로거 — 갱신 실패면 계정 disconnected", String(bAccAfter?.status) === "disconnected");
+      const [note] = await q(sql`SELECT count(*) c FROM notifications WHERE tenant_id = ${tid} AND kind = 'account_disconnected'`);
+      ok("블로거 — «다시 연결해 주세요» 알림 1행(침묵 금지)", n(note?.c) === 1);
+    }
+
+    const [wAcc] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key)
+      VALUES (${tid}, 'wordpress', ${"b2smoke.example.com"}, 'app_password', 'active', ${`t${tid}-wp`}) RETURNING id`);
+    const wPieceId = await mkApiPiece("wordpress", n(wAcc?.id));
+    const rWp = await publish((await loadPublishPiece(tid, wPieceId))!, (await loadPublishAccount(tid, n(wAcc?.id)))!, {});
+    ok("워드프레스 — 자격 없으면 no_creds", rWp.ok === false && rWp.reason === "no_creds");
+
+    const [xAcc] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key)
+      VALUES (${tid}, 'threads', ${"b2smoke_threads"}, 'oauth', 'active', ${`t${tid}-th`}) RETURNING id`);
+    const xPieceId = await mkApiPiece("threads", n(xAcc?.id));
+    const rX = await publish((await loadPublishPiece(tid, xPieceId))!, (await loadPublishAccount(tid, n(xAcc?.id)))!, {});
+    ok("미지원 채널 — unsupported_channel(조용히 성공 0)", rX.ok === false && rX.reason === "unsupported_channel");
+
     /* ── 10. 자격 평문 누출 검사 ─────────────────────── */
     const fleet = await fleetState(tid);
     const surfaces = JSON.stringify({ devices: await listDevices(tid), fleet, rel, rOk, rBad });

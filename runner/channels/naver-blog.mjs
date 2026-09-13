@@ -24,20 +24,35 @@ const BODY_SEL = ".se-component.se-text .se-text-paragraph";
 
 /* ───────────────────── 로그인 ───────────────────── */
 
+/**
+ * 로그인 여부 — 🔴 **긍정 신호로만** 판정한다.
+ *   종전에 «nidlogin 주소가 아니면 로그인됨» 으로 뒀더니 로그아웃 상태의 blog.naver.com 도 통과해
+ *   **로그인 단계를 통째로 건너뛰고** 에디터에서 «세션 만료»로 죽었다(2026-09-14 자사 테스트 계정 실측 job #8).
+ *   «아닌 것이 없다» 는 «맞다» 가 아니다 — 로그아웃 링크(=로그인 상태의 증거)를 본다.
+ *   판정이 애매하면 **로그아웃으로 본다**(한 번 더 로그인하는 비용 < 조용히 실패하는 비용).
+ */
 async function isLoggedIn(page) {
   try {
     await page.goto("https://blog.naver.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
     if (/nidlogin/i.test(page.url())) return false;
-    return (await page.locator('a[href*="logout"], .gnb_my, [class*="MyArea"]').count().catch(() => 0)) > 0
-      || !/nidlogin/i.test(page.url());
+    const out = await page.locator('a[href*="nidlogin.logout"], a[href*="nid.naver.com/nidlogin.logout"]').count().catch(() => 0);
+    if (out > 0) return true;
+    // 로그인 링크가 보이면 확실히 로그아웃 상태.
+    const inLink = await page.locator('a[href*="nidlogin.login"], a:has-text("로그인")').count().catch(() => 0);
+    if (inLink > 0) return false;
+    // 내 블로그 메뉴(로그인해야 뜬다) — 마지막 긍정 신호.
+    return (await page.locator('.gnb_my, [class*="MyArea"], a[href*="MyBlog"]').count().catch(() => 0)) > 0;
   } catch { return false; }
 }
 
 /** id/pw 자동 로그인. 캡차·기기등록·2단계는 **정직 실패**(사람이 해야 풀린다). */
 async function loginWithIdPw(page, id, pw) {
   await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  /* 이미 로그인돼 있으면 네이버가 로그인 화면에서 되돌려 보낸다 — 그걸 «폼을 못 찾았다»(selector_changed)로
+     읽으면 멀쩡한 계정에 «우리 버그» 딱지가 붙는다. 폼이 없고 주소도 로그인 화면이 아니면 그냥 통과시킨다. */
   // domcontentloaded 직후 바로 입력하면 폼 JS 초기화 전이라 값이 유실된다(AM 실측) — 보일 때까지 기다린다.
-  await page.locator("#id").waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+  const formShown = await page.locator("#id").waitFor({ state: "visible", timeout: 15_000 }).then(() => true).catch(() => false);
+  if (!formShown && !/nidlogin/i.test(page.url())) return;
   await settle(page, 500);
   await page.fill("#id", id).catch(() => {});
   await page.fill("#pw", pw).catch(() => {});
@@ -134,6 +149,17 @@ async function openEditor(page, blogId, shotKey) {
       const t = ((await fr.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
       if (t.length > seen.length) seen = t;
     }
+    /* 🔴 «화면을 못 찾았다»를 전부 selector_changed 로 적으면 **계정 문제가 우리 버그로 둔갑한다**
+       (selector_changed 는 ourBug=true·risk high — 고객의 잘못된 블로그 주소로 개발자를 호출하게 된다).
+       네이버가 «해당 블로그가 없습니다» 라고 말해 줬으면 그대로 믿는다 — AM 이 분류를 가른 이유가 이것이다.
+       2026-09-14 로컬 왕복 실측에서 실제로 이 오분류가 나왔다(job #3). */
+    if (/해당 블로그가 없|유효하지 않은 요청|존재하지 않는 블로그|블로그 아이디를 확인/.test(seen)) {
+      throw BLOCK("login_fail", `네이버에 «${blogId}» 블로그가 없어요. 계정의 블로그 주소를 확인해 주세요.`);
+    }
+    if (/이용이 제한|제재|블라인드 처리/.test(seen)) throw BLOCK("suspended", "이 블로그는 네이버에서 이용이 제한된 상태예요.");
+    if (/로그인/.test(seen) && /nidlogin|로그인이 필요/.test(`${page.url()} ${seen}`)) {
+      throw BLOCK("login_fail", "글쓰기 화면에서 다시 로그인을 요구했어요(세션 만료).");
+    }
     throw BLOCK("selector_changed", `글쓰기 화면을 찾지 못했어요 — url=${page.url().slice(0, 90)} · 화면="${seen.slice(0, 120)}"`);
   }
   await dismissEditorPopups(page);
@@ -215,6 +241,41 @@ async function attachImage(page, ctx, file, missed) {
   return false;
 }
 
+/**
+ * 🔴 moveCaretToEnd — AM 이 실물 대조로 확정한 방어(원본 `naver-blog-runner.mjs` #738·#742 · 이식 2026-09-14).
+ *
+ *   사진·인용구·구분선 **뒤에는 쓸 자리가 없다**. 그 상태로 그냥 타자를 치면 에디터 캐럿이 문서 끝이 아니라
+ *   **직전 글 문단 한복판**에 있어서, 다음 문장이 앞 문단을 두 동강 낸다(AM 실물: 한 문장이 세 조각·
+ *   인용구가 맨 뒤로 밀림·본문 1,606자가 인용 안에 갇힘). 조용히 망가지는 종류의 실패라 더 나쁘다.
+ *   ⇒ 문서의 **마지막 컴포넌트**가 글이 아니면, 에디터가 주는 «본문 추가»(`se-canvas-bottom-button`)로
+ *      끝에 **새 글 칸**을 만든다. 새 칸은 비어 있어 한복판에 끼어들 수가 없다.
+ *   ⚠️ «본문 추가»는 hover 영역이라 isVisible 이 false 로 나올 때가 있다 — 안 보이면 끝으로 스크롤 + force.
+ */
+async function moveCaretToEnd(page, ctx) {
+  try {
+    const lastIsText = await ctx.evaluate(() => {
+      const comps = document.querySelectorAll(".se-component");
+      const last = comps[comps.length - 1];
+      return !!(last && /(^|\s)se-text(\s|$)/.test((last.className || "").toString()));
+    }).catch(() => false);
+    if (!lastIsText) {
+      const add = ctx.locator(".se-canvas-bottom-button").first();
+      if (await add.isVisible({ timeout: 1200 }).catch(() => false)) await add.click({ timeout: 4000 }).catch(() => {});
+      else {
+        await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+        await add.click({ timeout: 3000, force: true }).catch(() => {});
+      }
+      await settle(page, 600);
+    }
+    // 마지막 글 문단을 실제로 클릭하고 End 로 줄 끝에 붙인다(에디터는 DOM Range 를 모른다 — 클릭·키보드만 안다).
+    const para = ctx.locator(".se-component.se-text").last().locator(".se-text-paragraph").last();
+    if (await para.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await para.click({ timeout: 4000 }).catch(() => {});
+      await page.keyboard.press("End").catch(() => {});
+    }
+  } catch { /* 못 잡아도 글은 계속 — 다음 op 가 이어 쓴다 */ }
+}
+
 async function playOps(page, ctx, plan, files, shotKey, missed) {
   let wrote = false;
   const type = async (text) => {
@@ -252,6 +313,7 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
         wrote = true;
         await shot(page, shotKey, op.role === "disclosure" ? "02-고지" : "인용구");
         await settle(page, 900);
+        await moveCaretToEnd(page, ctx);   // 🔴 인용구는 컴포넌트 — 뒤에 쓸 자리를 만든다(AM #738)
         break;
       }
       case "divider": {
@@ -259,6 +321,7 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
         if (!(await clickToolbarItem(ctx, "horizontalLine"))) { missed.divider++; await page.keyboard.insertText("———"); }
         wrote = true;
         await settle(page, 800);
+        await moveCaretToEnd(page, ctx);   // 🔴 구분선도 컴포넌트
         break;
       }
       case "list": await type(`• ${op.text}`); await settle(page, 200, 500); break;
@@ -282,12 +345,32 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
           if (grew && ++stable >= 3) break;
         }
         if (!grew) missed.imageSettle++;
+        await settle(page, 800);
+        await moveCaretToEnd(page, ctx);   // 🔴 사진이 완전히 앉은 뒤 끝으로(AM #737·#742)
         if (op.caption) { await page.keyboard.insertText(String(op.caption)); }
         wrote = true;
         await settle(page, 1000);
         break;
       }
-      case "tags": await type(op.text); await settle(page, 300); break;
+      case "tags": {
+        /* 태그 줄은 **글의 맨 끝**에. 링크카드(se-oglink)가 비동기로 생기면 캐럿이 중간에 남는다(AM #723) —
+           카드가 «더 이상 안 생긴다»를 확인한 뒤 끝을 다시 잡는다(최대 6초 · 안 생겨도 진행). */
+        const cardCount = async () => await ctx.locator(".se-component.se-oglink, .se-oglink").count().catch(() => 0);
+        const deadline = Date.now() + 6000;
+        let last = await cardCount(), stable = 0;
+        while (Date.now() < deadline) {
+          await settle(page, 400);
+          const now = await cardCount();
+          if (now !== last) { last = now; stable = 0; continue; }
+          if (++stable >= 4) break;
+        }
+        await moveCaretToEnd(page, ctx);
+        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        await page.keyboard.insertText(String(op.text));
+        wrote = true;
+        await settle(page, 300);
+        break;
+      }
       default: if (op.text) await type(op.text);
     }
   }
@@ -336,7 +419,7 @@ async function saveDraft(page, ctx, shotKey) {
   throw BLOCK("selector_changed", "임시저장 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
 }
 
-async function publishNow(page, ctx, tags, blogId, shotKey) {
+async function publishNow(page, ctx, tags, blogId, shotKey, title, categoryHint) {
   // 1차 발행(우상단) → 발행 설정 레이어
   let opened = false;
   for (const sel of ['button:has-text("발행")', '[data-testid="publishBtn"]', 'button[class*="publish"]']) {
@@ -348,6 +431,41 @@ async function publishNow(page, ctx, tags, blogId, shotKey) {
   if (!opened) throw BLOCK("selector_changed", "발행 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
   await settle(page, 1200);
   await shot(page, shotKey, "91-발행레이어");
+
+  /* 🔴 게시판(카테고리) 선택 — AM 이 8차 진단으로 확정한 자리(원본 `naver-blog-runner.mjs` · 이식 2026-09-14).
+     네이버는 게시판이 안 골라져 있으면 발행을 받지 않는다. 항목의 클릭 타깃은 내부 `a` 가 아니라 **`li` 자체**다.
+     ⚠️ isVisible 로 거르지 않는다 — 작은 화면에서 항목이 뷰포트 밖이면 전부 탈락해 «게시판 없음»이 된다(AM 실사고).
+        존재+텍스트로 후보를 잡고, 클릭할 때 scrollIntoView 로 올린다.
+     고를 때: 지정 카테고리(payload.options.category) > 제목 낱말이 겹치는 게시판 > 첫 실게시판. */
+  try {
+    const items = await page.locator('li[class*="item__"]').all();
+    const hint = String(categoryHint ?? "").trim();
+    const toks = new Set(String(title ?? "").replace(/[()[\]·,!?]/g, " ").split(/\s+/).filter((w) => w.length >= 2));
+    let best = null, bestScore = -1;
+    const seen = [];
+    for (const it of items) {
+      const txt = (((await it.textContent().catch(() => "")) || "").replace(/하위 카테고리/g, "").replace(/카테고리 (열기|닫기)/g, "").trim());
+      if (!txt || txt === "게시판" || txt === "전체 글감") continue;
+      seen.push(txt.slice(0, 16));
+      let score = 0;
+      if (hint && txt.includes(hint)) score += 100;
+      for (const t of toks) if (txt.includes(t)) score += 2;
+      if (score > bestScore) { bestScore = score; best = it; }
+    }
+    if (best) {
+      await best.scrollIntoViewIfNeeded().catch(() => {});
+      await settle(page, 300);
+      await best.click({ timeout: 4000 }).catch(async () => {
+        await best.click({ timeout: 4000, force: true }).catch(async () => {
+          await best.locator("a, span, label, div").first().click({ timeout: 3000, force: true }).catch(() => {});
+        });
+      });
+      await settle(page, 800);
+    } else if (items.length) {
+      // 조용히 넘기지 않는다 — 게시판이 없으면 발행이 거절된다(사람이 블로그에 게시판을 하나 만들어야 한다).
+      console.log(`  · 게시판 후보를 찾지 못했어요(후보=${JSON.stringify(seen).slice(0, 80)})`);
+    }
+  } catch { /* 게시판 처리 실패는 발행을 막지 않는다 — 확정 단계에서 네이버가 말해 준다 */ }
 
   await fillTags(page, tags).catch(() => 0);
   // 사람이 설정을 훑는 정도의 지연(기계적 즉시 확정 패턴 회피).
@@ -406,28 +524,31 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
 
   const page = ctx.pages()[0] ?? await ctx.newPage();
   const missed = { quote: 0, divider: 0, heading: 0, image: 0, imageDownload: 0, imageSettle: 0 };
-
-  // ① 로그인 — 쿠키가 살아 있으면 건너뛴다.
-  if (!(await isLoggedIn(page))) {
-    if (!account.login?.id || !account.login?.pw) {
-      throw BLOCK("login_fail", "저장된 로그인이 만료됐어요. 앱에서 «다시 로그인»을 눌러 주세요.");
-    }
-    await loginWithIdPw(page, account.login.id, account.login.pw);
-  }
-  await shot(page, shotKey, "00-로그인확인");
-
-  // ② 에디터
-  const ed = await openEditor(page, blogId, shotKey);
-
-  // ③ 제목
-  if (!(await clickEditable(ed, TITLE_SEL))) throw BLOCK("selector_changed", "제목 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
-  await page.keyboard.insertText(String(job.payload?.title ?? ""));
-  await settle(page, 600);
-
-  // ④ 본문
-  if (!(await clickEditable(ed, BODY_SEL))) throw BLOCK("selector_changed", "본문 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
-  const files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
+  /* 🔴 실패 스냅샷은 **모든 단계**를 덮는다. 종전에는 본문 단계부터만 감쌌는데, 실제로 가장 흔한 실패는
+     그 앞(로그인·에디터 진입)에서 난다 — 2026-09-14 로컬 왕복에서 FAIL.png 가 안 남아 그 사실이 드러났다.
+     «무엇에 막혔나»는 화면을 봐야 안다(AM 눈검사 규율). */
+  let files = null;
   try {
+    // ① 로그인 — 쿠키가 살아 있으면 건너뛴다.
+    if (!(await isLoggedIn(page))) {
+      if (!account.login?.id || !account.login?.pw) {
+        throw BLOCK("login_fail", "저장된 로그인이 만료됐어요. 앱에서 «다시 로그인»을 눌러 주세요.");
+      }
+      await loginWithIdPw(page, account.login.id, account.login.pw);
+    }
+    await shot(page, shotKey, "00-로그인확인");
+
+    // ② 에디터
+    const ed = await openEditor(page, blogId, shotKey);
+
+    // ③ 제목
+    if (!(await clickEditable(ed, TITLE_SEL))) throw BLOCK("selector_changed", "제목 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+    await page.keyboard.insertText(String(job.payload?.title ?? ""));
+    await settle(page, 600);
+
+    // ④ 본문
+    if (!(await clickEditable(ed, BODY_SEL))) throw BLOCK("selector_changed", "본문 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+    files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
     const wrote = await playOps(page, ed, plan, files, shotKey, missed);
     if (!wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");
 
@@ -442,13 +563,13 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
     notes.push(...(plan.stats.notes ?? []));
 
     if (dryRun) { await saveDraft(page, ed, shotKey); return { dryRun: true, notes }; }
-    const out = await publishNow(page, ed, plan.tags, blogId, shotKey);
+    const out = await publishNow(page, ed, plan.tags, blogId, shotKey, job.payload?.title, job.payload?.options?.category);
     return { ...out, notes };
   } catch (e) {
     await failShot(page, shotKey);
     throw e;
   } finally {
-    cleanupFiles(files);
+    if (files) cleanupFiles(files);
   }
 }
 

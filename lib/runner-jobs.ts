@@ -83,8 +83,9 @@ export interface RunnerJobAccount {
   proxyUrl?: string;
   /** 저장된 세션 쿠키(있으면 로그인 단계를 건너뛴다). */
   cookies?: unknown[];
-  /** 자동 로그인용 아이디/비밀번호(쿠키가 없거나 만료됐을 때). */
-  login?: { id: string; pw: string };
+  /** 자동 로그인용 아이디/비밀번호(쿠키가 없거나 만료됐을 때).
+   *   method — 로그인 방식. 티스토리는 «카카오 계정» 경유가 다수라 러너가 길을 갈라야 한다(실측 2026-09-14). */
+  login?: { id: string; pw: string; method?: "self" | "kakao" };
 }
 
 export interface RunnerJob {
@@ -283,8 +284,11 @@ async function loadAccountForRunner(tid: number, accountId: number): Promise<Run
   if (!out.cookies) {
     for (const c of creds) {
       if (String(c.kind) !== "password" || out.login) continue;
-      const o = decryptObj<{ loginId?: string; password?: string }>(String(c.enc ?? ""));
-      if (o?.loginId && o?.password) out.login = { id: String(o.loginId), pw: String(o.password) };
+      const o = decryptObj<{ loginId?: string; password?: string; method?: string }>(String(c.enc ?? ""));
+      if (o?.loginId && o?.password) {
+        out.login = { id: String(o.loginId), pw: String(o.password) };
+        if (o.method === "kakao") out.login.method = "kakao";
+      }
     }
   }
   return out;

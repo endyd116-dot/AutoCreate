@@ -7,8 +7,9 @@
  *      한 글자씩 연주하는 것보다 서식이 정확하고, 셀렉터 의존도 훨씬 낮다(도구모음을 안 건드린다).
  *      HTML 모드를 못 열면 기본 모드에서 ops 를 연주하는 폴백으로 내려앉는다(글은 나간다 · 장식은 준다).
  *
- *   ⚠️ 카카오 계정 로그인은 자동화하지 않는다 — 2단계·기기 확인이 붙는 길이라 **헤드풀 재로그인**(session.login)으로 보낸다.
- *      «될 것처럼» 시도해서 계정을 잠그는 것보다 정직하게 사람에게 넘기는 편이 싸다.
+ *   🔴 로그인은 **두 길**이다: 티스토리 자체 아이디 · **카카오 계정**(실측상 다수가 이쪽).
+ *      카카오 경로는 자동 로그인을 시도하되, **캡차·2단계·기기 확인이 뜨면 즉시 정직 실패**하고
+ *      헤드풀 재로그인(session.login)으로 보낸다 — 자동으로 뚫으려 들면 계정이 잠긴다.
  */
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
 
@@ -39,11 +40,58 @@ async function isLoggedIn(page, host) {
   } catch { return false; }
 }
 
-/** 티스토리 자체 아이디 로그인만 시도한다. 카카오로 넘어가면 사람에게 넘긴다. */
+/**
+ * 카카오 계정 로그인(실측 2026-09-14 · 자사 테스트 블로그) — 티스토리 사용자의 다수가 이 경로다.
+ *   `tistory.com/auth/login` → «카카오계정으로 로그인» → `accounts.kakao.com` → (동의) → 리다이렉트.
+ *   🔴 2단계·기기 확인이 붙으면 **정직 실패**한다 — 자동으로 뚫으려 들면 계정이 잠긴다(헤드풀 재로그인으로 보낸다).
+ */
+async function loginWithKakao(page, id, pw) {
+  // 티스토리 로그인 화면의 «카카오계정으로 로그인» 버튼(이미 카카오 페이지면 건너뛴다).
+  if (!/accounts\.kakao\.com/i.test(page.url())) {
+    for (const sel of ["a.btn_login.link_kakao_id", "a[class*='kakao']", "button[class*='kakao']", "text=카카오계정으로 로그인"]) {
+      try {
+        const b = page.locator(sel).first();
+        if (await b.isVisible({ timeout: 2500 }).catch(() => false)) { await b.click({ timeout: 6000 }); break; }
+      } catch { /* 다음 */ }
+    }
+    await settle(page, 2500);
+  }
+  if (!/accounts\.kakao\.com/i.test(page.url())) {
+    throw BLOCK("selector_changed", `카카오 로그인 화면으로 넘어가지 못했어요 — url=${page.url().slice(0, 80)}`);
+  }
+
+  const idBox = page.locator("input[name='loginId'], #loginId--1, input[type='email']").first();
+  const pwBox = page.locator("input[name='password'], #password--1, input[type='password']").first();
+  if (!(await idBox.isVisible({ timeout: 8000 }).catch(() => false))) {
+    throw BLOCK("selector_changed", "카카오 로그인 폼을 찾지 못했어요(화면이 바뀐 것 같아요).");
+  }
+  await idBox.fill(id).catch(() => {});
+  await pwBox.fill(pw).catch(() => {});
+  await page.locator("button[type='submit'], .btn_g.highlight.submit, button:has-text('로그인')").first().click({ timeout: 8000 }).catch(() => {});
+  await settle(page, 5000);
+
+  // 동의 화면(첫 연결 시) — 전체 동의 후 계속.
+  for (const sel of ["#agreeAll", "label[for='agreeAll']", "button:has-text('동의하고 계속하기')", "button:has-text('계속하기')"]) {
+    try {
+      const b = page.locator(sel).first();
+      if (await b.isVisible({ timeout: 1500 }).catch(() => false)) { await b.click({ timeout: 4000 }).catch(() => {}); await settle(page, 1500); }
+    } catch { /* 무시 */ }
+  }
+
+  const url = page.url();
+  const body = await page.content().catch(() => "");
+  if (/captcha|자동입력 방지|보안문자/i.test(body)) throw BLOCK("captcha", "카카오가 자동입력 방지를 띄웠어요.");
+  if (/2단계|인증번호|otp|verify/i.test(`${url} ${body.slice(0, 4000)}`) && /accounts\.kakao\.com/i.test(url)) {
+    throw BLOCK("login_fail", "카카오 2단계 인증이 필요해요. 앱에서 «다시 로그인»을 눌러 창에서 직접 로그인해 주세요.");
+  }
+  if (/accounts\.kakao\.com/i.test(page.url())) throw BLOCK("login_fail", "카카오 아이디 또는 비밀번호가 맞지 않아요.");
+}
+
+/** 티스토리 자체 아이디 로그인. 카카오 경로면 위 함수로 넘어간다. */
 async function loginWithIdPw(page, id, pw) {
   await page.goto("https://www.tistory.com/auth/login", { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-  if (/accounts\.kakao\.com/i.test(page.url())) {
-    throw BLOCK("login_fail", "티스토리가 카카오 로그인을 요구해요. 앱에서 «다시 로그인»을 눌러 창에서 직접 로그인해 주세요.");
+  if (/accounts\.kakao\.com/i.test(page.url()) || String(process.env.AC_TISTORY_LOGIN ?? "") === "kakao") {
+    return loginWithKakao(page, id, pw);
   }
   const idBox = page.locator("#loginId, input[name='loginId'], input[type='email']").first();
   if (!(await idBox.isVisible({ timeout: 6000 }).catch(() => false))) {
@@ -224,9 +272,13 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
 
   const page = ctx.pages()[0] ?? await ctx.newPage();
   const missed = { image: 0, imageDownload: 0, htmlMode: 0 };
-
+  /* 🔴 실패 스냅샷은 모든 단계를 덮는다(네이버와 같은 수리 · 2026-09-14 실측에서 로그인 실패 시 사진이 0장이었다). */
+  let files = null;
+  try {
   if (!(await isLoggedIn(page, host))) {
     if (!account.login?.id || !account.login?.pw) throw BLOCK("login_fail", "저장된 로그인이 만료됐어요. 앱에서 «다시 로그인»을 눌러 주세요.");
+    // 로그인 방식(카카오/자체)은 계정 자격에 실려 온다(없으면 화면을 보고 판단).
+    if (account.login.method === "kakao") process.env.AC_TISTORY_LOGIN = "kakao";
     await loginWithIdPw(page, account.login.id, account.login.pw);
     if (!(await isLoggedIn(page, host))) throw BLOCK("login_fail", "로그인은 됐는데 이 블로그의 관리 화면에 들어가지 못했어요.");
   }
@@ -242,8 +294,8 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
   });
   await settle(page, 600);
 
-  const files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
-  try {
+  files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
+  {
     // 본문 — HTML 모드 우선(가장 안전), 안 되면 연주 폴백.
     const notes = [];
     const html = await tryHtmlMode(page, job.payload?.bodyHtml, shotKey);
@@ -259,11 +311,12 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
 
     const out = await finishPublish(page, plan, job.payload?.options, shotKey, dryRun);
     return { ...out, notes };
+  }
   } catch (e) {
     await failShot(page, shotKey);
     throw e;
   } finally {
-    cleanupFiles(files);
+    if (files) cleanupFiles(files);
   }
 }
 

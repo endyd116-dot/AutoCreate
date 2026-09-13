@@ -20,12 +20,23 @@ const TARGETS = {
     homeUrl: "https://blog.naver.com",
     done: (page) => !/nidlogin/i.test(page.url()),
     cookieUrls: ["https://naver.com", "https://blog.naver.com", "https://nid.naver.com"],
+    /* 🔴 «로그인 상태 유지»를 켜야 세션이 장수명 쿠키가 된다 — 안 켜면 창을 닫는 순간 만료돼
+       저장해도 다음 회차에 다시 로그인을 물어본다(AM 이 근본 수리한 자리). */
+    tips: ["«로그인 상태 유지»를 꼭 켜 주세요(안 켜면 다음에 또 로그인해야 해요)."],
   },
   tistory: {
     loginUrl: "https://www.tistory.com/auth/login",
     homeUrl: "https://www.tistory.com",
     done: (page) => !/auth\/login|accounts\.kakao\.com/i.test(page.url()),
-    cookieUrls: ["https://www.tistory.com", "https://tistory.com"],
+    cookieUrls: ["https://www.tistory.com", "https://tistory.com", "https://accounts.kakao.com"],
+    /* 🔴 실측(2026-09-14 자사 테스트 블로그 note83685): 카카오 계정은 아이디·비밀번호가 맞아도 **2단계 인증**에서 멈춘다
+       («카카오톡으로 로그인 확인 메시지가 전송되었습니다» · 남은 시간 5분). 그 화면에
+       «이 브라우저에서 2단계 인증 사용 안 함» 체크가 있고, **그걸 켜야** 다음부터 자동 발행이 로그인 없이 돈다.
+       우리가 대신 켜지 않는다 — 계정 보안 설정은 주인이 정할 일이다. 대신 그 자리에서 알려 준다. */
+    tips: [
+      "카카오톡으로 온 «로그인 확인» 메시지를 눌러 주세요(2단계 인증).",
+      "그 화면의 «이 브라우저에서 2단계 인증 사용 안 함»을 켜 두면 다음부터 자동으로 올라가요.",
+    ],
   },
 };
 
@@ -43,6 +54,7 @@ export async function run({ ctx, job, token, shotKey }) {
   console.log("  ┌───────────────────────────────────────────────────────────┐");
   console.log(`  │  열린 창에서 «${String(account.handle ?? "").slice(0, 20)}» 계정으로 로그인해 주세요.`);
   console.log("  │  로그인이 끝나면 자동으로 저장됩니다(창을 닫지 마세요).");
+  for (const line of target.tips ?? []) console.log(`  │  ▸ ${line}`);
   console.log(`  │  최대 ${Math.round(WAIT_MS / 60_000)}분 기다립니다.`);
   console.log("  └───────────────────────────────────────────────────────────┘");
   console.log("");
