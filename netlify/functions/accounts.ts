@@ -53,7 +53,7 @@ async function upsertAccount(tid: number, channel: string, handle: string, displ
   const [ex] = await q(sql`SELECT id, last_error_kind FROM accounts WHERE tenant_id = ${tid} AND channel = ${channel} AND handle = ${handle} LIMIT 1`);
   if (ex) {
     if (String(ex.last_error_kind || "") !== "removed") return null;
-    await q(sql`UPDATE accounts SET display_name = COALESCE(${displayName}, display_name), auth_method = ${authMethod}, status = ${status}, last_error_kind = NULL, health_score = 100, updated_at = NOW() WHERE id = ${n(ex.id)}`);
+    await q(sql`UPDATE accounts SET display_name = COALESCE(${displayName}, display_name), auth_method = ${authMethod}, status = ${status}, last_error_kind = NULL, health_score = 100, posts_today = 0, last_post_at = NULL, updated_at = NOW() WHERE id = ${n(ex.id)}`);
     await q(sql`UPDATE account_creds SET purged_at = NOW() WHERE account_id = ${n(ex.id)} AND purged_at IS NULL`);
     return n(ex.id);
   }
