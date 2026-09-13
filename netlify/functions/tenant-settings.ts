@@ -13,10 +13,11 @@ import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/onboarding", "/api/tenant-settings"] };
-const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "onboardedAt"]);
+const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt"]);
 const CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress", "threads", "instagram", "youtube_shorts", "naver_clip", "reels", "tiktok"]);
 
-async function mergeSettings(tid: number, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+/** [v1.1 P1-2] tenants.settings 병합의 단일 경로 — rules-settings(netlify/functions/rules.ts)도 이 함수를 쓴다(같은 jsonb 두 경로 금지). */
+export async function mergeSettings(tid: number, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
   const rows = (await db.execute(sql`SELECT settings FROM tenants WHERE id = ${tid}`)) as unknown as { settings: Record<string, unknown> }[];
   const cur = (rows[0]?.settings && typeof rows[0].settings === "object") ? rows[0].settings : {};
   const next = { ...cur, ...patch };
