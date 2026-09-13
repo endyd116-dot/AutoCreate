@@ -90,13 +90,14 @@
   .coins{display:flex;justify-content:space-between;align-items:baseline;padding:14px 0 6px}
   .coins b{font-size:17px;font-variant-numeric:tabular-nums}
   .coins span{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .seg-w{display:inline-flex;background:var(--chip-off);border-radius:10px;padding:3px}.seg-w span{padding:4px 14px;border-radius:8px;font-size:12.5px;color:var(--muted);font-weight:500}.seg-w span.on{background:var(--surface);color:var(--ink);font-weight:600}
   .note{max-width:1240px;margin:28px auto 0;font-size:12.5px;color:var(--muted);line-height:1.6;border-top:1px solid var(--line);padding-top:14px}
 </style>
 
 <div class="head">
   <div class="eyebrow">AutoCreate · Screens · v1</div>
   <h1>AutoCreate 화면 시안</h1>
-  <p>핵심 화면 4종. 설계서 §13 헌장(깔끔·세련·심플)을 그대로 적용한 시안이며, 구현은 이 픽셀을 따른다. 숫자는 예시다.</p>
+  <p>핵심 화면 5종. 설계서 §13 헌장(깔끔·세련·심플)을 그대로 적용한 시안이며, 구현은 이 픽셀을 따른다. 숫자는 예시다.</p>
   <div class="rules">
     <span class="rule">화면당 색 <b>3</b></span>
     <span class="rule">첫 화면 숫자 <b>1</b></span>
@@ -139,7 +140,7 @@
       <div class="tabs">
         <div class="tab on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg>홈</div>
         <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>만들기</div>
-        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>발행함</div>
+        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>편성표</div>
         <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 18l5-6 4 3 7-9"/></svg>수익</div>
         <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>내 계정</div>
       </div>
@@ -173,7 +174,44 @@
     </div>
   </div>
 
-  <!-- 3. 내 계정 -->
+  <!-- 3. 편성표 -->
+  <div class="shot">
+    <div class="cap"><b>편성표</b>이번 주가 한눈에. 검수창 글은 «수정 / 이대로».</div>
+    <div class="phone">
+      <div class="status"><span>9:41</span><span>●●●</span></div>
+      <div class="appbar"><span>편성표</span><span class="sp"></span></div>
+      <div class="body">
+        <div class="sec" style="padding-top:6px">
+          <div class="seg-w"><span class="on">주</span><span>월</span></div>
+          <div class="sub" style="margin-top:8px"><span>9월 15일 – 21일 · 12건 편성</span><span>주 84코인</span></div>
+        </div>
+        <div class="sec">
+          <div class="label">오늘 · 월요일</div>
+          <div class="row"><div class="l"><span class="t">가을 이불 세탁, 이것만</span><span class="d">네이버 블로그 · @cook_a · 07:30</span></div><div class="r"><span class="chip ok">발행됨</span></div></div>
+          <div class="row"><div class="l"><span class="t">전기요금 아끼는 콘센트</span><span class="d">유튜브 쇼츠 · @short_c · 18:00</span></div><div class="r"><span class="chip off">예약</span></div></div>
+        </div>
+        <div class="sec">
+          <div class="label">내일 · 화요일</div>
+          <div class="row"><div class="l"><span class="t">에어프라이어 청소법, 3분 컷</span><span class="d">티스토리 · @tips_b · 13:00</span></div><div class="r"><span class="chip warn">검수</span></div></div>
+          <div class="row"><div class="l"><span class="t">출근길 5분 스트레칭</span><span class="d">유튜브 쇼츠 · @short_c · 18:00</span></div><div class="r"><span class="chip warn">검수</span></div></div>
+        </div>
+        <div class="sec">
+          <div class="label">수요일</div>
+          <div class="row"><div class="l"><span class="t">현관 냄새, 원인은 신발장</span><span class="d">네이버 블로그 · 계정 자동 · 07:30</span></div><div class="r"><span class="chip off">소재 확정</span></div></div>
+          <div class="row"><div class="l"><span class="t">소재 정하는 중</span><span class="d">유튜브 쇼츠 · @short_c · 18:00</span></div><div class="r"><span class="chip off">예정</span></div></div>
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg>홈</div>
+        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>만들기</div>
+        <div class="tab on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>편성표</div>
+        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 18l5-6 4 3 7-9"/></svg>수익</div>
+        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>내 계정</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 내 계정 -->
   <div class="shot">
     <div class="cap"><b>내 계정</b>채널별 묶음. 상태는 칩 하나로.</div>
     <div class="phone">
@@ -203,7 +241,7 @@
     </div>
   </div>
 
-  <!-- 4. 수익 -->
+  <!-- 5. 수익 -->
   <div class="shot">
     <div class="cap"><b>수익</b>단색 막대. 1등만 강조. 신선도는 작게.</div>
     <div class="phone">
@@ -234,7 +272,7 @@
       <div class="tabs">
         <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg>홈</div>
         <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>만들기</div>
-        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>발행함</div>
+        <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>편성표</div>
         <div class="tab on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 18l5-6 4 3 7-9"/></svg>수익</div>
         <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>내 계정</div>
       </div>
