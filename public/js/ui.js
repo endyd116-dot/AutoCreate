@@ -141,10 +141,38 @@
   /* ── 상태 어휘(계약 §1·§4·§5 → 사람말 알약) ── */
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
   UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약됨"], scheduled: ["off", "예약됨"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
-  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], scheduled: ["off", "예약됨"], published: ["ok", "발행됨"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"], coin_short: ["warn", "코인 부족"] };
+  /* [P1R2] 슬롯 상태기계 전 상태(DESIGN §5B.6 · 계약 §-1) — 어휘 한 벌 */
+  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약됨"], scheduled: ["off", "예약됨"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "올리는 중"], published: ["ok", "올라감"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"] };
+  /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
+  UI.POST_STATUS = { published: ["ok", "올라감"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"] };
+  /* [P1R2] RunnerErrorKind → 사람말(계약 §2) · 계정·발행함이 같이 쓰는 한 벌 */
+  UI.ERRK = { login_fail: "로그인이 풀렸어요", captcha: "보안 문자 확인이 필요해요", rate_limited: "채널이 잠시 막았어요", suspended: "채널에서 정지됐어요", selector_changed: "채널 화면이 바뀌었어요", network: "네트워크가 끊겼어요", unknown: "알 수 없는 문제예요" };
+  UI.errk = (k) => UI.ERRK[k] || k || "";
   UI.pill = (map, s) => { const p = map[s] || ["off", s]; return `<span class="pill ${p[0]}">${UI.esc(p[1])}</span>`; };
+  /* 달력 점 색 = 알약 색과 같은 자(초록·주황·빨강·회색) */
+  UI.slotDot = (s) => (UI.SLOT_STATUS[s] || ["off"])[0].replace("off", "");
+  /* «방금 전 · 2시간 전» — 러너 마지막 응답 */
+  UI.ago = (iso) => { if (!iso) return ""; const ms = Date.now() - UI.utc(iso).getTime(); if (ms < 90e3) return "방금 전"; const m = Math.round(ms / 60e3); if (m < 60) return `${m}분 전`; const h = Math.round(m / 60); if (h < 24) return `${h}시간 전`; return `${Math.round(h / 24)}일 전`; };
+  /* 복사(토큰·본문) — clipboard 막힌 환경 폴백까지 */
+  UI.copy = async function (text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* 폴백 */ }
+    try { const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:-1000px"; document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove(); return ok; } catch { return false; }
+  };
   UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스" };
   UI.EMOTION = { warm: "친근·따뜻", neutral: "담백·정리", witty: "재치", urgent: "급함·해결", calm: "차분" };
+  /* [P1R2] 해야 할 일·알림 마크 — kind 하나에 아이콘 하나(홈·알림함 공용 · 이모지 0) */
+  UI.KIND = {
+    runner: ["warn", '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>'],
+    reassign: ["warn", '<path d="M4 8h13l-3-3M20 16H7l3 3"/>'],
+    publish: ["warn", '<path d="M12 20V5M6 11l6-6 6 6"/>'],
+    review: ["soft", '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'],
+    account: ["warn", '<circle cx="9" cy="9" r="4"/><path d="M12.5 12.5L20 20M17 17l2-2"/>'],
+    coin: ["money", '<circle cx="12" cy="12" r="8"/><path d="M9 9l3 4 3-4M12 13v4"/>'],
+    setup: ["soft", '<path d="M12 5v14M5 12h14"/>'],
+    system: ["soft", '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'],
+  };
+  UI.kindMark = (kind, tone) => { const k = UI.KIND[kind] || UI.KIND.system; const cls = tone === "warn" || tone === "danger" ? "warn" : k[0];
+    return `<span class="mk ${cls}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${k[1]}</svg></span>`; };
   UI.chev = '<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg>';
   UI.dots = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
 

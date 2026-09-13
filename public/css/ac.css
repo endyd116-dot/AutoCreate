@@ -168,7 +168,7 @@ input,textarea,select{font:inherit;color:inherit}
 .cal .dd{height:38px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:12px;font-variant-numeric:tabular-nums;font-weight:500;border:0;width:100%}
 .cal .dd.today{background:var(--brand);color:var(--on-brand);font-weight:700} .cal .dd.sel{outline:2px solid var(--sel);outline-offset:-2px} .cal .dd.dim{color:var(--faint)}
 .cal .dots{display:flex;gap:2px;height:4px} .cal .dots i{width:4px;height:4px;border-radius:50%;background:var(--faint);display:block}
-.cal .dots i.ok{background:var(--money)} .cal .dots i.warn{background:var(--warn)} .cal .dd.today .dots i{background:currentColor;opacity:.7}
+.cal .dots i.ok{background:var(--money)} .cal .dots i.warn{background:var(--warn)} .cal .dots i.danger{background:var(--danger)} .cal .dd.today .dots i{background:currentColor;opacity:.7}
 
 /* 5 BottomSheet */
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);opacity:0;transition:opacity var(--dur) var(--ease);z-index:20}
@@ -231,6 +231,10 @@ input,textarea,select{font:inherit;color:inherit}
 .row.swipe{position:relative;transition:transform 200ms var(--ease);touch-action:pan-y}
 .gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
 [contenteditable="true"]{outline:none;border-radius:8px;transition:box-shadow var(--dur) var(--ease)} [contenteditable="true"]:focus{box-shadow:0 0 0 2px var(--sel)}
+
+/* ── P1R2 추가(2026-09-14) — 프리미티브 2개(.input 과 같은 급 · 컴포넌트 아님): 토큰·설치 명령 상자 · 행 우측 외부 링크 자국 ── */
+.code{background:var(--ground);border-radius:12px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--ink);user-select:all;display:block}
+.ext{width:15px;height:15px;color:var(--faint);flex:none}
 
 /* 검수 미리보기 — 채널 렌더(콘텐츠 스타일 · 컴포넌트 아님) */
 .preview{background:var(--surface);border-radius:var(--r-sec);padding:20px 20px 24px;font-size:15px;line-height:1.8;color:var(--ink);word-break:keep-all;overflow-wrap:anywhere}
