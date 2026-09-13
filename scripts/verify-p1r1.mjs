@@ -287,6 +287,7 @@ async function main() {
   // 편성 규칙(주 3회) → 슬롯 7일치 · 멱등
   const rl = await call(jar, "/api/rules-list");
   checkShape("rules-list 모양", rl.json, S.rulesList); if (rl.json?.settings) checkShape("settings 모양(변수 8)", rl.json.settings, S.settings);
+  await call(jar, "/api/rules-settings", { body: { quietDays: [] } });   // 앞선 실행이 남긴 쉬는 날을 지우고 센다(하니스 위생)
   const rs = await call(jar, "/api/rules-save", { body: { rules: [{ channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, active: true }] } });
   const activeRules = (rs.json?.rules || []).filter((r) => r.active);   // 비활성(지난 라운드) 규칙도 목록에 실린다 — 화면(A)도 active 만 그린다
   rec("rules-save 주3회", rs.json?.ok === true && activeRules.length === 1 && rs.json?.coinsPerWeek > 0, `${rs.status} ${rs.json?.step || ""} coinsPerWeek ${rs.json?.coinsPerWeek} slotsCreated ${rs.json?.slotsCreated}`, `rule id=${rs.json?.rules?.[0]?.id}`);

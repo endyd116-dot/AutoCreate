@@ -54,7 +54,7 @@ const CHARTER = () => {
   const text = clone.innerText || ""; clone.remove();   // 채널 마크(.mk)는 이모지 검사 제외(마크는 헌장상 허용 컬러)
   const cta = [...document.querySelectorAll(".cta .btn.primary, .btn.primary")].filter(vis).length;
   return {
-    primaryPage: primaries.filter((e) => !inSheet(e)).length, primarySheet: primaries.filter(inSheet).length,
+    primaryPage: primaries.filter((e) => !inSheet(e) && !e.closest(".row")).length, primaryRow: primaries.filter((e) => !inSheet(e) && e.closest(".row")).length, primarySheet: primaries.filter(inSheet).length,
     bigNum: nums.length, text, scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth,
     sheetOpen: !!document.querySelector(".sheet"), buttonsSmall: [...document.querySelectorAll("button, a.btn, .row.tap")].filter((e) => !e.closest(".cal")).filter(vis).filter((e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.height < 40; }).length,
     cta,
@@ -91,6 +91,7 @@ async function run() {
       const c = await page.evaluate(CHARTER).catch(() => null);
       if (c) {
         rec(pg.key, vp, "Primary 버튼 ≤1(페이지)", c.primaryPage <= 1, `${c.primaryPage}개`, shot);
+        if (c.primaryRow) rec(pg.key, vp, "행 안 Primary(헌장 §13.0 «화면당 1개»와 충돌)", "WARN", `목록 행 액션 ${c.primaryRow}개 — 설계 판단 필요`, shot);
         rec(pg.key, vp, "큰 숫자 ≤1", c.bigNum <= 1, `${c.bigNum}개`);
         const hard = c.text.match(new RegExp(EMOJI_HARD.source, "gu")) || []; const soft = (c.text.match(new RegExp(EMOJI_SOFT.source, "gu")) || []).filter((ch) => !EMOJI_HARD.test(ch));
         rec(pg.key, vp, "이모지 0", hard.length === 0, hard.length ? `«${hard.join("")}»` : "");
