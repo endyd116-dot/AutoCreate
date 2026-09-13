@@ -223,6 +223,7 @@ input,textarea,select{font:inherit;color:inherit}
 .sheet .row{padding-left:4px;padding-right:4px}
 .reasons{padding:4px 16px 10px;display:flex;flex-direction:column;gap:6px} .reasons p{margin:0;font-size:13.5px;color:var(--sub);display:flex;gap:8px} .reasons p::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--faint);flex:none;margin-top:8px}
 .confirm{padding:10px 4px 0} .confirm .q{font-size:15px;color:var(--sub);font-weight:500} .confirm .big{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.3;margin-top:4px;text-wrap:balance}
+.row .d.wrap{white-space:normal}
 .row .t.wrap{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .row.swipe{position:relative;transition:transform 200ms var(--ease);touch-action:pan-y}
 .gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
