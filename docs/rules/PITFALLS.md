@@ -9,6 +9,7 @@
 - **AC-2** 슬롯 없는 자동 생성을 «편의상» 허용하면 «주 0회로 뒀는데 계속 만들어지는» AM 사고가 그대로 재발한다(`content-slot-gate` 기본 fail-closed 유지).
 - **AC-3** 계정 N개 모델에서 러너 브라우저 컨텍스트를 계정별로 새로 열지 않으면 세션이 섞여 **다른 계정에 글이 올라간다**. 피스마다 새 컨텍스트(AM B3 원칙).
 - **AC-5** drizzle `sql` 템플릿에 **Date 객체를 바인딩하면 postgres-js가 `ERR_INVALID_ARG_TYPE`로 터진다**(Buffer.byteLength에 Date). `.toISOString()` 문자열 + `::timestamptz AT TIME ZONE 'UTC'` 로 넣는다(timestamp without tz = UTC 저장 · #4). 2026-09-14 Phase 0 스모크에서 가입·로그인 500.
+- **AC-8** 🔴 **Netlify env 를 다른 사이트에서 복사할 때 secret 값은 마스킹된 채로 온다**(`GET /accounts/{slug}/env?site_id=` 의 production 컨텍스트 secret = `********…`). 2026-09-14 Phase 0 에서 AM 사이트의 R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·NAVER_OPENAPI_CLIENT_SECRET 이 «20자 별표»로 복사돼 AutoCreate 에 등록됐고, P1R1-B 스모크에서 «Credential access key has length 20, should be 32» 로 이미지 업로드가 전건 실패했다(코인 환급·piece failed 경로는 정상 동작). ⇒ 복사 후 **길이·머리글자를 재고**(별표면 마스킹) · 가능하면 dev 컨텍스트 값이나 다른 사이트(값이 안 가려진 곳)에서 가져오고, **등록 직후 실호출 1회로 확인**한다(R2 = PutObject+HeadObject · Gemini = models.list 200).
 - **AC-4** 유튜브·틱톡 API는 앱 심사 전 업로드가 **비공개 고정**이다. «발행됨»으로 표기하지 말고 «비공개 업로드됨·공개 전환 필요»로 정직 표기.
 
 ---
