@@ -221,11 +221,19 @@ export async function contractFor(channel: string, emotionKey?: string | null): 
     const rows = (await db.execute(sql`SELECT contract FROM emotion_profiles WHERE key = ${key} LIMIT 1`)) as unknown as { contract: Record<string, unknown> }[];
     const o = rows[0]?.contract;
     if (o && typeof o === "object") {
+      /* 운영센터 시드(Phase 0 seed-plans)의 짧은 모양도 받는다: length [min,max] · images [min,max] · tone → register.
+         그 밖의 필드는 **기본값과 같은 모양(배열/객체/문자열)일 때만** 덮어쓴다 — 모양이 다르면 무시(스모크 실사고: length 배열이 객체를 덮어 NaN 코인). */
+      const o2: Record<string, unknown> = { ...o };
+      if (Array.isArray(o2.length) && o2.length.length >= 2) o2.length = { min: Number(o2.length[0]), max: Number(o2.length[1]) };
+      if (Array.isArray(o2.images) && o2.images.length >= 2) o2.images = { min: Number(o2.images[0]), max: Number(o2.images[1]), default: Number(o2.images[0]) };
+      if (typeof o2.tone === "string" && !o2.register) o2.register = o2.tone;
       for (const k of OVERLAY_KEYS) {
-        const v = o[k as string];
+        const v = o2[k as string];
         if (v === undefined || v === null) continue;
         const cur = base[k];
-        if (cur && typeof cur === "object" && !Array.isArray(cur) && typeof v === "object" && !Array.isArray(v)) (merged as unknown as Record<string, unknown>)[k] = { ...(cur as object), ...(v as object) };
+        const shape = (x: unknown) => Array.isArray(x) ? "array" : typeof x === "object" ? "object" : typeof x;
+        if (shape(cur) !== shape(v)) continue;
+        if (shape(cur) === "object") (merged as unknown as Record<string, unknown>)[k] = { ...(cur as object), ...(v as object) };
         else (merged as unknown as Record<string, unknown>)[k] = v;
       }
       if (emotionKey) merged.emotionKey = emotionKey;

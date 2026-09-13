@@ -20,6 +20,8 @@ import { kstDateStr, addDays } from "../../lib/best-time";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/rules-list", "/api/rules-save", "/api/rules-settings", "/api/slots-list", "/api/slots-skip"] };
+/** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
+const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 
 async function maxRulesOf(tid: number): Promise<number | null> {
@@ -31,7 +33,7 @@ async function maxRulesOf(tid: number): Promise<number | null> {
 export default async (req: Request): Promise<Response> => {
   const auth = requireUser(req); if (!auth.ok) return auth.res;
   const tid = auth.tid;
-  const url = new URL(req.url); const path = url.pathname;
+  const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/rules-list")) {
       const [rules, settings, maxRules] = await Promise.all([listRules(tid), readScheduleSettings(tid), maxRulesOf(tid)]);

@@ -35,7 +35,7 @@ export interface PieceSpec {
 export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
 export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null }; schedule?: { at: string }; drop?: true }
 
-const wordsOf = (c: WritingContract) => Math.round((c.length.min + c.length.max) / 2 / 2.2);   // 한국어 글자→어절 근사
+const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
 const pieceCoin = (imageCount: number) => coinCostOf("blog") + coinCostOf("image") * imageCount;
 
 export function goalOf(pieces: { channel: string }[], intent: string): Goal {
@@ -165,7 +165,7 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
     }
     if (p.format !== undefined) { if (!c.formats.includes(p.format as FormatKey)) return { ok: false, error: "이 채널에서 쓸 수 없는 구성이에요." }; next.format = p.format as FormatKey; next.composition = c.formatLabel[next.format] || next.format; }
     if (p.emotionKey) next.emotionKey = String(p.emotionKey).slice(0, 40);
-    if (p.images?.count !== undefined) next.images.count = Math.max(c.images.min, Math.min(c.images.max, Math.trunc(n(p.images.count))));
+    if (p.images?.count !== undefined) next.images.count = Math.max(c.images?.min ?? 0, Math.min(c.images?.max ?? 10, Math.trunc(n(p.images.count))));
     if (p.images?.style && ["photo", "illust", "infographic"].includes(p.images.style)) next.images.style = p.images.style as PieceSpec["images"]["style"];
     if (p.monetize && "affiliate" in p.monetize) {
       const af = p.monetize.affiliate;

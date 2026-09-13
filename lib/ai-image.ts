@@ -29,7 +29,7 @@ export interface GenerateImageArgs {
   aspect?: ImageAspect;
   tenantId?: number | null;
   ref?: string | null;
-  /** R2 키 접두 — 기본 `pieces/{tenantId}`. */
+  /** R2 키 접두 — 기본 `autocreate/{tenantId}`(버킷은 AM·MIS 와 공유 siren-uploads · prefix 로 격리). */
   keyPrefix?: string;
   timeoutMs?: number;
 }
@@ -83,7 +83,7 @@ export async function generateImage(a: GenerateImageArgs): Promise<GenerateImage
     const costUsd = calcCost(model, r.inTok, r.outTok);
     void recordAiUsage({ tenantId: a.tenantId, purpose: "image", model, inTokens: r.inTok, outTokens: r.outTok, costUsd, ref: a.ref });
     const ext = r.mime.includes("jpeg") || r.mime.includes("jpg") ? "jpg" : r.mime.includes("webp") ? "webp" : "png";
-    const key = safeKey(a.keyPrefix || `pieces/${a.tenantId ?? 0}`, ext);
+    const key = safeKey(a.keyPrefix || `autocreate/${a.tenantId ?? 0}`, ext);
     try {
       const put = await r2Put(key, Buffer.from(r.b64, "base64"), r.mime);
       return { ok: true, url: put.url, key, model, mime: r.mime, costUsd };

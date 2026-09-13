@@ -249,7 +249,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     for (const b of imageBlocks) {
       const i = b.imageIndex ?? images.length;
       const prompt = `${b.caption || topic.title}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
-      const r = await generateImage({ prompt, aspect: c.images.aspect as ImageAspect, tenantId: tid, ref: `piece:${pieceId}:img${i + 1}`, keyPrefix: `pieces/${tid}/${pieceId}` });
+      const r = await generateImage({ prompt, aspect: c.images.aspect as ImageAspect, tenantId: tid, ref: `piece:${pieceId}:img${i + 1}`, keyPrefix: `autocreate/${tid}/${pieceId}` });
       if (r.ok) {
         okImages++;
         images[i] = { url: r.url, caption: b.caption, alt: b.caption };

@@ -25,6 +25,8 @@ import { triggerGenerate } from "../../lib/director";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
+/** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
+const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
 const STATUSES = new Set(["generating", "draft", "in_review", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);
@@ -107,7 +109,7 @@ function sanitizeHtml(html: string): string {
 export default async (req: Request): Promise<Response> => {
   const auth = requireUser(req); if (!auth.ok) return auth.res;
   const tid = auth.tid;
-  const url = new URL(req.url); const path = url.pathname;
+  const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/pieces-list")) {
       const status = url.searchParams.get("status") || "all";
