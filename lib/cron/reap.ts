@@ -30,7 +30,7 @@ export const reapStep: CronStep = {
       lastReapTick = tick;
       const r = await reapStaleJobs(STALE_MIN);
       if (r === null) detail.queueReaper = "missing";   // «0건»이 아니라 «아직 못 물어봤다»
-      else { changed += r.released + r.exhausted; if (r.released) detail.released = r.released; if (r.exhausted) detail.exhausted = r.exhausted; }
+      else { changed += r.released + r.failed; if (r.released) detail.released = r.released; if (r.failed) detail.exhausted = r.failed; }
     }
 
     // ② 테넌트마다.

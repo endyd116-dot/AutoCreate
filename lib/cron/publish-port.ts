@@ -55,9 +55,9 @@ export type EnqueueJobFn = (tid: number, input: EnqueueInput) => Promise<Enqueue
 export interface PostStats { views?: number; likes?: number; comments?: number; alive?: boolean }
 export type FetchStatsFn = (tid: number, pieceId: number) => Promise<PostStats | null>;
 
-/** 잡 타임아웃 회수(B2 export) — claim 후 staleMin 무보고 잡을 되돌리고, 상한 초과 발행 잡은 awaiting_manual 로 종결한다. */
-export interface ReapResult { released: number; exhausted: number }
-export type ReapStaleJobsFn = (staleMin: number) => Promise<ReapResult>;
+/** 잡 타임아웃 회수(B2 export `reapStaleJobs(staleMin = 15)`) — claim 후 무보고 잡을 되돌리고, 상한 초과 발행 잡은 awaiting_manual 로 종결한다. */
+export interface ReapResult { released: number; failed: number }
+export type ReapStaleJobsFn = (staleMin?: number) => Promise<ReapResult>;
 
 /* ───────── 결합 ───────── */
 interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn; reapStaleJobs?: ReapStaleJobsFn; fetchStats?: FetchStatsFn }
@@ -129,7 +129,7 @@ export async function reapStaleJobs(staleMin: number): Promise<ReapResult | null
   const impl = await ensureBound();
   if (!impl?.reapStaleJobs) return null;
   try { return await impl.reapStaleJobs(staleMin); }
-  catch (e) { console.error("[publish-port] reapStaleJobs 실패", String((e as Error)?.message ?? e).slice(0, 200)); return { released: 0, exhausted: 0 }; }
+  catch (e) { console.error("[publish-port] reapStaleJobs 실패", String((e as Error)?.message ?? e).slice(0, 200)); return { released: 0, failed: 0 }; }
 }
 
 /**

@@ -95,7 +95,7 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
   const [b] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost)
     VALUES (${tid}, ${topic.id}, ${goal}, ${jsonb([spec])}, ${jsonb(reasons)}, ${"auto"}, ${"proposed"}, ${spec.coinCost}) RETURNING id`);
   const briefId = n(b?.id);
-  const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE id = ${briefId}`);
+  const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE tenant_id = ${tid} AND id = ${briefId}`);
   if (chk?.t !== "array") console.error("[director-auto] briefs.pieces jsonb_typeof !== array", chk);   // 쓴 직후 확인까지가 쓰기다(PITFALLS #1)
   return { ok: true, briefId, spec, topic, coinCost: spec.coinCost };
 }

@@ -53,7 +53,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const need = !!m.affiliate || m.adDisclosure === true || !!m.affiliateHint;
   const checks: GateCheck[] = [];
   const c = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
-  const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE id = ${n(p.account_id)}`) : [undefined];
+  const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(p.account_id)}`) : [undefined];
   const [pe] = acc?.persona_id ? await q(sql`SELECT profile FROM personas WHERE id = ${n(acc.persona_id)}`) : await q(sql`SELECT profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 1`);
   const terms = personaTerms((pe?.profile || {}) as Record<string, unknown>);
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
@@ -108,13 +108,13 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date } = {
   const gate = await recheckPiece(tid, p);
   const hard = hardFailures(gate);
   if (hard.length) {
-    await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE id = ${id}`);
+    await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${id}`);
     return { ok: false, step: "gate", gate, error: "발행 전 확인이 필요해요." };
   }
   const m = (p.meta || {}) as Record<string, unknown>;
   const at = utcDate(p.scheduled_for) ?? (m.scheduleAt ? new Date(String(m.scheduleAt)) : null) ?? new Date(now.getTime() + 3600_000);
   const atIso = (at.getTime() < now.getTime() + 5 * 60_000 ? new Date(now.getTime() + 15 * 60_000) : at).toISOString();
-  await q(sql`UPDATE pieces SET status = 'scheduled', scheduled_for = ${atIso}::timestamptz AT TIME ZONE 'UTC', gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE id = ${id}`);
-  if (p.slot_id) await q(sql`UPDATE slots SET status = 'scheduled', publish_at = ${atIso}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
+  await q(sql`UPDATE pieces SET status = 'scheduled', scheduled_for = ${atIso}::timestamptz AT TIME ZONE 'UTC', gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${id}`);
+  if (p.slot_id) await q(sql`UPDATE slots SET status = 'scheduled', publish_at = ${atIso}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(p.slot_id)}`);
   return { ok: true, status: "scheduled", scheduledFor: atIso, gate };
 }

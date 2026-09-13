@@ -84,7 +84,7 @@ export async function classifyAndApply(accountId: number, errorKind: RunnerError
     const health = await recomputeHealth(tid, aid);
 
     if (!next || cur === next) {
-      await q(sql`UPDATE accounts SET last_error_kind = ${kind}, updated_at = NOW() WHERE id = ${aid} AND COALESCE(last_error_kind,'') <> 'removed'`);
+      await q(sql`UPDATE accounts SET last_error_kind = ${kind}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${aid} AND COALESCE(last_error_kind,'') <> 'removed'`);
       await writeAudit({ tenantId: tid, action: "account_error", actorType: "system", target: `account:${aid}`, riskLevel: action === "none" ? "low" : "medium",
         detail: { errorKind: kind, action, status: cur, unchanged: true, health, pieceId: opts.pieceId ?? null, detail: String(opts.detail ?? "").slice(0, 300) || null } });
       return { ok: true, status: next ?? (cur as AccountStatus), action, note: next ? "이미 같은 상태예요." : undefined };
@@ -93,7 +93,7 @@ export async function classifyAndApply(accountId: number, errorKind: RunnerError
     // status 전이 — 'removed'(소프트 삭제) 계정은 건드리지 않는다.
     await q(sql`UPDATE accounts SET status = ${next}, last_error_kind = ${kind},
       ${action === "cooldown" ? sql`daily_cap = GREATEST(1, daily_cap - 1),` : sql``} updated_at = NOW()
-      WHERE id = ${aid} AND COALESCE(last_error_kind,'') <> 'removed'`);
+      WHERE tenant_id = ${tid} AND id = ${aid} AND COALESCE(last_error_kind,'') <> 'removed'`);
 
     const out: ClassifyResult = { ok: true, status: next, action };
 
@@ -101,7 +101,7 @@ export async function classifyAndApply(accountId: number, errorKind: RunnerError
       const r = await reassignSlots(aid, { tenantId: tid });
       out.reassigned = r;
       const names = [...new Set(r.targets.map((t) => t.toAccountId))];
-      const toHandles = names.length ? await q(sql`SELECT handle FROM accounts WHERE id IN (${sql.join(names.map((i) => sql`${i}`), sql`, `)})`) : [];
+      const toHandles = names.length ? await q(sql`SELECT handle FROM accounts WHERE tenant_id = ${tid} AND id IN (${sql.join(names.map((i) => sql`${i}`), sql`, `)})`) : [];
       const to = toHandles.map((h) => `@${h.handle}`).join(" · ");
       await notify(tid, "account_suspended", `@${handle} 계정이 정지됐어요`,
         r.moved > 0 ? `예정돼 있던 글 ${r.moved}건을 ${to} (으)로 옮겼어요. 코인은 더 들지 않아요.`
@@ -175,8 +175,8 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
 
       if (status === "publishing") {
         // 날아가던 발행을 끊고, 이어질 몫을 새 자리로 만든다.
-        const [old] = await q(sql`SELECT rule_id, slot_date, channel, kind, topic_id, brief_id, publish_at, review_deadline, origin FROM slots WHERE id = ${slotId}`);
-        await q(sql`UPDATE slots SET status = 'reassigned', piece_id = NULL, note = ${"계정 정지로 다른 계정에 넘겼어요"}, updated_at = NOW() WHERE id = ${slotId}`);
+        const [old] = await q(sql`SELECT rule_id, slot_date, channel, kind, topic_id, brief_id, publish_at, review_deadline, origin FROM slots WHERE tenant_id = ${tid} AND id = ${slotId}`);
+        await q(sql`UPDATE slots SET status = 'reassigned', piece_id = NULL, note = ${"계정 정지로 다른 계정에 넘겼어요"}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${slotId}`);
         const [ns] = await q(sql`INSERT INTO slots (tenant_id, rule_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, review_deadline, status, origin, note)
           VALUES (${tid}, ${old?.rule_id ?? null}, ${old?.slot_date}, ${old?.channel ?? channel}, ${old?.kind ?? "post"}, ${to.id}, ${old?.topic_id ?? null}, ${old?.brief_id ?? null}, ${pieceId},
                   ${old?.publish_at ?? null}, ${old?.review_deadline ?? null}, ${"scheduled"}, ${old?.origin ?? "auto"}, ${"정지된 계정에서 넘겨받았어요"}) RETURNING id`);
@@ -184,7 +184,7 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
         if (pieceId) await q(sql`UPDATE pieces SET account_id = ${to.id}, slot_id = ${newSlot}, status = 'scheduled', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId}`);
         out.targets.push({ slotId: newSlot, toAccountId: to.id });
       } else {
-        await q(sql`UPDATE slots SET account_id = ${to.id}, note = ${"정지된 계정에서 넘겨받았어요"}, updated_at = NOW() WHERE id = ${slotId}`);
+        await q(sql`UPDATE slots SET account_id = ${to.id}, note = ${"정지된 계정에서 넘겨받았어요"}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${slotId}`);
         if (pieceId) await q(sql`UPDATE pieces SET account_id = ${to.id}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId}`);
         out.targets.push({ slotId, toAccountId: to.id });
       }

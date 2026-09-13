@@ -104,7 +104,10 @@ export const publisherStep: CronStep = {
       const ak = ACCOUNT_ERROR_OF[reason];
       if (ak && p.account_id) await classifyAndApply(n(p.account_id), ak === "account_blocked" ? "suspended" : "login_fail", { tenantId: ctx.tid, pieceId, detail: r.error });
 
-      const terminal = TERMINAL.has(reason);
+      /* 🔴 `retriable:false` 는 사유가 무엇이든 **무조건** 존중한다(B2 2026-09-14).
+         가장 무서운 경우: 발행은 성공했는데 finalize 가 실패한 건도 `{ ok:false, reason:"config", retriable:false }` 로 온다 —
+         이걸 재시도하면 **남의 블로그에 같은 글이 두 번 올라간다**(되돌릴 수 없는 사고). B2 가 publish_finalize_failed(risk high) 를 이미 남긴다. */
+      const terminal = TERMINAL.has(reason) || r.retriable === false;
       const human = NEEDS_HUMAN.has(reason);
       const exhausted = !terminal && !human && attempts > MAX_ATTEMPTS;
 
