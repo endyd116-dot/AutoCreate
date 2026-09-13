@@ -14,13 +14,11 @@ import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
-import { contractFor } from "../../lib/writing-contracts";
-import { type Block, htmlToPlain } from "../../lib/blocks";
-import { runGate, GATE_KEYS, GATE_LABEL, type GateReport, type GateCheck } from "../../lib/ai-tell-gate";
-import { checkDisclosure, checkDisclosureHtml, disclosureTextFor } from "../../lib/disclosure";
-import { findBannedWords, BLOG_EXTRA_BANNED } from "../../lib/banned-words";
-import { maxSimilarity, SAME_BODY_SIMILARITY } from "../../lib/similarity";
-import { personaTerms } from "../../lib/content-gen";
+import { type GateReport } from "../../lib/ai-tell-gate";
+import { disclosureTextFor } from "../../lib/disclosure";
+/* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
+   같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
+import { recheckPiece, approvePiece } from "../../lib/content-approve";
 import { triggerGenerate } from "../../lib/director";
 import { sql } from "drizzle-orm";
 
@@ -54,46 +52,6 @@ function pieceRow(r: Row): Record<string, unknown> {
 }
 const PIECE_SELECT = sql`p.*, a.handle, (SELECT (c.meta->>'url') FROM piece_assets c WHERE c.piece_id = p.id AND c.kind = 'image' ORDER BY c.sort LIMIT 1) AS cover_url`;
 
-/** 발행 직전 재검사(approve · update) — 고지·금칙어·제휴 링크 수·유사도. bodyHtml 정본이면 HTML 기준. */
-async function recheck(tid: number, p: Row): Promise<GateReport> {
-  const m = (p.meta || {}) as Record<string, unknown>;
-  const blocks = (Array.isArray(p.blocks) ? p.blocks : []) as Block[];
-  const html = String(p.body || "");
-  const edited = m.editedByUser === true;
-  const plain = htmlToPlain(html);
-  const need = !!m.affiliate || m.adDisclosure === true || !!m.affiliateHint;
-  const checks: GateCheck[] = [];
-  const c = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
-  const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE id = ${n(p.account_id)}`) : [undefined];
-  const [pe] = acc?.persona_id ? await q(sql`SELECT profile FROM personas WHERE id = ${n(acc.persona_id)}`) : await q(sql`SELECT profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 1`);
-  const terms = personaTerms((pe?.profile || {}) as Record<string, unknown>);
-  const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
-  const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
-  if (!edited && blocks.length) {
-    return runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: m.adDisclosure === true }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
-  }
-  // bodyHtml 정본 — 텍스트 기반으로 같은 12키(구조 검사는 HTML 태그로 근사)
-  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || "") });
-  for (const k of GATE_KEYS) {
-    const from = base.checks.find((x) => x.key === k)!;
-    if (k === "disclosure") { const d = checkDisclosureHtml(html, need); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }
-    if (k === "visual_min") {
-      const cnt = (re: RegExp) => (html.match(re) || []).length; const miss: string[] = []; const vm = c.visualMin;
-      if (vm.quote && cnt(/<blockquote(?![^>]*disclosure)/gi) < vm.quote) miss.push(`인용구 ${cnt(/<blockquote(?![^>]*disclosure)/gi)}/${vm.quote}`);
-      if (vm.divider && cnt(/<hr/gi) < vm.divider) miss.push(`구분선 ${cnt(/<hr/gi)}/${vm.divider}`);
-      if (vm.image && cnt(/<img/gi) < vm.image) miss.push(`사진 ${cnt(/<img/gi)}/${vm.image}`);
-      if (vm.h2 && cnt(/<h2/gi) < vm.h2) miss.push(`소제목 ${cnt(/<h2/gi)}/${vm.h2}`);
-      if (vm.tableOrList && cnt(/<(table|ul|ol)/gi) < vm.tableOrList) miss.push(`표 또는 리스트 0/${vm.tableOrList}`);
-      if (vm.adsense && cnt(/class="adsense"/gi) < vm.adsense) miss.push(`광고 자리 ${cnt(/class="adsense"/gi)}/${vm.adsense}`);
-      checks.push({ key: k, label: GATE_LABEL[k], pass: miss.length === 0, ...(miss.length ? { detail: miss.join(" · ") } : {}) }); continue;
-    }
-    if (k === "affiliate_count") { const links = cnt2(html); checks.push({ key: k, label: GATE_LABEL[k], pass: links <= 2, ...(links > 2 ? { detail: `제휴 링크 ${links}개(2개 이하)` } : {}) }); continue; }
-    if (k === "banned_words") { const b = findBannedWords(`${p.title}\n${plain}`, BLOG_EXTRA_BANNED); checks.push({ key: k, label: GATE_LABEL[k], pass: !b.length, ...(b.length ? { detail: b.join(", ") } : {}) }); continue; }
-    checks.push(from);
-  }
-  return { ok: checks.every((x) => x.pass), checks, rewritten: false };
-}
-function cnt2(html: string): number { return (html.match(/class="affiliate"/g) || []).length + (html.match(/href="https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/g) || []).length; }
 
 /** 사용자가 고지를 지웠어도 첫 요소로 되돌린다(§16B.4). */
 function ensureDisclosureHtml(html: string, provider: string | null | undefined): string {
@@ -143,17 +101,12 @@ export default async (req: Request): Promise<Response> => {
     const st = String(p.status);
 
     if (path.endsWith("/pieces-approve")) {
-      if (st === "scheduled" || st === "approved") return json({ ok: true, status: "scheduled", scheduledFor: utcDate(p.scheduled_for)?.toISOString() ?? null });
-      if (st !== "in_review" && st !== "draft") return json({ ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." }, 400);
-      const gate = await recheck(tid, p);
-      const hard = gate.checks.filter((c) => !c.pass && ["disclosure", "banned_words", "affiliate_count", "similarity", "superlative"].includes(c.key));
-      if (hard.length) { await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE id = ${id}`); return json({ ok: false, step: "gate", error: "발행 전 확인이 필요해요.", gate }, 409); }
-      const at = utcDate(p.scheduled_for) ?? (m.scheduleAt ? new Date(String(m.scheduleAt)) : null) ?? new Date(Date.now() + 3600_000);
-      const atIso = (at.getTime() < Date.now() + 5 * 60_000 ? new Date(Date.now() + 15 * 60_000) : at).toISOString();
-      await q(sql`UPDATE pieces SET status = 'scheduled', scheduled_for = ${atIso}::timestamptz AT TIME ZONE 'UTC', gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE id = ${id}`);
-      if (p.slot_id) await q(sql`UPDATE slots SET status = 'scheduled', publish_at = ${atIso}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
-      await writeAudit({ tenantId: tid, action: "piece_approve", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { scheduledFor: atIso, gateOk: gate.ok } });
-      return json({ ok: true, status: "scheduled", scheduledFor: atIso });
+      const r = await approvePiece(tid, p);
+      if (!r.ok) return r.step === "gate"
+        ? json({ ok: false, step: "gate", error: r.error, gate: r.gate }, 409)
+        : json({ ok: false, step: "state", error: r.error }, 400);
+      if (!r.alreadyScheduled) await writeAudit({ tenantId: tid, action: "piece_approve", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { scheduledFor: r.scheduledFor, gateOk: r.gate.ok } });
+      return json({ ok: true, status: "scheduled", scheduledFor: r.scheduledFor });
     }
     if (path.endsWith("/pieces-reject")) {
       if (st === "rejected") return json({ ok: true, status: "rejected" });
@@ -203,7 +156,7 @@ export default async (req: Request): Promise<Response> => {
       if (!sets.length) return badRequest("바꿀 값이 없어요.");
       await q(sql`UPDATE pieces SET ${sql.join(sets, sql`, `)}, updated_at = NOW() WHERE id = ${id}`);
       const [p2] = await q(sql`SELECT p.* FROM pieces p WHERE p.id = ${id}`);
-      const gate = await recheck(tid, p2);
+      const gate = await recheckPiece(tid, p2);
       await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
       await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { title: typeof b.title === "string", body: typeof b.bodyHtml === "string", gateOk: gate.ok } });
       return json({ ok: true, gate, bodyHtml: String(p2.body || "") });
@@ -212,5 +165,3 @@ export default async (req: Request): Promise<Response> => {
   } catch (err) { return jsonError("pieces", err); }
 };
 
-// disclosure 블록 검사(블록 정본일 때)는 recheck 안 runGate 가 checkDisclosure 로 처리한다.
-void checkDisclosure;

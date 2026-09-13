@@ -51,8 +51,16 @@ export interface EnqueueInput { kind: RunnerJobKind; accountId?: number | null; 
 export type EnqueueResult = { ok: true; jobId: number; already?: boolean } | { ok: false; error: string; unavailable?: boolean };
 export type EnqueueJobFn = (tid: number, input: EnqueueInput) => Promise<EnqueueResult>;
 
+/** 발행된 글의 조회·좋아요·댓글 회수(API 채널 · B2 커넥터가 채널 API 로 물어본다). 러너 채널은 `revenue.stats` 잡이 담당. */
+export interface PostStats { views?: number; likes?: number; comments?: number; alive?: boolean }
+export type FetchStatsFn = (tid: number, pieceId: number) => Promise<PostStats | null>;
+
+/** 잡 타임아웃 회수(B2 export) — claim 후 staleMin 무보고 잡을 되돌리고, 상한 초과 발행 잡은 awaiting_manual 로 종결한다. */
+export interface ReapResult { released: number; exhausted: number }
+export type ReapStaleJobsFn = (staleMin: number) => Promise<ReapResult>;
+
 /* ───────── 결합 ───────── */
-interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn }
+interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn; reapStaleJobs?: ReapStaleJobsFn; fetchStats?: FetchStatsFn }
 let bound: Bound | null = null;
 let probed = false;
 
@@ -68,7 +76,7 @@ async function ensureBound(): Promise<Bound | null> {
   try {
     const mod = await import(/* @vite-ignore */ spec) as Partial<Bound>;
     if (typeof mod?.publishPieceById === "function") {
-      bound = { publishPieceById: mod.publishPieceById, publishViaOf: mod.publishViaOf, enqueueJob: mod.enqueueJob };
+      bound = { publishPieceById: mod.publishPieceById, publishViaOf: mod.publishViaOf, enqueueJob: mod.enqueueJob, reapStaleJobs: mod.reapStaleJobs, fetchStats: mod.fetchStats };
       console.log("[publish-port] 커넥터 자동 연결됨(lib/publish/index)");
     }
   } catch { /* 아직 없다 — unavailable 로 정직하게 */ }
@@ -111,6 +119,27 @@ export async function enqueueRunnerJob(tid: number, input: EnqueueInput): Promis
   if (!impl?.enqueueJob) return { ok: false, error: "러너 잡 적재기(lib/runner-jobs)가 아직 연결되지 않았어요.", unavailable: true };
   try { return await impl.enqueueJob(tid, input); }
   catch (e) { return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) }; }
+}
+
+/**
+ * reapStaleJobs — claim 후 오래 말이 없는 잡 회수. 🔴 큐 SQL 은 B2 한 벌이다(우선순위·attempts·종결 규칙이 거기 있다).
+ *   미연결이면 `null` — 호출부가 «아직 못 물어봤다»로 센다(0건과 구분).
+ */
+export async function reapStaleJobs(staleMin: number): Promise<ReapResult | null> {
+  const impl = await ensureBound();
+  if (!impl?.reapStaleJobs) return null;
+  try { return await impl.reapStaleJobs(staleMin); }
+  catch (e) { console.error("[publish-port] reapStaleJobs 실패", String((e as Error)?.message ?? e).slice(0, 200)); return { released: 0, exhausted: 0 }; }
+}
+
+/**
+ * fetchPostStats — API 채널 글의 통계 회수. 미연결이면 `null`(«0회 조회»가 아니라 «못 물어봤다» — 둘을 섞으면 성과 학습이 0 으로 오염된다).
+ */
+export async function fetchPostStats(tid: number, pieceId: number): Promise<PostStats | null> {
+  const impl = await ensureBound();
+  if (!impl?.fetchStats) return null;
+  try { return await impl.fetchStats(tid, pieceId); }
+  catch (e) { console.warn("[publish-port] fetchStats 실패", pieceId, String((e as Error)?.message ?? e).slice(0, 150)); return null; }
 }
 
 /** 커넥터가 붙어 있나 — 크론 응답 detail·스모크 보고용(«미구현»을 숫자로 보이게). */

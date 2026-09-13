@@ -15,6 +15,15 @@
   node_bundler = "esbuild"
   external_node_modules = ["postgres", "drizzle-orm", "jsonwebtoken", "bcryptjs", "@aws-sdk/client-s3", "resend"]
 
+# ══ 크론 우산 2개(계약 P1R2 §1 · DESIGN §5B.7) ══
+#   스텝은 `lib/cron/runner.ts STEPS` 에만 적힌다 — 여기에는 **함수의 주기**만(AM 관례: 스텝 추가 ≠ 함수 추가).
+#   수동 강제 실행은 `POST /api/cron-tick-*?secret=$CRON_SECRET`(또는 헤더 `x-cron-secret`).
+[functions."cron-tick-5m"]
+  schedule = "*/5 * * * *"
+
+[functions."cron-tick-hourly"]
+  schedule = "0 * * * *"
+
 # SPA 아님 — 정적 HTML 직접 서빙. /app/* 는 파일 그대로.
 [[headers]]
   for = "/*"
