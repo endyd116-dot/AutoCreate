@@ -16,15 +16,24 @@ export function datalabConfigured(): boolean { return !!cfg(); }
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
+/** ★C4 fix: 인증 실패(401/403)는 «키 문제»라 같은 요청 안에서 재시도해도 결과가 같다 — 한 번 겪으면 남은 묶음을 건너뛴다(응답 시간 낭비 0 · growthPct 키 생략). */
+let authFailedAt = 0;
+const AUTH_FAIL_TTL = 10 * 60_000;
+const authBlocked = () => authFailedAt > 0 && Date.now() - authFailedAt < AUTH_FAIL_TTL;
+
 async function datalabOnce(groups: { groupName: string; keywords: string[] }[], startDate: string, endDate: string): Promise<Map<string, number[]>> {
   const out = new Map<string, number[]>();
-  const c = cfg(); if (!c || !groups.length) return out;
+  const c = cfg(); if (!c || !groups.length || authBlocked()) return out;
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const r = await fetch(URL_, { method: "POST", signal: ctrl.signal,
       headers: { "Content-Type": "application/json", "X-Naver-Client-Id": c.id, "X-Naver-Client-Secret": c.secret },
       body: JSON.stringify({ startDate, endDate, timeUnit: "week", keywordGroups: groups.slice(0, 5) }) });
-    if (!r.ok) { console.warn(`[naver-datalab] ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`); return out; }
+    if (!r.ok) {
+      console.warn(`[naver-datalab] ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
+      if (r.status === 401 || r.status === 403) authFailedAt = Date.now();   // 키·권한 문제 → 남은 묶음 생략
+      return out;
+    }
     const j = (await r.json()) as { results?: { title: string; data?: { period: string; ratio: number }[] }[] };
     for (const g of j.results ?? []) out.set(g.title, (g.data ?? []).map((d) => Number(d.ratio) || 0));
   } catch (e) { console.warn("[naver-datalab] 실패", String((e as Error)?.message ?? e).slice(0, 100)); }
@@ -40,7 +49,7 @@ export async function lookupGrowth(keywords: string[]): Promise<Map<string, numb
   const out = new Map<string, number>();
   if (!datalabConfigured()) return out;
   const uniq = [...new Set(keywords.map((k) => String(k || "").trim()).filter(Boolean))];
-  if (!uniq.length) return out;
+  if (!uniq.length || authBlocked()) return out;
   const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
   const start = new Date(end); start.setUTCDate(start.getUTCDate() - 8 * 7);
   for (let i = 0; i < uniq.length; i += 5) {
@@ -54,7 +63,8 @@ export async function lookupGrowth(keywords: string[]): Promise<Map<string, numb
       if (prev <= 0) continue;
       out.set(k, Math.round(((recent - prev) / prev) * 100));
     }
-    if (i + 5 < uniq.length) await new Promise((r) => setTimeout(r, 200));
+    if (authBlocked()) break;   // 인증 실패면 더 묻지 않는다
+    if (i + 5 < uniq.length) await new Promise((r) => setTimeout(r, 150));
   }
   return out;
 }

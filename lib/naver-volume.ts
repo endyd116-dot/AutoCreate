@@ -59,14 +59,20 @@ async function keywordToolOnce(hints: string[]): Promise<KeywordVolume[]> {
  * lookupVolumes — 키워드들의 월 검색량(정확 매칭 · 공백 제거 기준). 5개씩 묶어 조회 · 연관어도 함께 돌려준다.
  *   반환 Map<normKw, KeywordVolume>. 없으면 빈 Map(호출부가 «미상» 처리 — 0 으로 저장하지 않는다).
  */
-export async function lookupVolumes(keywords: string[]): Promise<Map<string, KeywordVolume>> {
+export async function lookupVolumes(keywords: string[], budgetMs = 12_000): Promise<Map<string, KeywordVolume>> {
   const out = new Map<string, KeywordVolume>();
   if (!naverVolumeConfigured()) return out;
   const uniq = [...new Set(keywords.map(normKw).filter(Boolean))];
-  for (let i = 0; i < uniq.length; i += 5) {
-    const list = await keywordToolOnce(uniq.slice(i, i + 5));
-    for (const k of list) { const key = normKw(k.keyword); if (!out.has(key)) out.set(key, k); }
-    if (i + 5 < uniq.length) await new Promise((r) => setTimeout(r, 250));   // 레이트리밋 완충
+  // ★C4 fix: 5개씩 «순차 + 250ms» 는 후보 15개(씨앗 45개)에서 9콜 직렬 = 수 초를 먹는다 —
+  //   동기 함수(topics-refresh)가 Netlify 한도에서 죽는 주원인이었다. 3콜씩 동시에 던지고 전체 예산을 둔다(초과분은 조회 생략 = volume 키 생략·환각 0).
+  const batches: string[][] = [];
+  for (let i = 0; i < uniq.length; i += 5) batches.push(uniq.slice(i, i + 5));
+  const t0 = Date.now();
+  for (let i = 0; i < batches.length; i += 3) {
+    if (Date.now() - t0 > budgetMs) { console.warn(`[naver-volume] 예산(${budgetMs}ms) 초과 — 남은 ${batches.length - i}묶음 생략(volume 키 생략)`); break; }
+    const wave = await Promise.all(batches.slice(i, i + 3).map((b) => keywordToolOnce(b)));
+    for (const list of wave) for (const k of list) { const key = normKw(k.keyword); if (!out.has(key)) out.set(key, k); }
+    if (i + 3 < batches.length) await new Promise((r) => setTimeout(r, 150));   // 레이트리밋 완충
   }
   return out;
 }

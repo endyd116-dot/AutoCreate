@@ -151,10 +151,14 @@ export async function refreshCountToday(tid: number): Promise<number> {
 
 /** refreshTopics — 후보 생성 → 검색량·트렌드 → 스코어 → upsert. 반환 added(새로 만든 행 수). */
 export async function refreshTopics(tid: number): Promise<{ added: number; skipped: number; volumesKnown: boolean; growthKnown: boolean }> {
+  const t0 = Date.now(); const lap: Record<string, number> = {};   // ★C4: 동기 함수 한도(라이브)에서 어디가 오래 걸리는지 로그로 남긴다
   const ctx = await tenantContext(tid);
+  lap.ctx = Date.now() - t0;
   const cands = await generateCandidates(tid, ctx);
+  lap.llm = Date.now() - t0 - lap.ctx;
   const seeds = cands.flatMap((c) => c.seedKeywords.length ? c.seedKeywords : [c.title.replace(/\s+/g, "")]);
   const vols = await lookupVolumes(seeds);
+  lap.volumes = Date.now() - t0 - lap.ctx - lap.llm;
   const volumesKnown = vols.size > 0;
   const bestKw: string[] = [];
   const enriched = cands.map((c) => {
@@ -163,6 +167,7 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
     return { c, bv };
   });
   const growth = await lookupGrowth(bestKw);
+  lap.growth = Date.now() - t0 - lap.ctx - lap.llm - lap.volumes;
   const growthKnown = growth.size > 0;
   const used = await q(sql`SELECT norm_key FROM topics WHERE tenant_id = ${tid} AND status IN ('used','picked') AND created_at > NOW() - interval '30 days'`);
   const usedKeys = new Set(used.map((r) => String(r.norm_key)));
@@ -188,6 +193,7 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
   }
   const [chk] = await q(sql`SELECT jsonb_typeof(factors) AS t FROM topics WHERE tenant_id = ${tid} ORDER BY id DESC LIMIT 1`);
   if (chk && chk.t !== "object") console.error("[topics] factors jsonb_typeof !== object", chk);
+  console.log(`[topics] refresh tid=${tid} ${Date.now() - t0}ms (ctx ${lap.ctx} · llm ${lap.llm} · 검색량 ${lap.volumes} · 트렌드 ${lap.growth} · 저장 ${Date.now() - t0 - lap.ctx - lap.llm - lap.volumes - lap.growth}) added=${added}`);
   if (!volumesKnown) console.warn(`[topics] tid=${tid} 검색량 미상(키워드툴 키 없음 또는 실패) — volume 키 생략`);
   return { added, skipped, volumesKnown, growthKnown };
 }
