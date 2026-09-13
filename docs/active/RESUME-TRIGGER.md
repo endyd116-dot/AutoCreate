@@ -14,18 +14,19 @@
 6. docs/rules/PITFALLS.md §0(AC-1~8) — 특히 AC-5(Date 바인딩)·AC-8(env 마스킹)
 7. docs/DESIGN.md 은 «해당 § 만» 필요할 때 연다(84KB · 전문 통독 금지).
 
-■ 지금 상황(2026-09-14 기준 · 자세한 건 HANDOFF)
-- Phase 0 라이브(https://autocreate-endyd.netlify.app) · P1R1 완료·머지 · **P1R2 진행 중**.
-- main 에 이미 들어간 것: A(P1R2 프론트) · C 의 P1R1 수리 4건 + 검증 하니스 2종 · 로그인/가입 화면 개편.
-- 진행 중 세션: B(`feature/p1r2-back` · 크론 B5·B6·알림함) · B2(`feature/p1r2-back2` · 러너 드라이런 실증). A 는 끝났고 C 는 P1R2 검증이 남았다.
+■ 지금 상황(2026-09-14 갱신 · 자세한 건 HANDOFF §2)
+- Phase 0 라이브 · P1R1 완료·머지 · **P1R2 대부분 머지됨**(A 프론트 · B2 러너/커넥터 · C 의 P1R1 수리 5건 + 하니스).
+- **남은 것**: B(`feature/p1r2-back` · B5 발행 디스패처·B6 계정 전이/API·알림함·topics 배경화) · A 추가분(소재 뽑기 폴링 화면) · B2 셀렉터 실증(계정 해제됨) · C 의 P1R2 검증.
 - 🔴 **미배포**. 사장님 지시 = «배포는 라운드 끝나면 묶어서». P1R1+P1R2 가 한 배치로 나간다.
+- 계약 최신 = P1R2 v2.9(소재 뽑기 배경화 포함).
 
 ■ 이어서 할 일(순서)
-1. `ListAgents` 로 살아 있는 세션 이름 확인(이름은 재시작하면 바뀐다) → B·B2 진행 보고 받기(`SendMessage`).
-2. B·B2 완료 → `git merge --no-ff` (B → B2 순 · 겹침은 계약 §9 담당 분리 참고) → `npx tsc --noEmit` → `node scripts/build-pages.mjs` → 로컬 스모크.
-3. C 에게 P1R2 검증 2단계 발부(하니스 `scripts/verify-p1r1.mjs`·`shot-p1r1.mjs` 재사용 · 결함은 C 가 직접 수리 — PARALLEL §2.6).
-4. **배치 push = 배포** → 라이브 스모크(가입→홈→편성→발행 경로 · admin 로그인) → PROJECT_STATE·HANDOFF 갱신 → 사장님께 라운드 마감 보고.
-5. 다음 라운드(P1R3/Phase 2) 설계는 C 검증 중에 병행(파이프라이닝).
+1. `ListAgents` 로 살아 있는 세션 이름 확인(이름은 재시작하면 바뀐다) → B·B2·A 진행 보고 받기(`SendMessage`).
+2. **B 완료 → 머지** · **A 추가분 머지** · **B2 셀렉터 실증 결과 수령**(티스토리 2단계가 다시 뜨면 사장님께 «지금 카카오톡 승인 눌러 주세요» 전달 · 네이버는 실패 시 재시도 금지 = 계정 잠김).
+3. 머지마다 `npx tsc --noEmit` → `node scripts/build-pages.mjs` → 로컬 스모크.
+4. **C 에게 P1R2 검증(2단계) 발부** — 하니스 `scripts/verify-p1r1.mjs`·`shot-p1r1.mjs` 를 R2 계약(v2.9)에 맞춰 확장 · 결함은 C 가 직접 수리(PARALLEL §2.6).
+5. **배치 push = 배포** → 라이브 스모크(가입→홈→편성→발행 · admin 로그인 · 러너 1회) → PROJECT_STATE·HANDOFF 갱신 → 사장님께 라운드 마감 보고.
+6. 다음 라운드(P1R3/Phase 2 — 수익 회수·정지 승계 실증·운영센터 나머지) 설계는 C 검증 중에 병행(파이프라이닝).
 
 ■ 사장님 항구 지시(어기지 마라)
 - **전본 개발**: 설계 대비 누락·축소·요약 금지. 트리거마다 «설계 대비 범위 지도».
