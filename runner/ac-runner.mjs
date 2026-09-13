@@ -75,8 +75,15 @@ async function main() {
   if (OPT.canary) { await canary({ chromium, token, headed: OPT.headed }); return; }
 
   if (OPT.once) {
-    const n = await tick({ chromium, token, kinds: ALL_KINDS, max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
-    if (!n) log("지금은 할 일이 없어요.");
+    const { count, results } = await tick({ chromium, token, kinds: ALL_KINDS, max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
+    if (!count) { log("지금은 할 일이 없어요."); return; }
+    /* 🔴 실패했으면 **종료코드로 말한다**. 검증 하니스가 잡 행만 보고 판정하면 드라이런 실패에 ✓ 가 찍힌다
+       (드라이런은 잡을 큐로 되돌리므로 행만으로는 성공·실패가 같아 보인다 · 2026-09-14 실측). */
+    const failed = results.filter((r) => !r?.ok);
+    if (failed.length) {
+      for (const f of failed) log(`  실패 사유: ${f.errorKind} — ${f.detail ?? ""}`);
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -94,7 +101,7 @@ async function main() {
       if (hb?.ok) sleepSec = Number(hb.sleepSec ?? 60) || 60;
       else log(`하트비트 실패: ${String(hb?.error ?? "").slice(0, 80)}`);
 
-      const done = await tick({ chromium, token, kinds: ALL_KINDS, max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
+      const { count: done } = await tick({ chromium, token, kinds: ALL_KINDS, max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
       if (done) { idleRounds = 0; sleepSec = 5; }
       else if (++idleRounds === 1) log("할 일이 없어요 — 기다립니다(창을 닫지 마세요).");
     } catch (e) {

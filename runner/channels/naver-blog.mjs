@@ -72,6 +72,15 @@ async function loginWithIdPw(page, id, pw) {
     .catch(async () => { await page.getByRole("button", { name: "로그인", exact: true }).first().click({ timeout: 8000 }); });
   await settle(page, 4000);
 
+  /* 사람이 옆에 있을 때만(헤드풀 검증·재로그인) 캡차·기기확인을 **기다려 준다**. 기본값 0 = 기다리지 않는다.
+     🔴 운영(헤드리스)에서는 절대 기다리면 안 된다 — 아무도 없는 창 앞에서 잡을 붙들고 큐를 굶긴다. */
+  const waitMs = Number(process.env.AC_2FA_WAIT_MS ?? 0) || 0;
+  if (waitMs > 0 && /captcha|deviceConfirm|idSafetyRelease|need2/i.test(page.url())) {
+    console.log(`  · 네이버가 추가 확인을 요구했어요 — 창에서 직접 풀어 주세요(최대 ${Math.round(waitMs / 1000)}초 대기).`);
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline && /captcha|deviceConfirm|idSafetyRelease|need2|nidlogin/i.test(page.url())) await settle(page, 2000);
+  }
+
   const url = page.url();
   if (/captcha/i.test(url) || (await page.locator("#captcha, .captcha_wrap").count().catch(() => 0)) > 0) {
     throw BLOCK("captcha", "네이버가 자동입력 방지(캡차)를 띄웠어요.");
@@ -200,20 +209,69 @@ async function clickEditable(ctx, selector, retries = 2) {
 
 /* ───────────────────── 본문 연주 ───────────────────── */
 
-/** 도구모음 버튼(인용구·구분선 등). 못 찾으면 false — 호출자가 «장식 없이» 내려앉힌다(글은 나간다). */
-async function clickToolbarItem(ctx, name) {
-  const sels = [
-    `button[data-name="${name}"]`,
-    `.se-toolbar-item-${name} button`,
-    `button[data-log*="${name}"]`,
-  ];
-  for (const sel of sels) {
+/**
+ * 도구모음 셀렉터 — 🔴 AM 원본 `naver-blog-runner.mjs TOOLBAR_SELECTORS` **실측 정본** 그대로(이식 2026-09-14).
+ *   ⚠️ 내가 처음에 추측으로 쓴 `data-name="horizontalLine"`(캐멀)은 **틀렸다** — 실제는 `horizontal-line`(하이픈)이고,
+ *      그래서 구분선이 전부 «———» 텍스트 폴백으로 나갔다(2026-09-14 자사 계정 실증 스냅샷에서 확인).
+ *      추측 셀렉터는 조용히 폴백으로 흘러 «되는 것처럼» 보인다 — AM 이 실측으로 박아 둔 값을 그대로 쓴다.
+ */
+const TOOLBAR_SELECTORS = {
+  quotation: [
+    "button.se-insert-quotation-default-toolbar-button",       // 실측 정본(label="인용구 추가")
+    'button[data-name="quotation"]',
+    'button[aria-label="인용구 추가"]',
+  ],
+  horizontalLine: [
+    "button.se-insert-horizontal-line-default-toolbar-button", // 실측 정본(label="구분선 추가")
+    'button[data-name="horizontal-line"]',
+    'button[aria-label="구분선 추가"]',
+  ],
+};
+
+/** 소제목·본문 글자 크기(AM 정본값). 🔴 켠 것은 반드시 끈다 — 아래 setFontSize 주석. */
+const HEADING_FONT_SIZE = String(process.env.RUNNER_HEADING_SIZE || "19");
+const BODY_FONT_SIZE = String(process.env.RUNNER_BODY_SIZE || "15");
+
+/** 도구모음 버튼. 못 찾으면 false — 호출자가 «장식 없이» 내려앉힌다(글은 나간다). */
+async function clickToolbarItem(ctx, kind) {
+  for (const sel of TOOLBAR_SELECTORS[kind] ?? []) {
     try {
       const b = ctx.locator(sel).first();
       if (await b.isVisible({ timeout: 1200 }).catch(() => false)) { await b.click({ timeout: 4000 }); return true; }
-    } catch { /* 다음 */ }
+    } catch { /* 다음 후보 */ }
   }
   return false;
+}
+
+/** 도구모음에서 글자 크기 한 번 고르기(선택 상태든 캐럿 상태든 같은 동작). AM 원본 setFontSize 이식. */
+async function setFontSize(page, ctx, size) {
+  try {
+    const btn = ctx.locator("button.se-font-size-code-toolbar-button").first();
+    if (!(await btn.isVisible({ timeout: 1200 }).catch(() => false))) return false;
+    await btn.click({ timeout: 2500 });
+    await settle(page, 400);
+    for (const sel of [`button:has-text("${size}")`, `li:has-text("${size}")`, `[data-value="${size}"]`]) {
+      const o = ctx.locator(sel).last();
+      if (await o.isVisible({ timeout: 600 }).catch(() => false)) { await o.click({ timeout: 2000 }); return true; }
+    }
+    await page.keyboard.press("Escape").catch(() => {});
+  } catch { /* 크기 실패 — 굵게로 남는다(글은 나간다) */ }
+  return false;
+}
+
+/**
+ * 🔴 방금 친 길이만큼 되짚어 잡고 소제목 크기를 준 뒤 **본문 크기로 되돌린다**(AM `sizeLastTyped` 이식).
+ *   AM 이 실물에서 얻은 진범: **스마트에디터에서 글자 크기는 «커서»에 남는다.** 굵게는 토글이라 꺼지지만
+ *   크기는 올린 뒤 되돌리지 않으면 **그 소제목 다음에 치는 모든 글자가 19로 이어진다**
+ *   (사장님 «소제목만 크게 하랬더니 본문도 다 커져»의 정체 · 실물 #722·#747).
+ */
+async function sizeLastTyped(page, ctx, len) {
+  if (!len || len > 90) return false;
+  for (let i = 0; i < len; i++) await page.keyboard.press("Shift+ArrowLeft").catch(() => {});
+  const done = await setFontSize(page, ctx, HEADING_FONT_SIZE);
+  await page.keyboard.press("ArrowRight").catch(() => {});   // 선택 해제는 키보드로
+  if (done) await setFontSize(page, ctx, BODY_FONT_SIZE).catch(() => {});   // 켠 것은 끈다
+  return done;
 }
 
 async function attachImage(page, ctx, file, missed) {
@@ -251,29 +309,178 @@ async function attachImage(page, ctx, file, missed) {
  *      끝에 **새 글 칸**을 만든다. 새 칸은 비어 있어 한복판에 끼어들 수가 없다.
  *   ⚠️ «본문 추가»는 hover 영역이라 isVisible 이 false 로 나올 때가 있다 — 안 보이면 끝으로 스크롤 + force.
  */
-async function moveCaretToEnd(page, ctx) {
+async function moveCaretToEnd(page, ctx, missed) {
   try {
-    const lastIsText = await ctx.evaluate(() => {
+    const lastIsText = async () => await ctx.evaluate(() => {
       const comps = document.querySelectorAll(".se-component");
       const last = comps[comps.length - 1];
       return !!(last && /(^|\s)se-text(\s|$)/.test((last.className || "").toString()));
     }).catch(() => false);
-    if (!lastIsText) {
-      const add = ctx.locator(".se-canvas-bottom-button").first();
-      if (await add.isVisible({ timeout: 1200 }).catch(() => false)) await add.click({ timeout: 4000 }).catch(() => {});
-      else {
-        await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-        await add.click({ timeout: 3000, force: true }).catch(() => {});
+
+    if (!(await lastIsText())) {
+      /* 🔴 «본문 추가» 실측(2026-09-14 `runner/probe-editor.mjs` 덤프):
+           · `button.se-canvas-bottom-button __edge-area` — **존재하지만 `vis:false`**(hover 영역이라 Playwright 가 숨김으로 본다)
+           · `div.se-canvas-bottom` — 그 **보이는 부모**(텍스트 «본문 추가»)
+         종전엔 버튼이 안 보이면 force 클릭만 했는데 그게 자주 빗나가 «본문 추가» 실패가 글당 6건 났다(실측).
+         ⇒ 보이는 부모를 먼저 누르고, 그다음 버튼 force, 마지막으로 DOM 직접 클릭까지 세 겹으로 간다. */
+      const btn = ctx.locator(".se-canvas-bottom-button").first();
+      const box = ctx.locator(".se-canvas-bottom").first();
+      await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+      if (await btn.isVisible({ timeout: 800 }).catch(() => false)) await btn.click({ timeout: 4000 }).catch(() => {});
+      else if (await box.isVisible({ timeout: 800 }).catch(() => false)) await box.click({ timeout: 4000 }).catch(() => {});
+      else await btn.click({ timeout: 3000, force: true }).catch(() => {});
+      await settle(page, 500);
+      if (!(await lastIsText())) {
+        // 마지막 안전벨트 — 클릭 판정에 걸리면 DOM 에서 직접 이벤트를 쏜다(AM clickEditable 관례).
+        await ctx.evaluate(() => {
+          const el = document.querySelector(".se-canvas-bottom-button") || document.querySelector(".se-canvas-bottom");
+          if (!el) return false;
+          el.scrollIntoView({ block: "end" });
+          const r = el.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + r.height / 2;
+          for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+            el.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: x, clientY: y }));
+          }
+          return true;
+        }).catch(() => false);
       }
       await settle(page, 600);
+      /* 🔴 «본문 추가»가 실패했으면 **여기서 멈춘다**. 아래 폴백(마지막 글 문단 클릭)은 컴포넌트 **앞**의
+         문단을 짚어 캐럿을 **문서 한복판**에 꽂는다 — 그러면 다음 문장이 앞 문단 사이에 끼어들어
+         글 순서가 뒤바뀐다(2026-09-14 실증: 체크리스트 두 줄이 뒤집혀 나왔다 · AM #742 와 같은 자리).
+         못 만들었으면 조용히 중간을 짚느니 아무것도 안 하는 편이 낫다(다음 op 가 이어 쓴다). */
+      if (!(await lastIsText())) {
+        if (missed) missed.caretEnd++;
+        return false;
+      }
     }
-    // 마지막 글 문단을 실제로 클릭하고 End 로 줄 끝에 붙인다(에디터는 DOM Range 를 모른다 — 클릭·키보드만 안다).
-    const para = ctx.locator(".se-component.se-text").last().locator(".se-text-paragraph").last();
-    if (await para.isVisible({ timeout: 1500 }).catch(() => false)) {
+    /* 마지막 글 문단을 실제로 클릭하고 End 로 줄 끝에 붙인다(에디터는 DOM Range 를 모른다 — 클릭·키보드만 안다).
+       🔴 그리고 **써 보고 확인한다**. «클릭했으니 됐겠지»는 거짓 양성이다 — 컴포넌트가 비동기로 자리를 잡는 동안
+       클릭이 옛 좌표를 짚으면 캐럿이 문서 한복판에 남고, 다음 문장이 앞 문단 사이에 끼어들어 **글 순서가 뒤바뀐다**.
+       2026-09-14 실증에서 같은 원고가 실행마다 체크리스트 순서를 바꿔 내놨다(비결정적 = 경쟁).
+       AM 이 인용 탈출에서 얻은 결론과 같다: **관측이 아니라 실행만이 믿을 수 있는 판정이다.** */
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const para = ctx.locator(".se-component.se-text").last().locator(".se-text-paragraph").last();
+      if (!(await para.isVisible({ timeout: 1500 }).catch(() => false))) break;
       await para.click({ timeout: 4000 }).catch(() => {});
       await page.keyboard.press("End").catch(() => {});
+
+      /* 표식은 **보이는 글자**로 쓴다. 제로폭 문자는 키보드 이벤트로 아예 안 들어가는 경우가 있어
+         «못 찾음»이 되고, 그걸 실패로 세면 **멀쩡한 캐럿을 실패로 보고한다**(내 첫 구현이 그랬다 —
+         6건 실패가 전부 이 거짓 양성이었을 수 있다). 찾을 수 있는 글자를 쓰고 바로 지운다. */
+      const MARK = "⁣x";   // invisible separator + x — 눈에 거의 안 띄고 textContent 로는 찾힌다
+      await page.keyboard.type(MARK).catch(() => {});
+      const at = await ctx.evaluate((mark) => {
+        const comps = [...document.querySelectorAll(".se-component")];
+        return { idx: comps.findIndex((c) => (c.textContent || "").includes(mark)), total: comps.length };
+      }, MARK).catch(() => ({ idx: -1, total: 0 }));
+      for (let i = 0; i < MARK.length; i++) await page.keyboard.press("Backspace").catch(() => {});
+
+      if (at.idx === at.total - 1 && at.idx >= 0) return true;    // 진짜로 문서 끝이다
+      if (at.idx < 0) return true;                                /* 표식을 못 넣었다 = **판정 불가**.
+        실패로 세지 않는다 — «모르겠다»를 «틀렸다»로 적으면 보고서가 거짓말을 한다(AC-9 의 반대편 얼굴).
+        캐럿 위치는 앞의 클릭+End 로 최선을 다한 상태다. */
+      await settle(page, 500);                                    // 엉뚱한 컴포넌트에 들어갔다 — 한 박자 쉬고 다시
     }
   } catch { /* 못 잡아도 글은 계속 — 다음 op 가 이어 쓴다 */ }
+  if (missed) missed.caretEnd++;
+  return false;
+}
+
+/**
+ * 🔴 인용 블록 탈출 — AM 이 **세 번 고치고 세 번 재발한** 자리다(원본 주석 그대로 이식 2026-09-14).
+ *   실물 사고: #742 본문 1,606자 · #747 1,760자 · #748 1,970자가 **통째로 인용 안에 갇혔다**(매번 마지막 인용).
+ *   AM 이 틀렸던 판정법들: ①`document.getSelection()` ②«마지막 컴포넌트가 인용이 아니면 나온 것»
+ *   ③Enter 횟수로 세기 ④«moveCaretToEnd 한 줄이면 된다» — **전부 거짓 양성**이었다.
+ *   ⇒ 두 겹 + «써 보고 확인»:
+ *     ① 마지막 컴포넌트가 인용이 **아닐 때까지** Enter(최대 4회 · 횟수가 아니라 «나왔는지»로 센다)
+ *     ② moveCaretToEnd 로 끝을 잡는다(하나가 실패해도 다른 하나가 받는다)
+ *     ③ 🔴 **한 글자 쳐 보고** 그게 인용 안에 들어가는지 본다 — 관측이 아니라 실행이 유일하게 믿을 수 있는 판정이다.
+ *        (제로폭 문자라 자국 0 · 바로 Backspace)
+ *     ④ 인용의 기본 글자 크기는 **19**라 빠져나와도 커서에 남는다 → 본문 크기로 되돌린다(실물 #747).
+ */
+async function escapeQuote(page, ctx, missed) {
+  const lastIsQuote = async () => await ctx.evaluate(() => {
+    const c = document.querySelectorAll(".se-component");
+    return /se-quotation/.test((c[c.length - 1]?.className || "").toString());
+  }).catch(() => false);
+
+  for (let i = 0; i < 4 && (await lastIsQuote()); i++) await page.keyboard.press("Enter").catch(() => {});
+  await moveCaretToEnd(page, ctx, missed);
+
+  // ③ 써 보고 확인 — 이게 유일하게 믿을 수 있는 판정이다.
+  await page.keyboard.type("​").catch(() => {});
+  const stuck = await ctx.evaluate(() => {
+    const c = document.querySelectorAll(".se-component");
+    return /se-quotation/.test((c[c.length - 1]?.className || "").toString());
+  }).catch(() => false);
+  await page.keyboard.press("Backspace").catch(() => {});
+
+  if (stuck) {
+    for (let i = 0; i < 3 && (await lastIsQuote()); i++) await page.keyboard.press("Enter").catch(() => {});
+    await moveCaretToEnd(page, ctx, missed);
+    if (await lastIsQuote()) {
+      missed.quoteEscape++;   // 조용히 넘기지 않는다 — 뒤 본문이 인용에 갇힌다
+      console.log("  · ⚠️ 인용에서 빠져나오지 못했습니다 — 뒤 본문이 인용에 갇힐 수 있어요.");
+    }
+  }
+  // ④ 인용 기본 크기(19)가 커서에 남는다 — 본문 크기로 되돌린다.
+  await setFontSize(page, ctx, BODY_FONT_SIZE).catch(() => {});
+}
+
+/**
+ * 🔴 발행 직전 서식 스윕(AM `sweepFormatting` 의 AC 판 · 이식 2026-09-14).
+ *   계획(ops)이 약속한 모양과 **실물 DOM** 을 대조한다. AM 교훈대로 **자르거나 다시 쓰지 않는다** —
+ *   ①소제목 크기만 되살리고(그 자리만) ②나머지 어긋남은 **숫자로 보고**한다.
+ *   왜 «고치지 않고 보고»가 기본인가: AM 이 이 층에서 사고를 냈다(좋은 코드 두 개가 연쇄로 50자 H1 을 25자로 줄였다).
+ *   검증 안 된 자동 수리는 멀쩡한 글을 건드린다 — 우리는 **본 것을 말하는 것**부터 한다.
+ */
+async function sweepFormatting(page, ctx, plan, missed) {
+  const want = plan.ops.filter((o) => o.op === "heading").map((o) => String(o.text).trim());
+  if (!want.length) return { checked: 0, headingWrong: 0, repaired: 0 };
+
+  const rows = await ctx.evaluate(() => {
+    const out = [];
+    document.querySelectorAll(".se-component.se-text .se-text-paragraph").forEach((p) => {
+      const span = p.querySelector("span") || p;
+      out.push({
+        text: (p.textContent || "").replace(/\s+/g, " ").trim(),
+        size: parseInt(String(getComputedStyle(span).fontSize || "0"), 10) || 0,
+        bold: ["700", "bold", "600"].includes(String(getComputedStyle(span).fontWeight)),
+      });
+    });
+    return out;
+  }).catch(() => []);
+  if (!rows.length) return { checked: 0, headingWrong: 0, repaired: 0 };
+
+  const headSize = Number(HEADING_FONT_SIZE) || 19;
+  const bodySize = Number(BODY_FONT_SIZE) || 15;
+  let headingWrong = 0, repaired = 0, bodyTooBig = 0;
+
+  for (const row of rows) {
+    const isHeading = want.some((h) => h && row.text === h);
+    if (isHeading && row.size < headSize) {
+      headingWrong++;
+      /* 그 소제목만 다시 잡아 크기를 준다 — 문단을 끝에서부터 되짚는 게 아니라 **그 문단을 직접 클릭**하고
+         Home→Shift+End 로 그 줄만 잡는다(다른 줄에 번지지 않게). 실패해도 글은 그대로 나간다. */
+      try {
+        const para = ctx.locator(".se-component.se-text .se-text-paragraph", { hasText: row.text }).first();
+        if (await para.isVisible({ timeout: 1200 }).catch(() => false)) {
+          await para.click({ timeout: 3000 });
+          await page.keyboard.press("Home").catch(() => {});
+          await page.keyboard.press("Shift+End").catch(() => {});
+          if (await setFontSize(page, ctx, HEADING_FONT_SIZE)) repaired++;
+          await page.keyboard.press("ArrowRight").catch(() => {});
+          await setFontSize(page, ctx, BODY_FONT_SIZE).catch(() => {});   // 켠 것은 끈다
+        }
+      } catch { /* 못 고쳐도 보고에는 남는다 */ }
+    }
+    // 🔴 본문이 소제목 크기로 번진 자리(AM 실물 #747 — 지면의 19px 가 54곳이었다)
+    if (!isHeading && row.text && row.size > bodySize) bodyTooBig++;
+  }
+
+  if (bodyTooBig) missed.bodyTooBig = (missed.bodyTooBig ?? 0) + bodyTooBig;
+  return { checked: rows.length, headingWrong, repaired };
 }
 
 async function playOps(page, ctx, plan, files, shotKey, missed) {
@@ -289,12 +496,16 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
       case "para": await type(op.text); await settle(page, 250, 600); break;
       case "note": break;   // 사람이 읽는 메모 — 본문에 넣지 않는다(보고에만 실린다)
       case "heading": {
-        // 소제목: 에디터의 제목 스타일이 있으면 쓰고, 없으면 굵게로 내려앉는다(글은 나간다).
+        /* 🔴 소제목 = «굵게 + 글자 크기»다(AM 정본). 스마트에디터 ONE 에는 h2 버튼이 없다 —
+           내가 추측으로 쓴 `data-name="header2"` 는 존재하지 않아 **소제목이 본문과 똑같이 나갔다**
+           (2026-09-14 실증 스냅샷에서 «결론부터»가 평문이었다). 크기는 **반드시 되돌린다**(sizeLastTyped). */
         if (wrote) await page.keyboard.press("Enter").catch(() => {});
-        const styled = await clickToolbarItem(ctx, op.level === 3 ? "header3" : "header2");
-        if (!styled) { missed.heading++; await page.keyboard.press("Control+b").catch(() => {}); }
-        await page.keyboard.insertText(String(op.text));
-        if (!styled) await page.keyboard.press("Control+b").catch(() => {});
+        const text = String(op.text);
+        await page.keyboard.press("Control+b").catch(() => {});
+        await page.keyboard.type(text, { delay: 6 }).catch(async () => { await page.keyboard.insertText(text); });
+        await page.keyboard.press("Control+b").catch(() => {});
+        const sized = await sizeLastTyped(page, ctx, text.length);
+        if (!sized) missed.heading++;     // 굵게로는 남는다 — 조용히 넘기지 않고 센다
         await page.keyboard.press("Enter").catch(() => {});
         wrote = true;
         await settle(page, 400, 900);
@@ -306,22 +517,30 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
         if (!opened) {
           missed.quote++;
           await page.keyboard.insertText(`“${op.text}”`);   // 인용 컴포넌트를 못 열면 인용부호로라도 세운다
+          await page.keyboard.press("Enter").catch(() => {});
         } else {
-          await page.keyboard.insertText(String(op.text));
+          await page.keyboard.type(String(op.text), { delay: 6 }).catch(async () => { await page.keyboard.insertText(String(op.text)); });
+          await settle(page, 500, 1200);
+          await escapeQuote(page, ctx, missed);
         }
-        await page.keyboard.press("Enter").catch(() => {});
         wrote = true;
         await shot(page, shotKey, op.role === "disclosure" ? "02-고지" : "인용구");
         await settle(page, 900);
-        await moveCaretToEnd(page, ctx);   // 🔴 인용구는 컴포넌트 — 뒤에 쓸 자리를 만든다(AM #738)
         break;
       }
       case "divider": {
         if (wrote) await page.keyboard.press("Enter").catch(() => {});
-        if (!(await clickToolbarItem(ctx, "horizontalLine"))) { missed.divider++; await page.keyboard.insertText("———"); }
+        if (await clickToolbarItem(ctx, "horizontalLine")) {
+          // AM 관례 — 구분선 뒤는 End+Enter 로 새 줄을 연다(컴포넌트 뒤에 캐럿이 붙어 있지 않게).
+          await page.keyboard.press("End").catch(() => {});
+          await page.keyboard.press("Enter").catch(() => {});
+        } else {
+          missed.divider++;
+          await page.keyboard.press("Enter").catch(() => {});   // 폴백은 빈 줄로 숨을 준다(문단이 붙는 것보다 낫다)
+        }
         wrote = true;
         await settle(page, 800);
-        await moveCaretToEnd(page, ctx);   // 🔴 구분선도 컴포넌트
+        await moveCaretToEnd(page, ctx, missed);   // 🔴 구분선도 컴포넌트
         break;
       }
       case "list": await type(`• ${op.text}`); await settle(page, 200, 500); break;
@@ -346,7 +565,7 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
         }
         if (!grew) missed.imageSettle++;
         await settle(page, 800);
-        await moveCaretToEnd(page, ctx);   // 🔴 사진이 완전히 앉은 뒤 끝으로(AM #737·#742)
+        await moveCaretToEnd(page, ctx, missed);   // 🔴 사진이 완전히 앉은 뒤 끝으로(AM #737·#742)
         if (op.caption) { await page.keyboard.insertText(String(op.caption)); }
         wrote = true;
         await settle(page, 1000);
@@ -364,7 +583,7 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
           if (now !== last) { last = now; stable = 0; continue; }
           if (++stable >= 4) break;
         }
-        await moveCaretToEnd(page, ctx);
+        await moveCaretToEnd(page, ctx, missed);
         if (wrote) await page.keyboard.press("Enter").catch(() => {});
         await page.keyboard.insertText(String(op.text));
         wrote = true;
@@ -374,7 +593,7 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
       default: if (op.text) await type(op.text);
     }
   }
-  await shot(page, shotKey, "03-본문완성");
+  await shot(page, shotKey, "03-본문완성", true);
   return wrote;
 }
 
@@ -523,7 +742,7 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
   if (!blogId) throw BLOCK("login_fail", "블로그 아이디(핸들)가 없어요. 계정을 다시 연결해 주세요.");
 
   const page = ctx.pages()[0] ?? await ctx.newPage();
-  const missed = { quote: 0, divider: 0, heading: 0, image: 0, imageDownload: 0, imageSettle: 0 };
+  const missed = { quote: 0, divider: 0, heading: 0, quoteEscape: 0, caretEnd: 0, image: 0, imageDownload: 0, imageSettle: 0 };
   /* 🔴 실패 스냅샷은 **모든 단계**를 덮는다. 종전에는 본문 단계부터만 감쌌는데, 실제로 가장 흔한 실패는
      그 앞(로그인·에디터 진입)에서 난다 — 2026-09-14 로컬 왕복에서 FAIL.png 가 안 남아 그 사실이 드러났다.
      «무엇에 막혔나»는 화면을 봐야 안다(AM 눈검사 규율). */
@@ -552,11 +771,19 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
     const wrote = await playOps(page, ed, plan, files, shotKey, missed);
     if (!wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");
 
+    /* 🔴 발행 직전 서식 스윕 — 계획과 실물을 대조한다(실패해도 발행은 계속). */
+    const sweep = await sweepFormatting(page, ed, plan, missed).catch(() => ({ checked: 0, headingWrong: 0, repaired: 0 }));
+    await shot(page, shotKey, "04-스윕후", true);
+
     // ⑤ 발행 또는 임시저장
     const notes = [];
     if (missed.quote) notes.push(`인용구 ${missed.quote}건 폴백`);
     if (missed.divider) notes.push(`구분선 ${missed.divider}건 폴백`);
-    if (missed.heading) notes.push(`소제목 ${missed.heading}건 굵게 폴백`);
+    if (missed.heading) notes.push(`소제목 ${missed.heading}건 크기 미적용(굵게만)`);
+    if (missed.quoteEscape) notes.push(`🔴 인용 탈출 실패 ${missed.quoteEscape}건 — 뒤 본문이 인용에 갇혔을 수 있어요`);
+    if (missed.caretEnd) notes.push(`🔴 «본문 추가» 실패 ${missed.caretEnd}건 — 컴포넌트 뒤 글 순서가 어긋났을 수 있어요`);
+    if (missed.bodyTooBig) notes.push(`🔴 본문 ${missed.bodyTooBig}줄이 소제목 크기로 번졌어요`);
+    if (sweep.checked) notes.push(`서식 스윕: 문단 ${sweep.checked}개 · 소제목 크기 어긋남 ${sweep.headingWrong}건(되살림 ${sweep.repaired}건)`);
     if (missed.image) notes.push(`사진 버튼 ${missed.image}건 미발견`);
     if (missed.imageDownload) notes.push(`사진 ${missed.imageDownload}장 내려받기 실패`);
     if (missed.imageSettle) notes.push(`사진 ${missed.imageSettle}건 자리 확인 실패`);
