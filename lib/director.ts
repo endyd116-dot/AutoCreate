@@ -240,7 +240,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
 
 /**
  * 배경 생성 호출 실패 처리 — piece 를 failed 로 내리고 코인 환급·알림·슬롯 표시(content-gen 실패 경로와 같은 처치).
- *   ★C4 fix(2026-09-14 · PITFALLS AC-6): 호출이 실패해도 piece 가 generating 에 남으면 «코인은 빠졌는데 화면은 영원히 만드는 중»이 된다 —
+ *   ★C4 fix(2026-09-14 · PITFALLS AC-13): 호출이 실패해도 piece 가 generating 에 남으면 «코인은 빠졌는데 화면은 영원히 만드는 중»이 된다 —
  *   홈 «해야 할 일»은 in_review 만 세므로 사용자에게 아무 신호도 가지 않는다(조용한 0건 금지).
  */
 async function failTrigger(tid: number, pieceId: number, reason: string): Promise<void> {
@@ -273,8 +273,11 @@ export async function triggerGenerate(pieceId: number, tid: number): Promise<boo
     await failTrigger(tid, pieceId, `서버 설정(${missing})이 없어 생성을 시작하지 못했어요.`);
     return false;
   }
+  // 응답을 기다리되 6초까지만(호출이 «닿았는지»만 보면 된다). 프로덕션의 background 함수는 202 를 즉시 준다.
+  //   ⚠️ `netlify dev` 는 -background 함수를 **동기로** 실행한다(PITFALLS AC-12) — 끝까지 기다리면 이 함수가 먼저 타임아웃한다.
+  //   따라서 시간 초과(Abort)는 «호출은 닿았다»로 본다 — 생성 결과의 실패는 배경 함수 자신이 failed+환급+알림으로 남긴다.
   try {
-    const r = await fetch(`${site}/api/generate-piece-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid }) });
+    const r = await fetch(`${site}/api/generate-piece-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid }), signal: AbortSignal.timeout(6_000) });
     if (r.status !== 202 && !r.ok) {
       console.error(`[director] 배경 함수 호출 ${r.status}`);
       await failTrigger(tid, pieceId, `생성을 시작하지 못했어요(서버 응답 ${r.status}).`);
@@ -282,7 +285,9 @@ export async function triggerGenerate(pieceId: number, tid: number): Promise<boo
     }
     return true;
   } catch (e) {
-    console.error("[director] 배경 함수 호출 실패", String((e as Error)?.message ?? e));
+    const err = e as Error;
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") { console.warn(`[director] 배경 함수 응답 대기 6s 초과 — 호출은 닿은 것으로 본다(piece ${pieceId})`); return true; }
+    console.error("[director] 배경 함수 호출 실패", String(err?.message ?? e));
     await failTrigger(tid, pieceId, "생성을 시작하지 못했어요(서버에 연결하지 못했어요).");
     return false;
   }
