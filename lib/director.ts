@@ -233,7 +233,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
     await rollback(String((e as Error)?.message ?? e));
     throw e;
   }
-  for (const c of created) await triggerGenerate(c.pieceId, tid);   // ★C4 fix: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답 — 대기 비용 없음)
+  await Promise.all(created.map((c) => triggerGenerate(c.pieceId, tid)));   // ★C4 fix: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답) · piece 여럿이면 동시에
   const bal = await balance(tid);
   return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance };
 }
@@ -249,10 +249,17 @@ async function failTrigger(tid: number, pieceId: number, reason: string): Promis
     if (!p) return;   // 이미 다른 경로가 처리함(멱등)
     const refunded = await refundPiece(tid, pieceId);
     const meta = (p.meta || {}) as Record<string, unknown>;
-    await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", failReason: reason, refunded })}, updated_at = NOW() WHERE id = ${pieceId} AND tenant_id = ${tid}`);
-    if (p.slot_id) await q(sql`UPDATE slots SET status = 'failed', note = ${reason}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(p.slot_id)}`);
-    await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
-      VALUES (${tid}, ${"piece_failed"}, ${"글을 만들지 못했어요"}, ${`«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 시작하지 못했어요. 코인 ${refunded}개는 돌려드렸어요.`}, ${"/app/pieces.html?status=failed"})`);
+    const body = `«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 시작하지 못했어요. 코인 ${refunded}개는 돌려드렸어요.`;
+    // piece·slot·알림을 한 왕복으로(왕복이 늘면 동기 함수 한도 안에서 중간에 잘려 «failed 로만 바뀌고 알림은 없는» 반쪽 상태가 된다 — 실측 2026-09-14)
+    await q(sql`WITH up AS (
+        UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", failReason: reason, refunded })}, updated_at = NOW()
+        WHERE id = ${pieceId} AND tenant_id = ${tid} RETURNING slot_id
+      ), sl AS (
+        UPDATE slots SET status = 'failed', note = ${reason}, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = (SELECT slot_id FROM up) RETURNING id
+      )
+      INSERT INTO notifications (tenant_id, kind, title, body, link)
+      SELECT ${tid}, ${"piece_failed"}, ${"글을 만들지 못했어요"}, ${body}, ${"/app/pieces.html?status=failed"} FROM up`);
   } catch (e) { console.error("[director] failTrigger 실패", String((e as Error)?.message ?? e)); }
 }
 

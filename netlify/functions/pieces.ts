@@ -165,7 +165,17 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, status: "rejected" });
     }
     if (path.endsWith("/pieces-regenerate")) {
-      if (st === "generating") return json({ ok: true, status: "generating" });
+      if (st === "generating") {
+        // ★C4 fix: 배경 함수가 죽어 «만드는 중»에 갇힌 글은 다시 만들기가 거부되어 사용자가 빠져나갈 길이 없었다 —
+        //   20분 넘게 그대로면 코인 재차감 0(같은 ref)으로 한 번 더 건다. 다시 실패하면 triggerGenerate 가 failed+환급+알림으로 내린다.
+        const at = utcDate(p.updated_at);
+        if (at && Date.now() - at.getTime() > 20 * 60_000) {
+          const fired = await triggerGenerate(id, tid);
+          await writeAudit({ tenantId: tid, action: "piece_retrigger", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { fired, stuckMin: Math.round((Date.now() - at.getTime()) / 60_000) } });
+          return json({ ok: true, status: "generating" }, 202);
+        }
+        return json({ ok: true, status: "generating" });
+      }
       if (!["in_review", "draft", "failed", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 다시 만들 수 없어요." }, 400);
       const regen = n(m.regenCount);
       if (regen >= 1) return json({ ok: false, step: "regen_limit", error: "다시 만들기는 한 번만 할 수 있어요. 직접 수정하거나 새 소재로 만들어 주세요." }, 400);

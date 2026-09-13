@@ -288,7 +288,8 @@ async function main() {
   const rl = await call(jar, "/api/rules-list");
   checkShape("rules-list 모양", rl.json, S.rulesList); if (rl.json?.settings) checkShape("settings 모양(변수 8)", rl.json.settings, S.settings);
   const rs = await call(jar, "/api/rules-save", { body: { rules: [{ channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, active: true }] } });
-  rec("rules-save 주3회", rs.json?.ok === true && rs.json?.rules?.length === 1 && rs.json?.coinsPerWeek > 0, `${rs.status} ${rs.json?.step || ""} coinsPerWeek ${rs.json?.coinsPerWeek} slotsCreated ${rs.json?.slotsCreated}`, `rule id=${rs.json?.rules?.[0]?.id}`);
+  const activeRules = (rs.json?.rules || []).filter((r) => r.active);   // 비활성(지난 라운드) 규칙도 목록에 실린다 — 화면(A)도 active 만 그린다
+  rec("rules-save 주3회", rs.json?.ok === true && activeRules.length === 1 && rs.json?.coinsPerWeek > 0, `${rs.status} ${rs.json?.step || ""} coinsPerWeek ${rs.json?.coinsPerWeek} slotsCreated ${rs.json?.slotsCreated}`, `rule id=${rs.json?.rules?.[0]?.id}`);
   if (rs.json?.rules?.[0]) checkShape("Rule 모양", rs.json.rules[0], S.rule);
   rec("coinsPerWeek = 3×(1+6)", rs.json?.coinsPerWeek === 21, `${rs.json?.coinsPerWeek}(네이버 기본 이미지 6 가정)`);
   const rs2 = await call(jar, "/api/rules-save", { body: { rules: rs.json?.rules?.map(({ id, channel, kind, accountMode, every, count, active }) => ({ id, channel, kind, accountMode, every, count, active })) || [] } });
@@ -298,9 +299,11 @@ async function main() {
   const sl = await call(jar, "/api/slots-list", { query: { from, to } });
   const slots = sl.json?.slots || [];
   if (slots[0]) checkShape("Slot 모양", slots[0], S.slot);
-  const planned = slots.filter((s) => s.origin === "auto" && s.channel === "naver_blog");
+  const planned = slots.filter((s) => s.origin === "auto" && s.channel === "naver_blog" && s.status !== "skipped");   // 건너뛴 슬롯은 편성이 아니다
   rec("슬롯 7일치(주3회 → ≥3)", planned.length >= 3 && planned.length <= 4, `${from}~${to} auto ${planned.length}개 · 전체 ${slots.length}`, planned.map((s) => `${s.date}${s.publishAt ? "@" + s.publishAt : ""}`).join(","));
-  const dates = planned.map((s) => s.date); rec("슬롯 (rule,date) 중복 0", new Set(dates).size === dates.length, "");
+  const dates = planned.map((s) => s.date); rec("슬롯 날짜 중복 0(활성 규칙 1개 기준)", new Set(dates).size === dates.length, dates.join(","));
+  const stuckList = (all.json?.pieces || []).filter((x) => x.status === "generating" && Date.now() - new Date(x.createdAt).getTime() > 20 * 60 * 1000);
+  rec("생성중에 멈춘 글 0(20분 초과)", stuckList.length === 0, stuckList.map((x) => x.id + ":" + x.stage).join(",") || "없음");
   rec("수동 슬롯(origin manual) 존재", slots.some((s) => s.origin === "manual" && s.pieceId === piece.id), "");
   const quiet = planned[1]?.date;
   const st = await call(jar, "/api/rules-settings", { body: { produceLeadDays: 3, reviewPolicy: "silence_approves", topicLeadDays: 7, produceHour: "06:00", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: quiet ? [quiet] : [], horizonDays: 14 } });
