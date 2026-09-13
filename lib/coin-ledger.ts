@@ -122,15 +122,21 @@ export async function grant(tid: number, coins: number, reason: string, actorId:
   }
 }
 
-/** 환급 — 같은 piece 의 consume 합만큼 grant(ref `refund:piece:{id}` 멱등). 실패한 생성의 코인을 돌려준다. */
+/**
+ * 환급 — 그 piece 로 나간 consume 합(ref `piece:{id}` · `piece:{id}:img*` · 재생성 `piece:{id}:regen*`) − 이미 환급한 합 = 순액을 grant.
+ *   ref = `refund:piece:{id}:c{누적소비}` — 같은 누적 소비에 두 번 환급되지 않는다(멱등) · 재차감 뒤 다시 실패하면 누적이 달라져 새 환급이 된다. 원장 행은 지우지 않는다.
+ */
 export async function refundPiece(tid: number, pieceId: number): Promise<number> {
   try {
-    const r = await rows(db, sql`SELECT COALESCE(SUM(-delta),0) AS c FROM coin_ledger
-      WHERE tenant_id = ${tid} AND kind = 'consume' AND (ref = ${`piece:${pieceId}`} OR ref LIKE ${`piece:${pieceId}:img%`})`);
-    const c = Number(r[0]?.c || 0);
-    if (c <= 0) return 0;
-    const g = await grant(tid, c, `글을 만들지 못해 돌려드린 코인(piece ${pieceId})`, null, `refund:piece:${pieceId}`);
-    return g.granted;
+    const [c] = await rows(db, sql`SELECT COALESCE(SUM(-delta),0) AS c FROM coin_ledger
+      WHERE tenant_id = ${tid} AND kind = 'consume' AND (ref = ${`piece:${pieceId}`} OR ref LIKE ${`piece:${pieceId}:%`})`);
+    const [g] = await rows(db, sql`SELECT COALESCE(SUM(delta),0) AS g FROM coin_ledger
+      WHERE tenant_id = ${tid} AND kind = 'grant' AND ref LIKE ${`refund:piece:${pieceId}%`}`);
+    const consumed = Number(c?.c || 0), refunded = Number(g?.g || 0);
+    const net = consumed - refunded;
+    if (net <= 0) return 0;
+    const r = await grant(tid, net, `글을 만들지 못해 돌려드린 코인(piece ${pieceId})`, null, `refund:piece:${pieceId}:c${consumed}`);
+    return r.granted;
   } catch { return 0; }
 }
 
