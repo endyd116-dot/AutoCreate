@@ -13,6 +13,12 @@
 - ✅ **Phase 0 뼈대 코드**(2026-09-14): Neon `old-tree-90235056` · 스키마 v1(40표) · AM 코어 이식(response·sso-role·ai-models·kicc·billing-math·coin-table) · 인증(고객 9·운영자 4) · 종합 운영센터 API 8 · 앱 11화면 · 운영센터 6화면 · 시드(admin·플랜·채널·감성) · 로컬 스모크 통과
 - ⏳ **사장님 할 일**: 라이브에서 `admin` / `admin1234` 첫 로그인 → 비밀번호 변경. Q1~Q5·Q7 은 기본 가정으로 진행 중.
 
+## 2.5 진행 중 라운드 — P1R1 (2026-09-14 발부)
+- 계약서 `docs/active/2026-09-14-P1R1-contract.md`(§-1 설계 대비 범위 지도) · 트리거 A/B/C 3장 · 베이스 main `e6b3def`
+- 세션: A=`autocreate-a-a9`(feature/p1-front) · B=`autocreate-b-8a`(feature/p1-back) · C=`autocreate-c-41`(verify/p1) — 메인이 SendMessage 로 직접 소통
+- 머지 순서: B → (DDL 없음) → A → C 2단계 호출 → 배치 push
+- 🔴 전역 규칙 CLAUDE §8(전본 개발) 이 라운드부터 적용
+
 ## 3. 다음 할 일
 1. **Phase 0 마감(잔여)**: tbfa-mis 커밋 `ed374ee4`·`71d0d5c3`(sso-autocreate + 허브 카드 ⑥) **push 는 사장님 배포 타이밍** — MIS env(`AUTOCREATE_SSO_SECRET`·`AUTOCREATE_URL`)는 등록 완료(201). push 후 허브 카드 → AC 운영센터 SSO 라이브 확인.
 2. **Phase 1 글 MVP**(A/B/C 병렬 · 트리거 `docs/active/`): 소재(content-topics 이식+네이버 검색량) → 디렉터 → 글·이미지 생성(content-gen·writing-contracts·ai-tell-gate) → 검수 → 편성표(cadence_rules·slots 크론) → 네이버 블로그 러너 · 블로거 API · 계정 연결(N개) · 코인 원장 이식.
