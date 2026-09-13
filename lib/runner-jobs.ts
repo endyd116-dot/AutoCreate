@@ -5,7 +5,8 @@
  *            AM 은 content_pieces 를 직접 선점했지만 AC 는 `runner_jobs` 테이블이 있어 **잡 단위**로 다시 짰다.
  *
  *   🔴 이 파일이 유일하게 하는 위험한 일: **claim 응답에 계정 자격 평문을 싣는다**(DESIGN §7.1 평문 표면 2곳 중 하나).
- *      그 외 어떤 응답·로그·audit detail 에도 평문 0. claim 은 감사(`runner_creds_served`)를 남긴다.
+ *      그 외 어떤 응답·로그·audit detail 에도 평문 0. claim 은 자격이 실린 계정마다 감사 1행(`runner_creds_issued` · risk high)을 남기고,
+ *      **유효한 쿠키가 있으면 id/pw 는 싣지 않는다**(필요할 때만 열리는 표면).
  *
  *   🔴 상태를 쓰는 자리 분담(계약 §10 «두 곳에서 상태를 쓰지 않는다»):
  *      · 발행 **성공** → `lib/publish/finalize.ts finalizePublish` 만(posts·piece·slot·계정 카운터).
@@ -267,14 +268,20 @@ async function loadAccountForRunner(tid: number, accountId: number): Promise<Run
   if (a.proxy_url) out.proxyUrl = String(a.proxy_url);   // 러너용 원문(마스킹 안 함 — 이 응답 밖으로 나가면 안 된다)
   const creds = await q(sql`SELECT kind, enc, expires_at FROM account_creds
     WHERE account_id = ${accountId} AND purged_at IS NULL AND kind IN ('cookies','password') ORDER BY id DESC`);
+
+  // ① 유효한 쿠키가 있으면 그것만 준다.
   for (const c of creds) {
-    const kind = String(c.kind);
-    if (kind === "cookies" && !out.cookies) {
-      const exp = utcDate(c.expires_at);
-      if (exp && exp.getTime() < Date.now()) continue;   // 만료 쿠키는 주지 않는다(러너가 자동 로그인으로 간다)
-      const o = decryptObj<{ cookies?: unknown[] }>(String(c.enc ?? ""));
-      if (o && Array.isArray(o.cookies) && o.cookies.length) out.cookies = o.cookies;
-    } else if (kind === "password" && !out.login) {
+    if (String(c.kind) !== "cookies" || out.cookies) continue;
+    const exp = utcDate(c.expires_at);
+    if (exp && exp.getTime() < Date.now()) continue;     // 만료 쿠키는 주지 않는다(러너가 자동 로그인으로 간다)
+    const o = decryptObj<{ cookies?: unknown[] }>(String(c.enc ?? ""));
+    if (o && Array.isArray(o.cookies) && o.cookies.length) out.cookies = o.cookies;
+  }
+  /* ② 🔴 쿠키가 유효하면 id/pw 는 **싣지 않는다**(메인 조건 (나) 2026-09-14).
+        평문 표면은 «필요할 때만» 열린다 — 세션이 살아 있는데 비밀번호까지 내보낼 이유가 없다. */
+  if (!out.cookies) {
+    for (const c of creds) {
+      if (String(c.kind) !== "password" || out.login) continue;
       const o = decryptObj<{ loginId?: string; password?: string }>(String(c.enc ?? ""));
       if (o?.loginId && o?.password) out.login = { id: String(o.loginId), pw: String(o.password) };
     }
@@ -319,16 +326,24 @@ export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max =
     if (n(r.piece_id)) job.pieceId = n(r.piece_id);
     if (accountId) {
       job.account = await loadAccountForRunner(device.tenantId, accountId);
-      if (job.account) servedAccounts.push(accountId);
+      /* 🔴 자격 평문이 실제로 실린 건에 대해서만 **계정 1건당 1행** 감사(메인 조건 (가) 2026-09-14).
+            무엇이 나갔는지는 남기지 않는다 — 나갔다는 «사실»과 종류(cookies/login)만. */
+      if (job.account && (job.account.cookies || job.account.login)) {
+        servedAccounts.push(accountId);
+        await writeAudit({
+          tenantId: device.tenantId, action: "runner_creds_issued", actorType: "system", target: `account:${accountId}`,
+          detail: { deviceId: device.id, jobId: job.id, kind: job.kind, creds: job.account.cookies ? "cookies" : "login" },
+          riskLevel: "high",
+        });
+      }
     }
     jobs.push(job);
   }
   if (jobs.length) {
-    // 🔴 평문 자격이 나간 «사실»을 남긴다(무엇이 나갔는지는 남기지 않는다).
     await writeAudit({
-      tenantId: device.tenantId, action: "runner_creds_served", actorType: "system", target: `runner_device:${device.id}`,
+      tenantId: device.tenantId, action: "runner_jobs_claimed", actorType: "system", target: `runner_device:${device.id}`,
       detail: { jobIds: jobs.map((j) => j.id), accountIds: servedAccounts, kinds: jobs.map((j) => j.kind) },
-      riskLevel: "medium",
+      riskLevel: "low",
     });
   }
   return jobs;
