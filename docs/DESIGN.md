@@ -32,6 +32,7 @@ AM이 "회사의 마케팅 직원"이라면 AC는 "**개인의 수익 공장**"�
 | Q4 | 유튜브·틱톡 API 앱 심사를 **우리 앱 하나**로 받고 고객이 OAuth로 붙는 방식 동의 여부 | 동의 가정(고객이 각자 앱을 만드는 건 비현실적). |
 | Q5 | 계정별 **프록시(IP 분리)** 제공 여부 | 기본 미제공·«내 프록시 등록» 필드만 제공으로 가정. |
 | Q6 | 브랜드 컬러·로고 | **잉크 블랙 액센트**(v3 · 블루 제거). 별도 브랜드색은 토큰 `--brand` 하나로 교체 가능. |
+| Q7 | 체험 중 «첫 충전 소액팩 ₩5,000=10코인» 둘지(§12.3) | 둔다(1회 한정). |
 
 ---
 
@@ -622,7 +623,21 @@ cron-ai-model-watch (주 1회)
 
 ---
 
-## 11. SaaS · 테넌시 · 권한 · SSO
+## 11. SaaS · 테넌시 · 권한 · SSO · 운영 콘솔
+
+### 11.0 로그인·로그아웃 (개인정보 — 필수 · AM `lib/auth.ts` 그대로)
+
+| 구분 | 고객(테넌트) | 운영자(우리) |
+|---|---|---|
+| 진입 | `/login` — 이메일+비밀번호 · 가입 `/register`(이메일 인증 링크) | `/ops/login` — **MIS SSO 버튼** 또는 로컬 계정 |
+| 세션 | JWT **httpOnly·Secure·SameSite=Lax** 쿠키 · 2시간 유휴 만료(슬라이딩 · `/api/auth-refresh`) · «로그인 유지» 선택 시 30일 리프레시 토큰(DB 저장·회전) | 동일 · 유휴 2시간 · 로그인 유지 없음 |
+| 로그아웃 | 상단 «내 계정 → 로그아웃» · 쿠키 삭제 + 리프레시 토큰 폐기(`/api/auth-logout`) · **전 기기 로그아웃** 버튼 | 동일 |
+| 비밀번호 | bcryptjs(cost 12) · 재설정 = 단명 액션 토큰(1회용 nonce · `ACTION_TOKEN_SECRET` 분리) · 8자+영문+숫자 | 동일 + **최초 로그인 시 변경 강제** |
+| 보호 | 로그인 실패 5회 → 15분 잠금 · 가입 enumeration 완화 · 모든 인증 이벤트 `audit_log` | + 2FA(TOTP) Phase 4 |
+| 초기 운영자 | — | **`admin` / `admin1234`** (super_admin · 시드 스크립트 `scripts/seed-admin.mjs` · bcrypt 해시 저장 · `must_change_password=true`라 첫 로그인에 새 비밀번호 요구) |
+
+- 고객과 운영자는 **다른 테이블(`users` / `operators`)·다른 쿠키 이름**(`ac_user` / `ac_ops`) — 한쪽 유출이 다른 쪽에 안 번진다.
+- 팀 시트: 소유자가 «팀원 초대»(이메일 링크) → 같은 테넌트 `member`.
 
 ### 11.1 테넌시
 - `tenants`(워크스페이스) — 고객 1명 = 테넌트 1. 모든 도메인 테이블 `tenant_id`(AM §4.6).
@@ -636,7 +651,30 @@ cron-ai-model-watch (주 1회)
 - 원격접속(impersonation) AM 배관 그대로 → 고객 화면을 운영자가 그대로 본다(결제 차단·배너).
 
 ### 11.3 셀프 가입
-AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스텝.
+AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스텝. 가입 즉시 **14일 무료 체험**(§12.3).
+
+### 11.4 종합 운영센터 `/ops` (관리자 모드 · 사장님 요청 2026-09-14 «요금제·CS까지 종합 운영센터»)
+
+운영자만 진입(SSO 또는 로컬). 고객 화면과 같은 디자인 언어, 밀도만 높인다(표 허용). 좌측 레일 메뉴 12개 — **매출·고객·요금제·이벤트·결제·CS·러너·AI·채널·공지·운영진·감사**:
+
+| 메뉴 | 하는 일 | 데이터 |
+|---|---|---|
+| **대시보드(우리 매출)** | 오늘/이달 **매출**(구독·코인 분리) · **MRR**·ARR · 신규 가입·체험→유료 전환율 · 활성 테넌트 · 이탈 · 코인 판매/소비 · **AI 원가**(Gemini·영상 provider·TTS) · **마진**(매출−원가) · 채널별 발행 수·수익 회수 총액 | `invoices` `coin_ledger` `ai_usage` `subscriptions` |
+| **고객** | 테넌트 목록(플랜·상태·체험 남은 일·코인 잔액·계정 수·마지막 발행·건강) · 상세: 계정/러너/편성 상태 · **셋업 체크리스트**(계정 연결→수익 매체→규칙→첫 발행) · **원격접속**(impersonation · 배너·결제 차단·감사) · 코인 지급/회수 · 플랜 변경 · 체험 연장 · 메모 | `tenants` `accounts` `runner_devices` |
+| **이벤트·프로모션** | **체험 기간 이벤트**(기본 14일 · 기간 한정 30일 등) · **쿠폰**(플랜 할인 %/₩·기간·횟수·대상) · **보너스 코인**(첫 충전 +N% · 팩별 기간 한정) · 추천인 코인 · 대상 조건(가입일·플랜·채널) · 예약 시작/종료 · 성과(사용 수·전환) | `promotions` `coupons` `coupon_redemptions` |
+| **요금제** | 플랜 편집(이름·월/연 가격·계정 수·포함 코인·기능 토글·러너 한도·팀 시트·공개 여부·추천 배지) · **코인 팩·단가표 편집**(AM `COIN_TABLE`·`COIN_PACKS`를 DB 오버레이로 — 코드 기본값은 유지) · **가격 개정 게이트**: 기존 고객은 «고지 발송 → 다음 결제주기부터» 자동 적용(AM `plan_price_events` 계승) · 변경 이력 · 플랜별 가입자 수·MRR 기여 | `plans` `plan_price_events` `coin_price_overrides` |
+| **결제** | 인보이스·실패 재시도·환불(코인 환불 = AM `coin-refund`) · 빌링키 상태 · 세금계산서/현금영수증 · 미수 목록 | `invoices` `billing_keys` |
+| **CS(고객센터)** | **티켓함**: 앱 내 «문의하기»·이메일·카카오 채널 유입을 한 목록으로(상태 열림/진행/보류/해결 · 우선순위 · 담당자 · SLA 타이머) · 티켓 → 고객 상세·원격접속·코인 보상 **한 화면에서** · **매크로 답변**(자주 쓰는 답 20종) · 태그(결제·계정정지·러너·발행실패·환불) · **FAQ 편집**(앱 «도움말»에 반영) · 만족도(해결 후 1탭) · 자동 티켓: 러너 실패·결제 실패·계정 정지가 3회 반복되면 시스템이 티켓 생성 | `tickets` `ticket_messages` `macros` `faqs` |
+| **러너 팜** | 관리형 러너 목록·부하·계정 배정 · 하트비트 · 셀렉터 카나리 결과 | `runner_devices` |
+| **AI 엔진** | 역할별 현재 모델·후보·카나리·롤백(§10) · 원가 상한 | `ai_model_overrides` |
+| **채널** | 채널 레지스트리 상태(가동/준비중/장애) · 정책 문구(§16B) · 최적 시간 표 | `channel_registry` `disclosure` |
+| **공지·상태** | 인앱 공지 · 장애 배너(«네이버 발행 지연») | `notices` |
+| **운영진·감사** | 운영자 계정(역할 super_admin/admin/operator · SSO 매핑) · `audit_log` 검색(누가 언제 어느 테넌트에) | `operators` `audit_log` |
+
+- 권한: `super_admin` 전부(요금제·운영진 포함) · `admin` 고객/이벤트/결제/CS · `operator` 고객 열람+원격접속+CS 답변(결제·요금제 불가).
+- CS 흐름: 고객 앱 «내 계정 → 문의하기»(사진 첨부 가능·자동으로 테넌트·플랜·러너 상태·최근 오류를 티켓에 첨부) → 운영센터 티켓함 → 답변은 앱 알림+이메일 → 해결 시 «도움이 됐나요?» 1탭.
+- 셋업 지원 흐름: 고객 상세 → «원격접속» → 고객 화면 그대로 조작(계정 연결·규칙 설정) → 종료 시 감사 기록 + 고객에게 «운영자가 설정을 도와드렸어요» 알림.
+- 우리 매출 화면도 토스 패턴(«9월에 3,240,000원 벌었어요» → 구독/코인 막대 → 원가 → 마진).
 
 ---
 
@@ -660,9 +698,16 @@ AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스�
 | 러너 | 내 PC 1대 | 내 PC 2대 · 관리형 옵션(+₩30,000) | 관리형 포함(계정 50) |
 | 수익 통합 | API 소스 | + 러너 스크랩 | + 리포트 내보내기 |
 | 팀 시트 | 1 | 2 | 5 |
-| 체험 | 7일 · 20코인 | | |
+| 체험 | **14일 · Pro 기능 전부 · 코인은 유료**(§12.3) | | |
 
 > 근거: 코인 원가(글 ~₩60·이미지 ~₩30·60초 영상 ~₩8,000) 대비 포함분이 마진 안에 있고, 사용자의 «계정 수»가 자연스러운 업셀 축이다.
+
+### 12.3 무료 체험(사장님 확정 2026-09-14) — «구독은 14일 무료, 코인은 무료 아님»
+- 가입 즉시 **14일** 체험 · Pro 기능 전부(디렉터 손보기·자동 편성·페일오버) · 계정 5개까지.
+- **코인은 지급하지 않는다** — 만들려면 충전. 체험 중 충전분은 1년 유효(구독 전환과 무관하게 남는다).
+- 체험 종료 D-3·D-1·D-0 알림 → 미전환 시 «읽기 전용»(편성표·수익 열람 가능·생성/발행 정지 · 데이터 30일 보관 후 파기 안내).
+- 체험 기간·조건은 **이벤트로 운영자가 바꾼다**(§11.4 프로모션 · 기본값 14일). 재가입 체험 남용 방지: 이메일+결제수단 지문.
+- ☐ **Q7** 체험 진입 장벽 완화용 «첫 충전 소액팩 ₩5,000=10코인(1회 한정)» 둘지 — 문서 가정: 둔다(AM 팩 표엔 없으므로 AC 전용 `pack_trial`).
 
 ---
 
@@ -778,8 +823,9 @@ AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스�
 
 | 영역 | 테이블 |
 |---|---|
-| 테넌시·권한 | `tenants` `users` `tenant_members` `operators` `sessions` |
-| 플랜·결제·코인 | `plans` `subscriptions` `invoices` `billing_keys` `coin_ledger`(AM) `coin_orders` |
+| 테넌시·권한 | `tenants` `users` `tenant_members` `operators` `sessions` `refresh_tokens` `login_attempts` |
+| 플랜·결제·코인 | `plans` `plan_price_events` `coin_price_overrides` `subscriptions` `invoices` `billing_keys` `coin_ledger`(AM) `coin_orders` `promotions` `coupons` `coupon_redemptions` |
+| CS | `tickets` `ticket_messages` `macros` `faqs` |
 | 채널·계정 | `channel_registry` `accounts` `account_creds` `account_groups` `personas` `emotion_profiles` |
 | 소재·제작 | `topics` `topic_sources`(검색량 스냅샷) `briefs` `pieces` `piece_assets` `piece_gates`(검사 결과) |
 | 발행 | `schedules` `posts` `runner_devices` `runner_jobs` `runner_heartbeats` |
@@ -795,8 +841,9 @@ DDL 규칙: AM §4.5(추가형 DDL 자율·`scripts/neon-migrate.mjs`·`drizzle-
 
 | 그룹 | 엔드포인트 |
 |---|---|
-| 인증 | `auth-login/logout/me/refresh` · `auth-register/verify/forgot/reset` · `sso/enter` |
+| 인증 | `auth-login/logout/logout-all/me/refresh` · `auth-register/verify/forgot/reset` · `auth-change-password` · `team-invite/accept` · `sso/enter` |
 | 소재 | `topics-list` · `topics-refresh`(AI 소재뽑기·검색량) · `topics-pick` |
+| 고객센터 | `support-ticket-create/list/get/reply` · `faqs-list` |
 | 디렉터 | `director-propose`(자동안) · `director-confirm`(수정본 포함) · `director-settings`(자동모드) |
 | 제작 | `pieces-list/get` · `pieces-regenerate` · `pieces-approve/reject` · `assets-presign` |
 | 발행 | `schedule-list/move` · `publish-now` · `posts-list` |
@@ -804,7 +851,7 @@ DDL 규칙: AM §4.5(추가형 DDL 자율·`scripts/neon-migrate.mjs`·`drizzle-
 | 러너 | `runner/register` · `runner/queue`(claim/report/release) · `runner/heartbeat` · `runner/session-upload` |
 | 수익 | `revenue-summary` · `revenue-sources-connect` · `revenue-manual-add` |
 | 결제 | `billing-*`(AM) · `coin-balance/purchase/history`(AM) |
-| 운영(ops) | `ops-tenants` · `ops-coins-grant` · `ops-runners` · `ops-ai-models`(후보·적용·롤백) · `ops-impersonate` |
+| 운영(ops) | `ops-login/logout` · `ops-dashboard`(매출·MRR·원가·마진) · `ops-tenants/get/update` · `ops-coins-grant` · `ops-trial-extend` · `ops-promotions` · `ops-coupons` · `ops-plans/update` · `ops-coin-prices` · `ops-price-event-notify` · `ops-invoices/refund` · `ops-tickets/reply/assign/resolve` · `ops-macros` · `ops-faqs` · `ops-runners` · `ops-ai-models` · `ops-channels` · `ops-notices` · `ops-operators` · `ops-audit` · `ops-impersonate/end` |
 | 크론 | `cron-topics-refill` · `cron-publisher` · `cron-revenue-sync` · `cron-account-health` · `cron-ai-model-watch` · `cron-coin-monthly` |
 
 ---
@@ -827,7 +874,7 @@ DDL 규칙: AM §4.5(추가형 DDL 자율·`scripts/neon-migrate.mjs`·`drizzle-
 
 | Phase | 기간 | 산출 | 완료 정의(화면에서 쓸 수 있을 때) |
 |---|---|---|---|
-| **0 뼈대** | 1주 | 리포 스캐폴드 · AM 코어 이식(auth·tenant·coin·billing·ai·ai-models·audit) · 스키마 v1 · 디자인 시스템 · 온보딩 · MIS SSO | MIS 허브 카드 → AC 운영 콘솔 진입 · 셀프 가입 → 홈 |
+| **0 뼈대** | 1주 | 리포 스캐폴드 · AM 코어 이식(auth·tenant·coin·billing·ai·ai-models·audit) · 스키마 v1 · 디자인 시스템 · 온보딩 · 로그인/로그아웃 · MIS SSO + 로컬 admin 시드 · 운영 콘솔 골격(대시보드·고객) | MIS 허브 카드 또는 admin 로그인 → 운영 콘솔 · 셀프 가입 → 14일 체험 → 홈 |
 | **1 글 MVP** | 2~3주 | 소재뽑기 → 디렉터(자동+손보기) → 글·이미지 → 검수 → 예약 · 네이버 블로그 러너 · 블로거/WP API · 계정 N개 등록 | 계정 3개에 하루 3편이 자동 예약·발행되고 URL이 발행함에 뜬다 |
 | **2 수익·계정** | 2주 | 애드센스·쿠팡·유튜브 애널리틱스 API · 애드포스트 러너 스크랩 · 정지 감지·승계 · 캐던스 | 홈 «오늘 번 돈»이 실데이터 · 정지 계정 글이 다음 계정으로 옮겨진다 |
 | **3 영상** | 3~4주 | 쇼츠 공장 이식(3포맷) · 유튜브 API(앱 심사 착수) · 릴스·쓰레드 · 네이버 클립 러너 검증 | 소재 1개 → 60초 쇼츠가 계정별 변주로 예약·업로드 |

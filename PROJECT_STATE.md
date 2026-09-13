@@ -7,9 +7,9 @@
 - 라이브: https://autocreate-endyd.netlify.app (GitHub `main` push → 자동 배포) · 아직 빈 사이트(README만).
 
 ## 2. 현재 상태 (2026-09-14)
-- ✅ GitHub·Netlify 연동 · 설계서 v5(`docs/DESIGN.md`) · 화면 시안 v3(`docs/screens-v3.html`) · 웹 시안(`docs/screens-web-v1.html`)
+- ✅ GitHub·Netlify 연동 · 설계서 v8(`docs/DESIGN.md` — §5C 고도화·§16B 정책·§11.0 로그인·§11.4 종합 운영센터·§12.3 14일 체험·§19 체크리스트) · 화면 시안 v3(`docs/screens-v3.html`) · 웹 시안(`docs/screens-web-v1.html`)
 - ✅ 작업 규칙 이식: `CLAUDE.md` · `docs/rules/{PARALLEL_GUIDE,PITFALLS,TRIGGER-TEMPLATE,MEMORY-PORTABLE}.md` · `.claude/settings.json`
-- ⏳ **사장님 결정 대기**: DESIGN.md §0 Q1~Q6 (S스토리=티스토리? · 구독 가격 · 관리형 러너 · 단일 앱 심사 · 프록시 · 브랜드 컬러)
+- ⏳ **사장님 결정 대기**(기본 가정으로 진행 가능): DESIGN.md §0 Q1~Q5·Q7 · Q6 확정(잉크) (S스토리=티스토리? · 구독 가격 · 관리형 러너 · 단일 앱 심사 · 프록시 · 브랜드 컬러)
 
 ## 3. 다음 할 일
 1. Q1~Q6 답 → 설계서 확정(v1.0).
