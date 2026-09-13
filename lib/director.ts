@@ -233,23 +233,50 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
     await rollback(String((e as Error)?.message ?? e));
     throw e;
   }
-  for (const c of created) void triggerGenerate(c.pieceId, tid);
+  for (const c of created) await triggerGenerate(c.pieceId, tid);   // ★C4 fix: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답 — 대기 비용 없음)
   const bal = await balance(tid);
   return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance };
 }
 
-/** 배경 생성 함수 호출(POST · x-internal-secret). INTERNAL_SECRET 없으면 정직 실패(폴백 0) — piece 는 failed 로 표시. */
+/**
+ * 배경 생성 호출 실패 처리 — piece 를 failed 로 내리고 코인 환급·알림·슬롯 표시(content-gen 실패 경로와 같은 처치).
+ *   ★C4 fix(2026-09-14 · PITFALLS AC-6): 호출이 실패해도 piece 가 generating 에 남으면 «코인은 빠졌는데 화면은 영원히 만드는 중»이 된다 —
+ *   홈 «해야 할 일»은 in_review 만 세므로 사용자에게 아무 신호도 가지 않는다(조용한 0건 금지).
+ */
+async function failTrigger(tid: number, pieceId: number, reason: string): Promise<void> {
+  try {
+    const [p] = await q(sql`SELECT slot_id, meta FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} AND status = 'generating'`);
+    if (!p) return;   // 이미 다른 경로가 처리함(멱등)
+    const refunded = await refundPiece(tid, pieceId);
+    const meta = (p.meta || {}) as Record<string, unknown>;
+    await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", failReason: reason, refunded })}, updated_at = NOW() WHERE id = ${pieceId} AND tenant_id = ${tid}`);
+    if (p.slot_id) await q(sql`UPDATE slots SET status = 'failed', note = ${reason}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(p.slot_id)}`);
+    await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+      VALUES (${tid}, ${"piece_failed"}, ${"글을 만들지 못했어요"}, ${`«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 시작하지 못했어요. 코인 ${refunded}개는 돌려드렸어요.`}, ${"/app/pieces.html?status=failed"})`);
+  } catch (e) { console.error("[director] failTrigger 실패", String((e as Error)?.message ?? e)); }
+}
+
+/** 배경 생성 함수 호출(POST · x-internal-secret). 실패는 전부 정직하게 piece failed + 환급 + 알림(폴백 0). */
 export async function triggerGenerate(pieceId: number, tid: number): Promise<boolean> {
   const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
   const site = String(process.env.SITE_URL ?? "").replace(/\/$/, "");
   if (!secret || !site) {
-    console.error("[director] INTERNAL_SECRET 또는 SITE_URL 미설정 — 배경 생성 호출 불가");
-    await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", failReason: "서버 설정(INTERNAL_SECRET)이 없어 생성을 시작하지 못했어요." })}, updated_at = NOW() WHERE id = ${pieceId} AND tenant_id = ${tid}`);
+    const missing = !secret ? "INTERNAL_SECRET" : "SITE_URL";
+    console.error(`[director] ${missing} 미설정 — 배경 생성 호출 불가`);
+    await failTrigger(tid, pieceId, `서버 설정(${missing})이 없어 생성을 시작하지 못했어요.`);
     return false;
   }
   try {
     const r = await fetch(`${site}/api/generate-piece-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid }) });
-    if (r.status !== 202 && !r.ok) { console.error(`[director] 배경 함수 호출 ${r.status}`); return false; }
+    if (r.status !== 202 && !r.ok) {
+      console.error(`[director] 배경 함수 호출 ${r.status}`);
+      await failTrigger(tid, pieceId, `생성을 시작하지 못했어요(서버 응답 ${r.status}).`);
+      return false;
+    }
     return true;
-  } catch (e) { console.error("[director] 배경 함수 호출 실패", String((e as Error)?.message ?? e)); return false; }
+  } catch (e) {
+    console.error("[director] 배경 함수 호출 실패", String((e as Error)?.message ?? e));
+    await failTrigger(tid, pieceId, "생성을 시작하지 못했어요(서버에 연결하지 못했어요).");
+    return false;
+  }
 }
