@@ -11,7 +11,7 @@ export default async (req: Request): Promise<Response> => {
   try {
     const obj = await r2Get(key);
     if (!obj) return new Response("not found", { status: 404 });
-    return new Response(obj.bytes, { status: 200, headers: { "Content-Type": obj.contentType, "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" } });
+    return new Response(Buffer.from(obj.bytes), { status: 200, headers: { "Content-Type": obj.contentType, "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" } });
   } catch (e) {
     console.error("[r2-image]", e);
     return new Response("error", { status: 500 });
