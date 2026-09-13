@@ -101,6 +101,7 @@
       { id: 803, kind: "publish", title: "@cook_a 에 글이 올라갔어요", desc: "에어프라이어 청소, 눌어붙은 기름 3분 컷", link: "/app/posts.html", tone: "info", createdAt: iso(now - 26 * 3600e3), readAt: iso(now - 20 * 3600e3) },
     ],
     reassigned: fresh ? null : { fromHandle: "life_c", toHandle: "cook_a", moved: 3, at: iso(now - 5 * 3600e3) },
+    topicsRefresh: null, // [v2.9] { startedAt, finishedAt?, added?, error? } — tenants.settings.topicsRefresh 자리
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -152,6 +153,13 @@
     for (const s of S.slots) { if (KEEP.includes(s.status)) continue; const p = S.pieces.find((x) => x.id === s.pieceId); if (p && (p.status === "in_review" || p.status === "scheduled" || p.status === "published")) s.status = p.status; }
     for (const d of S.devices) if (d._t0 && Date.now() - d._t0 > 8000) { d.online = true; d.version = d.version || "1.0.3"; delete d._t0; } // 등록 후 첫 하트비트
   };
+  /* [v2.9] 소재 뽑기 배경 작업 흉내 — 2초 뒤 완료 · startedAt 10분 초과면 고아로 보고 running 해제(계약 §6D) */
+  const isRefreshing = () => { const t = S.topicsRefresh; return !!(t && t.startedAt && !t.finishedAt && Date.now() - new Date(t.startedAt).getTime() < 600000); };
+  const refreshTick = () => { const t = S.topicsRefresh; if (!t || !t.startedAt || t.finishedAt) return;
+    if (Date.now() - new Date(t.startedAt).getTime() < (Number(qs.get("refreshMs")) || 2000)) return; // ?refreshMs= 로 오래 도는 경우도 본다
+    if (qs.get("refreshFail") === "1") { t.finishedAt = iso(Date.now()); t.error = "지금은 소재를 뽑지 못했어요. 잠시 후 다시 해 주세요."; return; }
+    const add = [{ id: S.nextId++, title: "환절기 아이 기침, 가습기보다 먼저 볼 것", angle: "소아과 다녀온 후기", channelHint: "naver_blog", score: 73, status: "candidate", factors: { volume: 12100, growthPct: 55, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) }, { id: S.nextId++, title: "다이소 수납 3천원 조합", angle: "서랍 한 칸 비포·애프터", channelHint: "naver_blog", score: 68, status: "candidate", factors: { volume: 26000, competition: "high", intent: "commercial" }, expiresAt: iso(now + 6 * 86400e3) }];
+    S.topics.unshift(...add); t.finishedAt = iso(Date.now()); t.added = add.length; };
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const delay = (ms = 260) => new Promise((r) => setTimeout(r, ms));
 
@@ -197,11 +205,16 @@
     "accounts-oauth-start": (b) => { const c = CHANNELS.find((x) => x.key === b.channel); if (!c || !c.configured) return err("provider_not_configured", "준비 중이에요"); return { ok: true, url: `/app/accounts.html?connected=${b.channel}&mock=1` }; },
     "personas-list": () => ({ ok: true, personas: S.personas }),
     "personas-save": (b) => { let p = S.personas.find((x) => x.id === Number(b.id)); if (p) Object.assign(p, { name: b.name, profile: b.profile }); else { p = { id: S.nextId++, name: b.name, profile: b.profile || {} }; S.personas.push(p); } return { ok: true, persona: p }; },
-    /* §2 소재 */
-    "topics-list": () => ({ ok: true, topics: S.topics.filter((t) => t.status === "candidate"), refreshedAt: iso(now - 7200e3) }),
-    "topics-refresh": () => { if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요."); S.refreshCount++;
-      const add = [{ id: S.nextId++, title: "환절기 아이 기침, 가습기보다 먼저 볼 것", angle: "소아과 다녀온 후기", channelHint: "naver_blog", score: 73, status: "candidate", factors: { volume: 12100, growthPct: 55, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) }, { id: S.nextId++, title: "다이소 수납 3천원 조합", angle: "서랍 한 칸 비포·애프터", channelHint: "naver_blog", score: 68, status: "candidate", factors: { volume: 26000, competition: "high", intent: "commercial" }, expiresAt: iso(now + 6 * 86400e3) }];
-      S.topics.unshift(...add); return { ok: true, added: add.length, topics: S.topics.filter((t) => t.status === "candidate") }; },
+    /* §2 소재 — [v2.9] 뽑기는 배경 작업(POST 는 즉시 202 · 진행 상태는 topics-list.refresh 로 본다) */
+    "topics-list": () => { refreshTick(); const t = S.topicsRefresh;
+      const refresh = { running: isRefreshing() };
+      if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
+      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate"), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; },
+    "topics-refresh": () => { refreshTick();
+      if (isRefreshing()) return { ok: true, started: false, running: true };
+      if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
+      S.refreshCount++; S.topicsRefresh = { startedAt: iso(Date.now()) };
+      return { ok: true, started: true, status: 202 }; },
     "topics-pick": (b) => { const t = S.topics.find((x) => x.id === Number(b.id)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 }); t.status = "picked"; return { ok: true, topic: t }; },
     "topics-skip": (b) => { const t = S.topics.find((x) => x.id === Number(b.id)); if (t) t.status = "expired"; return { ok: true }; },
     /* §3 디렉터 */
@@ -292,7 +305,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; return { ...r, status, ok: !!r.ok };
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); return u.pathname + u.search + u.hash; } catch { return href; } };
+  const KEEP = ["runner", "refreshMs", "refreshFail"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);
   const badge = document.createElement("div"); badge.textContent = "모의 데이터"; badge.style.cssText = "position:fixed;bottom:calc(var(--tab-h) + 6px);left:8px;z-index:99;font-size:10px;font-weight:700;color:var(--muted);background:var(--press);border-radius:6px;padding:2px 6px;pointer-events:none"; document.body.appendChild(badge);

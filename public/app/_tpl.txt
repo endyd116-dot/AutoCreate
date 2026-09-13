@@ -5,17 +5,32 @@ PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스�
 --- script ---
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
-let accountsN = null;
+let accountsN = null, busy = false, timer = null;
 function sub(t) { const f = t.factors || {}; const parts = [];
   if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
   return parts.length ? parts.join(" · ") : UI.esc(t.angle || ""); }
-async function load() {
-  const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+/* [v2.9] 소재 뽑기는 배경 작업 — 도는 동안은 스켈레톤 + 한 문장, 5초마다 다시 본다(떠났다 와도 같은 상태) */
+const SK = `<div class="row"><span class="sk" style="width:28px;height:28px;border-radius:9px"></span><div class="l"><span class="sk" style="width:78%;height:13px"></span><span class="sk" style="width:42%;height:11px;margin-top:6px"></span></div></div>`;
+const busyBox = (since) => `${SK}${SK}<p class="muted" style="margin:2px 16px 12px;font-size:13.5px">소재 뽑는 중이에요 · 1~2분 걸려요${since ? ` · ${UI.esc(since)}에 시작했어요` : ""}</p>`;
+const STALE = `<p class="muted" style="margin:2px 16px 12px;font-size:13.5px">소재 뽑기가 너무 오래 걸려요. 다시 뽑아 주세요.</p>`;
+const startPoll = () => { if (!timer) timer = setInterval(() => load(true), 5000); };
+const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
+async function load(poll = false) {
+  const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
   if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0; }
-  const g = UI.$("#topics"); const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} <button type="button" id="refresh" style="color:var(--ink);font-weight:600;font-size:12.5px">새로 뽑기</button></div>`;
+  const f = r.refresh || {};
+  const startedMs = f.startedAt ? UI.utc(f.startedAt).getTime() : null;
+  const stale = !!(f.running && startedMs && Date.now() - startedMs > 600000); // 고아 방지 — 10분 넘으면 도는 걸로 보지 않는다
+  const was = busy; busy = !!f.running && !stale;
+  if (busy) startPoll(); else stopPoll();
+  if (was && !busy && !stale) UI.toast(f.error ? f.error : f.added ? `소재 ${f.added}개 찾았어요` : "새로 뽑을 소재가 없었어요");
+  const BUSY = busy ? busyBox(startedMs ? UI.ago(f.startedAt) : "") : stale ? STALE : "";
+  const g = UI.$("#topics");
+  const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : '<button type="button" id="refresh" style="color:var(--ink);font-weight:600;font-size:12.5px">새로 뽑기</button>'}</div>`;
   if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; bindRefresh(); return; }
-  if (!r.topics.length) { g.innerHTML = head + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p><button class="btn primary sm" type="button" id="refresh2">새로 뽑기</button></div>`; bindRefresh(); UI.$("#refresh2").onclick = refresh; return; }
-  g.innerHTML = head + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm primary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
+  if (busy && !r.topics.length) { g.innerHTML = head + BUSY; return; }
+  if (!r.topics.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p><button class="btn primary sm" type="button" id="refresh2">새로 뽑기</button></div>`; bindRefresh(); UI.$("#refresh2").onclick = refresh; return; }
+  g.innerHTML = head + BUSY + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm primary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
   bindRefresh();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
   UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
@@ -23,7 +38,13 @@ async function load() {
   UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
 }
 function bindRefresh() { const b = UI.$("#refresh"); if (b) b.onclick = refresh; }
-async function refresh() { UI.toast("소재를 뽑는 중이에요"); const r = await UI.api("/api/topics-refresh", { body: {} }); if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; } UI.toast(r.added ? `새 소재 ${r.added}개를 뽑았어요` : "새로 뽑을 소재가 없어요"); load(); }
+async function refresh() {
+  const b = UI.$("#refresh") || UI.$("#refresh2"); if (b) b.disabled = true;
+  const r = await UI.api("/api/topics-refresh", { body: {} }); if (b) b.disabled = false;
+  if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; }
+  if (r.topics) { UI.toast(r.added ? `소재 ${r.added}개 찾았어요` : "새로 뽑을 소재가 없어요"); load(); return; } // 옛 동기 응답 호환
+  busy = true; UI.toast(r.started === false ? "이미 뽑고 있어요" : "소재를 뽑기 시작했어요"); startPoll(); load(true);
+}
 async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
 await load();
 === schedule.html | schedule | 편성표 ===
