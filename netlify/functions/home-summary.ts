@@ -29,12 +29,12 @@ export default async (req: Request): Promise<Response> => {
       FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN pieces p ON p.id = s.piece_id
       WHERE s.tenant_id = ${tid} AND s.slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date ORDER BY s.publish_at NULLS LAST, s.id`);
     const todo: { kind: string; title: string; desc: string; link: string; tone: "warn" | "info" }[] = [];
-    const relogin = await q(sql`SELECT id, channel, handle FROM accounts WHERE tenant_id = ${tid} AND status IN ('pending_login','suspended','disconnected') ORDER BY id`);
+    const relogin = await q(sql`SELECT id, channel, handle FROM accounts WHERE tenant_id = ${tid} AND status IN ('suspended','disconnected') AND COALESCE(last_error_kind,'') <> 'removed' ORDER BY id`);
     for (const a of relogin) todo.push({ kind: "account", title: `@${a.handle} 다시 연결이 필요해요`, desc: String(a.channel), link: "/app/accounts.html", tone: "warn" });
     const [review] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid} AND status = 'in_review'`);
-    if (n(review?.c)) todo.push({ kind: "review", title: `봐주실 글 ${n(review.c)}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: "/app/schedule.html", tone: "info" });
+    if (n(review?.c)) todo.push({ kind: "review", title: `봐주실 글 ${n(review.c)}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: "/app/pieces.html", tone: "info" });
     const [runner] = await q(sql`SELECT COUNT(*) FILTER (WHERE status='online') AS online, COUNT(*) AS total FROM runner_devices WHERE tenant_id = ${tid}`);
-    const [accounts] = await q(sql`SELECT COUNT(*) AS c FROM accounts WHERE tenant_id = ${tid}`);
+    const [accounts] = await q(sql`SELECT COUNT(*) AS c FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
     const [rules] = await q(sql`SELECT COUNT(*) AS c FROM cadence_rules WHERE tenant_id = ${tid} AND active = true`);
     if (!n(accounts?.c)) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
     else if (!n(rules?.c)) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });

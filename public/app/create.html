@@ -6,22 +6,45 @@
 <title>만들기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=1">
+<link rel="stylesheet" href="/css/ac.css?v=2">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ttl">만들기</span><span class="sp"></span></div>
-<div class="step-h"><h1>무엇으로 벌까요?</h1><p>소재를 고르면 디렉터가 채널·계정·구성을 정해 드려요.</p></div>
-<div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="empty"><span class="mk soft">✎</span><h3>소재 뽑기는 곧 열려요</h3><p>먼저 계정을 연결해 두면 연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결하기</a></div></div>
+<div class="step-h"><h1>오늘은 어떤 소재로 벌까요?</h1><p>«디렉터에게» 보내면 채널·계정·구성·시각을 정해 드려요.</p></div>
+<div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=1"></script>
+<script src="/js/ui.js?v=2"></script>
+<script src="/js/mock.js?v=1"></script>
 <script>
 (async () => {
 await UI.boot("create");
+const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
+let accountsN = null;
+function sub(t) { const f = t.factors || {}; const parts = [];
+  if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
+  return parts.length ? parts.join(" · ") : UI.esc(t.angle || ""); }
+async function load() {
+  const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0; }
+  const g = UI.$("#topics"); const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} <button type="button" id="refresh" style="color:var(--ink);font-weight:600;font-size:12.5px">새로 뽑기</button></div>`;
+  if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; bindRefresh(); return; }
+  if (!r.topics.length) { g.innerHTML = head + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p><button class="btn primary sm" type="button" id="refresh2">새로 뽑기</button></div>`; bindRefresh(); UI.$("#refresh2").onclick = refresh; return; }
+  g.innerHTML = head + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm primary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
+  bindRefresh();
+  UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
+  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
+  // 좌측 스와이프 = 넘김
+  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
+}
+function bindRefresh() { const b = UI.$("#refresh"); if (b) b.onclick = refresh; }
+async function refresh() { UI.toast("소재를 뽑는 중이에요"); const r = await UI.api("/api/topics-refresh", { body: {} }); if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; } UI.toast(r.added ? `새 소재 ${r.added}개를 뽑았어요` : "새로 뽑을 소재가 없어요"); load(); }
+async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
+await load();
 })();
 </script>
 </body>

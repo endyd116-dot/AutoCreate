@@ -1,24 +1,162 @@
 PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스크립트 입력. 형식: === 파일명 | 탭키 | 제목 ===  본문HTML  --- script ---  JS
 === create.html | create | 만들기 ===
-<div class="step-h"><h1>무엇으로 벌까요?</h1><p>소재를 고르면 디렉터가 채널·계정·구성을 정해 드려요.</p></div>
-<div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="empty"><span class="mk soft">✎</span><h3>소재 뽑기는 곧 열려요</h3><p>먼저 계정을 연결해 두면 연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결하기</a></div></div>
+<div class="step-h"><h1>오늘은 어떤 소재로 벌까요?</h1><p>«디렉터에게» 보내면 채널·계정·구성·시각을 정해 드려요.</p></div>
+<div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 await UI.boot("create");
+const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
+let accountsN = null;
+function sub(t) { const f = t.factors || {}; const parts = [];
+  if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
+  return parts.length ? parts.join(" · ") : UI.esc(t.angle || ""); }
+async function load() {
+  const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0; }
+  const g = UI.$("#topics"); const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} <button type="button" id="refresh" style="color:var(--ink);font-weight:600;font-size:12.5px">새로 뽑기</button></div>`;
+  if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; bindRefresh(); return; }
+  if (!r.topics.length) { g.innerHTML = head + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p><button class="btn primary sm" type="button" id="refresh2">새로 뽑기</button></div>`; bindRefresh(); UI.$("#refresh2").onclick = refresh; return; }
+  g.innerHTML = head + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm primary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
+  bindRefresh();
+  UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
+  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
+  // 좌측 스와이프 = 넘김
+  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
+}
+function bindRefresh() { const b = UI.$("#refresh"); if (b) b.onclick = refresh; }
+async function refresh() { UI.toast("소재를 뽑는 중이에요"); const r = await UI.api("/api/topics-refresh", { body: {} }); if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; } UI.toast(r.added ? `새 소재 ${r.added}개를 뽑았어요` : "새로 뽑을 소재가 없어요"); load(); }
+async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
+await load();
 === schedule.html | schedule | 편성표 ===
-<div class="hl" style="padding-bottom:0"><div class="num" style="font-size:22px" id="mon">편성표</div></div>
+<div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
+<div class="seg" id="mode"><button type="button" data-m="week">주</button><button type="button" data-m="month" class="on">월</button></div>
 <div class="group" id="cal"></div>
-<div class="group" id="day"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>
+<div id="week" hidden></div>
+<div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
-await UI.boot("schedule");
-const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
-UI.$("#mon").textContent = `${now.getMonth() + 1}월`;
-const first = new Date(now.getFullYear(), now.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
-let h = ["일","월","화","수","목","금","토"].map((w) => `<span class="wd">${w}</span>`).join("");
-for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); if (i >= 35 && d.getMonth() !== now.getMonth()) break;
-  const dim = d.getMonth() !== now.getMonth(); const today = d.toDateString() === now.toDateString();
-  h += `<button type="button" class="dd ${dim ? "dim" : ""} ${today ? "today" : ""}">${d.getDate()}<span class="dots"></span></button>`; }
-UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
-UI.$("#mkRule").onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">편성 규칙 만들기는 다음 업데이트에서 열려요. 지금은 계정 연결을 먼저 해 두세요.</p><a class="btn primary" href="/app/accounts.html">계정 연결하기</a>`, { title: "자동 편성" });
+const me = await UI.boot("schedule"); if (!me) return;
+let mode = "month";
+const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 코인 미리보기 추정(정본은 rules-save 응답 coinsPerWeek)
+const today = KST(); let view = new Date(today.getFullYear(), today.getMonth(), 1); let sel = ymd(today);
+let D = { rules: [], settings: {}, coinsPerWeek: 0, maxRules: null }, accounts = [], slots = [];
+const gear = document.createElement("button"); gear.type = "button"; gear.className = "ic"; gear.setAttribute("aria-label", "편성 설정"); gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>'; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(gear);
+const dotCls = (s) => s === "published" ? "ok" : s === "in_review" ? "warn" : "";
+
+async function load() {
+  const [r, a] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list")]);
+  if (r.ok) D = r; accounts = a.ok ? a.accounts : [];
+  await loadSlots(); render();
+}
+async function loadSlots() {
+  const first = new Date(view.getFullYear(), view.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay()); const end = new Date(start); end.setDate(start.getDate() + 41);
+  const s = await UI.api(`/api/slots-list?from=${ymd(start)}&to=${ymd(end)}`); slots = s.ok ? s.slots : [];
+}
+function render() {
+  UI.$("#mon").textContent = `${view.getMonth() + 1}월${view.getFullYear() !== today.getFullYear() ? " " + view.getFullYear() : ""}`;
+  const active = D.rules.filter((r) => r.active);
+  if (active.length) { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); const we = new Date(ws); we.setDate(ws.getDate() + 6); const n = slots.filter((s) => s.date >= ymd(ws) && s.date <= ymd(we) && s.status !== "skipped").length; UI.$("#stat").textContent = `이번 주 ${n}건 · 주 ${D.coinsPerWeek}코인`; } else UI.$("#stat").textContent = "";
+  // 달력(상태 점 ≤3)
+  const first = new Date(view.getFullYear(), view.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
+  let h = WD.map((w) => `<span class="wd">${w}</span>`).join("");
+  for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); if (i >= 35 && d.getMonth() !== view.getMonth()) break; const k = ymd(d);
+    const dim = d.getMonth() !== view.getMonth(); const ds = slots.filter((s) => s.date === k && s.status !== "skipped").slice(0, 3);
+    h += `<button type="button" class="dd ${dim ? "dim" : ""} ${k === ymd(today) ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}">${d.getDate()}<span class="dots">${ds.map((s) => `<i class="${dotCls(s.status)}"></i>`).join("")}</span></button>`; }
+  UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
+  UI.$$("#cal .dd").forEach((b) => b.onclick = () => { sel = b.dataset.d; render(); });
+  // 그날 목록 · 규칙 없으면 빈 상태
+  const day = UI.$("#day"); const sd = new Date(sel + "T00:00:00"); const list = slots.filter((s) => s.date === sel).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
+  if (!active.length && !slots.length) { day.innerHTML = `<div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
+  day.innerHTML = `<div class="gt">${sd.getDate()}일 ${WD[sd.getDay()]}요일${list.length ? ` · ${list.length}건` : ""}</div>` + (list.length ? list.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("")
+    : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">이날은 나갈 글이 없어요</span><span class="d">${active.length ? "규칙에 없는 요일이거나 쉬는 날이에요" : "자동 편성을 켜면 채워져요"}</span></div></div>`);
+  UI.$$("#day .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id))));
+  // 주 보기 = 선택한 날이 든 주의 날짜별 리스트(DESIGN §5B.8)
+  UI.$("#cal").hidden = mode !== "month"; UI.$("#day").hidden = mode !== "month"; const wk = UI.$("#week"); wk.hidden = mode !== "week";
+  if (mode === "week") { const ws = new Date(sd); ws.setDate(sd.getDate() - sd.getDay()); wk.innerHTML = "";
+    for (let i = 0; i < 7; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); const k = ymd(d); const ls = slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
+      wk.insertAdjacentHTML("beforeend", `<div class="group" style="margin-bottom:12px"><div class="gt">${d.getDate()}일 ${WD[d.getDay()]}요일${k === ymd(today) ? ' <span class="pill ink">오늘</span>' : ""}</div>${ls.length ? ls.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("") : `<div class="row" style="min-height:40px"><span class="d muted">나갈 글 없음</span></div>`}</div>`); }
+    UI.$$("#week .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id)))); }
+}
+UI.$$("#mode button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mode button").forEach((x) => x.classList.toggle("on", x === b)); render(); });
+/* ── 슬롯 시트(R1: 정보 + 건너뛰기) ── */
+function slotSheet(s) {
+  const p = s.pieceId ? `<a class="btn secondary" href="/app/piece.html?id=${s.pieceId}">글 보기</a>` : "";
+  const canSkip = !["published", "skipped", "publishing"].includes(s.status);
+  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정</span><span class="v">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "건강한 계정 순으로 자동"}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">발행</span><span class="v">${s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간"}</span></div>
+    ${s.reviewDeadline ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">검수 마감</span><span class="v">${UI.dateKST(s.reviewDeadline)} ${UI.timeKST(s.reviewDeadline)}</span></div>` : ""}
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">편성</span><span class="v">${s.origin === "manual" ? "직접 만든 글" : "자동 편성"}</span></div>
+    <div class="cta" style="flex-direction:column">${p}${canSkip ? `<button class="btn ghost" type="button" id="skip" style="color:var(--danger)">이날은 건너뛰기</button>` : ""}</div><div id="sc"></div>`, { title: `${new Date(s.date + "T00:00:00").getDate()}일 편성`, onOpen: (sh, close) => {
+      const b = sh.querySelector("#skip"); if (b) b.onclick = () => UI.confirmRow(sh.querySelector("#sc"), "이 편성을 건너뛸까요? 다음 편성은 그대로 나가요.", async () => { const r = await UI.api("/api/slots-skip", { body: { id: s.id } }); if (!r.ok) return UI.toast(r.error || "건너뛰지 못했어요"); close(); UI.toast("건너뛰었어요"); await loadSlots(); render(); });
+    } });
+}
+/* ── 자동 편성 켜기 · 3스텝(한 화면 한 질문) ── */
+function ruleSheet() {
+  const chans = [...new Set(accounts.map((a) => a.channel))];
+  if (!chans.length) return UI.sheet(`<p class="muted" style="margin:0 0 16px">편성하려면 먼저 계정을 하나 연결해 주세요.</p><div class="cta"><a class="btn primary" href="/app/accounts.html">계정 연결</a></div>`, { title: "먼저 계정을 연결해요" });
+  const cur = Object.fromEntries(D.rules.filter((r) => r.active).map((r) => [r.channel, r]));
+  const st = { count: Object.fromEntries(chans.map((c) => [c, cur[c] ? (cur[c].every === "day" ? cur[c].count * 7 : cur[c].every === "month" ? Math.round(cur[c].count / 4) : cur[c].count) : 0])), mode: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountMode || "auto"])), acc: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountId || null])), reviewPolicy: D.settings.reviewPolicy || "silence_approves", produceLeadDays: D.settings.produceLeadDays || 3 };
+  const est = () => chans.reduce((a, c) => a + st.count[c] * (1 + (IMG[c] ?? 2)), 0);
+  let step = 1;
+  const view = (sh, close) => {
+    const body = sh.querySelector(".sheet-body"); const on = chans.filter((c) => st.count[c] > 0);
+    const prog = `<div class="prog" style="padding:0 0 8px"><i class="${step >= 1 ? "on" : ""}"></i><i class="${step >= 2 ? "on" : ""}"></i><i class="${step >= 3 ? "on" : ""}"></i></div>`;
+    if (step === 1) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>얼마나 자주 올릴까요?</h2><p>채널마다 «주 몇 회». 0이면 그 채널은 쉬어요.</p></div>` + chans.map((c) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))}<small>계정 ${accounts.filter((a) => a.channel === c).length}개</small></span></div>${UI.stepper("c:" + c, st.count[c], 0, 7, "회")}</div>`).join("") + `<div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
+    else if (step === 2) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>어느 계정으로?</h2><p>«자동»이면 그날 가장 건강한 계정에 배정해요.</p></div>` + on.map((c) => { const accs = accounts.filter((a) => a.channel === c); return `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))} · 주 ${st.count[c]}회</span></div>${UI.seg("m:" + c, [["auto", "자동"], ["fixed", "고르기"]], st.mode[c])}<div data-pick="${c}" ${st.mode[c] === "fixed" ? "" : "hidden"}>${UI.chips("a:" + c, accs.map((a) => [a.id, "@" + a.handle]), st.acc[c] || accs[0]?.id)}</div></div>`; }).join("") + `<div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="nx">다음</button></div>`;
+    else body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>${st.produceLeadDays}일 전에 만들어 두고,<br>조용히 두면 그대로 나가요</h2><p>검수 시간에 아무것도 안 하면 예정대로 발행돼요.</p></div>
+      <div class="sec">검수 방식</div>${UI.seg("rp", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], st.reviewPolicy)}
+      <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
+      <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div><div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
+      <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
+    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") st.reviewPolicy = v; else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
+    const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
+    const bk = body.querySelector("#bk"); if (bk) bk.onclick = () => { step--; view(sh, close); };
+    const go = body.querySelector("#go"); if (go) go.onclick = async () => {
+      go.disabled = true;
+      const rules = chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: "post", accountMode: st.mode[c], every: "week", count: st.count[c], active: true }; if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (cur[c]?.preferredHour != null) r.preferredHour = cur[c].preferredHour; if (cur[c]?.weekdays) r.weekdays = cur[c].weekdays; return r; });
+      const r = await UI.api("/api/rules-save", { body: { rules } }); go.disabled = false;
+      if (!r.ok) { if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); } return UI.toast(r.error || "저장하지 못했어요"); }
+      const s = await UI.api("/api/rules-settings", { body: { autoSchedule: true, reviewPolicy: st.reviewPolicy, produceLeadDays: st.produceLeadDays } }); if (!s.ok) UI.toast(s.error || "설정은 저장하지 못했어요");
+      close(); UI.done(`자동 편성을 켰어요 · 주 ${r.coinsPerWeek}코인`, load);
+    };
+  };
+  UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => { view(sh, close); } });
+}
+/* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
+function settingsSheet() {
+  const S = { horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [], ...D.settings };
+  const active = D.rules.filter((r) => r.active); const quiet = new Set(S.quietDays || []);
+  const days = []; for (let i = 0; i < 28; i++) { const d = new Date(today); d.setDate(today.getDate() + i); days.push(d); } const pad = today.getDay();
+  const qcal = `<div class="cal" style="padding:4px 0">${WD.map((w) => `<span class="wd">${w}</span>`).join("")}${"<span></span>".repeat(pad)}${days.map((d) => `<button type="button" class="dd ${quiet.has(ymd(d)) ? "sel" : ""}" data-q="${ymd(d)}" style="height:34px">${d.getDate()}</button>`).join("")}</div>`;
+  UI.sheet(`<div class="fr"><div class="fl">자동 편성<small>${active.length ? `규칙 ${active.length}개${D.maxRules ? ` · 최대 ${D.maxRules}개` : ""}` : "규칙을 만들면 켤 수 있어요"}</small></div><button class="toggle" type="button" id="auto" aria-checked="${!!S.autoSchedule}" aria-label="자동 편성"></button></div>
+    ${active.map((r) => `<div class="row" style="min-height:44px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회</span><span class="d">${r.accountMode === "fixed" ? "@" + UI.esc(accounts.find((a) => a.id === r.accountId)?.handle || "") : "계정 자동"}</span></div></div>`).join("")}
+    <div style="padding:6px 0 4px"><button class="btn secondary sm" type="button" id="rules" style="width:100%">${active.length ? "규칙 바꾸기" : "규칙 만들기"}</button></div>
+    <div class="sec">얼마나 미리 편성할까요</div>${UI.seg("horizonDays", [[7, "7일"], [14, "14일"], [30, "30일"]], S.horizonDays)}
+    <div class="sec">소재는 며칠 전에 정할까요</div>${UI.chips("topicLeadDays", [[3, "3일 전"], [7, "7일 전"], [14, "14일 전"]], S.topicLeadDays)}
+    <div class="sec">글은 며칠 전에 만들까요</div>${UI.chips("produceLeadDays", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], S.produceLeadDays)}
+    <div class="sec">만드는 시각</div>${UI.chips("produceHour", [["06:00", "06:00"], ["09:00", "09:00"]], S.produceHour)}
+    <div class="sec">검수 방식</div>${UI.seg("reviewPolicy", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], S.reviewPolicy)}
+    <div class="sec">발행 시간</div>${UI.seg("bestTimeMode", [["auto", "채널 최적 시간"], ["fixed", "정한 시간만"]], S.bestTimeMode)}
+    <div class="sec">주간 코인 상한</div>${UI.seg("capMode", [["plan", "플랜 포함분"], ["custom", "직접 정하기"]], S.weeklyCoinCap == null ? "plan" : "custom")}<div id="capBox" ${S.weeklyCoinCap == null ? "hidden" : ""} style="padding:8px 0 0">${UI.stepper("cap", S.weeklyCoinCap || 50, 10, 500, "코인", 10)}</div>
+    <div class="sec">쉬는 날 <span class="muted" style="font-weight:500">· 앞으로 4주 · 여러 날 가능</span></div>${qcal}
+    <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>`, { title: "편성 설정", onOpen: (sh, close) => {
+      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; });
+      sh.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => { const k = b.dataset.q; quiet.has(k) ? quiet.delete(k) : quiet.add(k); b.classList.toggle("sel", quiet.has(k)); });
+      UI.toggle(sh.querySelector("#auto"), (on) => { if (on && !active.length) { UI.toast("먼저 규칙을 만들어 주세요"); return false; } });
+      sh.querySelector("#rules").onclick = () => { close(); ruleSheet(); };
+      sh.querySelector("#save").onclick = async () => {
+        const body = { autoSchedule: sh.querySelector("#auto").getAttribute("aria-checked") === "true", horizonDays: Number(UI.chipVal(sh, "horizonDays")), topicLeadDays: Number(UI.chipVal(sh, "topicLeadDays")), produceLeadDays: Number(UI.chipVal(sh, "produceLeadDays")), produceHour: UI.chipVal(sh, "produceHour"), reviewPolicy: UI.chipVal(sh, "reviewPolicy"), bestTimeMode: UI.chipVal(sh, "bestTimeMode"), weeklyCoinCap: UI.chipVal(sh, "capMode") === "custom" ? UI.stepVal(sh, "cap") : null, quietDays: [...quiet].sort() };
+        const r = await UI.api("/api/rules-settings", { body }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
+        close(); UI.toast("편성 설정을 저장했어요"); load();
+      };
+    } });
+}
+gear.onclick = settingsSheet;
+UI.$("#prev").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); await loadSlots(); render(); };
+UI.$("#next").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); await loadSlots(); render(); };
+await load();
 === revenue.html | revenue | 수익 ===
 <div class="hl"><div class="say" id="say">이번 달</div><div class="num" id="num">0원 벌었어요</div><div class="tip" id="tip">수익 매체를 연결하면 매일 자동으로 모아요</div></div>
 <div class="group"><div class="gt">어디서</div><div class="empty"><span class="mk money">₩</span><h3>아직 연결된 수익 매체가 없어요</h3><p>애드센스·쿠팡 파트너스·유튜브는 연결하면 자동으로, 애드포스트는 러너가 가져와요.</p><a class="btn primary sm" href="/app/accounts.html">수익 매체 연결</a></div></div>
@@ -46,14 +184,124 @@ UI.$("#planName").textContent = P[me.tenant.planKey] || me.tenant.planKey;
 UI.$("#planDesc").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남음` : me.tenant.status === "active" ? "이용 중" : "이용 정지";
 UI.$("#plan").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남았어요` : "";
 UI.$("#coins").textContent = UI.num(me.coins);
+// 연결한 계정(실데이터 · A1 과 같은 행) — 채널별 그룹
+const al = await UI.api("/api/accounts-list");
+if (al.ok && al.accounts.length) {
+  const by = {}; for (const a of al.accounts) (by[a.channel] = by[a.channel] || []).push(a);
+  UI.$("#accounts").innerHTML = `<div class="gt">연결한 계정 ${al.accounts.length}개 <a href="/app/accounts.html">관리</a></div>` + Object.entries(by).map(([ch, list]) => list.map((a) => `<a class="row tap" href="/app/accounts.html">${UI.mark(ch)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(ch))} · 오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</a>`).join("")).join("");
+}
 === accounts.html | account | 계정 연결 ===
-<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 지금은 목록만 보여드려요 — 실제 연결은 곧 열려요.</p></div>
-<div class="cg" id="cg"></div>
+<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 마크를 누르면 바로 연결해요.</p></div>
+<div class="cg" id="cg"><span class="sk" style="height:96px;grid-column:1/-1"></span></div>
+<div class="group" id="list"><div class="gt">연결한 계정</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 await UI.boot("account");
 const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
-UI.$("#cg").innerHTML = Object.keys(UI.CH).map((k) => `<button type="button" class="cgi" data-k="${k}">${UI.mark(k)}${UI.chLabel(k)}<small>${SUB[k] || ""}</small></button>`).join("");
-UI.$$("#cg .cgi").forEach((b) => b.onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.chLabel(b.dataset.k)} 연결은 다음 업데이트에서 열려요. 준비되면 홈 «해야 할 일»에 알려드릴게요.</p><button class="btn primary" type="button" onclick="this.closest('.sheet').previousSibling.click()">알겠어요</button>`, { title: UI.chLabel(b.dataset.k) }));
+const ERR = { login_fail: "로그인 실패", captcha: "보안 문자 확인 필요", rate_limited: "발행 제한에 걸림", suspended: "채널에서 정지됨", selector_changed: "채널 화면이 바뀜", network: "네트워크 오류" };
+const HOURS = [[6,"06시"],[7,"07시"],[9,"09시"],[12,"12시"],[15,"15시"],[18,"18시"],[20,"20시"],[21,"21시"],[23,"23시"]];
+let D = { accounts: [], channels: [] }, personas = [];
+const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
+
+async function load() {
+  const r = await UI.api("/api/accounts-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
+  const chs = D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false }));
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : (SUB[c.key] || "")}</small></button>`).join("");
+  UI.$$("#cg .cgi").forEach((b) => b.onclick = () => connectSheet(chs.find((c) => c.key === b.dataset.k)));
+  const list = UI.$("#list");
+  list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
+    ? D.accounts.map((a) => `<button type="button" class="row tap" data-id="${a.id}">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d">오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</button>`).join("")
+    : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">아직 연결한 계정이 없어요</h3><p>위에서 채널 마크를 누르면 바로 연결할 수 있어요.</p></div>`);
+  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
+}
+
+/* ── 연결 시트(채널 방식별 · 계약 §1) ── */
+function connectSheet(c) {
+  const k = c.key, label = c.label || UI.chLabel(k);
+  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 발행할 때만 러너가 열어요.</p>
+    <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
+    <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="off" required><div class="help"></div></div>
+    <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off" placeholder="예: 요리하는 A"></div>
+    <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => submitAdd({ channel: k, handle: d.loginId, loginId: d.loginId, password: d.password, displayName: d.displayName || undefined }, f, close)) });
+  if (c.connectMethod === "app_password") return UI.sheet(`<form id="cf" autocomplete="off">
+    <div class="field"><label>사이트 주소</label><input class="input" name="siteUrl" type="url" required placeholder="https://myblog.com"><div class="help"></div></div>
+    <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required><div class="help"></div></div>
+    <div class="field"><label>앱 비밀번호</label><input class="input" name="appPassword" type="password" autocomplete="off" required><div class="help"></div></div>
+    <p class="muted" style="margin:0;font-size:12.5px">앱 비밀번호 만드는 법: 워드프레스 관리자 → 사용자 → 프로필 → «응용 프로그램 비밀번호»에서 새로 만들어요.</p>
+    <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off"></div>
+    <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => { let handle = d.siteUrl; try { handle = new URL(d.siteUrl).hostname; } catch { /* empty */ } submitAdd({ channel: k, handle, siteUrl: d.siteUrl, loginId: d.loginId, appPassword: d.appPassword, displayName: d.displayName || undefined }, f, close); }) });
+  // OAuth
+  UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(label)} 로그인 창으로 이동해요. 허용하면 여기로 돌아와요.</p><div class="cta"><button class="btn primary" type="button" id="go">${UI.esc(label)} 계정으로 연결</button></div>`, { title: `${label} 연결`, onOpen: (sh, close) => {
+    sh.querySelector("#go").onclick = async () => {
+      const r = await UI.api("/api/accounts-oauth-start", { body: { channel: k } });
+      if (r.ok && r.url) { location.href = r.url; return; }
+      if (r.step === "provider_not_configured") { sh.querySelector(".sheet-body").innerHTML = `<p style="margin:0 0 4px;font-size:16px;font-weight:700">준비 중이에요</p><p class="muted" style="margin:0 0 16px">${UI.esc(label)} 연결이 준비되면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`; sh.querySelector("#ok").onclick = close; return; }
+      UI.toast(r.error || "연결을 시작하지 못했어요");
+    }; } });
+}
+async function submitAdd(body, f, close) {
+  const r = await UI.api("/api/accounts-add", { body });
+  const pw = f.querySelector('[name="password"],[name="appPassword"]'); if (pw) pw.value = ""; // 🔴 자격은 요청 후 즉시 비운다
+  if (!r.ok) {
+    if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+    if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
+    if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
+    return UI.toast(r.error || "연결하지 못했어요");
+  }
+  close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
+}
+
+/* ── 계정 상세 시트(DESIGN §7.1 필드 전부) ── */
+async function detailSheet(a) {
+  if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
+  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · 건강 ${a.healthScore} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
+  ${a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>마지막 오류: ${UI.esc(ERR[a.lastErrorKind] || a.lastErrorKind)}</span></div>` : ""}
+  <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
+  <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">활동 시간대<small>여러 개 골라도 돼요 · 안 고르면 채널 기본 시간</small></div>${UI.chips("hours", HOURS, a.goldenHours || [], true)}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div></div>
+  <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
+  <div class="sec">수익 매체</div>
+  <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
+  <div style="padding:0 0 8px"><input class="input" id="cpA" placeholder="Access Key" autocomplete="off" style="margin-bottom:6px"><input class="input" id="cpS" placeholder="Secret Key" type="password" autocomplete="off"></div>
+  <div class="fr"><div class="fl">애드포스트<small>네이버 블로그 광고 수익</small></div>${a.monetize?.adpost ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
+  <div style="padding:0 0 8px"><input class="input" id="ap" placeholder="미디어 ID" autocomplete="off"></div>
+  <div class="fr"><div class="fl">애드센스<small>티스토리·블로거·워드프레스</small></div>${a.monetize?.adsense ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
+  <div style="padding:0 0 8px"><input class="input" id="as" placeholder="pub-0000000000000000" autocomplete="off"></div>
+  <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>
+  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rmc"></div></div>`;
+  UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
+    UI.bindSteppers(sh); UI.bindChips(sh);
+    bindPersona(sh, a);
+    sh.querySelector("#save").onclick = async () => {
+      const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), dailyCap: UI.stepVal(sh, "cap"), minGapMin: Number(UI.chipVal(sh, "gap") || 180), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
+      const m = {}; const v = (id) => sh.querySelector(id).value.trim();
+      if (v("#cpA") && v("#cpS")) { m.coupangAccessKey = v("#cpA"); m.coupangSecretKey = v("#cpS"); } if (v("#ap")) m.adpostMediaId = v("#ap"); if (v("#as")) m.adsensePub = v("#as");
+      if (Object.keys(m).length) body.monetize = m;
+      const r = await UI.api("/api/accounts-update", { body });
+      ["#cpA", "#cpS", "#ap", "#as"].forEach((id) => sh.querySelector(id).value = ""); // 🔴 비밀 값은 요청 후 즉시 비운다
+      if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
+      close(); UI.toast("저장했어요"); load();
+    };
+    sh.querySelector("#rm").onclick = () => UI.confirmRow(sh.querySelector("#rmc"), `@${a.handle} 연결을 해제할까요? 예약된 글은 다른 계정으로 넘어가요.`, async () => { const r = await UI.api("/api/accounts-remove", { body: { id: a.id } }); if (!r.ok) return UI.toast(r.error || "해제하지 못했어요"); close(); UI.toast("연결을 해제했어요"); load(); });
+  } });
+}
+function personaChips(sel) { return UI.chips("persona", [...personas.map((p) => [p.id, p.name]), ["new", "+ 새로 만들기"]], sel ?? ""); }
+function bindPersona(sh, a) {
+  UI.bindChips(sh, (name, v) => { if (name === "persona" && v === "new") personaSheet(sh, a); });
+}
+function personaSheet(parent, a) {
+  const F = [["region", "지역", "예: 경기 남부"], ["family", "가족", "예: 아이 둘"], ["job", "직업", "예: 회사원"], ["home", "집", "예: 아파트 25평"], ["brands", "쓰는 브랜드", "쉼표로 여러 개"], ["tone", "말투", "예: 친근한 구어 «~했어요»"], ["interests", "관심사", "쉼표로 여러 개"], ["banned", "금지어", "쉼표로 여러 개"], ["signature", "서명", "글 끝에 붙는 한 줄"]];
+  UI.sheet(`<form id="pf" autocomplete="off"><p class="muted" style="margin:0 0 8px">넓게 적어도 돼요. 글마다 이 재료를 조금씩 섞어요.</p><div class="field"><label>이름</label><input class="input" name="name" required placeholder="예: 30대 맞벌이 주부"></div>${F.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input class="input" name="${k}" placeholder="${ph}"></div>`).join("")}<div class="cta"><button class="btn primary" type="submit">만들기</button></div></form>`, { title: "새 페르소나", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d) => {
+    const list = (s) => s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined;
+    const profile = { region: d.region || undefined, family: d.family || undefined, job: d.job || undefined, home: d.home || undefined, brands: list(d.brands), tone: d.tone || undefined, interests: list(d.interests), banned: list(d.banned), signature: d.signature || undefined };
+    const r = await UI.api("/api/personas-save", { body: { name: d.name, profile } }); if (!r.ok) return UI.toast(r.error || "만들지 못했어요");
+    personas.push(r.persona); close(); UI.toast("페르소나를 만들었어요");
+    const pz = parent.querySelector("#pz"); pz.innerHTML = personaChips(r.persona.id); bindPersona(parent, a);
+  }) });
+}
+await load();
 === settings.html | account | 계정 · 보안 ===
 <div class="step-h"><h1>계정 · 보안</h1></div>
 <div class="group">
@@ -113,3 +361,178 @@ await UI.boot("home");
 --- script ---
 await UI.boot("account");
 const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/support-ticket-create", { body: d }); if (!r.ok) { UI.toast(r.error || "보내지 못했어요"); return; } UI.done("보냈어요", () => location.href = "/app/account.html"); });
+=== director.html | create | 디렉터 ===
+<div class="confirm"><div class="q">이 소재로</div><div class="big" id="big"><span class="sk" style="display:inline-block;width:70%"></span></div></div>
+<div class="group" id="targets"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="kv"></div>
+<div class="group" id="why"></div>
+<div class="cta" id="cta" hidden><button class="btn secondary w40" type="button" id="edit">손보기</button><button class="btn primary" type="button" id="make">만들기</button></div>
+--- script ---
+const me = await UI.boot("create"); if (!me) return;
+const topicId = Number(UI.qs.get("topicId")); if (!topicId) { UI.go("/app/create.html"); return; }
+const STYLE = [["photo", "사진"], ["illust", "일러스트"], ["infographic", "인포그래픽"]];
+const FORMATS = Object.entries(UI.FORMAT);
+const TIMES = [["07:30", "07:30"], ["12:00", "12:00"], ["21:00", "21:00"]];
+let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "";
+const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
+const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
+const cost = (p) => 1 + (p.images?.count || 0);
+const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
+const desc = (p) => [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
+
+async function load() {
+  const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
+  if (!r.ok) { UI.toast(r.error || "제안을 만들지 못했어요"); setTimeout(() => UI.go("/app/create.html"), 900); return; }
+  brief = r.brief; pieces = brief.pieces.map((p) => JSON.parse(JSON.stringify(p))); accounts = a.ok ? a.accounts : [];
+  if (!topicTitle && t?.ok) topicTitle = (t.topics.find((x) => x.id === brief.topicId) || {}).title || "";
+  render();
+}
+function render() {
+  const live = pieces.filter((p) => !p.drop);
+  UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
+  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}</span><span class="d wrap">${UI.esc(desc(p))}${p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--faint)">${UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}</div></div>`).join("")
+    : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
+  const tot = total();
+  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+  UI.$("#why").innerHTML = `<div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div>`;
+  UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
+}
+/* ── 손보기 시트(DESIGN §5.5 항목 전부) ── */
+function editSheet() {
+  const html = pieces.map((p, i) => { const accs = accounts.filter((a) => a.channel === p.channel); const emo = Object.entries(UI.EMOTION); if (p.emotionKey && !UI.EMOTION[p.emotionKey]) emo.unshift([p.emotionKey, p.emotionKey]);
+    const at = UI.utc(p.schedule.at); const hhmm = UI.timeKST(p.schedule.at); const dayOff = dayWord(p.schedule.at) === "모레" ? 2 : 1;
+    return `<section data-i="${i}" style="padding:4px 0 12px;${i ? "border-top:1px solid var(--line);margin-top:8px" : ""}">
+    <div class="fr" style="border:0"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(p.channel, "sm")}<span>${UI.esc(UI.chLabel(p.channel))}<small>${p.drop ? "이번엔 안 만들어요" : `${cost(p)}코인`}</small></span></div><button class="toggle" type="button" data-drop aria-checked="${!p.drop}" aria-label="이 채널 만들기"></button></div>
+    <div data-body ${p.drop ? "hidden" : ""}>
+      ${accs.length ? `<div class="sec">계정</div>${UI.seg("acc", accs.map((a) => [a.id, "@" + a.handle]), p.accountId)}` : `<div class="sec">계정</div><p class="muted" style="margin:0;font-size:13px">연결된 ${UI.esc(UI.chLabel(p.channel))} 계정이 없어요 · <a href="/app/accounts.html" style="text-decoration:underline">계정 연결</a></p>`}
+      <div class="sec">감성</div>${UI.chips("emo", emo, p.emotionKey)}
+      <div class="sec">구성</div>${UI.chips("fmt", FORMATS, p.format)}
+      <div class="fr"><div class="fl">이미지<small>1장 = 1코인</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
+      ${UI.seg("style", STYLE, p.images?.style || "photo")}
+      <div class="fr"><div class="fl">제휴 상품 넣기<small>고지 문구는 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
+      <div data-affbody ${p.monetize?.affiliate ? "" : "hidden"}><input class="input" data-pq placeholder="상품 검색어 · 예: 에어프라이어 세척솔" value="${UI.esc(p.monetize?.affiliate?.productQuery || "")}" style="margin-bottom:8px">${UI.seg("slot", [["mid", "중간"], ["end", "끝"], ["both", "둘 다"]], p.monetize?.affiliate?.slot || "end")}</div>
+      <div class="sec">언제</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${UI.seg("day", [[1, "내일"], [2, "모레"]], dayOff)}${UI.chips("time", TIMES.some(([v]) => v === hhmm) ? TIMES : [[hhmm, hhmm], ...TIMES], hhmm)}</div>
+    </div></section>`; }).join("");
+  UI.sheet(html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
+    UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh);
+    sh.querySelectorAll("section").forEach((sec) => {
+      const body = sec.querySelector("[data-body]"); const tg = sec.querySelector("[data-drop]");
+      UI.toggle(tg, (on) => { body.hidden = !on; sum(sh); });
+      const aff = sec.querySelector("[data-aff]"); UI.toggle(aff, (on) => { sec.querySelector("[data-affbody]").hidden = !on; });
+    });
+    sh.querySelector("#apply").onclick = () => {
+      sh.querySelectorAll("section").forEach((sec) => { const p = pieces[Number(sec.dataset.i)];
+        p.drop = sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true"; if (p.drop) return;
+        const acc = UI.chipVal(sec, "acc"); if (acc != null) { p.accountId = Number(acc); p.accountHandle = (accounts.find((a) => a.id === Number(acc)) || {}).handle || null; }
+        p.emotionKey = UI.chipVal(sec, "emo") || p.emotionKey; p.format = UI.chipVal(sec, "fmt") || p.format;
+        p.images = { ...(p.images || {}), count: UI.stepVal(sec, "img"), style: UI.chipVal(sec, "style") || "photo" };
+        const affOn = sec.querySelector("[data-aff]").getAttribute("aria-checked") === "true";
+        p.monetize = { ...(p.monetize || {}), affiliate: affOn ? { provider: "coupang", productQuery: sec.querySelector("[data-pq]").value.trim(), slot: UI.chipVal(sec, "slot") || "end" } : null, adDisclosure: affOn };
+        p.schedule = { ...(p.schedule || {}), at: kstAt(Number(UI.chipVal(sec, "day") || 1), UI.chipVal(sec, "time") || "07:30") };
+        p.coinCost = cost(p); });
+      close(); render(); UI.toast("적용했어요");
+    };
+  } });
+  function sum(sh) { let t = 0; sh.querySelectorAll("section").forEach((sec) => { if (sec.querySelector("[data-drop]").getAttribute("aria-checked") === "true") t += 1 + UI.stepVal(sec, "img"); }); const el = sh.querySelector("#sum"); if (el) el.textContent = t; }
+}
+/* ── 만들기 ── */
+async function make() {
+  const btn = UI.$("#make"); btn.disabled = true;
+  const patches = pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
+    const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
+    if (p.images.count !== o.images.count || p.images.style !== o.images.style) patch.images = { count: p.images.count, style: p.images.style };
+    if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
+    if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
+  const body = { briefId: brief.id }; if (patches.length) body.pieces = patches;
+  const r = await UI.api("/api/director-confirm", { body }); btn.disabled = false;
+  if (!r.ok) {
+    if (r.step === "coin_short") return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? brief.coinsLeft}코인이 있고 ${r.need ?? total()}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: `코인이 ${Math.max(0, (r.need ?? total()) - (r.have ?? brief.coinsLeft))}개 부족해요` });
+    return UI.toast(r.error || "만들기를 시작하지 못했어요");
+  }
+  UI.done("만들기 시작했어요", () => UI.go("/app/pieces.html"));
+}
+UI.$("#edit").onclick = editSheet; UI.$("#make").onclick = make;
+await load();
+=== pieces.html | home | 글 ===
+<div class="seg" id="seg"><button type="button" data-tab="generating">만드는 중</button><button type="button" data-tab="in_review">봐주세요</button><button type="button" data-tab="scheduled">예약됨</button><button type="button" data-tab="published">발행됨</button></div>
+<div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+--- script ---
+await UI.boot("home");
+const TAB = { generating: ["generating", "draft", "failed"], in_review: ["in_review"], scheduled: ["approved", "scheduled", "publishing", "awaiting_manual"], published: ["published"] };
+const STAGES = [["writing", "글 쓰는 중"], ["images", "사진 만드는 중"], ["checking", "검사 중"]];
+let tab = UI.qs.get("tab") || null, all = [], timer = null;
+function stepBar(p) { const i = p.stage === "failed" ? -1 : Math.max(0, STAGES.findIndex(([k]) => k === p.stage)); const done = p.stage === "done";
+  return `<div class="steps" style="padding:0 16px 12px 66px">${STAGES.map(([k, l], n) => `<div class="st ${done || n < i ? "done" : n === i ? "on" : ""}"><i>${done || n < i ? "✓" : n + 1}</i>${l}</div>`).join("")}</div>`; }
+function row(p) { const st = UI.PIECE_STATUS[p.status] || ["off", p.status]; const when = p.status === "published" ? UI.dateKST(p.publishedAt) : p.scheduledFor ? `${UI.dateKST(p.scheduledFor)} ${UI.timeKST(p.scheduledFor)}` : "";
+  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? stepBar(p) : ""); }
+function render() {
+  const cnt = Object.fromEntries(Object.entries(TAB).map(([k, v]) => [k, all.filter((p) => v.includes(p.status)).length]));
+  if (!tab) tab = cnt.generating ? "generating" : cnt.in_review ? "in_review" : cnt.scheduled ? "scheduled" : "in_review";
+  UI.$$("#seg button").forEach((b) => { b.classList.toggle("on", b.dataset.tab === tab); const n = cnt[b.dataset.tab]; b.textContent = b.textContent.replace(/\s\d+$/, "") + (n ? " " + n : ""); });
+  const list = all.filter((p) => TAB[tab].includes(p.status));
+  const EMPTY = { generating: ["지금 만드는 글이 없어요", "만들기에서 소재를 골라 디렉터에게 보내 보세요", "/app/create.html", "소재 고르기"], in_review: ["봐주실 글이 없어요", "글이 다 되면 여기에 «봐주세요»로 올라와요", null, null], scheduled: ["예약된 글이 없어요", "검수에서 «이대로 발행 예약»을 누르면 여기로 와요", null, null], published: ["아직 발행된 글이 없어요", "예약된 시각에 발행되면 여기에 쌓여요", null, null] };
+  const e = EMPTY[tab];
+  UI.$("#list").innerHTML = list.length ? list.map(row).join("") : `<div class="empty"><h3>${e[0]}</h3><p>${e[1]}</p>${e[2] ? `<a class="btn primary sm" href="${e[2]}">${e[3]}</a>` : ""}</div>`;
+  // 만드는 중이 남아 있으면 5초 폴링 · 없으면 중단
+  const busy = all.some((p) => p.status === "generating" || p.status === "draft");
+  if (busy && !timer) timer = setInterval(load, 5000); if (!busy && timer) { clearInterval(timer); timer = null; }
+}
+async function load() { const r = await UI.api("/api/pieces-list?status=all"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } all = r.pieces; render(); }
+UI.$$("#seg button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; render(); });
+await load();
+=== piece.html | home | 검수 ===
+<div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
+<article class="preview" id="pv" hidden><h1 id="ttl"></h1><div class="by" id="by"></div><div id="body"></div></article>
+<div class="group" id="gate" hidden></div>
+<div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
+--- script ---
+await UI.boot("home");
+const id = Number(UI.qs.get("id")); if (!id) { UI.go("/app/pieces.html"); return; }
+let P = null, dirty = false;
+const more = document.createElement("button"); more.type = "button"; more.className = "ic"; more.setAttribute("aria-label", "더보기"); more.innerHTML = UI.dots; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(more);
+/* 고지 블록 = bodyHtml 첫 요소 .disclosure(발행물 정본 · §16B) — 편집 불가 · 지워지면 되살린다 */
+let discHtml = "";
+function lockDisc(body) { const d = body.querySelector(".disclosure"); if (d) { d.contentEditable = "false"; d.setAttribute("data-lock", "1"); if (!d.querySelector("small")) d.insertAdjacentHTML("beforeend", '<small>제휴 고지 · 첫 줄에 자동으로 들어가요 · 지울 수 없어요</small>'); discHtml = d.outerHTML; } }
+function restoreDisc(body) { if (discHtml && !body.querySelector(".disclosure")) { body.insertAdjacentHTML("afterbegin", discHtml); UI.toast("고지 문구는 지울 수 없어요"); } }
+function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".disclosure small").forEach((x) => x.remove()); c.querySelectorAll(".disclosure").forEach((x) => { x.removeAttribute("contenteditable"); x.removeAttribute("data-lock"); }); return c.innerHTML; }
+function gateList(g) { return `<div class="gt">발행 전 검사 ${g.ok ? '<span class="pill ok">통과</span>' : '<span class="pill warn">확인 필요</span>'}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>`; }
+function render() {
+  const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = P.status === "in_review";
+  const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
+  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
+  const pv = UI.$("#pv"); pv.hidden = false; pv.className = `preview ${P.channel}`;
+  const ttl = UI.$("#ttl"); ttl.textContent = P.title || ""; ttl.contentEditable = editable ? "true" : "false";
+  UI.$("#by").innerHTML = `${UI.mark(P.channel, "sm")}<span>${P.accountHandle ? "@" + UI.esc(P.accountHandle) : ""} · ${UI.esc(UI.FORMAT[P.format] || P.format || "")}${P.meta?.tags?.length ? " · #" + P.meta.tags.map(UI.esc).join(" #") : ""}</span>`;
+  const body = UI.$("#body"); body.innerHTML = P.bodyHtml || ""; body.contentEditable = editable ? "true" : "false"; lockDisc(body);
+  const gate = UI.$("#gate"); if (P.gate) { gate.hidden = false; gate.innerHTML = gateList(P.gate); } else gate.hidden = true;
+  const cta = UI.$("#cta"); cta.hidden = false;
+  if (editable) { UI.$("#approve").hidden = false; UI.$("#approve").textContent = "이대로 발행 예약"; }
+  else if (P.status === "published" && P.externalUrl) { UI.$("#approve").hidden = true; cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">발행된 글 보기</a>`; }
+  else cta.hidden = true;
+  if (editable && !dirty) { const mark = () => { restoreDisc(body); if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ttl.addEventListener("input", mark); body.addEventListener("input", mark); }
+}
+async function load() { const r = await UI.api(`/api/pieces-get?id=${id}`); if (!r.ok) { UI.toast(r.error || "글을 찾을 수 없어요"); setTimeout(() => UI.go("/app/pieces.html"), 900); return; } P = r.piece; dirty = false; UI.$("#save").hidden = true; render(); }
+UI.$("#save").onclick = async () => {
+  const btn = UI.$("#save"); btn.disabled = true;
+  const r = await UI.api("/api/pieces-update", { body: { id, title: UI.$("#ttl").textContent.trim(), bodyHtml: cleanBody(UI.$("#body")) } }); btn.disabled = false;
+  if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
+  P.title = UI.$("#ttl").textContent.trim(); if (r.bodyHtml) { P.bodyHtml = r.bodyHtml; UI.$("#body").innerHTML = r.bodyHtml; lockDisc(UI.$("#body")); } P.gate = r.gate; P.gateOk = !!r.gate?.ok; UI.$("#gate").innerHTML = gateList(r.gate);
+  dirty = false; btn.hidden = true; const bad = (r.gate?.checks || []).filter((c) => !c.pass).length;
+  UI.toast(bad ? `저장했어요 · 검사 ${bad}개는 확인이 필요해요` : "저장했어요 · 검사 통과");
+};
+UI.$("#approve").onclick = async () => {
+  if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
+  const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
+  if (!r.ok) {
+    if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요.</p><div class="gate" style="padding:4px 0 8px">${r.gate.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>글 고치러 가기</button></div>`, { title: "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
+    return UI.toast(r.error || "예약하지 못했어요");
+  }
+  UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
+};
+more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
+  <button type="button" class="row tap" id="regen" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : "코인은 더 안 들어요 · 1회"}</span></div></button>
+  <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger)">버리기</span><span class="d">이 글은 발행하지 않아요</span></div></button></div><div id="rc"></div>`, { title: "이 글을", onOpen: (sh, close) => {
+    sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
+    sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
+  } });
+await load();
