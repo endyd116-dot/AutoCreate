@@ -118,11 +118,12 @@
   /* 막대 */
   .bars{display:flex;flex-direction:column;gap:12px;padding:6px 16px 12px}
   .bar{display:flex;align-items:center;gap:10px;font-size:13.5px}
-  .bar .n{width:76px;color:var(--sub);font-weight:500;display:flex;align-items:center;gap:8px}
+  .bar .n{width:96px;flex:none;color:var(--sub);font-weight:500;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar .n .mk{flex:none}
   .bar .track{flex:1;height:10px;border-radius:999px;background:var(--ground);overflow:hidden}
   .bar .fill{height:100%;border-radius:999px;background:var(--faint)}
   .bar.top .fill{background:var(--ink)}
-  .bar .v{width:58px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  .bar .v{width:58px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
   /* 달력 */
   .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:8px 10px 10px;text-align:center;font-size:12px}
   .cal .wd{color:var(--muted);font-weight:600;font-size:11px;padding-bottom:2px}
