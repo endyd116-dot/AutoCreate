@@ -17,12 +17,13 @@ import { db } from "../../db/index";
 import { jsonb, utcDate } from "../db-util";
 import { writeAudit } from "../audit";
 import { normalizeBlocks, type Block } from "../blocks";
-import { publishViaOf, type PublishPiece, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk } from "./contract";
+import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk } from "./contract";
+import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
 import { finalizePublish } from "./finalize";
 import { publishToBlogger } from "./blogger";
 import { publishToWordpress } from "./wordpress";
-import { enqueueJob, fleetState, publishJobKindOf, type RunnerPublishPayload } from "../runner-jobs";
+import { enqueueJob as enqueueRunnerJob, fleetState, publishJobKindOf, type RunnerJobKind, type RunnerPublishPayload } from "../runner-jobs";
 
 export * from "./contract";
 export { finalizePublish } from "./finalize";
@@ -93,7 +94,7 @@ export async function loadPublishAccount(tid: number, accountId: number): Promis
 
 /** 🔴 정본. piece 한 편을 채널에 맞게 발행한다(API 채널=직접 · 러너 채널=잡 적재). */
 export async function publish(piece: PublishPiece, account: PublishAccount | null, opts: PublishOpts = {}): Promise<PublishResult> {
-  const via = publishViaOf(piece.channel);
+  const via = strictPublishViaOf(piece.channel);
   if (!via) return { ok: false, reason: "unsupported_channel", retriable: false, error: "아직 이 채널로는 발행할 수 없어요.", detail: piece.channel };
 
   // ① 멱등 — 이미 나간 글은 두 번 나가지 않는다.
@@ -156,7 +157,7 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
       ...(prepared.scheduledFor ? { scheduledFor: prepared.scheduledFor } : {}),
       ...(opts.slotId ?? prepared.slotId ? { slotId: opts.slotId ?? prepared.slotId } : {}),
     };
-    const job = await enqueueJob({ tenantId: piece.tenantId, kind, accountId: account.id, pieceId: piece.id, payload });
+    const job = await enqueueRunnerJob({ tenantId: piece.tenantId, kind, accountId: account.id, pieceId: piece.id, payload });
     // 러너가 집어 가기 전에 크론이 같은 piece 를 또 집지 않도록 publishing 으로 옮긴다(잡 적재 자체도 멱등).
     await q(sql`UPDATE pieces SET status = 'publishing', updated_at = NOW() WHERE id = ${piece.id} AND status <> 'published'`);
     const runner = await fleetState(piece.tenantId);
@@ -199,6 +200,45 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
   if (fin.already) out.already = true;
   return out;
 }
+
+/* ─────────────────────── B 의 포트가 집어 가는 이름들 ───────────────────────
+ *   `lib/cron/publish-port.ts` 가 이 모듈에서 `publishPieceById` · `publishViaOf` · `enqueueJob` 을 찾는다.
+ *   포트의 타입에 맞춘 **어댑터**를 여기서 준다 — B 가 모양을 맞추느라 다시 짜지 않게.
+ */
+
+/**
+ * 포트용 채널 판정 — 포트의 `PublishViaOfFn` 은 null 을 모른다.
+ *   아직 발행을 못 하는 채널(클립·쓰레드…)은 «라우팅상» 포트의 기본 규칙과 같은 답을 주고,
+ *   실제 차단은 `publish()` 가 `unsupported_channel` 로 한다(판정기 두 벌 금지 · PITFALLS #11-b).
+ *   🔴 엄격한 판정(«못 올리는 채널 = null»)이 필요하면 `contract.ts` 의 동명 함수를 쓴다.
+ */
+export function publishViaOf(channel: string): "api" | "runner" {
+  return strictPublishViaOf(channel) ?? (connectMethodOf(channel) === "session" ? "runner" : "api");
+}
+
+/** 포트용 러너 잡 적재 어댑터(포트 시그니처: `(tid, input) => { ok, jobId, already? }`). */
+export async function enqueueJob(
+  tid: number,
+  input: { kind: RunnerJobKind; accountId?: number | null; pieceId?: number | null; payload?: Record<string, unknown>; priority?: number; dueAt?: Date | string | null },
+): Promise<{ ok: true; jobId: number; already?: boolean } | { ok: false; error: string }> {
+  try {
+    // ⚠️ AC-5 — drizzle sql 템플릿에 Date 를 바인딩하면 postgres-js 가 터진다. ISO 문자열로 바꿔 넘긴다.
+    const dueAt = input.dueAt instanceof Date ? input.dueAt.toISOString() : (input.dueAt ? String(input.dueAt) : undefined);
+    const r = await enqueueRunnerJob({
+      tenantId: tid, kind: input.kind,
+      accountId: input.accountId ?? null, pieceId: input.pieceId ?? null,
+      payload: input.payload ?? {},
+      ...(Number.isFinite(Number(input.priority)) ? { priority: Number(input.priority) } : {}),
+      ...(dueAt ? { dueAt } : {}),
+    });
+    return { ok: true, jobId: r.id, ...(r.created ? {} : { already: true }) };
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) };
+  }
+}
+
+/** 크론 `runner.reap`(5분) 이 부르는 이름 — 큐 SQL 을 B 가 다시 쓰지 않게 여기서도 내보낸다. */
+export { reapStaleJobs, fleetState as runnerFleetState } from "../runner-jobs";
 
 /** 편의 진입점 — 행 로드까지 B2 가 한다. B 의 publisher 는 id 만 주면 된다. */
 export async function publishPieceById(tenantId: number, pieceId: number, opts: PublishOpts = {}): Promise<PublishResult> {

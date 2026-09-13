@@ -12,8 +12,8 @@
  *      · 발행 **성공** → `lib/publish/finalize.ts finalizePublish` 만(posts·piece·slot·계정 카운터).
  *      · 발행 **실패**(러너 보고) → 이 파일이 종결한다(piece·slot `awaiting_manual` · job failed · accounts.last_error_kind).
  *        B 의 publisher 는 잡을 넘긴 뒤로는 그 piece 의 상태를 쓰지 않는다.
- *      · 계정 status 전이(cooldown/suspended/pending_login) → B 의 `lib/account-health.ts`. 여기선 신호(last_error_kind)만
- *        쓰고, 그 모듈이 있으면 넘겨준다(없으면 필드만 쓰고 넘어간다 — graceful).
+ *      · 계정 status 전이(cooldown/suspended/pending_login) → B 의 `lib/account-health.ts classifyAndApply`(정적 배선).
+ *        여기선 신호(last_error_kind)만 쓰고 그 함수에 넘긴다 — status 를 직접 쓰지 않는다.
  */
 import crypto from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
@@ -21,7 +21,8 @@ import { db } from "../db/index";
 import { jsonb, utcDate } from "./db-util";
 import { decryptObj, encryptObj } from "./creds-crypto";
 import { writeAudit } from "./audit";
-import { classifyRunnerBlock, type RunnerErrorKind, type RunnerBlock } from "./runner-block";
+import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
+import { classifyAndApply } from "./account-health";
 import { finalizePublish } from "./publish/finalize";
 import type { Block } from "./blocks";
 import type { RunnerFleetState } from "./publish/contract";
@@ -382,19 +383,15 @@ async function verifyPublishedUrl(url: string, title?: string | null): Promise<"
 }
 
 /** 계정 전이 신호 기록 — 필드만 쓴다. 전이 로직(B `lib/account-health.ts`)이 있으면 넘겨준다(없으면 graceful). */
-async function signalAccountError(tid: number, accountId: number, block: RunnerBlock): Promise<void> {
+async function signalAccountError(tid: number, accountId: number, block: RunnerBlock, pieceId?: number | null): Promise<void> {
   try {
     await q(sql`UPDATE accounts SET last_error_kind = ${block.kind}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`);
   } catch (e) { console.error("[runner-jobs] last_error_kind write failed", e); }
   if (block.accountAction === "none") return;
-  /* ⚠️ 임시 배선(B2-2 · 2026-09-14) — B 의 `lib/account-health.ts` 가 아직 이 워크트리에 없어 동적 import 로 둔다.
-     esbuild 번들에서 변수 specifier 는 해석되지 않으므로 **머지 후 반드시 정적 import 로 바꾼다**(그래야 실제로 불린다).
-     그때까지는 last_error_kind 만 남는다 — 조용한 축소가 아니라 «아직 안 배선됨»으로 보고돼 있다. */
-  try {
-    const spec = "./account-health";
-    const mod = await import(/* webpackIgnore: true */ spec) as { classifyAndApply?: (accountId: number, errorKind: RunnerErrorKind) => Promise<unknown> };
-    if (typeof mod.classifyAndApply === "function") await mod.classifyAndApply(accountId, block.kind);
-  } catch { /* B 가 아직 머지 전 — 신호만 남기고 넘어간다(두 곳에서 상태를 쓰지 않는다) */ }
+  /* 🔴 전이는 B 의 정본이 한다(정적 배선 · main 192a417 머지 후 2026-09-14).
+     실패해도 보고 자체는 성공시킨다 — 전이가 안 됐다고 잡 결과를 잃으면 안 된다. */
+  try { await classifyAndApply(accountId, block.kind, { tenantId: tid, detail: block.detail ?? block.message, pieceId }); }
+  catch (e) { console.error("[runner-jobs] classifyAndApply failed", e); }
 }
 
 async function notify(tid: number, kind: string, title: string, body: string, link?: string): Promise<void> {
@@ -441,7 +438,7 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
         result = ${jsonb({ ok: false, errorKind: block.kind, detail: block.detail ?? null, shotKey: fail.shotKey ?? null, attempts })},
         due_at = ${canRetry ? sql`NOW() + (${Math.min(30, attempts * 5)} * INTERVAL '1 minute')` : sql`NULL`},
         updated_at = NOW() WHERE id = ${jobId}`);
-    if (accountId) await signalAccountError(tid, accountId, block);
+    if (accountId) await signalAccountError(tid, accountId, block, pieceId || null);
     if (!canRetry && kind.startsWith("publish.") && pieceId) await failPublishPiece(tid, pieceId, block, fail.shotKey);
     if (!canRetry && block.needsHuman && accountId && !kind.startsWith("publish.")) {
       await notify(tid, "account_relogin", "계정 확인이 필요해요", block.message, "/app/accounts.html");

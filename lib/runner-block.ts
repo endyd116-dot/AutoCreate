@@ -13,23 +13,20 @@
  *   AM 은 11종(device_confirm·two_factor·console_api…)이었다. AC 계약은 7종으로 고정돼 있어 **좁은 원인은
  *   `detail` 에 원문으로 남기고 kind 는 계약 어휘로만** 낸다(어휘를 늘리면 B·A·DB 가 같이 흔들린다).
  *   좁은 원인이 처방을 가르는 자리(2단계 인증 = 자동화 구조적 불가)는 `humanOnly` 플래그로 표시한다.
+ *
+ *   ── 🔴 경계(메인 확정 2026-09-14 · 방향은 하나) ──────────────────────────────
+ *     이 파일(B2)  : **날것의 실패**(셀렉터·HTTP·본문·러너 마커) → `RunnerErrorKind`
+ *     account-health(B): `RunnerErrorKind` → 계정 status·action(전이표 **정본**)
+ *   그래서 어휘·전이표는 여기서 **정의하지 않고 import 한다**(사본 0 · 순환 0).
  */
 
-/** 계약 §2 — 이 7개가 전부다. DB `runner_jobs.error_kind`·`accounts.last_error_kind` 에 그대로 들어간다. */
-export type RunnerErrorKind =
-  | "login_fail"        // 아이디/비밀번호 불일치 · 2단계 인증 · 기기 등록 요구 — 사람이 다시 로그인해야 한다.
-  | "captcha"           // 봇 감지(자동입력 방지) — 사람이 헤드풀로 1회 풀어 주면 세션을 저장해 다음부터 건너뛴다.
-  | "rate_limited"      // 채널이 «너무 잦다»고 막음 — 식히고 캐던스를 줄인다.
-  | "suspended"         // 계정 정지·이용 제한 — 그 계정으로는 더 못 올린다(승계 대상).
-  | "selector_changed"  // 로그인은 됐는데 에디터에서 조작 지점을 못 찾음 — 🔴 우리가 고칠 것(고객 잘못 아님).
-  | "network"           // 연결·타임아웃 — 다음 회차 재시도.
-  | "unknown";          // 분류 불가(원문 보존).
+/* 어휘·전이표 정본 = `lib/account-health.ts`(계약 §4 가 거기에 배정했다). 여기서는 **읽기만** 한다. */
+import { ACCOUNT_ACTION_OF, RUNNER_ERROR_LABEL, isRunnerErrorKind, type RunnerErrorKind, type AccountAction } from "./account-health";
+export { ACCOUNT_ACTION_OF, RUNNER_ERROR_LABEL, isRunnerErrorKind };
+export type { RunnerErrorKind, AccountAction };
 
-export const RUNNER_ERROR_KINDS: readonly RunnerErrorKind[] = ["login_fail", "captcha", "rate_limited", "suspended", "selector_changed", "network", "unknown"];
-export function isRunnerErrorKind(v: unknown): v is RunnerErrorKind { return RUNNER_ERROR_KINDS.includes(String(v) as RunnerErrorKind); }
-
-/** 계정에 무엇을 해야 하나 — B 의 `lib/account-health.ts classifyAndApply` 가 이 표를 읽는다(계약 §4). */
-export type AccountAction = "relogin" | "cooldown" | "suspend" | "none";
+/** 계약 §2 의 7종 — 표(정본)에서 뽑는다(두 벌이 되지 않게). */
+export const RUNNER_ERROR_KINDS: readonly RunnerErrorKind[] = Object.freeze(Object.keys(ACCOUNT_ACTION_OF) as RunnerErrorKind[]);
 
 export interface RunnerBlock {
   kind: RunnerErrorKind;
@@ -51,51 +48,39 @@ export interface RunnerBlock {
   detail?: string;
 }
 
-const BLOCKS: Record<RunnerErrorKind, Omit<RunnerBlock, "kind" | "detail">> = {
+type BlockSpec = Pick<RunnerBlock, "message" | "needsHuman" | "retryable" | "ourBug">;
+const BLOCKS: Record<RunnerErrorKind, BlockSpec> = {
   login_fail: {
-    label: "로그인 실패",
     message: "계정에 로그인하지 못했어요. 비밀번호가 바뀌었거나 추가 확인이 필요해요 — «다시 로그인»을 눌러 주세요.",
-    needsHuman: true, retryable: false, accountAction: "relogin", ourBug: false,
+    needsHuman: true, retryable: false, ourBug: false,
   },
   captcha: {
     /* AM 2026-08-12 정정을 그대로 계승 — «로그인해도 또 걸립니다»는 사람이 할 일을 막는 거짓 안내였다.
        실측: 사람이 한 번 풀어 준 세션을 저장하자 다음 실행부터 로그인 단계 자체가 사라졌다. */
     message: "자동 로그인을 봇으로 보고 «자동입력 방지»가 떴어요. 창을 띄워 드릴 테니 한 번만 직접 로그인해 주세요 — 그 세션을 저장해 다음부터는 건너뜁니다.",
-    label: "봇 감지(캡차)",
-    needsHuman: true, retryable: false, accountAction: "relogin", ourBug: false,
+    needsHuman: true, retryable: false, ourBug: false,
   },
   rate_limited: {
-    label: "너무 잦음",
     message: "이 계정에 글이 너무 잦다고 채널이 막았어요. 24시간 쉬었다가 하루 발행 수를 한 건 줄일게요.",
-    needsHuman: false, retryable: true, accountAction: "cooldown", ourBug: false,
+    needsHuman: false, retryable: true, ourBug: false,
   },
   suspended: {
-    label: "계정 정지",
     message: "이 계정이 채널에서 제한됐어요. 예약된 글은 같은 채널의 다른 계정으로 옮길게요.",
-    needsHuman: true, retryable: false, accountAction: "suspend", ourBug: false,
+    needsHuman: true, retryable: false, ourBug: false,
   },
   selector_changed: {
-    label: "에디터 화면 변경",
     message: "로그인은 됐는데 글쓰기 화면에서 입력 자리를 찾지 못했어요. 채널이 화면을 바꾼 것으로 보여요 — 저희가 고칠 부분이라 담당이 확인합니다.",
-    needsHuman: false, retryable: true, accountAction: "none", ourBug: true,
+    needsHuman: false, retryable: true, ourBug: true,
   },
   network: {
-    label: "연결 문제",
     message: "연결이 끊기거나 응답이 너무 느렸어요. 다음 차례에 다시 시도할게요.",
-    needsHuman: false, retryable: true, accountAction: "none", ourBug: false,
+    needsHuman: false, retryable: true, ourBug: false,
   },
   unknown: {
-    label: "원인 미분류",
     message: "원인을 아직 분류하지 못했어요 — 남긴 사유를 그대로 보관했고 담당이 확인합니다.",
-    needsHuman: true, retryable: true, accountAction: "none", ourBug: false,
+    needsHuman: true, retryable: true, ourBug: false,
   },
 };
-
-/** 계정 전이 표(계약 §4) — B 는 이걸 import 해서 쓴다(두 곳에서 규칙을 다시 쓰지 않는다). */
-export const ACCOUNT_ACTION_OF: Readonly<Record<RunnerErrorKind, AccountAction>> =
-  Object.freeze(Object.fromEntries(RUNNER_ERROR_KINDS.map((k) => [k, BLOCKS[k].accountAction])) as Record<RunnerErrorKind, AccountAction>);
-export const RUNNER_ERROR_LABEL: Readonly<Record<RunnerErrorKind, string>> =
-  Object.freeze(Object.fromEntries(RUNNER_ERROR_KINDS.map((k) => [k, BLOCKS[k].label])) as Record<RunnerErrorKind, string>);
 
 /** 러너가 실패 문구에 박는 마커 — 서버는 마커가 있으면 추측하지 않는다(문구를 바꿔도 분류가 안 깨진다). */
 export const BLOCK_MARK = "[block:";
@@ -113,7 +98,7 @@ const HUMAN_ONLY_SIGNAL = /otp|2단계|two[_-]?factor|일회용\s?번호|인증�
 export function classifyRunnerBlock(errorKind: unknown, detail?: string | null): RunnerBlock {
   const raw = String(detail ?? "").slice(0, 400);
   const mk = (kind: RunnerErrorKind, extra?: Partial<RunnerBlock>): RunnerBlock => {
-    const o: RunnerBlock = { kind, ...BLOCKS[kind], ...extra };
+    const o: RunnerBlock = { kind, label: RUNNER_ERROR_LABEL[kind], accountAction: ACCOUNT_ACTION_OF[kind], ...BLOCKS[kind], ...extra };
     if (raw.trim()) o.detail = raw.slice(0, 120);
     return o;
   };
