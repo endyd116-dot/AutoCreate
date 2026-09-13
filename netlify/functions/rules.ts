@@ -113,7 +113,11 @@ export default async (req: Request): Promise<Response> => {
       const settings = scheduleSettingsOf(merged);
       // horizon·quietDays 가 바뀌면 달력을 다시 채운다(멱등)
       if ("horizonDays" in patch || "quietDays" in patch || "bestTimeMode" in patch) {
-        if ("quietDays" in patch && settings.quietDays.length) await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND status = 'planned' AND piece_id IS NULL AND slot_date = ANY(${settings.quietDays}::date[])`);
+        // ★C4 fix: JS 배열을 `= ANY(${arr}::date[])` 로 바인딩하면 postgres-js 가 문자열 하나로 보내 22P02(malformed array literal)로 죽는다 — 날짜를 하나씩 캐스팅해 IN 으로.
+        if ("quietDays" in patch && settings.quietDays.length) {
+          await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND status = 'planned' AND piece_id IS NULL
+            AND slot_date IN (${sql.join(settings.quietDays.map((d) => sql`${d}::date`), sql`, `)})`);
+        }
         await rollSlots(tid, settings.horizonDays);
       }
       await writeAudit({ tenantId: tid, action: "rules_settings", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: patch });
