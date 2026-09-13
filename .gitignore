@@ -28,3 +28,6 @@ Thumbs.db
 # runner local state
 runner/profiles/
 runner/.env
+
+# netlify dev artifacts
+deno.lock
