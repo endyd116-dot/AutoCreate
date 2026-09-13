@@ -22,6 +22,7 @@
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
+<p class="summary">담그기 10분 · 베이킹소다 5분 · 건조 30분이면 끝나요. 철수세미만 안 쓰면 돼요.</p>
 <h2>1. 바스켓은 물에 10분만 담가요</h2>
 <p>뜨거운 물에 세제 한 방울 넣고 10분 담가 두면 눌어붙은 기름이 절반은 떠요. 저는 이걸 안 하고 바로 문질러서 코팅을 긁었어요.</p>
 <figure><img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='400'%3E%3Crect width='640' height='400' fill='%23E8EBEE'/%3E%3C/svg%3E" alt=""><figcaption>10분 담가 둔 바스켓 — 기름이 떠오른 모습</figcaption></figure>
@@ -30,13 +31,16 @@
 <ul class="check"><li>바스켓 10분 담그기</li><li>베이킹소다 반죽 5분</li><li>헹군 뒤 완전히 말리기</li></ul>
 <hr>
 <p class="tip">코팅 제품은 철수세미 절대 금지 — 한 번 긁히면 냄새가 계속 배어요.</p>
+<a class="affiliate" href="https://link.coupang.com/a/mock" rel="nofollow sponsored"><img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Crect width='72' height='72' fill='%23E8EBEE'/%3E%3C/svg%3E" alt=""><span><span class="name">에어프라이어 세척솔 3종 세트</span><span class="price">8,900원</span></span><span class="go">쿠팡에서 보기</span></a>
 <p>이렇게 하니 한 달에 한 번이면 충분하더라고요. 여러분도 주말에 10분만 써 보세요.</p>
 <p class="tags">#에어프라이어청소 #베이킹소다 #주방청소</p>`;
-  const BODY_TISTORY = `<h2>에어프라이어 청소, 3분 요약</h2>
+  const BODY_TISTORY = `<nav class="toc"><ol><li>3분 요약</li><li>단계별 흔한 실수</li><li>자주 묻는 질문</li></ol></nav>
+<h2>에어프라이어 청소, 3분 요약</h2>
 <p>에어프라이어 바닥에 눌어붙은 기름은 «담그기 → 베이킹소다 → 건조» 세 단계면 끝난다. 각 단계에서 흔한 실수를 표로 정리했다.</p>
 <table><tr><th>단계</th><th>시간</th><th>흔한 실수</th></tr><tr><td>담그기</td><td>10분</td><td>찬물 사용</td></tr><tr><td>베이킹소다</td><td>5분</td><td>철수세미</td></tr><tr><td>건조</td><td>30분</td><td>젖은 채 조립</td></tr></table>
+<div class="adsense">애드센스 자리 · 발행 후 광고가 들어가요</div>
 <h3>자주 묻는 질문</h3>
-<p><b>Q. 식기세척기에 넣어도 되나요?</b><br>A. 바스켓만 가능. 본체는 물 세척 금지.</p>
+<dl class="faq"><dt>식기세척기에 넣어도 되나요?</dt><dd>바스켓만 가능. 본체는 물 세척 금지.</dd><dt>냄새가 남아요</dt><dd>레몬 껍질을 넣고 5분 돌리면 빠진다.</dd></dl>
 <ul class="check"><li>코팅 제품은 부드러운 수세미</li><li>세제는 한 방울</li></ul>
 <p>정리하면, 주 1회 10분이면 냄새와 연기 없이 쓸 수 있다.</p>`;
 

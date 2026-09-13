@@ -38,7 +38,7 @@ input,textarea,select{font:inherit;color:inherit}
   .page{padding:32px 40px 40px}
   .tabs{display:none}
 }
-@media (max-width:640px){ .rail{display:none} }
+@media (max-width:640px){ .rail{display:none} .page:has(>.cta:not([hidden])){padding-bottom:calc(var(--tab-h) + 96px)} }
 @media (min-width:1100px){ .page.two{max-width:1000px;display:grid;grid-template-columns:minmax(0,640px) 300px;gap:40px;align-content:start} .page.two>.aside{border-left:1px solid var(--line);padding-left:32px} }
 @media (max-width:1099px){ .page.two>.aside{display:none} }
 
@@ -250,3 +250,9 @@ input,textarea,select{font:inherit;color:inherit}
 .preview.tistory blockquote{margin:14px 0;padding:10px 16px;border-left:4px solid var(--t);background:var(--ground);border-radius:0 8px 8px 0}
 .preview.tistory ul.check{list-style:none;padding:0} .preview.tistory ul.check li{padding-left:24px;position:relative} .preview.tistory ul.check li::before{content:"✓";position:absolute;left:0;color:var(--t);font-weight:800}
 .preview.tistory .ad{border:1px dashed var(--faint);border-radius:8px;padding:14px;text-align:center;color:var(--muted);font-size:12.5px;margin:0 0 16px}
+/* [v1.1] 블록 렌더 class 계약(B renderBlocksHtml → A 미리보기): nav.toc · p.summary · a.affiliate(img·.name·.price) · div.adsense(«광고» 라벨) · dl.faq · p.tip · ul.check · p.tags */
+.preview nav.toc{background:var(--ground);border-radius:12px;padding:12px 16px 12px 32px;margin:0 0 16px;font-size:14px} .preview nav.toc::before{content:"목차";display:block;margin:0 0 4px -16px;font-size:12.5px;font-weight:700;color:var(--muted)} .preview nav.toc ol{margin:0;padding:0} .preview nav.toc li{margin:2px 0}
+.preview p.summary{border-left:3px solid var(--ink);padding:4px 0 4px 14px;color:var(--sub);font-size:14.5px;margin:0 0 18px}
+.preview a.affiliate{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px;margin:0 0 16px;text-decoration:none;color:inherit} .preview a.affiliate img{width:72px;height:72px;border-radius:10px;object-fit:cover;flex:none;min-height:0;background:var(--press)} .preview a.affiliate .name{display:block;font-weight:700;font-size:14.5px;line-height:1.4} .preview a.affiliate .price{display:block;color:var(--sub);font-size:13.5px;margin-top:2px;font-variant-numeric:tabular-nums} .preview a.affiliate .go{margin-left:auto;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.preview div.adsense{border:1px dashed var(--faint);border-radius:8px;padding:22px 14px;text-align:center;color:var(--muted);font-size:12.5px;margin:0 0 16px;position:relative} .preview div.adsense::before{content:"광고";position:absolute;top:6px;left:8px;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--ground);border-radius:4px;padding:1px 5px}
+.preview dl.faq{margin:0 0 16px} .preview dl.faq dt{font-weight:700;margin:10px 0 2px} .preview dl.faq dt::before{content:"Q. "} .preview dl.faq dd{margin:0;color:var(--sub)} .preview dl.faq dd::before{content:"A. "}
