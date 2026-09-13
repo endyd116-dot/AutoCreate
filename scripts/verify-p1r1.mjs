@@ -70,7 +70,7 @@ const S = {
   topic: { id: "number", title: "string", angle: "string|null?", channelHint: "string|null?", score: "number", status: "string", factors: "object", expiresAt: "string" },
   factors: { volume: "number?", growthPct: "number?", competition: "string?", intent: "string", pain: "number?", seasonal: "string?", performance: "number?" },
   brief: { id: "number", topicId: "number", goal: "string", mode: "string", coinCost: "number", coinsLeft: "number", reasons: "array", pieces: "array" },
-  pieceSpec: { key: "string", channel: "string", accountId: "number|null", accountHandle: "string|null", format: "string", emotionKey: "string", composition: "string", lengthHint: "object", images: "object", monetize: "object", schedule: "object", coinCost: "number" },
+  pieceSpec: { key: "string", channel: "string", accountId: "number|null", accountHandle: "string|null", format: "string", emotionKey: "string", composition: "string", lengthHint: "object", images: "object", monetize: "object", schedule: "object", coinCost: "number", angle: "string?" },   // [v1.2] angle 추가
   confirm: { ok: "boolean", briefId: "number", pieceIds: "array", coinsCharged: "number", coinsLeft: "number" },
   pieceRow: { id: "number", channel: "string", accountHandle: "string|null", kind: "string", format: "string|null", title: "string|null", status: "string", stage: "string", scheduledFor: "string?", publishedAt: "string?", externalUrl: "string?", coverUrl: "string?", gateOk: "boolean", failReason: "string?", createdAt: "string" },
   pieceDetailExtra: { bodyHtml: "string", blocks: "array", images: "array", meta: "object", gate: "object", topicTitle: "string|null", regenCount: "number" },
@@ -300,9 +300,10 @@ async function main() {
   const slots = sl.json?.slots || [];
   if (slots[0]) checkShape("Slot 모양", slots[0], S.slot);
   const planned = slots.filter((s) => s.origin === "auto" && s.channel === "naver_blog" && s.status !== "skipped");   // 건너뛴 슬롯은 편성이 아니다
-  rec("슬롯 7일치(주3회 → ≥3)", planned.length >= 3 && planned.length <= 4, `${from}~${to} auto ${planned.length}개 · 전체 ${slots.length}`, planned.map((s) => `${s.date}${s.publishAt ? "@" + s.publishAt : ""}`).join(","));
+  rec("슬롯 7일치(주3회 → 3~4)", planned.length >= 3 && planned.length <= 4, `${from}~${to} auto ${planned.length}개 · 전체 ${slots.length}`, planned.map((s) => `${s.date}${s.publishAt ? "@" + s.publishAt : ""}`).join(","));
   const dates = planned.map((s) => s.date); rec("슬롯 날짜 중복 0(활성 규칙 1개 기준)", new Set(dates).size === dates.length, dates.join(","));
-  const stuckList = (all.json?.pieces || []).filter((x) => x.status === "generating" && Date.now() - new Date(x.createdAt).getTime() > 20 * 60 * 1000);
+  const allNow = await call(jar, "/api/pieces-list", { query: { status: "generating" } });
+  const stuckList = (allNow.json?.pieces || []).filter((x) => Date.now() - new Date(x.createdAt).getTime() > 20 * 60 * 1000);
   rec("생성중에 멈춘 글 0(20분 초과)", stuckList.length === 0, stuckList.map((x) => x.id + ":" + x.stage).join(",") || "없음");
   rec("수동 슬롯(origin manual) 존재", slots.some((s) => s.origin === "manual" && s.pieceId === piece.id), "");
   const quiet = planned[1]?.date;
