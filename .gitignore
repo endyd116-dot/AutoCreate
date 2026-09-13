@@ -31,3 +31,6 @@ runner/.env
 
 # netlify dev artifacts
 deno.lock
+
+# per-worktree overrides
+.claude/settings.local.json
