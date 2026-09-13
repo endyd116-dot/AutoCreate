@@ -73,6 +73,11 @@ return json({ ok: true, pieces });
 - 🔴 **jsonb 쓰기 = `sql.json(obj)`만** (PITFALLS #1). 쓴 직후 `jsonb_typeof()` 확인까지가 쓰기다.
 - 파괴적 DDL·라이브 데이터 변경·공개 토글은 **사장님 승인 후**.
 
+### 4.5b 시각 — 🔴 저장 UTC · 표시 KST 전면(DESIGN §13.5)
+- 화면은 `UI.timeKST/dateKST/ago`·`OPS.dt` 만 사용(timeZone 고정). timeZone 없는 `toLocale*`·`datetime-local`·`getHours()` 업무 판단 금지.
+- 서버의 오늘·주·월·마감·produceHour 판정은 KST(SQL `AT TIME ZONE 'Asia/Seoul'` 또는 `lib/cron/base.ts` 소도구). 크론 표현식은 UTC, 업무 시각은 스텝 안에서 KST 판정.
+- 메일·알림 문구의 시각도 KST. 내보내기는 «(KST)» 표기.
+
 ### 4.6 멀티테넌트
 - 모든 도메인 테이블 `tenant_id`. 모든 쿼리·발행·집계 tenant 스코프. 교차 누수 금지.
 

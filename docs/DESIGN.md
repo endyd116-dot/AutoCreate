@@ -811,6 +811,24 @@ AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스�
 - 컴포넌트 12개는 그대로. `BottomSheet`가 ≥1100px에서 `SidePanel`로 렌더되는 것뿐(같은 컴포넌트·같은 내용).
 - 시안 정본: `docs/screens-v1.html`(폰) · `docs/screens-web-v1.html`(데스크톱).
 
+### 13.5 🔴 시각 표기 규약 — **모든 화면은 한국 시간(KST)** (사장님 지시 2026-09-14)
+
+**고객 화면·운영센터·메일·알림·내보내기까지 전부 KST 로 보여 준다. 보는 사람의 기기 시간대와 무관하다.** 해외에서 접속해도 «내일 07:30» 은 한국 기준 07:30 이다.
+
+| 층 | 규칙 |
+|---|---|
+| 저장 | **UTC**(`timestamp without time zone` = UTC · PITFALLS #4). DB 에 KST 를 넣지 않는다. |
+| 응답(API) | **ISO 8601 UTC 문자열**(`…Z`). 서버가 «07:30» 같은 완성된 문자열을 만들어 보내지 않는다(포맷은 화면의 몫). 날짜만 필요한 값(`slot_date`·`day`)은 **KST 기준 날짜**(`YYYY-MM-DD`)로 이미 고정된 값이다. |
+| 화면 | **`UI.timeKST` / `UI.dateKST` / `UI.ago` / `OPS.dt` 만 쓴다**(내부에서 `timeZone:"Asia/Seoul"` 고정). 🔴 금지: `new Date(x).toLocaleString()`·`toLocaleDateString()` 을 **timeZone 없이** 호출 · `getHours()/getDate()` 로 업무 판단 · `<input type="datetime-local">`(기기 시간대로 해석된다 — 시간 칩을 쓴다). |
+| 입력 | 사용자가 고르는 시각·날짜·요일·«쉬는 날»은 **전부 KST 로 해석**한다. 화면이 KST 시각을 UTC ISO 로 바꿔 보내거나, «07:30」 같은 KST 벽시계 값을 그대로 보내고 서버가 KST 로 해석한다 — **둘 중 하나를 계약에 글자로 적는다**(섞이면 9시간 어긋난다). |
+| 서버 계산 | 오늘·이번 주(월~일)·이번 달·마감 시각(02:00·08:00)·`produceHour` 는 **KST 기준**. 계산은 SQL 안에서 `(NOW() AT TIME ZONE 'Asia/Seoul')` 로 한다(드라이버 시간대에 기대지 않는다). JS 에서 필요하면 `lib/cron/base.ts` 의 KST 소도구(`kstHour`·`kstTodayStartUtc`·`kstWeekStartUtc`)만 쓴다. |
+| 크론 | Netlify 스케줄은 UTC 로 돈다. **«매일 06:00」 같은 업무 시각은 스텝 안에서 KST 로 판정**한다(`kstHour(now) === produceHour`). cron 표현식에 KST 를 넣지 않는다. |
+| 메일·알림·푸시 | 문구에 들어가는 시각도 KST(«내일 오전 7시 30분에 올라가요»). 서버가 문구를 만들 때 KST 로 포맷한다. |
+| 내보내기(CSV·리포트) | KST 로 쓰되 헤더나 열 이름에 **«(KST)»** 를 붙인다. 기계 판독용 열을 함께 낼 때만 UTC ISO. |
+| 외부 값 | 채널·수익 API 가 주는 시각은 그쪽 시간대다 — **받는 즉시 UTC 로 정규화**하고, 그 매체의 «집계일」이 KST 와 다르면(예: 애드센스 PT 기준) 화면에 기준을 한 줄로 밝힌다(«애드센스 기준일»). |
+
+**검증 항목(C)**: 기기 시간대를 UTC·America/New_York 로 바꿔 화면을 열어도 표시 시각이 동일한가 · `grep` 으로 timeZone 없는 `toLocale*` 0건 · `datetime-local` 0건 · 편성 규칙에 07:30 을 넣으면 slot.publish_at 이 UTC 22:30(전날) 로 저장되고 화면엔 07:30 으로 보이는가.
+
 ### 13.4 디자인 토큰(`public/css/ac.css`)
 - 폰트 Pretendard(AM 동일) · 스케일 13/15/17/20/24/32/40.
 - 색: ground `#F7F8FA` · surface `#FFFFFF` · text `#191F28` · muted `#6B7684` · brand `#3060F0` · money `#12B886` · warn `#F59F00` · danger `#F03E3E`. 다크는 토큰만 교체.
