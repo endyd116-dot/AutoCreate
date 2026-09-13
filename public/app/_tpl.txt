@@ -17,8 +17,8 @@ async function load() {
   if (!r.topics.length) { g.innerHTML = head + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p><button class="btn primary sm" type="button" id="refresh2">새로 뽑기</button></div>`; bindRefresh(); UI.$("#refresh2").onclick = refresh; return; }
   g.innerHTML = head + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm primary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
   bindRefresh();
-  UI.$$("[data-go]").forEach((b) => b.onclick = () => UI.go(`/app/director.html?topicId=${b.dataset.go}`));
-  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
+  UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
+  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
   // 좌측 스와이프 = 넘김
   UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
 }
@@ -245,3 +245,95 @@ await UI.boot("home");
 --- script ---
 await UI.boot("account");
 const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/support-ticket-create", { body: d }); if (!r.ok) { UI.toast(r.error || "보내지 못했어요"); return; } UI.done("보냈어요", () => location.href = "/app/account.html"); });
+=== director.html | create | 디렉터 ===
+<div class="confirm"><div class="q">이 소재로</div><div class="big" id="big"><span class="sk" style="display:inline-block;width:70%"></span></div></div>
+<div class="group" id="targets"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="kv"></div>
+<div class="group" id="why"></div>
+<div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="edit" style="flex:0 0 40%">손보기</button><button class="btn primary" type="button" id="make">만들기</button></div>
+--- script ---
+const me = await UI.boot("create"); if (!me) return;
+const topicId = Number(UI.qs.get("topicId")); if (!topicId) { UI.go("/app/create.html"); return; }
+const STYLE = [["photo", "사진"], ["illust", "일러스트"], ["infographic", "인포그래픽"]];
+const FORMATS = Object.entries(UI.FORMAT);
+const TIMES = [["07:30", "07:30"], ["12:00", "12:00"], ["21:00", "21:00"]];
+let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "";
+const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
+const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
+const cost = (p) => 1 + (p.images?.count || 0);
+const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
+const desc = (p) => [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
+
+async function load() {
+  const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
+  if (!r.ok) { UI.toast(r.error || "제안을 만들지 못했어요"); setTimeout(() => UI.go("/app/create.html"), 900); return; }
+  brief = r.brief; pieces = brief.pieces.map((p) => JSON.parse(JSON.stringify(p))); accounts = a.ok ? a.accounts : [];
+  if (!topicTitle && t?.ok) topicTitle = (t.topics.find((x) => x.id === brief.topicId) || {}).title || "";
+  render();
+}
+function render() {
+  const live = pieces.filter((p) => !p.drop);
+  UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
+  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}</span><span class="d wrap">${UI.esc(desc(p))}<br><span style="color:var(--faint)">${UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}</div></div>`).join("")
+    : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
+  const tot = total();
+  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+  UI.$("#why").innerHTML = `<div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div>`;
+  UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
+}
+/* ── 손보기 시트(DESIGN §5.5 항목 전부) ── */
+function editSheet() {
+  const html = pieces.map((p, i) => { const accs = accounts.filter((a) => a.channel === p.channel); const emo = Object.entries(UI.EMOTION); if (p.emotionKey && !UI.EMOTION[p.emotionKey]) emo.unshift([p.emotionKey, p.emotionKey]);
+    const at = UI.utc(p.schedule.at); const hhmm = UI.timeKST(p.schedule.at); const dayOff = dayWord(p.schedule.at) === "모레" ? 2 : 1;
+    return `<section data-i="${i}" style="padding:4px 0 12px;${i ? "border-top:1px solid var(--line);margin-top:8px" : ""}">
+    <div class="fr" style="border:0"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(p.channel, "sm")}<span>${UI.esc(UI.chLabel(p.channel))}<small>${p.drop ? "이번엔 안 만들어요" : `${cost(p)}코인`}</small></span></div><button class="toggle" type="button" data-drop aria-checked="${!p.drop}" aria-label="이 채널 만들기"></button></div>
+    <div data-body ${p.drop ? "hidden" : ""}>
+      ${accs.length ? `<div class="sec">계정</div>${UI.seg("acc", accs.map((a) => [a.id, "@" + a.handle]), p.accountId)}` : `<div class="sec">계정</div><p class="muted" style="margin:0;font-size:13px">연결된 ${UI.esc(UI.chLabel(p.channel))} 계정이 없어요 · <a href="/app/accounts.html" style="text-decoration:underline">계정 연결</a></p>`}
+      <div class="sec">감성</div>${UI.chips("emo", emo, p.emotionKey)}
+      <div class="sec">구성</div>${UI.chips("fmt", FORMATS, p.format)}
+      <div class="fr"><div class="fl">이미지<small>1장 = 1코인</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
+      ${UI.seg("style", STYLE, p.images?.style || "photo")}
+      <div class="fr"><div class="fl">제휴 상품 넣기<small>고지 문구는 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
+      <div data-affbody ${p.monetize?.affiliate ? "" : "hidden"}><input class="input" data-pq placeholder="상품 검색어 · 예: 에어프라이어 세척솔" value="${UI.esc(p.monetize?.affiliate?.productQuery || "")}" style="margin-bottom:8px">${UI.seg("slot", [["mid", "중간"], ["end", "끝"], ["both", "둘 다"]], p.monetize?.affiliate?.slot || "end")}</div>
+      <div class="sec">언제</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${UI.seg("day", [[1, "내일"], [2, "모레"]], dayOff)}${UI.chips("time", TIMES.some(([v]) => v === hhmm) ? TIMES : [[hhmm, hhmm], ...TIMES], hhmm)}</div>
+    </div></section>`; }).join("");
+  UI.sheet(html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
+    UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh);
+    sh.querySelectorAll("section").forEach((sec) => {
+      const body = sec.querySelector("[data-body]"); const tg = sec.querySelector("[data-drop]");
+      UI.toggle(tg, (on) => { body.hidden = !on; sum(sh); });
+      const aff = sec.querySelector("[data-aff]"); UI.toggle(aff, (on) => { sec.querySelector("[data-affbody]").hidden = !on; });
+    });
+    sh.querySelector("#apply").onclick = () => {
+      sh.querySelectorAll("section").forEach((sec) => { const p = pieces[Number(sec.dataset.i)];
+        p.drop = sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true"; if (p.drop) return;
+        const acc = UI.chipVal(sec, "acc"); if (acc != null) { p.accountId = Number(acc); p.accountHandle = (accounts.find((a) => a.id === Number(acc)) || {}).handle || null; }
+        p.emotionKey = UI.chipVal(sec, "emo") || p.emotionKey; p.format = UI.chipVal(sec, "fmt") || p.format;
+        p.images = { ...(p.images || {}), count: UI.stepVal(sec, "img"), style: UI.chipVal(sec, "style") || "photo" };
+        const affOn = sec.querySelector("[data-aff]").getAttribute("aria-checked") === "true";
+        p.monetize = { ...(p.monetize || {}), affiliate: affOn ? { provider: "coupang", productQuery: sec.querySelector("[data-pq]").value.trim(), slot: UI.chipVal(sec, "slot") || "end" } : null, adDisclosure: affOn };
+        p.schedule = { ...(p.schedule || {}), at: kstAt(Number(UI.chipVal(sec, "day") || 1), UI.chipVal(sec, "time") || "07:30") };
+        p.coinCost = cost(p); });
+      close(); render(); UI.toast("적용했어요");
+    };
+  } });
+  function sum(sh) { let t = 0; sh.querySelectorAll("section").forEach((sec) => { if (sec.querySelector("[data-drop]").getAttribute("aria-checked") === "true") t += 1 + UI.stepVal(sec, "img"); }); const el = sh.querySelector("#sum"); if (el) el.textContent = t; }
+}
+/* ── 만들기 ── */
+async function make() {
+  const btn = UI.$("#make"); btn.disabled = true;
+  const patches = pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
+    const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
+    if (p.images.count !== o.images.count || p.images.style !== o.images.style) patch.images = { count: p.images.count, style: p.images.style };
+    if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
+    if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
+  const body = { briefId: brief.id }; if (patches.length) body.pieces = patches;
+  const r = await UI.api("/api/director-confirm", { body }); btn.disabled = false;
+  if (!r.ok) {
+    if (r.step === "coin_short") return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? brief.coinsLeft}코인이 있고 ${r.need ?? total()}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: `코인이 ${Math.max(0, (r.need ?? total()) - (r.have ?? brief.coinsLeft))}개 부족해요` });
+    return UI.toast(r.error || "만들기를 시작하지 못했어요");
+  }
+  UI.done("만들기 시작했어요", () => UI.go("/app/pieces.html"));
+}
+UI.$("#edit").onclick = editSheet; UI.$("#make").onclick = make;
+await load();
