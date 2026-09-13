@@ -141,7 +141,7 @@
   /* ── 상태 어휘(계약 §1·§4·§5 → 사람말 알약) ── */
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
   UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약됨"], scheduled: ["off", "예약됨"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
-  UI.SLOT_STATUS = { planned: ["off", "소재 정하는 중"], assigned: ["off", "예정"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], scheduled: ["off", "예약됨"], published: ["ok", "발행됨"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"], coin_short: ["warn", "코인 부족"] };
+  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], scheduled: ["off", "예약됨"], published: ["ok", "발행됨"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"], coin_short: ["warn", "코인 부족"] };
   UI.pill = (map, s) => { const p = map[s] || ["off", s]; return `<span class="pill ${p[0]}">${UI.esc(p[1])}</span>`; };
   UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스" };
   UI.EMOTION = { warm: "친근·따뜻", neutral: "담백·정리", witty: "재치", urgent: "급함·해결", calm: "차분" };
@@ -149,10 +149,10 @@
   UI.dots = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
 
   /* ── 폼 프리미티브: 스테퍼·칩(시트 안 옵션은 칩/세그먼트/토글만 — 입력창 최소) ── */
-  UI.stepper = (name, val, min, max, suffix = "") => `<span class="stepper" data-stepper="${name}" data-min="${min}" data-max="${max}" data-suffix="${UI.esc(suffix)}"><button type="button" data-dec aria-label="줄이기">−</button><span class="val" data-val="${val}">${val}${UI.esc(suffix)}</span><button type="button" data-inc aria-label="늘리기">+</button></span>`;
+  UI.stepper = (name, val, min, max, suffix = "", step = 1) => `<span class="stepper" data-stepper="${name}" data-min="${min}" data-max="${max}" data-step="${step}" data-suffix="${UI.esc(suffix)}"><button type="button" data-dec aria-label="줄이기">−</button><span class="val" data-val="${val}">${val}${UI.esc(suffix)}</span><button type="button" data-inc aria-label="늘리기">+</button></span>`;
   UI.bindSteppers = (root, onChange) => $$("[data-stepper]", root).forEach((st) => {
     const v = $(".val", st); const set = (n) => { n = Math.min(+st.dataset.max, Math.max(+st.dataset.min, n)); v.dataset.val = n; v.textContent = n + (st.dataset.suffix || ""); $("[data-dec]", st).disabled = n <= +st.dataset.min; $("[data-inc]", st).disabled = n >= +st.dataset.max; if (onChange) onChange(st.dataset.stepper, n); };
-    $("[data-dec]", st).onclick = () => set(+v.dataset.val - 1); $("[data-inc]", st).onclick = () => set(+v.dataset.val + 1);
+    const sp = +st.dataset.step || 1; $("[data-dec]", st).onclick = () => set(+v.dataset.val - sp); $("[data-inc]", st).onclick = () => set(+v.dataset.val + sp);
   });
   UI.stepVal = (root, name) => Number($(`[data-stepper="${name}"] .val`, root)?.dataset.val || 0);
   /* opts = [[value,label]] · sel = value | [values](multi) */

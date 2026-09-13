@@ -93,7 +93,8 @@
       const date = ymd(d); const wd = new Date(date + "T00:00:00Z").getUTCDay();
       if ((S.settings.quietDays || []).includes(date)) continue;
       for (const r of S.rules) {
-        if (!r.active || !(r.weekdays || []).includes(wd)) continue;
+        const wds = r.weekdays && r.weekdays.length ? r.weekdays : [[], [3], [1, 4], [1, 3, 5], [1, 2, 4, 5], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6]][Math.min(7, r.every === "week" ? r.count : 7)]; // 요일 없으면 주 N회를 균등 분산(서버 slots.roll 흉내)
+        if (!r.active || !wds.includes(wd)) continue;
         if (S.slots.some((s) => s.date === date && s.channel === r.channel && s.origin === "auto")) continue;
         const acc = r.accountMode === "fixed" ? S.accounts.find((a) => a.id === r.accountId) : S.accounts.find((a) => a.channel === r.channel && a.status === "active");
         const piece = d <= 2 ? S.pieces.find((p) => p.channel === r.channel && p.status !== "published" && !S.slots.some((s) => s.pieceId === p.id)) : null;
@@ -173,11 +174,15 @@
       if (t) t.status = "picked"; br._charged = true; br._pieceIds = ids; return { ok: true, briefId: br.id, pieceIds: ids, coinsCharged: need, coinsLeft: S.coins, status: 202 }; },
     /* §4 글 */
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
-    "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); return { ok: true, piece: { ...pieceRow(p), bodyHtml: p.bodyHtml, blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+    "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
+${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
+      return { ok: true, piece: { ...pieceRow(p), bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     "pieces-approve": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
     "pieces-regenerate": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; },
-    "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title; if (b.bodyHtml) p.bodyHtml = b.bodyHtml; p.gate = gate(true); p.gateOk = true; return { ok: true, gate: p.gate, bodyHtml: p.bodyHtml }; },
+    "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title; if (b.bodyHtml) p.bodyHtml = b.bodyHtml.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); p.gate = gate(true); p.gateOk = true;
+      const body = p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
+${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; },
     /* §5 규칙·슬롯 */
     "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3 }),
     "rules-save": (b) => { if ((b.rules || []).filter((r) => r.active !== false).length > 3) return err("limit", "이 요금제에서는 규칙을 3개까지 만들 수 있어요."); const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
