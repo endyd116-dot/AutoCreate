@@ -116,8 +116,8 @@ input,textarea,select{font:inherit;color:inherit}
 .btn:active{transform:scale(.97)} .btn[disabled]{opacity:.35;pointer-events:none}
 .btn.primary{background:var(--brand);color:var(--on-brand)} .btn.secondary{background:var(--press);color:var(--ink)} .btn.ghost{background:transparent;color:var(--sub);height:44px;font-weight:600}
 .btn.sm{height:40px;font-size:14px;border-radius:12px;flex:none;padding:0 14px}
-.btn.danger{background:var(--danger-soft);color:var(--danger)}
-@media (min-width:641px){ .cta{position:static;padding:20px 0 0;background:none;justify-content:flex-end} .btn{flex:0 1 auto;min-width:160px;height:48px} .cta.nobar{padding-bottom:0} }
+.btn.danger{background:var(--danger-soft);color:var(--danger)} .btn.w40{flex:0 0 40%}
+@media (min-width:641px){ .cta{position:static;padding:20px 0 0;background:none;justify-content:flex-end} .btn{flex:0 1 auto;min-width:160px;height:48px} .btn.w40{flex:0 1 auto} .cta.nobar{padding-bottom:0} }
 
 /* 하단 탭 */
 .tabs{position:fixed;left:0;right:0;bottom:0;height:var(--tab-h);border-top:1px solid var(--line);display:flex;justify-content:space-around;align-items:center;padding:0 6px max(4px,env(safe-area-inset-bottom));background:var(--surface);z-index:7}
