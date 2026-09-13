@@ -19,9 +19,9 @@
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
-import { jsonb } from "../db-util";
+import { jsonb, utcDate } from "../db-util";
 import { approvePiece } from "../content-approve";
-import { kstHour, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
+import { kstHour, kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -66,11 +66,12 @@ export const reviewDeadlineStep: CronStep = {
     } else {
       // require_confirm — 자동 승인 0. D-0 08:00 에 한 번 부르고, 발행 시각을 넘기면 «안 나갔다»를 남긴다.
       if (hour === 8) {
-        const [today] = await q(sql`SELECT COUNT(*) AS c FROM slots s JOIN pieces p ON p.id = s.piece_id
+        const [today] = await q(sql`SELECT COUNT(*) AS c, MIN(s.publish_at) AS first_at FROM slots s JOIN pieces p ON p.id = s.piece_id
           WHERE s.tenant_id = ${ctx.tid} AND s.slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date AND p.status = 'in_review'`);
         const cnt = n(today?.c);
+        const when = kstTimeText(utcDate(today?.first_at), ctx.now);   // 문구 속 시각은 KST(§13.5)
         if (cnt && await notifyOnce(ctx.tid, "review_confirm", `오늘 나갈 글 ${cnt}건을 확인해 주세요`,
-          "«반드시 확인» 으로 설정해 두셨어요. 승인하지 않으면 오늘은 나가지 않아요.", "/app/pieces.html?status=in_review", { byKind: true })) notified++;
+          `«반드시 확인» 으로 설정해 두셨어요. 승인하지 않으면 오늘은 나가지 않아요.${when ? ` 첫 글은 ${when} 예정이에요.` : ""}`, "/app/pieces.html?status=in_review", { byKind: true })) notified++;
       }
       const late = await q(sql`SELECT p.id, p.title, s.id AS sid FROM slots s JOIN pieces p ON p.id = s.piece_id
         WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status = 'in_review'

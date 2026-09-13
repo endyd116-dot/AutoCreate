@@ -17,6 +17,7 @@ import { coinCostOf } from "./coin-table";
 import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
+import { guardSlot, type PieceOrigin } from "./slot-gate";
 import { seasonalFor } from "./kr-calendar";
 
 const n = (v: unknown) => Number(v || 0);
@@ -149,6 +150,14 @@ export type ConfirmResult =
   | { ok: false; step: "coin_short"; error: string; need: number; have: number }
   | { ok: false; step: string; error: string };
 
+/**
+ * confirm 옵션(P1R2 — 자동 편성).
+ *   🔴 `origin` 기본값은 **"auto"(fail-closed)**: 아무 말 없이 부르면 게이트를 탄다(CLAUDE §4.7 · PITFALLS AC-2).
+ *      사람이 누르는 경로(`/api/director-confirm`)는 `origin:"manual"` 을 **명시**한다. 빼먹으면 열리는 설계는 결국 열린다.
+ *   `slotId` 가 오면 **새 슬롯을 만들지 않고 그 편성 자리를 쓴다**(크론 경로) — 없으면 지금처럼 새 슬롯을 만든다(사람 경로).
+ */
+export interface ConfirmOpts { slotId?: number | null; origin?: PieceOrigin }
+
 async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecPatch[]): Promise<{ ok: true; specs: PieceSpec[] } | { ok: false; error: string }> {
   const accounts = await listAccounts(tid);
   const out: PieceSpec[] = [];
@@ -179,7 +188,9 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
   return { ok: true, specs: out };
 }
 
-export async function confirm(tid: number, briefId: number, patches: PieceSpecPatch[] = [], actorId: number | null = null): Promise<ConfirmResult> {
+export async function confirm(tid: number, briefId: number, patches: PieceSpecPatch[] = [], actorId: number | null = null, opts: ConfirmOpts = {}): Promise<ConfirmResult> {
+  const origin: PieceOrigin = opts.origin === "manual" ? "manual" : "auto";   // 기본 auto = fail-closed
+  const reuseSlotId = Math.floor(Number(opts.slotId) || 0) || null;
   const [b] = await q(sql`SELECT * FROM briefs WHERE tenant_id = ${tid} AND id = ${briefId}`);
   if (!b) return { ok: false, step: "not_found", error: "지시서를 찾을 수 없어요." };
   if (String(b.status) !== "proposed") {
@@ -197,11 +208,29 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   const bal0 = await balance(tid);
   if (bal0.balance < total) return { ok: false, step: "coin_short", error: `코인이 ${total - bal0.balance}개 부족해요.`, need: total - bal0.balance, have: bal0.balance };
 
+  /* 🔴 슬롯 게이트(CLAUDE §4.7 절대 게이트) — 자동 경로가 piece 를 만들려면 «어느 편성 자리의 몫인지» 말해야 한다.
+     사람 경로(origin:"manual")는 통과. 거부는 감사 + 홈 «해야 할 일»에 남는다(조용한 0건 금지 · AC-2). */
+  const gate = await guardSlot({ tenantId: tid, channel: specs[0].channel, origin, slotId: reuseSlotId, source: "director.confirm", topic: String(b.topic_id ?? "") });
+  if (!gate.ok) return { ok: false, step: "slot_gate", error: gate.reason ?? "편성표에 없는 자동 생성이에요." };
+
   const topicId = n(b.topic_id);
-  const created: { pieceId: number; slotId: number }[] = [];
+  // 빌려 쓸 자리의 원래 상태·채널(롤백 복원용 · 채널 대조용). 게이트를 이미 통과했으니 행은 있다.
+  let reuseSlotPrevStatus = "topic_assigned", reuseChannel = specs[0].channel, usedReuseSlot = false;
+  if (reuseSlotId) {
+    const [rs] = await q(sql`SELECT status, channel FROM slots WHERE tenant_id = ${tid} AND id = ${reuseSlotId}`);
+    if (rs) { reuseSlotPrevStatus = String(rs.status); reuseChannel = String(rs.channel); }
+  }
+  const created: { pieceId: number; slotId: number; reused?: { prevStatus: string } }[] = [];
   let charged = 0;
   const rollback = async (reason: string) => {
-    for (const c of created) { await refundPiece(tid, c.pieceId); await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND id = ${c.slotId}`); await q(sql`DELETE FROM piece_assets WHERE piece_id = ${c.pieceId}`); await q(sql`DELETE FROM pieces WHERE tenant_id = ${tid} AND id = ${c.pieceId}`); }
+    for (const c of created) {
+      await refundPiece(tid, c.pieceId);
+      // 빌려 쓴 편성 자리는 **지우지 않는다** — 원래 상태로 돌려놓는다(달력에서 자리가 증발하면 그날은 영영 비어 있다).
+      if (c.reused) await q(sql`UPDATE slots SET status = ${c.reused.prevStatus}, piece_id = NULL, brief_id = NULL, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${c.slotId}`);
+      else await q(sql`DELETE FROM slots WHERE tenant_id = ${tid} AND id = ${c.slotId}`);
+      await q(sql`DELETE FROM piece_assets WHERE piece_id = ${c.pieceId}`);
+      await q(sql`DELETE FROM pieces WHERE tenant_id = ${tid} AND id = ${c.pieceId}`);
+    }
     console.warn(`[director] confirm 롤백 brief=${briefId} reason=${reason} pieces=${created.map((c) => c.pieceId).join(",")}`);
   };
   try {
@@ -210,17 +239,29 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${"post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);
-      const slotDate = kstDateStr(new Date(s.schedule.at));
-      const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin)
-        VALUES (${tid}, ${slotDate}::date, ${s.channel}, ${"post"}, ${s.accountId}, ${topicId}, ${briefId}, ${pieceId}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${"producing"}, ${"manual"}) RETURNING id`);
-      const slotId = n(sl?.id);
+      /* 편성 자리를 빌려 쓰는가(크론) — 아니면 지금처럼 새 자리를 만든다(사람이 «만들기»로 끼워 넣는 글).
+         빌려 쓰는 자리는 **채널이 같은 첫 spec 하나**에만 준다(한 자리에 두 글이 들어갈 수 없다). */
+      let slotId: number, reused: { prevStatus: string } | undefined;
+      if (reuseSlotId && !usedReuseSlot && s.channel === reuseChannel) {
+        usedReuseSlot = true;
+        const [sl] = await q(sql`UPDATE slots SET piece_id = ${pieceId}, brief_id = ${briefId}, topic_id = ${topicId}, account_id = ${s.accountId},
+            status = ${"producing"}, note = NULL, updated_at = NOW()
+          WHERE tenant_id = ${tid} AND id = ${reuseSlotId} AND piece_id IS NULL RETURNING id`);
+        if (!sl) { await rollback("slot_taken"); return { ok: false, step: "slot_gate", error: "편성 자리를 그새 다른 글이 차지했어요." }; }
+        slotId = reuseSlotId; reused = { prevStatus: reuseSlotPrevStatus };
+      } else {
+        const slotDate = kstDateStr(new Date(s.schedule.at));
+        const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin)
+          VALUES (${tid}, ${slotDate}::date, ${s.channel}, ${"post"}, ${s.accountId}, ${topicId}, ${briefId}, ${pieceId}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${"producing"}, ${origin}) RETURNING id`);
+        slotId = n(sl?.id);
+      }
       await q(sql`UPDATE pieces SET slot_id = ${slotId} WHERE id = ${pieceId}`);
-      created.push({ pieceId, slotId });
-      const c1 = await consume(tid, "blog", `piece:${pieceId}`, { actorId, reason: `블로그 글(${s.channel})` });
+      created.push({ pieceId, slotId, ...(reused ? { reused } : {}) });
+      const c1 = await consume(tid, "blog", `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: `블로그 글(${s.channel})` });
       if (!c1.ok) { await rollback(c1.reason); return c1.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${c1.need}개 부족해요.`, need: c1.need, have: c1.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
       charged += c1.charged;
       for (let i = 1; i <= s.images.count; i++) {
-        const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, reason: `이미지 ${i}/${s.images.count}` });
+        const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `이미지 ${i}/${s.images.count}` });
         if (!ci.ok) { await rollback(ci.reason); return ci.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${ci.need}개 부족해요.`, need: ci.need, have: ci.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
         charged += ci.charged;
       }

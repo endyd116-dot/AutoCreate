@@ -49,6 +49,8 @@ export const STEPS: CronStep[] = [
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];
 
+export type { Every } from "./base";
+
 export interface StepReport { step: string; tenants: number; changed: number; skipped: number; errors: number; detail?: Record<string, unknown> }
 
 /* ───────── 게이트 ───────── */
@@ -93,7 +95,17 @@ async function activeTenants(): Promise<TenantRow[]> {
  * runTick — 우산 본체. 두 크론 함수가 `every` 만 바꿔 부른다.
  *   반환 = 계약 §1 응답 `{ ok:true, ran:[StepReport] }`.
  */
-export async function runTick(every: Every, req: Request): Promise<Response> {
+export interface RunTickOpts {
+  /**
+   * 이 테넌트 하나만 돈다(수동 호출 전용 · `/api/cron-run?tid=`).
+   *   왜 있나: 우산은 활성 테넌트를 **전부** 돈다. 검증할 때 남의 집 17채를 같이 돌면
+   *   ①예산이 쪼개져 내가 보려던 스텝이 `budgetSkipped` 로 밀리고 ②숫자가 남의 집 것과 섞여 재현이 안 된다.
+   *   스케줄 호출에는 적용되지 않는다(전체를 돌아야 한다).
+   */
+  onlyTid?: number | null;
+}
+
+export async function runTick(every: Every, req: Request, opts: RunTickOpts = {}): Promise<Response> {
   const t0 = Date.now();
   const manual = !(await isScheduled(req));
   if (manual && !secretOk(req)) {
@@ -104,7 +116,11 @@ export async function runTick(every: Every, req: Request): Promise<Response> {
   const deadline = t0 + TICK_BUDGET_MS;
 
   let tenants: TenantRow[];
-  try { tenants = await activeTenants(); }
+  try {
+    tenants = await activeTenants();
+    const only = Math.floor(Number(opts.onlyTid) || 0);
+    if (only > 0) tenants = tenants.filter((t) => t.tid === only);   // 수동 검증 — 한 집만
+  }
   catch (e) {
     console.error(`[cron:${every}] 테넌트 조회 실패`, e);
     await writeAudit({ tenantId: null, action: "cron_tick", riskLevel: "high", detail: { every, error: String((e as Error)?.message ?? e).slice(0, 300) } });
@@ -164,7 +180,7 @@ export async function runTick(every: Every, req: Request): Promise<Response> {
 
   const ms = Date.now() - t0;
   // 전건 기록 — 이 한 행에 모든 스텝의 숫자(0 포함)가 들어간다. «아무 일도 없었다»도 증거로 남는다(PITFALLS #7).
-  await writeAudit({ tenantId: null, action: "cron_tick", riskLevel: "low", target: `cron:${every}`, detail: { every, ms, tenants: tenants.length, manual, ran } });
+  await writeAudit({ tenantId: null, action: "cron_tick", riskLevel: "low", target: `cron:${every}`, detail: { every, ms, tenants: tenants.length, manual, onlyTid: opts.onlyTid ?? null, ran } });
   console.log(`[cron:${every}] 끝 ${ms}ms · 테넌트 ${tenants.length} · 스텝 ${ran.length}`);
   return json({ ok: true, ran, ms, tenants: tenants.length });
 }

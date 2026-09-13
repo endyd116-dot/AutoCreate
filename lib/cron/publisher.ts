@@ -23,9 +23,9 @@
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
-import { jsonb } from "../db-util";
+import { jsonb, utcDate } from "../db-util";
 import { classifyAndApply } from "../account-health";
-import { notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
+import { kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { publishPiece, publishPortStatus, runnerOffline, type PublishFailReason } from "./publish-port";
 
 const n = (v: unknown) => Number(v || 0);
@@ -50,7 +50,7 @@ export const publisherStep: CronStep = {
   every: "5m",
   needsAutoSchedule: false,   // 사람이 손으로 승인한 글도 나가야 한다 — 자동 편성과 무관.
   async run(ctx): Promise<StepOutcome> {
-    const due = await q(sql`SELECT p.id, p.title, p.channel, p.account_id, p.slot_id, p.meta, s.status AS slot_status
+    const due = await q(sql`SELECT p.id, p.title, p.channel, p.account_id, p.slot_id, p.meta, p.scheduled_for, s.status AS slot_status
       FROM pieces p LEFT JOIN slots s ON s.id = p.slot_id
       WHERE p.tenant_id = ${ctx.tid} AND p.status = 'scheduled' AND p.scheduled_for IS NOT NULL AND p.scheduled_for <= NOW()
       ORDER BY p.scheduled_for, p.id LIMIT 50`);
@@ -89,8 +89,9 @@ export const publisherStep: CronStep = {
         if (slotId) await setSlot(ctx.tid, slotId, offline ? "awaiting_runner" : "publishing", offline ? "내 PC 프로그램이 꺼져 있어요 — 켜면 바로 나가요" : null);
         if (offline) {
           waitingRunner++;
+          const when = kstTimeText(utcDate(p.scheduled_for), ctx.now);   // 문구 속 시각은 KST(§13.5)
           await notifyOnce(ctx.tid, "runner_offline", "내 PC 프로그램을 켜 주세요",
-            `«${title}» 을(를) 올리려면 내 PC 프로그램이 켜져 있어야 해요. 켜면 기다리던 글이 바로 나가요.`, "/app/runner.html", { withinHours: 6 });
+            `«${title}»${when ? ` 은(는) ${when}에 나갈 예정이었어요.` : " 을(를) 올리려면"} 내 PC 프로그램이 켜져 있어야 해요. 켜면 기다리던 글이 바로 나가요.`, "/app/runner.html", { withinHours: 6 });
         } else queued++;
         continue;
       }

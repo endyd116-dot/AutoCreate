@@ -72,6 +72,24 @@ export function kstToday(): SQL { return sql`(NOW() AT TIME ZONE 'Asia/Seoul')::
 /** Date → sql 바인딩(AC-5: Date 객체 금지 · 문자열 + 캐스트). */
 export function ts(d: Date): SQL { return sql`${d.toISOString()}::timestamptz AT TIME ZONE 'UTC'`; }
 
+/**
+ * kstTimeText — 🔴 **알림·메일 문구에 들어가는 시각은 서버가 KST 로 만든다**(DESIGN §13.5 · CLAUDE §4.5b ④).
+ *   저장은 UTC, 표시는 KST — 문구에 UTC 가 새면 사용자는 9시간 어긋난 안내를 받는다.
+ *   화면(JSON 응답)의 시각은 여전히 ISO UTC 문자열로 보낸다(포맷은 화면 몫) — 이 함수는 **문장 안에 박히는 시각** 전용이다.
+ *   예: «오늘 오후 9시» · «내일 오전 7시 30분» · «9/18 오전 9시».
+ */
+export function kstTimeText(at: Date | null | undefined, now: Date = new Date()): string {
+  if (!at || Number.isNaN(at.getTime())) return "";
+  const k = new Date(at.getTime() + KST_MS);
+  const kn = new Date(now.getTime() + KST_MS);
+  const dayDiff = Math.round((Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate()) - Date.UTC(kn.getUTCFullYear(), kn.getUTCMonth(), kn.getUTCDate())) / 86400_000);
+  const day = dayDiff === 0 ? "오늘" : dayDiff === 1 ? "내일" : dayDiff === -1 ? "어제" : `${k.getUTCMonth() + 1}/${k.getUTCDate()}`;
+  const h = k.getUTCHours(), m = k.getUTCMinutes();
+  const ampm = h < 12 ? "오전" : "오후";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${day} ${ampm} ${h12}시${m ? ` ${m}분` : ""}`;
+}
+
 /* ───────── 알림 ───────── */
 /**
  * notifyOnce — 같은 (tenant, kind, 제목) 알림이 `withinHours` 안에 있으면 **쓰지 않는다**.

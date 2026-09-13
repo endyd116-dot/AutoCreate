@@ -29,8 +29,15 @@ import { hourOf, kstHour, kstToday, kstWeekStartUtc, notifyOnce, setSlot, type C
 import { proposeForSlot, toAutoSlot } from "./director-auto";
 
 const n = (v: unknown) => Number(v || 0);
-/** 한 자리를 만드는 데 필요한 최소 예산(브리프 + piece + 코인 + 배경 호출). LLM 은 배경 함수가 따로 돈다. */
-const PER_SLOT_MS = 4_000;
+/**
+ * 한 자리를 만드는 데 필요한 최소 예산(브리프 + piece + 코인 + 배경 호출). LLM 은 배경 함수가 따로 돈다.
+ *   ⚠️ 우산은 **자리 단위로만** 멈출 수 있다 — 한 자리를 시작하면 끝까지 간다(중간에 끊으면 코인만 나가고 piece 가 없다).
+ *      그래서 남은 예산이 이 값보다 적으면 아예 시작하지 않는다. 로컬 실측(2026-09-14)에서 한 자리가 ~20초 걸렸는데
+ *      그건 **내 PC → Neon 왕복 지연**(질의 40여 회 × ~300ms)이다. 같은 리전에서 도는 프로덕션은 1초 안쪽이다.
+ */
+const PER_SLOT_MS = 6_000;
+/** 한 틱에 만드는 자리의 상한 — 예산과 별개의 안전선(한 집이 달력을 통째로 몰아 만들어 다른 집을 굶기지 않게). */
+const MAX_PER_TICK = 20;
 
 /** 이번 주(월~일 KST)에 이미 쓴 코인. 경계는 SQL 안에서 만든다(PITFALLS #4). */
 async function weeklySpent(tid: number): Promise<number> {
@@ -61,6 +68,7 @@ export const produceStep: CronStep = {
 
     let made = 0, coinShort = 0, capped = 0, blocked = 0, noAccount = 0, deferred = 0, failed = 0;
     for (const row of slots) {
+      if (made >= MAX_PER_TICK) { deferred++; continue; }
       if (ctx.deadline - Date.now() < PER_SLOT_MS) { deferred++; continue; }
       const slot = toAutoSlot(row);
 

@@ -8,11 +8,11 @@
  *     채널이 안 맞아도 «없는 것보다 낫다» — 힌트는 힌트다(디렉터가 produce 에서 그 채널에 맞게 앵글을 가른다).
  *
  *   ══ 후보가 없을 때 ══
- *     ① 이 틱에서 **한 번** `refreshTopics(tid)` 를 자동 실행한다. 사람이 누르는 «소재 뽑기»의 하루 3회 상한과는 **다른 계정**이다
- *        — 그래서 감사 action 을 `topics_refresh_cron` 으로 가른다(사람 상한을 세는 `refreshCountToday` 는 `topics_refresh` 만 센다).
- *     ② LLM 호출은 길다. 우산 예산이 12초 미만이면 **부르지 않고** 다음 주기로 미룬다. 불렀는데 예산이 끝나면 흘려보낸다
- *        (그 호출이 끝나면 topics 는 들어간다 — 다음 틱이 줍는다). 크론이 26초 벽에 부딪혀 틱 전체가 죽는 일이 없어야 한다.
- *     ③ 그래도 없으면 슬롯 `no_topic` + 알림 1회(«소재가 떨어졌어요»). 조용한 0건 금지 — 다음 주기에 다시 시도한다.
+ *     ① 이 틱에서 **한 번** 소재 리필을 시작한다 — 🔴 **배경 함수로**(계약 v2.9 · CLAUDE §4.5b «넘을 것 같으면 처음부터 배경으로»).
+ *        사람 경로(`/api/topics-refresh`)와 **같은 배경 함수·같은 상태 칸**을 쓴다 — 중복 실행 0(이미 도는 중이면 그쪽이 즉시 끝낸다).
+ *        사람의 하루 3회 상한과는 **다른 계정**이다: 감사 action 이 `topics_refresh_cron`(상한을 세는 `refreshCountToday` 는 `topics_refresh` 만 센다).
+ *     ② 배경이라 이 스텝은 **기다리지 않는다** — 리필은 다음 틱이 줍는다. 크론이 26초 벽에 부딪히는 경로 0.
+ *     ③ 이번 틱에 쓸 소재가 없으면 슬롯 `no_topic` + 알림 1회(«소재가 떨어졌어요»). 조용한 0건 금지 — 다음 주기에 다시 시도한다.
  *
  *   ⚠️ 경합: 같은 소재를 두 슬롯이 가져가지 못하게 **CAS**(`UPDATE topics SET status='picked' WHERE status='candidate' RETURNING id`)로 집는다.
  *      0행이면 남이 먼저 가져간 것 — 조용히 다음 후보로 간다.
@@ -20,8 +20,8 @@
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
-import { refreshTopics } from "../topics";
-import { kstToday, notifyOnce, setSlot, withTimeout, type CronStep, type StepOutcome } from "./base";
+import { startTopicsRefresh } from "../../netlify/functions/topics-refresh-background";
+import { kstToday, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -61,8 +61,8 @@ export const assignTopicsStep: CronStep = {
       ORDER BY slot_date, publish_at NULLS LAST, id`);
     if (!slots.length) return { changed: 0, skipped: 0 };
 
-    let pool = await loadCandidates(ctx.tid, slots.length * 3 + 20);
-    let refreshed: { added: number; skipped: number } | null = null;
+    const pool = await loadCandidates(ctx.tid, slots.length * 3 + 20);
+    let refill: Record<string, unknown> | null = null;
     let refreshTried = false;
     let assigned = 0, noTopic = 0, deferred = 0;
     const takenNormKeys = new Set<string>();
@@ -71,20 +71,15 @@ export const assignTopicsStep: CronStep = {
       if (Date.now() >= ctx.deadline) { deferred++; continue; }
       const slotId = n(s.id), channel = String(s.channel);
 
-      // 후보가 비었으면 이 틱에서 한 번만 리필한다(예산이 있을 때만 — LLM 은 길다).
+      /* 후보가 비었으면 이 틱에서 **한 번만** 리필을 시작한다 — 배경 함수라 기다리지 않는다(v2.9).
+         이번 틱의 남은 자리는 소재를 못 받지만, 리필이 끝나면 다음 틱이 줍는다. 그래서 아래에서 `no_topic` 으로 표시하고 알린다. */
       if (!pool.length && !refreshTried) {
         refreshTried = true;
-        const budget = ctx.deadline - Date.now();
-        if (budget < 12_000) {
-          deferred++;
-          console.log(`[cron/assign_topics] tid=${ctx.tid} 후보 0 · 예산 ${Math.round(budget / 1000)}s — 리필은 다음 주기로`);
-          continue;
-        }
-        const r = await withTimeout(refreshTopics(ctx.tid), budget - 3_000);
-        refreshed = r ? { added: r.added, skipped: r.skipped } : { added: 0, skipped: 0 };
-        await writeAudit({ tenantId: ctx.tid, action: "topics_refresh_cron", actorType: "system", target: `tenant:${ctx.tid}`,
-          detail: { origin: "cron", step: "slots.assign_topics", added: refreshed.added, skipped: refreshed.skipped, timedOut: r === null } });
-        pool = await loadCandidates(ctx.tid, slots.length * 3 + 20);
+        const st = await startTopicsRefresh(ctx.tid, "cron");
+        refill = { started: st.started, running: st.running, ...(st.error ? { error: st.error } : {}) };
+        await writeAudit({ tenantId: ctx.tid, action: "topics_refill_started", actorType: "system", target: `tenant:${ctx.tid}`,
+          detail: { origin: "cron", step: "slots.assign_topics", ...refill } });
+        console.log(`[cron/assign_topics] tid=${ctx.tid} 후보 0 → 배경 리필 ${st.started ? "시작" : st.running ? "이미 실행 중" : "실패"}`);
       }
 
       const cand = pickFor(pool, channel, takenNormKeys);
@@ -98,7 +93,7 @@ export const assignTopicsStep: CronStep = {
 
       // CAS — 남이 먼저 가져갔으면 0행. pool 에서 빼고 다음 슬롯으로(이 슬롯은 다음 주기가 다시 본다).
       const got = await q(sql`UPDATE topics SET status = 'picked', used_at = NULL WHERE tenant_id = ${ctx.tid} AND id = ${cand.id} AND status = 'candidate' RETURNING id`);
-      pool = pool.filter((c) => c.id !== cand.id);
+      const at = pool.indexOf(cand); if (at >= 0) pool.splice(at, 1);
       if (!got.length) { continue; }
       takenNormKeys.add(cand.normKey);
 
@@ -121,7 +116,7 @@ export const assignTopicsStep: CronStep = {
     const detail: Record<string, unknown> = {};
     if (noTopic) detail.noTopic = noTopic;
     if (deferred) detail.deferred = deferred;
-    if (refreshed) detail.refreshed = refreshed;
+    if (refill) detail.refill = refill;
     if (Object.keys(detail).length) out.detail = detail;
     return out;
   },
