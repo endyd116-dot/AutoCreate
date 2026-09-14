@@ -10,6 +10,7 @@ import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { propose, confirm, type PieceSpecPatch } from "../../lib/director";
+import { requireFeature } from "../../lib/plans";
 
 export const config = { path: ["/api/director-propose", "/api/director-confirm"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
@@ -34,6 +35,8 @@ export default async (req: Request): Promise<Response> => {
       const w = await requireWritable(tid); if (!w.ok) return w.res;   // 체험 종료(readonly)·정지(suspended)면 생성 금지(P1R4 §1.3)
       const b = await readJson<{ briefId?: number; pieces?: PieceSpecPatch[] }>(req);
       const briefId = n(b.briefId); if (!briefId) return badRequest("briefId");
+      // ★C(P1R4) fix: 손보기(pieces 패치) 는 directorEdit 기능(Starter 는 없음 · 계약 §1.4). requireFeature 는 있었지만 아무도 안 불렀다 — 코인 검사보다 먼저 잰다(Starter 가 «코인 부족»을 보면 안 된다).
+      if (Array.isArray(b.pieces) && b.pieces.length) { const f = await requireFeature(tid, "directorEdit"); if (!f.ok) return f.res; }
       // 🔴 `origin:"manual"` 을 **명시**한다 — confirm 의 기본값은 fail-closed 로 "auto" 이고, auto 는 편성 슬롯 없이는 거부된다(CLAUDE §4.7 · AC-2).
       //    사람이 «이대로 만들기»를 누른 경로이므로 편성표의 통제 대상이 아니다(사람이 곧 편성자다).
       const r = await confirm(tid, briefId, Array.isArray(b.pieces) ? b.pieces : [], auth.user.uid, { origin: "manual" });

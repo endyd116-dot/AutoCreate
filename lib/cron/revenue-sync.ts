@@ -47,9 +47,29 @@ export const revenueSyncStep: CronStep = {
       const j = await judgeAndNotify(ctx.tid);
       eligibility = { yppRefreshed: y.refreshed, yppSkipped: y.skipped, eligibilityNotified: j.notified };
     }
+    /* ★C(P1R4) fix: 러너 스크랩 소스(adpost·adfit·clip)는 아무도 잡을 적재하지 않았다(revenue-sync 는 API 소스만 · 러너는 잡이 있어야 움직인다)
+       → 애드포스트 수익이 자동으로는 영영 안 모였다(R3 §1.3 «일 1회» · §2.1 잡 3종). dailyHour 에 계정별 1건 적재(enqueueJob 이 queued/claimed 중복을 막는다) ·
+       플랜 runnerRevenue(Starter 없음 · 계약 §1.4)가 없으면 적재하지 않고 detail 에 남긴다. 경계 import 는 함수 안에서(AC-17). */
+    let scrapeQueued = 0, scrapeGated = 0;
+    if (nowH === dailyHour) {
+      const runnerSources = (await listSourceRows(ctx.tid)).filter((s) => ["adpost", "adfit", "clip"].includes(s.source) && s.status === "connected" && s.accountId);
+      if (runnerSources.length) {
+        const { tenantPlan } = await import("../plans");
+        const { plan } = await tenantPlan(ctx.tid);
+        if (!plan.features.runnerRevenue) scrapeGated = runnerSources.length;
+        else {
+          const { enqueueJob } = await import("../runner-jobs");
+          for (const s of runnerSources) {
+            const kind = (`revenue.${s.source}`) as "revenue.adpost" | "revenue.adfit" | "revenue.clip";
+            const j = await enqueueJob({ tenantId: ctx.tid, kind, accountId: s.accountId, payload: { source: s.source, sourceId: s.id } });
+            if (j.created) scrapeQueued++;
+          }
+        }
+      }
+    }
     if (!sources.length) {
-      const detail: Record<string, unknown> = { ...(ctx.manual ? { skippedByHour: `${nowH}시(기본 ${DEFAULT_HOUR}시 · 쿠팡 ${SYNC_HOUR_OF.coupang}시)` } : {}), ...(eligibility ?? {}) };
-      return { changed: eligibility?.eligibilityNotified ?? 0, skipped: 0, ...(Object.keys(detail).length ? { detail } : {}) };
+      const detail: Record<string, unknown> = { ...(scrapeQueued ? { scrapeQueued } : {}), ...(scrapeGated ? { scrapeGated } : {}), ...(ctx.manual ? { skippedByHour: `${nowH}시(기본 ${DEFAULT_HOUR}시 · 쿠팡 ${SYNC_HOUR_OF.coupang}시)` } : {}), ...(eligibility ?? {}) };
+      return { changed: (eligibility?.eligibilityNotified ?? 0) + scrapeQueued, skipped: scrapeGated, ...(Object.keys(detail).length ? { detail } : {}) };
     }
 
     let synced = 0, rows = 0, notConfigured = 0, failed = 0, deferred = 0, notified = eligibility?.eligibilityNotified ?? 0, done = 0;

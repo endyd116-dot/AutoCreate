@@ -20,6 +20,7 @@ import { requireUser } from "../../lib/guards";
 import { clientIp } from "../../lib/auth";
 import { writeAudit } from "../../lib/audit";
 import { getAccount } from "../../lib/accounts";
+import { checkLimit } from "../../lib/plans";
 import {
   registerDevice, listDevices, removeDevice, authRunner, heartbeat,
   claimJobs, reportJob, releaseJob, saveRunnerSession, enqueueJob, fleetState, latestSessionJob,
@@ -121,6 +122,7 @@ export default async (req: Request): Promise<Response> => {
       const b = await readJson<{ name?: unknown; kind?: unknown }>(req);
       const name = String(b.name ?? "").trim();
       if (!name) return badRequest("이름을 입력해 주세요.", "name");
+      { const c = await checkLimit(tid, "runnerDevices"); if (!c.ok) return c.res!; }   // ★C(P1R4) fix: 플랜 기기 한도(Starter 1 · Pro 2 · 계약 §1.4) — 안 재고 있었다
       let out: Awaited<ReturnType<typeof registerDevice>>;
       try { out = await registerDevice(tid, name, String(b.kind ?? "own")); }
       catch (e) {

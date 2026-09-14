@@ -46,6 +46,7 @@ export default async (req: Request): Promise<Response> => {
       // 이미 도는 중이면 횟수를 쓰지 않는다(중복 요청이 상한을 갉아먹지 않게) — 응답 모양은 계약 v2.9 글자 그대로.
       const cur = await readRefreshState(tid);
       if (cur.running) return json({ ok: true, started: false, running: true });
+      { const { requireAiBudget } = await import("../../lib/billing/ai-cost-cap"); const bgt = await requireAiBudget(tid); if (!bgt.ok) return json({ ok: false, step: "ai_cost_cap", error: bgt.error }, 400); }   // ★C(P1R4) fix: 소재 뽑기도 AI 생성 — 일 상한(§1.5)을 잰다
       const used = await refreshCountToday(tid);
       if (used >= REFRESH_PER_DAY) return json({ ok: false, step: "rate_limit", error: `소재 뽑기는 하루 ${REFRESH_PER_DAY}번까지예요. 내일 다시 뽑을 수 있어요.` }, 429);
       // 감사 행이 곧 횟수 — 시작 전에 먼저 적는다(실패해도 횟수는 쓴 것 · AI 비용이 나갔으므로)

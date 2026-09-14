@@ -116,13 +116,17 @@ export async function classifyAndApply(accountId: number, errorKind: RunnerError
     const out: ClassifyResult = { ok: true, status: next, action };
 
     if (action === "suspend") {
-      const r = await reassignSlots(aid, { tenantId: tid });
+      // ★C(P1R4) fix: 자동 승계는 failover 기능(계약 §1.4 · Starter 없음). requireFeature 가 아무 데서도 안 불리고 있었다 — 여기서 플랜을 본다.
+      const { tenantPlan } = await import("./plans");
+      const canFailover = (await tenantPlan(tid)).plan.features.failover === true;
+      const r = canFailover ? await reassignSlots(aid, { tenantId: tid }) : { moved: 0, unmoved: n((await q(sql`SELECT COUNT(*) AS c FROM slots WHERE tenant_id = ${tid} AND account_id = ${aid} AND status NOT IN ('published','skipped','failed','reassigned')`))[0]?.c), targets: [], gated: true } as ReassignResult & { gated?: boolean };
       out.reassigned = r;
       const names = [...new Set(r.targets.map((t) => t.toAccountId))];
       const toHandles = names.length ? await q(sql`SELECT handle FROM accounts WHERE tenant_id = ${tid} AND id IN (${sql.join(names.map((i) => sql`${i}`), sql`, `)})`) : [];
       const to = toHandles.map((h) => `@${h.handle}`).join(" · ");
       await notify(tid, "account_suspended", `@${handle} 계정이 정지됐어요`,
         r.moved > 0 ? `예정돼 있던 글 ${r.moved}건을 ${to} (으)로 옮겼어요. 코인은 더 들지 않아요.${r.unmoved ? ` 옮길 자리가 모자라 ${r.unmoved}건은 대기 중이에요 — 계정을 하나 더 연결하거나 직접 올려 주세요.` : ""}`
+          : (r as { gated?: boolean }).gated ? `예정돼 있던 글 ${r.unmoved}건이 멈춰 있어요. 지금 요금제에는 자동 승계가 없어요 — Pro 로 바꾸면 다른 계정으로 자동으로 옮겨 드려요.`
           : `옮길 수 있는 ${channel} 계정이 없어서 ${r.unmoved}건이 대기 중이에요. 계정을 하나 더 연결하거나 직접 올려 주세요.`,
         "/app/accounts.html");
     } else if (action === "relogin") {

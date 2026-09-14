@@ -96,7 +96,7 @@ export default async (req: Request): Promise<Response> => {
     const b = await readJson<Record<string, unknown>>(req);
     const id = n(b.id); if (!id) return badRequest("id");
     // P1R4 §1.3 — readonly·suspended 는 재생성 금지. 글을 찾기 전에 재서 403 이 404 보다 먼저.
-    if (path.endsWith("/pieces-regenerate")) { const w = await requireWritable(tid); if (!w.ok) return w.res; }
+    if (path.endsWith("/pieces-regenerate")) { const w = await requireWritable(tid); if (!w.ok) return w.res; const { requireAiBudget } = await import("../../lib/billing/ai-cost-cap"); const bgt = await requireAiBudget(tid); if (!bgt.ok) return json({ ok: false, step: "ai_cost_cap", error: bgt.error }, 400); }   // ★C(P1R4) fix: 다시 만들기도 AI 생성 — 일 상한
     const [p] = await q(sql`SELECT p.* FROM pieces p WHERE p.tenant_id = ${tid} AND p.id = ${id}`);
     if (!p) return json({ ok: false, error: "글을 찾을 수 없어요.", step: "not_found" }, 404);
     const m = (p.meta || {}) as Record<string, unknown>;
