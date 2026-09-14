@@ -101,6 +101,18 @@ export async function checkLimit(tid: number, resource: LimitResource, requested
   return { ok: false, reason: "plan_limit", used, limit, planKey, res: json({ ok: false, reason: "plan_limit", step: "plan_limit", resource, used, limit, planKey, error }, 402) };
 }
 
+/**
+ * 관리형 러너 월 이용료 — **대당 공급가**(부가세 별도 · §12.0 · 계약 P1R6 §3.1).
+ *   🔴 값이 사는 곳은 여기 하나다. 화면·API 에 숫자를 다시 적지 않는다(적는 순간 두 벌이 되어 갈라진다).
+ *   features.managedRunner 등급에서 유도한다: option(Pro)=유료 · included(Agency)=요금제에 포함(0원) · no=못 씀.
+ *   ⚠️ P1R6 계약은 «플랜 표의 managedRunner 가격을 plans.ts 에서 읽는다»고 했는데 표에 **가격 칸이 없었다** —
+ *      칸을 새로 만들면 DB plans 행·화면까지 번지므로, 등급에서 유도하는 상수 한 곳으로 뒀다(메인에 보고).
+ */
+export const MANAGED_RUNNER_PRICE_KRW = 30_000;
+export function managedRunnerUnitKrw(plan: PlanDef): number {
+  return plan.features.managedRunner === "option" ? MANAGED_RUNNER_PRICE_KRW : 0;
+}
+
 export type FeatureKey = keyof PlanFeatures;
 /** 기능형 게이트 — managedRunner 는 "no" 만 막힘(option·included 는 통과). */
 export async function requireFeature(tid: number, feature: FeatureKey): Promise<{ ok: true; planKey: string } | { ok: false; planKey: string; res: Response }> {
