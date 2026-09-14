@@ -22,6 +22,7 @@
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";
 import { writeAudit } from "./audit";
+import { kstDateStr } from "./best-time";
 
 /**
  * 🔴 **순환 import 차단** — 러너 잡 적재기는 **부를 때** 가져온다(최상단 import 금지).
@@ -121,7 +122,7 @@ export async function classifyAndApply(accountId: number, errorKind: RunnerError
       const toHandles = names.length ? await q(sql`SELECT handle FROM accounts WHERE tenant_id = ${tid} AND id IN (${sql.join(names.map((i) => sql`${i}`), sql`, `)})`) : [];
       const to = toHandles.map((h) => `@${h.handle}`).join(" · ");
       await notify(tid, "account_suspended", `@${handle} 계정이 정지됐어요`,
-        r.moved > 0 ? `예정돼 있던 글 ${r.moved}건을 ${to} (으)로 옮겼어요. 코인은 더 들지 않아요.`
+        r.moved > 0 ? `예정돼 있던 글 ${r.moved}건을 ${to} (으)로 옮겼어요. 코인은 더 들지 않아요.${r.unmoved ? ` 옮길 자리가 모자라 ${r.unmoved}건은 대기 중이에요 — 계정을 하나 더 연결하거나 직접 올려 주세요.` : ""}`
           : `옮길 수 있는 ${channel} 계정이 없어서 ${r.unmoved}건이 대기 중이에요. 계정을 하나 더 연결하거나 직접 올려 주세요.`,
         "/app/accounts.html");
     } else if (action === "relogin") {
@@ -166,7 +167,7 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
     if (!a) return out;
     const tid = n(a.tenant_id), channel = String(a.channel), groupId = a.group_id ? n(a.group_id) : null;
 
-    const slots = await q(sql`SELECT id, status, piece_id FROM slots
+    const slots = await q(sql`SELECT id, status, piece_id, slot_date::text AS d FROM slots
       WHERE tenant_id = ${tid} AND account_id = ${aid}
         AND status NOT IN ('published','skipped','failed','reassigned')
         AND (publish_at IS NULL OR publish_at > NOW() - interval '1 hour')
@@ -178,17 +179,29 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
       WHERE tenant_id = ${tid} AND channel = ${channel} AND id <> ${aid} AND status = 'active'
         AND COALESCE(last_error_kind,'') <> 'removed' AND posts_today < daily_cap
       ORDER BY (group_id IS NOT DISTINCT FROM ${groupId}) DESC, health_score DESC, id`);
-    const room = cands.map((c) => ({ id: n(c.id), left: Math.max(0, n(c.daily_cap) - n(c.posts_today)) })).filter((c) => c.left > 0);
+    /* ★C(P1R2) fix: 여유는 **날짜별**이다. 종전엔 `daily_cap − posts_today`(= 오늘 남은 칸)를 앞으로의 슬롯 **전부**의 예산으로 써서
+       한 주치 9자리 중 2자리만 옮기고 7자리를 정지 계정에 그대로 남겼다(실측 2026-09-14 · moved 2 · unmoved 7 — 남은 자리는 발행 때 account_blocked 로 멈춘다).
+       각 날짜의 여유 = daily_cap − (오늘이면 posts_today) − 그 계정이 그 날 이미 잡고 있는 자리 수. */
+    const room = cands.map((c) => ({ id: n(c.id), cap: Math.max(1, n(c.daily_cap)), postsToday: n(c.posts_today) }));
     if (!room.length) { out.unmoved = slots.length; return out; }
+    const today = kstDateStr(new Date());
+    const usedRows = await q(sql`SELECT account_id, slot_date::text AS d, COUNT(*) AS c FROM slots
+      WHERE tenant_id = ${tid} AND account_id IN (${sql.join(room.map((c) => sql`${c.id}`), sql`, `)})
+        AND status NOT IN ('published','skipped','failed','reassigned') AND slot_date >= ${today}::date
+      GROUP BY account_id, slot_date`);
+    const used = new Map<string, number>();
+    for (const r of usedRows) used.set(`${n(r.account_id)}:${String(r.d).slice(0, 10)}`, n(r.c));
+    const leftOn = (c: { id: number; cap: number; postsToday: number }, date: string) => c.cap - (date === today ? c.postsToday : 0) - (used.get(`${c.id}:${date}`) ?? 0);
 
     let k = 0;
     for (const s of slots) {
       const slotId = n(s.id), status = String(s.status), pieceId = s.piece_id ? n(s.piece_id) : null;
-      // 여유가 남은 계정을 돌아가며(한 계정에 하루치가 몰리면 그 계정도 정지된다 · §7.3)
+      const date = String(s.d ?? "").slice(0, 10);
+      // 그 날 여유가 있는 계정을 돌아가며(한 계정에 하루치가 몰리면 그 계정도 정지된다 · §7.3)
       let target = -1;
-      for (let i = 0; i < room.length; i++) { const c = room[(k + i) % room.length]; if (c.left > 0) { target = (k + i) % room.length; break; } }
+      for (let i = 0; i < room.length; i++) { const c = room[(k + i) % room.length]; if (leftOn(c, date) > 0) { target = (k + i) % room.length; break; } }
       if (target < 0) { out.unmoved++; continue; }
-      const to = room[target]; to.left--; k = (target + 1) % room.length;
+      const to = room[target]; used.set(`${to.id}:${date}`, (used.get(`${to.id}:${date}`) ?? 0) + 1); k = (target + 1) % room.length;
 
       if (status === "publishing") {
         // 날아가던 발행을 끊고, 이어질 몫을 새 자리로 만든다.

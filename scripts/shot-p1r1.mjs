@@ -41,7 +41,13 @@ function pages(ids) {
     { key: "schedule", url: q("/app/schedule.html"), sheet: ["#mkRule", "button:has-text('자동 편성 켜기')", ".appbar .ic:last-child"] },
     { key: "home", url: q("/app/home.html"), sheet: [] },
     { key: "account", url: q("/app/account.html"), sheet: [] },
-  ];
+    // P1R2·R3 화면(계약 v2.11 §5 · v3.5)
+    { key: "runner", url: q("/app/runner.html"), sheet: ["button:has-text('내 PC에서 켜기')", "button:has-text('켜기')"] },
+    { key: "posts", url: q("/app/posts.html"), sheet: [] },
+    { key: "notifications", url: q("/app/notifications.html"), sheet: [] },
+    { key: "revenue", url: q("/app/revenue.html"), sheet: [] },
+    { key: "ad-media", url: q("/app/ad-media.html"), sheet: [] },
+  ].filter((p) => !process.env.PAGES || process.env.PAGES.split(",").includes(p.key));
 }
 
 /* ── 헌장 검사(페이지 안에서 실행) ── */
@@ -56,7 +62,15 @@ const CHARTER = () => {
   return {
     primaryPage: primaries.filter((e) => !inSheet(e) && !e.closest(".row")).length, primaryRow: primaries.filter((e) => !inSheet(e) && e.closest(".row")).length, primarySheet: primaries.filter(inSheet).length,
     bigNum: nums.length, text, scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth,
-    sheetOpen: !!document.querySelector(".sheet"), buttonsSmall: [...document.querySelectorAll("button, a.btn, .row.tap")].filter((e) => !e.closest(".cal")).filter(vis).filter((e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.height < 40; }).length,
+    sheetOpen: !!document.querySelector(".sheet"), buttonsSmall: [...document.querySelectorAll("button, a.btn, .row.tap")].filter((e) => !e.closest(".cal")).filter(vis).filter((e) => {
+      const r0 = e.getBoundingClientRect(); if (r0.height <= 0 || r0.height >= 44) return false;
+      e.scrollIntoView({ block: "center", inline: "nearest" }); const r = e.getBoundingClientRect();   // 화면 밖 요소는 elementFromPoint 가 null — 보이는 자리로 옮겨 잰다
+      // 눌리는 영역 = 가운데 x 축에서 위·아래로 elementFromPoint 가 이 요소(또는 자손)를 돌려주는 구간 — 투명 오버레이(::before)까지 포함해 잰다
+      const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)); const hits = (el) => !!el && (el === e || e.contains(el));
+      let count = 0;   // 세로 축에서 실제로 눌리는 정수 좌표 수(오버레이 포함) — 44 미만이면 작다
+      for (let y = Math.max(0, Math.floor(r.top) - 12); y <= Math.min(window.innerHeight - 1, Math.ceil(r.bottom) + 12); y++) if (hits(document.elementFromPoint(cx, y))) count++;
+      return count < 42;   // 정수 표본·서브픽셀 오차 2px 허용(43 은 통과 · 40 은 잡는다)
+    }).length,
     cta,
   };
 };
@@ -88,7 +102,7 @@ async function run() {
       rec(pg.key, vp, "url 유지(로그인 리다이렉트 없음)", !/login\.html/.test(finalUrl), finalUrl);
       const shot = join(OUT, `${pg.key}-${vp}.png`);
       await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
-      const c = await page.evaluate(CHARTER).catch(() => null);
+      const c = await page.evaluate(CHARTER).catch(() => null); await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
       if (c) {
         rec(pg.key, vp, "Primary 버튼 ≤1(페이지)", c.primaryPage <= 1, `${c.primaryPage}개`, shot);
         if (c.primaryRow) rec(pg.key, vp, "행 안 Primary(헌장 §13.0 «화면당 1개»와 충돌)", "WARN", `목록 행 액션 ${c.primaryRow}개 — 설계 판단 필요`, shot);
@@ -99,7 +113,7 @@ async function run() {
         const sys = c.text.match(new RegExp(FORBIDDEN.source, "gi")) || [];
         rec(pg.key, vp, "시스템 용어 0", sys.length === 0, sys.length ? `«${[...new Set(sys)].join(",")}»` : "");
         rec(pg.key, vp, "가로 넘침 0", c.scrollW <= c.innerW + 1, `scrollWidth ${c.scrollW} / ${c.innerW}`);
-        if (c.buttonsSmall) rec(pg.key, vp, "터치 44px 미만 버튼", "WARN", `${c.buttonsSmall}개(높이<40px)`);
+        if (c.buttonsSmall) rec(pg.key, vp, "터치 44px 미만 버튼(눌리는 영역 기준)", "WARN", `${c.buttonsSmall}개`);
       }
       rec(pg.key, vp, "콘솔 에러 0", errors.length === 0, errors.slice(0, 3).join(" | "));
       rec(pg.key, vp, "실패 요청(≥400) 0", failed.length === 0, failed.slice(0, 4).join(" | "));
