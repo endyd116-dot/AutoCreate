@@ -144,10 +144,45 @@ async function tryHtmlMode(page, bodyHtml, shotKey) {
   } catch { return false; }
 }
 
+/**
+ * 본문 편집 영역에 **확실히** 포커스를 준다. 못 주면 던진다.
+ *   🔴 2026-09-14 실측(job #119 · 사장님 확인): 종전 코드는
+ *      `page.locator("#editor-tistory, .CodeMirror, [contenteditable], iframe#editor-tistory_ifr").first().click().catch(()=>{})`
+ *      였다. ① TinyMCE 본문은 **iframe 안**이라 부모 문서 셀렉터로는 안 잡히고 ② 클릭 실패를 **조용히 삼켜서**
+ *      직전에 제목칸(textarea#post-title-inp)에 있던 포커스가 그대로 남았다 →
+ *      **본문 전체가 제목칸에 입력됐다**(본문 빈칸 · Enter 도 제목이 먹어 문단 구분 소멸).
+ *      눈 감고 타자를 치느니 멈추는 게 낫다 — 실패는 던진다.
+ */
+async function focusEditorBody(page) {
+  // ① TinyMCE 본문(iframe) — 프레임 안의 body 를 직접 클릭해야 그 문서로 포커스가 간다.
+  try {
+    await page.frameLocator("iframe#editor-tistory_ifr").locator("body").first().click({ timeout: 6000 });
+    return "iframe";
+  } catch { /* 다음 후보 */ }
+  // ② CodeMirror(HTML·마크다운 모드)
+  const cm = page.locator(".CodeMirror").first();
+  if (await cm.isVisible({ timeout: 1500 }).catch(() => false)) { await cm.click({ timeout: 6000 }).catch(() => {}); return "codemirror"; }
+  // ③ 부모 문서의 contenteditable(제목칸은 textarea 라 여기 안 걸린다)
+  const ce = page.locator("[contenteditable='true']").first();
+  if (await ce.isVisible({ timeout: 1500 }).catch(() => false)) { await ce.click({ timeout: 6000 }).catch(() => {}); return "contenteditable"; }
+  throw BLOCK("selector_changed", "본문 편집 영역에 포커스를 주지 못했어요(제목칸에 쓸 위험이 있어 중단했어요).");
+}
+
+/** 지금 본문에 들어 있는 글자(되읽기용). 못 읽으면 빈 문자열. */
+async function readBodyText(page) {
+  try {
+    const t = await page.frameLocator("iframe#editor-tistory_ifr").locator("body").first().innerText({ timeout: 3000 });
+    if (t) return t;
+  } catch { /* 다음 */ }
+  try { return await page.locator(".CodeMirror").first().innerText({ timeout: 1500 }); } catch { /* 다음 */ }
+  try { return await page.locator("[contenteditable='true']").first().innerText({ timeout: 1500 }); } catch { /* 없음 */ }
+  return "";
+}
+
 /** 기본 모드 폴백 — ops 를 연주한다(장식은 줄지만 글은 나간다). */
 async function playOpsFallback(page, plan, files, shotKey, missed) {
-  const body = page.locator("#editor-tistory, .CodeMirror, [contenteditable='true'], iframe#editor-tistory_ifr").first();
-  await body.click({ timeout: 8000 }).catch(() => {});
+  const where = await focusEditorBody(page);
+  console.log(`  · 기본 모드 본문 포커스: ${where}`);
   let wrote = false;
   for (const op of plan.ops) {
     if (op.op === "note") continue;
@@ -180,6 +215,12 @@ async function playOpsFallback(page, plan, files, shotKey, missed) {
     await settle(page, 200, 500);
   }
   await shot(page, shotKey, "02-기본모드본문");
+  /* 🔴 되읽기 — 본문이 비어 있으면 타자가 **다른 칸으로 샌** 것이다(제목칸 사고의 재발 방지).
+     «썼다»고 보고하고 넘어가면 제목에 본문이 통째로 들어간 글이 임시저장된다. */
+  if (wrote) {
+    const got = (await readBodyText(page)).trim();
+    if (!got) throw BLOCK("selector_changed", "본문에 글이 들어가지 않았어요(타자가 다른 칸으로 샜을 수 있어요).");
+  }
   return wrote;
 }
 
@@ -323,6 +364,15 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
       notes.push("HTML 모드를 열지 못해 기본 모드로 넣었어요(서식 일부 폴백)");
       const wrote = await playOpsFallback(page, plan, files, shotKey, missed);
       if (!wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");
+    }
+    /* 🔴 제목 오염 검사 — 본문 타자가 제목칸으로 새면 제목에 글이 통째로 들어간다(2026-09-14 실측 job #119).
+       본문을 넣은 **뒤** 제목을 다시 읽어 확인하고, 어긋났으면 제목을 되돌린 뒤 사실을 남긴다(조용히 넘기지 않는다). */
+    if (titleText) {
+      const titleAfter = await titleBox.inputValue().catch(() => "");
+      if (titleAfter !== titleText) {
+        notes.push(`제목이 본문 입력에 오염돼 되돌렸어요(들어가 있던 길이 ${titleAfter.length})`);
+        await titleBox.fill(titleText).catch(() => {});
+      }
     }
     if (missed.image) notes.push(`사진 버튼 ${missed.image}건 미발견`);
     if (missed.imageDownload) notes.push(`사진 ${missed.imageDownload}장 내려받기 실패`);
