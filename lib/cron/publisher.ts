@@ -108,8 +108,12 @@ export const publisherStep: CronStep = {
       /* 🔴 `retriable:false` 는 사유가 무엇이든 **무조건** 존중한다(B2 2026-09-14).
          가장 무서운 경우: 발행은 성공했는데 finalize 가 실패한 건도 `{ ok:false, reason:"config", retriable:false }` 로 온다 —
          이걸 재시도하면 **남의 블로그에 같은 글이 두 번 올라간다**(되돌릴 수 없는 사고). B2 가 publish_finalize_failed(risk high) 를 이미 남긴다. */
-      const terminal = TERMINAL.has(reason) || r.retriable === false;
       const human = NEEDS_HUMAN.has(reason);
+      /* ★C(P1R2) fix: 사람이 손봐야 하는 실패(gate·no_creds·auth_failed·account_blocked·provider_not_configured)도 publish() 가 retriable:false 로 돌려준다.
+         retriable:false 를 무조건 terminal 로 읽으면 NEEDS_HUMAN 이 죽은 코드가 되어 전부 `failed` 로 떨어졌다(실측 2026-09-14: no_creds → failed).
+         계약 §3 «게이트 실패면 awaiting_manual + 알림(발행 금지)» · DESIGN §5B.6 awaiting_manual = 사람 개입 대기. 재시도 0 은 그대로(둘 다 큐에서 빠진다).
+         finalize 실패(reason "config")는 TERMINAL 에 있어 여전히 failed 다. */
+      const terminal = TERMINAL.has(reason) || (r.retriable === false && !human);
       const exhausted = !terminal && !human && attempts > MAX_ATTEMPTS;
 
       if (!terminal && !human && !exhausted) {

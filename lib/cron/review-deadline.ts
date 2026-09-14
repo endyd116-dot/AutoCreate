@@ -59,7 +59,7 @@ export const reviewDeadlineStep: CronStep = {
         await q(sql`UPDATE pieces SET status = 'awaiting_manual', meta = meta || ${jsonb({ failReason: `자동 승인을 멈췄어요 — ${why}` })}, updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId}`);
         await setSlot(ctx.tid, slotId, "awaiting_manual", `자동 승인 보류 — ${why}`);
         if (await notifyOnce(ctx.tid, "review_blocked", "그대로 내보내기 전에 봐 주세요",
-          `«${String(p.title || "글")}» 이(가) ${why} 때문에 자동 승인을 멈췄어요. 고치고 승인해 주세요.`, `/app/pieces.html?id=${pieceId}`)) notified++;
+          `«${String(p.title || "글")}» 이(가) ${why} 때문에 자동 승인을 멈췄어요. 고치고 승인해 주세요.`, `/app/piece.html?id=${pieceId}`)) notified++;
         await writeAudit({ tenantId: ctx.tid, action: "piece_auto_approve_blocked", actorType: "system", riskLevel: "medium", target: `piece:${pieceId}`,
           detail: { step: "slots.review_deadline", failed: r.gate.checks.filter((c) => !c.pass).map((c) => c.key), slotId } });
       }
@@ -81,7 +81,7 @@ export const reviewDeadlineStep: CronStep = {
         await q(sql`UPDATE pieces SET status = 'awaiting_manual', meta = meta || ${jsonb({ failReason: "승인을 기다리다 발행 시각이 지났어요." })}, updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId}`);
         if (await setSlot(ctx.tid, slotId, "awaiting_manual", "승인 전에 발행 시각이 지났어요")) blocked++;
         if (await notifyOnce(ctx.tid, "review_missed", "확인을 못 받아 나가지 못했어요",
-          `«${String(p.title || "글")}» 이(가) 승인을 기다리다 발행 시각을 넘겼어요. 지금 승인하면 다시 잡아 드려요.`, `/app/pieces.html?id=${pieceId}`)) notified++;
+          `«${String(p.title || "글")}» 이(가) 승인을 기다리다 발행 시각을 넘겼어요. 지금 승인하면 다시 잡아 드려요.`, `/app/piece.html?id=${pieceId}`)) notified++;
       }
     }
 

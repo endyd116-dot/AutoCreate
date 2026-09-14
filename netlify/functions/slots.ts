@@ -86,7 +86,11 @@ export default async (req: Request): Promise<Response> => {
       const gapAcc = Math.max(ACCOUNT_GAP_MIN, n(acc?.min_gap_min));
       const neighbours = await q(sql`SELECT account_id, publish_at FROM slots
         WHERE tenant_id = ${tid} AND id <> ${slotId} AND channel = ${String(s.channel)} AND publish_at IS NOT NULL
-          AND status NOT IN ('skipped','failed','reassigned') AND publish_at BETWEEN ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC' - interval '1 day' AND ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC' + interval '1 day'`);
+          AND status NOT IN ('skipped','failed','reassigned')
+          AND publish_at >= ((${at.toISOString()}::timestamptz AT TIME ZONE 'UTC') - interval '1 day')
+          AND publish_at <= ((${at.toISOString()}::timestamptz AT TIME ZONE 'UTC') + interval '1 day')`);
+      // ★C(P1R2) fix: `BETWEEN x AT TIME ZONE 'UTC' - interval …` 는 Postgres 문법 오류(BETWEEN 피연산자 안에서 AT TIME ZONE 우선순위) —
+      //   시각 바꾸기가 항상 500 이었다(B 는 로컬 캐시 문제로 이 경로를 못 쳤다). 괄호로 감싼 비교 두 개로.
       for (const x of neighbours) {
         const other = utcDate(x.publish_at); if (!other) continue;
         const diffMin = Math.abs(other.getTime() - at.getTime()) / 60_000;

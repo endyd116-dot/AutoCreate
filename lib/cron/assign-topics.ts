@@ -113,7 +113,7 @@ export const assignTopicsStep: CronStep = {
         // 소재가 정말 없다 — 슬롯에 사유를 남기고 알림 1회. 조용한 0건 금지(다음 주기 재시도).
         if (await setSlot(ctx.tid, slotId, "no_topic", "쓸 소재가 없어요")) noTopic++;
         await notifyOnce(ctx.tid, "slot_no_topic", "소재가 떨어졌어요",
-          "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", "/app/topics.html");
+          "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", "/app/create.html");   // ★C fix: /app/topics.html 은 없는 화면(소재는 create.html)
         continue;
       }
 
@@ -136,7 +136,7 @@ export const assignTopicsStep: CronStep = {
 
     if (assigned > 0) {
       await notifyOnce(ctx.tid, "topics_assigned", `다음 ${lead}일치 소재 ${assigned}개를 정했어요`,
-        "편성표에서 무엇이 언제 나가는지 볼 수 있어요. 바꾸고 싶으면 슬롯을 눌러 주세요.", "/app/schedule.html", { byKind: true });
+        "편성표에서 무엇이 언제 나가는지 볼 수 있어요. 바꾸고 싶으면 그 날 자리를 눌러 주세요.", "/app/schedule.html", { byKind: true });
     }
     const out: StepOutcome = { changed: assigned, skipped: noTopic + deferred };
     const detail: Record<string, unknown> = {};
