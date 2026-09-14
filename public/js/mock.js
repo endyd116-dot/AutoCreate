@@ -59,6 +59,9 @@
   const blocked = qs.get("readonly") === "1" ? "readonly" : qs.get("suspended") === "1" ? "suspended" : null; // [P1R4] 쓰기 막힘(계약 §1.3 requireWritable)
   const planLimit = qs.get("planLimit") || "";
   const kiccOff = qs.get("kicc") === "0";
+  /* [§1.6] 결제 라인 — ?keyin=1 정책 켜짐(기본 0) · ?keyinMid=0 비인증 MID 미등록 → available:false(체크박스 자체가 없다) */
+  const keyinOn = qs.get("keyin") === "1", keyinMid = qs.get("keyinMid") !== "0";
+  const keyinOption = () => ({ available: keyinOn && keyinMid, label: "카드번호 직접 입력", notice: "법인카드가 앱카드 창에서 거절될 때 쓰세요. 카드번호를 결제사 창에 직접 넣어요." });
   const aiCap = qs.get("aiCap") === "1", bannedTopic = qs.get("banned") === "1";
   /* [P1R5] 영상 손잡이 — ?stage=script|tts|clips|render|judging|done|failed(만드는 중 영상의 단계 고정) · ?judge=P0|P1|P2(검수 영상 심사 등급) · ?noFfmpeg=1(내 PC 프로그램 caps.ffmpeg=false) · ?uploaded=private(발행함 비공개 업로드 행) · ?videoBudget=0(달러 캡 초과 step budget) */
   const vStage = qs.get("stage") || "", vJudge = qs.get("judge") || "", noFfmpeg = qs.get("noFfmpeg") === "1", uploadedKnob = qs.get("uploaded") || "", videoBudget = qs.get("videoBudget") || "";
@@ -328,7 +331,7 @@
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
       const o = { ok: true, plan: p ? { key: p.key, name: p.name, priceKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), cycle: B.cycle } : { key: "trial", name: "체험", priceKrw: 0, vatKrw: 0, totalKrw: 0, cycle: B.cycle }, status: blocked || (paid ? "active" : "trial"), cancelAtPeriodEnd: B.cancelAtPeriodEnd, billingKey: B.billingKey ? { has: true, last4: B.billingKey.last4, brand: B.billingKey.brand } : { has: false }, vatNote: "부가세 별도" };
-      o.trialEndsAt = iso(now + (blocked ? -2 : 9) * 86400e3); if (B.periodEnd) o.periodEnd = B.periodEnd; if (B.nextBillingAt) o.nextBillingAt = B.nextBillingAt; if (B.pendingPlanKey) o.pendingPlanKey = B.pendingPlanKey; if (B.pendingCycle) o.pendingCycle = B.pendingCycle; return o; },
+      o.keyin = keyinOption(); o.trialEndsAt = iso(now + (blocked ? -2 : 9) * 86400e3); if (B.periodEnd) o.periodEnd = B.periodEnd; if (B.nextBillingAt) o.nextBillingAt = B.nextBillingAt; if (B.pendingPlanKey) o.pendingPlanKey = B.pendingPlanKey; if (B.pendingCycle) o.pendingCycle = B.pendingCycle; return o; },
     "subscription-quote": (_b, q) => { const p = PLANS.find((x) => x.key === q.get("planKey")); if (!p) return err("planKey", "planKey"); const cycle = q.get("cycle") === "year" ? "year" : "month"; const base = cycle === "year" ? p.priceYear : p.priceMonth;
       return { ok: true, quote: { supplyKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), discountPct: 0, source: "plan", baseKrw: base }, vatNote: "부가세 별도" }; },
     "subscription-change": (b) => { const B = S.billing; const p = PLANS.find((x) => x.key === b.planKey); if (!p) return err("plan", "고를 수 있는 요금제가 아니에요.");
@@ -349,17 +352,20 @@
       if (supply > 0) B.invoices.unshift({ id: 9000 + S.nextId++, kind: "subscription", period, amountKrw: supply, vatKrw: VAT(supply), totalKrw: supply + VAT(supply), status: "paid", paidAt: iso(Date.now()), createdAt: iso(Date.now()), orderNo: "AC-SUB-" + period.replace(/[^0-9A-Za-z]/g, "") + "-1", planKey: p.key });
       return { ok: true, effectiveAt: iso(Date.now()), pending: false, chargeNowKrw: supply, vatKrw: VAT(supply), totalKrw: supply + VAT(supply), invoiceId: supply > 0 ? B.invoices[0].id : null }; },
     "subscription-cancel": (b) => { const B = S.billing; if (B.planKey === "trial") return err("state", "구독 중이 아니에요."); const on = b.atPeriodEnd !== false; B.cancelAtPeriodEnd = on; if (on) { B.pendingPlanKey = null; B.pendingCycle = null; } return { ok: true, periodEnd: B.periodEnd, cancelAtPeriodEnd: on }; },
-    "billing-key-start": () => { if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요" }; const orderNo = "AC-BK-1-" + Date.now().toString(36); return { ok: true, orderNo, url: "/mock-kicc?orderNo=" + orderNo, form: {} }; }, // 인증창 흉내 → UI.postForm(mock) 이 콜백까지 대신한다
+    "billing-key-start": (b) => { if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요" };
+      const route = (b && (b.payRoute === "keyin" || b.keyin === true) && keyinOn && keyinMid) ? "keyin" : "auth"; // 3조건 — 하나라도 아니면 조용히 인증 라인(§1.6(4))
+      const orderNo = (route === "keyin" ? "AC-BKK-1-" : "AC-BK-1-") + Date.now().toString(36); S.billing.payRoute = route; return { ok: true, orderNo, url: "/mock-kicc?orderNo=" + orderNo, form: {} }; }, // 인증창 흉내 → UI.postForm(mock) 이 콜백까지 대신한다
     "billing-key-remove": () => { const had = !!S.billing.billingKey; S.billing.billingKey = null; return { ok: true, removed: had }; },
     "invoices": (_b, q) => { const y = q.get("year"); return { ok: true, rows: S.billing.invoices.filter((r) => !y || (r.paidAt || r.createdAt || "").startsWith(y)) }; },
     /* ── [P1R4] §1.1 코인 충전 — B coin-purchase.ts 모양(코드가 정본) ── */
-    "coin-packs": () => { const used = S.billing.orders.some((o) => o.packId === "pack_trial" && o.status === "paid"); return { ok: true, packs: PACKS.map((k) => ({ id: k.id, krw: k.krw, coins: k.coins, bonusPct: k.bonusPct, oncePerTenant: !!k.oncePerTenant, active: true, vatKrw: VAT(k.krw), totalKrw: k.krw + VAT(k.krw), available: !(k.oncePerTenant && used) })), vatNote: "부가세 별도" }; },
+    "coin-packs": () => { const used = S.billing.orders.some((o) => o.packId === "pack_trial" && o.status === "paid"); return { ok: true, packs: PACKS.map((k) => ({ id: k.id, krw: k.krw, coins: k.coins, bonusPct: k.bonusPct, oncePerTenant: !!k.oncePerTenant, active: true, vatKrw: VAT(k.krw), totalKrw: k.krw + VAT(k.krw), available: !(k.oncePerTenant && used) })), vatNote: "부가세 별도", keyin: keyinOption() }; },
     "coin-purchase-start": (b) => { const B = S.billing;
       if (!B.paidTerms && b.agreePaidTerms !== true) return err("paid_terms", "유료 약관에 동의해 주세요."); if (b.agreePaidTerms === true) B.paidTerms = true;
       const pk = PACKS.find((x) => x.id === b.packId); if (!pk) return err("pack", "충전 팩을 골라 주세요.");
       if (pk.oncePerTenant && B.orders.some((o) => o.packId === "pack_trial" && o.status === "paid")) return err("once", "첫 충전 팩은 한 번만 살 수 있어요. 다른 팩을 골라 주세요.");
       const vatKrw = VAT(pk.krw), totalKrw = pk.krw + vatKrw; if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요", amountKrw: pk.krw, vatKrw, totalKrw };
-      const orderNo = "AC-COIN-1-" + pk.id.replace(/^pack_/, "") + "-" + Date.now().toString(36); B.orders.unshift({ orderNo, packId: pk.id, coins: pk.coins, krw: pk.krw, vatKrw, totalKrw, status: "pending", paidAt: null, refundedAt: null });
+      const route = (b.payRoute === "keyin" || b.keyin === true) && keyinOn && keyinMid ? "keyin" : "auth"; // 조용한 폴백 — 화면엔 아무 말도 하지 않는다
+      const orderNo = "AC-COIN-1-" + pk.id.replace(/^pack_/, "") + "-" + Date.now().toString(36); B.orders.unshift({ orderNo, packId: pk.id, coins: pk.coins, krw: pk.krw, vatKrw, totalKrw, status: "pending", paidAt: null, refundedAt: null, payRoute: route });
       if (B.billingKey) { settleCoin(orderNo); return { ok: true, orderNo, mode: "oneclick", amountKrw: pk.krw, vatKrw, totalKrw, coins: pk.coins, balance: S.coins, invoiceId: B.invoices[0].id }; } // ㉠ 원클릭 — 응답이 곧 결과
       return { ok: true, orderNo, mode: "auth", amountKrw: pk.krw, vatKrw, totalKrw, coins: pk.coins, pay: { url: "/mock-kicc?orderNo=" + orderNo, form: {} } }; },                                   // ㉡ 인증창 → 콜백
     "coin-history": (_b, q) => { const m = q.get("month"); const rows = S.billing.ledger.filter((l) => !m || l.at.slice(0, 7) === m).map((l) => ({ ...l })); const purchased = S.billing.ledger.filter((l) => l.bucket === "purchased").reduce((a, l) => a + l.amount, 0);
@@ -562,11 +568,11 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
-    if (orderNo.startsWith("AC-BK-")) { if (!fail) S.billing.billingKey = { brand: "신한", last4: "4421" }; save(); return location.assign(withMock(`/app/plan.html?key=${fail ? "fail" : "ok"}${!fail && qs.get("fp") === "reused" ? "&trial=reused" : ""}`)); }
+    if (orderNo.startsWith("AC-BK-") || orderNo.startsWith("AC-BKK-")) { if (!fail) S.billing.billingKey = { brand: "신한", last4: "4421" }; save(); return location.assign(withMock(`/app/plan.html?key=${fail ? "fail" : "ok"}${!fail && qs.get("fp") === "reused" ? "&trial=reused" : ""}`)); }
     if (fail) { const o = S.billing.orders.find((x) => x.orderNo === orderNo); if (o) o.status = "failed"; save(); return location.assign(withMock("/app/coins.html?failed=" + encodeURIComponent("카드 한도 초과"))); }
     settleCoin(orderNo); save(); location.assign(withMock("/app/coins.html?charged=" + encodeURIComponent(orderNo))); };
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);
