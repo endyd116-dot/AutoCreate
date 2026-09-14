@@ -108,13 +108,34 @@ export function wavDurationMs(buf: Buffer): number {
 export const GEMINI_VOICES = ["Charon", "Aoede", "Puck", "Fenrir", "Kore"] as const;
 export function isGeminiVoice(v: unknown): boolean { return (GEMINI_VOICES as readonly string[]).includes(String(v)); }
 
+/* ═══════════ [AC-39] 세대 표식이 붙은 나레이션 키 ═══════════
+ *   🔴 종전 키는 `…/tts/narration-l{i}.wav` — **줄 번호가 곧 키**였다. 문제는 «덮인다»가 아니라 **경합**이다:
+ *      같은 piece 를 **다른 대본으로** 다시 만들면 `l0`·`l1` 이 옛 음성을 덮는데, 그 순간 이미 굽고 있던 렌더가
+ *      그 wav 를 받아 가면 **대본과 음성이 어긋난 영상**이 나간다. Typecast↔Gemini 폴백도 서로를 덮었다.
+ *   🔴 **R2 는 버전 관리가 없다**(Cloudflare 미제공 · B2 실측) — 덮으면 이전 판은 영영 없다.
+ *   ⇒ 키에 **대본 세대**(`gen`)와 **provider** 를 넣는다. 같은 대본으로 이어달리기하면 gen 이 같아 **재사용이 그대로 산다**
+ *      (재과금 0 규율 유지) · 대본이 바뀌면 **새 폴더**라 옛 음성은 남고 렌더가 그걸 집을 일이 없다.
+ */
+import { createHash } from "node:crypto";
+
+/** 대본 세대 — 줄 텍스트만 해시한다(팩트체크 메타 같은 곁가지가 바뀌었다고 음성을 다시 굽지 않게). */
+export function scriptGen(lines: { text?: unknown }[] | null | undefined): string {
+  const body = (lines ?? []).map((l) => String(l?.text ?? "")).join("\n");
+  return createHash("sha1").update(body, "utf8").digest("hex").slice(0, 8);
+}
+/** 나레이션 R2 키 — 🔴 **이 함수 하나가 만든다**(세 곳에서 손으로 조립하다 서로 덮었다). */
+export function narrationKey(a: { tenantId: number; pieceId: number; gen?: string | null; keySuffix: string; provider: "typecast" | "gemini" }): string {
+  const gen = String(a.gen ?? "").replace(/[^a-z0-9]/gi, "").slice(0, 16) || "g0";
+  return `autocreate/${a.tenantId}/${a.pieceId}/tts/${gen}/narration-${a.keySuffix}-${a.provider}.wav`;
+}
+
 export interface TtsWord { text: string; startMs: number; endMs: number }
 export type TtsResult =
   | { ok: true; key: string; mime: "audio/wav"; bytes: number; durationMs: number; words: TtsWord[]; provider: "gemini" | "typecast"; costUsd: number; notes?: string[] }
   | { ok: false; reason: string; costUsd: 0; httpStatus?: number };
 
 /** synthesizeGemini — 한 문장(또는 짧은 문단) → wav(R2). 어절 시각 없음(words=[]). */
-export async function synthesizeGemini(a: { tenantId: number; pieceId: number; text: string; voice?: string | null; keySuffix: string; dict?: SpeakReadingDict | null }): Promise<TtsResult> {
+export async function synthesizeGemini(a: { tenantId: number; pieceId: number; text: string; voice?: string | null; keySuffix: string; gen?: string | null; dict?: SpeakReadingDict | null }): Promise<TtsResult> {
   const base = preprocessForSpeech(a.text, a.dict);
   if (!base) return { ok: false, reason: "읽을 대본이 없습니다.", costUsd: 0 };
   if (!r2Configured()) return { ok: false, reason: "R2 미설정", costUsd: 0 };
@@ -123,7 +144,7 @@ export async function synthesizeGemini(a: { tenantId: number; pieceId: number; t
        `tts-typecast.ts` 와 같은 모양: 음절 수 ÷ 4.6초 길이의 무음 wav + 어절 시각 균등 분할 + ai_usage model "stub" 원가 0. */
     const durationMs = Math.max(600, Math.round(([...base].filter((ch) => /\S/.test(ch)).length / 4.6) * 1000));
     const buf = wrapPcmAsWav(Buffer.alloc(Math.round(24000 * 2 * durationMs / 1000)), 24000);
-    const key = `autocreate/${a.tenantId}/${a.pieceId}/tts/narration-${a.keySuffix}.wav`;
+    const key = narrationKey({ tenantId: a.tenantId, pieceId: a.pieceId, gen: a.gen, keySuffix: a.keySuffix, provider: "gemini" });
     await r2Put(key, buf, "audio/wav");
     const toks = base.split(/\s+/).filter(Boolean); const per = durationMs / Math.max(1, toks.length);
     const words: TtsWord[] = toks.map((t, i) => ({ text: t, startMs: Math.round(i * per), endMs: Math.round((i + 1) * per) }));
@@ -148,7 +169,7 @@ export async function synthesizeGemini(a: { tenantId: number; pieceId: number; t
     const isRiff = buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF";
     if (!isRiff) buf = wrapPcmAsWav(buf, pcmRateFromMime(mime));
     const durationMs = wavDurationMs(buf);
-    const key = `autocreate/${a.tenantId}/${a.pieceId}/tts/narration-${a.keySuffix}.wav`;
+    const key = narrationKey({ tenantId: a.tenantId, pieceId: a.pieceId, gen: a.gen, keySuffix: a.keySuffix, provider: "gemini" });
     await r2Put(key, buf, "audio/wav");
     const outTok = data.usageMetadata?.candidatesTokenCount ?? Math.round(durationMs / 40);
     const costUsd = Math.round(outTok / 1_000_000 * 10 * 1e6) / 1e6;   // TTS 출력 단가 $10/M 보수 추정

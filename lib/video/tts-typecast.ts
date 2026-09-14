@@ -10,6 +10,7 @@ import { recordAiUsage } from "../ai";
 import { r2Configured, r2Put } from "../r2";
 import { preprocessForSpeech, wavDurationMs, type SpeakReadingDict, type TtsResult, type TtsWord } from "./tts";
 import { videoStub } from "./types";
+import { narrationKey } from "./tts";   // [AC-39] 나레이션 키는 한 함수가 만든다(세 곳에서 조립하다 서로 덮었다)
 
 const TYPECAST_API_URL = process.env.TYPECAST_API_URL || "https://api.typecast.ai/v1/text-to-speech";
 export const TYPECAST_TIMESTAMPS_SUFFIX = "/with-timestamps";
@@ -98,7 +99,7 @@ export function trimWavLead(buf: Buffer, cutMs: number): { buf: Buffer; cutMs: n
 export interface TypecastLineOpts { voiceId?: string | null; previousText?: string | null; nextText?: string | null; tempo?: number; timestamps?: boolean; dict?: SpeakReadingDict | null }
 
 /** synthesizeTypecast — 한 문장 → wav(R2 `autocreate/{tid}/{pieceId}/tts/narration-{suffix}.wav`) + 어절 시각. */
-export async function synthesizeTypecast(a: { tenantId: number; pieceId: number; text: string; keySuffix: string }, opts: TypecastLineOpts = {}): Promise<TtsResult> {
+export async function synthesizeTypecast(a: { tenantId: number; pieceId: number; text: string; keySuffix: string; gen?: string | null }, opts: TypecastLineOpts = {}): Promise<TtsResult> {
   const base = preprocessForSpeech(a.text, opts.dict);
   if (!base) return { ok: false, reason: "읽을 대본이 없습니다.", costUsd: 0 };
   if (!r2Configured()) return { ok: false, reason: "R2 미설정", costUsd: 0 };
@@ -106,7 +107,7 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
   if (!apiKey && !videoStub()) return { ok: false, reason: "TYPECAST_API_KEY가 없어 타입캐스트 음성을 만들 수 없습니다.", costUsd: 0 };
   const chars = [...base].length;
   const costUsd = Math.round(chars * TYPECAST_USD_PER_CHAR * 1e6) / 1e6;
-  const key = `autocreate/${a.tenantId}/${a.pieceId}/tts/narration-${a.keySuffix}.wav`;
+  const key = narrationKey({ tenantId: a.tenantId, pieceId: a.pieceId, gen: a.gen, keySuffix: a.keySuffix, provider: "typecast" });
   if (videoStub()) {
     // 로컬 하니스 — 고정 응답: 음절 수 × 1/4.6초 길이의 무음 wav + 균등 어절 시각
     const durationMs = Math.max(600, Math.round((chars / 4.6) * 1000));
