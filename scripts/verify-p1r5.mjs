@@ -135,16 +135,26 @@ async function main() {
   }
   /* ══ sweep — 20분 침묵 → video.sweep 재디스패치 · 상한 3회 → failed+환급+알림 ══ */
   if (SECTIONS.has("sweep") && pieceId) {
-    await s`UPDATE pieces SET status = 'generating', updated_at = NOW() - interval '25 minutes', meta = (meta - 'chainLock') || ${s.json({ chainStage: { stage: "clips", at: new Date(Date.now() - 25 * 60_000).toISOString() }, chainResume: { count: 0 } })} WHERE id = ${pieceId}`;
+    /* 🔴 먼저 «render 단계 + 살아 있는 render.video 잡» 은 스위퍼가 **안 건드린다**(계약 §1.5 · reap 는 B2 몫)를 재고,
+       그다음 그 조건을 치워야 이어달리기 경로가 보인다. 안 치우면 스위퍼가 정상적으로 skip 해서 **검사가 헛돈다**(2026-09-14 내가 밟았다). */
+    const liveJobs = await s`SELECT id FROM runner_jobs WHERE piece_id = ${pieceId} AND kind = 'render.video' AND status = 'queued'`;
+    if (liveJobs.length) {
+      await s`UPDATE pieces SET status = 'generating', updated_at = NOW() - interval '25 minutes' WHERE id = ${pieceId}`;
+      const sk = await cron("5m", TID); const st0 = stepOf(sk, "video.sweep");
+      const [pk] = await s`SELECT status FROM pieces WHERE id = ${pieceId}`;
+      rec("stage render + 살아 있는 render.video 잡 → 스위퍼 무접촉(skip · 계약 §1.5)", (st0?.changed ?? 0) === 0 && pk?.status === "generating", `${JSON.stringify(st0 || {}).slice(0, 90)} · piece ${pk?.status} · 잡 ${liveJobs.length}건`);
+      await s`DELETE FROM runner_jobs WHERE piece_id = ${pieceId} AND kind = 'render.video'`;   // 이어달리기 경로를 재려면 치운다
+    } else warn("stage render + 살아 있는 render.video 잡 → 스위퍼 무접촉", "이 실행엔 렌더 잡이 없어 못 쟀다");
+    await s`UPDATE pieces SET status = 'generating', updated_at = NOW() - interval '25 minutes', meta = (meta - 'chainLock') || ${s.json({ stage: "clips", chainStage: { stage: "clips", at: new Date(Date.now() - 25 * 60_000).toISOString() }, chainResume: { count: 0 } })} WHERE id = ${pieceId}`;
     const sw = await cron("5m", TID); const st = stepOf(sw, "video.sweep");
     const [p1] = await s`SELECT status, meta FROM pieces WHERE id = ${pieceId}`;
     rec("video.sweep: 20분 침묵 + chainStage → 이어달리기 재디스패치(chainResume.count 1 · 잠금 먼저)", !!st && st.errors === 0 && (Number(p1?.meta?.chainResume?.count) >= 1 || st.changed >= 1), `${JSON.stringify(st || {}).slice(0, 120)} · resume ${JSON.stringify(p1?.meta?.chainResume)}`);
-    await s`UPDATE pieces SET status = 'generating', updated_at = NOW() - interval '25 minutes', meta = (meta - 'chainLock') || ${s.json({ chainResume: { count: 3 } })} WHERE id = ${pieceId}`;
+    await s`DELETE FROM runner_jobs WHERE piece_id = ${pieceId} AND kind = 'render.video'`;
+    await s`UPDATE pieces SET status = 'generating', updated_at = NOW() - interval '25 minutes', meta = (meta - 'chainLock') || ${s.json({ stage: "clips", chainStage: { stage: "clips", at: new Date(Date.now() - 25 * 60_000).toISOString() }, chainResume: { count: 3 } })} WHERE id = ${pieceId}`;
     const b0 = (await call(jar, "/api/coins-balance")).json; const sw2 = await cron("5m", TID);
     const [p2] = await s`SELECT status, meta FROM pieces WHERE id = ${pieceId}`; const b1 = (await call(jar, "/api/coins-balance")).json;
     const [nf] = await s`SELECT id FROM notifications WHERE tenant_id = ${TID} AND kind = 'piece_failed' ORDER BY id DESC LIMIT 1`;
     rec("상한(3) 초과 → failed + 사유(마지막 단계) + 환급 + 알림", p2?.status === "failed" && /단계/.test(String(p2?.meta?.failReason || "")) && b1.balance > b0.balance && !!nf, `${JSON.stringify(stepOf(sw2, "video.sweep") || {}).slice(0, 100)} · ${p2?.status} «${p2?.meta?.failReason}» · 코인 ${b0?.balance}→${b1?.balance} · 알림 ${nf?.id}`);
-    rec("stage render 는 runner_jobs 살아 있으면 스위퍼가 안 건드림", "WARN", "render 잡이 있는 piece 로 트리거 때");
   }
   /* ══ cost — 🔴 계약 v5.5 §1.4c-(1): R4 `checkAiCostCap` 재사용(새 캡 금지) · 소프트=통과+운영 알림 · 하드(일일×3)=차단·환급 · 전역 월 ₩1,400,000 · kill switch ══ */
   if (SECTIONS.has("cost") && topicId) {
@@ -181,9 +191,15 @@ async function main() {
       const brief = pr.json?.brief; if (!brief) return { status: pr.status, step: pr.json?.step || "propose_failed", error: pr.json?.error, pieceId: 0, spent: 0 };
       const b0 = (await call(jar, "/api/coins-balance")).json;
       const drop = brief.pieces.filter((p) => !(p.kind === "video" || p.video)).map((p) => ({ key: p.key, drop: true }));
-      const cf = await call(jar, "/api/director-confirm", { body: { briefId: brief.id, pieces: drop } });
+      let cf = await call(jar, "/api/director-confirm", { body: { briefId: brief.id, pieces: drop } });
+      // 🔴 Starter 는 `directorEdit` 기능이 없다 — «글 piece 를 뺀다»가 손보기로 막힌다(402 plan_feature).
+      //    그건 캡 이야기가 아니므로, 손보기 없이(제안 그대로) 다시 확정해 **캡 판정만** 본다.
+      if (cf.json?.step === "plan_feature") cf = await call(jar, "/api/director-confirm", { body: { briefId: brief.id } });
       const b1 = (await call(jar, "/api/coins-balance")).json;
-      return { status: cf.status, step: cf.json?.step, error: cf.json?.error, pieceId: cf.json?.pieceIds?.[0] || 0, spent: (b0?.balance ?? 0) - (b1?.balance ?? 0), balance: b1?.balance };
+      // 손보기 없이 확정하면 글 piece 도 같이 만들어진다 — **영상 piece** 를 골라 돌려준다(캡 절의 주어는 영상이다).
+      const ids = (cf.json?.pieceIds || []).map(Number).filter(Boolean);
+      const vids = ids.length ? await s`SELECT id FROM pieces WHERE tenant_id = ${TID} AND kind = 'video' AND id IN ${s(ids)} ORDER BY id LIMIT 1` : [];
+      return { status: cf.status, step: cf.json?.step, error: cf.json?.error, pieceId: Number(vids[0]?.id || ids[0] || 0), spent: (b0?.balance ?? 0) - (b1?.balance ?? 0), balance: b1?.balance };
     };
     const auditSince = async (t) => await s`SELECT action, risk_level, detail FROM audit_logs WHERE tenant_id = ${TID} AND created_at > ${t.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 20`;
 
@@ -236,8 +252,9 @@ async function main() {
       const tHard = new Date(Date.now() - 5_000);
       const b0 = (await call(jar, "/api/coins-balance")).json;
       await call(null, "/api/generate-video-background", { body: { pieceId: mid.pieceId, tenantId: TID }, headers: { "x-internal-secret": process.env.INTERNAL_SECRET || "" } });
-      await sleep(4000);
-      const [pf] = await s`SELECT status, meta FROM pieces WHERE id = ${mid.pieceId}`;
+      // 🔴 원가 관문은 **클립 단계**에서 만난다 — 대본·목소리를 지나야 닿는다. 4초만 자고 «안 막혔다»고 적으면 검사가 헛돈다(2026-09-14 내가 밟았다).
+      let pf = null; const dlH = Date.now() + Number(process.env.HARD_TIMEOUT_MS || 180_000);
+      while (Date.now() < dlH) { const [x] = await s`SELECT status, meta FROM pieces WHERE id = ${mid.pieceId}`; pf = x; if (["failed", "in_review", "awaiting_runner"].includes(String(x?.status))) break; await sleep(5000); }
       const b1 = (await call(jar, "/api/coins-balance")).json;
       const [note] = await s`SELECT id, kind, title FROM notifications WHERE tenant_id = ${TID} AND created_at > ${tHard.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 1`;
       const aHard = await auditSince(tHard); const hardRow = aHard.find((a) => /cost|cap|budget/i.test(String(a.action)));
@@ -330,13 +347,16 @@ async function main() {
         `1회 ${r1.ok ? "ok" : "실패"} · 2회 ${r2.ok ? "ok" : "실패"} · 2회차 «${r2.out.trim().split("\n").pop()?.slice(0, 70) || ""}»`);
     } else if (has) warn("seed-bgm 멱등", "SKIP_SEED_BGM=1 로 실행 생략");
     const [anyRender] = await s`SELECT id, status, meta FROM pieces WHERE tenant_id = ${TID} AND kind = 'video' AND meta ? 'render' ORDER BY id DESC LIMIT 1`;
-    const bgm = anyRender?.meta?.render?.audio?.bgm ?? "없음";
+    // 🔴 `null`(«무음이라고 말했다») 과 `undefined`(«키가 아예 없다») 는 다르다 — `??` 로 뭉개면 계약 §2.1 위반을 못 본다.
+    const audio = anyRender?.meta?.render?.audio;
+    const hasKey = !!audio && Object.prototype.hasOwnProperty.call(audio, "bgm");
+    const bgm = hasKey ? audio.bgm : undefined;
     const licensed = String(process.env.BGM_LICENSE_VERIFIED || "") === "1";
     // 🔴 «무음이 정직 경로» = bgm 이 null 이어도 **그것 때문에** 실패하지 않는다(다른 사유의 실패는 이 절의 관심사가 아니다).
     const bgmBlamed = /bgm|음악|배경음/i.test(String(anyRender?.meta?.failReason || ""));
     rec(licensed ? "BGM_LICENSE_VERIFIED=1 → audio.bgm 에 키·gainDb" : "BGM_LICENSE_VERIFIED 없음 → audio.bgm = null(무음)이 정직 경로(bgm 때문에 실패 0)",
-      anyRender ? (licensed ? !!bgm && !!bgm.key : bgm === null && !bgmBlamed) : false,
-      anyRender ? `piece ${anyRender.id} ${anyRender.status} · bgm ${JSON.stringify(bgm).slice(0, 40)} · 실패사유 «${String(anyRender.meta?.failReason || "-").slice(0, 45)}»` : "render 페이로드를 가진 piece 0(payload 절 먼저)");
+      anyRender ? (licensed ? !!bgm && !!bgm.key : hasKey && bgm === null && !bgmBlamed) : false,
+      anyRender ? `piece ${anyRender.id} ${anyRender.status} · audio.bgm ${hasKey ? JSON.stringify(bgm) : "🔴 키 없음(계약 §2.1 은 키 존재+null)"} · 실패사유 «${String(anyRender.meta?.failReason || "-").slice(0, 40)}»` : "render 페이로드를 가진 piece 0(payload 절 먼저)");
   }
 
   /* ══ rules — kind shorts 주 2회 → coinsPerWeek 2×28 · 슬롯 점 · 슬롯 없는 자동 생성 거부 감사 ══ */
