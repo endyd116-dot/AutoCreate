@@ -6,14 +6,21 @@
  *            · 제휴 = intent commercial|mixed → coupang(productQuery=소재 검색어 · slot mid/end) · 이미지 = 채널 기본 · coinCost = blog 1 + image×count.
  *   confirm: 패치 적용 → 잔액 선검사 → piece(generating·meta.stage writing)+slot(manual·producing) → consume(piece:{id} · piece:{id}:img{i}) → 경합 실패 시 refund+삭제 롤백 → 배경 생성 함수 호출.
  *   Brief.goal: tistory/blogger/wordpress 계정 → adsense · naver_blog → adpost · intent commercial → affiliate · 섞이면 mixed.
+ *   [P1R5 B-1] 영상 분기 — PieceSpec.kind "video" + video{format,seconds,provider,voice,variant,cuts,disclosure} · 코인 = videoCoinItem(seconds) 1회(이미지 코인 0) ·
+ *     달러 캡 선검사(코인 차감 «전») · 배경 함수는 generate-video-background. 슬롯 게이트·롤백·멱등은 글과 **같은 경로**(우회 0).
  */
 import { sql } from "drizzle-orm";
 import { jsonb, utcDate } from "./db-util";
 import { q, listAccounts, TEXT_CHANNELS, type AccountRow } from "./accounts";
-import { contractFor, pickFormat, defaultImageCount, type FormatKey, type WritingContract } from "./writing-contracts";
+import { VIDEO_CHANNELS, isVideoChannel, type VideoFormat, type VideoSeconds, type VideoSpec } from "./video/types";
+import { HOOK_TYPES, PALETTES } from "./video/scenes";
+import { GEMINI_VOICES } from "./video/tts";
+import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
+import { precheckVideoBudget, triggerVideo } from "./video/gen";
+import { contractFor, pickFormat, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract } from "./writing-contracts";
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { balance, consume, refundPiece } from "./coin-ledger";
-import { coinCostOf } from "./coin-table";
+import { coinCostOf, videoCoinItem } from "./coin-table";
 import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
@@ -35,16 +42,27 @@ export interface PieceSpec {
   schedule: { at: string; slotReason: string }; coinCost: number;
   /** 추가(계약 외 · A 무시 가능): 채널별로 가른 앵글 — content-gen 재료. */
   angle: string;
+  /** [P1R5 §1.1] 글/영상 — 기본 "post"(없으면 글 · R1~R4 호환). */
+  kind?: "post" | "video";
+  /** [P1R5 §1.1] kind video 일 때만. */
+  video?: VideoSpec;
 }
 export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
-export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null }; schedule?: { at: string }; drop?: true }
+export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null }; schedule?: { at: string }; drop?: true;
+  /** [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. */
+  video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number } }
 
 const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
 const pieceCoin = (imageCount: number) => coinCostOf("blog") + coinCostOf("image") * imageCount;
 
 export function goalOf(pieces: { channel: string }[], intent: string): Goal {
   const set = new Set<Goal>();
-  for (const p of pieces) { if (p.channel === "naver_blog" || p.channel === "naver_clip") set.add("adpost"); else if (["tistory", "blogger", "wordpress"].includes(p.channel)) set.add("adsense"); }
+  for (const p of pieces) {
+    if (p.channel === "youtube_shorts") set.add("ypp");                         // [P1R5] 쇼츠 = YPP(쇼츠 광고수익)
+    else if (p.channel === "naver_clip") set.add("clip_incentive");             // [P1R5] 클립 = 인센티브
+    else if (p.channel === "naver_blog") set.add("adpost");
+    else if (["tistory", "blogger", "wordpress"].includes(p.channel)) set.add("adsense");
+  }
   if (intent === "commercial") set.add("affiliate");
   if (set.size === 0) return "mixed";
   return set.size === 1 ? [...set][0] : "mixed";
@@ -72,6 +90,47 @@ async function recentFormats(tid: number, accountId: number | null, channel: str
   return rows.map((r) => String(r.format || "")).filter(Boolean);
 }
 
+/** 그 계정의 직전 영상 포맷(meta.video.format) — 포맷 로테이션 재료. */
+async function recentVideoFormats(tid: number, accountId: number | null, channel: string): Promise<string[]> {
+  const rows = accountId
+    ? await q(sql`SELECT meta->'video'->>'format' AS f FROM pieces WHERE tenant_id = ${tid} AND kind = 'video' AND account_id = ${accountId} AND status <> 'rejected' ORDER BY id DESC LIMIT 5`)
+    : await q(sql`SELECT meta->'video'->>'format' AS f FROM pieces WHERE tenant_id = ${tid} AND kind = 'video' AND channel = ${channel} AND status <> 'rejected' ORDER BY id DESC LIMIT 5`);
+  return rows.map((r) => String(r.f || "")).filter(Boolean);
+}
+
+/* ═══ [P1R5 §1.1] 영상 spec — 결정론(같은 brief·같은 계정이면 같은 값) ═══ */
+/** 채널·테넌트 설정 → 이 편의 길이(15|30|60). 채널 상한(클립 30)까지 자른다. */
+export function videoSecondsFor(channel: string, want?: unknown): VideoSeconds {
+  const n0 = Number(want); const base = n0 === 15 || n0 === 30 || n0 === 60 ? n0 : 60;
+  return clampSecondsForChannel(channel, base);
+}
+/** 포맷 로테이션(같은 계정 직전 영상과 다른 포맷) — 글의 pickFormat 과 같은 결. */
+function pickVideoFormat(recent: string[], seed: number): VideoFormat {
+  const pool: VideoFormat[] = ["graphic", "talking", "clip"];
+  const fresh = pool.filter((f) => f !== recent[0]);
+  const list = fresh.length ? fresh : pool;
+  return list[seed % list.length];
+}
+/** 다계정 변주(§6.2) — 같은 brief 의 i 번째 영상 piece 는 훅·팔레트·보이스가 서로 다르다(결정론). */
+export function variantFor(i: number, accountId: number | null): { hookType: string; palette: string; voiceId: string } {
+  const voices = typecastAvailable() ? [TYPECAST_VOICE_PILJAE, ...GEMINI_VOICES.slice(0, 2)] : [...GEMINI_VOICES];
+  return { hookType: HOOK_TYPES[i % HOOK_TYPES.length], palette: PALETTES[((accountId ?? 0) + i) % PALETTES.length], voiceId: voices[i % voices.length] };
+}
+/** 영상 PieceSpec.video 조립(코인·원가 계산의 근거). */
+export function buildVideoSpec(a: { channel: string; accountId: number | null; index: number; recentFormats: string[]; seconds?: unknown; affiliate: boolean }): VideoSpec {
+  const seconds = videoSecondsFor(a.channel, a.seconds);
+  const format = pickVideoFormat(a.recentFormats, (a.accountId ?? 0) + a.index);
+  const form = shortsFormOf(format, seconds);
+  const variant = variantFor(a.index, a.accountId);
+  return {
+    format, seconds, cuts: form.cuts.default,
+    provider: { tier: seconds === 15 ? "filler" : "standard", key: form.provider },
+    voice: { provider: typecastAvailable() && !GEMINI_VOICES.includes(variant.voiceId as typeof GEMINI_VOICES[number]) ? "typecast" : "gemini", voiceId: variant.voiceId },
+    variant,
+    disclosure: { badge: a.affiliate, descriptionFirstLine: a.affiliate },
+  };
+}
+
 /** 계정 배정(§5.3-2): active|pending_login · posts_today < daily_cap · health 높은 순(→ id). */
 export function assignAccount(accounts: AccountRow[], channel: string): AccountRow | null {
   const pool = accounts.filter((a) => a.channel === channel && (a.status === "active" || a.status === "pending_login") && a.postsToday < a.dailyCap)
@@ -88,8 +147,16 @@ export async function propose(tid: number, topicId: number): Promise<{ ok: true;
   // ★C(P1R4) fix: 금칙 카테고리(성인·도박·의료 과장·비방 · §1.5)는 «소재 단계에서 거부» — 편성 자리(slots-assign-topic)만 막고 디렉터 제안은 열려 있었다.
   { const banned = findBannedCategory(`${topic.title} ${topic.angle ?? ""}`); if (banned) { await writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "system", riskLevel: "medium", detail: { category: banned.category, word: banned.word, topicId } }); return { ok: false, step: "banned_category", error: `${banned.label} 주제는 만들 수 없어요.` }; } }
   const accounts = await listAccounts(tid);
-  const connected = [...new Set(accounts.filter((a) => TEXT_CHANNELS.has(a.channel) && a.status !== "suspended" && a.status !== "disconnected").map((a) => a.channel))];
-  if (!connected.length) return { ok: false, step: "no_account", error: "먼저 글 채널 계정을 하나 연결해 주세요." };
+  /* [P1R5 §1.1] 영상 축 — 테넌트가 settings.kinds 에 "video" 를 켰고 영상 채널 계정이 있으면 영상 piece 도 낸다(글과 섞일 수 있다). */
+  const [trow2] = await q(sql`SELECT settings FROM tenants WHERE id = ${tid}`);
+  const tset = ((trow2?.settings ?? {}) as Record<string, unknown>);
+  const kinds = Array.isArray(tset.kinds) ? (tset.kinds as unknown[]).map(String) : ["text"];
+  const wantVideo = kinds.includes("video");
+  const alive = (a: AccountRow) => a.status !== "suspended" && a.status !== "disconnected";
+  const textCh = [...new Set(accounts.filter((a) => TEXT_CHANNELS.has(a.channel) && alive(a)).map((a) => a.channel))];
+  const videoCh = wantVideo ? [...new Set(accounts.filter((a) => VIDEO_CHANNELS.has(a.channel) && alive(a)).map((a) => a.channel))] : [];
+  const connected = [...textCh, ...videoCh];
+  if (!connected.length) return { ok: false, step: "no_account", error: wantVideo ? "먼저 글 또는 영상 채널 계정을 하나 연결해 주세요." : "먼저 글 채널 계정을 하나 연결해 주세요." };
   const channels = [...(connected.includes(topic.channelHint) ? [topic.channelHint] : []), ...connected.filter((c) => c !== topic.channelHint)].slice(0, 3);
 
   const taken = await takenTimes(tid);
@@ -104,9 +171,26 @@ export async function propose(tid: number, topicId: number): Promise<{ ok: true;
     const sched = pickPublishAt({ channel: ch, goldenHours: acc?.goldenHours ?? null, taken: chTaken, takenSameAccount: acc ? (taken.byAccount.get(acc.id) ?? []) : [], minGapMin: acc?.minGapMin });
     taken.byChannel.set(ch, [...chTaken, sched.at]);
     if (acc) taken.byAccount.set(acc.id, [...(taken.byAccount.get(acc.id) ?? []), sched.at]);
+    if (isVideoChannel(ch)) {
+      /* [P1R5] 영상 piece — 이미지 코인 0 · 코인은 길이 구간제 1회 · 변주 인덱스는 지금까지 만든 영상 수. */
+      const vIndex = specs.filter((x) => x.kind === "video").length;
+      const video = buildVideoSpec({ channel: ch, accountId: acc?.id ?? null, index: vIndex, recentFormats: await recentVideoFormats(tid, acc?.id ?? null, ch), seconds: tset.videoSeconds, affiliate: !!affiliateBase });
+      specs.push({
+        key: `${ch}:${acc?.id ?? 0}`, channel: ch, accountId: acc?.id ?? null, accountHandle: acc?.handle ?? null,
+        kind: "video", video,
+        format: (video.format === "clip" ? "story" : video.format === "talking" ? "qna" : "info") as FormatKey,
+        emotionKey: "script", composition: `${video.seconds}초 ${video.format === "graphic" ? "그래픽 스토리" : video.format === "talking" ? "토킹" : "클립"}`,
+        lengthHint: { words: Math.round(video.seconds * 4.6 * 0.85 / 2.2) },
+        images: { count: 0, style: "photo", heroNeeded: false },
+        monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, adDisclosure: !!affiliateBase },
+        schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: coinCostOf(videoCoinItem(video.seconds)), angle: topic.angle,
+      });
+      continue;
+    }
     const imageCount = defaultImageCount(ch);
     specs.push({
       key: `${ch}:${acc?.id ?? 0}`, channel: ch, accountId: acc?.id ?? null, accountHandle: acc?.handle ?? null,
+      kind: "post",
       format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory" },
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, adDisclosure: !!affiliateBase },
@@ -187,6 +271,24 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       next.monetize.adDisclosure = !!next.monetize.affiliate;
     }
     if (p.schedule?.at) { const d = new Date(p.schedule.at); if (Number.isNaN(d.getTime())) return { ok: false, error: "시각 형식을 확인해 주세요." }; if (d.getTime() < Date.now() + 10 * 60_000) return { ok: false, error: "지금보다 10분 이상 뒤로 잡아 주세요." }; next.schedule = { at: d.toISOString(), slotReason: "직접 고른 시각" }; }
+    /* [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. 길이가 바뀌면 코인 구간도 바뀐다(계약 §0.1-4). */
+    if (next.kind === "video" && next.video) {
+      const v: VideoSpec = { ...next.video, provider: { ...next.video.provider }, voice: { ...next.video.voice }, variant: { ...next.video.variant }, disclosure: { ...next.video.disclosure } };
+      const pv = p.video ?? {};
+      if (pv.format && ["graphic", "talking", "clip"].includes(String(pv.format))) v.format = String(pv.format) as VideoFormat;
+      if (pv.seconds !== undefined) v.seconds = videoSecondsFor(s.channel, pv.seconds);
+      const form = shortsFormOf(v.format, v.seconds);
+      v.provider = { tier: v.seconds === 15 ? "filler" : "standard", key: form.provider };
+      v.cuts = pv.cuts !== undefined ? Math.max(form.cuts.min, Math.min(form.cuts.max, Math.trunc(n(pv.cuts)))) : form.cuts.default;
+      if (pv.voiceId) { const id = String(pv.voiceId).slice(0, 60); v.variant = { ...v.variant, voiceId: id }; v.voice = { provider: GEMINI_VOICES.includes(id as typeof GEMINI_VOICES[number]) ? "gemini" : "typecast", voiceId: id }; }
+      if (pv.palette) v.variant = { ...v.variant, palette: String(pv.palette).slice(0, 60) };
+      if (pv.hookType && HOOK_TYPES.includes(String(pv.hookType) as typeof HOOK_TYPES[number])) v.variant = { ...v.variant, hookType: String(pv.hookType) };
+      v.disclosure = { badge: !!next.monetize.affiliate, descriptionFirstLine: !!next.monetize.affiliate };
+      next.video = v;
+      next.composition = `${v.seconds}초 ${v.format === "graphic" ? "그래픽 스토리" : v.format === "talking" ? "토킹" : "클립"}`;
+      next.coinCost = coinCostOf(videoCoinItem(v.seconds));
+      out.push(next); continue;
+    }
     next.coinCost = pieceCoin(next.images.count);
     out.push(next);
   }
@@ -219,6 +321,12 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   // P1R4 §1.5 — AI 원가 일 상한(코인을 차감하기 전에 잰다 · 환율 없으면 잴 수 없어 막지 않는다).
   const budget = await requireAiBudget(tid);
   if (!budget.ok) return { ok: false, step: "ai_cost_cap", error: budget.error };
+  /* [P1R5 §1.2·§1.6] 영상 달러 캡 — **코인 차감 전**에 잰다(코인과 별개 관문). 초과면 원장 무접촉. */
+  for (const vs of specs) {
+    if (vs.kind !== "video" || !vs.video) continue;
+    const pb = await precheckVideoBudget(tid, vs.video.format, vs.video.seconds, vs.video.provider.key, vs.video.cuts);
+    if (!pb.ok) return { ok: false, step: "budget", error: pb.error };
+  }
   if (!gate.ok) return { ok: false, step: "slot_gate", error: gate.reason ?? "편성표에 없는 자동 생성이에요." };
 
   const topicId = n(b.topic_id);
@@ -228,7 +336,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
     const [rs] = await q(sql`SELECT status, channel FROM slots WHERE tenant_id = ${tid} AND id = ${reuseSlotId}`);
     if (rs) { reuseSlotPrevStatus = String(rs.status); reuseChannel = String(rs.channel); }
   }
-  const created: { pieceId: number; slotId: number; reused?: { prevStatus: string } }[] = [];
+  const created: { pieceId: number; slotId: number; isVideo?: boolean; reused?: { prevStatus: string } }[] = [];
   let charged = 0;
   const rollback = async (reason: string) => {
     for (const c of created) {
@@ -243,9 +351,13 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   };
   try {
     for (const s of specs) {
-      const meta = { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem: "blog", regenCount: 0 };
+      const isVideo = s.kind === "video" && !!s.video;
+      const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : "blog";
+      const meta = isVideo
+        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null }
+        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
-        VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${"post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
+        VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);
       /* 편성 자리를 빌려 쓰는가(크론) — 아니면 지금처럼 새 자리를 만든다(사람이 «만들기»로 끼워 넣는 글).
          빌려 쓰는 자리는 **채널이 같은 첫 spec 하나**에만 준다(한 자리에 두 글이 들어갈 수 없다). */
@@ -260,15 +372,15 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       } else {
         const slotDate = kstDateStr(new Date(s.schedule.at));
         const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin)
-          VALUES (${tid}, ${slotDate}::date, ${s.channel}, ${"post"}, ${s.accountId}, ${topicId}, ${briefId}, ${pieceId}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${"producing"}, ${origin}) RETURNING id`);
+          VALUES (${tid}, ${slotDate}::date, ${s.channel}, ${isVideo ? "shorts" : "post"}, ${s.accountId}, ${topicId}, ${briefId}, ${pieceId}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${"producing"}, ${origin}) RETURNING id`);
         slotId = n(sl?.id);
       }
       await q(sql`UPDATE pieces SET slot_id = ${slotId} WHERE id = ${pieceId}`);
-      created.push({ pieceId, slotId, ...(reused ? { reused } : {}) });
-      const c1 = await consume(tid, "blog", `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: `블로그 글(${s.channel})` });
+      created.push({ pieceId, slotId, isVideo, ...(reused ? { reused } : {}) });
+      const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : `블로그 글(${s.channel})` });
       if (!c1.ok) { await rollback(c1.reason); return c1.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${c1.need}개 부족해요.`, need: c1.need, have: c1.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
       charged += c1.charged;
-      for (let i = 1; i <= s.images.count; i++) {
+      for (let i = 1; i <= (isVideo ? 0 : s.images.count); i++) {
         const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `이미지 ${i}/${s.images.count}` });
         if (!ci.ok) { await rollback(ci.reason); return ci.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${ci.need}개 부족해요.`, need: ci.need, have: ci.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
         charged += ci.charged;
@@ -282,7 +394,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
     await rollback(String((e as Error)?.message ?? e));
     throw e;
   }
-  await Promise.all(created.map((c) => triggerGenerate(c.pieceId, tid)));   // ★C4 fix: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답) · piece 여럿이면 동시에
+  await Promise.all(created.map((c) => (c.isVideo ? triggerVideo(c.pieceId, tid) : triggerGenerate(c.pieceId, tid))));   // ★C4 fix · [P1R5] 영상은 generate-video-background: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답) · piece 여럿이면 동시에
   const bal = await balance(tid);
   return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance };
 }

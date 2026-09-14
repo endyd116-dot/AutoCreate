@@ -62,3 +62,22 @@ export function checkDisclosureHtml(html: string, need: boolean): DisclosureChec
   if (!isDisclosureText(m[1].replace(/<[^>]+>/g, ""))) return { ok: false, detail: "고지 문구가 정본과 달라요." };
   return { ok: true };
 }
+
+/* ═══ P1R5 §1.8 — 영상 고지 소비처(§16B.1 영상: 시작 3초 자막 + 우상단 상시 배지 + 설명란 첫 줄 공식 문구) ═══ */
+/** 우상단 배지 문구(짧은 형). */
+export function videoBadgeText(): string { return DISCLOSURE_TEXT.videoBadge; }
+/** 설명란·캡션 첫 줄 = 공식 문구 전문(유튜브 설명란·릴스 캡션·쓰레드 첫 줄 공통). */
+export function videoDescriptionFirstLine(provider: string | null | undefined): string { return disclosureTextFor(provider); }
+/** 시작 3초 자막 문구(짧은 형 + «광고»). */
+export function videoOpeningCaption(): string { return `광고 포함 · ${DISCLOSURE_TEXT.videoBadge.split(" · ")[1] ?? "파트너스 수수료"}`; }
+export interface VideoDisclosureInput { badge: string | null; disclosureCaption: string | null; descriptionFirstLine: string }
+/** checkVideoDisclosure — 제휴/유료면 배지·시작 자막·설명란 첫 줄 셋 다 있어야 통과(approve·publish 직전 재검사). */
+export function checkVideoDisclosure(v: VideoDisclosureInput, meta: { affiliate?: unknown; adDisclosure?: boolean } | null | undefined): DisclosureCheck {
+  const need = !!meta?.affiliate || meta?.adDisclosure === true;
+  if (!need) return { ok: true };
+  const miss: string[] = [];
+  if (!v.badge || !v.badge.includes("광고")) miss.push("우상단 배지");
+  if (!v.disclosureCaption || !v.disclosureCaption.includes("광고")) miss.push("시작 3초 자막");
+  if (!isDisclosureText(v.descriptionFirstLine)) miss.push("설명란 첫 줄 공식 문구");
+  return miss.length ? { ok: false, detail: `제휴 고지 누락: ${miss.join(" · ")}` } : { ok: true };
+}

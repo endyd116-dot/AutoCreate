@@ -2,7 +2,7 @@
  * lib/ai.ts — Gemini 호출 래퍼(폴백 체인 · JSON 모드 · 미터링). AM 원본: ../AutoMarketing/lib/ai.ts (복사 2026-09-14)
  *   가져온 것: fetch 본문·generationConfig·thinkingBudget 처리(mode flash=0 · pro=답변 예산 + 사고 몫)·에러 분류(isRetryable)·
  *             잘림(MAX_TOKENS) 실패 처리·머리 모델 혼잡 재시도·벽시계 예산(budgetMs)·모델별 비용(ai-cost).
- *   뺀 것: plan-gate·ai_feature_settings cap·BYO 키·결과 캐시·프롬프트 캐시·googleSearch(이 라운드 미사용).
+ *   뺀 것: plan-gate·ai_feature_settings cap·BYO 키·결과 캐시·프롬프트 캐시. googleSearch 는 P1R5 §1.7 에서 복원(팩트체크 왕복).
  *   바꾼 것: 시그니처를 객체 하나로(`callGemini({ purpose, chain, system, user, json, tenantId, ref })`) ·
  *           JSON 파싱 실패 시 **같은 모델 1회 재요청** 후 다음 모델 · 비용은 `ai_usage` 1행(purpose·model·토큰·cost_usd·ref).
  *   🔴 모델 이름 문자열 금지 — `lib/ai-models.ts` 에서 import 한 체인만 받는다. DB 오버레이(`ai_model_overrides.role`)가 있으면 그 체인이 이긴다(60초 캐시·graceful).
@@ -20,6 +20,8 @@ export interface AiAttempt { model: string; ok: boolean; reason?: string; ms: nu
 export interface AiOk {
   ok: true;
   text: string;
+  /** googleSearch:true 일 때만 — 그라운딩 출처(중복 제거 · ≤12). */
+  sources?: { url: string; title?: string }[];
   /** json:true 일 때만 — 파싱된 값. */
   json?: unknown;
   model: string;
@@ -53,6 +55,12 @@ export interface CallGeminiArgs {
   /** 체인 전체 벽시계 예산(동기 함수 26초 벽 방어). 미지정 = 끝까지. */
   budgetMs?: number;
   headRetries?: number;
+  /**
+   * [P1R5 §1.7 복원 · AM ★S4.0] Google 검색 그라운딩 — `tools:[{google_search:{}}]`. 응답에 groundingMetadata 출처(sources)가 붙는다.
+   *   ⚠️ jsonMode 와 병용 불가(검색은 텍스트 모드) — googleSearch:true 면 responseMimeType 을 싣지 않고 파싱 게이트도 건너뛴다(구조화는 호출부가 parseJsonLoose 로).
+   *   ⚠️ 씽킹(pro)과 검색 서술이 같은 출력 예산을 나눠 쓴다(AM #869 truncated) — 호출부가 maxOutputTokens 를 넉넉히 준다.
+   */
+  googleSearch?: boolean;
 }
 
 /* ───────── 사고 몫(AM ★THINKCAP) ───────── */
@@ -69,6 +77,7 @@ function isRetryable(reason: string): boolean {
 interface SingleResult {
   ok: boolean; text?: string; reason?: string;
   inputTokens: number; outputTokens: number; cachedTokens: number; thoughtTokens: number;
+  sources?: { url: string; title?: string }[];
 }
 
 async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string, timeoutMs: number): Promise<SingleResult> {
@@ -81,13 +90,14 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
   const generationConfig: Record<string, unknown> = {
     temperature: a.temperature ?? (a.json ? 0.2 : 0.4),
     maxOutputTokens: baseMax + thinkAllow,
-    ...(a.json ? { responseMimeType: "application/json" } : {}),
+    ...(a.json && !a.googleSearch ? { responseMimeType: "application/json" } : {}),
     thinkingConfig: { thinkingBudget: thinkAllow },
   };
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: a.user }] }],
     generationConfig,
   };
+  if (a.googleSearch) body.tools = [{ google_search: {} }];
   if (a.system) body.systemInstruction = { parts: [{ text: a.system }] };
 
   const controller = new AbortController();
@@ -99,7 +109,7 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
       return { ok: false, reason: `gemini_error_${resp.status}: ${errText.slice(0, 200)}`, ...empty };
     }
     const data = (await resp.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string; groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] } }[];
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; cachedContentTokenCount?: number; thoughtsTokenCount?: number };
     };
     const parts = data.candidates?.[0]?.content?.parts ?? [];
@@ -113,7 +123,13 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
     if (finishReason === "MAX_TOKENS" || finishReason === "LENGTH") {
       return { ok: false, reason: `truncated_${finishReason.toLowerCase()}`, inputTokens, outputTokens, cachedTokens, thoughtTokens };
     }
-    return { ok: true, text, inputTokens, outputTokens, cachedTokens, thoughtTokens };
+    let sources: { url: string; title?: string }[] | undefined;
+    if (a.googleSearch) {
+      const seen = new Set<string>(); const acc: { url: string; title?: string }[] = [];
+      for (const c of data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []) { const url = c?.web?.uri?.trim(); if (!url || seen.has(url)) continue; seen.add(url); acc.push({ url, title: c?.web?.title?.trim() || undefined }); if (acc.length >= 12) break; }
+      if (acc.length) sources = acc;
+    }
+    return { ok: true, text, inputTokens, outputTokens, cachedTokens, thoughtTokens, sources };
   } catch (err) {
     const aborted = (err as Error)?.name === "AbortError";
     return { ok: false, reason: aborted ? `timeout_${timeoutMs}ms` : `fetch_failed: ${String(err).slice(0, 200)}`, ...empty };
@@ -198,7 +214,7 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
     const r = await callSingleModel(model, a, apiKey, timeoutMs);
     let parsed: unknown = undefined;
     let parseFailed = false;
-    if (r.ok && r.text && a.json) { parsed = parseJsonLoose(r.text); if (parsed === null) parseFailed = true; }
+    if (r.ok && r.text && a.json && !a.googleSearch) { parsed = parseJsonLoose(r.text); if (parsed === null) parseFailed = true; }
     const okEff = !!(r.ok && r.text) && !parseFailed;
     trace.push({ model, ok: okEff, reason: okEff ? undefined : (parseFailed ? "json_parse_failed" : (r.reason ?? "unknown")), ms: Date.now() - mStart });
     // 실패한 호출도 토큰은 나갔다 — 기록한다(비용은 실제).
@@ -207,7 +223,7 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
     }
     if (okEff) {
       if (i > 0) console.info(`[gemini-${mode}] 폴백 #${i + 1} 성공: ${model} (1차 ${chain[0]} 실패: ${lastReason.slice(0, 80)})`);
-      return { ok: true, text: r.text!, json: parsed, model, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), inputTokens: r.inputTokens, outputTokens: r.outputTokens, thoughtTokens: r.thoughtTokens, trace };
+      return { ok: true, text: r.text!, json: parsed, model, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), inputTokens: r.inputTokens, outputTokens: r.outputTokens, thoughtTokens: r.thoughtTokens, trace, ...(r.sources ? { sources: r.sources } : {}) };
     }
     lastReason = parseFailed ? "json_parse_failed" : (r.reason ?? "unknown");
     console.warn(`[gemini-${mode}] ${i + 1}/${chain.length} ${model} 실패: ${lastReason.slice(0, 120)}`);

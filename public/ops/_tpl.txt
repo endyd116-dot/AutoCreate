@@ -241,7 +241,7 @@ const SRC = { app: "앱", email: "메일", kakao: "카카오", system: "자동" 
 const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; const m = Math.round((UI.utc(t.slaDueAt).getTime() - Date.now()) / 60e3); return m < 0 ? `<span style="color:var(--danger);font-weight:700">${-m}분 지남</span>` : m < 60 ? `<span style="color:var(--warn-ink);font-weight:700">${m}분</span>` : `${Math.round(m / 60)}시간`; };
 async function load() {
   const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}`, { noRedirect: true })]);
-  if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", `${s.avgFirstReplyMin}분`], ["SLA 놓침", `${s.slaMissPct}%`], ["만족", `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", s.avgFirstReplyMin == null ? "—" : `${s.avgFirstReplyMin}분`], ["SLA 놓침", s.slaMissPct == null ? "—" : `${s.slaMissPct}%`], ["만족", s.satisfactionPct == null ? "—" : `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   UI.$("#list").innerHTML = OPS.table([
     { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) }, { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },

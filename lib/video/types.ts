@@ -1,0 +1,107 @@
+/**
+ * lib/video/types.ts — 영상 축 어휘·페이로드 정본(계약 P1R5 §0.2 · §1.1 · §2.1 · §5 — 글자 그대로). 순수(임포트 0).
+ *   B(생성 두뇌)·B2(러너·출구)·A(화면 mock)가 같은 파일을 본다. 어휘를 늘리면 칸 폭(AC-21/30)을 같이 잰다:
+ *   VideoStage ≤ 8자 · format ≤ 8자 · pieces.format varchar(24) · piece_assets.kind varchar(12).
+ */
+export type VideoFormat = "graphic" | "talking" | "clip";
+export type VideoSeconds = 15 | 30 | 60;
+export type VideoChannel = "youtube_shorts" | "naver_clip" | "reels" | "threads";
+export type ProviderKey = "omni" | "veo_lite" | "veo_fast" | "veo" | "wan" | "hailuo" | "kling";
+export type ClipTier = "filler" | "standard" | "money";
+export type VideoStage = "script" | "tts" | "clips" | "render" | "judging" | "done" | "failed";
+export type JudgeGrade = "P0" | "P1" | "P2";
+export type TtsProvider = "typecast" | "gemini";
+
+export const VIDEO_CHANNELS: ReadonlySet<string> = new Set<VideoChannel>(["youtube_shorts", "naver_clip", "reels", "threads"]);
+export const VIDEO_FORMATS: readonly VideoFormat[] = ["graphic", "talking", "clip"];
+export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60];
+export const VIDEO_STAGES: readonly VideoStage[] = ["script", "tts", "clips", "render", "judging", "done", "failed"];
+export function isVideoChannel(v: unknown): v is VideoChannel { return VIDEO_CHANNELS.has(String(v)); }
+export function isVideoFormat(v: unknown): v is VideoFormat { return VIDEO_FORMATS.includes(String(v) as VideoFormat); }
+export function isVideoSeconds(v: unknown): v is VideoSeconds { return VIDEO_SECONDS.includes(Number(v) as VideoSeconds); }
+
+/** PieceSpec.video(계약 §1.1) — 디렉터가 정하고 confirm 이 pieces.meta.video 로 굳힌다. */
+export interface VideoSpec {
+  format: VideoFormat;
+  seconds: VideoSeconds;
+  provider: { tier: ClipTier; key: ProviderKey };
+  voice: { provider: TtsProvider; voiceId: string };
+  /** 다계정 변주 — 같은 brief 의 영상 piece 끼리 서로 다르다(결정론). */
+  variant: { hookType: string; palette: string; voiceId: string };
+  cuts: number;
+  disclosure: { badge: boolean; descriptionFirstLine: boolean };
+}
+
+/** 대본 한 줄(script 단계 산출 · pieces.blocks 재료 · 컷 경계 = 문장 경계). */
+export interface ScriptLine {
+  idx: number;
+  text: string;
+  /** hook | body | bridge | landing | closing — 훅·본문·전환·착지·마무리(AM shorts-script role 어휘). */
+  role: "hook" | "body" | "bridge" | "landing" | "closing";
+  /** 이 줄이 차지할 초(발화 예산에서 역산 · 컷 창 계획의 재료). */
+  seconds: number;
+  cutIdx: number;
+}
+export interface VideoScript {
+  lines: ScriptLine[];
+  hook: string;
+  closing: string;
+  youtube: { title: string; description: string; tags: string[] };
+  /** 팩트체크 스탬프(있을 때만 — 사실 주장이 없는 대본은 키 없음). */
+  factcheck?: { status: "verified" | "corrected" | "unverified" | "skipped"; claims: { claim: string; verdict: "ok" | "wrong" | "unknown"; note?: string }[] };
+}
+
+/** 컷 계획(scenes 단계). */
+export interface CutPlan {
+  idx: number;
+  startMs: number;
+  endMs: number;
+  lineIdx: number[];
+  /** 컷 프롬프트(SUBJECT/STYLE/COLOR/BEAT 계약 산출). */
+  prompt: string;
+  keyword: string;
+  /** provider 티어(15초 = veo_lite 강제). */
+  tier: ClipTier;
+  /** t2v(그래픽) | i2v(정지 이미지 애니메이션) | still(정지 이미지 Ken Burns · 토킹 포맷의 대체). */
+  mode: "t2v" | "i2v" | "still";
+}
+
+/* ───────── 러너 렌더 페이로드(계약 §2.1 글자 그대로) ───────── */
+export interface RenderScene { idx: number; startMs: number; endMs: number; clipKey?: string; imageKey?: string; motion?: "kenburns" | "none"; captionIdx: number[] }
+export interface RenderPhrase { idx: number; text: string; startMs: number; endMs: number; keyword?: string }
+export interface RenderPayload {
+  pieceId: number;
+  tenantId: number;
+  out: { w: 1080; h: 1920; fps: 30; maxSeconds: VideoSeconds; crf: 20 };
+  scenes: RenderScene[];
+  captions: { preset: "keyword_center" | "talking_big" | "clip_top"; phrases: RenderPhrase[]; srtKey: string };
+  audio: { narration: { key: string; startMs: number }[]; bgm: { key: string; gainDb: -18 } | null; sfx: [] | null; loudnorm: { I: -16; TP: -1.5; LRA: 11 } };
+  overlay: { badge: { text: string; corner: "tr" } | null; safeZone: { top: 220; bottom: 300 }; endcard: { text: string; url?: string } | null };
+  disclosureCaption: { text: string; untilMs: 3000 } | null;
+  /** B2 가 claim 시 채운다(presigned PUT) — B 는 비워 둔다. */
+  upload?: { putUrl: string; key: string; posterPutUrl: string; posterKey: string };
+}
+/** 러너 report(계약 §2.1) — B2 가 R2 HEAD 로 실존 확인한 뒤 finalizeRender 에 넘기는 모양. */
+export interface RenderReport { key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number; ffmpegVersion?: string }
+
+/* ───────── 심사(계약 §5 judgeVideo) ───────── */
+export interface JudgeAxis { key: string; label: string; pass: boolean; grade: JudgeGrade; detail?: string }
+export interface JudgeResult { grade: JudgeGrade; pass: boolean; axes: JudgeAxis[]; repaired: boolean }
+
+/* ───────── chainStage(계약 §1.4) ───────── */
+export interface ChainStage { stage: VideoStage; at: string; cutsDone?: number; cutsTotal?: number }
+export interface ChainLock { at: string; by: string }
+export interface ChainResume { count: number; at?: string }
+
+/** 컷 예산(계약 §1.4-3) — 15분 수명 − 합성·업로드 여유 4분. 상수 1곳.
+ *   env `CHAIN_BUDGET_MS` 는 **로컬 전용 손잡이**(C 하니스 이어달리기 재현 · 크론 CRON_BUDGET_MS 관례) — 프로덕션에 설정하지 않는다. */
+export const CHAIN_BUDGET_MS = (() => { const v = Number(process.env.CHAIN_BUDGET_MS); return Number.isFinite(v) && v >= 10_000 ? Math.floor(v) : 11 * 60_000; })();
+/** `VIDEO_PROVIDER_STUB=1` — provider·TTS·심사 비전 호출을 고정 응답으로 대체(로컬 하니스 전용 · ai_usage 는 model «stub» 로 기록 · 원가 0). 실호출은 이 변수가 없을 때만. */
+export function videoStub(): boolean { return String(process.env.VIDEO_PROVIDER_STUB ?? "").trim() === "1"; }
+/** 스위퍼 stale 판정(계약 §1.5) · 잠금 만료(§1.4 멱등). */
+export const CHAIN_STALE_MIN = 20;
+export const CHAIN_LOCK_MIN = 20;
+/** 이어달리기 상한(§1.4-3). */
+export const CHAIN_RESUME_MAX = 3;
+/** 심사 미달 재큐 상한(§0.1-7 · AM RENDER_MAX_RETRY). 3회째 = in_review(사람). */
+export const RENDER_MAX_RETRY = 2;

@@ -1,6 +1,7 @@
 /**
  * 편성 규칙·슬롯 API(계약 P1R1 §5 v1.1):
  *   GET  /api/rules-list                      → { rules:[Rule], settings:ScheduleSettings, coinsPerWeek, maxRules }
+ *   [P1R5 B-1 수정] Rule.kind = "post" | "shorts" — 영상 채널(youtube_shorts·naver_clip·reels·threads)이면 shorts 로 저장하고 슬롯도 그 kind 로 굴러간다(글 크론이 영상 슬롯을 집지 않는다).
  *   POST /api/rules-save { rules:[RuleInput] } → { rules, coinsPerWeek, slotsCreated }   // 전체 교체(있는 id 갱신 · 없는 id 비활성) → rollSlots 1회 · 활성 > maxRules 면 step limit
  *   POST /api/rules-settings Partial<ScheduleSettings> → { settings }                   // tenant-settings.mergeSettings 재사용(같은 jsonb 한 경로)
  *   GET  /api/slots-list?from=&to=            → { slots:[Slot] }
@@ -14,7 +15,8 @@ import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
-import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, type Rule } from "../../lib/slots";
+import { isVideoChannel } from "../../lib/video/types";
+import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, type Rule, type RuleKind } from "../../lib/slots";
 import { mergeSettings } from "./tenant-settings";
 import { kstDateStr, addDays } from "../../lib/best-time";
 import { sql } from "drizzle-orm";
@@ -75,7 +77,11 @@ export default async (req: Request): Promise<Response> => {
           accountId = n(a.id);
         }
         const ph = r.preferredHour === null || r.preferredHour === undefined || r.preferredHour === "" ? undefined : Math.trunc(n(r.preferredHour));
-        const o: Omit<Rule, "id"> & { id?: number } = { channel, kind: "post", accountMode, every, count, active: r.active !== false };
+        /* [P1R5 B-1 수정] kind — 영상 채널이면 shorts(요청이 말하지 않아도 채널이 정한다 · 글 채널에 shorts 를 넣지 않는다).
+           🔴 플랜 한도(maxRules)는 kind 와 무관한 «규칙 개수» 합산이다 — 아래 activeCount 가 그대로 센다(채널·종류별 한도 아님). */
+        const kind: RuleKind = isVideoChannel(channel) ? "shorts" : (String(r.kind) === "shorts" ? "shorts" : "post");
+        if (kind === "shorts" && !isVideoChannel(channel)) return badRequest("이 채널은 영상 편성을 지원하지 않아요.", "kind");
+        const o: Omit<Rule, "id"> & { id?: number } = { channel, kind, accountMode, every, count, active: r.active !== false };
         if (n(r.id)) o.id = n(r.id);
         if (accountId) o.accountId = accountId;
         if (weekdays.length) o.weekdays = weekdays;
@@ -91,12 +97,12 @@ export default async (req: Request): Promise<Response> => {
       const keep = new Set<number>();
       for (const r of clean) {
         if (r.id && existing.some((e) => e.id === r.id)) {
-          await q(sql`UPDATE cadence_rules SET channel = ${r.channel}, kind = ${"post"}, account_mode = ${r.accountMode}, account_id = ${r.accountId ?? null}, every = ${r.every}, count = ${r.count},
+          await q(sql`UPDATE cadence_rules SET channel = ${r.channel}, kind = ${r.kind}, account_mode = ${r.accountMode}, account_id = ${r.accountId ?? null}, every = ${r.every}, count = ${r.count},
             weekdays = ${r.weekdays ? jsonb(r.weekdays) : null}, preferred_hour = ${r.preferredHour ?? null}, format_hint = ${r.formatHint ?? null}, active = ${r.active} WHERE tenant_id = ${tid} AND id = ${r.id}`);
           keep.add(r.id);
         } else {
           const [row] = await q(sql`INSERT INTO cadence_rules (tenant_id, channel, kind, account_mode, account_id, every, count, weekdays, preferred_hour, format_hint, active)
-            VALUES (${tid}, ${r.channel}, ${"post"}, ${r.accountMode}, ${r.accountId ?? null}, ${r.every}, ${r.count}, ${r.weekdays ? jsonb(r.weekdays) : null}, ${r.preferredHour ?? null}, ${r.formatHint ?? null}, ${r.active}) RETURNING id`);
+            VALUES (${tid}, ${r.channel}, ${r.kind}, ${r.accountMode}, ${r.accountId ?? null}, ${r.every}, ${r.count}, ${r.weekdays ? jsonb(r.weekdays) : null}, ${r.preferredHour ?? null}, ${r.formatHint ?? null}, ${r.active}) RETURNING id`);
           keep.add(n(row?.id));
         }
       }
