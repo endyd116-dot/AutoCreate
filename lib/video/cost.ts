@@ -38,7 +38,8 @@ export function estimateVideoCostUsd(format: VideoFormat, seconds: VideoSeconds,
   const p = PROVIDERS[providerKey] ?? PROVIDERS.veo_lite;
   const n = cuts ?? (seconds === 60 ? 9 : seconds === 30 ? 5 : 3);
   const clipSec = Math.min(8, Math.max(4, Math.round(seconds / n)));
-  const clipCount = format === "talking" ? Math.ceil(n / 2) : n;          // 토킹은 절반이 정지 이미지
+  // 토킹은 **B-roll 3~4 + 나머지 정지 이미지**(계약 §1.3 표 · `scenes.ts buildCutPlans` 의 brollAt 과 같은 규칙).
+  const clipCount = format === "talking" ? Math.max(1, Math.min(4, Math.min(n, n <= 4 ? Math.ceil(n / 2) : n >= 10 ? 4 : 3))) : n;
   const stillCount = n - clipCount;                                        // 나머지는 CHAIN_IMAGE 한 장씩(§1.4c(2))
   const clips = clipCount * (p.gateway === "omni" ? clipSec * 0.10 : estimateClipCostUsd(p, clipSec));
   const stills = stillCount * STILL_IMAGE_USD;

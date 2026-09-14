@@ -165,12 +165,21 @@ export function tierFor(format: VideoFormat, seconds: VideoSeconds, isHookOrLand
 export function buildCutPlans(a: { windows: { idx: number; lineIdx: number[]; startMs: number; endMs: number }[]; lines: ScriptLine[]; drafts: CutDraft[]; format: VideoFormat; seconds: VideoSeconds; hookType: string; palette: string; bakedWords?: (string | null)[] }): { plans: CutPlan[]; risks: { cut: number; risks: CutRisk[] }[] } {
   const plans: CutPlan[] = []; const risks: { cut: number; risks: CutRisk[] }[] = [];
   const byIdx = new Map(a.lines.map((l) => [l.idx, l]));
+  /* 토킹 포맷 컷 종류(계약 §1.3 표 그대로): «**B-roll 3~4** · 나머지 정지 이미지».
+     🔴 예전 규칙(i%2 = 절반씩)은 표와 달랐다 — 60초 12컷이면 B-roll 이 6개가 되어 원가가 표의 두 배가 된다.
+     B-roll 은 첫 컷(훅)과 마지막 컷(엔드카드)을 포함해 **고르게** 흩는다 — 움직이는 그림이 앞뒤와 중간에 하나씩 있어야 정지 구간이 지루하지 않다. */
+  const brollAt = new Set<number>();
+  if (a.format === "talking") {
+    const n = a.windows.length;
+    const want = Math.max(1, Math.min(4, Math.min(n, n <= 4 ? Math.ceil(n / 2) : n >= 10 ? 4 : 3)));
+    for (let k = 0; k < want; k++) brollAt.add(Math.round((k * (n - 1)) / Math.max(1, want - 1)));
+  }
   a.windows.forEach((w, i) => {
     const lead = byIdx.get(w.lineIdx[0]);
     const draft = a.drafts[Math.min(a.drafts.length - 1, lead?.cutIdx ?? i)] ?? a.drafts[i] ?? { key: `cut:${i}`, subject: lead?.text ?? "" };
     const isHook = i === 0; const isLast = i === a.windows.length - 1;
     const r = checkCutConflicts(draft); if (r.length) risks.push({ cut: i, risks: r });
-    const mode: CutPlan["mode"] = a.format === "talking" ? (i % 2 === 0 ? "still" : "t2v") : "t2v";
+    const mode: CutPlan["mode"] = a.format === "talking" ? (brollAt.has(i) ? "t2v" : "still") : "t2v";
     const keyword = extractSceneKeyword(w.lineIdx.map((li) => byIdx.get(li)?.text ?? "").join(" ")) ?? "";
     plans.push({ idx: i, startMs: w.startMs, endMs: w.endMs, lineIdx: w.lineIdx, keyword, tier: tierFor(a.format, a.seconds, isHook || (isLast && lead?.role === "landing")), mode,
       prompt: buildShotPrompt(draft, { durationSec: cutDurationSec(w.startMs, w.endMs), isHook, hookType: a.hookType, palette: a.palette, bakedWord: a.bakedWords?.[i] ?? null, endcard: isLast }) });
