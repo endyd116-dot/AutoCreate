@@ -22,7 +22,7 @@ mkdirSync(OUT, { recursive: true });
 const { chromium } = await import(pathToFileURL(join(PW_DIR, "node_modules/playwright/index.mjs")).href);
 
 const VIEWPORTS = { phone: { width: 390, height: 844, isMobile: true, hasTouch: true }, desktop: { width: 1280, height: 800 } };
-const FORBIDDEN = /테넌트|러너 잡|\bpiece\b|슬롯/i;
+const FORBIDDEN = /테넌트|러너|piece|슬롯/i;   // «러너» 도 고객 화면 금지어(R2 §3 v3.1 · «내 PC» 로 말한다)
 const EMOJI_HARD = /\p{Emoji_Presentation}/u;                 // 진짜 이모지(컬러 글리프) = FAIL
 const EMOJI_SOFT = /\p{Extended_Pictographic}/u;              // ✎ ▦ 같은 딩뱃 = WARN(마크로 쓰는 중 · 헌장 «아이콘 1세트(선형)» 대상)
 
@@ -115,6 +115,7 @@ async function run() {
         rec(pg.key, vp, "가로 넘침 0", c.scrollW <= c.innerW + 1, `scrollWidth ${c.scrollW} / ${c.innerW}`);
         if (c.buttonsSmall) rec(pg.key, vp, "터치 44px 미만 버튼(눌리는 영역 기준)", "WARN", `${c.buttonsSmall}개`);
       }
+      if (pg.key === "accounts") { const g = await page.evaluate(() => [...document.querySelectorAll(".cg .cgi")].filter((e) => e.checkVisibility()).map((e) => (e.textContent || "").trim().slice(0, 8))).catch(() => []); rec(pg.key, vp, "계정 연결 그리드 = 글 4채널만(영상 6채널 숨김)", g.length === 4 && !g.some((t) => /쇼츠|클립|릴스|틱톡|인스타|쓰레드/.test(t)), g.join(",")); }
       rec(pg.key, vp, "콘솔 에러 0", errors.length === 0, errors.slice(0, 3).join(" | "));
       rec(pg.key, vp, "실패 요청(≥400) 0", failed.length === 0, failed.slice(0, 4).join(" | "));
       // 시트 열기(왕복) — 첫 셀렉터가 있으면 클릭 → 시트 스샷 → 시트 안 Primary ≤1
