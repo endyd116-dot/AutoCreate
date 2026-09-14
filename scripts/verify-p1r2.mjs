@@ -81,6 +81,9 @@ async function main() {
   if (!naver2) { const r = await call(jar, "/api/accounts-add", { body: { channel: "naver_blog", handle: "c_p1_naver2", loginId: "c_p1_naver2", password: "Zq9-plain-secret-77" } }); naver2 = r.json?.account; if (!naver2 && r.json?.step === "duplicate") naver2 = ((await call(jar, "/api/accounts-list")).json?.accounts || []).find((a) => a.handle === "c_p1_naver2"); }
   rec("네이버 계정 2개(승계용)", !!naver2?.id, `naver2 ${naver2?.id}`);
 
+  // 하니스 위생(테스트 테넌트): 앞선 실행이 건너뛴 미래 빈 자리를 되돌린다 — 그대로 두면 assign/produce 가 볼 자리가 없다(수리된 roll 은 skipped 를 되살리지 않는다)
+  guard(TID); await s`UPDATE slots SET status = 'planned', topic_id = NULL, note = NULL WHERE tenant_id = ${TID} AND origin = 'auto' AND status IN ('skipped','no_topic','coin_short') AND piece_id IS NULL AND slot_date >= CURRENT_DATE`;
+  await s`UPDATE topics SET status = 'candidate' WHERE tenant_id = ${TID} AND status = 'picked' AND id NOT IN (SELECT topic_id FROM slots WHERE tenant_id = ${TID} AND topic_id IS NOT NULL)`;
   const rs0 = await call(jar, "/api/rules-settings", { body: { autoSchedule: true, horizonDays: 7, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] } });
   rec("변수 8 기본값 저장", rs0.json?.ok === true && rs0.json?.settings?.autoSchedule === true, `${rs0.status}`);
   const rl = (await call(jar, "/api/rules-list")).json;
@@ -163,7 +166,7 @@ async function main() {
     // reschedule
     const rsl = slots.filter((x) => x.origin === "auto" && ["planned", "topic_assigned"].includes(x.status));
     if (rsl[0]) {
-      const at = new Date(Date.now() + 2 * 86400e3); at.setUTCHours(1, 0, 0, 0);   // KST 10:00
+      const at = new Date(Date.now() + 2 * 86400e3); at.setUTCHours(1, 5 + (Math.floor(Date.now() / 60000) % 40), 0, 0);   // KST 10:05~10:44(실행마다 다른 분 — 앞 실행과 30분 충돌 회피)
       const r1 = await call(jar, "/api/slots-reschedule", { body: { slotId: rsl[0].id, at: at.toISOString() } });
       rec("slots-reschedule", r1.json?.ok === true && r1.json?.slot?.publishAt === at.toISOString() && r1.json?.slot?.date === ymd(at), `${r1.status} ${r1.json?.step || ""} → ${r1.json?.slot?.date} ${r1.json?.slot?.publishAt}`, `slot ${rsl[0].id}`);
       const soon = await call(jar, "/api/slots-reschedule", { body: { slotId: rsl[0].id, at: new Date(Date.now() + 60e3).toISOString() } });
@@ -188,7 +191,7 @@ async function main() {
       rec("글 붙은 자리 소재 바꾸기 거부(state)", st.json?.step === "state", `${st.status} ${st.json?.step}`);
     } else warn("slots-produce-now", "topic_assigned 슬롯 없음");
     // skip
-    const sk = (await slotsNow()).find((x) => x.origin === "auto" && ["planned", "topic_assigned"].includes(x.status));
+    const sk = (await slotsNow()).filter((x) => x.origin === "auto" && ["planned", "topic_assigned"].includes(x.status) && !x.pieceId).pop();   // 가장 먼 자리(앞 자리는 produce 검사가 쓴다)
     if (sk) { const r = await call(jar, "/api/slots-skip", { body: { id: sk.id } }); const after = (await slotsNow()).find((x) => x.id === sk.id); rec("slots-skip → skipped", r.json?.ok === true && after?.status === "skipped", `slot ${sk.id}`); }
     // IDOR 4경로(타 테넌트 세션)
     const victim = (await slotsNow())[0];
@@ -218,10 +221,14 @@ async function main() {
     await call(jar, "/api/rules-settings", { body: { weeklyCoinCap: null } });
     const b0 = (await call(jar, "/api/coins-balance")).json?.balance;
     const mk = await cron("hourly", TID);
-    const md = tdetail(stepOf(mk, "slots.produce"), TID);
+    // 🔴 로컬은 배경 함수를 동기 실행해(AC-12②) 실제로 만든 틱이 30초 타임아웃 500 으로 끝날 수 있다 — 판정은 응답이 아니라 **감사 행**(cron_slots_produce · piece_auto_produced)으로.
+    const [prodAudit] = await s`SELECT id, detail FROM audit_logs WHERE action = 'cron_slots_produce' ORDER BY id DESC LIMIT 1`;
+    const md = (prodAudit?.detail?.detail?.tenants || []).find((t) => t.tid === TID) || tdetail(stepOf(mk, "slots.produce"), TID);
+    if (mk.status !== 200) warn("produce 틱 응답", `${mk.status} — 로컬 동기 배경 실행(AC-12②)으로 30초 초과 가능 · 감사 행으로 판정`);
     const b1 = (await call(jar, "/api/coins-balance")).json?.balance;
-    const [auditMade] = await s`SELECT id, detail FROM audit_logs WHERE tenant_id = ${TID} AND action = 'piece_auto_produced' ORDER BY id DESC LIMIT 1`;
-    rec("produce(크론) → made ≥1 · 코인 차감 · 감사 piece_auto_produced", (md.made || 0) >= 1 && b0 - b1 > 0 && !!auditMade, `made ${md.made} · ${b0}→${b1} · audit ${auditMade?.id}`, `audit_logs id=${auditMade?.id} pieceIds=${JSON.stringify(auditMade?.detail?.pieceIds)}`);
+    const [auditMade] = await s`SELECT id, detail, created_at FROM audit_logs WHERE tenant_id = ${TID} AND action = 'piece_auto_produced' ORDER BY id DESC LIMIT 1`;
+    const fresh = auditMade && Date.now() - new Date(auditMade.created_at).getTime() < 120_000;
+    rec("produce(크론) → made ≥1 · 코인 차감 · 감사 piece_auto_produced", (md.made || 0) >= 1 && b0 - b1 > 0 && fresh, `made ${md.made} · ${b0}→${b1} · audit ${auditMade?.id} · deferred ${md.deferredToNextDay || 0}`, `audit_logs id=${auditMade?.id} pieceIds=${JSON.stringify(auditMade?.detail?.pieceIds)}`);
     const prodSlots = (await slotsNow()).filter((x) => x.origin === "auto" && x.status === "producing");
     rec("자동 제작 슬롯 producing + pieceId", prodSlots.length >= 1 && prodSlots.every((x) => x.pieceId), `${prodSlots.length}개`);
     if (!producedPieceId && auditMade?.detail?.pieceIds?.[0]) { producedPieceId = auditMade.detail.pieceIds[0]; producedSlotId = Number(String(auditMade.target || "").replace("slot:", "")) || null; }
