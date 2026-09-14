@@ -161,13 +161,20 @@ export default async (req: Request): Promise<Response> => {
     // P1R4 §1.3 — readonly·suspended 는 재생성 금지. 글을 찾기 전에 재서 403 이 404 보다 먼저.
     if (path.endsWith("/pieces-regenerate")) {
       const w = await requireWritable(tid); if (!w.ok) return w.res;
-      // ★C(P1R4) fix: 다시 만들기도 AI 생성 — 일 상한. [P1R5 §1.4c(1)] 단 **영상은 소프트**(고객은 이미 코인을 냈다) — 막는 것은 영상 관문의 하드·전역뿐.
-      const { requireAiBudget } = await import("../../lib/billing/ai-cost-cap");
-      const bgt = await requireAiBudget(tid);
-      if (!bgt.ok) {
-        const [k] = await q(sql`SELECT kind FROM pieces WHERE tenant_id = ${tid} AND id = ${id}`);
-        if (String(k?.kind ?? "post") !== "video") return json({ ok: false, step: "ai_cost_cap", error: bgt.error }, 400);
-        await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "user", actorId: auth.user.uid, riskLevel: "medium", target: `piece:${id}`, detail: { usedKrw: bgt.check.usedKrw, capKrw: bgt.check.capKrw, at: "regenerate" } });
+      /* ★C(P1R4) fix: 다시 만들기도 AI 생성 — 일 상한. [P1R5 §1.4c(1)] 단 **영상은 소프트**(고객은 이미 코인을 냈다).
+         🔴 [2026-09-15 · AC-35] `requireAiBudget` 은 판정이 아니라 **명령**이다 — 초과를 보면 고객 알림(«오늘 만들 수 있는 양을
+         다 썼어요 · 내일 다시»)을 부수효과로 넣는다. 종전엔 그걸 **무조건 먼저** 부르고 반환만 분기해서, 영상 다시 만들기는
+         정상 진행되는데 알림함엔 «못 만들어요»가 남았다. 재생성은 **코인 0** 이라 «돈도 안 받고 안 만들어 준다»로 읽힌다.
+         ⇒ 판정은 순수 검사 `checkAiCostCap` 으로 하고, **글일 때만** 알림까지 하는 `requireAiBudget` 를 부른다.
+         `director.ts` 의 같은 수리(C)와 짝이다 · `requireAiBudget` 자체는 무변경(R4 글 경로 보존). */
+      const [k0] = await q(sql`SELECT kind FROM pieces WHERE tenant_id = ${tid} AND id = ${id}`);
+      const { checkAiCostCap, requireAiBudget } = await import("../../lib/billing/ai-cost-cap");
+      if (String(k0?.kind ?? "post") === "video") {
+        const c = await checkAiCostCap(tid);                                  // 순수 검사(부수효과 0)
+        if (!c.ok) await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "user", actorId: auth.user.uid, riskLevel: "medium", target: `piece:${id}`, detail: { usedKrw: c.usedKrw, capKrw: c.capKrw, usedUsd: c.usedUsd, at: "regenerate" } });
+      } else {
+        const bgt = await requireAiBudget(tid);                               // 글은 R4 그대로(알림 포함)
+        if (!bgt.ok) return json({ ok: false, step: "ai_cost_cap", error: bgt.error }, 400);
       }
     }
     const [p] = await q(sql`SELECT p.* FROM pieces p WHERE p.tenant_id = ${tid} AND p.id = ${id}`);
