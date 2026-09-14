@@ -16,8 +16,17 @@ import { BLOCK, KAKAO_AUTH_HOST, kakaoLogin } from "../lib/auth-kakao.mjs";   //
 
 
 const TITLE_SEL = '#post-title-inp, input[placeholder*="제목"], .textarea_tit';
-const MODE_OPEN_SEL = "#editor-mode-layer-btn-open, .btn_editor_mode, button[class*='mode']";
-const HTML_MODE_SEL = "#editor-mode-html, [data-mode='html'], li:has-text('HTML')";
+/* 🔴 실측 정정(2026-09-15 job #214 · 사장님 화면 확인 «메뉴 열려서 기본모드가 선택돼 있었다»):
+   모드 메뉴는 DOM 에 **두 벌**이다.
+     ① `#editor-mode-html-tistory` … 조상이 전부 `[0,0,0,0]` · 패널 `display:none` 인 **죽은 복제본**
+     ② `#editor-mode-html` (`.mce-tistory-mode-item`) … `[982,71,116,30]` 에 실제로 그려지는 **진짜**
+   접미사 `-tistory` 가 «정답»이라던 앞선 주석은 **틀렸다** — 그건 복제본이다.
+   그래서 «메뉴가 열렸나»를 복제본으로 판정해 «안 열렸다»로 읽고 버튼을 계속 눌러 **열었다 닫았다만** 했다.
+   판정도 클릭도 **보이는 쪽**으로 한다(`querySelectorAll`·`.first()` 는 숨은 것도 집는다 — 그게 이 사고의 뿌리다). */
+const MODE_OPEN_SEL = "#editor-mode-layer-btn-open, #editor-mode-layer-btn, button:has-text('기본모드'), .btn_editor_mode";
+/* 여는 순서대로 = 진짜 → 관계기반 → 죽은 복제본(최후). 고르는 건 언제나 **보이는 것**. */
+const HTML_ITEM_SELS = ["#editor-mode-html", "div.mce-tistory-mode-item:has-text('HTML')", "[data-mode='html']", "#editor-mode-html-tistory"];
+const HTML_MODE_SEL = HTML_ITEM_SELS.join(", ");
 const CM_SEL = ".CodeMirror";
 /* 실측(2026-09-14 job #74 · TinyMCE 티스토리 에디터): 하단에 «임시저장 N»(저장) · «완료»(발행 레이어 열기),
    우상단에 «기본모드 ∨»(모드 전환). 텍스트가 자식 span 에 있어 :has-text 가 못 잡을 수 있어 getByText 폴백을 함께 쓴다. */
@@ -93,76 +102,244 @@ async function openEditor(page, host, shotKey) {
   }
 }
 
-/** HTML 모드로 전환하고 bodyHtml 을 통째로 넣는다. 성공 = true. */
+/**
+ * HTML 모드로 전환하고 bodyHtml 을 통째로 넣는다.
+ *   반환 `{ ok, step, detail? }` — 🔴 **어디서 막혔는지를 돌려준다**(AC-27).
+ *   종전엔 모든 실패 경로가 `return false` 였다. 그래서 «HTML 모드를 못 열었다»만 남고
+ *   ①버튼이 없는 건지 ②레이어에 HTML 항목이 없는 건지 ③확인 팝업에 막힌 건지 ④CodeMirror 가 안 뜬 건지를
+ *   **영영 알 수 없었다** — 고칠 수가 없는 실패다. 단계마다 이름을 붙이고 막힌 자리의 화면을 찍는다.
+ */
 async function tryHtmlMode(page, bodyHtml, shotKey) {
+  const fail = async (step, detail) => {
+    await shot(page, shotKey, `02x-HTML모드실패-${step}`).catch(() => {});
+    console.log(`  · [html-mode] 막힌 자리: ${step}${detail ? ` — ${detail}` : ""}`);
+    return { ok: false, step, detail };
+  };
+  /* 폴백(기본 모드)을 **일부러** 태워 보는 스위치. 두 길이 다 살아 있는지 확인하는 유일한 방법이고,
+     티스토리가 HTML 모드를 또 바꿔 놓았을 때 배포 없이 내려앉힐 손잡이이기도 하다. */
+  if (String(process.env.AC_TISTORY_NO_HTML ?? "") === "1") {
+    console.log("  · [html-mode] AC_TISTORY_NO_HTML=1 — 건너뛰고 기본 모드로 간다(폴백 점검)");
+    return { ok: false, step: "disabled", detail: "AC_TISTORY_NO_HTML=1 로 껐어요(폴백 점검용)" };
+  }
+  /* 🔴 Playwright 는 `confirm()`·`alert()` 를 **기본값으로 «취소»** 한다(핸들러가 없으면).
+     즉 티스토리가 «HTML 모드로 바꾸면 서식이 바뀔 수 있어요, 계속할까요?» 를 띄웠다면
+     우리는 **매번 조용히 취소를 눌러 왔다** — 화면엔 아무 흔적도 안 남는다(PITFALLS #7 조용한 누락).
+     여기서만 «수락»으로 바꾸고, **무슨 말이 떴는지 반드시 적는다**(안 떴으면 안 떴다는 것도 증거다). */
+  const dialogs = [];
+  const onDialog = async (d) => { dialogs.push(`${d.type()}«${String(d.message() ?? "").replace(/\s+/g, " ").slice(0, 90)}»`); await d.accept().catch(() => {}); };
+  page.on("dialog", onDialog);
   try {
-    const opener = page.locator(MODE_OPEN_SEL).first();   // 실측: button#editor-mode-layer-btn-open
-    if (!(await opener.isVisible({ timeout: 3000 }).catch(() => false))) return false;
-    await opener.click({ timeout: 4000 });
-    await settle(page, 800);
-    /* 🔴 실측(job #75): 레이어 안 «HTML» 항목이 <button>·[data-mode] 가 아니라 텍스트 노드일 수 있어 CSS 로 못 잡았다.
-       카카오 «계속하기» 와 같은 처치 — 글자로 찾고 클릭 가능한 조상까지 올라가 누른다. 열린 레이어 DOM 도 덤프(RUNNER_DEBUG). */
-    if (process.env.RUNNER_DEBUG === "1") {
-      const layer = await page.evaluate(() => [...document.querySelectorAll("a,button,li,span,div")]
-        .filter((e) => /HTML|마크다운|기본모드/.test(e.textContent || "") && (e.textContent || "").length < 20)
-        .slice(0, 12).map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}.${(e.className || "").toString().split(/\s+/).filter(Boolean).slice(0, 2).join(".")}[${(e.textContent || "").trim().slice(0, 10)}]`)).catch(() => []);
-      console.log("  · [probe] 모드 레이어:", JSON.stringify(layer));
+    /* 🔴 후보가 여럿일 땐 `locator("a, b, c").first()` 를 쓰면 **DOM 순서상 첫 요소**가 잡힌다 —
+       그게 «안 보이는 것»이면 멀쩡한 뒤 후보가 있어도 실패한다(2026-09-15 실측). 그래서 하나씩 돈다.
+       그런데 «보이는 것»으로 고르면 이번처럼 **보이지만 안 열리는 미끼**(`#editor-mode-layer-btn-open`)를 집는다.
+       그래서 합격 기준을 «보이나»가 아니라 «**메뉴가 열리나**»로 둔다 — 후보 × 여는 방법을 돌려 보고 열린 조합에서 멈춘다.
+       실패는 통째로 로그에 남긴다(다음 사람이 같은 자리에서 또 헤매지 않게).
+
+       🔴 «눌렀다»와 «열렸다»는 다르다. 내 DOM 덤프는 `querySelectorAll` 이라 **숨은 항목까지 잡아서**
+          «항목은 있는데 못 찾는다»는 모순된 증거를 만들었다(TinyMCE 는 메뉴를 한 번 만들어 두고 숨겨 둔다).
+          그래서 «열림»의 판정은 오직 **항목이 보이나**로 한다. */
+    const openerSels = MODE_OPEN_SEL.split(",").map((x) => x.trim()).filter(Boolean);
+    /* 🔴 이 한 함수가 이번 사고의 교훈이다: 후보를 돌되 **`.first()` 가 아니라 «보이는 것»** 을 돌려준다.
+       같은 뜻의 요소가 숨은 복제본으로 한 벌 더 있는 화면에서 `.first()` 는 매번 시체를 집는다. */
+    const firstVisible = async (sels) => {
+      for (const s of sels) {
+        const l = page.locator(s);
+        const n = Math.min(await l.count().catch(() => 0), 4);
+        for (let i = 0; i < n; i++) {
+          const c = l.nth(i);
+          if (await c.isVisible().catch(() => false)) return { loc: c, sel: n > 1 ? `${s}[${i}]` : s };
+        }
+      }
+      return null;
+    };
+    let menuItem = null;
+    /* 🔴 2차 실측(job #208·#212): **네 가지 방법으로 눌러도 안 열렸다.** 그러니 «한 번 더 누르기»도, «다르게 누르기»도
+       답이 아니었다 — **누르는 대상이 틀렸던 것**이다. 그래서 «후보 × 여는 방법» 을 표로 돌린다.
+       클릭 오류는 삼키지 않고 적는다(AC-27: «가려져서 못 눌렀다»와 «눌렀는데 안 열렸다»는 다른 사건이다). */
+    // «열렸다»의 판정 = **보이는 HTML 항목이 잡히나**. 잡히면 그 자리에서 눌러야 하니 로케이터째 들고 온다.
+    const menuVisible = async () => { menuItem = await firstVisible(HTML_ITEM_SELS); return !!menuItem; };
+    const methods = [
+      ["click", async (t) => { await t.click({ timeout: 4000 }); }],
+      // TinyMCE 패널 버튼은 구현에 따라 click 이 아니라 **mousedown** 에서 연다. 그리고 뒤이은 click 이 **도로 닫는다** —
+      // 그래서 mousedown «만» 쏘는 칸을 따로 둔다(열자마자 내가 닫는 자책골 방지).
+      ["mousedown-only", async (t) => { await t.dispatchEvent("mousedown"); }],
+      // 투명한 층이 위를 덮고 있으면 Playwright 는 (일부러) 안 눌러 준다 — DOM 클릭은 그 층을 지나간다.
+      ["dom-click", async (t) => { await t.evaluate((el) => el.click()); }],
+      // 좌표로 진짜 마우스를 찍는다(래퍼가 아니라 **그 자리에 그려진 것**을 누른다).
+      ["mouse-xy", async (t) => { const b = await t.boundingBox(); if (!b) throw new Error("좌표를 못 구했다"); await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }],
+    ];
+    let menuOpen = false, openedBy = null, sawOpener = false;
+    const tried = [];
+    outer:
+    for (const sel of openerSels) {
+      const cand = page.locator(sel).first();
+      if (!(await cand.isVisible({ timeout: 1200 }).catch(() => false))) { tried.push(`${sel} → 안 보임`); continue; }
+      sawOpener = true;
+      for (const [name, run] of methods) {
+        const err = await run(cand).then(() => null, (e) => String(e?.message ?? e).split("\n")[0].slice(0, 80));
+        await settle(page, 450);            // isVisible 은 안 기다린다 — 메뉴가 그려질 틈을 내가 준다
+        if (await menuVisible()) {
+          menuOpen = true; openedBy = `${sel} · ${name} → ${menuItem.sel}`; break outer;
+        }
+        tried.push(`${sel} · ${name} → 안 열림${err ? ` (${err})` : ""}`);
+        await page.keyboard.press("Escape").catch(() => {});   // 열렸다 닫혔을 수도 있으니 다음 칸은 깨끗한 상태에서
+        await settle(page, 200);
+      }
     }
+    console.log(`  · [html-mode] 모드 메뉴 열림: ${menuOpen}${openedBy ? ` (${openedBy})` : ""}`);
+    if (!menuOpen) for (const t of tried) console.log(`      ✗ ${t}`);
+    // «버튼 자체가 없다»와 «버튼은 있는데 안 열린다»는 고칠 자리가 다르다 — 이름을 나눠 붙인다.
+    if (!sawOpener) return await fail("opener_not_found", tried.join(" / ").slice(0, 200));
+    await settle(page, 400);
+
+    /* 안 열렸으면 **누가 숨기고 있는지**를 남긴다 — «DOM 엔 있는데 안 보인다»까지만 알면 또 못 고친다.
+       ⚠️ 1차 진단은 항목 자신의 «크기 0» 에서 멈춰 아무것도 못 알려 줬다(부모가 display:none 이면 자식은 당연히 0×0 이다).
+          그러니 **진짜 숨긴 층**(display/visibility/aria-hidden)을 끝까지 찾아 올라가고, 크기 0 은 그 다음에 적는다. */
+    const hiddenBy = menuOpen ? null : await page.evaluate(() => {
+      const el = document.querySelector("#editor-mode-html") || document.querySelector("#editor-mode-html-tistory");
+      if (!el) return "항목이 DOM 에도 없다";
+      const name = (n) => `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${String(n.className || "").trim() ? "." + String(n.className).trim().split(/\s+/).slice(0, 2).join(".") : ""}`;
+      let zero = null;
+      for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        const cs = getComputedStyle(n), r = n.getBoundingClientRect();
+        const hard = cs.display === "none" ? "display:none"
+          : cs.visibility === "hidden" ? "visibility:hidden"
+          : Number(cs.opacity) === 0 ? "opacity:0"
+          : n.getAttribute("aria-hidden") === "true" ? "aria-hidden" : null;
+        if (hard) return `${name(n)} → ${hard}`;                       // 진짜 범인
+        if (!zero && (r.width === 0 || r.height === 0)) zero = `${name(n)} → 크기 0`;
+      }
+      return zero ?? "숨긴 층을 못 찾았다(보이는데 Playwright 만 못 본 것)";
+    }).catch(() => null);
+    if (hiddenBy) console.log(`  · [html-mode] 안 열린 이유: ${hiddenBy}`);
+
+    /* 🔴 실측 3차: 내가 «맞다»고 짠 셀렉터 셋이 **하나도 안 맞았는데**(0건) 화면엔 «기본모드 ∨» 가 멀쩡히 보였다.
+       즉 내 DOM 그림이 틀렸다. 추측을 한 번 더 하지 말고 **구조를 그대로 적어 온다** —
+       항목에서 위로 올라간 조상 사슬 + «기본모드» 글자를 가진 버튼들의 좌표. 다음 셀렉터는 이 출력에서 나온다. */
+    if (!menuOpen) {
+      const probe = await page.evaluate(() => {
+        const box = (n) => { const r = n.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; };
+        const nm = (n) => `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${String(n.className || "").trim() ? "." + String(n.className).trim().split(/\s+/).join(".") : ""}`;
+        const item = document.querySelector("#editor-mode-html") || document.querySelector("#editor-mode-html-tistory");
+        const chain = [];
+        for (let n = item, i = 0; n && i < 7; n = n.parentElement, i++) chain.push(`${nm(n)}{${getComputedStyle(n).display}}${JSON.stringify(box(n))}`);
+        const cands = [...document.querySelectorAll("button,a,div,span")]
+          .filter((n) => /기본\s?모드/.test((n.textContent || "")) && (n.textContent || "").trim().length < 12 && n.getBoundingClientRect().width > 0)
+          .slice(0, 6).map((n) => `${nm(n)}${JSON.stringify(box(n))}«${(n.textContent || "").trim().slice(0, 10)}»`);
+        const o = document.querySelector("#editor-mode-layer-btn-open");
+        return { chain, cands, opener: o ? `${nm(o)}${JSON.stringify(box(o))} ${o.outerHTML.slice(0, 160).replace(/\s+/g, " ")}` : "없음" };
+      }).catch((e) => ({ chain: [], cands: [], opener: `probe 실패: ${String(e?.message ?? e).slice(0, 60)}` }));
+      console.log(`  · [html-mode] 항목 조상사슬: ${JSON.stringify(probe.chain)}`);
+      console.log(`  · [html-mode] «기본모드» 보이는 것들: ${JSON.stringify(probe.cands)}`);
+      console.log(`  · [html-mode] #editor-mode-layer-btn-open = ${probe.opener}`);
+    }
+
+    /* 레이어가 열렸으면 **무엇이 들어 있는지** 항상 남긴다(디버그 플래그 없이도).
+       실패를 고치려면 «그 자리에 무엇이 있었나»가 있어야 한다 — 없으면 다음 사람이 같은 자리에서 또 헤맨다. */
+    const layer = await page.evaluate(() => [...document.querySelectorAll("a,button,li,span,div")]
+      .filter((e) => /HTML|마크다운|기본\s?모드/i.test(e.textContent || "") && (e.textContent || "").trim().length < 20)
+      .slice(0, 12).map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}${(e.className || "").toString().trim() ? "." + (e.className || "").toString().trim().split(/\s+/).slice(0, 2).join(".") : ""}[${(e.textContent || "").trim().slice(0, 12)}]`)).catch(() => []);
+    if (!menuOpen) console.log("  · [html-mode] 모드 레이어:", JSON.stringify(layer));   // 잘 열렸을 땐 소음이다
+
     let clicked = false;
-    const cssItem = page.locator(HTML_MODE_SEL).first();
-    if (await cssItem.isVisible({ timeout: 1500 }).catch(() => false)) { await cssItem.click({ timeout: 3000 }); clicked = true; }
-    else {
-      const byText = page.getByText("HTML", { exact: true }).first();
+    if (menuOpen) {
+      const e = await menuItem.loc.click({ timeout: 3000 }).then(() => null, (x) => String(x?.message ?? x).split("\n")[0].slice(0, 80));
+      if (e) console.log(`  · [html-mode] HTML 항목 클릭 실패: ${e}`);   // 삼키지 않는다(AC-27)
+      else console.log(`  · [html-mode] HTML 항목 클릭: ${menuItem.sel}`);
+      clicked = true;
+    }
+    if (!clicked) {
+      const again = await firstVisible(HTML_ITEM_SELS);   // 한 번 더 — 그새 그려졌을 수도
+      if (again) { await again.loc.click({ timeout: 3000 }).catch(() => {}); clicked = true; }
+    }
+    if (!clicked) {
+      // 글자로 찾고 **클릭 가능한 조상**까지 올라간다(카카오 «계속하기» 와 같은 처치).
+      const byText = page.getByText(/^\s*HTML\s*$/).first();
       if (await byText.isVisible({ timeout: 1500 }).catch(() => false)) {
         const anc = byText.locator("xpath=ancestor-or-self::*[self::button or self::a or self::li or @role='menuitem'][1]").first();
-        await (await anc.isVisible({ timeout: 300 }).catch(() => false) ? anc : byText).click({ timeout: 3000 });
+        await (await anc.isVisible({ timeout: 400 }).catch(() => false) ? anc : byText).click({ timeout: 3000 });
         clicked = true;
       }
     }
-    if (!clicked) return false;
+    if (!clicked) {
+      /* 마지막 칸: 메뉴가 안 열려도 **항목에 달린 핸들러**는 살아 있을 수 있다(TinyMCE 는 항목 엘리먼트에 건다).
+         숨은 요소는 Playwright 가 (일부러) 안 눌러 주니 DOM 으로 부른다.
+         🔴 «불렀다»를 «됐다»로 치지 않는다 — 성공 판정은 아래 CodeMirror 가 뜨느냐로만 한다. */
+      const fired = await page.evaluate((sels) => {
+        const el = sels.map((s) => { try { return document.querySelector(s); } catch { return null; } }).find(Boolean);
+        if (!el) return false;
+        el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        el.click();
+        return true;
+      }, ["#editor-mode-html", "#editor-mode-html-tistory"]).catch(() => false);
+      if (fired) { clicked = true; console.log("  · [html-mode] 숨은 항목에 DOM 클릭(메뉴는 끝내 안 열렸다)"); }
+    }
+    if (!clicked) return await fail("html_item_not_found", `${hiddenBy ?? ""} · 레이어 후보=${JSON.stringify(layer).slice(0, 200)}`);
     await settle(page, 1500);
-    // 모드 전환 확인 팝업(«HTML 모드로 바꾸면 편집이 제한될 수 있습니다» 등) — 확인/예.
+
+    // 모드 전환 확인 팝업(«편집이 제한될 수 있습니다» 등) — 있으면 승인. 없으면 그냥 지나간다.
     for (const sel of ["button:has-text('확인')", "button:has-text('예')", ".btn_confirm", "button[class*='confirm']", ".btn_g.highlight"]) {
       const b = page.locator(sel).first();
-      if (await b.isVisible({ timeout: 1000 }).catch(() => false)) { await b.click({ timeout: 3000 }).catch(() => {}); break; }
+      if (await b.isVisible({ timeout: 800 }).catch(() => false)) { await b.click({ timeout: 3000 }).catch(() => {}); break; }
     }
-    await settle(page, 1200);
-    if (!(await page.locator(CM_SEL).first().isVisible({ timeout: 5000 }).catch(() => false))) return false;
+    await settle(page, 1400);
+    if (dialogs.length) console.log(`  · [html-mode] 확인창: ${dialogs.join(" / ")}`);   // 떴으면 무슨 말이었나
+
+    if (!(await page.locator(CM_SEL).first().isVisible({ timeout: 6000 }).catch(() => false))) {
+      /* 🔴 «눌렀다»와 «바뀌었다»는 또 다르다. 모드 버튼의 **글자를 되읽어** 전환 자체가 됐는지 본다 —
+         «기본모드» 그대로면 전환이 막힌 것이고, «HTML» 인데 편집기가 없으면 편집기 셀렉터가 틀린 것이다.
+         고칠 자리가 다른 두 실패를 하나의 `codemirror_not_shown` 으로 뭉뚱그리면 또 못 고친다.
+         (라벨은 **여기서만** 읽는다 — 성공 경로에서 일찍 읽으면 갱신 전 값이라 거짓 «기본모드»가 찍힌다.) */
+      const modeLabel = (await page.locator("#editor-mode-layer-btn-open, #editor-mode-layer-btn").first().innerText({ timeout: 1500 }).catch(() => "")).replace(/\s+/g, "");
+      const switched = /html/i.test(modeLabel);
+      console.log(`  · [html-mode] 전환 후 모드 라벨: «${modeLabel || "(못 읽음)"}»`);
+      /* 편집기가 CodeMirror 가 아닐 수도 있다 — 그 자리에 **무엇이 생겼는지** 적어 둔다(다음 한 수의 재료). */
+      const editors = await page.evaluate(() => [...document.querySelectorAll("textarea,div.CodeMirror,div[class*='code'],div[class*='html']")]
+        .filter((e) => e.getBoundingClientRect().width > 100 && e.getBoundingClientRect().height > 60)
+        .slice(0, 6).map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}${String(e.className || "").trim() ? "." + String(e.className).trim().split(/\s+/).slice(0, 2).join(".") : ""}`)).catch(() => []);
+      console.log(`  · [html-mode] 그 자리에 있는 큰 편집기들: ${JSON.stringify(editors)}`);
+      return await fail(switched ? "editor_not_found" : "mode_not_switched",
+        switched ? `HTML 모드로는 바뀌었는데 편집기를 못 찾았다(후보=${JSON.stringify(editors).slice(0, 120)})`
+          : `항목은 눌렀는데 모드가 «${modeLabel || "?"}» 그대로다${dialogs.length ? ` · 확인창=${dialogs.join(" / ")}` : " · 확인창 없음"}`);
+    }
     /* CodeMirror 는 키 입력으로 긴 HTML 을 넣으면 자동 들여쓰기·괄호 보정이 끼어든다 —
        인스턴스 API 로 값을 **그대로** 세팅한다(그게 HTML 모드를 고른 이유다). */
     const set = await page.evaluate((html) => {
       const el = document.querySelector(".CodeMirror");
       const cm = el && el.CodeMirror;
-      if (!cm) return false;
+      if (!cm) return { ok: false, why: "instance_missing" };
       cm.setValue(html);
       cm.refresh();
-      return cm.getValue().length > 0;
-    }, String(bodyHtml ?? "")).catch(() => false);
-    if (!set) return false;
+      const got = cm.getValue();
+      return { ok: got.length > 0, len: got.length };
+    }, String(bodyHtml ?? "")).catch((e) => ({ ok: false, why: String(e?.message ?? e).slice(0, 80) }));
+    if (!set?.ok) return await fail("setvalue_failed", set?.why ?? "값이 들어가지 않았다");
+
     await shot(page, shotKey, "02-HTML모드본문");
-    return true;
-  } catch { return false; }
+    console.log(`  · [html-mode] ✓ 들어갔다(${set.len}자)`);
+    return { ok: true, step: "done" };
+  } catch (e) {
+    return await fail("exception", String(e?.message ?? e).slice(0, 120));
+  } finally {
+    // 🔴 여기서만 «수락»이다. 폴백·발행 경로까지 끌고 가면 엉뚱한 확인창을 대신 눌러 준다 — 반드시 걷어낸다.
+    page.off("dialog", onDialog);
+  }
 }
 
 /**
  * 본문 편집 영역에 **확실히** 포커스를 준다. 못 주면 던진다.
- *   🔴 2026-09-14 실측(job #119 · 사장님 확인): 종전 코드는
- *      `page.locator("#editor-tistory, .CodeMirror, [contenteditable], iframe#editor-tistory_ifr").first().click().catch(()=>{})`
- *      였다. ① TinyMCE 본문은 **iframe 안**이라 부모 문서 셀렉터로는 안 잡히고 ② 클릭 실패를 **조용히 삼켜서**
- *      직전에 제목칸(textarea#post-title-inp)에 있던 포커스가 그대로 남았다 →
- *      **본문 전체가 제목칸에 입력됐다**(본문 빈칸 · Enter 도 제목이 먹어 문단 구분 소멸).
+ *   🔴 2026-09-14 실측(job #119 · 사장님 확인): TinyMCE 본문은 **iframe 안**이라 부모 문서 셀렉터로는 캐럿이 안 들어가고,
+ *      그 클릭 실패를 **조용히 삼켜서** 직전 제목칸 포커스가 남아 **본문 전체가 제목칸에 입력됐다**.
  *      눈 감고 타자를 치느니 멈추는 게 낫다 — 실패는 던진다.
  */
 async function focusEditorBody(page) {
-  // ① TinyMCE 본문(iframe) — 프레임 안의 body 를 직접 클릭해야 그 문서로 포커스가 간다.
   try {
     await page.frameLocator("iframe#editor-tistory_ifr").locator("body").first().click({ timeout: 6000 });
     return "iframe";
   } catch { /* 다음 후보 */ }
-  // ② CodeMirror(HTML·마크다운 모드)
   const cm = page.locator(".CodeMirror").first();
   if (await cm.isVisible({ timeout: 1500 }).catch(() => false)) { await cm.click({ timeout: 6000 }).catch(() => {}); return "codemirror"; }
-  // ③ 부모 문서의 contenteditable(제목칸은 textarea 라 여기 안 걸린다)
   const ce = page.locator("[contenteditable='true']").first();
   if (await ce.isVisible({ timeout: 1500 }).catch(() => false)) { await ce.click({ timeout: 6000 }).catch(() => {}); return "contenteditable"; }
   throw BLOCK("selector_changed", "본문 편집 영역에 포커스를 주지 못했어요(제목칸에 쓸 위험이 있어 중단했어요).");
@@ -359,9 +536,11 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
     // 본문 — HTML 모드 우선(가장 안전), 안 되면 연주 폴백.
     const notes = [];
     const html = await tryHtmlMode(page, job.payload?.bodyHtml, shotKey);
-    if (!html) {
+    if (!html.ok) {
       missed.htmlMode++;
-      notes.push("HTML 모드를 열지 못해 기본 모드로 넣었어요(서식 일부 폴백)");
+      /* 🔴 **막힌 자리를 그대로 보고에 싣는다.** 종전엔 «HTML 모드를 열지 못해…» 한 줄뿐이라
+         다음 사람이 처음부터 다시 파야 했다(AC-27). 이제 어느 단계인지가 notes 로 서버까지 올라간다. */
+      notes.push(`HTML 모드를 열지 못해 기본 모드로 넣었어요(서식 일부 폴백 · 막힌 자리: ${html.step}${html.detail ? ` — ${String(html.detail).slice(0, 80)}` : ""})`);
       const wrote = await playOpsFallback(page, plan, files, shotKey, missed);
       if (!wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");
     }
