@@ -4,6 +4,8 @@
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts tistory`
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog`
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog --with-image`   (사진 삽입 경로까지)
+ *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog --job=revenue.adpost`   (수익 스크랩 · 서버에 안 보냄)
+ *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts tistory --job=ads.setup_tistory`  (애드센스 상태 읽기)
  *
  *   한 프로세스 안에서 전부 한다:
  *     ① 로컬 함수 서버(임의 포트 · `netlify/functions/runner.ts` 의 default export 를 그대로)
@@ -28,7 +30,7 @@ import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";
 import { encryptObj } from "../lib/creds-crypto";
-import { registerDevice } from "../lib/runner-jobs";
+import { registerDevice, enqueueJob, isRunnerJobKind, type RunnerJobKind } from "../lib/runner-jobs";
 import { publish, loadPublishPiece, loadPublishAccount } from "../lib/publish/index";
 import handler, { config } from "../netlify/functions/runner";
 
@@ -102,6 +104,10 @@ async function main() {
   const channel = String(process.argv[2] ?? "tistory");
   const keep = process.argv.includes("--keep");
   const withImage = process.argv.includes("--with-image");
+  /* --job=revenue.adpost 등 — 발행 대신 그 잡을 계정에 직접 적재한다(수익 스크랩·광고 상태 읽기 실측용). */
+  const jobArg = String(process.argv.find((a) => a.startsWith("--job=")) ?? "").slice(6);
+  const jobKind: RunnerJobKind | null = jobArg && isRunnerJobKind(jobArg) ? jobArg : null;
+  if (jobArg && !jobKind) { console.error(`알 수 없는 잡 종류: ${jobArg}`); process.exit(2); }
   if (!["tistory", "naver_blog"].includes(channel)) { console.error("사용법: verify-b2-runner.mts <tistory|naver_blog> [--keep]"); process.exit(2); }
 
   const cfg = channel === "tistory"
@@ -149,10 +155,17 @@ async function main() {
         VALUES (${tid}, ${pieceId}, 'image', ${"harness/ac-test.png"}, ${"세탁 전 이불 사진(시험용)"}, ${jsonb({ url: imgUrl })}, 0)`);
     }
 
-    const r = await publish((await loadPublishPiece(tid, pieceId))!, (await loadPublishAccount(tid, accountId))!, { actor: "user" });
-    if (!r.ok) { console.error(`  ✗ 잡 적재 실패: ${r.reason} ${r.error}`); return; }
+    let jobIdShown: number | string = "-";
+    if (jobKind) {
+      const j = await enqueueJob({ tenantId: tid, kind: jobKind, accountId, payload: { channel, handle: cfg.handle, verify: true } });
+      jobIdShown = j.id;
+    } else {
+      const r = await publish((await loadPublishPiece(tid, pieceId))!, (await loadPublishAccount(tid, accountId))!, { actor: "user" });
+      if (!r.ok) { console.error(`  ✗ 잡 적재 실패: ${r.reason} ${r.error}`); return; }
+      jobIdShown = r.ok ? String(r.jobId) : "-";
+    }
     const reg = await registerDevice(tid, "실증 PC", "own");
-    console.log(`   테넌트 ${tid} · 계정 ${accountId} · piece ${pieceId} · job ${r.ok ? r.jobId : "-"}\n`);
+    console.log(`   테넌트 ${tid} · 계정 ${accountId} · piece ${pieceId} · job ${jobIdShown}${jobKind ? ` (${jobKind})` : ""}\n`);
 
     // ── 러너 실행(자식 프로세스 · 창을 띄운다) ──
     const code = await new Promise<number>((resolve) => {

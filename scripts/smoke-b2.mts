@@ -230,6 +230,48 @@ async function main() {
     const ws = await fetchStats(tid, wPieceId);
     ok("fetchStats — 워드프레스 접속 불가면 null(0 으로 안 채움)", ws === null, JSON.stringify(ws));
 
+    /* ── 9D. 수익 스크랩 report(P1R3 §2.1) — upsert 한 함수 · parse 는 0 금지 · 상태 기록 ── */
+    await q(sql`UPDATE accounts SET status = 'active', last_error_kind = NULL WHERE id = ${accountId}`);
+    await q(sql`INSERT INTO revenue_sources (tenant_id, source, account_id, method, status) VALUES (${tid}, 'adpost', ${accountId}, 'runner', 'connected')`);
+    const rj = await enqueueJob({ tenantId: tid, kind: "revenue.adpost", accountId, payload: { verify: true } });
+    const [rc] = await claimJobs(device, ["revenue.adpost"], 1);
+    ok("수익 잡 — 적재·선점(우선순위 60)", rc?.id === rj.id && rc?.kind === "revenue.adpost");
+    const rr1 = await reportJob(device, rj.id, { ok: true, revenueRows: [{ source: "adpost", day: "2026-09-13", amountKrw: 1200, currency: "KRW" }], adpostState: "approved" });
+    const rd1 = await q(sql`SELECT amount_krw, freshness, account_id FROM revenue_daily WHERE tenant_id = ${tid} AND source = 'adpost'`);
+    ok("수익 report — upsertRevenueRows 로 1행(freshness runner · 계정 귀속 보정)", rr1.status === "done" && rd1.length === 1 && n(rd1[0]?.amount_krw) === 1200 && String(rd1[0]?.freshness) === "runner" && n(rd1[0]?.account_id) === accountId, rr1.reason ?? "");
+    const [accM] = await q(sql`SELECT monetize->>'adpostState' AS st FROM accounts WHERE id = ${accountId}`);
+    ok("수익 report — adpostState 가 accounts.monetize 에", String(accM?.st) === "approved");
+    const [rs1] = await q(sql`SELECT status, last_ok_at, fail_count FROM revenue_sources WHERE tenant_id = ${tid} AND source = 'adpost'`);
+    ok("수익 report — revenue_sources connected · last_ok_at", String(rs1?.status) === "connected" && !!rs1?.last_ok_at);
+
+    // 재수집 = 덮어쓰기(멱등 · 1행 유지)
+    const rj2 = await enqueueJob({ tenantId: tid, kind: "revenue.adpost", accountId, payload: {}, dedupe: false });
+    await claimJobs(device, ["revenue.adpost"], 1);
+    await reportJob(device, rj2.id, { ok: true, revenueRows: [{ source: "adpost", day: "2026-09-13", amountKrw: 1350, currency: "KRW" }] });
+    const rd2 = await q(sql`SELECT amount_krw FROM revenue_daily WHERE tenant_id = ${tid} AND source = 'adpost' AND day = '2026-09-13'::date`);
+    ok("🔴 수익 멱등 — 같은 날 재수집은 1행 덮어쓰기(1200→1350)", rd2.length === 1 && n(rd2[0]?.amount_krw) === 1350);
+
+    // 파싱 실패 — 행 0 · 계정 전이 0 · 소스 error · audit high
+    const rj3 = await enqueueJob({ tenantId: tid, kind: "revenue.adpost", accountId, payload: {}, dedupe: false });
+    await claimJobs(device, ["revenue.adpost"], 1);
+    const rr3 = await reportJob(device, rj3.id, { ok: false, errorKind: "parse", detail: "수입 표를 찾지 못했어요", shotKey: "job-x" });
+    const [j3] = await q(sql`SELECT status, error_kind FROM runner_jobs WHERE id = ${rj3.id}`);
+    const rd3 = await q(sql`SELECT count(*) c FROM revenue_daily WHERE tenant_id = ${tid} AND source = 'adpost'`);
+    const [acc3] = await q(sql`SELECT status FROM accounts WHERE id = ${accountId}`);
+    const [rs3] = await q(sql`SELECT status, last_error_kind, fail_count FROM revenue_sources WHERE tenant_id = ${tid} AND source = 'adpost'`);
+    ok("🔴 parse — 잡 failed(error_kind parse) · 행 그대로 1(0 으로 안 채움)", rr3.reason === "parse" && String(j3?.status) === "failed" && String(j3?.error_kind) === "parse" && n(rd3[0]?.c) === 1);
+    ok("parse — 계정 전이 0(우리 버그 · 계정 문제 아님)", String(acc3?.status) === "active");
+    ok("parse — revenue_sources error · last_error_kind parse · fail_count 1", String(rs3?.status) === "error" && String(rs3?.last_error_kind) === "parse" && n(rs3?.fail_count) === 1);
+    const [pa] = await q(sql`SELECT risk_level FROM audit_logs WHERE tenant_id = ${tid} AND action = 'runner_job_failed' AND detail->>'errorKind' = 'parse' ORDER BY id DESC LIMIT 1`);
+    ok("parse — audit risk high(우리가 볼 신호)", String(pa?.risk_level) === "high");
+
+    // 미등록(행 0 · 상태 none)은 성공이다
+    const rj4 = await enqueueJob({ tenantId: tid, kind: "revenue.adpost", accountId, payload: {}, dedupe: false });
+    await claimJobs(device, ["revenue.adpost"], 1);
+    const rr4 = await reportJob(device, rj4.id, { ok: true, revenueRows: [], adpostState: "none" });
+    const [accM4] = await q(sql`SELECT monetize->>'adpostState' AS st FROM accounts WHERE id = ${accountId}`);
+    ok("미등록 — 행 0 이어도 done · adpostState none(«없음»은 실패가 아니다)", rr4.status === "done" && String(accM4?.st) === "none");
+
     /* ── 10. 자격 평문 누출 검사 ─────────────────────── */
     const fleet = await fleetState(tid);
     const surfaces = JSON.stringify({ devices: await listDevices(tid), fleet, rel, rOk, rBad });
@@ -243,6 +285,8 @@ async function main() {
   } finally {
     /* ── 정리 ─────────────────────────────────────────── */
     for (const id of [tid, tidOther]) {
+      await q(sql`DELETE FROM revenue_daily WHERE tenant_id = ${id}`);
+      await q(sql`DELETE FROM revenue_sources WHERE tenant_id = ${id}`);
       await q(sql`DELETE FROM posts WHERE tenant_id = ${id}`);
       await q(sql`DELETE FROM runner_jobs WHERE tenant_id = ${id}`);
       await q(sql`DELETE FROM runner_devices WHERE tenant_id = ${id}`);

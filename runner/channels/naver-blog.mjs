@@ -15,88 +15,11 @@
  *   🔴 dryRun(카나리·검증)은 **임시저장까지만** 한다. 발행 버튼을 누르지 않는다.
  */
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
-
-const BLOCK = (kind, msg) => Object.assign(new Error(`[block:${kind}] ${msg}`), { errorKind: kind });
+import { BLOCK, ensureNaverLogin } from "../lib/auth-naver.mjs";   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
 
 const TITLE_SEL = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
 const EDITOR_SEL = ".se-content, .se-container, .se-components-wrap";
 const BODY_SEL = ".se-component.se-text .se-text-paragraph";
-
-/* ───────────────────── 로그인 ───────────────────── */
-
-/**
- * 로그인 여부 — 🔴 **긍정 신호로만** 판정한다.
- *   종전에 «nidlogin 주소가 아니면 로그인됨» 으로 뒀더니 로그아웃 상태의 blog.naver.com 도 통과해
- *   **로그인 단계를 통째로 건너뛰고** 에디터에서 «세션 만료»로 죽었다(2026-09-14 자사 테스트 계정 실측 job #8).
- *   «아닌 것이 없다» 는 «맞다» 가 아니다 — 로그아웃 링크(=로그인 상태의 증거)를 본다.
- *   판정이 애매하면 **로그아웃으로 본다**(한 번 더 로그인하는 비용 < 조용히 실패하는 비용).
- */
-async function isLoggedIn(page) {
-  try {
-    /* 🔴 2차 실측(2026-09-14 · 세션이 살아 있는 프로필로 재검): 종전 판정(blog.naver.com 의 로그아웃 링크·내 메뉴)은
-       `section.blog.naver.com` SPA 가 **렌더되기 전(domcontentloaded)** 에 세고 있어서 살아 있는 세션에도 false 를 냈다.
-       그래서 **매번 비밀번호 로그인**을 했고, 그 반복이 job #16 의 캡차를 불렀다. 긍정 신호를 잘못 골랐던 것이다(AC-19).
-       ⇒ 로그인이 필요한 주소(`MyBlog.naver`)를 열어 **어디로 보내는지**로 판정한다 — 로그인돼 있으면 `blog.naver.com/{내id}` 로,
-          아니면 `nidlogin` 으로 간다. 렌더 타이밍과 무관한 서버측 판정이다. */
-    await page.goto("https://blog.naver.com/MyBlog.naver", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await settle(page, 1200);
-    const url = page.url();
-    if (/nidlogin/i.test(url)) return false;
-    if (/blog\.naver\.com\/[A-Za-z0-9_-]{2,}/i.test(url) && !/section\.blog\.naver\.com|MyBlog\.naver/i.test(url)) return true;
-    // 판정이 애매하면 요소로 한 번 더(렌더 대기 후) — 그래도 모르면 로그아웃으로 본다(한 번 더 로그인 < 조용한 실패 · AC-9).
-    await settle(page, 1500);
-    const out = await page.locator('a[href*="nidlogin.logout"]').count().catch(() => 0);
-    if (out > 0) return true;
-    const inLink = await page.locator('a[href*="nidlogin.login"]').count().catch(() => 0);
-    if (inLink > 0) return false;
-    return (await page.locator('.gnb_my, [class*="MyArea"], a[href*="MyBlog"]').count().catch(() => 0)) > 0;
-  } catch { return false; }
-}
-
-/** id/pw 자동 로그인. 캡차·기기등록·2단계는 **정직 실패**(사람이 해야 풀린다). */
-async function loginWithIdPw(page, id, pw) {
-  await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30_000 });
-  /* 이미 로그인돼 있으면 네이버가 로그인 화면에서 되돌려 보낸다 — 그걸 «폼을 못 찾았다»(selector_changed)로
-     읽으면 멀쩡한 계정에 «우리 버그» 딱지가 붙는다. 폼이 없고 주소도 로그인 화면이 아니면 그냥 통과시킨다. */
-  // domcontentloaded 직후 바로 입력하면 폼 JS 초기화 전이라 값이 유실된다(AM 실측) — 보일 때까지 기다린다.
-  const formShown = await page.locator("#id").waitFor({ state: "visible", timeout: 15_000 }).then(() => true).catch(() => false);
-  if (!formShown && !/nidlogin/i.test(page.url())) return;
-  await settle(page, 500);
-  await page.fill("#id", id).catch(() => {});
-  await page.fill("#pw", pw).catch(() => {});
-  if (!(await page.inputValue("#id").catch(() => ""))) { await page.click("#id").catch(() => {}); await page.keyboard.insertText(id); }
-  if (!(await page.inputValue("#pw").catch(() => ""))) { await page.click("#pw").catch(() => {}); await page.keyboard.insertText(pw); }
-  const gotId = await page.inputValue("#id").catch(() => "");
-  const gotPw = await page.inputValue("#pw").catch(() => "");
-  if (!gotId || !gotPw) throw BLOCK("selector_changed", "로그인 폼에 아이디/비밀번호를 넣지 못했어요(네이버 로그인 화면이 바뀐 것 같아요).");
-
-  /* «로그인 상태 유지» — 미체크면 세션 쿠키라 창을 닫으면 만료된다(저장해도 재사용 불가 · AM 근본 수리).
-     hidden 스위치라 isChecked 판정이 불안정해서 force check + 라벨 클릭 폴백. */
-  await page.locator('input[name="smart_LEVEL"]').check({ force: true }).catch(async () => {
-    await page.locator('.login_stay, label:has-text("로그인 상태 유지")').first().click({ timeout: 3000 }).catch(() => {});
-  });
-
-  await page.locator("#loginBtn_row:visible, #loginBtn_column:visible").first().click({ timeout: 10_000 })
-    .catch(async () => { await page.getByRole("button", { name: "로그인", exact: true }).first().click({ timeout: 8000 }); });
-  await settle(page, 4000);
-
-  /* 사람이 옆에 있을 때만(헤드풀 검증·재로그인) 캡차·기기확인을 **기다려 준다**. 기본값 0 = 기다리지 않는다.
-     🔴 운영(헤드리스)에서는 절대 기다리면 안 된다 — 아무도 없는 창 앞에서 잡을 붙들고 큐를 굶긴다. */
-  const waitMs = Number(process.env.AC_2FA_WAIT_MS ?? 0) || 0;
-  if (waitMs > 0 && /captcha|deviceConfirm|idSafetyRelease|need2/i.test(page.url())) {
-    console.log(`  · 네이버가 추가 확인을 요구했어요 — 창에서 직접 풀어 주세요(최대 ${Math.round(waitMs / 1000)}초 대기).`);
-    const deadline = Date.now() + waitMs;
-    while (Date.now() < deadline && /captcha|deviceConfirm|idSafetyRelease|need2|nidlogin/i.test(page.url())) await settle(page, 2000);
-  }
-
-  const url = page.url();
-  if (/captcha/i.test(url) || (await page.locator("#captcha, .captcha_wrap").count().catch(() => 0)) > 0) {
-    throw BLOCK("captcha", "네이버가 자동입력 방지(캡차)를 띄웠어요.");
-  }
-  if (/deviceConfirm|idSafetyRelease|deviceRegist/i.test(url)) throw BLOCK("login_fail", "네이버가 «처음 보는 기기»라며 등록을 요구했어요.");
-  if (/need2|otp/i.test(url)) throw BLOCK("login_fail", "이 계정은 2단계 인증이 켜져 있어 자동 로그인이 되지 않아요.");
-  if (/nidlogin/i.test(page.url())) throw BLOCK("login_fail", "아이디 또는 비밀번호가 맞지 않아요.");
-}
 
 /* ───────────────────── 팝업·레이어 ───────────────────── */
 
@@ -756,13 +679,8 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
      «무엇에 막혔나»는 화면을 봐야 안다(AM 눈검사 규율). */
   let files = null;
   try {
-    // ① 로그인 — 쿠키가 살아 있으면 건너뛴다.
-    if (!(await isLoggedIn(page))) {
-      if (!account.login?.id || !account.login?.pw) {
-        throw BLOCK("login_fail", "저장된 로그인이 만료됐어요. 앱에서 «다시 로그인»을 눌러 주세요.");
-      }
-      await loginWithIdPw(page, account.login.id, account.login.pw);
-    }
+    // ① 로그인 — 쿠키가 살아 있으면 건너뛴다(공용 lib/auth-naver.mjs).
+    await ensureNaverLogin(page, account);
     await shot(page, shotKey, "00-로그인확인");
 
     // ② 에디터
