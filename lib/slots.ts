@@ -9,7 +9,7 @@ import { sql } from "drizzle-orm";
 import { utcDate, jsonb } from "./db-util";
 import { q } from "./accounts";
 import { defaultImageCount } from "./writing-contracts";
-import { coinCostOf } from "./coin-table";
+import { coinCostOf, videoCoinItem } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN } from "./best-time";
 
 const n = (v: unknown) => Number(v || 0);
@@ -48,9 +48,11 @@ export async function readScheduleSettings(tid: number): Promise<ScheduleSetting
 }
 
 /* ───────── Rule ───────── */
-export interface Rule { id: number; channel: string; kind: "post"; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; formatHint?: string; active: boolean }
+/** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다. */
+export type RuleKind = "post" | "shorts";
+export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; formatHint?: string; active: boolean }
 export function toRule(r: Row): Rule {
-  const o: Rule = { id: n(r.id), channel: String(r.channel), kind: "post", accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
+  const o: Rule = { id: n(r.id), channel: String(r.channel), kind: (String(r.kind) === "shorts" ? "shorts" : "post"), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
   if (r.account_id) o.accountId = n(r.account_id);
   if (Array.isArray(r.weekdays) && r.weekdays.length) o.weekdays = (r.weekdays as unknown[]).map(Number).filter((d) => d >= 0 && d <= 6);
   if (r.preferred_hour !== null && r.preferred_hour !== undefined) o.preferredHour = n(r.preferred_hour);
@@ -67,9 +69,12 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
   if (r.every === "month") return r.count * 12 / 52;
   return r.weekdays?.length ? Math.min(r.count, r.weekdays.length) || r.weekdays.length : r.count;
 }
-/** coinsPerWeek = Σ(활성 규칙 주환산 × (blog 1 + 채널 기본 imageCount)). */
+/** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60). */
 export function coinsPerWeek(rules: Rule[]): number {
-  return Math.round(rules.filter((r) => r.active).reduce((a, r) => a + weeklyCount(r) * (coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel)), 0));
+  return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
+    const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60)) : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
+    return a + weeklyCount(r) * per;
+  }, 0));
 }
 
 /** count 를 주 안에 균등 분산(결정론): 3 → 월·수·금 / 2 → 화·금 / 1 → 수 / 5 → 월~금. 0=일요일 기준 배열. */
@@ -147,7 +152,7 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
       if (!at) continue;   // 오늘 후보가 전부 지났다 — 내일부터
       const reviewDeadline = new Date(kstToUtc(date, 2, 0).getTime());   // D-0 02:00 KST(silence_approves 마감 · §5B.7)
       await q(sql`INSERT INTO slots (tenant_id, rule_id, slot_date, channel, kind, account_id, publish_at, review_deadline, status, origin)
-        VALUES (${tid}, ${r.id}, ${date}::date, ${r.channel}, ${"post"}, ${accountId}, ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${reviewDeadline.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${"planned"}, ${"auto"})`);
+        VALUES (${tid}, ${r.id}, ${date}::date, ${r.channel}, ${r.kind}, ${accountId}, ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${reviewDeadline.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${"planned"}, ${"auto"})`);
       have.add(key); takenBy.set(tk, [...taken, at]); created++;
     }
   }
