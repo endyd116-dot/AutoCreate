@@ -46,10 +46,12 @@ export type RunnerJobKind =
   | "session.login" | "session.verify"
   | "verify.post_alive" | "revenue.stats"
   | "revenue.adpost" | "revenue.adfit" | "revenue.clip"
-  | "ads.setup_tistory" | "ads.status_blogger";
+  | "ads.setup_tistory" | "ads.status_blogger"
+  | "ads.setup_blogger" | "ads.revert_blogger";
 export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
   "publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats",
   "revenue.adpost", "revenue.adfit", "revenue.clip", "ads.setup_tistory", "ads.status_blogger",
+  "ads.setup_blogger", "ads.revert_blogger",
 ];
 export function isRunnerJobKind(v: unknown): v is RunnerJobKind { return RUNNER_JOB_KINDS.includes(String(v) as RunnerJobKind); }
 /** 수익 스크랩 잡(report 에 `revenueRows` 가 실린다). `revenue.stats` 는 글 통계라 여기 안 든다. */
@@ -60,6 +62,7 @@ export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.free
   "publish.naver_blog": 10, "publish.tistory": 10,
   "session.login": 20, "session.verify": 20,
   "ads.setup_tistory": 30, "ads.status_blogger": 30,
+  "ads.setup_blogger": 30, "ads.revert_blogger": 30,
   "verify.post_alive": 40,
   "revenue.stats": 50,
   "revenue.adpost": 60, "revenue.adfit": 60, "revenue.clip": 60,
@@ -229,11 +232,22 @@ export async function heartbeat(device: DeviceRow, body: { version?: unknown; jo
      고객 화면·계정 상태는 건드리지 않는다(자사 테스트 계정의 드라이런이므로). */
   if (body.canary && typeof body.canary === "object") {
     const c = body.canary as Record<string, unknown>;
+    const channel = String(c.channel ?? "").slice(0, 24);
+    // 🔴 ok 는 3값(AC-9): true(정상)·false(깨짐)·null(판정 불가 — 세션 없음 등). c.ok 가 boolean 이 아니면 null 로 둔다.
+    const ok = c.ok === true ? true : c.ok === false ? false : null;
+    const step = String(c.step ?? "").slice(0, 40);
+    const detail = String(c.detail ?? "").slice(0, 300);
+    const shotKey = c.shotKey ? String(c.shotKey).slice(0, 80) : null;
     await writeAudit({
       tenantId: device.tenantId, action: "runner_canary", actorType: "system", target: `runner_device:${device.id}`,
-      detail: { ok: c.ok === true, channel: String(c.channel ?? "").slice(0, 24), step: String(c.step ?? "").slice(0, 40), detail: String(c.detail ?? "").slice(0, 200) },
-      riskLevel: c.ok === true ? "low" : "high",
+      detail: { ok, channel, step, detail }, riskLevel: ok === false ? "high" : "low",
     });
+    // 🔴 P1R4 §2.2 — canary_runs 에 적재(ops-canary·크론 runner.canary 평가가 읽는다). 하루·채널당 1행(KST 오늘 · UPSERT 덮어쓰기).
+    if (channel) {
+      await q(sql`INSERT INTO canary_runs (day, channel, ok, step, detail, shot_key, ran_at)
+        VALUES ((NOW() AT TIME ZONE 'Asia/Seoul')::date, ${channel}, ${ok}, ${step || null}, ${detail || null}, ${shotKey}, NOW())
+        ON CONFLICT (day, channel) DO UPDATE SET ok = EXCLUDED.ok, step = EXCLUDED.step, detail = EXCLUDED.detail, shot_key = EXCLUDED.shot_key, ran_at = NOW()`).catch((e) => console.error("[canary] upsert", e));
+    }
   }
   return { sleepSec: jobsWaiting > 0 ? 5 : 60, jobsWaiting };
 }
@@ -384,6 +398,8 @@ export interface RunnerReportOk {
   adpostState?: "none" | "pending" | "approved";
   /** `ads.setup_tistory` — 애드센스 연결 상태 읽기 결과(계약 §2.2 · 변경은 안 한다). */
   adsense?: { linked: boolean; state?: string; detail?: string };
+  /** `ads.setup_blogger`/`ads.revert_blogger` — 블로거 템플릿 광고 삽입/복원 결과(계약 P1R4 §2.2 · 백업 원문 포함). */
+  monetize?: { bloggerTemplateBackup?: string; adsenseInserted?: boolean; reverted?: boolean; detail?: string };
   shotKey?: string;
 }
 /**
@@ -593,6 +609,26 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     }
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, adsense: okBody.adsense ?? null, shotKey: okBody.shotKey ?? null })}, updated_at = NOW() WHERE id = ${jobId}`);
+    return { ok: true, status: "done" };
+  }
+
+  /* ── 블로거 광고 삽입/복원(P1R4 §2.2 · DESIGN §9.0) — 🔴 계정 monetize 만 쓴다(§5 경계). 템플릿 백업 원문은
+        setup 때 저장하고 revert 때 지운다(revert 는 그 백업을 «썼다»는 뜻). result 에는 원문을 싣지 않는다(크다 · hasBackup 플래그만). ── */
+  if (kind === "ads.setup_blogger" || kind === "ads.revert_blogger") {
+    const m = okBody.monetize ?? {};
+    const inserted = kind === "ads.setup_blogger" && !!m.adsenseInserted;
+    const reverted = kind === "ads.revert_blogger" && !!m.reverted;
+    const hasBackup = typeof m.bloggerTemplateBackup === "string" && !!m.bloggerTemplateBackup;
+    if (accountId) {
+      const patch: Record<string, unknown> = { adsenseInserted: kind === "ads.setup_blogger" ? inserted : false, bloggerAdsAt: new Date().toISOString() };
+      if (kind === "ads.setup_blogger" && hasBackup) patch.bloggerTemplateBackup = m.bloggerTemplateBackup;   // 복원용 원문
+      if (kind === "ads.revert_blogger") patch.bloggerTemplateBackup = null;                                  // 백업 소진
+      await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb(patch)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`).catch(() => {});
+    }
+    await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+      result = ${jsonb({ ok: true, monetize: { adsenseInserted: inserted, reverted, hasBackup, detail: m.detail ?? null }, shotKey: okBody.shotKey ?? null })}, updated_at = NOW() WHERE id = ${jobId}`);
+    await writeAudit({ tenantId: tid, action: kind === "ads.setup_blogger" ? "ads_setup_blogger" : "ads_revert_blogger", actorType: "system",
+      target: accountId ? `account:${accountId}` : `runner_job:${jobId}`, detail: { inserted, reverted, hasBackup }, riskLevel: "medium" });
     return { ok: true, status: "done" };
   }
 

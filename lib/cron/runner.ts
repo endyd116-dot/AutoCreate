@@ -36,6 +36,8 @@ import { revenueSyncStep } from "./revenue-sync";
 import { billingChargeStep } from "./billing-charge";
 import { trialExpireStep } from "./trial-expire";
 import { csAutoTicketStep } from "./cs-auto-ticket";
+import { runnerCanaryStep } from "./runner-canary";
+import { aiModelWatchStep } from "./ai-model-watch";
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -57,6 +59,8 @@ export const STEPS: CronStep[] = [
   billingChargeStep,   // hourly(09:00 KST) · 정기 청구·재시도·해지·연납 포함분(P1R4)
   trialExpireStep,     // hourly · 체험 D-3/D-1/D-0 알림(09:00) · 종료 → readonly(P1R4)
   csAutoTicketStep,    // hourly · 러너 실패·결제 실패·계정 정지 3회 → 시스템 티켓(P1R4 §2.1)
+  runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
+  aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
   publisherStep,       // 5m · due 발행
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];
