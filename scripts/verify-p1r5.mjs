@@ -365,8 +365,15 @@ async function main() {
     rec("규칙 kind shorts 주 2회 → coinsPerWeek 56(2×video_60 28) · slotsCreated ≥1", rs.json?.ok === true && rs.json.coinsPerWeek === 56 && rs.json.slotsCreated >= 1, `${rs.status} ${rs.json?.step || ""} coins/week ${rs.json?.coinsPerWeek} slots ${rs.json?.slotsCreated}`);
     const sl = (await call(jar, "/api/slots-list")).json?.slots || [];
     rec("슬롯 kind shorts · 채널 youtube_shorts", sl.some((x) => x.kind === "shorts" && x.channel === "youtube_shorts"), `${sl.filter((x) => x.kind === "shorts").length}개`);
-    const [gate] = await s`SELECT COUNT(*) AS c FROM audit_logs WHERE tenant_id = ${TID} AND action = 'piece_slotless_blocked'`;
-    warn("슬롯 없는 자동 생성 시도 → piece_slotless_blocked 감사(AC-2)", `자동 경로 재현 손잡이 트리거 때 · 현재 감사 ${gate?.c}건`);
+    /* 🔴 절대 게이트(AC-2)는 HTTP 밖에서만 재현된다 — `/api/director-confirm` 은 사람 경로라 origin:"manual" 을 명시한다.
+       그래서 `confirm({origin:"auto"})` 를 slotId 없이 부르는 프로브를 따로 돌린다(계약 §1.4b). */
+    const { execFileSync: ex2 } = await import("node:child_process");
+    let g = "";
+    try { g = String(ex2("npx", ["tsx", "--env-file=.env", "scripts/verify-p1r5-gates-probe.mts", "--tid", String(TID)], { timeout: 300_000, encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "pipe"] })); }
+    catch (e) { g = String(e?.stdout || "") + String(e?.stderr || e?.message || ""); }
+    const gl = g.split(/\r?\n/).filter((l) => l.startsWith("RESULT "));
+    if (!gl.length) rec("절대 게이트 프로브 실행(verify-p1r5-gates-probe.mts)", false, g.slice(-150).replace(/\s+/g, " "));
+    for (const l of gl) { try { const r = JSON.parse(l.slice(7)); rec(r.step, r.ok, r.note); } catch { /* */ } }
   }
   /* ══ disclosure — 배지 트랙 · 시작 3초 자막 · 설명란 첫 줄(제휴) · approve/publish 재검사 ══ */
   if (SECTIONS.has("disclosure")) {
