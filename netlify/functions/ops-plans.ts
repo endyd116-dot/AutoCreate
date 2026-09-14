@@ -18,7 +18,6 @@ import { writeAudit } from "../../lib/audit";
 import { q } from "../../lib/accounts";
 import { jsonb } from "../../lib/db-util";
 import { loadPlans, type PlanDef } from "../../lib/plans";
-import { PAID_PLANS } from "../../lib/subscription";
 import { COIN_TABLE } from "../../lib/coin-table";
 import { loadPacksAndTable, invalidatePackCache } from "../../lib/billing/packs";
 import { applyDuePriceEvents, schedulePriceEvent, cancelPriceEvent, toPriceEventRow } from "../../lib/billing/price-events";
@@ -130,7 +129,7 @@ export default async (req: Request): Promise<Response> => {
         FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id = t.id LEFT JOIN plans p ON p.key = t.plan_key WHERE t.status = 'active' GROUP BY t.plan_key`);
       const aggOf = new Map(agg.map((r) => [String(r.plan_key), { c: n(r.c), mrr: Math.round(n(r.mrr)) }]));
       const [trialCount] = await q(sql`SELECT COUNT(*) AS c FROM tenants WHERE status = 'trial'`);
-      const rows = plans.map((p) => planRow(p, p.key === "trial" ? n(trialCount?.c) : (aggOf.get(p.key)?.c ?? 0), PAID_PLANS.has(p.key) ? (aggOf.get(p.key)?.mrr ?? 0) : 0));
+      const rows = plans.map((p) => planRow(p, p.key === "trial" ? n(trialCount?.c) : (aggOf.get(p.key)?.c ?? 0), p.key !== "trial" ? (aggOf.get(p.key)?.mrr ?? 0) : 0));
       const events = await q(sql`SELECT * FROM plan_price_events ORDER BY id DESC LIMIT 50`);
       return json({ ok: true, plans: rows, priceEvents: events.map(toPriceEventRow) });
     }

@@ -18,7 +18,7 @@ import { signImpersonationToken, verifyUser, userCookie, clearCookie, USER_COOKI
 import { writeAudit } from "../../lib/audit";
 import { loadPlans, currentTrialDays, planOf } from "../../lib/plans";
 import { balance, grant, grantIncluded } from "../../lib/coin-ledger";
-import { readLedger, activeBillingKey, changePlan, kstMonthOf, periodEndOf, PAID_PLANS, type Cycle } from "../../lib/subscription";
+import { readLedger, activeBillingKey, changePlan, kstMonthOf, periodEndOf, isPaidPlan, type Cycle } from "../../lib/subscription";
 import { q } from "../../lib/accounts";
 import { utcDate } from "../../lib/db-util";
 import { pageOf, ts } from "../../lib/ops/period";
@@ -196,7 +196,7 @@ export default async (req: Request): Promise<Response> => {
       const [t] = await q(sql`SELECT status, plan_key FROM tenants WHERE id = ${id}`);
       if (!t) return json({ ok: false, error: "고객이 없어요.", step: "tenant" }, 404);
       if (b.charge === true) {
-        if (!PAID_PLANS.has(planKey)) return badRequest("청구는 유료 플랜만 할 수 있어요.", "plan");
+        if (!await isPaidPlan(planKey)) return badRequest("청구는 유료 플랜만 할 수 있어요.", "plan");
         const r = await changePlan(id, planKey, cycle, { actorId: o.ops.oid, source: "ops" });
         await writeAudit({ tenantId: id, action: "ops_plan_change", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { from: String(t.plan_key), to: planKey, cycle, charge: true, result: r } });
         if (!r.ok) return json({ ok: false, step: r.step, error: r.error, ...(r.totalKrw !== undefined ? { totalKrw: r.totalKrw } : {}) }, r.step === "not_configured" ? 200 : 400);

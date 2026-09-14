@@ -2,7 +2,8 @@
  * 코인 충전 API(계약 P1R4 §1.1 · DESIGN §12.1·§12.3):
  *   POST /api/coin-purchase-start { packId, agreePaidTerms? } → { ok, orderNo, mode:"oneclick"|"auth", pay?:{url,form}, amountKrw, vatKrw, totalKrw, coins, balance? }
  *   GET  /api/coin-charge-return?…KICC 콜백                    → 302 /app/coins.html?charged=orderNo | ?failed=사유
- *   GET  /api/coin-history?month=YYYY-MM                       → { ok, rows:[{ at, kind, amount, ref, expiresAt?, reason? }], balance:{ included, purchased, total } }
+ *   GET  /api/coin-history?month=YYYY-MM                       → { ok, rows:[{ at, kind, amount, ref, expiresAt?, reason? }], balance:{ included, purchased, total }, orders:[{ orderNo, packId, coins, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedAt?, refundable, refundDeadlineAt? }] }
+ *        rows = 원장 움직임(내역 · 월별) · orders = 충전 주문(환불 요청 버튼의 근거 · 7일·미사용 판정은 quoteCoinRefund)
  *   POST /api/coin-refund-request { orderNo }                  → { ok, refundKrw, revoked, invoiceId } | { ok:false, reason:"used"|"window"|…, error }
  *   GET  /api/coin-packs                                        → { ok, packs:[{ id, krw, vatKrw, totalKrw, coins, bonusPct, oncePerTenant, available }], vatNote }
  *   🔴 원격접속 중 충전·환불 403(denyIfImpersonating) · 결제 첫 회 유료 약관 재동의(agreePaidTerms) · KICC 없으면 no-op 정직(503 not_configured 아님 · 200 {ok:false, step:"not_configured"}).
@@ -54,7 +55,17 @@ export default async (req: Request): Promise<Response> => {
             AND to_char(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') = ${month} ORDER BY id DESC LIMIT 300`)
         : await q(sql`SELECT kind, bucket, delta, item, ref, reason, expires_at, created_at FROM coin_ledger WHERE tenant_id = ${tid} ORDER BY id DESC LIMIT 100`);
       const b = await balance(tid);
-      return json({ ok: true, rows: rows.map((r) => {
+      const orderRows = await q(sql`SELECT order_no, pack_id, krw, coins, vat_krw, total_krw, status, paid_at, refunded_at, created_at FROM coin_orders WHERE tenant_id = ${tid} AND status IN ('paid','refunded') ORDER BY id DESC LIMIT 50`);
+      const orders: Record<string, unknown>[] = [];
+      for (const r of orderRows) {
+        const o: Record<string, unknown> = { orderNo: String(r.order_no), packId: String(r.pack_id), coins: n(r.coins), amountKrw: n(r.krw), vatKrw: n(r.vat_krw), totalKrw: n(r.total_krw) || n(r.krw) + n(r.vat_krw), status: String(r.status), createdAt: utcDate(r.created_at)?.toISOString() ?? "" };
+        const pa = utcDate(r.paid_at); if (pa) o.paidAt = pa.toISOString();
+        const ra = utcDate(r.refunded_at); if (ra) o.refundedAt = ra.toISOString();
+        if (String(r.status) === "paid") { const qr = await quoteCoinRefund(tid, String(r.order_no)); o.refundable = qr.eligible; if (qr.refundDeadlineAt) o.refundDeadlineAt = qr.refundDeadlineAt; if (qr.eligible) o.refundKrw = qr.maxRefundKrw; else if (qr.reason) o.refundBlocked = qr.reason; }
+        else o.refundable = false;
+        orders.push(o);
+      }
+      return json({ ok: true, orders, rows: rows.map((r) => {
         const o: Record<string, unknown> = { at: utcDate(r.created_at)?.toISOString() ?? "", kind: String(r.kind), bucket: String(r.bucket), amount: n(r.delta) };
         if (r.item) o.item = String(r.item); if (r.ref) o.ref = String(r.ref); if (r.reason) o.reason = String(r.reason);
         const e = utcDate(r.expires_at); if (e) o.expiresAt = e.toISOString();

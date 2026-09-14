@@ -28,7 +28,15 @@ import { planOf, loadPlans, type PlanDef } from "./plans";
 const n = (v: unknown) => Number(v || 0);
 const KST_MS = 9 * 3600_000;
 export type Cycle = "month" | "year";
+/** 코드 기본 유료 플랜(폴백). 🔴 판정은 `isPaidPlan()`(DB 플랜 포함 — 운영센터가 만든 플랜도 결제 대상) — 이 상수를 직접 쓰지 않는다. */
 export const PAID_PLANS: ReadonlySet<string> = new Set(["starter", "pro", "agency"]);
+/** 유료 플랜인가 = plans(DB 우선·코드 폴백)에 있고 trial 이 아니다. */
+export async function isPaidPlan(planKey: string): Promise<boolean> {
+  const key = String(planKey ?? ""); if (!key || key === "trial") return false;
+  const plans = await loadPlans();
+  return plans.some((p) => p.key === key);
+}
+export async function paidPlanKeys(): Promise<string[]> { return (await loadPlans()).map((p) => p.key).filter((k) => k !== "trial"); }
 /** 연속 실패 이 횟수면 정지(계약 §1.2 «3회»). dunningSchedule 의 사다리(D+0 → +3일 → +4일)는 그대로 쓰고, 정지 시점만 3회로 당긴다. */
 export const SUSPEND_AFTER_FAILS = 3;
 
@@ -226,14 +234,14 @@ export type ChangeResult = { ok: true; effectiveAt: string; pending: boolean; ch
  *   체험/readonly/suspended 에서 유료 진입 = 지금 한 주기 청구 + 전환. 주기 변경(월↔연)은 다음 주기부터.
  */
 export async function changePlan(tid: number, planKey: string, cycle: Cycle, opts: { actorId?: number | null; source?: ChargeOutcome["source"] } = {}, now = new Date()): Promise<ChangeResult> {
-  if (!PAID_PLANS.has(planKey)) return { ok: false, step: "plan", error: "고를 수 있는 요금제가 아니에요." };
+  if (!await isPaidPlan(planKey)) return { ok: false, step: "plan", error: "고를 수 있는 요금제가 아니에요." };
   const [t] = await q(sql`SELECT status, plan_key FROM tenants WHERE id = ${tid}`);
   if (!t) return { ok: false, step: "plan", error: "계정을 찾을 수 없어요." };
   const status = String(t.status), curPlan = String(t.plan_key);
   const ledger = await readLedger(tid);
   const plans = await loadPlans();
   const rank = (k: string) => plans.find((p) => p.key === k)?.sort ?? 0;
-  const paying = status === "active" && PAID_PLANS.has(curPlan) && ledger?.periodEnd && ledger.periodEnd.getTime() > now.getTime();
+  const paying = status === "active" && await isPaidPlan(curPlan) && ledger?.periodEnd && ledger.periodEnd.getTime() > now.getTime();
 
   // ① 유료로 «진입»(체험·readonly·suspended·해지 뒤) — 지금 한 주기 청구.
   if (!paying) {
@@ -271,6 +279,28 @@ export async function changePlan(tid: number, planKey: string, cycle: Cycle, opt
   return { ok: true, effectiveAt: now.toISOString(), pending: false, chargeNowKrw: supply, vatKrw: vatOf(supply), totalKrw: supply + vatOf(supply), invoiceId: r.invoiceId };
 }
 
+/**
+ * 업그레이드 즉시 청구 미리보기(계약 v4.4 `subscription-quote.prorate` · 토스 원칙 «누르기 전 정확한 금액»).
+ *   changePlan ③ 과 **같은 산식**(prorateUpgradeSupply · 남은 일수/주기 일수). 업그레이드가 아니면(진입·다운·주기 변경) null.
+ */
+export async function prorateQuote(tid: number, planKey: string, cycle: Cycle, now = new Date()): Promise<{ chargeNowKrw: number; vatKrw: number; totalKrw: number; days: number; cycleDays: number } | null> {
+  const [t] = await q(sql`SELECT status, plan_key FROM tenants WHERE id = ${tid}`);
+  if (!t) return null;
+  const ledger = await readLedger(tid);
+  const curPlan = String(t.plan_key);
+  const paying = String(t.status) === "active" && await isPaidPlan(curPlan) && ledger?.periodEnd && ledger.periodEnd.getTime() > now.getTime();
+  if (!paying || planKey === curPlan) return null;
+  const plans = await loadPlans();
+  const rank = (k: string) => plans.find((p) => p.key === k)?.sort ?? 0;
+  if (rank(planKey) <= rank(curPlan) || cycle !== ledger!.cycle) return null;   // 다운·주기 변경은 다음 주기(즉시 청구 없음)
+  const curQuote = await quotePlan(tid, curPlan, ledger!.cycle, ledger, now), newQuote = await quotePlan(tid, planKey, ledger!.cycle, ledger, now);
+  const cycleDays = Math.max(1, Math.round((ledger!.periodEnd!.getTime() - ledger!.periodStart!.getTime()) / 86400_000));
+  const days = Math.max(0, Math.ceil((ledger!.periodEnd!.getTime() - now.getTime()) / 86400_000));
+  const chargeNowKrw = prorateUpgradeSupply(newQuote.supplyKrw, curQuote.supplyKrw, days, cycleDays);
+  const vatKrw = vatOf(chargeNowKrw);
+  return { chargeNowKrw, vatKrw, totalKrw: chargeNowKrw + vatKrw, days, cycleDays };
+}
+
 /** 해지(기간 말) — 빌키 유지 · 재구독 가능. 되돌리기(false)도 같은 함수. */
 export async function cancelAtPeriodEnd(tid: number, on: boolean, actorId: number | null = null): Promise<{ ok: boolean; periodEnd: string | null }> {
   const l = await readLedger(tid);
@@ -287,7 +317,7 @@ export async function subscriptionView(tid: number): Promise<Record<string, unkn
   const planKey = String(t?.plan_key ?? "trial");
   const plan: PlanDef = await planOf(planKey);
   const cycle: Cycle = l?.cycle ?? "month";
-  const quote = PAID_PLANS.has(planKey) ? await quotePlan(tid, planKey, cycle, l) : null;
+  const quote = await isPaidPlan(planKey) ? await quotePlan(tid, planKey, cycle, l) : null;
   const key = await activeBillingKey(tid);
   const o: Record<string, unknown> = {
     plan: { key: plan.key, name: plan.name, priceKrw: quote ? quote.supplyKrw : 0, vatKrw: quote ? quote.vatKrw : 0, totalKrw: quote ? quote.totalKrw : 0, cycle },
@@ -295,6 +325,7 @@ export async function subscriptionView(tid: number): Promise<Record<string, unkn
     billingKey: key ? { has: true, ...(key.last4 ? { last4: key.last4 } : {}), ...(key.brand ? { brand: key.brand } : {}) } : { has: false },
     vatNote: "부가세 별도",
   };
+  o.failCount = l?.failCount ?? 0;   // 미납 헤드라인 «N회 실패»(v4.4 추가 발주)
   const te = utcDate(t?.trial_ends_at); if (te) o.trialEndsAt = te.toISOString();
   if (l?.periodEnd) o.periodEnd = l.periodEnd.toISOString();
   if (l?.nextBillingAt) o.nextBillingAt = l.nextBillingAt.toISOString();

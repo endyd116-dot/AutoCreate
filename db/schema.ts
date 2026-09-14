@@ -683,37 +683,47 @@ export const planPriceEventsR4 = {
   noticeText: "notice_text", status: "status",   // varchar(12) — scheduled | noticed | applied | cancelled
   appliedAt: "applied_at", notifiedCount: "notified_count",
 } as const;
-/* ── B2 0006-r4-ops2.sql(러너 카나리·공지·AI 설정) — B2 초안 기준 선언 · 최종 DDL 이 달라지면 B2 가 B 에게 알린다 ── */
+
+/* === Phase 1 R4 · 운영센터 뒷단(P1R4-B2 · 2026-09-14 · drizzle/0006-r4-ops2.sql 과 동시 · B2 가 보낸 선언을 B 가 그대로 붙임) ===
+ *   append-only(CLAUDE §4.4). 새 테이블은 pgTable, 기존 테이블에 더한 칸은 *R4 const 로만(위 정의 안 건드림).
+ */
 export const canaryRuns = pgTable("canary_runs", {
   id:        bigserial("id", { mode: "number" }).primaryKey(),
   day:       date("day").notNull(),                       // KST 날짜
   channel:   varchar("channel", { length: 24 }).notNull(),
-  ok:        boolean("ok"),                               // NULL = 판정 불가(세션 없음 · AC-9)
+  ok:        boolean("ok"),                                // NULL = 판정 불가(AC-9)
   step:      varchar("step", { length: 40 }),
   detail:    text("detail"),
   shotKey:   varchar("shot_key", { length: 80 }),
   ranAt:     timestamp("ran_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => ({ dayIdx: index("canary_runs_day_idx").on(t.day, t.channel), uniq: uniqueIndex("canary_runs_uniq_idx").on(t.day, t.channel) }));
-export const noticesR4 = {
-  plans: "plans",           // jsonb NOT NULL DEFAULT "[]" — 대상 플랜([] = 전체)
-  channels: "channels",     // jsonb NOT NULL DEFAULT "[]" — incident 대상 채널
-  createdBy: "created_by",  // bigint — operators.id
-  updatedAt: "updated_at",
-  activeIdx: "notices_active_idx",
-} as const;
-export const aiModelOverridesR4 = {
-  candidate: "candidate",       // jsonb — 카나리 대기 체인
-  candidateAt: "candidate_at",
-  prevChain: "prev_chain",      // jsonb — 롤백용 직전 체인
-  updatedAt: "updated_at",
-} as const;
+}, (t) => ({
+  dayIdx:  index("canary_runs_day_idx").on(t.day, t.channel),
+  uniqIdx: uniqueIndex("canary_runs_uniq_idx").on(t.day, t.channel),   // 하루·채널당 1행(멱등 UPSERT + '__eval__' 잠금)
+}));
+
 export const aiSettings = pgTable("ai_settings", {
   id:         varchar("id", { length: 16 }).primaryKey().default("global"),
-  updateMode: varchar("update_mode", { length: 8 }).notNull().default("manual"),   // manual | auto
-  costCapKrw: integer("cost_cap_krw"),                                             // 테넌트·일 원가 상한(NULL = 무제한)
-  candidates: jsonb("candidates").notNull().default([]),
+  updateMode: varchar("update_mode", { length: 8 }).notNull().default("manual"),   // manual|auto
+  costCapKrw: integer("cost_cap_krw"),                     // (미사용) 원가상한 정본은 tenants.settings.aiCostCapKrwPerDay(lib/billing/ai-cost-cap.ts) · 메인 결정 6
+  candidates: jsonb("candidates").notNull().default([]),   // model_watch 후보 + 실측 4종
   watchedAt:  timestamp("watched_at"),
   updatedBy:  bigint("updated_by", { mode: "number" }),
   updatedAt:  timestamp("updated_at").notNull().defaultNow(),
 });
+
+/** ai_model_overrides 가 R4 에 더한 칸(Phase 0 aiModelOverrides 는 그대로) — 후보 카나리·롤백. */
+export const aiModelOverridesR4 = {
+  candidate:   "candidate",     // jsonb — 카나리 중인 새 체인(resolveChain 이 canary_pct% 라우팅)
+  candidateAt: "candidate_at",  // timestamp — 카나리 시작(24h 자동 승격 게이트)
+  prevChain:   "prev_chain",    // jsonb — 롤백용 직전 체인
+  updatedAt:   "updated_at",
+} as const;
+
+/** notices 가 R4 에 더한 칸(Phase 0 notices 는 그대로) — 대상 플랜·채널·작성자. */
+export const noticesR4 = {
+  plans:     "plans",       // jsonb NOT NULL DEFAULT '[]' — 대상 플랜([]=전체)
+  channels:  "channels",    // jsonb NOT NULL DEFAULT '[]' — incident 대상 채널
+  createdBy: "created_by",  // bigint — operators.id
+  updatedAt: "updated_at",
+} as const;

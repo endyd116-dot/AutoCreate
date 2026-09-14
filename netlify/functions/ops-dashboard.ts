@@ -12,7 +12,7 @@ import { json, jsonError } from "../../lib/response";
 import { requireAdmin } from "../../lib/guards";
 import { q } from "../../lib/accounts";
 import { loadPlans } from "../../lib/plans";
-import { PAID_PLANS } from "../../lib/subscription";
+import { paidPlanKeys } from "../../lib/subscription";
 import { fxToKrw } from "../../lib/revenue/common";
 import { COIN_KRW } from "../../lib/coin-table";
 import { kstMonthRange, ts, within } from "../../lib/ops/period";
@@ -39,11 +39,12 @@ export default async (req: Request): Promise<Response> => {
 
     // ② MRR — 활성 유료 테넌트의 월 환산 공급가(가입 시점 고정가 > 플랜가 · 연납은 /12 · 할인 반영).
     const plans = await loadPlans();
+    const paid = new Set(await paidPlanKeys());
     const subs = await q(sql`SELECT t.plan_key, s.cycle, s.price_locked_krw, s.discount_pct, s.discount_until
       FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id = t.id WHERE t.status = 'active'`);
     let mrr = 0; const byPlan = new Map<string, number>();
     for (const s of subs) {
-      const key = String(s.plan_key); if (!PAID_PLANS.has(key)) continue;
+      const key = String(s.plan_key); if (!paid.has(key)) continue;
       byPlan.set(key, (byPlan.get(key) ?? 0) + 1);
       const p = plans.find((x) => x.key === key); if (!p) continue;
       const yearly = String(s.cycle ?? "month") === "year";
@@ -64,8 +65,8 @@ export default async (req: Request): Promise<Response> => {
         COUNT(*) FILTER (WHERE status IN ('readonly', 'suspended', 'past_due')) AS at_risk,
         COUNT(*) AS total,
         -- 전환 코호트: 이번 달 가입 중 체험이 끝났거나 유료가 된 곳 / 그중 유료 활성
-        COUNT(*) FILTER (WHERE ${within(created, r)} AND (trial_ends_at <= NOW() OR (status = 'active' AND plan_key IN ('starter','pro','agency')))) AS cohort,
-        COUNT(*) FILTER (WHERE ${within(created, r)} AND status = 'active' AND plan_key IN ('starter','pro','agency')) AS converted
+        COUNT(*) FILTER (WHERE ${within(created, r)} AND (trial_ends_at <= NOW() OR (status = 'active' AND plan_key <> 'trial'))) AS cohort,
+        COUNT(*) FILTER (WHERE ${within(created, r)} AND status = 'active' AND plan_key <> 'trial') AS converted
       FROM tenants`);
     const cohort = n(t?.cohort), converted = n(t?.converted);
     const trialToPaidPct = cohort > 0 ? Math.round(converted * 100 / cohort) : null;

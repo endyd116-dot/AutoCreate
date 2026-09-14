@@ -199,15 +199,17 @@ export default async (req: Request): Promise<Response> => {
       if (b.assigneeId !== undefined) assigneeId = b.assigneeId === null ? null : n(b.assigneeId) || null;
     } else return json({ ok: false, error: "not found" }, 404);
     if (assigneeId) { const [op] = await q(sql`SELECT id FROM operators WHERE id = ${assigneeId} AND active = true`); if (!op) return badRequest("없는 운영자예요.", "assignee"); }
-    const [r] = await q(sql`UPDATE tickets SET
-        status = COALESCE(${status}, status),
-        priority = COALESCE(${priority}, priority),
-        sla_due_at = CASE WHEN ${priority} IS NOT NULL THEN created_at + (${priority ? SLA_HOURS[priority] : 0} || ' hours')::interval ELSE sla_due_at END,
-        tags = COALESCE(${tags ? jsonb(tags) : null}, tags),
-        assignee_id = CASE WHEN ${assigneeId === undefined} THEN assignee_id ELSE ${assigneeId ?? null} END,
-        resolved_at = CASE WHEN ${status} = 'resolved' THEN COALESCE(resolved_at, NOW()) WHEN ${status} IS NOT NULL THEN NULL ELSE resolved_at END,
-        closed_at = CASE WHEN ${status} = 'resolved' THEN NOW() WHEN ${status} IS NOT NULL THEN NULL ELSE closed_at END,
-        updated_at = NOW() WHERE id = ${id} RETURNING *`);
+    // SET 절은 있는 것만 조립한다(NULL 파라미터를 COALESCE/CASE 에 넣으면 42P18 «타입 미확정» — 스모크에서 잡힘).
+    const sets: SQL[] = [sql`updated_at = NOW()`];
+    if (status) {
+      sets.push(sql`status = ${status}`);
+      sets.push(status === "resolved" ? sql`resolved_at = COALESCE(resolved_at, NOW())` : sql`resolved_at = NULL`);
+      sets.push(status === "resolved" ? sql`closed_at = NOW()` : sql`closed_at = NULL`);
+    }
+    if (priority) { sets.push(sql`priority = ${priority}`); sets.push(sql`sla_due_at = created_at + ${`${SLA_HOURS[priority]} hours`}::interval`); }
+    if (tags) sets.push(sql`tags = ${jsonb(tags)}`);
+    if (assigneeId !== undefined) sets.push(assigneeId === null ? sql`assignee_id = NULL` : sql`assignee_id = ${assigneeId}`);
+    const [r] = await q(sql`UPDATE tickets SET ${sql.join(sets, sql`, `)} WHERE id = ${id} RETURNING *`);
     if (status === "resolved" && String(k.status) !== "resolved" && tid) await notifyCustomer(tid, id, String(k.subject), "ticket_resolved");
     await writeAudit({ tenantId: tid, action: "ops_ticket_update", actorType: "operator", actorId: o.ops.oid, ip, target: `ticket:${id}`, detail: { status, priority, tags, assigneeId: assigneeId === undefined ? undefined : assigneeId } });
     const [full] = await q(sql`${TICKET_SELECT} WHERE k.id = ${id}`);

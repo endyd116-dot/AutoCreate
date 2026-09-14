@@ -15,7 +15,7 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { grantIncluded } from "../coin-ledger";
 import { planOf } from "../plans";
-import { chargeTenant, kstMonthOf, periodEndOf, quotePlan, readLedger, PAID_PLANS, type Cycle } from "../subscription";
+import { chargeTenant, kstMonthOf, periodEndOf, quotePlan, readLedger, isPaidPlan, type Cycle } from "../subscription";
 import { applyDuePriceEvents } from "../billing/price-events";
 import { hourOf, kstHour, type CronStep, type StepOutcome } from "./base";
 
@@ -49,7 +49,8 @@ export const billingChargeStep: CronStep = {
     }
 
     // ⑤ 연납 포함분(매달) — 청구와 무관하게 먼저.
-    if (status === "active" && l.cycle === "year" && PAID_PLANS.has(planKey)) {
+    const paid = await isPaidPlan(planKey);
+    if (status === "active" && l.cycle === "year" && paid) {
       const plan = await planOf(planKey);
       const g = await grantIncluded(ctx.tid, plan.limits.coinsIncluded, kstMonthOf(ctx.now));
       if (g.granted) { changed++; detail.yearlyIncluded = g.granted; }
@@ -58,7 +59,7 @@ export const billingChargeStep: CronStep = {
     // ④ 정지 뒤 새 카드 → 1회 자동 재시도
     if (status === "suspended" && t.suspended_at) {
       const [newKey] = await q(sql`SELECT id FROM billing_keys WHERE tenant_id = ${ctx.tid} AND active = true AND removed_at IS NULL AND created_at > ${String(t.suspended_at)}::timestamp LIMIT 1`);
-      if (newKey && PAID_PLANS.has(planKey)) {
+      if (newKey && paid) {
         const start = ctx.now; const cycle = l.cycle;
         const quote = await quotePlan(ctx.tid, planKey, cycle, l, ctx.now);
         const r = await chargeTenant(ctx.tid, { planKey, cycle, period: periodLabel(start, cycle), supplyKrw: quote.supplyKrw, attempt: 1, source: "cron", periodStart: start });
@@ -67,12 +68,12 @@ export const billingChargeStep: CronStep = {
       }
       return { changed, skipped: 0, detail };
     }
-    if (status !== "active" || !PAID_PLANS.has(planKey)) return { changed, skipped: 0, ...(Object.keys(detail).length ? { detail } : {}) };
+    if (status !== "active" || !paid) return { changed, skipped: 0, ...(Object.keys(detail).length ? { detail } : {}) };
 
     // ②③ 청구 도래(정기 또는 재시도)
     if (l.nextBillingAt && l.nextBillingAt.getTime() <= now) {
       const retry = l.failCount > 0;
-      const nextPlan = (!retry && l.pendingPlanKey && PAID_PLANS.has(l.pendingPlanKey)) ? l.pendingPlanKey : planKey;
+      const nextPlan = (!retry && l.pendingPlanKey && await isPaidPlan(l.pendingPlanKey)) ? l.pendingPlanKey : planKey;
       const nextCycle: Cycle = (!retry && l.pendingCycle) ? l.pendingCycle : l.cycle;
       // 새 주기 시작 = 지난 주기 끝(정기) · 재시도는 원래 주기 그대로(period 라벨도 그대로).
       const start = retry ? (l.periodStart ?? ctx.now) : (l.periodEnd ?? ctx.now);

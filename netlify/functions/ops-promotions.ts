@@ -40,7 +40,7 @@ export default async (req: Request): Promise<Response> => {
         const rows = await q(sql`SELECT * FROM promotions WHERE (${kind} = '' OR kind = ${kind}) ORDER BY active DESC, created_at DESC LIMIT ${size} OFFSET ${offset}`);
         // 성과(전환) = 이 이벤트가 적용된 테넌트(audit promo_applied) 중 지금 유료 활성.
         const conv = rows.length ? await q(sql`SELECT a.target, COUNT(DISTINCT a.tenant_id) AS c FROM audit_logs a JOIN tenants t ON t.id = a.tenant_id
-          WHERE a.action = 'promo_applied' AND t.status = 'active' AND t.plan_key IN ('starter','pro','agency')
+          WHERE a.action = 'promo_applied' AND t.status = 'active' AND t.plan_key <> 'trial'
             AND a.target IN (${sql.join(rows.map((r) => sql`${`promotion:${n(r.id)}`}`), sql`, `)}) GROUP BY a.target`) : [];
         const convOf = new Map(conv.map((c) => [String(c.target), n(c.c)]));
         const status = (url.searchParams.get("status") || "").trim();

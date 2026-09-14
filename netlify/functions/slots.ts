@@ -48,6 +48,8 @@ export default async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
     const slotId = n(b.slotId); if (!slotId) return badRequest("slotId");
+    // P1R4 §1.3 — readonly·suspended 는 «지금 만들기» 금지. 자리를 찾기 전에 재서 403 이 404 보다 먼저 나온다(화면이 «요금제 고르기» 시트를 띄우는 근거).
+    if (path.endsWith("/slots-produce-now")) { const w = await requireWritable(tid); if (!w.ok) return w.res; }
     const [s] = await q(sql`SELECT id, channel, account_id, topic_id, piece_id, publish_at, status, slot_date::text AS d FROM slots WHERE tenant_id = ${tid} AND id = ${slotId}`);
     if (!s) return json({ ok: false, error: "편성 자리를 찾을 수 없어요.", step: "not_found" }, 404);
     const status = String(s.status), date = String(s.d).slice(0, 10);
@@ -114,7 +116,6 @@ export default async (req: Request): Promise<Response> => {
 
     /* ───────── 지금 만들기 ───────── */
     if (path.endsWith("/slots-produce-now")) {
-      const w = await requireWritable(tid); if (!w.ok) return w.res;   // readonly·suspended 는 생성 금지(P1R4 §1.3)
       if (s.piece_id) return json({ ok: true, pieceId: n(s.piece_id) });   // 멱등 — 이미 만들었다
       if (!EDITABLE.has(status)) return json({ ok: false, step: "state", error: "지금 만들 수 있는 자리가 아니에요." }, 400);
       if (!s.topic_id) return json({ ok: false, step: "no_topic", error: "먼저 소재를 골라 주세요." }, 400);
