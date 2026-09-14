@@ -706,6 +706,8 @@ UI.$("#pw").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>�
 const me = await UI.boot("account"); if (!me) return;
 if (me.impersonation) { UI.$("#page").insertAdjacentHTML("beforeend", `<div class="group"><div class="empty"><h3>원격접속 중엔 결제할 수 없어요</h3><p>운영자가 설정을 도와드리는 동안엔 요금제·카드를 바꿀 수 없어요. 끝난 뒤 본인이 직접 해 주세요.</p></div></div>`); UI.$$("#cards, #cycle, #card, #cancel").forEach((e) => e.hidden = true); return; }
 let S = null, PLANS = [], INV = [], cycle = "month";
+/* [§1.6] 카드 등록 라인 — 법인카드가 인증 창에서 거절될 때 쓰는 «카드번호 직접 입력»(available 일 때만 · 문구는 서버) */
+const keyinRow = (K) => K && K.available ? `<label class="chk" id="keyinRow"><input type="checkbox" id="keyin"> <span>${UI.esc(K.label || "카드번호 직접 입력")}</span></label>${K.notice ? `<p class="muted" style="margin:0 0 8px 34px;font-size:12.5px">${UI.esc(K.notice)}</p>` : ""}` : "";
 const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0, starter: 1, pro: 2, agency: 3 };
 /* KICC 카드 등록 콜백 복귀(billing-key-return): ?key=ok|fail · &trial=reused = 같은 카드로 체험을 이미 씀(§12.3) */
 const key = UI.qs.get("key");
@@ -799,7 +801,14 @@ async function choose(p) {
     } });
 }
 /* 카드 등록 = KICC 인증창(url·form 은 서버가 준다) → 콜백 billing-key-return → ?key=ok|fail */
-async function addCard() { const r = await UI.api("/api/billing-key-start", { body: {} }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }
+async function addCard() {
+  const K = S && S.keyin;
+  if (!K || !K.available) return startCard({});                                     // 선택지가 없으면 바로 기존(인증) 라인
+  UI.sheet(`<p class="muted" style="margin:0 0 12px">카드 등록 창으로 이동해요. 등록하면 다음 결제부터 자동으로 청구돼요.</p>${keyinRow(K)}<div class="cta"><button class="btn primary" type="button" id="go">카드 등록하러 가기</button></div>`, { title: "카드 등록", onOpen: (sh, close) => {
+    sh.querySelector("#go").onclick = () => { const body = {}; if (sh.querySelector("#keyin").checked) body.payRoute = "keyin"; close(); startCard(body); };
+  } });
+}
+async function startCard(body) { const r = await UI.api("/api/billing-key-start", { body }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }
 function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요. 지금 체험 기간은 그대로예요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
 function cancel() { UI.sheet(`<p class="muted" style="margin:0 0 8px">해지하면 ${S.periodEnd ? UI.dateKST(S.periodEnd) : "이번 기간 끝"}까지 그대로 쓰고, 그 뒤엔 보기만 돼요. 만든 글과 편성표는 남아요.</p><div id="cc"></div>`, { title: "구독 해지", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#cc"), "정말 해지할까요? 기간 안엔 언제든 되돌릴 수 있어요.", async () => { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: true } }); if (!r.ok) return UI.toast(r.error || "해지하지 못했어요"); close(); UI.toast(r.periodEnd ? `${UI.dateKST(r.periodEnd)}까지 쓰고 끝나요` : "해지를 예약했어요"); load(); }) }); }
 async function revert() { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: false } }); if (!r.ok) return UI.toast(r.error || "되돌리지 못했어요"); UI.toast("해지를 취소했어요 · 그대로 이어져요"); load(); }
@@ -812,7 +821,10 @@ await load();
 <div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
 --- script ---
 const me = await UI.boot("account"); if (!me) return;
-const won = UI.won; let PACKS = [], ROWS = [], T = null, mode = "this";
+const won = UI.won; let PACKS = [], ROWS = [], T = null, mode = "this", KEYIN = null;
+/* [§1.6] 결제 라인 선택 — available 일 때만 체크박스 1개(라벨·안내문은 서버 문구) · 켜면 body 에 payRoute:"keyin" · 조건이 안 맞으면 서버가 조용히 기존 방식으로 결제한다(실패 아님) */
+const keyinRow = (K) => K && K.available ? `<label class="chk" id="keyinRow" style="margin-top:4px"><input type="checkbox" id="keyin"> <span>${UI.esc(K.label || "카드번호 직접 입력")}</span></label>${K.notice ? `<p class="muted" style="margin:0 0 4px 34px;font-size:12.5px">${UI.esc(K.notice)}</p>` : ""}` : "";
+const keyinBody = (sh, body) => { const el = sh.querySelector("#keyin"); if (el && el.checked) body.payRoute = "keyin"; return body; };
 if (me.impersonation) UI.$("#packs").innerHTML = `<div class="empty" style="padding:20px 16px"><h3 style="font-size:15px">원격접속 중엔 충전할 수 없어요</h3><p>끝난 뒤 본인이 직접 해 주세요.</p></div>`;
 /* KICC 인증창 콜백 복귀(coin-charge-return): ?charged={주문번호} | ?failed={사유} */
 const charged = UI.qs.get("charged"), failed = UI.qs.get("failed");
@@ -822,7 +834,7 @@ const monthOf = () => { const d = new Date(); if (mode === "this") return ymKST(
 async function load() {
   const m = monthOf();
   const [p, k, h] = await Promise.all([UI.api("/api/plans"), UI.api("/api/coin-packs"), UI.api("/api/coin-history" + (m ? `?month=${m}` : ""))]);
-  T = p.ok ? p.coins : null; PACKS = k.ok ? k.packs || [] : []; ROWS = h.ok ? h.rows || [] : [];
+  T = p.ok ? p.coins : null; PACKS = k.ok ? k.packs || [] : []; ROWS = h.ok ? h.rows || [] : []; KEYIN = (k.ok && k.keyin) || null; // [§1.6] 카드번호 직접 입력 노출 여부 — 서버만 안다(available 일 때만 그린다)
   const B = h.ok && h.balance ? h.balance : { total: me.coins, included: 0, purchased: 0 };
   UI.countUp(UI.$("#bal"), B.total, UI.num);
   UI.$("#split").textContent = `플랜 포함 ${UI.num(B.included)} · 충전 ${UI.num(B.purchased)} · 포함분은 그달 말까지, 충전분은 1년`;
@@ -847,13 +859,14 @@ function buy(x) {
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(x.vatKrw)}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">카드 청구</span><span class="v" style="font-weight:800">${won(x.totalKrw)}</span></div>
     <p class="muted" style="margin:8px 0 0;font-size:13px">충전한 코인은 1년 동안 써요 · 안 쓴 코인은 7일 안에 환불돼요.</p>
+    ${keyinRow(KEYIN)}
     <label class="chk" id="agreeRow" ${firstPay ? "" : "hidden"}><input type="checkbox" id="agree"> <span><a href="/paid-terms.html" target="_blank" rel="noopener" style="text-decoration:underline">유료서비스 약관</a>(청약철회 7일 · 환불 기준)에 동의해요</span></label>
     <div class="cta"><button class="btn primary" type="button" id="go">충전하기</button></div>`,
     { title: "", onOpen: (sh, close) => {
       const row = sh.querySelector("#agreeRow"); const go = sh.querySelector("#go");
       const need = () => { row.hidden = false; row.style.outline = "2px solid var(--danger)"; row.style.borderRadius = "10px"; UI.toast("유료 약관에 동의해 주세요"); };
       go.onclick = async () => {
-        const body = { packId: x.id }; if (!row.hidden) { if (!sh.querySelector("#agree").checked) return need(); body.agreePaidTerms = true; }
+        const body = keyinBody(sh, { packId: x.id }); if (!row.hidden) { if (!sh.querySelector("#agree").checked) return need(); body.agreePaidTerms = true; }
         go.disabled = true; const r = await UI.api("/api/coin-purchase-start", { body }); go.disabled = false;
         if (!r.ok) { if (r.step === "paid_terms") return need(); if (r.step === "not_configured") { close(); return soon(); } if (r.step === "once") { close(); UI.toast(r.error || "첫 충전 팩은 한 번만 살 수 있어요"); return load(); } return UI.toast(r.error || "충전을 시작하지 못했어요"); }
         if (r.mode === "oneclick") { close(); return UI.done(`${UI.num(r.coins)}코인 충전했어요 · 잔액 ${UI.num(r.balance)}`, load); }   // 등록 카드로 즉시(응답이 곧 결과)
