@@ -408,7 +408,7 @@ async function load() {
   ], r.channels || []);
   OPS.lock(op, "super_admin", UI.$("#list"));
   UI.$$("[data-k]").forEach((b) => b.onclick = () => sheet(r.channels.find((c) => c.key === b.dataset.k)));
-  if (d.ok) { D = d; const t = d.text || {}; UI.$("#discC").textContent = t.coupang || ""; UI.$("#discG").textContent = t.generic || ""; UI.$("#discM").textContent = `${d.updatedBy ? "운영자 #" + d.updatedBy + " · " : ""}${d.updatedAt ? OPS.dt(d.updatedAt) : "코드 기본값"} · 바꾸면 다음 발행부터 새 문구 · 변경은 감사(high)에 남아요`; }
+  if (d.ok) { D = d; const t = d.text || {}; UI.$("#discC").textContent = t.coupang || ""; UI.$("#discG").textContent = t.generic || ""; UI.$("#discM").textContent = `${d.updatedBy ? (d.updatedBy.name || "운영자 #" + d.updatedBy.id) + " · " : ""}${d.updatedAt ? OPS.dt(d.updatedAt) : "코드 기본값"} · 바꾸면 다음 발행부터 새 문구 · 변경은 감사(high)에 남아요`; }
   OPS.lock(op, "super_admin", UI.$("#editD").parentElement);
 }
 function sheet(c) {
@@ -491,17 +491,17 @@ function form(o) {
 UI.$("#invite").onclick = () => form(null);
 load();
 === audit.html | audit | 감사 ===
-<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="flex:1;min-width:200px;padding:0"><input class="input" id="q" type="search" placeholder="동작·대상으로 찾기" autocomplete="off" style="height:44px"></div><div class="seg" id="risk" style="margin:0"><button class="on" data-v="">전부</button><button data-v="high">높음</button><button data-v="medium">중간</button><button data-v="low">낮음</button></div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="flex:1;min-width:200px;padding:0"><input class="input" id="q" type="search" placeholder="동작·대상으로 찾기" autocomplete="off" style="height:44px"></div><div class="seg" id="risk" style="margin:0"><button class="on" data-v="">전부</button><button data-v="high">높음</button><button data-v="medium">중간</button><button data-v="low">낮음</button></div><div class="seg" id="who" style="margin:0"><button class="on" data-v="">전체</button><button data-v="operator">운영자</button><button data-v="customer">고객</button><button data-v="system">시스템</button></div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="padding:0;width:150px"><input class="input" id="from" type="date" style="height:44px" aria-label="시작일(KST)"></div><span class="muted">~</span><div class="field" style="padding:0;width:150px"><input class="input" id="to" type="date" style="height:44px" aria-label="종료일(KST)"></div><span id="tenantChip"></span></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 const op = await OPS.boot("audit"); if (!op) return;
-let risk = "", page = 1; const tenant = UI.qs.get("tenant") || "";
+let risk = "", actorType = "", page = 1; const tenant = UI.qs.get("tenant") || "";
 if (tenant) UI.$("#tenantChip").innerHTML = `<span class="pill ink">고객 #${UI.esc(tenant)}</span> <a class="lk" href="/ops/audit.html" style="font-size:12.5px">전체 보기</a>`;
 async function load() {
-  const p = new URLSearchParams({ q: UI.$("#q").value.trim(), risk, from: UI.$("#from").value, to: UI.$("#to").value, page: String(page) }); if (tenant) p.set("tenant", tenant);
+  const p = new URLSearchParams({ q: UI.$("#q").value.trim(), risk, actorType, from: UI.$("#from").value, to: UI.$("#to").value, page: String(page) }); if (tenant) p.set("tenant", tenant); // actorType 어휘 = operator|customer|system(API·응답 같은 말)
   const r = await UI.api(`/api/ops-audit-search?${p}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
-  const who = (a) => `${{ operator: "운영자", user: "고객", system: "시스템" }[a.actorType] || UI.esc(a.actorType || "—")}${a.actorId != null ? " #" + a.actorId : ""}`;
+  const who = (a) => `${{ operator: "운영자", customer: "고객", user: "고객", system: "시스템" }[a.actorType] || UI.esc(a.actorType || "—")}${a.actorId != null ? " #" + a.actorId : ""}`;
   const TGT = { tenant: "고객", invoice: "청구서", account: "계정", operator: "운영자", runner_device: "러너", plan: "요금제", notice: "공지", order: "주문", ai: "AI", disclosure: "고지 문구", channel: "채널", ticket: "티켓", piece: "글", slot: "자리" };
   const tgt = (s) => { const m = String(s).match(/^([a-z_]+):(.+)$/); return m ? `${TGT[m[1]] || m[1]} ${/^\d+$/.test(m[2]) ? "#" + m[2] : m[2]}` : (TGT[String(s)] || String(s)); }; // target 은 «종류:id» — 사람말로
   const det = (a) => { if (a.detail == null) return ""; const s = typeof a.detail === "string" ? a.detail : Object.entries(a.detail).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "); return s.length > 140 ? s.slice(0, 140) + "…" : s; };
@@ -515,6 +515,7 @@ async function load() {
 UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(() => { page = 1; load(); }, 250); });
 ["from", "to"].forEach((id) => UI.$("#" + id).addEventListener("change", () => { page = 1; load(); }));
 UI.$$("#risk button").forEach((b) => b.onclick = () => { UI.$$("#risk button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); risk = b.dataset.v; page = 1; load(); });
+UI.$$("#who button").forEach((b) => b.onclick = () => { UI.$$("#who button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); actorType = b.dataset.v; page = 1; load(); });
 load();
 === password.html | operators | 비밀번호 ===
 <div class="step-h"><h1 id="h">비밀번호를 바꿔요</h1><p id="p">첫 로그인이라 기본 비밀번호는 더 쓸 수 없어요.</p></div>
