@@ -270,6 +270,24 @@ async function main() {
     const [softNotice] = await s`SELECT id, kind FROM notifications WHERE tenant_id = ${TID} AND kind IN ('ai_cost_cap','piece_failed') AND created_at > ${tSoft.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 1`;
     rec("소프트 → 고객 알림 0(고객은 이미 코인을 냈다)", !softNotice, softNotice ? `🔴 «${softNotice.kind}» ${softNotice.id}` : "없음");
 
+    /* ①b R4 회귀 — **글만 있는 확정**은 상한 초과에서 여전히 막히고 고객에게 알린다(영상 소프트가 글 규칙을 갉아먹지 않았는지).
+       영상 piece 를 빼고 글만 남겨 확정한다(pro 는 directorEdit 가 있다). */
+    // 🔴 알림은 하루 1건이라, 앞선 검사가 남긴 것이 있으면 «이번에 갔는지»를 못 가른다 — 테스트 테넌트의 옛 알림을 지우고 잰다.
+    await s`DELETE FROM notifications WHERE tenant_id = ${TID} AND kind = 'ai_cost_cap'`;
+    const tText = new Date(Date.now() - 5_000);
+    const trPick = await freshTopic();
+    const prT = trPick ? await call(jar, "/api/director-propose", { body: { topicId: trPick } }) : { json: null };
+    const briefT = prT.json?.brief;
+    if (briefT && briefT.pieces.some((p) => !(p.kind === "video" || p.video))) {
+      const dropVideo = briefT.pieces.filter((p) => p.kind === "video" || p.video).map((p) => ({ key: p.key, drop: true }));
+      const cfT = await call(jar, "/api/director-confirm", { body: { briefId: briefT.id, pieces: dropVideo } });
+      // 알림은 **하루 1건**이다(`requireAiBudget` 이 20시간 안 중복을 억제한다) — «방금 것»이 없어도 그 창 안에 1건이 있으면 규칙대로다.
+      const [noteT] = await s`SELECT id, created_at FROM notifications WHERE tenant_id = ${TID} AND kind = 'ai_cost_cap' AND created_at > NOW() - interval '20 hours' ORDER BY id DESC LIMIT 1`;
+      // 바로 위에서 옛 알림을 지웠으므로, 지금 남아 있는 행은 **이번 확정이 만든 것**이다.
+      rec("R4 회귀 — 글만 있는 확정은 상한 초과에서 **막히고 고객 알림**(하루 1건 · 영상 소프트가 글 규칙을 갉지 않는다)",
+        cfT.json?.step === "ai_cost_cap" && !!noteT, `${cfT.status} step ${cfT.json?.step || "-"} · 알림 ${noteT?.id || "0"}(이번 확정이 만든 것 · 앞서 비웠다)`, noteT ? `notification ${noteT.id}` : undefined);
+    } else warn("R4 회귀 — 글만 있는 확정은 상한 초과에서 막힌다", "글 piece 가 있는 제안을 못 얻어 못 쟀다");
+
     if (!(await stubGuard(TID, "cost/soft"))) return finish();   // 소프트 확정은 실제로 생성을 태운다 — 스텁이 새면 여기서 멈춘다
 
     /* ② 하드(일일 상한 ×3 초과) — 확정 시점: 차단하되 코인은 손대지 않는다 */
