@@ -58,10 +58,15 @@ export default async (req: Request): Promise<Response> => {
       const d = (row.detail && typeof row.detail === "object" ? row.detail : {}) as Record<string, unknown>;
       const at = utcDate(row.created_at)?.toISOString() ?? null;
       const ageDays = at ? Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000) : null;
+      /* 🔴 `r2Versioning` 어휘를 따로 낸다(메인 교차확인 2026-09-15):
+           "Enabled" 켜짐 · "Disabled" 꺼짐 · **"unsupported" R2 가 기능 자체를 안 준다** · null 못 물어봤다(확인 필요).
+         «기능 없음»을 «확인 필요»로 그리면 **아무도 끝낼 수 없는 숙제**가 된다 — 화면이 둘을 다르게 말해야 한다. */
+      const r2 = (d.r2 && typeof d.r2 === "object" ? d.r2 : null) as Record<string, unknown> | null;
+      const r2Versioning = r2?.versioning === undefined ? null : r2.versioning;
       return json({ ok: true, checked: true, checkedAt: at, ageDays,
         // 30일 넘게 안 봤으면 «오래됐다»고 말한다 — 확인해 둔 적 있다는 사실만으로 안심시키지 않는다.
         stale: ageDays !== null && ageDays > 30,
-        neon: d.neon ?? null, r2: d.r2 ?? null });
+        neon: d.neon ?? null, r2: d.r2 ?? null, r2Versioning });
     }
 
     if (path.endsWith("/ops-audit-search")) {
