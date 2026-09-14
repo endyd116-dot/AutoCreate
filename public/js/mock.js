@@ -18,8 +18,8 @@
   const CHANNELS = [
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true], ["tistory", "티스토리", "text", "runner", "session", true], ["blogger", "블로거", "text", "api", "oauth", false],
     ["wordpress", "워드프레스", "text", "api", "app_password", true], ["threads", "쓰레드", "text", "api", "oauth", true], ["instagram", "인스타그램", "video", "api", "oauth", false],
-    ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false], ["naver_clip", "네이버 클립", "video", "runner", "session", true], ["reels", "릴스", "video", "api", "oauth", false], ["tiktok", "틱톡", "video", "api", "oauth", false],
-  ].map(([key, label, category, publishVia, connectMethod, configured]) => ({ key, label, category, publishVia, status: "active", connectMethod, configured }));
+    ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false], ["naver_clip", "네이버 클립", "video", "runner", "session", true], ["reels", "릴스", "video", "api", "oauth", false], ["tiktok", "틱톡", "video", "api", "oauth", false, "coming"],
+  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => ({ key, label, category, publishVia, status: status || "active", connectMethod, configured })); // 틱톡 = 준비중(가동 전 · 그리드에서 숨는다)
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -215,6 +215,8 @@
     if (a.channel === "youtube_shorts") { const subs = 640, views = 2140000; o.ypp = { subs, views, ready: subs >= AD_THRESHOLDS.ypp.subs && views >= AD_THRESHOLDS.ypp.views }; }
     if (a.channel === "naver_clip") o.clip = { open: true, deadline: iso(now + 12 * 86400e3) };
     return o; });
+  /* ?trial=N — 체험 D-N(0 이면 끝남 readonly) · 기본 9일 */
+  const trialOf = () => { const d = qs.has("trial") ? Number(qs.get("trial")) : 9; return d <= 0 ? { status: "readonly", daysLeft: 0, planKey: "trial" } : { status: "trial", daysLeft: d, planKey: "trial" }; };
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const delay = (ms = 260) => new Promise((r) => setTimeout(r, ms));
 
@@ -237,7 +239,7 @@
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
-      return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: { status: "trial", daysLeft: 9, planKey: "trial" }, coins: S.coins, impersonation: null }; },
+      return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule; return { ok: true, settings: S.settings }; },
     "plans": () => ({ ok: true, plans: [], coins: { packs: [{ coins: 100, krw: 50000, bonusPct: 0 }, { coins: 220, krw: 100000, bonusPct: 10 }], table: { blog: 1, image: 1, cardnews: 3, video_15: 5, video_30: 8, video_60: 12, persona: 0 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* §1 계정 */
@@ -410,7 +412,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; return { ...r, status, ok: !!r.ok };
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);

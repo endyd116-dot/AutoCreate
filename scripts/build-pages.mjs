@@ -8,7 +8,7 @@ const FONT = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncact
 const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?history.back():location.assign('${fallback}')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>`;
 
 const TARGETS = [
-  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=6", "/js/mock.js?v=6"], back: ["accounts.html", "settings.html", "plans.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
+  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=6", "/js/mock.js?v=7"], back: ["accounts.html", "settings.html", "plans.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
   { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=6", "/js/ops.js?v=1"], back: ["tenant.html", "password.html"], fallback: "/ops/", manifest: false, robots: true, titleInBar: true }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
 ];
 

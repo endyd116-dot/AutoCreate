@@ -171,6 +171,9 @@
   .preview h1{font-size:22px;font-weight:800;line-height:1.35;letter-spacing:-.02em;margin:0 0 6px} .preview .by{font-size:12.5px;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:8px}
   .preview .disclosure{background:var(--ground);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--sub);margin:0 0 16px;line-height:1.5} .preview .disclosure small{display:block;color:var(--muted);font-size:11.5px;margin-top:4px}
   .preview p{margin:0 0 14px} .preview h2{font-size:18px;font-weight:800;margin:20px 0 10px;letter-spacing:-.01em} .preview .img{height:120px;border-radius:4px;background:var(--press)}
+  .preview blockquote{margin:16px 0;padding:14px 18px;text-align:center;font-weight:700;color:var(--sub);font-size:15px} .preview blockquote::before,.preview blockquote::after{content:"";display:block;width:36px;height:2px;background:var(--ink);margin:0 auto 10px} .preview blockquote::after{margin:10px auto 0}
+  .preview p.summary{border-left:3px solid var(--ink);padding:4px 0 4px 14px;color:var(--sub);font-size:14.5px;margin:0 0 18px}
+  .preview hr{border:0;height:8px;background:radial-gradient(circle,var(--faint) 1.5px,transparent 2px) center/12px 8px repeat-x;margin:20px 0}
   .step-h h2{font-size:24px}
 </style>
 
@@ -509,7 +512,7 @@
 
   <!-- 10. 검수 -->
   <div class="shot">
-    <div class="cap"><b>검수</b>채널 렌더 그대로 미리보기. 고지는 첫 줄 고정 상자. 하단 «이대로 발행 예약» 하나 — 수정은 본문 인라인, 더보기(⋯)에 다시 만들기·버리기.</div>
+    <div class="cap"><b>검수</b>채널 렌더 그대로 미리보기(네이버: 가운데 인용 · 요약 줄 · 점선 구분). 고지는 첫 줄 고정 상자. 하단 «이대로 발행 예약» 하나 — 수정은 본문 인라인, 더보기(⋯)에 다시 만들기·버리기.</div>
     <div class="phone">
       <div class="status"><span>9:41</span><span>●●●</span></div>
       <div class="appbar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 5l-7 7 7 7"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></div>
@@ -520,6 +523,8 @@
           <div class="by"><span class="mk sm n">N</span><span>@cook_a · 경험담 · #에어프라이어청소 #베이킹소다</span></div>
           <div class="disclosure">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.<small>제휴 고지 · 첫 줄에 자동으로 들어가요 · 지울 수 없어요</small></div>
           <p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
+          <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
+          <p class="summary">담그기 10분 · 베이킹소다 5분 · 건조 30분이면 끝나요.</p>
           <h2>1. 바스켓은 물에 10분만 담가요</h2>
           <div class="img"></div>
         </div>
