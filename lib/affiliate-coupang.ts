@@ -31,7 +31,8 @@ function authHeader(keys: CoupangKeys, method: string, path: string, query: stri
   return `CEA algorithm=HmacSHA256, access-key=${keys.accessKey}, signed-date=${dt}, signature=${sig}`;
 }
 
-async function call(keys: CoupangKeys, method: "GET" | "POST", path: string, query: Record<string, string> = {}, body?: unknown): Promise<{ ok: boolean; status: number; json: any }> {
+/** 서명 호출(HMAC) — 상품 검색·딥링크(여기)와 수익 리포트(lib/revenue/coupang.ts)가 같은 서명기를 쓴다 — 한 벌(P1R3 에서 export). */
+export async function coupangCall(keys: CoupangKeys, method: "GET" | "POST", path: string, query: Record<string, string> = {}, body?: unknown): Promise<{ ok: boolean; status: number; json: any }> {
   const qs = new URLSearchParams(query).toString();
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 15_000);
   try {
@@ -51,7 +52,7 @@ export async function searchProducts(keys: CoupangKeys, keyword: string, limit =
   const kw = String(keyword || "").trim(); if (!kw) return [];
   const q: Record<string, string> = { keyword: kw, limit: String(Math.max(1, Math.min(10, limit))) };
   if (subId) q.subId = subId;
-  const r = await call(keys, "GET", SEARCH_PATH, q);
+  const r = await coupangCall(keys, "GET", SEARCH_PATH, q);
   if (!r.ok || String(r.json?.rCode) !== "0") { console.warn(`[coupang] search ${r.status} ${JSON.stringify(r.json ?? "").slice(0, 160)}`); return []; }
   const list = (r.json?.data?.productData ?? []) as Record<string, unknown>[];
   return list.map((p) => ({
@@ -62,7 +63,7 @@ export async function searchProducts(keys: CoupangKeys, keyword: string, limit =
 
 /** 딥링크(subId 포함 단축 URL). 실패 null. */
 export async function deeplink(keys: CoupangKeys, url: string, subId: string): Promise<string | null> {
-  const r = await call(keys, "POST", DEEPLINK_PATH, {}, { coupangUrls: [url], subId });
+  const r = await coupangCall(keys, "POST", DEEPLINK_PATH, {}, { coupangUrls: [url], subId });
   if (!r.ok || String(r.json?.rCode) !== "0") { console.warn(`[coupang] deeplink ${r.status} ${JSON.stringify(r.json ?? "").slice(0, 160)}`); return null; }
   const d = (r.json?.data ?? [])[0];
   return d?.shortenUrl ? String(d.shortenUrl) : null;
