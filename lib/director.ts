@@ -281,7 +281,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
 
 /**
  * 배경 생성 호출 실패 처리 — piece 를 failed 로 내리고 코인 환급·알림·슬롯 표시(content-gen 실패 경로와 같은 처치).
- *   ★C4 fix(2026-09-14 · PITFALLS AC-13): 호출이 실패해도 piece 가 generating 에 남으면 «코인은 빠졌는데 화면은 영원히 만드는 중»이 된다 —
+ *   ★C4 fix(2026-09-14 · PITFALLS AC-16): 호출이 실패해도 piece 가 generating 에 남으면 «코인은 빠졌는데 화면은 영원히 만드는 중»이 된다 —
  *   홈 «해야 할 일»은 in_review 만 세므로 사용자에게 아무 신호도 가지 않는다(조용한 0건 금지).
  */
 async function failTrigger(tid: number, pieceId: number, reason: string): Promise<void> {
