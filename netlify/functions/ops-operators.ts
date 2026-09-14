@@ -86,7 +86,7 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/ops-operator-role")) {
       const id = n(b.id); const role = String(b.role ?? "");
       if (!id || !ROLES.has(role)) return badRequest("id·role");
-      if (id === g.ops.oid && role !== "super_admin") return json({ ok: false, error: "본인의 super_admin 권한은 스스로 내릴 수 없어요.", step: "self" }, 400);
+      if (id === Number(g.ops.oid) && role !== "super_admin") return json({ ok: false, error: "본인의 super_admin 권한은 스스로 내릴 수 없어요.", step: "self" }, 400);
       const [row] = await q(sql`UPDATE operators SET role = ${role} WHERE id = ${id} RETURNING id, email, name, role, sso_sub, active, last_login_at`);
       if (!row) return json({ ok: false, error: "운영자를 찾을 수 없어요.", step: "not_found" }, 404);
       await writeAudit({ tenantId: null, action: "ops_operator_role", actorType: "operator", actorId: g.ops.oid, target: `operator:${id}`, detail: { role }, riskLevel: "high" });
@@ -96,7 +96,7 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/ops-operator-disable")) {
       const id = n(b.id); const active = b.active === true;
       if (!id) return badRequest("id");
-      if (id === g.ops.oid && !active) return json({ ok: false, error: "본인 계정은 스스로 비활성화할 수 없어요.", step: "self" }, 400);
+      if (id === Number(g.ops.oid) && !active) return json({ ok: false, error: "본인 계정은 스스로 비활성화할 수 없어요.", step: "self" }, 400);
       const [row] = await q(sql`UPDATE operators SET active = ${active} WHERE id = ${id} RETURNING id, email, name, role, sso_sub, active, last_login_at`);
       if (!row) return json({ ok: false, error: "운영자를 찾을 수 없어요.", step: "not_found" }, 404);
       await writeAudit({ tenantId: null, action: "ops_operator_disable", actorType: "operator", actorId: g.ops.oid, target: `operator:${id}`, detail: { active }, riskLevel: "high" });

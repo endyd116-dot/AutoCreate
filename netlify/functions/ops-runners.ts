@@ -52,7 +52,7 @@ export default async (req: Request): Promise<Response> => {
       const g = requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
       const days = Math.max(1, Math.min(60, n(url.searchParams.get("days")) || 14));
       const rows = await q(sql`SELECT day, channel, ok, step, detail, shot_key, ran_at FROM canary_runs
-        WHERE channel <> '__eval__' AND day >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - ${days}
+        WHERE channel <> '__eval__' AND day >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date - ${days}::int)   -- ★C(P1R4) fix: date - $1 은 바인딩 타입이 없어 «operator does not exist: date >= integer» 500(AC-23) — ::int + 괄호
         ORDER BY day DESC, channel`);
       const today = String((await q(sql`SELECT (NOW() AT TIME ZONE 'Asia/Seoul')::date AS d`))[0]?.d ?? "");
       const byChannel = new Map<string, { channel: string; today: unknown; history: unknown[] }>();

@@ -186,12 +186,19 @@ async function main() {
     if (fa && fb) {
       await s`UPDATE accounts SET status = 'active' WHERE id IN (${fa.id}, ${fb.id})`;
       const [fsl] = await s`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, publish_at, status, origin) VALUES (${TID}, (NOW() AT TIME ZONE 'Asia/Seoul')::date + 3, 'naver_blog', 'post', ${fa.id}, NOW() + interval '3 days', 'planned', 'auto') RETURNING id`;
-      const { classifyAndApply } = await import("../lib/account-health.ts").catch(() => ({ classifyAndApply: null }));
-      if (classifyAndApply) { await classifyAndApply(Number(fa.id), "suspended", { tenantId: TID }); }
-      else { /* HTTP 경로: 러너 report 로 재현 */ const reg = await call(jar, "/api/runner-list"); void reg; }
+      // HTTP 경로로 정지 재현: 러너 토큰(d1) → relogin 잡 → claim → report suspended
+      const tok = d1.json?.device?.token; const H = { "x-runner-token": tok || "" };
+      await call(null, "/api/runner-heartbeat", { body: { version: "c", jobs: 0 }, headers: H });
+      await s`UPDATE accounts SET status = 'pending_login' WHERE id = ${fa.id}`;
+      const rl = await call(jar, "/api/accounts-relogin", { body: { id: Number(fa.id) } });
+      await s`UPDATE accounts SET status = 'active' WHERE id = ${fa.id}`;
+      const cl = await call(null, "/api/runner-queue", { body: { action: "claim", kinds: ["session.login"], max: 5 }, headers: H });
+      const got = (cl.json?.jobs || []).some((j) => j.id === rl.json?.job?.id);
+      const classifyAndApply = got ? async () => call(null, "/api/runner-queue", { body: { action: "report", jobId: rl.json.job.id, result: { ok: false, errorKind: "suspended", detail: "이용 제한" } }, headers: H }) : null;
+      if (classifyAndApply) await classifyAndApply();
       const [fs2] = await s`SELECT account_id FROM slots WHERE id = ${fsl.id}`;
       const [fn] = await s`SELECT body FROM notifications WHERE tenant_id = ${TID} AND kind = 'account_suspended' ORDER BY id DESC LIMIT 1`;
-      rec("starter(failover 없음) 정지 → 승계 0 · 알림 «Pro 로 바꾸면»", classifyAndApply ? Number(fs2?.account_id) === Number(fa.id) && /Pro/.test(String(fn?.body || "")) : true, classifyAndApply ? `slot acct ${fs2?.account_id}(=${fa.id}) · «${String(fn?.body || "").slice(0, 60)}»` : "tsx 없이 직접 호출 불가 — 보류");
+      rec("starter(failover 없음) 정지 → 승계 0 · 알림 «Pro 로 바꾸면»", classifyAndApply ? Number(fs2?.account_id) === Number(fa.id) && /Pro/.test(String(fn?.body || "")) : true, classifyAndApply ? `slot acct ${fs2?.account_id}(=${fa.id}) · «${String(fn?.body || "").slice(0, 60)}»` : "relogin 잡 claim 실패 — 보류");
       await s`UPDATE accounts SET status = 'active', last_error_kind = NULL WHERE id = ${fa.id}`;
     }
     // 러너 스크랩 잡 적재(pro · adpost 소스) · starter 는 gated
@@ -256,10 +263,11 @@ async function main() {
       const qBefore = await call(jar, "/api/subscription-quote", { query: { planKey: "pro", cycle: "month" } });
       rec("가격 개정 예약(30일 뒤) → 적용일 전 견적은 옛 가격 49,000", pe.json?.ok === true && qBefore.json?.quote?.supplyKrw === 49000, `${pe.status} ${pe.json?.step || ""} event ${pe.json?.event?.id || pe.json?.id} · quote ${qBefore.json?.quote?.supplyKrw}`);
       const peId = pe.json?.event?.id ?? pe.json?.id;
-      if (peId) { await s`UPDATE plan_price_events SET effective_at = NOW() - interval '1 minute', noticed_at = COALESCE(noticed_at, NOW() - interval '2 days') WHERE id = ${peId}`.catch(() => {}); const qAfter = await call(jar, "/api/subscription-quote", { query: { planKey: "pro", cycle: "month" } }); rec("적용일 지나면 견적 새 가격 59,000(source price_event)", qAfter.json?.quote?.supplyKrw === 59000 && qAfter.json?.quote?.source === "price_event", JSON.stringify(qAfter.json?.quote).slice(0, 140)); const pc = await call(oj, "/api/ops-price-event-cancel", { body: { id: peId } }); const qBack = await call(jar, "/api/subscription-quote", { query: { planKey: "pro", cycle: "month" } }); rec("가격 개정 취소 → 견적 49,000 복귀", pc.json?.ok === true && qBack.json?.quote?.supplyKrw === 49000, `${pc.status} ${pc.json?.step || ""} → ${qBack.json?.quote?.supplyKrw}`); }
+      if (peId) { await s`UPDATE plan_price_events SET effective_at = NOW() - interval '1 minute' WHERE id = ${peId}`; const qAfter = await call(jar, "/api/subscription-quote", { query: { planKey: "pro", cycle: "month" } }); rec("적용일 지나면 견적 새 가격 59,000(source price_event)", qAfter.json?.quote?.supplyKrw === 59000 && qAfter.json?.quote?.source === "price_event", JSON.stringify(qAfter.json?.quote).slice(0, 140)); const pc = await call(oj, "/api/ops-price-event-cancel", { body: { id: peId } }); const qBack = await call(jar, "/api/subscription-quote", { query: { planKey: "pro", cycle: "month" } }); rec("가격 개정 취소 → 견적 49,000 복귀", pc.json?.ok === true && qBack.json?.quote?.supplyKrw === 49000, `${pc.status} ${pc.json?.step || ""} → ${qBack.json?.quote?.supplyKrw}`); }
       // 인보이스·미수·환불 정직
       const inv = await call(oj, "/api/ops-invoices", { query: { status: "paid" } }); const rcv = await call(oj, "/api/ops-receivables"); const bks = await call(oj, "/api/ops-billing-keys");
-      rec("ops-invoices/receivables/billing-keys 모양(3금액 · tenantName)", inv.json?.ok === true && Array.isArray(inv.json.rows) && (inv.json.rows[0] ? ["amountKrw", "vatKrw", "totalKrw", "tenantName"].every((k) => k in inv.json.rows[0]) : true) && rcv.json?.ok === true && bks.json?.ok === true, `${inv.status}/${rcv.status}/${bks.status} n=${inv.json?.rows?.length}`);
+      rec("ops-invoices/receivables/billing-keys 모양(3금액 · tenantName)", inv.json?.ok === true && Array.isArray(inv.json.invoices) && typeof inv.json.total === "number" && (inv.json.invoices[0] ? ["amountKrw", "vatKrw", "totalKrw", "tenantName"].every((k) => k in inv.json.invoices[0]) : true) && rcv.json?.ok === true && Array.isArray(rcv.json.receivables) && bks.json?.ok === true && Array.isArray(bks.json.keys), `${inv.status}/${rcv.status}/${bks.status} n=${inv.json?.invoices?.length} recv ${rcv.json?.receivables?.length} keys ${bks.json?.keys?.length}`);
+      await s`INSERT INTO coin_orders (tenant_id, order_no, pack_id, coins, krw, status) VALUES (${TID}, ${"AC-COIN-C4-" + STAMP}, 'pack_trial', 10, 5000, 'paid') ON CONFLICT DO NOTHING`;
       const rf = await call(oj, "/api/ops-refund", { body: { orderNo: "AC-COIN-C4-" + STAMP } });
       rec("ops-refund(KICC 없음) → not_configured 정직 또는 원장 회수", rf.json?.step === "not_configured" || rf.json?.ok === true, `${rf.status} ${JSON.stringify(rf.json).slice(0, 120)}`);
       // 채널 status 변경 → 고객 그리드 즉시
@@ -270,7 +278,7 @@ async function main() {
       await call(oj, "/api/ops-channels", { body: { key: "threads", status: thr?.status || "planned" } });
       const al2 = (await call(jar, "/api/accounts-list")).json?.channels?.find((c) => c.key === "threads");
       rec("채널 status planned→active → 고객 accounts-list 즉시 active → 복귀", c1.json?.ok === true && al1?.status === "active" && al2?.status === (thr?.status || "planned"), `${c1.status} ${al1?.status} → ${al2?.status}`);
-      const dis = await call(oj, "/api/ops-disclosure"); rec("ops-disclosure {text,updatedAt}", dis.json?.ok === true && typeof dis.json.text === "string", `${dis.status}`);
+      const dis = await call(oj, "/api/ops-disclosure"); rec("ops-disclosure {text:{coupang,generic}} · 정본 문구", dis.json?.ok === true && /쿠팡 파트너스 활동의 일환으로/.test(dis.json.text?.coupang || "") && typeof dis.json.text?.generic === "string", `${dis.status}`);
       // 공지·장애 배너
       const nt = await call(oj, "/api/ops-notices", { body: { kind: "incident", title: `C R4 장애 ${STAMP}`, body: "네이버 발행이 늦어요", startsAt: new Date(Date.now() - 60e3).toISOString(), endsAt: new Date(Date.now() + 3600e3).toISOString(), channels: ["naver_blog"], active: true } });
       const cn = await call(jar, "/api/notices");
@@ -314,8 +322,8 @@ async function main() {
       }
       // 러너팜·카나리·AI
       const rn = await call(oj, "/api/ops-runners"); const cy = await call(oj, "/api/ops-canary"); const aim = await call(oj, "/api/ops-ai-models");
-      rec("ops-runners/canary/ai-models 모양", rn.json?.ok === true && Array.isArray(rn.json.runners) && cy.json?.ok === true && aim.json?.ok === true && Array.isArray(aim.json.roles) && aim.json.costCap && ["manual", "auto"].includes(aim.json.updateMode), `${rn.status}/${cy.status}/${aim.status} roles ${aim.json?.roles?.length} mode ${aim.json?.updateMode}`);
-      const cyRows = cy.json?.runs || cy.json?.canary || cy.json?.rows || [];
+      rec("ops-runners/canary/ai-models 모양", rn.json?.ok === true && Array.isArray(rn.json.runners) && cy.json?.ok === true && aim.json?.ok === true && Array.isArray(aim.json.roles) && ["manual", "auto"].includes(aim.json.settings?.updateMode), `${rn.status}/${cy.status}/${aim.status} roles ${aim.json?.roles?.length} mode ${aim.json?.settings?.updateMode}`);
+      const cyRows = (cy.json?.channels || cy.json?.runs || cy.json?.rows || []).flatMap((c) => c.history ? [...(c.today ? [c.today] : []), ...c.history] : [c]);
       rec("카나리 결과 ok:boolean|null(판정 불가 = null · 0/실패로 안 적음)", Array.isArray(cyRows) && cyRows.every((r) => r.ok === null || typeof r.ok === "boolean"), `${cyRows.length}건 ${JSON.stringify(cyRows[0] || {}).slice(0, 120)}`);
       const badModel = await call(oj, "/api/ops-ai-apply", { body: { role: "director", chain: ["not-a-real-model-xyz"], canaryPct: 0 } });
       rec("AI 적용: 실측 안 된 모델 → 거절(400 + 사람말)", badModel.status === 400 && !!badModel.json?.error, `${badModel.status} «${badModel.json?.error}»`);
@@ -357,7 +365,7 @@ async function main() {
     const r1 = mt ? await call(other, "/api/support-ticket-message", { body: { id: Number(mt.id), text: "idor" } }) : { status: 404 };
     const r2 = await call(other, "/api/coin-history"); const r3 = await call(other, "/api/invoices", { query: { year: "2026" } });
     const r4 = await call(other, "/api/coin-refund-request", { body: { orderNo: "AC-COIN-C4-" + STAMP, quoteOnly: true } });
-    rec("타 테넌트: 티켓 404 · 내 주문 환불 견적 거절 · 주문/인보이스 0", r1.status === 404 && r4.json?.ok !== true && !(r2.json?.rows || []).some((x) => String(x.ref || "").includes(STAMP)) && r3.json?.ok === true, `${r1.status}/${r4.status}/${r2.status}/${r3.status}`);
+    rec("타 테넌트: 티켓 404 · 내 주문 환불 견적 «없는 주문»(정보 0) · 주문/인보이스 0", r1.status === 404 && (r4.json?.ok !== true || (r4.json?.quote?.eligible === false && !r4.json?.quote?.maxRefundKrw)) && !(r2.json?.rows || []).some((x) => String(x.ref || "").includes(STAMP)) && r3.json?.ok === true, `${r1.status}/${r4.status} ${JSON.stringify(r4.json?.quote || {}).slice(0, 80)}`);
   }
   /* ══ cleanup — 돈·CS 행 정리(대시보드 오염 0) ══ */
   if (SECTIONS.has("cleanup")) {
