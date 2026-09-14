@@ -18,7 +18,10 @@ import { connectMethodOf } from "../accounts";
 export type PublishVia = "api" | "runner";
 export type PublishFailReason =
   | "gate" | "no_account" | "no_creds" | "account_blocked" | "auth_failed" | "provider_not_configured"
-  | "channel_error" | "network" | "unsupported_channel" | "not_publishable" | "config";
+  | "channel_error" | "network" | "unsupported_channel" | "not_publishable" | "config"
+  /* P1R5 §2.3 — 릴스·스레드가 영상을 **아직 처리 중**(IN_PROGRESS). 실패가 아니라 «조금 뒤에»(retriable).
+     🔴 `lib/publish/contract.ts` 의 같은 이름 union 과 **짝**이다 — 한쪽만 고치면 포트가 갈라진다. */
+  | "video_processing";
 
 export interface RunnerPresence { online: boolean; devices: number; lastSeenAt?: string; offlineMin?: number }
 

@@ -64,6 +64,10 @@ export async function enqueueRender(pieceId: number, payload: RenderPayload): Pr
   if (j.created) {
     await writeAudit({ tenantId, action: "render_enqueued", actorType: "system", target: `piece:${pieceId}`,
       detail: { jobId: j.id, scenes: payload.scenes?.length ?? 0, seconds: payload.out?.maxSeconds ?? null }, riskLevel: "low" });
+    /* 🔴 적재하는 지금 이미 러너가 없다면 **그 자리에서** 말한다(§7-2). 30분을 기다렸다 말하면
+       고객은 그동안 «왜 안 되지»만 겪는다. 잡은 큐에 그대로 둔다 — 켜면 바로 이어 굽는다. */
+    const why = await offlineReason(tenantId).catch(() => null);
+    if (why) await markAwaitingRunner(tenantId, pieceId, why);
   }
   return { jobId: j.id, created: j.created };
 }
@@ -151,6 +155,51 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
   await writeAudit({ tenantId: tid, action: "render_done", actorType: "system", target: `piece:${pieceId}`,
     detail: { key: report.key, durationMs: report.durationMs, grade: judged.grade }, riskLevel: "low" });
   return { ok: true, next: "in_review", retry };
+}
+
+/* ───────── 러너가 꺼져 있을 때(계약 §7-2 · R2 규칙 그대로) ─────────
+ *   렌더는 **고객 PC** 가 해야 한다. 그 PC 가 꺼져 있으면 잡은 큐에 남고 아무 일도 일어나지 않는다 —
+ *   그 상태를 **말하지 않으면** 고객은 «영상이 안 만들어진다»만 겪는다(조용한 정지 금지 · PITFALLS #7).
+ *   그래서 30분 넘게 집어 갈 러너가 없으면 그 글을 `awaiting_runner` 로 두고 홈 «해야 할 일»에 띄운다.
+ *   잡은 **큐에 그대로 둔다** — 러너를 켜면 바로 이어서 굽는다(취소가 아니다).
+ */
+const RUNNER_WAIT_MIN = 30;
+
+/** 지금 이 테넌트에 잡을 집어 갈 러너가 있나. 없으면 사람말 사유. */
+async function offlineReason(tid: number): Promise<string | null> {
+  const { fleetState } = await import("../runner-jobs");   // AC-17 경계는 함수 안에서
+  const f = await fleetState(tid);
+  if (!f.devices) return "내 PC 프로그램이 아직 연결되지 않았어요";
+  if (!f.online && (f.offlineMin ?? 999) >= RUNNER_WAIT_MIN) return "내 PC 프로그램이 꺼져 있어요";
+  return null;
+}
+
+async function markAwaitingRunner(tid: number, pieceId: number, why: string): Promise<void> {
+  const r = await q(sql`UPDATE pieces SET status = 'awaiting_runner',
+      meta = meta || ${jsonb({ failReason: `${why} — 켜 두시면 이어서 영상을 만들어요` })}, updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id = ${pieceId} AND status <> 'awaiting_runner' RETURNING id`);
+  if (!r.length) return;   // 이미 그 상태 — 알림을 두 번 보내지 않는다
+  const { notifyRunnerNeeded } = await import("./render-notify");
+  await notifyRunnerNeeded(tid, why);
+  await writeAudit({ tenantId: tid, action: "render_awaiting_runner", actorType: "system", target: `piece:${pieceId}`,
+    detail: { why }, riskLevel: "medium" });
+}
+
+/**
+ * 30분 넘게 기다린 렌더 잡을 훑어 «러너 꺼짐»을 알린다. 5분 틱(publisher)에서 부른다.
+ *   멱등 — 이미 awaiting_runner 인 글은 건너뛴다(알림 1회).
+ */
+export async function sweepRenderAwaitingRunner(tid: number): Promise<number> {
+  const stuck = await q(sql`SELECT id, piece_id FROM runner_jobs
+    WHERE tenant_id = ${tid} AND kind = 'render.video' AND status = 'queued'
+      AND created_at <= NOW() - (${RUNNER_WAIT_MIN} * INTERVAL '1 minute')
+      AND piece_id IS NOT NULL`);
+  if (!stuck.length) return 0;
+  const why = await offlineReason(tid);
+  if (!why) return 0;   // 러너는 살아 있다 — 단지 아직 못 집었을 뿐(우선순위·타임박스)
+  let marked = 0;
+  for (const j of stuck) { await markAwaitingRunner(tid, n(j.piece_id), why); marked++; }
+  return marked;
 }
 
 /** 같은 payload 로 다시 굽는다 — 직전 렌더 잡의 payload 를 그대로 쓴다(B 에게 되묻지 않는다). */
