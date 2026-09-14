@@ -239,6 +239,8 @@ export async function enqueueJob(
 
 /** 크론 `runner.reap`(5분) 이 부르는 이름 — 큐 SQL 을 B 가 다시 쓰지 않게 여기서도 내보낸다. */
 export { reapStaleJobs, fleetState as runnerFleetState } from "../runner-jobs";
+/** 크론 `slots.learn` 이 API 채널 통계를 물어보는 이름(포트 `FetchStatsFn`) — null = «못 물어봤다»(0 으로 적지 않는다 · AC-9). */
+export { fetchStats } from "./stats";
 
 /** 편의 진입점 — 행 로드까지 B2 가 한다. B 의 publisher 는 id 만 주면 된다. */
 export async function publishPieceById(tenantId: number, pieceId: number, opts: PublishOpts = {}): Promise<PublishResult> {
