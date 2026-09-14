@@ -25,16 +25,21 @@ export default async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return new Response("method", { status: 405 });
   if ((req.headers.get("x-internal-secret") || "") !== secret) return jres({ ok: false, step: "auth" }, 401);
 
-  let body: { tenantId?: number; retry?: boolean } = {};
+  let body: { tenantId?: number; retry?: boolean; claim?: string } = {};
   try { body = await req.json(); } catch { /* */ }
   const tid = Number(body.tenantId || 0);
   if (!tid) return jres({ ok: false, step: "validate" }, 400);
 
   const st = await readExportState(tid);
   /* 잠금 — `running` 은 «살아 있는 실행»을 뜻한다(고아 20분은 state 가 읽을 때 접는다).
-     다시 걸기(retry)는 자기 자신이 부른 것이므로 이 잠금을 통과해야 한다. */
-  if (!body.retry && st.running && st.progress && Date.now() - Date.parse(st.progress.at || "") < 60_000) {
-    console.log(`[export-background] t${tid} 이미 실행 중 — 건너뜀`);
+     다시 걸기(retry)는 자기 자신이 부른 것이므로 이 잠금을 통과해야 한다.
+     🔴 [2026-09-15 C 수리] `export-start` 가 **먼저** `running:true` 를 쓰고 그 다음 이 함수를 부른다 —
+        그래서 «이미 실행 중»이 **자기 자신**을 가리켜 첫 호출이 늘 건너뛰었다(내보내기가 한 번도 안 돌았다 · 실측 t177·t179).
+        시작한 쪽이 `claim`(= 그 실행의 `startedAt`)을 들고 오면 «내가 그 실행이다» 로 통과시킨다.
+        claim 이 없거나 다른 실행의 것이면 종전대로 건너뛴다(같은 ZIP 을 두 번 굽지 않는다). */
+  const mine = !!body.claim && !!st.startedAt && body.claim === st.startedAt;
+  if (!body.retry && !mine && st.running && st.progress && Date.now() - Date.parse(st.progress.at || "") < 60_000) {
+    console.log(`[export-background] t${tid} 이미 실행 중 — 건너뜀(claim ${body.claim ?? "없음"} · state ${st.startedAt ?? "없음"})`);
     return jres({ ok: true, skipped: "running" });
   }
   const kinds = (st.kinds ?? []).filter((k): k is ExportKind => (EXPORT_KINDS as readonly string[]).includes(k));
@@ -79,7 +84,12 @@ export default async (req: Request): Promise<Response> => {
  * 배경 함수 착수(계약 §2.1 · AC-16: **실패를 삼키지 않는다**).
  *   netlify dev 는 background 를 동기 실행하므로 타임아웃은 «닿았다»로 본다(AC-12 · R5 `triggerVideo` 와 같은 관례).
  */
-export async function startExport(tid: number, retry: boolean): Promise<{ started: boolean; error?: string }> {
+/**
+ * startExport — 배경 함수를 부른다.
+ *   🔴 `claim` = 이 실행을 시작할 때 상태에 적은 `startedAt`. 배경 함수는 «내가 그 실행이다» 를 이 값으로 안다.
+ *      없으면(옛 호출) 잠금 규칙 그대로 — 남의 실행이면 건너뛴다.
+ */
+export async function startExport(tid: number, retry: boolean, claim?: string | null): Promise<{ started: boolean; error?: string }> {
   const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
   const site = String(process.env.SITE_URL ?? "").replace(/\/$/, "");
   if (!secret || !site) {
@@ -90,7 +100,7 @@ export async function startExport(tid: number, retry: boolean): Promise<{ starte
   try {
     const r = await fetch(`${site}/api/export-background`, {
       method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret },
-      body: JSON.stringify({ tenantId: tid, retry }), signal: AbortSignal.timeout(6_000),
+      body: JSON.stringify({ tenantId: tid, retry, ...(claim ? { claim } : {}) }), signal: AbortSignal.timeout(6_000),
     });
     if (r.status !== 202 && !r.ok) { console.error(`[export] 배경 함수 호출 ${r.status}`); return { started: false, error: "내보내기를 시작하지 못했어요. 잠시 뒤 다시 해 주세요." }; }
     return { started: true };

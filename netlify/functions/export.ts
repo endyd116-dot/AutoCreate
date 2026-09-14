@@ -61,11 +61,13 @@ export default async (req: Request): Promise<Response> => {
     await writeAudit({ tenantId: tid, action: "export_start", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { n: used + 1, kinds, from, to, days } });
 
     // 🔴 이전 결과(url·bytes)를 지우고 시작한다 — 안 지우면 «만드는 중»인데 옛 링크가 같이 보인다(무엇을 받는지 헷갈린다).
-    await writeExportState(tid, { running: true, startedAt: new Date().toISOString(), kinds, from, to, retry: 0,
-      progress: { step: "준비", done: 0, total: 0, at: new Date().toISOString() },
+    const startedAt = new Date().toISOString();
+    await writeExportState(tid, { running: true, startedAt, kinds, from, to, retry: 0,
+      progress: { step: "준비", done: 0, total: 0, at: startedAt },
       finishedAt: undefined, url: undefined, expiresAt: undefined, key: undefined, bytes: undefined, files: undefined, error: undefined });
 
-    const st = await startExport(tid, false);
+    // 🔴 claim = 방금 쓴 startedAt — 배경 함수가 «내가 그 실행이다» 를 알아본다(안 넘기면 자기 잠금에 자기가 막힌다).
+    const st = await startExport(tid, false, startedAt);
     if (!st.started) {
       await writeExportState(tid, { running: false, finishedAt: new Date().toISOString(), error: st.error ?? "내보내기를 시작하지 못했어요." });
       return json({ ok: false, step: "start", error: st.error ?? "내보내기를 시작하지 못했어요." }, 502);

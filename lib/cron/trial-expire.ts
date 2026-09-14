@@ -36,7 +36,8 @@ export const trialExpireStep: CronStep = {
       await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${ctx.tid}, ${"trial_ended"}, ${"체험이 끝났어요"},
         ${"만든 글·편성표·수익은 그대로 볼 수 있어요. 새로 만들거나 발행하려면 요금제를 골라 주세요. 30일 동안 요금제를 고르지 않으면 데이터가 지워질 수 있어요(미리 한 번 더 알려드릴게요)."}, ${"/app/plan.html"})`);
       const owner = await tenantOwner(ctx.tid);
-      if (owner.email) void sendEmail(owner.email, "[AutoCreate] 체험이 끝났어요 — 요금제를 고르면 바로 이어져요", simpleMail("체험이 끝났어요", "만든 글과 편성표는 그대로 있어요. 요금제를 고르면 오늘부터 바로 이어서 만들고 발행할 수 있어요.", { label: "요금제 고르기", url: `${siteUrl()}/app/plan.html` }));
+      // 🔴 [2026-09-15 C · AC-36] 던지고 잊으면 «체험 끝» 메일이 조용히 사라진다(크론도 끝나면 인보케이션이 닫힌다) — await.
+      if (owner.email) await sendEmail(owner.email, "[AutoCreate] 체험이 끝났어요 — 요금제를 고르면 바로 이어져요", simpleMail("체험이 끝났어요", "만든 글과 편성표는 그대로 있어요. 요금제를 고르면 오늘부터 바로 이어서 만들고 발행할 수 있어요.", { label: "요금제 고르기", url: `${siteUrl()}/app/plan.html` }));
       await writeAudit({ tenantId: ctx.tid, action: "trial_expired", actorType: "system", detail: { trialEndsAt: ends.toISOString() } });
       return { changed: 1, skipped: 0, detail: { readonly: true } };
     }
@@ -52,7 +53,8 @@ export const trialExpireStep: CronStep = {
     if (await notifyOnce(ctx.tid, milestone, title, body, "/app/plan.html", { byKind: true, withinHours: 48 })) {
       changed++; detail.notified = milestone;
       const owner = await tenantOwner(ctx.tid);
-      if (owner.email) { void sendEmail(owner.email, `[AutoCreate] ${title}`, simpleMail(title, body, { label: "요금제 보기", url: `${siteUrl()}/app/plan.html` })); detail.mailed = true; }
+      // 🔴 [2026-09-15 C · AC-36 + AC-9] await 하고 **보낸 결과 그대로** 적는다 — 종전엔 던지고 잊고 detail.mailed=true 로 «보냈다» 고 말했다.
+      if (owner.email) detail.mailed = await sendEmail(owner.email, `[AutoCreate] ${title}`, simpleMail(title, body, { label: "요금제 보기", url: `${siteUrl()}/app/plan.html` }));
     }
     return { changed, skipped: 0, detail: { ...detail, daysLeft: left } };
   },
