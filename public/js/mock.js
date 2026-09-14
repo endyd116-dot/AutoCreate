@@ -130,10 +130,10 @@
       { id: 4, source: "youtube", accountId: 4, method: "api", status: "not_configured" },
       { id: 5, source: "adfit", accountId: 2, method: "runner", status: "error", lastSyncAt: iso(now - 3 * 86400e3), lastError: "auth" },
     ],
-    adState: revEmpty ? {} : { 1: "none", 3: "approved" },  // 계정별 애드포스트 신청 상태(«가입 완료했어요» 로 바뀐다)
+    adState: revEmpty ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
@@ -210,7 +210,8 @@
   const eligibility = () => S.accounts.filter((a) => a.status !== "disconnected").map((a) => {
     const o = { accountId: a.id, handle: a.handle, channel: a.channel };
     if (a.channel === "naver_blog") { const posts = a.id === 1 ? 38 : 61, visitors = a.id === 1 ? 214 : 520;
-      o.adpost = { state: S.adState[a.id] || "none", posts, visitors, ready: posts >= AD_THRESHOLDS.adpost.posts && visitors >= AD_THRESHOLDS.adpost.visitors }; }
+      o.adpost = { state: S.adState.adpost[a.id] || "none", posts, visitors, ready: posts >= AD_THRESHOLDS.adpost.posts && visitors >= AD_THRESHOLDS.adpost.visitors }; }
+    if (["tistory", "blogger", "wordpress"].includes(a.channel)) o.adsense = { state: S.adState.adsense[a.id] || "none" }; // [v3.5]
     if (a.channel === "youtube_shorts") { const subs = 640, views = 2140000; o.ypp = { subs, views, ready: subs >= AD_THRESHOLDS.ypp.subs && views >= AD_THRESHOLDS.ypp.views }; }
     if (a.channel === "naver_clip") o.clip = { open: true, deadline: iso(now + 12 * 86400e3) };
     return o; });
@@ -368,7 +369,12 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (b && b.action) {
         const s = S.revSources.find((x) => x.source === b.source && (b.accountId == null || x.accountId === Number(b.accountId)));
         if (b.action === "disconnect") { if (s) { s.status = "disconnected"; delete s.lastError; } return { ok: true }; }
-        if (b.action === "key" && !String(b.key || "").trim()) return err("key", "키를 붙여넣어 주세요.");
+        if (b.action === "connect") { // [v3.5] 구글 동의 진입점 — 유튜브 앱 키는 아직 없다고 두어 «준비가 아직이에요» 경로도 보이게
+          if (b.source === "youtube") return { ok: false, step: "provider_not_configured", error: "준비가 아직이에요", status: 503 };
+          if (s) { s.status = "connected"; s.lastSyncAt = iso(Date.now()); delete s.lastError; } else S.revSources.push({ id: S.nextId++, source: b.source, accountId: b.accountId ? Number(b.accountId) : undefined, method: "api", status: "connected", lastSyncAt: iso(Date.now()) });
+          return { ok: true, url: `/app/ad-media.html?connected=${b.source}&mock=1` }; }
+        if (b.action === "key") { const need = { coupang: ["accessKey", "secretKey"], aliexpress: ["appKey", "appSecret"], linkprice: ["affiliateId", "authKey"] }[b.source] || ["key"];
+          const creds = b.creds || (b.key ? { key: b.key } : {}); const miss = need.find((k) => !String(creds[k] || "").trim()); if (miss) return err("key", `키를 모두 넣어 주세요(${miss})`); }
         if (s) { s.status = "connected"; s.lastSyncAt = iso(Date.now()); delete s.lastError; }
         else S.revSources.push({ id: S.nextId++, source: b.source, accountId: b.accountId ? Number(b.accountId) : undefined, method: b.action === "key" ? "api" : "api", status: "connected", lastSyncAt: iso(Date.now()) });
         return { ok: true };
@@ -389,7 +395,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     /* ── [P1R3] §1.5 신청 조건 ── */
     "ad-eligibility": (b) => {
       if (b && b.action) { const id = Number(b.accountId); if (!id) return err("accountId", "계정을 골라 주세요.");
-        S.adState[id] = b.action === "approved" ? "approved" : "pending"; return { ok: true, accounts: eligibility() }; }
+        const src = ["adpost", "ypp", "adsense", "clip"].includes(b.source) ? b.source : null; if (!src) return err("source", "어느 매체인지 골라 주세요.");
+        S.adState[src][id] = b.action === "approved" ? "approved" : "pending"; return { ok: true, accounts: eligibility() }; }
       return { ok: true, thresholds: AD_THRESHOLDS, links: AD_LINKS, accounts: eligibility() }; },
     /* §6 코인 */
     "coins-balance": () => ({ ok: true, balance: S.coins, included: S.coins, purchased: 0, recent: [{ kind: "grant", delta: 30, reason: "운영 지급", createdAt: iso(now - 86400e3) }] }),

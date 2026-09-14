@@ -142,11 +142,11 @@
 
   /* ── 상태 어휘(계약 §1·§4·§5 → 사람말 알약) ── */
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
-  UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약됨"], scheduled: ["off", "예약됨"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
+  UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
   /* [P1R2] 슬롯 상태기계 전 상태(DESIGN §5B.6 · 계약 §-1) — 어휘 한 벌 */
-  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약됨"], scheduled: ["off", "예약됨"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "올리는 중"], published: ["ok", "올라감"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"] };
+  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"] };
   /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
-  UI.POST_STATUS = { published: ["ok", "올라감"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"] };
+  UI.POST_STATUS = { published: ["ok", "발행됨"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"] };
   /* [P1R2] RunnerErrorKind → 사람말(계약 §2) · 계정·발행함이 같이 쓰는 한 벌 */
   UI.ERRK = { login_fail: "로그인이 풀렸어요", captcha: "보안 문자 확인이 필요해요", rate_limited: "채널이 잠시 막았어요", suspended: "채널에서 정지됐어요", selector_changed: "채널 화면이 바뀌었어요", network: "네트워크가 끊겼어요", unknown: "알 수 없는 문제예요" };
   UI.errk = (k) => UI.ERRK[k] || k || "";
@@ -166,8 +166,8 @@
   UI.SRC = { adsense: "애드센스", youtube: "유튜브", coupang: "쿠팡 파트너스", aliexpress: "알리 어필리에이트", linkprice: "링크프라이스", adpost: "애드포스트", adfit: "카카오 애드핏", clip: "네이버 클립", meta: "메타", tiktok: "틱톡", x: "엑스", sponsor: "협찬·광고비", manual: "그 외" };
   UI.srcLabel = (s) => UI.SRC[s] || s;
   /* 소스 마크는 한 글자로 «겹치지 않게» 고른다 — 애드«센»스/애드«포»스트가 둘 다 «애»가 되면 줄이 구분되지 않는다 */
-  UI.SRCMARK = { adsense: "센", youtube: "유", coupang: "쿠", aliexpress: "알", linkprice: "링", adpost: "포", adfit: "핏", clip: "클", meta: "메", tiktok: "틱", x: "엑", sponsor: "협", manual: "기" };
-  UI.srcMark = (s, cls = "") => `<span class="mk soft ${cls}" aria-hidden="true">${UI.esc(UI.SRCMARK[s] || (UI.srcLabel(s) || "?").slice(0, 1))}</span>`;
+  UI.SRCMARK = { adsense: "A", youtube: "▶", coupang: "쿠", aliexpress: "알", linkprice: "L", adpost: "N", adfit: "k", clip: "C", meta: "M", tiktok: "♪", x: "X", sponsor: "협", manual: "기" };
+  UI.srcMark = (s, cls = "") => `<span class="mk src-${UI.esc(s)} ${cls}" aria-hidden="true">${UI.esc(UI.SRCMARK[s] || (UI.srcLabel(s) || "?").slice(0, 1))}</span>`; // [v4] 서비스 색(ac.css .mk.src-*)
   UI.FRESH = { api: "자동", runner: "내 PC", manual: "직접 입력" }; // «러너»는 고객 화면 금지어(§13.0)
   UI.freshPill = (f) => `<span class="pill off">${UI.esc(UI.FRESH[f] || f || "")}</span>`;
   /* 수익 매체 상태 — not_configured 는 «오류»가 아니다(PITFALLS AC-10) */

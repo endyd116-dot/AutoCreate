@@ -6,27 +6,28 @@
 <title>편성표 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=6">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar"><span class="ttl">편성표</span><span class="sp"></span></div>
-<div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
-<div class="seg" id="mode"><button type="button" data-m="week">주</button><button type="button" data-m="month" class="on">월</button></div>
+    <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
+<div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
+<div class="seg" id="mode"><button type="button" data-m="two" class="on">2주</button><button type="button" data-m="month">월</button></div>
 <div class="group" id="cal"></div>
-<div id="week" hidden></div>
+<div id="feed" hidden></div>
 <div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=5"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=6"></script>
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
-let mode = "month";
+/* [v4] 기본 = 2주 롤링(이번 주 + 다음 주) + 아래 여러 날 피드(시안 v3) · «월» = 6줄 달력 + 고른 하루(한 달치 편성용) */
+let mode = "two";
 const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -39,6 +40,9 @@ const TIMES = [["07:30", "07:30"], ["09:00", "09:00"], ["12:00", "12:00"], ["15:
 const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`;
+const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
   const [r, a] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list")]);
@@ -46,38 +50,51 @@ async function load() {
   await loadSlots(); render();
 }
 async function loadSlots() {
-  const first = new Date(view.getFullYear(), view.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay()); const end = new Date(start); end.setDate(start.getDate() + 41);
+  let start, end;
+  if (mode === "two") { start = weekStart(); end = new Date(start); end.setDate(start.getDate() + 13); }
+  else { const first = new Date(view.getFullYear(), view.getMonth(), 1); start = new Date(first); start.setDate(1 - first.getDay()); end = new Date(start); end.setDate(start.getDate() + 41); }
   const s = await UI.api(`/api/slots-list?from=${ymd(start)}&to=${ymd(end)}`); slots = s.ok ? s.slots : [];
 }
+function calCell(d, k, dim) {
+  const ds = slots.filter((s) => s.date === k && s.status !== "skipped").slice(0, 3);
+  return `<button type="button" class="dd ${dim ? "dim" : ""} ${k === ymd(today) ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}">${d.getDate()}<span class="dots">${ds.map((s) => `<i class="${dotCls(s.status)}"></i>`).join("")}</span></button>`;
+}
 function render() {
-  UI.$("#mon").textContent = `${view.getMonth() + 1}월${view.getFullYear() !== today.getFullYear() ? " " + view.getFullYear() : ""}`;
+  const two = mode === "two";
+  UI.$("#prev").hidden = two; UI.$("#next").hidden = two;
+  UI.$("#mon").textContent = two ? `${today.getMonth() + 1}월` : `${view.getMonth() + 1}월${view.getFullYear() !== today.getFullYear() ? " " + view.getFullYear() : ""}`;
   const active = D.rules.filter((r) => r.active);
-  if (active.length || slots.length) { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); const we = new Date(ws); we.setDate(ws.getDate() + 6);
+  if (active.length || slots.length) { const ws = weekStart(); const we = new Date(ws); we.setDate(ws.getDate() + 6);
     const n = slots.filter((s) => s.date >= ymd(ws) && s.date <= ymd(we) && s.status !== "skipped").length;
     const t = slots.filter((s) => s.date === ymd(today) && !["skipped", "published"].includes(s.status)).length;
     UI.$("#stat").textContent = `이번 주 ${n}건 · ${t ? `오늘 ${t}건 나가요` : "오늘은 없어요"}`; } else UI.$("#stat").textContent = "";
-  // 달력(상태 점 ≤3)
-  const first = new Date(view.getFullYear(), view.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
+  // 달력(상태 점 ≤3) — 2주: 이번 주 + 다음 주 두 줄 · 월: 6줄
   let h = WD.map((w) => `<span class="wd">${w}</span>`).join("");
-  for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); if (i >= 35 && d.getMonth() !== view.getMonth()) break; const k = ymd(d);
-    const dim = d.getMonth() !== view.getMonth(); const ds = slots.filter((s) => s.date === k && s.status !== "skipped").slice(0, 3);
-    h += `<button type="button" class="dd ${dim ? "dim" : ""} ${k === ymd(today) ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}">${d.getDate()}<span class="dots">${ds.map((s) => `<i class="${dotCls(s.status)}"></i>`).join("")}</span></button>`; }
+  if (two) { const ws = weekStart(); for (let i = 0; i < 14; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); h += calCell(d, ymd(d), d < today && ymd(d) !== ymd(today)); } }
+  else { const first = new Date(view.getFullYear(), view.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
+    for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); if (i >= 35 && d.getMonth() !== view.getMonth()) break; h += calCell(d, ymd(d), d.getMonth() !== view.getMonth()); } }
   UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
-  UI.$$("#cal .dd").forEach((b) => b.onclick = () => { sel = b.dataset.d; render(); });
-  // 그날 목록 · 규칙 없으면 빈 상태
-  const day = UI.$("#day"); const sd = new Date(sel + "T00:00:00"); const list = slots.filter((s) => s.date === sel).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
-  if (!active.length && !slots.length) { day.innerHTML = `<div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
-  day.innerHTML = `<div class="gt">${sd.getDate()}일 ${WD[sd.getDay()]}요일${list.length ? ` · ${list.length}건` : ""} <a href="/app/posts.html">올라간 글</a></div>` + (list.length ? list.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("")
-    : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">이날은 나갈 글이 없어요</span><span class="d">${active.length ? "규칙에 없는 요일이거나 쉬는 날이에요" : "자동 편성을 켜면 채워져요"}</span></div></div>`);
-  UI.$$("#day .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id))));
-  // 주 보기 = 선택한 날이 든 주의 날짜별 리스트(DESIGN §5B.8)
-  UI.$("#cal").hidden = mode !== "month"; UI.$("#day").hidden = mode !== "month"; const wk = UI.$("#week"); wk.hidden = mode !== "week";
-  if (mode === "week") { const ws = new Date(sd); ws.setDate(sd.getDate() - sd.getDay()); wk.innerHTML = "";
-    for (let i = 0; i < 7; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); const k = ymd(d); const ls = slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
-      wk.insertAdjacentHTML("beforeend", `<div class="group" style="margin-bottom:12px"><div class="gt">${d.getDate()}일 ${WD[d.getDay()]}요일${k === ymd(today) ? ' <span class="pill ink">오늘</span>' : ""}</div>${ls.length ? ls.map((s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`).join("") : `<div class="row" style="min-height:40px"><span class="d muted">나갈 글 없음</span></div>`}</div>`); }
-    UI.$$("#week .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id)))); }
+  UI.$$("#cal .dd").forEach((b) => b.onclick = () => { sel = b.dataset.d; render(); if (two) { const g = UI.$(`#feed [data-day="${sel}"]`); if (g) g.scrollIntoView({ behavior: "smooth", block: "start" }); else UI.toast("이날은 나갈 글이 없어요"); } });
+  const feed = UI.$("#feed"), day = UI.$("#day"); feed.hidden = !two; day.hidden = two;
+  // 규칙도 편성도 없으면 빈 상태 하나
+  if (!active.length && !slots.length) { const host = two ? feed : day; host.innerHTML = `<div class="group"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
+  if (two) {
+    // 여러 날 피드 — 오늘부터 다음 주 끝까지, 나갈 글이 있는 날만(시안 v3)
+    const ws = weekStart(); const groups = [];
+    for (let i = 0; i < 14; i++) { const d = new Date(ws); d.setDate(ws.getDate() + i); const k = ymd(d); if (d < today && k !== ymd(today)) continue; const ls = daySlots(k); if (!ls.length) continue;
+      groups.push(`<div class="group" data-day="${k}" style="margin-bottom:12px"><div class="gt">${d.getDate()}일 ${WD[d.getDay()]}요일</div>${ls.map(slotRow).join("")}</div>`); }
+    feed.innerHTML = groups.length ? groups.join("") : `<div class="group"><div class="row"><div class="l"><span class="t muted" style="font-weight:500">앞으로 2주간 나갈 글이 없어요</span><span class="d">${active.length ? "규칙에 없는 요일이거나 쉬는 날이에요" : "자동 편성을 켜면 채워져요"}</span></div></div></div>`;
+    UI.$$("#feed .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id))));
+  } else {
+    const sd = new Date(sel + "T00:00:00"); const list = daySlots(sel);
+    day.innerHTML = `<div class="gt">${sd.getDate()}일 ${WD[sd.getDay()]}요일 <a href="#" id="toTwo">전체</a></div>` + (list.length ? list.map(slotRow).join("")
+      : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">이날은 나갈 글이 없어요</span><span class="d">${active.length ? "규칙에 없는 요일이거나 쉬는 날이에요" : "자동 편성을 켜면 채워져요"}</span></div></div>`);
+    UI.$$("#day .row[data-id]").forEach((b) => b.onclick = () => slotSheet(slots.find((s) => s.id === Number(b.dataset.id))));
+    UI.$("#toTwo").onclick = (e) => { e.preventDefault(); setMode("two"); };
+  }
 }
-UI.$$("#mode button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mode button").forEach((x) => x.classList.toggle("on", x === b)); render(); });
+async function setMode(m) { mode = m; UI.$$("#mode button").forEach((x) => x.classList.toggle("on", x.dataset.m === m)); await loadSlots(); render(); }
+UI.$$("#mode button").forEach((b) => b.onclick = () => setMode(b.dataset.m));
 /* ── 슬롯 시트(DESIGN §5B.8 4동작: 소재 바꾸기 · 시각 바꾸기 · 지금 만들기 · 건너뛰기) ── */
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
 const topicSub = (t) => { const f = t.factors || {}; const p = []; if (f.volume != null) p.push(`검색 ${UI.num(f.volume)}`); if (f.growthPct != null) p.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) p.push(COMP[f.competition] || f.competition); if (f.seasonal) p.push(f.seasonal); return p.join(" · ") || (t.angle || ""); };

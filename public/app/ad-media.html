@@ -6,20 +6,20 @@
 <title>수익 매체 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=6">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/revenue.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">수익 매체</span><span class="sp"></span></div>
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/revenue.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="step-h"><h1>어디서 돈이 들어오나요?</h1><p>가입은 본인 이름으로 해야 해요. 연결과 수집은 저희가 할게요.</p></div>
 <div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=5"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=6"></script>
 <script>
 (async () => {
 await UI.boot("revenue");
@@ -27,15 +27,17 @@ await UI.boot("revenue");
 const FALLBACK_LINKS = { adpost: "https://adpost.naver.com/", adsense: "https://www.google.com/adsense/start/", ypp: "https://www.youtube.com/creators/how-things-work/monetization/", coupang: "https://partners.coupang.com/", clip: "https://creators.naver.com/" };
 const HOW = {
   adpost: ["애드포스트에 가입해요", "내 블로그를 «미디어»로 등록해요", "심사를 기다려요 · 승인되면 네이버가 광고를 자동으로 넣어요"],
-  adsense: ["애드센스에 가입해요", "티스토리·블로거·워드프레스 사이트를 추가해요", "심사를 기다려요 · 승인되면 글 안 «광고 자리»에 자동으로 들어가요"],
-  ypp: ["구독 1,000명·쇼츠 조회를 채워요", "유튜브 스튜디오에서 수익 창출을 신청해요", "승인되면 수익을 매일 가져와요"],
+  adsense: ["애드센스에 가입해요", "티스토리·블로거·워드프레스 사이트를 추가해요", "심사가 끝나면 «구글로 연결»을 눌러 수익을 가져와요"],
+  ypp: ["구독 1,000명·쇼츠 조회를 채워요", "유튜브 스튜디오에서 수익 창출을 신청해요", "승인되면 «구글로 연결»을 눌러 수익을 가져와요"],
   coupang: ["쿠팡 파트너스에 가입해요", "승인 후 API 키(2개)를 발급받아요", "여기에 키를 넣으면 링크와 수익이 자동이에요"],
   clip: ["클립 크리에이터 모집 기간에 지원해요", "선정되면 알려 주세요", "인센티브를 매일 가져와요"],
 };
-const KEYED = { coupang: [["accessKey", "Access Key"], ["secretKey", "Secret Key"]], aliexpress: [["appKey", "앱 키"]], linkprice: [["merchantKey", "머천트 키"]] };
+/* [v3.5 §1.4d] 키는 소스마다 여러 칸 — 서버 KEY_FIELDS 와 글자 그대로 · «?» = 선택 */
+const KEYED = { coupang: [["accessKey", "Access Key"], ["secretKey", "Secret Key"]], aliexpress: [["appKey", "App Key"], ["appSecret", "App Secret"], ["trackingId?", "Tracking ID"]], linkprice: [["affiliateId", "Affiliate ID"], ["authKey", "Auth Key"]] };
 let EL = { accounts: [], thresholds: null, links: {} }, SRC = [], accounts = [];
 const linkOf = (k) => (EL.links && EL.links[k]) || FALLBACK_LINKS[k] || "";
 const srcOf = (source, accountId) => SRC.find((s) => s.source === source && (accountId == null || s.accountId === accountId));
+const connected = UI.qs.get("connected"); if (connected) UI.toast(`${UI.srcLabel(connected)} 을(를) 구글로 연결했어요`); // [v3.5] 동의 후 돌아온 자리
 
 async function load() {
   const [e, v, a] = await Promise.all([UI.api("/api/ad-eligibility"), UI.api("/api/revenue-sources"), UI.api("/api/accounts-list")]);
@@ -51,66 +53,70 @@ function gauge(label, now, need, unit) {
   return `<div class="gauge ${now >= need ? "done" : ""}"><div class="gl"><span>${UI.esc(label)}</span><b>${UI.numShort(now)} / ${UI.numShort(need)}${UI.esc(unit)}</b></div><div class="gt2"><div class="gf" style="width:${pct}%"></div></div></div>`;
 }
 const STATE_PILL = { none: ["off", "아직 신청 전"], pending: ["warn", "심사 중"], approved: ["ok", "승인됨"] };
-
-function card(key, title, desc, inner) {
+const srcPill = (s) => { const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured; return `<span class="pill ${st[0]}">${st[1]}</span>`; };
+const srcSub = (s) => (s && s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
+const btn = (attr, label, danger = false) => `<button type="button" class="btn sm ${danger ? "ghost" : "secondary"}" ${attr}${danger ? ' style="color:var(--danger)"' : ""}>${label}</button>`;
+const bar = (...bs) => `<div style="display:flex;gap:8px;padding:2px 16px 10px;flex-wrap:wrap">${bs.filter(Boolean).join("")}</div>`;
+function card(title, desc, inner) {
   return `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(title)}</div><p class="muted" style="margin:0 16px 6px;font-size:13px">${UI.esc(desc)}</p>${inner}</div>`;
 }
-function rowBtns(key, accountId, state) {
-  const how = `<button type="button" class="btn ghost sm" data-how="${key}" data-acc="${accountId ?? ""}">신청 방법</button>`;
-  const done = state !== "approved" ? `<button type="button" class="btn sm secondary" data-done="${key}" data-acc="${accountId ?? ""}">가입 완료했어요</button>` : "";
-  return `<div style="display:flex;gap:8px;padding:2px 16px 10px">${how}${done}</div>`;
-}
+/* 계정 행 + 아래 버튼 줄 — 카드마다 같은 자리에 같은 것(통일성) */
+const accRow = (a, sub, pill) => `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(sub)}</span></div>${pill}</div>`;
+const gaugeRow = (a, gauges, pill) => `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><div style="padding:6px 0 0">${gauges}</div></div>${pill}</div>`;
+const notYet = `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기준을 넘으면 여기서 바로 알려드릴게요.</p>`;
 
 function render() {
   const th = EL.thresholds || {};
   let h = "";
 
-  /* ① 애드포스트 — 네이버 블로그 계정마다 */
+  /* ① 애드포스트 — 네이버 블로그 계정마다(조건 게이지 + 자기 신고) */
   const np = EL.accounts.filter((a) => a.adpost);
-  if (np.length) h += card("adpost", "네이버 애드포스트", "네이버 블로그에 네이버가 광고를 넣어 줘요. 글 수와 방문이 기준을 넘으면 신청할 수 있어요.",
+  if (np.length) h += card("네이버 애드포스트", "네이버 블로그에 네이버가 광고를 넣어 줘요. 글 수와 방문이 기준을 넘으면 신청할 수 있어요.",
     np.map((a) => { const st = STATE_PILL[a.adpost.state] || STATE_PILL.none;
-      return `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span>
-        <div style="padding:6px 0 0">${gauge("올린 글", a.adpost.posts, th.adpost?.posts, "편")}${gauge("방문", a.adpost.visitors, th.adpost?.visitors, "명")}</div></div><span class="pill ${st[0]}">${st[1]}</span></div>`
-        + (a.adpost.ready || a.adpost.state !== "none" ? rowBtns("adpost", a.accountId, a.adpost.state)
-          : `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기준을 넘으면 여기서 바로 알려드릴게요.</p>`); }).join(""));
+      return gaugeRow(a, gauge("올린 글", a.adpost.posts, th.adpost?.posts, "편") + gauge("방문", a.adpost.visitors, th.adpost?.visitors, "명"), `<span class="pill ${st[0]}">${st[1]}</span>`)
+        + (a.adpost.ready || a.adpost.state !== "none" ? bar(btn(`data-how="adpost" data-acc="${a.accountId}"`, "신청 방법"), a.adpost.state !== "approved" && btn(`data-done="adpost" data-acc="${a.accountId}"`, "가입 완료했어요")) : notYet); }).join(""));
 
-  /* ② 애드센스 — 티스토리·블로거·워드프레스 계정 */
-  const ad = accounts.filter((a) => ["tistory", "blogger", "wordpress"].includes(a.channel));
-  if (ad.length) h += card("adsense", "구글 애드센스", "티스토리·블로거·워드프레스 글에 광고를 넣어요. 글 안 «광고 자리»는 미리 비워 두고 있어요.",
-    ad.map((a) => { const s = srcOf("adsense", a.id); const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured;
-      return `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${s && s.lastSyncAt ? UI.esc(UI.ago(s.lastSyncAt)) + " 가져옴" : UI.esc(UI.SRC_ERR[(s && s.lastError) || "not_configured"])}</span></div><span class="pill ${st[0]}">${st[1]}</span></div>`
-        + rowBtns("adsense", a.id, s && s.status === "connected" ? "approved" : "none"); }).join(""));
+  /* ② 애드센스 — 글 채널 계정마다 · 상태(자기 신고) + 구글 동의(v3.5) */
+  const ad = EL.accounts.filter((a) => a.adsense || ["tistory", "blogger", "wordpress"].includes(a.channel));
+  if (ad.length) h += card("구글 애드센스", "티스토리·블로거·워드프레스 글에 광고를 넣어요. 글 안 «광고 자리»는 미리 비워 두고 있어요.",
+    ad.map((a) => { const s = srcOf("adsense", a.accountId); const state = (a.adsense && a.adsense.state) || "none"; const st = STATE_PILL[state];
+      const pill = s && s.status === "connected" ? srcPill(s) : `<span class="pill ${st[0]}">${st[1]}</span>`;
+      const sub = s && s.status === "connected" ? srcSub(s) : state === "approved" ? "구글로 연결하면 수익을 매일 가져와요" : state === "pending" ? "심사가 끝나면 알려 주세요" : "가입하고 사이트를 추가해 주세요";
+      return accRow(a, sub, pill) + bar(btn(`data-how="adsense" data-acc="${a.accountId}"`, "신청 방법"), state !== "approved" && !(s && s.status === "connected") && btn(`data-done="adsense" data-acc="${a.accountId}"`, "가입 완료했어요"),
+        (state === "approved" || (s && s.status !== "connected")) && btn(`data-connect="adsense" data-acc="${a.accountId}"`, s && s.status === "connected" ? "다시 연결" : "구글로 연결"), s && s.status === "connected" && btn(`data-off="adsense" data-acc="${a.accountId}"`, "끊기", true)); }).join(""));
 
-  /* ③ 유튜브 YPP */
+  /* ③ 유튜브 — 조건 게이지 + 구글 동의(수익 스코프는 따로 · v3.5) */
   const yt = EL.accounts.filter((a) => a.ypp);
-  if (yt.length) h += card("ypp", "유튜브 수익 창출", "구독과 조회가 기준을 넘으면 신청할 수 있어요.",
-    yt.map((a) => `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span>
-      <div style="padding:6px 0 0">${gauge("구독", a.ypp.subs, th.ypp?.subs, "명")}${gauge("쇼츠 조회", a.ypp.views, th.ypp?.views, "회")}</div></div><span class="pill ${a.ypp.ready ? "ok" : "off"}">${a.ypp.ready ? "신청 가능" : "모으는 중"}</span></div>`
-      + (a.ypp.ready ? rowBtns("ypp", a.accountId, "none") : `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기준을 넘으면 여기서 바로 알려드릴게요.</p>`)).join(""));
+  if (yt.length) h += card("유튜브 수익 창출", "구독과 조회가 기준을 넘으면 신청할 수 있어요. 승인 뒤에는 구글로 한 번 더 동의해야 수익을 가져와요.",
+    yt.map((a) => { const s = srcOf("youtube", a.accountId);
+      return gaugeRow(a, gauge("구독", a.ypp.subs, th.ypp?.subs, "명") + gauge("쇼츠 조회", a.ypp.views, th.ypp?.views, "회"), s && s.status === "connected" ? srcPill(s) : `<span class="pill ${a.ypp.ready ? "ok" : "off"}">${a.ypp.ready ? "신청 가능" : "모으는 중"}</span>`)
+        + (a.ypp.ready || s ? bar(btn(`data-how="ypp" data-acc="${a.accountId}"`, "신청 방법"), btn(`data-connect="youtube" data-acc="${a.accountId}"`, s && s.status === "connected" ? "다시 연결" : "구글로 연결"), s && s.status === "connected" && btn(`data-off="youtube" data-acc="${a.accountId}"`, "끊기", true)) : notYet); }).join(""));
 
-  /* ④ 키를 넣는 매체 */
-  for (const [key, fields] of Object.entries(KEYED)) {
-    const s = srcOf(key); const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured;
-    h += card(key, UI.srcLabel(key), key === "coupang" ? "가입하고 키를 넣으면 글마다 제휴 링크를 자동으로 넣고 수익을 가져와요." : "키를 넣으면 수익을 매일 가져와요.",
-      `<div class="row">${UI.srcMark(key)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(key))}</span><span class="d">${s && s.lastSyncAt ? UI.esc(UI.ago(s.lastSyncAt)) + " 가져옴" : UI.esc(UI.SRC_ERR[(s && s.lastError) || "not_configured"])}</span></div><span class="pill ${st[0]}">${st[1]}</span></div>
-       <div style="display:flex;gap:8px;padding:2px 16px 10px">${HOW[key] ? `<button type="button" class="btn ghost sm" data-how="${key}" data-acc="">신청 방법</button>` : ""}<button type="button" class="btn sm secondary" data-key="${key}">${s && s.status === "connected" ? "키 바꾸기" : "키 넣기"}</button>${s && s.status === "connected" ? `<button type="button" class="btn ghost sm" data-off="${key}" style="color:var(--danger)">끊기</button>` : ""}</div>`);
+  /* ④ 키를 넣는 매체(쿠팡·알리·링크프라이스) */
+  for (const key of Object.keys(KEYED)) {
+    const s = srcOf(key);
+    h += card(UI.srcLabel(key), key === "coupang" ? "가입하고 키를 넣으면 글마다 제휴 링크를 자동으로 넣고 수익을 가져와요." : "키를 넣으면 수익을 매일 가져와요.",
+      `<div class="row">${UI.srcMark(key)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(key))}</span><span class="d">${UI.esc(srcSub(s))}</span></div>${srcPill(s)}</div>`
+      + bar(HOW[key] && btn(`data-how="${key}" data-acc=""`, "신청 방법"), btn(`data-key="${key}"`, s && s.status === "connected" ? "키 바꾸기" : "키 넣기"), s && s.status === "connected" && btn(`data-off="${key}"`, "끊기", true)));
   }
 
   /* ⑤ 네이버 클립 */
   const cl = EL.accounts.find((a) => a.clip);
-  h += card("clip", "네이버 클립 인센티브", cl && cl.clip.open ? "지금 모집 중이에요." : "모집이 열리면 알려드릴게요.",
-    `<div class="row"><span class="mk soft">C</span><div class="l"><span class="t">클립 크리에이터</span><span class="d">${cl && cl.clip.open ? (cl.clip.deadline ? UI.esc(UI.dateKST(cl.clip.deadline)) + "까지 지원할 수 있어요" : "지원할 수 있어요") : "아직 모집 전이에요"}</span></div><span class="pill ${cl && cl.clip.open ? "ok" : "off"}">${cl && cl.clip.open ? "모집 중" : "대기"}</span></div>`
-    + (cl && cl.clip.open ? rowBtns("clip", cl.accountId, "none") : ""));
+  h += card("네이버 클립 인센티브", cl && cl.clip.open ? "지금 모집 중이에요." : "모집이 열리면 알려드릴게요.",
+    `<div class="row">${UI.srcMark("clip")}<div class="l"><span class="t">클립 크리에이터</span><span class="d">${cl && cl.clip.open ? (cl.clip.deadline ? UI.esc(UI.dateKST(cl.clip.deadline)) + "까지 지원할 수 있어요" : "지원할 수 있어요") : "아직 모집 전이에요"}</span></div><span class="pill ${cl && cl.clip.open ? "ok" : "off"}">${cl && cl.clip.open ? "모집 중" : "대기"}</span></div>`
+    + (cl && cl.clip.open ? bar(btn(`data-how="clip" data-acc="${cl.accountId}"`, "신청 방법"), btn(`data-done="clip" data-acc="${cl.accountId}"`, "가입 완료했어요")) : ""));
 
   /* ⑥ 자동으로 못 가져오는 것 */
-  h += card("manual", "그 밖에 받은 돈", "메타·틱톡·협찬비처럼 자동으로 못 가져오는 건 수익 화면에서 직접 넣을 수 있어요.",
-    `<a class="row tap" href="/app/revenue.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 넣으러 가기</span><span class="d">협찬·광고비 · 메타 · 틱톡 · 엑스</span></div>${UI.chev}</a>`);
+  h += card("그 밖에 받은 돈", "메타·틱톡·협찬비처럼 자동으로 못 가져오는 건 수익 화면에서 직접 넣을 수 있어요.",
+    `<a class="row tap" href="/app/revenue.html">${UI.srcMark("manual")}<div class="l"><span class="t">직접 넣으러 가기</span><span class="d">협찬·광고비 · 메타 · 틱톡 · 엑스</span></div>${UI.chev}</a>`);
 
   UI.$("#body").innerHTML = h;
-  UI.$$("#body [data-how]").forEach((b) => b.onclick = () => howSheet(b.dataset.how, b.dataset.acc ? Number(b.dataset.acc) : null));
-  UI.$$("#body [data-done]").forEach((b) => b.onclick = () => claimSheet(b.dataset.done, b.dataset.acc ? Number(b.dataset.acc) : null));
+  const acc = (b) => (b.dataset.acc ? Number(b.dataset.acc) : null);
+  UI.$$("#body [data-how]").forEach((b) => b.onclick = () => howSheet(b.dataset.how, acc(b)));
+  UI.$$("#body [data-done]").forEach((b) => b.onclick = () => claimSheet(b.dataset.done, acc(b)));
   UI.$$("#body [data-key]").forEach((b) => b.onclick = () => keySheet(b.dataset.key));
-  UI.$$("#body [data-off]").forEach((b) => b.onclick = () => disconnect(b.dataset.off));
+  UI.$$("#body [data-connect]").forEach((b) => b.onclick = () => googleConnect(b.dataset.connect, acc(b), b));
+  UI.$$("#body [data-off]").forEach((b) => b.onclick = () => disconnect(b.dataset.off, acc(b)));
 }
 
 /* 한 화면 한 단계 — 신청 방법 3단계 + 외부 새 창 */
@@ -118,14 +124,14 @@ function howSheet(key, accountId) {
   const steps = HOW[key] || []; const url = linkOf(key);
   UI.sheet(`<div class="steps" style="padding:4px 0 8px">${steps.map((s, i) => `<div class="st ${i === 0 ? "on" : ""}"><i>${i + 1}</i>${UI.esc(s)}</div>`).join("")}</div>
     <p class="muted" style="margin:0 0 4px;font-size:13px">가입은 본인 이름으로만 할 수 있어요. 새 창에서 하고 돌아와 주세요.</p>
-    <div class="cta" style="flex-direction:column">${url ? `<a class="btn primary" href="${UI.esc(url)}" target="_blank" rel="noopener" id="go">신청하러 가기</a>` : ""}<button type="button" class="btn ghost" id="did">가입 완료했어요</button></div>`,
+    <div class="cta" style="flex-direction:column">${url ? `<a class="btn primary" href="${UI.esc(url)}" target="_blank" rel="noopener">신청하러 가기</a>` : ""}<button type="button" class="btn ghost" id="did">가입 완료했어요</button></div>`,
     { title: `${UI.srcLabel(key === "ypp" ? "youtube" : key)} 신청`, onOpen: (sh, close) => {
       sh.querySelector("#did").onclick = () => { close(); setTimeout(() => claimSheet(key, accountId), 300); };
     } });
 }
-/* «가입 완료했어요» 1탭 — 자기 신고라 다음 수집에서 서버 판정이 이긴다고 정직하게 적는다 */
+/* «가입 완료했어요» 1탭 — 자기 신고라 다음 수집에서 서버 판정이 이긴다고 정직하게 적는다(v3.1) · source 4종 adpost|ypp|adsense|clip(v3.5) */
 function claimSheet(key, accountId) {
-  if (key !== "adpost" && key !== "ypp" && key !== "adsense" && key !== "clip") return keySheet(key);
+  if (!["adpost", "ypp", "adsense", "clip"].includes(key)) return keySheet(key);
   UI.sheet(`<p class="muted" style="margin:0 0 4px">신청까지 마치셨다면 여기서 알려 주세요. 상태를 «심사 중»으로 바꿔 둘게요.</p>
     <p class="muted" style="margin:0 0 16px;font-size:13px">승인 여부는 다음 수집 때 저희가 다시 확인해요. 아직이면 원래대로 돌아갈 수 있어요.</p>
     <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-a="applied">신청까지 했어요</button><button class="btn ghost" type="button" data-a="approved">이미 승인됐어요</button></div>`,
@@ -140,30 +146,41 @@ function claimSheet(key, accountId) {
       });
     } });
 }
-/* 키 입력 = 바텀시트 */
+/* [v3.5] 구글 동의 — connect → url 로 이동 · 앱 키 없으면 «준비가 아직이에요»(빨간 오류 아님 · AC-10) */
+async function googleConnect(source, accountId, b) {
+  b.disabled = true; const body = { action: "connect", source }; if (accountId) body.accountId = accountId;
+  const r = await UI.api("/api/revenue-sources", { body }); b.disabled = false;
+  if (r.ok && r.url) { location.href = r.url; return; }
+  if (r.step === "provider_not_configured") return UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">준비가 아직이에요</p><p class="muted" style="margin:0 0 16px">${UI.esc(UI.srcLabel(source))} 구글 연결이 열리면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } });
+  UI.toast(r.error || "연결을 시작하지 못했어요");
+}
+/* 키 입력 = 바텀시트 · 소스별 여러 칸 · creds 객체로 보낸다(v3.5) */
 function keySheet(key) {
   const fields = KEYED[key] || [["key", "키"]]; const url = linkOf(key);
   UI.sheet(`<p class="muted" style="margin:0 0 8px">키는 암호로 잠가서 보관하고, 수익을 가져올 때만 써요.</p>
-    ${fields.map(([n, l]) => `<div class="field"><label>${UI.esc(l)}</label><input class="input" data-f="${n}" autocomplete="off" type="password"><div class="help"></div></div>`).join("")}
+    ${fields.map(([n, l]) => { const opt = n.endsWith("?"); const name = n.replace(/\?$/, ""); return `<div class="field"><label>${UI.esc(l)}${opt ? ' <span class="muted" style="font-weight:500">선택</span>' : ""}</label><input class="input" data-f="${name}" ${opt ? 'data-opt="1"' : ""} autocomplete="off" type="password"><div class="help"></div></div>`; }).join("")}
     ${url ? `<p class="muted" style="margin:0 0 4px;font-size:12.5px">키는 <a href="${UI.esc(url)}" target="_blank" rel="noopener" style="text-decoration:underline">${UI.esc(UI.srcLabel(key))}</a> 에서 발급받아요.</p>` : ""}
     <div class="cta"><button class="btn primary" type="button" id="ok">연결하기</button></div>`,
     { title: `${UI.srcLabel(key)} 키`, onOpen: (sh, close) => {
+      const inputs = [...sh.querySelectorAll("[data-f]")];
+      const errAt = (name, msg) => { const i = inputs.find((x) => x.dataset.f === name) || inputs[0]; i.classList.add("err"); i.closest(".field").querySelector(".help").textContent = msg; };
       sh.querySelector("#ok").onclick = async (e) => {
-        const vals = [...sh.querySelectorAll("[data-f]")].map((i) => i.value.trim());
-        if (vals.some((v) => !v)) { sh.querySelector(".help").textContent = "키를 모두 넣어 주세요."; return; }
+        inputs.forEach((i) => { i.classList.remove("err"); i.closest(".field").querySelector(".help").textContent = ""; });
+        const creds = {}; for (const i of inputs) { const v = i.value.trim(); if (!v && !i.dataset.opt) return errAt(i.dataset.f, "키를 모두 넣어 주세요."); if (v) creds[i.dataset.f] = v; }
         e.target.disabled = true;
-        const r = await UI.api("/api/revenue-sources", { body: { action: "key", source: key, key: vals.join(":") } });
-        sh.querySelectorAll("[data-f]").forEach((i) => i.value = ""); // 🔴 키는 요청 후 즉시 비운다
+        const r = await UI.api("/api/revenue-sources", { body: { action: "key", source: key, creds } });
+        inputs.forEach((i) => i.value = ""); // 🔴 키는 요청 후 즉시 비운다
         e.target.disabled = false;
-        if (!r.ok) { sh.querySelector(".help").textContent = r.error || "연결하지 못했어요"; return; }
+        if (!r.ok) { const m = /\(([A-Za-z]+)\)/.exec(r.error || ""); return errAt(m ? m[1] : inputs[0].dataset.f, r.error || "연결하지 못했어요"); } // «키를 모두 넣어 주세요(appSecret)» → 그 칸에
         close(); UI.done("연결했어요", load);
       };
     } });
 }
-async function disconnect(key) {
+async function disconnect(key, accountId) {
   UI.sheet(`<div id="dc"></div>`, { title: `${UI.srcLabel(key)} 끊기`, onOpen: (sh, close) => {
     UI.confirmRow(sh.querySelector("#dc"), `${UI.srcLabel(key)} 연결을 끊을까요? 지금까지 모은 수익은 그대로 남아요.`, async () => {
-      const r = await UI.api("/api/revenue-sources", { body: { action: "disconnect", source: key } });
+      const body = { action: "disconnect", source: key }; if (accountId) body.accountId = accountId;
+      const r = await UI.api("/api/revenue-sources", { body });
       if (!r.ok) return UI.toast(r.error || "끊지 못했어요");
       close(); UI.toast("연결을 끊었어요"); load();
     });

@@ -6,21 +6,21 @@
 <title>코인 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=6">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">코인</span><span class="sp"></span></div>
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip">1코인 = 500원 · 충전분은 1년 동안 써요</div></div>
 <div class="group"><div class="gt">충전하기</div><div id="packs"></div></div>
 <div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=5"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=6"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
