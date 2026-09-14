@@ -127,7 +127,7 @@ export const invoices = pgTable("invoices", {
   id:        bigserial("id", { mode: "number" }).primaryKey(),
   tenantId:  bigint("tenant_id", { mode: "number" }).notNull(),
   kind:      varchar("kind", { length: 12 }).notNull().default("subscription"),
-  period:    varchar("period", { length: 20 }).notNull(),
+  period:    varchar("period", { length: 60 }).notNull(),
   amount:    integer("amount").notNull(),
   status:    varchar("status", { length: 12 }).notNull().default("pending"),
   pgRef:     varchar("pg_ref", { length: 120 }),

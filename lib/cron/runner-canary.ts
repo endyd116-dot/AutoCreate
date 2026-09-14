@@ -14,19 +14,31 @@ import { kstHour, type CronStep, type TenantCtx, type StepOutcome, NOOP } from "
 
 const CANARY_CHANNELS = ["naver_blog", "tistory"];
 
+/**
+ * 평가 시각(KST)과 강제 실행 — 🔴 **로컬 검증 전용 손잡이**(`CRON_BUDGET_MS` 와 같은 관례).
+ *   `CANARY_EVAL_HOUR`(기본 5) · `CRON_FORCE_CANARY=1` 은 **프로덕션에 설정하지 않는다**.
+ *   강제는 **수동 호출일 때만**(`/api/cron-run?secret=` → `ctx.manual`) 듣는다 — 스케줄 호출로는 절대 열리지 않는다(이중 잠금).
+ *   강제일 때는 «하루 1회» 잠금도 건너뛴다(같은 날 반복 검증을 해야 하므로).
+ */
+const EVAL_HOUR = Math.max(0, Math.min(23, Number(process.env.CANARY_EVAL_HOUR ?? 5)));
+const FORCE_EVAL = process.env.CRON_FORCE_CANARY === "1";
+
 export const runnerCanaryStep: CronStep = {
   key: "runner.canary",
   every: "hourly",
   needsAutoSchedule: false,   // 운영 신호 — 고객 자동 편성과 무관
   async run(ctx: TenantCtx): Promise<StepOutcome> {
     // KST 05:00 에만. 그 시각의 첫 테넌트 호출만 실제 평가하고 나머지는 유니크 충돌로 skip.
-    if (kstHour(ctx.now) !== 5) return NOOP;
+    const forced = FORCE_EVAL && ctx.manual;
+    if (!forced && kstHour(ctx.now) !== EVAL_HOUR) return NOOP;
 
     // 하루 1회 잠금 — canary_runs 에 채널 'eval' 한 줄을 오늘 날짜로 선점(UPSERT 아님 · 이미 있으면 conflict=이미 평가함).
-    const claim = await q(sql`INSERT INTO canary_runs (day, channel, ok, step, ran_at)
-      VALUES ((NOW() AT TIME ZONE 'Asia/Seoul')::date, ${"__eval__"}, NULL, ${"lock"}, NOW())
-      ON CONFLICT (day, channel) DO NOTHING RETURNING id`);
-    if (!claim.length) return { changed: 0, skipped: 1, detail: { reason: "already-evaluated-today" } };
+    if (!forced) {
+      const claim = await q(sql`INSERT INTO canary_runs (day, channel, ok, step, ran_at)
+        VALUES ((NOW() AT TIME ZONE 'Asia/Seoul')::date, ${"__eval__"}, NULL, ${"lock"}, NOW())
+        ON CONFLICT (day, channel) DO NOTHING RETURNING id`);
+      if (!claim.length) return { changed: 0, skipped: 1, detail: { reason: "already-evaluated-today" } };
+    }
 
     // 오늘(KST) 채널별 카나리 결과.
     const rows = await q(sql`SELECT channel, ok, step, detail, shot_key FROM canary_runs
