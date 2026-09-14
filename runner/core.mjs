@@ -99,7 +99,8 @@ export async function runJob({ chromium, token, job, headed, dryRun }) {
 
     const out = await handler.run({ ctx, job, plan, token, shotKey, dryRun });
 
-    if (out?.dryRun) return { ok: true, dryRun: true, notes: out.notes ?? [] };
+    // 🔴 shotKey 를 함께 돌려준다 — 카나리가 이 키를 하트비트에 실어야 운영이 «깨진 화면»을 찾아간다(없으면 canary_runs.shot_key 가 늘 비었다).
+    if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [] };
     if (job.kind.startsWith("publish.")) {
       if (!out?.externalUrl) return { ok: false, errorKind: "unknown", detail: "올리기는 했는데 글 주소를 회수하지 못했어요." };
       return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [] };
@@ -204,6 +205,8 @@ export async function canary({ chromium, token, headed }) {
       channel: String(job.account?.channel ?? ""),
       step: result.ok ? "draft_saved" : String(result.errorKind ?? "unknown"),
       detail: result.ok ? (result.notes ?? []).join(" · ") : String(result.detail ?? ""),
+      // 🔴 실패했을 때 «어느 화면에서 깨졌나»를 운영이 바로 열 수 있게(ops-canary·down 제안 감사에 그대로 실린다).
+      shotKey: result.shotKey ?? null,
     },
   }).catch(() => {});
   log(result.ok ? "카나리 ✓ 임시저장까지 정상(셀렉터 살아 있음)" : ok === null ? `카나리 · 판정 불가(${result.errorKind}) — 셀렉터 아님` : `카나리 ✗ ${result.errorKind}: ${result.detail}`);

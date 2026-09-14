@@ -6,6 +6,11 @@
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog --with-image`   (사진 삽입 경로까지)
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog --job=revenue.adpost`   (수익 스크랩 · 서버에 안 보냄)
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts tistory --job=ads.setup_tistory`  (애드센스 상태 읽기)
+ *   `node --env-file=.env scripts/verify-b2-runner.mts naver_blog --canary --keep`   (🐤 카나리 경로 · DESIGN §19)
+ *
+ *   🐤 `--canary` — 러너의 **카나리 경로**(`ac-runner --canary`)를 태운다. 보통 드라이런과 달리 결과를 **하트비트 canary 필드**로
+ *      보고하고 서버가 `canary_runs`(하루·채널 1행)에 적재한다 = 매일 05시(KST) 크론 `runner.canary` 가 읽을 바로 그 값.
+ *      `canary_runs` 는 테넌트 스코프가 아니라 정리 뒤에도 남는다(증거). 감사행까지 보려면 `--keep`.
  *
  *   한 프로세스 안에서 전부 한다:
  *     ① 로컬 함수 서버(임의 포트 · `netlify/functions/runner.ts` 의 default export 를 그대로)
@@ -104,6 +109,10 @@ async function main() {
   const channel = String(process.argv[2] ?? "tistory");
   const keep = process.argv.includes("--keep");
   const withImage = process.argv.includes("--with-image");
+  /* --canary — `--once --dry-run` 대신 러너의 **카나리 경로**(ac-runner --canary)를 태운다(DESIGN §19 · P1R4).
+     차이: 카나리는 드라이런 결과를 **하트비트의 canary 필드**로 보고하고, 서버가 `canary_runs`(하루·채널 1행)에 적재한다.
+     즉 «매일 새벽 05시에 돌 것»과 **같은 경로**를 지금 한 번 태워 보는 것이다(첫 증거). */
+  const canaryMode = process.argv.includes("--canary");
   /* --job=revenue.adpost 등 — 발행 대신 그 잡을 계정에 직접 적재한다(수익 스크랩·광고 상태 읽기 실측용). */
   const jobArg = String(process.argv.find((a) => a.startsWith("--job=")) ?? "").slice(6);
   const jobKind: RunnerJobKind | null = jobArg && isRunnerJobKind(jobArg) ? jobArg : null;
@@ -169,7 +178,8 @@ async function main() {
 
     // ── 러너 실행(자식 프로세스 · 창을 띄운다) ──
     const code = await new Promise<number>((resolve) => {
-      const child = spawn(process.execPath, [path.join(ROOT, "runner", "ac-runner.mjs"), "--once", "--headed", "--dry-run"], {
+      const runnerArgs = canaryMode ? ["--canary", "--headed"] : ["--once", "--headed", "--dry-run"];
+      const child = spawn(process.execPath, [path.join(ROOT, "runner", "ac-runner.mjs"), ...runnerArgs], {
         cwd: path.join(ROOT, "runner"),
         stdio: "inherit",
         env: {
@@ -194,6 +204,19 @@ async function main() {
     console.log(`   piece  : ${JSON.stringify(await q(sql`SELECT id, status, external_url FROM pieces WHERE tenant_id = ${tid}`))}`);
     console.log(`   account: ${JSON.stringify(await q(sql`SELECT id, status, last_error_kind FROM accounts WHERE tenant_id = ${tid}`))}`);
     console.log(`   posts  : ${(await q(sql`SELECT id FROM posts WHERE tenant_id = ${tid}`)).length}행 (드라이런이므로 0이 정상)`);
+
+    /* 🔴 카나리 증거 — canary_runs 는 테넌트 스코프가 아니라(하루·채널 1행) 아래 정리에서도 살아남는다.
+       이 행이 곧 «매일 05시 크론이 읽을 것»이다. ok 는 3값(true/false/null=판정불가 · AC-9). */
+    if (canaryMode) {
+      const cr = await q(sql`SELECT channel, ok, step, detail, shot_key FROM canary_runs
+        WHERE day = (NOW() AT TIME ZONE 'Asia/Seoul')::date AND channel <> '__eval__' ORDER BY channel`);
+      console.log(`\n   🐤 canary_runs(오늘 KST) ${cr.length}행 — 크론 runner.canary 가 읽을 값`);
+      for (const r of cr) {
+        const okTxt = r.ok === null ? "null(판정 불가)" : r.ok === true ? "true(정상)" : "false(깨짐 의심)";
+        console.log(`      · ${String(r.channel)} → ok=${okTxt} step=${r.step ?? "-"}${r.shot_key ? ` shot=${r.shot_key}` : ""}${r.detail ? ` · ${String(r.detail).slice(0, 90)}` : ""}`);
+      }
+      if (!cr.length) console.log("      (행 없음 — 하트비트가 canary 필드를 못 실었다. 러너 로그를 봐라.)");
+    }
 
     const shots = path.join(ROOT, "runner", "_shots");
     const dirs = fs.existsSync(shots) ? fs.readdirSync(shots).map((d) => ({ d, t: fs.statSync(path.join(shots, d)).mtimeMs })).sort((x, y) => y.t - x.t).slice(0, 1) : [];
