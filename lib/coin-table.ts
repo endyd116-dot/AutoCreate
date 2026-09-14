@@ -28,3 +28,15 @@ export const COIN_PACKS = [
 export type CoinPackId = typeof COIN_PACKS[number]["id"];
 export const PURCHASE_VALID_DAYS = 365;
 export function coinCostOf(item: CoinItem): number { return COIN_TABLE[item] ?? 0; }
+
+/**
+ * videoCoinItem — 영상 길이 → 구간(AM 원본 ../AutoMarketing/lib/coin-ledger.ts §1 videoCoinItem · 복사 2026-09-15 · «초 단위 산식 금지·구간제»).
+ *   ~5초 = video_clip · ~15초 = video_15 · ~35초 = video_30 · 그보다 길면 video_60(SHORTSBILL — 60초 편이 30초 요금으로 팔리던 손해의 수리).
+ */
+export function videoCoinItem(seconds: number | null | undefined): CoinItem {
+  const s = Number(seconds) || 0;
+  if (s <= 5) return "video_clip";
+  if (s <= 15) return "video_15";
+  if (s <= 35) return "video_30";
+  return "video_60";
+}

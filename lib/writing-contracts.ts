@@ -188,18 +188,62 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
   tiktok: shortsContract("tiktok", "틱톡 · 3초 훅", "9:16"),
 };
 
+/* ═══ P1R5 §1.3 — 영상 계약 4행(DESIGN §5C.1 «쇼츠·클립·릴스 대본» + §5.4 감성 3행 + §6.2 포맷 3·채널 규격). 포맷×초 표는 `shortsFormOf` 한 함수가 낸다(AM shorts-reference.shortsFormOf 관례 · SHORTS6 «길이·컷·발화 예산 한 표»). ═══ */
+export type ShortsFormat = "graphic" | "talking" | "clip";
+export interface ShortsForm {
+  format: ShortsFormat; seconds: 15 | 30 | 60;
+  /** 컷 수(min·max·기본). */
+  cuts: { min: number; max: number; default: number };
+  /** 컷 길이(초 · provider 생성 길이 상한 8). */
+  cutSec: { min: number; max: number };
+  /** 기본 provider 키(계약 §0.1-1 · 15초 = veo_lite 강제). */
+  provider: "omni" | "veo_lite";
+  /** 발화 예산(음절 · 초당 4.6 × 85%). */
+  syllables: { min: number; max: number };
+  /** 자막 프리셋(계약 §2.1 captions.preset). */
+  captionPreset: "keyword_center" | "talking_big" | "clip_top";
+  /** 정지 이미지 대체(토킹 = B-roll 절반 · Ken Burns). */
+  stillRatio: number;
+  /** 채널 규격(§6.2): 최대 초 · 세이프존. */
+  channelMaxSec: { youtube_shorts: 60; naver_clip: 30; reels: 60; threads: 60 };
+}
+/** shortsFormOf(format, seconds) — 포맷·초 → 계약 한 표(순수). */
+export function shortsFormOf(format: ShortsFormat, seconds: 15 | 30 | 60): ShortsForm {
+  const maxSyl = Math.floor(seconds * 4.6 * 0.85);
+  const syllables = { min: Math.floor(maxSyl * 0.55), max: maxSyl };
+  const channelMaxSec = { youtube_shorts: 60, naver_clip: 30, reels: 60, threads: 60 } as const;
+  if (format === "clip") return { format, seconds: seconds === 60 ? 30 : seconds, cuts: { min: 3, max: 4, default: 3 }, cutSec: { min: 5, max: 8 }, provider: seconds === 15 ? "veo_lite" : "omni", syllables, captionPreset: "clip_top", stillRatio: 0, channelMaxSec };
+  if (format === "talking") return { format, seconds: seconds === 15 ? 30 : seconds, cuts: { min: 3, max: 4, default: 4 }, cutSec: { min: 5, max: 5 }, provider: "veo_lite", syllables, captionPreset: "talking_big", stillRatio: 0.5, channelMaxSec };
+  const s60 = seconds === 60;
+  return { format: "graphic", seconds: seconds === 15 ? 30 : seconds, cuts: s60 ? { min: 6, max: 12, default: 9 } : { min: 4, max: 6, default: 5 }, cutSec: { min: 5, max: 8 }, provider: "omni", syllables, captionPreset: "keyword_center", stillRatio: 0, channelMaxSec };
+}
+/** 채널의 최대 초(§6.2 채널 규격) — 15|30|60 중 채널이 허용하는 것. */
+export function clampSecondsForChannel(channel: string, seconds: number): 15 | 30 | 60 {
+  const max = channel === "naver_clip" ? 30 : 60;
+  const s = seconds <= 15 ? 15 : seconds <= 30 ? 30 : 60;
+  return (Math.min(s, max) as 15 | 30 | 60);
+}
+
 function shortsContract(channel: string, label: string, aspect: "9:16"): WritingContract {
+  const clip = channel === "naver_clip"; const reels = channel === "reels";
   return {
     channel, emotionKey: "script", label,
-    reader: "무음으로 스크롤하는 시청자 — 3초 안에 멈추게 해야 한다",
-    register: "구어체 반말/존댓말 · 자막이 본체",
-    rules: ["3초 훅(반전·문제 제기·숫자). 문장 4~10개 · 한 문장 12자 이내.", "무음 시청 전제 — 자막만으로 이해되게.", "컷 4~8 · 엔드카드 1. 제휴가 있으면 시작 3초 자막 + 우상단 배지 «광고 포함 · 파트너스 수수료»."],
+    reader: clip ? "네이버 앱에서 생활 정보를 훑는 사람 — 15~30초 · 상단 자막 크게" : reels ? "감성 피드를 넘기는 사람 — 텍스트 오버레이 · BGM 무드" : "무음으로 스크롤하는 시청자 — 3초 안에 멈추게 해야 한다",
+    register: clip ? "생활밀착 네이버 톤 · 존댓말 · 짧은 문장" : "구어체 반말/존댓말 · 자막이 본체",
+    rules: [
+      "3초 훅(반전·문제 제기·숫자 · ≤16음절 · 도입어 금지) · 문장 4~10개 · 한 문장 ≤ 28음절.",
+      "무음 시청 전제 — 자막만으로 이해되게(나레이션은 보조).",
+      "컷 4~8(60초는 6~12) · 문장 경계 = 컷 경계 · 엔드카드 1 · 마무리는 행동 한 줄(광고성 CTA 금지).",
+      "제휴·유료면 시작 3초 자막 + 우상단 상시 배지 «광고 포함 · 파트너스 수수료» + 설명란 첫 줄 공식 문구(§16B).",
+      ...(clip ? ["쇼핑커넥트 태그는 메타로 · 본문에서 팔지 않는다."] : []),
+      ...(reels ? ["텍스트 오버레이 큰 글씨 · BGM 무드(라이선스 확인분만)."] : []),
+    ],
     formats: ["story", "info", "listicle", "compare"],
     formatLabel: { story: "반전", info: "문제해결", listicle: "목록(3가지)", compare: "비포애프터" },
     structure: { story: ["hook", "para", "para", "para", "tip"], info: ["hook", "para", "para", "para", "tip"], listicle: ["hook", "list", "para", "tip"], compare: ["hook", "para", "para", "tip"] },
-    visual: ["자막 본체(문장 4~10)", "컷 4~8", "엔드카드"],
+    visual: ["자막 본체(문장 4~10)", "컷 4~8", "엔드카드", "우상단 배지(제휴 시)", clip ? "상단 큰 자막" : "키워드 중앙 자막"],
     visualMin: {},
-    length: { min: 60, max: 220 },
+    length: { min: 60, max: 235 },
     titleStyle: "script", titleExample: "에어프라이어, 3분 만에 새것 되는 법",
     images: { min: 0, max: 0, default: 0, style: "photo", aspect },
     emojiPerParagraph: 0, text: false,
