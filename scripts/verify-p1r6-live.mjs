@@ -85,8 +85,13 @@ async function main() {
       await sleep(3000);   // 감사 쓰기가 응답보다 늦을 수 있다 — 여유를 준다(그래도 안 남으면 그게 결함)
       const aud = await s`SELECT id, created_at FROM audit_logs WHERE action = 'ops_forbidden' AND actor_id = ${opId}
         AND created_at > ${t1.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id`;
-      rec("🔴 AC-36 — `ops_forbidden` 감사가 **3/3** 남는다(던지고 잊으면 여기서 빠진다)", aud.length === 3,
-        `감사 ${aud.length}/3 · id ${aud.map((a) => a.id).join(",") || "없음"}`, `audit_logs ${aud.map((a) => a.id).join(",")}`);
+      /* 🔴 라이브는 **정확히 3** 이어야 한다. 로컬(`netlify dev`)은 함수가 4xx 를 내면 `.html`·`/index.html` 로 **다시 부른다**(AC-7)
+         — 한 번 누른 게 여러 번 들어와 감사가 부풀려진다. 그건 로컬 인공물이지 결함이 아니므로 로컬에선 «≥3» 으로 본다. */
+      const local = /localhost|127\.0\.0\.1/.test(BASE);
+      rec("🔴 AC-36 — `ops_forbidden` 감사가 **3/3** 남는다(던지고 잊으면 여기서 빠진다)",
+        local ? aud.length >= 3 : aud.length === 3,
+        `감사 ${aud.length}/3${local && aud.length > 3 ? " (로컬 정적 폴백으로 부풀려짐 · AC-7 · 라이브에선 정확히 3)" : ""} · id ${aud.map((a) => a.id).slice(0, 4).join(",") || "없음"}`,
+        `audit_logs ${aud.map((a) => a.id).slice(0, 4).join(",")}`);
       // ops-runners — 메인이 머지 충돌을 푼 자리(권한·감사)
       const t2 = new Date(Date.now() - 2_000);
       const rr = await call(oj, "/api/ops-runners");
