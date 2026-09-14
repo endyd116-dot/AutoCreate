@@ -34,6 +34,23 @@ const stepOf = (r, key) => (r.json?.ran || []).find((s) => s.step === key);
 let sql = null; const ALLOWED = new Set();
 async function db() { if (sql) return sql; const { default: postgres } = await import("postgres"); sql = postgres(process.env.NETLIFY_DATABASE_URL_UNPOOLED || process.env.NETLIFY_DATABASE_URL, { ssl: "require", max: 1 }); return sql; }
 const guard = (tid) => { if (!ALLOWED.has(Number(tid))) throw new Error(`테스트 테넌트 아님 tid=${tid}`); };
+/* ── 🔴 원가 방어선(메인 지시 2026-09-14): 스텁으로 돌린다고 했으면 **실호출 과금 행이 1건이라도 보이는 순간 중단**한다.
+      2026-09-14 실측: `VIDEO_PROVIDER_STUB=1` 인데 provider·TTS 가 스텁을 안 타 Veo 실호출 $0.4/편이 나갔다. «스텁이겠거니»는 증거가 아니다. */
+const RUN_T0 = new Date(Date.now() - 60_000).toISOString();
+const EXPECT_STUB = String(process.env.EXPECT_STUB ?? "1") === "1";   // dev 서버를 VIDEO_PROVIDER_STUB=1 로 띄웠다는 선언. 실호출 실증이면 EXPECT_STUB=0.
+async function stubGuard(tid, where) {
+  if (!EXPECT_STUB || !sql) return true;
+  const bad = await sql`SELECT purpose, model, cost_usd, ref FROM ai_usage WHERE tenant_id = ${tid}
+    AND purpose IN ('video_clip','tts','video_judge') AND created_at > ${RUN_T0}::timestamptz AT TIME ZONE 'UTC'
+    AND (model <> 'stub' OR cost_usd > 0) ORDER BY id LIMIT 5`;
+  if (!bad.length) return true;
+  const line = bad.map((b) => `${b.purpose}/${b.model}/$${b.cost_usd}/${b.ref}`).join(" · ").slice(0, 110);
+  // 큰 누수(클립·심사 비전 · 편당 $0.2~)는 **중단**. 작은 누수(TTS 폴백 $0.006 · 2026-09-14 현재 B-1 수리 대기)는 기록하고 계속 — 멈추면 캡 절을 아예 못 잰다.
+  const heavy = bad.some((b) => b.purpose !== "tts" || Number(b.cost_usd) >= 0.05);
+  if (heavy) { rec(`🔴 원가 방어선(${where}) — 스텁인데 실호출 과금 행 발견 → 즉시 중단`, false, line); return false; }
+  if (!stubGuard.warned) { stubGuard.warned = true; warn(`원가 방어선(${where}) — TTS 폴백이 스텁을 안 탄다(소액 · 수리 대기)`, line); }
+  return true;
+}
 const VIDEO_STAGES = ["script", "tts", "clips", "render", "judging", "done", "failed"];
 const COIN_OF_SECONDS = (sec) => (sec <= 5 ? "video_clip" : sec <= 15 ? "video_15" : sec <= 35 ? "video_30" : "video_60");   // §0.1-4 구간제(초 산식 금지)
 const COIN_TABLE = { video_clip: 2, video_15: 6, video_30: 12, video_60: 28 };
@@ -94,7 +111,7 @@ async function main() {
   /* ══ chain — chainStage 전이(스텁) · 잠금 20분 · 이어달리기 · 컷 재생성 0 ══ */
   if (SECTIONS.has("chain") && pieceId) {
     let last = null; const dl = Date.now() + Number(process.env.GEN_TIMEOUT_MS || 6 * 60_000); const seen = [];
-    while (Date.now() < dl) { const [p] = await s`SELECT status, meta FROM pieces WHERE id = ${pieceId}`; last = p; const st = p?.meta?.chainStage?.stage || p?.meta?.stage; if (st && seen[seen.length - 1] !== st) seen.push(st); if (["in_review", "failed"].includes(p?.status) || p?.meta?.stage === "render") break; await sleep(4000); }
+    while (Date.now() < dl) { const [p] = await s`SELECT status, meta FROM pieces WHERE id = ${pieceId}`; last = p; const st = p?.meta?.chainStage?.stage || p?.meta?.stage; if (st && seen[seen.length - 1] !== st) seen.push(st); if (!(await stubGuard(TID, "chain"))) return finish(); if (["in_review", "failed"].includes(p?.status) || p?.meta?.stage === "render") break; await sleep(4000); }
     rec("chainStage 전이 관측(script→tts→clips→render …)", seen.length >= 2 && seen.every((x) => VIDEO_STAGES.includes(x)), seen.join("→") + ` · status ${last?.status} · failReason ${last?.meta?.failReason || "-"}`);
     const assets = await s`SELECT kind, sort, r2_key, meta FROM piece_assets WHERE piece_id = ${pieceId} ORDER BY kind, sort`;
     const clips = assets.filter((a) => a.kind === "clip"), audio = assets.filter((a) => a.kind === "audio");
@@ -170,6 +187,8 @@ async function main() {
     const [softNotice] = await s`SELECT id, kind FROM notifications WHERE tenant_id = ${TID} AND kind IN ('ai_cost_cap','piece_failed') AND created_at > ${tSoft.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 1`;
     rec("소프트 → 고객 알림 0(고객은 이미 코인을 냈다)", !softNotice, softNotice ? `🔴 «${softNotice.kind}» ${softNotice.id}` : "없음");
 
+    if (!(await stubGuard(TID, "cost/soft"))) return finish();   // 소프트 확정은 실제로 생성을 태운다 — 스텁이 새면 여기서 멈춘다
+
     /* ② 하드(일일 상한 ×3 초과) — 확정 시점: 차단하되 코인은 손대지 않는다 */
     await clearSpend("soft"); await spend(HARD_USD, "hard");
     const hard = await confirmVideo();
@@ -222,8 +241,14 @@ async function main() {
   /* ══ payload — 🔴 v5.5 §1.4c-(2): 포맷 3종의 `scenes[]` 전건이 clipKey|imageKey 중 하나를 갖는다(둘 다 없으면 러너에 검은 화면 · 계약 §2.1 위반) ══ */
   const payloads = new Map();
   if (SECTIONS.has("payload")) {
-    const [base] = pieceId ? await s`SELECT topic_id, channel, account_id, meta FROM pieces WHERE id = ${pieceId}` : [null];
-    const baseTopic = base?.topic_id ? Number(base.topic_id) : topicId;
+    // 기준 재료는 스스로 찾는다(이 절만 단독 실행해도 돌아야 한다 · 디렉터·코인 우회 = 캡·코인과 독립적으로 «페이로드 모양»만 잰다)
+    const [base] = pieceId ? await s`SELECT topic_id, channel, account_id, meta FROM pieces WHERE id = ${pieceId}`
+      : await s`SELECT topic_id, channel, account_id, meta FROM pieces WHERE tenant_id = ${TID} AND kind = 'video' AND topic_id IS NOT NULL ORDER BY id DESC LIMIT 1`;
+    const [anyTopic] = base?.topic_id ? [] : await s`SELECT id FROM topics WHERE tenant_id = ${TID} ORDER BY id DESC LIMIT 1`;
+    const baseTopic = base?.topic_id ? Number(base.topic_id) : (topicId || Number(anyTopic?.id || 0));
+    // 🔴 원가 하드 캡은 **이 절의 관심사가 아니다**(cost 절이 따로 잰다). trial 하드 ₩9,000 이 60초 1편(₩8,989)을 막아 페이로드를 못 보게 되므로 pro 로 올렸다 저 절 끝에 되돌린다.
+    const [planRow] = await s`SELECT plan_key FROM tenants WHERE id = ${TID}`;
+    await s`UPDATE tenants SET plan_key = 'pro' WHERE id = ${TID}`;
     const baseSpec = (base?.meta?.video) || {};
     const CASES = [["graphic", 60, "omni"], ["talking", 60, "veo_lite"], ["clip", 15, "veo_lite"]];
     if (!baseTopic) warn("payload 무결성(포맷 3종)", "기준 소재/piece 가 없어 건너뜀");
@@ -235,7 +260,7 @@ async function main() {
       const npid = Number(np?.id);
       await call(null, "/api/generate-video-background", { body: { pieceId: npid, tenantId: TID }, headers: { "x-internal-secret": process.env.INTERNAL_SECRET || "" } });
       let row = null; const dl = Date.now() + Number(process.env.PAYLOAD_TIMEOUT_MS || 180_000);
-      while (Date.now() < dl) { const [p] = await s`SELECT status, meta FROM pieces WHERE id = ${npid}`; row = p; if (p?.meta?.render || p?.status === "failed" || p?.status === "in_review") break; await sleep(3000); }
+      while (Date.now() < dl) { const [p] = await s`SELECT status, meta FROM pieces WHERE id = ${npid}`; row = p; if (!(await stubGuard(TID, `payload/${format}`))) return finish(); if (p?.meta?.render || p?.status === "failed" || p?.status === "in_review") break; await sleep(3000); }
       const render = row?.meta?.render || null;
       const scenes = Array.isArray(render?.scenes) ? render.scenes : [];
       const holes = scenes.filter((sc) => !sc.clipKey && !sc.imageKey);
@@ -247,6 +272,7 @@ async function main() {
       if (format === "talking") rec("토킹 still 컷이 실제로 구간을 채운다(imageKey + motion kenburns ≥1 · 스킵 금지)",
         stills.length >= 1 && stills.every((x) => x.motion === "kenburns"), `still ${stills.length} · motion ${[...new Set(stills.map((x) => x.motion))].join("/") || "-"}`);
     }
+    await s`UPDATE tenants SET plan_key = ${String(planRow?.plan_key || "trial")} WHERE id = ${TID}`;   // 🔴 바로 되돌린다(가짜 유료 집 금지)
   }
 
   /* ══ bgm — 🔴 v5.5 §1.4c-(3): seed-bgm.mjs 존재·멱등 · BGM_LICENSE_VERIFIED 없으면 무음(audio.bgm=null)이 «정직 경로»(에러 아님) ══ */
