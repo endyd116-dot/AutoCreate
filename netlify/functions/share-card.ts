@@ -51,12 +51,17 @@ export default async (req: Request): Promise<Response> => {
       if (wantHandles) handles = [...new Set(accounts.map((a) => a.handle).filter(Boolean))].slice(0, 4);
     }
 
-    // 키에 옵션을 녹인다 — 같은 달이라도 «핸들 켠 카드»와 «끈 카드»는 다른 그림이다.
-    const key = `autocreate/${tid}/share/${month}-h${wantHandles ? 1 : 0}c${wantChannels ? 1 : 0}.png`;
+    /* 키에 **그림을 결정하는 값 전부**를 녹인다 — 같은 달이라도 «핸들 켠 카드»와 «끈 카드»는 다른 그림이고,
+       🔴 [2026-09-15 C 수리] **금액이 달라지면 다른 그림이다**. 종전엔 `{month}-h0c0.png` 한 칸이라, 달 초에 한 번 만든 카드가
+       그 달 내내 재사용됐다 — 수익이 쌓여도 카드는 **처음 숫자 그대로**였고, 같은 응답의 `amountKrw`(최신)와 카드 속 숫자가
+       **서로 다른 말을 했다**(실측: 87,650원으로 만든 카드가 12,340원으로 바뀐 뒤에도 바이트까지 동일).
+       고객이 그걸 그대로 자랑 글에 붙인다 — 틀린 금액을 공개하는 사고다. 값이 같으면 키도 같아 **재렌더는 여전히 0**이다. */
+    const prevKrw = Math.round(Number(s.prevMonthKrw ?? 0));
+    const deltaKrw = prevKrw > 0 ? amountKrw - prevKrw : 0;
+    const key = `autocreate/${tid}/share/${month}-h${wantHandles ? 1 : 0}c${wantChannels ? 1 : 0}-${amountKrw}-${deltaKrw}.png`;
     const have = await r2Head(key);
     if (!have) {
-      const prevKrw = Math.round(Number(s.prevMonthKrw ?? 0));
-      const card = await renderCard({ month, amountKrw, deltaKrw: prevKrw > 0 ? amountKrw - prevKrw : 0, handles, channels });
+      const card = await renderCard({ month, amountKrw, deltaKrw, handles, channels });
       await r2Put(key, card.bytes, card.contentType);
       // 🔴 감사는 await(`void writeAudit` 금지 · 계약 §0). 무엇을 **노출했는지**가 남아야 한다(핸들 공개는 되돌릴 수 없다).
       await writeAudit({ tenantId: tid, action: "share_card_render", actorType: "user", actorId: auth.user.uid, detail: { month, amountKrw, handles: wantHandles, channels: wantChannels, bytes: card.bytes.length } });
