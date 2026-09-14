@@ -61,7 +61,9 @@ export function verifyState(state: string): { tid: number; channel: OAuthChannel
 /* ───────── 인가 URL ───────── */
 const SCOPES: Record<OAuthChannel, string> = {
   blogger: "https://www.googleapis.com/auth/blogger",
-  youtube_shorts: "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+  /* [P1R3 v3.5 §1.4d(2)] yt-analytics-monetary.readonly 를 함께 받는다 — 한 번의 동의로 업로드+수익 회수.
+     이미 연결된 토큰은 이 스코프가 없으므로 «다시 연결하기»(accounts-oauth-start) 로 재동의해야 한다(새 화면 불필요). */
+  youtube_shorts: "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics-monetary.readonly",
   instagram: "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management",
   reels: "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management",
   threads: "threads_basic,threads_content_publish",
