@@ -120,22 +120,34 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
   } finally { clearTimeout(timer); }
 }
 
-/* ───────── DB 오버레이(ai_model_overrides) — 60초 캐시 · graceful ───────── */
-const overlayCache = new Map<string, { chain: string[] | null; at: number }>();
+/* ───────── DB 오버레이(ai_model_overrides) — 60초 캐시 · graceful ─────────
+ *   DESIGN §10 / DDL 0006 주석 정본: `chain`=현재 적용 중 · `candidate`=카나리 중인 새 체인 · `canary_pct`=candidate 트래픽 비율.
+ *     → 요청마다 canary_pct% 는 candidate 로, 나머지는 baseline(chain 있으면 chain · 없으면 코드 기본) 으로 간다.
+ *     candidate 가 없으면(승격 완료·미설정) 항상 baseline — canary_pct 는 candidate 가 있을 때만 의미.
+ *   🔴 캐시는 «결정»이 아니라 «원본 오버레이»를 60초 담는다 — 주사위는 호출마다 굴린다(60초 동안 한 결정에 고정되면 10% 카나리가
+ *      60초 단위 all-or-nothing 이 된다). P1R4-B2 에서 candidate 인지로 확장(그전엔 chain@canary_pct vs 코드였다 · 라이브 행 0건이라 안전).
+ */
+const overlayCache = new Map<string, { baseline: string[] | null; candidate: string[] | null; pct: number; at: number }>();
 export async function resolveChain(role: AiRole | undefined, codeChain: string[]): Promise<string[]> {
   if (!role) return codeChain;
-  const hit = overlayCache.get(role);
-  if (hit && Date.now() - hit.at < 60_000) return hit.chain ?? codeChain;
-  let chain: string[] | null = null;
-  try {
-    const rows = (await db.execute(sql`SELECT chain, canary_pct FROM ai_model_overrides WHERE role = ${role} LIMIT 1`)) as unknown as { chain: unknown; canary_pct: unknown }[];
-    const r = rows[0];
-    if (r && Array.isArray(r.chain) && r.chain.length && Number(r.canary_pct ?? 100) >= Math.random() * 100) {
-      chain = (r.chain as unknown[]).map(String).filter(Boolean);
-    }
-  } catch { /* 오버레이 조회 실패 — 코드 체인 */ }
-  overlayCache.set(role, { chain, at: Date.now() });
-  return chain ?? codeChain;
+  let ov = overlayCache.get(role);
+  if (!ov || Date.now() - ov.at >= 60_000) {
+    let baseline: string[] | null = null, candidate: string[] | null = null, pct = 100;
+    try {
+      const rows = (await db.execute(sql`SELECT chain, candidate, canary_pct FROM ai_model_overrides WHERE role = ${role} LIMIT 1`)) as unknown as { chain: unknown; candidate: unknown; canary_pct: unknown }[];
+      const r = rows[0];
+      if (r) {
+        if (Array.isArray(r.chain) && r.chain.length) baseline = (r.chain as unknown[]).map(String).filter(Boolean);
+        if (Array.isArray(r.candidate) && r.candidate.length) candidate = (r.candidate as unknown[]).map(String).filter(Boolean);
+        pct = Number(r.canary_pct ?? 100);
+      }
+    } catch { /* 오버레이 조회 실패 — 코드 체인 */ }
+    ov = { baseline, candidate, pct, at: Date.now() };
+    overlayCache.set(role, ov);
+  }
+  const base = ov.baseline ?? codeChain;
+  if (ov.candidate && ov.candidate.length && ov.pct >= Math.random() * 100) return ov.candidate;
+  return base;
 }
 
 /* ───────── 미터링(ai_usage 1행 · 실패 무해) ───────── */

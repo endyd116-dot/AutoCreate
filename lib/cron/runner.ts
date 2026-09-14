@@ -33,6 +33,8 @@ import { publisherStep } from "./publisher";
 import { learnStep } from "./learn";
 import { reapStep } from "./reap";
 import { revenueSyncStep } from "./revenue-sync";
+import { runnerCanaryStep } from "./runner-canary";
+import { aiModelWatchStep } from "./ai-model-watch";
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -51,6 +53,8 @@ export const STEPS: CronStep[] = [
   reviewDeadlineStep,  // hourly · 검수창 마감
   learnStep,           // hourly · 발행 성과 회수
   revenueSyncStep,     // hourly(06:00 KST · 쿠팡 13:00) · 수익 회수(P1R3)
+  runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
+  aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
   publisherStep,       // 5m · due 발행
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];

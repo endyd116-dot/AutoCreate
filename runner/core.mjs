@@ -19,6 +19,7 @@ import * as revenueAdfit from "./channels/revenue-adfit.mjs";
 import * as revenueClip from "./channels/revenue-clip.mjs";
 import * as adsSetupTistory from "./channels/ads-setup-tistory.mjs";
 import * as adsStatusBlogger from "./channels/ads-status-blogger.mjs";
+import * as adsSetupBlogger from "./channels/ads-setup-blogger.mjs";
 
 /** 시각은 저장 UTC · 사람에게 보이는 것은 KST(DESIGN §13.5). 콘솔·파일명은 사람이 보는 것이므로 KST. */
 export const kst = (d = new Date()) =>
@@ -38,10 +39,16 @@ const HANDLERS = {
   "revenue.clip": revenueClip,
   "ads.setup_tistory": adsSetupTistory,
   "ads.status_blogger": adsStatusBlogger,
+  // P1R4 §2.2 블로거 광고 삽입/복원(쓰기 · 한 모듈이 kind 로 분기)
+  "ads.setup_blogger": adsSetupBlogger,
+  "ads.revert_blogger": adsSetupBlogger,
 };
 /** 수익 스크랩 잡 — report 에 `revenueRows` 를 싣는다(서버가 upsert · 러너는 DB 를 안 본다). */
 const REVENUE_KINDS = new Set(["revenue.adpost", "revenue.adfit", "revenue.clip"]);
+/** 광고 상태 «읽기» — report 에 `adsense` 를 싣는다. */
 const ADS_KINDS = new Set(["ads.setup_tistory", "ads.status_blogger"]);
+/** 광고 «쓰기»(블로거 템플릿 삽입/복원) — report 에 `monetize`(백업 원문 포함)를 싣는다. */
+const ADS_WRITE_KINDS = new Set(["ads.setup_blogger", "ads.revert_blogger"]);
 
 /** 사람이 봐야 하는 잡(창이 떠야 한다). */
 const NEEDS_HEADED = new Set(["session.login", "session.verify"]);
@@ -104,6 +111,10 @@ export async function runJob({ chromium, token, job, headed, dryRun }) {
     }
     if (ADS_KINDS.has(job.kind)) {
       return { ok: true, adsense: out?.adsense ?? { linked: false, state: "unknown" }, shotKey, notes: out?.notes ?? [] };
+    }
+    if (ADS_WRITE_KINDS.has(job.kind)) {
+      // 🔴 monetize.bloggerTemplateBackup(원문)을 그대로 실어 보낸다 — 서버가 accounts.monetize 에 저장(복원 재료 · §5 경계).
+      return { ok: true, monetize: out?.monetize ?? {}, shotKey, notes: out?.notes ?? [] };
     }
     if (job.kind === "verify.post_alive" || job.kind === "revenue.stats") {
       return { ok: true, stats: { ...(out?.stats ?? {}), ...(out?.alive === false ? { alive: false } : {}) }, notes: out?.notes ?? [] };
@@ -182,15 +193,19 @@ export async function canary({ chromium, token, headed }) {
   }
   const result = await runJob({ chromium, token, job, headed: headed !== false, dryRun: true });
   await release(token, job.id, "canary(임시저장까지)").catch(() => {});
+  /* 🔴 AC-9 세 값. 성공=true. 실패라도 **셀렉터 문제만** false 로 본다 —
+     로그인/세션/네트워크 실패는 «판정 불가(null)»다(예: 티스토리 세션 없음). 안 그러면 크론이 매일 «티스토리 down» 오경보를 낸다. */
+  const UNKNOWN = new Set(["login_fail", "session_expired", "network", "no_job"]);
+  const ok = result.ok ? true : UNKNOWN.has(String(result.errorKind ?? "")) ? null : false;
   await heartbeat(token, {
     jobs: 0,
     canary: {
-      ok: !!result.ok,
+      ok,
       channel: String(job.account?.channel ?? ""),
       step: result.ok ? "draft_saved" : String(result.errorKind ?? "unknown"),
       detail: result.ok ? (result.notes ?? []).join(" · ") : String(result.detail ?? ""),
     },
   }).catch(() => {});
-  log(result.ok ? "카나리 ✓ 임시저장까지 정상(셀렉터 살아 있음)" : `카나리 ✗ ${result.errorKind}: ${result.detail}`);
+  log(result.ok ? "카나리 ✓ 임시저장까지 정상(셀렉터 살아 있음)" : ok === null ? `카나리 · 판정 불가(${result.errorKind}) — 셀렉터 아님` : `카나리 ✗ ${result.errorKind}: ${result.detail}`);
   return result;
 }
