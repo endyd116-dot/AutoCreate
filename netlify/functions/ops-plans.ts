@@ -61,7 +61,7 @@ function parseFeatures(b: Record<string, unknown>, base: Record<string, unknown>
 export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
-  const o = requireAdmin(req, ["super_admin"]); if (!o.ok) return o.res;
+  const o = await requireAdmin(req, ["super_admin"]); if (!o.ok) return o.res;
   const ip = clientIp(req);
   try {
     /* ── 코인 팩·단가 ── */

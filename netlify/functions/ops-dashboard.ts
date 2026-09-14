@@ -24,7 +24,7 @@ const supplyOfTotal = sql`FLOOR(refunded_krw / 1.1)`;
 
 export default async (req: Request): Promise<Response> => {
   if (req.method !== "GET") return json({ ok: false, error: "method" }, 405);
-  const o = requireAdmin(req); if (!o.ok) return o.res;
+  const o = await requireAdmin(req); if (!o.ok) return o.res;
   const url = new URL(req.url);
   const r = kstMonthRange(url.searchParams.get("month"));
   try {

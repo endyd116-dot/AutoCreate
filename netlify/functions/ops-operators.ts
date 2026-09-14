@@ -37,7 +37,7 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     /* 🔴 운영진·감사는 전부 super_admin 전용(§0.2). */
-    const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
+    const g = await requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
 
     if (path.endsWith("/ops-audit-search")) {
       // R1 /api/ops-audit(테넌트·limit) 를 확장: 자유어(action/target)·테넌트·actor·위험도·KST 기간.

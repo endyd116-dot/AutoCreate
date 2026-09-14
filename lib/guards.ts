@@ -70,11 +70,14 @@ export async function requireWritable(tid: number): Promise<WritableOk | Writabl
  *   super_admin 은 항상 통과(전부). 예: requireAdmin(req, ["admin"]) = admin·super_admin.
  *   ⚠️ 기존 `requireOps(req, minRole)`(최소 역할 서열)은 그대로 둔다 — 새 메뉴는 이 함수로, 옛 경로는 옛 함수로(무회귀).
  */
-export function requireAdmin(req: Request, allowed: OpsRole[] = ["operator", "admin", "super_admin"]): OpsOk | Fail {
+export async function requireAdmin(req: Request, allowed: OpsRole[] = ["operator", "admin", "super_admin"]): Promise<OpsOk | Fail> {
   const o = verifyOps(req);
   if (!o) return fail(json({ ok: false, error: "운영자 로그인이 필요해요.", step: "auth" }, 401));
   if (o.role === "super_admin" || allowed.includes(o.role)) return { ok: true, ops: o, res: null };
-  void writeAudit({ tenantId: null, action: "ops_forbidden", actorType: "operator", actorId: o.oid, riskLevel: "medium",
+  // 🔴 감사는 **await**(2026-09-15 · C 라이브 실측으로 간헐 유실 확인). 서버리스는 응답을 돌려주면 인보케이션을 끝낸다 —
+  //    `void writeAudit(...)` 는 INSERT 가 경합에서 지면 조용히 사라진다. «될 때도 있고 안 될 때도 있는 권한 거부 기록»은
+  //    없는 것보다 나쁘다(보안 감사). 403 은 이미 사람이 막힌 경로라 한 왕복(수십 ms) 늦는 편이 낫다.
+  await writeAudit({ tenantId: null, action: "ops_forbidden", actorType: "operator", actorId: o.oid, riskLevel: "medium",
     target: new URL(req.url).pathname, detail: { role: o.role, allowed } });
   return fail(json({ ok: false, error: "이 메뉴는 권한이 없어요.", step: "role", role: o.role }, 403));
 }

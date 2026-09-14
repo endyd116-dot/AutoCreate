@@ -25,7 +25,7 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/ops-runners") && req.method === "GET") {
-      const g = requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
       const runners = await q(sql`
         SELECT d.id, d.name, d.kind, d.tenant_id, d.version, d.last_seen_at,
                (d.last_seen_at IS NOT NULL AND d.last_seen_at > NOW() - (${ONLINE_WINDOW_MIN} * INTERVAL '1 minute')) AS online,
@@ -49,7 +49,7 @@ export default async (req: Request): Promise<Response> => {
     }
 
     if (path.endsWith("/ops-canary") && req.method === "GET") {
-      const g = requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
       const days = Math.max(1, Math.min(60, n(url.searchParams.get("days")) || 14));
       const rows = await q(sql`SELECT day, channel, ok, step, detail, shot_key, ran_at FROM canary_runs
         WHERE channel <> '__eval__' AND day >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date - ${days}::int)   -- ★C(P1R4) fix: date - $1 은 바인딩 타입이 없어 «operator does not exist: date >= integer» 500(AC-23) — ::int + 괄호
@@ -70,7 +70,7 @@ export default async (req: Request): Promise<Response> => {
 
     if (path.endsWith("/ops-runner-assign")) {
       // 러너 팜 변경 = super_admin 전용(플랫폼 설정 · 메인 결정 4).
-      const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
       if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
       const b = await readJson<Record<string, unknown>>(req);
       const id = n(b.id); const action = String(b.action ?? "");
