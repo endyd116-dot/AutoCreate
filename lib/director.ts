@@ -26,7 +26,7 @@ import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
 import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { guardSlot, type PieceOrigin } from "./slot-gate";
-import { requireAiBudget } from "./billing/ai-cost-cap";
+import { checkAiCostCap, requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
 import { findBannedCategory } from "./banned-categories";
 import { writeAudit } from "./audit";
@@ -319,16 +319,22 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   /* 🔴 슬롯 게이트(CLAUDE §4.7 절대 게이트) — 자동 경로가 piece 를 만들려면 «어느 편성 자리의 몫인지» 말해야 한다.
      사람 경로(origin:"manual")는 통과. 거부는 감사 + 홈 «해야 할 일»에 남는다(조용한 0건 금지 · AC-2). */
   const gate = await guardSlot({ tenantId: tid, channel: specs[0].channel, origin, slotId: reuseSlotId, source: "director.confirm", topic: String(b.topic_id ?? "") });
-  // P1R4 §1.5 — AI 원가 일 상한(코인을 차감하기 전에 잰다 · 환율 없으면 잴 수 없어 막지 않는다).
-  const budget = await requireAiBudget(tid);
+  /* P1R4 §1.5 — AI 원가 일 상한(코인을 차감하기 전에 잰다 · 환율 없으면 잴 수 없어 막지 않는다).
+     🔴 [2026-09-14 C 수리] **재는 것과 알리는 것을 가른다.** `requireAiBudget` 은 초과를 보면 고객 알림(«오늘 만들 수 있는 양을
+     다 썼어요 · 내일 다시 이어서 만들어요»)을 **부수효과로 넣는다**. 그걸 무조건 먼저 부르면, 바로 아래에서 영상을 소프트로
+     통과시켜 **영상은 만들어지고 코인도 빠졌는데 알림함엔 «오늘은 못 만들어요»** 가 남는다(실측: notifications#209).
+     고객은 그걸 «돈만 빠지고 안 만들어졌다»로 읽는다 — 계약 v5.6 의 «소프트 = 고객 무영향» 과도 어긋난다.
+     ⇒ 판정은 순수 검사 `checkAiCostCap` 으로 하고, **글만 있는 확정일 때만** 알림까지 하는 `requireAiBudget` 를 부른다.
+     `requireAiBudget` 자체는 그대로다(R4 글 경로가 계속 쓴다). */
   const hasVideo = specs.some((s) => s.kind === "video" && s.video);
+  const capCheck = await checkAiCostCap(tid);
   /* 🔴 [P1R5 §1.4c(1)] 영상이 섞인 확정은 여기서 막지 않는다 — 일일 상한 초과는 영상에서 **소프트**(운영 알림만)다.
      고객은 이미 코인을 냈고, 여기서 막으면 «돈은 받고 안 만들어 주는» 사고가 된다. 폭주는 아래 영상 관문의 **하드(상한 ×3)**·전역 월 상한이 잡는다.
-     글만 있는 확정은 R4 규칙 그대로(무변경). */
-  if (!budget.ok && !hasVideo) return { ok: false, step: "ai_cost_cap", error: budget.error };
+     글만 있는 확정은 R4 규칙 그대로(막고 + 고객 알림 1건/일). */
+  if (!capCheck.ok && !hasVideo) { const budget = await requireAiBudget(tid); return { ok: false, step: "ai_cost_cap", error: budget.ok ? "오늘 AI 사용 상한에 닿았어요." : budget.error }; }
   /* `textPiecesPassed` = 같은 확정에 묻어 통과한 글 piece 수(메인 지시) — «영상을 끼워 글 상한을 우회»가 이론상 가능해 운영센터에서 보이게 남긴다.
      글 원가는 영상의 ~1/150 이라 실질 누수는 없다는 판단(메인 승인). */
-  if (!budget.ok && hasVideo) await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "system", riskLevel: "medium", detail: { usedKrw: budget.check.usedKrw, capKrw: budget.check.capKrw, videoPieces: specs.filter((s) => s.kind === "video").length, textPiecesPassed: specs.filter((s) => s.kind !== "video").length, note: "영상 확정 — 일일 상한 초과를 소프트로 통과(§1.4c(1))" } });
+  if (!capCheck.ok && hasVideo) await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "system", riskLevel: "medium", detail: { usedKrw: capCheck.usedKrw, capKrw: capCheck.capKrw, videoPieces: specs.filter((s) => s.kind === "video").length, textPiecesPassed: specs.filter((s) => s.kind !== "video").length, note: "영상 확정 — 일일 상한 초과를 소프트로 통과(§1.4c(1))" } });
   /* [P1R5 §1.2·§1.6] 영상 원가 관문 — **코인 차감 전**에 잰다(코인과 별개 관문). 초과면 원장 무접촉. */
   for (const vs of specs) {
     if (vs.kind !== "video" || !vs.video) continue;
