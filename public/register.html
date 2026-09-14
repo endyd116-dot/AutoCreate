@@ -50,7 +50,8 @@
     const r = await UI.api("/api/auth-register", { body, noRedirect: true });
     if (!r.ok) { if (r.step === "referral") { refF.hidden = false; refT.hidden = true; UI.fieldError(f, "referralCode", r.error || "그런 추천 코드는 없어요."); return; }
       UI.fieldError(f, r.step === "exists" ? "email" : "password", r.error || "가입에 실패했어요."); return; }
-    UI.done(r.referral && r.referral.applied ? `가입했어요 · 추천 코인은 첫 결제 뒤에` : "가입했어요", () => { location.href = "/onboarding.html"; });
+    // 🔴 인증은 문이 아니라 배너 — 메일이 못 갔어도 가입은 통과시키고 다음 화면에서 «다시 보내기»를 띄운다(mailSent:false)
+    UI.done(r.referral && r.referral.applied ? `가입했어요 · 추천 코인은 첫 결제 뒤에` : "가입했어요", () => { UI.go(r.mailSent === false ? "/onboarding.html?mail=0" : "/onboarding.html"); });
   });
 </script>
 </body>
