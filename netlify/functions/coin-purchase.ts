@@ -1,11 +1,12 @@
 /**
  * 코인 충전 API(계약 P1R4 §1.1 · DESIGN §12.1·§12.3):
- *   POST /api/coin-purchase-start { packId, agreePaidTerms? } → { ok, orderNo, mode:"oneclick"|"auth", pay?:{url,form}, amountKrw, vatKrw, totalKrw, coins, balance? }
+ *   POST /api/coin-purchase-start { packId, agreePaidTerms?, payRoute?:"keyin", keyin?:true } → { ok, orderNo, mode:"oneclick"|"auth", pay?:{url,form}, amountKrw, vatKrw, totalKrw, coins, balance? }
  *   GET  /api/coin-charge-return?…KICC 콜백                    → 302 /app/coins.html?charged=orderNo | ?failed=사유
  *   GET  /api/coin-history?month=YYYY-MM                       → { ok, rows:[{ at, kind, amount, ref, expiresAt?, reason? }], balance:{ included, purchased, total }, orders:[{ orderNo, packId, coins, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedAt?, refundable, refundDeadlineAt? }] }
  *        rows = 원장 움직임(내역 · 월별) · orders = 충전 주문(환불 요청 버튼의 근거 · 7일·미사용 판정은 quoteCoinRefund)
  *   POST /api/coin-refund-request { orderNo }                  → { ok, refundKrw, revoked, invoiceId } | { ok:false, reason:"used"|"window"|…, error }
- *   GET  /api/coin-packs                                        → { ok, packs:[{ id, krw, vatKrw, totalKrw, coins, bonusPct, oncePerTenant, available }], vatNote }
+ *   GET  /api/coin-packs                                        → { ok, packs:[{ id, krw, vatKrw, totalKrw, coins, bonusPct, oncePerTenant, available }], vatNote, keyin:{ available, label, notice } }
+ *        keyin = «카드번호 직접 입력»(비인증 라인 · §1.6) 노출 여부 — 화면은 이 값만 보고 체크박스를 그린다(MID·정책 원본은 모른다).
  *   🔴 원격접속 중 충전·환불 403(denyIfImpersonating) · 결제 첫 회 유료 약관 재동의(agreePaidTerms) · KICC 없으면 no-op 정직(503 not_configured 아님 · 200 {ok:false, step:"not_configured"}).
  */
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -16,6 +17,7 @@ import { q } from "../../lib/accounts";
 import { balance } from "../../lib/coin-ledger";
 import { utcDate } from "../../lib/db-util";
 import { startCoinPurchase, approveCoinPurchase, trialPackUsed } from "../../lib/billing/coin-purchase";
+import { resolvePayRoute, keyinOption } from "../../lib/pay-route";
 import { executeCoinRefund, quoteCoinRefund } from "../../lib/billing/coin-refund";
 import { loadPacksAndTable, packView } from "../../lib/billing/packs";
 import { requirePaidTerms } from "../../lib/billing/consents";
@@ -46,7 +48,7 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/coin-packs")) {
       const { packs } = await loadPacksAndTable();
       const used = await trialPackUsed(tid);
-      return json({ ok: true, packs: packs.filter((p) => p.active).map((p) => ({ ...packView(p), available: !(p.oncePerTenant && used) })), vatNote: "부가세 별도" });
+      return json({ ok: true, packs: packs.filter((p) => p.active).map((p) => ({ ...packView(p), available: !(p.oncePerTenant && used) })), vatNote: "부가세 별도", keyin: await keyinOption() });
     }
     if (path.endsWith("/coin-history")) {
       const month = /^\d{4}-\d{2}$/.test(url.searchParams.get("month") || "") ? url.searchParams.get("month")! : null;
@@ -79,7 +81,7 @@ export default async (req: Request): Promise<Response> => {
 
     if (path.endsWith("/coin-purchase-start")) {
       if (!await requirePaidTerms(tid, auth.user.uid, b.agreePaidTerms, { ip: clientIp(req), ua: req.headers.get("user-agent") })) return json({ ok: false, step: "paid_terms", error: "유료 약관에 동의해 주세요." }, 400);
-      const r = await startCoinPurchase(tid, b.packId, { actorId: auth.user.uid, userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL });
+      const r = await startCoinPurchase(tid, b.packId, { actorId: auth.user.uid, userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL, route: await resolvePayRoute(b) });
       if (!r.ok) return json({ ok: false, step: r.step, error: r.error, ...(r.orderNo ? { orderNo: r.orderNo } : {}), ...(r.amountKrw !== undefined ? { amountKrw: r.amountKrw, vatKrw: r.vatKrw, totalKrw: r.totalKrw } : {}) }, r.step === "pack" || r.step === "once" ? 400 : 200);
       return json(r);
     }
