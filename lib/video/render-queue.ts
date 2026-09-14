@@ -30,9 +30,13 @@ export const RENDER_JOB_KIND: RunnerJobKind = "render.video";
 export const RENDER_JOB_PRIORITY = 70;
 
 /* 다시 구울 수 있는 횟수는 정본 상수(`RENDER_MAX_RETRY`)를 쓴다 — 두 벌이면 B 와 판정이 갈라진다. */
-/** 이보다 짧거나 작으면 «구웠다»를 믿지 않는다(빈 mp4·헤더만 있는 파일 방어). */
+/* 이보다 짧거나 작으면 «구웠다»를 믿지 않는다(빈 mp4·헤더만 있는 파일 방어).
+   🔴 크기 하한을 높게 잡으면 **멀쩡한 영상을 죽인다** — 2026-09-14 실측: 단색 정지 2장 6초가 **31KB** 로 나왔다
+      (H.264 는 디테일이 없으면 그 정도로 줄어든다). 50KB 하한이 그 영상을 «빈 영상»으로 몰아 재굽기로 돌렸다.
+      그래서 판정의 주된 근거는 **길이·프레임 수**로 두고, 바이트는 «사실상 아무것도 없다»(헤더만 있는 파일)만 거른다. */
 const MIN_DURATION_MS = 1_000;
-const MIN_BYTES = 50 * 1024;
+const MIN_BYTES = 8 * 1024;
+const MIN_FRAMES = 1;
 
 export type RenderNext = "judging" | "requeued" | "in_review" | "failed";
 
@@ -89,7 +93,7 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
   const retry = n(meta.renderRetry);
 
   /* ① 상식 검사 — 파일은 있는데 «빈 영상»인 경우(인코딩이 중간에 끊겼다). 다시 굽는다. */
-  if (report.durationMs < MIN_DURATION_MS || report.bytes < MIN_BYTES) {
+  if (report.durationMs < MIN_DURATION_MS || report.bytes < MIN_BYTES || report.frameCount < MIN_FRAMES) {
     const nextRetry = retry + 1;
     const giveUp = nextRetry > RENDER_MAX_RETRY;
     await q(sql`UPDATE pieces SET status = ${giveUp ? "failed" : String(p.status)},
@@ -111,8 +115,12 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
       VALUES (${tid}, ${pieceId}, 'thumb', ${report.posterKey.slice(0, 240)}, ${jsonb({ from: "render" })}, 1)`);
   }
 
-  /* ③ 심사 — 통과해야 사람 검수(in_review)로 간다. 아직 심사기가 없으면 «judging» 에서 정직하게 멈춘다. */
-  await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ chainStage: "judging", render: { key: report.key, posterKey: report.posterKey || null, durationMs: report.durationMs, bytes: report.bytes, frameCount: report.frameCount } })},
+  /* ③ 심사 — 통과해야 사람 검수(in_review)로 간다.
+     🔴 **`meta.render` 를 건드리지 않는다.** 거기엔 B 의 `RenderPayload`(장면·자막·고지·길이)가 들어 있고,
+        `judgeVideo` 가 그걸 읽어 disclosure·duration_fit·cut_rhythm 을 판정한다(judge.ts §117 `meta.render`).
+        2026-09-14 실측: 여기에 **결과 보고를 덮어써서** 심사기가 «렌더 페이로드 없음» → P0 로 모든 영상을 차단했다.
+        결과 수치(길이·바이트·프레임)는 이미 `piece_assets(video).meta` 에 있고 심사기도 거기서 읽는다 — 두 벌로 두지 않는다. */
+  await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ chainStage: "judging", renderedAt: new Date().toISOString() })},
       updated_at = NOW() WHERE id = ${pieceId}`);
 
   const judged = await tryJudge(pieceId);
@@ -121,6 +129,11 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
       detail: { key: report.key, durationMs: report.durationMs, bytes: report.bytes, judge: "pending(심사기 미배선)" }, riskLevel: "low" });
     return { ok: true, next: "judging", retry, reason: "judge_unavailable" };
   }
+
+  /* 🔴 심사 결과를 `gate_report` 에 남긴다(계약 §5 «아니면 in_review + gate_report»).
+     등급만 남기면 화면이 «왜 걸렸는지»를 못 그린다 — 축 목록이 있어야 사람이 고칠 수 있다. */
+  await q(sql`UPDATE pieces SET gate_report = ${jsonb({ grade: judged.grade, pass: judged.pass, axes: judged.axes ?? [], repaired: !!judged.repaired, at: new Date().toISOString() })},
+      updated_at = NOW() WHERE id = ${pieceId}`);
 
   if (judged.grade === "P0" || !judged.pass) {
     const nextRetry = retry + 1;
@@ -149,14 +162,31 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
  *   잡은 **큐에 그대로 둔다** — 러너를 켜면 바로 이어서 굽는다(취소가 아니다).
  */
 const RUNNER_WAIT_MIN = 30;
+/** «살아 있다» 판정 창 — runner-jobs 의 ONLINE_WINDOW_MIN 과 같은 값(하트비트 주기 기준). */
+const ONLINE_MIN = 5;
 
-/** 지금 이 테넌트에 잡을 집어 갈 러너가 있나. 없으면 사람말 사유. */
+/**
+ * 지금 이 테넌트에 잡을 집어 갈 러너가 있나. 없으면 **사람말 사유**, 있으면(또는 «아직 모른다») null.
+ *   🔴 «한 번도 응답이 없다»와 «꺼졌다»는 다르다 — 2026-09-14 실측에서 이걸 섞어 사고가 났다:
+ *      방금 등록한 기기는 하트비트 전이라 `last_seen_at` 이 NULL 인데, 그걸 «999분째 꺼짐»으로 읽어
+ *      적재하자마자 멀쩡한 글을 `awaiting_runner` 로 떨궜다(고객이 프로그램을 켜는 중인데 «꺼져 있다»고 말하는 꼴).
+ *      그래서 등록한 지 얼마 안 된 기기는 **아무 말도 하지 않는다**(모르면 모른다 · 30분 뒤 sweep 이 다시 본다).
+ */
 async function offlineReason(tid: number): Promise<string | null> {
-  const { fleetState } = await import("../runner-jobs");   // AC-17 경계는 함수 안에서
-  const f = await fleetState(tid);
-  if (!f.devices) return "내 PC 프로그램이 아직 연결되지 않았어요";
-  if (!f.online && (f.offlineMin ?? 999) >= RUNNER_WAIT_MIN) return "내 PC 프로그램이 꺼져 있어요";
-  return null;
+  const [r] = await q(sql`SELECT
+      COUNT(*) AS devices,
+      COUNT(*) FILTER (WHERE last_seen_at > NOW() - (${ONLINE_MIN} * INTERVAL '1 minute')) AS online,
+      MAX(last_seen_at) AS last_seen,
+      MIN(created_at)   AS first_registered
+    FROM runner_devices WHERE tenant_id = ${tid}`);
+  if (!n(r?.devices)) return "내 PC 프로그램이 아직 연결되지 않았어요";
+  if (n(r?.online)) return null;                                   // 살아 있다
+  const minsSince = (v: unknown) => (v ? (Date.now() - new Date(`${String(v).replace(" ", "T")}Z`).getTime()) / 60_000 : Infinity);
+  if (!r?.last_seen) {
+    // 한 번도 응답이 없다 — 방금 등록했으면 «켜는 중»일 수 있다(조용히 기다린다).
+    return minsSince(r?.first_registered) >= RUNNER_WAIT_MIN ? "내 PC 프로그램이 아직 한 번도 연결되지 않았어요" : null;
+  }
+  return minsSince(r.last_seen) >= RUNNER_WAIT_MIN ? "내 PC 프로그램이 꺼져 있어요" : null;
 }
 
 async function markAwaitingRunner(tid: number, pieceId: number, why: string): Promise<void> {
