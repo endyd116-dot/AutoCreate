@@ -47,6 +47,8 @@ function pages(ids) {
     { key: "notifications", url: q("/app/notifications.html"), sheet: [] },
     { key: "revenue", url: q("/app/revenue.html"), sheet: [] },
     { key: "ad-media", url: q("/app/ad-media.html"), sheet: [] },
+    { key: "onboarding", url: "/onboarding.html", sheet: ["button:has-text('다음')"] },   // 영상 채널 «곧 열려요» 칩(라이브 4채널 active)
+    { key: "login", url: "/login.html", sheet: [] },   // SSO 카드 회귀
   ].filter((p) => !process.env.PAGES || process.env.PAGES.split(",").includes(p.key));
 }
 
