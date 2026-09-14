@@ -18,7 +18,7 @@ import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf }
 import { buildCutPlans, planCutWindows, PALETTES } from "./scenes";
 import { generateClip, generateStill } from "./providers";
 import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
-import { synthesizeGemini, isGeminiVoice, type TtsResult, type TtsWord } from "./tts";
+import { synthesizeGemini, isGeminiVoice, scriptGen, type TtsResult, type TtsWord } from "./tts";
 import { splitPhrasesForLines, phrasesToRender, phrasesToSrt } from "./captions";
 import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget } from "./cost";
 import { resolveBgm } from "./bgm";
@@ -126,6 +126,10 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
 
     /* ── ② tts(문장마다 즉시 저장 · 이어받기) ── */
     await stamp(pieceId, "tts");
+    /* [AC-39] 대본 세대 — R2 키에 들어간다. 같은 대본으로 이어달리기하면 같은 값이라 **재사용이 그대로 살고**(재과금 0),
+       대본이 바뀌면 새 폴더라 굽고 있던 렌더가 새 음성을 집어 «대본과 음성이 어긋난 영상»이 되지 않는다.
+       🔴 R2 는 버전 관리가 없다 — 덮으면 이전 판은 영영 없다. */
+    const gen = scriptGen(theScript.lines);
     const have = await q(sql`SELECT sort, r2_key, meta FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'audio' ORDER BY sort`);
     const audio = new Map<number, { key: string; durationMs: number; words: TtsWord[]; provider: string }>();
     for (const a of have) { const am = (a.meta ?? {}) as Record<string, unknown>; audio.set(n(a.sort), { key: String(a.r2_key), durationMs: n(am.durationMs), words: (Array.isArray(am.words) ? am.words : []) as TtsWord[], provider: String(am.provider ?? "typecast") }); }
@@ -135,9 +139,9 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       if (audio.has(i)) continue;
       if (overBudget()) return await handOff(tid, pieceId, "tts", m2, slotId);
       let r: TtsResult = useTypecast && !isGeminiVoice(voiceId)
-        ? await synthesizeTypecast({ tenantId: tid, pieceId, text: line.text, keySuffix: `l${i}` }, { voiceId, previousText: theScript.lines[i - 1]?.text ?? null, nextText: theScript.lines[i + 1]?.text ?? null, dict: persona.dict })
-        : await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: voiceId, keySuffix: `l${i}`, dict: persona.dict });
-      if (!r.ok && useTypecast) r = await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: "Charon", keySuffix: `l${i}`, dict: persona.dict });   // 키 없음·throttle → 정직 폴백(자막 균등 분할)
+        ? await synthesizeTypecast({ tenantId: tid, pieceId, text: line.text, keySuffix: `l${i}`, gen }, { voiceId, previousText: theScript.lines[i - 1]?.text ?? null, nextText: theScript.lines[i + 1]?.text ?? null, dict: persona.dict })
+        : await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: voiceId, keySuffix: `l${i}`, gen, dict: persona.dict });
+      if (!r.ok && useTypecast) r = await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: "Charon", keySuffix: `l${i}`, gen, dict: persona.dict });   // 키 없음·throttle → 정직 폴백(자막 균등 분할)
       if (!r.ok) return await failPiece(tid, pieceId, `목소리를 만들지 못했어요(${r.reason}).`, slotId);
       await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"audio"}, ${r.key}, ${line.text.slice(0, 200)}, ${jsonb({ durationMs: r.durationMs, words: r.words, provider: r.provider, notes: r.notes ?? [] })}, ${i})`);
       audio.set(i, { key: r.key, durationMs: r.durationMs, words: r.words, provider: r.provider });
@@ -209,7 +213,7 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     await stamp(pieceId, "render");
     const phrases = splitPhrasesForLines(timed.map((l) => ({ i: l.idx, text: l.text, startMs: l.startMs, endMs: l.endMs, sceneIdx: l.cutIdx, words: l.words })));
     const srt = phrasesToSrt(phrases);
-    const srtKey = `autocreate/${tid}/${pieceId}/captions.srt`;
+    const srtKey = `autocreate/${tid}/${pieceId}/tts/${gen}/captions.srt`;   // [AC-39] 자막도 같은 세대 아래(대본이 바뀌면 옛 자막을 덮지 않는다)
     await r2Put(srtKey, Buffer.from(srt, "utf8"), "text/plain; charset=utf-8");
     const renderPhrases = phrasesToRender(phrases);
     const scenes: RenderScene[] = plans.map((c) => {
