@@ -14,7 +14,7 @@ import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
-import { planOf } from "../../lib/plans";
+import { planOf, checkLimit as planLimit } from "../../lib/plans";
 import { encryptObj, credsEncConfigured } from "../../lib/creds-crypto";
 import { q, listAccounts, getAccount, listChannels, connectMethodOf, isChannel, type ChannelKey } from "../../lib/accounts";
 import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUrl, exchangeCode } from "../../lib/oauth-providers";
@@ -27,14 +27,12 @@ const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.ht
 const n = (v: unknown) => Number(v || 0);
 const s = (v: unknown, max = 200) => String(v ?? "").trim().slice(0, max);
 
-/** 플랜 한도 검사 — 살아 있는 계정 수 ≥ maxAccounts 면 한도 응답. */
+/** 플랜 한도 검사 — P1R4 §1.4: `lib/plans.checkLimit` 한 벌(402 `plan_limit` · used/limit/planKey · A 의 업셀 시트가 이 모양을 읽는다). R1 의 로컬 403 step:limit 은 폐기. */
 async function checkLimit(tid: number): Promise<Response | null> {
-  const [t] = await q(sql`SELECT plan_key FROM tenants WHERE id = ${tid}`);
-  const plan = await planOf(String(t?.plan_key || "trial"));
-  const [c] = await q(sql`SELECT COUNT(*) AS c FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
-  if (n(c?.c) >= plan.limits.maxAccounts) return json({ ok: false, step: "limit", error: `이 요금제에서는 계정을 ${plan.limits.maxAccounts}개까지 연결할 수 있어요.` }, 403);
-  return null;
+  const c = await planLimit(tid, "accounts");
+  return c.ok ? null : c.res ?? null;
 }
+void planOf;
 
 /** 워드프레스 App Password 인증 확인 — GET {siteUrl}/wp-json/wp/v2/users/me (Basic). */
 async function verifyWordpress(siteUrl: string, loginId: string, appPassword: string): Promise<{ ok: boolean; name?: string; reason?: string }> {

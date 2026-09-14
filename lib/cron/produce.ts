@@ -25,6 +25,7 @@ import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { confirm } from "../director";
+import { requireWritable } from "../guards";
 import { hourOf, kstHour, kstToday, kstWeekStartUtc, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { proposeForSlot, toAutoSlot } from "./director-auto";
 
@@ -56,6 +57,9 @@ export const produceStep: CronStep = {
     const now = kstHour(ctx.now);
     if (now !== want) return { changed: 0, skipped: 0, ...(ctx.manual ? { detail: { skippedByHour: `${now}시 ≠ produceHour ${want}시` } } : {}) };
 
+    // 체험 종료(readonly)·정지(suspended)면 자동 생성도 멈춘다(P1R4 §1.3 · 같은 게이트 한 곳). 자리는 그대로 두고 센다(조용한 0건 금지).
+    const w = await requireWritable(ctx.tid);
+    if (!w.ok) return { changed: 0, skipped: 0, detail: { blocked: w.reason } };
     const lead = ctx.settings.produceLeadDays;
     const slots = await q(sql`SELECT id, channel, account_id, topic_id, publish_at, slot_date::text AS d FROM slots
       WHERE tenant_id = ${ctx.tid} AND status IN ('topic_assigned','coin_short') AND topic_id IS NOT NULL AND piece_id IS NULL

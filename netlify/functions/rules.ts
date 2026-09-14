@@ -12,7 +12,7 @@ import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
-import { planOf } from "../../lib/plans";
+import { planOf, checkLimit } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
 import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, type Rule } from "../../lib/slots";
 import { mergeSettings } from "./tenant-settings";
@@ -85,7 +85,8 @@ export default async (req: Request): Promise<Response> => {
       }
       const maxRules = await maxRulesOf(tid);
       const activeCount = clean.filter((r) => r.active).length;
-      if (maxRules !== null && activeCount > maxRules) return json({ ok: false, step: "limit", error: `이 요금제에서는 규칙을 ${maxRules}개까지 만들 수 있어요.` }, 403);
+      // P1R4 §1.4 — 402 plan_limit 모양(used/limit/planKey). «저장하려는 활성 규칙 수»가 한도를 넘나(checkLimit 는 현재 수 기준이라 여기선 요청값으로 직접 잰다).
+      if (maxRules !== null && activeCount > maxRules) { const [t] = await q(sql`SELECT plan_key FROM tenants WHERE id = ${tid}`); return json({ ok: false, reason: "plan_limit", step: "plan_limit", resource: "rules", used: activeCount, limit: maxRules, planKey: String(t?.plan_key ?? "trial"), error: `편성 규칙은 ${maxRules}개까지예요. Pro 로 바꾸면 제한이 없어요.` }, 402); }
       const existing = await listRules(tid);
       const keep = new Set<number>();
       for (const r of clean) {
@@ -119,6 +120,7 @@ export default async (req: Request): Promise<Response> => {
       const b = await readJson<Record<string, unknown>>(req);
       const patch = sanitizeSchedulePatch(b);
       if (!Object.keys(patch).length) return badRequest("바꿀 값이 없어요.");
+      if (patch.horizonDays !== undefined) { const c = await checkLimit(tid, "horizonDays", patch.horizonDays); if (!c.ok) return c.res!; }   // P1R4 §1.4 달력 기간 상한
       const merged = await mergeSettings(tid, patch as Record<string, unknown>);
       const settings = scheduleSettingsOf(merged);
       // horizon·quietDays 가 바뀌면 달력을 다시 채운다(멱등)

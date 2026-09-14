@@ -11,7 +11,7 @@
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
-import { requireUser } from "../../lib/guards";
+import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { utcDate } from "../../lib/db-util";
@@ -20,6 +20,7 @@ import { listSlots, type Slot } from "../../lib/slots";
 import { kstDateStr, kstToUtc, ACCOUNT_GAP_MIN } from "../../lib/best-time";
 import { confirm } from "../../lib/director";
 import { proposeForSlot, toAutoSlot } from "../../lib/cron/director-auto";
+import { findBannedCategory } from "../../lib/banned-categories";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/slots-assign-topic", "/api/slots-reschedule", "/api/slots-produce-now"] };
@@ -55,8 +56,10 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/slots-assign-topic")) {
       if (!EDITABLE.has(status)) return json({ ok: false, step: "state", error: "이미 글을 만들기 시작한 자리예요. 소재는 바꿀 수 없어요." }, 400);
       const topicId = n(b.topicId); if (!topicId) return badRequest("topicId");
-      const [t] = await q(sql`SELECT id, title, status FROM topics WHERE tenant_id = ${tid} AND id = ${topicId} AND (expires_at IS NULL OR expires_at > NOW())`);
+      const [t] = await q(sql`SELECT id, title, angle, status FROM topics WHERE tenant_id = ${tid} AND id = ${topicId} AND (expires_at IS NULL OR expires_at > NOW())`);
       if (!t) return json({ ok: false, step: "not_found", error: "그 소재를 찾을 수 없어요(기한이 지났을 수도 있어요)." }, 404);
+      const banned = findBannedCategory(`${String(t.title)} ${String(t.angle ?? "")}`);   // P1R4 §1.5 금칙 카테고리
+      if (banned) { await writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "user", actorId: auth.user.uid, riskLevel: "medium", detail: { category: banned.category, word: banned.word, topicId } }); return json({ ok: false, step: "banned_category", error: `${banned.label} 주제는 만들 수 없어요.` }, 400); }
       if (!["candidate", "picked"].includes(String(t.status))) return json({ ok: false, step: "topic_state", error: "이미 쓴 소재예요. 다른 소재를 골라 주세요." }, 400);
 
       const prev = s.topic_id ? n(s.topic_id) : null;
@@ -107,6 +110,7 @@ export default async (req: Request): Promise<Response> => {
 
     /* ───────── 지금 만들기 ───────── */
     if (path.endsWith("/slots-produce-now")) {
+      const w = await requireWritable(tid); if (!w.ok) return w.res;   // readonly·suspended 는 생성 금지(P1R4 §1.3)
       if (s.piece_id) return json({ ok: true, pieceId: n(s.piece_id) });   // 멱등 — 이미 만들었다
       if (!EDITABLE.has(status)) return json({ ok: false, step: "state", error: "지금 만들 수 있는 자리가 아니에요." }, 400);
       if (!s.topic_id) return json({ ok: false, step: "no_topic", error: "먼저 소재를 골라 주세요." }, 400);

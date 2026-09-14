@@ -11,6 +11,7 @@ import { refreshTopics } from "../../lib/topics";
 import { readRefreshState, humanRefreshError } from "../../lib/topics-refresh-state";
 import { mergeSettings } from "./tenant-settings";
 import { writeAudit } from "../../lib/audit";
+import { requireAiBudget } from "../../lib/billing/ai-cost-cap";
 
 export const config = { path: "/api/topics-refresh-background" };
 
@@ -30,6 +31,12 @@ export default async (req: Request): Promise<Response> => {
   const cur = await readRefreshState(tid);
   if (cur.running) { console.log(`[topics-refresh-background] tid=${tid} 이미 실행 중 — 건너뜀`); return new Response(JSON.stringify({ ok: true, skipped: "running" }), { status: 200 }); }
 
+  // P1R4 §1.5 — AI 원가 일 상한: LLM 을 부르기 전에 잰다(초과면 상태에 사람말 사유를 남기고 끝 · 환율 없으면 막지 않는다).
+  const budget = await requireAiBudget(tid);
+  if (!budget.ok) {
+    await mergeSettings(tid, { topicsRefresh: { running: false, finishedAt: new Date().toISOString(), error: budget.error, origin } });
+    return new Response(JSON.stringify({ ok: false, step: "ai_cost_cap", error: budget.error }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
   const startedAt = new Date().toISOString();
   await mergeSettings(tid, { topicsRefresh: { running: true, startedAt, origin } });
   const t0 = Date.now();

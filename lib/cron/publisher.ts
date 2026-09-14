@@ -25,6 +25,9 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { jsonb, utcDate } from "../db-util";
 import { classifyAndApply } from "../account-health";
+import { requireWritable } from "../guards";
+import { tenantPlan, requireCardBeforePublish } from "../plans";
+import { activeBillingKey } from "../subscription";
 import { kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { publishPiece, publishPortStatus, runnerOffline, type PublishFailReason } from "./publish-port";
 
@@ -50,6 +53,15 @@ export const publisherStep: CronStep = {
   every: "5m",
   needsAutoSchedule: false,   // 사람이 손으로 승인한 글도 나가야 한다 — 자동 편성과 무관.
   async run(ctx): Promise<StepOutcome> {
+    // readonly·suspended 는 발행도 멈춘다(P1R4 §1.3) — due 글은 scheduled 그대로 두고(결제하면 이어서 나간다) 센다.
+    const w = await requireWritable(ctx.tid);
+    if (!w.ok) return { changed: 0, skipped: 0, detail: { blocked: w.reason } };
+    // P1R4 §1.5 — 플랜 토글 requireCardBeforePublish: 결제 수단이 없으면 첫 발행을 미룬다(글은 scheduled 그대로 · 알림 1건/일).
+    const tp = await tenantPlan(ctx.tid);
+    if (requireCardBeforePublish(tp.plan) && !(await activeBillingKey(ctx.tid))) {
+      await notifyOnce(ctx.tid, "card_required", "발행 전에 결제 수단을 등록해 주세요", "카드를 등록하면 기다리던 글이 바로 나가요.", "/app/plan.html", { withinHours: 24 });
+      return { changed: 0, skipped: 0, detail: { blocked: "card_required" } };
+    }
     const due = await q(sql`SELECT p.id, p.title, p.channel, p.account_id, p.slot_id, p.meta, p.scheduled_for, s.status AS slot_status
       FROM pieces p LEFT JOIN slots s ON s.id = p.slot_id
       WHERE p.tenant_id = ${ctx.tid} AND p.status = 'scheduled' AND p.scheduled_for IS NOT NULL AND p.scheduled_for <= NOW()

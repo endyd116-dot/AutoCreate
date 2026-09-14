@@ -18,6 +18,7 @@ import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
 import { guardSlot, type PieceOrigin } from "./slot-gate";
+import { requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
 
 const n = (v: unknown) => Number(v || 0);
@@ -211,6 +212,9 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   /* 🔴 슬롯 게이트(CLAUDE §4.7 절대 게이트) — 자동 경로가 piece 를 만들려면 «어느 편성 자리의 몫인지» 말해야 한다.
      사람 경로(origin:"manual")는 통과. 거부는 감사 + 홈 «해야 할 일»에 남는다(조용한 0건 금지 · AC-2). */
   const gate = await guardSlot({ tenantId: tid, channel: specs[0].channel, origin, slotId: reuseSlotId, source: "director.confirm", topic: String(b.topic_id ?? "") });
+  // P1R4 §1.5 — AI 원가 일 상한(코인을 차감하기 전에 잰다 · 환율 없으면 잴 수 없어 막지 않는다).
+  const budget = await requireAiBudget(tid);
+  if (!budget.ok) return { ok: false, step: "ai_cost_cap", error: budget.error };
   if (!gate.ok) return { ok: false, step: "slot_gate", error: gate.reason ?? "편성표에 없는 자동 생성이에요." };
 
   const topicId = n(b.topic_id);

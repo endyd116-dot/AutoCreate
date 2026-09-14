@@ -9,7 +9,7 @@
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
-import { requireUser } from "../../lib/guards";
+import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
@@ -118,6 +118,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, status: "rejected" });
     }
     if (path.endsWith("/pieces-regenerate")) {
+      const w = await requireWritable(tid); if (!w.ok) return w.res;   // readonly·suspended 는 재생성 금지(P1R4 §1.3)
       if (st === "generating") {
         // ★C4 fix: 배경 함수가 죽어 «만드는 중»에 갇힌 글은 다시 만들기가 거부되어 사용자가 빠져나갈 길이 없었다 —
         //   20분 넘게 그대로면 코인 재차감 0(같은 ref)으로 한 번 더 건다. 다시 실패하면 triggerGenerate 가 failed+환급+알림으로 내린다.
