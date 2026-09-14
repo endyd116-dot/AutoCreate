@@ -32,9 +32,11 @@ const channels = [
   ["reels", "릴스", "video", "api", [12, 19], ["affiliate"], 12],
   ["tiktok", "틱톡", "video", "api", [19, 22], ["affiliate"], 13],
 ];
+// 발행 경로가 실제로 있는 채널만 active(고객 «계정 연결» 그리드는 active 만 그린다 · ui-v4). 영상·SNS 는 Phase 3 에서 켠다(운영센터 «채널» 메뉴).
+const ACTIVE_CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress"]);
 for (const [key, label, cat, via, hours, mon, sort] of channels) {
   await sql`INSERT INTO channel_registry (key, label, category, publish_via, status, best_hours, monetize, sort)
-    VALUES (${key}, ${label}, ${cat}, ${via}, ${"planned"}, ${sql.json(hours)}, ${sql.json(mon)}, ${sort}) ON CONFLICT (key) DO NOTHING`;
+    VALUES (${key}, ${label}, ${cat}, ${via}, ${ACTIVE_CHANNELS.has(key) ? "active" : "planned"}, ${sql.json(hours)}, ${sql.json(mon)}, ${sort}) ON CONFLICT (key) DO NOTHING`;
 }
 
 // ── 감성 프로파일 기본(DESIGN §5C.1 요약 · 운영센터에서 조정)

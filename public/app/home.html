@@ -13,7 +13,6 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="sp"></span><a class="ic" href="/app/notifications.html" aria-label="알림"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></a></div>
-    <div id="trialBanner" hidden></div>
     <a class="hl" href="/app/revenue.html" style="display:block">
       <div class="say">오늘</div>
       <div class="num" id="hlnum"><span class="sk" style="display:inline-block;width:60%"></span></div>
@@ -29,7 +28,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=6"></script>
+<script src="/js/mock.js?v=7"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
@@ -54,9 +53,10 @@
   } else if (mon || rev.lastMonthSameDay) { const d2 = mon - (rev.lastMonthSameDay || 0);
     tip.innerHTML = `이번 달 ${UI.won(mon)} · 지난달 같은 날보다 <b class="${d2 >= 0 ? "up" : ""}">${d2 >= 0 ? "+" : "−"}${UI.won(Math.abs(d2))}</b>`;
   } else tip.textContent = "수익 매체를 연결하면 여기에 매일 쌓여요";
-  // 체험 배너
-  if (r.trial.status === "trial") { const b = UI.$("#trialBanner"); b.hidden = false; b.className = "banner info"; b.innerHTML = `<span>무료 체험 ${r.trial.daysLeft}일 남았어요 · 코인 ${UI.num(r.coins)}개</span><a href="/app/plans.html">요금제 보기</a>`; }
-  else if (r.trial.status === "readonly") { const b = UI.$("#trialBanner"); b.hidden = false; b.className = "banner"; b.innerHTML = `<span>체험이 끝났어요. 이어서 쓰려면 요금제를 골라 주세요</span><a href="/app/plans.html">요금제</a>`; }
+  // 체험(DESIGN §12.3): 배너 없이 «해야 할 일» 행 하나 — D-3 이하일 때만 · 끝났으면 «요금제를 골라 주세요» · 그 전엔 홈에 아무것도 없다
+  const trial = r.trial || {};
+  if (trial.status === "trial" && trial.daysLeft != null && trial.daysLeft <= 3) r.todo.unshift({ kind: "coin", title: `무료 체험이 ${trial.daysLeft}일 남았어요`, desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plans.html", tone: "warn" });
+  else if (trial.status === "readonly") r.todo.unshift({ kind: "coin", title: "체험이 끝났어요", desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plans.html", tone: "warn" });
   // 해야 할 일
   const todo = UI.$("#todo");
   if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;
