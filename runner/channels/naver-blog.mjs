@@ -33,14 +33,22 @@ const BODY_SEL = ".se-component.se-text .se-text-paragraph";
  */
 async function isLoggedIn(page) {
   try {
-    await page.goto("https://blog.naver.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    if (/nidlogin/i.test(page.url())) return false;
-    const out = await page.locator('a[href*="nidlogin.logout"], a[href*="nid.naver.com/nidlogin.logout"]').count().catch(() => 0);
+    /* 🔴 2차 실측(2026-09-14 · 세션이 살아 있는 프로필로 재검): 종전 판정(blog.naver.com 의 로그아웃 링크·내 메뉴)은
+       `section.blog.naver.com` SPA 가 **렌더되기 전(domcontentloaded)** 에 세고 있어서 살아 있는 세션에도 false 를 냈다.
+       그래서 **매번 비밀번호 로그인**을 했고, 그 반복이 job #16 의 캡차를 불렀다. 긍정 신호를 잘못 골랐던 것이다(AC-19).
+       ⇒ 로그인이 필요한 주소(`MyBlog.naver`)를 열어 **어디로 보내는지**로 판정한다 — 로그인돼 있으면 `blog.naver.com/{내id}` 로,
+          아니면 `nidlogin` 으로 간다. 렌더 타이밍과 무관한 서버측 판정이다. */
+    await page.goto("https://blog.naver.com/MyBlog.naver", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await settle(page, 1200);
+    const url = page.url();
+    if (/nidlogin/i.test(url)) return false;
+    if (/blog\.naver\.com\/[A-Za-z0-9_-]{2,}/i.test(url) && !/section\.blog\.naver\.com|MyBlog\.naver/i.test(url)) return true;
+    // 판정이 애매하면 요소로 한 번 더(렌더 대기 후) — 그래도 모르면 로그아웃으로 본다(한 번 더 로그인 < 조용한 실패 · AC-9).
+    await settle(page, 1500);
+    const out = await page.locator('a[href*="nidlogin.logout"]').count().catch(() => 0);
     if (out > 0) return true;
-    // 로그인 링크가 보이면 확실히 로그아웃 상태.
-    const inLink = await page.locator('a[href*="nidlogin.login"], a:has-text("로그인")').count().catch(() => 0);
+    const inLink = await page.locator('a[href*="nidlogin.login"]').count().catch(() => 0);
     if (inLink > 0) return false;
-    // 내 블로그 메뉴(로그인해야 뜬다) — 마지막 긍정 신호.
     return (await page.locator('.gnb_my, [class*="MyArea"], a[href*="MyBlog"]').count().catch(() => 0)) > 0;
   } catch { return false; }
 }

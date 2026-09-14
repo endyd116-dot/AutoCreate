@@ -387,15 +387,23 @@ async function verifyPublishedUrl(url: string, title?: string | null): Promise<"
 }
 
 /** 계정 전이 신호 기록 — 필드만 쓴다. 전이 로직(B `lib/account-health.ts`)이 있으면 넘겨준다(없으면 graceful). */
-async function signalAccountError(tid: number, accountId: number, block: RunnerBlock, pieceId?: number | null): Promise<void> {
+/** @returns 이 piece 가 **다른 계정으로 넘어갔나**(suspend 승계) — 넘어갔으면 호출자가 piece 를 실패로 닫으면 안 된다. */
+async function signalAccountError(tid: number, accountId: number, block: RunnerBlock, pieceId?: number | null): Promise<{ handedOver: boolean }> {
   try {
     await q(sql`UPDATE accounts SET last_error_kind = ${block.kind}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`);
   } catch (e) { console.error("[runner-jobs] last_error_kind write failed", e); }
-  if (block.accountAction === "none") return;
+  if (block.accountAction === "none") return { handedOver: false };
   /* 🔴 전이는 B 의 정본이 한다(정적 배선 · main 192a417 머지 후 2026-09-14).
      실패해도 보고 자체는 성공시킨다 — 전이가 안 됐다고 잡 결과를 잃으면 안 된다. */
-  try { await classifyAndApply(accountId, block.kind, { tenantId: tid, detail: block.detail ?? block.message, pieceId }); }
-  catch (e) { console.error("[runner-jobs] classifyAndApply failed", e); }
+  try {
+    const r = await classifyAndApply(accountId, block.kind, { tenantId: tid, detail: block.detail ?? block.message, pieceId });
+    // 승계가 이 piece 를 실제로 옮겼는지 — piece 의 계정이 바뀌었으면 넘어간 것이다.
+    if (r.action === "suspend" && pieceId) {
+      const [p] = await q(sql`SELECT account_id FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
+      return { handedOver: !!p && n(p.account_id) !== accountId };
+    }
+  } catch (e) { console.error("[runner-jobs] classifyAndApply failed", e); }
+  return { handedOver: false };
 }
 
 async function notify(tid: number, kind: string, title: string, body: string, link?: string): Promise<void> {
@@ -442,8 +450,11 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
         result = ${jsonb({ ok: false, errorKind: block.kind, detail: block.detail ?? null, shotKey: fail.shotKey ?? null, attempts })},
         due_at = ${canRetry ? sql`NOW() + (${Math.min(30, attempts * 5)} * INTERVAL '1 minute')` : sql`NULL`},
         updated_at = NOW() WHERE id = ${jobId}`);
-    if (accountId) await signalAccountError(tid, accountId, block, pieceId || null);
-    if (!canRetry && kind.startsWith("publish.") && pieceId) await failPublishPiece(tid, pieceId, block, fail.shotKey);
+    const sig = accountId ? await signalAccountError(tid, accountId, block, pieceId || null) : { handedOver: false };
+    /* 🔴 정지 승계로 piece 가 **다른 계정에 넘어갔으면** 실패로 닫지 않는다 — 2026-09-14 승계 실증(verify-failover)에서
+       B 의 reassignSlots 가 만든 **새 슬롯을 내 failPublishPiece 가 awaiting_manual 로 덮어썼다**(순서 사고).
+       실패는 계정의 것이지 글의 것이 아니다. 넘어가지 못한 piece(받을 계정 없음)만 awaiting_manual 로 남긴다. */
+    if (!canRetry && kind.startsWith("publish.") && pieceId && !sig.handedOver) await failPublishPiece(tid, pieceId, block, fail.shotKey);
     if (!canRetry && block.needsHuman && accountId && !kind.startsWith("publish.")) {
       await notify(tid, "account_relogin", "계정 확인이 필요해요", block.message, "/app/accounts.html");
     }
