@@ -15,13 +15,14 @@ import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { type GateReport } from "../../lib/ai-tell-gate";
-import { disclosureTextFor } from "../../lib/disclosure";
+import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText } from "../../lib/disclosure";
 /* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
 import { recheckPiece, approvePiece } from "../../lib/content-approve";
 import { triggerGenerate } from "../../lib/director";
 import { triggerVideo } from "../../lib/video/gen";
-import { r2PublicUrl } from "../../lib/r2";
+import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
+import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -106,8 +107,19 @@ export default async (req: Request): Promise<Response> => {
       const isVideo = String(p.kind || "post") === "video";
       /* [P1R5 §1.4-6] 영상은 image 말고 **video·thumb·srt·clip** 도 읽어야 A 가 플레이어·SRT·컷 목록을 그린다.
          URL 은 `meta.url`(글 이미지) 우선 · 없으면 r2_key 로 공개 URL(영상 자산은 키만 있다). */
-      const assets = await q(sql`SELECT kind, caption, meta, sort, r2_key FROM piece_assets WHERE piece_id = ${id} AND kind IN (${isVideo ? sql.join(["video", "thumb", "srt", "clip", "image", "audio"].map((k) => sql`${k}`), sql`, `) : sql`'image'`}) ORDER BY kind, sort`);
-      const urlOf = (x: Row) => String(((x.meta || {}) as Record<string, unknown>).url || "") || (x.r2_key ? r2PublicUrl(String(x.r2_key)) : "");
+      const assets = await q(sql`SELECT id, kind, caption, meta, sort, r2_key FROM piece_assets WHERE piece_id = ${id} AND kind IN (${isVideo ? sql.join(["video", "thumb", "srt", "clip", "image", "audio"].map((k) => sql`${k}`), sql`, `) : sql`'image'`}) ORDER BY kind, sort`);
+      /* 🔴 영상 자산 URL 은 **서버가 presigned GET 으로 채운다**(계약 §2.1 · A 전제 — 화면이 presign 을 따로 요청하지 않는다).
+         `/api/r2-image` 는 png/jpg/webp 만 서빙하고 인증이 없어 영상·나레이션·자막을 거기 태울 수 없다(테넌트 자산 · §4.6). */
+      const signed = new Map<string, string>();
+      if (isVideo && r2Configured()) {
+        await Promise.all([...new Set(assets.map((x) => String(x.r2_key ?? "")).filter(Boolean))].map(async (k) => {
+          try { signed.set(k, await r2PresignGet(k)); } catch (e) { console.warn("[pieces] presign 실패", k, String((e as Error)?.message ?? e).slice(0, 80)); }
+        }));
+      }
+      const urlOf = (x: Row) => {
+        const key = String(x.r2_key ?? "");
+        return signed.get(key) || String(((x.meta || {}) as Record<string, unknown>).url || "") || (key ? r2PublicUrl(key) : "");
+      };
       const g = (p.gate_report && typeof p.gate_report === "object" ? p.gate_report : { ok: false, checks: [], rewritten: false }) as GateReport;
       const meta: Record<string, unknown> = { tags: Array.isArray(m.tags) ? m.tags : [], disclosure: m.disclosure ?? null };
       if (m.affiliate && typeof m.affiliate === "object") { const af = m.affiliate as Record<string, unknown>; meta.affiliate = { provider: af.provider, url: af.url, subId: af.subId }; }
@@ -118,11 +130,16 @@ export default async (req: Request): Promise<Response> => {
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };
       if (isVideo) {
+        // A 계약: `assets:[{ id, kind, url, meta }]` — 화면이 종류로 골라 쓴다(`images` 는 글 호환으로 그대로 둔다).
+        detail.assets = assets.map((x) => ({ id: n(x.id), kind: String(x.kind), url: urlOf(x), sort: n(x.sort), caption: x.caption ? String(x.caption) : "", meta: x.meta ?? {} }));
         const one = (k: string) => { const x = assets.find((a) => String(a.kind) === k); return x ? { url: urlOf(x), key: String(x.r2_key ?? ""), meta: x.meta ?? {} } : null; };
         const yt = (m.youtube ?? null) as { title?: unknown; description?: unknown; tags?: unknown } | null;
+        const vr = ((m.video ?? {}) as Record<string, unknown>).variant as { palette?: unknown; hookType?: unknown; voiceId?: unknown } | undefined;
         detail.video = {
           stage: stageOf(p),
           spec: m.video ?? null,
+          // 변주 사람말 이름(§13.0) — 화면 칩이 영문 프롬프트 문구를 보여 주지 않게 서버가 붙여 준다.
+          variantLabels: vr ? { palette: paletteLabelKo(vr.palette), hook: hookLabelKo(vr.hookType), voiceId: String(vr.voiceId ?? "") } : null,
           file: one("video"), poster: one("thumb"), srt: one("srt"),
           // 컷 = 클립(t2v) + 정지 이미지(still · kenburns) 를 컷 번호로 합쳐 준다 — 화면이 «장면 n» 으로 센다.
           cuts: assets.filter((x) => String(x.kind) === "clip" || (String(x.kind) === "image" && ((x.meta || {}) as Record<string, unknown>).still === true))
@@ -231,6 +248,29 @@ export default async (req: Request): Promise<Response> => {
     }
     if (path.endsWith("/pieces-update")) {
       if (!["in_review", "draft", "scheduled", "approved", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 수정할 수 없어요." }, 400);
+      if (String(p.kind || "post") === "video") {
+        /* [P1R5 §3 · A 실물] 영상 설명란 수정 — `{ id, title, body, tags[] }`.
+           🔴 첫 줄 고지는 **서버가 되붙인다**(사용자가 지워도 · 글의 «고지 첫 요소» 관례와 같은 급 · §16B.4).
+           정본은 `pieces.body`(발행 커넥터가 이걸 올린다) · `meta.description`·`meta.tags`·`meta.youtube` 도 같이 맞춰 둔다(A 가 읽는다). */
+        const need = !!m.affiliate || !!m.affiliateLink || m.adDisclosure === true;
+        const title = typeof b.title === "string" ? b.title.trim().slice(0, 120) : String(p.title || "");
+        let body = typeof b.body === "string" ? String(b.body).replace(/\r/g, "").slice(0, 5000).trim() : String(p.body || "");
+        if (need) {
+          const first = videoDescriptionFirstLine(String(((m.affiliate ?? m.affiliateLink ?? {}) as Record<string, unknown>).provider ?? "coupang"));
+          const rest = body.split("\n").filter((ln, i) => !(i === 0 && isDisclosureText(ln))).join("\n").trimStart();
+          body = `${first}\n${rest}`;
+        }
+        const tags = Array.isArray(b.tags) ? (b.tags as unknown[]).map((t) => String(t).replace(/^#/, "").trim()).filter(Boolean).slice(0, 15) : (Array.isArray(m.tags) ? m.tags as string[] : []);
+        const yt = (m.youtube ?? {}) as Record<string, unknown>;
+        await q(sql`UPDATE pieces SET title = ${title}, body = ${body},
+          meta = meta || ${jsonb({ description: body, tags, youtube: { ...yt, title, description: body, tags }, editedByUser: true, editedAt: new Date().toISOString() })},
+          updated_at = NOW() WHERE id = ${id}`);
+        const [p2] = await q(sql`SELECT p.* FROM pieces p WHERE p.id = ${id}`);
+        const gate = await recheckPiece(tid, p2);
+        await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
+        await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { kind: "video", title: typeof b.title === "string", body: typeof b.body === "string", tags: tags.length, gateOk: gate.ok } });
+        return json({ ok: true, gate, body, tags });
+      }
       const sets: ReturnType<typeof sql>[] = [];
       let bodyHtml = String(p.body || "");
       if (typeof b.title === "string") { const t = b.title.trim().slice(0, 120); if (t) sets.push(sql`title = ${t}`); }

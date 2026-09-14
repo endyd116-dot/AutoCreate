@@ -4,7 +4,7 @@
  *   뺀 것: 붉은 표식 라벨 도해(VIDEOFIT·SURPASS 층 — 지식쇼츠 전용) · 공간 지문 · 밴딧 오프너(hookType 로 대체). 실측 수리 이력(글자 요구 무해화·«»꺾쇠 글리프·하드컷 요구형·인물 캐스팅 고정)은 보존.
  *   🔴 무인물·무텍스트·무로고 규칙(DESIGN §5C.3·§19) — 한글은 «새길 낱말 1개» 예외만. 인물은 스타일라이즈드/실루엣 또는 «한국 성인 · 전 컷 같은 캐스팅».
  */
-import type { CutPlan, ClipTier, ScriptLine, VideoFormat, VideoSeconds } from "./types";
+import { PALETTE_LABELS_KO, HOOK_LABELS_KO, type CutPlan, type ClipTier, type ScriptLine, type VideoFormat, type VideoSeconds } from "./types";
 
 export const GRAPHIC_CUT_SEC = 8;
 export const CUT_MIN_MS = 1800;
@@ -177,3 +177,7 @@ export function buildCutPlans(a: { windows: { idx: number; lineIdx: number[]; st
   });
   return { plans, risks };
 }
+
+/* 사람말 이름 짝 대조(§13.0) — 프롬프트 문구를 고치고 `types.ts PALETTE_LABELS_KO`·`HOOK_LABELS_KO` 를 안 고치면 화면 칩이 «기본» 으로 떨어진다. 조용히 틀리지 않게 기동 때 알린다. */
+for (const p of PALETTES) if (!PALETTE_LABELS_KO[p]) console.error(`[video/scenes] 팔레트 «${p}» 의 사람말 이름이 types.ts PALETTE_LABELS_KO 에 없습니다`);
+for (const h of HOOK_TYPES) if (!HOOK_LABELS_KO[h]) console.error(`[video/scenes] 훅 «${h}» 의 사람말 이름이 types.ts HOOK_LABELS_KO 에 없습니다`);
