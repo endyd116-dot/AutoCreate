@@ -24,6 +24,7 @@ import { coinCostOf, videoCoinItem } from "./coin-table";
 import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
+import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { guardSlot, type PieceOrigin } from "./slot-gate";
 import { requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
@@ -325,7 +326,9 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
      고객은 이미 코인을 냈고, 여기서 막으면 «돈은 받고 안 만들어 주는» 사고가 된다. 폭주는 아래 영상 관문의 **하드(상한 ×3)**·전역 월 상한이 잡는다.
      글만 있는 확정은 R4 규칙 그대로(무변경). */
   if (!budget.ok && !hasVideo) return { ok: false, step: "ai_cost_cap", error: budget.error };
-  if (!budget.ok && hasVideo) await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "system", riskLevel: "medium", detail: { usedKrw: budget.check.usedKrw, capKrw: budget.check.capKrw, note: "영상 확정 — 일일 상한 초과를 소프트로 통과(§1.4c(1))" } });
+  /* `textPiecesPassed` = 같은 확정에 묻어 통과한 글 piece 수(메인 지시) — «영상을 끼워 글 상한을 우회»가 이론상 가능해 운영센터에서 보이게 남긴다.
+     글 원가는 영상의 ~1/150 이라 실질 누수는 없다는 판단(메인 승인). */
+  if (!budget.ok && hasVideo) await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "system", riskLevel: "medium", detail: { usedKrw: budget.check.usedKrw, capKrw: budget.check.capKrw, videoPieces: specs.filter((s) => s.kind === "video").length, textPiecesPassed: specs.filter((s) => s.kind !== "video").length, note: "영상 확정 — 일일 상한 초과를 소프트로 통과(§1.4c(1))" } });
   /* [P1R5 §1.2·§1.6] 영상 원가 관문 — **코인 차감 전**에 잰다(코인과 별개 관문). 초과면 원장 무접촉. */
   for (const vs of specs) {
     if (vs.kind !== "video" || !vs.video) continue;
@@ -335,6 +338,14 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   if (!gate.ok) return { ok: false, step: "slot_gate", error: gate.reason ?? "편성표에 없는 자동 생성이에요." };
 
   const topicId = n(b.topic_id);
+  /* [P1R5 §1.11] 레퍼런스 구조 — 소재에 `factors.structureTemplateId` 가 붙어 있으면 그 서사 단계를 영상 meta 에 싣는다.
+     `gen.ts` 가 `meta.structure` 를 대본 프롬프트의 «서사 단계 A → B → C» 로 넘긴다(안 실으면 배운 구조가 어디에도 쓰이지 않는다). */
+  let refStructure: string[] | null = null; let refTemplateId: number | null = null;
+  if (hasVideo) {
+    const [tr] = await q(sql`SELECT factors FROM topics WHERE tenant_id = ${tid} AND id = ${topicId}`);
+    const tplId = n(((tr?.factors ?? {}) as Record<string, unknown>).structureTemplateId);
+    if (tplId) { const tpl = await templateOf(tid, tplId); if (tpl?.structure.length) { refStructure = tpl.structure; refTemplateId = tpl.id; } }
+  }
   // 빌려 쓸 자리의 원래 상태·채널(롤백 복원용 · 채널 대조용). 게이트를 이미 통과했으니 행은 있다.
   let reuseSlotPrevStatus = "topic_assigned", reuseChannel = specs[0].channel, usedReuseSlot = false;
   if (reuseSlotId) {
@@ -359,7 +370,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const isVideo = s.kind === "video" && !!s.video;
       const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : "blog";
       const meta = isVideo
-        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null }
+        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
         : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
