@@ -37,7 +37,7 @@ const isVideo = (p) => p.kind === "video";
 /* 코인 = 글 1 + 사진 수 · 영상은 초 구간제(videoCoinItem · 정본은 서버 coinCost) */
 const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0) : 1 + (p.images?.count || 0);
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
-const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.HOOK[p.video?.variant?.hookType] || p.video?.variant?.hookType || ""}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
+const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
   : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
 
 async function load() {
@@ -70,7 +70,7 @@ function editSheet() {
       <div class="sec">포맷</div>${UI.seg("vfmt", Object.entries(UI.VFORMAT), v.format)}
       <div class="sec">길이</div>${UI.chips("vsec", UI.VSECONDS.map((s) => [s, s + "초"]), v.seconds)}
       <div class="sec">목소리</div>${voices.length ? UI.chips("voice", voices.map((x) => [x.voiceId, `${x.name} · ${x.desc}`]), v.voice?.voiceId) : `<p class="muted" style="margin:0;font-size:13px">${UI.esc(vo?.name || v.voice?.voiceId || "자동")}</p>`}<p class="muted" style="margin:4px 0 0;font-size:12.5px">타입캐스트 · 미리듣기는 다음에 열려요</p>
-      <div class="sec">계정마다 다르게 (자동)</div><p class="muted" style="margin:0;font-size:13px;line-height:1.6"><b style="color:var(--ink)">@${UI.esc(p.accountHandle || "")}</b> 훅 «${UI.esc(UI.HOOK[v.variant?.hookType] || v.variant?.hookType || "")}» · 팔레트 ${UI.esc(UI.PALETTE[v.variant?.palette] || v.variant?.palette || "")}${others.map((q) => ` &nbsp;·&nbsp; <b style="color:var(--ink)">@${UI.esc(q.accountHandle || "")}</b> 훅 «${UI.esc(UI.HOOK[q.video.variant?.hookType] || "")}» · 팔레트 ${UI.esc(UI.PALETTE[q.video.variant?.palette] || "")}`).join("")}</p>
+      <div class="sec">계정마다 다르게 (자동)</div><p class="muted" style="margin:0;font-size:13px;line-height:1.6"><b style="color:var(--ink)">@${UI.esc(p.accountHandle || "")}</b> 훅 «${UI.esc(UI.vword(v, "hook"))}» · 팔레트 ${UI.esc(UI.vword(v, "palette"))}${others.map((q) => ` &nbsp;·&nbsp; <b style="color:var(--ink)">@${UI.esc(q.accountHandle || "")}</b> 훅 «${UI.esc(UI.vword(q.video, "hook"))}» · 팔레트 ${UI.esc(UI.vword(q.video, "palette"))}`).join("")}</p>
       <div class="fr"><div class="fl">제휴 상품 넣기<small>배지 · 시작 자막 · 설명란 첫 줄 고지가 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
       <div data-affbody ${p.monetize?.affiliate ? "" : "hidden"}><input class="input" data-pq placeholder="상품 검색어 · 예: 에어프라이어 세척솔" value="${UI.esc(p.monetize?.affiliate?.productQuery || "")}"></div>
       <div class="kv" style="padding:12px 0 0"><span class="k">이 영상 코인</span><span class="v"><span data-vcoin>${cost(p)}</span>코인<small class="muted" data-vhint style="font-weight:500;margin-left:6px"></small></span></div>

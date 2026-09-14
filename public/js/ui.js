@@ -195,8 +195,13 @@
   UI.VSTAGE = [["script", "대본"], ["tts", "목소리"], ["clips", "장면"], ["render", "합성"], ["judging", "검사"], ["done", "완료"]];
   UI.VSTAGE_SAY = { script: "대본 쓰는 중", tts: "목소리 입히는 중", clips: "장면 만드는 중", render: "내 PC 프로그램이 굽는 중", judging: "검사하는 중", done: "다 됐어요", failed: "만들지 못했어요" };
   UI.JUDGE = { P0: ["danger", "심사 막힘"], P1: ["warn", "한 번 고쳐 통과"], P2: ["ok", "심사 통과"] };
-  UI.HOOK = { event_pushin: "밀어넣기", number_typo: "숫자 강조", extreme_closeup: "초근접", question: "질문", contrast: "반전" }; // B-1 lib/video/types.ts 훅 5종
-  UI.PALETTE = { ink: "잉크", coral: "코랄", mint: "민트", sand: "샌드", night: "나이트" }; // 팔레트 5종 이름은 B-1 scenes.ts 머지 뒤 확정(없는 키는 그대로 보여 준다)
+  /* 변주 사람말 — 🔴 정본은 서버가 주는 video.variantLabels{palette,hook,voiceId}. 아래는 서버가 못 줄 때의 폴백(B-1 types.ts 값과 같은 말). */
+  UI.HOOK = { event_pushin: "사건으로 시작", number_typo: "숫자로 시작", extreme_closeup: "확대로 시작", question: "질문으로 시작", contrast: "반전으로 시작" };
+  UI.PALETTE = { terracotta: "테라코타", teal: "청록", navy: "네이비", sage: "세이지", charcoal: "차콜" };
+  /* v = PieceSpec.video · key = "palette"|"hook"|"voiceId" — 서버 말이 있으면 그걸 쓰고, 없으면 폴백 표, 그것도 없으면 키 그대로(숨기지 않는다) */
+  UI.vword = (v, key) => { const L = v && v.variantLabels; if (L && L[key]) return L[key];
+    const raw = key === "hook" ? v?.variant?.hookType : key === "palette" ? v?.variant?.palette : v?.variant?.voiceId;
+    return (key === "hook" ? UI.HOOK[raw] : key === "palette" ? UI.PALETTE[raw] : null) || raw || ""; };
   UI.VIDEO_COIN = { 15: 6, 30: 12, 60: 28 }; // 손보기 코인 재계산 미리보기(정본은 director-confirm 응답 coinCost · videoCoinItem 구간제)
   UI.vlabel = (v) => v ? `${UI.VFORMAT[v.format] || v.format} ${v.seconds}초` : "";
   UI.studioUrl = (ref) => ref ? `https://studio.youtube.com/video/${encodeURIComponent(ref)}/edit` : "https://studio.youtube.com/";
