@@ -118,6 +118,8 @@ async function main() {
   /* --login-first — 사람이 창에서 한 번 로그인(session.login)한 **다음** 같은 계정으로 드라이런까지 이어서 한다.
      티스토리처럼 무인 로그인을 폐지한 채널은 이것 없이는 영원히 login_fail 이다(창조차 안 뜬다). */
   const loginFirst = process.argv.includes("--login-first");
+  /* ♻ 이미 로그인해 둔 테넌트를 재사용한다(쿠키 그대로 · 사람 2단계 0회). 고친 곳만 다시 재는 용도. */
+  const reuseTid = Number(String(process.argv.find((a) => a.startsWith("--reuse-tid=")) ?? "").slice(12)) || 0;
   /* --job=revenue.adpost 등 — 발행 대신 그 잡을 계정에 직접 적재한다(수익 스크랩·광고 상태 읽기 실측용). */
   const jobArg = String(process.argv.find((a) => a.startsWith("--job=")) ?? "").slice(6);
   const jobKind: RunnerJobKind | null = jobArg && isRunnerJobKind(jobArg) ? jobArg : null;
@@ -144,9 +146,20 @@ async function main() {
   console.log(`\n── B2 러너 셀렉터 실증 (${channel} · @${cfg.handle} · 임시저장까지) ──`);
   console.log(`   로컬 함수 서버 127.0.0.1:${port}\n`);
 
-  const [t] = await q(sql`INSERT INTO tenants (key, name, plan_key, status)
-    VALUES (${`b2ver${stamp}`.slice(0, 40)}, ${"B2실증"}, 'starter', 'active') RETURNING id`);
-  const tid = n(t?.id);
+  /* ♻ --reuse-tid=N — **이미 로그인해 둔** 테넌트/계정을 그대로 쓴다(쿠키 재사용 · 사람 2단계 0회).
+     왜 필요한가: 하니스는 실행마다 새 테넌트를 만들어서, 서식·셀렉터를 한 줄 고칠 때마다 사장님께 2단계 인증을
+     다시 부탁해야 했다(2026-09-14 실측: 티스토리 2단계 유효시간 만료로 두 번 허비). 저장된 쿠키가 살아 있으면
+     로그인을 건너뛰고 **고친 부분만** 다시 잰다. 재사용 시에는 테넌트를 지우지 않는다. */
+  let tid: number;
+  if (reuseTid) {
+    const [t0] = await q(sql`SELECT id FROM tenants WHERE id = ${reuseTid} LIMIT 1`);
+    if (!t0) { console.error(`\n  ✗ 테넌트 ${reuseTid} 이(가) 없어요.\n`); close(); await pgClient.end({ timeout: 5 }); process.exit(2); }
+    tid = reuseTid;
+  } else {
+    const [t] = await q(sql`INSERT INTO tenants (key, name, plan_key, status)
+      VALUES (${`b2ver${stamp}`.slice(0, 40)}, ${"B2실증"}, 'starter', 'active') RETURNING id`);
+    tid = n(t?.id);
+  }
   let ok = false;
   let canaryVerdict: "ok" | "fail" | "unknown" = "unknown";
   try {
@@ -155,11 +168,23 @@ async function main() {
        2단계·기기 확인이 매번 뜬다. 사장님이 «이 브라우저에서 2단계 인증 사용 안 함»을 켜도 다음 실행엔 사라진다
        (2026-09-14 실측: 티스토리 2단계가 두 번 연속 뜬 진짜 이유). 검증용 프로필은 채널당 하나로 고정한다.
        ⚠️ 운영에서는 계정마다 다른 키가 맞다(AC-3 세션 섞임 방지) — 여기는 자사 테스트 계정 1개짜리 검증이다. */
-    const [a] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key, daily_cap, min_gap_min)
-      VALUES (${tid}, ${channel}, ${cfg.handle}, 'session', 'active', ${`verify-${channel}`}, 3, 60) RETURNING id`);
-    const accountId = n(a?.id);
-    await q(sql`INSERT INTO account_creds (tenant_id, account_id, kind, enc)
-      VALUES (${tid}, ${accountId}, 'password', ${encryptObj({ loginId: cfg.id, password: cfg.pw, method: cfg.method })})`);
+    let accountId: number;
+    if (reuseTid) {
+      // 저장된 쿠키가 살아 있는 계정만 고른다 — 없으면 재사용의 의미가 없다(로그인부터 다시 해야 한다).
+      const [a0] = await q(sql`SELECT a.id FROM accounts a
+        WHERE a.tenant_id = ${tid} AND a.channel = ${channel}
+          AND EXISTS (SELECT 1 FROM account_creds c WHERE c.account_id = a.id AND c.kind = 'cookies' AND c.purged_at IS NULL)
+        ORDER BY a.id DESC LIMIT 1`);
+      if (!a0) { console.error(`\n  ✗ 테넌트 ${tid} 에 «${channel}» 쿠키가 저장된 계정이 없어요(먼저 --login-first 로 한 번 로그인).\n`); return; }
+      accountId = n(a0.id);
+      console.log(`   ♻ 재사용: 테넌트 ${tid} · 계정 ${accountId} — 저장된 쿠키를 쓰므로 **로그인·2단계 없음**\n`);
+    } else {
+      const [a] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key, daily_cap, min_gap_min)
+        VALUES (${tid}, ${channel}, ${cfg.handle}, 'session', 'active', ${`verify-${channel}`}, 3, 60) RETURNING id`);
+      accountId = n(a?.id);
+      await q(sql`INSERT INTO account_creds (tenant_id, account_id, kind, enc)
+        VALUES (${tid}, ${accountId}, 'password', ${encryptObj({ loginId: cfg.id, password: cfg.pw, method: cfg.method })})`);
+    }
     const [p] = await q(sql`INSERT INTO pieces (tenant_id, account_id, channel, kind, format, title, body, blocks, meta, status)
       VALUES (${tid}, ${accountId}, ${channel}, 'post', 'info', ${`[실증 드라이런] 겨울 이불 세탁 ${stamp}`}, ${body}, ${jsonb([])},
               ${jsonb({ tags: ["겨울이불", "코인워시"], disclosure: "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.", affiliate: { provider: "coupang", url: "https://link.coupang.com/x", subId: "piece_0" } })},
@@ -274,7 +299,8 @@ async function main() {
         : "\n   ✗ 임시저장까지 못 갔다 — 위 사유와 FAIL.png 를 보고 고친다.\n");
     }
   } finally {
-    if (!keep) {
+    // ♻ 재사용 테넌트는 **절대 지우지 않는다** — 지우면 어렵게 받은 로그인 쿠키가 날아가 사장님께 2단계를 또 부탁해야 한다.
+    if (!keep && !reuseTid) {
       for (const table of ["posts", "runner_jobs", "runner_devices", "account_creds", "piece_assets", "pieces", "accounts", "notifications", "audit_logs"]) {
         await q(sql`DELETE FROM ${sql.raw(table)} WHERE tenant_id = ${tid}`);
       }
