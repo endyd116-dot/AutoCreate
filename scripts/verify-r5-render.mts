@@ -1,6 +1,24 @@
 /**
  * scripts/verify-r5-render.mts — 🔴 **영상 렌더 전 구간 실증**(계약 P1R5 §2.1~2.2 · §5).
  *
+ *   ══ 쓰는 법(C 검증 재현용) ══
+ *     npx --yes tsx --env-file=.env scripts/verify-r5-render.mts            # 끝나면 테넌트 정리
+ *     npx --yes tsx --env-file=.env scripts/verify-r5-render.mts --keep     # 테넌트·자산 남김(행을 직접 들여다볼 때)
+ *
+ *   준비물(둘 다 없으면 즉시 정직하게 멈춘다 · 조용한 실패 0):
+ *     · **ffmpeg** — 없으면 러너가 렌더 잡을 아예 claim 하지 않는다(`caps.ffmpeg:false`). 설치는 `runner/install.md`.
+ *     · **R2 5키**(`.env` R2_*) — 없으면 시작하자마자 «R2 미설정»으로 종료(exit 2).
+ *   걸리는 시간 ≈ 40초(1080×1920 · 12초 · 인코딩 포함). 인자 없이 돌리면 남는 것 0.
+ *   러너 토큰·기기 등록·로컬 함수 서버를 **스크립트가 알아서** 만든다 — 사람이 준비할 것은 위 둘뿐이다.
+ *
+ *   ══ 판정을 두 가지로 나눠 읽어라(중요) ══
+ *     ① **렌더 판정** = 종료코드 · «✓ 렌더 전 구간 통과» — 이 스크립트가 책임지는 범위(B2).
+ *        러너가 실제로 굽고 presigned PUT 으로 올렸고, 서버가 **R2 HEAD 로 실존**을 확인했는가.
+ *     ② **심사 판정** = «심사 축» 목록(B-1 `judgeVideo` 영역) — 여기서 P0 가 떠도 **렌더 실패가 아니다**.
+ *        🔴 알려진 것: `frames_not_blank` 는 이 하니스에서 **항상 ✗** 다. 재료가 합성 그라데이션이라
+ *           비전 모델이 «빈 프레임»으로 본다 — **하니스 한계이지 제품 결함이 아니다**(실제 클립·사진이면 해당 없음).
+ *           그래서 piece 는 status=failed 로 끝난다. 그걸 «렌더 실패»로 적으면 기록이 틀린다.
+ *
  *   `npx tsx --env-file=.env scripts/verify-r5-render.mts [--keep]`
  *
  *   한 프로세스 안에서 전부 한다:
@@ -165,14 +183,24 @@ async function main() {
     const [gr] = await q(sql`SELECT gate_report FROM pieces WHERE id = ${pieceId}`);
     const axes = ((gr?.gate_report as Record<string, unknown> | null)?.axes ?? []) as { key: string; pass: boolean; grade: string; detail?: string }[];
     if (axes.length) {
-      console.log("   심사 축:");
-      for (const a of axes) console.log(`      ${a.pass ? "✓" : "✗"} ${a.key}(${a.grade})${a.detail ? ` — ${a.detail}` : ""}`);
+      console.log("   심사 축(B-1 judgeVideo 영역 — 이 스크립트의 합부와 별개):");
+      for (const a of axes) {
+        const known = a.key === "frames_not_blank" && !a.pass ? "  ← 하니스 한계(합성 재료) · 제품 결함 아님" : "";
+        console.log(`      ${a.pass ? "✓" : "✗"} ${a.key}(${a.grade})${a.detail ? ` — ${a.detail}` : ""}${known}`);
+      }
     }
 
-
+    /* 🔴 판정을 두 줄로 나눠 찍는다 — 렌더(내 책임)와 심사(B-1 책임)를 한 줄로 합치면
+       «심사 P0 = 렌더 실패»로 잘못 기록된다(가짜 빨강). 종료코드는 **렌더 판정**만 따른다. */
     console.log(ok
-      ? "\n   ✓ 렌더 전 구간 통과 — 러너가 실제로 굽고 올렸고, 서버가 R2 에서 실존을 확인했다.\n"
-      : "\n   ✗ 렌더가 끝까지 가지 못했다 — 위 잡 행의 사유를 보라.\n");
+      ? "\n   ✓ 렌더 판정: 통과 — 러너가 실제로 굽고 올렸고, 서버가 R2 HEAD 로 실존을 확인했다."
+      : "\n   ✗ 렌더 판정: 실패 — 위 잡 행의 사유를 보라.");
+    const p0 = axes.filter((a) => !a.pass && a.grade === "P0").map((a) => a.key);
+    if (axes.length) {
+      console.log(p0.length
+        ? `   · 심사 판정: P0 ${p0.join(", ")} — piece 는 failed 로 끝난다(렌더 실패가 아니다).\n`
+        : "   · 심사 판정: 통과.\n");
+    } else console.log("");
   } finally {
     if (!keep) {
       for (const table of ["runner_jobs", "runner_devices", "piece_assets", "pieces", "notifications", "audit_logs"]) {
