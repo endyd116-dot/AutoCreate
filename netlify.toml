@@ -13,7 +13,14 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["postgres", "drizzle-orm", "jsonwebtoken", "bcryptjs", "@aws-sdk/client-s3", "resend"]
+  external_node_modules = ["postgres", "drizzle-orm", "jsonwebtoken", "bcryptjs", "@aws-sdk/client-s3", "resend", "@resvg/resvg-js"]
+
+# 공유 카드(R6 §2.2) — 서버에서 한글 PNG 를 굽는다.
+#   🔴 `@resvg/resvg-js` 는 네이티브 모듈이라 esbuild 번들에 못 담는다 → external_node_modules 에 등재(위).
+#   🔴 폰트를 함께 실어야 한다 — Netlify 리눅스 컨테이너엔 **한글 글꼴이 없다**(없으면 전부 네모로 나온다).
+#   🔴 included_files 는 **이 함수 하나에만** 준다(AM 함정 #1141: sharp 를 전 함수에 복제해 번들이 폭증했다).
+[functions."share-card"]
+  included_files = ["assets/fonts/Pretendard-Regular.otf", "assets/fonts/Pretendard-Bold.otf"]
 
 # ══ 크론 우산 2개(계약 P1R2 §1 · DESIGN §5B.7) ══
 #   스텝은 `lib/cron/runner.ts STEPS` 에만 적힌다 — 여기에는 **함수의 주기**만(AM 관례: 스텝 추가 ≠ 함수 추가).
