@@ -266,6 +266,17 @@ input,textarea,select{font:inherit;color:inherit}
 .gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
 [contenteditable="true"]{outline:none;border-radius:8px;transition:box-shadow var(--dur) var(--ease)} [contenteditable="true"]:focus{box-shadow:0 0 0 2px var(--sel)}
 
+/* ── 터치 하한 44px(§13.0 접근성) — 보이는 크기는 그대로 두고 «누르는 영역»만 투명 오버레이로 44×44 이상 넓힌다 ──
+   대상 = 44 미만으로 그려지는 프리미티브 전부: 아이콘 버튼(.ic 40) · 작은 버튼(.btn.sm 40) · 세그먼트(30) · 칩(36) · 스테퍼(32) · 토글(28) · 섹션 헤더의 텍스트 링크(19) · 배너 안 버튼
+   달력 날짜(.cal .dd)와 일별 막대(.spark)는 격자라 가로 44 가 불가능 — 막대는 세로만 기둥 전체로 넓힌다 */
+.ic,.btn.sm,.seg button,.chip,.stepper button,.toggle,.banner button,.banner a,.group .gt a,.group .gt button{position:relative}
+.ic::before,.btn.sm::before,.seg button::before,.chip::before,.stepper button::before,.toggle::before,.banner button::before,.banner a::before{content:"";position:absolute;top:50%;left:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}
+.group .gt a::before,.group .gt button::before{content:"";position:absolute;left:50%;bottom:-2px;width:max(100%,44px);height:44px;transform:translateX(-50%)} /* 아래 행을 덮지 않게 위쪽으로 넓힌다 */
+.spark button{position:relative} .spark button::before{content:"";position:absolute;left:-1px;right:-1px;bottom:0;height:92px}
+.row .l:is(button){min-height:44px}
+.toggle::before{border-radius:999px}
+.seg button{min-width:44px} .seg button::before{width:100%} /* 붙어 있는 세그먼트는 옆으로 넓히면 이웃을 덮는다 — 폭은 실제로 44 를 주고 세로만 넓힌다 */
+
 /* ── P1R2 추가(2026-09-14) — 프리미티브 2개(.input 과 같은 급 · 컴포넌트 아님): 토큰·설치 명령 상자 · 행 우측 외부 링크 자국 ── */
 .code{background:var(--ground);border-radius:12px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--ink);user-select:all;display:block}
 .ext{width:15px;height:15px;color:var(--faint);flex:none}
