@@ -7,6 +7,7 @@
  *   🔴 평문(쿠키)은 HTTPS 본문으로만 나간다 — 파일·로그에 남기지 않는다.
  */
 import { shot, settle } from "../lib/browser.mjs";
+import { passKakaoConsent } from "../lib/auth-kakao.mjs";
 import { uploadSession } from "../lib/api.mjs";
 
 const BLOCK = (kind, msg) => Object.assign(new Error(`[block:${kind}] ${msg}`), { errorKind: kind });
@@ -35,8 +36,10 @@ const TARGETS = {
   tistory: {
     loginUrl: "https://www.tistory.com/auth/login",
     homeUrl: "https://www.tistory.com",
-    done: (page) => !/auth\/login|accounts\.kakao\.com/i.test(page.url()),
-    cookieUrls: ["https://www.tistory.com", "https://tistory.com", "https://accounts.kakao.com"],
+    /* 🔴 완료 = **티스토리 서비스 도메인에 실제 도착**(관리/블로그). kauth·accounts·auth/login 은 아직 진행 중 —
+       종전 `!/auth\/login|accounts\.kakao\.com/` 은 kauth.kakao.com 동의 화면을 «완료»로 오판정했다(job #87). */
+    done: (page) => /(^|\.)tistory\.com/i.test((() => { try { return new URL(page.url()).host; } catch { return ""; } })()) && !/\/auth\/login/i.test(page.url()),
+    cookieUrls: ["https://www.tistory.com", "https://tistory.com", "https://accounts.kakao.com", "https://kauth.kakao.com"],
     /* 🔴 실측(2026-09-14 자사 테스트 블로그 note83685): 카카오 계정은 아이디·비밀번호가 맞아도 **2단계 인증**에서 멈춘다
        («카카오톡으로 로그인 확인 메시지가 전송되었습니다» · 남은 시간 5분). 그 화면에
        «이 브라우저에서 2단계 인증 사용 안 함» 체크가 있고, **그걸 켜야** 다음부터 자동 발행이 로그인 없이 돈다.
@@ -67,13 +70,19 @@ export async function run({ ctx, job, token, shotKey }) {
   console.log("  └───────────────────────────────────────────────────────────┘");
   console.log("");
 
-  // 사람이 끝낼 때까지 폴링. 캡차·2단계는 사람이 푼다 — 우리는 기다리기만 한다.
+  /* 사람이 아이디·비번·2단계(휴대폰 승인)를 한다. 카카오 «계속하기»(동의) 화면은 우리가 눌러 준다 —
+     그 화면은 봇 판정 대상이 아니라 사람 세션의 단순 확인이라, 여기서 통과시켜 주면 사람 부담이 준다(2026-09-14 근본 수리).
+     🔴 완료 판정은 target.done(반드시 tistory/naver 서비스 도메인 도달) 로 — kauth·accounts 중간 화면을 «완료»로 오판정하지 않는다. */
   const deadline = Date.now() + WAIT_MS;
   let done = false;
   while (Date.now() < deadline) {
     await settle(page, 2000);
     if (page.isClosed()) throw BLOCK("login_fail", "로그인 창이 닫혔어요. 앱에서 다시 시도해 주세요.");
-    try { if (target.done(page)) { await settle(page, 2500); done = true; break; } } catch { /* 이동 중 */ }
+    try {
+      // 카카오 동의 화면이면 대신 눌러 준다(2FA 는 사람이 이미 함). naver 는 이 함수가 false 로 넘긴다.
+      if (channel === "tistory") await passKakaoConsent(page).catch(() => {});
+      if (target.done(page)) { await settle(page, 2500); done = true; break; }
+    } catch { /* 이동 중 */ }
   }
   if (!done) throw BLOCK("login_fail", `${Math.round(WAIT_MS / 60_000)}분 안에 로그인이 끝나지 않았어요. 앱에서 다시 시도해 주세요.`);
 
