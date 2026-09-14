@@ -385,7 +385,7 @@ async function main() {
     const api = await cron("5m", TID);
     const [bp2] = await s`SELECT status, meta->>'failReason' AS why, meta->>'publishAttempts' AS att FROM pieces WHERE id = ${bp.id}`;
     const [bnt] = await s`SELECT id, kind FROM notifications WHERE tenant_id = ${TID} AND kind IN ('publish_manual','publish_failed') ORDER BY id DESC LIMIT 1`;
-    rec("블로거 자격 없음 → awaiting_manual|failed + 사유 + 알림(재시도 0)", ["awaiting_manual", "failed"].includes(bp2?.status) && !!bp2?.why && !!bnt, `piece ${bp.id} ${bp2?.status} «${bp2?.why}» attempts ${bp2?.att} · 알림 ${bnt?.id} ${bnt?.kind} · detail ${JSON.stringify(stepOf(api, "publisher")?.detail || {})}`, `piece ${bp.id}`);
+    rec("블로거 자격 없음 → awaiting_manual(사람 개입) + 사유 + 알림(재시도 0)", bp2?.status === "awaiting_manual" && !!bp2?.why && bnt?.kind === "publish_manual", `piece ${bp.id} ${bp2?.status} «${bp2?.why}» attempts ${bp2?.att} · 알림 ${bnt?.id} ${bnt?.kind} · detail ${JSON.stringify(stepOf(api, "publisher")?.detail || {})}`, `piece ${bp.id}`);
     const api2 = await cron("5m", TID);
     const [bp3] = await s`SELECT meta->>'publishAttempts' AS att FROM pieces WHERE id = ${bp.id}`;
     rec("정직 실패 뒤 재시도 0(attempts 불변)", bp3?.att === bp2?.att, `attempts ${bp2?.att}→${bp3?.att}`);
@@ -415,7 +415,7 @@ async function main() {
   if (SECTIONS.has("transitions") && token) {
     const H = { "x-runner-token": token };
     const claimAny = async (kinds) => (await call(null, "/api/runner-queue", { body: { action: "claim", kinds, max: 5 }, headers: H })).json?.jobs || [];
-    const mkJob = async (accId) => { await s`UPDATE accounts SET status = 'pending_login' WHERE id = ${accId}`; const r = await call(jar, "/api/accounts-relogin", { body: { id: accId } }); return r.json?.job?.id; };
+    const mkJob = async (accId) => { await s`UPDATE runner_jobs SET status = 'failed', claimed_by = NULL, claimed_at = NULL WHERE tenant_id = ${TID} AND account_id = ${accId} AND kind IN ('session.login','session.verify') AND status IN ('queued','claimed')`; await s`UPDATE accounts SET status = 'pending_login' WHERE id = ${accId}`; const r = await call(jar, "/api/accounts-relogin", { body: { id: accId } }); return r.json?.job?.id; };   // 앞 보고가 남긴 재시도 잡(due_at 5분 뒤)은 치우고 새로
     const acc = async (id) => (await s`SELECT status, daily_cap, health_score, last_error_kind FROM accounts WHERE id = ${id}`)[0];
     // rate_limited → cooldown + daily_cap −1
     const capBefore = Number((await acc(naver.id)).daily_cap);
