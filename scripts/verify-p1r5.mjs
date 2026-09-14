@@ -1,7 +1,7 @@
 // scripts/verify-p1r5.mjs — P1R5 검증 하니스 뼈대(C · 계약 v5.1 §6 · 영상 «생성 두뇌 + 러너 렌더 + 출구»). 🔴 B-1·B2·A 머지 후 트리거 때 실경로로 채운다.
 //   로컬 스모크(돈 0): 손잡이 확정(계약 v5.2 §1.4b): dev 서버 env `VIDEO_PROVIDER_STUB=1`(provider·TTS·비전 스텁 · ai_usage 원가 0) · `CHAIN_BUDGET_MS`(기본 660000 · 이어달리기 재현은 30000 으로) · 슬롯 없는 자동 생성은 새 손잡이 없이 confirm({origin:"auto"}) slotId 없이(HTTP 밖 · tsx 로 lib 직접 호출) 로 chainStage 전이·잠금·이어달리기·스위퍼·코인 구간·달러 캡·kill switch·프레임 지문·uploaded_private 폭·배지 고지.
 //   라이브 실증(돈 씀 · 1회 · 메인 호출): 60초 실제 생성·렌더·유튜브 비공개 업로드 — 이 파일 밖(별도 스크립트 · videoId·R2 HEAD·스샷 증거).
-//   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,payload,render,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup)
+//   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,payload,render,bgm,rules,disclosure,fingerprint,posts,ui,wiring,regress,cleanup)
 //   🔴 계약 v5.5 §1.4c 반영(2026-09-14): ①원가 관문은 R4 `checkAiCostCap` 재사용(새 캡 금지) — **소프트(플랜 일일 상한 초과) = 막지 않는다 + 운영 알림** / 하드(×3) = failed+코인 환급+알림 2종 / 전역 월 ₩1,400,000 = 하드 / 환율 없으면 «못 재니 막지 않는다»(fxMissing · FX 기본값 코드에 박기 금지)
 //     ②토킹 still 컷은 **구축**(스킵 금지) — `scenes[]` 전건이 clipKey|imageKey 중 하나를 가져야 한다(둘 다 없으면 러너에 검은 화면 · §2.1 위반)  ③`scripts/seed-bgm.mjs` 존재·멱등 · BGM_LICENSE_VERIFIED 없으면 audio.bgm=null(무음)이 정직 경로(에러 아님).
 //   🔴 이 절의 핵심 하나: «자기 코인으로 만드는 고객이 우리 원가 캡에 막히는 경로 = 0». 초록이어야 하는 건 «성공», 0이어야 하는 건 «막힘»이다.
@@ -10,7 +10,7 @@ if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36); const EMAIL = process.env.TEST_EMAIL || `c+r5-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
 const CRON_SECRET = process.env.CRON_SECRET || "";
-const SECTIONS = new Set((process.env.SECTIONS || "setup,topics,director,chain,sweep,cost,payload,render,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "setup,topics,director,chain,sweep,cost,payload,render,bgm,rules,disclosure,fingerprint,posts,ui,wiring,regress,cleanup").split(","));
 /** 하니스 산술용 환율(= dev 서버에 준 FX_USD_KRW 와 같은 값이어야 한다). 🔴 제품 코드에는 절대 박지 않는다(계약 v5.5) — 여기는 «얼마를 심어야 구간에 들어가나»를 계산하는 검사 쪽이다. */
 const FX = Number(process.env.FX_USD_KRW || 1400);
 /** lib/billing/ai-cost-cap.ts PLAN_CAP_KRW 의 사본(정본은 그 파일 · 값이 바뀌면 이 표가 FAIL 로 알려 준다). */
@@ -372,6 +372,37 @@ async function main() {
     const pl = await call(jar, "/api/posts-list", { query: { status: "all" } });
     rec("posts-list status 어휘에 uploaded_private 허용(화면 «비공개 업로드됨»)", pl.json?.ok === true, `${pl.status}`);
   }
+  /* ══ ui — A 화면(계약 §3) 정적 검사: 서버 어휘를 화면이 실제로 쓰는가 · 되돌릴 수 없는 행동을 말하는가 ══ */
+  if (SECTIONS.has("ui")) {
+    const rd = (p) => (existsSync(p) ? readFileSync(p, "utf8") : "");
+    const uiJs = rd("public/js/ui.js"), piece = rd("public/app/piece.html"), pieces = rd("public/app/pieces.html"),
+      director = rd("public/app/director.html"), posts = rd("public/app/posts.html"), runner = rd("public/app/runner.html");
+    // ① 변주 사람말 — 서버 `video.variantLabels` 우선 · 없으면 상수 · 그것도 없으면 **키 그대로**(숨기지 않는다)
+    const vword = (uiJs.match(/UI\.vword[\s\S]{0,400}/) || [""])[0];
+    // 폴백 사다리 = 서버 라벨 → 상수표(UI.HOOK·UI.PALETTE) → **원값 그대로**(`|| raw`). 마지막 단이 «빈 화면»이면 안 된다.
+    rec("① 변주 사람말 = UI.vword 한 곳 · 서버 variantLabels 우선 · 최후엔 원값 그대로(숨김 0)",
+      /variantLabels/.test(vword) && /\|\|\s*raw\b/.test(vword), vword ? (vword.match(/\|\|\s*raw[^;]*/) || ["🔴 폴백 사다리 없음"])[0].slice(0, 70) : "UI.vword 없음");
+    rec("① 변주 라벨을 화면이 하드코딩하지 않는다(director·piece 는 vword 경유)",
+      !/hookType\s*===\s*["']/.test(director + piece) && (/vword/.test(director) || /vword/.test(piece)), `director ${/vword/.test(director) ? "vword" : "-"} · piece ${/vword/.test(piece) ? "vword" : "-"}`);
+    // ② 되돌릴 수 없는 행동 — «다시 만들기» 는 **사라진다는 사실**을 먼저 말한다(모르고 눌러 영상을 잃는 경로 0)
+    const regenBlock = (piece.match(/[\s\S]{0,600}pieces-regenerate/) || [""])[0];
+    rec("② 영상 «다시 만들기» → 확인 시트가 «지금 영상과 자막은 사라져요»를 먼저 말한다(코인 0 · 1회)",
+      /사라져|사라집/.test(regenBlock) && /UI\.sheet|confirmRow/.test(regenBlock), /사라져|사라집/.test(regenBlock) ? "확인 시트 문구 있음" : "🔴 경고 없이 재생성");
+    rec("② 재생성 1회 제한이 버튼 글자가 아니라 **비활성 전환**(계약 §7)", /regenCount\s*>=\s*1\s*\?\s*"disabled"/.test(piece), "");
+    // ③ 상태 어휘를 화면이 그대로 쓴다
+    // 스텝 표는 화면이 아니라 `UI.VSTAGE`(ui.js) 한 곳에 있다 — 어휘 정본은 거기서 센다.
+    const vstage = (uiJs.match(/UI\.VSTAGE\s*=[\s\S]{0,300}?\];/) || [""])[0];
+    rec("③ 만드는 중 스텝 6 = UI.VSTAGE 가 meta.stage 어휘 그대로(script→tts→clips→render→judging→done)",
+      VIDEO_STAGES.slice(0, 6).every((st) => vstage.includes(`"${st}"`)) && /videoBar|VSTAGE/.test(pieces),
+      VIDEO_STAGES.slice(0, 6).filter((st) => !vstage.includes(`"${st}"`)).join(",") || "6단계 전부 · pieces.html 이 사용");
+    rec("③ 발행함 «비공개 업로드됨 · 공개 전환 필요»(uploaded_private · AC-4)", /uploaded_private/.test(posts) && /비공개 업로드/.test(posts), "");
+    rec("③ 러너 화면 «ffmpeg 없음» 칩(caps.ffmpeg · 침묵 금지)", /ffmpeg/i.test(runner), "");
+    // ④ 헌장 — 영상 화면에 이모지 아이콘 0(§13.0 금지)
+    // 헌장이 금하는 건 «컬러 이모지 글리프»다(shot-p1r1.mjs 와 같은 자 `\p{Emoji_Presentation}`). ✓ 같은 흑백 기호는 아이콘이 아니라 글자다.
+    const emoji = [...(piece + pieces + director + posts + runner).matchAll(/\p{Emoji_Presentation}/gu)].map((m) => m[0]);
+    rec("④ 헌장: 영상 화면 5장에 이모지 아이콘 0(§13.0)", emoji.length === 0, emoji.length ? `«${[...new Set(emoji)].join("")}» ${emoji.length}개` : "0개");
+  }
+
   /* ══ wiring — 🔴 AC-29 «누가 부르나»: 새 게이트·잡 kind·상태 어휘의 **호출처 수를 센다**(0 이면 있는 척 미완) ══ */
   if (SECTIONS.has("wiring")) {
     const { readdirSync, statSync } = await import("node:fs");
