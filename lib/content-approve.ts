@@ -20,7 +20,7 @@ import { jsonb, utcDate } from "./db-util";
 import { contractFor } from "./writing-contracts";
 import { type Block, htmlToPlain } from "./blocks";
 import { runGate, GATE_KEYS, GATE_LABEL, type GateReport, type GateCheck } from "./ai-tell-gate";
-import { checkDisclosureHtml } from "./disclosure";
+import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
 import { personaTerms } from "./content-gen";
@@ -34,6 +34,14 @@ export const HARD_GATE_KEYS: readonly string[] = ["disclosure", "banned_words", 
 export function hardFailures(gate: GateReport): GateCheck[] {
   return gate.checks.filter((c) => !c.pass && HARD_GATE_KEYS.includes(c.key));
 }
+/**
+ * [P1R5 §1.4-5·§0.1-7] 영상 심사의 **P0 축**도 승인을 막는다(forbidden·disclosure·duration_fit·frames_not_blank).
+ *   P1·P2 는 기록만 — 화면이 축 목록으로 보여 주되 «이대로 예약»을 막지 않는다(3등급 규칙).
+ *   `hardFailures` 와 나눠 둔 이유: 축 키(duration_fit·frames_not_blank)는 GateKey 12 에 대응물이 없다.
+ */
+export function judgeBlockers(gate: GateReport): { key: string; label: string; detail?: string }[] {
+  return (gate.judge?.axes ?? []).filter((a) => !a.pass && a.grade === "P0").map((a) => ({ key: a.key, label: a.label, ...(a.detail ? { detail: a.detail } : {}) }));
+}
 
 /** 본문 HTML 의 제휴 링크 수(쿠팡 도메인 + affiliate 클래스). */
 export function affiliateLinkCount(html: string): number {
@@ -45,6 +53,7 @@ export function affiliateLinkCount(html: string): number {
  *   블록이 정본이면 블록 기준, 사용자가 HTML 을 고쳤으면(`meta.editedByUser`) HTML 기준(구조 검사는 태그로 근사).
  */
 export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
+  if (String(p.kind) === "video") return await recheckVideoPiece(tid, p);
   const m = (p.meta || {}) as Record<string, unknown>;
   const blocks = (Array.isArray(p.blocks) ? p.blocks : []) as Block[];
   const html = String(p.body || "");
@@ -83,6 +92,56 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   return { ok: checks.every((x) => x.pass), checks, rewritten: false };
 }
 
+/** [P1R5 §1.4-6] 영상에 해당하는 GateKey — HTML 을 전제하는 4키(visual_min·affiliate_count·bullet_ratio·para_repeat)는 영상에 뜻이 없어 빼고, 나머지 8키를 **대본 말**로 잰다. */
+export const VIDEO_GATE_KEYS: readonly string[] = ["cliche", "translationese", "sentence_variance", "superlative", "persona", "banned_words", "similarity", "disclosure"];
+
+/**
+ * recheckVideoPiece — 영상 검수 재검사(계약 §1.8 «approve·publish 직전 재검사» · §1.4-6).
+ *   말(대본)은 글과 **같은 판정기**(`runGate`)로 재고, 고지는 영상 3종(배지·시작 3초 자막·설명란 첫 줄)으로,
+ *   화면 품질은 `gate_report.judge`(생성 때 `judgeVideo` 가 남긴 축)를 **다시 읽어** 싣는다.
+ *   🔴 심사를 여기서 다시 돌리지 않는다 — 판정은 `finalizeRender` 한 곳(R2 §10 «두 곳에서 상태를 쓰지 않는다»). 여기서는 읽어 게이트로 옮길 뿐이다.
+ */
+export async function recheckVideoPiece(tid: number, p: Row): Promise<GateReport> {
+  const m = (p.meta || {}) as Record<string, unknown>;
+  const script = (m.script ?? null) as { lines?: { text?: unknown }[] } | null;
+  const spoken = (script?.lines ?? []).map((l) => String(l?.text ?? "")).filter(Boolean).join("\n");
+  const description = String(p.body || "");                       // 설명란(첫 줄 고지)
+  const plain = [spoken, description].filter(Boolean).join("\n");
+  const c = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
+  const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(p.account_id)}`) : [undefined];
+  const [pe] = acc?.persona_id ? await q(sql`SELECT profile FROM personas WHERE id = ${n(acc.persona_id)}`) : await q(sql`SELECT profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 1`);
+  const terms = personaTerms((pe?.profile || {}) as Record<string, unknown>);
+  // 대본 유사도 — 같은 brief 형제 + 같은 계정 30일(글과 같은 규칙 · §1.9 «텍스트 유사도는 대본에 그대로»)
+  const others = await q(sql`SELECT id, meta FROM pieces WHERE tenant_id = ${tid} AND kind = 'video' AND id <> ${n(p.id)}
+    AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
+  const otherTexts = others.map((o) => {
+    const om = (o.meta || {}) as Record<string, unknown>;
+    const ls = ((om.script ?? {}) as { lines?: { text?: unknown }[] }).lines ?? [];
+    return ls.map((l) => String(l?.text ?? "")).join("\n");
+  }).filter(Boolean);
+  const sim = maxSimilarity(spoken, otherTexts);
+
+  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score, against: sim.index >= 0 ? `영상 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
+  const checks: GateCheck[] = base.checks.filter((x) => VIDEO_GATE_KEYS.includes(x.key));
+
+  // 고지 = 영상 3종(배지·시작 3초 자막·설명란 첫 줄) — HTML 판정을 쓰지 않는다.
+  const payload = (m.render ?? null) as { overlay?: { badge?: { text?: unknown } | null }; disclosureCaption?: { text?: unknown } | null } | null;
+  const d = checkVideoDisclosure(
+    { badge: payload?.overlay?.badge ? String(payload.overlay.badge.text ?? "") : null,
+      disclosureCaption: payload?.disclosureCaption ? String(payload.disclosureCaption.text ?? "") : null,
+      descriptionFirstLine: description.split("\n")[0] ?? "" },
+    { affiliate: m.affiliate ?? m.affiliateLink ?? m.affiliateHint ?? null, adDisclosure: m.adDisclosure === true },
+  );
+  const di = checks.findIndex((x) => x.key === "disclosure");
+  const dCheck: GateCheck = { key: "disclosure", label: GATE_LABEL.disclosure, pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) };
+  if (di >= 0) checks[di] = dCheck; else checks.push(dCheck);
+
+  // 심사 축 — 생성 때 남은 것을 그대로 싣는다(없으면 «아직 안 구웠다»는 뜻 · 축 없음은 실패가 아니다).
+  const prev = (p.gate_report && typeof p.gate_report === "object" ? p.gate_report : null) as GateReport | null;
+  const judge = prev?.judge;
+  return { ok: checks.every((x) => x.pass) && !(judge?.axes ?? []).some((a) => !a.pass && a.grade === "P0"), checks, rewritten: false, ...(judge ? { judge } : {}) };
+}
+
 export type ApproveResult =
   | { ok: true; status: "scheduled"; scheduledFor: string; gate: GateReport; alreadyScheduled?: boolean }
   | { ok: false; step: "gate"; gate: GateReport; error: string }
@@ -107,7 +166,8 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date } = {
 
   const gate = await recheckPiece(tid, p);
   const hard = hardFailures(gate);
-  if (hard.length) {
+  const judged = judgeBlockers(gate);   // [P1R5] 영상 심사 P0(정책·고지·길이·빈 프레임)도 승인을 막는다 · P1/P2 는 통과
+  if (hard.length || judged.length) {
     await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${id}`);
     return { ok: false, step: "gate", gate, error: "발행 전 확인이 필요해요." };
   }

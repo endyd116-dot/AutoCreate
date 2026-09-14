@@ -8,6 +8,7 @@
 import { MODEL_TTS } from "../ai-models";
 import { recordAiUsage } from "../ai";
 import { r2Configured, r2Put } from "../r2";
+import { videoStub } from "./types";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -116,9 +117,21 @@ export type TtsResult =
 export async function synthesizeGemini(a: { tenantId: number; pieceId: number; text: string; voice?: string | null; keySuffix: string; dict?: SpeakReadingDict | null }): Promise<TtsResult> {
   const base = preprocessForSpeech(a.text, a.dict);
   if (!base) return { ok: false, reason: "읽을 대본이 없습니다.", costUsd: 0 };
+  if (!r2Configured()) return { ok: false, reason: "R2 미설정", costUsd: 0 };
+  if (videoStub()) {
+    /* 🔴 로컬 하니스(계약 §1.4b) — 여기 분기가 없어서 스텁 모드인데도 실호출이 나갔다(C 스모크 실측: gemini-tts ×4).
+       `tts-typecast.ts` 와 같은 모양: 음절 수 ÷ 4.6초 길이의 무음 wav + 어절 시각 균등 분할 + ai_usage model "stub" 원가 0. */
+    const durationMs = Math.max(600, Math.round(([...base].filter((ch) => /\S/.test(ch)).length / 4.6) * 1000));
+    const buf = wrapPcmAsWav(Buffer.alloc(Math.round(24000 * 2 * durationMs / 1000)), 24000);
+    const key = `autocreate/${a.tenantId}/${a.pieceId}/tts/narration-${a.keySuffix}.wav`;
+    await r2Put(key, buf, "audio/wav");
+    const toks = base.split(/\s+/).filter(Boolean); const per = durationMs / Math.max(1, toks.length);
+    const words: TtsWord[] = toks.map((t, i) => ({ text: t, startMs: Math.round(i * per), endMs: Math.round((i + 1) * per) }));
+    void recordAiUsage({ tenantId: a.tenantId, purpose: "tts", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+    return { ok: true, key, mime: "audio/wav", bytes: buf.length, durationMs, words, provider: "gemini", costUsd: 0, notes: ["stub"] };
+  }
   const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
   if (!apiKey) return { ok: false, reason: "Gemini 키가 없어 음성을 만들 수 없습니다.", costUsd: 0 };
-  if (!r2Configured()) return { ok: false, reason: "R2 미설정", costUsd: 0 };
   const voice = isGeminiVoice(a.voice) ? String(a.voice) : "Charon";
   const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 30_000);
   try {

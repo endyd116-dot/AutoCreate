@@ -4,7 +4,7 @@
  *   뺀 것: 붉은 표식 라벨 도해(VIDEOFIT·SURPASS 층 — 지식쇼츠 전용) · 공간 지문 · 밴딧 오프너(hookType 로 대체). 실측 수리 이력(글자 요구 무해화·«»꺾쇠 글리프·하드컷 요구형·인물 캐스팅 고정)은 보존.
  *   🔴 무인물·무텍스트·무로고 규칙(DESIGN §5C.3·§19) — 한글은 «새길 낱말 1개» 예외만. 인물은 스타일라이즈드/실루엣 또는 «한국 성인 · 전 컷 같은 캐스팅».
  */
-import type { CutPlan, ClipTier, ScriptLine, VideoFormat, VideoSeconds } from "./types";
+import { PALETTE_LABELS_KO, HOOK_LABELS_KO, type CutPlan, type ClipTier, type ScriptLine, type VideoFormat, type VideoSeconds } from "./types";
 
 export const GRAPHIC_CUT_SEC = 8;
 export const CUT_MIN_MS = 1800;
@@ -165,15 +165,28 @@ export function tierFor(format: VideoFormat, seconds: VideoSeconds, isHookOrLand
 export function buildCutPlans(a: { windows: { idx: number; lineIdx: number[]; startMs: number; endMs: number }[]; lines: ScriptLine[]; drafts: CutDraft[]; format: VideoFormat; seconds: VideoSeconds; hookType: string; palette: string; bakedWords?: (string | null)[] }): { plans: CutPlan[]; risks: { cut: number; risks: CutRisk[] }[] } {
   const plans: CutPlan[] = []; const risks: { cut: number; risks: CutRisk[] }[] = [];
   const byIdx = new Map(a.lines.map((l) => [l.idx, l]));
+  /* 토킹 포맷 컷 종류(계약 §1.3 표 그대로): «**B-roll 3~4** · 나머지 정지 이미지».
+     🔴 예전 규칙(i%2 = 절반씩)은 표와 달랐다 — 60초 12컷이면 B-roll 이 6개가 되어 원가가 표의 두 배가 된다.
+     B-roll 은 첫 컷(훅)과 마지막 컷(엔드카드)을 포함해 **고르게** 흩는다 — 움직이는 그림이 앞뒤와 중간에 하나씩 있어야 정지 구간이 지루하지 않다. */
+  const brollAt = new Set<number>();
+  if (a.format === "talking") {
+    const n = a.windows.length;
+    const want = Math.max(1, Math.min(4, Math.min(n, n <= 4 ? Math.ceil(n / 2) : n >= 10 ? 4 : 3)));
+    for (let k = 0; k < want; k++) brollAt.add(Math.round((k * (n - 1)) / Math.max(1, want - 1)));
+  }
   a.windows.forEach((w, i) => {
     const lead = byIdx.get(w.lineIdx[0]);
     const draft = a.drafts[Math.min(a.drafts.length - 1, lead?.cutIdx ?? i)] ?? a.drafts[i] ?? { key: `cut:${i}`, subject: lead?.text ?? "" };
     const isHook = i === 0; const isLast = i === a.windows.length - 1;
     const r = checkCutConflicts(draft); if (r.length) risks.push({ cut: i, risks: r });
-    const mode: CutPlan["mode"] = a.format === "talking" ? (i % 2 === 0 ? "still" : "t2v") : "t2v";
+    const mode: CutPlan["mode"] = a.format === "talking" ? (brollAt.has(i) ? "t2v" : "still") : "t2v";
     const keyword = extractSceneKeyword(w.lineIdx.map((li) => byIdx.get(li)?.text ?? "").join(" ")) ?? "";
     plans.push({ idx: i, startMs: w.startMs, endMs: w.endMs, lineIdx: w.lineIdx, keyword, tier: tierFor(a.format, a.seconds, isHook || (isLast && lead?.role === "landing")), mode,
       prompt: buildShotPrompt(draft, { durationSec: cutDurationSec(w.startMs, w.endMs), isHook, hookType: a.hookType, palette: a.palette, bakedWord: a.bakedWords?.[i] ?? null, endcard: isLast }) });
   });
   return { plans, risks };
 }
+
+/* 사람말 이름 짝 대조(§13.0) — 프롬프트 문구를 고치고 `types.ts PALETTE_LABELS_KO`·`HOOK_LABELS_KO` 를 안 고치면 화면 칩이 «기본» 으로 떨어진다. 조용히 틀리지 않게 기동 때 알린다. */
+for (const p of PALETTES) if (!PALETTE_LABELS_KO[p]) console.error(`[video/scenes] 팔레트 «${p}» 의 사람말 이름이 types.ts PALETTE_LABELS_KO 에 없습니다`);
+for (const h of HOOK_TYPES) if (!HOOK_LABELS_KO[h]) console.error(`[video/scenes] 훅 «${h}» 의 사람말 이름이 types.ts HOOK_LABELS_KO 에 없습니다`);

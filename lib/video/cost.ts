@@ -5,7 +5,7 @@
  *   영상 원가도 전부 `ai_usage`(video_clip·tts·video_judge·video_script·video_factcheck·video_factfix)로 들어가므로
  *   **같은 함수가 이미 센다** — 여기서는 그 결과를 **영상용 두 단계**로 나누어 판정만 한다:
  *     소프트 = 일일 상한 초과        → 🔴 막지 않는다(고객은 이미 코인을 냈다) · 운영 알림 1건/일 · 감사 usedKrw/capKrw
- *     하드   = 일일 상한 × 3 초과    → 차단(호출부가 piece failed + 코인 환급 + 고객 알림) · 운영 알림 risk high
+ *     하드   = **이미 쓴 것**이 일일 상한 × 3 초과 → 차단(v5.6 · 예상치를 더하지 않는다 — 한 편은 언제나 통과 · 폭주는 다음 편부터) · 운영 알림 risk high
  *     전역   = 월 ₩1,400,000 초과    → 차단(전 테넌트) · 운영 알림 risk high. **이것만 새로 잰다.**
  *   🔴 환율이 없으면 **못 재는 것이므로 막지 않는다**(`fxMissing:true` 를 응답·감사에 · `ai-cost-cap.ts` 규칙 그대로).
  *   🔴 `FX_USD_KRW` 기본값을 코드에 박지 않는다(`lib/revenue/common.ts fxToKrw` 헤더 — 환율 출처는 그 함수 하나).
@@ -38,7 +38,8 @@ export function estimateVideoCostUsd(format: VideoFormat, seconds: VideoSeconds,
   const p = PROVIDERS[providerKey] ?? PROVIDERS.veo_lite;
   const n = cuts ?? (seconds === 60 ? 9 : seconds === 30 ? 5 : 3);
   const clipSec = Math.min(8, Math.max(4, Math.round(seconds / n)));
-  const clipCount = format === "talking" ? Math.ceil(n / 2) : n;          // 토킹은 절반이 정지 이미지
+  // 토킹은 **B-roll 3~4 + 나머지 정지 이미지**(계약 §1.3 표 · `scenes.ts buildCutPlans` 의 brollAt 과 같은 규칙).
+  const clipCount = format === "talking" ? Math.max(1, Math.min(4, Math.min(n, n <= 4 ? Math.ceil(n / 2) : n >= 10 ? 4 : 3))) : n;
   const stillCount = n - clipCount;                                        // 나머지는 CHAIN_IMAGE 한 장씩(§1.4c(2))
   const clips = clipCount * (p.gateway === "omni" ? clipSec * 0.10 : estimateClipCostUsd(p, clipSec));
   const stills = stillCount * STILL_IMAGE_USD;
@@ -101,11 +102,18 @@ export async function checkVideoBudget(tenantId: number, addUsd = 0): Promise<Vi
     base.addKrw = add ? add.krw : 0;
     base.usedKrw = cap.usedKrw ?? 0;
     const projected = base.usedKrw + base.addKrw;
+    // 소프트는 **예상치까지** 본다 — 막지 않으니 일찍 알릴수록 좋다.
     base.soft = base.capKrw > 0 && projected > base.capKrw;
     const g = await globalMonthKrw();
     base.globalKrw = g.krw;
-    if (base.capKrw > 0 && projected > base.hardKrw) return { ...base, allowed: false, reason: "hard_cap" };
-    if (g.krw !== null && GLOBAL_MONTHLY_CAP_KRW > 0 && g.krw + base.addKrw > GLOBAL_MONTHLY_CAP_KRW) return { ...base, allowed: false, reason: "global_cap" };
+    /* 🔴 [v5.6] 하드는 **이미 쓴 것**만 본다(`addKrw` 를 더하지 않는다).
+       이유: 하드는 «버그 루프·남용» 방어지 편당 원가 심사가 아니다. 예상치를 더하면 trial 이 60초 1편도 못 만든다 —
+       C 라이브 실측: graphic/60s/omni/9컷 = ₩8,989 인데 trial 하드는 3,000×3 = ₩9,000(여유 ₩11).
+       그날 LLM 으로 ₩697만 써도 «돈 받고 안 만들어 주는» 사고가 다시 난다.
+       `used` 기준이면 **한 편은 언제나 통과**하고 폭주는 다음 편부터 즉시 막힌다. 초과분은 1편치(≤₩9,000)로 유한하고,
+       그 1편도 고객이 28코인(₩14,000)을 낸 것이라 편당 흑자다. */
+    if (base.capKrw > 0 && base.usedKrw > base.hardKrw) return { ...base, allowed: false, reason: "hard_cap" };
+    if (g.krw !== null && GLOBAL_MONTHLY_CAP_KRW > 0 && g.krw > GLOBAL_MONTHLY_CAP_KRW) return { ...base, allowed: false, reason: "global_cap" };
     return base;
   } catch (e) {
     console.error("[video/cost] checkVideoBudget 실패(fail-closed):", e);

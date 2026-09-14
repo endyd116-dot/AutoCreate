@@ -73,7 +73,16 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
     const dur = n(report.durationMs); const okDur = dur > 0 && dur <= (p.out.maxSeconds + 1) * 1000 && dur >= p.out.maxSeconds * 1000 * 0.6;
     const frames = n(report.frameCount); const okFrames = frames === 0 || Math.abs(frames - dur * 30 / 1000) <= 45;
     axes.push(axis("duration_fit", okDur && okFrames, okDur ? (okFrames ? undefined : `프레임 수 ${frames} 가 길이 ${dur}ms 와 안 맞음`) : `길이 ${Math.round(dur / 100) / 10}s(규격 ${Math.round(p.out.maxSeconds * 0.6)}~${p.out.maxSeconds}s)`));
-    axes.push(axis("frames_not_blank", n(report.bytes) > 150_000, n(report.bytes) > 150_000 ? undefined : `파일 ${n(report.bytes)}B — 빈 영상 의심`));
+    /* frames_not_blank — 🔴 **바이트 크기로 «빈 영상»을 의심하지 않는다**(B2 실측: 단색 6초 mp4 = 31KB · H.264 는 디테일이 없으면 그만큼만 쓴다).
+       예전 기준(>150KB)은 저디테일 실사(단색 배경 토킹 컷)의 멀쩡한 영상을 P0 로 죽였다.
+       판정은 **프레임이 실제로 있는가**(길이 + 프레임 수)로 하고, 바이트는 «헤더만 있는 파일»(8KB 미만)만 거른다. */
+    const bytes = n(report.bytes); const frameCount = n(report.frameCount);
+    const headerOnly = bytes > 0 && bytes < 8_000;
+    const noFrames = dur <= 0 || (frameCount > 0 && frameCount < 10);
+    axes.push(axis("frames_not_blank", !headerOnly && !noFrames,
+      headerOnly ? `파일 ${bytes}B — 헤더만 있는 파일(빈 영상)`
+        : noFrames ? (dur <= 0 ? "길이 0 — 프레임이 없음" : `프레임 ${frameCount}장 — 빈 영상`)
+          : undefined));
   }
   return { axes, repairedPayload: repaired };
 }
