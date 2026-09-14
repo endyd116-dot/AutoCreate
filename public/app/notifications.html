@@ -19,7 +19,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=6"></script>
+<script src="/js/mock.js?v=7"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -34,7 +34,7 @@ async function load() {
   }
   const unread = list.filter((n) => !n.readAt).length;
   UI.$("#list").innerHTML = list.length
-    ? `<div class="gt">알림 ${list.length}개${unread ? ` · 안 읽음 ${unread}` : ""}${unread && r.ok ? ` <button type="button" id="readAll" style="color:var(--ink);font-weight:600;font-size:12.5px">모두 읽음</button>` : ""}</div>` + list.map(row).join("")
+    ? (unread ? `<div class="gt">안 읽음 ${unread}${r.ok ? ` <button type="button" id="readAll" style="color:var(--ink);font-weight:600;font-size:12.5px">모두 읽음</button>` : ""}</div>` : "") + list.map(row).join("")
     : EMPTY;
   const b = UI.$("#readAll"); if (b) b.onclick = async () => { const rr = await UI.api("/api/notifications-read", { body: {} }); if (!rr.ok) return UI.toast(rr.error || "읽음으로 바꾸지 못했어요"); load(); };
 }

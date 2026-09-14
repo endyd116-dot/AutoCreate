@@ -20,7 +20,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=6"></script>
+<script src="/js/mock.js?v=7"></script>
 <script>
 (async () => {
 await UI.boot("account");
@@ -34,7 +34,8 @@ const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계
 async function load() {
   const r = await UI.api("/api/accounts-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
-  const chs = D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false }));
+  const chs = (D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false })))
+    .filter((c) => !c.status || c.status === "active" || cnt[c.key]); // [v4] 가동 전 채널은 숨긴다(이미 연결된 계정이 있으면 남긴다)
   UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : (SUB[c.key] || "")}</small></button>`).join("");
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => connectSheet(chs.find((c) => c.key === b.dataset.k)));
   const list = UI.$("#list");
