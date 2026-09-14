@@ -750,6 +750,11 @@ export const featureFlags = pgTable("feature_flags", {
   updatedBy: bigint("updated_by", { mode: "number" }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+export const runnerDevicesR5 = {
+  /** caps jsonb NOT NULL DEFAULT '{}' — 러너 능력 신고(P1R5 §2.4 · B2 가 DDL 적용 · B 가 선언 · CLAUDE §4.4): { ffmpeg:boolean, ffmpegVersion?:string, chromium?:boolean }.
+   *  false 면 서버가 `render.video` 잡을 그 기기에 주지 않고 화면에 «ffmpeg 없음» 칩을 띄운다(조용한 0건 금지). */
+  caps: "caps",
+} as const;
 export const postsR5 = {
   /** status varchar(20) NOT NULL DEFAULT 'published' — published|uploaded_private|processing(계약 §0.1-6 · AC-4 정직 표기). */
   status: "status",

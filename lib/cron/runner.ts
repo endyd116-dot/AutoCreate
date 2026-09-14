@@ -32,6 +32,7 @@ import { reviewDeadlineStep } from "./review-deadline";
 import { publisherStep } from "./publisher";
 import { learnStep } from "./learn";
 import { reapStep } from "./reap";
+import { videoSweepStep } from "./video-sweep";
 import { revenueSyncStep } from "./revenue-sync";
 import { billingChargeStep } from "./billing-charge";
 import { trialExpireStep } from "./trial-expire";
@@ -62,6 +63,7 @@ export const STEPS: CronStep[] = [
   runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
   aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
   publisherStep,       // 5m · due 발행
+  videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];
 
