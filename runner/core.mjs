@@ -20,6 +20,9 @@ import * as revenueClip from "./channels/revenue-clip.mjs";
 import * as adsSetupTistory from "./channels/ads-setup-tistory.mjs";
 import * as adsStatusBlogger from "./channels/ads-status-blogger.mjs";
 import * as adsSetupBlogger from "./channels/ads-setup-blogger.mjs";
+// P1R5 §2.2 — 영상 렌더 · 네이버 클립 스텁(AC-18: 채널은 **정적 import** 목록에만 둔다).
+import * as renderVideo from "./channels/render-video.mjs";
+import * as naverClip from "./channels/naver-clip.mjs";
 
 /** 시각은 저장 UTC · 사람에게 보이는 것은 KST(DESIGN §13.5). 콘솔·파일명은 사람이 보는 것이므로 KST. */
 export const kst = (d = new Date()) =>
@@ -42,7 +45,28 @@ const HANDLERS = {
   // P1R4 §2.2 블로거 광고 삽입/복원(쓰기 · 한 모듈이 kind 로 분기)
   "ads.setup_blogger": adsSetupBlogger,
   "ads.revert_blogger": adsSetupBlogger,
+  // P1R5 §2.2·§2.3
+  "render.video": renderVideo,
+  "publish.naver_clip": naverClip,
 };
+
+/** 영상 렌더 잡 — report 에 `render`(mp4 키·길이·바이트)를 싣는다. */
+const RENDER_KINDS = new Set(["render.video"]);
+
+/**
+ * 이 PC 가 **집어도 되는** 잡 종류(계약 §2.2).
+ *   🔴 ffmpeg 가 없으면 `render.video` 를 **claim 하지 않는다** — 집어 놓고 실패하면 그 글은 재시도만 쌓이고
+ *      다른 러너(ffmpeg 있는 PC)도 못 가져간다. 대신 하트비트 `caps.ffmpeg:false` 로 알려 화면이 «ffmpeg 없음»을 띄운다.
+ */
+export function claimableKinds() {
+  const ok = renderVideo.caps().ffmpeg;
+  return ALL_KINDS.filter((k) => ok || !RENDER_KINDS.has(k));
+}
+
+/** 하트비트에 실을 이 PC 의 능력(§2.4) — 지금은 ffmpeg 유무·버전. */
+export function runnerCaps() {
+  return renderVideo.caps();
+}
 /** 수익 스크랩 잡 — report 에 `revenueRows` 를 싣는다(서버가 upsert · 러너는 DB 를 안 본다). */
 const REVENUE_KINDS = new Set(["revenue.adpost", "revenue.adfit", "revenue.clip"]);
 /** 광고 상태 «읽기» — report 에 `adsense` 를 싣는다. */
@@ -112,6 +136,12 @@ export async function runJob({ chromium, token, job, headed, dryRun }) {
     }
     if (ADS_KINDS.has(job.kind)) {
       return { ok: true, adsense: out?.adsense ?? { linked: false, state: "unknown" }, shotKey, notes: out?.notes ?? [] };
+    }
+    if (RENDER_KINDS.has(job.kind)) {
+      /* 🔴 «구웠다»는 말만으로는 성공이 아니다 — key 가 없으면 실패로 돌려보낸다.
+         서버는 여기 더해 **R2 HEAD 로 실존까지** 확인한다(계약 §2.1 · 러너 주장 불신). */
+      if (!out?.render?.key) return { ok: false, errorKind: "encode", detail: "영상을 구웠다는데 파일 키가 없어요.", shotKey };
+      return { ok: true, render: out.render, shotKey, notes: out.notes ?? [] };
     }
     if (ADS_WRITE_KINDS.has(job.kind)) {
       // 🔴 monetize.bloggerTemplateBackup(원문)을 그대로 실어 보낸다 — 서버가 accounts.monetize 에 저장(복원 재료 · §5 경계).

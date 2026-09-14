@@ -634,6 +634,26 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     return { ok: true, status: "failed", reason: "parse" };
   }
 
+  /* ── 네이버 클립(P1R5 §2.3) — 아직 올릴 길이 없다. **재시도하지 않고** 사람에게 넘긴다. ──
+       분류기(`classifyRunnerBlock`)에 맡기면 `not_supported_yet` 이 «unknown» 으로 떨어져 3번 헛돈다.
+       길이 막힌 것은 계정 문제도 우리 버그도 아니므로 계정 상태를 건드리지 않는다. 조용한 0건 금지(PITFALLS #7). */
+  if (result.ok !== true && kind === "publish.naver_clip") {
+    const fail = result as RunnerReportFail;
+    await q(sql`UPDATE runner_jobs SET status='failed', claimed_by=NULL, claimed_at=NULL, error_kind='not_supported_yet',
+      result = ${jsonb({ ok: false, errorKind: "not_supported_yet", detail: String(fail.detail ?? "").slice(0, 300) })},
+      due_at = NULL, updated_at = NOW() WHERE id = ${jobId}`);
+    if (pieceId) {
+      await q(sql`UPDATE pieces SET status = 'awaiting_manual',
+        meta = meta || ${jsonb({ failReason: "네이버 클립은 아직 자동 업로드를 지원하지 않아요", manualChannel: "naver_clip" })},
+        updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+    }
+    await notify(tid, "manual_upload", "클립은 앱에서 올려 주세요",
+      "영상은 다 만들어 뒀어요. 네이버 클립은 아직 자동 업로드가 안 돼서, 만들어 둔 영상을 네이버 앱에서 올려 주세요.", "/app/pieces.html");
+    await writeAudit({ tenantId: tid, action: "publish_not_supported", actorType: "system", target: `piece:${pieceId || jobId}`,
+      detail: { kind, channel: "naver_clip" }, riskLevel: "low" });
+    return { ok: true, status: "failed", reason: "not_supported_yet" };
+  }
+
   /* ── 실패 ───────────────────────────────────────────────── */
   if (result.ok !== true) {
     const fail = result as RunnerReportFail;

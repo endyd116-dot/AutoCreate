@@ -16,7 +16,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { writeAudit } from "../audit";
-import { enqueueJob, type RunnerRenderPayload, type RunnerPayload } from "../runner-jobs";
+import { enqueueJob, type RunnerRenderPayload, type RunnerPayload, type RunnerJobKind } from "../runner-jobs";
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -28,13 +28,22 @@ const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
  */
 export type RenderPayload = Omit<RunnerRenderPayload, "upload">;
 
+/* 🔴 타입 정본은 B-1 의 `lib/video/types.ts`(메인 정리 2026-09-14 · A 도 같은 파일을 본다).
+   그 파일이 오면 위 `RenderPayload` 와 아래 `RenderReport` 지역 정의를 지우고 **이 한 줄**로 바꾼다:
+     import type { RenderPayload, RenderReport } from "./types";
+   지금은 파일이 없어(양쪽 브랜치 모두) 지역 정의로 **모양만 같게** 둔다 — 구조가 같으니 교체가 한 줄이다. */
+
+/** 잡 kind·우선순위 정본(B-1 이 이 이름으로 참조한다 · 계약 §2.1). */
+export const RENDER_JOB_KIND: RunnerJobKind = "render.video";
+export const RENDER_JOB_PRIORITY = 70;
+
 /** 다시 구울 수 있는 횟수. 넘으면 사람에게 넘긴다(무한 재시도 금지). */
 const MAX_RENDER_RETRY = 2;
 /** 이보다 짧거나 작으면 «구웠다»를 믿지 않는다(빈 mp4·헤더만 있는 파일 방어). */
 const MIN_DURATION_MS = 1_000;
 const MIN_BYTES = 50 * 1024;
 
-export interface FinalizeRenderReport { key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number }
+export interface RenderReport { key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number }
 export type RenderNext = "judging" | "requeued" | "in_review" | "failed";
 
 /**
@@ -45,10 +54,13 @@ export async function enqueueRender(pieceId: number, payload: RenderPayload): Pr
   const tenantId = n(payload?.tenantId);
   if (!tenantId) throw new Error("[render-queue] payload.tenantId 가 없어요.");
   const j = await enqueueJob({
-    tenantId, kind: "render.video", pieceId,
+    tenantId, kind: RENDER_JOB_KIND, pieceId,
     payload: payload as unknown as RunnerPayload,
     dedupe: true,
   });
+  // 화면이 «지금 굽는 중»을 그릴 수 있게 단계와 잡 id 를 남긴다(B-1 계약: meta.stage='render' · renderJobId).
+  await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ stage: "render", chainStage: "render", renderJobId: j.id })}, updated_at = NOW()
+    WHERE id = ${pieceId} AND tenant_id = ${tenantId}`);
   if (j.created) {
     await writeAudit({ tenantId, action: "render_enqueued", actorType: "system", target: `piece:${pieceId}`,
       detail: { jobId: j.id, scenes: payload.scenes?.length ?? 0, seconds: payload.out?.maxSeconds ?? null }, riskLevel: "low" });
@@ -56,26 +68,33 @@ export async function enqueueRender(pieceId: number, payload: RenderPayload): Pr
   return { jobId: j.id, created: j.created };
 }
 
+type JudgeResult = { grade: "P0" | "P1" | "P2"; pass: boolean; repaired?: boolean };
 /**
- * 🔴 B 의 심사(`lib/video/judge.ts judgeVideo`) 배선 자리.
- *   계약 §5: `judgeVideo(pieceId) → { grade:"P0"|"P1"|"P2", pass, axes, repaired }` · AC-18 에 따라 **정적 import** 여야 한다.
- *   ⚠️ B-1 이 아직 그 파일을 내지 않았다(2026-09-14). 파일이 생기면 이 함수 몸통을 아래 두 줄로 바꾼다 —
- *      그 외 로직(자산·상태·재시도)은 이미 두 경로를 다 처리하므로 **다른 곳은 손대지 않는다**:
- *        import { judgeVideo } from "./judge";            // 파일 상단(정적)
- *        return await judgeVideo(pieceId);
- *   그때까지는 null 을 돌려 «아직 판정 못 했다»로 두고 `chainStage="judging"` 에서 멈춘다(가짜 통과 0).
+ * B-1 의 심사(`lib/video/judge.ts judgeVideo`) 호출 — **함수 안 동적 import**(AC-17 · 메인 정리 2026-09-14).
+ *   계약 §5: `judgeVideo(pieceId) → { grade:"P0"|"P1"|"P2", pass, axes, repaired }`.
+ *   ⚠️ 그 파일이 아직 없다(2026-09-14 · B-1 작업 중). 그래서 지정자를 **변수**로 둔다 —
+ *      리터럴로 쓰면 «없는 모듈»이라 타입검사가 깨져 내 쪽 작업이 통째로 막힌다.
+ *      judge.ts 가 들어오면 이 변수를 리터럴 `"./judge"` 로 바꾸면 된다(그때부터 타입도 잡힌다).
+ *   🔴 못 부르면 **null** — «판정했다»고 꾸미지 않는다. 호출부가 `chainStage="judging"` 에서 멈춘다(가짜 통과 0).
  */
-async function tryJudge(_pieceId: number): Promise<{ grade: "P0" | "P1" | "P2"; pass: boolean; repaired?: boolean } | null> {
-  return null;
+const JUDGE_MODULE = "./judge";
+async function tryJudge(pieceId: number): Promise<JudgeResult | null> {
+  try {
+    const m = (await import(JUDGE_MODULE)) as { judgeVideo?: (id: number) => Promise<JudgeResult> };
+    if (typeof m?.judgeVideo !== "function") return null;
+    return await m.judgeVideo(pieceId);
+  } catch {
+    return null;
+  }
 }
 
 /**
  * 렌더 결과 확정. 호출 전에 **reportJob 이 R2 HEAD 로 파일 실존을 확인**했다(여기선 크기·길이 상식 검사만 한다).
  *   next: judging(심사 대기) · in_review(통과 → 사람 검수) · requeued(다시 굽기) · failed(포기).
  */
-export async function finalizeRender(pieceId: number, report: FinalizeRenderReport): Promise<{ ok: boolean; next: RenderNext; retry: number }> {
+export async function finalizeRender(pieceId: number, report: RenderReport): Promise<{ ok: boolean; next: RenderNext; retry: number; reason?: string }> {
   const [p] = await q(sql`SELECT id, tenant_id, status, meta FROM pieces WHERE id = ${pieceId} LIMIT 1`);
-  if (!p) return { ok: false, next: "failed", retry: 0 };
+  if (!p) return { ok: false, next: "failed", retry: 0, reason: "piece_not_found" };
   const tid = n(p.tenant_id);
   const meta = (p.meta && typeof p.meta === "object" ? { ...(p.meta as Record<string, unknown>) } : {}) as Record<string, unknown>;
   const retry = n(meta.renderRetry);
@@ -90,7 +109,7 @@ export async function finalizeRender(pieceId: number, report: FinalizeRenderRepo
     await writeAudit({ tenantId: tid, action: "render_too_small", actorType: "system", target: `piece:${pieceId}`,
       detail: { durationMs: report.durationMs, bytes: report.bytes, retry: nextRetry, giveUp }, riskLevel: "high" });
     if (!giveUp) await requeueRender(tid, pieceId);
-    return { ok: false, next: giveUp ? "failed" : "requeued", retry: nextRetry };
+    return { ok: false, next: giveUp ? "failed" : "requeued", retry: nextRetry, reason: "empty_render" };
   }
 
   /* ② 자산 기록 — 같은 piece 의 이전 video/thumb 는 지우고 새로 넣는다(재렌더 시 중복 방지 · 멱등). */
@@ -111,7 +130,7 @@ export async function finalizeRender(pieceId: number, report: FinalizeRenderRepo
   if (!judged) {
     await writeAudit({ tenantId: tid, action: "render_done", actorType: "system", target: `piece:${pieceId}`,
       detail: { key: report.key, durationMs: report.durationMs, bytes: report.bytes, judge: "pending(심사기 미배선)" }, riskLevel: "low" });
-    return { ok: true, next: "judging", retry };
+    return { ok: true, next: "judging", retry, reason: "judge_unavailable" };
   }
 
   if (judged.grade === "P0" || !judged.pass) {
@@ -123,7 +142,7 @@ export async function finalizeRender(pieceId: number, report: FinalizeRenderRepo
     await writeAudit({ tenantId: tid, action: "render_judge_failed", actorType: "system", target: `piece:${pieceId}`,
       detail: { grade: judged.grade, retry: nextRetry, giveUp }, riskLevel: "high" });
     if (!giveUp) await requeueRender(tid, pieceId);
-    return { ok: false, next: giveUp ? "failed" : "requeued", retry: nextRetry };
+    return { ok: false, next: giveUp ? "failed" : "requeued", retry: nextRetry, reason: `judge_${judged.grade}` };
   }
 
   await q(sql`UPDATE pieces SET status = 'in_review',
