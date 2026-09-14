@@ -1,13 +1,21 @@
 // scripts/verify-p1r5.mjs — P1R5 검증 하니스 뼈대(C · 계약 v5.1 §6 · 영상 «생성 두뇌 + 러너 렌더 + 출구»). 🔴 B-1·B2·A 머지 후 트리거 때 실경로로 채운다.
 //   로컬 스모크(돈 0): 손잡이 확정(계약 v5.2 §1.4b): dev 서버 env `VIDEO_PROVIDER_STUB=1`(provider·TTS·비전 스텁 · ai_usage 원가 0) · `CHAIN_BUDGET_MS`(기본 660000 · 이어달리기 재현은 30000 으로) · 슬롯 없는 자동 생성은 새 손잡이 없이 confirm({origin:"auto"}) slotId 없이(HTTP 밖 · tsx 로 lib 직접 호출) 로 chainStage 전이·잠금·이어달리기·스위퍼·코인 구간·달러 캡·kill switch·프레임 지문·uploaded_private 폭·배지 고지.
 //   라이브 실증(돈 씀 · 1회 · 메인 호출): 60초 실제 생성·렌더·유튜브 비공개 업로드 — 이 파일 밖(별도 스크립트 · videoId·R2 HEAD·스샷 증거).
-//   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,rules,disclosure,fingerprint,posts,regress,cleanup)
+//   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,payload,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup)
+//   🔴 계약 v5.5 §1.4c 반영(2026-09-14): ①원가 관문은 R4 `checkAiCostCap` 재사용(새 캡 금지) — **소프트(플랜 일일 상한 초과) = 막지 않는다 + 운영 알림** / 하드(×3) = failed+코인 환급+알림 2종 / 전역 월 ₩1,400,000 = 하드 / 환율 없으면 «못 재니 막지 않는다»(fxMissing · FX 기본값 코드에 박기 금지)
+//     ②토킹 still 컷은 **구축**(스킵 금지) — `scenes[]` 전건이 clipKey|imageKey 중 하나를 가져야 한다(둘 다 없으면 러너에 검은 화면 · §2.1 위반)  ③`scripts/seed-bgm.mjs` 존재·멱등 · BGM_LICENSE_VERIFIED 없으면 audio.bgm=null(무음)이 정직 경로(에러 아님).
+//   🔴 이 절의 핵심 하나: «자기 코인으로 만드는 고객이 우리 원가 캡에 막히는 경로 = 0». 초록이어야 하는 건 «성공», 0이어야 하는 건 «막힘»이다.
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) { const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"|"$/g, ""); }
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36); const EMAIL = process.env.TEST_EMAIL || `c+r5-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
 const CRON_SECRET = process.env.CRON_SECRET || "";
-const SECTIONS = new Set((process.env.SECTIONS || "setup,topics,director,chain,sweep,cost,rules,disclosure,fingerprint,posts,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "setup,topics,director,chain,sweep,cost,payload,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup").split(","));
+/** 하니스 산술용 환율(= dev 서버에 준 FX_USD_KRW 와 같은 값이어야 한다). 🔴 제품 코드에는 절대 박지 않는다(계약 v5.5) — 여기는 «얼마를 심어야 구간에 들어가나»를 계산하는 검사 쪽이다. */
+const FX = Number(process.env.FX_USD_KRW || 1400);
+/** lib/billing/ai-cost-cap.ts PLAN_CAP_KRW 의 사본(정본은 그 파일 · 값이 바뀌면 이 표가 FAIL 로 알려 준다). */
+const PLAN_CAP_KRW = { trial: 3_000, starter: 5_000, pro: 20_000, agency: 60_000 };
+const GLOBAL_CAP_KRW = 1_400_000;
 const results = []; const t0 = Date.now();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
@@ -116,22 +124,152 @@ async function main() {
     rec("상한(3) 초과 → failed + 사유(마지막 단계) + 환급 + 알림", p2?.status === "failed" && /단계/.test(String(p2?.meta?.failReason || "")) && b1.balance > b0.balance && !!nf, `${JSON.stringify(stepOf(sw2, "video.sweep") || {}).slice(0, 100)} · ${p2?.status} «${p2?.meta?.failReason}» · 코인 ${b0?.balance}→${b1?.balance} · 알림 ${nf?.id}`);
     rec("stage render 는 runner_jobs 살아 있으면 스위퍼가 안 건드림", "WARN", "render 잡이 있는 piece 로 트리거 때");
   }
-  /* ══ cost — 달러 캡(테넌트 $30 · 전역 $300 · fail-closed) · kill switch ══ */
+  /* ══ cost — 🔴 계약 v5.5 §1.4c-(1): R4 `checkAiCostCap` 재사용(새 캡 금지) · 소프트=통과+운영 알림 · 하드(일일×3)=차단·환급 · 전역 월 ₩1,400,000 · kill switch ══ */
   if (SECTIONS.has("cost") && topicId) {
-    await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref) VALUES (${TID}, 'video_clip', 'c-stub', 0, 0, 31, ${"cap" + STAMP})`;
-    const pr = await call(jar, "/api/director-propose", { body: { topicId } });
-    const b0 = (await call(jar, "/api/coins-balance")).json;
-    const cf = pr.json?.brief ? await call(jar, "/api/director-confirm", { body: { briefId: pr.json.brief.id, pieces: pr.json.brief.pieces.filter((p) => !(p.kind === "video" || p.video)).map((p) => ({ key: p.key, drop: true })) } }) : { status: 0, json: null };
-    const b1 = (await call(jar, "/api/coins-balance")).json;
-    rec("테넌트 월 $30 초과 → step budget · 코인 무접촉", cf.json?.step === "budget" && b0?.balance === b1?.balance, `${cf.status} ${cf.json?.step} «${cf.json?.error}» · ${b0?.balance}→${b1?.balance}`);
-    await s`DELETE FROM ai_usage WHERE tenant_id = ${TID} AND ref = ${"cap" + STAMP}`;
+    /* 정적 — «문을 둘로 만들지 않는다» · FX 기본값 박기 금지 */
+    const src = existsSync("lib/video/cost.ts") ? readFileSync("lib/video/cost.ts", "utf8") : "";
+    rec("cost.ts = R4 관문 재사용(checkAiCostCap 호출) · 자체 월 캡 상수 0(v5.5)", /checkAiCostCap/.test(src) && !/TENANT_CAP_USD/.test(src),
+      `checkAiCostCap ${/checkAiCostCap/.test(src) ? "있음" : "없음"} · 자체 캡 상수 ${/TENANT_CAP_USD|VIDEO_TENANT_MONTHLY_CAP_USD/.test(src) ? "남아 있음" : "0"}`);
+    rec("환율 기본값을 코드에 박지 않음 · 못 재면 막지 않는다(fxMissing · v5.5)", !/FX_[A-Z]*_KRW[^\n]*\|\|\s*['"]?\d/.test(src) && !/fxRate\s*(\?\?|\|\|)\s*\d/.test(src) && /fxMissing/.test(src),
+      `리터럴 환율 ${/FX_[A-Z]*_KRW[^\n]*\|\|\s*['"]?\d|fxRate\s*(\?\?|\|\|)\s*\d/.test(src) ? "🔴 있음" : "0"} · fxMissing 처리 ${/fxMissing/.test(src) ? "있음" : "없음"}`);
+    rec("소프트/하드 2단계 어휘 존재(soft·hard)", /soft/i.test(src) && /hard/i.test(src), src ? "정적" : "파일 없음");
+
+    /* 준비 — 플랜 pro(일일 상한 ₩20,000) · 코인 넉넉히. 🔴 정리에서 trial 로 되돌린다(가짜 MRR 금지 · C-HANDOFF §2.3) */
+    await s`UPDATE tenants SET plan_key = 'pro' WHERE id = ${TID}`;
+    await s`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason) VALUES (${TID}, 'grant', 'included', 200, ${"r5cost:" + STAMP}, 'R5 원가 절')`;
+    const capKrw = PLAN_CAP_KRW.pro;
+    const SOFT_USD = Math.round(((capKrw * 1.5) / FX) * 100) / 100;    // 일일 상한의 1.5배 = 소프트 구간(막으면 안 된다)
+    const HARD_USD = Math.round(((capKrw * 3.6) / FX) * 100) / 100;    // ×3 초과 = 하드
+    const useRef = (tag) => `r5cost-${tag}-${STAMP}`;
+    const spend = async (usd, tag, tid = TID) => { guard(tid); await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref) VALUES (${tid}, 'video_clip', 'c-stub', 0, 0, ${usd}, ${useRef(tag)})`; };
+    const clearSpend = async (tag, tid = TID) => { guard(tid); await s`DELETE FROM ai_usage WHERE tenant_id = ${tid} AND ref = ${useRef(tag)}`; };
+    /** 영상 piece 1개를 제안→확정한다(글 piece 는 drop). 반환: {status, step, error, pieceId, spent(코인), balance} */
+    const confirmVideo = async () => {
+      const pr = await call(jar, "/api/director-propose", { body: { topicId } });
+      const brief = pr.json?.brief; if (!brief) return { status: pr.status, step: pr.json?.step || "propose_failed", error: pr.json?.error, pieceId: 0, spent: 0 };
+      const b0 = (await call(jar, "/api/coins-balance")).json;
+      const drop = brief.pieces.filter((p) => !(p.kind === "video" || p.video)).map((p) => ({ key: p.key, drop: true }));
+      const cf = await call(jar, "/api/director-confirm", { body: { briefId: brief.id, pieces: drop } });
+      const b1 = (await call(jar, "/api/coins-balance")).json;
+      return { status: cf.status, step: cf.json?.step, error: cf.json?.error, pieceId: cf.json?.pieceIds?.[0] || 0, spent: (b0?.balance ?? 0) - (b1?.balance ?? 0), balance: b1?.balance };
+    };
+    const auditSince = async (t) => await s`SELECT action, risk_level, detail FROM audit_logs WHERE tenant_id = ${TID} AND created_at > ${t.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 20`;
+
+    /* ① 🔴 소프트 — 이 절의 핵심: «자기 코인으로 만드는 고객이 우리 원가 캡에 막히는 경로 = 0» */
+    await clearSpend("soft"); await spend(SOFT_USD, "soft");
+    const tSoft = new Date(Date.now() - 5_000);
+    const soft = await confirmVideo();
+    rec("🔴 소프트 구간(Pro 일일 상한 ₩20,000 초과 · ×3 미만) → 확정 **성공** · 코인 정상 차감 · 고객 무영향",
+      soft.status === 202 && soft.pieceId > 0 && soft.spent > 0,
+      `${soft.status} step ${soft.step || "-"} «${String(soft.error || "").slice(0, 60)}» · piece ${soft.pieceId} · 코인 -${soft.spent} · 심은 원가 $${SOFT_USD}(₩${Math.round(SOFT_USD * FX).toLocaleString("ko-KR")} > 상한 ₩${capKrw.toLocaleString("ko-KR")})`,
+      soft.pieceId ? `piece ${soft.pieceId}` : undefined);
+    const aSoft = await auditSince(tSoft);
+    const softRow = aSoft.find((a) => /soft/i.test(String(a.action)));
+    rec("소프트 → 운영 알림 1건(감사 · usedKrw·capKrw 기록 · 고객 알림 아님)", !!softRow && (softRow.detail?.usedKrw != null || softRow.detail?.capKrw != null),
+      softRow ? `${softRow.action} risk ${softRow.risk_level} ${JSON.stringify(softRow.detail || {}).slice(0, 90)}` : `감사 ${aSoft.map((a) => a.action).join(",").slice(0, 90) || "0건"}`);
+    const [softNotice] = await s`SELECT id, kind FROM notifications WHERE tenant_id = ${TID} AND kind IN ('ai_cost_cap','piece_failed') AND created_at > ${tSoft.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 1`;
+    rec("소프트 → 고객 알림 0(고객은 이미 코인을 냈다)", !softNotice, softNotice ? `🔴 «${softNotice.kind}» ${softNotice.id}` : "없음");
+
+    /* ② 하드(일일 상한 ×3 초과) — 확정 시점: 차단하되 코인은 손대지 않는다 */
+    await clearSpend("soft"); await spend(HARD_USD, "hard");
+    const hard = await confirmVideo();
+    rec("하드 구간(일일 상한 ×3 초과) → 차단 · 코인 무접촉(또는 차감했다면 같은 왕복에 환급)", hard.status !== 202 && hard.spent === 0,
+      `${hard.status} step ${hard.step || "-"} «${String(hard.error || "").slice(0, 70)}» · 코인 차감 ${hard.spent}`);
+
+    /* ③ 하드를 **체인 안에서** 만나면 = failed + 코인 환급 + 고객 알림 + 운영 알림(risk high) */
+    await clearSpend("hard");
+    const mid = await confirmVideo();
+    if (mid.pieceId) {
+      await s`UPDATE pieces SET status = 'generating', meta = (meta - 'chainLock') || ${s.json({ stage: "script" })}, updated_at = NOW() WHERE id = ${mid.pieceId}`;
+      await spend(HARD_USD, "chain");
+      const tHard = new Date(Date.now() - 5_000);
+      const b0 = (await call(jar, "/api/coins-balance")).json;
+      await call(null, "/api/generate-video-background", { body: { pieceId: mid.pieceId, tenantId: TID }, headers: { "x-internal-secret": process.env.INTERNAL_SECRET || "" } });
+      await sleep(4000);
+      const [pf] = await s`SELECT status, meta FROM pieces WHERE id = ${mid.pieceId}`;
+      const b1 = (await call(jar, "/api/coins-balance")).json;
+      const [note] = await s`SELECT id, kind, title FROM notifications WHERE tenant_id = ${TID} AND created_at > ${tHard.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 1`;
+      const aHard = await auditSince(tHard); const hardRow = aHard.find((a) => /cost|cap|budget/i.test(String(a.action)));
+      rec("체인 안 하드 → piece failed + **코인 환급 실제 발생** + 고객 알림 + 운영 알림(risk high)",
+        pf?.status === "failed" && (b1?.balance ?? 0) > (b0?.balance ?? 0) && !!note && !!hardRow && hardRow.risk_level === "high",
+        `piece ${mid.pieceId} ${pf?.status} «${String(pf?.meta?.failReason || "").slice(0, 50)}» · 코인 ${b0?.balance}→${b1?.balance} · 알림 ${note?.kind || "0"} · 감사 ${hardRow ? `${hardRow.action}/${hardRow.risk_level}` : "0"}`,
+        `piece ${mid.pieceId}`);
+      await clearSpend("chain");
+    } else warn("체인 안 하드 → failed+환급+알림 2종", `확정이 안 돼 못 쟀다(${mid.status} ${mid.step || ""})`);
+
+    /* ④ 전역 월 ₩1,400,000 = 하드. 🔴 Neon 은 다른 세션(B·B2)과 **공유**다 — 심는 즉시 재고 바로 지운다(남기면 남의 스모크가 막힌다) */
+    const gJar = new Jar(); const gEmail = `c+r5g-${STAMP}@autocreate.test`;
+    let gTid = 0;
+    const gr = await call(gJar, "/api/auth-register", { body: { email: gEmail, password: PASSWORD, name: "C R5 G", consents: { terms: true, privacy: true, paidTerms: true, automationNotice: true } } });
+    if (gr.json?.ok) { const gm = await call(gJar, "/api/auth-me"); gTid = Number(gm.json?.tenant?.id || 0); if (gTid) ALLOWED.add(gTid); }
+    if (gTid) {
+      await spend(Math.round((GLOBAL_CAP_KRW / FX) * 100) / 100, "global", gTid);
+      const g = await confirmVideo();
+      rec("전역 월 ₩1,400,000 초과 → 하드(전 테넌트 생성 정지) · 코인 무접촉", g.status !== 202 && g.spent === 0,
+        `${g.status} step ${g.step || "-"} «${String(g.error || "").slice(0, 60)}» · 다른 테넌트 ${gTid} 에 $${Math.round(GLOBAL_CAP_KRW / FX)} 심음`);
+      await clearSpend("global", gTid);
+      await s`DELETE FROM ai_usage WHERE tenant_id = ${gTid}`.catch(() => {});
+    } else warn("전역 월 ₩1,400,000 하드", `보조 테넌트 가입 실패(${gr.status}) — 전역 절 건너뜀`);
+
+    /* ⑤ kill switch */
     await s`INSERT INTO feature_flags (key, tenant_id, enabled) VALUES ('video', ${TID}, false) ON CONFLICT DO NOTHING`.catch(() => warn("feature_flags", "표/컬럼 모양 확인"));
-    const pr2 = await call(jar, "/api/director-propose", { body: { topicId } });
-    const cf2 = pr2.json?.brief ? await call(jar, "/api/director-confirm", { body: { briefId: pr2.json.brief.id, pieces: pr2.json.brief.pieces.filter((p) => !(p.kind === "video" || p.video)).map((p) => ({ key: p.key, drop: true })) } }) : { status: 0, json: null };
-    rec("kill switch(feature_flags video=false) → step budget(killed)", cf2.json?.step === "budget" || cf2.json?.reason === "killed", `${cf2.status} ${cf2.json?.step} ${cf2.json?.reason || ""}`);
+    const kill = await confirmVideo();
+    rec("kill switch(feature_flags video=false) → 차단(killed) · 코인 무접촉", kill.status !== 202 && kill.spent === 0, `${kill.status} step ${kill.step || "-"} «${String(kill.error || "").slice(0, 60)}»`);
     await s`DELETE FROM feature_flags WHERE key = 'video' AND tenant_id = ${TID}`.catch(() => {});
-    rec("조회 실패 = 차단(fail-closed) · 전역 $300", "WARN", "정적 확인: lib/video/cost.ts checkVideoBudget lookup_failed → allowed:false");
+    await s`UPDATE tenants SET plan_key = 'trial' WHERE id = ${TID}`;   // 🔴 여기서 바로 되돌린다(정리 절까지 미루지 않는다)
+    await s`DELETE FROM ai_usage WHERE tenant_id = ${TID} AND ref LIKE ${"r5cost-%"}`;
   }
+  /* ══ payload — 🔴 v5.5 §1.4c-(2): 포맷 3종의 `scenes[]` 전건이 clipKey|imageKey 중 하나를 갖는다(둘 다 없으면 러너에 검은 화면 · 계약 §2.1 위반) ══ */
+  const payloads = new Map();
+  if (SECTIONS.has("payload")) {
+    const [base] = pieceId ? await s`SELECT topic_id, channel, account_id, meta FROM pieces WHERE id = ${pieceId}` : [null];
+    const baseTopic = base?.topic_id ? Number(base.topic_id) : topicId;
+    const baseSpec = (base?.meta?.video) || {};
+    const CASES = [["graphic", 60, "omni"], ["talking", 60, "veo_lite"], ["clip", 15, "veo_lite"]];
+    if (!baseTopic) warn("payload 무결성(포맷 3종)", "기준 소재/piece 가 없어 건너뜀");
+    for (const [format, seconds, providerKey] of (baseTopic ? CASES : [])) {
+      const spec = { ...baseSpec, format, seconds, provider: { tier: "standard", key: providerKey }, voice: { provider: "typecast", voiceId: baseSpec?.voice?.voiceId || "" }, variant: { hookType: "event_pushin", palette: "cool", voiceId: baseSpec?.variant?.voiceId || "" }, disclosure: { badge: false, descriptionFirstLine: false } };
+      const [np] = await s`INSERT INTO pieces (tenant_id, topic_id, channel, account_id, kind, status, title, meta)
+        VALUES (${TID}, ${baseTopic}, ${String(base?.channel || "youtube_shorts")}, ${base?.account_id ?? null}, 'video', 'generating', ${`C R5 payload ${format}`},
+                ${s.json({ stage: "script", video: spec, angle: String(base?.meta?.angle || ""), chainStage: null, chainLock: null, chainResume: { count: 0 } })}) RETURNING id`;
+      const npid = Number(np?.id);
+      await call(null, "/api/generate-video-background", { body: { pieceId: npid, tenantId: TID }, headers: { "x-internal-secret": process.env.INTERNAL_SECRET || "" } });
+      let row = null; const dl = Date.now() + Number(process.env.PAYLOAD_TIMEOUT_MS || 180_000);
+      while (Date.now() < dl) { const [p] = await s`SELECT status, meta FROM pieces WHERE id = ${npid}`; row = p; if (p?.meta?.render || p?.status === "failed" || p?.status === "in_review") break; await sleep(3000); }
+      const render = row?.meta?.render || null;
+      const scenes = Array.isArray(render?.scenes) ? render.scenes : [];
+      const holes = scenes.filter((sc) => !sc.clipKey && !sc.imageKey);
+      const stills = scenes.filter((sc) => !sc.clipKey && sc.imageKey);
+      payloads.set(format, render);
+      rec(`payload ${format}/${seconds}s: scenes 전건이 clipKey|imageKey 중 하나(빈 구간 0)`, scenes.length > 0 && holes.length === 0,
+        `piece ${npid} ${row?.status} · scenes ${scenes.length} · clip ${scenes.filter((x) => x.clipKey).length} · image ${stills.length} · 🔴빈칸 ${holes.length}${holes.length ? ` (idx ${holes.map((h) => h.idx).join(",")})` : ""} · ${String(row?.meta?.failReason || "").slice(0, 50)}`,
+        `piece ${npid}`);
+      if (format === "talking") rec("토킹 still 컷이 실제로 구간을 채운다(imageKey + motion kenburns ≥1 · 스킵 금지)",
+        stills.length >= 1 && stills.every((x) => x.motion === "kenburns"), `still ${stills.length} · motion ${[...new Set(stills.map((x) => x.motion))].join("/") || "-"}`);
+    }
+  }
+
+  /* ══ bgm — 🔴 v5.5 §1.4c-(3): seed-bgm.mjs 존재·멱등 · BGM_LICENSE_VERIFIED 없으면 무음(audio.bgm=null)이 «정직 경로»(에러 아님) ══ */
+  if (SECTIONS.has("bgm")) {
+    const has = existsSync("scripts/seed-bgm.mjs");
+    rec("scripts/seed-bgm.mjs 존재(FreePD → R2 autocreate/bgm/ · 라이선스 메타 동봉)", has, has ? "있음" : "없음");
+    if (has && process.env.SKIP_SEED_BGM !== "1") {
+      const { execFileSync } = await import("node:child_process");
+      const run = () => { try { return { ok: true, out: String(execFileSync(process.execPath, ["scripts/seed-bgm.mjs"], { timeout: 180_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) }; } catch (e) { return { ok: false, out: String(e?.stdout || "") + String(e?.stderr || e?.message || "") }; } };
+      const r1 = run(); const r2 = has ? run() : { ok: false, out: "" };
+      rec("seed-bgm 2회 실행 = 멱등(둘 다 종료코드 0 · 2회차는 신규 업로드 0)", r1.ok && r2.ok && /이미|건너|skip|0\s*개|신규 0|unchanged/i.test(r2.out),
+        `1회 ${r1.ok ? "ok" : "실패"} · 2회 ${r2.ok ? "ok" : "실패"} · 2회차 «${r2.out.trim().split("\n").pop()?.slice(0, 70) || ""}»`);
+    } else if (has) warn("seed-bgm 멱등", "SKIP_SEED_BGM=1 로 실행 생략");
+    const [anyRender] = await s`SELECT id, status, meta FROM pieces WHERE tenant_id = ${TID} AND kind = 'video' AND meta ? 'render' ORDER BY id DESC LIMIT 1`;
+    const bgm = anyRender?.meta?.render?.audio?.bgm ?? "없음";
+    const licensed = String(process.env.BGM_LICENSE_VERIFIED || "") === "1";
+    // 🔴 «무음이 정직 경로» = bgm 이 null 이어도 **그것 때문에** 실패하지 않는다(다른 사유의 실패는 이 절의 관심사가 아니다).
+    const bgmBlamed = /bgm|음악|배경음/i.test(String(anyRender?.meta?.failReason || ""));
+    rec(licensed ? "BGM_LICENSE_VERIFIED=1 → audio.bgm 에 키·gainDb" : "BGM_LICENSE_VERIFIED 없음 → audio.bgm = null(무음)이 정직 경로(bgm 때문에 실패 0)",
+      anyRender ? (licensed ? !!bgm && !!bgm.key : bgm === null && !bgmBlamed) : false,
+      anyRender ? `piece ${anyRender.id} ${anyRender.status} · bgm ${JSON.stringify(bgm).slice(0, 40)} · 실패사유 «${String(anyRender.meta?.failReason || "-").slice(0, 45)}»` : "render 페이로드를 가진 piece 0(payload 절 먼저)");
+  }
+
   /* ══ rules — kind shorts 주 2회 → coinsPerWeek 2×28 · 슬롯 점 · 슬롯 없는 자동 생성 거부 감사 ══ */
   if (SECTIONS.has("rules")) {
     const rs = await call(jar, "/api/rules-save", { body: { rules: [{ channel: "youtube_shorts", kind: "shorts", accountMode: "auto", every: "week", count: 2, active: true }] } });
@@ -165,6 +303,31 @@ async function main() {
     const pl = await call(jar, "/api/posts-list", { query: { status: "all" } });
     rec("posts-list status 어휘에 uploaded_private 허용(화면 «비공개 업로드됨»)", pl.json?.ok === true, `${pl.status}`);
   }
+  /* ══ wiring — 🔴 AC-29 «누가 부르나»: 새 게이트·잡 kind·상태 어휘의 **호출처 수를 센다**(0 이면 있는 척 미완) ══ */
+  if (SECTIONS.has("wiring")) {
+    const { readdirSync, statSync } = await import("node:fs");
+    const files = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = `${d}/${f}`; if (f === "node_modules" || f.startsWith(".")) continue; const st = statSync(p); if (st.isDirectory()) walk(p); else if (/\.(ts|mts|mjs|js)$/.test(f)) files.push(p); } };
+    for (const d of ["lib", "netlify/functions", "runner", "db"]) { try { walk(d); } catch { /* */ } };
+    const src = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
+    const callers = (needle, ownerRe) => [...src].filter(([f, t]) => !ownerRe.test(f) && t.includes(needle)).map(([f]) => f);
+    const must = [
+      ["triggerVideo(", /lib\/video\/gen\.ts/, "배경 생성 착수(디렉터·재생성·스위퍼)"],
+      ["checkVideoBudget(", /lib\/video\/cost\.ts/, "원가 관문"],
+      ["videoCoinItem(", /lib\/coin-table\.ts/, "영상 코인 구간제"],
+      ["enqueueRender(", /lib\/video\/render-queue\.ts/, "렌더 잡 적재"],
+    ];
+    for (const [needle, owner, what] of must) { const c = callers(needle, owner); rec(`호출처 ≥1 — ${needle.replace("(", "")}(${what})`, c.length >= 1, c.length ? c.join(" ").slice(0, 90) : "🔴 0곳 = 있는 게이트가 안 지킨다(AC-29)"); }
+    // 스위퍼는 «문자열»이 아니라 STEPS 배열 등록으로 산다(문자열 grep 은 주석에도 걸린다 — 심볼로 센다)
+    const runnerSrc = src.get("lib/cron/runner.ts") || "";
+    rec("스위퍼 등록 — lib/cron/runner.ts STEPS 에 videoSweepStep(5m)", /import\s*\{[^}]*videoSweepStep/.test(runnerSrc) && /videoSweepStep\s*,/.test(runnerSrc.split("STEPS")[1] || runnerSrc), /videoSweepStep/.test(runnerSrc) ? "import+STEPS" : "🔴 미등록");
+    // 🔴 고지 재검사는 **승인·발행 직전**에 불려야 한다(계약 §1.8) — 심사(judge) 안에서만 불리면 «검수에서 통과시킨 것»을 발행이 다시 안 본다
+    const approveCallers = callers("checkVideoDisclosure", /lib\/(disclosure|video\/judge)\.ts/);
+    rec("고지 재검사 호출처 — approve·publish 경로(content-approve·publish/*)에 ≥1(계약 §1.8)",
+      approveCallers.some((f) => /content-approve|publish|pieces/.test(f)), approveCallers.length ? approveCallers.join(" ").slice(0, 90) : "🔴 judge.ts 밖 0곳 — 승인·발행 직전 재검사 미배선(AC-29)");
+    const later = [["finalizeRender(", /lib\/video\/render-queue\.ts/, "B2"], ["render.video", /lib\/video\/(render-queue|types)\.ts/, "B2"], ["uploaded_private", /lib\/video\//, "B2·A"], ["publish.naver_clip", /lib\/video\//, "B2"]];
+    for (const [needle, owner, who] of later) { const c = callers(needle, owner); rec(`호출처(${who} 머지 후) — ${needle.replace("(", "")}`, c.length >= 1 ? true : "WARN", c.length ? c.join(" ").slice(0, 90) : `${who} 미머지 — 머지 후 다시 센다`); }
+  }
+
   /* ══ regress — 글 파이프 무변경 · 타 테넌트 · 평문 ══ */
   if (SECTIONS.has("regress")) {
     const other = new Jar(); await call(other, "/api/auth-login", { body: { email: "c+p1b@autocreate.test", password: PASSWORD } });
@@ -175,10 +338,16 @@ async function main() {
     const c = await cron("hourly", TID); rec("글 파이프 크론 회귀(hourly errors 0)", c.status === 200 && (c.json?.ran || []).every((x) => x.errors === 0), (c.json?.ran || []).map((x) => `${x.step}:${x.errors}`).join(" "));
   }
   if (SECTIONS.has("cleanup")) {
-    for (const t of ["piece_assets"]) await s`DELETE FROM piece_assets WHERE piece_id IN (SELECT id FROM pieces WHERE tenant_id = ${TID})`.catch(() => {});
-    for (const t of ["runner_jobs", "coin_ledger", "ai_usage", "notifications", "slots", "pieces", "briefs", "cadence_rules"]) { try { await s.unsafe(`DELETE FROM ${t} WHERE tenant_id = $1`, [TID]); } catch { /* */ } }
-    await s`DELETE FROM shorts_templates WHERE tenant_id = ${TID}`.catch(() => {});
-    rec("정리(테스트 테넌트 영상·코인·잡·템플릿 행)", true, `tenant ${TID}`);
+    /* 🔴 정리까지가 검증(C-HANDOFF §2.3): 돈·상태 행을 먼저 되돌린다 — 가짜 유료 테넌트가 운영 대시보드 MRR·전환율을 만든다. */
+    for (const t of [...ALLOWED]) {
+      try { await s.unsafe(`UPDATE tenants SET plan_key = 'trial' WHERE id = $1 AND plan_key <> 'trial'`, [t]); } catch { /* */ }
+      try { await s.unsafe(`DELETE FROM piece_assets WHERE piece_id IN (SELECT id FROM pieces WHERE tenant_id = $1)`, [t]); } catch { /* */ }
+      for (const tbl of ["affiliate_links", "posts", "runner_jobs", "coin_ledger", "ai_usage", "notifications", "audit_logs", "feature_flags", "slots", "pieces", "briefs", "cadence_rules", "shorts_templates"]) { try { await s.unsafe(`DELETE FROM ${tbl} WHERE tenant_id = $1`, [t]); } catch { /* */ } }
+    }
+    // AC-20 계열 회피: 배열 바인딩 대신 id 목록을 펼쳐 센다.
+    let left = { c: 0 };
+    for (const t of [...ALLOWED]) { try { const [r] = await s.unsafe(`SELECT COUNT(*) AS c FROM tenants WHERE id = $1 AND plan_key <> 'trial'`, [t]); left = { c: Number(left.c) + Number(r?.c || 0) }; } catch { left = { c: "?" }; } }
+    rec("정리(테스트 테넌트 영상·코인·잡·감사·템플릿 행 · 플랜 trial 복구)", String(left?.c) === "0", `tenants ${[...ALLOWED].join(",")} · 유료로 남은 집 ${left?.c}`);
   }
   finish();
 }
