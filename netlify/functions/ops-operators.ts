@@ -4,7 +4,9 @@
  *   POST /api/ops-operators { id?, email, name, role, ssoSubject? }  → { ok, operator }   // 생성/수정(비밀번호는 여기서 안 만든다 · SSO/기존 흐름)
  *   POST /api/ops-operator-role   { id, role }        → { ok, operator }
  *   POST /api/ops-operator-disable { id, active }     → { ok, operator }
- *   GET  /api/ops-audit-search?q&tenant&actor&action&risk&from&to&page → { ok, rows:[…], page, total }  // R1 ops-audit 확장 · KST 기간
+ *   GET  /api/ops-audit-search?q&tenant&actor&actorType&action&risk&from&to&page → { ok, rows:[…], page, total }  // R1 ops-audit 확장 · KST 기간
+ *        actorType = operator|customer|system — 🔴 DB 칸(audit_logs.actor_type)은 user|operator|system 이라 «customer ↔ user» 로 옮긴다.
+ *        응답의 rows[].actorType 도 같은 어휘(customer)로 내보낸다 — 거르는 말과 보이는 말이 다르면 화면이 못 맞춘다.
  *   Operator = { id, email, name, role, ssoSubject?, active, lastLoginAt? }   // DB 저장은 operators.sso_sub
  */
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -20,6 +22,9 @@ const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.ht
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 const ROLES = new Set(["operator", "admin", "super_admin"]);
 const PAGE = 30;
+/** 감사 행위자 어휘: 화면·API = operator|customer|system · DB(audit_logs.actor_type) = operator|user|system. */
+const AT_TO_DB: Record<string, string> = { operator: "operator", customer: "user", user: "user", system: "system" };
+const AT_TO_API = (dbType: string) => (dbType === "user" ? "customer" : dbType);
 
 function toOperator(r: Record<string, unknown>) {
   const o: Record<string, unknown> = { id: n(r.id), email: String(r.email ?? ""), name: String(r.name ?? ""), role: String(r.role ?? "operator"), active: r.active === true };
@@ -42,6 +47,13 @@ export default async (req: Request): Promise<Response> => {
       if (qtext) conds.push(sql`(action ILIKE ${"%" + qtext + "%"} OR target ILIKE ${"%" + qtext + "%"})`);
       const tenant = n(url.searchParams.get("tenant")); if (tenant) conds.push(sql`tenant_id = ${tenant}`);
       const actor = n(url.searchParams.get("actor")); if (actor) conds.push(sql`actor_id = ${actor}`);
+      // 행위자 «종류» — actor_id 만으로는 운영자인지 고객인지 못 가른다(메인 소발주 1). API customer → DB user.
+      const at = String(url.searchParams.get("actorType") ?? "").trim().toLowerCase();
+      if (at && at !== "all") {
+        const dbType = AT_TO_DB[at];
+        if (!dbType) return badRequest("actorType 은 operator|customer|system", "actorType");
+        conds.push(sql`actor_type = ${dbType}`);
+      }
       const action = String(url.searchParams.get("action") ?? "").trim(); if (action) conds.push(sql`action = ${action}`);
       const risk = String(url.searchParams.get("risk") ?? "").trim(); if (risk) conds.push(sql`risk_level = ${risk}`);
       // from/to 는 KST 날짜(YYYY-MM-DD) — KST 자정 경계를 UTC 로 변환해 비교(§13.5).
@@ -54,7 +66,7 @@ export default async (req: Request): Promise<Response> => {
       const rows = await q(sql`SELECT id, tenant_id, actor_type, actor_id, action, target, risk_level, detail, ip, created_at
         FROM audit_logs WHERE ${where} ORDER BY id DESC LIMIT ${PAGE} OFFSET ${(page - 1) * PAGE}`);
       return json({ ok: true, rows: rows.map((r) => ({
-        id: n(r.id), tenantId: r.tenant_id ? n(r.tenant_id) : null, actorType: r.actor_type ? String(r.actor_type) : null,
+        id: n(r.id), tenantId: r.tenant_id ? n(r.tenant_id) : null, actorType: r.actor_type ? AT_TO_API(String(r.actor_type)) : null,
         actorId: r.actor_id ? n(r.actor_id) : null, action: String(r.action), target: r.target ? String(r.target) : null,
         risk: String(r.risk_level), detail: r.detail ?? null, ip: r.ip ? String(r.ip) : null,
         at: utcDate(r.created_at)?.toISOString(),
