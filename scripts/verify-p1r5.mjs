@@ -89,8 +89,14 @@ async function main() {
     else rec("소재에 영상 채널 힌트 후보 존재", true, `«${vt.title}» ${vt.channelHint}`);
     topicId = (vt || tl[0])?.id || 0;
   }
-  // 절을 골라 돌려도(SECTIONS=cost 처럼) 재료가 있어야 한다 — 소재는 이 집에 있는 것을 그대로 쓴다.
-  if (!topicId) { const [t] = await s`SELECT id FROM topics WHERE tenant_id = ${TID} ORDER BY id DESC LIMIT 1`; topicId = Number(t?.id || 0); }
+  // 절을 골라 돌려도(SECTIONS=cost 처럼) 재료가 있어야 한다. 🔴 **아직 안 쓴** 소재여야 한다 — 쓴 소재면 `step:"topic_state"` 로 절 전체가 헛돈다.
+  if (!topicId) {
+    const pick = async () => (await s`SELECT id FROM topics WHERE tenant_id = ${TID} AND status = 'candidate'
+      AND id NOT IN (SELECT COALESCE(topic_id, 0) FROM pieces WHERE tenant_id = ${TID}) ORDER BY id DESC LIMIT 1`)[0];
+    let t = await pick();
+    if (!t) { await call(jar, "/api/topics-refresh", { body: {} }); for (let i = 0; i < 12 && !t; i++) { await sleep(8000); t = await pick(); } }
+    topicId = Number(t?.id || 0);
+  }
 
   /* ══ director — 제안(글 1 + 쇼츠 1 · 코인 1+6+28) → 확정(코인 1회 · 재확정 0 · 달러 캡 선검사) ══ */
   let pieceId = 0, briefId = 0;
@@ -130,8 +136,31 @@ async function main() {
     await sleep(3000); const [u1] = await s`SELECT COUNT(*) AS c FROM ai_usage WHERE tenant_id = ${TID}`;
     rec("잠금 20분 안 중복 호출 → 즉시 반환 · ai_usage 증가 0", [200, 202].includes(bg.status) && Number(u1?.c) === Number(u0?.c), `${bg.status} usage ${u0?.c}→${u1?.c}`);
     await s`UPDATE pieces SET meta = meta - 'chainLock' WHERE id = ${pieceId}`;
-    // 이어달리기: chainResume.count 증가 · 이미 만든 컷 재생성 0(clip 자산 수·ai_usage video_clip 행 불변)
-    warn("이어달리기(CHAIN_BUDGET_MS=30000 서버로 재실행 → resume:true 재디스패치 · 컷 재생성 0)", "dev 서버를 CHAIN_BUDGET_MS=30000 으로 띄운 2회차 실행에서 chainResume.count≥1 · clip 자산 수·ai_usage video_clip 행 불변을 잰다(트리거)");
+  }
+
+  /* ══ resume — 이어달리기(§1.4-3): 15분 벽 앞에서 스스로 멈추고 이어 달린다 · 🔴 이미 만든 컷은 **다시 만들지 않는다**(돈 두 배 금지)
+       🔴 dev 서버를 `CHAIN_BUDGET_MS=30000` 으로 띄운 상태에서만 의미가 있다(상수는 함수 프로세스 로드 시점에 읽힌다). ══ */
+  if (SECTIONS.has("resume")) {
+    const [base3] = await s`SELECT topic_id, channel, account_id, meta FROM pieces WHERE tenant_id = ${TID} AND kind = 'video' AND topic_id IS NOT NULL ORDER BY id DESC LIMIT 1`;
+    if (!base3?.topic_id) warn("이어달리기", "기준 piece 가 없어 건너뜀");
+    else {
+      const [np] = await s`INSERT INTO pieces (tenant_id, topic_id, channel, account_id, kind, status, title, meta)
+        VALUES (${TID}, ${Number(base3.topic_id)}, ${String(base3.channel)}, ${base3.account_id ?? null}, 'video', 'generating', 'C R5 이어달리기',
+                ${s.json({ stage: "script", video: { ...(base3.meta?.video || {}), format: "graphic", seconds: 60, cuts: 9 }, chainStage: null, chainLock: null, chainResume: { count: 0 } })}) RETURNING id`;
+      const rid = Number(np?.id);
+      await call(null, "/api/generate-video-background", { body: { pieceId: rid, tenantId: TID }, headers: { "x-internal-secret": process.env.INTERNAL_SECRET || "" } });
+      let row = null; const dl = Date.now() + Number(process.env.RESUME_TIMEOUT_MS || 300_000);
+      while (Date.now() < dl) { const [p] = await s`SELECT status, meta FROM pieces WHERE id = ${rid}`; row = p; if (!(await stubGuard(TID, "resume"))) return finish(); if (p?.meta?.render || ["failed", "in_review", "awaiting_runner"].includes(String(p?.status))) break; await sleep(5000); }
+      const cnt = Number(row?.meta?.chainResume?.count || 0);
+      rec("이어달리기 — 예산(CHAIN_BUDGET_MS) 앞에서 스스로 멈추고 재디스패치(chainResume.count ≥ 1 · 상한 3)",
+        cnt >= 1 && cnt <= 3, `piece ${rid} · resume ${cnt} · ${row?.status} · stage ${row?.meta?.stage} · 서버 예산 ${process.env.RESUME_SERVER_BUDGET_MS || "(서버 env 확인)"}`, `piece ${rid}`);
+      // 🔴 컷 재생성 0 의 증거: 컷 하나당 ai_usage ref 가 하나다(`piece:{id}:cut{n}`·`:still{n}`). 다시 만들었다면 같은 ref 가 두 줄이 된다.
+      const usage = await s`SELECT ref, COUNT(*) AS c FROM ai_usage WHERE tenant_id = ${TID} AND ref LIKE ${"piece:" + rid + ":%"} AND purpose = 'video_clip' GROUP BY ref ORDER BY c DESC`;
+      const dup = usage.filter((u) => Number(u.c) > 1);
+      const [assets] = await s`SELECT COUNT(*) AS c FROM piece_assets WHERE piece_id = ${rid} AND kind IN ('clip','image')`;
+      rec("이어달리기 뒤 **이미 만든 컷 재생성 0**(같은 cut ref 가 두 번 과금되지 않는다)", dup.length === 0,
+        `컷 ref ${usage.length}종 · 중복 ${dup.length}${dup.length ? ` (${dup.map((d) => d.ref).join(",")})` : ""} · 자산 ${assets?.c}장`);
+    }
   }
   /* ══ sweep — 20분 침묵 → video.sweep 재디스패치 · 상한 3회 → failed+환급+알림 ══ */
   if (SECTIONS.has("sweep") && pieceId) {
@@ -149,12 +178,18 @@ async function main() {
     const sw = await cron("5m", TID); const st = stepOf(sw, "video.sweep");
     const [p1] = await s`SELECT status, meta FROM pieces WHERE id = ${pieceId}`;
     rec("video.sweep: 20분 침묵 + chainStage → 이어달리기 재디스패치(chainResume.count 1 · 잠금 먼저)", !!st && st.errors === 0 && (Number(p1?.meta?.chainResume?.count) >= 1 || st.changed >= 1), `${JSON.stringify(st || {}).slice(0, 120)} · resume ${JSON.stringify(p1?.meta?.chainResume)}`);
-    await s`DELETE FROM runner_jobs WHERE piece_id = ${pieceId} AND kind = 'render.video'`;
-    await s`UPDATE pieces SET status = 'generating', updated_at = NOW() - interval '25 minutes', meta = (meta - 'chainLock') || ${s.json({ stage: "clips", chainStage: { stage: "clips", at: new Date(Date.now() - 25 * 60_000).toISOString() }, chainResume: { count: 3 } })} WHERE id = ${pieceId}`;
+    /* 🔴 상한 초과는 **전용 piece** 로 잰다 — 바로 앞 검사에서 되살아난 체인이 아직 돌며 `chainLock` 을 다시 잡아
+       내가 세운 조건을 덮어쓴다(그러면 스위퍼가 정상적으로 skip 해서 검사가 또 헛돈다). 코인 원장도 같이 심어 **환급이 실제로 도는지** 본다. */
+    const [base2] = await s`SELECT topic_id, channel, account_id FROM pieces WHERE id = ${pieceId}`;
+    const [capped] = await s`INSERT INTO pieces (tenant_id, topic_id, channel, account_id, kind, status, title, updated_at, meta)
+      VALUES (${TID}, ${base2?.topic_id ?? null}, ${String(base2?.channel || "youtube_shorts")}, ${base2?.account_id ?? null}, 'video', 'generating', 'C R5 스위퍼 상한',
+              NOW() - interval '25 minutes', ${s.json({ stage: "clips", video: { format: "graphic", seconds: 60, cuts: 9 }, chainStage: { stage: "clips", at: new Date(Date.now() - 25 * 60_000).toISOString() }, chainLock: null, chainResume: { count: 3 } })}) RETURNING id`;
+    const cappedId = Number(capped?.id);
+    await s`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason) VALUES (${TID}, 'consume', 'included', -28, ${"piece:" + cappedId}, 'R5 스위퍼 상한 시험')`;
     const b0 = (await call(jar, "/api/coins-balance")).json; const sw2 = await cron("5m", TID);
-    const [p2] = await s`SELECT status, meta FROM pieces WHERE id = ${pieceId}`; const b1 = (await call(jar, "/api/coins-balance")).json;
+    const [p2] = await s`SELECT status, meta FROM pieces WHERE id = ${cappedId}`; const b1 = (await call(jar, "/api/coins-balance")).json;
     const [nf] = await s`SELECT id FROM notifications WHERE tenant_id = ${TID} AND kind = 'piece_failed' ORDER BY id DESC LIMIT 1`;
-    rec("상한(3) 초과 → failed + 사유(마지막 단계) + 환급 + 알림", p2?.status === "failed" && /단계/.test(String(p2?.meta?.failReason || "")) && b1.balance > b0.balance && !!nf, `${JSON.stringify(stepOf(sw2, "video.sweep") || {}).slice(0, 100)} · ${p2?.status} «${p2?.meta?.failReason}» · 코인 ${b0?.balance}→${b1?.balance} · 알림 ${nf?.id}`);
+    rec("상한(3) 초과 → failed + 사유(마지막 단계) + 환급(코인 실제 복구) + 알림", p2?.status === "failed" && /단계/.test(String(p2?.meta?.failReason || "")) && b1.balance > b0.balance && !!nf, `piece ${cappedId} ${JSON.stringify(stepOf(sw2, "video.sweep") || {}).slice(0, 80)} · ${p2?.status} «${String(p2?.meta?.failReason || "").slice(0, 40)}» · 코인 ${b0?.balance}→${b1?.balance} · 알림 ${nf?.id}`, `piece ${cappedId}`);
   }
   /* ══ cost — 🔴 계약 v5.5 §1.4c-(1): R4 `checkAiCostCap` 재사용(새 캡 금지) · 소프트=통과+운영 알림 · 하드(일일×3)=차단·환급 · 전역 월 ₩1,400,000 · kill switch ══ */
   if (SECTIONS.has("cost") && topicId) {
@@ -354,9 +389,23 @@ async function main() {
     const licensed = String(process.env.BGM_LICENSE_VERIFIED || "") === "1";
     // 🔴 «무음이 정직 경로» = bgm 이 null 이어도 **그것 때문에** 실패하지 않는다(다른 사유의 실패는 이 절의 관심사가 아니다).
     const bgmBlamed = /bgm|음악|배경음/i.test(String(anyRender?.meta?.failReason || ""));
-    rec(licensed ? "BGM_LICENSE_VERIFIED=1 → audio.bgm 에 키·gainDb" : "BGM_LICENSE_VERIFIED 없음 → audio.bgm = null(무음)이 정직 경로(bgm 때문에 실패 0)",
-      anyRender ? (licensed ? !!bgm && !!bgm.key : hasKey && bgm === null && !bgmBlamed) : false,
-      anyRender ? `piece ${anyRender.id} ${anyRender.status} · audio.bgm ${hasKey ? JSON.stringify(bgm) : "🔴 키 없음(계약 §2.1 은 키 존재+null)"} · 실패사유 «${String(anyRender.meta?.failReason || "-").slice(0, 40)}»` : "render 페이로드를 가진 piece 0(payload 절 먼저)");
+    rec(licensed ? "BGM_LICENSE_VERIFIED=1 → audio.bgm 에 키·gainDb(무음이 아니라 음악이 기본 경로)" : "BGM_LICENSE_VERIFIED 없음 → audio.bgm = null(무음)이 정직 경로(bgm 때문에 실패 0)",
+      anyRender ? (licensed ? !!bgm && !!bgm.key && typeof bgm.gainDb === "number" : hasKey && bgm === null && !bgmBlamed) : false,
+      anyRender ? `piece ${anyRender.id} ${anyRender.status} · audio.bgm ${hasKey ? JSON.stringify(bgm).slice(0, 70) : "🔴 키 없음(계약 §2.1 은 키 존재+null)"} · 실패사유 «${String(anyRender.meta?.failReason || "-").slice(0, 30)}»` : "render 페이로드를 가진 piece 0(payload 절 먼저)");
+    if (licensed) {
+      // 무드 매핑(lib/video/bgm.ts): graphic→uplift · talking→calm · clip→warm. payload 절이 만든 3포맷 piece 로 되짚는다.
+      const MOOD = { graphic: "uplift", talking: "calm", clip: "warm" };
+      const rows = await s`SELECT id, meta->'video'->>'format' AS fmt, meta->'render'->'audio'->'bgm'->>'key' AS k
+        FROM pieces WHERE tenant_id = ${TID} AND kind = 'video' AND meta->'render'->'audio' ? 'bgm' AND meta->'video'->>'format' IS NOT NULL ORDER BY id DESC LIMIT 12`;
+      const seen = new Map(); for (const r0 of rows) if (r0.k && !seen.has(r0.fmt)) seen.set(r0.fmt, r0.k);
+      const checked = [...seen].filter(([f]) => MOOD[f]);
+      rec("BGM 무드 매핑 — graphic→uplift · talking→calm · clip→warm(포맷마다 그 무드 폴더의 곡)",
+        checked.length >= 1 && checked.every(([f, k]) => String(k).includes(MOOD[f])),
+        checked.map(([f, k]) => `${f}→${String(k).split("/").slice(-2).join("/")}`).join(" · ") || "bgm 실린 piece 0(payload 절 먼저)");
+      const keys = rows.map((r0) => r0.k).filter(Boolean);
+      rec("BGM 곡 회전 — 같은 무드 안에서 한 곡만 쓰지 않는다(seed 회전)", keys.length < 2 ? "WARN" : new Set(keys).size >= 2,
+        `${new Set(keys).size}곡/${keys.length}편`);
+    }
   }
 
   /* ══ rules — kind shorts 주 2회 → coinsPerWeek 2×28 · 슬롯 점 · 슬롯 없는 자동 생성 거부 감사 ══ */
