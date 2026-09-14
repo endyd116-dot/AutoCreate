@@ -13,7 +13,7 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">운영진</span><span class="sp"></span></div>
-<div class="group"><div class="gt">운영자 <button type="button" id="invite" style="color:var(--ink);font-weight:600;font-size:12.5px">초대</button></div><div id="list"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">super_admin 전부 · admin 고객/이벤트/결제/CS/공지 · operator 고객 열람+원격접속+CS 답변. 싸이렌MIS SSO 는 sso_subject 로 묶여요.</p></div>
+<div class="group"><div class="gt">운영자 <button type="button" id="invite" style="color:var(--ink);font-weight:600;font-size:12.5px">초대</button></div><div id="list"></div><div id="pager" class="muted" style="padding:0 16px 4px;font-size:12.5px"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">super_admin 전부 · admin 고객/이벤트/결제/CS/공지 · operator 고객 열람+원격접속+CS 답변(러너·AI·채널은 조회만). 싸이렌MIS SSO 는 sso_subject 로 묶여요.</p></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -24,17 +24,24 @@
 (async () => {
 const op = await OPS.boot("operators"); if (!op) return;
 const RL = { super_admin: ["ink", "super_admin"], admin: ["ok", "admin"], operator: ["off", "operator"] };
+let page = 1;
 async function load() {
-  const r = await UI.api("/api/ops-operators", { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-operators?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   UI.$("#list").innerHTML = OPS.table([
-    { h: "이름", f: (o) => `<b>${UI.esc(o.name)}</b><br><span class="muted">${UI.esc(o.email)}</span>` }, { h: "역할", f: (o) => OPS.pill(RL[o.role] || ["off", o.role]) }, { h: "SSO", f: (o) => o.ssoSubject ? `<span class="muted">${UI.esc(o.ssoSubject)}</span>` : "—" },
+    { h: "이름", f: (o) => `<b>${UI.esc(o.name || "—")}</b><br><span class="muted">${UI.esc(o.email)}</span>` }, { h: "역할", f: (o) => OPS.pill(RL[o.role] || ["off", o.role]) }, { h: "SSO", f: (o) => o.ssoSubject ? `<span class="muted">${UI.esc(o.ssoSubject)}</span>` : "—" },
     { h: "상태", f: (o) => OPS.pill(o.active ? ["ok", "활성"] : ["off", "꺼짐"]) }, { h: "마지막 로그인", f: (o) => OPS.dt(o.lastLoginAt) },
-    { h: "", f: (o) => o.id === op.id ? '<span class="muted">나</span>' : `<button type="button" class="lk" data-role="${o.id}">역할</button> · <button type="button" class="lk" data-off="${o.id}">${o.active ? "끄기" : "켜기"}</button>` },
+    { h: "", f: (o) => o.id === op.id ? '<span class="muted">나</span>' : `<button type="button" class="lk" data-role="${o.id}">역할</button> · <button type="button" class="lk" data-edit="${o.id}">고치기</button> · <button type="button" class="lk" data-off="${o.id}">${o.active ? "끄기" : "켜기"}</button>` },
   ], r.operators || []);
-  UI.$$("[data-role]").forEach((b) => b.onclick = () => { const o = r.operators.find((x) => x.id === Number(b.dataset.role)); UI.sheet(`<div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o.role)}<div class="cta"><button class="btn primary" type="button" id="ok">바꾸기</button></div>`, { title: `${o.name} 역할`, onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const rr = await UI.api("/api/ops-operators-role", { body: { id: o.id, role: UI.chipVal(sh, "role") }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); close(); UI.toast("바꿨어요"); load(); }; } }); });
-  UI.$$("[data-off]").forEach((b) => b.onclick = async () => { const rr = await UI.api("/api/ops-operators-disable", { body: { id: Number(b.dataset.off) }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); load(); });
+  UI.$("#pager").innerHTML = OPS.pager(r.page, r.total, 30); UI.$$("#pager [data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); load(); });
+  const byId = (id) => (r.operators || []).find((x) => x.id === Number(id));
+  UI.$$("[data-role]").forEach((b) => b.onclick = () => { const o = byId(b.dataset.role); UI.sheet(`<div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o.role)}<div class="cta"><button class="btn primary" type="button" id="ok">바꾸기</button></div>`, { title: `${o.name || o.email} 역할`, onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const rr = await UI.api("/api/ops-operator-role", { body: { id: o.id, role: UI.chipVal(sh, "role") }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요"); load(); }; } }); });
+  UI.$$("[data-off]").forEach((b) => b.onclick = async () => { const o = byId(b.dataset.off); const rr = await UI.api("/api/ops-operator-disable", { body: { id: o.id, active: !o.active }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "바꾸지 못했어요"); UI.toast(rr.operator.active ? "켰어요" : "껐어요"); load(); });
+  UI.$$("[data-edit]").forEach((b) => b.onclick = () => form(byId(b.dataset.edit)));
 }
-UI.$("#invite").onclick = () => UI.sheet(`<form id="if"><div class="field"><label>이메일</label><input class="input" name="email" type="email" required placeholder="name@company.com"><div class="help"></div></div><div class="field"><label>이름</label><input class="input" name="name" placeholder="선택"></div><div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), "operator")}<div class="cta"><button class="btn primary" type="submit">초대</button></div></form>`, { title: "운영자 초대", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#if"), async (d, f) => { const r = await UI.api("/api/ops-operators", { body: { action: "invite", email: d.email, name: d.name || undefined, role: UI.chipVal(sh, "role") }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "email", r.error); close(); UI.toast("초대했어요 · 첫 로그인에 비밀번호를 바꿔요"); load(); }); } });
+function form(o) {
+  UI.sheet(`<form id="if"><div class="field"><label>이메일</label><input class="input" name="email" type="email" required value="${UI.esc(o?.email || "")}" placeholder="name@company.com"><div class="help"></div></div><div class="field"><label>이름</label><input class="input" name="name" value="${UI.esc(o?.name || "")}" placeholder="선택"></div><div class="field"><label>SSO 주체 <span class="muted" style="font-weight:500">· 싸이렌MIS · 선택</span></label><input class="input" name="ssoSubject" value="${UI.esc(o?.ssoSubject || "")}" placeholder="mis:123"></div><div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o?.role || "operator")}<div class="cta"><button class="btn primary" type="submit">${o ? "고치기" : "초대"}</button></div></form>`, { title: o ? "운영자 고치기" : "운영자 초대", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#if"), async (d, f) => { const r = await UI.api("/api/ops-operators", { body: { id: o?.id, email: d.email, name: d.name || "", role: UI.chipVal(sh, "role"), ssoSubject: d.ssoSubject || undefined }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "email", r.error || "저장하지 못했어요"); close(); UI.toast(o ? "고쳤어요" : "초대했어요 · 첫 로그인에 비밀번호를 바꿔요"); load(); }); } });
+}
+UI.$("#invite").onclick = () => form(null);
 load();
 })();
 </script>

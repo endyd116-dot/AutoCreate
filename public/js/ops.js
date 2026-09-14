@@ -9,16 +9,22 @@
     ["promo", "이벤트", "/ops/promo.html", '<path d="M12 3l2.5 6 6.5.5-5 4.3 1.6 6.4L12 17l-5.6 3.2L8 13.8 3 9.5 9.5 9z"/>', "admin"],
     ["billing", "결제", "/ops/billing.html", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/>', "admin"],
     ["cs", "CS", "/ops/cs.html", '<path d="M4 5h16v11H8l-4 4z"/>', "operator"],
-    ["runners", "러너", "/ops/runners.html", '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/>', "super_admin"],
-    ["ai", "AI", "/ops/ai.html", '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>', "super_admin"],
-    ["channels", "채널", "/ops/channels.html", '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>', "super_admin"],
-    ["notices", "공지", "/ops/notices.html", '<path d="M4 10v4h3l6 4V6L7 10zM16 9a4 4 0 0 1 0 6"/>', "admin"],
+    ["runners", "러너", "/ops/runners.html", '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/>', "operator"],
+    ["ai", "AI", "/ops/ai.html", '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>', "operator"],
+    ["channels", "채널", "/ops/channels.html", '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>', "operator"],
+    ["notices", "공지", "/ops/notices.html", '<path d="M4 10v4h3l6 4V6L7 10zM16 9a4 4 0 0 1 0 6"/>', "operator"],
     ["operators", "운영진", "/ops/operators.html", '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c1-3.5 3.5-5 6-5s5 1.5 6 5M15 18c.5-2 2-3 4-3"/>', "super_admin"],
     ["audit", "감사", "/ops/audit.html", '<path d="M5 4h14v16H5zM9 9h6M9 13h6"/>', "super_admin"],
   ];
   const RANK = { super_admin: 3, admin: 2, operator: 1 };
   O.can = (op, minRole) => (RANK[op?.role] || 0) >= (RANK[minRole] || 0);
   O.menus = (op) => MENU.filter((m) => O.can(op, m[4]));
+  /* [P1R4-B2] 조회는 열고 «변경»만 잠근다 — 버튼을 숨기지 않고 잠금 표시(메인 지시: 러너·AI·채널·정책 문구 변경 = super_admin · 공지 = admin+) */
+  const LOCK_MSG = { super_admin: "최고 관리자만 바꿀 수 있어요", admin: "관리자만 바꿀 수 있어요", operator: "" };
+  O.lockPill = (minRole) => ` <span class="pill off" title="${LOCK_MSG[minRole] || ""}">${LOCK_MSG[minRole] || ""}</span>`;
+  O.lock = (op, minRole, root, except = []) => { if (!root || O.can(op, minRole)) return false; const keep = new Set(except.flatMap((s) => [...root.querySelectorAll(s)]));
+    root.querySelectorAll("button, .lk").forEach((b) => { if (keep.has(b)) return; b.disabled = true; b.classList.add("locked"); b.title = LOCK_MSG[minRole] || ""; b.addEventListener("click", (e) => { e.preventDefault(); UI.toast(LOCK_MSG[minRole] || "권한이 없어요"); }); }); return true; };
+  O.pager = (page, total, per) => { const last = Math.max(1, Math.ceil((total || 0) / per)); if (last <= 1) return ""; return `<span>${page} / ${last} 쪽</span> ${page > 1 ? `<button type="button" class="lk" data-page="${page - 1}">이전</button>` : ""} ${page < last ? `<button type="button" class="lk" data-page="${page + 1}">다음</button>` : ""}`; };
   const svg = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
   O.shell = function (active, op) {
     const rail = UI.$(".rail");

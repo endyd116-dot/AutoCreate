@@ -13,8 +13,8 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">채널</span><span class="sp"></span></div>
-<div class="group"><div class="gt">레지스트리 <span class="muted" style="font-weight:500">상태를 바꾸면 고객 그리드·온보딩에 바로 반영</span></div><div id="list"></div></div>
-<div class="group"><div class="gt">제휴 고지 문구(§16B) <button type="button" id="editD" style="color:var(--ink);font-weight:600;font-size:12.5px">고치기</button></div><p id="disc" style="margin:0 16px 4px;font-size:14px"></p><p id="discM" class="muted" style="margin:0 16px 12px;font-size:12.5px"></p></div>
+<div class="group"><div class="gt">레지스트리 <span class="muted" style="font-weight:500">상태를 바꾸면 고객 그리드·온보딩에 바로 반영</span><span id="lock1"></span></div><div id="list"></div></div>
+<div class="group"><div class="gt">제휴 고지 문구(§16B) <button type="button" id="editD" style="color:var(--ink);font-weight:600;font-size:12.5px">고치기</button><span id="lock2"></span></div><div class="kv"><span class="k">쿠팡 파트너스</span><span class="v" id="discC" style="font-weight:500;text-align:right;max-width:70%"></span></div><div class="kv"><span class="k">일반 제휴</span><span class="v" id="discG" style="font-weight:500;text-align:right;max-width:70%"></span></div><p id="discM" class="muted" style="margin:0 16px 12px;font-size:12.5px"></p></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -24,18 +24,23 @@
 <script>
 (async () => {
 const op = await OPS.boot("channels"); if (!op) return;
+const canEdit = OPS.can(op, "super_admin");
 const CST = { active: ["ok", "가동"], planned: ["off", "준비 중"], down: ["danger", "장애"] };
+const MON = Object.keys(UI.SRC).map((k) => [k, UI.srcLabel(k)]);
 let D;
 async function load() {
   const [r, d] = await Promise.all([UI.api("/api/ops-channels", { noRedirect: true }), UI.api("/api/ops-disclosure", { noRedirect: true })]);
   if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin"); UI.$("#lock2").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "채널", f: (c) => `${UI.mark(c.key, "sm")}<b>${UI.esc(c.label || UI.chLabel(c.key))}</b>` }, { h: "상태", f: (c) => OPS.pill(CST[c.status] || ["off", c.status]) },
     { h: "최적 시간(KST)", f: (c) => (c.bestHours || []).map((h) => String(h).padStart(2, "0") + "시").join(" · ") || "—" }, { h: "수익", f: (c) => (c.monetize || []).map((m) => UI.srcLabel(m)).join(" · ") || "—" },
     { h: "", f: (c) => `<button type="button" class="lk" data-k="${c.key}">바꾸기</button>` },
   ], r.channels || []);
+  OPS.lock(op, "super_admin", UI.$("#list"));
   UI.$$("[data-k]").forEach((b) => b.onclick = () => sheet(r.channels.find((c) => c.key === b.dataset.k)));
-  if (d.ok) { D = d; UI.$("#disc").textContent = d.text; UI.$("#discM").textContent = `${UI.esc(d.updatedBy || "")} · ${OPS.dt(d.updatedAt)} · 바꾸면 다음 발행부터 새 문구 · 변경은 감사에 남아요`; }
+  if (d.ok) { D = d; const t = d.text || {}; UI.$("#discC").textContent = t.coupang || ""; UI.$("#discG").textContent = t.generic || ""; UI.$("#discM").textContent = `${d.updatedBy ? "운영자 #" + d.updatedBy + " · " : ""}${d.updatedAt ? OPS.dt(d.updatedAt) : "코드 기본값"} · 바꾸면 다음 발행부터 새 문구 · 변경은 감사(high)에 남아요`; }
+  OPS.lock(op, "super_admin", UI.$("#editD").parentElement);
 }
 function sheet(c) {
   const H = [6, 7, 8, 9, 12, 13, 15, 18, 19, 20, 21, 23].map((h) => [h, h + "시"]);
@@ -43,13 +48,14 @@ function sheet(c) {
     <div class="sec">상태</div>${UI.seg("status", [["active", "가동"], ["planned", "준비 중"], ["down", "장애"]], c.status)}
     <p class="muted" id="hint" style="margin:8px 0 0;font-size:13px"></p>
     <div class="sec">최적 시간(KST)</div>${UI.chips("hours", H, c.bestHours || [], true)}
+    <div class="sec">수익 매체</div>${UI.chips("mon", MON, c.monetize || [], true)}
     <div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "채널 설정", onOpen: (sh, close) => {
       const hint = sh.querySelector("#hint"); const say = (v) => { hint.textContent = v === "down" ? "장애로 두면 고객 편성표의 이 채널 발행이 «PC 대기/확인 필요»로 멈춰요. 카나리 ✗ 뒤에 사람이 눌러요." : v === "planned" ? "준비 중이면 고객 그리드에서 숨고 온보딩엔 «곧 열려요» 칩이 붙어요." : "가동이면 고객이 바로 연결할 수 있어요."; }; say(c.status);
       UI.bindChips(sh, (n, v) => { if (n === "status") say(v); });
-      sh.querySelector("#ok").onclick = async () => { const r = await UI.api("/api/ops-channels", { body: { key: c.key, status: UI.chipVal(sh, "status"), bestHours: UI.chipVal(sh, "hours").map(Number) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요 · 고객 화면에 바로 반영"); load(); };
+      sh.querySelector("#ok").onclick = async () => { const r = await UI.api("/api/ops-channels", { body: { key: c.key, status: UI.chipVal(sh, "status"), bestHours: UI.chipVal(sh, "hours").map(Number), monetize: UI.chipVal(sh, "mon") }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요 · 고객 화면에 바로 반영"); load(); };
     } });
 }
-UI.$("#editD").onclick = () => UI.sheet(`<form id="df"><div class="field"><label>고지 문구 <span class="muted" style="font-weight:500">· 공정위 «추천·보증 심사지침» · 첫 블록 고정</span></label><textarea class="input" name="text" rows="4" style="height:auto;padding:14px 16px" required>${UI.esc(D?.text || "")}</textarea><div class="help"></div></div><div id="dc"></div><div class="cta"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "고지 문구", onOpen: (sh, close) => UI.form(sh.querySelector("#df"), (d, f) => UI.confirmRow(sh.querySelector("#dc"), "다음 발행부터 모든 고객의 제휴 글 첫 줄이 이 문구로 바뀌어요. 바꿀까요?", async () => { const r = await UI.api("/api/ops-disclosure", { body: { text: d.text }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "text", r.error); close(); UI.toast("바꿨어요 · 감사 기록"); load(); })) });
+UI.$("#editD").onclick = () => { const t = (D && D.text) || {}; UI.sheet(`<form id="df"><div class="field"><label>쿠팡 파트너스 <span class="muted" style="font-weight:500">· 쿠팡 필수 문구 · 첫 블록 고정</span></label><textarea class="input" name="coupang" rows="3" style="height:auto;padding:14px 16px" required>${UI.esc(t.coupang || "")}</textarea><div class="help"></div></div><div class="field"><label>일반 제휴 <span class="muted" style="font-weight:500">· 공정위 «추천·보증 심사지침»</span></label><textarea class="input" name="generic" rows="3" style="height:auto;padding:14px 16px" required>${UI.esc(t.generic || "")}</textarea><div class="help"></div></div><div id="dc"></div><div class="cta"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "고지 문구", onOpen: (sh, close) => UI.form(sh.querySelector("#df"), (d, f) => UI.confirmRow(sh.querySelector("#dc"), "다음 발행부터 모든 고객의 제휴 글 첫 줄이 이 문구로 바뀌어요. 바꿀까요?", async () => { const r = await UI.api("/api/ops-disclosure", { body: { coupang: d.coupang, generic: d.generic }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "coupang", r.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요 · 감사 기록"); load(); })) }); };
 load();
 })();
 </script>
