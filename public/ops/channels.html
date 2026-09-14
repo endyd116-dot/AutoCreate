@@ -39,7 +39,7 @@ async function load() {
   ], r.channels || []);
   OPS.lock(op, "super_admin", UI.$("#list"));
   UI.$$("[data-k]").forEach((b) => b.onclick = () => sheet(r.channels.find((c) => c.key === b.dataset.k)));
-  if (d.ok) { D = d; const t = d.text || {}; UI.$("#discC").textContent = t.coupang || ""; UI.$("#discG").textContent = t.generic || ""; UI.$("#discM").textContent = `${d.updatedBy ? "운영자 #" + d.updatedBy + " · " : ""}${d.updatedAt ? OPS.dt(d.updatedAt) : "코드 기본값"} · 바꾸면 다음 발행부터 새 문구 · 변경은 감사(high)에 남아요`; }
+  if (d.ok) { D = d; const t = d.text || {}; UI.$("#discC").textContent = t.coupang || ""; UI.$("#discG").textContent = t.generic || ""; UI.$("#discM").textContent = `${d.updatedBy ? (d.updatedBy.name || "운영자 #" + d.updatedBy.id) + " · " : ""}${d.updatedAt ? OPS.dt(d.updatedAt) : "코드 기본값"} · 바꾸면 다음 발행부터 새 문구 · 변경은 감사(high)에 남아요`; }
   OPS.lock(op, "super_admin", UI.$("#editD").parentElement);
 }
 function sheet(c) {
