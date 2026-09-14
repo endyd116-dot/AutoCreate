@@ -3,6 +3,7 @@
  *
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts tistory`
  *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog`
+ *   `npx tsx --env-file=.env scripts/verify-b2-runner.mts naver_blog --with-image`   (사진 삽입 경로까지)
  *
  *   한 프로세스 안에서 전부 한다:
  *     ① 로컬 함수 서버(임의 포트 · `netlify/functions/runner.ts` 의 default export 를 그대로)
@@ -22,6 +23,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
+import { deflateSync as zlibSync } from "node:zlib";
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";
@@ -48,10 +50,31 @@ const BODY = `<div class="disclosure">이 포스팅은 쿠팡 파트너스 활�
 <p>다음엔 건조기까지 돌려 보려고요.</p>
 <p class="tags">#겨울이불 #코인워시</p>`;
 
+/**
+ * 시험용 사진 — 외부 URL 에 기대지 않고 하니스 서버가 직접 낸다(자립 · 외부 서비스 흔들림 0).
+ *   최소 PNG 인코더(zlib + CRC32). 320×200 · 주황 단색. 네이버가 «너무 작은 사진»으로 거르지 않을 크기.
+ */
+function makePng(w: number, h: number, rgb: [number, number, number]): Buffer {
+  const crcTable = new Int32Array(256).map((_, k) => { let c = k; for (let i = 0; i < 8; i++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c; });
+  const crc32 = (buf: Buffer) => { let c = -1; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = rgb[0]; raw[o + 1] = rgb[1]; raw[o + 2] = rgb[2]; } }
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", zlibSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+const TEST_PNG = makePng(320, 200, [255, 140, 0]);
+
 function startServer(): Promise<{ port: number; close: () => void }> {
   const paths: string[] = Array.isArray(config?.path) ? config.path : [String(config?.path ?? "")];
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/img/ac-test.png") { res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(TEST_PNG.length) }).end(TEST_PNG); return; }
     if (!paths.includes(url.pathname)) { res.writeHead(404).end('{"ok":false,"step":"harness"}'); return; }
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
@@ -78,6 +101,7 @@ function startServer(): Promise<{ port: number; close: () => void }> {
 async function main() {
   const channel = String(process.argv[2] ?? "tistory");
   const keep = process.argv.includes("--keep");
+  const withImage = process.argv.includes("--with-image");
   if (!["tistory", "naver_blog"].includes(channel)) { console.error("사용법: verify-b2-runner.mts <tistory|naver_blog> [--keep]"); process.exit(2); }
 
   const cfg = channel === "tistory"
@@ -90,6 +114,13 @@ async function main() {
 
   const { port, close } = await startServer();
   const stamp = Date.now();
+  const imgUrl = `http://127.0.0.1:${port}/img/ac-test.png`;
+  /* 🔴 사진 삽입 경로 실증(네이버 «개별사진» 팝업·자리 잡을 때까지 대기·캡션)은 이미지 있는 원고로만 탄다.
+     사진은 하니스 서버가 직접 낸다(외부 URL 의존 0). */
+  const body = withImage
+    ? BODY.replace("<hr>", `<figure><img src="${imgUrl}" alt=""><figcaption>세탁 전 이불 사진(시험용)</figcaption></figure>
+<hr>`)
+    : BODY;
   console.log(`\n── B2 러너 셀렉터 실증 (${channel} · @${cfg.handle} · 임시저장까지) ──`);
   console.log(`   로컬 함수 서버 127.0.0.1:${port}\n`);
 
@@ -109,10 +140,14 @@ async function main() {
     await q(sql`INSERT INTO account_creds (tenant_id, account_id, kind, enc)
       VALUES (${tid}, ${accountId}, 'password', ${encryptObj({ loginId: cfg.id, password: cfg.pw, method: cfg.method })})`);
     const [p] = await q(sql`INSERT INTO pieces (tenant_id, account_id, channel, kind, format, title, body, blocks, meta, status)
-      VALUES (${tid}, ${accountId}, ${channel}, 'post', 'info', ${`[실증 드라이런] 겨울 이불 세탁 ${stamp}`}, ${BODY}, ${jsonb([])},
+      VALUES (${tid}, ${accountId}, ${channel}, 'post', 'info', ${`[실증 드라이런] 겨울 이불 세탁 ${stamp}`}, ${body}, ${jsonb([])},
               ${jsonb({ tags: ["겨울이불", "코인워시"], disclosure: "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.", affiliate: { provider: "coupang", url: "https://link.coupang.com/x", subId: "piece_0" } })},
               'scheduled') RETURNING id`);
     const pieceId = n(p?.id);
+    if (withImage) {
+      await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort)
+        VALUES (${tid}, ${pieceId}, 'image', ${"harness/ac-test.png"}, ${"세탁 전 이불 사진(시험용)"}, ${jsonb({ url: imgUrl })}, 0)`);
+    }
 
     const r = await publish((await loadPublishPiece(tid, pieceId))!, (await loadPublishAccount(tid, accountId))!, { actor: "user" });
     if (!r.ok) { console.error(`  ✗ 잡 적재 실패: ${r.reason} ${r.error}`); return; }
@@ -164,7 +199,7 @@ async function main() {
       : "\n   ✗ 임시저장까지 못 갔다 — 위 사유와 FAIL.png 를 보고 고친다.\n");
   } finally {
     if (!keep) {
-      for (const table of ["posts", "runner_jobs", "runner_devices", "account_creds", "pieces", "accounts", "notifications", "audit_logs"]) {
+      for (const table of ["posts", "runner_jobs", "runner_devices", "account_creds", "piece_assets", "pieces", "accounts", "notifications", "audit_logs"]) {
         await q(sql`DELETE FROM ${sql.raw(table)} WHERE tenant_id = ${tid}`);
       }
       await q(sql`DELETE FROM tenants WHERE id = ${tid}`);
