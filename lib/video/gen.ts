@@ -16,11 +16,11 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys } 
 import { toTopic } from "../topics";
 import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf } from "./script";
 import { buildCutPlans, planCutWindows, PALETTES } from "./scenes";
-import { generateClip } from "./providers";
+import { generateClip, generateStill } from "./providers";
 import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
 import { synthesizeGemini, isGeminiVoice, type TtsResult, type TtsWord } from "./tts";
 import { splitPhrasesForLines, phrasesToRender, phrasesToSrt } from "./captions";
-import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage } from "./cost";
+import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget } from "./cost";
 import { enqueueRender } from "./render-queue";
 import { r2Put } from "../r2";
 import {
@@ -155,10 +155,29 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     if (risks.some((r) => r.risks.some((x) => x.level === "p0"))) return await failPiece(tid, pieceId, `장면 서술이 정책에 걸려요(${risks[0].risks[0].issue}).`, slotId);
     const clipRows = await q(sql`SELECT sort, r2_key FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'clip' ORDER BY sort`);
     const clips = new Map<number, string>(clipRows.map((c) => [n(c.sort), String(c.r2_key)]));
+    // 정지 이미지 컷(토킹 포맷 · §1.4c(2)) — 이미 만든 장은 다시 굽지 않는다.
+    const stillRows = await q(sql`SELECT sort, r2_key FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'image' ORDER BY sort`);
+    const stills = new Map<number, string>(stillRows.map((c) => [n(c.sort), String(c.r2_key)]));
+    // 🔴 돈이 나가기 직전 원가 관문 재검사(§1.4c(1)) — 소프트는 통과(운영 알림만) · 하드/전역만 막는다. 남은 컷만 센다(이어달리기에서 이미 만든 컷을 두 번 세지 않는다).
+    const remain = plans.filter((c) => !(c.mode === "still" ? stills.has(c.idx) : clips.has(c.idx))).length;
+    if (remain > 0) {
+      const perCut = estimateVideoCostUsd(format, seconds, form.provider, plans.length) / Math.max(1, plans.length);
+      const b = await checkVideoBudget(tid, perCut * remain);
+      await recordVideoBudget(tid, b, { at: "clips", pieceId, remainCuts: remain });
+      if (!b.allowed) return await failPiece(tid, pieceId, videoBudgetMessage(b), slotId);
+    }
     for (const cut of plans) {
-      if (clips.has(cut.idx)) continue;   // 이미 만든 컷은 다시 만들지 않는다(돈 두 배 금지)
+      if (cut.mode === "still" ? stills.has(cut.idx) : clips.has(cut.idx)) continue;   // 이미 만든 컷은 다시 만들지 않는다(돈 두 배 금지)
       if (overBudget()) return await handOff(tid, pieceId, "clips", m2, slotId);
-      if (cut.mode === "still") continue;   // 토킹 포맷의 정지 이미지 컷 — 러너가 Ken Burns 로(이미지는 piece_assets image 재사용)
+      if (cut.mode === "still") {
+        // 🔴 스킵 금지(계약 §1.4c(2)) — 스킵하면 `clipKey`·`imageKey` 둘 다 없는 장면이 러너에 가서 검은 화면이 된다.
+        const s = await generateStill({ tenantId: tid, pieceId, cutIdx: cut.idx, prompt: cut.prompt, ref: `piece:${pieceId}:still${cut.idx}` });
+        if (!s.ok) return await failPiece(tid, pieceId, `장면 그림을 만들지 못했어요(${s.reason}).`, slotId);
+        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${s.key}, ${cut.keyword || null}, ${jsonb({ still: true, cutIdx: cut.idx, motion: "kenburns", model: s.model, costUsd: s.costUsd, prompt: cut.prompt.slice(0, 2000) })}, ${cut.idx})`);
+        stills.set(cut.idx, s.key);
+        await stamp(pieceId, "clips", { cutsDone: clips.size + stills.size, cutsTotal: plans.length });
+        continue;
+      }
       const r = await generateClip({ tenantId: tid, pieceId, cutIdx: cut.idx, prompt: cut.prompt, providerKey: form.provider, seconds, durationSec: Math.min(8, Math.max(4, Math.round((cut.endMs - cut.startMs) / 1000))), mode: "t2v", ref: `piece:${pieceId}:cut${cut.idx}` });
       if (!r.ok) {
         if (r.policyBlocked) return await failPiece(tid, pieceId, "장면이 정책에 걸려 만들지 못했어요.", slotId);
@@ -166,7 +185,7 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       }
       await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"clip"}, ${r.key}, ${cut.keyword || null}, ${jsonb({ interactionId: r.interactionId ?? null, provider: r.provider, model: r.model, costUsd: r.costUsd, durationSec: r.durationSec, prompt: cut.prompt.slice(0, 2000) })}, ${cut.idx})`);
       clips.set(cut.idx, r.key);
-      await stamp(pieceId, "clips", { cutsDone: clips.size, cutsTotal: plans.length });
+      await stamp(pieceId, "clips", { cutsDone: clips.size + stills.size, cutsTotal: plans.length });
     }
 
     /* ── 제휴 링크(설명란) ── */
@@ -186,7 +205,14 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     const srtKey = `autocreate/${tid}/${pieceId}/captions.srt`;
     await r2Put(srtKey, Buffer.from(srt, "utf8"), "text/plain; charset=utf-8");
     const renderPhrases = phrasesToRender(phrases);
-    const scenes: RenderScene[] = plans.map((c) => ({ idx: c.idx, startMs: c.startMs, endMs: c.endMs, ...(clips.get(c.idx) ? { clipKey: clips.get(c.idx)! } : { imageKey: undefined, motion: "kenburns" as const }), captionIdx: renderPhrases.filter((ph) => ph.startMs >= c.startMs && ph.startMs < c.endMs).map((ph) => ph.idx) }));
+    const scenes: RenderScene[] = plans.map((c) => {
+      const clipKey = clips.get(c.idx); const imageKey = stills.get(c.idx);
+      const captionIdx = renderPhrases.filter((ph) => ph.startMs >= c.startMs && ph.startMs < c.endMs).map((ph) => ph.idx);
+      return { idx: c.idx, startMs: c.startMs, endMs: c.endMs, ...(clipKey ? { clipKey } : imageKey ? { imageKey, motion: "kenburns" as const } : {}), captionIdx };
+    });
+    // 🔴 계약 §2.1 «clipKey|imageKey 중 하나» — 둘 다 없는 장면은 러너에서 검은 화면이 된다. 잘못된 payload 를 내보내느니 여기서 멈춘다(조용한 축소 0).
+    const blind = scenes.filter((s) => !s.clipKey && !s.imageKey);
+    if (blind.length) return await failPiece(tid, pieceId, `장면 ${blind.map((s) => s.idx + 1).join("·")}번의 화면이 비어 있어 멈췄어요.`, slotId);
     const affiliate = !!aff;
     const firstLine = affiliate ? videoDescriptionFirstLine(aff?.provider ?? "coupang") : "";
     const yt = youtubeMetaOf(theScript as never, { firstLine, tags: [] });
@@ -241,10 +267,15 @@ export async function triggerVideo(pieceId: number, tid: number, resume = false)
   }
 }
 
-/** 확정 직전 달러 캡 선검사(계약 §1.2) — 코인 차감 **전**에 부른다. */
+/**
+ * 확정 직전 원가 관문 선검사(계약 §1.2 · §1.4c(1)) — 코인 차감 **전**에 부른다.
+ *   🔴 소프트(플랜 일일 상한) 초과는 **통과**시킨다 — 고객은 이미 코인을 냈다. 운영 알림만 남는다(`recordVideoBudget`).
+ *   막는 것은 하드(일일 상한 × 3) · 전역 월 상한 · kill switch · 조회 실패뿐.
+ */
 export async function precheckVideoBudget(tid: number, format: VideoFormat, seconds: VideoSeconds, providerKey: VideoSpec["provider"]["key"], cuts: number): Promise<{ ok: true } | { ok: false; error: string }> {
   const add = estimateVideoCostUsd(format, seconds, providerKey, cuts);
   const b = await checkVideoBudget(tid, add);
+  await recordVideoBudget(tid, b, { at: "precheck", addUsd: add, format, seconds, cuts });
   return b.allowed ? { ok: true } : { ok: false, error: videoBudgetMessage(b) };
 }
 void (undefined as unknown as CutPlan);

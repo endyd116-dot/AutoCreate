@@ -320,8 +320,13 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   const gate = await guardSlot({ tenantId: tid, channel: specs[0].channel, origin, slotId: reuseSlotId, source: "director.confirm", topic: String(b.topic_id ?? "") });
   // P1R4 §1.5 — AI 원가 일 상한(코인을 차감하기 전에 잰다 · 환율 없으면 잴 수 없어 막지 않는다).
   const budget = await requireAiBudget(tid);
-  if (!budget.ok) return { ok: false, step: "ai_cost_cap", error: budget.error };
-  /* [P1R5 §1.2·§1.6] 영상 달러 캡 — **코인 차감 전**에 잰다(코인과 별개 관문). 초과면 원장 무접촉. */
+  const hasVideo = specs.some((s) => s.kind === "video" && s.video);
+  /* 🔴 [P1R5 §1.4c(1)] 영상이 섞인 확정은 여기서 막지 않는다 — 일일 상한 초과는 영상에서 **소프트**(운영 알림만)다.
+     고객은 이미 코인을 냈고, 여기서 막으면 «돈은 받고 안 만들어 주는» 사고가 된다. 폭주는 아래 영상 관문의 **하드(상한 ×3)**·전역 월 상한이 잡는다.
+     글만 있는 확정은 R4 규칙 그대로(무변경). */
+  if (!budget.ok && !hasVideo) return { ok: false, step: "ai_cost_cap", error: budget.error };
+  if (!budget.ok && hasVideo) await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "system", riskLevel: "medium", detail: { usedKrw: budget.check.usedKrw, capKrw: budget.check.capKrw, note: "영상 확정 — 일일 상한 초과를 소프트로 통과(§1.4c(1))" } });
+  /* [P1R5 §1.2·§1.6] 영상 원가 관문 — **코인 차감 전**에 잰다(코인과 별개 관문). 초과면 원장 무접촉. */
   for (const vs of specs) {
     if (vs.kind !== "video" || !vs.video) continue;
     const pb = await precheckVideoBudget(tid, vs.video.format, vs.video.seconds, vs.video.provider.key, vs.video.cuts);
