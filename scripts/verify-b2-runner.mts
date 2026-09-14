@@ -41,6 +41,8 @@ import handler, { config } from "../netlify/functions/runner";
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
+/** 사람이 2단계 인증을 누를 시간(--login-first 로그인 단계 전용 · 5분). */
+const LOGIN_WAIT_MS = 300_000;
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 const env = (k: string) => String(process.env[k] ?? "").trim();
 /* ⚠️ `import.meta.url` 의 pathname 은 **퍼센트 인코딩**돼 있다(한글 경로 «작업» → %EC%9E%91%EC%97%85).
@@ -113,6 +115,9 @@ async function main() {
      차이: 카나리는 드라이런 결과를 **하트비트의 canary 필드**로 보고하고, 서버가 `canary_runs`(하루·채널 1행)에 적재한다.
      즉 «매일 새벽 05시에 돌 것»과 **같은 경로**를 지금 한 번 태워 보는 것이다(첫 증거). */
   const canaryMode = process.argv.includes("--canary");
+  /* --login-first — 사람이 창에서 한 번 로그인(session.login)한 **다음** 같은 계정으로 드라이런까지 이어서 한다.
+     티스토리처럼 무인 로그인을 폐지한 채널은 이것 없이는 영원히 login_fail 이다(창조차 안 뜬다). */
+  const loginFirst = process.argv.includes("--login-first");
   /* --job=revenue.adpost 등 — 발행 대신 그 잡을 계정에 직접 적재한다(수익 스크랩·광고 상태 읽기 실측용). */
   const jobArg = String(process.argv.find((a) => a.startsWith("--job=")) ?? "").slice(6);
   const jobKind: RunnerJobKind | null = jobArg && isRunnerJobKind(jobArg) ? jobArg : null;
@@ -143,6 +148,7 @@ async function main() {
     VALUES (${`b2ver${stamp}`.slice(0, 40)}, ${"B2실증"}, 'starter', 'active') RETURNING id`);
   const tid = n(t?.id);
   let ok = false;
+  let canaryVerdict: "ok" | "fail" | "unknown" = "unknown";
   try {
     /* 🔴 프로필 키는 **실행마다 바뀌면 안 된다**. 하니스가 매번 새 테넌트를 만드는 바람에 `t{tid}-{channel}` 도
        매번 달라졌고, 그래서 **브라우저 프로필이 매번 새로 생겼다** — 카카오·네이버 입장에서는 늘 «처음 보는 브라우저»라
@@ -164,6 +170,42 @@ async function main() {
         VALUES (${tid}, ${pieceId}, 'image', ${"harness/ac-test.png"}, ${"세탁 전 이불 사진(시험용)"}, ${jsonb({ url: imgUrl })}, 0)`);
     }
 
+    const reg = await registerDevice(tid, "실증 PC", "own");
+    /** 러너를 자식 프로세스로 한 번 돌린다(창을 띄운다). 반환 = 종료코드. */
+    const runRunner = (runnerArgs: string[], waitMs?: number) => new Promise<number>((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, "runner", "ac-runner.mjs"), ...runnerArgs], {
+        cwd: path.join(ROOT, "runner"),
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          AC_SERVER: `http://127.0.0.1:${port}`,
+          AC_RUNNER_TOKEN: reg.device.token,
+          RUNNER_SHOTS: "1",
+          AC_2FA_WAIT_MS: String(waitMs ?? (Number(env("AC_2FA_WAIT_MS")) || 180_000)),
+        },
+      });
+      child.on("exit", (c) => resolve(c ?? 1));
+    });
+
+    /* ── ①(--login-first) 사람이 한 번 로그인한다 ──────────────────────────────
+       🔴 티스토리·블로거는 **무인 로그인을 하지 않는다**(카카오 OAuth 콜백 루프·구글 봇탐지 → 2026-09-14 근본진단).
+          그래서 publish 잡은 세션이 없으면 즉시 `login_fail` 로 멈춘다 — 창을 띄우지 않는다.
+          로그인은 **session.login 잡**의 몫이고, 거기서 받은 쿠키(account_creds kind='cookies')를
+          다음 claim 이 job.account.cookies 로 실어 준다. 그래서 «로그인 → 드라이런»은 **같은 계정**에서 이어야 한다
+          (하니스가 실행마다 새 테넌트를 만들기 때문에 따로 돌리면 쿠키가 이어지지 않는다).
+       ⚠️ 우선순위상 publish(10) 가 session.login(20) 보다 먼저 잡히므로 **로그인을 먼저 끝내고** 발행 잡을 넣는다. */
+    if (loginFirst) {
+      await enqueueJob({ tenantId: tid, kind: "session.login", accountId, payload: { channel, handle: cfg.handle, verify: true } });
+      console.log(`   ① 로그인 창을 띄웁니다 — 카카오/네이버 2단계를 **직접** 눌러 주세요(최대 ${Math.round(LOGIN_WAIT_MS / 60000)}분).\n`);
+      await runRunner(["--once", "--headed"], LOGIN_WAIT_MS);
+      const [cred] = await q(sql`SELECT id FROM account_creds WHERE account_id = ${accountId} AND kind = 'cookies' AND purged_at IS NULL LIMIT 1`);
+      if (!cred) {
+        console.error("\n   ✗ 쿠키가 저장되지 않았어요(로그인 미완료). 임시저장 드라이런을 건너뜁니다.\n");
+        return;
+      }
+      console.log("\n   ✓ 로그인 쿠키 저장 확인 — 이어서 «임시저장까지» 드라이런을 돕니다.\n");
+    }
+
     let jobIdShown: number | string = "-";
     if (jobKind) {
       const j = await enqueueJob({ tenantId: tid, kind: jobKind, accountId, payload: { channel, handle: cfg.handle, verify: true } });
@@ -173,25 +215,10 @@ async function main() {
       if (!r.ok) { console.error(`  ✗ 잡 적재 실패: ${r.reason} ${r.error}`); return; }
       jobIdShown = r.ok ? String(r.jobId) : "-";
     }
-    const reg = await registerDevice(tid, "실증 PC", "own");
     console.log(`   테넌트 ${tid} · 계정 ${accountId} · piece ${pieceId} · job ${jobIdShown}${jobKind ? ` (${jobKind})` : ""}\n`);
 
-    // ── 러너 실행(자식 프로세스 · 창을 띄운다) ──
-    const code = await new Promise<number>((resolve) => {
-      const runnerArgs = canaryMode ? ["--canary", "--headed"] : ["--once", "--headed", "--dry-run"];
-      const child = spawn(process.execPath, [path.join(ROOT, "runner", "ac-runner.mjs"), ...runnerArgs], {
-        cwd: path.join(ROOT, "runner"),
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          AC_SERVER: `http://127.0.0.1:${port}`,
-          AC_RUNNER_TOKEN: reg.device.token,
-          RUNNER_SHOTS: "1",
-          AC_2FA_WAIT_MS: String(Number(env("AC_2FA_WAIT_MS")) || 180_000),
-        },
-      });
-      child.on("exit", (c) => resolve(c ?? 1));
-    });
+    // ── ② 러너 실행(자식 프로세스 · 창을 띄운다) ──
+    const code = await runRunner(canaryMode ? ["--canary", "--headed"] : ["--once", "--headed", "--dry-run"]);
 
     // ── 자취 ──
     console.log(`\n── 서버에 남은 자취(러너 종료코드 ${code}) ──`);
@@ -210,6 +237,10 @@ async function main() {
     if (canaryMode) {
       const cr = await q(sql`SELECT channel, ok, step, detail, shot_key FROM canary_runs
         WHERE day = (NOW() AT TIME ZONE 'Asia/Seoul')::date AND channel <> '__eval__' ORDER BY channel`);
+      /* 🔴 판정은 **이 행**으로 한다 — `ac-runner --canary` 는 결과와 무관하게 종료코드 0 이라
+         종료코드로 판정하면 login_fail 에도 «✓ 임시저장까지 도달»이 찍힌다(2026-09-14 티스토리에서 실제로 찍었다 · PITFALLS #9 재발). */
+      const mine = cr.find((r) => String(r.channel) === channel);
+      canaryVerdict = mine?.ok === true ? "ok" : mine?.ok === false ? "fail" : "unknown";
       console.log(`\n   🐤 canary_runs(오늘 KST) ${cr.length}행 — 크론 runner.canary 가 읽을 값`);
       for (const r of cr) {
         const okTxt = r.ok === null ? "null(판정 불가)" : r.ok === true ? "true(정상)" : "false(깨짐 의심)";
@@ -229,10 +260,19 @@ async function main() {
        드라이런은 잡을 큐로 되돌리므로(release) 성공·실패가 행에서 똑같이 `queued`·error_kind 없음으로 보인다.
        2026-09-14 실측에서 실제로 실패(job #13 티스토리)에 «✓ 임시저장까지 도달»을 찍었다(PITFALLS #9 재발).
        추가 안전벨트: 성공이면 마지막 스냅샷에 임시저장 단계(`90-`)가 있어야 한다. */
-    ok = code === 0;
-    console.log(ok
-      ? "\n   ✓ 임시저장까지 도달(셀렉터 살아 있음) — 잡은 큐로 되돌려졌다.\n"
-      : "\n   ✗ 임시저장까지 못 갔다 — 위 사유와 FAIL.png 를 보고 고친다.\n");
+    if (canaryMode) {
+      ok = canaryVerdict === "ok";
+      console.log(ok
+        ? "\n   ✓ 카나리 정상 — 임시저장까지 도달(셀렉터 살아 있음). 잡은 큐로 되돌려졌다.\n"
+        : canaryVerdict === "unknown"
+          ? "\n   · 카나리 판정 불가 — 셀렉터 문제가 아니다(세션/로그인/네트워크). 크론은 이걸 실패로 세지 않는다(AC-9).\n"
+          : "\n   ✗ 카나리 실패 — 셀렉터가 깨졌다. shot_key 폴더의 FAIL.png 를 보고 고친다.\n");
+    } else {
+      ok = code === 0;
+      console.log(ok
+        ? "\n   ✓ 임시저장까지 도달(셀렉터 살아 있음) — 잡은 큐로 되돌려졌다.\n"
+        : "\n   ✗ 임시저장까지 못 갔다 — 위 사유와 FAIL.png 를 보고 고친다.\n");
+    }
   } finally {
     if (!keep) {
       for (const table of ["posts", "runner_jobs", "runner_devices", "account_creds", "piece_assets", "pieces", "accounts", "notifications", "audit_logs"]) {
