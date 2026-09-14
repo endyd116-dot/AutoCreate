@@ -6,7 +6,7 @@
 <title>시작하기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=4">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <main class="page white" id="page">
@@ -16,7 +16,7 @@
     <div class="step-h"><h1>어떤 걸로<br>벌고 싶어요?</h1><p>둘 다 골라도 돼요. 나중에 바꿀 수 있어요.</p></div>
     <div class="choices">
       <button type="button" class="choice on" data-k="text"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h11l3 3v13H5z M8 12h8M8 16h8M8 8h4"/></svg></span><span><span class="ct">글</span><span class="cd" style="display:block">네이버 블로그 · 티스토리<br>애드포스트 · 애드센스</span></span></button>
-      <button type="button" class="choice on" data-k="video"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span><span><span class="ct">영상</span><span class="cd" style="display:block">쇼츠 · 클립 · 릴스<br>유튜브 수익 · 제휴</span></span></button>
+      <button type="button" class="choice on" data-k="video"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span><span><span class="ct">영상 <span class="pill off" id="videoSoon" hidden style="vertical-align:2px">곧 열려요</span></span><span class="cd" style="display:block">쇼츠 · 클립 · 릴스<br>유튜브 수익 · 제휴</span></span></button>
     </div>
   </section>
   <section id="s2" hidden>
@@ -33,15 +33,20 @@
   </section>
   <div class="cta nobar"><button class="btn primary" id="next" type="button">다음</button></div>
 </main>
-<script src="/js/ui.js?v=4"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=7"></script>
 <script>
   let step = 1; const sel = { kinds: ["text", "video"], channels: [] };
-  const TEXT = ["naver_blog", "tistory", "blogger", "threads"], VIDEO = ["youtube_shorts", "naver_clip", "reels"];
-  const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", threads: "유입", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴" };
+  /* 채널은 레지스트리(accounts-list.channels · status active|planned|down)로 그린다 — 하드코딩하면 계정 연결 그리드와 어긋난다.
+     planned 는 고를 수 있되 «곧 열려요» 칩(고른 건 저장 → 열리면 계정 연결에 뜬다). 못 읽으면 발행 경로 있는 4채널만. */
+  const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
+  const FALLBACK = ["naver_blog", "tistory", "blogger", "wordpress"].map((key) => ({ key, label: UI.chLabel(key), category: "text", status: "active" }));
+  let CH = FALLBACK;
+  const soon = (c) => c.status && c.status !== "active";
   UI.$$("#s1 .choice").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.kinds = UI.$$("#s1 .choice.on").map((x) => x.dataset.k); UI.$("#next").disabled = !sel.kinds.length; });
   function renderChannels() {
-    const list = [...(sel.kinds.includes("text") ? TEXT : []), ...(sel.kinds.includes("video") ? VIDEO : [])];
-    UI.$("#cg").innerHTML = list.map((k) => `<button type="button" class="cgi ${sel.channels.includes(k) ? "on" : ""}" data-k="${k}">${UI.mark(k)}${UI.chLabel(k)}<small>${SUB[k]}</small></button>`).join("");
+    const list = CH.filter((c) => sel.kinds.includes(c.category === "video" ? "video" : "text") && c.status !== "down");
+    UI.$("#cg").innerHTML = list.map((c) => `<button type="button" class="cgi ${sel.channels.includes(c.key) ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${soon(c) ? '<span class="pill off" style="background:var(--press)">곧 열려요</span>' : UI.esc(SUB[c.key] || "")}</small></button>`).join("");
     UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.channels = UI.$$("#cg .cgi.on").map((x) => x.dataset.k); });
   }
   function show() {
@@ -54,9 +59,12 @@
     if (step < 3) { step++; show(); return; }
     const r = await UI.api("/api/onboarding", { body: { kinds: sel.kinds, channels: sel.channels } });
     if (!r.ok) { UI.toast(r.error || "저장하지 못했어요"); return; }
-    UI.done("준비됐어요", () => { location.href = "/app/home.html"; });
+    UI.done("준비됐어요", () => UI.go("/app/home.html")); // UI.go — 앱 화면과 같은 이동(모의 층이 이어 붙는다)
   };
   (async () => { const me = await UI.api("/api/auth-me"); if (me.ok && me.tenant?.trialDaysLeft != null) UI.$("#trial").textContent = me.tenant.trialDaysLeft + "일 남음"; })();
+  (async () => { const r = await UI.api("/api/accounts-list"); if (r.ok && Array.isArray(r.channels) && r.channels.length) CH = r.channels;
+    UI.$("#videoSoon").hidden = CH.some((c) => c.category === "video" && c.status === "active"); // 영상 채널이 하나도 안 열렸으면 첫 단계 타일에도 칩
+    if (step === 2) renderChannels(); })();
   show();
 </script>
 </body>
