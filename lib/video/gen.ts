@@ -21,6 +21,7 @@ import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
 import { synthesizeGemini, isGeminiVoice, type TtsResult, type TtsWord } from "./tts";
 import { splitPhrasesForLines, phrasesToRender, phrasesToSrt } from "./captions";
 import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget } from "./cost";
+import { resolveBgm } from "./bgm";
 import { enqueueRender } from "./render-queue";
 import { r2Put } from "../r2";
 import {
@@ -228,7 +229,8 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       out: { w: 1080, h: 1920, fps: 30, maxSeconds: seconds, crf: 20 },
       scenes,
       captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey },
-      audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: null, sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
+      // BGM: `BGM_LICENSE_VERIFIED=1` + 시드 매니페스트가 있을 때만 깔린다. 둘 중 하나라도 없으면 null = **무음**(계약 §1.4c(3) 정직 경로).
+      audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: await resolveBgm({ format, seed: pieceId }), sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
       overlay: { badge: affiliate ? { text: videoBadgeText(), corner: "tr" } : null, safeZone: { top: 220, bottom: 300 }, endcard: { text: theScript.closing.slice(0, 40) } },
       disclosureCaption: affiliate ? { text: videoOpeningCaption(), untilMs: 3000 } : null,
     };
