@@ -47,7 +47,7 @@ export default async (req: Request): Promise<Response> => {
   const path = routeOf(req);
   try {
     if (path.endsWith("/ops-ai-models") && req.method === "GET") {
-      const g = requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
       const rows = await q(sql`SELECT role, chain, candidate, canary_pct, prev_chain, candidate_at, applied_at FROM ai_model_overrides`);
       const byRole = new Map(rows.map((r) => [String(r.role), r]));
       const roles = AI_ROLES.map((role) => {
@@ -68,7 +68,7 @@ export default async (req: Request): Promise<Response> => {
     }
 
     // ── 여기부터 변경 = super_admin 전용(엔진은 플랫폼 설정 · 메인 결정 4) ──
-    const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
+    const g = await requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
     if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
     const oid = g.ops.oid;
