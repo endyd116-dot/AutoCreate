@@ -16,7 +16,7 @@
  *   🔴 시각 표기는 KST(사람이 보는 것) · 서버 저장은 UTC(DESIGN §13.5).
  */
 import { readToken, saveToken, serverBase, maskToken, heartbeat, claim, VERSION } from "./lib/api.mjs";
-import { tick, canary, log, ALL_KINDS } from "./core.mjs";
+import { tick, canary, log, claimableKinds, runnerCaps } from "./core.mjs";
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -59,7 +59,7 @@ async function main() {
   }
 
   // 연결 확인 — 토큰이 틀렸으면 여기서 바로 말한다(큐를 돌다가 조용히 실패하지 않게).
-  const hello = await heartbeat(token, { jobs: 0 });
+  const hello = await heartbeat(token, { jobs: 0, caps: runnerCaps() });
   if (!hello?.ok) { console.error(`  ✗ ${hello?.error ?? "서버에 연결하지 못했어요."}\n`); process.exit(1); }
   log(`서버 연결 확인 · 대기 중인 잡 ${hello.jobsWaiting ?? 0}건`);
 
@@ -75,7 +75,7 @@ async function main() {
   if (OPT.canary) { await canary({ chromium, token, headed: OPT.headed }); return; }
 
   if (OPT.once) {
-    const { count, results } = await tick({ chromium, token, kinds: ALL_KINDS, max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
+    const { count, results } = await tick({ chromium, token, kinds: claimableKinds(), max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
     if (!count) { log("지금은 할 일이 없어요."); return; }
     /* 🔴 실패했으면 **종료코드로 말한다**. 검증 하니스가 잡 행만 보고 판정하면 드라이런 실패에 ✓ 가 찍힌다
        (드라이런은 잡을 큐로 되돌리므로 행만으로는 성공·실패가 같아 보인다 · 2026-09-14 실측). */
@@ -97,11 +97,11 @@ async function main() {
   while (!stop) {
     let sleepSec = 60;
     try {
-      const hb = await heartbeat(token, { jobs: 0 });
+      const hb = await heartbeat(token, { jobs: 0, caps: runnerCaps() });
       if (hb?.ok) sleepSec = Number(hb.sleepSec ?? 60) || 60;
       else log(`하트비트 실패: ${String(hb?.error ?? "").slice(0, 80)}`);
 
-      const { count: done } = await tick({ chromium, token, kinds: ALL_KINDS, max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
+      const { count: done } = await tick({ chromium, token, kinds: claimableKinds(), max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
       if (done) { idleRounds = 0; sleepSec = 5; }
       else if (++idleRounds === 1) log("할 일이 없어요 — 기다립니다(창을 닫지 마세요).");
     } catch (e) {

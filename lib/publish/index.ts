@@ -23,6 +23,9 @@ import { runPublishGate } from "./gate";
 import { finalizePublish } from "./finalize";
 import { publishToBlogger } from "./blogger";
 import { publishToWordpress } from "./wordpress";
+import { publishYoutubeShorts } from "./youtube";
+import { publishReels } from "./instagram";
+import { publishThreadsVideo } from "./threads";
 import { enqueueJob as enqueueRunnerJob, fleetState, publishJobKindOf, type RunnerJobKind, type RunnerPublishPayload } from "../runner-jobs";
 
 export * from "./contract";
@@ -169,9 +172,15 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
   }
 
   /* ④-B API 채널 — 지금 바로 올리고 finalize 까지 한다. */
+  /* P1R5 §2.3 — 영상 3종이 붙었다. 유튜브·릴스·스레드는 **OAuth API** 채널이라 여기서 바로 올린다.
+     ⚠️ 릴스·스레드는 «컨테이너 → 처리 대기 → 게시» 3단계라 아직 처리 중이면 `video_processing`(retriable) 이 돌아온다 —
+        실패가 아니라 «조금 뒤에»다. publisher 가 다음 틱에 다시 부르고, 그때 컨테이너를 새로 만들지 않는다(중복 게시 0). */
   const r = piece.channel === "blogger" ? await publishToBlogger(prepared, account)
     : piece.channel === "wordpress" ? await publishToWordpress(prepared, account)
-      : { ok: false as const, reason: "unsupported_channel" as const, retriable: false, error: "아직 이 채널로는 발행할 수 없어요." };
+      : piece.channel === "youtube_shorts" ? await publishYoutubeShorts(prepared, account)
+        : piece.channel === "reels" ? await publishReels(prepared, account)
+          : piece.channel === "threads" ? await publishThreadsVideo(prepared, account)
+            : { ok: false as const, reason: "unsupported_channel" as const, retriable: false, error: "아직 이 채널로는 발행할 수 없어요." };
 
   if (!r.ok) {
     await writeAudit({

@@ -26,6 +26,8 @@ import { classifyAndApply } from "./account-health";
 import { finalizePublish } from "./publish/finalize";
 // 🔴 수익 행을 쓰는 유일한 함수(계약 P1R3 §5). lib/revenue/** 는 runner-jobs 를 보지 않는다(AC-17 · 방향 한쪽).
 import { upsertRevenueRows } from "./revenue/upsert";
+import { r2Head, r2Configured, r2PresignGet, r2PresignPut, safeKey } from "./r2";
+import type { RenderPayload, RenderReport } from "./video/types";
 import type { RevenueRow } from "./revenue/types";
 import type { Block } from "./blocks";
 import type { RunnerFleetState } from "./publish/contract";
@@ -47,11 +49,14 @@ export type RunnerJobKind =
   | "verify.post_alive" | "revenue.stats"
   | "revenue.adpost" | "revenue.adfit" | "revenue.clip"
   | "ads.setup_tistory" | "ads.status_blogger"
-  | "ads.setup_blogger" | "ads.revert_blogger";
+  | "ads.setup_blogger" | "ads.revert_blogger"
+  // P1R5 §0.2 — 영상: 렌더(러너가 굽는다) · 유튜브 쇼츠 · 네이버 클립(스텁).
+  | "render.video" | "publish.youtube_shorts" | "publish.naver_clip";
 export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
   "publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats",
   "revenue.adpost", "revenue.adfit", "revenue.clip", "ads.setup_tistory", "ads.status_blogger",
   "ads.setup_blogger", "ads.revert_blogger",
+  "render.video", "publish.youtube_shorts", "publish.naver_clip",
 ];
 export function isRunnerJobKind(v: unknown): v is RunnerJobKind { return RUNNER_JOB_KINDS.includes(String(v) as RunnerJobKind); }
 /** 수익 스크랩 잡(report 에 `revenueRows` 가 실린다). `revenue.stats` 는 글 통계라 여기 안 든다. */
@@ -60,6 +65,9 @@ export const REVENUE_SCRAPE_KINDS: ReadonlySet<string> = new Set(["revenue.adpos
 /** 우선순위 — 숫자가 작을수록 먼저(계약 §2 «발행 10 > 세션 20 > 통계 50» · DESIGN §8.3 «수익 스크랩 > 렌더»). */
 export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.freeze({
   "publish.naver_blog": 10, "publish.tistory": 10,
+  // P1R5 §0.2 «발행 > 세션 > 수익 > 렌더» — 렌더는 오래 걸리므로 가장 뒤(70).
+  "publish.youtube_shorts": 10, "publish.naver_clip": 10,
+  "render.video": 70,
   "session.login": 20, "session.verify": 20,
   "ads.setup_tistory": 30, "ads.status_blogger": 30,
   "ads.setup_blogger": 30, "ads.revert_blogger": 30,
@@ -73,6 +81,9 @@ export function priorityOf(kind: RunnerJobKind): number { return JOB_PRIORITY[ki
 export function publishJobKindOf(channel: string): RunnerJobKind | null {
   if (channel === "naver_blog") return "publish.naver_blog";
   if (channel === "tistory") return "publish.tistory";
+  /* P1R5 — 네이버 클립은 공개 API 가 없어 러너 잡으로 예약해 두고 **스텁**으로 정직하게 막는다(§2.3).
+     유튜브·릴스·스레드는 **API 채널**이라 여기서 러너 잡을 만들지 않는다(lib/publish/{youtube,instagram,threads}.ts). */
+  if (channel === "naver_clip") return "publish.naver_clip";
   return null;
 }
 
@@ -93,7 +104,23 @@ export interface RunnerPublishPayload {
   /** 티스토리 카테고리·공개설정 등 채널 옵션. */
   options?: Record<string, unknown>;
 }
-export type RunnerPayload = RunnerPublishPayload | Record<string, unknown>;
+/* ─────────────────────────── 영상 렌더(P1R5 §2.1) ───────────────────────────
+ *   🔴 러너는 **payload 만 보고 굽는다**(서버에 다시 묻지 않는다).
+ *      `clipKey`/`imageKey`/`audio.*.key` 는 claim 시 서버가 **presigned GET URL 로 치환해** 내려준다 —
+ *      러너에 R2 자격을 주지 않는다(자격 표면 2곳 규칙 · CLAUDE §4.7).
+ *   결과 mp4 는 `upload` 의 presigned PUT 으로 러너가 직접 올린다(함수 본문 6MB 벽 우회).
+ */
+/**
+ * 러너에게 **실제로 내려가는** 모양 — B 의 `RenderPayload`(lib/video/types.ts 정본)에 presigned `upload` 가 채워진 상태.
+ *   🔴 타입을 여기서 다시 정의하지 않는다. 두 벌이 되면 B 가 보내는 모양과 러너가 기대하는 모양이 **조용히 갈라진다**
+ *      (같은 사고를 `PublishFailReason` 이중 정의에서 이미 봤다). 정본은 `lib/video/types.ts` 한 곳.
+ */
+export type RunnerRenderPayload = RenderPayload & { upload: NonNullable<RenderPayload["upload"]> };
+/** 러너가 렌더를 마치고 싣는 결과 = B-1 `RenderReport` 그대로. 🔴 서버는 이 주장을 믿지 않고 **R2 HEAD 로 실존 확인** 후에만 성공 처리한다. */
+export type RunnerRenderResult = RenderReport;
+export const RENDER_ERROR_KINDS: ReadonlySet<string> = new Set(["ffmpeg_missing", "font_missing", "clip_fetch", "encode", "upload"]);
+
+export type RunnerPayload = RunnerPublishPayload | RunnerRenderPayload | Record<string, unknown>;
 
 /** claim 응답의 계정 — 🔴 평문 자격이 실리는 유일한 자리. */
 export interface RunnerJobAccount {
@@ -222,10 +249,17 @@ export async function authRunner(req: Request): Promise<DeviceRow | null> {
 }
 
 /** 하트비트 — last_seen_at·version 갱신 후 다음 폴링 간격을 알려 준다. */
-export async function heartbeat(device: DeviceRow, body: { version?: unknown; jobs?: unknown; canary?: unknown }): Promise<{ sleepSec: number; jobsWaiting: number }> {
+export async function heartbeat(device: DeviceRow, body: { version?: unknown; jobs?: unknown; canary?: unknown; caps?: unknown }): Promise<{ sleepSec: number; jobsWaiting: number }> {
   const version = String(body.version ?? "").slice(0, 20) || null;
+  /* P1R5 §2.4 — 러너 «능력»(caps). 지금은 ffmpeg 유무. 🔴 ffmpeg 가 없으면 러너는 렌더 잡을 **집지 않고**
+     여기로 알린다 — 화면이 «ffmpeg 없음» 칩을 띄운다(조용히 잡이 안 도는 상황을 만들지 않는다 · PITFALLS #7). */
+  let caps: { ffmpeg: boolean; ffmpegVersion?: string } | null = null;
+  if (body.caps && typeof body.caps === "object") {
+    const c = body.caps as Record<string, unknown>;
+    caps = { ffmpeg: c.ffmpeg === true, ...(c.ffmpegVersion ? { ffmpegVersion: String(c.ffmpegVersion).slice(0, 40) } : {}) };
+  }
   await q(sql`UPDATE runner_devices SET last_seen_at = NOW(), status = 'online',
-    version = COALESCE(${version}, version) WHERE id = ${device.id}`);
+    version = COALESCE(${version}, version)${caps ? sql`, caps = ${jsonb(caps)}` : sql``} WHERE id = ${device.id}`);
   const [r] = await q(sql`SELECT COUNT(*) AS c FROM runner_jobs WHERE tenant_id = ${device.tenantId} AND status = 'queued' AND (due_at IS NULL OR due_at <= NOW())`);
   const jobsWaiting = n(r?.c);
   /* 카나리 결과(DESIGN §19)는 큐가 아니라 하트비트로 온다 — 셀렉터 변경을 고객보다 먼저 알기 위한 운영 신호다.
@@ -331,6 +365,44 @@ async function loadAccountForRunner(tid: number, accountId: number): Promise<Run
  *   한 문장(CTE + UPDATE … FROM)이라 러너 여러 대가 동시에 집어도 같은 잡을 두 번 가져가지 않는다.
  *   우선순위 오름차순 → id 오름차순(오래된 것 먼저) · 테넌트 스코프는 기기 토큰이 정한다.
  */
+/**
+ * 렌더 payload 를 러너가 쓸 수 있는 모양으로 바꾼다(계약 §2.1).
+ *   🔴 러너에 **R2 자격을 주지 않는다** — 읽을 것은 presigned GET, 올릴 곳은 presigned PUT «URL 만» 쥐여 준다.
+ *      키 자리(clipKey·imageKey·srtKey·audio.*.key)를 **URL 로 치환**하고, 결과를 올릴 `upload` 를 서버가 만들어 붙인다.
+ *   유효시간 2시간 — 렌더가 오래 걸려도 만료되지 않게(그러나 영원하지 않게).
+ */
+const PRESIGN_SEC = 2 * 3600;
+async function presignRenderPayload(tid: number, pieceId: number, raw: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  if (!r2Configured()) return null;   // 저장소가 없으면 렌더가 성립하지 않는다 — 잡을 내보내지 않는다(정직)
+  const p = JSON.parse(JSON.stringify(raw ?? {})) as Record<string, unknown>;
+  const get = async (k: unknown) => (k && typeof k === "string" ? await r2PresignGet(k, PRESIGN_SEC) : k);
+
+  const scenes = Array.isArray(p.scenes) ? p.scenes as Record<string, unknown>[] : [];
+  for (const s of scenes) {
+    if (s.clipKey) s.clipKey = await get(s.clipKey);
+    if (s.imageKey) s.imageKey = await get(s.imageKey);
+  }
+  const captions = (p.captions && typeof p.captions === "object" ? p.captions : null) as Record<string, unknown> | null;
+  if (captions?.srtKey) captions.srtKey = await get(captions.srtKey);
+  const audio = (p.audio && typeof p.audio === "object" ? p.audio : null) as Record<string, unknown> | null;
+  if (audio) {
+    for (const a of (Array.isArray(audio.narration) ? audio.narration : []) as Record<string, unknown>[]) a.key = await get(a.key);
+    for (const a of (Array.isArray(audio.sfx) ? audio.sfx : []) as Record<string, unknown>[]) a.key = await get(a.key);
+    const bgm = (audio.bgm && typeof audio.bgm === "object" ? audio.bgm : null) as Record<string, unknown> | null;
+    if (bgm?.key) bgm.key = await get(bgm.key);
+  }
+
+  // 결과물 자리는 **서버가 정한다**(러너가 키를 지어내면 남의 자리에 쓸 수 있다).
+  const key = safeKey(`pieces/${tid}/${pieceId}/video`, "mp4");
+  const posterKey = safeKey(`pieces/${tid}/${pieceId}/poster`, "jpg");
+  p.upload = {
+    key, posterKey,
+    putUrl: await r2PresignPut(key, "video/mp4", PRESIGN_SEC),
+    posterPutUrl: await r2PresignPut(posterKey, "image/jpeg", PRESIGN_SEC),
+  };
+  return p;
+}
+
 export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max = 3): Promise<RunnerJob[]> {
   const want = (kinds.length ? kinds : [...RUNNER_JOB_KINDS]).filter(isRunnerJobKind);
   if (!want.length) return [];
@@ -350,9 +422,21 @@ export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max =
       FROM picked WHERE j.id = picked.id
     RETURNING j.id, j.kind, j.account_id, j.piece_id, j.payload, j.priority, j.attempts`);
 
+  /* 🔴 렌더는 **회당 1건**(계약 §2.1 타임박스) — 한 번에 여러 개를 물면 러너 PC 가 몇십 분 묶여
+     그 사이 들어온 «발행»이 늦는다. 우선순위(70)로 뒤로 밀리긴 하지만, 렌더만 여러 개 쌓인 날엔 다 물 수 있다.
+     더 물린 건 즉시 큐로 돌려놓는다(attempts 도 되돌린다 — 집었다 놓은 것으로 재시도를 깎지 않는다). */
+  const extraRender = rows.filter((r) => String(r.kind) === "render.video").slice(1).map((r) => n(r.id));
+  if (extraRender.length) {
+    await q(sql`UPDATE runner_jobs SET status = 'queued', claimed_by = NULL, claimed_at = NULL,
+      attempts = GREATEST(0, attempts - 1), updated_at = NOW()
+      WHERE id IN (${sql.join(extraRender.map((i) => sql`${i}`), sql`, `)})`);
+  }
+  const skip = new Set(extraRender);
+
   const jobs: RunnerJob[] = [];
   const servedAccounts: number[] = [];
   for (const r of rows) {
+    if (skip.has(n(r.id))) continue;
     const accountId = n(r.account_id);
     const job: RunnerJob = {
       id: n(r.id), kind: String(r.kind) as RunnerJobKind,
@@ -361,6 +445,19 @@ export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max =
     };
     if (accountId) job.accountId = accountId;
     if (n(r.piece_id)) job.pieceId = n(r.piece_id);
+    /* 렌더 잡은 키를 **presigned URL 로 치환**해 내려준다(러너에 R2 자격 0 · §2.1).
+       저장소가 미설정이면 굽더라도 올릴 곳이 없다 — 잡을 큐로 돌려놓고 정직하게 남긴다(조용한 실패 금지). */
+    if (job.kind === "render.video") {
+      const signed = await presignRenderPayload(device.tenantId, n(r.piece_id), job.payload as Record<string, unknown>);
+      if (!signed) {
+        await q(sql`UPDATE runner_jobs SET status='queued', claimed_by=NULL, claimed_at=NULL,
+          attempts = GREATEST(0, attempts - 1), updated_at = NOW() WHERE id = ${job.id}`);
+        await writeAudit({ tenantId: device.tenantId, action: "render_blocked", actorType: "system", target: `runner_job:${job.id}`,
+          detail: { reason: "r2_not_configured" }, riskLevel: "high" });
+        continue;
+      }
+      job.payload = signed as RunnerPayload;
+    }
     if (accountId) {
       job.account = await loadAccountForRunner(device.tenantId, accountId);
       /* 🔴 자격 평문이 실제로 실린 건에 대해서만 **계정 1건당 1행** 감사(메인 조건 (가) 2026-09-14).
@@ -400,6 +497,8 @@ export interface RunnerReportOk {
   adsense?: { linked: boolean; state?: string; detail?: string };
   /** `ads.setup_blogger`/`ads.revert_blogger` — 블로거 템플릿 광고 삽입/복원 결과(계약 P1R4 §2.2 · 백업 원문 포함). */
   monetize?: { bloggerTemplateBackup?: string; adsenseInserted?: boolean; reverted?: boolean; detail?: string };
+  /** `render.video`(P1R5 §2.1) — 러너가 구운 mp4. 🔴 서버가 R2 HEAD 로 확인하기 전엔 «성공»이 아니다. */
+  render?: RunnerRenderResult;
   shotKey?: string;
 }
 /**
@@ -508,6 +607,26 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
       riskLevel: "high",
     });
     return { ok: true, status: "failed", reason: "parse" };
+  }
+
+  /* ── 네이버 클립(P1R5 §2.3) — 아직 올릴 길이 없다. **재시도하지 않고** 사람에게 넘긴다. ──
+       분류기(`classifyRunnerBlock`)에 맡기면 `not_supported_yet` 이 «unknown» 으로 떨어져 3번 헛돈다.
+       길이 막힌 것은 계정 문제도 우리 버그도 아니므로 계정 상태를 건드리지 않는다. 조용한 0건 금지(PITFALLS #7). */
+  if (result.ok !== true && kind === "publish.naver_clip") {
+    const fail = result as RunnerReportFail;
+    await q(sql`UPDATE runner_jobs SET status='failed', claimed_by=NULL, claimed_at=NULL, error_kind='not_supported_yet',
+      result = ${jsonb({ ok: false, errorKind: "not_supported_yet", detail: String(fail.detail ?? "").slice(0, 300) })},
+      due_at = NULL, updated_at = NOW() WHERE id = ${jobId}`);
+    if (pieceId) {
+      await q(sql`UPDATE pieces SET status = 'awaiting_manual',
+        meta = meta || ${jsonb({ failReason: "네이버 클립은 아직 자동 업로드를 지원하지 않아요", manualChannel: "naver_clip" })},
+        updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+    }
+    await notify(tid, "manual_upload", "클립은 앱에서 올려 주세요",
+      "영상은 다 만들어 뒀어요. 네이버 클립은 아직 자동 업로드가 안 돼서, 만들어 둔 영상을 네이버 앱에서 올려 주세요.", "/app/pieces.html");
+    await writeAudit({ tenantId: tid, action: "publish_not_supported", actorType: "system", target: `piece:${pieceId || jobId}`,
+      detail: { kind, channel: "naver_clip" }, riskLevel: "low" });
+    return { ok: true, status: "failed", reason: "not_supported_yet" };
   }
 
   /* ── 실패 ───────────────────────────────────────────────── */
@@ -630,6 +749,38 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     await writeAudit({ tenantId: tid, action: kind === "ads.setup_blogger" ? "ads_setup_blogger" : "ads_revert_blogger", actorType: "system",
       target: accountId ? `account:${accountId}` : `runner_job:${jobId}`, detail: { inserted, reverted, hasBackup }, riskLevel: "medium" });
     return { ok: true, status: "done" };
+  }
+
+  /* ── 영상 렌더(P1R5 §2.1) ─────────────────────────────────────────────
+     🔴 **러너 주장을 믿지 않는다**(§2.1 · DESIGN §8.3 발행 관례와 같은 원칙):
+        «구웠다»는 보고만으로 성공 처리하면, 파일이 없는데 심사·발행으로 넘어가 빈 영상이 올라간다.
+        R2 HEAD 로 **실존과 크기**를 확인한 뒤에만 다음 단계로 보낸다. bytes 도 러너 값이 아니라 **HEAD 실측**을 쓴다.
+     🔴 AC-17 순환 0 — `render-queue` 는 이 파일을 import 한다. 그래서 여기서는 **함수 안에서** 동적으로 부른다. */
+  if (kind === "render.video") {
+    const r = okBody.render;
+    const failRender = async (reason: string, detail: string) => {
+      await q(sql`UPDATE runner_jobs SET status='failed', claimed_by=NULL, claimed_at=NULL, error_kind='encode',
+        result = ${jsonb({ ok: false, reason, detail })}, updated_at = NOW() WHERE id = ${jobId}`);
+      await writeAudit({ tenantId: tid, action: "render_verify_failed", actorType: "system", target: `piece:${pieceId}`,
+        detail: { jobId, reason, detail, claimed: r ?? null }, riskLevel: "high" });
+      return { ok: true, status: "failed" as RunnerJobStatus, reason };
+    };
+    if (!r?.key) return await failRender("no_key", "렌더는 성공이라는데 파일 키가 없어요.");
+    const head = await r2Head(r.key);
+    if (!head || head.bytes <= 0) {
+      return await failRender("not_found", `올렸다는 영상이 저장소에 없어요(key=${String(r.key).slice(0, 80)}).`);
+    }
+    const { finalizeRender } = await import("./video/render-queue");
+    const fin = await finalizeRender(pieceId, {
+      key: r.key, posterKey: String(r.posterKey ?? ""),
+      durationMs: Math.max(0, Math.trunc(Number(r.durationMs) || 0)),
+      bytes: head.bytes,                                   // 🔴 실측값(러너 주장 아님)
+      frameCount: Math.max(0, Math.trunc(Number(r.frameCount) || 0)),
+    });
+    await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+      result = ${jsonb({ ok: true, key: r.key, posterKey: r.posterKey ?? null, bytes: head.bytes, durationMs: r.durationMs ?? null, frameCount: r.frameCount ?? null, ffmpegVersion: r.ffmpegVersion ?? null, next: fin.next })},
+      updated_at = NOW() WHERE id = ${jobId}`);
+    return { ok: fin.ok, status: "done", reason: fin.next };
   }
 
   // 통계·생존 확인 잡 — posts.stats 에 병합(read→merge→write · jsonb 부분갱신 금지).

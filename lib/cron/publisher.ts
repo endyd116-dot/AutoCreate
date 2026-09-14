@@ -67,6 +67,8 @@ const HUMAN: Record<PublishFailReason, string> = {
   gate: "발행 전 검사에 걸렸어요", no_account: "올릴 계정이 없어요", no_creds: "계정 로그인 정보가 없어요",
   account_blocked: "계정이 막혀 있어요", auth_failed: "로그인이 풀렸어요", provider_not_configured: "채널 연결 설정이 아직이에요",
   channel_error: "채널이 응답하지 않았어요", network: "인터넷 연결 문제였어요",
+  // 실패가 아니라 «아직 처리 중» — 다음 틱에 같은 컨테이너로 다시 올린다(중복 게시 0).
+  video_processing: "영상을 채널이 아직 처리하고 있어요",
   unsupported_channel: "아직 지원하지 않는 채널이에요", not_publishable: "지금 상태로는 올릴 수 없어요", config: "서버 설정 문제예요",
 };
 
@@ -84,11 +86,17 @@ export const publisherStep: CronStep = {
       await notifyOnce(ctx.tid, "card_required", "발행 전에 결제 수단을 등록해 주세요", "카드를 등록하면 기다리던 글이 바로 나가요.", "/app/plan.html", { withinHours: 24 });
       return { changed: 0, skipped: 0, detail: { blocked: "card_required" } };
     }
+    /* P1R5 §7-2 — 렌더는 **고객 PC** 가 한다. 30분 넘게 집어 갈 러너가 없으면 그 글을 `awaiting_runner` 로 두고
+       «내 PC 프로그램을 켜 주세요»를 홈에 띄운다(조용한 정지 금지). 잡은 큐에 그대로 — 켜면 이어서 굽는다.
+       비치명: 실패해도 발행 본류를 막지 않는다. */
+    const { sweepRenderAwaitingRunner } = await import("../video/render-queue");
+    const renderWaiting = await sweepRenderAwaitingRunner(ctx.tid).catch(() => 0);
+
     const due = await q(sql`SELECT p.id, p.title, p.channel, p.kind, p.account_id, p.slot_id, p.meta, p.scheduled_for, s.status AS slot_status
       FROM pieces p LEFT JOIN slots s ON s.id = p.slot_id
       WHERE p.tenant_id = ${ctx.tid} AND p.status = 'scheduled' AND p.scheduled_for IS NOT NULL AND p.scheduled_for <= NOW()
       ORDER BY p.scheduled_for, p.id LIMIT 50`);
-    if (!due.length) return { changed: 0, skipped: 0 };
+    if (!due.length) return renderWaiting ? { changed: 0, skipped: 0, detail: { renderWaiting } } : { changed: 0, skipped: 0 };
 
     // 커넥터가 없으면 **아무 것도 건드리지 않는다** — 한 번 크게 남기고 다음 주기로.
     if (await publishPortStatus() === "missing") {
@@ -190,7 +198,7 @@ export const publisherStep: CronStep = {
 
     const out: StepOutcome = { changed: published + queued + waitingRunner + manual + failed, skipped: already + retry + deferred };
     const detail: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries({ published, queued, waitingRunner, manual, failed, retry, already, deferred })) if (v) detail[k] = v;
+    for (const [k, v] of Object.entries({ published, queued, waitingRunner, manual, failed, retry, already, deferred, renderWaiting })) if (v) detail[k] = v;
     if (Object.keys(detail).length) out.detail = detail;
     return out;
   },
