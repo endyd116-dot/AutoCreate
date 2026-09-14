@@ -15,6 +15,8 @@ const BASE = (process.env.BASE_URL || "http://localhost:8899").replace(/\/$/, ""
 const EMAIL = process.env.TEST_EMAIL || "c+p1@autocreate.test";
 const PASSWORD = process.env.TEST_PASSWORD || "Cp1Verify2026x";
 const MOCK = process.env.MOCK === "1";
+const OPS = process.env.OPS === "1";   // 운영센터 화면(ops-login · /ops/*.html)
+const OPS_USER = process.env.OPS_USER || "admin", OPS_PASS = process.env.OPS_PASS || "admin1234";
 const PW_DIR = resolve(process.env.PW_DIR || join(HERE, "../../AutoMarketing"));
 const OUT = resolve(process.env.SHOT_DIR || join(HERE, "../_shots/p1r1"));
 mkdirSync(OUT, { recursive: true });
@@ -49,7 +51,18 @@ function pages(ids) {
     { key: "ad-media", url: q("/app/ad-media.html"), sheet: [] },
     { key: "onboarding", url: "/onboarding.html", sheet: ["button:has-text('다음')"] },   // 영상 채널 «곧 열려요» 칩(라이브 4채널 active)
     { key: "login", url: "/login.html", sheet: [] },   // SSO 카드 회귀
+    // P1R4 고객 결제·플랜·약관
+    { key: "plan", url: q("/app/plan.html"), sheet: ["button:has-text('이 플랜으로')", "button:has-text('바꾸기')"] },
+    { key: "coins", url: q("/app/coins.html"), sheet: ["button:has-text('충전')"] },
+    { key: "settings", url: q("/app/settings.html"), sheet: [] },
+    { key: "support", url: q("/app/support.html"), sheet: ["button:has-text('문의')"] },
+    { key: "terms", url: "/terms.html", sheet: [] }, { key: "privacy", url: "/privacy.html", sheet: [] }, { key: "paid-terms", url: "/paid-terms.html", sheet: [] }, { key: "automation-notice", url: "/automation-notice.html", sheet: [] },
+    { key: "register", url: "/register.html", sheet: [] },
   ].filter((p) => !process.env.PAGES || process.env.PAGES.split(",").includes(p.key));
+}
+/* 운영센터 16장(OPS=1) — 로그인은 ops-login · 데스크톱 위주 */
+function opsPages() {
+  return ["index", "tenants", "tenant", "billing", "plans", "promo", "cs", "ticket", "cs-faq", "runners", "ai", "channels", "notices", "operators", "audit", "password", "login"].map((k) => ({ key: "ops-" + k, url: "/ops/" + k + ".html" + (k === "tenant" ? "?id=" + (process.env.OPS_TENANT_ID || "3") : k === "ticket" ? "?id=" + (process.env.OPS_TICKET_ID || "1") : ""), sheet: [] })).filter((p) => !process.env.PAGES || process.env.PAGES.split(",").includes(p.key));
 }
 
 /* ── 헌장 검사(페이지 안에서 실행) ── */
@@ -83,15 +96,15 @@ async function run() {
   for (const [vp, size] of Object.entries(VIEWPORTS)) {
     const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height }, isMobile: !!size.isMobile, hasTouch: !!size.hasTouch, locale: "ko-KR", timezoneId: "Asia/Seoul", baseURL: BASE, deviceScaleFactor: 1 });
     // 로그인(API · 컨텍스트 쿠키 공유) — mock 모드도 로그인은 필요(UI.boot 가 auth-me 를 부른다)
-    const lg = await ctx.request.post("/api/auth-login", { data: { email: EMAIL, password: PASSWORD, remember: true } });
-    if (!lg.ok()) { const rg = await ctx.request.post("/api/auth-register", { data: { email: EMAIL, password: PASSWORD, name: "C검증" } }); rec("login", vp, "auth", rg.ok(), `login ${lg.status()} → register ${rg.status()}`); }
+    const lg = OPS ? await ctx.request.post("/api/ops-login", { data: { email: OPS_USER, password: OPS_PASS } }) : await ctx.request.post("/api/auth-login", { data: { email: EMAIL, password: PASSWORD, remember: true } });
+    if (!lg.ok() && !OPS) { const rg = await ctx.request.post("/api/auth-register", { data: { email: EMAIL, password: PASSWORD, name: "C검증" } }); rec("login", vp, "auth", rg.ok(), `login ${lg.status()} → register ${rg.status()}`); }
     else rec("login", vp, "auth", true, `login ${lg.status()}`);
     // 실 데이터 id(하니스 C2 가 만든 것) — mock 이면 1
     if (!MOCK && !ids.topicId) {
       try { const t = await (await ctx.request.get("/api/topics-list?status=candidate")).json(); ids.topicId = t.topics?.[0]?.id; } catch { /* 없음 */ }
       try { const p = await (await ctx.request.get("/api/pieces-list?status=all")).json(); ids.pieceId = (p.pieces || []).find((x) => x.status === "in_review")?.id || p.pieces?.[0]?.id; } catch { /* 없음 */ }
     }
-    for (const pg of pages(ids)) {
+    for (const pg of (OPS ? opsPages() : pages(ids))) {
       const page = await ctx.newPage();
       const errors = [], failed = [];
       page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice(0, 200)); });
@@ -101,7 +114,7 @@ async function run() {
       try { await page.goto(pg.url, { waitUntil: "networkidle", timeout: 30000 }); } catch (e) { ok = false; rec(pg.key, vp, "goto", false, String(e.message).slice(0, 120)); }
       await page.waitForTimeout(800);
       const finalUrl = page.url().replace(BASE, "");
-      rec(pg.key, vp, "url 유지(로그인 리다이렉트 없음)", !/login\.html/.test(finalUrl), finalUrl);
+      if (!/login$/.test(pg.key)) rec(pg.key, vp, "url 유지(로그인 리다이렉트 없음)", !/login\.html/.test(finalUrl), finalUrl);
       const shot = join(OUT, `${pg.key}-${vp}.png`);
       await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
       const c = await page.evaluate(CHARTER).catch(() => null); await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
@@ -113,7 +126,7 @@ async function run() {
         rec(pg.key, vp, "이모지 0", hard.length === 0, hard.length ? `«${hard.join("")}»` : "");
         if (soft.length) rec(pg.key, vp, "딩뱃 마크(선형 아이콘 권장)", "WARN", `«${[...new Set(soft)].join("")}»`);
         const sys = c.text.match(new RegExp(FORBIDDEN.source, "gi")) || [];
-        rec(pg.key, vp, "시스템 용어 0", sys.length === 0, sys.length ? `«${[...new Set(sys)].join(",")}»` : "");
+        rec(pg.key, vp, "시스템 용어 0", OPS ? (sys.length === 0 ? true : "WARN") : sys.length === 0, sys.length ? `«${[...new Set(sys)].join(",")}»` : "");
         rec(pg.key, vp, "가로 넘침 0", c.scrollW <= c.innerW + 1, `scrollWidth ${c.scrollW} / ${c.innerW}`);
         if (c.buttonsSmall) rec(pg.key, vp, "터치 44px 미만 버튼(눌리는 영역 기준)", "WARN", `${c.buttonsSmall}개`);
       }
