@@ -288,6 +288,30 @@ async function main() {
         cfT.json?.step === "ai_cost_cap" && !!noteT, `${cfT.status} step ${cfT.json?.step || "-"} · 알림 ${noteT?.id || "0"}(이번 확정이 만든 것 · 앞서 비웠다)`, noteT ? `notification ${noteT.id}` : undefined);
     } else warn("R4 회귀 — 글만 있는 확정은 상한 초과에서 막힌다", "글 piece 가 있는 제안을 못 얻어 못 쟀다");
 
+    /* ①c 🔴 **재생성 경로에도 같은 거짓 알림**이 있었다(2026-09-14 메인·B-1 발견 · `netlify/functions/pieces.ts` 의 `pieces-regenerate`
+       가 `director.ts` 와 똑같이 «먼저 requireAiBudget → 나중에 kind 로 가르기» 구조였다).
+       재생성은 **코인 0** 이라 더 나쁘다 — «돈도 안 받고 못 만든다고 말하는» 꼴이 된다.
+       여기서는 게이트 판정만 본다(뒤에 이어지는 체인 성패는 이 절의 관심사가 아니다). */
+    const mkPiece = async (kind) => {
+      const [x] = await s`INSERT INTO pieces (tenant_id, channel, kind, status, title, meta)
+        VALUES (${TID}, ${kind === "video" ? "youtube_shorts" : "naver_blog"}, ${kind}, 'draft', ${`C R5 재생성 게이트 ${kind}`},
+                ${s.json(kind === "video" ? { stage: "done", video: { format: "graphic", seconds: 60, cuts: 9 } } : { stage: "done" })}) RETURNING id`;
+      return Number(x?.id);
+    };
+    const capNotices = async (since) => (await s`SELECT id FROM notifications WHERE tenant_id = ${TID} AND kind = 'ai_cost_cap' AND created_at > ${since.toISOString()}::timestamptz AT TIME ZONE 'UTC'`).length;
+    await s`DELETE FROM notifications WHERE tenant_id = ${TID} AND kind = 'ai_cost_cap'`;
+    const vRegen = await mkPiece("video"); const tRegen = await mkPiece("post");
+    const tv = new Date(Date.now() - 5_000);
+    const rgV = await call(jar, "/api/pieces-regenerate", { body: { id: vRegen } });
+    rec("🔴 영상 «다시 만들기» 소프트 구간 → 진행 · **고객 알림 0**(재생성은 코인 0 — 여기서 알리면 «돈도 안 받고 못 만든다»가 된다)",
+      rgV.json?.step !== "ai_cost_cap" && (await capNotices(tv)) === 0, `${rgV.status} step ${rgV.json?.step || "-"} · 알림 ${await capNotices(tv)}`, `piece ${vRegen}`);
+    await s`DELETE FROM notifications WHERE tenant_id = ${TID} AND kind = 'ai_cost_cap'`;
+    const tt = new Date(Date.now() - 5_000);
+    const rgT = await call(jar, "/api/pieces-regenerate", { body: { id: tRegen } });
+    rec("글 «다시 만들기» 는 상한 초과에서 여전히 막히고 고객 알림 1건(R4 회귀)",
+      rgT.json?.step === "ai_cost_cap" && (await capNotices(tt)) === 1, `${rgT.status} step ${rgT.json?.step || "-"} · 알림 ${await capNotices(tt)}`);
+    for (const pid of [vRegen, tRegen]) { await s`DELETE FROM piece_assets WHERE piece_id = ${pid}`.catch(() => {}); await s`DELETE FROM pieces WHERE id = ${pid}`.catch(() => {}); }
+
     if (!(await stubGuard(TID, "cost/soft"))) return finish();   // 소프트 확정은 실제로 생성을 태운다 — 스텁이 새면 여기서 멈춘다
 
     /* ② 하드(일일 상한 ×3 초과) — 확정 시점: 차단하되 코인은 손대지 않는다 */
