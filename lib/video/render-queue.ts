@@ -16,34 +16,24 @@ import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { writeAudit } from "../audit";
-import { enqueueJob, type RunnerRenderPayload, type RunnerPayload, type RunnerJobKind } from "../runner-jobs";
+import { enqueueJob, type RunnerPayload, type RunnerJobKind } from "../runner-jobs";
+/* 🔴 타입 정본은 B-1 의 `lib/video/types.ts` 한 곳(A 도 같은 파일을 본다). 여기서 다시 정의하지 않는다. */
+import { RENDER_MAX_RETRY, type RenderPayload, type RenderReport, type JudgeResult } from "./types";
+export type { RenderPayload, RenderReport } from "./types";
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 
-/**
- * B 가 넘기는 모양 — `RunnerRenderPayload` 에서 `upload`(presigned) 를 뺀 것.
- *   키는 **r2_key 그대로**다. presigned GET/PUT 치환은 claim 시 B2 가 한다(러너에 R2 자격 0 · §2.1).
- */
-export type RenderPayload = Omit<RunnerRenderPayload, "upload">;
-
-/* 🔴 타입 정본은 B-1 의 `lib/video/types.ts`(메인 정리 2026-09-14 · A 도 같은 파일을 본다).
-   그 파일이 오면 위 `RenderPayload` 와 아래 `RenderReport` 지역 정의를 지우고 **이 한 줄**로 바꾼다:
-     import type { RenderPayload, RenderReport } from "./types";
-   지금은 파일이 없어(양쪽 브랜치 모두) 지역 정의로 **모양만 같게** 둔다 — 구조가 같으니 교체가 한 줄이다. */
-
 /** 잡 kind·우선순위 정본(B-1 이 이 이름으로 참조한다 · 계약 §2.1). */
 export const RENDER_JOB_KIND: RunnerJobKind = "render.video";
 export const RENDER_JOB_PRIORITY = 70;
 
-/** 다시 구울 수 있는 횟수. 넘으면 사람에게 넘긴다(무한 재시도 금지). */
-const MAX_RENDER_RETRY = 2;
+/* 다시 구울 수 있는 횟수는 정본 상수(`RENDER_MAX_RETRY`)를 쓴다 — 두 벌이면 B 와 판정이 갈라진다. */
 /** 이보다 짧거나 작으면 «구웠다»를 믿지 않는다(빈 mp4·헤더만 있는 파일 방어). */
 const MIN_DURATION_MS = 1_000;
 const MIN_BYTES = 50 * 1024;
 
-export interface RenderReport { key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number }
 export type RenderNext = "judging" | "requeued" | "in_review" | "failed";
 
 /**
@@ -72,22 +62,17 @@ export async function enqueueRender(pieceId: number, payload: RenderPayload): Pr
   return { jobId: j.id, created: j.created };
 }
 
-type JudgeResult = { grade: "P0" | "P1" | "P2"; pass: boolean; repaired?: boolean };
 /**
- * B-1 의 심사(`lib/video/judge.ts judgeVideo`) 호출 — **함수 안 동적 import**(AC-17 · 메인 정리 2026-09-14).
- *   계약 §5: `judgeVideo(pieceId) → { grade:"P0"|"P1"|"P2", pass, axes, repaired }`.
- *   ⚠️ 그 파일이 아직 없다(2026-09-14 · B-1 작업 중). 그래서 지정자를 **변수**로 둔다 —
- *      리터럴로 쓰면 «없는 모듈»이라 타입검사가 깨져 내 쪽 작업이 통째로 막힌다.
- *      judge.ts 가 들어오면 이 변수를 리터럴 `"./judge"` 로 바꾸면 된다(그때부터 타입도 잡힌다).
- *   🔴 못 부르면 **null** — «판정했다»고 꾸미지 않는다. 호출부가 `chainStage="judging"` 에서 멈춘다(가짜 통과 0).
+ * B-1 의 심사(`lib/video/judge.ts judgeVideo`) — **함수 안 동적 import**(AC-17 순환 0 · 메인 정리).
+ *   실물이 들어와 지정자를 리터럴로 되돌렸다 → 타입까지 검사된다(`JudgeResult` 정본 사용).
+ *   🔴 호출이 터져도 **null** — «판정했다»고 꾸미지 않는다. 호출부가 `chainStage="judging"` 에서 멈춘다(가짜 통과 0).
  */
-const JUDGE_MODULE = "./judge";
 async function tryJudge(pieceId: number): Promise<JudgeResult | null> {
   try {
-    const m = (await import(JUDGE_MODULE)) as { judgeVideo?: (id: number) => Promise<JudgeResult> };
-    if (typeof m?.judgeVideo !== "function") return null;
-    return await m.judgeVideo(pieceId);
-  } catch {
+    const { judgeVideo } = await import("./judge");
+    return await judgeVideo(pieceId);
+  } catch (e) {
+    console.error("[render-queue] judgeVideo 실패", String((e as Error)?.message ?? e).slice(0, 160));
     return null;
   }
 }
@@ -106,7 +91,7 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
   /* ① 상식 검사 — 파일은 있는데 «빈 영상»인 경우(인코딩이 중간에 끊겼다). 다시 굽는다. */
   if (report.durationMs < MIN_DURATION_MS || report.bytes < MIN_BYTES) {
     const nextRetry = retry + 1;
-    const giveUp = nextRetry > MAX_RENDER_RETRY;
+    const giveUp = nextRetry > RENDER_MAX_RETRY;
     await q(sql`UPDATE pieces SET status = ${giveUp ? "failed" : String(p.status)},
         meta = meta || ${jsonb({ renderRetry: nextRetry, chainStage: giveUp ? "failed" : "render", failReason: giveUp ? "영상이 계속 비어 있어요(인코딩 실패)" : undefined })},
         updated_at = NOW() WHERE id = ${pieceId}`);
@@ -139,7 +124,7 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
 
   if (judged.grade === "P0" || !judged.pass) {
     const nextRetry = retry + 1;
-    const giveUp = judged.grade === "P0" || nextRetry > MAX_RENDER_RETRY;   // P0(정책 위반)은 다시 굽지 않는다
+    const giveUp = judged.grade === "P0" || nextRetry > RENDER_MAX_RETRY;   // P0(정책 위반)은 다시 굽지 않는다
     await q(sql`UPDATE pieces SET status = ${giveUp ? "failed" : String(p.status)},
         meta = meta || ${jsonb({ renderRetry: nextRetry, chainStage: giveUp ? "failed" : "render", judgeGrade: judged.grade, failReason: giveUp ? (judged.grade === "P0" ? "정책에 어긋나는 영상이라 올리지 않았어요" : "영상 품질이 기준에 못 미쳐요") : undefined })},
         updated_at = NOW() WHERE id = ${pieceId}`);

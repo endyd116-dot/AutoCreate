@@ -27,6 +27,7 @@ import { finalizePublish } from "./publish/finalize";
 // 🔴 수익 행을 쓰는 유일한 함수(계약 P1R3 §5). lib/revenue/** 는 runner-jobs 를 보지 않는다(AC-17 · 방향 한쪽).
 import { upsertRevenueRows } from "./revenue/upsert";
 import { r2Head, r2Configured, r2PresignGet, r2PresignPut, safeKey } from "./r2";
+import type { RenderPayload, RenderReport } from "./video/types";
 import type { RevenueRow } from "./revenue/types";
 import type { Block } from "./blocks";
 import type { RunnerFleetState } from "./publish/contract";
@@ -109,40 +110,14 @@ export interface RunnerPublishPayload {
  *      러너에 R2 자격을 주지 않는다(자격 표면 2곳 규칙 · CLAUDE §4.7).
  *   결과 mp4 는 `upload` 의 presigned PUT 으로 러너가 직접 올린다(함수 본문 6MB 벽 우회).
  */
-export type VideoSeconds = 15 | 30 | 60;
-export interface RenderScene {
-  idx: number; startMs: number; endMs: number;
-  /** clipKey | imageKey 중 하나(영상 조각이거나 정지 이미지). */
-  clipKey?: string; imageKey?: string;
-  motion?: "kenburns" | "none";
-  captionIdx: number[];
-}
-export interface RenderPhrase { idx: number; text: string; startMs: number; endMs: number; keyword?: string }
-export interface RunnerRenderPayload {
-  pieceId: number; tenantId: number;
-  out: { w: 1080; h: 1920; fps: 30; maxSeconds: VideoSeconds; crf: 20 };
-  scenes: RenderScene[];
-  captions: { preset: "keyword_center" | "talking_big" | "clip_top"; phrases: RenderPhrase[]; srtKey: string };
-  audio: {
-    narration: { key: string; startMs: number }[];
-    bgm: { key: string; gainDb: number } | null;
-    sfx: { key: string; startMs: number }[] | null;
-    loudnorm: { I: number; TP: number; LRA: number };
-  };
-  overlay: {
-    badge: { text: string; corner: "tr" } | null;
-    safeZone: { top: number; bottom: number };
-    endcard: { text: string; url?: string } | null;
-  };
-  /** 시작 3초 고지 자막(§16B) — 제휴 소재일 때만. */
-  disclosureCaption: { text: string; untilMs: number } | null;
-  upload: { putUrl: string; key: string; posterPutUrl: string; posterKey: string };
-}
-/** 러너가 렌더를 마치고 싣는 결과. 🔴 서버는 이 주장을 믿지 않고 **R2 HEAD 로 실존 확인** 후에만 성공 처리한다. */
-export interface RunnerRenderResult {
-  key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number; ffmpegVersion?: string;
-}
-/** 렌더 실패 종류(계약 §2.1) — 전이표 7종 밖의 «우리/환경» 사유라 계정 상태를 건드리지 않는다. */
+/**
+ * 러너에게 **실제로 내려가는** 모양 — B 의 `RenderPayload`(lib/video/types.ts 정본)에 presigned `upload` 가 채워진 상태.
+ *   🔴 타입을 여기서 다시 정의하지 않는다. 두 벌이 되면 B 가 보내는 모양과 러너가 기대하는 모양이 **조용히 갈라진다**
+ *      (같은 사고를 `PublishFailReason` 이중 정의에서 이미 봤다). 정본은 `lib/video/types.ts` 한 곳.
+ */
+export type RunnerRenderPayload = RenderPayload & { upload: NonNullable<RenderPayload["upload"]> };
+/** 러너가 렌더를 마치고 싣는 결과 = B-1 `RenderReport` 그대로. 🔴 서버는 이 주장을 믿지 않고 **R2 HEAD 로 실존 확인** 후에만 성공 처리한다. */
+export type RunnerRenderResult = RenderReport;
 export const RENDER_ERROR_KINDS: ReadonlySet<string> = new Set(["ffmpeg_missing", "font_missing", "clip_fetch", "encode", "upload"]);
 
 export type RunnerPayload = RunnerPublishPayload | RunnerRenderPayload | Record<string, unknown>;
