@@ -27,15 +27,18 @@ await UI.boot("schedule");
 const EXT = '<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 let tab = UI.qs.get("status") || "all", posts = [];
 const stuckOf = (p) => p.status === "awaiting_manual" || p.status === "failed";
+const privateOf = (p) => p.status === "uploaded_private";                                  // [P1R5] 심사 전 비공개 업로드(posts.status · §7-1)
+const processingOf = (p) => p.status === "publishing" && p.errorKind === "video_processing"; // [P1R5] 릴스 컨테이너 처리 중(retriable)
 const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(x).toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); const d = k(UI.utc(p.publishedAt)), t0 = k(new Date()), y = k(new Date(Date.now() - 86400e3)); return d === t0 ? "오늘" : d === y ? "어제" : UI.dateKST(p.publishedAt, { weekday: "short" }); };
 
 function row(p) {
-  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
-  const sub = stuckOf(p) ? UI.errk(p.errorKind) : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
+  if (privateOf(p)) return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d" style="display:flex;align-items:center;gap:6px;overflow:visible;flex-wrap:wrap">${UI.pill(UI.POST_STATUS, p.status)}<span>공개 전환 필요</span></span></div><a class="lk" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;min-height:44px;display:inline-flex;align-items:center" data-stop>스튜디오 ›</a></button>`;
+  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
+  const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}가 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
   return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
 }
 function render() {
-  const shown = posts.filter((p) => tab === "all" || p.status === tab);
+  const shown = posts.filter((p) => tab === "all" || p.status === tab || (tab === "published" && privateOf(p)));
   UI.$$("#seg button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   const host = UI.$("#list");
   if (!shown.length) {
@@ -43,31 +46,36 @@ function render() {
     host.innerHTML = `<div class="group"><div class="empty"><h3>${E[0]}</h3><p>${E[1]}</p>${E[2] ? `<a class="btn primary sm" href="${E[2]}">${E[3]}</a>` : ""}</div></div>`;
     return;
   }
-  const stuck = shown.filter(stuckOf), rest = shown.filter((p) => !stuckOf(p));
+  const stuck = shown.filter(stuckOf), priv = shown.filter(privateOf), proc = shown.filter(processingOf), rest = shown.filter((p) => !stuckOf(p) && !privateOf(p) && !processingOf(p));
   const days = [];
   for (const p of rest) { const k = dayOf(p); let g = days.find((x) => x.k === k); if (!g) { g = { k, list: [] }; days.push(g); } g.list.push(p); }
   host.innerHTML = (stuck.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">직접 올려야 해요 ${stuck.length}건</div>${stuck.map(row).join("")}</div>` : "")
+    + (priv.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">공개로 바꿔 주세요 ${priv.length}건</div>${priv.map(row).join("")}<p class="muted" style="margin:0 16px 12px;font-size:12.5px">유튜브 앱 심사 전엔 비공개로 올라가요 · 스튜디오에서 «공개»로 바꾸면 끝나요</p></div>` : "")
+    + (proc.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">처리 중 ${proc.length}건</div>${proc.map(row).join("")}</div>` : "")
     + days.map((g) => `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(g.k)} · ${g.list.length}건</div>${g.list.map(row).join("")}</div>`).join("");
-  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => postSheet(posts.find((p) => p.id === Number(b.dataset.id))));
+  UI.$$("#list .row[data-id]").forEach((b) => b.onclick = (e) => { if (e.target.closest("[data-stop]")) return; postSheet(posts.find((p) => p.id === Number(b.dataset.id))); });
 }
-async function load() { const r = await UI.api(`/api/posts-list?status=${tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = r.posts || []; render(); }
+async function load() { const r = await UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render(); }
 
-/* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유) */
+/* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유 · [P1R5] 비공개 업로드 → 스튜디오) */
 function postSheet(p) {
   if (!p) return;
   const s = p.stats || {};
   const stat = [s.views != null ? `조회 ${UI.num(s.views)}` : null, s.likes != null ? `좋아요 ${UI.num(s.likes)}` : null, s.comments != null ? `댓글 ${UI.num(s.comments)}` : null].filter(Boolean).join(" · ");
-  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${UI.pill(UI.POST_STATUS, p.status)}</div>
+  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${processingOf(p) ? '<span class="pill off">처리 중</span>' : UI.pill(UI.POST_STATUS, p.status)}</div>
     ${stuckOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(p.errorKind))}${p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div>` : ""}
+    ${privateOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>심사 전엔 비공개로 올라가요 · 유튜브 스튜디오에서 «공개»로 바꾸면 사람들에게 보여요</span></div>` : ""}
+    ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}가 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}
     ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
     ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : "채널 연동"}</span></div>` : ""}
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
     ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
     <div class="cta" style="flex-direction:column">
-      ${p.externalUrl ? `<a class="btn primary" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">올라간 글 열기</a>` : ""}
+      ${privateOf(p) ? `<a class="btn primary" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener">유튜브 스튜디오 열기</a>` : ""}
+      ${p.externalUrl ? `<a class="btn ${privateOf(p) ? "secondary" : "primary"}" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">${privateOf(p) ? "올라간 영상 보기(비공개)" : "올라간 글 열기"}</a>` : ""}
       ${stuckOf(p) ? `<button class="btn ${p.externalUrl ? "secondary" : "primary"}" type="button" id="cp">본문 복사하기</button>` : ""}
-      ${p.pieceId ? `<a class="btn ghost" href="/app/piece.html?id=${p.pieceId}">글 보기</a>` : ""}
+      ${p.pieceId ? `<a class="btn ghost" href="/app/piece.html?id=${p.pieceId}">${privateOf(p) || processingOf(p) ? "영상 보기" : "글 보기"}</a>` : ""}
     </div>
     ${stuckOf(p) ? `<p class="muted" style="margin:4px 0 0;font-size:13px">복사한 본문을 ${UI.esc(UI.chLabel(p.channel))} 에 붙여 넣으면 그대로 올라가요.</p>` : ""}`,
     { title: "", onOpen: (sh) => {

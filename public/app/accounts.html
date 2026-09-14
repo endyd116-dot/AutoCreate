@@ -67,7 +67,7 @@ function connectSheet(c) {
     <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off"></div>
     <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => { let handle = d.siteUrl; try { handle = new URL(d.siteUrl).hostname; } catch { /* empty */ } submitAdd({ channel: k, handle, siteUrl: d.siteUrl, loginId: d.loginId, appPassword: d.appPassword, displayName: d.displayName || undefined }, f, close); }) });
   // OAuth
-  UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(label)} 로그인 창으로 이동해요. 허용하면 여기로 돌아와요.</p><div class="cta"><button class="btn primary" type="button" id="go">${UI.esc(label)} 계정으로 연결</button></div>`, { title: `${label} 연결`, onOpen: (sh, close) => {
+  UI.sheet(`<p class="muted" style="margin:0 0 ${k === "youtube_shorts" ? 8 : 16}px">${UI.esc(label)} 로그인 창으로 이동해요. 허용하면 여기로 돌아와요.</p>${k === "youtube_shorts" ? '<p class="muted" style="margin:0 0 16px;font-size:13px">심사 전엔 비공개로 올라가요 — 유튜브 앱 심사가 끝나면 바로 공개로 올라가요. 그전엔 스튜디오에서 «공개»로 바꾸면 돼요.</p>' : ""}<div class="cta"><button class="btn primary" type="button" id="go">${UI.esc(label)} 계정으로 연결</button></div>`, { title: `${label} 연결`, onOpen: (sh, close) => {
     sh.querySelector("#go").onclick = async () => {
       const r = await UI.api("/api/accounts-oauth-start", { body: { channel: k } });
       if (r.ok && r.url) { location.href = r.url; return; }
@@ -152,6 +152,7 @@ async function detailSheet(a) {
   ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(a.lastErrorKind || "login_fail"))}</span><button type="button" id="relogin">다시 로그인</button></div>`
     : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
     : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
+  ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
