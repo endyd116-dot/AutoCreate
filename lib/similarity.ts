@@ -34,3 +34,10 @@ export function maxSimilarity(text: string, others: string[]): { score: number; 
   others.forEach((o, i) => { const s = copySimilarity(text, o); if (s > best.score) best = { score: s, index: i }; });
   return best;
 }
+
+/**
+ * 계정 간 유사도 게이트(P1R3 §1.7 · DESIGN §7.3): 같은 테넌트의 **다른 계정**이 최근 CROSS_ACCOUNT_DAYS 일 안에 올린 글과
+ *   제목·도입부가 이만큼 닮으면 편성 단계에서 소재를 바꾼다(플랫폼의 «같은 사람이 여러 계정» 판정을 피한다). 🔴 임계·기간은 여기 한 곳.
+ */
+export const CROSS_ACCOUNT_SIMILARITY = 0.6;
+export const CROSS_ACCOUNT_DAYS = 14;

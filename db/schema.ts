@@ -550,3 +550,29 @@ export const aiUsage = pgTable("ai_usage", {
   ref:       varchar("ref", { length: 120 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => ({ dayIdx: index("ai_usage_tenant_day_idx").on(t.tenantId, t.createdAt) }));
+
+/* === Phase 2 R3 · 수익(P1R3-B · 2026-09-14 · drizzle/0002-r3-revenue.sql 과 동시) ===
+ *   append-only(CLAUDE §4.4). 위 Phase 0 정의(revenueDaily·revenueSources)는 그대로 두고, 이번 라운드가 더한 칸·인덱스만 여기에 적는다.
+ *   실제 DDL 은 표현식 유니크(COALESCE(account_id,0)·COALESCE(piece_id,0))라 drizzle 선언으로 온전히 표현되지 않는다 — SQL 파일이 정본이다.
+ */
+export const revenueDailyR3 = {
+  /** updated_at timestamp NOT NULL DEFAULT now() — UPSERT 갱신 시각(신선도 «마지막 수집» 표시의 근거). */
+  updatedAt: "updated_at",
+  /** revenue_daily_uniq_idx ON (tenant_id, source, COALESCE(account_id,0), COALESCE(piece_id,0), day) — 멱등 UPSERT 의 근거(lib/revenue/upsert.ts 와 짝). */
+  uniqIdx: "revenue_daily_uniq_idx",
+  /** revenue_daily_piece_idx ON (tenant_id, piece_id) WHERE piece_id IS NOT NULL — 글별 TOP 5. */
+  pieceIdx: "revenue_daily_piece_idx",
+} as const;
+export const revenueSourcesR3 = {
+  lastError: "last_error",              // text — 마지막 실패 사유(사람말)
+  lastErrorKind: "last_error_kind",     // varchar(16) — not_configured|auth|rate_limit|provider|parse
+  failCount: "fail_count",              // integer NOT NULL DEFAULT 0 — 연속 실패(3 이상이면 status=error)
+  lastOkAt: "last_ok_at",               // timestamp — 마지막 성공 수집(«없음»을 0 으로 안 쓰는 대신 남기는 시각 · AC-9)
+  errorNotifiedAt: "error_notified_at", // timestamp — 오류 알림 24h 중복 방지
+  config: "config",                     // jsonb NOT NULL DEFAULT '{}' — 사이트 id·채널 id·머천트 id(비밀 아님 · 비밀은 cred_enc)
+  updatedAt: "updated_at",
+  /** revenue_sources_uniq_idx ON (tenant_id, source, COALESCE(account_id,0)) — 소스 행은 (테넌트,소스,계정)당 하나. */
+  uniqIdx: "revenue_sources_uniq_idx",
+  /** status varchar(12)→varchar(16)(drizzle/0003) — 'not_configured'(14자)가 안 들어갔다(2026-09-14 스모크 22001). Phase 0 선언은 그대로 두고 여기서 폭만 기록한다. */
+  statusWidth: 16,
+} as const;
