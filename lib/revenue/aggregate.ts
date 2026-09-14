@@ -10,7 +10,8 @@ import { utcDate } from "../db-util";
 import { CONFIRMED_SOURCES, type Freshness } from "./types";
 
 const n = (v: unknown) => Number(v || 0);
-const CONFIRMED_LIST = [...CONFIRMED_SOURCES];
+/** 확정 소스 목록을 SQL 인라인 리스트로 — 배열 파라미터(`ANY($1::text[])`)는 드리즐→postgres-js 경로에서 42846(cannot cast)로 죽는다(2026-09-14 실측). */
+const CONFIRMED_IN = sql.join([...CONFIRMED_SOURCES].map((x) => sql`${x}`), sql`, `);
 const kstToday = sql`(NOW() AT TIME ZONE 'Asia/Seoul')::date`;
 
 export interface RevenueSummary {
@@ -29,8 +30,8 @@ export function monthStart(month: string | null | undefined): string | null {
 /** 홈 큰 숫자 4개(§1.4b(5)) — 오늘 확정·오늘 예상·어제 전체·이번 달. */
 export async function homeRevenue(tid: number): Promise<HomeRevenue> {
   const [r] = await q(sql`SELECT
-      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND source = ANY(${CONFIRMED_LIST}::text[])), 0) AS today_confirmed,
-      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND NOT (source = ANY(${CONFIRMED_LIST}::text[]))), 0) AS today_estimated,
+      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND source IN (${CONFIRMED_IN})), 0) AS today_confirmed,
+      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND NOT (source IN (${CONFIRMED_IN}))), 0) AS today_estimated,
       COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} - 1), 0) AS yesterday,
       COALESCE(SUM(amount_krw) FILTER (WHERE day >= date_trunc('month', ${kstToday})::date), 0) AS month
     FROM revenue_daily WHERE tenant_id = ${tid} AND day >= date_trunc('month', ${kstToday})::date - 1`);
@@ -44,8 +45,8 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
   const [tot] = await q(sql`SELECT
       COALESCE(SUM(amount_krw) FILTER (WHERE day >= ${start} AND day < (${start} + interval '1 month')::date), 0) AS month,
       COALESCE(SUM(amount_krw) FILTER (WHERE day >= (${start} - interval '1 month')::date AND day < ${start}), 0) AS prev,
-      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND source = ANY(${CONFIRMED_LIST}::text[])), 0) AS today_confirmed,
-      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND NOT (source = ANY(${CONFIRMED_LIST}::text[]))), 0) AS today_estimated
+      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND source IN (${CONFIRMED_IN})), 0) AS today_confirmed,
+      COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND NOT (source IN (${CONFIRMED_IN}))), 0) AS today_estimated
     FROM revenue_daily WHERE tenant_id = ${tid} AND day >= (${start} - interval '1 month')::date`);
   const bySrc = await q(sql`SELECT d.source, COALESCE(SUM(d.amount_krw),0) AS krw, MAX(d.freshness) AS freshness, MAX(d.updated_at) AS last_upd,
       (SELECT MAX(s.last_ok_at) FROM revenue_sources s WHERE s.tenant_id = d.tenant_id AND s.source = d.source) AS last_ok

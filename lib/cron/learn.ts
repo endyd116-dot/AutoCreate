@@ -179,7 +179,7 @@ async function revenueByTopic(tid: number): Promise<Map<number, { krw: number; s
   const out = new Map<number, { krw: number; samples: number }>();
   if (!byPiece.size) return out;
   const ids = [...byPiece.keys()];
-  const rows = await q(sql`SELECT id, topic_id FROM pieces WHERE tenant_id = ${tid} AND topic_id IS NOT NULL AND id = ANY(${ids}::bigint[])`);
+  const rows = await q(sql`SELECT id, topic_id FROM pieces WHERE tenant_id = ${tid} AND topic_id IS NOT NULL AND id IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`);
   for (const r of rows) {
     const t = n(r.topic_id), pr = byPiece.get(n(r.id)); if (!pr) continue;
     const cur = out.get(t) ?? { krw: 0, samples: 0 };

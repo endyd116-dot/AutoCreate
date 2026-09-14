@@ -573,4 +573,6 @@ export const revenueSourcesR3 = {
   updatedAt: "updated_at",
   /** revenue_sources_uniq_idx ON (tenant_id, source, COALESCE(account_id,0)) — 소스 행은 (테넌트,소스,계정)당 하나. */
   uniqIdx: "revenue_sources_uniq_idx",
+  /** status varchar(12)→varchar(16)(drizzle/0003) — 'not_configured'(14자)가 안 들어갔다(2026-09-14 스모크 22001). Phase 0 선언은 그대로 두고 여기서 폭만 기록한다. */
+  statusWidth: 16,
 } as const;
