@@ -15,11 +15,19 @@
   const todayYmd = ymd(0);
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
+  /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
+  const VF = (key, label, maxSeconds) => ({ key, label, maxSeconds });
+  const CH_VIDEO = {
+    youtube_shorts: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("talking", "말하는 사람", 60), VF("clip", "클립", 30)] },
+    naver_clip: { maxSeconds: 30, formats: [VF("clip", "클립", 30), VF("graphic", "그래픽 스토리", 30)] },
+    reels: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("talking", "말하는 사람", 60), VF("clip", "클립", 30)] },
+    threads: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("clip", "클립", 30)] },
+  }; // 🔴 상한은 서버가 말한다(화면 상수 금지 · 릴스 90 은 Phase 5)
   const CHANNELS = [
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
     ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
     ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
-  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => ({ key, label, category, publishVia, status, connectMethod, configured })); // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const o = { key, label, category, publishVia, status, connectMethod, configured }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -61,6 +69,17 @@
   const kiccOff = qs.get("kicc") === "0";
   /* [§1.6] 결제 라인 — ?keyin=1 정책 켜짐(기본 0) · ?keyinMid=0 비인증 MID 미등록 → available:false(체크박스 자체가 없다) */
   const keyinOn = qs.get("keyin") === "1", keyinMid = qs.get("keyinMid") !== "0";
+  /* [P1R6] 손잡이 — ?supplier=0(회사 정보 없음 → 영수증 «준비 중») · ?share=0(이달 수익 0 → 공유 카드 없음) · ?managed=deny(플랜에 관리형 러너 없음 → 402 plan_feature) · ?export=running(내보내기 도는 중) · ?amOff=1(AM 다리 미설정) */
+  const supplierOff = qs.get("supplier") === "0", shareOff = qs.get("share") === "0", managedDeny = qs.get("managed") === "deny", exportRunning = qs.get("export") === "running", amOff = qs.get("amOff") === "1";
+  const SUPPLIER = { name: "주식회사 함께워크", ceo: "김두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 123, 4층", email: "help@autocreate.dev", phone: "02-1234-5678" }; // ops_settings.company(운영센터 «회사 정보» 한 출처)
+  /* 공유 카드 그림(모의) — 실서버는 PNG presigned(24h · B-1 서버 래스터라이저) · 화면은 <img> 로 띄우기만 한다 */
+  const shareImg = (month, handles, channels) => { const mm = Number(String(month).slice(5, 7)) || 9; const krw = (S.revRows || []).filter((r) => String(r.day || "").slice(0, 7) === month).reduce((a2, r) => a2 + (r.amountKrw || 0), 0);
+    const lines = [`<text x='540' y='560' font-family='sans-serif' font-size='44' fill='#8B95A1' text-anchor='middle'>${mm}월에</text>`,
+      `<text x='540' y='690' font-family='sans-serif' font-size='88' font-weight='800' fill='#191F28' text-anchor='middle'>${krw.toLocaleString("ko-KR")}원 벌었어요</text>`];
+    if (channels) lines.push(`<text x='540' y='780' font-family='sans-serif' font-size='40' fill='#4E5968' text-anchor='middle'>네이버 블로그 · 유튜브 쇼츠</text>`);
+    if (handles) lines.push(`<text x='540' y='${channels ? 850 : 780}' font-family='sans-serif' font-size='40' fill='#8B95A1' text-anchor='middle'>@cook_a · @shorts_d</text>`);
+    lines.push(`<text x='540' y='1180' font-family='sans-serif' font-size='36' fill='#B0B8C1' text-anchor='middle'>AutoCreate</text>`);
+    return "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='1080' height='1350'><rect width='1080' height='1350' fill='#F2F4F6'/><rect x='60' y='60' width='960' height='1230' rx='48' fill='#fff'/>${lines.join("")}</svg>`); };
   const keyinOption = () => ({ available: keyinOn && keyinMid, label: "카드번호 직접 입력", notice: "법인카드가 앱카드 창에서 거절될 때 쓰세요. 카드번호를 결제사 창에 직접 넣어요." });
   const aiCap = qs.get("aiCap") === "1", bannedTopic = qs.get("banned") === "1";
   /* [P1R5] 영상 손잡이 — ?stage=script|tts|clips|render|judging|done|failed(만드는 중 영상의 단계 고정) · ?judge=P0|P1|P2(검수 영상 심사 등급) · ?noFfmpeg=1(내 PC 프로그램 caps.ffmpeg=false) · ?uploaded=private(발행함 비공개 업로드 행) · ?videoBudget=0(달러 캡 초과 step budget) */
@@ -114,7 +133,7 @@
   }
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
-    v: 5, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
+    v: 6, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     accounts: fresh ? [] : [
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
@@ -132,6 +151,11 @@
       { id: 17, title: "전자레인지 냄새, 레몬 한 조각으로 끝", angle: "3초 훅 · 비포/애프터", channelHint: "youtube_shorts", score: 81, status: "candidate", factors: { volume: 15600, growthPct: 63, competition: "low", intent: "info" }, expiresAt: iso(now + 6 * 86400e3) }, // [P1R5] 영상 채널 힌트(§1.11)
     ],
     templates: [], // [P1R5] shorts_templates(레퍼런스 구조 · topics-reference)
+    /* [P1R6] 추천인 · 세금계산서 프로필 · 관리형 러너 신청 · 내보내기 작업 */
+    referral: { code: "AC7K2M9Q", invited: fresh ? [] : [{ tenantName: "요리하는 집", at: iso(now - 9 * 86400e3), rewarded: true }, { tenantName: "팁스고", at: iso(now - 2 * 86400e3), rewarded: false }], rewardCoins: 20 },
+    taxProfile: fresh ? null : { bizNo: "220-88-12345", bizName: "다온커머스", email: "tax@daon.co.kr" },
+    managed: { status: "none", assigned: 0 },
+    exportJob: null,
     briefs: {},
     pieces: fresh ? [] : [
       { id: 501, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "story", title: "에어프라이어 청소법, 눌어붙은 기름 3분 컷", status: "in_review", stage: "done", scheduledFor: kst(1, 7, 30), coverUrl: "", gateOk: true, createdAt: iso(now - 3600e3), topicTitle: "에어프라이어 청소법", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["에어프라이어청소", "베이킹소다"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece501" } }, gate: gate(true) },
@@ -141,8 +165,8 @@
       { id: 505, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "story", title: "에어프라이어 청소, 눌어붙은 기름 3분 컷", status: "published", stage: "done", publishedAt: iso(now - 26 * 3600e3), externalUrl: "https://blog.naver.com/cook_a/223456789", gateOk: true, createdAt: iso(now - 3 * 86400e3), topicTitle: "에어프라이어 청소법", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["에어프라이어청소"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece505" } }, gate: gate(true) },
       { id: 506, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "guide", title: "가을 이불 세탁, 건조기 없이 뽀송하게", status: "awaiting_manual", stage: "done", scheduledFor: iso(now - 4 * 3600e3), gateOk: true, createdAt: iso(now - 2 * 86400e3), topicTitle: "가을 이불 세탁", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["이불세탁"], disclosure: null }, gate: gate(true) },
       /* [P1R5] 영상 piece(kind video · §1.2 행 모양) — 508 만드는 중(?stage= 로 단계 고정 · 없으면 시간 따라 진행) · 509 봐주세요(?judge= 로 등급) */
-      { id: 508, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "에어프라이어 기름때, 3분이면 끝", status: "generating", scheduledFor: kst(1, 18, 0), gateOk: false, createdAt: iso(now - 300e3), topicTitle: "에어프라이어 청소법", regenCount: 0, coinCost: 28, bodyHtml: "", meta: { stage: "script", chainStage: { stage: "script", at: iso(now - 300e3) }, video: videoSpec(0, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["에어프라이어", "청소"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece508" }, chainResume: { count: 0 } }, gate: null, _v0: now - 9500 },
-      { id: 509, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" } }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
+      { id: 508, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "에어프라이어 기름때, 3분이면 끝", status: "generating", scheduledFor: kst(1, 18, 0), gateOk: false, createdAt: iso(now - 300e3), topicTitle: "에어프라이어 청소법", regenCount: 0, coinCost: 28, bodyHtml: "", meta: { stage: "script", chainStage: { stage: "script", at: iso(now - 300e3) }, video: videoSpec(0, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, tags: ["에어프라이어", "청소"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece508" }, chainResume: { count: 0 } }, gate: null, _v0: now - 9500 },
+      { id: 509, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" }, endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
     ],
     rules: fresh ? [] : [
       { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, active: true },
@@ -191,7 +215,7 @@
     adState: revEmpty ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 5) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 6) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
@@ -305,6 +329,10 @@
   const R = {
     "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: true, mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: blocked === "suspended" ? "starter" : "trial", status: blocked || "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: blocked ? 0 : 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: qs.get("imp") === "1" ? { byName: "운영 관리자", startedAt: iso(now - 5 * 60e3), until: iso(now + 55 * 60e3) } : null }),
     "auth-refresh": () => ({ ok: true }),
+    "auth-register": (b) => { const code = String(b.referralCode || "").trim().toUpperCase();
+      if (code && code !== S.referral.code.slice(0, 4) + "OK" && !/^[A-Z0-9]{8}$/.test(code)) return { ok: false, step: "referral", error: "그런 추천 코드는 없어요. 다시 확인해 주세요.", status: 400 };
+      if (code === S.referral.code) return { ok: false, step: "referral", error: "자기 코드는 쓸 수 없어요.", status: 400 };
+      return { ok: true, user: { id: 1, email: b.email }, referral: code ? { applied: true, rewardCoins: S.referral.rewardCoins } : undefined, status: 201 }; }, // [P1R6] 400 step:"referral"
     "onboarding": (b) => { S.onboarding = { kinds: b.kinds || [], channels: b.channels || [] }; return { ok: true }; },
     "home-summary": () => { tick(); const review = S.pieces.filter((p) => p.status === "in_review").length; const todo = [];
       const online = S.devices.filter((d) => d.online).length;
@@ -316,6 +344,7 @@
       if (!online && runnerDue) todo.push({ kind: "runner", title: "내 PC 프로그램이 꺼져 있어요", desc: `네이버·티스토리 예약 ${runnerDue}건은 이 프로그램이 올려요`, link: "/app/runner.html", tone: "warn" });
       const vWait = S.pieces.filter((p) => p.kind === "video" && p.status === "generating" && p.meta.stage === "render").length; // [P1R5] 합성 대기(§7-2 awaiting_runner · 침묵 금지)
       if (vWait && !online) todo.push({ kind: "runner", title: `영상 ${vWait}편을 굽지 못하고 있어요`, desc: "내 PC 프로그램을 켜면 이어서 만들어요", link: "/app/runner.html", tone: "warn" });
+      if (S.exportJob && S.exportJob.finishedAt && S.exportJob.url) todo.push({ kind: "setup", title: "내보내기가 준비됐어요", desc: `${UI.dateKST(S.exportJob.expiresAt)}까지 받을 수 있어요`, link: "/app/settings.html", tone: "info" }); // [P1R6]
       if (S.devices.some((d) => d.caps && d.caps.ffmpeg === false)) todo.push({ kind: "runner", title: "내 PC 프로그램에 ffmpeg 가 없어요", desc: "영상을 굽지 못해요 · 설치 안내 보기", link: "/app/runner.html", tone: "warn" });
       const stuck = S.posts.filter((p) => p.status === "awaiting_manual" || p.status === "failed").length;
       if (stuck) todo.push({ kind: "publish", title: `글 ${stuck}건이 올라가지 못했어요`, desc: "직접 올리거나 다시 올려 주세요", link: "/app/posts.html", tone: "warn" });
@@ -378,6 +407,47 @@
       const inv = S.billing.invoices.find((r) => r.kind === "coin" && r.period === o.orderNo); if (inv) { inv.refundedKrw = quote.maxRefundKrw; if (quote.maxRefundKrw >= inv.totalKrw) inv.status = "refunded"; }
       S.notifications.unshift({ id: S.nextId++, kind: "coin_refunded", title: "환불이 처리됐어요", desc: `${quote.maxRefundKrw.toLocaleString("ko-KR")}원을 돌려드렸어요(미사용 ${quote.unusedCoins}코인 회수). 카드사 사정에 따라 3~5일 걸릴 수 있어요.`, link: "/app/coins.html", tone: "info", createdAt: iso(Date.now()) });
       return { ok: true, refundKrw: quote.maxRefundKrw, revoked: quote.unusedCoins, invoiceId: inv ? inv.id : null }; },
+    /* ── [P1R6] §2.1 내보내기(배경 작업 · 202 + 폴링 · 준비되면 알림·해야 할 일) ── */
+    "export-start": (b) => { const nw = notWritable(); if (nw) return nw; const kinds = Array.isArray(b.kinds) && b.kinds.length ? b.kinds : ["post", "video", "revenue"];
+      if (S.exportJob && !S.exportJob.finishedAt) return { ok: true, started: false, running: true };
+      S.exportJob = { startedAt: iso(Date.now()), kinds, from: b.from || null, to: b.to || null, _t0: Date.now() }; return { ok: true, started: true, status: 202 }; },
+    "export-status": () => { const j = S.exportJob; if (!j) return { ok: true, running: false };
+      if (!j.finishedAt && !exportRunning && Date.now() - j._t0 > 6000) { j.finishedAt = iso(Date.now()); j.bytes = 18_400_000; j.url = "data:text/plain;charset=utf-8,AutoCreate%20export%20(mock)"; j.expiresAt = iso(Date.now() + 7 * 86400e3);
+        S.notifications.unshift({ id: S.nextId++, kind: "export_ready", title: "내보내기가 준비됐어요", desc: "7일 안에 받아 주세요 · 글 · 영상 · 수익(KST)", link: "/app/settings.html", tone: "info", createdAt: iso(Date.now()) }); }
+      const o = { ok: true, running: !j.finishedAt, startedAt: j.startedAt }; if (j.finishedAt) { o.finishedAt = j.finishedAt; o.url = j.url; o.expiresAt = j.expiresAt; o.bytes = j.bytes; } return o; },
+    /* ── [P1R6] §2.2 공유 카드 — 서버 렌더 · 핸들·채널 이름은 꺼짐이 기본 · 수익 0원이면 카드 없음 ── */
+    "share-card": (_b, q) => { const month = q.get("month") || todayYmd.slice(0, 7);
+      if (shareOff || revEmpty) return err("empty", "이 달엔 아직 자랑할 게 없어요.");
+      const handles = q.get("handles") === "1", channels = q.get("channels") === "1";
+      return { ok: true, imageUrl: shareImg(month, handles, channels), expiresAt: iso(Date.now() + 24 * 3600e3), month, handles, channels }; },
+    /* ── [P1R6] §1.1 추천인 ── */
+    "referral": () => ({ ok: true, ...S.referral }),
+    /* ── [P1R6] §1.2 영수증(공급자 정보는 운영센터 «회사 정보» 한 출처 · 없으면 null → 화면 «준비 중») ── */
+    "invoice": (_b, q) => { const id = Number(q.get("id")); const inv = S.billing.invoices.find((x) => x.id === id); if (!inv) return err("not_found", "청구서를 찾을 수 없어요.", { status: 404 });
+      return { ok: true, invoice: { ...inv, taxInvoice: inv.taxInvoice || { status: "none" } }, supplier: supplierOff ? null : SUPPLIER }; },
+    "tax-profile": (b) => { if (b && (b.bizNo || b.bizName || b.email)) { S.taxProfile = { bizNo: String(b.bizNo || "").trim(), bizName: String(b.bizName || "").trim(), email: String(b.email || "").trim() }; return { ok: true, profile: S.taxProfile }; }
+      return { ok: true, profile: S.taxProfile }; },
+    "tax-invoice-request": (b) => { const inv = S.billing.invoices.find((x) => x.id === Number(b.invoiceId)); if (!inv) return err("not_found", "청구서를 찾을 수 없어요.", { status: 404 });
+      if (!/^\d{3}-?\d{2}-?\d{5}$/.test(String(b.bizNo || "").trim())) return err("bizNo", "사업자등록번호 10자리를 확인해 주세요.");
+      if (!String(b.bizName || "").trim()) return err("bizName", "상호를 적어 주세요."); if (!/@/.test(String(b.email || ""))) return err("email", "받으실 메일 주소를 확인해 주세요.");
+      inv.taxInvoice = { status: "requested", requestedAt: iso(Date.now()) }; S.taxProfile = { bizNo: b.bizNo, bizName: b.bizName, email: b.email };
+      return { ok: true, taxInvoice: inv.taxInvoice }; },
+    /* ── [P1R6] §3.1 관리형 러너 신청(플랜 게이트 · 요금은 서버 값) ── */
+    "managed-runner": (b) => { if (b && b.devices !== undefined) {
+        if (managedDeny) return { ok: false, reason: "plan_limit", step: "plan_feature", feature: "managedRunner", planKey: "starter", error: "대신 돌려주는 PC는 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.", status: 402 };
+        const n = Math.max(1, Math.min(5, Number(b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, requestedAt: iso(Date.now()) };
+        S.notifications.unshift({ id: S.nextId++, kind: "setup", title: "대신 돌려주는 PC를 신청했어요", desc: "운영자가 확인하고 배정해 드려요 · 보통 하루 안에", link: "/app/runner.html", tone: "info", createdAt: iso(Date.now()) });
+        return { ok: true, status: S.managed.status, devices: n }; }
+      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: "none", assigned: 0, max: 5 };
+      return { ok: true, eligible: true, price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5 }; },
+    /* ── [P1R6] §1.4 AM↔AC 코인 이전(키 없으면 준비 중 · 부분 성공 금지) ── */
+    "coin-transfer": (b) => { const nw = notWritable(); if (nw) return nw;
+      if (amOff) return { ok: false, step: "not_configured", error: "아직 준비 중이에요 · 곧 열려요", status: 200 };
+      const n = Math.max(1, Math.floor(Number(b.coins) || 0)); if (!n) return err("coins", "가져올 코인 수를 골라 주세요.");
+      if (n > 200) return err("limit", "한 번에 200코인까지 가져올 수 있어요.");
+      const ref = "transfer:AM:AM-" + Date.now().toString(36); S.coins += n;
+      S.billing.ledger.unshift({ at: iso(Date.now()), kind: "grant", bucket: "purchased", amount: n, ref, reason: "AM 에서 가져온 코인", expiresAt: iso(Date.now() + 365 * 86400e3) });
+      return { ok: true, coins: n, balance: S.coins, ref }; },
     /* ── [P1R4] §2.1 문의 · FAQ · 공지 · 첨부 ── */
     "support-ticket": (b) => { if (!String(b.subject || "").trim()) return err("subject", "한 줄로 무엇이 막히는지 적어 주세요."); if (!String(b.text || "").trim()) return err("text", "조금 더 자세히 적어 주세요."); const id = S.nextId++; S.tickets.unshift({ id, subject: b.subject, status: "open", createdAt: iso(Date.now()), updatedAt: iso(Date.now()), attachments: b.attachments || [], messages: [{ from: "customer", text: b.text, at: iso(Date.now()) }, { from: "system", text: "자동 첨부 · 플랜 trial · 내 PC 프로그램 0/1 · 최근 오류 1건", at: iso(Date.now()) }] }); return { ok: true, id, status: 201 }; },
     "support-tickets": () => ({ ok: true, tickets: S.tickets.map((t) => ({ id: t.id, subject: t.subject, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, rating: t.rating, messages: t.messages })) }),
@@ -568,7 +638,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

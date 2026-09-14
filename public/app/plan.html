@@ -76,7 +76,28 @@ function receipt(r) { const ST = { paid: "결제 완료", failed: "결제 실패
     ${r.refundedKrw ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">환불</span><span class="v">${won(r.refundedKrw)}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${r.paidAt ? "결제일" : "생성"}</span><span class="v">${UI.dateKST(r.paidAt || r.createdAt, { year: "numeric" })} ${UI.timeKST(r.paidAt || r.createdAt)}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v">${ST[r.status] || UI.esc(r.status)}</span></div>
-    <p class="muted" style="margin:10px 0 0;font-size:12.5px">세금계산서·현금영수증이 필요하면 «문의하기»에서 청구서 번호 ${r.id}을 알려 주세요.</p>`, { title: "영수증" }); }
+    <div id="taxRow"></div>
+    <div class="cta" style="flex-direction:column"><a class="btn secondary" href="/receipt.html?id=${r.id}" target="_blank" rel="noopener">영수증 페이지 열기</a></div>`, { title: "영수증", onOpen: (sh) => taxRow(sh, r) }); }
+/* [P1R6] 세금계산서 요청 — 상태 필 + 3칸(다음부터 자동) · 발행은 운영센터에서 */
+const TAXST = { none: null, requested: ["warn", "요청됨"], issued: ["ok", "발행됨"] };
+async function taxRow(sh, r) {
+  const host = sh.querySelector("#taxRow"); if (!host || r.kind === "coin" && false) return;
+  const inv = await UI.api(`/api/invoice?id=${r.id}`); const ti = (inv.ok && inv.invoice && inv.invoice.taxInvoice) || { status: "none" };
+  const pill = TAXST[ti.status];
+  host.innerHTML = `<button type="button" class="row tap" id="taxBtn" style="padding-left:0;padding-right:0"><div class="l"><span class="t">세금계산서 받기</span><span class="d">${ti.status === "issued" ? `${UI.dateKST(ti.issuedAt)} 발행` : ti.status === "requested" ? "요청했어요 · 보통 영업일 2일 안에" : "사업자라면 발행해 드려요"}</span></div>${pill ? `<span class="pill ${pill[0]}">${pill[1]}</span>` : UI.chev}</button>`;
+  if (ti.status !== "none") { if (ti.url) host.querySelector("#taxBtn").onclick = () => window.open(ti.url, "_blank", "noopener"); return; }
+  host.querySelector("#taxBtn").onclick = async () => {
+    const p = await UI.api("/api/tax-profile"); const pf = (p.ok && p.profile) || {};
+    UI.sheet(`<form id="tf"><div class="field"><label>사업자등록번호</label><input class="input" name="bizNo" inputmode="numeric" placeholder="000-00-00000" value="${UI.esc(pf.bizNo || "")}" required><div class="help"></div></div>
+      <div class="field"><label>상호</label><input class="input" name="bizName" value="${UI.esc(pf.bizName || "")}" required><div class="help"></div></div>
+      <div class="field"><label>받으실 메일</label><input class="input" name="email" type="email" value="${UI.esc(pf.email || "")}" required><div class="help"></div></div>
+      <p class="muted" style="margin:0 0 4px;font-size:13px">한 번 적어 두면 다음 청구서부터는 그대로 써요. 공급가 ${won(r.amountKrw)} · 부가세 ${won(r.vatKrw)} 기준으로 발행돼요.</p>
+      <div class="cta"><button class="btn primary" type="submit">요청하기</button></div></form>`, { title: "세금계산서", onOpen: (s2, close) => UI.form(s2.querySelector("#tf"), async (d, f) => {
+        const rr = await UI.api("/api/tax-invoice-request", { body: { invoiceId: r.id, bizNo: d.bizNo.trim(), bizName: d.bizName.trim(), email: d.email.trim() } });
+        if (!rr.ok) return UI.fieldError(f, rr.step === "bizNo" ? "bizNo" : rr.step === "bizName" ? "bizName" : "email", rr.error || "요청하지 못했어요");
+        close(); UI.toast("요청했어요 · 메일로 보내 드려요"); taxRow(sh, r); }) });
+  };
+}
 function renderCards() {
   const cur = S.plan.key; const active = S.status === "active";
   UI.$("#cards").innerHTML = PLANS.map((p) => { const isCur = active && cur === p.key && (S.plan.cycle || "month") === cycle;

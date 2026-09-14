@@ -29,6 +29,7 @@
   <div class="gt">설정</div>
   <a class="row tap" href="/app/settings.html"><div class="l"><span class="t">계정 · 보안</span><span class="d">비밀번호 · 기기 · 로그아웃</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/support.html"><div class="l"><span class="t">문의하기</span><span class="d">막히는 게 있으면 바로 알려 주세요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <button class="row tap" type="button" id="ref"><div class="l"><span class="t">친구 초대</span><span class="d" id="refd">코드를 나눠 주면 둘 다 코인을 받아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
 </div>
   </main>
 </div>
@@ -38,6 +39,15 @@
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
+/* [P1R6] 추천인 — 내 코드 · 초대 목록(보상은 «피추천인 첫 유료 결제»부터 · 그전엔 «아직») */
+(async () => { const r = await UI.api("/api/referral"); if (!r.ok) return;
+  const done = (r.invited || []).filter((x) => x.rewarded).length;
+  UI.$("#refd").textContent = `${r.code} · 초대 ${(r.invited || []).length}명${done ? ` · 코인 받은 건 ${done}명` : ""}`;
+  UI.$("#ref").onclick = () => UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">내 추천 코드</div><div class="big" style="font-family:ui-monospace,monospace;letter-spacing:.08em">${UI.esc(r.code)}</div></div>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">친구가 가입할 때 이 코드를 넣으면, 친구의 <b style="color:var(--ink)">첫 결제가 끝난 뒤</b> 둘 다 ${r.rewardCoins}코인을 받아요. 체험만 하면 코인은 안 나가요.</p>
+    ${(r.invited || []).length ? (r.invited || []).map((x) => `<div class="row" style="padding-left:0;padding-right:0;min-height:44px"><div class="l"><span class="t" style="font-size:14px">${UI.esc(x.tenantName)}</span><span class="d">${UI.dateKST(x.at)} 가입</span></div>${x.rewarded ? '<span class="pill ok">코인 받음</span>' : '<span class="pill off">첫 결제 전</span>'}</div>`).join("") : '<p class="muted" style="margin:0;font-size:13px">아직 초대한 사람이 없어요.</p>'}
+    <div class="cta"><button class="btn primary" type="button" id="cp">코드 복사하기</button></div>`, { title: "친구 초대", onOpen: (sh) => { sh.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(r.code)) ? "복사했어요 · 친구에게 보내 주세요" : "복사하지 못했어요"); } });
+})();
 UI.$("#name").textContent = `${me.user.name || me.user.email}님`;
 const P = { trial: "체험", starter: "Starter", pro: "Pro", agency: "Agency" };
 UI.$("#planName").textContent = P[me.tenant.planKey] || me.tenant.planKey;
