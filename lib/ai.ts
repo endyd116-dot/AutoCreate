@@ -61,6 +61,13 @@ export interface CallGeminiArgs {
    *   ⚠️ 씽킹(pro)과 검색 서술이 같은 출력 예산을 나눠 쓴다(AM #869 truncated) — 호출부가 maxOutputTokens 를 넉넉히 준다.
    */
   googleSearch?: boolean;
+  /**
+   * [P1R5 §1.11] 미디어 직독 — `fileData.fileUri`(유튜브 URL 을 모델이 직접 본다 · AM `shorts-reference.ts` 실증).
+   *   ⚠️ text 파트보다 **앞**에 실어야 한다(AM 실측 — 뒤에 실으면 모델이 영상을 안 본 답을 낸다).
+   *   ⚠️ 영상 직독은 길다(수십 초) — 호출부가 `timeoutMs` 를 넉넉히 준다.
+   */
+  fileUri?: string | null;
+  fileMimeType?: string | null;
 }
 
 /* ───────── 사고 몫(AM ★THINKCAP) ───────── */
@@ -93,8 +100,11 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
     ...(a.json && !a.googleSearch ? { responseMimeType: "application/json" } : {}),
     thinkingConfig: { thinkingBudget: thinkAllow },
   };
+  const parts: Record<string, unknown>[] = [];
+  if (a.fileUri) parts.push({ fileData: { fileUri: a.fileUri, ...(a.fileMimeType ? { mimeType: a.fileMimeType } : {}) } });   // 🔴 text 보다 앞(§1.11)
+  parts.push({ text: a.user });
   const body: Record<string, unknown> = {
-    contents: [{ role: "user", parts: [{ text: a.user }] }],
+    contents: [{ role: "user", parts }],
     generationConfig,
   };
   if (a.googleSearch) body.tools = [{ google_search: {} }];
