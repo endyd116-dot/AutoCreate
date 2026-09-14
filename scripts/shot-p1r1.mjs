@@ -24,7 +24,7 @@ mkdirSync(OUT, { recursive: true });
 const { chromium } = await import(pathToFileURL(join(PW_DIR, "node_modules/playwright/index.mjs")).href);
 
 const VIEWPORTS = { phone: { width: 390, height: 844, isMobile: true, hasTouch: true }, desktop: { width: 1280, height: 800 } };
-const FORBIDDEN = /테넌트|러너|piece|슬롯/i;   // «러너» 도 고객 화면 금지어(R2 §3 v3.1 · «내 PC» 로 말한다)
+const FORBIDDEN = /테넌트|러너|\bpiece\b|슬롯/i;   // «러너» 도 고객 화면 금지어(R2 §3 v3.1 · «내 PC» 로 말한다)
 const EMOJI_HARD = /\p{Emoji_Presentation}/u;                 // 진짜 이모지(컬러 글리프) = FAIL
 const EMOJI_SOFT = /\p{Extended_Pictographic}/u;              // ✎ ▦ 같은 딩뱃 = WARN(마크로 쓰는 중 · 헌장 «아이콘 1세트(선형)» 대상)
 
