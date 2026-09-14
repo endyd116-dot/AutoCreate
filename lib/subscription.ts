@@ -77,9 +77,10 @@ export async function tenantOwner(tid: number): Promise<{ name: string; email: s
   const [t] = await q(sql`SELECT t.name, (SELECT u.email FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS email FROM tenants t WHERE t.id = ${tid}`);
   return { name: String(t?.name ?? ""), email: t?.email ? String(t.email) : null };
 }
-export async function activeBillingKey(tid: number): Promise<{ id: number; billingKey: string; last4: string | null; brand: string | null } | null> {
-  const [k] = await q(sql`SELECT id, billing_key, last4, brand FROM billing_keys WHERE tenant_id = ${tid} AND active = true AND removed_at IS NULL ORDER BY id DESC LIMIT 1`);
-  return k ? { id: n(k.id), billingKey: String(k.billing_key), last4: k.last4 ? String(k.last4) : null, brand: k.brand ? String(k.brand) : null } : null;
+export async function activeBillingKey(tid: number): Promise<{ id: number; billingKey: string; last4: string | null; brand: string | null; pgMid: string | null } | null> {
+  const [k] = await q(sql`SELECT id, billing_key, last4, brand, pg_mid FROM billing_keys WHERE tenant_id = ${tid} AND active = true AND removed_at IS NULL ORDER BY id DESC LIMIT 1`);
+  // pgMid = 이 빌키를 발급한 MID(§1.6) — 청구·삭제는 이 MID 로만 된다. NULL 인 옛 행은 midOrDefault 가 인증 MID 로 폴백.
+  return k ? { id: n(k.id), billingKey: String(k.billing_key), last4: k.last4 ? String(k.last4) : null, brand: k.brand ? String(k.brand) : null, pgMid: k.pg_mid ? String(k.pg_mid) : null } : null;
 }
 
 /* ───────── 가격 ───────── */
@@ -128,6 +129,8 @@ export interface ChargeOutcome {
   period: string;
   supplyKrw: number; vatKrw: number; totalKrw: number;
   orderNo: string; pgTid?: string | null;
+  /** 이 청구를 처리한 KICC MID(invoices.pg_mid 로 저장 · 취소가 같은 MID 를 써야 한다 · §1.6). */
+  pgMid?: string | null;
   errorCode?: string | null; errorMessage?: string | null; retryable?: boolean;
   /** 이번 실패가 몇 번째인가(1-based). 성공이면 무시. */
   attempt: number;
@@ -144,10 +147,10 @@ export async function applyChargeResult(tid: number, r: ChargeOutcome, now = new
     const start = r.periodStart ?? now;
     const end = periodEndOf(start, r.cycle);
     // ① 인보이스(멱등 · 같은 period 재승인이면 갱신)
-    const [inv] = await q(sql`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, pg_ref, paid_at, order_no, plan_key, attempts, detail)
-      VALUES (${tid}, ${kind}, ${r.period}, ${r.supplyKrw}, ${r.vatKrw}, ${r.totalKrw}, ${"paid"}, ${r.pgTid ?? null}, ${ts(now)}, ${r.orderNo}, ${r.planKey}, ${Math.max(1, r.attempt)}, ${jsonb({ cycle: r.cycle, source: r.source })})
+    const [inv] = await q(sql`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, pg_ref, pg_mid, paid_at, order_no, plan_key, attempts, detail)
+      VALUES (${tid}, ${kind}, ${r.period}, ${r.supplyKrw}, ${r.vatKrw}, ${r.totalKrw}, ${"paid"}, ${r.pgTid ?? null}, ${r.pgMid ?? null}, ${ts(now)}, ${r.orderNo}, ${r.planKey}, ${Math.max(1, r.attempt)}, ${jsonb({ cycle: r.cycle, source: r.source })})
       ON CONFLICT (tenant_id, kind, period) DO UPDATE SET status = 'paid', amount = EXCLUDED.amount, vat_krw = EXCLUDED.vat_krw, total_krw = EXCLUDED.total_krw,
-        pg_ref = EXCLUDED.pg_ref, paid_at = EXCLUDED.paid_at, order_no = EXCLUDED.order_no, plan_key = EXCLUDED.plan_key, last_error = NULL, next_retry_at = NULL, updated_at = NOW()
+        pg_ref = EXCLUDED.pg_ref, pg_mid = COALESCE(EXCLUDED.pg_mid, invoices.pg_mid), paid_at = EXCLUDED.paid_at, order_no = EXCLUDED.order_no, plan_key = EXCLUDED.plan_key, last_error = NULL, next_retry_at = NULL, updated_at = NOW()
       RETURNING id`);
     // ② 정본(tenants) — active + 플랜. 체험 끝·readonly·suspended 전부 여기서 풀린다.
     await q(sql`UPDATE tenants SET status = 'active', plan_key = ${r.planKey}, suspended_at = NULL, readonly_at = NULL, updated_at = NOW() WHERE id = ${tid}`);
@@ -177,10 +180,10 @@ export async function applyChargeResult(tid: number, r: ChargeOutcome, now = new
   const suspend = attempt >= SUSPEND_AFTER_FAILS || d.notice === "suspend" || r.retryable === false && attempt >= 2;
   const retryAt = !suspend && d.retryDays ? new Date(now.getTime() + d.retryDays * 86400_000) : null;
   const err = String(r.errorMessage || r.errorCode || "결제 실패").slice(0, 300);
-  const [inv] = await q(sql`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, order_no, plan_key, attempts, next_retry_at, last_error, detail)
-    VALUES (${tid}, ${kind}, ${r.period}, ${r.supplyKrw}, ${r.vatKrw}, ${r.totalKrw}, ${"failed"}, ${r.orderNo}, ${r.planKey}, ${attempt}, ${retryAt ? ts(retryAt) : null}, ${err}, ${jsonb({ cycle: r.cycle, source: r.source, errorCode: r.errorCode ?? null })})
+  const [inv] = await q(sql`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, order_no, pg_mid, plan_key, attempts, next_retry_at, last_error, detail)
+    VALUES (${tid}, ${kind}, ${r.period}, ${r.supplyKrw}, ${r.vatKrw}, ${r.totalKrw}, ${"failed"}, ${r.orderNo}, ${r.pgMid ?? null}, ${r.planKey}, ${attempt}, ${retryAt ? ts(retryAt) : null}, ${err}, ${jsonb({ cycle: r.cycle, source: r.source, errorCode: r.errorCode ?? null })})
     ON CONFLICT (tenant_id, kind, period) DO UPDATE SET status = CASE WHEN invoices.status = 'paid' THEN 'paid' ELSE 'failed' END,
-      attempts = ${attempt}, next_retry_at = ${retryAt ? ts(retryAt) : null}, last_error = ${err}, order_no = EXCLUDED.order_no, updated_at = NOW()
+      attempts = ${attempt}, next_retry_at = ${retryAt ? ts(retryAt) : null}, last_error = ${err}, order_no = EXCLUDED.order_no, pg_mid = COALESCE(EXCLUDED.pg_mid, invoices.pg_mid), updated_at = NOW()
     RETURNING id, status`);
   await q(sql`INSERT INTO subscriptions (tenant_id, plan_key, status, cycle, period_start, period_end, next_billing_at, fail_count, updated_at)
     VALUES (${tid}, ${r.planKey}, ${"active"}, ${r.cycle}, ${ts(now)}, ${ts(now)}, ${retryAt ? ts(retryAt) : null}, ${attempt}, NOW())
@@ -220,8 +223,9 @@ export async function chargeTenant(tid: number, opts: { planKey: string; cycle: 
   const owner = await tenantOwner(tid);
   const orderNo = orderNoSub(tid, opts.period, opts.attempt);
   const plan = await planOf(opts.planKey);
-  const res = await chargeWithBillingKey({ billingKey: key.billingKey, shopOrderNo: orderNo, amount: totalKrw, goodsName: opts.goods ?? `AutoCreate ${plan.name} ${opts.cycle === "year" ? "연" : "월"} 구독`, customerName: owner.name, customerEmail: owner.email ?? undefined });
-  const applied = await applyChargeResult(tid, { ok: res.success, planKey: opts.planKey, cycle: opts.cycle, period: opts.period, supplyKrw: opts.supplyKrw, vatKrw, totalKrw, orderNo, pgTid: res.pgTid ?? null,
+  // 빌키 청구는 **발급한 MID** 로(KICC 규칙 · §1.6). 상품명은 어댑터가 «AutoCreate » 를 붙인다(명세서 구별).
+  const res = await chargeWithBillingKey({ billingKey: key.billingKey, shopOrderNo: orderNo, amount: totalKrw, goodsName: opts.goods ?? `${plan.name} ${opts.cycle === "year" ? "연" : "월"} 구독`, customerName: owner.name, customerEmail: owner.email ?? undefined, mid: key.pgMid });
+  const applied = await applyChargeResult(tid, { ok: res.success, planKey: opts.planKey, cycle: opts.cycle, period: opts.period, supplyKrw: opts.supplyKrw, vatKrw, totalKrw, orderNo, pgTid: res.pgTid ?? null, pgMid: res.mallId ?? key.pgMid ?? null,
     errorCode: res.errorCode ?? null, errorMessage: res.errorMessage ?? null, retryable: res.retryable, attempt: opts.attempt, source: opts.source, periodStart: opts.periodStart, keepPeriod: opts.keepPeriod, actorId: opts.actorId });
   return { ...applied, totalKrw };
 }
@@ -272,7 +276,7 @@ export async function changePlan(tid: number, planKey: string, cycle: Cycle, opt
     await q(sql`UPDATE tenants SET plan_key = ${planKey}, updated_at = NOW() WHERE id = ${tid}`);
     return { ok: true, effectiveAt: now.toISOString(), pending: false, chargeNowKrw: 0, vatKrw: 0, totalKrw: 0 };
   }
-  const r = await chargeTenant(tid, { planKey, cycle: ledger!.cycle, period, supplyKrw: supply, attempt: 1, source: opts.source ?? "change", keepPeriod: true, actorId: opts.actorId, goods: `AutoCreate 업그레이드 차액(${planKey} · 남은 ${remainDays}일)` });
+  const r = await chargeTenant(tid, { planKey, cycle: ledger!.cycle, period, supplyKrw: supply, attempt: 1, source: opts.source ?? "change", keepPeriod: true, actorId: opts.actorId, goods: `업그레이드 차액(${planKey} · 남은 ${remainDays}일)` });
   if (r.notConfigured) return { ok: false, step: "not_configured", error: r.error ?? "결제 준비 중이에요", totalKrw: r.totalKrw };
   if (r.noBillingKey) return { ok: false, step: "billing_key", error: "먼저 결제 수단을 등록해 주세요.", totalKrw: r.totalKrw };
   if (!r.ok) return { ok: false, step: "charge", error: r.error ?? "결제에 실패했어요.", totalKrw: r.totalKrw };

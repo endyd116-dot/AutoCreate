@@ -759,3 +759,24 @@ export const postsR5 = {
   /** status varchar(20) NOT NULL DEFAULT 'published' — published|uploaded_private|processing(계약 §0.1-6 · AC-4 정직 표기). */
   status: "status",
 } as const;
+
+/* === P1R4 fix · KICC 이중 MID(2026-09-14 · drizzle/0009-kicc-mid.sql 과 동시 · 계약 §1.6) ===
+ *   append-only(CLAUDE §4.4). KICC 는 **승인·취소·빌키 청구/삭제를 그 거래를 만든 MID 로만** 받는다(함께워크ON 실전 규칙).
+ *   그래서 실제 사용한 mallId 를 남기고 취소·재청구가 그 값을 되쓴다(lib/kicc.ts `midOrDefault`·`secretForMid`).
+ *   NULL = 이 칸이 없던 때의 결제 → 인증 MID(`KICC_MALL_ID`) 로 폴백 · 단일 MID 환경에서도 그대로 돈다.
+ */
+export const kiccMidR4 = {
+  invoices: "pg_mid",      // varchar(40) — 이 청구를 승인한 MID(구독·코인 영수증 공용)
+  coinOrders: "pg_mid",    // varchar(40) — 거래등록 MID(콜백 승인이 같은 MID 를 써야 한다 · 콜백엔 세션이 없다)
+  billingKeys: "pg_mid",   // varchar(40) — 빌키를 발급한 MID(청구·삭제가 이 MID 로만 된다)
+  /** 빌키 주문번호가 라인을 말한다: `AC-BK-…`(인증) · `AC-BKK-…`(비인증) — 빌키 행은 승인 뒤에야 생기기 때문. */
+  billingKeyOrderPrefixes: ["AC-BK-", "AC-BKK-"],
+} as const;
+
+/** 운영센터 전역 설정(플랫폼 한 벌 · tenants.settings 와 다른 축). 첫 손님 = `payment` { keyinEnabled, keyinLabel?, keyinNotice? }. */
+export const opsSettings = pgTable("ops_settings", {
+  key:       varchar("key", { length: 40 }).primaryKey(),
+  value:     jsonb("value").notNull().default({}),
+  updatedBy: bigint("updated_by", { mode: "number" }),   // operators.id
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

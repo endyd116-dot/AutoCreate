@@ -6,6 +6,8 @@
  *   GET  /api/ops-billing-keys?q&page                     → { ok, keys:[BillingKey], total, page }
  *   GET  /api/ops-receivables                             → { ok, receivables:[Receivable], total, overdueKrw }   실패 뒤 아직 안 걷힌 구독 청구(테넌트별 합)
  *   POST /api/ops-tax-invoice { invoiceId, kind?:"tax_invoice"|"cash_receipt", note? } → 요청 기록(tax_doc_requested_at · detail.taxDoc) — 실발급은 KICC 키 뒤
+ *   GET  /api/ops-payment-settings                        → { ok, payment:{ keyinEnabled, keyinLabel, keyinNotice }, keyinMidConfigured, mode }   (§1.6 결제 라인 토글)
+ *   POST /api/ops-payment-settings { keyinEnabled?, keyinLabel?, keyinNotice? } → 저장 + 감사(high). 🔴 MID·secret 값 자체는 응답·감사에 싣지 않는다(등록 여부 boolean 만).
  *   🔴 돈 계산은 billing-math(resolveRefund) · 금액 3개(amount·vat·total) 따로 · 청구 상태 갱신은 applyChargeResult 한 벌(재시도도 chargeTenant 를 통해).
  */
 import { sql, type SQL } from "drizzle-orm";
@@ -20,9 +22,12 @@ import { resolveRefund } from "../../lib/billing-math";
 import { chargeTenant, readLedger, type Cycle } from "../../lib/subscription";
 import { executeCoinRefund } from "../../lib/billing/coin-refund";
 import { isCoinOrderNo } from "../../lib/billing/packs";
+import { routeOfMid, isKeyinMidConfigured, getKiccConfig } from "../../lib/kicc";
+import { paymentPolicy } from "../../lib/pay-route";
+import { readOpsSetting, writeOpsSetting } from "../../lib/ops/settings";
 import { kstMonthRange, pageOf, within } from "../../lib/ops/period";
 
-export const config = { path: ["/api/ops-invoices", "/api/ops-invoice-retry", "/api/ops-refund", "/api/ops-billing-keys", "/api/ops-receivables", "/api/ops-tax-invoice"] };
+export const config = { path: ["/api/ops-invoices", "/api/ops-invoice-retry", "/api/ops-refund", "/api/ops-billing-keys", "/api/ops-receivables", "/api/ops-tax-invoice", "/api/ops-payment-settings"] };
 const n = (v: unknown) => Number(v || 0);
 const iso = (v: unknown) => utcDate(v)?.toISOString();
 const INVOICE_STATUSES = ["paid", "failed", "pending", "refunded"];
@@ -43,6 +48,7 @@ function invoiceRow(r: Record<string, unknown>): Record<string, unknown> {
   if (r.order_no) o.orderNo = String(r.order_no);
   if (r.plan_key) o.planKey = String(r.plan_key);
   if (r.last_error) o.lastError = String(r.last_error).slice(0, 200);
+  if (r.pg_mid) o.payRoute = routeOfMid(String(r.pg_mid));   // 어느 결제 라인이었나(§1.6 · MID 값은 싣지 않는다)
   const td = iso(r.tax_doc_requested_at); if (td) o.taxDocRequestedAt = td;
   return o;
 }
@@ -53,6 +59,27 @@ export default async (req: Request): Promise<Response> => {
   const o = requireAdmin(req, ["admin", "super_admin"]); if (!o.ok) return o.res;
   const ip = clientIp(req);
   try {
+    /* ── 결제 라인 토글(§1.6) ── */
+    if (path.endsWith("/ops-payment-settings")) {
+      if (req.method === "GET") {
+        const pol = await paymentPolicy();
+        return json({ ok: true, payment: pol, keyinMidConfigured: isKeyinMidConfigured(), mode: getKiccConfig().mode, kiccConfigured: !!getKiccConfig().authMid });
+      }
+      if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
+      const b = await readJson<{ keyinEnabled?: boolean; keyinLabel?: string; keyinNotice?: string }>(req);
+      const patchBag: Record<string, unknown> = {};
+      if (typeof b.keyinEnabled === "boolean") patchBag.keyinEnabled = b.keyinEnabled;
+      if (typeof b.keyinLabel === "string") patchBag.keyinLabel = b.keyinLabel.trim().slice(0, 40);
+      if (typeof b.keyinNotice === "string") patchBag.keyinNotice = b.keyinNotice.trim().slice(0, 300);
+      if (!Object.keys(patchBag).length) return badRequest("바꿀 값이 없어요.");
+      const before = await readOpsSetting("payment", true);
+      await writeOpsSetting("payment", patchBag, o.ops.oid);
+      await writeAudit({ tenantId: null, action: "ops_payment_settings", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { before: { keyinEnabled: before.keyinEnabled === true }, after: patchBag, keyinMidConfigured: isKeyinMidConfigured() } });
+      const pol = await paymentPolicy();
+      // 🔴 MID 가 없는데 토글만 켜면 라인은 그대로 인증이다(resolvePayRoute 3조건) — 화면이 오해하지 않게 같이 알린다.
+      return json({ ok: true, payment: pol, keyinMidConfigured: isKeyinMidConfigured(), effective: pol.keyinEnabled && isKeyinMidConfigured() });
+    }
+
     /* ── 인보이스 목록 ── */
     if (path.endsWith("/ops-invoices")) {
       if (req.method !== "GET") return json({ ok: false, error: "method" }, 405);
@@ -76,10 +103,10 @@ export default async (req: Request): Promise<Response> => {
       const { page, size, offset } = pageOf(url);
       const where: SQL = sql`(${s} = '' OR LOWER(t.name) LIKE ${"%" + s + "%"} OR LOWER(t.key) LIKE ${"%" + s + "%"} OR k.last4 = ${s})`;
       const [cnt] = await q(sql`SELECT COUNT(*) AS c FROM billing_keys k JOIN tenants t ON t.id = k.tenant_id WHERE ${where}`);
-      const rows = await q(sql`SELECT k.id, k.tenant_id, t.name AS tenant_name, k.brand, k.last4, k.card_label, k.active, k.removed_at, k.card_fp, k.created_at
+      const rows = await q(sql`SELECT k.id, k.tenant_id, t.name AS tenant_name, k.brand, k.last4, k.card_label, k.active, k.removed_at, k.card_fp, k.pg_mid, k.created_at
         FROM billing_keys k JOIN tenants t ON t.id = k.tenant_id WHERE ${where} ORDER BY k.active DESC, k.id DESC LIMIT ${size} OFFSET ${offset}`);
       const keys = rows.map((r) => {
-        const k: Record<string, unknown> = { id: n(r.id), tenantId: n(r.tenant_id), tenantName: String(r.tenant_name ?? ""), brand: String(r.brand ?? r.card_label ?? ""), last4: String(r.last4 ?? ""), active: r.active === true && !r.removed_at, updatedAt: iso(r.removed_at) ?? iso(r.created_at) ?? "" };
+        const k: Record<string, unknown> = { id: n(r.id), tenantId: n(r.tenant_id), tenantName: String(r.tenant_name ?? ""), brand: String(r.brand ?? r.card_label ?? ""), last4: String(r.last4 ?? ""), active: r.active === true && !r.removed_at, updatedAt: iso(r.removed_at) ?? iso(r.created_at) ?? "", payRoute: routeOfMid(r.pg_mid ? String(r.pg_mid) : null) };
         if (r.card_fp) k.cardFp = String(r.card_fp).slice(0, 12);   // 지문 앞 12자만(같은 카드 판별용 · 전체 노출 불필요)
         return k;
       });
@@ -151,7 +178,8 @@ export default async (req: Request): Promise<Response> => {
       if (!isKiccConfigured()) return json({ ok: false, step: "not_configured", error: "결제 준비 중이라 환불도 아직이에요 · 곧 열려요", refundKrw: rr.refund });
       const pgTid = String(inv.pg_ref ?? ""); if (!pgTid) return json({ ok: false, step: "pg", error: "PG 거래번호가 없어 취소할 수 없어요." }, 400);
       const fullFromZero = rr.full && n(inv.refunded_krw) === 0;   // KICC revise: 전액 40(amount 없음) · 부분 32(amount) — AM deposit.ts 관례
-      const c = await cancelPayment({ pgTid, reviseTypeCode: fullFromZero ? "40" : "32", amount: fullFromZero ? undefined : rr.refund, reason });
+      const pgMid = inv.pg_mid ? String(inv.pg_mid) : null;        // 🔴 취소는 승인한 MID 로만(§1.6)
+      const c = await cancelPayment({ pgTid, reviseTypeCode: fullFromZero ? "40" : "32", amount: fullFromZero ? undefined : rr.refund, reason, mid: pgMid });
       const tid = n(inv.tenant_id);
       if (!c.success) {
         await writeAudit({ tenantId: tid, action: "subscription_refund_failed", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "medium", target: `order:${orderNo}`, detail: { refundKrw: rr.refund, errorCode: c.errorCode ?? null, error: c.errorMessage ?? null } });
@@ -159,7 +187,7 @@ export default async (req: Request): Promise<Response> => {
       }
       await q(sql`UPDATE invoices SET refunded_krw = ${rr.newRefunded}, status = ${rr.full ? "refunded" : "paid"}, updated_at = NOW() WHERE id = ${n(inv.id)}`);
       await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"subscription_refunded"}, ${"환불이 처리됐어요"}, ${`${rr.refund.toLocaleString("ko-KR")}원을 돌려드렸어요. 카드사 사정에 따라 3~5일 걸릴 수 있어요.`}, ${"/app/plan.html"})`);
-      await writeAudit({ tenantId: tid, action: "subscription_refund", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", target: `order:${orderNo}`, detail: { refundKrw: rr.refund, newRefunded: rr.newRefunded, full: rr.full, pgTid, invoiceId: n(inv.id), reason } });
+      await writeAudit({ tenantId: tid, action: "subscription_refund", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", target: `order:${orderNo}`, detail: { refundKrw: rr.refund, newRefunded: rr.newRefunded, full: rr.full, pgTid, invoiceId: n(inv.id), reason, payRoute: routeOfMid(pgMid) } });
       return json({ ok: true, kind: "subscription", refundKrw: rr.refund, refundedKrw: rr.newRefunded, full: rr.full, invoiceId: n(inv.id) });
     }
 

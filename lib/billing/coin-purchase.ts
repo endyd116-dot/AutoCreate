@@ -11,6 +11,7 @@
  *     · «성공한 충전만 영수증 1행»(실패는 coin_orders.status='failed' 만 · 미수로 쌓이지 않는다).
  *     · pack_trial 은 (tenant, pack_id, status='paid') 가 있으면 거절 · 체험 중 허용(§12.3).
  *     · KICC 키 없으면 no-op 정직(`notConfigured` · «결제 준비 중이에요»). 원격접속 중 충전 금지는 호출부(denyIfImpersonating).
+ *     · **이중 MID(§1.6)**: 거래등록 MID 를 `coin_orders.pg_mid` 에 남기고 콜백 승인이 그 MID 를 쓴다 · 원클릭은 빌키의 `pg_mid` 로 청구 · 영수증에도 `invoices.pg_mid`.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
@@ -21,6 +22,7 @@ import { applyBonusCoins } from "./promotions";
 import { jsonb } from "../db-util";
 import { activeBillingKey, tenantOwner } from "../subscription";
 import { coinOrderNo, findPack, packIdOfCode, parseCoinOrderNo, type CoinPack } from "./packs";
+import type { PayRoute } from "../kicc";
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -36,22 +38,22 @@ export async function trialPackUsed(tid: number): Promise<boolean> {
 }
 
 /** «성공한 충전만» 영수증 1행(invoices kind='coin' · period=주문번호 · 멱등). */
-async function recordCoinInvoice(tid: number, orderNo: string, pack: CoinPack, pgTid: string | null): Promise<number | null> {
+async function recordCoinInvoice(tid: number, orderNo: string, pack: CoinPack, pgTid: string | null, pgMid: string | null): Promise<number | null> {
   const vatKrw = vatOf(pack.krw);
-  const [inv] = await q(sql`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, pg_ref, paid_at, order_no, detail)
-    VALUES (${tid}, ${"coin"}, ${orderNo}, ${pack.krw}, ${vatKrw}, ${pack.krw + vatKrw}, ${"paid"}, ${pgTid}, NOW(), ${orderNo}, ${jsonb({ packId: pack.id, coins: pack.coins })})
-    ON CONFLICT (tenant_id, kind, period) DO UPDATE SET status = 'paid', pg_ref = COALESCE(EXCLUDED.pg_ref, invoices.pg_ref), updated_at = NOW() RETURNING id`);
+  const [inv] = await q(sql`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, pg_ref, pg_mid, paid_at, order_no, detail)
+    VALUES (${tid}, ${"coin"}, ${orderNo}, ${pack.krw}, ${vatKrw}, ${pack.krw + vatKrw}, ${"paid"}, ${pgTid}, ${pgMid}, NOW(), ${orderNo}, ${jsonb({ packId: pack.id, coins: pack.coins })})
+    ON CONFLICT (tenant_id, kind, period) DO UPDATE SET status = 'paid', pg_ref = COALESCE(EXCLUDED.pg_ref, invoices.pg_ref), pg_mid = COALESCE(EXCLUDED.pg_mid, invoices.pg_mid), updated_at = NOW() RETURNING id`);
   return inv ? n(inv.id) : null;
 }
-async function markOrder(tid: number, orderNo: string, status: "paid" | "failed", extra: { pgTid?: string | null; error?: string | null } = {}): Promise<void> {
-  await q(sql`UPDATE coin_orders SET status = ${status}, pg_ref = COALESCE(${extra.pgTid ?? null}, pg_ref), error = ${extra.error ?? null},
+async function markOrder(tid: number, orderNo: string, status: "paid" | "failed", extra: { pgTid?: string | null; error?: string | null; pgMid?: string | null } = {}): Promise<void> {
+  await q(sql`UPDATE coin_orders SET status = ${status}, pg_ref = COALESCE(${extra.pgTid ?? null}, pg_ref), pg_mid = COALESCE(${extra.pgMid ?? null}, pg_mid), error = ${extra.error ?? null},
     paid_at = CASE WHEN ${status} = 'paid' THEN NOW() ELSE paid_at END, updated_at = NOW() WHERE tenant_id = ${tid} AND order_no = ${orderNo}`);
 }
 
 /** 결제 성공 뒤 «기입 + 영수증»(㉠·㉡ 공용 · 멱등). */
-async function settle(tid: number, orderNo: string, pack: CoinPack, pgTid: string | null, actorId: number | null): Promise<{ balance: number; invoiceId: number | null; already: boolean; bonus: number }> {
-  await markOrder(tid, orderNo, "paid", { pgTid });
-  const invoiceId = await recordCoinInvoice(tid, orderNo, pack, pgTid);
+async function settle(tid: number, orderNo: string, pack: CoinPack, pgTid: string | null, actorId: number | null, pgMid: string | null = null): Promise<{ balance: number; invoiceId: number | null; already: boolean; bonus: number }> {
+  await markOrder(tid, orderNo, "paid", { pgTid, pgMid });
+  const invoiceId = await recordCoinInvoice(tid, orderNo, pack, pgTid, pgMid);
   const p = await purchaseCoins(tid, pack.coins, orderNo, { actorId, reason: `코인 충전 ${pack.coins.toLocaleString("ko-KR")}개(₩${(pack.krw + vatOf(pack.krw)).toLocaleString("ko-KR")} · 유효 1년)` });
   // 이벤트 보너스(계약 §2.1 ops-promotions bonus_coin · ref bonus:{orderNo} 멱등) — 충전이 실제로 기입된 뒤에만.
   const bonus = p.already ? { bonus: 0, promoId: null } : await applyBonusCoins(tid, orderNo, pack.id, pack.coins, actorId);
@@ -59,63 +61,67 @@ async function settle(tid: number, orderNo: string, pack: CoinPack, pgTid: strin
   return { balance: bonus.bonus ? (await balance(tid)).balance : p.balance, invoiceId, already: p.already, bonus: bonus.bonus };
 }
 
-export async function startCoinPurchase(tid: number, packId: unknown, opts: { actorId: number; userAgent?: string | null; returnBase?: string }): Promise<StartResult> {
+export async function startCoinPurchase(tid: number, packId: unknown, opts: { actorId: number; userAgent?: string | null; returnBase?: string; route?: PayRoute }): Promise<StartResult> {
   const pack = await findPack(packId);
   if (!pack) return { ok: false, step: "pack", error: "충전 팩을 골라 주세요." };
   if (pack.oncePerTenant && await trialPackUsed(tid)) return { ok: false, step: "once", error: "첫 충전 팩은 한 번만 살 수 있어요. 다른 팩을 골라 주세요." };
   const vatKrw = vatOf(pack.krw), totalKrw = pack.krw + vatKrw;
   const { isKiccConfigured, chargeWithBillingKey, registerTrade, deviceTypeFromUA } = await import("../kicc");
   if (!isKiccConfigured()) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요", amountKrw: pack.krw, vatKrw, totalKrw };
+  const route: PayRoute = opts.route === "keyin" ? "keyin" : "auth";   // 판정은 lib/pay-route.ts 한 곳
   const owner = await tenantOwner(tid);
   const orderNo = coinOrderNo(tid, pack.id);
-  const goodsName = `AutoCreate 코인 ${pack.coins.toLocaleString("ko-KR")}개 충전`;
+  const goodsName = `코인 ${pack.coins.toLocaleString("ko-KR")}개 충전`;   // 어댑터가 «AutoCreate » 를 붙인다(명세서 구별 · §1.6)
   const key = await activeBillingKey(tid);
   await q(sql`INSERT INTO coin_orders (tenant_id, pack_id, krw, coins, status, order_no, vat_krw, total_krw, mode)
     VALUES (${tid}, ${pack.id}, ${pack.krw}, ${pack.coins}, ${"pending"}, ${orderNo}, ${vatKrw}, ${totalKrw}, ${key ? "oneclick" : "auth"})`);
 
   if (key) {
-    // ㉠ 원클릭 — 응답이 곧 결과.
-    const r = await chargeWithBillingKey({ billingKey: key.billingKey, shopOrderNo: orderNo, amount: totalKrw, goodsName, customerName: owner.name, customerEmail: owner.email ?? undefined });
+    // ㉠ 원클릭 — 응답이 곧 결과. 빌키를 발급한 MID 로만 청구된다(§1.6).
+    const r = await chargeWithBillingKey({ billingKey: key.billingKey, shopOrderNo: orderNo, amount: totalKrw, goodsName, customerName: owner.name, customerEmail: owner.email ?? undefined, mid: key.pgMid });
     if (!r.success) {
-      await markOrder(tid, orderNo, "failed", { error: (r.errorMessage || r.errorCode || "charge_failed").slice(0, 300) });
+      await markOrder(tid, orderNo, "failed", { error: (r.errorMessage || r.errorCode || "charge_failed").slice(0, 300), pgMid: r.mallId ?? key.pgMid ?? null });
       await writeAudit({ tenantId: tid, action: "coin_purchase_failed", actorType: "user", actorId: opts.actorId, riskLevel: "medium", target: `order:${orderNo}`, detail: { packId: pack.id, totalKrw, errorCode: r.errorCode ?? null, error: r.errorMessage ?? null } });
       return { ok: false, step: "charge", error: r.errorMessage || "카드 결제가 되지 않았어요. 카드 한도·유효기간을 확인해 주세요.", orderNo, amountKrw: pack.krw, vatKrw, totalKrw };
     }
-    const s = await settle(tid, orderNo, pack, r.pgTid ?? null, opts.actorId);
+    const s = await settle(tid, orderNo, pack, r.pgTid ?? null, opts.actorId, r.mallId ?? key.pgMid ?? null);
     return { ok: true, orderNo, mode: "oneclick", amountKrw: pack.krw, vatKrw, totalKrw, coins: pack.coins, bonus: s.bonus, balance: s.balance, invoiceId: s.invoiceId };
   }
   // ㉡ 인증창 — 콜백에서 approveCoinPurchase.
   const base = (opts.returnBase || process.env.SITE_URL || "").replace(/\/$/, "");
-  const r = await registerTrade({ shopOrderNo: orderNo, amount: totalKrw, goodsName, isBillingKey: false, returnUrl: `${base}/api/coin-charge-return`, customerName: owner.name, customerEmail: owner.email ?? undefined, deviceTypeCode: deviceTypeFromUA(opts.userAgent) });
+  const r = await registerTrade({ shopOrderNo: orderNo, amount: totalKrw, goodsName, isBillingKey: false, returnUrl: `${base}/api/coin-charge-return`, customerName: owner.name, customerEmail: owner.email ?? undefined, deviceTypeCode: deviceTypeFromUA(opts.userAgent), route });
   if (!r.success || !r.authPageUrl) {
     await markOrder(tid, orderNo, "failed", { error: (r.errorMessage || r.errorCode || "register_failed").slice(0, 300) });
     return { ok: false, step: "charge", error: r.errorMessage || "결제창을 열지 못했어요. 잠시 뒤 다시 해 주세요.", orderNo, amountKrw: pack.krw, vatKrw, totalKrw };
   }
+  // 🔴 승인(콜백)은 **등록과 같은 MID** 로 해야 한다 → 지금 쓴 MID 를 주문 행에 남긴다(콜백엔 세션이 없다).
+  await q(sql`UPDATE coin_orders SET pg_mid = ${r.mallId ?? null}, updated_at = NOW() WHERE tenant_id = ${tid} AND order_no = ${orderNo}`);
   return { ok: true, orderNo, mode: "auth", amountKrw: pack.krw, vatKrw, totalKrw, coins: pack.coins, pay: { url: r.authPageUrl, form: {} } };
 }
 
 export type ApproveResult = { ok: true; tenantId: number; coins: number; bonus: number; balance: number; alreadyPaid: boolean } | { ok: false; tenantId?: number; reason: string };
 /** ㉡ 콜백 — 승인 확정 → 기입. 같은 주문번호 재수신은 alreadyPaid(원장 유니크가 최종 보증). */
-export async function approveCoinPurchase(authorizationId: string, orderNo: string, opts: { verifyMsgAuth?: (raw: unknown) => boolean } = {}): Promise<ApproveResult> {
+export async function approveCoinPurchase(authorizationId: string, orderNo: string, opts: { verifyMsgAuth?: (raw: unknown, mid?: string | null) => boolean } = {}): Promise<ApproveResult> {
   const parsed = parseCoinOrderNo(orderNo);
   if (!parsed) return { ok: false, reason: "bad_order_no" };
   const tid = parsed.tenantId;
-  const [o] = await q(sql`SELECT pack_id, status FROM coin_orders WHERE tenant_id = ${tid} AND order_no = ${orderNo}`);
+  const [o] = await q(sql`SELECT pack_id, status, pg_mid FROM coin_orders WHERE tenant_id = ${tid} AND order_no = ${orderNo}`);
   const pack = await findPack(o?.pack_id ?? packIdOfCode(parsed.packCode));
   if (!pack) return { ok: false, tenantId: tid, reason: "unknown_pack" };
   if (String(o?.status) === "paid") { const b = await balance(tid); return { ok: true, tenantId: tid, coins: pack.coins, bonus: 0, balance: b.balance, alreadyPaid: true }; }
   const { approveTrade } = await import("../kicc");
-  const a = await approveTrade({ authorizationId, shopOrderNo: orderNo });
+  const orderMid = o?.pg_mid ? String(o.pg_mid) : null;   // 거래등록 때 쓴 MID(§1.6) — 없으면 인증 MID 폴백
+  const a = await approveTrade({ authorizationId, shopOrderNo: orderNo, mid: orderMid });
   if (!a.success) {
     await markOrder(tid, orderNo, "failed", { error: (a.errorMessage || a.errorCode || "approve_failed").slice(0, 300) });
     await writeAudit({ tenantId: tid, action: "coin_purchase_failed", actorType: "system", riskLevel: "medium", target: `order:${orderNo}`, detail: { packId: pack.id, errorCode: a.errorCode ?? null, error: a.errorMessage ?? null } });
     return { ok: false, tenantId: tid, reason: a.errorMessage || a.errorCode || "approve_failed" };
   }
-  if (opts.verifyMsgAuth && !opts.verifyMsgAuth(a.raw)) {
+  if (opts.verifyMsgAuth && !opts.verifyMsgAuth(a.raw, a.mallId ?? orderMid)) {
     // 서명 불일치 = «PG 는 승인했는데 서명만 다르다» — 코인을 넣지 않고 사람이 본다(AM classifyChargeFailure msgauth 규율).
     await writeAudit({ tenantId: tid, action: "coin_purchase_msgauth_mismatch", actorType: "system", riskLevel: "high", target: `order:${orderNo}`, detail: { pgTid: a.pgTid ?? null } });
     return { ok: false, tenantId: tid, reason: "msgauth_mismatch" };
   }
-  const s = await settle(tid, orderNo, pack, a.pgTid ?? null, null);
+  const s = await settle(tid, orderNo, pack, a.pgTid ?? null, null, a.mallId ?? orderMid);
   return { ok: true, tenantId: tid, coins: pack.coins, bonus: s.bonus, balance: s.balance, alreadyPaid: s.already };
 }
