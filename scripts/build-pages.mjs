@@ -9,7 +9,7 @@ const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?hist
 
 const TARGETS = [
   { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=7", "/js/mock.js?v=8"], back: ["accounts.html", "settings.html", "plan.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
-  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=7", "/js/ops.js?v=2", "/js/mock-ops.js?v=1"], back: ["tenant.html", "ticket.html", "cs-faq.html", "password.html"], fallback: "/ops/", fallbacks: { "tenant.html": "/ops/tenants.html", "ticket.html": "/ops/cs.html", "cs-faq.html": "/ops/cs.html" }, manifest: false, robots: true, titleInBar: true }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
+  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=7", "/js/ops.js?v=2", "/js/mock-ops.js?v=1"], back: ["tenant.html", "ticket.html", "cs-faq.html", "password.html"], fallback: "/ops/", fallbacks: { "tenant.html": "/ops/tenants.html", "ticket.html": "/ops/cs.html", "cs-faq.html": "/ops/cs.html" }, manifest: false, robots: true, titleInBar: true, bodyClass: "ops" }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
 ];
 
 for (const t of TARGETS) {
@@ -29,7 +29,7 @@ for (const t of TARGETS) {
 ${t.robots ? `<meta name="robots" content="noindex">\n` : ""}${t.manifest ? `<link rel="manifest" href="/manifest.webmanifest">\n` : ""}${FONT}
 <link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
-<body>
+<body${t.bodyClass ? ` class="${t.bodyClass}"` : ""}>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page${flag === "white" ? " white" : ""}" id="page">

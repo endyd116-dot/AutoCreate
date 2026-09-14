@@ -224,7 +224,7 @@ input,textarea,select{font:inherit;color:inherit}
 .tbl .pill{font-size:11px;padding:2px 7px} .tbl .mk.sm{width:24px;height:24px;border-radius:7px;font-size:11px;display:inline-grid;vertical-align:middle;margin-right:6px}
 .tbl button.lk{color:var(--ink);font-weight:600;text-decoration:underline;text-underline-offset:2px} .tbl .muted{color:var(--muted)}
 .ops-two{display:grid;grid-template-columns:1fr;gap:12px} .ops-three{display:grid;grid-template-columns:1fr;gap:12px;align-items:start} .ops-two>*,.ops-three>*{min-width:0} .ops-two .group,.ops-three .group{min-width:0}
-@media (min-width:1100px){ .ops-two{grid-template-columns:1fr 1fr} .ops-three{grid-template-columns:minmax(0,1fr) 300px;gap:24px} }
+@media (min-width:1100px){ .ops-two{grid-template-columns:1fr 1fr} .ops-three{grid-template-columns:minmax(0,1fr) 300px;gap:24px} body.ops .page{max-width:1040px} } /* 운영센터는 표가 많아 넓게(§13.0b 운영 콘솔 예외) */
 .stat4{display:grid;grid-template-columns:repeat(2,1fr);gap:0 24px;padding:4px 16px 10px} .stat4 .st{padding:8px 0} .stat4 .st .k{font-size:12px;color:var(--muted);font-weight:600} .stat4 .st .v{font-size:20px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:2px}
 @media (min-width:641px){ .stat4{grid-template-columns:repeat(4,1fr)} }
 .msg{padding:10px 14px;border-radius:14px;background:var(--ground);margin:6px 16px;font-size:13.5px;line-height:1.5;max-width:86%} .msg.op{background:var(--brand-soft);margin-left:auto} .msg.sys{background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:12.5px;max-width:100%} .msg small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
