@@ -39,7 +39,11 @@ export interface PublishGateResult {
 }
 
 const DISCLOSURE_RE = /<div[^>]*class="[^"]*\bdisclosure\b[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi;
-const ADSENSE_SLOT_RE = /<div[^>]*class="[^"]*\badsense\b[^"]*"[^>]*>\s*<\/div>/gi;
+/* 빈 광고 자리 두 가지 모양을 같은 규칙으로 실체화한다:
+ *   · P1R1 §4B `adsense` 블록 → `<div class="adsense"></div>`
+ *   · P1R3 §2.2 [v3.4] B 의 렌더가 첫 소제목 뒤·마지막 문단 앞에 비워 두는 `<div class="ad-slot" data-slot="mid"></div>`
+ * 키가 있으면 유닛으로, 없으면 **자리를 지운다**(빈 div 를 남의 블로그에 남기지 않는다). 네이버는 채널에서 걸러 호출한다. */
+const ADSENSE_SLOT_RE = /<div[^>]*class="[^"]*\b(?:adsense|ad-slot)\b[^"]*"[^>]*>\s*<\/div>/gi;
 
 /** 고지를 본문 첫 요소로 강제(있던 것은 전부 제거하고 정본 하나만 둔다). pieces.ts 의 ensureDisclosureHtml 과 같은 규칙. */
 export function ensureDisclosureFirstHtml(html: string, provider: string | null | undefined): string {
