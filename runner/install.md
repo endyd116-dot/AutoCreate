@@ -129,6 +129,16 @@ FFMPEG_PATH=/opt/homebrew/bin/ffmpeg
 > 경로에 **띄어쓰기**가 있으면(`C:\Program Files\...`) 따옴표로 감싸 주세요.
 > `.env` 파일 안에서는 따옴표 없이 그대로 적으시면 됩니다.
 
+### 자막 글꼴 (선택)
+
+영상 자막은 **Pretendard**로 그립니다. 없어도 영상은 정상으로 만들어져요 —
+Windows는 맑은 고딕, Mac은 애플 SD 산돌고딕으로 대신 그립니다(글자가 사라지지 않아요).
+
+글꼴을 그대로 쓰고 싶으시면 [Pretendard 내려받기](https://github.com/orioncactus/pretendard/releases)에서
+받아 설치해 주세요(Windows: 파일 우클릭 → «모든 사용자용으로 설치»).
+
+> 글꼴을 바꾸면 자막 줄바꿈 위치가 조금 달라질 수 있어요. 이미 만든 영상은 그대로입니다.
+
 ---
 
 ## 자주 묻는 것

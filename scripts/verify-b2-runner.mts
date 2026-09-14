@@ -43,6 +43,11 @@ type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
 /** 사람이 2단계 인증을 누를 시간(--login-first 로그인 단계 전용 · 5분). */
 const LOGIN_WAIT_MS = 300_000;
+/** 발행을 하지 않는 «읽기 전용» 잡 — 드라이런 없이 돌려야 report 경로까지 실증된다. */
+const READ_ONLY_KINDS = new Set<string>([
+  "revenue.adpost", "revenue.adfit", "revenue.clip", "revenue.stats",
+  "verify.post_alive", "ads.setup_tistory", "ads.status_blogger",
+]);
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 const env = (k: string) => String(process.env[k] ?? "").trim();
 /* ⚠️ `import.meta.url` 의 pathname 은 **퍼센트 인코딩**돼 있다(한글 경로 «작업» → %EC%9E%91%EC%97%85).
@@ -173,7 +178,9 @@ async function main() {
       // 저장된 쿠키가 살아 있는 계정만 고른다 — 없으면 재사용의 의미가 없다(로그인부터 다시 해야 한다).
       const [a0] = await q(sql`SELECT a.id FROM accounts a
         WHERE a.tenant_id = ${tid} AND a.channel = ${channel}
-          AND EXISTS (SELECT 1 FROM account_creds c WHERE c.account_id = a.id AND c.kind = 'cookies' AND c.purged_at IS NULL)
+          -- 쿠키(티스토리=사람 로그인) 또는 비밀번호(네이버=자동 로그인) 중 **아무거나** 있으면 재사용 가능하다.
+          -- 쿠키만 보면 네이버 계정이 늘 «없음»으로 걸러진다(네이버는 쿠키를 저장하지 않고 비번으로 매번 들어간다).
+          AND EXISTS (SELECT 1 FROM account_creds c WHERE c.account_id = a.id AND c.kind IN ('cookies','password') AND c.purged_at IS NULL)
         ORDER BY a.id DESC LIMIT 1`);
       if (!a0) { console.error(`\n  ✗ 테넌트 ${tid} 에 «${channel}» 쿠키가 저장된 계정이 없어요(먼저 --login-first 로 한 번 로그인).\n`); return; }
       accountId = n(a0.id);
@@ -243,7 +250,15 @@ async function main() {
     console.log(`   테넌트 ${tid} · 계정 ${accountId} · piece ${pieceId} · job ${jobIdShown}${jobKind ? ` (${jobKind})` : ""}\n`);
 
     // ── ② 러너 실행(자식 프로세스 · 창을 띄운다) ──
-    const code = await runRunner(canaryMode ? ["--canary", "--headed"] : ["--once", "--headed", "--dry-run"]);
+    /* 🔴 `--dry-run` 은 «발행을 막는» 장치다. 수익 스크랩·상태 읽기 잡은 **아무것도 발행하지 않는데**,
+       드라이런이면 러너가 report 자체를 건너뛰므로(core.processJob) 정작 검증하려는 경로
+       (revenueRows → `upsertRevenueRows` → `revenue_sources.last_ok_at`)가 통째로 안 돈다
+       — 2026-09-14 실측에서 «0행 읽음(서버에 안 보냄)» 으로 끝나 전 구간이 이어지지 않았다.
+       읽기 전용 잡은 드라이런 없이 돌려 **실제 보고까지** 잇는다(발행 위험 0). */
+    const code = await runRunner(
+      canaryMode ? ["--canary", "--headed"]
+        : jobKind && READ_ONLY_KINDS.has(jobKind) ? ["--once", "--headed"]
+          : ["--once", "--headed", "--dry-run"]);
 
     // ── 자취 ──
     console.log(`\n── 서버에 남은 자취(러너 종료코드 ${code}) ──`);

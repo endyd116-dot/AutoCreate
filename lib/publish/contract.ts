@@ -20,10 +20,10 @@ export type { GateReport };
 
 export type PublishVia = "api" | "runner";
 
-/** 서버(API)에서 바로 발행하는 채널. */
-export const API_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["blogger", "wordpress"]);
-/** 러너(브라우저 자동화)로만 발행되는 채널. */
-export const RUNNER_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "tistory"]);
+/** 서버(API)에서 바로 발행하는 채널. P1R5 — 영상 3종(유튜브·릴스·스레드)은 **OAuth API** 로 올린다. */
+export const API_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["blogger", "wordpress", "youtube_shorts", "reels", "threads"]);
+/** 러너(브라우저 자동화)로만 발행되는 채널. P1R5 — 네이버 클립은 러너 잡으로 예약하되 **스텁**(정직하게 막는다 · §2.3). */
+export const RUNNER_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "tistory", "naver_clip"]);
 
 /** 이 채널을 어떻게 발행하나. 아직 발행을 지원하지 않는 채널은 null(= reason "unsupported_channel"). */
 export function publishViaOf(channel: string): PublishVia | null {
@@ -110,6 +110,9 @@ export type PublishFailReason =
   | "provider_not_configured"
   | "channel_error"
   | "network"
+  /** P1R5 §2.3 — 릴스·스레드가 영상을 **아직 처리 중**(IN_PROGRESS). 실패가 아니라 «조금 뒤에 다시»다(retriable).
+      creation_id 를 남겨 두므로 다음 시도는 컨테이너를 새로 만들지 않는다(중복 게시 0). */
+  | "video_processing"
   | "unsupported_channel"
   | "not_publishable"
   | "config";
