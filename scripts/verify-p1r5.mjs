@@ -1,7 +1,7 @@
 // scripts/verify-p1r5.mjs — P1R5 검증 하니스 뼈대(C · 계약 v5.1 §6 · 영상 «생성 두뇌 + 러너 렌더 + 출구»). 🔴 B-1·B2·A 머지 후 트리거 때 실경로로 채운다.
 //   로컬 스모크(돈 0): 손잡이 확정(계약 v5.2 §1.4b): dev 서버 env `VIDEO_PROVIDER_STUB=1`(provider·TTS·비전 스텁 · ai_usage 원가 0) · `CHAIN_BUDGET_MS`(기본 660000 · 이어달리기 재현은 30000 으로) · 슬롯 없는 자동 생성은 새 손잡이 없이 confirm({origin:"auto"}) slotId 없이(HTTP 밖 · tsx 로 lib 직접 호출) 로 chainStage 전이·잠금·이어달리기·스위퍼·코인 구간·달러 캡·kill switch·프레임 지문·uploaded_private 폭·배지 고지.
 //   라이브 실증(돈 씀 · 1회 · 메인 호출): 60초 실제 생성·렌더·유튜브 비공개 업로드 — 이 파일 밖(별도 스크립트 · videoId·R2 HEAD·스샷 증거).
-//   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,payload,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup)
+//   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,payload,render,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup)
 //   🔴 계약 v5.5 §1.4c 반영(2026-09-14): ①원가 관문은 R4 `checkAiCostCap` 재사용(새 캡 금지) — **소프트(플랜 일일 상한 초과) = 막지 않는다 + 운영 알림** / 하드(×3) = failed+코인 환급+알림 2종 / 전역 월 ₩1,400,000 = 하드 / 환율 없으면 «못 재니 막지 않는다»(fxMissing · FX 기본값 코드에 박기 금지)
 //     ②토킹 still 컷은 **구축**(스킵 금지) — `scenes[]` 전건이 clipKey|imageKey 중 하나를 가져야 한다(둘 다 없으면 러너에 검은 화면 · §2.1 위반)  ③`scripts/seed-bgm.mjs` 존재·멱등 · BGM_LICENSE_VERIFIED 없으면 audio.bgm=null(무음)이 정직 경로(에러 아님).
 //   🔴 이 절의 핵심 하나: «자기 코인으로 만드는 고객이 우리 원가 캡에 막히는 경로 = 0». 초록이어야 하는 건 «성공», 0이어야 하는 건 «막힘»이다.
@@ -10,7 +10,7 @@ if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36); const EMAIL = process.env.TEST_EMAIL || `c+r5-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
 const CRON_SECRET = process.env.CRON_SECRET || "";
-const SECTIONS = new Set((process.env.SECTIONS || "setup,topics,director,chain,sweep,cost,payload,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "setup,topics,director,chain,sweep,cost,payload,render,bgm,rules,disclosure,fingerprint,posts,wiring,regress,cleanup").split(","));
 /** 하니스 산술용 환율(= dev 서버에 준 FX_USD_KRW 와 같은 값이어야 한다). 🔴 제품 코드에는 절대 박지 않는다(계약 v5.5) — 여기는 «얼마를 심어야 구간에 들어가나»를 계산하는 검사 쪽이다. */
 const FX = Number(process.env.FX_USD_KRW || 1400);
 /** lib/billing/ai-cost-cap.ts PLAN_CAP_KRW 의 사본(정본은 그 파일 · 값이 바뀌면 이 표가 FAIL 로 알려 준다). */
@@ -172,6 +172,23 @@ async function main() {
     };
     const auditSince = async (t) => await s`SELECT action, risk_level, detail FROM audit_logs WHERE tenant_id = ${TID} AND created_at > ${t.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 20`;
 
+    /* ⓪ 🔴 계약 v5.6 — «한 편은 언제나 만들 수 있다». 하드는 폭주 방어지 **편당 원가 심사**가 아니다.
+       2026-09-14 실측: 60초 그래픽 1편 원가 ₩8,989 vs trial 하드 ₩9,000(=일일 3,000×3) → 그날 소재·디렉터로 ₩697만 써도
+       28코인(₩14,000)을 가진 고객이 **1편도 못 만들었다**. 판정에서 addKrw 를 빼면 첫 편은 늘 통과하고 폭주는 다음 편에서 막힌다. */
+    for (const planKey of ["trial", "starter"]) {
+      await s`DELETE FROM ai_usage WHERE tenant_id = ${TID}`;          // 오늘 사용분을 지워 «깨끗한 하루»로 만든다(결정론)
+      await s`UPDATE tenants SET plan_key = ${planKey} WHERE id = ${TID}`;
+      const one = await confirmVideo();
+      const cap = PLAN_CAP_KRW[planKey];
+      rec(`🔴 ${planKey} 도 60초 1편은 만들 수 있다(하드 ₩${(cap * 3).toLocaleString("ko-KR")} · 편 원가 ≈₩8,989 · v5.6)`,
+        one.status === 202 && one.pieceId > 0 && one.spent > 0,
+        `${one.status} step ${one.step || "-"} «${String(one.error || "").slice(0, 55)}» · piece ${one.pieceId} · 코인 -${one.spent}`,
+        one.pieceId ? `piece ${one.pieceId}` : undefined);
+      if (one.pieceId) await s`UPDATE pieces SET status = 'draft' WHERE id = ${one.pieceId}`;   // 체인을 더 태우지 않는다(원가·시간)
+    }
+    await s`UPDATE tenants SET plan_key = 'pro' WHERE id = ${TID}`;
+    await s`DELETE FROM ai_usage WHERE tenant_id = ${TID}`;
+
     /* ① 🔴 소프트 — 이 절의 핵심: «자기 코인으로 만드는 고객이 우리 원가 캡에 막히는 경로 = 0» */
     await clearSpend("soft"); await spend(SOFT_USD, "soft");
     const tSoft = new Date(Date.now() - 5_000);
@@ -273,6 +290,17 @@ async function main() {
         stills.length >= 1 && stills.every((x) => x.motion === "kenburns"), `still ${stills.length} · motion ${[...new Set(stills.map((x) => x.motion))].join("/") || "-"}`);
     }
     await s`UPDATE tenants SET plan_key = ${String(planRow?.plan_key || "trial")} WHERE id = ${TID}`;   // 🔴 바로 되돌린다(가짜 유료 집 금지)
+  }
+
+  /* ══ render — 렌더 경계 회귀(B2 가 실측 mp4 에서 잡은 3건) · 별도 프로브(TS 경계 함수 직접 호출) ══ */
+  if (SECTIONS.has("render")) {
+    const { execFileSync } = await import("node:child_process");
+    let o = "";
+    try { o = String(execFileSync("npx", ["tsx", "--env-file=.env", "scripts/verify-p1r5-render-probe.mts", "--tid", String(TID)], { timeout: 300_000, encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "pipe"] })); }
+    catch (e) { o = String(e?.stdout || "") + String(e?.stderr || e?.message || ""); }
+    const lines = o.split(/\r?\n/).filter((l) => l.startsWith("RESULT "));
+    if (!lines.length) rec("렌더 경계 프로브 실행(verify-p1r5-render-probe.mts)", false, o.slice(-150).replace(/\s+/g, " "));
+    for (const l of lines) { try { const r = JSON.parse(l.slice(7)); rec(r.step, r.ok, r.note); } catch { /* */ } }
   }
 
   /* ══ bgm — 🔴 v5.5 §1.4c-(3): seed-bgm.mjs 존재·멱등 · BGM_LICENSE_VERIFIED 없으면 무음(audio.bgm=null)이 «정직 경로»(에러 아님) ══ */
