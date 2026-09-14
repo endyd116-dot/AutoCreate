@@ -38,9 +38,15 @@ export async function loadBgmManifest(): Promise<BgmManifest | null> {
 /** 테스트·운영 재적재용. */
 export function clearBgmCache(): void { _cache = null; }
 
-/** 포맷 → 곡 분위기(계약 §5.4 영상 감성과 같은 결). 매니페스트에 그 분위기가 없으면 아무 곡이나(결정론). */
+/** 무드 어휘 — `scripts/seed-bgm.mjs CATALOG` 와 글자 그대로 같다(AM `video-render.ts BGM_LIBRARY` 정본: 무드 4 × 3곡). */
+export const BGM_MOODS = ["uplift", "calm", "focus", "warm"] as const;
+/**
+ * 포맷 → 곡 분위기(계약 §5.4 영상 감성과 같은 결).
+ *   graphic(정보·반전·속도) = uplift · talking(말 중심·차분) = calm · clip(생활밀착·친근) = warm · focus 는 중립 풀(명시 지정용).
+ *   매니페스트에 그 무드가 없으면 `resolveBgm` 이 전체 풀에서 고른다(무음으로 떨어뜨리지 않는다).
+ */
 export function moodForFormat(format: string): string {
-  return format === "talking" ? "calm" : format === "clip" ? "drive" : "bright";
+  return format === "talking" ? "calm" : format === "clip" ? "warm" : "uplift";
 }
 
 /**
