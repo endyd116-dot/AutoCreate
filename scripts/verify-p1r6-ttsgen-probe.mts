@@ -40,4 +40,10 @@ out("⑤ 옛 모양(`narration-l{i}.wav` — 줄 번호가 곧 키)이 남아 �
 /* 세대가 비어도(옛 piece·세대 계산 실패) 키가 «폴더 없이» 나오면 안 된다 — 최소한 g0 로 격리된다. */
 const kNone = narrationKey({ tenantId: 7, pieceId: 42, gen: null, keySuffix: "l0", provider: "typecast" });
 out("세대를 모를 때도 폴더로 격리된다(g0 · 루트에 흩뿌리지 않는다)", /\/tts\/g0\//.test(kNone), kNone);
+/* ───────── 곁다리: 채널 상한 자르기(계약 §2.3) — 순수 함수라 여기서 같이 잰다 ───────── */
+const { clampSecondsForChannel } = await import("../lib/writing-contracts");
+const clipped = clampSecondsForChannel("naver_clip", 60);
+const kept = clampSecondsForChannel("youtube_shorts", 60);
+out("naver_clip 60초 요청 → 30초로 잘린다(서버 규칙 · 화면 상수 아님)", clipped === 30, `naver_clip 60 → ${clipped}`);
+out("youtube_shorts 60초는 그대로", kept === 60, `youtube_shorts 60 → ${kept}`);
 process.exit(0);

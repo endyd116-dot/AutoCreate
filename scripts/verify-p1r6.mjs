@@ -4,14 +4,14 @@
 //         관리형 러너 플랜 게이트 · 백업 상태 4어휘 · R5 회귀.
 //   🔴 규율: 증거 동반 · 하니스 초록은 증거가 아니다(#9·AC-14) · 로컬 인공물 금지(AC-7·AC-12·AC-34: **실행 중 소스 편집 금지**) ·
 //           테스트 테넌트만 · 정리까지가 검증 · 보존 4집(3·13·109·116) 금지.
-//   사용: node scripts/verify-p1r6.mjs   (BASE_URL 기본 http://localhost:8901 · SECTIONS=setup,channels,clamp,endcard,export,share,ttsgen,audit,managed,backup,regress,cleanup)
+//   사용: node scripts/verify-p1r6.mjs   (BASE_URL 기본 http://localhost:8901 · SECTIONS=setup,channels,clamp,endcard,export,share,ttsgen,audit,mail,reconcile,managed,backup,regress,cleanup)
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) { const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"|"$/g, ""); }
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36);
 const EMAIL = process.env.TEST_EMAIL || `c+r6-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
-const SECTIONS = new Set((process.env.SECTIONS || "setup,channels,clamp,endcard,export,share,ttsgen,audit,managed,backup,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "setup,channels,clamp,endcard,export,share,ttsgen,audit,mail,reconcile,managed,backup,regress,cleanup").split(","));
 const results = []; const t0 = Date.now();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
@@ -277,6 +277,12 @@ async function main() {
         g.json?.ok === true && g.json.price && Number.isInteger(g.json.price.amountKrw) && Number.isInteger(g.json.price.vatKrw) && Number.isInteger(g.json.price.totalKrw),
         `${g.status} ${JSON.stringify(g.json ?? {}).slice(0, 120)}`);
       await s`UPDATE tenants SET plan_key = 'starter' WHERE id = ${TID}`;
+      const sg = await call(jar, "/api/managed-runner");
+      /* 🔴 «못 쓴다»와 «공짜다»가 같은 값이 되면 안 된다(메인 지적) — 자격이 없어도 **안내용 정가**가 실려야
+         화면이 «Pro 로 바꾸면 대당 ₩30,000» 을 말할 수 있다. 여기서 0 이면 고객은 공짜인 줄 안다. */
+      rec("자격 없음(Starter)이어도 price 는 안내용 **정가**(₩0 아님 · 대당 공급가)",
+        sg.json?.eligible === false && Number(sg.json?.price?.amountKrw) > 0,
+        `eligible=${sg.json?.eligible} · amountKrw=${sg.json?.price?.amountKrw} · vat=${sg.json?.price?.vatKrw} · total=${sg.json?.price?.totalKrw} · reason «${String(sg.json?.reason || "").slice(0, 30)}»`);
       const p = await call(jar, "/api/managed-runner", { body: { devices: 1 } });
       rec("Starter → 402 plan_feature(플랜 게이트 · 사람말)", p.status === 402 && p.json?.step === "plan_feature", `${p.status} ${p.json?.step} «${String(p.json?.error || "").slice(0, 40)}»`);
       await s`UPDATE tenants SET plan_key = 'trial' WHERE id = ${TID}`;
@@ -293,10 +299,50 @@ async function main() {
         const v = b.json?.r2Versioning;
         rec("r2Versioning 4어휘 — «못 물어봤다(null)»와 «그 기능이 없다(unsupported)»를 가른다",
           ["Enabled", "Disabled", "unsupported", null].includes(v === undefined ? null : v), `r2Versioning=${JSON.stringify(v)}`);
-        rec("Neon PITR 보존 7일로 읽힌다", Number(b.json?.pitrDays) === 7, `pitrDays=${b.json?.pitrDays}`);
-        rec("마지막 확인이 30일 넘으면 stale", typeof b.json?.stale === "boolean", `stale=${b.json?.stale} · checkedAt=${b.json?.checkedAt ?? "-"}`);
+        rec("Neon PITR 보존 7일로 읽힌다", Number(b.json?.neon?.retentionDays) === 7, `neon.retentionDays=${b.json?.neon?.retentionDays} · ok=${b.json?.neon?.ok}`);
+        rec("마지막 확인이 30일 넘으면 stale(확인한 적 없으면 checked:false 로 정직)", typeof b.json?.stale === "boolean" && typeof b.json?.checked === "boolean",
+          `checked=${b.json?.checked} · stale=${b.json?.stale} · ageDays=${b.json?.ageDays ?? "-"} · checkedAt=${b.json?.checkedAt ?? "-"}`);
       }
     }
+  }
+
+  /* ══ mail — 인증 메일은 **문이 아니라 배너**(가입은 통과) · 다시 보내기 · 🔴 forgot 은 계정 존재를 흘리지 않는다 ══ */
+  if (SECTIONS.has("mail")) {
+    const mj = new Jar(); const mEmail = `c+r6m-${STAMP}@autocreate.test`;
+    const reg = await call(mj, "/api/auth-register", { body: { email: mEmail, password: PASSWORD, name: "C R6 메일", consents: { terms: true, privacy: true, paidTerms: true, automationNotice: true } } });
+    rec("🔴 인증 메일이 안 나가도 **가입은 통과**(인증은 문이 아니라 배너) · mailSent 를 정직하게 말한다",
+      (reg.status === 201 || reg.json?.ok === true) && typeof reg.json?.mailSent === "boolean",
+      `${reg.status} ok=${reg.json?.ok} mailSent=${reg.json?.mailSent}`);
+    const me2 = await call(mj, "/api/auth-me");
+    rec("가입 직후 바로 쓸 수 있다(인증 전에도 세션)", me2.json?.ok === true, `${me2.status} tid ${me2.json?.tenant?.id}`);
+    if (me2.json?.tenant?.id) ALLOWED.add(Number(me2.json.tenant.id));
+    const r1 = await call(mj, "/api/auth-verify-resend", { body: {} });
+    const r2 = await call(mj, "/api/auth-verify-resend", { body: {} });
+    rec("«다시 보내기» → 연속 호출은 429 step rate(60초 · 폭주 방지)", r2.status === 429 && r2.json?.step === "rate",
+      `1회 ${r1.status}/${r1.json?.step ?? "ok"} · 2회 ${r2.status}/${r2.json?.step ?? "-"}`);
+    rec("메일이 또 실패해도 «다시 시도할 길»을 없애지 않는다(step mail 이어도 200/4xx 로 사람말)",
+      r1.status !== 500 && (r1.json?.ok === true || ["mail", "rate", "verified"].includes(String(r1.json?.step))),
+      `${r1.status} ${JSON.stringify(r1.json ?? {}).slice(0, 80)}`);
+    /* 🔴 auth-forgot — 있는 계정과 없는 계정의 응답이 **다르면 계정 목록이 새 나간다**(enumeration).
+       상태코드·본문·(대략적인) 응답 시간이 같아야 한다. */
+    const known = await call(null, "/api/auth-forgot", { body: { email: mEmail } });
+    const unknown = await call(null, "/api/auth-forgot", { body: { email: `nobody-${STAMP}@autocreate.test` } });
+    rec("🔴 비밀번호 찾기 — 있는 계정/없는 계정 응답이 **같다**(계정 존재 누설 0)",
+      known.status === unknown.status && known.text === unknown.text,
+      `있음 ${known.status} «${known.text.slice(0, 44)}» · 없음 ${unknown.status} «${unknown.text.slice(0, 44)}»`);
+    const fjs = ["public/forgot.html", "public/app/forgot.html", "public/login.html"].filter(existsSync).map((f) => readFileSync(f, "utf8")).join("\n");
+    rec("화면도 성공/실패를 가려 그리지 않는다(«없는 계정» 문구 0)", !/없는 계정|가입되지 않은|존재하지 않는 (계정|이메일)/.test(fjs), fjs ? "문구 0" : "화면 파일을 못 찾음");
+  }
+
+  /* ══ reconcile — 영상 원가 확정(유실분 복구 · 멱등) ══ */
+  if (SECTIONS.has("reconcile")) {
+    const { execFileSync } = await import("node:child_process");
+    let o = "";
+    try { o = String(execFileSync("npx", ["tsx", "--env-file=.env", "scripts/verify-p1r6-reconcile-probe.mts", "--tid", String(TID)], { timeout: 180_000, encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "pipe"] })); }
+    catch (e) { o = String(e?.stdout || "") + String(e?.stderr || e?.message || ""); }
+    const lines = o.split(/\r?\n/).filter((l) => l.startsWith("RESULT "));
+    if (!lines.length) rec("원가 확정 프로브 실행", false, o.slice(-150).replace(/\s+/g, " "));
+    for (const l of lines) { try { const x = JSON.parse(l.slice(7)); rec(x.step, x.ok, x.note); } catch { /* */ } }
   }
 
   /* ══ regress — R5 영상 파이프·타 테넌트·크론 ══ */
