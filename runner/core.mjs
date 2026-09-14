@@ -109,6 +109,10 @@ export async function processJob({ chromium, token, job, headed, dryRun }) {
        대신 큐에 되돌려 놓는다(release). 카나리는 하트비트로 따로 보고한다. */
     await release(token, job.id, "dry-run(임시저장까지)").catch(() => {});
     log(result.ok ? `  ✓ ${label} 임시저장까지 성공 — 큐에 되돌림` : `  ✗ ${label} ${result.errorKind}: ${result.detail}`);
+    /* 🔴 드라이런에서도 notes 를 찍는다. 종전엔 발행 경로에서만 찍어서, **폴백이 몇 건 났는지**를
+       검증에서 볼 수 없었다 — «성공»만 보고 서식이 깎인 걸 놓친다(2026-09-14 실측: 소제목 크기 미적용을
+       스냅샷을 눈으로 보고서야 알았다). 검증은 폴백 건수를 숫자로 봐야 한다. */
+    for (const nt of result.notes ?? []) log(`     · ${nt}`);
     return result;
   }
 
@@ -120,14 +124,20 @@ export async function processJob({ chromium, token, job, headed, dryRun }) {
   return result;
 }
 
-/** 한 바퀴 — 집어서 실행하고 보고한다. 반환 = 처리한 건수. */
+/**
+ * 한 바퀴 — 집어서 실행하고 보고한다.
+ * @returns `{ count, results }` — 🔴 **결과를 돌려준다**(종전엔 건수만 줘서, 드라이런 실패를
+ *   검증 하니스가 «잡이 queued 니까 성공»으로 읽고 **실패에 ✓ 를 찍었다** · 2026-09-14 실측).
+ *   드라이런은 release 로 되돌리므로 잡 행만 보면 성공·실패가 구분되지 않는다 — 판정은 이 결과로 한다.
+ */
 export async function tick({ chromium, token, kinds, max, headed, dryRun }) {
   const res = await claim(token, kinds ?? ALL_KINDS, max ?? 1);
-  if (!res?.ok) { log(`큐를 읽지 못했어요: ${String(res?.error ?? "").slice(0, 90)}`); return 0; }
+  if (!res?.ok) { log(`큐를 읽지 못했어요: ${String(res?.error ?? "").slice(0, 90)}`); return { count: 0, results: [] }; }
   const jobs = res.jobs ?? [];
-  if (!jobs.length) return 0;
-  for (const job of jobs) await processJob({ chromium, token, job, headed, dryRun });
-  return jobs.length;
+  if (!jobs.length) return { count: 0, results: [] };
+  const results = [];
+  for (const job of jobs) results.push(await processJob({ chromium, token, job, headed, dryRun }));
+  return { count: jobs.length, results };
 }
 
 /**

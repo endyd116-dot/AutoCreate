@@ -73,13 +73,13 @@ export async function applyCookies(ctx, cookies) {
 /** 단계 스냅샷(눈검사) — RUNNER_SHOTS=1 일 때만. 반환 = shotKey(실패 보고에 실린다). */
 export function shotKeyFor(jobId) { return `job-${jobId}-${Date.now().toString(36)}`; }
 
-export async function shot(page, shotKey, step) {
+export async function shot(page, shotKey, step, fullPage = false) {
   if (!SHOTS_ON || !page) return null;
   try {
     const dir = path.join(SHOTS_DIR, safe(shotKey));
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${String(step).replace(/[^A-Za-z0-9가-힣_-]/g, "_").slice(0, 40)}.png`);
-    await page.screenshot({ path: file, fullPage: false });
+    await page.screenshot({ path: file, fullPage });
     return file;
   } catch { return null; }
 }
