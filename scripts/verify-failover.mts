@@ -142,6 +142,35 @@ async function main() {
     const noteB = await q(sql`SELECT body FROM notifications WHERE tenant_id = ${tid} AND kind = 'account_suspended' ORDER BY id DESC LIMIT 1`);
     ok("(나) 알림이 «옮길 계정이 없다»고 말한다", /옮길 수 있는|대기 중/.test(String(noteB[0]?.body ?? "")), String(noteB[0]?.body ?? "").slice(0, 50));
 
+    /* ── (다) [C · 2026-09-14] 한 주치 9자리 · 받는 계정 daily_cap 2 — 여유는 **날짜별**이다.
+         종전 코드는 «오늘 남은 칸(daily_cap−posts_today)»을 앞으로의 슬롯 전체 예산으로 써서 2건만 옮기고 7건을 정지 계정에 남겼다(C 실측 · P1R2). */
+    try {
+    const D = await mkAcc("naver_blog", "fo_d_weekly_suspended");
+    const E = await mkAcc("naver_blog", "fo_e_cap2_receiver");
+    await q(sql`UPDATE accounts SET daily_cap = 2, posts_today = 0 WHERE id = ${E}`);
+    const weekSlots: number[] = [];
+    for (let d = 1; d <= 7; d++) {
+      const copies = d === 3 || d === 5 ? 2 : 1;   // 9자리: 하루 2건인 날 둘(3일·5일) + 나머지 1건
+      for (let k = 0; k < copies; k++) weekSlots.push(n((await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, publish_at, status, origin)
+        VALUES (${tid}, ${today}::date + ${d}::int, 'naver_blog', 'post', ${D}, NOW() + (${d * 24 + k} * INTERVAL '1 hour'), 'planned', 'auto') RETURNING id`))[0]?.id));
+    }
+    const rD = await classifyAndApply(D, "suspended", { tenantId: tid });
+    const movedRows = await q(sql`SELECT id, account_id, slot_date::text AS d FROM slots WHERE tenant_id = ${tid} AND id IN (${sql.join(weekSlots.map((i) => sql`${i}`), sql`, `)})`);
+    const perDay = new Map<string, number>(); for (const r of movedRows) if (n(r.account_id) === E) perDay.set(String(r.d), (perDay.get(String(r.d)) ?? 0) + 1);
+    ok("(다) 한 주치 9자리 · daily_cap 2 → 전부 @e 로(날짜별 여유 · 하루 ≤2)", rD.reassigned?.moved === 9 && (rD.reassigned?.unmoved ?? 0) === 0 && movedRows.every((r) => n(r.account_id) === E) && [...perDay.values()].every((c) => c <= 2), `moved=${rD.reassigned?.moved} unmoved=${rD.reassigned?.unmoved} 하루 최대 ${Math.max(0, ...perDay.values())}`);
+    // 하루 3건이면 그 날 1건은 못 옮긴다 — 0 으로 «옮겼다» 하지 않고 unmoved 로 정직 + 알림에 건수
+    await q(sql`UPDATE accounts SET status = 'active', last_error_kind = NULL WHERE id = ${D}`);
+    const F = await mkAcc("naver_blog", "fo_f_three_a_day");
+    const G = await mkAcc("naver_blog", "fo_g_cap2_receiver2");
+    await q(sql`UPDATE accounts SET daily_cap = 2, posts_today = 0 WHERE id = ${G}`);
+    await q(sql`UPDATE accounts SET status = 'suspended' WHERE id IN (${D}, ${E})`);   // 받을 곳은 @g 하나뿐
+    for (let k = 0; k < 3; k++) await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, publish_at, status, origin)
+      VALUES (${tid}, ${today}::date + 2::int, 'naver_blog', 'post', ${F}, NOW() + (${48 + k} * INTERVAL '1 hour'), 'planned', 'auto')`);
+    const rF = await classifyAndApply(F, "suspended", { tenantId: tid });
+    const noteF = await q(sql`SELECT body FROM notifications WHERE tenant_id = ${tid} AND kind = 'account_suspended' ORDER BY id DESC LIMIT 1`);
+    ok("(다) 하루 3건 · 받는 쪽 cap 2 → moved 2 · unmoved 1 · 알림에 «1건 대기»", rF.reassigned?.moved === 2 && rF.reassigned?.unmoved === 1 && /1건/.test(String(noteF[0]?.body ?? "")), `moved=${rF.reassigned?.moved} unmoved=${rF.reassigned?.unmoved} · ${String(noteF[0]?.body ?? "").slice(0, 60)}`);
+
+    } catch (e) { ok("(다) 실행 자체", false, String((e as Error)?.message ?? e).slice(0, 200)); }
     say(`\n  증거 row id — tenant ${tid} · accounts A=${A} B=${B} C=${C} · slots sched=${sSched} pub=${sPub} done=${sDone} planned=${sPlanned} new=${r3new?.id ?? "-"} · pieces ${pSched}/${pPub}/${pDone} · job ${job.id}`);
   } finally {
     const shotDir = path.join(ROOT, "runner", "_shots");
