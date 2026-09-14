@@ -171,7 +171,8 @@ export async function loginOperator(email: string, password: string, ip: string 
 }
 
 export function issueOpsSession(op: { id: number; email: string; name?: string | null; role: OpsRole }): string[] {
-  const token = signOpsToken({ oid: op.id, role: op.role, email: op.email, name: op.name || undefined });
+  // ★C(P1R4) fix: 원시 SELECT 의 bigint 는 postgres-js 가 **문자열**로 준다 — "1" 이 토큰에 실리면 `id === g.ops.oid`(자기 자신 보호)가 항상 거짓이라 super_admin 이 스스로를 강등·비활성화할 수 있었다(실측 · admin 이 operator 로 내려앉음).
+  const token = signOpsToken({ oid: Number(op.id), role: op.role, email: op.email, name: op.name || undefined });
   return [opsCookie(token)];
 }
 export function opsLogoutHeaders(): string[] { return [clearCookie(OPS_COOKIE)]; }

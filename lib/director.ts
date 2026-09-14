@@ -20,6 +20,8 @@ import { toTopic, type Topic } from "./topics";
 import { guardSlot, type PieceOrigin } from "./slot-gate";
 import { requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
+import { findBannedCategory } from "./banned-categories";
+import { writeAudit } from "./audit";
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -83,6 +85,8 @@ export async function propose(tid: number, topicId: number): Promise<{ ok: true;
   if (!trow) return { ok: false, step: "not_found", error: "소재를 찾을 수 없어요." };
   const topic = toTopic(trow);
   if (!["candidate", "picked"].includes(topic.status)) return { ok: false, step: "topic_state", error: "이미 쓴 소재예요. 다른 소재를 골라 주세요." };
+  // ★C(P1R4) fix: 금칙 카테고리(성인·도박·의료 과장·비방 · §1.5)는 «소재 단계에서 거부» — 편성 자리(slots-assign-topic)만 막고 디렉터 제안은 열려 있었다.
+  { const banned = findBannedCategory(`${topic.title} ${topic.angle ?? ""}`); if (banned) { await writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "system", riskLevel: "medium", detail: { category: banned.category, word: banned.word, topicId } }); return { ok: false, step: "banned_category", error: `${banned.label} 주제는 만들 수 없어요.` }; } }
   const accounts = await listAccounts(tid);
   const connected = [...new Set(accounts.filter((a) => TEXT_CHANNELS.has(a.channel) && a.status !== "suspended" && a.status !== "disconnected").map((a) => a.channel))];
   if (!connected.length) return { ok: false, step: "no_account", error: "먼저 글 채널 계정을 하나 연결해 주세요." };

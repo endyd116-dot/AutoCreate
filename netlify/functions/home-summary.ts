@@ -30,6 +30,9 @@ export default async (req: Request): Promise<Response> => {
       FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN pieces p ON p.id = s.piece_id
       WHERE s.tenant_id = ${tid} AND s.slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date ORDER BY s.publish_at NULLS LAST, s.id`);
     const todo: { kind: string; title: string; desc: string; link: string; tone: "warn" | "info" }[] = [];
+    // ★C(P1R4) fix: 체험 종료(readonly)·정지(suspended)는 홈 «해야 할 일» 첫 행이어야 한다(계약 §1.3 · 알림함에만 있으면 홈에서 왜 안 만들어지는지 모른다)
+    if (ctx.tenant.status === "readonly") todo.push({ kind: "plan", title: "체험이 끝났어요 — 요금제를 골라 주세요", desc: "만든 글·편성표는 그대로예요. 고르면 바로 이어서 만들고 발행해요", link: "/app/plan.html", tone: "warn" });
+    else if (ctx.tenant.status === "suspended") todo.push({ kind: "plan", title: "결제가 안 돼서 잠시 멈췄어요", desc: "결제 수단을 확인하면 바로 다시 돌아가요", link: "/app/plan.html", tone: "warn" });
     const relogin = await q(sql`SELECT id, channel, handle FROM accounts WHERE tenant_id = ${tid} AND status IN ('suspended','disconnected') AND COALESCE(last_error_kind,'') <> 'removed' ORDER BY id`);
     for (const a of relogin) todo.push({ kind: "account", title: `@${a.handle} 다시 연결이 필요해요`, desc: String(a.channel), link: "/app/accounts.html", tone: "warn" });
     const [review] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid} AND status = 'in_review'`);
