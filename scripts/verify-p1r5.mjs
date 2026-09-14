@@ -42,7 +42,9 @@ async function stubGuard(tid, where) {
   if (!EXPECT_STUB || !sql) return true;
   const bad = await sql`SELECT purpose, model, cost_usd, ref FROM ai_usage WHERE tenant_id = ${tid}
     AND purpose IN ('video_clip','tts','video_judge') AND created_at > ${RUN_T0}::timestamptz AT TIME ZONE 'UTC'
-    AND (model <> 'stub' OR cost_usd > 0) ORDER BY id LIMIT 5`;
+    AND (model <> 'stub' OR cost_usd > 0)
+    AND COALESCE(ref, '') NOT LIKE 'r5cost-%' AND model <> 'c-stub'   -- 하니스가 캡 시험용으로 **일부러 심은** 행은 누수가 아니다
+    ORDER BY id LIMIT 5`;
   if (!bad.length) return true;
   const line = bad.map((b) => `${b.purpose}/${b.model}/$${b.cost_usd}/${b.ref}`).join(" · ").slice(0, 110);
   // 큰 누수(클립·심사 비전 · 편당 $0.2~)는 **중단**. 작은 누수(TTS 폴백 $0.006 · 2026-09-14 현재 B-1 수리 대기)는 기록하고 계속 — 멈추면 캡 절을 아예 못 잰다.
@@ -87,6 +89,9 @@ async function main() {
     else rec("소재에 영상 채널 힌트 후보 존재", true, `«${vt.title}» ${vt.channelHint}`);
     topicId = (vt || tl[0])?.id || 0;
   }
+  // 절을 골라 돌려도(SECTIONS=cost 처럼) 재료가 있어야 한다 — 소재는 이 집에 있는 것을 그대로 쓴다.
+  if (!topicId) { const [t] = await s`SELECT id FROM topics WHERE tenant_id = ${TID} ORDER BY id DESC LIMIT 1`; topicId = Number(t?.id || 0); }
+
   /* ══ director — 제안(글 1 + 쇼츠 1 · 코인 1+6+28) → 확정(코인 1회 · 재확정 0 · 달러 캡 선검사) ══ */
   let pieceId = 0, briefId = 0;
   if (SECTIONS.has("director") && topicId) {
@@ -160,8 +165,18 @@ async function main() {
     const useRef = (tag) => `r5cost-${tag}-${STAMP}`;
     const spend = async (usd, tag, tid = TID) => { guard(tid); await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref) VALUES (${tid}, 'video_clip', 'c-stub', 0, 0, ${usd}, ${useRef(tag)})`; };
     const clearSpend = async (tag, tid = TID) => { guard(tid); await s`DELETE FROM ai_usage WHERE tenant_id = ${tid} AND ref = ${useRef(tag)}`; };
+    /** 아직 안 쓴 소재 하나. 🔴 같은 소재로 두 번 제안하면 `step:"topic_state"`(«이미 쓴 소재예요»)라 캡 판정이 가려진다 — 절마다 새 소재로 간다. */
+    const freshTopic = async () => {
+      const pick = async () => (await s`SELECT id FROM topics WHERE tenant_id = ${TID} AND status = 'candidate'
+        AND id NOT IN (SELECT COALESCE(topic_id, 0) FROM pieces WHERE tenant_id = ${TID}) ORDER BY id DESC LIMIT 1`)[0];
+      let t = await pick();
+      if (!t) { await call(jar, "/api/topics-refresh", { body: {} }); for (let i = 0; i < 12 && !t; i++) { await sleep(8000); t = await pick(); } }
+      return Number(t?.id || 0);
+    };
     /** 영상 piece 1개를 제안→확정한다(글 piece 는 drop). 반환: {status, step, error, pieceId, spent(코인), balance} */
     const confirmVideo = async () => {
+      const topicId = await freshTopic();
+      if (!topicId) return { status: 0, step: "no_topic", error: "쓸 수 있는 소재가 없다(refresh 도 못 채웠다)", pieceId: 0, spent: 0 };
       const pr = await call(jar, "/api/director-propose", { body: { topicId } });
       const brief = pr.json?.brief; if (!brief) return { status: pr.status, step: pr.json?.step || "propose_failed", error: pr.json?.error, pieceId: 0, spent: 0 };
       const b0 = (await call(jar, "/api/coins-balance")).json;
