@@ -8,6 +8,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured } from "./oauth-providers";
+import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0 — writing-contracts 는 db·drizzle 만 본다)
 
 type Row = Record<string, unknown>;
 export const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -69,12 +70,22 @@ export async function getAccount(tid: number, id: number): Promise<AccountRow | 
   return rows[0] ? toAccountRow(rows[0]) : null;
 }
 
-export interface ChannelInfo { key: string; label: string; category: string; publishVia: string; status: string; connectMethod: ConnectMethod; configured: boolean }
+export interface ChannelInfo {
+  key: string; label: string; category: string; publishVia: string; status: string; connectMethod: ConnectMethod; configured: boolean;
+  /** [P1R6 §2.3] 영상 채널이면 규격 — 🔴 **화면이 숫자를 갖지 않는다**(«클립은 30초까지» 를 화면에 적지 않는다).
+   *  `maxSeconds` = 채널 상한(naver_clip 30 · 나머지 60 · 릴스 90 은 Phase 5) · `formats[].maxSeconds` = 채널·포맷 상한 중 작은 쪽.
+   *  정본은 `lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC`·`VIDEO_FORMAT_MAX_SEC` 한 곳. */
+  video?: { maxSeconds: 15 | 30 | 60; formats: { key: string; label: string; maxSeconds: 15 | 30 | 60 }[] };
+}
 /** channel_registry + 연결 방식 + 앱 키 존재. 레지스트리가 비어 있으면 코드 목록으로. */
 export async function listChannels(): Promise<ChannelInfo[]> {
   let rows: Row[] = [];
   try { rows = await q(sql`SELECT key, label, category, publish_via, status FROM channel_registry ORDER BY sort, key`); } catch { rows = []; }
   if (!rows.length) rows = ALL_CHANNELS.map((k) => ({ key: k, label: k, category: /shorts|clip|reels|tiktok/.test(k) ? "video" : "text", publish_via: connectMethodOf(k) === "session" ? "runner" : "api", status: "planned" }));
-  return rows.map((r) => ({ key: String(r.key), label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status: String(r.status),
-    connectMethod: connectMethodOf(String(r.key)), configured: providerConfigured(String(r.key)) }));
+  return rows.map((r) => {
+    const key = String(r.key);
+    const video = videoChannelSpec(key);
+    return { key, label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status: String(r.status),
+      connectMethod: connectMethodOf(key), configured: providerConfigured(key), ...(video ? { video } : {}) };
+  });
 }

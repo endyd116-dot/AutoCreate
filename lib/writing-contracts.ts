@@ -205,13 +205,14 @@ export interface ShortsForm {
   /** 정지 이미지 대체(토킹 = B-roll 절반 · Ken Burns). */
   stillRatio: number;
   /** 채널 규격(§6.2): 최대 초 · 세이프존. */
-  channelMaxSec: { youtube_shorts: 60; naver_clip: 30; reels: 60; threads: 60 };
+  /** 채널 상한 표 — 값은 `VIDEO_CHANNEL_MAX_SEC` 한 곳에서 온다([P1R6 §2.3] · 여기에 숫자를 다시 적지 않는다). */
+  channelMaxSec: Readonly<Record<string, 15 | 30 | 60>>;
 }
 /** shortsFormOf(format, seconds) — 포맷·초 → 계약 한 표(순수). */
 export function shortsFormOf(format: ShortsFormat, seconds: 15 | 30 | 60): ShortsForm {
   const maxSyl = Math.floor(seconds * 4.6 * 0.85);
   const syllables = { min: Math.floor(maxSyl * 0.55), max: maxSyl };
-  const channelMaxSec = { youtube_shorts: 60, naver_clip: 30, reels: 60, threads: 60 } as const;
+  const channelMaxSec = VIDEO_CHANNEL_MAX_SEC;   // 🔴 표는 위 한 곳(§2.3) — 여기서 다시 적지 않는다
   if (format === "clip") return { format, seconds: seconds === 60 ? 30 : seconds, cuts: { min: 3, max: 4, default: 3 }, cutSec: { min: 5, max: 8 }, provider: seconds === 15 ? "veo_lite" : "omni", syllables, captionPreset: "clip_top", stillRatio: 0, channelMaxSec };
   /* 🔴 토킹(계약 §1.3 표): 컷 길이 **5초 고정** · B-roll 3~4 · **나머지 정지 이미지**. 즉 컷 수는 «초 ÷ 5»(60초 = 12컷)이지 3~4 가 아니다.
      예전 값(default 4)은 60초를 컷 4개로 나눠 창이 15초가 됐고, 8초 상한 클립으로는 7초가 비어 러너가 멈춘 화면을 늘려야 했다(설계 축소 · CLAUDE §8). */
@@ -219,9 +220,28 @@ export function shortsFormOf(format: ShortsFormat, seconds: 15 | 30 | 60): Short
   const s60 = seconds === 60;
   return { format: "graphic", seconds: seconds === 15 ? 30 : seconds, cuts: s60 ? { min: 6, max: 12, default: 9 } : { min: 4, max: 6, default: 5 }, cutSec: { min: 5, max: 8 }, provider: "omni", syllables, captionPreset: "keyword_center", stillRatio: 0, channelMaxSec };
 }
+/* ═══════════ 영상 채널 규격 — 🔴 **한 곳**(계약 P1R6 §2.3 «화면 상수 금지») ═══════════
+ *   여기가 정본이다: `clampSecondsForChannel`·`shortsFormOf`·`accounts-list.channels[].video` 가 전부 이 표를 읽는다.
+ *   화면(A)은 이 값을 서버에서 받아 칩을 켜고 끈다 — «클립은 30초까지» 같은 숫자를 화면에 적지 않는다.
+ *   릴스 90초는 Phase 5(계약 R5 §7-3 «R5 제외») — 여기 60 을 올리는 것으로 열린다. */
+export const VIDEO_CHANNEL_MAX_SEC: Readonly<Record<string, 15 | 30 | 60>> = { youtube_shorts: 60, naver_clip: 30, reels: 60, threads: 60 };
+/** 포맷 자체의 상한(채널과 **별개** 축) — 클립형은 생활밀착 15~30초라 어느 채널에서도 30을 넘지 않는다(§1.3 표). */
+export const VIDEO_FORMAT_MAX_SEC: Readonly<Record<ShortsFormat, 15 | 30 | 60>> = { graphic: 60, talking: 60, clip: 30 };
+export const VIDEO_FORMAT_LABEL: Readonly<Record<ShortsFormat, string>> = { graphic: "그래픽 스토리", talking: "말하는 영상", clip: "짧은 클립" };
+
+/** 이 채널에서 고를 수 있는 것 — 채널 상한 + 포맷별 상한(둘 중 작은 것이 실제 상한). */
+export function videoChannelSpec(channel: string): { maxSeconds: 15 | 30 | 60; formats: { key: ShortsFormat; label: string; maxSeconds: 15 | 30 | 60 }[] } | null {
+  const max = VIDEO_CHANNEL_MAX_SEC[channel];
+  if (!max) return null;
+  const formats = (Object.keys(VIDEO_FORMAT_MAX_SEC) as ShortsFormat[]).map((key) => ({
+    key, label: VIDEO_FORMAT_LABEL[key], maxSeconds: Math.min(max, VIDEO_FORMAT_MAX_SEC[key]) as 15 | 30 | 60,
+  }));
+  return { maxSeconds: max, formats };
+}
+
 /** 채널의 최대 초(§6.2 채널 규격) — 15|30|60 중 채널이 허용하는 것. */
 export function clampSecondsForChannel(channel: string, seconds: number): 15 | 30 | 60 {
-  const max = channel === "naver_clip" ? 30 : 60;
+  const max = VIDEO_CHANNEL_MAX_SEC[channel] ?? 60;
   const s = seconds <= 15 ? 15 : seconds <= 30 ? 30 : 60;
   return (Math.min(s, max) as 15 | 30 | 60);
 }

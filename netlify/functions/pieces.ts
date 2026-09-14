@@ -151,6 +151,14 @@ export default async (req: Request): Promise<Response> => {
           youtube: yt ? { title: String(yt.title ?? ""), description: String(yt.description ?? ""), tags: Array.isArray(yt.tags) ? yt.tags : [] } : null,
           judge: g.judge ?? null,
           structureTemplateId: m.structureTemplateId ?? null,
+          /* [P1R6 §2.3] 엔드카드 — payload 에는 처음부터 있었는데 화면에 안 내려가서 «무엇이 마지막에 나오나»를 검수가 못 봤다.
+             읽기 전용(편집은 디렉터 손보기) · `url` 은 제휴일 때만 생긴다(쇼핑 태그 메타는 유튜브 승인 후). */
+          endcard: ((m.render ?? null) as { overlay?: { endcard?: { text?: unknown; url?: unknown } | null } } | null)?.overlay?.endcard
+            ? { text: String(((m.render as { overlay: { endcard: { text?: unknown } } }).overlay.endcard.text) ?? ""),
+                ...(((m.render as { overlay: { endcard: { url?: unknown } } }).overlay.endcard.url) ? { url: String((m.render as { overlay: { endcard: { url?: unknown } } }).overlay.endcard.url) } : {}) }
+            : null,
+          /** 자동 하향 사실(§2.3) — 있으면 화면이 «N초로 맞췄어요». */
+          clampedFrom: ((m.video ?? {}) as { clampedFrom?: unknown }).clampedFrom ?? null,
         };
       }
       return json({ ok: true, piece: detail });
