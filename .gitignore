@@ -46,3 +46,4 @@ runner/tmp/
 
 # 로컬 스모크·검증 스크립트(PITFALLS #16 — _* 는 커밋하지 않는다)
 scripts/_smoke/
+assets/fonts/*.ttf

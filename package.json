@@ -15,6 +15,7 @@
     "@aws-sdk/client-s3": "^3.1068.0",
     "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "@netlify/functions": "^2.8.2",
+    "@resvg/resvg-js": "^2.6.2",
     "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.36.4",
     "jsonwebtoken": "^9.0.3",
@@ -29,5 +30,7 @@
     "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   },
-  "engines": { "node": "20" }
+  "engines": {
+    "node": "20"
+  }
 }
