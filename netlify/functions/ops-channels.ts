@@ -38,7 +38,7 @@ export default async (req: Request): Promise<Response> => {
           monetize: Array.isArray(r.monetize) ? (r.monetize as unknown[]).map(String) : [],
         })) });
       }
-      const g = requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;   // 채널·고지문구 변경 = super_admin(플랫폼 설정 · 메인 결정 4)
       const b = await readJson<{ key?: unknown; status?: unknown; bestHours?: unknown; monetize?: unknown; label?: unknown }>(req);
       const key = String(b.key ?? "").trim();
       if (!key) return badRequest("key");
@@ -78,7 +78,7 @@ export default async (req: Request): Promise<Response> => {
         const t = await readText();
         return json({ ok: true, text: { coupang: t.coupang, generic: t.generic }, updatedAt: t.updatedAt, updatedBy: t.updatedBy });
       }
-      const g = requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;   // 채널·고지문구 변경 = super_admin(플랫폼 설정 · 메인 결정 4)
       const b = await readJson<{ coupang?: unknown; generic?: unknown }>(req);
       const cur = await readText();
       const next = { coupang: b.coupang !== undefined ? String(b.coupang).slice(0, 300) : cur.coupang, generic: b.generic !== undefined ? String(b.generic).slice(0, 300) : cur.generic };

@@ -15,12 +15,10 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { jsonb } from "../db-util";
 import { ALL_DECLARED_MODELS, CHAIN_HIGH } from "../ai-models";
-import { callGemini } from "../ai";
+import { verifyModel, type ModelTest } from "../ai-verify";
 import { kstHour, type CronStep, type TenantCtx, type StepOutcome, NOOP } from "./base";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-type Tri = boolean | null;   // true=됨 · false=거부(미지원) · null=판정 불가(예산/네트워크)
-interface Tested { text: Tri; json: Tri; googleSearch: Tri; image: Tri }
 
 /** models.list — API 가 주는 이름만(우리가 짓지 않는다). generateContent 지원 gemini 계열만. */
 async function listRemoteModels(): Promise<string[]> {
@@ -41,44 +39,6 @@ async function listRemoteModels(): Promise<string[]> {
     pageToken = j.nextPageToken;
   }
   return [...new Set(out)];
-}
-
-/** 직접 fetch 실측 — 200=want() 통과면 true · 4xx=모델 거부=false · 그 외/네트워크/예산=null. */
-async function probe(model: string, body: unknown, deadline: number, want: (j: unknown) => boolean): Promise<Tri> {
-  const key = String(process.env.GEMINI_API_KEY ?? "").trim();
-  const ms = deadline - Date.now();
-  if (!key || ms < 2_000) return null;
-  try {
-    const r = await fetch(`${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(key)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(Math.min(12_000, ms)) });
-    if (r.status === 200) { const j = await r.json().catch(() => null); return want(j); }
-    if (r.status >= 400 && r.status < 500) return false;   // 모델이 거부 = 미지원
-    return null;                                           // 5xx 등 = 판정 불가
-  } catch { return null; }                                 // 타임아웃/네트워크 = 판정 불가
-}
-
-/** 실측 4종 — 넣기 전에 우리 키로 돌려 «되는지»만 본다(CLAUDE §4.9). */
-async function testModel(model: string, deadline: number): Promise<Tested> {
-  const t: Tested = { text: null, json: null, googleSearch: null, image: null };
-  const budget = () => Math.max(2_000, Math.min(12_000, deadline - Date.now()));
-  if (Date.now() < deadline) {
-    const r = await callGemini({ purpose: "model_watch", chain: [model], user: "한 단어로만 답해: 하늘은 무슨 색?", timeoutMs: budget(), budgetMs: budget() }).catch(() => null);
-    t.text = r ? !!r.ok : null;
-  }
-  if (Date.now() < deadline) {
-    const r = await callGemini({ purpose: "model_watch", chain: [model], user: '사과 색을 {"color":"..."} JSON 으로만.', json: true, timeoutMs: budget(), budgetMs: budget() }).catch(() => null);
-    t.json = r ? !!r.ok : null;
-  }
-  // googleSearch: 도구를 붙여 직접 호출 — 200 이면 이 모델이 그라운딩을 받는다.
-  t.googleSearch = await probe(model, { contents: [{ role: "user", parts: [{ text: "오늘 서울 날씨 한 줄 요약." }] }], tools: [{ google_search: {} }] },
-    deadline, (j) => Array.isArray((j as { candidates?: unknown[] })?.candidates) && (j as { candidates: unknown[] }).candidates.length > 0);
-  // image: 이미지 모달리티를 요청 — 200 + inlineData(이미지 바이트) 면 이 모델이 이미지를 낸다.
-  t.image = await probe(model, { contents: [{ role: "user", parts: [{ text: "a single red apple, plain white background" }] }], generationConfig: { responseModalities: ["IMAGE"] } },
-    deadline, (j) => {
-      const parts = (j as { candidates?: { content?: { parts?: { inlineData?: unknown; inline_data?: unknown }[] } }[] })?.candidates?.[0]?.content?.parts ?? [];
-      return parts.some((p) => p?.inlineData || p?.inline_data);
-    });
-  return t;
 }
 
 /** 24h 지난 카나리 승격/롤백(auto 전용) — ai_usage 실측 실패율로 판정. 멱등(canary_pct<100 · candidate 있는 행만). */
@@ -149,10 +109,10 @@ export const aiModelWatchStep: CronStep = {
     const news = remote.filter((m) => !declared.has(m.toLowerCase()) && !/tts|embedding|aqa|learnlm/i.test(m)).slice(0, 12);
 
     // 새 후보 전건 기록(실측은 예산 안에서 최대 3종 · 나머지는 tested=null 로 남겨 다음 주에 마저 · 조용한 축소 0).
-    const candidates: { model: string; tested: Tested | null; at: string }[] = [];
+    const candidates: { model: string; tested: ModelTest | null; at: string }[] = [];
     let testedCount = 0;
     for (const m of news) {
-      if (testedCount < 3 && Date.now() < deadline - 2_000) { candidates.push({ model: m, tested: await testModel(m, deadline), at: new Date().toISOString() }); testedCount++; }
+      if (testedCount < 3 && Date.now() < deadline - 2_000) { candidates.push({ model: m, tested: await verifyModel(m, { deadline }), at: new Date().toISOString() }); testedCount++; }
       else candidates.push({ model: m, tested: null, at: new Date().toISOString() });
     }
     await q(sql`UPDATE ai_settings SET candidates = ${jsonb(candidates)}, updated_at = NOW() WHERE id = 'global'`);

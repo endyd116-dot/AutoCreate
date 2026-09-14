@@ -1,12 +1,14 @@
 /**
  * 운영센터 — AI 엔진(계약 P1R4 §2.2 · DESIGN §10 전문). 🔴 모델 무배포 갱신·카나리·자동/수동·원가 상한.
- *   GET  /api/ops-ai-models    → { ok, roles:[{ role, codeChain, chain, candidate, canaryPct, prevChain, candidateAt, appliedAt }], settings:{ updateMode, costCapKrw, candidates } }
+ *   GET  /api/ops-ai-models    → { ok, roles:[{ role, codeChain, chain, candidate, canaryPct, prevChain, candidateAt, appliedAt }], settings:{ updateMode, candidates } }
  *   POST /api/ops-ai-apply     { role, chain:[model], canaryPct }  → { ok, role, chain, candidate, canaryPct }   // canaryPct<100=카나리·=100=전량 적용
  *   POST /api/ops-ai-rollback  { role }                            → { ok, role, chain }                          // prev_chain 복원 + 후보 폐기
  *   POST /api/ops-ai-mode      { mode: "manual"|"auto" }           → { ok, updateMode }
- *   POST /api/ops-ai-cost-cap  { costCapKrw: number|null }         → { ok, costCapKrw }
- *   권한: 조회 operator+ · 변경 admin+(super_admin 포함). 🔴 모델 이름은 페이로드→오버레이(§4.9 의 «무배포 갱신» 경로) —
- *        코드에 없던 모델명은 넣기 전에 **우리 키로 불러 본다**(verifyChain · §4.9). ai-models.ts 밖에 모델명 리터럴을 적지 않는다.
+ *   POST /api/ops-ai-cost-cap  { tenantId, costCapKrw:number|null } → { ok, tenantId, costCapKrw }
+ *        🔴 B(lib/billing/ai-cost-cap.ts)의 판정 함수 checkAiCostCap 이 읽는 **그 키**를 쓴다 — `tenants.settings.aiCostCapKrwPerDay`(테넌트별 · null=플랜기본).
+ *           판정 함수·환율(fxToKrw)은 B 한 벌만(이중 게이트 금지 · 메인 결정 6). 여기선 키만 세팅한다.
+ *   권한: 조회 operator+ · 변경 **super_admin 전용**(AI 엔진은 플랫폼 설정 · DESIGN §11.4 는 admin 을 고객/이벤트/결제/CS 로 한정). 🔴 모델 이름은
+ *        페이로드→오버레이(§4.9 «무배포 갱신»). 코드에 없던 모델명은 넣기 전 **우리 키로 불러 본다**(verifyChain · §4.9). ai-models.ts 밖 리터럴 금지.
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
@@ -25,6 +27,7 @@ const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.ht
 const CODE_CHAIN: Record<string, string[]> = { high: CHAIN_HIGH, low: CHAIN_LOW, director: CHAIN_DIRECTOR, landing: CHAIN_LANDING_GEN, image: CHAIN_IMAGE };
 const AI_ROLES = Object.keys(CODE_CHAIN);
 
+const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 const cleanChain = (v: unknown): string[] =>
   (Array.isArray(v) ? v : []).map((x) => String(x ?? "").trim()).filter(Boolean).map((s) => s.slice(0, 60)).slice(0, 6);
 const arr = (v: unknown): string[] => (Array.isArray(v) ? (v as unknown[]).map(String) : []);
@@ -59,12 +62,13 @@ export default async (req: Request): Promise<Response> => {
           appliedAt: utcDate(r?.applied_at)?.toISOString() ?? null,
         };
       });
-      const [s] = await q(sql`SELECT update_mode, cost_cap_krw, candidates FROM ai_settings WHERE id = 'global'`);
-      return json({ ok: true, roles, settings: { updateMode: String(s?.update_mode ?? "manual"), costCapKrw: s?.cost_cap_krw == null ? null : Number(s.cost_cap_krw), candidates: s?.candidates ?? [] } });
+      // 원가 상한은 테넌트별(tenants.settings.aiCostCapKrwPerDay · B 판정) — 전역 값을 여기 싣지 않는다.
+      const [s] = await q(sql`SELECT update_mode, candidates FROM ai_settings WHERE id = 'global'`);
+      return json({ ok: true, roles, settings: { updateMode: String(s?.update_mode ?? "manual"), candidates: s?.candidates ?? [] } });
     }
 
-    // ── 여기부터 변경(admin+) ──
-    const g = requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
+    // ── 여기부터 변경 = super_admin 전용(엔진은 플랫폼 설정 · 메인 결정 4) ──
+    const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
     if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
     const oid = g.ops.oid;
@@ -120,12 +124,19 @@ export default async (req: Request): Promise<Response> => {
     }
 
     if (path.endsWith("/ops-ai-cost-cap")) {
+      // 🔴 B 가 읽는 키(tenants.settings.aiCostCapKrwPerDay)만 쓴다 — 판정·환율·게이트는 B 의 lib/billing/ai-cost-cap.ts 한 벌.
+      const tenantId = n(b.tenantId);
+      if (!tenantId) return badRequest("tenantId 가 필요해요(테넌트별 상한)", "tenant");
+      const [t] = await q(sql`SELECT id FROM tenants WHERE id = ${tenantId} LIMIT 1`);
+      if (!t) return json({ ok: false, error: "그 테넌트가 없어요.", step: "tenant" }, 404);
       const raw = b.costCapKrw;
       const capKrw = raw == null || raw === "" ? null : Math.max(0, Math.trunc(Number(raw)));
       if (capKrw != null && !Number.isFinite(capKrw)) return badRequest("costCapKrw", "cost_cap");
-      await q(sql`UPDATE ai_settings SET cost_cap_krw = ${capKrw}, updated_by = ${oid}, updated_at = NOW() WHERE id = 'global'`);
-      await writeAudit({ tenantId: null, action: "ops_ai_cost_cap", actorType: "operator", actorId: oid, target: "ai", detail: { costCapKrw: capKrw }, riskLevel: "medium" });
-      return json({ ok: true, costCapKrw: capKrw });
+      // null = 오버라이드 제거(플랜 기본값으로 복귀) · 값 = 그 테넌트 하루 상한(원).
+      if (capKrw == null) await q(sql`UPDATE tenants SET settings = settings - 'aiCostCapKrwPerDay', updated_at = NOW() WHERE id = ${tenantId}`);
+      else await q(sql`UPDATE tenants SET settings = settings || ${jsonb({ aiCostCapKrwPerDay: capKrw })}, updated_at = NOW() WHERE id = ${tenantId}`);
+      await writeAudit({ tenantId, action: "ops_ai_cost_cap", actorType: "operator", actorId: oid, target: `tenant:${tenantId}`, detail: { costCapKrw: capKrw }, riskLevel: "medium" });
+      return json({ ok: true, tenantId, costCapKrw: capKrw });
     }
 
     return json({ ok: false, error: "not_found", step: "route" }, 404);

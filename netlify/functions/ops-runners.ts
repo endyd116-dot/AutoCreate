@@ -69,7 +69,8 @@ export default async (req: Request): Promise<Response> => {
     }
 
     if (path.endsWith("/ops-runner-assign")) {
-      const g = requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
+      // 러너 팜 변경 = super_admin 전용(플랫폼 설정 · 메인 결정 4).
+      const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
       if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
       const b = await readJson<Record<string, unknown>>(req);
       const id = n(b.id); const action = String(b.action ?? "");

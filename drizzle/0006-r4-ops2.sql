@@ -46,7 +46,7 @@ ALTER TABLE ai_model_overrides ADD COLUMN IF NOT EXISTS updated_at   timestamp N
 CREATE TABLE IF NOT EXISTS ai_settings (
   id            varchar(16) PRIMARY KEY DEFAULT 'global',
   update_mode   varchar(8) NOT NULL DEFAULT 'manual',    -- manual | auto
-  cost_cap_krw  integer,                                 -- 테넌트·일 원가 상한(원 · NULL = 무제한)
+  cost_cap_krw  integer,                                 -- (미사용) 원가 상한 정본은 tenants.settings.aiCostCapKrwPerDay + 플랜기본(B lib/billing/ai-cost-cap.ts · 메인 결정 6). 칸은 무해하게 둔다.
   candidates    jsonb NOT NULL DEFAULT '[]'::jsonb,      -- model_watch 가 찾은 신모델 후보 + 실측 4종 결과
   watched_at    timestamp,
   updated_by    bigint,
