@@ -15,6 +15,7 @@
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/pieces.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
 <article class="preview" id="pv" hidden><h1 id="ttl"></h1><div class="by" id="by"></div><div id="body"></div></article>
+<div id="vpane" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
   </main>
@@ -34,44 +35,89 @@ function lockDisc(body) { const d = body.querySelector(".disclosure"); if (d) { 
 function restoreDisc(body) { if (discHtml && !body.querySelector(".disclosure")) { body.insertAdjacentHTML("afterbegin", discHtml); UI.toast("고지 문구는 지울 수 없어요"); } }
 function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".disclosure small").forEach((x) => x.remove()); c.querySelectorAll(".disclosure").forEach((x) => { x.removeAttribute("contenteditable"); x.removeAttribute("data-lock"); }); return c.innerHTML; }
 function gateList(g) { return `<div class="gt">발행 전 검사 ${g.ok ? '<span class="pill ok">통과</span>' : '<span class="pill warn">확인 필요</span>'}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>`; }
+/* [P1R5] 영상 심사 = gate.judge(§1.4 done · grade P0/P1/P2 · axes label 만) + 기존 checks */
+function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || ["off", j.grade] : null;
+  return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade); return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger)" : "background:var(--warn-soft);color:#B26A00"}" title="${UI.esc(a.detail || "")}">${UI.esc(a.label)} ${a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과"}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
+const LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+const assetOf = (kind) => (P.assets || []).find((a) => a.kind === kind) || null;
+const mmss = (ms) => { const s = Math.round((ms || 0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+/* [P1R5] 영상 검수 — <video controls playsinline> 표준 태그(포스터 = thumb) · 제휴면 배지·시작 자막 미리보기 · SRT 내려받기 · 설명란(첫 줄 고지 잠금) */
+function renderVideo(editable) {
+  const v = P.meta?.video || {}; const vid = assetOf("video"), thumb = assetOf("thumb"), srt = assetOf("srt"); const disc = v.disclosure || {};
+  const lines = String(P.body || "").split("\n"); const lead = disc.descriptionFirstLine ? lines[0] : ""; const rest = (disc.descriptionFirstLine ? lines.slice(1) : lines).join("\n").replace(/\n?#\S+(\s|$)/g, "").trim();
+  const tags = (P.meta?.tags || []);
+  const pane = UI.$("#vpane"); pane.hidden = false;
+  pane.innerHTML = `<div class="vwrap">
+    <div class="vid">${vid ? `<video controls playsinline preload="metadata" poster="${UI.esc(thumb?.url || "")}"${vid.url ? ` src="${UI.esc(vid.url)}"` : ""}></video>${vid.url ? "" : `<div class="vplay"><i></i></div>`}` : `<img src="${UI.esc(thumb?.url || "")}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`}${disc.badge ? '<span class="vbadge">광고 · 제휴</span>' : ""}${disc.badge ? '<div class="vcap">이 영상엔 제휴 링크가 있어요</div>' : ""}${vid?.meta?.durationMs ? `<span class="vdur">${mmss(vid.meta.durationMs)}</span>` : ""}</div>
+    <div class="vside">
+      <div class="kv"><span class="k">포맷</span><span class="v">${UI.esc(UI.vlabel(v))}</span></div>
+      <div class="kv"><span class="k">컷 · 목소리</span><span class="v">${v.cuts || "—"}컷 · ${UI.esc(P.meta?.tts?.provider === "gemini" ? "기본 음성" : "타입캐스트")}</span></div>
+      <div class="kv"><span class="k">자막</span><span class="v">${srt?.url ? `<a href="${UI.esc(srt.url)}" download="subtitles.srt" style="display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:-8px 0">SRT 내려받기<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></a>` : "—"}</span></div>
+      ${disc.badge ? `<div class="kv"><span class="k">제휴 표시</span><span class="v" style="font-size:12.5px">배지 · 시작 3초 자막 · 설명란 첫 줄</span></div>` : ""}
+    </div></div>
+    <div class="group" style="margin-top:12px"><div class="gt">설명란 <span class="muted" style="font-weight:500">${editable ? "제목·설명·태그를 고칠 수 있어요" : ""}</span></div>
+      <div class="desc-edit"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">제목</div><div id="vttl" class="rest" style="padding:6px 2px;font-weight:700;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(P.title || "")}</div>
+        ${lead ? `<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div><div class="lead">${UI.esc(lead)}</div>` : '<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div>'}
+        <div id="vdesc" class="rest" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(rest)}</div></div>
+      ${lead ? `<div class="lockline">${LOCK}첫 줄 고지는 잠겨 있어요 · 지울 수 없어요</div>` : ""}
+      <div class="desc-edit" style="padding-top:8px"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">태그</div><div id="vtags" class="rest" style="padding:6px 2px;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(tags.map((x) => "#" + x).join(" "))}</div></div>
+    </div>`;
+  if (editable && !dirty) { const mark = () => { if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ["#vttl", "#vdesc", "#vtags"].forEach((s) => pane.querySelector(s).addEventListener("input", mark)); }
+}
 function render() {
-  const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = P.status === "in_review";
+  const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = P.status === "in_review"; const video = P.kind === "video";
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
-  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
-  const pv = UI.$("#pv"); pv.hidden = false; pv.className = `preview ${P.channel}`;
+  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
+  const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
+  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false;
+    if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; gate.hidden = true; cta.hidden = true; return; }
+    renderVideo(editable);
+    if (P.gate) { gate.hidden = false; gate.innerHTML = judgeList(P.gate); } else gate.hidden = true;
+    cta.hidden = false;
+    if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve" ${P.gate?.judge?.grade === "P0" ? "disabled" : ""}>이대로 예약</button>`; bindCta(); }
+    else if (P.status === "published" && P.externalUrl) cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">올라간 영상 보기</a>`;
+    else cta.hidden = true;
+    return; }
+  UI.$("#vpane").hidden = true;
+  pv.hidden = false; pv.className = `preview ${P.channel}`;
   const ttl = UI.$("#ttl"); ttl.textContent = P.title || ""; ttl.contentEditable = editable ? "true" : "false";
   UI.$("#by").innerHTML = `${UI.mark(P.channel, "sm")}<span>${P.accountHandle ? "@" + UI.esc(P.accountHandle) : ""} · ${UI.esc(UI.FORMAT[P.format] || P.format || "")}${P.meta?.tags?.length ? " · #" + P.meta.tags.map(UI.esc).join(" #") : ""}</span>`;
   const body = UI.$("#body"); body.innerHTML = P.bodyHtml || ""; body.contentEditable = editable ? "true" : "false"; lockDisc(body);
-  const gate = UI.$("#gate"); if (P.gate) { gate.hidden = false; gate.innerHTML = gateList(P.gate); } else gate.hidden = true;
-  const cta = UI.$("#cta"); cta.hidden = false;
-  if (editable) { UI.$("#approve").hidden = false; UI.$("#approve").textContent = "이대로 발행 예약"; }
-  else if (P.status === "published" && P.externalUrl) { UI.$("#approve").hidden = true; cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">발행된 글 보기</a>`; }
+  if (P.gate) { gate.hidden = false; gate.innerHTML = gateList(P.gate); } else gate.hidden = true;
+  cta.hidden = false;
+  if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button>`; bindCta(); }
+  else if (P.status === "published" && P.externalUrl) { cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">발행된 글 보기</a>`; }
   else cta.hidden = true;
   if (editable && !dirty) { const mark = () => { restoreDisc(body); if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ttl.addEventListener("input", mark); body.addEventListener("input", mark); }
 }
-async function load() { const r = await UI.api(`/api/pieces-get?id=${id}`); if (!r.ok) { UI.toast(r.error || "글을 찾을 수 없어요"); setTimeout(() => UI.go("/app/pieces.html"), 900); return; } P = r.piece; dirty = false; UI.$("#save").hidden = true; render(); }
-UI.$("#save").onclick = async () => {
-  const btn = UI.$("#save"); btn.disabled = true;
-  const r = await UI.api("/api/pieces-update", { body: { id, title: UI.$("#ttl").textContent.trim(), bodyHtml: cleanBody(UI.$("#body")) } }); btn.disabled = false;
+async function load() { const r = await UI.api(`/api/pieces-get?id=${id}`); if (!r.ok) { UI.toast(r.error || "글을 찾을 수 없어요"); setTimeout(() => UI.go("/app/pieces.html"), 900); return; } P = r.piece; dirty = false; render(); }
+async function save() {
+  const btn = UI.$("#save"); btn.disabled = true; const video = P.kind === "video";
+  const body = video ? { id, title: UI.$("#vttl").textContent.trim(), body: [(P.meta?.video?.disclosure?.descriptionFirstLine ? String(P.body || "").split("\n")[0] : ""), UI.$("#vdesc").innerText.trim(), UI.$("#vtags").textContent.trim()].filter(Boolean).join("\n"), tags: UI.$("#vtags").textContent.split(/\s+/).map((x) => x.replace(/^#/, "")).filter(Boolean) }
+    : { id, title: UI.$("#ttl").textContent.trim(), bodyHtml: cleanBody(UI.$("#body")) };
+  const r = await UI.api("/api/pieces-update", { body }); btn.disabled = false;
   if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
-  P.title = UI.$("#ttl").textContent.trim(); if (r.bodyHtml) { P.bodyHtml = r.bodyHtml; UI.$("#body").innerHTML = r.bodyHtml; lockDisc(UI.$("#body")); } P.gate = r.gate; P.gateOk = !!r.gate?.ok; UI.$("#gate").innerHTML = gateList(r.gate);
+  P.title = body.title; if (video) { if (typeof r.body === "string") P.body = r.body; if (r.tags) P.meta.tags = r.tags; } else if (r.bodyHtml) { P.bodyHtml = r.bodyHtml; UI.$("#body").innerHTML = r.bodyHtml; lockDisc(UI.$("#body")); }
+  if (r.gate) { P.gate = r.gate; P.gateOk = !!r.gate?.ok; UI.$("#gate").innerHTML = video ? judgeList(r.gate) : gateList(r.gate); }
   dirty = false; btn.hidden = true; const bad = (r.gate?.checks || []).filter((c) => !c.pass).length;
   UI.toast(bad ? `저장했어요 · 검사 ${bad}개는 확인이 필요해요` : "저장했어요 · 검사 통과");
-};
-UI.$("#approve").onclick = async () => {
+}
+async function approve() {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
   const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
   if (!r.ok) { if (r.gated) return;
-    if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요.</p><div class="gate" style="padding:4px 0 8px">${r.gate.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>글 고치러 가기</button></div>`, { title: "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
+    if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">${P.kind === "video" ? UI.esc(r.error || "심사에서 막혔어요") : "아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요."}</p><div class="gate" style="padding:4px 0 8px">${(r.gate.checks || []).map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>${P.kind === "video" ? "알겠어요" : "글 고치러 가기"}</button></div>`, { title: P.kind === "video" ? "예약할 수 없어요" : "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
     return UI.toast(r.error || "예약하지 못했어요");
   }
   UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
-};
+}
+async function regen(close) { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return r.gated ? (close && close()) : UI.toast(r.error || "다시 만들지 못했어요"); if (close) close(); UI.toast(P.kind === "video" ? "다시 만들기 시작했어요 · 코인은 더 안 들어요" : "다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); }
+function bindCta() { const s = UI.$("#save"); if (s) s.onclick = save; const a = UI.$("#approve"); if (a) a.onclick = approve; const g = UI.$("#regen"); if (g) g.onclick = () => regen(); }
 more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
-  <button type="button" class="row tap" id="regen" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : "코인은 더 안 들어요 · 1회"}</span></div></button>
-  <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger)">버리기</span><span class="d">이 글은 발행하지 않아요</span></div></button></div><div id="rc"></div>`, { title: "이 글을", onOpen: (sh, close) => {
-    sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
-    sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
+  <button type="button" class="row tap" id="regen2" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : "코인은 더 안 들어요 · 1회"}</span></div></button>
+  <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger)">버리기</span><span class="d">${P.kind === "video" ? "이 영상은 올리지 않아요" : "이 글은 발행하지 않아요"}</span></div></button></div><div id="rc"></div>`, { title: P.kind === "video" ? "이 영상을" : "이 글을", onOpen: (sh, close) => {
+    sh.querySelector("#regen2").onclick = () => regen(close);
+    sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), P.kind === "video" ? "이 영상을 버릴까요? 되돌릴 수 없어요." : "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
   } });
 await load();
 })();
