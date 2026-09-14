@@ -7,7 +7,7 @@
  *     쿠폰은 청구 전에 적용(redeemCoupon · 1테넌트 1회 · pct 는 장부 할인 · krw 는 다음 청구 1회 차감) — 틀린 코드는 400 step "coupon" 으로 멈춘다(모르고 정가 결제되지 않게).
  *   POST /api/subscription-cancel { atPeriodEnd:true|false } → { ok, periodEnd }
  *   POST /api/billing-key-start { payRoute?:"keyin", keyin?:true } → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }   // 라인 판정은 lib/pay-route(§1.6 · 3조건)
- *   GET  /api/billing-key-return?…KICC 콜백              → 302 /app/plan.html?key=ok|fail
+ *   GET|POST /api/billing-key-return …KICC 콜백          → 302 /app/plan.html?key=ok|fail&reason=…   🔴 KICC 는 **POST form** 으로 돌아온다(2026-09-15 실측) — 쿼리만 읽으면 못 받는다(lib/billing/callback.ts)
  *   POST /api/billing-key-remove                         → { ok, removed }
  *   GET  /api/invoices?year=                             → { ok, rows:[{ id, kind, period, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedKrw? }] }
  *   🔴 결제 경로는 본인만(denyIfImpersonating) · 부가세 별도(금액 3개 따로) · KICC 없으면 no-op 정직.
@@ -22,6 +22,9 @@ import { subscriptionView, quotePlan, changePlan, cancelAtPeriodEnd, isPaidPlan,
 import { startBillingKey, approveBillingKey, removeBillingKeyOf } from "../../lib/billing/billing-key";
 import { requirePaidTerms } from "../../lib/billing/consents";
 import { resolvePayRoute, keyinOption } from "../../lib/pay-route";
+import { readKiccCallback, callbackAudit } from "../../lib/billing/callback";
+import { parseBkOrder } from "../../lib/billing/billing-key";
+import { writeAudit } from "../../lib/audit";
 import { redeemCoupon, validateCoupon } from "../../lib/billing/promotions";
 import { sql } from "drizzle-orm";
 
@@ -35,11 +38,14 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/billing-key-return")) {
-      const p = url.searchParams;
-      const orderNo = p.get("shopOrderNo") || p.get("orderNo") || "", authorizationId = p.get("authorizationId") || "";
-      if (!orderNo || !authorizationId) return redirect("/app/plan.html?key=fail");
-      const r = await approveBillingKey(authorizationId, orderNo);
-      return redirect(r.ok ? `/app/plan.html?key=ok${r.trialEndedByFp ? "&trial=reused" : ""}` : "/app/plan.html?key=fail");
+      const p = await readKiccCallback(req);
+      // 🔴 어떤 경우에도 흔적을 남긴다(값 금지 · 이름만) — 파라미터가 어긋나도 30초에 안다(AC-9 · 2026-09-15 사고).
+      const tid0 = p.orderNo ? parseBkOrder(p.orderNo)?.tenantId ?? null : null;
+      await writeAudit({ tenantId: tid0, action: "billing_key_callback", actorType: "system", riskLevel: "medium", detail: callbackAudit(p) });
+      if (!p.orderNo || !p.authorizationId) return redirect(`/app/plan.html?key=fail&reason=params`);
+      if (!p.success) return redirect(`/app/plan.html?key=fail&reason=${encodeURIComponent(p.resCd || "cancelled")}`);
+      const r = await approveBillingKey(p.authorizationId, p.orderNo);
+      return redirect(r.ok ? `/app/plan.html?key=ok${r.trialEndedByFp ? "&trial=reused" : ""}` : `/app/plan.html?key=fail&reason=approve`);
     }
 
     const auth = requireUser(req); if (!auth.ok) return auth.res;

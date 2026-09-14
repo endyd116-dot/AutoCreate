@@ -1,7 +1,7 @@
 /**
  * 코인 충전 API(계약 P1R4 §1.1 · DESIGN §12.1·§12.3):
  *   POST /api/coin-purchase-start { packId, agreePaidTerms?, payRoute?:"keyin", keyin?:true } → { ok, orderNo, mode:"oneclick"|"auth", pay?:{url,form}, amountKrw, vatKrw, totalKrw, coins, balance? }
- *   GET  /api/coin-charge-return?…KICC 콜백                    → 302 /app/coins.html?charged=orderNo | ?failed=사유
+ *   GET|POST /api/coin-charge-return …KICC 콜백                → 302 /app/coins.html?charged=orderNo | ?failed=사유   🔴 KICC 는 **POST form** 으로 돌아온다(2026-09-15 실측 · lib/billing/callback.ts)
  *   GET  /api/coin-history?month=YYYY-MM                       → { ok, rows:[{ at, kind, amount, ref, expiresAt?, reason? }], balance:{ included, purchased, total }, orders:[{ orderNo, packId, coins, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedAt?, refundable, refundDeadlineAt? }] }
  *        rows = 원장 움직임(내역 · 월별) · orders = 충전 주문(환불 요청 버튼의 근거 · 7일·미사용 판정은 quoteCoinRefund)
  *   POST /api/coin-refund-request { orderNo }                  → { ok, refundKrw, revoked, invoiceId } | { ok:false, reason:"used"|"window"|…, error }
@@ -18,6 +18,9 @@ import { balance } from "../../lib/coin-ledger";
 import { utcDate } from "../../lib/db-util";
 import { startCoinPurchase, approveCoinPurchase, trialPackUsed } from "../../lib/billing/coin-purchase";
 import { resolvePayRoute, keyinOption } from "../../lib/pay-route";
+import { readKiccCallback, callbackAudit } from "../../lib/billing/callback";
+import { parseCoinOrderNo } from "../../lib/billing/packs";
+import { writeAudit } from "../../lib/audit";
 import { executeCoinRefund, quoteCoinRefund } from "../../lib/billing/coin-refund";
 import { loadPacksAndTable, packView } from "../../lib/billing/packs";
 import { requirePaidTerms } from "../../lib/billing/consents";
@@ -33,10 +36,13 @@ export default async (req: Request): Promise<Response> => {
   try {
     /* ── 콜백(세션 없음 · 주문번호 되파싱) ── */
     if (path.endsWith("/coin-charge-return")) {
-      const p = url.searchParams;
-      const orderNo = p.get("shopOrderNo") || p.get("orderNo") || p.get("shop_order_no") || "";
-      const authorizationId = p.get("authorizationId") || p.get("authorization_id") || "";
-      if (!orderNo || !authorizationId) return redirect(`/app/coins.html?failed=${encodeURIComponent(p.get("resultMsg") || p.get("errorMessage") || "결제가 취소됐어요")}`);
+      const cb = await readKiccCallback(req);
+      const orderNo = cb.orderNo, authorizationId = cb.authorizationId;
+      // 🔴 어떤 경우에도 흔적을 남긴다(값 금지 · 이름만).
+      const tid0 = orderNo ? parseCoinOrderNo(orderNo)?.tenantId ?? null : null;
+      await writeAudit({ tenantId: tid0, action: "coin_charge_callback", actorType: "system", riskLevel: "medium", detail: callbackAudit(cb) });
+      if (!orderNo || !authorizationId) return redirect(`/app/coins.html?failed=${encodeURIComponent(cb.resMsg || "결제가 취소됐어요")}&reason=params`);
+      if (!cb.success) return redirect(`/app/coins.html?failed=${encodeURIComponent(cb.resMsg || "결제가 취소됐어요")}&reason=${encodeURIComponent(cb.resCd || "cancelled")}`);
       const verify = String(process.env.KICC_VERIFY_MSGAUTH ?? "") === "1" ? (await import("../../lib/kicc")).verifyMsgAuth : undefined;
       const r = await approveCoinPurchase(authorizationId, orderNo, { verifyMsgAuth: verify });
       return redirect(r.ok ? `/app/coins.html?charged=${encodeURIComponent(orderNo)}` : `/app/coins.html?failed=${encodeURIComponent(r.reason)}`);
