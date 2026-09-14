@@ -139,7 +139,7 @@ async function generateCandidates(tid: number, ctx: Awaited<ReturnType<typeof te
   const r = await callGeminiJson<{ candidates?: (Candidate & { structureTemplate?: unknown })[] }>({ purpose: "topics", chain: CHAIN_DIRECTOR, role: "director", system, user, tenantId: tid, ref: `topics:${tid}`, mode: "pro", maxOutputTokens: 6000 });
   if (!r.ok) throw Object.assign(new Error(`소재 후보 생성 실패: ${r.reason}`), { step: "ai" });
   const list = Array.isArray(r.data?.candidates) ? r.data.candidates : [];
-  return list.map((c) => {
+  const out: Candidate[] = list.map((c) => {
     const hint = String(c?.channelHint ?? "");
     const isVideoHint = ctx.videoChannels.includes(hint);
     // 구조 템플릿은 **영상 후보에만** · 번호가 목록 밖이면 버린다(모델이 지어낸 id 를 저장하지 않는다).
@@ -154,12 +154,25 @@ async function generateCandidates(tid: number, ctx: Awaited<ReturnType<typeof te
       pain: Math.max(0.3, Math.min(1, Number(c?.pain) || 0.5)),
       ...(tpl ? { structureTemplateId: tpl.id } : {}),
     };
-  }).filter((c) => c.title && !hasSuperlative(`${c.title} ${c.angle}`))
-    .filter((c) => {   // P1R4 §1.5 — 금칙 카테고리(성인·도박·의료 과장·비방·불법)는 소재 단계에서 거부 + 감사
-      const hit = findBannedCategory(`${c.title} ${c.angle} ${c.seedKeywords.join(" ")}`);
-      if (hit) void writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "system", riskLevel: "medium", detail: { category: hit.category, word: hit.word, title: c.title.slice(0, 80) } });
-      return !hit;
-    });
+  }).filter((c) => c.title && !hasSuperlative(`${c.title} ${c.angle}`));
+
+  /* P1R4 §1.5 — 금칙 카테고리(성인·도박·의료 과장·비방·불법)는 소재 단계에서 거부 + 감사.
+     🔴 [2026-09-15 C · AC-36] 종전엔 `.filter()` 안에서 `void writeAudit(...)` 였다 — 동기 콜백이라 await 할 자리가 없었고,
+     서버리스는 응답 뒤 인보케이션을 끝내므로 **거부 기록이 될 때도 안 될 때도 있었다**(계약 P1R6 §0 «감사는 await»).
+     ⇒ 거르기(순수)와 기록하기(비동기)를 갈라, 거른 뒤 **한 번에 await** 한다. 여러 건이어도 왕복은 병렬 1회다. */
+  const blocked: { c: Candidate; hit: { category: string; word: string } }[] = [];
+  const passed = out.filter((c) => {
+    const hit = findBannedCategory(`${c.title} ${c.angle} ${c.seedKeywords.join(" ")}`);
+    if (hit) blocked.push({ c, hit });
+    return !hit;
+  });
+  if (blocked.length) {
+    await Promise.all(blocked.map(({ c, hit }) => writeAudit({
+      tenantId: tid, action: "topic_banned_category", actorType: "system", riskLevel: "medium",
+      detail: { category: hit.category, word: hit.word, title: c.title.slice(0, 80) },
+    })));
+  }
+  return passed;
 }
 
 /* ───────── ②③ 검색량 결합 + 스코어 ───────── */

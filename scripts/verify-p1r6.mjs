@@ -111,7 +111,9 @@ async function main() {
 
   /* ══ endcard — 검수 화면이 읽을 수 있게 pieces-get 이 내려준다(계약 §2.3) ══ */
   if (SECTIONS.has("endcard") && clipPieceId) {
-    await s`UPDATE pieces SET meta = meta || ${s.json({ video: { format: "clip", seconds: 30, cuts: 3, endcard: { text: "설명란 링크 확인", url: "https://example.test/x" } } })} WHERE id = ${clipPieceId}`;
+    /* 엔드카드의 **정본은 렌더 페이로드**(`meta.render.overlay.endcard`)다 — gen.ts 가 거기에 싣고 러너가 그걸 굽는다.
+       계약 §2.3 의 «meta.video.endcard» 는 «검수 화면에 내려보내라»는 뜻이고, 서버는 payload 를 읽어 `piece.video.endcard` 로 준다(출처 한 곳). */
+    await s`UPDATE pieces SET meta = meta || ${s.json({ render: { overlay: { endcard: { text: "설명란 링크 확인", url: "https://example.test/x" } } } })} WHERE id = ${clipPieceId}`;
     const g = await call(jar, "/api/pieces-get", { query: { id: String(clipPieceId) } });
     const ec = g.json?.piece?.video?.endcard ?? g.json?.piece?.meta?.video?.endcard ?? null;
     rec("pieces-get 에 meta.video.endcard{text,url?} 가 내려온다", !!ec && typeof ec.text === "string", `${g.status} ${JSON.stringify(ec)}`, `piece ${clipPieceId}`);
@@ -131,10 +133,11 @@ async function main() {
     // 내 집 재료: 발행 글 1 + 수익 1행
     const [mine] = await s`INSERT INTO pieces (tenant_id, channel, kind, status, title, body, published_at, meta)
       VALUES (${TID}, 'naver_blog', 'post', 'published', ${"C R6 내보내기 글"}, ${"<h2>소제목</h2><p>본문 내용</p>"}, NOW(), ${s.json({})}) RETURNING id`;
-    await s`INSERT INTO revenue_daily (tenant_id, source_id, day, amount_krw, currency, meta)
-      VALUES (${TID}, NULL, (NOW() AT TIME ZONE 'Asia/Seoul')::date, 12345, 'KRW', ${s.json({ note: "R6 하니스" })})`.catch(async () => {
-      await s`INSERT INTO revenue_daily (tenant_id, day, amount_krw) VALUES (${TID}, (NOW() AT TIME ZONE 'Asia/Seoul')::date, 12345)`.catch(() => {});
-    });
+    // revenue_daily 는 source·currency·freshness 가 NOT NULL — 스키마를 안 보고 심으면 조용히 0원이 되어 «공유 카드가 안 만들어진다» 로 오진한다.
+    await s`INSERT INTO revenue_daily (tenant_id, source, day, amount_krw, currency, freshness, raw)
+      VALUES (${TID}, 'adpost', (NOW() AT TIME ZONE 'Asia/Seoul')::date, 12345, 'KRW', 'manual', ${s.json({ note: "R6 하니스" })})`;
+    const [rv] = await s`SELECT COALESCE(SUM(amount_krw),0) AS krw FROM revenue_daily WHERE tenant_id = ${TID}`;
+    rec("내보낼 재료 — 발행 글 1 + 수익 12,345원(심은 직후 되읽기)", Number(rv?.krw) === 12345, `revenue ${rv?.krw}원 · piece ${mine?.id}`);
 
     const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
     const from = new Date(Date.now() + 9 * 3600_000 - 7 * 86400_000).toISOString().slice(0, 10);
@@ -177,10 +180,17 @@ async function main() {
       }
     } else warn("ZIP 내려받기", `url 이 없어 못 쟀다(error: ${ex?.error ?? "-"})`);
 
-    // 하루 3회 상한
-    let last = null;
-    for (let i = 0; i < 4; i++) { last = await call(jar, "/api/export-start", { body: { kinds: ["post"], from, to: today } }); if (last.status === 429) break; await sleep(500); }
-    rec("하루 상한 초과 → 429 step rate_limit(사람말)", last?.status === 429 && last?.json?.step === "rate_limit", `${last?.status} ${last?.json?.step} «${String(last?.json?.error || "").slice(0, 40)}»`);
+    /* 하루 상한 — 🔴 «돌고 있는 중»이면 서버가 `started:false, running:true` 로 답한다(상한과 다른 길).
+       그 상태로 세면 상한을 영영 못 만난다 — 돌던 것이 끝난 뒤에 센다. */
+    for (let i = 0; i < 20; i++) { const g = await call(jar, "/api/export-status"); const e = g.json?.export ?? g.json; if (!e?.running) break; await sleep(3000); }
+    let last = null; const tries = [];
+    for (let i = 0; i < 5; i++) {
+      last = await call(jar, "/api/export-start", { body: { kinds: ["post"], from, to: today } });
+      tries.push(`${last.status}${last.json?.step ? "/" + last.json.step : ""}`);
+      if (last.status === 429) break;
+      for (let k = 0; k < 20; k++) { const g = await call(jar, "/api/export-status"); const e = g.json?.export ?? g.json; if (!e?.running) break; await sleep(3000); }
+    }
+    rec("하루 상한 초과 → 429 step rate_limit(사람말)", last?.status === 429 && last?.json?.step === "rate_limit", `시도 ${tries.join(" ")} · «${String(last?.json?.error || "").slice(0, 36)}»`);
 
     // 만료 뒤에는 url 을 **아예 안 준다**(끊어진 링크를 주지 않는다)
     await s`UPDATE tenants SET settings = COALESCE(settings, '{}'::jsonb) WHERE id = ${TID}`;
@@ -237,7 +247,17 @@ async function main() {
     const hits = [];
     for (const f of files) {
       const t = readFileSync(f, "utf8");
-      t.split("\n").forEach((line, i) => { if (/\bvoid\s+(writeAudit|sendEmail|notify\w*)\s*\(/.test(line)) hits.push({ f, i: i + 1, kind: /writeAudit/.test(line) ? "audit" : "mail" }); });
+      /* 🔴 주석에 적힌 «`void writeAudit(...)` 는 이래서 안 된다» 같은 설명줄을 세면 수리해도 영원히 빨갛다 — 코드줄만 센다.
+         한 줄 주석뿐 아니라 **블록 주석 안**(수리 사유를 여러 줄로 적은 자리)도 빼야 한다 — 2026-09-15 내가 두 번 밟았다. */
+      let inBlock = false;
+      t.split("\n").forEach((line, i) => {
+        let code = line;
+        if (inBlock) { const end = code.indexOf("*/"); if (end < 0) { return; } code = code.slice(end + 2); inBlock = false; }
+        const open = code.indexOf("/*");
+        if (open >= 0) { const close = code.indexOf("*/", open + 2); if (close < 0) { inBlock = true; code = code.slice(0, open); } else code = code.slice(0, open) + code.slice(close + 2); }
+        code = code.replace(/\/\/.*$/, "");
+        if (/\bvoid\s+(writeAudit|sendEmail|notify\w*)\s*\(/.test(code)) hits.push({ f, i: i + 1, kind: /writeAudit/.test(code) ? "audit" : "mail" });
+      });
     }
     const audits = hits.filter((h) => h.kind === "audit");
     rec("AC-36 — `void writeAudit(` 잔여 0(감사는 응답 전에 써야 남는다)", audits.length === 0,
@@ -264,7 +284,7 @@ async function main() {
   }
   if (SECTIONS.has("backup")) {
     const ojar = new Jar();
-    const lo = await call(ojar, "/api/ops-login", { body: { username: process.env.OPS_USER || "admin", password: process.env.OPS_PASS || "" } });
+    const lo = await call(ojar, "/api/ops-login", { body: { email: process.env.OPS_USER || "admin", password: process.env.OPS_PASS || "admin1234" } });
     if (!lo.json?.ok) warn("백업 상태(B2 §3.3)", `운영 로그인 없이 못 쟀다(${lo.status}) — OPS_USER/OPS_PASS`);
     else {
       const b = await call(ojar, "/api/ops-backup-status");
