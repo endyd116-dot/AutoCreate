@@ -55,11 +55,11 @@
       inv(9001, 2, "요리하는 집", "subscription", thisMonth, 49000, "paid", 30),
       inv(9002, 4, "에이전시 K", "subscription", thisMonth, 149000, "paid", 28),
       inv(9003, 3, "팁스고", "subscription", thisMonth, 19000, "failed", 20),
-      inv(9004, 2, "요리하는 집", "coin", "AC-COIN-20260912-0007", 100000, "paid", 50),
+      { ...inv(9004, 2, "요리하는 집", "coin", "AC-COIN-20260912-0007", 100000, "paid", 50), payRoute: "keyin" }, // [§1.6] 비인증(카드번호 직접 입력) 라인으로 결제된 행
       inv(9005, 1, "모의", "coin", "AC-COIN-20260913-0011", 5000, "paid", 12),
       inv(9006, 6, "오늘 가입", "coin", "AC-COIN-20260914-0002", 50000, "pending", 1),
     ],
-    billingKeys: fresh ? [] : [{ tenantId: 2, tenantName: "요리하는 집", brand: "신한", last4: "4421", active: true, updatedAt: iso(now - 30 * 86400e3) }, { tenantId: 3, tenantName: "팁스고", brand: "국민", last4: "0192", active: false, updatedAt: iso(now - 3 * 86400e3) }, { tenantId: 4, tenantName: "에이전시 K", brand: "현대", last4: "7730", active: true, updatedAt: iso(now - 100 * 86400e3) }],
+    billingKeys: fresh ? [] : [{ tenantId: 2, tenantName: "요리하는 집", brand: "신한", last4: "4421", active: true, updatedAt: iso(now - 30 * 86400e3) }, { tenantId: 3, tenantName: "팁스고", brand: "국민", last4: "0192", active: false, updatedAt: iso(now - 3 * 86400e3) }, { payRoute: "keyin", tenantId: 4, tenantName: "에이전시 K", brand: "현대", last4: "7730", active: true, updatedAt: iso(now - 100 * 86400e3) }],
     receivables: fresh ? [] : [{ tenantId: 3, tenantName: "팁스고", overdueKrw: 20900, overdueDays: 6, attempts: 2, lastFailReason: "카드 한도 초과" }],
     tickets: fresh ? [] : [
       { id: 701, tenantId: 3, tenantName: "팁스고", subject: "결제가 안 돼요", status: "open", priority: "high", tags: ["결제"], source: "app", createdAt: iso(now - 3 * 3600e3), updatedAt: iso(now - 3 * 3600e3), slaDueAt: iso(now + 1 * 3600e3) },
@@ -95,6 +95,7 @@
     /* [B2] channel_registry(ops-channels.ts) */
     channels: [["naver_blog", "네이버 블로그", "active", [7, 12, 21], ["adpost", "coupang"]], ["tistory", "티스토리", "active", [12, 13, 19], ["adsense"]], ["blogger", "블로거", "active", [9, 21], ["adsense"]], ["wordpress", "워드프레스", "active", [9, 21], ["adsense"]], ["threads", "쓰레드", "planned", [8, 20], []], ["instagram", "인스타그램", "planned", [18], ["coupang"]], ["youtube_shorts", "유튜브 쇼츠", "planned", [18], ["youtube"]], ["naver_clip", "네이버 클립", "planned", [19], ["clip"]], ["reels", "릴스", "planned", [18], []], ["tiktok", "틱톡", "planned", [20], []]].map(([key, label, status, bestHours, monetize]) => ({ key, label, status, bestHours, monetize })),
     /* [B2] ops-disclosure — text{coupang,generic} · 오버라이드 없으면 코드 기본(updatedAt 없음) */
+    payment: { keyinEnabled: false, keyinLabel: "카드번호 직접 입력", keyinNotice: "법인카드가 앱카드 창에서 거절될 때 쓰세요." }, // ops_settings.payment
     disclosure: { text: { coupang: "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.", generic: "이 글에는 제휴 링크가 포함되어 있으며, 구매 시 일정액의 수수료를 받을 수 있습니다." }, updatedAt: null, updatedBy: null },
     notices: fresh ? [] : [
       { id: 801, kind: "incident", title: "네이버 발행이 늦어요 · 네이버 쪽 점검", body: "14:00 부터 네이버 블로그 발행이 30분쯤 밀리고 있어요. 예약은 그대로 나가요.", startsAt: iso(now - 2 * 3600e3), endsAt: iso(now + 4 * 3600e3), channels: ["naver_blog"], active: true },
@@ -113,10 +114,12 @@
   });
 
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || !S.ai || !S.ai.settings || !S.disclosure || !S.disclosure.text || qs.get("reset") === "1" || !S.tickets) { S = seed(); save(); }
+  if (!S || fresh || !S.ai || !S.ai.settings || !S.disclosure || !S.disclosure.text || qs.get("reset") === "1" || !S.tickets || !S.payment) { S = seed(); save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const forbid = () => ({ ok: false, step: "forbidden", error: "이 역할로는 할 수 없어요.", status: 403 });
+  /* [§1.6(5)] 결제 라인 정책 — ?keyinMid=0 이면 비인증 MID 미등록(켜도 고객에겐 안 보인다) · MID·시크릿 값은 응답에 없다 */
+  const keyinMid = qs.get("keyinMid") !== "0";
   const ROLE = { super_admin: 3, admin: 2, operator: 1 };
   const need = (minRole) => ROLE[role] < ROLE[minRole];
   const me = () => S.operators.find((o) => o.role === role) || S.operators[0];
@@ -174,6 +177,12 @@
     "ops-invoice-retry": (b) => { if (need("admin")) return forbid(); const i = S.invoices.find((x) => x.id === Number(b.id)); if (!i) return err("id", "인보이스가 없어요.", { status: 404 }); if (i.status !== "failed") return err("status", "실패한 인보이스만 다시 시도할 수 있어요."); i.attempts++; if (i.attempts >= 3) { i.status = "paid"; i.paidAt = iso(Date.now()); delete i.nextRetryAt; S.receivables = S.receivables.filter((r) => r.tenantId !== i.tenantId); const t = tn(i.tenantId); if (t) t.status = "active"; } else i.nextRetryAt = iso(Date.now() + 86400e3); return { ok: true, invoice: i }; },
     "ops-refund": (b) => { if (need("admin")) return forbid(); const i = S.invoices.find((x) => x.period === b.orderNo && x.kind === "coin"); if (!i) return err("orderNo", "그 주문번호의 충전이 없어요.", { status: 404 }); if (i.status === "refunded") return err("status", "이미 환불한 주문이에요."); const daysAgo = (Date.now() - new Date(i.paidAt).getTime()) / 86400e3; if (daysAgo > 7) return { ok: false, step: "window", reason: "window", error: "충전 후 7일이 지나 환불할 수 없어요.", status: 400 }; i.status = "refunded"; i.refundedKrw = i.totalKrw; return { ok: true, refundKrw: i.totalKrw, revoked: Math.round(i.amountKrw / 500), invoiceId: i.id }; },
     "ops-billing-keys": () => { if (need("admin")) return forbid(); return { ok: true, rows: S.billingKeys }; },
+    "ops-payment-settings": (b) => { const P = S.payment;
+      if (b && (b.keyinEnabled !== undefined || b.keyinLabel !== undefined || b.keyinNotice !== undefined)) { if (need("admin")) return forbid();
+        if (typeof b.keyinEnabled === "boolean") P.keyinEnabled = b.keyinEnabled; if (typeof b.keyinLabel === "string") P.keyinLabel = b.keyinLabel.trim().slice(0, 40) || "카드번호 직접 입력"; if (typeof b.keyinNotice === "string") P.keyinNotice = b.keyinNotice.trim().slice(0, 300);
+        S.audit.unshift({ id: S.nextId++, action: "ops_payment_settings", actor_type: "operator", actor_id: me().id, tenant_id: null, target: "payment", risk_level: "high", created_at: iso(Date.now()), detail: { keyinEnabled: P.keyinEnabled } });
+        return { ok: true, payment: { ...P }, keyinMidConfigured: keyinMid, effective: P.keyinEnabled && keyinMid }; }
+      return { ok: true, payment: { ...P }, keyinMidConfigured: keyinMid, kiccConfigured: true, mode: "test" }; },
     "ops-receivables": () => { if (need("admin")) return forbid(); return { ok: true, rows: S.receivables }; },
     "ops-tax-invoice": (b) => { if (need("admin")) return forbid(); const i = S.invoices.find((x) => x.id === Number(b.invoiceId)); if (!i) return err("invoiceId", "인보이스가 없어요.", { status: 404 }); i.taxRequestedAt = iso(Date.now()); return { ok: true, status: "requested", note: "KICC 키가 꽂히면 실발급돼요 · 지금은 요청만 기록" }; },
     /* ── CS ── */

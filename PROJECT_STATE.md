@@ -6,19 +6,20 @@
 - **AutoCreate(AC)** — 다계정 글·영상 자동 생성·발행 + 수익 통합 SaaS(토스형). AM 엔진 이식.
 - 라이브: https://autocreate-endyd.netlify.app (GitHub `main` push → 자동 배포) · 아직 빈 사이트(README만).
 
-## 2. 현재 상태 (2026-09-14 · 배포 #3 완료)
-- ✅ **라이브 = main `0f3ec44`**(배포 #3 · R4 «돈을 받고·운영한다» · Netlify ready) — 스모크: 고객 페이지 10종 · 가입(consents 4) · coin-packs 3금액 · subscription/quote(49,000/4,900/53,900) · KICC 없음 `not_configured` 정직 · 티켓 · **운영센터 12메뉴 API 전부 200**.
-- 배포 이력: #1 Phase 0 `d2a4994` · #2 R1+R2+R3 `e33807d`(+핫픽스 `ebbe372`) · #3 R4 `0f3ec44`.
-- ✅ 완료·머지: Phase 0 · R1 · R2 · R3 · ui-v4 · **R4**(B 결제·구독·체험·게이트·운영 6메뉴 API 116/116 · B2 러너팜·카나리·AI 자동 업데이트·채널·공지·운영진·블로거 템플릿 · A 운영센터 16장·코인/요금제/문의/약관 · C 결함 9건 수리 · 라이브 DDL 0004~0007). 러너 실증 매트릭스 **4/4**(네이버·티스토리 임시저장 ✓ · 블로거/WP 정직 정지) · 티스토리 쿠키 테넌트 109(2027-09 까지 · `--reuse-tid=109`).
-- 🔨 **P1R5 «영상 축·쇼츠 공장» 진행 중**(계약 `docs/active/2026-09-15-P1R5-contract.md` v5.1 · 조사 `2026-09-14-R5-presurvey-video.md`): **B-1**(`autocreate-b-8a` · `../AutoCreate-B1` · `feature/p1r5-back` · 생성 두뇌) · B2(`feature/p1r5-back2` · 렌더 잡·유튜브/릴스/쓰레드 출구 · 그 전에 애드포스트 전 구간 되짚기) · A(`feature/p1r5-front` · 화면 8) · C(C6-R4 라이브 → R5 검증). B(`autocreate-b-ae`) 는 대기.
-- 함정 노트 **AC-30** 까지.
-- ⏳ **사장님 할 일**: ① 라이브 `admin`/`admin1234` 첫 로그인 → **비밀번호 변경(아직)** ② **TYPECAST_API_KEY**(R5 TTS · 없으면 Gemini 폴백) ③ **유튜브 OAuth 앱 심사 착수**(심사 전엔 비공개 업로드) ④ KICC 키 · 쿠팡·Meta·Threads 앱 키(정직 no-op 상태) ⑤ 약관 4문서 법률 검토(«법률 검토 전» 배지) ⑥ 통신판매업 신고.
-- 결정 누적: 부가세 별도(AM 방식 · AM↔AC 코인 이전 예정) · 홈 큰 숫자 = 오늘 확정+예상 · UI 세부 메인 판단(시안 v3/v4 뿌리) · R5 §D 8건(Omni+Lite · 타입캐스트 · topics 흡수 · 코인 구간제 · uploaded_private · 3등급 심사 · $30/$300).
+## 2. 현재 상태 (2026-09-15 · 배포 #4 완료)
+- ✅ **라이브 = main `e5458f8`**(배포 #4 · **R5 영상 축 + KICC 이중 MID**) — 스모크: 화면 7종 · 가입(consents 4) · `coin-packs.keyin`·`subscription.keyin` · `ops-payment-settings`(keyin/kicc 전부 false = 정직) · 채널 4 active/6 planned.
+- 배포 이력: #1 `d2a4994`(Phase 0) · #2 `e33807d`(R1+R2+R3, 핫픽스 `ebbe372`) · #3 `0f3ec44`(R4) · **#4 `e5458f8`(R5+KICC)**.
+- ✅ 라운드 완료: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · **R5**(영상: provider 사다리·TTS·자막·컷·11축 심사·원가 관문·프레임 지문 / 러너 렌더 ffmpeg·BGM 12곡 / 유튜브·릴스·쓰레드 출구 / 화면 8) · **KICC 이중 MID**(ON 구별).
+- R5 C 판정 «배포 가능» — 제품 결함 3건 수리(심사가 «계획서»를 검사하던 것 · 소프트 구간 거짓 알림 2곳). 함정 노트 **AC-35** 까지.
+- 러너 실증 4/4(네이버·티스토리 임시저장 · 블로거/WP 정직 정지) · **실측 mp4**(12s·360프레임·R2 HEAD·ffprobe 3길이 일치).
+- 🔨 **다음 = R6**(마지막): 내보내기 ZIP · 공유 카드 · 추천인 코드 · 영수증 페이지 · 세금계산서 · 관리형 러너 신청 · naver_clip 30초 안내 · 엔드카드 URL · **AM↔AC 코인 이전** · 티스토리 HTML 모드. 화면 목록 = `docs/active/R6-screen-list.md`.
+- ⏳ **사장님 할 일**: ① 라이브 `admin` 비밀번호 변경(아직) ② **KICC**: MID 1개 추가(AutoCreate · ON 과 정산 분리 · **비인증 MID 동반**) + **복귀 주소 2개 허용**(`/api/coin-charge-return`·`/api/billing-key-return`) + **허용 결제수단 코드 확인** → `docs/active/KICC-GO-LIVE.md` ③ **유튜브 OAuth 앱 + 심사 착수**(없으면 영상 채널을 못 켠다 · 심사 전엔 비공개 업로드) ④ TYPECAST_API_KEY(없으면 Gemini TTS 폴백) ⑤ 쿠팡·Meta·Threads 키 ⑥ 약관 4문서 법률 검토 · 통신판매업 신고 ⑦ 사업자 정보(상호·대표·등록번호·주소·통판 신고번호 → 운영센터 «회사 정보»).
+- 결정 누적: 부가세 별도(AM 방식 · AM↔AC 코인 이전 예정) · UI 세부는 메인 판단 · R5 §D 8건 + v5.6(하드 캡은 `used` 만) · 공유 카드 핸들 숨김 기본 · 공급자 정보는 운영센터에서.
 
 ## 3. 다음 할 일
-1. **R5 마감**: B-1→B2→A 머지 → C R5 검증(라이브 60초 1회 실증) → 배포 #4.
-2. **R6 마무리**(콘텐츠 내보내기 ZIP · 공유 카드 · 추천인 코드 · 관리형 러너 팜 · AM↔AC 코인 이전 · 티스토리 HTML 모드 · 영수증 페이지 · 세금계산서 실발급).
-3. 외부 키 도착 시 «키 꽂으면 즉시» 항목 실증(KICC 실결제 사다리 · 애드센스/유튜브 수익 · 쿠팡 회수 · 릴스/쓰레드 발행).
+1. **C 배포 후 3가지**: 라이브 회귀 · **«돈 쓰는» 60초 1편 실증**(`measured` 가 `piece_assets(video).meta` 까지 흐르는지) · 스모크 잔재 정리(승인 완료).
+2. **R6 발사**(마지막 라운드) → 배포 #5.
+3. 외부 키 도착 시 실증: KICC(①인증 결제 ②빌키+청구 ③**부분 취소**) · 유튜브 업로드 · 애드센스/쿠팡 수익 · 릴스/쓰레드.
 
 ## 4. 운영 메모
 - Netlify site id `a14524de-ebfa-46e8-a116-dbc87343f276` · 이름 `autocreate-endyd`(변경 가능).

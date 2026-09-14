@@ -6,7 +6,7 @@
  *   POST /api/subscription-change { planKey, cycle, agreePaidTerms?, couponCode? } → { ok, effectiveAt, pending, chargeNowKrw?, vatKrw?, totalKrw? } | { ok:false, step:"billing_key"|"not_configured"|"charge"|"plan"|"same"|"paid_terms"|"coupon" }
  *     쿠폰은 청구 전에 적용(redeemCoupon · 1테넌트 1회 · pct 는 장부 할인 · krw 는 다음 청구 1회 차감) — 틀린 코드는 400 step "coupon" 으로 멈춘다(모르고 정가 결제되지 않게).
  *   POST /api/subscription-cancel { atPeriodEnd:true|false } → { ok, periodEnd }
- *   POST /api/billing-key-start                          → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }
+ *   POST /api/billing-key-start { payRoute?:"keyin", keyin?:true } → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }   // 라인 판정은 lib/pay-route(§1.6 · 3조건)
  *   GET  /api/billing-key-return?…KICC 콜백              → 302 /app/plan.html?key=ok|fail
  *   POST /api/billing-key-remove                         → { ok, removed }
  *   GET  /api/invoices?year=                             → { ok, rows:[{ id, kind, period, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedKrw? }] }
@@ -21,6 +21,7 @@ import { utcDate } from "../../lib/db-util";
 import { subscriptionView, quotePlan, changePlan, cancelAtPeriodEnd, isPaidPlan, prorateQuote, type Cycle } from "../../lib/subscription";
 import { startBillingKey, approveBillingKey, removeBillingKeyOf } from "../../lib/billing/billing-key";
 import { requirePaidTerms } from "../../lib/billing/consents";
+import { resolvePayRoute, keyinOption } from "../../lib/pay-route";
 import { redeemCoupon, validateCoupon } from "../../lib/billing/promotions";
 import { sql } from "drizzle-orm";
 
@@ -44,7 +45,7 @@ export default async (req: Request): Promise<Response> => {
     const auth = requireUser(req); if (!auth.ok) return auth.res;
     const tid = auth.tid;
 
-    if (path.endsWith("/subscription") && req.method === "GET") return json({ ok: true, ...(await subscriptionView(tid)) });
+    if (path.endsWith("/subscription") && req.method === "GET") return json({ ok: true, ...(await subscriptionView(tid)), keyin: await keyinOption() });
     if (path.endsWith("/subscription-quote")) {
       const planKey = String(url.searchParams.get("planKey") || ""); if (!await isPaidPlan(planKey)) return badRequest("planKey");
       const couponCode = (url.searchParams.get("couponCode") || "").trim() || null;
@@ -90,7 +91,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, periodEnd: r.periodEnd, cancelAtPeriodEnd: on });
     }
     if (path.endsWith("/billing-key-start")) {
-      const r = await startBillingKey(tid, { userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL });
+      const r = await startBillingKey(tid, { userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL, route: await resolvePayRoute(b) });
       if (!r.ok) return json({ ok: false, step: r.step, error: r.error }, 200);
       return json({ ok: true, url: r.url, form: r.form, orderNo: r.orderNo });
     }
