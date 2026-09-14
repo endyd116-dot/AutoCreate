@@ -21,6 +21,7 @@ import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
 import { synthesizeGemini, isGeminiVoice, type TtsResult, type TtsWord } from "./tts";
 import { splitPhrasesForLines, phrasesToRender, phrasesToSrt } from "./captions";
 import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget } from "./cost";
+import { resolveBgm } from "./bgm";
 import { enqueueRender } from "./render-queue";
 import { r2Put } from "../r2";
 import {
@@ -142,6 +143,12 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       audio.set(i, { key: r.key, durationMs: r.durationMs, words: r.words, provider: r.provider });
       await stamp(pieceId, "tts", { cutsDone: audio.size, cutsTotal: theScript.lines.length });
     }
+    /* [메인 확정] `meta.tts.provider` — A 의 «목소리» 스텝이 piece meta 를 읽는다(`piece_assets.meta.provider` 는 문장별로 그대로 둔다).
+       한 문장이라도 Gemini 로 떨어졌으면 **gemini** 로 적는다 — 그 문장은 어절 시각이 없어 자막이 균등 분할이고, 화면이 그 사실을 말해야 한다. */
+    const provs = new Set([...audio.values()].map((a) => a.provider));
+    const ttsProvider = videoStub() ? "stub" : provs.has("gemini") ? "gemini" : "typecast";
+    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ tts: { provider: ttsProvider, sentences: audio.size } })} WHERE id = ${pieceId}`);
+
     // 문장 시각(누적 · 컷 경계 = 문장 경계)
     let at = 0;
     const timed = theScript.lines.map((l, i) => { const a = audio.get(i)!; const startMs = at; const endMs = startMs + Math.max(400, a.durationMs) + 120; at = endMs; return { ...l, startMs, endMs, words: a.words, key: a.key }; });
@@ -222,7 +229,8 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       out: { w: 1080, h: 1920, fps: 30, maxSeconds: seconds, crf: 20 },
       scenes,
       captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey },
-      audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: null, sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
+      // BGM: `BGM_LICENSE_VERIFIED=1` + 시드 매니페스트가 있을 때만 깔린다. 둘 중 하나라도 없으면 null = **무음**(계약 §1.4c(3) 정직 경로).
+      audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: await resolveBgm({ format, seed: pieceId }), sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
       overlay: { badge: affiliate ? { text: videoBadgeText(), corner: "tr" } : null, safeZone: { top: 220, bottom: 300 }, endcard: { text: theScript.closing.slice(0, 40) } },
       disclosureCaption: affiliate ? { text: videoOpeningCaption(), untilMs: 3000 } : null,
     };

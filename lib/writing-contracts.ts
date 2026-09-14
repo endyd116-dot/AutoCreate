@@ -213,7 +213,9 @@ export function shortsFormOf(format: ShortsFormat, seconds: 15 | 30 | 60): Short
   const syllables = { min: Math.floor(maxSyl * 0.55), max: maxSyl };
   const channelMaxSec = { youtube_shorts: 60, naver_clip: 30, reels: 60, threads: 60 } as const;
   if (format === "clip") return { format, seconds: seconds === 60 ? 30 : seconds, cuts: { min: 3, max: 4, default: 3 }, cutSec: { min: 5, max: 8 }, provider: seconds === 15 ? "veo_lite" : "omni", syllables, captionPreset: "clip_top", stillRatio: 0, channelMaxSec };
-  if (format === "talking") return { format, seconds: seconds === 15 ? 30 : seconds, cuts: { min: 3, max: 4, default: 4 }, cutSec: { min: 5, max: 5 }, provider: "veo_lite", syllables, captionPreset: "talking_big", stillRatio: 0.5, channelMaxSec };
+  /* 🔴 토킹(계약 §1.3 표): 컷 길이 **5초 고정** · B-roll 3~4 · **나머지 정지 이미지**. 즉 컷 수는 «초 ÷ 5»(60초 = 12컷)이지 3~4 가 아니다.
+     예전 값(default 4)은 60초를 컷 4개로 나눠 창이 15초가 됐고, 8초 상한 클립으로는 7초가 비어 러너가 멈춘 화면을 늘려야 했다(설계 축소 · CLAUDE §8). */
+  if (format === "talking") { const tc = Math.round((seconds === 15 ? 30 : seconds) / 5); return { format, seconds: seconds === 15 ? 30 : seconds, cuts: { min: Math.max(3, tc - 3), max: tc + 3, default: tc }, cutSec: { min: 5, max: 5 }, provider: "veo_lite", syllables, captionPreset: "talking_big", stillRatio: 0.5, channelMaxSec }; }
   const s60 = seconds === 60;
   return { format: "graphic", seconds: seconds === 15 ? 30 : seconds, cuts: s60 ? { min: 6, max: 12, default: 9 } : { min: 4, max: 6, default: 5 }, cutSec: { min: 5, max: 8 }, provider: "omni", syllables, captionPreset: "keyword_center", stillRatio: 0, channelMaxSec };
 }

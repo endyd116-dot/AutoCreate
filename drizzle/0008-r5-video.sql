@@ -1,3 +1,4 @@
+-- ⚠️ 0008 이 둘이다: 이 파일(B-1 · shorts_templates·feature_flags·posts.status)과 `0008-r5-b2-runner.sql`(B2 · runner_devices.caps 등). 둘 다 Neon 에 적용 완료라 리넘버하지 않는다(적용 이력과 어긋난다). **다음 번호는 0009.**
 -- P1R5-B · 영상 축(쇼츠 공장) — 추가형·멱등(2026-09-15). 정본 짝 = db/schema.ts «Phase 3 R5» 블록.
 -- 🔴 creative_assets·video_assets·shorts_topics 표를 만들지 않는다(두 척추 금지 · 계약 §0). 영상 piece = pieces(kind 'video') + piece_assets + runner_jobs + posts.
 

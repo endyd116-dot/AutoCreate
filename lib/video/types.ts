@@ -105,3 +105,26 @@ export const CHAIN_LOCK_MIN = 20;
 export const CHAIN_RESUME_MAX = 3;
 /** 심사 미달 재큐 상한(§0.1-7 · AM RENDER_MAX_RETRY). 3회째 = in_review(사람). */
 export const RENDER_MAX_RETRY = 2;
+
+/* ═══════════ 변주 사람말 이름(계약 §13.0 «말은 사람말» · A 가 칩에 쓴다) ═══════════
+ *   🔴 키 = `lib/video/scenes.ts PALETTES`·`HOOK_TYPES` 의 **영문 프롬프트 문구 그대로**(그 문구가 곧 id 다).
+ *      scenes.ts 의 문구를 고치면 여기도 같이 고친다 — scenes.ts 가 기동 때 짝을 대조해 콘솔에 알린다.
+ *   이 파일에 두는 이유: A·B2 가 보는 **어휘 정본**이고, types.ts 는 아무것도 import 하지 않아 어디서든 읽을 수 있다(AC-17). */
+export const PALETTE_LABELS_KO: Readonly<Record<string, string>> = {
+  "warm terracotta and cream": "테라코타",
+  "cool teal and off-white": "청록",
+  "deep navy and amber": "네이비",
+  "sage green and sand": "세이지",
+  "charcoal and coral": "차콜",
+};
+export function paletteLabelKo(palette: unknown): string { return PALETTE_LABELS_KO[String(palette ?? "")] ?? "기본"; }
+
+/** 훅 연출 사람말 이름 — 키 = `scenes.ts HOOK_TYPES`. */
+export const HOOK_LABELS_KO: Readonly<Record<string, string>> = {
+  event_pushin: "사건으로 시작",
+  number_typo: "숫자로 시작",
+  extreme_closeup: "확대로 시작",
+  question: "질문으로 시작",
+  contrast: "반전으로 시작",
+};
+export function hookLabelKo(hookType: unknown): string { return HOOK_LABELS_KO[String(hookType ?? "")] ?? "기본"; }
