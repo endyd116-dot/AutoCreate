@@ -24,6 +24,9 @@ import { writeAudit } from "./audit";
 import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
 import { classifyAndApply } from "./account-health";
 import { finalizePublish } from "./publish/finalize";
+// 🔴 수익 행을 쓰는 유일한 함수(계약 P1R3 §5). lib/revenue/** 는 runner-jobs 를 보지 않는다(AC-17 · 방향 한쪽).
+import { upsertRevenueRows } from "./revenue/upsert";
+import type { RevenueRow } from "./revenue/types";
 import type { Block } from "./blocks";
 import type { RunnerFleetState } from "./publish/contract";
 
@@ -34,17 +37,32 @@ const iso = (v: unknown): string | undefined => utcDate(v)?.toISOString() ?? und
 
 /* ─────────────────────────── 어휘 ─────────────────────────── */
 
-/** 계약 §2. DESIGN §8.2 의 나머지(publish.naver_clip·brunch·render.video·revenue.adpost…)는 Phase 2~3. */
-export type RunnerJobKind = "publish.naver_blog" | "publish.tistory" | "session.login" | "session.verify" | "verify.post_alive" | "revenue.stats";
-export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = ["publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats"];
+/**
+ * 계약 P1R2 §2 + P1R3 §2.1(수익 스크랩 3종)·§2.2(`ads.setup_tistory`) — union 확장 2026-09-14.
+ *   DESIGN §8.2 의 나머지(publish.naver_clip·brunch·render.video)는 Phase 3.
+ */
+export type RunnerJobKind =
+  | "publish.naver_blog" | "publish.tistory"
+  | "session.login" | "session.verify"
+  | "verify.post_alive" | "revenue.stats"
+  | "revenue.adpost" | "revenue.adfit" | "revenue.clip"
+  | "ads.setup_tistory" | "ads.status_blogger";
+export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
+  "publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats",
+  "revenue.adpost", "revenue.adfit", "revenue.clip", "ads.setup_tistory", "ads.status_blogger",
+];
 export function isRunnerJobKind(v: unknown): v is RunnerJobKind { return RUNNER_JOB_KINDS.includes(String(v) as RunnerJobKind); }
+/** 수익 스크랩 잡(report 에 `revenueRows` 가 실린다). `revenue.stats` 는 글 통계라 여기 안 든다. */
+export const REVENUE_SCRAPE_KINDS: ReadonlySet<string> = new Set(["revenue.adpost", "revenue.adfit", "revenue.clip"]);
 
-/** 우선순위 — 숫자가 작을수록 먼저(계약 §2 «발행 10 > 세션 20 > 통계 50»). */
+/** 우선순위 — 숫자가 작을수록 먼저(계약 §2 «발행 10 > 세션 20 > 통계 50» · DESIGN §8.3 «수익 스크랩 > 렌더»). */
 export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.freeze({
   "publish.naver_blog": 10, "publish.tistory": 10,
   "session.login": 20, "session.verify": 20,
+  "ads.setup_tistory": 30, "ads.status_blogger": 30,
   "verify.post_alive": 40,
   "revenue.stats": 50,
+  "revenue.adpost": 60, "revenue.adfit": 60, "revenue.clip": 60,
 });
 export function priorityOf(kind: RunnerJobKind): number { return JOB_PRIORITY[kind] ?? 50; }
 
@@ -356,7 +374,23 @@ export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max =
 
 /* ─────────────────────────── 보고(report) ─────────────────────────── */
 
-export interface RunnerReportOk { ok: true; externalUrl?: string; channelRef?: string; stats?: Record<string, unknown> }
+export interface RunnerReportOk {
+  ok: true;
+  externalUrl?: string; channelRef?: string;
+  stats?: Record<string, unknown>;
+  /** 수익 스크랩 잡(계약 P1R3 §2.1) — 서버가 `upsertRevenueRows(tid, rows, "runner")` 로 쓴다. 러너는 DB 를 안 본다. */
+  revenueRows?: RevenueRow[];
+  /** 애드포스트 «미등록/심사중/승인» 같은 매체 상태(계약 §1.5b · 없으면 키 없음). */
+  adpostState?: "none" | "pending" | "approved";
+  /** `ads.setup_tistory` — 애드센스 연결 상태 읽기 결과(계약 §2.2 · 변경은 안 한다). */
+  adsense?: { linked: boolean; state?: string; detail?: string };
+  shotKey?: string;
+}
+/**
+ * 실패 보고. `errorKind` 는 계약 P1R2 §2 의 7종 **또는 `"parse"`**(P1R3 §2.1 — 파싱 실패를 0 으로 채우지 않는다 · AC-9).
+ *   🔴 "parse" 는 전이표(`lib/account-health.ts` 7종) **밖**이다 — 계정 문제가 아니라 **우리 버그**(화면이 바뀌었거나 파서가 틀렸다).
+ *      계정 전이 0 · 재시도 무의미 · audit high 로 종결한다(전이표에 넣지 않는다 — 표는 B 의 정본).
+ */
 export interface RunnerReportFail { ok: false; errorKind?: unknown; detail?: string; shotKey?: string }
 export type RunnerReportBody = RunnerReportOk | RunnerReportFail;
 
@@ -387,15 +421,23 @@ async function verifyPublishedUrl(url: string, title?: string | null): Promise<"
 }
 
 /** 계정 전이 신호 기록 — 필드만 쓴다. 전이 로직(B `lib/account-health.ts`)이 있으면 넘겨준다(없으면 graceful). */
-async function signalAccountError(tid: number, accountId: number, block: RunnerBlock, pieceId?: number | null): Promise<void> {
+/** @returns 이 piece 가 **다른 계정으로 넘어갔나**(suspend 승계) — 넘어갔으면 호출자가 piece 를 실패로 닫으면 안 된다. */
+async function signalAccountError(tid: number, accountId: number, block: RunnerBlock, pieceId?: number | null): Promise<{ handedOver: boolean }> {
   try {
     await q(sql`UPDATE accounts SET last_error_kind = ${block.kind}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`);
   } catch (e) { console.error("[runner-jobs] last_error_kind write failed", e); }
-  if (block.accountAction === "none") return;
+  if (block.accountAction === "none") return { handedOver: false };
   /* 🔴 전이는 B 의 정본이 한다(정적 배선 · main 192a417 머지 후 2026-09-14).
      실패해도 보고 자체는 성공시킨다 — 전이가 안 됐다고 잡 결과를 잃으면 안 된다. */
-  try { await classifyAndApply(accountId, block.kind, { tenantId: tid, detail: block.detail ?? block.message, pieceId }); }
-  catch (e) { console.error("[runner-jobs] classifyAndApply failed", e); }
+  try {
+    const r = await classifyAndApply(accountId, block.kind, { tenantId: tid, detail: block.detail ?? block.message, pieceId });
+    // 승계가 이 piece 를 실제로 옮겼는지 — 새 슬롯이 이 piece 를 물고 있으면 넘어간 것이다.
+    if (r.action === "suspend" && pieceId) {
+      const [p] = await q(sql`SELECT account_id FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
+      return { handedOver: !!p && n(p.account_id) !== accountId };
+    }
+  } catch (e) { console.error("[runner-jobs] classifyAndApply failed", e); }
+  return { handedOver: false };
 }
 
 async function notify(tid: number, kind: string, title: string, body: string, link?: string): Promise<void> {
@@ -431,6 +473,27 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   const accountId = n(j.account_id);
   const payload = (j.payload && typeof j.payload === "object" ? j.payload : {}) as Record<string, unknown>;
 
+  /* ── 실패(parse) — 계약 P1R3 §2.1 · 우리 버그 · 계정 전이 0 · 0 으로 채우지 않는다(AC-9) ── */
+  if (result.ok !== true && String((result as RunnerReportFail).errorKind) === "parse") {
+    const fail = result as RunnerReportFail;
+    await q(sql`UPDATE runner_jobs SET status = 'failed', claimed_by = NULL, claimed_at = NULL, error_kind = 'parse',
+        result = ${jsonb({ ok: false, errorKind: "parse", detail: String(fail.detail ?? "").slice(0, 300), shotKey: fail.shotKey ?? null, attempts: n(j.attempts) })},
+        due_at = NULL, updated_at = NOW() WHERE id = ${jobId}`);
+    // 수익 소스 행에 «못 읽었다»를 남긴다(행을 만들지 않는다 · 계약 §0). 소스 행이 없으면 넘어간다.
+    const source = kind === "revenue.adpost" ? "adpost" : kind === "revenue.adfit" ? "adfit" : kind === "revenue.clip" ? "clip" : null;
+    if (source) {
+      await q(sql`UPDATE revenue_sources SET status = 'error', last_error = ${String(fail.detail ?? "파싱 실패").slice(0, 300)}, last_error_kind = 'parse',
+        fail_count = fail_count + 1, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND source = ${source} ${accountId ? sql`AND account_id = ${accountId}` : sql``}`).catch(() => {});
+    }
+    await writeAudit({
+      tenantId: tid, action: "runner_job_failed", actorType: "system", target: `runner_job:${jobId}`,
+      detail: { kind, errorKind: "parse", ourBug: true, shotKey: fail.shotKey ?? null, detail: String(fail.detail ?? "").slice(0, 200) },
+      riskLevel: "high",
+    });
+    return { ok: true, status: "failed", reason: "parse" };
+  }
+
   /* ── 실패 ───────────────────────────────────────────────── */
   if (result.ok !== true) {
     const fail = result as RunnerReportFail;
@@ -442,8 +505,11 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
         result = ${jsonb({ ok: false, errorKind: block.kind, detail: block.detail ?? null, shotKey: fail.shotKey ?? null, attempts })},
         due_at = ${canRetry ? sql`NOW() + (${Math.min(30, attempts * 5)} * INTERVAL '1 minute')` : sql`NULL`},
         updated_at = NOW() WHERE id = ${jobId}`);
-    if (accountId) await signalAccountError(tid, accountId, block, pieceId || null);
-    if (!canRetry && kind.startsWith("publish.") && pieceId) await failPublishPiece(tid, pieceId, block, fail.shotKey);
+    const sig = accountId ? await signalAccountError(tid, accountId, block, pieceId || null) : { handedOver: false };
+    /* 🔴 정지 승계로 piece 가 **다른 계정에 넘어갔으면** 실패로 닫지 않는다 — 2026-09-14 승계 실증(verify-failover)에서
+       B 의 reassignSlots 가 만든 **새 슬롯을 내 failPublishPiece 가 awaiting_manual 로 덮어썼다**(순서 사고).
+       실패는 계정의 것이지 글의 것이 아니다. 넘어가지 못한 piece(받을 계정 없음)만 awaiting_manual 로 남긴다. */
+    if (!canRetry && kind.startsWith("publish.") && pieceId && !sig.handedOver) await failPublishPiece(tid, pieceId, block, fail.shotKey);
     if (!canRetry && block.needsHuman && accountId && !kind.startsWith("publish.")) {
       await notify(tid, "account_relogin", "계정 확인이 필요해요", block.message, "/app/accounts.html");
     }
@@ -491,6 +557,43 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
       return { ok: false, status: "done", reason: fin.reason, verified };
     }
     return { ok: true, status: "done", postId: fin.postId, verified };
+  }
+
+  /* ── 수익 스크랩 잡(P1R3 §2.1) — 🔴 DB 쓰기는 `upsertRevenueRows` 하나뿐(§5). 행이 0개면 «없음»이지 «0원»이 아니다. ── */
+  if (REVENUE_SCRAPE_KINDS.has(kind)) {
+    const source = kind === "revenue.adpost" ? "adpost" : kind === "revenue.adfit" ? "adfit" : "clip";
+    const rows = Array.isArray(okBody.revenueRows) ? okBody.revenueRows : [];
+    // 러너가 accountId 를 안 실었으면 잡의 계정으로 귀속한다(러너는 자기 계정 id 를 잡에서 받는다).
+    const stamped = rows.map((r) => ({ ...r, source: r.source || source, ...(accountId && !r.accountId ? { accountId } : {}) }));
+    const up = stamped.length ? await upsertRevenueRows(tid, stamped, "runner") : { written: 0, rejected: 0, rejectedReasons: [] as string[] };
+    // 소스 행 갱신 — 성공(행 0개여도 «읽긴 읽었다»는 성공이다 · 애드포스트 미등록이 그 예).
+    await q(sql`UPDATE revenue_sources SET status = 'connected', last_sync_at = NOW(), last_ok_at = NOW(), last_error = NULL, last_error_kind = NULL, fail_count = 0,
+        ${okBody.adpostState ? sql`config = config || ${jsonb({ adpostState: okBody.adpostState })},` : sql``} updated_at = NOW()
+      WHERE tenant_id = ${tid} AND source = ${source} ${accountId ? sql`AND account_id = ${accountId}` : sql``}`).catch(() => {});
+    // 계정의 매체 상태(계약 §1.5b · monetize.adpostState) — 화면이 «미등록/심사중/승인»을 그리는 값.
+    if (okBody.adpostState && accountId) {
+      await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb({ adpostState: okBody.adpostState, adpostCheckedAt: new Date().toISOString() })}, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = ${accountId}`).catch(() => {});
+    }
+    await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+      result = ${jsonb({ ok: true, rows: stamped.length, written: up.written, rejected: up.rejected, rejectedReasons: up.rejectedReasons, adpostState: okBody.adpostState ?? null, shotKey: okBody.shotKey ?? null })},
+      updated_at = NOW() WHERE id = ${jobId}`);
+    if (up.rejected) {
+      await writeAudit({ tenantId: tid, action: "revenue_rows_rejected", actorType: "system", target: `runner_job:${jobId}`,
+        detail: { kind, rejected: up.rejected, reasons: up.rejectedReasons }, riskLevel: "medium" });
+    }
+    return { ok: true, status: "done", reason: `rows=${stamped.length} written=${up.written} rejected=${up.rejected}` };
+  }
+
+  /* ── 애드센스 연결 상태 읽기(P1R3 §2.2 · 읽기만) ── */
+  if (kind === "ads.setup_tistory" || kind === "ads.status_blogger") {
+    if (okBody.adsense && accountId) {
+      await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb({ adsenseLinked: !!okBody.adsense.linked, adsenseState: okBody.adsense.state ?? null, adsenseCheckedAt: new Date().toISOString() })}, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = ${accountId}`).catch(() => {});
+    }
+    await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+      result = ${jsonb({ ok: true, adsense: okBody.adsense ?? null, shotKey: okBody.shotKey ?? null })}, updated_at = NOW() WHERE id = ${jobId}`);
+    return { ok: true, status: "done" };
   }
 
   // 통계·생존 확인 잡 — posts.stats 에 병합(read→merge→write · jsonb 부분갱신 금지).

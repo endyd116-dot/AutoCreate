@@ -241,6 +241,8 @@ export async function enqueueJob(
 export { reapStaleJobs, fleetState as runnerFleetState } from "../runner-jobs";
 /** 크론 `slots.learn` 이 API 채널 통계를 물어보는 이름(포트 `FetchStatsFn`) — null = «못 물어봤다»(0 으로 적지 않는다 · AC-9). */
 export { fetchStats } from "./stats";
+/** 워드프레스 광고 위젯 삽입/되돌리기(P1R3 v3.4 §2.2 · 백업 = accounts.monetize.wpAdWidget). */
+export { insertWordpressAdWidget, removeWordpressAdWidget, adsenseWidgetHtml } from "./ads";
 
 /** 편의 진입점 — 행 로드까지 B2 가 한다. B 의 publisher 는 id 만 주면 된다. */
 export async function publishPieceById(tenantId: number, pieceId: number, opts: PublishOpts = {}): Promise<PublishResult> {

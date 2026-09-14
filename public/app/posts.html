@@ -6,20 +6,21 @@
 <title>올라간 글 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=6">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/schedule.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">올라간 글</span><span class="sp"></span></div>
-<div class="seg" id="seg"><button type="button" data-tab="all" class="on">전체</button><button type="button" data-tab="published">올라감</button><button type="button" data-tab="awaiting_manual">직접 올리기</button></div>
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/schedule.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
+<div class="step-h"><h1>올라간 글</h1></div>
+<div class="seg" id="seg"><button type="button" data-tab="all" class="on">전체</button><button type="button" data-tab="published">발행됨</button><button type="button" data-tab="awaiting_manual">직접 올리기</button></div>
 <div id="list"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=5"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=6"></script>
 <script>
 (async () => {
 await UI.boot("schedule");

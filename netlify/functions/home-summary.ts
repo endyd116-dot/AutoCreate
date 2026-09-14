@@ -6,6 +6,7 @@ import { json, jsonError } from "../../lib/response";
 import { requireUser } from "../../lib/guards";
 import { userContext } from "../../lib/auth-service";
 import { db } from "../../db/index";
+import { homeRevenue } from "../../lib/revenue/aggregate";
 import { sql } from "drizzle-orm";
 export const config = { path: "/api/home-summary" };
 type Row = Record<string, unknown>;
@@ -43,7 +44,8 @@ export default async (req: Request): Promise<Response> => {
     const [unread] = await q(sql`SELECT COUNT(*) AS c FROM notifications WHERE tenant_id = ${tid} AND read_at IS NULL`);
     const settings = (ctx.tenant.settings || {}) as Record<string, unknown>;
     return json({ ok: true,
-      revenue: { today: n(rev?.today), month: n(rev?.month), lastMonthSameDay: n(rev?.last_same) },
+      // 계약 P1R3 §1.4b(5): 새 키 4개(확정/예상은 합치지 않는다 · DESIGN §9.3) + 옛 키 보존(호환).
+      revenue: { ...(await homeRevenue(tid)), today: n(rev?.today), month: n(rev?.month), lastMonthSameDay: n(rev?.last_same) },
       // pieceId 는 있을 때만(계약 v2.7) — 홈 «봐주세요» 행이 piece.html?id= 로 바로 간다.
       todaySlots: todaySlots.map((s) => ({ id: n(s.id), channel: s.channel, status: s.status, publishAt: s.publish_at, handle: s.handle, title: s.title, ...(s.piece_id ? { pieceId: n(s.piece_id) } : {}) })),
       todo, notices, unread: n(unread?.c),

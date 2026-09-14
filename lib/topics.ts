@@ -49,6 +49,26 @@ export function competitionOf(compIdx: string | undefined): "low" | "mid" | "hig
 export function channelDifficulty(ch: string | null | undefined): number {
   switch (String(ch ?? "")) { case "naver_blog": return 1.2; case "tistory": return 1.25; case "blogger": case "wordpress": return 1.2; case "threads": return 0.95; default: return 1.1; }
 }
+/**
+ * 성과 팩터 표(P1R3 §1.6 · DESIGN §9.3 «수익 나는 소재 학습»). 🔴 가중치는 여기 한 곳.
+ *   perf(0~1) = 조회 정규화 × views + 수익 정규화 × revenue. 수익 정규화 = clamp01(30일 piece 수익 / revenueFullKrw).
+ *   🔴 표본(30일 수익 행 수) < minSamples 면 **수익 항을 넣지 않는다(중립)** — 0원 구간을 «나쁜 소재»로 단정하지 않는다.
+ *   점수식은 perf 를 곱수로 쓴다: performanceMultiplier(null)=1.0(모름) · perf 0→multMin · perf 1→multMax.
+ */
+export const PERFORMANCE_WEIGHTS = { views: 0.4, revenue: 0.6, minSamples: 5, revenueFullKrw: 30_000, multMin: 0.7, multMax: 1.3 } as const;
+export function performanceOf(viewsNorm: number | null, revenueKrw: number | null, samples: number): number | null {
+  const v = viewsNorm === null ? null : clamp01(viewsNorm);
+  const useRev = revenueKrw !== null && samples >= PERFORMANCE_WEIGHTS.minSamples;
+  if (v === null && !useRev) return null;
+  if (!useRev) return Math.round(v! * 100) / 100;                       // 수익 표본 부족 → 조회만(수익 항 중립)
+  const r = clamp01(revenueKrw! / PERFORMANCE_WEIGHTS.revenueFullKrw);
+  const vv = v ?? r;                                                   // 조회를 모르면 수익만으로
+  return Math.round((vv * PERFORMANCE_WEIGHTS.views + r * PERFORMANCE_WEIGHTS.revenue) * 100) / 100;
+}
+export function performanceMultiplier(perf: number | null | undefined): number {
+  if (perf === null || perf === undefined || !Number.isFinite(perf)) return 1;
+  return PERFORMANCE_WEIGHTS.multMin + (PERFORMANCE_WEIGHTS.multMax - PERFORMANCE_WEIGHTS.multMin) * clamp01(perf);
+}
 export function computeScore(f: { demand: number; intent: number; pain: number; compGap: number; difficulty: number; seasonal: number; performance?: number }): number {
   const raw = (f.demand * f.intent * f.pain * f.compGap) / Math.max(0.1, f.difficulty) * f.seasonal * (f.performance ?? 1);
   return Math.round(raw * 1000) / 10;

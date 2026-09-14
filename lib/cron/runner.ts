@@ -32,6 +32,7 @@ import { reviewDeadlineStep } from "./review-deadline";
 import { publisherStep } from "./publisher";
 import { learnStep } from "./learn";
 import { reapStep } from "./reap";
+import { revenueSyncStep } from "./revenue-sync";
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -49,6 +50,7 @@ export const STEPS: CronStep[] = [
   produceStep,         // hourly(produceHour 시각에만) · D-3 제작
   reviewDeadlineStep,  // hourly · 검수창 마감
   learnStep,           // hourly · 발행 성과 회수
+  revenueSyncStep,     // hourly(06:00 KST · 쿠팡 13:00) · 수익 회수(P1R3)
   publisherStep,       // 5m · due 발행
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];

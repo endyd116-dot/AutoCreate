@@ -14,6 +14,11 @@ import * as naverBlog from "./channels/naver-blog.mjs";
 import * as tistory from "./channels/tistory.mjs";
 import * as sessionLogin from "./channels/session-login.mjs";
 import * as postAlive from "./channels/post-alive.mjs";
+import * as revenueAdpost from "./channels/revenue-adpost.mjs";
+import * as revenueAdfit from "./channels/revenue-adfit.mjs";
+import * as revenueClip from "./channels/revenue-clip.mjs";
+import * as adsSetupTistory from "./channels/ads-setup-tistory.mjs";
+import * as adsStatusBlogger from "./channels/ads-status-blogger.mjs";
 
 /** 시각은 저장 UTC · 사람에게 보이는 것은 KST(DESIGN §13.5). 콘솔·파일명은 사람이 보는 것이므로 KST. */
 export const kst = (d = new Date()) =>
@@ -27,7 +32,16 @@ const HANDLERS = {
   "session.verify": sessionLogin,
   "verify.post_alive": postAlive,
   "revenue.stats": postAlive,
+  // P1R3 §2.1 수익 스크랩 3종 · §2.2 광고 상태 읽기 2종
+  "revenue.adpost": revenueAdpost,
+  "revenue.adfit": revenueAdfit,
+  "revenue.clip": revenueClip,
+  "ads.setup_tistory": adsSetupTistory,
+  "ads.status_blogger": adsStatusBlogger,
 };
+/** 수익 스크랩 잡 — report 에 `revenueRows` 를 싣는다(서버가 upsert · 러너는 DB 를 안 본다). */
+const REVENUE_KINDS = new Set(["revenue.adpost", "revenue.adfit", "revenue.clip"]);
+const ADS_KINDS = new Set(["ads.setup_tistory", "ads.status_blogger"]);
 
 /** 사람이 봐야 하는 잡(창이 떠야 한다). */
 const NEEDS_HEADED = new Set(["session.login", "session.verify"]);
@@ -83,6 +97,14 @@ export async function runJob({ chromium, token, job, headed, dryRun }) {
       if (!out?.externalUrl) return { ok: false, errorKind: "unknown", detail: "올리기는 했는데 글 주소를 회수하지 못했어요." };
       return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [] };
     }
+    if (REVENUE_KINDS.has(job.kind)) {
+      /* 🔴 행 0개도 성공이다(미가입·미등록 = 정직한 «없음»). 0원 행을 지어내지 않는다(AC-9). */
+      const rows = Array.isArray(out?.revenueRows) ? out.revenueRows : [];
+      return { ok: true, revenueRows: rows, ...(out?.adpostState ? { adpostState: out.adpostState } : {}), shotKey, notes: out?.notes ?? [] };
+    }
+    if (ADS_KINDS.has(job.kind)) {
+      return { ok: true, adsense: out?.adsense ?? { linked: false, state: "unknown" }, shotKey, notes: out?.notes ?? [] };
+    }
     if (job.kind === "verify.post_alive" || job.kind === "revenue.stats") {
       return { ok: true, stats: { ...(out?.stats ?? {}), ...(out?.alive === false ? { alive: false } : {}) }, notes: out?.notes ?? [] };
     }
@@ -108,7 +130,10 @@ export async function processJob({ chromium, token, job, headed, dryRun }) {
     /* 🔴 드라이런은 **보고하지 않는다** — 서버 상태를 건드리면 «발행됐다»가 되거나 잡이 소모된다.
        대신 큐에 되돌려 놓는다(release). 카나리는 하트비트로 따로 보고한다. */
     await release(token, job.id, "dry-run(임시저장까지)").catch(() => {});
-    log(result.ok ? `  ✓ ${label} 임시저장까지 성공 — 큐에 되돌림` : `  ✗ ${label} ${result.errorKind}: ${result.detail}`);
+    const what = REVENUE_KINDS.has(job.kind)
+      ? `수익 ${result.revenueRows?.length ?? 0}행${result.adpostState ? ` · 상태 ${result.adpostState}` : ""} 읽음(서버에 안 보냄)`
+      : ADS_KINDS.has(job.kind) ? `광고 상태 ${result.adsense?.state ?? "?"} 읽음(서버에 안 보냄)` : "임시저장까지 성공";
+    log(result.ok ? `  ✓ ${label} ${what} — 큐에 되돌림` : `  ✗ ${label} ${result.errorKind}: ${result.detail}`);
     /* 🔴 드라이런에서도 notes 를 찍는다. 종전엔 발행 경로에서만 찍어서, **폴백이 몇 건 났는지**를
        검증에서 볼 수 없었다 — «성공»만 보고 서식이 깎인 걸 놓친다(2026-09-14 실측: 소제목 크기 미적용을
        스냅샷을 눈으로 보고서야 알았다). 검증은 폴백 건수를 숫자로 봐야 한다. */

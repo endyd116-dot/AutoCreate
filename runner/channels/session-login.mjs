@@ -15,6 +15,14 @@ const BLOCK = (kind, msg) => Object.assign(new Error(`[block:${kind}] ${msg}`), 
 const WAIT_MS = Number(process.env.AC_LOGIN_WAIT_MS ?? 5 * 60_000);
 
 const TARGETS = {
+  /* 구글(블로거 대시보드 «수익» 탭 읽기용). 자동 로그인은 절대 안 한다 — 봇 탐지·2단계가 가장 세다. 사람이 창에서 한다. */
+  blogger: {
+    loginUrl: "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fwww.blogger.com%2F",
+    homeUrl: "https://www.blogger.com/",
+    done: (page) => /blogger\.com/i.test(page.url()) && !/accounts\.google\.com/i.test(page.url()),
+    cookieUrls: ["https://www.blogger.com", "https://accounts.google.com", "https://google.com"],
+    tips: ["구글 계정으로 로그인해 주세요(2단계가 있으면 휴대폰에서 승인)."],
+  },
   naver_blog: {
     loginUrl: "https://nid.naver.com/nidlogin.login",
     homeUrl: "https://blog.naver.com",

@@ -22,7 +22,9 @@
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { jsonb, utcDate } from "../db-util";
-import { clamp01 } from "../topics";
+import { clamp01, performanceOf, performanceMultiplier, computeScore, demandScore, intentScore, compGapScore, channelDifficulty } from "../topics";
+import { seasonalFor } from "../kr-calendar";
+import { pieceRevenue30d } from "../revenue/aggregate";
 import { type CronStep, type StepOutcome } from "./base";
 import { enqueueRunnerJob, fetchPostStats, viaOf } from "./publish-port";
 
@@ -32,7 +34,7 @@ export const MILESTONES = [6, 24, 72] as const;
 export type Milestone = typeof MILESTONES[number];
 
 /** 조회수 → 0~1 성과값. 1만 조회 = 1.0(로그 스케일 — 100 과 1,000 의 차이가 1,000 과 10,000 의 차이와 같게). */
-export function performanceOf(views: number): number {
+export function viewsNorm(views: number): number {
   if (!(Number(views) > 0)) return 0;
   return Math.round(clamp01(Math.log10(Number(views) + 1) / Math.log10(10000)) * 100) / 100;
 }
@@ -55,8 +57,7 @@ export const learnStep: CronStep = {
       FROM posts po LEFT JOIN pieces p ON p.id = po.piece_id
       WHERE po.tenant_id = ${ctx.tid} AND po.published_at > NOW() - interval '5 days'
       ORDER BY po.published_at DESC LIMIT 200`);
-    if (!posts.length) return { changed: 0, skipped: 0 };
-
+    // posts 가 없어도 수익 되먹임은 돈다(수동 입력 수익은 posts 없이도 piece 에 붙는다) — 조기 반환하지 않는다.
     let synced = 0, queued = 0, unavailable = 0, notDue = 0, deferred = 0;
     const topicBest = new Map<number, number>();
 
@@ -70,7 +71,7 @@ export const learnStep: CronStep = {
 
       // 마일스톤이 안 됐어도 이미 잰 조회수는 소재 되먹임에 쓴다(재조회 0).
       const known = n(stats.views);
-      if (po.topic_id && known > 0) topicBest.set(n(po.topic_id), Math.max(topicBest.get(n(po.topic_id)) ?? 0, performanceOf(known)));
+      if (po.topic_id && known > 0) topicBest.set(n(po.topic_id), Math.max(topicBest.get(n(po.topic_id)) ?? 0, viewsNorm(known)));
       if (!m) { notDue++; continue; }
 
       const via = await viaOf(String(po.channel));
@@ -99,18 +100,34 @@ export const learnStep: CronStep = {
       await q(sql`UPDATE posts SET stats = ${jsonb(next)} WHERE tenant_id = ${ctx.tid} AND id = ${n(po.id)}`);
       synced++;
       const views = n(next.views);
-      if (po.topic_id && views > 0) topicBest.set(n(po.topic_id), Math.max(topicBest.get(n(po.topic_id)) ?? 0, performanceOf(views)));
+      if (po.topic_id && views > 0) topicBest.set(n(po.topic_id), Math.max(topicBest.get(n(po.topic_id)) ?? 0, viewsNorm(views)));
     }
 
-    // 소재 되먹임 — factors 는 jsonb 병합(다른 팩터를 덮지 않는다).
+    /* 소재 되먹임(P1R3 §1.6 · DESIGN §9.3) — 조회(위) + **수익**(30일 piece 수익 → topic 합산)을 `lib/topics.performanceOf` 한 식으로 섞는다.
+       🔴 수익 표본 5건 미만이면 수익 항은 중립(조회만) — 0원 구간을 «나쁜 소재»로 단정하지 않는다. 가중치는 topics.ts 팩터 표 한 곳.
+       factors 는 jsonb 병합(다른 팩터를 덮지 않는다) + **점수 재계산**(성과가 곱수로 들어가야 편성이 실제로 바뀐다 — 저장만 하고 아무도 안 읽는 칸 금지 · PITFALLS #11). */
+    const revByTopic = await revenueByTopic(ctx.tid);
+    const topicIds = new Set<number>([...topicBest.keys(), ...revByTopic.keys()]);
     let fed = 0;
-    for (const [topicId, perf] of topicBest) {
-      const r = await q(sql`UPDATE topics SET factors = factors || ${jsonb({ performance: perf })}
-        WHERE tenant_id = ${ctx.tid} AND id = ${topicId} AND COALESCE((factors->>'performance')::numeric, 0) < ${perf} RETURNING id`);
-      fed += r.length;
+    for (const topicId of topicIds) {
+      const rev = revByTopic.get(topicId);
+      const perf = performanceOf(topicBest.has(topicId) ? topicBest.get(topicId)! : null, rev ? rev.krw : null, rev ? rev.samples : 0);
+      if (perf === null) continue;
+      const [t] = await q(sql`SELECT title, angle, channel_hint, factors FROM topics WHERE tenant_id = ${ctx.tid} AND id = ${topicId}`);
+      if (!t) continue;
+      const f = (t.factors && typeof t.factors === "object" ? t.factors : {}) as Record<string, unknown>;
+      const prev = Number(f.performance); const prevSamples = n(f.performanceSamples);
+      if (Number.isFinite(prev) && Math.abs(prev - perf) < 0.005 && prevSamples === (rev?.samples ?? 0)) continue;   // 변화 없음 — 쓰지 않는다(멱등)
+      const season = seasonalFor(`${String(t.title)} ${String(t.angle ?? "")}`);
+      const score = computeScore({ demand: demandScore(Number(f.volume) || undefined), intent: intentScore((f.intent as "info" | "commercial" | "mixed") || "info"),
+        pain: Math.max(0.3, Math.min(1, Number(f.pain) || 0.5)), compGap: compGapScore(f.competition === "low" ? "낮음" : f.competition === "mid" ? "중간" : f.competition === "high" ? "높음" : undefined),
+        difficulty: channelDifficulty(String(t.channel_hint ?? "")), seasonal: season.weight, performance: performanceMultiplier(perf) });
+      await q(sql`UPDATE topics SET factors = factors || ${jsonb({ performance: perf, performanceSamples: rev?.samples ?? 0, revenueKrw30d: rev?.krw ?? 0 })}, score = ${score}
+        WHERE tenant_id = ${ctx.tid} AND id = ${topicId}`);
+      fed++;
     }
     if (fed) {
-      const [chk] = await q(sql`SELECT jsonb_typeof(factors) AS t FROM topics WHERE tenant_id = ${ctx.tid} AND id = ${[...topicBest.keys()][0]}`);
+      const [chk] = await q(sql`SELECT jsonb_typeof(factors) AS t FROM topics WHERE tenant_id = ${ctx.tid} AND id = ${[...topicIds][0]}`);
       if (chk && chk.t !== "object") console.error("[cron/learn] topics.factors jsonb_typeof !== object", chk);   // 쓴 직후 확인까지가 쓰기다(PITFALLS #1)
     }
 
@@ -153,5 +170,20 @@ export async function bestHoursFor(tid: number): Promise<Map<number, number[]>> 
       out.set(aid, [...(out.get(aid) ?? []), n(r.h)]);
     }
   } catch (e) { console.warn("[cron/learn] bestHoursFor 실패 — 기본표 순서를 쓴다", String((e as Error)?.message ?? e).slice(0, 120)); }
+  return out;
+}
+
+/** 30일 piece 수익을 topic 으로 합산(§1.6). samples = 수익 행 수(5건 미만이면 호출부가 중립). */
+async function revenueByTopic(tid: number): Promise<Map<number, { krw: number; samples: number }>> {
+  const byPiece = await pieceRevenue30d(tid);
+  const out = new Map<number, { krw: number; samples: number }>();
+  if (!byPiece.size) return out;
+  const ids = [...byPiece.keys()];
+  const rows = await q(sql`SELECT id, topic_id FROM pieces WHERE tenant_id = ${tid} AND topic_id IS NOT NULL AND id IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`);
+  for (const r of rows) {
+    const t = n(r.topic_id), pr = byPiece.get(n(r.id)); if (!pr) continue;
+    const cur = out.get(t) ?? { krw: 0, samples: 0 };
+    cur.krw += pr.krw; cur.samples += pr.samples; out.set(t, cur);
+  }
   return out;
 }

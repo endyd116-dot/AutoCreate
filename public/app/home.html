@@ -6,7 +6,7 @@
 <title>홈 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=6">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <div class="shell">
@@ -28,8 +28,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=5"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=6"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
@@ -50,9 +50,9 @@
   } else numEl.textContent = (mon || yst) ? "오늘은 아직이에요" : "아직 연결된 곳이 없어요";
   const tip = UI.$("#tip");
   if (yst != null && (conf || est || mon)) { const d = conf - yst;
-    tip.innerHTML = yst ? `이번 달 ${UI.won(mon)} · 어제보다 <b>${d >= 0 ? "+" : "−"}${UI.won(Math.abs(d))}</b>` : `이번 달 ${UI.won(mon)}`;
+    tip.innerHTML = yst ? `이번 달 ${UI.won(mon)} · 어제보다 <b class="${d >= 0 ? "up" : ""}">${d >= 0 ? "+" : "−"}${UI.won(Math.abs(d))}</b>` : `이번 달 ${UI.won(mon)}`; // [v4] 증가만 초록
   } else if (mon || rev.lastMonthSameDay) { const d2 = mon - (rev.lastMonthSameDay || 0);
-    tip.innerHTML = `이번 달 ${UI.won(mon)} · 지난달 같은 날보다 <b>${d2 >= 0 ? "+" : "−"}${UI.won(Math.abs(d2))}</b>`;
+    tip.innerHTML = `이번 달 ${UI.won(mon)} · 지난달 같은 날보다 <b class="${d2 >= 0 ? "up" : ""}">${d2 >= 0 ? "+" : "−"}${UI.won(Math.abs(d2))}</b>`;
   } else tip.textContent = "수익 매체를 연결하면 여기에 매일 쌓여요";
   // 체험 배너
   if (r.trial.status === "trial") { const b = UI.$("#trialBanner"); b.hidden = false; b.className = "banner info"; b.innerHTML = `<span>무료 체험 ${r.trial.daysLeft}일 남았어요 · 코인 ${UI.num(r.coins)}개</span><a href="/app/plans.html">요금제 보기</a>`; }
@@ -60,13 +60,13 @@
   // 해야 할 일
   const todo = UI.$("#todo");
   if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;
-  else todo.innerHTML = `<div class="gt">해야 할 일 ${r.todo.length}</div>` + r.todo.map((t) => `<a class="row tap" href="${t.link}">${UI.kindMark(t.kind, t.tone)}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.desc)}</span></div>${UI.chev}</a>`).join("");
+  else todo.innerHTML = r.todo.map((t) => `<a class="row tap" href="${t.link}">${UI.kindMark(t.kind, t.tone)}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.desc)}</span></div>${UI.chev}</a>`).join("");
   // 알림 안 읽음 표시(종)
   if (r.unread) { const bell = UI.$(".appbar .ic"); if (bell) { bell.style.position = "relative"; bell.insertAdjacentHTML("beforeend", '<span class="dot danger" style="position:absolute;top:7px;right:7px"></span>'); bell.setAttribute("aria-label", `알림 ${r.unread}개`); } }
   // 오늘 편성
   const PILL = { ...UI.SLOT_STATUS, scheduled: ["off", "예약"], approved: ["off", "예약"] };
   const slots = UI.$("#slots");
-  slots.innerHTML = `<div class="gt">오늘 편성 <a href="/app/schedule.html">편성표</a></div>` + (r.todaySlots.length
+  slots.innerHTML = `<div class="gt">오늘 편성 <a href="/app/schedule.html">전체</a></div>` + (r.todaySlots.length
     ? r.todaySlots.map((s) => { const p = PILL[s.status] || ["off", s.status]; return `<a class="row tap" href="${s.status === "in_review" && s.pieceId ? `/app/piece.html?id=${s.pieceId}` : "/app/schedule.html"}"><span class="mk ${s.channel}">${(UI.CH[s.channel] || {}).mark || "?"}</span><div class="l"><span class="t">${UI.esc(s.title || "소재 정하는 중")}</span><span class="d">${s.handle ? "@" + UI.esc(s.handle) : "계정 자동"} · ${UI.timeKST(s.publishAt) || "시간 자동"}</span></div><span class="pill ${p[0]}">${p[1]}</span></a>`; }).join("")
     : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘 나갈 글이 없어요</span><span class="d">자동 편성을 켜면 내일부터 채워져요</span></div></div>`);
   // 자동 편성 토글

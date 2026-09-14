@@ -60,7 +60,7 @@ input,textarea,select{font:inherit;color:inherit}
 .appbar .ic{width:40px;height:40px;display:grid;place-items:center;border-radius:12px;color:var(--ink)}
 .appbar .ic svg{width:24px;height:24px}
 .appbar .ic:active{background:var(--press)}
-.appbar .sp{width:40px}
+.appbar .sp,.appbar .ph{width:40px} /* [v4] 앱바엔 제목 텍스트가 없다 — 좌 자리(.ph)·우 자리(.sp)만 */
 @media (min-width:641px){ .appbar{position:static;background:transparent;height:auto;padding:0 0 8px} .page.white .appbar{background:transparent} }
 
 /* 2 BigNumber — 문장형 헤드라인 */
@@ -70,13 +70,13 @@ input,textarea,select{font:inherit;color:inherit}
 .hl .num em{font-style:normal;color:var(--money)}
 .hl .num .est{font-size:15px;font-weight:600;color:var(--muted);letter-spacing:0;white-space:nowrap}
 .hl .tip{font-size:13px;color:var(--muted);margin-top:6px}
-.hl .tip b{color:var(--money);font-weight:700}
+.hl .tip b{color:var(--ink);font-weight:700} .hl .tip b.up{color:var(--money)} /* [v4] 증가만 초록 · 감소는 잉크 중립(빨강 금지) */
 @media (min-width:641px){ .hl .num{font-size:40px} }
 
 /* 그룹 섹션 */
 .group{background:var(--surface);border-radius:var(--r-sec);padding:6px 4px}
 .group .gt{font-size:13px;color:var(--muted);font-weight:600;padding:10px 16px 4px;display:flex;justify-content:space-between;align-items:center}
-.group .gt a{color:var(--muted);font-weight:500;font-size:12.5px}
+.group .gt a{color:var(--muted);font-weight:500;font-size:12.5px} .group .gt a::after{content:" ›"} /* [v4] 섹션당 1개 · 2~3자 + › (토스 «전체보기 ›») */
 
 /* 3 ListRow */
 .row{display:flex;align-items:center;gap:12px;min-height:var(--row-h);padding:6px 16px;border-radius:14px;transition:background var(--dur) var(--ease),transform var(--dur) var(--ease);width:100%;text-align:left}
@@ -96,6 +96,9 @@ input,textarea,select{font:inherit;color:inherit}
 .mk.threads{background:var(--th)} .mk.tiktok{background:var(--tk)}
 .mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money)} .mk.warn{background:var(--warn-soft);color:var(--warn)} .mk.danger{background:var(--danger-soft);color:var(--danger)}
 .mk svg{width:20px;height:20px} .mk.sm{width:28px;height:28px;border-radius:9px;font-size:12px}
+/* [v4] 수익 소스 마크 = 서비스 색(시안 v3 · 채널 마크와 같은 급) */
+.mk.src-adsense{background:#4285F4} .mk.src-youtube{background:var(--y)} .mk.src-coupang{background:#E53238} .mk.src-adpost{background:var(--n)} .mk.src-adfit{background:#FEE500;color:var(--ink)} .mk.src-clip{background:var(--c)}
+.mk.src-aliexpress{background:#FF4747} .mk.src-linkprice{background:#1E64C8} .mk.src-meta{background:#0866FF} .mk.src-tiktok{background:var(--tk)} .mk.src-x{background:#000} .mk.src-sponsor,.mk.src-manual{background:var(--brand-soft);color:var(--ink)}
 
 /* 4 StatusChip */
 .pill{font-size:12px;font-weight:700;border-radius:8px;padding:3px 8px;white-space:nowrap;flex:none}

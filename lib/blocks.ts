@@ -70,8 +70,28 @@ export function renderBlocksHtml(blocks: Block[], channel: string, images: Rende
       }
     }
   }
-  void channel;
-  return out.join("\n");
+  return insertAdSlots(out.join("\n"), channel);
+}
+
+/** 광고 자리를 넣지 않는 채널 — 네이버 블로그는 애드포스트가 자동 삽입한다(계약 P1R3 §2.2). 영상·SNS 채널은 본문 광고 자리가 없다. */
+export const NO_AD_SLOT_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "naver_clip", "threads", "instagram", "reels", "tiktok", "youtube_shorts"]);
+/**
+ * insertAdSlots — 본문에 «애드센스 자리» 2곳을 비워 둔다(계약 P1R3 §2.2 · DESIGN §9.0): **첫 소제목(h2) 뒤 · 마지막 문단(p) 앞**.
+ *   `<div class="ad-slot" data-slot="mid"></div>` / `data-slot="end"`. 광고 코드 실체화는 B2(발행층)가 한다 — 여기는 자리만.
+ *   멱등: 이미 `.ad-slot` 이 있으면 손대지 않는다. h2 가 없으면 mid 는 첫 문단 뒤. 사용자가 고친 HTML(pieces-update)은 건드리지 않는다.
+ */
+export function insertAdSlots(html: string, channel: string): string {
+  if (!html || NO_AD_SLOT_CHANNELS.has(String(channel)) || /class="ad-slot"/.test(html)) return html;
+  const MID = `<div class="ad-slot" data-slot="mid"></div>`, END = `<div class="ad-slot" data-slot="end"></div>`;
+  let s = html;
+  const h2 = /<\/h2>/i.exec(s);
+  if (h2) s = s.slice(0, h2.index + h2[0].length) + "\n" + MID + s.slice(h2.index + h2[0].length);
+  else { const p1 = /<\/p>/i.exec(s); if (p1) s = s.slice(0, p1.index + p1[0].length) + "\n" + MID + s.slice(p1.index + p1[0].length); }
+  // 마지막 «문단» = class 없는 마지막 <p>(태그·요약·고지처럼 class 가 붙은 p 는 문단이 아니다). 없으면 맨 끝.
+  const ps = [...s.matchAll(/<p(?![^>]*class=)[^>]*>/gi)];
+  if (ps.length) { const last = ps[ps.length - 1]; s = s.slice(0, last.index) + END + "\n" + s.slice(last.index); }
+  else s = s + "\n" + END;
+  return s;
 }
 
 /** HTML → 평문(게이트·유사도 판정용). */
