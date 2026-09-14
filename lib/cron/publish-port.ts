@@ -65,7 +65,7 @@ export type ReapStaleJobsFn = (staleMin?: number) => Promise<ReapResult>;
    **모듈이 생긴 뒤에도 런타임에 여전히 «missing» 으로 보였다**(로컬 스모크 실측: `publisher` 가 `connector:"missing"` 보고 · 발행 0건).
    «있는데 연결 안 된 커넥터»는 조용한 실패라 제일 나쁘다 — 모듈이 존재하는 지금은 정적 import 가 정답이다.
    포트는 이제 **타입 경계 + 미구현 정직 반환**만 맡는다(러너/API 판단·잡 적재는 여전히 전부 B2 안 · 계약 §10). */
-import { publishPieceById as b2PublishPieceById, publishViaOf as b2PublishViaOf, enqueueJob as b2EnqueueJob, reapStaleJobs as b2ReapStaleJobs } from "../publish/index";
+import { publishPieceById as b2PublishPieceById, publishViaOf as b2PublishViaOf, enqueueJob as b2EnqueueJob, reapStaleJobs as b2ReapStaleJobs, fetchStats as b2FetchStats } from "../publish/index";
 
 interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn; reapStaleJobs?: ReapStaleJobsFn; fetchStats?: FetchStatsFn }
 
@@ -74,7 +74,7 @@ let bound: Bound | null = {
   publishViaOf: b2PublishViaOf as unknown as PublishViaOfFn,
   enqueueJob: b2EnqueueJob as unknown as EnqueueJobFn,
   reapStaleJobs: b2ReapStaleJobs as unknown as ReapStaleJobsFn,
-  // fetchStats: B2 미제공 — API 채널 통계는 `learn` 이 «못 물어봤다»로 센다(조회 0 으로 적지 않는다).
+  fetchStats: b2FetchStats as unknown as FetchStatsFn, // B2 제공(2026-09-14) — null = «못 물어봤다»(조회 0 으로 적지 않는다)
 };
 
 /** 구현을 갈아끼울 때만 쓴다(테스트·예외 상황). 평상시엔 위 정적 결합이 정본이다. */
