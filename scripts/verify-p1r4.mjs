@@ -77,6 +77,26 @@ async function main() {
     rec("coins-balance included/purchased 분리 · 합 = balance", bal.json?.ok === true && bal.json.included + bal.json.purchased === bal.json.balance, JSON.stringify({ i: bal.json?.included, p: bal.json?.purchased, b: bal.json?.balance }));
     const q1 = await call(jar, "/api/coin-refund-request", { body: { orderNo: "AC-COIN-C4-" + STAMP, quoteOnly: true } });
     rec("환불 quoteOnly → quote{eligible,reason,maxRefundKrw,unusedCoins,usedCoins,packCoins}", q1.json?.quote && ["eligible", "maxRefundKrw", "unusedCoins", "usedCoins", "packCoins"].every((k) => k in q1.json.quote), `${q1.status} ${JSON.stringify(q1.json).slice(0, 200)}`);
+    // 환불 5규칙(견적 · KICC 무관): 유료 팩 결제 완료 상태를 심는다 — 인보이스(kind coin · period=주문번호 · paid) + purchased 원장 로트(+100 · 365일)
+    const ORD = `AC-COIN-${TID}-50-${STAMP}`;
+    await s`INSERT INTO coin_orders (tenant_id, order_no, pack_id, coins, krw, vat_krw, total_krw, status) VALUES (${TID}, ${ORD}, 'pack_50k', 100, 50000, 5000, 55000, 'paid')`;
+    const invIns = await s`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, paid_at, order_no) VALUES (${TID}, 'coin', ${ORD}, 50000, 5000, 55000, 'paid', NOW(), ${ORD}) RETURNING id`.catch((e) => ({ err: String(e.message) }));
+    rec("코인 영수증 INSERT(period=주문번호 22자+) 가능 — invoices.period 폭(0007 DDL)", Array.isArray(invIns) && invIns[0]?.id > 0, Array.isArray(invIns) ? `invoice ${invIns[0]?.id} · period ${ORD.length}자` : String(invIns.err).slice(0, 100));
+    await s`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, item, ref, reason, expires_at) VALUES (${TID}, 'purchase', 'purchased', 100, NULL, ${ORD}, 'C R4 충전', NOW() + interval '365 days')`;
+    const rq1 = (await call(jar, "/api/coin-refund-request", { body: { orderNo: ORD, quoteOnly: true } })).json?.quote;
+    rec("환불 ①②④ 미사용 100코인 → maxRefund 55,000(단가 = 결제액(부가세 포함)÷코인 550) · eligible", rq1?.eligible === true && rq1.unusedCoins === 100 && rq1.maxRefundKrw === 55000 && rq1.unitKrw === 550 && rq1.packCoins === 100, JSON.stringify(rq1).slice(0, 160));
+    await s`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, item, ref, reason) VALUES (${TID}, 'consume', 'purchased', -30, 'blog', ${"piece:c4" + STAMP}, 'C R4 사용')`;
+    const rq2 = (await call(jar, "/api/coin-refund-request", { body: { orderNo: ORD, quoteOnly: true } })).json?.quote;
+    rec("환불 ① 30 사용 → 미사용 70 · 38,500(미사용분 전액 · 부분 환불 없음)", rq2?.eligible === true && rq2.usedCoins === 30 && rq2.unusedCoins === 70 && rq2.maxRefundKrw === 38500, JSON.stringify(rq2).slice(0, 160));
+    await s`UPDATE invoices SET paid_at = NOW() - interval '8 days' WHERE tenant_id = ${TID} AND period = ${ORD}`;
+    const rq3 = (await call(jar, "/api/coin-refund-request", { body: { orderNo: ORD, quoteOnly: true } })).json?.quote;
+    rec("환불 ③ 7일 지남 → window(7일 룰 우선)", rq3?.eligible === false && rq3.reason === "window", JSON.stringify(rq3).slice(0, 120));
+    await s`UPDATE invoices SET paid_at = NOW() WHERE tenant_id = ${TID} AND period = ${ORD}`;
+    await s`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, item, ref, reason) VALUES (${TID}, 'consume', 'purchased', -70, 'blog', ${"piece:c4b" + STAMP}, 'C R4 사용')`;
+    const rq4 = (await call(jar, "/api/coin-refund-request", { body: { orderNo: ORD, quoteOnly: true } })).json?.quote;
+    rec("환불 ⑤ 전부 사용 → used(돌려줄 것 0)", rq4?.eligible === false && rq4.reason === "used", JSON.stringify(rq4).slice(0, 120));
+    const rx = await call(jar, "/api/coin-refund-request", { body: { orderNo: ORD } });
+    rec("환불 실행(KICC 없음) → not_configured 정직(200 ok:false) 또는 quote 거절", rx.json?.ok === false && ["not_configured", "quote"].includes(rx.json?.step), `${rx.status} ${rx.json?.step} ${rx.json?.reason || ""}`);
     const q2 = await call(jar, "/api/coin-refund-request", { body: { orderNo: "AC-COIN-none" } });
     rec("없는 주문 환불 → 400 quote + reason", q2.status === 400 && q2.json?.step === "quote" && !!q2.json?.reason, `${q2.status} ${q2.json?.step}/${q2.json?.reason}`);
   }
@@ -269,7 +289,7 @@ async function main() {
       rec("ops-invoices/receivables/billing-keys 모양(3금액 · tenantName)", inv.json?.ok === true && Array.isArray(inv.json.invoices) && typeof inv.json.total === "number" && (inv.json.invoices[0] ? ["amountKrw", "vatKrw", "totalKrw", "tenantName"].every((k) => k in inv.json.invoices[0]) : true) && rcv.json?.ok === true && Array.isArray(rcv.json.receivables) && bks.json?.ok === true && Array.isArray(bks.json.keys), `${inv.status}/${rcv.status}/${bks.status} n=${inv.json?.invoices?.length} recv ${rcv.json?.receivables?.length} keys ${bks.json?.keys?.length}`);
       await s`INSERT INTO coin_orders (tenant_id, order_no, pack_id, coins, krw, status) VALUES (${TID}, ${"AC-COIN-C4-" + STAMP}, 'pack_trial', 10, 5000, 'paid') ON CONFLICT DO NOTHING`;
       const rf = await call(oj, "/api/ops-refund", { body: { orderNo: "AC-COIN-C4-" + STAMP } });
-      rec("ops-refund(KICC 없음) → not_configured 정직 또는 원장 회수", rf.json?.step === "not_configured" || rf.json?.ok === true, `${rf.status} ${JSON.stringify(rf.json).slice(0, 120)}`);
+      rec("ops-refund: 인보이스 없는 주문 → 400 quote/not_paid 정직(0원 환불 없음)", rf.status === 400 && rf.json?.step === "quote", `${rf.status} ${JSON.stringify(rf.json).slice(0, 120)}`);
       // 채널 status 변경 → 고객 그리드 즉시
       const chs = (await call(oj, "/api/ops-channels")).json?.channels || [];
       const thr = chs.find((c) => c.key === "threads");
