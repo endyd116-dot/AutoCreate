@@ -17,7 +17,7 @@
 
 # ══ 크론 우산 2개(계약 P1R2 §1 · DESIGN §5B.7) ══
 #   스텝은 `lib/cron/runner.ts STEPS` 에만 적힌다 — 여기에는 **함수의 주기**만(AM 관례: 스텝 추가 ≠ 함수 추가).
-#   수동 강제 실행은 `POST /api/cron-tick-*?secret=$CRON_SECRET`(또는 헤더 `x-cron-secret`).
+#   수동 강제 실행은 `POST /api/cron-run?every=5m|hourly&secret=$CRON_SECRET`(계약 v2.10 · scheduled 함수는 HTTP 불가 · PITFALLS AC-12①).
 [functions."cron-tick-5m"]
   schedule = "*/5 * * * *"
 
