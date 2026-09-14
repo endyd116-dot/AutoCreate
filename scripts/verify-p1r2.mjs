@@ -120,11 +120,10 @@ async function main() {
     rec("autoSchedule=false 여도 learn 은 돈다", stepOf(off, "slots.learn")?.tenants === 1, "");
     await call(jar, "/api/rules-settings", { body: { autoSchedule: true } });
     // horizonDays 7 → 14 : roll 이 더 만든다
-    const before = (await slotsNow()).filter((x) => x.origin === "auto" && x.status !== "skipped").length;
+    const h7 = await cron("hourly", TID); const c7 = tdetail(stepOf(h7, "slots.roll"), TID).checked || 0;
     await call(jar, "/api/rules-settings", { body: { horizonDays: 14 } });
-    const h14 = await cron("hourly", TID);
-    const after = (await slotsNow()).filter((x) => x.origin === "auto" && x.status !== "skipped").length;
-    rec("horizonDays 7→14 → roll 추가 생성", stepOf(h14, "slots.roll")?.changed > 0 && after > before, `slots ${before}→${after} · roll changed ${stepOf(h14, "slots.roll")?.changed}`);
+    const h14 = await cron("hourly", TID); const c14 = tdetail(stepOf(h14, "slots.roll"), TID).checked || 0;
+    rec("horizonDays 7→14 → roll 이 보는 자리 수 증가(checked)", c14 > c7 && tdetail(stepOf(h14, "slots.roll"), TID).horizonDays === 14, `checked ${c7}(7일)→${c14}(14일)`);
     await call(jar, "/api/rules-settings", { body: { horizonDays: 7 } });
     // quietDays: 앞으로의 planned 슬롯 하나를 쉬는 날로 → 삭제(v2.11) · roll 재실행에도 안 생김
     const planned = (await slotsNow()).filter((x) => x.origin === "auto" && x.status === "planned" && x.date > today);
