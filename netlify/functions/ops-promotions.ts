@@ -28,7 +28,7 @@ const tsOrNull = (v: string | null): SQL => (v ? sql`${v}::timestamptz AT TIME Z
 export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
-  const o = requireAdmin(req, ["admin", "super_admin"]); if (!o.ok) return o.res;
+  const o = await requireAdmin(req, ["admin", "super_admin"]); if (!o.ok) return o.res;
   const ip = clientIp(req);
   try {
     /* ── 이벤트 ── */

@@ -7,6 +7,9 @@
  *   GET  /api/ops-audit-search?q&tenant&actor&actorType&action&risk&from&to&page → { ok, rows:[…], page, total }  // R1 ops-audit 확장 · KST 기간
  *        actorType = operator|customer|system — 🔴 DB 칸(audit_logs.actor_type)은 user|operator|system 이라 «customer ↔ user» 로 옮긴다.
  *        응답의 rows[].actorType 도 같은 어휘(customer)로 내보낸다 — 거르는 말과 보이는 말이 다르면 화면이 못 맞춘다.
+ *   GET  /api/ops-backup-status → { ok, checked, checkedAt, ageDays, stale, neon:{ok,retentionDays,detail}, r2:{ok,versioning,detail} }
+ *        P1R6 §3.3 — 백업·복구 «상태 한 줄». 값은 `scripts/check-backup.mts` 가 남긴 마지막 감사 행에서 읽는다.
+ *        🔴 확인과 표시까지가 범위(자동 복구 없음) · 확인한 적 없으면 «확인 필요»(추측 금지).
  *   Operator = { id, email, name, role, ssoSubject?, active, lastLoginAt? }   // DB 저장은 operators.sso_sub
  */
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -17,7 +20,7 @@ import { q } from "../../lib/accounts";
 import { sql } from "drizzle-orm";
 import { utcDate } from "../../lib/db-util";
 
-export const config = { path: ["/api/ops-operators", "/api/ops-operator-role", "/api/ops-operator-disable", "/api/ops-audit-search"] };
+export const config = { path: ["/api/ops-operators", "/api/ops-operator-role", "/api/ops-operator-disable", "/api/ops-audit-search", "/api/ops-backup-status"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 const ROLES = new Set(["operator", "admin", "super_admin"]);
@@ -37,7 +40,34 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     /* 🔴 운영진·감사는 전부 super_admin 전용(§0.2). */
-    const g = requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
+    const g = await requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
+
+    /* P1R6 §3.3 — 백업·복구 «상태 한 줄»(운영진·감사 아래).
+       🔴 **확인과 표시까지**가 범위다(자동 복구 없음 — 사고 때 사람이 판단할 자리를 기계가 먼저 밟지 않는다).
+       값은 `scripts/check-backup.mts` 가 남긴 **마지막 감사 행**에서 읽는다. 행이 없으면 «확인 필요»다 —
+       🔴 «아마 켜져 있을 것»을 상태로 적지 않는다(추측 금지). 오래된 확인도 그 시각을 그대로 보여 준다. */
+    if (path.endsWith("/ops-backup-status")) {
+      const [row] = await q(sql`SELECT detail, created_at FROM audit_logs
+        WHERE action = 'ops_backup_check' ORDER BY id DESC LIMIT 1`);
+      if (!row) {
+        return json({ ok: true, checked: false, checkedAt: null,
+          neon: { ok: false, retentionDays: null, detail: "아직 확인한 적이 없어요." },
+          r2: { ok: false, versioning: null, detail: "아직 확인한 적이 없어요." },
+          hint: "scripts/check-backup.mts 를 돌리면 이 줄이 채워져요." });
+      }
+      const d = (row.detail && typeof row.detail === "object" ? row.detail : {}) as Record<string, unknown>;
+      const at = utcDate(row.created_at)?.toISOString() ?? null;
+      const ageDays = at ? Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000) : null;
+      /* 🔴 `r2Versioning` 어휘를 따로 낸다(메인 교차확인 2026-09-15):
+           "Enabled" 켜짐 · "Disabled" 꺼짐 · **"unsupported" R2 가 기능 자체를 안 준다** · null 못 물어봤다(확인 필요).
+         «기능 없음»을 «확인 필요»로 그리면 **아무도 끝낼 수 없는 숙제**가 된다 — 화면이 둘을 다르게 말해야 한다. */
+      const r2 = (d.r2 && typeof d.r2 === "object" ? d.r2 : null) as Record<string, unknown> | null;
+      const r2Versioning = r2?.versioning === undefined ? null : r2.versioning;
+      return json({ ok: true, checked: true, checkedAt: at, ageDays,
+        // 30일 넘게 안 봤으면 «오래됐다»고 말한다 — 확인해 둔 적 있다는 사실만으로 안심시키지 않는다.
+        stale: ageDays !== null && ageDays > 30,
+        neon: d.neon ?? null, r2: d.r2 ?? null, r2Versioning });
+    }
 
     if (path.endsWith("/ops-audit-search")) {
       // R1 /api/ops-audit(테넌트·limit) 를 확장: 자유어(action/target)·테넌트·actor·위험도·KST 기간.

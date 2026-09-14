@@ -1,8 +1,12 @@
-# R5-B 인수인계 — «소재 하나가 계정별 쇼츠가 된다» 생성 두뇌 (B-1 → 새 세션)
+# B-1 인수인계 — 영상(R5) · 내보내기·공유 카드(R6) (B-1 → 새 세션)
 
-> 작성 2026-09-15 · 작성자 = B-1(`autocreate-b-8a`) · 워크트리 **`../AutoCreate-B1`** · 브랜치 **`feature/p1r5-back`**
-> 계약 정본 `docs/active/2026-09-15-P1R5-contract.md`(v5.1~v5.3) · 조사 정본 `docs/active/2026-09-14-R5-presurvey-video.md`(A~G · §D 결정 8)
-> 이 문서는 «어디까지 했고 다음이 무엇인지»다. 규칙은 CLAUDE.md, 설계는 DESIGN.md, 키 이름은 계약서가 정본.
+> 🔴 **이 문서를 읽는 순서**: **§0(지금 상태) → §8~§12(현재)** 를 먼저 읽어라.
+> **§1~§7 은 2026-09-15 R5 중간 시점의 스냅숏**이다 — «어떻게 여기까지 왔나»를 남겨 둔 기록이고, 그 안의 «미착수»·«못 정한 것»은
+> **전부 끝났다**(어디서 끝났는지는 각 절 머리에 적어 뒀다). 지금 할 일을 §2 에서 찾으면 안 된다.
+
+> 계약 정본 **R5** `docs/active/2026-09-15-P1R5-contract.md`(v5.6 — §1 이 B-1 몫) · **R6** `docs/active/2026-09-15-P1R6-contract.md`(v6.0 — §2 가 B-1 몫)
+> 조사 정본 `docs/active/2026-09-14-R5-presurvey-video.md`(A~G) · 규칙은 CLAUDE.md, 설계는 DESIGN.md, **키 이름은 계약서가 정본**.
+> 이력: §1~§7 = 2026-09-15 R5 중간(작성 `autocreate-b-8a` · 브랜치 그때 `feature/p1r5-back`) · §8~§12 = R5 완료 + R6 §2 완료(2026-09-15).
 
 ---
 
@@ -10,11 +14,12 @@
 
 | | |
 |---|---|
-| 브랜치 | `feature/p1r5-back`(베이스 main `0f3ec44` = R4 배포본 · rebase 완료) |
-| HEAD | **`17f86c5`** + 이 문서 커밋(아래 §7) |
-| tsc | `npx tsc --noEmit` → **`lib/video/render-queue.ts` 2건만**(자리 표시 — B2 본체 머지하면 사라진다). 그 밖 0 |
-| DDL | `drizzle/0008-r5-video.sql` **Neon 적용 완료(5/5)** — shorts_templates · feature_flags · posts.status |
-| 진행률 | 계약 §1 기준 **약 75%**(생성 두뇌·배선 완료 · 남은 것 = §5 아래) |
+| 워크트리 | **`../AutoCreate-B1`** — 🔴 이 폴더에서 세션을 띄워라(다른 B 가 `AutoCreate-B` 를 쓴다 · 폴더를 공유하면 커밋이 섞인다) |
+| 브랜치 | `feature/p1r6-back1`(베이스 main · R5 분 `feature/p1r5-back` 은 전부 머지됨) |
+| 상태 | **R5 §1 100% · R6 §2 100%** — 둘 다 main 머지 완료 · 워킹트리 clean |
+| tsc | `npx tsc --noEmit` **0건** |
+| DDL | `drizzle/0008-r5-video.sql` 적용 완료 · ⚠️ **0008 이 둘**(B2 것과) — **다음 번호는 0009** · R6 에서 B-1 이 더한 DDL 은 **없다**(내보내기 상태는 `tenants.settings.export` jsonb) |
+| 보고 머리말 | `■ B-1 (영상·내보내기) · 폴더 AutoCreate-B1 · 브랜치 <브랜치> · 지금: <한 줄>` — 사장님이 창만 보고 구분하신다(메인 지시) |
 
 ---
 
@@ -60,7 +65,9 @@
 
 ---
 
-## 2. 다음 할 일 — 순서와 «어디까지 생각해 뒀는지»
+## 2. [스냅숏 · 전부 완료] 그때의 «다음 할 일»
+
+> ✅ ①~④ **전부 끝났다**(§8 참조). 남겨 둔 이유는 «어디까지 생각해 두고 넘겼나»가 다음 설계에 쓸모가 있어서다.
 
 ### ① `topics-reference`(계약 §1.11) — 미착수
 - 경로 `POST /api/topics-reference { url }` → Gemini 가 URL 을 훅·서사·스타일로 분해 → `shorts_templates` 1행 → `{ ok:true, template:{ id, name, structure, hook, style } }`.
@@ -98,7 +105,9 @@
 - **slot kind**: 영상 규칙·슬롯은 `shorts`(글 크론이 집어가지 않게) · 플랜 `maxRules` 는 kind 무관 **규칙 개수 합산**.
 - **게이트 우회 0**: 영상도 `guardSlot`·`requireWritable`·`requireAiBudget` 를 글과 같은 경로로 탄다.
 
-## 4. 아직 못 정한 것(새 세션이 정하거나 메인에 물을 것)
+## 4. [스냅숏 · 전부 결정됨] 그때의 미결 5건
+
+> ✅ 1~3 = 계약 v5.4~v5.6(§8-A) · 4 엔드카드 = R6 §2.3 으로 화면까지 · 5 클립 30초 = R6 §2.3 «서버가 말한다».
 
 1. **자동 편성(`produce` 스텝)이 영상 슬롯을 집는다** — 지금 `lib/cron/produce.ts` 는 slot.kind 를 안 보고 전부 집는다. 영상 1편 = $6 이라 «자동으로 하루 한 편»이 켜지면 달러 캡에 금방 닿는다(캡이 막긴 한다 — `step:"budget"` → 슬롯은 자리에 남고 알림). R5 범위로 둘지(그대로) · kind='post' 로 좁힐지 **메인 결정 필요**.
 2. **토킹 포맷의 정지 이미지** — `CutPlan.mode:"still"` 을 만들어 뒀지만 이미지 생성 경로(`ai-image.ts` 재사용)를 아직 안 붙였다. 지금은 still 컷이 **스킵**되어 그 구간 클립이 없다(러너가 imageKey 없이 받으면 검은 화면). 둘 중 하나: ①still 도 `generateImage` 로 한 장 굽고 `piece_assets kind='image'` → payload.imageKey ②토킹 포맷을 R6 로 미룸.
@@ -106,7 +115,9 @@
 4. **엔드카드 URL** — payload.overlay.endcard 에 text 만 넣는다. «설명란 링크» 컷(§6.2 수익 슬롯)은 문구만 있고 URL 은 안 싣는다(쇼핑 태그 메타는 키 후).
 5. **naver_clip 30초 상한** — `clampSecondsForChannel` 로 자르지만, 디렉터가 60초를 요청해도 조용히 30 으로 내린다. 화면에 «클립은 30초까지예요»를 A 가 보여줄지 계약에 없다.
 
-## 5. 함정 메모(PITFALLS 에 아직 안 올림 — 새 세션이 밟으면 그때 AC-N 으로)
+## 5. [스냅숏] 그때의 함정 메모
+
+> ✅ 대부분 PITFALLS 에 올라갔다(AC-26·31·35·37·38·39). 아래는 원문 그대로 둔다.
 
 - **Omni 편집 왕복에 `video task` 를 같이 보내면 400** — AM 이 이걸 몰라 «1회 대안 재생성»이 실물에서 한 번도 성공한 적이 없었다(원장엔 retried 만 남아 고친 것처럼 보였다). `omni.ts` 에 주석으로 박아 뒀다.
 - **Veo `durationSeconds` 는 4·6·8 만** — 5를 보내면 400인데 에러 문구가 «between 4 and 8»이라 거짓말처럼 읽힌다.
@@ -123,7 +134,7 @@
 - 유튜브 커넥터 이름 = `publishYoutubeShorts(piece, account) → PublishResult`(메인 확정).
 - A 어휘: `VideoStage`(meta.stage) · `posts.status += uploaded_private` · PieceSpec.video · 훅 5종 · 팔레트 5종.
 
-## 7. 재개 절차(새 세션 첫 5분)
+## 7. [스냅숏] 그때의 재개 절차 — **§12 를 대신 보라**
 
 ```
 cd ../AutoCreate-B1 && git branch --show-current   # feature/p1r5-back
@@ -132,3 +143,80 @@ cat docs/active/2026-09-15-P1R5-contract.md        # §1 전부 · §0.1 결정 
 cat docs/active/R5-B-HANDOFF.md                    # 이 문서
 ```
 그다음 §2 의 ①→②→③ 순서. 커밋은 자유(push 금지) · 진행률 % 한 줄은 계약 §1 기준.
+
+---
+---
+
+# ▣ 현재 (2026-09-15 · R5 완료 + R6 §2 완료)
+
+## 8. R5 마무리 + R6 §2 — 한 일
+
+### 8-A. R5 잔여(§1 100%)
+| 무엇 | 어디 | 한 줄 |
+|---|---|---|
+| 원가 관문 재작성 | `lib/video/cost.ts` | 🔴 **새 캡을 만들지 않는다** — R4 `checkAiCostCap`(플랜 일일 KRW)을 부르고 판정만 2단계: **소프트**(일일 상한 초과 = 통과 + 운영 알림 1건/일) · **하드**(일일 × 3 = 차단 + 환급) · 전역 월 ₩1.4M. 🔴 [v5.6] **하드는 «이미 쓴 것»만 본다**(예상치를 더하면 trial 이 60초 1편도 못 만든다 — 실측 ₩8,989 vs 하드 ₩9,000) |
+| 토킹 still 컷 | `providers/index.ts generateStill` · `gen.ts` | 스킵하면 `clipKey`·`imageKey` 둘 다 없는 장면이 러너로 가 **검은 화면**. payload 조립 후 «둘 다 없는 장면»이 하나라도 있으면 **내보내지 않고 failPiece** |
+| 토킹 컷 수 | `writing-contracts.shortsFormOf` · `scenes.buildCutPlans` | 계약 §1.3 = «B-roll 3~4 · **나머지 정지**»인데 코드는 컷 **총수**를 3~4 로 읽었다 → 60초가 컷 4개(창 15초)인데 클립 상한은 8초 → 7초가 빈다. 이제 초÷5(60→12컷) · B-roll 은 고르게 흩은 3~4 |
+| `topics-reference` | `lib/video/reference.ts` · `netlify/functions/topics-reference.ts` | AM `shorts-reference.ts` 이식 — 🔴 **저작권 게이트**(`sanitizeTemplate` 화이트리스트 복사 + 길이 캡)가 이 파일의 존재 이유. 소재 영상 힌트 → `factors.structureTemplateId` → 디렉터 `meta.structure` → 대본 «서사 단계» 전 구간 배선 |
+| 검수 영상 분기 | `content-approve.ts recheckVideoPiece` · `pieces.ts` | 말(대본+설명란)은 글과 **같은 `runGate` 8키** · 고지는 영상 3종 · 화면 품질은 `gate_report.judge` 를 **읽어** 싣는다(여기서 심사를 다시 돌리지 않는다) · `judgeBlockers`(P0)가 승인·발행을 막는다 |
+| 고지 재검사 배선 | `content-approve` + `publish-video-background` | `checkVideoDisclosure` 호출처가 judge 1곳뿐이었다(AC-29) → **승인·발행 직전 2곳**에 배선. 걸리면 올리지 않고 `awaiting_manual` |
+| 스텁 누수 | `providers/index.ts` · `tts.ts` | `generateClip`·`synthesizeGemini` 에 `VIDEO_PROVIDER_STUB` 분기가 **없어서** 스텁 스모크가 실호출로 돈을 썼다(실측 $0.4) |
+| BGM | `scripts/seed-bgm.mjs` · `lib/video/bgm.ts` | FreePD → **archive.org 미러**(freepd.com 폐쇄) 12곡(무드 4 × 3) → R2 · `--check`(HEAD 만 · R2 자격 불요) · 🔴 `BGM_LICENSE_VERIFIED=1` 없으면 **무조건 무음** |
+| AC-35 | `pieces.ts` regenerate | `requireAiBudget` 은 판정이 아니라 **명령**(알림 INSERT) — 영상은 부르지도 않는다 |
+| AC-39 | `tts.ts narrationKey`·`scriptGen` | 나레이션·자막 키에 **대본 세대 + provider**. 🔴 R2 는 버전 관리가 없다(AC-37) — **덮어쓸 수 있는 키 0** 이 이번 조사의 결론 |
+
+### 8-B. R6 §2
+| 무엇 | 어디 | 한 줄 |
+|---|---|---|
+| 내보내기 ZIP | `lib/export/{zip,r2-multipart,markdown,build,state}.ts` · `netlify/functions/export{,-background}.ts` | 의존 0(`node:zlib`) ZIP 라이터 + **R2 멀티파트 8MB 스트리밍**(다 만들어 올리면 배경 함수 메모리를 넘긴다) · 용량 상한은 **쓰면서 센다**(추정 금지) · 시간 예산 11분 · 상태는 `tenants.settings.export`(새 표 0) · 🔴 **만료된 URL 은 주지 않는다** |
+| 공유 카드 | `lib/share-card/render.ts` · `netlify/functions/share-card.ts` | SVG → **resvg PNG**(래스터라이저는 `toPng` 한 함수 뒤) · `loadSystemFonts:false` + 우리 OTF(리눅스엔 한글 글꼴이 없다) · 🔴 **핸들·채널 꺼짐이 기본** · 0원이면 안 만든다 |
+| R5 잔여 2 | `writing-contracts.videoChannelSpec` · `accounts-list` · `pieces-get` | 채널·포맷 상한을 **서버가 말한다**(화면 상수 0) · 자동 하향 `clampedFrom` · 엔드카드 노출 |
+
+## 9. 지금 열려 있는 것 — 다음 세션이 이어받을 것
+
+1. **C 의 R6 검증 결과 대기**. 결함이 `lib/video/**`·`lib/export/**`·`lib/share-card/**` 로 오면 B-1 몫이다.
+2. **외부 선결(코드는 다 되어 있다 · «키 꽂으면 즉시»)**
+   - `TYPECAST_API_KEY` — 없으면 Gemini 폴백(어절 시각 없음 → 자막 균등 분할 · `meta.tts.provider` 에 남는다).
+   - 유튜브 앱 심사 — 심사 전엔 `privacyStatus:"private"` 고정(`posts.status='uploaded_private'`).
+   - 유튜브 쇼핑 제휴 승인 — 엔드카드 `url`·쇼핑 태그 메타. **문구·자리는 이미 있다**.
+3. **릴스 90초**(Phase 5) — `VIDEO_CHANNEL_MAX_SEC.reels` 를 60→90 으로 올리면 **그 자리에서 열린다**(clamp·화면·심사가 전부 그 표를 읽는다).
+4. **관리형 러너 팜**(Phase 4) — `publish.youtube_shorts` 잡 kind 는 **어휘만 예약**돼 있다(지금 유튜브 업로드는 서버 API).
+
+## 10. 결정(§3 에 더하는 것 · 다시 묻지 말 것)
+
+- **원가**: 코인(고객) ↔ 원가 캡(우리)은 **별개 관문** · 소프트는 고객에게 **보이지 않는다** · 하드는 «이미 쓴 것» 기준 · 환율 없으면 **못 재므로 막지 않는다**(`fxMissing`).
+- **`require~` 가드**(AC-35): 판정이 아니라 명령일 수 있다 — 반환만 분기하지 말고 **호출 자체를 가른다**. 단 «실제로 막는 자리»(`topics*`)는 알림이 **맞는** 동작이라 그대로 둔다.
+- **R2 키**(AC-37·39): **덮어쓸 수 있는 결정론 키 0**. 새 산출물을 R2 에 쓸 땐 `safeKey`(타임스탬프+난수)나 **세대 폴더**를 쓴다.
+- **내보내기 상태**는 `tenants.settings.export`(소재 뽑기 관례) — 테넌트당 1건이라 새 표를 만들지 않았다.
+- **ZIP 은 부분 재개가 불가능**하다(스트림 한 줄기) → R5 의 «이어달리기» 자리는 «처음부터 다시»(상한 2). «기간을 좁혀 주세요» 류는 **재시도하지 않는다**(다시 걸어도 같은 결과).
+- **공유 카드 핸들 숨김**은 취향이 아니라 안전이다 — 핸들이 박힌 이미지를 올리는 건 «이 계정은 자동화»를 공개 게시하는 것과 같다(DESIGN §16·§7.3).
+
+## 11. 함정(§5 에 더하는 것 · 내가 실제로 밟은 것만)
+
+- **AC-38 제어문자**: 소스에 유니코드 이스케이프를 쓸 때 **파일에 실제 제어 바이트가 박히지 않았는지** 확인해라(`grep -P '[\x00-\x1f]'`). 박히면 파일이 **바이너리로 취급**되어 git diff·grep·번들러가 조용히 달라진다. 실제로 `build.ts` 가 그렇게 됐다.
+- **PITFALLS #4 재발**: `timestamp without tz` 는 문자열로 온다 — `new Date(문자열)` 은 **로컬 시각**으로 읽는다. 정본은 `lib/db-util.ts utcDate` 하나. SQL 쪽 KST 필터가 맞으면 «파일은 다 들어왔는데 **폴더 이름만** 틀린» 모양이 되어 더 안 보인다.
+- **`volumedetect` 출력은 stderr**다 — stdout 만 받으면 늘 «측정 실패»로 읽힌다.
+- **숫자만 보지 말고 그림을 열어 봐라**: 공유 카드는 단언 전건 통과 상태에서 «가운데가 텅 빈 카드»·«알약 밖으로 나간 한글 칩» 두 건이 남아 있었다. PNG 를 실제로 보고서야 잡혔다.
+- **한글 글자 폭 ≠ 라틴**: 32px 에서 한글 ≈ 32px · 영문/숫자 ≈ 17px. 한 계수로 재면 상자 밖으로 나간다.
+
+## 12. 재개 절차(새 세션 첫 5분) — §7 대신 이것
+
+```
+cd ../AutoCreate-B1 && git branch --show-current && git status --porcelain   # 🔴 폴더 확인(다른 B 가 AutoCreate-B 를 쓴다)
+git merge main && npx tsc --noEmit                                          # 0건이 정상
+cat docs/active/R5-B-HANDOFF.md                                             # 이 문서 §0 → §8~§12
+cat docs/active/2026-09-15-P1R6-contract.md                                 # §2 가 B-1 몫 · §5 담당
+sed -n '1,80p' docs/rules/PITFALLS.md                                       # AC-1~AC-39
+```
+스모크(전부 `scripts/_smoke/` · **커밋 금지** · 테넌트를 스스로 만들고 지운다):
+```
+npx tsx scripts/_smoke/r5-b1-caps.mts      # (없으면) r6-b1-caps — 채널·포맷 상한·clampedFrom
+npx tsx scripts/_smoke/r6-b1-zip.mts       # ZIP 을 OS 압축 해제기로 연다
+npx tsx scripts/_smoke/r6-b1-card.mts      # 카드 PNG 4종(그림을 눈으로 볼 것)
+npx tsx scripts/_smoke/r6-b1-ttskey.mts    # AC-39 세대 키
+npx --yes tsx --env-file=.env scripts/_smoke/r6-b1-export.mts        # 내보내기 라이브(교차 누수 0)
+npx --yes tsx --env-file=.env scripts/_smoke/r5-b1-gates.mts         # 원가 관문 실판정
+VIDEO_PROVIDER_STUB=1 npx --yes tsx --env-file=.env scripts/_smoke/r5-b1-bgm-mix.mts   # 렌더+BGM 믹스
+```
+> 🔴 스모크는 **미커밋**이라 워크트리에만 있다. 새 PC 로 옮기거나 지웠다면 이 문서의 목적(무엇을 재는가)만 보고 다시 짜라 —
+> 재는 것은 ①교차 누수 0 ②스텁에서 실호출 0(`ai_usage.model='stub'`) ③덮어쓸 수 있는 키 0 ④그림을 눈으로 확인.

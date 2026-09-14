@@ -56,7 +56,7 @@ async function notifyCustomer(tid: number, ticketId: number, subject: string, ki
 export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
-  const o = requireAdmin(req); if (!o.ok) return o.res;
+  const o = await requireAdmin(req); if (!o.ok) return o.res;
   const ip = clientIp(req);
   try {
     /* ── 티켓함 ── */
@@ -115,7 +115,7 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/ops-macros")) {
       if (req.method === "GET") { const rows = await q(sql`SELECT * FROM macros ORDER BY active DESC, sort, id`); return json({ ok: true, macros: rows.map(macroRow), total: rows.length }); }
       if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
-      const g = requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: number; title?: string; text?: string; tags?: unknown; active?: boolean; sort?: number }>(req);
       const id = n(b.id);
       if (id && typeof b.active === "boolean" && b.title === undefined && b.text === undefined) {
@@ -137,7 +137,7 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/ops-faqs")) {
       if (req.method === "GET") { const rows = await q(sql`SELECT * FROM faqs ORDER BY sort, id`); return json({ ok: true, faqs: rows.map(faqRow), total: rows.length }); }
       if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
-      const g = requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: number; q?: string; a?: string; order?: number; public?: boolean; category?: string; delete?: boolean }>(req);
       const id = n(b.id);
       if (id && b.delete === true) { await q(sql`DELETE FROM faqs WHERE id = ${id}`); await writeAudit({ tenantId: null, action: "ops_faq_delete", actorType: "operator", actorId: o.ops.oid, ip, target: `faq:${id}` }); return json({ ok: true, deleted: id }); }

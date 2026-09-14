@@ -18,6 +18,9 @@
       <div class="field"><label for="name">이름 또는 닉네임</label><input class="input" id="name" name="name" type="text" autocomplete="nickname" maxlength="80" placeholder="예: 두현"><div class="help"></div></div>
       <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
       <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div>
+      <!-- [P1R6] 추천 코드 — 접힌 줄(있는 사람만 편다) · 400 step:"referral" 이면 이 칸에 사람말 -->
+      <button type="button" id="refT" class="row tap" style="padding:10px 0;background:none;min-height:44px"><div class="l"><span class="t" style="font-size:14px">추천 코드가 있어요</span><span class="d">친구 코드를 넣으면 친구의 첫 결제 뒤 둘 다 코인을 받아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+      <div class="field" id="refF" hidden><label for="referralCode">추천 코드</label><input class="input" id="referralCode" name="referralCode" autocomplete="off" maxlength="8" placeholder="예: AC7K2M9Q" style="text-transform:uppercase"><div class="help"></div></div>
       <!-- [P1R4] 가입 동의 4(§19 · 계약 §3.2) — 하나라도 없으면 가입 안 됨 · consents 로 기록 -->
       <label class="chk" style="padding-bottom:2px"><input type="checkbox" id="all"> <span><b>모두 동의해요</b></span></label>
       <div style="border-top:1px solid var(--line);margin:4px 0"></div>
@@ -31,17 +34,24 @@
   </div>
 </main>
 <script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
   const f = UI.$("#f");
   const all = UI.$("#all"), each = UI.$$("[data-c]");
+  const refT = UI.$("#refT"), refF = UI.$("#refF");
+  refT.onclick = () => { refF.hidden = !refF.hidden; refT.hidden = !refF.hidden ? true : false; if (!refF.hidden) UI.$("#referralCode").focus(); };
   all.onchange = () => each.forEach((c) => { c.checked = all.checked; }); each.forEach((c) => c.onchange = () => { all.checked = each.every((x) => x.checked); });
   UI.form(f, async (d) => {
     ["email", "password"].forEach((k) => UI.fieldError(f, k, ""));
     const consents = { terms: !!d.terms, privacy: !!d.privacy, paidTerms: !!d.paidTerms, automationNotice: !!d.automationNotice };
     if (!Object.values(consents).every(Boolean)) { UI.toast("네 가지 약관에 모두 동의해 주세요"); return; }
-    const r = await UI.api("/api/auth-register", { body: { email: d.email, password: d.password, name: d.name || undefined, consents }, noRedirect: true });
-    if (!r.ok) { UI.fieldError(f, r.step === "exists" ? "email" : "password", r.error || "가입에 실패했어요."); return; }
-    UI.done("가입했어요", () => { location.href = "/onboarding.html"; });
+    const body = { email: d.email, password: d.password, name: d.name || undefined, consents };
+    const code = String(d.referralCode || "").trim().toUpperCase(); if (code) body.referralCode = code;
+    const r = await UI.api("/api/auth-register", { body, noRedirect: true });
+    if (!r.ok) { if (r.step === "referral") { refF.hidden = false; refT.hidden = true; UI.fieldError(f, "referralCode", r.error || "그런 추천 코드는 없어요."); return; }
+      UI.fieldError(f, r.step === "exists" ? "email" : "password", r.error || "가입에 실패했어요."); return; }
+    // 🔴 인증은 문이 아니라 배너 — 메일이 못 갔어도 가입은 통과시키고 다음 화면에서 «다시 보내기»를 띄운다(mailSent:false)
+    UI.done(r.referral && r.referral.applied ? `가입했어요 · 추천 코인은 첫 결제 뒤에` : "가입했어요", () => { UI.go(r.mailSent === false ? "/onboarding.html?mail=0" : "/onboarding.html"); });
   });
 </script>
 </body>

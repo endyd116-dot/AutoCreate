@@ -35,7 +35,7 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/ops-notices") && req.method === "GET") {
-      const g = requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
       const page = Math.max(1, n(url.searchParams.get("page")) || 1);
       const kind = url.searchParams.get("kind");
       const where = kind === "notice" || kind === "incident" ? sql`WHERE kind = ${kind}` : sql``;
@@ -45,7 +45,7 @@ export default async (req: Request): Promise<Response> => {
     }
 
     if (path.endsWith("/ops-notice-delete")) {
-      const g = requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: unknown }>(req); const id = n(b.id);
       if (!id) return badRequest("id");
       await q(sql`DELETE FROM notices WHERE id = ${id}`);
@@ -54,7 +54,7 @@ export default async (req: Request): Promise<Response> => {
     }
 
     if (path.endsWith("/ops-notices")) {
-      const g = requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, ["admin", "super_admin"]); if (!g.ok) return g.res;
       const b = await readJson<Record<string, unknown>>(req);
       const kind = String(b.kind ?? "notice");
       if (kind !== "notice" && kind !== "incident") return badRequest("kind 는 notice/incident");

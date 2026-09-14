@@ -599,7 +599,7 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     if (source) {
       await q(sql`UPDATE revenue_sources SET status = 'error', last_error = ${String(fail.detail ?? "파싱 실패").slice(0, 300)}, last_error_kind = 'parse',
         fail_count = fail_count + 1, updated_at = NOW()
-        WHERE tenant_id = ${tid} AND source = ${source} ${accountId ? sql`AND account_id = ${accountId}` : sql``}`).catch(() => {});
+        WHERE tenant_id = ${tid} AND source = ${source} ${accountId ? sql`AND account_id = ${accountId}` : sql``}`).catch((e) => console.warn("[runner-jobs] 보조 갱신 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)));
     }
     await writeAudit({
       tenantId: tid, action: "runner_job_failed", actorType: "system", target: `runner_job:${jobId}`,
@@ -704,11 +704,11 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     // 소스 행 갱신 — 성공(행 0개여도 «읽긴 읽었다»는 성공이다 · 애드포스트 미등록이 그 예).
     await q(sql`UPDATE revenue_sources SET status = 'connected', last_sync_at = NOW(), last_ok_at = NOW(), last_error = NULL, last_error_kind = NULL, fail_count = 0,
         ${okBody.adpostState ? sql`config = config || ${jsonb({ adpostState: okBody.adpostState })},` : sql``} updated_at = NOW()
-      WHERE tenant_id = ${tid} AND source = ${source} ${accountId ? sql`AND account_id = ${accountId}` : sql``}`).catch(() => {});
+      WHERE tenant_id = ${tid} AND source = ${source} ${accountId ? sql`AND account_id = ${accountId}` : sql``}`).catch((e) => console.warn("[runner-jobs] 보조 갱신 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)));
     // 계정의 매체 상태(계약 §1.5b · monetize.adpostState) — 화면이 «미등록/심사중/승인»을 그리는 값.
     if (okBody.adpostState && accountId) {
       await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb({ adpostState: okBody.adpostState, adpostCheckedAt: new Date().toISOString() })}, updated_at = NOW()
-        WHERE tenant_id = ${tid} AND id = ${accountId}`).catch(() => {});
+        WHERE tenant_id = ${tid} AND id = ${accountId}`).catch((e) => console.warn("[runner-jobs] 보조 갱신 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)));
     }
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, rows: stamped.length, written: up.written, rejected: up.rejected, rejectedReasons: up.rejectedReasons, adpostState: okBody.adpostState ?? null, shotKey: okBody.shotKey ?? null })},
@@ -724,7 +724,7 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   if (kind === "ads.setup_tistory" || kind === "ads.status_blogger") {
     if (okBody.adsense && accountId) {
       await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb({ adsenseLinked: !!okBody.adsense.linked, adsenseState: okBody.adsense.state ?? null, adsenseCheckedAt: new Date().toISOString() })}, updated_at = NOW()
-        WHERE tenant_id = ${tid} AND id = ${accountId}`).catch(() => {});
+        WHERE tenant_id = ${tid} AND id = ${accountId}`).catch((e) => console.warn("[runner-jobs] 보조 갱신 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)));
     }
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, adsense: okBody.adsense ?? null, shotKey: okBody.shotKey ?? null })}, updated_at = NOW() WHERE id = ${jobId}`);
@@ -742,7 +742,7 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
       const patch: Record<string, unknown> = { adsenseInserted: kind === "ads.setup_blogger" ? inserted : false, bloggerAdsAt: new Date().toISOString() };
       if (kind === "ads.setup_blogger" && hasBackup) patch.bloggerTemplateBackup = m.bloggerTemplateBackup;   // 복원용 원문
       if (kind === "ads.revert_blogger") patch.bloggerTemplateBackup = null;                                  // 백업 소진
-      await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb(patch)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`).catch(() => {});
+      await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb(patch)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`).catch((e) => console.warn("[runner-jobs] 보조 갱신 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)));
     }
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, monetize: { adsenseInserted: inserted, reverted, hasBackup, detail: m.detail ?? null }, shotKey: okBody.shotKey ?? null })}, updated_at = NOW() WHERE id = ${jobId}`);

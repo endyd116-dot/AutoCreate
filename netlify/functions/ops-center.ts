@@ -14,7 +14,7 @@ const n = (v: unknown) => Number(v || 0);
 
 export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
-  const o = requireAdmin(req); if (!o.ok) return o.res;
+  const o = await requireAdmin(req); if (!o.ok) return o.res;
   try {
     const tid = n(url.searchParams.get("tenantId"));
     const limit = Math.min(200, n(url.searchParams.get("limit")) || 50);

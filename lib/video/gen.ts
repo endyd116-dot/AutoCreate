@@ -20,7 +20,7 @@ import { generateClip, generateStill } from "./providers";
 import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
 import { synthesizeGemini, isGeminiVoice, scriptGen, type TtsResult, type TtsWord } from "./tts";
 import { splitPhrasesForLines, phrasesToRender, phrasesToSrt } from "./captions";
-import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget } from "./cost";
+import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget, reconcilePieceCost } from "./cost";
 import { resolveBgm } from "./bgm";
 import { enqueueRender } from "./render-queue";
 import { r2Put } from "../r2";
@@ -242,6 +242,8 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       meta = meta || ${jsonb({ render: payload, youtube: { ...yt, description }, affiliateLink: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, totalMs, cutCount: plans.length, disclosure: affiliate ? firstLine : null, adDisclosure: affiliate })}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(meta) AS m, jsonb_typeof(blocks) AS b FROM pieces WHERE id = ${pieceId}`);
     if (chk?.m !== "object" || chk?.b !== "array") console.error("[video/gen] jsonb_typeof 이상", chk);
+    // 🔴 체인 끝 원가 확정(AC-36) — 컷·정지컷의 `void recordAiUsage` 가 샜으면 여기서 한 행으로 채운다(하드 상한이 읽는 값).
+    await reconcilePieceCost(tid, pieceId);
     const enq = await enqueueRender(pieceId, payload);
     console.log(`[video/gen] piece ${pieceId} 렌더 잡 ${enq.jobId}(created=${enq.created}) · 컷 ${plans.length} · ${Math.round(totalMs / 100) / 10}s`);
     await releaseLock(pieceId);

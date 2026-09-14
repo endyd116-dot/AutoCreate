@@ -56,7 +56,7 @@ function invoiceRow(r: Record<string, unknown>): Record<string, unknown> {
 export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
-  const o = requireAdmin(req, ["admin", "super_admin"]); if (!o.ok) return o.res;
+  const o = await requireAdmin(req, ["admin", "super_admin"]); if (!o.ok) return o.res;
   const ip = clientIp(req);
   try {
     /* ── 결제 라인 토글(§1.6) ── */

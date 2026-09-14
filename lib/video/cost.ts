@@ -121,6 +121,35 @@ export async function checkVideoBudget(tenantId: number, addUsd = 0): Promise<Vi
   }
 }
 
+/**
+ * 🔴 체인 끝 **원가 확정**(2026-09-15 · AC-36). 영상 한 편이 끝날 때 딱 한 번, 빠진 원가를 `ai_usage` 에 **await 로** 채운다.
+ *   왜: 컷·정지컷 원가는 `void recordAiUsage(...)` 로 기록된다(생성 한복판이라 그게 맞다) — 그런데 서버리스가 그 사이에 끊기면 행이 샌다.
+ *   그 값을 **하드 상한이 읽는다**(`checkVideoBudget` → `checkAiCostCap` → ai_usage 합) — 새면 «버그 루프·남용» 방어가 헐거워진다.
+ *   그래서 지워지지 않는 정본(`piece_assets.meta.costUsd` · 이건 await 로 쓴다)과 대조해 **모자란 만큼만** 한 행으로 확정한다.
+ *   멱등: 두 번 불러도 두 번째는 차액이 0 이라 아무것도 안 쓴다(자기 교정). TTS·판정 원가는 자산 행이 없어 대상이 아니다(§보고 B-4).
+ *   ⚠️ 자정(KST)을 걸쳐 끝나면 확정분은 «끝난 날»에 잡힌다 — 상한은 하루 단위라 한 편 분량은 유한하다.
+ */
+export async function reconcilePieceCost(tenantId: number, pieceId: number): Promise<{ addedUsd: number }> {
+  try {
+    // ⚠️ jsonb `?` 연산자는 쓰지 않는다(드라이버·풀러에서 물음표가 파라미터로 오해돼 연결이 끊긴 실측 2026-09-15) — `->>` 로만.
+    //    값이 숫자가 아닌 행은 0 으로 접는다(자산 meta 는 사람이 손댈 수 있는 자리가 아니지만, 합계가 예외로 죽으면 안 된다).
+    const [a] = await q(sql`SELECT COALESCE(SUM(CASE WHEN meta->>'costUsd' ~ '^[0-9]+(\.[0-9]+)?$' THEN (meta->>'costUsd')::numeric ELSE 0 END), 0) AS usd
+      FROM piece_assets WHERE tenant_id = ${tenantId} AND piece_id = ${pieceId} AND kind IN ('clip', 'image')`);
+    const [u] = await q(sql`SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM ai_usage
+      WHERE tenant_id = ${tenantId} AND ref LIKE ${`piece:${pieceId}:%`} AND purpose IN ('video_clip', 'image')`);
+    const [r] = await q(sql`SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM ai_usage
+      WHERE tenant_id = ${tenantId} AND ref = ${`video_reconcile:${pieceId}`}`);
+    const assets = Number(a?.usd ?? 0), used = Number(u?.usd ?? 0) + Number(r?.usd ?? 0);
+    const delta = Math.round((assets - used) * 1e6) / 1e6;
+    if (!(delta > 0.0005)) return { addedUsd: 0 };   // 다 들어와 있다(정상 경로) — 아무것도 안 쓴다
+    const { recordAiUsage } = await import("../ai");
+    await recordAiUsage({ tenantId, purpose: "video_reconcile", model: "reconcile", inTokens: 0, outTokens: 0, costUsd: delta, ref: `video_reconcile:${pieceId}` });
+    console.warn(`[video/cost] piece ${pieceId} 원가 확정 +$${delta.toFixed(4)}(유실분 보정 · 자산 $${assets.toFixed(4)} vs 기록 $${used.toFixed(4)})`);
+    await writeAudit({ tenantId, action: "ai_usage_reconciled", actorType: "system", riskLevel: "low", target: `piece:${pieceId}`, detail: { addedUsd: delta, assetsUsd: assets, recordedUsd: used } });
+    return { addedUsd: delta };
+  } catch (e) { console.warn("[video/cost] 원가 확정 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)); return { addedUsd: 0 }; }
+}
+
 /** 고객에게 보일 한 문장(하드·전역·킬스위치·조회실패만 — 소프트는 고객에게 보이지 않는다). */
 export function videoBudgetMessage(r: VideoBudgetResult): string {
   switch (r.reason) {

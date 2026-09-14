@@ -11,7 +11,8 @@
 <body>
 <main class="page white" id="page">
   <div class="appbar"><button class="ic" id="back" type="button" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><span class="sp"></span></div>
-  <div class="prog" id="prog"><i class="on"></i><i></i><i></i></div>
+  <div id="mailBn"></div>
+<div class="prog" id="prog"><i class="on"></i><i></i><i></i></div>
   <section id="s1">
     <div class="step-h"><h1>어떤 걸로<br>벌고 싶어요?</h1><p>둘 다 골라도 돼요. 나중에 바꿀 수 있어요.</p></div>
     <div class="choices">
@@ -35,6 +36,15 @@
 </main>
 <script src="/js/ui.js?v=7"></script>
 <script src="/js/mock.js?v=8"></script>
+<script>
+  /* [P1R6] 가입 때 인증 메일이 못 갔으면(?mail=0) 첫 화면에 한 줄 — 온보딩은 막지 않는다 */
+  (async () => { if (UI.qs.get("mail") !== "0") return; const host = UI.$("#mailBn"); if (!host) return;
+    host.innerHTML = '<div class="banner" style="margin:0 0 12px"><span>인증 메일이 안 갔어요</span><button type="button" id="mailRe">다시 보내기</button></div>';
+    UI.$("#mailRe").onclick = async (e) => { e.target.disabled = true; const r = await UI.api("/api/auth-verify-resend", { body: {} }); e.target.disabled = false;
+      if (!r.ok) return UI.toast(r.step === "rate" ? "방금 보냈어요 · 잠시 뒤 다시 눌러 주세요" : (r.error || "지금은 안 돼요 · 잠시 뒤 다시 해 주세요"));
+      if (r.verified) { host.innerHTML = ""; return UI.toast("이미 인증이 끝났어요"); }
+      UI.toast("인증 메일을 다시 보냈어요 · 메일함을 확인해 주세요"); }; })();
+</script>
 <script>
   let step = 1; const sel = { kinds: ["text", "video"], channels: [] };
   /* 채널은 레지스트리(accounts-list.channels · status active|planned|down)로 그린다 — 하드코딩하면 계정 연결 그리드와 어긋난다.

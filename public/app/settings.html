@@ -17,12 +17,14 @@
 <div class="group">
   <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
   <div class="kv"><span class="k">이메일 인증</span><span class="v" id="verified"></span></div>
+  <div id="mailBn"></div>
 </div>
 <div class="group">
   <button class="row tap" type="button" id="pw"><div class="l"><span class="t">비밀번호 바꾸기</span><span class="d">바꾸면 다른 기기는 로그아웃돼요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
   <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
   <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
 </div>
+<div class="group" id="expg"><div class="gt">내 자료</div><div id="exp"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -33,8 +35,53 @@
 const me = await UI.boot("account"); if (!me) return;
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
+/* [P1R6] 인증 메일 «다시 보내기» — 가입 때 메일이 못 갔거나(mail=0) 아직 인증 전이면 배너 한 줄. 인증은 문이 아니라 배너라 가입·사용은 막지 않는다 */
+function mailBanner() {
+  const host = UI.$("#mailBn"); if (me.user.emailVerified) { host.innerHTML = ""; return; }
+  const failed = UI.qs.get("mail") === "0";
+  host.innerHTML = `<div class="banner" style="margin:4px 16px 12px"><span>${failed ? "인증 메일이 안 갔어요" : "이메일 인증이 아직이에요"}</span><button type="button" id="mailRe">다시 보내기</button></div>`;
+  UI.$("#mailRe").onclick = async (e) => { e.target.disabled = true;
+    const r = await UI.api("/api/auth-verify-resend", { body: {} }); e.target.disabled = false;
+    if (!r.ok) { if (r.step === "rate") return UI.toast("방금 보냈어요 · 잠시 뒤 다시 눌러 주세요"); return UI.toast(r.error || "지금은 안 돼요 · 잠시 뒤 다시 해 주세요"); }
+    if (r.verified) { me.user.emailVerified = true; UI.$("#verified").innerHTML = '<span class="pill ok">완료</span>'; host.innerHTML = ""; UI.toast("이미 인증이 끝났어요"); return; }
+    UI.toast("인증 메일을 다시 보냈어요 · 메일함을 확인해 주세요"); };
+}
+mailBanner();
 UI.$("#out").onclick = async () => { await UI.api("/api/auth-logout", { method: "POST" }); location.href = "/login.html?out=1"; };
 UI.$("#outAll").onclick = async () => { const r = await UI.api("/api/auth-logout-all", { method: "POST" }); location.href = "/login.html?out=1"; };
+/* [P1R6] 내보내기 — 배경 작업(202) → 5초 폴링 → 준비되면 같은 행이 «받기(N일 안)» · 만든 것은 내 것이다(§19) */
+let expTimer = null;
+const MB = (b) => `${(Number(b || 0) / 1048576).toFixed(1)}MB`;
+function expRow(j) {
+  const host = UI.$("#exp");
+  if (j && j.running) { host.innerHTML = `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></span><div class="l"><span class="t">모으는 중이에요</span><span class="d">${UI.esc(UI.ago(j.startedAt) || "방금")} 시작 · 다 되면 알려드려요 · 이 화면을 떠나도 돼요</span></div></div>`;
+    if (!expTimer) expTimer = setInterval(loadExp, 5000); return; }
+  if (expTimer) { clearInterval(expTimer); expTimer = null; }
+  if (j && j.error) { host.innerHTML = `<div class="row"><span class="mk warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span><div class="l"><span class="t">다 모으지 못했어요</span><span class="d wrap">${UI.esc(j.error)}</span></div></div>
+    <button type="button" class="row tap" id="expAgain"><div class="l"><span class="t">기간 좁혀 다시 만들기</span><span class="d">${j.startedAt ? UI.dateKST(j.startedAt) + " 시도" : ""}</span></div>${UI.chev}</button>`; // 사유 문장은 서버 것을 그대로(§2.1 · 쓰면서 세다 멈춘다 · 시작 전엔 못 잰다)
+    UI.$("#expAgain").onclick = () => expSheet(true); return; }
+  if (j && j.url) { host.innerHTML = `<a class="row tap" href="${UI.esc(j.url)}" download="autocreate-export.zip"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></span><div class="l"><span class="t">받기</span><span class="d">${MB(j.bytes)}${j.expiresAt ? ` · ${UI.dateKST(j.expiresAt)}까지` : ""} · 글 · 영상 · 수익(KST)</span></div>${UI.chev}</a>
+    <button type="button" class="row tap" id="expAgain"><div class="l"><span class="t">다시 만들기</span><span class="d">기간이나 범위를 바꿔서</span></div>${UI.chev}</button>`;
+    UI.$("#expAgain").onclick = expSheet; return; }
+  host.innerHTML = `<button type="button" class="row tap" id="expStart"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></span><div class="l"><span class="t">전부 내보내기</span><span class="d">만든 글·영상과 수익 기록을 한 묶음으로 받아요</span></div>${UI.chev}</button>`;
+  UI.$("#expStart").onclick = expSheet;
+}
+async function loadExp() { const r = await UI.api("/api/export-status"); if (!r.ok) { UI.$("#exp").innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; } expRow(r); }
+function expSheet(narrow) {
+  const kst = new Date(Date.now() + 9 * 3600e3); const ym = kst.toISOString().slice(0, 7);
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">무엇을 담을까요</p>${UI.chips("kinds", [["post", "글"], ["video", "영상"], ["revenue", "수익(CSV)"]], ["post", "video", "revenue"], true)}
+    <div class="sec">기간</div>${UI.chips("range", [["1", "이번 달"], ["3", "3개월"], ["12", "1년"], ["all", "전부"]], narrow ? "1" : "3")}
+    <p class="muted" style="margin:10px 0 0;font-size:13px">글은 마크다운 + 사진, 영상은 mp4 + 자막, 수익은 CSV(KST)로 담아요. 다 되면 알림으로 알려드리고 7일 동안 받을 수 있어요.</p>
+    <div class="cta"><button class="btn primary" type="button" id="go">만들기</button></div>`, { title: "내보내기", onOpen: (sh, close) => { UI.bindChips(sh);
+      sh.querySelector("#go").onclick = async () => {
+        const kinds = UI.chipVal(sh, "kinds") || []; if (!kinds.length) return UI.toast("하나는 골라 주세요");
+        const rg = UI.chipVal(sh, "range"); const body = { kinds };
+        if (rg !== "all") { const m = Number(rg); const from = new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth() - (m - 1), 1)); body.from = from.toISOString().slice(0, 10); body.to = `${ym}-${String(new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth() + 1, 0)).getUTCDate()).padStart(2, "0")}`; }
+        const r = await UI.api("/api/export-start", { body }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "시작하지 못했어요");
+        close(); UI.toast(r.started === false ? "이미 모으고 있어요" : "모으기 시작했어요 · 다 되면 알려드려요"); loadExp();
+      }; } });
+}
+loadExp();
 UI.$("#pw").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>현재 비밀번호</label><input class="input" name="current" type="password" autocomplete="current-password" required><div class="help"></div></div><div class="field"><label>새 비밀번호</label><input class="input" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "비밀번호 바꾸기", onOpen: (sh, close) => {
   const f = sh.querySelector("#pf"); UI.form(f, async (d) => { const r = await UI.api("/api/auth-change-password", { body: d }); if (!r.ok) { UI.fieldError(f, r.step === "current" ? "current" : "password", r.error); return; } close(); UI.toast("비밀번호를 바꿨어요"); }); } });
 })();

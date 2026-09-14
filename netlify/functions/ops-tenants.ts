@@ -49,7 +49,7 @@ function tenantRow(r: Record<string, unknown>, now: number): Record<string, unkn
 export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
-  const o = requireAdmin(req); if (!o.ok) return o.res;
+  const o = await requireAdmin(req); if (!o.ok) return o.res;
   const ip = clientIp(req);
   try {
     /* ── 목록 ── */
@@ -120,7 +120,7 @@ export default async (req: Request): Promise<Response> => {
 
     /* ── 정본 직접 수정(admin) ── */
     if (path.endsWith("/ops-tenant-update")) {
-      const g = requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: number; planKey?: string; status?: string; trialEndsAt?: string; note?: string; priceLockedKrw?: number | null }>(req);
       const id = n(b.id); if (!id) return badRequest("id");
       const plans = await loadPlans();
@@ -149,7 +149,7 @@ export default async (req: Request): Promise<Response> => {
 
     /* ── 코인 지급/회수(admin) ── */
     if (path.endsWith("/ops-coins-grant")) {
-      const g = requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: number; coins?: number; reason?: string }>(req);
       const id = n(b.id); const coins = Math.trunc(n(b.coins));
       if (!id || !coins || Math.abs(coins) > 10_000) return badRequest("id·coins(±10,000 이내)");
@@ -170,7 +170,7 @@ export default async (req: Request): Promise<Response> => {
 
     /* ── 체험 연장(admin) ── */
     if (path.endsWith("/ops-trial-extend")) {
-      const g = requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: number; days?: number }>(req);
       const id = n(b.id); const days = Math.trunc(n(b.days));
       if (!id || days < 1 || days > 90) return badRequest("id·days(1~90)");
@@ -187,7 +187,7 @@ export default async (req: Request): Promise<Response> => {
 
     /* ── 플랜 변경(admin) — charge:true 면 실제 청구 · 아니면 무상 전환(운영 재량 · 감사 high) ── */
     if (path.endsWith("/ops-plan-change")) {
-      const g = requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
+      const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
       const b = await readJson<{ id?: number; planKey?: string; cycle?: string; charge?: boolean }>(req);
       const id = n(b.id); const planKey = String(b.planKey || ""); const cycle: Cycle = b.cycle === "year" ? "year" : "month";
       if (!id || !planKey) return badRequest("id·planKey");
