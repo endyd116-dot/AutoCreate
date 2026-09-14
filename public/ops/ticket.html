@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>티켓 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/cs.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">티켓</span><span class="sp"></span></div>
+<div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
+<div class="ops-three">
+<div>
+  <div class="group" id="thread"></div>
+  <div class="group"><div class="gt">답변 <span class="muted" style="font-weight:500">앱 알림 + 메일</span></div><div style="padding:0 12px 6px"><div class="chips" id="macros"></div><textarea class="input" id="reply" rows="4" style="height:auto;padding:14px 16px" placeholder="매크로를 고르거나 직접 적어요"></textarea></div><div class="cta" style="position:static;padding:8px 12px 10px;justify-content:flex-end"><button class="btn primary" type="button" id="send">보내기</button></div></div>
+</div>
+<div>
+  <div class="group"><div class="gt">고객 컨텍스트 <a id="toTenant" href="#">고객</a></div><div id="ctx"></div></div>
+  <div class="group"><div class="gt">처리</div><div style="padding:0 12px 10px"><div class="sec">우선순위</div><div id="pri"></div><div class="sec">담당</div><div id="asg"></div><div class="sec">태그</div><div id="tags"></div></div><div class="cta" style="position:static;padding:4px 12px 10px;flex-direction:column"><button class="btn secondary" type="button" id="hold">보류</button><button class="btn secondary" type="button" id="resolve">해결로</button></div></div>
+</div>
+</div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("cs"); if (!op) return;
+const id = Number(UI.qs.get("id")); let T;
+const TST = { open: ["warn", "열림"], progress: ["ink", "진행"], hold: ["off", "보류"], resolved: ["ok", "해결"] };
+const PRI = [["urgent", "긴급"], ["high", "높음"], ["normal", "보통"], ["low", "낮음"]];
+const TAGS = ["결제", "계정정지", "러너", "발행실패", "환불"];
+async function load() {
+  const r = await UI.api(`/api/ops-ticket?id=${id}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "티켓이 없어요"); return; } T = r;
+  const t = r.ticket;
+  UI.$("#head").innerHTML = `<span class="mk soft">#</span><div class="l"><span class="t wrap">${UI.esc(t.subject)}</span><span class="d">${UI.esc(t.tenantName)} · ${OPS.dt(t.createdAt)} · ${t.source === "system" ? "자동 티켓" : "고객 문의"}${t.rating != null ? ` · 만족 ${t.rating ? "○" : "×"}` : ""}</span></div>${OPS.pill(TST[t.status] || ["off", t.status])}`;
+  UI.$("#thread").innerHTML = `<div class="gt">대화</div>` + (r.messages || []).map((m) => `<div class="msg ${m.from === "operator" ? "op" : m.from === "system" ? "sys" : ""}">${UI.esc(m.text)}${m.attachments?.length ? `<br><span class="muted" style="font-size:12px">첨부 ${m.attachments.length}개</span>` : ""}<small>${m.from === "operator" ? "운영" : m.from === "system" ? "자동" : "고객"} · ${OPS.dt(m.at)}</small></div>`).join("") + `<div style="height:8px"></div>`;
+  const c = r.context || {}; UI.$("#toTenant").href = `/ops/tenant.html?id=${t.tenantId}`;
+  UI.$("#ctx").innerHTML = `<div class="kv"><span class="k">플랜 · 상태</span><span class="v">${UI.esc(c.planKey || "—")} ${c.status ? OPS.pill(OPS.status(c.status)) : ""}</span></div><div class="kv"><span class="k">코인</span><span class="v">${UI.num(c.coins || 0)}</span></div><div class="kv"><span class="k">PC 프로그램</span><span class="v">${c.runner ? `${c.runner.online}/${c.runner.total} 켜짐` : "—"}</span></div>${(c.recentErrors || []).map((e) => `<div class="kv"><span class="k" style="white-space:normal">${UI.esc(e.text)}</span><span class="v muted" style="font-weight:500">${OPS.dt(e.at)}</span></div>`).join("")}${c.appVersion ? `<div class="kv"><span class="k">앱 버전</span><span class="v">${UI.esc(c.appVersion)}</span></div>` : ""}`;
+  UI.$("#macros").innerHTML = (r.macros || []).map((m) => `<button type="button" class="chip" data-m="${m.id}">${UI.esc(m.title)}</button>`).join("");
+  UI.$$("#macros .chip").forEach((b) => b.onclick = () => { const m = r.macros.find((x) => x.id === Number(b.dataset.m)); UI.$("#reply").value = m.text; UI.$("#reply").focus(); });
+  UI.$("#pri").innerHTML = UI.chips("pri", PRI, t.priority); UI.$("#tags").innerHTML = UI.chips("tags", TAGS.map((x) => [x, x]), t.tags || [], true);
+  UI.$("#asg").innerHTML = UI.chips("asg", [["", "없음"], [String(op.id), "나"], ...(t.assignee && t.assignee.id !== op.id ? [[String(t.assignee.id), t.assignee.name]] : [])], t.assignee ? String(t.assignee.id) : "");
+  UI.bindChips(document, async (n, v) => { if (n === "pri" || n === "tags") { const rr = await UI.api("/api/ops-ticket-priority", { body: { id, priority: UI.chipVal(document, "pri"), tags: UI.chipVal(document, "tags") }, noRedirect: true }); if (!rr.ok) UI.toast(rr.error); } if (n === "asg") { const rr = await UI.api("/api/ops-ticket-assign", { body: { id, operatorId: v ? Number(v) : null }, noRedirect: true }); if (!rr.ok) UI.toast(rr.error); } });
+}
+UI.$("#send").onclick = async () => { const text = UI.$("#reply").value.trim(); if (!text) return UI.toast("답변을 적어 주세요"); UI.$("#send").disabled = true; const r = await UI.api("/api/ops-ticket-reply", { body: { id, text }, noRedirect: true }); UI.$("#send").disabled = false; if (!r.ok) return UI.toast(r.error || "보내지 못했어요"); UI.$("#reply").value = ""; UI.toast("보냈어요 · 앱 알림 + 메일"); load(); };
+UI.$("#hold").onclick = async () => { const r = await UI.api("/api/ops-ticket-resolve", { body: { id, status: "hold" }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.toast("보류했어요"); load(); };
+UI.$("#resolve").onclick = async () => { const r = await UI.api("/api/ops-ticket-resolve", { body: { id, status: "resolved" }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.done("해결로 옮겼어요 · 고객에게 «도움이 됐나요?»가 가요", load); };
+load();
+})();
+</script>
+</body>
+</html>

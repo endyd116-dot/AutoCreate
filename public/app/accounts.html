@@ -6,7 +6,7 @@
 <title>계정 연결 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 await UI.boot("account");
@@ -79,7 +79,8 @@ async function submitAdd(body, f, close) {
   const r = await UI.api("/api/accounts-add", { body });
   const pw = f.querySelector('[name="password"],[name="appPassword"]'); if (pw) pw.value = ""; // 🔴 자격은 요청 후 즉시 비운다
   if (!r.ok) {
-    if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+    if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
+    if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
     if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
     return UI.toast(r.error || "연결하지 못했어요");

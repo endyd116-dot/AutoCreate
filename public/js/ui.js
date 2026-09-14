@@ -23,7 +23,46 @@
       const login = path.startsWith("/api/ops") ? "/ops/login.html" : "/login.html";
       if (location.pathname !== login) location.href = login + "?next=" + encodeURIComponent(location.pathname + location.search);
     }
-    return { ...data, status: res.status, ok: !!data.ok && res.ok };
+    const out = { ...data, status: res.status, ok: !!data.ok && res.ok };
+    if (!opts.noGate && UI.gate(out)) out.gated = true; // [P1R4] 쓰기 막힘·플랜 한도·상한은 화면마다 말고 여기서 한 번(계약 §1.3·§1.4·§1.5) · 화면은 gated 면 제 토스트를 겹치지 않는다
+    return out;
+  };
+
+  /* ── [P1R4] 막힘 시트 — 403 writable(readonly|suspended) · 402 plan_limit. 업셀 한 문장 + Primary 1 ── */
+  let gateOpen = false;
+  UI.gate = function (r) {
+    if (!r || r.ok || gateOpen) return false;
+    const done = (html, title, cta, href) => { gateOpen = true; UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
+    if (r.status === 403 && r.step === "writable") {
+      if (r.reason === "suspended") return done("결제가 밀려 있어요. 카드를 확인하면 바로 이어서 돼요. 만든 글과 편성표는 그대로예요.", "잠시 멈춰 있어요", "카드 확인하기", "/app/plan.html");
+      return done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
+    }
+    if (r.step === "banned_category") { UI.toast(r.error || "이 주제는 만들 수 없어요"); return true; }           // 서버 문구 그대로(카테고리 이름이 들어 있다)
+    if (r.step === "ai_cost_cap") return done(UI.esc(r.error || "오늘 AI 사용이 하루 상한에 닿았어요. 내일 다시 이어서 만들 수 있어요."), "오늘은 여기까지예요", "홈으로", "/app/home.html");
+    if (r.status === 402 && r.step === "plan_feature") return done(UI.esc(r.error || "지금 요금제에 없는 기능이에요."), "요금제에 없는 기능이에요", "요금제 보기", "/app/plan.html");
+    if (r.status === 402 && (r.step === "plan_limit" || r.reason === "plan_limit")) {
+      const NAME = { accounts: "계정", runnerDevices: "내 PC 프로그램", teamSeats: "팀원", rules: "편성 규칙", horizonDays: "편성 기간" };
+      const unit = { accounts: "개", runnerDevices: "대", teamSeats: "명", rules: "개", horizonDays: "일" }[r.resource] || "개";
+      const what = NAME[r.resource] || "이 항목";
+      gateOpen = true;
+      UI.sheet(`<p class="muted" id="gmsg" style="margin:0 0 16px">${UI.esc(what)}은 ${r.limit}${unit}까지예요.</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "여기까지예요", onOpen: async (sh) => {
+        const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; });
+        const p = await UI.api("/api/plans", { noGate: true }).catch(() => null); // 업셀 숫자는 플랜 표에서(화면에 박지 않는다)
+        const key = { accounts: "maxAccounts", horizonDays: "horizonDays", rules: "maxRules", runnerDevices: "runnerDevices", teamSeats: "teamSeats" }[r.resource];
+        const next = p && p.ok && key ? (p.plans || []).filter((x) => (x.limits || {})[key] > r.limit).sort((a, b) => a.limits[key] - b.limits[key])[0] : null;
+        if (next) sh.querySelector("#gmsg").textContent = `${what}은 ${r.limit}${unit}까지예요 · ${next.name} 로 바꾸면 ${next.limits[key]}${unit}`;
+      } });
+      return true;
+    }
+    return false;
+  };
+
+  /* 결제사 인증창으로 — 서버가 준 url·form 그대로(form 이 비면 이동만). mock.js 가 감싸 콜백까지 흉내 낸다 */
+  UI.postForm = function (url, form) {
+    const keys = Object.keys(form || {}); if (!keys.length) { location.assign(url); return; }
+    const f = document.createElement("form"); f.method = "POST"; f.action = url; f.style.display = "none";
+    for (const k of keys) { const i = document.createElement("input"); i.type = "hidden"; i.name = k; i.value = String(form[k] ?? ""); f.appendChild(i); }
+    document.body.appendChild(f); f.submit();
   };
 
   /* ── 포맷 ── */
@@ -118,9 +157,11 @@
     setInterval(() => fetch("/api/auth-refresh", { method: "POST", credentials: "same-origin" }), 5 * 60 * 1000);
     return me;
   };
+  /* [P1R4] 원격접속 중이면 결제 경로를 화면에서 숨긴다(서버 403 은 그대로) */
+  UI.hidePayIfImp = function (...els) { if (!UI.me || !UI.me.impersonation) return false; els.forEach((e) => { if (e) e.hidden = true; }); return true; };
   UI.impBanner = function (imp) {
     const b = document.createElement("div"); b.className = "banner"; b.style.margin = "8px 0 0";
-    b.innerHTML = `<span>운영자 ${UI.esc(imp.byName || "")}가 이 고객 화면을 보고 있어요</span><button type="button">끝내기</button>`;
+    b.innerHTML = `<span>운영자가 보고 있어요 · ${UI.esc(imp.byName || "")}${imp.until ? " · " + UI.timeKST(imp.until) + "까지" : ""}</span><button type="button">끝내기</button>`; // [P1R4] 결제·충전·비밀번호 경로는 서버가 403(denyIfImpersonating) · 화면도 숨긴다(UI.hidePayIfImp)
     b.querySelector("button").onclick = async () => { await fetch("/api/ops-impersonate-end", { method: "POST", credentials: "same-origin" }); location.href = "/ops/tenants.html"; };
     const page = $(".page"); if (page) page.prepend(b);
   };
@@ -183,8 +224,17 @@
     coin: ["money", '<circle cx="12" cy="12" r="8"/><path d="M9 9l3 4 3-4M12 13v4"/>'],
     setup: ["soft", '<path d="M12 5v14M5 12h14"/>'],
     system: ["soft", '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'],
+    card: ["warn", '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/>'],
+    clock: ["warn", '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'],
+    gauge: ["warn", '<path d="M4 17a8 8 0 0 1 16 0"/><path d="M12 17l4-6"/>'],
+    money: ["money", '<path d="M12 3v18M17 7H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6"/>'],
   };
-  UI.kindMark = (kind, tone) => { const k = UI.KIND[kind] || UI.KIND.system; const cls = tone === "warn" || tone === "danger" ? "warn" : k[0];
+  /* [P1R4] 서버 알림 kind(lib/cron notifyOnce · B 결제·체험) → 아이콘 하나 · 링크 없을 때의 기본 링크 */
+  UI.KIND_ALIAS = { slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
+    trial_d3: "clock", trial_d1: "clock", trial_d0: "clock", trial_ended: "clock", trial_reused: "clock", billing_failed: "card", billing_suspended: "card", subscription_suspended_no_key: "card", subscription_cancelled: "card", card_required: "card", ai_cost_cap: "gauge", coin_refunded: "money" };
+  UI.KIND_LINK = { trial_d3: "/app/plan.html", trial_d1: "/app/plan.html", trial_d0: "/app/plan.html", trial_ended: "/app/plan.html", trial_reused: "/app/plan.html", billing_failed: "/app/plan.html", billing_suspended: "/app/plan.html", subscription_suspended_no_key: "/app/plan.html", subscription_cancelled: "/app/plan.html", card_required: "/app/plan.html",
+    coin_refunded: "/app/coins.html", coin_cap: "/app/coins.html", coin_short: "/app/coins.html", ai_cost_cap: "/app/home.html", slot_no_topic: "/app/create.html", runner_offline: "/app/runner.html", revenue_error: "/app/ad-media.html" };
+  UI.kindMark = (kind, tone) => { const k = UI.KIND[kind] || UI.KIND[UI.KIND_ALIAS[kind]] || UI.KIND.system; const cls = tone === "warn" || tone === "danger" ? "warn" : k[0];
     return `<span class="mk ${cls}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${k[1]}</svg></span>`; };
   UI.chev = '<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg>';
   UI.dots = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';

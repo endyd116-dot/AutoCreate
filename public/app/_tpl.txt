@@ -41,7 +41,7 @@ async function load(poll = false) {
 async function refresh() {
   const b = UI.$("#refresh"); b.disabled = true;
   const r = await UI.api("/api/topics-refresh", { body: {} }); b.disabled = busy;
-  if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; }
+  if (!r.ok) { if (!r.gated) UI.toast(r.error || "지금은 뽑지 못했어요"); return; }
   if (r.topics) { UI.toast(r.added ? `소재 ${r.added}개 찾았어요` : "새로 뽑을 소재가 없어요"); load(); return; } // 옛 동기 응답 호환
   busy = true; UI.toast(r.started === false ? "이미 뽑고 있어요" : "소재를 뽑기 시작했어요"); startPoll(); load(true);
 }
@@ -172,7 +172,7 @@ function slotSheet(s) {
           host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; bar.hidden = false; };
           host.querySelector("[data-yes]").onclick = async (e) => { e.target.disabled = true;
             const r = await UI.api("/api/slots-produce-now", { body: { slotId: s.id } }); e.target.disabled = false;
-            if (!r.ok) {
+            if (!r.ok) { if (r.gated) return close();
               if (r.step === "coin_short") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? 0}코인이 있고 ${r.need ?? coinOf(s.channel)}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: "코인이 모자라요" }); }
               return UI.toast(r.error || "만들기를 시작하지 못했어요");
             }
@@ -199,7 +199,7 @@ async function topicSheet(s, closeParent) {
     { title: "어떤 소재로 바꿀까요", onOpen: (sh, close) => {
       sh.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
         const rr = await UI.api("/api/slots-assign-topic", { body: { slotId: s.id, topicId: Number(b.dataset.t) } });
-        if (!rr.ok) return UI.toast(rr.error || "소재를 바꾸지 못했어요");
+        if (!rr.ok) return rr.gated ? undefined : UI.toast(rr.error || "소재를 바꾸지 못했어요");
         close(); UI.toast("소재를 바꿨어요"); await reload(closeParent);
       });
     } });
@@ -248,7 +248,7 @@ function ruleSheet() {
       go.disabled = true;
       const rules = chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: "post", accountMode: st.mode[c], every: "week", count: st.count[c], active: true }; if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (cur[c]?.preferredHour != null) r.preferredHour = cur[c].preferredHour; if (cur[c]?.weekdays) r.weekdays = cur[c].weekdays; return r; });
       const r = await UI.api("/api/rules-save", { body: { rules } }); go.disabled = false;
-      if (!r.ok) { if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); } return UI.toast(r.error || "저장하지 못했어요"); }
+      if (!r.ok) { if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); } return UI.toast(r.error || "저장하지 못했어요"); }
       const s = await UI.api("/api/rules-settings", { body: { autoSchedule: true, reviewPolicy: st.reviewPolicy, produceLeadDays: st.produceLeadDays } }); if (!s.ok) UI.toast(s.error || "설정은 저장하지 못했어요");
       close(); UI.done(`자동 편성을 켰어요 · 주 ${r.coinsPerWeek}코인`, load);
     };
@@ -450,7 +450,7 @@ await load();
 </div>
 <div class="group">
   <div class="gt">요금제 · 코인</div>
-  <a class="row tap" href="/app/plans.html"><span class="mk soft">₩</span><div class="l"><span class="t" id="planName">체험</span><span class="d" id="planDesc"></span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/plan.html"><span class="mk soft">₩</span><div class="l"><span class="t" id="planName">체험</span><span class="d" id="planDesc"></span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/coins.html"><span class="mk money">C</span><div class="l"><span class="t">코인 <span id="coins">0</span>개</span><span class="d">1코인 = 500원 · 충전분은 1년</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
 <div class="group">
@@ -466,6 +466,7 @@ UI.$("#planName").textContent = P[me.tenant.planKey] || me.tenant.planKey;
 UI.$("#planDesc").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남음` : me.tenant.status === "active" ? "이용 중" : "이용 정지";
 UI.$("#plan").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남았어요` : "";
 UI.$("#coins").textContent = UI.num(me.coins);
+if (me.impersonation) UI.$$(".group").forEach((g) => { if (g.textContent.includes("요금제 · 코인")) g.hidden = true; }); // [P1R4] 원격접속 중 결제 경로 숨김
 // 내 PC 프로그램 상태(켜짐/꺼짐) · 올라간 글 수
 UI.api("/api/runner-list").then((rl) => {
   if (!rl.ok) return;
@@ -541,7 +542,8 @@ async function submitAdd(body, f, close) {
   const r = await UI.api("/api/accounts-add", { body });
   const pw = f.querySelector('[name="password"],[name="appPassword"]'); if (pw) pw.value = ""; // 🔴 자격은 요청 후 즉시 비운다
   if (!r.ok) {
-    if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+    if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
+    if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
     if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
     return UI.toast(r.error || "연결하지 못했어요");
@@ -683,40 +685,197 @@ UI.$("#out").onclick = async () => { await UI.api("/api/auth-logout", { method: 
 UI.$("#outAll").onclick = async () => { const r = await UI.api("/api/auth-logout-all", { method: "POST" }); location.href = "/login.html?out=1"; };
 UI.$("#pw").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>현재 비밀번호</label><input class="input" name="current" type="password" autocomplete="current-password" required><div class="help"></div></div><div class="field"><label>새 비밀번호</label><input class="input" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "비밀번호 바꾸기", onOpen: (sh, close) => {
   const f = sh.querySelector("#pf"); UI.form(f, async (d) => { const r = await UI.api("/api/auth-change-password", { body: d }); if (!r.ok) { UI.fieldError(f, r.step === "current" ? "current" : "password", r.error); return; } close(); UI.toast("비밀번호를 바꿨어요"); }); } });
-=== plans.html | account | 요금제 ===
-<div class="step-h"><h1>이어서 쓸 요금제를 골라요</h1><p>구독은 기능 이용료예요. 글·영상을 만들 때 쓰는 코인은 따로 충전해요.</p></div>
-<div id="plans"><div class="sk" style="height:120px"></div></div>
+=== plan.html | account | 요금제 ===
+<div class="hl"><div class="say" id="say">지금은</div><div class="num" id="cur">…</div><div class="tip" id="curTip"></div></div>
+<div class="seg" id="cycle" style="margin:0"><button type="button" data-c="month" class="on">월납</button><button type="button" data-c="year">연납 · 2개월 무료</button></div>
+<div id="cards" style="display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 0 8px;margin:0 -16px;padding-left:16px;padding-right:16px"><div class="sk" style="height:300px;min-width:280px"></div></div>
+<p class="muted center" style="margin:0;font-size:12.5px">모든 가격은 부가세 별도예요 · 카드에는 10% 더한 금액이 청구돼요</p>
+<div class="group" id="card"><div class="gt">결제 카드</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="inv"><div class="gt">청구서 · 영수증</div></div>
+<div class="group" id="cancel" hidden></div>
 --- script ---
-await UI.boot("account");
-const r = await UI.api("/api/plans"); if (!r.ok) return;
-UI.$("#plans").innerHTML = r.plans.map((p) => `<div class="group" style="margin-bottom:12px;${p.recommended ? "outline:2px solid var(--sel);outline-offset:-2px" : ""}">
-  <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}</div>
-  <div class="hl" style="padding-top:0"><div class="num" style="font-size:24px">${UI.won(p.priceMonth)}<small class="muted" style="font-size:13px;font-weight:500"> /월</small></div><div class="tip">연납 ${UI.won(p.priceYear)} · 2개월 무료</div></div>
-  <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
-  <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
-  <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
-  <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>
-  <div class="kv"><span class="k">계정 정지 시 승계</span><span class="v">${p.features.failover ? "자동" : "—"}</span></div>
-  <div class="cta nobar" style="position:static;padding:12px 12px 8px"><button class="btn primary" type="button" onclick="UI.toast('결제는 곧 열려요 · 지금은 체험 기간을 쓰세요')">이 플랜으로</button></div>
-</div>`).join("");
+const me = await UI.boot("account"); if (!me) return;
+if (me.impersonation) { UI.$("#page").insertAdjacentHTML("beforeend", `<div class="group"><div class="empty"><h3>원격접속 중엔 결제할 수 없어요</h3><p>운영자가 설정을 도와드리는 동안엔 요금제·카드를 바꿀 수 없어요. 끝난 뒤 본인이 직접 해 주세요.</p></div></div>`); UI.$$("#cards, #cycle, #card, #cancel").forEach((e) => e.hidden = true); return; }
+let S = null, PLANS = [], INV = [], cycle = "month";
+const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0, starter: 1, pro: 2, agency: 3 };
+/* KICC 카드 등록 콜백 복귀(billing-key-return): ?key=ok|fail · &trial=reused = 같은 카드로 체험을 이미 씀(§12.3) */
+const key = UI.qs.get("key");
+if (key === "ok") { if (UI.qs.get("trial") === "reused") UI.sheet(`<p class="muted" style="margin:0 0 16px">이 카드로 체험을 이미 쓰신 적이 있어요. 체험은 여기서 끝나지만, 요금제를 고르면 바로 이어서 할 수 있어요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "이미 체험을 쓰셨어요", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); else UI.toast("카드를 등록했어요"); }
+else if (key === "fail") UI.toast("카드 등록이 안 됐어요 · 다시 해 주세요");
+/* 카드 안 가격은 큰 숫자(.hl)가 아니다 — 화면당 큰 숫자 1 · 공급가는 /api/plans 의 서버 값 · 부가세는 시트에서 견적(subscription-quote)으로 */
+const price = (p) => `<div style="padding:0 16px 6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${won(cycle === "year" ? p.priceYear : p.priceMonth)}<small class="muted" style="font-size:13px;font-weight:500"> /${cycle === "year" ? "년" : "월"}</small></div><div class="muted" style="font-size:13px;margin-top:4px">${VATNOTE}${cycle === "year" ? ` · 월 ${won(p.priceMonth)} × 10개월 값` : ""}</div></div>`;
+const paying = () => S && S.status === "active" && RANK[S.plan.key] > 0;
+async function load() {
+  const [s, p, i] = await Promise.all([UI.api("/api/subscription"), UI.api("/api/plans"), UI.api(`/api/invoices?year=${new Date().getFullYear()}`)]);
+  if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; } S = s; PLANS = (p.ok ? p.plans || [] : []).filter((x) => x.public !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0)); INV = i.ok ? i.rows || [] : [];
+  const st = S.status || "trial"; const trial = st === "trial", ended = st === "readonly", susp = st === "suspended";
+  const left = Math.max(0, Math.ceil((UI.utc(S.trialEndsAt) - Date.now()) / 86400e3));
+  UI.$("#say").textContent = trial ? "무료 체험" : ended ? "체험이 끝났어요" : susp ? "결제가 밀려 있어요" : "지금은";
+  UI.$("#cur").textContent = trial ? `${left}일 남았어요` : ended ? "요금제를 골라 주세요" : susp ? "카드를 확인해 주세요" : `${S.plan.name} 쓰고 있어요`;
+  UI.$("#curTip").textContent = trial ? `${UI.dateKST(S.trialEndsAt)}까지 Pro 기능 전부 · 끝나면 보기만 돼요` : ended ? "보는 건 지금도 돼요 · 고르면 바로 이어서 만들 수 있어요" : susp ? "카드 결제가 이어서 실패했어요 · 카드를 바꾸면 바로 다시 돼요"
+    : `${S.plan.cycle === "year" ? "연납" : "월납"} ${won(S.plan.priceKrw)} · ${VATNOTE}${S.nextBillingAt ? ` · 다음 청구 ${UI.dateKST(S.nextBillingAt)}` : ""}${S.pendingPlanKey ? ` · 다음 주기부터 ${UI.esc(nameOf(S.pendingPlanKey))}${S.pendingCycle ? (S.pendingCycle === "year" ? " 연납" : " 월납") : ""}` : ""}${S.cancelAtPeriodEnd ? " · 해지 예약됨" : ""}`;
+  if (S.plan.cycle && st === "active") cycle = S.plan.cycle; UI.$$("#cycle button").forEach((x) => x.classList.toggle("on", x.dataset.c === cycle));
+  renderCards();
+  const bk = S.billingKey || {};
+  UI.$("#card").innerHTML = `<div class="gt">결제 카드</div>` + (bk.has ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></span><div class="l"><span class="t">${UI.esc(bk.brand || "카드")}${bk.last4 ? ` ····${UI.esc(bk.last4)}` : ""}</span><span class="d">자동 결제에 써요</span></div><button type="button" class="btn sm secondary" id="cardChange">바꾸기</button><button type="button" class="btn sm ghost" id="cardRemove" style="color:var(--danger)">지우기</button></div>`
+    : `<button type="button" class="row tap" id="cardAdd"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">카드 등록하기</span><span class="d">등록하면 요금제를 고를 수 있어요 · 카드 정보는 결제사에만 저장돼요</span></div>${UI.chev}</button>`);
+  const cb = UI.$("#cardAdd") || UI.$("#cardChange"); if (cb) cb.onclick = addCard;
+  const rm = UI.$("#cardRemove"); if (rm) rm.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "카드 지우기", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "카드를 지우면 다음 청구가 실패해요. 새 카드를 곧 등록해 주세요.", async () => { const r = await UI.api("/api/billing-key-remove", { body: {} }); if (!r.ok) return UI.toast(r.error || "지우지 못했어요"); close(); UI.toast(r.removed ? "카드를 지웠어요" : "등록된 카드가 없어요"); load(); }) });
+  UI.$("#inv").innerHTML = `<div class="gt">청구서 · 영수증 <span class="muted" style="font-weight:500">${new Date().getFullYear()}년</span></div>` + (INV.length ? INV.map((r, k) => `<button type="button" class="row tap" data-inv="${k}"><div class="l"><span class="t">${invTitle(r)}</span><span class="d">공급가 ${won(r.amountKrw)} + 부가세 ${won(r.vatKrw)}${r.paidAt ? ` · ${UI.dateKST(r.paidAt)}` : ""}${r.status === "failed" ? " · 결제 실패" : r.status === "refunded" ? " · 환불됨" : r.refundedKrw ? ` · ${won(r.refundedKrw)} 환불` : ""}</span></div><span class="r">${won(r.totalKrw)}</span>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">아직 청구서가 없어요</span></div></div>`);
+  UI.$$("[data-inv]").forEach((el) => el.onclick = () => receipt(INV[Number(el.dataset.inv)]));
+  const c = UI.$("#cancel"); c.hidden = !paying();
+  c.innerHTML = S.cancelAtPeriodEnd ? `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t">해지 되돌리기</span><span class="d">${S.periodEnd ? UI.dateKST(S.periodEnd) + "에 끝나기로 되어 있어요" : "해지가 예약되어 있어요"} · 되돌리면 그대로 이어져요</span></div>${UI.chev}</button>`
+    : `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t" style="color:var(--danger)">구독 해지</span><span class="d">이번 기간 끝까지 쓰고 다음 청구가 없어요</span></div></button>`;
+  const cbtn = UI.$("#cancelBtn"); if (cbtn) cbtn.onclick = S.cancelAtPeriodEnd ? revert : cancel;
+}
+const nameOf = (k) => (PLANS.find((p) => p.key === k) || {}).name || k;
+/* invoices.period 는 문자열 그대로 — 'YYYY-MM' 월납 · 'YYYY-MM~YYYY-MM' 연납 · ':up-{plan}' 업그레이드 차액 · 코인은 주문번호 */
+function periodLabel(p) { const s = String(p || ""); if (/^AC-COIN-/.test(s)) return s; const m = s.match(/^(\d{4})-(\d{2})(~(\d{4})-(\d{2}))?/); if (!m) return s; const a = `${Number(m[2])}월`; return (m[3] ? `${a}~${Number(m[5])}월` : a) + (s.includes(":up-") ? " · 플랜 변경" : ""); }
+const invTitle = (r) => r.kind === "coin" ? "코인 충전" : `${r.planKey ? nameOf(r.planKey) + " " : ""}구독 · ${periodLabel(r.period)}`;
+function receipt(r) { const ST = { paid: "결제 완료", failed: "결제 실패", refunded: "환불됨", pending: "대기" };
+  UI.sheet(`<div class="kv" style="padding-left:0;padding-right:0"><span class="k">항목</span><span class="v">${invTitle(r)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${r.kind === "coin" ? "주문번호" : "기간"}</span><span class="v" style="font-variant-numeric:tabular-nums">${UI.esc(r.kind === "coin" ? r.orderNo || r.period : r.period)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">공급가</span><span class="v">${won(r.amountKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(r.vatKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">합계</span><span class="v" style="font-weight:800">${won(r.totalKrw)}</span></div>
+    ${r.refundedKrw ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">환불</span><span class="v">${won(r.refundedKrw)}</span></div>` : ""}
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${r.paidAt ? "결제일" : "생성"}</span><span class="v">${UI.dateKST(r.paidAt || r.createdAt, { year: "numeric" })} ${UI.timeKST(r.paidAt || r.createdAt)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v">${ST[r.status] || UI.esc(r.status)}</span></div>
+    <p class="muted" style="margin:10px 0 0;font-size:12.5px">세금계산서·현금영수증이 필요하면 «문의하기»에서 청구서 번호 ${r.id}을 알려 주세요.</p>`, { title: "영수증" }); }
+function renderCards() {
+  const cur = S.plan.key; const active = S.status === "active";
+  UI.$("#cards").innerHTML = PLANS.map((p) => { const isCur = active && cur === p.key && (S.plan.cycle || "month") === cycle;
+    return `<div class="group" ${isCur || (!active && p.recommended) ? "data-rec" : ""} style="min-width:280px;scroll-snap-align:start;flex:none;${p.recommended ? "outline:2px solid var(--sel);outline-offset:-2px" : ""}">
+      <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}${isCur ? '<span class="pill ok">지금</span>' : ""}</div>${price(p)}
+      <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
+      <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
+      <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
+      <div class="kv"><span class="k">편성 규칙</span><span class="v">${p.limits.maxRules == null ? "제한 없음" : p.limits.maxRules + "개"}</span></div>
+      <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>
+      <div class="kv"><span class="k">계정 정지 시 승계</span><span class="v">${p.features.failover ? "자동" : "—"}</span></div>
+      <div class="kv"><span class="k">대신 돌려주는 PC</span><span class="v">${p.features.managedRunner === "included" ? "포함" : p.features.managedRunner === "option" ? "선택" : "—"}</span></div>
+      <div class="cta nobar" style="position:static;padding:12px 12px 8px"><button class="btn ${p.recommended ? "primary" : "secondary"}" type="button" data-plan="${p.key}" ${isCur ? "disabled" : ""}>${isCur ? "쓰는 중" : "이 플랜으로"}</button></div></div>`; }).join("");
+  UI.$$("[data-plan]").forEach((b) => b.onclick = () => choose(PLANS.find((p) => p.key === b.dataset.plan)));
+  if (!renderCards.seen) { renderCards.seen = true; const rec = UI.$("#cards .group[data-rec]"); if (rec) UI.$("#cards").scrollLeft = Math.max(0, rec.offsetLeft - 16); } // 처음엔 추천(또는 지금 쓰는) 카드가 보이게
+}
+/* «이 플랜으로» → 견적(GET subscription-quote)의 공급가·부가세·청구를 «서버 값 그대로» 보여주고 바꾼다. 화면은 ×1.1 을 하지 않는다 */
+async function choose(p) {
+  const needCard = !(S.billingKey && S.billingKey.has);
+  const q = await UI.api(`/api/subscription-quote?planKey=${encodeURIComponent(p.key)}&cycle=${cycle}`);
+  const Q = q.ok ? q.quote : null;
+  const up = paying() && RANK[p.key] > RANK[S.plan.key], down = paying() && (RANK[p.key] < RANK[S.plan.key] || (p.key === S.plan.key && cycle !== S.plan.cycle));
+  const when = up ? "남은 날수만큼 차액만 지금 결제되고, 다음 청구부터 이 금액이에요." : down ? "이번 기간은 그대로 쓰고 다음 청구부터 바뀌어요." : "지금 결제되고 바로 시작돼요.";
+  const src = Q && Q.source === "locked" ? " 가입 때 가격 그대로예요." : Q && Q.source === "price_event" ? " 개정된 가격이에요." : "";
+  const firstPay = !INV.some((r) => r.status === "paid"); // 유료 약관은 첫 결제 1회 — 결제한 적 없으면 먼저 묻고, 서버 400 paid_terms 면 다시 편다
+  UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">${UI.esc(p.name)} · ${cycle === "year" ? "연납" : "월납"}</div><div class="big">${up ? "지금 바로 바뀌어요" : down ? "다음 청구부터 바뀌어요" : "이 요금으로 시작할게요"}</div></div>
+    ${Q ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">요금(${VATNOTE})</span><span class="v">${won(Q.supplyKrw)}${Q.discountPct ? ` <span class="pill ok">${Q.discountPct}% 할인</span>` : ""}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(Q.vatKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">카드 청구</span><span class="v" style="font-weight:800">${won(Q.totalKrw)}${cycle === "year" ? " /년" : " /월"}</span></div>`
+    : `<p class="muted" style="margin:0 0 4px">${UI.esc(q.error || "견적을 받지 못했어요. 금액은 결제 뒤 청구서에서 확인돼요.")}</p>`}
+    <p class="muted" style="margin:10px 0 0;font-size:13px">${when}${src}</p>
+    ${needCard ? `<div class="banner" style="margin:12px 0 0"><span>먼저 카드를 등록해 주세요</span></div>` : ""}
+    <label class="chk" id="agreeRow" ${firstPay && !needCard ? "" : "hidden"}><input type="checkbox" id="agree"> <span><a href="/paid-terms.html" target="_blank" rel="noopener" style="text-decoration:underline">유료서비스 약관</a>(청약철회 7일 · 환불 기준)에 동의해요</span></label>
+    <div class="cta"><button class="btn primary" type="button" id="go">${needCard ? "카드 등록하러 가기" : up || down ? "바꾸기" : "시작하기"}</button></div>`,
+    { title: "", onOpen: (sh, close) => {
+      const row = sh.querySelector("#agreeRow"); const go = sh.querySelector("#go");
+      const need = () => { row.hidden = false; row.style.outline = "2px solid var(--danger)"; row.style.borderRadius = "10px"; UI.toast("유료 약관에 동의해 주세요"); };
+      go.onclick = async () => {
+        if (needCard) { close(); return addCard(); }
+        const agree = sh.querySelector("#agree").checked; if (!row.hidden && !agree) return need();
+        go.disabled = true; const body = { planKey: p.key, cycle }; if (agree) body.agreePaidTerms = true;
+        const r = await UI.api("/api/subscription-change", { body }); go.disabled = false;
+        if (!r.ok) { if (r.step === "paid_terms") return need(); if (r.step === "not_configured") { close(); return soon(); } if (r.step === "billing_key") { close(); return addCard(); } return UI.toast(r.error || "바꾸지 못했어요"); }
+        close(); UI.done(r.pending ? `${UI.dateKST(r.effectiveAt)}부터 ${p.name}` : r.totalKrw ? `${p.name} 시작 · ${won(r.totalKrw)} 결제했어요` : `${p.name} 로 바꿨어요`, load);
+      };
+    } });
+}
+/* 카드 등록 = KICC 인증창(url·form 은 서버가 준다) → 콜백 billing-key-return → ?key=ok|fail */
+async function addCard() { const r = await UI.api("/api/billing-key-start", { body: {} }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }
+function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요. 지금 체험 기간은 그대로예요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
+function cancel() { UI.sheet(`<p class="muted" style="margin:0 0 8px">해지하면 ${S.periodEnd ? UI.dateKST(S.periodEnd) : "이번 기간 끝"}까지 그대로 쓰고, 그 뒤엔 보기만 돼요. 만든 글과 편성표는 남아요.</p><div id="cc"></div>`, { title: "구독 해지", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#cc"), "정말 해지할까요? 기간 안엔 언제든 되돌릴 수 있어요.", async () => { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: true } }); if (!r.ok) return UI.toast(r.error || "해지하지 못했어요"); close(); UI.toast(r.periodEnd ? `${UI.dateKST(r.periodEnd)}까지 쓰고 끝나요` : "해지를 예약했어요"); load(); }) }); }
+async function revert() { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: false } }); if (!r.ok) return UI.toast(r.error || "되돌리지 못했어요"); UI.toast("해지를 취소했어요 · 그대로 이어져요"); load(); }
+UI.$$("#cycle button").forEach((b) => b.onclick = () => { cycle = b.dataset.c; UI.$$("#cycle button").forEach((x) => x.classList.toggle("on", x === b)); renderCards(); });
+await load();
 === coins.html | account | 코인 ===
-<div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip">1코인 = 500원 · 충전분은 1년 동안 써요</div></div>
-<div class="group"><div class="gt">충전하기</div><div id="packs"></div></div>
+<div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip" id="split">…</div></div>
+<div class="group" id="packs"><div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div></div>
+<div class="group" id="hist"><div class="gt">코인 내역 <span class="muted" style="font-weight:500">KST</span></div><div class="seg" id="mseg" style="margin:8px 16px 4px"><button type="button" data-m="this" class="on">이번 달</button><button type="button" data-m="prev">지난 달</button><button type="button" data-m="all">전체</button></div><div id="rows"></div></div>
 <div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
 --- script ---
 const me = await UI.boot("account"); if (!me) return;
-UI.countUp(UI.$("#bal"), me.coins, UI.num);
-const r = await UI.api("/api/plans"); if (!r.ok) return;
-UI.$("#packs").innerHTML = r.coins.packs.map((p) => `<button type="button" class="row tap" onclick="UI.toast('결제는 곧 열려요')"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(p.coins)}코인${p.bonusPct ? ` <span class="pill ok">+${p.bonusPct}%</span>` : ""}${p.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}</span><span class="d">${UI.won(p.krw)}</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`).join("");
-const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"];
-UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(r.coins.labels[k])}</span><span class="v">${r.coins.table[k]}코인</span></div>`).join("");
+const won = UI.won; let PACKS = [], ROWS = [], T = null, mode = "this";
+if (me.impersonation) UI.$("#packs").innerHTML = `<div class="empty" style="padding:20px 16px"><h3 style="font-size:15px">원격접속 중엔 충전할 수 없어요</h3><p>끝난 뒤 본인이 직접 해 주세요.</p></div>`;
+/* KICC 인증창 콜백 복귀(coin-charge-return): ?charged={주문번호} | ?failed={사유} */
+const charged = UI.qs.get("charged"), failed = UI.qs.get("failed");
+if (failed) UI.toast(`결제가 안 됐어요 · ${failed}`);
+const ymKST = (d) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 7);
+const monthOf = () => { const d = new Date(); if (mode === "this") return ymKST(d); if (mode === "prev") { d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return ymKST(d); } return null; };
+async function load() {
+  const m = monthOf();
+  const [p, k, h] = await Promise.all([UI.api("/api/plans"), UI.api("/api/coin-packs"), UI.api("/api/coin-history" + (m ? `?month=${m}` : ""))]);
+  T = p.ok ? p.coins : null; PACKS = k.ok ? k.packs || [] : []; ROWS = h.ok ? h.rows || [] : [];
+  const B = h.ok && h.balance ? h.balance : { total: me.coins, included: 0, purchased: 0 };
+  UI.countUp(UI.$("#bal"), B.total, UI.num);
+  UI.$("#split").textContent = `플랜 포함 ${UI.num(B.included)} · 충전 ${UI.num(B.purchased)} · 포함분은 그달 말까지, 충전분은 1년`;
+  if (charged && !load.said) { load.said = true; const row = ROWS.find((r) => r.kind === "purchase" && r.ref === charged); UI.done(row ? `${UI.num(row.amount)}코인 충전했어요` : "충전했어요"); }
+  if (!me.impersonation) {
+    const show = PACKS.filter((x) => x.available !== false); // 첫 충전 팩은 썼으면 서버가 available:false — 숨긴다
+    UI.$("#packs").innerHTML = `<div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div>` + (show.length ? show.map((x) => `<button type="button" class="row tap" data-pack="${UI.esc(x.id)}"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(x.coins)}코인${x.bonusPct ? ` <span class="pill ok">+${x.bonusPct}%</span>` : ""}${x.oncePerTenant ? ' <span class="pill off">첫 충전 1회</span>' : ""}</span><span class="d">${won(x.krw)} + 부가세 ${won(x.vatKrw)}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${won(x.totalKrw)}</span>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 살 수 있는 팩이 없어요</span></div></div>`);
+    UI.$$("[data-pack]").forEach((el) => el.onclick = () => buy(PACKS.find((x) => x.id === el.dataset.pack)));
+  }
+  const KIND = { purchase: "충전", consume: "사용", grant: "지급", revoke: "환불 회수", expire: "만료" };
+  UI.$("#rows").innerHTML = ROWS.length ? ROWS.map((r) => { const plus = r.amount > 0; const what = r.kind === "consume" ? (T && T.labels[r.item]) || "사용" : KIND[r.kind] || r.kind;
+    return `<div class="row"><div class="l"><span class="t">${UI.esc(what)}${r.bucket === "included" ? ' <span class="muted" style="font-weight:500;font-size:12px">포함분</span>' : ""}</span><span class="d">${r.kind === "grant" || r.kind === "revoke" ? UI.esc(r.reason || "") + " · " : ""}${r.at ? `${UI.dateKST(r.at)} ${UI.timeKST(r.at)}` : ""}${r.expiresAt && plus ? ` · ${UI.dateKST(r.expiresAt, { year: "numeric" })}까지` : ""}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${plus ? "+" : "−"}${UI.num(Math.abs(r.amount))}</span>${r.kind === "purchase" && r.ref && !me.impersonation ? `<button type="button" class="btn ghost sm" data-refund="${UI.esc(r.ref)}" style="padding:0 8px">환불</button>` : ""}</div>`; }).join("")
+    : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">${mode === "all" ? "아직 내역이 없어요" : "이 달엔 내역이 없어요"}</span></div></div>`;
+  UI.$$("[data-refund]").forEach((el) => el.onclick = () => refund(el.dataset.refund));
+  if (T) { const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"]; UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(T.labels[k])}</span><span class="v">${T.table[k]}코인</span></div>`).join(""); }
+}
+/* 충전 시트 — 공급가·부가세·청구는 coin-packs 의 서버 값(화면에서 ×1.1 안 함) · 유료 약관은 첫 결제 1회(충전한 적 없으면 먼저 묻고 · 서버 400 paid_terms 면 다시 편다) */
+function buy(x) {
+  const firstPay = !ROWS.some((r) => r.kind === "purchase");
+  UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">${UI.num(x.coins)}코인</div><div class="big">${won(x.totalKrw)} 결제할게요</div></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">공급가</span><span class="v">${won(x.krw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(x.vatKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">카드 청구</span><span class="v" style="font-weight:800">${won(x.totalKrw)}</span></div>
+    <p class="muted" style="margin:8px 0 0;font-size:13px">충전한 코인은 1년 동안 써요 · 안 쓴 코인은 7일 안에 환불돼요.</p>
+    <label class="chk" id="agreeRow" ${firstPay ? "" : "hidden"}><input type="checkbox" id="agree"> <span><a href="/paid-terms.html" target="_blank" rel="noopener" style="text-decoration:underline">유료서비스 약관</a>(청약철회 7일 · 환불 기준)에 동의해요</span></label>
+    <div class="cta"><button class="btn primary" type="button" id="go">충전하기</button></div>`,
+    { title: "", onOpen: (sh, close) => {
+      const row = sh.querySelector("#agreeRow"); const go = sh.querySelector("#go");
+      const need = () => { row.hidden = false; row.style.outline = "2px solid var(--danger)"; row.style.borderRadius = "10px"; UI.toast("유료 약관에 동의해 주세요"); };
+      go.onclick = async () => {
+        const body = { packId: x.id }; if (!row.hidden) { if (!sh.querySelector("#agree").checked) return need(); body.agreePaidTerms = true; }
+        go.disabled = true; const r = await UI.api("/api/coin-purchase-start", { body }); go.disabled = false;
+        if (!r.ok) { if (r.step === "paid_terms") return need(); if (r.step === "not_configured") { close(); return soon(); } if (r.step === "once") { close(); UI.toast(r.error || "첫 충전 팩은 한 번만 살 수 있어요"); return load(); } return UI.toast(r.error || "충전을 시작하지 못했어요"); }
+        if (r.mode === "oneclick") { close(); return UI.done(`${UI.num(r.coins)}코인 충전했어요 · 잔액 ${UI.num(r.balance)}`, load); }   // 등록 카드로 즉시(응답이 곧 결과)
+        if (r.pay && r.pay.url) return UI.postForm(r.pay.url, r.pay.form);                                                     // 인증창 → coin-charge-return → ?charged=
+        close(); UI.toast("결제창을 열지 못했어요 · 잠시 뒤 다시 해 주세요");
+      };
+    } });
+}
+/* 환불 = 견적(quoteOnly) → 확인 → 실행. 판정·금액은 전부 서버(5규칙) · 화면은 이유를 사람말로만 */
+const WHY = { not_coin_order: "충전 주문이 아니에요", not_paid: "결제가 끝난 주문이 아니에요", already_refunded: "이미 환불된 주문이에요", window: "충전 후 7일이 지나 환불할 수 없어요", used: "코인을 모두 써서 돌려드릴 게 없어요", no_lot: "충전 기록을 찾지 못했어요 · 문의해 주세요" };
+async function refund(orderNo) {
+  const q = await UI.api("/api/coin-refund-request", { body: { orderNo, quoteOnly: true } });
+  if (!q.ok) return UI.toast(q.error || "환불 조건을 확인하지 못했어요");
+  const Q = q.quote || {}; if (!Q.eligible) return UI.toast(WHY[Q.reason] || "지금은 환불할 수 없어요");
+  UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">${Q.usedCoins ? `안 쓴 ${UI.num(Q.unusedCoins)}코인만` : "전액"}</div><div class="big">${won(Q.maxRefundKrw)} 돌려드려요</div></div>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">${Q.usedCoins ? `받은 ${UI.num(Q.packCoins)}코인 중 ${UI.num(Q.usedCoins)}코인을 써서 남은 만큼만 돌려드려요(단가는 그 주문의 결제액 ÷ 받은 코인).` : "아직 한 개도 안 써서 전액이에요."}${Q.refundDeadlineAt ? ` ${UI.dateKST(Q.refundDeadlineAt)}까지만 돼요.` : ""} 카드사 사정에 따라 3~5일 걸릴 수 있어요.</p><div id="rc"></div>`,
+    { title: "환불 요청", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), `이 충전을 환불할까요? ${UI.num(Q.unusedCoins)}코인이 회수돼요.`, async () => {
+      const r = await UI.api("/api/coin-refund-request", { body: { orderNo, reason: "고객 요청" } });
+      if (!r.ok) { if (r.step === "not_configured") { close(); return soon(); } return UI.toast((r.reason && WHY[r.reason]) || r.error || "환불하지 못했어요"); }
+      close(); UI.done(`${won(r.refundKrw)} 환불 · ${UI.num(r.revoked)}코인 회수`, load); }) });
+}
+function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
+UI.$$("#mseg button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mseg button").forEach((x) => x.classList.toggle("on", x === b)); load(); });
+await load();
 === notifications.html | home | 알림 ===
 <div class="step-h"><h1>알림</h1></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 await UI.boot("home");
 const EMPTY = `<div class="empty"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></span><h3>아직 알림이 없어요</h3><p>발행·검수·계정 상태가 바뀌면 여기에 쌓여요.</p></div>`;
-const row = (n) => `<a class="row tap" href="${n.link ? UI.esc(n.link) : "javascript:void 0"}" ${n.readAt ? 'style="opacity:.55"' : ""}>${UI.kindMark(n.kind, n.tone)}<div class="l"><span class="t wrap">${UI.esc(n.title)}</span><span class="d wrap">${UI.esc(n.desc || "")}</span></div><span class="r mut">${UI.esc(UI.ago(n.createdAt))}</span>${n.link ? UI.chev : ""}</a>`;
+const row = (n) => { const link = n.link || UI.KIND_LINK[n.kind] || ""; return `<a class="row tap" href="${link ? UI.esc(link) : "javascript:void 0"}" ${n.readAt ? 'style="opacity:.55"' : ""}>${UI.kindMark(n.kind, n.tone)}<div class="l"><span class="t wrap">${UI.esc(n.title)}</span><span class="d wrap">${UI.esc(n.desc || "")}</span></div><span class="r mut">${UI.esc(UI.ago(n.createdAt))}</span>${link ? UI.chev : ""}</a>`; }; // [P1R4] 링크 없는 kind 는 기본 링크
 async function load() {
   const r = await UI.api("/api/notifications-list?limit=50");
   let list = r.ok ? (r.notifications || []) : null;
@@ -732,13 +891,39 @@ async function load() {
 }
 await load();
 === support.html | account | 문의하기 ===
-<div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·계정·최근 오류는 자동으로 같이 보내져요.</p></div>
-<form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
-<div class="field"><label for="body">자세히</label><textarea class="input" id="body" name="body" rows="5" style="height:auto;padding:14px 16px" required></textarea><div class="help"></div></div>
-<div class="cta"><button class="btn primary" type="submit">보내기</button></div></form>
+<div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·내 PC 프로그램 상태·최근 오류는 자동으로 같이 보내져요.</p></div>
+<div class="group" id="faq"><div class="gt">자주 묻는 질문</div></div>
+<div class="group" id="mine"><div class="gt">내 문의</div></div>
+<div class="cta"><button class="btn primary" type="button" id="ask">문의 남기기</button></div>
 --- script ---
 await UI.boot("account");
-const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/support-ticket-create", { body: d }); if (!r.ok) { UI.toast(r.error || "보내지 못했어요"); return; } UI.done("보냈어요", () => location.href = "/app/account.html"); });
+const TST = { open: ["warn", "접수"], progress: ["ink", "답변 중"], hold: ["off", "확인 중"], resolved: ["ok", "해결"] };
+async function load() {
+  const [f, t] = await Promise.all([UI.api("/api/faqs"), UI.api("/api/support-tickets")]);
+  const faqs = f.ok ? f.faqs || [] : [];
+  UI.$("#faq").innerHTML = `<div class="gt">자주 묻는 질문</div>` + (faqs.length ? faqs.map((q) => `<button type="button" class="row tap" data-faq="${q.id}"><div class="l"><span class="t wrap">${UI.esc(q.q)}</span></div>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">아직 없어요</span></div></div>`);
+  UI.$$("[data-faq]").forEach((b) => b.onclick = () => { const q = faqs.find((x) => x.id === Number(b.dataset.faq)); UI.sheet(`<p style="margin:0 0 12px;font-size:15px;line-height:1.7">${UI.esc(q.a)}</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: q.q, onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); });
+  const tk = t.ok ? t.tickets || [] : [];
+  UI.$("#mine").innerHTML = `<div class="gt">내 문의</div>` + (tk.length ? tk.map((x) => `<button type="button" class="row tap" data-t="${x.id}"><div class="l"><span class="t">${UI.esc(x.subject)}</span><span class="d">${UI.ago(x.updatedAt)}${x.status === "resolved" && x.rating == null ? " · 도움이 됐는지 알려 주세요" : ""}</span></div>${UI.pill(TST, x.status)}${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">남긴 문의가 없어요</span></div></div>`);
+  UI.$$("[data-t]").forEach((b) => b.onclick = () => thread(tk.find((x) => x.id === Number(b.dataset.t))));
+}
+function thread(x) {
+  UI.sheet(`<div style="display:flex;flex-direction:column;gap:6px">${(x.messages || []).map((m) => `<div class="msg ${m.from === "operator" ? "op" : m.from === "system" ? "sys" : ""}" style="margin:0;${m.from === "operator" ? "align-self:flex-end" : ""}">${UI.esc(m.text)}<small>${m.from === "operator" ? "AutoCreate" : m.from === "system" ? "자동 첨부" : "나"} · ${UI.dateKST(m.at)} ${UI.timeKST(m.at)}</small></div>`).join("")}</div>
+    ${x.status === "resolved" && x.rating == null ? `<div class="sec">도움이 됐나요?</div><div class="cta" style="padding-top:6px"><button class="btn secondary" type="button" data-r="0">아니요</button><button class="btn primary" type="button" data-r="1">네</button></div>` : x.rating != null ? `<p class="muted center" style="margin:12px 0 0;font-size:13px">평가해 주셔서 고마워요</p>` : `<p class="muted center" style="margin:12px 0 0;font-size:13px">답변이 오면 알림으로 알려드려요</p>`}`,
+    { title: x.subject, onOpen: (sh, close) => { sh.querySelectorAll("[data-r]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/support-rate", { body: { id: x.id, helpful: b.dataset.r === "1" } }); if (!r.ok) return UI.toast(r.error); close(); UI.toast("고마워요"); load(); }); } });
+}
+let files = [];
+UI.$("#ask").onclick = () => { files = []; UI.sheet(`<form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
+  <div class="field"><label for="body">자세히</label><textarea class="input" id="body" name="text" rows="5" style="height:auto;padding:14px 16px" required></textarea><div class="help"></div></div>
+  <div class="field"><label>사진 <span class="muted" style="font-weight:500">· 선택 · 3장까지</span></label><input type="file" id="pic" accept="image/*" multiple style="font-size:13px"><div id="picList" class="muted" style="font-size:12.5px"></div></div>
+  <div class="cta"><button class="btn primary" type="submit">보내기</button></div></form>`, { title: "문의 남기기", onOpen: (sh, close) => {
+    sh.querySelector("#pic").addEventListener("change", async (e) => { const list = [...e.target.files].slice(0, 3); const out = [];
+      for (const f of list) { if (f.size > 3 * 1024 * 1024) { UI.toast(`${f.name} 은 3MB 를 넘어요`); continue; } const b64 = await new Promise((res) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(",")[1]); rd.readAsDataURL(f); });
+        const r = await UI.api("/api/upload", { body: { filename: f.name, contentType: f.type, dataBase64: b64 } }); if (r.ok) out.push({ key: r.key, name: f.name }); else UI.toast(r.error || "올리지 못했어요"); }
+      files = out; sh.querySelector("#picList").textContent = out.length ? out.map((x) => x.name).join(" · ") + " 붙였어요" : ""; });
+    UI.form(sh.querySelector("#f"), async (d, f) => { const r = await UI.api("/api/support-ticket", { body: { subject: d.subject, text: d.text, attachments: files.map((x) => x.key) } }); if (!r.ok) return UI.fieldError(f, r.step === "subject" ? "subject" : "text", r.error || "보내지 못했어요"); close(); UI.done("보냈어요 · 답변은 알림으로", load); });
+  } }); };
+await load();
 === director.html | create | 디렉터 ===
 <div class="confirm"><div class="q">이 소재로</div><div class="big" id="big"><span class="sk" style="display:inline-block;width:70%"></span></div></div>
 <div class="group" id="targets"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
@@ -823,7 +1008,7 @@ async function make() {
     if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
   const body = { briefId: brief.id }; if (patches.length) body.pieces = patches;
   const r = await UI.api("/api/director-confirm", { body }); btn.disabled = false;
-  if (!r.ok) {
+  if (!r.ok) { if (r.gated) return;
     if (r.step === "coin_short") return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? brief.coinsLeft}코인이 있고 ${r.need ?? total()}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: `코인이 ${Math.max(0, (r.need ?? total()) - (r.have ?? brief.coinsLeft))}개 부족해요` });
     return UI.toast(r.error || "만들기를 시작하지 못했어요");
   }
@@ -902,7 +1087,7 @@ UI.$("#save").onclick = async () => {
 UI.$("#approve").onclick = async () => {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
   const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
-  if (!r.ok) {
+  if (!r.ok) { if (r.gated) return;
     if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요.</p><div class="gate" style="padding:4px 0 8px">${r.gate.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>글 고치러 가기</button></div>`, { title: "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
     return UI.toast(r.error || "예약하지 못했어요");
   }
@@ -911,7 +1096,7 @@ UI.$("#approve").onclick = async () => {
 more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
   <button type="button" class="row tap" id="regen" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : "코인은 더 안 들어요 · 1회"}</span></div></button>
   <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger)">버리기</span><span class="d">이 글은 발행하지 않아요</span></div></button></div><div id="rc"></div>`, { title: "이 글을", onOpen: (sh, close) => {
-    sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
+    sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
     sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
   } });
 await load();
@@ -975,7 +1160,7 @@ function addSheet() {
         const btn = body.querySelector("#nx"); btn.disabled = true;
         const r = await UI.api("/api/runner-register", { body: { name, kind: "own" } }); btn.disabled = false;
         if (!r.ok) {
-          if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plans.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+          if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
           body.querySelector(".help").textContent = r.error || "등록하지 못했어요"; return;
         }
         token = r.device.token; DL.url = (r.install || {}).url || ""; DL.cmd = (r.install || {}).cmd || ""; step = 2; view(sh, close);

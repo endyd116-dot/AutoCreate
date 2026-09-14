@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CS · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ph"></span><span class="ttl">CS</span><span class="sp"></span></div>
+<div class="group"><div class="stat4" id="stat"></div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="st" style="margin:0"><button class="on" data-v="">전체</button><button data-v="open">열림</button><button data-v="progress">진행</button><button data-v="hold">보류</button><button data-v="resolved">해결</button></div><div class="seg" id="pr" style="margin:0"><button class="on" data-v="">우선순위</button><button data-v="urgent">긴급</button><button data-v="high">높음</button></div><div class="seg" id="mine" style="margin:0"><button data-v="">내 것만</button></div></div>
+<div class="group"><div class="gt">티켓함 <a href="/ops/cs-faq.html">FAQ · 매크로</a></div><div id="list"></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("cs"); if (!op) return;
+let status = "", priority = "", mine = false;
+const TST = { open: ["warn", "열림"], progress: ["ink", "진행"], hold: ["off", "보류"], resolved: ["ok", "해결"] };
+const PRI = { urgent: ["danger", "긴급"], high: ["warn", "높음"], normal: ["off", "보통"], low: ["off", "낮음"] };
+const SRC = { app: "앱", email: "메일", kakao: "카카오", system: "자동" };
+const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; const m = Math.round((UI.utc(t.slaDueAt).getTime() - Date.now()) / 60e3); return m < 0 ? `<span style="color:var(--danger);font-weight:700">${-m}분 지남</span>` : m < 60 ? `<span style="color:var(--warn-ink);font-weight:700">${m}분</span>` : `${Math.round(m / 60)}시간`; };
+async function load() {
+  const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}`, { noRedirect: true })]);
+  if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", `${s.avgFirstReplyMin}분`], ["SLA 놓침", `${s.slaMissPct}%`], ["만족", `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  UI.$("#list").innerHTML = OPS.table([
+    { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) }, { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },
+    { h: "상태", f: (t) => OPS.pill(TST[t.status] || ["off", t.status]) }, { h: "담당", f: (t) => t.assignee ? UI.esc(t.assignee.name) : '<span class="muted">없음</span>' },
+    { h: "SLA", f: sla }, { h: "갱신", f: (t) => OPS.dt(t.updatedAt) },
+  ], r.tickets || [], (t) => `class="tap" data-id="${t.id}"`);
+  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = () => UI.go(`/ops/ticket.html?id=${tr.dataset.id}`));
+}
+UI.$$("#st button").forEach((b) => b.onclick = () => { UI.$$("#st button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.v; load(); });
+UI.$$("#pr button").forEach((b) => b.onclick = () => { UI.$$("#pr button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); priority = b.dataset.v; load(); });
+UI.$("#mine button").onclick = (e) => { mine = !mine; e.target.classList.toggle("on", mine); load(); };
+load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>러너 팜 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ph"></span><span class="ttl">러너 팜</span><span class="sp"></span></div>
+<div class="group"><div class="gt">러너 <span class="muted" style="font-weight:500">관리형(팜) + 고객 PC</span></div><div id="list"></div></div>
+<div class="group"><div class="gt">셀렉터 카나리 <span class="muted" style="font-weight:500">매일 05:00 KST · 자사 계정 «임시저장까지» 드라이런</span></div><div id="canary"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">✗ 는 채널 상태를 down 으로 바꿀 «제안»이에요 — 자동 전환은 안 하고 채널 메뉴에서 사람이 눌러요. «—» 는 판정 불가(세션 없음).</p></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("runners"); if (!op) return;
+async function load() {
+  const [r, c] = await Promise.all([UI.api("/api/ops-runners", { noRedirect: true }), UI.api("/api/ops-canary", { noRedirect: true })]);
+  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  UI.$("#list").innerHTML = OPS.table([
+    { h: "이름", f: (x) => `<b>${UI.esc(x.name)}</b> <span class="pill ${x.kind === "managed" ? "ink" : "off"}">${x.kind === "managed" ? "관리형" : "고객 PC"}</span>${x.tenantName ? `<br><span class="muted">${UI.esc(x.tenantName)}</span>` : ""}` },
+    { h: "상태", f: (x) => OPS.pill(x.status === "online" ? ["ok", "켜짐"] : ["off", "꺼짐"]) }, { h: "부하", f: (x) => `<span class="track" style="display:inline-block;width:80px;height:8px;border-radius:999px;background:var(--ground);vertical-align:middle;overflow:hidden"><span style="display:block;height:100%;width:${Math.round((x.load || 0) * 100)}%;background:${(x.load || 0) > 0.8 ? "var(--warn)" : "var(--faint)"}"></span></span> ${Math.round((x.load || 0) * 100)}%` },
+    { h: "배정 계정", r: true, f: (x) => UI.num(x.assignedAccounts || 0) }, { h: "대기", r: true, f: (x) => UI.num(x.jobsWaiting || 0) }, { h: "하트비트", f: (x) => x.lastSeenAt ? UI.ago(x.lastSeenAt) : "—" }, { h: "버전", f: (x) => UI.esc(x.version || "—") },
+    { h: "", f: (x) => x.kind === "managed" ? `<button type="button" class="lk" data-assign="${x.id}">계정 배정</button>` : "" },
+  ], r.runners || []);
+  UI.$$("[data-assign]").forEach((b) => b.onclick = () => UI.sheet(`<div class="sec">몇 계정을 더 붙일까요</div>${UI.chips("n", [[1, "1"], [5, "5"], [10, "10"]], 5)}<div class="cta"><button class="btn primary" type="button" id="ok">배정</button></div>`, { title: "계정 배정", onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const rr = await UI.api("/api/ops-runner-assign", { body: { runnerId: Number(b.dataset.assign), accounts: Number(UI.chipVal(sh, "n")) }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); close(); UI.toast(`배정 ${rr.runner.assignedAccounts}계정`); load(); }; } }));
+  const runs = c.ok ? c.runs || [] : []; const days = [...new Set(runs.map((x) => x.day))].sort().reverse(); const chans = [...new Set(runs.map((x) => x.channel))];
+  const cell = (x) => !x ? "—" : x.ok === null ? `<span class="muted" title="${UI.esc(x.error || "")}">—</span>` : x.ok ? `<span style="color:var(--money);font-weight:800">✓</span>${x.shotKey ? ` <a class="lk" href="#" data-shot="${UI.esc(x.shotKey)}" style="font-weight:500;color:var(--muted)">스냅샷</a>` : ""}` : `<span style="color:var(--danger);font-weight:800">✗</span> <span class="muted">${UI.esc(x.error || "")}</span>${x.shotKey ? ` <a class="lk" href="#" data-shot="${UI.esc(x.shotKey)}" style="font-weight:500;color:var(--muted)">스냅샷</a>` : ""}`;
+  UI.$("#canary").innerHTML = OPS.table([{ h: "날짜(KST)", f: (d) => d }, ...chans.map((ch) => ({ h: UI.chLabel(ch), f: (d) => cell(runs.find((x) => x.day === d && x.channel === ch)) }))], days);
+  UI.$$("[data-shot]").forEach((a) => a.onclick = (e) => { e.preventDefault(); UI.toast(`스냅샷 ${a.dataset.shot} · R2 저장소에서 열려요`); });
+}
+load();
+})();
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@
 <title>검수 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
@@ -20,8 +20,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -61,7 +61,7 @@ UI.$("#save").onclick = async () => {
 UI.$("#approve").onclick = async () => {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
   const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
-  if (!r.ok) {
+  if (!r.ok) { if (r.gated) return;
     if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요.</p><div class="gate" style="padding:4px 0 8px">${r.gate.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>글 고치러 가기</button></div>`, { title: "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
     return UI.toast(r.error || "예약하지 못했어요");
   }
@@ -70,7 +70,7 @@ UI.$("#approve").onclick = async () => {
 more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
   <button type="button" class="row tap" id="regen" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : "코인은 더 안 들어요 · 1회"}</span></div></button>
   <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger)">버리기</span><span class="d">이 글은 발행하지 않아요</span></div></button></div><div id="rc"></div>`, { title: "이 글을", onOpen: (sh, close) => {
-    sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
+    sh.querySelector("#regen").onclick = async () => { const r = await UI.api("/api/pieces-regenerate", { body: { id } }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "다시 만들지 못했어요"); close(); UI.toast("다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); };
     sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
   } });
 await load();

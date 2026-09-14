@@ -6,29 +6,91 @@
 <title>코인 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
-<div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip">1코인 = 500원 · 충전분은 1년 동안 써요</div></div>
-<div class="group"><div class="gt">충전하기</div><div id="packs"></div></div>
+<div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip" id="split">…</div></div>
+<div class="group" id="packs"><div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div></div>
+<div class="group" id="hist"><div class="gt">코인 내역 <span class="muted" style="font-weight:500">KST</span></div><div class="seg" id="mseg" style="margin:8px 16px 4px"><button type="button" data-m="this" class="on">이번 달</button><button type="button" data-m="prev">지난 달</button><button type="button" data-m="all">전체</button></div><div id="rows"></div></div>
 <div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
-UI.countUp(UI.$("#bal"), me.coins, UI.num);
-const r = await UI.api("/api/plans"); if (!r.ok) return;
-UI.$("#packs").innerHTML = r.coins.packs.map((p) => `<button type="button" class="row tap" onclick="UI.toast('결제는 곧 열려요')"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(p.coins)}코인${p.bonusPct ? ` <span class="pill ok">+${p.bonusPct}%</span>` : ""}${p.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}</span><span class="d">${UI.won(p.krw)}</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`).join("");
-const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"];
-UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(r.coins.labels[k])}</span><span class="v">${r.coins.table[k]}코인</span></div>`).join("");
+const won = UI.won; let PACKS = [], ROWS = [], T = null, mode = "this";
+if (me.impersonation) UI.$("#packs").innerHTML = `<div class="empty" style="padding:20px 16px"><h3 style="font-size:15px">원격접속 중엔 충전할 수 없어요</h3><p>끝난 뒤 본인이 직접 해 주세요.</p></div>`;
+/* KICC 인증창 콜백 복귀(coin-charge-return): ?charged={주문번호} | ?failed={사유} */
+const charged = UI.qs.get("charged"), failed = UI.qs.get("failed");
+if (failed) UI.toast(`결제가 안 됐어요 · ${failed}`);
+const ymKST = (d) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 7);
+const monthOf = () => { const d = new Date(); if (mode === "this") return ymKST(d); if (mode === "prev") { d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return ymKST(d); } return null; };
+async function load() {
+  const m = monthOf();
+  const [p, k, h] = await Promise.all([UI.api("/api/plans"), UI.api("/api/coin-packs"), UI.api("/api/coin-history" + (m ? `?month=${m}` : ""))]);
+  T = p.ok ? p.coins : null; PACKS = k.ok ? k.packs || [] : []; ROWS = h.ok ? h.rows || [] : [];
+  const B = h.ok && h.balance ? h.balance : { total: me.coins, included: 0, purchased: 0 };
+  UI.countUp(UI.$("#bal"), B.total, UI.num);
+  UI.$("#split").textContent = `플랜 포함 ${UI.num(B.included)} · 충전 ${UI.num(B.purchased)} · 포함분은 그달 말까지, 충전분은 1년`;
+  if (charged && !load.said) { load.said = true; const row = ROWS.find((r) => r.kind === "purchase" && r.ref === charged); UI.done(row ? `${UI.num(row.amount)}코인 충전했어요` : "충전했어요"); }
+  if (!me.impersonation) {
+    const show = PACKS.filter((x) => x.available !== false); // 첫 충전 팩은 썼으면 서버가 available:false — 숨긴다
+    UI.$("#packs").innerHTML = `<div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div>` + (show.length ? show.map((x) => `<button type="button" class="row tap" data-pack="${UI.esc(x.id)}"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(x.coins)}코인${x.bonusPct ? ` <span class="pill ok">+${x.bonusPct}%</span>` : ""}${x.oncePerTenant ? ' <span class="pill off">첫 충전 1회</span>' : ""}</span><span class="d">${won(x.krw)} + 부가세 ${won(x.vatKrw)}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${won(x.totalKrw)}</span>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 살 수 있는 팩이 없어요</span></div></div>`);
+    UI.$$("[data-pack]").forEach((el) => el.onclick = () => buy(PACKS.find((x) => x.id === el.dataset.pack)));
+  }
+  const KIND = { purchase: "충전", consume: "사용", grant: "지급", revoke: "환불 회수", expire: "만료" };
+  UI.$("#rows").innerHTML = ROWS.length ? ROWS.map((r) => { const plus = r.amount > 0; const what = r.kind === "consume" ? (T && T.labels[r.item]) || "사용" : KIND[r.kind] || r.kind;
+    return `<div class="row"><div class="l"><span class="t">${UI.esc(what)}${r.bucket === "included" ? ' <span class="muted" style="font-weight:500;font-size:12px">포함분</span>' : ""}</span><span class="d">${r.kind === "grant" || r.kind === "revoke" ? UI.esc(r.reason || "") + " · " : ""}${r.at ? `${UI.dateKST(r.at)} ${UI.timeKST(r.at)}` : ""}${r.expiresAt && plus ? ` · ${UI.dateKST(r.expiresAt, { year: "numeric" })}까지` : ""}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${plus ? "+" : "−"}${UI.num(Math.abs(r.amount))}</span>${r.kind === "purchase" && r.ref && !me.impersonation ? `<button type="button" class="btn ghost sm" data-refund="${UI.esc(r.ref)}" style="padding:0 8px">환불</button>` : ""}</div>`; }).join("")
+    : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">${mode === "all" ? "아직 내역이 없어요" : "이 달엔 내역이 없어요"}</span></div></div>`;
+  UI.$$("[data-refund]").forEach((el) => el.onclick = () => refund(el.dataset.refund));
+  if (T) { const show = ["blog", "image", "cardnews", "video_15", "video_30", "video_60", "persona"]; UI.$("#table").innerHTML = show.map((k) => `<div class="kv"><span class="k">${UI.esc(T.labels[k])}</span><span class="v">${T.table[k]}코인</span></div>`).join(""); }
+}
+/* 충전 시트 — 공급가·부가세·청구는 coin-packs 의 서버 값(화면에서 ×1.1 안 함) · 유료 약관은 첫 결제 1회(충전한 적 없으면 먼저 묻고 · 서버 400 paid_terms 면 다시 편다) */
+function buy(x) {
+  const firstPay = !ROWS.some((r) => r.kind === "purchase");
+  UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">${UI.num(x.coins)}코인</div><div class="big">${won(x.totalKrw)} 결제할게요</div></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">공급가</span><span class="v">${won(x.krw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(x.vatKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">카드 청구</span><span class="v" style="font-weight:800">${won(x.totalKrw)}</span></div>
+    <p class="muted" style="margin:8px 0 0;font-size:13px">충전한 코인은 1년 동안 써요 · 안 쓴 코인은 7일 안에 환불돼요.</p>
+    <label class="chk" id="agreeRow" ${firstPay ? "" : "hidden"}><input type="checkbox" id="agree"> <span><a href="/paid-terms.html" target="_blank" rel="noopener" style="text-decoration:underline">유료서비스 약관</a>(청약철회 7일 · 환불 기준)에 동의해요</span></label>
+    <div class="cta"><button class="btn primary" type="button" id="go">충전하기</button></div>`,
+    { title: "", onOpen: (sh, close) => {
+      const row = sh.querySelector("#agreeRow"); const go = sh.querySelector("#go");
+      const need = () => { row.hidden = false; row.style.outline = "2px solid var(--danger)"; row.style.borderRadius = "10px"; UI.toast("유료 약관에 동의해 주세요"); };
+      go.onclick = async () => {
+        const body = { packId: x.id }; if (!row.hidden) { if (!sh.querySelector("#agree").checked) return need(); body.agreePaidTerms = true; }
+        go.disabled = true; const r = await UI.api("/api/coin-purchase-start", { body }); go.disabled = false;
+        if (!r.ok) { if (r.step === "paid_terms") return need(); if (r.step === "not_configured") { close(); return soon(); } if (r.step === "once") { close(); UI.toast(r.error || "첫 충전 팩은 한 번만 살 수 있어요"); return load(); } return UI.toast(r.error || "충전을 시작하지 못했어요"); }
+        if (r.mode === "oneclick") { close(); return UI.done(`${UI.num(r.coins)}코인 충전했어요 · 잔액 ${UI.num(r.balance)}`, load); }   // 등록 카드로 즉시(응답이 곧 결과)
+        if (r.pay && r.pay.url) return UI.postForm(r.pay.url, r.pay.form);                                                     // 인증창 → coin-charge-return → ?charged=
+        close(); UI.toast("결제창을 열지 못했어요 · 잠시 뒤 다시 해 주세요");
+      };
+    } });
+}
+/* 환불 = 견적(quoteOnly) → 확인 → 실행. 판정·금액은 전부 서버(5규칙) · 화면은 이유를 사람말로만 */
+const WHY = { not_coin_order: "충전 주문이 아니에요", not_paid: "결제가 끝난 주문이 아니에요", already_refunded: "이미 환불된 주문이에요", window: "충전 후 7일이 지나 환불할 수 없어요", used: "코인을 모두 써서 돌려드릴 게 없어요", no_lot: "충전 기록을 찾지 못했어요 · 문의해 주세요" };
+async function refund(orderNo) {
+  const q = await UI.api("/api/coin-refund-request", { body: { orderNo, quoteOnly: true } });
+  if (!q.ok) return UI.toast(q.error || "환불 조건을 확인하지 못했어요");
+  const Q = q.quote || {}; if (!Q.eligible) return UI.toast(WHY[Q.reason] || "지금은 환불할 수 없어요");
+  UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">${Q.usedCoins ? `안 쓴 ${UI.num(Q.unusedCoins)}코인만` : "전액"}</div><div class="big">${won(Q.maxRefundKrw)} 돌려드려요</div></div>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">${Q.usedCoins ? `받은 ${UI.num(Q.packCoins)}코인 중 ${UI.num(Q.usedCoins)}코인을 써서 남은 만큼만 돌려드려요(단가는 그 주문의 결제액 ÷ 받은 코인).` : "아직 한 개도 안 써서 전액이에요."}${Q.refundDeadlineAt ? ` ${UI.dateKST(Q.refundDeadlineAt)}까지만 돼요.` : ""} 카드사 사정에 따라 3~5일 걸릴 수 있어요.</p><div id="rc"></div>`,
+    { title: "환불 요청", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), `이 충전을 환불할까요? ${UI.num(Q.unusedCoins)}코인이 회수돼요.`, async () => {
+      const r = await UI.api("/api/coin-refund-request", { body: { orderNo, reason: "고객 요청" } });
+      if (!r.ok) { if (r.step === "not_configured") { close(); return soon(); } return UI.toast((r.reason && WHY[r.reason]) || r.error || "환불하지 못했어요"); }
+      close(); UI.done(`${won(r.refundKrw)} 환불 · ${UI.num(r.revoked)}코인 회수`, load); }) });
+}
+function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
+UI.$$("#mseg button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mseg button").forEach((x) => x.classList.toggle("on", x === b)); load(); });
+await load();
 })();
 </script>
 </body>

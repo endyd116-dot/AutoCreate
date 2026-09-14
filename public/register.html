@@ -6,7 +6,7 @@
 <title>가입 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=4">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <main class="page auth">
@@ -18,19 +18,28 @@
       <div class="field"><label for="name">이름 또는 닉네임</label><input class="input" id="name" name="name" type="text" autocomplete="nickname" maxlength="80" placeholder="예: 두현"><div class="help"></div></div>
       <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
       <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div>
-      <label class="chk"><input type="checkbox" name="agree" id="agree" required> <span><a href="/terms.html" target="_blank" rel="noopener">이용약관</a>과 <a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>에 동의해요</span></label>
+      <!-- [P1R4] 가입 동의 4(§19 · 계약 §3.2) — 하나라도 없으면 가입 안 됨 · consents 로 기록 -->
+      <label class="chk" style="padding-bottom:2px"><input type="checkbox" id="all"> <span><b>모두 동의해요</b></span></label>
+      <div style="border-top:1px solid var(--line);margin:4px 0"></div>
+      <label class="chk"><input type="checkbox" name="terms" data-c> <span><a href="/terms.html" target="_blank" rel="noopener">이용약관</a>에 동의해요 <span class="muted">(필수)</span></span></label>
+      <label class="chk"><input type="checkbox" name="privacy" data-c> <span><a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>에 동의해요 <span class="muted">(필수)</span></span></label>
+      <label class="chk"><input type="checkbox" name="paidTerms" data-c> <span><a href="/paid-terms.html" target="_blank" rel="noopener">유료서비스 약관</a>(구독 자동결제 · 청약철회 7일 · 환불)에 동의해요 <span class="muted">(필수)</span></span></label>
+      <label class="chk"><input type="checkbox" name="automationNotice" data-c> <span><a href="/automation-notice.html" target="_blank" rel="noopener">자동 발행 · 계정 제재 안내</a>를 읽고 동의해요 <span class="muted">(필수)</span></span></label>
       <div class="cta"><button class="btn primary" type="submit">시작하기</button></div>
     </form>
     <div class="links"><a href="/login.html">이미 계정이 있어요</a></div>
   </div>
 </main>
-<script src="/js/ui.js?v=4"></script>
+<script src="/js/ui.js?v=7"></script>
 <script>
   const f = UI.$("#f");
+  const all = UI.$("#all"), each = UI.$$("[data-c]");
+  all.onchange = () => each.forEach((c) => { c.checked = all.checked; }); each.forEach((c) => c.onchange = () => { all.checked = each.every((x) => x.checked); });
   UI.form(f, async (d) => {
     ["email", "password"].forEach((k) => UI.fieldError(f, k, ""));
-    if (!d.agree) { UI.toast("약관에 동의해 주세요"); return; }
-    const r = await UI.api("/api/auth-register", { body: { email: d.email, password: d.password, name: d.name || undefined }, noRedirect: true });
+    const consents = { terms: !!d.terms, privacy: !!d.privacy, paidTerms: !!d.paidTerms, automationNotice: !!d.automationNotice };
+    if (!Object.values(consents).every(Boolean)) { UI.toast("네 가지 약관에 모두 동의해 주세요"); return; }
+    const r = await UI.api("/api/auth-register", { body: { email: d.email, password: d.password, name: d.name || undefined, consents }, noRedirect: true });
     if (!r.ok) { UI.fieldError(f, r.step === "exists" ? "email" : "password", r.error || "가입에 실패했어요."); return; }
     UI.done("가입했어요", () => { location.href = "/onboarding.html"; });
   });

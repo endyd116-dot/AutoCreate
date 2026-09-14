@@ -6,13 +6,14 @@
 <title>홈 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="sp"></span><a class="ic" href="/app/notifications.html" aria-label="알림"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></a></div>
+    <div id="notice" hidden></div>
     <a class="hl" href="/app/revenue.html" style="display:block">
       <div class="say">오늘</div>
       <div class="num" id="hlnum"><span class="sk" style="display:inline-block;width:60%"></span></div>
@@ -27,13 +28,22 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
   const v = UI.qs.get("verify");
   if (v === "ok") UI.toast("이메일 인증이 끝났어요"); else if (v === "used") UI.toast("이미 인증된 링크예요"); else if (v) UI.toast("인증 링크가 유효하지 않아요");
+  // [P1R4] 공지·장애 배너 — 홈 상단 1줄 · 기간 안에서만 · 닫으면 그 공지는 다시 안 보여요(localStorage)
+  UI.api("/api/notices", { noGate: true }).then((n) => {
+    if (!n.ok) return; const nowT = Date.now(); let seen = []; try { seen = JSON.parse(localStorage.getItem("acNoticeSeen") || "[]"); } catch { /* empty */ }
+    const live = (n.notices || []).filter((x) => (!x.startsAt || UI.utc(x.startsAt).getTime() <= nowT) && (!x.endsAt || UI.utc(x.endsAt).getTime() >= nowT) && !seen.includes(x.id));
+    const pick = live.find((x) => x.kind === "incident") || live[0]; if (!pick) return;
+    const el = UI.$("#notice"); el.hidden = false; el.className = "banner" + (pick.kind === "incident" ? "" : " info");
+    el.innerHTML = `<span>${UI.esc(pick.title)}</span><button type="button" aria-label="닫기" style="text-decoration:none;font-size:18px;line-height:1">×</button>`;
+    el.querySelector("button").onclick = () => { el.hidden = true; try { localStorage.setItem("acNoticeSeen", JSON.stringify([...seen, pick.id])); } catch { /* empty */ } };
+  });
   const r = await UI.api("/api/home-summary");
   if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   // [P1R3] 오늘 번 돈 — 확정은 진하게, 예상은 회색 작게. 🔴 둘을 합쳐서 한 숫자로 그리지 않는다(§9.3)
@@ -55,8 +65,8 @@
   } else tip.textContent = "수익 매체를 연결하면 여기에 매일 쌓여요";
   // 체험(DESIGN §12.3): 배너 없이 «해야 할 일» 행 하나 — D-3 이하일 때만 · 끝났으면 «요금제를 골라 주세요» · 그 전엔 홈에 아무것도 없다
   const trial = r.trial || {};
-  if (trial.status === "trial" && trial.daysLeft != null && trial.daysLeft <= 3) r.todo.unshift({ kind: "coin", title: `무료 체험이 ${trial.daysLeft}일 남았어요`, desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plans.html", tone: "warn" });
-  else if (trial.status === "readonly") r.todo.unshift({ kind: "coin", title: "체험이 끝났어요", desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plans.html", tone: "warn" });
+  if (trial.status === "trial" && trial.daysLeft != null && trial.daysLeft <= 3) r.todo.unshift({ kind: "coin", title: `무료 체험이 ${trial.daysLeft}일 남았어요`, desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plan.html", tone: "warn" });
+  else if (trial.status === "readonly") r.todo.unshift({ kind: "coin", title: "체험이 끝났어요", desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plan.html", tone: "warn" });
   // 해야 할 일
   const todo = UI.$("#todo");
   if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;

@@ -6,7 +6,7 @@
 <title>알림 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
@@ -18,13 +18,13 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 await UI.boot("home");
 const EMPTY = `<div class="empty"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></span><h3>아직 알림이 없어요</h3><p>발행·검수·계정 상태가 바뀌면 여기에 쌓여요.</p></div>`;
-const row = (n) => `<a class="row tap" href="${n.link ? UI.esc(n.link) : "javascript:void 0"}" ${n.readAt ? 'style="opacity:.55"' : ""}>${UI.kindMark(n.kind, n.tone)}<div class="l"><span class="t wrap">${UI.esc(n.title)}</span><span class="d wrap">${UI.esc(n.desc || "")}</span></div><span class="r mut">${UI.esc(UI.ago(n.createdAt))}</span>${n.link ? UI.chev : ""}</a>`;
+const row = (n) => { const link = n.link || UI.KIND_LINK[n.kind] || ""; return `<a class="row tap" href="${link ? UI.esc(link) : "javascript:void 0"}" ${n.readAt ? 'style="opacity:.55"' : ""}>${UI.kindMark(n.kind, n.tone)}<div class="l"><span class="t wrap">${UI.esc(n.title)}</span><span class="d wrap">${UI.esc(n.desc || "")}</span></div><span class="r mut">${UI.esc(UI.ago(n.createdAt))}</span>${link ? UI.chev : ""}</a>`; }; // [P1R4] 링크 없는 kind 는 기본 링크
 async function load() {
   const r = await UI.api("/api/notifications-list?limit=50");
   let list = r.ok ? (r.notifications || []) : null;

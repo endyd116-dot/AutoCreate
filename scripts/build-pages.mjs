@@ -8,8 +8,8 @@ const FONT = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncact
 const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?history.back():location.assign('${fallback}')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>`;
 
 const TARGETS = [
-  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=6", "/js/mock.js?v=7"], back: ["accounts.html", "settings.html", "plans.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
-  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=6", "/js/ops.js?v=1"], back: ["tenant.html", "password.html"], fallback: "/ops/", manifest: false, robots: true, titleInBar: true }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
+  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=7", "/js/mock.js?v=8"], back: ["accounts.html", "settings.html", "plan.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
+  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=7", "/js/ops.js?v=2", "/js/mock-ops.js?v=1"], back: ["tenant.html", "ticket.html", "cs-faq.html", "password.html"], fallback: "/ops/", fallbacks: { "tenant.html": "/ops/tenants.html", "ticket.html": "/ops/cs.html", "cs-faq.html": "/ops/cs.html" }, manifest: false, robots: true, titleInBar: true }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
 ];
 
 for (const t of TARGETS) {
@@ -27,7 +27,7 @@ for (const t of TARGETS) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title} · ${t.suffix}</title>
 ${t.robots ? `<meta name="robots" content="noindex">\n` : ""}${t.manifest ? `<link rel="manifest" href="/manifest.webmanifest">\n` : ""}${FONT}
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">

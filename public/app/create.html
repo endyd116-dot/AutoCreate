@@ -6,7 +6,7 @@
 <title>만들기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 await UI.boot("create");
@@ -60,7 +60,7 @@ async function load(poll = false) {
 async function refresh() {
   const b = UI.$("#refresh"); b.disabled = true;
   const r = await UI.api("/api/topics-refresh", { body: {} }); b.disabled = busy;
-  if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; }
+  if (!r.ok) { if (!r.gated) UI.toast(r.error || "지금은 뽑지 못했어요"); return; }
   if (r.topics) { UI.toast(r.added ? `소재 ${r.added}개 찾았어요` : "새로 뽑을 소재가 없어요"); load(); return; } // 옛 동기 응답 호환
   busy = true; UI.toast(r.started === false ? "이미 뽑고 있어요" : "소재를 뽑기 시작했어요"); startPoll(); load(true);
 }

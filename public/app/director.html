@@ -6,7 +6,7 @@
 <title>디렉터 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 const me = await UI.boot("create"); if (!me) return;
@@ -102,7 +102,7 @@ async function make() {
     if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
   const body = { briefId: brief.id }; if (patches.length) body.pieces = patches;
   const r = await UI.api("/api/director-confirm", { body }); btn.disabled = false;
-  if (!r.ok) {
+  if (!r.ok) { if (r.gated) return;
     if (r.step === "coin_short") return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? brief.coinsLeft}코인이 있고 ${r.need ?? total()}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: `코인이 ${Math.max(0, (r.need ?? total()) - (r.have ?? brief.coinsLeft))}개 부족해요` });
     return UI.toast(r.error || "만들기를 시작하지 못했어요");
   }

@@ -55,7 +55,19 @@
 
   const fresh = qs.get("fresh") === "1";
   const runnerOn = qs.get("runner") === "on";
-  const revEmpty = qs.get("revEmpty") === "1";                 // 수익 빈 상태(연결 0·행 0)
+  const revEmpty = qs.get("revEmpty") === "1";
+  const blocked = qs.get("readonly") === "1" ? "readonly" : qs.get("suspended") === "1" ? "suspended" : null; // [P1R4] 쓰기 막힘(계약 §1.3 requireWritable)
+  const planLimit = qs.get("planLimit") || "";
+  const kiccOff = qs.get("kicc") === "0";
+  const aiCap = qs.get("aiCap") === "1", bannedTopic = qs.get("banned") === "1";                                          // [P1R4] §1.5 게이트 견본(ai_cost_cap · banned_category)                                                                    // [P1R4] KICC 키 없음 → «결제 준비 중이에요»(no-op 정직)
+  const PLANS = [ // = B lib/plans.ts PLAN_DEFAULTS(공개 3개 · trial 은 /api/plans 에 안 나온다)
+    { key: "starter", name: "Starter", priceMonth: 19000, priceYear: 190000, public: true, recommended: false, sort: 1, limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3 }, features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false } },
+    { key: "pro", name: "Pro", priceMonth: 49000, priceYear: 490000, public: true, recommended: true, sort: 2, limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null }, features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false } },
+    { key: "agency", name: "Agency", priceMonth: 149000, priceYear: 1490000, public: true, recommended: false, sort: 3, limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null }, features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true } },
+  ];
+  const PACKS = [{ id: "pack_100", coins: 100, krw: 50000, bonusPct: 0 }, { id: "pack_220", coins: 220, krw: 100000, bonusPct: 10 }, { id: "pack_720", coins: 720, krw: 300000, bonusPct: 20 }, { id: "pack_trial", coins: 10, krw: 5000, bonusPct: 0, oncePerTenant: true }];
+  const VAT = (a) => Math.round(a * 0.1);                                                              // [P1R4] 402 plan_limit(§1.4)
+  const notWritable = () => (blocked ? { ok: false, step: "writable", reason: blocked, error: blocked === "readonly" ? "체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요." : "결제가 밀려 있어요. 카드를 확인해 주세요.", status: 403 } : null);                 // 수익 빈 상태(연결 0·행 0)
   const revError = qs.get("revError") || "";                   // ?revError=adsense — 그 소스를 연결 끊김으로
   /* revenue_daily 씨앗 — 75일치. d === -6 은 수집 실패라 «행이 없고», d === -11 은 진짜 0원이라 «행이 있다»(AC-9) */
   function revSeed() {
@@ -118,8 +130,16 @@
       { id: 801, kind: "reassign", title: "@life_c 계정이 정지됐어요", desc: "예약된 글 3건을 @cook_a 로 옮겼어요", link: "/app/accounts.html", tone: "warn", createdAt: iso(now - 5 * 3600e3) },
       { id: 802, kind: "publish", title: "글 1건이 올라가지 못했어요", desc: "«가을 이불 세탁» · 채널 화면이 바뀌었어요", link: "/app/posts.html", tone: "warn", createdAt: iso(now - 4 * 3600e3) },
       { id: 803, kind: "publish", title: "@cook_a 에 글이 올라갔어요", desc: "에어프라이어 청소, 눌어붙은 기름 3분 컷", link: "/app/posts.html", tone: "info", createdAt: iso(now - 26 * 3600e3), readAt: iso(now - 20 * 3600e3) },
+      { id: 804, kind: "trial_d3", title: "체험이 3일 남았어요", desc: "끝나면 보기만 돼요. 요금제를 고르면 그대로 이어져요.", link: "/app/plan.html", tone: "info", createdAt: iso(now - 30 * 3600e3), readAt: iso(now - 20 * 3600e3) },   // [P1R4] B trial-expire 알림 kind
+      { id: 805, kind: "coin_refunded", title: "환불이 처리됐어요", desc: "5,500원을 돌려드렸어요(미사용 10코인 회수). 카드사 사정에 따라 3~5일 걸릴 수 있어요.", link: "/app/coins.html", tone: "info", createdAt: iso(now - 3 * 86400e3), readAt: iso(now - 2 * 86400e3) },
     ],
     reassigned: fresh ? null : { fromHandle: "life_c", toHandle: "cook_a", moved: 3, at: iso(now - 5 * 3600e3) },
+    /* ── [P1R4] 결제·구독·문의(계약 v4.1 §1·§2.1 support) ── */
+    billing: { planKey: "trial", cycle: "month", billingKey: null, pendingPlanKey: null, pendingCycle: null, cancelAtPeriodEnd: false, periodStart: null, periodEnd: null, nextBillingAt: null, paidTerms: false, // = tenants.plan_key + subscriptions 장부 + consents(paid_terms)
+      orders: [{ orderNo: "AC-COIN-1-trial-mfx1k2", packId: "pack_trial", coins: 10, krw: 5000, vatKrw: 500, totalKrw: 5500, status: "paid", paidAt: iso(now - 12 * 3600e3), refundedAt: null }],   // coin_orders
+      ledger: [{ at: iso(now - 12 * 3600e3), kind: "purchase", bucket: "purchased", amount: 10, ref: "AC-COIN-1-trial-mfx1k2", reason: "코인 충전 10개(₩5,500 · 유효 1년)", expiresAt: iso(now + 365 * 86400e3) }, { at: iso(now - 11 * 3600e3), kind: "consume", bucket: "purchased", amount: -4, item: "cardnews", ref: "piece:507", reason: "카드뉴스" }, { at: iso(now - 86400e3), kind: "grant", bucket: "included", amount: 30, ref: "ops:grant:1", reason: "운영 지급" }],   // coin_ledger
+      invoices: [{ id: 9100, kind: "coin", period: "AC-COIN-1-trial-mfx1k2", amountKrw: 5000, vatKrw: 500, totalKrw: 5500, status: "paid", paidAt: iso(now - 12 * 3600e3), createdAt: iso(now - 12 * 3600e3), orderNo: "AC-COIN-1-trial-mfx1k2" }] },
+    tickets: fresh ? [] : [{ id: 702, subject: "네이버 글이 안 올라가요", status: "progress", createdAt: iso(now - 26 * 3600e3), updatedAt: iso(now - 2 * 3600e3), messages: [{ from: "customer", text: "어제부터 네이버에 글이 안 올라가요. 프로그램은 켜 두었어요.", at: iso(now - 26 * 3600e3) }, { from: "operator", text: "확인해 보니 네이버 로그인이 풀려 있어요. «내 계정 → 다시 로그인»을 눌러 주시면 PC 프로그램이 로그인 창을 열어요.", at: iso(now - 2 * 3600e3) }] }, { id: 690, subject: "코인 만료가 언제인가요", status: "resolved", createdAt: iso(now - 9 * 86400e3), updatedAt: iso(now - 8 * 86400e3), messages: [{ from: "customer", text: "충전한 코인은 언제까지 쓸 수 있나요?", at: iso(now - 9 * 86400e3) }, { from: "operator", text: "충전한 코인은 1년, 플랜 포함 코인은 그달 말까지예요.", at: iso(now - 8 * 86400e3) }] }],
     topicsRefresh: null, // [v2.9] { startedAt, finishedAt?, added?, error? } — tenants.settings.topicsRefresh 자리
     /* ── [P1R3] 수익(계약 §1.4 · DESIGN §9) ── */
     revRows: revEmpty ? [] : revSeed(),          // revenue_daily 행 — 수집 못 한 날은 «행 자체가 없다»(AC-9)
@@ -133,7 +153,7 @@
     adState: revEmpty ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || !S.billing || !S.billing.invoices) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
@@ -216,13 +236,25 @@
     if (a.channel === "naver_clip") o.clip = { open: true, deadline: iso(now + 12 * 86400e3) };
     return o; });
   /* ?trial=N — 체험 D-N(0 이면 끝남 readonly) · 기본 9일 */
-  const trialOf = () => { const d = qs.has("trial") ? Number(qs.get("trial")) : 9; return d <= 0 ? { status: "readonly", daysLeft: 0, planKey: "trial" } : { status: "trial", daysLeft: d, planKey: "trial" }; };
+  const trialOf = () => { if (blocked === "suspended") return { status: "suspended", daysLeft: 0, planKey: "starter" }; const d = blocked === "readonly" ? 0 : qs.has("trial") ? Number(qs.get("trial")) : 9; return d <= 0 ? { status: "readonly", daysLeft: 0, planKey: "trial" } : { status: "trial", daysLeft: d, planKey: "trial" }; };
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
+  /* [P1R4] 코인 결제 확정(㉠ 원클릭 · ㉡ 콜백 공용) — coin_orders paid + invoices kind=coin 1행 + 원장 purchase */
+  const settleCoin = (orderNo) => { const B = S.billing; const o = B.orders.find((x) => x.orderNo === orderNo); if (!o || o.status === "paid") return; o.status = "paid"; o.paidAt = iso(Date.now()); S.coins += o.coins;
+    B.ledger.unshift({ at: o.paidAt, kind: "purchase", bucket: "purchased", amount: o.coins, ref: orderNo, reason: `코인 충전 ${o.coins}개(₩${o.totalKrw.toLocaleString("ko-KR")} · 유효 1년)`, expiresAt: iso(Date.now() + 365 * 86400e3) });
+    B.invoices.unshift({ id: 9000 + S.nextId++, kind: "coin", period: orderNo, amountKrw: o.krw, vatKrw: o.vatKrw, totalKrw: o.totalKrw, status: "paid", paidAt: o.paidAt, createdAt: o.paidAt, orderNo }); };
+  const REFUND_KO = { not_coin_order: "충전 주문이 아니에요.", not_paid: "결제가 끝난 주문이 아니에요.", already_refunded: "이미 환불된 주문이에요.", window: "충전 후 7일이 지나 환불할 수 없어요.", used: "코인을 모두 써서 돌려드릴 게 없어요.", no_lot: "충전 기록을 찾지 못했어요." };
+  /* 환불 견적(B coin-refund.ts 5규칙) — ①미사용분만 ③7일 룰 먼저 ④단가 = 결제액 ÷ 받은 코인 ⑤부분 환불 없음 */
+  const refundQuote = (o, orderNo) => { const NO = (reason, base = {}) => ({ eligible: false, reason, orderNo, packKrw: 0, vatKrw: 0, totalKrw: 0, packCoins: 0, unitKrw: 0, usedCoins: 0, unusedCoins: 0, maxRefundKrw: 0, purchasedAt: null, refundDeadlineAt: null, invoiceId: null, ...base });
+    if (!/^AC-COIN-/.test(orderNo || "")) return NO("not_coin_order"); if (!o || o.status === "pending" || o.status === "failed") return NO("not_paid"); if (o.status === "refunded") return NO("already_refunded");
+    const used = -S.billing.ledger.filter((l) => l.kind === "consume" && l.bucket === "purchased").reduce((a, l) => a + l.amount, 0); const unused = Math.max(0, o.coins - Math.min(used, o.coins)); const usedCoins = o.coins - unused;
+    const unitKrw = o.totalKrw / o.coins; const maxRefundKrw = usedCoins === 0 ? o.totalKrw : Math.floor(unused * unitKrw); const deadline = new Date(o.paidAt).getTime() + 7 * 86400e3;
+    const base = { packKrw: o.krw, vatKrw: o.vatKrw, totalKrw: o.totalKrw, packCoins: o.coins, unitKrw, usedCoins, unusedCoins: unused, maxRefundKrw, purchasedAt: o.paidAt, refundDeadlineAt: iso(deadline), invoiceId: 9100 };
+    if (Date.now() > deadline) return NO("window", base); if (unused <= 0) return NO("used", base); return { ...NO("no_lot", base), eligible: true, reason: null }; };
   const delay = (ms = 260) => new Promise((r) => setTimeout(r, ms));
 
   /* ── 라우트 ── */
   const R = {
-    "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: true, mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: "trial", status: "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: null }),
+    "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: true, mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: blocked === "suspended" ? "starter" : "trial", status: blocked || "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: blocked ? 0 : 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: qs.get("imp") === "1" ? { byName: "운영 관리자", startedAt: iso(now - 5 * 60e3), until: iso(now + 55 * 60e3) } : null }),
     "auth-refresh": () => ({ ok: true }),
     "onboarding": (b) => { S.onboarding = { kinds: b.kinds || [], channels: b.channels || [] }; return { ok: true }; },
     "home-summary": () => { tick(); const review = S.pieces.filter((p) => p.status === "in_review").length; const todo = [];
@@ -236,17 +268,73 @@
       const stuck = S.posts.filter((p) => p.status === "awaiting_manual" || p.status === "failed").length;
       if (stuck) todo.push({ kind: "publish", title: `글 ${stuck}건이 올라가지 못했어요`, desc: "직접 올리거나 다시 올려 주세요", link: "/app/posts.html", tone: "warn" });
       if (S.reassigned) todo.push({ kind: "reassign", title: `@${S.reassigned.fromHandle} 계정이 정지됐어요`, desc: `글 ${S.reassigned.moved}건을 @${S.reassigned.toHandle} 로 옮겼어요`, link: "/app/accounts.html", tone: "warn" });
-      if (review) todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: "/app/pieces.html", tone: "info" });
+      if (review) { const one = review === 1 ? S.pieces.find((p) => p.status === "in_review") : null; todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: one ? `/app/piece.html?id=${one.id}` : "/app/pieces.html", tone: "info" }); } // ★C fix: 1건이면 그 글로
+      if (S.slots.some((s) => s.status === "no_topic" && s.date >= todayYmd)) todo.push({ kind: "slot_no_topic", title: "소재가 떨어졌어요", desc: "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", link: "/app/create.html", tone: "warn" }); // ★C fix: 소재는 create.html
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
       return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule; return { ok: true, settings: S.settings }; },
-    "plans": () => ({ ok: true, plans: [], coins: { packs: [{ coins: 100, krw: 50000, bonusPct: 0 }, { coins: 220, krw: 100000, bonusPct: 10 }], table: { blog: 1, image: 1, cardnews: 3, video_15: 5, video_30: 8, video_60: 12, persona: 0 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
+    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p })), trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
+    /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
+    "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
+      const o = { ok: true, plan: p ? { key: p.key, name: p.name, priceKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), cycle: B.cycle } : { key: "trial", name: "체험", priceKrw: 0, vatKrw: 0, totalKrw: 0, cycle: B.cycle }, status: blocked || (paid ? "active" : "trial"), cancelAtPeriodEnd: B.cancelAtPeriodEnd, billingKey: B.billingKey ? { has: true, last4: B.billingKey.last4, brand: B.billingKey.brand } : { has: false }, vatNote: "부가세 별도" };
+      o.trialEndsAt = iso(now + (blocked ? -2 : 9) * 86400e3); if (B.periodEnd) o.periodEnd = B.periodEnd; if (B.nextBillingAt) o.nextBillingAt = B.nextBillingAt; if (B.pendingPlanKey) o.pendingPlanKey = B.pendingPlanKey; if (B.pendingCycle) o.pendingCycle = B.pendingCycle; return o; },
+    "subscription-quote": (_b, q) => { const p = PLANS.find((x) => x.key === q.get("planKey")); if (!p) return err("planKey", "planKey"); const cycle = q.get("cycle") === "year" ? "year" : "month"; const base = cycle === "year" ? p.priceYear : p.priceMonth;
+      return { ok: true, quote: { supplyKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), discountPct: 0, source: "plan", baseKrw: base }, vatNote: "부가세 별도" }; },
+    "subscription-change": (b) => { const B = S.billing; const p = PLANS.find((x) => x.key === b.planKey); if (!p) return err("plan", "고를 수 있는 요금제가 아니에요.");
+      if (!B.paidTerms && b.agreePaidTerms !== true) return err("paid_terms", "유료 약관에 동의해 주세요."); if (b.agreePaidTerms === true) B.paidTerms = true;
+      const cycle = b.cycle === "year" ? "year" : "month"; const rank = { trial: 0, starter: 1, pro: 2, agency: 3 }; const paying = B.planKey !== "trial" && !blocked;
+      const charge = (supply) => { if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요", totalKrw: supply + VAT(supply) }; if (!B.billingKey) return { ok: false, step: "billing_key", error: "먼저 결제 수단을 등록해 주세요.", totalKrw: supply + VAT(supply) }; return null; };
+      if (!paying) { const supply = cycle === "year" ? p.priceYear : p.priceMonth; const c = charge(supply); if (c) return c;
+        B.planKey = p.key; B.cycle = cycle; B.pendingPlanKey = null; B.pendingCycle = null; B.periodStart = iso(Date.now()); B.periodEnd = iso(Date.now() + (cycle === "year" ? 365 : 30) * 86400e3); B.nextBillingAt = B.periodEnd; B.cancelAtPeriodEnd = false;
+        const period = cycle === "year" ? `${todayYmd.slice(0, 7)}~${ymd(365).slice(0, 7)}` : todayYmd.slice(0, 7);
+        B.invoices.unshift({ id: 9000 + S.nextId++, kind: "subscription", period, amountKrw: supply, vatKrw: VAT(supply), totalKrw: supply + VAT(supply), status: "paid", paidAt: iso(Date.now()), createdAt: iso(Date.now()), orderNo: "AC-SUB-" + period.replace(/[^0-9A-Za-z]/g, "") + "-1", planKey: p.key });
+        S.coins += p.limits.coinsIncluded; S.billing.ledger.unshift({ at: iso(Date.now()), kind: "grant", bucket: "included", amount: p.limits.coinsIncluded, ref: "included:1:" + todayYmd.slice(0, 7), reason: "월 포함 코인", expiresAt: iso(Date.now() + 30 * 86400e3) });
+        return { ok: true, effectiveAt: iso(Date.now()), pending: false, chargeNowKrw: supply, vatKrw: VAT(supply), totalKrw: supply + VAT(supply), invoiceId: B.invoices[0].id }; }
+      if (p.key === B.planKey && cycle === B.cycle) return err("same", "지금 쓰는 요금제예요.");
+      if (rank[p.key] < rank[B.planKey] || (p.key === B.planKey && cycle !== B.cycle)) { B.pendingPlanKey = p.key; B.pendingCycle = cycle; B.cancelAtPeriodEnd = false; return { ok: true, effectiveAt: B.periodEnd, pending: true }; }
+      const cur = PLANS.find((x) => x.key === B.planKey); const days = B.cycle === "year" ? 365 : 30; const remain = Math.max(0, Math.ceil((new Date(B.periodEnd).getTime() - Date.now()) / 86400e3));
+      const supply = Math.max(0, Math.floor(((B.cycle === "year" ? p.priceYear - cur.priceYear : p.priceMonth - cur.priceMonth) * remain) / days)); const c = charge(supply); if (c) return c;
+      B.planKey = p.key; const period = `${B.periodStart.slice(0, 7)}:up-${p.key}`;
+      if (supply > 0) B.invoices.unshift({ id: 9000 + S.nextId++, kind: "subscription", period, amountKrw: supply, vatKrw: VAT(supply), totalKrw: supply + VAT(supply), status: "paid", paidAt: iso(Date.now()), createdAt: iso(Date.now()), orderNo: "AC-SUB-" + period.replace(/[^0-9A-Za-z]/g, "") + "-1", planKey: p.key });
+      return { ok: true, effectiveAt: iso(Date.now()), pending: false, chargeNowKrw: supply, vatKrw: VAT(supply), totalKrw: supply + VAT(supply), invoiceId: supply > 0 ? B.invoices[0].id : null }; },
+    "subscription-cancel": (b) => { const B = S.billing; if (B.planKey === "trial") return err("state", "구독 중이 아니에요."); const on = b.atPeriodEnd !== false; B.cancelAtPeriodEnd = on; if (on) { B.pendingPlanKey = null; B.pendingCycle = null; } return { ok: true, periodEnd: B.periodEnd, cancelAtPeriodEnd: on }; },
+    "billing-key-start": () => { if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요" }; const orderNo = "AC-BK-1-" + Date.now().toString(36); return { ok: true, orderNo, url: "/mock-kicc?orderNo=" + orderNo, form: {} }; }, // 인증창 흉내 → UI.postForm(mock) 이 콜백까지 대신한다
+    "billing-key-remove": () => { const had = !!S.billing.billingKey; S.billing.billingKey = null; return { ok: true, removed: had }; },
+    "invoices": (_b, q) => { const y = q.get("year"); return { ok: true, rows: S.billing.invoices.filter((r) => !y || (r.paidAt || r.createdAt || "").startsWith(y)) }; },
+    /* ── [P1R4] §1.1 코인 충전 — B coin-purchase.ts 모양(코드가 정본) ── */
+    "coin-packs": () => { const used = S.billing.orders.some((o) => o.packId === "pack_trial" && o.status === "paid"); return { ok: true, packs: PACKS.map((k) => ({ id: k.id, krw: k.krw, coins: k.coins, bonusPct: k.bonusPct, oncePerTenant: !!k.oncePerTenant, active: true, vatKrw: VAT(k.krw), totalKrw: k.krw + VAT(k.krw), available: !(k.oncePerTenant && used) })), vatNote: "부가세 별도" }; },
+    "coin-purchase-start": (b) => { const B = S.billing;
+      if (!B.paidTerms && b.agreePaidTerms !== true) return err("paid_terms", "유료 약관에 동의해 주세요."); if (b.agreePaidTerms === true) B.paidTerms = true;
+      const pk = PACKS.find((x) => x.id === b.packId); if (!pk) return err("pack", "충전 팩을 골라 주세요.");
+      if (pk.oncePerTenant && B.orders.some((o) => o.packId === "pack_trial" && o.status === "paid")) return err("once", "첫 충전 팩은 한 번만 살 수 있어요. 다른 팩을 골라 주세요.");
+      const vatKrw = VAT(pk.krw), totalKrw = pk.krw + vatKrw; if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요", amountKrw: pk.krw, vatKrw, totalKrw };
+      const orderNo = "AC-COIN-1-" + pk.id.replace(/^pack_/, "") + "-" + Date.now().toString(36); B.orders.unshift({ orderNo, packId: pk.id, coins: pk.coins, krw: pk.krw, vatKrw, totalKrw, status: "pending", paidAt: null, refundedAt: null });
+      if (B.billingKey) { settleCoin(orderNo); return { ok: true, orderNo, mode: "oneclick", amountKrw: pk.krw, vatKrw, totalKrw, coins: pk.coins, balance: S.coins, invoiceId: B.invoices[0].id }; } // ㉠ 원클릭 — 응답이 곧 결과
+      return { ok: true, orderNo, mode: "auth", amountKrw: pk.krw, vatKrw, totalKrw, coins: pk.coins, pay: { url: "/mock-kicc?orderNo=" + orderNo, form: {} } }; },                                   // ㉡ 인증창 → 콜백
+    "coin-history": (_b, q) => { const m = q.get("month"); const rows = S.billing.ledger.filter((l) => !m || l.at.slice(0, 7) === m).map((l) => ({ ...l })); const purchased = S.billing.ledger.filter((l) => l.bucket === "purchased").reduce((a, l) => a + l.amount, 0);
+      return { ok: true, rows, balance: { included: Math.max(0, S.coins - Math.max(0, purchased)), purchased: Math.max(0, purchased), total: S.coins } }; },
+    "coin-refund-request": (b) => { const o = S.billing.orders.find((x) => x.orderNo === b.orderNo); const quote = refundQuote(o, b.orderNo);
+      if (b.quoteOnly === true) return { ok: true, quote };
+      if (!quote.eligible) return { ok: false, step: "quote", reason: quote.reason, error: REFUND_KO[quote.reason], quote, status: 400 };
+      if (kiccOff) return { ok: false, step: "not_configured", error: "결제 준비 중이라 환불도 아직이에요 · 곧 열려요", quote };
+      o.status = "refunded"; o.refundedAt = iso(Date.now()); S.coins -= quote.unusedCoins; S.billing.ledger.unshift({ at: o.refundedAt, kind: "revoke", bucket: "purchased", amount: -quote.unusedCoins, ref: o.orderNo, reason: `환불 회수(₩${quote.maxRefundKrw.toLocaleString("ko-KR")} · 미사용 ${quote.unusedCoins}코인)` });
+      const inv = S.billing.invoices.find((r) => r.kind === "coin" && r.period === o.orderNo); if (inv) { inv.refundedKrw = quote.maxRefundKrw; if (quote.maxRefundKrw >= inv.totalKrw) inv.status = "refunded"; }
+      S.notifications.unshift({ id: S.nextId++, kind: "coin_refunded", title: "환불이 처리됐어요", desc: `${quote.maxRefundKrw.toLocaleString("ko-KR")}원을 돌려드렸어요(미사용 ${quote.unusedCoins}코인 회수). 카드사 사정에 따라 3~5일 걸릴 수 있어요.`, link: "/app/coins.html", tone: "info", createdAt: iso(Date.now()) });
+      return { ok: true, refundKrw: quote.maxRefundKrw, revoked: quote.unusedCoins, invoiceId: inv ? inv.id : null }; },
+    /* ── [P1R4] §2.1 문의 · FAQ · 공지 · 첨부 ── */
+    "support-ticket": (b) => { if (!String(b.subject || "").trim()) return err("subject", "한 줄로 무엇이 막히는지 적어 주세요."); if (!String(b.text || "").trim()) return err("text", "조금 더 자세히 적어 주세요."); const id = S.nextId++; S.tickets.unshift({ id, subject: b.subject, status: "open", createdAt: iso(Date.now()), updatedAt: iso(Date.now()), attachments: b.attachments || [], messages: [{ from: "customer", text: b.text, at: iso(Date.now()) }, { from: "system", text: "자동 첨부 · 플랜 trial · 내 PC 프로그램 0/1 · 최근 오류 1건", at: iso(Date.now()) }] }); return { ok: true, id, status: 201 }; },
+    "support-tickets": () => ({ ok: true, tickets: S.tickets.map((t) => ({ id: t.id, subject: t.subject, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, rating: t.rating, messages: t.messages })) }),
+    "support-rate": (b) => { const t = S.tickets.find((x) => x.id === Number(b.id)); if (!t) return err("id", "문의가 없어요.", { status: 404 }); t.rating = !!b.helpful; return { ok: true }; },
+    "faqs": () => ({ ok: true, faqs: [{ id: 1, q: "코인은 언제까지 쓸 수 있나요?", a: "충전한 코인은 1년, 플랜에 포함된 코인은 그달 말까지예요." }, { id: 2, q: "네이버·티스토리는 왜 내 PC 프로그램이 필요한가요?", a: "두 곳은 바깥에서 글을 넣는 길이 없어서 PC 프로그램이 대신 올려요." }, { id: 3, q: "환불은 어떻게 되나요?", a: "미사용 코인은 충전 후 7일 안에 환불돼요. 구독은 기간 말에 해지돼요." }] }),
+    "upload": (b) => { if (!b.dataBase64 || !b.contentType) return err("file", "사진을 골라 주세요."); if (String(b.dataBase64).length > 4e6) return err("size", "3MB 이하 사진만 붙일 수 있어요."); return { ok: true, key: "autocreate/1/support/" + Date.now() + "-" + String(b.filename || "img").replace(/[^\w.-]/g, "_"), url: "" }; },
+    "notices": () => ({ ok: true, notices: qs.get("incident") === "0" ? [] : [{ id: 801, kind: "incident", title: "네이버 발행이 늦어요 · 네이버 쪽 점검", body: "14:00 부터 네이버 블로그 발행이 30분쯤 밀리고 있어요. 예약은 그대로 나가요.", startsAt: iso(now - 2 * 3600e3), endsAt: iso(now + 4 * 3600e3), channels: ["naver_blog"] }, { id: 802, kind: "notice", title: "9월 25일 새벽 2시 점검(10분)", startsAt: iso(now - 3600e3), endsAt: iso(now + 11 * 86400e3) }] }),
     /* §1 계정 */
     "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS }),
     "accounts-add": (b) => {
       if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
+      if (planLimit === "accounts") return { ok: false, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 3, planKey: "starter", error: "계정은(는) 3개까지예요. Pro 로 바꾸면 더 늘어나요.", status: 402 };
       if (S.accounts.length >= 5) return err("limit", "이 요금제에서는 계정을 5개까지 연결할 수 있어요.");
       if (S.accounts.some((a) => a.channel === b.channel && a.handle === b.handle)) return err("duplicate", "이미 연결한 계정이에요.");
       if (b.channel === "wordpress" && b.appPassword === "wrong") return err("wp_auth", "워드프레스 로그인 정보를 확인해 주세요.");
@@ -268,7 +356,7 @@
       const refresh = { running: isRefreshing() };
       if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
       return { ok: true, topics: S.topics.filter((x) => x.status === "candidate"), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; },
-    "topics-refresh": () => { refreshTick();
+    "topics-refresh": () => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; refreshTick();
       if (isRefreshing()) return { ok: true, started: false, running: true };
       if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
       S.refreshCount++; S.topicsRefresh = { startedAt: iso(Date.now()) };
@@ -283,7 +371,7 @@
       if (!pieces.length) pieces.push({ key: "p1", channel: "naver_blog", accountId: null, accountHandle: null, format: "story", emotionKey: "warm", composition: "experience", lengthHint: { words: 1400 }, images: { count: 6, style: "photo", heroNeeded: true }, monetize: { affiliate: null, adDisclosure: false }, schedule: { at: kst(1, 7, 30), slotReason: "네이버 블로그 아침 골든타임 · 계정은 연결 후 배정" }, coinCost: 7 });
       const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "쓰는 코인은 글 1 + 사진 수예요 · 다시 만들기는 무료"], pieces };
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
-    "director-confirm": (b) => { const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
+    "director-confirm": (b) => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
       let pieces = br.pieces.map((p) => ({ ...p })); for (const patch of b.pieces || []) { const i = pieces.findIndex((p) => p.key === patch.key); if (i < 0) continue; if (patch.drop) { pieces.splice(i, 1); continue; }
         const p = pieces[i]; if (patch.accountId !== undefined) { p.accountId = patch.accountId; p.accountHandle = S.accounts.find((a) => a.id === patch.accountId)?.handle || null; } if (patch.format) p.format = patch.format; if (patch.emotionKey) p.emotionKey = patch.emotionKey;
         if (patch.images) Object.assign(p.images, patch.images); if (patch.monetize && "affiliate" in patch.monetize) p.monetize.affiliate = patch.monetize.affiliate ? { provider: "coupang", ...patch.monetize.affiliate } : null; if (patch.schedule?.at) p.schedule.at = patch.schedule.at; p.coinCost = 1 + p.images.count; }
@@ -298,9 +386,9 @@
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
       return { ok: true, piece: { ...pieceRow(p), bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
-    "pieces-approve": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
+    "pieces-approve": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
-    "pieces-regenerate": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; },
+    "pieces-regenerate": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; },
     "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title; if (b.bodyHtml) p.bodyHtml = b.bodyHtml.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); p.gate = gate(true); p.gateOk = true;
       const body = p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; },
@@ -311,7 +399,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999"; return { ok: true, slots: S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")) }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
-    "slots-assign-topic": (b) => { tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
+    "slots-assign-topic": (b) => { if (bannedTopic) return err("banned_category", "도박·사행성 주제는 만들 수 없어요."); tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
       const t = S.topics.find((x) => x.id === Number(b.topicId)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
       if (s.pieceId) return err("stage", "이미 글을 만들기 시작해서 소재를 바꿀 수 없어요.");
       if (S.slots.some((x) => x !== s && x.topicTitle === t.title && x.date >= ymd(-30))) return err("duplicate", "최근 30일 안에 같은 소재로 나간 편성이 있어요.");
@@ -323,7 +411,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < 30 * 60e3);
       if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. 30분 이상 떨어뜨려 주세요.`);
       s.publishAt = b.at; s.date = new Date(at + 9 * 3600e3).toISOString().slice(0, 10); return { ok: true, slot: { ...s } }; },
-    "slots-produce-now": (b) => { tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
+    "slots-produce-now": (b) => { const nw = notWritable(); if (nw) return nw; tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
       if (!s.topicTitle) return err("no_topic", "먼저 소재를 정해 주세요.");
       if (s.pieceId) return err("exists", "이 편성은 이미 글이 있어요.");
       const need = 1 + (IMG[s.channel] ?? 2); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
@@ -402,7 +490,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
         S.adState[src][id] = b.action === "approved" ? "approved" : "pending"; return { ok: true, accounts: eligibility() }; }
       return { ok: true, thresholds: AD_THRESHOLDS, links: AD_LINKS, accounts: eligibility() }; },
     /* §6 코인 */
-    "coins-balance": () => ({ ok: true, balance: S.coins, included: S.coins, purchased: 0, recent: [{ kind: "grant", delta: 30, reason: "운영 지급", createdAt: iso(now - 86400e3) }] }),
+    "coins-balance": () => { const purchased = Math.max(0, S.billing.ledger.filter((l) => l.bucket === "purchased").reduce((a, l) => a + l.amount, 0)); return { ok: true, balance: S.coins, included: Math.max(0, S.coins - purchased), purchased, recent: S.billing.ledger.slice(0, 20).map((l) => ({ kind: l.kind, delta: l.amount, item: l.item, reason: l.reason, createdAt: l.at })) }; },
   };
 
   const real = UI.api;
@@ -410,12 +498,16 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const u = new URL(path, location.origin); const name = u.pathname.replace(/^\/api\//, "");
     const h = R[name]; if (!h) return real(path, opts);
     await delay(); const r = h(opts.body || {}, u.searchParams); save();
-    const status = r.status || 200; return { ...r, status, ok: !!r.ok };
+    const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
+  UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
+    if (orderNo.startsWith("AC-BK-")) { if (!fail) S.billing.billingKey = { brand: "신한", last4: "4421" }; save(); return location.assign(withMock(`/app/plan.html?key=${fail ? "fail" : "ok"}${!fail && qs.get("fp") === "reused" ? "&trial=reused" : ""}`)); }
+    if (fail) { const o = S.billing.orders.find((x) => x.orderNo === orderNo); if (o) o.status = "failed"; save(); return location.assign(withMock("/app/coins.html?failed=" + encodeURIComponent("카드 한도 초과"))); }
+    settleCoin(orderNo); save(); location.assign(withMock("/app/coins.html?charged=" + encodeURIComponent(orderNo))); };
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);
   const badge = document.createElement("div"); badge.textContent = "모의 데이터"; badge.style.cssText = "position:fixed;bottom:calc(var(--tab-h) + 6px);left:8px;z-index:99;font-size:10px;font-weight:700;color:var(--muted);background:var(--press);border-radius:6px;padding:2px 6px;pointer-events:none"; document.body.appendChild(badge);
 })();

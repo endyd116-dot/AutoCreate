@@ -6,52 +6,42 @@
 <title>매출 · AutoCreate 운영센터</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">매출</span><span class="sp"></span></div>
-<div class="hl"><div class="say" id="say">이번 달</div><div class="num"><em id="rev">0원</em> 벌었어요</div><div class="tip" id="tip"></div></div>
-<div class="group"><div class="gt">구독 · 코인</div>
-  <div class="kv"><span class="k">구독 매출</span><span class="v" id="sub">—</span></div>
-  <div class="kv"><span class="k">코인 매출</span><span class="v" id="coin">—</span></div>
-  <div class="kv"><span class="k">MRR · ARR</span><span class="v" id="mrr">—</span></div>
-  <div class="kv"><span class="k">AI 원가(이달)</span><span class="v" id="ai">—</span></div>
-  <div class="kv"><span class="k">마진</span><span class="v" id="margin">—</span></div>
-</div>
-<div class="group"><div class="gt">고객</div>
-  <div class="kv"><span class="k">전체 · 체험 · 유료</span><span class="v" id="tenants">—</span></div>
-  <div class="kv"><span class="k">이달 신규 · 오늘</span><span class="v" id="new">—</span></div>
-  <div class="kv"><span class="k">위험(미납·읽기전용)</span><span class="v" id="risk">—</span></div>
-  <div class="kv"><span class="k">플랜별 유료</span><span class="v" id="byplan">—</span></div>
-</div>
-<div class="group"><div class="gt">운영</div>
-  <div class="kv"><span class="k">이달 발행</span><span class="v" id="pub">—</span></div>
-  <div class="kv"><span class="k">고객 수익 회수(이달)</span><span class="v" id="crev">—</span></div>
-  <div class="kv"><span class="k">열린 CS 티켓</span><span class="v" id="tk">—</span></div>
-  <div class="kv"><span class="k">코인 판매 · 소비(이달)</span><span class="v" id="coins">—</span></div>
-</div>
+<div class="hl"><div class="say" id="say">이번 달</div><div class="num" id="rev">…</div><div class="tip" id="tip"></div></div>
+<div class="group"><div class="gt">구독 · 코인</div><div class="bars" id="bars"></div><div class="kv"><span class="k">AI 원가(이달)</span><span class="v" id="ai">—</span></div><div class="kv"><span class="k">마진</span><span class="v" id="margin">—</span></div></div>
+<div class="group"><div class="gt">고객</div><div class="stat4" id="stat"></div></div>
+<div class="group"><div class="gt">발행 · 수익 회수</div><div class="bars" id="pub"></div><div class="kv"><span class="k">고객 수익 회수 총액(이달)</span><span class="v" id="crev">—</span></div><div class="kv"><span class="k">코인 판매 · 소비(이달)</span><span class="v" id="coins">—</span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/ops.js?v=1"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
 <script>
 (async () => {
 const op = await OPS.boot("dash"); if (!op) return;
-const r = await UI.api("/api/ops-dashboard", { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
-const m = r.month, t = r.tenants;
-UI.$("#say").textContent = `${new Date().getMonth() + 1}월에`; UI.countUp(UI.$("#rev"), m.revenue);
-UI.$("#tip").textContent = `오늘 ${UI.won(m.today)}`;
-UI.$("#sub").textContent = UI.won(m.subscription); UI.$("#coin").textContent = UI.won(m.coin);
-UI.$("#mrr").textContent = `${UI.won(m.mrr)} · ${UI.won(m.arr)}`; UI.$("#ai").textContent = UI.won(m.aiCostKrw);
-UI.$("#margin").innerHTML = `<span style="color:var(--money)">${UI.won(m.marginKrw)}</span>`;
-UI.$("#tenants").textContent = `${t.total} · ${t.trial} · ${t.active}`; UI.$("#new").textContent = `${t.newMonth} · ${t.newToday}`; UI.$("#risk").textContent = t.atRisk;
-UI.$("#byplan").textContent = t.byPlan.length ? t.byPlan.map((p) => `${p.planKey} ${p.count}`).join(" · ") : "—";
-UI.$("#pub").textContent = UI.num(m.published) + "건"; UI.$("#crev").textContent = UI.won(m.customerRevenueKrw); UI.$("#tk").textContent = m.openTickets + "건";
-UI.$("#coins").textContent = `${UI.num(m.coinsSold)} · ${UI.num(m.coinsConsumed)}`;
+const month = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }).slice(0, 7);
+const r = await UI.api(`/api/ops-dashboard?month=${month}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+const rv = r.revenue || {};
+UI.$("#say").textContent = `${Number(month.slice(5))}월에`; UI.$("#rev").innerHTML = `<span id="big">0원</span> 벌었어요`; UI.countUp(UI.$("#big"), rv.monthKrw || 0);
+UI.$("#tip").textContent = `오늘 ${UI.won(rv.todayKrw || 0)} · MRR ${UI.won(r.mrr || 0)} · ARR ${UI.won(r.arr || 0)}`;
+const max = Math.max(1, rv.subscriptionKrw || 0, rv.coinKrw || 0);
+UI.$("#bars").innerHTML = [["구독", rv.subscriptionKrw || 0], ["코인", rv.coinKrw || 0]].map(([n, v], i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${n}</span><span class="track"><span class="fill" style="width:${Math.round((v / max) * 100)}%"></span></span><span class="v">${UI.num(v)}</span></div>`).join("");
+// 🔴 원가는 환율이 없으면 «원가 미환산» — 0 으로 그리지 않는다(계약 §0.1)
+const ai = r.aiCost || {};
+UI.$("#ai").innerHTML = ai.fxMissing ? `<span class="pill warn">원가 미환산</span> <span class="muted" style="font-weight:500">$${(ai.usd || 0).toFixed(2)} · 환율(FX_USD_KRW)을 넣어 주세요</span>` : `${UI.won(ai.krw || 0)} <span class="muted" style="font-weight:500">($${(ai.usd || 0).toFixed(2)})</span>`;
+UI.$("#margin").innerHTML = r.marginKrw == null ? `<span class="muted" style="font-weight:500">원가가 환산돼야 계산해요</span>` : `<b class="${r.marginKrw >= 0 ? "up" : ""}" style="color:${r.marginKrw >= 0 ? "var(--money)" : "var(--ink)"}">${UI.won(r.marginKrw)}</b>`;
+const st = (k, v) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", `${r.trialToPaidPct ?? 0}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", `${r.churn?.month ?? 0} · ${r.churn?.pct ?? 0}%`);
+const bc = (r.published && r.published.byChannel) || []; const pm = Math.max(1, ...bc.map((x) => x.n));
+UI.$("#pub").innerHTML = bc.length ? bc.map((x, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(x.channel, "sm")}${UI.esc(UI.chLabel(x.channel))}</span><span class="track"><span class="fill" style="width:${Math.round((x.n / pm) * 100)}%"></span></span><span class="v">${UI.num(x.n)}</span></div>`).join("") : `<p class="muted" style="margin:0 16px 8px;font-size:13px">이달 발행이 아직 없어요</p>`;
+UI.$("#crev").textContent = UI.won(r.revenueCollectedKrw || 0); UI.$("#coins").textContent = `${UI.won(r.coins?.soldKrw || 0)} · ${UI.num(r.coins?.consumed || 0)}코인`;
 })();
 </script>
 </body>

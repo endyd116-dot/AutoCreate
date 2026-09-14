@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>개인정보처리방침 · AutoCreate</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+<style>
+  .doc{max-width:720px;margin:0 auto;padding:16px 16px 64px;font-size:15px;line-height:1.75;color:var(--ink)}
+  .doc h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:24px 0 6px} .doc .meta{font-size:12.5px;color:var(--muted);margin:0 0 20px}
+  .doc h2{font-size:17px;font-weight:700;margin:26px 0 8px;letter-spacing:-.01em} .doc p,.doc li{margin:0 0 8px} .doc ol,.doc ul{padding-left:20px;margin:0 0 10px}
+  .doc .box{background:var(--surface);border-radius:20px;padding:14px 18px;margin:10px 0} .doc .draft{display:inline-block;background:var(--warn-soft);color:var(--warn-ink);border-radius:8px;padding:3px 8px;font-size:12px;font-weight:700;margin-right:6px}
+  .doc .links{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:28px} .doc .links a{color:var(--sub);font-weight:500;display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:0 4px;margin:0 -4px}
+</style>
+</head>
+<body>
+<main class="doc">
+<h1>개인정보처리방침</h1>
+<p class="meta"><span class="draft">초안 · 법률 검토 전</span>시행 예정일 2026-10-01 · AutoCreate(오토크리에이트)</p>
+
+<p>AutoCreate(이하 «회사»)는 개인정보 보호법에 따라 이용자의 개인정보를 다음과 같이 처리합니다.</p>
+<h2>1. 수집하는 항목과 목적</h2>
+<div class="box"><b>계정</b> — 이메일, 이름(닉네임), 비밀번호(해시), 로그인 기록 → 가입·인증·고객 지원<br><b>채널 계정 자격</b> — 연결한 블로그·영상 채널의 아이디·비밀번호·세션(쿠키)·OAuth 토큰·API 키 → 이용자 대신 글을 올리고 수익을 가져오기 위해<br><b>결제</b> — 결제사(KICC)가 발급한 빌링키·카드 브랜드·끝 4자리·카드 지문(마스킹 번호의 해시) → 구독 자동결제·코인 충전·체험 남용 방지 <span class="muted">(카드 번호 전체는 회사가 저장하지 않습니다)</span><br><b>생성 요청 내용</b> — 소재·지시서·생성물 → 생성·검수·발행<br><b>수익 데이터</b> — 애드센스·애드포스트·쿠팡 등에서 가져온 수익 금액·조회수 → 수익 통합 화면<br><b>이용 기록</b> — 접속 IP·기기·앱 버전·오류 로그 → 장애 대응·보안·문의 답변</div>
+<h2>2. 보관 기간</h2><ul><li>계정 정보: 탈퇴 후 30일(법령상 거래 기록은 전자상거래법에 따라 5년)</li><li>채널 계정 자격: 연결을 해제하면 즉시 «파기 표시»하고 30일 안에 삭제합니다.</li><li>결제 정보: 구독 종료 후 5년(전자상거래법)</li><li>이용 기록·오류 로그: 1년</li></ul>
+<h2>3. 처리 위탁과 제3자 제공</h2><div class="box">결제 — KICC(한국정보통신) · 메일 발송 — Resend · 데이터베이스 — Neon(PostgreSQL) · 파일 저장 — Cloudflare R2 · 호스팅 — Netlify · 인공지능 생성 — Google Gemini(생성 요청 시 소재·지시서·초안이 전달되며, 채널 계정 자격은 전달하지 않습니다) · 통계 회수 — 각 채널·수익 매체 API<br>회사는 위 업체 외에 이용자의 동의 없이 개인정보를 제3자에게 제공하지 않습니다.</div>
+<h2>4. 채널 계정 자격의 보관 방식(동의 사항)</h2><ol><li>자격은 서버에서 AES-256-GCM 으로 암호화되어 저장되고, 복호화는 ①내 PC 프로그램이 발행·로그인 확인 작업을 받을 때 ②회사 운영자가 장애 대응을 위해 열람할 때(전건 감사 기록) 두 곳에서만 일어납니다.</li><li>내 PC 프로그램은 이용자 PC 안에 채널별 브라우저 프로필(세션 파일)을 두며, 이 파일은 암호화해 보관됩니다. 프로그램을 삭제하면 함께 지워집니다.</li><li>이용자는 언제든 연결을 해제해 자격의 파기를 요청할 수 있습니다.</li></ol>
+<h2>5. 원격 지원(원격접속)</h2><p>이용자가 문의하거나 설정 대행을 요청하면 회사 운영자가 이용자의 화면을 그대로 열어 설정을 도울 수 있습니다. 이때 화면 상단에 «운영자가 보고 있어요»가 표시되고, 결제·충전·비밀번호 변경은 막히며, 모든 동작이 감사 기록으로 남고 종료 시 이용자에게 알립니다.</p>
+<h2>6. 이용자의 권리</h2><p>이용자는 개인정보의 열람·정정·삭제·처리정지를 요청할 수 있습니다. 앱 «내 계정 → 문의하기» 또는 아래 연락처로 요청하면 10일 안에 답합니다.</p>
+<h2>7. 안전조치</h2><ul><li>전송 구간 TLS · 저장 시 암호화 · 접근 권한 최소화 · 운영자 행위 감사 기록 · 비밀번호는 해시로만 보관</li></ul>
+<h2>8. 쿠키</h2><p>로그인 유지에 필요한 httpOnly 쿠키만 씁니다. 광고 추적 쿠키는 쓰지 않습니다.</p>
+<h2>9. 개인정보 보호책임자</h2><div class="box">책임자: (사장님 성함) · 이메일: (담당 이메일) · 이 방침은 2026-10-01부터 적용되며, 바뀌면 시행 7일 전 서비스 안에서 알립니다.</div>
+<div class="links"><a href="/terms.html">이용약관</a><a href="/privacy.html">개인정보처리방침</a><a href="/paid-terms.html">유료서비스 약관</a><a href="/automation-notice.html">자동 발행 · 계정 제재 안내</a><a href="/">홈으로</a></div>
+</main>
+</body>
+</html>

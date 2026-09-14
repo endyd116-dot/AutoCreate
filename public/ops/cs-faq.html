@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FAQ · 매크로 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/cs.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">FAQ · 매크로</span><span class="sp"></span></div>
+<div class="ops-two">
+<div class="group"><div class="gt">매크로 <button type="button" id="addM" style="color:var(--ink);font-weight:600;font-size:12.5px">새 매크로</button></div><div id="macros"></div></div>
+<div class="group"><div class="gt">FAQ <span class="muted" style="font-weight:500">고객 «문의하기» 위에 보여요</span><button type="button" id="addF" style="color:var(--ink);font-weight:600;font-size:12.5px">새 FAQ</button></div><div id="faqs"></div></div>
+</div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("cs"); if (!op) return;
+const can = OPS.can(op, "admin");
+async function load() {
+  const [m, f] = await Promise.all([UI.api("/api/ops-macros", { noRedirect: true }), UI.api("/api/ops-faqs", { noRedirect: true })]);
+  UI.$("#macros").innerHTML = OPS.table([{ h: "제목", f: (x) => `<b>${UI.esc(x.title)}</b>` }, { h: "본문", f: (x) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(x.text)}</span>` }, { h: "", f: (x) => can ? `<button type="button" class="lk" data-em="${x.id}">고치기</button> · <button type="button" class="lk" data-dm="${x.id}">지우기</button>` : "" }], m.ok ? m.macros || [] : []);
+  UI.$("#faqs").innerHTML = OPS.table([{ h: "질문", f: (x) => `<b>${UI.esc(x.q)}</b>` }, { h: "답", f: (x) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(x.a)}</span>` }, { h: "공개", f: (x) => OPS.pill(x.public ? ["ok", "공개"] : ["off", "숨김"]) }, { h: "", f: (x) => can ? `<button type="button" class="lk" data-ef="${x.id}">고치기</button> · <button type="button" class="lk" data-df="${x.id}">지우기</button>` : "" }], f.ok ? f.faqs || [] : []);
+  UI.$$("[data-em]").forEach((b) => b.onclick = () => macroSheet((m.macros || []).find((x) => x.id === Number(b.dataset.em))));
+  UI.$$("[data-dm]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/ops-macros", { body: { action: "delete", id: Number(b.dataset.dm) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); load(); });
+  UI.$$("[data-ef]").forEach((b) => b.onclick = () => faqSheet((f.faqs || []).find((x) => x.id === Number(b.dataset.ef))));
+  UI.$$("[data-df]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/ops-faqs", { body: { action: "delete", id: Number(b.dataset.df) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); load(); });
+}
+function macroSheet(x) { UI.sheet(`<form id="mf"><div class="field"><label>제목</label><input class="input" name="title" required value="${UI.esc(x?.title || "")}"></div><div class="field"><label>본문</label><textarea class="input" name="text" rows="4" style="height:auto;padding:14px 16px" required>${UI.esc(x?.text || "")}</textarea></div><div class="cta"><button class="btn primary" type="submit">저장</button></div></form>`, { title: x ? "매크로 고치기" : "새 매크로", onOpen: (sh, close) => UI.form(sh.querySelector("#mf"), async (d) => { const r = await UI.api("/api/ops-macros", { body: { action: "save", id: x?.id, macro: { title: d.title, text: d.text } }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); close(); load(); }) }); }
+function faqSheet(x) { UI.sheet(`<form id="ff"><div class="field"><label>질문</label><input class="input" name="q" required value="${UI.esc(x?.q || "")}"></div><div class="field"><label>답</label><textarea class="input" name="a" rows="4" style="height:auto;padding:14px 16px" required>${UI.esc(x?.a || "")}</textarea></div><div class="fr"><div class="fl">공개</div><button class="toggle" type="button" id="pub" aria-checked="${x ? !!x.public : true}"></button></div><div class="cta"><button class="btn primary" type="submit">저장</button></div></form>`, { title: x ? "FAQ 고치기" : "새 FAQ", onOpen: (sh, close) => { UI.toggle(sh.querySelector("#pub")); UI.form(sh.querySelector("#ff"), async (d) => { const r = await UI.api("/api/ops-faqs", { body: { action: "save", id: x?.id, faq: { q: d.q, a: d.a, public: sh.querySelector("#pub").getAttribute("aria-checked") === "true" } }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); close(); load(); }); } }); }
+UI.$("#addM").onclick = () => macroSheet(null); UI.$("#addF").onclick = () => faqSheet(null);
+if (!can) { UI.$("#addM").hidden = true; UI.$("#addF").hidden = true; }
+load();
+})();
+</script>
+</body>
+</html>

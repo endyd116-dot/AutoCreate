@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>요금제 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ph"></span><span class="ttl">요금제</span><span class="sp"></span></div>
+<div class="ops-two" id="cards"></div>
+<div class="group"><div class="gt">코인 팩 · 단가 <span class="muted" style="font-weight:500">부가세 별도 · 코드 기본값 위에 DB 오버레이</span><button type="button" id="editCoins" style="color:var(--ink);font-weight:600;font-size:12.5px">고치기</button></div><div id="packs"></div><div id="table"></div></div>
+<div class="group"><div class="gt">가격 개정 <button type="button" id="newPrice" style="color:var(--ink);font-weight:600;font-size:12.5px">개정 예약</button></div><p class="muted" style="margin:0 16px 8px;font-size:13px">기존 고객은 고지 발송 → 적용일 이후 첫 청구부터. 가격을 잠근(price_locked) 고객은 그대로예요.</p><div id="events"></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("plans"); if (!op) return;
+let P = null, CP = null;
+const FEAT = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "정지 승계", managedRunner: "관리형 러너", runnerRevenue: "러너 수익 회수", teamApproval: "팀 승인" };
+async function load() {
+  const [p, c] = await Promise.all([UI.api("/api/ops-plans", { noRedirect: true }), UI.api("/api/ops-coin-prices", { noRedirect: true })]);
+  if (!p.ok) { UI.toast(p.error || "불러오지 못했어요"); return; } P = p; CP = c.ok ? c : null;
+  UI.$("#cards").innerHTML = (p.plans || []).map((x) => `<div class="group"><div class="gt">${UI.esc(x.name)} ${x.recommended ? '<span class="pill ink">추천</span>' : ""}<button type="button" data-edit="${x.key}" style="color:var(--ink);font-weight:600;font-size:12.5px">고치기</button></div>
+    <div style="padding:0 16px 8px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${UI.won(x.priceMonthKrw)}<small class="muted" style="font-size:13px;font-weight:500"> /월 · 부가세 별도</small></div><div class="muted" style="font-size:13px;margin-top:4px">연납 ${UI.won(x.priceYearKrw)} · 2개월 무료 · 가입자 ${UI.num(x.subscribers)} · MRR ${UI.won(x.mrrKrw)}</div></div>
+    <div class="kv"><span class="k">계정 · 포함 코인</span><span class="v">${x.maxAccounts}개 · ${x.coinsIncluded}코인</span></div>
+    <div class="kv"><span class="k">PC 프로그램 · 팀 시트</span><span class="v">${x.runnerDevices}대 · ${x.teamSeats}명</span></div>
+    <div class="kv"><span class="k">규칙 · 편성 기간</span><span class="v">${x.maxRules >= 99 ? "무제한" : x.maxRules + "개"} · ${x.horizonDays}일</span></div>
+    <div class="kv"><span class="k">기능</span><span class="v" style="white-space:normal;justify-content:flex-end;gap:4px;flex-wrap:wrap">${Object.entries(FEAT).map(([k, l]) => `<span class="pill ${x.features?.[k] ? "ok" : "off"}">${l}</span>`).join("")}</span></div>
+    <div class="kv"><span class="k">공개 · 첫 발행 전 카드</span><span class="v">${x.public ? "공개" : "숨김"} · ${x.requireCardBeforePublish ? "필요" : "안 물음"}</span></div></div>`).join("");
+  UI.$$("[data-edit]").forEach((b) => b.onclick = () => planSheet(p.plans.find((x) => x.key === b.dataset.edit)));
+  if (CP) { UI.$("#packs").innerHTML = OPS.table([{ h: "팩", f: (k) => `<b>${UI.esc(k.id)}</b>${k.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}` }, { h: "가격", r: true, f: (k) => UI.won(k.krw) }, { h: "코인", r: true, f: (k) => UI.num(k.coins) }, { h: "보너스", r: true, f: (k) => k.bonusPct ? `+${k.bonusPct}%` : "—" }, { h: "청구", r: true, f: (k) => `${UI.won(k.krw + Math.round(k.krw * 0.1))}<span class="muted"> (VAT 포함)</span>` }], CP.packs || []);
+    UI.$("#table").innerHTML = `<div class="kv" style="white-space:normal"><span class="k">단가표</span><span class="v" style="white-space:normal;justify-content:flex-end;gap:6px;flex-wrap:wrap">${Object.entries(CP.table || {}).map(([k, v]) => `<span class="pill off">${UI.esc(k)} ${v}</span>`).join("")}</span></div>`; }
+  const EST = { scheduled: ["off", "예약"], noticed: ["warn", "고지 보냄"], applied: ["ok", "적용됨"] };
+  UI.$("#events").innerHTML = OPS.table([{ h: "플랜", f: (e) => UI.esc(e.planKey) }, { h: "가격", f: (e) => `${UI.won(e.oldPriceKrw)} → <b>${UI.won(e.newPriceKrw)}</b>` }, { h: "적용일(KST)", f: (e) => OPS.dateKST(e.effectiveAt) }, { h: "고지", f: (e) => e.noticedAt ? OPS.dt(e.noticedAt) : "—" }, { h: "대상", r: true, f: (e) => UI.num(e.affected) }, { h: "상태", f: (e) => OPS.pill(EST[e.status] || ["off", e.status]) }, { h: "문구", f: (e) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:320px">${UI.esc(e.noticeText)}</span>` }], p.priceEvents || []);
+}
+function planSheet(x) {
+  UI.sheet(`<form id="pf"><p class="muted" style="margin:0 0 8px;font-size:13px">가격은 여기서 못 바꿔요 — «가격 개정 예약»으로만(기존 고객 고지 → 다음 주기).</p>
+    <div class="fr"><div class="fl">계정 수</div>${UI.stepper("maxAccounts", x.maxAccounts, 1, 200, "개")}</div>
+    <div class="fr"><div class="fl">포함 코인/월</div>${UI.stepper("coinsIncluded", x.coinsIncluded, 0, 2000, "코인", 10)}</div>
+    <div class="fr"><div class="fl">PC 프로그램</div>${UI.stepper("runnerDevices", x.runnerDevices, 0, 20, "대")}</div>
+    <div class="fr"><div class="fl">팀 시트</div>${UI.stepper("teamSeats", x.teamSeats, 1, 50, "명")}</div>
+    <div class="fr"><div class="fl">편성 기간</div>${UI.seg("horizonDays", [[7, "7일"], [14, "14일"], [30, "30일"]], x.horizonDays)}</div>
+    <div class="sec">기능</div>${Object.entries(FEAT).map(([k, l]) => `<div class="fr"><div class="fl">${l}</div><button class="toggle" type="button" data-f="${k}" aria-checked="${!!x.features?.[k]}"></button></div>`).join("")}
+    <div class="fr"><div class="fl">공개</div><button class="toggle" type="button" data-f="public" aria-checked="${!!x.public}"></button></div>
+    <div class="fr"><div class="fl">추천 배지</div><button class="toggle" type="button" data-f="recommended" aria-checked="${!!x.recommended}"></button></div>
+    <div class="fr"><div class="fl">첫 발행 전 결제수단 요구<small>남용 방지 · 기본 꺼짐</small></div><button class="toggle" type="button" data-f="requireCardBeforePublish" aria-checked="${!!x.requireCardBeforePublish}"></button></div>
+    <div class="cta"><button class="btn primary" type="submit">저장</button></div></form>`, { title: `${x.name} 고치기`, onOpen: (sh, close) => { UI.bindSteppers(sh); UI.bindChips(sh); sh.querySelectorAll(".toggle").forEach((t) => UI.toggle(t));
+      UI.form(sh.querySelector("#pf"), async () => { const on = (k) => sh.querySelector(`[data-f="${k}"]`).getAttribute("aria-checked") === "true";
+        const patch = { maxAccounts: UI.stepVal(sh, "maxAccounts"), coinsIncluded: UI.stepVal(sh, "coinsIncluded"), runnerDevices: UI.stepVal(sh, "runnerDevices"), teamSeats: UI.stepVal(sh, "teamSeats"), horizonDays: Number(UI.chipVal(sh, "horizonDays")), features: Object.fromEntries(Object.keys(FEAT).map((k) => [k, on(k)])), public: on("public"), recommended: on("recommended"), requireCardBeforePublish: on("requireCardBeforePublish") };
+        const r = await UI.api("/api/ops-plan-update", { body: { key: x.key, patch }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요"); load(); }); } });
+}
+UI.$("#editCoins").onclick = () => { if (!CP) return; UI.sheet(`<form id="cf">${(CP.packs || []).map((k, i) => `<div class="fr"><div class="fl">${UI.esc(k.id)}<small>${UI.num(k.coins)}코인</small></div><input class="input" name="krw${i}" type="number" value="${k.krw}" style="width:130px;height:40px"></div>`).join("")}<p class="muted" style="margin:8px 0 0;font-size:12.5px">부가세 별도 · 코인 수는 코드 기본값(AM 과 같은 팩)이라 여기서 안 바꿔요.</p><div class="cta"><button class="btn primary" type="submit">저장</button></div></form>`, { title: "코인 팩 가격", onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), async (d) => { const packs = CP.packs.map((k, i) => ({ ...k, krw: Number(d["krw" + i]) })); const r = await UI.api("/api/ops-coin-prices", { body: { packs }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); close(); UI.toast("저장했어요"); load(); }) }); };
+UI.$("#newPrice").onclick = () => { if (!P) return; const dayIn = (n) => new Date(Date.now() + n * 86400e3).toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  UI.sheet(`<form id="ef"><div class="sec">플랜</div>${UI.chips("planKey", P.plans.map((x) => [x.key, x.name]), "pro")}
+    <div class="field"><label>새 월 가격(부가세 별도)</label><input class="input" name="newPriceKrw" type="number" required placeholder="49000"><div class="help"></div></div>
+    <div class="field"><label>적용일(KST) <span class="muted" style="font-weight:500">· 고지 뒤 30일 이후</span></label><input class="input" name="effectiveAt" required value="${dayIn(31)}"><div class="help"></div></div>
+    <div class="field"><label>고지 문구</label><textarea class="input" name="noticeText" rows="3" style="height:auto;padding:14px 16px" required placeholder="Pro 요금이 11월 1일 청구분부터 월 49,000원(부가세 별도)으로 바뀌어요."></textarea><div class="help"></div></div>
+    <div class="group" style="background:var(--ground)"><div class="gt">고객이 받을 고지 미리보기</div><p id="pv" class="muted" style="margin:0 16px 12px;font-size:13.5px;color:var(--ink)">—</p></div>
+    <div class="cta"><button class="btn primary" type="submit">개정 예약</button></div></form>`, { title: "가격 개정", onOpen: (sh, close) => { UI.bindChips(sh); const ta = sh.querySelector("[name=noticeText]"); ta.addEventListener("input", () => { sh.querySelector("#pv").textContent = ta.value || "—"; });
+      UI.form(sh.querySelector("#ef"), async (d, f) => { const r = await UI.api("/api/ops-price-event", { body: { planKey: UI.chipVal(sh, "planKey"), newPriceKrw: Number(d.newPriceKrw), effectiveAt: d.effectiveAt + "T00:00:00+09:00", noticeText: d.noticeText }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, r.step === "effectiveAt" ? "effectiveAt" : r.step === "noticeText" ? "noticeText" : "newPriceKrw", r.error); close(); UI.done("개정을 예약했어요 · 고지가 나가요", load); }); } }); };
+load();
+})();
+</script>
+</body>
+</html>

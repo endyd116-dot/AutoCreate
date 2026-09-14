@@ -6,24 +6,36 @@
 <title>감사 · AutoCreate 운영센터</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">감사</span><span class="sp"></span></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><div class="field" style="flex:1;min-width:200px;padding:0"><input class="input" id="q" type="search" placeholder="동작·내용으로 찾기" autocomplete="off" style="height:44px"></div><div class="seg" id="actor" style="margin:0"><button class="on" data-v="">전부</button><button data-v="operator">운영자</button><button data-v="user">고객</button><button data-v="system">시스템</button></div></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/ops.js?v=1"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
 <script>
 (async () => {
 const op = await OPS.boot("audit"); if (!op) return;
-const r = await UI.api("/api/ops-audit?limit=100", { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
-UI.$("#list").innerHTML = `<div class="gt">최근 ${r.rows.length}건</div>` + r.rows.map((a) => `<div class="row"><span class="dot ${a.risk_level === "high" || a.risk_level === "critical" ? "danger" : a.risk_level === "medium" ? "warn" : "off"}"></span><div class="l"><span class="t">${UI.esc(a.action)}</span><span class="d">테넌트 ${a.tenant_id ?? "—"} · ${a.actor_type}#${a.actor_id ?? ""} · ${UI.esc(a.ip || "")}</span></div><span class="r mut">${OPS.dt(a.created_at)}</span></div>`).join("");
+let actor = "";
+async function load() {
+  const r = await UI.api(`/api/ops-audit?q=${encodeURIComponent(UI.$("#q").value.trim())}&actor=${actor}&limit=100`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  UI.$("#list").innerHTML = `<div class="gt">최근 ${UI.num(r.total ?? (r.rows || []).length)}건 <span class="muted" style="font-weight:500">KST</span></div>` + OPS.table([
+    { h: "언제", f: (a) => OPS.dt(a.created_at) }, { h: "위험", f: (a) => `<span class="dot ${a.risk_level === "high" || a.risk_level === "critical" ? "danger" : a.risk_level === "medium" ? "warn" : "off"}"></span>` },
+    { h: "동작", f: (a) => `<b>${UI.esc(a.action)}</b>` }, { h: "누가", f: (a) => `${UI.esc(a.actor_type)}${a.actor_id != null ? "#" + a.actor_id : ""}` },
+    { h: "고객", f: (a) => a.tenant_id != null ? `<a class="lk" href="/ops/tenant.html?id=${a.tenant_id}">#${a.tenant_id}</a>` : "—" }, { h: "내용", f: (a) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(a.detail || "")}</span>` },
+  ], r.rows || []);
+}
+UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(load, 250); });
+UI.$$("#actor button").forEach((b) => b.onclick = () => { UI.$$("#actor button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); actor = b.dataset.v; load(); });
+load();
 })();
 </script>
 </body>

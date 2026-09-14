@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>공지 · 상태 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ph"></span><span class="ttl">공지 · 상태</span><span class="sp"></span></div>
+<div class="group"><div class="gt">공지 · 장애 배너 <button type="button" id="add" style="color:var(--ink);font-weight:600;font-size:12.5px">새로 쓰기</button></div><div id="list"></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("notices"); if (!op) return;
+async function load() {
+  const r = await UI.api("/api/ops-notices", { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  UI.$("#list").innerHTML = OPS.table([
+    { h: "종류", f: (n) => OPS.pill(n.kind === "incident" ? ["warn", "장애 배너"] : ["off", "공지"]) }, { h: "제목", f: (n) => `<b>${UI.esc(n.title)}</b>${n.body ? `<br><span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(n.body)}</span>` : ""}` },
+    { h: "기간(KST)", f: (n) => `${OPS.dt(n.startsAt)} ~ ${n.endsAt ? OPS.dt(n.endsAt) : "계속"}` }, { h: "대상", f: (n) => [...(n.plans || []), ...(n.channels || []).map(UI.chLabel)].join(" · ") || "전체" },
+    { h: "켜짐", f: (n) => OPS.pill(n.active ? ["ok", "켜짐"] : ["off", "꺼짐"]) },
+    { h: "", f: (n) => `<button type="button" class="lk" data-t="${n.id}">${n.active ? "끄기" : "켜기"}</button> · <button type="button" class="lk" data-e="${n.id}">고치기</button> · <button type="button" class="lk" data-d="${n.id}">지우기</button>` },
+  ], r.notices || []);
+  UI.$$("[data-t]").forEach((b) => b.onclick = async () => { const rr = await UI.api("/api/ops-notices", { body: { action: "toggle", id: Number(b.dataset.t) }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); load(); });
+  UI.$$("[data-d]").forEach((b) => b.onclick = async () => { const rr = await UI.api("/api/ops-notices", { body: { action: "delete", id: Number(b.dataset.d) }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); load(); });
+  UI.$$("[data-e]").forEach((b) => b.onclick = () => sheet((r.notices || []).find((n) => n.id === Number(b.dataset.e))));
+}
+function sheet(n) {
+  const v = n || { kind: "notice", title: "", body: "", startsAt: new Date().toISOString(), endsAt: "", plans: [], channels: [] };
+  UI.sheet(`<form id="nf"><div class="sec">종류</div>${UI.seg("kind", [["notice", "공지"], ["incident", "장애 배너"]], v.kind)}
+    <div class="field"><label>제목 <span class="muted" style="font-weight:500">· 홈 상단 1줄 · 문장형</span></label><input class="input" name="title" required value="${UI.esc(v.title)}" placeholder="네이버 발행이 늦어요 · 네이버 쪽 점검"><div class="help"></div></div>
+    <div class="field"><label>본문 <span class="muted" style="font-weight:500">· 선택</span></label><textarea class="input" name="body" rows="3" style="height:auto;padding:14px 16px">${UI.esc(v.body || "")}</textarea></div>
+    <div style="display:flex;gap:8px"><div class="field" style="flex:1"><label>시작(KST)</label><input class="input" name="startsAt" required value="${UI.esc(String(v.startsAt).slice(0, 16).replace("T", " "))}" placeholder="2026-09-14 14:00"></div><div class="field" style="flex:1"><label>끝(KST) <span class="muted" style="font-weight:500">비우면 계속</span></label><input class="input" name="endsAt" value="${UI.esc(v.endsAt ? String(v.endsAt).slice(0, 16).replace("T", " ") : "")}"></div></div>
+    <div class="sec">대상 플랜 <span class="muted" style="font-weight:500">· 안 고르면 전체</span></div>${UI.chips("plans", [["trial", "체험"], ["starter", "Starter"], ["pro", "Pro"], ["agency", "Agency"]], v.plans || [], true)}
+    <div class="sec">채널(장애일 때)</div>${UI.chips("channels", Object.keys(UI.CH).slice(0, 4).map((k) => [k, UI.chLabel(k)]), v.channels || [], true)}
+    <div class="cta"><button class="btn primary" type="submit">${n ? "고치기" : "올리기"}</button></div></form>`, { title: n ? "공지 고치기" : "새 공지", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#nf"), async (d, f) => {
+      const toIso = (s) => (s ? new Date(s.replace(" ", "T") + ":00+09:00").toISOString() : undefined);
+      const notice = { kind: UI.chipVal(sh, "kind"), title: d.title, body: d.body || undefined, startsAt: toIso(d.startsAt), endsAt: toIso(d.endsAt), plans: UI.chipVal(sh, "plans"), channels: UI.chipVal(sh, "channels") };
+      const r = await UI.api("/api/ops-notices", { body: { action: "save", id: n?.id, notice }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "title", r.error); close(); UI.toast(n ? "고쳤어요" : "올렸어요 · 고객 홈에 바로"); load(); }); } });
+}
+UI.$("#add").onclick = () => sheet(null);
+load();
+})();
+</script>
+</body>
+</html>

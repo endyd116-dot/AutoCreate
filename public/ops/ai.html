@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI 엔진 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ph"></span><span class="ttl">AI 엔진</span><span class="sp"></span></div>
+<div class="group"><div class="gt">역할별 모델 <span class="muted" style="font-weight:500">정본 lib/ai-models.ts + DB 오버레이</span></div><div id="roles"></div></div>
+<div class="ops-two">
+<div class="group"><div class="gt">후보(실측 통과 여부)</div><div id="cands"></div></div>
+<div class="group"><div class="gt">원가 · 업데이트</div><div id="cost"></div></div>
+</div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("ai"); if (!op) return;
+const ROLE = { writer: "글", director: "디렉터", topics: "소재", image: "사진" };
+let A;
+async function load() {
+  const r = await UI.api("/api/ops-ai-models", { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } A = r;
+  UI.$("#roles").innerHTML = OPS.table([
+    { h: "역할", f: (x) => `<b>${ROLE[x.role] || x.role}</b>` }, { h: "현재", f: (x) => `<span style="font-family:ui-monospace,monospace">${UI.esc(x.current)}</span>` },
+    { h: "후보 · 카나리", f: (x) => x.candidate ? `<span style="font-family:ui-monospace,monospace">${UI.esc(x.candidate)}</span> <span class="pill ${x.canaryPct ? "warn" : "off"}">${x.canaryPct}%</span>` : '<span class="muted">없음</span>' },
+    { h: "바뀜", f: (x) => OPS.dt(x.updatedAt) },
+    { h: "", f: (x) => `<button type="button" class="lk" data-apply="${x.role}">적용 · 카나리</button>${x.candidate ? ` · <button type="button" class="lk" data-rb="${x.role}">롤백</button>` : ""}` },
+  ], r.roles || []);
+  UI.$("#cands").innerHTML = OPS.table([{ h: "모델", f: (c) => `<span style="font-family:ui-monospace,monospace">${UI.esc(c.model)}</span>` }, ...["text", "json", "googleSearch", "image"].map((k) => ({ h: { text: "글", json: "JSON", googleSearch: "검색", image: "사진" }[k], f: (c) => c.tested?.[k] ? '<span style="color:var(--money);font-weight:800">✓</span>' : '<span class="muted">—</span>' }))], r.candidates || []);
+  UI.$("#cost").innerHTML = `<div class="kv"><span class="k">원가 상한(고객 · 일)</span><span class="v">${UI.won(r.costCap?.krwPerDay || 0)}</span></div><div class="kv"><span class="k">업데이트</span><span class="v">${r.updateMode === "auto" ? '<span class="pill ok">자동</span> 카나리 10% 24h → 승격' : '<span class="pill off">수동</span>'}</span></div><div class="kv"><span class="k">마지막 모델 점검</span><span class="v">${OPS.dt(r.lastWatchAt)}</span></div><div class="cta" style="position:static;padding:8px 12px 10px;flex-direction:column"><button class="btn secondary sm" type="button" id="cap">상한 · 모드 바꾸기</button><button class="btn ghost sm" type="button" id="sync">정본 동기화 내려받기</button></div>`;
+  UI.$$("[data-apply]").forEach((b) => b.onclick = () => { const x = r.roles.find((y) => y.role === b.dataset.apply); UI.sheet(`<div class="field"><label>모델(체인)</label><input class="input" id="chain" value="${UI.esc(x.candidate || "")}" placeholder="예: text-next" style="font-family:ui-monospace,monospace"><div class="help"></div></div><div class="sec">카나리 비율</div>${UI.chips("pct", [[10, "10%"], [50, "50%"], [100, "100% (승격)"]], x.canaryPct || 10)}<p class="muted" style="margin:10px 0 0;font-size:13px">100% 는 현재 모델을 교체해요 · 실측 4종을 통과한 후보만 넣어요(«목록에 있다고 쓰지 않는다»).</p><div class="cta"><button class="btn primary" type="button" id="ok">적용</button></div>`, { title: `${ROLE[x.role] || x.role} 모델`, onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const chain = sh.querySelector("#chain").value.trim(); if (!chain) { sh.querySelector(".help").textContent = "모델을 적어 주세요."; return; } const rr = await UI.api("/api/ops-ai-apply", { body: { role: x.role, chain, canaryPct: Number(UI.chipVal(sh, "pct")) }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); close(); UI.toast("적용했어요 · 감사 기록"); load(); }; } }); });
+  UI.$$("[data-rb]").forEach((b) => b.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "롤백", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "후보를 내리고 현재 모델로만 돌릴까요?", async () => { const rr = await UI.api("/api/ops-ai-rollback", { body: { role: b.dataset.rb }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); close(); UI.toast("롤백했어요"); load(); }) }));
+  UI.$("#cap").onclick = () => UI.sheet(`<div class="fr"><div class="fl">원가 상한<small>고객 · 일 · 넘으면 생성 거부 + 알림</small></div>${UI.stepper("cap", r.costCap?.krwPerDay || 30000, 5000, 300000, "원", 5000)}</div><div class="sec">업데이트</div>${UI.seg("mode", [["manual", "수동"], ["auto", "자동(카나리 → 승격)"]], r.updateMode)}<div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "원가 · 업데이트", onOpen: (sh, close) => { UI.bindSteppers(sh); UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const rr = await UI.api("/api/ops-ai-cost-cap", { body: { krwPerDay: UI.stepVal(sh, "cap"), updateMode: UI.chipVal(sh, "mode") }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error); close(); UI.toast("저장했어요"); load(); }; } });
+  UI.$("#sync").onclick = () => { const txt = `// lib/ai-models.ts 형태 · DB 오버레이 내려받기(${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST) · PR 은 사람이\nexport const AI_MODELS = ${JSON.stringify(Object.fromEntries((A.roles || []).map((x) => [x.role, x.current])), null, 2)};\n`; UI.sheet(`<code class="code" style="white-space:pre-wrap;font-size:12px">${UI.esc(txt)}</code><div class="cta"><button class="btn primary" type="button" id="cp">복사</button></div>`, { title: "정본 동기화", onOpen: (sh) => { sh.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(txt)) ? "복사했어요 · PR 로 올려요" : "복사하지 못했어요"); } }); };
+}
+load();
+})();
+</script>
+</body>
+</html>
