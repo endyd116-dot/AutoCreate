@@ -24,6 +24,8 @@ import { lookupGrowth } from "./naver-datalab";
 import { seasonalFor, seasonLine } from "./kr-calendar";
 import { listAccounts, TEXT_CHANNELS } from "./accounts";
 import { AD_LAW_BANNED, normalizeForBanScan } from "./banned-words";
+import { findBannedCategory } from "./banned-categories";
+import { writeAudit } from "./audit";
 
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -127,7 +129,12 @@ async function generateCandidates(tid: number, ctx: Awaited<ReturnType<typeof te
     channelHint: TEXT_CHANNELS.has(String(c?.channelHint)) && ctx.channels.includes(String(c.channelHint)) ? String(c.channelHint) : ctx.channels[0],
     intent: (["info", "commercial", "mixed"].includes(String(c?.intent)) ? String(c.intent) : "info") as TopicIntent,
     pain: Math.max(0.3, Math.min(1, Number(c?.pain) || 0.5)),
-  })).filter((c) => c.title && !hasSuperlative(`${c.title} ${c.angle}`));
+  })).filter((c) => c.title && !hasSuperlative(`${c.title} ${c.angle}`))
+    .filter((c) => {   // P1R4 §1.5 — 금칙 카테고리(성인·도박·의료 과장·비방·불법)는 소재 단계에서 거부 + 감사
+      const hit = findBannedCategory(`${c.title} ${c.angle} ${c.seedKeywords.join(" ")}`);
+      if (hit) void writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "system", riskLevel: "medium", detail: { category: hit.category, word: hit.word, title: c.title.slice(0, 80) } });
+      return !hit;
+    });
 }
 
 /* ───────── ②③ 검색량 결합 + 스코어 ───────── */

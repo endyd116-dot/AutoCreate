@@ -8,7 +8,7 @@
  */
 import { db } from "../db/index";
 import { sql, type SQL } from "drizzle-orm";
-import { coinCostOf, COIN_ITEM_LABEL, type CoinItem } from "./coin-table";
+import { coinCostOf, COIN_ITEM_LABEL, PURCHASE_VALID_DAYS, type CoinItem } from "./coin-table";
 import { utcDate } from "./db-util";
 
 export type CoinBucket = "included" | "purchased";
@@ -153,4 +153,101 @@ export async function recentLedger(tid: number, limit = 20): Promise<LedgerRow[]
       return o;
     });
   } catch { return []; }
+}
+
+/* ═══════════════════ P1R4 — 충전(purchase) · 회수(revoke) · 월 포함분(included) · 묶음 배분 ═══════════════════
+ *   AM 원본: ../AutoMarketing/lib/coin-ledger.ts §6 purchaseCoins(§822) · lib/coin-refund.ts readPurchasedLots/allocateLots(§103~150) (이식 2026-09-14)
+ *   가져온 약속 ⑤ 충전 = purchased 버킷 · +365일 만료 · ref=주문번호 멱등 ⑥ 회수(revoke) = 주문당 1회(같은 유니크 (tenant,'revoke',ref,'purchased'))
+ *   ⑦ 묶음(lot) 배분 = 오래된 충전부터 소비된 것으로 본다(FIFO) — 환불 가능액 «미사용분»의 유일한 판정기(환불이 자기 규칙을 세우지 않는다)
+ *   ⑧ 월 포함분 = included 버킷 · ref `included:{tid}:{YYYY-MM}` 멱등 · **expires_at = 그달 말일 23:59:59 KST**(계약 §0.1 · 별도 정리 잡 없음)
+ *   ⚠️ 바꾼 것: AM 의 operator_id·via_impersonation 칸은 AC 원장에 없다 → actor_id + 감사 detail 로 대신. */
+
+export interface PurchaseResult { ok: boolean; granted: number; already: boolean; balance: number; error?: string }
+/** 충전 기입 — 결제 성공 뒤에만 부른다(호출부가 순서를 지킨다). 같은 주문번호 두 번째는 already(0). */
+export async function purchaseCoins(tid: number, coins: number, orderNo: string, opts: { reason?: string; actorId?: number | null; now?: Date } = {}): Promise<PurchaseResult> {
+  const c = Math.floor(Number(coins)); const ref = String(orderNo ?? "").trim();
+  if (!Number.isFinite(c) || c <= 0 || !ref) { const b = await balance(tid); return { ok: false, granted: 0, already: false, balance: b.balance, error: "invalid_purchase" }; }
+  const now = opts.now ?? new Date();
+  const expiresAt = new Date(now.getTime() + PURCHASE_VALID_DAYS * 86400_000).toISOString();
+  try {
+    const r = await rows(db, sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason, actor_id, expires_at)
+      VALUES (${tid}, ${"purchase"}, ${"purchased"}, ${c}, ${ref}, ${(opts.reason ?? `코인 충전 ${c.toLocaleString("ko-KR")}개(유효 1년)`).slice(0, 200)}, ${opts.actorId ?? null}, ${expiresAt}::timestamptz AT TIME ZONE 'UTC')
+      ON CONFLICT (tenant_id, kind, ref, bucket) WHERE ref IS NOT NULL DO NOTHING RETURNING id`);
+    const b = await balance(tid);
+    return { ok: true, granted: r.length ? c : 0, already: !r.length, balance: b.balance };
+  } catch (e) {
+    if ((e as { code?: string })?.code === "23505") { const b = await balance(tid); return { ok: true, granted: 0, already: true, balance: b.balance }; }
+    console.error("[coin-ledger] purchase failed", e); const b = await balance(tid);
+    return { ok: false, granted: 0, already: false, balance: b.balance, error: String((e as Error)?.message ?? e).slice(0, 200) };
+  }
+}
+
+/* ───────── 묶음(lot) 배분 — 환불 «미사용분»의 유일한 판정기 ───────── */
+export interface CoinLot { lotId: number; ref: string | null; granted: number; revoked: number; amount: number; remaining: number; expiresAt: string | null; createdAt: string }
+export interface PurchasedLots { lots: CoinLot[]; outflow: number }
+/**
+ * readPurchasedLots — 충전 묶음마다 «아직 안 쓴 수»를 센다.
+ *   유출(소비·소멸 · revoke 제외)은 **오래된 묶음부터** 먹은 것으로 본다(FIFO). 만료된 묶음은 배분 대상에서 빠진다(이미 사라진 코인).
+ *   revoke 는 자기 묶음에서 이미 뺐으므로 유출에 두 번 넣지 않는다.
+ */
+export async function readPurchasedLots(tid: number, now: Date = new Date()): Promise<PurchasedLots> {
+  const rev = await rows(db, sql`SELECT ref, COALESCE(SUM(-delta),0) AS amt FROM coin_ledger WHERE tenant_id = ${tid} AND bucket = 'purchased' AND kind = 'revoke' AND delta < 0 AND ref IS NOT NULL GROUP BY ref`);
+  const revokedByRef = new Map(rev.map((r) => [String(r.ref), Number(r.amt || 0)]));
+  const lotRows = await rows(db, sql`SELECT id, delta, ref, expires_at, created_at FROM coin_ledger WHERE tenant_id = ${tid} AND bucket = 'purchased' AND delta > 0 ORDER BY created_at, id`);
+  const [o] = await rows(db, sql`SELECT COALESCE(SUM(-delta),0) AS out FROM coin_ledger WHERE tenant_id = ${tid} AND bucket = 'purchased' AND delta < 0 AND kind <> 'revoke'`);
+  let outflow = Number(o?.out || 0);
+  const lots: CoinLot[] = [];
+  for (const r of lotRows) {
+    const ref = r.ref ? String(r.ref) : null; const granted = Number(r.delta || 0); const revoked = ref ? (revokedByRef.get(ref) ?? 0) : 0;
+    const exp = utcDate(r.expires_at); const expired = !!exp && exp.getTime() <= now.getTime();
+    const amount = Math.max(0, granted - revoked);
+    lots.push({ lotId: Number(r.id), ref, granted, revoked, amount, remaining: expired ? 0 : amount, expiresAt: exp?.toISOString() ?? null, createdAt: utcDate(r.created_at)?.toISOString() ?? "" });
+  }
+  // FIFO 배분 — 살아 있는 묶음에 유출을 오래된 순으로 먹인다.
+  for (const l of lots) { if (l.remaining <= 0) continue; const take = Math.min(l.remaining, outflow); l.remaining -= take; outflow -= take; if (outflow <= 0) break; }
+  return { lots, outflow: Number(o?.out || 0) };
+}
+export function lotOfOrder(p: PurchasedLots, orderNo: string): CoinLot | null { return p.lots.find((l) => l.ref === orderNo) ?? null; }
+
+export interface RevokeResult { ok: boolean; revoked: number; alreadyRevoked: boolean; ledgerId: number | null; error?: string }
+/**
+ * revokeCoins — 환불 회수(주문당 1회 · 미사용분 전량). 🔴 PG 취소가 **성공한 뒤에만** 부른다(호출부 lib/billing/coin-refund 가 순서를 지킨다).
+ *   락 안에서 «지금» 잔량으로 회수한다(미리보기 시점 잔량이 아니라). 잔량 0 이면 행을 안 적는다(0짜리 원장 행은 사실이 아니다).
+ */
+export async function revokeCoins(tid: number, orderNo: string, reason: string, actorId: number | null = null): Promise<RevokeResult> {
+  const ref = String(orderNo ?? "").trim();
+  if (!ref) return { ok: false, revoked: 0, alreadyRevoked: false, ledgerId: null, error: "order_no_required" };
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${COIN_LOCK_NS}, ${tid})`);
+      const dup = await rows(tx, sql`SELECT id FROM coin_ledger WHERE tenant_id = ${tid} AND kind = 'revoke' AND ref = ${ref} AND bucket = 'purchased' LIMIT 1`);
+      if (dup.length) return { ok: true, revoked: 0, alreadyRevoked: true, ledgerId: Number(dup[0].id) };
+      const lot = lotOfOrder(await readPurchasedLots(tid), ref);
+      const amount = Math.max(0, Math.floor(lot?.remaining ?? 0));
+      if (amount <= 0) return { ok: true, revoked: 0, alreadyRevoked: false, ledgerId: null };
+      const ins = await rows(tx, sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason, actor_id)
+        VALUES (${tid}, ${"revoke"}, ${"purchased"}, ${-amount}, ${ref}, ${reason.slice(0, 200)}, ${actorId})
+        ON CONFLICT (tenant_id, kind, ref, bucket) WHERE ref IS NOT NULL DO NOTHING RETURNING id`);
+      return ins.length ? { ok: true, revoked: amount, alreadyRevoked: false, ledgerId: Number(ins[0].id) } : { ok: true, revoked: 0, alreadyRevoked: true, ledgerId: null };
+    });
+  } catch (e) { return { ok: false, revoked: 0, alreadyRevoked: false, ledgerId: null, error: String((e as Error)?.message ?? e).slice(0, 200) }; }
+}
+
+/** 'YYYY-MM'(KST) 의 마지막 순간(그달 말일 23:59:59 KST)을 UTC ISO 로. 순수 산술 — DB·드라이버 tz 무관. */
+export function monthEndKstIso(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 1) - 9 * 3600_000 - 1000).toISOString();   // 다음 달 1일 00:00 KST − 1초
+}
+/**
+ * grantIncluded — 월 포함분 지급(청구 성공 시 · 계약 §1.2). ref `included:{tid}:{YYYY-MM}` 멱등 · **expires_at = 그달 말일 KST**(이월 없음 · §12.1).
+ *   지난달 포함분은 자기 expires_at 으로 저절로 빠진다 — 별도 «만료 처리»가 없다.
+ */
+export async function grantIncluded(tid: number, coins: number, month: string, actorId: number | null = null): Promise<{ ok: boolean; granted: number; already: boolean }> {
+  const c = Math.floor(Number(coins)); if (!Number.isFinite(c) || c <= 0 || !/^\d{4}-\d{2}$/.test(month)) return { ok: false, granted: 0, already: false };
+  try {
+    const r = await rows(db, sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason, actor_id, expires_at)
+      VALUES (${tid}, ${"grant"}, ${"included"}, ${c}, ${`included:${tid}:${month}`}, ${`${month} 포함 코인 ${c}개(이달 말까지)`}, ${actorId}, ${monthEndKstIso(month)}::timestamptz AT TIME ZONE 'UTC')
+      ON CONFLICT (tenant_id, kind, ref, bucket) WHERE ref IS NOT NULL DO NOTHING RETURNING id`);
+    return { ok: true, granted: r.length ? c : 0, already: !r.length };
+  } catch (e) { if ((e as { code?: string })?.code === "23505") return { ok: true, granted: 0, already: true }; console.error("[coin-ledger] grantIncluded", e); return { ok: false, granted: 0, already: false }; }
 }

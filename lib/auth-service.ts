@@ -12,7 +12,7 @@ import {
   USER_COOKIE, OPS_COOKIE, REFRESH_COOKIE, type UserClaims, type OpsClaims, type OpsRole, type UserRole,
 } from "./auth";
 import { writeAudit } from "./audit";
-import { currentTrialDays } from "./plans";
+import { currentTrialPromo } from "./plans";
 import { tenantKeyFrom } from "./validate";
 
 const BCRYPT_COST = 12;
@@ -33,7 +33,7 @@ export async function findUserByEmail(email: string): Promise<UserRow | null> {
 
 /** 가입 = 테넌트 생성(체험 N일) + owner 사용자. 반환 user·tenant·verifyNonce. */
 export async function registerUser(input: { email: string; password: string; name?: string; ip?: string | null }) {
-  const trialDays = await currentTrialDays();
+  const { days: trialDays, promoId } = await currentTrialPromo();
   const hash = await bcrypt.hash(input.password, BCRYPT_COST);
   const key = tenantKeyFrom(input.email);
   const nonce = hashToken(`${input.email}:${Date.now()}:${Math.random()}`).slice(0, 48);
@@ -47,7 +47,13 @@ export async function registerUser(input: { email: string; password: string; nam
     VALUES (${Number(tenant.id)}, ${input.email}, ${hash}, ${input.name || null}, ${"owner"}, ${nonce})
     RETURNING id, tenant_id, email, name, role`);
   const user = u[0];
-  await writeAudit({ tenantId: Number(tenant.id), action: "user_register", actorType: "user", actorId: Number(user.id), ip: input.ip ?? null, detail: { trialDays } });
+  await writeAudit({ tenantId: Number(tenant.id), action: "user_register", actorType: "user", actorId: Number(user.id), ip: input.ip ?? null, detail: { trialDays, promoId } });
+  if (promoId) {   // 체험 기간 이벤트 성과(계약 §2.1 ops-promotions stats.used/converted) — 실패해도 가입은 정상
+    try {
+      await rows(sql`UPDATE promotions SET uses = uses + 1, updated_at = NOW() WHERE id = ${promoId}`);
+      await writeAudit({ tenantId: Number(tenant.id), action: "promo_applied", actorType: "system", target: `promotion:${promoId}`, detail: { kind: "trial_days", days: trialDays } });
+    } catch (e) { console.warn("[auth-service] promo uses 실패", String((e as Error)?.message ?? e).slice(0, 100)); }
+  }
   return { user, tenant, verifyNonce: nonce, trialDays };
 }
 

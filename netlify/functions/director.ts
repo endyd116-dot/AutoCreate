@@ -6,7 +6,7 @@
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
-import { requireUser } from "../../lib/guards";
+import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { propose, confirm, type PieceSpecPatch } from "../../lib/director";
@@ -31,6 +31,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, brief: r.brief });
     }
     if (path.endsWith("/director-confirm")) {
+      const w = await requireWritable(tid); if (!w.ok) return w.res;   // 체험 종료(readonly)·정지(suspended)면 생성 금지(P1R4 §1.3)
       const b = await readJson<{ briefId?: number; pieces?: PieceSpecPatch[] }>(req);
       const briefId = n(b.briefId); if (!briefId) return badRequest("briefId");
       // 🔴 `origin:"manual"` 을 **명시**한다 — confirm 의 기본값은 fail-closed 로 "auto" 이고, auto 는 편성 슬롯 없이는 거부된다(CLAUDE §4.7 · AC-2).

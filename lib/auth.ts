@@ -30,8 +30,10 @@ export type UserClaims = { typ: "user"; uid: number; tid: number; role: UserRole
 export type OpsClaims = {
   typ: "ops"; oid: number; role: OpsRole; email?: string; name?: string;
   /** 원격접속(impersonation) — 운영자가 고객 화면을 볼 때만. 고객 토큰에 얹어 발급한다(§11.4). */
-  imp?: { by: number; byName?: string; tid: number; tenantKey: string } | null;
+  imp?: { by: number; byName?: string; tid: number; tenantKey: string; at?: number; until?: number } | null;
 };
+/** 원격접속 세션 상한(분 · 계약 §2.3 «세션 60분 상한»). 토큰 만료 = 쿠키 만료 — 지나면 고객 API 가 401 을 내 화면이 로그인으로 돌아간다. */
+export const IMPERSONATION_MAX_MIN = 60;
 
 if (!SECRET) console.warn("[auth] JWT_SECRET 미설정 — 토큰 서명 불가");
 
@@ -44,7 +46,7 @@ export function signOpsToken(c: Omit<OpsClaims, "typ">): string {
 }
 /** 원격접속 세션 = 고객 토큰 모양 + imp 정보(감사·배너·결제 차단 판정용). */
 export function signImpersonationToken(c: Omit<UserClaims, "typ"> & { imp: NonNullable<OpsClaims["imp"]> }): string {
-  return jwt.sign({ ...c, typ: "user" }, SECRET, { expiresIn: EXPIRES } as jwt.SignOptions);
+  return jwt.sign({ ...c, typ: "user" }, SECRET, { expiresIn: `${IMPERSONATION_MAX_MIN}m` } as jwt.SignOptions);
 }
 
 function verify<T extends { typ: string }>(token: string | null, typ: T["typ"]): T | null {
@@ -67,8 +69,8 @@ export function verifyOps(req: Request): OpsClaims | null {
 function secureFlag(): string {
   return (process.env.SITE_URL || "").startsWith("https") ? "; Secure" : "";
 }
-export function userCookie(token: string): string {
-  return `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}${secureFlag()}`;
+export function userCookie(token: string, maxAgeSec: number = SESSION_MAX_AGE): string {
+  return `${USER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.max(0, Math.floor(maxAgeSec))}${secureFlag()}`;
 }
 export function opsCookie(token: string): string {
   return `${OPS_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}${secureFlag()}`;

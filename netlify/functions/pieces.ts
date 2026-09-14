@@ -9,7 +9,7 @@
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
-import { requireUser } from "../../lib/guards";
+import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
@@ -95,6 +95,8 @@ export default async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
     const id = n(b.id); if (!id) return badRequest("id");
+    // P1R4 §1.3 — readonly·suspended 는 재생성 금지. 글을 찾기 전에 재서 403 이 404 보다 먼저.
+    if (path.endsWith("/pieces-regenerate")) { const w = await requireWritable(tid); if (!w.ok) return w.res; }
     const [p] = await q(sql`SELECT p.* FROM pieces p WHERE p.tenant_id = ${tid} AND p.id = ${id}`);
     if (!p) return json({ ok: false, error: "글을 찾을 수 없어요.", step: "not_found" }, 404);
     const m = (p.meta || {}) as Record<string, unknown>;
