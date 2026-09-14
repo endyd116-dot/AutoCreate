@@ -44,6 +44,7 @@ const mmss = (ms) => { const s = Math.round((ms || 0) / 1000); return `${Math.fl
 /* [P1R5] 영상 검수 — <video controls playsinline> 표준 태그(포스터 = thumb) · 제휴면 배지·시작 자막 미리보기 · SRT 내려받기 · 설명란(첫 줄 고지 잠금) */
 function renderVideo(editable) {
   const v = P.meta?.video || {}; const vid = assetOf("video"), thumb = assetOf("thumb"), srt = assetOf("srt"); const disc = v.disclosure || {};
+  const E = v.endcard || P.meta?.endcard || null; // [P1R6] 엔드카드 — 마지막 컷 문구·링크(읽기 전용 · 바꾸려면 디렉터 손보기)
   const lines = String(P.body || "").split("\n"); const lead = disc.descriptionFirstLine ? lines[0] : ""; const rest = (disc.descriptionFirstLine ? lines.slice(1) : lines).join("\n").replace(/\n?#\S+(\s|$)/g, "").trim();
   const tags = (P.meta?.tags || []);
   const pane = UI.$("#vpane"); pane.hidden = false;
@@ -60,6 +61,7 @@ function renderVideo(editable) {
         ${lead ? `<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div><div class="lead">${UI.esc(lead)}</div>` : '<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div>'}
         <div id="vdesc" class="rest" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(rest)}</div></div>
       ${lead ? `<div class="lockline">${LOCK}첫 줄 고지는 잠겨 있어요 · 지울 수 없어요</div>` : ""}
+      ${E ? `<div class="lockline" style="border-top:1px solid var(--line);color:var(--sub)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 19h8"/></svg><span style="white-space:normal">마지막 컷에 «${UI.esc(E.text)}»${E.url ? ` · ${UI.esc(E.url)}` : ""}</span></div>` : ""}
       <div class="desc-edit" style="padding-top:8px"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">태그</div><div id="vtags" class="rest" style="padding:6px 2px;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(tags.map((x) => "#" + x).join(" "))}</div></div>
     </div>`;
   if (editable && !dirty) { const mark = () => { if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ["#vttl", "#vdesc", "#vtags"].forEach((s) => pane.querySelector(s).addEventListener("input", mark)); }

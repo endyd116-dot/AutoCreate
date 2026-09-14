@@ -15,6 +15,7 @@
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip" id="split">…</div></div>
 <div class="group" id="packs"><div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div></div>
+<div class="group" id="tg"><button type="button" class="row tap" id="transfer"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg></span><div class="l"><span class="t">다른 서비스 코인 가져오기</span><span class="d">함께 쓰는 서비스에 남은 코인을 여기로 옮겨요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="group" id="hist"><div class="gt">코인 내역 <span class="muted" style="font-weight:500">KST</span></div><div class="seg" id="mseg" style="margin:8px 16px 4px"><button type="button" data-m="this" class="on">이번 달</button><button type="button" data-m="prev">지난 달</button><button type="button" data-m="all">전체</button></div><div id="rows"></div></div>
 <div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
   </main>
@@ -48,6 +49,7 @@ async function load() {
     UI.$("#packs").innerHTML = `<div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div>` + (show.length ? show.map((x) => `<button type="button" class="row tap" data-pack="${UI.esc(x.id)}"><span class="mk money">C</span><div class="l"><span class="t">${UI.num(x.coins)}코인${x.bonusPct ? ` <span class="pill ok">+${x.bonusPct}%</span>` : ""}${x.oncePerTenant ? ' <span class="pill off">첫 충전 1회</span>' : ""}</span><span class="d">${won(x.krw)} + 부가세 ${won(x.vatKrw)}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${won(x.totalKrw)}</span>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 살 수 있는 팩이 없어요</span></div></div>`);
     UI.$$("[data-pack]").forEach((el) => el.onclick = () => buy(PACKS.find((x) => x.id === el.dataset.pack)));
   }
+  if (!me.impersonation) { const tr = UI.$("#transfer"); if (tr) tr.onclick = transferSheet; }
   const KIND = { purchase: "충전", consume: "사용", grant: "지급", revoke: "환불 회수", expire: "만료" };
   UI.$("#rows").innerHTML = ROWS.length ? ROWS.map((r) => { const plus = r.amount > 0; const what = r.kind === "consume" ? (T && T.labels[r.item]) || "사용" : KIND[r.kind] || r.kind;
     return `<div class="row"><div class="l"><span class="t">${UI.esc(what)}${r.bucket === "included" ? ' <span class="muted" style="font-weight:500;font-size:12px">포함분</span>' : ""}</span><span class="d">${r.kind === "grant" || r.kind === "revoke" ? UI.esc(r.reason || "") + " · " : ""}${r.at ? `${UI.dateKST(r.at)} ${UI.timeKST(r.at)}` : ""}${r.expiresAt && plus ? ` · ${UI.dateKST(r.expiresAt, { year: "numeric" })}까지` : ""}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${plus ? "+" : "−"}${UI.num(Math.abs(r.amount))}</span>${r.kind === "purchase" && r.ref && !me.impersonation ? `<button type="button" class="btn ghost sm" data-refund="${UI.esc(r.ref)}" style="padding:0 8px">환불</button>` : ""}</div>`; }).join("")
@@ -93,6 +95,18 @@ async function refund(orderNo) {
       close(); UI.done(`${won(r.refundKrw)} 환불 · ${UI.num(r.revoked)}코인 회수`, load); }) });
 }
 function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
+/* [P1R6] 코인 가져오기 — 저쪽에서 차감되고 여기로 들어온다(부분 성공 없음) · 다리가 아직이면 «준비 중» */
+function transferSheet() {
+  UI.sheet(`<p class="muted" style="margin:0 0 8px">함께 쓰는 서비스(AutoMarketing)에 남은 코인을 여기로 옮겨요. 옮긴 코인은 <b style="color:var(--ink)">여기서 1년</b> 동안 쓸 수 있어요.</p>
+    <div class="fr"><div class="fl">몇 코인<small>저쪽에서 그만큼 줄어요</small></div>${UI.stepper("tc", 20, 10, 200, "코인", 10)}</div>
+    <p class="muted" style="margin:10px 0 0;font-size:13px">옮기는 중에 문제가 생기면 아무것도 옮기지 않아요(반만 옮겨지는 일은 없어요).</p>
+    <div class="cta"><button class="btn primary" type="button" id="go">가져오기</button></div>`, { title: "코인 가져오기", onOpen: (sh, close) => { UI.bindSteppers(sh);
+      sh.querySelector("#go").onclick = async () => { const r = await UI.api("/api/coin-transfer", { body: { coins: UI.stepVal(sh, "tc") } });
+        if (!r.ok) { if (r.step === "not_configured") { close(); return soonTransfer(); } return r.gated ? close() : UI.toast(r.error || "가져오지 못했어요"); }
+        close(); UI.done(`${UI.num(r.coins)}코인 가져왔어요 · 잔액 ${UI.num(r.balance)}`, load); };
+    } });
+}
+function soonTransfer() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">아직 준비 중이에요</p><p class="muted" style="margin:0 0 16px">두 서비스를 잇는 일이 끝나면 바로 열려요. 열리면 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
 UI.$$("#mseg button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mseg button").forEach((x) => x.classList.toggle("on", x === b)); load(); });
 await load();
 })();

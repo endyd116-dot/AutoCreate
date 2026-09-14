@@ -38,6 +38,27 @@ const won = (n) => UI.won(n);
 const dayLabel = (d) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
 
 
+/* [P1R6] 공유 카드 — 서버가 그린 이미지를 보여만 준다(화면 canvas 합성 0) · 🔴 핸들·채널 이름은 꺼짐이 기본(계정이 자동화로 돈다는 걸 공개 게시하지 않는다) */
+const shareLink = () => SUM && SUM.monthKrw > 0 ? `<p class="center" style="margin:-4px 0 4px"><a href="#" id="shareLink" style="font-size:13.5px;color:var(--muted);text-decoration:underline;text-underline-offset:3px;display:inline-flex;align-items:center;min-height:44px">이만큼 벌었어요 공유하기</a></p>` : "";
+function shareSheet() {
+  let handles = false, channels = false, url = "", busy = false;
+  UI.sheet(`<div id="shareBox" style="background:var(--ground);border-radius:16px;aspect-ratio:4/5;max-height:300px;display:grid;place-items:center;overflow:hidden;margin-bottom:12px"><span class="muted" style="font-size:13px">카드를 만드는 중이에요</span></div>
+    <div class="fr"><div class="fl">채널 이름 보이기<small>네이버 블로그 · 유튜브 쇼츠 같은 이름</small></div><button class="toggle" type="button" id="tCh" aria-checked="false" aria-label="채널 이름 보이기"></button></div>
+    <div class="fr"><div class="fl">계정 이름 보이기<small>@handle</small></div><button class="toggle" type="button" id="tH" aria-checked="false" aria-label="계정 이름 보이기"></button></div>
+    <p class="muted" id="shareWarn" style="margin:6px 0 0;font-size:12.5px" hidden>계정 이름이 함께 보여요 — 그 계정이 자동으로 올라간다는 걸 같이 알리는 셈이에요.</p>
+    <div class="cta"><a class="btn primary" id="shareSave" href="#" download="autocreate-card.png">이미지 저장</a></div>`,
+    { title: `${view.m}월 카드`, onOpen: (sh, close) => {
+      const box = sh.querySelector("#shareBox"), save = sh.querySelector("#shareSave"), warn = sh.querySelector("#shareWarn");
+      const draw = async () => { if (busy) return; busy = true; save.style.pointerEvents = "none"; save.style.opacity = ".5";
+        const r = await UI.api(`/api/share-card?month=${mkey()}&handles=${handles ? 1 : 0}&channels=${channels ? 1 : 0}`); busy = false;
+        if (!r.ok) { box.innerHTML = `<span class="muted" style="font-size:13px">${UI.esc(r.error || "카드를 만들지 못했어요")}</span>`; return; }
+        url = r.imageUrl; box.innerHTML = `<img src="${UI.esc(url)}" alt="" style="width:100%;height:100%;object-fit:contain">`;
+        save.href = url; save.style.pointerEvents = ""; save.style.opacity = ""; };
+      UI.toggle(sh.querySelector("#tCh"), (on) => { channels = on; draw(); });
+      UI.toggle(sh.querySelector("#tH"), (on) => { handles = on; warn.hidden = !on; draw(); });
+      draw();
+    } });
+}
 async function load() {
   const from = `${mkey()}-01`; const last = new Date(view.y, view.m, 0).getDate(); const to = `${mkey()}-${String(last).padStart(2, "0")}`;
   const pm = new Date(view.y, view.m - 2, 1); const pmk = `${pm.getFullYear()}-${String(pm.getMonth() + 1).padStart(2, "0")}`;
@@ -75,7 +96,8 @@ function render() {
   UI.$("#tip").innerHTML = base
     ? `${isThisMonth() ? "지난달 같은 날보다" : "그 전달보다"} <b class="${diff >= 0 ? "up" : ""}">${won(Math.abs(diff))} ${diff >= 0 ? "더" : "덜"}</b> 벌었어요`
     : "지난달에는 기록이 없어요";
-  body.innerHTML = dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  body.innerHTML = shareLink() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  const sl = UI.$("#shareLink"); if (sl) sl.onclick = (e) => { e.preventDefault(); shareSheet(); };
   bindDaily(); bindManual();
 }
 

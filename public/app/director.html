@@ -30,10 +30,18 @@ const topicId = Number(UI.qs.get("topicId")); if (!topicId) { UI.go("/app/create
 const STYLE = [["photo", "사진"], ["illust", "일러스트"], ["infographic", "인포그래픽"]];
 const FORMATS = Object.entries(UI.FORMAT);
 const TIMES = [["07:30", "07:30"], ["12:00", "12:00"], ["21:00", "21:00"], ["18:00", "18:00"]];
-let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "";
+let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null;
 const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
 const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
 const isVideo = (p) => p.kind === "video";
+/* 길이 칩 = 그 채널 × 그 포맷의 상한까지만(서버가 준 숫자 · 화면 상수 0) · 상한이 60 미만이면 왜 그런지 한 줄 */
+const secChips = (p) => { const m = fmtMax(p.channel, p.video.format); const list = UI.VSECONDS.filter((s) => s <= m);
+  return UI.chips("vsec", list.map((s) => [s, s + "초"]), Math.min(p.video.seconds, m)) + (m < 60 ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))} · ${UI.esc(UI.VFORMAT[p.video.format] || p.video.format)}은 ${m}초까지 올라가요 · 60초는 유튜브 쇼츠 그래픽에서요</p>` : ""); };
+/* [P1R6] 채널별 영상 상한은 서버가 말한다(accounts-list.channels[].video.maxSeconds · 화면 상수 금지) */
+let CHV = {};
+const vfmts = (ch) => (CHV[ch] && CHV[ch].formats) || [];                               // [{key,label,maxSeconds}] — 이 채널에서 되는 포맷
+const fmtMax = (ch, fmt) => { const f = vfmts(ch).find((x) => x.key === fmt); return f ? f.maxSeconds : (CHV[ch] && CHV[ch].maxSeconds) || 60; }; // 🔴 포맷 상한만 본다(교집합 계산 0)
+const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.channel, p.video.format); if (p.video.seconds > m) { const was = p.video.seconds; p.video.seconds = m; p.coinCost = UI.VIDEO_COIN[m] ?? p.coinCost; return { was, now: m }; } return null; };
 /* 코인 = 글 1 + 사진 수 · 영상은 초 구간제(videoCoinItem · 정본은 서버 coinCost) */
 const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0) : 1 + (p.images?.count || 0);
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
@@ -44,6 +52,8 @@ async function load() {
   const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
   if (!r.ok) { UI.toast(r.error || "제안을 만들지 못했어요"); setTimeout(() => UI.go("/app/create.html"), 900); return; }
   brief = r.brief; pieces = brief.pieces.map((p) => JSON.parse(JSON.stringify(p))); accounts = a.ok ? a.accounts : [];
+  CHV = Object.fromEntries((a.ok ? a.channels || [] : []).filter((c) => c.video).map((c) => [c.key, c.video]));
+  clamped = pieces.map((p) => isVideo(p) && p.video.clampedFrom ? { was: p.video.clampedFrom, now: p.video.seconds } : clampSec(p)).filter(Boolean)[0] || null; // 서버가 clampedFrom 을 주면 그 말을 쓰고, 없으면 화면이 포맷 상한으로 내린다
   if (!topicTitle && t?.ok) topicTitle = (t.topics.find((x) => x.id === brief.topicId) || {}).title || "";
   render();
 }
@@ -67,8 +77,8 @@ function editSheet() {
     const when = `<div class="sec">언제</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${UI.seg("day", [[1, "내일"], [2, "모레"]], dayOff)}${UI.chips("time", TIMES.some(([v]) => v === hhmm) ? TIMES : [[hhmm, hhmm], ...TIMES], hhmm)}</div>`;
     if (isVideo(p)) { const v = p.video; const vo = voices.find((x) => x.voiceId === v.voice?.voiceId); const others = pieces.filter((q) => isVideo(q) && q !== p);
       return `<section data-i="${i}" data-video style="padding:4px 0 12px;${i ? "border-top:1px solid var(--line);margin-top:8px" : ""}">${head}<div data-body ${p.drop ? "hidden" : ""}>${acc}
-      <div class="sec">포맷</div>${UI.seg("vfmt", Object.entries(UI.VFORMAT), v.format)}
-      <div class="sec">길이</div>${UI.chips("vsec", UI.VSECONDS.map((s) => [s, s + "초"]), v.seconds)}
+      <div class="sec">포맷</div>${UI.seg("vfmt", (vfmts(p.channel).length ? vfmts(p.channel).map((x) => [x.key, x.label]) : Object.entries(UI.VFORMAT)), v.format)}
+      <div class="sec">길이</div><div data-secwrap>${secChips(p)}</div>
       <div class="sec">목소리</div>${voices.length ? UI.chips("voice", voices.map((x) => [x.voiceId, `${x.name} · ${x.desc}`]), v.voice?.voiceId) : `<p class="muted" style="margin:0;font-size:13px">${UI.esc(vo?.name || v.voice?.voiceId || "자동")}</p>`}<p class="muted" style="margin:4px 0 0;font-size:12.5px">타입캐스트 · 미리듣기는 다음에 열려요</p>
       <div class="sec">계정마다 다르게 (자동)</div><p class="muted" style="margin:0;font-size:13px;line-height:1.6"><b style="color:var(--ink)">@${UI.esc(p.accountHandle || "")}</b> 훅 «${UI.esc(UI.vword(v, "hook"))}» · 팔레트 ${UI.esc(UI.vword(v, "palette"))}${others.map((q) => ` &nbsp;·&nbsp; <b style="color:var(--ink)">@${UI.esc(q.accountHandle || "")}</b> 훅 «${UI.esc(UI.vword(q.video, "hook"))}» · 팔레트 ${UI.esc(UI.vword(q.video, "palette"))}`).join("")}</p>
       <div class="fr"><div class="fl">제휴 상품 넣기<small>배지 · 시작 자막 · 설명란 첫 줄 고지가 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
@@ -83,8 +93,10 @@ function editSheet() {
       <div class="fr"><div class="fl">제휴 상품 넣기<small>고지 문구는 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
       <div data-affbody ${p.monetize?.affiliate ? "" : "hidden"}><input class="input" data-pq placeholder="상품 검색어 · 예: 에어프라이어 세척솔" value="${UI.esc(p.monetize?.affiliate?.productQuery || "")}" style="margin-bottom:8px">${UI.seg("slot", [["mid", "중간"], ["end", "끝"], ["both", "둘 다"]], p.monetize?.affiliate?.slot || "end")}</div>
       ${when}</div></section>`; }).join("");
-  UI.sheet(html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
-    UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh, (n, v, g) => { if (n === "vsec") { const sec = g.closest("section"); const c = UI.VIDEO_COIN[Number(v)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; const cur = pieces[Number(sec.dataset.i)]; const hint = sec.querySelector("[data-vhint]"); hint.textContent = Number(v) !== cur.video.seconds ? `${cur.video.seconds}초 ${cost(cur)}코인 → ${v}초 ${c}코인` : ""; sum(sh); } });
+  UI.sheet((clamped ? `<div class="banner" style="margin:0 0 8px"><span>${clamped.now}초로 맞췄어요 — 이 채널은 ${clamped.now}초까지 올라가요</span></div>` : "") + html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
+    UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh, (n, v, g) => {
+      if (n === "vfmt") { const sec = g.closest("section"); const p = pieces[Number(sec.dataset.i)]; p.video.format = v; const w = sec.querySelector("[data-secwrap]"); if (w) { w.innerHTML = secChips(p); UI.bindChips(w, (n2, v2) => { if (n2 === "vsec") { const c = UI.VIDEO_COIN[Number(v2)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; sum(sh); } }); const cur = Number(UI.chipVal(w, "vsec")); sec.querySelector("[data-vcoin]").textContent = UI.VIDEO_COIN[cur] ?? 0; sum(sh); } }
+      if (n === "vsec") { const sec = g.closest("section"); const c = UI.VIDEO_COIN[Number(v)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; const cur = pieces[Number(sec.dataset.i)]; const hint = sec.querySelector("[data-vhint]"); hint.textContent = Number(v) !== cur.video.seconds ? `${cur.video.seconds}초 ${cost(cur)}코인 → ${v}초 ${c}코인` : ""; sum(sh); } });
     sh.querySelectorAll("section").forEach((sec) => {
       const body = sec.querySelector("[data-body]"); const tg = sec.querySelector("[data-drop]");
       UI.toggle(tg, (on) => { body.hidden = !on; sum(sh); });
