@@ -6,7 +6,7 @@
 <title>만들기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=5">
+<link rel="stylesheet" href="/css/ac.css?v=6">
 </head>
 <body>
 <div class="shell">
@@ -15,11 +15,12 @@
     <div class="appbar"><span class="ttl">만들기</span><span class="sp"></span></div>
 <div class="step-h"><h1>오늘은 어떤 소재로 벌까요?</h1><p>«디렉터에게» 보내면 채널·계정·구성·시각을 정해 드려요.</p></div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=4"></script>
+<script src="/js/mock.js?v=5"></script>
 <script>
 (async () => {
 await UI.boot("create");
@@ -45,26 +46,26 @@ async function load(poll = false) {
   if (was && !busy && !stale) UI.toast(f.error ? f.error : f.added ? `소재 ${f.added}개 찾았어요` : "새로 뽑을 소재가 없었어요");
   const BUSY = busy ? busyBox(startedMs ? UI.ago(f.startedAt) : "") : stale ? STALE : "";
   const g = UI.$("#topics");
-  const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : '<button type="button" id="refresh" style="color:var(--ink);font-weight:600;font-size:12.5px">새로 뽑기</button>'}</div>`;
-  if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; bindRefresh(); return; }
+  const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : ""}</div>`;
+  const cta = UI.$("#cta"), rb = UI.$("#refresh"); cta.hidden = !accountsN; rb.disabled = busy; rb.textContent = busy ? "뽑는 중이에요" : "새로 뽑기";
+  if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; return; }
   if (busy && !r.topics.length) { g.innerHTML = head + BUSY; return; }
-  if (!r.topics.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p><button class="btn primary sm" type="button" id="refresh2">새로 뽑기</button></div>`; bindRefresh(); UI.$("#refresh2").onclick = refresh; return; }
-  g.innerHTML = head + BUSY + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm primary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
-  bindRefresh();
+  if (!r.topics.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p></div>`; return; }
+  g.innerHTML = head + BUSY + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
   UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
   // 좌측 스와이프 = 넘김
   UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
 }
-function bindRefresh() { const b = UI.$("#refresh"); if (b) b.onclick = refresh; }
 async function refresh() {
-  const b = UI.$("#refresh") || UI.$("#refresh2"); if (b) b.disabled = true;
-  const r = await UI.api("/api/topics-refresh", { body: {} }); if (b) b.disabled = false;
+  const b = UI.$("#refresh"); b.disabled = true;
+  const r = await UI.api("/api/topics-refresh", { body: {} }); b.disabled = busy;
   if (!r.ok) { UI.toast(r.error || "지금은 뽑지 못했어요"); return; }
   if (r.topics) { UI.toast(r.added ? `소재 ${r.added}개 찾았어요` : "새로 뽑을 소재가 없어요"); load(); return; } // 옛 동기 응답 호환
   busy = true; UI.toast(r.started === false ? "이미 뽑고 있어요" : "소재를 뽑기 시작했어요"); startPoll(); load(true);
 }
 async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
+UI.$("#refresh").onclick = refresh;
 await load();
 })();
 </script>
