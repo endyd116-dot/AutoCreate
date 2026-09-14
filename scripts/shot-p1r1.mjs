@@ -41,7 +41,13 @@ function pages(ids) {
     { key: "schedule", url: q("/app/schedule.html"), sheet: ["#mkRule", "button:has-text('자동 편성 켜기')", ".appbar .ic:last-child"] },
     { key: "home", url: q("/app/home.html"), sheet: [] },
     { key: "account", url: q("/app/account.html"), sheet: [] },
-  ];
+    // P1R2·R3 화면(계약 v2.11 §5 · v3.5)
+    { key: "runner", url: q("/app/runner.html"), sheet: ["button:has-text('내 PC에서 켜기')", "button:has-text('켜기')"] },
+    { key: "posts", url: q("/app/posts.html"), sheet: [] },
+    { key: "notifications", url: q("/app/notifications.html"), sheet: [] },
+    { key: "revenue", url: q("/app/revenue.html"), sheet: [] },
+    { key: "ad-media", url: q("/app/ad-media.html"), sheet: [] },
+  ].filter((p) => !process.env.PAGES || process.env.PAGES.split(",").includes(p.key));
 }
 
 /* ── 헌장 검사(페이지 안에서 실행) ── */
@@ -56,7 +62,15 @@ const CHARTER = () => {
   return {
     primaryPage: primaries.filter((e) => !inSheet(e) && !e.closest(".row")).length, primaryRow: primaries.filter((e) => !inSheet(e) && e.closest(".row")).length, primarySheet: primaries.filter(inSheet).length,
     bigNum: nums.length, text, scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth,
-    sheetOpen: !!document.querySelector(".sheet"), buttonsSmall: [...document.querySelectorAll("button, a.btn, .row.tap")].filter((e) => !e.closest(".cal")).filter(vis).filter((e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.height < 40; }).length,
+    sheetOpen: !!document.querySelector(".sheet"), buttonsSmall: [...document.querySelectorAll("button, a.btn, .row.tap")].filter((e) => !e.closest(".cal")).filter(vis).filter((e) => {
+      const r = e.getBoundingClientRect(); if (r.height <= 0 || r.height >= 44) return false;
+      // 눌리는 영역 = 가운데 x 축에서 위·아래로 elementFromPoint 가 이 요소(또는 자손)를 돌려주는 구간 — 투명 오버레이(::before)까지 포함해 잰다
+      const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)); const hits = (el) => el && (el === e || e.contains(el) || el.contains?.(e) === false && el.closest?.("button, a.btn, .row.tap") === e);
+      let top = r.top, bottom = r.bottom;
+      for (let y = r.top - 1; y >= Math.max(0, r.top - 12); y--) { if (hits(document.elementFromPoint(cx, y))) top = y; else break; }
+      for (let y = r.bottom + 1; y <= Math.min(window.innerHeight - 1, r.bottom + 12); y++) { if (hits(document.elementFromPoint(cx, y))) bottom = y; else break; }
+      return bottom - top < 44;
+    }).length,
     cta,
   };
 };
