@@ -212,6 +212,24 @@ async function main() {
     const rX = await publish((await loadPublishPiece(tid, xPieceId))!, (await loadPublishAccount(tid, n(xAcc?.id)))!, {});
     ok("미지원 채널 — unsupported_channel(조용히 성공 0)", rX.ok === false && rX.reason === "unsupported_channel");
 
+    /* ── 9C. fetchStats — «못 물어봤다»는 null · 없는 값은 안 싣는다(AC-9) ── */
+    const { fetchStats } = await import("../lib/publish/stats");
+    ok("fetchStats — post 행 없으면 null", (await fetchStats(tid, 999999999)) === null);
+    // 러너 채널(네이버) 발행물 — 이 함수 몫이 아니다 → null(0 이 아니다)
+    ok("fetchStats — 러너 채널은 null(revenue.stats 잡의 몫)", (await fetchStats(tid, pieceId)) === null);
+    // 블로거 발행물인데 토큰이 끊긴 계정(위에서 disconnected) → null
+    await q(sql`INSERT INTO posts (tenant_id, piece_id, account_id, channel, external_url, channel_ref, published_via)
+      VALUES (${tid}, ${bPieceId}, ${bAccId}, 'blogger', ${"https://b2smoke.blogspot.com/p1"}, ${"123"}, 'api')`);
+    const bs = await fetchStats(tid, bPieceId);
+    ok("fetchStats — 블로거 자격 실패면 null(0 으로 안 채움)", bs === null, JSON.stringify(bs));
+    // 워드프레스 — 존재하지 않는 사이트(네트워크 실패) → null
+    await q(sql`INSERT INTO account_creds (tenant_id, account_id, kind, enc)
+      VALUES (${tid}, ${n(wAcc?.id)}, 'app_password', ${encryptObj({ siteUrl: "https://b2smoke-no-such-site.invalid", loginId: "u", appPassword: "p" })})`);
+    await q(sql`INSERT INTO posts (tenant_id, piece_id, account_id, channel, external_url, channel_ref, published_via)
+      VALUES (${tid}, ${wPieceId}, ${n(wAcc?.id)}, 'wordpress', ${"https://b2smoke-no-such-site.invalid/?p=7"}, ${"7"}, 'api')`);
+    const ws = await fetchStats(tid, wPieceId);
+    ok("fetchStats — 워드프레스 접속 불가면 null(0 으로 안 채움)", ws === null, JSON.stringify(ws));
+
     /* ── 10. 자격 평문 누출 검사 ─────────────────────── */
     const fleet = await fleetState(tid);
     const surfaces = JSON.stringify({ devices: await listDevices(tid), fleet, rel, rOk, rBad });
