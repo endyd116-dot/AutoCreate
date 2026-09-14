@@ -268,17 +268,26 @@ export async function run({ ctx, job, shotKey, dryRun }) {
 
     const outPath = join(dir, "out.mp4");
     const maxSec = Math.max(1, Number(out.maxSeconds) || 60);
+    /* 🔴 길이는 **장면 끝**으로 잠근다(2026-09-14 라이브 회귀 · B-1 이 BGM 실측하다 잡음).
+       종전엔 `-t maxSeconds` 였다. BGM 은 `-stream_loop -1`(무한)이고 `amix=duration=longest` 라서
+       **오디오가 무한**이 되고, 그 무한이 maxSeconds 에서 잘렸다 →
+       장면 합계 < maxSeconds 면 차이만큼 **정지 화면 + 음악**이 꼬리로 붙는다(실측: 영상 12s · 컨테이너 15s).
+       «60초 쇼츠»인데 본체가 47초면 13초가 정지 화면이다 — 쇼츠에선 이탈로 직결된다.
+       BGM 이 없을 땐 longest = 나레이션이라 **드러나지 않았다**(무음 하니스가 영영 못 잡는 결함이었다).
+       기준은 `totalMs`(= concat 이 실제로 만들어 내는 길이 = 장면 durMs 합). 이어진 타임라인이면 max(endMs) 와 같다.
+       이 값으로 잠가야 아래 `durationMs` 보고도 **참말**이 된다(심사 duration_fit 이 그 값을 믿는다). */
+    const bodySec = Math.min(maxSec, totalMs / 1000);
     args.push("-filter_complex", fc.join(";"), "-map", "[vout]");
     if (alabels.length) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
     else args.push("-an");
     args.push("-c:v", "libx264", ...X264, "-pix_fmt", "yuv420p", "-r", String(out.fps),
-      "-t", String(maxSec), "-movflags", "+faststart", outPath);
+      "-t", bodySec.toFixed(3), "-movflags", "+faststart", outPath);
     await runFfmpeg(bin, args);
     if (!existsSync(outPath) || statSync(outPath).size < 1024) throw BLOCK("encode", "영상이 만들어지지 않았어요(빈 파일).");
 
     /* ⑤ 포스터 — 후보 몇 장을 뽑아 **가장 선명한** 1장. */
     const posterDir = join(dir, "poster-%02d.jpg");
-    await runFfmpeg(bin, ["-y", "-i", outPath, "-vf", `fps=1/${Math.max(1, Math.floor(maxSec / 5))},scale=${out.w}:${out.h}`, "-frames:v", "5", "-q:v", "3", posterDir], 120_000);
+    await runFfmpeg(bin, ["-y", "-i", outPath, "-vf", `fps=1/${Math.max(1, Math.floor(bodySec / 5))},scale=${out.w}:${out.h}`, "-frames:v", "5", "-q:v", "3", posterDir], 120_000);
     const cands = [1, 2, 3, 4, 5].map((i) => join(dir, `poster-0${i}.jpg`)).filter((f) => existsSync(f));
     const poster = pickSharpest(cands);
     if (!poster) throw BLOCK("encode", "포스터를 뽑지 못했어요.");
@@ -287,7 +296,8 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     const bytes = await putTo(p.upload.putUrl, outPath, "video/mp4");
     await putTo(p.upload.posterPutUrl, poster, "image/jpeg");
 
-    const durationMs = Math.min(maxSec * 1000, totalMs);
+    // 🔴 위 `-t bodySec` 과 **같은 값**을 보고한다. 두 식이 갈라지면 또 «컨테이너와 다른 길이»를 참말처럼 보고하게 된다.
+    const durationMs = Math.round(bodySec * 1000);
     return {
       render: {
         key: p.upload.key, posterKey: p.upload.posterKey,
