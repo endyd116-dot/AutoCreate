@@ -727,3 +727,30 @@ export const noticesR4 = {
   createdBy: "created_by",  // bigint — operators.id
   updatedAt: "updated_at",
 } as const;
+
+/* === Phase 3 R5 · 영상 축·쇼츠 공장(P1R5-B · 2026-09-15 · drizzle/0008-r5-video.sql 과 동시) ===
+ *   append-only(CLAUDE §4.4). 새 표 2(shorts_templates·feature_flags) + posts.status 칸 1. creative_assets 류는 만들지 않는다(계약 §0 두 척추 금지).
+ */
+export const shortsTemplates = pgTable("shorts_templates", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId: bigint("tenant_id", { mode: "number" }),                 // NULL = 내장 템플릿
+  name: varchar("name", { length: 80 }).notNull(),
+  sourceUrl: text("source_url"),
+  structure: jsonb("structure").notNull().default([]),               // [string] 서사 단계
+  hookType: varchar("hook_type", { length: 24 }),                    // curiosity_gap|contrast|question|number|confession
+  style: jsonb("style").notNull().default({}),                       // { visual, palette, caption, pace }
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const featureFlags = pgTable("feature_flags", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  key: varchar("key", { length: 40 }).notNull(),                     // 'video' = 영상 kill switch(계약 §1.6)
+  tenantId: bigint("tenant_id", { mode: "number" }),                 // NULL = 전역
+  enabled: boolean("enabled").notNull().default(true),
+  note: text("note"),
+  updatedBy: bigint("updated_by", { mode: "number" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export const postsR5 = {
+  /** status varchar(20) NOT NULL DEFAULT 'published' — published|uploaded_private|processing(계약 §0.1-6 · AC-4 정직 표기). */
+  status: "status",
+} as const;
