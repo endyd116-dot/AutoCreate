@@ -65,7 +65,7 @@ const CHARTER = () => {
     sheetOpen: !!document.querySelector(".sheet"), buttonsSmall: [...document.querySelectorAll("button, a.btn, .row.tap")].filter((e) => !e.closest(".cal")).filter(vis).filter((e) => {
       const r = e.getBoundingClientRect(); if (r.height <= 0 || r.height >= 44) return false;
       // 눌리는 영역 = 가운데 x 축에서 위·아래로 elementFromPoint 가 이 요소(또는 자손)를 돌려주는 구간 — 투명 오버레이(::before)까지 포함해 잰다
-      const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)); const hits = (el) => el && (el === e || e.contains(el) || el.contains?.(e) === false && el.closest?.("button, a.btn, .row.tap") === e);
+      const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)); const hits = (el) => !!el && (el === e || e.contains(el));
       let top = r.top, bottom = r.bottom;
       for (let y = r.top - 1; y >= Math.max(0, r.top - 12); y--) { if (hits(document.elementFromPoint(cx, y))) top = y; else break; }
       for (let y = r.bottom + 1; y <= Math.min(window.innerHeight - 1, r.bottom + 12); y++) { if (hits(document.elementFromPoint(cx, y))) bottom = y; else break; }
@@ -113,7 +113,7 @@ async function run() {
         const sys = c.text.match(new RegExp(FORBIDDEN.source, "gi")) || [];
         rec(pg.key, vp, "시스템 용어 0", sys.length === 0, sys.length ? `«${[...new Set(sys)].join(",")}»` : "");
         rec(pg.key, vp, "가로 넘침 0", c.scrollW <= c.innerW + 1, `scrollWidth ${c.scrollW} / ${c.innerW}`);
-        if (c.buttonsSmall) rec(pg.key, vp, "터치 44px 미만 버튼", "WARN", `${c.buttonsSmall}개(높이<40px)`);
+        if (c.buttonsSmall) rec(pg.key, vp, "터치 44px 미만 버튼(눌리는 영역 기준)", "WARN", `${c.buttonsSmall}개`);
       }
       rec(pg.key, vp, "콘솔 에러 0", errors.length === 0, errors.slice(0, 3).join(" | "));
       rec(pg.key, vp, "실패 요청(≥400) 0", failed.length === 0, failed.slice(0, 4).join(" | "));
