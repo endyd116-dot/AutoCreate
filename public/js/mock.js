@@ -70,7 +70,9 @@
   /* [§1.6] 결제 라인 — ?keyin=1 정책 켜짐(기본 0) · ?keyinMid=0 비인증 MID 미등록 → available:false(체크박스 자체가 없다) */
   const keyinOn = qs.get("keyin") === "1", keyinMid = qs.get("keyinMid") !== "0";
   /* [P1R6] 손잡이 — ?supplier=0(회사 정보 없음 → 영수증 «준비 중») · ?share=0(이달 수익 0 → 공유 카드 없음) · ?managed=deny(플랜에 관리형 러너 없음 → 402 plan_feature) · ?export=running(내보내기 도는 중) · ?amOff=1(AM 다리 미설정) */
-  const supplierOff = qs.get("supplier") === "0", shareOff = qs.get("share") === "0", managedDeny = qs.get("managed") === "deny", exportRunning = qs.get("export") === "running", amOff = qs.get("amOff") === "1";
+  const mailOff = qs.get("mail") === "0";      // [P1R6] 가입 인증 메일 실패 흉내(배너 · 다시 보내기)
+  let resendAt = 0;                             // 60초 쿨다운(서버 audit 로 재는 것을 흉내)
+  const supplierOff = qs.get("supplier") === "0", shareOff = qs.get("share") === "0", managedDeny = qs.get("managed") === "deny", exportRunning = qs.get("export") === "running", exportFail = qs.get("export") === "fail", amOff = qs.get("amOff") === "1";
   const SUPPLIER = { name: "주식회사 함께워크", ceo: "김두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 123, 4층", email: "help@autocreate.dev", phone: "02-1234-5678" }; // ops_settings.company(운영센터 «회사 정보» 한 출처)
   /* 공유 카드 그림(모의) — 실서버는 PNG presigned(24h · B-1 서버 래스터라이저) · 화면은 <img> 로 띄우기만 한다 */
   const shareImg = (month, handles, channels) => { const mm = Number(String(month).slice(5, 7)) || 9; const krw = (S.revRows || []).filter((r) => String(r.day || "").slice(0, 7) === month).reduce((a2, r) => a2 + (r.amountKrw || 0), 0);
@@ -327,12 +329,16 @@
 
   /* ── 라우트 ── */
   const R = {
-    "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: true, mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: blocked === "suspended" ? "starter" : "trial", status: blocked || "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: blocked ? 0 : 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: qs.get("imp") === "1" ? { byName: "운영 관리자", startedAt: iso(now - 5 * 60e3), until: iso(now + 55 * 60e3) } : null }),
+    "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: qs.get("mail") !== "0", mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: blocked === "suspended" ? "starter" : "trial", status: blocked || "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: blocked ? 0 : 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: qs.get("imp") === "1" ? { byName: "운영 관리자", startedAt: iso(now - 5 * 60e3), until: iso(now + 55 * 60e3) } : null }),
     "auth-refresh": () => ({ ok: true }),
     "auth-register": (b) => { const code = String(b.referralCode || "").trim().toUpperCase();
       if (code && code !== S.referral.code.slice(0, 4) + "OK" && !/^[A-Z0-9]{8}$/.test(code)) return { ok: false, step: "referral", error: "그런 추천 코드는 없어요. 다시 확인해 주세요.", status: 400 };
       if (code === S.referral.code) return { ok: false, step: "referral", error: "자기 코드는 쓸 수 없어요.", status: 400 };
-      return { ok: true, user: { id: 1, email: b.email }, referral: code ? { applied: true, rewardCoins: S.referral.rewardCoins } : undefined, status: 201 }; }, // [P1R6] 400 step:"referral"
+      return { ok: true, user: { id: 1, email: b.email }, referral: code ? { applied: true, rewardCoins: S.referral.rewardCoins } : undefined, mailSent: !mailOff, status: 201 }; }, // mailSent:false → 화면은 배너 + 다시 보내기(가입은 통과)
+    "auth-verify-resend": () => { const now2 = Date.now(); if (now2 - resendAt < 60000) return { ok: false, step: "rate", error: "방금 보냈어요. 잠시 뒤 다시 해 주세요.", status: 429 };
+      resendAt = now2; if (qs.get("verified") === "1") return { ok: true, sent: false, verified: true };
+      if (qs.get("mailFail") === "1") return { ok: false, step: "mail", error: "지금은 메일을 보내지 못했어요. 잠시 뒤 다시 해 주세요.", status: 200 };
+      return { ok: true, sent: true }; }, // [P1R6] 400 step:"referral"
     "onboarding": (b) => { S.onboarding = { kinds: b.kinds || [], channels: b.channels || [] }; return { ok: true }; },
     "home-summary": () => { tick(); const review = S.pieces.filter((p) => p.status === "in_review").length; const todo = [];
       const online = S.devices.filter((d) => d.online).length;
@@ -412,6 +418,7 @@
       if (S.exportJob && !S.exportJob.finishedAt) return { ok: true, started: false, running: true };
       S.exportJob = { startedAt: iso(Date.now()), kinds, from: b.from || null, to: b.to || null, _t0: Date.now() }; return { ok: true, started: true, status: 202 }; },
     "export-status": () => { const j = S.exportJob; if (!j) return { ok: true, running: false };
+      if (exportFail) return { ok: true, running: false, startedAt: j.startedAt, error: "자료가 너무 많아 다 담지 못했어요. 기간을 좁혀 주세요." }; // 쓰면서 세다 멈춘 사유(서버 문장)
       if (!j.finishedAt && !exportRunning && Date.now() - j._t0 > 6000) { j.finishedAt = iso(Date.now()); j.bytes = 18_400_000; j.url = "data:text/plain;charset=utf-8,AutoCreate%20export%20(mock)"; j.expiresAt = iso(Date.now() + 7 * 86400e3);
         S.notifications.unshift({ id: S.nextId++, kind: "export_ready", title: "내보내기가 준비됐어요", desc: "7일 안에 받아 주세요 · 글 · 영상 · 수익(KST)", link: "/app/settings.html", tone: "info", createdAt: iso(Date.now()) }); }
       const o = { ok: true, running: !j.finishedAt, startedAt: j.startedAt }; if (j.finishedAt) { o.finishedAt = j.finishedAt; o.url = j.url; o.expiresAt = j.expiresAt; o.bytes = j.bytes; } return o; },
@@ -638,8 +645,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
-  const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !u.pathname.startsWith("/app/")) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
     if (orderNo.startsWith("AC-BK-") || orderNo.startsWith("AC-BKK-")) { if (!fail) S.billing.billingKey = { brand: "신한", last4: "4421" }; save(); return location.assign(withMock(`/app/plan.html?key=${fail ? "fail" : "ok"}${!fail && qs.get("fp") === "reused" ? "&trial=reused" : ""}`)); }
