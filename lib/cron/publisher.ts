@@ -19,6 +19,11 @@
  *        이것을 `config`(=failed) 로 접으면 B2 머지 전에 due 글이 전부 죽는다.
  *
  *   재시도 횟수는 `pieces.meta.publishAttempts` — 성공하면 B2 가 status 를 바꾸므로 이 값은 더 늘지 않는다.
+ *
+ *   ══ [P1R5 B-1 수정] 영상(kind='video') 분기 ══
+ *     mp4 업로드는 **서버가 스트리밍**한다(유튜브 resumable) — 동기 26초 안에 못 끝낸다. 그래서 이 스텝은 영상이면
+ *     `publish-video-background`(15분)를 202 로 부르고 piece 를 `publishing` 으로만 표시한다(계약 v5.3 §2.3b).
+ *     그 뒤 상태(posts·uploaded_private·실패 되돌림)는 배경 함수와 B2 의 finalizePublish 가 쓴다 — 여기서 다시 쓰지 않는다.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
@@ -33,6 +38,23 @@ import { publishPiece, publishPortStatus, runnerOffline, type PublishFailReason 
 
 const n = (v: unknown) => Number(v || 0);
 const MAX_ATTEMPTS = 3;
+
+/** [P1R5 B-1] 영상 업로드 배경 함수 호출(202) — 실패는 호출부가 awaiting_manual 로 종결한다(조용한 0건 금지). */
+async function triggerVideoPublish(tid: number, pieceId: number, slotId: number | null): Promise<boolean> {
+  const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
+  const site = String(process.env.SITE_URL ?? "").replace(/\/$/, "");
+  if (!secret || !site) { console.error(`[cron/publisher] ${!secret ? "INTERNAL_SECRET" : "SITE_URL"} 미설정 — 영상 업로드 호출 불가`); return false; }
+  try {
+    const r = await fetch(`${site}/api/publish-video-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid, ...(slotId ? { slotId } : {}) }), signal: AbortSignal.timeout(6_000) });
+    if (r.status !== 202 && !r.ok) { console.error(`[cron/publisher] 영상 업로드 배경 함수 ${r.status}`); return false; }
+    return true;
+  } catch (e) {
+    const err = e as Error;
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") return true;   // netlify dev 는 background 를 동기 실행(AC-12)
+    console.error("[cron/publisher] 영상 업로드 호출 실패", String(err?.message ?? e));
+    return false;
+  }
+}
 
 /** 사람이 손봐야 끝나는 실패 — 재시도해도 같은 답이 온다. */
 const NEEDS_HUMAN: ReadonlySet<PublishFailReason> = new Set(["gate", "no_account", "no_creds", "account_blocked", "auth_failed", "provider_not_configured"]);
@@ -62,7 +84,7 @@ export const publisherStep: CronStep = {
       await notifyOnce(ctx.tid, "card_required", "발행 전에 결제 수단을 등록해 주세요", "카드를 등록하면 기다리던 글이 바로 나가요.", "/app/plan.html", { withinHours: 24 });
       return { changed: 0, skipped: 0, detail: { blocked: "card_required" } };
     }
-    const due = await q(sql`SELECT p.id, p.title, p.channel, p.account_id, p.slot_id, p.meta, p.scheduled_for, s.status AS slot_status
+    const due = await q(sql`SELECT p.id, p.title, p.channel, p.kind, p.account_id, p.slot_id, p.meta, p.scheduled_for, s.status AS slot_status
       FROM pieces p LEFT JOIN slots s ON s.id = p.slot_id
       WHERE p.tenant_id = ${ctx.tid} AND p.status = 'scheduled' AND p.scheduled_for IS NOT NULL AND p.scheduled_for <= NOW()
       ORDER BY p.scheduled_for, p.id LIMIT 50`);
@@ -84,6 +106,22 @@ export const publisherStep: CronStep = {
       const pieceId = n(p.id), slotId = p.slot_id ? n(p.slot_id) : null;
       const meta = (p.meta && typeof p.meta === "object" ? p.meta : {}) as Record<string, unknown>;
       const title = String(p.title || "글");
+
+      /* [P1R5 B-1] 영상 = 배경 업로드로 넘긴다(동기 26초 안에 mp4 를 못 올린다). 호출 실패는 삼키지 않는다(AC-16). */
+      if (String(p.kind) === "video") {
+        const fired = await triggerVideoPublish(ctx.tid, pieceId, slotId);
+        if (fired) {
+          await q(sql`UPDATE pieces SET status = 'publishing', updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId} AND status = 'scheduled'`);
+          if (slotId) await setSlot(ctx.tid, slotId, "publishing", null);
+          queued++;
+        } else {
+          await q(sql`UPDATE pieces SET status = 'awaiting_manual', meta = meta || ${jsonb({ publishFail: { reason: "config", error: "업로드를 시작하지 못했어요(서버 설정)." } })}, updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId} AND status = 'scheduled'`);
+          if (slotId) await setSlot(ctx.tid, slotId, "awaiting_manual", "업로드를 시작하지 못했어요");
+          await notifyOnce(ctx.tid, "publish_manual", "영상 업로드에 손이 필요해요", `«${title}» 업로드를 시작하지 못했어요.`, "/app/posts.html", { withinHours: 6 });
+          manual++;
+        }
+        continue;
+      }
 
       const r = await publishPiece(ctx.tid, pieceId, { slotId });
 

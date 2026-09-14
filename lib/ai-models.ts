@@ -96,6 +96,25 @@ export const MODEL_KEY_VALIDATE = "gemini-2.5-flash-lite";
 /** 음성(TTS). */
 export const MODEL_TTS = process.env.GEMINI_MODEL_TTS || "gemini-3.1-flash-tts-preview";
 
+
+/* ═══════════════════ ③-b 영상을 «만드는» 모델 — P1R5 쇼츠 공장(AM video-providers/registry.ts 2026-09-03 실측치 이식 · 모델명은 여기 한 곳) ═══════════════════ */
+
+/**
+ * OMNI — Gemini Omni 1.1 Flash(Interactions API · 동기 ~35s · $0.10/s). 그래픽 스토리 쇼츠의 기본 provider(계약 P1R5 §0.1-1).
+ *   AM SHORTS1 실증(2026-09-03): 9:16 · 8초 · 실물 1컷 생성 성공. ⚠️ 1:1 은 400 — 9:16/16:9 만.
+ */
+export const MODEL_OMNI = process.env.GEMINI_MODEL_OMNI || "gemini-omni-1.1-flash";
+/** VEO 3.1 3등급(predictLongRunning 폴링 · durationSeconds 4·6·8 만 · 1:1 400). Lite 가 video_15 강제 티어(원가 역전 방지). */
+export const MODEL_VEO = process.env.GEMINI_MODEL_VEO || "veo-3.1-generate-preview";
+export const MODEL_VEO_FAST = process.env.GEMINI_MODEL_VEO_FAST || "veo-3.1-fast-generate-preview";
+export const MODEL_VEO_LITE = process.env.GEMINI_MODEL_VEO_LITE || "veo-3.1-lite-generate-preview";
+/** fal.ai 게이트웨이 모델 경로(FAL_KEY 있을 때만 · kling 은 명시 지정 시만 — 자기재사용 조항). */
+export const FAL_MODEL_WAN = "fal-ai/wan/v2.2-5b/image-to-video";
+export const FAL_MODEL_HAILUO = "fal-ai/minimax/hailuo-02/standard/image-to-video";
+export const FAL_MODEL_KLING = "fal-ai/kling-video/v2.6/pro/image-to-video";
+/** 영상 모델은 `verify-ai-models` 텍스트 프로브로 못 잰다(영상 출력·과금) — 살아 있음 확인은 C 라이브 1컷 실증이 정본. */
+export const VIDEO_MODELS: string[] = [MODEL_OMNI, MODEL_VEO, MODEL_VEO_FAST, MODEL_VEO_LITE];
+
 /* ═══════════════════ ④ 하니스가 쓰는 «전 모델» 목록 ═══════════════════ */
 
 /** 🔴 이 파일이 선언한 모든 모델(중복 제거). `verify-ai-models` 가 이걸 실제로 호출해 살아 있는지 잰다. */
