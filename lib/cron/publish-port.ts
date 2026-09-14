@@ -51,29 +51,36 @@ export interface EnqueueInput { kind: RunnerJobKind; accountId?: number | null; 
 export type EnqueueResult = { ok: true; jobId: number; already?: boolean } | { ok: false; error: string; unavailable?: boolean };
 export type EnqueueJobFn = (tid: number, input: EnqueueInput) => Promise<EnqueueResult>;
 
+/** 발행된 글의 조회·좋아요·댓글 회수(API 채널 · B2 커넥터가 채널 API 로 물어본다). 러너 채널은 `revenue.stats` 잡이 담당. */
+export interface PostStats { views?: number; likes?: number; comments?: number; alive?: boolean }
+export type FetchStatsFn = (tid: number, pieceId: number) => Promise<PostStats | null>;
+
+/** 잡 타임아웃 회수(B2 export `reapStaleJobs(staleMin = 15)`) — claim 후 무보고 잡을 되돌리고, 상한 초과 발행 잡은 awaiting_manual 로 종결한다. */
+export interface ReapResult { released: number; failed: number }
+export type ReapStaleJobsFn = (staleMin?: number) => Promise<ReapResult>;
+
 /* ───────── 결합 ───────── */
-interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn }
-let bound: Bound | null = null;
-let probed = false;
+/* 🔴 **B2 머지 완료(2026-09-14) — 정적 import 로 꿰었다.**
+   머지 전에는 모듈이 없어 «변수 지정자 동적 import» 로 두었는데, 그 형태는 esbuild 가 번들에 담지 못해
+   **모듈이 생긴 뒤에도 런타임에 여전히 «missing» 으로 보였다**(로컬 스모크 실측: `publisher` 가 `connector:"missing"` 보고 · 발행 0건).
+   «있는데 연결 안 된 커넥터»는 조용한 실패라 제일 나쁘다 — 모듈이 존재하는 지금은 정적 import 가 정답이다.
+   포트는 이제 **타입 경계 + 미구현 정직 반환**만 맡는다(러너/API 판단·잡 적재는 여전히 전부 B2 안 · 계약 §10). */
+import { publishPieceById as b2PublishPieceById, publishViaOf as b2PublishViaOf, enqueueJob as b2EnqueueJob, reapStaleJobs as b2ReapStaleJobs } from "../publish/index";
 
-/** 🔴 머지 시 한 줄 — `bindPublish({ publishPieceById, publishViaOf })`. 이후 포트는 그대로 그 구현을 쓴다. */
-export function bindPublish(impl: Bound): void { bound = impl; probed = true; console.log("[publish-port] 커넥터 연결됨(bindPublish)"); }
+interface Bound { publishPieceById: PublishPieceByIdFn; publishViaOf?: PublishViaOfFn; enqueueJob?: EnqueueJobFn; reapStaleJobs?: ReapStaleJobsFn; fetchStats?: FetchStatsFn }
 
-/** B2 모듈이 이미 있으면 자동 연결(머지 직후 배선을 잊어도 돌게 — 그래도 bindPublish 가 정본이다). */
-async function ensureBound(): Promise<Bound | null> {
-  if (bound || probed) return bound;
-  probed = true;
-  // 지정자를 변수로 둔다 — 모듈이 없는 지금 TS·번들러가 «없는 모듈»로 죽지 않게. 머지 후에는 런타임에 찾아진다.
-  const spec = "../publish/index";
-  try {
-    const mod = await import(/* @vite-ignore */ spec) as Partial<Bound>;
-    if (typeof mod?.publishPieceById === "function") {
-      bound = { publishPieceById: mod.publishPieceById, publishViaOf: mod.publishViaOf, enqueueJob: mod.enqueueJob };
-      console.log("[publish-port] 커넥터 자동 연결됨(lib/publish/index)");
-    }
-  } catch { /* 아직 없다 — unavailable 로 정직하게 */ }
-  return bound;
-}
+let bound: Bound | null = {
+  publishPieceById: b2PublishPieceById as unknown as PublishPieceByIdFn,
+  publishViaOf: b2PublishViaOf as unknown as PublishViaOfFn,
+  enqueueJob: b2EnqueueJob as unknown as EnqueueJobFn,
+  reapStaleJobs: b2ReapStaleJobs as unknown as ReapStaleJobsFn,
+  // fetchStats: B2 미제공 — API 채널 통계는 `learn` 이 «못 물어봤다»로 센다(조회 0 으로 적지 않는다).
+};
+
+/** 구현을 갈아끼울 때만 쓴다(테스트·예외 상황). 평상시엔 위 정적 결합이 정본이다. */
+export function bindPublish(impl: Bound | null): void { bound = impl; }
+
+async function ensureBound(): Promise<Bound | null> { return bound; }
 
 const UNAVAILABLE: PublishFail = {
   ok: false, reason: "config", retriable: true, unavailable: true,
@@ -111,6 +118,27 @@ export async function enqueueRunnerJob(tid: number, input: EnqueueInput): Promis
   if (!impl?.enqueueJob) return { ok: false, error: "러너 잡 적재기(lib/runner-jobs)가 아직 연결되지 않았어요.", unavailable: true };
   try { return await impl.enqueueJob(tid, input); }
   catch (e) { return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) }; }
+}
+
+/**
+ * reapStaleJobs — claim 후 오래 말이 없는 잡 회수. 🔴 큐 SQL 은 B2 한 벌이다(우선순위·attempts·종결 규칙이 거기 있다).
+ *   미연결이면 `null` — 호출부가 «아직 못 물어봤다»로 센다(0건과 구분).
+ */
+export async function reapStaleJobs(staleMin: number): Promise<ReapResult | null> {
+  const impl = await ensureBound();
+  if (!impl?.reapStaleJobs) return null;
+  try { return await impl.reapStaleJobs(staleMin); }
+  catch (e) { console.error("[publish-port] reapStaleJobs 실패", String((e as Error)?.message ?? e).slice(0, 200)); return { released: 0, failed: 0 }; }
+}
+
+/**
+ * fetchPostStats — API 채널 글의 통계 회수. 미연결이면 `null`(«0회 조회»가 아니라 «못 물어봤다» — 둘을 섞으면 성과 학습이 0 으로 오염된다).
+ */
+export async function fetchPostStats(tid: number, pieceId: number): Promise<PostStats | null> {
+  const impl = await ensureBound();
+  if (!impl?.fetchStats) return null;
+  try { return await impl.fetchStats(tid, pieceId); }
+  catch (e) { console.warn("[publish-port] fetchStats 실패", pieceId, String((e as Error)?.message ?? e).slice(0, 150)); return null; }
 }
 
 /** 커넥터가 붙어 있나 — 크론 응답 detail·스모크 보고용(«미구현»을 숫자로 보이게). */

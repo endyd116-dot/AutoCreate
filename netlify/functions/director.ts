@@ -33,7 +33,9 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/director-confirm")) {
       const b = await readJson<{ briefId?: number; pieces?: PieceSpecPatch[] }>(req);
       const briefId = n(b.briefId); if (!briefId) return badRequest("briefId");
-      const r = await confirm(tid, briefId, Array.isArray(b.pieces) ? b.pieces : [], auth.user.uid);
+      // 🔴 `origin:"manual"` 을 **명시**한다 — confirm 의 기본값은 fail-closed 로 "auto" 이고, auto 는 편성 슬롯 없이는 거부된다(CLAUDE §4.7 · AC-2).
+      //    사람이 «이대로 만들기»를 누른 경로이므로 편성표의 통제 대상이 아니다(사람이 곧 편성자다).
+      const r = await confirm(tid, briefId, Array.isArray(b.pieces) ? b.pieces : [], auth.user.uid, { origin: "manual" });
       if (!r.ok) return json(r, r.step === "coin_short" ? 402 : r.step === "not_found" ? 404 : 400);
       await writeAudit({ tenantId: tid, action: "director_confirm", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `brief:${briefId}`, detail: { pieceIds: r.pieceIds, coinsCharged: r.coinsCharged } });
       return json(r, 202);

@@ -25,7 +25,7 @@ export default async (req: Request): Promise<Response> => {
         COALESCE(SUM(amount_krw) FILTER (WHERE day >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') - interval '1 month')::date
                                           AND day <= ((NOW() AT TIME ZONE 'Asia/Seoul') - interval '1 month')::date),0) AS last_same
       FROM revenue_daily WHERE tenant_id = ${tid}`);
-    const todaySlots = await q(sql`SELECT s.id, s.channel, s.status, s.publish_at, s.account_id, a.handle, p.title
+    const todaySlots = await q(sql`SELECT s.id, s.channel, s.status, s.publish_at, s.account_id, s.piece_id, a.handle, p.title
       FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN pieces p ON p.id = s.piece_id
       WHERE s.tenant_id = ${tid} AND s.slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date ORDER BY s.publish_at NULLS LAST, s.id`);
     const todo: { kind: string; title: string; desc: string; link: string; tone: "warn" | "info" }[] = [];
@@ -44,7 +44,8 @@ export default async (req: Request): Promise<Response> => {
     const settings = (ctx.tenant.settings || {}) as Record<string, unknown>;
     return json({ ok: true,
       revenue: { today: n(rev?.today), month: n(rev?.month), lastMonthSameDay: n(rev?.last_same) },
-      todaySlots: todaySlots.map((s) => ({ id: n(s.id), channel: s.channel, status: s.status, publishAt: s.publish_at, handle: s.handle, title: s.title })),
+      // pieceId 는 있을 때만(계약 v2.7) — 홈 «봐주세요» 행이 piece.html?id= 로 바로 간다.
+      todaySlots: todaySlots.map((s) => ({ id: n(s.id), channel: s.channel, status: s.status, publishAt: s.publish_at, handle: s.handle, title: s.title, ...(s.piece_id ? { pieceId: n(s.piece_id) } : {}) })),
       todo, notices, unread: n(unread?.c),
       auto: { enabled: !!settings.autoSchedule, rules: n(rules?.c) },
       runner: { online: n(runner?.online), total: n(runner?.total) },

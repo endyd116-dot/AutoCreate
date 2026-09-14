@@ -1,0 +1,109 @@
+/**
+ * lib/cron/director-auto.ts — 디렉터 **자동 모드** 진입점(계약 §1 `slots.produce` · DESIGN §5.3 · §5B.7).
+ *   «슬롯이 이미 «무엇을 언제»를 정했다 — 디렉터는 «어떻게»만 정한다.»
+ *
+ *   ══ propose() 와 무엇이 다른가 ══
+ *     사람 경로(`lib/director.ts propose`)는 채널을 **고르고**(최대 3) LLM 1콜로 채널별 앵글을 가른다.
+ *     자동 모드는 슬롯이 채널·계정·시각을 이미 못 박았다 → 고를 것이 없다 → **결정론 부분만** 쓴다.
+ *       · 앵글: 소재의 앵글 그대로(한 채널뿐이라 «가를» 상대가 없다 — LLM 1콜을 아낀다 = 크론 예산·코인 절약)
+ *       · 구성: `pickFormat`(그 계정 직전 글과 다른 format · 결정론 로테이션) — 사람 경로와 **같은 판정기**
+ *       · 이미지 수·감성·제휴·코인: 사람 경로와 같은 규칙(`defaultImageCount`·`contractFor`·intent→coupang·`coinCostOf`)
+ *       · 일정: 슬롯의 `publish_at` 그대로(디렉터가 다시 고르지 않는다 — 슬롯이 정본)
+ *
+ *   🔴 이 파일은 **brief 를 만들어 주기만 한다.** piece 생성·코인 차감·롤백·배경 호출은 `lib/director.ts confirm()` 한 경로다
+ *      (두 벌을 만들면 «코인은 차감됐는데 piece 가 없는» 사고가 갈라진 경로에서만 난다 · PITFALLS #11-b).
+ */
+import { sql } from "drizzle-orm";
+import { q, listAccounts, type AccountRow } from "../accounts";
+import { jsonb, utcDate } from "../db-util";
+import { contractFor, pickFormat, defaultImageCount, type FormatKey, type WritingContract } from "../writing-contracts";
+import { coinCostOf } from "../coin-table";
+import { toTopic, type Topic } from "../topics";
+import { assignAccount, goalOf, type Affiliate, type PieceSpec } from "../director";
+
+const n = (v: unknown) => Number(v || 0);
+
+/** 한국어 글자수 계약 → 어절 근사(사람 경로 `lib/director.ts wordsOf` 와 같은 식 · 그쪽은 비공개라 식만 맞춘다). */
+function wordsOf(c: WritingContract): number {
+  const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2);
+  return Number.isFinite(w) && w > 0 ? w : 900;
+}
+const pieceCoin = (imageCount: number) => coinCostOf("blog") + coinCostOf("image") * imageCount;
+
+/** 그 계정(없으면 그 채널)의 최근 format — 로테이션 재료. 사람 경로와 같은 질의. */
+async function recentFormats(tid: number, accountId: number | null, channel: string): Promise<string[]> {
+  const rows = accountId
+    ? await q(sql`SELECT format FROM pieces WHERE tenant_id = ${tid} AND account_id = ${accountId} AND status <> 'rejected' ORDER BY id DESC LIMIT 5`)
+    : await q(sql`SELECT format FROM pieces WHERE tenant_id = ${tid} AND channel = ${channel} AND status <> 'rejected' ORDER BY id DESC LIMIT 5`);
+  return rows.map((r) => String(r.format || "")).filter(Boolean);
+}
+
+export interface AutoSlot { id: number; channel: string; accountId: number | null; topicId: number; publishAt: Date | null; date: string }
+
+export type AutoBrief =
+  | { ok: true; briefId: number; spec: PieceSpec; topic: Topic; coinCost: number }
+  | { ok: false; step: "no_topic" | "no_account" | "topic_state"; error: string };
+
+/**
+ * proposeForSlot — 슬롯 1개 → brief 1개(piece 1개). DB 에 briefs 행을 남긴다(mode 'auto' · status 'proposed').
+ *   ⚠️ 계정: 슬롯이 계정을 못 박았으면 그 계정을 **그대로** 쓴다(규칙이 «고정 계정»이라고 말한 자리다).
+ *      못 박지 않았으면 `assignAccount`(사람 경로와 같은 판정기 — active|pending_login · posts_today<daily_cap · health 순).
+ *      슬롯이 못 박은 계정이 오늘 캡을 넘었으면 **같은 채널의 건강한 계정으로 대신**한다(하루치가 통째로 증발하지 않게 · 못 찾으면 no_account).
+ */
+export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoBrief> {
+  const [trow] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${slot.topicId}`);
+  if (!trow) return { ok: false, step: "no_topic", error: "배정된 소재를 찾을 수 없어요." };
+  const topic = toTopic(trow);
+  if (!["candidate", "picked"].includes(topic.status)) return { ok: false, step: "topic_state", error: "이미 쓴 소재예요." };
+
+  const accounts = await listAccounts(tid);
+  let acc: AccountRow | null = null;
+  if (slot.accountId) {
+    const fixed = accounts.find((a) => a.id === slot.accountId) ?? null;
+    const usable = fixed && (fixed.status === "active" || fixed.status === "pending_login") && fixed.postsToday < fixed.dailyCap;
+    acc = usable ? fixed : assignAccount(accounts, slot.channel);
+  } else {
+    acc = assignAccount(accounts, slot.channel);
+  }
+  if (!acc) return { ok: false, step: "no_account", error: `${slot.channel} 에 오늘 글을 올릴 수 있는 계정이 없어요.` };
+
+  const c = await contractFor(slot.channel);
+  const format = pickFormat(c, await recentFormats(tid, acc.id, slot.channel), `${topic.id}:${slot.channel}:${acc.id}`) as FormatKey;
+  const imageCount = defaultImageCount(slot.channel);
+  const intent = topic.factors.intent;
+  const affiliate: Affiliate | null = intent === "commercial" ? { provider: "coupang", productQuery: topic.title, slot: "mid" }
+    : intent === "mixed" ? { provider: "coupang", productQuery: topic.title, slot: "end" } : null;
+  const at = (slot.publishAt ?? new Date(Date.now() + 24 * 3600_000)).toISOString();
+
+  const spec: PieceSpec = {
+    key: `${slot.channel}:${acc.id}`, channel: slot.channel, accountId: acc.id, accountHandle: acc.handle,
+    format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
+    images: { count: imageCount, style: c.images.style, heroNeeded: slot.channel === "naver_blog" || slot.channel === "tistory" },
+    monetize: { affiliate, adDisclosure: !!affiliate },
+    schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(imageCount), angle: topic.angle,
+  };
+
+  // 사람말 3줄(LLM 0 · 결정론) — 검수 화면이 «왜 이렇게 만들었나»를 말할 수 있어야 한다.
+  const reasons = [
+    `편성표에 잡힌 ${slot.date.slice(5).replace("-", "/")} 자리라 ${acc.handle ? `@${acc.handle}` : slot.channel}에 ${spec.composition} 구성으로 써요.`,
+    topic.factors.volume ? `«${topic.title}»는 한 달에 ${topic.factors.volume.toLocaleString()}번 검색돼요${topic.factors.competition === "low" ? " · 경쟁이 낮은 편이에요" : ""}.`
+      : topic.factors.seasonal ? `${topic.factors.seasonal} 시즌이라 지금 올리면 좋아요.` : "직전 글과 다른 구성이라 계정이 단조로워 보이지 않아요.",
+    affiliate ? "상품을 찾는 글이라 제휴 링크와 고지 문구를 넣어요." : "발행 3일 전에 미리 만들어 두고, 조용하면 그대로 나가요.",
+  ];
+
+  const goal = goalOf([spec], intent);
+  const [b] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost)
+    VALUES (${tid}, ${topic.id}, ${goal}, ${jsonb([spec])}, ${jsonb(reasons)}, ${"auto"}, ${"proposed"}, ${spec.coinCost}) RETURNING id`);
+  const briefId = n(b?.id);
+  const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE tenant_id = ${tid} AND id = ${briefId}`);
+  if (chk?.t !== "array") console.error("[director-auto] briefs.pieces jsonb_typeof !== array", chk);   // 쓴 직후 확인까지가 쓰기다(PITFALLS #1)
+  return { ok: true, briefId, spec, topic, coinCost: spec.coinCost };
+}
+
+/** 슬롯 행(DB) → AutoSlot. */
+export function toAutoSlot(r: Record<string, unknown>): AutoSlot {
+  return {
+    id: n(r.id), channel: String(r.channel), accountId: r.account_id ? n(r.account_id) : null,
+    topicId: n(r.topic_id), publishAt: utcDate(r.publish_at), date: String(r.d ?? "").slice(0, 10),
+  };
+}
