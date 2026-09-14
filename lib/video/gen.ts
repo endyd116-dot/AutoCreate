@@ -142,6 +142,12 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       audio.set(i, { key: r.key, durationMs: r.durationMs, words: r.words, provider: r.provider });
       await stamp(pieceId, "tts", { cutsDone: audio.size, cutsTotal: theScript.lines.length });
     }
+    /* [메인 확정] `meta.tts.provider` — A 의 «목소리» 스텝이 piece meta 를 읽는다(`piece_assets.meta.provider` 는 문장별로 그대로 둔다).
+       한 문장이라도 Gemini 로 떨어졌으면 **gemini** 로 적는다 — 그 문장은 어절 시각이 없어 자막이 균등 분할이고, 화면이 그 사실을 말해야 한다. */
+    const provs = new Set([...audio.values()].map((a) => a.provider));
+    const ttsProvider = videoStub() ? "stub" : provs.has("gemini") ? "gemini" : "typecast";
+    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ tts: { provider: ttsProvider, sentences: audio.size } })} WHERE id = ${pieceId}`);
+
     // 문장 시각(누적 · 컷 경계 = 문장 경계)
     let at = 0;
     const timed = theScript.lines.map((l, i) => { const a = audio.get(i)!; const startMs = at; const endMs = startMs + Math.max(400, a.durationMs) + 120; at = endMs; return { ...l, startMs, endMs, words: a.words, key: a.key }; });

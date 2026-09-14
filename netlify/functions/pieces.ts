@@ -20,6 +20,8 @@ import { disclosureTextFor } from "../../lib/disclosure";
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
 import { recheckPiece, approvePiece } from "../../lib/content-approve";
 import { triggerGenerate } from "../../lib/director";
+import { triggerVideo } from "../../lib/video/gen";
+import { r2PublicUrl } from "../../lib/r2";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -29,12 +31,16 @@ const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
 const STATUSES = new Set(["generating", "draft", "in_review", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);
 
-function stageOf(r: Row): "writing" | "images" | "checking" | "done" | "failed" {
+/** 글 스텝 3(writing·images·checking) · [P1R5] 영상 스텝 6(`VideoStage` = script·tts·clips·render·judging·done — A 가 «대본→목소리→장면→합성→검사→완료» 로 그린다). */
+const VIDEO_STAGES = ["script", "tts", "clips", "render", "judging", "done", "failed"];
+function stageOf(r: Row): string {
   const st = String(r.status); const m = (r.meta || {}) as Record<string, unknown>;
+  const isVideo = String(r.kind || "post") === "video";
   if (st === "failed") return "failed";
   if (st !== "generating") return "done";
-  const s = String(m.stage || "writing");
-  return (["writing", "images", "checking", "done"].includes(s) ? s : "writing") as "writing" | "images" | "checking" | "done";
+  const s = String(m.stage || (isVideo ? "script" : "writing"));
+  if (isVideo) return VIDEO_STAGES.includes(s) ? s : "script";
+  return ["writing", "images", "checking", "done"].includes(s) ? s : "writing";
 }
 function pieceRow(r: Row): Record<string, unknown> {
   const m = (r.meta && typeof r.meta === "object" ? r.meta : {}) as Record<string, unknown>;
@@ -46,11 +52,27 @@ function pieceRow(r: Row): Record<string, unknown> {
   const sf = utcDate(r.scheduled_for); if (sf) o.scheduledFor = sf.toISOString();
   const pa = utcDate(r.published_at); if (pa) o.publishedAt = pa.toISOString();
   if (r.external_url) o.externalUrl = String(r.external_url);
-  if (r.cover_url) o.coverUrl = String(r.cover_url);
+  const cover = r.cover_url ? String(r.cover_url) : r.cover_key ? r2PublicUrl(String(r.cover_key)) : "";
+  if (cover) o.coverUrl = cover;
   if (m.failReason) o.failReason = String(m.failReason);
+  if (String(r.kind || "post") === "video") {
+    // [P1R5] 영상 전용 — 만드는 중 진행(컷 n/N)·목소리 provider·이어달리기 횟수. 화면 스텝 바가 읽는다.
+    const cs = (m.chainStage ?? null) as { cutsDone?: unknown; cutsTotal?: unknown } | null;
+    if (cs && (cs.cutsDone !== undefined || cs.cutsTotal !== undefined)) o.progress = { done: n(cs.cutsDone), total: n(cs.cutsTotal) };
+    const v = (m.video ?? null) as { format?: unknown; seconds?: unknown } | null;
+    if (v) o.video = { format: String(v.format ?? ""), seconds: n(v.seconds) };
+    const tts = (m.tts ?? null) as { provider?: unknown } | null;
+    if (tts?.provider) o.ttsProvider = String(tts.provider);
+    const cr = (m.chainResume ?? null) as { count?: unknown } | null;
+    if (n(cr?.count) > 0) o.resumeCount = n(cr?.count);
+  }
   return o;
 }
-const PIECE_SELECT = sql`p.*, a.handle, (SELECT (c.meta->>'url') FROM piece_assets c WHERE c.piece_id = p.id AND c.kind = 'image' ORDER BY c.sort LIMIT 1) AS cover_url`;
+/* 포스터: 영상은 `thumb`(finalizeRender 가 남긴 것)가 먼저 · 없으면 `image`(글의 대표 사진 · 영상의 정지 컷).
+   meta.url 이 없는 자산(영상 쪽)은 r2_key 로 공개 URL 을 만든다(§1.4-6 · pieceRow 에서). */
+const PIECE_SELECT = sql`p.*, a.handle,
+  (SELECT (c.meta->>'url') FROM piece_assets c WHERE c.piece_id = p.id AND c.kind IN ('thumb','image') ORDER BY (c.kind <> 'thumb'), c.sort LIMIT 1) AS cover_url,
+  (SELECT c.r2_key FROM piece_assets c WHERE c.piece_id = p.id AND c.kind IN ('thumb','image') ORDER BY (c.kind <> 'thumb'), c.sort LIMIT 1) AS cover_key`;
 
 
 /** 사용자가 고지를 지웠어도 첫 요소로 되돌린다(§16B.4). */
@@ -81,22 +103,56 @@ export default async (req: Request): Promise<Response> => {
       const [p] = await q(sql`SELECT ${PIECE_SELECT}, t.title AS topic_title FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id LEFT JOIN topics t ON t.id = p.topic_id WHERE p.tenant_id = ${tid} AND p.id = ${id}`);
       if (!p) return json({ ok: false, error: "글을 찾을 수 없어요.", step: "not_found" }, 404);
       const m = (p.meta || {}) as Record<string, unknown>;
-      const assets = await q(sql`SELECT caption, meta, sort FROM piece_assets WHERE piece_id = ${id} AND kind = 'image' ORDER BY sort`);
+      const isVideo = String(p.kind || "post") === "video";
+      /* [P1R5 §1.4-6] 영상은 image 말고 **video·thumb·srt·clip** 도 읽어야 A 가 플레이어·SRT·컷 목록을 그린다.
+         URL 은 `meta.url`(글 이미지) 우선 · 없으면 r2_key 로 공개 URL(영상 자산은 키만 있다). */
+      const assets = await q(sql`SELECT kind, caption, meta, sort, r2_key FROM piece_assets WHERE piece_id = ${id} AND kind IN (${isVideo ? sql.join(["video", "thumb", "srt", "clip", "image", "audio"].map((k) => sql`${k}`), sql`, `) : sql`'image'`}) ORDER BY kind, sort`);
+      const urlOf = (x: Row) => String(((x.meta || {}) as Record<string, unknown>).url || "") || (x.r2_key ? r2PublicUrl(String(x.r2_key)) : "");
       const g = (p.gate_report && typeof p.gate_report === "object" ? p.gate_report : { ok: false, checks: [], rewritten: false }) as GateReport;
       const meta: Record<string, unknown> = { tags: Array.isArray(m.tags) ? m.tags : [], disclosure: m.disclosure ?? null };
       if (m.affiliate && typeof m.affiliate === "object") { const af = m.affiliate as Record<string, unknown>; meta.affiliate = { provider: af.provider, url: af.url, subId: af.subId }; }
       if (m.scheduleAt) meta.scheduleAt = m.scheduleAt;
       if (m.slotReason) meta.slotReason = m.slotReason;
       if (m.angle) meta.angle = m.angle;
-      return json({ ok: true, piece: { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
-        images: assets.map((x) => ({ url: String(((x.meta || {}) as Record<string, unknown>).url || ""), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
-        meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) } });
+      const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
+        images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
+        meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };
+      if (isVideo) {
+        const one = (k: string) => { const x = assets.find((a) => String(a.kind) === k); return x ? { url: urlOf(x), key: String(x.r2_key ?? ""), meta: x.meta ?? {} } : null; };
+        const yt = (m.youtube ?? null) as { title?: unknown; description?: unknown; tags?: unknown } | null;
+        detail.video = {
+          stage: stageOf(p),
+          spec: m.video ?? null,
+          file: one("video"), poster: one("thumb"), srt: one("srt"),
+          // 컷 = 클립(t2v) + 정지 이미지(still · kenburns) 를 컷 번호로 합쳐 준다 — 화면이 «장면 n» 으로 센다.
+          cuts: assets.filter((x) => String(x.kind) === "clip" || (String(x.kind) === "image" && ((x.meta || {}) as Record<string, unknown>).still === true))
+            .map((x) => ({ idx: n(x.sort), kind: String(x.kind) === "clip" ? "clip" : "still", url: urlOf(x), keyword: x.caption ? String(x.caption) : "" }))
+            .sort((a, b) => a.idx - b.idx),
+          narration: assets.filter((x) => String(x.kind) === "audio").length,
+          totalMs: n(m.totalMs), cutCount: n(m.cutCount),
+          tts: m.tts ?? null,
+          youtube: yt ? { title: String(yt.title ?? ""), description: String(yt.description ?? ""), tags: Array.isArray(yt.tags) ? yt.tags : [] } : null,
+          judge: g.judge ?? null,
+          structureTemplateId: m.structureTemplateId ?? null,
+        };
+      }
+      return json({ ok: true, piece: detail });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
     const id = n(b.id); if (!id) return badRequest("id");
     // P1R4 §1.3 — readonly·suspended 는 재생성 금지. 글을 찾기 전에 재서 403 이 404 보다 먼저.
-    if (path.endsWith("/pieces-regenerate")) { const w = await requireWritable(tid); if (!w.ok) return w.res; const { requireAiBudget } = await import("../../lib/billing/ai-cost-cap"); const bgt = await requireAiBudget(tid); if (!bgt.ok) return json({ ok: false, step: "ai_cost_cap", error: bgt.error }, 400); }   // ★C(P1R4) fix: 다시 만들기도 AI 생성 — 일 상한
+    if (path.endsWith("/pieces-regenerate")) {
+      const w = await requireWritable(tid); if (!w.ok) return w.res;
+      // ★C(P1R4) fix: 다시 만들기도 AI 생성 — 일 상한. [P1R5 §1.4c(1)] 단 **영상은 소프트**(고객은 이미 코인을 냈다) — 막는 것은 영상 관문의 하드·전역뿐.
+      const { requireAiBudget } = await import("../../lib/billing/ai-cost-cap");
+      const bgt = await requireAiBudget(tid);
+      if (!bgt.ok) {
+        const [k] = await q(sql`SELECT kind FROM pieces WHERE tenant_id = ${tid} AND id = ${id}`);
+        if (String(k?.kind ?? "post") !== "video") return json({ ok: false, step: "ai_cost_cap", error: bgt.error }, 400);
+        await writeAudit({ tenantId: tid, action: "ai_cost_soft_video_pass", actorType: "user", actorId: auth.user.uid, riskLevel: "medium", target: `piece:${id}`, detail: { usedKrw: bgt.check.usedKrw, capKrw: bgt.check.capKrw, at: "regenerate" } });
+      }
+    }
     const [p] = await q(sql`SELECT p.* FROM pieces p WHERE p.tenant_id = ${tid} AND p.id = ${id}`);
     if (!p) return json({ ok: false, error: "글을 찾을 수 없어요.", step: "not_found" }, 404);
     const m = (p.meta || {}) as Record<string, unknown>;
@@ -120,12 +176,14 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, status: "rejected" });
     }
     if (path.endsWith("/pieces-regenerate")) {
+      const isVideo = String(p.kind || "post") === "video";
       if (st === "generating") {
         // ★C4 fix: 배경 함수가 죽어 «만드는 중»에 갇힌 글은 다시 만들기가 거부되어 사용자가 빠져나갈 길이 없었다 —
         //   20분 넘게 그대로면 코인 재차감 0(같은 ref)으로 한 번 더 건다. 다시 실패하면 triggerGenerate 가 failed+환급+알림으로 내린다.
         const at = utcDate(p.updated_at);
         if (at && Date.now() - at.getTime() > 20 * 60_000) {
-          const fired = await triggerGenerate(id, tid);
+          // [P1R5] 영상은 영상 체인을 다시 건다(`triggerVideo`). 잠금은 20분 넘었으니 `generateVideo` 가 뺏는다.
+          const fired = isVideo ? await triggerVideo(id, tid, true) : await triggerGenerate(id, tid);
           await writeAudit({ tenantId: tid, action: "piece_retrigger", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { fired, stuckMin: Math.round((Date.now() - at.getTime()) / 60_000) } });
           return json({ ok: true, status: "generating" }, 202);
         }
@@ -138,18 +196,36 @@ export default async (req: Request): Promise<Response> => {
       // 실패로 환급됐던 piece 는 다시 차감(원장 행 삭제 0 · 새 ref `piece:{id}:regen{n}` — 순액은 1회분 · 부족하면 coin_short)
       if (st === "failed" && n(m.refunded) > 0) {
         const { consume, refundPiece } = await import("../../lib/coin-ledger");
-        const imgs = Math.max(0, Math.trunc(n(m.imageCount)));
         const tag = `piece:${id}:regen${regen + 1}`;
-        const c1 = await consume(tid, "blog", tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
-        if (!c1.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: c1.reason === "insufficient" ? c1.need : 0, have: c1.balance }, 402);
-        for (let i = 1; i <= imgs; i++) {
-          const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `이미지 ${i}/${imgs}(재차감)` });
-          if (!ci.ok) { await refundPiece(tid, id); return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: ci.reason === "insufficient" ? ci.need : 0, have: ci.balance }, 402); }
+        if (isVideo) {
+          // [P1R5 §1.10] 영상은 `videoCoinItem(seconds)` **1건**(이미지 코인 없음).
+          const { videoCoinItem } = await import("../../lib/coin-table");
+          const secs = n(((m.video ?? {}) as Record<string, unknown>).seconds) || 60;
+          const cv = await consume(tid, videoCoinItem(secs as 15 | 30 | 60), tag, { actorId: auth.user.uid, reason: "영상 다시 만들기(환급분 재차감)" });
+          if (!cv.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: cv.reason === "insufficient" ? cv.need : 0, have: cv.balance }, 402);
+        } else {
+          const imgs = Math.max(0, Math.trunc(n(m.imageCount)));
+          const c1 = await consume(tid, "blog", tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
+          if (!c1.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: c1.reason === "insufficient" ? c1.need : 0, have: c1.balance }, 402);
+          for (let i = 1; i <= imgs; i++) {
+            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `이미지 ${i}/${imgs}(재차감)` });
+            if (!ci.ok) { await refundPiece(tid, id); return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: ci.reason === "insufficient" ? ci.need : 0, have: ci.balance }, 402); }
+          }
         }
       }
-      await q(sql`UPDATE pieces SET status = 'generating', gate_report = NULL, meta = meta || ${jsonb({ stage: "writing", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null, angle: note ? `${String(m.angle || "")} — 사용자 요청: ${note}` : m.angle })}, updated_at = NOW() WHERE id = ${id}`);
+      if (isVideo) {
+        /* 🔴 영상 «다시 만들기»는 **정말 다시 만든다** — 대본·문장 음성·컷을 지우지 않으면 `generateVideo` 의 이어받기가
+           전부 «이미 있음»으로 건너뛰어 **같은 영상**이 다시 나온다(사용자 요청 note 가 반영되지 않는다).
+           산출물만 지운다(원장·감사·piece 행은 그대로). 코인은 위 규칙대로(실패 환급분만 재차감 · 검수 단계 재생성은 0). */
+        await q(sql`DELETE FROM piece_assets WHERE piece_id = ${id} AND tenant_id = ${tid} AND kind IN ('clip','audio','image','srt','video','thumb')`);
+        await q(sql`UPDATE pieces SET status = 'generating', gate_report = NULL, body = NULL, blocks = '[]'::jsonb,
+          meta = (meta - 'script' - 'drafts' - 'render' - 'youtube' - 'chainStage') || ${jsonb({ stage: "script", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null, chainLock: null, chainResume: { count: 0 }, angle: note ? `${String(m.angle || "")} — 사용자 요청: ${note}` : m.angle })},
+          updated_at = NOW() WHERE id = ${id}`);
+      } else {
+        await q(sql`UPDATE pieces SET status = 'generating', gate_report = NULL, meta = meta || ${jsonb({ stage: "writing", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null, angle: note ? `${String(m.angle || "")} — 사용자 요청: ${note}` : m.angle })}, updated_at = NOW() WHERE id = ${id}`);
+      }
       if (p.slot_id) await q(sql`UPDATE slots SET status = 'producing', updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
-      const fired = await triggerGenerate(id, tid);
+      const fired = isVideo ? await triggerVideo(id, tid) : await triggerGenerate(id, tid);
       await writeAudit({ tenantId: tid, action: "piece_regenerate", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { note, fired } });
       return json({ ok: true, status: "generating" }, 202);
     }

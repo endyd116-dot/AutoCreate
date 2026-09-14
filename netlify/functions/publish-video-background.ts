@@ -10,6 +10,8 @@ import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../../lib/db-util";
 import { publishPieceById } from "../../lib/publish";
+import { recheckVideoPiece, hardFailures, judgeBlockers } from "../../lib/content-approve";
+import { writeAudit } from "../../lib/audit";
 export const config = { path: "/api/publish-video-background" };
 
 type Row = Record<string, unknown>;
@@ -29,6 +31,23 @@ export default async (req: Request): Promise<Response> => {
     const [p] = await q(sql`SELECT status FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} AND kind = 'video'`);
     if (!p) return new Response(JSON.stringify({ ok: false, step: "not_found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     if (String(p.status) !== "publishing" && String(p.status) !== "scheduled") { console.log(`[publish-video-background] piece=${pieceId} status=${p.status} — 스킵(멱등)`); return new Response(JSON.stringify({ ok: true, skipped: true }), { status: 200, headers: { "Content-Type": "application/json" } }); }
+
+    /* 🔴 발행 **직전** 재검사(계약 §1.8·§16B · AC-29 «호출처 0» 수리) — 승인 뒤에 설명란을 고쳤을 수 있다.
+       고지 3종(우상단 배지 · 시작 3초 자막 · 설명란 첫 줄)과 대본 금칙어·유사도를 승인과 **같은 판정기**로 다시 잰다.
+       막는 것은 승인과 같은 하드 기준뿐(하드 게이트 + 심사 P0) — 취향 항목은 발행을 막지 않는다.
+       고지가 빠진 영상이 나가면 공정위 건이다 → 나가지 않게 하고 사람에게 넘긴다(조용한 통과 0). */
+    const [full] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+    const gate = await recheckVideoPiece(tid, full);
+    const blockers = [...hardFailures(gate).map((c) => c.label), ...judgeBlockers(gate).map((a) => a.label)];
+    if (blockers.length) {
+      await q(sql`UPDATE pieces SET status = 'awaiting_manual', gate_report = ${jsonb(gate)}, meta = meta || ${jsonb({ publishFail: { reason: "gate", error: blockers.join(" · "), at: new Date().toISOString() } })}, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = ${pieceId} AND status IN ('publishing','scheduled')`);
+      await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"publish_manual"}, ${"영상을 올리기 전에 확인이 필요해요"}, ${`${blockers.join(" · ")} — 확인하고 다시 올려 주세요.`.slice(0, 200)}, ${`/app/piece.html?id=${pieceId}`})`);
+      await writeAudit({ tenantId: tid, action: "video_publish_gate_block", actorType: "system", riskLevel: "high", target: `piece:${pieceId}`, detail: { blockers } });
+      console.error(`[publish-video-background] piece=${pieceId} 발행 직전 게이트 차단: ${blockers.join(" · ")}`);
+      return new Response(JSON.stringify({ ok: false, reason: "gate", blockers }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+
     const r = await publishPieceById(tid, pieceId, body.slotId ? { slotId: Number(body.slotId) } : {});
     if (r.ok) { console.log(`[publish-video-background] piece=${pieceId} → ${r.via}${r.already ? " (이미 나감)" : ""} ${Math.round((Date.now() - t0) / 1000)}s`); return new Response(JSON.stringify({ ok: true, via: r.via }), { status: 200, headers: { "Content-Type": "application/json" } }); }
     // 실패 — retriable 이면 다음 틱에 다시(상태만 되돌린다) · 아니면 사람에게

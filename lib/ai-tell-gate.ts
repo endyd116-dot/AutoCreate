@@ -33,7 +33,12 @@ export const GATE_LABEL: Record<GateKey, string> = {
   disclosure: "제휴 고지 첫머리", banned_words: "광고법 금칙어 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
 };
 export interface GateCheck { key: GateKey; label: string; pass: boolean; detail?: string }
-export interface GateReport { ok: boolean; checks: GateCheck[]; rewritten: boolean }
+export interface GateReport {
+  ok: boolean; checks: GateCheck[]; rewritten: boolean;
+  /** [P1R5 §1.4-6] 영상 심사 결과 — «GateKey 12 중 영상에 해당하는 것 + judge». 글 piece 에는 없다.
+   *  모양은 `lib/video/types.ts JudgeResult` 와 구조적으로 같다(여기서 video 를 import 하지 않으려고 구조로만 적는다 · AC-17). */
+  judge?: { grade: "P0" | "P1" | "P2"; axes: { key: string; label: string; pass: boolean; grade: "P0" | "P1" | "P2"; detail?: string }[]; repaired?: boolean };
+}
 
 /** 상투 표현 사전 60개 — 「~에 대해 알아보겠습니다」류 도입·마무리·강조 상투구. 정규식(어미 변형 흡수). */
 export const CLICHES: { re: RegExp; label: string }[] = [
