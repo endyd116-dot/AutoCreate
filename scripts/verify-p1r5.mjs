@@ -1,5 +1,5 @@
 // scripts/verify-p1r5.mjs — P1R5 검증 하니스 뼈대(C · 계약 v5.1 §6 · 영상 «생성 두뇌 + 러너 렌더 + 출구»). 🔴 B-1·B2·A 머지 후 트리거 때 실경로로 채운다.
-//   로컬 스모크(돈 0): 스텁 provider(env VIDEO_PROVIDER_STUB=1 · B-1 이 붙이는 손잡이 이름은 트리거 때 확정) 로 chainStage 전이·잠금·이어달리기·스위퍼·코인 구간·달러 캡·kill switch·프레임 지문·uploaded_private 폭·배지 고지.
+//   로컬 스모크(돈 0): 손잡이 확정(계약 v5.2 §1.4b): dev 서버 env `VIDEO_PROVIDER_STUB=1`(provider·TTS·비전 스텁 · ai_usage 원가 0) · `CHAIN_BUDGET_MS`(기본 660000 · 이어달리기 재현은 30000 으로) · 슬롯 없는 자동 생성은 새 손잡이 없이 confirm({origin:"auto"}) slotId 없이(HTTP 밖 · tsx 로 lib 직접 호출) 로 chainStage 전이·잠금·이어달리기·스위퍼·코인 구간·달러 캡·kill switch·프레임 지문·uploaded_private 폭·배지 고지.
 //   라이브 실증(돈 씀 · 1회 · 메인 호출): 60초 실제 생성·렌더·유튜브 비공개 업로드 — 이 파일 밖(별도 스크립트 · videoId·R2 HEAD·스샷 증거).
 //   사용: node scripts/verify-p1r5.mjs   (BASE_URL 기본 http://localhost:8901 · CRON_SECRET · SECTIONS=setup,topics,director,chain,sweep,cost,rules,disclosure,fingerprint,posts,regress,cleanup)
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -101,7 +101,7 @@ async function main() {
     rec("잠금 20분 안 중복 호출 → 즉시 반환 · ai_usage 증가 0", [200, 202].includes(bg.status) && Number(u1?.c) === Number(u0?.c), `${bg.status} usage ${u0?.c}→${u1?.c}`);
     await s`UPDATE pieces SET meta = meta - 'chainLock' WHERE id = ${pieceId}`;
     // 이어달리기: chainResume.count 증가 · 이미 만든 컷 재생성 0(clip 자산 수·ai_usage video_clip 행 불변)
-    warn("이어달리기(11분 초과 → resume:true 재디스패치 · 컷 재생성 0)", "스텁 provider 의 CHAIN_BUDGET_MS 덮어쓰기 손잡이 확정 후 채움(트리거)");
+    warn("이어달리기(CHAIN_BUDGET_MS=30000 서버로 재실행 → resume:true 재디스패치 · 컷 재생성 0)", "dev 서버를 CHAIN_BUDGET_MS=30000 으로 띄운 2회차 실행에서 chainResume.count≥1 · clip 자산 수·ai_usage video_clip 행 불변을 잰다(트리거)");
   }
   /* ══ sweep — 20분 침묵 → video.sweep 재디스패치 · 상한 3회 → failed+환급+알림 ══ */
   if (SECTIONS.has("sweep") && pieceId) {
