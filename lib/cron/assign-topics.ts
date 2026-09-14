@@ -79,7 +79,7 @@ export const assignTopicsStep: CronStep = {
     const lead = ctx.settings.topicLeadDays;
     // 창 = 오늘(KST) ~ 오늘+topicLeadDays. 경계는 SQL 안에서 만든다(PITFALLS #4).
     const slots = await q(sql`SELECT id, channel, account_id, slot_date::text AS d FROM slots
-      WHERE tenant_id = ${ctx.tid} AND status = 'planned' AND topic_id IS NULL AND piece_id IS NULL
+      WHERE tenant_id = ${ctx.tid} AND status IN ('planned','no_topic') AND topic_id IS NULL AND piece_id IS NULL   -- ★C6 fix: no_topic 도 다시 본다(리필 뒤 영영 비어 있던 자리)
         AND slot_date >= ${kstToday()} AND slot_date <= ${kstToday()} + ${lead}::int
       ORDER BY slot_date, publish_at NULLS LAST, id`);
     if (!slots.length) return { changed: 0, skipped: 0 };
@@ -111,6 +111,7 @@ export const assignTopicsStep: CronStep = {
       const cand = pickFor(pool, channel, takenNormKeys, (c) => { const r = tooSimilarToOtherAccount(c, recent, slotAccountId); if (r.similar) similarSkipped++; return r.similar; });
       if (!cand) {
         // 소재가 정말 없다 — 슬롯에 사유를 남기고 알림 1회. 조용한 0건 금지(다음 주기 재시도).
+        // ★C6 라이브 실측(2026-09-14): 종전엔 no_topic 이 된 자리를 다음 주기가 다시 안 봤다(SELECT 가 planned 만) — 리필로 소재가 생겨도 영영 빈 자리였다.
         if (await setSlot(ctx.tid, slotId, "no_topic", "쓸 소재가 없어요")) noTopic++;
         await notifyOnce(ctx.tid, "slot_no_topic", "소재가 떨어졌어요",
           "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", "/app/create.html");   // ★C fix: /app/topics.html 은 없는 화면(소재는 create.html)
@@ -124,7 +125,7 @@ export const assignTopicsStep: CronStep = {
       takenNormKeys.add(cand.normKey);
 
       const upd = await q(sql`UPDATE slots SET topic_id = ${cand.id}, status = 'topic_assigned', note = NULL, updated_at = NOW()
-        WHERE tenant_id = ${ctx.tid} AND id = ${slotId} AND status = 'planned' AND topic_id IS NULL RETURNING id`);
+        WHERE tenant_id = ${ctx.tid} AND id = ${slotId} AND status IN ('planned','no_topic') AND topic_id IS NULL RETURNING id`);
       if (!upd.length) {
         // 슬롯이 그새 바뀌었다(건너뛰기 등) — 소재를 도로 후보로 돌려준다(소재가 증발하지 않게).
         await q(sql`UPDATE topics SET status = 'candidate' WHERE tenant_id = ${ctx.tid} AND id = ${cand.id} AND status = 'picked'`);

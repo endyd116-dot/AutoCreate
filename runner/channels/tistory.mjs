@@ -19,9 +19,11 @@ const TITLE_SEL = '#post-title-inp, input[placeholder*="제목"], .textarea_tit'
 const MODE_OPEN_SEL = "#editor-mode-layer-btn-open, .btn_editor_mode, button[class*='mode']";
 const HTML_MODE_SEL = "#editor-mode-html, [data-mode='html'], li:has-text('HTML')";
 const CM_SEL = ".CodeMirror";
-const DONE_SEL = "#publish-layer-btn, button:has-text('완료')";
-const SAVE_SEL = "#save-btn, button:has-text('저장')";
-const PUBLISH_SEL = "#publish-btn, .btn_publish, button:has-text('공개 발행')";
+/* 실측(2026-09-14 job #74 · TinyMCE 티스토리 에디터): 하단에 «임시저장 N»(저장) · «완료»(발행 레이어 열기),
+   우상단에 «기본모드 ∨»(모드 전환). 텍스트가 자식 span 에 있어 :has-text 가 못 잡을 수 있어 getByText 폴백을 함께 쓴다. */
+const DONE_SEL = "#publish-layer-btn, button:has-text('완료'), a:has-text('완료')";
+const SAVE_SEL = "#save-btn, button:has-text('임시저장'), a:has-text('임시저장'), .btn_save, [class*='save']";
+const PUBLISH_SEL = "#publish-btn, .btn_publish, button:has-text('공개 발행'), button:has-text('공개'), button:has-text('발행')";
 
 function blogHost(handle) {
   const h = String(handle ?? "").replace(/^@/, "").trim();
@@ -74,6 +76,17 @@ async function openEditor(page, host, shotKey) {
     } catch { /* 무시 */ }
   }
   await shot(page, shotKey, "01-에디터진입");
+  // 🔴 실측 DOM 덤프(RUNNER_DEBUG=1) — 이 화면은 세션이 안 남아 매번 2FA 라, 한 번 뜰 때 실제 버튼·모드·에디터 이름을 받아 적는다.
+  if (process.env.RUNNER_DEBUG === "1") {
+    const d = await page.evaluate(() => {
+      const desc = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}.${(el.className || "").toString().split(/\s+/).filter(Boolean).slice(0, 2).join(".")}[${(el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 12)}]`;
+      const btns = [...document.querySelectorAll("button, a[role='button'], [class*='btn']")].filter((e) => /저장|완료|발행|공개|모드|HTML|기본/.test(e.textContent || "")).slice(0, 20).map(desc);
+      const ifr = [...document.querySelectorAll("iframe")].map((f) => f.id || f.name || "(no-id)");
+      const titles = [...document.querySelectorAll("input,textarea")].filter((e) => /제목|title/i.test((e.placeholder || "") + (e.id || "") + (e.className || ""))).map(desc);
+      return { btns, ifr, titles, ce: document.querySelectorAll("[contenteditable='true']").length };
+    }).catch(() => null);
+    console.log("  · [probe] 버튼:", JSON.stringify(d?.btns)); console.log("  · [probe] iframe:", JSON.stringify(d?.ifr), "제목칸:", JSON.stringify(d?.titles), "ce:", d?.ce);
+  }
   if (!(await page.locator(TITLE_SEL).first().isVisible({ timeout: 10_000 }).catch(() => false))) {
     const seen = ((await page.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
     throw BLOCK("selector_changed", `글쓰기 화면을 찾지 못했어요 — url=${page.url().slice(0, 90)} · 화면="${seen.slice(0, 120)}"`);
@@ -83,18 +96,35 @@ async function openEditor(page, host, shotKey) {
 /** HTML 모드로 전환하고 bodyHtml 을 통째로 넣는다. 성공 = true. */
 async function tryHtmlMode(page, bodyHtml, shotKey) {
   try {
-    const opener = page.locator(MODE_OPEN_SEL).first();
+    const opener = page.locator(MODE_OPEN_SEL).first();   // 실측: button#editor-mode-layer-btn-open
     if (!(await opener.isVisible({ timeout: 3000 }).catch(() => false))) return false;
     await opener.click({ timeout: 4000 });
-    await settle(page, 600);
-    const htmlItem = page.locator(HTML_MODE_SEL).first();
-    if (!(await htmlItem.isVisible({ timeout: 3000 }).catch(() => false))) return false;
-    await htmlItem.click({ timeout: 4000 });
+    await settle(page, 800);
+    /* 🔴 실측(job #75): 레이어 안 «HTML» 항목이 <button>·[data-mode] 가 아니라 텍스트 노드일 수 있어 CSS 로 못 잡았다.
+       카카오 «계속하기» 와 같은 처치 — 글자로 찾고 클릭 가능한 조상까지 올라가 누른다. 열린 레이어 DOM 도 덤프(RUNNER_DEBUG). */
+    if (process.env.RUNNER_DEBUG === "1") {
+      const layer = await page.evaluate(() => [...document.querySelectorAll("a,button,li,span,div")]
+        .filter((e) => /HTML|마크다운|기본모드/.test(e.textContent || "") && (e.textContent || "").length < 20)
+        .slice(0, 12).map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}.${(e.className || "").toString().split(/\s+/).filter(Boolean).slice(0, 2).join(".")}[${(e.textContent || "").trim().slice(0, 10)}]`)).catch(() => []);
+      console.log("  · [probe] 모드 레이어:", JSON.stringify(layer));
+    }
+    let clicked = false;
+    const cssItem = page.locator(HTML_MODE_SEL).first();
+    if (await cssItem.isVisible({ timeout: 1500 }).catch(() => false)) { await cssItem.click({ timeout: 3000 }); clicked = true; }
+    else {
+      const byText = page.getByText("HTML", { exact: true }).first();
+      if (await byText.isVisible({ timeout: 1500 }).catch(() => false)) {
+        const anc = byText.locator("xpath=ancestor-or-self::*[self::button or self::a or self::li or @role='menuitem'][1]").first();
+        await (await anc.isVisible({ timeout: 300 }).catch(() => false) ? anc : byText).click({ timeout: 3000 });
+        clicked = true;
+      }
+    }
+    if (!clicked) return false;
     await settle(page, 1500);
-    // 모드 전환 확인 팝업(«HTML 모드로 바꾸면 서식이…») — 확인.
-    for (const sel of ["button:has-text('확인')", ".btn_confirm", "button[class*='confirm']"]) {
+    // 모드 전환 확인 팝업(«HTML 모드로 바꾸면 편집이 제한될 수 있습니다» 등) — 확인/예.
+    for (const sel of ["button:has-text('확인')", "button:has-text('예')", ".btn_confirm", "button[class*='confirm']", ".btn_g.highlight"]) {
       const b = page.locator(sel).first();
-      if (await b.isVisible({ timeout: 1200 }).catch(() => false)) { await b.click({ timeout: 3000 }).catch(() => {}); break; }
+      if (await b.isVisible({ timeout: 1000 }).catch(() => false)) { await b.click({ timeout: 3000 }).catch(() => {}); break; }
     }
     await settle(page, 1200);
     if (!(await page.locator(CM_SEL).first().isVisible({ timeout: 5000 }).catch(() => false))) return false;
@@ -156,12 +186,23 @@ async function playOpsFallback(page, plan, files, shotKey, missed) {
 /** 발행 레이어: 카테고리·공개·태그 → 확정. dryRun 이면 레이어 전에 임시저장하고 끝낸다. */
 async function finishPublish(page, plan, options, shotKey, dryRun) {
   if (dryRun) {
-    const save = page.locator(SAVE_SEL).first();
-    if (!(await save.isVisible({ timeout: 3000 }).catch(() => false))) throw BLOCK("selector_changed", "임시저장 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
-    await save.click({ timeout: 6000 });
-    await settle(page, 2500);
+    /* 🔴 임시저장 버튼을 CSS 로 못 찾으면 글자로(«임시저장») 찾고 클릭 가능한 조상까지 올라간다.
+       그래도 없으면 — TinyMCE 티스토리는 **자동 저장**이 돈다(«자동 저장 완료 HH:MM:SS»). 그 지표가 보이면
+       드라이런의 목표(발행 없이 초안 저장)는 이미 이뤄진 것이라 성공으로 본다(임시저장까지만 · 발행 0). */
+    let saved = false;
+    let save = page.locator(SAVE_SEL).first();
+    if (!(await save.isVisible({ timeout: 3000 }).catch(() => false))) {
+      const byText = page.getByText("임시저장", { exact: false }).first();
+      if (await byText.isVisible({ timeout: 2000 }).catch(() => false)) {
+        save = byText.locator("xpath=ancestor-or-self::*[self::button or self::a or @role='button'][1]").first();
+        if (!(await save.isVisible({ timeout: 500 }).catch(() => false))) save = byText;
+      } else { save = null; }
+    }
+    if (save) { await save.click({ timeout: 6000 }).catch(() => {}); await settle(page, 2500); saved = true; }
+    const autosaved = await page.getByText(/자동 저장 완료/).first().isVisible({ timeout: 3000 }).catch(() => false);
     await shot(page, shotKey, "90-임시저장");
-    return { dryRun: true };
+    if (!saved && !autosaved) throw BLOCK("selector_changed", "임시저장 버튼도 자동저장 지표도 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+    return { dryRun: true, notes: [saved ? "임시저장 클릭" : "자동저장 확인(버튼 미발견)"] };
   }
 
   const done = page.locator(DONE_SEL).first();
@@ -232,22 +273,44 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
   let files = null;
   try {
   if (!(await isLoggedIn(page, host))) {
+    /* 🔴 근본 수리(job #77~#84 실측): **카카오 계정은 무인 자동 로그인을 하지 않는다.**
+       카카오는 2단계(휴대폰 승인) + 동의 화면 + OAuth 콜백을 거치는데, 콜백이 자동화 컨텍스트에서 세션을 완성하지 못하고
+       티스토리 로그인으로 **되돌아오는 리다이렉트 루프**가 있다(FAIL 스냅샷 = 티스토리 로그인 페이지). 봇이 뚫을 수 있는 화면이 아니다.
+       ⇒ 사람이 «다시 로그인»(session.login · 헤드풀)으로 **한 번** 로그인해 쿠키를 저장하면, 이후 발행은 그 쿠키(claim 이 실어 준다)로 돈다.
+          이게 실제 사용자 흐름이다. 여기서 자동 로그인으로 계정을 위험에 빠뜨리지 않는다. */
+    if (account.login?.method === "kakao") {
+      throw BLOCK("login_fail", "카카오 로그인은 창에서 한 번 직접 해 주셔야 해요. 앱에서 «다시 로그인»을 누르면 창이 열리고, 그 로그인 세션으로 이후 글이 자동으로 올라갑니다.");
+    }
     if (!account.login?.id || !account.login?.pw) throw BLOCK("login_fail", "저장된 로그인이 만료됐어요. 앱에서 «다시 로그인»을 눌러 주세요.");
-    // 로그인 방식(카카오/자체)은 계정 자격에 실려 온다(없으면 화면을 보고 판단).
-    if (account.login.method === "kakao") process.env.AC_TISTORY_LOGIN = "kakao";
     await loginWithIdPw(page, account.login.id, account.login.pw, shotKey);
-    if (!(await isLoggedIn(page, host))) throw BLOCK("login_fail", "로그인은 됐는데 이 블로그의 관리 화면에 들어가지 못했어요.");
+    /* 🔴 카카오 동의 뒤 티스토리 OAuth 콜백이 자동화에서 세션을 못 세우고 authorize 로 되돌아오는 루프가 있다(job #84 실측).
+       콜백이 세션을 세웠을 수도 있어 «에디터로 직접» 몇 번 가 본다(OAuth 춤이 멈춘 뒤 정착할 시간). 그래도 안 서면
+       그건 사람이 완료해야 하는 화면이라 — 자동 재시도로 뚫지 않고 «다시 로그인»(헤드풀 세션 로그인)으로 정직하게 넘긴다. */
+    let settled = false;
+    for (let i = 0; i < 3 && !settled; i++) { if (await isLoggedIn(page, host)) settled = true; else await settle(page, 2500); }
+    if (!settled) throw BLOCK("login_fail", "카카오 로그인이 자동으로 끝나지 않았어요(로그인 화면이 되돌아와요). 앱에서 «다시 로그인»을 눌러 창에서 직접 한 번 로그인해 주시면 그 세션으로 자동 발행됩니다.");
   }
   await shot(page, shotKey, "00-로그인확인");
 
   await openEditor(page, host, shotKey);
 
-  // 제목
-  const title = page.locator(TITLE_SEL).first();
-  await title.click({ timeout: 8000 }).catch(() => {});
-  await title.fill(String(job.payload?.title ?? "")).catch(async () => {
-    await page.keyboard.insertText(String(job.payload?.title ?? ""));
-  });
+  // 제목 — 🔴 실측(job #75): fill 이 조용히 빗나가 제목이 **본문에 섞여 들어갔다**. 채운 뒤 값을 되읽어 확인하고,
+  //   비었으면 클릭 후 타자로 다시(그래도 비면 notes 로 보고 · 조용히 넘기지 않는다).
+  const titleText = String(job.payload?.title ?? "");
+  const titleBox = page.locator("textarea#post-title-inp, #post-title-inp, .textarea_tit").first();
+  const titleNotes = [];
+  if (await titleBox.isVisible({ timeout: 8000 }).catch(() => false)) {
+    await titleBox.fill(titleText).catch(() => {});
+    if ((await titleBox.inputValue().catch(() => "")) !== titleText) {
+      await titleBox.click({ timeout: 4000 }).catch(() => {});
+      await page.keyboard.press("Control+A").catch(() => {});
+      await page.keyboard.type(titleText, { delay: 8 }).catch(() => {});
+    }
+    const got = await titleBox.inputValue().catch(() => "");
+    if (got !== titleText) titleNotes.push(`제목 입력 확인 실패(들어간 값 "${got.slice(0, 20)}")`);
+  } else {
+    titleNotes.push("제목 칸을 못 찾았어요(textarea#post-title-inp)");
+  }
   await settle(page, 600);
 
   files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
@@ -263,10 +326,11 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
     }
     if (missed.image) notes.push(`사진 버튼 ${missed.image}건 미발견`);
     if (missed.imageDownload) notes.push(`사진 ${missed.imageDownload}장 내려받기 실패`);
+    notes.push(...titleNotes);
     notes.push(...(plan.stats.notes ?? []));
 
     const out = await finishPublish(page, plan, job.payload?.options, shotKey, dryRun);
-    return { ...out, notes };
+    return { ...out, notes: [...notes, ...(out.notes ?? [])] };
   }
   } catch (e) {
     await failShot(page, shotKey);
