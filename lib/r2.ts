@@ -4,7 +4,8 @@
  *   공개 URL: R2_PUBLIC_BASE 가 있으면 `${base}/${key}` · 없으면 우리 서빙 함수 `/api/r2-image?key=`(netlify/functions/r2-image.ts).
  *   graceful: 미설정이면 r2Configured()=false — 호출부가 정직하게 «이미지 저장소 미설정»으로 처리.
  */
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 let _client: S3Client | null = null;
 
@@ -50,6 +51,29 @@ export async function r2Get(key: string): Promise<{ bytes: Uint8Array; contentTy
     const bytes = await r.Body.transformToByteArray();
     return { bytes, contentType: r.ContentType || "application/octet-stream" };
   } catch { return null; }
+}
+
+/* ───────── P1R5 §2.1 — 러너 렌더용(B2 추가 · 기존 함수 무변경) ─────────
+ *   러너에 **R2 자격을 주지 않는다**(CLAUDE §4.7 «평문 표면 2곳»). 대신 서버가 잡을 내려줄 때
+ *   읽을 것은 presigned GET, 올릴 곳은 presigned PUT 으로 **URL 만** 쥐여 준다(유효시간 제한).
+ */
+
+/** 객체가 실제로 있나 + 크기. 🔴 «러너가 올렸다»는 주장을 믿지 않고 이걸로 확인한다(계약 §2.1). 없으면 null. */
+export async function r2Head(key: string): Promise<{ bytes: number; contentType: string } | null> {
+  try {
+    const r = await getR2Client().send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    return { bytes: Number(r.ContentLength ?? 0), contentType: r.ContentType || "application/octet-stream" };
+  } catch { return null; }
+}
+
+/** 올리기용 서명 URL(러너가 mp4·포스터를 직접 PUT — 함수 본문 6MB 벽 우회). */
+export async function r2PresignPut(key: string, contentType: string, expiresSec = 3600): Promise<string> {
+  return getSignedUrl(getR2Client(), new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, ContentType: contentType }), { expiresIn: expiresSec });
+}
+
+/** 읽기용 서명 URL(러너가 클립·이미지·오디오를 내려받는다). 공개 버킷이 아니어도 된다. */
+export async function r2PresignGet(key: string, expiresSec = 3600): Promise<string> {
+  return getSignedUrl(getR2Client(), new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: expiresSec });
 }
 
 /** 공개 URL — R2_PUBLIC_BASE(공개 버킷 커스텀 도메인) 있으면 직접, 없으면 서빙 함수 경유. */
