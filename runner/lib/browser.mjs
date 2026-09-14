@@ -47,6 +47,25 @@ export async function openContext({ chromium }, { profileKey, proxyUrl, headed, 
   const ctx = await chromium.launchPersistentContext(dir, opts);
   ctx.setDefaultTimeout(20_000);
   ctx.setDefaultNavigationTimeout(45_000);
+  /* 🔴 2026-09-15 실측(티스토리 HTML 모드): Playwright 는 핸들러가 없으면 `confirm()` 을 **자동으로 «취소»** 한다.
+     티스토리가 «작성 모드를 변경하시겠습니까?» 를 띄우고 있었는데 우리는 매번 조용히 취소를 눌렀고,
+     화면·로그 어디에도 흔적이 없어 **이틀을 엉뚱한 셀렉터만 뒤졌다**(PITFALLS #7 조용한 누락).
+     동작은 그대로 둔다(자동 승인은 위험하다 — «발행하시겠습니까»까지 눌러 줄 수 있다). 대신 **보이게** 한다:
+     뜬 확인창은 채널이 모르고 지나가더라도 여기서 한 줄로 남는다. 승인이 필요한 곳은 채널이 직접 `page.on("dialog")` 를 건다. */
+  /* ⚠️ 함정 안의 함정: 리스너를 **하나라도** 달면 Playwright 의 자동 처리가 꺼진다.
+     로그만 찍고 아무도 안 받으면 페이지가 확인창에서 **영영 멎는다**(발행이 통째로 죽는다).
+     그래서 로그 + «조금 늦은 취소»다 — 채널이 먼저 받으면(accept) 이 취소는 조용히 실패하고,
+     아무도 안 받으면 종전과 똑같이 취소된다. 동작은 그대로, 흔적만 생긴다. */
+  const watchDialogs = (p) => p.on("dialog", (d) => {
+    if (d.type() !== "beforeunload") {
+      console.log(`  · [확인창] ${d.type()}«${String(d.message() ?? "").replace(/\s+/g, " ").slice(0, 90)}» → 채널이 안 받으면 취소`);
+    }
+    setTimeout(() => { d.dismiss().catch(() => {}); }, 400);
+  });
+  /* 🔴 `ctx.on("page")` 는 **런치 때 이미 있던 첫 페이지에는 안 걸린다** — 그런데 러너가 쓰는 게 바로 그 페이지다.
+     이것만 달아 두면 «감시하고 있다»고 믿으면서 실은 아무것도 안 보는 거짓 안전망이 된다. 둘 다 건다. */
+  ctx.pages().forEach(watchDialogs);
+  ctx.on("page", watchDialogs);
   return ctx;
 }
 

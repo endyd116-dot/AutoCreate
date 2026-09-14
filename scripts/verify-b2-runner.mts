@@ -167,6 +167,7 @@ async function main() {
   }
   let ok = false;
   let canaryVerdict: "ok" | "fail" | "unknown" = "unknown";
+  let credIdBefore = 0;   // --login-first: 로그인 **전** 최신 쿠키 id(새로 생겼는지 가르는 기준)
   try {
     /* 🔴 프로필 키는 **실행마다 바뀌면 안 된다**. 하니스가 매번 새 테넌트를 만드는 바람에 `t{tid}-{channel}` 도
        매번 달라졌고, 그래서 **브라우저 프로필이 매번 새로 생겼다** — 카카오·네이버 입장에서는 늘 «처음 보는 브라우저»라
@@ -227,10 +228,25 @@ async function main() {
           (하니스가 실행마다 새 테넌트를 만들기 때문에 따로 돌리면 쿠키가 이어지지 않는다).
        ⚠️ 우선순위상 publish(10) 가 session.login(20) 보다 먼저 잡히므로 **로그인을 먼저 끝내고** 발행 잡을 넣는다. */
     if (loginFirst) {
+      /* 🔴 남아 있던 잡을 먼저 치운다(2026-09-15 실측 사고).
+         지난 실행에서 큐에 남은 `publish.tistory` 는 우선순위 10 이라 `session.login`(20)보다 **먼저 집힌다** —
+         그래서 로그인 창이 뜨기도 전에 만료 세션으로 발행을 시도하고, 실패하면서 계정을 잠가 버렸다.
+         이 하니스는 검증용 픽스처이므로 대기 중인 잡을 지우고 시작하는 것이 맞다. */
+      const cleared = await q(sql`DELETE FROM runner_jobs WHERE tenant_id = ${tid} AND status IN ('queued','claimed') RETURNING id`);
+      if (cleared.length) console.log(`   (이전 실행에서 남은 잡 ${cleared.length}건 정리 — 로그인이 먼저 집히도록)`);
+      /* 직전 실패로 계정이 잠겼을 수 있다. 로그인하러 가는 길을 계정 상태가 막으면 안 된다. */
+      await q(sql`UPDATE accounts SET status = 'active', last_error_kind = NULL, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${accountId}`);
+      // 🔴 «새 쿠키가 생겼나»를 재려면 **시작 시점의 최신 자격 id** 를 먼저 잡아 둔다(아래 검사에서 씀).
+      const [before] = await q(sql`SELECT COALESCE(MAX(id), 0) AS mx FROM account_creds WHERE account_id = ${accountId} AND kind = 'cookies'`);
+      credIdBefore = n(before?.mx);
       await enqueueJob({ tenantId: tid, kind: "session.login", accountId, payload: { channel, handle: cfg.handle, verify: true } });
       console.log(`   ① 로그인 창을 띄웁니다 — 카카오/네이버 2단계를 **직접** 눌러 주세요(최대 ${Math.round(LOGIN_WAIT_MS / 60000)}분).\n`);
       await runRunner(["--once", "--headed"], LOGIN_WAIT_MS);
-      const [cred] = await q(sql`SELECT id FROM account_creds WHERE account_id = ${accountId} AND kind = 'cookies' AND purged_at IS NULL LIMIT 1`);
+      /* 🔴 «쿠키가 있나»가 아니라 «**이번에 새로** 생겼나»를 본다.
+         종전엔 존재 여부만 봐서, 예전(만료된) 쿠키 행이 남아 있으면 로그인이 실패했는데도 ✓ 가 찍혔다
+         (2026-09-15 실측: 로그인 창이 뜨지도 않았는데 «쿠키 저장 확인» 이 통과했다 — 가짜 초록). */
+      const [cred] = await q(sql`SELECT id FROM account_creds
+        WHERE account_id = ${accountId} AND kind = 'cookies' AND purged_at IS NULL AND id > ${credIdBefore} LIMIT 1`);
       if (!cred) {
         console.error("\n   ✗ 쿠키가 저장되지 않았어요(로그인 미완료). 임시저장 드라이런을 건너뜁니다.\n");
         return;
