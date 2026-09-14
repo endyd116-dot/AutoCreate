@@ -30,6 +30,9 @@ export interface VideoSpec {
   variant: { hookType: string; palette: string; voiceId: string };
   cuts: number;
   disclosure: { badge: boolean; descriptionFirstLine: boolean };
+  /** [P1R6 §2.3] 사용자가 고른 길이에서 **자동으로 내려간** 경우의 원래 값(채널 상한 ∩ 포맷 상한).
+   *  화면이 «30초로 맞췄어요» 를 말하는 근거 — 없으면 조용히 바뀐 것이 없다는 뜻이다(조용한 하향 금지). */
+  clampedFrom?: VideoSeconds;
 }
 
 /** 대본 한 줄(script 단계 산출 · pieces.blocks 재료 · 컷 경계 = 문장 경계). */

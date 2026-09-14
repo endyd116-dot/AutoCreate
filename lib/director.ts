@@ -100,10 +100,26 @@ async function recentVideoFormats(tid: number, accountId: number | null, channel
 }
 
 /* ═══ [P1R5 §1.1] 영상 spec — 결정론(같은 brief·같은 계정이면 같은 값) ═══ */
-/** 채널·테넌트 설정 → 이 편의 길이(15|30|60). 채널 상한(클립 30)까지 자른다. */
+/** 채널·테넌트 설정 → 이 편의 길이(15|30|60). 채널 상한(클립 채널 30)까지 자른다. */
 export function videoSecondsFor(channel: string, want?: unknown): VideoSeconds {
   const n0 = Number(want); const base = n0 === 15 || n0 === 30 || n0 === 60 ? n0 : 60;
   return clampSecondsForChannel(channel, base);
+}
+/**
+ * [P1R6 §2.3] 최종 길이 = **채널 상한 ∩ 포맷 상한**. 요청값에서 내려갔으면 `clampedFrom` 으로 사실을 남긴다
+ * (화면이 «30초로 맞췄어요» 를 말한다 · 조용한 하향 금지).
+ *
+ * 🔴 겸사 수리: 종전 `buildVideoSpec` 은 **채널 상한만** 적용한 `seconds` 를 spec 에 넣고 포맷 상한은 `shortsFormOf` 안에만 있었다.
+ *    그래서 유튜브 쇼츠(60) + 클립 포맷(실제 30초)이면 `spec.seconds=60` 인데 실물은 ~15~30초가 된다 →
+ *    payload `out.maxSeconds=60` · 심사 `duration_fit` 은 «≥ 60×0.6 = 36초»를 요구 → **멀쩡한 클립이 P0 로 막힌다**.
+ *    포맷 로테이션이 클립을 고르는 1/3 확률에서 터지는 자리였다. 이제 `shortsFormOf` 가 낸 값을 정본으로 쓴다.
+ */
+export function resolveVideoSeconds(channel: string, format: VideoFormat, want?: unknown): { seconds: VideoSeconds; clampedFrom?: VideoSeconds } {
+  const asked = videoSecondsFor(channel, want);                       // 채널 상한
+  const seconds = shortsFormOf(format, asked).seconds as VideoSeconds; // + 포맷 상한·하한
+  // 사실을 남기는 건 «사용자가 골랐는데 내려간» 경우뿐이다 — 기본값(요청 없음)에서 내려간 건 알릴 것이 없다(§2.3 «자동 하향 시»).
+  const explicit = want !== undefined && want !== null && Number(want) > 0;
+  return explicit && seconds !== Number(want) ? { seconds, clampedFrom: Number(want) as VideoSeconds } : { seconds };
 }
 /** 포맷 로테이션(같은 계정 직전 영상과 다른 포맷) — 글의 pickFormat 과 같은 결. */
 function pickVideoFormat(recent: string[], seed: number): VideoFormat {
@@ -119,12 +135,12 @@ export function variantFor(i: number, accountId: number | null): { hookType: str
 }
 /** 영상 PieceSpec.video 조립(코인·원가 계산의 근거). */
 export function buildVideoSpec(a: { channel: string; accountId: number | null; index: number; recentFormats: string[]; seconds?: unknown; affiliate: boolean }): VideoSpec {
-  const seconds = videoSecondsFor(a.channel, a.seconds);
   const format = pickVideoFormat(a.recentFormats, (a.accountId ?? 0) + a.index);
+  const { seconds, clampedFrom } = resolveVideoSeconds(a.channel, format, a.seconds);
   const form = shortsFormOf(format, seconds);
   const variant = variantFor(a.index, a.accountId);
   return {
-    format, seconds, cuts: form.cuts.default,
+    format, seconds, cuts: form.cuts.default, ...(clampedFrom ? { clampedFrom } : {}),
     provider: { tier: seconds === 15 ? "filler" : "standard", key: form.provider },
     voice: { provider: typecastAvailable() && !GEMINI_VOICES.includes(variant.voiceId as typeof GEMINI_VOICES[number]) ? "typecast" : "gemini", voiceId: variant.voiceId },
     variant,
@@ -277,7 +293,13 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       const v: VideoSpec = { ...next.video, provider: { ...next.video.provider }, voice: { ...next.video.voice }, variant: { ...next.video.variant }, disclosure: { ...next.video.disclosure } };
       const pv = p.video ?? {};
       if (pv.format && ["graphic", "talking", "clip"].includes(String(pv.format))) v.format = String(pv.format) as VideoFormat;
-      if (pv.seconds !== undefined) v.seconds = videoSecondsFor(s.channel, pv.seconds);
+      /* [P1R6 §2.3] 손보기에서 길이를 고르면 **채널 ∩ 포맷** 상한을 다시 적용하고, 내려갔으면 `clampedFrom` 으로 남긴다.
+         포맷만 바꿔도(예: 60초 유지 + 클립 포맷) 상한이 달라지므로 **포맷 패치만 와도 다시 푼다**. */
+      if (pv.seconds !== undefined || pv.format) {
+        const r = resolveVideoSeconds(s.channel, v.format, pv.seconds !== undefined ? pv.seconds : v.seconds);
+        v.seconds = r.seconds;
+        if (r.clampedFrom) v.clampedFrom = r.clampedFrom; else delete v.clampedFrom;
+      }
       const form = shortsFormOf(v.format, v.seconds);
       v.provider = { tier: v.seconds === 15 ? "filler" : "standard", key: form.provider };
       v.cuts = pv.cuts !== undefined ? Math.max(form.cuts.min, Math.min(form.cuts.max, Math.trunc(n(pv.cuts)))) : form.cuts.default;
