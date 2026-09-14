@@ -591,7 +591,7 @@ account_groups (같은 채널·같은 니치 묶음 → 페일오버 단위)
 `revenue_daily(tenant_id, source, account_id?, piece_id?, date, amount_krw, currency, fx_rate, freshness: api|runner|manual, raw jsonb)` · 유니크 `(tenant, source, account, piece, date)`.
 
 ### 9.3 화면
-- 홈 큰 숫자 = **오늘 확정 수익**(어제까지 확정 + 오늘 추정은 회색 «예상»).
+- 홈 큰 숫자 = **오늘 번 돈**(사장님 확정 2026-09-14 · 두 값을 합쳐 그리지 않는다): **확정** = 오늘 날짜에 대해 하루치를 확정으로 주는 소스(애드센스·쿠팡·수동 입력)의 합 → 진하게 · **예상** = 아직 부분 수집뿐인 소스(애드포스트·유튜브)의 오늘치 → 회색 작게 «예상». «어제보다 ±N원» 은 어제 전체 합과 비교. (이전 문구 «어제까지 확정 + 오늘 추정» 은 두 가지로 읽혀 폐기 — 그 읽기로는 어제 대비가 항상 0원이 된다.)
 - 수익 탭: 이번달 총합 → 소스별 → 계정별 → **글/영상별 TOP 5**(«이 글이 이번 달 38,200원»). 신선도 배지.
 - «수익 나는 소재 학습»: piece 수익을 topic factor로 되먹임(AM `performance` 팩터 자리).
 
