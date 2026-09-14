@@ -16,10 +16,10 @@
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   const CHANNELS = [
-    ["naver_blog", "네이버 블로그", "text", "runner", "session", true], ["tistory", "티스토리", "text", "runner", "session", true], ["blogger", "블로거", "text", "api", "oauth", false],
-    ["wordpress", "워드프레스", "text", "api", "app_password", true], ["threads", "쓰레드", "text", "api", "oauth", true], ["instagram", "인스타그램", "video", "api", "oauth", false],
-    ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false], ["naver_clip", "네이버 클립", "video", "runner", "session", true], ["reels", "릴스", "video", "api", "oauth", false], ["tiktok", "틱톡", "video", "api", "oauth", false, "coming"],
-  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => ({ key, label, category, publishVia, status: status || "active", connectMethod, configured })); // 틱톡 = 준비중(가동 전 · 그리드에서 숨는다)
+    ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
+    ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
+    ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
+  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => ({ key, label, category, publishVia, status, connectMethod, configured })); // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -224,6 +224,7 @@
   const R = {
     "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: true, mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: "trial", status: "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: null }),
     "auth-refresh": () => ({ ok: true }),
+    "onboarding": (b) => { S.onboarding = { kinds: b.kinds || [], channels: b.channels || [] }; return { ok: true }; },
     "home-summary": () => { tick(); const review = S.pieces.filter((p) => p.status === "in_review").length; const todo = [];
       const online = S.devices.filter((d) => d.online).length;
       const RUNNER_CH = CHANNELS.filter((c) => c.publishVia === "runner").map((c) => c.key);
