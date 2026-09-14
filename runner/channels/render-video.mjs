@@ -52,10 +52,62 @@ export function resolveFfmpeg() {
   return "";
 }
 
+/* ───────── ffprobe 사다리 ─────────
+   🔴 2026-09-14 C 수리: 여태 보고한 `durationMs`·`frameCount` 는 **잰 값이 아니라 계획값**이었다
+      (`durationMs = -t 에 넘긴 bodySec` · `frameCount = durationMs/1000 × fps`).
+      두 숫자가 «서로 일관되게» 계산되니 심사의 `okFrames` 는 **항상 참인 항등식**이 되고,
+      산출물이 계획과 달라도(=AC-31 의 «정지 화면 + 음악» 13초 꼬리) 심사는 영영 통과시킨다.
+      → 굽고 나서 **파일을 직접 재서** 보고한다. 심사는 그 값으로 «컨테이너와 영상 길이가 갈라졌는가»를 본다.
+   사다리는 ffmpeg 것과 같은 자리 + env FFPROBE_PATH(B2 하니스 resolveFfprobe 와 동일) —
+   «방금 winget 으로 깔았는데 못 찾는다»(AC-27 계열)를 막는다. */
+const FFPROBE_CANDIDATES = () => [
+  process.env.FFPROBE_PATH,
+  _resolved ? String(_resolved).replace(/ffmpeg(\.exe)?$/i, (m) => (m.toLowerCase().endsWith(".exe") ? "ffprobe.exe" : "ffprobe")) : null,
+  "ffprobe",
+  process.env.LOCALAPPDATA ? `${process.env.LOCALAPPDATA}\\Microsoft\\WinGet\\Links\\ffprobe.exe` : null,
+  "C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe", "C:\\ffmpeg\\bin\\ffprobe.exe",
+  "/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", "/usr/bin/ffprobe",
+].filter(Boolean);
+
+let _probe = null;
+export function resolveFfprobe() {
+  if (_probe !== null) return _probe;
+  resolveFfmpeg();                                   // ffmpeg 경로를 먼저 정해야 옆자리 후보가 생긴다
+  for (const cand of FFPROBE_CANDIDATES()) {
+    try { const r = spawnSync(cand, ["-version"], { encoding: "utf8", shell: false }); if (!r.error && r.status === 0) { _probe = cand; return cand; } } catch { /* 다음 후보 */ }
+  }
+  _probe = "";
+  return "";
+}
+
+const probeNum = (v) => { const x = Number(String(v ?? "").trim()); return Number.isFinite(x) && x > 0 ? x : 0; };
+
+/**
+ * measureOutput — 구운 파일을 **직접 잰다**. 못 재면 `null`(«모른다»)이다 — 계획값을 잰 값인 척 돌려주지 않는다(AC-9).
+ *   containerMs = format.duration · videoMs/audioMs = 스트림별 duration · frameCount = 실제 패킷 수.
+ */
+function measureOutput(file) {
+  const probe = resolveFfprobe();
+  if (!probe) return null;
+  const run = (args) => { try { const r = spawnSync(probe, args, { encoding: "utf8", shell: false, timeout: 120_000 }); return r.status === 0 ? String(r.stdout || "") : ""; } catch { return ""; } };
+  const containerSec = probeNum(run(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file]).trim());
+  if (!containerSec) return null;
+  const streams = run(["-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "csv=p=0", file]).split(/\r?\n/).filter(Boolean);
+  let videoSec = 0, audioSec = 0;
+  for (const line of streams) { const [type, dur] = line.split(","); if (type === "video") videoSec = videoSec || probeNum(dur); else if (type === "audio") audioSec = audioSec || probeNum(dur); }
+  const frames = probeNum(run(["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", file]).trim());
+  return {
+    containerMs: Math.round(containerSec * 1000),
+    videoMs: Math.round((videoSec || containerSec) * 1000),   // 스트림 duration 이 N/A 인 컨테이너도 있다 → 컨테이너로 대신한다
+    audioMs: audioSec ? Math.round(audioSec * 1000) : 0,      // 0 = 오디오 트랙 없음(무음 경로)
+    frameCount: frames,
+  };
+}
+
 /** 하트비트에 실을 능력(§2.4). 🔴 ffmpeg 가 없으면 서버가 렌더 잡을 안 주고 화면이 «ffmpeg 없음» 칩을 띄운다. */
 export function caps() {
   const f = resolveFfmpeg();
-  return f ? { ffmpeg: true, ffmpegVersion: _version } : { ffmpeg: false };
+  return f ? { ffmpeg: true, ffmpegVersion: _version, ffprobe: !!resolveFfprobe() } : { ffmpeg: false };
 }
 
 const X264 = ["-crf", String(process.env.RENDER_CRF || "20"), "-preset", String(process.env.RENDER_X264_PRESET || "medium")];
@@ -296,15 +348,24 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     const bytes = await putTo(p.upload.putUrl, outPath, "video/mp4");
     await putTo(p.upload.posterPutUrl, poster, "image/jpeg");
 
-    // 🔴 위 `-t bodySec` 과 **같은 값**을 보고한다. 두 식이 갈라지면 또 «컨테이너와 다른 길이»를 참말처럼 보고하게 된다.
-    const durationMs = Math.round(bodySec * 1000);
+    /* 🔴 **잰 값으로 보고한다**(2026-09-14 C 수리 · AC-31 의 짝).
+       종전엔 `-t bodySec` 을 그대로 되돌려 보냈다 — 계획과 산출물이 갈라져도 보고가 «일관»되니 심사가 못 잡았다.
+       ffprobe 가 있으면 컨테이너·영상·오디오·실프레임을 싣고, 없으면 **새 필드를 아예 안 보낸다**(계획값을 잰 값인 척 하지 않는다).
+       옛 서버·새 서버 어느 쪽에 붙어도 깨지지 않는다(추가 필드는 전부 선택). */
+    const m = measureOutput(outPath);
+    const planMs = Math.round(bodySec * 1000);
+    const durationMs = m?.videoMs || planMs;
     return {
       render: {
         key: p.upload.key, posterKey: p.upload.posterKey,
-        durationMs, bytes, frameCount: Math.round((durationMs / 1000) * out.fps),
+        durationMs, bytes,
+        frameCount: m?.frameCount || Math.round((planMs / 1000) * out.fps),
+        ...(m ? { containerMs: m.containerMs, videoMs: m.videoMs, audioMs: m.audioMs, plannedMs: planMs, measured: true } : {}),
         ffmpegVersion: _version || undefined,
       },
-      notes: [`${sceneFiles.length}장면 · 자막 ${layers.length} · ${(bytes / 1024 / 1024).toFixed(1)}MB`],
+      notes: [`${sceneFiles.length}장면 · 자막 ${layers.length} · ${(bytes / 1024 / 1024).toFixed(1)}MB`,
+        m ? `실측 컨테이너 ${(m.containerMs / 1000).toFixed(2)}s · 영상 ${(m.videoMs / 1000).toFixed(2)}s · 오디오 ${m.audioMs ? `${(m.audioMs / 1000).toFixed(2)}s` : "없음"} · ${m.frameCount}프레임`
+          : "ffprobe 없음 — 길이는 계획값(심사는 꼬리 판정을 보류한다)"],
     };
   } catch (e) {
     try { const pg = ctx.pages()[0]; if (pg) await failShot(pg, shotKey); } catch { /* 무시 */ }

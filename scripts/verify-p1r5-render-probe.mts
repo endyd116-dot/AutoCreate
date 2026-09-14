@@ -79,6 +79,37 @@ async function main() {
     const rC = await finalizeRender(c, { key: `autocreate/${TID}/${c}/video.mp4`, posterKey: null, durationMs: 300, bytes: 900, frameCount: 0 } as never);
     out("②b 0.3초·900B·0프레임 = 진짜 빈 영상 → empty_render 로 재큐/종결", rC.reason === "empty_render", `next ${rC.next} reason ${rC.reason ?? "-"}`);
 
+    /* ②c 🔴 **꼬리 음성 대조**(2026-09-14 C 수리 · AC-31 의 짝) — 심사가 «산출물»을 보는지 확인한다.
+       B-1 실측 참값(되돌린 빌드): 컨테이너 15.00s · 영상 12.00s · 오디오 15.00s → 꼬리 **3.00s**.
+       그 보고가 들어오면 `duration_fit` 이 **떨어져야** 한다. 안 떨어지면 심사는 다시 계획서를 보고 있는 것이다. */
+    const t1 = await makePiece(TID, "C R5 프로브 ②c 꼬리(되살린 빌드)"); made.push(t1);
+    const rT = await finalizeRender(t1, { key: `autocreate/${TID}/${t1}/video.mp4`, posterKey: `autocreate/${TID}/${t1}/poster.jpg`,
+      durationMs: 12_000, bytes: 5_500_000, frameCount: 360, containerMs: 15_000, videoMs: 12_000, audioMs: 15_000, plannedMs: 12_000, measured: true } as never);
+    const aT = ((await q(sql`SELECT gate_report FROM pieces WHERE id = ${t1}`))[0]?.gate_report ?? {}) as Row;
+    const axT = (aT.axes ?? []) as { key: string; pass: boolean; detail?: string }[];
+    const durT = axT.find((x) => x.key === "duration_fit");
+    out("②c 꼬리 음성 대조 — 컨테이너 15.00s · 영상 12.00s(꼬리 3.00s) → duration_fit **실패**(P0 차단)",
+      durT ? durT.pass === false : rT.next === "failed" || rT.next === "requeued",
+      `next ${rT.next} · duration_fit ${durT ? (durT.pass ? "🔴 통과(못 잡았다)" : "실패") : "축 없음"} «${String(durT?.detail ?? "").slice(0, 60)}»`);
+
+    /* ②d 양성 대조 — 같은 보고에서 꼬리만 없애면 통과해야 한다(규칙이 아무거나 떨어뜨리는 게 아님을 보인다) */
+    const t2 = await makePiece(TID, "C R5 프로브 ②d 꼬리 없음"); made.push(t2);
+    const rOk = await finalizeRender(t2, { key: `autocreate/${TID}/${t2}/video.mp4`, posterKey: `autocreate/${TID}/${t2}/poster.jpg`,
+      durationMs: 12_000, bytes: 5_500_000, frameCount: 360, containerMs: 12_000, videoMs: 12_000, audioMs: 12_000, plannedMs: 12_000, measured: true } as never);
+    const aOk = ((await q(sql`SELECT gate_report FROM pieces WHERE id = ${t2}`))[0]?.gate_report ?? {}) as Row;
+    const axOk = ((aOk.axes ?? []) as { key: string; pass: boolean; detail?: string }[]).find((x) => x.key === "duration_fit");
+    out("②d 양성 대조 — 컨테이너 = 영상 12.00s → duration_fit 통과(규칙이 멀쩡한 영상을 죽이지 않는다)",
+      axOk ? axOk.pass === true : rOk.next === "in_review", `next ${rOk.next} · duration_fit ${axOk ? (axOk.pass ? "통과" : `🔴 실패 «${axOk.detail}»`) : "축 없음"}`);
+
+    /* ②e 옛 러너 호환 — 실측 필드가 없으면 **판정 보류**(통과도 실패도 아님 · AC-9). 죽지 않는 것까지가 호환이다. */
+    const t3 = await makePiece(TID, "C R5 프로브 ②e 옛 러너"); made.push(t3);
+    const rOld = await finalizeRender(t3, { key: `autocreate/${TID}/${t3}/video.mp4`, posterKey: `autocreate/${TID}/${t3}/poster.jpg`, durationMs: 12_000, bytes: 5_500_000, frameCount: 360 } as never);
+    const aOld = ((await q(sql`SELECT gate_report FROM pieces WHERE id = ${t3}`))[0]?.gate_report ?? {}) as Row;
+    const axOld = ((aOld.axes ?? []) as { key: string; pass: boolean; detail?: string }[]).find((x) => x.key === "duration_fit");
+    out("②e 옛 러너(실측 필드 없음) → 죽지 않고 **꼬리 판정 보류**(사유를 말한다 · AC-9)",
+      !!axOld && axOld.pass === true && /보류|계획값/.test(String(axOld.detail ?? "")),
+      `next ${rOld.next} · duration_fit ${axOld ? `${axOld.pass ? "통과" : "실패"} «${String(axOld.detail ?? "").slice(0, 40)}»` : "축 없음"}`);
+
     /* ③ 하트비트 전(last_seen_at NULL) 러너를 «꺼짐»으로 오판하지 않는다 */
     // 🔴 순서가 중요하다: `enqueueRender` 는 **적재 그 자리에서** 러너 유무를 본다(§7-2 · 기기 0대면 즉시 awaiting_runner).
     //    «등록은 했는데 아직 하트비트 전»을 재려면 기기를 **먼저** 만들어야 한다.

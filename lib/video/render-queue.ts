@@ -107,9 +107,12 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
 
   /* ② 자산 기록 — 같은 piece 의 이전 video/thumb 는 지우고 새로 넣는다(재렌더 시 중복 방지 · 멱등). */
   await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${pieceId} AND kind IN ('video','thumb')`);
+  /* 🔴 실측 필드(containerMs·videoMs·audioMs·measured)도 같이 남긴다 — `judgeVideo` 는 이 meta 만 읽는다.
+     여기서 흘리면 심사는 다시 «계획값»으로 판정하게 된다(2026-09-14 C 수리 · AC-31 의 짝). 없는 러너면 키가 안 생긴다(선택 필드). */
   await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort)
     VALUES (${tid}, ${pieceId}, 'video', ${report.key.slice(0, 240)},
-            ${jsonb({ durationMs: report.durationMs, bytes: report.bytes, frameCount: report.frameCount })}, 0)`);
+            ${jsonb({ durationMs: report.durationMs, bytes: report.bytes, frameCount: report.frameCount,
+              ...(report.measured === true ? { containerMs: report.containerMs, videoMs: report.videoMs, audioMs: report.audioMs, plannedMs: report.plannedMs, measured: true } : {}) })}, 0)`);
   if (report.posterKey) {
     await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort)
       VALUES (${tid}, ${pieceId}, 'thumb', ${report.posterKey.slice(0, 240)}, ${jsonb({ from: "render" })}, 1)`);

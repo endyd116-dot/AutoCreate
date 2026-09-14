@@ -17,7 +17,7 @@ import { checkVideoDisclosure } from "../disclosure";
 import { checkHook } from "./script";
 import { hammingHex, phashFromGray32, PHASH_SIMILAR_MAX_DISTANCE } from "./fingerprint";
 import { JUDGE_COST_USD } from "./cost";
-import { videoStub, type JudgeAxis, type JudgeGrade, type JudgeResult, type RenderPayload } from "./types";
+import { videoStub, type JudgeAxis, type JudgeGrade, type JudgeResult, type RenderPayload, type RenderReport } from "./types";
 
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -26,12 +26,14 @@ const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 export const VISION_BLIND_REASON = "심사를 돌리지 못했습니다(AI 판정이 일시 장애로 응답하지 않음) — 영상은 정상적으로 만들어졌습니다. 품질 문제가 아니므로 다시 만들 필요는 없습니다: 화면에서 보시고 이대로 예약하거나 잠시 뒤 다시 시도해 주세요.";
 /** 자막 읽기 속도 상한(초당 글자 · AM CAPTION 계약 5.5자/초 + 여유). */
 export const READ_CHARS_PER_SEC = 6.5;
+/** 컨테이너가 영상 트랙보다 이만큼 넘게 길면 «끝에 정지 화면이 붙었다»로 본다(§AC-31). 키프레임·mux 오차는 이 아래다. */
+export const TAIL_TOLERANCE_MS = Number(process.env.VIDEO_TAIL_TOLERANCE_MS || "500");
 const AXIS_LABEL: Record<string, string> = { hook_first: "첫 컷이 훅", safe_area: "자막·배지가 안전영역 안", reading_time: "자막 읽을 시간 충분", text_broken: "깨진 글자 없음", black_margin: "검은 여백 없음", frames_not_blank: "빈 프레임 없음", cut_rhythm: "컷 리듬 살아 있음", forbidden: "금칙·내부 문자열 없음", disclosure: "제휴 고지(배지·자막·설명란)", duration_fit: "길이 규격 안", similarity: "다른 계정 영상과 겹치지 않음" };
 const GRADE_OF: Record<string, JudgeGrade> = { forbidden: "P0", disclosure: "P0", duration_fit: "P0", frames_not_blank: "P0", text_broken: "P1", black_margin: "P1", safe_area: "P1", hook_first: "P1", similarity: "P1", reading_time: "P2", cut_rhythm: "P2" };
 const axis = (key: string, pass: boolean, detail?: string): JudgeAxis => ({ key, label: AXIS_LABEL[key] ?? key, pass, grade: GRADE_OF[key] ?? "P2", ...(detail ? { detail } : {}) });
 
 /* ═══ 결정론 축(페이로드) ═══ */
-export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string, unknown>, report?: { durationMs?: number; bytes?: number; frameCount?: number } | null, hookText?: string): { axes: JudgeAxis[]; repairedPayload: RenderPayload | null } {
+export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string, unknown>, report?: Partial<RenderReport> | null, hookText?: string): { axes: JudgeAxis[]; repairedPayload: RenderPayload | null } {
   const axes: JudgeAxis[] = [];
   let repaired: RenderPayload | null = null;
   const totalMs = p.scenes.length ? Math.max(...p.scenes.map((s) => s.endMs)) : 0;
@@ -68,21 +70,36 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
   // disclosure(§16B)
   const d = checkVideoDisclosure({ badge: p.overlay.badge?.text ?? null, disclosureCaption: p.disclosureCaption?.text ?? null, descriptionFirstLine: String(meta.description ?? "").split("\n")[0] ?? "" }, { affiliate: meta.affiliate, adDisclosure: meta.adDisclosure === true });
   axes.push(axis("disclosure", d.ok, d.detail));
-  // duration_fit — 실측 길이 ≤ maxSeconds+1s · ≥ 60% · bytes·frameCount 일관
+  /* duration_fit — 길이 ≤ maxSeconds+1s · ≥ 60% · 🔴 **컨테이너와 영상 트랙이 갈라지지 않았는가**.
+     2026-09-14 C 수리: 종전엔 러너가 보낸 `durationMs`(= 인코딩에 넘긴 `-t` 값)와 그걸로 나눈 `frameCount` 를 견줬다.
+     두 값이 같은 식에서 나오니 `|frames − dur×fps|` 는 **항상 참인 항등식**이었고, AC-31 의 «정지 화면 + 음악 13초 꼬리»가
+     («컨테이너 15s · 영상 12s») 그대로 통과했다 — 심사가 산출물이 아니라 **계획서**를 보고 있었다.
+     이제 러너가 `measured:true` 로 ffprobe 실측을 실어 보내면 그 값으로 본다. 안 실려 오면(옛 러너·ffprobe 없음)
+     길이 규격만 보고 **꼬리 판정은 보류**한다 — 통과도 실패도 아니다(AC-9: 못 재는 것을 «괜찮다»로 접지 않는다). */
   if (report) {
     const dur = n(report.durationMs); const okDur = dur > 0 && dur <= (p.out.maxSeconds + 1) * 1000 && dur >= p.out.maxSeconds * 1000 * 0.6;
-    const frames = n(report.frameCount); const okFrames = frames === 0 || Math.abs(frames - dur * 30 / 1000) <= 45;
-    axes.push(axis("duration_fit", okDur && okFrames, okDur ? (okFrames ? undefined : `프레임 수 ${frames} 가 길이 ${dur}ms 와 안 맞음`) : `길이 ${Math.round(dur / 100) / 10}s(규격 ${Math.round(p.out.maxSeconds * 0.6)}~${p.out.maxSeconds}s)`));
+    const measured = report.measured === true;
+    const containerMs = n(report.containerMs); const videoMs = n(report.videoMs) || dur;
+    const tailMs = measured && containerMs > 0 ? containerMs - videoMs : 0;
+    const okTail = !measured || tailMs <= TAIL_TOLERANCE_MS;
+    const detail = !okDur ? `길이 ${Math.round(dur / 100) / 10}s(규격 ${Math.round(p.out.maxSeconds * 0.6)}~${p.out.maxSeconds}s)`
+      : !okTail ? `컨테이너 ${(containerMs / 1000).toFixed(2)}s 가 영상 ${(videoMs / 1000).toFixed(2)}s 보다 ${(tailMs / 1000).toFixed(2)}s 길어요 — 끝에 정지 화면이 붙어 있어요`
+        : measured ? undefined : "러너가 잰 값이 아니라 계획값 — 꼬리 판정 보류(러너 ffprobe 필요)";
+    axes.push(axis("duration_fit", okDur && okTail, detail));
     /* frames_not_blank — 🔴 **바이트 크기로 «빈 영상»을 의심하지 않는다**(B2 실측: 단색 6초 mp4 = 31KB · H.264 는 디테일이 없으면 그만큼만 쓴다).
        예전 기준(>150KB)은 저디테일 실사(단색 배경 토킹 컷)의 멀쩡한 영상을 P0 로 죽였다.
        판정은 **프레임이 실제로 있는가**(길이 + 프레임 수)로 하고, 바이트는 «헤더만 있는 파일»(8KB 미만)만 거른다. */
     const bytes = n(report.bytes); const frameCount = n(report.frameCount);
     const headerOnly = bytes > 0 && bytes < 8_000;
-    const noFrames = dur <= 0 || (frameCount > 0 && frameCount < 10);
-    axes.push(axis("frames_not_blank", !headerOnly && !noFrames,
+    /* 🔴 프레임 수는 **실측일 때만** 판정에 쓴다(2026-09-14 C 수리). 계획값은 `dur/1000×fps` 라 «10장 미만»이 영영 안 나온다 —
+       조건이 있는데 이빨이 없는 상태였다. 실측이 오면 그 두 조건이 그때 비로소 산다. */
+    const noFrames = dur <= 0 || (measured && frameCount > 0 && frameCount < 10);
+    const framesShort = measured && frameCount > 0 && videoMs > 0 && frameCount < Math.floor((videoMs / 1000) * p.out.fps * 0.5);
+    axes.push(axis("frames_not_blank", !headerOnly && !noFrames && !framesShort,
       headerOnly ? `파일 ${bytes}B — 헤더만 있는 파일(빈 영상)`
         : noFrames ? (dur <= 0 ? "길이 0 — 프레임이 없음" : `프레임 ${frameCount}장 — 빈 영상`)
-          : undefined));
+          : framesShort ? `프레임 ${frameCount}장 — ${(videoMs / 1000).toFixed(1)}초 ${p.out.fps}fps 에 한참 못 미쳐요(끊긴 인코딩)`
+            : measured ? undefined : "프레임 수가 계획값 — 판정 보류(러너 ffprobe 필요)"));
   }
   return { axes, repairedPayload: repaired };
 }
@@ -132,7 +149,11 @@ export async function judgeVideo(pieceId: number): Promise<JudgeResult> {
   const assets = await q(sql`SELECT kind, r2_key, meta FROM piece_assets WHERE piece_id = ${pieceId} AND kind IN ('video','thumb','clip') ORDER BY kind, sort`);
   const video = assets.find((a) => a.kind === "video"); const thumb = assets.find((a) => a.kind === "thumb");
   const vmeta = (video?.meta ?? {}) as Record<string, unknown>;
-  const det = judgePayloadDeterministic(payload, meta, video ? { durationMs: n(vmeta.durationMs), bytes: n(vmeta.bytes), frameCount: n(vmeta.frameCount) } : null, String(meta.hook ?? ""));
+  const det = judgePayloadDeterministic(payload, meta, video
+    ? { durationMs: n(vmeta.durationMs), bytes: n(vmeta.bytes), frameCount: n(vmeta.frameCount),
+        // 실측이 실려 있으면 그대로 넘긴다 — 없으면 넘기지 않는다(계획값을 잰 값인 척 하지 않는다 · AC-9)
+        ...(vmeta.measured === true ? { containerMs: n(vmeta.containerMs), videoMs: n(vmeta.videoMs), audioMs: n(vmeta.audioMs), measured: true } : {}) }
+    : null, String(meta.hook ?? ""));
   const vis = await visionAxes(tid, pieceId, [thumb?.r2_key, ...assets.filter((a) => a.kind === "clip").slice(0, 2).map((a) => a.r2_key)].filter(Boolean).map(String));
   const sim = await similarityAxis(tid, pieceId, p.account_id ? n(p.account_id) : null, String(vmeta.thumbGray ?? "") || null);
   // 비전이 결정론 축(safe_area·frames_not_blank)과 겹치면 «둘 중 실패»를 채택 — 비전 불능이면 결정론만

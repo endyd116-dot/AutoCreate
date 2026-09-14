@@ -82,7 +82,25 @@ export interface RenderPayload {
   upload?: { putUrl: string; key: string; posterPutUrl: string; posterKey: string };
 }
 /** 러너 report(계약 §2.1) — B2 가 R2 HEAD 로 실존 확인한 뒤 finalizeRender 에 넘기는 모양. */
-export interface RenderReport { key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number; ffmpegVersion?: string }
+/**
+ * 러너가 굽고 나서 돌려주는 것. 🔴 `measured:true` 일 때만 길이·프레임이 **잰 값**이다(ffprobe).
+ *   2026-09-14 C 수리(AC-31 의 짝): 종전 `durationMs`·`frameCount` 는 인코딩에 넘긴 `-t` 값과 그 산수였다 —
+ *   계획끼리 일관된 숫자라 심사가 «산출물이 계획과 다르다»를 영영 볼 수 없었다(13초 정지 화면 꼬리가 통과한 이유).
+ *   옛 러너는 새 필드를 안 보낸다 → 심사는 **판정 보류**(통과도 실패도 아님 · AC-9).
+ */
+export interface RenderReport {
+  key: string; posterKey: string; durationMs: number; bytes: number; frameCount: number; ffmpegVersion?: string;
+  /** ffprobe 실측 — 컨테이너 전체 길이(ms). 영상보다 길면 «정지 화면 + 음악» 꼬리다. */
+  containerMs?: number;
+  /** ffprobe 실측 — 영상 트랙 길이(ms). */
+  videoMs?: number;
+  /** ffprobe 실측 — 오디오 트랙 길이(ms) · 0 = 무음(트랙 없음). */
+  audioMs?: number;
+  /** 러너가 인코딩에 넘긴 계획 길이(ms) — 실측과 견주는 참고값(판정 근거로 쓰지 않는다). */
+  plannedMs?: number;
+  /** true 면 위 세 값과 frameCount 가 ffprobe 실측이다. 없으면 계획값(판정 보류). */
+  measured?: boolean;
+}
 
 /* ───────── 심사(계약 §5 judgeVideo) ───────── */
 export interface JudgeAxis { key: string; label: string; pass: boolean; grade: JudgeGrade; detail?: string }
