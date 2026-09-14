@@ -1,4 +1,5 @@
 -- P1R5-B2 · 러너 렌더(§2.4) — 추가형·멱등. scripts/neon-migrate.mjs 로 적용.
+-- ⚠️ 0008 이 둘: 이 파일 = B2 runner_devices.caps · `0008-r5-video.sql` = B-1 영상 표. 둘 다 적용 완료 · 다음 번호는 0009.
 -- 🔴 파괴적 문장 0. schema.ts 선언은 B 몫(계약 §4 «db/schema.ts 는 B 만 · B2 는 SQL 만»).
 
 -- ── runner_devices.caps: 러너가 하트비트로 알리는 «능력»(§2.4) ──
