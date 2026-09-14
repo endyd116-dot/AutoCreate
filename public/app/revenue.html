@@ -6,13 +6,13 @@
 <title>수익 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=6">
+<link rel="stylesheet" href="/css/ac.css?v=7">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar"><span class="ttl">수익</span><span class="sp"></span></div>
+    <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
 <div style="display:flex;align-items:center;gap:2px;padding:6px 0 0">
   <button type="button" class="ic" id="prev" aria-label="지난달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button>
   <span id="mon" style="font-weight:700;font-size:15px"></span>
@@ -23,33 +23,33 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=5"></script>
-<script src="/js/mock.js?v=5"></script>
+<script src="/js/ui.js?v=6"></script>
+<script src="/js/mock.js?v=6"></script>
 <script>
 (async () => {
 await UI.boot("revenue");
 const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
 const today = KST(); const todayYmd = today.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 let view = { y: today.getFullYear(), m: today.getMonth() + 1 };
-let SUM = null, DAYS = [], SRC = [], accounts = [];
+let SUM = null, DAYS = [], SRC = [], accounts = [], PREV_SAME = null; // PREV_SAME = 지난달 «같은 날까지» 합(시안 문장 · 화면이 revenue-daily 로 계산)
 const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
 const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
 const won = (n) => UI.won(n);
 const dayLabel = (d) => `${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일`;
 
-/* 상단 우측 = 수익 매체로 */
-const link = document.createElement("a"); link.className = "ic"; link.href = "/app/ad-media.html"; link.setAttribute("aria-label", "수익 매체");
-link.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>';
-const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(link);
 
 async function load() {
   const from = `${mkey()}-01`; const last = new Date(view.y, view.m, 0).getDate(); const to = `${mkey()}-${String(last).padStart(2, "0")}`;
-  const [s, d, v, a] = await Promise.all([
+  const pm = new Date(view.y, view.m - 2, 1); const pmk = `${pm.getFullYear()}-${String(pm.getMonth() + 1).padStart(2, "0")}`;
+  const pmLast = new Date(pm.getFullYear(), pm.getMonth() + 1, 0).getDate();
+  const pmTo = `${pmk}-${String(Math.min(pmLast, isThisMonth() ? Number(todayYmd.slice(8, 10)) : pmLast)).padStart(2, "0")}`; // 이번 달이면 «같은 날까지» · 지난 달이면 그 전달 전체
+  const [s, d, v, a, pd] = await Promise.all([
     UI.api(`/api/revenue-summary?month=${mkey()}`), UI.api(`/api/revenue-daily?from=${from}&to=${to}`),
-    UI.api("/api/revenue-sources"), UI.api("/api/accounts-list"),
+    UI.api("/api/revenue-sources"), UI.api("/api/accounts-list"), UI.api(`/api/revenue-daily?from=${pmk}-01&to=${pmTo}`),
   ]);
   if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; }
   SUM = s; DAYS = d.ok ? (d.days || []) : []; SRC = v.ok ? (v.sources || []) : []; accounts = a.ok ? (a.accounts || []) : [];
+  PREV_SAME = pd.ok ? (pd.days || []).reduce((x, y) => x + (y.krw || 0), 0) : null;
   render();
 }
 
@@ -67,11 +67,13 @@ function render() {
   }
   UI.$("#hl").hidden = false;
   UI.$("#say").textContent = `${view.m}월에`;
-  UI.$("#num").innerHTML = `<em id="big">0원</em> 벌었어요`;
+  UI.$("#num").innerHTML = `<span id="big">0원</span> 벌었어요`; // [v4] 잉크 — 초록은 홈 한 곳뿐(화면당 색 3)
   UI.countUp(UI.$("#big"), SUM.monthKrw, won);
-  const diff = SUM.monthKrw - (SUM.prevMonthKrw || 0);
-  UI.$("#tip").innerHTML = SUM.prevMonthKrw
-    ? `지난달 ${won(SUM.prevMonthKrw)} · <b>${diff >= 0 ? "+" : "−"}${won(Math.abs(diff))}</b>`
+  // [v4] 시안 문장: «지난달 같은 날보다 67,300원 더 벌었어요» — 증가만 초록, 감소는 잉크
+  const base = PREV_SAME != null ? PREV_SAME : (SUM.prevMonthKrw || 0);
+  const diff = SUM.monthKrw - base;
+  UI.$("#tip").innerHTML = base
+    ? `${isThisMonth() ? "지난달 같은 날보다" : "그 전달보다"} <b class="${diff >= 0 ? "up" : ""}">${won(Math.abs(diff))} ${diff >= 0 ? "더" : "덜"}</b> 벌었어요`
     : "지난달에는 기록이 없어요";
   body.innerHTML = dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
   bindDaily(); bindManual();
@@ -92,7 +94,7 @@ function dailyGroup() {
     const h = Math.max(8, Math.round((r.krw / max) * 100));
     bars += `<button type="button" class="${r.krw === max ? "top" : ""}" data-d="${day}" style="height:${h}%" aria-label="${dayLabel(day)} ${won(r.krw)}"></button>`;
   }
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">날마다 ${miss.length ? `<span class="muted" style="font-weight:500">못 가져온 날 ${miss.length}일</span>` : ""}</div>
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">날마다</div>
     <div class="spark">${bars}</div><div class="spark-x"><span>1일</span><span>${upto}일</span></div>
     ${miss.length ? `<div class="spark-l">빗금 친 날은 아직 못 가져온 날이에요 · 0원이 아니에요</div>` : ""}</div>`;
 }
@@ -107,7 +109,7 @@ function bindDaily() {
 /* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */
 function sourceGroup() {
   const list = SUM.bySource || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">매체 관리</a></div>` + list.map((s) => {
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
@@ -125,7 +127,7 @@ function accountGroup() {
 /* ④ 글·영상별 TOP 5 */
 function pieceGroup() {
   const list = SUM.topPieces || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글 ${list.length}개</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">이 글이 ${view.m}월에</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
 }
 
 /* ⑤ 직접 입력 */
