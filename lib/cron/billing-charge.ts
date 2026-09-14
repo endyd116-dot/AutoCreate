@@ -16,6 +16,7 @@ import { writeAudit } from "../audit";
 import { grantIncluded } from "../coin-ledger";
 import { planOf } from "../plans";
 import { chargeTenant, kstMonthOf, periodEndOf, quotePlan, readLedger, PAID_PLANS, type Cycle } from "../subscription";
+import { applyDuePriceEvents } from "../billing/price-events";
 import { hourOf, kstHour, type CronStep, type StepOutcome } from "./base";
 
 export const BILLING_HOUR = 9;
@@ -29,6 +30,7 @@ export const billingChargeStep: CronStep = {
   async run(ctx): Promise<StepOutcome> {
     const want = typeof ctx.raw.billingHour === "string" ? hourOf(ctx.raw.billingHour, BILLING_HOUR) : BILLING_HOUR;
     if (kstHour(ctx.now) !== want) return { changed: 0, skipped: 0, ...(ctx.manual ? { detail: { skippedByHour: `${kstHour(ctx.now)}시 ≠ ${want}시` } } : {}) };
+    await applyDuePriceEvents();   // 가격 개정 게이트: 적용일이 지난 개정을 표시가에 반영(멱등 · 청구 전)
     const [t] = await q(sql`SELECT status, plan_key, suspended_at FROM tenants WHERE id = ${ctx.tid}`);
     const l = await readLedger(ctx.tid);
     if (!t || !l) return { changed: 0, skipped: 0 };

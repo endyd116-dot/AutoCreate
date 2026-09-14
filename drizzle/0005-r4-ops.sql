@@ -27,6 +27,6 @@ ALTER TABLE coupon_redemptions ADD COLUMN IF NOT EXISTS converted_at timestamp; 
 
 -- ── plan_price_events: 가격 개정 게이트(고지 → effective_at 이후 첫 청구부터) ─────────────────────
 ALTER TABLE plan_price_events ADD COLUMN IF NOT EXISTS notice_text text;
-ALTER TABLE plan_price_events ADD COLUMN IF NOT EXISTS status varchar(12) NOT NULL DEFAULT 'scheduled';  -- scheduled | notified | applied | cancelled
+ALTER TABLE plan_price_events ADD COLUMN IF NOT EXISTS status varchar(12) NOT NULL DEFAULT 'scheduled';  -- scheduled | noticed | applied | cancelled  (계약 §2.4(3) 어휘 · quotePlan 은 noticed/applied 만 본다)
 ALTER TABLE plan_price_events ADD COLUMN IF NOT EXISTS applied_at timestamp;
 ALTER TABLE plan_price_events ADD COLUMN IF NOT EXISTS notified_count integer NOT NULL DEFAULT 0;

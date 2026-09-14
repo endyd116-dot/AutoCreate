@@ -21,6 +21,7 @@ import { writeAudit } from "./audit";
 import { vatOf, subscriptionAfterDiscount, prorateUpgradeSupply, dunningSchedule } from "./billing-math";
 import { grantIncluded } from "./coin-ledger";
 import { createTicket } from "./cs";
+import { pendingKrwCoupon, markCouponConverted, validateCoupon } from "./billing/promotions";
 import { jsonb, utcDate } from "./db-util";
 import { planOf, loadPlans, type PlanDef } from "./plans";
 
@@ -74,9 +75,12 @@ export async function activeBillingKey(tid: number): Promise<{ id: number; billi
 }
 
 /* ───────── 가격 ───────── */
-export interface Quote { planKey: string; cycle: Cycle; baseKrw: number; supplyKrw: number; vatKrw: number; totalKrw: number; discountPct: number; source: "locked" | "price_event" | "plan" }
-/** 공급가 결정: 고정가 > 개정 이벤트(effective_at 경과) > plans 현재가 → 할인 → 부가세. 화면·청구가 같은 함수를 본다. */
-export async function quotePlan(tid: number, planKey: string, cycle: Cycle, ledger?: Ledger | null, now = new Date()): Promise<Quote> {
+export interface Quote { planKey: string; cycle: Cycle; baseKrw: number; supplyKrw: number; vatKrw: number; totalKrw: number; discountPct: number; source: "locked" | "price_event" | "plan"; couponCode?: string; couponKrw?: number }
+/**
+ * 공급가 결정: 고정가 > 개정 이벤트(effective_at 경과) > plans 현재가 → 할인(장부 discount_pct · 쿠폰 pct) → krw 쿠폰 1회 차감 → 부가세. 화면·청구가 같은 함수를 본다.
+ *   `opts.previewCoupon` = 아직 적용 안 한 코드를 미리 보기(subscription-quote). 실제 적용은 redeemCoupon(장부) → 여기서는 장부 값을 읽는다.
+ */
+export async function quotePlan(tid: number, planKey: string, cycle: Cycle, ledger?: Ledger | null, now = new Date(), opts: { previewCoupon?: string | null } = {}): Promise<Quote> {
   const plan = await planOf(planKey);
   const l = ledger === undefined ? await readLedger(tid) : ledger;
   let base = cycle === "year" ? (plan.priceYear || plan.priceMonth * 10) : plan.priceMonth;
@@ -90,10 +94,22 @@ export async function quotePlan(tid: number, planKey: string, cycle: Cycle, ledg
     const evPrice = after ? n(cycle === "year" ? after.priceYear : after.priceMonth) : 0;
     if (evPrice > 0) { base = evPrice; source = "price_event"; }
   }
-  const discountPct = l && l.discountPct > 0 && (!l.discountUntil || l.discountUntil.getTime() > now.getTime()) ? l.discountPct : 0;
-  const supplyKrw = subscriptionAfterDiscount(base, discountPct);
+  let discountPct = l && l.discountPct > 0 && (!l.discountUntil || l.discountUntil.getTime() > now.getTime()) ? l.discountPct : 0;
+  let couponKrw = 0; let couponCode: string | undefined;
+  if (opts.previewCoupon) {
+    const v = await validateCoupon(tid, opts.previewCoupon, planKey);
+    if (v.ok) { couponCode = v.coupon.code; if (v.coupon.kind === "pct") discountPct = Math.max(discountPct, v.coupon.value); else couponKrw = v.coupon.value; }
+  } else {
+    const pending = await pendingKrwCoupon(tid, l?.couponCode ?? null);
+    if (pending) { couponCode = pending.code; couponKrw = pending.krw; }
+    else if (l?.couponCode && discountPct > 0) couponCode = l.couponCode;
+  }
+  const supplyKrw = Math.max(0, subscriptionAfterDiscount(base, discountPct) - couponKrw);
   const vatKrw = vatOf(supplyKrw);
-  return { planKey, cycle, baseKrw: base, supplyKrw, vatKrw, totalKrw: supplyKrw + vatKrw, discountPct, source };
+  const qt: Quote = { planKey, cycle, baseKrw: base, supplyKrw, vatKrw, totalKrw: supplyKrw + vatKrw, discountPct, source };
+  if (couponCode) qt.couponCode = couponCode;
+  if (couponKrw) qt.couponKrw = Math.min(couponKrw, subscriptionAfterDiscount(base, discountPct));
+  return qt;
 }
 
 /* ───────── 🔴 청구 결과 적용 — 한 벌 ───────── */
@@ -141,6 +157,7 @@ export async function applyChargeResult(tid: number, r: ChargeOutcome, now = new
     // ④ 포함분(월 단위 · 멱등 · 월말 만료). 연납도 «이달» 몫을 지금 주고, 다음 달들은 크론이 월별 ref 로 준다.
     const plan = await planOf(r.planKey);
     const g = await grantIncluded(tid, plan.limits.coinsIncluded, kstMonthOf(now));
+    await markCouponConverted(tid, r.orderNo);   // 쿠폰 성과(전환) · krw 쿠폰은 1회 소진
     await writeAudit({ tenantId: tid, action: "billing_attempt", actorType: r.source === "ops" ? "operator" : "system", actorId: r.actorId ?? null, target: `invoice:${n(inv?.id)}`,
       detail: { ok: true, source: r.source, planKey: r.planKey, cycle: r.cycle, period: r.period, supplyKrw: r.supplyKrw, vatKrw: r.vatKrw, totalKrw: r.totalKrw, orderNo: r.orderNo, pgTid: r.pgTid ?? null, includedGranted: g.granted, keepPeriod: !!r.keepPeriod } });
     return { ok: true, status: "active", planKey: r.planKey, invoiceId: n(inv?.id) || null, nextBillingAt: r.keepPeriod ? undefined : end.toISOString(), includedGranted: g.granted };

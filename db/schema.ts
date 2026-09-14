@@ -576,3 +576,144 @@ export const revenueSourcesR3 = {
   /** status varchar(12)→varchar(16)(drizzle/0003) — 'not_configured'(14자)가 안 들어갔다(2026-09-14 스모크 22001). Phase 0 선언은 그대로 두고 여기서 폭만 기록한다. */
   statusWidth: 16,
 } as const;
+
+/* === Phase 1 R4 · 결제·구독·운영센터(P1R4-B · 2026-09-14 · drizzle/0004-r4-billing.sql · 0005-r4-ops.sql 과 동시 · B2 의 0006-r4-ops2.sql 선언 포함) ===
+ *   append-only(CLAUDE §4.4). Phase 0 정의(tenants·subscriptions·invoices·billing_keys·coin_orders·promotions·coupons·tickets…)는 그대로 두고, 이번 라운드가 더한 칸·표·인덱스만 여기에 적는다.
+ *   부분 유니크(WHERE …)·표현식 인덱스는 drizzle 선언으로 온전히 표현되지 않는다 — SQL 파일이 정본이다.
+ */
+/** subscriptions = 결제 주기 «장부»(정본은 tenants.status/plan_key/trial_ends_at · 계약 §0.1). */
+export const subscriptionsR4 = {
+  nextBillingAt: "next_billing_at",           // timestamp — 다음 정기 청구(재시도 중엔 next_retry_at 과 같음)
+  billingDay: "billing_day",                  // integer — 약정일 1~28
+  pendingPlanKey: "pending_plan_key",         // varchar(32) — 다운그레이드·주기 변경 예약(다음 주기부터)
+  pendingCycle: "pending_cycle",              // varchar(8)
+  cancelAtPeriodEnd: "cancel_at_period_end",  // boolean NOT NULL DEFAULT false
+  discountPct: "discount_pct",                // integer NOT NULL DEFAULT 0 — 쿠폰 월할인(%)
+  discountUntil: "discount_until",            // timestamp
+  priceLockedKrw: "price_locked_krw",         // integer — 가입 시점 가격 고정(가격 개정 게이트가 존중)
+  billingKeyMissingAt: "billing_key_missing_at", // timestamp — 활성인데 카드 없음(3일 뒤 정지)
+  failCount: "fail_count",                    // integer NOT NULL DEFAULT 0 — 연속 청구 실패(3회 → suspended)
+  lastChargeAt: "last_charge_at",             // timestamp
+  couponCode: "coupon_code",                  // varchar(40) — krw 쿠폰은 다음 청구 1회 차감 뒤 비운다
+  updatedAt: "updated_at",
+  /** subscriptions_tenant_uniq ON (tenant_id) — 테넌트당 장부 1행(UPSERT 근거). */
+  tenantUniq: "subscriptions_tenant_uniq",
+} as const;
+export const billingKeysR4 = {
+  cardFp: "card_fp",       // varchar(64) — sha256(KICC 마스킹 번호) · 체험 재가입 남용 판정(tenants.trial_fp 와 짝)
+  last4: "last4",          // varchar(4)
+  brand: "brand",          // varchar(40)
+  removedAt: "removed_at", // timestamp — 삭제 = 행 유지 + removed_at(active=false)
+  fpIdx: "billing_keys_fp_idx",   // ON (card_fp) WHERE card_fp IS NOT NULL
+} as const;
+export const invoicesR4 = {
+  vatKrw: "vat_krw",                 // integer NOT NULL DEFAULT 0 — 부가세(§12.0 별도 · amount = 공급가)
+  totalKrw: "total_krw",             // integer — 청구액(NULL = 옛 행 · amount+vat 로 읽는다)
+  refundedKrw: "refunded_krw",       // integer NOT NULL DEFAULT 0 — 환불 누계(total 기준)
+  orderNo: "order_no",               // varchar(60) — AC-SUB-… / AC-COIN-…
+  planKey: "plan_key",               // varchar(32)
+  attempts: "attempts",              // integer NOT NULL DEFAULT 0
+  nextRetryAt: "next_retry_at",      // timestamp — dunning D+3/D+7
+  lastError: "last_error",           // text
+  taxDocRequestedAt: "tax_doc_requested_at", // timestamp — 세금계산서/현금영수증 요청(실발급은 KICC 키 뒤 · detail.taxDoc)
+  updatedAt: "updated_at",
+} as const;
+export const coinOrdersR4 = {
+  vatKrw: "vat_krw", totalKrw: "total_krw",
+  mode: "mode",              // varchar(10) — oneclick | auth
+  error: "error",            // text — 실패 사유
+  paidAt: "paid_at", refundedAt: "refunded_at", updatedAt: "updated_at",
+  tenantPackIdx: "coin_orders_tenant_pack_idx",   // ON (tenant_id, pack_id, status) — pack_trial 1회 판정
+} as const;
+/** 코인 팩·단가표 DB 오버레이(코드 기본값 lib/coin-table.ts 는 그대로 · lib/billing/packs.ts 가 60초 캐시로 읽는다). */
+export const coinPriceOverrides = pgTable("coin_price_overrides", {
+  key:       varchar("key", { length: 40 }).primaryKey(),        // "pack:pack_50k" | "item:blog"
+  kind:      varchar("kind", { length: 8 }).notNull(),           // pack | item
+  value:     jsonb("value").notNull().default({}),                // pack { krw, coins, bonusPct, oncePerTenant, active } · item { coins }
+  active:    boolean("active").notNull().default(true),
+  updatedBy: bigint("updated_by", { mode: "number" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+/** 약관 동의 기록(§19 · 계약 §3.2 · lib/billing/consents.ts). */
+export const consents = pgTable("consents", {
+  id:        bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:  bigint("tenant_id", { mode: "number" }).notNull(),
+  userId:    bigint("user_id", { mode: "number" }),
+  kind:      varchar("kind", { length: 32 }).notNull(),           // terms | privacy | paid_terms | automation_notice | sanction_notice | creds_storage | marketing
+  version:   varchar("version", { length: 20 }).notNull(),
+  agreedAt:  timestamp("agreed_at").notNull().defaultNow(),
+  ip:        varchar("ip", { length: 64 }),
+  userAgent: varchar("user_agent", { length: 200 }),
+}, (t) => ({ tenantIdx: index("consents_tenant_idx").on(t.tenantId, t.kind, t.agreedAt) }));
+export const tenantsR4 = {
+  readonlyAt: "readonly_at",     // timestamp — 체험 종료 → readonly 전환 시각(status "readonly" · varchar(16) 폭 확인 AC-21)
+  suspendedAt: "suspended_at",   // timestamp — 청구 3회 실패/카드 없음 정지
+  opsNote: "ops_note",           // text — 운영 메모
+  trialFp: "trial_fp",           // varchar(64) — 체험을 쓴 카드 지문(같은 지문의 다른 테넌트가 체험이면 trial_ends_at=NOW())
+  /** status 어휘 확장: trial | active | past_due | readonly | suspended | cancelled | closed */
+  statuses: ["trial", "active", "past_due", "readonly", "suspended", "cancelled", "closed"],
+} as const;
+/* ── 0005-r4-ops.sql ── */
+export const ticketsR4 = {
+  autoKey: "auto_key",             // varchar(80) — 시스템 티켓 멱등 키(billing_fail:{tid}:{period} · runner_fail:{tid}:{week} · account_suspended:{tid}:{week})
+  source: "source",                // varchar(12) NOT NULL DEFAULT "user" — user|app|system|ops (channel 과 별개)
+  slaDueAt: "sla_due_at",          // timestamp — 생성 + SLA_HOURS[priority]
+  firstReplyAt: "first_reply_at",  // timestamp — 첫 운영 답변(internal 제외)
+  lastMessageAt: "last_message_at",
+  closedAt: "closed_at",
+  autoKeyUniq: "tickets_auto_key_uniq",   // UNIQUE (tenant_id, auto_key) WHERE auto_key IS NOT NULL
+  statusIdx: "tickets_status_idx",        // ON (status, priority, created_at)
+} as const;
+export const ticketMessagesR4 = { internal: "internal" } as const;            // boolean NOT NULL DEFAULT false — 운영 메모(고객에게 안 보임)
+export const macrosR4 = { sort: "sort", active: "active" } as const;
+export const promotionsR4 = {
+  conditions: "conditions",  // jsonb NOT NULL DEFAULT "{}" — { planKeys?, signupAfter?, channels? }(응답 target)
+  uses: "uses",              // integer NOT NULL DEFAULT 0 — 적용 횟수(성과 used)
+  updatedAt: "updated_at",
+  /** kind 어휘(계약 §2.4(2)): trial_days | bonus_coin | referral — config { days } · { pct, packIds?, firstChargeOnly? } · { coins } */
+  kinds: ["trial_days", "bonus_coin", "referral"],
+} as const;
+export const couponsR4 = {
+  conditions: "conditions", months: "months", name: "name", updatedAt: "updated_at",
+  /** kind 어휘(계약 §2.4(2)): pct | krw */
+  kinds: ["pct", "krw"],
+} as const;
+export const couponRedemptionsR4 = { orderNo: "order_no", convertedAt: "converted_at" } as const;   // 성과: 이 쿠폰으로 청구 성공한 시각
+export const planPriceEventsR4 = {
+  noticeText: "notice_text", status: "status",   // varchar(12) — scheduled | noticed | applied | cancelled
+  appliedAt: "applied_at", notifiedCount: "notified_count",
+} as const;
+/* ── B2 0006-r4-ops2.sql(러너 카나리·공지·AI 설정) — B2 초안 기준 선언 · 최종 DDL 이 달라지면 B2 가 B 에게 알린다 ── */
+export const canaryRuns = pgTable("canary_runs", {
+  id:        bigserial("id", { mode: "number" }).primaryKey(),
+  day:       date("day").notNull(),                       // KST 날짜
+  channel:   varchar("channel", { length: 24 }).notNull(),
+  ok:        boolean("ok"),                               // NULL = 판정 불가(세션 없음 · AC-9)
+  step:      varchar("step", { length: 40 }),
+  detail:    text("detail"),
+  shotKey:   varchar("shot_key", { length: 80 }),
+  ranAt:     timestamp("ran_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ dayIdx: index("canary_runs_day_idx").on(t.day, t.channel), uniq: uniqueIndex("canary_runs_uniq_idx").on(t.day, t.channel) }));
+export const noticesR4 = {
+  plans: "plans",           // jsonb NOT NULL DEFAULT "[]" — 대상 플랜([] = 전체)
+  channels: "channels",     // jsonb NOT NULL DEFAULT "[]" — incident 대상 채널
+  createdBy: "created_by",  // bigint — operators.id
+  updatedAt: "updated_at",
+  activeIdx: "notices_active_idx",
+} as const;
+export const aiModelOverridesR4 = {
+  candidate: "candidate",       // jsonb — 카나리 대기 체인
+  candidateAt: "candidate_at",
+  prevChain: "prev_chain",      // jsonb — 롤백용 직전 체인
+  updatedAt: "updated_at",
+} as const;
+export const aiSettings = pgTable("ai_settings", {
+  id:         varchar("id", { length: 16 }).primaryKey().default("global"),
+  updateMode: varchar("update_mode", { length: 8 }).notNull().default("manual"),   // manual | auto
+  costCapKrw: integer("cost_cap_krw"),                                             // 테넌트·일 원가 상한(NULL = 무제한)
+  candidates: jsonb("candidates").notNull().default([]),
+  watchedAt:  timestamp("watched_at"),
+  updatedBy:  bigint("updated_by", { mode: "number" }),
+  updatedAt:  timestamp("updated_at").notNull().defaultNow(),
+});

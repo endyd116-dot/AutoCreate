@@ -45,17 +45,18 @@ export async function planOf(key: string): Promise<PlanDef> {
   return all.find((p) => p.key === key) || PLAN_DEFAULTS.find((p) => p.key === key) || PLAN_DEFAULTS[0];
 }
 
-/** 활성 체험 일수 — 프로모션(trial_days)이 있으면 그 값(운영센터 이벤트). */
-export async function currentTrialDays(): Promise<number> {
+/** 활성 체험 일수 — 프로모션(trial_days)이 있으면 그 값(운영센터 이벤트). 어떤 이벤트가 적용됐는지(promoId)도 돌려준다(성과 집계 · P1R4 §2.1). */
+export async function currentTrialPromo(): Promise<{ days: number; promoId: number | null }> {
   try {
-    const rows = await db.execute(sql`SELECT config FROM promotions WHERE kind = ${"trial_days"} AND active = true
+    const rows = await db.execute(sql`SELECT id, config FROM promotions WHERE kind = ${"trial_days"} AND active = true
       AND (starts_at IS NULL OR starts_at <= NOW()) AND (ends_at IS NULL OR ends_at >= NOW()) ORDER BY created_at DESC LIMIT 1`);
-    const r = (rows as unknown as { config?: { days?: unknown } }[])[0];
+    const r = (rows as unknown as { id?: unknown; config?: { days?: unknown } }[])[0];
     const d = Number(r?.config?.days);
-    if (Number.isFinite(d) && d > 0) return d;
+    if (Number.isFinite(d) && d > 0) return { days: Math.min(90, Math.floor(d)), promoId: Number(r?.id) || null };
   } catch { /* graceful */ }
-  return TRIAL_DAYS_DEFAULT;
+  return { days: TRIAL_DAYS_DEFAULT, promoId: null };
 }
+export async function currentTrialDays(): Promise<number> { return (await currentTrialPromo()).days; }
 
 /* ═══════════ P1R4 — 플랜 게이트(계약 §1.4 · §0.1) ═══════════
  *   AM `plan-gate.ts`(1,489줄 · 광고·리드·랜딩 10축)는 **옮기지 않는다** — AC 축은 6개뿐이라 이 두 함수면 된다.

@@ -1,8 +1,9 @@
 /**
  * 구독·결제 수단·인보이스 API(계약 P1R4 §1.2 · DESIGN §12.2·§12.0):
  *   GET  /api/subscription                             → { ok, plan:{key,name,priceKrw,vatKrw,totalKrw,cycle}, status, trialEndsAt?, periodEnd?, nextBillingAt?, pendingPlanKey?, cancelAtPeriodEnd, billingKey:{has,last4?,brand?}, vatNote }
- *   GET  /api/subscription-quote?planKey&cycle          → { ok, quote:{ supplyKrw, vatKrw, totalKrw, discountPct, source } }   // 화면 «이 플랜으로» 시트가 미리 보는 값
- *   POST /api/subscription-change { planKey, cycle, agreePaidTerms? } → { ok, effectiveAt, pending, chargeNowKrw?, vatKrw?, totalKrw? } | { ok:false, step:"billing_key"|"not_configured"|"charge"|"plan"|"same"|"paid_terms" }
+ *   GET  /api/subscription-quote?planKey&cycle&couponCode? → { ok, quote:{ supplyKrw, vatKrw, totalKrw, discountPct, source, couponCode?, couponKrw? }, coupon?:{ ok, error? } }   // 화면 «이 플랜으로» 시트가 미리 보는 값(쿠폰은 미리보기만)
+ *   POST /api/subscription-change { planKey, cycle, agreePaidTerms?, couponCode? } → { ok, effectiveAt, pending, chargeNowKrw?, vatKrw?, totalKrw? } | { ok:false, step:"billing_key"|"not_configured"|"charge"|"plan"|"same"|"paid_terms"|"coupon" }
+ *     쿠폰은 청구 전에 적용(redeemCoupon · 1테넌트 1회 · pct 는 장부 할인 · krw 는 다음 청구 1회 차감) — 틀린 코드는 400 step "coupon" 으로 멈춘다(모르고 정가 결제되지 않게).
  *   POST /api/subscription-cancel { atPeriodEnd:true|false } → { ok, periodEnd }
  *   POST /api/billing-key-start                          → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }
  *   GET  /api/billing-key-return?…KICC 콜백              → 302 /app/plan.html?key=ok|fail
@@ -19,6 +20,7 @@ import { utcDate } from "../../lib/db-util";
 import { subscriptionView, quotePlan, changePlan, cancelAtPeriodEnd, PAID_PLANS, type Cycle } from "../../lib/subscription";
 import { startBillingKey, approveBillingKey, removeBillingKeyOf } from "../../lib/billing/billing-key";
 import { requirePaidTerms } from "../../lib/billing/consents";
+import { redeemCoupon, validateCoupon } from "../../lib/billing/promotions";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/subscription", "/api/subscription-quote", "/api/subscription-change", "/api/subscription-cancel", "/api/billing-key-start", "/api/billing-key-return", "/api/billing-key-remove", "/api/invoices"] };
@@ -44,8 +46,11 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/subscription") && req.method === "GET") return json({ ok: true, ...(await subscriptionView(tid)) });
     if (path.endsWith("/subscription-quote")) {
       const planKey = String(url.searchParams.get("planKey") || ""); if (!PAID_PLANS.has(planKey)) return badRequest("planKey");
-      const qt = await quotePlan(tid, planKey, cycleOf(url.searchParams.get("cycle")));
-      return json({ ok: true, quote: { supplyKrw: qt.supplyKrw, vatKrw: qt.vatKrw, totalKrw: qt.totalKrw, discountPct: qt.discountPct, source: qt.source, baseKrw: qt.baseKrw }, vatNote: "부가세 별도" });
+      const couponCode = (url.searchParams.get("couponCode") || "").trim() || null;
+      const qt = await quotePlan(tid, planKey, cycleOf(url.searchParams.get("cycle")), undefined, new Date(), { previewCoupon: couponCode });
+      const body: Record<string, unknown> = { ok: true, quote: { supplyKrw: qt.supplyKrw, vatKrw: qt.vatKrw, totalKrw: qt.totalKrw, discountPct: qt.discountPct, source: qt.source, baseKrw: qt.baseKrw, ...(qt.couponCode ? { couponCode: qt.couponCode } : {}), ...(qt.couponKrw ? { couponKrw: qt.couponKrw } : {}) }, vatNote: "부가세 별도" };
+      if (couponCode) { const v = await validateCoupon(tid, couponCode, planKey); body.coupon = v.ok ? { ok: true, kind: v.coupon.kind, value: v.coupon.value, months: v.coupon.months } : { ok: false, reason: v.reason, error: v.error }; }
+      return json(body);
     }
     if (path.endsWith("/invoices")) {
       const year = /^\d{4}$/.test(url.searchParams.get("year") || "") ? url.searchParams.get("year")! : null;
@@ -67,6 +72,10 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/subscription-change")) {
       const planKey = String(b.planKey ?? ""); if (!PAID_PLANS.has(planKey)) return badRequest("고를 수 있는 요금제가 아니에요.", "plan");
       if (!await requirePaidTerms(tid, auth.user.uid, b.agreePaidTerms, { ip: clientIp(req), ua: req.headers.get("user-agent") })) return json({ ok: false, step: "paid_terms", error: "유료 약관에 동의해 주세요." }, 400);
+      if (typeof b.couponCode === "string" && b.couponCode.trim()) {
+        const c = await redeemCoupon(tid, b.couponCode, planKey, auth.user.uid);
+        if (!c.ok) return json({ ok: false, step: "coupon", reason: c.reason, error: c.error }, 400);
+      }
       const r = await changePlan(tid, planKey, cycleOf(b.cycle), { actorId: auth.user.uid, source: "change" });
       if (!r.ok) return json({ ok: false, step: r.step, error: r.error, ...(r.totalKrw !== undefined ? { totalKrw: r.totalKrw } : {}) }, r.step === "plan" || r.step === "same" ? 400 : 200);
       return json(r);

@@ -17,6 +17,7 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { vatOf } from "../billing-math";
 import { purchaseCoins, balance } from "../coin-ledger";
+import { applyBonusCoins } from "./promotions";
 import { jsonb } from "../db-util";
 import { activeBillingKey, tenantOwner } from "../subscription";
 import { coinOrderNo, findPack, packIdOfCode, parseCoinOrderNo, type CoinPack } from "./packs";
@@ -24,7 +25,7 @@ import { coinOrderNo, findPack, packIdOfCode, parseCoinOrderNo, type CoinPack } 
 const n = (v: unknown) => Number(v || 0);
 
 export type StartResult =
-  | { ok: true; orderNo: string; mode: "oneclick"; amountKrw: number; vatKrw: number; totalKrw: number; coins: number; balance: number; invoiceId: number | null }
+  | { ok: true; orderNo: string; mode: "oneclick"; amountKrw: number; vatKrw: number; totalKrw: number; coins: number; bonus: number; balance: number; invoiceId: number | null }
   | { ok: true; orderNo: string; mode: "auth"; amountKrw: number; vatKrw: number; totalKrw: number; coins: number; pay: { url: string; form: Record<string, string> } }
   | { ok: false; step: "pack" | "once" | "not_configured" | "charge" | "tenant"; error: string; orderNo?: string; amountKrw?: number; vatKrw?: number; totalKrw?: number };
 
@@ -48,12 +49,14 @@ async function markOrder(tid: number, orderNo: string, status: "paid" | "failed"
 }
 
 /** 결제 성공 뒤 «기입 + 영수증»(㉠·㉡ 공용 · 멱등). */
-async function settle(tid: number, orderNo: string, pack: CoinPack, pgTid: string | null, actorId: number | null): Promise<{ balance: number; invoiceId: number | null; already: boolean }> {
+async function settle(tid: number, orderNo: string, pack: CoinPack, pgTid: string | null, actorId: number | null): Promise<{ balance: number; invoiceId: number | null; already: boolean; bonus: number }> {
   await markOrder(tid, orderNo, "paid", { pgTid });
   const invoiceId = await recordCoinInvoice(tid, orderNo, pack, pgTid);
   const p = await purchaseCoins(tid, pack.coins, orderNo, { actorId, reason: `코인 충전 ${pack.coins.toLocaleString("ko-KR")}개(₩${(pack.krw + vatOf(pack.krw)).toLocaleString("ko-KR")} · 유효 1년)` });
-  await writeAudit({ tenantId: tid, action: "coin_purchase", actorType: actorId ? "user" : "system", actorId, target: `order:${orderNo}`, detail: { packId: pack.id, coins: pack.coins, krw: pack.krw, vatKrw: vatOf(pack.krw), pgTid, granted: p.granted, already: p.already, invoiceId } });
-  return { balance: p.balance, invoiceId, already: p.already };
+  // 이벤트 보너스(계약 §2.1 ops-promotions bonus_coin · ref bonus:{orderNo} 멱등) — 충전이 실제로 기입된 뒤에만.
+  const bonus = p.already ? { bonus: 0, promoId: null } : await applyBonusCoins(tid, orderNo, pack.id, pack.coins, actorId);
+  await writeAudit({ tenantId: tid, action: "coin_purchase", actorType: actorId ? "user" : "system", actorId, target: `order:${orderNo}`, detail: { packId: pack.id, coins: pack.coins, krw: pack.krw, vatKrw: vatOf(pack.krw), pgTid, granted: p.granted, already: p.already, invoiceId, bonus: bonus.bonus } });
+  return { balance: bonus.bonus ? (await balance(tid)).balance : p.balance, invoiceId, already: p.already, bonus: bonus.bonus };
 }
 
 export async function startCoinPurchase(tid: number, packId: unknown, opts: { actorId: number; userAgent?: string | null; returnBase?: string }): Promise<StartResult> {
@@ -79,7 +82,7 @@ export async function startCoinPurchase(tid: number, packId: unknown, opts: { ac
       return { ok: false, step: "charge", error: r.errorMessage || "카드 결제가 되지 않았어요. 카드 한도·유효기간을 확인해 주세요.", orderNo, amountKrw: pack.krw, vatKrw, totalKrw };
     }
     const s = await settle(tid, orderNo, pack, r.pgTid ?? null, opts.actorId);
-    return { ok: true, orderNo, mode: "oneclick", amountKrw: pack.krw, vatKrw, totalKrw, coins: pack.coins, balance: s.balance, invoiceId: s.invoiceId };
+    return { ok: true, orderNo, mode: "oneclick", amountKrw: pack.krw, vatKrw, totalKrw, coins: pack.coins, bonus: s.bonus, balance: s.balance, invoiceId: s.invoiceId };
   }
   // ㉡ 인증창 — 콜백에서 approveCoinPurchase.
   const base = (opts.returnBase || process.env.SITE_URL || "").replace(/\/$/, "");
@@ -91,7 +94,7 @@ export async function startCoinPurchase(tid: number, packId: unknown, opts: { ac
   return { ok: true, orderNo, mode: "auth", amountKrw: pack.krw, vatKrw, totalKrw, coins: pack.coins, pay: { url: r.authPageUrl, form: {} } };
 }
 
-export type ApproveResult = { ok: true; tenantId: number; coins: number; balance: number; alreadyPaid: boolean } | { ok: false; tenantId?: number; reason: string };
+export type ApproveResult = { ok: true; tenantId: number; coins: number; bonus: number; balance: number; alreadyPaid: boolean } | { ok: false; tenantId?: number; reason: string };
 /** ㉡ 콜백 — 승인 확정 → 기입. 같은 주문번호 재수신은 alreadyPaid(원장 유니크가 최종 보증). */
 export async function approveCoinPurchase(authorizationId: string, orderNo: string, opts: { verifyMsgAuth?: (raw: unknown) => boolean } = {}): Promise<ApproveResult> {
   const parsed = parseCoinOrderNo(orderNo);
@@ -100,7 +103,7 @@ export async function approveCoinPurchase(authorizationId: string, orderNo: stri
   const [o] = await q(sql`SELECT pack_id, status FROM coin_orders WHERE tenant_id = ${tid} AND order_no = ${orderNo}`);
   const pack = await findPack(o?.pack_id ?? packIdOfCode(parsed.packCode));
   if (!pack) return { ok: false, tenantId: tid, reason: "unknown_pack" };
-  if (String(o?.status) === "paid") { const b = await balance(tid); return { ok: true, tenantId: tid, coins: pack.coins, balance: b.balance, alreadyPaid: true }; }
+  if (String(o?.status) === "paid") { const b = await balance(tid); return { ok: true, tenantId: tid, coins: pack.coins, bonus: 0, balance: b.balance, alreadyPaid: true }; }
   const { approveTrade } = await import("../kicc");
   const a = await approveTrade({ authorizationId, shopOrderNo: orderNo });
   if (!a.success) {
@@ -114,5 +117,5 @@ export async function approveCoinPurchase(authorizationId: string, orderNo: stri
     return { ok: false, tenantId: tid, reason: "msgauth_mismatch" };
   }
   const s = await settle(tid, orderNo, pack, a.pgTid ?? null, null);
-  return { ok: true, tenantId: tid, coins: pack.coins, balance: s.balance, alreadyPaid: s.already };
+  return { ok: true, tenantId: tid, coins: pack.coins, bonus: s.bonus, balance: s.balance, alreadyPaid: s.already };
 }

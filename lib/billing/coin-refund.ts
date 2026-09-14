@@ -65,7 +65,9 @@ export async function executeCoinRefund(tid: number, orderNo: string, opts: { ac
   const [inv] = await q(sql`SELECT pg_ref FROM invoices WHERE id = ${quote.invoiceId}`);
   const pgTid = String(inv?.pg_ref ?? "");
   if (!pgTid) return { ok: false, step: "pg", error: "결제 기록(PG 번호)이 없어 환불하지 못했어요. 문의해 주세요.", quote };
-  const c = await cancelPayment({ pgTid, amount: quote.maxRefundKrw, reason: (opts.reason ?? "코인 충전 환불").slice(0, 100) });
+  // KICC revise: 전액 = 40(amount 없음) · 부분 = 32(amount) — AM deposit.ts 관례.
+  const full = quote.maxRefundKrw >= quote.totalKrw;
+  const c = await cancelPayment({ pgTid, reviseTypeCode: full ? "40" : "32", amount: full ? undefined : quote.maxRefundKrw, reason: (opts.reason ?? "코인 충전 환불").slice(0, 100) });
   if (!c.success) {
     await writeAudit({ tenantId: tid, action: "coin_refund_failed", actorType: opts.actorType, actorId: opts.actorId, riskLevel: "medium", target: `order:${orderNo}`, detail: { refundKrw: quote.maxRefundKrw, errorCode: c.errorCode ?? null, error: c.errorMessage ?? null } });
     return { ok: false, step: "pg", error: c.errorMessage || "카드사 취소가 되지 않았어요. 잠시 뒤 다시 해 주세요.", quote };
