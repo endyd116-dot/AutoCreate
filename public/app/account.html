@@ -6,7 +6,7 @@
 <title>내 계정 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
@@ -22,7 +22,7 @@
 </div>
 <div class="group">
   <div class="gt">요금제 · 코인</div>
-  <a class="row tap" href="/app/plans.html"><span class="mk soft">₩</span><div class="l"><span class="t" id="planName">체험</span><span class="d" id="planDesc"></span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/plan.html"><span class="mk soft">₩</span><div class="l"><span class="t" id="planName">체험</span><span class="d" id="planDesc"></span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/coins.html"><span class="mk money">C</span><div class="l"><span class="t">코인 <span id="coins">0</span>개</span><span class="d">1코인 = 500원 · 충전분은 1년</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
 <div class="group">
@@ -33,8 +33,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -44,6 +44,7 @@ UI.$("#planName").textContent = P[me.tenant.planKey] || me.tenant.planKey;
 UI.$("#planDesc").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남음` : me.tenant.status === "active" ? "이용 중" : "이용 정지";
 UI.$("#plan").textContent = me.tenant.status === "trial" ? `무료 체험 ${me.tenant.trialDaysLeft}일 남았어요` : "";
 UI.$("#coins").textContent = UI.num(me.coins);
+if (me.impersonation) UI.$$(".group").forEach((g) => { if (g.textContent.includes("요금제 · 코인")) g.hidden = true; }); // [P1R4] 원격접속 중 결제 경로 숨김
 // 내 PC 프로그램 상태(켜짐/꺼짐) · 올라간 글 수
 UI.api("/api/runner-list").then((rl) => {
   if (!rl.ok) return;

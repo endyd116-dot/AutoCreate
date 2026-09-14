@@ -6,48 +6,69 @@
 <title>고객 상세 · AutoCreate 운영센터</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
-<body>
+<body class="ops">
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
-    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">고객 상세</span><span class="sp"></span></div>
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/tenants.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">고객 상세</span><span class="sp"></span></div>
 <div class="hl"><div class="say" id="key"></div><div class="num" id="name" style="font-size:24px">…</div><div class="tip" id="meta"></div></div>
+<div class="ops-two">
+<div>
 <div class="group"><div class="gt">셋업 체크리스트</div><div id="setup"></div></div>
 <div class="group"><div class="gt">빠른 작업</div>
-  <button class="row tap" type="button" id="imp"><span class="mk soft">→</span><div class="l"><span class="t">원격접속</span><span class="d">고객 화면 그대로 보고 설정을 도와줘요(감사 기록·결제 차단)</span></div></button>
+  <button class="row tap" type="button" id="imp"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h12M12 6l6 6-6 6"/></svg></span><div class="l"><span class="t">원격접속</span><span class="d">고객 화면 그대로 보고 설정을 도와줘요 · 결제 경로는 막히고 전부 감사에 남아요</span></div></button>
   <button class="row tap" type="button" id="grant"><span class="mk money">C</span><div class="l"><span class="t">코인 지급 · 회수</span><span class="d" id="coins">잔액 —</span></div></button>
-  <button class="row tap" type="button" id="plan"><span class="mk soft">₩</span><div class="l"><span class="t">플랜 · 상태 · 체험 연장</span><span class="d" id="planD"></span></div></button>
+  <button class="row tap" type="button" id="trial"><span class="mk soft">T</span><div class="l"><span class="t">체험 연장</span><span class="d" id="trialD"></span></div></button>
+  <button class="row tap" type="button" id="plan"><span class="mk soft">₩</span><div class="l"><span class="t">플랜 · 상태 바꾸기</span><span class="d" id="planD"></span></div></button>
 </div>
+<div class="group"><div class="gt">메모 <button type="button" id="noteAdd" style="color:var(--ink);font-weight:600;font-size:12.5px">쓰기</button></div><div id="notes"></div></div>
+</div>
+<div>
+<div class="group"><div class="gt">구독 · 결제</div><div id="subs"></div></div>
 <div class="group"><div class="gt">계정</div><div id="accounts"></div></div>
-<div class="group"><div class="gt">사용자 · 러너</div><div id="users"></div><div id="runners"></div></div>
+<div class="group"><div class="gt">사용자 · 러너 · 편성</div><div id="users"></div><div id="runners"></div><div id="slots"></div></div>
 <div class="group"><div class="gt">최근 기록</div><div id="audit"></div></div>
+</div>
+</div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/ops.js?v=1"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
 <script>
 (async () => {
 const op = await OPS.boot("tenants"); if (!op) return;
 const id = UI.qs.get("id"); let T;
+const can = OPS.can(op, "admin"); // operator 는 열람 + 원격접속만(계약 §0.2)
 async function load() {
-  const r = await UI.api(`/api/ops-tenant?id=${id}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } T = r;
+  const r = await UI.api(`/api/ops-tenant?id=${id}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } T = r;
   const t = r.tenant, s = OPS.status(t.status);
   UI.$("#key").textContent = t.key; UI.$("#name").textContent = t.name;
-  UI.$("#meta").innerHTML = `<span class="pill ${s[0]}">${s[1]}</span> ${t.plan_key} · 가입 ${OPS.dt(t.created_at)} · 체험 종료 ${OPS.dt(t.trial_ends_at)}`;
-  const st = r.setup; const chk = (ok, l) => `<div class="kv"><span class="k">${l}</span><span class="v">${ok ? '<span class="pill ok">완료</span>' : '<span class="pill off">아직</span>'}</span></div>`;
-  UI.$("#setup").innerHTML = chk(st.accountsConnected, "계정 연결") + chk(st.revenueSource, "수익 매체") + chk(st.rule, "편성 규칙") + chk(st.firstPublish, "첫 발행");
-  UI.$("#coins").textContent = `잔액 ${UI.num(r.coins)}코인`; UI.$("#planD").textContent = `${t.plan_key} · ${t.status}`;
-  UI.$("#accounts").innerHTML = r.accounts.length ? r.accounts.map((a) => `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">건강 ${a.health_score} · 오늘 ${a.posts_today}/${a.daily_cap}</span></div><span class="pill ${a.status === "active" ? "ok" : a.status === "suspended" ? "danger" : "warn"}">${a.status}</span></div>`).join("") : `<div class="kv"><span class="k muted">연결된 계정 없음</span></div>`;
-  UI.$("#users").innerHTML = r.users.map((u) => `<div class="kv"><span class="k">${UI.esc(u.email)} <span class="pill off">${u.role}</span></span><span class="v">${u.email_verified_at ? "인증" : "미인증"} · ${OPS.dt(u.last_login_at)}</span></div>`).join("");
-  UI.$("#runners").innerHTML = r.runners.length ? r.runners.map((d) => `<div class="kv"><span class="k">러너 ${UI.esc(d.name)}</span><span class="v"><span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status}</span> ${OPS.dt(d.last_seen_at)}</span></div>`).join("") : `<div class="kv"><span class="k muted">러너 없음</span></div>`;
-  UI.$("#audit").innerHTML = r.audit.length ? r.audit.map((a) => `<div class="kv"><span class="k">${UI.esc(a.action)} <span class="muted">${a.actor_type}#${a.actor_id ?? ""}</span></span><span class="v muted" style="font-weight:500">${OPS.dt(a.created_at)}</span></div>`).join("") : `<div class="kv"><span class="k muted">기록 없음</span></div>`;
+  UI.$("#meta").innerHTML = `${OPS.pill(s)} ${UI.esc(t.plan_key)} · 가입 ${OPS.dt(t.created_at)}${t.trial_ends_at ? ` · 체험 ${OPS.dleft(t.trial_ends_at)}(${OPS.dt(t.trial_ends_at)})` : ""}`;
+  // 셋업 4칸 — v4 이름(accounts·adMedia·rules·firstPublish) 우선, R1 이름은 폴백
+  const st = r.setup || {}; const g = (a, b) => (st[a] != null ? st[a] : st[b]);
+  const chk = (ok, l, d) => `<div class="kv"><span class="k">${l}<br><span class="muted" style="font-size:12px;font-weight:500">${d}</span></span><span class="v">${ok ? '<span class="pill ok">완료</span>' : '<span class="pill off">아직</span>'}</span></div>`;
+  UI.$("#setup").innerHTML = chk(g("accounts", "accountsConnected"), "① 계정 연결", "채널 계정이 하나라도") + chk(g("adMedia", "revenueSource"), "② 수익 매체", "애드포스트·애드센스·쿠팡 중 하나") + chk(g("rules", "rule"), "③ 편성 규칙", "자동 편성 규칙 1개 이상") + chk(g("firstPublish", "firstPublish"), "④ 첫 발행", "발행된 글 1건");
+  const cs = r.coinsSplit; UI.$("#coins").textContent = `잔액 ${UI.num(r.coins)}코인${cs ? ` · 포함 ${UI.num(cs.included)} · 충전 ${UI.num(cs.purchased)}` : ""}`;
+  UI.$("#trialD").textContent = t.trial_ends_at ? `지금 ${OPS.dleft(t.trial_ends_at)} · ${OPS.dt(t.trial_ends_at)}까지` : "체험 아님";
+  UI.$("#planD").textContent = `${t.plan_key} · ${s[1]}`;
+  const sub = r.subscription; UI.$("#subs").innerHTML = sub ? `<div class="kv"><span class="k">주기</span><span class="v">${sub.cycle === "year" ? "연납" : "월납"}</span></div><div class="kv"><span class="k">다음 청구</span><span class="v">${OPS.dt(sub.nextBillingAt)}</span></div><div class="kv"><span class="k">카드</span><span class="v">${sub.billingKey ? `${UI.esc(sub.billingKey.brand)} ${UI.esc(sub.billingKey.last4)} ${sub.billingKey.active ? '<span class="pill ok">유효</span>' : '<span class="pill warn">실패</span>'}` : '<span class="pill off">없음</span>'}</span></div>` : `<div class="kv"><span class="k">구독</span><span class="v muted" style="font-weight:500">체험 중 · 구독 없음</span></div>`;
+  UI.$("#accounts").innerHTML = (r.accounts || []).length ? r.accounts.map((a) => `<div class="row" style="min-height:44px">${UI.mark(a.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">@${UI.esc(a.handle)}</span><span class="d">건강 ${a.health_score} · 오늘 ${a.posts_today}/${a.daily_cap}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>`).join("") : `<div class="kv"><span class="k muted">연결한 계정이 없어요</span></div>`;
+  UI.$("#users").innerHTML = (r.users || []).map((u) => `<div class="kv"><span class="k">${UI.esc(u.email)} <span class="pill off">${UI.esc(u.role)}</span></span><span class="v">${u.email_verified_at ? "인증" : "미인증"} · ${OPS.dt(u.last_login_at)}</span></div>`).join("");
+  UI.$("#runners").innerHTML = (r.runners || []).length ? r.runners.map((d) => `<div class="kv"><span class="k">내 PC 프로그램 ${UI.esc(d.name)}</span><span class="v"><span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status === "online" ? "켜짐" : "꺼짐"}</span> ${OPS.dt(d.last_seen_at)}</span></div>`).join("") : `<div class="kv"><span class="k muted">PC 프로그램 없음</span></div>`;
+  UI.$("#slots").innerHTML = r.slots ? `<div class="kv"><span class="k">편성</span><span class="v">예정 ${UI.num(r.slots.planned)} · 발행됨 ${UI.num(r.slots.published)}</span></div>` : "";
+  UI.$("#notes").innerHTML = (r.notes || []).length ? r.notes.map((n) => `<div class="kv"><span class="k" style="color:var(--ink);white-space:normal">${UI.esc(n.text)}<br><span class="muted" style="font-size:12px">${UI.esc(n.by)} · ${OPS.dt(n.at)}</span></span></div>`).join("") : `<div class="kv"><span class="k muted">메모 없음</span></div>`;
+  UI.$("#audit").innerHTML = (r.audit || []).length ? r.audit.map((a) => `<div class="kv"><span class="k">${UI.esc(a.action)} <span class="muted">${UI.esc(a.detail || "")}</span></span><span class="v muted" style="font-weight:500">${OPS.dt(a.created_at)}</span></div>`).join("") : `<div class="kv"><span class="k muted">기록 없음</span></div>`;
+  ["#grant", "#trial", "#plan"].forEach((s) => { const b = UI.$(s); b.disabled = !can; b.style.opacity = can ? "" : ".45"; });
 }
-UI.$("#imp").onclick = async () => { const r = await UI.api("/api/ops-impersonate", { body: { id: Number(id) }, noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } location.href = r.redirect; };
-UI.$("#grant").onclick = () => UI.sheet(`<form id="gf"><div class="field"><label>코인(음수 = 회수)</label><input class="input" name="coins" type="number" required value="10"></div><div class="field"><label>사유</label><input class="input" name="reason" required placeholder="예: 온보딩 지원"></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">적용</button></div></form>`, { title: "코인 지급", onOpen: (sh, close) => UI.form(sh.querySelector("#gf"), async (d) => { const r = await UI.api("/api/ops-coins-grant", { body: { id: Number(id), coins: Number(d.coins), reason: d.reason }, noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } close(); UI.toast(`잔액 ${UI.num(r.balance)}코인`); load(); }) });
-UI.$("#plan").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>플랜</label><select class="input" name="planKey"><option value="">그대로</option><option>trial</option><option>starter</option><option>pro</option><option>agency</option></select></div><div class="field"><label>상태</label><select class="input" name="status"><option value="">그대로</option><option>trial</option><option>active</option><option>past_due</option><option>readonly</option><option>closed</option></select></div><div class="field"><label>체험 종료일</label><input class="input" name="trialEndsAt" type="date"></div><div class="field"><label>메모</label><input class="input" name="note"></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">저장</button></div></form>`, { title: "플랜 · 상태", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d) => { const body = { id: Number(id) }; for (const k of ["planKey", "status", "trialEndsAt", "note"]) if (d[k]) body[k] = d[k]; const r = await UI.api("/api/ops-tenant-update", { body, noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; } close(); UI.toast("저장했어요"); load(); }) });
+UI.$("#imp").onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 4px">고객 화면을 그대로 열어요. 결제·충전·비밀번호는 막히고, 모든 동작이 감사에 남아요.</p><p class="muted" style="margin:0 0 16px;font-size:13px">끝내면 고객에게 «운영자가 설정을 도와드렸어요» 알림이 가요 · 60분 상한</p><div class="cta"><button class="btn primary" type="button" id="go">원격접속 시작</button></div>`, { title: "원격접속", onOpen: (sh, close) => { sh.querySelector("#go").onclick = async () => { const r = await UI.api("/api/ops-impersonate", { body: { id: Number(id) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "시작하지 못했어요"); close(); location.href = r.redirect; }; } });
+UI.$("#grant").onclick = () => UI.sheet(`<form id="gf"><div class="sec">얼마나</div>${UI.chips("n", [[10, "+10"], [30, "+30"], [100, "+100"], [-10, "−10"]], 10)}<div class="field"><label>직접 넣기(음수 = 회수)</label><input class="input" name="coins" type="number" placeholder="예: 50"></div><div class="field"><label>사유</label><input class="input" name="reason" required placeholder="예: 온보딩 지원 · 장애 보상"><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">지급</button></div></form>`, { title: "코인 지급 · 회수", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#gf"), async (d, f) => { const n = Number(d.coins) || Number(UI.chipVal(sh, "n")); const r = await UI.api("/api/ops-coins-grant", { body: { id: Number(id), coins: n, reason: d.reason }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "reason", r.error); close(); UI.toast(`${n > 0 ? "+" : ""}${n}코인 · 잔액 ${UI.num(r.balance)}`); load(); }); } });
+UI.$("#trial").onclick = () => UI.sheet(`<div class="sec">며칠 늘릴까요</div>${UI.chips("d", [[3, "3일"], [7, "7일"], [14, "14일"], [30, "30일"]], 7)}<p class="muted" style="margin:10px 0 0;font-size:13px">읽기 전용이면 다시 체험으로 돌아가요.</p><div class="cta"><button class="btn primary" type="button" id="ok">연장</button></div>`, { title: "체험 연장", onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const r = await UI.api("/api/ops-trial-extend", { body: { id: Number(id), days: Number(UI.chipVal(sh, "d")) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "연장하지 못했어요"); close(); UI.toast(`${OPS.dt(r.trialEndsAt)}까지로 늘렸어요`); load(); }; } });
+UI.$("#plan").onclick = () => UI.sheet(`<div class="sec">플랜</div>${UI.chips("p", [["trial", "체험"], ["starter", "Starter"], ["pro", "Pro"], ["agency", "Agency"]], T?.tenant?.plan_key)}<div class="sec">상태</div>${UI.chips("s", [["trial", "체험"], ["active", "이용 중"], ["past_due", "미납"], ["readonly", "읽기 전용"], ["suspended", "정지"], ["closed", "종료"]], T?.tenant?.status)}<div class="cta"><button class="btn primary" type="button" id="ok">바꾸기</button></div>`, { title: "플랜 · 상태", onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const planKey = UI.chipVal(sh, "p"), status = UI.chipVal(sh, "s"); let r = await UI.api("/api/ops-plan-change", { body: { id: Number(id), planKey }, noRedirect: true }); if (r.ok) r = await UI.api("/api/ops-tenant-update", { body: { id: Number(id), status }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요"); load(); }; } });
+UI.$("#noteAdd").onclick = () => UI.sheet(`<form id="nf"><div class="field"><textarea class="input" name="text" rows="4" style="height:auto;padding:14px 16px" required placeholder="다음 담당자가 볼 한 줄"></textarea><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">남기기</button></div></form>`, { title: "메모", onOpen: (sh, close) => UI.form(sh.querySelector("#nf"), async (d, f) => { const r = await UI.api("/api/ops-tenant-note", { body: { id: Number(id), text: d.text }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "text", r.error); close(); load(); }) });
 load();
 })();
 </script>

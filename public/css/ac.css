@@ -217,6 +217,18 @@ input,textarea,select{font:inherit;color:inherit}
 .banner.info{background:var(--brand-soft);color:var(--ink)}
 .banner button{font-weight:700;text-decoration:underline}
 
+/* ── [P1R4] 운영센터 표(§13.0b «운영 콘솔 예외» — 고객 화면엔 쓰지 않는다 · 밀도만 높인다) ── */
+.twrap{overflow-x:auto;padding:0 4px 4px} .tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:1.4}
+.tbl th,.tbl td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle} .tbl th{color:var(--muted);font-weight:600;font-size:12px}
+.tbl tr:last-child td{border-bottom:0} .tbl td.r,.tbl th.r{text-align:right;font-variant-numeric:tabular-nums} .tbl tr.tap{cursor:pointer} .tbl tr.tap:hover{background:var(--press)}
+.tbl .pill{font-size:11px;padding:2px 7px} .tbl .mk.sm{width:24px;height:24px;border-radius:7px;font-size:11px;display:inline-grid;vertical-align:middle;margin-right:6px}
+.tbl button.lk{color:var(--ink);font-weight:600;text-decoration:underline;text-underline-offset:2px} .tbl .muted{color:var(--muted)} .locked,button.locked,.lk.locked{opacity:.4;cursor:not-allowed;pointer-events:auto}
+.ops-two{display:grid;grid-template-columns:1fr;gap:12px} .ops-three{display:grid;grid-template-columns:1fr;gap:12px;align-items:start} .ops-two>*,.ops-three>*{min-width:0} .ops-two .group,.ops-three .group{min-width:0}
+@media (min-width:1100px){ .ops-two{grid-template-columns:1fr 1fr} .ops-three{grid-template-columns:minmax(0,1fr) 300px;gap:24px} body.ops .page{max-width:1040px} } /* 운영센터는 표가 많아 넓게(§13.0b 운영 콘솔 예외) */
+.stat4{display:grid;grid-template-columns:repeat(2,1fr);gap:0 24px;padding:4px 16px 10px} .stat4 .st{padding:8px 0} .stat4 .st .k{font-size:12px;color:var(--muted);font-weight:600} .stat4 .st .v{font-size:20px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:2px}
+@media (min-width:641px){ .stat4{grid-template-columns:repeat(4,1fr)} }
+.msg{padding:10px 14px;border-radius:14px;background:var(--ground);margin:6px 16px;font-size:13.5px;line-height:1.5;max-width:86%} .msg.op{background:var(--brand-soft);margin-left:auto} .msg.sys{background:transparent;border:1px dashed var(--line);color:var(--muted);font-size:12.5px;max-width:100%} .msg small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+
 /* ── 인증 화면(2026-09-14 개편) — 폰: 전면 흰 화면 · 데스크톱: 회색 바탕 위 «카드 한 장»(그룹 섹션과 같은 결) ── */
 .page.auth{max-width:none;padding:0;background:var(--surface);display:flex;flex-direction:column;justify-content:center;min-height:100dvh;gap:0}
 .auth-in{width:100%;max-width:400px;margin:0 auto;padding:24px var(--gutter) 32px;display:flex;flex-direction:column}
@@ -229,7 +241,7 @@ input,textarea,select{font:inherit;color:inherit}
 .auth form{display:flex;flex-direction:column;gap:2px}
 .auth .cta{position:static;padding:16px 0 0;background:none;justify-content:stretch}
 .auth .cta .btn{flex:1;width:100%;min-width:0;height:54px}
-.auth .links{display:flex;justify-content:center;gap:18px;font-size:13.5px;padding:20px 0 0}
+.auth .links{display:flex;justify-content:center;gap:18px;font-size:13.5px;padding:8px 0 0} .auth .links a{display:inline-flex;align-items:center;min-height:44px;padding:0 4px}
 .auth .links a{color:var(--muted);font-weight:500}
 .auth .links a:hover{color:var(--ink)}
 .auth .foot{margin-top:auto;padding-top:28px;text-align:center;font-size:12px;color:var(--faint)}
@@ -239,12 +251,12 @@ input,textarea,select{font:inherit;color:inherit}
   .auth .foot{margin-top:24px}
 }
 /* 체크박스 — 잉크 계열 커스텀(기본 accent 색 제거) */
-.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub);padding:10px 2px;cursor:pointer;user-select:none}
+.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub);padding:10px 2px;min-height:44px;cursor:pointer;user-select:none}
 .chk input{appearance:none;-webkit-appearance:none;width:22px;height:22px;border-radius:7px;background:var(--ground);border:2px solid var(--line);flex:none;display:grid;place-items:center;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
 .chk input:checked{background:var(--brand);border-color:var(--brand)}
 .chk input:checked::after{content:"";width:11px;height:6px;border-left:2.5px solid var(--on-brand);border-bottom:2.5px solid var(--on-brand);transform:rotate(-45deg) translate(1px,-1px)}
-.chk input:focus-visible{outline:2px solid var(--sel);outline-offset:2px}
-.chk a{text-decoration:underline;text-underline-offset:2px}
+.chk input:focus-visible{outline:2px solid var(--sel);outline-offset:2px} .chk input{position:relative} .chk input::before{content:"";position:absolute;inset:-14px} /* 터치 44 — 보이는 22px 상자 밖까지 눌린다 */
+.chk a{text-decoration:underline;text-underline-offset:2px;display:inline-block;padding:12px 0;margin:-12px 0;position:relative;z-index:1}
 .divider{height:1px;background:var(--line);margin:12px 0}
 .muted{color:var(--muted)} .tnum{font-variant-numeric:tabular-nums} .center{text-align:center}
 

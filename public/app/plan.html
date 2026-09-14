@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>요금제 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
+<div class="hl"><div class="say" id="say">지금은</div><div class="num" id="cur">…</div><div class="tip" id="curTip"></div></div>
+<div class="seg" id="cycle" style="margin:0"><button type="button" data-c="month" class="on">월납</button><button type="button" data-c="year">연납 · 2개월 무료</button></div>
+<div id="cards" style="display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 0 8px;margin:0 -16px;padding-left:16px;padding-right:16px"><div class="sk" style="height:300px;min-width:280px"></div></div>
+<p class="muted center" style="margin:0;font-size:12.5px">모든 가격은 부가세 별도예요 · 카드에는 10% 더한 금액이 청구돼요</p>
+<div class="group" id="card"><div class="gt">결제 카드</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="inv"><div class="gt">청구서 · 영수증</div></div>
+<div class="group" id="cancel" hidden></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
+<script>
+(async () => {
+const me = await UI.boot("account"); if (!me) return;
+if (me.impersonation) { UI.$("#page").insertAdjacentHTML("beforeend", `<div class="group"><div class="empty"><h3>원격접속 중엔 결제할 수 없어요</h3><p>운영자가 설정을 도와드리는 동안엔 요금제·카드를 바꿀 수 없어요. 끝난 뒤 본인이 직접 해 주세요.</p></div></div>`); UI.$$("#cards, #cycle, #card, #cancel").forEach((e) => e.hidden = true); return; }
+let S = null, PLANS = [], INV = [], cycle = "month";
+const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0, starter: 1, pro: 2, agency: 3 };
+/* KICC 카드 등록 콜백 복귀(billing-key-return): ?key=ok|fail · &trial=reused = 같은 카드로 체험을 이미 씀(§12.3) */
+const key = UI.qs.get("key");
+if (key === "ok") { if (UI.qs.get("trial") === "reused") UI.sheet(`<p class="muted" style="margin:0 0 16px">이 카드로 체험을 이미 쓰신 적이 있어요. 체험은 여기서 끝나지만, 요금제를 고르면 바로 이어서 할 수 있어요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "이미 체험을 쓰셨어요", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); else UI.toast("카드를 등록했어요"); }
+else if (key === "fail") UI.toast("카드 등록이 안 됐어요 · 다시 해 주세요");
+/* 카드 안 가격은 큰 숫자(.hl)가 아니다 — 화면당 큰 숫자 1 · 공급가는 /api/plans 의 서버 값 · 부가세는 시트에서 견적(subscription-quote)으로 */
+const price = (p) => `<div style="padding:0 16px 6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${won(cycle === "year" ? p.priceYear : p.priceMonth)}<small class="muted" style="font-size:13px;font-weight:500"> /${cycle === "year" ? "년" : "월"}</small></div><div class="muted" style="font-size:13px;margin-top:4px">${VATNOTE}${cycle === "year" ? ` · 월 ${won(p.priceMonth)} × 10개월 값` : ""}</div></div>`;
+const paying = () => S && S.status === "active" && RANK[S.plan.key] > 0;
+async function load() {
+  const [s, p, i] = await Promise.all([UI.api("/api/subscription"), UI.api("/api/plans"), UI.api(`/api/invoices?year=${new Date().getFullYear()}`)]);
+  if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; } S = s; PLANS = (p.ok ? p.plans || [] : []).filter((x) => x.public !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0)); INV = i.ok ? i.rows || [] : [];
+  const st = S.status || "trial"; const trial = st === "trial", ended = st === "readonly", susp = st === "suspended";
+  const left = Math.max(0, Math.ceil((UI.utc(S.trialEndsAt) - Date.now()) / 86400e3));
+  UI.$("#say").textContent = trial ? "무료 체험" : ended ? "체험이 끝났어요" : susp ? "결제가 밀려 있어요" : "지금은";
+  UI.$("#cur").textContent = trial ? `${left}일 남았어요` : ended ? "요금제를 골라 주세요" : susp ? "카드를 확인해 주세요" : `${S.plan.name} 쓰고 있어요`;
+  UI.$("#curTip").textContent = trial ? `${UI.dateKST(S.trialEndsAt)}까지 Pro 기능 전부 · 끝나면 보기만 돼요` : ended ? "보는 건 지금도 돼요 · 고르면 바로 이어서 만들 수 있어요" : susp ? "카드 결제가 이어서 실패했어요 · 카드를 바꾸면 바로 다시 돼요"
+    : `${S.plan.cycle === "year" ? "연납" : "월납"} ${won(S.plan.priceKrw)} · ${VATNOTE}${S.nextBillingAt ? ` · 다음 청구 ${UI.dateKST(S.nextBillingAt)}` : ""}${S.pendingPlanKey ? ` · 다음 주기부터 ${UI.esc(nameOf(S.pendingPlanKey))}${S.pendingCycle ? (S.pendingCycle === "year" ? " 연납" : " 월납") : ""}` : ""}${S.cancelAtPeriodEnd ? " · 해지 예약됨" : ""}`;
+  if (S.plan.cycle && st === "active") cycle = S.plan.cycle; UI.$$("#cycle button").forEach((x) => x.classList.toggle("on", x.dataset.c === cycle));
+  renderCards();
+  const bk = S.billingKey || {};
+  UI.$("#card").innerHTML = `<div class="gt">결제 카드</div>` + (bk.has ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></span><div class="l"><span class="t">${UI.esc(bk.brand || "카드")}${bk.last4 ? ` ····${UI.esc(bk.last4)}` : ""}</span><span class="d">자동 결제에 써요</span></div><button type="button" class="btn sm secondary" id="cardChange">바꾸기</button><button type="button" class="btn sm ghost" id="cardRemove" style="color:var(--danger)">지우기</button></div>`
+    : `<button type="button" class="row tap" id="cardAdd"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">카드 등록하기</span><span class="d">등록하면 요금제를 고를 수 있어요 · 카드 정보는 결제사에만 저장돼요</span></div>${UI.chev}</button>`);
+  const cb = UI.$("#cardAdd") || UI.$("#cardChange"); if (cb) cb.onclick = addCard;
+  const rm = UI.$("#cardRemove"); if (rm) rm.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "카드 지우기", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "카드를 지우면 다음 청구가 실패해요. 새 카드를 곧 등록해 주세요.", async () => { const r = await UI.api("/api/billing-key-remove", { body: {} }); if (!r.ok) return UI.toast(r.error || "지우지 못했어요"); close(); UI.toast(r.removed ? "카드를 지웠어요" : "등록된 카드가 없어요"); load(); }) });
+  UI.$("#inv").innerHTML = `<div class="gt">청구서 · 영수증 <span class="muted" style="font-weight:500">${new Date().getFullYear()}년</span></div>` + (INV.length ? INV.map((r, k) => `<button type="button" class="row tap" data-inv="${k}"><div class="l"><span class="t">${invTitle(r)}</span><span class="d">공급가 ${won(r.amountKrw)} + 부가세 ${won(r.vatKrw)}${r.paidAt ? ` · ${UI.dateKST(r.paidAt)}` : ""}${r.status === "failed" ? " · 결제 실패" : r.status === "refunded" ? " · 환불됨" : r.refundedKrw ? ` · ${won(r.refundedKrw)} 환불` : ""}</span></div><span class="r">${won(r.totalKrw)}</span>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">아직 청구서가 없어요</span></div></div>`);
+  UI.$$("[data-inv]").forEach((el) => el.onclick = () => receipt(INV[Number(el.dataset.inv)]));
+  const c = UI.$("#cancel"); c.hidden = !paying();
+  c.innerHTML = S.cancelAtPeriodEnd ? `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t">해지 되돌리기</span><span class="d">${S.periodEnd ? UI.dateKST(S.periodEnd) + "에 끝나기로 되어 있어요" : "해지가 예약되어 있어요"} · 되돌리면 그대로 이어져요</span></div>${UI.chev}</button>`
+    : `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t" style="color:var(--danger)">구독 해지</span><span class="d">이번 기간 끝까지 쓰고 다음 청구가 없어요</span></div></button>`;
+  const cbtn = UI.$("#cancelBtn"); if (cbtn) cbtn.onclick = S.cancelAtPeriodEnd ? revert : cancel;
+}
+const nameOf = (k) => (PLANS.find((p) => p.key === k) || {}).name || k;
+/* invoices.period 는 문자열 그대로 — 'YYYY-MM' 월납 · 'YYYY-MM~YYYY-MM' 연납 · ':up-{plan}' 업그레이드 차액 · 코인은 주문번호 */
+function periodLabel(p) { const s = String(p || ""); if (/^AC-COIN-/.test(s)) return s; const m = s.match(/^(\d{4})-(\d{2})(~(\d{4})-(\d{2}))?/); if (!m) return s; const a = `${Number(m[2])}월`; return (m[3] ? `${a}~${Number(m[5])}월` : a) + (s.includes(":up-") ? " · 플랜 변경" : ""); }
+const invTitle = (r) => r.kind === "coin" ? "코인 충전" : `${r.planKey ? nameOf(r.planKey) + " " : ""}구독 · ${periodLabel(r.period)}`;
+function receipt(r) { const ST = { paid: "결제 완료", failed: "결제 실패", refunded: "환불됨", pending: "대기" };
+  UI.sheet(`<div class="kv" style="padding-left:0;padding-right:0"><span class="k">항목</span><span class="v">${invTitle(r)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${r.kind === "coin" ? "주문번호" : "기간"}</span><span class="v" style="font-variant-numeric:tabular-nums">${UI.esc(r.kind === "coin" ? r.orderNo || r.period : r.period)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">공급가</span><span class="v">${won(r.amountKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(r.vatKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">합계</span><span class="v" style="font-weight:800">${won(r.totalKrw)}</span></div>
+    ${r.refundedKrw ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">환불</span><span class="v">${won(r.refundedKrw)}</span></div>` : ""}
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${r.paidAt ? "결제일" : "생성"}</span><span class="v">${UI.dateKST(r.paidAt || r.createdAt, { year: "numeric" })} ${UI.timeKST(r.paidAt || r.createdAt)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v">${ST[r.status] || UI.esc(r.status)}</span></div>
+    <p class="muted" style="margin:10px 0 0;font-size:12.5px">세금계산서·현금영수증이 필요하면 «문의하기»에서 청구서 번호 ${r.id}을 알려 주세요.</p>`, { title: "영수증" }); }
+function renderCards() {
+  const cur = S.plan.key; const active = S.status === "active";
+  UI.$("#cards").innerHTML = PLANS.map((p) => { const isCur = active && cur === p.key && (S.plan.cycle || "month") === cycle;
+    return `<div class="group" ${isCur || (!active && p.recommended) ? "data-rec" : ""} style="min-width:280px;scroll-snap-align:start;flex:none;${p.recommended ? "outline:2px solid var(--sel);outline-offset:-2px" : ""}">
+      <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}${isCur ? '<span class="pill ok">지금</span>' : ""}</div>${price(p)}
+      <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
+      <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
+      <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
+      <div class="kv"><span class="k">편성 규칙</span><span class="v">${p.limits.maxRules == null ? "제한 없음" : p.limits.maxRules + "개"}</span></div>
+      <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>
+      <div class="kv"><span class="k">계정 정지 시 승계</span><span class="v">${p.features.failover ? "자동" : "—"}</span></div>
+      <div class="kv"><span class="k">대신 돌려주는 PC</span><span class="v">${p.features.managedRunner === "included" ? "포함" : p.features.managedRunner === "option" ? "선택" : "—"}</span></div>
+      <div class="cta nobar" style="position:static;padding:12px 12px 8px"><button class="btn ${p.recommended ? "primary" : "secondary"}" type="button" data-plan="${p.key}" ${isCur ? "disabled" : ""}>${isCur ? "쓰는 중" : "이 플랜으로"}</button></div></div>`; }).join("");
+  UI.$$("[data-plan]").forEach((b) => b.onclick = () => choose(PLANS.find((p) => p.key === b.dataset.plan)));
+  if (!renderCards.seen) { renderCards.seen = true; const rec = UI.$("#cards .group[data-rec]"); if (rec) UI.$("#cards").scrollLeft = Math.max(0, rec.offsetLeft - 16); } // 처음엔 추천(또는 지금 쓰는) 카드가 보이게
+}
+/* «이 플랜으로» → 견적(GET subscription-quote)의 공급가·부가세·청구를 «서버 값 그대로» 보여주고 바꾼다. 화면은 ×1.1 을 하지 않는다 */
+async function choose(p) {
+  const needCard = !(S.billingKey && S.billingKey.has);
+  const q = await UI.api(`/api/subscription-quote?planKey=${encodeURIComponent(p.key)}&cycle=${cycle}`);
+  const Q = q.ok ? q.quote : null;
+  const up = paying() && RANK[p.key] > RANK[S.plan.key], down = paying() && (RANK[p.key] < RANK[S.plan.key] || (p.key === S.plan.key && cycle !== S.plan.cycle));
+  const when = up ? "남은 날수만큼 차액만 지금 결제되고, 다음 청구부터 이 금액이에요." : down ? "이번 기간은 그대로 쓰고 다음 청구부터 바뀌어요." : "지금 결제되고 바로 시작돼요.";
+  const src = Q && Q.source === "locked" ? " 가입 때 가격 그대로예요." : Q && Q.source === "price_event" ? " 개정된 가격이에요." : "";
+  const firstPay = !INV.some((r) => r.status === "paid"); // 유료 약관은 첫 결제 1회 — 결제한 적 없으면 먼저 묻고, 서버 400 paid_terms 면 다시 편다
+  UI.sheet(`<div class="confirm" style="padding-top:0"><div class="q">${UI.esc(p.name)} · ${cycle === "year" ? "연납" : "월납"}</div><div class="big">${up ? "지금 바로 바뀌어요" : down ? "다음 청구부터 바뀌어요" : "이 요금으로 시작할게요"}</div></div>
+    ${Q ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">요금(${VATNOTE})</span><span class="v">${won(Q.supplyKrw)}${Q.discountPct ? ` <span class="pill ok">${Q.discountPct}% 할인</span>` : ""}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v">${won(Q.vatKrw)}</span></div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">카드 청구</span><span class="v" style="font-weight:800">${won(Q.totalKrw)}${cycle === "year" ? " /년" : " /월"}</span></div>`
+    : `<p class="muted" style="margin:0 0 4px">${UI.esc(q.error || "견적을 받지 못했어요. 금액은 결제 뒤 청구서에서 확인돼요.")}</p>`}
+    <p class="muted" style="margin:10px 0 0;font-size:13px">${when}${src}</p>
+    ${needCard ? `<div class="banner" style="margin:12px 0 0"><span>먼저 카드를 등록해 주세요</span></div>` : ""}
+    <label class="chk" id="agreeRow" ${firstPay && !needCard ? "" : "hidden"}><input type="checkbox" id="agree"> <span><a href="/paid-terms.html" target="_blank" rel="noopener" style="text-decoration:underline">유료서비스 약관</a>(청약철회 7일 · 환불 기준)에 동의해요</span></label>
+    <div class="cta"><button class="btn primary" type="button" id="go">${needCard ? "카드 등록하러 가기" : up || down ? "바꾸기" : "시작하기"}</button></div>`,
+    { title: "", onOpen: (sh, close) => {
+      const row = sh.querySelector("#agreeRow"); const go = sh.querySelector("#go");
+      const need = () => { row.hidden = false; row.style.outline = "2px solid var(--danger)"; row.style.borderRadius = "10px"; UI.toast("유료 약관에 동의해 주세요"); };
+      go.onclick = async () => {
+        if (needCard) { close(); return addCard(); }
+        const agree = sh.querySelector("#agree").checked; if (!row.hidden && !agree) return need();
+        go.disabled = true; const body = { planKey: p.key, cycle }; if (agree) body.agreePaidTerms = true;
+        const r = await UI.api("/api/subscription-change", { body }); go.disabled = false;
+        if (!r.ok) { if (r.step === "paid_terms") return need(); if (r.step === "not_configured") { close(); return soon(); } if (r.step === "billing_key") { close(); return addCard(); } return UI.toast(r.error || "바꾸지 못했어요"); }
+        close(); UI.done(r.pending ? `${UI.dateKST(r.effectiveAt)}부터 ${p.name}` : r.totalKrw ? `${p.name} 시작 · ${won(r.totalKrw)} 결제했어요` : `${p.name} 로 바꿨어요`, load);
+      };
+    } });
+}
+/* 카드 등록 = KICC 인증창(url·form 은 서버가 준다) → 콜백 billing-key-return → ?key=ok|fail */
+async function addCard() { const r = await UI.api("/api/billing-key-start", { body: {} }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }
+function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요. 지금 체험 기간은 그대로예요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
+function cancel() { UI.sheet(`<p class="muted" style="margin:0 0 8px">해지하면 ${S.periodEnd ? UI.dateKST(S.periodEnd) : "이번 기간 끝"}까지 그대로 쓰고, 그 뒤엔 보기만 돼요. 만든 글과 편성표는 남아요.</p><div id="cc"></div>`, { title: "구독 해지", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#cc"), "정말 해지할까요? 기간 안엔 언제든 되돌릴 수 있어요.", async () => { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: true } }); if (!r.ok) return UI.toast(r.error || "해지하지 못했어요"); close(); UI.toast(r.periodEnd ? `${UI.dateKST(r.periodEnd)}까지 쓰고 끝나요` : "해지를 예약했어요"); load(); }) }); }
+async function revert() { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: false } }); if (!r.ok) return UI.toast(r.error || "되돌리지 못했어요"); UI.toast("해지를 취소했어요 · 그대로 이어져요"); load(); }
+UI.$$("#cycle button").forEach((b) => b.onclick = () => { cycle = b.dataset.c; UI.$$("#cycle button").forEach((x) => x.classList.toggle("on", x === b)); renderCards(); });
+await load();
+})();
+</script>
+</body>
+</html>

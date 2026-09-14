@@ -6,34 +6,42 @@
 <title>고객 · AutoCreate 운영센터</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
-<body>
+<body class="ops">
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">고객</span><span class="sp"></span></div>
-<div class="field"><input class="input" id="q" type="search" placeholder="이름·이메일·키로 찾기"></div>
-<div class="seg" id="seg"><button class="on" data-s="">전체</button><button data-s="trial">체험</button><button data-s="active">유료</button><button data-s="readonly">읽기전용</button></div>
+<div class="field" style="padding-top:0"><input class="input" id="q" type="search" placeholder="이름·이메일·키로 찾기" autocomplete="off"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="seg" id="seg" style="margin:0"><button class="on" data-s="">전체</button><button data-s="trial">체험</button><button data-s="active">유료</button><button data-s="past_due">미납</button><button data-s="readonly">읽기전용</button></div><div class="seg" id="plan" style="margin:0"><button class="on" data-p="">플랜 전부</button><button data-p="starter">Starter</button><button data-p="pro">Pro</button><button data-p="agency">Agency</button></div></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/ops.js?v=1"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
 <script>
 (async () => {
 const op = await OPS.boot("tenants"); if (!op) return;
-let status = "";
+let status = "", plan = "";
 async function load() {
   const q = UI.$("#q").value.trim();
-  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
-  const list = UI.$("#list");
-  list.innerHTML = r.tenants.length ? `<div class="gt">${r.tenants.length}곳</div>` + r.tenants.map((t) => { const s = OPS.status(t.status); return `<a class="row tap" href="/ops/tenant.html?id=${t.id}"><span class="mk soft">${UI.esc((t.name || "?").slice(0, 1))}</span><div class="l"><span class="t">${UI.esc(t.name)} <span class="muted" style="font-weight:400;font-size:12px">${UI.esc(t.ownerEmail || "")}</span></span><span class="d">${t.planKey} · 계정 ${t.accounts} · ${UI.num(t.coins)}코인 · 마지막 발행 ${OPS.dt(t.lastPostAt)}</span></div><span class="pill ${s[0]}">${s[1]}</span></a>`; }).join("")
-    : `<div class="empty"><h3>아직 고객이 없어요</h3><p>가입이 생기면 여기에 쌓여요.</p></div>`;
+  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const rows = r.tenants || [];
+  UI.$("#list").innerHTML = `<div class="gt">${UI.num(r.total ?? rows.length)}곳</div>` + OPS.table([
+    { h: "고객", f: (t) => `<span class="mk soft sm">${UI.esc((t.name || "?").slice(0, 1))}</span><b>${UI.esc(t.name)}</b> <span class="muted">${UI.esc(t.key)}</span>` },
+    { h: "플랜", f: (t) => UI.esc(t.planKey) }, { h: "상태", f: (t) => OPS.pill(OPS.status(t.status)) },
+    { h: "체험", f: (t) => (t.status === "trial" || t.status === "readonly") ? OPS.dleft(t.trialEndsAt) : "—" },
+    { h: "코인", r: true, f: (t) => UI.num(t.coins || 0) }, { h: "계정", r: true, f: (t) => UI.num(t.accounts || 0) },
+    { h: "마지막 발행", f: (t) => OPS.dt(t.lastPostAt) }, { h: "건강", r: true, f: (t) => t.health == null ? "—" : `<span class="dot ${t.health >= 80 ? "ok" : t.health >= 50 ? "warn" : "danger"}"></span> ${t.health}` },
+  ], rows, (t) => `class="tap" data-id="${t.id}"`);
+  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = () => UI.go(`/ops/tenant.html?id=${tr.dataset.id}`));
 }
 UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(load, 250); });
 UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.s; load(); });
+UI.$$("#plan button").forEach((b) => b.onclick = () => { UI.$$("#plan button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); plan = b.dataset.p; load(); });
 load();
 })();
 </script>

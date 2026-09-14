@@ -6,26 +6,52 @@
 <title>문의하기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
-<div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·계정·최근 오류는 자동으로 같이 보내져요.</p></div>
-<form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
-<div class="field"><label for="body">자세히</label><textarea class="input" id="body" name="body" rows="5" style="height:auto;padding:14px 16px" required></textarea><div class="help"></div></div>
-<div class="cta"><button class="btn primary" type="submit">보내기</button></div></form>
+<div class="step-h"><h1>무엇이 막히나요?</h1><p>플랜·내 PC 프로그램 상태·최근 오류는 자동으로 같이 보내져요.</p></div>
+<div class="group" id="faq"><div class="gt">자주 묻는 질문</div></div>
+<div class="group" id="mine"><div class="gt">내 문의</div></div>
+<div class="cta"><button class="btn primary" type="button" id="ask">문의 남기기</button></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/mock.js?v=7"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
 await UI.boot("account");
-const f = UI.$("#f"); UI.form(f, async (d) => { const r = await UI.api("/api/support-ticket-create", { body: d }); if (!r.ok) { UI.toast(r.error || "보내지 못했어요"); return; } UI.done("보냈어요", () => location.href = "/app/account.html"); });
+const TST = { open: ["warn", "접수"], progress: ["ink", "답변 중"], hold: ["off", "확인 중"], resolved: ["ok", "해결"] };
+async function load() {
+  const [f, t] = await Promise.all([UI.api("/api/faqs"), UI.api("/api/support-tickets")]);
+  const faqs = f.ok ? f.faqs || [] : [];
+  UI.$("#faq").innerHTML = `<div class="gt">자주 묻는 질문</div>` + (faqs.length ? faqs.map((q) => `<button type="button" class="row tap" data-faq="${q.id}"><div class="l"><span class="t wrap">${UI.esc(q.q)}</span></div>${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">아직 없어요</span></div></div>`);
+  UI.$$("[data-faq]").forEach((b) => b.onclick = () => { const q = faqs.find((x) => x.id === Number(b.dataset.faq)); UI.sheet(`<p style="margin:0 0 12px;font-size:15px;line-height:1.7">${UI.esc(q.a)}</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: q.q, onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); });
+  const tk = t.ok ? t.tickets || [] : [];
+  UI.$("#mine").innerHTML = `<div class="gt">내 문의</div>` + (tk.length ? tk.map((x) => `<button type="button" class="row tap" data-t="${x.id}"><div class="l"><span class="t">${UI.esc(x.subject)}</span><span class="d">${UI.ago(x.updatedAt)}${x.status === "resolved" && x.rating == null ? " · 도움이 됐는지 알려 주세요" : ""}</span></div>${UI.pill(TST, x.status)}${UI.chev}</button>`).join("") : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">남긴 문의가 없어요</span></div></div>`);
+  UI.$$("[data-t]").forEach((b) => b.onclick = () => thread(tk.find((x) => x.id === Number(b.dataset.t))));
+}
+function thread(x) {
+  UI.sheet(`<div style="display:flex;flex-direction:column;gap:6px">${(x.messages || []).map((m) => `<div class="msg ${m.from === "operator" ? "op" : m.from === "system" ? "sys" : ""}" style="margin:0;${m.from === "operator" ? "align-self:flex-end" : ""}">${UI.esc(m.text)}<small>${m.from === "operator" ? "AutoCreate" : m.from === "system" ? "자동 첨부" : "나"} · ${UI.dateKST(m.at)} ${UI.timeKST(m.at)}</small></div>`).join("")}</div>
+    ${x.status === "resolved" && x.rating == null ? `<div class="sec">도움이 됐나요?</div><div class="cta" style="padding-top:6px"><button class="btn secondary" type="button" data-r="0">아니요</button><button class="btn primary" type="button" data-r="1">네</button></div>` : x.rating != null ? `<p class="muted center" style="margin:12px 0 0;font-size:13px">평가해 주셔서 고마워요</p>` : `<p class="muted center" style="margin:12px 0 0;font-size:13px">답변이 오면 알림으로 알려드려요</p>`}`,
+    { title: x.subject, onOpen: (sh, close) => { sh.querySelectorAll("[data-r]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/support-rate", { body: { id: x.id, helpful: b.dataset.r === "1" } }); if (!r.ok) return UI.toast(r.error); close(); UI.toast("고마워요"); load(); }); } });
+}
+let files = [];
+UI.$("#ask").onclick = () => { files = []; UI.sheet(`<form id="f"><div class="field"><label for="subject">한 줄 요약</label><input class="input" id="subject" name="subject" required maxlength="160" placeholder="예: 네이버 계정이 안 붙어요"><div class="help"></div></div>
+  <div class="field"><label for="body">자세히</label><textarea class="input" id="body" name="text" rows="5" style="height:auto;padding:14px 16px" required></textarea><div class="help"></div></div>
+  <div class="field"><label>사진 <span class="muted" style="font-weight:500">· 선택 · 3장까지</span></label><input type="file" id="pic" accept="image/*" multiple style="font-size:13px"><div id="picList" class="muted" style="font-size:12.5px"></div></div>
+  <div class="cta"><button class="btn primary" type="submit">보내기</button></div></form>`, { title: "문의 남기기", onOpen: (sh, close) => {
+    sh.querySelector("#pic").addEventListener("change", async (e) => { const list = [...e.target.files].slice(0, 3); const out = [];
+      for (const f of list) { if (f.size > 3 * 1024 * 1024) { UI.toast(`${f.name} 은 3MB 를 넘어요`); continue; } const b64 = await new Promise((res) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(",")[1]); rd.readAsDataURL(f); });
+        const r = await UI.api("/api/upload", { body: { filename: f.name, contentType: f.type, dataBase64: b64 } }); if (r.ok) out.push({ key: r.key, name: f.name }); else UI.toast(r.error || "올리지 못했어요"); }
+      files = out; sh.querySelector("#picList").textContent = out.length ? out.map((x) => x.name).join(" · ") + " 붙였어요" : ""; });
+    UI.form(sh.querySelector("#f"), async (d, f) => { const r = await UI.api("/api/support-ticket", { body: { subject: d.subject, text: d.text, attachments: files.map((x) => x.key) } }); if (!r.ok) return UI.fieldError(f, r.step === "subject" ? "subject" : "text", r.error || "보내지 못했어요"); close(); UI.done("보냈어요 · 답변은 알림으로", load); });
+  } }); };
+await load();
 })();
 </script>
 </body>

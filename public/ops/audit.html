@@ -6,24 +6,45 @@
 <title>감사 · AutoCreate 운영센터</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=7">
+<link rel="stylesheet" href="/css/ac.css?v=8">
 </head>
-<body>
+<body class="ops">
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">감사</span><span class="sp"></span></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="flex:1;min-width:200px;padding:0"><input class="input" id="q" type="search" placeholder="동작·대상으로 찾기" autocomplete="off" style="height:44px"></div><div class="seg" id="risk" style="margin:0"><button class="on" data-v="">전부</button><button data-v="high">높음</button><button data-v="medium">중간</button><button data-v="low">낮음</button></div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="padding:0;width:150px"><input class="input" id="from" type="date" style="height:44px" aria-label="시작일(KST)"></div><span class="muted">~</span><div class="field" style="padding:0;width:150px"><input class="input" id="to" type="date" style="height:44px" aria-label="종료일(KST)"></div><span id="tenantChip"></span></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=6"></script>
-<script src="/js/ops.js?v=1"></script>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
 <script>
 (async () => {
 const op = await OPS.boot("audit"); if (!op) return;
-const r = await UI.api("/api/ops-audit?limit=100", { noRedirect: true }); if (!r.ok) { UI.toast(r.error); return; }
-UI.$("#list").innerHTML = `<div class="gt">최근 ${r.rows.length}건</div>` + r.rows.map((a) => `<div class="row"><span class="dot ${a.risk_level === "high" || a.risk_level === "critical" ? "danger" : a.risk_level === "medium" ? "warn" : "off"}"></span><div class="l"><span class="t">${UI.esc(a.action)}</span><span class="d">테넌트 ${a.tenant_id ?? "—"} · ${a.actor_type}#${a.actor_id ?? ""} · ${UI.esc(a.ip || "")}</span></div><span class="r mut">${OPS.dt(a.created_at)}</span></div>`).join("");
+let risk = "", page = 1; const tenant = UI.qs.get("tenant") || "";
+if (tenant) UI.$("#tenantChip").innerHTML = `<span class="pill ink">고객 #${UI.esc(tenant)}</span> <a class="lk" href="/ops/audit.html" style="font-size:12.5px">전체 보기</a>`;
+async function load() {
+  const p = new URLSearchParams({ q: UI.$("#q").value.trim(), risk, from: UI.$("#from").value, to: UI.$("#to").value, page: String(page) }); if (tenant) p.set("tenant", tenant);
+  const r = await UI.api(`/api/ops-audit-search?${p}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const who = (a) => `${{ operator: "운영자", user: "고객", system: "시스템" }[a.actorType] || UI.esc(a.actorType || "—")}${a.actorId != null ? " #" + a.actorId : ""}`;
+  const TGT = { tenant: "고객", invoice: "청구서", account: "계정", operator: "운영자", runner_device: "러너", plan: "요금제", notice: "공지", order: "주문", ai: "AI", disclosure: "고지 문구", channel: "채널", ticket: "티켓", piece: "글", slot: "자리" };
+  const tgt = (s) => { const m = String(s).match(/^([a-z_]+):(.+)$/); return m ? `${TGT[m[1]] || m[1]} ${/^\d+$/.test(m[2]) ? "#" + m[2] : m[2]}` : (TGT[String(s)] || String(s)); }; // target 은 «종류:id» — 사람말로
+  const det = (a) => { if (a.detail == null) return ""; const s = typeof a.detail === "string" ? a.detail : Object.entries(a.detail).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "); return s.length > 140 ? s.slice(0, 140) + "…" : s; };
+  UI.$("#list").innerHTML = `<div class="gt">${UI.num(r.total || 0)}건 <span class="muted" style="font-weight:500">KST</span></div>` + OPS.table([
+    { h: "언제", f: (a) => OPS.dt(a.at) }, { h: "위험", f: (a) => `<span class="dot ${a.risk === "high" || a.risk === "critical" ? "danger" : a.risk === "medium" ? "warn" : "off"}"></span>` },
+    { h: "동작", f: (a) => `<b>${UI.esc(a.action)}</b>${a.target ? `<br><span class="muted">${UI.esc(tgt(a.target))}</span>` : ""}` }, { h: "누가", f: (a) => who(a) },
+    { h: "고객", f: (a) => a.tenantId != null ? `<a class="lk" href="/ops/tenant.html?id=${a.tenantId}">#${a.tenantId}</a>` : "—" }, { h: "내용", f: (a) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(det(a))}</span>` },
+  ], r.rows || []) + `<div class="muted" style="padding:0 16px 10px;font-size:12.5px">${OPS.pager(r.page, r.total, 30)}</div>`;
+  UI.$$("#list [data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); load(); });
+}
+UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(() => { page = 1; load(); }, 250); });
+["from", "to"].forEach((id) => UI.$("#" + id).addEventListener("change", () => { page = 1; load(); }));
+UI.$$("#risk button").forEach((b) => b.onclick = () => { UI.$$("#risk button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); risk = b.dataset.v; page = 1; load(); });
+load();
 })();
 </script>
 </body>

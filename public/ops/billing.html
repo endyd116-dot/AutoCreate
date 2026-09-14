@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>결제 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=8">
+</head>
+<body class="ops">
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><span class="ph"></span><span class="ttl">결제</span><span class="sp"></span></div>
+<div class="seg" id="seg" style="margin:0"><button class="on" data-s="">전체</button><button data-s="paid">결제됨</button><button data-s="failed">실패</button><button data-s="pending">대기</button><button data-s="refunded">환불</button></div>
+<div class="group"><div class="gt">인보이스 <span class="muted" style="font-weight:500">공급가 · 부가세 · 청구 따로</span></div><div id="inv"></div></div>
+<div class="ops-two">
+<div class="group"><div class="gt">미수</div><div id="recv"></div></div>
+<div class="group"><div class="gt">빌링키(카드)</div><div id="keys"></div></div>
+</div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("billing"); if (!op) return;
+let status = "";
+const IST = { paid: ["ok", "결제됨"], failed: ["danger", "실패"], pending: ["off", "대기"], refunded: ["warn", "환불"] };
+async function load() {
+  const [i, k, rcv] = await Promise.all([UI.api(`/api/ops-invoices?status=${status}`, { noRedirect: true }), UI.api("/api/ops-billing-keys", { noRedirect: true }), UI.api("/api/ops-receivables", { noRedirect: true })]);
+  if (!i.ok) { UI.toast(i.error || "불러오지 못했어요"); return; }
+  UI.$("#inv").innerHTML = OPS.table([
+    { h: "고객", f: (x) => `<b>${UI.esc(x.tenantName)}</b>` }, { h: "종류", f: (x) => x.kind === "coin" ? `코인 <span class="muted">${UI.esc(x.period)}</span>` : `구독 <span class="muted">${UI.esc(x.period)}</span>` },
+    { h: "공급가", r: true, f: (x) => UI.won(x.amountKrw) }, { h: "부가세", r: true, f: (x) => UI.won(x.vatKrw) }, { h: "청구", r: true, f: (x) => `<b>${UI.won(x.totalKrw)}</b>` },
+    { h: "상태", f: (x) => OPS.pill(IST[x.status] || ["off", x.status]) + (x.status === "failed" ? ` <span class="muted">${x.attempts}회 · 다음 ${OPS.dt(x.nextRetryAt)}</span>` : "") },
+    { h: "언제", f: (x) => OPS.dt(x.paidAt || x.failedAt) },
+    { h: "", f: (x) => [x.status === "failed" ? `<button type="button" class="lk" data-retry="${x.id}">다시 시도</button>` : "", x.kind === "coin" && x.status === "paid" ? `<button type="button" class="lk" data-refund="${UI.esc(x.period)}">환불</button>` : "", x.status === "paid" ? `<button type="button" class="lk" data-tax="${x.id}">${x.taxRequestedAt ? "증빙 요청됨" : "증빙"}</button>` : "", x.receiptUrl ? `<a class="lk" href="${UI.esc(x.receiptUrl)}" target="_blank" rel="noopener">영수증</a>` : ""].filter(Boolean).join(" · ") },
+  ], i.rows || []);
+  UI.$("#recv").innerHTML = OPS.table([{ h: "고객", f: (x) => `<b>${UI.esc(x.tenantName)}</b>` }, { h: "미수", r: true, f: (x) => UI.won(x.overdueKrw) }, { h: "연체", r: true, f: (x) => `${x.overdueDays}일` }, { h: "시도", r: true, f: (x) => `${x.attempts}회` }, { h: "사유", f: (x) => UI.esc(x.lastFailReason || "") }], rcv.ok ? rcv.rows || [] : []);
+  UI.$("#keys").innerHTML = OPS.table([{ h: "고객", f: (x) => `<b>${UI.esc(x.tenantName)}</b>` }, { h: "카드", f: (x) => `${UI.esc(x.brand)} ${UI.esc(x.last4)}` }, { h: "상태", f: (x) => OPS.pill(x.active ? ["ok", "유효"] : ["warn", "실패"]) }, { h: "갱신", f: (x) => OPS.dt(x.updatedAt) }], k.ok ? k.rows || [] : []);
+  UI.$$("[data-retry]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/ops-invoice-retry", { body: { id: Number(b.dataset.retry) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.toast(r.invoice.status === "paid" ? "결제됐어요" : `다시 시도 예약 · ${r.invoice.attempts}회째`); load(); });
+  UI.$$("[data-refund]").forEach((b) => b.onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 8px">주문 <b style="font-family:ui-monospace,monospace">${UI.esc(b.dataset.refund)}</b></p><p class="muted" style="margin:0 0 12px;font-size:13px">규칙 5: 미사용분만 · 회수 ≤ 잔량 · 7일 · 단가 = 결제액 ÷ 받은 코인 · 부분 환불 없음</p><div id="rc"></div>`, { title: "코인 환불", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "이 주문을 환불할까요? 미사용 코인은 회수돼요.", async () => { const r = await UI.api("/api/ops-refund", { body: { orderNo: b.dataset.refund }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "환불하지 못했어요"); close(); UI.toast(`${UI.won(r.refundKrw)} 환불 · ${r.revoked}코인 회수`); load(); }) }));
+  UI.$$("[data-tax]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/ops-tax-invoice", { body: { invoiceId: Number(b.dataset.tax) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.toast(r.note || "요청했어요"); load(); });
+}
+UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.s; load(); });
+load();
+})();
+</script>
+</body>
+</html>
