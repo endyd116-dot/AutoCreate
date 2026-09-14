@@ -66,10 +66,9 @@ const CHARTER = () => {
       const r = e.getBoundingClientRect(); if (r.height <= 0 || r.height >= 44) return false;
       // 눌리는 영역 = 가운데 x 축에서 위·아래로 elementFromPoint 가 이 요소(또는 자손)를 돌려주는 구간 — 투명 오버레이(::before)까지 포함해 잰다
       const cx = Math.min(window.innerWidth - 1, Math.max(0, r.left + r.width / 2)); const hits = (el) => !!el && (el === e || e.contains(el));
-      let top = r.top, bottom = r.bottom;
-      for (let y = r.top - 1; y >= Math.max(0, r.top - 12); y--) { if (hits(document.elementFromPoint(cx, y))) top = y; else break; }
-      for (let y = r.bottom + 1; y <= Math.min(window.innerHeight - 1, r.bottom + 12); y++) { if (hits(document.elementFromPoint(cx, y))) bottom = y; else break; }
-      return bottom - top < 44;
+      let count = 0;   // 세로 축에서 실제로 눌리는 정수 좌표 수(오버레이 포함) — 44 미만이면 작다
+      for (let y = Math.max(0, Math.floor(r.top) - 12); y <= Math.min(window.innerHeight - 1, Math.ceil(r.bottom) + 12); y++) if (hits(document.elementFromPoint(cx, y))) count++;
+      return count < 42;   // 정수 표본·서브픽셀 오차 2px 허용(43 은 통과 · 40 은 잡는다)
     }).length,
     cta,
   };
