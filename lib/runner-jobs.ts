@@ -770,15 +770,24 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     if (!head || head.bytes <= 0) {
       return await failRender("not_found", `올렸다는 영상이 저장소에 없어요(key=${String(r.key).slice(0, 80)}).`);
     }
+    /* 🔴 [2026-09-15 C · 라이브 실증에서 잡음] 러너의 **ffprobe 실측**(containerMs·videoMs·audioMs·measured)을 여기서 흘리면
+       `finalizeRender` → `judgeVideo` 가 그 값을 영영 못 봐서 «꼬리» 판정이 보류로 주저앉는다(AC-33 의 재발).
+       이 자리는 필드를 **골라 담는 경계**라, 새 측정값을 추가할 때마다 여기 한 줄을 같이 고쳐야 한다.
+       🔴 `bytes` 만은 계속 서버 HEAD 실측을 쓴다(러너 주장 불신 · §2.1). */
+    const num = (v: unknown) => Math.max(0, Math.trunc(Number(v) || 0));
+    const measured = r.measured === true;
     const { finalizeRender } = await import("./video/render-queue");
     const fin = await finalizeRender(pieceId, {
       key: r.key, posterKey: String(r.posterKey ?? ""),
-      durationMs: Math.max(0, Math.trunc(Number(r.durationMs) || 0)),
+      durationMs: num(r.durationMs),
       bytes: head.bytes,                                   // 🔴 실측값(러너 주장 아님)
-      frameCount: Math.max(0, Math.trunc(Number(r.frameCount) || 0)),
+      frameCount: num(r.frameCount),
+      ...(measured ? { containerMs: num(r.containerMs), videoMs: num(r.videoMs), audioMs: num(r.audioMs), plannedMs: num(r.plannedMs), measured: true } : {}),
     });
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
-      result = ${jsonb({ ok: true, key: r.key, posterKey: r.posterKey ?? null, bytes: head.bytes, durationMs: r.durationMs ?? null, frameCount: r.frameCount ?? null, ffmpegVersion: r.ffmpegVersion ?? null, next: fin.next })},
+      result = ${jsonb({ ok: true, key: r.key, posterKey: r.posterKey ?? null, bytes: head.bytes, durationMs: r.durationMs ?? null, frameCount: r.frameCount ?? null,
+        ...(measured ? { containerMs: r.containerMs ?? null, videoMs: r.videoMs ?? null, audioMs: r.audioMs ?? null, measured: true } : {}),
+        ffmpegVersion: r.ffmpegVersion ?? null, next: fin.next })},
       updated_at = NOW() WHERE id = ${jobId}`);
     return { ok: fin.ok, status: "done", reason: fin.next };
   }
