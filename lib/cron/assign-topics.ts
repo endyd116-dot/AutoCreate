@@ -22,26 +22,49 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { startTopicsRefresh } from "../../netlify/functions/topics-refresh-background";
 import { kstToday, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
+import { maxSimilarity, CROSS_ACCOUNT_SIMILARITY, CROSS_ACCOUNT_DAYS } from "../similarity";
+import { htmlToPlain } from "../blocks";
 
 const n = (v: unknown) => Number(v || 0);
 
-interface Cand { id: number; normKey: string; hint: string; score: number; title: string }
+interface Cand { id: number; normKey: string; hint: string; score: number; title: string; angle: string }
+/** 최근 글(계정 간 유사도 게이트 재료) — 제목 + 도입부(첫 300자). */
+interface RecentPiece { accountId: number | null; text: string }
 
 /** 후보 소재 — 30일 중복 회피 포함. 한 번 읽어 메모리에서 소모한다(슬롯마다 다시 뒤지면 같은 자리를 두 번 집는다 · AM SlotPool 교훈). */
 async function loadCandidates(tid: number, limit: number): Promise<Cand[]> {
-  const rows = await q(sql`SELECT t.id, t.norm_key, t.channel_hint, t.score, t.title FROM topics t
+  const rows = await q(sql`SELECT t.id, t.norm_key, t.channel_hint, t.score, t.title, t.angle FROM topics t
     WHERE t.tenant_id = ${tid} AND t.status = 'candidate' AND (t.expires_at IS NULL OR t.expires_at > NOW())
       AND NOT EXISTS (SELECT 1 FROM topics u WHERE u.tenant_id = t.tenant_id AND u.norm_key = t.norm_key
                         AND u.status IN ('used','picked') AND COALESCE(u.used_at, u.created_at) > NOW() - interval '30 days')
     ORDER BY t.score DESC, t.id DESC LIMIT ${Math.max(1, Math.min(200, limit))}`);
-  return rows.map((r) => ({ id: n(r.id), normKey: String(r.norm_key ?? ""), hint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), title: String(r.title ?? "") }));
+  return rows.map((r) => ({ id: n(r.id), normKey: String(r.norm_key ?? ""), hint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), title: String(r.title ?? ""), angle: String(r.angle ?? "") }));
+}
+
+/**
+ * 계정 간 유사도 게이트 재료(P1R3 §1.7 · DESIGN §7.3): 이 테넌트가 최근 CROSS_ACCOUNT_DAYS 일에 만든 글의 제목+도입부.
+ *   같은 테넌트의 **다른 계정** 글과 닮은 소재를 같은 시기에 또 내면 플랫폼이 «한 사람이 여러 계정»으로 본다 — 편성 단계에서 소재를 바꾼다.
+ *   R1 의 유사도 함수(lib/similarity.maxSimilarity)를 **그대로** 쓴다(판정기 두 벌 금지) · 임계·기간은 그 파일 상수 한 곳.
+ */
+async function recentPieces(tid: number): Promise<RecentPiece[]> {
+  const rows = await q(sql`SELECT account_id, title, body FROM pieces WHERE tenant_id = ${tid} AND status NOT IN ('rejected','failed')
+    AND created_at > NOW() - (${CROSS_ACCOUNT_DAYS} || ' days')::interval AND title IS NOT NULL ORDER BY id DESC LIMIT 300`);
+  return rows.map((r) => ({ accountId: r.account_id ? n(r.account_id) : null, text: `${String(r.title ?? "")} ${htmlToPlain(String(r.body ?? "")).slice(0, 300)}` }));
+}
+/** 이 소재가 «다른 계정»의 최근 글과 닮았나. slotAccountId 가 없으면(자동 로테이션) 모든 최근 글과 비교한다(어느 계정이 될지 모른다). */
+function tooSimilarToOtherAccount(cand: Cand, recent: RecentPiece[], slotAccountId: number | null): { similar: boolean; score: number } {
+  const others = recent.filter((p) => slotAccountId === null || p.accountId === null || p.accountId !== slotAccountId).map((p) => p.text);
+  if (!others.length) return { similar: false, score: 0 };
+  const m = maxSimilarity(`${cand.title} ${cand.angle}`, others);
+  return { similar: m.score >= CROSS_ACCOUNT_SIMILARITY, score: m.score };
 }
 
 /** 이 슬롯에 가장 맞는 후보(없으면 null). 채널 힌트 일치 > 점수(> 최신 — pool 이 이미 score DESC, id DESC 라 동점은 앞이 최신). */
-function pickFor(pool: Cand[], channel: string, taken: Set<string>): Cand | null {
+function pickFor(pool: Cand[], channel: string, taken: Set<string>, reject?: (c: Cand) => boolean): Cand | null {
   let best: Cand | null = null, bestKey = -1;
   for (const c of pool) {
     if (taken.has(c.normKey)) continue;
+    if (reject && reject(c)) continue;
     const key = (c.hint === channel ? 1_000_000 : 0) + c.score;
     if (key > bestKey) { bestKey = key; best = c; }
   }
@@ -55,7 +78,7 @@ export const assignTopicsStep: CronStep = {
   async run(ctx): Promise<StepOutcome> {
     const lead = ctx.settings.topicLeadDays;
     // 창 = 오늘(KST) ~ 오늘+topicLeadDays. 경계는 SQL 안에서 만든다(PITFALLS #4).
-    const slots = await q(sql`SELECT id, channel, slot_date::text AS d FROM slots
+    const slots = await q(sql`SELECT id, channel, account_id, slot_date::text AS d FROM slots
       WHERE tenant_id = ${ctx.tid} AND status = 'planned' AND topic_id IS NULL AND piece_id IS NULL
         AND slot_date >= ${kstToday()} AND slot_date <= ${kstToday()} + ${lead}::int
       ORDER BY slot_date, publish_at NULLS LAST, id`);
@@ -66,10 +89,12 @@ export const assignTopicsStep: CronStep = {
     let refreshTried = false;
     let assigned = 0, noTopic = 0, deferred = 0;
     const takenNormKeys = new Set<string>();
+    const recent = await recentPieces(ctx.tid);
+    let similarSkipped = 0;
 
     for (const s of slots) {
       if (Date.now() >= ctx.deadline) { deferred++; continue; }
-      const slotId = n(s.id), channel = String(s.channel);
+      const slotId = n(s.id), channel = String(s.channel), slotAccountId = s.account_id ? n(s.account_id) : null;
 
       /* 후보가 비었으면 이 틱에서 **한 번만** 리필을 시작한다 — 배경 함수라 기다리지 않는다(v2.9).
          이번 틱의 남은 자리는 소재를 못 받지만, 리필이 끝나면 다음 틱이 줍는다. 그래서 아래에서 `no_topic` 으로 표시하고 알린다. */
@@ -82,7 +107,8 @@ export const assignTopicsStep: CronStep = {
         console.log(`[cron/assign_topics] tid=${ctx.tid} 후보 0 → 배경 리필 ${st.started ? "시작" : st.running ? "이미 실행 중" : "실패"}`);
       }
 
-      const cand = pickFor(pool, channel, takenNormKeys);
+      // 계정 간 유사도 게이트(§1.7) — 닮은 소재는 이 자리에서 건너뛰고 다음 후보로(= 소재 교체).
+      const cand = pickFor(pool, channel, takenNormKeys, (c) => { const r = tooSimilarToOtherAccount(c, recent, slotAccountId); if (r.similar) similarSkipped++; return r.similar; });
       if (!cand) {
         // 소재가 정말 없다 — 슬롯에 사유를 남기고 알림 1회. 조용한 0건 금지(다음 주기 재시도).
         if (await setSlot(ctx.tid, slotId, "no_topic", "쓸 소재가 없어요")) noTopic++;
@@ -116,6 +142,7 @@ export const assignTopicsStep: CronStep = {
     const detail: Record<string, unknown> = {};
     if (noTopic) detail.noTopic = noTopic;
     if (deferred) detail.deferred = deferred;
+    if (similarSkipped) detail.similarSkipped = similarSkipped;   // 계정 간 유사도로 교체한 후보 수(§1.7)
     if (refill) detail.refill = refill;
     if (Object.keys(detail).length) out.detail = detail;
     return out;
