@@ -15,7 +15,7 @@
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="hl"><div class="say">내 PC 프로그램이</div><div class="num" id="num"><span class="sk" style="display:inline-block;width:60%"></span></div><div class="tip" id="tip"></div></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
-<div class="group" id="why"><div class="gt">왜 필요한가요</div><div class="reasons"><p>네이버 블로그·티스토리는 프로그램이 대신 올려요. 이 두 곳은 바깥에서 글을 넣는 길이 없어서예요.</p><p>켜 두기만 하면 돼요. 꺼져 있으면 그 시각을 지나도 글을 버리지 않고 기다려요.</p><p>로그인 정보는 암호로 잠가 두고, 올릴 때만 이 프로그램이 열어요.</p></div></div>
+<div class="group" id="why"><div class="gt">왜 필요한가요</div><div class="reasons"><p>네이버 블로그·티스토리는 프로그램이 대신 올려요. 이 두 곳은 바깥에서 글을 넣는 길이 없어서예요.</p><p>영상도 이 프로그램이 구워요(1080×1920 · ffmpeg). 서버에서는 만들 수 없어서 내 PC가 필요해요.</p><p>켜 두기만 하면 돼요. 꺼져 있으면 그 시각을 지나도 글을 버리지 않고 기다려요.</p><p>로그인 정보는 암호로 잠가 두고, 올릴 때만 이 프로그램이 열어요.</p></div></div>
 <div class="cta"><button class="btn primary" type="button" id="add">내 PC에서 켜기</button></div>
   </main>
 </div>
@@ -34,12 +34,13 @@ function render() {
   const last = devices.map((d) => d.lastSeenAt).filter(Boolean).sort().pop();
   const waiting = devices.reduce((a, d) => a + (d.jobsWaiting || 0), 0);
   UI.$("#num").textContent = !devices.length ? "아직 없어요" : on.length ? "지금 켜져 있어요" : "꺼져 있어요";
-  UI.$("#tip").textContent = !devices.length ? "네이버·티스토리 글은 이 프로그램이 올려요"
-    : on.length ? `${UI.ago(last) || "방금 전"} 응답${waiting ? ` · 올릴 글 ${waiting}건` : " · 올릴 글 없음"}`
+  const noFf = devices.some((d) => d.caps && d.caps.ffmpeg === false);
+  UI.$("#tip").textContent = !devices.length ? "네이버·티스토리 글과 영상은 이 프로그램이 올리고 구워요"
+    : on.length ? `${UI.ago(last) || "방금 전"} 응답${waiting ? ` · 올릴 글 ${waiting}건` : " · 올릴 글 없음"}${noFf ? " · 영상은 ffmpeg 설치 후" : ""}`
     : `마지막 응답 ${UI.ago(last) || "오래전"}${waiting ? ` · 글 ${waiting}건이 기다려요` : ""}`;
   const list = UI.$("#list");
   list.innerHTML = devices.length
-    ? `<div class="gt">연결한 PC ${devices.length}대</div>` + devices.map((d) => `<button type="button" class="row tap" data-id="${d.id}"><span class="mk ${d.status === "online" ? "money" : "soft"}">${PC}</span><div class="l"><span class="t">${UI.esc(d.name)}</span><span class="d">${d.version ? "버전 " + UI.esc(d.version) + " · " : ""}${d.status === "online" ? (d.jobsWaiting ? `올릴 글 ${d.jobsWaiting}건` : "올릴 글 없음") : "마지막 응답 " + UI.esc(UI.ago(d.lastSeenAt) || "오래전")}</span></div><span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status === "online" ? "켜짐" : "꺼짐"}</span>${UI.chev}</button>`).join("")
+    ? `<div class="gt">연결한 PC ${devices.length}대</div>` + devices.map((d) => `<button type="button" class="row tap" data-id="${d.id}"><span class="mk ${d.status === "online" ? "money" : "soft"}">${PC}</span><div class="l"><span class="t">${UI.esc(d.name)}</span><span class="d">${d.version ? "버전 " + UI.esc(d.version) + " · " : ""}${d.status === "online" ? (d.jobsWaiting ? `올릴 글 ${d.jobsWaiting}건` : "올릴 글 없음") : "마지막 응답 " + UI.esc(UI.ago(d.lastSeenAt) || "오래전")}${d.caps && d.caps.ffmpeg === false ? " · 영상을 굽지 못해요" : ""}</span></div>${d.caps && d.caps.ffmpeg === false ? '<span class="pill warn">ffmpeg 없음</span>' : `<span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status === "online" ? "켜짐" : "꺼짐"}</span>`}${UI.chev}</button>`).join("")
     : `<div class="empty"><span class="mk soft">${PC}</span><h3>아직 연결한 PC가 없어요</h3><p>늘 켜 두는 PC 한 대면 돼요. 아래에서 3분이면 끝나요.</p></div>`;
   UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => deviceSheet(devices.find((d) => d.id === Number(b.dataset.id))));
   const wait = devices.some((d) => d.status !== "online");
@@ -54,14 +55,29 @@ function deviceSheet(d) {
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">마지막 응답</span><span class="v">${UI.esc(UI.ago(d.lastSeenAt) || "아직 없음")}</span></div>
     ${d.version ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">버전</span><span class="v">${UI.esc(d.version)}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">기다리는 글</span><span class="v">${d.jobsWaiting || 0}건</span></div>
+    ${d.caps ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상 굽기(ffmpeg)</span><span class="v">${d.caps.ffmpeg === false ? '<span class="pill warn">없음</span>' : `<span class="pill ok">있음</span>${d.caps.ffmpegVersion ? " " + UI.esc(d.caps.ffmpegVersion) : ""}`}</span></div>` : ""}
+    ${d.caps && d.caps.ffmpeg === false ? `<div class="banner" style="margin:8px 0 0"><span>ffmpeg 가 없어 영상을 굽지 못해요 · 글 올리기는 그대로 돼요</span><button type="button" id="ffm">설치 안내</button></div>` : ""}
     ${d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
     <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
+      const ff = sh.querySelector("#ffm"); if (ff) ff.onclick = () => { close(); ffmpegSheet(); } // [P1R5] caps.ffmpeg=false → 설치 안내(침묵 금지 · §2.2)
       sh.querySelector("#rm").onclick = () => UI.confirmRow(sh.querySelector("#rc"), `${d.name} 연결을 해제할까요? 이 PC로는 더 이상 글을 올리지 않아요.`, async () => {
         const r = await UI.api("/api/runner-remove", { body: { id: d.id } }); if (!r.ok) return UI.toast(r.error || "해제하지 못했어요");
         close(); UI.toast("연결을 해제했어요"); load(); });
     } });
 }
 
+/* [P1R5] ffmpeg 설치 안내 — 영상은 이 프로그램이 굽는다(서버리스 불가 §6.2) · 없으면 잡을 받지 않고 caps.ffmpeg:false 로 알린다 */
+function ffmpegSheet() {
+  const cmd = "winget install --id Gyan.FFmpeg -e";
+  UI.sheet(`<p class="muted" style="margin:0 0 12px;font-size:13.5px">영상은 내 PC 프로그램이 굽어요. 그러려면 ffmpeg 가 필요해요 — 한 번만 설치하면 돼요.</p>
+    <div class="steps" style="padding:0 0 8px"><div class="st on"><i>1</i>Windows 검색에서 «PowerShell»을 열어요</div><div class="st on"><i>2</i>아래 한 줄을 붙여 넣고 Enter</div><div class="st on"><i>3</i>프로그램을 껐다 켜면 «ffmpeg 있음»으로 바뀌어요</div></div>
+    <code class="code" style="display:block;white-space:pre-wrap;font-size:13px;margin:4px 0 12px">${UI.esc(cmd)}</code>
+    <p class="muted" style="margin:0 0 12px;font-size:12.5px">다른 곳에 설치했다면 프로그램 설정의 FFMPEG_PATH 에 경로를 적어 주세요. 자막 글꼴(Pretendard)은 프로그램에 들어 있어요.</p>
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="cp">명령 복사하기</button><button class="btn secondary" type="button" id="re">설치했어요 · 다시 확인</button></div>`, { title: "ffmpeg 설치", onOpen: (sh, close) => {
+      sh.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(cmd)) ? "복사했어요 · PowerShell 에 붙여 넣으세요" : "복사하지 못했어요");
+      sh.querySelector("#re").onclick = async () => { close(); await load(); UI.toast(devices.some((d) => d.caps && d.caps.ffmpeg === false) ? "아직 ffmpeg 가 안 보여요 · 프로그램을 껐다 켜 주세요" : "ffmpeg 를 찾았어요"); };
+    } });
+}
 /* 켜기 3스텝(한 화면 한 질문 · 열쇠는 1회만 보여 준다) */
 function addSheet() {
   let step = 1, name = "", token = "";

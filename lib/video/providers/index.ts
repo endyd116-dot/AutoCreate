@@ -10,7 +10,8 @@ import { PROVIDERS, estimateClipCostUsd, fallbackProvider, type ProviderSpec } f
 import { omniGenerate, omniEditRetry, type OmniGenerateResult } from "./omni";
 import { veoGenerate } from "./veo";
 import { falGenerate } from "./fal";
-import type { ProviderKey, VideoSeconds } from "../types";
+import { generateImage } from "../../ai-image";
+import { videoStub, type ProviderKey, type VideoSeconds } from "../types";
 
 export interface GenerateClipInput {
   tenantId: number; pieceId: number; cutIdx: number;
@@ -50,6 +51,14 @@ async function callProvider(spec: ProviderSpec, inp: GenerateClipInput, apiKey: 
 export async function generateClip(inp: GenerateClipInput): Promise<GenerateClipResult> {
   const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
   if (!r2Configured()) return { ok: false, reason: "r2_not_configured", provider: inp.providerKey };
+  if (videoStub()) {
+    // 로컬 하니스(계약 §1.4b) — provider 호출 없이 고정 응답. R2 에는 «스텁» 표식이 든 자리 채움 바이트를 둔다(키가 없으면 payload 가 거짓말이 된다).
+    const key = safeKey(`autocreate/${inp.tenantId}/${inp.pieceId}/clips`, "mp4");
+    const buf = Buffer.concat([Buffer.from("ACSTUBMP4\n", "utf8"), Buffer.alloc(12_000)]);
+    try { await r2Put(key, buf, "video/mp4"); } catch (e) { return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`, provider: inp.providerKey }; }
+    void recordAiUsage({ tenantId: inp.tenantId, purpose: "video_clip", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: inp.ref ?? `piece:${inp.pieceId}:cut${inp.cutIdx}` });
+    return { ok: true, key, url: key, provider: inp.providerKey, model: "stub", costUsd: 0, durationSec: inp.durationSec };
+  }
   let spec: ProviderSpec | null = PROVIDERS[inp.providerKey];
   let tried = 0;
   while (spec && tried < 2) {
@@ -72,4 +81,30 @@ export async function generateClip(inp: GenerateClipInput): Promise<GenerateClip
     return { ok: true, key, url: key, provider: spec.key, model: spec.model, interactionId: r.interactionId, costUsd, durationSec: inp.durationSec };
   }
   return { ok: false, reason: "no_provider_available", provider: inp.providerKey };
+}
+
+/* ═══════════ 정지 이미지 컷(계약 §1.4c(2) · 토킹 포맷) ═══════════
+ *   🔴 스킵하지 않는다 — 스킵하면 러너가 `clipKey`·`imageKey` 둘 다 없는 장면을 받아 **검은 화면**이 된다(계약 §2.1 «둘 중 하나»).
+ *   경로 = 조사 §F `CHAIN_IMAGE`($0.04/장 · `lib/ai-image.ts` 재사용 · ai_usage purpose 'image') → 러너가 Ken Burns 로 움직인다. */
+export interface GenerateStillInput { tenantId: number; pieceId: number; cutIdx: number; prompt: string; ref?: string }
+export type GenerateStillResult = { ok: true; key: string; model: string; costUsd: number } | { ok: false; reason: string };
+
+/** 컷 프롬프트에서 카메라 워크 절을 뺀다 — 정지 한 장에 «push-in» 을 시키면 모델이 흔들린 그림을 낸다. */
+export function stillPromptOf(prompt: string): string {
+  return String(prompt || "").split("\n").filter((l) => !/^\s*CAMERA\b/i.test(l)).join("\n").trim();
+}
+
+export async function generateStill(inp: GenerateStillInput): Promise<GenerateStillResult> {
+  if (!r2Configured()) return { ok: false, reason: "r2_not_configured" };
+  const ref = inp.ref ?? `piece:${inp.pieceId}:still${inp.cutIdx}`;
+  if (videoStub()) {
+    const key = safeKey(`autocreate/${inp.tenantId}/${inp.pieceId}/stills`, "png");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    try { await r2Put(key, png, "image/png"); } catch (e) { return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}` }; }
+    void recordAiUsage({ tenantId: inp.tenantId, purpose: "image", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref });
+    return { ok: true, key, model: "stub", costUsd: 0 };
+  }
+  const r = await generateImage({ prompt: stillPromptOf(inp.prompt), aspect: "9:16", tenantId: inp.tenantId, ref, keyPrefix: `autocreate/${inp.tenantId}/${inp.pieceId}/stills`, timeoutMs: 90_000 });
+  if (!r.ok) { console.warn(`[video/providers] 정지 컷 ${inp.cutIdx} 실패: ${r.reason}`); return { ok: false, reason: r.reason }; }
+  return { ok: true, key: r.key, model: r.model, costUsd: r.costUsd };
 }

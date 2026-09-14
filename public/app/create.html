@@ -15,6 +15,7 @@
     <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
 <div class="step-h"><h1>오늘은 어떤 소재로 벌까요?</h1><p>«디렉터에게» 보내면 채널·계정·구성·시각을 정해 드려요.</p></div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div>${UI.chev}</button></div>
 <div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
   </main>
 </div>
@@ -25,9 +26,10 @@
 (async () => {
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
-let accountsN = null, busy = false, timer = null;
+let accountsN = null, busy = false, timer = null, templates = []; // [P1R5] shorts_templates(레퍼런스 구조)
 function sub(t) { const f = t.factors || {}; const parts = [];
   if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
+  const tp = t.factors?.structureTemplateId ? templates.find((x) => x.id === t.factors.structureTemplateId) : null; if (tp) parts.push(`구조: ${UI.esc(tp.name)}`); // [P1R5] 레퍼런스 구조 부제
   return parts.length ? parts.join(" · ") : UI.esc(t.angle || ""); }
 /* [v2.9] 소재 뽑기는 배경 작업 — 도는 동안은 스켈레톤 + 한 문장, 5초마다 다시 본다(떠났다 와도 같은 상태) */
 const SK = `<div class="row"><span class="sk" style="width:28px;height:28px;border-radius:9px"></span><div class="l"><span class="sk" style="width:78%;height:13px"></span><span class="sk" style="width:42%;height:11px;margin-top:6px"></span></div></div>`;
@@ -38,6 +40,7 @@ const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
 async function load(poll = false) {
   const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
   if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0; }
+  templates = r.templates || []; UI.$("#refg").hidden = !accountsN; if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
   const f = r.refresh || {};
   const startedMs = f.startedAt ? UI.utc(f.startedAt).getTime() : null;
   const stale = !!(f.running && startedMs && Date.now() - startedMs > 600000); // 고아 방지 — 10분 넘으면 도는 걸로 보지 않는다
@@ -66,6 +69,10 @@ async function refresh() {
 }
 async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
 UI.$("#refresh").onclick = refresh;
+/* [P1R5] 레퍼런스 URL 한 칸 → POST /api/topics-reference {url} → template{name,structure,hook,style} · 코인 0 · 하루 3회 */
+UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>쇼츠 · 릴스 링크</label><input class="input" name="url" type="url" required placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url"><div class="help"></div></div><p class="muted" style="margin:0 0 4px;font-size:13px">링크의 훅·서사·스타일을 구조로 배워 다음 소재부터 «구조: …»로 붙여요. 영상을 베끼지 않아요.</p>${templates.length ? `<div class="sec">배운 구조</div>${templates.map((x) => `<div class="row" style="padding-left:0;padding-right:0;min-height:44px"><div class="l"><span class="t" style="font-size:14px">${UI.esc(x.name)}</span><span class="d">${(x.structure || []).slice(0, 3).map(UI.esc).join(" → ")}</span></div></div>`).join("")}` : ""}<div class="cta"><button class="btn primary" type="submit">구조 배우기</button></div></form>`, { title: "레퍼런스로 구조 배우기", onOpen: (sh, close) => UI.form(sh.querySelector("#rf"), async (d, f) => {
+  const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
+  close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
 await load();
 })();
 </script>

@@ -23,6 +23,8 @@ import { lookupVolumes, normKw, type KeywordVolume } from "./naver-volume";
 import { lookupGrowth } from "./naver-datalab";
 import { seasonalFor, seasonLine } from "./kr-calendar";
 import { listAccounts, TEXT_CHANNELS } from "./accounts";
+import { VIDEO_CHANNELS } from "./video/types";          // 순수 어휘 파일(AC-17 순환 0 — types 는 아무것도 import 하지 않는다)
+import { listTemplates } from "./video/reference";       // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { AD_LAW_BANNED, normalizeForBanScan } from "./banned-words";
 import { findBannedCategory } from "./banned-categories";
 import { writeAudit } from "./audit";
@@ -31,7 +33,11 @@ type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
 
 export type TopicIntent = "info" | "commercial" | "mixed";
-export interface TopicFactors { volume?: number; growthPct?: number; competition?: "low" | "mid" | "high"; intent: TopicIntent; pain?: number; seasonal?: string; performance?: number }
+export interface TopicFactors {
+  volume?: number; growthPct?: number; competition?: "low" | "mid" | "high"; intent: TopicIntent; pain?: number; seasonal?: string; performance?: number;
+  /** [P1R5 §1.11] 레퍼런스 구조 템플릿(`shorts_templates.id`) — 영상 후보에만 붙는다. 디렉터가 `meta.structure` 로 옮겨 대본 프롬프트의 «서사 단계»가 된다. */
+  structureTemplateId?: number;
+}
 export interface Topic { id: number; title: string; angle: string; channelHint: string; score: number; status: string; factors: TopicFactors; expiresAt: string }
 
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -83,7 +89,7 @@ export function hasSuperlative(text: string): boolean {
 }
 
 /* ───────── ① 후보 생성(LLM) ───────── */
-interface Candidate { title: string; angle: string; seedKeywords: string[]; channelHint: string; intent: TopicIntent; pain: number }
+interface Candidate { title: string; angle: string; seedKeywords: string[]; channelHint: string; intent: TopicIntent; pain: number; structureTemplateId?: number }
 
 async function tenantContext(tid: number) {
   const [t] = await q(sql`SELECT settings FROM tenants WHERE id = ${tid}`);
@@ -92,10 +98,15 @@ async function tenantContext(tid: number) {
   const accountChannels = [...new Set(accounts.map((a) => a.channel))].filter((c) => TEXT_CHANNELS.has(c));
   const settingChannels = (Array.isArray(settings.channels) ? (settings.channels as unknown[]).map(String) : []).filter((c) => TEXT_CHANNELS.has(c));
   const channels = accountChannels.length ? accountChannels : settingChannels.length ? settingChannels : ["naver_blog", "tistory"];
+  /* [P1R5 §1.11] 영상 채널 힌트 — 테넌트가 `settings.kinds` 에 "video" 를 켰고 영상 계정이 있을 때만 후보에 섞는다(디렉터 §1.1 과 같은 조건).
+     레퍼런스 구조 템플릿이 있으면 목록으로 넘겨, 모델이 영상 후보마다 어울리는 구조를 고르게 한다(`factors.structureTemplateId`). */
+  const kinds = Array.isArray(settings.kinds) ? (settings.kinds as unknown[]).map(String) : ["text"];
+  const videoChannels = kinds.includes("video") ? [...new Set(accounts.map((a) => a.channel))].filter((c) => VIDEO_CHANNELS.has(c)) : [];
+  const templates = videoChannels.length ? await listTemplates(tid, 8) : [];
   const personaIds = [...new Set(accounts.map((a) => a.personaId).filter(Boolean))] as number[];
   const personas = personaIds.length ? await q(sql`SELECT name, profile FROM personas WHERE tenant_id = ${tid} AND id IN (${sql.join(personaIds.map((i) => sql`${i}`), sql`, `)})`) : await q(sql`SELECT name, profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 2`);
   const recent = await q(sql`SELECT title FROM topics WHERE tenant_id = ${tid} AND created_at > NOW() - interval '30 days' ORDER BY id DESC LIMIT 60`);
-  return { settings, channels, personas: personas.map((p) => ({ name: String(p.name), profile: (p.profile || {}) as Record<string, unknown> })), recentTitles: recent.map((r) => String(r.title)) };
+  return { settings, channels, videoChannels, templates, personas: personas.map((p) => ({ name: String(p.name), profile: (p.profile || {}) as Record<string, unknown> })), recentTitles: recent.map((r) => String(r.title)) };
 }
 
 function personaLine(p: { name: string; profile: Record<string, unknown> }): string {
@@ -108,28 +119,42 @@ function personaLine(p: { name: string; profile: Record<string, unknown> }): str
 async function generateCandidates(tid: number, ctx: Awaited<ReturnType<typeof tenantContext>>): Promise<Candidate[]> {
   const system = [
     "너는 한국 블로그·SNS 소재 편성자다. 검색되는 실제 고민을 고르되, 지어낸 수치·근거 없는 최상급(최고·1위·100%·완벽)은 절대 쓰지 않는다.",
-    "출력은 JSON 하나: { \"candidates\": [ { \"title\": string(검색어가 앞에 오는 자연스러운 한국어 제목 25자 내), \"angle\": string(어떤 관점·경험으로 풀지 한 문장), \"seedKeywords\": [string×3 · 네이버에서 실제로 치는 짧은 검색어 · 공백 없이], \"channelHint\": string(아래 채널 키 중 하나), \"intent\": \"info\"|\"commercial\"|\"mixed\", \"pain\": number(0~1 · 얼마나 절실한 고민인가) } ×15 ] }",
+    "출력은 JSON 하나: { \"candidates\": [ { \"title\": string(검색어가 앞에 오는 자연스러운 한국어 제목 25자 내), \"angle\": string(어떤 관점·경험으로 풀지 한 문장), \"seedKeywords\": [string×3 · 네이버에서 실제로 치는 짧은 검색어 · 공백 없이], \"channelHint\": string(아래 채널 키 중 하나), \"intent\": \"info\"|\"commercial\"|\"mixed\", \"pain\": number(0~1 · 얼마나 절실한 고민인가), \"structureTemplate\": number|null(아래 구조 템플릿 번호 · 없으면 null) } ×15 ] }",
     "채널 힌트 규칙: 경험담·생활 밀착·사진이 어울리면 naver_blog · 정리·비교·가이드는 tistory 또는 blogger/wordpress · 짧은 훅·의견은 threads.",
+    ctx.videoChannels.length
+      ? `영상 채널(${ctx.videoChannels.join(", ")})도 대상이다 — 3초 안에 훅이 서고, 말로 60초에 끝나며, 장면이 그려지는 소재면 영상 채널 키를 고른다(설명·표·링크가 필요한 소재는 글 채널로). 15개 중 5개 안팎을 영상 후보로.`
+      : "",
+    ctx.templates.length
+      ? `영상 후보에는 아래 «구조 템플릿» 중 어울리는 것의 번호를 "structureTemplate" 에 넣는다(안 맞으면 null · 글 후보는 항상 null).\n${ctx.templates.map((t, i) => `  ${i}. ${t.name} — ${t.structure.join(" → ").slice(0, 160)}`).join("\n")}`
+      : "",
     "15개는 서로 다른 주제여야 하고(같은 주제의 변주 금지), 상업 의도(intent commercial/mixed)를 5개 안팎 섞는다.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   const user = [
-    `[대상 채널] ${ctx.channels.join(", ")}`,
+    `[대상 채널] ${[...ctx.channels, ...ctx.videoChannels].join(", ")}`,
     ctx.personas.length ? `[운영자 페르소나(사정)]\n${ctx.personas.map(personaLine).join("\n")}` : "[운영자 페르소나] 아직 없음 — 1인 가구·직장인·자취 같은 넓은 사정으로",
     `[계절] ${seasonLine()}`,
     ctx.recentTitles.length ? `[최근 30일 이미 쓴 소재 — 겹치지 말 것]\n${ctx.recentTitles.slice(0, 40).map((t) => `- ${t}`).join("\n")}` : "",
     "위 조건으로 후보 15개를 JSON 으로.",
   ].filter(Boolean).join("\n\n");
-  const r = await callGeminiJson<{ candidates?: Candidate[] }>({ purpose: "topics", chain: CHAIN_DIRECTOR, role: "director", system, user, tenantId: tid, ref: `topics:${tid}`, mode: "pro", maxOutputTokens: 6000 });
+  const r = await callGeminiJson<{ candidates?: (Candidate & { structureTemplate?: unknown })[] }>({ purpose: "topics", chain: CHAIN_DIRECTOR, role: "director", system, user, tenantId: tid, ref: `topics:${tid}`, mode: "pro", maxOutputTokens: 6000 });
   if (!r.ok) throw Object.assign(new Error(`소재 후보 생성 실패: ${r.reason}`), { step: "ai" });
   const list = Array.isArray(r.data?.candidates) ? r.data.candidates : [];
-  return list.map((c) => ({
-    title: String(c?.title ?? "").trim().slice(0, 120),
-    angle: String(c?.angle ?? "").trim().slice(0, 300),
-    seedKeywords: (Array.isArray(c?.seedKeywords) ? c.seedKeywords : []).map((k) => String(k ?? "").replace(/\s+/g, "").trim()).filter(Boolean).slice(0, 3),
-    channelHint: TEXT_CHANNELS.has(String(c?.channelHint)) && ctx.channels.includes(String(c.channelHint)) ? String(c.channelHint) : ctx.channels[0],
-    intent: (["info", "commercial", "mixed"].includes(String(c?.intent)) ? String(c.intent) : "info") as TopicIntent,
-    pain: Math.max(0.3, Math.min(1, Number(c?.pain) || 0.5)),
-  })).filter((c) => c.title && !hasSuperlative(`${c.title} ${c.angle}`))
+  return list.map((c) => {
+    const hint = String(c?.channelHint ?? "");
+    const isVideoHint = ctx.videoChannels.includes(hint);
+    // 구조 템플릿은 **영상 후보에만** · 번호가 목록 밖이면 버린다(모델이 지어낸 id 를 저장하지 않는다).
+    const ti = Number(c?.structureTemplate);
+    const tpl = isVideoHint && Number.isInteger(ti) && ti >= 0 && ti < ctx.templates.length ? ctx.templates[ti] : null;
+    return {
+      title: String(c?.title ?? "").trim().slice(0, 120),
+      angle: String(c?.angle ?? "").trim().slice(0, 300),
+      seedKeywords: (Array.isArray(c?.seedKeywords) ? c.seedKeywords : []).map((k) => String(k ?? "").replace(/\s+/g, "").trim()).filter(Boolean).slice(0, 3),
+      channelHint: isVideoHint || (TEXT_CHANNELS.has(hint) && ctx.channels.includes(hint)) ? hint : ctx.channels[0],
+      intent: (["info", "commercial", "mixed"].includes(String(c?.intent)) ? String(c.intent) : "info") as TopicIntent,
+      pain: Math.max(0.3, Math.min(1, Number(c?.pain) || 0.5)),
+      ...(tpl ? { structureTemplateId: tpl.id } : {}),
+    };
+  }).filter((c) => c.title && !hasSuperlative(`${c.title} ${c.angle}`))
     .filter((c) => {   // P1R4 §1.5 — 금칙 카테고리(성인·도박·의료 과장·비방·불법)는 소재 단계에서 거부 + 감사
       const hit = findBannedCategory(`${c.title} ${c.angle} ${c.seedKeywords.join(" ")}`);
       if (hit) void writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "system", riskLevel: "medium", detail: { category: hit.category, word: hit.word, title: c.title.slice(0, 80) } });
@@ -160,6 +185,7 @@ export function toTopic(r: Row): Topic {
   if (Number.isFinite(Number(f.pain)) && f.pain !== undefined && f.pain !== null) factors.pain = Number(f.pain);
   if (f.seasonal) factors.seasonal = String(f.seasonal);
   factors.performance = Number(f.performance) || 0;
+  if (Number.isFinite(Number(f.structureTemplateId)) && Number(f.structureTemplateId) > 0) factors.structureTemplateId = Number(f.structureTemplateId);
   return { id: Number(r.id), title: String(r.title), angle: String(r.angle ?? ""), channelHint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), status: String(r.status), factors, expiresAt: utcDate(r.expires_at)?.toISOString() ?? "" };
 }
 
@@ -208,6 +234,7 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
     const comp = competitionOf(bv.compIdx); if (comp) factors.competition = comp;
     const g = bv.keyword ? growth.get(bv.keyword) : undefined; if (g !== undefined) factors.growthPct = g;
     if (seasonal.label) factors.seasonal = seasonal.label;
+    if (c.structureTemplateId) factors.structureTemplateId = c.structureTemplateId;   // [P1R5 §1.11]
     const score = computeScore({ demand: demandScore(bv.volume), intent: intentScore(c.intent), pain: c.pain, compGap: compGapScore(bv.compIdx), difficulty: channelDifficulty(c.channelHint), seasonal: seasonal.weight, performance: 1 });
     const [ex] = await q(sql`SELECT id, score, status FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} ORDER BY id DESC LIMIT 1`);
     if (ex && String(ex.status) === "candidate") {
