@@ -501,6 +501,19 @@ export function imagesFor(c: WritingContract, group?: TopicGroup | null): { min:
   return g || { min: c.images.min, max: c.images.max, default: c.images.default };
 }
 
+/**
+ * [R8-A §2] 이 글의 **수익 목적**을 정한다 — 🔴 **한 곳**이다.
+ *   생성(`content-gen`)과 검수 화면(`pieces-get`)이 **같은 함수**를 봐야 «프롬프트에 실린 값»과 «화면이 보여 주는 값»이 안 갈린다
+ *   (갈리면 화면이 거짓말을 한다 · AC-57 대용물 금지 · 오늘 우리가 gate_report 에서 겪은 그 모양).
+ *   규칙: 제휴가 붙었으면 `affiliate` 가 이긴다 → 아니면 brief 의 목적 → 그것도 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스).
+ */
+export function resolveGoal(a: { affiliate: boolean; briefGoal?: string | null; channel: string }): RevenueGoal {
+  if (a.affiliate) return "affiliate";
+  const g = String(a.briefGoal ?? "").trim();
+  if (g) return g as RevenueGoal;
+  return a.channel === "naver_blog" ? "adpost" : "adsense";
+}
+
 /** [R8-A §2] 소재·형식에서 주제군을 고른다(순수 · 재료가 없으면 null = 채널 고정값을 쓴다). */
 export function topicGroupOf(a: { format?: string | null; intent?: string | null; title?: string | null }): TopicGroup | null {
   const f = String(a.format ?? ""), intent = String(a.intent ?? ""), t = String(a.title ?? "");

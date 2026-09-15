@@ -5,7 +5,10 @@
  *   POST /api/pieces-approve { id }               → { status:"scheduled", scheduledFor } | ✗ { step:"gate", error, gate }   // 고지·금칙어·제휴 링크 수·유사도 재검사
  *   POST /api/pieces-reject { id, reason? }       → { status:"rejected" }
  *   POST /api/pieces-regenerate { id, note? }     → { status:"generating" } | ✗ step regen_limit   // 코인 0(같은 ref) · 1회
- *   POST /api/pieces-update { id, title?, bodyHtml? } → { gate:GateReport, bodyHtml }              // bodyHtml 정본 승격(meta.editedByUser) · 고지 첫 요소 재삽입 · 게이트 재검사(정보)
+ *   POST /api/pieces-update { id, title?, bodyHtml?, monetize? } → { gate:GateReport, bodyHtml }   // bodyHtml 정본 승격(meta.editedByUser) · 고지 첫 요소 재삽입 · 게이트 재검사(정보)
+ *     [R8-A] `monetize:{sponsored?,gift?}` = **대가 켜기**(글·영상 **둘 다**). 켜기만 한다(false 는 안 내린다) · **monetize 만 보내도 된다** ·
+ *     🔴 `meta.editedByUser` 는 **본문이 실제로 온 경우에만** 찍는다(그 값이 서면 재검사가 블록→HTML 로 바뀐다 · 읽는 곳 `lib/content-approve.ts:155` 한 곳).
+ *   GET  /api/pieces-get 응답에 [R8-A] `topicGroup`(없으면 null) · `goal` · `contract`(그 글에 **적용된** 분량·사진·goalRules) 3축.
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
@@ -23,6 +26,8 @@ import { triggerGenerate } from "../../lib/director";
 import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
+import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "../../lib/writing-contracts";
+import { htmlToPlain } from "../../lib/blocks";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -129,6 +134,37 @@ export default async (req: Request): Promise<Response> => {
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };
+
+      /* ══ [R8-A fix ③] «이 글이 왜 이렇게 생겼나» 3축 — A 검수 화면의 `?why=1` 자리 ══
+         🔴 **계약 파일의 기본값이 아니라 «이 글에 적용된 값»**이다(AC-57 대용물 금지). 셋이 갈리면 화면이 거짓말을 한다.
+         · `topicGroup` — 없으면 **null 그대로**(«모름»을 «기본값»으로 위장하지 않는다)
+         · `goal` — `briefs.goal`. 🔴 생성이 쓰는 `resolveGoal` **같은 함수**를 부른다(프롬프트에 실린 값과 화면 값이 갈리지 않게)
+         · `contract.summary` — 그 글에 실제로 적용된 분량·사진 수·목적 규칙 */
+      try {
+        const wc = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
+        /* 🔴 **없는 format 을 `formats[0]` 으로 메우지 않는다** — 그러면 «모름»이 «info» 로 위장되고
+           주제군·분량이 그 거짓값에서 흘러나온다(AC-57 대용물 금지 · 스모크에서 실제로 걸렸다). 없으면 없는 대로 둔다. */
+        const fmt = String(p.format || m.format || "") || null;
+        const grp = fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
+        const [brow] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE tenant_id = ${tid} AND id = ${n(p.brief_id)}`) : [undefined];
+        const goal = resolveGoal({ affiliate: !!m.affiliate, briefGoal: brow?.goal as string | null, channel: String(p.channel) });
+        const len = lengthFor(wc, grp), img = imagesFor(wc, grp);
+        detail.topicGroup = grp;                       // null 이면 null — 화면이 «모름»으로 그린다
+        detail.goal = goal;
+        detail.contract = {
+          channel: String(p.channel), label: wc.label, format: fmt, formatLabel: fmt ? (wc.formatLabel[fmt as keyof typeof wc.formatLabel] ?? fmt) : null,
+          register: wc.register,
+          length: { min: len.min, max: len.max, fromGroup: !!(grp && wc.lengthByGroup?.[grp]) },
+          images: { min: img.min, max: img.max, default: img.default, fromGroup: !!(grp && wc.imagesByGroup?.[grp]) },
+          goalRules: wc.goalRules?.[goal] ?? [],       // 실제로 프롬프트에 실린 줄들(없으면 빈 배열)
+          /* 실제 글의 길이 — 계약 폭 안에 있는지 화면이 바로 보여 줄 수 있게. */
+          actualChars: htmlToPlain(String(p.body || "")).length,
+        };
+      } catch (e) {
+        /* 🔴 못 실으면 **빈칸으로 두고 사유를 남긴다** — 기본값으로 채우면 화면이 «이 글에 적용된 값»이라고 거짓말한다(AC-9). */
+        console.warn("[pieces] why 3축 조립 실패", String((e as Error)?.message ?? e).slice(0, 120));
+        detail.contract = null; detail.topicGroup = null; detail.goal = null;
+      }
       if (isVideo) {
         // A 계약: `assets:[{ id, kind, url, meta }]` — 화면이 종류로 골라 쓴다(`images` 는 글 호환으로 그대로 둔다).
         detail.assets = assets.map((x) => ({ id: n(x.id), kind: String(x.kind), url: urlOf(x), sort: n(x.sort), caption: x.caption ? String(x.caption) : "", meta: x.meta ?? {} }));
@@ -269,6 +305,18 @@ export default async (req: Request): Promise<Response> => {
         /* [P1R5 §3 · A 실물] 영상 설명란 수정 — `{ id, title, body, tags[] }`.
            🔴 첫 줄 고지는 **서버가 되붙인다**(사용자가 지워도 · 글의 «고지 첫 요소» 관례와 같은 급 · §16B.4).
            정본은 `pieces.body`(발행 커넥터가 이걸 올린다) · `meta.description`·`meta.tags`·`meta.youtube` 도 같이 맞춰 둔다(A 가 읽는다). */
+        /* [R8-A fix ①] 🔴 **영상에도 «대가 켜기» 입구를 연다.**
+           종전엔 이 갈래가 `compensationOfMeta(m)` 으로 **이미 켜진 것을 읽기만** 했다 — 글 갈래에만 `monetize` 입구가 있었다.
+           즉 **협찬·무상 제공 영상에 고지를 켤 방법이 아무 데도 없었다**(B3 가 글에서 잡은 구멍의 영상판).
+           규율은 글과 **똑같다**: **켜기만** 한다(`false` 를 보내도 안 내린다) — 켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남는다. */
+        const vmz = (b.monetize ?? {}) as Record<string, unknown>;
+        const vOn = { sponsored: vmz.sponsored === true, gift: vmz.gift === true };
+        if (vOn.sponsored || vOn.gift) {
+          await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ ...(vOn.sponsored ? { sponsored: true } : {}), ...(vOn.gift ? { gift: true } : {}), adDisclosure: true })} WHERE id = ${id}`);
+          if (vOn.sponsored) m.sponsored = true;
+          if (vOn.gift) m.gift = true;
+          m.adDisclosure = true;
+        }
         const comp = compensationOfMeta(m);            // [R8-A §4] 제휴·협찬·무상 제공
         const need = comp.need;
         const title = typeof b.title === "string" ? b.title.trim().slice(0, 120) : String(p.title || "");
@@ -280,14 +328,17 @@ export default async (req: Request): Promise<Response> => {
         }
         const tags = Array.isArray(b.tags) ? (b.tags as unknown[]).map((t) => String(t).replace(/^#/, "").trim()).filter(Boolean).slice(0, 15) : (Array.isArray(m.tags) ? m.tags as string[] : []);
         const yt = (m.youtube ?? {}) as Record<string, unknown>;
+        /* 🔴 [R8-A fix ②의 짝] `editedByUser` 는 **사람이 실제로 글을 고쳤을 때만** 찍는다.
+           종전엔 이 갈래가 **언제나** 찍어서, 대가만 켜도 «사람이 고친 글»이 됐다 — `recheckPiece` 가 블록 대신 HTML 로 판정한다(읽는 곳 1곳 · content-approve.ts:155). */
+        const vEdited = typeof b.title === "string" || typeof b.body === "string";
         await q(sql`UPDATE pieces SET title = ${title}, body = ${body},
-          meta = meta || ${jsonb({ description: body, tags, youtube: { ...yt, title, description: body, tags }, editedByUser: true, editedAt: new Date().toISOString() })},
+          meta = meta || ${jsonb({ description: body, tags, youtube: { ...yt, title, description: body, tags }, ...(vEdited ? { editedByUser: true, editedAt: new Date().toISOString() } : {}) })},
           updated_at = NOW() WHERE id = ${id}`);
         const [p2] = await q(sql`SELECT p.* FROM pieces p WHERE p.id = ${id}`);
         const gate = await recheckPiece(tid, p2);
         await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
-        await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { kind: "video", title: typeof b.title === "string", body: typeof b.body === "string", tags: tags.length, gateOk: gate.ok } });
-        return json({ ok: true, gate, body, tags });
+        await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { kind: "video", title: typeof b.title === "string", body: typeof b.body === "string", tags: tags.length, gateOk: gate.ok, ...(vOn.sponsored || vOn.gift ? { monetize: { ...(vOn.sponsored ? { sponsored: true } : {}), ...(vOn.gift ? { gift: true } : {}) } } : {}) } });
+        return json({ ok: true, gate, body, tags, ...(need ? { disclosureFirstLine: body.split("\n")[0] } : {}) });
       }
       const sets: ReturnType<typeof sql>[] = [];
       let bodyHtml = String(p.body || "");
@@ -309,14 +360,26 @@ export default async (req: Request): Promise<Response> => {
         bodyHtml = sanitizeHtml(b.bodyHtml);
         if (need) bodyHtml = ensureDisclosureHtml(bodyHtml, comp.provider ?? "coupang", { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift });
         sets.push(sql`body = ${bodyHtml}`);
+        /* 🔴 `editedByUser` 는 **`bodyHtml` 이 실제로 온 경우에만** 찍는다 — 읽는 곳이 딱 하나 있고(`lib/content-approve.ts:155`),
+           그 값이 서면 재검사가 **블록 기준 → HTML 기준**으로 바뀐다. 사람이 한 글자도 안 고쳤는데 찍으면 조용한 오염이다. */
         sets.push(sql`meta = meta || ${jsonb({ editedByUser: true, editedAt: new Date().toISOString() })}`);
+      } else if (turnOn.sponsored || turnOn.gift) {
+        /* [R8-A fix ②] 🔴 **대가만 켜도 성사된다.** 종전엔 `sets` 가 비어 400 이 났고, 그래서 화면이 `bodyHtml` 을 **억지로 같이** 보냈다 —
+           그 부작용으로 `editedByUser` 가 찍혔다(위 주석의 그 오염). 이제 여기서 **저장된 본문에 고지만 되붙여** 쓴다. */
+        const withDisc = ensureDisclosureHtml(bodyHtml, comp.provider ?? "coupang", { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift });
+        if (withDisc !== bodyHtml) { bodyHtml = withDisc; sets.push(sql`body = ${bodyHtml}`); }
       }
-      if (!sets.length) return badRequest("바꿀 값이 없어요.");
+      /* 대가를 켰으면 «바꾼 것»이 있는 것이다 — 본문이 이미 고지를 갖고 있어 `sets` 가 비어도 400 을 내지 않는다(위 UPDATE 로 meta 는 이미 섰다). */
+      if (!sets.length && !(turnOn.sponsored || turnOn.gift)) return badRequest("바꿀 값이 없어요.");
+      if (!sets.length) sets.push(sql`updated_at = NOW()`);
       await q(sql`UPDATE pieces SET ${sql.join(sets, sql`, `)}, updated_at = NOW() WHERE id = ${id}`);
       const [p2] = await q(sql`SELECT p.* FROM pieces p WHERE p.id = ${id}`);
       const gate = await recheckPiece(tid, p2);
       await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
-      await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { title: typeof b.title === "string", body: typeof b.bodyHtml === "string", gateOk: gate.ok } });
+      await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`,
+        detail: { title: typeof b.title === "string", body: typeof b.bodyHtml === "string", gateOk: gate.ok,
+          // 무엇을 «켰는지» 남긴다 — 대가는 되돌릴 수 없는 종류의 표시라 누가 언제 켰는지가 증거가 된다.
+          ...(turnOn.sponsored || turnOn.gift ? { monetize: { ...(turnOn.sponsored ? { sponsored: true } : {}), ...(turnOn.gift ? { gift: true } : {}) } } : {}) } });
       return json({ ok: true, gate, bodyHtml: String(p2.body || "") });
     }
     return json({ ok: false, error: "not_found" }, 404);
