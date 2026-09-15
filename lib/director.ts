@@ -28,7 +28,7 @@ import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼
 import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
 import { checkAiCostCap, requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
-import { findBannedCategory } from "./banned-categories";
+import { findBannedCategory, isHealthTopic, HEALTH_FORBIDDEN_FORMATS } from "./banned-categories";
 import { writeAudit } from "./audit";
 import { backgroundBase } from "./site-url";   // [AC-53/54] 자기 배경 함수 호출 = «이 배포» · 로컬에서 라이브면 던진다
 
@@ -40,7 +40,11 @@ export interface PieceSpec {
   key: string; channel: string; accountId: number | null; accountHandle: string | null;
   format: FormatKey; emotionKey: string; composition: string; lengthHint: { words: number };
   images: { count: number; style: "photo" | "illust" | "infographic"; heroNeeded: boolean };
-  monetize: { affiliate: Affiliate | null; adDisclosure: boolean };
+  /**
+   * [R8-A §4] 대가 3종 — `adDisclosure` 는 **셋의 OR 결과**(파생값)다. 화면·서버가 따로 계산하지 않게 여기서 한 번 정한다.
+   *   🔴 `sponsored`(원고료·PPL)·`gift`(제품 무상 제공)는 **우리가 알 수 없다** — 고객이 켜는 값이라 자동 경로 기본값은 false.
+   */
+  monetize: { affiliate: Affiliate | null; sponsored: boolean; gift: boolean; adDisclosure: boolean };
   schedule: { at: string; slotReason: string }; coinCost: number;
   /** 추가(계약 외 · A 무시 가능): 채널별로 가른 앵글 — content-gen 재료. */
   angle: string;
@@ -58,7 +62,7 @@ export interface PieceSpec {
   usesTodaySlot?: { slotId: number; publishAt: string };
 }
 export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
-export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null }; schedule?: { at: string }; drop?: true;
+export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null; sponsored?: boolean; gift?: boolean }; schedule?: { at: string }; drop?: true;
   /** [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. */
   video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number } }
 
@@ -233,7 +237,13 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
   for (const ch of channels) {
     const c = await contractFor(ch);
     const acc = assignAccount(accounts, ch);
-    const format = pickFormat(c, await recentFormats(tid, acc?.id ?? null, ch), `${topic.id}:${ch}:${acc?.id ?? 0}`);
+    /* [R8-A §4] 건강·의료 소재엔 «경험담» 구성을 빼고 고른다 — 자동 경로(`director-auto`)와 **같은 규칙**이어야 한다
+       (사람이 누른 글만 의료법 §56 을 비껴가면 게이트가 아니라 구멍이다). */
+    const healthTopic = isHealthTopic(`${topic.title} ${topic.angle ?? ""}`);
+    const cPick = healthTopic
+      ? { ...c, formats: (c.formats.filter((f) => !HEALTH_FORBIDDEN_FORMATS.includes(f)) as FormatKey[]).length ? (c.formats.filter((f) => !HEALTH_FORBIDDEN_FORMATS.includes(f)) as FormatKey[]) : c.formats }
+      : c;
+    const format = pickFormat(cPick, await recentFormats(tid, acc?.id ?? null, ch), `${topic.id}:${ch}:${acc?.id ?? 0}`);
     const chTaken = taken.byChannel.get(ch) ?? [];
     const sched = pickPublishAt({ channel: ch, goldenHours: acc?.goldenHours ?? null, taken: chTaken, takenSameAccount: acc ? (taken.byAccount.get(acc.id) ?? []) : [], minGapMin: acc?.minGapMin });
     taken.byChannel.set(ch, [...chTaken, sched.at]);
@@ -249,7 +259,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
         emotionKey: "script", composition: `${video.seconds}초 ${video.format === "graphic" ? "그래픽 스토리" : video.format === "talking" ? "토킹" : "클립"}`,
         lengthHint: { words: Math.round(video.seconds * 4.6 * 0.85 / 2.2) },
         images: { count: 0, style: "photo", heroNeeded: false },
-        monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, adDisclosure: !!affiliateBase },
+        monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
         schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: coinCostOf(videoCoinItem(video.seconds)), angle: topic.angle,
       });
       continue;
@@ -260,7 +270,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       kind: "post",
       format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory" },
-      monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, adDisclosure: !!affiliateBase },
+      monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
       schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(imageCount), angle: topic.angle,
     });
   }
@@ -350,10 +360,14 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
     if (p.emotionKey) next.emotionKey = String(p.emotionKey).slice(0, 40);
     if (p.images?.count !== undefined) next.images.count = Math.max(c.images?.min ?? 0, Math.min(c.images?.max ?? 10, Math.trunc(n(p.images.count))));
     if (p.images?.style && ["photo", "illust", "infographic"].includes(p.images.style)) next.images.style = p.images.style as PieceSpec["images"]["style"];
+    /* [R8-A §4] 협찬·무상 제공 — 🔴 **끄는 길을 두지 않는다**: 여기서는 «켜기»만 받는다(false 를 보내도 내려가지 않는다).
+       켜고 만든 뒤 끄면 «고지 없는 글»이 남기 때문이다. 내리려면 글을 버리거나 재검수로 다시 만든다(메인 판정 2026-09-15). */
+    if (p.monetize?.sponsored === true) next.monetize.sponsored = true;
+    if (p.monetize?.gift === true) next.monetize.gift = true;
     if (p.monetize && "affiliate" in p.monetize) {
       const af = p.monetize.affiliate;
       next.monetize.affiliate = af && af.productQuery ? { provider: "coupang", productQuery: String(af.productQuery).slice(0, 120), slot: (["mid", "end", "both"].includes(String(af.slot)) ? af.slot : "mid") as Affiliate["slot"] } : null;
-      next.monetize.adDisclosure = !!next.monetize.affiliate;
+      next.monetize.adDisclosure = !!next.monetize.affiliate || next.monetize.sponsored || next.monetize.gift;   // [R8-A §4] 셋의 OR
     }
     if (p.schedule?.at) { const d = new Date(p.schedule.at); if (Number.isNaN(d.getTime())) return { ok: false, error: "시각 형식을 확인해 주세요." }; if (d.getTime() < Date.now() + 10 * 60_000) return { ok: false, error: "지금보다 10분 이상 뒤로 잡아 주세요." }; next.schedule = { at: d.toISOString(), slotReason: "직접 고른 시각" }; }
     /* [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. 길이가 바뀌면 코인 구간도 바뀐다(계약 §0.1-4). */
@@ -374,7 +388,7 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       if (pv.voiceId) { const id = String(pv.voiceId).slice(0, 60); v.variant = { ...v.variant, voiceId: id }; v.voice = { provider: GEMINI_VOICES.includes(id as typeof GEMINI_VOICES[number]) ? "gemini" : "typecast", voiceId: id }; }
       if (pv.palette) v.variant = { ...v.variant, palette: String(pv.palette).slice(0, 60) };
       if (pv.hookType && HOOK_TYPES.includes(String(pv.hookType) as typeof HOOK_TYPES[number])) v.variant = { ...v.variant, hookType: String(pv.hookType) };
-      v.disclosure = { badge: !!next.monetize.affiliate, descriptionFirstLine: !!next.monetize.affiliate };
+      v.disclosure = { badge: next.monetize.adDisclosure, descriptionFirstLine: next.monetize.adDisclosure };   // [R8-A §4] 영상도 대가 3종 같은 조건
       next.video = v;
       next.composition = `${v.seconds}초 ${v.format === "graphic" ? "그래픽 스토리" : v.format === "talking" ? "토킹" : "클립"}`;
       next.coinCost = coinCostOf(videoCoinItem(v.seconds));
@@ -482,8 +496,8 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const isVideo = s.kind === "video" && !!s.video;
       const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : "blog";
       const meta = isVideo
-        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
-        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 };
+        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
+        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);

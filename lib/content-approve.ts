@@ -27,12 +27,19 @@ import { personaTerms } from "./content-gen";
 import { countAffiliateLinks } from "./publish/gate";
 /* [R8-A §2 · B-1] 골격 지문 — 순수 모듈(DB 0). 여기서 최근 글을 읽어 넘겨 준다(ai-tell-gate 는 순수로 둔다 · AC-17). */
 import { structurePrint, compareToRecent, printFromMeta, STRUCTURE_OVERLAP_MAX, type StructurePrint } from "./structure-print";
+import { compensationOfMeta } from "./disclosure";            // [R8-A §4] 대가 3종 판정 한 곳
+import { classifyBanned } from "./banned-words";              // [R8-A §4] 3층 사전
+import { isHealthTopic } from "./banned-categories";          // [R8-A §4] 건강·의료 소재면 효능 표현이 바로 위법
 
 type Row = Record<string, unknown>;
 const n = (v: unknown) => Number(v || 0);
 
 /** 승인을 **막는** 게이트 키(사고 게이트). 나머지는 보여만 준다. */
-export const HARD_GATE_KEYS: readonly string[] = ["disclosure", "banned_words", "affiliate_count", "similarity", "superlative"];
+/* [R8-A §4] 🔴 `superlative` 를 **하드에서 뺀다**(B-1 지적 · 표시광고법 §5 는 낱말 금지가 아니라 실증 책임).
+   그 축은 «낱말이 있나»만 봤고 근거를 보지 않아, «판매량 1위(2026년 9월 네이버 쇼핑 기준)» 처럼 **법이 허용하는 문장까지 승인을 막았다**.
+   이제 `superlative` 는 같은 문장의 근거(기관·기간·수치)를 보고, 없을 때만 **보여 준다**(소프트).
+   법 축을 막는 것은 `banned_words` 다 — 3층 사전(hard = 단정·효능 / needs_proof = 근거 없는 최상급)이 그 자리를 맡는다. */
+export const HARD_GATE_KEYS: readonly string[] = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"];
 /** 이 게이트 결과가 승인을 막는가. */
 export function hardFailures(gate: GateReport): GateCheck[] {
   return gate.checks.filter((c) => !c.pass && HARD_GATE_KEYS.includes(c.key));
@@ -147,7 +154,8 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const html = String(p.body || "");
   const edited = m.editedByUser === true;
   const plain = htmlToPlain(html);
-  const need = !!m.affiliate || m.adDisclosure === true || !!m.affiliateHint;
+  const comp = compensationOfMeta(m);                       // [R8-A §4] 대가 3종(제휴·협찬·무상 제공) — 하나라도 참이면 고지가 필요하다
+  const need = comp.need;
   const checks: GateCheck[] = [];
   const c = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
   const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(p.account_id)}`) : [undefined];
@@ -156,7 +164,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
   if (!edited && blocks.length) {
-    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: m.adDisclosure === true }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
     return { ...g, checks: [...g.checks, link, st], ok: g.ok && link.pass && st.pass };
@@ -165,7 +173,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || "") });
   for (const k of GATE_KEYS) {
     const from = base.checks.find((x) => x.key === k)!;
-    if (k === "disclosure") { const d = checkDisclosureHtml(html, need); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }
+    if (k === "disclosure") { const d = checkDisclosureHtml(html, need, comp.kinds); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }
     if (k === "visual_min") {
       const cnt = (re: RegExp) => (html.match(re) || []).length; const miss: string[] = []; const vm = c.visualMin;
       if (vm.quote && cnt(/<blockquote(?![^>]*disclosure)/gi) < vm.quote) miss.push(`인용구 ${cnt(/<blockquote(?![^>]*disclosure)/gi)}/${vm.quote}`);
@@ -177,7 +185,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
       checks.push({ key: k, label: GATE_LABEL[k], pass: miss.length === 0, ...(miss.length ? { detail: miss.join(" · ") } : {}) }); continue;
     }
     if (k === "affiliate_count") { const links = affiliateLinkCount(html); checks.push({ key: k, label: GATE_LABEL[k], pass: links <= 2, ...(links > 2 ? { detail: `제휴 링크 ${links}개(2개 이하)` } : {}) }); continue; }
-    if (k === "banned_words") { const b = findBannedWords(`${p.title}\n${plain}`, BLOG_EXTRA_BANNED); checks.push({ key: k, label: GATE_LABEL[k], pass: !b.length, ...(b.length ? { detail: b.join(", ") } : {}) }); continue; }
+    if (k === "banned_words") { const cb = classifyBanned(`${p.title}\n${plain}`, { paid: comp.need, health: isHealthTopic(`${p.title}\n${plain}`) }); const b = [...cb.hard, ...cb.needsProof].map((h) => `«${h.word}»(${h.law})`); checks.push({ key: k, label: GATE_LABEL[k], pass: !b.length, ...(b.length ? { detail: b.join(", ") } : {}) }); continue; }
     checks.push(from);
   }
   checks.push(await checkLinks(html));   // [P1R7 B3] 소프트 링크 검사(HTML 정본 경로도 같은 한 벌)
@@ -185,7 +193,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
 }
 
 /** [P1R5 §1.4-6] 영상에 해당하는 GateKey — HTML 을 전제하는 4키(visual_min·affiliate_count·bullet_ratio·para_repeat)는 영상에 뜻이 없어 빼고, 나머지 8키를 **대본 말**로 잰다. */
-export const VIDEO_GATE_KEYS: readonly string[] = ["cliche", "translationese", "sentence_variance", "superlative", "persona", "banned_words", "similarity", "disclosure"];
+export const VIDEO_GATE_KEYS: readonly string[] = ["cliche", "translationese", "sentence_variance", "superlative", "persona", "banned_words", "similarity", "disclosure", "ad_pointing"];
 
 /**
  * recheckVideoPiece — 영상 검수 재검사(계약 §1.8 «approve·publish 직전 재검사» · §1.4-6).

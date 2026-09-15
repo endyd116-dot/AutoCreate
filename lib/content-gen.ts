@@ -137,7 +137,7 @@ function captionSlots(count: number, rate: number, seed: number): Set<number> {
 }
 const seedOf = (s: string) => { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
 
-export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingContract, affiliate: boolean, provider: string | null, seedText = ""): Block[] {
+export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingContract, affiliate: boolean, provider: string | null, seedText = "", comp?: { sponsored?: boolean; gift?: boolean }): Block[] {
   let blocks = normalizeBlocks(raw);
   /* image 블록 — [2026-09-15 §5C 수리] **prompt(그림 지시)** 와 **caption(사람이 읽는 한 줄)** 을 가른다.
      종전엔 한 문장이 두 일을 해서 «~놓여 있는 모습» 묘사문이 캡션으로 발행됐다(사장님 실측 piece 329).
@@ -180,7 +180,8 @@ export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingCo
   if (structure.includes("toc") && !blocks.some((b) => b.type === "toc")) blocks.unshift({ type: "toc" });
   if (structure.includes("hashtags") && !blocks.some((b) => b.type === "hashtags")) blocks.push({ type: "hashtags", items: [] });
   blocks = blocks.filter((b) => b.type !== "affiliate" && b.type !== "disclosure");
-  return ensureDisclosureFirst(blocks, affiliate, provider);
+  /* [R8-A §4] 대가 3종 — 제휴만이 아니라 협찬(sponsored)·무상 제공(gift)도 고지를 켠다(공정위 «경제적 이해관계»). */
+  return ensureDisclosureFirst(blocks, { affiliate, sponsored: comp?.sponsored === true, gift: comp?.gift === true, provider });
 }
 
 function insertAffiliate(blocks: Block[], block: Block, slot: string): Block[] {
@@ -236,7 +237,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, lengthWords, rewrite });
       const r = await callGeminiJson<{ title?: string; blocks?: unknown; tags?: unknown; affiliateChoice?: unknown }>({ purpose: "content", chain: CHAIN_HIGH, role: "high", system: pr.system, user: pr.user, tenantId: tid, ref: `piece:${pieceId}`, mode: "pro", maxOutputTokens: 12_000, timeoutMs: 180_000 });
       if (!r.ok) throw new Error(`글 생성 실패(${r.reason})`);
-      const blocks = fixBlocks(r.data?.blocks, structure, c, affiliate, aff?.provider ?? null, `${pieceId}:${topic.title}`);   // seed = 같은 글이면 캡션 자리가 늘 같다
+      const blocks = fixBlocks(r.data?.blocks, structure, c, affiliate, aff?.provider ?? null, `${pieceId}:${topic.title}`, { sponsored: meta.sponsored === true, gift: meta.gift === true });   // seed = 같은 글 · [R8-A §4] 대가 3종이면 캡션 자리가 늘 같다
       const title = String(r.data?.title ?? topic.title).trim().slice(0, 80) || topic.title;
       const tags = (Array.isArray(r.data?.tags) ? r.data.tags : []).map((t) => String(t ?? "").replace(/^#/, "").trim()).filter(Boolean).slice(0, 10);
       const choice = Number.isInteger(Number(r.data?.affiliateChoice)) ? Number(r.data?.affiliateChoice) : 0;
@@ -309,7 +310,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     /* [R8-A §2 · B-1] 골격 지문을 같이 남긴다 — 🔴 **여기서 안 적으면 `structure_repeat` 축은 견줄 재료가 0 이라 영영 «못 쟀어요» 다**(AC-29).
        영상의 `meta.frameHash` 와 같은 자리·같은 뜻(그림 지문 ↔ 골격 지문). 추가형이라 옛 글엔 없고, 없는 글은 견주기에서 빠진다. */
     const sPrint = structurePrint(draft.blocks);
-    const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: affiliate ? disclosureTextFor(aff?.provider) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
+    const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: (affiliate || meta.sponsored === true || meta.gift === true) ? disclosureTextFor({ affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true, provider: aff?.provider ?? null }) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
       structurePrint: sPrint, structureHash: structureHash(sPrint) };
     await q(sql`UPDATE pieces SET title = ${draft.title}, body = ${bodyHtml}, blocks = ${jsonb(draft.blocks)}, meta = ${jsonb(nextMeta)}, gate_report = ${jsonb(report)}, status = ${"in_review"}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(blocks) AS b, jsonb_typeof(meta) AS m, jsonb_typeof(gate_report) AS g FROM pieces WHERE id = ${pieceId}`);
