@@ -18,7 +18,7 @@ import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { type GateReport } from "../../lib/ai-tell-gate";
-import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText, compensationOfMeta } from "../../lib/disclosure";
+import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText, compensationOfMeta, videoBadgeText, videoOpeningCaption } from "../../lib/disclosure";
 /* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
 import { recheckPiece, approvePiece } from "../../lib/content-approve";
@@ -311,11 +311,32 @@ export default async (req: Request): Promise<Response> => {
            규율은 글과 **똑같다**: **켜기만** 한다(`false` 를 보내도 안 내린다) — 켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남는다. */
         const vmz = (b.monetize ?? {}) as Record<string, unknown>;
         const vOn = { sponsored: vmz.sponsored === true, gift: vmz.gift === true };
+        let needsRerender = false;
         if (vOn.sponsored || vOn.gift) {
-          await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ ...(vOn.sponsored ? { sponsored: true } : {}), ...(vOn.gift ? { gift: true } : {}), adDisclosure: true })} WHERE id = ${id}`);
           if (vOn.sponsored) m.sponsored = true;
           if (vOn.gift) m.gift = true;
           m.adDisclosure = true;
+          /* 🔴 [R8-A · 눌러 보고 찾은 것 2026-09-15] **설명란 첫 줄만 고치면 절반이다.**
+             영상 고지는 3중이다(§16B.1): ①우상단 배지 ②시작 3초 자막 ③설명란 첫 줄.
+             ①②는 `meta.render`(러너가 굽는 페이로드)에 들어 있는데, 그건 **생성 때** `needDisc` 로 정해진다(`lib/video/gen.ts:247·249`).
+             검수에서 뒤늦게 대가를 켜면 payload 는 `badge:null · disclosureCaption:null` 인 채다 —
+             실측: `checkVideoDisclosure` 가 «고지 누락: 우상단 배지 · 시작 3초 자막» 을 낸다(승인은 그 덕에 막힌다).
+             ⇒ 여기서 **payload 를 같이 고친다**. 다만 **이미 구워진 mp4 에는 배지가 없다** — 다시 구워야 화면에 뜬다.
+                그래서 `needsRerender` 를 응답에 실어 화면이 «다시 만들어야 배지가 들어가요» 라고 말하게 한다(조용히 넘기지 않는다). */
+          const cur = (m.render ?? null) as Record<string, any> | null;
+          if (cur && typeof cur === "object") {
+            const c2 = compensationOfMeta(m);
+            const patched = {
+              ...cur,
+              overlay: { ...(cur.overlay ?? {}), badge: { text: videoBadgeText({ affiliate: c2.affiliate, sponsored: c2.sponsored, gift: c2.gift, provider: c2.provider ?? null }), corner: "tr" } },
+              disclosureCaption: { text: videoOpeningCaption({ affiliate: c2.affiliate, sponsored: c2.sponsored, gift: c2.gift, provider: c2.provider ?? null }), untilMs: 3000 },
+            };
+            m.render = patched;
+            await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ ...(vOn.sponsored ? { sponsored: true } : {}), ...(vOn.gift ? { gift: true } : {}), adDisclosure: true, render: patched })} WHERE id = ${id}`);
+            needsRerender = true;
+          } else {
+            await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ ...(vOn.sponsored ? { sponsored: true } : {}), ...(vOn.gift ? { gift: true } : {}), adDisclosure: true })} WHERE id = ${id}`);
+          }
         }
         const comp = compensationOfMeta(m);            // [R8-A §4] 제휴·협찬·무상 제공
         const need = comp.need;
@@ -338,7 +359,8 @@ export default async (req: Request): Promise<Response> => {
         const gate = await recheckPiece(tid, p2);
         await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
         await writeAudit({ tenantId: tid, action: "piece_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { kind: "video", title: typeof b.title === "string", body: typeof b.body === "string", tags: tags.length, gateOk: gate.ok, ...(vOn.sponsored || vOn.gift ? { monetize: { ...(vOn.sponsored ? { sponsored: true } : {}), ...(vOn.gift ? { gift: true } : {}) } } : {}) } });
-        return json({ ok: true, gate, body, tags, ...(need ? { disclosureFirstLine: body.split("\n")[0] } : {}) });
+        return json({ ok: true, gate, body, tags, ...(need ? { disclosureFirstLine: body.split("\n")[0] } : {}),
+          ...(needsRerender ? { needsRerender: true, needsRerenderWhy: "이미 만들어진 영상에는 광고 배지가 없어요. 다시 만들어야 화면에 배지와 시작 자막이 들어가요." } : {}) });
       }
       const sets: ReturnType<typeof sql>[] = [];
       let bodyHtml = String(p.body || "");

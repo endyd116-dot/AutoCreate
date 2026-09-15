@@ -36,11 +36,18 @@
     const done = (html, title, cta, href) => { gateOpen = true; gateSheet = UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
     if (r.status === 403 && r.step === "writable") {
       if (r.reason === "suspended") return done("결제가 밀려 있어요. 카드를 확인하면 바로 이어서 돼요. 만든 글과 편성표는 그대로예요.", "잠시 멈춰 있어요", "카드 확인하기", "/app/plan.html");
+      /* 🔴 [R7 §3.1 · B ba99538] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
+         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 서버가 사유·날짜를 403 에 실어 주면 **그 응답만으로** 그린다(왕복 0). */
+      if (r.reason === "closed") {
+        const T = "탈퇴를 신청하셨어요";
+        let say = String(r.error || "");
+        if (say.startsWith(T)) say = say.slice(T.length).replace(/^[.·\s]+/, "");   // 제목과 같은 말을 두 번 하지 않는다(문장은 서버 것 그대로)
+        if (!say) say = r.daysLeft != null ? `${r.daysLeft}일 뒤에 자료가 지워져요. 그때까지는 보기만 할 수 있어요.` : "지금은 보기만 할 수 있어요.";
+        return done(UI.esc(say), T, "되돌리러 가기", "/app/settings.html");
+      }
       const opened = done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
-      /* 🔴 [R7 §3.1] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
-         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 막힌 그 순간에 한 번만 물어보고(GET) 탈퇴한 집이면 시트를 바꿔 준다.
-         ⏳ **임시다**(2026-09-15 메인 결정 · B 에 발주): 서버가 403 에 `reason:"closed"` + `purgeAt`·`daysLeft` 를 실어 주면
-            이 왕복을 통째로 지우고 위 `suspended` 처럼 `reason` 한 줄로 가른다. 그때까지만 산다. */
+      /* ⏳ 아래는 **받침대(fallback)** 다 — `reason:"closed"` 를 주는 서버(ba99538)는 2026-09-15 현재 `feature/p1r7-back` 에만 있고
+         main 에는 아직 없다. main 에 들어오면 이 블록(GET 한 번)을 통째로 지운다 — 위 분기가 같은 일을 왕복 없이 한다. */
       const gs = gateSheet;
       UI.api("/api/account-close", { noGate: true, noRedirect: true }).then((c) => {   // noRedirect — 이 확인 때문에 누구도 로그인 화면으로 튕기지 않게
         if (!c.ok || !c.closed || !gs || !gs.el.isConnected) return;
@@ -429,6 +436,30 @@
     coin_refunded: "/app/coins.html", export_ready: "/app/settings.html", referral: "/app/account.html", coin_cap: "/app/coins.html", coin_short: "/app/coins.html", ai_cost_cap: "/app/home.html", slot_no_topic: "/app/create.html", runner_offline: "/app/runner.html", revenue_error: "/app/ad-media.html" };
   UI.kindMark = (kind, tone) => { const k = UI.KIND[kind] || UI.KIND[UI.KIND_ALIAS[kind]] || UI.KIND.system; const cls = tone === "warn" || tone === "danger" ? "warn" : k[0];
     return `<span class="mk ${cls}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${k[1]}</svg></span>`; };
+  /* [R8-A §4 · 2026-09-15 · lib/disclosure.ts COMPENSATION_LABEL·DISCLOSURE_TEXT 에서 그대로 복사] 🔴 손으로 고치지 마라 —
+     scripts/verify-label-surface.mjs 가 서버와 글자까지 대조한다. «체험단»처럼 지침이 부적절 예시로 든 낱말을 쓰지 않는 것도 서버 쪽 판단이다. */
+  UI.COMP_LABEL = { affiliate: "제휴 수수료", sponsored: "원고료·유료 광고", gift: "제품·서비스 무상 제공" };
+  UI.DISCLOSURE_TEXT = {
+    coupang: "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+    generic: "이 글에는 제휴 링크가 포함되어 있으며, 구매 시 일정 수수료를 받을 수 있습니다.",
+    sponsoredBody: "이 글은 광고주에게서 원고료 등 대가를 받고 작성한 유료 광고입니다.",
+    giftBody: "이 글은 광고주에게서 제품(또는 서비스)을 무상으로 제공받아 작성했습니다.",
+  };
+  /* 본문 첫머리 고지에 **어느 종류가 이미 실렸나**. 🔴 화면이 판정하지 않는다 — 서버가 넣은 문장이 거기 있는지만 본다. */
+  UI.compOf = function (bodyHtml) {
+    const s = String(bodyHtml || ""); const i = s.indexOf('class="disclosure"');
+    const e = i < 0 ? -1 : s.indexOf("</div>", i);
+    const t = i < 0 || e < 0 ? "" : s.slice(i, e).replace(/<[^>]+>/g, " ");
+    const T = UI.DISCLOSURE_TEXT;
+    return { affiliate: t.includes(T.coupang) || t.includes(T.generic), sponsored: t.includes(T.sponsoredBody), gift: t.includes(T.giftBody), text: t.replace(/\s+/g, " ").trim() };
+  };
+  /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS 에서 그대로 복사] 🔴 **이 축만 «이대로 예약»을 막는다**(hardFailures).
+     나머지 실패는 «알려드리는 것»이다 — 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 안다(골격 반복·최상급이 그렇다). */
+  UI.GATE_HARD = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"];
+  /* 주제군·수익 목적은 **서버에 한국말이 없다**(값만 있다 · lib/writing-contracts.ts TopicGroup·RevenueGoal) — 고객 낱말은 여기가 정본. */
+  UI.GROUP_LABEL = { review: "후기·리뷰", info: "정보·방법", life: "일상" };
+  UI.GOAL_LABEL = { affiliate: "제휴 수수료", adsense: "애드센스", adpost: "애드포스트", ypp: "유튜브 수익", clip_incentive: "클립 인센티브", mixed: "여러 가지" };
+
   UI.chev = '<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg>';
   UI.dots = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
 
