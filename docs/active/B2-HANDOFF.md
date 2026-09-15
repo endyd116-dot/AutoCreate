@@ -13,7 +13,7 @@
 
 | 무엇 | 상태 |
 |---|---|
-| 러너 배포 | R2 `autocreate/runner/v1.1.6.zip` · 고객은 `/api/runner-download`(로그인·플랜·presigned 10분)로만 받는다 |
+| 러너 배포 | R2 **`autocreate/runner/v1.1.7.zip`** · sha256 `3be28110a15f7c10…` · 고객은 `/api/runner-download`(로그인·플랜·presigned 10분)로만 받는다 |
 | 실발행 | **한 건도 안 했다.** 준비만 끝(`scripts/publish-preflight.mts`) — 막는 것 1개 = 계정 `pending_login`(사장님 로그인 1회) |
 | 프록시 | 표·배정·fail-closed·출구 IP 확인까지 됨 · **실제로 산 IP 는 0개**(합동 세션 11번) |
 | 실증 테넌트 | 남은 것 **109 하나(보존 대상)** — 하니스가 스스로 지운다 |
