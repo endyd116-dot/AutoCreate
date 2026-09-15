@@ -19,6 +19,12 @@
  *     · 🔴 카카오 성공 + 블로그 글에 «2단계 인증» → **성공을 login_fail 로 뒤집었다**
  *     · 카카오 이유 모름(동의 화면 막힘 = 우리 문제) → 고객을 불렀다
  *
+ *   «로그인돼 있나» 쪽도 같은 방식으로 되짚었다 — 옛 판은 **두 케이스에서 «로그인됨»** 이라고 답했다(비싼 쪽):
+ *     · `PostList.naver`(로그아웃 화면) → true   ← «이름.naver» 를 사람 id 로 읽었다
+ *     · 요소 신호 0 + «내 블로그» 링크만 → true   ← 로그아웃 화면에도 있는 링크를 긍정 신호로 썼다
+ *   ⚠️ 셋째(로그인 URL 쿼리에 blog.naver.com) 는 **옛 판도 맞게 답했다** — 앞선 `nidlogin` 검사가 먼저 걸렀다.
+ *      고친 것은 둘이다(셋이 아니다).
+ *
  *   실행: npx --yes tsx scripts/verify-runner-auth.mts        (DB·네트워크·브라우저 불필요)
  */
 import path from "node:path";
@@ -26,8 +32,9 @@ import { pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const load = async (f: string) => await import(pathToFileURL(path.join(ROOT, "runner", "lib", f)).href);
-const { classifyNaverLoginWall } = await load("auth-naver.mjs") as {
+const { classifyNaverLoginWall, classifyNaverSession } = await load("auth-naver.mjs") as {
   classifyNaverLoginWall: (url: string, seen: string, hasCaptchaEl?: boolean) => { kind: string; message: string } | null;
+  classifyNaverSession: (url: string, signals?: { logoutLinks?: number; loginLinks?: number }) => boolean | null;
 };
 const { classifyKakaoLoginWall } = await load("auth-kakao.mjs") as {
   classifyKakaoLoginWall: (url: string, seen: string) => { kind: string; message: string } | null;
@@ -146,6 +153,40 @@ console.log("\n  로그인 벽 판정 실측 (순수 함수 · 실계정 로그�
 run("네이버", NAVER, (u, s, c) => classifyNaverLoginWall(u, s, c));
 run("카카오", KAKAO, (u, s) => classifyKakaoLoginWall(u, s));
 
+/* ── 로그인돼 있나(`isNaverLoggedIn`) ────────────────────────────────────
+   🔴 여기가 틀리면 방향이 둘 다 비싸다:
+     · 로그아웃인데 **로그인됐다**고 하면 → 로그인 단계를 건너뛰고 에디터에서 «세션 만료»로 죽는다(job #8 실측).
+     · 로그인됐는데 **아니라고** 하면 → **매번 비밀번호 로그인**을 하고 그 반복이 캡차를 부른다(job #16 실측 · AC-19).
+   ⇒ 세 값이어야 한다: true / false / **null(URL 만으로는 모름 → 요소로 한 번 더)**. 그리고 «애매하면 로그아웃». */
+interface SCase { name: string; url: string; sig?: { logoutLinks?: number; loginLinks?: number }; want: boolean | null; why: string }
+const SESSION: SCase[] = [
+  { name: "내 블로그 주소로 갔다", url: "https://blog.naver.com/myid123", want: true, why: "id 경로 = 로그인됨" },
+  { name: "내 글 주소", url: "https://blog.naver.com/my_id-9/223456789", want: true, why: "id + 글번호" },
+  { name: "로그인 화면으로 튕김", url: "https://nid.naver.com/nidlogin.login", want: false, why: "기준선" },
+  { name: "🔴 로그인 URL 의 **쿼리 안에** blog.naver.com 이 있다",
+    url: "https://nid.naver.com/nidlogin.login?url=https%3A%2F%2Fblog.naver.com%2FMyBlog.naver",
+    want: false, why: "🔴 돌아갈 주소가 쿼리에 실린다 — 주소 안에 그 글자가 있다고 로그인된 게 아니다" },
+  { name: "MyBlog.naver 에 머물러 있다", url: "https://blog.naver.com/MyBlog.naver", want: null, why: "아직 모른다 — 요소로 본다" },
+  { name: "🔴 PostList.naver", url: "https://blog.naver.com/PostList.naver?blogId=x", want: null,
+    why: "🔴 «이름.naver» 는 사람 id 가 아니다 — id 로 읽으면 **로그아웃인데 로그인됐다**고 한다" },
+  { name: "section 홈", url: "https://section.blog.naver.com/BlogHome.naver", want: null, why: "블로그 홈은 로그아웃도 열린다" },
+  { name: "blog.naver.com 루트", url: "https://blog.naver.com/", want: null, why: "id 가 없다" },
+  { name: "빈 페이지", url: "about:blank", want: null, why: "아무 정보 없음" },
+  { name: "요소: 로그아웃 링크가 있다", url: "https://blog.naver.com/MyBlog.naver", sig: { logoutLinks: 1 }, want: true,
+    why: "로그아웃 링크는 **로그인 상태에서만** 있다(진짜 긍정 신호)" },
+  { name: "요소: 로그인 링크가 있다", url: "https://blog.naver.com/MyBlog.naver", sig: { loginLinks: 1 }, want: false, why: "명백" },
+  { name: "🔴 요소: 아무 신호도 없다", url: "https://blog.naver.com/MyBlog.naver", sig: {}, want: false,
+    why: "🔴 **애매하면 로그아웃**(한 번 더 로그인 < 조용한 실패). «내 블로그» 링크 같은 건 로그아웃 화면에도 있어 긍정 신호가 못 된다" },
+];
+console.log("");
+console.log("  [로그인돼 있나]");
+for (const c of SESSION) {
+  const got = classifyNaverSession(c.url, c.sig);
+  const ok = got === c.want;
+  if (ok) pass++; else fails.push(`세션 «${c.name}» — 기대 ${String(c.want)} · 실제 ${String(got)}  (${c.why})`);
+  console.log(`  ${ok ? "✓" : "✗"} ${c.name.padEnd(44)} → ${String(got).padEnd(8)}${ok ? "" : "  " + c.why}`);
+}
+
 /* 🔴 음성 대조 — «전부 벽» 이나 «전부 통과» 면 검사가 아무것도 안 보는 것이다.
    그리고 **고객을 부르는 종류(login_fail·captcha)와 안 부르는 종류(unknown)가 둘 다** 나와야 한다 —
    한쪽만 나오면 이 판정은 가르는 일을 안 하고 있는 것이다. */
@@ -155,7 +196,7 @@ const spread = kinds.has("통과") && kinds.has("login_fail") && kinds.has("capt
 console.log(`\n  ${spread ? "✓" : "✗"} 음성 대조 — 나온 판정 ${[...kinds].join(", ")}`);
 if (!spread) fails.push("판정이 한쪽으로 쏠렸다(통과·login_fail·captcha·unknown 이 다 나와야 한다) — 초록이어도 의미가 없다");
 
-const total = NAVER.length + KAKAO.length;
+const total = NAVER.length + KAKAO.length + SESSION.length;
 console.log(`\n  통과 ${pass}/${total}`);
 if (fails.length) { console.error("\n  ✗ 실패:\n" + fails.map((f) => `    · ${f}`).join("\n") + "\n"); process.exitCode = 1; }
 else console.log("\n  ✓ 우리 문제와 고객 문제를 섞지 않는다.\n");
