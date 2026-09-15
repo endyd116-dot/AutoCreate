@@ -93,7 +93,7 @@
 
 - **Neon** `old-tree-90235056` · DDL `node scripts/neon-migrate.mjs`(0001~0011) · 키 `~/.neon-am-key` · PITR 7일.
 - **Netlify** site `a14524de-ebfa-46e8-a116-dbc87343f276` · PAT `nfp_bB2BR1…`(AM 메모리 `neon-netlify-remote`) · **AC-8** 다른 사이트 secret 은 `****`.
-- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip **`autocreate/runner/v1.1.6.zip`**+`latest.json`(sha256 738c0925… · v1.1.5 run.bat 열쇠 수리 · v1.1.6 프록시 fail-closed·출구 IP·트래픽 계측·프레임 지문)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
+- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip **`autocreate/runner/v1.1.7.zip`**+`latest.json`(sha256 3be28110… · 128,364B · v1.1.7 = R7 러너 고침 전부: 비공개 감지·표 찾기 6·돈/날짜 3·로그인 판정 6·준비 판정)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
 - **KICC**: ON 계약 공용 · MID 2 · live · **빌키 = keyin 고정**(AC-45) · 복귀 주소 등록 불필요·KEYIN 시크릿 불필요(실측 확정) · 개통 정본 `docs/active/KICC-GO-LIVE.md`.
 - 로컬 `.env`(워크트리 6곳 동기): `TEST_TISTORY_*`·`TEST_NAVER_*`·`FX_USD_KRW`·`BGM_LICENSE_VERIFIED`.
 
