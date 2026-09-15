@@ -15,7 +15,7 @@ import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/bro
 import { BLOCK, KAKAO_AUTH_HOST, kakaoLogin } from "../lib/auth-kakao.mjs";   // 카카오 로그인은 공용(애드핏과 같은 세션)
 
 
-const TITLE_SEL = '#post-title-inp, input[placeholder*="제목"], .textarea_tit';
+const B_TITLE = '#post-title-inp, input[placeholder*="제목"], .textarea_tit';
 /* 🔴 실측 정정(2026-09-15 job #214 · 사장님 화면 확인 «메뉴 열려서 기본모드가 선택돼 있었다»):
    모드 메뉴는 DOM 에 **두 벌**이다.
      ① `#editor-mode-html-tistory` … 조상이 전부 `[0,0,0,0]` · 패널 `display:none` 인 **죽은 복제본**
@@ -23,21 +23,34 @@ const TITLE_SEL = '#post-title-inp, input[placeholder*="제목"], .textarea_tit'
    접미사 `-tistory` 가 «정답»이라던 앞선 주석은 **틀렸다** — 그건 복제본이다.
    그래서 «메뉴가 열렸나»를 복제본으로 판정해 «안 열렸다»로 읽고 버튼을 계속 눌러 **열었다 닫았다만** 했다.
    판정도 클릭도 **보이는 쪽**으로 한다(`querySelectorAll`·`.first()` 는 숨은 것도 집는다 — 그게 이 사고의 뿌리다). */
-const MODE_OPEN_SEL = "#editor-mode-layer-btn-open, #editor-mode-layer-btn, button:has-text('기본모드'), .btn_editor_mode";
+const B_MODE_OPEN = "#editor-mode-layer-btn-open, #editor-mode-layer-btn, button:has-text('기본모드'), .btn_editor_mode";
 /* 여는 순서대로 = 진짜 → 관계기반 → 죽은 복제본(최후). 고르는 건 언제나 **보이는 것**. */
-const HTML_ITEM_SELS = ["#editor-mode-html", "div.mce-tistory-mode-item:has-text('HTML')", "[data-mode='html']", "#editor-mode-html-tistory"];
-const HTML_MODE_SEL = HTML_ITEM_SELS.join(", ");
-const CM_SEL = ".CodeMirror";
+const B_HTML_ITEMS = ["#editor-mode-html", "div.mce-tistory-mode-item:has-text('HTML')", "[data-mode='html']", "#editor-mode-html-tistory"];
+
+const B_CM = ".CodeMirror";
 /* 실측(2026-09-14 job #74 · TinyMCE 티스토리 에디터): 하단에 «임시저장 N»(저장) · «완료»(발행 레이어 열기),
    우상단에 «기본모드 ∨»(모드 전환). 텍스트가 자식 span 에 있어 :has-text 가 못 잡을 수 있어 getByText 폴백을 함께 쓴다. */
-const DONE_SEL = "#publish-layer-btn, button:has-text('완료'), a:has-text('완료')";
-const SAVE_SEL = "#save-btn, button:has-text('임시저장'), a:has-text('임시저장'), .btn_save, [class*='save']";
+const B_DONE = "#publish-layer-btn, button:has-text('완료'), a:has-text('완료')";
+const B_SAVE = "#save-btn, button:has-text('임시저장'), a:has-text('임시저장'), .btn_save, [class*='save']";
 /* 🔴 2026-09-15 실측으로 잡은 폭탄: `:has-text()` 는 **부분일치**라 `button:has-text('공개')` 가 **«비공개»를 집는다**
    (Playwright 로 직접 확인: `<button>비공개</button>` 가 그 셀렉터에 걸린다).
    발행 레이어에는 «공개/비공개/보호» 가 나란히 있으므로, 옛 목록대로면 **실발행 첫 시도에 «비공개»를 눌러**
    «발행했는데 아무도 못 보는 글»이 될 수 있었다 — 그러고도 URL 은 생기니 **성공으로 보고**된다(제일 나쁜 실패).
    그래서 «공개»라는 느슨한 후보를 **뺐다**. 남긴 것은 전부 «발행» 동작을 뜻하는 것뿐이다. */
-const PUBLISH_SEL = "#publish-btn, .btn_publish, button:has-text('공개 발행'), button:has-text('발행하기'), button:has-text('발행')";
+const B_PUBLISH = "#publish-btn, .btn_publish, button:has-text('공개 발행'), button:has-text('발행하기'), button:has-text('발행')";
+
+/* ═══ [P1R8 §3.3] 셀렉터 표 — 🔴 **여기 값은 «묶여 온 표»(zip 안의 기본값)다** ═══
+   서버가 서명된 표를 내려 주면 그 칸이 이깁니다. 못 주거나 못 믿으면 **이 값 그대로** 돕니다
+   (`runner/lib/recipe.mjs` · «배포는 편의고 발행이 본업»).
+   🔴 `S` 가 모듈 변수인 것이 안전한 이유: 러너는 잡을 **한 건씩 순차로** 돈다(`core.mjs tick` 의 `for … await`).
+      동시에 두 잡을 돌리게 되는 날엔 **여기를 먼저 고쳐야 한다** — 그래서 적어 둔다. */
+export const BUNDLED_SELECTORS = {
+  title: B_TITLE, modeOpen: B_MODE_OPEN, htmlItems: B_HTML_ITEMS.join(", "),
+  codemirror: B_CM, done: B_DONE, save: B_SAVE, publish: B_PUBLISH,
+};
+let S = { ...BUNDLED_SELECTORS };
+/** 후보 목록이 필요한 자리(«보이는 것»을 고르려면 낱개로 봐야 한다 · AC-43). */
+const htmlItems = () => String(S.htmlItems || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 function blogHost(handle) {
   const h = String(handle ?? "").replace(/^@/, "").trim();
@@ -101,7 +114,7 @@ async function openEditor(page, host, shotKey) {
     }).catch(() => null);
     console.log("  · [probe] 버튼:", JSON.stringify(d?.btns)); console.log("  · [probe] iframe:", JSON.stringify(d?.ifr), "제목칸:", JSON.stringify(d?.titles), "ce:", d?.ce);
   }
-  if (!(await page.locator(TITLE_SEL).first().isVisible({ timeout: 10_000 }).catch(() => false))) {
+  if (!(await page.locator(S.title).first().isVisible({ timeout: 10_000 }).catch(() => false))) {
     const seen = ((await page.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
     throw BLOCK("selector_changed", `글쓰기 화면을 찾지 못했어요 — url=${page.url().slice(0, 90)} · 화면="${seen.slice(0, 120)}"`);
   }
@@ -143,7 +156,7 @@ async function tryHtmlMode(page, bodyHtml, shotKey) {
        🔴 «눌렀다»와 «열렸다»는 다르다. 내 DOM 덤프는 `querySelectorAll` 이라 **숨은 항목까지 잡아서**
           «항목은 있는데 못 찾는다»는 모순된 증거를 만들었다(TinyMCE 는 메뉴를 한 번 만들어 두고 숨겨 둔다).
           그래서 «열림»의 판정은 오직 **항목이 보이나**로 한다. */
-    const openerSels = MODE_OPEN_SEL.split(",").map((x) => x.trim()).filter(Boolean);
+    const openerSels = S.modeOpen.split(",").map((x) => x.trim()).filter(Boolean);
     /* 🔴 이 한 함수가 이번 사고의 교훈이다: 후보를 돌되 **`.first()` 가 아니라 «보이는 것»** 을 돌려준다.
        같은 뜻의 요소가 숨은 복제본으로 한 벌 더 있는 화면에서 `.first()` 는 매번 시체를 집는다. */
     const firstVisible = async (sels) => {
@@ -162,7 +175,7 @@ async function tryHtmlMode(page, bodyHtml, shotKey) {
        답이 아니었다 — **누르는 대상이 틀렸던 것**이다. 그래서 «후보 × 여는 방법» 을 표로 돌린다.
        클릭 오류는 삼키지 않고 적는다(AC-27: «가려져서 못 눌렀다»와 «눌렀는데 안 열렸다»는 다른 사건이다). */
     // «열렸다»의 판정 = **보이는 HTML 항목이 잡히나**. 잡히면 그 자리에서 눌러야 하니 로케이터째 들고 온다.
-    const menuVisible = async () => { menuItem = await firstVisible(HTML_ITEM_SELS); return !!menuItem; };
+    const menuVisible = async () => { menuItem = await firstVisible(htmlItems()); return !!menuItem; };
     const methods = [
       ["click", async (t) => { await t.click({ timeout: 4000 }); }],
       // TinyMCE 패널 버튼은 구현에 따라 click 이 아니라 **mousedown** 에서 연다. 그리고 뒤이은 click 이 **도로 닫는다** —
@@ -254,7 +267,7 @@ async function tryHtmlMode(page, bodyHtml, shotKey) {
       clicked = true;
     }
     if (!clicked) {
-      const again = await firstVisible(HTML_ITEM_SELS);   // 한 번 더 — 그새 그려졌을 수도
+      const again = await firstVisible(htmlItems());   // 한 번 더 — 그새 그려졌을 수도
       if (again) { await again.loc.click({ timeout: 3000 }).catch(() => {}); clicked = true; }
     }
     if (!clicked) {
@@ -291,7 +304,7 @@ async function tryHtmlMode(page, bodyHtml, shotKey) {
     await settle(page, 1400);
     if (dialogs.length) console.log(`  · [html-mode] 확인창: ${dialogs.join(" / ")}`);   // 떴으면 무슨 말이었나
 
-    if (!(await page.locator(CM_SEL).first().isVisible({ timeout: 6000 }).catch(() => false))) {
+    if (!(await page.locator(S.codemirror).first().isVisible({ timeout: 6000 }).catch(() => false))) {
       /* 🔴 «눌렀다»와 «바뀌었다»는 또 다르다. 모드 버튼의 **글자를 되읽어** 전환 자체가 됐는지 본다 —
          «기본모드» 그대로면 전환이 막힌 것이고, «HTML» 인데 편집기가 없으면 편집기 셀렉터가 틀린 것이다.
          고칠 자리가 다른 두 실패를 하나의 `codemirror_not_shown` 으로 뭉뚱그리면 또 못 고친다.
@@ -416,7 +429,7 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
        그래도 없으면 — TinyMCE 티스토리는 **자동 저장**이 돈다(«자동 저장 완료 HH:MM:SS»). 그 지표가 보이면
        드라이런의 목표(발행 없이 초안 저장)는 이미 이뤄진 것이라 성공으로 본다(임시저장까지만 · 발행 0). */
     let saved = false;
-    let save = page.locator(SAVE_SEL).first();
+    let save = page.locator(S.save).first();
     if (!(await save.isVisible({ timeout: 3000 }).catch(() => false))) {
       const byText = page.getByText("임시저장", { exact: false }).first();
       if (await byText.isVisible({ timeout: 2000 }).catch(() => false)) {
@@ -442,7 +455,7 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
     return null;
   };
 
-  const doneHit = await visibleOf(DONE_SEL);
+  const doneHit = await visibleOf(S.done);
   if (!doneHit) throw BLOCK("selector_changed", "«완료» 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
   console.log(`  · [publish] 완료 버튼: ${doneHit.sel}`);
   await doneHit.loc.click({ timeout: 8000 });
@@ -468,7 +481,7 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
     console.log(`  · [publish-probe] 레이어 URL: ${layer.url}`);
     console.log(`  · [publish-probe] 보이는 버튼/선택: ${JSON.stringify(layer.btns)}`);
     console.log(`  · [publish-probe] 입력칸: ${JSON.stringify(layer.inputs)}`);
-    const pubHit = await visibleOf(PUBLISH_SEL);
+    const pubHit = await visibleOf(S.publish);
     console.log(`  · [publish-probe] «공개 발행» 후보: ${pubHit ? pubHit.sel : "🔴 못 찾음 — 실발행 때 여기서 막힌다"}`);
     return { dryRun: true, notes: ["발행 레이어까지만 확인(발행 안 함)", `버튼 ${layer.btns.length}개 · 발행버튼 ${pubHit ? "찾음" : "못 찾음"}`] };
   }
@@ -518,7 +531,7 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
   page.on("dialog", onPubDialog);
 
   const before = page.url();
-  const pubHit2 = await visibleOf(PUBLISH_SEL);
+  const pubHit2 = await visibleOf(S.publish);
   if (!pubHit2) { page.off("dialog", onPubDialog); throw BLOCK("selector_changed", "«공개 발행» 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요)."); }
   console.log(`  · [publish] 발행 버튼: ${pubHit2.sel}`);
   await pubHit2.loc.click({ timeout: 8000 });
@@ -548,7 +561,11 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
 
 /* ───────────────────── 진입점 ───────────────────── */
 
-export async function run({ ctx, job, plan, shotKey, dryRun }) {
+export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
+  /* [P1R8 §3.3] 이 잡에 쓸 표를 고른다 — 서버 값이 있는 칸만 덮고 **나머지는 묶여 온 값 그대로**다.
+     한 칸만 와도 나머지가 종전대로 돌아야 한다(전부 아니면 전무가 아니다). */
+  S = { ...BUNDLED_SELECTORS };
+  if (recipe) for (const k of Object.keys(BUNDLED_SELECTORS)) { const v = recipe.sel(k); if (v && v !== BUNDLED_SELECTORS[k]) S[k] = v; }
   const account = job.account ?? {};
   const host = blogHost(account.handle);
   if (!host) throw BLOCK("login_fail", "티스토리 블로그 주소(핸들)가 없어요. 계정을 다시 연결해 주세요.");
