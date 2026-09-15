@@ -806,6 +806,10 @@ account_groups (같은 채널·같은 니치 묶음 → 페일오버 단위)
 | **내 PC 러너** | 고객 PC(Windows 런처 `run.bat` · zip 내려받기 → 열쇠 1회 → 자동 업데이트) | 전 플랜 · 직접 돌리고 싶은 사람의 선택지 |
 
 - **관리형 감시** `managed.watch`(`lib/cron/managed-runner-watch.ts`) — 우리 기기가 죽으면 **운영이 먼저 안다**(고객이 «왜 안 올라가지?» 하기 전에). 관리형이 기본이 된 이상 이건 옵션이 아니다.
+- **로그인 시 자동 시작 = 옵트인**(2026-09-15 · B2 실측 · 메인 승인) — 고객이 `run.bat --autostart` 를 직접 칠 때만 시작프로그램에 등록한다(최소화 실행 · `--autostart-off` 로 끄는 길 동봉 · **몰래 켜지 않는다**).
+  🔴 **트레이 앱은 만들지 않는다.** 트레이가 풀려던 문제 셋 중 둘은 이미 풀려 있고(꺼짐은 홈 «해야 할 일»·알림함·웹푸시 셋이 말한다 · 콘솔 미관은 내 PC 러너가 «기본»이 아니게 된 뒤로 값이 작다), 남은 하나(«재부팅하면 안 돌아온다»)가 위 옵트인으로 닫힌다. 드는 값은 Electron 150MB **또는 코드 서명 인증서**(없으면 SmartScreen 경고 = 콘솔 창보다 나쁜 첫인상)인데 자기 PC 러너 실고객은 0명이다. 사유 전문 `docs/active/2026-09-15-runner-tray-decision.md`.
+  ⚠️ 맥·리눅스 자동 시작은 **안 만들었다**(launchd·systemd 는 배포판마다 다르고 우리에게 그 기기가 없다 — 못 돌려 보는 코드를 배치/셸에 넣는 것이 바로 `run.bat` 사고였다).
+- **러너 프로필 봉인**(계정 로그인 세션 암호화) — 계정당 프로필 키를 **서버가 쥐고 claim 때 내려 준다**. 🔴 **fail-open**: 봉인이 깨져도 발행을 막지 않는다(안전보다 **계정 생존**이 앞이다 · CLAUDE §9). 리눅스부터 만들고 Windows 는 이미 OS 가 봉인하므로(DPAPI 실측) 뒤로, **맥은 기기가 없어 «못 쟀다»로 둔다**(추정으로 적지 않는다 · AC-9). 설계 전문 `docs/active/2026-09-15-runner-profile-seal-design.md`.
 
 ### 8.2 잡 종류(`runner_jobs.kind`)
 `publish.naver_blog` · `publish.tistory` · `publish.naver_clip` · `publish.brunch` · `render.video` · `session.login`(헤드풀 재로그인) · `session.verify` · `revenue.adpost` · `revenue.adfit` · `revenue.clip` · `verify.post_alive`
