@@ -265,28 +265,34 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     };
 
     let draft = await write();
-    let rewritten = false;
-    // 유사도 — 임계 초과면 앵글을 바꿔 1회 재생성
-    let sim = maxSimilarity(blocksToPlain(draft.blocks), otherPlain.map((o) => o.text));
-    if (sim.score >= SAME_BODY_SIMILARITY && otherPlain.length) {
-      const inst = `[다시 쓰기 — 이 글은 이미 있는 글(#${otherPlain[sim.index].id})과 ${Math.round(sim.score * 100)}% 겹친다. 도입 장면·소제목·예시·순서를 전부 다른 관점으로 새로 써라. 같은 문장 재사용 금지.]\n`;
-      draft = await write(inst, `${angle} — 다른 관점: 반대 경험이나 실패담에서 출발`);
-      rewritten = true;
-      sim = maxSimilarity(blocksToPlain(draft.blocks), otherPlain.map((o) => o.text));
-    }
+    const simOf = (d: typeof draft) => maxSimilarity(blocksToPlain(d.blocks), otherPlain.map((o) => o.text));
+    let sim = simOf(draft);
 
     await setStage(pieceId, "checking");
-    const gateInput = (blocks: Block[], title: string) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${otherPlain[sim.index]?.id}` : undefined }, title, group });   // [R8 §2.1] group — 분량 축이 계약과 **같은 폭**으로 재게(안 주면 채널 기본 폭이라 잣대가 갈린다)
-    let report: GateReport = runGate(gateInput(draft.blocks, draft.title));
-    if (!report.ok && !rewritten) {
-      const inst = buildRewriteInstruction(report);
-      const second = await write(inst);
-      const r2 = runGate(gateInput(second.blocks, second.title));
-      // 더 나아졌으면 채택(통과 수 기준) · 아니면 첫 원고를 사람에게
-      if (r2.ok || r2.checks.filter((x) => x.pass).length >= report.checks.filter((x) => x.pass).length) { draft = second; report = r2; }
+    const gateInput = (blocks: Block[], title: string, s: typeof sim) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: s.score, against: s.index >= 0 ? `글 #${otherPlain[s.index]?.id}` : undefined }, title, group });   // [R8 §2.1] group — 분량 축이 계약과 **같은 폭**으로 재게(안 주면 채널 기본 폭이라 잣대가 갈린다)
+    let report: GateReport = runGate(gateInput(draft.blocks, draft.title, sim));
+
+    /* 🔴 [R8 §2.1] 다시 쓰기는 **한 번**이고, 그 한 번에 **할 말을 다 모아서** 한다.
+       종전엔 ①유사도 재생성 ②게이트 재작성이 **따로** 있었고, ①이 돌면 `rewritten` 이 서서 ②가 통째로 건너뛰었다.
+       C 실호출 3편이 전부 «2호출» 이었는데 그게 ① 이었다면, 그 글들은 **분량 지시를 한 번도 못 받은 것**이 된다.
+       ⇒ 게이트를 **먼저** 돌리고, 겹침과 게이트 지적을 **한 프롬프트에 합쳐** 한 번만 다시 쓴다(호출 수는 그대로 2). */
+    const simBad = sim.score >= SAME_BODY_SIMILARITY && otherPlain.length > 0;
+    let rewritten = false;
+    if (simBad || !report.ok) {
+      const simInst = simBad
+        ? `[다시 쓰기 — 이 글은 이미 있는 글(#${otherPlain[sim.index].id})과 ${Math.round(sim.score * 100)}% 겹친다. 도입 장면·소제목·예시·순서를 전부 다른 관점으로 새로 써라. 같은 문장 재사용 금지.]\n`
+        : "";
+      const inst = `${simInst}${buildRewriteInstruction(report)}`;
+      const second = await write(inst, simBad ? `${angle} — 다른 관점: 반대 경험이나 실패담에서 출발` : undefined);
+      const sim2 = simOf(second);
+      const r2 = runGate(gateInput(second.blocks, second.title, sim2));
+      /* 채택 기준: 겹쳐서 다시 썼으면 **덜 겹치는 쪽**이 우선(그게 다시 쓴 이유다) · 아니면 통과 수가 많은 쪽.
+         나빠졌으면 첫 원고를 사람에게 보낸다 — 둘 다 나쁘면 고르는 것이 아니라 사람에게 넘기는 것이 맞다. */
+      const better = simBad ? (sim2.score < sim.score || r2.ok) : (r2.ok || r2.checks.filter((x) => x.pass).length >= report.checks.filter((x) => x.pass).length);
+      if (better) { draft = second; report = r2; sim = sim2; }
       report = { ...report, rewritten: true };
       rewritten = true;
-    } else if (rewritten) report = { ...report, rewritten: true };
+    }
 
     // 제휴 링크 블록(딥링크 · affiliate_links)
     let affiliateMeta: { provider: string; url: string; subId: string; productName?: string } | null = null;
