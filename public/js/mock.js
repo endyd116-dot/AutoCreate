@@ -38,6 +38,15 @@
   /* [R8CLOSE] 같은 `?why=` 손잡이에 두 갈래 더 — `fit0`(적합도를 못 쟀다) · `nohero`(대표로 쓸 사진이 없다).
      🔴 둘 다 «못 한 쪽»이다. 잘 된 화면만 보면 **못 한 쪽 문장을 아무도 안 본다**(그래서 거기에 거짓말이 숨는다). */
   const whyMode = qs.get("why") || "";
+  /* [R8CLOSE-B2 §B5] 쓰레드 연결글 손잡이 — ?th=partial(반만 올라갔다 · 못 올린 글을 들고 있다) · ?th=cut(끝긴 자리만) · ?th=both
+     🔴 모양은 `lib/publish/threads.ts` 가 쓰는 그대로고, `say` 는 그 파일이 만드는 문장 식을 따른다(화면이 다시 지는지 여기서 재진다).
+     🔴 이 칸은 **올라간 글**에만 생긴다 — 모의도 published 글(504)에 붙이고 채널을 쓰레드로 바꾼다. */
+  const thKnob = qs.get("th") || "";
+  const TH_REMAIN = ["그래서 세 번째로 해 본 게 베이킹소다 반죽이예요. 눈금 정도 물을 섮어 눈처럼 만들고, 코너와 바스켓에 손가락으로 발라 두었어요.",
+    "5분 뒤에 수세미로 밀어 내니 누런 기름이 그대로 밀려 나왔어요. 마른 행주로 한 번 더 닦아 내면 끝이에요."];
+  const TH_PARTIAL = { posted: 2, parts: 3, why: "state_unsaved", say: "스레드 3조각 중 2조각까지 올라갔어요.", remain: TH_REMAIN };
+  const TH_CUT = { midSentence: true, kinds: ["sentence", "word"], droppedChars: 214, parts: 3 };
+
   const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
   /* [R8-A2 §5D①·§5E] 직접 쓰기·내리기 손잡이
@@ -913,7 +922,7 @@
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
-      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
+      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}), /* [R8CLOSE] 영상에도 «왜 이 채널·이 계정» — 🔴 `hero` 는 안 실는다(사진 계약은 글의 것이다). */ channelReason: WHY3(whyMode).channelReason, personaFit: WHY3(whyMode).personaFit }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
       /* [R8-A §2 · B-1 d6c2359] «왜 이렇게 생겼나» 3축 — 이름·모양은 서버 pieces-get 그대로.
          값은 lib/writing-contracts.ts 의 그 채널 칸에서 복사(label·register·분량·사진).
          🔴 ?why=none = **형식이 없어 주제군을 못 정한 글** — topicGroup 이 null 로 오고 분량이 채널 기본값에서 온다(fromGroup:false). */
@@ -929,7 +938,7 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
           goalRules: NV ? ["r1", "r2", "r3"] : ["r1", "r2"],   /* 🔴 화면은 **가짓수만** 쓴다(모델 지시문이라 글자 그대로 안 보여 준다) */
           actualChars: String(p.bodyHtml || "").replace(/<[^>]+>/g, "").length } };
       /* [R8-A2 §2.4] `?claims=1` 이면 근거 없는 수치가 섞인 글 — 서버가 이미 주던 칸(`meta.numberClaims`)을 화면이 그리는지 본다. */
-      return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], meta: { ...p.meta, ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+      return { ok: true, piece: { ...pieceRow(p), ...(thKnob ? { channel: "threads", status: "published", externalUrl: "https://www.threads.net/@cook_a/post/mock" } : {}), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], meta: { ...p.meta, ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode), ...(thKnob === "partial" || thKnob === "both" ? { thChainPartial: TH_PARTIAL } : {}), ...(thKnob === "cut" || thKnob === "both" ? { thChainCut: TH_CUT } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     /* 🔴 [R8-A2 §9] 승인은 **막지 않는다** — 서버 `HARD_GATE_KEYS = []` 이고, 영상도 `judgeBlockers` 둘(깨진 물건)만 거부한다.
        옛 모의는 `p.gateOk` 가 false 면 막고 P0 면 다 막아서, **시연·스샷에서만 존재하는 가짜 게이트**를 만들고 있었다(AC-52 의 모의 쪽 얼굴).
        🔴 사유 문장은 서버(`lib/content-approve.ts approvePiece`) 글자 그대로. */
