@@ -25,6 +25,9 @@ const WARN_KINDS: ReadonlySet<string> = new Set([
   "runner_offline", "piece_failed", "review_blocked", "review_missed", "coin_short",
   // [R8 · DESIGN §5E.2] 신고는 «기한 안에 고객이 해야 끝나는» 일이다 — 알려 주기만 하면 기한이 지나간다.
   "takedown_notice", "takedown_due_soon", "takedown_escalated",
+  /* [R8 §4.4] 🔴 «내 키가 안 되어 대신 만들었어요» — 알려 주기만 하면 **그동안 우리 돈이 계속 나간다**(키가 «틀림»이면 저절로 안 낫는다).
+     고객이 키를 고쳐 꽂아야 끝나는 일이라 warn 이다. */
+  "ai_key_fallback",
 ]);
 
 export interface NotificationRow { id: number; kind: string; title: string; desc?: string; link?: string; tone: "warn" | "info"; createdAt: string; readAt?: string }

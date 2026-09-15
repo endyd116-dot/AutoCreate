@@ -1075,3 +1075,38 @@ export const ticketMessagesR8 = {
   /** 그 말이 들어온 길(app|email|kakao|ops). 한 티켓 안에 길이 섞일 수 있어 **줄마다** 적는다. */
   source: "source",
 } as const;
+
+
+/* === Phase 1 R8 · B(고객이 꽂는 AI 키 BYO · P1R8-B §4.4 · 2026-09-15 · drizzle/0032-r8-byo-ai-key.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   우리 키 여러 개를 돌려 쓰는 것(`lib/ai-key.ts` · B-1)과 **다른 절반**이다 — 저쪽은 env 만 보고 테넌트 개념이 0이다.
+ *   🔴 키를 **고르는 자리**는 그대로 `leaseAiKey()` 하나. 이 표는 **값을 가져오는 곳**일 뿐이다.
+ */
+export const tenantAiKeys = pgTable("tenant_ai_keys", {
+  id:            bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:      bigint("tenant_id", { mode: "number" }).notNull(),
+  provider:      varchar("provider", { length: 20 }).notNull().default("gemini"),
+  label:         varchar("label", { length: 40 }).notNull().default("내 키"),
+  /** 🔴 AES-256-GCM 암호문만(`CREDS_ENC_KEY` · 폴백 없음). 계정 자격과 **같은 취급** — 평문 칸은 없다. */
+  keyEnc:        text("key_enc").notNull(),
+  /** 화면이 «어느 키인지» 알아볼 정도만. 🔴 평문이 아니다. */
+  masked:        varchar("masked", { length: 24 }).notNull().default(""),
+  status:        varchar("status", { length: 12 }).notNull().default("active"),
+  lastOkAt:      timestamp("last_ok_at"),
+  lastErrorAt:   timestamp("last_error_at"),
+  /** invalid|quota|forbidden — 🔴 셋은 고객이 할 일이 다르다. «오류»로 뭉치지 않는다. */
+  lastErrorKind: varchar("last_error_kind", { length: 12 }),
+  restedUntil:   timestamp("rested_until"),
+  createdAt:     timestamp("created_at").notNull().defaultNow(),
+  updatedAt:     timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ tenantIdx: index("tenant_ai_keys_tenant_idx").on(t.tenantId, t.status) }));
+
+export const tenantsR8Byo = {
+  /** 🔴 «내 키가 안 되면 우리 키로 대신 돌려 주세요» — **기본 꺼짐**. 몰래 안 켠다(메인 조건 1). */
+  aiKeyFallback: "ai_key_fallback",
+} as const;
+
+export const aiUsageR8Byo = {
+  /** 🔴 «켰나»가 아니라 **실제로 어느 키로 나갔나**. 고객 키가 죽어 우리 키로 돌았으면 그건 우리 원가다(AC-71). */
+  byo: "byo",
+  byoIdx: "ai_usage_byo_idx",
+} as const;
