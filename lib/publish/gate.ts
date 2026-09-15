@@ -67,11 +67,19 @@ export function materializeAdsense(html: string, adsensePub?: string): string {
   return String(html || "").replace(ADSENSE_SLOT_RE, unit);
 }
 
-/** 제휴 링크 수 — 렌더 계약의 `class="affiliate"` + 쿠팡 도메인 직링크(사람이 손으로 붙인 것까지 센다). */
+/**
+ * 제휴 링크 수 — **`<a>` 하나를 1개로** 센다. 조건은 둘 중 하나: 렌더 계약의 `class="affiliate"` **또는**
+ * 쿠팡 도메인 직링크(사람이 손으로 붙인 것까지 센다).
+ *
+ * 🔴 2026-09-15(C · R7 §1 되짚기): 예전 구현은 두 조건을 **따로 더했다**. 그런데 `lib/blocks.ts:74` 의 렌더러는
+ *    `<a class="affiliate" href="https://link.coupang.com/…">` 로 **둘 다** 내놓는다 → 상품 1개가 2개로 세어졌다.
+ *    결과: 설계 §16B 의 «2개 이하» 가 실제로는 «1개 이하» 로 동작해 **쿠팡 상품 2개짜리 정상 글이 발행 직전에 막혔다**
+ *    (`ok:false` → `awaiting_manual` → 고객에게 «직접 올려 주세요»). 게이트가 나쁜 글이 아니라 고객을 막고 있었다.
+ */
 export function countAffiliateLinks(html: string): number {
-  const s = String(html || "");
-  return (s.match(/class="affiliate"/g) || []).length
-    + (s.match(/href="https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/g) || []).length;
+  const tags = String(html || "").match(/<a\b[^>]*>/gi) || [];
+  return tags.filter((t) => /class="[^"]*\baffiliate\b[^"]*"/i.test(t)
+    || /href="https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/i.test(t)).length;
 }
 
 /** 애드센스를 붙일 수 있는 채널(네이버 블로그는 애드포스트라 제외). */
