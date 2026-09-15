@@ -23,7 +23,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=17"></script>
+<script src="/js/ui.js?v=18"></script>
 <script src="/js/mock.js?v=18"></script>
 <script>
 (async () => {
@@ -44,7 +44,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {

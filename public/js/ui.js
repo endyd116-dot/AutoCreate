@@ -438,7 +438,11 @@
     try { await navigator.clipboard.writeText(text); return true; } catch { /* 폴백 */ }
     try { const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:-1000px"; document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove(); return ok; } catch { return false; }
   };
-  UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스" };
+  UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스", steps: "단계" };   /* [R8 · B-1] 인스타 format 이 5종이 됐다 — 서버 FormatKey 와 짝이라 빠지면 화면에 빈칸이 뜬다 */
+  /* [R8 · B-1] 자리·글의 종류는 이제 **셋**이다(post·shorts·cardnews). 화면이 «영상이냐 아니냐»로만 갈라 보면 카드뉴스가 글로 보인다.
+     🔴 «post» 는 배지를 안 단다 — 기본이라 이름표가 붙으면 오히려 시끄럽다. */
+  UI.KIND_PILL = { shorts: "영상", cardnews: "카드뉴스" };
+  UI.kindPill = (kind) => (UI.KIND_PILL[kind] ? `<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">${UI.KIND_PILL[kind]}</span>` : "");
   UI.EMOTION = { warm: "친근·따뜻", neutral: "담백·정리", witty: "재치", urgent: "급함·해결", calm: "차분" };
   /* [P1R3] 수익 소스 사람말(계약 v3.1 source enum 13종) · 신선도 배지 — 수익·매체·계정 화면 공용 한 벌 */
   UI.SRC = { adsense: "애드센스", youtube: "유튜브", coupang: "쿠팡 파트너스", aliexpress: "알리 어필리에이트", linkprice: "링크프라이스", adpost: "애드포스트", adfit: "카카오 애드핏", clip: "네이버 클립", meta: "메타", tiktok: "틱톡", x: "엑스", sponsor: "협찬·광고비", manual: "그 외" };

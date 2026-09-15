@@ -20,7 +20,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=17"></script>
+<script src="/js/ui.js?v=18"></script>
 <script src="/js/mock.js?v=18"></script>
 <script>
 (async () => {
@@ -81,8 +81,17 @@ async function load(poll = false) {
   bindAdd(); bindChf();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
   UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
-  // 좌측 스와이프 = 넘김
-  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
+  /* [DESIGN §13.0b 소재 카드] 스와이프 — **왼쪽 = 넘김 · 오른쪽 = 디렉터에게**(설계의 세 번째 «위 = 나중에»는 아직 안 만든다:
+     서버에 «나중에»를 적어 둘 자리가 없다(`topics-pick`·`topics-skip` 뿐) — 화면에서만 숨기면 새로고침하면 돌아와
+     «했는데 안 됐다»가 된다. 서버가 열리면 그때 붙인다 · 메인에 보고).
+     🔴 두 방향 다 **이미 단추로 되는 일**이라 스와이프는 지름길일 뿐이다 — 스와이프로만 되는 기능을 만들지 않는다(못 찾는 사람이 생긴다). */
+  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0;
+    row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true });
+    row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; row.style.transform = `translateX(${Math.max(Math.min(dx, 120), -120)}px)`; }, { passive: true });
+    row.addEventListener("touchend", async () => { row.style.transform = ""; const d = dx; x0 = null;
+      if (d < -80) return skip(Number(row.dataset.id));
+      if (d > 80) { const t = (r.topics || []).find((x) => x.id === Number(row.dataset.id)); if (t) UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title || "")}`); }
+    }); });
 }
 async function refresh() {
   const b = UI.$("#refresh"); b.disabled = true;
