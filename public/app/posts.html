@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=13"></script>
-<script src="/js/mock.js?v=13"></script>
+<script src="/js/ui.js?v=14"></script>
+<script src="/js/mock.js?v=14"></script>
 <script>
 (async () => {
 await UI.boot("schedule");
@@ -58,6 +58,28 @@ function render() {
 }
 async function load() { const r = await UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render(); }
 
+/* [R8 §3 · DESIGN §5E] «내려 줘» — 고객이 누르면 **우리가 대신** 내린다(우리가 일방적으로 내리는 길은 만들지 않는다).
+   🔴 `canRetract` 가 false 인 채널(유튜브·쓰레드 …)엔 **단추를 만들지 않는다** — 삭제 권한이 없어서다. 대신 그 글로 가는 길을 준다.
+      없는 되돌리기를 단추로 만들면 눌러도 아무 일이 안 난다(티스토리 «광고 떼기»와 같은 규율).
+   🔴 되돌릴 수 없는 동작이라 한 번 묻는다 — 단추 이름은 «네»가 아니라 **«내릴게요»**(무슨 일이 일어나는지 단추가 말한다).
+   🔴 코인은 안 든다(retract 경로에 consume 호출 0 · 우리 잘못이든 마음이 바뀌었든 내리는 데 돈을 받지 않는다). */
+const retractable = (p) => p.status === "published" && !p.retractedAt;
+const retractBtn = (p) => (retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
+const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
+  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}은 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
+function bindRetract(p, sh, close) {
+  const b = sh.querySelector("#rt"); if (!b) return;
+  b.onclick = () => UI.confirmRow(sh.querySelector("#rtc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
+    b.disabled = true;
+    const r = await UI.api("/api/post-retract", { body: { postId: p.id } });
+    b.disabled = false;
+    const say = UI.esc(r.message || r.error || "");
+    close();
+    setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta">${r.openUrl ? `<a class="btn primary" href="${UI.esc(r.openUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
+      { title: r.ok ? "" : "내리지 못했어요", onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; const bg = s2.previousSibling; if (bg) bg.addEventListener("click", load); } }), 300);
+    await load();
+  }, "내릴게요");
+}
 /* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유 · [P1R5] 비공개 업로드 → 스튜디오) */
 function postSheet(p) {
   if (!p) return;
@@ -78,9 +100,12 @@ function postSheet(p) {
       ${stuckOf(p) && isVideoPost(p) ? `<button class="btn secondary" type="button" id="vdl2">영상 내려받기</button>` : ""}
       ${stuckOf(p) ? `<button class="btn ${p.externalUrl ? "secondary" : "primary"}" type="button" id="cp">${isVideoPost(p) ? "올린 주소 적기" : "본문 복사하기"}</button>` : ""}
       ${p.pieceId ? `<a class="btn ghost" href="/app/piece.html?id=${p.pieceId}">${privateOf(p) || processingOf(p) ? "영상 보기" : "글 보기"}</a>` : ""}
+      ${retractBtn(p)}
     </div>
+    <div id="rtc"></div>${retractSay(p)}
     ${stuckOf(p) ? `<p class="muted" id="vdlNote2" style="margin:4px 0 0;font-size:13px">${isVideoPost(p) ? `영상을 받아 ${UI.esc(UI.chLabel(p.channel))} 앱에서 올린 뒤, 그 주소를 적어 주세요.` : `복사한 본문을 ${UI.esc(UI.chLabel(p.channel))} 에 붙여 넣으면 그대로 올라가요.`}</p>` : ""}`,
     { title: "", onOpen: (sh, close) => {
+      bindRetract(p, sh, close);
       const dl2 = sh.querySelector("#vdl2"); if (dl2) dl2.onclick = async () => { dl2.disabled = true; await UI.videoDownload(p.pieceId, sh.querySelector("#vdlNote2")); dl2.disabled = false; };
       const cp = sh.querySelector("#cp"); if (!cp) return;
       if (isVideoPost(p)) { cp.onclick = () => { close(); UI.markPublishedSheet({ id: p.pieceId, channel: p.channel }, load); }; return; }

@@ -27,7 +27,7 @@
 <div class="group">
   <button class="row tap" type="button" id="pw"><div class="l"><span class="t">비밀번호 바꾸기</span><span class="d">바꾸면 다른 기기는 로그아웃돼요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
   <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
-  <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
+  <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger-ink)">로그아웃</span></div></button>
 </div>
 <div class="group" id="notig"><div class="gt">알림</div>
   <div class="fr"><div class="fl" id="notiT">기기 알림 받기<small id="notiD">확인할 게 생기면 바로 알려드려요</small></div><button class="toggle" type="button" id="noti" aria-checked="false" aria-label="기기 알림 받기"></button></div>
@@ -44,8 +44,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=13"></script>
-<script src="/js/mock.js?v=13"></script>
+<script src="/js/ui.js?v=14"></script>
+<script src="/js/mock.js?v=14"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -161,7 +161,7 @@ function drawClose() {
   if (!CLOSE) { bn.innerHTML = ""; row.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
   if (!CLOSE.closed) {
     bn.innerHTML = "";
-    row.innerHTML = `<button class="row tap" type="button" id="closeGo"><div class="l"><span class="t" style="color:var(--danger)">계정 탈퇴</span><span class="d">신청해도 ${CLOSE.graceDays}일 안에는 되돌릴 수 있어요</span></div>${UI.chev}</button>`;
+    row.innerHTML = `<button class="row tap" type="button" id="closeGo"><div class="l"><span class="t" style="color:var(--danger-ink)">계정 탈퇴</span><span class="d">신청해도 ${CLOSE.graceDays}일 안에는 되돌릴 수 있어요</span></div>${UI.chev}</button>`;
     UI.$("#closeGo").onclick = closeSheet; return;
   }
   const left = CLOSE.daysLeft != null ? ` · ${CLOSE.daysLeft}일 남았어요` : "";

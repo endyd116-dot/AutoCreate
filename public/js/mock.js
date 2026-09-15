@@ -257,6 +257,10 @@
         { id: 704, pieceId: 509, channel: "youtube_shorts", accountHandle: "shorts_d", title: "전자레인지 냄새, 레몬 한 조각으로 끝", externalUrl: "https://www.youtube.com/shorts/dQw4w9WgXcQ", channelRef: "dQw4w9WgXcQ", publishedVia: "api", publishedAt: iso(now - 3 * 3600e3), status: "uploaded_private", stats: {}, alive: true },
         { id: 705, pieceId: 509, channel: "reels", accountHandle: "reels_f", title: "3분 청소 루틴", publishedVia: "api", status: "publishing", errorKind: "video_processing", retriable: true, stats: {}, alive: true },
       ] : []),
+      /* [R8 §5E] ?uploaded=done — 공개로 올라간 쇼츠. 🔴 유튜브는 **우리가 못 내린다**(삭제 스코프 없음) — 화면이 그 길을 정직하게 말하는지 보는 자리 */
+      ...(uploadedKnob === "done" ? [
+        { id: 706, pieceId: 509, channel: "youtube_shorts", accountHandle: "shorts_d", title: "전자레인지 냄새, 레몬 한 조각으로 끝", externalUrl: "https://www.youtube.com/shorts/dQw4w9WgXcQ", channelRef: "dQw4w9WgXcQ", publishedVia: "api", publishedAt: iso(now - 5 * 3600e3), status: "published", stats: { views: 2140, likes: 64, lastSyncAt: iso(now - 2 * 3600e3) }, alive: true },
+      ] : []),
     ],
     reloginJobs: {},
     notifications: fresh ? [] : [
@@ -286,6 +290,7 @@
     adState: revEmpty || fresh ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: adsApproved ? { 2: "approved", 5: "approved" } : { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
     /* [R8 §3.2] 워드프레스만 «지금 붙었나»를 우리가 안다(위젯 id 를 우리가 넣는다) — 나머지는 러너가 하고 우리는 모른다(AC-9) */
     adsAttached: {},
+    retracted: {},   /* [R8 §5E] 내린 글(postId → 내린 시각) */
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== MOCK_V) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -731,8 +736,12 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
 ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; },
     /* §5 규칙·슬롯 */
     /* [R7 §4.3 · B3] 코인 미리보기·자동 승인 판정 재료 — 포함분 0(체험)도 0 그대로 싣는다 */
-    "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3, includedCoins: planKnob === "starter" ? 40 : 150, planKey: planKnob || "pro", autoApprove: planKnob !== "starter" }),
-    "rules-save": (b) => { if ((b.rules || []).filter((r) => r.active !== false).length > 3) return err("limit", "이 요금제에서는 규칙을 3개까지 만들 수 있어요."); const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
+    "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: planKnob === "pro" || planKnob === "agency" ? null : 3, includedCoins: planKnob === "starter" ? 40 : 150, planKey: planKnob || "pro", autoApprove: planKnob !== "starter" }),
+    /* 🔴 한도 거절 모양은 **서버 rules.ts 그대로** — 402 `plan_limit`(resource·used·limit·planKey). 종전엔 `step:"limit"` 이라
+       화면의 공통 막힘 시트(UI.gate)가 안 걸리고 토스트만 떴다(2026-09-15 발견 · 모의만 옛 모양이었다). */
+    "rules-save": (b) => { const want = (b.rules || []).filter((r) => r.active !== false).length; const cap = planKnob === "pro" || planKnob === "agency" ? null : 3;
+      if (cap !== null && want > cap) return { ok: false, status: 402, reason: "plan_limit", step: "plan_limit", resource: "rules", used: want, limit: cap, planKey: planKnob || "trial", error: `편성 규칙은 ${cap}개까지예요. Pro 로 바꾸면 제한이 없어요.` };
+      const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
     "rules-settings": (b) => { if (planKnob === "starter" && !keptAuto && b.reviewPolicy === "silence_approves") return { ok: false, status: 402, reason: "plan_limit", step: "plan_feature", feature: "autoApprove", planKey: "starter", error: "«조용하면 발행»은 Pro 요금제부터 쓸 수 있어요. 지금 요금제에서는 발행 전에 한 번 확인해 주세요." }; for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const list = S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => ({ ...s }));
@@ -804,7 +813,22 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     },
     "posts-list": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999", st = q.get("status") || "all";
       const day = (p) => p.publishedAt ? new Date(new Date(p.publishedAt).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : null;
-      return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p })) }; },
+      /* [R8 §3 · B2 lib/channel-registry.ts retractVia] 🔴 **우리가 대신 내릴 수 있는 채널만** true — 유튜브·쓰레드는 삭제 권한이 없다.
+         화면은 이 값으로 단추를 켜고 끈다(없는 되돌리기를 단추로 만들지 않게). */
+      const CAN_RETRACT = { naver_blog: true, tistory: true, blogger: true, wordpress: true, naver_clip: false, youtube_shorts: false, reels: false, threads: false, instagram: false, tiktok: false };
+      return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p, canRetract: CAN_RETRACT[p.channel] !== false, ...(S.retracted[p.id] ? { retractedAt: S.retracted[p.id] } : {}) })) }; },
+    /* [R8 §3 · DESIGN §5E] «내려 줘» — 문장·상태는 lib/publish/retract.ts 그대로. 🔴 코인 0(consume 호출이 아예 없다) */
+    "post-retract": (b) => {
+      const p = S.posts.find((x) => x.id === Number(b.postId)); if (!p) return { ok: false, state: "not_found", message: "그 글을 찾을 수 없어요.", status: 404 };
+      if (S.retracted[p.id]) return { ok: true, state: "already", message: "이미 내렸어요.", ...(p.externalUrl ? { openUrl: p.externalUrl } : {}) };
+      const CAN = { naver_clip: false, youtube_shorts: false, reels: false, threads: false, instagram: false, tiktok: false };
+      if (CAN[p.channel] === false) return { ok: false, state: "unsupported", status: 409,
+        message: `«${UI.chLabel(p.channel)}» 은 우리가 대신 내려 드릴 수 없어요. 아래 주소로 가서 직접 내려 주세요.`, ...(p.externalUrl ? { openUrl: p.externalUrl } : {}) };
+      const runner = ["naver_blog", "tistory"].includes(p.channel);
+      S.retracted[p.id] = iso(Date.now());
+      if (runner) return { ok: true, state: "queued", message: "내 PC 프로그램이 켜지면 그 글을 내릴게요. 끝나면 정말 내려갔는지 한 번 더 확인해요.", ...(p.externalUrl ? { openUrl: p.externalUrl } : {}) };
+      return { ok: true, state: "done", message: "글을 내렸어요. 정말 내려갔는지 한 번 더 확인할게요." };
+    },
     /* ── [P1R2] §2 러너 기기(내 PC 프로그램) ── */
     "runner-list": () => { tick(); return { ok: true, devices: S.devices.map(devRow) }; },
     "runner-register": (b) => { const name = String(b.name || "").trim(); if (!name) return err("name", "기기 이름을 적어 주세요.");
@@ -968,5 +992,5 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     if (fail) { const o = S.billing.orders.find((x) => x.orderNo === orderNo); if (o) o.status = "failed"; save(); return location.assign(withMock("/app/coins.html?failed=" + encodeURIComponent(reason === "cancelled" ? "결제가 취소됐어요" : "카드사 응답: 거절") + "&reason=" + encodeURIComponent(reason))); }
     settleCoin(orderNo); save(); location.assign(withMock("/app/coins.html?charged=" + encodeURIComponent(orderNo))); };
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("a[href]"); if (!a) return; const h = a.getAttribute("href"); if (!h || h.startsWith("javascript:") || h.startsWith("#")) return; const m = withMock(h); if (m !== h) a.setAttribute("href", m); }, true);
-  const badge = document.createElement("div"); badge.textContent = "모의 데이터"; badge.style.cssText = "position:fixed;bottom:calc(var(--tab-h) + 6px);left:8px;z-index:99;font-size:10px;font-weight:700;color:var(--muted);background:var(--press);border-radius:6px;padding:2px 6px;pointer-events:none"; document.body.appendChild(badge);
+  const badge = document.createElement("div"); badge.textContent = "모의 데이터"; badge.style.cssText = "position:fixed;bottom:calc(var(--tab-h) + 6px);left:8px;z-index:99;font-size:10px;font-weight:700;color:var(--surface);background:var(--ink);border-radius:6px;padding:2px 6px;pointer-events:none"; document.body.appendChild(badge);
 })();

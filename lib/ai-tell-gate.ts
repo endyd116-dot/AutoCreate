@@ -29,7 +29,7 @@ import { SAME_BODY_SIMILARITY } from "./similarity";
 
 /** [P1R7 B3] `link_check` 는 **여기(runGate)가 재는 12키가 아니다** — 네트워크가 필요해 `lib/content-approve.ts checkLinks` 가 따로 재서 붙인다(소프트).
  *  어휘를 이 파일에 두는 이유: 화면·감사가 키·라벨을 한 곳에서 읽어야 하기 때문(GATE_KEYS 에는 넣지 않는다 = runGate 는 안 돈다). */
-export type GateKey = "length" | "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "ad_pointing" | "link_check" | "structure_repeat";
+export type GateKey = "length" | "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "ad_pointing" | "link_check" | "stock_safe" | "structure_repeat";
 export const GATE_KEYS: GateKey[] = ["length", "cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count", "ad_pointing"];
 export const GATE_LABEL: Record<GateKey, string> = {
   /* [R8 §2.1 · B-1] 🔴 **분량** — 여태 **아무도 안 쟀다**. `blocksCharCount`(공백 포함 · 고지·태그 제외)는 있었는데 **부르는 곳이 0** 이었다(AC-29).
@@ -47,6 +47,9 @@ export const GATE_LABEL: Record<GateKey, string> = {
   /* [R8-A §4 · 사장님 지시] 🔴 **좁은 축**이다 — «광고·배너»를 **가리키며 누르라**고 할 때만 걸린다(애드센스 계정 정지 사유).
      독자 행동 유도(계속 읽기·저장·구독)와 우리 제휴 링크 유도는 **여기서 안 잡는다** — 오히려 더 해야 하는 것들이다. */
   ad_pointing: "광고를 가리키지 않음",
+  /* [P1R8 §5.1-앞] 스톡 사진 안전 — «광고가 들어간 글에 사람·상표가 찍힌 스톡을 쓰지 않았나»(무료 스톡 라이선스의 조건).
+     `GATE_KEYS` 밖(= runGate 가 안 돈다 · DB 의 piece_assets 를 읽어야 해서 `lib/content-approve.ts` 가 따로 잰다 · link_check 와 같은 자리). */
+  stock_safe: "스톡 사진이 쓸 수 있는 것",
   /* [R8-A §2 · B-1] 골격 반복 — `similarity` 는 **글자**만 봐서, 소제목 수·블록 순서·끝맺음이 매번 같아도 단어만 다르면 통과한다.
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
@@ -59,6 +62,7 @@ export type GateWeight = "high" | "mid" | "low";
  */
 export const GATE_WEIGHT: Readonly<Record<string, GateWeight>> = {
   disclosure: "high", banned_words: "high", ad_pointing: "high",
+  stock_safe: "high",                          // 제3자가 다치는 축(저작권·초상권) — 막지는 않지만 **맨 위에서 읽혀야** 한다
   affiliate_count: "mid", similarity: "mid", superlative: "mid", length: "mid", visual_min: "mid", link_check: "mid",
   cliche: "low", para_repeat: "low", bullet_ratio: "low", sentence_variance: "low", translationese: "low", persona: "low", structure_repeat: "low",
 };

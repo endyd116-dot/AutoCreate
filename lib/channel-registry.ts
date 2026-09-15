@@ -46,6 +46,19 @@ export interface ChannelSpec {
   publishVia: PublishVia | null;
   /** 러너 잡 이름(`runner/core.mjs` 가 실제로 처리하는 kind). 러너 채널이 아니면 null. */
   jobKind: string | null;
+  /**
+   * 🔴 **올린 글을 내릴 수 있나**(DESIGN §5E · 사장님 질문 2026-09-15). `publishVia` 와 **같은 규율**로 — 모르면 `null`.
+   *   `"api"` = 서버가 직접 지운다 · `"runner"` = 고객 PC 러너가 브라우저로 지운다 · `null` = **내릴 길이 없다**.
+   *
+   *   ⚠️ **올릴 수 있다고 내릴 수 있는 게 아니다.** 실측으로 확인한 것(2026-09-15 B2):
+   *     · `blogger` — OAuth 스코프가 `auth/blogger`(전체)라 `posts.delete` 가 **된다**.
+   *     · 🔴 `youtube_shorts` — 스코프가 `youtube.upload`·`youtube.readonly`·`yt-analytics-monetary.readonly` 뿐이라
+   *       **`videos.delete` 권한이 없다**(삭제엔 `auth/youtube` 또는 `youtube.force-ssl` 가 필요하다).
+   *       스코프를 늘리면 **이미 연결된 계정이 전부 재동의**해야 하므로 여기서 조용히 켜지 않는다 — 사장님 판단 사안.
+   *     · `wordpress` — 앱 비밀번호로 `DELETE wp/v2/posts/{id}` 가 되므로 추가 권한이 필요 없다.
+   *     · `threads` — 삭제 엔드포인트를 **확인하지 못했다**. 확인 못 한 길을 열지 않는다.
+   */
+  retractVia: PublishVia | null;
   /** 글 축이냐 영상 축이냐 — 편성·생성이 갈린다(§5B.3). */
   axis: ChannelKindAxis;
   /**
@@ -64,16 +77,16 @@ export interface ChannelSpec {
  *   순서는 «글 먼저 · 영상 나중»(화면 정렬은 DB `sort` 가 따로 정한다).
  */
 export const CHANNELS: readonly ChannelSpec[] = [
-  { key: "naver_blog", connect: "session", publishVia: "runner", jobKind: "publish.naver_blog", axis: "text", textGen: true },
-  { key: "tistory", connect: "session", publishVia: "runner", jobKind: "publish.tistory", axis: "text", textGen: true },
-  { key: "blogger", connect: "oauth", publishVia: "api", jobKind: null, axis: "text", textGen: true },
-  { key: "wordpress", connect: "app_password", publishVia: "api", jobKind: null, axis: "text", textGen: true },
-  { key: "threads", connect: "oauth", publishVia: "api", jobKind: null, axis: "text", textGen: true, note: "글·영상 둘 다 올린다(축은 글로 센다 · lib/video/types 의 영상 채널 목록과 다른 축)" },
-  { key: "instagram", connect: "oauth", publishVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 피드·카드뉴스 커넥터 없음(P1R8 §3.4 B2) — 붙기 전까지 null" },
-  { key: "youtube_shorts", connect: "oauth", publishVia: "api", jobKind: null, axis: "video", textGen: false },
-  { key: "naver_clip", connect: "session", publishVia: "runner", jobKind: "publish.naver_clip", axis: "video", textGen: false, note: "러너 스텁 — 잡은 쌓이되 사람이 올린다(§2.3)" },
-  { key: "reels", connect: "oauth", publishVia: "api", jobKind: null, axis: "video", textGen: false },
-  { key: "tiktok", connect: "oauth", publishVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 커넥터 없음(P1R8 §3.4 B2) — 심사 전엔 «본인만 보기»" },
+  { key: "naver_blog", connect: "session", publishVia: "runner", jobKind: "publish.naver_blog", retractVia: "runner", axis: "text", textGen: true },
+  { key: "tistory", connect: "session", publishVia: "runner", jobKind: "publish.tistory", retractVia: "runner", axis: "text", textGen: true },
+  { key: "blogger", connect: "oauth", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true },
+  { key: "wordpress", connect: "app_password", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true },
+  { key: "threads", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: true, note: "글·영상 둘 다 올린다(축은 글로 센다 · lib/video/types 의 영상 채널 목록과 다른 축)" },
+  { key: "instagram", connect: "oauth", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 피드·카드뉴스 커넥터 없음(P1R8 §3.4 B2) — 붙기 전까지 null" },
+  { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
+  { key: "naver_clip", connect: "session", publishVia: "runner", retractVia: null, jobKind: "publish.naver_clip", axis: "video", textGen: false, note: "러너 스텁 — 잡은 쌓이되 사람이 올린다(§2.3)" },
+  { key: "reels", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false },
+  { key: "tiktok", connect: "oauth", publishVia: null, retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 커넥터 없음(P1R8 §3.4 B2) — 심사 전엔 «본인만 보기»" },
 ];
 
 const BY_KEY: ReadonlyMap<string, ChannelSpec> = new Map(CHANNELS.map((c) => [c.key, c]));
@@ -106,6 +119,18 @@ export function connectMethodOf(channel: string): ConnectMethod {
 /** 발행 경로. 🔴 모르면 **null** — 호출부가 «아직 이 채널은 올릴 수 없어요»로 막는다(추측 0). */
 export function publishViaOf(channel: string): PublishVia | null {
   return channelSpec(channel)?.publishVia ?? null;
+}
+
+/**
+ * 🔴 **내리는 경로**(DESIGN §5E). 모르면 **null** — 호출부가 «우리가 대신 내려 드릴 수 없어요»로 막고
+ *   «직접 내려 주세요» + 그 글로 가는 링크를 준다. **없는 길을 단추로 만들지 않는다.**
+ */
+export function retractViaOf(channel: string): PublishVia | null {
+  return channelSpec(channel)?.retractVia ?? null;
+}
+/** 우리가 대신 내려 줄 수 있는 채널인가 — 화면이 단추를 켤지 정하는 값. */
+export function canRetract(channel: string): boolean {
+  return retractViaOf(channel) !== null;
 }
 
 /** 러너 잡 이름. 러너 채널이 아니거나 모르는 채널이면 null. */

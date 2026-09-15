@@ -20,6 +20,7 @@ import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
 import { precheckVideoBudget, triggerVideo } from "./video/gen";
 import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract } from "./writing-contracts";
 import { pickPublishAt, kstDateStr } from "./best-time";
+import { gapMinFor } from "./publish-gap";
 import { balance, consume, refundPiece } from "./coin-ledger";
 import { coinCostOf, videoCoinItem } from "./coin-table";
 import { callGeminiJson } from "./ai";
@@ -275,7 +276,18 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
     const format = fp.format;
     if (fp.switched) console.info(`[director] 골격 겹침으로 구성 갈아탐 tid=${tid} ch=${ch} → ${fp.format} (${fp.why})`);
     const chTaken = taken.byChannel.get(ch) ?? [];
-    const sched = pickPublishAt({ channel: ch, goldenHours: acc?.goldenHours ?? null, taken: chTaken, takenSameAccount: acc ? (taken.byAccount.get(acc.id) ?? []) : [], minGapMin: acc?.minGapMin });
+    /* [R8] 🔴 간격은 **`publish-gap.ts` 한 곳**에서 온다 — 계정마다 «우리가 무엇을 아는가»가 달라서다
+       (전용 IP 가 **실제로 다른 것이 확인된** 계정끼리만 좁힐 수 있다 · `docs/.../proxy-cost.md` §6.3b).
+       ⚠️ 계정이 없으면(자동 배정 전) 가장 안전한 기본을 쓴다 — 모를 때 좁히지 않는다. */
+    const gap = acc ? await gapMinFor(tid, acc.id) : null;
+    const sched = pickPublishAt({
+      channel: ch, goldenHours: acc?.goldenHours ?? null, taken: chTaken,
+      takenSameAccount: acc ? (taken.byAccount.get(acc.id) ?? []) : [], minGapMin: acc?.minGapMin,
+      ...(gap ? { gapMin: gap.gapMin } : {}),
+      /* 🔴 계정마다 **다른** 흔들림 — 전 계정이 같은 폭으로 흔들리면 «같이 흔들리는 것»이 다시 신호가 된다. */
+      ...(acc ? { jitterSeed: `acc:${acc.id}` } : {}),
+      avoidNight: true,
+    });
     taken.byChannel.set(ch, [...chTaken, sched.at]);
     if (acc) taken.byAccount.set(acc.id, [...(taken.byAccount.get(acc.id) ?? []), sched.at]);
     if (isVideoChannel(ch)) {

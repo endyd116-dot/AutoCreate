@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=13"></script>
-<script src="/js/mock.js?v=13"></script>
+<script src="/js/ui.js?v=14"></script>
+<script src="/js/mock.js?v=14"></script>
 <script>
 (async () => {
 await UI.boot("account");
@@ -107,7 +107,7 @@ function deviceSheet(d) {
     ${unbound ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">아직 한 번도 안 켰어요. 열쇠를 넣고 프로그램을 켜면 이 PC 에 묶여요.</p>` : d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
     <div style="margin:12px 0 0"><button type="button" class="row tap" id="rot"><div class="l"><span class="t">열쇠 다시 받기</span><span class="d wrap">PC 를 바꿨거나 열쇠가 새어 나간 것 같을 때 · 옛 열쇠는 바로 못 써요</span></div>${UI.chev}</button><div id="rc2"></div></div>
     ${d.version ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">프로그램 v${UI.esc(d.version)}</p>` : ""}
-    <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
+    <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger-ink);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
       const ff = sh.querySelector("#ffm"); if (ff) ff.onclick = () => { close(); ffmpegSheet(); } // [P1R5] caps.ffmpeg=false → 설치 안내(침묵 금지 · §2.2)
       sh.querySelector("#rot").onclick = () => UI.confirmRow(sh.querySelector("#rc2"), "지금 켜 둔 내 PC 프로그램은 멈춰요 · 새 열쇠를 넣어야 다시 켜져요", async () => {
         const r = await UI.api("/api/runner-rotate", { body: { id: d.id } }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "열쇠를 다시 받지 못했어요");

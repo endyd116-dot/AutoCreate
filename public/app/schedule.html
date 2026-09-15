@@ -23,8 +23,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=13"></script>
-<script src="/js/mock.js?v=13"></script>
+<script src="/js/ui.js?v=14"></script>
+<script src="/js/mock.js?v=14"></script>
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
@@ -181,14 +181,36 @@ async function topicSheet(s, closeParent) {
   const r = await UI.api("/api/topics-list?status=candidate");
   const list = (r.ok ? r.topics : []).filter((t) => t.title !== s.topicTitle);
   const used = new Set(slots.filter((x) => x.id !== s.id && x.topicTitle).map((x) => x.topicTitle)); // 30일 중복 회피 — 서버도 같은 자로 거른다
-  UI.sheet(list.length
-    ? list.map((t) => { const dup = used.has(t.title); return `<button type="button" class="row tap" data-t="${t.id}" ${dup ? 'disabled style="opacity:.4"' : ""}>${UI.mark(t.channelHint || s.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${dup ? "다른 날에 이미 편성됐어요" : UI.esc(topicSub(t))}</span></div>${dup ? "" : UI.chev}</button>`; }).join("")
-    : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">고를 소재가 없어요</h3><p>«만들기»에서 새로 뽑으면 여기에도 나와요.</p><a class="btn primary sm" href="/app/create.html">소재 뽑으러 가기</a></div>`,
+  /* [R8 · 사장님 지시] 🔴 **여기서 바로 적을 수 있어야 한다.** 종전엔 «이미 뽑아 둔 후보»만 보여 줘서,
+     «미스터 트롯이 유행이네»를 지금 떠올리면 만들기로 나갔다 → 소재 만들고 → 돌아와 붙이는 **세 걸음**이었다.
+     `topics-add`(코인 0) 로 만들고 그 id 로 바로 `slots-assign-topic` — 한 걸음. 거절 문장은 만들기 화면과 **같은 것**을 쓴다(두 곳이 다른 말을 하지 않게). */
+  const assign = async (topicId, say) => {
+    const rr = await UI.api("/api/slots-assign-topic", { body: { slotId: s.id, topicId: Number(topicId) } });
+    if (!rr.ok) { if (!rr.gated) UI.toast(rr.error || "소재를 바꾸지 못했어요"); return false; }
+    UI.toast(say); await reload(closeParent); return true;
+  };
+  UI.sheet(`<form id="ntf"><div class="field"><label>직접 적기 <span class="muted" style="font-weight:500">· 코인 0</span></label><input class="input" name="title" maxlength="80" required placeholder="예: 미스터 트롯 투표하는 법" autocomplete="off"><div class="help"></div></div>
+      <div id="ndup"></div><div class="cta nobar" style="position:static;padding:0 0 4px"><button class="btn primary" type="submit">이 자리에 넣기</button></div></form>
+    <div class="sec">또는 뽑아 둔 소재에서</div>`
+    + (list.length
+      ? list.map((t) => { const dup = used.has(t.title); return `<button type="button" class="row tap" data-t="${t.id}" ${dup ? 'disabled style="opacity:.4"' : ""}>${UI.mark(t.channelHint || s.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${dup ? "다른 날에 이미 편성됐어요" : UI.esc(topicSub(t))}</span></div>${dup ? "" : UI.chev}</button>`; }).join("")
+      : `<div class="empty" style="padding:12px 16px"><p style="margin:0">뽑아 둔 소재가 없어요 · <a href="/app/create.html" style="font-weight:700;text-decoration:underline">소재 뽑으러 가기</a></p></div>`),
     { title: "어떤 소재로 바꿀까요", onOpen: (sh, close) => {
-      sh.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
-        const rr = await UI.api("/api/slots-assign-topic", { body: { slotId: s.id, topicId: Number(b.dataset.t) } });
-        if (!rr.ok) return rr.gated ? undefined : UI.toast(rr.error || "소재를 바꾸지 못했어요");
-        close(); UI.toast("소재를 바꿨어요"); await reload(closeParent);
+      sh.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => { if (await assign(b.dataset.t, "소재를 바꿨어요")) close(); });
+      UI.form(sh.querySelector("#ntf"), async (d, f) => {
+        const r2 = await UI.api("/api/topics-add", { body: { title: d.title.trim(), channelHint: s.channel } });
+        if (!r2.ok) {
+          /* 🔴 순서가 뜻이다 — 금지 주제는 **칸 밑에** 사유를 붙인다(만들기 화면과 같은 차례 · UI.gate 가 이미 토스트로도 말한다).
+             `gated` 를 먼저 보면 시트가 닫혀 «왜 안 됐는지»가 사라진다. */
+          if (r2.step === "banned_category") return UI.fieldError(f, "title", r2.error || "이 주제는 만들 수 없어요");
+          if (r2.gated) return close();
+          if (r2.step === "duplicate" && (r2.topic || r2.existing)) { const ex = r2.topic || r2.existing;
+            sh.querySelector("#ndup").innerHTML = `<div class="banner" style="margin:0 0 8px"><span>30일 안에 같은 소재가 있어요 · 그걸로 넣을까요?</span><button type="button" id="ndupGo">그걸로</button></div>`;
+            sh.querySelector("#ndupGo").onclick = async () => { if (await assign(ex.id, "그 소재로 넣었어요")) close(); }; return; }
+          if (r2.step === "rate") return UI.fieldError(f, "title", r2.error || "오늘은 여기까지예요 · 내일 다시 넣어 주세요");
+          return UI.fieldError(f, "title", r2.error || "소재를 넣지 못했어요");
+        }
+        if (await assign(r2.topic.id, "소재를 넣었어요 · 만들 때 이 소재로 써요")) close();
       });
     } });
 }
@@ -218,6 +240,62 @@ const keptAuto = () => D.autoApprove === false && (D.settings || {}).reviewPolic
 const autoApproveOff = () => D.autoApprove === false && !keptAuto();
 const inclSay = (weekly) => { const inc = Number(D.includedCoins || 0); const monthly = Math.round(weekly * 4.3); return inc <= 0 ? "포함분 없음 · 코인으로 채워요" : monthly <= inc ? `이 편성이면 포함분 안이에요` : `달 약 ${UI.num(monthly)}코인 · 포함분을 ${UI.num(monthly - inc)}코인 넘어요`; };
 /* ── 자동 편성 켜기 · 4스텝(한 화면 한 질문) ── */
+/* [R8 §6.2] 🔴 **한 채널에 규칙이 여럿일 수 있다** — 서버(cadence_rules)는 처음부터 행마다 채널·주기·요일·시각·계정을 따로 받는데,
+   화면이 «채널당 하나»로 묶어 버려서 «네이버 아침 3회 + 저녁 2회»나 «계정마다 다른 주기»를 만들 길이 아예 없었다(서버는 되는데 화면만 1:1).
+   🔴 저장은 **늘 전체 목록**이다 — 서버는 목록에 없는 규칙을 끈다(그게 곧 «지우기»다). 한 줄만 고쳐도 나머지를 같이 보낸다. */
+const everySay = (r) => (r.every === "day" ? `하루 ${r.count}회` : r.every === "month" ? `달 ${r.count}회` : `주 ${r.count}회`);
+const ruleSay = (r) => [everySay(r), r.every === "week" && (r.weekdays || []).length ? (r.weekdays || []).map((i) => WD[Number(i)]).join("·") : "", r.preferredHour != null ? `${String(r.preferredHour).padStart(2, "0")}시` : "시각 자동",
+  r.accountMode === "fixed" && r.accountId ? "@" + (accounts.find((a) => a.id === r.accountId)?.handle || "") : "계정 자동"].filter(Boolean).join(" · ");
+const activeRules = () => (D.rules || []).filter((r) => r.active !== false);
+function rulesListSheet() {
+  const rs = activeRules();
+  const rows = rs.map((r) => `<button class="row tap" type="button" data-rule="${r.id}">${UI.mark(r.channel, "sm")}<div class="l"><span class="t">${UI.esc(UI.chLabel(r.channel))}</span><span class="d wrap">${UI.esc(ruleSay(r))}</span></div>${UI.chev}</button>`).join("");
+  UI.sheet(`<p class="muted" style="margin:0 0 10px;font-size:13px">한 채널에 여러 규칙을 둘 수 있어요 — 아침·저녁을 따로 두거나, 계정마다 다르게요.</p>
+    <div class="group" style="margin:0 -4px">${rows}<button class="row tap" type="button" data-rule="new"><span class="mk soft">+</span><div class="l"><span class="t">규칙 추가</span><span class="d">${D.maxRules == null ? "개수 제한 없어요" : `${rs.length}/${D.maxRules}개 쓰는 중`}</span></div>${UI.chev}</button></div>`,
+    { title: "편성 규칙", onOpen: (sh, close) => UI.$$("[data-rule]", sh).forEach((b) => b.onclick = () => { close(); setTimeout(() => ruleOneSheet(b.dataset.rule === "new" ? null : rs.find((x) => String(x.id) === b.dataset.rule)), 280); }) });
+}
+/* 규칙 한 줄만 고치는 시트 — 마법사(첫 규칙)와 달리 **이미 굴러가는 집**이 쓰는 자리라 한 화면에 다 둔다(단계가 없다). */
+function ruleOneSheet(rule) {
+  const chans = [...new Set(accounts.map((a) => a.channel))];
+  if (!chans.length) return UI.sheet(`<p class="muted" style="margin:0 0 16px">편성하려면 먼저 계정을 하나 연결해 주세요.</p><div class="cta"><a class="btn primary" href="/app/accounts.html">계정 연결</a></div>`, { title: "먼저 계정을 연결해요" });
+  const s = { channel: rule?.channel || chans[0], every: rule?.every || "week", count: rule?.count || 3, wd: (rule?.weekdays || []).map(Number),
+    hour: rule?.preferredHour ?? null, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
+  const view = (sh, close) => {
+    const body = sh.querySelector(".sheet-body"); const accs = accounts.filter((a) => a.channel === s.channel);
+    body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}
+      <div class="sec">얼마나 자주</div><div class="fr" style="padding-left:0;padding-right:0"><div class="fl">${UI.esc(everySay(s))}<small>0으로 두면 이 규칙은 지워져요</small></div>${UI.stepper("cnt", s.count, 0, s.every === "day" ? 3 : s.every === "month" ? 31 : 7, "회")}</div>
+      <div style="padding:0 0 10px">${UI.seg("ev", [["day", "매일"], ["week", "주"], ["month", "달"]], s.every)}</div>
+      ${s.every === "week" ? `<div class="sec">어느 요일</div>${UI.chips("wd", WD.map((w, i) => [i, w]), s.wd, true)}<p class="muted" style="margin:6px 0 0;font-size:12.5px">${s.wd.length ? `${s.wd.length}일 골랐어요` : "안 고르면 저희가 골라요"}</p>` : ""}
+      <div class="sec">몇 시에</div>${UI.chips("hr", [["", "자동"], ...HOURS_R], s.hour == null ? "" : String(s.hour))}
+      <div class="sec">어느 계정으로</div>${UI.seg("md", [["auto", "자동"], ["fixed", "고르기"]], s.mode)}
+      <div data-pick ${s.mode === "fixed" ? "" : "hidden"} style="padding-top:8px">${UI.chips("ac", accs.map((a) => [a.id, "@" + a.handle]), s.acc || accs[0]?.id)}</div>
+      <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger-ink)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
+    UI.bindSteppers(body, (n, v) => { if (n === "cnt") { s.count = v; view(sh, close); } });
+    UI.bindChips(body, (n, v) => {
+      if (n === "ch") { s.channel = v; s.acc = null; view(sh, close); } else if (n === "ev") { s.every = v; view(sh, close); }
+      else if (n === "wd") { s.wd = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); }
+      else if (n === "hr") s.hour = v === "" ? null : Number(v);
+      else if (n === "md") { s.mode = v; body.querySelector("[data-pick]").hidden = v !== "fixed"; }
+      else if (n === "ac") s.acc = Number(v);
+    });
+    const one = () => { const r = { channel: s.channel, kind: isVideoCh(s.channel) ? "shorts" : "post", accountMode: s.mode, every: s.every, count: s.count, active: true };
+      if (rule?.id) r.id = rule.id;
+      if (s.mode === "fixed") r.accountId = s.acc || accounts.find((a) => a.channel === s.channel)?.id;
+      if (s.hour != null) r.preferredHour = s.hour;
+      if (s.every === "week" && s.wd.length) r.weekdays = s.wd;
+      return r; };
+    const send = async (list, btn, say) => { btn.disabled = true;
+      const r = await UI.api("/api/rules-save", { body: { rules: list } }); btn.disabled = false;
+      if (!r.ok) { if (r.gated) { close(); return; } return UI.toast(r.error || "저장하지 못했어요"); }   // 한도(402 plan_limit)는 UI.gate 가 시트로 말한다 — 시트를 겹치지 않게 이건 닫는다
+      close(); UI.toast(`${say} · 주 ${r.coinsPerWeek}코인`); await load();
+    };
+    const others = activeRules().filter((x) => !rule || x.id !== rule.id).map((x) => ({ id: x.id, channel: x.channel, kind: x.kind, accountMode: x.accountMode, accountId: x.accountId, every: x.every, count: x.count, weekdays: x.weekdays, preferredHour: x.preferredHour, active: true }));
+    body.querySelector("#save").onclick = (e) => { if (!s.count) return UI.toast("1회 이상으로 해 주세요"); send([...others, one()], e.currentTarget, rule ? "규칙을 고쳤어요" : "규칙을 추가했어요"); };
+    const del = body.querySelector("#del");
+    if (del) del.onclick = (e) => { const btn = e.currentTarget; UI.confirmRow(body.querySelector(".cta"), "이 규칙을 지울까요? 아직 안 나간 자리는 사라져요.", () => send(others, btn, "규칙을 지웠어요")); };
+  };
+  UI.sheet(`<div class="sheet-body"></div>`, { title: rule ? "규칙 고치기" : "규칙 추가", onOpen: (sh, close) => view(sh, close) });
+}
 function ruleSheet() {
   const chans = [...new Set(accounts.map((a) => a.channel))];
   if (!chans.length) return UI.sheet(`<p class="muted" style="margin:0 0 16px">편성하려면 먼저 계정을 하나 연결해 주세요.</p><div class="cta"><a class="btn primary" href="/app/accounts.html">계정 연결</a></div>`, { title: "먼저 계정을 연결해요" });
@@ -301,7 +379,8 @@ function settingsSheet() {
       UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; });
       sh.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => { const k = b.dataset.q; quiet.has(k) ? quiet.delete(k) : quiet.add(k); b.classList.toggle("sel", quiet.has(k)); });
       UI.toggle(sh.querySelector("#auto"), (on) => { if (on && !active.length) { UI.toast("먼저 규칙을 만들어 주세요"); return false; } });
-      sh.querySelector("#rules").onclick = () => { close(); ruleSheet(); };
+      /* [R8 §6.2] 이미 규칙이 있으면 **목록**으로(한 채널에 여럿을 둘 수 있다) · 처음이면 마법사 그대로 */
+      sh.querySelector("#rules").onclick = () => { close(); setTimeout(() => (activeRules().length ? rulesListSheet() : ruleSheet()), 280); };
       sh.querySelector("#save").onclick = async () => {
         const body = { autoSchedule: sh.querySelector("#auto").getAttribute("aria-checked") === "true", horizonDays: Number(UI.chipVal(sh, "horizonDays")), topicLeadDays: Number(UI.chipVal(sh, "topicLeadDays")), produceLeadDays: Number(UI.chipVal(sh, "produceLeadDays")), produceHour: UI.chipVal(sh, "produceHour"), reviewPolicy: UI.chipVal(sh, "reviewPolicy"), bestTimeMode: UI.chipVal(sh, "bestTimeMode"), weeklyCoinCap: UI.chipVal(sh, "capMode") === "custom" ? UI.stepVal(sh, "cap") : null, quietDays: [...quiet].sort() };
         const r = await UI.api("/api/rules-settings", { body }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");

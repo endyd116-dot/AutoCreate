@@ -28,6 +28,7 @@ import { countAffiliateLinks } from "./publish/gate";
 /* [R8-A §2 · B-1] 골격 지문 — 순수 모듈(DB 0). 여기서 최근 글을 읽어 넘겨 준다(ai-tell-gate 는 순수로 둔다 · AC-17). */
 import { structurePrint, compareToRecent, printFromMeta, STRUCTURE_OVERLAP_MAX, type StructurePrint } from "./structure-print";
 import { compensationOfMeta } from "./disclosure";            // [R8-A §4] 대가 3종 판정 한 곳
+import { assessStockImage, stockSourceOf } from "./stock-safety";   // [P1R8] 광고성 글 + 사람·상표 스톡 금지
 import { classifyBanned } from "./banned-words";              // [R8-A §4] 3층 사전
 import { isHealthTopic } from "./banned-categories";          // [R8-A §4] 건강·의료 소재면 효능 표현이 바로 위법
 
@@ -39,7 +40,7 @@ const n = (v: unknown) => Number(v || 0);
    그 축은 «낱말이 있나»만 봤고 근거를 보지 않아, «판매량 1위(2026년 9월 네이버 쇼핑 기준)» 처럼 **법이 허용하는 문장까지 승인을 막았다**.
    이제 `superlative` 는 같은 문장의 근거(기관·기간·수치)를 보고, 없을 때만 **보여 준다**(소프트).
    법 축을 막는 것은 `banned_words` 다 — 3층 사전(hard = 단정·효능 / needs_proof = 근거 없는 최상급)이 그 자리를 맡는다. */
-export const HARD_GATE_KEYS: readonly string[] = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"];
+export const HARD_GATE_KEYS: readonly string[] = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing", "stock_safe"];
 /** 이 게이트 결과가 승인을 막는가. */
 export function hardFailures(gate: GateReport): GateCheck[] {
   return gate.checks.filter((c) => !c.pass && HARD_GATE_KEYS.includes(c.key));
@@ -84,6 +85,7 @@ export const SELF_GATE_LEVEL: Readonly<Record<string, SelfGateLevel>> = {
   [STRUCTURE_KEY]: "off",                     // 우리가 만든 골격이 아니다
   /* ── 돈다(말해 준다) — 법이든 플랫폼이든 채널 계약이든 **막지는 않는다** ── */
   disclosure: "soft", banned_words: "soft", ad_pointing: "soft",
+  stock_safe: "soft",                         // [P1R8 B3] 스톡 사진(사람·상표) — 제3자가 다치는 축이지만 **막지는 않는다**(§9 최종)
   affiliate_count: "soft", similarity: "soft", superlative: "soft",
   length: "soft", visual_min: "soft", link_check: "soft",
 };
@@ -194,6 +196,32 @@ export async function checkLinks(html: string): Promise<GateCheck> {
  */
 export const affiliateLinkCount = countAffiliateLinks;
 
+/** 스톡 사진 안전 검사 키. */
+export const STOCK_KEY = "stock_safe" as const;
+/**
+ * [P1R8 §5.1-앞] 이 글에 붙은 사진 중 **스톡**이 광고성 글 규칙에 걸리나(판정은 `lib/stock-safety.ts` · 여기는 재료만 읽는다).
+ *   🔴 **지금은 대부분 «검사할 것이 없음»으로 통과한다** — 스톡 조달(B-1 `lib/stock/`)이 아직 `piece_assets.meta.stock` 을 안 적기 때문이다.
+ *      값이 적히기 시작하면 **이 코드를 고치지 않아도 게이트가 켜진다**(없는 것을 있는 척하지 않는다 · AC-9).
+ *   🔴 **하드**다(`HARD_GATE_KEYS`) — 라이선스 위반은 «보여만 주고 넘어갈» 종류가 아니다. 걸리면 사진을 바꾸거나 광고를 빼야 한다.
+ */
+export async function checkStockSafety(tid: number, p: Row): Promise<GateCheck> {
+  const label = GATE_LABEL[STOCK_KEY];
+  const paid = compensationOfMeta((p.meta || {}) as Record<string, unknown>).need;
+  let rows: Row[] = [];
+  try {
+    rows = await q(sql`SELECT id, meta FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${n(p.id)} AND meta IS NOT NULL ORDER BY sort, id`);
+  } catch (e) {
+    console.warn("[content-approve] 스톡 출처 조회 실패", String((e as Error)?.message ?? e).slice(0, 120));
+    return { key: STOCK_KEY, label, pass: true, detail: "사진 출처를 읽지 못했어요(검사 못 함)" };
+  }
+  const stocks = rows.map((r) => ({ id: n(r.id), src: stockSourceOf(r.meta) })).filter((x): x is { id: number; src: NonNullable<ReturnType<typeof stockSourceOf>> } => !!x.src);
+  if (!stocks.length) return { key: STOCK_KEY, label, pass: true, ...(paid ? { detail: "스톡 사진이 없어요(우리가 만든 그림·고객 사진)" } : {}) };
+  const bad = stocks.map((x) => ({ id: x.id, v: assessStockImage(x.src, { paid }) })).filter((x) => !x.v.ok);
+  if (!bad.length) return { key: STOCK_KEY, label, pass: true, detail: `스톡 ${stocks.length}장 확인` };
+  const first = bad[0];
+  return { key: STOCK_KEY, label, pass: false, detail: `사진 ${bad.length}장: ${first.v.reason}${first.v.law ? ` (${first.v.law})` : ""}` };
+}
+
 /**
  * recheckPiece — 발행 직전 재검사(승인·수정 공용). 고지·금칙어·제휴 링크 수·유사도 + 12키 게이트.
  *   블록이 정본이면 블록 기준, 사용자가 HTML 을 고쳤으면(`meta.editedByUser`) HTML 기준(구조 검사는 태그로 근사).
@@ -234,7 +262,8 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || ""), group, origin });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
-    const full: GateReport = withWeights({ ...g, checks: [...g.checks, link, st], ok: g.ok && link.pass && st.pass });
+    const stock = await checkStockSafety(tid, p);      // [P1R8 B3] 스톡 사진 안전(광고성 글 + 사람·상표) — 제3자가 다치는 축
+    const full: GateReport = withWeights({ ...g, checks: [...g.checks, link, st, stock], ok: g.ok && link.pass && st.pass && stock.pass });
     return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
@@ -257,6 +286,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     checks.push(from);
   }
   checks.push(await checkLinks(html));   // [P1R7 B3] 소프트 링크 검사(HTML 정본 경로도 같은 한 벌)
+  checks.push(await checkStockSafety(tid, p));   // [P1R8 B3] 스톡 사진 안전(HTML 정본 경로도 같은 한 벌 · 두 경로가 갈라지지 않게)
   /* [R8 §5D] 직접 쓴 글은 HTML 이 정본이라 **이 경로로 온다** — ① 정책은 여기서도 같이 입힌다(한 곳만 입히면 화면이 갈린다). */
   const out: GateReport = withWeights({ ok: checks.every((x) => x.pass), checks, rewritten: false });
   return origin === "self" ? applySelfGatePolicy(out) : out;
