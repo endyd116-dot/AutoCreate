@@ -474,15 +474,58 @@ function seeded(seed: number): () => number {
  *      `structure_repeat` 축(`lib/structure-print.ts`)이 그걸 재고, 이 함수가 그걸 **만들지 않게** 한다.
  *   `tiers` 가 없는 채널(쓰레드·인스타·영상)은 **아무것도 하지 않는다**(무회귀).
  */
+/* 🔴 `visualMin` → 블록 타입별 요구 수(순수). `hashtags` 는 **블록 안 items 개수**를 세는 항목이라 골격 단계에서 못 정하므로 제외한다
+   (`lib/ai-tell-gate.ts` visual_min 이 그렇게 센다 — 여기서 손으로 다시 세면 대용물이 된다 · AC-57). */
+const TABLE_OR_LIST: readonly BlockType[] = ["table", "list", "checklist"];
+const TABLE_OR_LIST_KEY = "__tableOrList" as unknown as BlockType;
+function visualNeedOf(c: WritingContract): Map<BlockType, number> {
+  const vm = c.visualMin as unknown as Record<string, number>;
+  const m = new Map<BlockType, number>();
+  for (const [k, v] of Object.entries(vm)) {
+    if (!v || k === "hashtags") continue;
+    if (k === "tableOrList") { m.set(TABLE_OR_LIST_KEY, v); continue; }
+    m.set(k as BlockType, v);
+  }
+  return m;
+}
+
 export function applyTiers(base: BlockType[], c: WritingContract, seed: number): BlockType[] {
   const t = c.tiers;
   if (!t) return base;
   const rnd = seeded(seed);
   const out: BlockType[] = [];
+  /* 🔴 [2026-09-15 C · R8] **계약이 스스로와 싸우지 않게 한다.**
+     `visualMin` 이 요구하는 블록이 `tiers.optional` 에 있으면 ②에서 떨어질 수 있고, 그러면 `visual_min` 축이 실패해
+     **재작성이 한 번 더 돈다 = 그 편 글 비용이 두 배**다. 아무도 규칙을 어기지 않았는데 돈만 든다.
+     실측(제품 `runGate` 로 40편씩): naver_blog **80%** · tistory 15% · blogger 20% · wordpress 18% 가 미달이었다.
+     🔴 재작성은 `content-gen.ts:278` 의 `!report.ok`(13축 **전부**)로 돈다 — `HARD_GATE_KEYS` 와 **무관**하다.
+        그래서 게이트를 소프트로 바꿔도 이 비용은 안 사라진다(메인 확인 요청 2026-09-15 · 코드로 확인함).
+     ⇒ **떨어뜨렸을 때 요구치 미만이 되는 블록은 남긴다.** 무작위는 그대로 두되 «못 채우는 무작위»만 막는다. */
+  const need = visualNeedOf(c);
+  const left = new Map<BlockType, number>();
+  for (const b of base) if (!t.suppress.includes(b)) left.set(b, (left.get(b) ?? 0) + 1);
+  const kept = new Map<BlockType, number>();
+  const have = (k: BlockType) => (kept.get(k) ?? 0) + (left.get(k) ?? 0);
+  /** 이걸 떨어뜨려도 `visualMin` 을 아직 채울 수 있나. */
+  const droppable = (b: BlockType): boolean => {
+    const own = need.get(b) ?? 0;
+    if (own > 0 && have(b) - 1 < own) return false;
+    /* `tableOrList` 는 셋 중 아무거나로 채운다 — 그룹 잔량으로 본다. */
+    if (TABLE_OR_LIST.includes(b)) {
+      const groupNeed = need.get(TABLE_OR_LIST_KEY) ?? 0;
+      if (groupNeed > 0) {
+        const groupHave = TABLE_OR_LIST.reduce((s, k) => s + have(k), 0);
+        if (groupHave - 1 < groupNeed) return false;
+      }
+    }
+    return true;
+  };
   for (const b of base) {
     if (t.suppress.includes(b)) continue;                 // ① 억제
-    if (t.optional.includes(b) && rnd() < 0.45) continue; // ② 선택 — 글마다 들쭉날쭉
+    left.set(b, (left.get(b) ?? 1) - 1);
+    if (t.optional.includes(b) && rnd() < 0.45 && droppable(b)) continue; // ② 선택 — 글마다 들쭉날쭉(단, 계약이 요구하는 수는 남긴다)
     out.push(b);
+    kept.set(b, (kept.get(b) ?? 0) + 1);
   }
   /* 선택 블록을 너무 많이 떨어뜨려 필수만 남으면 그것도 매번 같은 모양이다 — 하나는 되살린다. */
   if (!out.some((b) => t.optional.includes(b))) {
