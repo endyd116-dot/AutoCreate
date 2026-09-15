@@ -6,7 +6,7 @@
  *   POST /api/subscription-change { planKey, cycle, agreePaidTerms?, couponCode? } → { ok, effectiveAt, pending, chargeNowKrw?, vatKrw?, totalKrw? } | { ok:false, step:"billing_key"|"not_configured"|"charge"|"plan"|"same"|"paid_terms"|"coupon" }
  *     쿠폰은 청구 전에 적용(redeemCoupon · 1테넌트 1회 · pct 는 장부 할인 · krw 는 다음 청구 1회 차감) — 틀린 코드는 400 step "coupon" 으로 멈춘다(모르고 정가 결제되지 않게).
  *   POST /api/subscription-cancel { atPeriodEnd:true|false } → { ok, periodEnd }
- *   POST /api/billing-key-start { payRoute?:"keyin", keyin?:true } → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }   // 라인 판정은 lib/pay-route(§1.6 · 3조건)
+ *   POST /api/billing-key-start { probe? }                → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }   // 🔴 빌키 = keyin MID 고정(등록돼 있으면 · 토글 무관 · lib/billing/billing-key.ts)
  *   GET|POST /api/billing-key-return …KICC 콜백          → 302 /app/plan.html?key=ok|fail&reason=…   🔴 KICC 는 **POST form** 으로 돌아온다(2026-09-15 실측) — 쿼리만 읽으면 못 받는다(lib/billing/callback.ts)
  *   POST /api/billing-key-remove                         → { ok, removed }
  *   GET  /api/invoices?year=                             → { ok, rows:[{ id, kind, period, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedKrw? }] }
@@ -21,7 +21,7 @@ import { utcDate } from "../../lib/db-util";
 import { subscriptionView, quotePlan, changePlan, cancelAtPeriodEnd, isPaidPlan, prorateQuote, type Cycle } from "../../lib/subscription";
 import { startBillingKey, approveBillingKey, removeBillingKeyOf } from "../../lib/billing/billing-key";
 import { requirePaidTerms } from "../../lib/billing/consents";
-import { resolvePayRoute, keyinOption } from "../../lib/pay-route";
+import { keyinOption } from "../../lib/pay-route";
 import { readKiccCallback, callbackAudit } from "../../lib/billing/callback";
 import { parseBkOrder } from "../../lib/billing/billing-key";
 import { writeAudit } from "../../lib/audit";
@@ -103,7 +103,8 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, periodEnd: r.periodEnd, cancelAtPeriodEnd: on });
     }
     if (path.endsWith("/billing-key-start")) {
-      const r = await startBillingKey(tid, { userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL, route: await resolvePayRoute(b), probe: b.probe === true });
+      // 빌키 라인은 lib 가 정한다(keyin MID 있으면 keyin 고정 · §1.6 2026-09-15) — 고객 선택·토글(resolvePayRoute)은 단건 결제용이라 여기선 안 쓴다.
+      const r = await startBillingKey(tid, { userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL, probe: b.probe === true });
       if (!r.ok) return json({ ok: false, step: r.step, error: r.error }, 200);
       return json({ ok: true, url: r.url, form: r.form, orderNo: r.orderNo });
     }
