@@ -12,10 +12,15 @@ import { q } from "./accounts";
 import { callGeminiJson } from "./ai";
 import { CHAIN_HIGH } from "./ai-models";
 import { generateImage, type ImageAspect } from "./ai-image";
+import { searchStock, stockConfigured, stockTroubleLine, type StockCandidate } from "./stock";   // [R8 §10] 사진 조달 — 편당 원가의 85%가 사진이다
+import { attachStockPhoto } from "./stock/attach";
+import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate } from "./stock/plan";
+import { listPhotos } from "./piece-photos";                     // 내가 올린 사진(옛 B-1) — 조달 순서 ①
+import { aiSourceKey } from "./photo-source";
 import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, type RenderImage } from "./blocks";
 import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
-import { ensureDisclosureFirst, disclosureTextFor } from "./disclosure";
+import { ensureDisclosureFirst, disclosureTextFor, compensationOfMeta } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
 import { seasonLine } from "./kr-calendar";
 import { toTopic, type Topic } from "./topics";
@@ -313,27 +318,83 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       affiliateMeta = { provider: "coupang", url, subId, productName: prod.productName };
     }
 
-    // 이미지
+    /* ════ 사진 — 🔴 조달 순서 ①내 사진 → ②스톡 → ③AI (DESIGN §5C.5 · 계약 P1R8 §10.3) ════
+       왜 바꿨나 = **돈**. 라이브 `ai_usage` 실측으로 글 1편 원가 ₩458 중 **사진이 ₩389(85%)** 다.
+       사장님: «사진을 스톡으로 가져오고 1장(많아야 2장)만 메인만 AI 로». 네이버 한 편 기준 **₩458 → ₩134(-71%)**.
+       🔴 **사진 «수»는 깎지 않는다**(§10.3) — 바뀌는 것은 «어디서 가져오나»뿐이고, 못 채우면 AI 가 메운다. */
     await setStage(pieceId, "images");
     const images: RenderImage[] = [];
     const imageBlocks = draft.blocks.filter((b) => b.type === "image");
     let okImages = 0;
-    await q(sql`DELETE FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'image'`);
+    const mix = emptyMix();
+
+    /* 🔴 **내가 올린 사진은 지우지 않는다.** 옛 판은 `kind='image'` 를 전부 지웠다 —
+       그러면 «다시 만들기»가 고객이 올린 사진을 통째로 날린다(옛 B-1 이 만든 사진 업로드와 겹치는 자리였다).
+       AI·스톡은 지운다(둘 다 다시 가져오면 되고, 옛 블록에 묶인 채 남으면 순서가 어긋난다).
+       옛 행에는 `meta.source` 가 없다 — 그때는 AI 뿐이었으므로 `COALESCE(...,'ai')` 로 AI 취급한다(지어낸 값이 아니다). */
+    await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${pieceId} AND kind = 'image'
+      AND COALESCE(meta->'source'->>'kind', 'ai') <> 'customer'`);
+    const mine = await listPhotos(tid, pieceId);          // 남은 것 = 내 사진뿐(올린 순서)
+    let mineAt = 0;
+
+    const heroIdx = heroIndexOf(imageBlocks.map((b, k) => b.imageIndex ?? k));
+    /* 스톡은 **글마다 한 번**만 찾는다(블록마다 찾으면 Pixabay 100req/60초를 금방 먹는다 · `lib/stock/plan.ts` 헤더).
+       대표 1장은 AI 라 그만큼 빼고, 내 사진이 있으면 그만큼 더 뺀다. */
+    const paidPiece = compensationOfMeta(meta).need;
+    const wantStock = Math.max(0, imageBlocks.length - (heroIdx >= 0 ? 1 : 0) - mine.length);
+    let pool: StockCandidate[] = [];
+    /* 🔴 인포그래픽(카드뉴스)은 스톡으로 못 바꾼다 — 글자가 얹힌 그림이라 사진이 대신할 수 없다(§2.5 는 이 절감의 바깥). */
+    if (wantStock > 0 && c.images.style !== "infographic" && stockConfigured()) {
+      const found = await searchStock({ query: stockQueryOf(topic.title), count: wantStock, paid: paidPiece });
+      pool = found.picks;
+      if (!pool.length) console.info(`[content-gen] piece ${pieceId} 스톡 0건 — ${stockTroubleLine(found.tried) ?? "사유 없음"}`);
+    }
+    const usedStock = new Set<string>();
+
     for (const b of imageBlocks) {
       const i = b.imageIndex ?? images.length;
       /* [§5C 수리] 그림은 **prompt** 로 만든다(묘사문은 여기서만 쓴다). caption 은 사람이 읽는 한 줄이고 대부분 없다.
          alt 는 접근성용 — prompt 에서 짧게 파생(화면에 안 보이고 러너는 alt 를 타이핑하지 않는다 · naver-blog.mjs 확인). */
       const scene = b.prompt || b.caption || topic.title;
-      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
       const alt = String(scene).replace(/\s+/g, " ").trim().slice(0, 60);
+
+      /* ① 내가 올린 사진 — 🔴 제일 먼저다. 네이버에서 제일 강하고(업계 통설 · 체크리스트 13번) **AI 값이 0원**이다.
+         대표 자리는 건너뛴다(대표는 그 글에만 있는 그림이어야 한다). 행은 이미 있으니 자리(sort)만 맞춰 준다. */
+      if (i !== heroIdx && mineAt < mine.length) {
+        const mp = mine[mineAt++];
+        await q(sql`UPDATE piece_assets SET sort = ${i} WHERE tenant_id = ${tid} AND id = ${mp.id}`);
+        images[i] = { url: mp.url, caption: b.caption ?? mp.caption ?? undefined, alt };
+        okImages++; mix.customer++;
+        continue;
+      }
+
+      /* ② 스톡 — 라이선스가 명시된 정식 API 통로로만(§10.2 «긁어 오기»는 금지). AI 값 0원. */
+      if (i !== heroIdx && pool.length) {
+        const cand = takeCandidate(pool, usedStock);
+        if (cand) {
+          const st = await attachStockPhoto({
+            tenantId: tid, pieceId, userId: null, candidate: cand,
+            caption: b.caption ?? null, alt, sort: i, paid: paidPiece,
+          });
+          if (st.ok) { images[i] = { url: st.url, caption: b.caption, alt }; okImages++; mix.stock++; continue; }
+          /* 🔴 스톡이 실패하면 **조용히 비우지 않고** 아래 AI 로 내려간다 — 사진 수를 깎지 않는다(§10.3). */
+          console.warn(`[content-gen] piece ${pieceId} 스톡 ${i} 실패(${st.step}) — AI 로 메운다`);
+        }
+      }
+
+      /* ③ AI — 대표 1장, 그리고 위에서 못 채운 자리. 🔴 «상한»이 아니라 «맨 뒤»다(`lib/stock/plan.ts` 헤더). */
+      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
       const r = await generateImage({ prompt, aspect: c.images.aspect as ImageAspect, tenantId: tid, ref: `piece:${pieceId}:img${i + 1}`, keyPrefix: `autocreate/${tid}/${pieceId}` });
       if (r.ok) {
-        okImages++;
+        okImages++; mix.ai++;
         images[i] = { url: r.url, caption: b.caption, alt };
-        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${r.key}, ${b.caption ?? null}, ${jsonb({ url: r.url, model: r.model, mime: r.mime, alt, prompt: String(scene).slice(0, 300) })}, ${i})`);
+        /* 🔴 AI 사진에도 `meta.source` 를 적는다 — 세 길이 **같은 칸**에 적혀야 되짚기가 한 길이 된다(`lib/photo-source.ts` 헤더).
+           그리고 위의 DELETE 가 «AI 인가»를 이 칸으로 판정한다 — 안 적으면 옛 행 취급으로만 지워진다. */
+        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${r.key}, ${b.caption ?? null}, ${jsonb({ url: r.url, model: r.model, mime: r.mime, alt, prompt: String(scene).slice(0, 300), source: { kind: "ai", key: aiSourceKey(r.model, `piece:${pieceId}:img${i + 1}`), addedAt: new Date().toISOString(), by: null, mime: r.mime } })}, ${i})`);
       } else {
         console.warn(`[content-gen] piece ${pieceId} 이미지 ${i} 실패: ${r.reason}`);
         images[i] = { url: "", caption: b.caption, alt };
+        mix.failed++;
       }
     }
     if (imageBlocks.length && okImages === 0) throw new Error("이미지를 한 장도 만들지 못했어요.");
@@ -345,6 +406,9 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const sPrint = structurePrint(draft.blocks);
     const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: (affiliate || meta.sponsored === true || meta.gift === true) ? disclosureTextFor({ affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true, provider: aff?.provider ?? null }) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
       structurePrint: sPrint, structureHash: structureHash(sPrint),
+      /* [R8 §10 · §5F] 🔴 이 글의 사진이 **어디서 왔나**(장수만). 되먹임 원장이 이 칸을 읽는다(옛 B-1 과 칸 이름 합의 2026-09-15).
+         🔴 **실제로 붙은 것만 센다** — «AI 1장일 것이다»로 채우면 그게 대용물이고 원장 전체가 거짓이 된다(AC-57). */
+      photoMix: mix,
       /* [R8 §2.1] 🔴 주제군을 **적어 둔다**. 검수·재검사가 다시 계산하면 재료가 달라 값이 갈린다 —
          여기서는 `intent` 를 알지만(소재에서 온다) 검수 시점엔 없어서 `intent:null` 로 계산되고 있었다.
          분량 폭이 주제군에 달렸으니, 갈리면 **잰 값은 같은데 기준이 다른** 상태가 된다. */
