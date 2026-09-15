@@ -52,10 +52,13 @@ const FOUR = [
     } },
   { n: "3b", name: "`ai-key`(키 로테이션)",
     check: () => {
+      /* 🔴 [2026-09-16 · C] 옛 판은 `file || rotate` 였다 — **파일만 있어도 닫힘**이라 화면에 «파일 true · 로테이션 false» 를
+         찍으면서 «닫힘»이라 말했다(판정과 설명이 어긋난 자리 · AC-80). 게다가 `rotate` 정규식이 실제 이름을 몰랐다 —
+         고르는 자리는 `leaseAiKey()` 다(AC-75). ⇒ **그 자리를 실제로 부르나**로 잰다(고르기 + 결과 되먹임 둘 다). */
       const file = existsSync("lib/ai-key.ts");
-      const rotate = inFile("lib/ai.ts", /rotate|keyPool|다음 키/i);
-      return file || rotate ? ["닫힘", `파일 ${file} · 로테이션 ${rotate}`]
-        : ["열림", "키를 여러 개 돌려 쓰는 길 0 — 지금은 키가 1개라 안 아프지만 설계 §3.3 이 요구한다(B-1 발주됨)"];
+      const rotate = inFile("lib/ai.ts", /leaseAiKey\(/) && inFile("lib/ai.ts", /reportAiKeyOutcome\(/);
+      return file && rotate ? ["닫힘", "lib/ai-key.ts + lib/ai.ts:291 이 leaseAiKey() 로 고르고 reportAiKeyOutcome() 으로 되먹인다"]
+        : [file ? "🟠 일부" : "열림", `파일 ${file} · 고르는 자리를 부르나 ${rotate} — 파일만 있고 안 부르면 닫힌 게 아니다(AC-69)`];
     } },
   { n: 4, name: "고지 게이트 사유가 홈에 뜨나",
     check: () => {
@@ -97,10 +100,22 @@ const FOUR = [
   { n: 10, name: "팩트체크 «수치 주장 표시»(글)",
     check: () => {
       /* 🔴 영상엔 `factcheckRoundTrip` 이 있다(`lib/video/script.ts`) — **그건 이 행이 아니다**(이 행은 §16 글 축이다). */
-      const textMark = inFile("lib/ai-tell-gate.ts", /numeric_claim|수치 주장/) || inFile("lib/content-gen.ts", /numericClaims/);
-      const videoOnly = inFile("lib/video/gen.ts", /factcheckRoundTrip/);
-      return textMark ? ["닫힘", "글 축에 수치 주장 표시가 있다"]
-        : ["열림", `글 축엔 «쓰지 마라» 프롬프트와 superlative 근거 요구만 있고 **표시(사람이 확인할 수 있게)는 0** · 영상 팩트체크(${videoOnly})는 다른 행이다`];
+      /* 🔴 [2026-09-16 · C] **옛 이름으로 재고 있었다**(AC-75). 이 줄은 `lib/content-gen.ts` 에서 `numericClaims`(소문자 n)를
+         찾았는데 실제 이름은 **`findNumericClaims`**(대문자 N)라 안 걸렸고, `ai-tell-gate.ts` 의 `numeric_claim` 은 0건이었다.
+         사슬은 네 마디로 다 이어져 있다 — C 가 처음부터 끝까지 따라가 확인했다:
+           ①순수 lib/fact-claims.ts:81 findNumericClaims
+           ②생성 lib/content-gen.ts:455 가 부르고 :471 이 meta.numberClaims 로 적는다
+           ③서버 netlify/functions/pieces.ts:142 가 summary·items·line 으로 내려준다
+           ④화면 public/app/piece.html:82 renderClaims() · :233 에서 부른다
+         🔴 잣대를 **«화면이 그리나»**로 올린다(메인 지시) — **빌드 산출물**(piece.html)을 본다.
+            _tpl.txt 만 보면 빌드가 끊겨도 초록이 뜬다. */
+      const gen = inFile("lib/content-gen.ts", /findNumericClaims\(/);
+      const srv = inFile("netlify/functions/pieces.ts", /numberClaims/);
+      const drawDef = inFile("public/app/piece.html", /function renderClaims/);
+      const drawCall = inFile("public/app/piece.html", /renderClaims\(\)\s*;/);
+      if (gen && srv && drawDef && drawCall) return ["닫힘", "생성 content-gen:455 → 서버 pieces.ts:142 → **화면 piece.html renderClaims() 가 그린다**(정의+호출 둘 다)"];
+      if (gen && srv && drawDef) return ["🟠 일부", "화면에 그리는 함수는 있는데 **부르는 자리가 없다**(AC-69)"];
+      return ["열림", `생성 ${gen} · 서버 ${srv} · 화면정의 ${drawDef} · 화면호출 ${drawCall}`];
     } },
   { n: 11, name: "러너 PC 세션 파일 암호화",
     check: () => {
@@ -109,7 +124,14 @@ const FOUR = [
          🔴 «있나»가 아니라 «**제품이 부르나**»까지 본다 — 파일만 있고 안 부르면 이 칸은 안 닫힌다(AC-69). */
       const has = anyFile(["runner/lib/profile-seal.mjs", "runner/lib/browser.mjs", "runner/lib/profile.mjs", "runner/index.mjs"], /createCipheriv|aes-256|encrypt/i);
       const used = anyFile(["runner/core.mjs", "runner/ac-runner.mjs"], /sealProfile|unsealProfile|profile-seal/);
-      if (has.length && used.length) return ["닫힘", `${has.join(",")} · 부르는 곳 ${used.join(",")}`];
+      /* 🔴 [2026-09-16 · C 재검] **서버 마디를 같이 본다.** 러너가 아무리 불러도 `account.profileSealKey` 가 안 내려오면
+         러너의 그 if 는 영영 거짓이고 봉인은 한 번도 안 돈다. C 가 사슬 여섯 마디를 직접 따라갔다:
+           러너 probeFleet(core.mjs:77) → 하트비트 caps(ac-runner.mjs:65) → runner_devices.caps 적재(runner-jobs.ts:489)
+           → claim 이 되읽음(runner-jobs.ts:706 deviceCaps) → sealWantedFor → ensureProfileKey → 응답 profileSealKey
+         이 줄이 없으면 **서버가 열쇠를 끊어도 하니스는 계속 초록**이다. */
+      const srvIssues = inFile("lib/runner-jobs.ts", /ensureProfileKey\(/) && inFile("lib/profile-seal.ts", /sealWantedFor/);
+      if (has.length && used.length && srvIssues) return ["닫힘", `${has.join(",")} · 러너가 부른다 · **서버가 열쇠를 내린다**(runner-jobs ensureProfileKey)`];
+      if (has.length && used.length) return ["🟠 일부", "러너는 부르는데 **서버가 열쇠를 안 내린다** — profileSealKey 가 늘 비면 봉인은 영영 안 돈다"];
       if (has.length) return ["열림", `암호화는 있는데 **부르는 곳이 0**이다(${has.join(",")}) — 만들어 놓고 아무도 안 쓴다`];
       return ["열림", "runner 자체 코드에 암호화 0(node_modules 매치는 남의 코드다) — 고객 PC 에 세션이 평문"];
     } },
@@ -244,19 +266,41 @@ const THREE_REST = [
        여섯 항목을 **각각 그 기능의 실물**로 재고, 내역을 칸 수에 그대로 실어 보낸다(일부로 뭉치면 닫힘·열림이 둘 다 과소평가된다). */
     const SC = ["public/js/ui.js", "public/app/home.html", "public/app/create.html", "public/app/settings.html", "public/app/revenue.html"].map(read).join("\n");
     const items = [
-      ["대비 4.5:1", /4\.5:1|contrastRatio/],
       ["당겨서 새로고침", /당겨서 새로고침|pullToRefresh/],
       ["햅틱", /햅틱|vibrate\(/],
       ["계좌연결 패턴", /계좌 연결/],
       ["소재 스와이프", /swipe|스와이프/],
-      ["기기 시간대", /deviceTz|resolvedOptions\(\)\.timeZone/],
     ];
-    const got = items.filter(([, re]) => re.test(SC)).map(([n]) => n);
-    const miss = items.filter(([, re]) => !re.test(SC)).map(([n]) => n);
+    /* 🔴 [2026-09-16 · C] **둘은 낱말로 재면 안 되는 항목이라 여기서 뺐다** — 둘 다 «대용물»이었다(AC-70):
+         · **대비 4.5:1** — 옛 판은 소스에서 `/4\.5:1|contrastRatio/` 를 찾았다. 주석에 «4.5:1»이라고 적어 두기만 해도 통과한다.
+           **색이 실제로 그런지는 한 번도 안 쟀다.** 진짜로 재던 것은 scratchpad 의 shot.mjs 였는데 **저장소 밖이라 지금 없다**
+           (`public/css/ac.css:9` 가 그렇게 적어 뒀다) — 그래서 «21건 미달»도 «그 뒤 전부 통과»도 다시 재 볼 수 없었다.
+           ⇒ `scripts/verify-contrast.mjs` 가 ac.css 토큰을 읽어 WCAG 로 **직접 계산**한다(짝 32개 · 지금 미달 0).
+         · **기기 시간대** — 옛 판은 `/deviceTz|resolvedOptions\(\)\.timeZone/` 를 찾아 «없다 ⇒ 미개발»로 셌다.
+           🔴 **우리 규약은 정반대다**: 화면은 Asia/Seoul 을 고정하므로 그 낱말이 **있으면 오히려 냄새**다.
+           그리고 설계(`docs/DESIGN.md:1134`)는 이걸 기능이 아니라 «**검증 항목(C)**»으로 적어 뒀다 — 만들 게 아니라 **돌려 볼 것**이다.
+           ⇒ `scripts/verify-kst-surface.mjs` 가 프로세스를 UTC·America/New_York·Pacific/Kiritimati 로 **진짜 띄워** 같은 글자가 나오는지 잰다.
+       ⇒ 이 묶음은 **4칸**만 낱말로 세고, 나머지 2칸은 그 하니스 **파일이 있나**로 센다(있으면 머지마다 돈다 · 없으면 열림). */
+    const realHarness = [
+      ["대비 4.5:1(실측)", "scripts/verify-contrast.mjs"],
+      ["기기 시간대(실행)", "scripts/verify-kst-surface.mjs"],
+    ];
+    const got = [...items.filter(([, re]) => re.test(SC)).map(([n]) => n), ...realHarness.filter(([, p]) => existsSync(p)).map(([n]) => n)];
+    const miss = [...items.filter(([, re]) => !re.test(SC)).map(([n]) => n), ...realHarness.filter(([, p]) => !existsSync(p)).map(([n]) => n)];
     return [got.length === 6 ? "닫힘" : got.length ? "🟠 일부" : "열림",
       `있는 것 ${got.length}/6 [${got.join(",")}] · 없는 것 [${miss.join(",")}]`, [got.length, 0, miss.length]];
   }],
-  ["E1 AI 원가 provider 분해", () => [yes(inFile("netlify/functions/ops-ai.ts", /byProvider|provider 분해/)), "0건"]],
+  ["E1 AI 원가 provider 분해", () => {
+    /* 🔴 [2026-09-16 · C] 옛 판은 `ops-ai.ts` 를 봤는데 실물은 **`ops-dashboard.ts:148`** 에 있다(파일을 잘못 지목 · AC-75).
+       그런데 **운영 화면이 그 값을 한 번도 안 읽는다** — CLAUDE §4.8 «서버만 있고 화면이 없으면 닫힌 게 아니다». ⇒ 일부.
+       🔴 이건 «가짜 열림»을 고치다가 **«가짜 닫힘»으로 넘어가지 않게** 세운 자리다(메인이 물은 반대 방향). */
+    const srv = inFile("netlify/functions/ops-dashboard.ts", /byProvider/);
+    const ui = ["public/ops/index.html", "public/ops/ai.html"].filter((p) => inFile(p, /byProvider/)).length > 0;
+    return [srv && ui ? "닫힘" : srv ? "🟠 일부" : "열림",
+      srv && ui ? "ops-dashboard.ts:148 + 운영 화면이 그린다"
+        : srv ? "서버는 낸다(ops-dashboard.ts:148 · 호출 수 기준) · 🔴 **운영 화면이 안 읽는다** — 만들어 놓고 아무도 안 본다(AC-69)"
+          : "0건"];
+  }],
   ["E2 추천인 이벤트", () => {
     const active = inFile("lib/referral.ts", /활성인 추천 이벤트/);
     const ops = inFile("lib/referral.ts", /ops-promotions|kind:s*"referral"/);
@@ -266,7 +310,21 @@ const THREE_REST = [
   ["E4 AM↔AC 코인 이전", () => [yes(inFile("netlify/functions/coin-transfer.ts", /amDebit/)), "coin-transfer → am-bridge amDebit (칸12 에서 이리로 옮김)"]],
   ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/am-bridge.ts"], /syncPr|동기화 PR/).length), "0건"]],
   ["E6 운영자 화면 조정", () => [yes(existsSync("netlify/functions/ops-center.ts")), "ops-center"]],
-  ["F 팀 축 4(시트·초대·accept·팀 승인)", () => [yes(SERVER_TEXT.includes("team-invite") || SERVER_TEXT.includes("team_members")), "lib·netlify·public 전수 0건"]],
+  ["F 팀 축 4(시트·초대·accept·팀 승인)", () => {
+    /* 🔴 [2026-09-16 · C] 옛 판은 `SERVER_TEXT`(= referral.ts·ops-center.ts·cs.ts 셋)에서 팀을 찾았다 — **팀과 아무 상관없는 파일 셋**이라
+       lib/team.ts·netlify/functions/team.ts·public/app/team.html 이 다 생긴 뒤에도 «전수 0건»을 찍었다(**가짜 열림 4칸**).
+       ⇒ 파일을 지목한다. 그리고 네 칸을 **각각** 잰다 — 뭉치면 «일부»가 부풀고 닫힘·열림이 둘 다 과소평가된다. */
+    const sheet = existsSync("public/app/team.html") && inFile("public/app/team.html", /\/api\/team/);
+    const invite = inFile("netlify/functions/team.ts", /team-invite/) && inFile("lib/team.ts", /invite/i);
+    const accept = existsSync("public/app/team-accept.html") && inFile("netlify/functions/team.ts", /team-accept/);
+    /* 팀 승인은 «크론이 실제로 건너뛰나»까지 본다 — 정의만 있으면 안 닫힌 것이다(AC-69). 두 겹을 다 지목한다. */
+    const approval = inFile("lib/content-approve.ts", /step:\s*"team_approval"/)
+      && inFile("lib/cron/review-deadline.ts", /needsOwnerApproval\(/)
+      && inFile("lib/cron/review-deadline.ts", /"team_approval"/);
+    const n = [sheet, invite, accept, approval].filter(Boolean).length;
+    return [n === 4 ? "닫힘" : n ? "🟠 일부" : "열림",
+      `시트 ${sheet} · 초대 ${invite} · accept ${accept} · 팀승인 ${approval}(크론 두 겹) = ${n}/4`, [n, 0, 4 - n]];
+  }],
   ["H1 카드뉴스 kind", () => [yes(inFile("lib/slots.ts", /cardnews/)), "verify-cardnews PASS 20"]],
   ["H3 상태 16종", () => [yes(inFile("public/js/ui.js", /UI\.SLOT_STATUS/)), "UI.SLOT_STATUS 17종"]],
   /* 🔴 [메인 2026-09-16] **안 만들기로 결정한 항목**이다(DESIGN §8.1 · 사유 `docs/active/2026-09-15-runner-tray-decision.md`).
