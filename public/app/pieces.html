@@ -6,7 +6,7 @@
 <title>글 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=17">
+<link rel="stylesheet" href="/css/ac.css?v=18">
 </head>
 <body>
 <div class="shell">
@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=16"></script>
-<script src="/js/mock.js?v=17"></script>
+<script src="/js/ui.js?v=19"></script>
+<script src="/js/mock.js?v=19"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -34,7 +34,7 @@ function videoBar(p) { const m = p.meta || {}; const stage = m.stage || "script"
   const extra = (k) => k === "clips" && stage === "clips" && cs.cutsTotal ? ` <small class="muted" style="font-weight:500">${cs.cutsDone ?? 0}/${cs.cutsTotal}</small>` : k === "render" && stage === "render" ? (runnerOn === false ? ` <span class="pill warn" style="margin-left:4px">내 PC 프로그램을 켜 주세요</span>` : ` <small class="muted" style="font-weight:500">내 PC 프로그램이 굽는 중</small>`) : "";
   return `<div class="steps" style="padding:0 16px 12px 66px">${UI.VSTAGE.map(([k, l], n) => `<div class="st ${n < i || stage === "done" ? "done" : n === i ? "on" : ""}"><i>${n < i || stage === "done" ? "✓" : n + 1}</i>${l}${extra(k)}</div>`).join("")}</div>`; }
 function row(p) { const st = UI.PIECE_STATUS[p.status] || ["off", p.status]; const when = p.status === "published" ? UI.dateKST(p.publishedAt) : p.scheduledFor ? `${UI.dateKST(p.scheduledFor)} ${UI.timeKST(p.scheduledFor)}` : ""; const video = p.kind === "video";
-  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${video ? '<span class="pill ink" style="font-size:11px;padding:2px 7px">영상</span>' : ""}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
+  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${UI.kindPill(p.kind)}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
 function render() {
   const cnt = Object.fromEntries(Object.entries(TAB).map(([k, v]) => [k, all.filter((p) => v.includes(p.status)).length]));
   if (!tab) tab = cnt.generating ? "generating" : cnt.in_review ? "in_review" : cnt.scheduled ? "scheduled" : "in_review";

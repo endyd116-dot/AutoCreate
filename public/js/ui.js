@@ -257,6 +257,18 @@
     brunch: { label: "브런치", mark: "br" }, naver_clip_post: { label: "클립 게시물", mark: "C" },
   };
   UI.mark = (ch, cls = "") => { const c = UI.CH[ch] || { mark: "?" }; return `<span class="mk ${ch} ${cls}" aria-hidden="true">${c.mark}</span>`; };
+  /* [R8 §5.3 · B3] 계정 사진 — 있으면 사진, **없으면 채널 마크 그대로**.
+     🔴 기본 그림으로 채우지 않는다: 그러면 «사진이 있다»와 «아직 없다»가 같은 얼굴이 된다(서버도 그래서 null 로 둔다 · AC-9).
+     🔴 사진이 있어도 **어느 채널인지는 계속 보인다**(작은 배지) — 계정이 여럿이면 그게 먼저 필요한 정보다.
+     🔴 주소가 죽었으면 채널 마크로 되돌린다 — 깨진 그림이 뜨는 것보다 낫다. */
+  UI.accMark = (a, cls = "") => {
+    const ch = String(a?.channel || ""); const c = UI.CH[ch] || { mark: "?" };
+    /* 🔴 https 또는 **우리 서버의 같은 출처 경로**만 그린다 — http 는 브라우저가 막아 «넣었는데 안 보인다»가 되고(서버도 https 만 받는다),
+       바깥 스킴(data:·javascript: …)은 아예 그리지 않는다. */
+    const url = String(a?.avatar || "");
+    if (!/^https:\/\//i.test(url) && !/^\/[^/]/.test(url)) return UI.mark(ch, cls);
+    return `<span class="mk ph ${cls}" aria-hidden="true"><img src="${UI.esc(url)}" alt="" loading="lazy" onerror="this.closest('.mk').className='mk ${ch} ${cls}';this.closest('.mk').textContent='${UI.esc(c.mark)}'"><i class="mk ${ch}">${c.mark}</i></span>`;
+  };
   UI.chLabel = (ch) => (UI.CH[ch] || {}).label || ch;
 
   /* ── 숫자 카운트업(600ms · reduced-motion 이면 즉시) ── */
@@ -410,7 +422,12 @@
   UI.vword = (v, key) => { const L = v && v.variantLabels; if (L && L[key]) return L[key];
     const raw = key === "hook" ? v?.variant?.hookType : key === "palette" ? v?.variant?.palette : v?.variant?.voiceId;
     return (key === "hook" ? UI.HOOK[raw] : key === "palette" ? UI.PALETTE[raw] : null) || raw || ""; };
-  UI.VIDEO_COIN = { 15: 6, 30: 12, 60: 28 }; // 손보기 코인 재계산 미리보기(정본은 director-confirm 응답 coinCost · videoCoinItem 구간제)
+  /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts COIN_TABLE 에서 그대로 복사] 🔴 손으로 고치지 마라 — 하니스가 서버 표와 대조한다.
+     🔴 **글 1편 = 1코인**(AI 사진 1장 포함) · AI 사진 추가 1장 = +1 · **내 사진·스톡 사진은 0** · 카드뉴스 3(장수로 안 셈).
+     🔴 이 표는 **미리보기용**이다 — 실제로 빠지는 값은 언제나 서버가 준 것(`coinCost`·`director-estimate` 응답)이다.
+        운영센터가 단가를 바꿀 수 있게 됐으니(B ea980a3), 서버 값이 오는 자리에서는 **이 표를 쓰지 않는다**. */
+  UI.COIN = { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28 };
+  UI.VIDEO_COIN = { 15: UI.COIN.video_15, 30: UI.COIN.video_30, 60: UI.COIN.video_60 }; // 손보기 코인 재계산 미리보기(정본은 director-confirm 응답 coinCost · videoCoinItem 구간제)
   UI.vlabel = (v) => v ? `${UI.VFORMAT[v.format] || v.format} ${v.seconds}초` : "";
   UI.studioUrl = (ref) => ref ? `https://studio.youtube.com/video/${encodeURIComponent(ref)}/edit` : "https://studio.youtube.com/";
   /* [P1R2] RunnerErrorKind → 사람말(계약 §2) · 계정·발행함이 같이 쓰는 한 벌 */
@@ -426,7 +443,11 @@
     try { await navigator.clipboard.writeText(text); return true; } catch { /* 폴백 */ }
     try { const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:-1000px"; document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove(); return ok; } catch { return false; }
   };
-  UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스", steps: "단계" };   // [R8 §2.5] steps = 인스타 카드뉴스 단계형(서버 FormatKey 와 짝)
+  UI.FORMAT = { story: "경험담", info: "정보", listicle: "목록", compare: "비교", qna: "문답", guide: "가이드", cardnews: "카드뉴스", steps: "단계" };   /* [R8 · B-1] 인스타 format 이 5종이 됐다 — 서버 FormatKey 와 짝이라 빠지면 화면에 빈칸이 뜬다 */
+  /* [R8 · B-1] 자리·글의 종류는 이제 **셋**이다(post·shorts·cardnews). 화면이 «영상이냐 아니냐»로만 갈라 보면 카드뉴스가 글로 보인다.
+     🔴 «post» 는 배지를 안 단다 — 기본이라 이름표가 붙으면 오히려 시끄럽다. */
+  UI.KIND_PILL = { shorts: "영상", cardnews: "카드뉴스" };
+  UI.kindPill = (kind) => (UI.KIND_PILL[kind] ? `<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">${UI.KIND_PILL[kind]}</span>` : "");
   UI.EMOTION = { warm: "친근·따뜻", neutral: "담백·정리", witty: "재치", urgent: "급함·해결", calm: "차분" };
   /* [P1R3] 수익 소스 사람말(계약 v3.1 source enum 13종) · 신선도 배지 — 수익·매체·계정 화면 공용 한 벌 */
   UI.SRC = { adsense: "애드센스", youtube: "유튜브", coupang: "쿠팡 파트너스", aliexpress: "알리 어필리에이트", linkprice: "링크프라이스", adpost: "애드포스트", adfit: "카카오 애드핏", clip: "네이버 클립", meta: "메타", tiktok: "틱톡", x: "엑스", sponsor: "협찬·광고비", manual: "그 외" };

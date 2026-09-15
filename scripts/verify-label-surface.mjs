@@ -227,6 +227,18 @@ for (const n of NUMS) {
     `서버 ${want}${n.unit} ↔ 화면 ${n.screen}${n.unit}${want === n.screen ? "" : `  ⇒ 고칠 곳은 ${n.where}`}`);
 }
 
+/* ───────── ⑧-b 🔴 **코인 값**(서버 COIN_TABLE ↔ 화면 미리보기 표) ─────────
+   왜: 2026-09-15 사장님 승인으로 **글 1편이 7코인 → 1코인**이 됐다. 화면은 «1 + 사진 장수»로 세고 있어서 **7배를 불러 주고 있었다**.
+   돈은 낱말보다 더 티 나는 거짓말이다. 게다가 운영센터가 단가를 바꿀 수 있게 됐으니(B ea980a3) 화면에 박은 숫자는 그날로 썩는다.
+   🔴 미리보기 표는 **서버 표에서 복사**하고 여기서 견준다. 실제 차감은 언제나 서버 응답(`coinCost`)이다. */
+const coinTs = read("lib/coin-table.ts");
+const coinSrv = objectMap(coinTs, "COIN_TABLE: Record<CoinItem, number> =") || new Map();
+const coinSrvNum = new Map([...(coinTs.match(/COIN_TABLE: Record<CoinItem, number> = \{([\s\S]*?)\}/)?.[1] ?? "").matchAll(/([a-z_0-9]+)\s*:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+const coinUi = new Map([...(uiJs.match(/UI\.COIN = \{([^}]*)\}/)?.[1] ?? "").matchAll(/([a-z_0-9]+)\s*:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+const coinDiff = [...coinUi].filter(([k, v]) => coinSrvNum.get(k) !== v).map(([k, v]) => `${k}: 화면 ${v} ≠ 서버 ${coinSrvNum.get(k) ?? "없음"}`);
+rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.size > 0 && coinUi.size > 0 && coinDiff.length === 0,
+  coinDiff.join(" | ") || `${coinUi.size}종 · 글 ${coinSrvNum.get("blog")}코인`, coinDiff);
+
 /* ───────── ⑧ 광고 붙이는 «길»(서버 adsWayOf·adsRemovable ↔ 화면 표) ─────────
    왜: 채널마다 길이 다르고(우리가 직접 / 내 PC 가 / 아직 없음), **티스토리는 뗄 수 없다**(러너가 읽기만 한다).
    화면이 이 표를 잘못 들고 있으면 **눌러도 아무 일이 안 나는 단추**가 생긴다 — 없는 되돌리기를 약속하는 것이 가장 나쁘다.
