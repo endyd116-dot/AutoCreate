@@ -2,7 +2,7 @@
  * GET /api/ops-dashboard?month=YYYY-MM — 운영센터 대시보드(계약 §2.1 · DESIGN §11.4 «9월에 3,240,000원 벌었어요»). R1 `ops-center.ts` 의 대시보드를 **교체**.
  *   응답(계약 글자 그대로 · 전부 KST 월):
  *     { revenue:{ todayKrw, monthKrw, subscriptionKrw, coinKrw }, mrr, arr, signups:{ today, month }, trialToPaidPct, activeTenants,
- *       churn:{ month, pct }, coins:{ soldKrw, consumed }, aiCost:{ usd, krw?, fxMissing, calls, byPurpose:[{purpose,usd,calls}], excluded:{ internalUsd, syntheticUsd, orphanUsd, byoUsd, byoCalls } }, marginKrw?, published:{ byChannel:[{channel,n}] }, revenueCollectedKrw }
+ *       churn:{ month, pct }, coins:{ soldKrw, consumed }, aiCost:{ usd, krw?, fxMissing, calls, byPurpose:[{purpose,usd,calls}], byProvider:[{provider,calls,usd}], overPlan:{coins,pieces}, excluded:{ internalUsd, syntheticUsd, orphanUsd, byoUsd, byoCalls } }, marginKrw?, published:{ byChannel:[{channel,n}] }, revenueCollectedKrw }
  *   돈 규칙: 매출 = **공급가**(invoices.amount · 부가세 제외 · 환불분은 공급가로 환산해 뺀다). 부가세는 매출이 아니다(§12.0).
  *   🔴 «없음 ≠ 0»(AC-9): 환율이 없으면 aiCost.krw 를 싣지 않고 fxMissing:true · marginKrw 도 싣지 않는다. 전환율은 코호트가 없으면 null.
  *   R1 화면(public/ops/index.html)이 읽던 `month`·`tenants` 객체는 과도기 동안 같이 싣는다(계약 모양엔 없는 키 · A 가 R4 화면으로 바꾸면 뗀다). 집계한 달은 `period`.
@@ -114,6 +114,30 @@ export default async (req: Request): Promise<Response> => {
       FROM ai_usage a WHERE ${within(sql`a.created_at`, r)} AND ${aiCustomer} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`);
     const aiByModel = await q(sql`SELECT a.model, COALESCE(SUM(a.cost_usd), 0) AS usd, COUNT(*)::int AS calls
       FROM ai_usage a WHERE ${within(sql`a.created_at`, r)} AND ${aiCustomer} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`);
+    /* [R8 §4.5 운영 축] 🔴 **provider 분해는 «호출 수» 기준**(메인 지시) — 돈만 보면 «어디에 많이 기대고 있나»가 안 보인다.
+       한 곳이 흔들리면 그날 공장이 서는데, 그 «한 곳»이 어디인지는 **몇 번 부르나**로 드러난다.
+       🔴 지금은 제공사가 **하나뿐**이라 이 줄이 늘 한 줄이다 — 그게 사실이고, 사실대로 보여 준다(있는 척도 없는 척도 안 한다 · AC-9).
+       모델 이름 앞머리로 가른다(`lib/ai-models.ts` 밖에 모델 **이름**을 적지 않는다는 §4.9 와 어긋나지 않는다 — 여기서 쓰는 건 이름이 아니라 **갈래**다). */
+    const aiByProvider = await q(sql`SELECT
+        CASE WHEN a.model ILIKE 'gemini%' OR a.model ILIKE 'models/gemini%' THEN 'gemini'
+             WHEN a.model ILIKE 'gpt%' OR a.model ILIKE 'o1%' OR a.model ILIKE 'o3%' THEN 'openai'
+             WHEN a.model ILIKE 'claude%' THEN 'anthropic'
+             WHEN a.model = '' OR a.model IS NULL THEN '(모름)'
+             ELSE split_part(a.model, '-', 1) END AS provider,
+        COUNT(*)::int AS calls, COALESCE(SUM(a.cost_usd), 0) AS usd
+      FROM ai_usage a WHERE ${within(sql`a.created_at`, r)} AND ${aiCustomer} GROUP BY 1 ORDER BY 2 DESC LIMIT 8`);
+    /* [R8 §4.5] 🔴 **우리가 안은 몫** — 고객이 계획보다 AI 사진을 더 써서 **더 받지 않기로 한** 그 코인.
+       감사에만 있으면 아무도 안 본다(오늘 이 프로젝트를 열한 번 관통한 문장이다).
+       그리고 이 숫자는 «스톡이 비어서 AI 가 다 구웠다»는 **신호**다 — 재고를 채우라는 말이지 그냥 손실이 아니다.
+       🔴 `ai_usage` 와 **같은 거르개**를 태운다(내부 집 제외) — 안 그러면 오늘 고친 그 오염이 이 칸에서 되살아난다(AC-71).
+       🔴 «얼마»만이 아니라 **«몇 편이 그랬나»**도 준다 — 금액만 있으면 한 편이 크게 샌 건지 전부 조금씩인지 모른다. */
+    let overPlan = { coins: 0, pieces: 0 };
+    try {
+      const [op] = await q(sql`SELECT COALESCE(SUM((g.detail->>'absorbed')::numeric), 0) AS coins, COUNT(*)::int AS pieces
+        FROM audit_logs g WHERE g.action = 'piece_ai_over_plan' AND ${within(sql`g.created_at`, r)}
+          AND g.tenant_id IS NOT NULL AND EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = g.tenant_id AND NOT zt.is_internal)`);
+      overPlan = { coins: Math.round(n(op?.coins) * 100) / 100, pieces: n(op?.pieces) };
+    } catch (e) { console.warn("[ops-dashboard] 안은 몫 조회 실패 — 그 줄만 빠진다", String((e as Error)?.message ?? e).slice(0, 100)); }
     const usd = Math.round(n(ai?.usd) * 10000) / 10000;
     const fx = fxToKrw(usd, "USD", {});
     const round4 = (v: unknown) => Math.round(n(v) * 10000) / 10000;
@@ -121,6 +145,9 @@ export default async (req: Request): Promise<Response> => {
     aiCost.calls = n(ai?.calls);
     aiCost.byPurpose = aiBy.map((x) => ({ purpose: String(x.purpose ?? ""), usd: round4(x.usd), calls: n(x.calls) }));
     aiCost.byModel = aiByModel.map((x) => ({ model: String(x.model ?? ""), usd: round4(x.usd), calls: n(x.calls) }));
+    aiCost.byProvider = aiByProvider.map((x) => ({ provider: String(x.provider ?? ""), calls: n(x.calls), usd: round4(x.usd) }));
+    /* 🔴 우리가 안은 몫 — 0이어도 **키를 싣는다**(«없음»과 «0»은 다르다 · AC-9). 화면이 «아직 없어요»를 그릴 수 있어야 한다. */
+    aiCost.overPlan = overPlan;
     /* «왜 이 숫자가 작아 보이나»를 화면이 설명할 수 있게 — 뺀 몫을 따로 말한다(숨긴 게 아니라 가른 것이다). */
     aiCost.excluded = { internalUsd: round4(aiAll?.internal_usd), syntheticUsd: round4(aiAll?.synthetic_usd), orphanUsd: round4(aiAll?.orphan_usd),
       /* 🔴 [R8 §4.4] 고객이 **자기 키로** 쓴 몫 — 우리가 안 낸 돈이라 원가에서 빠진다(숨긴 게 아니라 가른 것이다). */
