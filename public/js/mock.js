@@ -71,6 +71,8 @@
   const keyinOn = qs.get("keyin") === "1", keyinMid = qs.get("keyinMid") !== "0";
   /* [P1R6] 손잡이 — ?supplier=0(회사 정보 없음 → 영수증 «준비 중») · ?share=0(이달 수익 0 → 공유 카드 없음) · ?managed=deny(플랜에 관리형 러너 없음 → 402 plan_feature) · ?export=running(내보내기 도는 중) · ?amOff=1(AM 다리 미설정) */
   const mailOff = qs.get("mail") === "0";
+  const runnerDl = qs.get("runnerDl") || "";       // [러너 배포] 내려받기 손잡이 — plan(403 step:"plan") · none(503 step:"no_release") · 기본 = 10분 링크
+  const otherPc = qs.get("otherPc") === "1";       // [러너 배포] 다른 PC 가 이 열쇠로 켜려 한 기기 1대(otherDeviceAt · 있을 때만 키가 온다)
   const autoOff = qs.get("autoOff") === "1";  // [실측] 자동 편성 꺼짐(규칙은 있음) — 홈·편성표 맨 위 한 줄      // [P1R6] 가입 인증 메일 실패 흉내(배너 · 다시 보내기)
   let resendAt = 0;                             // 60초 쿨다운(서버 audit 로 재는 것을 흉내)
   const supplierOff = qs.get("supplier") === "0", shareOff = qs.get("share") === "0", managedDeny = qs.get("managed") === "deny", exportRunning = qs.get("export") === "running", exportFail = qs.get("export") === "fail", amOff = qs.get("amOff") === "1";
@@ -179,7 +181,8 @@
     settings: { autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
     /* ── [P1R2] 러너 기기(계약 §2) · 발행함(§6) · 재로그인 잡(§7.2) · 알림함 ── */
-    devices: fresh ? [] : [{ id: 901, name: "집 PC", kind: "own", online: runnerOn, lastSeenAt: iso(now - 2 * 3600e3), version: "1.0.3", jobsWaiting: 2, caps: { ffmpeg: !noFfmpeg, ffmpegVersion: noFfmpeg ? undefined : "7.1" } }], // [P1R5] heartbeat caps(§2.4)
+    devices: fresh ? [] : [{ id: 901, name: "집 PC", kind: "own", online: runnerOn, bound: true, lastSeenAt: iso(now - 2 * 3600e3), version: "1.1.3", jobsWaiting: 2, caps: { ffmpeg: !noFfmpeg, ffmpegVersion: noFfmpeg ? undefined : "7.1" } },
+      ...(otherPc ? [{ id: 902, name: "사무실 PC", kind: "own", online: false, bound: true, lastSeenAt: iso(now - 3 * 86400e3), version: "1.1.2", jobsWaiting: 0, otherDeviceAt: iso(now - 40 * 60e3), otherDeviceCount: 3 }] : [])], // [러너 배포] bound = 처음 켠 PC 에 묶임 · otherDeviceAt 은 «있을 때만» // [P1R5] heartbeat caps(§2.4)
     posts: fresh ? [] : [
       { id: 701, pieceId: 504, channel: "tistory", accountHandle: "tips_b", title: "전기요금 아끼는 콘센트", externalUrl: "https://tips-b.tistory.com/12", publishedVia: "api", publishedAt: iso(now - 2 * 86400e3), status: "published", stats: { views: 1240, likes: 8, comments: 2, lastSyncAt: iso(now - 6 * 3600e3) }, alive: true },
       { id: 702, pieceId: 505, channel: "naver_blog", accountHandle: "cook_a", title: "에어프라이어 청소, 눌어붙은 기름 3분 컷", externalUrl: "https://blog.naver.com/cook_a/223456789", publishedVia: "runner", publishedAt: iso(now - 26 * 3600e3), status: "published", stats: { views: 318, likes: 21, lastSyncAt: iso(now - 3 * 3600e3) }, alive: true },
@@ -256,6 +259,7 @@
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
   const devRow = (d) => { const o = { id: d.id, name: d.name, kind: d.kind, status: d.online ? "online" : "offline", jobsWaiting: d.jobsWaiting || 0 }; if (d.caps) o.caps = d.caps; // [P1R5] caps.ffmpeg(§2.4)
+    if (d.bound) o.bound = true; if (d.otherDeviceAt) { o.otherDeviceAt = d.otherDeviceAt; o.otherDeviceCount = d.otherDeviceCount || 1; } // [러너 배포] 지문 값은 싣지 않는다 — «묶였나 · 다른 PC 가 있었나 · 몇 번» 만
     const seen = d.online ? iso(Date.now() - 21e3) : d.lastSeenAt; if (seen) o.lastSeenAt = seen; if (d.version) o.version = d.version; return o; };
   /* 재로그인 잡 — 4초 대기 → 10초 창 열림 → 완료(계정 active 승격) */
   const reloginJob = (accountId) => { const j = S.reloginJobs[accountId]; if (!j) return null; const age = Date.now() - j._t0;
@@ -279,7 +283,7 @@
     if (vJudge) { const q = S.pieces.find((x) => x.id === 509); if (q && q.gate && q.gate.judge.grade !== vJudge) { q.gate = { ok: vJudge !== "P0", rewritten: vJudge === "P1", checks: VIDEO_GATE_CHECKS, judge: judgeReport(vJudge) }; q.gateOk = vJudge !== "P0"; } }
     const KEEP = ["no_topic", "coin_short", "awaiting_runner", "awaiting_manual", "skipped"]; // 사람이 봐야 하는 상태는 piece 가 덮지 않는다
     for (const s of S.slots) { if (KEEP.includes(s.status)) continue; const p = S.pieces.find((x) => x.id === s.pieceId); if (p && (p.status === "in_review" || p.status === "scheduled" || p.status === "published")) s.status = p.status; }
-    for (const d of S.devices) if (d._t0 && Date.now() - d._t0 > 8000) { d.online = true; d.version = d.version || "1.0.3"; delete d._t0; } // 등록 후 첫 하트비트
+    for (const d of S.devices) if (d._t0 && Date.now() - d._t0 > 8000) { d.online = true; d.bound = true; d.version = d.version || "1.1.3"; delete d._t0; } // 등록 후 첫 하트비트(= 처음 켠 PC 에 묶인다)
   };
   /* [v2.9] 소재 뽑기 배경 작업 흉내 — 2초 뒤 완료 · startedAt 10분 초과면 고아로 보고 running 해제(계약 §6D) */
   const isRefreshing = () => { const t = S.topicsRefresh; return !!(t && t.startedAt && !t.finishedAt && Date.now() - new Date(t.startedAt).getTime() < 600000); };
@@ -585,7 +589,18 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (S.devices.length >= 3) return err("limit", "이 요금제에서는 기기를 3대까지 연결할 수 있어요.");
       const token = "acr_" + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
       const d = { id: S.nextId++, name, kind: b.kind || "own", online: false, jobsWaiting: 0, _t0: Date.now() }; S.devices.push(d);
-      return { ok: true, device: { id: d.id, name: d.name, token }, install: { url: "https://autocreate-endyd.netlify.app/runner/ac-runner.zip", cmd: `npx ac-runner --token ${token}` } }; },
+      return { ok: true, device: { id: d.id, name: d.name, token }, install: { cmd: "run.bat (Windows) · ./run.sh (Mac·Linux)", url: location.origin + "/api/runner-download", token, steps: ["내려받은 zip 을 압축 풀기", "run.bat 두 번 클릭(Mac·Linux 는 ./run.sh)", "토큰 붙여넣기"] } }; }, // [러너 배포] 서버 install 모양 그대로(lib/runner-jobs registerDevice)
+    /* [러너 배포] 내려받기 — 로그인·쓰기 가능·플랜에 러너가 있어야 10분짜리 링크. 모의 링크는 빈 zip blob(화면을 떠나지 않고 «받아진다») */
+    "runner-download": () => { const nw = notWritable(); if (nw) return nw;
+      if (runnerDl === "plan") return { ok: false, status: 403, step: "plan", planKey: "starter", error: "지금 요금제에는 «내 PC에서 켜기»가 없어요. 요금제를 바꾸면 바로 받을 수 있어요." };
+      if (runnerDl === "none") return { ok: false, status: 503, step: "no_release", error: "프로그램을 준비 중이에요. 잠시 뒤 다시 눌러 주세요." };
+      const url = URL.createObjectURL(new Blob([new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])], { type: "application/zip" }));
+      return { ok: true, version: "1.1.3", bytes: 13107200, sha256: "3f1c0a9e5b7d2c4e6a8f0b1d3e5c7a9b2d4f6e8a0c1b3d5f7a9c2e4b6d8f0a1c", filename: "autocreate-runner-v1.1.3.zip", url, expiresInSec: 600 }; },
+    /* [러너 배포] 열쇠 재발급 — 옛 열쇠 즉사 · 지문(묶기) 초기화 · 평문은 이 응답 1회뿐 */
+    "runner-rotate": (b) => { const nw = notWritable(); if (nw) return nw; const d = S.devices.find((x) => x.id === Number(b.id)); if (!d) return { ok: false, status: 404, step: "not_found", error: "기기를 찾을 수 없어요." };
+      const token = "acr_" + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+      d.online = false; delete d.bound; delete d.otherDeviceAt; delete d.otherDeviceCount; delete d._t0;
+      return { ok: true, device: { id: d.id, name: d.name, token }, install: { steps: ["받은 폴더에서 run.bat 을 다시 실행", "새 토큰 붙여넣기"] } }; },
     "runner-remove": (b) => { S.devices = S.devices.filter((d) => d.id !== Number(b.id)); return { ok: true }; },
     /* ── [P1R2] §7.2 계정 다시 로그인(POST=요청 · GET=폴링) ── */
     "accounts-relogin": (b, q) => { tick(); const id = Number(b.id || q.get("id")); const a = S.accounts.find((x) => x.id === id);
@@ -658,7 +673,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
