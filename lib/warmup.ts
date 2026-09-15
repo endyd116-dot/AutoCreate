@@ -141,8 +141,10 @@ export function warmupRisk(inp: WarmupInput, now: Date = new Date()): string | n
   const week = Number(inp.postsThisWeek);
   const full = Number.isFinite(week) && st.weeklyQuota !== null && week >= st.weeklyQuota;
   if (full) {
+    /* 🔴 [CLAUDE §3 · 사장님 2026-09-15] «정지될 수 있어요»로 끝내지 않는다 — 막지도 않으면서 불안만 주는 말이 **게이트보다 나쁘다**.
+       ①사실 한 줄 ②왜 그렇게 권하는지 ③고르는 것은 고객, 순서로 말한다. 위험은 **재료**로 주고 판단은 고객이 한다. */
     return `만든 지 얼마 안 된 계정이라 이번 주 권장량(${st.weeklyQuota}건)을 이미 채웠어요. `
-      + "지금 더 올리면 «새 계정이 갑자기 많이 쓴다»로 보여 정지될 수 있어요 — 그래도 올리시겠어요?";
+      + "새 계정은 천천히 늘릴수록 오래 잘 돌아서 이렇게 권해 드려요.";
   }
   return `만든 지 얼마 안 된 계정이라 천천히 올리는 중이에요(${st.label}). 하루 1건까지 권해요.`;
 }

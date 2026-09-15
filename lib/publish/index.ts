@@ -19,7 +19,7 @@ import { db } from "../../db/index";
 import { jsonb, utcDate } from "../db-util";
 import { writeAudit } from "../audit";
 import { normalizeBlocks, type Block } from "../blocks";
-import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
+import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishImage, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
 import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
 import { finalizePublish } from "./finalize";
@@ -85,10 +85,13 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
     blocks: normalizeBlocks(p.blocks) as Block[],
     images: assets.map((a) => {
       const m = (a.meta && typeof a.meta === "object" ? a.meta : {}) as Record<string, unknown>;
-      const img: { url: string; caption?: string; alt?: string; sort?: number } = { url: String(m.url ?? ""), sort: n(a.sort) };
+      const img: PublishImage = { url: String(m.url ?? ""), sort: n(a.sort) };
       if (a.caption) img.caption = String(a.caption);
       // alt 는 `meta.alt`(B-1 84a2372 가 남긴다). 아직 없는 옛 행이면 캡션으로 내려앉는다 — 지금까지와 같은 동작.
       if (m.alt) img.alt = String(m.alt).slice(0, 200);
+      /* [2026-09-16] 🔴 출처를 여기서 안 실으면 크레딧을 쓸 재료가 발행까지 못 온다(A 가 잡은 죽은 통로). */
+      if (m.source && typeof m.source === "object") img.source = m.source as PublishImage["source"];
+      if (m.stock && typeof m.stock === "object") img.stock = m.stock as PublishImage["stock"];
       return img;
     }).filter((i) => !!i.url),
     tags: Array.isArray(meta.tags) ? (meta.tags as unknown[]).map(String).slice(0, 20) : [],
@@ -161,7 +164,8 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
 
   // ③ 🔴 발행 직전 최종 게이트(§16B)
   const gate = runPublishGate(
-    { channel: piece.channel, title: piece.title, bodyHtml: piece.bodyHtml, affiliate: piece.affiliate ?? null, adDisclosure: !!piece.disclosure },
+    { channel: piece.channel, title: piece.title, bodyHtml: piece.bodyHtml, affiliate: piece.affiliate ?? null, adDisclosure: !!piece.disclosure,
+      images: piece.images },   // [2026-09-16] 🔴 스톡 크레딧을 쓰려면 사진 출처가 여기까지 와야 한다(A 가 «부르는 곳 0» 을 잡았다)
     { adsensePub: String((account.monetize as Record<string, unknown> | undefined)?.adsensePub ?? "") },
   );
   /* 🔴 [§9] `gate_report` 는 **늘** 저장한다 — 종전엔 본문이 바뀐 경우에만 썼는데,

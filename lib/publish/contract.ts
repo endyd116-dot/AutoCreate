@@ -13,6 +13,7 @@
  */
 import type { Block } from "../blocks";
 import type { GateReport } from "../ai-tell-gate";
+import type { PhotoSource, StockMeta } from "../photo-source";   // [2026-09-16] 크레딧 재료 — 발행까지 들고 간다
 import { API_CHANNEL_KEYS, RUNNER_CHANNEL_KEYS, publishViaOf as registryPublishViaOf } from "../channel-registry";   // [P1R8 §5.2] 발행 경로 정본(순수 리프)
 
 export type { GateReport };
@@ -54,7 +55,13 @@ export function publishViaOf(channel: string): PublishVia | null {
  *      캡션이 «대부분 없다»로 바뀐 뒤로 alt 를 caption 으로 채우면 **alt 가 통째로 비어 버린다** —
  *      스크린리더 사용자에게는 사진이 사라지고, 이미지 검색에서도 빠진다. 그래서 칸을 나눠 받는다.
  */
-export interface PublishImage { url: string; caption?: string; alt?: string; sort?: number }
+/**
+ * 발행에 실리는 사진 한 장.
+ *   🔴 `source`·`stock` 은 **크레딧을 쓰기 위해** 여기까지 온다(2026-09-16 메인 · A 가 잡았다).
+ *      `piece_assets.meta` 에 처음부터 있었는데 **발행 쪽이 읽지 않아** 스톡 작가·출처가 본문에 안 실렸다.
+ *      `lib/stock/index.ts:22` 가 스스로 적어 뒀다 — «키가 죽는 진짜 경로는 **크레딧 미표기**».
+ */
+export interface PublishImage { url: string; caption?: string; alt?: string; sort?: number; source?: PhotoSource | null; stock?: StockMeta | null }
 
 /**
  * publish() 가 받는 글 한 편. pieces 행 + piece_assets 를 합친 모양.

@@ -1110,3 +1110,32 @@ export const aiUsageR8Byo = {
   byo: "byo",
   byoIdx: "ai_usage_byo_idx",
 } as const;
+
+
+/* === Phase 1 R8 · B(팀 시트 · P1R8-B §4.5 · 2026-09-16 · drizzle/0033-r8-team.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   `plans.limits.teamSeats`(1/2/5)가 요금표에 있고 `checkLimit` 도 세고 있었는데 **팀원을 늘릴 길이 없었다** —
+ *   «Agency 는 팀 자리 5개»가 팔리는데 쓸 수 없는 줄이었다. `users.role`(owner|member)은 여태 아무 데서도 안 쓰였다.
+ */
+export const teamInvites = pgTable("team_invites", {
+  id:          bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:    bigint("tenant_id", { mode: "number" }).notNull(),
+  email:       varchar("email", { length: 160 }).notNull(),
+  /** 🔴 `member` 만. owner 는 초대로 만들지 않는다 — 집주인이 둘이면 «누가 정하나»가 사라진다. */
+  role:        varchar("role", { length: 16 }).notNull().default("member"),
+  /** 🔴 sha256 hex **해시만**(비밀번호와 같은 취급). 평문은 메일로 한 번 나가고 우리도 다시 못 본다. */
+  tokenHash:   varchar("token_hash", { length: 64 }).notNull(),
+  invitedBy:   bigint("invited_by", { mode: "number" }),
+  expiresAt:   timestamp("expires_at").notNull(),
+  acceptedAt:  timestamp("accepted_at"),
+  acceptedUid: bigint("accepted_uid", { mode: "number" }),
+  revokedAt:   timestamp("revoked_at"),
+  createdAt:   timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ tenantIdx: index("team_invites_tenant_idx").on(t.tenantId, t.acceptedAt, t.revokedAt) }));
+
+export const usersR8Team = {
+  /** 누가 데려왔나(기록용). 🔴 권한 판정에는 쓰지 않는다. */
+  invitedBy: "invited_by",
+  /** 🔴 살아 있는 초대는 이메일당 하나(부분 유니크) — 두 번 눌러 두 통이 가면 자리를 두 개 먹는다. */
+  pendingUniq: "team_invites_pending_uniq",
+  tokenUniq: "team_invites_token_uniq",
+} as const;
