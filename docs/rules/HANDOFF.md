@@ -72,9 +72,9 @@
 |---|---|---|---|---|
 | `autocreate-ca` | 메인 | `AutoCreate` | `main` | — |
 | `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `fix/r4-audit-await` | 테스트 정리 완료 · 대기 |
-| `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | `topics-add` API · 캡션/프롬프트 분리 발주 중 |
+| `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | ✅ 완료 `c0fbc2b`(topics-add) · `84a2372`(캡션 §5C) · **머지 대기** |
 | `autocreate-b2-e4` | **B2**(러너·발행) | `AutoCreate-B2` | `feature/runner-dist` | 러너 배포 zip·인증 다운로드·자동 업데이트·기기 묶기 발주 중 |
-| `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | «+ 내 소재 넣기»·자동편성 꺼짐 안내·건너뜀 표시 발주 중 |
+| `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | ✅ 완료 `8dfa5a1`(베이스 e7bd0c7) · **머지 대기** |
 | `autocreate-c-41 [3d0736]` | **C**(검증·새 세션) | `AutoCreate-C` | `verify/p1r5` | 대기 |
 | ~~`autocreate-c-41 [b3f2d6]`~~ ~~`autocreate-b-8a`~~ | 옛 C·옛 B-1 | — | — | 빈 창 |
 
@@ -122,8 +122,8 @@
 
 ### 진행 중(압축 시점 · 세션별 발주)
 1. ✅ **테스트 정리 완료**(2026-09-15 · 사장님이 B 창에서 직접 Allow · 감사 `ops_live_cleanup`): 160·196·197 삭제 · t189 trial+queued 잡 14 삭제 · **198 trial + `next_billing_at NULL`(10/15 자동청구 해제)** · 빌키 ****0542 보존 · 인보이스 #10 refunded 보존 · 포함코인 33 회수. **MRR 73,000 → 49,000**(116 pro 만) · 활성 유료 1 · 보존 4집 생존.
-2. **B-1**: `POST /api/topics-add`(직접 소재 · 검색량 조회 · 금칙·중복·일 20) · 캡션/프롬프트 분리(`captionRate` · 묘사문 금칙).
-3. **A**: «+ 내 소재 넣기» 시트(→ director) · 자동 편성 꺼짐 안내+토글 · 오늘·내일 자리 «이번엔 건너뛰어요».
+2. ✅ **B-1 완료 · 머지 대기**: `c0fbc2b` `POST /api/topics-add`(400 title·banned_category·duplicate(+topic 동봉)·channel · 429 rate · Topic.source ai|manual · manual 맨 위) · `84a2372` 캡션 §5C(image{prompt,caption?} 분리 · 묘사문 7패턴 금칙 · captionRate naver 0.3/tistory 0.2/blogger·WP 0.5 · alt 는 prompt 파생). 남은 것: 글 실호출 1건 확인($0.3 · 메인 승인) · topics-add 제목 검사에 단독어 «카지노·바카라·토토·배팅·도박» 추가(메인 결정) · B2 몫 `lib/publish/wordpress.ts:71` alt_text 를 `piece_assets.meta.alt` 로.
+3. ✅ **A 완료 · 머지 대기**: `8dfa5a1` «내 소재 넣기» 시트(→ director 직행 · duplicate→기존으로 · «직접» 필 · «검색량 모름») · 자동 편성 꺼짐 배너(홈·편성표 · 켜기 동기화 · 규칙 0 숨김) · «이번엔 건너뛰어요»(skipReason too_soon 우선). 스샷 `_shots/r6f-*.png`.
 4. **B2**: `build-runner.mjs` → R2 zip + `latest.json` · `/api/runner-download`(로그인·플랜 게이트·감사) · 하트비트 자동 업데이트(sha256·옛 판 보존) · 기기 지문 묶기+토큰 재발급 · 셀렉터 서버 배포는 설계 보고.
 5. 2~4 머지 → **C 검증 발부**(`verify-p1r6.mjs` 확장) → 배포 #7.
 
