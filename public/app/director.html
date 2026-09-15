@@ -6,7 +6,7 @@
 <title>디렉터 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=17">
+<link rel="stylesheet" href="/css/ac.css?v=18">
 </head>
 <body>
 <div class="shell">
@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=16"></script>
-<script src="/js/mock.js?v=17"></script>
+<script src="/js/ui.js?v=19"></script>
+<script src="/js/mock.js?v=19"></script>
 <script>
 (async () => {
 const me = await UI.boot("create"); if (!me) return;
@@ -46,7 +46,9 @@ const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.chann
 const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0) : 1 + (p.images?.count || 0);
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
 const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
-  : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
+  /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
+     «사진 6장»만 적으면 고객은 «6코인이겠지»로 읽는다(그게 옛 값이었다). 그래서 AI 장수를 따로 적는다. */
+  : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
 
 async function load() {
   const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
@@ -124,7 +126,7 @@ async function make() {
   const btn = UI.$("#make"); btn.disabled = true;
   const patches = pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
     const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
-    if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style)) patch.images = { count: p.images.count, style: p.images.style };
+    if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style || p.images.aiCount !== o.images.aiCount)) patch.images = { count: p.images.count, style: p.images.style, ...(p.images.aiCount != null ? { aiCount: p.images.aiCount } : {}) };   /* [R8] aiCount = AI 로 구울 장수(여기만 돈이 든다) */
     if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
     if (isVideo(p)) { const v = {}; if (p.video.format !== o.video.format) v.format = p.video.format; if (p.video.seconds !== o.video.seconds) v.seconds = p.video.seconds; if (p.video.voice?.voiceId !== o.video.voice?.voiceId) v.voiceId = p.video.voice.voiceId; if (Object.keys(v).length) patch.video = v; } // PieceSpecPatch.video(§1.1)
     if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);

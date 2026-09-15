@@ -15,6 +15,15 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 title AutoCreate Runner
 
+REM --- 0) Auto-start (P1R8 3.5 - OPT-IN ONLY, never automatic) -------
+REM  We decided NOT to build a tray app (see docs/active/2026-09-15-runner-tray-decision.md).
+REM  The one real thing a tray app gave us that we did not already have is "come back
+REM  after a reboot". A Startup shortcut does that in ~10 lines instead of a whole
+REM  Electron build + a code-signing certificate.
+REM  The customer runs this on purpose; we never install it behind their back.
+if /I "%~1"=="--autostart"     goto :autostart_on
+if /I "%~1"=="--autostart-off" goto :autostart_off
+
 REM  The runner prints Korean. Node writes UTF-8 bytes; a Korean Windows console
 REM  defaults to codepage 949 and renders them as garbage ("?щ꼫" instead of "러너").
 REM  Switch this window to UTF-8 so our own messages are readable. Quiet on failure -
@@ -85,6 +94,51 @@ if errorlevel 75 (
 :stopped
 echo.
 echo   Runner stopped.
+pause
+exit /b 0
+
+REM ============================================================
+REM  Auto-start helpers
+REM  Paths go through environment variables on purpose: putting a Windows path
+REM  with spaces inside a PowerShell -Command string means fighting two layers of
+REM  quoting, and that is exactly how we produced "silently did nothing" before
+REM  (PITFALLS AC-67 - do not fight the escaping, avoid it).
+REM  WindowStyle 7 = start minimised, so the console does not jump in the
+REM  customer's face at every login.
+REM ============================================================
+:autostart_on
+set "AC_LNK=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AutoCreate Runner.lnk"
+set "AC_TARGET=%~f0"
+set "AC_DIR=%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$w=New-Object -COM WScript.Shell; $s=$w.CreateShortcut($env:AC_LNK); $s.TargetPath=$env:AC_TARGET; $s.WorkingDirectory=$env:AC_DIR; $s.WindowStyle=7; $s.Description='AutoCreate Runner'; $s.Save()" >nul 2>nul
+REM  Do not trust the exit code - check the file is actually there (PITFALLS AC-66:
+REM  "we called it" is not "it happened"; read the disk).
+if exist "%AC_LNK%" (
+  echo   [OK] This PC will start the runner automatically when you log in.
+  echo        Window starts minimised. To undo:  run.bat --autostart-off
+) else (
+  echo   [X] Could not create the startup shortcut.
+  echo       Start it by hand after each reboot, or add run.bat to the Startup folder:
+  echo       press Win+R, type  shell:startup  , and drop a shortcut to this file there.
+)
+echo.
+pause
+exit /b 0
+
+:autostart_off
+set "AC_LNK=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AutoCreate Runner.lnk"
+if exist "%AC_LNK%" (
+  del /f /q "%AC_LNK%" >nul 2>nul
+  if exist "%AC_LNK%" (
+    echo   [X] Could not remove it. Delete this file by hand:
+    echo       %AC_LNK%
+  ) else (
+    echo   [OK] Auto-start turned off. The runner no longer starts by itself.
+  )
+) else (
+  echo   [OK] Auto-start was not on. Nothing to do.
+)
+echo.
 pause
 exit /b 0
 

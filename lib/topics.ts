@@ -35,6 +35,14 @@ const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as 
 export type TopicIntent = "info" | "commercial" | "mixed";
 export interface TopicFactors {
   volume?: number; growthPct?: number; competition?: "low" | "mid" | "high"; intent: TopicIntent; pain?: number; seasonal?: string; performance?: number;
+  /**
+   * [R8 §2.4-라 · DESIGN §5C.6] 🔴 **`volume` 이 «누구의» 검색량인가** — 그 낱말이다.
+   *   여태 `bestVolume()` 이 씨앗 낱말들 중 제일 큰 것을 골라 **`volume` 만 저장하고 `keyword` 는 버렸다.**
+   *   그래서 `content-gen` 이 «검색어: {소재 제목} (월 검색 N)» 을 만들었는데 — **N 은 제목의 검색량이 아니다.**
+   *   모델은 그 숫자를 믿고 **제목 문구를 노리고 쓴다.** 재려던 것(그 키워드)과 실제로 준 것(제목)이 갈린 전형적인 대용물이다(AC-57).
+   *   🔴 못 찾았으면 **비워 둔다** — 제목으로 대신 채우면 같은 거짓말이 이름만 바꿔 돌아온다.
+   */
+  keyword?: string;
   /** [P1R5 §1.11] 레퍼런스 구조 템플릿(`shorts_templates.id`) — 영상 후보에만 붙는다. 디렉터가 `meta.structure` 로 옮겨 대본 프롬프트의 «서사 단계»가 된다. */
   structureTemplateId?: number;
 }
@@ -195,6 +203,8 @@ export function toTopic(r: Row): Topic {
   const f = (r.factors && typeof r.factors === "object" ? r.factors : {}) as Record<string, unknown>;
   const factors: TopicFactors = { intent: (["info", "commercial", "mixed"].includes(String(f.intent)) ? String(f.intent) : "info") as TopicIntent };
   if (Number.isFinite(Number(f.volume)) && f.volume !== undefined && f.volume !== null) factors.volume = Number(f.volume);
+  /* 🔴 [R8-라] 옛 소재에는 이 칸이 없다 — 그때는 저장을 안 했다. 없으면 **없는 대로** 둔다(프롬프트가 검색량 줄을 통째로 뺀다). */
+  if (typeof f.keyword === "string" && f.keyword.trim()) factors.keyword = String(f.keyword).trim().slice(0, 80);
   if (Number.isFinite(Number(f.growthPct)) && f.growthPct !== undefined && f.growthPct !== null) factors.growthPct = Number(f.growthPct);
   if (["low", "mid", "high"].includes(String(f.competition))) factors.competition = String(f.competition) as TopicFactors["competition"];
   if (Number.isFinite(Number(f.pain)) && f.pain !== undefined && f.pain !== null) factors.pain = Number(f.pain);
@@ -246,6 +256,8 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
     const seasonal = seasonalFor(`${c.title} ${c.angle}`);
     const factors: TopicFactors = { intent: c.intent, pain: Math.round(c.pain * 100) / 100, performance: 0 };
     if (bv.volume !== undefined) factors.volume = bv.volume;
+    /* 🔴 [R8-라] 검색량을 **누구의 것인지와 함께** 저장한다. 숫자만 남기면 그 숫자가 제목에 붙어 나간다(위 `keyword` 설명). */
+    if (bv.keyword) factors.keyword = String(bv.keyword).slice(0, 80);
     const comp = competitionOf(bv.compIdx); if (comp) factors.competition = comp;
     const g = bv.keyword ? growth.get(bv.keyword) : undefined; if (g !== undefined) factors.growthPct = g;
     if (seasonal.label) factors.seasonal = seasonal.label;
@@ -327,9 +339,14 @@ export async function addManualTopic(tid: number, a: { title: unknown; keyword?:
     const vols = await lookupVolumes(seeds, 8_000);
     const bv = bestVolume(seeds, vols);
     if (bv.volume !== undefined) { factors.volume = bv.volume; volumeKnown = true; }
+    /* 🔴 [R8-라] 잰 낱말을 **함께** 적는다 — 숫자만 남기면 그 숫자가 «제목»에 붙어 프롬프트로 나간다(AC-57). */
+    if (bv.keyword) factors.keyword = String(bv.keyword).slice(0, 80);
     compIdx = bv.compIdx;
     const comp = competitionOf(compIdx); if (comp) factors.competition = comp;
   } catch (e) { console.warn("[topics-add] 검색량 조회 실패(소재는 만든다):", String((e as Error)?.message ?? e).slice(0, 100)); }
+  /* 🔴 못 쟀어도 **사용자가 직접 적은 검색어**는 목표로 남긴다 — 그건 우리가 못 잰 것이지 없는 것이 아니다(AC-9).
+     이때 `volume` 은 비어 있고, 프롬프트는 «목표 검색어: X» 만 주고 검색량 괄호를 뺀다(없는 숫자를 지어내지 않는다). */
+  if (!factors.keyword && keyword) factors.keyword = keyword.slice(0, 80);
   const seasonal = seasonalFor(`${title} ${angle}`);
   if (seasonal.label) factors.seasonal = seasonal.label;
   const score = computeScore({ demand: demandScore(factors.volume), intent: intentScore("info"), pain: 0.6, compGap: compGapScore(compIdx), difficulty: channelDifficulty(channelHint), seasonal: seasonal.weight, performance: 1 });

@@ -62,8 +62,17 @@ async function load(poll = false) {
   bindAdd(); bindChf();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
   UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
-  // 좌측 스와이프 = 넘김
-  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0; row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true }); row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; if (dx < 0) row.style.transform = `translateX(${Math.max(dx, -120)}px)`; }, { passive: true }); row.addEventListener("touchend", async () => { row.style.transform = ""; if (dx < -80) await skip(Number(row.dataset.id)); x0 = null; }); });
+  /* [DESIGN §13.0b 소재 카드] 스와이프 — **왼쪽 = 넘김 · 오른쪽 = 디렉터에게**(설계의 세 번째 «위 = 나중에»는 아직 안 만든다:
+     서버에 «나중에»를 적어 둘 자리가 없다(`topics-pick`·`topics-skip` 뿐) — 화면에서만 숨기면 새로고침하면 돌아와
+     «했는데 안 됐다»가 된다. 서버가 열리면 그때 붙인다 · 메인에 보고).
+     🔴 두 방향 다 **이미 단추로 되는 일**이라 스와이프는 지름길일 뿐이다 — 스와이프로만 되는 기능을 만들지 않는다(못 찾는 사람이 생긴다). */
+  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0;
+    row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true });
+    row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; row.style.transform = `translateX(${Math.max(Math.min(dx, 120), -120)}px)`; }, { passive: true });
+    row.addEventListener("touchend", async () => { row.style.transform = ""; const d = dx; x0 = null;
+      if (d < -80) return skip(Number(row.dataset.id));
+      if (d > 80) { const t = (r.topics || []).find((x) => x.id === Number(row.dataset.id)); if (t) UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title || "")}`); }
+    }); });
 }
 async function refresh() {
   const b = UI.$("#refresh"); b.disabled = true;
@@ -115,8 +124,10 @@ let mode = "two";
 const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
-const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 코인 미리보기 추정(정본은 rules-save 응답 coinsPerWeek)
-const isVideoCh = (c) => UI.VIDEO_CH.includes(c); const perPiece = (c) => isVideoCh(c) ? UI.VIDEO_COIN[60] : 1 + (IMG[c] ?? 2); // [P1R5] shorts 규칙 = 편당 video_60(§1.10)
+/* 🔴 [R8 · 사장님 승인 2026-09-15] **글 1편 = 1코인**(AI 사진 1장 포함) — 종전 화면은 «1 + 사진 장수»로 세어 네이버를 **7코인**이라 적었다.
+   사진은 «내 사진 → 스톡 → AI» 로 채우고 **AI 로 구운 장만** 돈이 든다(추가 1장 +1). 사진 장수는 이제 **공짜 질문**이다.
+   🔴 미리보기일 뿐이다 — 자리마다의 실제 값은 서버가 준다(`slots-list[].coinCost` · `director-estimate`). 오면 그쪽으로 갈아탄다. */
+const isVideoCh = (c) => UI.VIDEO_CH.includes(c); const perPiece = (c) => (isVideoCh(c) ? UI.VIDEO_COIN[60] : UI.COIN.blog); // [P1R5] shorts 규칙 = 편당 video_60(§1.10)
 const today = KST(); let view = new Date(today.getFullYear(), today.getMonth(), 1); let sel = ymd(today);
 let D = { rules: [], settings: {}, coinsPerWeek: 0, maxRules: null }, accounts = [], slots = [];
 const gear = document.createElement("button"); gear.type = "button"; gear.className = "ic"; gear.setAttribute("aria-label", "편성 설정"); gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>'; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(gear);
@@ -126,7 +137,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -780,7 +791,7 @@ async function load() {
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
     ? D.accounts.map((a) => { const relogin = a.status === "pending_login";
         const sub = relogin ? UI.errk(a.lastErrorKind || "login_fail") : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요" : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
-        const head = `${UI.mark(a.channel)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
+        const head = `${UI.accMark(a)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
         return relogin
           ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">다시 로그인</button></div>`
           : `<div class="row">${head}${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</div>`; }).join("")
@@ -906,7 +917,7 @@ async function detailSheet(a) {
   const srcLine = !mySrc.length ? "아직 연결한 곳이 없어요"
     : badSrc.length ? `${okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") || "연결됨 없음"} · ${UI.srcLabel(badSrc[0].source)} 끊김`
     : okSrc.length ? okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") : "키를 넣으면 바로 가져와요";
-  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
+  const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.accMark(a)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
   ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(a.lastErrorKind || "login_fail"))}</span><button type="button" id="relogin">다시 로그인</button></div>`
     : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
     : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
@@ -1523,7 +1534,9 @@ const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.chann
 const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0) : 1 + (p.images?.count || 0);
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
 const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
-  : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
+  /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
+     «사진 6장»만 적으면 고객은 «6코인이겠지»로 읽는다(그게 옛 값이었다). 그래서 AI 장수를 따로 적는다. */
+  : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
 
 async function load() {
   const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
@@ -1601,7 +1614,7 @@ async function make() {
   const btn = UI.$("#make"); btn.disabled = true;
   const patches = pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
     const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
-    if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style)) patch.images = { count: p.images.count, style: p.images.style };
+    if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style || p.images.aiCount !== o.images.aiCount)) patch.images = { count: p.images.count, style: p.images.style, ...(p.images.aiCount != null ? { aiCount: p.images.aiCount } : {}) };   /* [R8] aiCount = AI 로 구울 장수(여기만 돈이 든다) */
     if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
     if (isVideo(p)) { const v = {}; if (p.video.format !== o.video.format) v.format = p.video.format; if (p.video.seconds !== o.video.seconds) v.seconds = p.video.seconds; if (p.video.voice?.voiceId !== o.video.voice?.voiceId) v.voiceId = p.video.voice.voiceId; if (Object.keys(v).length) patch.video = v; } // PieceSpecPatch.video(§1.1)
     if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
@@ -1635,7 +1648,7 @@ function videoBar(p) { const m = p.meta || {}; const stage = m.stage || "script"
   const extra = (k) => k === "clips" && stage === "clips" && cs.cutsTotal ? ` <small class="muted" style="font-weight:500">${cs.cutsDone ?? 0}/${cs.cutsTotal}</small>` : k === "render" && stage === "render" ? (runnerOn === false ? ` <span class="pill warn" style="margin-left:4px">내 PC 프로그램을 켜 주세요</span>` : ` <small class="muted" style="font-weight:500">내 PC 프로그램이 굽는 중</small>`) : "";
   return `<div class="steps" style="padding:0 16px 12px 66px">${UI.VSTAGE.map(([k, l], n) => `<div class="st ${n < i || stage === "done" ? "done" : n === i ? "on" : ""}"><i>${n < i || stage === "done" ? "✓" : n + 1}</i>${l}${extra(k)}</div>`).join("")}</div>`; }
 function row(p) { const st = UI.PIECE_STATUS[p.status] || ["off", p.status]; const when = p.status === "published" ? UI.dateKST(p.publishedAt) : p.scheduledFor ? `${UI.dateKST(p.scheduledFor)} ${UI.timeKST(p.scheduledFor)}` : ""; const video = p.kind === "video";
-  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${video ? '<span class="pill ink" style="font-size:11px;padding:2px 7px">영상</span>' : ""}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
+  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${UI.kindPill(p.kind)}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
 function render() {
   const cnt = Object.fromEntries(Object.entries(TAB).map(([k, v]) => [k, all.filter((p) => v.includes(p.status)).length]));
   if (!tab) tab = cnt.generating ? "generating" : cnt.in_review ? "in_review" : cnt.scheduled ? "scheduled" : "in_review";
@@ -2021,6 +2034,9 @@ function deviceSheet(d) {
     ${sealRow(d)}
     ${unbound ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">아직 한 번도 안 켰어요. 열쇠를 넣고 프로그램을 켜면 이 PC 에 묶여요.</p>` : d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
     <div style="margin:12px 0 0"><button type="button" class="row tap" id="rot"><div class="l"><span class="t">열쇠 다시 받기</span><span class="d wrap">PC 를 바꿨거나 열쇠가 새어 나간 것 같을 때 · 옛 열쇠는 바로 못 써요</span></div>${UI.chev}</button><div id="rc2"></div></div>
+    <!-- [P1R8 §3.5 · B2] 트레이 앱 대신 «재부팅 뒤 자동 시작»만 준다(판단: docs/active/2026-09-15-runner-tray-decision.md).
+         🔴 우리가 몰래 켜지 않는다 — 고객이 직접 치는 명령이라 **말로 알려 주는 것까지**가 이 기능이다. -->
+    <p class="muted" style="margin:10px 0 0;font-size:13px">PC 를 켤 때 자동으로 시작하게 하려면, 프로그램 폴더에서 <code>run.bat --autostart</code> 를 한 번 실행해 주세요. 끄기는 <code>run.bat --autostart-off</code>.</p>
     ${d.version ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">프로그램 v${UI.esc(d.version)}</p>` : ""}
     <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger-ink);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
       const ff = sh.querySelector("#ffm"); if (ff) ff.onclick = () => { close(); ffmpegSheet(); } // [P1R5] caps.ffmpeg=false → 설치 안내(침묵 금지 · §2.2)

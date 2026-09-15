@@ -3,6 +3,21 @@
 #   (내용 충돌 2곳이 700줄 속에 숨는다). 새로 쓰는 파일부터 LF 로 맞춘다.
 #   ⚠️ **전체 정규화(`git add --renormalize .`)는 브랜치가 다 비었을 때 한 번에** — 지금 하면 다섯 창의 브랜치가 통째로 충돌한다.
 * text=auto eol=lf
+
+# ── 🔴 예외: 실행 스크립트는 OS 가 정한 규격이 따로 있다 (2026-09-15 B2 실측) ──
+#   `runner/run.bat` 이 LF 로 저장돼 있었고, 그 상태에서 cmd.exe 의 `goto` 는
+#   **바이트 오프셋으로 뛰다가 줄 중간에 착지한다** — `--autostart` 플래그가 통째로 무시되고
+#   러너가 그냥 실행됐다(고객이 누른 것과 **다른 일**이 일어나는데 오류 한 줄 없다 · AC-51 «돌려 봐야 잡힌다»).
+#   🔴 위 `* eol=lf` 가 이 파일들까지 덮으면 그 결함이 **체크아웃마다 되살아난다** — 그래서 뒤에 적어 덮어쓴다
+#      (gitattributes 는 **나중 줄이 이긴다**).
+#   셸 스크립트는 반대다: CR 가 섞이면 `\r: command not found` 가 난다.
+#   ⚠️ 이건 «취향»이 아니라 **인터프리터 규격**이라 위 LF 정책과 부딪치지 않는다.
+#   ⚠️ 그리고 이 규칙만 믿지 않는다 — `scripts/build-runner.mts` 가 **실제로 나가는 바이트**를 다시 본다(AC-66).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+
 *.png binary
 *.jpg binary
 *.jpeg binary

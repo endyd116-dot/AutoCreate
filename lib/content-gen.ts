@@ -12,10 +12,15 @@ import { q } from "./accounts";
 import { callGeminiJson } from "./ai";
 import { CHAIN_HIGH } from "./ai-models";
 import { generateImage, type ImageAspect } from "./ai-image";
-import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
+import { searchStock, stockConfigured, stockTroubleLine, type StockCandidate } from "./stock";   // [R8 §10] 사진 조달 — 편당 원가의 85%가 사진이다
+import { attachStockPhoto } from "./stock/attach";
+import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate } from "./stock/plan";
+import { listPhotos } from "./piece-photos";                     // 내가 올린 사진(옛 B-1) — 조달 순서 ①
+import { aiSourceKey } from "./photo-source";
+import { contractFor, structureFor, coinFormatOf, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, blocksCharCount, type RenderImage } from "./blocks";
 import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
-import { ensureDisclosureFirst, disclosureTextFor } from "./disclosure";
+import { ensureDisclosureFirst, disclosureTextFor, compensationOfMeta } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
 import { seasonLine } from "./kr-calendar";
 import { toTopic, type Topic } from "./topics";
@@ -27,6 +32,7 @@ import { writeAudit } from "./audit";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
 import { recordOutcome, riskOf } from "./outcomes";   // [R8 §5F] 되먹임 원장 — «만들 때의 모습»을 남긴다
+import { findNumericClaims, summarizeClaims } from "./fact-claims";   // [R8 §2.4] 수치 주장 표시(순수)
 import { lengthFor, topicGroupOf, resolveGoalDetail, estimateChars, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳) + [R8 §2.1] 분량 추정표
 
 const n = (v: unknown) => Number(v || 0);
@@ -72,7 +78,20 @@ async function coupangKeysFor(tid: number, accountId: number | null): Promise<Co
 }
 
 /* ───────── 프롬프트 6칸 ───────── */
-function blockSchemaLine(): string {
+function blockSchemaLine(card?: { max: number } | null): string {
+  /* 🔴 [R8 §2.5] 카드뉴스는 caption 규칙이 **정반대**다(글 채널은 «대부분 안 단다» · 카드뉴스는 «전부 단다»).
+     같은 문장을 두 채널에 주면 모델이 둘 중 하나를 어긴다 — 그래서 **채널에 따라 다른 줄을 준다**(AC-63). */
+  if (card) {
+    return [
+      "블록 JSON 모양(type 별 필수 필드):",
+      "hook{text · 표지 카드에 얹을 한 줄} · list{items[]} · checklist{items[]} · table{rows[][] · 첫 행은 헤더} · quote{text · 핵심 한 줄} · para{text · 게시물 본문 2~3줄} · tip{text, items?} · faq{items[] · 각 항목 \"질문 | 답\"} · summary{text 또는 items[]}",
+      `image{prompt · 카드 **그림**을 만들기 위한 장면 묘사 한 문장(영문 가능 · 글자·사람·로고 없는 배경 · 독자에게 안 보인다) · **caption 필수** · 카드 위에 얹히는 글자 ${card.max}자 이내 · imageIndex 는 0부터 순서대로}`,
+      `🔴 image.caption 규칙(카드뉴스): **모든 카드에 caption 을 단다**(빠뜨린 카드는 빈 카드가 된다). ${card.max}자 이내 · 한 카드에 한 메시지.`,
+      "🔴 **첫 image = 표지 카드**(제목을 그대로 베끼지 말고 한 번 더 좁힌다) · **마지막 image = 행동 유도**(저장하기·다음 글·프로필 보기). 가운데는 핵심 하나씩.",
+      "🔴 caption 에 «~하는 모습» «~이 놓여 있는» «~를 보여주는» 같은 **장면 설명문 금지** — 그건 prompt 에만 쓴다.",
+      "hashtags{items[] · 5~10개 · # 없이} · disclosure{}(시스템이 채운다 · 비워 둠)",
+    ].join("\n");
+  }
   return [
     "블록 JSON 모양(type 별 필수 필드):",
     "hook{text} · para{text · 2~4문장} · h2{text} · h3{text} · quote{text · 핵심 한 줄} · list{items[]} · checklist{items[]} · table{rows[][] · 첫 행은 헤더}",
@@ -107,7 +126,7 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
     "",
     "[② 구성 — 아래 블록 시퀀스를 «순서·개수 그대로» 채운다(타입 추가·생략 금지)]",
     a.structure.map((t, i) => `${i + 1}.${t}`).join(" → "),
-    blockSchemaLine(),
+    blockSchemaLine(c.cardText ?? null),
     "",
     "[④ 한국 규칙]",
     "· 가격은 원화(부가세 포함) · 단위는 한국 관행(평/㎡ 병기 · ℓ · cm). 한국 브랜드·한국 계절·한국 검색 습관.",
@@ -127,7 +146,12 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
     "[③ 재료]",
     `소재: ${a.topic.title}`,
     `앵글(이 글의 관점): ${a.angle}`,
-    `검색어: ${a.topic.title.replace(/[,·]/g, " ")}${a.topic.factors.volume ? ` (월 검색 ${a.topic.factors.volume.toLocaleString()})` : ""}`,
+    /* 🔴 [R8-라 · DESIGN §5C.6-2] **잰 낱말을 그대로 준다.** 옛 줄은 «검색어: {소재 제목} (월 검색 N)» 이었는데
+       N 은 제목이 아니라 `bestVolume()` 이 고른 **다른 낱말**의 값이었다 — 모델이 틀린 문구를 노리고 썼다(AC-57 대용물).
+       🔴 그리고 **못 찾았으면 검색량 줄 자체를 뺀다.** 제목으로 대신 채우면 같은 거짓말이 이름만 바꿔 돌아온다(AC-9 «모르면 모른다»). */
+    a.topic.factors.keyword
+      ? `목표 검색어(이 낱말이 본문에 자연스럽게 들어가야 한다): ${a.topic.factors.keyword}${a.topic.factors.volume ? ` (월 검색 ${a.topic.factors.volume.toLocaleString()})` : ""}`
+      : "",
     a.personaFacts.length ? `내 사정(1~2개를 실제 장면으로 자연스럽게 · 나열 금지): ${a.personaFacts.join(" / ")}` : "내 사정: 1인 가구 직장인(넓게)",
     a.persona.tone ? `말투 힌트: ${a.persona.tone}` : "",
     a.persona.banned?.length ? `쓰지 말 것: ${a.persona.banned.join(", ")}` : "",
@@ -168,10 +192,13 @@ export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingCo
     if (b.type !== "image") return b;
     const my = idx++;
     const prev = blocks.slice(0, i).reverse().find((x) => (x.type === "para" || x.type === "hook") && x.text);
-    const legacyCaptionIsPrompt = !b.prompt && !!b.caption && (descriptiveCaptionHit(b.caption) !== null || [...b.caption].length > 25);
+    /* [R8 §2.5] 🔴 카드뉴스는 상한이 다르다 — 카드 글자는 25자가 아니라 계약이 정한 `cardText.max`(인스타 30자)다.
+       🔴 묘사문 금칙은 **그대로** 적용한다: 카드 위에 «~하는 모습»이 얹히면 그건 카드가 아니라 사진 설명이다. */
+    const capMax = c.cardText?.max ?? 25;
+    const legacyCaptionIsPrompt = !b.prompt && !!b.caption && (descriptiveCaptionHit(b.caption) !== null || [...b.caption].length > capMax);
     const prompt = b.prompt || (legacyCaptionIsPrompt ? b.caption : null) || (prev?.text ? String(prev.text).split(/[.!?]\s/)[0].slice(0, 120) : c.label);
     let caption = legacyCaptionIsPrompt ? undefined : b.caption;
-    if (caption && (descriptiveCaptionHit(caption) || [...caption].length > 25)) caption = undefined;
+    if (caption && (descriptiveCaptionHit(caption) || [...caption].length > capMax)) caption = undefined;
     const out: Block = { ...b, imageIndex: my, prompt };
     if (caption) out.caption = caption; else delete out.caption;
     return out;
@@ -179,7 +206,9 @@ export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingCo
   // 2차: 비율 — **유효한 캡션이 있는 사진 중에서** `round(전체 × captionRate)` 장만 남긴다(결정론 · 같은 글이면 같은 자리).
   //       전체 사진에서 자리를 먼저 뽑으면 «캡션이 있던 사진»과 어긋나 멀쩡한 캡션을 버리고 0장이 될 수 있다.
   const withCap = blocks.filter((b) => b.type === "image" && b.caption).map((b) => b.imageIndex as number);
-  const keepN = Math.round(imgCount * Math.max(0, Math.min(1, c.images.captionRate ?? 0)));
+  /* 🔴 [R8 §2.5] 카드뉴스는 **비율로 솎지 않는다** — 카드는 전부 글자를 갖는다(`captionRate` 를 덮는다).
+     글 채널의 «대부분 캡션 없음»은 실물 근거가 있는 규칙이지만, 카드뉴스에 그걸 적용하면 **빈 카드가 남는다.** */
+  const keepN = c.cardText ? withCap.length : Math.round(imgCount * Math.max(0, Math.min(1, c.images.captionRate ?? 0)));
   if (withCap.length > keepN) {
     const pick = captionSlots(withCap.length, keepN / withCap.length, seedOf(seedText || c.channel));
     const keep = new Set(withCap.filter((_, k) => pick.has(k)));
@@ -268,7 +297,9 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       const title = String(r.data?.title ?? topic.title).trim().slice(0, 80) || topic.title;
       const tags = (Array.isArray(r.data?.tags) ? r.data.tags : []).map((t) => String(t ?? "").replace(/^#/, "").trim()).filter(Boolean).slice(0, 10);
       const choice = Number.isInteger(Number(r.data?.affiliateChoice)) ? Number(r.data?.affiliateChoice) : 0;
-      return { blocks, title, tags, choice, model: r.model };
+      /* 🔴 [R8 §2.4] `pr.user` 를 **들고 나온다** — 수치 판정이 «우리가 준 숫자»를 재료 목록에서 다시 조립하면
+         프롬프트와 언젠가 갈라진다. 실제로 보낸 그 문자열을 그대로 봐야 갈릴 수가 없다(AC-70 «같은 입력»). */
+      return { blocks, title, tags, choice, model: r.model, promptUser: pr.user };
     };
 
     let draft = await write();
@@ -316,27 +347,83 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       affiliateMeta = { provider: "coupang", url, subId, productName: prod.productName };
     }
 
-    // 이미지
+    /* ════ 사진 — 🔴 조달 순서 ①내 사진 → ②스톡 → ③AI (DESIGN §5C.5 · 계약 P1R8 §10.3) ════
+       왜 바꿨나 = **돈**. 라이브 `ai_usage` 실측으로 글 1편 원가 ₩458 중 **사진이 ₩389(85%)** 다.
+       사장님: «사진을 스톡으로 가져오고 1장(많아야 2장)만 메인만 AI 로». 네이버 한 편 기준 **₩458 → ₩134(-71%)**.
+       🔴 **사진 «수»는 깎지 않는다**(§10.3) — 바뀌는 것은 «어디서 가져오나»뿐이고, 못 채우면 AI 가 메운다. */
     await setStage(pieceId, "images");
     const images: RenderImage[] = [];
     const imageBlocks = draft.blocks.filter((b) => b.type === "image");
     let okImages = 0;
-    await q(sql`DELETE FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'image'`);
+    const mix = emptyMix();
+
+    /* 🔴 **내가 올린 사진은 지우지 않는다.** 옛 판은 `kind='image'` 를 전부 지웠다 —
+       그러면 «다시 만들기»가 고객이 올린 사진을 통째로 날린다(옛 B-1 이 만든 사진 업로드와 겹치는 자리였다).
+       AI·스톡은 지운다(둘 다 다시 가져오면 되고, 옛 블록에 묶인 채 남으면 순서가 어긋난다).
+       옛 행에는 `meta.source` 가 없다 — 그때는 AI 뿐이었으므로 `COALESCE(...,'ai')` 로 AI 취급한다(지어낸 값이 아니다). */
+    await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${pieceId} AND kind = 'image'
+      AND COALESCE(meta->'source'->>'kind', 'ai') <> 'customer'`);
+    const mine = await listPhotos(tid, pieceId);          // 남은 것 = 내 사진뿐(올린 순서)
+    let mineAt = 0;
+
+    const heroIdx = heroIndexOf(imageBlocks.map((b, k) => b.imageIndex ?? k));
+    /* 스톡은 **글마다 한 번**만 찾는다(블록마다 찾으면 Pixabay 100req/60초를 금방 먹는다 · `lib/stock/plan.ts` 헤더).
+       대표 1장은 AI 라 그만큼 빼고, 내 사진이 있으면 그만큼 더 뺀다. */
+    const paidPiece = compensationOfMeta(meta).need;
+    const wantStock = Math.max(0, imageBlocks.length - (heroIdx >= 0 ? 1 : 0) - mine.length);
+    let pool: StockCandidate[] = [];
+    /* 🔴 인포그래픽(카드뉴스)은 스톡으로 못 바꾼다 — 글자가 얹힌 그림이라 사진이 대신할 수 없다(§2.5 는 이 절감의 바깥). */
+    if (wantStock > 0 && c.images.style !== "infographic" && stockConfigured()) {
+      const found = await searchStock({ query: stockQueryOf(topic.title), count: wantStock, paid: paidPiece });
+      pool = found.picks;
+      if (!pool.length) console.info(`[content-gen] piece ${pieceId} 스톡 0건 — ${stockTroubleLine(found.tried) ?? "사유 없음"}`);
+    }
+    const usedStock = new Set<string>();
+
     for (const b of imageBlocks) {
       const i = b.imageIndex ?? images.length;
       /* [§5C 수리] 그림은 **prompt** 로 만든다(묘사문은 여기서만 쓴다). caption 은 사람이 읽는 한 줄이고 대부분 없다.
          alt 는 접근성용 — prompt 에서 짧게 파생(화면에 안 보이고 러너는 alt 를 타이핑하지 않는다 · naver-blog.mjs 확인). */
       const scene = b.prompt || b.caption || topic.title;
-      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
       const alt = String(scene).replace(/\s+/g, " ").trim().slice(0, 60);
+
+      /* ① 내가 올린 사진 — 🔴 제일 먼저다. 네이버에서 제일 강하고(업계 통설 · 체크리스트 13번) **AI 값이 0원**이다.
+         대표 자리는 건너뛴다(대표는 그 글에만 있는 그림이어야 한다). 행은 이미 있으니 자리(sort)만 맞춰 준다. */
+      if (i !== heroIdx && mineAt < mine.length) {
+        const mp = mine[mineAt++];
+        await q(sql`UPDATE piece_assets SET sort = ${i} WHERE tenant_id = ${tid} AND id = ${mp.id}`);
+        images[i] = { url: mp.url, caption: b.caption ?? mp.caption ?? undefined, alt };
+        okImages++; mix.customer++;
+        continue;
+      }
+
+      /* ② 스톡 — 라이선스가 명시된 정식 API 통로로만(§10.2 «긁어 오기»는 금지). AI 값 0원. */
+      if (i !== heroIdx && pool.length) {
+        const cand = takeCandidate(pool, usedStock);
+        if (cand) {
+          const st = await attachStockPhoto({
+            tenantId: tid, pieceId, userId: null, candidate: cand,
+            caption: b.caption ?? null, alt, sort: i, paid: paidPiece,
+          });
+          if (st.ok) { images[i] = { url: st.url, caption: b.caption, alt }; okImages++; mix.stock++; continue; }
+          /* 🔴 스톡이 실패하면 **조용히 비우지 않고** 아래 AI 로 내려간다 — 사진 수를 깎지 않는다(§10.3). */
+          console.warn(`[content-gen] piece ${pieceId} 스톡 ${i} 실패(${st.step}) — AI 로 메운다`);
+        }
+      }
+
+      /* ③ AI — 대표 1장, 그리고 위에서 못 채운 자리. 🔴 «상한»이 아니라 «맨 뒤»다(`lib/stock/plan.ts` 헤더). */
+      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
       const r = await generateImage({ prompt, aspect: c.images.aspect as ImageAspect, tenantId: tid, ref: `piece:${pieceId}:img${i + 1}`, keyPrefix: `autocreate/${tid}/${pieceId}` });
       if (r.ok) {
-        okImages++;
+        okImages++; mix.ai++;
         images[i] = { url: r.url, caption: b.caption, alt };
-        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${r.key}, ${b.caption ?? null}, ${jsonb({ url: r.url, model: r.model, mime: r.mime, alt, prompt: String(scene).slice(0, 300) })}, ${i})`);
+        /* 🔴 AI 사진에도 `meta.source` 를 적는다 — 세 길이 **같은 칸**에 적혀야 되짚기가 한 길이 된다(`lib/photo-source.ts` 헤더).
+           그리고 위의 DELETE 가 «AI 인가»를 이 칸으로 판정한다 — 안 적으면 옛 행 취급으로만 지워진다. */
+        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${r.key}, ${b.caption ?? null}, ${jsonb({ url: r.url, model: r.model, mime: r.mime, alt, prompt: String(scene).slice(0, 300), source: { kind: "ai", key: aiSourceKey(r.model, `piece:${pieceId}:img${i + 1}`), addedAt: new Date().toISOString(), by: null, mime: r.mime } })}, ${i})`);
       } else {
         console.warn(`[content-gen] piece ${pieceId} 이미지 ${i} 실패: ${r.reason}`);
         images[i] = { url: "", caption: b.caption, alt };
+        mix.failed++;
       }
     }
     if (imageBlocks.length && okImages === 0) throw new Error("이미지를 한 장도 만들지 못했어요.");
@@ -346,8 +433,20 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     /* [R8-A §2 · B-1] 골격 지문을 같이 남긴다 — 🔴 **여기서 안 적으면 `structure_repeat` 축은 견줄 재료가 0 이라 영영 «못 쟀어요» 다**(AC-29).
        영상의 `meta.frameHash` 와 같은 자리·같은 뜻(그림 지문 ↔ 골격 지문). 추가형이라 옛 글엔 없고, 없는 글은 견주기에서 빠진다. */
     const sPrint = structurePrint(draft.blocks);
+    /* [R8 §2.4] 수치 주장 — **재작성까지 끝난 최종 블록**으로 잰다(초안으로 재면 화면과 본문이 갈린다). */
+    const claims = findNumericClaims(draft.blocks, draft.promptUser);
+    const claimSummary = summarizeClaims(claims);
+    if (claimSummary.risky) console.info(`[content-gen] piece ${pieceId} 확인 필요한 금액·비율 ${claimSummary.risky}개(우리가 준 자료에 없는 숫자)`);
     const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: (affiliate || meta.sponsored === true || meta.gift === true) ? disclosureTextFor({ affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true, provider: aff?.provider ?? null }) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
       structurePrint: sPrint, structureHash: structureHash(sPrint),
+      /* [R8 §10 · §5F] 🔴 이 글의 사진이 **어디서 왔나**(장수만). 되먹임 원장이 이 칸을 읽는다(옛 B-1 과 칸 이름 합의 2026-09-15).
+         🔴 **실제로 붙은 것만 센다** — «AI 1장일 것이다»로 채우면 그게 대용물이고 원장 전체가 거짓이 된다(AC-57). */
+      photoMix: mix,
+      /* [R8 §2.4] 🔴 **수치 주장 표시** — 프롬프트 ⑤칸이 «근거 없는 수치 금지»라고 말만 하고 **아무도 안 쟀다**.
+         여기서 잰다: 글 안의 숫자를 «우리가 준 것(given)»과 «모델이 만든 것(self)»으로 가른다.
+         🔴 **«맞나»를 재는 게 아니다** — 그건 우리가 알 수 없다. «누가 만든 숫자인가»까지다(`lib/fact-claims.ts` 헤더).
+         🔴 막지 않는다(§9) — 검수 화면이 보여 주고 사람이 확인한다. A 와 합의한 칸 이름: `numberClaims`. */
+      numberClaims: { summary: claimSummary, items: claims.slice(0, 40) },
       /* [R8 §2.1] 🔴 주제군을 **적어 둔다**. 검수·재검사가 다시 계산하면 재료가 달라 값이 갈린다 —
          여기서는 `intent` 를 알지만(소재에서 온다) 검수 시점엔 없어서 `intent:null` 로 계산되고 있었다.
          분량 폭이 주제군에 달렸으니, 갈리면 **잰 값은 같은데 기준이 다른** 상태가 된다. */
@@ -376,7 +475,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     try {
       const plannedAi = Math.max(0, Math.floor(Number(meta.aiImageCount ?? AI_IMAGES_INCLUDED) || 0));
       const actualAi = Math.max(0, Math.floor(Number(photoMix.ai ?? 0) || 0));
-      const want = pieceCoinCost("post", Math.min(plannedAi, actualAi), { format });
+      const want = pieceCoinCost("post", Math.min(plannedAi, actualAi), { format: coinFormatOf(channel, format) });
       const back = await settlePieceCoins(tid, pieceId, want);
       if (back > 0) {
         await writeAudit({ tenantId: tid, action: "piece_coin_settled", actorType: "system", target: `piece:${pieceId}`,
@@ -384,7 +483,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       } else if (actualAi > plannedAi) {
         /* 🔴 우리가 안은 몫 — 더 받지 않기로 한 값이다. 숫자로 남겨야 «스톡 재고가 비었다»를 운영이 본다. */
         await writeAudit({ tenantId: tid, action: "piece_ai_over_plan", actorType: "system", riskLevel: "low", target: `piece:${pieceId}`,
-          detail: { plannedAi, actualAi, absorbed: pieceCoinCost("post", actualAi, { format }) - pieceCoinCost("post", plannedAi, { format }), photoMix } });
+          detail: { plannedAi, actualAi, absorbed: pieceCoinCost("post", actualAi, { format: coinFormatOf(channel, format) }) - pieceCoinCost("post", plannedAi, { format: coinFormatOf(channel, format) }), photoMix } });
       }
     } catch (e) { console.error("[content-gen] 사진 값 정산 실패 — 글은 그대로 간다", String((e as Error)?.message ?? e).slice(0, 120)); }
     await recordOutcome({
