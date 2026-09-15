@@ -70,7 +70,8 @@
   /* [§1.6] 결제 라인 — ?keyin=1 정책 켜짐(기본 0) · ?keyinMid=0 비인증 MID 미등록 → available:false(체크박스 자체가 없다) */
   const keyinOn = qs.get("keyin") === "1", keyinMid = qs.get("keyinMid") !== "0";
   /* [P1R6] 손잡이 — ?supplier=0(회사 정보 없음 → 영수증 «준비 중») · ?share=0(이달 수익 0 → 공유 카드 없음) · ?managed=deny(플랜에 관리형 러너 없음 → 402 plan_feature) · ?export=running(내보내기 도는 중) · ?amOff=1(AM 다리 미설정) */
-  const mailOff = qs.get("mail") === "0";      // [P1R6] 가입 인증 메일 실패 흉내(배너 · 다시 보내기)
+  const mailOff = qs.get("mail") === "0";
+  const autoOff = qs.get("autoOff") === "1";  // [실측] 자동 편성 꺼짐(규칙은 있음) — 홈·편성표 맨 위 한 줄      // [P1R6] 가입 인증 메일 실패 흉내(배너 · 다시 보내기)
   let resendAt = 0;                             // 60초 쿨다운(서버 audit 로 재는 것을 흉내)
   const supplierOff = qs.get("supplier") === "0", shareOff = qs.get("share") === "0", managedDeny = qs.get("managed") === "deny", exportRunning = qs.get("export") === "running", exportFail = qs.get("export") === "fail", amOff = qs.get("amOff") === "1";
   const SUPPLIER = { name: "주식회사 함께워크", ceo: "김두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 123, 4층", email: "help@autocreate.dev", phone: "02-1234-5678" }; // ops_settings.company(운영센터 «회사 정보» 한 출처)
@@ -219,6 +220,7 @@
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 6) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
+  if (autoOff) { S.settings.autoSchedule = false; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
   /* 슬롯 생성(규칙대로 · 멱등) — 계약 §5 slots.roll 모양 */
@@ -360,7 +362,7 @@
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
-      return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
+      return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length, produceLeadDays: S.settings.produceLeadDays }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule; return { ok: true, settings: S.settings }; },
     "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p })), trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
@@ -484,6 +486,12 @@
     "personas-list": () => ({ ok: true, personas: S.personas }),
     "personas-save": (b) => { let p = S.personas.find((x) => x.id === Number(b.id)); if (p) Object.assign(p, { name: b.name, profile: b.profile }); else { p = { id: S.nextId++, name: b.name, profile: b.profile || {} }; S.personas.push(p); } return { ok: true, persona: p }; },
     /* §2 소재 — [v2.9] 뽑기는 배경 작업(POST 는 즉시 202 · 진행 상태는 topics-list.refresh 로 본다) */
+    "topics-add": (b) => { const nw = notWritable(); if (nw) return nw; const title = String(b.title || "").trim(); if (!title || title.length > 80) return err("title", title ? "80자 안으로 적어 주세요." : "무엇에 대해 쓸지 한 줄 적어 주세요.");
+      if (/도박|토토|카지노/.test(title)) return err("banned_category", "도박·사행성 주제는 만들 수 없어요.");
+      const dup = S.topics.find((x) => x.status === "candidate" && x.title.replace(/\s/g, "") === title.replace(/\s/g, "")); if (dup) return { ok: false, step: "duplicate", error: "30일 안에 같은 소재가 있어요.", topic: { id: dup.id, title: dup.title }, status: 400 };
+      if (S.topics.filter((x) => x.source === "manual" && (x.createdAt || "").slice(0, 10) === todayYmd).length >= 10) return { ok: false, step: "rate", error: "오늘은 10개까지 넣을 수 있어요. 내일 다시 넣어 주세요.", status: 429 };
+      const topic = { id: S.nextId++, title, angle: b.keyword ? String(b.keyword).trim() : "", channelHint: b.channelHint || S.accounts[0]?.channel || "naver_blog", score: null, status: "candidate", source: "manual", factors: { keyword: b.keyword ? String(b.keyword).trim() : undefined, intent: "info" }, createdAt: iso(Date.now()), expiresAt: iso(Date.now() + 30 * 86400e3) };
+      S.topics.unshift(topic); return { ok: true, topic, status: 201 }; }, // [실측] 직접 소재 — Topic 모양 topics-list 그대로 · source:"manual" · 검색량은 없음(0 아님)
     "topics-reference": (b) => { const url = String(b.url || "").trim(); if (!/^https?:\/\/\S+$/.test(url)) return err("url", "쇼츠·릴스 링크를 붙여 주세요."); if (S.templates.filter((x) => x.createdAt.slice(0, 10) === todayYmd).length >= 3) return err("limit", "오늘은 3개까지 배울 수 있어요. 내일 다시 해 주세요.");
       const tpl = { id: S.nextId++, name: /youtube|youtu\.be/.test(url) ? "비포·애프터 반전 (60초)" : "생활밀착 3단계 (30초)", sourceUrl: url, structure: ["3초 훅: 결과 먼저 보여 주기", "문제 한 줄", "해결 3단계", "엔드카드 · 설명란 링크"], hook: "twist", style: { palette: "ink", captions: "keyword_center", pace: "fast" }, createdAt: iso(Date.now()) };
       S.templates.push(tpl); const tp = S.topics.find((x) => x.status === "candidate" && VIDEO_CH.includes(x.channelHint)) || S.topics.find((x) => x.status === "candidate"); if (tp) tp.factors.structureTemplateId = tpl.id; return { ok: true, template: tpl }; }, // [P1R5] §1.11 · 코인 0 · 하루 3회
@@ -540,7 +548,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3 }),
     "rules-save": (b) => { if ((b.rules || []).filter((r) => r.active !== false).length > 3) return err("limit", "이 요금제에서는 규칙을 3개까지 만들 수 있어요."); const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
     "rules-settings": (b) => { for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
-    "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999"; return { ok: true, slots: S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")) }; },
+    "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999"; const lead = S.settings.produceLeadDays || 3;
+      return { ok: true, slots: S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => { const o = { ...s }; const days = Math.round((new Date(s.date + "T00:00:00Z") - new Date(todayYmd + "T00:00:00Z")) / 86400e3); if (!s.pieceId && ["planned", "topic_assigned", "assigned"].includes(s.status) && days >= 0 && days < lead) o.skipReason = "too_soon"; return o; }) }; }, // [실측] produceLeadDays 안의 planned 자리 = 이번엔 건너뛴다(서버가 말한다)
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
     "slots-assign-topic": (b) => { if (bannedTopic) return err("banned_category", "도박·사행성 주제는 만들 수 없어요."); tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
@@ -645,7 +654,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

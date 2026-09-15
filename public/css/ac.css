@@ -215,7 +215,7 @@ input,textarea,select{font:inherit;color:inherit}
 /* 배너(원격접속·체험) */
 .banner{background:var(--warn-soft);color:var(--warn-ink);border-radius:14px;padding:10px 14px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .banner.info{background:var(--brand-soft);color:var(--ink)}
-.banner button{font-weight:700;text-decoration:underline}
+.banner button{font-weight:700;text-decoration:underline;white-space:nowrap;flex:none}
 
 /* ── [P1R4] 운영센터 표(§13.0b «운영 콘솔 예외» — 고객 화면엔 쓰지 않는다 · 밀도만 높인다) ── */
 .twrap{overflow-x:auto;padding:0 4px 4px} .tbl{width:100%;border-collapse:collapse;font-size:13px;line-height:1.4}
