@@ -36,7 +36,7 @@ function pages(ids) {
   const q = (u) => MOCK ? `${u}${u.includes("?") ? "&" : "?"}mock=1` : u;
   return [
     { key: "accounts", url: q("/app/accounts.html"), sheet: [".cg .cgi", "button:has-text('연결')"] },
-    { key: "create", url: q("/app/create.html"), sheet: ["button:has-text('디렉터에게')", "a:has-text('디렉터에게')"] },
+    { key: "create", url: q("/app/create.html"), sheet: ["#addTopic", "button:has-text('디렉터에게')", "a:has-text('디렉터에게')"] },   // [R6.5] «내 소재 넣기» 시트
     { key: "director", url: q(`/app/director.html?topicId=${ids.topicId || 1}`), sheet: ["button:has-text('손보기')"] },
     { key: "pieces", url: q("/app/pieces.html"), sheet: [] },
     { key: "piece", url: q(`/app/piece.html?id=${ids.pieceId || 1}`), sheet: ["button:has-text('⋯')", ".appbar .ic:last-child", "button[aria-label*='더']"] },
@@ -138,8 +138,10 @@ async function run() {
         let opened = false;
         for (const sel of pg.sheet) {
           const el = page.locator(sel).first();
+          await el.waitFor({ state: "visible", timeout: 4000 }).catch(() => {});   // [R6.5] 목록이 API 뒤에 그려지는 화면(만들기)은 셀렉터가 늦게 생긴다 — 잠깐 기다린다
           if (await el.count() && await el.isVisible().catch(() => false)) {
-            await el.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(500);
+            await el.click({ timeout: 3000 }).catch(() => {});
+            await page.locator(".sheet").first().waitFor({ state: "attached", timeout: 8000 }).catch(() => {});   // [R6.5] 시트를 열기 전에 API 를 한 번 부르는 화면(만들기 «내 소재 넣기» = accounts-list)이 있다 — 로컬 콜드스타트 3~4초를 기다린다
             if (await page.locator(".sheet").count()) { opened = true; const s2 = join(OUT, `${pg.key}-${vp}-sheet.png`); await page.screenshot({ path: s2, fullPage: false }).catch(() => {}); const c2 = await page.evaluate(CHARTER).catch(() => null); rec(pg.key, vp, "시트 열림 · 시트 Primary ≤1", !!c2 && c2.primarySheet <= 1, `${sel} → primary ${c2?.primarySheet}`, s2); const sys2 = (c2?.text || "").match(new RegExp(FORBIDDEN.source, "gi")) || []; if (sys2.length) rec(pg.key, vp, "시트 시스템 용어 0", false, `«${[...new Set(sys2)].join(",")}»`); }
             break;
           }

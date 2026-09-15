@@ -93,11 +93,12 @@
     const ymd = (d) => d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
     const s = await UI.api(`/api/slots-list?from=${ymd(d0)}&to=${ymd(d1)}`);
     const next = s.ok ? (s.slots || []).filter((x) => x.publishAt && new Date(x.publishAt) > new Date() && !["skipped", "published"].includes(x.status)).sort((a, b) => a.publishAt.localeCompare(b.publishAt))[0] : null;
-    if (!next) return `규칙 ${r.auto.rules}개로 돌아가요`;
+    const head = r.auto.enabled ? `규칙 ${r.auto.rules}개로 돌아가요` : `규칙 ${r.auto.rules}개 · 지금은 꺼져 있어요`;   // [R6.5 C] 꺼져 있는데 «돌아가요» 라고 말하지 않는다(위 배너와 어긋난다)
+    if (!next) return head;
     const day = ymd(new Date(next.publishAt)) === ymd(d0) ? "오늘" : ymd(new Date(next.publishAt)) === ymd(new Date(Date.now() + 86400e3)) ? "내일" : UI.dateKST(next.publishAt);
-    return `규칙 ${r.auto.rules}개로 돌아가요 · 다음 글은 ${day} ${UI.timeKST(next.publishAt)}`;
+    return `${head} · 다음 글은 ${day} ${UI.timeKST(next.publishAt)}`;
   };
-  UI.$("#autoDesc").textContent = r.auto.rules ? `규칙 ${r.auto.rules}개로 돌아가요` : "규칙을 만들면 켤 수 있어요";
+  UI.$("#autoDesc").textContent = r.auto.rules ? (r.auto.enabled ? `규칙 ${r.auto.rules}개로 돌아가요` : `규칙 ${r.auto.rules}개 · 지금은 꺼져 있어요`) : "규칙을 만들면 켤 수 있어요";
   autoDesc().then((t) => { UI.$("#autoDesc").textContent = t; });
   UI.toggle(tg, async (on) => {
     if (on && !r.auto.rules) { UI.toast("먼저 편성 규칙을 만들어 주세요"); setTimeout(() => UI.go("/app/schedule.html"), 600); return false; }
