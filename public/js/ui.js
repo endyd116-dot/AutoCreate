@@ -869,7 +869,7 @@
      🔴 겁주지 않는다(§3) — 사실 한 줄 → 어떻게 하면 되는지 → 우리가 대신 해 주는 것. */
   /* [R9R10-A · B 확정 2026-09-16] 서식·블록 이름표 — 🔴 `meta.formatUnused[].label` 은 **서버가 실어 준다**(정본 MARK_LABEL). 이 맵은 ①서버 label 이 비었을 때의 예비
      ②`formatCaps` 가 null(«올려 봐야 알아요»)인 종류를 부를 때만 쓴다. 어휘 = 마크 7(bold·underline·italic·value·line·row·emoji) + 블록 타입. */
-  UI.MARK_LABEL = { bold: "굵게", underline: "밑줄", italic: "기울임", value: "핵심 숫자·낱말 강조", line: "문장 형광펜", row: "나열 강조", emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", place: "장소 카드", h3: "작은 소제목", tip: "팁 상자", summary: "요약 상자", affiliate: "상품 카드", adsense: "광고 자리" };
+  UI.MARK_LABEL = { bold: "굵게", underline: "밑줄", italic: "기울임", value: "핵심 강조", line: "형광펜", row: "나열 강조", emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", place: "장소 카드", h3: "작은 소제목", tip: "팁 상자", summary: "요약 상자", affiliate: "상품 카드", adsense: "광고 자리" };
   UI.STYLE_SRC = { url: "링크로 배움", capture: "캡처로 배움", paste: "붙여넣기로 배움" };
   UI.REF_FAIL_SAY = {
     login_wall: "로그인해야 보이는 글이라 저희가 못 열었어요.",
