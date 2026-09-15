@@ -63,8 +63,8 @@ export default async (req: Request): Promise<Response> => {
       const out: Record<string, unknown> = { ok: true, eligible, price, status, assigned, max, planKey };
       if (!eligible) out.reason = "지금 요금제에는 관리형 러너가 없어요. Pro 로 바꾸면 신청할 수 있어요.";
       if (grade === "included") out.reason = "Agency 요금제에는 관리형 러너가 포함돼 있어요(추가 요금 없음).";
-      // 새 이름으로 내보내되 옛 이름도 함께 둔다(A 화면이 바뀌는 동안 깨지지 않게 · 바뀌면 devices 를 뺀다).
-      if (open) { out.accounts = n(open.accounts) || n(open.devices); out.devices = out.accounts; out.requestedAt = utcDate(open.created_at)?.toISOString(); }
+      // A 가 `accounts` 로 전환 완료(2026-09-15) — 옛 이름 `devices` 는 응답에서 뺐다.
+      if (open) { out.accounts = n(open.accounts) || n(open.devices); out.requestedAt = utcDate(open.created_at)?.toISOString(); }
       return json(out);
     }
 
@@ -75,7 +75,8 @@ export default async (req: Request): Promise<Response> => {
     const feat = await requireFeature(tid, "managedRunner"); if (!feat.ok) return feat.res;   // Starter → 402 plan_feature
 
     const b = await readJson<{ accounts?: unknown; devices?: unknown; note?: unknown }>(req);
-    // 화면이 새 이름(accounts)으로 보내고, 아직 안 바뀐 화면은 옛 이름(devices)으로 보낸다 — 둘 다 받는다.
+    /* 받는 쪽은 옛 이름도 계속 받는다 — 옛 화면이 캐시에 남아 있을 수 있고, 받아 주는 건 공짜다.
+       내보내는 쪽만 뺐다(응답에 두 이름이 있으면 다음 사람이 «어느 게 진짜냐»를 묻는다). */
     const accounts = n(b.accounts) || n(b.devices);
     if (accounts < 1 || accounts > max) {
       return badRequest(`계정 수는 1~${max}개 사이로 골라 주세요(지금 요금제 기준).`, "accounts");
@@ -107,8 +108,7 @@ export default async (req: Request): Promise<Response> => {
       VALUES (${tid}, ${"managed_runner"}, ${"관리형 러너 신청을 받았어요"},
               ${`계정 ${accounts}개 신청이 접수됐어요. 담당이 확인하고 준비되면 알려 드릴게요.`}, ${"/app/runner.html"})`);
 
-    // 옛 이름도 함께(A 화면 전환 중 호환 · 전환되면 devices 를 뺀다).
-    return json({ ok: true, status: "requested", accounts, devices: accounts, price, totalKrw });
+    return json({ ok: true, status: "requested", accounts, price, totalKrw });
   } catch (err) {
     return jsonError("managed_runner", err);
   }
