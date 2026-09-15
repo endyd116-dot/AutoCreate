@@ -86,12 +86,38 @@ export function warmupState(inp: WarmupInput, now: Date = new Date()): WarmupSta
  *   워밍업 중이면 ①하루 1건으로 낮추고 ②이번 주 할당을 다 썼으면 **0**(= 오늘은 더 못 올린다).
  *   🔴 `postsThisWeek` 를 모르면 주간 판정을 **건너뛴다**(하루 상한만 적용) — 모르는 값으로 막지 않는다.
  */
-export function effectiveDailyCap(storedCap: number, inp: WarmupInput, now: Date = new Date()): number {
+/**
+ * 🔴 **워밍업은 «하드»가 아니다**(CLAUDE §9 · 사장님 지시 2026-09-15).
+ *   «새 계정은 주 1건»이라는 규칙은 **어디에도 없다** — 플랫폼 문서에 그런 문장이 없고, **우리 추정**이다
+ *   (간격 30분과 똑같다 · `docs/active/2026-09-15-proxy-cost.md` §6.3b).
+ *   §9 의 하드 셋(①법령 위반 ②제3자가 다침 ③되돌릴 수 없음) 중 **어디에도 안 든다** —
+ *   올린 글은 이제 **내릴 수 있고**(DESIGN §5E), 되돌릴 수 없는 건 «계정 정지»인데 그건 **위험**이지 확정이 아니다.
+ *
+ *   ⚠️ 종전엔 주간 할당을 넘기면 **0 을 반환**했다. 그러면 그 계정이 **발행 풀에서 통째로 빠져**
+ *      (`director.ts:168` · `director-auto.ts:72` 가 `postsToday < dailyCap` 로 거른다)
+ *      고객은 «오늘 하나 더»가 아니라 **«이번 주 끝»**을 맞고, 화면에는 **이유도 안 보인다**.
+ *      «과한 정도»가 아니라 고장이었다.
+ *
+ *   ⇒ **`override` 를 받는다**: 고객이 «오늘은 하나 더 올릴래»를 **직접 눌렀을 때만** 주간 0 을 넘긴다.
+ *     🔴 **끄는 것이 아니다**(끄는 건 `warmup_off` 가 따로 있다) — **그 회차만** 넘긴다. 저장하지 않는다.
+ *     🔴 하루 상한(`WARMUP_DAILY_CAP`)은 그대로다 — «오늘 하나 더»지 «오늘 무제한»이 아니다.
+ *     🔴 그리고 **`daily_cap`(고객이 정한 값)은 넘기지 않는다** — 우리 추정을 넘기는 것과
+ *        고객이 스스로 정한 값을 우리가 넘겨 주는 것은 다르다. 후자면 그 설정이 무의미해진다.
+ */
+export interface CapOpts {
+  /** 고객이 «이번만 넘길래»를 **직접 눌렀나**. 자동 편성(크론)은 절대 true 로 부르지 않는다. */
+  override?: boolean;
+}
+export function effectiveDailyCap(storedCap: number, inp: WarmupInput, now: Date = new Date(), opts?: CapOpts): number {
   const cap = Math.max(0, Math.floor(Number(storedCap) || 0));
   const st = warmupState(inp, now);
   if (!st.active) return cap;
   const week = Number(inp.postsThisWeek);
-  if (Number.isFinite(week) && st.weeklyQuota !== null && week >= st.weeklyQuota) return 0;
+  if (Number.isFinite(week) && st.weeklyQuota !== null && week >= st.weeklyQuota) {
+    /* 주간 할당을 다 썼다 — 자동 편성은 여기서 멈춘다(0). 고객이 직접 눌렀으면 **하루 한 건**은 열어 준다.
+       🔴 `cap` 을 넘지 않는다: 고객이 daily_cap 을 0 으로 뒀으면 그건 «올리지 마»라는 고객의 뜻이다. */
+    return opts?.override ? Math.min(cap, WARMUP_DAILY_CAP) : 0;
+  }
   return Math.min(cap, WARMUP_DAILY_CAP);
 }
 
@@ -102,4 +128,21 @@ export function effectiveDailyCap(storedCap: number, inp: WarmupInput, now: Date
 export function effectiveMinGapMin(storedGap: number, inp: WarmupInput, now: Date = new Date()): number {
   const gap = Math.max(0, Math.floor(Number(storedGap) || 0));
   return warmupState(inp, now).active ? Math.max(gap, 360) : gap;   // 6시간
+}
+
+/**
+ * warmupRisk — 🔴 **막지 않고 말한다**(간격·새벽과 같은 방식). 화면이 그대로 보여 준다.
+ *   경우마다 **다른 문구**여야 한다 — 같으면 고객이 «왜 지금 그런지»를 모른다.
+ *   @returns 위험 한 줄(워밍업이 아니면 null)
+ */
+export function warmupRisk(inp: WarmupInput, now: Date = new Date()): string | null {
+  const st = warmupState(inp, now);
+  if (!st.active) return null;
+  const week = Number(inp.postsThisWeek);
+  const full = Number.isFinite(week) && st.weeklyQuota !== null && week >= st.weeklyQuota;
+  if (full) {
+    return `만든 지 얼마 안 된 계정이라 이번 주 권장량(${st.weeklyQuota}건)을 이미 채웠어요. `
+      + "지금 더 올리면 «새 계정이 갑자기 많이 쓴다»로 보여 정지될 수 있어요 — 그래도 올리시겠어요?";
+  }
+  return `만든 지 얼마 안 된 계정이라 천천히 올리는 중이에요(${st.label}). 하루 1건까지 권해요.`;
 }

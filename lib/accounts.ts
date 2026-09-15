@@ -11,7 +11,7 @@ import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
 import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, type ConnectMethod } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0)
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
-import { warmupState, effectiveDailyCap, effectiveMinGapMin } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
+import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 
 type Row = Record<string, unknown>;
 export const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -38,7 +38,17 @@ export interface AccountRow {
   dailyCapBase?: number;
   minGapMin: number;
   /** 워밍업 중일 때만(§2.6). 화면은 `label` 을 그대로 쓰면 된다. */
-  warmup?: { week: number; weeklyQuota: number | null; label: string; postsThisWeek: number };
+  /** [P1R7 §2.6 · R8 §9] 워밍업 중일 때만. 🔴 `blockedThisWeek`·`canOverride`·`risk` 는
+      «막지 않고 말한다»를 화면이 그릴 재료다 — 워밍업은 **우리 추정**이지 규칙이 아니다(CLAUDE §9). */
+  warmup?: {
+    week: number; weeklyQuota: number | null; label: string; postsThisWeek: number;
+    /** 이번 주 권장량을 다 썼다 — **자동 편성은 멈춘다**. */
+    blockedThisWeek?: boolean;
+    /** 🔴 고객이 «이번만 넘길래»를 누를 수 있나(끄는 게 아니라 **그 회차만**). */
+    canOverride?: boolean;
+    /** 넘길 때 보여 줄 위험 한 줄. */
+    risk?: string;
+  };
   goldenHours?: number[]; lastPostAt?: string; lastErrorKind?: string; groupId?: number; personaId?: number;
   proxyUrl?: string; browserProfileKey: string; hasCreds: boolean;
   monetize: { coupang: boolean; adpost: boolean; adsense: boolean };
@@ -75,7 +85,18 @@ export function toAccountRow(r: Row): AccountRow {
     o.dailyCapBase = o.dailyCap;
     o.dailyCap = effectiveDailyCap(o.dailyCap, wIn);
     o.minGapMin = effectiveMinGapMin(o.minGapMin, wIn);
-    o.warmup = { week: w.week, weeklyQuota: w.weeklyQuota, label: w.label, postsThisWeek: wIn.postsThisWeek };
+    /* 🔴 화면이 «왜 지금 못 만드나»를 말할 수 있어야 한다(CLAUDE §9 — 막을 거면 이유를 보여 준다).
+       `blockedThisWeek` = 이번 주 권장량을 다 썼다(자동 편성은 멈춘다) ·
+       `canOverride` = 🔴 **고객이 «이번만 넘길래»를 누를 수 있다**(끄는 게 아니라 그 회차만) ·
+       `risk` = 넘길 때 보여 줄 한 줄. 문구는 경우마다 다르다. */
+    const blockedThisWeek = o.dailyCap === 0 && (o.dailyCapBase ?? 0) > 0;
+    o.warmup = {
+      week: w.week, weeklyQuota: w.weeklyQuota, label: w.label, postsThisWeek: wIn.postsThisWeek,
+      blockedThisWeek,
+      /* 고객이 daily_cap 을 0 으로 뒀으면 넘길 것이 없다 — 그건 우리 추정이 아니라 **고객의 뜻**이다. */
+      canOverride: blockedThisWeek,
+      risk: warmupRisk(wIn) ?? undefined,
+    };
   }
   if (Array.isArray(r.golden_hours) && r.golden_hours.length) o.goldenHours = (r.golden_hours as unknown[]).map(Number).filter((n) => Number.isFinite(n));
   const lp = utcDate(r.last_post_at); if (lp) o.lastPostAt = lp.toISOString();
