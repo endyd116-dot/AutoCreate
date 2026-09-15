@@ -20,6 +20,7 @@ import { sql } from "drizzle-orm";
 import { q } from "./accounts";
 import { encrypt, decrypt, credsEncConfigured, maskSecret } from "./creds-crypto";
 import { redactKeys, type ByoKey } from "./ai-key";
+import { featureOn } from "./ops/features";   // [2026-09-16] BYO 는 지금 **안 판다** — 입구만 닫고 코드는 재워 둔다(CLAUDE §8)
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -57,6 +58,9 @@ function toView(r: Record<string, unknown>): ByoKeyView {
 export async function byoKeyFor(tenantId?: number | null): Promise<ByoKey | null> {
   const tid = Math.floor(Number(tenantId) || 0);
   if (!tid || !credsEncConfigured()) return null;
+  /* 🔴 기능이 꺼져 있으면 **이미 꽂아 둔 키도 안 쓴다** — 꺼진 기능이 뒤에서 도는 게 제일 나쁘다(고객은 우리 키로 도는 줄 안다).
+     표의 행은 **안 지운다**: 다시 켜면 그 자리에서 이어진다(고객이 다시 꽂게 만들지 않는다). */
+  if (!(await featureOn("byoAiKey"))) return null;
   const hit = cache.get(tid);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.key;
   try {
@@ -149,6 +153,7 @@ export async function listByoKeys(tenantId: number): Promise<ByoKeyView[]> {
  */
 export async function saveByoKey(tenantId: number, key: string, label?: string): Promise<{ ok: true; id: number } | { ok: false; kind: ByoErrorKind | "not_configured"; error: string }> {
   const tid = Math.floor(Number(tenantId) || 0);
+  if (!(await featureOn("byoAiKey"))) return { ok: false, kind: "not_configured", error: "지금은 내 키를 꽂는 기능을 쓰지 않아요." };
   const k = String(key ?? "").trim();
   if (!credsEncConfigured()) return { ok: false, kind: "not_configured", error: "지금은 키를 안전하게 보관할 수 없어요. 운영팀에 알려 주세요." };
   if (k.length < 20) return { ok: false, kind: "invalid", error: BYO_ERROR_TEXT.invalid };
