@@ -11,6 +11,8 @@
  *   🔴 401 이면 토큰을 한 번만 강제 갱신하고 재시도한다(무한 재시도 금지).
  */
 import { ensureFreshToken } from "./tokens";
+import { articleJsonLdScript, jsonLdSurvived } from "./seo";   // [P1R8 §3.4-②] 살아 있는 구조화 데이터만(Article)
+import { writeAudit } from "../audit";
 import type { PublishPiece, PublishAccount, PublishFailReason } from "./contract";
 
 export type ConnectorResult =
@@ -43,10 +45,18 @@ export async function publishToBlogger(piece: PublishPiece, account: PublishAcco
   const blogId = String((tok.token.extra as Record<string, unknown> | undefined)?.blogId ?? tok.token.externalId ?? "").trim();
   if (!blogId) return { ok: false, reason: "no_creds", retriable: false, error: "블로그를 찾지 못했어요. 블로거를 다시 연결해 주세요." };
 
+  /* [P1R8 §3.4-② · SEO 조사] Article JSON-LD — 블로거도 `<head>` 를 못 만져서 **본문 끝**에 붙인다(구글은 문서 어디서든 읽는다).
+     🔴 블로거가 `<script>` 를 지우는지 **우리 키로 확인한 적이 없다**(`GOOGLE_OAUTH_CLIENT_ID` 미등록). 그래서 워드프레스와 같이
+        응답 본문을 되읽어 **살아남았는지 보고 감사에 남긴다** — «넣었다»를 «붙었다»로 세지 않는다(AC-63).
+     🔴 FAQPage·HowTo 는 **일부러 안 넣는다**(둘 다 구글이 지원을 끊었다 · `lib/publish/seo.ts` 머리말). */
+  const ld = articleJsonLdScript(piece, {
+    authorName: account.displayName || account.handle,
+    ...(piece.scheduledFor ? { publishedAt: piece.scheduledFor } : {}),
+  });
   const body: Record<string, unknown> = {
     kind: "blogger#post",
     title: String(piece.title || "").slice(0, 300),
-    content: piece.bodyHtml,
+    content: piece.bodyHtml + ld,
   };
   if (piece.tags.length) body.labels = piece.tags.slice(0, 20).map((t) => String(t).slice(0, 40));
 
@@ -74,6 +84,12 @@ export async function publishToBlogger(piece: PublishPiece, account: PublishAcco
   if (res.status < 200 || res.status >= 300 || !url) {
     const msg = String(((res.json?.error as Record<string, unknown> | undefined)?.message) ?? "").slice(0, 160);
     return { ok: false, reason: "channel_error", retriable: false, error: "블로거가 글을 받지 않았어요.", detail: `http_${res.status} ${msg}` };
+  }
+  if (ld && !jsonLdSurvived(res.json?.content)) {
+    /* 🔴 발행은 성공이다 — 구조화 데이터는 부가다. 다만 **지워졌다는 사실**은 남긴다(안 남기면 다음 사람이 처음부터 추적한다). */
+    await writeAudit({ tenantId: piece.tenantId, action: "blogger_jsonld_stripped", actorType: "system", target: `piece:${piece.id}`,
+      detail: { note: "블로거가 <script type=application/ld+json> 를 지웠다 — 이 채널은 구조화 데이터를 못 싣는다", url: url.slice(0, 200) }, riskLevel: "low" })
+      .catch((e: unknown) => console.warn("[blogger] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
   }
   return { ok: true, externalUrl: url, ...(id ? { channelRef: id } : {}) };
 }
