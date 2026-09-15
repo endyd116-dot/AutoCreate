@@ -133,16 +133,21 @@ async function main() {
       guard(tid);
       // 재료: 글 1 · 결제 이력 1(법정 보존 대상) · R2 접두사 1
       const [pc] = await s`INSERT INTO pieces (tenant_id, channel, kind, status, title, body, meta) VALUES (${tid}, 'naver_blog', 'post', 'published', 'C R7 파기 대상', '<p>본문</p>', ${s.json({})}) RETURNING id`;
-      await s`INSERT INTO invoices (tenant_id, kind, period, amount_krw, vat_krw, total_krw, status, paid_at)
-        VALUES (${tid}, 'subscription', ${"2026-09"}, 19000, 1900, 20900, 'paid', NOW())`.catch(() => {});
+      /* 🔴 씨앗은 **삼키지 않는다** — 종전엔 `.catch(() => {})` 라 컬럼이 틀려 0행이 심겼고, 그걸 «영수증까지 지웠다» 는
+         제품 결함으로 읽을 뻔했다(내 catch 가 내 눈을 가렸다). 컬럼은 실제 스키마대로: amount(원) · tax_biz(개인 식별자) */
+      const [seedInv] = await s`INSERT INTO invoices (tenant_id, kind, period, amount, vat_krw, total_krw, status, paid_at, order_no, tax_biz, detail)
+        VALUES (${tid}, 'subscription', ${"2026-09"}, 19000, 1900, 20900, 'paid', NOW(), ${"AC-R7-" + STAMP}, ${s.json({ bizNo: "000-00-00000", email: `c+r7purge-${STAMP}@autocreate.test` })}, ${s.json({ email: `c+r7purge-${STAMP}@autocreate.test` })}) RETURNING id`;
+      rec("③ 씨앗 — 결제 이력 1행을 실제로 심었다(되읽기)", Number(seedInv?.id) > 0, `invoice ${seedInv?.id}`);
       await call(jar, "/api/account-close", { body: {} });
       await s`UPDATE tenants SET purge_at = NOW() - interval '1 day' WHERE id = ${tid}`;   // 기한 지난 것으로
       const c = await cron("hourly", tid); const st = stepOf(c, "tenant.purge");   // hourly·global(04시 게이트는 manual 이면 통과)
       const [t3] = await s`SELECT id, status FROM tenants WHERE id = ${tid}`;
       const [left] = await s`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid}`;
       rec("🔴 ③ 기한 지난 집은 실제로 파기된다(글 행 0)", !!st && Number(left?.c) === 0, `step ${JSON.stringify(st || {}).slice(0, 80)} · pieces ${left?.c} · tenant ${t3?.status ?? "행 없음"}`, `piece ${pc?.id}`);
-      const inv = await s`SELECT id, tenant_id, total_krw, tax_biz, meta FROM invoices WHERE tenant_id = ${tid}`.catch(() => []);
-      const masked = inv.length === 0 ? null : inv.every((x) => !JSON.stringify(x).includes(`c+r7purge-${STAMP}`));
+      /* 🔴 `.catch(() => [])` 가 **없는 컬럼(meta)** 의 오류를 삼켜 «영수증 0행» 으로 보이게 했다 — 두 번째. 컬럼은 스키마대로, 실패는 소리 내게. */
+      let inv = [];
+      try { inv = await s`SELECT id, tenant_id, total_krw, tax_biz, detail, order_no FROM invoices WHERE tenant_id = ${tid}`; } catch (e) { rec("③ 영수증 조회", false, String(e?.message ?? e).slice(0, 90)); }
+      const masked = inv.length === 0 ? null : inv.every((x) => !JSON.stringify(x).includes(`c+r7purge-${STAMP}`) && !x.tax_biz);
       rec("🔴 ③ 결제 이력은 **법정 보존분만 남고 개인 식별자는 마스킹**(다 지워도·안 지워도 틀린 자리)",
         inv.length >= 1 && masked === true, inv.length ? `영수증 ${inv.length}행 남음 · 식별자 노출 ${masked ? "0" : "🔴 있음"}` : "🔴 영수증까지 전부 삭제(전자상거래법 5년 보존 위반 소지)");
       const [aud] = await s`SELECT id, detail FROM audit_logs WHERE action = 'tenant_purged' ORDER BY id DESC LIMIT 1`.catch(() => []);
