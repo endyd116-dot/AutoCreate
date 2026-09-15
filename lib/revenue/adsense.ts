@@ -4,6 +4,8 @@
  *   귀속: PAGE_URL → `posts.external_url`(정규화 비교) → piece · DOMAIN_NAME → `config.domainToAccount`(사용자가 사이트↔계정을 이어 둔 표) → account.
  *   🔴 원문 일부는 raw 에(진단) · 토큰은 절대 안 넣는다. 파싱이 어긋나면 rows 를 0 으로 채우지 않고 `parse` 로 돌려준다(AC-9).
  *   자격: `revenue_sources.cred_enc` = OAuthToken(JSON · AES-256-GCM). 만료 임박은 ensureFresh 가 갱신 → `credPatch` 로 돌려주면 호출부가 저장.
+ *   🔴 [P1R7 B3 · §13.5 «외부 값»] **DATE 차원은 애드센스 계정 시간대(대개 PT) 기준일**이다 — 우리는 **옮기지 않고 그대로 쓴다**(옮기면 매체 리포트와
+ *      숫자가 어긋나 «우리 화면이 틀렸다»가 된다). 대신 `DAY_BASIS_OF.adsense = "pt"` 로 **화면이 «미국 시간 기준»을 한 줄로 밝힌다**. ⬜ 실측은 키가 온 뒤.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
