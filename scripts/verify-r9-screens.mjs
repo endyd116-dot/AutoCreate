@@ -55,15 +55,15 @@ const FORBID_ALL = ["url_para", "caret_drift", "channel_unsupported", "block_uns
 /* ── 장면 — 트리거 A-1~A-6 을 하나씩 짚는다 ── */
 const SCENES = [
   { key: "piece-fmt", url: q("/app/piece.html?id=501&fmt=1"), wait: "#fmtunused:not([hidden])",
-    need: ["이 채널에선 못 낸 꾸밈", "밑줄", "표", "핵심 강조", "나열 강조", "주소가 링크로 살아야 해서", "자리가 어긋나서 안 칠했어요", "기울임은 일부러 안 넣어요", "글 내용은 그대로예요", "등급", "보통", "든 코인", "2코인", "스타일", "살림 블로그 스타일"],
+    need: ["이 채널에선 못 낸 꾸밈", "밑줄", "표", "핵심 숫자·낱말 강조", "나열 강조", "주소가 든 문단은 링크가 먼저라", "편집기에서 자리를 정확히 못 잡아", "핵심 숫자·낱말 강조 2곳", "기울임 — 이 채널에서는 낼 수 없는 꾸밈이라", "글 내용은 그대로예요", "등급", "보통", "든 코인", "2코인", "스타일", "살림 블로그 스타일"],
     forbid: ["최소", "못 낸 서식", "budget"], marks: true, negative: { hide: "#fmtunused", mustLose: "이 채널에선 못 낸 꾸밈" } },
   { key: "piece-plain", url: q("/app/piece.html?id=501"), wait: "#why:not([hidden])", need: ["등급", "보통"], forbid: ["못 낸 꾸밈", "올려 봐야 아는 꾸밈", "돌려드렸어요"] },
   { key: "piece-settle", url: q("/app/piece.html?id=501&settle=1"), wait: "#why:not([hidden])", need: ["프리미엄", "1코인", "2코인은 돌려드렸어요", "내 사진으로 채워서"], forbid: ["3코인"] },
-  { key: "piece-unknown-caps", url: q("/app/piece.html?id=502"), wait: "#fmtunused:not([hidden])", need: ["올려 봐야 아는 꾸밈", "올려 봐야 알아요", "핵심 강조", "나열 강조"], forbid: ["못 낸 꾸밈"] },
+  { key: "piece-unknown-caps", url: q("/app/piece.html?id=502"), wait: "#fmtunused:not([hidden])", need: ["올려 봐야 아는 꾸밈", "올려 봐야 알아요", "핵심 숫자·낱말 강조", "나열 강조"], forbid: ["못 낸 꾸밈"] },
   { key: "create", url: q("/app/create.html"), wait: "#refPost:not([hidden])", need: ["글 레퍼런스로 스타일 배우기", "코인 0"], forbid: [] },
   { key: "create-sheet", url: q("/app/create.html"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rfList .stylerow" }],
     need: ["잘 된 글 주소", "이번 달 2/30개", "숫자와 목록", "남의 문장은 한 줄도 저장하지 않아요", "배운 스타일", "살림 블로그 스타일", "정리형 리뷰", "1.8배", "주소로 못 열면"], forbid: ["summary", "captionRate"], sheet: true,
-    actions2: [{ click: "#rfList [data-open]" }, { wait: "#rfList [data-body]:not([hidden])" }], need2: ["문단 2~3줄", "이모지 ✅📌💡 를 문단 첫머리에", "밑줄 5곳", "사진 7장", "기본에서 풀기", "지우기"] },
+    actions2: [{ click: "#rfList [data-open]" }, { wait: "#rfList [data-body]:not([hidden])" }], need2: ["문단 2~3줄", "이모지 ✅📌💡 를 문단 첫머리에", "밑줄 5곳", "사진 7장", "뼈대 · 첫 줄 → 소제목 → 문단", "기본에서 풀기", "지우기"] },
   { key: "ref-ok", url: q("/app/create.html"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rf input[name=url]" }, { fill: ["#rf input[name=url]", "https://blog.naver.com/someone/223000000"] }, { click: "#rfGo" }, { wait: "#rfState:not([hidden])" }, { sleep: 1500 }],
     need: ["차례를 기다리고 있어요"], forbid: [], sheet: true,
     actions2: [{ waitText: "아래 «배운 스타일»에서" }], need2: ["배웠어요 · 새로 배운 스타일", "이번 달 3/30개"] },

@@ -413,7 +413,7 @@
 
   /* ── 상태 어휘(계약 §1·§4·§5 → 사람말 알약) ── */
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
-  UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], awaiting_runner: ["warn", "PC 대기"], failed: ["danger", "실패"], rejected: ["off", "버림"] };   // [AC-52] awaiting_runner = 영상 렌더가 내 PC 프로그램을 기다린다(편성표 낱말과 같게)
+  UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], edited: ["warn", "고쳤어요"], /* [R9-9 · B] 사람이 검수에서 고친 글 — «봐주세요»의 한 갈래 */ approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], awaiting_runner: ["warn", "PC 대기"], failed: ["danger", "실패"], rejected: ["off", "버림"] };   // [AC-52] awaiting_runner = 영상 렌더가 내 PC 프로그램을 기다린다(편성표 낱말과 같게)
   /* [P1R2] 슬롯 상태기계 전 상태(DESIGN §5B.6 · 계약 §-1) — 어휘 한 벌 */
   UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], rejected: ["off", "버림"], failed: ["danger", "실패"] };
   /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
@@ -511,7 +511,7 @@
         마감 자동 승인이 이 글을 **아예 안 집기 때문에**(lib/cron/review-deadline.ts) 주인이 안 보면 그대로 멈춰 있다. 그래서 주의(`review_wait`)다.
         링크는 서버가 실어 준다(`/app/pieces.html?status=in_review`) — KIND_LINK 에 또 적지 않는다(두 출처 금지). */
   UI.KIND_ALIAS = { gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
-    ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "system", /* [R9R10-A · B c922b28] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
+    ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "setup", /* [R9R10-A · B c922b28 · 메인이 main 에서 setup 으로 이음] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ format_demoted: "publish", /* [R9R10 · B2] «이 글에서 못 낸 꾸밈이 있어요»(발행 뒤 · 링크 /app/piece.html?id=) — 검수·발행 얼굴 */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
     awaiting_manual: "publish", pending_login: "account", slot_gate: "setup", forcedByPlan: "review", slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
@@ -869,7 +869,11 @@
      🔴 겁주지 않는다(§3) — 사실 한 줄 → 어떻게 하면 되는지 → 우리가 대신 해 주는 것. */
   /* [R9R10-A · B 확정 2026-09-16] 서식·블록 이름표 — 🔴 `meta.formatUnused[].label` 은 **서버가 실어 준다**(정본 MARK_LABEL). 이 맵은 ①서버 label 이 비었을 때의 예비
      ②`formatCaps` 가 null(«올려 봐야 알아요»)인 종류를 부를 때만 쓴다. 어휘 = 마크 7(bold·underline·italic·value·line·row·emoji) + 블록 타입. */
-  UI.MARK_LABEL = { bold: "굵게", underline: "밑줄", italic: "기울임", value: "핵심 강조", line: "형광펜", row: "나열 강조", emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", place: "장소 카드", h3: "작은 소제목", tip: "팁 상자", summary: "요약 상자", affiliate: "상품 카드", adsense: "광고 자리" };
+  /* [2026-09-16 · lib/blocks.ts MARK_LABEL + lib/format-marks.ts FIELD_LABEL(feature/r9-back) 에서 **글자 그대로** 복사 — 하니스 ⑧-d 가 대조한다 · 손으로 고치지 마라] */
+  UI.MARK_LABEL = { value: "핵심 숫자·낱말 강조", line: "문장 형광펜", row: "나열 강조", bold: "굵게", underline: "밑줄", italic: "기울임",   /* 2026-09-16 · main 에 머지된 lib/blocks.ts MARK_LABEL 글자 그대로(메인 확정) — ⑧-d 가 대조 */
+    emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", list: "목록",
+    place: "장소·링크 카드", h2: "소제목", h3: "작은 소제목", summary: "요약", tip: "한 줄 팁", hashtags: "해시태그", affiliate: "제휴 링크", adsense: "광고 자리",
+    color: "글자색", align: "가운데 정렬", hook: "첫 줄" };
   UI.STYLE_SRC = { url: "링크로 배움", capture: "캡처로 배움", paste: "붙여넣기로 배움" };
   UI.REF_FAIL_SAY = {
     login_wall: "로그인해야 보이는 글이라 저희가 못 열었어요.",
@@ -884,7 +888,9 @@
     let styles = [], defaultStyleId = null, quota = null, recommend = null, pollTimer = null, opened = null;
     const stop = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } };
     const quotaLine = () => (quota && quota.limit != null ? `이번 달 ${UI.num(quota.used || 0)}/${UI.num(quota.limit)}개 배웠어요 · 코인은 들지 않아요` : "코인은 들지 않아요");
-    const learnedHtml = (s) => (Array.isArray(s.summary) && s.summary.length ? `<div class="learned">${s.summary.map((x) => `<div class="ln">${UI.esc(x)}</div>`).join("")}</div>` : '<p class="muted" style="margin:0;font-size:13px">배운 내용을 아직 못 불러왔어요.</p>');
+    /* outline = [{type,label}] — label 은 서버 사람말(B 3차) · 없거나 label 이 빈 칸은 그 줄을 안 그린다(영어 type 을 내보내지 않는다 · AC-91) */
+    const outlineLine = (s) => { const o = Array.isArray(s.outline) ? s.outline.map((x) => x && x.label).filter(Boolean) : []; return o.length ? `<div class="ln">뼈대 · ${UI.esc(o.join(" → "))}</div>` : ""; };
+    const learnedHtml = (s) => (Array.isArray(s.summary) && s.summary.length ? `<div class="learned">${s.summary.map((x) => `<div class="ln">${UI.esc(x)}</div>`).join("")}${outlineLine(s)}</div>` : '<p class="muted" style="margin:0;font-size:13px">배운 내용을 아직 못 불러왔어요.</p>');
     const listHtml = () => {
       if (!styles.length) return '<p class="muted" style="margin:0 0 4px;font-size:13px">아직 배운 스타일이 없어요. 위에 주소를 넣으면 첫 스타일이 생겨요.</p>';
       return styles.map((s) => `<div class="stylerow" data-style="${s.id}"><button type="button" class="row tap" data-open="${s.id}" style="padding-left:0;padding-right:0"><div class="l"><span class="t">${UI.esc(s.name)}${s.id === defaultStyleId ? ' <span class="pill ink" style="font-size:11px;padding:1px 6px">기본</span>' : ""}</span><span class="d">${UI.esc(UI.STYLE_SRC[s.source] || "배움")}${s.createdAt ? " · " + UI.dateKST(s.createdAt) : ""}${Array.isArray(s.summary) ? ` · 배운 것 ${s.summary.length}가지` : ""}</span></div>${UI.chev}</button>

@@ -266,8 +266,12 @@ rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.s
    🔴 B 가 머지되기 전엔 서버 표가 없다 — 그때는 △(경고)로 두고, 표가 생기면 **글자·숫자까지** 대조한다. */
 {
   const pickTier = (txt) => new Map([...txt.matchAll(/(simple|standard|premium)\b[^{]*\{([^}]*)\}/g)].map((m) => [m[1], {
-    label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coins: Number((m[2].match(/coins:\s*(\d+)/) || [])[1]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
-  const srvBlock = coinTs.match(/COIN_TIERS[^=]*=\s*\{([\s\S]*?)\n\}/);
+    label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coins: coinsOf(m[2]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
+  /* 🔴 앵커는 `export const COIN_TIERS` — 파일 위쪽 주석이 `COIN_TIERS[k].coins` 를 먼저 말해서(B 실물) 이름만 찾으면 엉뚱한 자리에 선다. */
+  const srvBlock = coinTs.match(/export const COIN_TIERS[^=]*=\s*\{([\s\S]*?)\n\}/);
+  /* coins 가 숫자가 아니라 `COIN_TABLE.post_simple` 참조로 적혀 있다(값 두 벌 금지 · B) — 그 표에서 숫자를 찾아 푼다. */
+  const coinTable = new Map([...coinTs.matchAll(/\b(post_[a-z]+)\s*:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+  const coinsOf = (body) => { const m = body.match(/coins:\s*([A-Za-z_.]+|\d+)/); if (!m) return NaN; const v = m[1]; if (/^\d+$/.test(v)) return Number(v); const k = v.split(".").pop(); return coinTable.has(k) ? coinTable.get(k) : NaN; };
   const mockBlock = mockJs.match(/const TIERS = \[([\s\S]*?)\];/);
   const tierMock = new Map([...(mockBlock?.[1] ?? "").matchAll(/key:\s*"(simple|standard|premium)"([^}]*)\}/g)].map((m) => [m[1], {
     label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coins: Number((m[2].match(/coins:\s*(\d+)/) || [])[1]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
@@ -289,11 +293,24 @@ rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.s
     rec("🔴 ⑧-c 등급 표(라벨·코인·문장)가 서버 COIN_TIERS 와 같다", srv.size === 3 && diffs.length === 0, diffs.slice(0, 4).join(" | ") || `${srv.size}등급 · ${[...srv].map(([k, v]) => `${v.label} ${v.coins}`).join(" · ")}`, diffs);
   }
   /* 서식·블록 이름표 — 서버 MARK_LABEL(B) 이 정본. formatUnused[].label 은 서버가 실어 주지만, 화면의 예비 맵(UI.MARK_LABEL)이 같은 낱말을 쓰는지 본다. */
-  const markSrv = objectMap(serverText, "MARK_LABEL") || new Map();
+  /* 정본 둘: lib/blocks.ts `export const MARK_LABEL`(마크 여섯) + lib/format-marks.ts `export const FIELD_LABEL`(블록 요소 · MARK_LABEL 을 펼쳐 넣는다).
+     🔴 이름만 찾으면 주석의 «MARK_LABEL·FIELD_LABEL» 에 먼저 선다(C 가 잡은 «0등급»과 같은 병) — `export const` 에 닻을 내린다. 모의 FMT_UNUSED 의 label·why 도 서버 글자여야 한다. */
+  const markSrv = new Map([...(objectMap(serverText, "export const MARK_LABEL") || new Map()), ...(objectMap(serverText, "export const FIELD_LABEL") || new Map())]);
   const markUi = objectMap(uiJs, "UI.MARK_LABEL =") || new Map();
-  if (!markSrv.size) rec("⑧-d 서식 이름표 — 서버 MARK_LABEL 을 아직 못 읽었다(B 머지 전)", "WARN", `화면 예비 맵 ${markUi.size}개`);
-  else { const md = [...markSrv].filter(([k, v]) => markUi.has(k) && markUi.get(k) !== v).map(([k, v]) => `${k}: 화면 «${markUi.get(k)}» ≠ 서버 «${v}»`);
-    rec("🔴 ⑧-d 서식 이름표가 서버 MARK_LABEL 과 같다(겹치는 키)", md.length === 0, md.slice(0, 4).join(" | ") || `서버 ${markSrv.size}개 · 겹침 ${[...markSrv.keys()].filter((k) => markUi.has(k)).length}개`, md); }
+  const fmtMock = [...mockJs.matchAll(/field:\s*"([a-z_0-9]+)",\s*label:\s*"([^"]*)",\s*why:\s*"([^"]*)"/g)].map((m) => ({ field: m[1], label: m[2], why: m[3] }));
+  const whySrv = objectMap(serverText, "export const WHY_SAY") || new Map();
+  if (!markSrv.size) rec("⑧-d 서식 이름표 — 서버 MARK_LABEL·FIELD_LABEL 을 아직 못 읽었다(B 머지 전)", "WARN", `화면 사본 ${markUi.size}개 · 모의 ${fmtMock.length}칸`);
+  else {
+    const md = [...markSrv].filter(([k, v]) => markUi.has(k) && markUi.get(k) !== v).map(([k, v]) => `${k}: 화면 «${markUi.get(k)}» ≠ 서버 «${v}»`);
+    const extra = [...markUi.keys()].filter((k) => !markSrv.has(k));
+    const mm = fmtMock.filter((x) => markSrv.has(x.field) && markSrv.get(x.field) !== x.label).map((x) => `${x.field}: 모의 «${x.label}» ≠ 서버 «${markSrv.get(x.field)}»`);
+    rec("🔴 ⑧-d 서식 이름표(화면 사본)가 서버 MARK_LABEL·FIELD_LABEL 과 글자까지 같다", md.length === 0, md.slice(0, 4).join(" | ") || `서버 ${markSrv.size}개 · 겹침 ${[...markSrv.keys()].filter((k) => markUi.has(k)).length}개`, md);
+    rec("🔴 ⑧-d 모의 formatUnused 의 label 이 서버와 같다", mm.length === 0, mm.slice(0, 4).join(" | ") || `${fmtMock.length}칸`, mm);
+    if (extra.length) rec("⑧-d 화면 사본에만 있는 서식 키(서버에 없음)", "WARN", extra.join(" "), extra);
+    /* why 는 서버가 사람말 문장(WHY_SAY)으로 실어 준다 — 모의 문장이 그 표의 값 중 하나여야 화면 시연이 고객 문장이다 */
+    if (whySrv.size) { const ws = new Set(whySrv.values()); const mw = fmtMock.filter((x) => !ws.has(x.why)).map((x) => `${x.field}: «${x.why.slice(0, 30)}…»`);
+      rec("🔴 ⑧-d 모의 formatUnused 의 why 가 서버 WHY_SAY 문장 중 하나다", mw.length === 0, mw.slice(0, 3).join(" | ") || `${whySrv.size}문장`, mw); }
+  }
 }
 
 /* ───────── ⑧ 광고 붙이는 «길»(서버 adsWayOf·adsRemovable ↔ 화면 표) ─────────

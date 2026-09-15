@@ -176,7 +176,7 @@
     affiliate_count: "제휴 링크를 2개까지만 남겨 주세요.",
     superlative: "«1위»·«최고» 옆에 출처·기간·수치를 적거나 표현을 낮춰 주세요.",
     structure_repeat: "소제목 수·순서·끝맺음을 바꿔 보세요.",
-    cross_account: "다른 계정에 올린 글과 도입·소제목·예시를 다르게 잡아 주세요 — 한 계정에서만 올리는 것도 방법이에요.",   /* [R9R10 · B-4] 서버 GATE_HOW 가 정본 — 머지 때 글자를 맞춘다 */
+    cross_account: "다른 계정에 올린 글과 닮았어요 — 이 계정 독자에게 맞는 다른 면(경험·계절·예시)으로 바꿔 주세요. 다시 만들기를 누르면 저희가 다른 관점으로 써 드려요.",   /* [R9R10 · B-4] lib/ai-tell-gate.ts GATE_HOW 글자 그대로(feature/r9-back 253c8f8) */
   };
   const decorate = (c) => ({ ...c, weight: GATE_WEIGHT[c.key] || "normal", ...(c.pass || !GATE_HOW[c.key] ? {} : { how: GATE_HOW[c.key] }) });
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
@@ -192,7 +192,7 @@
     { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 75% 미만 · 6편과 견줌)" },
     /* [R9R10 · B-4 · B c922b28 GATE_LABEL 그대로] 🔴 **유사도 «계정 간»** — 같은 집의 다른 계정·다른 brief 글과도 본다(계정 하나 = IP 하나 · 위험도 1번).
        막지 않는다(§9) · 못 쟀으면 skipped:true 로 «못 쟀어요»(AC-9). ?gate=xacc → 못 잰 갈래 · ?gate=xaccdup → 겹친 갈래(소프트 · 예약은 된다) */
-    { key: "cross_account", label: "다른 내 계정 글과 겹치지 않음", pass: gateKnob !== "xaccdup", ...(gateKnob === "xacc" ? { skipped: true, detail: "다른 계정에 견줄 글이 아직 없어 못 쟀어요" } : gateKnob === "xaccdup" ? { detail: "@life_c 의 글 #488 과 71% 닮았어요 — 같은 사람이 여러 계정에서 비슷한 글을 올리면 플랫폼이 먼저 봐요" } : { detail: "내 다른 계정 글 4편과 견줌 · 가장 닮은 글 22%" }) },
+    { key: "cross_account", label: "다른 내 계정 글과 겹치지 않음", pass: gateKnob !== "xaccdup", ...(gateKnob === "xacc" ? { skipped: true, detail: "견줄 다른 계정 글이 아직 없어서 못 쟀어요" }   /* 서버 skipReason 문장 그대로(B 3차) */ : gateKnob === "xaccdup" ? { detail: "유사도 71%(@life_c 글 #488)" }   /* 서버 detail 모양 «유사도 N%(상대)» · 사람말 설명은 how 가 맡는다 */ : { detail: "내 다른 계정 글 4편과 견줌 · 가장 닮은 글 22%" }) },
     /* [R8-A §4] 광고 가리킴 — 🔴 **하드**(승인이 막힌다) · 좁은 축이다(광고·배너를 가리키며 누르라고 할 때만) */
     { key: "ad_pointing", label: "광고를 가리키지 않음", pass: gateKnob !== "adpoint", ...(gateKnob === "adpoint" ? { detail: "광고를 가리키며 누르라고 함: «아래 배너 클릭하고 가세요»" } : {}) } ].map(decorate) });
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS] 이 축만 «이대로 예약»을 막는다 — 소프트 실패는 막지 않는다(서버 hardFailures 와 같게) */
@@ -316,12 +316,14 @@
   const tierFields = (acc) => { const k = (acc && acc.defaultTier) || "simple"; return { tier: k, coinCost: tierCoins(k) }; };
   /* [R9R10-A · B 확정 모양] 못 낸 서식 = [{field, label, why}] — label 은 서버 정본(MARK_LABEL) · why 는 러너·서버 어휘(B2 일곱)라 화면이 안 그린다.
      🔴 italic 은 «못 낸다»가 아니라 «일부러 안 낸다»(번짐 축) — B2 가 그렇게 말해 달라고 했다. */
+  /* label = 서버 MARK_LABEL·FIELD_LABEL 글자 그대로(feature/r9-back 253c8f8) · n = 몇 곳 */
+  /* why = 서버 WHY_SAY 문장 그대로(lib/format-marks.ts · feature/r9-back 253c8f8) — 코드가 아니라 고객 문장이다(화면이 그대로 그린다) */
   const FMT_UNUSED = [
-    { field: "underline", label: "밑줄", why: "url_para" },
-    { field: "table", label: "표", why: "block_unsupported" },
-    { field: "value", label: "핵심 강조", why: "caret_drift" },
-    { field: "italic", label: "기울임", why: "channel_unsupported" },
-    { field: "row", label: "나열 강조", why: "budget" },
+    { field: "underline", label: "밑줄", why: "주소가 든 문단은 링크가 먼저라 꾸밈을 뺐어요.", n: 1 },
+    { field: "table", label: "표", why: "목록·표 안에는 꾸밈을 실을 칸이 없어 글자만 그대로 실었어요.", n: 1 },
+    { field: "value", label: "핵심 숫자·낱말 강조", why: "편집기에서 자리를 정확히 못 잡아 그 꾸밈은 뺐어요 — 글자는 그대로예요.", n: 2 },
+    { field: "italic", label: "기울임", why: "이 채널에서는 낼 수 없는 꾸밈이라 글자만 그대로 실었어요.", n: 1 },
+    { field: "row", label: "나열 강조", why: "한 글에 너무 많으면 오히려 읽기 어려워서 앞쪽 몇 곳만 남겼어요.", n: 3 },
   ];
   /* pieces-get.formatCaps — 채널 표(lib/channel-registry.ts · B). null = 모름(올려 봐야 안다). */
   const FORMAT_CAPS = {
@@ -411,9 +413,11 @@
     styles: noStyles ? [] : [
       { id: 701, accountId: 1, name: "살림 블로그 스타일", source: "url", createdAt: iso(now - 3 * 86400e3),
         summary: ["문단 2~3줄 · 한 문단 60자쯤", "이모지 ✅📌💡 를 문단 첫머리에 · 글당 6개쯤", "밑줄 5곳 · 주로 숫자에", "사진 7장 · 소제목 아래마다 · 캡션은 3장에만", "소제목 4개 · 결론이 앞에", "해요체 8 : 합니다체 2 · 질문 문장 15%"],
+        outline: [{ type: "hook", label: "첫 줄" }, { type: "h2", label: "소제목" }, { type: "para", label: "문단" }, { type: "image", label: "사진" }, { type: "h2", label: "소제목" }, { type: "para", label: "문단" }, { type: "list", label: "목록" }, { type: "tip", label: "한 줄 팁" }],   /* [B 3차] 뼈대 = 사람말 label(FIELD_LABEL) */
         learned: { paragraph: { lines: [2, 3], chars: 60 }, emoji: { use: true, where: "para_start", top: ["✅", "📌", "💡"], perPost: 6 }, emphasis: { kinds: ["underline", "bold"], perPost: 5, on: ["number"] }, photos: { count: 7, where: "after_h2", captionRate: 0.4 }, blocks: { list: 2, table: 0, quote: 1, divider: 2 }, tone: { haeyo: 0.8, hamnida: 0.2, question: 0.15 }, title: { hasNumber: true, chars: 22 }, structure: ["hook", "h2", "para", "image", "h2", "para", "list", "tip"] } },
       { id: 702, accountId: 1, name: "정리형 리뷰", source: "capture", createdAt: iso(now - 86400e3),
         summary: ["문단 4~5줄", "이모지 안 씀", "굵게 3곳 · 결론 문장에", "사진 3장 · 글 앞쪽에 몰아서", "표 1개 · 소제목 3개", "합니다체 9 : 해요체 1"],
+        outline: [{ type: "summary", label: "요약" }, { type: "h2", label: "소제목" }, { type: "table", label: "표" }, { type: "para", label: "문단" }, { type: "h2", label: "소제목" }, { type: "para", label: "문단" }, { type: "faq", label: "자주 묻는 질문" }],
         learned: { paragraph: { lines: [4, 5], chars: 110 }, emoji: { use: false }, emphasis: { kinds: ["bold"], perPost: 3, on: ["conclusion"] }, photos: { count: 3, where: "top" }, blocks: { list: 1, table: 1, quote: 0, divider: 0 }, tone: { haeyo: 0.1, hamnida: 0.9, question: 0.05 }, title: { hasNumber: false, chars: 18 }, structure: ["summary", "h2", "table", "para", "h2", "para", "faq"] } },
     ],
     styleRefs: {}, styleQuota: { used: refKnob === "quota" ? 30 : 2, limit: 30 },
