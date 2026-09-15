@@ -1554,6 +1554,8 @@ await load();
 <div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
 <article class="preview" id="pv" hidden><h1 id="ttl"></h1><div class="by" id="by"></div><div id="body"></div></article>
 <div id="vpane" hidden></div>
+<div class="group" id="why" hidden></div>
+<div class="group" id="comp" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
 --- script ---
@@ -1563,10 +1565,75 @@ let P = null, dirty = false;
 const more = document.createElement("button"); more.type = "button"; more.className = "ic"; more.setAttribute("aria-label", "더보기"); more.innerHTML = UI.dots; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(more);
 /* 고지 블록 = bodyHtml 첫 요소 .disclosure(발행물 정본 · §16B) — 편집 불가 · 지워지면 되살린다 */
 let discHtml = "";
-function lockDisc(body) { const d = body.querySelector(".disclosure"); if (d) { d.contentEditable = "false"; d.setAttribute("data-lock", "1"); if (!d.querySelector("small")) d.insertAdjacentHTML("beforeend", '<small>제휴 고지 · 첫 줄에 자동으로 들어가요 · 지울 수 없어요</small>'); discHtml = d.outerHTML; } }
+function lockDisc(body) { const d = body.querySelector(".disclosure"); if (d) { d.contentEditable = "false"; d.setAttribute("data-lock", "1"); if (!d.querySelector("small")) d.insertAdjacentHTML("beforeend", '<small>대가 고지 · 첫 줄에 자동으로 들어가요 · 지울 수 없어요</small>'); discHtml = d.outerHTML; } }
 function restoreDisc(body) { if (discHtml && !body.querySelector(".disclosure")) { body.insertAdjacentHTML("afterbegin", discHtml); UI.toast("고지 문구는 지울 수 없어요"); } }
 function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".disclosure small").forEach((x) => x.remove()); c.querySelectorAll(".disclosure").forEach((x) => { x.removeAttribute("contenteditable"); x.removeAttribute("data-lock"); }); return c.innerHTML; }
-function gateList(g) { return `<div class="gt">발행 전 검사 ${g.ok ? '<span class="pill ok">통과</span>' : '<span class="pill warn">확인 필요</span>'}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>`; }
+/* [R8-A] 🔴 **막는 축과 알려 주는 축을 달리 그린다** — 서버는 `HARD_GATE_KEYS` 5개(UI.GATE_HARD)로만 예약을 막는다(hardFailures).
+   골격 반복·최상급·링크 열림은 **소프트**라 실패해도 예약이 된다. 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 알고
+   고치러 간다(그게 이번에 서버가 축을 늘리면서 커진 위험이다). 🔴 사유(detail)는 서버 문장 그대로. */
+const gateRow = (c) => { const soft = !c.pass && !UI.GATE_HARD.includes(c.key);
+  return `<div class="g ${c.pass ? "" : soft ? "soft" : "no"}"><i>${c.pass ? "✓" : soft ? "i" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`; };
+function gateList(g) {
+  const checks = g.checks || [];
+  const hard = checks.filter((c) => !c.pass && UI.GATE_HARD.includes(c.key));
+  const soft = checks.filter((c) => !c.pass && !UI.GATE_HARD.includes(c.key));
+  const pill = hard.length ? '<span class="pill warn">확인 필요</span>' : '<span class="pill ok">' + (soft.length ? "예약할 수 있어요" : "통과") + '</span>';
+  const say = hard.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${hard.length}가지를 고쳐야 예약할 수 있어요.</p>`
+    : soft.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">아래 ${soft.length}가지는 알려드리는 것이라 예약을 막지 않아요.</p>` : "";
+  return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>`;
+}
+/* [R8-A §2] «이 글이 왜 이렇게 생겼나» — 채널 계약 · 주제군 · 수익 목적.
+   🔴 지금 `pieces-get` 이 주는 건 channel·format·angle·slotReason 뿐이다. `topicGroup`·`goal`·`contract.summary` 는 **아직 안 온다**(메인에 발주 중) —
+      오면 이 줄들이 저절로 켜진다. 🔴 화면이 채널 계약표를 베껴 와 «아마 이럴 것»이라고 그리지 않는다(정본은 lib/writing-contracts.ts · AC-52). */
+function renderWhy() {
+  const host = UI.$("#why"); const m = P.meta || {};
+  const kv = (k, v) => `<div class="kv"><span class="k">${UI.esc(k)}</span><span class="v wrap" style="white-space:normal;text-align:right">${UI.esc(v)}</span></div>`;
+  let h = "";
+  h += kv("채널", `${UI.chLabel(P.channel)}${UI.FORMAT[P.format] ? " · " + UI.FORMAT[P.format] : ""}`);
+  if (UI.GROUP_LABEL[P.topicGroup]) h += kv("주제군", UI.GROUP_LABEL[P.topicGroup]);
+  if (UI.GOAL_LABEL[P.goal]) h += kv("수익 목적", UI.GOAL_LABEL[P.goal]);
+  if (P.contract && P.contract.summary) h += kv("이렇게 쓰기로", String(P.contract.summary));
+  if (m.angle) h += kv("잡은 방향", String(m.angle));
+  if (m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
+  host.hidden = false; host.innerHTML = '<div class="gt">이 글이 왜 이렇게 생겼나</div>' + h;
+}
+/* [R8-A §4 · 법 경로] 대가를 받았나 — 🔴 **켜기만 있다**(서버가 false 를 무시한다).
+   켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남기 때문이다. 내리려면 이 글을 버리고 다시 만든다.
+   🔴 무엇이 켜졌나는 **본문 첫머리 고지 문장**에서 읽는다(발행되는 물건이 곧 정본 · meta 는 화면에 안 온다). */
+const COMP_ASK = { sponsored: "원고료·PPL을 받았어요", gift: "제품·서비스를 무상으로 받았어요" };
+function renderComp() {
+  const host = UI.$("#comp"); const editable = P.status === "in_review";
+  const on = UI.compOf(P.bodyHtml); const aff = !!(P.meta && P.meta.affiliate);
+  const kinds = ["affiliate", "sponsored", "gift"].filter((k) => (k === "affiliate" ? aff || on.affiliate : on[k]));
+  let h = "";
+  if (kinds.length) h += `<div class="row"><div class="l"><span class="t">첫머리에 밝혔어요 · ${UI.esc(kinds.map((k) => UI.COMP_LABEL[k]).join(" · "))}</span><span class="d wrap">${UI.esc(on.text || "발행할 때 첫 줄에 들어가요")}</span></div></div>`;
+  const ask = Object.keys(COMP_ASK).filter((k) => !on[k]);
+  if (editable) h += ask.map((k) => `<button class="row tap" type="button" data-comp="${k}"><div class="l"><span class="t">${COMP_ASK[k]}</span><span class="d">밝히면 첫머리에 한 줄이 들어가요</span></div>${UI.chev}</button>`).join("");
+  if (!h) { host.hidden = true; return; }
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">대가를 받았나요</div>' + h
+    + (editable && ask.length ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">한 번 밝히면 끌 수 없어요 — 고지 없이 나간 글이 남지 않게요. 잘못 눌렀다면 이 글을 버리고 다시 만들어 주세요.</p>' : "");
+  UI.$$("#comp [data-comp]").forEach((b) => b.onclick = () => compSheet(b.dataset.comp));
+}
+function compSheet(kind) {
+  const line = kind === "sponsored" ? UI.DISCLOSURE_TEXT.sponsoredBody : UI.DISCLOSURE_TEXT.giftBody;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">밝히면 이 문장이 <b style="color:var(--ink)">글 맨 앞</b>에 들어가요. 공정위 지침이 «제목이나 첫 부분»을 요구해서예요.</p>
+    <div style="background:var(--ground);border-radius:12px;padding:10px 12px;font-size:13.5px;line-height:1.5;margin:0 0 10px">${UI.esc(line)}</div>
+    <p class="muted" style="margin:0 0 4px;font-size:12.5px">여러 가지를 받았다면 모두 밝혀야 해요 — 종류마다 한 문장씩 들어가요. 한 번 밝히면 끌 수 없어요.</p>
+    <div id="cc"></div>`, { title: `${UI.COMP_LABEL[kind]}를 받으셨나요`, onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#cc"), "이 글 첫머리에 밝힐까요?", () => compOn(kind, close)) });
+}
+async function compOn(kind, close) {
+  if (dirty) { if (close) close(); return UI.toast("먼저 «수정 저장»을 눌러 주세요"); }
+  /* 🔴 **본문을 같이 보낸다** — 서버는 `bodyHtml` 이 올 때만 고지를 본문에 넣는다(pieces.ts pieces-update).
+     안 보내면 meta 만 켜지고 «대가 고지 첫머리»(하드 축)가 빨강인 채 남아 예약이 막힌다. 고친 글이 아니라 **지금 있는 글 그대로** 보낸다. */
+  const r = await UI.api("/api/pieces-update", { body: { id, monetize: { [kind]: true }, bodyHtml: cleanBody(UI.$("#body")) } });
+  if (!r.ok) return UI.toast(r.error || "밝히지 못했어요");
+  if (close) close();
+  if (r.bodyHtml) { P.bodyHtml = r.bodyHtml; const body = UI.$("#body"); body.innerHTML = r.bodyHtml; lockDisc(body); }
+  if (r.gate) { P.gate = r.gate; P.gateOk = !!r.gate.ok; UI.$("#gate").innerHTML = gateList(r.gate); }
+  renderComp();
+  UI.toast("글 첫머리에 밝혔어요");
+}
 /* [P1R5] 영상 심사 = gate.judge(§1.4 done · grade P0/P1/P2 · axes label 만) + 기존 checks */
 function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || ["off", j.grade] : null;
   return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${(j?.axes || []).some((a) => a.pending) ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${(j.axes || []).filter((a) => a.pending).length}가지는 아직 못 쟀어요 — ${UI.esc(((j.axes || []).find((a) => a.pending) || {}).detail || "잴 재료가 아직 안 왔어요")}</p>` : ""}${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade);
@@ -1614,7 +1681,7 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false;
+  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true; UI.$("#comp").hidden = true;
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);
     if (P.gate) { gate.hidden = false; gate.innerHTML = judgeList(P.gate); } else gate.hidden = true;
@@ -1628,6 +1695,7 @@ function render() {
   const ttl = UI.$("#ttl"); ttl.textContent = P.title || ""; ttl.contentEditable = editable ? "true" : "false";
   UI.$("#by").innerHTML = `${UI.mark(P.channel, "sm")}<span>${P.accountHandle ? "@" + UI.esc(P.accountHandle) : ""} · ${UI.esc(UI.FORMAT[P.format] || P.format || "")}${P.meta?.tags?.length ? " · #" + P.meta.tags.map(UI.esc).join(" #") : ""}</span>`;
   const body = UI.$("#body"); body.innerHTML = P.bodyHtml || ""; body.contentEditable = editable ? "true" : "false"; lockDisc(body);
+  renderWhy(); renderComp();
   if (P.gate) { gate.hidden = false; gate.innerHTML = gateList(P.gate); } else gate.hidden = true;
   cta.hidden = false;
   if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button>`; bindCta(); }
@@ -1651,7 +1719,7 @@ async function approve() {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
   const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
   if (!r.ok) { if (r.gated) return;
-    if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">${P.kind === "video" ? UI.esc(r.error || "심사에서 막혔어요") : "아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요."}</p><div class="gate" style="padding:4px 0 8px">${(r.gate.checks || []).map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>${P.kind === "video" ? "알겠어요" : "글 고치러 가기"}</button></div>`, { title: P.kind === "video" ? "예약할 수 없어요" : "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
+    if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">${P.kind === "video" ? UI.esc(r.error || "심사에서 막혔어요") : "아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요."}</p><div class="gate" style="padding:4px 0 8px">${(r.gate.checks || []).map(gateRow).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>${P.kind === "video" ? "알겠어요" : "글 고치러 가기"}</button></div>`, { title: P.kind === "video" ? "예약할 수 없어요" : "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
     return UI.toast(r.error || "예약하지 못했어요");
   }
   UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));

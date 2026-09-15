@@ -9,8 +9,8 @@ const FONT = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncact
 const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?history.back():location.assign('${fallback}')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>`;
 
 const TARGETS = [
-  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=9", "/js/mock.js?v=9"], back: ["accounts.html", "settings.html", "plan.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
-  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=9", "/js/ops.js?v=2", "/js/mock-ops.js?v=1"], back: ["tenant.html", "ticket.html", "cs-faq.html", "password.html", "company.html"], fallback: "/ops/", fallbacks: { "company.html": "/ops/plans.html", "tenant.html": "/ops/tenants.html", "ticket.html": "/ops/cs.html", "cs-faq.html": "/ops/cs.html" }, manifest: false, robots: true, titleInBar: true, bodyClass: "ops" }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
+  { dir: "public/app", suffix: "AutoCreate", scripts: ["/js/ui.js?v=10", "/js/mock.js?v=10"], back: ["accounts.html", "settings.html", "plan.html", "coins.html", "notifications.html", "support.html", "director.html", "pieces.html", "piece.html", "runner.html", "posts.html", "ad-media.html"], fallback: "/app/account.html", fallbacks: { "director.html": "/app/create.html", "pieces.html": "/app/home.html", "piece.html": "/app/pieces.html", "posts.html": "/app/schedule.html", "ad-media.html": "/app/revenue.html" }, manifest: true, robots: false },
+  { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=10", "/js/ops.js?v=2", "/js/mock-ops.js?v=1"], back: ["tenant.html", "ticket.html", "cs-faq.html", "password.html", "company.html"], fallback: "/ops/", fallbacks: { "company.html": "/ops/plans.html", "tenant.html": "/ops/tenants.html", "ticket.html": "/ops/cs.html", "cs-faq.html": "/ops/cs.html" }, manifest: false, robots: true, titleInBar: true, bodyClass: "ops" }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
 ];
 
 /* [R7 §4.4] 앱 판 번호 — 사람이 올리는 걸 잊는다. **빌드가 오늘(KST)을 박는다**(설정 «앱 정보»에 보이는 그 값).
@@ -42,7 +42,7 @@ for (const t of TARGETS) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title} · ${t.suffix}</title>
 ${t.robots ? `<meta name="robots" content="noindex">\n` : ""}${t.manifest ? `<link rel="manifest" href="/manifest.webmanifest">\n` : ""}${FONT}
-<link rel="stylesheet" href="/css/ac.css?v=14">
+<link rel="stylesheet" href="/css/ac.css?v=15">
 </head>
 <body${t.bodyClass ? ` class="${t.bodyClass}"` : ""}>
 <div class="shell">

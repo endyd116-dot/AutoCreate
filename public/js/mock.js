@@ -26,6 +26,10 @@
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const oneChannel = qs.get("oneCh") === "1";   // [사장님 실측] 네이버 계정만 있는 집 — 소재가 전부 한 채널
   const closedKnob = qs.get("closed") === "1";  // [R7 §3.1] 이미 탈퇴를 신청해 둔 집(파기 예약 중)
+  const gateKnob = qs.get("gate") || "";        // [R8-A] soft = 골격 반복이 걸린 글(막지 않는다) · adpoint = 광고 가리킴(막는다)
+  /* [R8-A §2] 🔴 `topicGroup`·`goal`·`contract` 는 **서버가 아직 안 준다**(pieces-get 이 안 싣는다 · 메인에 발주 중).
+     기본은 꺼 둔다 — 모의가 켜 두면 «화면에 이미 있는 것»처럼 보여 발주가 잊힌다. 값은 서버 어휘 그대로(TopicGroup·RevenueGoal). */
+  const whyKnob = qs.get("why") === "1";
   const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
 
@@ -49,7 +53,6 @@
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
-<p class="summary">담그기 10분 · 베이킹소다 5분 · 건조 30분이면 끝나요. 철수세미만 안 쓰면 돼요.</p>
 <h2>1. 바스켓은 물에 10분만 담가요</h2>
 <p>뜨거운 물에 세제 한 방울 넣고 10분 담가 두면 눌어붙은 기름이 절반은 떠요. 저는 이걸 안 하고 바로 문질러서 코팅을 긁었어요.</p>
 <figure><img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='400'%3E%3Crect width='640' height='400' fill='%23E8EBEE'/%3E%3C/svg%3E" alt=""><figcaption>10분 담가 둔 바스켓 — 기름이 떠오른 모습</figcaption></figure>
@@ -71,14 +74,26 @@
 <ul class="check"><li>코팅 제품은 부드러운 수세미</li><li>세제는 한 방울</li></ul>
 <p>정리하면, 주 1회 10분이면 냄새와 연기 없이 쓸 수 있다.</p>`;
 
+  /* [AC-52 · 2026-09-15 · lib/disclosure.ts DISCLOSURE_TEXT 에서 그대로 복사] 🔴 손으로 고치지 마라 — 고객이 볼 고지 문장이다 */
   const DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
+  const DISC_SPONSORED = "이 글은 광고주에게서 원고료 등 대가를 받고 작성한 유료 광고입니다.";
+  const DISC_GIFT = "이 글은 광고주에게서 제품(또는 서비스)을 무상으로 제공받아 작성했습니다.";
+  /* 여러 종류면 **문장을 전부 싣는다**(순서 고정: 제휴 → 원고료 → 무상 제공 · normalizeCompensation 과 같다) */
+  const discTextOf = (meta) => [meta.affiliate ? DISCLOSURE : "", meta.sponsored ? DISC_SPONSORED : "", meta.gift ? DISC_GIFT : ""].filter(Boolean).join(" ");
   // [v1.1] GateKey 12 · 순서 고정(5C.2 8검사 + 16B 4검사)
   /* [AC-52 · 2026-09-15 · lib/ai-tell-gate.ts GATE_LABEL 에서 그대로 복사] 🔴 라벨은 **통과형 문장**이다 — «문단 시작 반복 ✓» 처럼 명사형이면 뜻이 반대로 읽힌다 */
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
     { key: "cliche", label: "상투 표현 없음", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작이 다양함", pass: true }, { key: "bullet_ratio", label: "불릿이 본문을 대신하지 않음", pass: true, detail: "18%" },
     { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "최상급에 근거가 있음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
     { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
-    { key: "disclosure", label: "대가 고지 첫머리", pass: ok }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true } ] });
+    { key: "disclosure", label: "대가 고지 첫머리", pass: ok }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true },
+    /* [R8-A §2 · B-1] 골격 반복 — 🔴 **소프트**(HARD_GATE_KEYS 밖)라 실패해도 예약은 된다. 사유 문장 모양은 서버 checkStructure 그대로 */
+    { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 70% 미만 · 6편과 견줌)" },
+    /* [R8-A §4] 광고 가리킴 — 🔴 **하드**(승인이 막힌다) · 좁은 축이다(광고·배너를 가리키며 누르라고 할 때만) */
+    { key: "ad_pointing", label: "광고를 가리키지 않음", pass: gateKnob !== "adpoint", ...(gateKnob === "adpoint" ? { detail: "광고를 가리키며 누르라고 함: «아래 배너 클릭하고 가세요»" } : {}) } ] });
+  /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS] 이 축만 «이대로 예약»을 막는다 — 소프트 실패는 막지 않는다(서버 hardFailures 와 같게) */
+  const HARD = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"];
+  const gateOkOf = (g) => !((g && g.checks) || []).some((c) => !c.pass && HARD.includes(c.key));
 
   const fresh = qs.get("fresh") === "1";
   const runnerOn = qs.get("runner") === "on";
@@ -124,7 +139,7 @@
     variantLabels: { hook: HOOK_KO[HOOKS[i % HOOKS.length]], palette: PALETTE_KO[PALETTES[(Number(accountId || 0) + i) % PALETTES.length]], voiceId: VOICES[i % VOICES.length].name }, /* 사람말은 서버가 붙인다(화면 하드코딩 0) */
     cuts: format === "clip" ? 3 : seconds >= 60 ? 9 : 5, disclosure: { badge: true, descriptionFirstLine: true } });
   /* [AC-52 · 2026-09-15 · lib/video/judge.ts AXIS_LABEL 에서 그대로 복사] 🔴 손으로 고치지 마라 — 서버가 정본이고, 다르면 verify-label-surface 가 빨강이다 */
-  const JUDGE_AXES = [["hook_first", "첫 컷이 훅"], ["safe_area", "자막·배지가 안전영역 안"], ["reading_time", "자막 읽을 시간 충분"], ["text_broken", "깨진 글자 없음"], ["black_margin", "검은 여백 없음"], ["frames_not_blank", "빈 프레임 없음"], ["cut_rhythm", "컷 리듬 살아 있음"], ["forbidden", "금칙·내부 문자열 없음"], ["disclosure", "제휴 고지(배지·자막·설명란)"], ["duration_fit", "길이 규격 안"], ["similarity", "다른 계정 영상과 겹치지 않음"]];
+  const JUDGE_AXES = [["hook_first", "첫 컷이 훅"], ["safe_area", "자막·배지가 안전영역 안"], ["caption_lines", "자막 2줄 이내"], ["reading_time", "자막 읽을 시간 충분"], ["text_broken", "깨진 글자 없음"], ["black_margin", "검은 여백 없음"], ["frames_not_blank", "빈 프레임 없음"], ["cut_rhythm", "컷 리듬 살아 있음"], ["forbidden", "금칙·내부 문자열 없음"], ["disclosure", "제휴 고지(배지·자막·설명란)"], ["duration_fit", "길이 규격 안"], ["similarity", "다른 계정 영상과 겹치지 않음"]];
   const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "black_margin") || (grade === "P0" && key === "forbidden");   /* [AC-52] 서버 GRADE_OF 의 P1·P0 축으로 */ const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
       if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "black_margin") o.detail = "4번 컷 아래 검은 여백 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "forbidden") o.detail = "내부 문자열이 남았어요 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
   const POSTER = "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='540' height='960'><rect width='540' height='960' fill='#191F28'/><rect x='60' y='380' width='420' height='120' rx='16' fill='#2A2A32'/><text x='270' y='452' font-family='sans-serif' font-size='40' font-weight='800' fill='#fff' text-anchor='middle'>에어프라이어 기름때</text></svg>");
@@ -261,6 +276,8 @@
   /* [R7 §4.3] 라이브 표본처럼 «몇 자리에만» 사람말이 실려 있다(18건 중 5건) — 서버 slots.note 가 이제 화면으로 나온다 */
   if (!S.slotNotes) { const cand = S.slots.filter((s) => s.date >= todayYmd).slice(0, 3); S.slotNotes = {};
     if (cand[0]) S.slotNotes[cand[0].id] = "정지된 계정에서 넘겨받았어요"; if (cand[2]) S.slotNotes[cand[2].id] = "소재가 겹쳐 다른 소재로 바꿨어요"; }
+  /* [R8-A] 검사 손잡이가 켜졌으면 그 글의 gate 를 다시 만든다 + 예약을 막는 것은 **하드 축뿐**(서버 hardFailures 와 같게) */
+  for (const p of S.pieces) { if (!p.gate || p.kind === "video") continue; if (gateKnob) p.gate = gate(true); p.gateOk = gateOkOf(p.gate); }
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   if (autoOff) { S.settings.autoSchedule = false; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
@@ -641,12 +658,23 @@
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
       if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
-      return { ok: true, piece: { ...pieceRow(p), bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+      /* [R8-A §2] 🔴 아래 세 칸은 **아직 서버에 없다**(?why=1 로만 켜진다) — 화면이 «오면 저절로 켜지게» 만들어 둔 자리다 */
+      const why = whyKnob ? { topicGroup: "review", goal: p.channel === "naver_blog" ? "adpost" : "adsense", contract: { summary: p.channel === "naver_blog" ? "사진 6장 이상 · 1,200~2,500자 · 목차·FAQ·요약은 안 써요" : "1,500~3,000자 · 목차·FAQ는 넣을 수 있어요 · 광고 자리 2곳" } } : {};
+      return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     "pieces-approve": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.kind === "video" && p.gate?.judge?.grade === "P0") return err("gate", "심사에서 막혔어요 · 다시 만들거나 버려 주세요.", { gate: p.gate }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
     "pieces-regenerate": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; if (p.kind === "video") { p.meta.stage = "script"; p.meta.chainStage = { stage: "script", at: iso(Date.now()) }; p.gate = null; p.gateOk = false; delete p.assets; delete p.blocks; p.body = ""; /* 산출물 삭제 — 안 지우면 이어받기가 «이미 있음»으로 건너뛴다 */ delete p._t0; p._v0 = Date.now(); const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "producing"; return { ok: true, status: "generating" }; } p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; }, // [P1R5] 영상 재생성 = 코인 0 · 처음부터
     "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title;
-      if (p.kind === "video") { if (typeof b.body === "string") { const first = String(p.body || "").split("\n")[0]; const rest = b.body.split("\n").filter((l, i) => !(i === 0 && l === first)); p.body = p.meta.video.disclosure.descriptionFirstLine ? [first, ...rest].join("\n") : b.body; } if (Array.isArray(b.tags)) { p.meta.tags = b.tags.map((x) => String(x).replace(/^#/, "")).filter(Boolean).slice(0, 15); const hb = (p.blocks || []).find((x) => x.type === "hashtags"); if (hb) hb.tags = p.meta.tags; } return { ok: true, gate: p.gate, body: p.body, tags: p.meta.tags }; } // [P1R5] 설명란 편집 · 첫 줄 고지는 서버가 잠근다 if (b.bodyHtml) p.bodyHtml = b.bodyHtml.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); p.gate = gate(true); p.gateOk = true;
+      if (p.kind === "video") { if (typeof b.body === "string") { const first = String(p.body || "").split("\n")[0]; const rest = b.body.split("\n").filter((l, i) => !(i === 0 && l === first)); p.body = p.meta.video.disclosure.descriptionFirstLine ? [first, ...rest].join("\n") : b.body; } if (Array.isArray(b.tags)) { p.meta.tags = b.tags.map((x) => String(x).replace(/^#/, "")).filter(Boolean).slice(0, 15); const hb = (p.blocks || []).find((x) => x.type === "hashtags"); if (hb) hb.tags = p.meta.tags; } return { ok: true, gate: p.gate, body: p.body, tags: p.meta.tags }; }   /* [P1R5] 설명란 편집 · 첫 줄 고지는 서버가 잠근다 */
+      /* 🔴 여기부터 있던 코드가 윗줄 «//» 주석에 통째로 먹혀 있었다(2026-09-15 발견) — 본문 저장도 게이트 갱신도 안 됐다.
+         한 줄 안에서는 «//» 뒤가 전부 주석이다. 줄 가운데 설명은 여러 줄 주석으로만 적는다(같은 사고 세 번째). */
+      if (b.bodyHtml) p.bodyHtml = b.bodyHtml.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, "");
+      /* [R8-A §4] 대가 켜기 — 🔴 **켜기만 받는다**(false 는 무시 · 서버 pieces-update 와 같다). 종류가 늘면 고지 문장도 늘어난다. */
+      const mz = b.monetize || {};
+      if (mz.sponsored === true) p.meta.sponsored = true;
+      if (mz.gift === true) p.meta.gift = true;
+      if (mz.sponsored === true || mz.gift === true) { p.meta.adDisclosure = true; p.meta.disclosure = discTextOf(p.meta); }
+      p.gate = gate(true); p.gateOk = gateOkOf(p.gate);
       const body = p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; },
     /* §5 규칙·슬롯 */
@@ -839,7 +867,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
