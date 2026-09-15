@@ -372,7 +372,32 @@ const THREE_REST = [
         ? `seo.ts articleJsonLdScript 를 **발행이 부른다**(${callers.join(",")})${extra ? " + WP 는 excerpt·slug 도 보낸다" : ""} · FAQPage·HowTo 는 일부러 안 만든다(구글 지원 중단)`
         : `구현 ${impl} · 부르는 곳 ${callers.length}/2 — 만들어 놓고 안 부르면 닫힌 게 아니다(AC-69)`];
   }],
-  ["B7 에디터 실제 요소", () => [yes(inFile("lib/writing-contracts.ts", /editorElements/), ), "0건"]],
+  /* 🔴 [2026-09-16 메인 · B2 가 원문을 찾아왔다] 옛 판은 `lib/writing-contracts.ts` 의 `editorElements` 를 봤다 —
+     **그 이름은 이 저장소 어디에도 없다**(이 검사 줄 자신이 유일한 등장이었다). 한 번도 만든 적 없는 이름을 찾고 있었다.
+     원래 감사가 물은 것은 `docs/active/2026-09-15-DESIGN-AUDIT.md:867` 에 있다:
+       «§5C.3 에디터 실제 요소 변환 — blocks.ts:87 ad-slot 은 있으나 **SE ONE 인용구·구분선 모듈 grep 0**»
+     ⇒ 계약층(`writing-contracts.ts`)은 «어떤 블록을 쓸까»를 정할 뿐이고 **버튼을 누르는 건 러너**다.
+        그 파일엔 영영 안 생긴다 — **자가 엉뚱한 층을 보고 있었다.**
+     ⇒ 넷을 다 본다(전부 «끊기면 빨개지는 것» · 🔴 메인이 변이로 넷 다 확인했다).
+       ①계획: 못 세운 블록을 `no_editor_op` 로 적나(plan.mjs:236)
+       ②셀렉터: 🔴 **감사가 «grep 0»이라 적었던 바로 그 둘**(naver-blog.mjs:161·166)
+       ③🔴 **부르는 곳**: 정의만 있으면 안 닫힌 것이다(AC-69 · :717·:737)
+       ④폴백을 **센다**: 조용한 폴백 금지(:719·:742)
+     ⚠️ 티스토리는 주 경로가 HTML 모드라 `<blockquote>`·`<hr>` 진짜 요소로 더 세다.
+        폴백(평문)은 세기는 하는데 **그 사실이 고객에게 안 닿는다** — 그건 B7 이 아니라 별도 칸이다(B2 제기). */
+  ["B7 에디터 실제 요소", () => {
+    const plan = inFile("runner/lib/plan.mjs", /no_editor_op/);
+    const sel = inFile("runner/channels/naver-blog.mjs", /se-insert-quotation-default-toolbar-button/)
+             && inFile("runner/channels/naver-blog.mjs", /se-insert-horizontal-line-default-toolbar-button/);
+    const call = inFile("runner/channels/naver-blog.mjs", /clickToolbarItem[(]ctx, "quotation"[)]/)
+              && inFile("runner/channels/naver-blog.mjs", /clickToolbarItem[(]ctx, "horizontalLine"[)]/);
+    const count = inFile("runner/channels/naver-blog.mjs", /missed[.]quote[+][+]/)
+               && inFile("runner/channels/naver-blog.mjs", /missed[.]divider[+][+]/);
+    return [plan && sel && call && count ? "닫힘" : "열림",
+      plan && sel && call && count
+        ? "블록 19종 → 에디터 op(plan.mjs) · SE ONE **인용구·구분선 버튼을 실제로 누른다**(naver-blog.mjs) · 못 세운 것은 no_editor_op / 폴백은 missed 로 **센다**"
+        : `계획 ${plan} · 셀렉터 ${sel} · **부르는 곳 ${call}** · 폴백 계수 ${count}`];
+  }],
   /* 🔴 [2026-09-16 B-1] 설명줄이 판정을 안 따라가 «닫힘 … 0건» 이라는 모순을 찍고 있었다(B9 와 같은 뿌리).
      하니스가 거짓말하면 다음 조사가 그걸 믿는다. */
   ["B8 목표 매체 채널 선택", () => { const on = inFile("lib/director.ts", /targetChannel|목표 매체/);
