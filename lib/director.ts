@@ -156,7 +156,12 @@ export function assignAccount(accounts: AccountRow[], channel: string): AccountR
 }
 
 /* ───────── propose ───────── */
-export async function propose(tid: number, topicId: number): Promise<{ ok: true; brief: Brief } | { ok: false; step: string; error: string }> {
+/**
+ * propose — 소재 1개 → 제작 지시서. `opts.origin` 은 **누가 부르는가**다(계약 R7 §1.2).
+ *   🔴 기본값은 `"auto"`(fail-closed · `confirm` 과 같은 규율) — 아무 말 없이 부르면 보수적으로 군다.
+ *   `"manual"` = 사람이 만들기 화면에서 누른 것. 이때만 «계정 없이 영상» 이 열린다.
+ */
+export async function propose(tid: number, topicId: number, opts: { origin?: PieceOrigin } = {}): Promise<{ ok: true; brief: Brief } | { ok: false; step: string; error: string }> {
   const [trow] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${topicId}`);
   if (!trow) return { ok: false, step: "not_found", error: "소재를 찾을 수 없어요." };
   const topic = toTopic(trow);
@@ -172,7 +177,14 @@ export async function propose(tid: number, topicId: number): Promise<{ ok: true;
   const alive = (a: AccountRow) => a.status !== "suspended" && a.status !== "disconnected";
   const textCh = [...new Set(accounts.filter((a) => TEXT_CHANNELS.has(a.channel) && alive(a)).map((a) => a.channel))];
   const videoCh = wantVideo ? [...new Set(accounts.filter((a) => VIDEO_CHANNELS.has(a.channel) && alive(a)).map((a) => a.channel))] : [];
-  const connected = [...textCh, ...videoCh];
+  /* 🔴 [R7 §1.2] **계정 없이 영상 만들기** — 영상을 켠 고객은 계정이 없어도 영상을 만들어 «앱에서 직접» 올릴 수 있어야 한다
+     (유튜브 앱 심사 전이라 OAuth 연결이 막혀 있고, 클립은 원래 앱에서 올린다 · 전수조사 §A).
+     🔴 **수동 «만들기» 경로만**이다: 자동 편성(`origin:"auto"`)은 종전대로 계정이 있어야 한다 — 슬롯 게이트(§4.7)와 별개로,
+        아무도 안 보는 사이에 올릴 곳 없는 영상을 코인 써 가며 쌓지 않는다.
+     채널은 소재 힌트가 영상 채널이면 그것, 아니면 `youtube_shorts`(60초 · 가장 흔한 규격)로 둔다 — 길이·최적시간·계약이 채널에 달려 있어 «무채널»로는 만들 수 없다. */
+  const noAccountVideo = wantVideo && opts.origin === "manual" && !videoCh.length;
+  const fallbackVideoCh = isVideoChannel(topic.channelHint) ? topic.channelHint : "youtube_shorts";
+  const connected = [...textCh, ...videoCh, ...(noAccountVideo ? [fallbackVideoCh] : [])];
   if (!connected.length) return { ok: false, step: "no_account", error: wantVideo ? "먼저 글 또는 영상 채널 계정을 하나 연결해 주세요." : "먼저 글 채널 계정을 하나 연결해 주세요." };
   const channels = [...(connected.includes(topic.channelHint) ? [topic.channelHint] : []), ...connected.filter((c) => c !== topic.channelHint)].slice(0, 3);
 
