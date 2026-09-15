@@ -53,6 +53,9 @@ export interface PublishPiece {
   id: number;
   tenantId: number;
   channel: string;
+  /** `pieces.kind` — `post`(글) \| `video`(영상). 🔴 **채널만으로는 못 가른다**: 스레드처럼
+   *  글도 영상도 되는 채널이 있어서, 여기가 없으면 커넥터가 한쪽으로만 보낸다(P1R7 §2.3 에서 실제로 그랬다). */
+  kind: string;
   accountId: number | null;
   slotId?: number;
   title: string;

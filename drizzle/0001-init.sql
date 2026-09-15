@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS channel_registry (
   label        varchar(40) NOT NULL,
   category     varchar(10) NOT NULL,        -- text|video
   publish_via  varchar(10) NOT NULL,        -- api|runner|manual
-  status       varchar(12) NOT NULL DEFAULT 'planned',  -- live|beta|planned|paused
+  status       varchar(12) NOT NULL DEFAULT 'planned',  -- ⚠️ 어휘는 `active|planned|down` — 0013 의 CHECK 가 정본이다(여기 적혀 있던 live|beta|paused 는 한 번도 쓰인 적이 없다)
   best_hours   jsonb NOT NULL DEFAULT '[]',
   monetize     jsonb NOT NULL DEFAULT '[]',
   sort         int NOT NULL DEFAULT 0
