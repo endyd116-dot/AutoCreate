@@ -25,7 +25,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=23"></script>
-<script src="/js/mock.js?v=22"></script>
+<script src="/js/mock.js?v=23"></script>
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
@@ -310,6 +310,10 @@ function ruleOneSheet(rule) {
       <p class="muted" style="margin:6px 0 0;font-size:12.5px">계정끼리 너무 붙어 나가면 자리가 뒤로 밀릴 수 있어요 — 그때는 편성표에 그 까닭이 적혀요.</p>`}
       <div class="sec">어느 계정으로</div>${UI.seg("md", [["auto", "자동"], ["fixed", "고르기"]], s.mode)}
       <div data-pick ${s.mode === "fixed" ? "" : "hidden"} style="padding-top:8px">${UI.chips("ac", accs.map((a) => [a.id, "@" + a.handle]), s.acc || accs[0]?.id)}</div>
+      ${""/* [R8 · rules-estimate] 🔴 **고치기 전에** 얼마나 드는지 말한다 — 여태 이 자리는 저장한 **뒤에야** 코인을 알려 줬다.
+             🔴 숫자는 서버가 «저장과 같은 식»으로 재 준다(화면이 편수 × 단가를 셈하면 단가 바뀌는 날 화면만 옛 셈이다 · AC-47).
+             🔴 못 쟀으면 이 칸을 **통째로 감춘다** — 0 이라고 적지 않는다(«없음 ≠ 0» · AC-9). */}
+      <div class="group" id="estBox" hidden style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est1">—</span>코인</span></div><div id="estNote1"></div></div>
       <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger-ink)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
     UI.bindSteppers(body, (n, v) => { if (n === "cnt") { s.count = v; view(sh, close); } });
     UI.bindChips(body, (n, v) => {
@@ -332,6 +336,15 @@ function ruleOneSheet(rule) {
       close(); UI.toast(`${say} · 주 ${r.coinsPerWeek}코인`); await load();
     };
     const others = activeRules().filter((x) => !rule || x.id !== rule.id).map((x) => ({ id: x.id, channel: x.channel, kind: x.kind, accountMode: x.accountMode, accountId: x.accountId, every: x.every, count: x.count, weekdays: x.weekdays, preferredHour: x.preferredHour, active: true }));
+    (async () => {   // 🔴 고치는 중에도 값이 따라 움직인다(고른 뒤에 알면 늦다)
+      if (!s.count) return;
+      const r = await UI.api("/api/rules-estimate", { body: { rules: [...others, one()] }, noGate: true });
+      const box = body.querySelector("#estBox"); if (!box || !r.ok) return;   // 못 쟀으면 그냥 안 보여 준다
+      box.hidden = false;
+      box.querySelector("#est1").textContent = UI.num(r.coinsPerWeek);
+      box.querySelector("#estNote1").innerHTML = r.shortfallNote
+        ? `<div class="kv"><span class="k wrap">요금제 포함분</span><span class="v wrap" style="font-weight:600;text-align:right">${UI.esc(r.shortfallNote)}</span></div>` : "";
+    })();
     body.querySelector("#save").onclick = (e) => { if (!s.count) return UI.toast("1회 이상으로 해 주세요"); send([...others, one()], e.currentTarget, rule ? "규칙을 고쳤어요" : "규칙을 추가했어요"); };
     const del = body.querySelector("#del");
     if (del) del.onclick = (e) => { const btn = e.currentTarget; UI.confirmRow(body.querySelector(".cta"), "이 규칙을 지울까요? 아직 안 나간 자리는 사라져요.", () => send(others, btn, "규칙을 지웠어요")); };
@@ -349,6 +362,22 @@ function ruleSheet() {
     mode: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountMode || "auto"])), acc: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountId || null])), reviewPolicy: D.settings.reviewPolicy || "silence_approves", produceLeadDays: D.settings.produceLeadDays || 3 };
   const perWeek = (c) => st.every[c] === "day" ? st.count[c] * 7 : st.every[c] === "month" ? st.count[c] / 4 : st.count[c];   // 코인 미리보기는 «주»로 환산해서 견준다
   const est = () => Math.round(chans.reduce((a, c) => a + perWeek(c) * perPiece(c), 0));
+  /* 🔴 저장에 보낼 모양과 견적에 보낼 모양은 **같아야** 한다 — 서버가 «같은 검사·같은 식»으로 재 주는 값이라(rules.ts §R8),
+     여기서 둘을 따로 만들면 «견적과 실제가 다른» 화면이 된다. 한 곳에서 짓는다. */
+  const ruleInputs = () => chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: st.every[c], count: st.count[c], active: true }; /* [P1R5] kind shorts · [R7 §4.3] 주기·요일·시각 */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (st.hour[c] != null) r.preferredHour = st.hour[c]; if (st.every[c] === "week" && st.wd[c].length) r.weekdays = st.wd[c]; return r; });
+  /* [R8 · rules-estimate] 🔴 **켜기 전에** 서버가 같은 식으로 재 준다 — 화면의 «편수 × 단가»는 단가를 바꾸는 날 옛 셈으로 남는다(AC-47·AC-52).
+     🔴 `shortfallNote` 는 «요금제 포함분으로는 달 중간에 멈춘다»를 **저장 전에** 말해 주는 서버 문장이다.
+        나중에 알면 그건 막힌 게 아니라 속은 것이다 — 그래서 화면이 셈해서 흉내 내지 않고 그 문장을 그대로 싣는다.
+     🔴 못 불러오면 **화면 미리보기를 그대로 둔다** — 값을 지우지 않는다(«없음 ≠ 0» · AC-9). */
+  async function estServer(body) {
+    const r = await UI.api("/api/rules-estimate", { body: { rules: ruleInputs() }, noGate: true });
+    if (!r.ok) return;
+    const e = body.querySelector("#est"); if (e) e.textContent = UI.num(r.coinsPerWeek);
+    const host = body.querySelector("#estNote"); if (!host) return;
+    host.innerHTML = r.shortfallNote
+      ? `<div class="kv"><span class="k wrap">요금제 포함분</span><span class="v wrap" style="font-weight:600;text-align:right">${UI.esc(r.shortfallNote)}</span></div>`
+      : (D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v">${UI.num(D.includedCoins)}코인/달 · 이 편성이면 포함분 안이에요</span></div>` : "");
+  }
   let step = 1;
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const on = chans.filter((c) => st.count[c] > 0);
@@ -366,17 +395,17 @@ function ruleSheet() {
       <p class="muted" id="rpSay2" style="margin:6px 0 0;font-size:12.5px">${rpSay(autoApproveOff() ? "require_confirm" : st.reviewPolicy)}</p>
       <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
       <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div>
-        ${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}
+        <div id="estNote">${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}</div>${""/* 🔴 서버가 답하면 이 칸을 통째로 갈아 끼운다(estServer) — 화면 셈은 답이 올 때까지의 미리보기다 */}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
     UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") { st.reviewPolicy = v; const sy = body.querySelector("#rpSay2"); if (sy) sy.textContent = rpSay(v); }   /* [R8 §9-2] 🔴 켜는 **그 순간에** 무엇을 켜는 것인지 말한다 — «사람이 안 보는 경로»가 생기는 자리가 여기다 */
       else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
     const bk = body.querySelector("#bk"); if (bk) bk.onclick = () => { step--; view(sh, close); };
+    if (step === 4) estServer(body);   // 🔴 켜기 전에 서버가 **같은 식**으로 다시 잰다(화면 셈은 그때까지의 미리보기)
     const go = body.querySelector("#go"); if (go) go.onclick = async () => {
       go.disabled = true;
-      const rules = chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: st.every[c], count: st.count[c], active: true }; /* [P1R5] kind shorts · [R7 §4.3] 주기·요일·시각 */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (st.hour[c] != null) r.preferredHour = st.hour[c]; if (st.every[c] === "week" && st.wd[c].length) r.weekdays = st.wd[c]; return r; });
-      const r = await UI.api("/api/rules-save", { body: { rules } }); go.disabled = false;
+      const r = await UI.api("/api/rules-save", { body: { rules: ruleInputs() } }); go.disabled = false;
       if (!r.ok) { if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); } return UI.toast(r.error || "저장하지 못했어요"); }
       const s = await UI.api("/api/rules-settings", { body: { autoSchedule: true, reviewPolicy: st.reviewPolicy, produceLeadDays: st.produceLeadDays }, noGate: true });
       if (!s.ok) UI.toast(s.step === "plan_feature" ? "자동 승인은 Pro 부터예요 · 지금은 검수에서 눌러야 나가요" : s.error || "설정은 저장하지 못했어요");

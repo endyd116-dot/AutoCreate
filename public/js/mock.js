@@ -882,6 +882,20 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "rules-save": (b) => { const want = (b.rules || []).filter((r) => r.active !== false).length; const cap = planKnob === "pro" || planKnob === "agency" ? null : 3;
       if (cap !== null && want > cap) return { ok: false, status: 402, reason: "plan_limit", step: "plan_limit", resource: "rules", used: want, limit: cap, planKey: planKnob || "trial", error: `편성 규칙은 ${cap}개까지예요. Pro 로 바꾸면 제한이 없어요.` };
       const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
+    /* [R8 · rules.ts] 견적 — 🔴 **아무것도 쓰지 않는다**. 저장과 **같은 식**으로 재 주는 자리라 화면이 «편수 × 단가»를 따로 셈하지 않아도 된다.
+       🔴 `shortfallNote` 는 «요금제 포함분으로는 달 중간에 멈춘다»를 **저장 전에** 말해 주는 문장이다(서버 글자 그대로).
+          나중에 알면 막힌 게 아니라 속은 것이다 — 그래서 저장 전에 말한다. */
+    "rules-estimate": (b) => {
+      const rules = (b.rules || []).filter((r) => r.active !== false);
+      const perWeek = Math.round(rules.reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.every === "month" ? r.count / 4 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0));
+      const perMonth = Math.round(perWeek * 52 / 12);
+      const included = planKnob === "starter" ? 40 : 150;
+      const cap = planKnob === "pro" || planKnob === "agency" ? null : 3;
+      const out = { ok: true, coinsPerWeek: perWeek, coinsPerMonth: perMonth, rules: rules.length, limit: cap, overLimit: cap !== null && rules.length > cap };
+      if (included > 0 && perMonth > included) { const days = Math.max(1, Math.floor(included / Math.max(1, perWeek / 7)));
+        out.shortfallNote = `이 계획대로면 한 달에 ${perMonth}코인이 들어요. 요금제에 든 ${included}코인으로는 약 ${days}일치예요 — 코인을 채우거나 횟수를 줄여 주세요.`; }
+      return out;
+    },
     "rules-settings": (b) => { if (planKnob === "starter" && !keptAuto && b.reviewPolicy === "silence_approves") return { ok: false, status: 402, reason: "plan_limit", step: "plan_feature", feature: "autoApprove", planKey: "starter", error: "«조용하면 발행»은 Pro 요금제부터 쓸 수 있어요. 지금 요금제에서는 발행 전에 한 번 확인해 주세요." }; for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const list = S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => ({ ...s }));
