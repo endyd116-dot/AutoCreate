@@ -14,7 +14,7 @@ import { CHAIN_HIGH } from "./ai-models";
 import { generateImage, type ImageAspect } from "./ai-image";
 import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, type RenderImage } from "./blocks";
-import { runGate, buildRewriteInstruction, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
+import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
 import { ensureDisclosureFirst, disclosureTextFor } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
 import { seasonLine } from "./kr-calendar";
@@ -276,13 +276,16 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const gateInput = (blocks: Block[], title: string, s: typeof sim) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: s.score, against: s.index >= 0 ? `글 #${otherPlain[s.index]?.id}` : undefined }, title, group });   // [R8 §2.1] group — 분량 축이 계약과 **같은 폭**으로 재게(안 주면 채널 기본 폭이라 잣대가 갈린다)
     let report: GateReport = runGate(gateInput(draft.blocks, draft.title, sim));
 
-    /* 🔴 [R8 §2.1] 다시 쓰기는 **한 번**이고, 그 한 번에 **할 말을 다 모아서** 한다.
-       종전엔 ①유사도 재생성 ②게이트 재작성이 **따로** 있었고, ①이 돌면 `rewritten` 이 서서 ②가 통째로 건너뛰었다.
-       C 실호출 3편이 전부 «2호출» 이었는데 그게 ① 이었다면, 그 글들은 **분량 지시를 한 번도 못 받은 것**이 된다.
-       ⇒ 게이트를 **먼저** 돌리고, 겹침과 게이트 지적을 **한 프롬프트에 합쳐** 한 번만 다시 쓴다(호출 수는 그대로 2). */
+    /* 🔴 [R8 §2.1 + §9] 다시 쓰기는 **한 번**이고, **좁은 축에서만** 돈다. 두 수리가 여기서 만난다.
+       ① [§2.1 · B-1] 종전엔 ①유사도 재생성 ②게이트 재작성이 **따로** 있었고, ①이 돌면 `rewritten` 이 서서 ②가 통째로 건너뛰었다 —
+          즉 겹쳐서 다시 쓴 글은 **고지·금칙이 걸려도** 다시 쓰라는 말을 한 번도 못 들었다(C 가 main 에서 독립으로 같은 것을 찾았다).
+          ⇒ 게이트를 **먼저** 돌리고 겹침과 게이트 지적을 **한 프롬프트에 합쳐** 한 번만 다시 쓴다(호출 수는 그대로 2).
+       ② [§9 · B3] 그 «한 번»도 **계정이 다치는 축**에서만 돈다(`REWRITE_KEYS`) — 상투 표현 하나로 글 값을 두 배 만들지 않는다.
+          🔴 축을 지운 게 아니다: 판정은 다 돌고 `gate_report` 에 남는다. **재작성을 부르는 조건만** 좁혔다.
+       🔴 지시문(`buildRewriteInstruction`)은 **좁히지 않는다** — 어차피 한 번 쓰는 값이라, 이왕 고칠 때 품질 지적도 같이 말해 주는 편이 낫다. */
     const simBad = sim.score >= SAME_BODY_SIMILARITY && otherPlain.length > 0;
     let rewritten = false;
-    if (simBad || !report.ok) {
+    if (simBad || needsRewrite(report)) {
       const simInst = simBad
         ? `[다시 쓰기 — 이 글은 이미 있는 글(#${otherPlain[sim.index].id})과 ${Math.round(sim.score * 100)}% 겹친다. 도입 장면·소제목·예시·순서를 전부 다른 관점으로 새로 써라. 같은 문장 재사용 금지.]\n`
         : "";

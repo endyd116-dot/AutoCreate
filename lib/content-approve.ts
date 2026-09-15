@@ -8,18 +8,20 @@
  *     판정기가 함수 파일 안에 숨어 있으면 새 층(크론)이 그걸 못 불러 결국 한 벌을 더 만든다 — 그 순간 사람 승인과
  *     자동 승인의 기준이 갈라지고, 자동 승인만 정책 위반을 통과시킨다(PITFALLS #11-b «이미 있는 정본 판정기를 새 층이 안 부르는 것도 같은 죄»).
  *
- *   ══ 하드 게이트 ══
- *     12키 중 **법·돈·날조**에 걸리는 5키(고지·금칙어·제휴 링크 수·유사도·최상급)만 승인을 막는다(PITFALLS #19 «게이트는 사고 게이트만»).
- *     나머지(AI 티·구성·길이 등)는 점수로 보여 주되 승인을 막지 않는다 — 취향은 게이트가 아니라 프롬프트의 일이다.
- *
- *   🔴 자동 승인이 하드 게이트에 걸리면 **발행하지 않는다** — `awaiting_manual` + 알림. 조용한 통과 0(자동 승인으로 정책 위반이 나가는 일 0).
+ *   ══ [P1R8 §9 최종] 🔴 **막는 축은 없다**(사장님 전역 지시 2026-09-15 · «말해 주기로 내려. 고객 계정이야.») ══
+ *     검사는 **그대로 돈다** — 모든 축이 재고, `gate_report` 에 남고, 화면·알림이 **말해 준다**. 바뀐 것은 «막는 판정» 하나뿐이다.
+ *     막는 것은 딱 하나: **깨진 영상**(까만 화면·길이 초과 · `judgeBlockers`) — 그건 정책이 아니라 **불량품**이다.
+ *     대신 «말해 주기»를 세게 한다: 칸마다 **무게**(`weight` high/normal)와 **어떻게**(`how`) · 승인 뒤 **알림 1회 + 감사** ·
+ *     발행함 목록에 `riskCount`·`riskHigh`(나간 뒤에 처음 알게 되는 것이 유일하게 남은 안전장치라서).
+ *     🔴 그리고 **고지는 막는 게 아니라 넣어 주는 것**이다(`ensureDisclosureHtml`) — 대가를 켜면 첫머리에 자동으로 실린다.
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";
+import { writeAudit } from "./audit";   // [P1R8 §9] «말하고 통과» 를 감사에 남긴다
 import { jsonb, utcDate } from "./db-util";
 import { contractFor, topicGroupOf, type TopicGroup } from "./writing-contracts";   // [R8 §2.1] 주제군 — 분량 폭이 여기에 달렸다
 import { type Block, htmlToPlain } from "./blocks";
-import { runGate, GATE_KEYS, GATE_LABEL, gateWeightOf, type GateReport, type GateCheck } from "./ai-tell-gate";
+import { runGate, GATE_KEYS, GATE_LABEL, decorateCheck, type GateReport, type GateCheck } from "./ai-tell-gate";
 import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
@@ -35,23 +37,47 @@ import { isHealthTopic } from "./banned-categories";          // [R8-A §4] 건�
 type Row = Record<string, unknown>;
 const n = (v: unknown) => Number(v || 0);
 
-/** 승인을 **막는** 게이트 키(사고 게이트). 나머지는 보여만 준다. */
-/* [R8-A §4] 🔴 `superlative` 를 **하드에서 뺀다**(B-1 지적 · 표시광고법 §5 는 낱말 금지가 아니라 실증 책임).
+/* ═══ [P1R8 §9 최종] 🔴 승인을 **막는 축은 없다**(하드 0개) ═══
+   하루에 잣대가 세 번 좁아졌다: ①«법·플랫폼 정책» → ②«법·제3자·비가역»(플랫폼 정책 제외) → ③ **전부 소프트**.
+   그 기록을 남기는 이유: 다음 사람이 «예전엔 막았는데 왜 없지»를 물을 때 **되돌리지 않고** 이유를 읽게 하려고.
+
+   [R8-A §4] `superlative` 를 **하드에서 뺀다**(B-1 지적 · 표시광고법 §5 는 낱말 금지가 아니라 실증 책임).
    그 축은 «낱말이 있나»만 봤고 근거를 보지 않아, «판매량 1위(2026년 9월 네이버 쇼핑 기준)» 처럼 **법이 허용하는 문장까지 승인을 막았다**.
    이제 `superlative` 는 같은 문장의 근거(기관·기간·수치)를 보고, 없을 때만 **보여 준다**(소프트).
    법 축을 막는 것은 `banned_words` 다 — 3층 사전(hard = 단정·효능 / needs_proof = 근거 없는 최상급)이 그 자리를 맡는다. */
-export const HARD_GATE_KEYS: readonly string[] = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing", "stock_safe"];
+/* 🔴🔴 **빈 배열이 맞다. 버그가 아니다. 채워 넣지 마라.** (사장님 전역 지시 2026-09-15 · CLAUDE §9 최종)
+     사장님 원문: **«말해 주기로 내려. 고객 계정이야. 우리가 책임지는 게 아니야.»**
+     메인이 «법·제3자는 남길까요»를 두 번 물었고 **두 번 다 내리라**고 하셨다.
+   🔴 **검사를 끈 것이 아니다** — 모든 축은 그대로 돌고(`runGate`), 결과는 `gate_report` 에 그대로 남고, 화면·알림이 **말해 준다**.
+      바뀐 것은 «막는 판정» 하나뿐이다. **축을 지우거나 판정 로직을 빼면 «말해 주기»의 재료가 사라진다.** */
+export const HARD_GATE_KEYS: readonly string[] = [];
 /** 이 게이트 결과가 승인을 막는가. */
 export function hardFailures(gate: GateReport): GateCheck[] {
   return gate.checks.filter((c) => !c.pass && HARD_GATE_KEYS.includes(c.key));
 }
 /**
- * [P1R5 §1.4-5·§0.1-7] 영상 심사의 **P0 축**도 승인을 막는다(forbidden·disclosure·duration_fit·frames_not_blank).
- *   P1·P2 는 기록만 — 화면이 축 목록으로 보여 주되 «이대로 예약»을 막지 않는다(3등급 규칙).
- *   `hardFailures` 와 나눠 둔 이유: 축 키(duration_fit·frames_not_blank)는 GateKey 12 에 대응물이 없다.
+ * [P1R5 §1.4-5 → P1R8 §9] 영상 심사 P0 중 **«물건이 깨진 것»만** 막는다 — 그건 게이트가 아니라 **불량품**이다.
+ *   · `frames_not_blank`(까만 화면) · `duration_fit`(채널 상한 초과 — 올려도 플랫폼이 거부한다) → **막는다**
+ *   · `forbidden`·`disclosure`(정책·고지 축) → 🔴 **막지 않고 말해 준다**(§9 — 정책은 하드의 근거가 아니다).
+ *     고지는 «막는 게 아니라 **넣어 주는 것**»이라 `lib/disclosure.ts` 가 배지·3초 자막·설명 첫 줄을 자동으로 싣는다.
  */
 export function judgeBlockers(gate: GateReport): { key: string; label: string; detail?: string }[] {
-  return (gate.judge?.axes ?? []).filter((a) => !a.pass && a.grade === "P0").map((a) => ({ key: a.key, label: a.label, ...(a.detail ? { detail: a.detail } : {}) }));
+  const BROKEN = new Set(["frames_not_blank", "duration_fit"]);
+  return (gate.judge?.axes ?? []).filter((a) => !a.pass && a.grade === "P0" && BROKEN.has(a.key)).map((a) => ({ key: a.key, label: a.label, ...(a.detail ? { detail: a.detail } : {}) }));
+}
+/** [P1R8 §9] 막지는 않지만 **말해 줘야 하는** 실패 축(사람이 읽는 라벨) — 승인·발행 뒤 알림·감사에 싣는다. */
+export function riskLabels(gate: GateReport, max = 3): string[] {
+  const soft = gate.checks.filter((c) => !c.pass).map((c) => c.label);
+  const judge = (gate.judge?.axes ?? []).filter((a) => !a.pass).map((a) => a.label);
+  return [...new Set([...soft, ...judge])].slice(0, max);
+}
+/** [P1R8 §9] «말하고 통과» — 자동 승인처럼 사람이 안 보는 경로에도 닿게 알림 1회(같은 글로 도배하지 않는다). */
+async function notifyGateRisk(tid: number, pieceId: number, title: string, risks: string[]): Promise<void> {
+  await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+    SELECT ${tid}, ${"gate_risk"}, ${"이 글엔 이런 점이 있었어요"},
+           ${`«${String(title || "글").slice(0, 30)}» — ${risks.join(" · ")}. 그대로 내보냈어요. 검수에서 고치거나 «내리기»로 되돌릴 수 있어요.`},
+           ${`/app/piece.html?id=${pieceId}`}
+    WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE tenant_id = ${tid} AND kind = 'gate_risk' AND link = ${`/app/piece.html?id=${pieceId}`})`);
 }
 
 /* ═══════════ [P1R7 B3] 링크 열림 검사 — **소프트**(경고) · DESIGN §4.2 «코드 게이트(…링크)» · AM `content-link-verify` 자리 ═══════════
@@ -100,13 +126,6 @@ export const SELF_SKIPPED_GATE_KEYS: readonly string[] = Object.entries(SELF_GAT
  *      순수 함수는 그대로 두고 **쓰는 쪽에서 값을 버린다** — 버린 값은 응답에도 안 싣는다(잰 척하지 않는다).
  *   `ok` 는 «모든 검사를 통과했나»라는 **알림**이다 — 막는 것과는 상관이 없다(막는 축이 0개다).
  */
-/**
- * [R8 §9] 보고서의 모든 축에 **무게**를 채운다 — `runGate` 밖에서 만든 축(고지 HTML 판정·링크·골격)도 빠지지 않게 **한 자리**에서 입힌다.
- *   🔴 만드는 자리마다 손으로 붙이면 한 군데는 반드시 빠진다(스모크에서 실제로 빠졌다).
- */
-function withWeights(report: GateReport): GateReport {
-  return { ...report, checks: report.checks.map((c) => (c.weight ? c : { ...c, weight: gateWeightOf(c.key) })) };
-}
 
 export function applySelfGatePolicy(report: GateReport): GateReport {
   const checks: GateCheck[] = report.checks.map((c) => {
@@ -263,7 +282,8 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
     const stock = await checkStockSafety(tid, p);      // [P1R8 B3] 스톡 사진 안전(광고성 글 + 사람·상표) — 제3자가 다치는 축
-    const full: GateReport = withWeights({ ...g, checks: [...g.checks, link, st, stock], ok: g.ok && link.pass && st.pass && stock.pass });
+    /* [P1R8 §9] 🔴 여기서 만든 칸도 **같은 손**을 거친다 — 무게·«어떻게»가 빠진 칸이 하나라도 있으면 화면이 그 축만 다르게 그린다. */
+    const full: GateReport = { ...g, checks: [...g.checks, link, st, stock].map(decorateCheck), ok: g.ok && link.pass && st.pass && stock.pass };
     return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
@@ -287,8 +307,8 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   }
   checks.push(await checkLinks(html));   // [P1R7 B3] 소프트 링크 검사(HTML 정본 경로도 같은 한 벌)
   checks.push(await checkStockSafety(tid, p));   // [P1R8 B3] 스톡 사진 안전(HTML 정본 경로도 같은 한 벌 · 두 경로가 갈라지지 않게)
-  /* [R8 §5D] 직접 쓴 글은 HTML 이 정본이라 **이 경로로 온다** — ① 정책은 여기서도 같이 입힌다(한 곳만 입히면 화면이 갈린다). */
-  const out: GateReport = withWeights({ ok: checks.every((x) => x.pass), checks, rewritten: false });
+  /* [R8 §5D · B-1] 직접 쓴 글은 HTML 이 정본이라 **이 경로로 온다** — ① 정책(안 잰 축 표시)은 여기서도 같이 입힌다(한 곳만 입히면 화면이 갈린다). */
+  const out: GateReport = { ok: checks.every((x) => x.pass), checks: checks.map(decorateCheck), rewritten: false };
   return origin === "self" ? applySelfGatePolicy(out) : out;
 }
 
@@ -339,7 +359,7 @@ export async function recheckVideoPiece(tid: number, p: Row): Promise<GateReport
   // 심사 축 — 생성 때 남은 것을 그대로 싣는다(없으면 «아직 안 구웠다»는 뜻 · 축 없음은 실패가 아니다).
   const prev = (p.gate_report && typeof p.gate_report === "object" ? p.gate_report : null) as GateReport | null;
   const judge = prev?.judge;
-  return { ok: checks.every((x) => x.pass) && !(judge?.axes ?? []).some((a) => !a.pass && a.grade === "P0"), checks, rewritten: false, ...(judge ? { judge } : {}) };
+  return { ok: checks.every((x) => x.pass) && !(judge?.axes ?? []).some((a) => !a.pass && a.grade === "P0"), checks: checks.map(decorateCheck), rewritten: false, ...(judge ? { judge } : {}) };
 }
 
 export type ApproveResult =
@@ -365,15 +385,20 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date } = {
   if (st !== "in_review" && st !== "draft") return { ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." };
 
   const gate = await recheckPiece(tid, p);
-  /* [R8 §9] 직접 쓴 글은 **자기 표**로 막는다 — 플랫폼 정책은 하드가 아니다(막으면 공장이 선다).
-     🔴 AI 가 쓴 글의 표(`HARD_GATE_KEYS`)는 B3 이 §9 잣대로 다시 세는 중이다 — 두 곳에서 각자 좁히지 않게 여기선 갈래만 둔다. */
-  /* [R8 §9] 🔴 막는 축은 **0개**다(`HARD_GATE_KEYS` 를 B3 이 비운다) — 갈래를 여기 또 만들지 않는다.
-     검사는 계속 돌고 결과는 `gate` 로 나간다. 막지만 않는다. */
-  const hard = hardFailures(gate);
-  const judged = judgeBlockers(gate);   // [P1R5] 영상 심사 P0(정책·고지·길이·빈 프레임)도 승인을 막는다 · P1/P2 는 통과
+  const hard = hardFailures(gate);      // [P1R8 §9] 지금은 늘 빈 배열이다 — 막는 축이 없다(`HARD_GATE_KEYS` 주석)
+  const judged = judgeBlockers(gate);   // 깨진 영상(까만 화면·길이 초과)만 — 불량품은 올려도 소용이 없다
   if (hard.length || judged.length) {
     await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${id}`);
     return { ok: false, step: "gate", gate, error: "발행 전 확인이 필요해요." };
+  }
+  /* [P1R8 §9] 🔴 **막지 않는 대신 말한다** — 이 줄이 없으면 우리는 그냥 검사를 끈 것이다.
+     자동 승인처럼 **사람이 안 보는 경로**에도 닿아야 해서 알림 1회 + 감사로 남긴다(화면은 `gate_report` 를 그대로 읽는다).
+     🔴 «조용히 통과»가 아니라 **«말하고 통과»**. */
+  const risks = riskLabels(gate);
+  if (risks.length) {
+    await notifyGateRisk(tid, id, String(p.title ?? ""), risks).catch((e) => console.warn("[approve] 위험 알림 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+    await writeAudit({ tenantId: tid, action: "piece_approved_with_risks", actorType: "system", riskLevel: "medium", target: `piece:${id}`,
+      detail: { risks, failed: gate.checks.filter((c) => !c.pass).map((c) => c.key) } }).catch(() => {});
   }
   const m = (p.meta || {}) as Record<string, unknown>;
   const at = utcDate(p.scheduled_for) ?? (m.scheduleAt ? new Date(String(m.scheduleAt)) : null) ?? new Date(now.getTime() + 3600_000);

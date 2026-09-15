@@ -42,6 +42,13 @@ export interface PostRow {
   canRetract: boolean;
   /** 이미 내렸나(내린 시각). 있으면 단추 대신 «내렸어요»를 보여 준다. */
   retractedAt?: string;
+  /**
+   * [P1R8 §9 · A 요청] 🔴 **나간 뒤에도 보이는 위험** — 하드 게이트가 0이라 «막지 않고 말해 주는» 것이 유일한 안전장치다.
+   *   자동 승인으로 나간 글은 **아무도 검수 화면을 안 본다** — 그래서 발행함 목록에서 바로 짚어 준다.
+   *   riskCount = 실패한 검사 칸 수 · riskHigh = 그중 무거운 것(법·제3자·계정)이 있나 · 자세한 내용은 pieces-get 의 gate.
+   */
+  riskCount?: number;
+  riskHigh?: boolean;
 }
 
 export default async (req: Request): Promise<Response> => {
@@ -78,7 +85,9 @@ export default async (req: Request): Promise<Response> => {
              a.handle,
              po.id AS post_id, po.external_url AS po_url, po.published_via, po.stats, po.published_at AS po_at,
              (SELECT rj.error_kind FROM runner_jobs rj WHERE rj.tenant_id = p.tenant_id AND rj.piece_id = p.id
-                AND rj.error_kind IS NOT NULL ORDER BY rj.id DESC LIMIT 1) AS job_error_kind
+                AND rj.error_kind IS NOT NULL ORDER BY rj.id DESC LIMIT 1) AS job_error_kind,
+             /* [P1R8 §9] 검사 결과는 발행 뒤에도 pieces.gate_report 에 그대로 남는다 — 여기서는 **세기만** 한다(덮지 않는다). */
+             p.gate_report AS gate_report
         FROM pieces p
         LEFT JOIN accounts a ON a.id = p.account_id
         LEFT JOIN posts po ON po.piece_id = p.id AND po.tenant_id = p.tenant_id
@@ -102,6 +111,15 @@ export default async (req: Request): Promise<Response> => {
       };
       const urlStr = String(r.po_url || r.p_url || "");
       if (urlStr) o.externalUrl = urlStr;
+      /* [P1R8 §9] 나간 뒤에도 «이 글엔 이런 점이 있었어요»를 목록에서 짚어 준다.
+         🔴 무게는 **서버 값**(`GateCheck.weight`)을 그대로 읽는다 — 화면도 우리도 키 목록을 외우지 않는다(AC-57).
+         옛 글은 `weight` 가 없을 수 있다(이 기능 전에 저장된 보고서) → 그때는 개수만 센다(«무거움»을 지어내지 않는다). */
+      const gr = (r.gate_report && typeof r.gate_report === "object" ? r.gate_report : null) as { checks?: { pass?: boolean; weight?: string }[] } | null;
+      const failed = (gr?.checks ?? []).filter((c) => c && c.pass === false);
+      if (failed.length) {
+        o.riskCount = failed.length;
+        if (failed.some((c) => c.weight === "high")) o.riskHigh = true;
+      }
       /* [R8 §3 · DESIGN §5E] 🔴 «내려 줄 수 있나»는 **채널 성질 표**가 정한다(추측 0).
          주소가 있어야(=실제로 올라간 글이어야) 켠다 — 아직 안 올라간 글에 «내려 줘»가 뜨면 «뭘 내린다는 거지»가 된다. */
       o.canRetract = !!urlStr && canRetract(String(r.channel));

@@ -32,7 +32,7 @@ import { jsonb, utcDate } from "../db-util";
 import { approvePiece } from "../content-approve";
 import { kstHour, kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { planOf, autoApproveAllowed } from "../plans";   // [P1R7 B3] 자동 승인 플랜 게이트(§5B.9)
-import { accountsTrust } from "../account-trust";       // [P1R8 §5.2] 자동 승인은 «신뢰 계정»에서만(DESIGN §4.2)
+import { accountsTrust } from "../account-trust";       // [P1R8 §9] 신뢰는 **알려 주는 축**이다 — 막지 않는다(사장님 지시 2026-09-15)
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -61,12 +61,13 @@ export const reviewDeadlineStep: CronStep = {
         WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status = 'in_review'
           AND s.review_deadline IS NOT NULL AND s.review_deadline <= NOW() AND ${NOT_SILENT}
         ORDER BY s.publish_at NULLS LAST, s.id LIMIT 200`);
-      /* [P1R8 §5.2] 🔴 **자동 승인은 «신뢰 계정»에서만**(DESIGN §4.2). 설계는 처음부터 계정 단위라고 말했는데
-         코드에는 테넌트 스위치 + 요금제 게이트뿐이라 **어제 연결한 계정도 사람 없이 나갔다**.
-         신뢰 = 성공 발행 3건 + 건강도 70 + active + 워밍업 아님(`lib/account-trust.ts` · 근거는 그 파일 머리말).
-         🔴 2026-09-15 라이브에서는 **모든 계정이 «아직»**이다(실발행이 거의 없어서) — 그래서 이 줄은 지금 **자동 승인을 사실상 멈춘다**.
-            그게 맞다: «검증 안 된 계정에 사람 없이 내보내기»가 원래 막으려던 것이고, **처음 3편을 사람이 보면 스스로 풀린다.**
-            대신 **조용히 멈추지 않는다** — 고객에게 사유를 한 번 알리고 감사에 남긴다(AC-9). */
+      /* [P1R8 §5.2 → §9] 🔴 **신뢰 계정은 «막는 축»이 아니라 «알려 주는 축»이다**(사장님 전역 지시 2026-09-15 · CLAUDE §9 «게이트는 최소화»).
+         설계(§4.2)는 자동 승인을 계정 단위 신뢰로 말하고, 코드엔 테넌트 스위치 + 요금제 게이트뿐이었다 — 그 빈자리를 판정기로 채웠다.
+         🔴 **그런데 막는 데 쓰면 안 된다**: 라이브 실측에서 계정 12개가 **전부 «아직»**이었다(실발행이 없어서).
+            그대로 막으면 «알아서 올려»를 켠 고객의 글이 **한 편도 안 나간다** — 막아서 공장을 세우는 쪽이 더 나쁘다.
+         ⇒ **자동 승인은 그대로 하고**, 처음 몇 편은 «한 번 보시는 게 좋아요»를 **알림·감사로만** 남긴다.
+         🔴 워밍업도 여기서 막지 않는다 — 계정 보호는 **발행량**이 하는 일이고 이미 `effectiveDailyCap` 이 하루 상한으로 막는다.
+            같은 것을 두 곳에서 막으면 «왜 안 나가지»가 두 배로 어려워진다(AC-29 «게이트 호출처는 한 곳»). */
       const trustMap = await accountsTrust(ctx.tid, due.map((x) => n(x.account_id)).filter(Boolean));
       for (const p of due) {
         if (Date.now() >= ctx.deadline) { pending++; continue; }
@@ -74,13 +75,13 @@ export const reviewDeadlineStep: CronStep = {
         const accId = n(p.account_id);
         const trust = accId ? trustMap.get(accId) : undefined;
         if (accId && trust && !trust.trusted) {
-          untrusted++;
-          if (await notifyOnce(ctx.tid, `trust_review:${accId}`.slice(0, 32), "처음 몇 편은 직접 봐 주세요",
-            `${trust.reasons[0] ?? "이 계정은 아직 자동으로 내보내지 않아요"} — 검수에서 승인하시면 바로 나가요.`,
+          untrusted++;   // 막지 않는다 — 센다(운영이 «아직 처음인 계정으로 자동 발행 중»을 본다)
+          if (await notifyOnce(ctx.tid, `trust_review:${accId}`.slice(0, 32), "처음 몇 편은 한 번 보시는 게 좋아요",
+            `${trust.reasons[0] ?? "이 계정은 이제 막 시작했어요"} — 그대로 두면 예정대로 나가요. 검수에서 미리 보실 수도 있어요.`,
             `/app/piece.html?id=${pieceId}`)) notified++;
           await writeAudit({ tenantId: ctx.tid, action: "auto_approve_untrusted", actorType: "system", target: `piece:${pieceId}`,
-            detail: { accountId: accId, evidence: trust.evidence, reasons: trust.reasons, slotId } });
-          continue;   // 상태는 그대로 in_review — 사람이 보면 나간다
+            detail: { accountId: accId, evidence: trust.evidence, reasons: trust.reasons, slotId, blocked: false } });
+          /* 🔴 `continue` 하지 않는다 — 알리고 **그대로 승인으로 간다**(§9). */
         }
         const r = await approvePiece(ctx.tid, p, { now: ctx.now });
         if (r.ok) {
@@ -130,7 +131,7 @@ export const reviewDeadlineStep: CronStep = {
     const detail: Record<string, unknown> = { policy, ...(forcedByPlan ? { forcedByPlan: true, planKey: ctx.planKey, stored: ctx.raw.reviewPolicy ?? null } : {}) };
     if (approved) detail.approved = approved;
     if (blocked) detail.blocked = blocked;
-    if (untrusted) detail.untrusted = untrusted;   // [P1R8 §5.2] 신뢰가 아직 안 선 계정이라 사람에게 남긴 건수(조용한 0건 금지)
+    if (untrusted) detail.untrusted = untrusted;   // [P1R8 §9] 아직 처음인 계정의 글을 **그대로 내보낸** 건수(막지 않는다 · 알림만)
     if (notified) detail.notified = notified;
     if (approved || blocked || notified) out.detail = detail;
     return out;
