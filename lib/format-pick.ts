@@ -1,8 +1,5 @@
 /**
  * lib/format-pick.ts — **골격 지문을 보고 다음 글의 format 을 고른다**(R8 §2.2 · B-1 2026-09-15).
- *   🔎 출처: AC 신규(계약 R8 §2.2 · B-1 · 생성 커밋 `f589413` 2026-09-15) — AM 원본 없음(`../AutoMarketing/lib/` 에 같은 이름 없음 · 2026-09-16 확인).
- *     계보: 구성 로테이션 자체는 AM `content-tone.ts` 에서 왔고 그건 `lib/writing-contracts.ts` 가 이미 밝히고 있다.
- *     이 파일은 그 위에 **골격 지문**(`lib/structure-print.ts`)을 얹은 AC 고유분이다 — AM 에는 지문으로 고르는 코드가 없다.
  *
  *   ══ 왜 ══
  *     `pickFormat()` 은 **이름**으로만 돈다(«직전에 쓴 것 빼고 · 최근에 안 쓴 것 우선»).
@@ -28,7 +25,9 @@
  *     format 이 1~5개뿐이라 **한 채널에 10편**을 쓰면 같은 format 이 도는 것 자체는 못 막는다(인스타는 아예 1종이다).
  *     그건 «고르기»가 아니라 «만들기»(같은 format 을 매번 다르게 흔드는 것 = `applyTiers` · C 몫)의 일이다.
  *     여기가 메우는 구멍은 하나다 — **이름이 다른데 생김새가 닮은 칸**.
- *   🔎 출처: AC 신규(계약 R8 §2.2 · B-1 · 2026-09-15) — AM 원본 없음.
+ *   🔎 출처: AC 신규(계약 R8 §2.2 · B-1 · 생성 커밋 `f589413` 2026-09-15) — AM 원본 없음(`../AutoMarketing/lib/` 에 같은 이름 없음 · 2026-09-16 확인).
+ *     계보: 구성 로테이션 자체는 AM `content-tone.ts` 에서 왔고 그건 `lib/writing-contracts.ts` 가 이미 밝히고 있다.
+ *     이 파일은 그 위에 **골격 지문**(`lib/structure-print.ts`)을 얹은 AC 고유분이다 — AM 에는 지문으로 고르는 코드가 없다.
  */
 import { structurePrint, structureOverlap, STRUCTURE_OVERLAP_MAX, type StructurePrint } from "./structure-print";
 import { pickFormat, structureFor, topicGroupOf, type WritingContract, type FormatKey, type BlockType } from "./writing-contracts";

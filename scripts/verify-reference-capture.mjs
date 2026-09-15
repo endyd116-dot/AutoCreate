@@ -54,10 +54,19 @@ if (argMut === "all") {
     try { out = execFileSync(process.execPath, [fileURLToPath(import.meta.url), `--mutate=${k}`], { encoding: "utf8" }); }
     catch (e) { code = e.status ?? 1; out = String(e.stdout ?? ""); }
     const lines = out.split("\n").filter((l) => l.includes("  ✘ "));
-    rows.push({ k, red: code !== 0, n: lines.length, axes: [...new Set(lines.map((l) => l.trim().split(" ")[1]))].join(","), expect: MUTATIONS[k].expect });
+    /* 🔴 **«심지 못했다»(종료 2·3)를 «빨강»으로 세지 마라** — 앵커가 낡으면 그건 **하니스 고장**이지
+       «방어가 살아 있다»가 아니다. 2026-09-16 에 자매 하니스에서 실제로 가짜 빨강이 나왔다. */
+    const broken = code === 2 || code === 3;
+    rows.push({ k, red: code === 1 && lines.length > 0, broken, n: lines.length, axes: [...new Set(lines.map((l) => l.trim().split(" ")[1]))].join(","), expect: MUTATIONS[k].expect });
   }
   console.log("\n══ 변이 대조(«이 방어를 빼면 빨개지나») ══");
-  for (const r of rows) console.log(`  ${r.red ? "🔴 빨강" : "⚪ 초록"}  ${r.k}  실패축 ${r.n}개 [${r.axes}]  ← ${r.expect}`);
+  for (const r of rows) console.log(`  ${r.broken ? "🟠 못 심음" : r.red ? "🔴 빨강" : "⚪ 초록"}  ${r.k}  실패축 ${r.n}개 [${r.axes}]  ← ${r.expect}`);
+  const brokenRows = rows.filter((r) => r.broken);
+  if (brokenRows.length) {
+    console.log(`\n🟠 변이 ${brokenRows.map((r) => r.k).join("·")} 을(를) **심을 자리를 못 찾았다** — 코드가 바뀌었는데 앵커가 낡았다.`
+      + ` 🔴 이건 **하니스 고장**이다(고치기 전까지 이 파일의 초록을 믿지 마라).`);
+    process.exit(1);
+  }
   const silent = rows.filter((r) => !r.red);
   if (silent.length) { console.log(`\n🔴 변이 ${silent.map((r) => r.k).join("·")} 이(가) **빨개지지 않았다** — 그 축은 아무것도 못 잡는다(AC-87).`); process.exit(1); }
   console.log("\n✅ 여섯 다 빨개졌다 — 이제 «전부 통과»를 믿어도 된다.");

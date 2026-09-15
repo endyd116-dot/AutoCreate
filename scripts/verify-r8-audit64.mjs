@@ -11,18 +11,98 @@
 //
 //   🔴 첫 판에서 내 정규식이 헐거워 **가짜 닫힘 3건**을 만들었다(팩트체크가 `video/cost.ts` 에, 딥링크가 `affiliate-coupang.ts` 에,
 //      CS 가 `referral.ts` 에 걸렸다). 그래서 이 판은 행마다 **틀릴 수 없는 근거**(파일 경로 + 그 파일 안의 특정 문자열)로 좁혔다.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync as existsSync0 } from "node:fs";
 
 const JSON_OUT = process.argv.includes("--json");
-const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
-/** 그 파일 안에 그 패턴이 있나 — **파일을 지목**해서 본다(전역 grep 은 엉뚱한 파일에 걸린다). */
-const inFile = (p, re) => re.test(read(p));
+/* [2026-09-16 메인 · b-49 실측] 주석을 걷어 낸 본문 — «주석에만 적혀 있는 것»을 만든 것으로 세지 않는다(AC-59).
+   b-49 가 찔러 보니 11칸 중 **9칸**이 주석 한 줄로 닫혔다(A10·B7·B8·H1·E4·C1·A12·C2·H3).
+   지금 당장 틀린 값은 아니었지만(주석 덕에 초록인 칸 0) «계획을 주석에 적는 우리 관습»과 만나는 순간 거짓말이 된다.
+   형제 하니스 `verify-r8-deadends.mjs` 가 이미 같은 일을 한다 — **자가 두 벌인 게 제일 나쁘다**(AC-82).
+   HTML 주석도 같이 건다(C2 가 `<!-- -->` 로 닫혔다).
+   [예외] ③C5 는 **산출물 자체가 주석**이라 `read()` 를 그대로 쓴다(아래 headerOf). */
+const stripComments = (t) => t
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+  .replace(/<!--[\s\S]*?-->/g, " ");
+/* ══ [자 점검용 손잡이 셋] (b-49 설계 · 2026-09-16) 🔴 **환경변수가 없으면 아래 셋은 전부 항등식이다** ══
+   AC_HIDE="경로[,경로…]"    그 파일을 **빈 파일**로 읽는다(+ existsSync 도 false) — «이 칸이 정말 그 파일을 읽나»
+   AC_INJECT="경로::글[§§…]"  읽히는 내용 **뒤에 한 줄** 덧댄다(디스크는 안 건드린다) — «이 칸이 닫힐 수 있는 자인가»
+   AC_STRIP=1                모든 파일을 **주석 지운 본문**으로 읽는다 — «이 칸이 주석을 세고 있나»
+   🔴 **판정 로직은 한 줄도 안 바뀐다** — 바꾸는 것은 «읽히는 내용»뿐이다.
+   ⚠️ `AC_INJECT` 의 글에 `::` 나 `§§` 를 넣지 마라(구분자다).
+   ⚠️ 🔴 **③C5 는 손잡이가 안 먹는다** — `read()` 를 안 쓰고 `readdirSync` + 자기 `headerOf()` 로 돈다. 그 칸은 직접 변이로 재라.
+   근거: `docs/active/2026-09-16-audit-measure-review.md` — 이 손잡이로 가짜 초록 둘(④7·E6)을 찾았다. */
+const AC_HIDE = (process.env.AC_HIDE || "").split(",").filter(Boolean);
+const AC_INJECT = (process.env.AC_INJECT || "").split("§§").filter(Boolean).map((x) => x.split("::"));
+const AC_STRIP = process.env.AC_STRIP === "1";
+/** 경로 끝맞춤(윈도우 역슬래시도 받는다). */
+const acPath = (p) => String(p).split(String.fromCharCode(92)).join("/");
+const acHidden = (p) => AC_HIDE.length > 0 && AC_HIDE.some((h) => acPath(p).endsWith(h));
+const existsSync = (p) => (acHidden(p) ? false : existsSync0(p));
+/** AC_INJECT 덧대기 — 🔴 `AC_HIDE` 와 **같은 파일에** 걸 수 있어야 한다(«근거는 지우고 주석만 남긴다» 를 한 파일에서 재려면 · b-49). */
+const injectOf = (p, t) => { for (const [ip, txt] of AC_INJECT) if (acPath(p).endsWith(ip)) t += "\n" + txt; return t; };
+/** 🔴 **날것**으로 읽는다(주석 포함) — ③C5 처럼 «주석이 곧 산출물»인 칸만 이걸 쓴다. */
+const read = (p) => {
+  if (acHidden(p)) return injectOf(p, "");
+  let t; try { t = readFileSync(p, "utf8"); } catch { return ""; }
+  if (AC_STRIP) t = stripComments(t);
+  return injectOf(p, t);
+};
+/* 🔴 [2026-09-16 메인 · b-49 가 잡았다] **주석을 걷어 낸 본문 — 기본은 이쪽이다.**
+   앞 판은 걷어내기를 `inFile` **안에** 숨겼다. 그래서 `read()` 를 직접 쓰는 자리(다섯 곳)가 **조용히 뚫렸다** —
+   🔴 실제로 **D 접근성**이 그랬다: `revenue.html` 에 «햅틱·당겨서 새로고침·스와이프 는 **다음 라운드에 만든다**»라는
+   HTML 주석 한 줄을 넣으면 그 셋이 «있다»가 되어 **닫힘 6/6** 이 떴다(b-49 실측).
+   **우리는 계획을 주석에 적는다 — 가정이 아니라 우리 관습이다.**
+   ⇒ 보호를 **이름 있는 함수로 꺼낸다.** 새 칸을 쓰는 사람이 `read` 와 `readCode` 중 고르게 되고, 고르지 않으면 안 뚫린다. */
+const readCode = (p) => (AC_STRIP ? read(p) : stripComments(read(p)));
+/** 그 파일 안에 그 패턴이 있나 — **파일을 지목**해서 본다(전역 grep 은 엉뚱한 파일에 걸린다). 🔴 주석은 뺀 본문에서 본다. */
+const inFile = (p, re) => re.test(readCode(p));
 const anyFile = (ps, re) => ps.filter((p) => inFile(p, re));
 
 const results = [];
 /** 한 줄이 몇 «칸»인가 — 묶음 행(접근성 6·팀 4·트레이 2·레지스트리 2·고지 4)은 한 줄이 여러 칸이다.
  *  🔴 칸 수를 안 달면 줄을 세는 것과 칸을 세는 것이 갈려 분모가 또 흔들린다(오늘 «64·66·67» 로 세 번 흔들렸다). */
 const rec = (row, state, why, w = 1, split = null) => results.push({ row, state, why, w, split });
+
+/* ══ [화면 축] 🔴 **판정에 안 쓴다. 출력에만 붙는다.** ══
+   CLAUDE §4.8 «완료 = 화면에서 쓸 수 있을 때» 를 **자가 안 재는 칸**을 눈에 보이게 하려는 표시다.
+   🔴 «화면에 이 낱말이 있나»로 재지 않는다 — 그건 가짜 빨강을 만든다(§8.3: 유사도·장소 카드는
+      `UI.gateList`·`bodyHtml` 이 **일반 렌더**로 그려서 열쇠 낱말이 화면에 있을 이유가 없다).
+   🔴 조각은 «그 칸을 가리키는 가장 짧고 안 바뀔 말»로 고른다. 칸 이름을 통째로 적으면 이름이 조금만 바뀌어도 미분류가 된다. */
+const SCREEN_AXIS = [
+  ["④-1 탈퇴", "고객"], ["④-2 매체 기준일", "고객"], ["④-3a", "운영"], ["④-3b", "해당없음"],
+  ["④-4 고지 게이트", "고객"], ["④-5 WP 사이드바", "고객"], ["④-6 `publish-now`", "고객"],
+  ["④-7 `avatar`", "고객"], ["④-8 `account_groups`", "고객"], ["④-9 CS 이메일", "운영"],
+  ["④-10 팩트체크", "고객"], ["④-11 러너 PC 세션", "해당없음"], ["④-12 클립", "고객"],
+  ["`lib/channel-registry.ts` 정본 통합", "해당없음"], ["고지 축(", "고객"],
+  ["편성·규칙 화면", "고객"], ["자동승인 «신뢰 계정»", "고객"],
+  ["A1 클립 게시물형", "고객"], ["A2 인스타 피드", "고객"], ["A3 페북", "고객"], ["A4 X(글)", "고객"],
+  ["A5 브런치", "고객"], ["A6 틱톡", "고객"], ["A7 페북릴스", "고객"], ["A8 텐핑", "고객"],
+  ["A9 쇼핑커넥트", "고객"], ["A10 `publish.brunch`", "해당없음"], ["A11 커넥터 신규", "해당없음"],
+  ["A12 §17 P5", "고객"],
+  ["B1 유사도", "고객"], ["B2 페르소나 적합도", "고객"], ["B3 신조어", "고객"], ["B4 장소 카드", "고객"],
+  ["B5 쓰레드 연결글", "고객"], ["B6 블로거·WP AEO", "해당없음"], ["B7 에디터 실제 요소", "해당없음"],
+  ["B8 목표 매체", "고객"], ["B9 `images.heroNeeded`", "고객"],
+  ["C1 소재 90일", "해당없음"], ["C2 추천인 코인 화면", "고객"], ["C3 brief 상태", "고객"],
+  ["C4 piece 상태", "해당없음"], ["C5 AC-1 헤더", "해당없음"],
+  ["D 접근성", "고객"],
+  ["E1 AI 원가", "운영"], ["E2 추천인 이벤트", "해당없음"], ["E3 티켓 한 화면", "운영"],
+  ["E4 AM↔AC", "고객"], ["E5 정본 동기화", "운영"], ["E6 운영자 화면 조정", "운영"],
+  ["F 팀 축", "고객"], ["H1 카드뉴스 kind", "고객"], ["H3 상태 16종", "고객"],
+  ["I 러너 트레이 앱", "해당없음"],
+];
+/* 🔴 «이 칸이 public/ 을 지목하나» — 판정에 안 쓴다. 자를 고치면 **저절로 따라온다**(사람 표가 안 낡는다). */
+const _selfLines = read("scripts/verify-r8-audit64.mjs").split("\n");
+const _rowStarts = _selfLines.map((l, i) => ((/^\s*\["(.+?)", \(\) =>/.test(l) || /^\s*\{ (?:n: .*?)?name: "(.+?)"/.test(l)) ? i : -1)).filter((i) => i >= 0);
+const READS_SCREEN = new Map();
+_rowStarts.forEach((s, k) => {
+  const nm = (_selfLines[s].match(/\["(.+?)"/) || _selfLines[s].match(/name: "(.+?)"/) || [])[1] || "";
+  const body = stripComments(_selfLines.slice(s, _rowStarts[k + 1] ?? _selfLines.length).join("\n"));
+  if (nm) READS_SCREEN.set(nm, /"public\//.test(body) || /\bSC\b/.test(body));
+});
+const axisOf = (row) => { const h = SCREEN_AXIS.find(([k]) => row.includes(k)); return h ? h[1] : "미분류"; };
+const readsScreenOf = (row) => { for (const [nm, v] of READS_SCREEN) if (row.includes(nm)) return v; return null; };
+
 
 /* ══ ④ 진짜 미개발 12행 — 조사 §10.3-④ 표 그대로 ══ */
 const FOUR = [
@@ -79,8 +159,17 @@ const FOUR = [
     } },
   { n: 7, name: "`avatar`(계정 사진)",
     check: () => {
-      const fixed = inFile("lib/accounts.ts", /avatar:\s*null/);
-      return fixed ? ["열림", "lib/accounts.ts 가 여전히 `avatar: null` 고정 — 값이 어디서도 안 온다"] : ["닫힘", "고정값 아님"];
+      /* 🔴 [2026-09-16 메인 · b-49 가 잡았다] 옛 판은 «`avatar: null` 고정이 **없으면** 닫힘»이라는 **부정형**이었다.
+         그래서 `lib/accounts.ts` 를 **통째로 가려도 «닫힘»**이 나왔다 — 파일이 지워져도·이름이 바뀌어도 초록이다.
+         그 «닫힘»은 «계정 사진이 된다»가 아니라 «**내가 아는 나쁜 모양을 못 찾았다**»였다(AC-87 의 제일 비싼 얼굴).
+         ⇒ **긍정 증거**로 바꾼다 — 읽고 · 싣고 · **화면이 그린다**(머리말 ③ 규율 그대로). 이웃 칸 6·8 과 같은 모양이다. */
+      const sel = inFile("lib/accounts.ts", /a\.avatar_url/);
+      const map = inFile("lib/accounts.ts", /avatar:\s*r\.avatar_url/);
+      const ui = inFile("public/js/ui.js", /\.avatar/);
+      const fixed = inFile("lib/accounts.ts", /avatar:\s*null\s*[,}]/);
+      return sel && map && ui && !fixed
+        ? ["닫힘", "accounts.ts 가 avatar_url 을 읽어 싣고 ui.js 가 그린다"]
+        : ["🟠 일부", `SELECT ${sel} 매핑 ${map} 화면 ${ui}${fixed ? " · 🔴 avatar: null 고정이 남아 있다" : ""}`];
     } },
   { n: 8, name: "`account_groups` 표·화면",
     check: () => {
@@ -122,7 +211,9 @@ const FOUR = [
       /* 🔴 [메인 2026-09-16 · AC-75] 옛 파일 이름으로 재고 있었다. B2 가 §3.1 에서 **`runner/lib/profile-seal.mjs`** 로 만들었고
          `runner/core.mjs` 가 실제로 `sealProfile`·`unsealProfile` 을 부른다(:155·:259) · `ac-runner.mjs` 가 `sealLine` 을 부른다.
          🔴 «있나»가 아니라 «**제품이 부르나**»까지 본다 — 파일만 있고 안 부르면 이 칸은 안 닫힌다(AC-69). */
-      const has = anyFile(["runner/lib/profile-seal.mjs", "runner/lib/browser.mjs", "runner/lib/profile.mjs", "runner/index.mjs"], /createCipheriv|aes-256|encrypt/i);
+      /* 🔴 [2026-09-16 메인] `runner/lib/profile.mjs`·`runner/index.mjs` 는 **없는 파일**이었다(C 의 자가검사가 물었다 · AC-82).
+         지금은 앞 둘이 있어 통과하지만, 앞 둘이 이름을 바꾸면 **죽은 경로만 남아 조용히 «없음»**이 된다. */
+      const has = anyFile(["runner/lib/profile-seal.mjs", "runner/lib/browser.mjs"], /createCipheriv|aes-256|encrypt/i);
       const used = anyFile(["runner/core.mjs", "runner/ac-runner.mjs"], /sealProfile|unsealProfile|profile-seal/);
       /* 🔴 [2026-09-16 · C 재검] **서버 마디를 같이 본다.** 러너가 아무리 불러도 `account.profileSealKey` 가 안 내려오면
          러너의 그 if 는 영영 거짓이고 봉인은 한 번도 안 돈다. C 가 사슬 여섯 마디를 직접 따라갔다:
@@ -190,8 +281,6 @@ for (const r of THREE) { const [state, why, split] = r.check(); rec(`③ ${r.nam
 
 /* ══ ③ 나머지 — 🔴 **손으로 센 스냅샷을 박아 두지 않는다.** 내가 조사할 때 쓴 근거를 그대로 predicate 로 옮겨
       다시 돌릴 때마다 **다시 재지게** 한다. 안 그러면 이 숫자가 조용히 낡는다(그게 우리가 오늘 열 번 잡은 병이다). ══ */
-const SCREEN_TEXT = ["public/js/ui.js", "public/js/mock.js", "public/app/home.html", "public/app/revenue.html", "public/app/settings.html"].map(read).join("\n");
-const SERVER_TEXT = ["lib/referral.ts", "netlify/functions/ops-center.ts", "lib/cs.ts"].map(read).join("\n");
 const yes = (v) => (v ? "닫힘" : "열림");
 const THREE_REST = [
   /* A. 다음 Phase 채널·잡 12칸 — 판정은 «표에 있나»가 아니라 «라우팅표가 그 커넥터를 부르나» */
@@ -216,7 +305,9 @@ const THREE_REST = [
     const route = inFile("lib/publish/index.ts", /facebook:|x:|tiktok:/);
     return [yes(table && route), "표 1곳 + 라우팅 1곳 + 모듈 1개 — R8 에서 페북·X·틱톡·인스타피드·롱폼이 이 길로 붙었다"];
   }],
-  ["A12 §17 P5(릴스 90초)", () => [yes(inFile("lib/video/types.ts", /VideoSeconds = 15 \| 30 \| 60 \| 90/)),
+  /* 🔴 [2026-09-16 메인 · b-49 실측] 옛 판은 **타입 별칭 글자**를 봤다 — 실제 배열 `VIDEO_SECONDS` 에 90 을 넣어도 **열림 그대로**였다.
+     «90초를 진짜로 켜도 빨강이 안 풀리는 자»다. ⇒ **실제로 고를 수 있는 값**(런타임 배열)을 본다. */
+  ["A12 §17 P5(릴스 90초)", () => [yes(inFile("lib/video/types.ts", /VIDEO_SECONDS[^=]*=\s*\[[^\]]*90/)),
     "VIDEO_SECONDS 에 90 없음 · 🔴 «AM↔AC 코인 이전»은 운영 축 E4 로 옮겼다(원표가 같은 것을 두 칸에 적었다)"]],
   /* B. 글 품질 축 9행 */
   ["B1 유사도 «계정 간» 중복 0", () => {
@@ -281,7 +372,32 @@ const THREE_REST = [
         ? `seo.ts articleJsonLdScript 를 **발행이 부른다**(${callers.join(",")})${extra ? " + WP 는 excerpt·slug 도 보낸다" : ""} · FAQPage·HowTo 는 일부러 안 만든다(구글 지원 중단)`
         : `구현 ${impl} · 부르는 곳 ${callers.length}/2 — 만들어 놓고 안 부르면 닫힌 게 아니다(AC-69)`];
   }],
-  ["B7 에디터 실제 요소", () => [yes(inFile("lib/writing-contracts.ts", /editorElements/), ), "0건"]],
+  /* 🔴 [2026-09-16 메인 · B2 가 원문을 찾아왔다] 옛 판은 `lib/writing-contracts.ts` 의 `editorElements` 를 봤다 —
+     **그 이름은 이 저장소 어디에도 없다**(이 검사 줄 자신이 유일한 등장이었다). 한 번도 만든 적 없는 이름을 찾고 있었다.
+     원래 감사가 물은 것은 `docs/active/2026-09-15-DESIGN-AUDIT.md:867` 에 있다:
+       «§5C.3 에디터 실제 요소 변환 — blocks.ts:87 ad-slot 은 있으나 **SE ONE 인용구·구분선 모듈 grep 0**»
+     ⇒ 계약층(`writing-contracts.ts`)은 «어떤 블록을 쓸까»를 정할 뿐이고 **버튼을 누르는 건 러너**다.
+        그 파일엔 영영 안 생긴다 — **자가 엉뚱한 층을 보고 있었다.**
+     ⇒ 넷을 다 본다(전부 «끊기면 빨개지는 것» · 🔴 메인이 변이로 넷 다 확인했다).
+       ①계획: 못 세운 블록을 `no_editor_op` 로 적나(plan.mjs:236)
+       ②셀렉터: 🔴 **감사가 «grep 0»이라 적었던 바로 그 둘**(naver-blog.mjs:161·166)
+       ③🔴 **부르는 곳**: 정의만 있으면 안 닫힌 것이다(AC-69 · :717·:737)
+       ④폴백을 **센다**: 조용한 폴백 금지(:719·:742)
+     ⚠️ 티스토리는 주 경로가 HTML 모드라 `<blockquote>`·`<hr>` 진짜 요소로 더 세다.
+        폴백(평문)은 세기는 하는데 **그 사실이 고객에게 안 닿는다** — 그건 B7 이 아니라 별도 칸이다(B2 제기). */
+  ["B7 에디터 실제 요소", () => {
+    const plan = inFile("runner/lib/plan.mjs", /no_editor_op/);
+    const sel = inFile("runner/channels/naver-blog.mjs", /se-insert-quotation-default-toolbar-button/)
+             && inFile("runner/channels/naver-blog.mjs", /se-insert-horizontal-line-default-toolbar-button/);
+    const call = inFile("runner/channels/naver-blog.mjs", /clickToolbarItem[(]ctx, "quotation"[)]/)
+              && inFile("runner/channels/naver-blog.mjs", /clickToolbarItem[(]ctx, "horizontalLine"[)]/);
+    const count = inFile("runner/channels/naver-blog.mjs", /missed[.]quote[+][+]/)
+               && inFile("runner/channels/naver-blog.mjs", /missed[.]divider[+][+]/);
+    return [plan && sel && call && count ? "닫힘" : "열림",
+      plan && sel && call && count
+        ? "블록 19종 → 에디터 op(plan.mjs) · SE ONE **인용구·구분선 버튼을 실제로 누른다**(naver-blog.mjs) · 못 세운 것은 no_editor_op / 폴백은 missed 로 **센다**"
+        : `계획 ${plan} · 셀렉터 ${sel} · **부르는 곳 ${call}** · 폴백 계수 ${count}`];
+  }],
   /* 🔴 [2026-09-16 B-1] 설명줄이 판정을 안 따라가 «닫힘 … 0건» 이라는 모순을 찍고 있었다(B9 와 같은 뿌리).
      하니스가 거짓말하면 다음 조사가 그걸 믿는다. */
   ["B8 목표 매체 채널 선택", () => { const on = inFile("lib/director.ts", /targetChannel|목표 매체/);
@@ -308,7 +424,8 @@ const THREE_REST = [
   ["D 접근성 6(대비·당겨새로고침·햅틱·계좌연결·스와이프·기기시간대)", () => {
     /* 🔴 낱말 하나로 뭉쳐 세면 틀린다 — 첫 판에서 `contrast` 가 **훅 이름**(«반전으로 시작»)에 걸려 가짜로 세어졌다.
        여섯 항목을 **각각 그 기능의 실물**로 재고, 내역을 칸 수에 그대로 실어 보낸다(일부로 뭉치면 닫힘·열림이 둘 다 과소평가된다). */
-    const SC = ["public/js/ui.js", "public/app/home.html", "public/app/create.html", "public/app/settings.html", "public/app/revenue.html"].map(read).join("\n");
+    /* 🔴 `readCode` 로 읽는다 — 날것으로 읽으면 «다음 라운드에 만든다» 같은 **계획 주석**이 «있다»가 된다(b-49 실측). */
+    const SC = ["public/js/ui.js", "public/app/home.html", "public/app/create.html", "public/app/settings.html", "public/app/revenue.html"].map(readCode).join("\n");
     const items = [
       ["당겨서 새로고침", /당겨서 새로고침|pullToRefresh/],
       ["햅틱", /햅틱|vibrate\(/],
@@ -334,7 +451,7 @@ const THREE_REST = [
          우리가 붙이는 건 은행 계좌가 아니다. 그 낱말을 화면에서 찾으면 **제대로 만들수록 못 찾는다.**
        ⇒ 이름이 아니라 **패턴의 모양**을 잰다(DESIGN §13.0b 의 «구체 형태» 그대로):
          채널 마크 그리드 · 연결 수 표기 · 눌러서 채널별 연결 · 끝나면 완료를 말해 준다. */
-    const A = read("public/app/accounts.html");
+    const A = readCode("public/app/accounts.html");   // 🔴 날것 금지 — 위와 같은 까닭
     const acc = [/UI\.mark\(/.test(A), /개 연결됨/.test(A), /연결 시트|openConnect|data-k=/.test(A), /connected/.test(A)]
       .filter(Boolean).length >= 3;
     const shape = [["계좌연결 패턴(모양)", acc]];
@@ -374,7 +491,21 @@ const THREE_REST = [
      정본 동기화는 «DB 오버레이를 `lib/ai-models.ts` 로 되돌리는 PR»이라 그 코드는 `lib/ai-models-sync.ts` 에 산다.
      🔴 **검사를 맞추려고 코드를 엉뚱한 파일에 넣지 않는다** — 그러면 검사는 초록인데 물건은 남의 집에 있다. */
   ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/ai-models-sync.ts", "netlify/functions/ops-ai-sync.ts"], /openSyncPr|정본 동기화/).length), "오버레이가 파일과 갈라진 채 굳으면 «파일이 정본»이 거짓말이 된다"]],
-  ["E6 운영자 화면 조정", () => [yes(existsSync("netlify/functions/ops-center.ts")), "ops-center"]],
+  /* 🔴 [2026-09-16 메인 · b-49 가 잡았다] 옛 판은 `existsSync("netlify/functions/ops-center.ts")` **파일 이름 하나**로 셌다.
+     그런데 그 파일이 서비스하는 경로는 **`/api/ops-audit`** 이고(`:12`), 화면이 부르는 엔드포인트 어디에도 `ops-center` 가 없다.
+     **이름만 맞는 파일이 있어서 초록**이었다(AC-70). 기능은 실제로 **다른 곳**에 다 있다:
+       ①서버 `netlify/functions/ops-tenants.ts` 가 `/api/ops-impersonate`·`-end` 를 서비스
+       ②운영 화면 `public/ops/tenant.html` 의 `#imp` 가 부른다(정본은 `public/ops/_tpl.txt`)
+       ③🔴 고객 화면 `public/js/ui.js` 가 «운영자가 보고 있어요» 배너를 그린다(`impBanner`)
+     ⇒ 셋을 다 본다. 하나라도 끊기면 빨개진다 — **화면 축까지 재는 칸**이다. */
+  ["E6 운영자 화면 조정", () => {
+    const srv = inFile("netlify/functions/ops-tenants.ts", /ops-impersonate/);
+    const ops = inFile("public/ops/tenant.html", /ops-impersonate/);
+    const cust = inFile("public/js/ui.js", /impBanner/);
+    return srv && ops && cust
+      ? ["닫힘", "ops-tenants.ts 가 /api/ops-impersonate 를 열고 · ops/tenant.html 이 부르고 · ui.js 가 «운영자가 보고 있어요» 배너를 그린다"]
+      : ["🟠 일부", `서버 ${srv} 운영화면 ${ops} 고객배너 ${cust}`];
+  }],
   ["F 팀 축 4(시트·초대·accept·팀 승인)", () => {
     /* 🔴 [2026-09-16 · C] 옛 판은 `SERVER_TEXT`(= referral.ts·ops-center.ts·cs.ts 셋)에서 팀을 찾았다 — **팀과 아무 상관없는 파일 셋**이라
        lib/team.ts·netlify/functions/team.ts·public/app/team.html 이 다 생긴 뒤에도 «전수 0건»을 찍었다(**가짜 열림 4칸**).
@@ -402,10 +533,33 @@ const THREE_REST = [
 for (const [name, fn] of THREE_REST) {
   let out = fn();
   if (out === "AC1_HEADER") {
-    /* lib/*.ts 중 **출처 헤더가 아예 없는** 파일 수 — 있는 채로 남으면 다음 사람이 출처를 못 따라간다(AC-1). */
+    /* lib/*.ts 중 **출처 헤더가 아예 없는** 파일 수 — 있는 채로 남으면 다음 사람이 출처를 못 따라간다(AC-1).
+
+       🔴 [2026-09-16 · b-49] **«앞 12행»은 대용물이었다 — 자를 «헤더 주석 구역»으로 바꾼다.**
+         관례(CLAUDE §2)는 «헤더 주석에 적는다»지 «앞 12행에 적는다»가 아니다. 그런데 이 저장소의 실제 관례는
+         🔴 **출처를 헤더 블록 «끝»에 적는 것**이고 헤더 구역은 평균 15행이다 — 12행 창은 그 끝을 못 본다.
+         그래서 «없다»고 세던 14개가 **전부 이미 적혀 있었다**(진짜 없는 것 0개).
+         AC-97(«낱말로 세는 검사는 있는데 못 본다도 만든다»)의 두 번째 얼굴이고, 그 헛수는 사람에게
+         **없는 출처를 지어내라고 시킨다** — 제일 나쁜 결과다(실제로 내가 format-pick.ts 에 한 줄을 겹쳐 적었다).
+       🔴 느슨해진 것이 아니다: **코드가 처음 나오는 줄에서 멈춘다.** 본문 깊숙이 «출처»라고 적어도 안 세어진다.
+         `//` 머리줄(AM 복사본 관례 · ai-models·response·billing-math·sso-role)과 블록 주석을 **둘 다** 잡는다.
+         바꾸기 전후를 lib/*.ts 93개 전수로 견줬다: **통과→실패 0개** · 실패→통과 14개 · 남는 것 0개. */
     const { readdirSync } = await import("node:fs");
     const files = readdirSync("lib").filter((f) => f.endsWith(".ts"));
-    const missing = files.filter((f) => !/AM 원본|AC 신규|출처/.test(read(`lib/${f}`).split("\n").slice(0, 12).join("\n")));
+    /** 파일 맨 앞 **주석 구역**(코드가 시작되면 끝). */
+    const headerOf = (text) => {
+      const out = []; let inBlock = false;
+      for (const line of text.split("\n")) {
+        const t = line.trim();
+        if (inBlock) { out.push(line); if (t.includes("*/")) inBlock = false; continue; }
+        if (t === "") { out.push(line); continue; }
+        if (t.startsWith("//")) { out.push(line); continue; }
+        if (t.startsWith("/*")) { out.push(line); if (!t.includes("*/")) inBlock = true; continue; }
+        break;                                   // 🔴 코드다 — 여기서 멈춘다
+      }
+      return out.join("\n");
+    };
+    const missing = files.filter((f) => !/AM 원본|AC 신규|출처/.test(headerOf(read(`lib/${f}`))));
     out = [missing.length === 0 ? "닫힘" : "🟠 일부", `lib/*.ts ${files.length}개 중 출처 헤더 없는 것 **${missing.length}개**(${missing.slice(0, 3).join(",")}…)`];
   }
   const W = { "D 접근성": 6, "F 팀 축": 4, "I 러너 트레이 앱": 2 };
@@ -442,5 +596,25 @@ else {
 ■ **${T}칸 중 닫힘 ${C} · 일부 ${P} · 열림 ${O} (${Math.round((C / T) * 100)}%)**  ← 사장님 보고용 한 줄` +
     (D ? `
    (분모 = ③54 + ④13 = 67 중 **안 만들기로 결정한 ${D}칸을 뺐다** — 없는 항목을 미개발로 세면 그것도 거짓말이다 · AC-75)` : "  (분모 = ③54 + ④13)"));
+
+/* 🔴 표가 칸을 못 따라가면 **큰 소리로** 말한다 — 조용히 빠지는 것이 이 표의 유일한 실패다. */
+const _axisHits = new Map(SCREEN_AXIS.map(([k]) => [k, 0]));
+const _unmatched = [], _doubled = [];
+for (const r of results) {
+  const hits = SCREEN_AXIS.filter(([k]) => r.row.includes(k));
+  hits.forEach(([k]) => _axisHits.set(k, _axisHits.get(k) + 1));
+  if (hits.length === 0) _unmatched.push(r.row);
+  if (hits.length > 1) _doubled.push(`${r.row} → ${hits.map(([k]) => k).join(" / ")}`);
+}
+const _deadKeys = [..._axisHits].filter(([, n]) => n === 0).map(([k]) => k);
+const _orphan = results.filter((r) => readsScreenOf(r.row) === null);
+if (_unmatched.length) console.log(`🔴 화면 축 표에 **없는 칸 ${_unmatched.length}개** — 새 칸이 생겼으면 SCREEN_AXIS 에 한 줄 더해라: ${_unmatched.join(" · ")}`);
+if (_doubled.length)   console.log(`🔴 화면 축 표에 **두 번 걸리는 칸 ${_doubled.length}개** — 조각이 너무 짧다: ${_doubled.join(" · ")}`);
+if (_deadKeys.length)  console.log(`🔴 화면 축 표에 **아무 칸도 안 가리키는 조각 ${_deadKeys.length}개** — 칸 이름이 바뀌었다: ${_deadKeys.join(" · ")}`);
+if (_orphan.length)    console.log(`🔴 «화면을 보나»를 **못 잰 칸 ${_orphan.length}개** — 칸 선언 모양이 바뀌었다(위 _rowStarts 정규식): ${_orphan.map((r) => r.row).join(" · ")}`);
+const _blind = results.filter((r) => ["고객", "운영"].includes(axisOf(r.row)) && readsScreenOf(r.row) === false && r.state === "닫힘");
+console.log(`   닫힘 가운데 ${_blind.length}칸은 «서버에 있다»까지만 보고 셌어요 — 화면에 실제로 보이는지는 이 숫자가 말해 주지 않아요.`);
+console.log(`   (어느 칸인지·왜 그런지는 docs/active/2026-09-16-audit-measure-review.md §8·§12)`);
+
 }
 process.exit(0);

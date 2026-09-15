@@ -1,6 +1,6 @@
 /**
  * scripts/verify-runner-format.mjs — 🔴 **«번짐» 변이 하니스**(R9-3 · 네이버 접속 0 · 브라우저 0).
- *   node scripts/verify-runner-format.mjs [--mutate=m1..m6]
+ *   node scripts/verify-runner-format.mjs [--mutate=m1..m8|all]
  *
  * ══ 이 병은 **네 번째 판**이다 ══
  *   AM #799 색 · #800·#801 굵게 · 2026-08-20 밑줄 · 2026-09-15 빨강/가운데/기울임.
@@ -9,13 +9,20 @@
  * ══ 🔴 왜 변이가 있나 (AC-87) ══
  *   «빨강이 안 나오면 그 검사는 아무것도 못 잡는다.» 각 변이는 방어 한 겹을 빼고, 그때 **어느 축이 빨개져야 하는지**를
  *   같이 적는다. 변이를 걸었는데 전부 초록이면 **하니스가 고장난 것**이고, 그걸 모르면 이 파일은 장식이다.
- *   ⇒ `--mutate=all` 로 여섯을 차례로 돌려 «여섯 다 빨개지나»를 한 번에 본다.
+ *   ⇒ `--mutate=all` 로 차례로 돌려 «전부 빨개지나»를 한 번에 본다.
  *
- * ══ 이 하니스가 **못 재는 것**(정직 · AC-9) ══
- *   🔴 **contenteditable 에서 «실제로 번지는가»는 못 잰다.** 여기서 재는 것은 ①끊는 줄이 제자리에 있나(구조)
- *      ②상태기계가 실패를 «깨끗»으로 치지 않나(행동) ③판정 함수가 무엇을 세고 무엇을 안 세나(행동)다.
- *      «진짜 브라우저에서 다음 문단이 앞 서식을 물려받나»는 **C 가 진짜 Chromium + 가짜 스마트에디터로** 잰다
- *      (2026-09-16 B2↔C 합의). 사슬 검사는 싸고 넓게, 렌더 검사는 좁고 진짜로 — **둘 다** 둔다(AC-87).
+ * ══ 🔴 이 하니스가 **못 재는 것** — 그리고 그게 실제로 터졌다(2026-09-16) ══
+ *   **contenteditable 에서 «실제로 번지는가»는 못 잰다.** 여기서 재는 것은 ①끊는 줄이 제자리에 있나(구조)
+ *   ②상태기계가 실패를 «깨끗»으로 치지 않나(행동) ③판정 함수가 무엇을 세고 무엇을 안 세나(행동)다.
+ *
+ *   🔴 **이 한계가 «이론»이 아니라는 것을 같은 날 증명당했다.** 이 파일이 **55/0 초록 · 변이 6/6 빨강**일 때
+ *      C 가 진짜 Chromium 으로 재 보니 **끊기가 통째로 무력했다** — 밑줄 마크 뒤 평문 3문단이 통문단 밑줄이었고,
+ *      끊기를 아예 빼 봐도 **결과가 같았다**(= 아무 일도 안 하고 있었다).
+ *      진범은 `fresh` 가 «마지막이 글이 아닐 때만» 새 칸을 만드는 함수였던 것이고,
+ *      내 축들은 «`boundary()` 를 부르나»만 봤지 **«부르는 게 맞는 것이냐»**는 안 봤다.
+ *      ⇒ 그때 더한 것이 **F-01e·F-01f·F-01g · m7**이다. 그리고 **굵게를 안 세던 것**(F-06d · m8)도 그때 드러났다.
+ *   🔴 교훈 둘: ①**변이가 다 빨개져도 «내가 생각한 고장»만 찌른 것일 수 있다** — 남이 **다른 자로** 재 줘야 안다.
+ *              ②사슬 검사는 싸고 넓게, **렌더 검사는 좁고 진짜로** — 둘 다 둔다(AC-87). 진짜 브라우저 쪽은 C 몫이다.
  */
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -33,13 +40,19 @@ let SRC_BLEED = readFileSync(P_BLEED, "utf8");
 let SRC_NAVER = readFileSync(P_NAVER, "utf8");
 const SRC_PLAN = readFileSync(P_PLAN, "utf8");
 
-/* ═══ 변이 6종 — AM `verify-runner-format.mjs` m1~m6 에 **1:1 대응**(자리는 우리 구조) ═══ */
+/* ═══ 변이 — m1~m6 은 AM `verify-runner-format.mjs` 에 **1:1 대응**(자리는 우리 구조) · m7~m8 은 C 실측 뒤 추가 ═══ */
 const MUTATIONS = {
   /* 🔴 m1 은 **조각 경로의 끊기**를 뺀다 — 바로 앞 문단에서 색을 칠한 다음에 이어 치는 자리라 번짐이 제일 크게 난다.
      ⚠️ 첫판에 나는 여기를 `if (false) await typeParts(op)` 로 끊었는데 **변이가 초록으로 지나갔다** —
         축들이 «boundary 가 있나»를 보고 있었고 그건 그대로였기 때문이다. 변이를 안 돌려 봤으면 그 축을 믿을 뻔했다(AC-87). */
-  m1: { file: "naver", from: "    await boundary();\n    for (const p of parts) {", to: "    /* removed */\n    for (const p of parts) {",
-    expect: "F-01 (칠한 뒤 다음 조각·다음 문단을 안 끊는 판 = 사장님이 보신 그 판)" },
+  /* 🔴 m1 은 **끊기 자체를 죽인다**(정의 한 곳) — 자리별 앵커는 코드를 고칠 때마다 낡는다.
+     실제로 두 번 낡았고(2026-09-16), 두 번째엔 새로 넣은 «못 심음» 가드가 잡아 줬다.
+     ⇒ 변이 앵커는 **가장 안 움직이는 줄**에 건다 — 호출부가 아니라 **정의부**다. */
+  m1: { file: "naver", from: "  const boundary = () => breakFormatBeforePara(fmt, fresh);", to: "  const boundary = () => Promise.resolve(false);",
+    expect: "F-01 (문단 경계 끊기가 통째로 사라지는 판 = 사장님이 보신 그 판)" },
+  /* 🔴 m9 — 태그 줄만 안 끊는 판(끊기 사고를 고치다 같은 뿌리로 하나 더 찾은 자리 · 2026-09-16). */
+  m9: { file: "naver", from: "        const brokeTags = await boundary();", to: "        const brokeTags = false;",
+    expect: "F-01h (해시태그 줄이 앞 문단 서식을 물려받는다 — 마지막 줄이라 뒤에 아무도 없다)" },
   m2: { file: "naver", from: '  markFormatDirty(fmt, `${kind} 적용`);', to: "  /* removed */",
     expect: "F-02a (칠한 뒤 «더럽다»를 안 적는 병 — 빨강 번짐의 출발점)" },
   m3: { file: "naver", from: '          markFormatDirty(fmt, "인용구(색·정렬·기울임)");', to: "          /* removed */",
@@ -50,6 +63,23 @@ const MUTATIONS = {
     expect: "F-08 (자기검사가 세기만 하고 안 막는 병)" },
   m6: { file: "bleed", from: '    .filter((p) => !p.closest(".se-quotation")', to: '    .filter((p) => (true || !p.closest(".se-quotation"))',
     expect: "F-06 (인용을 세어 정상 글도 발행이 막히는 거짓 양성)" },
+  /* 🔴 m7·m8 은 **C 가 진짜 Chromium 으로 잡아 준 뒤에 생긴 축**이다(2026-09-16).
+     내 첫 판은 m1~m6 이 전부 빨개지는 걸 보고 «전부 통과»를 믿었는데, **그때 제품은 통째로 고장나 있었다** —
+     변이 여섯이 다 «내가 생각한 고장»만 찔렀기 때문이다. 남이 다른 자로 재 주지 않았으면 못 찾았다. */
+  m7: { file: "naver", from: "  const fresh = () => freshTextBlock(page, ctx);", to: "  const fresh = () => moveCaretToEnd(page, ctx, missed);",
+    expect: "F-01e (끊기가 «마지막이 글이면 아무것도 안 하는» 함수를 쓴다 = C 가 찾은 그 고장 그대로)" },
+  m8: { file: "bleed", from: "    const bold = !looksHeading && (all(wgt) || (spans.length === 0 && wgt(p)));", to: "    const bold = false;",
+    expect: "F-06d (굵게를 안 세어 AM #800·#801 판을 통째로 놓친다)" },
+  /* 🔴 m10 — **조각 경계 꼬리**(C 가 잡은 두 번째 판). «먼저 전부 평문»을 «치고 바로 칠하기»로 되돌린다 = 옛 판 그대로. */
+  m10: { file: "naver", from: "    const joined = parts.map((p) => p.t).join(\"\");\n    await page.keyboard.insertText(joined);",
+    to: "    const joined = parts.map((p) => p.t).join(\"\");\n    for (const p0 of parts) { await page.keyboard.insertText(p0.t); if (p0.mark) await applyMark(page, ctx, p0.t.length, p0.t, p0.mark, seq, fmt); }",
+    expect: "F-01j (치고 바로 칠해 다음 조각이 서식을 물려받는다 = C 가 찾은 «꼬리» 그대로)" },
+  /* 🔴 m11 — 대조 문을 빼면 «어긋나도 칠한다»가 된다(AM 이 무너진 그 자리). */
+  m11: { file: "naver", from: "    if (!(await tailMatches(ctx, joined.slice(-60)))) {", to: "    if (false) {",
+    expect: "F-01k (좌표가 어긋나도 칠해 문단이 갈린다 — AM «노란 도배·문단 두 동강»)" },
+  /* 🔴 m12 — 맨 텍스트 노드를 안 세면 정상 글이 «통문단»으로 읽혀 발행이 막힌다(거짓 양성). */
+  m12: { file: "bleed", from: "    const all = (fn) => !bareText && spans.length > 0 && spans.every(fn);", to: "    const all = (fn) => spans.length > 0 && spans.every(fn);",
+    expect: "F-06f (앞머리 평문 + 서식 span 하나를 통문단으로 읽어 정상 글을 막는다)" },
 };
 
 const argMut = (process.argv.find((a) => a.startsWith("--mutate=")) || "").split("=")[1] || "";
@@ -63,16 +93,27 @@ if (argMut === "all") {
     try { out = execFileSync(process.execPath, [fileURLToPath(import.meta.url), `--mutate=${k}`], { encoding: "utf8" }); }
     catch (e) { code = e.status ?? 1; out = String(e.stdout ?? ""); }
     const failLines = out.split("\n").filter((l) => l.includes("  ✘ "));
-    rows.push({ k, red: code !== 0, n: failLines.length, axes: failLines.map((l) => l.trim().split(" ")[1]).join(","), expect: MUTATIONS[k].expect });
+    /* 🔴 **«심지 못했다»(종료 2·3)를 «빨강»으로 세지 마라 — 그게 가짜 빨강이다.**
+       2026-09-16 에 실제로 겪었다: 코드를 고쳐 m1 의 앵커가 두 곳이 되자 변이가 **심기지도 못하고 죽었는데**
+       종료코드가 0 이 아니라는 이유로 «빨강»으로 세어져 **«여덟 다 빨개졌다»가 나왔다.** 축은 한 줄도 안 돌았다.
+       ⇒ 앵커가 낡으면 그건 **하니스 고장**이지 «방어가 살아 있다»는 증거가 아니다. 갈라서 센다. */
+    const broken = code === 2 || code === 3;
+    rows.push({ k, red: code === 1 && failLines.length > 0, broken, n: failLines.length, axes: failLines.map((l) => l.trim().split(" ")[1]).join(","), expect: MUTATIONS[k].expect });
   }
   console.log("\n══ 변이 대조(«이 방어를 빼면 빨개지나») ══");
-  for (const r of rows) console.log(`  ${r.red ? "🔴 빨강" : "⚪ 초록"}  ${r.k}  실패축 ${r.n}개 [${r.axes}]  ← ${r.expect}`);
+  for (const r of rows) console.log(`  ${r.broken ? "🟠 못 심음" : r.red ? "🔴 빨강" : "⚪ 초록"}  ${r.k}  실패축 ${r.n}개 [${r.axes}]  ← ${r.expect}`);
+  const broken = rows.filter((r) => r.broken);
+  if (broken.length) {
+    console.log(`\n🟠 변이 ${broken.map((r) => r.k).join("·")} 을(를) **심을 자리를 못 찾았다** — 코드가 바뀌었는데 앵커가 낡았다.`
+      + ` 🔴 이건 «방어가 살아 있다»가 **아니라 하니스 고장**이다(고치기 전까지 이 파일의 초록을 믿지 마라).`);
+    process.exit(1);
+  }
   const silent = rows.filter((r) => !r.red);
   if (silent.length) {
     console.log(`\n🔴 변이 ${silent.map((r) => r.k).join("·")} 이(가) **빨개지지 않았다** — 그 축은 아무것도 못 잡는다(AC-87).`);
     process.exit(1);
   }
-  console.log("\n✅ 여섯 다 빨개졌다 — 이제 «전부 통과»를 믿어도 된다.");
+  console.log("\n✅ 변이 전부 빨개졌다 — 이제 «전부 통과»를 믿어도 된다(단, 이 자가 보는 범위 안에서만 · 위 머리말 참조).");
   process.exit(0);
 }
 
@@ -139,10 +180,49 @@ console.log("\n[① 문단 경계에서 서식 끊기]");
     "F-01 🔴 끊기가 **한 곳의 규칙**으로 올라왔다(AM 이 URL 전용 방어였던 것을 올린 그 자리)");
   const calls = (play.match(/await boundary\(\)/g) || []).length;
   ok(calls >= 4, "F-01b 문단이 서는 자리마다 부른다(평문·조각·소제목·인용 = 4곳 이상)", `${calls}곳`);
-  ok(play.indexOf("await boundary();") < play.indexOf("await page.keyboard.insertText(p.t)"),
+  ok(play.indexOf("const broke = await boundary();") < play.indexOf("await page.keyboard.insertText(joined)"),
     "F-01c 끊기는 문단을 쓰기 **전**이다(뒤에 부르면 이미 물든 다음이다)");
-  ok(/await boundary\(\);\s+for \(const p of parts\)/.test(play.replace(/\n/g, "\n")),
-    "F-01d 조각 경로(typeParts)가 끊기를 지나서 시작한다");
+  ok(/const broke = await boundary\(\);\s+if \(wrote && !broke\)/.test(play),
+    "F-01d 조각 경로(typeParts)가 **끊기를 먼저** 지나고, 🔴 새 칸이 생겼으면 **Enter 를 또 안 친다**(둘 다 하면 마크 있는 글마다 빈 줄이 쌓인다)");
+
+  /* ═══ 🔴 F-01j~l — **조각 경계**(2026-09-16 C 가 진짜 Chromium 으로 잡은 두 번째 판) ═══
+   *   종전엔 «치고 바로 칠하기»라 칠한 뒤 캐럿이 **서식 span 안**에 남고 다음 조각이 그걸 물려받았다.
+   *   실물: 계획 «밑줄 한 토막»(5자) → **21자**(문단 끝까지 밑줄). 문단 경계는 끊는데 **조각 경계는 아무도 안 끊었다.**
+   *   🔴 그리고 이건 «통문단»이 아니라 «부분»이라 `measureFormatBleedIn` 도 **못 본다** — 자가검사가 통과시킨다. */
+  const tp = play.slice(play.indexOf("const typeParts = async"), play.indexOf("for (const op of plan.ops)"));
+  ok(tp.indexOf("insertText(joined)") < tp.indexOf("applyMark("),
+    "F-01j 🔴 문단을 **먼저 전부 평문으로** 친 뒤에 칠한다(칠하고 이어 치면 다음 조각이 서식을 물려받는다)");
+  ok(/if \(!\(await tailMatches\(ctx, joined\.slice\(-60\)\)\)\) \{[\s\S]{0,200}return;/.test(tp),
+    "F-01k 🔴 칠하기 **전에 문단 글자를 통째로 대조**하고, 어긋나면 **한 조각도 안 칠한다**(AM 이 이 길에서 무너진 이유가 좌표 어긋남이고 AM 엔 이 문이 없었다)");
+  ok(/sort\(\(a, b\) => b\.e - a\.e\)/.test(tp) && !/press\("End"\)/.test(tp),
+    "F-01l 🔴 **오른쪽 조각부터 왼쪽으로만** 간다 · `End` 를 안 쓴다(문단이 줄바꿈되면 `End` 는 **줄 끝**이라 좌표가 틀린다)");
+  /* 🔴 F-01h — «태그 줄»은 **글의 마지막 줄**이라 뒤에 아무 문단도 없다 = 아무도 대신 끊어 주지 않는다.
+     끊기 사고를 고치다 **같은 병을 여기서 하나 더** 찾았다(2026-09-16): 종전엔 이 자리만 boundary 를 안 지났고,
+     `moveCaretToEnd` 는 여기서 새 칸을 안 만든다(마지막이 글이라 조건에 안 걸린다) — 같은 뿌리였다. */
+  const tagsCase = play.slice(play.indexOf('case "tags"'), play.indexOf('default: if (op.text)'));
+  ok(/const brokeTags = await boundary\(\);/.test(tagsCase),
+    "F-01h 🔴 **태그 줄도 끊기를 지난다**(앞 문단이 색을 남기면 해시태그가 통째로 물드는데, 태그는 마지막 줄이라 뒤에 아무도 없다)",
+    tagsCase.slice(0, 160));
+  /* 🔴 «문단이 서는 자리»가 전부 끊기를 지나나 — 하나라도 빠지면 그 자리에서만 조용히 번진다. */
+  const boundaryCalls = (play.match(/await boundary\(\)/g) || []).length;
+  ok(boundaryCalls >= 5, "F-01i 끊기를 부르는 자리가 다섯 이상(평문·조각·소제목·인용·태그)", `${boundaryCalls}곳`);
+
+  /* ═══ 🔴 F-01e — **이 축이 없어서 끊기가 통째로 무력했다**(2026-09-16 C 가 진짜 Chromium 으로 잡았다) ═══
+   *
+   *   내 첫 판은 «`boundary()` 를 부르나»만 봤고 **부르는 것이 무엇을 하는지**는 안 봤다. 그래서 55/0 초록인 채로
+   *   밑줄 마크 뒤 평문 3문단이 **통문단 밑줄**로 나가고 있었다.
+   *   진범: `fresh` 를 `moveCaretToEnd` 로 뒀는데 그 함수는 «마지막이 글이 **아닐 때만**» 새 칸을 만든다.
+   *   서식을 칠한 직후엔 **마지막이 언제나 글**이라 그 분기에 영영 못 들어간다 — 남은 경로(문단 클릭+End)는
+   *   인라인 span 안에 캐럿을 둬 **서식을 그대로 잇는다.** AM 은 **조건 없이** 누른다. 그 한 줄 차이였다.
+   *   🔴 교훈: «부르나»(F-01)와 «**부르는 게 맞는 것이냐**»(F-01e)는 다른 축이다. 앞만 재면 이름만 맞고 뜻이 틀린다. */
+  ok(/const fresh = \(\) => freshTextBlock\(page, ctx\);/.test(play),
+    "F-01e 🔴 끊기가 **무조건 새 칸을 만드는** 함수를 쓴다(`moveCaretToEnd` 는 «마지막이 글이 아닐 때만» 만든다 — 칠한 직후엔 절대 안 걸린다)",
+    (play.match(/const fresh = [^\n]+/) ?? ["(못 찾음)"])[0]);
+  const fb = SRC_NAVER.slice(SRC_NAVER.indexOf("async function freshTextBlock("), SRC_NAVER.indexOf("async function moveCaretToEnd"));
+  ok(!/lastIsText/.test(fb),
+    "F-01f 🔴 그 함수에 **«이미 글이면 건너뛴다» 조건이 없다**(조건을 다시 넣는 순간 이 병이 그대로 돌아온다)");
+  ok(/const before = await compCount\(ctx\);/.test(fb) && /<= before\) return false;/.test(fb),
+    "F-01g 🔴 «눌렀다»가 아니라 **«생겼다»로 판정한다** — 종전 `breaks` 는 클릭 성공을 세서 `breaks:4·breakFails:0` 인데 **새 칸은 0개**였다(숫자가 거짓말했다)");
 
   const applyFn = SRC_NAVER.slice(SRC_NAVER.indexOf("async function applyMark("), SRC_NAVER.indexOf("async function attachImage"));
   ok(/markFormatDirty\(fmt, `\$\{kind\} 적용`\);/.test(applyFn),
@@ -225,11 +305,51 @@ console.log("\n[④ 발행 전 자기검사]");
   ok(partial.bad === 0,
     "F-06b 🔴 문단이 **통째로** 물들었을 때만 1표(부분 강조는 정상 — 우리 글의 의도다)", `걸림 ${partial.bad}`);
 
+  /* 🔴 F-06f — **`<p>` 바로 밑의 «맨 텍스트»도 글자다**(2026-09-16 C 지적 · C 의 가짜 에디터에서 거짓 양성 3/8).
+     종전엔 span 만 세어 «앞머리 평문 + 서식 span 하나»가 통문단으로 읽혔다.
+     ⚠️ 거짓 양성은 **정상 글의 발행을 막는다** — 못 잡는 것보다 이쪽이 고객에게 더 아프다(AC-68). */
+  const bare = FB.measureFormatBleedIn({
+    document: makeDocument([textComponent([
+      para("밑줄 한 토막", { bare: "이 문단에는 ", spans: [STYLE.underline] }),
+    ])]),
+    getComputedStyle,
+  });
+  ok(bare.bad === 0 && bare.underline === 0,
+    "F-06f 🔴 «span 에 안 감싸인 앞머리 평문 + 서식 span 하나»는 **통문단이 아니다**(맨 텍스트도 글자로 센다)",
+    `걸림 ${bare.bad} · 밑줄 ${bare.underline}`);
+
   const gray = FB.measureFormatBleedIn({
     document: makeDocument([textComponent([para("회색 글씨 문단입니다", { spans: [{ color: "rgb(120, 120, 120)" }] })])]),
     getComputedStyle,
   });
   ok(gray.red === 0, "F-06c 색은 «빨강 계열»만(검정·회색은 정상)", `빨강 ${gray.red}`);
+
+  /* ═══ 🔴 F-06d — **굵게도 센다**(2026-09-16 C 지적으로 더했다) ═══
+     AM #800·#801 이 바로 **굵게 번짐**이었는데 내 첫 판은 빨강·가운데·기울임·밑줄만 세어,
+     value/bold 마크만 있는 글이 **통째로 굵게 나가도 0%** 였다 — 가장 흔한 판을 못 보는 자였다. */
+  const boldBled = FB.measureFormatBleedIn({
+    document: makeDocument([textComponent([
+      para("여기부터 통째로 굵습니다", { spans: [{ fontWeight: "700", fontSize: "15px" }] }),
+      para("여기는 멀쩡합니다", { spans: [{ fontWeight: "400", fontSize: "15px" }] }),
+    ])]),
+    getComputedStyle, headingSize: 19, bodySize: 15,
+  });
+  ok(boldBled.bold === 1 && boldBled.bad === 1,
+    "F-06d 🔴 **통문단 굵게를 센다**(AM #800·#801 이 그 판이었다 — 안 세면 가장 흔한 번짐을 통째로 놓친다)",
+    `굵게 ${boldBled.bold} · 걸림 ${boldBled.bad}/${boldBled.total}`);
+
+  /* 🔴 대조군 짝 — **소제목은 원래 굵다.** 크기로 안 가르면 소제목 많은 글이 전부 «번졌다»가 되어 검사가 무용지물이 된다(AC-68). */
+  const headings = FB.measureFormatBleedIn({
+    document: makeDocument([textComponent([
+      para("결론부터", { spans: [{ fontWeight: "700", fontSize: "19px" }] }),
+      para("왜 줄었나", { spans: [{ fontWeight: "700", fontSize: "19px" }] }),
+      para("본문입니다 멀쩡합니다", { spans: [{ fontWeight: "400", fontSize: "15px" }] }),
+    ])]),
+    getComputedStyle, headingSize: 19, bodySize: 15,
+  });
+  ok(headings.bold === 0 && headings.bad === 0,
+    "F-06e 🔴 대조군 짝 — **소제목(굵게 + 소제목 크기)은 안 센다**(굵다고 다 번짐이면 정상 글이 전부 막힌다)",
+    `굵게 ${headings.bold} · 걸림 ${headings.bad}/${headings.total}`);
 
   /* 판정 — 🔴 «세기»와 «멈추기»는 다른 층이다. */
   const bled = FB.measureFormatBleedIn({
@@ -258,7 +378,8 @@ console.log("\n[④ 발행 전 자기검사]");
 console.log("\n[⑤ 발행 경로 — 「정의가 있나」가 아니라 「부르나」]");
 {
   const run = SRC_NAVER.slice(SRC_NAVER.indexOf("export async function run({"));
-  ok(/const bleed = await measureFormatBleed\(ed\);/.test(run), "F-09 발행 버튼을 누르기 **전에** 잰다");
+  ok(/const bleed = await measureFormatBleed\(ed, \{ headingSize:/.test(run),
+    "F-09 발행 버튼을 누르기 **전에** 잰다 — 🔴 그리고 **소제목 크기를 같이 넘긴다**(안 넘기면 굵게 판정이 소제목을 번짐으로 센다)");
   ok(run.indexOf("measureFormatBleed(ed)") < run.indexOf("publishNow(page, ed"), "F-09b 잰 뒤에 발행한다(순서)");
   ok(run.indexOf("measureFormatBleed(ed)") < run.indexOf("if (dryRun)"),
     "F-09c 🔴 **임시저장(카나리)도 잰다** — 카나리가 «멀쩡하다»고 한 뒤 본 발행에서 터지면 카나리가 무슨 소용인가");

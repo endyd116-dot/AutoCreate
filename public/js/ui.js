@@ -831,5 +831,165 @@
   };
   /* 키를 만드는 자리 — 서버 문장이 «구글 AI 스튜디오»라고 말하므로 화면은 **그 자리로 데려다준다**(CLAUDE §9-4 «대신 해 줄 수 있는 것»). */
   UI.AI_KEY_URL = "https://aistudio.google.com/apikey";
+
+  /* ══ [R9R10-A · R10-5·6] 코인 등급 — 🔴 이름의 정본은 서버 `lib/coin-table.ts COIN_TIERS`(B · 2026-09-16 · docs/active/2026-09-16-R9R10-AB-keys.md §11).
+       하니스(`verify-label-surface` ⑧-c)가 서버 파일과 대조한다 — B 가 머지되기 전엔 △(경고)로 뜬다.
+     🔴 «최소»라는 말을 쓰지 않는다(사장님) — 간단히 · 보통 · 프리미엄.
+     🔴 코인 수·사진 수·글자 수·설명 문장(`say`)은 **여기 안 적는다** — 서버 `accounts-list.tiers[]` 가 준다(AC-74 · 화면이 셈을 다시 하지 않는다).
+        여기엔 주제군 라벨(`UI.GROUP_LABEL`)과 같은 자리로 **이름만** 둔다(검수 화면처럼 `tiers` 를 안 부르는 자리가 `meta.tier` 를 사람말로 바꿀 때 쓴다). */
+  UI.TIER_LABEL = { simple: "간단히", standard: "보통", premium: "프리미엄" };
+  /* 사장님 확정 문구 — 사진을 더 올려도 코인이 안 는다는 사실. 등급을 고르는 자리마다 같은 문장을 쓴다(한 곳). */
+  UI.TIER_NOTE = "내 사진을 올리면 AI 사진을 대신하거나 더 얹어요 — 코인은 안 늘어요";
+  /**
+   * 등급 고르는 줄 셋. `tiers` = 서버 값(`[{key,label,coins,say}]`).
+   *   🔴 서버 값이 없으면 **아무 등급도 그리지 않는다** — «못 불러왔어요» 한 줄. 화면이 표를 지어 그리면 그날부터 서버와 갈린다.
+   *   `data-chips` 라 `UI.chipVal`·`UI.bindChips` 를 그대로 쓴다(선택 = `.on`).
+   */
+  UI.tierRows = (name, tiers, sel, { note = true } = {}) => {
+    if (!Array.isArray(tiers) || !tiers.length) return '<p class="muted" style="margin:0;font-size:13px">등급 정보를 아직 못 불러왔어요 · 지금 값으로 그대로 만들어요.</p>';
+    return `<div class="tierpick" data-chips="${UI.esc(name)}">${tiers.map((t) => `<button type="button" class="row tap ${String(sel) === String(t.key) ? "on" : ""}" data-v="${UI.esc(t.key)}"><div class="l"><span class="t">${UI.esc(t.label || UI.TIER_LABEL[t.key] || t.key)}</span><span class="d wrap">${UI.esc(t.say || "")}</span></div><span class="r">${UI.num(t.coins)}코인</span></button>`).join("")}</div>`
+      + (note ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.TIER_NOTE}</p>` : "");
+  };
+  /** 스타일 고르는 칩 — 맨 앞은 «이 계정 기본»(`""`). 배운 스타일이 없으면 칩 대신 빈 문자열(부르는 쪽이 «배우기» 줄을 낸다). */
+  UI.styleChips = (name, styles, sel, first = "이 계정 기본") => (Array.isArray(styles) && styles.length ? UI.chips(name, [["", first], ...styles.map((s) => [s.id, s.name])], sel == null ? "" : sel) : "");
+
+  /* ══ [R9R10-A · R10-3·4·5] 계정의 옷장 + 글 레퍼런스 배우기 — 🔴 **한 곳**(계정 상세 · 만들기 · 직접 쓰기 · 디렉터가 같은 시트를 연다).
+     계약(A 제안 · docs/active/2026-09-16-R9R10-AB-keys.md §5~9 · 정본은 서버):
+       GET  /api/account-styles?accountId=  → { styles[], defaultStyleId, quota:{used,limit,resetAt}, recommend:{measured,styleId,line} }
+       POST /api/style-reference {url, accountId} → { ref:{id,status}, quota } · 400 step quota|url|no_runner
+       GET  /api/style-reference?id= → { ref:{status:"queued|capturing|reading|done|failed", failKind, style} }
+       POST /api/style-reference-upload {accountId, images[]} · POST /api/style-reference-text {accountId, text}
+       POST /api/account-style-default {accountId, styleId|null} · POST /api/account-style-delete {id}
+     🔴 코인 0 — 코인 문장을 화면이 지어내지 않는다. 남은 횟수는 서버 `quota` 로만 말한다(없으면 숫자를 안 쓴다).
+     🔴 배운 것은 서버 `summary[]`(고객 문장 · 숫자와 목록)만 그린다 — `learned` 의 영어 키는 안 그린다(AC-91). 원문은 어느 칸에도 없다(서버가 저장을 안 한다).
+     🔴 못 열었을 때의 갈래(B2 확정 2026-09-16): login_wall·blocked·timeout·not_found → «화면을 찍어서 올려 주세요» ·
+        no_runner → «내 PC 프로그램을 켜 주세요»가 먼저(찍어 올리라고 하면 고객이 헛일을 한다).
+        다섯 밖의 값이면 «못 열었어요»로만 — `|| "blocked"` 같은 폴백 금지(AC-92 · 모름을 특정 값으로 바꾸지 않는다).
+     🔴 복붙은 **마지막 예비** — 꾸밈(밑줄·형광펜·이모지·사진 자리)이 다 날아간다고 말한다.
+     🔴 겁주지 않는다(§3) — 사실 한 줄 → 어떻게 하면 되는지 → 우리가 대신 해 주는 것. */
+  /* [R9R10-A · B 확정 2026-09-16] 서식·블록 이름표 — 🔴 `meta.formatUnused[].label` 은 **서버가 실어 준다**(정본 MARK_LABEL). 이 맵은 ①서버 label 이 비었을 때의 예비
+     ②`formatCaps` 가 null(«올려 봐야 알아요»)인 종류를 부를 때만 쓴다. 어휘 = 마크 7(bold·underline·italic·value·line·row·emoji) + 블록 타입. */
+  UI.MARK_LABEL = { bold: "굵게", underline: "밑줄", italic: "기울임", value: "핵심 강조", line: "형광펜", row: "나열 강조", emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", place: "장소 카드", h3: "작은 소제목", tip: "팁 상자", summary: "요약 상자", affiliate: "상품 카드", adsense: "광고 자리" };
+  UI.STYLE_SRC = { url: "링크로 배움", capture: "캡처로 배움", paste: "붙여넣기로 배움" };
+  UI.REF_FAIL_SAY = {
+    login_wall: "로그인해야 보이는 글이라 저희가 못 열었어요.",
+    blocked: "그 사이트가 자동으로 여는 걸 막고 있어서 못 열었어요.",
+    timeout: "페이지가 너무 오래 걸려서 못 열었어요.",
+    not_found: "그 주소에서 글을 못 찾았어요.",
+    no_runner: "글을 열어 줄 내 PC 프로그램이 지금 꺼져 있어요.",
+  };
+  UI.REF_STAGE_SAY = { queued: "차례를 기다리고 있어요", capturing: "내 PC 프로그램이 글을 열어 화면을 찍고 있어요", reading: "AI가 모양을 읽고 있어요 · 글은 저장하지 않아요" };
+  UI.styleSheet = function ({ accounts = [], accountId = null, onChange } = {}) {
+    let acc = accounts.find((a) => a.id === accountId) || accounts[0] || null;
+    let styles = [], defaultStyleId = null, quota = null, recommend = null, pollTimer = null, opened = null;
+    const stop = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } };
+    const quotaLine = () => (quota && quota.limit != null ? `이번 달 ${UI.num(quota.used || 0)}/${UI.num(quota.limit)}개 배웠어요 · 코인은 들지 않아요` : "코인은 들지 않아요");
+    const learnedHtml = (s) => (Array.isArray(s.summary) && s.summary.length ? `<div class="learned">${s.summary.map((x) => `<div class="ln">${UI.esc(x)}</div>`).join("")}</div>` : '<p class="muted" style="margin:0;font-size:13px">배운 내용을 아직 못 불러왔어요.</p>');
+    const listHtml = () => {
+      if (!styles.length) return '<p class="muted" style="margin:0 0 4px;font-size:13px">아직 배운 스타일이 없어요. 위에 주소를 넣으면 첫 스타일이 생겨요.</p>';
+      return styles.map((s) => `<div class="stylerow" data-style="${s.id}"><button type="button" class="row tap" data-open="${s.id}" style="padding-left:0;padding-right:0"><div class="l"><span class="t">${UI.esc(s.name)}${s.id === defaultStyleId ? ' <span class="pill ink" style="font-size:11px;padding:1px 6px">기본</span>' : ""}</span><span class="d">${UI.esc(UI.STYLE_SRC[s.source] || "배움")}${s.createdAt ? " · " + UI.dateKST(s.createdAt) : ""}${Array.isArray(s.summary) ? ` · 배운 것 ${s.summary.length}가지` : ""}</span></div>${UI.chev}</button>
+        <div data-body ${opened === s.id ? "" : "hidden"} style="padding:0 0 10px">${learnedHtml(s)}
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">${s.id === defaultStyleId ? `<button type="button" class="btn sm secondary" data-undefault="${s.id}">기본에서 풀기</button>` : `<button type="button" class="btn sm secondary" data-default="${s.id}">이 계정 기본으로 걸기</button>`}<button type="button" class="btn sm ghost" data-del="${s.id}" style="color:var(--danger-ink)">지우기</button></div><div data-delc></div></div></div>`).join("");
+    };
+    const recHtml = () => {
+      if (!recommend || !recommend.line) return "";
+      const s = recommend.measured && recommend.styleId ? styles.find((x) => x.id === recommend.styleId) : null;
+      return `<div class="sec">잘 되는 스타일</div><p class="muted" style="margin:0;font-size:13px;line-height:1.55">${UI.esc(recommend.line)}</p>${s && s.id !== defaultStyleId ? `<button type="button" class="btn sm secondary" data-default="${s.id}" style="margin-top:8px">«${UI.esc(s.name)}» 기본으로 걸기</button>` : ""}`;
+    };
+    const failHtml = (kind) => {
+      const say = UI.REF_FAIL_SAY[kind] || "그 주소를 열지 못했어요.";
+      const runner = kind === "no_runner";
+      return `<p style="margin:0 0 6px;font-size:14px;font-weight:700">${UI.esc(say)}</p>`
+        + (runner
+          ? `<p class="muted" style="margin:0 0 10px;font-size:13px">내 PC 프로그램을 켜면 저희가 열어서 배워요. 지금 바로 하고 싶으면 아래처럼 화면을 찍어 올려 주셔도 돼요.</p><a class="btn secondary sm" href="/app/runner.html" style="margin-bottom:10px">내 PC 프로그램 보기</a>`
+          : '<p class="muted" style="margin:0 0 10px;font-size:13px">그 글을 폰 화면으로 열고, 처음부터 끝까지 2~6장 찍어서 올려 주세요. 겹치게 찍어도 돼요 — 저희가 읽고 사진은 바로 지워요. 한 장이 너무 크면 그렇다고 알려드려요.</p>')
+        + '<button type="button" class="btn secondary sm" id="rfPick">찍은 화면 올리기</button>'
+        + '<button type="button" class="btn ghost sm" id="rfPasteT" style="margin-left:6px">글을 붙여 넣기</button>'
+        + '<div id="rfPaste" hidden style="margin-top:10px"><p class="muted" style="margin:0 0 6px;font-size:12.5px">마지막 방법이에요 — 붙여 넣으면 밑줄·형광펜·이모지·사진 자리 같은 꾸밈은 다 날아가고 문단·말투·구성만 배워요.</p><textarea class="input" id="rfText" rows="6" placeholder="글 본문을 여기에 붙여 넣어 주세요" style="resize:vertical;min-height:120px"></textarea><div style="margin-top:8px"><button type="button" class="btn secondary sm" id="rfPasteGo">이 글로 배우기</button></div></div>';
+    };
+    const html = () => `${accounts.length > 1 ? `<div class="sec">어느 계정에</div>${UI.chips("sacc", accounts.map((a) => [a.id, "@" + a.handle]), acc ? acc.id : "")}` : (acc ? `<p class="muted" style="margin:0 0 4px;font-size:13px">@${UI.esc(acc.handle)} · ${UI.esc(UI.chLabel(acc.channel))}</p>` : "")}
+      <div class="sec">새로 배우기</div>
+      <form id="rf"><div class="field"><label>잘 된 글 주소</label><input class="input" name="url" type="url" required placeholder="https://blog.naver.com/…" autocomplete="off" inputmode="url"><div class="note" id="rfQuota">${UI.esc(quotaLine())}</div><div class="help"></div></div>
+      <p class="muted" style="margin:0 0 8px;font-size:13px">문단 길이 · 이모지 · 밑줄·형광펜 · 사진 버릇 · 말투를 <b style="color:var(--ink)">숫자와 목록</b>으로만 배워요. 남의 문장은 한 줄도 저장하지 않아요.</p>
+      <div class="cta nobar" style="position:static;padding:0 0 4px"><button class="btn primary" type="submit" id="rfGo">주소로 배우기</button></div>
+      <p class="muted" style="margin:6px 0 0;font-size:12.5px"><a href="#" id="rfAlt" style="text-decoration:underline">주소로 못 열면? 화면을 찍어 올릴 수 있어요</a></p></form>
+      <div id="rfState" hidden style="margin-top:10px;background:var(--ground);border-radius:12px;padding:12px 14px"></div>
+      <input type="file" id="rfFile" accept="image/jpeg,image/png,image/webp" multiple hidden>
+      <div class="sec">배운 스타일 <span class="muted" style="font-weight:500">${styles.length ? styles.length + "개" : ""}</span></div><div id="rfList">${listHtml()}</div>
+      <div id="rfRec">${recHtml()}</div>`;
+    const load = async () => {
+      if (!acc) { styles = []; defaultStyleId = null; quota = null; recommend = null; return; }
+      const r = await UI.api(`/api/account-styles?accountId=${acc.id}`, { noGate: true });
+      styles = r.ok ? (r.styles || []) : []; defaultStyleId = r.ok ? (r.defaultStyleId ?? null) : null; quota = r.ok ? (r.quota || null) : null; recommend = r.ok ? (r.recommend || null) : null;
+      return r;
+    };
+    const emit = () => { if (onChange) onChange({ accountId: acc ? acc.id : null, styles: styles.map((s) => ({ ...s })), defaultStyleId }); };
+    UI.sheet('<div id="rfRoot"><span class="sk" style="width:100%;height:80px"></span></div>', { title: "레퍼런스로 스타일 배우기", onOpen: async (sh, close) => {
+      const root = sh.querySelector("#rfRoot");
+      const draw = () => { root.innerHTML = html(); bind(); };
+      const state = (inner, { show = true } = {}) => { const st = sh.querySelector("#rfState"); if (!st) return; st.hidden = !show; st.innerHTML = inner; };
+      /* 진행 — 서버 status 로만 말한다(단계 문장은 UI.REF_STAGE_SAY). 60번(약 70초) 넘게 안 끝나면 «시간이 걸려요 · 나중에 목록에서 보세요». */
+      const poll = (id, tries = 0) => { stop(); pollTimer = setTimeout(async () => {
+        const r = await UI.api(`/api/style-reference?id=${id}`, { noGate: true });
+        if (!r.ok) { state(`<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "진행 상태를 못 읽었어요 · 잠시 뒤 목록에서 확인해 주세요")}</p>`); return; }
+        const ref = r.ref || {};
+        if (ref.status === "done") { await load(); if (ref.style && ref.style.id) opened = ref.style.id; draw(); state(`<p style="margin:0 0 6px;font-size:14px;font-weight:700">배웠어요${ref.style && ref.style.name ? ` · ${UI.esc(ref.style.name)}` : ""}</p><p class="muted" style="margin:0;font-size:13px">아래 «배운 스타일»에서 무엇을 배웠는지 볼 수 있어요. 이 계정 기본으로 걸면 다음 글부터 자동으로 써요.</p>`); emit(); return; }
+        if (ref.status === "failed") { state(failHtml(ref.failKind)); bindFail(); return; }
+        if (tries >= 60) { state('<p class="muted" style="margin:0;font-size:13px">생각보다 오래 걸리고 있어요. 끝나면 «배운 스타일» 목록에 올라와요 — 나중에 다시 열어 봐 주세요.</p>'); return; }
+        state(`<p class="muted" style="margin:0;font-size:13px">${UI.esc(UI.REF_STAGE_SAY[ref.status] || "배우고 있어요")}${tries > 3 ? ` · ${tries * 1.2 | 0}초째` : ""}</p>`);
+        poll(id, tries + 1); }, 1200); };
+      const start = async (r, f) => {
+        if (!r.ok) {
+          if (r.gated) return;
+          if (r.step === "no_runner" || r.failKind === "no_runner") { state(failHtml("no_runner")); bindFail(); return; }
+          if (r.step === "quota") { if (f) UI.fieldError(f, "url", r.error || "이번 달 한도를 다 썼어요"); else state(`<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "이번 달 한도를 다 썼어요")}</p>`); return; }
+          if (f) return UI.fieldError(f, "url", r.error || "지금은 배우지 못했어요");
+          return state(`<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "지금은 배우지 못했어요")}</p>`);
+        }
+        if (r.quota) { quota = r.quota; const q = sh.querySelector("#rfQuota"); if (q) q.textContent = quotaLine(); }
+        state(`<p class="muted" style="margin:0;font-size:13px">${UI.esc(UI.REF_STAGE_SAY.queued)}</p>`);
+        poll(r.ref && r.ref.id);
+      };
+      const bindFail = () => {
+        const file = sh.querySelector("#rfFile"), pick = sh.querySelector("#rfPick");
+        if (pick) pick.onclick = () => file.click();
+        const pt = sh.querySelector("#rfPasteT"), pb = sh.querySelector("#rfPaste");
+        if (pt && pb) pt.onclick = () => { pb.hidden = false; pt.hidden = true; pb.querySelector("textarea").focus(); };
+        const pg = sh.querySelector("#rfPasteGo");
+        if (pg) pg.onclick = async () => { const t = (sh.querySelector("#rfText").value || "").trim(); if (!t) return UI.toast("본문을 붙여 넣어 주세요"); pg.disabled = true; const r = await UI.api("/api/style-reference-text", { body: { accountId: acc ? acc.id : null, text: t } }); pg.disabled = false; if (!r.ok && r.step === "text") return UI.toast(r.error || "더 길게 붙여 주세요"); start(r); };
+      };
+      const bind = () => {
+        UI.bindChips(root, async (n, v) => { if (n !== "sacc") return; acc = accounts.find((a) => String(a.id) === String(v)) || acc; stop(); await load(); draw(); });
+        const form = sh.querySelector("#rf");
+        UI.form(form, async (d, f) => { const r = await UI.api("/api/style-reference", { body: { url: d.url.trim(), accountId: acc ? acc.id : null } }); start(r, f); });
+        const alt = sh.querySelector("#rfAlt"); if (alt) alt.onclick = (e) => { e.preventDefault(); state(failHtml("blocked").replace(UI.esc(UI.REF_FAIL_SAY.blocked), "주소로 못 여는 글은 화면을 찍어 올려 주세요.")); bindFail(); };
+        const file = sh.querySelector("#rfFile");
+        if (file) file.onchange = async () => {
+          const list = Array.from(file.files || []).slice(0, 6); file.value = ""; if (!list.length) return;   /* 서버 상한 6장 · 장당 1MB(B · step too_big 이면 서버 문장을 그대로 보여 준다) */
+          state(`<p class="muted" style="margin:0;font-size:13px">${list.length}장 올리는 중이에요</p>`);
+          const images = []; for (const f of list) images.push(await new Promise((ok) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result || "")); rd.onerror = () => ok(""); rd.readAsDataURL(f); }));
+          const r = await UI.api("/api/style-reference-upload", { body: { accountId: acc ? acc.id : null, images: images.filter(Boolean) } });
+          start(r);
+        };
+        UI.$$("[data-open]", root).forEach((b) => b.onclick = () => { const id = Number(b.dataset.open); opened = opened === id ? null : id; sh.querySelector("#rfList").innerHTML = listHtml(); bindList(); });
+        bindList();
+      };
+      const bindList = () => {
+        UI.$$("[data-open]", root).forEach((b) => b.onclick = () => { const id = Number(b.dataset.open); opened = opened === id ? null : id; sh.querySelector("#rfList").innerHTML = listHtml(); bindList(); });
+        UI.$$("[data-default],[data-undefault]", root).forEach((b) => b.onclick = async () => {
+          const id = b.dataset.default ? Number(b.dataset.default) : null; b.disabled = true;
+          const r = await UI.api("/api/account-style-default", { body: { accountId: acc ? acc.id : null, styleId: id } }); b.disabled = false;
+          if (!r.ok) return r.gated ? undefined : UI.toast(r.error || "저장하지 못했어요");
+          defaultStyleId = r.defaultStyleId ?? id; sh.querySelector("#rfList").innerHTML = listHtml(); sh.querySelector("#rfRec").innerHTML = recHtml(); bindList();
+          UI.toast(id ? "이 계정 기본으로 걸었어요 · 다음 글부터 자동으로 써요" : "기본에서 풀었어요"); emit();
+        });
+        UI.$$("[data-del]", root).forEach((b) => b.onclick = () => { const row = b.closest(".stylerow"); UI.confirmRow(row.querySelector("[data-delc]"), "이 스타일을 지울까요? 이미 만든 글은 그대로예요.", async () => {
+          const r = await UI.api("/api/account-style-delete", { body: { id: Number(b.dataset.del) } }); if (!r.ok) return UI.toast(r.error || "지우지 못했어요");
+          await load(); sh.querySelector("#rfList").innerHTML = listHtml(); sh.querySelector("#rfRec").innerHTML = recHtml(); bindList(); UI.toast("지웠어요"); emit(); }); });
+      };
+      await load(); draw();
+      const obs = new MutationObserver(() => { if (!document.body.contains(sh)) { stop(); obs.disconnect(); } }); obs.observe(document.body, { childList: true });
+    } });
+  };
   UI.confirmRow = (host, msg, onYes, yes) => { host.innerHTML = `<p class="muted" style="margin:8px 0 12px">${UI.esc(msg)}</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn danger" type="button" data-yes>${UI.esc(yes || "네, 할게요")}</button></div>`; host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; }; host.querySelector("[data-yes]").onclick = onYes; };
 })();

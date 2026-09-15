@@ -7,12 +7,13 @@ PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스�
   <a class="row tap" href="/app/pieces.html?tab=in_review"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/><path d="M12 15l7.5-7.5a1.8 1.8 0 0 0-2.5-2.5L9.5 12.5 9 15z"/></svg></span><div class="l"><span class="t">AI가 쓴 걸 내가 고치기</span><span class="d" id="wayFixD">만들어 둔 글을 열어 고친 뒤 예약해요 · 고쳐도 코인은 더 안 들어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
-<div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
+<div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <button type="button" class="row tap" id="refPost" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">글 레퍼런스로 스타일 배우기</span><span class="d" id="refPostD">잘 된 글 주소 하나면 문단·이모지·강조·사진 버릇을 배워 그 계정 글에 써요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
 --- script ---
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
-let accountsN = null, busy = false, timer = null, templates = []; // [P1R5] shorts_templates(레퍼런스 구조)
+let accountsN = null, busy = false, timer = null, templates = [], textAccounts = []; // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다)
 /* [사장님 실측 2026-09-15 · 테넌트 198] «네이버 소재만 계속 보인다» — 데이터는 맞다(소재 채널은 **연결된 계정의 채널**에서만 정해진다 · lib/topics.ts).
    틀린 건 **화면이 그 까닭을 말하지 않은 것**이다. 연결된 채널을 한 줄로 말하고, 둘 이상이면 칩으로 거른다.
    🔴 고른 칩은 **화면 안에서만** 산다(저장·URL 금지) — 새로 들어오면 늘 «전체»(«한 번 누르면 계속 그 상태»가 그 불편의 정체). */
@@ -37,8 +38,11 @@ async function loadChans() {
 async function load(poll = false) {
   const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
   if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0;
-    chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : []; }
-  templates = r.templates || []; UI.$("#refg").hidden = !accountsN; if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
+    chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : [];
+    /* [R9R10-A] «글 채널»은 서버가 말한다(channels[].category) — 화면에 채널 이름을 박지 않는다 */
+    const textCh = new Set((a.ok ? a.channels || [] : []).filter((c) => c.category === "text").map((c) => c.key));
+    textAccounts = a.ok ? (a.accounts || []).filter((x) => textCh.has(x.channel) && x.status !== "suspended") : []; }
+  templates = r.templates || []; UI.$("#refg").hidden = !accountsN; UI.$("#refPost").hidden = !textAccounts.length; if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
   const f = r.refresh || {};
   const startedMs = f.startedAt ? UI.utc(f.startedAt).getTime() : null;
   const stale = !!(f.running && startedMs && Date.now() - startedMs > 600000); // 고아 방지 — 10분 넘으면 도는 걸로 보지 않는다
@@ -112,6 +116,8 @@ async function addSheet() {
 UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>쇼츠 · 릴스 링크</label><input class="input" name="url" type="url" required placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url"><div class="help"></div></div><p class="muted" style="margin:0 0 4px;font-size:13px">링크의 훅·서사·스타일을 구조로 배워 다음 소재부터 «구조: …»로 붙여요. 영상을 베끼지 않아요.</p>${templates.length ? `<div class="sec">배운 구조</div>${templates.map((x) => `<div class="row" style="padding-left:0;padding-right:0;min-height:44px"><div class="l"><span class="t" style="font-size:14px">${UI.esc(x.name)}</span><span class="d">${(x.structure || []).slice(0, 3).map(UI.esc).join(" → ")}</span></div></div>`).join("")}` : ""}<div class="cta"><button class="btn primary" type="submit">구조 배우기</button></div></form>`, { title: "레퍼런스로 구조 배우기", onOpen: (sh, close) => UI.form(sh.querySelector("#rf"), async (d, f) => {
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
+/* [R9R10-A · A-3] 글 레퍼런스 — 영상 줄과 **같은 결**(행 하나 → 시트 · 주소 한 칸 · 코인 0). 시트는 ui.js 한 곳(UI.styleSheet) — 계정 상세·직접 쓰기·디렉터가 같은 것을 연다. */
+UI.$("#refPost").onclick = () => UI.styleSheet({ accounts: textAccounts, accountId: textAccounts[0] ? textAccounts[0].id : null });
 UI.pullToRefresh(load);   /* [R8 §6.1] 소재 목록은 «새 소식» 화면이라 당겨서 새로고침이 맞다 */
 /* [R8-A2 §5D.1] 🔴 **셋은 «모드»가 아니라 «입구»다** — 미리 고르는 설정이 아니라 그때그때 고르는 것이다(사장님 «이것이 다 가능하게 하는 게 주요 골자»).
    «맡기기»는 이 화면 아래 소재 목록이 곧 그 길이라 **같은 화면 안에서** 데려간다(없는 화면으로 보내지 않는다). */
@@ -133,6 +139,7 @@ UI.api("/api/pieces-list?status=in_review").then((r) => { if (!r.ok) return; con
   </div>
   <p class="muted" id="cnt" style="margin:0 16px 12px;font-size:12.5px">본문 0자</p>
 </div>
+<div class="group" id="stylez" hidden><div class="gt">어떤 모양으로</div></div>
 <div class="group" id="when"><div class="gt">언제 올릴까요</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="comp"><div class="gt">대가를 받았나요</div>
   <div class="fr"><div class="fl">원고료·PPL을 받았어요<small>켜면 글 첫머리에 고지 한 줄을 저희가 넣어 드려요</small></div><button class="toggle" type="button" data-comp="sponsored" aria-checked="false" aria-label="원고료·PPL을 받았어요"></button></div>
@@ -160,8 +167,8 @@ await UI.boot("create");
       1코인이 붙는 날이 오면 화면만 0 이라고 계속 말하게 된다.
    🔴 **막지 않는다** — 검사에 걸려도 그대로 예약된다(§9 하드 게이트 0개). 대신 또렷하게 말하고, 되돌릴 길을 같은 자리에서 준다.
    🔴 시각은 KST 고정(§4.5b) — `datetime-local` 을 쓰지 않는다(그 값엔 시간대가 없다). 날짜·시각 셈은 `UI.atKST` 한 곳. */
-let accounts = [], channels = [], slots = [], sending = false;
-const st = { channel: "", accountId: null, when: "slot", slotId: null, date: UI.ymdKST(), time: "09:00", mon: { sponsored: false, gift: false, affiliate: false }, aff: "coupang" };
+let accounts = [], channels = [], slots = [], sending = false, stylesByAcc = {};   /* [R9R10-A] stylesByAcc = 계정별 옷장(한 번 읽으면 둔다) */
+const st = { channel: "", accountId: null, when: "slot", slotId: null, date: UI.ymdKST(), time: "09:00", mon: { sponsored: false, gift: false, affiliate: false }, aff: "coupang", styleId: "" };   /* styleId "" = 이 계정 기본(서버가 정한다) */
 /* 제휴처 이름은 **수익 화면과 같은 어휘**를 쓴다(UI.SRC) — 여기서 새 낱말을 만들면 두 화면이 다른 말을 한다.
    🔴 «그 밖»(manual)은 서버에서 쿠팡 전용 문구가 아닌 **일반 제휴 문구**로 나간다(lib/disclosure.ts disclosureSentence). */
 const AFF = ["coupang", "linkprice", "aliexpress", "manual"];
@@ -191,9 +198,29 @@ function renderWhere() {
     + `<div class="row">${UI.mark(st.channel)}<div class="l"><span class="t">${UI.esc(UI.chLabel(st.channel))}</span><span class="d">${cur ? `@${UI.esc(cur.handle)} · 오늘 ${cur.postsToday}/${cur.dailyCap}` : "계정을 골라 주세요"}</span></div></div>`
     + (accs.length > 1 ? `<div style="padding:0 12px 12px">${UI.chips("acc", accs.map((a) => [a.id, "@" + a.handle]), st.accountId)}</div>` : "");
   UI.bindChips(host, (name, v) => {
-    if (name === "ch") { st.channel = v; st.accountId = null; st.slotId = null; renderWhere(); renderWhen(); }
-    else if (name === "acc") { st.accountId = Number(v) || null; renderWhere(); }
+    if (name === "ch") { st.channel = v; st.accountId = null; st.slotId = null; renderWhere(); renderWhen(); renderStyle(); }
+    else if (name === "acc") { st.accountId = Number(v) || null; renderWhere(); renderStyle(); }
   });
+}
+
+/* ── [R9R10-A · R10-4 · 설계 §3.6] 직접 쓰기에서도 **스타일만 빌려 쓰기**(«내가 쓰되 구성만 그 틀로») — 스타일은 그 계정의 옷장(`/api/account-styles`)에서 읽는다.
+     🔴 코인 0 · 글자는 그대로다(문단·말투·구성만 그 틀로 · 서버가 한다). 없으면 배우러 가는 줄만 낸다(시트는 ui.js 한 곳 UI.styleSheet).
+     🔴 «이 계정 기본»(`""`)은 서버가 정한다 — 화면이 기본 스타일 id 를 대신 채워 보내지 않는다(AC-92). ── */
+async function renderStyle() {
+  const host = UI.$("#stylez"); const acc = accounts.find((a) => a.id === st.accountId);
+  if (!acc) { host.hidden = true; return; }
+  if (!stylesByAcc[acc.id]) { const r = await UI.api(`/api/account-styles?accountId=${acc.id}`, { noGate: true }); stylesByAcc[acc.id] = r.ok ? { styles: r.styles || [], defaultStyleId: r.defaultStyleId ?? null } : { styles: [], defaultStyleId: null, failed: true }; }
+  if (accounts.find((a) => a.id === st.accountId) !== acc) return;   // 읽는 사이 계정이 바뀌었으면 새 호출이 그린다
+  const W = stylesByAcc[acc.id]; if (!W.styles.some((x) => String(x.id) === String(st.styleId))) st.styleId = "";
+  const def = W.defaultStyleId ? W.styles.find((x) => x.id === W.defaultStyleId) : null;
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">어떤 모양으로</div>' + (W.styles.length
+    ? `<div style="padding:0 12px 6px">${UI.styleChips("wstyle", W.styles, st.styleId, def ? "이 계정 기본" : "그대로")}</div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">${def ? `«${UI.esc(def.name)}»이 이 계정 기본이에요 · ` : ""}문단·말투·구성만 그 틀로 다듬어요 — 내용은 그대로고 코인은 들지 않아요.</p>`
+    : `<p class="muted" style="margin:0 16px 10px;font-size:13px">${W.failed ? "스타일 목록을 못 불러왔어요 · 그대로 올려도 돼요." : "아직 배운 스타일이 없어요 · 잘 된 글 주소 하나면 문단·이모지·강조 버릇을 배워 둘 수 있어요."}</p>`)
+    + `<button type="button" class="row tap" id="styleMore"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">${W.styles.length ? "스타일 배우기 · 관리" : "글 레퍼런스로 스타일 배우기"}</span><span class="d">코인은 들지 않아요</span></div>${UI.chev}</button>`;
+  UI.bindChips(host, (n, v) => { if (n === "wstyle") st.styleId = v || ""; });
+  UI.$("#styleMore").onclick = () => UI.styleSheet({ accounts: accounts.filter((a) => a.channel === st.channel && a.status !== "suspended"), accountId: acc.id,
+    onChange: ({ accountId, styles, defaultStyleId }) => { stylesByAcc[accountId] = { styles, defaultStyleId }; if (accountId === st.accountId) renderStyle(); } });
 }
 
 /* ── 언제 올릴까요 — ①편성표 빈자리를 빌리거나 ②시각을 직접 고른다(서버 계약의 slotId | scheduleAt 그대로) ── */
@@ -237,6 +264,7 @@ async function send() {
   const html = bodyHtml();
   const body = { channel: st.channel, title, bodyHtml: html, monetize: { sponsored: st.mon.sponsored, gift: st.mon.gift, ...(st.mon.affiliate ? { affiliate: { provider: st.aff } } : {}) } };
   if (st.accountId) body.accountId = st.accountId;
+  if (st.styleId) body.styleId = Number(st.styleId);   /* [R9R10-A] 이번 글만 이 스타일로 · 비면 서버가 계정 기본을 쓴다 */
   if (st.when === "slot" && st.slotId) body.slotId = st.slotId; else body.scheduleAt = UI.atKST(st.date, st.time);
   sending = true; btn.disabled = true; btn.textContent = "넣는 중…";
   const r = await UI.api("/api/pieces-self", { body });
@@ -298,7 +326,7 @@ async function load() {
   /* 🔴 자리를 못 읽어도 화면은 선다 — «시각 정하기»로는 그대로 쓸 수 있다(못 읽은 것을 «자리 0개»로 그리지 않는다 · AC-9). */
   slots = s.ok ? (s.slots || []) : [];
   if (!s.ok && !s.gated) st.when = "time";
-  renderWhere(); renderWhen();
+  renderWhere(); renderWhen(); renderStyle();
 }
 bindComp(); bindEditors();
 UI.$("#go").onclick = send;
@@ -1168,7 +1196,11 @@ async function reloginSheet(a) {
 async function detailSheet(a) {
   if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
   // [P1R3] 이 계정의 수익 — 매체 상태 한 줄 + 이달 수익
-  const [rs, rv] = await Promise.all([UI.api("/api/revenue-sources"), UI.api("/api/revenue-summary")]);
+  /* [R9R10-A · A-4·A-6] 글 채널 계정에만 등급·옷장이 있다 — «글 채널»은 서버 channels[].category 가 말한다 */
+  const isText = ((D.channels || []).find((c) => c.key === a.channel) || {}).category === "text";
+  const [rs, rv, rw] = await Promise.all([UI.api("/api/revenue-sources"), UI.api("/api/revenue-summary"), isText ? UI.api(`/api/account-styles?accountId=${a.id}`, { noGate: true }) : Promise.resolve({ ok: false })]);
+  const W = rw.ok ? { styles: rw.styles || [], defaultStyleId: rw.defaultStyleId ?? null, recommend: rw.recommend || null } : { styles: [], defaultStyleId: null, recommend: null, failed: isText };
+  const wzChips = () => (W.styles.length ? UI.styleChips("wstyle", W.styles, W.defaultStyleId ?? "", "안 씀") : `<p class="muted" style="margin:0;font-size:13px">${W.failed ? "스타일 목록을 못 불러왔어요." : "아직 배운 스타일이 없어요."}</p>`);
   const mySrc = rs.ok ? (rs.sources || []).filter((s) => s.accountId === a.id) : [];
   const myKrw = rv.ok ? ((rv.byAccount || []).find((x) => x.accountId === a.id) || {}).krw || 0 : 0;
   const okSrc = mySrc.filter((s) => s.status === "connected");
@@ -1190,6 +1222,8 @@ async function detailSheet(a) {
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">활동 시간대<small>여러 개 골라도 돼요 · 안 고르면 채널 기본 시간</small></div>${UI.chips("hours", HOURS, a.goldenHours || [], true)}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div><button type="button" class="btn ghost sm" id="pedit" style="margin-top:8px;align-self:flex-start" hidden>고른 페르소나 고치기</button></div>
+  ${isText ? `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 등급<small>이 계정 글의 기본 등급 · 글마다 바꿀 수 있어요</small></div>${UI.tierRows("tier", D.tiers, a.defaultTier || "")}${a.defaultTier ? "" : '<p class="muted" style="margin:6px 0 0;font-size:12.5px">아직 안 골랐어요 · 고르기 전엔 «간단히»로 만들어요.</p>'}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 스타일<small>레퍼런스로 배운 모양 · 이 계정 글에 자동으로 써요</small></div><div id="wz">${wzChips()}</div>${W.recommend && W.recommend.line ? `<p class="muted" id="wzRec" style="margin:8px 0 0;font-size:12.5px;line-height:1.5">${UI.esc(W.recommend.line)}</p>` : ""}<button type="button" class="btn ghost sm" id="wzMore" style="margin-top:8px;align-self:flex-start">${W.styles.length ? "스타일 배우기 · 관리" : "글 레퍼런스로 스타일 배우기 · 코인 0"}</button></div>` : ""}
   <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
   <div class="sec">수익 매체</div>
   <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
@@ -1203,9 +1237,14 @@ async function detailSheet(a) {
   UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
-    const rb = sh.querySelector("#relogin"); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
+    const rb = sh.querySelector("#relogin");
+    /* [R9R10-A] 옷장 시트는 ui.js 한 곳(UI.styleSheet) — 돌아오면 칩만 다시 그린다 */
+    const wzMore = sh.querySelector("#wzMore"); if (wzMore) wzMore.onclick = () => UI.styleSheet({ accounts: D.accounts.filter((x) => x.channel === a.channel && x.status !== "suspended"), accountId: a.id,
+      onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
     sh.querySelector("#save").onclick = async () => {
       const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), dailyCap: UI.stepVal(sh, "cap"), minGapMin: Number(UI.chipVal(sh, "gap") || 180), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
+      /* [R9R10-A · 계약 §13] 등급·스타일 기본값은 **계정마다** — 고른 것만 보낸다(안 고른 등급을 화면이 채워 보내지 않는다 · AC-92) */
+      if (isText) { const tv = UI.chipVal(sh, "tier"); if (tv) body.defaultTier = tv; if (sh.querySelector('[data-chips="wstyle"]')) { const wv = UI.chipVal(sh, "wstyle"); body.defaultStyleId = wv ? Number(wv) : null; } }
       const m = {}; const v = (id) => sh.querySelector(id).value.trim();
       if (v("#cpA") && v("#cpS")) { m.coupangAccessKey = v("#cpA"); m.coupangSecretKey = v("#cpS"); } if (v("#ap")) m.adpostMediaId = v("#ap"); if (v("#as")) m.adsensePub = v("#as");
       if (Object.keys(m).length) body.monetize = m;
@@ -1857,6 +1896,7 @@ function renderCards() {
       <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}${isCur ? '<span class="pill ok">지금</span>' : ""}</div>${price(p)}
       <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
       <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
+      ${p.piecesByTier ? `<div class="kv"><span class="k" style="white-space:nowrap;flex:none;padding-right:12px">글로 치면</span><span class="v wrap" style="white-space:normal;text-align:right;font-size:13px">${Object.keys(UI.TIER_LABEL).filter((k) => p.piecesByTier[k] != null).map((k) => `${UI.TIER_LABEL[k]} ${UI.num(p.piecesByTier[k])}편`).join(" · ")}</span></div>` : ""}
       <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
       <div class="kv"><span class="k">편성 규칙</span><span class="v">${p.limits.maxRules == null ? "제한 없음" : p.limits.maxRules + "개"}</span></div>
       <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>
@@ -2123,7 +2163,7 @@ const topicId = Number(UI.qs.get("topicId")); if (!topicId) { UI.go("/app/create
 const STYLE = [["photo", "사진"], ["illust", "일러스트"], ["infographic", "인포그래픽"]];
 const FORMATS = Object.entries(UI.FORMAT);
 const TIMES = [["07:30", "07:30"], ["12:00", "12:00"], ["21:00", "21:00"], ["18:00", "18:00"]];
-let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null;
+let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null, TIERS = [], STYLES = {};   /* [R9R10-A] TIERS = 서버 accounts-list.tiers · STYLES = 계정별 옷장 */
 const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
 const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
 const isVideo = (p) => p.kind === "video";
@@ -2139,28 +2179,39 @@ const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.chann
      네이버를 **7코인**이라 적던 바로 그 셈이다 — 편성표에서는 걷어 냈는데 디렉터에는 남아 있었다.
    🔴 글 1편 = 1코인이고 **AI 로 구운 장만** 더 든다(사진 장수는 공짜 질문 — 내 사진·스톡이 채운다).
      화면 셈은 서버가 아직 말 안 해 준 동안의 미리보기일 뿐이고, 총액은 `director-estimate` 가 확정한다. */
+/* [R9R10-A · A-5] 🔴 글 코인은 **서버 값만**(`coinCost` = 등급 코인 · 식은 lib/coin-table.ts pieceCoinCost 한 곳). 없으면 `null`(«코인 확인 중») —
+     «1 + 사진 수»로 다시 세지 않는다(AC-74 · 그 셈이 오늘 네이버를 7코인이라 적던 자리다). 총액·시트 합계 모두 director-estimate 가 답한다. */
 const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0)
-  : (typeof p.coinCost === "number" ? p.coinCost : UI.COIN.blog + Math.max(0, (p.images?.aiCount ?? 1) - 1));
-const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
+  : (typeof p.coinCost === "number" ? p.coinCost : null);
+const coinSay = (n) => (typeof n === "number" ? `${UI.num(n)}코인` : "코인 확인 중");
+const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + (cost(p) || 0), 0);
 const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
   /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
      «사진 6장»만 적으면 고객은 «6코인이겠지»로 읽는다(그게 옛 값이었다). 그래서 AI 장수를 따로 적는다. */
-  : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
+  : [p.tier && UI.TIER_LABEL[p.tier] ? `${UI.TIER_LABEL[p.tier]} · ${coinSay(cost(p))}` : coinSay(cost(p)), UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
 
 async function load() {
   const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
   if (!r.ok) { UI.toast(r.error || "제안을 만들지 못했어요"); setTimeout(() => UI.go("/app/create.html"), 900); return; }
   brief = r.brief; pieces = brief.pieces.map((p) => JSON.parse(JSON.stringify(p))); accounts = a.ok ? a.accounts : [];
   CHV = Object.fromEntries((a.ok ? a.channels || [] : []).filter((c) => c.video).map((c) => [c.key, c.video]));
+  TIERS = a.ok ? (a.tiers || []) : [];   /* [R9R10-A] 등급표 = 서버 값(없으면 등급 줄을 안 그린다) */
+  /* [R9R10-A] 글마다 스타일을 덮어쓰려면 그 계정의 옷장을 알아야 한다 — 글 piece 의 계정마다 한 번 읽는다(못 읽으면 칩을 안 그린다 · 지어내지 않는다) */
+  const accIds = [...new Set(pieces.filter((p) => !isVideo(p) && p.accountId).map((p) => p.accountId))];
+  await Promise.all(accIds.map(async (id) => { const r = await UI.api(`/api/account-styles?accountId=${id}`, { noGate: true }); if (r.ok) STYLES[id] = { styles: r.styles || [], defaultStyleId: r.defaultStyleId ?? null }; }));
   clamped = pieces.map((p) => isVideo(p) && p.video.clampedFrom ? { was: p.video.clampedFrom, now: p.video.seconds } : clampSec(p)).filter(Boolean)[0] || null; // 서버가 clampedFrom 을 주면 그 말을 쓰고, 없으면 화면이 포맷 상한으로 내린다
   if (!topicTitle && t?.ok) topicTitle = (t.topics.find((x) => x.id === brief.topicId) || {}).title || "";
   render();
 }
+function drawTargets() {
+  const live = pieces.filter((p) => !p.drop);
+  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
+    : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
+}
 function render() {
   const live = pieces.filter((p) => !p.drop);
   UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
-  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
-    : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
+  drawTargets();
   drawKv(total(), brief.coinsLeft);
   estKv();   // 🔴 서버가 같은 손질로 다시 재 준다 — 답이 오면 위 숫자를 갈아 끼운다
 
@@ -2169,10 +2220,10 @@ function render() {
 }
 /* ── 손보기 시트(DESIGN §5.5 항목 전부 + [P1R5] 영상 섹션: 포맷 3 · 길이 15/30/60 · 목소리 · 계정 변주(읽기 전용) · 코인 재계산) ── */
 function editSheet() {
-  const voices = brief.voices || [];
+  const voices = brief.voices || []; let sheetRead = null;   /* [R9R10-A] 시트의 지금 값을 읽는 함수 — 합계(서버 견적)와 «적용»이 같은 것을 읽는다 */
   const html = pieces.map((p, i) => { const accs = accounts.filter((a) => a.channel === p.channel); const emo = Object.entries(UI.EMOTION); if (p.emotionKey && !UI.EMOTION[p.emotionKey]) emo.unshift([p.emotionKey, p.emotionKey]);
     const hhmm = UI.timeKST(p.schedule.at); const dayOff = dayWord(p.schedule.at) === "모레" ? 2 : 1;
-    const head = `<div class="fr" style="border:0"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(p.channel, "sm")}<span>${UI.esc(UI.chLabel(p.channel))}${isVideo(p) ? " · 영상" : ""}<small data-cost>${p.drop ? "이번엔 안 만들어요" : `${cost(p)}코인`}</small></span></div><button class="toggle" type="button" data-drop aria-checked="${!p.drop}" aria-label="이 채널 만들기"></button></div>`;
+    const head = `<div class="fr" style="border:0"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(p.channel, "sm")}<span>${UI.esc(UI.chLabel(p.channel))}${isVideo(p) ? " · 영상" : ""}<small data-cost>${p.drop ? "이번엔 안 만들어요" : coinSay(cost(p))}</small></span></div><button class="toggle" type="button" data-drop aria-checked="${!p.drop}" aria-label="이 채널 만들기"></button></div>`;
     const acc = accs.length ? `<div class="sec">계정</div>${UI.seg("acc", accs.map((a) => [a.id, "@" + a.handle]), p.accountId)}` : `<div class="sec">계정</div><p class="muted" style="margin:0;font-size:13px">연결된 ${UI.esc(UI.chLabel(p.channel))} 계정이 없어요 · <a href="/app/accounts.html" style="text-decoration:underline">계정 연결</a></p>`;
     const when = `<div class="sec">언제</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${UI.seg("day", [[1, "내일"], [2, "모레"]], dayOff)}${UI.chips("time", TIMES.some(([v]) => v === hhmm) ? TIMES : [[hhmm, hhmm], ...TIMES], hhmm)}</div>`;
     if (isVideo(p)) { const v = p.video; const vo = voices.find((x) => x.voiceId === v.voice?.voiceId); const others = pieces.filter((q) => isVideo(q) && q !== p);
@@ -2188,13 +2239,16 @@ function editSheet() {
     return `<section data-i="${i}" style="padding:4px 0 12px;${i ? "border-top:1px solid var(--line);margin-top:8px" : ""}">${head}<div data-body ${p.drop ? "hidden" : ""}>${acc}
       <div class="sec">감성</div>${UI.chips("emo", emo, p.emotionKey)}
       <div class="sec">구성</div>${UI.chips("fmt", FORMATS, p.format)}
-      <div class="fr"><div class="fl">이미지<small>1장 = 1코인</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
+      <div class="sec">등급</div>${UI.tierRows("tier", TIERS, p.tier || "")}
+      ${STYLES[p.accountId] && STYLES[p.accountId].styles.length ? `<div class="sec">스타일 <span class="muted" style="font-weight:500">이번 글만</span></div>${UI.styleChips("wstyle", STYLES[p.accountId].styles, p.styleId ?? "", STYLES[p.accountId].defaultStyleId ? "이 계정 기본" : "그대로")}` : ""}
+      <div class="fr"><div class="fl">사진 자리<small>등급의 AI 사진 말고는 내 사진·스톡으로 채워요 · 코인은 안 늘어요</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
       ${UI.seg("style", STYLE, p.images?.style || "photo")}
       <div class="fr"><div class="fl">제휴 상품 넣기<small>고지 문구는 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
       <div data-affbody ${p.monetize?.affiliate ? "" : "hidden"}><input class="input" data-pq placeholder="상품 검색어 · 예: 에어프라이어 세척솔" value="${UI.esc(p.monetize?.affiliate?.productQuery || "")}" style="margin-bottom:8px">${UI.seg("slot", [["mid", "중간"], ["end", "끝"], ["both", "둘 다"]], p.monetize?.affiliate?.slot || "end")}</div>
       ${when}</div></section>`; }).join("");
   UI.sheet((clamped ? `<div class="banner" style="margin:0 0 8px"><span>${clamped.now}초로 맞췄어요 — 이 채널은 ${clamped.now}초까지 올라가요</span></div>` : "") + html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
     UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh, (n, v, g) => {
+      if (n === "tier" || n === "wstyle" || n === "fmt") sum(sh);   /* [R9R10-A] 등급·구성이 바뀌면 서버 견적을 다시 받는다 */
       if (n === "vfmt") { const sec = g.closest("section"); const p = pieces[Number(sec.dataset.i)]; p.video.format = v; const w = sec.querySelector("[data-secwrap]"); if (w) { w.innerHTML = secChips(p); UI.bindChips(w, (n2, v2) => { if (n2 === "vsec") { const c = UI.VIDEO_COIN[Number(v2)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; sum(sh); } }); const cur = Number(UI.chipVal(w, "vsec")); sec.querySelector("[data-vcoin]").textContent = UI.VIDEO_COIN[cur] ?? 0; sum(sh); } }
       if (n === "vsec") { const sec = g.closest("section"); const c = UI.VIDEO_COIN[Number(v)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; const cur = pieces[Number(sec.dataset.i)]; const hint = sec.querySelector("[data-vhint]"); hint.textContent = Number(v) !== cur.video.seconds ? `${cur.video.seconds}초 ${cost(cur)}코인 → ${v}초 ${c}코인` : ""; sum(sh); } });
     sh.querySelectorAll("section").forEach((sec) => {
@@ -2202,22 +2256,33 @@ function editSheet() {
       UI.toggle(tg, (on) => { body.hidden = !on; sum(sh); });
       const aff = sec.querySelector("[data-aff]"); UI.toggle(aff, (on) => { sec.querySelector("[data-affbody]").hidden = !on; });
     });
-    sh.querySelector("#apply").onclick = () => {
-      sh.querySelectorAll("section").forEach((sec) => { const p = pieces[Number(sec.dataset.i)];
+    const readSheet = () => { const out = pieces.map((p) => JSON.parse(JSON.stringify(p)));
+      sh.querySelectorAll("section").forEach((sec) => { const p = out[Number(sec.dataset.i)];
         p.drop = sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true"; if (p.drop) return;
         const acc = UI.chipVal(sec, "acc"); if (acc != null) { p.accountId = Number(acc); p.accountHandle = (accounts.find((a) => a.id === Number(acc)) || {}).handle || null; }
         const affOn = sec.querySelector("[data-aff]").getAttribute("aria-checked") === "true";
         if (isVideo(p)) { const v = p.video; v.format = UI.chipVal(sec, "vfmt") || v.format; v.seconds = Number(UI.chipVal(sec, "vsec") || v.seconds); const vid = UI.chipVal(sec, "voice"); if (vid) { v.voice = { ...(v.voice || {}), voiceId: vid }; v.variant = { ...(v.variant || {}), voiceId: vid }; }
           p.monetize = { ...(p.monetize || {}), affiliate: affOn ? { provider: "coupang", productQuery: sec.querySelector("[data-pq]").value.trim(), slot: "end" } : null, adDisclosure: affOn }; v.disclosure = { badge: affOn, descriptionFirstLine: affOn }; }
         else { p.emotionKey = UI.chipVal(sec, "emo") || p.emotionKey; p.format = UI.chipVal(sec, "fmt") || p.format;
+          const tv = UI.chipVal(sec, "tier"); if (tv) p.tier = tv;   /* [R9R10-A] 등급 — 코인은 서버 견적이 답한다(화면 셈 0) */
+          if (sec.querySelector('[data-chips="wstyle"]')) { const sv = UI.chipVal(sec, "wstyle"); p.styleId = sv ? Number(sv) : null; }
           p.images = { ...(p.images || {}), count: UI.stepVal(sec, "img"), style: UI.chipVal(sec, "style") || "photo" };
           p.monetize = { ...(p.monetize || {}), affiliate: affOn ? { provider: "coupang", productQuery: sec.querySelector("[data-pq]").value.trim(), slot: UI.chipVal(sec, "slot") || "end" } : null, adDisclosure: affOn }; }
         p.schedule = { ...(p.schedule || {}), at: kstAt(Number(UI.chipVal(sec, "day") || 1), UI.chipVal(sec, "time") || "07:30") };
-        p.coinCost = cost(p); });
-      close(); render(); UI.toast("적용했어요");
-    };
+        if (isVideo(p)) p.coinCost = cost(p); else if (p.tier !== pieces[Number(sec.dataset.i)].tier) p.coinCost = null; });   /* 글 코인은 서버가 다시 말해 줄 때까지 «확인 중» */
+      return out; };
+    sheetRead = readSheet;
+    sh.querySelector("#apply").onclick = () => { pieces = readSheet(); close(); render(); UI.toast("적용했어요"); };
   } });
-  function sum(sh) { let t = 0; sh.querySelectorAll("section").forEach((sec) => { if (sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true") return; t += sec.hasAttribute("data-video") ? (UI.VIDEO_COIN[Number(UI.chipVal(sec, "vsec"))] ?? 0) : 1 + UI.stepVal(sec, "img"); }); const el = sh.querySelector("#sum"); if (el) el.textContent = t; }
+  /* 🔴 [R9R10-A] 시트 안의 합계도 **서버 견적**이다 — 옛 «1 + 사진 수» 셈을 지웠다(AC-74). 답이 올 때까지 «…» · 늦게 온 답은 버린다 · 못 받으면 «?»(0 으로 그리지 않는다 · AC-9). */
+  let sumSeq = 0, sumTimer = null;
+  function sum(sh) { const el = sh.querySelector("#sum"); if (el) el.textContent = "…"; clearTimeout(sumTimer); sumTimer = setTimeout(async () => {
+    const my = ++sumSeq; const tmp = sheetRead ? sheetRead() : pieces; const body = { briefId: brief.id }; const ps = patchesOf(tmp); if (ps.length) body.pieces = ps;
+    const r = await UI.api("/api/director-estimate", { body, noGate: true }); if (my !== sumSeq) return;
+    const el2 = sh.querySelector("#sum"); if (!el2) return;
+    if (!r.ok) { el2.textContent = "?"; return; }
+    el2.textContent = UI.num(r.coinCost);
+    for (const e of r.pieces || []) { const sec = [...sh.querySelectorAll("section")].find((x) => tmp[Number(x.dataset.i)] && tmp[Number(x.dataset.i)].key === e.key); const c = sec && sec.querySelector("[data-cost]"); if (c && typeof e.coinCost === "number" && sec.querySelector("[data-drop]").getAttribute("aria-checked") === "true") c.textContent = coinSay(e.coinCost); } }, 250); }
 }
 /* [R8 · director-estimate] 🔴 «얼마 드나»는 **서버가 확정한다**(`{ coinCost, coinsLeft, enough, need }`).
      화면 셈은 답이 올 때까지의 미리보기이고, 답이 오면 그 자리를 갈아 끼운다.
@@ -2236,12 +2301,16 @@ async function estKv() {
   const body = { briefId: brief.id }; const ps = patchesOf(); if (ps.length) body.pieces = ps;
   const r = await UI.api("/api/director-estimate", { body, noGate: true });
   if (my !== estSeq || !r.ok) return;   // 늦게 온 답이 새 답을 덮지 않게 · 못 쟀으면 미리보기를 그대로 둔다
+  /* [R9R10-A] 글마다의 코인도 서버 답으로 갈아 끼운다(등급을 바꾼 뒤 «확인 중»이던 자리) */
+  let changed = false; for (const e of r.pieces || []) { const p = pieces.find((x) => x.key === e.key); if (p && typeof e.coinCost === "number" && p.coinCost !== e.coinCost) { p.coinCost = e.coinCost; changed = true; } }
+  if (changed) drawTargets();
   drawKv(r.coinCost, r.coinsLeft, r.enough ? null : r.need);
 }
 /* 🔴 견적에 보낼 손질과 만들기에 보낼 손질은 **같아야** 한다 — 둘을 따로 지으면 «견적과 실제가 다른» 화면이 된다(rules 쪽과 같은 규율). */
-function patchesOf() {
-  return pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
+function patchesOf(list = pieces) {
+  return list.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
     const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
+    if (!isVideo(p) && p.tier !== o.tier) patch.tier = p.tier; if (!isVideo(p) && (p.styleId || null) !== (o.styleId || null)) patch.styleId = p.styleId || null;   /* [R9R10-A] 등급·스타일(이번 글만) — 견적과 확정이 같은 손질을 보낸다 */
     if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style || p.images.aiCount !== o.images.aiCount)) patch.images = { count: p.images.count, style: p.images.style, ...(p.images.aiCount != null ? { aiCount: p.images.aiCount } : {}) };   /* [R8] aiCount = AI 로 구울 장수(여기만 돈이 든다) */
     if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
     if (isVideo(p)) { const v = {}; if (p.video.format !== o.video.format) v.format = p.video.format; if (p.video.seconds !== o.video.seconds) v.seconds = p.video.seconds; if (p.video.voice?.voiceId !== o.video.voice?.voiceId) v.voiceId = p.video.voice.voiceId; if (Object.keys(v).length) patch.video = v; } // PieceSpecPatch.video(§1.1)
@@ -2309,6 +2378,7 @@ await load();
 <div class="group" id="photos" hidden></div>
 <div class="group" id="claims" hidden></div>
 <div class="group" id="refunused" hidden></div>
+<div class="group" id="fmtunused" hidden></div>
 <div class="group" id="thchain" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="group" id="teamwait" hidden></div>
@@ -2378,6 +2448,12 @@ function renderWhy(videoOnly) {
      🔴 대표가 없어도 **막지 않는다** — 서버 문장이 «그대로 두셔도 글은 올라가요»로 이미 그렇게 말한다(§9). */
   if (!videoOnly && m.hero && m.hero.line) h += kv("대표 사진", String(m.hero.line));
   if (c && c.register) h += kv("말투", String(c.register));
+  /* [R9R10-A · A-5·A-6] 등급 · 든 코인 · 스타일 — 🔴 전부 서버 값(`meta.tier` · `meta.coins{planned,charged,returned,line}` · `meta.styleName`). 화면이 셈하지 않는다(AC-74).
+     🔴 **덜 받고 돌려준 일은 서버 문장(line)으로 말한다** — 조용히 돌려주면 고객이 모른다(트리거 A-5). line 이 없으면 숫자만 적고 사연을 지어내지 않는다(AC-9).
+     🔴 모르는 등급 키는 안 그린다(영어 키를 내보내지 않는다). */
+  if (!videoOnly && m.tier && UI.TIER_LABEL[m.tier]) h += kv("등급", UI.TIER_LABEL[m.tier]);
+  if (!videoOnly && m.coins && typeof m.coins.charged === "number") h += kv("든 코인", `${UI.num(m.coins.charged)}코인`, m.coins.line ? String(m.coins.line) : (Number(m.coins.returned) > 0 ? `${UI.num(m.coins.returned)}코인은 돌려드렸어요` : ""));
+  if (!videoOnly && m.styleName) h += kv("스타일", String(m.styleName), "레퍼런스에서 배운 모양으로 썼어요");
   if (!videoOnly && m.angle) h += kv("잡은 방향", String(m.angle));
   /* [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** — `slotReason`(왜 이 시각인가) 과 **같은 자리·같은 뜻**이라 나란히 둔다(서버 주석이 그렇게 적혀 있다).
      채널이 하나인 집엔 값이 아예 안 온다(고를 것이 없으니 까닭도 없다) — 그때 «자동으로 골랐어요» 같은 말을 **지어내지 않는다**. */
@@ -2443,14 +2519,48 @@ function renderThreadChain() {
   const cp = UI.$("#thCopy");
   if (cp) cp.onclick = async () => { const ok = await UI.copy(remain.join("\n\n")); UI.toast(ok ? "남은 글을 복사했어요" : "복사가 안 됐어요 · 위 글을 길게 눌러 복사해 주세요"); };
 }
+/* [R9R10-A · R9-7] 🔴 **같은 화면을 글 서식에도 쓴다**(트리거 A-2 «새로 짓지 마라») — 영상 `refUnused` 와 글 `formatUnused` 가 같은 칩 줄(`unusedChips`)을 지난다. */
+const unusedChips = (names) => `<div class="chips" style="padding:0 16px 10px;gap:6px">${names.map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px">${UI.esc(x)}</span>`).join("")}</div>`;
 function renderRefUnused() {
   const host = UI.$("#refunused"); const list = ((P.meta || {}).refUnused || []).filter((x) => x && x.field);
   if (!list.length) { host.hidden = true; return; }
   const names = [...new Set(list.map((x) => REF_FIELD_SAY[x.field] || "그 밖"))];
   host.hidden = false;
-  host.innerHTML = '<div class="gt">이건 못 따라 했어요</div>'
-    + `<div class="chips" style="padding:0 16px 10px;gap:6px">${names.map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px">${UI.esc(x)}</span>`).join("")}</div>`
+  host.innerHTML = '<div class="gt">이건 못 따라 했어요</div>' + unusedChips(names)
     + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">참고한 영상에서 ${names.length}가지는 지금 우리 편집기로 못 내요. 나머지는 그대로 배워서 만들었어요.</p>`;
+}
+/* ══ [R9R10-A · R9-7 · 설계 §2.1e] 🔴 **이 채널에선 못 낸 꾸밈** — 서버가 `meta.formatUnused = [{field, label, why}]` 로 남긴다(B 확정 2026-09-16 · 영상 refUnused 와 같은 모양).
+     · `label` 은 **서버 정본**(MARK_LABEL) — 화면은 그 글자를 쓰고, 비었을 때만 UI.MARK_LABEL 로 부른다(영어 칸 이름을 내보내지 않는다 · AC-91).
+     · 🔴 `why` 는 러너·서버 어휘(budget · too_long · url_para · block_unsupported · channel_unsupported · caret_drift · range_invalid)라 **안 그린다**(AC-91).
+       다만 `url_para`·`caret_drift` 는 **우리가 일부러 한 일**이라 «못 냈어요»로만 보이면 고장처럼 읽힌다(B2) — 그 둘만 화면이 제 말로 한 줄 붙인다.
+     · 🔴 기울임(italic)은 «못 낸다»가 아니라 **일부러 안 낸다**(글이 번져 보이는 축 · B2) — 그렇게 말한다.
+     · 🔴 `formatCaps` 가 null 인 종류(모름 · 티스토리 형광펜 등)가 본문에 있으면 «올려 봐야 알아요»로 미리 말한다(B: 그런 마크는 벗기지 않고 발행 뒤 같은 칸에 적힌다).
+     · 겁주지 않는다(§3) · 막지 않는다(§9) — 글 내용은 그대로라는 사실을 같이 준다. 발행 뒤에도 그대로 보인다(§9-2). */
+const FMT_WHY_SAY = { url_para: "주소가 링크로 살아야 해서 꾸밈을 뺐어요", caret_drift: "자리가 어긋나서 안 칠했어요" };
+const CAP_IN_BODY = { bold: /<strong\b/i, underline: /<u\b/i, italic: /<em\b/i, value: /class="value"/, line: /class="line"/, row: /class="row"/, quote: /<blockquote/i, table: /<table/i, checklist: /class="check"/, faq: /class="faq"/, toc: /class="toc"/, divider: /<hr\b/i, image: /<figure/i, place: /class="place"/, emoji: /\p{Extended_Pictographic}/u };
+function capsUnknownInBody() {
+  const caps = P.formatCaps; if (!caps || typeof caps !== "object" || P.kind === "video") return [];
+  const body = String(P.bodyHtml || "");
+  return Object.keys(CAP_IN_BODY).filter((k) => caps[k] === null && CAP_IN_BODY[k].test(body)).map((k) => UI.MARK_LABEL[k] || k);
+}
+function renderFmtUnused() {
+  const host = UI.$("#fmtunused"); if (P.kind === "video") { host.hidden = true; return; }
+  const all = ((P.meta || {}).formatUnused || []).filter((x) => x && x.field);
+  const nameOf = (x) => x.label || UI.MARK_LABEL[x.field] || "그 밖";
+  const italic = all.filter((x) => x.field === "italic"), list = all.filter((x) => x.field !== "italic");
+  const unknown = capsUnknownInBody();
+  if (!all.length && !unknown.length) { host.hidden = true; return; }
+  const names = [...new Set(list.map(nameOf))];
+  let h = "";
+  if (names.length) {
+    h += unusedChips(names) + `<p class="muted" style="margin:0 16px 6px;font-size:12.5px">${UI.esc(UI.chLabel(P.channel))}에서는 ${names.length}가지 꾸밈을 못 실었어요. 글 내용은 그대로예요.</p>`;
+    const lines = [...new Set(list.filter((x) => FMT_WHY_SAY[x.why]).map((x) => `${nameOf(x)} — ${FMT_WHY_SAY[x.why]}`))];
+    if (lines.length) h += `<div style="padding:0 16px 6px">${lines.map((l) => `<p class="muted" style="margin:0 0 4px;font-size:12.5px">${UI.esc(l)}</p>`).join("")}</div>`;
+  }
+  if (italic.length) h += '<p class="muted" style="margin:0 16px 6px;font-size:12.5px">기울임은 일부러 안 넣어요 — 글이 번져 보이기 쉬운 꾸밈이라서요.</p>';
+  if (unknown.length) h += `<p class="muted" style="margin:0 16px 6px;font-size:12.5px">${UI.esc(unknown.join(" · "))}${unknown.length > 1 ? "은" : "는"} ${UI.esc(UI.chLabel(P.channel))}에서 되는지 아직 몰라요 · 올려 봐야 알아요. 안 되면 올라간 뒤 여기에 적어 드려요.</p>`;
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">${names.length ? "이 채널에선 못 낸 꾸밈" : italic.length ? "일부러 안 넣은 꾸밈" : "올려 봐야 아는 꾸밈"}</div>` + h + '<div style="height:6px"></div>';
 }
 /* ══ [R8-A2 §2.4] 🔴 **수치 주장 표시** — 서버(`netlify/functions/pieces.ts:142`)가 `meta.numberClaims = { summary, items, line }` 을
      **이미 실어 보내고 있었는데** 검수 화면이 한 번도 안 그렸다(`grep -n "numberClaims" public/app/piece.html` = 0).
@@ -2601,7 +2711,7 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  renderTeamWait(); renderRefUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
+  renderTeamWait(); renderRefUnused(); renderFmtUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; renderWhy(true); UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);
