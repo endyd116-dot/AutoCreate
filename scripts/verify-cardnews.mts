@@ -17,7 +17,7 @@ import { WRITING_CONTRACTS, structureFor, imagesFor, contractSelfConflicts, isCa
 import { structurePrint, structureOverlap, STRUCTURE_OVERLAP_MAX } from "../lib/structure-print";
 import type { Block } from "../lib/blocks";
 import { coinsPerWeek, toRuleKind, type Rule } from "../lib/slots";
-import { COIN_TABLE } from "../lib/coin-table";
+import { COIN_TABLE, AI_IMAGES_INCLUDED, pieceCoinCost } from "../lib/coin-table";
 import { CHANNELS } from "../lib/channel-registry";
 
 const results: { step: string; ok: boolean; note: string }[] = [];
@@ -142,11 +142,24 @@ const printOf = (types: string[]) => structurePrint(types.map((t) => ({ type: t 
   rec("⑦ 🔴 음성 대조 — 장당으로 셌다면 나왔을 값과 다르다(이중 청구 아님)", weekly !== perCard,
     `카드뉴스 ${weekly}코인 ↔ 장당으로 셌다면 ${perCard}코인(카드 ${imagesFor(IG, "review").default}장) — 화면은 ${COIN_TABLE.cardnews} 이라고 말한다`);
 
-  /* 글 채널은 그대로여야 한다(내가 건드려 깨뜨리지 않았다). */
+  /* 🔴 [2026-09-15 C 수리] 이 줄은 **옛 코인 값**이었다(«blog 1 + 사진 장당 1» = 7 기대).
+     사장님 승인 재설계로 **글 1편 = 1코인(AI 사진 1장 포함) · AI 사진 «추가»만 장당 1코인 · 고객 사진·스톡은 0** 이 됐다.
+     식은 `pieceCoinCost` 한 곳: `blog + image × max(0, AI장수 − AI_IMAGES_INCLUDED)`. 기본 경로는 AI 1장이라 **1코인**이 맞다. */
   const blogRule: Rule = { id: 2, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 1, active: true };
   const blogWeekly = coinsPerWeek([blogRule]);
-  rec("⑦ 글 채널 코인은 그대로(blog 1 + 사진 장당 1)", blogWeekly === COIN_TABLE.blog + COIN_TABLE.image * 6,
-    `네이버 주 1회 = ${blogWeekly}코인(기대 ${COIN_TABLE.blog + COIN_TABLE.image * 6})`);
+  rec("⑦ 글 1편 = 1코인(AI 사진 1장 포함 · 나머지는 고객·스톡이라 0)", blogWeekly === COIN_TABLE.blog,
+    `네이버 주 1회 = ${blogWeekly}코인(기대 ${COIN_TABLE.blog}) · 사진 6장이어도 AI 는 1장이라 안 오른다`);
+
+  /* 🔴 **오르는 쪽 대조** — 「늘 1」로 굳으면 AI 를 더 써도 안 받는 반대쪽 사고가 난다(메인 지시).
+     식이 살아 있다면 AI 를 2장·3장으로 올릴 때 **그만큼 올라야** 한다. */
+  const ai2 = pieceCoinCost("post", 2), ai3 = pieceCoinCost("post", 3);
+  rec("⑦ 🔴 오르는 쪽 — AI 사진을 2장·3장으로 올리면 2·3코인(«늘 1»로 굳지 않았다)",
+    ai2 === COIN_TABLE.blog + COIN_TABLE.image && ai3 === COIN_TABLE.blog + COIN_TABLE.image * 2,
+    `AI 1장 ${pieceCoinCost("post", 1)} · 2장 ${ai2} · 3장 ${ai3} (식 = blog ${COIN_TABLE.blog} + image ${COIN_TABLE.image} × (AI−${AI_IMAGES_INCLUDED}))`);
+
+  /* 🔴 **바닥 쪽 대조** — AI 를 0장 써도 글값 1코인 아래로는 안 내려간다(음수·0 청구 0). */
+  rec("⑦ 바닥 — AI 사진 0장이어도 글값 1코인(0·음수로 안 떨어진다)",
+    pieceCoinCost("post", 0) === COIN_TABLE.blog, `AI 0장 → ${pieceCoinCost("post", 0)}코인`);
 }
 
 const w = (x: unknown, n: number) => String(x ?? "").slice(0, n).padEnd(n);
