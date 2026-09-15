@@ -65,6 +65,24 @@
     document.body.appendChild(f); f.submit();
   };
 
+  /* [KICC 실측] 결제사 복귀 실패 — ?reason= 을 사람말로. 고객이 «왜»를 알아야 같은 카드로 또 누르지 않는다.
+     reason: params(값 비어 옴) · approve(카드사 거절) · pg(응답 늦음) · cancelled(창에서 취소) · 그 밖 = 카드사 거절 코드(8373 등 · 보여도 된다 — 카드사에 말할 근거) */
+  UI.PAYFAIL = {
+    params: ["결제사에서 돌아온 정보가 비어 있어요", "다시 시도해 주세요. 같은 일이 또 생기면 문의해 주세요."],
+    approve: ["카드사가 등록을 거절했어요", "다른 카드로 하거나, 카드사(명세서 뒷면 번호)에 «온라인 자동결제 허용»이 되어 있는지 확인해 주세요."],
+    pg: ["결제사 응답이 늦어요", "잠시 뒤 다시 해 주세요."],
+    cancelled: ["결제창에서 취소했어요", "다시 하려면 아래를 눌러 주세요."],
+  };
+  UI.payFailSheet = function ({ reason, msg, what = "card", onRetry }) {
+    const r = String(reason || "").trim(); const known = UI.PAYFAIL[r];
+    const head = known ? known[0] : r ? `거절 코드 ${UI.esc(r)}` : what === "coin" ? "결제가 안 됐어요" : "카드 등록이 안 됐어요";
+    const body = known ? known[1] : r ? "카드사에 이 코드로 확인해 주세요. 다른 카드로 하면 바로 돼요." : "다시 시도해 주세요.";
+    const sub = msg && msg !== head ? `<p class="muted" style="margin:0 0 4px;font-size:12.5px">${UI.esc(msg)}${r && known && r !== "cancelled" ? "" : ""}</p>` : "";
+    UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${head}</p><p class="muted" style="margin:0 0 12px">${body}</p>${sub}<div class="cta"><button class="btn primary" type="button" id="pfRetry">${what === "coin" ? "다른 카드로 다시 하기" : "다른 카드로 등록"}</button></div>`,
+      { title: what === "coin" ? "결제가 안 됐어요" : "카드 등록이 안 됐어요", onOpen: (sh, close) => { sh.querySelector("#pfRetry").onclick = () => { close(); if (onRetry) onRetry(); }; } });
+    try { const url = new URL(location.href); ["key", "reason", "failed", "charged", "trial"].forEach((k) => url.searchParams.delete(k)); history.replaceState(null, "", url.pathname + (url.search || "") + url.hash); } catch { /* empty */ } // 새로고침해도 다시 안 뜨게(모의 손잡이는 남긴다)
+  };
+
   /* ── 포맷 ── */
   UI.won = (n) => (Number(n) || 0).toLocaleString("ko-KR") + "원";
   UI.num = (n) => (Number(n) || 0).toLocaleString("ko-KR");

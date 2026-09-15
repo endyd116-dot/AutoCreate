@@ -36,7 +36,7 @@ const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0,
 /* KICC 카드 등록 콜백 복귀(billing-key-return): ?key=ok|fail · &trial=reused = 같은 카드로 체험을 이미 씀(§12.3) */
 const key = UI.qs.get("key");
 if (key === "ok") { if (UI.qs.get("trial") === "reused") UI.sheet(`<p class="muted" style="margin:0 0 16px">이 카드로 체험을 이미 쓰신 적이 있어요. 체험은 여기서 끝나지만, 요금제를 고르면 바로 이어서 할 수 있어요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "이미 체험을 쓰셨어요", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); else UI.toast("카드를 등록했어요"); }
-else if (key === "fail") UI.toast("카드 등록이 안 됐어요 · 다시 해 주세요");
+else if (key === "fail") setTimeout(() => UI.payFailSheet({ reason: UI.qs.get("reason"), what: "card", onRetry: addCard }), 300); // 왜 안 됐는지 + 다른 카드로(토스트 아님)
 /* 카드 안 가격은 큰 숫자(.hl)가 아니다 — 화면당 큰 숫자 1 · 공급가는 /api/plans 의 서버 값 · 부가세는 시트에서 견적(subscription-quote)으로 */
 const price = (p) => `<div style="padding:0 16px 6px"><div style="font-size:24px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums">${won(cycle === "year" ? p.priceYear : p.priceMonth)}<small class="muted" style="font-size:13px;font-weight:500"> /${cycle === "year" ? "년" : "월"}</small></div><div class="muted" style="font-size:13px;margin-top:4px">${VATNOTE}${cycle === "year" ? ` · 월 ${won(p.priceMonth)} × 10개월 값` : ""}</div></div>`;
 const paying = () => S && S.status === "active" && RANK[S.plan.key] > 0;
