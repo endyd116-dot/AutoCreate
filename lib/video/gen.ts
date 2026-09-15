@@ -78,7 +78,7 @@ async function personaFactsFor(tid: number, accountId: number | null): Promise<{
 /* ═══ 메인 ═══ */
 export async function generateVideo(tid: number, pieceId: number, opts: { resume?: boolean; by?: string } = {}): Promise<GenResult> {
   const [p0] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} AND kind = 'video'`);
-  if (!p0) return { ok: false, status: "failed", reason: "piece 없음(video)" };
+  if (!p0) return { ok: false, status: "failed", reason: "그 영상 글을 찾지 못했어요." };
   if (String(p0.status) !== "generating") return { ok: true, status: "skipped", reason: "already_done" };   // 멱등
   if (!(await acquireLock(pieceId, opts.by ?? "background"))) return { ok: true, status: "generating", reason: "locked" };
   const slotId = p0.slot_id ? n(p0.slot_id) : null;

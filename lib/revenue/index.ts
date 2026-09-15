@@ -33,7 +33,7 @@ export async function syncSource(tenantId: number, src: RevenueSourceRow, range:
     case "coupang": return syncCoupang(tenantId, src, range);
     case "aliexpress": return syncAliexpress(tenantId, src, range);
     case "linkprice": return syncLinkprice(tenantId, src, range);
-    default: return fail("not_configured", false, `${src.source} 는 API 로 가져오는 소스가 아니에요(러너 또는 직접 입력).`);
+    default: return fail("not_configured", false, `${src.source} 는 API 로 가져오는 매체가 아니에요(내 PC 프로그램이 모으거나 직접 넣어 주세요).`);
   }
 }
 

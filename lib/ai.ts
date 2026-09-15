@@ -13,6 +13,7 @@ import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 import { calcCost } from "./ai-cost";
 import { aiKeysConfigured, leaseAiKey, reportAiKeyOutcome, isRateLimitReason, redactKeys } from "./ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳
+import { byoKeyFor, markByoOutcome, byoErrorKind, fallbackAllowed, noteFallback, BYO_ERROR_TEXT } from "./ai-key-byo";   // [R8 §4.4] 고객이 꽂은 키
 import * as M from "./ai-models";
 import { buildAiCacheKey, tryAiCacheGet, aiCacheSet } from "./ai-cache";   // [P1R7 B3] 5분 응답 캐시(AM 이식)
 import { aiStubActive, aiStubAnswer, AI_STUB_MODEL } from "./ai-stub";   // [R8 §2.1] 글 실호출 대체 스위치(로컬 전용)
@@ -37,7 +38,9 @@ export interface AiOk {
   cached?: boolean;
   trace: AiAttempt[];
 }
-export interface AiFail { ok: false; text: null; reason: string; trace: AiAttempt[] }
+export interface AiFail { ok: false; text: null; reason: string; trace: AiAttempt[];
+  /** 🔴 [R8 §4.4] **고객이 꽂은 키가 문제일 때** — 호출부가 그대로 사람말로 쓴다(«오류»로 뭉치지 않는다). */
+  byoError?: { kind: "invalid" | "quota" | "forbidden"; text: string } }
 
 export type AiRole = "high" | "low" | "director" | "landing" | "image";
 
@@ -208,11 +211,13 @@ export function __clearInternalCache(): void { internalCache.clear(); }
  *   (종전엔 대시보드가 `NOT EXISTS(tenants…)` 로 판정해서, 부모를 지우면 그 돈이 **고객 비용으로 넘어갔다** — 고아 103행 $9.98.)
  *   `synthetic` = 실제 호출이 아닌 행(하니스가 상한 시험용으로 적어 넣는 것). 지우지 않고 표시해서 기본 집계에서 뺀다.
  */
-export async function recordAiUsage(row: { tenantId?: number | null; purpose: string; model: string; inTokens: number; outTokens: number; costUsd: number; ref?: string | null; synthetic?: boolean }): Promise<void> {
+export async function recordAiUsage(row: { tenantId?: number | null; purpose: string; model: string; inTokens: number; outTokens: number; costUsd: number; ref?: string | null; synthetic?: boolean; byo?: boolean }): Promise<void> {
   try {
     const internal = await isInternalTenant(row.tenantId);
-    await db.execute(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, is_internal, synthetic)
-      VALUES (${row.tenantId ?? null}, ${row.purpose.slice(0, 40)}, ${row.model.slice(0, 60)}, ${Math.trunc(row.inTokens)}, ${Math.trunc(row.outTokens)}, ${row.costUsd.toFixed(6)}, ${row.ref ? String(row.ref).slice(0, 120) : null}, ${internal}, ${row.synthetic === true})`);
+    /* 🔴 [R8 §4.4] `byo` 는 «켰나»가 아니라 **실제로 어느 키로 나갔나**다. 고객 키가 죽어 우리 키로 돌았으면 그건 **우리 원가**다 —
+       의도로 적으면 AC-71(부모를 지우면 분류가 넘어가던 고아 103행 $9.98)이 이 칸에서 되살아난다. */
+    await db.execute(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, is_internal, synthetic, byo)
+      VALUES (${row.tenantId ?? null}, ${row.purpose.slice(0, 40)}, ${row.model.slice(0, 60)}, ${Math.trunc(row.inTokens)}, ${Math.trunc(row.outTokens)}, ${row.costUsd.toFixed(6)}, ${row.ref ? String(row.ref).slice(0, 120) : null}, ${internal}, ${row.synthetic === true}, ${row.byo === true})`);
   } catch (e) { console.warn("[ai_usage] 기록 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
 }
 
@@ -265,6 +270,10 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
   }
   const MIN_MODEL_MS = 2500;
   const chainStart = Date.now();
+  /* ── [R8 §4.4] 🔴 **고객이 자기 키를 꽂았으면 그 키로 나간다.** 값을 가져오는 일만 여기서 하고, **고르는 일은 `leaseAiKey()` 한 곳**이다.
+     `useOurs` 는 «고객 키가 죽어서 우리 키로 넘어왔다»는 **그 호출 한정** 표시다 — 저장하지 않는다. ── */
+  const byo = await byoKeyFor(a.tenantId);
+  let useOurs = false;
   const HEAD_RETRY_MAX = Math.max(0, Math.floor(a.headRetries ?? 1));
   let headRetried = 0;
   let parseRetried = false;
@@ -279,11 +288,30 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
     }
     const mStart = Date.now();
     /* 🔴 시도마다 빌린다 — 라운드로빈이 여기서 돈다. 키 1개면 늘 같은 키(퇴화형). */
-    const lease = leaseAiKey();
+    const lease = leaseAiKey(useOurs ? null : byo);
     const r = await callSingleModel(model, a, lease?.key ?? "", timeoutMs);
     /* 🔴 결과를 **반드시** 돌려준다 — 안 알려 주면 쉬는 키가 영영 안 생겨 이 기능이 장식이 된다.
        429·할당량만 그 키를 쉬게 한다. 503·타임아웃은 제공사가 바쁜 것이지 키 잘못이 아니다(`isRateLimitReason` 헤더). */
     reportAiKeyOutcome(lease, r.ok ? "ok" : isRateLimitReason(r.reason) ? "rate_limited" : "error");
+    /* [R8 §4.4] 고객 키 결과는 **표**에 적는다(쉼·꺼짐이 서버 재시작과 무관하게 남아야 한다).
+       🔴 `quota` 만 쉬게 하고 `invalid`·`forbidden` 이면 꺼 둔다 — 틀린 키로 계속 때리면 그 집이 제공사에서 막힌다. */
+    if (lease?.byo && a.tenantId) {
+      const kind = r.ok ? null : byoErrorKind(r.reason);
+      await markByoOutcome(a.tenantId, r.ok ? "ok" : (kind ?? "quota")).catch(() => {});
+      /* 🔴 **고객 키가 죽었다** — 여기서부터는 «키를 고르는 일»이 아니라 **«남의 요금을 대신 낼까»라는 돈 결정**이다.
+         (나) 규칙(메인 승인): **고객이 미리 켜 둔 경우에만** 우리 키로 이어 돌린다. 안 켰으면 그 회차는 사실대로 실패한다.
+         🔴 조용히 넘어가지 않는다 — 넘어갔으면 아래 `ai_key_fallback_used` 감사와 알림이 **그날 안에** 닿는다. */
+      if (kind) {
+        if (await fallbackAllowed(a.tenantId)) {
+          useOurs = true;
+          await noteFallback(a.tenantId, kind, model);
+          i--; continue;   // 같은 모델을 우리 키로 한 번 더
+        }
+        lastReason = `byo_${kind}`;
+        trace.push({ model, ok: false, reason: lastReason, ms: Date.now() - mStart });
+        return { ok: false, text: null, reason: lastReason, trace, byoError: { kind, text: BYO_ERROR_TEXT[kind] } };
+      }
+    }
     let parsed: unknown = undefined;
     let parseFailed = false;
     if (r.ok && r.text && a.json && !a.googleSearch) { parsed = parseJsonLoose(r.text); if (parsed === null) parseFailed = true; }
@@ -293,7 +321,7 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
     if (r.inputTokens || r.outputTokens) {
       /* 🔴 AC-36 — **돈 기록은 await**. 서버리스는 응답을 돌려주면 인보케이션을 끝낸다: 던지고 잊으면 «썼는데 원장에 없는 돈»이 생긴다
          (실제로 B-1 의 $3.63 이 원장에 없다 · PITFALLS AC-54-③). 쓰기 1회는 수십 ms 다 — 그 값에 원가 정직을 산다. */
-      await recordAiUsage({ tenantId: a.tenantId, purpose: okEff ? a.purpose : `${a.purpose}:fail`, model, inTokens: r.inputTokens, outTokens: r.outputTokens, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), ref: a.ref });
+      await recordAiUsage({ tenantId: a.tenantId, purpose: okEff ? a.purpose : `${a.purpose}:fail`, model, inTokens: r.inputTokens, outTokens: r.outputTokens, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), ref: a.ref, byo: lease?.byo === true });
     }
     if (okEff) {
       if (cacheKey && r.text) aiCacheSet(cacheKey, { text: r.text, json: parsed, model, inputTokens: r.inputTokens, outputTokens: r.outputTokens, thoughtTokens: r.thoughtTokens });

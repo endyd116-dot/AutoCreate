@@ -2,7 +2,7 @@
  * GET /api/ops-dashboard?month=YYYY-MM — 운영센터 대시보드(계약 §2.1 · DESIGN §11.4 «9월에 3,240,000원 벌었어요»). R1 `ops-center.ts` 의 대시보드를 **교체**.
  *   응답(계약 글자 그대로 · 전부 KST 월):
  *     { revenue:{ todayKrw, monthKrw, subscriptionKrw, coinKrw }, mrr, arr, signups:{ today, month }, trialToPaidPct, activeTenants,
- *       churn:{ month, pct }, coins:{ soldKrw, consumed }, aiCost:{ usd, krw?, fxMissing, calls, byPurpose:[{purpose,usd,calls}], excluded:{ internalUsd, syntheticUsd, orphanUsd } }, marginKrw?, published:{ byChannel:[{channel,n}] }, revenueCollectedKrw }
+ *       churn:{ month, pct }, coins:{ soldKrw, consumed }, aiCost:{ usd, krw?, fxMissing, calls, byPurpose:[{purpose,usd,calls}], excluded:{ internalUsd, syntheticUsd, orphanUsd, byoUsd, byoCalls } }, marginKrw?, published:{ byChannel:[{channel,n}] }, revenueCollectedKrw }
  *   돈 규칙: 매출 = **공급가**(invoices.amount · 부가세 제외 · 환불분은 공급가로 환산해 뺀다). 부가세는 매출이 아니다(§12.0).
  *   🔴 «없음 ≠ 0»(AC-9): 환율이 없으면 aiCost.krw 를 싣지 않고 fxMissing:true · marginKrw 도 싣지 않는다. 전환율은 코호트가 없으면 null.
  *   R1 화면(public/ops/index.html)이 읽던 `month`·`tenants` 객체는 과도기 동안 같이 싣는다(계약 모양엔 없는 키 · A 가 R4 화면으로 바꾸면 뗀다). 집계한 달은 `period`.
@@ -94,7 +94,9 @@ export default async (req: Request): Promise<Response> => {
          ① 행의 `is_internal`(쓰는 순간 스냅샷) ② 행의 `synthetic`(실제 호출이 아님) ③ **고아**(테넌트가 지워졌다 = 우리 테스트 집)
        🔴 테넌트 없는 호출(`tenant_id IS NULL`)은 **우리 플랫폼 몫이라 그대로 센다**(실제로 쓴 돈이다).
        그리고 «얼마나 많이 불렀나»를 같이 준다 — 편 수로 보면 3배씩 틀린다(글 1편이 생성·재작성·게이트로 여러 호출로 쪼개진다). */
-    const aiCustomer = sql`(NOT a.is_internal AND NOT a.synthetic AND (a.tenant_id IS NULL OR EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = a.tenant_id AND NOT zt.is_internal)))`;
+    /* 🔴 [R8 §4.4] `NOT a.byo` 를 더한다 — **고객이 자기 키로 쓴 돈은 우리 원가가 아니다.**
+       안 가르면 «우리 AI 원가»가 남의 지갑까지 세어 마진이 거짓말을 한다(AC-71 의 같은 구멍이 새 칸에서 되살아나는 자리). */
+    const aiCustomer = sql`(NOT a.is_internal AND NOT a.synthetic AND NOT a.byo AND (a.tenant_id IS NULL OR EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = a.tenant_id AND NOT zt.is_internal)))`;
     const [ai] = await q(sql`SELECT COALESCE(SUM(a.cost_usd), 0) AS usd, COUNT(*)::int AS calls,
         COALESCE(SUM(a.cost_usd) FILTER (WHERE a.is_internal OR EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = a.tenant_id AND zt.is_internal)), 0) AS internal_usd,
         COALESCE(SUM(a.cost_usd) FILTER (WHERE a.synthetic), 0) AS synthetic_usd,
@@ -103,7 +105,9 @@ export default async (req: Request): Promise<Response> => {
     const [aiAll] = await q(sql`SELECT COALESCE(SUM(a.cost_usd), 0) AS usd, COUNT(*)::int AS calls,
         COALESCE(SUM(a.cost_usd) FILTER (WHERE a.is_internal OR EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = a.tenant_id AND zt.is_internal)), 0) AS internal_usd,
         COALESCE(SUM(a.cost_usd) FILTER (WHERE a.synthetic), 0) AS synthetic_usd,
-        COALESCE(SUM(a.cost_usd) FILTER (WHERE a.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = a.tenant_id)), 0) AS orphan_usd
+        COALESCE(SUM(a.cost_usd) FILTER (WHERE a.tenant_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tenants zt WHERE zt.id = a.tenant_id)), 0) AS orphan_usd,
+        COALESCE(SUM(a.cost_usd) FILTER (WHERE a.byo), 0) AS byo_usd,
+        COUNT(*) FILTER (WHERE a.byo)::int AS byo_calls
       FROM ai_usage a WHERE ${within(sql`a.created_at`, r)}`);
     /* 🔴 **무엇이 비싼가는 `purpose` 로 먼저 본다** — «글이 비싸다»는 오해가 나기 딱 좋다(실측: 글 3편 $0.98 중 사진 18장 $0.83 = 85%). */
     const aiBy = await q(sql`SELECT a.purpose, COALESCE(SUM(a.cost_usd), 0) AS usd, COUNT(*)::int AS calls
@@ -118,7 +122,10 @@ export default async (req: Request): Promise<Response> => {
     aiCost.byPurpose = aiBy.map((x) => ({ purpose: String(x.purpose ?? ""), usd: round4(x.usd), calls: n(x.calls) }));
     aiCost.byModel = aiByModel.map((x) => ({ model: String(x.model ?? ""), usd: round4(x.usd), calls: n(x.calls) }));
     /* «왜 이 숫자가 작아 보이나»를 화면이 설명할 수 있게 — 뺀 몫을 따로 말한다(숨긴 게 아니라 가른 것이다). */
-    aiCost.excluded = { internalUsd: round4(aiAll?.internal_usd), syntheticUsd: round4(aiAll?.synthetic_usd), orphanUsd: round4(aiAll?.orphan_usd), totalUsd: round4(n(aiAll?.usd) - n(ai?.usd)), calls: Math.max(0, n(aiAll?.calls) - n(ai?.calls)) };
+    aiCost.excluded = { internalUsd: round4(aiAll?.internal_usd), syntheticUsd: round4(aiAll?.synthetic_usd), orphanUsd: round4(aiAll?.orphan_usd),
+      /* 🔴 [R8 §4.4] 고객이 **자기 키로** 쓴 몫 — 우리가 안 낸 돈이라 원가에서 빠진다(숨긴 게 아니라 가른 것이다). */
+      byoUsd: round4(aiAll?.byo_usd), byoCalls: n(aiAll?.byo_calls),
+      totalUsd: round4(n(aiAll?.usd) - n(ai?.usd)), calls: Math.max(0, n(aiAll?.calls) - n(ai?.calls)) };
 
     // ⑥ 채널별 발행 · 고객이 걷은 수익(revenue_daily · KST day 는 이미 날짜)
     const pub = await q(sql`SELECT channel, COUNT(*) AS c FROM posts WHERE ${within(sql`published_at`, r)}${notInternal} GROUP BY channel ORDER BY c DESC`);

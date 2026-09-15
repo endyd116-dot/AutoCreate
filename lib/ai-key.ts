@@ -25,6 +25,14 @@
  *     끝 4자도 «어느 키인지»를 말해 주지만 **순번이면 충분하고**(운영자는 `GEMINI_API_KEYS` 의 몇 번째인지 알면 된다)
  *     남기지 않은 것은 새지도 않는다. 제공사 오류 본문이 키를 되비칠 수 있어 `redactKeys()` 로 걷어 낸다.
  *
+ *   ══ [R8 §4.4] 고객이 자기 키를 꽂으면(BYO) ══
+ *     🔴 **고르는 자리는 여전히 여기 하나다.** 다만 이 파일은 **순수 리프**(DB·import 0)이고 `leaseAiKey()` 는 **동기**라,
+ *        테넌트 키를 **가져오는 일**은 밖(`lib/ai-key-byo.ts` · DB+복호화)에서 하고 **값만 넘겨받는다**(메인 승인 2026-09-15).
+ *        갈래를 밖에 하나 더 내면 «고르는 자리가 둘»이 되고, 그게 오늘 카드뉴스가 1코인으로 샌 사고의 모양이다(AC-74).
+ *     🔴 고객 키도 **우리 키와 똑같이** 429 면 쉰다. 다만 쉰다고 **우리 풀로 넘어가지 않는다** —
+ *        그건 «키를 고르는 일»이 아니라 **«남의 요금을 대신 낼까»라는 돈 결정**이라 호출부(`lib/ai.ts`)가 정한다.
+ *     🔴 `redactKeys()` 는 **고객 키도** 걷어 낸다 — 빌려 준 키를 기억해 뒀다가 지운다(우리 풀만 지우면 고객 키가 오류 본문으로 샌다).
+ *
  *   ══ 못 하는 것(정직 · AC-9) ══
  *     쉼 상태는 **함수 인스턴스 메모리**다 — 콜드 스타트마다 비워지고 인스턴스끼리 공유되지 않는다.
  *     즉 «완벽한 배분»이 아니라 **같은 인스턴스가 방금 맞은 429 를 되풀이하지 않는** 정도다.
@@ -37,11 +45,16 @@ export const KEY_COOLDOWN_MS = 60_000;
 export interface AiKeyLease {
   /** 실제 키 — 🔴 **로그·오류·응답에 절대 싣지 마라.** 부르는 자리에서 URL 에만 쓴다. */
   key: string;
-  /** 사람이 보는 이름. `key#1` 꼴(순번) — 키 값이 아니다. */
+  /** 사람이 보는 이름. `key#1` 꼴(순번) — 키 값이 아니다. 고객 키는 `내 키`. */
   label: string;
-  /** 0-based 순번(내부용). */
+  /** 0-based 순번(내부용). 🔴 고객 키는 **-1**(우리 풀의 자리가 아니다). */
   index: number;
+  /** 🔴 [R8 §4.4] **고객 키로 나갔나** — `ai_usage.byo` 에 그대로 적는다(의도가 아니라 사실 · AC-71). */
+  byo?: true;
 }
+
+/** [R8 §4.4] 고객이 꽂은 키 — 값은 `lib/ai-key-byo.ts` 가 DB 에서 꺼내 복호화해 넘긴다. */
+export interface ByoKey { key: string; label?: string; restingUntil?: number | null }
 
 interface KeyState { key: string; label: string; cooldownUntil: number; rested: number; lastRestedAt: number; used: number }
 
@@ -79,12 +92,27 @@ export function aiKeysConfigured(): boolean { ensurePool(); return pool.length >
 /** 몇 개인가(운영 표시·하니스). */
 export function aiKeyCount(): number { ensurePool(); return pool.length; }
 
+/* 🔴 빌려 준 **고객 키**를 기억해 둔다 — `redactKeys()` 가 지울 수 있게. 값은 여기서 절대 밖으로 안 나간다.
+   ⚠️ 무한정 쌓이지 않게 상한을 둔다(오래된 것부터 버린다 · 지워도 다음 호출에서 다시 들어온다). */
+const byoSeen = new Set<string>();
+const BYO_SEEN_MAX = 50;
+
 /**
  * 쓸 키 하나를 빌린다(라운드로빈 · 쉬는 키는 건너뛴다).
- *   🔴 전부 쉬는 중이면 **가장 먼저 풀리는 키를 그냥 준다** — 기다리지 않고, 막지도 않는다(위 헤더).
+ *   🔴 [R8 §4.4] **고객이 자기 키를 꽂았으면 그 키를 준다** — 우리 풀은 안 본다.
+ *      쉬는 중이어도 준다(위 헤더의 «막지 않는다»와 같은 결). «우리 키로 대신 돌릴까»는 **돈 결정**이라 호출부가 정한다.
+ *   🔴 전부 쉬는 중이면 **가장 먼저 풀리는 키를 그냥 준다** — 기다리지 않고, 막지도 않는다.
  *   @returns 키가 하나도 없으면 `null` — 호출부는 지금처럼 `no_api_key` 로 답한다.
  */
-export function leaseAiKey(): AiKeyLease | null {
+export function leaseAiKey(byo?: ByoKey | null): AiKeyLease | null {
+  const bk = String(byo?.key ?? "").trim();
+  if (bk) {
+    if (bk.length >= 8) {
+      byoSeen.add(bk);
+      if (byoSeen.size > BYO_SEEN_MAX) byoSeen.delete(byoSeen.values().next().value as string);
+    }
+    return { key: bk, label: String(byo?.label ?? "내 키").slice(0, 40), index: -1, byo: true };
+  }
   ensurePool();
   if (!pool.length) return null;
   const now = Date.now();
@@ -110,6 +138,9 @@ export type AiKeyOutcome = "ok" | "rate_limited" | "error";
  */
 export function reportAiKeyOutcome(lease: AiKeyLease | null | undefined, outcome: AiKeyOutcome): void {
   if (!lease) return;
+  /* 🔴 [R8 §4.4] 고객 키는 **우리 풀의 자리가 아니다**(index -1) — 쉼은 `tenant_ai_keys.rested_until` 에 남는다.
+     여기서 `pool[-1]` 을 건드리면 **엉뚱한 우리 키가 쉰다**(고객 한 명의 429 로 우리 공장이 느려진다). */
+  if (lease.byo || lease.index < 0) return;
   const s = pool[lease.index];
   if (!s || s.key !== lease.key) return;   // 풀이 그새 바뀌었다 — 옛 임대는 조용히 버린다
   if (outcome === "rate_limited") {
@@ -140,6 +171,9 @@ export function redactKeys(text: unknown): string {
   let s = String(text ?? "").replace(/([?&]key=)[^&\s"']+/gi, "$1***");
   ensurePool();
   for (const k of pool) if (k.key.length >= 8) s = s.split(k.key).join("***");
+  /* 🔴 [R8 §4.4] **고객 키도 걷어 낸다.** 우리 풀만 지우면 BYO 를 붙이는 순간 **고객 키가 오류 본문으로 샌다** —
+     제공사가 우리가 보낸 주소를 되비치기 때문이다. 남의 키를 우리 로그에 살게 두는 건 제일 나쁜 종류다. */
+  for (const k of byoSeen) s = s.split(k).join("***");
   return s;
 }
 
@@ -160,4 +194,4 @@ export function aiKeyStats(): AiKeyStat[] {
 }
 
 /** 하니스 전용 — 쉼·셈을 지운다(env 를 바꿔 가며 재려면 필요하다). 제품 코드는 부르지 않는다. */
-export function _resetAiKeysForTest(): void { poolSig = "(none)"; pool = []; cursor = 0; }
+export function _resetAiKeysForTest(): void { poolSig = "(none)"; pool = []; cursor = 0; byoSeen.clear(); }
