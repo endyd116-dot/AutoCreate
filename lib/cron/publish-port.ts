@@ -13,7 +13,7 @@
  *        섞으면 «커넥터가 아직 없다» 가 «이 글은 못 나간다(failed)» 로 둔갑해 멀쩡한 글을 죽인다.
  *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
-import { connectMethodOf } from "../accounts";
+import { publishViaOf as registryPublishViaOf } from "../channel-registry";   // [P1R8 §5.2] 채널 성질 정본(추측 폴백 제거)
 
 /* ───────── B2 확정 타입(계약 §10 · 글자 그대로) ───────── */
 export type PublishVia = "api" | "runner";
@@ -47,7 +47,8 @@ export type PublishResult = PublishOk | PublishFail;
 
 export interface PublishOpts { slotId?: number | null; actor?: "cron" | "user" }
 export type PublishPieceByIdFn = (tid: number, pieceId: number, opts?: PublishOpts) => Promise<PublishResult>;
-export type PublishViaOfFn = (channel: string) => PublishVia;
+/** [P1R8 §5.2] 🔴 null = «아직 올릴 코드가 없는 채널» — 추측해서 값을 지어내지 않는다. */
+export type PublishViaOfFn = (channel: string) => PublishVia | null;
 
 /* ───────── 러너 잡 적재(B2 `lib/runner-jobs.ts`) ───────── */
 export type RunnerJobKind = "publish.naver_blog" | "publish.tistory" | "session.login" | "session.verify" | "verify.post_alive" | "revenue.stats";
@@ -124,15 +125,19 @@ async function channelGate(tid: number, pieceId: number): Promise<PublishFail | 
 }
 
 /**
- * viaOf — 이 채널은 API 로 나가나 러너로 나가나.
- *   B2 가 연결돼 있으면 **B2 의 판정기**(`publishViaOf`)를 쓴다. 아직이면 AC 의 기존 정본
- *   `lib/accounts.connectMethodOf`(session = 러너 · 그 외 = API · `listChannels().publishVia` 와 같은 식)로 답한다.
- *   새 판정기를 짓지 않는다 — 두 벌이 되면 «러너 채널인데 API 로 보내는» 사고가 난다(PITFALLS #11-b).
+ * viaOf — 이 채널은 API 로 나가나 러너로 나가나. 🔴 **모르면 null**(P1R8 §5.2).
+ *   판정은 `lib/channel-registry.ts` 표 한 곳이다(B2 판정기가 붙어 있어도 결국 같은 표를 읽는다).
+ *
+ *   🔴 **없앤 줄: «표에 없으면 `connectMethodOf` 로 추측»** — «oauth 니까 api 겠지»가 커넥터 없는 채널에
+ *      `instagram`·`tiktok` 까지 «API 로 올릴 수 있다»고 대답하게 만들었다(2026-09-15 프로브로 확인).
+ *      연결 방식으로 발행 경로를 판정하는 것은 **대용물 판정**(AC-57)이고, 모름을 기본값으로 위장하는 것(AC-9)이다.
+ *      🔴 **다시 열지 마라** — 이 줄은 «B2 포트가 아직 안 붙었을 때를 위한 임시 호환»으로 들어왔다가 그대로 굳었다.
+ *      «호환을 위해 열어 둔 문은 스스로 닫히지 않는다»(AC-65). 새 채널은 **표에 행을 넣어서** 연다.
  */
-export async function viaOf(channel: string): Promise<PublishVia> {
+export async function viaOf(channel: string): Promise<PublishVia | null> {
   const impl = await ensureBound();
-  if (impl?.publishViaOf) { try { return impl.publishViaOf(channel); } catch { /* 폴백으로 */ } }
-  return connectMethodOf(channel) === "session" ? "runner" : "api";
+  if (impl?.publishViaOf) return impl.publishViaOf(channel);   // 🔴 try/catch 로 실패를 삼키지 않는다(AC-58) — 표 조회는 던지지 않는다
+  return registryPublishViaOf(channel);
 }
 
 /**

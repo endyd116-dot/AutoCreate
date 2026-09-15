@@ -13,6 +13,7 @@
  */
 import type { Block } from "../blocks";
 import type { GateReport } from "../ai-tell-gate";
+import { API_CHANNEL_KEYS, RUNNER_CHANNEL_KEYS, publishViaOf as registryPublishViaOf } from "../channel-registry";   // [P1R8 §5.2] 발행 경로 정본(순수 리프)
 
 export type { GateReport };
 
@@ -34,15 +35,13 @@ export type PublishVia = "api" | "runner";
 export type PublishedVia = PublishVia | "manual";
 
 /** 서버(API)에서 바로 발행하는 채널. P1R5 — 영상 3종(유튜브·릴스·스레드)은 **OAuth API** 로 올린다. */
-export const API_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["blogger", "wordpress", "youtube_shorts", "reels", "threads"]);
+export const API_PUBLISH_CHANNELS: ReadonlySet<string> = API_CHANNEL_KEYS;
 /** 러너(브라우저 자동화)로만 발행되는 채널. P1R5 — 네이버 클립은 러너 잡으로 예약하되 **스텁**(정직하게 막는다 · §2.3). */
-export const RUNNER_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "tistory", "naver_clip"]);
+export const RUNNER_PUBLISH_CHANNELS: ReadonlySet<string> = RUNNER_CHANNEL_KEYS;
 
 /** 이 채널을 어떻게 발행하나. 아직 발행을 지원하지 않는 채널은 null(= reason "unsupported_channel"). */
 export function publishViaOf(channel: string): PublishVia | null {
-  if (API_PUBLISH_CHANNELS.has(channel)) return "api";
-  if (RUNNER_PUBLISH_CHANNELS.has(channel)) return "runner";
-  return null;
+  return registryPublishViaOf(channel);
 }
 
 /* ─────────────────────────── 입력 ─────────────────────────── */
