@@ -10,7 +10,11 @@ export interface Block {
   items?: string[];
   rows?: string[][];
   imageIndex?: number;
+  /** [2026-09-15 §5C 수리] 사람이 읽는 캡션 — **글쓴이 말투 한 줄(≤25자)** · 대부분의 사진엔 **없다**(`images.captionRate`).
+   *  🔴 그림 지시문이 아니다. 종전엔 한 문장이 «그림 지시 + 캡션» 두 일을 해서 «~놓여 있는 모습» 묘사문이 그대로 발행됐다(사장님 실측 piece 329). */
   caption?: string;
+  /** [2026-09-15] 그림 생성용 묘사(영문 가능 · 사람·로고·글자 없는 장면) — 화면·발행에 **절대 나가지 않는다**. `alt` 는 여기서 짧게 파생한다. */
+  prompt?: string;
   affiliate?: { productName: string; url: string; imageUrl?: string; price?: number };
 }
 export interface RenderImage { url: string; caption?: string; alt?: string }
@@ -42,8 +46,11 @@ export function renderBlocksHtml(blocks: Block[], channel: string, images: Rende
       case "image": {
         const img = typeof b.imageIndex === "number" ? images[b.imageIndex] : undefined;
         const cap = b.caption || img?.caption || "";
-        if (img?.url) out.push(`<figure data-image-index="${b.imageIndex ?? ""}"><img src="${esc(img.url)}" alt="${esc(img.alt || cap)}" loading="lazy"><figcaption>${inline(cap)}</figcaption></figure>`);
-        else out.push(`<figure class="pending" data-image-index="${b.imageIndex ?? ""}"><figcaption>${inline(cap)}</figcaption></figure>`);
+        // [§5C 수리] 캡션이 없으면 <figcaption> 자체를 내지 않는다(빈 칸이 보이면 그것도 티다) · alt 는 접근성용(화면에 안 보인다 · prompt 파생)
+        const fc = cap ? `<figcaption>${inline(cap)}</figcaption>` : "";
+        const alt = img?.alt || cap || "사진";
+        if (img?.url) out.push(`<figure data-image-index="${b.imageIndex ?? ""}"><img src="${esc(img.url)}" alt="${esc(alt)}" loading="lazy">${fc}</figure>`);
+        else out.push(`<figure class="pending" data-image-index="${b.imageIndex ?? ""}">${fc}</figure>`);
         break;
       }
       case "divider": out.push(`<hr>`); break;
@@ -134,6 +141,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
     if (Array.isArray(o.items)) { const items = o.items.map((i) => String(i ?? "").trim()).filter(Boolean); if (items.length) b.items = items; }
     if (Array.isArray(o.rows)) { const rows = o.rows.filter(Array.isArray).map((r) => (r as unknown[]).map((c) => String(c ?? "").trim())); if (rows.length) b.rows = rows; }
     if (typeof o.caption === "string" && o.caption.trim()) b.caption = o.caption.trim();
+    if (typeof o.prompt === "string" && o.prompt.trim()) b.prompt = o.prompt.trim().slice(0, 600);
     if (Number.isInteger(Number(o.imageIndex)) && o.imageIndex !== undefined && o.imageIndex !== null) b.imageIndex = Number(o.imageIndex);
     if (type === "para" && !b.text && !b.items) continue;
     if ((type === "list" || type === "checklist") && !b.items) continue;
