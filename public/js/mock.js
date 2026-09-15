@@ -158,7 +158,13 @@
   ];
   const PACKS = [{ id: "pack_100", coins: 100, krw: 50000, bonusPct: 0 }, { id: "pack_220", coins: 220, krw: 100000, bonusPct: 10 }, { id: "pack_720", coins: 720, krw: 300000, bonusPct: 20 }, { id: "pack_trial", coins: 10, krw: 5000, bonusPct: 0, oncePerTenant: true }];
   const VAT = (a) => Math.round(a * 0.1);                                                              // [P1R4] 402 plan_limit(§1.4)
-  const notWritable = () => (blocked ? { ok: false, step: "writable", reason: blocked, error: blocked === "readonly" ? "체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요." : "결제가 밀려 있어요. 카드를 확인해 주세요.", status: 403 } : null);                 // 수익 빈 상태(연결 0·행 0)
+  /* [P1R7 §3.1 · B ba99538] 쓰기 막힘 — 🔴 **탈퇴 신청이 먼저다**(그 집엔 «체험»도 «결제»도 할 말이 아니다).
+     문장·칸 이름은 lib/guards.ts requireWritable 에서 그대로(느슨하게 베끼면 화면이 또 딴말을 한다 · AC-52). */
+  const notWritable = () => {
+    if (S.close) { const daysLeft = Math.max(0, Math.ceil((new Date(S.close.purgeAt).getTime() - Date.now()) / 86400e3));
+      return { ok: false, step: "writable", reason: "closed", error: `탈퇴를 신청하셨어요. ${daysLeft}일 뒤에 자료가 지워져요 — 그때까지는 보기만 할 수 있고, 되돌리면 하던 대로 다시 쓸 수 있어요.`, purgeAt: S.close.purgeAt, daysLeft, status: 403 }; }
+    return blocked ? { ok: false, step: "writable", reason: blocked, error: blocked === "readonly" ? "체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요." : "결제가 밀려 있어요. 카드를 확인해 주세요.", status: 403 } : null;
+  };
   const revError = qs.get("revError") || "";                   // ?revError=adsense — 그 소스를 연결 끊김으로
   /* revenue_daily 씨앗 — 75일치. d === -6 은 수집 실패라 «행이 없고», d === -11 은 진짜 0원이라 «행이 있다»(AC-9) */
   function revSeed() {

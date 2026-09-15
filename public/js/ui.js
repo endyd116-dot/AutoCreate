@@ -36,11 +36,18 @@
     const done = (html, title, cta, href) => { gateOpen = true; gateSheet = UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
     if (r.status === 403 && r.step === "writable") {
       if (r.reason === "suspended") return done("결제가 밀려 있어요. 카드를 확인하면 바로 이어서 돼요. 만든 글과 편성표는 그대로예요.", "잠시 멈춰 있어요", "카드 확인하기", "/app/plan.html");
+      /* 🔴 [R7 §3.1 · B ba99538] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
+         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 서버가 사유·날짜를 403 에 실어 주면 **그 응답만으로** 그린다(왕복 0). */
+      if (r.reason === "closed") {
+        const T = "탈퇴를 신청하셨어요";
+        let say = String(r.error || "");
+        if (say.startsWith(T)) say = say.slice(T.length).replace(/^[.·\s]+/, "");   // 제목과 같은 말을 두 번 하지 않는다(문장은 서버 것 그대로)
+        if (!say) say = r.daysLeft != null ? `${r.daysLeft}일 뒤에 자료가 지워져요. 그때까지는 보기만 할 수 있어요.` : "지금은 보기만 할 수 있어요.";
+        return done(UI.esc(say), T, "되돌리러 가기", "/app/settings.html");
+      }
       const opened = done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
-      /* 🔴 [R7 §3.1] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
-         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 막힌 그 순간에 한 번만 물어보고(GET) 탈퇴한 집이면 시트를 바꿔 준다.
-         ⏳ **임시다**(2026-09-15 메인 결정 · B 에 발주): 서버가 403 에 `reason:"closed"` + `purgeAt`·`daysLeft` 를 실어 주면
-            이 왕복을 통째로 지우고 위 `suspended` 처럼 `reason` 한 줄로 가른다. 그때까지만 산다. */
+      /* ⏳ 아래는 **받침대(fallback)** 다 — `reason:"closed"` 를 주는 서버(ba99538)는 2026-09-15 현재 `feature/p1r7-back` 에만 있고
+         main 에는 아직 없다. main 에 들어오면 이 블록(GET 한 번)을 통째로 지운다 — 위 분기가 같은 일을 왕복 없이 한다. */
       const gs = gateSheet;
       UI.api("/api/account-close", { noGate: true, noRedirect: true }).then((c) => {   // noRedirect — 이 확인 때문에 누구도 로그인 화면으로 튕기지 않게
         if (!c.ok || !c.closed || !gs || !gs.el.isConnected) return;
