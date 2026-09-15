@@ -248,7 +248,7 @@ async function setStage(pieceId: number, stage: string, extra: Record<string, un
 /* ───────── 메인 ───────── */
 export async function generatePiece(tid: number, pieceId: number): Promise<{ ok: boolean; status: string; reason?: string }> {
   const [p] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId}`);
-  if (!p) return { ok: false, status: "missing", reason: "piece 없음" };
+  if (!p) return { ok: false, status: "missing", reason: "그 글을 찾지 못했어요." };
   if (String(p.status) !== "generating") return { ok: true, status: String(p.status), reason: "already_done" };   // 멱등
   const meta = (p.meta && typeof p.meta === "object" ? p.meta : {}) as Record<string, unknown>;
   try {

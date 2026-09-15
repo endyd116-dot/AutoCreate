@@ -47,7 +47,7 @@ export const csAutoTicketStep: CronStep = {
     if (n(rf?.c) >= AUTO_TICKET_THRESHOLD) {
       const key = `runner_fail:${tid}:${week}`;
       if (!await hasOpen(tid, key)) {
-        const r = await createTicket({ tenantId: tid, subject: `러너 실패 ${n(rf.c)}회(${AUTO_TICKET_WINDOW_HOURS}시간)`, text: `최근 ${AUTO_TICKET_WINDOW_HOURS}시간 동안 러너 작업이 ${n(rf.c)}번 실패했어요.\n작업: ${rf.jobs ?? "-"}\n사유: ${rf.kinds ?? "-"}\n고객 PC 러너·계정 로그인·셀렉터를 확인해 주세요.`, source: "system", priority: "high", tags: ["자동", "러너"], autoKey: key });
+        const r = await createTicket({ tenantId: tid, subject: `자동 올리기 실패 ${n(rf.c)}회(${AUTO_TICKET_WINDOW_HOURS}시간)`, text: `최근 ${AUTO_TICKET_WINDOW_HOURS}시간 동안 자동으로 올리는 일이 ${n(rf.c)}번 실패했어요.\n작업: ${rf.jobs ?? "-"}\n사유: ${rf.kinds ?? "-"}\n내 PC 프로그램이 켜져 있는지, 계정 로그인이 풀리지 않았는지 확인해 주세요.`, source: "system", priority: "high", tags: ["자동", "내 PC"], autoKey: key });
         if (r.ok && r.created) { changed++; detail.runnerFail = r.ticketId; }
       }
     }

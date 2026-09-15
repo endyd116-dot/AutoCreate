@@ -168,7 +168,7 @@ export default async (req: Request): Promise<Response> => {
       try { out = await registerDevice(tid, name, String(b.kind ?? "own")); }
       catch (e) {
         if ((e as { code?: string })?.code === "RUNNER_TOKEN_SECRET_MISSING") {
-          return json({ ok: false, error: "러너 기능이 아직 준비 중이에요.", step: "not_configured" }, 503);
+          return json({ ok: false, error: "내 PC 프로그램 기능이 아직 준비 중이에요.", step: "not_configured" }, 503);
         }
         throw e;
       }

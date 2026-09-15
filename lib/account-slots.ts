@@ -137,7 +137,7 @@ export async function buyAccountSlots(tid: number, kindIn: unknown, countIn: unk
   const made: SlotView[] = [];
   for (let i = 0; i < count; i++) {
     const [row] = await q(sql`INSERT INTO account_slots (tenant_id, kind, status, coins_per_period) VALUES (${tid}, ${p.kind}, ${"waiting_ip"}, ${p.coins}) RETURNING *`);
-    if (!row) return { ok: false, step: "write", error: "슬롯을 만들지 못했어요. 잠시 뒤 다시 해 주세요." };
+    if (!row) return { ok: false, step: "write", error: "계정 자리를 만들지 못했어요. 잠시 뒤 다시 해 주세요." };
     made.push(toView(row));
   }
   await writeAudit({ tenantId: tid, action: "account_slot_buy", actorType: actorId ? "user" : "system", actorId, target: `slots:${made.map((m) => m.id).join(",")}`,
@@ -149,7 +149,7 @@ export async function buyAccountSlots(tid: number, kindIn: unknown, countIn: unk
 /** 자동 갱신 끄기·켜기(환불은 없다 — 다음 갱신만 멈춘다). */
 export async function setSlotAutoRenew(tid: number, slotId: number, on: boolean, actorId: number | null): Promise<{ ok: boolean; slot?: SlotView; error?: string }> {
   const [row] = await q(sql`UPDATE account_slots SET auto_renew = ${on}, updated_at = NOW() WHERE id = ${slotId} AND tenant_id = ${tid} AND status <> 'cancelled' RETURNING *`);
-  if (!row) return { ok: false, error: "슬롯을 찾을 수 없어요." };
+  if (!row) return { ok: false, error: "그 계정 자리를 찾을 수 없어요." };
   await writeAudit({ tenantId: tid, action: "account_slot_auto_renew", actorType: "user", actorId, target: `slot:${slotId}`, detail: { autoRenew: on } });
   return { ok: true, slot: toView(row) };
 }
