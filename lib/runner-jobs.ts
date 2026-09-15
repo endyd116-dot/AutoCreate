@@ -171,6 +171,16 @@ export interface RunnerDevice {
   /** 다른 PC 에서 이 토큰으로 접속을 시도한 마지막 시각·횟수(계약 «묶기» ②).
    *  🔴 **지문 값 자체는 절대 내보내지 않는다** — 화면이 알아야 할 것은 «있었나/몇 번»뿐이다. */
   otherDeviceAt?: string; otherDeviceCount?: number;
+  /**
+   * [P1R8 §3.1] 이 PC 의 «능력»(하트비트가 올린 값).
+   *   🔴 **2026-09-15 B2 발견 — 여태 이 칸이 없어서 `runner_devices.caps` 가 화면에 한 번도 닿은 적이 없다.**
+   *      서버는 R5 부터 ffmpeg 유무를 **저장은 했는데**(heartbeat) `listDevices` 가 SELECT 를 안 했고,
+   *      `public/app/runner.html` 은 `d.caps.ffmpeg === false` 를 **네 곳에서** 읽고 있었다 —
+   *      즉 «ffmpeg 없음» 칩·«설치 안내» 배너는 **뜰 수가 없었다**. 저장·화면 둘 다 멀쳄해 보여서
+   *      `grep caps` 로는 초록으로 나오는 자리다(AC-69 «정의는 있는데 부르는 자리가 없다»의 변형 —
+   *      여기는 «양끝은 있는데 가운데가 없다» · AC-56 사슬).
+   */
+  caps?: { ffmpeg?: boolean; ffmpegVersion?: string; profileSeal?: ProfileSealCap };
 }
 
 /* ─────────────────────────── 기기·토큰 ─────────────────────────── */
@@ -234,7 +244,7 @@ export async function registerDevice(tid: number, name: string, kind = "own"): P
 /** 기기 목록 — status 는 저장값이 아니라 **조회 시 계산**한다(5분 무응답 = offline). */
 export async function listDevices(tid: number): Promise<RunnerDevice[]> {
   const rows = await q(sql`
-    SELECT d.id, d.name, d.kind, d.last_seen_at, d.version,
+    SELECT d.id, d.name, d.kind, d.last_seen_at, d.version, d.caps,   /* [P1R8 §3.1] 🔴 여태 안 뽑아서 화면에 한 번도 안 갔다(위 타입 주석) */
            (d.fingerprint IS NOT NULL) AS bound, d.fp_mismatch_at, d.fp_mismatch_count,
            (d.last_seen_at IS NOT NULL AND d.last_seen_at > NOW() - (${ONLINE_WINDOW_MIN} * INTERVAL '1 minute')) AS is_online,
            (SELECT COUNT(*) FROM runner_jobs j WHERE j.tenant_id = d.tenant_id AND j.status = 'queued') AS jobs_waiting
@@ -252,6 +262,11 @@ export async function listDevices(tid: number): Promise<RunnerDevice[]> {
        횟수만 0으로 늘 보내면 화면이 «0번 있었어요» 같은 말을 하게 되거나, 조건을 화면이 또 짜야 한다. */
     const fp = iso(r.fp_mismatch_at);
     if (fp) { o.otherDeviceAt = fp; o.otherDeviceCount = n(r.fp_mismatch_count); }
+    /* [P1R8 §3.1] 저장해 둔 «능력»을 그대로 내보낸다 — 🔴 **빈 객체는 안 보낸다**.
+       화면이 `d.caps && d.caps.ffmpeg === false` 로 판단하므로, 아직 하트비트를 한 번도 안 받은 기기에
+       `{}` 를 보내면 «ffmpeg 있음»으로 보인다(모른다 ≠ 있다 · AC-9). 칸 자체를 안 만든다. */
+    const caps = (r.caps && typeof r.caps === "object" ? r.caps : null) as RunnerDevice["caps"] | null;
+    if (caps && Object.keys(caps).length) o.caps = caps;
     return o;
   });
 }
@@ -421,14 +436,48 @@ async function onOtherDevice(device: DeviceRow): Promise<void> {
 }
 
 /** 하트비트 — last_seen_at·version 갱신 후 다음 폴링 간격을 알려 준다. */
+/**
+ * [P1R8 §3.1] 러너가 올리는 «로그인 정보 보관 상태». 설계 `docs/active/2026-09-15-runner-profile-seal-design.md`.
+ *   🔴 같은 `v10` 접두사가 플랫폼마다 뜻이 다르다(윈도우 DPAPI / 맥 키체인 / **리눅스 하드코딩**) —
+ *      그래서 판정은 러너의 순수 함수(`runner/lib/profile-seal.mjs classifyProfileSeal`)가 하고, 여기는 **받아 적기만** 한다.
+ *      서버가 다시 판정하면 같은 규칙이 두 곳에 생기고 언젠가 갈라진다.
+ */
+export interface ProfileSealCap {
+  platform: string;
+  /** `os`=OS 가 기기에 묶어 잠금 · `keyring`=리눅스 키링 · 🔴 `weak`=공개된 고정 키(복사하면 열린다) · `none`=로그인 0 · `unknown`=못 쟀다 */
+  state: "os" | "keyring" | "weak" | "none" | "unknown";
+  /** 폴더를 복사해 가면 못 여나. 🔴 **null = 모른다**(false 가 아니다). */
+  copySafe: boolean | null;
+  profiles: number;
+  weak: number;
+  why: string;
+}
+
 export async function heartbeat(device: DeviceRow, body: { version?: unknown; jobs?: unknown; canary?: unknown; caps?: unknown; updateFailed?: unknown }): Promise<{ sleepSec: number; jobsWaiting: number; update?: RunnerUpdateOffer }> {
   const version = String(body.version ?? "").slice(0, 20) || null;
   /* P1R5 §2.4 — 러너 «능력»(caps). 지금은 ffmpeg 유무. 🔴 ffmpeg 가 없으면 러너는 렌더 잡을 **집지 않고**
      여기로 알린다 — 화면이 «ffmpeg 없음» 칩을 띄운다(조용히 잡이 안 도는 상황을 만들지 않는다 · PITFALLS #7). */
-  let caps: { ffmpeg: boolean; ffmpegVersion?: string } | null = null;
+  let caps: { ffmpeg: boolean; ffmpegVersion?: string; profileSeal?: ProfileSealCap } | null = null;
   if (body.caps && typeof body.caps === "object") {
     const c = body.caps as Record<string, unknown>;
     caps = { ffmpeg: c.ffmpeg === true, ...(c.ffmpegVersion ? { ffmpegVersion: String(c.ffmpegVersion).slice(0, 40) } : {}) };
+    /* [P1R8 §3.1 · 0단계] 🔴 **로그인 정보가 실제로 잠겨 있나**(러너가 읽기만 해서 올린다).
+       봉인을 만들지 말지·어디부터 켤지를 정하려면 **리눅스 기기가 몇 대인지**부터 알아야 하는데
+       여태 `runner_devices` 에 운영체제 칸조차 없었다(설계 §2 «못 잰 것 하나 더»).
+       🔴 `copySafe` 는 **3값**이다 — true/false/**null(못 쟀다)**. 못 쟀다를 «안전»으로 접지 않는다(AC-9). */
+    const ps = c.profileSeal;
+    if (ps && typeof ps === "object") {
+      const p = ps as Record<string, unknown>;
+      const state = String(p.state ?? "unknown");
+      caps.profileSeal = {
+        platform: String(p.platform ?? "").slice(0, 16),
+        state: (["os", "keyring", "weak", "none", "unknown"] as const).includes(state as never) ? (state as ProfileSealCap["state"]) : "unknown",
+        copySafe: p.copySafe === true ? true : p.copySafe === false ? false : null,
+        profiles: Math.max(0, Math.floor(Number(p.profiles ?? 0)) || 0),
+        weak: Math.max(0, Math.floor(Number(p.weak ?? 0)) || 0),
+        why: String(p.why ?? "").slice(0, 200),
+      };
+    }
   }
   await q(sql`UPDATE runner_devices SET last_seen_at = NOW(), status = 'online',
     version = COALESCE(${version}, version)${caps ? sql`, caps = ${jsonb(caps)}` : sql``} WHERE id = ${device.id}`);

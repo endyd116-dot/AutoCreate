@@ -118,13 +118,16 @@ export default async (req: Request): Promise<Response> => {
     const u = new URL(req.url);
     const back = (qs: string) => new Response(null, { status: 302, headers: { Location: `/app/accounts.html?${qs}`, "Cache-Control": "no-store" } });
     try {
-      const st = verifyState(u.searchParams.get("state") || "");
+      const stateRaw = u.searchParams.get("state") || "";
+      const st = verifyState(stateRaw);
       const code = u.searchParams.get("code") || "";
       if (!st) return back("error=state");
       if (!code) return back(`error=${encodeURIComponent(u.searchParams.get("error") || "denied")}&channel=${st.channel}`);
       if (!credsEncConfigured()) return back("error=creds_key");
       const lim = await checkLimit(st.tid); if (lim) return back(`error=limit&channel=${st.channel}`);
-      const ex = await exchangeCode(st.channel, code);
+      /* [P1R8 §3.4 · B2] 🔴 state 원문을 함께 넘긴다 — **X 만** 이걸로 PKCE verifier 를 다시 계산한다
+         (저장소 없이 PKCE 를 성립시키는 자리 · `lib/oauth-providers.ts xPkceVerifier` 주석). 다른 채널은 무시한다. */
+      const ex = await exchangeCode(st.channel, code, stateRaw);
       if (!ex.ok) { await writeAudit({ tenantId: st.tid, action: "account_oauth_fail", actorType: "user", actorId: st.uid, detail: { channel: st.channel, reason: ex.reason }, riskLevel: "medium" }); return back(`error=oauth&channel=${st.channel}`); }
       const handle = s(ex.token.handle, 120) || ex.token.externalId;
       let id = await upsertAccount(st.tid, st.channel, handle, ex.token.displayName || null, "oauth", "active");

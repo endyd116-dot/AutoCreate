@@ -82,12 +82,41 @@ export const CHANNELS: readonly ChannelSpec[] = [
   { key: "blogger", connect: "oauth", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true },
   { key: "wordpress", connect: "app_password", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true },
   { key: "threads", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: true, note: "글·영상 둘 다 올린다(축은 글로 센다 · lib/video/types 의 영상 채널 목록과 다른 축)" },
-  { key: "instagram", connect: "oauth", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 피드·카드뉴스 커넥터 없음(P1R8 §3.4 B2) — 붙기 전까지 null" },
+  /* [P1R8 §3.4] 피드·카드뉴스 커넥터가 생겼다(`lib/publish/instagram.ts publishInstagramFeed` — 사진 1장 / 캐러셀 2~10장).
+     🔴 `textGen` 은 **아직 false** 다 — 글 계약에 format 이 1종뿐이라 10편 중 9편이 «골격 75% 이상 겹침»에 걸린다(B-1 실측).
+        카드뉴스 계약이 보강된 뒤에 켠다. «올릴 수 있다»와 «써 줄 수 있다»는 다른 칸이다. */
+  { key: "instagram", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: false, note: "피드·카드뉴스 발행 O · 🔴 인스타 API 에는 **삭제가 없다** → retract 는 null(직접 내려 주세요). textGen 은 카드뉴스 계약 보강 후." },
+  /* [P1R8 §3.4] 페이스북 페이지 — 글·사진(설계 §2.1 P3). 삭제는 `DELETE /{post-id}` 로 **된다**(페이지 토큰). */
+  { key: "facebook", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, note: "페이지 글·사진. 🔴 발행은 **페이지 토큰**으로 한다(사용자 토큰 아님 · lib/publish/facebook.ts 머리말). textGen 은 페북용 글 계약이 생긴 뒤." },
+  /* [P1R8 §3.4] X(트위터) — 설계 §2.1 «API(유료) · P4 선택». 🔴 한글은 한 자가 2로 세어진다(lib/publish/x.ts weightedLen). */
+  { key: "x", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, note: "쓰기가 유료 플랜이다. 삭제는 DELETE /2/tweets/{id} 로 된다. 영상은 아직 못 올린다(글·사진만)." },
+  /* [P1R8 §3.4] 브런치 — 🔴 **일부러 null** 이다. 아래 «못 채운 칸» 주석 참조. */
+  { key: "brunch", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 러너 채널인데 **셀렉터를 한 번도 못 쟀다**(작가 승인 계정이 없어 화면을 연 적이 없다). 추측으로 채우지 않는다 — 아래 주석." },
   { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
+  /* [P1R8 §3.4] 유튜브 롱폼 — 쇼츠와 **같은 `videos.insert`**(lib/publish/youtube.ts publishYoutube · 주소만 다르다).
+     🔴 쿼터는 채널이 아니라 **구글 프로젝트** 단위라 쇼츠와 합산해 센다(todayUploads). */
+  { key: "youtube_long", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "쇼츠와 같은 API·같은 동의·같은 쿼터. retract 는 쇼츠와 같은 이유로 null." },
   { key: "naver_clip", connect: "session", publishVia: "runner", retractVia: null, jobKind: "publish.naver_clip", axis: "video", textGen: false, note: "러너 스텁 — 잡은 쌓이되 사람이 올린다(§2.3)" },
+  /* [P1R8 §3.4] 클립 «게시물형»(텍스트+이미지 · 설계 §2.1 P3) — 🔴 **일부러 null**. 아래 «못 채운 칸» 주석 참조. */
+  { key: "naver_clip_post", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 영상 클립과 **다른 채널**이다(텍스트+이미지 게시물형 · 2026 확대). 업로드 경로를 실측한 적이 없다 — 아래 주석." },
   { key: "reels", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false },
-  { key: "tiktok", connect: "oauth", publishVia: null, retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 커넥터 없음(P1R8 §3.4 B2) — 심사 전엔 «본인만 보기»" },
+  /* [P1R8 §3.4] 페북 릴스 — 페이지 릴스 3단계 업로드(`publishFacebookReels`). 삭제는 페이지 글과 같은 `DELETE /{id}`. */
+  { key: "facebook_reels", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "video", textGen: false, note: "페이지 릴스(start→rupload→finish). 페이지 토큰으로 올린다." },
+  /* [P1R8 §3.4] 틱톡 — 커넥터가 생겼다(`lib/publish/tiktok.ts`). 🔴 **삭제 API 가 없어** retract 는 null. */
+  { key: "tiktok", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 심사 전엔 «본인만 보기» 고정(플랫폼 사실 · 우리 게이트 아님) · PULL_FROM_URL 은 도메인 소유 확인 필요 · **삭제 API 없음** → retract null" },
 ];
+
+/* ═══ [P1R8 §3.4] 🔴 **«못 채운 칸»을 왜 안 채웠나** — `brunch` · `naver_clip_post` ═══
+   둘 다 **러너 채널**이라 «올리는 코드»가 브라우저 조작 순서(셀렉터)다. 그런데 —
+     · **브런치**: 글을 쓰려면 **작가 승인**이 먼저다(신청→심사). 승인된 계정이 없어 `brunch.co.kr/write` 를 **한 번도 연 적이 없다**.
+     · **클립 게시물형**: 네이버가 2026 에 확대한 텍스트+이미지 글인데, PC 업로드 경로 자체가 확인되지 않았다(영상 클립과 같은 문제 · §2.2).
+   ⇒ 여기 `publishVia: "runner"` 와 잡 이름을 **적을 수는 있다.** 적으면 편성·예약·큐가 전부 돌고 화면도 «되는 채널»로 보인다.
+      그런데 러너가 집으면 **아무 데도 못 누르고 실패**한다. 그건 «키 꽂으면 가동»이 아니라 **되는 척**이다.
+   🔴 그리고 추측한 셀렉터를 박아 두는 것이 이 프로젝트에서 제일 비싼 실수였다 —
+      티스토리는 «죽은 복제본»(AC-43)과 «조용한 confirm 취소»(AC-42)로 **이틀**을 태웠고, 그건 **실측 화면을 보고서야** 풀렸다.
+      화면을 본 적도 없는 채널에 셀렉터를 적는 것은 그 이틀을 **미리 사 두는 것**이다.
+   ⇒ 그래서 `null` 로 둔다. 화면은 «곧 연결할 수 있어요»라고 **정직하게** 말하고, 발행은 «아직 이 채널로는 올릴 수 없어요»로 막힌다.
+   **열려면 필요한 것은 코드가 아니라 «한 번 재 보는 것»이다**(승인 계정 1개 + 화면 1회 실측 → 셀렉터 표 → 카나리). */
 
 const BY_KEY: ReadonlyMap<string, ChannelSpec> = new Map(CHANNELS.map((c) => [c.key, c]));
 

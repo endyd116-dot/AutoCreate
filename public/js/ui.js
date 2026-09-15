@@ -251,6 +251,10 @@
     naver_blog: { label: "네이버 블로그", mark: "N" }, tistory: { label: "티스토리", mark: "T" }, blogger: { label: "블로거", mark: "B" }, wordpress: { label: "워드프레스", mark: "W" },
     threads: { label: "쓰레드", mark: "@" }, instagram: { label: "인스타그램", mark: "◎" }, youtube_shorts: { label: "유튜브 쇼츠", mark: "▶" }, naver_clip: { label: "네이버 클립", mark: "C" },
     reels: { label: "릴스", mark: "◎" }, tiktok: { label: "틱톡", mark: "♪" },
+    /* [P1R8 §3.4 · B2] 다음 Phase 채널 — 이름이 없으면 화면에 «facebook_reels» 같은 **열쇠 글자**가 그대로 뜬다. */
+    facebook: { label: "페이스북", mark: "f" }, facebook_reels: { label: "페북 릴스", mark: "f" },
+    x: { label: "엑스", mark: "X" }, youtube_long: { label: "유튜브 영상", mark: "▶" },
+    brunch: { label: "브런치", mark: "br" }, naver_clip_post: { label: "클립 게시물", mark: "C" },
   };
   UI.mark = (ch, cls = "") => { const c = UI.CH[ch] || { mark: "?" }; return `<span class="mk ${ch} ${cls}" aria-hidden="true">${c.mark}</span>`; };
   UI.chLabel = (ch) => (UI.CH[ch] || {}).label || ch;

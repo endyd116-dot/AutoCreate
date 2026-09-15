@@ -11,6 +11,8 @@
  *   자격: `account_creds(kind 'app_password')` = { siteUrl, loginId, appPassword }. 🔴 이 파일 밖으로 나가지 않는다.
  */
 import { loadWpCreds } from "./tokens";
+import { excerptOf, slugOf, articleJsonLdScript, jsonLdSurvived } from "./seo";   // [P1R8 §3.4-②] REST 가 받는데 안 보내던 칸 + 살아 있는 구조화 데이터
+import { writeAudit } from "../audit";
 import type { PublishPiece, PublishAccount } from "./contract";
 import type { ConnectorResult } from "./blogger";
 
@@ -122,8 +124,27 @@ export async function publishToWordpress(piece: PublishPiece, account: PublishAc
   let tagIds: number[] = [];
   if (piece.tags.length) { try { tagIds = await resolveTagIds(site, auth, piece.tags); } catch { tagIds = []; } }
 
-  const body: Record<string, unknown> = { title: String(piece.title || "").slice(0, 300), content: html, status: "publish" };
+  /* [P1R8 §3.4-② · SEO 조사] 🔴 **REST 가 이미 받는데 우리가 안 보내던 두 칸**을 보낸다.
+     · `excerpt` = 스니펫용 한 문단(테마·SEO 플러그인이 `<meta name="description">` 으로 내보낸다)
+     · `slug`    = 주소 뒷글자. 안 보내면 워드프레스가 **한글 제목을 그대로** 주소로 써서
+                   `%EA%B0%80%EC%9D%84…` 같은 **사람이 못 읽는 주소**가 공유된다(순위가 아니라 **읽힘**의 문제).
+     빈 값이면 **아예 안 보낸다** — 빈 문자열을 보내면 워드프레스가 «비우라»는 뜻으로 받는다(기본값보다 나쁘다). */
+  const excerpt = excerptOf(piece);
+  const slug = slugOf(piece);
+
+  /* 🔴 Article JSON-LD 는 본문 끝에 붙인다 — REST 로는 `<head>` 를 만질 수 없기 때문이다.
+     구글은 문서 어디에 있든 JSON-LD 를 읽는다. **다만 워드프레스가 `<script>` 를 지울 수 있어**(KSES · `unfiltered_html` 권한),
+     아래에서 응답의 `content.rendered` 를 되읽어 **살아남았는지 확인**한다(«넣었다»는 증거가 아니다 · AC-63).
+     🔴 FAQPage·HowTo 는 **일부러 안 넣는다** — 둘 다 구글이 지원을 끊었다(`lib/publish/seo.ts` 머리말). */
+  const ld = articleJsonLdScript(piece, {
+    authorName: account.displayName || account.handle,
+    ...(piece.scheduledFor ? { publishedAt: piece.scheduledFor } : {}),
+  });
+
+  const body: Record<string, unknown> = { title: String(piece.title || "").slice(0, 300), content: html + ld, status: "publish" };
   if (tagIds.length) body.tags = tagIds;
+  if (excerpt) body.excerpt = excerpt;
+  if (slug) body.slug = slug;
 
   let res: Awaited<ReturnType<typeof wpFetch>>;
   try {
@@ -145,6 +166,15 @@ export async function publishToWordpress(piece: PublishPiece, account: PublishAc
   const id = String(res.json?.id ?? "").trim();
   if (res.status < 200 || res.status >= 300 || !link) {
     return { ok: false, reason: "channel_error", retriable: false, error: "워드프레스가 글을 받지 않았어요.", detail: `http_${res.status} ${String(res.json?.message ?? res.text).slice(0, 160)}` };
+  }
+
+  /* 🔴 구조화 데이터가 **실제로 살아남았나**를 응답으로 확인한다(위 주석). 지워졌으면 **조용히 넘어가지 않고** 감사에 남긴다 —
+     안 남기면 다음 사람이 «JSON-LD 붙였는데 왜 서치콘솔에 안 뜨지»를 처음부터 추적한다.
+     🔴 그래도 **발행은 성공이다** — 구조화 데이터는 글의 부가이지 본체가 아니다(이것 때문에 글을 막지 않는다). */
+  if (ld && !jsonLdSurvived(res.json?.content?.rendered)) {
+    await writeAudit({ tenantId: piece.tenantId, action: "wp_jsonld_stripped", actorType: "system", target: `piece:${piece.id}`,
+      detail: { note: "워드프레스가 <script type=application/ld+json> 를 지웠다 — 앱 비밀번호 사용자에게 unfiltered_html 권한이 없다(KSES)", url: link.slice(0, 200) }, riskLevel: "low" })
+      .catch((e: unknown) => console.warn("[wordpress] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
   }
   return { ok: true, externalUrl: link, ...(id ? { channelRef: id } : {}) };
 }

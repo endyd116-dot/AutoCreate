@@ -31,6 +31,16 @@ const channels = [
   ["naver_clip", "네이버 클립", "video", "runner", [19, 22], ["clip_incentive", "shoppingconnect"], 11],
   ["reels", "릴스", "video", "api", [12, 19], ["affiliate"], 12],
   ["tiktok", "틱톡", "video", "api", [19, 22], ["affiliate"], 13],
+  /* [P1R8 §3.4 · B2] 다음 Phase 채널 — 🔴 **DDL `0029` 와 글자 하나까지 같아야 한다.**
+     여기만 고치면 라이브가 안 따라오고, DDL 만 고치면 새 설치에 채널이 없다(정본이 둘이면 언젠가 갈라진다).
+     · best_hours 가 빈 배열인 이유 = **잰 적이 없다**(그럴듯한 숫자를 지어 넣으면 편성이 근거 없는 시각을 «최적»이라 말한다 · AC-9)
+     · brunch·naver_clip_post 의 'manual' = **지금 사실**이다(러너 셀렉터를 재 본 적이 없다 · `lib/channel-registry.ts` 의 «못 채운 칸») */
+  ["facebook", "페이스북", "text", "api", [], ["affiliate"], 20],
+  ["x", "엑스", "text", "api", [], ["affiliate"], 21],
+  ["brunch", "브런치", "text", "manual", [], ["affiliate"], 22],
+  ["naver_clip_post", "클립 게시물", "text", "manual", [], ["clip_incentive", "shoppingconnect"], 23],
+  ["youtube_long", "유튜브 영상", "video", "api", [], ["ypp", "affiliate"], 24],
+  ["facebook_reels", "페북 릴스", "video", "api", [], ["affiliate"], 25],
 ];
 // 발행 경로가 실제로 있는 채널만 active(고객 «계정 연결» 그리드는 active 만 그린다 · ui-v4). 영상·SNS 는 Phase 3 에서 켠다(운영센터 «채널» 메뉴).
 const ACTIVE_CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress"]);

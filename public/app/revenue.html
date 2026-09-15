@@ -178,12 +178,18 @@ function pieceGroup() {
 
 /* ⑤ 직접 입력 */
 function manualGroup() {
-  return `<div class="group"><button type="button" class="row tap" id="manual"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 받은 수익 넣기</span><span class="d">협찬비·메타·틱톡처럼 자동으로 못 가져오는 것</span></div>${UI.chev}</button></div>`;
+  return `<div class="group"><button type="button" class="row tap" id="manual"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 받은 수익 넣기</span><span class="d">협찬비·텐핑·애드픽처럼 자동으로 못 가져오는 것</span></div>${UI.chev}</button></div>`;
 }
 function bindManual() { const b = UI.$("#manual"); if (b) b.onclick = manualSheet; }
 
 async function manualSheet() {
-  const MSRC = [["sponsor", "협찬·광고비"], ["meta", "메타"], ["tiktok", "틱톡"], ["x", "엑스"], ["manual", "그 외"]];
+  /* [P1R8 §3.4 · B2] 🔴 고를 수 있는 매체와 **이름은 서버가 정본**이다(/api/revenue-sources manualSources).
+     화면이 목록을 갖고 있으면 매체가 늘 때마다 두 곳을 맞춰야 하고, 빠뜨리면 새 매체가 영영 안 보인다(AC-52).
+     서버를 못 부르면 옛 목록으로 내려앉는다 — 시트가 안 열리는 것보다 낫다. */
+  const sr = await UI.api("/api/revenue-sources");
+  const MSRC = (sr.ok && Array.isArray(sr.manualSources) && sr.manualSources.length)
+    ? sr.manualSources.map((m) => [m.key, m.label])
+    : [["sponsor", "협찬·광고비"], ["meta", "메타"], ["tiktok", "틱톡"], ["x", "엑스"], ["manual", "그 외"]];
   const DAYS3 = [[todayYmd, "오늘"], [ymdOff(-1), "어제"], [ymdOff(-2), "그제"]];
   const pl = await UI.api("/api/pieces-list?status=published");
   const pieces = pl.ok ? (pl.pieces || []).slice(0, 8) : [];

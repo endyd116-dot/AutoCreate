@@ -17,15 +17,19 @@ import { db } from "../../db/index";
 import { jsonb, utcDate } from "../db-util";
 import { writeAudit } from "../audit";
 import { normalizeBlocks, type Block } from "../blocks";
-import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk } from "./contract";
+import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
 import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
 import { finalizePublish } from "./finalize";
 import { publishToBlogger } from "./blogger";
 import { publishToWordpress } from "./wordpress";
-import { publishYoutubeShorts } from "./youtube";
-import { publishReels } from "./instagram";
+import { publishYoutubeShorts, publishYoutubeLong } from "./youtube";
+import { publishReels, publishInstagramFeed } from "./instagram";
 import { publishThreadsText, publishThreadsVideo } from "./threads";
+// [P1R8 §3.4] 다음 Phase 채널 — 페북(글·릴스) · X · 틱톡.
+import { publishFacebookPost, publishFacebookReels } from "./facebook";
+import { publishToX } from "./x";
+import { publishToTiktok } from "./tiktok";
 import { enqueueJob as enqueueRunnerJob, fleetState, publishJobKindOf, type RunnerJobKind, type RunnerPublishPayload } from "../runner-jobs";
 
 export * from "./contract";
@@ -35,6 +39,29 @@ export { runPublishGate } from "./gate";
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
+
+/* ═══ [P1R8 §3.4] API 채널 → 커넥터 표 ═══
+ *   종전엔 삼항 사슬이었는데 채널이 5개에서 **11개**가 되면서 읽을 수 없게 됐다.
+ *   🔴 표로 바꾸면서 지킨 선: **이 표에 없으면 «아직 못 올린다»** 이지 «추측해서 보낸다»가 아니다
+ *      (`channel-registry` 가 `publishVia: "api"` 라고 말했는데 여기 없으면 그건 두 표가 갈라진 것이고,
+ *       `scripts/verify-channel-tables.mjs` 가 그걸 잡는다).
+ *   🔴 스레드는 **글도 영상도** 되는 채널이라 `piece.kind` 로 가른다 — 채널만 보고는 못 가르는 자리다(P1R7 §2.3).
+ *      종전엔 무조건 영상으로 보내서, 스레드로 예약한 **글은 «올릴 영상이 아직 없어요»로 영원히 막혔다**.
+ */
+type ApiConnector = (piece: PublishPiece, account: PublishAccount) => Promise<PublishResult | { ok: true; externalUrl: string; channelRef?: string } | { ok: false; reason: PublishFailReason; retriable: boolean; error: string; detail?: string }>;
+const API_CONNECTORS: Readonly<Record<string, ApiConnector>> = {
+  blogger: publishToBlogger,
+  wordpress: publishToWordpress,
+  youtube_shorts: publishYoutubeShorts,
+  youtube_long: publishYoutubeLong,
+  reels: publishReels,
+  instagram: publishInstagramFeed,
+  facebook: publishFacebookPost,
+  facebook_reels: publishFacebookReels,
+  x: publishToX,
+  tiktok: publishToTiktok,
+  threads: (p, a) => (p.kind === "video" ? publishThreadsVideo(p, a) : publishThreadsText(p, a)),
+};
 
 /** 발행을 걸 수 있는 piece 상태 — 검수 전(generating·draft·in_review)·거절·이미 발행은 안 된다. */
 const PUBLISHABLE: ReadonlySet<string> = new Set(["approved", "scheduled", "publishing", "awaiting_manual", "failed"]);
@@ -185,16 +212,10 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
   /* P1R5 §2.3 — 영상 3종이 붙었다. 유튜브·릴스·스레드는 **OAuth API** 채널이라 여기서 바로 올린다.
      ⚠️ 릴스·스레드는 «컨테이너 → 처리 대기 → 게시» 3단계라 아직 처리 중이면 `video_processing`(retriable) 이 돌아온다 —
         실패가 아니라 «조금 뒤에»다. publisher 가 다음 틱에 다시 부르고, 그때 컨테이너를 새로 만들지 않는다(중복 게시 0). */
-  const r = piece.channel === "blogger" ? await publishToBlogger(prepared, account)
-    : piece.channel === "wordpress" ? await publishToWordpress(prepared, account)
-      : piece.channel === "youtube_shorts" ? await publishYoutubeShorts(prepared, account)
-        : piece.channel === "reels" ? await publishReels(prepared, account)
-          /* 🔴 스레드는 **글도 영상도** 되는 채널이다(설계 §2.1 글 P2 + §2.2 영상 P2).
-             종전엔 무조건 영상으로 보내서, 스레드로 예약한 **글은 «올릴 영상이 아직 없어요»로 영원히 막혔다**.
-             채널이 아니라 `piece.kind` 로 가른다 — 채널만 보고는 못 가르는 자리다(P1R7 §2.3). */
-          : piece.channel === "threads"
-            ? (prepared.kind === "video" ? await publishThreadsVideo(prepared, account) : await publishThreadsText(prepared, account))
-            : { ok: false as const, reason: "unsupported_channel" as const, retriable: false, error: "아직 이 채널로는 발행할 수 없어요." };
+  const connector = API_CONNECTORS[piece.channel];
+  const r = connector
+    ? await connector(prepared, account)
+    : { ok: false as const, reason: "unsupported_channel" as const, retriable: false, error: "아직 이 채널로는 발행할 수 없어요." };
 
   if (!r.ok) {
     await writeAudit({

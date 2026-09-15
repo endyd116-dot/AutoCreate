@@ -18,6 +18,7 @@
 import { readToken, saveToken, serverBase, maskToken, heartbeat, claim, VERSION } from "./lib/api.mjs";
 import { tick, canary, log, claimableKinds, runnerCaps } from "./core.mjs";
 import { applyUpdate, isNewer, RESTART_EXIT_CODE } from "./lib/update.mjs";
+import { sealLine } from "./lib/profile-seal.mjs";   // [P1R8 §3.1] 로그인 정보 보관 상태 한 줄(또렷하게 · CLAUDE §9-1)
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -60,9 +61,13 @@ async function main() {
   }
 
   // 연결 확인 — 토큰이 틀렸으면 여기서 바로 말한다(큐를 돌다가 조용히 실패하지 않게).
-  const hello = await heartbeat(token, { jobs: 0, caps: runnerCaps() });
+  const caps = runnerCaps();
+  const hello = await heartbeat(token, { jobs: 0, caps });
   if (!hello?.ok) { console.error(`  ✗ ${hello?.error ?? "서버에 연결하지 못했어요."}\n`); process.exit(1); }
   log(`서버 연결 확인 · 대기 중인 잡 ${hello.jobsWaiting ?? 0}건`);
+  /* [P1R8 §3.1] 🔴 **또렷하게 말한다**(CLAUDE §9-1) — 이 PC 의 로그인 정보가 어떻게 보관되는지.
+     «공개된 고정 키로 잠긴다»는 지나가는 회색 글씨가 되면 안 되는 종류라, 시작할 때마다 찍는다. */
+  if (caps.profileSeal) console.log(sealLine(caps.profileSeal));
 
   /* --peek — 큐만 본다. 🔴 claim 은 선점이라 «보기»가 아니다. 그래서 하트비트가 알려 준 개수만 쓴다. */
   if (OPT.peek) {
