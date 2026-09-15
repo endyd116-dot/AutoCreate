@@ -9,7 +9,9 @@
  *   🔴 **발행 규칙은 크론과 한 벌**(`lib/publish-one.ts`) — 여기서 상태 전이를 다시 쓰지 않는다(두 벌이면 갈라진다).
  *   🔴 **멱등**(§4.7): 이미 나간 글은 `already` 로 200 을 준다. 같은 글을 두 번 눌러도 남의 블로그에 두 번 올라가지 않는다
  *      (마지막 방어선은 B2 의 `external_url`/`channel_ref` 유일 검사 · 우리는 그 앞에서 상태로 한 번 더 막는다).
- *   🔴 **캐던스를 존중한다**(§4.7 계정 캐던스): 오늘 상한(워밍업 유효값) · 계정 min_gap · **같은 채널 계정 간 30분**.
+ *   🔴 [CLAUDE §9] **워밍업은 소프트 · 고객이 정한 값은 하드.** 워밍업이 깎은 몫은 `{ warmupOverride: true }` 로 **그 회차만** 넘긴다
+ *      (저장하지 않는다 · 넘긴 사실은 감사 `publish_now_warmup_override` 에 남는다). `accounts.daily_cap`·`min_gap_min` 은 넘기기로도 못 넘는다.
+ *   🔴 **캐던스를 존중한다**(§4.7 계정 캐던스): 오늘 상한(워밍업 유효값) · 계정 min_gap · 같은 채널 계정 간 간격(`gapMinFor` 의 바닥).
  *      막히면 **언제부터 가능한지**(`retryAt`)를 같이 준다 — «안 돼요»만 주면 고객은 계속 누른다.
  */
 import { sql } from "drizzle-orm";
@@ -83,27 +85,53 @@ export default async (req: Request): Promise<Response> => {
       const warm = { openedAt: (p.opened_at as string | null) ?? null, createdAt: (p.account_created_at as string | null) ?? null, off: p.warmup_off === true, postsThisWeek: n(p.posts_this_week) };
       /* 🔴 [R8 · CLAUDE §9] 워밍업은 **우리 추정**이지 규칙이 아니다 — 고객이 «이번만 올릴래»를 **직접 눌렀으면** 넘겨 준다.
          끄는 게 아니라 **그 회차만**이고 저장하지 않는다. `daily_cap`(고객이 정한 값)은 그대로 지킨다. */
-      const cap = effectiveDailyCap(n(p.daily_cap) || 2, warm, new Date(), { override: warmupOverride });
+      /* 🔴 [CLAUDE §9] 두 가지를 **가른다**.
+           · `customerCap`(= `accounts.daily_cap`) = **고객이 정한 값** → 🔴 **하드**. 넘기기 단추를 줘도 이 선은 못 넘는다(그건 고객의 뜻이다).
+           · `warmCap`(워밍업이 깎은 값) = **우리 추정** → **소프트**. «이번 회차만» 넘길 수 있다.
+         종전에는 `cap === 0`(주간 권장량 소진)일 때만 넘길 길을 줬다. 그런데 워밍업은 **하루 상한도** 깎는다(`min(cap, 1)`) —
+         고객이 하루 5건으로 뒀는데 워밍업이 1건으로 깎으면, 2건째부터 «내일 다시»만 뜨고 **넘길 길이 없었다.** 같은 종류인데 한쪽만 열려 있었다. */
+      const customerCap = n(p.daily_cap) || 2;
+      const warmCap = effectiveDailyCap(customerCap, warm, new Date(), { override: warmupOverride });
+      const cap = warmupOverride ? customerCap : warmCap;   // 🔴 넘기더라도 고객이 정한 값은 못 넘는다
+      const usedOverride = warmupOverride && warmCap < customerCap && n(p.posts_today) >= warmCap;
       if (n(p.posts_today) >= cap) {
         const risk = warmupRisk(warm);
         /* 🔴 **막을 거면 넘길 길과 이유를 같이 준다**(§9-1 «무엇이·왜·어떻게»).
-           `canOverride` 를 보고 화면이 «그래도 올릴래요» 단추를 띄운다 — 지금은 «내일 다시»만 있어 길이 없었다. */
-        const byWarmup = cap === 0 && n(p.daily_cap) > 0 && !warmupOverride;
-        return json({ ok: false, step: "cadence", capped: true, dailyCap: cap, postsToday: n(p.posts_today),
-          ...(byWarmup ? { canOverride: true, overrideKey: "warmupOverride" } : {}),
+           `canOverride` 를 보고 화면이 «그래도 올릴래요» 단추를 띄운다 — 지금은 «내일 다시»만 있어 길이 없었다.
+           🔴 넘길 길은 **워밍업이 막고 있고 고객이 정한 값에는 아직 자리가 남았을 때**만 준다(없는 길을 단추로 만들지 않는다 · DESIGN §5E.3). */
+        const byWarmup = !warmupOverride && warmCap < customerCap && n(p.posts_today) < customerCap;
+        const hitOwn = n(p.posts_today) >= customerCap;
+        return json({ ok: false, step: "cadence", capped: true, dailyCap: cap, customerCap, postsToday: n(p.posts_today),
+          ...(byWarmup ? { canOverride: true, overrideKey: "warmupOverride", confirmLabel: "이번 한 번만 올릴게요" } : {}),
           ...(risk ? { risk } : {}),
-          error: cap === 0
-            ? "이 계정은 이번 주 권장량을 다 썼어요(새 계정은 천천히 늘려요)."
-            : `오늘 이 계정으로 ${cap}건까지 올릴 수 있어요. 내일 다시 올리거나 다른 계정을 써 주세요.` }, 400);
+          error: hitOwn
+            ? `오늘 이 계정으로 ${customerCap}건까지 올리기로 정해 두셨어요. 내일 다시 올리거나 다른 계정을 써 주세요.`
+            : warmCap === 0
+              ? "이 계정은 이번 주 권장량을 다 썼어요(새 계정은 천천히 늘려요). 그래도 이번 한 번은 올리시겠어요?"
+              : `새 계정이라 오늘은 ${warmCap}건까지만 권해 드려요. 그래도 이번 한 번은 올리시겠어요?` }, 400);
       }
-      const gapMin = effectiveMinGapMin(n(p.min_gap_min) || 180, warm);
+      /* 간격도 같은 규율 — 🔴 **워밍업이 늘린 몫만** 넘긴다. 고객이 정한 `min_gap_min` 은 그대로 지킨다. */
+      const ownGap = n(p.min_gap_min) || 180;
+      const warmGap = effectiveMinGapMin(ownGap, warm);
+      const gapMin = warmupOverride ? ownGap : warmGap;
       const last = utcDate(p.last_post_at);
       if (last) {
         const nextOk = new Date(last.getTime() + gapMin * 60_000);
         if (nextOk.getTime() > Date.now()) {
-          return json({ ok: false, step: "cadence", retryAt: nextOk.toISOString(), gapMin,
-            error: `이 계정은 글 사이를 ${gapMin}분 띄워요. ${kstAt(nextOk)}부터 올릴 수 있어요.` }, 400);
+          const byWarmupGap = !warmupOverride && warmGap > ownGap && last.getTime() + ownGap * 60_000 <= Date.now();
+          return json({ ok: false, step: "cadence", retryAt: nextOk.toISOString(), gapMin, customerGapMin: ownGap,
+            ...(byWarmupGap ? { canOverride: true, overrideKey: "warmupOverride", confirmLabel: "이번 한 번만 올릴게요" } : {}),
+            ...(warmupRisk(warm) ? { risk: warmupRisk(warm) as string } : {}),
+            error: byWarmupGap
+              ? `새 계정이라 글 사이를 ${warmGap}분 띄우길 권해 드려요(${kstAt(nextOk)}부터). 그래도 이번 한 번은 올리시겠어요?`
+              : `이 계정은 글 사이를 ${gapMin}분 띄워요. ${kstAt(nextOk)}부터 올릴 수 있어요.` }, 400);
         }
+      }
+      /* 🔴 넘기기가 **실제로 문을 열어 준 경우에만** 감사에 남긴다(누른 것과 쓰인 것은 다르다 · 나중에 «왜 정지됐지»를 되짚을 재료).
+         저장하지 않는 값이라 **여기 말고는 기록이 남는 곳이 없다.** */
+      if (usedOverride || (warmupOverride && warmGap > ownGap)) {
+        await writeAudit({ tenantId: tid, action: "publish_now_warmup_override", actorType: "user", actorId: uid, ip: clientIp(req), riskLevel: "medium",
+          target: `piece:${pieceId}`, detail: { accountId, postsToday: n(p.posts_today), warmCap, customerCap, warmGap, ownGap, risk: warmupRisk(warm) ?? null } });
       }
       /* 🔴 같은 채널의 **다른 계정** 과도 간격을 띄운다(§7.3 · 같은 채널에 몰아 올리면 묶여 보인다).
          [R8] 간격은 **`lib/publish-gap.ts` 한 곳**에서 온다 — 여기가 **고객이 «지금 올리기»를 직접 누르는 자리**라
