@@ -24,7 +24,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
-import { lengthFor, topicGroupOf, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래
+import { lengthFor, topicGroupOf, resolveGoal, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳)
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -230,7 +230,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const structure = structureFor(c, format, imageCount, affiliate, pieceId, group);
     /* 이 글의 수익 목적 — brief 에 있으면 그걸, 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스). 제휴가 붙은 글은 affiliate 가 이긴다. */
     const [bg] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE id = ${n(p.brief_id)}`) : [undefined];
-    const goal = affiliate ? "affiliate" : (String(bg?.goal ?? "") || (channel === "naver_blog" ? "adpost" : "adsense"));
+    const goal = resolveGoal({ affiliate, briefGoal: bg?.goal as string | null, channel });   // 🔴 정본 한 곳 — 검수 화면(pieces-get)도 같은 함수를 본다
     const angle = String(meta.angle || topic.angle || "");
     const pFacts = personaMaterial(persona.profile, pieceId);
     const terms = personaTerms(persona.profile);
