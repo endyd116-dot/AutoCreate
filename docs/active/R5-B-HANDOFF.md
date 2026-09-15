@@ -275,6 +275,17 @@ VIDEO_PROVIDER_STUB=1 npx --yes tsx --env-file=.env scripts/_smoke/r5-b1-bgm-mix
   `lib/video/types.ts`·`render-queue.ts`·`home-summary.ts` 는 **CRLF** 다. 편집 전후로 `count(b"
 ")` 를 대조해라.
 - 🔴 **커밋을 버리면(reset --soft 재작성) 메인에 먼저 알려라** — 메인이 이미 머지했을 수 있다(실제로 한 번 충돌시켰다).
+- 🔴 **AC-53/54 · 내가 $3.63 을 태웠다(2026-09-15)**. 로컬 `netlify dev` 에서 영상을 확정하면 `triggerVideo` 가 `SITE_URL`(=라이브)로
+  배경 함수를 불러 **라이브에서 스텁 없이** 진짜 Veo·TTS 가 돌았다. 직접 원인은 «옛 서버»: `TaskStop` 은 netlify dev 의 node 프로세스를
+  **못 죽인다**(래퍼만 죽는다) · 재시작은 «포트 못 잡음»으로 조용히 실패 · 하니스는 옛 번들·옛 `.env` 를 든 서버와 이야기했다.
+  ⇒ 지금은 ①`lib/site-url.ts backgroundBase()` 가 로컬에서 라이브면 **던지고** ②`/api/health` 가 `dev·deploy·stub·loadedAt` 을 답하며
+  ③하니스 선행 검사가 넷 중 하나라도 아니면 exit 3 이다. **돌리기 전에 `netstat -ano | grep :8921` 로 포트 주인을 확인해라.**
+- 🔴 **스모크 정리 목록에 `ai_usage` 를 넣지 마라** — 쓴 돈의 기록이 테넌트와 함께 사라진다(`scripts/_teardown.mjs` 도 `KEEP_TABLES` 로 지킨다).
+  이미 지운 $3.63 은 `audit_logs#3325 ai_cost_unrecorded` 한 줄이 유일한 DB 기록이다.
+- 🔴 **Bash 툴의 heredoc 은 역슬래시를 반으로 접는다**(두 개가 하나로 · «\x00» 같은 글자는 진짜 NUL 로 들어간다 — 이 줄을 쓰다가도 한 번 당했다).
+  정규식·이스케이프가 든 코드는 heredoc/python 문자열로 넣지 말고 **Edit 툴**로 넣어라
+  (`videoNamePart` 의 금지 글자 클래스에서 역슬래시 하나가 사라져 «\» 가 안 걸러진 채 스모크에서 잡혔다).
+- 🔴 **CRLF 판정은 «하나라도 있으면»이 아니라 다수결로** — 이 문서는 LF 인데 stray CRLF 1줄 때문에 통째로 CRLF 로 써져 606줄 diff 가 됐다.
 
 ### 13.5 스모크(전부 미커밋 · #16 — 무엇을 재는가만 남긴다)
 
@@ -296,3 +307,5 @@ npx tsx scripts/_smoke/r7-b1-todayslot.mts     # §1.6 자리 수 불변 · 코�
 | `FinalizeInput.via` 를 커넥터 타입에서 분리 | B2 | 메인이 전달함 |
 | `gate_report.axes[].pending` 을 검수 화면이 ✅ 로 안 그리게 | A | 메인이 전달함 |
 | P1R5 §182 유사 시 1회 자동 재생성 | B-1 | **R8 후보**(원가 · 메인 결정) |
+| `lib/cron/publisher.ts:45` → `backgroundBase()` · `runner-jobs.ts siteBase()` → `publicBase()` | B2 | 메인이 발주함 |
+| `usesTodaySlot`(제안 예고) · `pending` 축 3상태 · `home.html` «체험이 끝났어요» 중복 행 | A | 메인이 전달함 |

@@ -12,6 +12,7 @@ import { jsonb } from "../../lib/db-util";
 import { publishPieceById } from "../../lib/publish";
 import { recheckVideoPiece, hardFailures, judgeBlockers } from "../../lib/content-approve";
 import { writeAudit } from "../../lib/audit";
+import { setSlot } from "../../lib/cron/base";   // 슬롯 상태 쓰기 한 곳(base.ts) — 편성표가 «올리는 중»에 영영 멈춰 있지 않게
 export const config = { path: "/api/publish-video-background" };
 
 type Row = Record<string, unknown>;
@@ -28,8 +29,10 @@ export default async (req: Request): Promise<Response> => {
   if (!pieceId || !tid) return new Response(JSON.stringify({ ok: false, step: "validate" }), { status: 400, headers: { "Content-Type": "application/json" } });
   const t0 = Date.now();
   try {
-    const [p] = await q(sql`SELECT status FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} AND kind = 'video'`);
+    const [p] = await q(sql`SELECT status, slot_id FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} AND kind = 'video'`);
     if (!p) return new Response(JSON.stringify({ ok: false, step: "not_found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    // 편성 자리 — 호출부(publisher)가 준 것이 먼저, 없으면 piece 에 붙은 것(같은 값이어야 한다).
+    const slotId = Number(body.slotId || 0) || Number(p.slot_id || 0) || null;
     if (String(p.status) !== "publishing" && String(p.status) !== "scheduled") { console.log(`[publish-video-background] piece=${pieceId} status=${p.status} — 스킵(멱등)`); return new Response(JSON.stringify({ ok: true, skipped: true }), { status: 200, headers: { "Content-Type": "application/json" } }); }
 
     /* 🔴 발행 **직전** 재검사(계약 §1.8·§16B · AC-29 «호출처 0» 수리) — 승인 뒤에 설명란을 고쳤을 수 있다.
@@ -42,6 +45,9 @@ export default async (req: Request): Promise<Response> => {
     if (blockers.length) {
       await q(sql`UPDATE pieces SET status = 'awaiting_manual', gate_report = ${jsonb(gate)}, meta = meta || ${jsonb({ publishFail: { reason: "gate", error: blockers.join(" · "), at: new Date().toISOString() } })}, updated_at = NOW()
         WHERE tenant_id = ${tid} AND id = ${pieceId} AND status IN ('publishing','scheduled')`);
+      /* 🔴 [R7 통합 점검 2026-09-15] 편성 자리도 같이 옮긴다 — publisher 가 `publishing` 으로 올려 두고 넘겼는데 여기서 piece 만 내리면
+         편성표는 «올리는 중»에 영영 멈춰 있다(실측: piece awaiting_manual · slot publishing). 글 경로(publisher.ts:189)와 같은 처치. */
+      if (slotId) await setSlot(tid, slotId, "awaiting_manual", blockers.join(" · "));
       await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"publish_manual"}, ${"영상을 올리기 전에 확인이 필요해요"}, ${`${blockers.join(" · ")} — 확인하고 다시 올려 주세요.`.slice(0, 200)}, ${`/app/piece.html?id=${pieceId}`})`);
       await writeAudit({ tenantId: tid, action: "video_publish_gate_block", actorType: "system", riskLevel: "high", target: `piece:${pieceId}`, detail: { blockers } });
       console.error(`[publish-video-background] piece=${pieceId} 발행 직전 게이트 차단: ${blockers.join(" · ")}`);
@@ -54,6 +60,8 @@ export default async (req: Request): Promise<Response> => {
     const retriable = r.retriable === true;
     await q(sql`UPDATE pieces SET status = ${retriable ? "scheduled" : "awaiting_manual"}, meta = meta || ${jsonb({ publishFail: { reason: r.reason, error: r.error ?? null, at: new Date().toISOString() } })}, updated_at = NOW()
       WHERE tenant_id = ${tid} AND id = ${pieceId} AND status IN ('publishing','scheduled')`);
+    // 편성 자리도 piece 와 같은 상태로(위 게이트 차단과 같은 이유) — 다시 시도면 `scheduled` 로 되돌려 다음 틱이 잡게, 아니면 «직접 올리기».
+    if (slotId) await setSlot(tid, slotId, retriable ? "scheduled" : "awaiting_manual", retriable ? null : String(r.error ?? "업로드하지 못했어요"));
     if (!retriable) await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"publish_manual"}, ${"영상 업로드에 손이 필요해요"}, ${String(r.error ?? "업로드하지 못했어요.").slice(0, 200)}, ${"/app/posts.html"})`);
     console.error(`[publish-video-background] piece=${pieceId} 실패 reason=${r.reason} retriable=${retriable}`);
     return new Response(JSON.stringify({ ok: false, reason: r.reason, retriable }), { status: 200, headers: { "Content-Type": "application/json" } });
