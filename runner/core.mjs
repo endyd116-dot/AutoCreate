@@ -14,6 +14,8 @@ import * as naverBlog from "./channels/naver-blog.mjs";
 import * as tistory from "./channels/tistory.mjs";
 import * as sessionLogin from "./channels/session-login.mjs";
 import * as postAlive from "./channels/post-alive.mjs";
+// [R8 §3 · DESIGN §5E] 올린 글 내리기 — 고객이 «내려 줘»를 눌렀을 때만 온다.
+import * as retract from "./channels/retract.mjs";
 import * as revenueAdpost from "./channels/revenue-adpost.mjs";
 import * as revenueAdfit from "./channels/revenue-adfit.mjs";
 import * as revenueClip from "./channels/revenue-clip.mjs";
@@ -35,6 +37,7 @@ const HANDLERS = {
   "session.login": sessionLogin,
   "session.verify": sessionLogin,
   "verify.post_alive": postAlive,
+  "publish.retract": retract,
   "revenue.stats": postAlive,
   // P1R3 §2.1 수익 스크랩 3종 · §2.2 광고 상태 읽기 2종
   "revenue.adpost": revenueAdpost,
@@ -160,6 +163,12 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
 
     // 🔴 shotKey 를 함께 돌려준다 — 카나리가 이 키를 하트비트에 실어야 운영이 «깨진 화면»을 찾아간다(없으면 canary_runs.shot_key 가 늘 비었다).
     if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [] };
+    /* 🔴 **`publish.retract` 는 `publish.` 로 시작한다** — 아래 발행 분기보다 **먼저** 가른다.
+       안 그러면 «올리기는 했는데 글 주소를 회수하지 못했어요»라는 엉뚱한 실패가 난다(내리는 잡에 외부 주소가 있을 리 없다).
+       접두사로 종류를 가르는 코드에 새 잡을 끼울 때 늘 생기는 함정이라 여기 적어 둔다. */
+    if (job.kind === "publish.retract") {
+      return { ok: true, stats: { ...(out?.retract ?? {}) }, shotKey, notes: out?.notes ?? [] };
+    }
     if (job.kind.startsWith("publish.")) {
       if (!out?.externalUrl) return { ok: false, errorKind: "unknown", detail: "올리기는 했는데 글 주소를 회수하지 못했어요." };
       return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [] };

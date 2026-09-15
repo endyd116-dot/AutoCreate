@@ -52,13 +52,15 @@ export type RunnerJobKind =
   | "publish.naver_blog" | "publish.tistory"
   | "session.login" | "session.verify"
   | "verify.post_alive" | "revenue.stats"
+  // [R8 §3 · DESIGN §5E] 🔴 올린 글을 **내린다** — 고객이 «내려 줘»를 눌렀을 때만(우리가 임의로 부르지 않는다).
+  | "publish.retract"
   | "revenue.adpost" | "revenue.adfit" | "revenue.clip"
   | "ads.setup_tistory" | "ads.status_blogger"
   | "ads.setup_blogger" | "ads.revert_blogger"
   // P1R5 §0.2 — 영상: 렌더(러너가 굽는다) · 유튜브 쇼츠 · 네이버 클립(스텁).
   | "render.video" | "publish.youtube_shorts" | "publish.naver_clip";
 export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
-  "publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats",
+  "publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats", "publish.retract",
   "revenue.adpost", "revenue.adfit", "revenue.clip", "ads.setup_tistory", "ads.status_blogger",
   "ads.setup_blogger", "ads.revert_blogger",
   "render.video", "publish.youtube_shorts", "publish.naver_clip",
@@ -70,6 +72,8 @@ export const REVENUE_SCRAPE_KINDS: ReadonlySet<string> = new Set(["revenue.adpos
 /** 우선순위 — 숫자가 작을수록 먼저(계약 §2 «발행 10 > 세션 20 > 통계 50» · DESIGN §8.3 «수익 스크랩 > 렌더»). */
 export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.freeze({
   "publish.naver_blog": 10, "publish.tistory": 10,
+  /* 🔴 내리기는 **발행보다 먼저**다(5). 잘못 나간 글이 떠 있는 시간을 줄이는 게 새 글을 올리는 것보다 급하다. */
+  "publish.retract": 5,
   // P1R5 §0.2 «발행 > 세션 > 수익 > 렌더» — 렌더는 오래 걸리므로 가장 뒤(70).
   "publish.youtube_shorts": 10, "publish.naver_clip": 10,
   "render.video": 70,
@@ -904,6 +908,43 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   /* ── 네이버 클립(P1R5 §2.3) — 아직 올릴 길이 없다. **재시도하지 않고** 사람에게 넘긴다. ──
        분류기(`classifyRunnerBlock`)에 맡기면 `not_supported_yet` 이 «unknown» 으로 떨어져 3번 헛돈다.
        길이 막힌 것은 계정 문제도 우리 버그도 아니므로 계정 상태를 건드리지 않는다. 조용한 0건 금지(PITFALLS #7). */
+  /* ── 🔴 내리기 실패 중 «이미 없었다»는 **실패가 아니다**(DESIGN §5E.3) ──
+     러너가 그 글을 못 찾았다면(404·삭제됨 화면) 그건 **우리가 원한 상태**다. 실패로 세면:
+       ① 재시도가 돌면서 없는 글을 계속 찾으러 가고 ② 고객 화면엔 «내리지 못했어요»가 뜨는데 실제로는 내려가 있다.
+     ⚠️ 방향을 헷갈리지 말 것 — AC-9 은 «없음을 0·정상으로 읽지 마라»인데, 여기서는 **없음이 목표**다.
+        무엇을 물었는가가 다르다(«얼마 벌었나» vs «내려갔나»). */
+  if (result.ok !== true && kind === "publish.retract") {
+    const fail = result as RunnerReportFail;
+    const gone = String(fail.errorKind ?? "") === "already_gone";
+    if (gone) {
+      const postId = n(payload.postId);
+      if (postId) {
+        const { afterRetracted } = await import("./publish/retract");
+        await afterRetracted(tid, postId, {
+          channel: String(payload.channel ?? ""), externalUrl: String(payload.externalUrl ?? ""),
+          pieceId: pieceId ?? null, accountId: accountId ?? null,
+        });
+      }
+      await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+        result = ${jsonb({ ok: true, alreadyGone: true })}, updated_at = NOW() WHERE id = ${jobId}`);
+      return { ok: true, status: "done", reason: "already_gone" };
+    }
+    /* 진짜 실패 — 🔴 **표식을 걷어낸다.** 안 걷으면 «내렸다»가 남아 그 글을 **영영 다시 못 내린다**
+       (`retractPost` 가 표식을 보고 «이미 내렸어요»로 돌려보낸다). */
+    const postId = n(payload.postId);
+    if (postId) { const { unmarkRetract } = await import("./publish/retract"); await unmarkRetract(tid, postId); }
+    await q(sql`UPDATE runner_jobs SET status='failed', claimed_by=NULL, claimed_at=NULL, error_kind=${String(fail.errorKind ?? "unknown").slice(0, 24)},
+      result = ${jsonb({ ok: false, detail: String(fail.detail ?? "").slice(0, 300) })}, updated_at = NOW() WHERE id = ${jobId}`);
+    await notify(tid, "retract_failed", "글을 내리지 못했어요",
+      `${String(fail.detail ?? "").slice(0, 120)} 직접 내려 주셔야 해요.`,
+      String(payload.externalUrl ?? "") || "/app/pieces.html");
+    await writeAudit({
+      tenantId: tid, action: "post_retract_failed", actorType: "system", target: `post:${postId || jobId}`,
+      detail: { kind, errorKind: fail.errorKind ?? null, detail: String(fail.detail ?? "").slice(0, 200) }, riskLevel: "high",
+    });
+    return { ok: true, status: "failed", reason: "retract_failed" };
+  }
+
   if (result.ok !== true && kind === "publish.naver_clip") {
     const fail = result as RunnerReportFail;
     await q(sql`UPDATE runner_jobs SET status='failed', claimed_by=NULL, claimed_at=NULL, error_kind='not_supported_yet',
@@ -1045,6 +1086,28 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   }
 
   /* ── 애드센스 연결 상태 읽기(P1R3 §2.2 · 읽기만) ── */
+  /* ── 내리기 성공(DESIGN §5E) ──
+     🔴 **«없음»이 성공이다.** 러너가 «그 글이 이미 없었다»고 돌려줘도 우리가 원한 상태이므로 성공으로 센다.
+        ⚠️ 이게 AC-9 의 **반대 얼굴**이다: 수집·발행에서는 «없다»를 «0·정상»으로 읽으면 거짓이 되는데,
+        내리기에서는 «없다»가 정확히 목표다. 같은 «없음»인데 방향이 반대라 여기 적어 둔다.
+     🔴 그리고 **«지웠다»는 러너의 주장이다** — 내린 뒤 `verify.post_alive` 를 걸어
+        **쿠키 없는 서버 눈으로** 정말 없는지 본다(AC-54 · «버튼을 눌렀다»는 증거가 아니다). */
+  if (kind === "publish.retract") {
+    const postId = n(payload.postId);
+    if (postId) {
+      const { afterRetracted } = await import("./publish/retract");
+      await afterRetracted(tid, postId, {
+        channel: String(payload.channel ?? ""),
+        externalUrl: String(payload.externalUrl ?? ""),
+        pieceId: pieceId ?? null,
+        accountId: accountId ?? null,
+      });
+    }
+    await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+      result = ${jsonb({ ok: true, alreadyGone: okBody.stats?.alreadyGone === true })}, updated_at = NOW() WHERE id = ${jobId}`);
+    return { ok: true, status: "done" };
+  }
+
   if (kind === "ads.setup_tistory" || kind === "ads.status_blogger") {
     if (okBody.adsense && accountId) {
       await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb({ adsenseLinked: !!okBody.adsense.linked, adsenseState: okBody.adsense.state ?? null, adsenseCheckedAt: new Date().toISOString() })}, updated_at = NOW()

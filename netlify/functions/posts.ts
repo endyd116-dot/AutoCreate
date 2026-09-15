@@ -1,6 +1,7 @@
 /**
  * 발행함 API(계약 P1R2 §6 v2.1 · DESIGN §2.3):
- *   GET /api/posts-list?from=&to=&status=published|awaiting_manual|failed|all(기본 all) → { ok:true, posts:[PostRow] }
+ *   GET  /api/posts-list?from=&to=&status=published|awaiting_manual|failed|all(기본 all) → { ok:true, posts:[PostRow] }
+ *   POST /api/post-retract { postId, reason? } → { ok, state, message, openUrl? }   // [R8 §3 · DESIGN §5E] 고객이 «내려 줘»를 누른다
  *
  *   🔴 **posts 가 아니라 pieces 를 기준으로 만든다**(계약 v2.1): 발행에 실패한 글은 `posts` 행이 아예 없다.
  *      posts 에서 출발하면 «직접 올려 주셔야 해요» 가 목록에서 통째로 사라진다 — 사용자가 가장 알아야 할 행이 안 보이는 사고.
@@ -14,12 +15,17 @@
  */
 import { json, jsonError } from "../../lib/response";
 import { requireUser } from "../../lib/guards";
+import { readJson } from "../../lib/validate";
+import { retractPost } from "../../lib/publish/retract";
+import { canRetract } from "../../lib/channel-registry";
 import { utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { kstDateStr, addDays } from "../../lib/best-time";
 import { sql } from "drizzle-orm";
 
-export const config = { path: "/api/posts-list" };
+export const config = { path: ["/api/posts-list", "/api/post-retract"] };
+/** netlify dev 의 정적 폴백이 경로 매칭에서 빠지면 엉뚱한 405 가 보인다 — 꼬리를 떼고 맞춘다(AC-7). */
+const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 const STATUSES = new Set(["published", "awaiting_manual", "failed"]);
 const ERROR_KINDS = new Set(["login_fail", "captcha", "rate_limited", "suspended", "selector_changed", "network", "unknown"]);
@@ -31,6 +37,11 @@ export interface PostRow {
   externalUrl?: string; publishedVia?: "api" | "runner" | "manual"; publishedAt?: string;
   stats: { views?: number; likes?: number; comments?: number; lastSyncAt?: string };
   alive: boolean; errorKind?: string; failReason?: string;
+  /** [R8 §3 · DESIGN §5E] 🔴 **우리가 대신 내려 줄 수 있는 채널인가** — 화면이 단추를 켤지 정하는 값.
+      false 면 «직접 내려 주세요» + `externalUrl` 로 보낸다. **없는 길을 단추로 만들지 않는다.** */
+  canRetract: boolean;
+  /** 이미 내렸나(내린 시각). 있으면 단추 대신 «내렸어요»를 보여 준다. */
+  retractedAt?: string;
 }
 
 export default async (req: Request): Promise<Response> => {
@@ -38,6 +49,21 @@ export default async (req: Request): Promise<Response> => {
   const tid = auth.tid;
   const url = new URL(req.url);
   try {
+    /* ── [R8 §3 · DESIGN §5E] 올린 글 내리기 ──
+       🔴 **고객이 누른 것만** 여기로 온다(§5E.1 ② — «우리가 동의 없이 내린다»(③)는 만들지 않았다).
+       🔴 `requireWritable` 을 **부르지 않는다** — 체험이 끝났다고 «내 글을 내려 달라»를 막으면,
+          고객이 내리고 싶은데 못 내리는 상태가 된다. 돈이 드는 경로가 아니고(코인 0), 되레 **안 막는 게 안전한 쪽**이다
+          (`/api/post-mark-published` 가 같은 이유로 안 부른다). */
+    if (routeOf(req).endsWith("/post-retract")) {
+      if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
+      const b = await readJson<{ postId?: unknown; reason?: unknown }>(req);
+      const postId = n(b.postId);
+      if (!postId) return json({ ok: false, step: "id", error: "어떤 글인지 알 수 없어요." }, 400);
+      const reason = String(b.reason ?? "").trim().slice(0, 200) || "고객 요청";
+      const r = await retractPost(tid, postId, { reason, by: `user:${auth.user.uid}` });
+      return json(r, r.ok ? 200 : r.state === "not_found" ? 404 : 409);
+    }
+
     const today = kstDateStr(new Date());
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
     const from = dateRe.test(url.searchParams.get("from") || "") ? url.searchParams.get("from")! : addDays(today, -30);
@@ -71,10 +97,16 @@ export default async (req: Request): Promise<Response> => {
         id: r.post_id ? n(r.post_id) : pieceId,
         pieceId, channel: String(r.channel), accountHandle: r.handle ? String(r.handle) : null,
         title: String(r.title || ""), status: String(r.status) as PostRow["status"],
+        canRetract: false,           // 아래에서 주소를 확인하고 정한다(이 자리엔 아직 urlStr 이 없다)
         stats: {}, alive: String(st.alive ?? "") !== "false",   // 기본은 «살아 있다» — 확인한 적 없으면 죽었다고 하지 않는다
       };
       const urlStr = String(r.po_url || r.p_url || "");
       if (urlStr) o.externalUrl = urlStr;
+      /* [R8 §3 · DESIGN §5E] 🔴 «내려 줄 수 있나»는 **채널 성질 표**가 정한다(추측 0).
+         주소가 있어야(=실제로 올라간 글이어야) 켠다 — 아직 안 올라간 글에 «내려 줘»가 뜨면 «뭘 내린다는 거지»가 된다. */
+      o.canRetract = !!urlStr && canRetract(String(r.channel));
+      const rt = (st.retract && typeof st.retract === "object" ? st.retract : null) as { retractedAt?: string } | null;
+      if (rt?.retractedAt) { o.retractedAt = String(rt.retractedAt); o.canRetract = false; }   // 이미 내렸으면 단추를 끈다
       if (r.published_via === "api" || r.published_via === "runner" || r.published_via === "manual") o.publishedVia = r.published_via;
       const at = utcDate(r.po_at) ?? utcDate(r.p_at); if (at) o.publishedAt = at.toISOString();
       for (const k of ["views", "likes", "comments"] as const) if (Number.isFinite(Number(st[k])) && st[k] !== null && st[k] !== undefined) o.stats[k] = Number(st[k]);
