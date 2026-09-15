@@ -422,7 +422,12 @@
   UI.vword = (v, key) => { const L = v && v.variantLabels; if (L && L[key]) return L[key];
     const raw = key === "hook" ? v?.variant?.hookType : key === "palette" ? v?.variant?.palette : v?.variant?.voiceId;
     return (key === "hook" ? UI.HOOK[raw] : key === "palette" ? UI.PALETTE[raw] : null) || raw || ""; };
-  UI.VIDEO_COIN = { 15: 6, 30: 12, 60: 28 }; // 손보기 코인 재계산 미리보기(정본은 director-confirm 응답 coinCost · videoCoinItem 구간제)
+  /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts COIN_TABLE 에서 그대로 복사] 🔴 손으로 고치지 마라 — 하니스가 서버 표와 대조한다.
+     🔴 **글 1편 = 1코인**(AI 사진 1장 포함) · AI 사진 추가 1장 = +1 · **내 사진·스톡 사진은 0** · 카드뉴스 3(장수로 안 셈).
+     🔴 이 표는 **미리보기용**이다 — 실제로 빠지는 값은 언제나 서버가 준 것(`coinCost`·`director-estimate` 응답)이다.
+        운영센터가 단가를 바꿀 수 있게 됐으니(B ea980a3), 서버 값이 오는 자리에서는 **이 표를 쓰지 않는다**. */
+  UI.COIN = { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28 };
+  UI.VIDEO_COIN = { 15: UI.COIN.video_15, 30: UI.COIN.video_30, 60: UI.COIN.video_60 }; // 손보기 코인 재계산 미리보기(정본은 director-confirm 응답 coinCost · videoCoinItem 구간제)
   UI.vlabel = (v) => v ? `${UI.VFORMAT[v.format] || v.format} ${v.seconds}초` : "";
   UI.studioUrl = (ref) => ref ? `https://studio.youtube.com/video/${encodeURIComponent(ref)}/edit` : "https://studio.youtube.com/";
   /* [P1R2] RunnerErrorKind → 사람말(계약 §2) · 계정·발행함이 같이 쓰는 한 벌 */

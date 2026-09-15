@@ -208,6 +208,8 @@
   /* 모의 계정 사진 — 바깥 주소를 쓰면 «열어야 보이는 그림»이 되니 데이터 URI 로(서버는 https 만 받는다는 규칙은 화면 쪽 검사로 따로 지킨다) */
   /* 모의 계정 사진 — 우리 서버가 주는 그림 자리(같은 출처 파일). 🔴 실서버는 https 만 받는다(accounts.ts) · 화면도 https 와 같은 출처만 그린다 */
   const AVATAR = "/icon.svg";
+  /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
+  const COIN = { blog: 1, image: 1, cardnews: 3 };
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     v: MOCK_V, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100,
@@ -352,7 +354,7 @@
     // 오늘 «확인 필요» 한 건(발행함 703·piece 506 과 같은 글) — 없으면 만들어 둔다
     S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "awaiting_manual", publishAt: kst(0, 11, 0), topicTitle: "가을 이불 세탁, 건조기 없이 뽀송하게", pieceId: 506, origin: "auto" });
   }
-  const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : 1 + (IMG[r.channel] || 2)), 0); // [P1R5] shorts = video_60 단가(§1.10)
+  const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0); // [P1R5] shorts = video_60 단가(§1.10)
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
   const devRow = (d) => { const o = { id: d.id, name: d.name, kind: d.kind, status: d.online ? "online" : "offline", jobsWaiting: d.jobsWaiting || 0 }; if (d.caps) o.caps = d.caps; // [P1R5] caps.ffmpeg(§2.4)
@@ -668,11 +670,11 @@
     /* §3 디렉터 */
     "director-propose": (b) => { const t = S.topics.find((x) => x.id === Number(b.topicId)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
       const pieces = []; const nv = S.accounts.find((a) => a.channel === "naver_blog"); const ts = S.accounts.find((a) => a.channel === "tistory");
-      if (nv) pieces.push({ key: "p1", channel: "naver_blog", accountId: nv.id, accountHandle: nv.handle, format: "story", emotionKey: "warm", composition: "experience", lengthHint: { words: 1400 }, images: { count: 8, style: "photo", heroNeeded: true }, monetize: { affiliate: t.factors.intent !== "info" ? { provider: "coupang", productQuery: "에어프라이어 세척솔", slot: "end" } : null, adDisclosure: true }, schedule: { at: kst(1, 7, 30), slotReason: "네이버 블로그 아침 골든타임 · @" + nv.handle + " 오늘 0/" + nv.dailyCap }, coinCost: 9 });
-      if (ts) pieces.push({ key: "p2", channel: "tistory", accountId: ts.id, accountHandle: ts.handle, format: "compare", emotionKey: "neutral", composition: "compare", angle: "비교표로 정리", lengthHint: { words: 1200 }, images: { count: 3, style: "infographic", heroNeeded: true }, monetize: { affiliate: null, adDisclosure: false }, schedule: { at: kst(1, 13, 0), slotReason: "티스토리 점심 검색 피크 · 애드센스 자리 2곳" }, coinCost: 4 });
+      if (nv) pieces.push({ key: "p1", channel: "naver_blog", accountId: nv.id, accountHandle: nv.handle, format: "story", emotionKey: "warm", composition: "experience", lengthHint: { words: 1400 }, images: { count: 8, style: "photo", heroNeeded: true, aiCount: 1 }, monetize: { affiliate: t.factors.intent !== "info" ? { provider: "coupang", productQuery: "에어프라이어 세척솔", slot: "end" } : null, adDisclosure: true }, schedule: { at: kst(1, 7, 30), slotReason: "네이버 블로그 아침 골든타임 · @" + nv.handle + " 오늘 0/" + nv.dailyCap }, coinCost: COIN.blog });
+      if (ts) pieces.push({ key: "p2", channel: "tistory", accountId: ts.id, accountHandle: ts.handle, format: "compare", emotionKey: "neutral", composition: "compare", angle: "비교표로 정리", lengthHint: { words: 1200 }, images: { count: 3, style: "infographic", heroNeeded: true, aiCount: 1 }, monetize: { affiliate: null, adDisclosure: false }, schedule: { at: kst(1, 13, 0), slotReason: "티스토리 점심 검색 피크 · 애드센스 자리 2곳" }, coinCost: COIN.blog });
       const yt = S.accounts.find((a) => VIDEO_CH.includes(a.channel) && a.status === "active"); // [P1R5] 영상 계정이 있으면 같은 brief 에 영상 piece(§1.1 채널 선택)
       if (yt) pieces.push({ key: "p3", kind: "video", channel: yt.channel, accountId: yt.id, accountHandle: yt.handle, emotionKey: "shorts", angle: "3초 훅 · 비포/애프터", video: videoSpec(0, yt.id, 60, "graphic"), monetize: { affiliate: t.factors.intent !== "info" ? { provider: "coupang", productQuery: "에어프라이어 세척솔", slot: "end" } : null, adDisclosure: true }, schedule: { at: kst(1, 18, 0), slotReason: "쇼츠 저녁 골든타임 18시 · @" + yt.handle + " 오늘 0/" + yt.dailyCap }, coinCost: VIDEO_COIN.video_60 });
-      if (!pieces.length) pieces.push({ key: "p1", channel: "naver_blog", accountId: null, accountHandle: null, format: "story", emotionKey: "warm", composition: "experience", lengthHint: { words: 1400 }, images: { count: 6, style: "photo", heroNeeded: true }, monetize: { affiliate: null, adDisclosure: false }, schedule: { at: kst(1, 7, 30), slotReason: "네이버 블로그 아침 골든타임 · 계정은 연결 후 배정" }, coinCost: 7 });
+      if (!pieces.length) pieces.push({ key: "p1", channel: "naver_blog", accountId: null, accountHandle: null, format: "story", emotionKey: "warm", composition: "experience", lengthHint: { words: 1400 }, images: { count: 6, style: "photo", heroNeeded: true, aiCount: 1 }, monetize: { affiliate: null, adDisclosure: false }, schedule: { at: kst(1, 7, 30), slotReason: "네이버 블로그 아침 골든타임 · 계정은 연결 후 배정" }, coinCost: COIN.blog });
       /* [B-1 a39b458] 제안 단계 예고 — 첫 spec 이 오늘 자리를 쓸 것이면 usesTodaySlot 을 싣는다(확정이 정본 · 그 사이 자리가 찰 수 있다) */
       { const first = pieces[0]; const s0 = usedSlotOn && first && S.slots.find((s) => s.date === todayYmd && s.channel === first.channel && !s.pieceId && ["planned", "topic_assigned", "assigned", "no_topic"].includes(s.status));
         if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
@@ -787,7 +789,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "slots-produce-now": (b) => { const nw = notWritable(); if (nw) return nw; tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
       if (!s.topicTitle) return err("no_topic", "먼저 소재를 정해 주세요.");
       if (s.pieceId) return err("exists", "이 편성은 이미 글이 있어요.");
-      const need = 1 + (IMG[s.channel] ?? 2); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
+      const need = s.kind === "shorts" ? VIDEO_COIN.video_60 : s.kind === "cardnews" ? COIN.cardnews : COIN.blog; if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
       S.coins -= need; const id = S.nextId++;
       S.pieces.push({ id, channel: s.channel, accountHandle: s.accountHandle, kind: "post", format: "story", title: s.topicTitle, status: "generating", stage: "writing", scheduledFor: s.publishAt, gateOk: false, createdAt: iso(Date.now()), topicTitle: s.topicTitle, regenCount: 0, bodyHtml: s.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true), _t0: Date.now() });
       s.pieceId = id; s.status = "producing"; return { ok: true, pieceId: id }; },
