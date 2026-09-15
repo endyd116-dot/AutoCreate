@@ -25,6 +25,8 @@ import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
 import { personaTerms } from "./content-gen";
 import { countAffiliateLinks } from "./publish/gate";
+/* [R8-A §2 · B-1] 골격 지문 — 순수 모듈(DB 0). 여기서 최근 글을 읽어 넘겨 준다(ai-tell-gate 는 순수로 둔다 · AC-17). */
+import { structurePrint, compareToRecent, printFromMeta, STRUCTURE_OVERLAP_MAX, type StructurePrint } from "./structure-print";
 
 type Row = Record<string, unknown>;
 const n = (v: unknown) => Number(v || 0);
@@ -53,6 +55,34 @@ export function judgeBlockers(gate: GateReport): { key: string; label: string; d
  *   비용 상한: 링크 **3개까지 · 전체 3초**(병렬 · 크론이 200건을 도는 자리라 편당 상한이 곧 틱 예산이다).
  */
 export const LINK_CHECK_KEY = "link_check" as const;
+export const STRUCTURE_KEY = "structure_repeat" as const;
+
+/**
+ * [R8-A §2 · B-1] **골격 반복** — 같은 테넌트·같은 채널의 최근 글과 **구조**가 얼마나 겹치나.
+ *   🔴 `similarity`(글자 2-gram)로는 안 잡힌다: 우리 `structure` 는 채널당 format 3~5개 **고정 배열**이라
+ *      같은 채널에 10편을 쓰면 골격이 3~5가지로 돈다. 단어만 바꾸면 유사도는 낮게 나오지만 **사람은 첫눈에 안다**.
+ *   🔴 **소프트**다(HARD_GATE_KEYS 밖) — 초기엔 표본이 적어 오탐이 나고, 하드로 걸면 첫 고객이 글을 못 낸다.
+ *   🔴 **못 잰 것은 실패가 아니다**(AC-9): 견줄 글이 없으면 `pass:true` + «견줄 글이 없어요».
+ */
+export async function checkStructure(tid: number, p: Row, blocks: Block[]): Promise<GateCheck> {
+  const label = GATE_LABEL[STRUCTURE_KEY];
+  if (!blocks.length) return { key: STRUCTURE_KEY, label, pass: true, detail: "블록이 없어 재지 못했어요" };
+  const mine = structurePrint(blocks);
+  let recent: { id: number; print: StructurePrint }[] = [];
+  try {
+    const rows = await q(sql`SELECT id, meta->'structurePrint' AS sp FROM pieces
+      WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND channel = ${String(p.channel ?? "")} AND kind <> 'video'
+        AND meta->'structurePrint' IS NOT NULL AND created_at > NOW() - interval '30 days'
+      ORDER BY id DESC LIMIT 10`);
+    recent = rows.map((r) => ({ id: n(r.id), print: printFromMeta(r.sp) })).filter((x): x is { id: number; print: StructurePrint } => !!x.print);
+  } catch (e) { console.warn("[content-approve] 골격 지문 조회 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
+  const cmp = compareToRecent(mine, recent);
+  if (!cmp.compared) return { key: STRUCTURE_KEY, label, pass: true, detail: "견줄 최근 글이 없어요(아직 못 쟀어요)" };
+  const pass = cmp.overlap < STRUCTURE_OVERLAP_MAX;
+  return { key: STRUCTURE_KEY, label, pass,
+    detail: pass ? `가장 닮은 글과 ${Math.round(cmp.overlap * 100)}%(기준 ${Math.round(STRUCTURE_OVERLAP_MAX * 100)}% 미만 · ${cmp.compared}편과 견줌)`
+      : `최근 글 #${cmp.againstId} 과 구조가 ${Math.round(cmp.overlap * 100)}% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요` };
+}
 const LINK_CHECK_MAX = 3;
 const LINK_CHECK_MS = 3000;
 
@@ -128,7 +158,8 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   if (!edited && blocks.length) {
     const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: m.adDisclosure === true }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
-    return { ...g, checks: [...g.checks, link], ok: g.ok && link.pass };
+    const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
+    return { ...g, checks: [...g.checks, link, st], ok: g.ok && link.pass && st.pass };
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
   const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || "") });

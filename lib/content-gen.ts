@@ -23,6 +23,7 @@ import { decryptObj } from "./creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, type CoupangProduct } from "./affiliate-coupang";
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
+import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -305,7 +306,11 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const imageFailures = imageBlocks.length - okImages;
 
     const bodyHtml = renderBlocksHtml(draft.blocks, channel, images);
-    const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: affiliate ? disclosureTextFor(aff?.provider) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten };
+    /* [R8-A §2 · B-1] 골격 지문을 같이 남긴다 — 🔴 **여기서 안 적으면 `structure_repeat` 축은 견줄 재료가 0 이라 영영 «못 쟀어요» 다**(AC-29).
+       영상의 `meta.frameHash` 와 같은 자리·같은 뜻(그림 지문 ↔ 골격 지문). 추가형이라 옛 글엔 없고, 없는 글은 견주기에서 빠진다. */
+    const sPrint = structurePrint(draft.blocks);
+    const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: affiliate ? disclosureTextFor(aff?.provider) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
+      structurePrint: sPrint, structureHash: structureHash(sPrint) };
     await q(sql`UPDATE pieces SET title = ${draft.title}, body = ${bodyHtml}, blocks = ${jsonb(draft.blocks)}, meta = ${jsonb(nextMeta)}, gate_report = ${jsonb(report)}, status = ${"in_review"}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(blocks) AS b, jsonb_typeof(meta) AS m, jsonb_typeof(gate_report) AS g FROM pieces WHERE id = ${pieceId}`);
     if (chk?.b !== "array" || chk?.m !== "object" || chk?.g !== "object") console.error("[content-gen] jsonb_typeof 이상", chk);
