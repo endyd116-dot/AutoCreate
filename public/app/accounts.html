@@ -90,10 +90,19 @@ function connectSheet(c) {
       UI.toast(r.error || "연결을 시작하지 못했어요");
     }; } });
 }
+/* [R7 §3.6] 계정 한도는 «요금제를 올리세요»만이 답이 아니다 — 서버가 402 에 상품을 실어 주면 그 자리에서 코인으로 산다 */
+async function slotOfferSheet(r, close) {
+  if (close) close();
+  UI.sheet(`<p class="muted" style="margin:0 0 12px">${UI.esc(r.error || "계정을 더 쓰려면 슬롯이 필요해요.")}</p>
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="buySlot">계정 1개 더 쓰기</button><a class="btn ghost" href="/app/plan.html">요금제 보기</a></div>`,
+    { title: "계정을 더 쓰려면", onOpen: (sh, cl) => { sh.querySelector("#buySlot").onclick = () => { cl();
+      UI.slotBuySheet({ offers: r.slotOffer.offers, balance: r.balance, onDone: () => UI.go("/app/accounts.html") }); }; } });
+}
 async function submitAdd(body, f, close) {
   const r = await UI.api("/api/accounts-add", { body });
   const pw = f.querySelector('[name="password"],[name="appPassword"]'); if (pw) pw.value = ""; // 🔴 자격은 요청 후 즉시 비운다
   if (!r.ok) {
+    if (r.slotOffer) return slotOfferSheet(r, close);   // [R7 §3.6] 한도 402 에 상품이 실려 오면 업셀 시트 대신 «사기»
     if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
     if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);

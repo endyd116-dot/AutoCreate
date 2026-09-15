@@ -15,6 +15,8 @@
   const todayYmd = ymd(0);
   const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
   const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
+  const slotsKnob = qs.get("slots") || "";        // [R7 §3.6] none·waiting·active·paused — 계정 슬롯 상태
+  const slotCoinsShort = qs.get("slotCoins") === "0";
   const usedSlotOn = qs.get("usedSlot") !== "0";   // [R7 §1.6] 사람이 만들면 오늘 자리를 쓴다(기본) · 0 이면 예전처럼 새 자리
   const slotRace = qs.get("slotRace") === "1";      // 제안엔 «오늘 자리»가 있었는데 확정 사이에 그 자리가 찼다(확정 응답에 usedTodaySlot 없음 = 확정이 정본)
   const judgePending = qs.get("judgePending") === "1";   // [R7 §1.5] 못 잰 축(보류)이 있는 심사표
@@ -196,6 +198,10 @@
       { id: 2, channel: "tistory", kind: "post", accountMode: "fixed", accountId: 2, every: "week", count: 2, weekdays: [2, 4], preferredHour: 13, active: true },
       { id: 3, channel: "youtube_shorts", kind: "shorts", accountMode: "auto", every: "week", count: 2, weekdays: [2, 5], preferredHour: 18, active: true }, // [P1R5] kind shorts 규칙(주 2회 · 편당 video_60)
     ],
+    /* [R7 §3.6] 산 계정 슬롯 — ?slots=waiting|active|paused (기본 없음) */
+    slots2: slotsKnob === "waiting" ? [{ id: 4101, kind: "account_slot", status: "waiting_ip", coins: 24, krw: 12000, accountId: null, proxyId: null, autoRenew: true, periodsCharged: 0, label: "계정 1개 더 + 전용 IP", managed: false }]
+      : slotsKnob === "active" ? [{ id: 4102, kind: "account_slot", status: "active", coins: 24, krw: 12000, accountId: 1, proxyId: 9, autoRenew: true, periodsCharged: 2, startedAt: iso(now - 12 * 86400e3), expiresAt: iso(now + 18 * 86400e3), daysLeft: 18, label: "계정 1개 더 + 전용 IP", managed: false }]
+      : slotsKnob === "paused" ? [{ id: 4103, kind: "account_slot_managed", status: "paused", coins: 50, krw: 25000, accountId: 4, proxyId: null, autoRenew: true, periodsCharged: 1, pausedAt: iso(now - 2 * 86400e3), label: "관리형 계정 1개", managed: true }] : [],
     kindsSet: kindsKnob !== "none",   // [R7 §1.1] 온보딩을 안 거친 테넌트(?kinds=none) — 토글은 보이고 꺼짐
     settings: { kinds: kindsKnob === "text" || kindsKnob === "none" ? ["text"] : ["text", "video"], autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: planKnob === "starter" && !keptAuto ? "require_confirm" : "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
@@ -478,6 +484,21 @@
       return { ok: true, taxInvoice: inv.taxInvoice }; },
     /* ── [P1R6] §3.1 관리형 러너 신청(플랜 게이트 · 요금은 서버 값) ── */
     /* [B2 §2.4] 계정당 월요금(전용 IP 포함) — GET { price(계정당), max(플랜 최대 계정 수), accounts? } · POST { accounts } */
+    /* [R7 §3.6 · B] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 구매 시점엔 차감 0(IP 배정될 때 첫 30일치) */
+    "account-slots": () => { const offers = [
+        { kind: "account_slot", coins: 24, krw: 12000, days: 30, label: "계정 1개 더 + 전용 IP", desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 프로그램으로 돌아가요.", managed: false },
+        { kind: "account_slot_managed", coins: 50, krw: 25000, days: 30, label: "관리형 계정 1개", desc: "계정 하나를 더 쓰고, 전용 IP 와 우리 서버 실행까지 포함이에요. PC 를 켜 두지 않아도 돼요.", managed: true }];
+      return { ok: true, slots: S.slots2, offers, balance: S.coins, includedAccounts: 15, extraSlots: S.slots2.filter((s) => s.status !== "cancelled").length,
+        usedAccounts: S.accounts.length, canAddNow: S.accounts.length < 15 + S.slots2.length, note: "남은 기간 환불은 없어요. 다음 갱신만 끌 수 있어요." }; },
+    "account-slot-buy": (b) => { const nw = notWritable(); if (nw) return nw;
+      const P = { account_slot: { coins: 24, krw: 12000, label: "계정 1개 더 + 전용 IP", managed: false }, account_slot_managed: { coins: 50, krw: 25000, label: "관리형 계정 1개", managed: true } }[String(b.kind || "")];
+      if (!P) return err("kind", "어떤 상품인지 골라 주세요.");
+      const cnt = Math.trunc(Number(b.count) || 1); if (cnt < 1 || cnt > 5) return err("count", "한 번에 5개까지 살 수 있어요.");
+      const need = P.coins * cnt; if (slotCoinsShort || S.coins < need) return err("coins", "코인이 모자라요.", { need, balance: S.coins });
+      const made = []; for (let i = 0; i < cnt; i++) { const s = { id: S.nextId++, kind: b.kind, status: "waiting_ip", coins: P.coins, krw: P.krw, accountId: null, proxyId: null, autoRenew: true, periodsCharged: 0, label: P.label, managed: P.managed }; S.slots2.unshift(s); made.push(s); }
+      return { ok: true, slots: made, balance: S.coins, waitingIp: cnt };   /* 🔴 산 시점엔 차감 0 — IP 가 붙을 때 빠진다 */ },
+    "account-slot-renew": (b) => { const s = S.slots2.find((x) => x.id === Number(b.id)); if (!s) return err("not_found", "그 자리를 찾을 수 없어요.", { status: 404 });
+      s.autoRenew = !!b.autoRenew; return { ok: true, slot: s }; },
     "managed-runner": (b) => { if (b && (b.devices !== undefined || b.accounts !== undefined)) {
         if (managedDeny) return { ok: false, reason: "plan_limit", step: "plan_feature", feature: "managedRunner", planKey: "starter", error: "대신 돌려주는 PC는 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.", status: 402 };
         const n = Number(b.accounts ?? b.devices) || 0; if (n < 1 || n > 15) return err("accounts", "계정 수는 1~15개 사이로 골라 주세요(지금 요금제 기준).");
@@ -520,7 +541,10 @@
     "accounts-add": (b) => {
       if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
       if (planLimit === "accounts") return { ok: false, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 3, planKey: "starter", error: "계정은(는) 3개까지예요. Pro 로 바꾸면 더 늘어나요.", status: 402 };
-      if (S.accounts.length >= 5) return err("limit", "이 요금제에서는 계정을 5개까지 연결할 수 있어요.");
+      if (S.accounts.length >= 5) return { ok: false, status: 402, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 5, planKey: "pro",
+        error: "계정은 지금 5개까지예요. 계정 1개를 더 쓰려면 코인으로 살 수 있어요(전용 IP 포함).", balance: S.coins,
+        slotOffer: { offers: [{ kind: "account_slot", coins: 24, krw: 12000, days: 30, label: "계정 1개 더 + 전용 IP", desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 프로그램으로 돌아가요.", managed: false },
+            { kind: "account_slot_managed", coins: 50, krw: 25000, days: 30, label: "관리형 계정 1개", desc: "계정 하나를 더 쓰고, 전용 IP 와 우리 서버 실행까지 포함이에요. PC 를 켜 두지 않아도 돼요.", managed: true }], extraSlots: S.slots2.length, buyPath: "/api/account-slot-buy" } };
       if (S.accounts.some((a) => a.channel === b.channel && a.handle === b.handle)) return err("duplicate", "이미 연결한 계정이에요.");
       if (b.channel === "wordpress" && b.appPassword === "wrong") return err("wp_auth", "워드프레스 로그인 정보를 확인해 주세요.");
       if (["naver_blog", "tistory", "naver_clip"].includes(b.channel) && (!b.loginId || !b.password)) return err("creds", "아이디와 비밀번호를 입력해 주세요.");
@@ -772,7 +796,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
