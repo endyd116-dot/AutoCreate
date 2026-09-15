@@ -18,7 +18,7 @@ import { HOOK_TYPES, PALETTES } from "./video/scenes";
 import { GEMINI_VOICES } from "./video/tts";
 import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
 import { precheckVideoBudget, triggerVideo } from "./video/gen";
-import { contractFor, pickFormat, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract } from "./writing-contracts";
+import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract } from "./writing-contracts";
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { balance, consume, refundPiece } from "./coin-ledger";
 import { coinCostOf, videoCoinItem } from "./coin-table";
@@ -27,6 +27,8 @@ import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
 import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
+import { pickFormatByPrint, type FormatPick } from "./format-pick";        // [R8 §2.2] 골격 지문으로 format 고르기
+import { printFromMeta, type StructurePrint } from "./structure-print";    // 축이 쓰는 지문 그대로
 import { checkAiCostCap, requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
 import { findBannedCategory, isHealthTopic, HEALTH_FORBIDDEN_FORMATS } from "./banned-categories";
@@ -49,6 +51,12 @@ export interface PieceSpec {
   schedule: { at: string; slotReason: string }; coinCost: number;
   /** 추가(계약 외 · A 무시 가능): 채널별로 가른 앵글 — content-gen 재료. */
   angle: string;
+  /**
+   * [R8 §2.2] **이 구성을 왜 골랐나** — 골격 지문으로 잰 값과 사람말 사유.
+   *   🔴 이게 없으면 §2.2 는 «돌긴 도는데 아무도 못 보는» 기능이다(AC-29). `pieces.meta.formatPick` 으로 내려가
+   *      검수 화면·감사에서 그대로 읽힌다. 자동 경로도 같은 자리에 싣는다(둘이 다른 곳에 적으면 화면이 갈린다).
+   */
+  formatPick?: FormatPick;
   /** [P1R5 §1.1] 글/영상 — 기본 "post"(없으면 글 · R1~R4 호환). */
   kind?: "post" | "video";
   /** [P1R5 §1.1] kind video 일 때만. */
@@ -103,6 +111,22 @@ async function recentFormats(tid: number, accountId: number | null, channel: str
     ? await q(sql`SELECT format FROM pieces WHERE tenant_id = ${tid} AND account_id = ${accountId} AND status <> 'rejected' ORDER BY id DESC LIMIT 5`)
     : await q(sql`SELECT format FROM pieces WHERE tenant_id = ${tid} AND channel = ${channel} AND status <> 'rejected' ORDER BY id DESC LIMIT 5`);
   return rows.map((r) => String(r.format || "")).filter(Boolean);
+}
+
+/**
+ * [R8 §2.2] 그 채널의 **최근 글 골격 지문** — format 을 «생김새»로 고르는 재료.
+ *   🔴 `structure_repeat` 축(`lib/content-approve.ts checkStructure`)이 보는 것과 **같은 자리·같은 조건**을 읽는다
+ *      (같은 채널 · 영상 제외 · 30일 · 최신 10편). 고르는 잣대와 재는 잣대가 갈리면 둘이 영원히 싸운다(메인 지시).
+ *   지문이 없는 옛 글은 빠진다 — 그래서 빈 배열이면 «못 쟀다»이고, 고르기는 종전 이름 순서로 떨어진다(AC-9).
+ */
+async function recentPrints(tid: number, channel: string): Promise<StructurePrint[]> {
+  try {
+    const rows = await q(sql`SELECT meta->'structurePrint' AS sp FROM pieces
+      WHERE tenant_id = ${tid} AND channel = ${channel} AND kind <> 'video'
+        AND meta->'structurePrint' IS NOT NULL AND created_at > NOW() - interval '30 days'
+      ORDER BY id DESC LIMIT 10`);
+    return rows.map((r) => printFromMeta(r.sp)).filter((x): x is StructurePrint => !!x);
+  } catch (e) { console.warn("[director] 골격 지문 조회 실패 — 이름 순서로 고른다", String((e as Error)?.message ?? e).slice(0, 120)); return []; }
 }
 
 /** 그 계정의 직전 영상 포맷(meta.video.format) — 포맷 로테이션 재료. */
@@ -244,7 +268,12 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
     const cPick = healthTopic
       ? { ...c, formats: (c.formats.filter((f) => !HEALTH_FORBIDDEN_FORMATS.includes(f)) as FormatKey[]).length ? (c.formats.filter((f) => !HEALTH_FORBIDDEN_FORMATS.includes(f)) as FormatKey[]) : c.formats }
       : c;
-    const format = pickFormat(cPick, await recentFormats(tid, acc?.id ?? null, ch), `${topic.id}:${ch}:${acc?.id ?? 0}`);
+    /* [R8 §2.2] 🔴 **골격 지문을 보고 고른다** — 이름 로테이션만으로는 «생김새가 닮은 글»을 못 피한다.
+       축이 «겹친다»고 말해도 고르는 쪽이 안 들으면 다음 글도 또 겹쳤다(재기만 하고 피하지 않던 상태). */
+    const fp = pickFormatByPrint(cPick, await recentFormats(tid, acc?.id ?? null, ch), `${topic.id}:${ch}:${acc?.id ?? 0}`, null, await recentPrints(tid, ch),
+      { imageCount: defaultImageCount(ch), affiliate: !!affiliateBase, intent, title: topic.title });   // 넷 다 여기서 이미 정해져 있다(지어낸 값 0)
+    const format = fp.format;
+    if (fp.switched) console.info(`[director] 골격 겹침으로 구성 갈아탐 tid=${tid} ch=${ch} → ${fp.format} (${fp.why})`);
     const chTaken = taken.byChannel.get(ch) ?? [];
     const sched = pickPublishAt({ channel: ch, goldenHours: acc?.goldenHours ?? null, taken: chTaken, takenSameAccount: acc ? (taken.byAccount.get(acc.id) ?? []) : [], minGapMin: acc?.minGapMin });
     taken.byChannel.set(ch, [...chTaken, sched.at]);
@@ -273,6 +302,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory" },
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
       schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(imageCount), angle: topic.angle,
+      formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
     });
   }
 
@@ -498,7 +528,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : "blog";
       const meta = isVideo
         ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
-        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 };
+        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}) };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);
