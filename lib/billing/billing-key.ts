@@ -8,13 +8,17 @@
  *     빌키 등록 시 다른 테넌트의 `trial_fp` 와 같으면 **이 테넌트의 체험을 즉시 끝낸다**(trial_ends_at = now · 알림 «이미 체험을 쓰셨어요»). 카드번호 자체는 어디에도 남기지 않는다.
  *   주문번호 `AC-BK-{tid}-{base36}`(인증 라인) · **`AC-BKK-…`(비인증 라인)** — 콜백엔 세션이 없고 빌키 행도 아직 없어서, 어느 MID 로 등록했는지를 **주문번호가 스스로 말한다**(승인은 같은 MID 여야 한다 · KICC 규칙).
  *   발급된 MID 는 `billing_keys.pg_mid` 에 남긴다 — 청구·삭제가 그 MID 로만 되기 때문(§1.6).
+ *   🔴 **빌키 발급 = keyin MID 고정**(비인증 MID 가 등록돼 있으면 · 2026-09-15 라이브 실측): 인증 MID 로 빌키 등록창을 열면 카드사가
+ *      «8373 카드사 전화요망»으로 거절한다(카드 문제가 아니라 **그 MID 에 자동결제 발급이 안 열려 있는 것**). 함께워크ON 도 그래서
+ *      «keyin = 비인증(카드번호 직접입력)·**빌링키 발급**»으로 쓴다. 운영 토글(`payment.keyinEnabled`)은 «고객이 고르는 비인증 단건 결제»
+ *      스위치라 여기와 무관 — 빌키 라인은 코드가 정한다. keyin MID 가 없으면 auth 로(단일 MID 환경 그대로).
  */
 import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { tenantOwner } from "../subscription";
-import type { PayRoute } from "../kicc";
+import { isKeyinMidConfigured, type PayRoute } from "../kicc";
 
 const n = (v: unknown) => Number(v || 0);
 /**
@@ -36,7 +40,7 @@ export type StartKeyResult = { ok: true; orderNo: string; url: string; form: Rec
 export async function startBillingKey(tid: number, opts: { userAgent?: string | null; returnBase?: string; route?: PayRoute; probe?: boolean }): Promise<StartKeyResult> {
   const { isKiccConfigured, registerTrade, deviceTypeFromUA } = await import("../kicc");
   if (!isKiccConfigured()) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요" };
-  const route: PayRoute = opts.route === "keyin" ? "keyin" : "auth";   // 판정은 lib/pay-route.ts resolvePayRoute 한 곳
+  const route: PayRoute = isKeyinMidConfigured() ? "keyin" : (opts.route === "keyin" ? "keyin" : "auth");   // 🔴 빌키 = keyin 고정(등록돼 있으면) · 토글 무관
   const owner = await tenantOwner(tid);
   const orderNo = bkOrderNo(tid, route, Date.now(), opts.probe === true);   // probe = 개통 실측용(결과를 화면에 바로 보여 준다)
   const base = (opts.returnBase || process.env.SITE_URL || "").replace(/\/$/, "");
