@@ -271,6 +271,20 @@ const rmUi = bracketList(uiJs, "UI.ADS_REMOVABLE =").sort();
 rec("🔴 «뗄 수 있는 길» 목록이 서버와 같다(티스토리는 못 뗀다)", rmSrv.length > 0 && rmSrv.join(",") === rmUi.join(","),
   rmSrv.join(",") === rmUi.join(",") ? `${rmSrv.length}가지` : `서버 «${rmSrv.join(" ")}» ≠ 화면 «${rmUi.join(" ")}»`, { rmSrv, rmUi });
 
+/* ───────── ㉗ 🔴 **내 AI 키가 안 될 때의 사유 셋**(서버 BYO_ERROR_TEXT ↔ 화면 ↔ 모의) ─────────
+   왜: 목록(`GET /api/ai-keys`)은 `lastErrorKind` 만 주고 **문장은 안 준다**. 그래서 문장이 화면 쪽에 한 벌 더 생겼다.
+   이 셋은 «오류»가 아니라 **고객이 할 일이 서로 다른 셋**이다(키를 다시 복사 / 기다린다 / API 를 켠다).
+   서버가 문구를 고쳤는데 화면이 옛 문장을 말하면 고객은 **엉뚱한 일을 한다** — 코인표(⑧-b)와 같은 이유로 여기서 견준다.
+   🔴 꽂을 때의 실패 문장은 서버가 그때그때 보내 준다(`error`) — 화면은 그걸 그대로 쓴다. 여기서 재는 건 **목록 쪽** 한 벌이다. */
+const byoSrv = objectMap(read("lib/ai-key-byo.ts"), "BYO_ERROR_TEXT: Record<ByoErrorKind, string> =") || new Map();
+const byoUi = objectMap(uiJs, "UI.BYO_ERROR_TEXT =") || new Map();
+const byoMock = objectMap(mockJs, "const BYO_ERROR_TEXT =") || new Map();
+const byoDiff = [...byoSrv].filter(([k, v]) => byoUi.get(k) !== v).map(([k, v]) => `${k}: 화면 «${byoUi.get(k) ?? "없음"}» ≠ 서버 «${v}»`);
+const byoExtra = [...byoUi].filter(([k]) => !byoSrv.has(k)).map(([k]) => `화면에만 «${k}»`);
+rec("🔴 AI 키 실패 사유 셋이 서버와 글자까지 같다(화면)", byoSrv.size === 3 && byoDiff.length === 0 && byoExtra.length === 0,
+  [...byoDiff, ...byoExtra].join(" | ") || `${byoSrv.size}갈래(${[...byoSrv.keys()].join("·")})`, [...byoDiff, ...byoExtra]);
+const byoMockDiff = [...byoSrv].filter(([k, v]) => byoMock.get(k) !== v).map(([k]) => k);
+rec("AI 키 실패 사유 셋이 모의에도 그대로 있다", byoMockDiff.length === 0 ? true : "WARN", byoMockDiff.join(" ") || "같음", byoMockDiff);
 /* ───────── ⑨ 🔴 **시스템 용어가 시트 안에 숨어 있지 않나**(정적) ─────────
    왜: 화면 감사(scratchpad/shot.mjs)는 **열려 있는 화면만** 본다 — 바텀시트 안 문구는 열어야 보인다.
    2026-09-15 실측: 계정 연결 시트가 «발행할 때만 **러너**가 열어요»라고 말하고 있었다(고객 금지어 · §13.0 «러너»→«내 PC 프로그램»).

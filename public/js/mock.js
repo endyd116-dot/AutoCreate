@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 9;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 10;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -44,6 +44,11 @@
   const selfKnob = qs.get("self") || "";
   const tdKnob = qs.get("td") || "";
   const claimsKnob = qs.get("claims") === "1";
+  /* [R8-B §4.4] 내 AI 키 손잡이 — ?aikey=ok|invalid|resting|noenc (기본: 안 꽂은 집) · ?aifb=1 = 대신 만들기를 이미 켜 둔 집
+     🔴 `noenc` 는 «맡아 둘 수 없는 상태»(서버 `configured:false`)다 — 그때 화면이 꽂는 자리를 안 그리는지 보려고 둔다. */
+  const aiKeyKnob = qs.get("aikey") || "";
+  const aiNoEnc = aiKeyKnob === "noenc";
+  const aiFbKnob = qs.get("aifb") === "1";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -239,9 +244,22 @@
   const AVATAR = "/icon.svg";
   /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
   const COIN = { blog: 1, image: 1, cardnews: 3 };
+  /* [R8-B §4.4] 🔴 lib/ai-key-byo.ts BYO_ERROR_TEXT **그대로** — 사유 셋은 고객이 할 일이 서로 달라서 갈라 놓은 것이다. */
+  const BYO_ERROR_TEXT = {
+    invalid: "키가 맞지 않아요. 구글 AI 스튜디오에서 키를 다시 복사해 주세요.",
+    quota: "키가 이번 한도에 걸렸어요. 한도가 풀리면 다시 만들어요.",
+    forbidden: "이 키에 권한이 없어요. 키를 만든 프로젝트에서 Generative Language API 를 켜 주세요.",
+  };
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     v: MOCK_V, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100,
+    /* [R8-B §4.4] 내 AI 키(tenant_ai_keys) — 🔴 **평문은 여기에도 없다**: `masked` 는 서버 `maskSecret` 과 같은 모양(앞 2자 + 별 8개).
+       `resting` 은 «한도에 걸려 60초 쉬는 중»이고 status 는 그대로 active 다(쉬는 키는 건너뛰고 다음 키로 간다 · lib/ai-key-byo.ts byoKeyFor). */
+    aiKeys: aiKeyKnob === "ok" ? [{ id: 91, label: "내 키", provider: "gemini", status: "active", masked: "AI********", lastOkAt: iso(now - 2 * 3600e3), lastErrorAt: null, lastErrorKind: null, resting: false }]
+      : aiKeyKnob === "invalid" ? [{ id: 91, label: "내 키", provider: "gemini", status: "invalid", masked: "AI********", lastOkAt: iso(now - 3 * 86400e3), lastErrorAt: iso(now - 40 * 60e3), lastErrorKind: "invalid", resting: false }]
+      : aiKeyKnob === "resting" ? [{ id: 91, label: "내 키", provider: "gemini", status: "active", masked: "AI********", lastOkAt: iso(now - 10 * 60e3), lastErrorAt: iso(now - 30e3), lastErrorKind: "quota", resting: true }]
+      : [],
+    aiFallback: aiFbKnob,
     /* [R7 §3.1] 탈퇴 예약 — 서버는 tenants.closed_at·purge_at 에 둔다. null = 신청 안 한 집 */
     close: closedKnob ? { closedAt: iso(now - 2 * 86400e3), purgeAt: iso(now + 28 * 86400e3), reason: null } : null, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
@@ -1128,6 +1146,25 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       return { ok: true, closedAt: S.close.closedAt, purgeAt: S.close.purgeAt, graceDays: GRACE };
     },
     "account-restore": () => { S.close = null; return { ok: true, status: "trial", closed: false, graceDays: 30 }; },
+    /* [R8-B §4.4] 내 AI 키 — 서버 `netlify/functions/ai-key.ts` · `lib/ai-key-byo.ts` 모양 그대로.
+       🔴 사유 셋의 문장은 서버 `BYO_ERROR_TEXT` **글자 그대로**(화면 `UI.BYO_ERROR_TEXT` 와 하니스 ㉗이 셋을 대조한다).
+       🔴 꽂을 때 서버는 **그 키로 한 번 걸어 본다** — 모의는 그 대신 넣은 글자로 갈라 준다:
+          20자 미만 → invalid · «quota» 포함 → quota · «forbid» 포함 → forbidden · 그 밖 → 성공.
+          (세 갈래를 화면이 서로 다르게 그리는지 재려면 세 갈래로 들어갈 길이 있어야 한다.) */
+    "ai-keys": () => ({ ok: true, keys: S.aiKeys, fallback: S.aiFallback, configured: !aiNoEnc }),
+    "ai-key-add": (b) => {
+      if (aiNoEnc) return { ok: false, step: "not_configured", error: "지금은 키를 안전하게 보관할 수 없어요. 운영팀에 알려 주세요.", status: 503 };
+      const k = String(b.key || "").trim();
+      const kind = k.length < 20 ? "invalid" : /quota/i.test(k) ? "quota" : /forbid/i.test(k) ? "forbidden" : null;
+      if (kind) return { ok: false, step: kind, error: BYO_ERROR_TEXT[kind], status: 400 };
+      const id = S.nextId++;
+      S.aiKeys.push({ id, label: String(b.label || "내 키").slice(0, 40), provider: "gemini", status: "active", masked: k.slice(0, 2) + "*".repeat(Math.min(8, Math.max(3, k.length - 2))), lastOkAt: iso(Date.now()), lastErrorAt: null, lastErrorKind: null, resting: false });
+      return { ok: true, id, keys: S.aiKeys, status: 201 };
+    },
+    /* 🔴 뺀 키로 쓴 기록(ai_usage)은 서버가 **남긴다** — 모의엔 그 표가 없지만 화면 문구가 그렇게 말하므로 여기 적어 둔다. */
+    "ai-key-delete": (b) => { const i = S.aiKeys.findIndex((k) => k.id === Number(b.id)); if (i < 0) return { ok: false, error: "그 키를 찾을 수 없어요.", step: "not_found", status: 404 }; S.aiKeys.splice(i, 1); return { ok: true, keys: S.aiKeys }; },
+    "ai-key-fallback": (b) => { S.aiFallback = b.on === true; return { ok: true, fallback: S.aiFallback,
+      message: S.aiFallback ? "내 키가 안 될 때는 저희 키로 대신 만들어 드려요. 그때마다 알려 드릴게요." : "이제 내 키가 안 되면 그 회차는 만들지 않고 알려만 드려요." }; },
     /* §6 코인 */
     "coins-balance": () => { const purchased = Math.max(0, S.billing.ledger.filter((l) => l.bucket === "purchased").reduce((a, l) => a + l.amount, 0)); return { ok: true, balance: S.coins, included: Math.max(0, S.coins - purchased), purchased, recent: S.billing.ledger.slice(0, 20).map((l) => ({ kind: l.kind, delta: l.amount, item: l.item, reason: l.reason, createdAt: l.at })) }; },
   };
@@ -1146,7 +1183,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

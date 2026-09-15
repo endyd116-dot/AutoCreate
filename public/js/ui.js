@@ -190,7 +190,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.15";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
+  UI.APP_VERSION = "2026.09.16";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).
@@ -724,5 +724,16 @@
   UI.go = (href) => location.assign(href);
   /* ── 바텀시트 폼 안 «확인 한 번 더»(팝업 모달 금지 · 시트 안 인라인 확인) ── */
   /* `yes` 를 주면 «네, 할게요» 대신 **그 동작의 이름**을 쓴다 — 되돌릴 수 없는 일일수록 단추가 무슨 일을 하는지 말해야 한다(§5E). */
+  /* ── [R8-B §4.4] 고객이 꽂은 AI 키 — 🔴 **사유 셋의 사람말은 서버가 정본**(`lib/ai-key-byo.ts BYO_ERROR_TEXT`).
+       목록(`GET /api/ai-keys`)은 `lastErrorKind` 만 주고 문장은 안 준다. 그래서 여기 **글자 그대로** 옮겨 두고,
+       하니스(`verify-label-surface` ㉗)가 서버 파일과 바이트로 대조한다 — 두 곳이 갈리면 빨강이다(코인표 ⑧-b 와 같은 방식).
+     🔴 사유를 «오류»로 뭉치지 않는다: 고객이 **할 일이 서로 다르다**(키를 다시 복사 / 기다린다 / API 를 켠다). ── */
+  UI.BYO_ERROR_TEXT = {
+    invalid: "키가 맞지 않아요. 구글 AI 스튜디오에서 키를 다시 복사해 주세요.",
+    quota: "키가 이번 한도에 걸렸어요. 한도가 풀리면 다시 만들어요.",
+    forbidden: "이 키에 권한이 없어요. 키를 만든 프로젝트에서 Generative Language API 를 켜 주세요.",
+  };
+  /* 키를 만드는 자리 — 서버 문장이 «구글 AI 스튜디오»라고 말하므로 화면은 **그 자리로 데려다준다**(CLAUDE §9-4 «대신 해 줄 수 있는 것»). */
+  UI.AI_KEY_URL = "https://aistudio.google.com/apikey";
   UI.confirmRow = (host, msg, onYes, yes) => { host.innerHTML = `<p class="muted" style="margin:8px 0 12px">${UI.esc(msg)}</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn danger" type="button" data-yes>${UI.esc(yes || "네, 할게요")}</button></div>`; host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; }; host.querySelector("[data-yes]").onclick = onYes; };
 })();

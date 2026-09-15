@@ -1176,6 +1176,10 @@ await load();
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
+<div class="group" id="ai-key"><div class="gt">내 AI 키</div><div id="akBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="akFbg" hidden><div class="gt">내 키가 안 될 때</div>
+  <div class="fr"><div class="fl">저희 키로 대신 만들기<small id="akFbD">내 키가 안 되면 그 회차는 만들지 않고 알려드려요</small></div><button class="toggle" type="button" id="akFb" aria-checked="false" aria-label="내 키가 안 될 때 저희 키로 대신 만들기"></button></div>
+</div>
 <div class="group">
   <div class="gt">계정 · 보안</div>
   <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
@@ -1380,6 +1384,119 @@ function closeSheet() {
     } });
 }
 loadClose();
+
+/* ══ [R8-B §4.4 · DESIGN §3.3] 🔴 **내 AI 키** — 서버 `netlify/functions/ai-key.ts`
+     (GET `/api/ai-keys` → `{ keys:[{id,label,status,masked,lastOkAt,lastErrorKind,resting}], fallback, configured }` · POST `ai-key-add`·`ai-key-delete`·`ai-key-fallback`).
+     알림 `ai_key_fallback` 의 링크가 **바로 이 자리**다(`/app/settings.html#ai-key` · lib/ai-key-byo.ts noteFallback) — 그래서 그려진 뒤에 데려간다.
+   🔴 **평문 키는 어디에도 안 온다** — 서버가 주는 건 `masked` 뿐이다. 그러니 «키 보기»를 만들지 않는다(화면이 키를 되보여 줄 길 자체가 없다).
+   🔴 `configured:false` = «안전하게 맡아 둘 수 없는 상태». 그때는 **꽂는 자리를 아예 안 그린다** — 넣어도 저장이 안 되는 칸을 두지 않는다(서버 주석과 같은 뜻).
+   🔴 실패 사유 셋(`invalid`·`quota`·`forbidden`)은 **할 일이 서로 달라서** 갈라 놓은 것이다. 문장은 서버 정본(`UI.BYO_ERROR_TEXT` · 하니스 ㉗이 대조).
+   🔴 대신 만들기는 **기본 꺼짐**이고 **켤 때 무엇을 켜는지 먼저 말한다**(CLAUDE §9-2). 끄는 건 한 번에 꺼진다(§9-3 되돌릴 길).
+      문구에 «코인 N개»를 쓰지 않는다 — 지금은 편당 코인 말고 더 받는 게 없다(돈 문장은 서버 것만 · lib/ai-key-byo.ts noteFallback 주석). */
+const AK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l2 2M14 9l2 2"/></svg>';
+let AK = null;
+const akPill = (k) => k.status === "invalid" ? '<span class="pill danger">안 돼요</span>' : k.resting ? '<span class="pill warn">잠깐 쉬어요</span>' : '<span class="pill ok">쓰는 중</span>';
+function akLine(k) {
+  if (k.status === "invalid") return UI.BYO_ERROR_TEXT[k.lastErrorKind] || "지금은 이 키로 만들지 못하고 있어요";
+  if (k.resting) return UI.BYO_ERROR_TEXT.quota;
+  return k.lastOkAt ? `${UI.ago(k.lastOkAt)} 이 키로 만들었어요` : "아직 이 키로 만든 적이 없어요";   // 🔴 «없음 ≠ 0»(AC-9) — 안 쓴 것이지 0번 성공한 게 아니다
+}
+const akFbSay = (on) => on ? "내 키가 안 되면 저희 키로 대신 만들어 드리고, 그때마다 알려드려요" : "내 키가 안 되면 그 회차는 만들지 않고 알려드려요";
+async function loadAiKeys() {
+  const r = await UI.api("/api/ai-keys", { noGate: true });
+  AK = r.ok ? r : null;
+  drawAiKeys();
+  if (location.hash === "#ai-key") UI.$("#ai-key").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+function drawAiKeys() {
+  const host = UI.$("#akBody"), fbg = UI.$("#akFbg");
+  fbg.hidden = true;
+  if (!AK) { host.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
+  if (!AK.configured) {
+    /* 🔴 꽂으라고 하지 않는다. ①사실 ②그동안 어떻게 되는지 ③우리가 대신 하는 것 — 겁주지 않는다(CLAUDE §3). */
+    host.innerHTML = `<div class="row"><span class="mk soft">${AK_ICON}</span><div class="l"><span class="t">지금은 내 키를 맡아 둘 수 없어요</span><span class="d wrap">안전하게 맡아 두는 준비가 아직이에요. 그동안은 저희 키로 만들어 드리고, 준비되면 이 자리에서 꽂으실 수 있어요.</span></div></div>`;
+    return;
+  }
+  const keys = AK.keys || [];
+  host.innerHTML = keys.map((k) => `<button type="button" class="row tap" data-ak="${k.id}"><span class="mk ${k.status === "invalid" ? "warn" : "soft"}">${AK_ICON}</span><div class="l"><span class="t wrap">${UI.esc(k.label)} <span class="muted" style="font-weight:500">${UI.esc(k.masked)}</span></span><span class="d wrap">${UI.esc(akLine(k))}</span></div>${akPill(k)}${UI.chev}</button>`).join("")
+    + `<button type="button" class="row tap" id="akAdd"><div class="l"><span class="t">${keys.length ? "키 하나 더 꽂기" : "내 키 꽂기"}</span><span class="d wrap">${keys.length ? "쉬거나 안 되는 키는 건너뛰고 다음 키로 만들어요" : "지금은 저희 키로 만들고 있어요 · 내 키를 꽂으면 그 키로 만들어요"}</span></div>${UI.chev}</button>`;
+  UI.$$("#akBody [data-ak]").forEach((b) => b.onclick = () => akSheet(keys.find((k) => k.id === Number(b.dataset.ak))));
+  UI.$("#akAdd").onclick = akAddSheet;
+  /* 🔴 꽂은 키가 하나도 없으면 이 토글은 **뜻이 없다**(안 꽂으면 늘 저희 키다) — 없는 길을 만들지 않는다. */
+  if (!keys.length) return;
+  fbg.hidden = false;
+  const tg = UI.$("#akFb"); tg.setAttribute("aria-checked", AK.fallback ? "true" : "false");
+  UI.$("#akFbD").textContent = akFbSay(!!AK.fallback);
+  if (!tg.dataset.bound) { tg.dataset.bound = "1"; UI.toggle(tg, async (next) => { if (next) { akFbAsk(); return false; } return await akFbSet(false); }); }
+}
+/* 켜는 쪽만 한 단계 더 — «무엇을 켜는지»를 읽고 나서 켠다(끄는 쪽은 한 번에 꺼진다). */
+function akFbAsk() {
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">내 키가 안 되는 <b style="color:var(--ink)">그 회차만</b> 저희 키로 대신 만들어 드려요. 대신 만든 날은 알림으로 알려드리고, 여기서 언제든 다시 끄실 수 있어요.</p>
+    <p class="muted" style="margin:0">꺼 두시면 내 키가 안 되는 회차는 만들지 않고 알려드려요.</p>
+    <div class="cta"><button class="btn primary" type="button" id="akFbGo">켜기</button></div>`,
+    { title: "대신 만들기를 켤까요?", onOpen: (sh, close) => { sh.querySelector("#akFbGo").onclick = async (e) => { e.target.disabled = true; const r = await akFbSet(true); e.target.disabled = false; if (r !== false) close(); }; } });
+}
+async function akFbSet(on) {
+  const r = await UI.api("/api/ai-key-fallback", { body: { on } });
+  if (!r.ok) { UI.toast(r.gated ? "" : r.error || "바꾸지 못했어요"); return false; }
+  AK.fallback = r.fallback;
+  UI.$("#akFb").setAttribute("aria-checked", r.fallback ? "true" : "false");
+  UI.$("#akFbD").textContent = akFbSay(r.fallback);
+  UI.toast(r.message || (r.fallback ? "대신 만들기를 켰어요" : "대신 만들기를 껐어요"));   // 🔴 돈이 걸린 문장은 서버 것을 그대로
+  return r.fallback === on ? undefined : false;
+}
+function akSheet(k) {
+  if (!k) return;
+  const bad = k.status === "invalid";
+  UI.sheet(`<div class="kv"><span class="k">키</span><span class="v">${UI.esc(k.masked)}</span></div>
+    <div class="kv"><span class="k">상태</span><span class="v">${akPill(k)}</span></div>
+    ${k.lastOkAt ? `<div class="kv"><span class="k">마지막으로 쓴 때</span><span class="v">${UI.esc(UI.dateKST(k.lastOkAt))} ${UI.esc(UI.timeKST(k.lastOkAt))}</span></div>` : ""}
+    <p class="muted" style="margin:12px 0 0">${UI.esc(akLine(k))}</p>
+    ${bad ? `<p class="muted" style="margin:6px 0 0">고친 키는 <a href="${UI.AI_KEY_URL}" target="_blank" rel="noopener">구글 AI 스튜디오</a>에서 다시 복사하실 수 있어요. 새 키를 꽂으면 바로 그 키로 만들어요.</p>` : ""}
+    <div id="akDel"></div>
+    <div class="cta" id="akCta">${bad ? `<button class="btn primary" type="button" id="akRe">새 키 꽂기</button>` : ""}<button class="btn secondary" type="button" id="akDelGo">이 키 빼기</button></div>`,
+    { title: k.label, onOpen: (sh, close) => {
+      const re = sh.querySelector("#akRe"); if (re) re.onclick = () => { close(); setTimeout(akAddSheet, 300); };
+      sh.querySelector("#akDelGo").onclick = () => {
+        const h = sh.querySelector("#akDel"), cta = sh.querySelector("#akCta");
+        /* 🔴 되돌릴 수 없는 동작이라 한 단계 확인한다(§9 «게이트»가 아니라 고객을 위한 확인). 쓴 기록이 남는다는 것도 같이 말한다. */
+        UI.confirmRow(h, "이 키를 빼면 다시 꽂기 전까지 저희 키로 만들어요. 이 키로 만든 기록은 그대로 남아요.", async (e) => {
+          e.target.disabled = true;
+          const r = await UI.api("/api/ai-key-delete", { body: { id: k.id } });
+          e.target.disabled = false;
+          if (!r.ok) { if (!r.gated) UI.toast(r.error || "빼지 못했어요"); return; }
+          close(); await loadAiKeys(); UI.toast("키를 뺐어요");
+        }, "네, 뺄게요");
+        const no = h.querySelector("[data-no]"), prev = no.onclick;
+        no.onclick = () => { prev(); cta.hidden = false; };
+        cta.hidden = true;
+      };
+    } });
+}
+function akAddSheet() {
+  UI.sheet(`<form id="akf">
+      <div class="field"><label>AI 키</label><input class="input" name="key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="구글 AI 스튜디오에서 복사한 키"><div class="help">구글 AI 스튜디오에서 만든 키를 붙여넣어 주세요 · <a href="${UI.AI_KEY_URL}" target="_blank" rel="noopener">키 만들러 가기</a></div></div>
+      <div class="field"><label>이름 <span class="muted" style="font-weight:500">· 안 적어도 돼요</span></label><input class="input" name="label" type="text" maxlength="40" placeholder="내 키"><div class="help"></div></div>
+      <p class="muted" style="margin:0;font-size:13px">꽂을 때 그 키로 한 번 걸어 보고, <b style="color:var(--ink)">되는 것만</b> 맡아 둬요. 맡아 둔 키는 잠가서 보관하고 다시 보여 드리지 않아요.</p>
+      <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="submit">꽂기</button></div></form>`,
+    { title: "내 키 꽂기", onOpen: (sh, close) => {
+      const f = sh.querySelector("#akf"), go = f.querySelector('button[type="submit"]');
+      UI.form(f, async (d) => {
+        UI.fieldError(f, "key", "");
+        go.textContent = "확인하는 중…";   // 🔴 진짜로 그 키로 한 번 걸어 보느라 몇 초 걸린다 — 멈춘 것처럼 보이지 않게
+        const body = { key: String(d.key || "").trim() }; if (String(d.label || "").trim()) body.label = String(d.label).trim();
+        const r = await UI.api("/api/ai-key-add", { body });
+        go.textContent = "꽂기";
+        if (!r.ok) {
+          if (r.gated) return;
+          if (r.step === "not_configured") { close(); return UI.toast(r.error || "지금은 꽂을 수 없어요"); }
+          return UI.fieldError(f, "key", r.error || "꽂지 못했어요");   // invalid·quota·forbidden — 문장은 서버 것 그대로(할 일이 서로 다르다)
+        }
+        close(); await loadAiKeys(); UI.toast("내 키를 꽂았어요 · 이제 이 키로 만들어요");
+      });
+    } });
+}
+loadAiKeys();
 
 /* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **내 글에 들어온 신고** — 서버가 보내는 알림·메일의 링크가 바로 이 자리다
      (`/app/settings.html#takedown` · lib/takedown.ts:153 · lib/cron/takedown-watch.ts:31). 그 링크는 여태 **아무 데도 아닌 곳**을 가리키고 있었다:
