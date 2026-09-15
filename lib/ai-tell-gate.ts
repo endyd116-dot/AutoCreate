@@ -308,3 +308,22 @@ export function buildRewriteInstruction(report: GateReport): string {
   });
   return `[다시 쓰기 — 직전 원고가 아래 검사에 걸렸다. 같은 실수를 반복하면 이 글은 사람 검수로 넘어간다]\n${lines.join("\n")}\n`;
 }
+
+/* ═══ [P1R8 §9] 🔴 «다시 쓰기»를 부르는 축은 **좁다** — 사장님 전역 지시 «게이트는 최소화하라» ═══
+   예전엔 `report.ok` 가 **하나라도** 빨가면 글을 **통째로 다시 썼다**(AI 콜 2배 = 그 글의 돈이 두 배).
+   그런데 그 안에는 «사진 6장 중 5장»·«상투 표현 1건»·«골격이 최근 글과 닮음» 같은 **취향에 가까운 축**이 섞여 있다.
+   🔴 실제로 돈이 새던 자리: `blogger`·`wordpress` 계약이 `visualMin.faq = 1` 로 FAQ 를 요구하는데
+      같은 계약의 `tiers.optional` 이 FAQ 를 **빼기도 한다** → 빠진 글마다 재작성이 돌았다(계약의 두 부분이 싸운다).
+   ⇒ **다시 쓰기는 «고치면 법·정책을 지킬 수 있는 축»이 빨갈 때만** 부른다. 나머지는 **그대로 두고 사람에게 보여 준다**
+      (어차피 승인도 막지 않는 축이다 · `HARD_GATE_KEYS` 밖).
+   🔴 이 목록은 `lib/content-approve.ts HARD_GATE_KEYS` 와 **같은 뜻**이지만 파일이 다르다 —
+      `content-approve` 는 DB 를 보고 이 파일은 순수라서(AC-17) 한쪽을 import 하면 순환이 된다. **두 곳을 같이 고친다.** */
+/* 🔴 **막는 것과 다시 쓰는 것은 다른 잣대다**: 승인을 막는 것은 법·제3자·비가역 셋뿐이지만(§9),
+   **다시 쓰기는 «AI 콜 한 번»이라 위험을 줄이는 값이 있으면 쓴다**. 그래서 소프트여도 `ad_pointing`·`similarity` 는 여기 남는다
+   (애드센스 정지·저품질 판정은 **고객 계정**이 다치는 자리다 — 막지는 않되 한 번은 고쳐 본다).
+   `affiliate_count` 는 뺐다 — 링크 수는 다시 써서 고칠 것이 아니라 **지우면 되는 것**이다(돈 쓸 이유가 없다). */
+export const REWRITE_KEYS: readonly GateKey[] = ["disclosure", "banned_words", "ad_pointing", "similarity"];
+/** 다시 쓸 만한 실패가 있나(없으면 한 번 더 쓰지 않는다 = 돈을 아낀다). */
+export function needsRewrite(report: GateReport): boolean {
+  return report.checks.some((c) => !c.pass && (REWRITE_KEYS as readonly string[]).includes(c.key));
+}
