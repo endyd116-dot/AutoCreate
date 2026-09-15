@@ -463,6 +463,30 @@
     if (s.status === "planned") return { window: "pending", reason: `소재를 먼저 정하고 ${pwTickText()}에 만들어요.` };
     return { window: "pending", reason: `${pwTickText()}에 만들어요.` };
   }
+  /* [R8] 🔴 손질(PieceSpecPatch)을 먹이는 자리는 **한 곳**이다 — 견적(`director-estimate`)과 만들기(`director-confirm`)가
+     따로 셈하면 «견적과 실제가 다른» 화면이 된다(서버도 estimate·confirm 이 같은 함수를 본다).
+     🔴 글 코인 = `COIN.blog` + **AI 로 구운 여분 장수**. 여기 있던 «1 + 사진 장수»는 네이버를 7코인이라 적던 그 셈이다(AC-52). */
+  function applyPatches(br, patches) {
+    const pieces = br.pieces.map((p) => ({ ...p }));
+    for (const patch of patches || []) {
+      const i = pieces.findIndex((p) => p.key === patch.key); if (i < 0) continue;
+      if (patch.drop) { pieces.splice(i, 1); continue; }
+      const p = pieces[i];
+      if (patch.accountId !== undefined) { p.accountId = patch.accountId; p.accountHandle = S.accounts.find((a) => a.id === patch.accountId)?.handle || null; }
+      if (patch.format) p.format = patch.format;
+      if (patch.emotionKey) p.emotionKey = patch.emotionKey;
+      if (patch.images && p.images) Object.assign(p.images, patch.images);
+      if (patch.monetize && "affiliate" in patch.monetize) p.monetize.affiliate = patch.monetize.affiliate ? { provider: "coupang", ...patch.monetize.affiliate } : null;
+      if (patch.schedule && patch.schedule.at) p.schedule.at = patch.schedule.at;
+      if (p.kind === "video") { const v = patch.video || {};
+        if (v.format) p.video.format = v.format; if (v.seconds) p.video.seconds = Number(v.seconds); if (v.cuts) p.video.cuts = Number(v.cuts);
+        if (v.voiceId) { p.video.voice.voiceId = v.voiceId; p.video.variant.voiceId = v.voiceId; }
+        if (v.palette) p.video.variant.palette = v.palette; if (v.hookType) p.video.variant.hookType = v.hookType;
+        p.coinCost = VIDEO_COIN[videoCoinItem(p.video.seconds)];
+      } else p.coinCost = COIN.blog + Math.max(0, ((p.images && p.images.aiCount != null ? p.images.aiCount : 1) - 1));
+    }
+    return pieces;
+  }
   const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0); // [P1R5] shorts = video_60 단가(§1.10)
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
@@ -569,10 +593,29 @@
       const runnerDue = S.slots.filter((s) => RUNNER_CH.includes(s.channel) && s.date >= todayYmd && !["skipped", "published"].includes(s.status)).length;
       /* [R8 §4.1 · B] 발행 전 검사에 걸린 글 — 🔴 B 가 새 kind 를 만들지 않고 화면에 이미 있는 `review_blocked` 를 썼다.
          사유는 서버 GATE_LABEL 그대로 앞 3개(첫 낱말이 보통 «대가 고지 첫머리»다). */
-      const gateStuck = S.pieces.filter((p) => p.status === "in_review" && p.gate && (p.gate.checks || []).some((c) => !c.pass && ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"].includes(c.key)));
-      if (gateStuck.length) todo.push({ kind: "review_blocked", title: `발행 전 확인이 필요한 글이 ${gateStuck.length}건 있어요`, count: gateStuck.length,
-        desc: `${[...new Set(gateStuck.flatMap((p) => (p.gate.checks || []).filter((c) => !c.pass).map((c) => c.label)))].slice(0, 3).join(" · ")} — 고치고 승인하면 그 자리에서 다시 나가요`,
-        link: gateStuck.length === 1 ? `/app/piece.html?id=${gateStuck[0].id}` : "/app/pieces.html?status=in_review", tone: "warn", ...(gateStuck.length === 1 ? { pieceId: gateStuck[0].id } : {}) });
+      /* 🔴 [R8 · home-summary.ts] **뜻이 바뀐 자리**다 — 종전엔 «게이트에 막힌 글»이었는데, 사장님이 전역으로 내리셔서
+         (`HARD_GATE_KEYS = []`) 막는 판정이 하나도 없다. 그래도 검사는 그대로 다 돌고 표시가 남는다.
+         🔴 남은 일은 **그 표시를 사람이 볼 수 있게 올리는 것**이다 — 안 올리면 «검사했는데 아무도 안 봤다»가 되고
+            그게 «조용히 0건»의 가장 나쁜 형태다(우리는 알았는데 고객만 몰랐다).
+         🔴 kind 는 `review_blocked` 그대로다(화면 낱말이 이미 있다 · AC-52). 나가기 전(pre)과 나간 뒤(post)를 갈라 센다.
+         🔴 «직접 올려야 할 글»(awaiting_manual)은 여기서 빼고 센다 — 같은 글을 두 줄로 세면 숫자를 못 믿는다. */
+      const WARN_ST = ["draft", "in_review", "approved", "scheduled", "published"];
+      const warnAll = S.pieces.filter((p) => WARN_ST.includes(p.status) && p.gate && (p.gate.checks || []).some((c) => !c.pass));
+      const warnPre = warnAll.filter((p) => p.status !== "published"), warnPost = warnAll.filter((p) => p.status === "published");
+      if (warnPre.length || warnPost.length) {
+        const src = warnPre.length ? warnPre : warnPost;
+        const cnt = new Map();   // 사유는 **많이 걸린 순 3개**까지 · 라벨은 서버 정본 그대로(화면이 문구를 지어내지 않는다)
+        for (const p of src) for (const c of p.gate.checks) if (!c.pass) cnt.set(c.label, (cnt.get(c.label) || 0) + 1);
+        const why = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l]) => l).join(" · ") || "확인이 필요한 표시가 있어요";
+        const one = src.length === 1 ? src[0] : null;
+        todo.push(warnPre.length
+          ? { kind: "review_blocked", title: `이 위험을 안고 나갈 글이 ${warnPre.length}건 있어요`, count: warnPre.length,
+              desc: `${why} — 막지는 않았어요. 그대로 두시면 이 상태로 나가요${warnPost.length ? ` (이미 나간 글 ${warnPost.length}건에도 같은 표시가 있어요)` : ""}`,
+              link: one ? `/app/piece.html?id=${one.id}` : "/app/pieces.html?status=in_review", tone: "warn", ...(one ? { pieceId: one.id } : {}) }
+          : { kind: "review_blocked", title: `이 위험을 안고 나간 글이 ${warnPost.length}건 있어요`, count: warnPost.length,
+              desc: `${why} — 막지 않았어요. 지금이라도 고치거나 내릴 수 있어요`,
+              link: one ? `/app/piece.html?id=${one.id}` : "/app/posts.html", tone: "warn", ...(one ? { pieceId: one.id } : {}) });
+      }
       // 정지 계정은 아래 «승계» 한 줄로만 알린다(같은 사건을 두 줄로 쓰지 않는다)
       for (const a of S.accounts.filter((a) => ["pending_login", "disconnected"].includes(a.status)))
         todo.push({ kind: "account", title: a.status === "pending_login" ? `@${a.handle} 다시 로그인이 필요해요` : `@${a.handle} 연결이 끊겼어요`, desc: UI.chLabel(a.channel), link: "/app/accounts.html", tone: "warn" });
@@ -791,11 +834,15 @@
         if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
       const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "쓰는 코인은 글 1 + 사진 수예요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
+    /* [R8 · director-estimate] 🔴 **아무것도 쓰지 않고** 손질된 값으로 얼마 드는지만 답한다 — 화면이 «1 + 사진 장수»로 셈하던 자리를 대신한다. */
+    "director-estimate": (b) => { const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
+      const pieces = applyPatches(br, b.pieces);
+      const coinCost = pieces.reduce((a, p) => a + (p.coinCost || 0), 0);
+      return { ok: true, coinCost, coinsLeft: S.coins, enough: coinCost <= S.coins, need: Math.max(0, coinCost - S.coins),
+        pieces: pieces.map((p) => ({ key: p.key, channel: p.channel, kind: p.kind || "post", coinCost: p.coinCost, imageCount: p.images?.count ?? 0, aiCount: p.images?.aiCount ?? 0 })) };
+    },
     "director-confirm": (b) => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
-      let pieces = br.pieces.map((p) => ({ ...p })); for (const patch of b.pieces || []) { const i = pieces.findIndex((p) => p.key === patch.key); if (i < 0) continue; if (patch.drop) { pieces.splice(i, 1); continue; }
-        const p = pieces[i]; if (patch.accountId !== undefined) { p.accountId = patch.accountId; p.accountHandle = S.accounts.find((a) => a.id === patch.accountId)?.handle || null; } if (patch.format) p.format = patch.format; if (patch.emotionKey) p.emotionKey = patch.emotionKey;
-        if (patch.images && p.images) Object.assign(p.images, patch.images); if (patch.monetize && "affiliate" in patch.monetize) p.monetize.affiliate = patch.monetize.affiliate ? { provider: "coupang", ...patch.monetize.affiliate } : null; if (patch.schedule?.at) p.schedule.at = patch.schedule.at;
-        if (p.kind === "video") { const v = patch.video || {}; if (v.format) p.video.format = v.format; if (v.seconds) p.video.seconds = Number(v.seconds); if (v.cuts) p.video.cuts = Number(v.cuts); if (v.voiceId) { p.video.voice.voiceId = v.voiceId; p.video.variant.voiceId = v.voiceId; } if (v.palette) p.video.variant.palette = v.palette; if (v.hookType) p.video.variant.hookType = v.hookType; p.coinCost = VIDEO_COIN[videoCoinItem(p.video.seconds)]; } else p.coinCost = 1 + p.images.count; } // [P1R5] PieceSpecPatch.video · 코인 = videoCoinItem(seconds)
+      let pieces = applyPatches(br, b.pieces);
       if (videoBudget === "0" && pieces.some((p) => p.kind === "video")) return { ok: false, step: "budget", error: "이번 달 영상 제작 한도에 닿았어요. 다음 달에 다시 만들 수 있어요." }; // §1.2 달러 캡 선검사(코인 차감 전)
       const need = pieces.reduce((a, p) => a + p.coinCost, 0); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
       if (br._charged) return { ok: true, briefId: br.id, pieceIds: br._pieceIds, coinsCharged: 0, coinsLeft: S.coins, status: 202 };
