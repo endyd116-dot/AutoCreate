@@ -6,7 +6,7 @@ if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36);
 const EMAIL = process.env.TEST_EMAIL || `c+r65-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
-const SECTIONS = new Set((process.env.SECTIONS || "add,readonly,rate,assign,idor,caption,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "add,readonly,rate,assign,idor,caption,tooSoon,runnerDist,regress,cleanup").split(","));
 const results = []; const t0 = Date.now();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
@@ -152,6 +152,122 @@ async function main() {
     for (const l of lines) { try { const x = JSON.parse(l.slice(7)); rec(x.step, x.ok, x.note); } catch { /* */ } }
     const wp = existsSync("lib/publish/wordpress.ts") ? readFileSync("lib/publish/wordpress.ts", "utf8") : "";
     rec("wordpress alt_text — 캡션 없으면 alt 도 빈다(B2 잇는 중 · 결함 기록만)", /alt_text:\s*caption/.test(wp) ? "WARN" : !/alt_text:\s*caption/.test(wp), /alt_text:\s*caption/.test(wp) ? "wordpress.ts:71 `alt_text: caption` — 캡션 기본 없음이라 alt 가 빈다 · B2 몫" : "alt 가 prompt 파생으로 바뀜");
+  }
+
+  /* ══ tooSoon — ④ «이번엔 건너뛰어요» = 서버 `skipReason:"too_soon"`(다음 제작 틱 > 발행 시각) · 5경우 + 타 테넌트 ══ */
+  if (SECTIONS.has("tooSoon")) {
+    const KST = 9 * 3600_000; const now = new Date(); const kst = new Date(now.getTime() + KST);
+    const H = kst.getUTCHours(); const ymd = (d) => new Date(d.getTime() + KST).toISOString().slice(0, 10);
+    const today = ymd(now), tomorrow = ymd(new Date(now.getTime() + 86400_000)), day2 = ymd(new Date(now.getTime() + 2 * 86400_000));
+    const atKst = (dayStr, h, m = 0) => new Date(Date.parse(`${dayStr}T00:00:00Z`) + (h * 60 + m) * 60_000 - KST).toISOString();   // KST h:m → UTC ISO
+    const mk = async (dayStr, publishIso, status = "planned", extra = {}) => {
+      const [r] = await s`INSERT INTO slots (tenant_id, slot_date, channel, kind, status, publish_at, origin, piece_id)
+        VALUES (${TID}, ${dayStr}::date, 'naver_blog', 'post', ${status}, ${publishIso ? s`${publishIso}::timestamptz AT TIME ZONE 'UTC'` : null}, 'auto', ${extra.pieceId ?? null}) RETURNING id`;
+      return Number(r?.id);
+    };
+    const list = async () => { const r = await call(jar, "/api/slots-list", { query: { from: today, to: day2 } }); return new Map((r.json?.slots || []).map((x) => [Number(x.id), x])); };
+    await s`DELETE FROM slots WHERE tenant_id = ${TID}`;
+    // 🔴 메인 지적 경우: produceHour 를 **지금 시각과 같은 시**로 두면 다음 틱은 내일 → 오늘 자리는 전부 too_soon
+    await call(jar, "/api/rules-settings", { body: { autoSchedule: true, produceHour: `${String(H).padStart(2, "0")}:00` } });
+    const a1 = await mk(today, atKst(today, 23, 30));                          // 오늘 23:30 — 틱(내일 H) 보다 앞 → too_soon
+    const a2 = await mk(tomorrow, atKst(tomorrow, H, 0));                     // 내일 H:00 — 틱과 같은 시각(P <= T) → too_soon
+    const a3 = await mk(tomorrow, atKst(tomorrow, (H + 1) % 24 || 23, 0));   // 내일 H+1 — 틱 뒤 → 키 없음
+    const a4 = await mk(today, null);                                         // publish_at 없음 → 그날 23:59 → too_soon
+    const a5 = await mk(day2, null);                                          // 모레 · 시각 없음 → 23:59 모레 → 키 없음
+    const [pc] = await s`INSERT INTO pieces (tenant_id, channel, kind, status, title, meta) VALUES (${TID}, 'naver_blog', 'post', 'in_review', 'C R6.5 글 있음', ${s.json({})}) RETURNING id`;
+    const a6 = await mk(today, atKst(today, 23, 40), "in_review", { pieceId: Number(pc.id) });   // 글이 있는 자리 → 키 없음
+    const a7 = await mk(today, atKst(today, 23, 50), "skipped");             // 만들어질 차례가 아닌 상태 → 키 없음
+    const L = await list();
+    const sr = (id) => L.get(id)?.skipReason;
+    rec(`④ produceHour=지금 시(${H}시) → 오늘 23:30 자리는 too_soon(다음 틱이 내일이라)`, sr(a1) === "too_soon", `slot ${a1} skipReason=${sr(a1)}`);
+    rec("④ 내일 H:00(틱과 같은 시각) → too_soon(P <= T)", sr(a2) === "too_soon", `slot ${a2} skipReason=${sr(a2)}`);
+    rec("④ 내일 H+1 → 키 없음(다음 틱에 만들어진다)", L.has(a3) && sr(a3) === undefined, `slot ${a3} skipReason=${sr(a3) ?? "없음"}`);
+    rec("④ publish_at 없는 오늘 자리 → 23:59 기준 too_soon", sr(a4) === "too_soon", `slot ${a4} skipReason=${sr(a4)}`);
+    rec("④ 모레 · 시각 없음 → 키 없음", L.has(a5) && sr(a5) === undefined, `slot ${a5} skipReason=${sr(a5) ?? "없음"}`);
+    rec("④ 글이 이미 있는 자리 → 키 없음(못 만드는 게 아니라 만든 것)", L.has(a6) && sr(a6) === undefined, `slot ${a6} status ${L.get(a6)?.status} skipReason=${sr(a6) ?? "없음"}`);
+    rec("④ skipped 상태 → 키 없음(만들어질 차례가 아니다)", L.has(a7) && sr(a7) === undefined, `slot ${a7} skipReason=${sr(a7) ?? "없음"}`);
+    // produceHour 를 **미래 시**로 두면 오늘 그 시각 전 자리만 too_soon
+    const H2 = (H + 3) % 24;
+    if (H2 > H) {
+      await call(jar, "/api/rules-settings", { body: { produceHour: `${String(H2).padStart(2, "0")}:00` } });
+      const b1 = await mk(today, atKst(today, H2, -30)); const b2 = await mk(today, atKst(today, H2, 30));
+      const L2 = await list();
+      rec(`④ produceHour=${H2}시(미래) → 그 전 자리 too_soon · 그 뒤 자리 키 없음`, L2.get(b1)?.skipReason === "too_soon" && L2.get(b2)?.skipReason === undefined,
+        `${H2 - 1}:30→${L2.get(b1)?.skipReason ?? "없음"} · ${H2}:30→${L2.get(b2)?.skipReason ?? "없음"}`);
+    } else warn("④ 미래 produceHour 경우", `지금 ${H}시라 오늘 안에 +3시가 없다(자정 근처) — 다음 실행 때`);
+    // 타 테넌트 누수
+    const other = new Jar(); await call(other, "/api/auth-login", { body: { email: "c+p1b@autocreate.test", password: PASSWORD } });
+    const ol = await call(other, "/api/slots-list", { query: { from: today, to: day2 } });
+    const leak = (ol.json?.slots || []).filter((x) => [a1, a2, a3, a4, a5, a6, a7].includes(Number(x.id)));
+    rec("④ 타 테넌트(13) slots-list 에 내 자리 0", ol.status === 200 && leak.length === 0, `${ol.status} 누출 ${leak.length}`);
+    const sch = existsSync("public/app/schedule.html") ? readFileSync("public/app/schedule.html", "utf8") : "";
+    rec("④ 화면은 서버 키(skipReason)만 본다 — «날짜 − 오늘 < lead» 계산 0", /skipReason/.test(sch) && !/produceLeadDays\s*[<>]/.test(sch), /skipReason/.test(sch) ? "skipReason 사용" : "🔴 화면이 서버 키를 안 본다");
+  }
+
+  /* ══ runnerDist — ⑤ 러너 배포: 내려받기·sha256 실대조·지문·rotate·노출 범위(발행 0건 · 러너 실행 0) ══ */
+  if (SECTIONS.has("runnerDist")) {
+    const { createHash } = await import("node:crypto");
+    const anon = await call(null, "/api/runner-download");
+    rec("⑤ runner-download 비로그인 → 401", anon.status === 401, `${anon.status}`);
+    const dl = await call(jar, "/api/runner-download");
+    const ok = dl.status === 200 && dl.json?.ok === true;
+    rec("⑤ runner-download 200 → version·bytes·sha256·filename·url·expiresInSec 600", ok && dl.json.version && dl.json.sha256 && dl.json.filename && dl.json.url && dl.json.expiresInSec === 600,
+      ok ? `v${dl.json.version} · ${dl.json.bytes}B · ${dl.json.filename} · sha ${String(dl.json.sha256).slice(0, 12)}…` : `${dl.status} ${dl.json?.step} «${String(dl.json?.error || "").slice(0, 40)}»`);
+    const [ad] = await s`SELECT id, detail FROM audit_logs WHERE tenant_id = ${TID} AND action = 'runner_downloaded' ORDER BY id DESC LIMIT 1`;
+    rec("⑤ 감사 runner_downloaded(version·planKey)", !!ad && ad.detail?.version === dl.json?.version, `audit ${ad?.id} ${JSON.stringify(ad?.detail || {}).slice(0, 60)}`);
+    if (ok) {
+      rec("⑤ presigned 만료 10분(URL X-Amz-Expires=600)", /X-Amz-Expires=600\b/.test(dl.json.url), (dl.json.url.match(/X-Amz-Expires=\d+/) || ["없음"])[0]);
+      const res = await fetch(dl.json.url).catch(() => null);
+      const buf = res?.ok ? Buffer.from(await res.arrayBuffer()) : null;
+      const cd = res?.headers.get("content-disposition") || "";
+      rec("⑤ 🔴 응답 헤더 content-disposition 의 파일명 = 응답 filename(«링크가 열렸다»로는 안 잡힌다)", !!buf && cd.includes(dl.json.filename), `${res?.status} «${cd.slice(0, 70)}»`);
+      const sha = buf ? createHash("sha256").update(buf).digest("hex") : "";
+      rec("⑤ 🔴 받은 zip 의 sha256 = 응답 sha256(실대조)", !!buf && sha === dl.json.sha256 && buf.length === dl.json.bytes, `${buf?.length}B · ${sha.slice(0, 16)}… vs ${String(dl.json.sha256).slice(0, 16)}…`);
+      let manifest = null;
+      try { const { execFileSync } = await import("node:child_process"); const o = String(execFileSync("npx", ["tsx", "--env-file=.env", "scripts/verify-r6-5-latest-probe.mts"], { encoding: "utf8", shell: true, timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] })); manifest = JSON.parse(o.trim().split(/\r?\n/).pop()); } catch { /* */ }
+      rec("⑤ R2 latest.json 의 sha256·version 이 응답과 같다", !!manifest && manifest.sha256 === dl.json.sha256 && manifest.version === dl.json.version, manifest ? `latest.json v${manifest.version} sha ${String(manifest.sha256).slice(0, 12)}…` : "latest.json 못 읽음");
+      rec("⑤ zip 이 진짜 zip(PK 시그니처)", !!buf && buf[0] === 0x50 && buf[1] === 0x4b, buf ? `${buf.slice(0, 2).toString("latin1")}` : "-");
+    }
+    // readonly 면 내려받기도 막힌다(requireWritable)
+    await s`UPDATE tenants SET status = 'readonly' WHERE id = ${TID}`;
+    const ro = await call(jar, "/api/runner-download");
+    rec("⑤ readonly 테넌트 → 403 writable(내려받기도 생성 계열)", ro.status === 403 && ro.json?.step === "writable", `${ro.status} ${ro.json?.step}`);
+    await s`UPDATE tenants SET status = 'trial' WHERE id = ${TID}`;
+    warn("⑤ 403 plan(runnerDevices 0)", "표준 4플랜(trial 1·starter 1·pro 2·agency 5)엔 0 이 없다 — 라이브에선 닿을 수 없는 분기(정적 확인만)");
+    warn("⑤ 503 no_release", "R2 에 latest.json 이 이미 있다 — 지우고 재현하지 않는다(정적 확인만 · «준비 중이에요» 사람말)");
+
+    /* 지문 — 첫 하트비트가 묶고 · 다른 값이면 401 + 알림 · runner-list 는 지문 값 미노출 */
+    const reg = await call(jar, "/api/runner-register", { body: { name: "C R6.5 지문 PC", kind: "own" } });
+    const dev = reg.json?.device; const tok = dev?.token; const devId = Number(dev?.id || 0);
+    rec("⑤ 기기 등록 → 열쇠 1회 발급", reg.status === 200 && !!tok && devId > 0, `${reg.status} device ${devId}`);
+    if (tok) {
+      const fpA = "a".repeat(64), fpB = "b".repeat(64);
+      const hb = (t, fp) => fetch(`${BASE}/api/runner-heartbeat`, { method: "POST", headers: { "Content-Type": "application/json", "x-runner-token": t, "x-runner-fp": fp }, body: JSON.stringify({ version: "1.1.4", jobs: [] }) }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+      const h1 = await hb(tok, fpA);
+      const [d1] = await s`SELECT fingerprint IS NOT NULL AS bound, fp_mismatch_count FROM runner_devices WHERE id = ${devId}`;
+      rec("⑤ 첫 하트비트(x-runner-fp A) → 200 · 기기에 지문이 묶인다", h1.status === 200 && d1?.bound === true, `${h1.status} bound ${d1?.bound}`);
+      const tN = new Date(Date.now() - 3_000);
+      const h2 = await hb(tok, fpB);
+      const [d2] = await s`SELECT fp_mismatch_count AS c FROM runner_devices WHERE id = ${devId}`;
+      const [nt] = await s`SELECT id, title FROM notifications WHERE tenant_id = ${TID} AND created_at > ${tN.toISOString()}::timestamptz AT TIME ZONE 'UTC' ORDER BY id DESC LIMIT 1`;
+      rec("⑤ 🔴 다른 지문(B) → 401 «다른 PC에 연결돼 있어요» + 고객 알림 + 카운트 1", h2.status === 401 && /다른 PC/.test(String(h2.json?.error || h2.json?.message || "")) && Number(d2?.c) === 1 && !!nt,
+        `${h2.status} «${String(h2.json?.error || h2.json?.message || "").slice(0, 40)}» · mismatch ${d2?.c} · 알림 ${nt?.id ?? "0"} «${String(nt?.title || "").slice(0, 24)}»`);
+      const rl = await call(jar, "/api/runner-list");
+      const me = (rl.json?.devices || []).find((x) => Number(x.id) === devId);
+      rec("⑤ runner-list — bound·otherDeviceAt·otherDeviceCount·version 만(지문 값 미노출)", !!me && me.bound === true && !!me.otherDeviceAt && Number(me.otherDeviceCount) === 1 && !JSON.stringify(rl.json).includes(fpA),
+        `bound ${me?.bound} · otherDeviceAt ${me?.otherDeviceAt ? "있음" : "없음"} · count ${me?.otherDeviceCount} · 지문 노출 ${JSON.stringify(rl.json).includes(fpA) ? "🔴 있음" : "0"}`);
+      const rot = await call(jar, "/api/runner-rotate", { body: { id: devId } });
+      const tok2 = rot.json?.device?.token;
+      const old = await hb(tok, fpA); const fresh = await hb(tok2 || "x", fpB);
+      const [d3] = await s`SELECT fingerprint AS fp, fp_mismatch_count AS c FROM runner_devices WHERE id = ${devId}`;
+      rec("⑤ rotate → 옛 열쇠 즉사(401) · 새 열쇠 통과 · 지문 초기화(새 PC 로 다시 묶임 · 카운트 0)", rot.status === 200 && !!tok2 && old.status === 401 && fresh.status === 200 && String(d3?.fp || "") === fpB && Number(d3?.c) === 0,
+        `rotate ${rot.status} · 옛 ${old.status} · 새 ${fresh.status} · fp ${d3?.fp ? d3.fp.slice(0, 6) + "…" : "없음"} · count ${d3?.c}`);
+      const bad = await hb("not-a-token", fpA);
+      rec("⑤ 틀린 열쇠 → 401 «러너 열쇠가 올바르지 않아요»", bad.status === 401 && /열쇠/.test(String(bad.json?.error || bad.json?.message || "")), `${bad.status} «${String(bad.json?.error || bad.json?.message || "").slice(0, 30)}»`);
+      await call(jar, "/api/runner-remove", { body: { id: devId } });
+    }
+    const [pub] = await s`SELECT COUNT(*) AS c FROM posts WHERE tenant_id = ${TID}`;
+    rec("⑤ 발행 0건(러너를 실행하지 않았다)", Number(pub?.c) === 0, `posts ${pub?.c}`);
   }
 
   /* ══ regress — topics.ts 5경로 · 로그인·홈 ══ */
