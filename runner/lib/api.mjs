@@ -2,6 +2,7 @@
  * runner/lib/api.mjs — 서버 큐 클라이언트(계약 §2) + 설정 읽기. 의존성 0(node 20 fetch).
  *   🔴 토큰은 파일(`runner/.token`)·env·인자에서만 읽고 **로그에 찍지 않는다**(찍으면 그 로그가 곧 계정 열쇠다).
  */
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -27,8 +28,39 @@ export function readToken(argToken) {
   if (fromEnv) return fromEnv;
   try { return fs.readFileSync(TOKEN_FILE, "utf8").trim() || null; } catch { return null; }
 }
+/**
+ * 열쇠 저장 — 🔴 **권한을 «좁혔다»고 믿으면 안 된다. 플랫폼이 무시한다**(R8 §3.1 · 2026-09-15 실측).
+ *
+ *   종전엔 `mode: 0o600` 한 줄이 전부였다. 그런데 **Windows 는 POSIX 모드를 안 본다** —
+ *   실제 디스크에서 `.token` 은 **`-rw-r--r--`(644)** 였다. 즉 **같은 PC 를 쓰는 다른 사람이 그냥 읽는다.**
+ *   그 사람은 **같은 기기라 지문도 맞으므로** 서버의 기기 구속으로도 안 막힌다 — 열쇠 하나면 계정 자격이 나간다.
+ *   ⇒ Windows 에서는 `icacls` 로 **현재 사용자만** 읽게 좁힌다(외부 의존성 0 · OS 기본 명령).
+ *   ⚠️ 못 좁혔으면 **조용히 넘어가지 않는다** — 한 줄 남긴다(«했다»고 믿게 두는 것이 제일 나쁘다).
+ */
 export function saveToken(token) {
   fs.writeFileSync(TOKEN_FILE, String(token).trim() + "\n", { encoding: "utf8", mode: 0o600 });
+  const r = restrictTokenAcl(TOKEN_FILE);
+  if (!r.ok) console.log(`  · [주의] 열쇠 파일 권한을 좁히지 못했어요(${r.why}) — 이 PC 를 함께 쓰는 사람이 있으면 «${TOKEN_FILE}» 를 확인해 주세요.`);
+}
+
+/**
+ * restrictTokenAcl — Windows 에서 파일 권한을 현재 사용자만으로 좁힌다. 다른 OS 는 0600 이 실제로 걸리므로 그대로 둔다.
+ *   @returns { ok:true } | { ok:false, why } — **«모른다»를 «됐다»로 바꾸지 않는다**(AC-9).
+ */
+export function restrictTokenAcl(file) {
+  if (process.platform !== "win32") return { ok: true };               // POSIX 는 위의 0600 이 진짜로 걸린다
+  const user = process.env.USERNAME ? `${process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\` : ""}${process.env.USERNAME}` : "";
+  if (!user) return { ok: false, why: "사용자 이름을 못 읽었어요" };
+  try {
+    /* `/inheritance:r` = 상속받은 권한(= Users 그룹 읽기)을 끊고, `/grant:r` = 나만 전체 권한.
+       셸을 안 거친다(shell:false) — 사용자 이름에 공백·특수문자가 있어도 안전하다. */
+    const r = spawnSync("icacls", [file, "/inheritance:r", "/grant:r", `${user}:F`], { encoding: "utf8", shell: false, timeout: 15_000 });
+    if (r.error) return { ok: false, why: String(r.error.message ?? r.error).slice(0, 60) };
+    if (r.status !== 0) return { ok: false, why: `icacls 종료코드 ${r.status}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, why: String(e?.message ?? e).slice(0, 60) };
+  }
 }
 export function serverBase() {
   return String(process.env.AC_SERVER ?? DEFAULT_SERVER).replace(/\/$/, "");
