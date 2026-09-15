@@ -17,7 +17,7 @@ import { checkVideoDisclosure } from "../disclosure";
 import { checkHook } from "./script";
 import { hammingHex, phashFromGray32, PHASH_SIMILAR_MAX_DISTANCE } from "./fingerprint";
 import { JUDGE_COST_USD } from "./cost";
-import { videoStub, type JudgeAxis, type JudgeGrade, type JudgeResult, type RenderPayload, type RenderReport } from "./types";
+import { videoStub, safeZoneOf, type JudgeAxis, type JudgeGrade, type JudgeResult, type RenderPayload, type RenderReport } from "./types";
 
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -28,12 +28,61 @@ export const VISION_BLIND_REASON = "심사를 돌리지 못했습니다(AI 판�
 export const READ_CHARS_PER_SEC = 6.5;
 /** 컨테이너가 영상 트랙보다 이만큼 넘게 길면 «끝에 정지 화면이 붙었다»로 본다(§AC-31). 키프레임·mux 오차는 이 아래다. */
 export const TAIL_TOLERANCE_MS = Number(process.env.VIDEO_TAIL_TOLERANCE_MS || "500");
-const AXIS_LABEL: Record<string, string> = { hook_first: "첫 컷이 훅", safe_area: "자막·배지가 안전영역 안", reading_time: "자막 읽을 시간 충분", text_broken: "깨진 글자 없음", black_margin: "검은 여백 없음", frames_not_blank: "빈 프레임 없음", cut_rhythm: "컷 리듬 살아 있음", forbidden: "금칙·내부 문자열 없음", disclosure: "제휴 고지(배지·자막·설명란)", duration_fit: "길이 규격 안", similarity: "다른 계정 영상과 겹치지 않음" };
-const GRADE_OF: Record<string, JudgeGrade> = { forbidden: "P0", disclosure: "P0", duration_fit: "P0", frames_not_blank: "P0", text_broken: "P1", black_margin: "P1", safe_area: "P1", hook_first: "P1", similarity: "P1", reading_time: "P2", cut_rhythm: "P2" };
+const AXIS_LABEL: Record<string, string> = { hook_first: "첫 컷이 훅", safe_area: "자막·배지가 안전영역 안", caption_lines: "자막 2줄 이내", reading_time: "자막 읽을 시간 충분", text_broken: "깨진 글자 없음", black_margin: "검은 여백 없음", frames_not_blank: "빈 프레임 없음", cut_rhythm: "컷 리듬 살아 있음", forbidden: "금칙·내부 문자열 없음", disclosure: "제휴 고지(배지·자막·설명란)", duration_fit: "길이 규격 안", similarity: "다른 계정 영상과 겹치지 않음" };
+const GRADE_OF: Record<string, JudgeGrade> = { forbidden: "P0", disclosure: "P0", duration_fit: "P0", frames_not_blank: "P0", text_broken: "P1", black_margin: "P1", safe_area: "P1", caption_lines: "P2", hook_first: "P1", similarity: "P1", reading_time: "P2", cut_rhythm: "P2" };
 const axis = (key: string, pass: boolean, detail?: string): JudgeAxis => ({ key, label: AXIS_LABEL[key] ?? key, pass, grade: GRADE_OF[key] ?? "P2", ...(detail ? { detail } : {}) });
 /** [R7 §1.5] «못 쟀다»를 «괜찮다»로 접지 않는다(AC-33 · AC-9) — 막지는 않지만(`pass:true`) 잰 척도 하지 않는다.
     실패한 축에는 붙이지 않는다: 떨어뜨릴 만큼은 쟀다는 뜻이라 보류가 아니다. */
 const pendingIf = (a: JudgeAxis, pending: boolean): JudgeAxis => (pending && a.pass ? { ...a, pending: true } : a);
+
+/* ═══ 자막·배지가 «그 채널의» 안전영역 안인가 (R8-A §3) ═══
+   🔴 종전 축은 «자막·배지가 안전영역 안»이라는 **이름을 달고** 실제로는 `safeZone.top === 220 && bottom === 300`,
+      즉 **«그 숫자가 그 숫자인가»**를 쟀다(AC-57 의 교과서적 모양). 결과가 뒤집혀 있었다:
+      틀린 값(300)을 «통과»로 도장 찍고, 쇼츠에 맞게 390 으로 고치면 **그 순간 축이 빨강**이 됐다 — **고치면 검사가 막았다.**
+   ⇒ 이제 이름이 말하는 것을 잰다: **자막 블록과 배지가 플랫폼 UI 띠를 침범하지 않는가.**
+
+   렌더러가 실제로 그리는 자리(`runner/channels/render-video.mjs buildOverlayHtml`):
+     · 자막 = `bottom: safeZone.bottom` (프리셋 `clip_top` 이면 `top: safeZone.top`) · 좌우 = `side`
+     · 배지 = 오른쪽 위 `top: safeZone.top`
+   그래서 «침범하지 않았다» = 그 값들이 **그 채널의 UI 띠 두께 이상**이라는 뜻이다. */
+export const CAPTION_SIDE_PX = 60;
+function checkSafeArea(p: RenderPayload): JudgeAxis {
+  const want = safeZoneOf(p.channel);                    // 채널이 없으면 가장 보수적인 값(AC-9)
+  const got = p.overlay.safeZone;
+  const bad: string[] = [];
+  if (!(got.bottom >= want.bottom)) bad.push(`아래 ${got.bottom}px < 필요 ${want.bottom}px(자막 마지막 줄이 UI 에 가려진다)`);
+  if (!(got.top >= want.top)) bad.push(`위 ${got.top}px < 필요 ${want.top}px`);
+  const side = Number(got.side ?? CAPTION_SIDE_PX);
+  if (!(side >= want.side)) bad.push(`좌우 ${side}px < 필요 ${want.side}px`);
+  /* 🔴 제휴 고지 **배지**도 같이 본다 — 배지가 UI 에 가려지면 §16B 고지가 안 보이는 것이라 품질이 아니라 **정책** 문제다. */
+  if (p.overlay.badge && !(got.top >= want.top)) bad.push("제휴 배지가 상단 UI 안");
+  if (p.overlay.badge && p.overlay.badge.corner !== "tr") bad.push(`배지 코너 ${p.overlay.badge.corner}(tr 이어야 한다)`);
+  const ch = p.channel ?? "(채널 없음 — 보수적 기준)";
+  return axis("safe_area", bad.length === 0, bad.length ? `${ch}: ${bad.join(" · ")}` : undefined);
+}
+
+/* ═══ 자막 줄 수 (R8-A §3) ═══
+   한국어 자막 표준: **한 줄 16~18자 · 최대 2줄**(넷플릭스 한국어 지침은 한 줄 16자).
+   🔴 우리에겐 **줄 수 규칙이 아예 없었다** — `white-space:pre-wrap` 의 자동 줄바꿈에 맡겨 두고 아무도 정하지 않았다.
+      지금 값(구절 ≤12음절)으로는 우연히 2줄 안에 들어가지만, **우연히 맞는 것은 규칙이 아니다**(다음 사람이 글자 크기만 키우면 깨진다).
+   글자 폭은 한글 기준 ≈ 글자 크기(1em)로 잡는다 — 정확한 폰트 메트릭 없이 재는 근사라 **보수적으로** 본다. */
+export const CAPTION_MAX_LINES = 2;
+const PRESET_FONT_PX: Record<string, number> = { keyword_center: 78, talking_big: 92, clip_top: 64 };
+export function captionLinesOf(text: string, fontPx: number, boxPx: number): number {
+  const chars = String(text ?? "").replace(/\s/g, "").length;
+  const perLine = Math.max(1, Math.floor(boxPx / Math.max(1, fontPx)));
+  return Math.max(1, Math.ceil(chars / perLine));
+}
+function checkCaptionLines(p: RenderPayload): JudgeAxis {
+  const fontPx = PRESET_FONT_PX[p.captions.preset] ?? 78;
+  const side = Number(p.overlay.safeZone.side ?? CAPTION_SIDE_PX);
+  const boxPx = Math.max(1, p.out.w - side * 2);
+  const over = p.captions.phrases
+    .map((ph) => ({ t: ph.text, n: captionLinesOf(ph.text, fontPx, boxPx) }))
+    .filter((x) => x.n > CAPTION_MAX_LINES);
+  return axis("caption_lines", over.length === 0,
+    over.length ? `${over.length}구절이 ${CAPTION_MAX_LINES}줄을 넘는다(${fontPx}px·${boxPx}px 기준): ${over.slice(0, 2).map((x) => `«${x.t.slice(0, 14)}»(${x.n}줄)`).join(" ")}` : undefined);
+}
 
 /* ═══ 결정론 축(페이로드) ═══ */
 export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string, unknown>, report?: Partial<RenderReport> | null, hookText?: string): { axes: JudgeAxis[]; repairedPayload: RenderPayload | null } {
@@ -43,8 +92,10 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
   // ① hook_first
   const h = checkHook(hookText ?? p.captions.phrases[0]?.text ?? "");
   axes.push(axis("hook_first", h.ok && p.scenes[0]?.startMs === 0, h.ok ? undefined : h.reason ?? undefined));
-  // ② safe_area — 프리셋·세이프존 존재 + 배지 코너 tr
-  axes.push(axis("safe_area", p.overlay.safeZone.top === 220 && p.overlay.safeZone.bottom === 300 && (!p.overlay.badge || p.overlay.badge.corner === "tr")));
+  // ② safe_area — 🔴 **그 채널의 안전영역 안인가**(R8-A §3 · 2026-09-15)
+  axes.push(checkSafeArea(p));
+  // ②b caption_lines — 자막이 최대 2줄인가(R8-A §3 · 한국어 자막 표준: 한 줄 16~18자 · 최대 2줄)
+  axes.push(checkCaptionLines(p));
   // ③ reading_time — 구절 글자 ≤ 표시 초 × 6.5 · 수리 = 뒤 구절 시작을 밀지 않고 endMs 연장(다음 구절 start 까지)
   const slow: string[] = []; let fixedRead = false;
   const phrases = p.captions.phrases.map((ph, i, arr) => {

@@ -9,7 +9,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { refundPiece } from "../coin-ledger";
-import { contractFor, shortsFormOf, type ShortsFormat } from "../writing-contracts";
+import { shortsFormOf, type ShortsFormat } from "../writing-contracts";
 import { videoBadgeText, videoDescriptionFirstLine, videoOpeningCaption } from "../disclosure";
 import { decryptObj } from "../creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys } from "../affiliate-coupang";
@@ -26,7 +26,7 @@ import { enqueueRender } from "./render-queue";
 import { r2Put } from "../r2";
 import { backgroundBase } from "../site-url";   // [AC-53/54] 자기 배경 함수 호출 = «이 배포» · 로컬에서 라이브면 던진다
 import {
-  CHAIN_BUDGET_MS, CHAIN_LOCK_MIN, CHAIN_RESUME_MAX, videoStub,
+  CHAIN_BUDGET_MS, CHAIN_LOCK_MIN, CHAIN_RESUME_MAX, videoStub, safeZoneOf, isVideoChannel,
   type CutPlan, type RenderPayload, type RenderScene, type ScriptLine, type VideoFormat, type VideoSeconds, type VideoSpec, type VideoStage,
 } from "./types";
 
@@ -98,7 +98,11 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     const cuts = Math.max(form.cuts.min, Math.min(form.cuts.max, spec.cuts || form.cuts.default));
     const aff = (meta.affiliate ?? null) as { provider: string; productQuery: string } | null;
     const persona = await personaFactsFor(tid, accountId);
-    void (await contractFor(channel, "script"));   // 감성 오버레이 접촉(운영자 조정분 반영 · 값은 form 이 정본)
+    /* 🔴 종전에 여기 `void (await contractFor(channel, "script"));` 가 있었다 — 주석은 «운영자 조정분 **반영**»인데
+       `contractFor` 는 **순수 읽기**(DB SELECT + 60초 캐시)라 결과를 버리면 **아무 일도 안 일어난다**.
+       운영자가 그 채널 감성 계약을 고쳐도 영상 대본은 한 글자도 안 바뀌었고, 남는 건 **버려지는 질의 한 번**이었다.
+       영상 쪽 정본은 `form`(= `shortsFormOf(format, seconds)`)이라 실제로 반영할 것이 없다 → **호출과 주석을 지웠다**.
+       ⚠️ 영상에도 감성 계약을 태우기로 정하면 그건 R8 몫이다(설계 결정 · 지금 조용히 끼워 넣지 않는다). */
 
     /* ── ① script ── */
     let script = (meta.script ?? null) as Awaited<ReturnType<typeof buildVideoScript>> extends { ok: true; script: infer S } ? S | null : null;
@@ -240,7 +244,8 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey },
       // BGM: `BGM_LICENSE_VERIFIED=1` + 시드 매니페스트가 있을 때만 깔린다. 둘 중 하나라도 없으면 null = **무음**(계약 §1.4c(3) 정직 경로).
       audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: await resolveBgm({ format, seed: pieceId }), sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
-      overlay: { badge: needDisc ? { text: videoBadgeText(comp), corner: "tr" } : null, safeZone: { top: 220, bottom: 300 }, endcard: { text: theScript.closing.slice(0, 40) } },
+      overlay: { badge: needDisc ? { text: videoBadgeText(comp), corner: "tr" } : null, safeZone: safeZoneOf(channel), endcard: { text: theScript.closing.slice(0, 40) } },
+      ...(isVideoChannel(channel) ? { channel } : {}),
       disclosureCaption: needDisc ? { text: videoOpeningCaption(comp), untilMs: 3000 } : null,
     };
     await q(sql`UPDATE pieces SET body = ${description}, blocks = ${jsonb([{ type: "video" }, { type: "srt" }, { type: "hashtags", items: yt.tags }])},

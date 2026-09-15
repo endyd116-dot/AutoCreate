@@ -135,12 +135,23 @@ const mockKind = setOf(/kind:\s*"([a-z_0-9]+)"/g, mockJs);
 const mockKindUnknown = minus(mockKind, new Set([...srvNotify, ...srvTodo, ...known, ...ddlVocab, "post", "shorts", "video", "own", "managed", "coin", "subscription", "tax_invoice", "cash_receipt", "srt", "thumb", "notice", "incident"]));
 rec("모의 알림·해야 할 일 kind 가 서버 어휘 안에 있다", mockKindUnknown.length === 0 ? true : "WARN", mockKindUnknown.join(" ") || "전부 서버 어휘", mockKindUnknown);
 
+/* ───────── ⑥ 매체 «기준일» 안내(서버 DAY_BASIS_NOTE ↔ 모의) ─────────
+   왜: 애드센스·유튜브는 **미국 시간 기준**으로 하루를 센다. 우리는 날짜를 옮기지 않고 화면이 그 사실을 한 줄로 밝히는데,
+   그 한 줄을 모의가 제 말로 지어내면 또 «고객이 볼 문장»과 달라진다(AC-52 와 같은 사고). */
+const typesTs = read("lib/revenue/types.ts");
+const dbSrv = objectMap(typesTs, "DAY_BASIS_NOTE") || new Map();
+const dbMock = objectMap(mockJs, "DAY_BASIS_NOTE") || new Map();
+const dbDiff = [...dbSrv].filter(([k, v]) => dbMock.get(k) !== v).map(([k]) => k);
+const dbExtra = minus(new Set(dbMock.keys()), new Set(dbSrv.keys()));
+rec("🔴 매체 기준일 안내 — 모의 문구가 서버와 글자까지 같다", dbSrv.size > 0 && dbDiff.length === 0 && dbExtra.length === 0,
+  [...dbDiff, ...dbExtra].join(" ") || `서버 ${dbSrv.size}종`, [...dbDiff, ...dbExtra]);
+
 /* ───────── 출력 ───────── */
 if (JSON_OUT) console.log(JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
 else {
   const w = (x, n) => String(x ?? "").slice(0, n).padEnd(n);
   console.log(`\n라벨 표면 전수 diff(AC-52) · ${new Date().toISOString()}\n${"─".repeat(124)}`);
   for (const r of results) console.log(`${r.ok === "PASS" ? "✓" : r.ok === "WARN" ? "△" : "✗"} ${w(r.step, 58)} ${w(r.note, 62)}`);
-  console.log(`${"─".repeat(124)}\n정본 = 서버(lib/video/judge.ts · lib/ai-tell-gate.ts · drizzle · notifyOnce) · 다르면 고칠 곳은 public/js/{ui,mock}.js`);
+  console.log(`${"─".repeat(124)}\n정본 = 서버(lib/video/judge.ts · lib/ai-tell-gate.ts · lib/revenue/types.ts · drizzle · notifyOnce) · 다르면 고칠 곳은 public/js/{ui,mock}.js`);
 }
 process.exit(results.some((r) => r.ok === "FAIL") ? 1 : 0);

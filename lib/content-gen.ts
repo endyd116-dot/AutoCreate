@@ -24,6 +24,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
+import { lengthFor, topicGroupOf, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -77,14 +78,20 @@ function blockSchemaLine(): string {
     "hashtags{items[] · 5~10개 · # 없이} · toc{} · summary{text 또는 items[]} · disclosure{}(시스템이 채운다 · 비워 둠) · adsense{}(빈 블록) · affiliate{}(시스템이 채운다 · 비워 둠)",
   ].join("\n");
 }
-function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic: Topic; angle: string; persona: PersonaProfile; personaFacts: string[]; affiliateCands: CoupangProduct[] | null; affiliateQuery: string | null; lengthWords: number; rewrite?: string }): { system: string; user: string } {
+function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic: Topic; angle: string; persona: PersonaProfile; personaFacts: string[]; affiliateCands: CoupangProduct[] | null; affiliateQuery: string | null; lengthWords: number; rewrite?: string; goal?: string | null; group?: TopicGroup | null }): { system: string; user: string } {
   const c = a.c;
+  const len = lengthFor(c, a.group);
+  /* 🔴 [R8-A §2] 수익 목적별 규칙 — 2026-09-15 확인: `briefs.goal` 이 여기까지 **한 번도 안 왔다**(grep 0).
+     그래서 «애드센스 목적»과 «애드포스트 목적»이 글을 한 글자도 바꾸지 않았다(선언만 있고 분기 0 · AC-59 계열).
+     사장님 질문 «같은 네이버라도 수익 목적에 따라 글 구성을 달리해야 하나?» 의 답이 이 줄들이다. */
+  const goalRules = (a.goal && c.goalRules?.[a.goal as keyof typeof c.goalRules]) || [];
   const system = [
     a.rewrite || "",
     `[① 역할 — ${c.label}]`,
     `독자: ${c.reader}`, `말투: ${c.register}`,
     ...c.rules.map((r) => `· ${r}`),
-    `· 분량: 본문 ${c.length.min.toLocaleString()}~${c.length.max.toLocaleString()}자(공백 포함 · 고지·해시태그 제외). 하한에 못 미치면 반려된다 — 모자라면 장면·사실을 더 담고 같은 말을 반복하지 않는다.`,
+    ...(goalRules.length ? ["", `[①-b 이 글의 수익 목적 — ${a.goal}]`, ...goalRules.map((r) => `· ${r}`)] : []),
+    `· 분량: 본문 ${len.min.toLocaleString()}~${len.max.toLocaleString()}자(공백 포함 · 고지·해시태그 제외)${a.group ? ` — 이 글은 «${a.group === "review" ? "후기·리뷰" : a.group === "info" ? "정보성" : "생활정보"}» 라 이 폭이다` : ""}. 하한에 못 미치면 반려된다 — 모자라면 장면·사실을 더 담고 같은 말을 반복하지 않는다.`,
     "",
     "[② 구성 — 아래 블록 시퀀스를 «순서·개수 그대로» 채운다(타입 추가·생략 금지)]",
     a.structure.map((t, i) => `${i + 1}.${t}`).join(" → "),
@@ -217,7 +224,13 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const imageCount = Math.max(0, Math.trunc(n(meta.imageCount ?? c.images.default)));
     const aff = (meta.affiliate && typeof meta.affiliate === "object" ? meta.affiliate : null) as { provider: string; productQuery: string; slot: string } | null;
     const affiliate = !!aff;
-    const structure = structureFor(c, format, imageCount, affiliate);
+    /* [R8-A §2] 🔴 골격을 **글마다 다르게** 낸다 — 계약이 내는 골격이 3~5가지뿐이라 4편째부터 반드시 겹쳤다(스모크 실측).
+       seed 는 pieceId — 같은 글은 다시 만들어도 같은 골격이다(재생성 멱등). 3단(필수/선택/억제)은 `applyTiers` 가 적용한다. */
+    const group = topicGroupOf({ format, intent: topic.factors?.intent ?? null, title: topic.title });
+    const structure = structureFor(c, format, imageCount, affiliate, pieceId);
+    /* 이 글의 수익 목적 — brief 에 있으면 그걸, 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스). 제휴가 붙은 글은 affiliate 가 이긴다. */
+    const [bg] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE id = ${n(p.brief_id)}`) : [undefined];
+    const goal = affiliate ? "affiliate" : (String(bg?.goal ?? "") || (channel === "naver_blog" ? "adpost" : "adsense"));
     const angle = String(meta.angle || topic.angle || "");
     const pFacts = personaMaterial(persona.profile, pieceId);
     const terms = personaTerms(persona.profile);
@@ -234,7 +247,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
 
     await setStage(pieceId, "writing");
     const write = async (rewrite?: string, angleOverride?: string) => {
-      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, lengthWords, rewrite });
+      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, lengthWords, rewrite, goal, group });
       const r = await callGeminiJson<{ title?: string; blocks?: unknown; tags?: unknown; affiliateChoice?: unknown }>({ purpose: "content", chain: CHAIN_HIGH, role: "high", system: pr.system, user: pr.user, tenantId: tid, ref: `piece:${pieceId}`, mode: "pro", maxOutputTokens: 12_000, timeoutMs: 180_000 });
       if (!r.ok) throw new Error(`글 생성 실패(${r.reason})`);
       const blocks = fixBlocks(r.data?.blocks, structure, c, affiliate, aff?.provider ?? null, `${pieceId}:${topic.title}`, { sponsored: meta.sponsored === true, gift: meta.gift === true });   // seed = 같은 글 · [R8-A §4] 대가 3종이면 캡션 자리가 늘 같다

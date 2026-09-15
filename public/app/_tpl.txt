@@ -530,7 +530,10 @@ function sourceGroup() {
     /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
        🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
     const est = estOf(s);
-    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+    /* [B3 6a5ab40 · §13.5] 매체마다 세는 «하루»가 다르다 — 애드센스·유튜브는 미국 시간 기준이라 우리 KST 날짜와 하루가 어긋난다.
+       🔴 날짜를 옮기지 않는다(매체 리포트와 숫자를 맞춘다) · 대신 서버가 준 문장(dayBasisNote)을 **그대로** 붙인다. */
+    const basis = src && src.dayBasisNote ? String(src.dayBasisNote) : "";
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}${basis ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(basis)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
   }).join("") + "</div>";
 }
 
@@ -858,6 +861,7 @@ function personaSheet(parent, a) {
 await load();
 === settings.html | account | 설정 ===
 <div class="step-h"><h1>설정</h1></div>
+<div id="closeBn"></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
@@ -883,6 +887,7 @@ await load();
   <a class="row tap" href="/terms.html"><div class="l"><span class="t">이용약관</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/privacy.html"><div class="l"><span class="t">개인정보 처리방침</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
+<div class="group" id="closeg"><div class="gt">계정 정리</div><div id="closeRow"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 --- script ---
 const me = await UI.boot("account"); if (!me) return;
 /* [R7 §1.1] 영상 만들기 — GET/POST /api/tenant-settings { kinds, kindsSet }.
@@ -984,6 +989,68 @@ function expSheet(narrow) {
 loadExp();
 UI.$("#pw").onclick = () => UI.sheet(`<form id="pf"><div class="field"><label>현재 비밀번호</label><input class="input" name="current" type="password" autocomplete="current-password" required><div class="help"></div></div><div class="field"><label>새 비밀번호</label><input class="input" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상 · 영문+숫자"><div class="help"></div></div><div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "비밀번호 바꾸기", onOpen: (sh, close) => {
   const f = sh.querySelector("#pf"); UI.form(f, async (d) => { const r = await UI.api("/api/auth-change-password", { body: d }); if (!r.ok) { UI.fieldError(f, r.step === "current" ? "current" : "password", r.error); return; } close(); UI.toast("비밀번호를 바꿨어요"); }); } });
+/* [R7 §3.1 · DESIGN §16 법 경로] 탈퇴 · 되돌리기 — 이용자 권리는 **누를 자리가 있어야** 기능이다(CLAUDE §4.8 · 서버·크론은 R7 에 다 있었는데 화면이 없었다).
+   서버(account-close.ts): GET /api/account-close → { closed, closedAt, purgeAt, daysLeft, graceDays } · POST { reason? } 신청 · POST /api/account-restore 되돌리기.
+   🔴 «30일»을 화면에 박지 않는다 — 날짜도 남은 일수도 서버가 준 값(graceDays·purgeAt·daysLeft)만 쓴다.
+   🔴 신청해 놓고 잊으면 30일 뒤 조용히 사라진다 — 그래서 설정 맨 위와 홈에 **예약 중이라는 사실이 계속 보인다**(배너 + «되돌리기»).
+   🔴 noGate — 막힘 사유(구독 살아 있음·보호 계정·원격접속 중)는 서버가 사람 문장으로 준다. 업셀 시트로 덮으면 까닭이 사라진다. */
+let CLOSE = null;
+const purgeSay = (c) => `${UI.dateKST(c.purgeAt)}에 지워져요`;
+async function loadClose() { const r = await UI.api("/api/account-close", { noGate: true }); CLOSE = r.ok ? r : null; drawClose(); }
+function drawClose() {
+  const bn = UI.$("#closeBn"), row = UI.$("#closeRow");
+  if (!CLOSE) { bn.innerHTML = ""; row.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
+  if (!CLOSE.closed) {
+    bn.innerHTML = "";
+    row.innerHTML = `<button class="row tap" type="button" id="closeGo"><div class="l"><span class="t" style="color:var(--danger)">계정 탈퇴</span><span class="d">신청해도 ${CLOSE.graceDays}일 안에는 되돌릴 수 있어요</span></div>${UI.chev}</button>`;
+    UI.$("#closeGo").onclick = closeSheet; return;
+  }
+  const left = CLOSE.daysLeft != null ? ` · ${CLOSE.daysLeft}일 남았어요` : "";
+  bn.innerHTML = `<div class="banner" style="margin:4px 16px 12px"><span>탈퇴 신청 · ${UI.esc(purgeSay(CLOSE))}${UI.esc(left)}</span><button type="button" data-undo>되돌리기</button></div>`;
+  row.innerHTML = `<div class="row"><div class="l"><span class="t">탈퇴를 신청했어요</span><span class="d wrap">${UI.esc(purgeSay(CLOSE))} · 그때까지는 보기만 할 수 있어요. 지금 되돌리면 자료는 그대로예요.</span></div></div>
+    <button class="row tap" type="button" data-undo><div class="l"><span class="t">되돌리기</span><span class="d">하던 대로 다시 쓸 수 있어요</span></div>${UI.chev}</button>`;
+  UI.$$("[data-undo]").forEach((b) => b.onclick = () => undoClose(b));
+}
+async function undoClose(btn) {
+  btn.disabled = true;
+  const r = await UI.api("/api/account-restore", { body: {}, noGate: true });
+  btn.disabled = false;
+  if (!r.ok) return UI.toast(r.error || "되돌리지 못했어요");   // 서버 문장 그대로(이미 파기됐다 등 — 우리가 지어내지 않는다)
+  CLOSE = r; drawClose(); UI.toast("탈퇴를 되돌렸어요 · 하던 대로 쓰시면 돼요");
+}
+/* 한 화면 한 단계 — «무슨 일이 일어나나 → 무엇이 남나 → 확인 체크 → 탈퇴». 🔴 체크 전에는 버튼이 눌리지 않는다(위험 동작 한 단계 확인). */
+const WHY = [["expensive", "생각보다 비싸요"], ["hard", "쓰기 어려워요"], ["no_channel", "원하는 채널이 없어요"], ["little", "수익이 적어요"], ["etc", "그 밖에"]];
+function closeSheet() {
+  if (!CLOSE) return;   // 상태를 못 읽었으면 열지 않는다(«30일»을 화면이 지어내지 않게)
+  const g = CLOSE.graceDays;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">지금 바로 <b style="color:var(--ink)">보기만</b> 할 수 있게 바뀌고, <b style="color:var(--ink)">${g}일 뒤</b>에 만든 글·영상·연결한 계정·수익 기록이 모두 지워져요. 그 전에는 «되돌리기»로 그대로 돌아올 수 있어요.</p>
+    <p class="muted" style="margin:0 0 10px">영수증은 법에 따라 5년 남지만(전자상거래법), 이름·이메일 같은 개인 정보는 지워요. 만든 것들을 남기고 싶다면 위 «내 자료»에서 먼저 받아 주세요.</p>
+    <div class="sec">왜 나가시나요 <span class="muted" style="font-weight:500">· 안 골라도 돼요</span></div>${UI.chips("why", WHY, "")}
+    <label class="chk" style="margin:10px 0 0"><input type="checkbox" id="okChk"><i></i>위 내용을 확인했고, 탈퇴에 동의해요</label>
+    <div class="cta"><button class="btn danger" type="button" id="closeDo" disabled>탈퇴하기</button></div>`,
+    { title: "정말 나가시겠어요?", onOpen: (sh, close) => {
+      UI.bindChips(sh);
+      const go = sh.querySelector("#closeDo"), chk = sh.querySelector("#okChk");
+      chk.onchange = () => { go.disabled = !chk.checked; };
+      go.onclick = async () => {
+        if (!chk.checked) return;
+        go.disabled = true;
+        const pick = UI.chipVal(sh, "why"); const why = (WHY.find((w) => w[0] === pick) || [])[1];
+        const r = await UI.api("/api/account-close", { body: why ? { reason: why } : {}, noGate: true });
+        go.disabled = false;
+        if (!r.ok) {
+          /* 구독이 살아 있으면 돈이 계속 나간다 — 서버가 먼저 해지하라고 한다. 그 길을 바로 내준다(문장은 서버 것). */
+          if (r.step === "subscription") { close(); return setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "먼저 해지해 주세요" }), 300); }
+          return UI.toast(r.error || "지금은 탈퇴할 수 없어요");
+        }
+        close();
+        await loadClose();   // 🔴 날짜·남은 일수는 서버에서 다시 읽는다(신청 응답으로 화면 값을 지어내지 않는다)
+        UI.toast(r.already ? "이미 탈퇴를 신청하셨어요" : "탈퇴를 신청했어요 · 그 전엔 되돌릴 수 있어요");
+      };
+    } });
+}
+loadClose();
+
 === plan.html | account | 요금제 ===
 <div class="hl"><div class="say" id="say">지금은</div><div class="num" id="cur">…</div><div class="tip" id="curTip"></div></div>
 <div class="seg" id="cycle" style="margin:0"><button type="button" data-c="month" class="on">월납</button><button type="button" data-c="year">연납 · 2개월 무료</button></div>

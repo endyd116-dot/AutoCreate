@@ -12,6 +12,28 @@ export type FormatKey = "story" | "info" | "listicle" | "compare" | "qna" | "gui
 
 export interface VisualMin { quote?: number; divider?: number; image?: number; h2?: number; tableOrList?: number; adsense?: number; checklist?: number; hashtags?: number; faq?: number }
 
+/* ═══════════ [R8-A §2 · B-1 2026-09-15] 계약의 «성격»을 바꾼 세 축 ═══════════
+ *   조사 결론(`docs/active/2026-09-15-R8A-voice-text.md`): 우리 계약은 **실물이 아니라 «SEO 블로그가 말하는 이상적인 글»**을 베끼고 있었다.
+ *   증거 ①목차·FAQ 를 전 format **필수**로 박았는데 실물은 티스토리 1/4·블로거 0/2·워드프레스 2/2 로 **글마다 다르다**
+ *        ②글자 수 상한이 통째로 낮다(티스토리 실물 8,500~12,500 vs 우리 3,000)
+ *        ③🔴 계약이 내는 **골격이 3~5가지뿐**이라 블로거·워드프레스는 **4편째부터 반드시 겹친다**(스모크 실측) — 그게 AI 티의 가장 큰 원인이다.
+ *   ⇒ 고정값 1벌 → **①범위 ②주제군 갈래 ③필수/선택/억제 3단** + **④수익 목적 갈래**(사장님 질문 2026-09-15).
+ */
+
+/** 주제군 — 같은 채널이라도 이 갈래에 따라 분량·사진 수가 다르다(실물 관측). */
+export type TopicGroup = "review" | "info" | "life";
+export const TOPIC_GROUPS: readonly TopicGroup[] = ["review", "info", "life"];
+
+/** 수익 목적 — `lib/director.ts Goal` 과 같은 어휘(여기서 director 를 import 하면 순환이다 · AC-17). */
+export type RevenueGoal = "affiliate" | "adsense" | "adpost" | "ypp" | "clip_incentive" | "mixed";
+
+/**
+ * 블록 3단 — **필수 / 선택 / 억제**.
+ *   `required` 는 매번 들어간다. `optional` 은 **글마다 들쭉날쭉**해야 한다(그게 실물이다).
+ *   🔴 `suppress` = «이 채널에선 흔하지 않다» — 넣으면 오히려 AI 티다(실물 근거가 없어 우리가 박아 뒀던 것들).
+ */
+export interface BlockTiers { required: BlockType[]; optional: BlockType[]; suppress: BlockType[] }
+
 export interface WritingContract {
   channel: string;
   /** 감성 키(emotion_profiles.key 의 뒤쪽 · DESIGN §5.4 «기본 감성»). */
@@ -42,6 +64,29 @@ export interface WritingContract {
   emojiPerParagraph: number;
   /** 글 채널인가(이 라운드 생성 대상). */
   text: boolean;
+
+  /* ── [R8-A §2] 아래 넷은 **선택 필드**다. 없으면 위의 고정값이 그대로 쓰인다(무회귀). ── */
+  /** 주제군별 분량 — 없으면 `length`. 실물 근거는 조사 문서 §2.2·§3·§4. */
+  lengthByGroup?: Partial<Record<TopicGroup, { min: number; max: number }>>;
+  /** 주제군별 사진 수 — 없으면 `images`. */
+  imagesByGroup?: Partial<Record<TopicGroup, { min: number; max: number; default: number }>>;
+  /** 블록 3단(필수/선택/억제) — 없으면 `structure` 배열을 그대로 쓴다. */
+  tiers?: BlockTiers;
+  /**
+   * 수익 목적별 규칙 — **프롬프트에 그대로 실린다**.
+   *   🔴 사장님 질문(2026-09-15): «같은 네이버라도 수익 목적에 따라 글 구성을 다 달리해야 하나?»
+   *      답: **달라야 한다.** 그런데 2026-09-15 확인 결과 `briefs.goal` 은 저장만 되고 `content-gen` 에 **한 번도 안 들어갔다**(grep 0) —
+   *      즉 «애드센스 목적»과 «애드포스트 목적»이 글을 **한 글자도 바꾸지 않았다**. 그 구멍을 이 필드가 막는다.
+   *
+   *   🔴 **«유도»는 3층으로 갈린다**(사장님 2026-09-15 · 뭉뚱그리면 글이 밍밍해지고 수익이 안 난다):
+   *     ① **광고를 가리키는 유도** — 🔴 절대 금지. «아래 배너 눌러 주세요»·«광고 보고 가세요»·광고 위치 지시. **계정 정지 사유**.
+   *     ② **우리 링크(쿠팡 제휴)로의 유도** — 🟢 해도 된다. 단 고지 필수 · 과장·거짓 금지(표시광고법).
+   *     ③ **독자의 행동으로의 유도**(계속 읽기·저장·다음 글·구독) — 🟢🟢 **더 해야 한다.**
+   *        애드센스·애드포스트 수익은 **체류·노출**에서 나온다 — «오래 읽게 하는 것»이 정당하고 유일한 개선법이다.
+   *   🔴 그리고 지금 우리 글은 «유도가 과한» 쪽이 아니라 **«부족한» 쪽**이다 —
+   *      실물은 끝맺음이 «행동 유도 한 문장»인데(조사 §2.2·§3) 우리는 `faq` 로 끝났다.
+   */
+  goalRules?: Partial<Record<RevenueGoal, string[]>>;
 }
 
 const NAVER_STORY: BlockType[] = ["hook", "image", "quote", "para", "image", "image", "checklist", "para", "image", "divider", "para", "image", "tip", "image", "hashtags"];
@@ -73,6 +118,28 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     titleStyle: "naver", titleExample: "에어프라이어 청소, 3분이면 새것처럼",
     images: { min: 6, max: 10, default: 6, style: "photo", aspect: "4:3", captionRate: 0.3 },
     emojiPerParagraph: 0, text: true,
+    /* [R8-A] 🔴 네이버는 **실물 미확인**(도구가 naver.com 을 못 읽는다 · 조사 §0.1). 아래 값은 그대로 두되 **출처가 «업계 통설»**임을 밝힌다 —
+       «1,500자 이상»·«사진 6~13장»은 네이버가 공식으로 낸 적이 없다(조사 §5.1). 사장님 세션 실물이 들어오면 여기부터 고친다. */
+    lengthByGroup: { review: { min: 1200, max: 2500 }, info: { min: 1500, max: 3000 }, life: { min: 1000, max: 2200 } },
+    tiers: {
+      required: ["hook", "para", "image"],
+      optional: ["quote", "divider", "checklist", "tip", "list", "h3"],
+      /* 🔴 목차·FAQ·요약은 네이버 블로그에서 흔하지 않다(스마트에디터에 그런 관례가 없다). 넣으면 «검색 최적화 글» 티가 난다. */
+      suppress: ["toc", "faq", "summary", "adsense"],
+    },
+    goalRules: {
+      /* 🔴 네이버 = 애드포스트. 광고는 **네이버가 자동 배치**한다 — 우리가 광고 자리를 만들지 않는다(그래서 structure 에 `adsense` 가 없는 게 맞다).
+         수익은 «체류·재방문»에서 나온다 ⇒ 경험담·사진·이웃 말투. */
+      adpost: [
+        "이 글의 목표는 «다시 오게 하는 것»이다 — 🔴 **끝맺음은 «다음 행동 한 줄»**(다음에 쓸 이야기 예고·이웃 추가 권유). 이 유도는 **해야 한다**.",
+        "광고 자리를 본문에 만들지 않는다(네이버가 알아서 붙인다).",
+        "사진과 겪은 장면을 아끼지 않는다 — 오래 머무르게 하는 건 정보 밀도가 아니라 장면이다.",
+      ],
+      affiliate: [
+        "이 글의 목표는 «고르게 돕는 것»이다 — 비교 기준을 먼저 주고, 내가 왜 그걸 골랐는지 말한다.",
+        "🔴 제휴 고지는 첫머리에 그대로 둔다(법 · 빼거나 아래로 내리지 않는다).",
+      ],
+    },
   },
   tistory: {
     channel: "tistory", emotionKey: "info", label: "티스토리 · 정보·정리",
@@ -99,6 +166,27 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
     images: { min: 2, max: 4, default: 3, style: "photo", aspect: "16:9", captionRate: 0.2 },
     emojiPerParagraph: 0, text: true,
+    /* [R8-A 실물 근거] 티스토리 4편: 1,850(후기) / 8,500 / 12,000 / 12,500(정보성) · 이미지 8(후기) / 2·2·2(정보성) ·
+       목차 1/4 · FAQ 1/4 · 요약박스 0/4 · H3 5~22개 · 태그 6~8 · 종결어미 ~습니다 60~70% + ~세요·~나요? 15~25%. */
+    lengthByGroup: { review: { min: 1500, max: 3000 }, info: { min: 3000, max: 12000 }, life: { min: 1500, max: 4000 } },
+    imagesByGroup: { review: { min: 5, max: 10, default: 7 }, info: { min: 1, max: 3, default: 2 }, life: { min: 2, max: 6, default: 3 } },
+    tiers: {
+      required: ["para", "h2"],
+      /* 🔴 목차·FAQ 는 **선택**이다 — 실물 1/4. 전 format 필수로 박아 두면 매번 같은 골격이 되고 그게 AI 티다. */
+      optional: ["toc", "faq", "h3", "table", "list", "checklist", "image", "tip"],
+      suppress: ["summary", "quote", "divider", "hashtags"],
+    },
+    goalRules: {
+      /* 🔴 애드센스 = «오래 읽게 한다». 광고는 우리가 자리를 만든다(structure 의 `adsense` 2곳). */
+      adsense: [
+        "이 글의 목표는 «끝까지 읽게 하는 것»이다 — 소제목을 넉넉히 두고, 각 소제목 아래를 스스로 완결되게 쓴다.",
+        "🔴 **광고를 가리키는 말만** 쓰지 않는다 — «아래 배너»·«광고 눌러 주세요»·광고 위치 지시(계정 정지 사유). **일반 권유는 막지 않는다.**",
+        "🔴 **끝맺음은 «다음 행동 한 줄»**이다 — 독자를 계속 읽게·다시 오게 만드는 유도는 **더 해야 한다**(체류가 곧 수익).",
+        "소구점을 먼저 던지고 공감 → 정보 → 다음 행동 순서로 간다.",
+        "광고가 들어갈 자리 앞뒤 문단은 짧게 끊지 않는다(문단이 몰리면 광고가 붙어 보인다).",
+      ],
+      affiliate: ["비교 기준을 먼저 주고 내가 왜 그걸 골랐는지 말한다.", "🔴 제휴 고지는 첫머리에 그대로 둔다(법)."],
+    },
   },
   blogger: {
     channel: "blogger", emotionKey: "seo", label: "블로거 · SEO 정보",
@@ -123,6 +211,20 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
     images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9", captionRate: 0.5 },
     emojiPerParagraph: 0, text: true,
+    /* [R8-A 실물 근거] 블로거 2편: 2,500 / 3,850자 · 이미지 0 / 11장 · FAQ 0/2 · 목차 0/2·1/2 · 라벨 0/4 · H2 6·6.
+       🔴 «이미지 0장인 정보 글»이 실제로 있다 — 그래서 하한을 0 으로 연다. */
+    lengthByGroup: { review: { min: 1500, max: 3000 }, info: { min: 1500, max: 4000 }, life: { min: 1200, max: 3000 } },
+    imagesByGroup: { review: { min: 2, max: 8, default: 4 }, info: { min: 0, max: 6, default: 2 }, life: { min: 1, max: 6, default: 2 } },
+    tiers: { required: ["para", "h2"], optional: ["toc", "faq", "h3", "table", "list", "checklist", "image", "tip"], suppress: ["summary", "quote", "divider", "adsense", "hashtags"] },
+    goalRules: {
+      adsense: [
+        "이 글의 목표는 «끝까지 읽게 하는 것»이다 — 소제목을 넉넉히 두고 각 소제목 아래를 스스로 완결되게 쓴다.",
+        "🔴 **광고를 가리키는 말만** 쓰지 않는다 — «아래 배너»·«광고 눌러 주세요»·광고 위치 지시. (일반 권유는 막지 않는다.)",
+        "🔴 **끝맺음은 «다음 행동 한 줄»**이다 — «오늘 하나만 해 보세요: …». 독자를 계속 읽게·다시 오게 만드는 유도는 **더 해야 한다**(체류가 곧 수익).",
+        "소구점을 먼저 던지고(«이거 몰라서 손해 봤다») 공감 → 정보 → 다음 행동 순서로 간다.",
+      ],
+      affiliate: ["비교 기준을 먼저 주고 내가 왜 그걸 골랐는지 말한다.", "🔴 제휴 고지는 첫머리에 그대로 둔다(법)."],
+    },
   },
   threads: {
     channel: "threads", emotionKey: "hook", label: "쓰레드 · 훅·짧게",
@@ -185,6 +287,21 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
     images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9", captionRate: 0.5 },
     emojiPerParagraph: 0, text: true,
+    /* [R8-A 실물 근거] 워드프레스 2편: 28,000~40,000자 · 이미지 15~20장 · 목차 2/2 · FAQ 0/2 · 이모지 2~15개(💡📍👉) · H3 4~30.
+       🔴 표본 2편이 **둘 다 대형 가이드**라 «폭의 위쪽만 봤다» — 하한은 우리 값을 지키고 상한만 연다(조사 §8.3). */
+    lengthByGroup: { review: { min: 1500, max: 4000 }, info: { min: 2000, max: 15000 }, life: { min: 1500, max: 5000 } },
+    imagesByGroup: { review: { min: 2, max: 12, default: 5 }, info: { min: 2, max: 20, default: 6 }, life: { min: 2, max: 10, default: 4 } },
+    /* 🔴 목차는 워드프레스에서 **흔하다**(2/2) — 티스토리와 반대다. 그래서 «선택»이되 긴 글이면 붙는다. */
+    tiers: { required: ["para", "h2"], optional: ["toc", "h3", "table", "list", "checklist", "image", "tip", "faq"], suppress: ["summary", "quote", "divider", "adsense", "hashtags"] },
+    goalRules: {
+      adsense: [
+        "이 글의 목표는 «끝까지 읽게 하는 것»이다 — 소제목을 넉넉히 두고 각 소제목 아래를 스스로 완결되게 쓴다.",
+        "🔴 **광고를 가리키는 말만** 쓰지 않는다 — «아래 배너»·«광고 눌러 주세요»·광고 위치 지시. (일반 권유는 막지 않는다.)",
+        "🔴 **끝맺음은 «다음 행동 한 줄»**이다 — «오늘 하나만 해 보세요: …». 독자를 계속 읽게·다시 오게 만드는 유도는 **더 해야 한다**(체류가 곧 수익).",
+        "소구점을 먼저 던지고(«이거 몰라서 손해 봤다») 공감 → 정보 → 다음 행동 순서로 간다.",
+      ],
+      affiliate: ["비교 기준을 먼저 주고 내가 왜 그걸 골랐는지 말한다.", "🔴 제휴 고지는 첫머리에 그대로 둔다(법)."],
+    },
   },
   /* 영상 대본 3채널 — 같은 계약(§5C.1 «쇼츠·클립·릴스 대본» 1행). 생성은 Phase 3 · 계약은 지금 전부. */
   youtube_shorts: shortsContract("youtube_shorts", "유튜브 쇼츠 · 3초 훅·자막 본체", "9:16"),
@@ -337,8 +454,78 @@ export function pickFormat(c: WritingContract, recent: string[], seed: string, h
 }
 
 /** format 의 블록 시퀀스를 이미지 수에 맞춰 조정(image 블록을 count 개로 · 부족하면 뒤에서 제거 · 넘치면 para 뒤에 추가). */
-export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean): BlockType[] {
-  const base = [...(c.structure[format] ?? c.structure[c.formats[0]] ?? NAVER_STORY)];
+/** 작은 결정론 난수(seed) — 같은 글은 언제 만들어도 같은 골격이 나온다(재생성 멱등). */
+function seeded(seed: number): () => number {
+  let x = (Math.floor(seed) || 1) >>> 0;
+  return () => { x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; return x / 0x100000000; };
+}
+
+/**
+ * [R8-A §2] 블록 3단을 적용해 **골격을 글마다 다르게** 만든다.
+ *   ① `suppress` 에 든 블록은 **뺀다**(«이 채널에선 흔하지 않다» — 넣으면 AI 티).
+ *   ② `optional` 에 든 블록은 **seed 로 들쭉날쭉하게** 남긴다(대략 절반). `required` 는 건드리지 않는다.
+ *   🔴 이게 이 라운드의 핵심이다 — 계약이 내는 골격이 **3~5가지뿐**이라 블로거·워드프레스는 4편째부터 반드시 겹쳤다(스모크 실측).
+ *      `structure_repeat` 축(`lib/structure-print.ts`)이 그걸 재고, 이 함수가 그걸 **만들지 않게** 한다.
+ *   `tiers` 가 없는 채널(쓰레드·인스타·영상)은 **아무것도 하지 않는다**(무회귀).
+ */
+export function applyTiers(base: BlockType[], c: WritingContract, seed: number): BlockType[] {
+  const t = c.tiers;
+  if (!t) return base;
+  const rnd = seeded(seed);
+  const out: BlockType[] = [];
+  for (const b of base) {
+    if (t.suppress.includes(b)) continue;                 // ① 억제
+    if (t.optional.includes(b) && rnd() < 0.45) continue; // ② 선택 — 글마다 들쭉날쭉
+    out.push(b);
+  }
+  /* 선택 블록을 너무 많이 떨어뜨려 필수만 남으면 그것도 매번 같은 모양이다 — 하나는 되살린다. */
+  if (!out.some((b) => t.optional.includes(b))) {
+    const cand = base.filter((b) => t.optional.includes(b) && !t.suppress.includes(b));
+    if (cand.length) { const pick = cand[Math.floor(rnd() * cand.length)]; const at = base.indexOf(pick); out.splice(Math.min(at, out.length), 0, pick); }
+  }
+  return out.length ? out : base;
+}
+
+/** [R8-A §2] 주제군별 분량·사진 수 — 값이 없으면 채널 고정값(무회귀). */
+export function lengthFor(c: WritingContract, group?: TopicGroup | null): { min: number; max: number } {
+  return (group && c.lengthByGroup?.[group]) || c.length;
+}
+export function imagesFor(c: WritingContract, group?: TopicGroup | null): { min: number; max: number; default: number } {
+  const g = group && c.imagesByGroup?.[group];
+  return g || { min: c.images.min, max: c.images.max, default: c.images.default };
+}
+
+/** [R8-A §2] 소재·형식에서 주제군을 고른다(순수 · 재료가 없으면 null = 채널 고정값을 쓴다). */
+export function topicGroupOf(a: { format?: string | null; intent?: string | null; title?: string | null }): TopicGroup | null {
+  const f = String(a.format ?? ""), intent = String(a.intent ?? ""), t = String(a.title ?? "");
+  if (f === "compare" || /후기|리뷰|써\s?봤|사용기|내돈내산/.test(t) || intent === "commercial") return "review";
+  if (f === "info" || f === "listicle" || f === "guide" || f === "qna") return "info";
+  if (f === "story") return "life";
+  return null;
+}
+
+/**
+ * [R8-A §2 실호출 검증에서 잡은 것 2026-09-15] **끝맺음을 «다음 행동 한 줄»로 바꾼다.**
+ *   🔴 `goalRules` 에 «끝맺음은 다음 행동 한 줄»을 적어 놨는데 **글은 여전히 FAQ 로 끝났다.**
+ *      원인: 프롬프트 ②칸이 «블록 시퀀스를 순서·개수 **그대로** 채운다(추가·생략 금지)» 라고 강제한다 —
+ *      즉 **규칙(①-b)과 구조(②)가 싸우면 구조가 이긴다.** 말로만 고치면 안 되고 **구조를 고쳐야** 한다.
+ *      (이게 «계약만 고치면 생성이 따라오나»의 답이다 — 문장만 고치면 안 따라온다.)
+ */
+function endWithAction(seq: BlockType[], c: WritingContract): BlockType[] {
+  if (!c.tiers || c.tiers.suppress.includes("tip")) return seq;
+  const out = [...seq];
+  const last = out[out.length - 1];
+  if (last === "tip") return out;
+  /* 해시태그는 진짜 마지막이다(네이버) — 그 앞에 넣는다. */
+  const at = last === "hashtags" ? out.length - 1 : out.length;
+  out.splice(at, 0, "tip");
+  return out;
+}
+
+/** `seed` 를 주면 3단(필수/선택/억제)을 적용해 골격을 글마다 다르게 낸다. 안 주면 종전 그대로(무회귀). */
+export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean, seed?: number): BlockType[] {
+  const raw = [...(c.structure[format] ?? c.structure[c.formats[0]] ?? NAVER_STORY)];
+  const base = seed === undefined ? raw : endWithAction(applyTiers(raw, c, seed), c);
   let imgs = base.filter((b) => b === "image").length;
   const out: BlockType[] = [];
   for (const b of base) { if (b === "image" && imgs > imageCount) { imgs--; continue; } out.push(b); }
