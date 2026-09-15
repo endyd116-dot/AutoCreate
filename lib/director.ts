@@ -454,6 +454,28 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
   return { ok: true, specs: out };
 }
 
+/**
+ * [R8 · 사장님 코인값 승인 2026-09-15] estimate — **누르기 전에 몇 코인인지.** 아무것도 쓰지 않는다(견적만).
+ *   🔴 왜 서버가 재는가: 화면이 «1 + AI 장수 − 1» 을 **다시 적으면** 값을 바꿀 때 한 쪽이 썩는다(AC-47).
+ *      `confirm` 과 **같은 `applyPatches`** 를 타므로 «견적에서 본 숫자»와 «실제로 빠진 숫자»가 갈릴 수 없다.
+ *   🔴 사진을 더 넣는 것은 **공짜**다(내 사진·스톡). `images.aiCount` 만 코인을 움직인다 — 화면에서 다른 질문으로 물어야 한다.
+ */
+export async function estimate(tid: number, briefId: number, patches: PieceSpecPatch[] = []): Promise<
+  | { ok: true; coinCost: number; coinsLeft: number; enough: boolean; need: number; pieces: { key: string; channel: string; kind: "post" | "video"; coinCost: number; imageCount: number; aiCount: number }[] }
+  | { ok: false; step: string; error: string }> {
+  const [b] = await q(sql`SELECT * FROM briefs WHERE tenant_id = ${tid} AND id = ${Math.floor(Number(briefId) || 0)}`);
+  if (!b) return { ok: false, step: "not_found", error: "지시서를 찾을 수 없어요." };
+  const base = (Array.isArray(b.pieces) ? b.pieces : []) as PieceSpec[];
+  const ap = await applyPatches(tid, base, Array.isArray(patches) ? patches : []);
+  if (!ap.ok) return { ok: false, step: "patch", error: ap.error };
+  const coinCost = ap.specs.reduce((a, s) => a + s.coinCost, 0);
+  const bal = await balance(tid);
+  return {
+    ok: true, coinCost, coinsLeft: bal.balance, enough: bal.balance >= coinCost, need: Math.max(0, coinCost - bal.balance),
+    pieces: ap.specs.map((s) => ({ key: s.key, channel: s.channel, kind: s.kind ?? "post", coinCost: s.coinCost, imageCount: s.images.count, aiCount: s.images.aiCount })),
+  };
+}
+
 export async function confirm(tid: number, briefId: number, patches: PieceSpecPatch[] = [], actorId: number | null = null, opts: ConfirmOpts = {}): Promise<ConfirmResult> {
   const origin: PieceOrigin = opts.origin === "manual" ? "manual" : "auto";   // 기본 auto = fail-closed
   const reuseSlotId = Math.floor(Number(opts.slotId) || 0) || null;
