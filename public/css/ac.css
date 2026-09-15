@@ -39,8 +39,14 @@ input,textarea,select{font:inherit;color:inherit}
   .tabs{display:none}
 }
 @media (max-width:640px){ .rail{display:none} .page:has(>.cta:not([hidden])){padding-bottom:calc(var(--tab-h) + 96px)} }
-@media (min-width:1100px){ .page.two{max-width:1000px;display:grid;grid-template-columns:minmax(0,640px) 300px;gap:40px;align-content:start} .page.two>.aside{border-left:1px solid var(--line);padding-left:32px} }
-@media (max-width:1099px){ .page.two>.aside{display:none} }
+/* [R7 §4.4] 데스크톱 우측 300 패널(DESIGN §13.3b) — 좁은 화면에서는 본문 아래로 그냥 흐른다.
+   .aside.desk-only = «데스크톱에서만 더 보여 주는 것»(좁은 화면에 없던 내용을 새로 밀어 넣지 않는다) */
+.page.two>.aside.desk-only{display:none}
+@media (min-width:1100px){ .page.two{max-width:1000px;display:grid;grid-template-columns:minmax(0,640px) 300px;gap:40px;align-content:start}
+  .page.two>*{grid-column:1}   /* 🔴 칸을 명시한다 — 안 그러면 자식이 순서대로 두 칸에 번갈아 들어간다(본문 3번째 그룹이 오른쪽으로 튄다) */
+  .page.two>.aside{grid-column:2;grid-row:1/span 99;align-self:start;border-left:1px solid var(--line);padding-left:32px}
+  .page.two>.aside.desk-only{display:block} .page.two>.aside>.group{background:transparent;padding-left:0;padding-right:0} .page.two>.aside .gt{padding-left:0} .page.two>.aside .row{padding-left:0;padding-right:0} }
+@media (max-width:1099px){ .page.two>.aside.desk-only{display:none} }   /* 좁은 화면: 데스크톱 전용 칸만 숨긴다 — 본문에서 옮겨 온 내용(디렉터 «왜 이렇게 정했나요»)은 그대로 흐른다 */
 
 /* 좌측 레일 */
 .rail .brand{font-weight:800;font-size:16px;letter-spacing:-.01em;padding:4px 12px 18px}

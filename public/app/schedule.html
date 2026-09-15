@@ -6,23 +6,24 @@
 <title>편성표 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=10">
+<link rel="stylesheet" href="/css/ac.css?v=11">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
-  <main class="page" id="page">
+  <main class="page two" id="page">
     <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
 <div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
 <div class="seg" id="mode"><button type="button" data-m="two" class="on">2주</button><button type="button" data-m="month">월</button></div>
 <div class="group" id="cal"></div>
 <div id="feed" hidden></div>
+<aside class="aside desk-only" id="side"></aside>
 <div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=7"></script>
+<script src="/js/ui.js?v=8"></script>
 <script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
@@ -89,6 +90,7 @@ function render() {
   UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
   UI.$$("#cal .dd").forEach((b) => b.onclick = () => { sel = b.dataset.d; render(); if (two) { const g = UI.$(`#feed [data-day="${sel}"]`); if (g) g.scrollIntoView({ behavior: "smooth", block: "start" }); else UI.toast("이날은 나갈 글이 없어요"); } });
   const feed = UI.$("#feed"), day = UI.$("#day"); feed.hidden = !two; day.hidden = two;
+  renderSide();
   // 규칙도 편성도 없으면 빈 상태 하나
   if (!active.length && !slots.length) { const host = two ? feed : day; host.innerHTML = `<div class="group"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
   if (two) {
@@ -260,6 +262,23 @@ function ruleSheet() {
     };
   };
   UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => { view(sh, close); } });
+}
+/* [R7 §4.4 · DESIGN §13.3b] 데스크톱 우측 300 패널 — 화면을 옮겨 다니지 않고 «오늘»과 규칙을 같이 본다(좁은 화면에는 아예 없다 · 없던 내용을 폰에 밀어 넣지 않는다) */
+function renderSide() {
+  const side = UI.$("#side"); if (!side) return;
+  const k = ymd(today); const ls = daySlots(k).filter((s) => s.status !== "skipped");
+  const active = (D.rules || []).filter((r) => r.active);
+  const done = ls.filter((s) => s.status === "published").length;
+  const rows = ls.length ? ls.map((s) => `<div class="row" style="min-height:44px">${UI.mark(s.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${tooSoon(s) ? '<span class="pill off">건너뜀</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>`).join("")
+    : '<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘은 나갈 글이 없어요</span></div></div>';
+  const ruleRows = active.map((r) => `<div class="row" style="min-height:40px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:13.5px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회</span><span class="d">${(r.weekdays || []).length ? r.weekdays.map((w) => WD[w]).join("·") : "요일 자동"}${r.preferredHour != null ? " · " + String(r.preferredHour).padStart(2, "0") + "시" : ""}</span></div></div>`).join("");
+  side.innerHTML = `<div class="group"><div class="gt">오늘</div>${rows}</div>
+    <div class="group"><div class="gt">자동 편성</div>
+      <div class="row" style="min-height:44px"><div class="l"><span class="t" style="font-size:14px">${D.settings && D.settings.autoSchedule ? "켜져 있어요" : "꺼져 있어요"}</span><span class="d">${active.length ? "규칙 " + active.length + "개 · 오늘 " + done + "/" + ls.length + "건 나갔어요" : "규칙이 아직 없어요"}</span></div></div>
+      ${ruleRows}
+      <div style="padding:8px 0 0"><button class="btn secondary sm" type="button" id="sideRules" style="width:100%">편성 설정</button></div>
+    </div>`;
+  const b = UI.$("#sideRules"); if (b) b.onclick = settingsSheet;
 }
 /* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
 function settingsSheet() {

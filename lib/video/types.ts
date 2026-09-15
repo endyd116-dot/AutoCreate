@@ -103,10 +103,28 @@ export interface RenderReport {
   plannedMs?: number;
   /** true 면 위 세 값과 frameCount 가 ffprobe 실측이다. 없으면 계획값(판정 보류). */
   measured?: boolean;
+  /**
+   * [R7 §1.5] 대표 프레임 지문 재료 — 포스터를 **32×32 그레이 raw(1024B)** 로 줄인 것의 base64.
+   *   러너가 ffmpeg 한 줄로 만든다(새 의존성 0):
+   *     `ffmpeg -y -i poster.jpg -vf scale=32:32,format=gray -f rawvideo -pix_fmt gray thumb.raw`  → readFileSync(...).toString("base64")
+   *   서버가 이걸 받아 `phashFromGray32` 로 64bit pHash 를 만들고 **다른 계정의 최근 14일 영상**과 해밍 거리를 잰다(§1.9 · §6.2).
+   *   🔴 못 만들면 **키를 아예 보내지 않는다**. 빈 문자열·0 으로 채우면 심사가 «못 쟀다»와 «닮지 않았다»를 구분하지 못한다(AC-33·AC-9).
+   */
+  thumbGray?: string;
+  /** [R7 §1.5] 러너가 직접 pHash 를 계산했으면 hex 16자. `thumbGray` 가 있으면 서버가 다시 계산하니 **둘 중 하나만** 있으면 된다. */
+  framePhash?: string;
 }
 
 /* ───────── 심사(계약 §5 judgeVideo) ───────── */
-export interface JudgeAxis { key: string; label: string; pass: boolean; grade: JudgeGrade; detail?: string }
+export interface JudgeAxis {
+  key: string; label: string; pass: boolean; grade: JudgeGrade; detail?: string;
+  /**
+   * [R7 §1.5] **판정 보류** — 통과도 실패도 아니다(AC-33 · AC-9).
+   *   `pass:true` 라 막지는 않지만 «쟀고 괜찮았다»는 뜻이 **아니다**: 잴 재료가 안 와서 판정을 못 한 것이다.
+   *   화면은 이 축을 ✅ 로 그리면 안 된다 — «아직 못 쟀어요»로 그린다. 없으면(undefined) 실제로 잰 결과다.
+   */
+  pending?: boolean;
+}
 export interface JudgeResult { grade: JudgeGrade; pass: boolean; axes: JudgeAxis[]; repaired: boolean }
 
 /* ───────── chainStage(계약 §1.4) ───────── */

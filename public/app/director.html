@@ -6,22 +6,22 @@
 <title>디렉터 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=10">
+<link rel="stylesheet" href="/css/ac.css?v=11">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
-  <main class="page" id="page">
+  <main class="page two" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/create.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="confirm"><div class="q">이 소재로</div><div class="big" id="big"><span class="sk" style="display:inline-block;width:70%"></span></div></div>
 <div class="group" id="targets"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="kv"></div>
-<div class="group" id="why"></div>
+<aside class="aside" id="why"></aside>
 <div class="cta" id="cta" hidden><button class="btn secondary w40" type="button" id="edit">손보기</button><button class="btn primary" type="button" id="make">만들기</button></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=7"></script>
+<script src="/js/ui.js?v=8"></script>
 <script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
@@ -64,7 +64,7 @@ function render() {
     : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
   const tot = total();
   UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
-  UI.$("#why").innerHTML = `<div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div>`;
+  UI.$("#why").innerHTML = `<div class="group"><div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div></div>`;
   UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
 }
 /* ── 손보기 시트(DESIGN §5.5 항목 전부 + [P1R5] 영상 섹션: 포맷 3 · 길이 15/30/60 · 목소리 · 계정 변주(읽기 전용) · 코인 재계산) ── */

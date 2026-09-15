@@ -83,7 +83,103 @@
     try { const url = new URL(location.href); ["key", "reason", "failed", "charged", "trial"].forEach((k) => url.searchParams.delete(k)); history.replaceState(null, "", url.pathname + (url.search || "") + url.hash); } catch { /* empty */ } // 새로고침해도 다시 안 뜨게(모의 손잡이는 남긴다)
   };
 
+  /* [R7 §1.3] 계정 없이 만든 영상의 출구 — ①내려받기 ②앱에서 직접 올림 ③올린 주소 적기.
+     🔴 내려받기 주소는 10분짜리 서명이고 교차 출처라 `<a download>` 가 무시된다 — 파일 이름은 서버가 서명 안에 넣어 준다(화면은 이름을 고르지 않는다). */
+  UI.videoDownload = async function (pieceId, note) {
+    const r = await UI.api("/api/piece-video?id=" + encodeURIComponent(pieceId));
+    if (!r.ok) {
+      if (r.gated) return false;
+      if (r.step === "no_render") { UI.toast(r.error || "아직 영상 파일이 없어요"); return false; }
+      UI.toast(r.error || "영상을 가져오지 못했어요"); return false;
+    }
+    if (note) note.textContent = [r.filename ? `${r.filename} 를 받아요` : "", r.bytes ? UI.mb(r.bytes) : "", "받는 주소는 10분 동안만 살아 있어요"].filter(Boolean).join(" · ");
+    location.href = r.url;   // 같은 창에서 받아진다(파일 이름·Content-Disposition 은 서명 안에 있다)
+    return true;
+  };
+  /* 올린 주소 적기 — 400 step:"url" 이 흔하다(고객이 다른 채널 주소를 붙인다). 서버 문장이 이미 사람말이라 그대로 칸 밑에 붙이고,
+     reason 이 있으면 그 채널의 «이렇게 생긴 주소»를 한 줄 더 보여 준다. */
+  UI.URL_HINT = {
+    youtube_shorts: "youtube.com/shorts/… 또는 youtu.be/… 로 붙여 주세요",
+    reels: "instagram.com/reel/… 로 붙여 주세요",
+    instagram: "instagram.com/p/… 또는 /reel/… 로 붙여 주세요",
+    naver_clip: "blog.naver.com/… 또는 clip.naver.com/… 로 붙여 주세요",
+    naver_blog: "blog.naver.com/아이디/글번호 로 붙여 주세요",
+    tistory: "…tistory.com/글번호 또는 직접 쓰시는 주소로 붙여 주세요",
+    tiktok: "tiktok.com/@아이디/video/… 로 붙여 주세요",
+    threads: "threads.net/@아이디/post/… 로 붙여 주세요",
+    blogger: "…blogspot.com/… 또는 직접 쓰시는 주소로 붙여 주세요",
+    wordpress: "…wordpress.com/… 또는 직접 쓰시는 주소로 붙여 주세요",
+  };
+  UI.markPublishedSheet = function (piece, onDone) {
+    const ch = piece.channel, label = UI.chLabel(ch);
+    UI.sheet(`<p class="muted" style="margin:0 0 10px">${UI.esc(label)} 앱에서 올린 뒤, 그 글 주소를 붙여 주세요. 발행함에 쌓이고 편성표도 «발행됨»으로 바뀌어요.</p>
+      <form id="mpf"><div class="field"><label for="mpu">올린 주소</label><input class="input" id="mpu" name="url" inputmode="url" placeholder="https://" autocomplete="off"><div class="help"></div></div>
+      <p class="muted" style="margin:0 0 8px;font-size:12.5px">${UI.esc(UI.URL_HINT[ch] || "올린 글의 주소를 그대로 붙여 주세요")}</p>
+      <div class="cta" style="position:static;padding:4px 0 8px"><button class="btn primary" type="submit">다 올렸어요</button></div></form>`,
+      { title: "올린 주소 적기", onOpen: (sh, close) => UI.form(sh.querySelector("#mpf"), async (d, f) => {
+        const url = String(d.url || "").trim();
+        if (!url) return UI.fieldError(f, "url", "주소를 붙여 주세요.");
+        const r = await UI.api("/api/post-mark-published", { body: { pieceId: piece.id, url } });
+        if (!r.ok) {
+          if (r.gated) return close();
+          if (r.step === "url") return UI.fieldError(f, "url", `${r.error || "주소를 확인해 주세요."} ${UI.URL_HINT[ch] || ""}`.trim());
+          return UI.fieldError(f, "url", r.error || "적지 못했어요");
+        }
+        close();
+        UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${r.already ? "이미 적어 둔 글이에요" : "올린 글로 적었어요"}</p>
+          <p class="muted" style="margin:0 0 6px">${UI.esc(r.message || "발행함에서 볼 수 있어요.")}</p>
+          <p class="muted" style="margin:0 0 12px;font-size:12.5px">이제 이 글의 수익도 함께 세어요.</p>
+          <div class="cta" style="position:static;padding:0"><a class="btn primary" href="${UI.esc(r.url)}" target="_blank" rel="noopener">올린 글 열기</a></div>`, { title: "" });
+        if (onDone) onDone(r);
+      }) });
+  };
+
+  /* [R7 §4.4] 알림 — 서비스워커는 «알림»만 맡는다(오프라인 캐시 안 한다 · public/sw.js).
+     🔴 기기 알림은 «권한»과 «구독» 두 단계다: 권한만 받고 서버에 구독을 못 보내면 알림은 **안 온다** — 화면이 «켰어요»라고 말하면 거짓말이 된다.
+     그래서 서버 키(/api/push-key)가 없으면 그 상태를 그대로 말한다(준비 중). */
+  UI.swReady = function () {
+    if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+    return navigator.serviceWorker.register("/sw.js").catch(() => null);
+  };
+  UI.pushState = function () {
+    const iosStandalone = window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return { can: false, ios, iosStandalone, perm: "unsupported" };
+    return { can: true, ios, iosStandalone, perm: Notification.permission };
+  };
+  const b64 = (s) => { const pad = "=".repeat((4 - (s.length % 4)) % 4); const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
+  /** 켜기: 권한 → 서버 공개키 → 구독 → 서버 저장. 어느 칸에서 막혀도 «어디서 막혔는지»를 돌려준다(조용한 실패 금지). */
+  UI.pushEnable = async function () {
+    const st = UI.pushState();
+    if (!st.can) return { ok: false, step: "unsupported" };
+    let perm = st.perm;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") return { ok: false, step: perm === "denied" ? "denied" : "dismissed" };
+    const reg = await UI.swReady(); if (!reg) return { ok: false, step: "sw" };
+    const ready = await navigator.serviceWorker.ready;
+    const key = await UI.api("/api/push-key", { noRedirect: true, noGate: true });
+    if (!key.ok || !key.publicKey) return { ok: false, step: "no_server", perm };
+    try {
+      const sub = await ready.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key.publicKey) });
+      const r = await UI.api("/api/push-subscribe", { body: sub.toJSON(), noGate: true });
+      if (!r.ok) return { ok: false, step: "save", error: r.error };
+      return { ok: true };
+    } catch (e) { return { ok: false, step: "subscribe", error: String((e && e.message) || e) }; }
+  };
+  UI.pushDisable = async function () {
+    try { const ready = await navigator.serviceWorker.ready; const sub = await ready.pushManager.getSubscription();
+      if (sub) { await UI.api("/api/push-unsubscribe", { body: { endpoint: sub.endpoint }, noGate: true }).catch(() => null); await sub.unsubscribe(); } } catch { /* 이미 없으면 그만 */ }
+    return { ok: true };
+  };
+  UI.pushSubscribed = async function () {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+    try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
+  };
+  UI.APP_VERSION = "2026.09.15";   // 배포 묶음마다 메인이 올린다(화면에 보이는 유일한 판 번호)
+
+
   /* ── 포맷 ── */
+  UI.mb = (b) => (b > 0 ? `${(b / 1048576).toFixed(1)}MB` : "");
   UI.won = (n) => (Number(n) || 0).toLocaleString("ko-KR") + "원";
   UI.num = (n) => (Number(n) || 0).toLocaleString("ko-KR");
   UI.utc = (v) => { if (!v) return null; const s = String(v); return /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(s) && !/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? new Date(s.replace(" ", "T") + "Z") : new Date(s); };
@@ -169,6 +265,7 @@
     const me = await UI.api("/api/auth-me");
     if (!me.ok) return null;
     UI.me = me; UI.shell(active, me);
+    UI.swReady();   // [R7 §4.4] 알림용 서비스워커는 앱에 들어오면 등록해 둔다(권한을 나중에 켜도 바로 받을 수 있게)
     if (me.impersonation) UI.impBanner(me.impersonation);
     // 활동 시 슬라이딩 연장(탭 복귀·5분 주기)
     document.addEventListener("visibilitychange", () => { if (!document.hidden) fetch("/api/auth-refresh", { method: "POST", credentials: "same-origin" }); });
@@ -203,7 +300,7 @@
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
   UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
   /* [P1R2] 슬롯 상태기계 전 상태(DESIGN §5B.6 · 계약 §-1) — 어휘 한 벌 */
-  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"] };
+  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], rejected: ["off", "버림"], failed: ["danger", "실패"] };
   /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
   UI.POST_STATUS = { published: ["ok", "발행됨"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"], uploaded_private: ["warn", "비공개 업로드됨"], publishing: ["off", "올리는 중"] }; // [P1R5] uploaded_private(§7-1) · 릴스 처리 중은 publishing + errorKind video_processing
   /* [P1R5] 영상 어휘 — 계약 v5.1 §0.2 글자 그대로(VideoFormat · VideoSeconds · VideoStage · JudgeGrade · VideoChannel) · 사람말은 여기 한 곳 */
@@ -265,7 +362,8 @@
     money: ["money", '<path d="M12 3v18M17 7H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6"/>'],
   };
   /* [P1R4] 서버 알림 kind(lib/cron notifyOnce · B 결제·체험) → 아이콘 하나 · 링크 없을 때의 기본 링크 */
-  UI.KIND_ALIAS = { slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
+  /* [R7 §1.4 · B-1 a1c9801] 홈 «해야 할 일» 7줄 — 새 kind 는 이미 있는 아이콘으로 잇는다(아이콘을 새로 만들지 않는다) */
+  UI.KIND_ALIAS = { awaiting_manual: "publish", pending_login: "account", slot_gate: "setup", forcedByPlan: "review", slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
     trial_d3: "clock", trial_d1: "clock", trial_d0: "clock", trial_ended: "clock", trial_reused: "clock", billing_failed: "card", billing_suspended: "card", subscription_suspended_no_key: "card", subscription_cancelled: "card", card_required: "card", ai_cost_cap: "gauge", coin_refunded: "money", export_ready: "coin", referral: "coin" };
   UI.KIND_LINK = { trial_d3: "/app/plan.html", trial_d1: "/app/plan.html", trial_d0: "/app/plan.html", trial_ended: "/app/plan.html", trial_reused: "/app/plan.html", billing_failed: "/app/plan.html", billing_suspended: "/app/plan.html", subscription_suspended_no_key: "/app/plan.html", subscription_cancelled: "/app/plan.html", card_required: "/app/plan.html",
     coin_refunded: "/app/coins.html", export_ready: "/app/settings.html", referral: "/app/account.html", coin_cap: "/app/coins.html", coin_short: "/app/coins.html", ai_cost_cap: "/app/home.html", slot_no_topic: "/app/create.html", runner_offline: "/app/runner.html", revenue_error: "/app/ad-media.html" };
