@@ -6,22 +6,27 @@
 <title>만들기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=18">
+<link rel="stylesheet" href="/css/ac.css?v=19">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
-<div class="step-h"><h1>오늘은 어떤 소재로 벌까요?</h1><p>«디렉터에게» 보내면 채널·계정·구성·시각을 정해 드려요.</p></div>
+<div class="step-h"><h1>오늘은 어떻게 써 볼까요?</h1><p>셋 중 아무거나 고르면 돼요 · 오늘은 직접 쓰고 내일은 맡겨도 돼요.</p></div>
+<div class="group" id="ways"><div class="gt">쓰는 길</div>
+  <button type="button" class="row tap" id="wayAi"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg></span><div class="l"><span class="t">AI에게 맡기기</span><span class="d">소재만 고르면 채널·계정·구성·시각까지 정해 드려요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <a class="row tap" href="/app/write.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14 6l4 4"/></svg></span><div class="l"><span class="t">내가 직접 쓰기</span><span class="d">제목과 본문을 직접 쓰고 편성표에 걸어요 · AI를 안 써서 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/pieces.html?tab=in_review"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/><path d="M12 15l7.5-7.5a1.8 1.8 0 0 0-2.5-2.5L9.5 12.5 9 15z"/></svg></span><div class="l"><span class="t">AI가 쓴 걸 내가 고치기</span><span class="d" id="wayFixD">만들어 둔 글을 열어 고친 뒤 예약해요 · 고쳐도 코인은 더 안 들어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=19"></script>
-<script src="/js/mock.js?v=19"></script>
+<script src="/js/ui.js?v=20"></script>
+<script src="/js/mock.js?v=20"></script>
 <script>
 (async () => {
 await UI.boot("create");
@@ -127,7 +132,13 @@ UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>�
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
 UI.pullToRefresh(load);   /* [R8 §6.1] 소재 목록은 «새 소식» 화면이라 당겨서 새로고침이 맞다 */
+/* [R8-A2 §5D.1] 🔴 **셋은 «모드»가 아니라 «입구»다** — 미리 고르는 설정이 아니라 그때그때 고르는 것이다(사장님 «이것이 다 가능하게 하는 게 주요 골자»).
+   «맡기기»는 이 화면 아래 소재 목록이 곧 그 길이라 **같은 화면 안에서** 데려간다(없는 화면으로 보내지 않는다). */
+UI.$("#wayAi").onclick = () => { const g = UI.$("#topics"); if (g) g.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); };
 await load();
+/* «고치기»는 **만들어 둔 글이 몇 편인지**를 같이 말한다 — 못 세면 기본 문장을 그대로 둔다(«0편»을 지어내지 않는다 · AC-9). */
+UI.api("/api/pieces-list?status=in_review").then((r) => { if (!r.ok) return; const n = (r.pieces || []).length;
+  if (n) UI.$("#wayFixD").textContent = `지금 봐주세요가 ${n}편 있어요 · 열어서 고친 뒤 예약하면 돼요`; });
 })();
 </script>
 </body>

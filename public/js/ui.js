@@ -408,6 +408,11 @@
   UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], rejected: ["off", "버림"], failed: ["danger", "실패"] };
   /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
   UI.POST_STATUS = { published: ["ok", "발행됨"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"], uploaded_private: ["warn", "비공개 업로드됨"], publishing: ["off", "올리는 중"] }; // [P1R5] uploaded_private(§7-1) · 릴스 처리 중은 publishing + errorKind video_processing
+  /* [R8-A2 · DESIGN §5E.2] 내 글에 들어온 신고(`takedown_notices.status`) — 서버엔 값만 있고 **한국말은 여기가 정본**이다(주제군·수익 목적과 같은 자리).
+     🔴 «곧 정지됩니다» 같은 말을 쓰지 않는다 — 자동 정지는 없고(운영자가 누른다 · lib/takedown.ts), 겁주는 말은 §3 위반이다. */
+  UI.TAKEDOWN_STATUS = { open: ["warn", "확인 필요"], customer_removed: ["off", "내렸다고 알림"], retracted: ["ok", "내렸어요"], disconnected: ["danger", "계정 끊김"], suspended: ["danger", "서비스 멈춤"], dismissed: ["ok", "문제없음"], resolved: ["ok", "끝났어요"] };
+  /** 아직 «살아 있는» 신고 — lib/takedown.ts `ACTIVE_STATUSES` 에서 그대로 복사(배너·개수를 이 잣대로 센다). */
+  UI.TAKEDOWN_ACTIVE = ["open", "disconnected", "suspended"];
   /* [P1R5] 영상 어휘 — 계약 v5.1 §0.2 글자 그대로(VideoFormat · VideoSeconds · VideoStage · JudgeGrade · VideoChannel) · 사람말은 여기 한 곳 */
   UI.VIDEO_CH = ["youtube_shorts", "naver_clip", "reels", "threads"];
   UI.VFORMAT = { graphic: "그래픽 스토리", talking: "말하는 사람", clip: "클립" };
@@ -525,11 +530,165 @@
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS 에서 그대로 복사] 🔴 **이 축만 «이대로 예약»을 막는다**(hardFailures).
      나머지 실패는 «알려드리는 것»이다 — 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 안다(골격 반복·최상급이 그렇다). */
   UI.GATE_HARD = [];
+  /* [R8-A2 · lib/content-approve.ts judgeBlockers `BROKEN` 에서 그대로 복사 · 하니스가 서버와 대조한다] 🔴 손으로 고치지 마라.
+     영상 심사 P0 중 **«물건이 깨진 것»** 둘만 서버가 승인을 거부한다 — 그건 게이트가 아니라 **불량품**이다(올려도 채널이 안 받는다).
+     🔴 나머지 P0(정책·고지 축)는 **막지 않는다**(§9) — 화면도 단추를 잠그지 않고, 대신 무엇이·왜·어떻게 하면 되는지 세 줄로 말한다. */
+  UI.JUDGE_BLOCK = ["frames_not_blank", "duration_fit"];
   /* 주제군·수익 목적은 **서버에 한국말이 없다**(값만 있다 · lib/writing-contracts.ts TopicGroup·RevenueGoal) — 고객 낱말은 여기가 정본. */
   UI.GROUP_LABEL = { review: "후기·리뷰", info: "정보·방법", life: "일상" };
   UI.GOAL_LABEL = { affiliate: "제휴 수수료", adsense: "애드센스", adpost: "애드포스트", ypp: "유튜브 수익", clip_incentive: "클립 인센티브", mixed: "여러 가지" };
 
-  UI.chev = '<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg>';
+  /* ══ [R8-A2 §9] 발행 전 검사 줄 — 🔴 **한 곳에서 그린다**(검수 화면과 직접 쓰기 화면이 같은 말을 하도록).
+     원래 `public/app/piece.html` 안에만 있었고, 직접 쓰기(§5D①)가 같은 결과를 받게 되면서 여기로 올렸다 —
+     두 화면이 각자 그리면 축이 늘 때마다 한쪽만 낡는다(AC-52 의 화면 쪽 얼굴).
+     🔴 **막는 축은 0개다**(`UI.GATE_HARD` = 서버 `HARD_GATE_KEYS` 복사 · 사장님 2026-09-15 «말해 주기로 내려»).
+        막지 않는 대신 ①또렷하게 ②어떻게 하면 되는지 ③되돌릴 수 있다는 것을 말한다.
+     🔴 무게(`weight`)·어떻게(`how`)·못 잰 축(`skipped`)은 **전부 서버 값**이다 — 화면이 키를 보고 정하면 그게 대용물이다(AC-57). */
+  UI.gateHigh = (c) => !c.pass && c.weight === "high";
+  /* 🔴 `skipped:true` = «안 쟀다». `pass` 가 true 라도 ✓(통과)로 그리지 않는다 — 못 잰 것을 통과로 그리면 거짓말이다(AC-33·AC-9). */
+  UI.gateRow = (c) => {
+    if (c.skipped) return `<div class="g skip"><i>–</i><span>${UI.esc(c.label)}</span><small>${UI.esc(c.detail || "이 글에는 재지 않았어요")}</small></div>`;
+    const cls = c.pass ? "" : UI.gateHigh(c) ? "hi" : "soft";
+    return `<div class="g ${cls}"><i>${c.pass ? "✓" : UI.gateHigh(c) ? "!" : "i"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}${!c.pass && c.how ? `<small class="how">${UI.esc(c.how)}</small>` : ""}</div>`;
+  };
+  /**
+   * 검사 한 벌. `opts.back` 에 «되돌릴 길» 문장을 주면 그 줄을 함께 적는다(§9-3 — 되돌릴 길이 있어야 «말해 주기»가 정직하다).
+   * 🔴 문장은 «겁주지 않는다»(CLAUDE §3 · 사장님 2026-09-15): 위협·책임 전가·겁주는 조건절을 쓰지 않는다.
+   */
+  UI.gateList = (g, opts = {}) => {
+    const checks = g.checks || [];
+    const bad = checks.filter((c) => !c.pass && !c.skipped);
+    const skipped = checks.filter((c) => c.skipped);
+    const high = bad.filter(UI.gateHigh);
+    const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
+    /* 🔴 «고쳐야 예약할 수 있어요»는 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
+    const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
+    /* 못 잰 축이 있으면 **몇 개인지 먼저 말한다** — 초록 옆에 회색 줄만 끼워 두면 못 보고 «다 통과»로 읽는다. */
+    const skip = skipped.length ? `<p class="muted" style="margin:0 16px 8px;font-size:12.5px">${skipped.length}가지는 이 글에 맞지 않아 재지 않았어요.</p>` : "";
+    const back = opts.back === false ? "" : `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">${UI.esc(opts.back || "올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.")}</p>`;
+    return `<div class="gt">${UI.esc(opts.title || "발행 전 검사")} ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}${skip}<div class="gate">${checks.map(UI.gateRow).join("")}</div>${bad.length ? back : ""}`;
+  };
+  /* 🔴 서버가 «지금은 안 돼요»라고 할 때 — **문장은 전부 서버 것**이다. `publish-now` 와 `pieces-self` 의 캐던스 400 이
+     같은 모양(step:"cadence" + retryAt·gapMin·dailyCap·postsToday·capped)이라 **같은 함수가 그린다**:
+     두 화면이 같은 사유에 다른 말을 하면 그게 버그다(트리거 P1R8-A2). */
+  /* [R8 §9 · B b2662c9] 🔴 막을 때 **넘길 길을 같이** 준다 — 서버가 `canOverride` 를 주면(우리가 권하는 값에 닿았을 뿐,
+     고객이 정한 값은 아직 남았다) «이번 한 번만» 단추를 낸다. 🔴 **`canOverride` 가 없으면 단추를 그리지 않는다** —
+     그건 고객이 스스로 정한 값에 닿았다는 뜻이고, 넘기기를 보내도 서버가 안 열어 준다(없는 길을 단추로 만들지 않는다).
+     🔴 «설정을 바꾸시겠어요»로 유도하지 않는다 — 이건 **그 회차만**이고 저장되지 않는다(설정은 «내 계정»의 일이다).
+     문구는 전부 서버 것: `error`·`risk`·`confirmLabel`. */
+  UI.cannotSheet = (r, title, onOverride) => {
+    const can = !!(r.canOverride && r.overrideKey && onOverride);
+    return UI.sheet(`<p class="muted" style="margin:0 0 ${r.risk ? "8" : "16"}px">${UI.esc(r.message || r.error || "")}</p>`
+      + (r.risk ? `<p class="muted" style="margin:0 0 16px;font-size:12.5px">${UI.esc(r.risk)}</p>` : "")
+      + `<div class="cta">${can ? `<button class="btn secondary" type="button" data-ok>내일 올릴게요</button><button class="btn primary" type="button" data-go>${UI.esc(r.confirmLabel || "이번 한 번만 올릴게요")}</button>`
+        : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
+      { title: title || "지금은 올릴 수 없어요", onOpen: (sh, close) => {
+        sh.querySelector("[data-ok]").onclick = close;
+        const go = sh.querySelector("[data-go]"); if (go) go.onclick = () => { close(); onOverride(r.overrideKey); };
+      } });
+  };
+
+  /* ── 날짜(KST 고정 · DESIGN §13.5) — 편성표와 직접 쓰기가 **같은 셈**을 쓴다(둘이 갈리면 예약 시각이 갈린다) ── */
+  UI.ymdKST = (d = new Date()) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });     // "YYYY-MM-DD"
+  UI.plusYmd = (ymd, n) => { const d = new Date(ymd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  /** "YYYY-MM-DD" + "HH:MM"(KST) → UTC ISO. 🔴 `datetime-local` 을 쓰지 않는 까닭 = 그 값엔 시간대가 없다(§4.5b). */
+  UI.atKST = (ymd, hhmm) => { const [h, m] = String(hhmm).split(":").map(Number); const d = new Date(ymd + "T00:00:00Z"); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
+  UI.dayLabelKST = (ymd) => { const t = UI.ymdKST(); if (ymd === t) return "오늘"; if (ymd === UI.plusYmd(t, 1)) return "내일"; const [, m, d] = ymd.split("-"); return `${Number(m)}월 ${Number(d)}일`; };
+  /** 편성표가 쓰는 시각 프리셋 — 직접 쓰기도 같은 눈금을 준다(한 곳에서 고친다). */
+  UI.TIMES = [["07:30", "07:30"], ["09:00", "09:00"], ["12:00", "12:00"], ["15:00", "15:00"], ["18:00", "18:00"], ["21:00", "21:00"]];
+
+  /* ══ [R8 §5D.4] 내 사진 넣기 — 🔴 설계가 «사진 업로드가 ①의 전제»라고 못 박았다(DESIGN §5D.3-4):
+     이게 없으면 «직접 쓰기»는 **글자만 쓰는 길**이 된다. 서버(`/api/piece-photo-add`)는 R8 에 다 만들어져 있었는데
+     부르는 화면이 **한 곳도 없었다** — 그래서 직접 쓰기 결과 화면과 검수 화면이 **이 한 함수**를 같이 쓴다.
+     🔴 거절 사유 문장은 전부 서버 것(`step`: empty·too_big·bad_type·r2·piece) — 상한 숫자를 화면에 박지 않는다(AC-74).
+     🔴 내 사진은 코인 0 이다 — 이 길에 코인 호출이 아예 없다(§5D.1 «내 사진만 쓰면 사진도 코인 0»). */
+  UI.photoSheet = function (pieceId, onDone) {
+    let photos = [];
+    /* 행(ListRow) 한 벌 — 🔴 격자 위 작은 ✕ 를 쓰지 않는다(터치 44px 하한 · §13.0 접근성). 마크 38px + 이름 + 44px 단추. */
+    const SRC = { customer: "내 사진", stock: "스톡 사진", ai: "AI 사진" };
+    const thumb = (p, i) => `<div class="row" style="padding-left:0;padding-right:0"><span class="mk ph"><img src="${UI.esc(p.url)}" alt="" loading="lazy"></span><div class="l"><span class="t">${UI.esc(p.caption || `사진 ${i + 1}`)}</span><span class="d">${UI.esc(SRC[p.source && p.source.kind] || "내 사진")}</span></div><button type="button" data-drop="${p.id}" aria-label="이 사진 빼기" style="min-height:44px;min-width:44px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
+    const draw = (sh) => {
+      sh.querySelector("#phList").innerHTML = photos.length ? photos.map(thumb).join("") : '<p class="muted" style="margin:0;font-size:13px">아직 넣은 사진이 없어요.</p>';
+      $$("[data-drop]", sh).forEach((b) => b.onclick = async () => {
+        b.disabled = true;
+        const r = await UI.api("/api/piece-photo-remove", { body: { assetId: Number(b.dataset.drop) } });
+        b.disabled = false;
+        if (!r.ok) return r.gated ? undefined : UI.toast(r.error || "빼지 못했어요");
+        photos = photos.filter((x) => x.id !== Number(b.dataset.drop)); draw(sh); if (onDone) onDone(photos);
+      });
+    };
+    UI.sheet(`<p class="muted" style="margin:0 0 10px;font-size:13px">JPG·PNG·WEBP 사진을 넣을 수 있어요. 내 사진은 코인이 들지 않아요.</p>
+      <div id="phList"><span class="sk" style="width:100%;height:60px"></span></div>
+      <p class="muted" id="phNote" style="margin:8px 0 0;font-size:12.5px;min-height:16px"></p>
+      <div class="cta"><button class="btn primary" type="button" id="phPick">사진 고르기</button></div>
+      <input type="file" id="phFile" accept="image/jpeg,image/png,image/webp" multiple hidden>`,
+      { title: "사진 넣기", onOpen: async (sh) => {
+        const note = sh.querySelector("#phNote"), file = sh.querySelector("#phFile"), pick = sh.querySelector("#phPick");
+        const r = await UI.api(`/api/piece-photos?pieceId=${pieceId}`);
+        photos = r.ok ? (r.photos || []) : []; draw(sh);
+        if (!r.ok && !r.gated) note.textContent = r.error || "사진을 불러오지 못했어요";
+        pick.onclick = () => file.click();
+        file.onchange = async () => {
+          const list = Array.from(file.files || []); file.value = "";
+          if (!list.length) return;
+          pick.disabled = true;
+          for (let i = 0; i < list.length; i++) {
+            const f = list[i];
+            note.textContent = list.length > 1 ? `${i + 1}/${list.length}장 올리는 중이에요` : "올리는 중이에요";
+            const dataBase64 = await new Promise((ok) => { const rd = new FileReader(); rd.onload = () => ok(String(rd.result || "").split(",")[1] || ""); rd.onerror = () => ok(""); rd.readAsDataURL(f); });
+            const up = await UI.api("/api/piece-photo-add", { body: { pieceId, dataBase64, filename: f.name } });
+            if (!up.ok) { note.textContent = up.gated ? "" : (up.error || "사진을 올리지 못했어요"); break; }   /* 사유는 서버 문장 그대로 */
+            if (!photos.some((x) => x.id === up.photo.id)) photos.push(up.photo);
+            note.textContent = up.already ? "같은 사진이 이미 있어요" : "";
+            draw(sh);
+          }
+          pick.disabled = false; if (onDone) onDone(photos);
+        };
+      } });
+  };
+
+  /* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 내 글에 들어온 **신고**에 답하는 두 갈래 — 🔴 서버(`/api/takedowns`·`/api/takedown-action`)는
+     R8 에 완성인데 **읽는 화면이 한 곳도 없었다**. 알림·메일이 보내는 주소(`/app/settings.html#takedown`)조차 아무 데도 아닌 곳이었다.
+       ① «제가 직접 내렸어요»(`removed`) — 우리가 확인할 길이 있으면 **정말 없는지 확인까지** 한다
+       ② «대신 내려 주세요»(`retract`) — 러너·API 가 대신 내린다
+     🔴 **길이 없는 채널엔 단추를 만들지 않는다**(§5E.3 · 티스토리 «광고 떼기»에서 배운 것) — 눌러도 아무 일이 안 나는 단추를 만들지 않는다.
+        대신 그 주소로 가는 길을 준다: **게이트가 아니라 사실이다**(§9 «없는 길»).
+     🔴 문장은 전부 서버 것(`message`·`error`) · 코인 0 · 되돌릴 수 없는 동작이라 확인은 한 번 둔다(§9 밖 — 고객을 위한 확인이다). */
+  UI.takedownSheet = function (nt, onDone) {
+    const live = UI.TAKEDOWN_ACTIVE.includes(nt.status);
+    const canRetract = live && nt.canRetract && nt.retractAvailable;
+    const open = nt.externalUrl ? `<a class="btn secondary" href="${UI.esc(nt.externalUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : "";
+    /* 🔴 우리가 못 내리는 자리는 **그렇다고 말한다** — «안 돼요»가 아니라 «여기서는 저희가 못 내려요 · 이 주소에서 직접 내리시면 돼요». */
+    const noWay = live && !canRetract
+      ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(nt.channel ? `${UI.chLabel(nt.channel)}은 저희가 대신 내려 드릴 수 없어요.` : "이 신고는 저희가 올린 글로 이어지지 않아요.")} 그 글에서 직접 내리신 뒤 «제가 직접 내렸어요»를 눌러 주세요.</p>` : "";
+    UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${nt.channel ? UI.mark(nt.channel) : ""}<div class="l"><span class="t wrap">${UI.esc(nt.kindLabel || "신고")}</span><span class="d">${UI.esc(nt.claimant || "신고 접수")}</span></div>${UI.pill(UI.TAKEDOWN_STATUS, nt.status)}</div>
+      <p class="muted" style="margin:4px 0 10px;font-size:13.5px;line-height:1.55;white-space:normal">${UI.esc(nt.reason || "")}</p>
+      <div class="kv" style="padding-left:0;padding-right:0"><span class="k">받은 날</span><span class="v">${UI.esc(UI.dateKST(nt.receivedAt))}</span></div>
+      <div class="kv" style="padding-left:0;padding-right:0"><span class="k">봐 주셨으면 하는 날</span><span class="v">${UI.esc(UI.dateKST(nt.dueAt))}${nt.daysLeft != null ? ` · ${nt.daysLeft}일 남음` : ""}</span></div>
+      ${live ? '<p class="muted" style="margin:8px 0 0;font-size:12.5px">그때까지 같은 글이 다시 올라가지 않도록 저희가 막아 뒀어요. 무엇을 하실지는 고르시면 돼요.</p>' : ""}
+      <div class="cta" style="flex-direction:column">${open}
+        ${canRetract ? '<button class="btn primary" type="button" id="tdRetract">대신 내려 주세요</button>' : ""}
+        ${live ? `<button class="btn ${canRetract ? "secondary" : "primary"}" type="button" id="tdRemoved">제가 직접 내렸어요</button>` : ""}
+      </div><div id="tdc"></div>${noWay}`,
+      { title: "", onOpen: (sh, close) => {
+        const say = (r, title) => { close(); setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.message || r.error || "")}</p><div class="cta">${r.url ? `<a class="btn primary" href="${UI.esc(r.url)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
+          { title, onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; } }), 300); if (onDone) onDone(); };
+        const rm = sh.querySelector("#tdRemoved");
+        if (rm) rm.onclick = async () => { rm.disabled = true;
+          const r = await UI.api("/api/takedown-action", { body: { id: nt.id, action: "removed" } }); rm.disabled = false;
+          if (!r.ok && r.gated) return; say(r, r.ok ? "알려 주셔서 고마워요" : "알리지 못했어요"); };
+        const rt = sh.querySelector("#tdRetract");
+        if (rt) rt.onclick = () => UI.confirmRow(sh.querySelector("#tdc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
+          rt.disabled = true;
+          const r = await UI.api("/api/takedown-action", { body: { id: nt.id, action: "retract" } }); rt.disabled = false;
+          if (!r.ok && r.gated) return;
+          /* 🔴 400 + url = «여기서는 저희가 못 내려요» — 사유 문장도 그 주소도 서버 것이다(화면이 지어내면 안 되는 길을 알려 준다). */
+          say(r, r.ok ? "대신 내려 드릴게요" : "저희가 내려 드릴 수 없는 채널이에요");
+        }, "내려 주세요");
+      } });
+  };
+
+  UI.chev ='<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg>';
   UI.dots = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
 
   /* ── 폼 프리미티브: 스테퍼·칩(시트 안 옵션은 칩/세그먼트/토글만 — 입력창 최소) ── */

@@ -150,12 +150,14 @@ rec("🔴 글 상태 — 서버가 쓰는 값에 화면 낱말이 다 있다", p
 const mockSlotStatus = setOf(/status:\s*"([a-z_]+)"/g, mockJs);
 /* 서버 어휘의 «우주» = DDL 주석에 적힌 모든 열거값(-- a|b|c) + 코드가 쓰는 상태 — 표마다 손으로 적지 않는다 */
 const ddlVocab = new Set();
-/* «a(설명) | b | c(설명)» 처럼 괄호 설명이 끼어도 값만 뜬다 — 주석을 사람이 읽기 좋게 써도 어휘가 빠지지 않게 */
+/* «a(설명) | b | c(설명)» 처럼 괄호 설명이 끼어도 값만 뜬다 — 주석을 사람이 읽기 좋게 써도 어휘가 빠지지 않게.
+   🔴 [R8-A2 수리] 한 칸에 **값이 둘** 있는 주석(«open(접수) → customer_removed(고객이 내림) | …» · takedown_notices)에서
+      앞의 하나만 떠서 `customer_removed` 가 «모의가 지어낸 값»으로 WARN 이 났다. 칸마다 **전부** 뜬다. */
 for (const line of ddl.split("\n")) {
   const cm = line.includes("--") ? line.slice(line.indexOf("--") + 2) : "";
   if (!cm.includes("|")) continue;
-  const parts = cm.split("|").map((x) => (x.match(/[a-z_]{3,}/) || [""])[0]).filter(Boolean);
-  if (parts.length >= 2) for (const v of parts) ddlVocab.add(v);
+  const parts = cm.split("|").map((x) => x.match(/[a-z_]{3,}/g) || []).filter((x) => x.length);
+  if (parts.length >= 2) for (const vs of parts) for (const v of vs) ddlVocab.add(v);
 }
 const mockSlotUnknown = minus(mockSlotStatus, new Set([...slotSrv, ...pieceSrv, ...uiPost.keys(), ...ddlVocab, "not_configured", "none", "progress", "done", "queued", "running", "connected", "error", "requested"]));
 rec("모의가 쓰는 상태 값이 서버 어휘 안에 있다", mockSlotUnknown.length === 0 ? true : "WARN", mockSlotUnknown.join(" ") || "전부 서버 어휘", mockSlotUnknown);
@@ -173,7 +175,10 @@ rec("홈 해야 할 일 kind — 화면 아이콘이 다 있다", todoNoIcon.len
 
 /* ───────── ⑤ 모의 알림·todo kind 도 서버 어휘 안인지 ───────── */
 const mockKind = setOf(/kind:\s*"([a-z_0-9]+)"/g, mockJs);
-const mockKindUnknown = minus(mockKind, new Set([...srvNotify, ...srvTodo, ...known, ...ddlVocab, "post", "shorts", "video", "own", "managed", "coin", "subscription", "tax_invoice", "cash_receipt", "srt", "thumb", "notice", "incident"]));
+/* 🔴 이 regex 는 `kind:` 라는 **이름만** 보기 때문에 알림과 상관없는 칸(사진 출처 kind · 수치 주장 kind)까지 집는다 —
+   [R8-A2] 그 둘을 허용 목록에 적는다(lib/photo-source.ts PhotoSourceKind · lib/fact-claims.ts ClaimKind). */
+const mockKindUnknown = minus(mockKind, new Set([...srvNotify, ...srvTodo, ...known, ...ddlVocab, "post", "shorts", "video", "own", "managed", "coin", "subscription", "tax_invoice", "cash_receipt", "srt", "thumb", "notice", "incident",
+  "customer", "stock", "money", "percent", "year", "count", "structural"]));
 rec("모의 알림·해야 할 일 kind 가 서버 어휘 안에 있다", mockKindUnknown.length === 0 ? true : "WARN", mockKindUnknown.join(" ") || "전부 서버 어휘", mockKindUnknown);
 
 /* ───────── ⑥ 매체 «기준일» 안내(서버 DAY_BASIS_NOTE ↔ 모의) ─────────
