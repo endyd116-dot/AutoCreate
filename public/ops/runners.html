@@ -16,6 +16,9 @@
 <div class="group"><div class="stat4" id="farm"></div></div>
 <div class="group"><div class="gt">러너 <span class="muted" style="font-weight:500">관리형(팜) + 고객 PC</span><span id="lock1"></span></div><div id="list"></div></div>
 <div class="group"><div class="gt">셀렉터 카나리 <span class="muted" style="font-weight:500">매일 05:00 KST 평가 · 러너가 «임시저장까지» 드라이런</span></div><div id="canary"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">✗ 는 채널 상태를 down 으로 바꿀 «제안»이에요 — 자동 전환은 안 하고 채널 메뉴에서 사람이 눌러요. «—» 는 판정 불가(세션 없음).</p></div>
+<!-- [P1R8 §3.3 · B2] 셀렉터 표 배포 — 🔴 «어느 판이 어디까지 퍼졌나»와 **«왜 아직 대기 중인가»**.
+     대기 이유를 안 보여 주면 멈춰 있는 것과 도는 것을 구분할 수 없다(설계 §9). -->
+<div class="group"><div class="gt">셀렉터 표 배포 <span class="muted" style="font-weight:500">넓히는 건 평일 10~18시(KST)만 · 되돌리는 건 언제나</span><span id="lock2"></span></div><div id="recipe"></div><p class="muted" id="recipeNote" style="margin:0 16px 10px;font-size:12.5px"></p></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -54,6 +57,40 @@ async function load() {
     return h.ok === null ? `<span class="muted" title="판정 불가">—</span>${h.step ? ` <span class="muted">${UI.esc(STEP[h.step] || h.step)}</span>` : ""}` : h.ok ? `<span style="color:var(--money-ink);font-weight:800">✓</span>${shot}` : `<span style="color:var(--danger-ink);font-weight:800">✗</span> <span class="muted">${UI.esc(STEP[h.step] || h.step || "")}</span>${shot}`; };
   UI.$("#canary").innerHTML = days.length ? OPS.table([{ h: "날짜(KST)", f: (d) => d }, ...chans.map((x) => ({ h: UI.chLabel(x.channel), f: (d) => cell(x, d) }))], days) : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">아직 카나리 결과가 없어요 · 러너가 «ac-runner --canary» 로 보내면 여기 쌓여요</span></div></div>`;
   UI.$$("[data-shot]").forEach((a) => a.onclick = (e) => { e.preventDefault(); UI.toast(`스냅샷 ${a.dataset.shot} · R2 저장소에서 열려요`); });
+
+  /* [P1R8 §3.3] 셀렉터 표 배포 — 🔴 숫자·문구는 **전부 서버가 준다**(화면이 조건을 다시 짜면 서버와 갈린다 · AC-74). */
+  const rc = await UI.api("/api/ops-recipe", { noRedirect: true });
+  if (rc.ok) {
+    const STAGE = { canary: "우리 드라이런", own: "우리 기기", volunteer: "먼저 받기 켠 집", all: "전체" };
+    UI.$("#recipe").innerHTML = OPS.table([
+      { h: "채널", f: (x) => UI.chLabel(x.channel) },
+      { h: "지금 퍼진 판", f: (x) => x.current ? `<span class="mono">${UI.esc(x.current)}</span>` : '<span class="muted">묶여 온 표</span>' },
+      { h: "시험 중", f: (x) => x.candidate ? `<span class="mono">${UI.esc(x.candidate)}</span> <span class="pill warn">${UI.esc(STAGE[x.stage] || x.stage || "")}</span>` : '<span class="muted">없음</span>' },
+      { h: "카나리", f: (x) => x.candidate ? `${x.canary.good}✓ ${x.canary.bad}✗ ${x.canary.unknown}—` : "—" },
+      /* 🔴 «왜 대기 중인가» — 이 칸이 이 표의 존재 이유다. */
+      { h: "왜 대기 중", f: (x) => x.why ? `<span class="muted">${UI.esc(x.why)}</span>` : (x.candidate ? '<span class="pill ok">넓힐 수 있어요</span>' : "—") },
+      { h: "발행 실패", f: (x) => x.harm.fails ? `<span class="pill warn">${x.harm.fails}건 · ${x.harm.tenants}집</span>` : "—" },
+      { h: "", f: (x) => x.candidate ? `<button type="button" class="lk" data-rpro="${x.channel}">한 단계 넓히기</button> · <button type="button" class="lk" data-rrb="${x.channel}">되돌리기</button>` : "" },
+    ], rc.channels || []);
+    /* 🔴 «열쇠가 없다»를 고장처럼 말하지 않는다 — 그건 키 꽂기 전의 정상 상태다(발행은 그대로 된다). */
+    UI.$("#recipeNote").innerHTML = (rc.signing
+      ? "표를 올리면 우리 드라이런 → 우리 기기 → 먼저 받기 켠 집 → 전체 순서로 퍼져요."
+      : "🔴 아직 서명 열쇠가 없어서 표를 내려 주지 않아요 — 러너는 묶여 온 셀렉터로 <b>그대로 잘 돕니다</b>(발행에 지장 없음).")
+      + (rc.fellBack24h ? ` · 어제 하루 <b>${UI.num(rc.fellBack24h)}건</b>이 표를 못 믿고 묶여 온 것으로 되돌아갔어요.` : "");
+    if (canEdit) {
+      UI.$$("[data-rpro]").forEach((b) => b.onclick = async () => {
+        const r = await UI.api("/api/ops-recipe", { body: { action: "promote", channel: b.dataset.rpro }, noRedirect: true });
+        UI.toast(r.ok ? `«${STAGE[r.stage] || r.stage}» 까지 넓혔어요` : (r.error || "아직 넓힐 수 없어요")); if (r.ok) load();
+      });
+      /* 되돌리기는 되돌릴 수 없는 일이 아니지만(다시 올리면 된다) 남의 러너를 한꺼번에 바꾸는 일이라 한 번 묻는다.
+         🔴 이 화면의 다른 롤백(AI 모델)과 **같은 방식**을 쓴다 — 낱말과 손놀림이 화면마다 다르면 그게 사고가 된다. */
+      UI.$$("[data-rrb]").forEach((b) => b.onclick = () => UI.sheet(`<div id="rrc"></div>`, { title: "표 되돌리기", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rrc"), "시험 중인 판을 버리고 지금 퍼진 판으로 돌아갈까요? 되돌리기는 언제든 돼요.", async () => {
+        const r = await UI.api("/api/ops-recipe", { body: { action: "rollback", channel: b.dataset.rrb, reason: "운영자가 되돌렸어요" }, noRedirect: true });
+        if (!r.ok) return UI.toast(r.error || "되돌리지 못했어요");
+        close(); UI.toast("되돌렸어요"); load();
+      }) }));
+    } else { UI.$("#lock2").innerHTML = OPS.lockPill("super_admin"); UI.$$("[data-rpro],[data-rrb]").forEach((b) => b.disabled = true); }
+  }
 }
 load();
 })();
