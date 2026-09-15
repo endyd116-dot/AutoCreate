@@ -2308,6 +2308,7 @@ await load();
 <div class="group" id="photos" hidden></div>
 <div class="group" id="claims" hidden></div>
 <div class="group" id="refunused" hidden></div>
+<div class="group" id="thchain" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="group" id="teamwait" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
@@ -2349,12 +2350,22 @@ const gateList = (g) => (P && P.status === "published"
    🔴 `fromGroup` = 그 분량·사진 수가 «주제군에서 온 값»인지 «채널 고정값»인지 — 어디서 온 숫자인지까지 말한다.
    🔴 `goalRules` 는 **모델에게 주는 지시문**이다(이모지·굵게·«이미지 alt» 같은 말이 섞여 있다) — 글자 그대로 화면에 올리지 않고 **가짓수**만 말한다.
       고객이 읽을 문장이 필요하면 서버가 따로 내려 줘야 한다(메인에 보고). */
-function renderWhy() {
-  const host = UI.$("#why"); const m = P.meta || {}; const c = P.contract || null;
-  const kv = (k, v, sub) => `<div class="kv"><span class="k">${UI.esc(k)}</span><span class="v wrap" style="white-space:normal;text-align:right">${UI.esc(v)}${sub ? `<small class="muted" style="display:block;font-weight:500;font-size:12px">${UI.esc(sub)}</small>` : ""}</span></div>`;
+/* [R8CLOSE] 🔴 **영상에도 «왜 이 채널·이 계정»** (메인 결정 2026-09-16).
+     여태 영상은 `#why` 를 통째로 숨겼다 — «영상은 컷·자막이 그 몫»이라서였다. 그건 «**어떻게** 생겼나»에는 맞는 말이지만
+     «**왜 하필** 이 채널·이 계정인가»는 **영상이 스스로 못 말한다.** 쇼츠·클립·릴스를 같이 쓰는 집에서 «왜 클립에?»의 답이
+     없으면 글 축과 말이 갈린다.
+   🔴 **컷·자막 자리를 뺏지 않는다** — 영상에서는 그 둘(채널·계정)만 그리고, 분량·사진·말투처럼 **글의 잣대는 안 그린다**
+      (영상엔 그 계약이 없다 — 있는 척하면 그게 거짓말이다). 자리도 영상 판 **아래**다.
+   🔴 둘 다 값이 없으면(채널이 하나인 집 등) **아무것도 안 그린다.** «자동으로 골랐어요» 같은 말을 지어내지 않는다. */
+function renderWhy(videoOnly) {
+  const host = UI.$("#why"); const m = P.meta || {}; const c = videoOnly ? null : (P.contract || null);
+  /* 🔴 [2026-09-16] 이름표가 **낱말 한가운데서 잘렸다** — «대표 사/진» «이 채널인 까/닭».
+     값 쪽이 `white-space:normal` 로 포개져 이름 칸을 눈꿸기 때문이다. 이름은 **안 접는다**(flex:none).
+     🔴 `ac.css` 를 안 고치고 여기서 막는다 — 그 파일은 지금 다른 창이 고치는 중이다. */
+  const kv = (k, v, sub) => `<div class="kv"><span class="k" style="white-space:nowrap;flex:none;padding-right:12px">${UI.esc(k)}</span><span class="v wrap" style="white-space:normal;text-align:right">${UI.esc(v)}${sub ? `<small class="muted" style="display:block;font-weight:500;font-size:12px">${UI.esc(sub)}</small>` : ""}</span></div>`;
   const src = (fromGroup) => (fromGroup ? "주제군에 맞춘 값" : "이 채널 기본값");
   let h = "";
-  h += kv("채널", c && c.label ? c.label : UI.chLabel(P.channel), c && c.formatLabel ? c.formatLabel : UI.FORMAT[P.format] || "");
+  if (!videoOnly) h += kv("채널", c && c.label ? c.label : UI.chLabel(P.channel), c && c.formatLabel ? c.formatLabel : UI.FORMAT[P.format] || "");
   if (c) h += kv("주제군", UI.GROUP_LABEL[P.topicGroup] || "아직 몰라요", UI.GROUP_LABEL[P.topicGroup] ? "" : "형식이 정해지지 않아 채널 기본값으로 썼어요");
   if (c && UI.GOAL_LABEL[P.goal]) h += kv("수익 목적", UI.GOAL_LABEL[P.goal], (c.goalRules || []).length ? `이 목적에 맞춘 규칙 ${c.goalRules.length}가지를 지켜 썼어요` : "이 목적에 따로 맞춘 규칙은 없어요");
   if (c && c.length) h += kv("분량", `${UI.num(c.length.min)}~${UI.num(c.length.max)}자`, `${src(c.length.fromGroup)}${c.actualChars ? ` · 지금 글은 ${UI.num(c.actualChars)}자` : ""}`);
@@ -2364,18 +2375,20 @@ function renderWhy() {
      🔴 **«대표로 고정됐어요»라고 쓰지 않는다** — `pinned` 는 서버가 리터럴 `false` 로 박는다(에디터에서 콕 집는 동작이 아직 없다 · R10).
         그래서 `pinned` 를 읽지도 않는다: 읽으면 언젠가 «true 면 이렇게»를 쓰게 되고 그게 곧 거짓말이 된다.
      🔴 대표가 없어도 **막지 않는다** — 서버 문장이 «그대로 두셔도 글은 올라가요»로 이미 그렇게 말한다(§9). */
-  if (m.hero && m.hero.line) h += kv("대표 사진", String(m.hero.line));
+  if (!videoOnly && m.hero && m.hero.line) h += kv("대표 사진", String(m.hero.line));
   if (c && c.register) h += kv("말투", String(c.register));
-  if (m.angle) h += kv("잡은 방향", String(m.angle));
+  if (!videoOnly && m.angle) h += kv("잡은 방향", String(m.angle));
   /* [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** — `slotReason`(왜 이 시각인가) 과 **같은 자리·같은 뜻**이라 나란히 둔다(서버 주석이 그렇게 적혀 있다).
      채널이 하나인 집엔 값이 아예 안 온다(고를 것이 없으니 까닭도 없다) — 그때 «자동으로 골랐어요» 같은 말을 **지어내지 않는다**. */
   if (m.channelReason) h += kv("이 채널인 까닭", String(m.channelReason));
-  if (m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
+  if (!videoOnly && m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
   /* [R8CLOSE-B1 §B2] 🔴 **왜 이 계정인가** — 적합도가 낮아도 **배정은 됐다**(§9 막지 않는다 · 순위만 달라졌다).
      🔴 점수(`score`)는 안 그린다 — 고객이 고칠 수 있는 숫자가 아니고, 숫자를 보여 주면 «몇 점이어야 하나»를 묻게 된다(§13.0 숫자 1개).
      🔴 `measured:false`(못 쟀다)일 때도 **서버 `line` 이 그 사실을 그대로 말한다** — 화면이 0점으로 그리면 그게 거짓말이다(AC-9). */
   if (m.personaFit && m.personaFit.line) h += kv("이 계정인 까닭", String(m.personaFit.line));
-  host.hidden = false; host.innerHTML = '<div class="gt">이 글이 왜 이렇게 생겼나</div>' + h;
+  if (!h) { host.hidden = true; return; }   // 영상인데 «왜»가 둘 다 없으면 빈 칸을 남기지 않는다
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">${videoOnly ? "왜 이 계정에 올라가나" : "이 글이 왜 이렇게 생겼나"}</div>` + h;
 }
 /* ══ [R8CLOSE-B2] 🔴 **이건 못 따라 했어요** — 레퍼런스에서 배웠지만 우리가 못 내는 축을 서버가 `meta.refUnused = [{field, why}]` 로 남긴다
      (`lib/video/reference-apply.ts`). «조용히 버리지 않는다»는 규율의 **화면 쪽 반쪽**이다 — 서버만 적어 두면 아무도 안 본다.
@@ -2387,6 +2400,48 @@ function renderWhy() {
    🔴 모르는 축 이름이 오면 **영어 칸 이름을 그대로 내보내지 않는다**(그게 곧 시스템 용어다) — «그 밖»으로 센다.
    🔴 없으면 아무것도 안 그린다. */
 const REF_FIELD_SAY = { caption: "자막 모양", camera: "카메라 움직임", pace: "컷 빠르기", rules: "연출 규칙", style: "화면 분위기", palette: "색", hookPrinciple: "첫 3초 훅" };
+/* ══ [R8CLOSE-B2 §B5] 🔴 **스레드가 다 안 올라갔을 때** — 서버(`lib/publish/threads.ts`)가 두 칸을 남긴다.
+     · `thChainPartial = { posted, parts, why, say, remain[] }` — 몇 조각까지 갔나 + 🔴 **못 올린 글을 그대로**
+     · `thChainCut     = { midSentence, kinds[], droppedChars, parts }` — 어디서 끊겼나 · 버린 글자
+   🔴 **감사에만 남기면 고객에겐 안 닿는다**(감사는 운영 화면만 읽는다) — 여기가 §9-2(사람이 안 보는 경로에서도 닿게)의 화면 쪽이다.
+      독자가 먼저 «반만 올라간 스레드»를 보게 두지 않는다.
+   🔴 `remain` 이 이 칸의 값이다(§9-4 «우리가 대신 해 줄 수 있는 것») — **숫자만 주면 «그래서 뭘 하라고»가 된다.**
+      글을 그대로 보여 주고 복사까지 준다.
+   🔴 **«다시 올리기» 단추를 만들지 않는다** — 서버가 «어디까지 올렸는지»를 못 적어서 멈춘 상태다. 우리가 이어 올리면
+      **같은 글이 두 번** 나간다(`threads.ts` 가 그래서 멈춘다). 없는 길을 단추로 만들지 않는다(§9 «없는 길»).
+   🔴 겁주지 않는다(§3) — 이미 나간 글이고 막을 것도 없다. 사실 한 줄 → 어떻게 하면 되는지 → 우리가 들고 있는 것, 그 차례다.
+   🔴 문장은 서버 `say` 가 정본이다(AC-74) — 조각 수를 화면이 다시 세지 않는다. */
+function renderThreadChain() {
+  const host = UI.$("#thchain"); const m = P.meta || {};
+  const part = m.thChainPartial && m.thChainPartial.say ? m.thChainPartial : null;
+  const cut = m.thChainCut || null;
+  if (!part && !cut) { host.hidden = true; return; }
+  const remain = part && Array.isArray(part.remain) ? part.remain.filter((x) => String(x || "").trim()) : [];
+  let h = "";
+  if (part) {
+    h += `<p class="muted" style="margin:0 16px 8px;font-size:13px">${UI.esc(part.say)}</p>`;
+    h += remain.length
+      ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">남은 글은 저희가 그대로 들고 있어요. 저희가 이어 올리면 같은 글이 두 번 나갈 수 있어서, 복사해 드릴게요 — 스레드 앱에서 마지막 글에 이어 달아 주시면 돼요.</p>'
+      : '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">남은 글은 못 찾았어요. 본문에서 그 뒷부분을 이어 올려 주시면 돼요.</p>';
+    if (remain.length) {
+      h += `<div style="padding:0 16px 10px">${remain.map((x, i) => `<div style="background:var(--ground);border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.6;margin-bottom:8px;white-space:pre-wrap;word-break:break-word">${remain.length > 1 ? `<b style="display:block;color:var(--muted);font-size:12px;font-weight:600;margin-bottom:4px">${i + 1}번째 남은 글</b>` : ""}${UI.esc(x)}</div>`).join("")}</div>`;
+      h += '<div style="padding:0 16px 12px"><button class="btn secondary sm" type="button" id="thCopy">남은 글 복사하기</button></div>';
+    }
+  }
+  /* 끊긴 자리 — 🔴 이미 나간 글이라 **고칠 수 있는 게 아니다**. 그래도 말하는 것은 «조용히 사라지게 두지 않는다»(AC-9) 때문이다.
+     🔴 `kinds` 의 `word`·`char` 가 «문장 한가운데»다(서버 `CutKind`) — 화면이 그 낱말을 그대로 내보내지 않는다. */
+  if (cut) {
+    const say = [];
+    if (cut.midSentence) say.push("문장 한가운데서 끊긴 조각이 있어요.");
+    if (Number(cut.droppedChars) > 0) say.push(`뒷부분 ${UI.num(cut.droppedChars)}자는 나가지 못했어요.`);
+    if (say.length) h += `<p class="muted" style="margin:${part ? 4 : 0}px 16px 12px;font-size:12.5px">${UI.esc(say.join(" "))} 다음 글부터는 조각이 덜 끊기게 조금 짧게 써 드릴게요.</p>`;
+  }
+  if (!h) { host.hidden = true; return; }
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">${part ? "남은 스레드 이어 올리기" : "스레드가 끊긴 자리"}</div>` + h;
+  const cp = UI.$("#thCopy");
+  if (cp) cp.onclick = async () => { const ok = await UI.copy(remain.join("\n\n")); UI.toast(ok ? "남은 글을 복사했어요" : "복사가 안 됐어요 · 위 글을 길게 눌러 복사해 주세요"); };
+}
 function renderRefUnused() {
   const host = UI.$("#refunused"); const list = ((P.meta || {}).refUnused || []).filter((x) => x && x.field);
   if (!list.length) { host.hidden = true; return; }
@@ -2545,9 +2600,9 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  renderTeamWait(); renderRefUnused();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
-  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true; UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
-    if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; gate.hidden = true; cta.hidden = true; return; }
+  renderTeamWait(); renderRefUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
+  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; renderWhy(true); UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
+    if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);
     renderComp();   // [R8 §5.1] 영상에도 «대가를 받았나요» — 협찬 영상에 고지를 켤 자리가 아무 데도 없었다
     if (P.gate) { gate.hidden = false; gate.innerHTML = judgeList(P.gate); } else gate.hidden = true;
