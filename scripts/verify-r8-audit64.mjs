@@ -402,10 +402,33 @@ const THREE_REST = [
 for (const [name, fn] of THREE_REST) {
   let out = fn();
   if (out === "AC1_HEADER") {
-    /* lib/*.ts 중 **출처 헤더가 아예 없는** 파일 수 — 있는 채로 남으면 다음 사람이 출처를 못 따라간다(AC-1). */
+    /* lib/*.ts 중 **출처 헤더가 아예 없는** 파일 수 — 있는 채로 남으면 다음 사람이 출처를 못 따라간다(AC-1).
+
+       🔴 [2026-09-16 · b-49] **«앞 12행»은 대용물이었다 — 자를 «헤더 주석 구역»으로 바꾼다.**
+         관례(CLAUDE §2)는 «헤더 주석에 적는다»지 «앞 12행에 적는다»가 아니다. 그런데 이 저장소의 실제 관례는
+         🔴 **출처를 헤더 블록 «끝»에 적는 것**이고 헤더 구역은 평균 15행이다 — 12행 창은 그 끝을 못 본다.
+         그래서 «없다»고 세던 14개가 **전부 이미 적혀 있었다**(진짜 없는 것 0개).
+         AC-97(«낱말로 세는 검사는 있는데 못 본다도 만든다»)의 두 번째 얼굴이고, 그 헛수는 사람에게
+         **없는 출처를 지어내라고 시킨다** — 제일 나쁜 결과다(실제로 내가 format-pick.ts 에 한 줄을 겹쳐 적었다).
+       🔴 느슨해진 것이 아니다: **코드가 처음 나오는 줄에서 멈춘다.** 본문 깊숙이 «출처»라고 적어도 안 세어진다.
+         `//` 머리줄(AM 복사본 관례 · ai-models·response·billing-math·sso-role)과 블록 주석을 **둘 다** 잡는다.
+         바꾸기 전후를 lib/*.ts 93개 전수로 견줬다: **통과→실패 0개** · 실패→통과 14개 · 남는 것 0개. */
     const { readdirSync } = await import("node:fs");
     const files = readdirSync("lib").filter((f) => f.endsWith(".ts"));
-    const missing = files.filter((f) => !/AM 원본|AC 신규|출처/.test(read(`lib/${f}`).split("\n").slice(0, 12).join("\n")));
+    /** 파일 맨 앞 **주석 구역**(코드가 시작되면 끝). */
+    const headerOf = (text) => {
+      const out = []; let inBlock = false;
+      for (const line of text.split("\n")) {
+        const t = line.trim();
+        if (inBlock) { out.push(line); if (t.includes("*/")) inBlock = false; continue; }
+        if (t === "") { out.push(line); continue; }
+        if (t.startsWith("//")) { out.push(line); continue; }
+        if (t.startsWith("/*")) { out.push(line); if (!t.includes("*/")) inBlock = true; continue; }
+        break;                                   // 🔴 코드다 — 여기서 멈춘다
+      }
+      return out.join("\n");
+    };
+    const missing = files.filter((f) => !/AM 원본|AC 신규|출처/.test(headerOf(read(`lib/${f}`))));
     out = [missing.length === 0 ? "닫힘" : "🟠 일부", `lib/*.ts ${files.length}개 중 출처 헤더 없는 것 **${missing.length}개**(${missing.slice(0, 3).join(",")}…)`];
   }
   const W = { "D 접근성": 6, "F 팀 축": 4, "I 러너 트레이 앱": 2 };
