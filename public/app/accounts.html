@@ -6,7 +6,7 @@
 <title>계정 연결 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=21">
+<link rel="stylesheet" href="/css/ac.css?v=22">
 </head>
 <body>
 <div class="shell">
@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=26"></script>
-<script src="/js/mock.js?v=28"></script>
+<script src="/js/ui.js?v=27"></script>
+<script src="/js/mock.js?v=29"></script>
 <script>
 (async () => {
 await UI.boot("account");
@@ -165,7 +165,11 @@ async function reloginSheet(a) {
 async function detailSheet(a) {
   if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
   // [P1R3] 이 계정의 수익 — 매체 상태 한 줄 + 이달 수익
-  const [rs, rv] = await Promise.all([UI.api("/api/revenue-sources"), UI.api("/api/revenue-summary")]);
+  /* [R9R10-A · A-4·A-6] 글 채널 계정에만 등급·옷장이 있다 — «글 채널»은 서버 channels[].category 가 말한다 */
+  const isText = ((D.channels || []).find((c) => c.key === a.channel) || {}).category === "text";
+  const [rs, rv, rw] = await Promise.all([UI.api("/api/revenue-sources"), UI.api("/api/revenue-summary"), isText ? UI.api(`/api/account-styles?accountId=${a.id}`, { noGate: true }) : Promise.resolve({ ok: false })]);
+  const W = rw.ok ? { styles: rw.styles || [], defaultStyleId: rw.defaultStyleId ?? null, recommend: rw.recommend || null } : { styles: [], defaultStyleId: null, recommend: null, failed: isText };
+  const wzChips = () => (W.styles.length ? UI.styleChips("wstyle", W.styles, W.defaultStyleId ?? "", "안 씀") : `<p class="muted" style="margin:0;font-size:13px">${W.failed ? "스타일 목록을 못 불러왔어요." : "아직 배운 스타일이 없어요."}</p>`);
   const mySrc = rs.ok ? (rs.sources || []).filter((s) => s.accountId === a.id) : [];
   const myKrw = rv.ok ? ((rv.byAccount || []).find((x) => x.accountId === a.id) || {}).krw || 0 : 0;
   const okSrc = mySrc.filter((s) => s.status === "connected");
@@ -187,6 +191,8 @@ async function detailSheet(a) {
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">활동 시간대<small>여러 개 골라도 돼요 · 안 고르면 채널 기본 시간</small></div>${UI.chips("hours", HOURS, a.goldenHours || [], true)}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div><button type="button" class="btn ghost sm" id="pedit" style="margin-top:8px;align-self:flex-start" hidden>고른 페르소나 고치기</button></div>
+  ${isText ? `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 등급<small>이 계정 글의 기본 등급 · 글마다 바꿀 수 있어요</small></div>${UI.tierRows("tier", D.tiers, a.defaultTier || "")}${a.defaultTier ? "" : '<p class="muted" style="margin:6px 0 0;font-size:12.5px">아직 안 골랐어요 · 고르기 전엔 «간단히»로 만들어요.</p>'}</div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 스타일<small>레퍼런스로 배운 모양 · 이 계정 글에 자동으로 써요</small></div><div id="wz">${wzChips()}</div>${W.recommend && W.recommend.line ? `<p class="muted" id="wzRec" style="margin:8px 0 0;font-size:12.5px;line-height:1.5">${UI.esc(W.recommend.line)}</p>` : ""}<button type="button" class="btn ghost sm" id="wzMore" style="margin-top:8px;align-self:flex-start">${W.styles.length ? "스타일 배우기 · 관리" : "글 레퍼런스로 스타일 배우기 · 코인 0"}</button></div>` : ""}
   <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
   <div class="sec">수익 매체</div>
   <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
@@ -200,9 +206,14 @@ async function detailSheet(a) {
   UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
-    const rb = sh.querySelector("#relogin"); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
+    const rb = sh.querySelector("#relogin");
+    /* [R9R10-A] 옷장 시트는 ui.js 한 곳(UI.styleSheet) — 돌아오면 칩만 다시 그린다 */
+    const wzMore = sh.querySelector("#wzMore"); if (wzMore) wzMore.onclick = () => UI.styleSheet({ accounts: D.accounts.filter((x) => x.channel === a.channel && x.status !== "suspended"), accountId: a.id,
+      onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
     sh.querySelector("#save").onclick = async () => {
       const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), dailyCap: UI.stepVal(sh, "cap"), minGapMin: Number(UI.chipVal(sh, "gap") || 180), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
+      /* [R9R10-A · 계약 §13] 등급·스타일 기본값은 **계정마다** — 고른 것만 보낸다(안 고른 등급을 화면이 채워 보내지 않는다 · AC-92) */
+      if (isText) { const tv = UI.chipVal(sh, "tier"); if (tv) body.defaultTier = tv; if (sh.querySelector('[data-chips="wstyle"]')) { const wv = UI.chipVal(sh, "wstyle"); body.defaultStyleId = wv ? Number(wv) : null; } }
       const m = {}; const v = (id) => sh.querySelector(id).value.trim();
       if (v("#cpA") && v("#cpS")) { m.coupangAccessKey = v("#cpA"); m.coupangSecretKey = v("#cpS"); } if (v("#ap")) m.adpostMediaId = v("#ap"); if (v("#as")) m.adsensePub = v("#as");
       if (Object.keys(m).length) body.monetize = m;

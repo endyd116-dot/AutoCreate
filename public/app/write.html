@@ -6,7 +6,7 @@
 <title>직접 쓰기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=21">
+<link rel="stylesheet" href="/css/ac.css?v=22">
 </head>
 <body>
 <div class="shell">
@@ -25,6 +25,7 @@
   </div>
   <p class="muted" id="cnt" style="margin:0 16px 12px;font-size:12.5px">본문 0자</p>
 </div>
+<div class="group" id="stylez" hidden><div class="gt">어떤 모양으로</div></div>
 <div class="group" id="when"><div class="gt">언제 올릴까요</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="comp"><div class="gt">대가를 받았나요</div>
   <div class="fr"><div class="fl">원고료·PPL을 받았어요<small>켜면 글 첫머리에 고지 한 줄을 저희가 넣어 드려요</small></div><button class="toggle" type="button" data-comp="sponsored" aria-checked="false" aria-label="원고료·PPL을 받았어요"></button></div>
@@ -39,8 +40,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=26"></script>
-<script src="/js/mock.js?v=28"></script>
+<script src="/js/ui.js?v=27"></script>
+<script src="/js/mock.js?v=29"></script>
 <script>
 (async () => {
 await UI.boot("create");
@@ -58,8 +59,8 @@ await UI.boot("create");
       1코인이 붙는 날이 오면 화면만 0 이라고 계속 말하게 된다.
    🔴 **막지 않는다** — 검사에 걸려도 그대로 예약된다(§9 하드 게이트 0개). 대신 또렷하게 말하고, 되돌릴 길을 같은 자리에서 준다.
    🔴 시각은 KST 고정(§4.5b) — `datetime-local` 을 쓰지 않는다(그 값엔 시간대가 없다). 날짜·시각 셈은 `UI.atKST` 한 곳. */
-let accounts = [], channels = [], slots = [], sending = false;
-const st = { channel: "", accountId: null, when: "slot", slotId: null, date: UI.ymdKST(), time: "09:00", mon: { sponsored: false, gift: false, affiliate: false }, aff: "coupang" };
+let accounts = [], channels = [], slots = [], sending = false, stylesByAcc = {};   /* [R9R10-A] stylesByAcc = 계정별 옷장(한 번 읽으면 둔다) */
+const st = { channel: "", accountId: null, when: "slot", slotId: null, date: UI.ymdKST(), time: "09:00", mon: { sponsored: false, gift: false, affiliate: false }, aff: "coupang", styleId: "" };   /* styleId "" = 이 계정 기본(서버가 정한다) */
 /* 제휴처 이름은 **수익 화면과 같은 어휘**를 쓴다(UI.SRC) — 여기서 새 낱말을 만들면 두 화면이 다른 말을 한다.
    🔴 «그 밖»(manual)은 서버에서 쿠팡 전용 문구가 아닌 **일반 제휴 문구**로 나간다(lib/disclosure.ts disclosureSentence). */
 const AFF = ["coupang", "linkprice", "aliexpress", "manual"];
@@ -89,9 +90,29 @@ function renderWhere() {
     + `<div class="row">${UI.mark(st.channel)}<div class="l"><span class="t">${UI.esc(UI.chLabel(st.channel))}</span><span class="d">${cur ? `@${UI.esc(cur.handle)} · 오늘 ${cur.postsToday}/${cur.dailyCap}` : "계정을 골라 주세요"}</span></div></div>`
     + (accs.length > 1 ? `<div style="padding:0 12px 12px">${UI.chips("acc", accs.map((a) => [a.id, "@" + a.handle]), st.accountId)}</div>` : "");
   UI.bindChips(host, (name, v) => {
-    if (name === "ch") { st.channel = v; st.accountId = null; st.slotId = null; renderWhere(); renderWhen(); }
-    else if (name === "acc") { st.accountId = Number(v) || null; renderWhere(); }
+    if (name === "ch") { st.channel = v; st.accountId = null; st.slotId = null; renderWhere(); renderWhen(); renderStyle(); }
+    else if (name === "acc") { st.accountId = Number(v) || null; renderWhere(); renderStyle(); }
   });
+}
+
+/* ── [R9R10-A · R10-4 · 설계 §3.6] 직접 쓰기에서도 **스타일만 빌려 쓰기**(«내가 쓰되 구성만 그 틀로») — 스타일은 그 계정의 옷장(`/api/account-styles`)에서 읽는다.
+     🔴 코인 0 · 글자는 그대로다(문단·말투·구성만 그 틀로 · 서버가 한다). 없으면 배우러 가는 줄만 낸다(시트는 ui.js 한 곳 UI.styleSheet).
+     🔴 «이 계정 기본»(`""`)은 서버가 정한다 — 화면이 기본 스타일 id 를 대신 채워 보내지 않는다(AC-92). ── */
+async function renderStyle() {
+  const host = UI.$("#stylez"); const acc = accounts.find((a) => a.id === st.accountId);
+  if (!acc) { host.hidden = true; return; }
+  if (!stylesByAcc[acc.id]) { const r = await UI.api(`/api/account-styles?accountId=${acc.id}`, { noGate: true }); stylesByAcc[acc.id] = r.ok ? { styles: r.styles || [], defaultStyleId: r.defaultStyleId ?? null } : { styles: [], defaultStyleId: null, failed: true }; }
+  if (accounts.find((a) => a.id === st.accountId) !== acc) return;   // 읽는 사이 계정이 바뀌었으면 새 호출이 그린다
+  const W = stylesByAcc[acc.id]; if (!W.styles.some((x) => String(x.id) === String(st.styleId))) st.styleId = "";
+  const def = W.defaultStyleId ? W.styles.find((x) => x.id === W.defaultStyleId) : null;
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">어떤 모양으로</div>' + (W.styles.length
+    ? `<div style="padding:0 12px 6px">${UI.styleChips("wstyle", W.styles, st.styleId, def ? "이 계정 기본" : "그대로")}</div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">${def ? `«${UI.esc(def.name)}»이 이 계정 기본이에요 · ` : ""}문단·말투·구성만 그 틀로 다듬어요 — 내용은 그대로고 코인은 들지 않아요.</p>`
+    : `<p class="muted" style="margin:0 16px 10px;font-size:13px">${W.failed ? "스타일 목록을 못 불러왔어요 · 그대로 올려도 돼요." : "아직 배운 스타일이 없어요 · 잘 된 글 주소 하나면 문단·이모지·강조 버릇을 배워 둘 수 있어요."}</p>`)
+    + `<button type="button" class="row tap" id="styleMore"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">${W.styles.length ? "스타일 배우기 · 관리" : "글 레퍼런스로 스타일 배우기"}</span><span class="d">코인은 들지 않아요</span></div>${UI.chev}</button>`;
+  UI.bindChips(host, (n, v) => { if (n === "wstyle") st.styleId = v || ""; });
+  UI.$("#styleMore").onclick = () => UI.styleSheet({ accounts: accounts.filter((a) => a.channel === st.channel && a.status !== "suspended"), accountId: acc.id,
+    onChange: ({ accountId, styles, defaultStyleId }) => { stylesByAcc[accountId] = { styles, defaultStyleId }; if (accountId === st.accountId) renderStyle(); } });
 }
 
 /* ── 언제 올릴까요 — ①편성표 빈자리를 빌리거나 ②시각을 직접 고른다(서버 계약의 slotId | scheduleAt 그대로) ── */
@@ -135,6 +156,7 @@ async function send() {
   const html = bodyHtml();
   const body = { channel: st.channel, title, bodyHtml: html, monetize: { sponsored: st.mon.sponsored, gift: st.mon.gift, ...(st.mon.affiliate ? { affiliate: { provider: st.aff } } : {}) } };
   if (st.accountId) body.accountId = st.accountId;
+  if (st.styleId) body.styleId = Number(st.styleId);   /* [R9R10-A] 이번 글만 이 스타일로 · 비면 서버가 계정 기본을 쓴다 */
   if (st.when === "slot" && st.slotId) body.slotId = st.slotId; else body.scheduleAt = UI.atKST(st.date, st.time);
   sending = true; btn.disabled = true; btn.textContent = "넣는 중…";
   const r = await UI.api("/api/pieces-self", { body });
@@ -196,7 +218,7 @@ async function load() {
   /* 🔴 자리를 못 읽어도 화면은 선다 — «시각 정하기»로는 그대로 쓸 수 있다(못 읽은 것을 «자리 0개»로 그리지 않는다 · AC-9). */
   slots = s.ok ? (s.slots || []) : [];
   if (!s.ok && !s.gated) st.when = "time";
-  renderWhere(); renderWhen();
+  renderWhere(); renderWhen(); renderStyle();
 }
 bindComp(); bindEditors();
 UI.$("#go").onclick = send;

@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 13;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 14;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -56,6 +56,11 @@
   const selfKnob = qs.get("self") || "";
   const tdKnob = qs.get("td") || "";
   const claimsKnob = qs.get("claims") === "1";
+  /* [R9R10-A] 서식·레퍼런스·등급 손잡이
+     ?fmt=1 → 글 501 에 «못 낸 서식»(meta.formatUnused) · ?settle=1 → 프리미엄으로 만들었는데 AI 사진을 안 구워 1코인만 받은 글(meta.coins.line)
+     ?ref=fail|blocked|timeout|notfound → 주소로 배우기가 그 갈래로 실패 · ?ref=norunner → 열어 줄 PC 가 없다 · ?ref=quota → 이번 달 한도를 다 씀
+     ?styles=0 → 배운 스타일이 없는 집 · ?rec=0 → 표본이 적어 추천을 못 하는 집 */
+  const fmtKnob = qs.get("fmt") === "1", settleKnob = qs.get("settle") === "1", refKnob = qs.get("ref") || "", noStyles = qs.get("styles") === "0", recNone = qs.get("rec") === "0";
   /* [R8-B §4.4] 내 AI 키 손잡이 — ?aikey=ok|invalid|resting|noenc (기본: 안 꽂은 집) · ?aifb=1 = 대신 만들기를 이미 켜 둔 집
      🔴 `noenc` 는 «맡아 둘 수 없는 상태»(서버 `configured:false`)다 — 그때 화면이 꽂는 자리를 안 그리는지 보려고 둔다. */
   const aiKeyKnob = qs.get("aikey") || "";
@@ -95,13 +100,13 @@
     const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
     const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
-  const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
+  const BODY_NAVER = `<p>✅ 주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. <mark class="line">세 번 실패하고 네 번째에 깨끗해진 방법</mark>을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
 <h2>1. 바스켓은 물에 10분만 담가요</h2>
-<p>뜨거운 물에 세제 한 방울 넣고 10분 담가 두면 눌어붙은 기름이 절반은 떠요. 저는 이걸 안 하고 바로 문질러서 코팅을 긁었어요.</p>
+<p>📌 뜨거운 물에 세제 한 방울 넣고 <mark class="value">10분</mark> 담가 두면 눌어붙은 기름이 절반은 떠요. 저는 이걸 안 하고 바로 문질러서 <u>코팅을 긁었어요</u>.</p>
 <figure><img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='400'%3E%3Crect width='640' height='400' fill='%23E8EBEE'/%3E%3C/svg%3E" alt=""><figcaption>10분 담가 둔 바스켓 — 기름이 떠오른 모습</figcaption></figure>
 <h2>2. 베이킹소다 반죽으로 코너를 닦아요</h2>
-<p>베이킹소다 2 : 물 1로 반죽해 코너에 발라 두면 5분 뒤 부드러운 수세미로 밀리듯 닦여요.</p>
+<p>💡 베이킹소다 <mark class="value">2 : 1</mark>로 반죽해 코너에 발라 두면 <u>5분 뒤</u> 부드러운 수세미로 밀리듯 닦여요.</p>
 <ul class="check"><li>바스켓 10분 담그기</li><li>베이킹소다 반죽 5분</li><li>헹군 뒤 완전히 말리기</li></ul>
 <hr>
 <p class="tip">코팅 제품은 철수세미 절대 금지 — 한 번 긁히면 냄새가 계속 배어요.</p>
@@ -110,7 +115,7 @@
 <p class="tags">#에어프라이어청소 #베이킹소다 #주방청소</p>`;
   const BODY_TISTORY = `<nav class="toc"><ol><li>3분 요약</li><li>단계별 흔한 실수</li><li>자주 묻는 질문</li></ol></nav>
 <h2>에어프라이어 청소, 3분 요약</h2>
-<p>에어프라이어 바닥에 눌어붙은 기름은 «담그기 → 베이킹소다 → 건조» 세 단계면 끝난다. 각 단계에서 흔한 실수를 표로 정리했다.</p>
+<p>에어프라이어 바닥에 눌어붙은 기름은 <mark class="row">«담그기 → 베이킹소다 → 건조»</mark> 세 단계면 끝난다. 각 단계에서 흔한 실수를 <mark class="value">표</mark>로 정리했다.</p>
 <table><tr><th>단계</th><th>시간</th><th>흔한 실수</th></tr><tr><td>담그기</td><td>10분</td><td>찬물 사용</td></tr><tr><td>베이킹소다</td><td>5분</td><td>철수세미</td></tr><tr><td>건조</td><td>30분</td><td>젖은 채 조립</td></tr></table>
 <div class="adsense">애드센스 자리 · 발행 후 광고가 들어가요</div>
 <h3>자주 묻는 질문</h3>
@@ -292,6 +297,38 @@
   const AVATAR = "/icon.svg";
   /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
   const COIN = { blog: 1, image: 1, cardnews: 3 };
+  /* [R9R10-A · 사장님 확정 2026-09-16] 코인 등급 — 🔴 정본은 서버 lib/coin-table.ts COIN_TIERS(B 채택) · 글자까지 같아야 한다(verify-label-surface ⑧-c).
+     accounts-list.tiers 로 실어 준다 · 화면은 이 값을 셈 없이 그린다(AC-74). «최소»라는 말을 쓰지 않는다. */
+  /* ⚠️ 필드 순서 «key · coins · label» — 라벨 하니스 ②가 `{ key:…, label:… }` 꼴을 **글 검사축**으로 읽는다(정규식). 뜻은 같다. */
+  const TIERS = [
+    { key: "simple", coins: 1, label: "간단히", aiImages: [1, 1], chars: 1000, say: "AI가 사진 1장 · 핵심만 1,000자쯤" },
+    { key: "standard", coins: 2, label: "보통", aiImages: [2, 3], chars: 1500, say: "AI가 사진 2~3장 · 목록·표까지 1,500자쯤" },
+    { key: "premium", coins: 3, label: "프리미엄", aiImages: [4, 5], chars: 2000, say: "AI가 사진 4~5장 · 자주 묻는 질문까지 2,000자쯤" },
+  ];
+  const tierOf = (k) => TIERS.find((t) => t.key === k) || null;
+  /* 서버 규칙(B): 등급 안 고른 계정은 simple — 모르면 모자라게 받는 쪽(AC-93). */
+  const tierCoins = (k) => { const t = tierOf(k); return t ? t.coins : TIERS[0].coins; };
+  const tierFields = (acc) => { const k = (acc && acc.defaultTier) || "simple"; return { tier: k, coinCost: tierCoins(k) }; };
+  /* [R9R10-A · B 확정 모양] 못 낸 서식 = [{field, label, why}] — label 은 서버 정본(MARK_LABEL) · why 는 러너·서버 어휘(B2 일곱)라 화면이 안 그린다.
+     🔴 italic 은 «못 낸다»가 아니라 «일부러 안 낸다»(번짐 축) — B2 가 그렇게 말해 달라고 했다. */
+  const FMT_UNUSED = [
+    { field: "underline", label: "밑줄", why: "url_para" },
+    { field: "table", label: "표", why: "block_unsupported" },
+    { field: "value", label: "핵심 강조", why: "caret_drift" },
+    { field: "italic", label: "기울임", why: "channel_unsupported" },
+    { field: "row", label: "나열 강조", why: "budget" },
+  ];
+  /* pieces-get.formatCaps — 채널 표(lib/channel-registry.ts · B). null = 모름(올려 봐야 안다). */
+  const FORMAT_CAPS = {
+    naver_blog: { bold: true, underline: true, italic: false, value: true, line: true, row: true, emoji: true, quote: true, table: false, checklist: false, faq: false, toc: false, divider: true, image: true, place: false },
+    tistory: { bold: true, underline: true, italic: null, value: null, line: null, row: null, emoji: true, quote: true, table: true, checklist: true, faq: true, toc: true, divider: true, image: true, place: true },
+    threads: { bold: false, underline: false, italic: false, value: false, line: false, row: false, emoji: true, quote: false, table: false, checklist: false, faq: false, toc: false, divider: false, image: true, place: false },
+  };
+  /* 덜 받고 돌려준 글(meta.coins) — 🔴 line 은 서버 문장(모의가 그 자리에서 말한다) · 화면은 숫자를 다시 세지 않는다. */
+  const COINS_SETTLED = { tier: "premium", planned: 3, charged: 1, returned: 2, line: "프리미엄으로 만들었는데 내 사진으로 채워서 AI 사진을 안 구웠어요. 1코인만 받고 2코인은 돌려드렸어요." };
+  const pieceCoinsMeta = (p) => { if (settleKnob && p.id === 501) return { tier: "premium", coins: COINS_SETTLED };
+    const tier = p.meta.tier || (p.origin === "self" || p.meta.origin === "self" ? null : "standard"); if (!tier) return {};
+    return { tier, coins: { tier, planned: tierCoins(tier), charged: tierCoins(tier), returned: 0 } }; };
   /* [R8 §10.3] 스톡 후보 — 사다리 순서는 서버와 같다(Pixabay 먼저 · lib/stock/index.ts:35).
      그림은 바깥을 안 부르려고 그 자리에서 그린다(정적 하니스에서도 격자가 그대로 보여야 한다). */
   const STOCK_PROVIDERS = ["pixabay", "pexels"];
@@ -347,9 +384,9 @@
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
       { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatar: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
     ] : [
-      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
-      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
-      { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701 },
+      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true }, defaultTier: "premium", defaultStyleId: null },
+      { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false }, defaultTier: null, defaultStyleId: null },
       { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: avatarOn ? AVATAR : null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
       /* [R8 §3.2] ?ads=1 일 때만 — 워드프레스는 «우리가 직접 위젯을 넣는» 유일한 길이라 그 갈래를 화면에서 보려면 계정이 하나 있어야 한다 */
       ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatar: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
@@ -365,6 +402,16 @@
       { id: 17, title: "전자레인지 냄새, 레몬 한 조각으로 끝", angle: "3초 훅 · 비포/애프터", channelHint: "youtube_shorts", score: 81, status: "candidate", factors: { volume: 15600, growthPct: 63, competition: "low", intent: "info" }, expiresAt: iso(now + 6 * 86400e3) }, // [P1R5] 영상 채널 힌트(§1.11)
     ],
     templates: [], // [P1R5] shorts_templates(레퍼런스 구조 · topics-reference)
+    /* [R9R10-A] 계정의 옷장 — 🔴 원문은 한 줄도 없다(summary = 숫자와 목록 · 서버 textStyleSummary 문장). learned 의 영어 키는 화면이 안 그린다. */
+    styles: noStyles ? [] : [
+      { id: 701, accountId: 1, name: "살림 블로그 스타일", source: "url", createdAt: iso(now - 3 * 86400e3),
+        summary: ["문단 2~3줄 · 한 문단 60자쯤", "이모지 ✅📌💡 를 문단 첫머리에 · 글당 6개쯤", "밑줄 5곳 · 주로 숫자에", "사진 7장 · 소제목 아래마다 · 캡션은 3장에만", "소제목 4개 · 결론이 앞에", "해요체 8 : 합니다체 2 · 질문 문장 15%"],
+        learned: { paragraph: { lines: [2, 3], chars: 60 }, emoji: { use: true, where: "para_start", top: ["✅", "📌", "💡"], perPost: 6 }, emphasis: { kinds: ["underline", "bold"], perPost: 5, on: ["number"] }, photos: { count: 7, where: "after_h2", captionRate: 0.4 }, blocks: { list: 2, table: 0, quote: 1, divider: 2 }, tone: { haeyo: 0.8, hamnida: 0.2, question: 0.15 }, title: { hasNumber: true, chars: 22 }, structure: ["hook", "h2", "para", "image", "h2", "para", "list", "tip"] } },
+      { id: 702, accountId: 1, name: "정리형 리뷰", source: "capture", createdAt: iso(now - 86400e3),
+        summary: ["문단 4~5줄", "이모지 안 씀", "굵게 3곳 · 결론 문장에", "사진 3장 · 글 앞쪽에 몰아서", "표 1개 · 소제목 3개", "합니다체 9 : 해요체 1"],
+        learned: { paragraph: { lines: [4, 5], chars: 110 }, emoji: { use: false }, emphasis: { kinds: ["bold"], perPost: 3, on: ["conclusion"] }, photos: { count: 3, where: "top" }, blocks: { list: 1, table: 1, quote: 0, divider: 0 }, tone: { haeyo: 0.1, hamnida: 0.9, question: 0.05 }, title: { hasNumber: false, chars: 18 }, structure: ["summary", "h2", "table", "para", "h2", "para", "faq"] } },
+    ],
+    styleRefs: {}, styleQuota: { used: refKnob === "quota" ? 30 : 2, limit: 30 },
     /* [P1R6] 추천인 · 세금계산서 프로필 · 관리형 러너 신청 · 내보내기 작업 */
     referral: { code: "AC7K2M9Q", invited: fresh ? [] : [{ tenantName: "요리하는 집", at: iso(now - 9 * 86400e3), rewarded: true }, { tenantName: "팁스고", at: iso(now - 2 * 86400e3), rewarded: false }], rewardCoins: 20 },
     taxProfile: fresh ? null : { bizNo: "220-88-12345", bizName: "다온커머스", email: "tax@daon.co.kr" },
@@ -520,6 +567,23 @@
   /* [R8] 🔴 손질(PieceSpecPatch)을 먹이는 자리는 **한 곳**이다 — 견적(`director-estimate`)과 만들기(`director-confirm`)가
      따로 셈하면 «견적과 실제가 다른» 화면이 된다(서버도 estimate·confirm 이 같은 함수를 본다).
      🔴 글 코인 = `COIN.blog` + **AI 로 구운 여분 장수**. 여기 있던 «1 + 사진 장수»는 네이버를 7코인이라 적던 그 셈이다(AC-52). */
+  /* [R9R10-A · R10-3·4·5] 레퍼런스 작업 — 시간으로 단계가 흐른다(queued → capturing → reading → done|failed). 캡처·원문은 어디에도 담지 않는다(모의도). */
+  function newRef(accountId, source, images = 0, chars = 0) { const id = S.nextId++; S.styleRefs[id] = { id, accountId, source, startedAt: Date.now(), images, chars, done: false }; return S.styleRefs[id]; }
+  function refView(ref) {
+    const el = Date.now() - ref.startedAt; const fk = { fail: "login_wall", blocked: "blocked", timeout: "timeout", notfound: "not_found" }[refKnob] || null;
+    let status = ref.source === "url" ? (el < 1500 ? "queued" : el < 3500 ? "capturing" : el < 5000 ? "reading" : "done") : (el < 2500 ? "reading" : "done");
+    if (status === "done" && ref.source === "url" && fk) status = "failed";
+    let style = null;
+    if (status === "done" && !ref.done) { ref.done = true; S.styleQuota.used++;
+      style = { id: S.nextId++, accountId: ref.accountId, source: ref.source, createdAt: iso(Date.now()),
+        name: ref.source === "paste" ? "붙여 넣은 글의 구성" : "새로 배운 스타일 " + (S.styles.length + 1),
+        summary: ref.source === "paste" ? ["문단 3~4줄", "소제목 3개 · 결론이 뒤에", "해요체 9 : 합니다체 1", "밑줄·형광펜·이모지·사진 자리는 붙여 넣기로는 못 배웠어요"]
+          : ["문단 2줄 · 한 문단 45자쯤", "이모지 🔥👉 를 소제목 앞에 · 글당 4개", "형광펜 3곳 · 결론 문장에", "사진 " + (5 + ref.images) + "장 · 문단마다 하나", "소제목 5개 · 체크리스트 1개"],
+        learned: {} };
+      S.styles.push(style); ref.styleId = style.id; }
+    if (ref.done && !style) style = S.styles.find((s) => s.id === ref.styleId) || null;
+    return { id: ref.id, status, failKind: status === "failed" ? fk : null, style: status === "done" ? style : null }; }
+  const styleNameOf = (id) => (S.styles.find((s) => s.id === Number(id)) || {}).name || null;
   function applyPatches(br, patches) {
     const pieces = br.pieces.map((p) => ({ ...p }));
     for (const patch of patches || []) {
@@ -529,6 +593,8 @@
       if (patch.accountId !== undefined) { p.accountId = patch.accountId; p.accountHandle = S.accounts.find((a) => a.id === patch.accountId)?.handle || null; }
       if (patch.format) p.format = patch.format;
       if (patch.emotionKey) p.emotionKey = patch.emotionKey;
+      if (patch.tier && p.kind !== "video" && tierOf(patch.tier)) { p.tier = patch.tier; p.coinCost = tierCoins(patch.tier); }   /* [R9R10-A] 글마다 덮어쓰기 */
+      if ("styleId" in patch && p.kind !== "video") p.styleId = patch.styleId ? Number(patch.styleId) : null;
       if (patch.images && p.images) Object.assign(p.images, patch.images);
       if (patch.monetize && "affiliate" in patch.monetize) p.monetize.affiliate = patch.monetize.affiliate ? { provider: "coupang", ...patch.monetize.affiliate } : null;
       if (patch.schedule && patch.schedule.at) p.schedule.at = patch.schedule.at;
@@ -537,11 +603,11 @@
         if (v.voiceId) { p.video.voice.voiceId = v.voiceId; p.video.variant.voiceId = v.voiceId; }
         if (v.palette) p.video.variant.palette = v.palette; if (v.hookType) p.video.variant.hookType = v.hookType;
         p.coinCost = VIDEO_COIN[videoCoinItem(p.video.seconds)];
-      } else p.coinCost = COIN.blog + Math.max(0, ((p.images && p.images.aiCount != null ? p.images.aiCount : 1) - 1));
+      } else p.coinCost = p.format === "cardnews" ? COIN.cardnews : tierCoins(p.tier);   /* [R9R10-A] 글값 = 등급 코인(옛 «1 + AI 사진 수» 셈은 등급 값을 덮어써서 프리미엄이 1코인으로 나왔다 · 2026-09-16 실측) */
     }
     return pieces;
   }
-  const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0); // [P1R5] shorts = video_60 단가(§1.10)
+  const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : tierFields(r.accountMode === "fixed" ? S.accounts.find((a) => a.id === r.accountId) : null).coinCost), 0); // [P1R5] shorts = video_60 단가(§1.10) · [R9R10-A] 글 = 계정 기본 등급(계정 자동이면 simple)
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
   const devRow = (d) => { const o = { id: d.id, name: d.name, kind: d.kind, status: d.online ? "online" : "offline", jobsWaiting: d.jobsWaiting || 0 }; if (d.caps) o.caps = d.caps; // [P1R5] caps.ffmpeg(§2.4)
@@ -701,7 +767,7 @@
       if (typeof b.goal === "string") { if (["adsense", "adpost", "ypp", "clip_incentive"].includes(b.goal)) S.settings.goal = b.goal; else delete S.settings.goal; }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
       return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer }; },
-    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p })), trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
+    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p, piecesByTier: Object.fromEntries(TIERS.map((t) => [t.key, Math.floor(p.limits.coinsIncluded / t.coins)])) })),   /* [R9R10-A] «이 요금제로 몇 편» — 서버가 셈 */ trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
       const o = { ok: true, plan: p ? { key: p.key, name: p.name, priceKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), cycle: B.cycle } : { key: "trial", name: "체험", priceKrw: 0, vatKrw: 0, totalKrw: 0, cycle: B.cycle }, status: blocked || (paid ? "active" : "trial"), cancelAtPeriodEnd: B.cancelAtPeriodEnd, billingKey: B.billingKey ? { has: true, last4: B.billingKey.last4, brand: B.billingKey.brand } : { has: false }, vatNote: "부가세 별도" };
@@ -833,7 +899,7 @@
     "upload": (b) => { if (!b.dataBase64 || !b.contentType) return err("file", "사진을 골라 주세요."); if (String(b.dataBase64).length > 4e6) return err("size", "3MB 이하 사진만 붙일 수 있어요."); return { ok: true, key: "autocreate/1/support/" + Date.now() + "-" + String(b.filename || "img").replace(/[^\w.-]/g, "_"), url: "" }; },
     "notices": () => ({ ok: true, notices: qs.get("incident") === "0" ? [] : [{ id: 801, kind: "incident", title: "네이버 발행이 늦어요 · 네이버 쪽 점검", body: "14:00 부터 네이버 블로그 발행이 30분쯤 밀리고 있어요. 예약은 그대로 나가요.", startsAt: iso(now - 2 * 3600e3), endsAt: iso(now + 4 * 3600e3), channels: ["naver_blog"] }, { id: 802, kind: "notice", title: "9월 25일 새벽 2시 점검(10분)", startsAt: iso(now - 3600e3), endsAt: iso(now + 11 * 86400e3) }] }),
     /* §1 계정 */
-    "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS }),
+    "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS, tiers: TIERS.map((t) => ({ ...t })) }),   /* [R9R10-A] tiers = 서버 COIN_TIERS 그대로 */
     "accounts-add": (b) => {
       if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
       if (planLimit === "accounts") return { ok: false, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 3, planKey: "starter", error: "계정은(는) 3개까지예요. Pro 로 바꾸면 더 늘어나요.", status: 402 };
@@ -845,11 +911,11 @@
       if (b.channel === "wordpress" && b.appPassword === "wrong") return err("wp_auth", "워드프레스 로그인 정보를 확인해 주세요.");
       if (["naver_blog", "tistory", "naver_clip"].includes(b.channel) && (!b.loginId || !b.password)) return err("creds", "아이디와 비밀번호를 입력해 주세요.");
       if (b.channel === "wordpress" && (!b.siteUrl || !b.loginId || !b.appPassword)) return err("creds", "사이트 주소·아이디·앱 비밀번호를 입력해 주세요.");
-      const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", avatar: null, status: b.channel === "wordpress" ? "active" : "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [], browserProfileKey: "acc-" + S.nextId, hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } };
+      const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", avatar: null, status: b.channel === "wordpress" ? "active" : "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [], browserProfileKey: "acc-" + S.nextId, hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null };
       S.accounts.push(a); return { ok: true, account: { ...a } }; },
     "accounts-remove": (b) => { S.accounts = S.accounts.filter((a) => a.id !== Number(b.id)); return { ok: true }; },
     "accounts-update": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
-      for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours"]) if (b[k] !== undefined) a[k] = b[k];
+      for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours", "defaultTier", "defaultStyleId"]) if (b[k] !== undefined) a[k] = b[k];   /* [R9R10-A] 등급·스타일 기본값은 계정마다 */
       if (b.proxyUrl !== undefined) a.proxyUrl = b.proxyUrl ? b.proxyUrl.replace(/\/\/([^@]+)@/, "//****@") : undefined;
       if (b.monetize) { const m = b.monetize; if (m.coupangAccessKey && m.coupangSecretKey) a.monetize.coupang = true; if (m.adpostMediaId) a.monetize.adpost = true; if (m.adsensePub) a.monetize.adsense = true; }
       return { ok: true, account: { ...a } }; },
@@ -890,14 +956,16 @@
       /* [B-1 a39b458] 제안 단계 예고 — 첫 spec 이 오늘 자리를 쓸 것이면 usesTodaySlot 을 싣는다(확정이 정본 · 그 사이 자리가 찰 수 있다) */
       { const first = pieces[0]; const s0 = usedSlotOn && first && S.slots.find((s) => s.date === todayYmd && s.channel === first.channel && !s.pieceId && ["planned", "topic_assigned", "assigned", "no_topic"].includes(s.status));
         if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
-      const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "글 한 편에 1코인이에요 · AI 사진 1장이 들어 있고, 더 쓰셔도 그만큼 더 받지 않아요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
+      /* [R9R10-A] 글마다 등급 = 계정 기본값 · 코인 = 등급 코인(식은 서버 pieceCoinCost 한 곳 · 여기선 그 값을 흉내 낼 뿐) · 계정 기본 스타일이 있으면 붙는다 */
+      for (const p of pieces) { if (p.kind === "video") continue; const acc = S.accounts.find((a) => a.id === p.accountId); Object.assign(p, tierFields(acc)); if (acc && acc.defaultStyleId) p.styleId = acc.defaultStyleId; }
+      const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "등급대로 코인이 들어요 — 간단히 1 · 보통 2 · 프리미엄 3 · 내 사진을 올려도 코인은 안 늘어요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
     /* [R8 · director-estimate] 🔴 **아무것도 쓰지 않고** 손질된 값으로 얼마 드는지만 답한다 — 화면이 «1 + 사진 장수»로 셈하던 자리를 대신한다. */
     "director-estimate": (b) => { const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
       const pieces = applyPatches(br, b.pieces);
       const coinCost = pieces.reduce((a, p) => a + (p.coinCost || 0), 0);
       return { ok: true, coinCost, coinsLeft: S.coins, enough: coinCost <= S.coins, need: Math.max(0, coinCost - S.coins),
-        pieces: pieces.map((p) => ({ key: p.key, channel: p.channel, kind: p.kind || "post", coinCost: p.coinCost, imageCount: p.images?.count ?? 0, aiCount: p.images?.aiCount ?? 0 })) };
+        pieces: pieces.map((p) => ({ key: p.key, channel: p.channel, kind: p.kind || "post", tier: p.tier, coinCost: p.coinCost, imageCount: p.images?.count ?? 0, aiCount: p.images?.aiCount ?? 0 })) };
     },
     "director-confirm": (b) => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
       let pieces = applyPatches(br, b.pieces);
@@ -913,11 +981,29 @@
       for (const p of pieces) { const id = S.nextId++; ids.push(id);
         if (p.kind === "video") { S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "video", title: t?.title || "새 영상", status: "generating", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, coinCost: p.coinCost, bodyHtml: "", meta: { stage: "script", chainStage: { stage: "script", at: iso(Date.now()) }, video: p.video, angle: p.angle, emotionKey: p.emotionKey, scheduleAt: p.schedule.at, tags: [], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined, chainLock: null, chainResume: { count: 0 } }, gate: null, _v0: Date.now() });
           S.slots.push({ id: S.nextId++, date: p.schedule.at ? new Date(new Date(p.schedule.at).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : todayYmd, channel: p.channel, kind: "shorts", accountId: p.accountId, accountHandle: p.accountHandle, status: "producing", publishAt: p.schedule.at, topicTitle: t?.title, pieceId: id, origin: "manual" }); continue; } // [P1R5] §1.2 kind video 행 + slot(shorts)
-        S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "post", format: p.format, title: t?.title || "새 글", status: "generating", stage: "writing", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, bodyHtml: p.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: ["에어프라이어청소"], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined }, gate: gate(true), _t0: Date.now() });
+        S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "post", format: p.format, title: t?.title || "새 글", status: "generating", stage: "writing", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, bodyHtml: p.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tier: p.tier, ...(p.styleId ? { styleId: p.styleId, styleName: styleNameOf(p.styleId) } : {}), tags: ["에어프라이어청소"], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined }, coinCost: p.coinCost, gate: gate(true), _t0: Date.now() });
         if (p._useSlot) { Object.assign(p._useSlot, { status: "producing", pieceId: id, topicTitle: t?.title, accountId: p.accountId ?? p._useSlot.accountId, accountHandle: p.accountHandle || p._useSlot.accountHandle }); continue; }   // [R7 §1.6] 그 자리를 쓴다(새로 만들지 않는다)
         S.slots.push({ id: S.nextId++, date: p.schedule.at ? new Date(new Date(p.schedule.at).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : todayYmd, channel: p.channel, kind: "post", accountId: p.accountId, accountHandle: p.accountHandle, status: "producing", publishAt: p.schedule.at, topicTitle: t?.title, pieceId: id, origin: "manual" }); }
       if (t) t.status = "picked"; br._charged = true; br._pieceIds = ids;
       return { ok: true, briefId: br.id, pieceIds: ids, coinsCharged: need, coinsLeft: S.coins, ...(usedSlot ? { usedTodaySlot: usedSlot } : {}), status: 202 }; },
+    /* ══ [R9R10-A · R10-4·5] 계정의 옷장 · 글 레퍼런스 — 키는 docs/active/2026-09-16-R9R10-AB-keys.md §5~9(B 채택) · 코인 0 · 요금제 월 한도 ══ */
+    "account-styles": (_b, q) => { const accountId = Number(q.get("accountId")) || null;
+      const styles = S.styles.filter((s) => !accountId || s.accountId === accountId).map((s) => ({ ...s }));
+      const acc = S.accounts.find((a) => a.id === accountId);
+      /* 되먹임 원장(§5F)의 첫 실사용 — 🔴 표본이 적으면 measured:false + «아직 몰라요»(AC-9 · 지어내지 않는다) */
+      const recommend = recNone || !styles.length ? { measured: false, styleId: null, line: "아직 이 계정 글이 몇 편 안 돼서 어느 스타일이 잘 되는지는 몰라요. 30편쯤 쌓이면 말씀드릴게요." }
+        : { measured: true, styleId: styles[0].id, line: "«" + styles[0].name + "»로 쓴 글 6편이 다른 글보다 조회가 1.8배 높았어요." };
+      return { ok: true, styles, defaultStyleId: (acc && acc.defaultStyleId) || null, quota: { ...S.styleQuota, resetAt: kst(31 - Number(todayYmd.slice(8)), 0) }, recommend }; },
+    "account-style-default": (b) => { const a = S.accounts.find((x) => x.id === Number(b.accountId)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 }); a.defaultStyleId = b.styleId ? Number(b.styleId) : null; return { ok: true, defaultStyleId: a.defaultStyleId }; },
+    "account-style-delete": (b) => { const id = Number(b.id); S.styles = S.styles.filter((s) => s.id !== id); for (const a of S.accounts) if (a.defaultStyleId === id) a.defaultStyleId = null; return { ok: true }; },
+    "style-reference": (b, q) => {
+      if (q.get("id")) { const ref = S.styleRefs[q.get("id")]; if (!ref) return err("not_found", "그 작업을 찾을 수 없어요.", { status: 404 }); return { ok: true, ref: refView(ref) }; }
+      const url = String(b.url || "").trim(); if (!/^https?:\/\/\S+$/.test(url)) return err("url", "글 주소를 붙여 주세요.");
+      if (S.styleQuota.used >= S.styleQuota.limit) return err("quota", "이번 달 레퍼런스 " + S.styleQuota.limit + "개를 다 썼어요. 다음 달 1일에 다시 열려요.", { quota: { ...S.styleQuota } });
+      if (refKnob === "norunner") return err("no_runner", "글을 열어 줄 내 PC 프로그램이 지금 꺼져 있어요.", { failKind: "no_runner" });
+      return { ok: true, ref: refView(newRef(Number(b.accountId) || null, "url")), quota: { ...S.styleQuota } }; },
+    "style-reference-upload": (b) => { const n = Array.isArray(b.images) ? b.images.length : 0; if (!n) return err("images", "캡처 이미지를 한 장 이상 올려 주세요."); if (n > 6) return err("too_big", "캡처는 6장까지 올릴 수 있어요."); return { ok: true, ref: refView(newRef(Number(b.accountId) || null, "capture", n)), quota: { ...S.styleQuota } }; },
+    "style-reference-text": (b) => { const t = String(b.text || "").trim(); if (t.length < 200) return err("text", "200자 이상 붙여 주세요. 짧으면 모양을 못 재요."); return { ok: true, ref: refView(newRef(Number(b.accountId) || null, "paste", 0, t.length)), quota: { ...S.styleQuota } }; },
     /* §4 글 */
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
@@ -938,7 +1024,7 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
           goalRules: NV ? ["r1", "r2", "r3"] : ["r1", "r2"],   /* 🔴 화면은 **가짓수만** 쓴다(모델 지시문이라 글자 그대로 안 보여 준다) */
           actualChars: String(p.bodyHtml || "").replace(/<[^>]+>/g, "").length } };
       /* [R8-A2 §2.4] `?claims=1` 이면 근거 없는 수치가 섞인 글 — 서버가 이미 주던 칸(`meta.numberClaims`)을 화면이 그리는지 본다. */
-      return { ok: true, piece: { ...pieceRow(p), ...(thKnob ? { channel: "threads", status: "published", externalUrl: "https://www.threads.net/@cook_a/post/mock" } : {}), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], meta: { ...p.meta, ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode), ...(thKnob === "partial" || thKnob === "both" ? { thChainPartial: TH_PARTIAL } : {}), ...(thKnob === "cut" || thKnob === "both" ? { thChainCut: TH_CUT } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+      return { ok: true, piece: { ...pieceRow(p), ...(thKnob ? { channel: "threads", status: "published", externalUrl: "https://www.threads.net/@cook_a/post/mock" } : {}), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], formatCaps: FORMAT_CAPS[thKnob ? "threads" : p.channel] ?? null, meta: { ...p.meta, ...pieceCoinsMeta(p), ...(fmtKnob && p.id === 501 ? { formatUnused: FMT_UNUSED } : {}), ...(p.id === 501 && !noStyles && !p.meta.styleId ? { styleId: 701, styleName: styleNameOf(701) } : {}), ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode), ...(thKnob === "partial" || thKnob === "both" ? { thChainPartial: TH_PARTIAL } : {}), ...(thKnob === "cut" || thKnob === "both" ? { thChainCut: TH_CUT } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     /* 🔴 [R8-A2 §9] 승인은 **막지 않는다** — 서버 `HARD_GATE_KEYS = []` 이고, 영상도 `judgeBlockers` 둘(깨진 물건)만 거부한다.
        옛 모의는 `p.gateOk` 가 false 면 막고 P0 면 다 막아서, **시연·스샷에서만 존재하는 가짜 게이트**를 만들고 있었다(AC-52 의 모의 쪽 얼굴).
        🔴 사유 문장은 서버(`lib/content-approve.ts approvePiece`) 글자 그대로. */
@@ -1015,7 +1101,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
          화면은 이 값만 읽고 **스스로 다시 재지 않는다**(AC-47). */
       for (const s of list) { const pw = produceWindowOf(s); if (!pw) continue;
         s.produceWindow = pw.window; s.produceReason = pw.reason;
-        if (pw.window !== "done") s.coinCost = s.kind === "shorts" ? VIDEO_COIN.video_60 : s.kind === "cardnews" ? COIN.cardnews : COIN.blog; }
+        if (pw.window !== "done") { if (s.kind === "shorts") s.coinCost = VIDEO_COIN.video_60; else if (s.kind === "cardnews") s.coinCost = COIN.cardnews;
+          else { const tf = tierFields(S.accounts.find((a) => a.id === s.accountId)); s.tier = tf.tier; s.coinCost = tf.coinCost; } } }   /* [R9R10-A] 글 자리 = 계정 기본 등급 코인 */
       return { ok: true, slots: list }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
@@ -1149,7 +1236,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       const acc = S.accounts.find((a) => a.id === accountId) || null;
       const p = { id, channel, accountId: accountId || null, accountHandle: acc ? acc.handle : null, kind: "post", format: "", origin: "self",
         title, status: "in_review", stage: "done", scheduledFor: at, gateOk: true, createdAt: iso(Date.now()), topicTitle: "", regenCount: 0,
-        bodyHtml: (comp ? `<div class="disclosure">${comp}</div>\n` : "") + html, meta: { tags: [], disclosure: comp, origin: "self", editedByUser: true, ...(mon.affiliate ? { affiliate: mon.affiliate } : {}) },
+        bodyHtml: (comp ? `<div class="disclosure">${comp}</div>\n` : "") + html, meta: { tags: [], disclosure: comp, origin: "self", editedByUser: true, ...(mon.affiliate ? { affiliate: mon.affiliate } : {}), ...(b.styleId ? { styleId: Number(b.styleId), styleName: styleNameOf(b.styleId) } : {}) },
         gate: selfGate(gate(true)) };
       S.pieces.unshift(p);
       let slot = null;
@@ -1449,7 +1536,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["fmt", "settle", "ref", "styles", "rec", "runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
