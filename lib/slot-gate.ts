@@ -28,7 +28,11 @@ import { q } from "./accounts";
 import { writeAudit } from "./audit";
 
 /** 이 생성이 «사람이 시킨 것»인가 «시스템이 스스로 도는 것»인가. 기본 auto(fail-closed). */
-export type PieceOrigin = "auto" | "manual";
+/**
+ * 글이 만들어진 길(DESIGN §5D) — `auto`(편성표가 만든다) · `manual`(사람이 «만들기»를 눌러 AI 가 쓴다) · `self`(**사람이 직접 쓴다** · AI 0).
+ *   🔴 `self` 는 성과 원장에서 «사람이 쓴 글»과 «AI 가 쓴 글»을 가르는 값이기도 하다(§5F).
+ */
+export type PieceOrigin = "auto" | "manual" | "self";
 
 export interface SlotGateInput {
   tenantId: number;
@@ -72,12 +76,13 @@ export const OPEN_SLOT_STATUS: ReadonlySet<string> = new Set(["planned", "topic_
  */
 export async function guardSlot(input: SlotGateInput): Promise<SlotGateResult> {
   const tenantId = Math.floor(Number(input.tenantId) || 0);
-  const origin: PieceOrigin = input.origin === "manual" ? "manual" : "auto";
+  /* 🔴 `self` 도 사람 경로다 — 슬롯이 붙어 있으면 존중하고 없으면 없는 대로 통과(자동 생성 게이트는 «자동»만 막는다). */
+  const origin: PieceOrigin = input.origin === "manual" ? "manual" : input.origin === "self" ? "self" : "auto";
   const channel = String(input.channel ?? "").trim();
   const slotId = Math.floor(Number(input.slotId) || 0) || null;
 
   // 사람 경로 = 예외. 슬롯이 붙어 있으면 그대로 존중하고, 없으면 없는 대로 통과.
-  if (origin === "manual") return { ok: true, slotId };
+  if (origin === "manual" || origin === "self") return { ok: true, slotId };
 
   if (tenantId <= 0) return { ok: false, slotId: null, code: "gate_unavailable", reason: "테넌트를 알 수 없어 편성 대조를 못 했어요." };
 

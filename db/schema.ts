@@ -341,6 +341,9 @@ export const briefs = pgTable("briefs", {
 export const pieces = pgTable("pieces", {
   id:           bigserial("id", { mode: "number" }).primaryKey(),
   tenantId:     bigint("tenant_id", { mode: "number" }).notNull(),
+  /* [R8 §5D · B-1 2026-09-15 · drizzle/0024] 글이 만들어진 길 — auto(편성표) · manual(사람이 «만들기») · self(**사람이 직접 씀** · AI 0).
+     `slots.origin`(자리의 출처)과 **다른 값**이다 — 자동으로 잡힌 자리에 사람이 직접 쓴 글을 꽂을 수 있다. */
+  origin:       varchar("origin", { length: 8 }).notNull().default("auto"),
   briefId:      bigint("brief_id", { mode: "number" }),
   slotId:       bigint("slot_id", { mode: "number" }),
   topicId:      bigint("topic_id", { mode: "number" }),

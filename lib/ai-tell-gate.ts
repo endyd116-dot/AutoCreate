@@ -48,7 +48,17 @@ export const GATE_LABEL: Record<GateKey, string> = {
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
 };
-export interface GateCheck { key: GateKey; label: string; pass: boolean; detail?: string }
+export interface GateCheck {
+  key: GateKey; label: string; pass: boolean; detail?: string;
+  /**
+   * [R8 §5D.3-3] **이 축은 재지 않았다**(사람이 직접 쓴 글에 AI 티 축을 들이대지 않는다).
+   *   🔴 «조용히 다 끄기» 금지라 **빠뜨리지 않고 실어 보낸다** — 화면이 이 칸을 보고 «안 했어요»로 그리고,
+   *      `pass:true` 를 초록 ✓ 로 **그리지 않는다**(못 잰 것을 통과로 그리지 않는 규율 · AC-33).
+   */
+  skipped?: boolean;
+  /** 왜 안 쟀나 — 지금은 `"self"` 하나(직접 쓴 글). */
+  skipReason?: string;
+}
 export interface GateReport {
   ok: boolean; checks: GateCheck[]; rewritten: boolean;
   /** [P1R5 §1.4-6] 영상 심사 결과 — «GateKey 12 중 영상에 해당하는 것 + judge». 글 piece 에는 없다.
@@ -175,6 +185,11 @@ export interface GateInput {
   title?: string;
   /** [R8 §2.1] 주제군 — 계약 분량 폭이 주제군마다 다르다(`lengthFor`). 없으면 채널 기본 폭. */
   group?: TopicGroup | null;
+  /**
+   * [R8 §5D] 이 글이 **어떻게 만들어졌나**(`auto`·`manual`·`self`). 판정 자체는 안 바꾸고 **말투만** 바꾼다 —
+   *   ①은 사람이 방금 쓴 글이라 «모자란다»는 판정문이 아프게 읽힌다(A 지적 2026-09-15). 같은 정보를 권유형으로 적는다.
+   */
+  origin?: string | null;
 }
 
 export function runGate(inp: GateInput): GateReport {
@@ -189,10 +204,13 @@ export function runGate(inp: GateInput): GateReport {
      그걸로 재작성(=돈)을 돌리지 않는다. */
   const lenRange = lengthFor(contract, inp.group);
   const chars = blocksCharCount(blocks);
+  const self = String(inp.origin ?? "") === "self";
   push("length", chars >= lenRange.min,
     chars >= lenRange.min
-      ? `${chars.toLocaleString()}자(계약 ${lenRange.min.toLocaleString()}~${lenRange.max.toLocaleString()}자)${chars > lenRange.max ? " — 폭보다 길다" : ""}`
-      : `${chars.toLocaleString()}자 — 계약 하한 ${lenRange.min.toLocaleString()}자에 ${(lenRange.min - chars).toLocaleString()}자 모자란다`);
+      ? `${chars.toLocaleString()}자(${self ? "이 채널에서 잘 읽히는 " : "계약 "}${lenRange.min.toLocaleString()}~${lenRange.max.toLocaleString()}자)${chars > lenRange.max ? " — 폭보다 길다" : ""}`
+      : self
+        ? `${lenRange.min.toLocaleString()}자쯤이면 더 잘 읽혀요 — 지금 ${chars.toLocaleString()}자예요(안 고쳐도 올라갑니다)`
+        : `${chars.toLocaleString()}자 — 계약 하한 ${lenRange.min.toLocaleString()}자에 ${(lenRange.min - chars).toLocaleString()}자 모자란다`);
 
   // cliche — 본문 상투구 + [2026-09-15 §5C] **사진 캡션의 묘사문**(«~놓여 있는 모습» = 그림 지시문이 캡션으로 새어 나온 것 · 사장님 실측 piece 329)
   const hits = CLICHES.filter((c) => c.re.test(plain)).map((c) => c.label);
