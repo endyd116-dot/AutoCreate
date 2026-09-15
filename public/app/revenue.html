@@ -18,7 +18,7 @@
   <span id="mon" style="font-weight:700;font-size:15px"></span>
   <button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button>
 </div>
-<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div></div>
+<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div><p class="muted" id="estNote" hidden style="margin:6px 4px 0;font-size:12.5px"></p></div>
 <div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
   </main>
 </div>
@@ -34,6 +34,13 @@ const todayYmd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul"
 const [TY, TM, TD] = todayYmd.split("-").map(Number);
 const ymdOffKST = (n) => new Date(Date.UTC(TY, TM - 1, TD + n)).toISOString().slice(0, 10);   // 달력 날짜 산수는 UTC 앵커로(기기 시간대 안 탄다)
 let view = { y: TY, m: TM };
+
+/* [B2 8a71d69] «예상 수입» 도장 — 서버가 행에 estimated(또는 raw.estimated)를 찍고 노트를 준다.
+   🔴 화면이 «예상인지»를 스스로 판정하지 않는다 — 서버 도장만 본다(스스로 판정하면 매체가 늘 때마다 또 갈린다). */
+const estOf = (s) => { if (!s) return null; const on = s.estimated === true || (s.raw && s.raw.estimated === true); if (!on) return null;
+  /* 🔴 서버 노트는 **글자 그대로** 쓰되 앞머리 그림문자만 뗀다 — 헌장 «이모지 0»(운영 로그용 ⚠️ 가 고객 화면까지 오면 감사가 빨강) */
+  const raw = String(s.estimatedNote || (s.raw && s.raw.estimatedNote) || s.note || (s.raw && s.raw.note) || "");
+  return { note: raw.replace(new RegExp("^(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]|\s)+", "u"), "").trim() }; };
 let SUM = null, DAYS = [], SRC = [], accounts = [], PREV_SAME = null; // PREV_SAME = 지난달 «같은 날까지» 합(시안 문장 · 화면이 revenue-daily 로 계산)
 const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
 const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
@@ -91,6 +98,10 @@ function render() {
   }
   UI.$("#hl").hidden = false;
   UI.$("#say").textContent = `${view.m}월에`;
+  /* [B2] 이 달에 «예상 수입» 매체가 섞였으면 그 사실을 한 줄로(합계는 그대로 — 큰 숫자를 흐리게 하지 않는다 · 헌장) */
+  const estSrcs = (SUM.bySource || []).filter(estOf);
+  UI.$("#estNote").hidden = !estSrcs.length;
+  if (estSrcs.length) UI.$("#estNote").textContent = `${estSrcs.map((s) => UI.srcLabel(s.source)).join(" · ")} — 확정이 아니라 예상치예요 · 확정되면 숫자가 바뀔 수 있어요`;
   UI.$("#num").innerHTML = `<span id="big">0원</span> 벌었어요`; // [v4] 잉크 — 초록은 홈 한 곳뿐(화면당 색 3)
   UI.countUp(UI.$("#big"), SUM.monthKrw, won);
   // [v4] 시안 문장: «지난달 같은 날보다 67,300원 더 벌었어요» — 증가만 초록, 감소는 잉크
@@ -138,7 +149,10 @@ function sourceGroup() {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
-    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span></div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+    /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
+       🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
+    const est = estOf(s);
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
   }).join("") + "</div>";
 }
 

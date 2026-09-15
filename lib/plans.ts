@@ -4,7 +4,8 @@
  */
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
-import { TEXT_CHANNELS } from "./accounts";   // [P1R7 §3.2] 채널 정본은 lib/accounts 하나 — 게이트가 목록을 두 벌 갖지 않는다(순환 0: accounts 는 plans 를 보지 않는다)
+import { TEXT_CHANNELS } from "./accounts";
+import { COIN_KRW } from "./coin-table";   // [P1R7 §3.2] 채널 정본은 lib/accounts 하나 — 게이트가 목록을 두 벌 갖지 않는다(순환 0: accounts 는 plans 를 보지 않는다)
 
 export interface PlanLimits { maxAccounts: number; coinsIncluded: number; runnerDevices: number; teamSeats: number; horizonDays: number; maxRules: number | null;
   /** [P1R7 §3.2] 이 요금제가 **새로 연결**할 수 있는 채널(설계 §12.2 · 사장님 결정 3). 없으면 코드 기본값 → 그것도 없으면 제한 없음.
@@ -98,10 +99,17 @@ export async function tenantPlan(tid: number): Promise<{ planKey: string; plan: 
 export async function checkLimit(tid: number, resource: LimitResource, requested?: number): Promise<LimitCheck> {
   const { planKey, plan } = await tenantPlan(tid);
   const L = plan.limits;
-  let used = 0; let limit: number | null = null; let label = "";
+  let used = 0; let limit: number | null = null; let label = ""; let extraSlots = 0;
   try {
     switch (resource) {
-      case "accounts": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.maxAccounts; label = "계정"; break; }
+      case "accounts": {
+        const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`)) as unknown as { c: number }[];
+        used = Number(r[0]?.c ?? 0);
+        /* [P1R7 §3.6] 산 슬롯만큼 한도가 늘어난다(active 만 — 쉬는 슬롯은 한도가 아니다). 플랜 포함분은 그대로 두고 «그 이상»을 파는 구조. */
+        const { activeSlotCount } = await import("./account-slots");
+        extraSlots = await activeSlotCount(tid);
+        limit = L.maxAccounts + extraSlots; label = "계정"; break;
+      }
       case "runnerDevices": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM runner_devices WHERE tenant_id = ${tid}`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.runnerDevices; label = "내 PC 러너"; break; }
       case "teamSeats": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM users WHERE tenant_id = ${tid}`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.teamSeats; label = "팀원"; break; }
       case "rules": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM cadence_rules WHERE tenant_id = ${tid} AND active = true`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.maxRules; label = "편성 규칙"; break; }
@@ -112,7 +120,12 @@ export async function checkLimit(tid: number, resource: LimitResource, requested
   if (!over) return { ok: true, used, limit, planKey };
   const upsell = planKey === "starter" ? "Pro" : planKey === "pro" ? "Agency" : null;
   const error = resource === "horizonDays" ? `이 요금제에서는 달력을 ${limit}일까지만 미리 채울 수 있어요.` : `${label}은(는) ${limit}개까지예요.${upsell ? ` ${upsell} 로 바꾸면 더 늘어나요.` : ""}`;
-  return { ok: false, reason: "plan_limit", used, limit, planKey, res: json({ ok: false, reason: "plan_limit", step: "plan_limit", resource, used, limit, planKey, error }, 402) };
+  /* [P1R7 §3.6] 계정 한도는 «요금제를 올리세요»만이 답이 아니다 — **계정 1개를 코인으로 살 수 있다**.
+     402 에 상품을 같이 실어 A 가 «계정 1개 더(월 24코인)» 시트를 그린다(화면이 값을 갖지 않는다). */
+  const slotOffer = resource === "accounts" ? { offers: accountSlotOffers(), extraSlots, buyPath: "/api/account-slot-buy" } : undefined;
+  const body: Record<string, unknown> = { ok: false, reason: "plan_limit", step: "plan_limit", resource, used, limit, planKey, error };
+  if (slotOffer) { body.slotOffer = slotOffer; body.error = `${label}은(는) 지금 ${limit}개까지예요. 계정 1개를 더 쓰려면 코인으로 살 수 있어요(전용 IP 포함).`; }
+  return { ok: false, reason: "plan_limit", used, limit, planKey, res: json(body, 402) };
 }
 
 /**
@@ -213,4 +226,41 @@ export async function requireChannel(tid: number, channel: string, label?: strin
   return { ok: false, planKey, allowed,
     res: json({ ok: false, reason: "plan_limit", step: "plan_channel", channel, allowed, planKey,
       error: `이 요금제에서는 ${name}을(를) 새로 연결할 수 없어요.${upsell ? ` ${upsell} 로 바꾸면 쓸 수 있어요.` : ""} 이미 연결한 계정은 그대로 쓸 수 있어요.` }, 402) };
+}
+
+/* ═══════════ P1R7 §3.6 — «계정 1개 + 전용 IP» 를 코인으로 산다(사장님 지시 2026-09-15) ═══════════
+ *   사장님 말씀: «계정 1개도 코인으로 구매할 수 있게 · 프록시는 우리가 사더라도 쓰는 고객에겐 마진을 붙여서.»
+ *   🔴 **값이 사는 곳은 여기 하나다** — 화면·DB·문서에 숫자를 다시 적지 않는다(적는 순간 두 벌이 되어 갈라진다).
+ *   🔴 원가 근거 = `docs/active/2026-09-15-proxy-cost.md` **§2(계정당 월 ≈₩5,500) · §4.1(B2 트래픽 실측 — 글 계정 월 0.3~0.9GB)
+ *      · §6.2(모바일 회선 자체 구축 시 계정당 ₩1,000~2,400)**. 지금 값은 **잠정**이다 —
+ *      **판매가 최종 확정은 사장님 합동 세션 12번**(`docs/active/2026-09-15-OWNER-CHECKLIST.md`).
+ *   🔴 **다음 원가 재측정일: 2026-10-15**(한국 IP 실구매 견적 3곳 · 로그인된 진짜 에디터 트래픽 — proxy-cost §4 남은 실측 2개).
+ *      재측정에서 원가가 내려가면 값을 내린다(지금 마진 2.2배는 «재고를 못 구할 위험»을 안은 값이다).
+ *   🔴 **30일권 + 자동 갱신** — IP 가 월 과금이라 «한 번 사면 끝»으로 팔면 매달 손해다(운영은 lib/account-slots.ts).
+ */
+export type AccountSlotKind = "account_slot" | "account_slot_managed";
+export interface AccountSlotProduct {
+  kind: AccountSlotKind;
+  /** 30일당 코인(1코인 = ₩500 · lib/coin-table.ts COIN_KRW). */
+  coins: number;
+  label: string;
+  /** 시트 한 줄 설명 — 화면이 문구를 지어내지 않게 서버가 준다. */
+  desc: string;
+  /** 우리 서버가 대신 돌리나(관리형). false = 고객 PC 러너. */
+  managed: boolean;
+}
+export const ACCOUNT_SLOT_PRODUCTS: Readonly<Record<AccountSlotKind, AccountSlotProduct>> = {
+  account_slot: { kind: "account_slot", coins: 24, label: "계정 1개 더 + 전용 IP",
+    desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 러너로 돌아가요.", managed: false },
+  account_slot_managed: { kind: "account_slot_managed", coins: 50, label: "관리형 계정 1개",
+    desc: "계정 하나를 더 쓰고, 전용 IP 와 **우리 서버 실행**까지 포함이에요. PC 를 켜 두지 않아도 돼요.", managed: true },
+};
+export const ACCOUNT_SLOT_DAYS = 30;
+export function accountSlotProduct(kind: unknown): AccountSlotProduct | null {
+  const k = String(kind ?? "") as AccountSlotKind;
+  return ACCOUNT_SLOT_PRODUCTS[k] ?? null;
+}
+/** 화면이 그대로 그리는 상품 목록(원화는 서버가 환산해 준다 — 화면이 ×500 을 하지 않는다). */
+export function accountSlotOffers(): (AccountSlotProduct & { krw: number; days: number })[] {
+  return Object.values(ACCOUNT_SLOT_PRODUCTS).map((p) => ({ ...p, krw: p.coins * COIN_KRW, days: ACCOUNT_SLOT_DAYS }));
 }

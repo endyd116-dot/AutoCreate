@@ -62,7 +62,8 @@ const gateTs = read("lib/ai-tell-gate.ts");
 const uiJs = read("public/js/ui.js");
 const mockJs = read("public/js/mock.js");
 const homeTs = read("netlify/functions/home-summary.ts");
-const ddl = read("drizzle/0001-init.sql");
+/* DDL 은 **전부** 읽는다 — 새 표(account_slots 등)의 열거값도 자동으로 어휘가 된다(0001 만 읽으면 새 표가 WARN 으로 뜬다) */
+const ddl = walk("drizzle", [".sql"]).sort().map(read).join(String.fromCharCode(10));
 const serverFiles = [...walk("lib", [".ts"]), ...walk("netlify/functions", [".ts", ".mts"])];
 const serverText = serverFiles.map(read).join("\n");
 
@@ -108,7 +109,13 @@ rec("🔴 글 상태 — 서버가 쓰는 값에 화면 낱말이 다 있다", p
 const mockSlotStatus = setOf(/status:\s*"([a-z_]+)"/g, mockJs);
 /* 서버 어휘의 «우주» = DDL 주석에 적힌 모든 열거값(-- a|b|c) + 코드가 쓰는 상태 — 표마다 손으로 적지 않는다 */
 const ddlVocab = new Set();
-for (const m of ddl.matchAll(/--\s*([a-z_]+(?:\|[a-z_]+)+)/g)) for (const v of m[1].split("|")) ddlVocab.add(v.trim());
+/* «a(설명) | b | c(설명)» 처럼 괄호 설명이 끼어도 값만 뜬다 — 주석을 사람이 읽기 좋게 써도 어휘가 빠지지 않게 */
+for (const line of ddl.split("\n")) {
+  const cm = line.includes("--") ? line.slice(line.indexOf("--") + 2) : "";
+  if (!cm.includes("|")) continue;
+  const parts = cm.split("|").map((x) => (x.match(/[a-z_]{3,}/) || [""])[0]).filter(Boolean);
+  if (parts.length >= 2) for (const v of parts) ddlVocab.add(v);
+}
 const mockSlotUnknown = minus(mockSlotStatus, new Set([...slotSrv, ...pieceSrv, ...uiPost.keys(), ...ddlVocab, "not_configured", "none", "progress", "done", "queued", "running", "connected", "error", "requested"]));
 rec("모의가 쓰는 상태 값이 서버 어휘 안에 있다", mockSlotUnknown.length === 0 ? true : "WARN", mockSlotUnknown.join(" ") || "전부 서버 어휘", mockSlotUnknown);
 

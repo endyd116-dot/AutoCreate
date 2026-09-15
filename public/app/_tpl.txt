@@ -379,7 +379,7 @@ await load();
   <span id="mon" style="font-weight:700;font-size:15px"></span>
   <button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button>
 </div>
-<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div></div>
+<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div><p class="muted" id="estNote" hidden style="margin:6px 4px 0;font-size:12.5px"></p></div>
 <div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 --- script ---
 await UI.boot("revenue");
@@ -389,6 +389,13 @@ const todayYmd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul"
 const [TY, TM, TD] = todayYmd.split("-").map(Number);
 const ymdOffKST = (n) => new Date(Date.UTC(TY, TM - 1, TD + n)).toISOString().slice(0, 10);   // 달력 날짜 산수는 UTC 앵커로(기기 시간대 안 탄다)
 let view = { y: TY, m: TM };
+
+/* [B2 8a71d69] «예상 수입» 도장 — 서버가 행에 estimated(또는 raw.estimated)를 찍고 노트를 준다.
+   🔴 화면이 «예상인지»를 스스로 판정하지 않는다 — 서버 도장만 본다(스스로 판정하면 매체가 늘 때마다 또 갈린다). */
+const estOf = (s) => { if (!s) return null; const on = s.estimated === true || (s.raw && s.raw.estimated === true); if (!on) return null;
+  /* 🔴 서버 노트는 **글자 그대로** 쓰되 앞머리 그림문자만 뗀다 — 헌장 «이모지 0»(운영 로그용 ⚠️ 가 고객 화면까지 오면 감사가 빨강) */
+  const raw = String(s.estimatedNote || (s.raw && s.raw.estimatedNote) || s.note || (s.raw && s.raw.note) || "");
+  return { note: raw.replace(new RegExp("^(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]|\s)+", "u"), "").trim() }; };
 let SUM = null, DAYS = [], SRC = [], accounts = [], PREV_SAME = null; // PREV_SAME = 지난달 «같은 날까지» 합(시안 문장 · 화면이 revenue-daily 로 계산)
 const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
 const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
@@ -446,6 +453,10 @@ function render() {
   }
   UI.$("#hl").hidden = false;
   UI.$("#say").textContent = `${view.m}월에`;
+  /* [B2] 이 달에 «예상 수입» 매체가 섞였으면 그 사실을 한 줄로(합계는 그대로 — 큰 숫자를 흐리게 하지 않는다 · 헌장) */
+  const estSrcs = (SUM.bySource || []).filter(estOf);
+  UI.$("#estNote").hidden = !estSrcs.length;
+  if (estSrcs.length) UI.$("#estNote").textContent = `${estSrcs.map((s) => UI.srcLabel(s.source)).join(" · ")} — 확정이 아니라 예상치예요 · 확정되면 숫자가 바뀔 수 있어요`;
   UI.$("#num").innerHTML = `<span id="big">0원</span> 벌었어요`; // [v4] 잉크 — 초록은 홈 한 곳뿐(화면당 색 3)
   UI.countUp(UI.$("#big"), SUM.monthKrw, won);
   // [v4] 시안 문장: «지난달 같은 날보다 67,300원 더 벌었어요» — 증가만 초록, 감소는 잉크
@@ -493,7 +504,10 @@ function sourceGroup() {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
-    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span></div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+    /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
+       🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
+    const est = estOf(s);
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
   }).join("") + "</div>";
 }
 
@@ -681,10 +695,19 @@ function connectSheet(c) {
       UI.toast(r.error || "연결을 시작하지 못했어요");
     }; } });
 }
+/* [R7 §3.6] 계정 한도는 «요금제를 올리세요»만이 답이 아니다 — 서버가 402 에 상품을 실어 주면 그 자리에서 코인으로 산다 */
+async function slotOfferSheet(r, close) {
+  if (close) close();
+  UI.sheet(`<p class="muted" style="margin:0 0 12px">${UI.esc(r.error || "계정을 더 쓰려면 슬롯이 필요해요.")}</p>
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="buySlot">계정 1개 더 쓰기</button><a class="btn ghost" href="/app/plan.html">요금제 보기</a></div>`,
+    { title: "계정을 더 쓰려면", onOpen: (sh, cl) => { sh.querySelector("#buySlot").onclick = () => { cl();
+      UI.slotBuySheet({ offers: r.slotOffer.offers, balance: r.balance, onDone: () => UI.go("/app/accounts.html") }); }; } });
+}
 async function submitAdd(body, f, close) {
   const r = await UI.api("/api/accounts-add", { body });
   const pw = f.querySelector('[name="password"],[name="appPassword"]'); if (pw) pw.value = ""; // 🔴 자격은 요청 후 즉시 비운다
   if (!r.ok) {
+    if (r.slotOffer) return slotOfferSheet(r, close);   // [R7 §3.6] 한도 402 에 상품이 실려 오면 업셀 시트 대신 «사기»
     if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
     if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
@@ -865,7 +888,7 @@ loadKinds();
 async function loadNoti() {
   const tg = UI.$("#noti"), why = UI.$("#notiWhy"), desc = UI.$("#notiD");
   const st = UI.pushState();
-  const say = (on, line) => { tg.setAttribute("aria-checked", on ? "true" : "false"); why.hidden = !line; why.textContent = line || ""; desc.textContent = on ? "새 소식이 오면 이 기기로 알려드려요" : "확인할 게 생기면 바로 알려드려요"; };
+  const say = (on, line) => { tg.setAttribute("aria-checked", on ? "true" : "false"); why.hidden = !line; why.textContent = line || ""; desc.textContent = on ? "새 소식이 오면 이 기기로 알려드려요 · 최대 5분 걸려요" : "확인할 게 생기면 알려드려요 · 최대 5분 걸려요"; };   // [B] 서버가 5분마다 모아 쏜다 — 즉시처럼 말하지 않는다
   if (!st.can) { tg.disabled = true; tg.classList.add("locked");
     return say(false, st.ios && !st.iosStandalone ? "아이폰은 «공유 → 홈 화면에 추가» 로 앱처럼 설치하면 알림을 받을 수 있어요" : "이 브라우저는 기기 알림을 지원하지 않아요 · 알림함에서는 그대로 볼 수 있어요"); }
   if (st.ios && !st.iosStandalone) { tg.disabled = true; tg.classList.add("locked"); return say(false, "아이폰은 «공유 → 홈 화면에 추가» 로 앱처럼 설치하면 알림을 받을 수 있어요"); }
@@ -1082,6 +1105,7 @@ await load();
 === coins.html | account | 코인 ===
 <div class="hl"><div class="say">지금</div><div class="num"><em id="bal">0</em>코인 있어요</div><div class="tip" id="split">…</div></div>
 <div class="group" id="packs"><div class="gt">충전하기 <span class="muted" style="font-weight:500">1코인 = 500원 · 부가세 별도</span></div></div>
+<div class="group" id="slotg" hidden><div class="gt">계정 더 쓰기 <span class="muted" style="font-weight:500">계정 1개 + 전용 IP · 30일마다</span></div><div id="slots"></div></div>
 <div class="group" id="tg"><button type="button" class="row tap" id="transfer"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg></span><div class="l"><span class="t">다른 서비스 코인 가져오기</span><span class="d">함께 쓰는 서비스에 남은 코인을 여기로 옮겨요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="group" id="hist"><div class="gt">코인 내역 <span class="muted" style="font-weight:500">KST</span></div><div class="seg" id="mseg" style="margin:8px 16px 4px"><button type="button" data-m="this" class="on">이번 달</button><button type="button" data-m="prev">지난 달</button><button type="button" data-m="all">전체</button></div><div id="rows"></div></div>
 <div class="group"><div class="gt">코인으로 만드는 것</div><div id="table"></div></div>
@@ -1111,6 +1135,7 @@ async function load() {
     UI.$$("[data-pack]").forEach((el) => el.onclick = () => buy(PACKS.find((x) => x.id === el.dataset.pack)));
   }
   if (!me.impersonation) { const tr = UI.$("#transfer"); if (tr) tr.onclick = transferSheet; }
+  loadSlots();
   const KIND = { purchase: "충전", consume: "사용", grant: "지급", revoke: "환불 회수", expire: "만료" };
   UI.$("#rows").innerHTML = ROWS.length ? ROWS.map((r) => { const plus = r.amount > 0; const what = r.kind === "consume" ? (T && T.labels[r.item]) || "사용" : KIND[r.kind] || r.kind;
     return `<div class="row"><div class="l"><span class="t">${UI.esc(what)}${r.bucket === "included" ? ' <span class="muted" style="font-weight:500;font-size:12px">포함분</span>' : ""}</span><span class="d">${r.kind === "grant" || r.kind === "revoke" ? UI.esc(r.reason || "") + " · " : ""}${r.at ? `${UI.dateKST(r.at)} ${UI.timeKST(r.at)}` : ""}${r.expiresAt && plus ? ` · ${UI.dateKST(r.expiresAt, { year: "numeric" })}까지` : ""}</span></div><span class="r" style="font-variant-numeric:tabular-nums">${plus ? "+" : "−"}${UI.num(Math.abs(r.amount))}</span>${r.kind === "purchase" && r.ref && !me.impersonation ? `<button type="button" class="btn ghost sm" data-refund="${UI.esc(r.ref)}" style="padding:0 8px">환불</button>` : ""}</div>`; }).join("")
@@ -1169,6 +1194,36 @@ function transferSheet() {
 }
 function soonTransfer() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">아직 준비 중이에요</p><p class="muted" style="margin:0 0 16px">두 서비스를 잇는 일이 끝나면 바로 열려요. 열리면 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
 UI.$$("#mseg button").forEach((b) => b.onclick = () => { mode = b.dataset.m; UI.$$("#mseg button").forEach((x) => x.classList.toggle("on", x === b)); load(); });
+/* [R7 §3.6] 계정 슬롯 — 여기서 사고, 여기서 상태를 본다(값·문구는 서버 offers·note) */
+async function loadSlots() {
+  const r = await UI.api("/api/account-slots", { noGate: true }); const g = UI.$("#slotg"); if (!r.ok) { g.hidden = true; return; }
+  g.hidden = false;
+  const mine = (r.slots || []).map((s) => { const st = UI.SLOT_STATE[s.status] || ["off", s.status, ""];
+    const when = s.status === "active" && s.daysLeft != null ? `${s.daysLeft}일 남음 · ${s.autoRenew ? "자동 갱신 켜짐" : "다음 갱신 꺼짐"}` : st[2];
+    return `<button type="button" class="row tap" data-slot="${s.id}"><span class="mk ${s.status === "active" ? "money" : "soft"}">${s.managed ? "관" : "IP"}</span><div class="l"><span class="t">${UI.esc(s.label)}</span><span class="d wrap">${UI.esc(when)}</span></div><span class="pill ${st[0]}">${st[1]}</span></button>`; }).join("");
+  UI.$("#slots").innerHTML = `<div class="row" style="min-height:44px"><div class="l"><span class="t" style="font-size:14px">계정 ${UI.num(r.usedAccounts)}개 쓰는 중</span><span class="d">요금제 포함 ${UI.num(r.includedAccounts)}개${r.extraSlots ? ` · 더 산 계정 ${UI.num(r.extraSlots)}개` : ""}</span></div></div>`
+    + mine + `<div style="padding:8px 16px 10px"><button class="btn secondary sm" type="button" id="slotBuy" style="width:100%">계정 1개 더 쓰기</button></div>`;
+  UI.$("#slotBuy").onclick = () => UI.slotBuySheet({ offers: r.offers, note: r.note, balance: r.balance, onDone: load });
+  UI.$$("[data-slot]").forEach((b) => b.onclick = () => slotSheet((r.slots || []).find((s) => s.id === Number(b.dataset.slot)), r.note));
+}
+function slotSheet(s, note) {
+  if (!s) return;
+  const st = UI.SLOT_STATE[s.status] || ["off", s.status, ""];
+  UI.sheet(`<div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v"><span class="pill ${st[0]}">${st[1]}</span></span></div>
+    ${st[2] ? `<p class="muted" style="margin:6px 0 10px;font-size:13.5px">${UI.esc(st[2])}</p>` : ""}
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">요금</span><span class="v">${UI.num(s.coins)}코인 / 30일<small class="muted" style="font-weight:500"> · ${UI.won(s.krw)}</small></span></div>
+    ${s.expiresAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">다음 갱신</span><span class="v">${UI.dateKST(s.expiresAt)}${s.daysLeft != null ? ` · ${s.daysLeft}일 남음` : ""}</span></div>` : ""}
+    ${s.periodsCharged ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">지금까지</span><span class="v">${UI.num(s.periodsCharged)}번 빠졌어요</span></div>` : ""}
+    <div class="fr" style="padding-top:8px"><div class="fl">자동 갱신<small>끄면 남은 기간까지만 쓰고 멈춰요</small></div><button class="toggle" type="button" id="ar" aria-checked="${s.autoRenew ? "true" : "false"}" aria-label="자동 갱신"></button></div>
+    <p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(note || "남은 기간 환불은 없어요. 다음 갱신만 끌 수 있어요.")}</p>`,
+    { title: s.label, onOpen: (sh) => {
+      UI.toggle(sh.querySelector("#ar"), async (on) => {
+        const r = await UI.api("/api/account-slot-renew", { body: { id: s.id, autoRenew: on } });
+        if (!r.ok) { UI.toast(r.error || "바꾸지 못했어요"); return false; }
+        UI.toast(on ? "자동 갱신을 켰어요" : "다음 갱신부터 안 빠져요 · 남은 기간은 그대로 써요"); loadSlots();
+      });
+    } });
+}
 await load();
 === notifications.html | home | 알림 ===
 <div class="step-h"><h1>알림</h1></div>

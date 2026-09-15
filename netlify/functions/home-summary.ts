@@ -93,6 +93,11 @@ export default async (req: Request): Promise<Response> => {
       }
       const coinC = n(stuck?.coin_c);
       if (coinC) todo.push({ kind: "coin_short", title: `코인이 모자라 미뤄 둔 자리가 ${coinC}개 있어요`, desc: `코인을 채우면 그 자리에서 이어서 만들어요${stuck?.coin_first ? ` (가장 이른 자리 ${String(stuck.coin_first)})` : ""}`, count: coinC, link: "/app/coins.html", tone: "warn" });
+      /* [P1R7 §3.6 · B] 코인이 모자라 «쉬는» 계정 슬롯 — 그 계정만 멈춘 것이라 코인 부족(자리)과 따로 말한다.
+         B-1 §1.4 표의 어휘를 따른다(kind = 한 낱말 · link 는 눌러야 할 곳). */
+      const [slotP] = await q(sql`SELECT COUNT(*)::int AS c, MIN(coins_per_period)::int AS coins FROM account_slots WHERE tenant_id = ${tid} AND status = 'paused'`);
+      if (n(slotP?.c)) todo.push({ kind: "account_slot", title: `계정 ${n(slotP.c)}개가 코인이 모자라 쉬고 있어요`, count: n(slotP.c),
+        desc: `코인 ${n(slotP.coins) * n(slotP.c)}개를 채우면 그 계정만 바로 다시 돌아가요(다른 계정은 그대로 돌고 있어요)`, link: "/app/coins.html", tone: "warn" });
     } catch (e) { console.warn("[home] 멈춘 글·자리 조회 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
     const [review] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid} AND status = 'in_review'`);
     /* 🔴 `forcedByPlan` 이면 «내일 나가기 전에 확인해 주세요»는 **거짓말**이 된다 — 승인하지 않으면 그 글은 아예 안 나간다(B3 크론이 마감 뒤 awaiting_manual 로 내린다). */
