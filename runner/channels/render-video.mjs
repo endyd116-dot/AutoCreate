@@ -159,18 +159,46 @@ export function buildOverlayHtml(payload) {
   /* 🔴 폴백을 **가장 보수적인 값**으로 바꿨다(R8-A §3 · 2026-09-15). 종전 폴백 220/300 은
      쇼츠·릴스·틱톡 **셋 다 미달**이라, 서버가 채널값을 안 보내면 자막이 UI 에 먹혔다. 모르면 안전한 쪽(AC-9). */
   const safe = overlay?.safeZone ?? { top: 220, bottom: 450, side: 60 };
-  const side = Number(safe.side ?? 60);
   const preset = captions?.preset ?? "keyword_center";
-  const size = preset === "talking_big" ? 92 : preset === "clip_top" ? 64 : 78;
-  const pos = preset === "clip_top" ? `top:${safe.top}px;` : `bottom:${safe.bottom}px;`;
+
+  /* ═══ [R10-6] 🔴 **자막 모양을 상수에서 값으로 연다** ═══
+   *
+   *   2026-09-16 실측(`docs/active/2026-09-16-B2-video-capability.md` §1): 자막은 ffmpeg `drawtext` 가 아니라
+   *   **브라우저가 HTML/CSS 로 그린 PNG** 다 ⇒ **CSS 로 되는 것은 원리상 다 된다**(굵기·크기·색·외곽선·자간).
+   *   못 냈던 이유는 «렌더가 못 해서»가 아니라 **그 CSS 가 상수로 박혀 있어서**였다.
+   *   ⇒ 레퍼런스가 「굵기 900 · 강조는 주황 · 한 줄 14자」를 배워 와도 **넣을 칸이 없던** 것을 여기서 연다.
+   *
+   *   🔴 **안 주면 지금까지와 똑같다.** 아래 기본값은 전부 **종전에 박혀 있던 그 값**이다 —
+   *      값을 여는 변경이 화면을 바꾸면 그건 «칸 열기»가 아니라 **조용한 개편**이다(구운 영상이 달라진다).
+   *   🔴 **모르는 축은 `null` 로 둔다**(AC-92) — 예: `maxCharsPerLine` 은 기본이 없다. «한 줄 몇 자»를
+   *      우리가 지어내면 심사(`judge.ts`)가 재는 2줄 규칙과 **다른 숫자 두 벌**이 생긴다.
+   */
+  const t = captions?.type ?? {};
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const side = num(t.side, Number(safe.side ?? 60));
+  const size = num(t.size, preset === "talking_big" ? 92 : preset === "clip_top" ? 64 : 78);
+  const weight = num(t.weight, 800);
+  const lineHeight = num(t.lineHeight, 1.25);
+  const color = String(t.color ?? "#fff");
+  const accent = String(t.accentColor ?? "#ffe14d");
+  const shadow = String(t.shadow ?? "0 4px 18px rgba(0,0,0,.75),0 0 6px rgba(0,0,0,.9)");
+  /* 외곽선 — 🔴 종전엔 **아예 없었다**(그림자만). 안 주면 여전히 안 그린다(무회귀). */
+  const stroke = num(t.strokeWidth, 0) > 0
+    ? `-webkit-text-stroke:${num(t.strokeWidth, 0)}px ${String(t.strokeColor ?? "#000")};paint-order:stroke fill;`
+    : "";
+  /* 자리 — 🔴 `position` 을 주면 그게 이기고, 안 주면 **종전대로 프리셋이 정한다**. */
+  const place = String(t.position ?? (preset === "clip_top" ? "top" : "bottom"));
+  const pos = place === "top" ? `top:${safe.top}px;`
+    : place === "middle" ? `top:50%;transform:translateY(-50%);`
+      : `bottom:${safe.bottom}px;`;
   return `<!doctype html><meta charset="utf-8">
 <style>
   @font-face{font-family:Pretendard;src:local("Pretendard"),local("Pretendard Variable");}
   html,body{margin:0;padding:0;background:transparent;width:${out.w}px;height:${out.h}px;overflow:hidden;}
   body{font-family:Pretendard,"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
-  #cap{position:absolute;left:${side}px;right:${side}px;${pos}text-align:center;font-weight:800;font-size:${size}px;line-height:1.25;
-       color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.75),0 0 6px rgba(0,0,0,.9);white-space:pre-wrap;}
-  #cap .kw{color:#ffe14d;}
+  #cap{position:absolute;left:${side}px;right:${side}px;${pos}text-align:center;font-weight:${weight};font-size:${size}px;line-height:${lineHeight};
+       color:${color};text-shadow:${shadow};${stroke}white-space:pre-wrap;}
+  #cap .kw{color:${accent};}
   /* 배지는 안전영역 «안»에 둔다. 종전 safe.top - 140 은 안전영역 위쪽 바깥이라,
      쇼츠(상단 UI 180px) 기준 top=80px 로 배지가 통째로 UI 에 가려졌다 — 그 배지가 제휴 고지다(16B).
      품질 문제가 아니라 정책 문제라 자리를 안으로 들였다. */
@@ -197,12 +225,42 @@ export function buildOverlayHtml(payload) {
 }
 
 /** 자막 한 문구를 HTML 로 — keyword 가 있으면 그 부분만 강조색. */
-function phraseHtml(ph) {
-  const text = esc(ph?.text ?? "");
+function phraseHtml(ph, maxCharsPerLine = null) {
+  const text = esc(wrapPhrase(ph?.text ?? "", maxCharsPerLine));
   const kw = String(ph?.keyword ?? "").trim();
   if (!kw) return text;
   const safeKw = esc(kw);
   return text.split(safeKw).join(`<span class="kw">${safeKw}</span>`);
+}
+
+/**
+ * [R10-6] 🔴 **한 줄 글자 수를 «규칙»으로 만든다.**
+ *
+ *   심사(`lib/video/judge.ts`)는 «자막 2줄 이내»를 **이미 재고 있는데** 만드는 쪽엔 규칙이 없었다.
+ *   그 파일 주석이 자백해 뒀다: 「지금 값(구절 ≤12음절)으로는 **우연히** 2줄 안에 들어가지만,
+ *   **우연히 맞는 것은 규칙이 아니다** — 다음 사람이 글자 크기만 키우면 깨진다」(`judge.ts:68`).
+ *   ⇒ 여기서 **낱말 경계로** 줄을 끊는다. CSS 는 `white-space:pre-wrap` 이라 우리가 넣은 개행을 그대로 그린다.
+ *
+ *   🔴 **안 주면 아무 일도 안 한다**(`null`). «한 줄 몇 자»의 기본값을 우리가 지어내면
+ *      심사가 재는 규칙과 **다른 숫자 두 벌**이 생긴다(AC-92 · AC-78). 값은 서버·레퍼런스가 준다.
+ *   ⚠️ 낱말 하나가 상한보다 길면 **자르지 않는다** — 자르면 그 낱말을 못 읽는다(강조 낱말이면 더 나쁘다).
+ */
+export function wrapPhrase(raw, maxCharsPerLine) {
+  const s = String(raw ?? "");
+  const cap = Number(maxCharsPerLine);
+  if (!Number.isFinite(cap) || cap < 2 || !s.trim()) return s;
+  const out = [];
+  for (const para of s.split("\n")) {
+    let line = "";
+    for (const w of para.split(/(\s+)/)) {
+      if (/^\s+$/.test(w)) { if (line) line += w; continue; }
+      const next = line ? line.trimEnd() + " " + w : w;
+      if (next.length > cap && line.trim()) { out.push(line.trimEnd()); line = w; }
+      else line = next;
+    }
+    out.push(line.trimEnd());
+  }
+  return out.join("\n");
 }
 
 /** 가장 선명한 프레임 1장(AM `pickSharpestFrame` 이식 관례) — 라플라시안 분산 대신 **파일 크기**로 고른다.
@@ -257,8 +315,10 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     const layers = [];   // { file, startMs, endMs }
     const phrases = p.captions?.phrases ?? [];
     const hasBadge = !!p.overlay?.badge?.text;
+    /* [R10-6] 한 줄 글자 수 상한 — 🔴 **서버가 줄 때만** 끊는다(안 주면 지금까지와 똑같다 · AC-92). */
+    const maxLineChars = p.captions?.type?.maxCharsPerLine ?? null;
     for (const ph of phrases) {
-      await page.evaluate(([html, opts]) => window.__show(html, opts), [phraseHtml(ph), { badge: hasBadge, endcard: false }]);
+      await page.evaluate(([html, opts]) => window.__show(html, opts), [phraseHtml(ph, maxLineChars), { badge: hasBadge, endcard: false }]);
       const f = join(dir, `ov-${String(ph.idx).padStart(3, "0")}.png`);
       writeFileSync(f, await page.screenshot({ type: "png", omitBackground: true }));
       layers.push({ file: f, startMs: Math.max(0, Number(ph.startMs) || 0), endMs: Math.max(0, Number(ph.endMs) || 0) });

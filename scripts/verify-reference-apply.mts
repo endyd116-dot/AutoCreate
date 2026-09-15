@@ -37,6 +37,12 @@ const STUB: TemplateStyle = {
   camera: "two beats per cut: hold then push-in",
   rules: ["빨강은 계측선에만", "인물은 실루엣·뒷모습"],
   hookPrinciple: "아는 줄 알았던 것에 빈칸을 내서 끝까지 보게 한다",
+  /* [R10-6] 숫자로 배워 오는 축 — 🔴 표본이 **제품과 같은 모양**이어야 한다(표본이 틀리면 초록도 틀린다). */
+  typography: { weight: 900, strokeWidth: 3, shadow: "hard" },
+  captionPlace: { position: "middle", maxCharsPerLine: 14, accentColor: "#ff6a00" },
+  speed: { secPerCut: 5, totalSec: 45 },
+  design: { colorCount: 3, sideMargin: 72 },
+  audioTempo: 1.25,
 };
 
 console.log("① 자유 문장 → 우리 손잡이(fast|normal|hold)");
@@ -62,7 +68,20 @@ console.log("\n② 닿는 것 / 못 내는 것 가르기");
   eq("훅 원리가 닿는다", r.applied.hookPrinciple, STUB.hookPrinciple);
   eq("연출 규칙이 닿는다", r.applied.rules, STUB.rules);
   eq("호흡은 컷 비트 수로 닿는다", r.applied.pace, "hold");
-  ok("🔴 자막 문법은 못 낸다고 적는다", whyOf(r.unused, "caption").includes("상수"), JSON.stringify(r.unused));
+  /* 🔴 **2026-09-16 저녁(R10-6)에 사실이 바뀌어 이 축을 고쳤다.**
+     종전 축은 «자막 문법은 «상수»라 못 낸다고 적는다»였다 — 그때는 맞았다(굵기·색·그림자가 렌더에 박혀 있었다).
+     그날 `buildOverlayHtml` 의 상수를 payload 값으로 열었고, 그래서 **이 축이 빨개졌다.**
+     ⚠️ 여기서 «검사를 맞추려고» 코드를 되돌리면 그게 AC-78(검사가 값을 베끼는 것)의 거울상이다.
+        사실이 움직였으면 **자를 고치는 게 맞다.** 다만 고칠 때 **무엇이 왜 바뀌었는지**를 이렇게 적어 둔다.
+     새 축: 숫자로 읽은 자막 축은 `applied.captionType` 으로 **닿고**, 글로만 배워 온 것은 여전히 «못 낸다»로 남는다. */
+  ok("🔴 숫자로 읽은 자막 축은 **닿는다**(굵기·자리·줄 수 — 2026-09-16 에 상수를 값으로 열었다)",
+    !!r.applied.captionType && Object.keys(r.applied.captionType).length > 0, JSON.stringify(r.applied.captionType));
+  {
+    /* 대조군 짝 — **글로만** 배워 온 자막 문법(숫자 0)은 여전히 «못 낸다»로 남아야 한다(AC-68). */
+    const wordy = applyReferenceStyle({ ...STUB, typography: undefined, captionPlace: undefined, design: undefined, caption: "big keyword centered, one line" });
+    ok("🔴 글로만 배워 온 자막 문법은 **여전히 «못 낸다»**(숫자가 없으면 렌더에 넣을 수 없다)",
+      whyOf(wordy.unused, "caption").includes("숫자로 못 읽었다"), JSON.stringify(wordy.unused));
+  }
   ok("🔴 카메라는 «비트 수만 받았다»고 적는다", whyOf(r.unused, "camera").includes("비트 수만"), JSON.stringify(r.unused));
   ok("못 낸 것에는 **이유가 같이** 있다", r.unused.every((u) => u.field && u.why.length > 10));
 }
@@ -169,6 +188,43 @@ console.log("\n⑦ 🔴 사슬 — **제품이 정말 부르나**(순수 함수 
   ok("🔴 gen 이 컷 계획에 넘긴다", /buildCutPlans\(\{[^)]*refStyle/.test(gen), "buildCutPlans 호출에 refStyle 이 없다 — 배선이 여기서 끊기면 프롬프트는 안 바뀐다");
   eq("🔴 대본 두 번(첫 판·다시 쓰기) 다 훅 원리를 넘긴다", (gen.match(/hookPrinciple:\s*refStyle\?\.hookPrinciple/g) ?? []).length, 2);
   ok("대본 프롬프트가 훅 원리를 쓴다", /inp\.hookPrinciple/.test(scr));
+
+  /* [R10-6] 🔴 **자막 모양 사슬** — 배워서 → 걸러서 → payload 로 → 러너가 CSS 로 그린다. 네 칸 중 하나라도 비면 장식이다. */
+  ok("🔴 gen 이 자막 모양을 render payload 에 싣는다",
+    /captions:\s*\{[^}]*refStyle\?\.captionType/.test(gen),
+    "captions 에 type 이 안 실린다 — reference-apply 가 만든 값을 아무도 안 부른다(AC-69)");
+  const rv = code("runner/channels/render-video.mjs");
+  ok("🔴 러너가 그 값을 실제로 CSS 에 쓴다",
+    /const t = captions\?\.type \?\? \{\}/.test(rv) && /font-weight:\$\{weight\}/.test(rv),
+    "러너가 captions.type 을 안 읽는다 — payload 에 실어도 그림이 안 바뀐다");
+  ok("🔴 한 줄 글자 수를 **실제로 끊는다**", /phraseHtml\(ph, maxLineChars\)/.test(rv) && /export function wrapPhrase/.test(rv));
+  /* 🔴 무회귀 짝 — **안 주면 종전 값 그대로**여야 한다(값 열기가 그림을 바꾸면 그건 조용한 개편이다). */
+  {
+    const html = (await import("../runner/channels/render-video.mjs")).buildOverlayHtml({
+      out: { w: 1080, h: 1920 }, overlay: { safeZone: { top: 220, bottom: 450, side: 60 } }, captions: { preset: "keyword_center" },
+    } as never) as string;
+    ok("🔴 자막 값을 **안 주면 종전 상수 그대로** 그린다(무회귀)",
+      html.includes("font-weight:800") && html.includes("font-size:78px") && html.includes("#ffe14d") && !html.includes("text-stroke"),
+      html.slice(html.indexOf("#cap{"), html.indexOf("#cap{") + 200));
+  }
+  /* 그리고 값을 주면 **그 값으로** 바뀐다(둘 다 재야 «열렸다»가 증명된다 · AC-68). */
+  {
+    const html = (await import("../runner/channels/render-video.mjs")).buildOverlayHtml({
+      out: { w: 1080, h: 1920 }, overlay: { safeZone: { top: 220, bottom: 450, side: 60 } },
+      captions: { preset: "keyword_center", type: { weight: 900, accentColor: "#ff6a00", strokeWidth: 3, position: "middle" } },
+    } as never) as string;
+    ok("그리고 값을 주면 **그 값으로** 그린다",
+      html.includes("font-weight:900") && html.includes("#ff6a00") && html.includes("-webkit-text-stroke:3px") && html.includes("translateY(-50%)"),
+      html.slice(html.indexOf("#cap{"), html.indexOf("#cap{") + 240));
+  }
+
+  /* 🔴 **못 낸 축은 프롬프트에서 묻지도 않는다** — 물으면 토큰만 쓰고 «못 냈어요» 칸만 늘어난다. */
+  const refSrc = readFileSync("lib/video/reference.ts", "utf8");
+  const prompt = refSrc.slice(refSrc.indexOf("const ANALYZE_PROMPT"), refSrc.indexOf("function stubRaw"));
+  ok("🔴 자막 모션·컷 전환은 **묻지 않는다**(우리 렌더가 못 내는 축이라 배워도 장식이다)",
+    !/captionMotion|transition|디졸브|슬라이드|와이프|등장 방식/.test(prompt.replace(/묻지 않는 것[\s\S]*$/, "")),
+    "프롬프트가 아직 모션·전환을 묻는다");
+  ok("🔴 그리고 «모르면 키를 빼라»고 말한다(지어낸 «보통» 이 틀린 값보다 나쁘다)", /지어내지 마라/.test(prompt));
 }
 
 console.log(`\n${fail ? "🔴" : "✅"} ${pass} 통과 · ${fail} 실패`);

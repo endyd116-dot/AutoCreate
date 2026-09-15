@@ -324,9 +324,15 @@ function opsFromBlocks(blocks, images, demoted) {
            🔴 그래도 **«안 냈다»고는 적는다** — 조용한 0건 금지(PITFALLS #7). 화면은 «이 채널엔 광고를 못 넣어요»를 말할 수 있어야 한다. */
         noteNoOp("adsense", "");
         break;
-      case "hashtags":
-        if (text) ops.push({ op: "tags", text });
+      case "hashtags": {
+        /* 🔴 **정본은 `items` 다**(`lib/blocks.ts:80` 이 `b.items` 로 렌더한다). 종전엔 `text` 만 봐서
+           items 로 온 해시태그 블록이 **op 0 · note 0 으로 조용히 사라졌다**(C 가 19종 전수로 잡았다 · 2026-09-16).
+           `payload.tags` 가 따로 오면 태그 자체는 살지만, 그건 «이 블록이 살았다»가 아니다 — 다른 값이 우연히 겹친 것이다. */
+        const tagLine = (b?.items ?? []).map((t) => `#${String(t).replace(/^#+/, "").replace(/\s+/g, "")}`).filter((t) => t.length > 1).join(" ");
+        const line2 = tagLine || text;
+        if (line2) ops.push({ op: "tags", text: line2 });
         break;
+      }
       default:
         if (text) ops.push({ op: "para", text });
     }
@@ -340,7 +346,10 @@ function opsFromHtml(html) {
   const ops = [];
   const src = String(html ?? "");
   // 최상위 요소를 순서대로 훑는다(중첩은 얕다 — §4B 계약이 단순한 모양을 보장한다).
-  const re = /<(div|p|h2|h3|blockquote|hr|ul|ol|figure|dl|nav|a|table)\b([^>]*)>([\s\S]*?)<\/\1>|<hr\s*\/?>/gi;
+  /* 🔴 `aside` 가 빠져 있었다 — `lib/blocks.ts` 는 장소 카드를 `<aside class="place">` 로 낸다.
+     그래서 **검수창에서 본문을 고친 글**(블록과 어긋나 이 폴백으로 오는 글)에서 장소가 **통째로 사라졌다**
+     (C 가 19종 전수로 잡았다 · 2026-09-16). 🔴 사라지는 것은 오류를 안 내서 더 나쁘다 — 아무도 모른다. */
+  const re = /<(div|p|h2|h3|blockquote|hr|ul|ol|figure|dl|nav|a|aside|table)\b([^>]*)>([\s\S]*?)<\/\1>|<hr\s*\/?>/gi;
   let m;
   while ((m = re.exec(src)) !== null) {
     if (!m[1]) { ops.push({ op: "divider" }); continue; }
@@ -375,6 +384,14 @@ function opsFromHtml(html) {
       }
       continue;
     }
+    if (tag === "aside" && cls.includes("place")) {
+      /* 블록 정본 경로와 **같은 모양으로** 내려앉힌다(링크 한 줄 + «못 냈어요») — 두 경로가 다른 글을 내면 그게 더 나쁘다. */
+      const url = /<a[^>]*href="([^"]+)"/i.exec(inner)?.[1] ?? "";
+      if (text) ops.push(url ? { op: "link", text, url } : { op: "para", text });
+      if (text) ops.push({ op: "note", text: "장소 카드는 아직 못 넣어서 링크로 넣었습니다" });
+      continue;
+    }
+    if (tag === "aside") { if (text) ops.push({ op: "para", text }); continue; }
     if (tag === "a" && cls.includes("affiliate")) {
       const url = /href="([^"]+)"/i.exec(attrs)?.[1] ?? "";
       const name = clean(unescapeHtml(/<b[^>]*class="name"[^>]*>([\s\S]*?)<\/b>/i.exec(inner)?.[1] ?? "")) || "상품 보러가기";

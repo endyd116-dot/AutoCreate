@@ -866,14 +866,45 @@ export type RunnerReportBody = (RunnerReportOk | RunnerReportFail) & RunnerRecip
 
 export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found" | "private"; block?: RunnerBlock }
 
-/** 러너 `why`(내부어) → 화면이 그리는 `field`(축 이름). 🔴 모르는 `why` 는 **버리지 않고 그대로** 넘긴다(AC-9). */
-const FORMAT_WHY_FIELD: Record<string, string> = {
-  budget: "highlight", too_long: "highlight", url_para: "link_first",
-  block_unsupported: "list_emphasis", channel_unsupported: "highlight",
-  caret_drift: "emphasis_place", range_invalid: "emphasis_place",
-  /* 🔴 «블록 자체를 에디터 요소로 못 세웠다» — 마크 이야기가 아니다(표·장소·광고). `kind` 가 **블록 종류**로 온다. */
-  no_editor_op: "editor_element",
-};
+/**
+ * 러너 보고를 **그 글에 이미 있는 기록과 합친다**(순수 · 2026-09-16 B2↔B 합의 · 합치는 쪽은 B).
+ *
+ *   🔴 **저장은 `meta.formatMarks` 한 곳뿐이다.** `meta.formatUnused` 를 따로 쓰지 않는다 —
+ *      화면이 쓰는 `formatUnused` 는 `pieces-get` 이 **매번 투영**한다(저장이 두 벌이면 갈린다).
+ *   🔴 **생성 때 서버가 쓴 `planned`·`kept` 를 러너 보고가 덮지 않는다** — 러너는 «실제로 눌렀나»(applied)와
+ *      «누르다 못 낸 것»(demoted)을 아는 쪽이고, «내려던 것»은 서버가 아는 쪽이다. 각자 아는 것만 쓴다.
+ *   🔴 `demoted` 는 **덮지 않고 붙인다** — 서버 강등(생성 때)과 러너 강등(발행 때)은 **다른 사건**이다.
+ *      러너 것에는 `by:"runner"` 를 박아 둔다(나중에 «어디서 깎였나»를 물을 수 있게).
+ *   🔴 **재보고 멱등** — 같은 잡이 두 번 보고해도 러너 강등이 두 벌로 쌓이지 않는다(앞 러너 것을 걷고 새로 붙인다).
+ *   ⚠️ 러너 보고를 **믿되 자른다**(길이·개수 상한) — 러너는 고객 PC 에서 돈다.
+ *
+ *   ⓘ B 가 `lib/format-marks.ts mergeRunnerFormatMarks` 로 같은 일을 하는 순수 함수를 만들고 있다.
+ *     머지 때 **그쪽이 정본**이고 이 함수 본문은 그 호출 한 줄로 바뀐다(모양은 같게 맞춰 뒀다).
+ */
+export function mergeRunnerFormatMarks(prev: unknown, fm: RunnerFormatMarks): Record<string, unknown> {
+  const p = (prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>) } : {}) as Record<string, unknown>;
+  const prevDemoted = Array.isArray(p.demoted) ? (p.demoted as Record<string, unknown>[]) : [];
+  const runnerDemoted = (fm.demoted ?? []).slice(0, 40).map((d) => ({
+    kind: String(d.kind ?? "").slice(0, 24),
+    why: String(d.why ?? "").slice(0, 32),
+    ...(d.sample ? { sample: String(d.sample).slice(0, 20) } : {}),
+    by: "runner" as const,
+  }));
+  const out: Record<string, unknown> = {
+    ...p,
+    /* 러너가 아는 것만 덮는다. 모르면(키 없음) **앞 값을 그대로 둔다** — `?? null` 로 지우면 서버 기록이 사라진다. */
+    ...(fm.applied ? { applied: fm.applied } : {}),
+    ...(fm.kept ? { kept: fm.kept } : {}),
+    ...(fm.planned && !p.planned ? { planned: fm.planned } : {}),
+    breaks: Number(fm.breaks ?? 0),
+    breakFails: Number(fm.breakFails ?? 0),
+    /* 🔴 **못 쟀으면 키를 안 만든다** — `bleed: null` 로 적으면 «쟀는데 깨끗했다»로 읽힌다(AC-92). */
+    ...(fm.bleed ? { bleed: fm.bleed } : {}),
+    demoted: [...prevDemoted.filter((d) => d?.by !== "runner"), ...runnerDemoted].slice(0, 80),
+    runnerReportedAt: new Date().toISOString(),
+  };
+  return out;
+}
 
 /**
  * [R9-2/5] 🔴 **«못 낸 서식»을 그 글에 적는다** — 영상의 `meta.refUnused` 와 **같은 모양**(설계 §2.1e).
@@ -885,22 +916,12 @@ const FORMAT_WHY_FIELD: Record<string, string> = {
  */
 export async function applyFormatMarksToPiece(tid: number, pieceId: number, fm: RunnerFormatMarks | undefined): Promise<void> {
   if (!pieceId || !fm) return;
-  const unused = (fm.demoted ?? []).map((d) => ({
-    field: FORMAT_WHY_FIELD[String(d.why)] ?? String(d.kind || "emphasis"),
-    kind: String(d.kind ?? ""), why: String(d.why ?? ""),
-    ...(d.sample ? { sample: String(d.sample).slice(0, 24) } : {}),
-  })).slice(0, 40);
-  /* 🔴 **번짐을 못 쟀으면 «못 쟀다»로 적는다** — 키를 빼 버리면 화면이 «깨끗했다»로 읽는다(AC-92 · AC-9). */
-  const stamp = {
-    planned: fm.planned ?? null, kept: fm.kept ?? null, applied: fm.applied ?? null,
-    breaks: Number(fm.breaks ?? 0), breakFails: Number(fm.breakFails ?? 0),
-    bleed: fm.bleed ?? null, measuredAt: new Date().toISOString(),
-  };
   try {
     const [row] = await q(sql`SELECT meta FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
     if (!row) return;
     const cur = (row.meta && typeof row.meta === "object" ? { ...(row.meta as Record<string, unknown>) } : {}) as Record<string, unknown>;
-    await q(sql`UPDATE pieces SET meta = ${jsonb({ ...cur, formatUnused: unused, formatMarks: stamp })}, updated_at = NOW()
+    const merged = mergeRunnerFormatMarks(cur.formatMarks, fm);
+    await q(sql`UPDATE pieces SET meta = ${jsonb({ ...cur, formatMarks: merged })}, updated_at = NOW()
       WHERE tenant_id = ${tid} AND id = ${pieceId}`);
   } catch (e) {
     /* 보조 갱신 실패는 발행을 되돌리지 않는다 — 다만 **조용히 넘어가지 않는다**(AC-58: 삼킨 검사가 판정을 뒤집는다). */

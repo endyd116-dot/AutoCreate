@@ -45,6 +45,17 @@ export interface RefStyleApplied {
   hookPrinciple?: string;
   /** `variant.palette` 로 간다 → 컷 프롬프트 COLOR 절. */
   palette?: string;
+
+  /* ═══ [R10-6] 자막 모양 — 🔴 **렌더 payload `captions.type` 으로 그대로 간다** ═══
+   *   2026-09-16 에 `render-video.mjs buildOverlayHtml` 의 상수를 값으로 열었다. 종전에는 배워 와도
+   *   «넣을 칸이 없다»로 `unused` 에만 남았다 — 그 칸이 이제 있다.
+   *   🔴 읽은 축만 담는다. 하나도 못 읽었으면 `captionType` 자체가 없다(빈 객체를 넘기지 않는다). */
+  captionType?: {
+    weight?: number; strokeWidth?: number; shadow?: string;
+    position?: "top" | "middle" | "bottom"; maxCharsPerLine?: number; accentColor?: string; side?: number;
+  };
+  /** 영상 전체 길이(초) — 고객이 고른 값이 **있으면 고객 것이 이긴다**(§9 핸들은 고객에게). */
+  totalSec?: number;
 }
 /** 못 넘긴 칸 — **이름과 이유**를 같이 남긴다(AC-9). */
 export interface RefUnused { field: string; why: string }
@@ -112,10 +123,54 @@ export function applyReferenceStyle(style: TemplateStyle | null | undefined): Re
   }
   if (rules.length) applied.rules = rules;
 
-  /* 🔴 자막 문법 — **넣을 칸이 없다.** 자막은 브라우저가 그린 PNG 이고 굵기·색·그림자가 렌더에 **상수**로 박혀 있다.
-     프리셋 3개(keyword_center·talking_big·clip_top) 말고 고를 것이 없다 → 배워 와도 늘 여기 남는다. */
+  /* ═══ [R10-6] 자막 모양 — 🔴 **이제 칸이 있다.** ═══
+     2026-09-16 이전엔 굵기·색·그림자가 렌더에 상수로 박혀 있어 배워 와도 늘 `unused` 였다.
+     같은 날 `buildOverlayHtml` 의 상수를 payload 값으로 열었다(기본값은 종전 상수 그대로 · 무회귀).
+     🔴 읽은 축만 담는다 — 못 읽은 축은 **키를 안 만든다**(«보통»으로 메우면 안 배운 것을 배운 척하는 것이다 · AC-92). */
+  const ct: NonNullable<RefStyleApplied["captionType"]> = {};
+  const ty = s.typography ?? {};
+  const cp = s.captionPlace ?? {};
+  if (Number.isFinite(Number(ty.weight))) ct.weight = Number(ty.weight);
+  if (Number.isFinite(Number(ty.strokeWidth)) && Number(ty.strokeWidth) > 0) ct.strokeWidth = Number(ty.strokeWidth);
+  /* 그림자는 «세기 말»을 CSS 한 벌로 옮긴다 — 레퍼런스가 쓰는 낱말과 렌더가 받는 값이 다른 층이다. */
+  if (ty.shadow === "none") ct.shadow = "none";
+  else if (ty.shadow === "hard") ct.shadow = "0 6px 0 rgba(0,0,0,.9)";
+  else if (ty.shadow === "soft") ct.shadow = "0 4px 18px rgba(0,0,0,.75),0 0 6px rgba(0,0,0,.9)";
+  if (cp.position) ct.position = cp.position;
+  if (Number.isFinite(Number(cp.maxCharsPerLine))) ct.maxCharsPerLine = Number(cp.maxCharsPerLine);
+  if (cp.accentColor) ct.accentColor = cp.accentColor;
+  if (Number.isFinite(Number(s.design?.sideMargin))) ct.side = Number(s.design?.sideMargin);
+  if (Object.keys(ct).length) applied.captionType = ct;
+
+  /* 🔴 **크기는 안 받는다** — 자막 글자 크기는 프리셋(`talking_big`·`clip_top`·그 외)이 정하고 그건 **고객이 고르는 값**이다.
+     레퍼런스가 덮으면 화면 칩이 말하는 것과 영상이 달라진다(AC-52 — 그래서 색도 `variant.palette` 로 넣는다). */
+
+  /* 🔴 배워 온 자막 문장(`caption`)은 **자유 문장**이라 숫자가 아니다 — 위 구조화된 칸이 못 받은 부분만 남긴다. */
   const caption = txt(s.caption, 160);
-  if (caption) unused.push({ field: "caption", why: "자막 모양이 렌더에 상수로 박혀 있다(프리셋 3개뿐) — 넣을 칸이 없다 · R10 3번" });
+  if (caption && !Object.keys(ct).length) {
+    unused.push({ field: "caption", why: `«${caption.slice(0, 40)}» 에서 굵기·자리·줄 수를 숫자로 못 읽었다 — 글로만 배워 온 것은 렌더에 넣을 수 없다` });
+  }
+
+  /* 전체 길이 — 배운 값은 **기본값 후보**다. 고객이 15/30/60 을 골랐으면 고객 것이 이긴다(호출자가 정한다). */
+  if (Number.isFinite(Number(s.speed?.totalSec))) applied.totalSec = Number(s.speed?.totalSec);
+
+  /* 컷당 초 — 🔴 **직접 지정하는 칸이 없다.** 컷 길이는 나레이션 길이가 정한다(`gen.ts:163`).
+     «5초마다»는 위 `paceHintOf` 가 fast|normal|hold 로 **거칠게** 받고, 초 단위 그대로는 못 낸다. */
+  if (Number.isFinite(Number(s.speed?.secPerCut))) {
+    unused.push({ field: "secPerCut", why: `컷 길이는 나레이션 길이가 정해서 «${s.speed?.secPerCut}초마다»를 그대로 못 넣는다 — 빠르기(fast/normal/hold)로만 받았다 · R11` });
+  }
+
+  /* 🟠 말 속도 — 🔴 **이번 라운드는 저장까지만**(트리거 B2-6). 손잡이(`tts-typecast.ts` 0.5~2.0)는 있지만
+     넘기는 것은 **새 규칙**이다: 나레이션 길이가 바뀌면 **자막 시각·컷 창·전체 길이가 전부 따라 움직인다.**
+     ⇒ 배워서 저장하고 여기 «아직 반영 안 함»으로 남긴다. 조용히 버리면 다음 사람이 처음부터 다시 잰다(AC-9). */
+  if (Number.isFinite(Number(s.audioTempo))) {
+    unused.push({ field: "audioTempo", why: `말 속도 ${s.audioTempo}배를 배웠지만 아직 안 넣는다 — 속도를 바꾸면 자막 시각·컷 창·전체 길이가 같이 움직여서 따로 잡아야 한다 · R11` });
+  }
+
+  /* 🔴 **색 가짓수**는 못 받는다 — 우리 팔레트는 «색 이름 한 줄»이고 «몇 개»를 강제하는 자리가 없다. */
+  if (Number.isFinite(Number(s.design?.colorCount))) {
+    unused.push({ field: "colorCount", why: `«색 ${s.design?.colorCount}개»를 셌지만 우리 팔레트는 색 가짓수를 강제하는 칸이 없다 — 색 자체는 palette 로 넘어갔다` });
+  }
 
   /* 컷 속도·카메라 — 🟠 **한 축만** 받는다. */
   const paceTxt = txt(s.pace, 120);

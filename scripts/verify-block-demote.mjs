@@ -43,7 +43,9 @@ const SAMPLE = {
   divider: {},
   tip: { text: "이건 알아 두면 좋아요" },
   faq: { items: ["Q. 얼마나 걸리나요", "A. 한 달이면 보여요"] },
-  hashtags: { text: "#절약 #전기요금" },
+  /* 🔴 표본은 **제품과 같은 모양**이어야 한다 — `lib/blocks.ts:80` 이 `b.items` 로 렌더한다.
+     첫판에 내가 `text` 를 줬더니 «초록»이 나왔는데 라이브에서는 items 로 와서 조용히 사라지고 있었다(C 가 잡았다). */
+  hashtags: { items: ["절약", "전기요금"] },
   disclosure: { text: "이 글은 제휴 링크를 포함합니다" },
   adsense: { text: "<script>...</script>" },
   toc: { items: ["결론부터", "왜 줄었나"] },
@@ -102,6 +104,48 @@ for (const r of rows) {
       `B-${r.t} → ${r.ops}${r.notes?.length ? ` · 못 낸 것: ${r.notes.join("/")}` : ""}`,
       "op 0개 + 설명 0개 = 조용히 사라진다(AC-9)");
   }
+}
+
+/* ═══ 🔴 **폴백 경로도 같은 자로 잰다** — 여기가 내 눈먼 자리였다 ═══
+ *
+ *   첫판에 나는 **블록 경로만** 쟀고 22/0 초록을 받았다. C 가 같은 19종을 대 보고 **셋**을 찾았다(2026-09-16):
+ *     ① `place` 가 폴백에서 통째로 사라짐(`opsFromHtml` 태그 목록에 `aside` 가 없었다)
+ *     ② `hashtags` 가 `items` 로 오면 op 0 · note 0 (`case` 가 `text` 만 봤다)
+ *     ③ `adsense` 가 두 경로 다 op 0 · note 0
+ *   🔴 교훈은 «셋을 고쳤다»가 아니라 **«내 자가 한쪽 길만 보고 있었다»**이다 —
+ *      검수창에서 본문을 고친 글은 **전부 폴백으로 온다**. 그 길을 안 재면 그 글들만 조용히 깎인다.
+ *   ⚠️ 그리고 **표본이 제품과 같아야 한다**: 내 `hashtags` 표본은 `text` 를 줬는데 제품(`lib/blocks.ts:80`)은
+ *      `items` 로 렌더한다. **표본이 틀리면 초록도 틀린다**(AC-78 의 사촌).
+ */
+console.log("\n[폴백 경로(bodyHtml) — 검수창에서 본문을 고친 글이 오는 길]");
+{
+  const HTML_SAMPLES = {
+    place: `<aside class="place"><a href="https://map.example.com/1" rel="noopener"><strong>○○카페</strong><span class="addr">서울 어딘가</span></a></aside>`,
+    hashtags: `<p class="tags">#절약 #전기요금</p>`,
+    table: `<table><thead><tr><th>구분</th><th>금액</th></tr></thead><tbody><tr><td>지난달</td><td>3만 원</td></tr></tbody></table>`,
+    affiliate: `<a class="affiliate" href="https://example.com/p/1"><b class="name">절전 멀티탭</b></a>`,
+    faq: `<dl><dt>얼마나 걸리나요</dt><dd>한 달이면 보여요</dd></dl>`,
+    checklist: `<ul class="check"><li>확인 하나</li></ul>`,
+    image: `<figure><img src="https://cdn.example.com/a.jpg"><figcaption>그날 계량기</figcaption></figure>`,
+    quote: `<blockquote>한 문장으로 뽑으면 이렇습니다</blockquote>`,
+    h2: `<h2>결론부터</h2>`,
+    divider: `<hr>`,
+    disclosure: `<div class="disclosure">이 글은 제휴 링크를 포함합니다</div>`,
+  };
+  for (const [t, html] of Object.entries(HTML_SAMPLES)) {
+    const r = PLAN.planEditorOps({ bodyHtml: html });
+    const body = r.ops.filter((o) => o.op !== "note");
+    const explained = (r.stats.notes?.length ?? 0) > 0;
+    ok(body.length > 0 || explained,
+      `H-${t} → ${body.map((o) => o.op).join("+") || "(없음)"}${r.stats.notes?.length ? ` · 못 낸 것: ${r.stats.notes.join("/")}` : ""}`,
+      "op 0개 + 설명 0개 = 폴백 경로에서 조용히 사라진다(AC-9)");
+  }
+  /* 🔴 두 길이 **같은 글**을 내나 — 다른 글을 내면 «검수창에서 고쳤더니 장소가 사라졌다»가 된다. */
+  const viaBlock = PLAN.planEditorOps({ blocks: [{ type: "place", place: { name: "○○카페", address: "서울 어딘가", url: "https://map.example.com/1" } }] });
+  const viaHtml = PLAN.planEditorOps({ bodyHtml: HTML_SAMPLES.place });
+  ok(viaBlock.ops[0]?.op === viaHtml.ops[0]?.op && viaBlock.stats.notes.length === viaHtml.stats.notes.length,
+    "H-99 🔴 같은 장소가 **두 길에서 같은 모양**으로 내려간다(블록 경로 ↔ 폴백 경로)",
+    `블록 ${viaBlock.ops[0]?.op}/${viaBlock.stats.notes.length}건 ↔ 폴백 ${viaHtml.ops[0]?.op}/${viaHtml.stats.notes.length}건`);
 }
 
 /* 🔴 대조군 짝 — 모르는 종류는 «조용히 흘러가지 않는다»를 실제로 확인한다(AC-68: 통과해야 하는 것도 같이 잰다). */

@@ -99,6 +99,20 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
     status: String(p.status ?? ""),
   };
   if (n(p.slot_id)) out.slotId = n(p.slot_id);
+  /* [R9-9] 🔴 **허용 목록에 넣는 것까지가 «값을 만든 것»이다.** 2026-09-16 하루에 허용 목록 **세 곳**이
+     값을 조용히 먹었다(`ALLOWED_SETTINGS`·`sanitizeProfile`·`pieces-get meta`) — 여기가 네 번째가 되지 않게 한다. */
+  if (Array.isArray(meta.productTags)) {
+    const tags = (meta.productTags as unknown[])
+      .map((t) => (t && typeof t === "object" ? t : {}) as Record<string, unknown>)
+      .map((t) => ({
+        productId: String(t.productId ?? t.product_id ?? "").trim(),
+        ...(Number.isFinite(Number(t.x)) ? { x: Number(t.x) } : {}),
+        ...(Number.isFinite(Number(t.y)) ? { y: Number(t.y) } : {}),
+      }))
+      .filter((t) => t.productId)
+      .slice(0, 5);   // 인스타 한 장짜리 사진의 상한(공식 문서)
+    if (tags.length) out.productTags = tags;
+  }
   if (meta.affiliate && typeof meta.affiliate === "object") {
     const af = meta.affiliate as Record<string, unknown>;
     out.affiliate = { provider: String(af.provider ?? "coupang"), url: String(af.url ?? ""), ...(af.subId ? { subId: String(af.subId) } : {}) };
