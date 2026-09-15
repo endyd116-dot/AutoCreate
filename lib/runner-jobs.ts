@@ -26,6 +26,8 @@ import { jsonb, utcDate } from "./db-util";
 import { decryptObj, encryptObj } from "./creds-crypto";
 import { writeAudit } from "./audit";
 import { pieceLink } from "./manual-upload";
+// [R9-11] «못 낸 꾸밈» 알림 문구 정본 = B 의 이 파일 한 곳(두 곳에서 문장을 지으면 화면과 알림이 다른 말을 한다 · AC-52)
+import { formatDemotionNotice } from "./format-marks";
 import { publicBase } from "./site-url";
 import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
 import { classifyAndApply } from "./account-health";
@@ -931,12 +933,35 @@ export function mergeRunnerFormatMarks(prev: unknown, fm: RunnerFormatMarks): Re
 export async function applyFormatMarksToPiece(tid: number, pieceId: number, fm: RunnerFormatMarks | undefined): Promise<void> {
   if (!pieceId || !fm) return;
   try {
-    const [row] = await q(sql`SELECT meta FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
+    /* `title`·`channel` 도 같이 읽는다 — 알림이 «어느 글인지»를 말해야 하고, 🔴 **되돌릴 길이 채널마다 다르다**(§5E).
+       채널은 `kind.replace("publish.","")` 로 짐작할 수도 있지만 **행에 있는 값이 정본**이다(짐작은 언젠가 갈린다). */
+    const [row] = await q(sql`SELECT meta, title, channel FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
     if (!row) return;
     const cur = (row.meta && typeof row.meta === "object" ? { ...(row.meta as Record<string, unknown>) } : {}) as Record<string, unknown>;
     const merged = mergeRunnerFormatMarks(cur.formatMarks, fm);
     await q(sql`UPDATE pieces SET meta = ${jsonb({ ...cur, formatMarks: merged })}, updated_at = NOW()
       WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+
+    /* ═══ [R9-11] 🔴 **여기가 «자동 승인에서도 닿게»의 자리다**(CLAUDE §9 ②) ═══
+     *
+     *   검수 화면 칩(R9-7)은 **사람이 그 글을 열어 봐야** 보인다. 자동 승인이면 아무도 안 연다 —
+     *   그러면 «깎였다»가 **아무에게도 안 닿고**, 그게 §9 가 «막지 않는 대가»로 못 박은 넷 중 ②를 어기는 것이다.
+     *   ⇒ 알림 한 줄이 그 구멍을 막는다.
+     *
+     *   🔴 **문구는 여기서 만들지 않는다** — B 의 `lib/format-marks.ts formatDemotionNotice(meta.formatMarks, title)`
+     *      가 정본이다(2026-09-16 B2↔B 합의). 두 곳에서 문장을 지으면 **화면과 알림이 다른 말을 한다**(AC-52).
+     *   ⚠️ 말투는 §3 — «정지됩니다» 아니고 «**이 글은 인용구가 따옴표로 대신 들어갔어요**» 쪽이고,
+     *      **되돌릴 길**(다시 올리기)을 같이 준다(§9-3). 그것도 B 의 함수가 문장에 담는다.
+     *   🔴 **강등이 0 이면 `null` 이라 알림이 안 간다** — 안 깎였는데 «깎였어요»가 가면 **더 나쁜 거짓말**이다(AC-68).
+     */
+    /* 🔴 **세 번째 인자(`String(row.channel ?? "")`)를 넣는 것이 남았다.** B 가 내 §9-3 지적을 받아
+       `formatDemotionNotice(fm, title, channel?)` 로 넓히는 중인데(`feature/r9-back`) main 에는 아직 2인자다.
+       ⇒ **지금 넣으면 빌드가 깨지고, 안 넣으면 «채널에서 직접 바꾸세요»로 나간다.** 둘 중 §9-② 구멍(아무에게도 안 닿는다)이
+          훨씬 크므로 **먼저 닫고** 인자는 B 판이 머지되는 즉시 더한다 — `row.channel` 은 위에서 **이미 읽어 뒀다**.
+       ⚠️ 그때까지 이 알림의 «되돌릴 길» 문장은 티스토리에서 **덜 정확하다**(내려서 다시 올릴 수 있는데 그 말을 못 한다).
+          «틀린 말»은 아니고 «덜 도와주는 말»이다 — 그래서 막지 않고 내보낸다. */
+    const say = formatDemotionNotice(merged, String(row.title ?? ""));
+    if (say) await notify(tid, "format_demoted", say.title, say.body, pieceLink(pieceId));
   } catch (e) {
     /* 보조 갱신 실패는 발행을 되돌리지 않는다 — 다만 **조용히 넘어가지 않는다**(AC-58: 삼킨 검사가 판정을 뒤집는다). */
     console.warn("[runner-jobs] formatMarks 기록 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 140));

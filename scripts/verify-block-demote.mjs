@@ -176,7 +176,11 @@ console.log("\n[R9-11 «깎였다»가 고객에게 닿나 — 티스토리 기�
 {
   const TIS = readFileSync(join(ROOT, "runner", "channels", "tistory.mjs"), "utf8");
   const CORE = readFileSync(join(ROOT, "runner", "core.mjs"), "utf8");
-  const JOBS = readFileSync(join(ROOT, "lib", "runner-jobs.ts"), "utf8");
+  /* 🔴 **주석을 코드로 세지 마라.** 변이로 «알림 줄을 주석 처리»해 봤더니 **초록으로 지나갔다**(2026-09-16) —
+     `// removed if (say) await notify(...)` 가 글자로는 그대로 남아 있었기 때문이다.
+     오늘 **네 번째**로 같은 함정이다(AC-99). «지웠다»와 «주석으로 죽였다»는 코드에서 같은 뜻이다. */
+  const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+  const JOBS = codeOnly(readFileSync(join(ROOT, "lib", "runner-jobs.ts"), "utf8"));
 
   /* 🔴 **행동으로 잰다.** 첫판엔 «그 줄이 있나»만 봐서 `if (field)` → `if (false)` 변이가 **초록으로 지나갔다**
      (AC-99 · 오늘 세 번째다). 그래서 이름 짓는 규칙을 **순수 함수로 빼** 실제로 돌린다. */
@@ -213,6 +217,27 @@ console.log("\n[R9-11 «깎였다»가 고객에게 닿나 — 티스토리 기�
   /* 🔴 대조군 짝 — **HTML 모드가 열리면 아무것도 안 싣는다**(깎인 게 없는데 칩이 뜨면 그게 거짓말이다 · AC-68). */
   ok(/missed\.degraded\.length\s*\?/.test(TIS) && /: null;/.test(TIS.slice(TIS.indexOf("const formatMarks = missed.degraded.length"), TIS.indexOf("const formatMarks = missed.degraded.length") + 200)),
     "R-07 🔴 대조군 짝 — 깎인 게 **없으면 키 자체를 안 만든다**(안 깎였는데 «깎였어요»가 뜨면 그게 더 나쁘다)");
+
+  /* ═══ 🔴 R-10~ — **닿는 길 ②: 알림**(§9-② «사람이 안 보는 경로에서도 닿게») ═══
+   *   검수 화면 칩(닿는 길 ①)은 **사람이 그 글을 열어 봐야** 보인다. 자동 승인이면 아무도 안 연다 —
+   *   그러면 «깎였다»가 **아무에게도 안 닿고**, 그게 이 칸이 생긴 이유 자체다.
+   *   🔴 **화면 하나로는 §9 를 못 지킨다. 닿는 길이 둘이어야 한다.** */
+  /* ⚠️ **문구가 실제로 나오나**(행동)는 여기서 못 잰다 — `node` 는 확장자 없는 TS import 를 못 푼다.
+     그쪽은 `scripts/verify-format-notice.mts`(tsx) 가 잰다. 여기서는 **사슬**만 본다(싸고 넓게 · AC-87). */
+  const JOBS2 = JOBS;
+  ok(/const say = formatDemotionNotice\(merged, String\(row\.title \?\? ""\)/.test(JOBS2)
+    && /if \(say\) await notify\(tid, "format_demoted", say\.title, say\.body, pieceLink\(pieceId\)\);/.test(JOBS2),
+    "R-12 🔴 그 문구를 **실제로 알림으로 보낸다**(만들어 놓고 안 부르면 AC-69)");
+  /* 🔴 **자동 승인 경로에서 닿나** — 이 칸의 전부다.
+     `applyFormatMarksToPiece` 는 `reportJob` 의 **발행 성공 경로**에서 불린다. 그 길은 사람이 승인했든
+     자동으로 나갔든 **똑같이 지난다**(화면 핸들러가 아니다). 그래서 자동 승인에서도 닿는다. */
+  const pub = JOBS2.slice(JOBS2.indexOf('if (kind.startsWith("publish."))'), JOBS2.indexOf('if (kind.startsWith("publish."))') + 900);
+  ok(/await applyFormatMarksToPiece\(tid, pieceId \?\? 0, okBody\.formatMarks\);/.test(pub),
+    "R-13 🔴 알림을 부르는 함수가 **발행 성공 경로**에 있다(사람이 승인했든 자동이든 **같은 길**이라 자동 승인에서도 닿는다)");
+  ok(!/approve|review|검수/.test(JOBS2.slice(JOBS2.indexOf("const say = formatDemotionNotice") - 400, JOBS2.indexOf("const say = formatDemotionNotice"))),
+    "R-13b 그 자리가 **검수·승인 화면에 매달려 있지 않다**(화면에 매달면 자동 경로에서 안 돈다)");
+  ok(/title, channel FROM pieces/.test(JOBS2),
+    "R-14 되돌릴 길을 채널별로 말하려고 `channel` 을 **미리 읽어 둔다**(§5E — 내릴 수 있는 채널과 아닌 채널이 다르다)");
 }
 
 console.log(`\nverify-block-demote: ${pass}/${fail} (통과/실패)`);
