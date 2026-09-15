@@ -34,6 +34,7 @@ import { learnStep } from "./learn";
 import { reapStep } from "./reap";
 import { videoSweepStep } from "./video-sweep";
 import { revenueSyncStep } from "./revenue-sync";
+import { managedRunnerWatchStep } from "./managed-runner-watch";
 import { billingChargeStep } from "./billing-charge";
 import { trialExpireStep } from "./trial-expire";
 import { csAutoTicketStep } from "./cs-auto-ticket";
@@ -70,6 +71,7 @@ export const STEPS: AnyStep[] = [
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
   publisherStep,       // 5m · due 발행
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
+  managedRunnerWatchStep, // 5m · **global** — 관리형(우리 기기) 러너가 30분 조용하면 운영 감사(P1R7 §2.4)
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];
 
