@@ -15,6 +15,7 @@
   const todayYmd = ymd(0);
   const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
   const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
+  const estKnob = qs.get("est") === "1";          // [B2] «예상수입» 도장이 찍힌 매체가 섞인 달
   const slotsKnob = qs.get("slots") || "";        // [R7 §3.6] none·waiting·active·paused — 계정 슬롯 상태
   const slotCoinsShort = qs.get("slotCoins") === "0";
   const usedSlotOn = qs.get("usedSlot") !== "0";   // [R7 §1.6] 사람이 만들면 오늘 자리를 쓴다(기본) · 0 이면 예전처럼 새 자리
@@ -735,7 +736,10 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       /* [여정 점검 9 · B3 확인] 라이브에선 연결 안 된 소스에 수익이 없다 — 모의도 그렇게(«키 필요»인데 금액이 붙는 조합을 만들지 않는다) */
       const bySource = groupKrw(mine, "source").filter(([source]) => { const s = S.revSources.find((x) => x.source === source); return !s || s.status === "connected"; })
         .map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
-          const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt; return o; });
+          const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
+          /* [B2 8a71d69] 애드포스트처럼 «예상 수입» 열만 주는 매체 — 서버가 도장을 찍고 노트를 준다(?est=1) */
+          if (estKnob && source === "adpost") { o.estimated = true; o.note = "⚠️ «예상수입» 열로 읽었어요 — 확정 금액이 아니라 예상치예요"; }
+          return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
         return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
       const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
@@ -796,7 +800,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
