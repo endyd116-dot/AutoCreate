@@ -110,6 +110,11 @@ const TARGETS = [
   ["🔴 목표 매체 → 채널 순서", "targetChannelOrder", "lib/director-goal.ts", "설계 §5.3-1 의 셋째 재료(목표 매체)가 다시 0건이 되고 «목표가 뭐든 같은 채널»로 돌아간다"],
   ["매체가 살아 있나(라이브 상태)", "mediaLiveOf", "lib/director-goal.ts", "애드센스는 러너가 `linked` 로 적는데 `approved` 만 보면 **영영 «안 붙었다»** 가 된다"],
   ["왜 이 채널인지 한 줄", "channelReason", "lib/director.ts", "순서는 바뀌는데 **왜 바뀌었는지 아무도 못 본다**(막지 않는 대신 말해 주기로 한 값 · §9)"],
+  /* ── [R8CLOSE-B1 §B2] 페르소나 적합도 — 🔴 **양끝을 다 센다**(재는 쪽 · 배정이 쓰는 쪽). ── */
+  ["🔴 페르소나 적합도 — 잰다", "personaFitOf", "lib/persona-fit.ts", "배정이 다시 건강도·캐던스만 보게 되고 캠핑 계정과 재테크 계정에 같은 소재가 떨어진다"],
+  ["🔴 페르소나 적합도 — 배정이 쓴다", "personaFitsFor", "lib/persona-fit.ts", "재기만 하고 **순위를 안 바꾼다** — 설계 §5.3-2 의 셋째 재료가 또 장식이 된다"],
+  ["페르소나 적합도 — 가산점 천장", "personaFitBonus", "lib/persona-fit.ts", "천장 없이 더하면 적합도가 건강도를 이겨 **아픈 계정에 글이 몰린다**(순위가 아니라 게이트가 된다)"],
+  ["왜 이 계정인지 한 줄", "personaFit", "lib/director.ts", "낮아도 배정은 됐는데 **낮다는 걸 아무도 못 본다**(막지 않는 대신 말해 주기로 한 값 · §9)"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {

@@ -189,7 +189,17 @@ const THREE_REST = [
     return [sameBriefOrAccount ? "🟠 일부" : "열림",
       "🔴 같은 brief **또는 같은 계정** 30일만 본다 — **다른 brief·다른 계정끼리는 안 본다**. 설계 §4.3 «계정 간 중복 0» 은 아직 반쪽"];
   }],
-  ["B2 페르소나 적합도 LLM", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/content-approve.ts"], /personaFit|적합도/).length), "0건"]],
+  /* 🔴 [2026-09-16 B-1] 보던 자리가 **틀렸다.** 적합도는 «다 쓴 글을 재는 것»(ai-tell-gate·content-approve)이 아니라
+     **«계정을 고르는 것»**(DESIGN §5.3-2 배정)이다. 엉뚱한 파일을 보고 있으면 진짜로 만들어도 영영 열림이고,
+     반대로 그 파일에 «적합도»라는 낱말만 스쳐도 닫힘이 된다(AC-78 의 다음 층 — 검사가 **엉뚱한 곳**을 본다).
+     ⇒ 판정기(`lib/persona-fit.ts`)가 있고 **두 경로가 다 배정에 쓰는가**로 바꾼다. 느슨해진 게 아니라 더 조인 것이다.
+     🔴 이름에 «LLM» 이 붙어 있지만 **LLM 은 일부러 안 붙였다**(메인 지시 · 돈이 두 배) — 글자로 재고 못 잰 축은 «못 쟀다»로 적는다. */
+  ["B2 페르소나 적합도", () => {
+    const has = inFile("lib/persona-fit.ts", /personaFitOf/);
+    const human = inFile("lib/director.ts", /assignAccount.accounts, ch, fit.bonus./);
+    const auto = inFile("lib/cron/director-auto.ts", /assignAccount.accounts, slot.channel, fit.bonus./);
+    return [yes(has && human && auto), has ? `판정기 ${has} · 사람 경로 ${human} · 자동 경로 ${auto}` : "0건"];
+  }],
   ["B3 신조어 화이트리스트", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/banned-words.ts"], /slangWhitelist|신조어/).length), "0건"]],
   ["B4 장소 카드", () => [yes(anyFile(["lib/blocks.ts", "lib/writing-contracts.ts"], /placeCard|장소 카드/).length), "0건"]],
   ["B5 쓰레드 연결글", () => [yes(inFile("lib/publish/threads.ts", /연결글|threadChain|reply_to/), ), "0건"]],

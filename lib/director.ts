@@ -29,7 +29,8 @@ import { toTopic, type Topic } from "./topics";
 import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
 import { pickFormatByPrint, type FormatPick } from "./format-pick";
-import { targetChannelOrder } from "./director-goal";   // [R8CLOSE-B1 §B8] 목표 매체 → 채널 선택(DESIGN §5.3-1)        // [R8 §2.2] 골격 지문으로 format 고르기
+import { targetChannelOrder } from "./director-goal";   // [R8CLOSE-B1 §B8] 목표 매체 → 채널 선택(DESIGN §5.3-1)
+import { personaFitsFor } from "./persona-fit";         // [R8CLOSE-B1 §B2] 페르소나 적합도(DESIGN §5.3-2 · 🔴 LLM 0)        // [R8 §2.2] 골격 지문으로 format 고르기
 import { printFromMeta, type StructurePrint } from "./structure-print";    // 축이 쓰는 지문 그대로
 import { checkAiCostCap, requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
@@ -60,6 +61,8 @@ export interface PieceSpec {
   angle: string;
   /** [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** 한 줄(사람말). 고객이 «왜 티스토리?»를 물으면 답할 자리다. */
   channelReason?: string;
+  /** [R8CLOSE-B1 §B2] 🔴 **왜 이 계정인가** — 페르소나 적합도. `measured:false` = 못 쟀다(0 과 다르다 · AC-9). */
+  personaFit?: { score: number; matched: string[]; measured: boolean; line: string };
   /**
    * [R8 §2.2] **이 구성을 왜 골랐나** — 골격 지문으로 잰 값과 사람말 사유.
    *   🔴 이게 없으면 §2.2 는 «돌긴 도는데 아무도 못 보는» 기능이다(AC-29). `pieces.meta.formatPick` 으로 내려가
@@ -199,9 +202,18 @@ export function buildVideoSpec(a: { channel: string; accountId: number | null; i
 }
 
 /** 계정 배정(§5.3-2): active|pending_login · posts_today < daily_cap · health 높은 순(→ id). */
-export function assignAccount(accounts: AccountRow[], channel: string): AccountRow | null {
+/**
+ * 계정 배정 — DESIGN §5.3-2 「건강도 · 캐던스 · **페르소나 적합도**」.
+ *   🔴 [R8CLOSE-B1 §B2] 셋째(적합도)가 **0건**이었다. 캠핑 얘기만 하던 계정과 재테크 얘기만 하던 계정에
+ *      같은 소재가 똑같이 떨어졌다. 이제 `fitBonus`(계정 id → 가산점)를 받으면 그만큼 순위가 움직인다.
+ *   🔴 **막지 않는다**(§9): 적합도가 0이어도 **후보에서 빼지 않는다** — 거르는 조건은 종전 그대로(캐던스·상태)다.
+ *      가산점에는 천장이 있다(`PERSONA_FIT_WEIGHT` = 20) — 적합도가 건강도를 이기면 그건 순위가 아니라 게이트다.
+ *   🔴 `fitBonus` 를 안 주면 **종전과 완전히 같다**(가산점 0). 부르는 곳이 늘어도 조용히 달라지지 않는다.
+ */
+export function assignAccount(accounts: AccountRow[], channel: string, fitBonus?: ReadonlyMap<number, number>): AccountRow | null {
+  const bonus = (a: AccountRow) => fitBonus?.get(a.id) ?? 0;
   const pool = accounts.filter((a) => a.channel === channel && (a.status === "active" || a.status === "pending_login") && a.postsToday < a.dailyCap)
-    .sort((a, b) => b.healthScore - a.healthScore || a.id - b.id);
+    .sort((a, b) => (b.healthScore + bonus(b)) - (a.healthScore + bonus(a)) || a.id - b.id);
   return pool[0] ?? null;
 }
 
@@ -277,12 +289,15 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
   const channels = order.channels.slice(0, 3);
 
   const taken = await takenTimes(tid);
+  /* [R8CLOSE-B1 §B2] 🔴 **페르소나 적합도** — 소재를 «이 계정 이야기»와 견준다. LLM 은 안 부른다(글자 겹침 · 값 0원).
+     계정마다 읽지 않고 **한 번에** 읽는다(계정 30개면 쿼리 30번이 된다). */
+  const fit = await personaFitsFor(tid, accounts, { title: topic.title, angle: topic.angle, keyword: (topic.factors as unknown as Record<string, unknown>)?.keyword as string | undefined });
   const intent = topic.factors.intent;
   const affiliateBase: Affiliate | null = intent === "commercial" ? { provider: "coupang", productQuery: topic.title, slot: "mid" } : intent === "mixed" ? { provider: "coupang", productQuery: topic.title, slot: "end" } : null;
   const specs: PieceSpec[] = [];
   for (const ch of channels) {
     const c = await contractFor(ch);
-    const acc = assignAccount(accounts, ch);
+    const acc = assignAccount(accounts, ch, fit.bonus);
     /* [R8-A §4] 건강·의료 소재엔 «경험담» 구성을 빼고 고른다 — 자동 경로(`director-auto`)와 **같은 규칙**이어야 한다
        (사람이 누른 글만 의료법 §56 을 비껴가면 게이트가 아니라 구멍이다). */
     const healthTopic = isHealthTopic(`${topic.title} ${topic.angle ?? ""}`);
@@ -338,6 +353,8 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(ch, Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
       ...(ch === channels[0] ? { channelReason: order.reason } : {}),   // [R8CLOSE-B1 §B8] 순서를 정한 이유는 **맨 앞 채널**에 붙는다
+      /* [R8CLOSE-B1 §B2] 🔴 **이 계정에 왜 갔는지** — 낮아도 배정은 됐다. 낮으면 낮다고 말해 준다(막지 않는다 · §9). */
+      ...(acc && fit.fits.get(acc.id) ? { personaFit: { score: Number(fit.fits.get(acc.id)!.score.toFixed(2)), matched: fit.fits.get(acc.id)!.matched.slice(0, 5), measured: fit.fits.get(acc.id)!.measured, line: fit.fits.get(acc.id)!.line } } : {}),
     });
   }
 
@@ -593,7 +610,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : isCard ? "cardnews" : "blog";
       const meta = isVideo
         ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
-        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}), ...(s.channelReason ? { channelReason: s.channelReason } : {}) };
+        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}), ...(s.channelReason ? { channelReason: s.channelReason } : {}), ...(s.personaFit ? { personaFit: s.personaFit } : {}) };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : isCard ? "cardnews" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);

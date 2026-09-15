@@ -22,6 +22,7 @@ import { pieceCoinCost, AI_IMAGES_INCLUDED } from "../coin-table";
 import { toTopic, type Topic } from "../topics";
 import { assignAccount, goalOf, type Affiliate, type PieceSpec } from "../director";
 import { pausedAccountIds } from "../account-slots";
+import { personaFitsFor } from "../persona-fit";   // [R8CLOSE-B1 §B2] 🔴 사람 경로와 **같은 판정기**로 배정한다(두 경로가 갈리면 그게 곧 «왜 어제랑 달라요»다)
 import { isHealthTopic, HEALTH_FORBIDDEN_FORMATS } from "../banned-categories";   // [R8-A §4] 건강·의료 소재엔 경험담 구성 금지(의료법 §56)
 import { pickFormatByPrint } from "../format-pick";                        // [R8 §2.2] 골격 지문으로 고르기(사람 경로와 같은 함수)
 import { printFromMeta, type StructurePrint } from "../structure-print";
@@ -86,13 +87,17 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
      🔴 사람이 만드는 경로(director.propose)는 막지 않는다(고객이 직접 누르는 건 자기 판단). */
   const paused = new Set(await pausedAccountIds(tid));
   const accounts = (await listAccounts(tid)).filter((a) => !paused.has(a.id));
+  /* [R8CLOSE-B1 §B2] 🔴 **페르소나 적합도** — 사람 경로(`director.propose`)와 **같은 함수**를 쓴다.
+     🔴 자동 경로가 더 중요하다: 사람은 화면에서 계정을 바꿀 수 있지만 자동은 아무도 안 본다. */
+  const fit = await personaFitsFor(tid, accounts, { title: topic.title, angle: topic.angle, keyword: (topic.factors as unknown as Record<string, unknown>)?.keyword as string | undefined });
   let acc: AccountRow | null = null;
   if (slot.accountId) {
+    /* 🔴 자리가 계정을 못 박았으면 **적합도로 뒤집지 않는다** — 고객이 «이 자리는 이 계정»이라고 정한 것이다(§9 «계약»). */
     const fixed = accounts.find((a) => a.id === slot.accountId) ?? null;
     const usable = fixed && (fixed.status === "active" || fixed.status === "pending_login") && fixed.postsToday < fixed.dailyCap;
-    acc = usable ? fixed : assignAccount(accounts, slot.channel);
+    acc = usable ? fixed : assignAccount(accounts, slot.channel, fit.bonus);
   } else {
-    acc = assignAccount(accounts, slot.channel);
+    acc = assignAccount(accounts, slot.channel, fit.bonus);
   }
   if (!acc) return { ok: false, step: "no_account", error: `${slot.channel} 에 오늘 글을 올릴 수 있는 계정이 없어요.` };
 
