@@ -954,13 +954,11 @@ export async function applyFormatMarksToPiece(tid: number, pieceId: number, fm: 
      *      **되돌릴 길**(다시 올리기)을 같이 준다(§9-3). 그것도 B 의 함수가 문장에 담는다.
      *   🔴 **강등이 0 이면 `null` 이라 알림이 안 간다** — 안 깎였는데 «깎였어요»가 가면 **더 나쁜 거짓말**이다(AC-68).
      */
-    /* 🔴 **세 번째 인자(`String(row.channel ?? "")`)를 넣는 것이 남았다.** B 가 내 §9-3 지적을 받아
-       `formatDemotionNotice(fm, title, channel?)` 로 넓히는 중인데(`feature/r9-back`) main 에는 아직 2인자다.
-       ⇒ **지금 넣으면 빌드가 깨지고, 안 넣으면 «채널에서 직접 바꾸세요»로 나간다.** 둘 중 §9-② 구멍(아무에게도 안 닿는다)이
-          훨씬 크므로 **먼저 닫고** 인자는 B 판이 머지되는 즉시 더한다 — `row.channel` 은 위에서 **이미 읽어 뒀다**.
-       ⚠️ 그때까지 이 알림의 «되돌릴 길» 문장은 티스토리에서 **덜 정확하다**(내려서 다시 올릴 수 있는데 그 말을 못 한다).
-          «틀린 말»은 아니고 «덜 도와주는 말»이다 — 그래서 막지 않고 내보낸다. */
-    const say = formatDemotionNotice(merged, String(row.title ?? ""));
+    /* 🔴 **채널을 같이 넘긴다** — 되돌릴 길이 채널마다 다르기 때문이다(§5E · §9-3).
+       내릴 수 있으면 «내렸다가 고쳐서 다시 올릴 수 있어요» · 못 내리면 «채널에서 직접 바꾸실 수 있어요» ·
+       🔴 **채널을 모르면 되돌릴 길 문장을 아예 안 낸다**(B 의 함수가 그렇게 짠다) — 지어내지 않는 쪽이 맞다(AC-92).
+       `kind.replace("publish.","")` 로 짐작할 수도 있지만 **행에 있는 값이 정본**이다(짐작은 언젠가 갈린다). */
+    const say = formatDemotionNotice(merged, String(row.title ?? ""), String(row.channel ?? ""));
     if (say) await notify(tid, "format_demoted", say.title, say.body, pieceLink(pieceId));
   } catch (e) {
     /* 보조 갱신 실패는 발행을 되돌리지 않는다 — 다만 **조용히 넘어가지 않는다**(AC-58: 삼킨 검사가 판정을 뒤집는다). */
