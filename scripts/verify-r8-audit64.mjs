@@ -261,10 +261,18 @@ const THREE_REST = [
   }],
   ["B6 블로거·WP AEO 규격", () => {
     /* 🔴 낱말 «AEO» 는 계약의 visual 라벨(«FAQ(AEO)»)에도 있다 — 그건 **규격 구현이 아니다**(대용물 · AC-57).
-       규격이라면 seo.ts 가 구조화 데이터·질문형 헤딩을 실제로 내보내야 한다. */
-    const label = inFile("lib/writing-contracts.ts", /FAQ(AEO)/);
-    const impl = inFile("lib/publish/seo.ts", /faqPage|FAQPage|question/i);
-    return [impl ? "닫힘" : "열림", impl ? "seo.ts 가 구조화 데이터를 낸다" : `계약 라벨에 «AEO» 글자만 있다(label=${label}) · seo.ts 구현 0`];
+       🔴 [2026-09-16 · C 자체검사] 옛 판은 `seo.ts` 에서 `/faqPage|FAQPage|question/i` 를 찾았는데 **유일한 매치가 주석**이었다:
+          «**FAQPage JSON-LD — 안 만든다**»(구글이 2025-05-08 지원 중단). 즉 «안 만든다»고 정직하게 적어 둔 그 문장이
+          «만든다»로 세어졌다 — B2 가 B5 에서 찾은 병과 **똑같다**(`verify-audit-selftest.mjs` 가 잡았다).
+          🔴 정직하게 적을수록 초록이 되는 검사는 최악이다. ⇒ **살아 있는 규격**(Article JSON-LD)을 **발행이 부르나**로 잰다.
+          FAQPage·HowTo 는 «아직 안 한 것»이 아니라 **«하지 않기로 한 것»**이라 잣대가 아니다. */
+    const impl = inFile("lib/publish/seo.ts", /export function articleJsonLdScript/);
+    const callers = ["lib/publish/blogger.ts", "lib/publish/wordpress.ts"].filter((p) => inFile(p, /articleJsonLdScript\(/));
+    const extra = inFile("lib/publish/wordpress.ts", /excerptOf\(/) && inFile("lib/publish/wordpress.ts", /slugOf\(/);
+    return [impl && callers.length === 2 ? "닫힘" : impl ? "🟠 일부" : "열림",
+      impl && callers.length === 2
+        ? `seo.ts articleJsonLdScript 를 **발행이 부른다**(${callers.join(",")})${extra ? " + WP 는 excerpt·slug 도 보낸다" : ""} · FAQPage·HowTo 는 일부러 안 만든다(구글 지원 중단)`
+        : `구현 ${impl} · 부르는 곳 ${callers.length}/2 — 만들어 놓고 안 부르면 닫힌 게 아니다(AC-69)`];
   }],
   ["B7 에디터 실제 요소", () => [yes(inFile("lib/writing-contracts.ts", /editorElements/), ), "0건"]],
   /* 🔴 [2026-09-16 B-1] 설명줄이 판정을 안 따라가 «닫힘 … 0건» 이라는 모순을 찍고 있었다(B9 와 같은 뿌리).
@@ -297,7 +305,6 @@ const THREE_REST = [
     const items = [
       ["당겨서 새로고침", /당겨서 새로고침|pullToRefresh/],
       ["햅틱", /햅틱|vibrate\(/],
-      ["계좌연결 패턴", /계좌 연결/],
       ["소재 스와이프", /swipe|스와이프/],
     ];
     /* 🔴 [2026-09-16 · C] **둘은 낱말로 재면 안 되는 항목이라 여기서 뺐다** — 둘 다 «대용물»이었다(AC-70):
@@ -314,8 +321,22 @@ const THREE_REST = [
       ["대비 4.5:1(실측)", "scripts/verify-contrast.mjs"],
       ["기기 시간대(실행)", "scripts/verify-kst-surface.mjs"],
     ];
-    const got = [...items.filter(([, re]) => re.test(SC)).map(([n]) => n), ...realHarness.filter(([, p]) => existsSync(p)).map(([n]) => n)];
-    const miss = [...items.filter(([, re]) => !re.test(SC)).map(([n]) => n), ...realHarness.filter(([, p]) => !existsSync(p)).map(([n]) => n)];
+    /* 🔴 [2026-09-16 · C · 메인 C1-⑤] **«계좌연결 패턴»은 두 겹으로 틀리게 재고 있었다.**
+       ①파일이 틀렸다 — 이 묶음은 다섯 파일만 읽는데 계정 연결 화면은 `public/app/accounts.html` 이다(AC-82).
+       ②낱말이 틀렸다 — «계좌 연결»은 **토스 패턴의 이름**이고(`docs/DESIGN.md:1024`), 우리 화면은 «계정 연결»이라 써야 맞다.
+         우리가 붙이는 건 은행 계좌가 아니다. 그 낱말을 화면에서 찾으면 **제대로 만들수록 못 찾는다.**
+       ⇒ 이름이 아니라 **패턴의 모양**을 잰다(DESIGN §13.0b 의 «구체 형태» 그대로):
+         채널 마크 그리드 · 연결 수 표기 · 눌러서 채널별 연결 · 끝나면 완료를 말해 준다. */
+    const A = read("public/app/accounts.html");
+    const acc = [/UI\.mark\(/.test(A), /개 연결됨/.test(A), /연결 시트|openConnect|data-k=/.test(A), /connected/.test(A)]
+      .filter(Boolean).length >= 3;
+    const shape = [["계좌연결 패턴(모양)", acc]];
+    const got = [...items.filter(([, re]) => re.test(SC)).map(([n]) => n),
+      ...shape.filter(([, ok]) => ok).map(([n]) => n),
+      ...realHarness.filter(([, p]) => existsSync(p)).map(([n]) => n)];
+    const miss = [...items.filter(([, re]) => !re.test(SC)).map(([n]) => n),
+      ...shape.filter(([, ok]) => !ok).map(([n]) => n),
+      ...realHarness.filter(([, p]) => !existsSync(p)).map(([n]) => n)];
     return [got.length === 6 ? "닫힘" : got.length ? "🟠 일부" : "열림",
       `있는 것 ${got.length}/6 [${got.join(",")}] · 없는 것 [${miss.join(",")}]`, [got.length, 0, miss.length]];
   }],
@@ -331,13 +352,18 @@ const THREE_REST = [
           : "0건"];
   }],
   ["E2 추천인 이벤트", () => {
-    const active = inFile("lib/referral.ts", /활성인 추천 이벤트/);
-    const ops = inFile("lib/referral.ts", /ops-promotions|kind:s*"referral"/);
-    return [active && ops ? "닫힘" : "열림", active ? "referral.ts:106 «지금 활성인 추천 이벤트의 코인 수» + ops-promotions kind:referral" : "0건"];
+    /* 🔴 [2026-09-16 · C 자체검사] 옛 판은 `/활성인 추천 이벤트/` — **한국어 주석 문장**이었다(referral.ts:106 의 JSDoc).
+       주석을 지우면 이 칸이 열림으로 뒤집혔다. 코드가 아니라 글자를 세고 있었다는 뜻이다.
+       ⇒ 실제로 **이벤트 표를 읽어 코인 수를 정하는 호출**을 잰다. 그리고 그 값을 **쓰는 자리**까지 본다(AC-69). */
+    const reads = inFile("lib/referral.ts", /activePromotions\(\s*"referral"\s*\)/);
+    const used = inFile("lib/referral.ts", /referralRewardCoins\(/);
+    return [reads && used ? "닫힘" : reads ? "🟠 일부" : "열림",
+      reads && used ? "referral.ts:109 activePromotions(\"referral\") 로 이벤트 표를 읽고 referralRewardCoins() 를 쓴다(없으면 0)"
+        : `이벤트 표를 읽나 ${reads} · 그 값을 쓰나 ${used}`];
   }],
   ["E3 티켓 한 화면", () => [yes(existsSync("public/ops/cs.html")), "public/ops/cs.html"]],
   ["E4 AM↔AC 코인 이전", () => [yes(inFile("netlify/functions/coin-transfer.ts", /amDebit/)), "coin-transfer → am-bridge amDebit (칸12 에서 이리로 옮김)"]],
-  ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/am-bridge.ts"], /syncPr|동기화 PR/).length), "0건"]],
+  ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/am-bridge.ts"], /syncPr\s*[(=:]/).length), "0건(주석 말고 **코드**로 센다)"]],
   ["E6 운영자 화면 조정", () => [yes(existsSync("netlify/functions/ops-center.ts")), "ops-center"]],
   ["F 팀 축 4(시트·초대·accept·팀 승인)", () => {
     /* 🔴 [2026-09-16 · C] 옛 판은 `SERVER_TEXT`(= referral.ts·ops-center.ts·cs.ts 셋)에서 팀을 찾았다 — **팀과 아무 상관없는 파일 셋**이라
