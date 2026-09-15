@@ -6,7 +6,9 @@ import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 
 export interface PlanLimits { maxAccounts: number; coinsIncluded: number; runnerDevices: number; teamSeats: number; horizonDays: number; maxRules: number | null }
-export interface PlanFeatures { directorEdit: boolean; autoSchedule: boolean; failover: boolean; managedRunner: "no" | "option" | "included"; runnerRevenue: boolean; teamApproval: boolean }
+export interface PlanFeatures { directorEdit: boolean; autoSchedule: boolean; failover: boolean; managedRunner: "no" | "option" | "included"; runnerRevenue: boolean; teamApproval: boolean;
+  /** [P1R7 B3] «조용하면 그대로 발행»(DESIGN §5B.9 · Starter 제외). 라이브 plans 행엔 없는 키라 `autoApproveAllowed` 가 코드 기본값으로 메운다. */
+  autoApprove?: boolean }
 export interface PlanDef { key: string; name: string; priceMonth: number; priceYear: number; limits: PlanLimits; features: PlanFeatures; public: boolean; recommended: boolean; sort: number }
 
 export const TRIAL_DAYS_DEFAULT = 14;
@@ -14,16 +16,16 @@ export const TRIAL_DAYS_DEFAULT = 14;
 export const PLAN_DEFAULTS: PlanDef[] = [
   { key: "trial", name: "체험", priceMonth: 0, priceYear: 0, public: false, recommended: false, sort: 0,
     limits: { maxAccounts: 5, coinsIncluded: 0, runnerDevices: 1, teamSeats: 1, horizonDays: 14, maxRules: null },
-    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "no", runnerRevenue: true, teamApproval: false } },
+    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "no", runnerRevenue: true, teamApproval: false, autoApprove: true } },
   { key: "starter", name: "Starter", priceMonth: 19_000, priceYear: 190_000, public: true, recommended: false, sort: 1,
     limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3 },
-    features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false } },
+    features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false, autoApprove: false } },   // [P1R7 B3] 자동 승인은 Pro 부터(DESIGN §5B.9)
   { key: "pro", name: "Pro", priceMonth: 49_000, priceYear: 490_000, public: true, recommended: true, sort: 2,
     limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null },
-    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false } },
+    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false, autoApprove: true } },
   { key: "agency", name: "Agency", priceMonth: 149_000, priceYear: 1_490_000, public: true, recommended: false, sort: 3,
     limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null },
-    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true } },
+    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true, autoApprove: true } },
 ];
 
 type PlanRow = { key: string; name: string; price_month: unknown; price_year: unknown; limits: PlanLimits; features: PlanFeatures; public: unknown; recommended: unknown; sort: unknown };
@@ -118,10 +120,24 @@ export type FeatureKey = keyof PlanFeatures;
 export async function requireFeature(tid: number, feature: FeatureKey): Promise<{ ok: true; planKey: string } | { ok: false; planKey: string; res: Response }> {
   const { planKey, plan } = await tenantPlan(tid);
   const v = plan.features[feature];
-  const ok = feature === "managedRunner" ? v !== "no" : v === true;
+  /* [P1R7 B3] `autoApprove` 는 라이브 plans 행에 **없는 키**라 `v === true` 로 재면 전 플랜이 막힌다 — 코드 기본값 폴백을 타야 한다. */
+  const ok = feature === "managedRunner" ? v !== "no" : feature === "autoApprove" ? autoApproveAllowed(planKey, plan) : v === true;
   if (ok) return { ok: true, planKey };
-  const label: Record<FeatureKey, string> = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "계정 자동 승계", managedRunner: "관리형 러너", runnerRevenue: "내 PC 수익 수집", teamApproval: "팀 승인 흐름" };
+  const label: Record<FeatureKey, string> = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "계정 자동 승계", managedRunner: "관리형 러너", runnerRevenue: "내 PC 수익 수집", teamApproval: "팀 승인 흐름", autoApprove: "«조용하면 발행»(자동 승인)" };
   return { ok: false, planKey, res: json({ ok: false, reason: "plan_limit", step: "plan_feature", feature, planKey, error: `${label[feature]}은(는) 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.` }, 402) };
+}
+/**
+ * [P1R7 B3] 자동 승인(«조용하면 그대로 발행» · DESIGN §5B.9 «Pro = … 자동 승인»)을 이 플랜이 쓸 수 있나.
+ *   🔴 라이브 `plans.features` 는 Phase 0 시드 그대로라 이 키가 **없다** — 없으면 코드 기본값(`PLAN_DEFAULTS`)으로 판정한다(AC-6 «모양이 다르면 코드가 정본»).
+ *      그래서 DDL·라이브 UPDATE 0 으로 오늘부터 맞게 돈다. 운영자가 나중에 값을 넣으면 그 값이 이긴다.
+ *   🔴 모르는 플랜 키(운영자가 새로 만든 플랜)는 **허용** — 모른다고 고객을 막지 않는다(조용한 정지 0).
+ */
+export function autoApproveAllowed(planKey: string, plan: PlanDef): boolean {
+  const v = (plan.features as unknown as Record<string, unknown>).autoApprove;
+  if (typeof v === "boolean") return v;
+  const def = PLAN_DEFAULTS.find((p) => p.key === planKey);
+  const dv = def ? (def.features as unknown as Record<string, unknown>).autoApprove : undefined;
+  return typeof dv === "boolean" ? dv : true;
 }
 /** «첫 발행 전 결제수단 등록» 토글(계약 §1.5 · 플랜 features.requireCardBeforePublish · 기본 false). */
 export function requireCardBeforePublish(plan: PlanDef): boolean { return (plan.features as unknown as Record<string, unknown>).requireCardBeforePublish === true; }
