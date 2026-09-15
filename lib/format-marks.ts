@@ -20,7 +20,7 @@
  *   🔴 순수 함수(DB·네트워크 0). `scripts/verify-format-marks.mts` 가 그대로 돌린다.
  */
 import { type Block, type MarkKind, MARK_KINDS, MARK_LABEL, MARK_BUDGET, type MarkDrop } from "./blocks";
-import { formatCapsOf, canRetract, type FormatCapKey } from "./channel-registry";
+import { formatCapsOf, canRetract, channelSpec, type FormatCapKey } from "./channel-registry";
 
 export interface MarkDemotion { kind: string; why: string; sample?: string; by?: "server" | "runner" }
 /**
@@ -94,7 +94,10 @@ export function formatDemotionNotice(fm: unknown, pieceTitle?: string | null, ch
   const more = rows.length > 3 ? ` 외 ${rows.length - 3}가지` : "";
   /* 🔴 §9-③ «되돌릴 길을 함께 준다» — 이 알림은 **이미 올라간 뒤**에 간다(B2 지적 2026-09-16). 우리 화면에서 고치는 게 아니라
      내릴 수 있는 채널(§5E `canRetract`)이면 «내렸다가 고쳐서 다시 올리기», 아니면 «채널에서 직접 고치기»가 정직한 길이다. 채널을 모르면 둘 다 안 지어내고 «글을 열면 보여 드려요»까지만. */
-  const back = channel ? (canRetract(channel) ? " 고치고 싶으면 글을 내렸다가 고쳐서 다시 올릴 수 있어요." : " 고치고 싶으면 채널에서 직접 바꾸실 수 있어요.") : "";
+  /* 🔴 [C 발견 · B2 확인 2026-09-16] `canRetract` 는 2값이라 **«표에 없는 채널»과 «표에 있고 못 내리는 채널»이 같은 false** 다(화면 단추엔 그게 맞다 — «모르면 안 켠다»).
+     여기선 3값이 필요하다: 표에 없는 채널(새 채널을 pieces 에 먼저 넣고 레지스트리 행을 나중에 넣는 틈)에 «채널에서 직접 바꾸세요»를 주면 **근거 없는 안내**다(AC-92 «모른다»→«못 한다»). 모르면 채널을 안 준 것과 같이 — 문장 없음. */
+  const known = !!channel && !!channelSpec(channel);
+  const back = !known ? "" : (canRetract(channel!) ? " 고치고 싶으면 글을 내렸다가 고쳐서 다시 올릴 수 있어요." : " 고치고 싶으면 채널에서 직접 바꾸실 수 있어요.");
   return {
     title: "이 글에서 못 낸 꾸밈이 있어요",
     body: `${pieceTitle ? `«${String(pieceTitle).slice(0, 30)}» — ` : ""}${head}${more}. 글자는 그대로 실렸고, 글을 열면 무엇이 어떻게 들어갔는지 보여 드려요.${back}`,
