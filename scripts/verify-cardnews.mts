@@ -17,7 +17,7 @@ import { WRITING_CONTRACTS, structureFor, imagesFor, contractSelfConflicts, isCa
 import { structurePrint, structureOverlap, STRUCTURE_OVERLAP_MAX } from "../lib/structure-print";
 import type { Block } from "../lib/blocks";
 import { coinsPerWeek, toRuleKind, type Rule } from "../lib/slots";
-import { COIN_TABLE, AI_IMAGES_INCLUDED, pieceCoinCost } from "../lib/coin-table";
+import { COIN_TABLE, AI_IMAGES_INCLUDED, pieceCoinCost, COIN_TIERS } from "../lib/coin-table";
 import { CHANNELS } from "../lib/channel-registry";
 
 const results: { step: string; ok: boolean; note: string }[] = [];
@@ -160,10 +160,12 @@ const printOf = (types: string[]) => structurePrint(types.map((t) => ({ type: t 
 
   /* 🔴 **오르는 쪽 대조** — 「늘 1」로 굳으면 AI 를 더 써도 안 받는 반대쪽 사고가 난다(메인 지시).
      식이 살아 있다면 AI 를 2장·3장으로 올릴 때 **그만큼 올라야** 한다. */
-  const ai2 = pieceCoinCost("post", 2), ai3 = pieceCoinCost("post", 3);
-  rec("⑦ 🔴 오르는 쪽 — AI 사진을 2장·3장으로 올리면 2·3코인(«늘 1»로 굳지 않았다)",
-    ai2 === COIN_TABLE.blog + COIN_TABLE.image && ai3 === COIN_TABLE.blog + COIN_TABLE.image * 2,
-    `AI 1장 ${pieceCoinCost("post", 1)} · 2장 ${ai2} · 3장 ${ai3} (식 = blog ${COIN_TABLE.blog} + image ${COIN_TABLE.image} × (AI−${AI_IMAGES_INCLUDED}))`);
+  /* [R10-7 · 2026-09-16] 🔴 식이 바뀌었다 — 옛 «blog + image×(AI−1)»(AI 5장 = 5코인)은 등급 셋(간단히 1 · 보통 2 · 프리미엄 3 · 상한 3)으로 내렸다(사장님).
+     이 줄은 그 옛 식을 **리터럴로 베껴 적고** 있었다(AC-78 — 값을 베낀 검사는 남이 값을 바꾸는 순간 낡는다). «오르는 쪽»의 뜻은 그대로 잰다: 등급을 올리면 값이 오른다(«늘 1»로 굳지 않았다). */
+  const ai2 = pieceCoinCost("post", 2, { tier: "standard" }), ai3 = pieceCoinCost("post", 4, { tier: "premium" });
+  rec("⑦ 🔴 오르는 쪽 — 보통(AI 2장)이면 2 · 프리미엄(AI 4장)이면 3 («늘 1»로 굳지 않았다)",
+    ai2 === COIN_TIERS.standard.coins && ai3 === COIN_TIERS.premium.coins,
+    `간단히 AI 1장 ${pieceCoinCost("post", 1, { tier: "simple" })} · 보통 AI 2장 ${ai2} · 프리미엄 AI 4장 ${ai3} (식 = min(등급 코인, AI 장수별 값) · 상한 ${COIN_TIERS.premium.coins})`);
 
   /* 🔴 **바닥 쪽 대조** — AI 를 0장 써도 글값 1코인 아래로는 안 내려간다(음수·0 청구 0). */
   rec("⑦ 바닥 — AI 사진 0장이어도 글값 1코인(0·음수로 안 떨어진다)",

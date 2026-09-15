@@ -510,7 +510,7 @@
      [R8 §4.5 · B] `team_review` — 팀원이 만든 글이 주인을 기다린다(`lib/team.ts notifyOwnersWaiting`). 🔴 `review`(soft) 로 잇지 마라 —
         마감 자동 승인이 이 글을 **아예 안 집기 때문에**(lib/cron/review-deadline.ts) 주인이 안 보면 그대로 멈춰 있다. 그래서 주의(`review_wait`)다.
         링크는 서버가 실어 준다(`/app/pieces.html?status=in_review`) — KIND_LINK 에 또 적지 않는다(두 출처 금지). */
-  UI.KIND_ALIAS = { gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+  UI.KIND_ALIAS = { style_learned: "setup", gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
@@ -869,7 +869,7 @@
      🔴 겁주지 않는다(§3) — 사실 한 줄 → 어떻게 하면 되는지 → 우리가 대신 해 주는 것. */
   /* [R9R10-A · B 확정 2026-09-16] 서식·블록 이름표 — 🔴 `meta.formatUnused[].label` 은 **서버가 실어 준다**(정본 MARK_LABEL). 이 맵은 ①서버 label 이 비었을 때의 예비
      ②`formatCaps` 가 null(«올려 봐야 알아요»)인 종류를 부를 때만 쓴다. 어휘 = 마크 7(bold·underline·italic·value·line·row·emoji) + 블록 타입. */
-  UI.MARK_LABEL = { bold: "굵게", underline: "밑줄", italic: "기울임", value: "핵심 강조", line: "형광펜", row: "나열 강조", emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", place: "장소 카드", h3: "작은 소제목", tip: "팁 상자", summary: "요약 상자", affiliate: "상품 카드", adsense: "광고 자리" };
+  UI.MARK_LABEL = { bold: "굵게", underline: "밑줄", italic: "기울임", value: "핵심 숫자·낱말 강조", line: "문장 형광펜", row: "나열 강조", emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", place: "장소 카드", h3: "작은 소제목", tip: "팁 상자", summary: "요약 상자", affiliate: "상품 카드", adsense: "광고 자리" };
   UI.STYLE_SRC = { url: "링크로 배움", capture: "캡처로 배움", paste: "붙여넣기로 배움" };
   UI.REF_FAIL_SAY = {
     login_wall: "로그인해야 보이는 글이라 저희가 못 열었어요.",

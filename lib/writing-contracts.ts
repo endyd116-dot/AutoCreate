@@ -6,6 +6,7 @@
  */
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
+import { COIN_TIERS, imageSlotsForTier, plannedAiFor, type CoinTier } from "./coin-table";   // [R10-8] 등급 → 분량·구성·사진 자리(표는 coin-table 한 곳 · 순수 리프)
 
 /**
  * 🔴 [R8CLOSE-B1 §B4 · 2026-09-16] **블록 어휘는 `lib/blocks.ts` 한 곳이다.**
@@ -545,6 +546,14 @@ export function soleFormatOf(channel: string): FormatKey | null {
   return c && c.formats.length === 1 ? c.formats[0] : null;
 }
 export function defaultImageCount(channel: string): number { return (WRITING_CONTRACTS[channel] ?? WRITING_CONTRACTS.naver_blog).images.default; }
+/**
+ * [R10-7] 견적 자리(편성표 · 규칙)가 쓰는 **동기** 추정 — 소재·주제군을 아직 모르는 자리라 채널 기본 사진 자리로 «이 등급이면 AI 몇 장»을 센다.
+ *   디렉터가 실제로 정하는 값(`imageCountFor` + `plannedAiFor`)과 **같은 두 함수**를 부른다 — 견적과 차감이 갈릴 수 없게.
+ */
+export function estimateAiImagesFor(channel: string, tier: CoinTier): number {
+  const c = WRITING_CONTRACTS[channel] ?? WRITING_CONTRACTS.naver_blog;
+  return plannedAiFor(tier, imageCountFor(c, null, tier));
+}
 
 /** 문자열 시드 → 결정론 해시(AM hashSeed). */
 export function hashSeed(seed: string): number {
@@ -674,13 +683,70 @@ function addOptional(seq: BlockType[], t: BlockTiers, rnd: () => number): BlockT
   return out.length ? out : seq;
 }
 
-/** [R8-A §2] 주제군별 분량·사진 수 — 값이 없으면 채널 고정값(무회귀). */
-export function lengthFor(c: WritingContract, group?: TopicGroup | null): { min: number; max: number } {
-  return (group && c.lengthByGroup?.[group]) || c.length;
+/**
+ * [R8-A §2] 주제군별 분량·사진 수 — 값이 없으면 채널 고정값(무회귀).
+ *   [R10-8 · 사장님 «전반적인 컨텐츠 퀄리티»] 등급이 **하한을 올린다**: 보통 ≥1,500 · 프리미엄 ≥2,000(`COIN_TIERS.chars`). 간단히는 채널 폭 그대로(오늘까지의 글과 같다).
+ *   🔴 채널 폭 **위로만** 올린다(내리지 않는다 — 계약 하한은 실물 근거다) · 🔴 짧은 채널(쓰레드 500자 상한)에선 상한 200자 아래까지만 — 등급이 채널 한계를 넘게 시키지 않는다.
+ *   🔴 게이트(`ai-tell-gate length`)·프롬프트·검수 화면이 **같은 함수·같은 tier** 로 잰다 — 잣대가 갈리면 «잰 값은 같은데 기준이 다른» 상태가 된다.
+ */
+export function lengthFor(c: WritingContract, group?: TopicGroup | null, tier?: CoinTier | null): { min: number; max: number } {
+  const base = (group && c.lengthByGroup?.[group]) || c.length;
+  if (!tier || tier === "simple") return base;
+  const floor = COIN_TIERS[tier].chars;
+  const min = Math.min(Math.max(base.min, floor), Math.max(base.min, base.max - 200));
+  return { min, max: base.max };
 }
 export function imagesFor(c: WritingContract, group?: TopicGroup | null): { min: number; max: number; default: number } {
   const g = group && c.imagesByGroup?.[group];
   return g || { min: c.images.min, max: c.images.max, default: c.images.default };
+}
+/**
+ * [R10-7] 등급이 있을 때 사진 자리 **상한** — 블로그형 채널(사진 3장 이상 받는 곳)은 등급이 계약 상한을 **넘길 수 있다**(고객이 «AI 사진 4~5장»을 산 것이고 계약 상한은 실물 «보통 이만큼»이지 플랫폼 한계가 아니다).
+ *   🔴 사진을 1~2장만 받는 채널(쓰레드 · 커넥터가 한 장만 올린다)은 **넘기지 않는다** — 그건 플랫폼 사실이라 등급이 못 바꾼다(«없는 길»).
+ */
+export function maxImagesFor(c: WritingContract, tier?: CoinTier | null, group?: TopicGroup | null): number {
+  const img = imagesFor(c, group);
+  if (!tier || img.max < 3) return img.max;
+  return Math.max(img.max, COIN_TIERS[tier].aiImages[1]);
+}
+/** [R10-7] 이 글의 사진 자리 수 — 계약 기본값과 «등급이 굽겠다는 AI 장수» 중 큰 쪽(상한은 `maxImagesFor`). 디렉터 두 경로(사람·자동)가 **같은 함수**를 쓴다. */
+export function imageCountFor(c: WritingContract, group?: TopicGroup | null, tier?: CoinTier | null): number {
+  const img = imagesFor(c, group);
+  const want = tier ? imageSlotsForTier(tier, img.default) : img.default;
+  return Math.max(img.min, Math.min(maxImagesFor(c, tier, group), want));
+}
+/**
+ * [R10-8] 🔴 **등급마다 글도 달라진다** — 사진 수만 다르면 «프리미엄»이 거짓말이 된다(사장님). 구조로 넣는다(규칙과 구조가 싸우면 구조가 이긴다 · AC-63).
+ *   보통 = +목록·표(셋 중 하나라도 있으면 그대로) · 프리미엄 = +체크리스트 +FAQ. 간단히 = 그대로.
+ *   🔴 `tiers.suppress` 에 든 블록은 넣지 않는다(그 채널에선 흔하지 않은 요소) · 🔴 `visualMin` 은 건드리지 않는다(«최소치도 게이트다» · CLAUDE §9 · 2026-09-15 faq 사고) —
+ *      이 함수는 **더하기만** 하고 요구치를 만들지 않으므로 `contractSelfConflicts` 가 그대로 0 이다(검사가 그걸 잰다 · `scripts/verify-coin-tier.mts`).
+ *   꼬리(해시태그·행동 유도 한 줄·FAQ·요약)는 `endWithAction` 이 정한 자리라 그 **앞**에 넣는다.
+ */
+export function applyQualityTier(seq: BlockType[], c: WritingContract, tier?: CoinTier | null): BlockType[] {
+  /* 🔴 `tiers` 가 없는 채널(쓰레드·인스타·영상)은 **아무것도 하지 않는다** — `applyTiers` 와 같은 선. 500자 글에 체크리스트·FAQ 를 꽂으면 그 채널 실물이 아니다(검사 ⑤가 이걸 잡았다). */
+  if (!tier || tier === "simple" || !c.tiers) return seq;
+  const sup = new Set<BlockType>(c.tiers?.suppress ?? []);
+  const out = [...seq];
+  const tailTypes: BlockType[] = ["hashtags", "tip", "faq", "summary"];
+  const tailAt = () => { let i = out.length; while (i > 0 && tailTypes.includes(out[i - 1])) i--; return i; };
+  const midParaAt = () => { const ps = out.map((b, i) => (b === "para" ? i : -1)).filter((i) => i >= 0); return ps.length ? ps[Math.floor(ps.length / 2)] + 1 : Math.max(1, tailAt()); };
+  const ensure = (t: BlockType, at: () => number) => { if (sup.has(t) || out.includes(t)) return; out.splice(at(), 0, t); };
+  if (!(["list", "table", "checklist"] as BlockType[]).some((t) => out.includes(t))) ensure("list", midParaAt);
+  if (tier === "premium") { ensure("checklist", midParaAt); ensure("faq", tailAt); }
+  return out;
+}
+/**
+ * [R10-8] 등급별 프롬프트 줄(① 역할 칸 뒤에 실린다). 🔴 구조는 `applyQualityTier` 가 넣고 여기는 **그 블록을 어떻게 채우나**만 말한다(문장은 부탁 · 구조가 강제 · AC-63).
+ *   검색 최적화: 구글은 «글자 수는 순위와 무관»이라 했고 FAQ 리치결과는 2025-05 에 끝났다(`lib/publish/seo.ts` 머리말) — 그래서 «구조화 데이터»는 HTML 채널의 Article JSON-LD(이미 붙는다) + **검색어 배치**(제목·첫 문단·소제목 하나)로 말한다. 지어낸 SEO 규칙은 넣지 않는다.
+ */
+export function tierPromptLines(tier?: CoinTier | null): string[] {
+  if (!tier || tier === "simple") return [];
+  const lines = ["· 목록·표는 실제 정보(가격·기간·비교·순서)로 채운다 — 장식용 나열 금지."];
+  if (tier === "premium") lines.push(
+    "· 체크리스트는 독자가 따라 할 수 있는 행동 단위로(5~7개) · 자주 묻는 질문은 3개 이상, 각 답은 두 문장 이상.",
+    "· 목표 검색어를 제목·첫 문단·소제목 하나에 자연스럽게 넣는다(같은 문장 반복 금지) · 요약이 있으면 결론을 먼저 말한다.",
+  );
+  return lines;
 }
 
 /**
@@ -843,9 +909,10 @@ export function expandForLength(seq: BlockType[], c: WritingContract, group: Top
 }
 
 /** `seed` 를 주면 3단(필수/선택/억제)을 적용해 골격을 글마다 다르게 낸다. 안 주면 종전 그대로(무회귀). */
-export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean, seed?: number, group?: TopicGroup | null): BlockType[] {
+export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean, seed?: number, group?: TopicGroup | null, tier?: CoinTier | null): BlockType[] {
   const raw = [...(c.structure[format] ?? c.structure[c.formats[0]] ?? NAVER_STORY)];
-  const base = seed === undefined ? raw : endWithAction(expandForLength(applyTiers(raw, c, seed), c, group, seed), c);
+  /* [R10-8] 등급 블록은 3단·분량 늘리기·끝맺음 **뒤**에 더한다(끝맺음 앞에 넣으므로 `tip` 이 계속 마지막이다). 간단히·tier 없음 = 종전 그대로(무회귀). */
+  const base = seed === undefined ? raw : applyQualityTier(endWithAction(expandForLength(applyTiers(raw, c, seed), c, group, seed), c), c, tier);
   let imgs = base.filter((b) => b === "image").length;
   const out: BlockType[] = [];
   for (const b of base) { if (b === "image" && imgs > imageCount) { imgs--; continue; } out.push(b); }

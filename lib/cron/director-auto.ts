@@ -17,8 +17,8 @@
 import { sql } from "drizzle-orm";
 import { q, listAccounts, type AccountRow } from "../accounts";
 import { jsonb, utcDate } from "../db-util";
-import { contractFor, defaultImageCount, coinFormatOf, type FormatKey, type WritingContract } from "../writing-contracts";
-import { pieceCoinCost, AI_IMAGES_INCLUDED } from "../coin-table";
+import { contractFor, defaultImageCount, coinFormatOf, imageCountFor, type FormatKey, type WritingContract } from "../writing-contracts";
+import { pieceCoinCost, DEFAULT_COIN_TIER, plannedAiFor, type CoinTier } from "../coin-table";   // [R10-7·9] 등급 — 사람 경로(director.ts)와 같은 세 함수
 import { toTopic, type Topic } from "../topics";
 import { assignAccount, goalOf, type Affiliate, type PieceSpec } from "../director";
 import { pausedAccountIds } from "../account-slots";
@@ -34,8 +34,8 @@ function wordsOf(c: WritingContract): number {
   const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2);
   return Number.isFinite(w) && w > 0 ? w : 900;
 }
-/** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적(`slots-list.coinCost`)과 **같은 숫자**여야 한다. */
-const pieceCoin = (channel: string, aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format: coinFormatOf(channel, format) });
+/** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적(`slots-list.coinCost`)과 **같은 숫자**여야 한다. [R10-7] 등급을 반드시 넘긴다. */
+const pieceCoin = (channel: string, aiCount: number, format: string | undefined, tier: CoinTier) => pieceCoinCost("post", aiCount, { format: coinFormatOf(channel, format), tier });
 
 /** 그 계정(없으면 그 채널)의 최근 format — 로테이션 재료. 사람 경로와 같은 질의. */
 async function recentFormats(tid: number, accountId: number | null, channel: string): Promise<string[]> {
@@ -124,7 +124,10 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
     /* 조사(으로/로)가 라벨 끝 글자에 따라 달라져 «…구성으로» 로 고정한다(«비교 후기»으로 같은 어색한 문장 0). */
     ? { hint, reason: `규칙에 정해 둔 구성은 ${(c.label.split(" · ")[0] || slot.channel)}에서 쓸 수 없어 «${c.formatLabel[format] || format}» 구성으로 만들었어요.` }
     : undefined;
-  const imageCount = defaultImageCount(slot.channel);
+  /* [R10-9] 🔴 자동 경로의 등급 = **그 계정의 기본값**(안 골랐으면 simple). 고객이 고를 자리가 없는 경로라 계정 기본값이 곧 «글마다 등급»이다. 사람 경로와 같은 세 함수. */
+  const tier: CoinTier = acc.defaultTier ?? DEFAULT_COIN_TIER;
+  const imageCount = imageCountFor(c, null, tier);
+  const aiCount = plannedAiFor(tier, imageCount);
   const intent = topic.factors.intent;
   const affiliate: Affiliate | null = intent === "commercial" ? { provider: "coupang", productQuery: topic.title, slot: "mid" }
     : intent === "mixed" ? { provider: "coupang", productQuery: topic.title, slot: "end" } : null;
@@ -133,11 +136,12 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
   const spec: PieceSpec = {
     key: `${slot.channel}:${acc.id}`, channel: slot.channel, accountId: acc.id, accountHandle: acc.handle,
     format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
-    /* [R8] 기본 = **AI 1장 + 나머지 스톡** — 글 한 편 1코인(사장님 승인값). 자동 경로는 고객이 고를 자리가 없으니 언제나 기본값이다. */
-    images: { count: imageCount, style: c.images.style, heroNeeded: slot.channel === "naver_blog" || slot.channel === "tistory", aiCount: Math.min(imageCount, AI_IMAGES_INCLUDED) },
+    /* [R8] 간단히 = **AI 1장 + 나머지 스톡** — 글 한 편 1코인(사장님 승인값). 보통·프리미엄은 계정 기본값을 따라 AI 를 더 굽는다. */
+    images: { count: imageCount, style: c.images.style, heroNeeded: slot.channel === "naver_blog" || slot.channel === "tistory", aiCount },
+    tier, styleId: acc.defaultStyleId ?? null,   // [R10-4] 계정에 걸어 둔 스타일이 자동 경로의 옷이다(«공장이 돈다»)
     /* [R8-A §4] 자동 경로는 «협찬·무상 제공»을 알 수 없다 — 기본 false. 고객이 검수에서 켠다(켜면 고지가 첫머리에 박힌다). */
     monetize: { affiliate, sponsored: false, gift: false, adDisclosure: !!affiliate },
-    schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(slot.channel, Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
+    schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(slot.channel, aiCount, format, tier), angle: topic.angle,
     formatPick: fpick,   // [R8 §2.2] 왜 이 구성인지 — 사람 경로와 **같은 자리**(pieces.meta.formatPick)
   };
 
