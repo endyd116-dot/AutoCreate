@@ -296,7 +296,9 @@ async function pickPaletteIndex(ctx, hex) {
 async function applyMark(page, ctx, len, expect, kind, seq, fmt) {
   const cap = kind === "line" ? 140 : kind === "underline" ? 80 : 60;
   if (!len || len > cap) return "channel_unsupported";
-  if (!(await tailMatches(ctx, expect))) return "caret_drift";
+  /* `expect` 가 있으면 «내가 방금 친 것을 잡고 있나»를 확인한다. 문단 가운데를 되짚어 칠할 때는
+     호출자가 문단 전체를 한 번 대조해 두므로 여기서는 건너뛴다(그때 `expect` 를 안 준다). */
+  if (expect && !(await tailMatches(ctx, expect))) return "caret_drift";
 
   for (let i = 0; i < len; i++) await page.keyboard.press("Shift+ArrowLeft").catch(() => {});
 
@@ -618,24 +620,70 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
   };
 
   /** 조각들을 **치면서 바로** 칠한다(되돌아가지 않는다 — AM 8차 확정: 「다 쓰고 나중에 칠하기」는 실물이 무너졌다). */
+  /** 조각 하나를 못 냈다고 적는다 — 🔴 조용히 안 버린다(AC-9 · A 가 사람말 칩으로 그린다). */
+  const noteMarkFail = (kind, why, sample) => {
+    missed.markFail = missed.markFail ?? [];
+    if (missed.markFail.length < 40) missed.markFail.push({ kind, why, sample: String(sample).slice(0, 24) });
+  };
+
+  /**
+   * 🔴 **문단을 먼저 전부 평문으로 치고, 그다음 되짚어 칠한다**(2026-09-16 C 실측으로 뒤집었다).
+   *
+   *   ══ 왜 바꿨나 — «조각 경계»는 아무도 안 끊고 있었다 ══
+   *     종전엔 «치고 바로 칠하기»였다. 그러면 칠한 뒤 `ArrowRight` 로 푼 **캐럿이 서식 span 안**에 남고,
+   *     이어서 다음 조각을 치면 그 조각이 **서식을 물려받는다.** C 가 진짜 Chromium 으로 잡은 실물:
+   *       계획 «밑줄 한 토막»(5자) → 실물 **21자**(문단 끝까지 밑줄) · 계획 «12,400원» → «12,400원 입니다.»
+   *     문단 **경계**는 `freshTextBlock` 이 끊지만 조각 **경계**는 끊는 사람이 없었다.
+   *     🔴 그리고 이건 «통문단»이 아니라 «부분»이라 `measureFormatBleedIn` 도 **못 본다** — 자가검사가 통과시킨다.
+   *
+   *   ══ ⚠️ AM 은 이 길에서 한 번 실패했다 — 그래서 무엇이 다른지 적어 둔다 ══
+   *     AM 주석: 「문단을 다 쓰고 나중에 칠하기」는 실물이 무너졌다(노란 도배·문단 두 동강) —
+   *     **에디터가 컴포넌트를 만들며 문단 구조를 바꾸면 «끝에서 N번째» 좌표가 통째로 어긋난다.**
+   *     그 컴포넌트는 **주소가 만드는 링크카드**였다. 우리는 다르다:
+   *       ① 🔴 **주소가 든 문단은 계획층이 강조를 통째로 걷는다**(`url_para`) — 마크가 있는 문단엔 URL 이 **없다**.
+   *          ⇒ 칠하는 동안 비동기로 생길 컴포넌트가 없다(AM 이 무너진 그 조건이 성립하지 않는다).
+   *       ② 🔴 칠하기 **전에 문단 글자를 통째로 대조**한다 — 어긋나면 **한 조각도 안 칠하고 물러난다.**
+   *          AM 에는 이 대조가 없었다(`colorLastTyped` 의 꼬리 확인은 그 사고 **뒤에** 생겼다).
+   *       ③ 좌표는 **문단 끝에서 왼쪽으로만** 간다(`End` 를 안 쓴다 — 문단이 줄바꿈되면 `End` 는 **줄 끝**이라 틀린다).
+   *     그래도 남는 위험은 있다 ⇒ 어긋나면 **안 칠하고 `caret_drift` 로 적는다.** 안 칠한 강조는 아쉬울 뿐이지만
+   *     잘못 칠한 강조는 글을 망가뜨린다(AM #736 의 결론 그대로).
+   */
   const typeParts = async (op) => {
-    const parts = Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }];
+    const parts = (Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }])
+      .filter((p) => p.t);
     const broke = await boundary();
     if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
-    for (const p of parts) {
-      if (!p.t) continue;
-      await page.keyboard.insertText(p.t);
-      if (!p.mark) continue;
-      const r = await applyMark(page, ctx, p.t.length, p.t, p.mark, seq, fmt);
-      if (r === "ok") acc[p.mark] = (acc[p.mark] ?? 0) + 1;
-      else {
-        /* 🔴 조용히 안 버린다 — 발행 보고에 «왜 못 냈나»로 실린다(AC-9 · A 가 사람말 칩으로 그린다). */
-        missed.markFail = missed.markFail ?? [];
-        if (missed.markFail.length < 40) missed.markFail.push({ kind: p.mark, why: r, sample: p.t.slice(0, 24) });
-      }
-      await settle(page, 400, 900);   // 팔레트가 닫히고 커서 서식이 확정된 뒤에 다음 조각을 친다
-    }
+
+    /* ① 전부 평문으로 — 이 순간 문단 안에 **서식 span 이 하나도 없다**(물려받을 것이 없다). */
+    const joined = parts.map((p) => p.t).join("");
+    await page.keyboard.insertText(joined);
     wrote = true;
+    await settle(page, 300, 600);
+
+    /* 조각마다 문단 안 위치 [s, e) — 칠하기는 글자 수를 **안 바꾸므로** 이 좌표는 끝까지 유효하다. */
+    let at = 0;
+    const spans = parts.map((p) => { const s = at; at += p.t.length; return { p, s, e: at }; }).filter((x) => x.p.mark);
+    if (!spans.length) return;
+
+    /* ② 🔴 칠하기 전에 **문단 글자를 통째로 대조**한다(AM 에 없던 문). 어긋나면 한 조각도 안 칠한다. */
+    if (!(await tailMatches(ctx, joined.slice(-60)))) {
+      for (const x of spans) noteMarkFail(x.p.mark, "caret_drift", x.p.t);
+      return;
+    }
+
+    /* ③ 오른쪽 조각부터 되짚어 칠한다 — 캐럿은 문단 끝에 있고 **왼쪽으로만** 간다. */
+    let fromEnd = 0;                                   // 문단 끝에서 캐럿까지 몇 글자인가
+    for (const x of [...spans].sort((a, b) => b.e - a.e)) {
+      const stepLeft = (joined.length - x.e) - fromEnd;
+      for (let i = 0; i < stepLeft; i++) await page.keyboard.press("ArrowLeft").catch(() => {});
+      /* `expect` 를 안 넘긴다 — 꼬리 대조는 위에서 문단 전체로 이미 했다(가운데를 칠할 땐 꼬리가 기댓값과 다르다). */
+      const r = await applyMark(page, ctx, x.e - x.s, "", x.p.mark, seq, fmt);
+      if (r === "ok") acc[x.p.mark] = (acc[x.p.mark] ?? 0) + 1;
+      else noteMarkFail(x.p.mark, r, x.p.t);
+      /* 칠한 뒤 `ArrowRight` 로 풀면 캐럿은 그 조각의 **끝**에 있다. */
+      fromEnd = joined.length - x.e;
+      await settle(page, 400, 900);                    // 팔레트가 닫히고 커서 서식이 확정된 뒤에 다음 조각으로
+    }
   };
 
   for (const op of plan.ops) {
