@@ -112,7 +112,11 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
   await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort)
     VALUES (${tid}, ${pieceId}, 'video', ${report.key.slice(0, 240)},
             ${jsonb({ durationMs: report.durationMs, bytes: report.bytes, frameCount: report.frameCount,
-              ...(report.measured === true ? { containerMs: report.containerMs, videoMs: report.videoMs, audioMs: report.audioMs, plannedMs: report.plannedMs, measured: true } : {}) })}, 0)`);
+              ...(report.measured === true ? { containerMs: report.containerMs, videoMs: report.videoMs, audioMs: report.audioMs, plannedMs: report.plannedMs, measured: true } : {}),
+              /* [R7 §1.5] 프레임 지문 재료 — 🔴 여기서 안 받아 적으면 러너가 보내도 **그 자리에서 사라진다**(심사는 이 meta 만 읽는다).
+                 없으면 키를 안 만든다(빈 문자열로 채우면 심사가 «못 쟀다»와 «닮지 않았다»를 구분하지 못한다 · AC-33). */
+              ...(typeof report.thumbGray === "string" && report.thumbGray.length >= 1_000 && report.thumbGray.length <= 8_192 ? { thumbGray: report.thumbGray } : {}),   // 32×32 그레이 1024B → base64 ≈1368자. 자르지 않는다(자른 base64 는 지문이 아니라 쓰레기다)
+              ...(typeof report.framePhash === "string" && /^[0-9a-f]{16}$/i.test(report.framePhash) ? { framePhash: report.framePhash.toLowerCase() } : {}) })}, 0)`);
   if (report.posterKey) {
     await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort)
       VALUES (${tid}, ${pieceId}, 'thumb', ${report.posterKey.slice(0, 240)}, ${jsonb({ from: "render" })}, 1)`);
