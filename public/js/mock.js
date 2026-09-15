@@ -25,6 +25,7 @@
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const oneChannel = qs.get("oneCh") === "1";   // [사장님 실측] 네이버 계정만 있는 집 — 소재가 전부 한 채널
+  const avatarOn = qs.get("avatar") === "1";   /* [R8 §5.3] 계정 사진이 들어온 집(유튜브 연결 때 자동으로 온다) — 🔴 없는 계정과 나란히 둬서 «있음/없음»이 다르게 보이는지 본다 */
   const closedKnob = qs.get("closed") === "1";  // [R7 §3.1] 이미 탈퇴를 신청해 둔 집(파기 예약 중)
   const gateKnob = qs.get("gate") || "";        // [R8-A] soft = 골격 반복이 걸린 글(막지 않는다) · adpoint = 광고 가리킴(막는다)
   /* [R8-A §2 · B-1 d6c2359] `topicGroup`·`goal`·`contract` 를 서버가 준다(pieces-get).
@@ -204,6 +205,9 @@
     }
     return rows;
   }
+  /* 모의 계정 사진 — 바깥 주소를 쓰면 «열어야 보이는 그림»이 되니 데이터 URI 로(서버는 https 만 받는다는 규칙은 화면 쪽 검사로 따로 지킨다) */
+  /* 모의 계정 사진 — 우리 서버가 주는 그림 자리(같은 출처 파일). 🔴 실서버는 https 만 받는다(accounts.ts) · 화면도 https 와 같은 출처만 그린다 */
+  const AVATAR = "/icon.svg";
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     v: MOCK_V, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100,
@@ -217,7 +221,7 @@
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
-      { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+      { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: avatarOn ? AVATAR : null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
       /* [R8 §3.2] ?ads=1 일 때만 — 워드프레스는 «우리가 직접 위젯을 넣는» 유일한 길이라 그 갈래를 화면에서 보려면 계정이 하나 있어야 한다 */
       ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatar: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
     ],

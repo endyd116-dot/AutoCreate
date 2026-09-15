@@ -257,6 +257,18 @@
     brunch: { label: "브런치", mark: "br" }, naver_clip_post: { label: "클립 게시물", mark: "C" },
   };
   UI.mark = (ch, cls = "") => { const c = UI.CH[ch] || { mark: "?" }; return `<span class="mk ${ch} ${cls}" aria-hidden="true">${c.mark}</span>`; };
+  /* [R8 §5.3 · B3] 계정 사진 — 있으면 사진, **없으면 채널 마크 그대로**.
+     🔴 기본 그림으로 채우지 않는다: 그러면 «사진이 있다»와 «아직 없다»가 같은 얼굴이 된다(서버도 그래서 null 로 둔다 · AC-9).
+     🔴 사진이 있어도 **어느 채널인지는 계속 보인다**(작은 배지) — 계정이 여럿이면 그게 먼저 필요한 정보다.
+     🔴 주소가 죽었으면 채널 마크로 되돌린다 — 깨진 그림이 뜨는 것보다 낫다. */
+  UI.accMark = (a, cls = "") => {
+    const ch = String(a?.channel || ""); const c = UI.CH[ch] || { mark: "?" };
+    /* 🔴 https 또는 **우리 서버의 같은 출처 경로**만 그린다 — http 는 브라우저가 막아 «넣었는데 안 보인다»가 되고(서버도 https 만 받는다),
+       바깥 스킴(data:·javascript: …)은 아예 그리지 않는다. */
+    const url = String(a?.avatar || "");
+    if (!/^https:\/\//i.test(url) && !/^\/[^/]/.test(url)) return UI.mark(ch, cls);
+    return `<span class="mk ph ${cls}" aria-hidden="true"><img src="${UI.esc(url)}" alt="" loading="lazy" onerror="this.closest('.mk').className='mk ${ch} ${cls}';this.closest('.mk').textContent='${UI.esc(c.mark)}'"><i class="mk ${ch}">${c.mark}</i></span>`;
+  };
   UI.chLabel = (ch) => (UI.CH[ch] || {}).label || ch;
 
   /* ── 숫자 카운트업(600ms · reduced-motion 이면 즉시) ── */
