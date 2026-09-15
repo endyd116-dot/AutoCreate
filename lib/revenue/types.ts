@@ -23,6 +23,26 @@ export const FRESHNESS_OF: Readonly<Record<RevenueSource, Freshness>> = {
  */
 export const CONFIRMED_SOURCES: ReadonlySet<RevenueSource> = new Set(["adsense", "coupang", "aliexpress", "linkprice", "meta", "tiktok", "x", "sponsor", "manual"]);
 
+/**
+ * [P1R7 B3 · DESIGN §13.5 «외부 값»] **그 매체의 «집계일»이 KST 인가.**
+ *   우리는 매체가 준 날짜 문자열을 그대로 `revenue_daily.day` 에 넣는다 — 🔴 **옮기지 않는다**(시차만큼 밀어 버리면 매체 리포트와 숫자가 안 맞아
+ *   «우리 화면이 틀렸다»가 된다). 대신 **기준이 다르면 화면이 그 사실을 한 줄로 밝힌다**(«애드센스 기준일»).
+ *   값: `kst` = 한국 날짜 그대로 · `pt` = 미국 태평양(구글 계열 리포트 관례 · 계정 설정에 따라 다를 수 있다) · `provider` = 매체 자체 기준(문서 확인 전).
+ *   ⬜ 실측은 **키가 온 뒤**(§19 기술 «애드센스 Management API 승인»·«쿠팡 subId 집계») — 그때 이 표를 실제 리포트와 대조해 고친다.
+ */
+export type DayBasis = "kst" | "pt" | "provider";
+export const DAY_BASIS_OF: Readonly<Record<RevenueSource, DayBasis>> = {
+  adsense: "pt", youtube: "pt",                     // 구글 리포트는 계정 시간대(대개 PT) 기준일 — 한국 자정과 다르다
+  coupang: "kst", adpost: "kst", adfit: "kst", clip: "kst",   // 국내 매체 = 한국 날짜
+  aliexpress: "provider", linkprice: "provider",    // 문서 확인 전 — 확인되면 kst/pt 로 바꾼다
+  meta: "kst", tiktok: "kst", x: "kst", sponsor: "kst", manual: "kst",   // 사람이 KST 로 적는다
+};
+/** 화면에 한 줄로 붙일 말(없으면 KST 라 굳이 말하지 않는다). */
+export const DAY_BASIS_NOTE: Readonly<Partial<Record<DayBasis, string>>> = {
+  pt: "이 매체는 미국 시간 기준으로 하루를 세요 — 한국 날짜와 하루가 어긋날 수 있어요.",
+  provider: "이 매체가 세는 하루 기준을 아직 확인하지 못했어요 — 한국 날짜와 다를 수 있어요.",
+};
+
 /** 수익 1행(계약 §1.1). day 는 **KST 날짜** · amountKrw 는 정수 원(외화는 currency+fxRate 를 남기고 환산값을 넣는다). */
 export interface RevenueRow {
   source: RevenueSource | string;

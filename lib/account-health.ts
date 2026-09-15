@@ -173,7 +173,7 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
 
     const slots = await q(sql`SELECT id, status, piece_id, slot_date::text AS d FROM slots
       WHERE tenant_id = ${tid} AND account_id = ${aid}
-        AND status NOT IN ('published','skipped','failed','reassigned')
+        AND status NOT IN ('published','skipped','rejected','failed','reassigned')
         AND (publish_at IS NULL OR publish_at > NOW() - interval '1 hour')
       ORDER BY publish_at NULLS LAST, id`);
     if (!slots.length) return out;
@@ -191,7 +191,7 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
     const today = kstDateStr(new Date());
     const usedRows = await q(sql`SELECT account_id, slot_date::text AS d, COUNT(*) AS c FROM slots
       WHERE tenant_id = ${tid} AND account_id IN (${sql.join(room.map((c) => sql`${c.id}`), sql`, `)})
-        AND status NOT IN ('published','skipped','failed','reassigned') AND slot_date >= ${today}::date
+        AND status NOT IN ('published','skipped','rejected','failed','reassigned') AND slot_date >= ${today}::date
       GROUP BY account_id, slot_date`);
     const used = new Map<string, number>();
     for (const r of usedRows) used.set(`${n(r.account_id)}:${String(r.d).slice(0, 10)}`, n(r.c));

@@ -2,7 +2,8 @@
  * lib/ai.ts — Gemini 호출 래퍼(폴백 체인 · JSON 모드 · 미터링). AM 원본: ../AutoMarketing/lib/ai.ts (복사 2026-09-14)
  *   가져온 것: fetch 본문·generationConfig·thinkingBudget 처리(mode flash=0 · pro=답변 예산 + 사고 몫)·에러 분류(isRetryable)·
  *             잘림(MAX_TOKENS) 실패 처리·머리 모델 혼잡 재시도·벽시계 예산(budgetMs)·모델별 비용(ai-cost).
- *   뺀 것: plan-gate·ai_feature_settings cap·BYO 키·결과 캐시·프롬프트 캐시. googleSearch 는 P1R5 §1.7 에서 복원(팩트체크 왕복).
+ *   뺀 것: plan-gate·ai_feature_settings cap·BYO 키·프롬프트 캐시. googleSearch 는 P1R5 §1.7 에서 복원(팩트체크 왕복) ·
+ *          **결과 캐시는 P1R7 B3 에서 이식**(`lib/ai-cache.ts` · 5분 TTL · googleSearch 는 캐시 안 함 · 적중은 costUsd 0 + ai_usage 기록 0).
  *   바꾼 것: 시그니처를 객체 하나로(`callGemini({ purpose, chain, system, user, json, tenantId, ref })`) ·
  *           JSON 파싱 실패 시 **같은 모델 1회 재요청** 후 다음 모델 · 비용은 `ai_usage` 1행(purpose·model·토큰·cost_usd·ref).
  *   🔴 모델 이름 문자열 금지 — `lib/ai-models.ts` 에서 import 한 체인만 받는다. DB 오버레이(`ai_model_overrides.role`)가 있으면 그 체인이 이긴다(60초 캐시·graceful).
@@ -12,6 +13,7 @@ import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 import { calcCost } from "./ai-cost";
 import * as M from "./ai-models";
+import { buildAiCacheKey, tryAiCacheGet, aiCacheSet } from "./ai-cache";   // [P1R7 B3] 5분 응답 캐시(AM 이식)
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -29,6 +31,8 @@ export interface AiOk {
   inputTokens: number;
   outputTokens: number;
   thoughtTokens: number;
+  /** [P1R7 B3] 5분 캐시 적중 — 실제 호출 0 · costUsd 0 · `ai_usage` 기록 없음. */
+  cached?: boolean;
   trace: AiAttempt[];
 }
 export interface AiFail { ok: false; text: null; reason: string; trace: AiAttempt[] }
@@ -206,6 +210,18 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
   const resolved = await resolveChain(a.role, a.chain);
   const chain = resolved.length ? resolved : [M.MODEL_DEFAULT];
   const mode = a.mode ?? "flash";
+  /* [P1R7 B3] 응답 캐시(AM `ai-cache` 이식) — 같은 입력이 5분 안에 다시 오면 **돈을 두 번 쓰지 않는다**.
+     🔴 `googleSearch` 는 캐시하지 않는다(«지금»을 묻는 호출 — 5분 전 답이 틀릴 수 있다).
+     🔴 적중은 `ai_usage` 에 기록하지 않는다(안 쓴 돈을 쓴 것으로 세면 원가·캡이 거짓말을 한다) · `costUsd:0` · `cached:true`. */
+  const cacheKey = a.googleSearch ? null
+    : buildAiCacheKey({ tenantId: a.tenantId ?? null, purpose: a.purpose, chain, role: a.role, system: a.system, user: a.user, json: a.json, mode, temperature: a.temperature, maxOutputTokens: a.maxOutputTokens });
+  if (cacheKey) {
+    const hit = tryAiCacheGet(cacheKey);
+    if (hit) {
+      trace.push({ model: hit.model, ok: true, reason: "cache_hit", ms: 0 });
+      return { ok: true, text: hit.text, json: hit.json, model: hit.model, costUsd: 0, inputTokens: hit.inputTokens, outputTokens: hit.outputTokens, thoughtTokens: hit.thoughtTokens, cached: true, trace };
+    }
+  }
   const MIN_MODEL_MS = 2500;
   const chainStart = Date.now();
   const HEAD_RETRY_MAX = Math.max(0, Math.floor(a.headRetries ?? 1));
@@ -232,6 +248,7 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
       void recordAiUsage({ tenantId: a.tenantId, purpose: okEff ? a.purpose : `${a.purpose}:fail`, model, inTokens: r.inputTokens, outTokens: r.outputTokens, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), ref: a.ref });
     }
     if (okEff) {
+      if (cacheKey && r.text) aiCacheSet(cacheKey, { text: r.text, json: parsed, model, inputTokens: r.inputTokens, outputTokens: r.outputTokens, thoughtTokens: r.thoughtTokens });
       if (i > 0) console.info(`[gemini-${mode}] 폴백 #${i + 1} 성공: ${model} (1차 ${chain[0]} 실패: ${lastReason.slice(0, 80)})`);
       return { ok: true, text: r.text!, json: parsed, model, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), inputTokens: r.inputTokens, outputTokens: r.outputTokens, thoughtTokens: r.thoughtTokens, trace, ...(r.sources ? { sources: r.sources } : {}) };
     }

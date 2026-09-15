@@ -164,7 +164,9 @@ export async function runJob({ chromium, token, job, headed, dryRun }) {
 
 /** 잡 1건을 실행하고 서버에 보고까지. 반환 = 요약 한 줄(로그용). */
 export async function processJob({ chromium, token, job, headed, dryRun }) {
-  const label = `#${job.id} ${job.kind}${job.account?.handle ? ` @${job.account.handle}` : ""}`;
+  // handle 은 이미 «@» 로 시작할 때가 많다(계정 등록 화면이 @ 를 붙여 받는다) → 붙이지 말고 **없을 때만** 붙인다(«@@r7walk» 실측).
+  const handle = String(job.account?.handle ?? "").trim();
+  const label = `#${job.id} ${job.kind}${handle ? ` ${handle.startsWith("@") ? handle : `@${handle}`}` : ""}`;
   log(`▶ ${label}${dryRun ? " (임시저장까지 · 발행 안 함)" : ""}`);
   const result = await runJob({ chromium, token, job, headed, dryRun });
 
