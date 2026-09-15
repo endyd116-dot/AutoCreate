@@ -65,6 +65,9 @@ export interface ScriptInput {
   topic: { title: string; angle: string; intent: string; seasonal?: string };
   persona: { facts: string[]; tone?: string; signature?: string };
   hookType: string; structure?: string[] | null;
+  /** [R8CLOSE · B2] 레퍼런스가 배워 온 «훅이 작동하는 원리»(≤80자 · `TemplateStyle.hookPrinciple`).
+      🔴 `hookType` 은 다섯 갈래뿐이라 **왜 그 훅이 먹히는가**를 못 담는다 — 그걸 담으라고 저장해 놓고 **안 읽고 있었다.** */
+  hookPrinciple?: string | null;
   affiliate?: { productQuery: string } | null;
   /** 재작성 지시(게이트 실패·팩트체크 정정). */
   rewrite?: string | null;
@@ -90,7 +93,7 @@ export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; sc
   const system = [
     inp.rewrite ?? "",
     `[역할] 한국 숏폼 대본 작가. ${inp.channel} ${inp.seconds}초 · 포맷 ${inp.format}: ${FORMAT_RULE[inp.format]}`,
-    `[구조] 첫 문장 = 3초 훅(≤16음절 · 도입어·완만한 질문 금지 · 사실·숫자·반전으로 시작 · 훅 유형 «${inp.hookType}»${HOOK_TYPES.includes(inp.hookType as typeof HOOK_TYPES[number]) ? "" : "(자유)"}) → 본문 → 착지(개인 판단 한 줄) → 마무리(행동 한 줄 · 광고성 CTA 금지).${inp.structure?.length ? ` 서사 단계: ${inp.structure.join(" → ")}` : ""}`,
+    `[구조] 첫 문장 = 3초 훅(≤16음절 · 도입어·완만한 질문 금지 · 사실·숫자·반전으로 시작 · 훅 유형 «${inp.hookType}»${HOOK_TYPES.includes(inp.hookType as typeof HOOK_TYPES[number]) ? "" : "(자유)"}${inp.hookPrinciple ? ` · 훅이 먹히는 원리: «${inp.hookPrinciple}»` : ""}) → 본문 → 착지(개인 판단 한 줄) → 마무리(행동 한 줄 · 광고성 CTA 금지).${inp.structure?.length ? ` 서사 단계: ${inp.structure.join(" → ")}` : ""}`,
     `[분량] 문장 ${b.lines[0]}~${b.lines[1]}개 · 총 ${b.minSyl}~${b.maxSyl}음절(초당 4.6음절 · 무음 시청 자막 본체 · 한 문장 ≤ 28음절) · 컷 ${inp.cuts}개(문장마다 cutIdx 0~${inp.cuts - 1} 배정 · 연속 문장이 같은 컷을 공유해도 된다).`,
     "[금지] 근거 없는 수치·연도·통계(모르면 쓰지 않는다) · 최상급(최고·1위·100%) · 수익 약속(«얼마 번다») · 상투 도입(«오늘은 ~를 알아보겠습니다») · 실존 인물·타인 상호 · 이모지.",
     "[컷 서술] cuts[].subject 는 영어 한 문장(무엇이 보이는가 · 사물·공간·동작 · 인물은 silhouette/back view/stylized 로 · 글자·로고·간판 없음 · 실존 인물 없음). palette 는 짧은 색 조합. redMeasureLine 은 치수·비교 컷에만 true.",

@@ -20,9 +20,11 @@ export const HOOK_TYPES = ["event_pushin", "number_typo", "extreme_closeup", "qu
 export type StyleMode = "graphic" | "hybrid" | "photoreal";
 const PERSON_SIGNAL = /\b(person|people|man|woman|figure|character|worker|student|mom|dad|kid|child)\b/i;
 const STYLIZED_SIGNAL = /\b(stylized|silhouette|low-poly|from behind|back view|faceless|3d character)\b/i;
-const P0_LIKENESS = /\b(celebrity|actor|actress|idol|president|famous|look-alike|lookalike)\b|유명인|연예인|배우|아이돌|대통령|닮은/i;
+/** 🔴 `reference-apply.ts` 도 이 잣대를 쓴다 — 레퍼런스가 배워 온 규칙을 **여기와 다른 목록**으로 거르면 그게 AC-57 이다. */
+export const P0_LIKENESS = /\b(celebrity|actor|actress|idol|president|famous|look-alike|lookalike)\b|유명인|연예인|배우|아이돌|대통령|닮은/i;
 const P0_PHOTOREAL_PERSON = /\b(photoreal(istic)? (person|people|face)|real (person|face)|close-up of (a|the) face)\b/i;
-const TEXT_SIGNAL = /\b(text|letters?|logo|brand name|signage|sign board|caption|subtitle)\b|글자|로고|간판|문구|자막/i;
+/** 🔴 위와 같은 이유로 내보낸다(레퍼런스 규칙 거르기). */
+export const TEXT_SIGNAL = /\b(text|letters?|logo|brand name|signage|sign board|caption|subtitle)\b|글자|로고|간판|문구|자막/i;
 const TEXT_DEMAND_KILL_RE = /(본문|문단|설명문|자막|캡션|장문|줄글|paragraphs?|sentences?|articles?|document ?text|body ?copy|captions?|subtitles?|transcripts?|prose)/i;
 
 export interface CutRisk { level: "p0" | "high" | "warn"; issue: string }
@@ -94,12 +96,21 @@ export function cameraGrammarRule(durationSec: number, pace?: "fast" | "normal" 
   return `CAMERA GRAMMAR: cut ${beats} times inside this shot as instructed above — every cut is an instant change of camera setup, never a slow drift. Within each cut move laterally only (lateral dolly, no crane, no orbit). End the shot with a rapid push-in close-up of about ${PUNCH_IN_ZOOM}x.`;
 }
 
-export interface ShotPromptOpts { durationSec?: number; isHook?: boolean; hookType?: string | null; bakedWord?: string | null; styleMode?: StyleMode | null; palette?: string | null; endcard?: boolean }
+export interface ShotPromptOpts { durationSec?: number; isHook?: boolean; hookType?: string | null; bakedWord?: string | null; styleMode?: StyleMode | null; palette?: string | null; endcard?: boolean;
+  /* ── [R8CLOSE · B2] 레퍼런스가 배워 온 것이 들어오는 자리(없으면 종전과 **한 글자도 안 달라진다**) ── */
+  /** STYLE 절 바탕 — 비면 `DEFAULT_GRAPHIC_STYLE`. */
+  styleBase?: string | null;
+  /** RULES 절에 덧붙는다(≤6 · 이미 `reference-apply` 가 안전 규칙과 싸우는 것을 걸렀다). */
+  extraRules?: string[] | null;
+  /** 컷 안 비트 수 — 🔴 **컷 자신의 pace 가 먼저다**(대본 모델이 그 컷을 보고 정한 값이라 더 구체적이다). */
+  pace?: "fast" | "normal" | "hold" | null;
+}
 
 /** buildShotPrompt — 컷 1개 → t2v 프롬프트(채록 계약: SUBJECT → STYLE → COLOR IS RICH AND CLEAN → CAMERA BEAT → 규칙). */
 export function buildShotPrompt(cut: CutDraft, opts: ShotPromptOpts = {}): string {
   const mode: StyleMode = opts.styleMode ?? "graphic";
-  const style = defuseTextDemand(applyStyleMode(DEFAULT_GRAPHIC_STYLE, mode));
+  /* 🔴 레퍼런스가 배워 온 그림 스타일이 있으면 그것이 바탕이다 — 이 한 줄이 «배워 놓고 안 읽는다»를 끝낸다. */
+  const style = defuseTextDemand(applyStyleMode(String(opts.styleBase ?? "").trim() || DEFAULT_GRAPHIC_STYLE, mode));
   const palette = String(opts.palette ?? cut.palette ?? "").trim();
   const color = defuseTextDemand(palette ? `${palette}, ${DEFAULT_GRAPHIC_COLOR}` : DEFAULT_GRAPHIC_COLOR);
   const dur = Math.max(2, Math.min(GRAPHIC_CUT_SEC, Math.round(Number(opts.durationSec) || GRAPHIC_CUT_SEC)));
@@ -109,6 +120,8 @@ export function buildShotPrompt(cut: CutDraft, opts: ShotPromptOpts = {}): strin
     if (mode === "graphic") subject += STYLIZED_SIGNAL.test(subject) ? " — keep every human figure stylized (no photorealistic skin, no live-action look)" : " — all human figures as stylized 3D characters, silhouette or back view only, no realistic faces";
     else subject += ` — ${WORLD_CAST_CLAUSE}, consistent casting in every shot of this piece, natural skin, no celebrity likeness`;
   }
+  /* 컷 자신의 pace(대본 모델) → 없으면 레퍼런스 pace. 둘 다 없으면 종전과 같은 기본 호흡이다. */
+  const pace = cut.pace ?? opts.pace ?? null;
   const baked = bakedWordOk(opts.bakedWord) ? String(opts.bakedWord).trim() : "";
   const lines: string[] = [`SUBJECT: ${subject}`, `STYLE: ${style}`, `COLOR IS RICH AND CLEAN: ${color}`];
   if (baked) {
@@ -123,7 +136,7 @@ export function buildShotPrompt(cut: CutDraft, opts: ShotPromptOpts = {}): strin
       else if (opener === "contrast") { lines.push(`CAMERA, BEAT ONE (0-${mid}s): two halves of the frame show the before and the after side by side, static`); lines.push(`CAMERA, BEAT TWO (${mid}s-${dur}s): rapid push-in into the "after" half`); }
       else { lines.push(`CAMERA, BEAT ONE (0-${mid}s): the event is ALREADY happening in the very first frame — fast push-in toward the point of change, no establishing shot, no slow build`); lines.push(`CAMERA, BEAT TWO (${mid}s-${dur}s): hold tight on the single most striking detail`); }
     } else {
-      const pieces = splitCutBeats(dur, cut.pace ?? null); let at = 0;
+      const pieces = splitCutBeats(dur, pace); let at = 0;
       const plan = pieces.map((s) => { const from = at; at += s; return `${from}-${at}s`; }).join(" | ");
       lines.push(`CAMERA: this shot is edited as EXACTLY ${pieces.length} hard cuts — ${pieces.map((s) => `${s}s`).join(" + ")} (${plan}). A hard cut means the framing changes instantly to a new angle, a new distance or a different part of the scene — it is NOT a dolly, NOT a zoom and NOT a pan.`);
       lines.push(`CAMERA CONTINUITY: keep the same room, the same character, the same wardrobe and the same lighting across all ${pieces.length} cuts — only the camera setup changes. Cut 1 opens with the event already happening; the last cut ends on a rapid push-in close-up of about ${PUNCH_IN_ZOOM}x.`);
@@ -132,10 +145,12 @@ export function buildShotPrompt(cut: CutDraft, opts: ShotPromptOpts = {}): strin
   const rules: string[] = [baked
     ? `Follow the CAMERA cut count above exactly. No text anywhere in the frame except the single word ${baked} — no other letters, no numerals, no logos, no quotation marks or brackets.`
     : "Follow the CAMERA cut count above exactly. No text, no letters, no numerals, no logos anywhere in the frame."];
-  rules.push(cameraGrammarRule(dur, cut.pace ?? null));
+  rules.push(cameraGrammarRule(dur, pace));
   if (cut.redMeasureLine && !cut.redProp) rules.push("Red is reserved for measurement guide lines only: draw thin red dimension lines with end ticks; state whether each guide line is fixed or moving.");
   else if (cut.redProp) rules.push("This cut contains a red prop — do NOT draw any red measurement guide lines (red stays exclusive to the prop).");
   else rules.push("Do not use red accents (red is reserved for measurement lines, which this cut does not have).");
+  /* 🔴 레퍼런스 규칙은 **여기**다 — 우리 안전 규칙(무인물·무로고)이 **뒤에** 와서 마지막 말이 되게 한다. */
+  for (const r of opts.extraRules ?? []) { const x = String(r ?? "").trim(); if (x) rules.push(defuseTextDemand(x)); }
   rules.push("No real people's likeness, no celebrities, no identifiable real faces, no brand logos or trademarks, no watermark.");
   if (opts.endcard) rules.push("This is the END CARD shot: a calm, clean composition with generous empty space in the upper two thirds so a caption can be placed over it later.");
   lines.push(`RULES: ${rules.join(" ")}`);
@@ -162,7 +177,9 @@ export function tierFor(format: VideoFormat, seconds: VideoSeconds, isHookOrLand
 }
 
 /** 컷 계획 조립(순수) — 창 + 대본 컷 초안 + 변주 → CutPlan[]. */
-export function buildCutPlans(a: { windows: { idx: number; lineIdx: number[]; startMs: number; endMs: number }[]; lines: ScriptLine[]; drafts: CutDraft[]; format: VideoFormat; seconds: VideoSeconds; hookType: string; palette: string; bakedWords?: (string | null)[] }): { plans: CutPlan[]; risks: { cut: number; risks: CutRisk[] }[] } {
+export function buildCutPlans(a: { windows: { idx: number; lineIdx: number[]; startMs: number; endMs: number }[]; lines: ScriptLine[]; drafts: CutDraft[]; format: VideoFormat; seconds: VideoSeconds; hookType: string; palette: string; bakedWords?: (string | null)[];
+  /** [R8CLOSE · B2] 레퍼런스가 배워 온 것 중 **닿는 것만**(`reference-apply.ts applyReferenceStyle`). */
+  refStyle?: { style?: string; rules?: string[]; pace?: "fast" | "normal" | "hold" } | null }): { plans: CutPlan[]; risks: { cut: number; risks: CutRisk[] }[] } {
   const plans: CutPlan[] = []; const risks: { cut: number; risks: CutRisk[] }[] = [];
   const byIdx = new Map(a.lines.map((l) => [l.idx, l]));
   /* 토킹 포맷 컷 종류(계약 §1.3 표 그대로): «**B-roll 3~4** · 나머지 정지 이미지».
@@ -182,7 +199,7 @@ export function buildCutPlans(a: { windows: { idx: number; lineIdx: number[]; st
     const mode: CutPlan["mode"] = a.format === "talking" ? (brollAt.has(i) ? "t2v" : "still") : "t2v";
     const keyword = extractSceneKeyword(w.lineIdx.map((li) => byIdx.get(li)?.text ?? "").join(" ")) ?? "";
     plans.push({ idx: i, startMs: w.startMs, endMs: w.endMs, lineIdx: w.lineIdx, keyword, tier: tierFor(a.format, a.seconds, isHook || (isLast && lead?.role === "landing")), mode,
-      prompt: buildShotPrompt(draft, { durationSec: cutDurationSec(w.startMs, w.endMs), isHook, hookType: a.hookType, palette: a.palette, bakedWord: a.bakedWords?.[i] ?? null, endcard: isLast }) });
+      prompt: buildShotPrompt(draft, { durationSec: cutDurationSec(w.startMs, w.endMs), isHook, hookType: a.hookType, palette: a.palette, bakedWord: a.bakedWords?.[i] ?? null, endcard: isLast, styleBase: a.refStyle?.style ?? null, extraRules: a.refStyle?.rules ?? null, pace: a.refStyle?.pace ?? null }) });
   });
   return { plans, risks };
 }
