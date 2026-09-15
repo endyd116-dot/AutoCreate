@@ -6,7 +6,7 @@
 <title>만들기 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=15">
+<link rel="stylesheet" href="/css/ac.css?v=17">
 </head>
 <body>
 <div class="shell">
@@ -20,8 +20,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=14"></script>
-<script src="/js/mock.js?v=14"></script>
+<script src="/js/ui.js?v=16"></script>
+<script src="/js/mock.js?v=16"></script>
 <script>
 (async () => {
 await UI.boot("create");
@@ -117,6 +117,7 @@ async function addSheet() {
 UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>쇼츠 · 릴스 링크</label><input class="input" name="url" type="url" required placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url"><div class="help"></div></div><p class="muted" style="margin:0 0 4px;font-size:13px">링크의 훅·서사·스타일을 구조로 배워 다음 소재부터 «구조: …»로 붙여요. 영상을 베끼지 않아요.</p>${templates.length ? `<div class="sec">배운 구조</div>${templates.map((x) => `<div class="row" style="padding-left:0;padding-right:0;min-height:44px"><div class="l"><span class="t" style="font-size:14px">${UI.esc(x.name)}</span><span class="d">${(x.structure || []).slice(0, 3).map(UI.esc).join(" → ")}</span></div></div>`).join("")}` : ""}<div class="cta"><button class="btn primary" type="submit">구조 배우기</button></div></form>`, { title: "레퍼런스로 구조 배우기", onOpen: (sh, close) => UI.form(sh.querySelector("#rf"), async (d, f) => {
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
+UI.pullToRefresh(load);   /* [R8 §6.1] 소재 목록은 «새 소식» 화면이라 당겨서 새로고침이 맞다 */
 await load();
 })();
 </script>

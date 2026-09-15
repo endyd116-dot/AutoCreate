@@ -93,12 +93,16 @@ rec("서버에만 있고 모의가 한 번도 안 보여 주는 글 검사 축",
 /* ③ 막는 축 목록 — 화면이 이 목록으로 «고쳐야 하는 것»과 «알려 주는 것»을 가른다. 서버와 다르면 둘 중 하나가 거짓말이 된다. */
 const approveTs = read("lib/content-approve.ts");
 /* 이름 **뒤에서부터** 대괄호를 찾는다 — 이름 안의 `string[]` 을 목록으로 잘못 집지 않게. */
-const bracketList = (text, name) => { const i = text.indexOf(name); if (i < 0) return []; const s = text.indexOf("[", i + name.length), e = text.indexOf("]", s);
+/* 🔴 «못 찾았다»(null)와 «비어 있다»([])를 가른다 — R8 §9 로 `HARD_GATE_KEYS` 가 **빈 배열**이 되는데,
+   둘을 같이 «0개»로 읽으면 하니스가 «서버를 못 읽었다»로 빨개진다(비어 있는 게 정답인 날이 온다). */
+const bracketList = (text, name) => { const i = text.indexOf(name); if (i < 0) return null; const s = text.indexOf("[", i + name.length), e = text.indexOf("]", s);
   return s < 0 || e < 0 ? [] : [...text.slice(s, e).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]); };
 const hardSrv = bracketList(approveTs, "HARD_GATE_KEYS: readonly string[] =");
 const hardUi = bracketList(uiJs, "UI.GATE_HARD =");
-rec("🔴 «예약을 막는 축» 목록이 서버와 같다", hardSrv.length > 0 && hardSrv.join(",") === hardUi.join(","),
-  hardSrv.join(",") === hardUi.join(",") ? `${hardSrv.length}축` : `서버 «${hardSrv.join(" ")}» ≠ 화면 «${hardUi.join(" ")}»`, { hardSrv, hardUi });
+const hardSame = hardSrv !== null && hardUi !== null && hardSrv.join(",") === hardUi.join(",");
+rec("🔴 «예약을 막는 축» 목록이 서버와 같다", hardSame,
+  hardSrv === null ? "서버에서 HARD_GATE_KEYS 를 못 읽었다" : hardUi === null ? "화면에서 UI.GATE_HARD 를 못 읽었다"
+    : hardSame ? (hardSrv.length ? `${hardSrv.length}축` : "0축 — 막는 축이 없다(§9)") : `서버 «${hardSrv.join(" ") || "없음"}» ≠ 화면 «${hardUi.join(" ") || "없음"}»`, { hardSrv, hardUi });
 
 /* ④ 대가 고지 — 문장 하나가 달라도 «고객이 볼 문구»가 달라진다(법 문구라 더 그렇다) */
 const discTs = read("lib/disclosure.ts");
