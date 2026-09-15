@@ -6,7 +6,7 @@
 <title>올라간 글 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=11">
+<link rel="stylesheet" href="/css/ac.css?v=13">
 </head>
 <body>
 <div class="shell">
@@ -35,7 +35,7 @@ const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(
 function row(p) {
   if (privateOf(p)) return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d" style="display:flex;align-items:center;gap:6px;overflow:visible;flex-wrap:wrap">${UI.pill(UI.POST_STATUS, p.status)}<span>공개 전환 필요</span></span></div><a class="lk" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;min-height:44px;display:inline-flex;align-items:center" data-stop>스튜디오 ›</a></button>`;
   const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
-  const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}가 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
+  const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}에서 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
   return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
 }
 function render() {
@@ -66,7 +66,7 @@ function postSheet(p) {
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${processingOf(p) ? '<span class="pill off">처리 중</span>' : UI.pill(UI.POST_STATUS, p.status)}</div>
     ${stuckOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(p.errorKind))}${p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div>` : ""}
     ${privateOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>심사 전엔 비공개로 올라가요 · 유튜브 스튜디오에서 «공개»로 바꾸면 사람들에게 보여요</span></div>` : ""}
-    ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}가 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}
+    ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}에서 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}
     ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
     ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : p.publishedVia === "manual" ? "직접 올림" : "채널 연동"}</span></div>` : ""}
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}

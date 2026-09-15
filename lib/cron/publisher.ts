@@ -28,6 +28,7 @@
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
+import { backgroundBase } from "../site-url";
 import { jsonb, utcDate } from "../db-util";
 import { classifyAndApply } from "../account-health";
 import { requireWritable } from "../guards";
@@ -42,8 +43,14 @@ const MAX_ATTEMPTS = 3;
 /** [P1R5 B-1] 영상 업로드 배경 함수 호출(202) — 실패는 호출부가 awaiting_manual 로 종결한다(조용한 0건 금지). */
 async function triggerVideoPublish(tid: number, pieceId: number, slotId: number | null): Promise<boolean> {
   const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
-  const site = String(process.env.SITE_URL ?? "").replace(/\/$/, "");
-  if (!secret || !site) { console.error(`[cron/publisher] ${!secret ? "INTERNAL_SECRET" : "SITE_URL"} 미설정 — 영상 업로드 호출 불가`); return false; }
+  if (!secret) { console.error("[cron/publisher] INTERNAL_SECRET 미설정 — 영상 업로드 호출 불가"); return false; }
+  /* 🔴 AC-53 — 자기 호출은 **«지금 돌고 있는 이 배포»**로 가야 한다.
+     종전엔 `SITE_URL`(=라이브)이라, 로컬에서 `VIDEO_PROVIDER_STUB=1` 을 켜고 돌려도
+     **배경 함수는 그 변수가 없는 라이브에서 실행**돼 진짜 돈이 나갔다(B-1 이 실제로 $3.63 을 태웠다).
+     로컬인데 주소가 로컬이 아니면 헬퍼가 **던진다** — 삼키지 않고 false 로 종결한다(호출부가 awaiting_manual 로 남긴다). */
+  let site: string;
+  try { site = backgroundBase(); }
+  catch (e) { console.error(`[cron/publisher] 배경 호출 주소 거부 — ${String((e as Error)?.message ?? e)}`); return false; }
   try {
     const r = await fetch(`${site}/api/publish-video-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid, ...(slotId ? { slotId } : {}) }), signal: AbortSignal.timeout(6_000) });
     if (r.status !== 202 && !r.ok) { console.error(`[cron/publisher] 영상 업로드 배경 함수 ${r.status}`); return false; }

@@ -221,15 +221,39 @@ export async function kakaoLogin(page, id, pw, shotKey) {
     await step("k4-콜백후");
   }
 
-  if (/자동입력 방지|보안문자|캡차/.test(seen)) throw BLOCK("captcha", "카카오가 자동입력 방지를 띄웠어요.");
-  if (/2단계 인증|인증번호를 입력|카카오톡으로 인증/.test(seen)) {
-    throw BLOCK("login_fail", "카카오 2단계 인증이 필요해요. 앱에서 «다시 로그인»을 눌러 창에서 직접 로그인해 주세요.");
+  const wall = classifyKakaoLoginWall(page.url(), seen);
+  if (wall) throw BLOCK(wall.kind, wall.message);
+}
+
+/**
+ * classifyKakaoLoginWall — «무슨 벽에 막혔나»를 **순수하게** 가른다(2026-09-15 · 순수 함수로 분리).
+ *   @returns { kind, message } | null(벽 없음 = 통과)
+ *
+ *   🔴 **①성공을 실패로 뒤집던 자리였다.** 종전엔 화면 글자(`seen`)만 보고 «2단계 인증»·«새로운 기기»를 찾았는데,
+ *      이 판정은 **콜백이 끝나 티스토리로 돌아온 뒤**에도 돈다. 그래서 고객 블로그 글에 그 낱말이 있으면
+ *      («카카오 2단계 인증 켜는 법» 같은 글) **성공한 로그인을 `login_fail` 로 뒤집고** 멀쩡한 계정을
+ *      `pending_login` 으로 밀었다. ⇒ 벽 판정은 **카카오 인증 도메인에 있을 때만** 한다.
+ *      (이 파일이 이미 겪은 함정의 형제다 — 그때는 `page.content()` 속 «verify» 한 글자였고, 이번엔 남의 글이다.)
+ *
+ *   🔴 **②모르면 모른다고 한다.** 종전 마지막 줄은 «끝나지 않았어요»라면서도 `login_fail` 이라,
+ *      동의 화면에서 막힌 것(= **우리 문제**)까지 계정을 `pending_login` 으로 밀고 고객을 불렀다.
+ *      전이표상 `unknown` 은 계정을 안 건드리고 건강도만 깎는다 — 이유를 모를 때 맞는 칸은 그쪽이다(AC-10).
+ */
+export function classifyKakaoLoginWall(url, seen) {
+  const u = String(url ?? "");
+  const t = String(seen ?? "");
+  if (!KAKAO_AUTH_HOST.test(u)) return null;                   // 카카오 인증 화면을 벗어났다 = 통과
+
+  if (/자동입력 방지|보안문자|캡차/.test(t)) return { kind: "captcha", message: "카카오가 자동입력 방지를 띄웠어요." };
+  if (/2단계 인증|인증번호를 입력|카카오톡으로 인증|카카오톡으로 로그인 확인/.test(t)) {
+    return { kind: "login_fail", message: "카카오 **2단계 인증**이 필요해요. 앱에서 «다시 로그인»을 눌러 창에서 직접 로그인해 주세요." };
   }
-  if (/새로운 기기|기기 등록|이 기기를 등록/.test(seen)) {
-    throw BLOCK("login_fail", "카카오가 «처음 보는 기기»라며 확인을 요구했어요. 앱에서 «다시 로그인»을 눌러 주세요.");
+  if (/새로운 기기|기기 등록|이 기기를 등록/.test(t)) {
+    return { kind: "login_fail", message: "카카오가 «처음 보는 기기»라며 확인을 요구했어요. 앱에서 «다시 로그인»을 눌러 주세요." };
   }
-  if (/accounts\.kakao\.com/i.test(page.url())) {
-    if (/비밀번호가 일치하지|아이디 또는 비밀번호|다시 확인해 주세요/.test(seen)) throw BLOCK("login_fail", "카카오 아이디 또는 비밀번호가 맞지 않아요.");
-    throw BLOCK("login_fail", `카카오 로그인이 끝나지 않았어요 — 화면="${seen.slice(0, 120)}"`);
+  if (/비밀번호가 일치하지|아이디 또는 비밀번호|다시 확인해\s*주세요/.test(t)) {
+    return { kind: "login_fail", message: "카카오 아이디 또는 비밀번호가 맞지 않아요." };
   }
+  /* 동의 화면에서 막힘·콜백 지연 등 — **우리 문제일 수 있다.** 계정을 세우지 않고 화면 글자를 남긴다. */
+  return { kind: "unknown", message: `카카오 로그인이 끝나지 않았어요(이유를 확인하지 못했어요) — 화면="${t.slice(0, 120)}"` };
 }

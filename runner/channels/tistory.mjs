@@ -32,7 +32,12 @@ const CM_SEL = ".CodeMirror";
    우상단에 «기본모드 ∨»(모드 전환). 텍스트가 자식 span 에 있어 :has-text 가 못 잡을 수 있어 getByText 폴백을 함께 쓴다. */
 const DONE_SEL = "#publish-layer-btn, button:has-text('완료'), a:has-text('완료')";
 const SAVE_SEL = "#save-btn, button:has-text('임시저장'), a:has-text('임시저장'), .btn_save, [class*='save']";
-const PUBLISH_SEL = "#publish-btn, .btn_publish, button:has-text('공개 발행'), button:has-text('공개'), button:has-text('발행')";
+/* 🔴 2026-09-15 실측으로 잡은 폭탄: `:has-text()` 는 **부분일치**라 `button:has-text('공개')` 가 **«비공개»를 집는다**
+   (Playwright 로 직접 확인: `<button>비공개</button>` 가 그 셀렉터에 걸린다).
+   발행 레이어에는 «공개/비공개/보호» 가 나란히 있으므로, 옛 목록대로면 **실발행 첫 시도에 «비공개»를 눌러**
+   «발행했는데 아무도 못 보는 글»이 될 수 있었다 — 그러고도 URL 은 생기니 **성공으로 보고**된다(제일 나쁜 실패).
+   그래서 «공개»라는 느슨한 후보를 **뺐다**. 남긴 것은 전부 «발행» 동작을 뜻하는 것뿐이다. */
+const PUBLISH_SEL = "#publish-btn, .btn_publish, button:has-text('공개 발행'), button:has-text('발행하기'), button:has-text('발행')";
 
 function blogHost(handle) {
   const h = String(handle ?? "").replace(/^@/, "").trim();
@@ -403,7 +408,10 @@ async function playOpsFallback(page, plan, files, shotKey, missed) {
 
 /** 발행 레이어: 카테고리·공개·태그 → 확정. dryRun 이면 레이어 전에 임시저장하고 끝낸다. */
 async function finishPublish(page, plan, options, shotKey, dryRun) {
-  if (dryRun) {
+  /* 🔴 탐침은 **드라이런일 때만** 켜진다. 실발행 중에 이 깃발이 켜져 있으면 «발행한 줄 알았는데 안 나갔다»가 되고,
+     그건 조용한 실패다 — 실발행은 깃발을 무시하고 끝까지 간다. */
+  const probe = dryRun && String(process.env.AC_TISTORY_PROBE_PUBLISH ?? "") === "1";
+  if (dryRun && !probe) {
     /* 🔴 임시저장 버튼을 CSS 로 못 찾으면 글자로(«임시저장») 찾고 클릭 가능한 조상까지 올라간다.
        그래도 없으면 — TinyMCE 티스토리는 **자동 저장**이 돈다(«자동 저장 완료 HH:MM:SS»). 그 지표가 보이면
        드라이런의 목표(발행 없이 초안 저장)는 이미 이뤄진 것이라 성공으로 본다(임시저장까지만 · 발행 0). */
@@ -423,11 +431,47 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
     return { dryRun: true, notes: [saved ? "임시저장 클릭" : "자동저장 확인(버튼 미발견)"] };
   }
 
-  const done = page.locator(DONE_SEL).first();
-  if (!(await done.isVisible({ timeout: 4000 }).catch(() => false))) throw BLOCK("selector_changed", "«완료» 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
-  await done.click({ timeout: 8000 });
+  /* 🔴 후보 목록에 `.first()` 를 쓰면 **DOM 순서상 첫 요소**가 잡힌다 — 그게 숨은 복제본이면 «못 찾았다»가 된다.
+     티스토리 에디터에서 실제로 그랬다(모드 메뉴가 두 벌 · AC-43). 그래서 여기도 **보이는 것**을 고른다. */
+  const visibleOf = async (selList) => {
+    for (const sel of String(selList).split(",").map((x) => x.trim()).filter(Boolean)) {
+      const l = page.locator(sel);
+      const cnt = Math.min(await l.count().catch(() => 0), 4);
+      for (let i = 0; i < cnt; i++) { const c = l.nth(i); if (await c.isVisible().catch(() => false)) return { loc: c, sel }; }
+    }
+    return null;
+  };
+
+  const doneHit = await visibleOf(DONE_SEL);
+  if (!doneHit) throw BLOCK("selector_changed", "«완료» 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+  console.log(`  · [publish] 완료 버튼: ${doneHit.sel}`);
+  await doneHit.loc.click({ timeout: 8000 });
   await settle(page, 1500);
   await shot(page, shotKey, "91-발행레이어");
+
+  /* 🔴 **탐침 모드**(`AC_TISTORY_PROBE_PUBLISH=1`) — «완료»를 눌러 발행 레이어까지만 가고 **발행하지 않는다.**
+     이 구간은 지금까지 **한 번도 지나간 적이 없다**(카나리가 임시저장에서 끝났다). 그래서 실발행 전에
+     «무슨 창이 뜨고 무엇이 성공 신호인가»를 눈으로 확인할 길이 필요하다 — 확인창(AC-42)·죽은 복제 셀렉터(AC-43)가
+     이 자리에 잠복해 있을 확률이 높다. 레이어 안의 실제 요소를 찍어 남기고 거기서 멈춘다. */
+  if (probe) {
+    const layer = await page.evaluate(() => {
+      const box = (n) => { const r = n.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; };
+      const nm = (n) => `${n.tagName.toLowerCase()}${n.id ? "#" + n.id : ""}${String(n.className || "").trim() ? "." + String(n.className).trim().split(/\s+/).slice(0, 2).join(".") : ""}`;
+      const vis = (n) => n.getBoundingClientRect().width > 0 && n.getBoundingClientRect().height > 0;
+      const btns = [...document.querySelectorAll("button,a[role='button'],input[type='radio'],input[type='checkbox'],label")]
+        .filter((n) => vis(n) && /발행|공개|비공개|보호|예약|확인|취소|닫기|카테고리|태그/.test((n.textContent || "") + (n.value || "")))
+        .slice(0, 20).map((n) => `${nm(n)}${JSON.stringify(box(n))}«${((n.textContent || n.value || "").trim()).slice(0, 12)}»`);
+      const inputs = [...document.querySelectorAll("input,textarea")].filter(vis).slice(0, 12)
+        .map((n) => `${nm(n)}[type=${n.type ?? ""}${n.checked ? " checked" : ""}]«${(n.placeholder || "").slice(0, 14)}»`);
+      return { btns, inputs, url: location.href };
+    }).catch((e) => ({ btns: [], inputs: [], url: `probe 실패: ${String(e?.message ?? e).slice(0, 60)}` }));
+    console.log(`  · [publish-probe] 레이어 URL: ${layer.url}`);
+    console.log(`  · [publish-probe] 보이는 버튼/선택: ${JSON.stringify(layer.btns)}`);
+    console.log(`  · [publish-probe] 입력칸: ${JSON.stringify(layer.inputs)}`);
+    const pubHit = await visibleOf(PUBLISH_SEL);
+    console.log(`  · [publish-probe] «공개 발행» 후보: ${pubHit ? pubHit.sel : "🔴 못 찾음 — 실발행 때 여기서 막힌다"}`);
+    return { dryRun: true, notes: ["발행 레이어까지만 확인(발행 안 함)", `버튼 ${layer.btns.length}개 · 발행버튼 ${pubHit ? "찾음" : "못 찾음"}`] };
+  }
 
   // 카테고리(지정이 있을 때만 · 없으면 블로그 기본값)
   const wantCat = String(options?.category ?? "").trim();
@@ -447,19 +491,39 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
   const tags = (plan.tags ?? []).slice(0, 10);
   if (tags.length) {
     try {
-      const box = page.locator("#tagText, input[placeholder*='태그']").first();
-      if (await box.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await box.click({ timeout: 3000 });
-        for (const t of tags) { await page.keyboard.type(t, { delay: 12 }); await page.keyboard.press("Enter"); await settle(page, 120); }
+      const hit = await visibleOf("#tagText, input[placeholder*='태그']");
+      if (hit) {
+        await hit.loc.click({ timeout: 3000 });
+        /* 🔴 **포커스가 태그칸에 실제로 들어갔는지 확인하고서야 타자를 친다.**
+           여기서 Enter 를 누르는데, 포커스가 딴 데(예: «발행» 버튼)에 있으면 **그 Enter 가 발행을 눌러 버린다** —
+           카테고리·공개설정도 안 끝난 채로. 클릭 실패를 삼키던 종전 구조에서 실제로 가능한 사고였다(AC-27 의 짝).
+           확인이 안 되면 태그를 **포기한다**(태그는 부가 정보고, 잘못된 Enter 는 되돌릴 수 없다). */
+        const focused = await hit.loc.evaluate((el) => el === document.activeElement).catch(() => false);
+        if (focused) {
+          for (const t of tags) { await page.keyboard.type(t, { delay: 12 }); await page.keyboard.press("Enter"); await settle(page, 120); }
+        } else {
+          console.log("  · [publish] 태그칸에 포커스가 안 들어가 태그를 건너뜁니다(엉뚱한 곳에 Enter 를 치지 않는다)");
+        }
       }
     } catch { /* 태그 실패해도 발행은 계속 */ }
   }
   await settle(page, 800, 1800);
 
+  /* 🔴 발행 확인창을 **받는다**(AC-42). Playwright 는 핸들러가 없으면 `confirm()` 을 자동으로 «취소»하는데,
+     티스토리가 «발행하시겠습니까?» 를 띄운다면 우리는 조용히 취소를 누르고 **URL 을 45초 기다리다 실패**한다 —
+     화면·로그에 흔적이 없어 원인을 영영 못 찾는다(HTML 모드에서 실제로 이틀을 태운 함정이다).
+     여기서만 수락하고 무슨 말이었는지 남긴다. 끝나면 반드시 걷어낸다(다른 확인창을 대신 눌러 주지 않게). */
+  const pubDialogs = [];
+  const onPubDialog = async (d) => { pubDialogs.push(`${d.type()}«${String(d.message() ?? "").replace(/\s+/g, " ").slice(0, 90)}»`); await d.accept().catch(() => {}); };
+  page.on("dialog", onPubDialog);
+
   const before = page.url();
-  const pub = page.locator(PUBLISH_SEL).first();
-  if (!(await pub.isVisible({ timeout: 4000 }).catch(() => false))) throw BLOCK("selector_changed", "«공개 발행» 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
-  await pub.click({ timeout: 8000 });
+  const pubHit2 = await visibleOf(PUBLISH_SEL);
+  if (!pubHit2) { page.off("dialog", onPubDialog); throw BLOCK("selector_changed", "«공개 발행» 버튼을 찾지 못했어요(에디터 화면이 바뀐 것 같아요)."); }
+  console.log(`  · [publish] 발행 버튼: ${pubHit2.sel}`);
+  await pubHit2.loc.click({ timeout: 8000 });
+  await settle(page, 1200);
+  if (pubDialogs.length) console.log(`  · [publish] 확인창: ${pubDialogs.join(" / ")}`);
 
   // 발행되면 글 주소(/{entryId} 또는 /entry/...)로 이동한다.
   let found = null;
@@ -474,7 +538,11 @@ async function finishPublish(page, plan, options, shotKey, dryRun) {
     await settle(page, 600);
   }
   await shot(page, shotKey, "92-발행후");
-  if (!found) throw BLOCK("unknown", `발행 후 글 주소를 회수하지 못했어요(현재 ${page.url().slice(0, 70)}).`);
+  page.off("dialog", onPubDialog);            // 🔴 반드시 걷어낸다 — 뒤따르는 다른 확인창을 대신 눌러 주지 않게
+  if (!found) {
+    // 확인창이 떴었다면 그 문구가 원인 추적의 전부다 — 실패 사유에 함께 싣는다(«그냥 못 찾았다»로 끝내지 않는다).
+    throw BLOCK("unknown", `발행 후 글 주소를 회수하지 못했어요(현재 ${page.url().slice(0, 70)})${pubDialogs.length ? ` · 확인창=${pubDialogs.join(" / ")}` : " · 확인창 없음"}.`);
+  }
   return { externalUrl: found.url, channelRef: found.id ? `tistory:${found.id}` : `tistory:${found.url.slice(-40)}` };
 }
 

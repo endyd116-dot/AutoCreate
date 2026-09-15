@@ -20,6 +20,7 @@
  *   graceful: 이 파일은 throw 하지 않는다 — 계정 장부 갱신 실패가 발행 파이프라인을 죽이면 안 된다.
  */
 import { sql } from "drizzle-orm";
+import { effectiveDailyCap } from "./warmup";   // [P1R7 §2.6] 워밍업 유효 상한의 단일 출처(B2)
 import { q } from "./accounts";
 import { writeAudit } from "./audit";
 import { kstDateStr } from "./best-time";
@@ -179,14 +180,37 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
     if (!slots.length) return out;
 
     // 받을 수 있는 계정 — 같은 그룹 우선(정렬 키), 오늘 남은 여유를 세며 나눠 준다.
-    const cands = await q(sql`SELECT id, handle, daily_cap, posts_today, health_score, group_id FROM accounts
+    /* 🔴 [P1R7-B2 §2.5-⑦] **같은 IP 로는 옮기지 않는다.**
+       정지는 IP 단위로 번지는 일이 많다(사장님 지시 «한 IP 에서 하나 정지되면 연좌제처럼 다 죽는다»).
+       그런데 승계는 «살아 있는 계정»만 보고 골라서, **방금 정지된 계정과 같은 IP 를 쓰는 계정**으로 옮길 수 있었다 —
+       그러면 옮긴 자리가 며칠 뒤 같이 죽는다. 옮기는 행위가 사고를 키우는 셈이다.
+       두 가지로 거른다: ①같은 프록시(`proxy_id`) ②실제로 같은 IP 로 나간 기록(`last_exit_ip`).
+       ⚠️ 프록시가 없는 계정끼리는 둘 다 NULL 이라 못 가른다(전부 같은 회선이다) — 그건 IP 를 사야 풀리는 문제고,
+          여기서 «NULL 은 서로 다르다»고 우기지 않는다(그러면 안전한 척하게 된다). */
+    const [me] = await q(sql`SELECT proxy_id, last_exit_ip FROM accounts WHERE id = ${aid}`);
+    const myProxy = n(me?.proxy_id) || null;
+    const myIp = me?.last_exit_ip ? String(me.last_exit_ip) : null;
+    /* 🔴 [P1R7-B §2.6 잇기] 상한은 **저장값이 아니라 유효값**이다 — 워밍업 중인 계정은 하루 1건(주간 할당을 쓰면 0)이다.
+       종전엔 이 SQL 이 `posts_today < daily_cap`(저장값)으로 걸러서, **워밍업 중인 새 계정에 정지 계정의 자리를 몰아 줄** 수 있었다
+       (새 계정에 몰아 주는 것이 바로 §2.6 이 막으려는 그 사고다). 그래서 거르기를 SQL 밖으로 꺼내 `effectiveDailyCap` 한 출처로 잰다. */
+    const raw = await q(sql`SELECT id, handle, daily_cap, posts_today, health_score, group_id, created_at, opened_at, warmup_off,
+        (SELECT COUNT(*) FROM posts p WHERE p.account_id = accounts.id
+           AND (p.published_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date >= (date_trunc('week', (NOW() AT TIME ZONE 'Asia/Seoul'))::date)) AS posts_this_week
+      FROM accounts
       WHERE tenant_id = ${tid} AND channel = ${channel} AND id <> ${aid} AND status = 'active'
-        AND COALESCE(last_error_kind,'') <> 'removed' AND posts_today < daily_cap
+        AND COALESCE(last_error_kind,'') <> 'removed'
+        ${myProxy ? sql`AND (proxy_id IS NULL OR proxy_id <> ${myProxy})` : sql``}
+        ${myIp ? sql`AND (last_exit_ip IS NULL OR last_exit_ip <> ${myIp})` : sql``}
       ORDER BY (group_id IS NOT DISTINCT FROM ${groupId}) DESC, health_score DESC, id`);
+    const capOf = (r: Record<string, unknown>) => effectiveDailyCap(n(r.daily_cap), {
+      openedAt: (r.opened_at as string | null) ?? null, createdAt: (r.created_at as string | null) ?? null,
+      off: r.warmup_off === true, postsThisWeek: n(r.posts_this_week),
+    });
+    const cands = raw.filter((r) => n(r.posts_today) < capOf(r));
     /* ★C(P1R2) fix: 여유는 **날짜별**이다. 종전엔 `daily_cap − posts_today`(= 오늘 남은 칸)를 앞으로의 슬롯 **전부**의 예산으로 써서
        한 주치 9자리 중 2자리만 옮기고 7자리를 정지 계정에 그대로 남겼다(실측 2026-09-14 · moved 2 · unmoved 7 — 남은 자리는 발행 때 account_blocked 로 멈춘다).
        각 날짜의 여유 = daily_cap − (오늘이면 posts_today) − 그 계정이 그 날 이미 잡고 있는 자리 수. */
-    const room = cands.map((c) => ({ id: n(c.id), cap: Math.max(1, n(c.daily_cap)), postsToday: n(c.posts_today) }));
+    const room = cands.map((c) => ({ id: n(c.id), cap: Math.max(1, capOf(c)), postsToday: n(c.posts_today) }));   // 유효 상한(워밍업 반영)
     if (!room.length) { out.unmoved = slots.length; return out; }
     const today = kstDateStr(new Date());
     const usedRows = await q(sql`SELECT account_id, slot_date::text AS d, COUNT(*) AS c FROM slots

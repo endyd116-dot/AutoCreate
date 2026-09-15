@@ -21,6 +21,7 @@ import { db } from "../db/index";
 import { jsonb, utcDate } from "./db-util";
 import { decryptObj, encryptObj } from "./creds-crypto";
 import { writeAudit } from "./audit";
+import { publicBase } from "./site-url";
 import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
 import { classifyAndApply } from "./account-health";
 import { finalizePublish } from "./publish/finalize";
@@ -184,9 +185,10 @@ export function hashRunnerToken(token: string): string {
 }
 function newRunnerToken(): string { return `acr_${crypto.randomBytes(24).toString("base64url")}`; }
 
-function siteBase(): string {
-  return String(process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.SITE_URL || "https://autocreate-endyd.netlify.app").replace(/\/$/, "");
-}
+/* 🔴 여기서 만드는 주소는 고객에게 **주고 남는다**(설치 안내에 박히고, 고객이 복사해 둔다) → 정본 우선 `publicBase()`.
+   종전엔 `URL` 을 먼저 봐서 **배포 프리뷰에서 등록하면 며칠 뒤 죽는 주소**가 안내에 박혔다.
+   자기 호출용 `backgroundBase()`(이 배포)와 **일부러 다른 함수**다 — 하나로 합치면 둘 중 하나가 반드시 틀린다(AC-53). */
+const siteBase = publicBase;
 
 export interface RegisteredDevice {
   device: { id: number; name: string; token: string };
@@ -643,6 +645,12 @@ export interface RunnerReportOk {
   /** 이 잡이 실제로 나간 IP(계약 §2.5-4 · 프록시 배정 계정만). 서버가 `accounts.last_exit_ip` 에 적는다. */
   exitIp?: string;
   shotKey?: string;
+  /* 🔴 **`notes` 는 여기 없다 — 러너가 보내도 서버가 버린다.** 일부러 그렇다(메인 판정 2026-09-15).
+     러너 노트를 저장할 자리를 새로 파면 «러너가 하는 말»이 또 하나의 진실 원천이 되고,
+     화면 문구가 러너 판(zip)에 묶여 버린다(고치려면 러너를 다시 배포해야 한다).
+     ⇒ **러너는 «사실»만 구조화해 보낸다**(예: `revenueRows[].raw.amountEstimated`·`amountHead`·`rowsDropped`)
+        **문장은 서버가 만든다**(`lib/revenue/aggregate.ts`). 화면에 가야 할 것을 `notes` 에 담지 마라 — 사라진다.
+     (러너 콘솔 로그로는 여전히 쓸모 있어서 러너 쪽 `notes` 자체는 남겨 뒀다.) */
 }
 /**
  * 실패 보고. `errorKind` 는 계약 P1R2 §2 의 7종 **또는 `"parse"`**(P1R3 §2.1 — 파싱 실패를 0 으로 채우지 않는다 · AC-9).
@@ -652,7 +660,7 @@ export interface RunnerReportOk {
 export interface RunnerReportFail { ok: false; errorKind?: unknown; detail?: string; shotKey?: string; exitIp?: string }
 export type RunnerReportBody = RunnerReportOk | RunnerReportFail;
 
-export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found"; block?: RunnerBlock }
+export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found" | "private"; block?: RunnerBlock }
 
 /**
  * 러너 주장을 믿지 않는다(계약 §2 · DESIGN §8.3) — 보고된 URL 을 서버가 직접 확인한다.
@@ -661,19 +669,50 @@ export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: 
  *   unknown   → 우리가 못 읽은 것(가용성·iframe 본문) — 발행 «사실»을 뒤집지 않는다(확정하되 unverified 도장).
  *   ⚠️ AM 교훈: 네이버 본문은 iframe 안이라 제목 대조가 실패해도 «없다»고 단정하면 오판이 된다.
  */
-async function verifyPublishedUrl(url: string, title?: string | null): Promise<"found" | "not_found" | "unknown"> {
+/**
+ * 🔴 **«비공개로 올라간 글»을 가려내는 표식**(2026-09-15 · AC-55 뒷정리).
+ *
+ *   왜 필요한가: `button:has-text('공개')` 가 **«비공개»를 집을 수 있다**(부분일치 · AC-55). 그러면 글은
+ *   올라가고 주소도 생기지만 **아무도 못 본다.** 그런데 이 확인은 제목으로 판정하므로, 비공개 안내 페이지에는
+ *   제목이 없어서 `unknown` 이 되고 — `unknown` 은 **«확정하되 unverified 도장»** 이라 **발행이 성공으로 끝난다.**
+ *   즉 지금까지 «틀린 성공»이 그대로 통과했다. 여기서 끊는다.
+ *
+ *   ⚠️ **이 낱말 목록은 아직 실물로 확인하지 못했다**(우리 티스토리 계정이 `pending_login` 이라 비공개 글을 못 만들어 봤다).
+ *      그래서 **넓게 잡지 않았다** — 표식이 안 걸리면 종전대로 `unknown` 이다(오탐으로 멀쩡한 발행을 막지 않는다).
+ *      첫 실발행 때 «탐침 1회»로 실제 비공개 페이지를 한 번 열어 이 목록을 확정해야 한다(사장님 체크리스트 2번).
+ */
+const PRIVATE_MARKS = [
+  "비공개글입니다", "비공개포스트", "비공개로설정", "비공개상태",
+  "보호되어있는글", "보호된글입니다", "비밀글입니다",
+  "권한이없습니다", "접근권한이없",
+];
+
+/**
+ * 러너 주장을 믿지 않는다(계약 §2 · DESIGN §8.3) — 보고된 URL 을 서버가 직접 확인한다.
+ *
+ *   🔴 **이 확인이 곧 «로그아웃한 남의 눈»이다.** 서버 `fetch` 에는 그 계정의 쿠키가 없다 —
+ *      러너(= 글쓴이 본인의 브라우저)로는 **절대 못 보는 것**을 여기서만 볼 수 있다.
+ *      비공개 글은 글쓴이 눈에는 멀쩡해 보이므로, 공개 여부를 판정할 수 있는 자리는 **여기 하나뿐**이다.
+ */
+export async function verifyPublishedUrl(url: string, title?: string | null): Promise<"found" | "not_found" | "private" | "unknown"> {
   const u = String(url || "").trim();
   if (!/^https?:\/\//i.test(u)) return "not_found";
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 10_000);
   try {
     const r = await fetch(u, { redirect: "follow", signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoCreate/1.0)" } });
     if (r.status === 404 || r.status === 410) return "not_found";
-    if (!r.ok) return "unknown";
-    const body = await r.text();
+    /* 🔴 403 은 «없다»가 아니라 «못 본다»다 — 비공개의 전형이라 본문까지 읽어 본다(`!r.ok` 로 뭉뚱그리지 않는다). */
+    const body = r.status === 403 || r.ok ? await r.text().catch(() => "") : "";
+    if (!r.ok && !body) return "unknown";
     if (!body) return "unknown";
+    const flat = body.replace(/\s+/g, "");
+    /* 🔴 제목 검사보다 **먼저** 본다. 비공개 안내 페이지가 어쩌다 제목을 품고 있어도(목록·og:title 등)
+       «찾았다»로 넘어가면 그게 바로 «틀린 성공»이다. 못 보는 쪽이 이긴다. */
+    if (PRIVATE_MARKS.some((m) => flat.includes(m))) return "private";
+    if (!r.ok) return "unknown";
     const tt = String(title ?? "").replace(/\s+/g, "").slice(0, 20);
     if (!tt) return "found";
-    return body.replace(/\s+/g, "").includes(tt) ? "found" : "unknown";
+    return flat.includes(tt) ? "found" : "unknown";
   } catch { return "unknown"; }
   finally { clearTimeout(t); }
 }
@@ -875,12 +914,40 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
       if (pieceId) await failPublishPiece(tid, pieceId, block);
       return { ok: true, status: "failed", reason: "verify_not_found", verified: "not_found", block };
     }
-    const verified: "server" | "unverified" = v === "found" ? "server" : "unverified";
+    const verified: "server" | "unverified" | "private" = v === "found" ? "server" : v === "private" ? "private" : "unverified";
     const fin = await finalizePublish(pieceId, {
       via: "runner", externalUrl, tenantId: tid,
       ...(channelRef ? { channelRef } : {}),
       ...(accountId ? { accountId } : {}),
     });
+    /* 🔴 **비공개로 올라갔다** — 여기서 «실패»로만 끝내면 안 된다.
+       글은 **이미 채널에 존재한다.** 확정(finalizePublish)을 건너뛰면 `external_url` 이 안 남고,
+       그러면 발행 멱등 게이트(«주소 있으면 재게시 금지»)가 붙잡을 것이 없어져 **같은 글이 두 번 올라간다.**
+       그래서 순서는 «확정 먼저 → 그다음 정직하게 표시»다:
+         ① 주소를 남겨 중복을 막고  ② 글은 «공개 아님»으로 도장 찍고  ③ 고객에게 할 일을 알리고  ④ 운영 감사에 남긴다.
+       고객이 할 일은 **재발행이 아니라 «공개로 바꾸기»** — 알림 문구가 그걸 정확히 말해야 한다. */
+    if (v === "private" && fin.ok) {
+      const postId = n(fin.postId);
+      if (postId) {
+        /* jsonb 부분갱신 금지(PITFALLS #1) — read→merge→write. `public:false` 는 «모른다»가 아니라 «확인했고 아니다»다. */
+        const [p] = await q(sql`SELECT stats FROM posts WHERE tenant_id = ${tid} AND id = ${postId} LIMIT 1`);
+        const cur = (p?.stats && typeof p.stats === "object" ? { ...(p.stats as Record<string, unknown>) } : {}) as Record<string, unknown>;
+        await q(sql`UPDATE posts SET stats = ${jsonb({ ...cur, public: false, publicCheckedAt: new Date().toISOString() })}
+          WHERE tenant_id = ${tid} AND id = ${postId}`).catch((e) => console.error("[runner-jobs] private stamp failed", e));
+      }
+      /* 🔴 `void` 로 던지지 않는다 — 알림·감사는 **기다린다**(안 그러면 함수가 끝나며 조용히 사라진다).
+         ⚠️ 문구를 «비공개입니다»로 단정하지 않는다. 낱말로 가리는 방식이라 **오탐이 가능하다** —
+            «글을 비공개로 설정하는 방법» 같은 글은 본문에 그 말이 있어서 걸린다(실측으로 확인 · `verify-public-check.mts`).
+            그래도 이 방향을 고른 이유: **조용한 «틀린 성공»보다 시끄러운 헛경보가 낫다.**
+            헛경보는 고객이 글을 열어 보면 5초에 끝나고, 틀린 성공은 아무도 모른 채 남는다. */
+      await notify(tid, "publish", "글이 비공개로 보여요 — 확인해 주세요",
+        "로그인하지 않은 상태로 열어 보니 **글이 안 보였어요**(비공개일 수 있어요). 다시 올리지 마시고(중복이 됩니다) 채널에서 공개 설정을 확인해 주세요.", externalUrl);
+      await writeAudit({
+        tenantId: tid, action: "publish_not_public", actorType: "system", target: `piece:${pieceId ?? 0}`,
+        detail: { externalUrl, channel: kind.replace("publish.", ""), accountId: accountId ?? null },
+        riskLevel: "high",
+      });
+    }
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, externalUrl, channelRef: channelRef ?? null, verified })}, updated_at = NOW() WHERE id = ${jobId}`);
     if (!fin.ok) {
@@ -998,9 +1065,40 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   if ((kind === "verify.post_alive" || kind === "revenue.stats") && okBody.stats) {
     const postId = n(payload.postId);
     if (postId) {
+      const extra: Record<string, unknown> = {};
+      /* 🔴 **러너의 «살아 있다»는 공개 여부의 증거가 아니다**(2026-09-15 · AC-55 뒷정리).
+         이 잡은 **그 계정의 로그인된 프로필**에서 돈다(`runner/core.mjs` 가 `profileKey` + `applyCookies`).
+         글쓴이 자신의 눈으로 열면 **비공개 글도 멀쩡하게 보인다** — 러너의 «비공개입니다» 검사는
+         구조적으로 **남의 글에만** 걸린다. 그래서 «올렸는데 비공개»는 발행 때도, 7일 뒤 확인 때도 안 잡혔다.
+         공개 여부를 판정할 수 있는 자리는 **쿠키가 없는 서버**뿐이라(위 `verifyPublishedUrl` 주석) 여기서 한 번 더 본다.
+         ⚠️ 발행 잡이 아니라 **확인 잡**이므로 결과를 뒤집지 않는다 — 도장만 찍고 알린다(AC-9: 모르면 아무 키도 안 남긴다). */
+      if (kind === "verify.post_alive" && okBody.stats.alive !== false) {
+        const u = String(payload.externalUrl ?? "");
+        const ttl = String(payload.title ?? "").trim();
+        if (u) {
+          const v = await verifyPublishedUrl(u, ttl || null);
+          if (v === "private") {
+            extra.public = false;
+            extra.publicCheckedAt = new Date().toISOString();
+            await notify(tid, "publish", "7일 전 올린 글이 안 보여요 — 확인해 주세요",
+              "로그인하지 않은 상태로 열어 보니 **글이 안 보였어요**(비공개일 수 있어요). 다시 올리지 마시고(중복이 됩니다) 채널에서 공개 설정을 확인해 주세요.", u);
+            await writeAudit({
+              tenantId: tid, action: "publish_not_public", actorType: "system", target: `post:${postId}`,
+              detail: { externalUrl: u, at: "alive7", accountId: accountId ?? null }, riskLevel: "high",
+            });
+          } else if (v === "found" && ttl) {
+            /* 🔴 `ttl` 을 **반드시** 같이 본다. 제목이 없으면 `verifyPublishedUrl` 은 200 이기만 해도 «found» 라
+               (블로그 첫 화면으로 튕긴 것도 통과한다) — 그 «found» 로 `public:true` 를 찍으면
+               우리가 막으려던 바로 그 **틀린 초록**을 우리 손으로 찍는 셈이다. 제목이 맞았을 때만 공개로 본다. */
+            extra.public = true;
+            extra.publicCheckedAt = new Date().toISOString();
+          }
+          // `unknown`·`not_found`·제목 없음 은 **아무 키도 안 남긴다** — «못 읽었다»를 «비공개»로도 «공개»로도 바꾸지 않는다(AC-9).
+        }
+      }
       const [p] = await q(sql`SELECT stats FROM posts WHERE tenant_id = ${tid} AND id = ${postId} LIMIT 1`);
       const cur = (p?.stats && typeof p.stats === "object" ? { ...(p.stats as Record<string, unknown>) } : {}) as Record<string, unknown>;
-      const merged = { ...cur, ...okBody.stats, lastSyncAt: new Date().toISOString() };
+      const merged = { ...cur, ...okBody.stats, ...extra, lastSyncAt: new Date().toISOString() };
       await q(sql`UPDATE posts SET stats = ${jsonb(merged)} WHERE tenant_id = ${tid} AND id = ${postId}`);
     }
   }

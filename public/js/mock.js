@@ -15,10 +15,15 @@
   const todayYmd = ymd(0);
   const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
   const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
-  const managedPer = qs.get("managed") === "account" ? "account" : "";   // [R7 §4.5] 계정당 요금 모양(서버가 per 를 실을 때)
+  const estKnob = qs.get("est") === "1";          // [B2] «예상수입» 도장이 찍힌 매체가 섞인 달
+  const slotsKnob = qs.get("slots") || "";        // [R7 §3.6] none·waiting·active·paused — 계정 슬롯 상태
+  const slotCoinsShort = qs.get("slotCoins") === "0";
+  const usedSlotOn = qs.get("usedSlot") !== "0";   // [R7 §1.6] 사람이 만들면 오늘 자리를 쓴다(기본) · 0 이면 예전처럼 새 자리
+  const slotRace = qs.get("slotRace") === "1";      // 제안엔 «오늘 자리»가 있었는데 확정 사이에 그 자리가 찼다(확정 응답에 usedTodaySlot 없음 = 확정이 정본)
   const judgePending = qs.get("judgePending") === "1";   // [R7 §1.5] 못 잰 축(보류)이 있는 심사표
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
+  const oneChannel = qs.get("oneCh") === "1";   // [사장님 실측] 네이버 계정만 있는 집 — 소재가 전부 한 채널
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
@@ -34,7 +39,10 @@
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
     ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
     ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
-  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const o = { key, label, category, publishVia, status: chOpen ? "active" : status, connectMethod, configured }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const st = chOpen ? "active" : status;
+    /* [B3 020fb15] 서버가 주는 한 칸 — 라이브 실측: 블로거는 status=active 인데 우리 앱 키가 없어 못 붙는다 */
+    const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
+    const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -62,11 +70,12 @@
 
   const DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
   // [v1.1] GateKey 12 · 순서 고정(5C.2 8검사 + 16B 4검사)
+  /* [AC-52 · 2026-09-15 · lib/ai-tell-gate.ts GATE_LABEL 에서 그대로 복사] 🔴 라벨은 **통과형 문장**이다 — «문단 시작 반복 ✓» 처럼 명사형이면 뜻이 반대로 읽힌다 */
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
-    { key: "cliche", label: "상투적 표현", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작 반복", pass: true }, { key: "bullet_ratio", label: "글머리표 비율", pass: true, detail: "18%" },
-    { key: "sentence_variance", label: "문장 길이 변화", pass: true }, { key: "translationese", label: "번역투", pass: true, detail: "0건" }, { key: "superlative", label: "과장 표현", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
-    { key: "persona", label: "페르소나 재료", pass: true, detail: "3곳" }, { key: "visual_min", label: "사진 수", pass: true, detail: "8장" },
-    { key: "disclosure", label: "제휴 고지 첫 블록", pass: ok }, { key: "banned_words", label: "금칙어", pass: true, detail: "0건" }, { key: "similarity", label: "다른 계정 글과 유사도", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 수", pass: true, detail: "1개" } ] });
+    { key: "cliche", label: "상투 표현 없음", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작이 다양함", pass: true }, { key: "bullet_ratio", label: "불릿이 본문을 대신하지 않음", pass: true, detail: "18%" },
+    { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "근거 없는 최상급 없음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
+    { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
+    { key: "disclosure", label: "제휴 고지 첫머리", pass: ok }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true } ] });
 
   const fresh = qs.get("fresh") === "1";
   const runnerOn = qs.get("runner") === "on";
@@ -111,14 +120,16 @@
     variant: { hookType: HOOKS[i % HOOKS.length], palette: PALETTES[(Number(accountId || 0) + i) % PALETTES.length], voiceId: VOICES[i % VOICES.length].voiceId },
     variantLabels: { hook: HOOK_KO[HOOKS[i % HOOKS.length]], palette: PALETTE_KO[PALETTES[(Number(accountId || 0) + i) % PALETTES.length]], voiceId: VOICES[i % VOICES.length].name }, /* 사람말은 서버가 붙인다(화면 하드코딩 0) */
     cuts: format === "clip" ? 3 : seconds >= 60 ? 9 : 5, disclosure: { badge: true, descriptionFirstLine: true } });
-  const JUDGE_AXES = [["hook3s", "훅 3초 안에"], ["caption_sync", "자막 싱크"], ["frame_gap", "프레임 공백"], ["loop_seam", "루프 이음새"], ["cut_quality", "컷 화질"], ["policy", "정책 · 고지"], ["similarity", "계정 간 변주"], ["audio", "소리 정규화"], ["duration_fit", "길이 맞음"]];
-  const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "cut_quality") || (grade === "P0" && key === "policy"); const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
-      if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "cut_quality") o.detail = "4번 컷 화질 낮음 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "policy") o.detail = "정책 위반 의심 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
+  /* [AC-52 · 2026-09-15 · lib/video/judge.ts AXIS_LABEL 에서 그대로 복사] 🔴 손으로 고치지 마라 — 서버가 정본이고, 다르면 verify-label-surface 가 빨강이다 */
+  const JUDGE_AXES = [["hook_first", "첫 컷이 훅"], ["safe_area", "자막·배지가 안전영역 안"], ["reading_time", "자막 읽을 시간 충분"], ["text_broken", "깨진 글자 없음"], ["black_margin", "검은 여백 없음"], ["frames_not_blank", "빈 프레임 없음"], ["cut_rhythm", "컷 리듬 살아 있음"], ["forbidden", "금칙·내부 문자열 없음"], ["disclosure", "제휴 고지(배지·자막·설명란)"], ["duration_fit", "길이 규격 안"], ["similarity", "다른 계정 영상과 겹치지 않음"]];
+  const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "black_margin") || (grade === "P0" && key === "forbidden");   /* [AC-52] 서버 GRADE_OF 의 P1·P0 축으로 */ const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
+      if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "black_margin") o.detail = "4번 컷 아래 검은 여백 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "forbidden") o.detail = "내부 문자열이 남았어요 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
   const POSTER = "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='540' height='960'><rect width='540' height='960' fill='#191F28'/><rect x='60' y='380' width='420' height='120' rx='16' fill='#2A2A32'/><text x='270' y='452' font-family='sans-serif' font-size='40' font-weight='800' fill='#fff' text-anchor='middle'>에어프라이어 기름때</text></svg>");
   const SRT = "data:text/plain;charset=utf-8," + encodeURIComponent("1\n00:00:00,000 --> 00:00:03,000\n제휴 링크가 있어요\n\n2\n00:00:03,000 --> 00:00:07,500\n눌어붙은 기름, 3분이면 끝나요\n\n3\n00:00:07,500 --> 00:00:13,000\n베이킹소다 한 스푼이 전부예요\n");
   const VDESC = "이 영상은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n베이킹소다 한 스푼이면 눌어붙은 기름이 녹아요. 준비물과 순서를 58초에 담았어요.\n\n#에어프라이어 #청소 #살림팁";
   const videoAssets = () => [{ id: 9001, kind: "video", url: "", meta: { durationMs: 58000, bytes: 8412300, frameCount: 1740 } }, { id: 9002, kind: "srt", url: SRT }, { id: 9003, kind: "thumb", url: POSTER }];
-  const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "제휴 고지(배지 · 시작 자막 · 설명란 첫 줄)", pass: true }, { key: "banned_words", label: "금칙어", pass: true, detail: "0건" }, { key: "superlative", label: "과장 표현", pass: true, detail: "0건" }];
+  /* [AC-52] 영상 piece 에도 붙는 글 게이트 칸 — 라벨은 서버 GATE_LABEL 그대로 */
+  const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "제휴 고지 첫머리", pass: true }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "superlative", label: "근거 없는 최상급 없음", pass: true, detail: "0건" }];
   /* 완성 = in_review + 설명란 body(첫 줄 고지) + blocks(video·srt·hashtags) + assets(video·thumb·srt) + gate.judge(§1.4 done) */
   const finishVideo = (p, grade = "P2") => { p.status = grade === "P0" ? "in_review" : "in_review"; p.meta.stage = "done"; p.meta.chainStage = { stage: "done", at: iso(Date.now()) }; p.gateOk = grade !== "P0"; p.body = VDESC; p.blocks = [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["에어프라이어", "청소", "살림팁"] }]; p.assets = videoAssets();
     p.gate = { ok: grade !== "P0", rewritten: grade === "P1", checks: VIDEO_GATE_CHECKS, judge: judgeReport(grade) }; delete p._v0; const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "in_review"; };                                          // [P1R4] §1.5 게이트 견본(ai_cost_cap · banned_category)                                                                    // [P1R4] KICC 키 없음 → «결제 준비 중이에요»(no-op 정직)
@@ -150,7 +161,11 @@
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     v: 7, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
-    accounts: fresh ? [] : [
+    /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
+    accounts: fresh ? [] : oneChannel ? [
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
+      { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatar: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
+    ] : [
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
@@ -189,6 +204,10 @@
       { id: 2, channel: "tistory", kind: "post", accountMode: "fixed", accountId: 2, every: "week", count: 2, weekdays: [2, 4], preferredHour: 13, active: true },
       { id: 3, channel: "youtube_shorts", kind: "shorts", accountMode: "auto", every: "week", count: 2, weekdays: [2, 5], preferredHour: 18, active: true }, // [P1R5] kind shorts 규칙(주 2회 · 편당 video_60)
     ],
+    /* [R7 §3.6] 산 계정 슬롯 — ?slots=waiting|active|paused (기본 없음) */
+    slots2: slotsKnob === "waiting" ? [{ id: 4101, kind: "account_slot", status: "waiting_ip", coins: 24, krw: 12000, accountId: null, proxyId: null, autoRenew: true, periodsCharged: 0, label: "계정 1개 더 + 전용 IP", managed: false }]
+      : slotsKnob === "active" ? [{ id: 4102, kind: "account_slot", status: "active", coins: 24, krw: 12000, accountId: 1, proxyId: 9, autoRenew: true, periodsCharged: 2, startedAt: iso(now - 12 * 86400e3), expiresAt: iso(now + 18 * 86400e3), daysLeft: 18, label: "계정 1개 더 + 전용 IP", managed: false }]
+      : slotsKnob === "paused" ? [{ id: 4103, kind: "account_slot_managed", status: "paused", coins: 50, krw: 25000, accountId: 4, proxyId: null, autoRenew: true, periodsCharged: 1, pausedAt: iso(now - 2 * 86400e3), label: "관리형 계정 1개", managed: true }] : [],
     kindsSet: kindsKnob !== "none",   // [R7 §1.1] 온보딩을 안 거친 테넌트(?kinds=none) — 토글은 보이고 꺼짐
     settings: { kinds: kindsKnob === "text" || kindsKnob === "none" ? ["text"] : ["text", "video"], autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: planKnob === "starter" && !keptAuto ? "require_confirm" : "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
@@ -222,15 +241,15 @@
     tickets: fresh ? [] : [{ id: 702, subject: "네이버 글이 안 올라가요", status: "progress", createdAt: iso(now - 26 * 3600e3), updatedAt: iso(now - 2 * 3600e3), messages: [{ from: "customer", text: "어제부터 네이버에 글이 안 올라가요. 프로그램은 켜 두었어요.", at: iso(now - 26 * 3600e3) }, { from: "operator", text: "확인해 보니 네이버 로그인이 풀려 있어요. «내 계정 → 다시 로그인»을 눌러 주시면 PC 프로그램이 로그인 창을 열어요.", at: iso(now - 2 * 3600e3) }] }, { id: 690, subject: "코인 만료가 언제인가요", status: "resolved", createdAt: iso(now - 9 * 86400e3), updatedAt: iso(now - 8 * 86400e3), messages: [{ from: "customer", text: "충전한 코인은 언제까지 쓸 수 있나요?", at: iso(now - 9 * 86400e3) }, { from: "operator", text: "충전한 코인은 1년, 플랜 포함 코인은 그달 말까지예요.", at: iso(now - 8 * 86400e3) }] }],
     topicsRefresh: null, // [v2.9] { startedAt, finishedAt?, added?, error? } — tenants.settings.topicsRefresh 자리
     /* ── [P1R3] 수익(계약 §1.4 · DESIGN §9) ── */
-    revRows: revEmpty ? [] : revSeed(),          // revenue_daily 행 — 수집 못 한 날은 «행 자체가 없다»(AC-9)
-    revSources: revEmpty ? [] : [
+    revRows: revEmpty || fresh ? [] : revSeed(),   // [여정 점검 12] ?fresh=1 = 새로 가입한 집 — 수익 행이 남아 있으면 «첫 화면»을 영영 못 본다          // revenue_daily 행 — 수집 못 한 날은 «행 자체가 없다»(AC-9)
+    revSources: revEmpty || fresh ? [] : [
       { id: 1, source: "adsense", accountId: 2, method: "api", status: "connected", lastSyncAt: iso(now - 6 * 3600e3) },
       { id: 2, source: "adpost", accountId: 1, method: "runner", status: "connected", lastSyncAt: iso(now - 11 * 3600e3) },
       { id: 3, source: "coupang", accountId: 1, method: "api", status: "connected", lastSyncAt: iso(now - 3 * 3600e3) },
       { id: 4, source: "youtube", accountId: 4, method: "api", status: "not_configured" },
       { id: 5, source: "adfit", accountId: 2, method: "runner", status: "error", lastSyncAt: iso(now - 3 * 86400e3), lastError: "auth" },
     ],
-    adState: revEmpty ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
+    adState: revEmpty || fresh ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 7) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -380,6 +399,9 @@
       if (S.reassigned) todo.push({ kind: "reassign", title: `@${S.reassigned.fromHandle} 계정이 정지됐어요`, desc: `글 ${S.reassigned.moved}건을 @${S.reassigned.toHandle} 로 옮겼어요`, link: "/app/accounts.html", tone: "warn" });
       if (review) { const one = review === 1 ? S.pieces.find((p) => p.status === "in_review") : null; todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: one ? `/app/piece.html?id=${one.id}` : "/app/pieces.html", tone: "info" }); } // ★C fix: 1건이면 그 글로
       if (S.slots.some((s) => s.status === "no_topic" && s.date >= todayYmd)) todo.push({ kind: "slot_no_topic", title: "소재가 떨어졌어요", desc: "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", link: "/app/create.html", tone: "warn" }); // ★C fix: 소재는 create.html
+      /* [여정 점검 13] 체험 끝·결제 멈춤은 **서버 todo(kind:"plan")가 정본** — 모의도 같은 줄을 보낸다(화면은 이제 안 얹는다) */
+      if (blocked === "readonly") todo.push({ kind: "plan", title: "체험이 끝났어요 — 요금제를 골라 주세요", desc: "만든 글과 편성표는 그대로예요. 요금제를 고르면 바로 이어서 돼요.", link: "/app/plan.html", tone: "warn" });
+      else if (blocked === "suspended") todo.push({ kind: "plan", title: "결제가 안 돼서 잠시 멈췄어요", desc: "카드를 확인하면 바로 이어서 돼요.", link: "/app/plan.html", tone: "warn" });
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: `${CHANNELS.filter((c) => c.status === "active").slice(0, 3).map((c) => c.label).join(" · ") || "지금 열린 채널"} 중 하나면 돼요`, link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
@@ -467,16 +489,33 @@
       inv.taxInvoice = { status: "requested", requestedAt: iso(Date.now()) }; S.taxProfile = { bizNo: b.bizNo, bizName: b.bizName, email: b.email };
       return { ok: true, taxInvoice: inv.taxInvoice }; },
     /* ── [P1R6] §3.1 관리형 러너 신청(플랜 게이트 · 요금은 서버 값) ── */
+    /* [B2 §2.4] 계정당 월요금(전용 IP 포함) — GET { price(계정당), max(플랜 최대 계정 수), accounts? } · POST { accounts } */
+    /* [R7 §3.6 · B] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 구매 시점엔 차감 0(IP 배정될 때 첫 30일치) */
+    "account-slots": () => { const offers = [
+        { kind: "account_slot", coins: 24, krw: 12000, days: 30, label: "계정 1개 더 + 전용 IP", desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 프로그램으로 돌아가요.", managed: false },
+        { kind: "account_slot_managed", coins: 50, krw: 25000, days: 30, label: "관리형 계정 1개", desc: "계정 하나를 더 쓰고, 전용 IP 와 우리 서버 실행까지 포함이에요. PC 를 켜 두지 않아도 돼요.", managed: true }];
+      return { ok: true, slots: S.slots2, offers, balance: S.coins, includedAccounts: 15, extraSlots: S.slots2.filter((s) => s.status !== "cancelled").length,
+        usedAccounts: S.accounts.length, canAddNow: S.accounts.length < 15 + S.slots2.length, note: "남은 기간 환불은 없어요. 다음 갱신만 끌 수 있어요." }; },
+    "account-slot-buy": (b) => { const nw = notWritable(); if (nw) return nw;
+      const P = { account_slot: { coins: 24, krw: 12000, label: "계정 1개 더 + 전용 IP", managed: false }, account_slot_managed: { coins: 50, krw: 25000, label: "관리형 계정 1개", managed: true } }[String(b.kind || "")];
+      if (!P) return err("kind", "어떤 상품인지 골라 주세요.");
+      const cnt = Math.trunc(Number(b.count) || 1); if (cnt < 1 || cnt > 5) return err("count", "한 번에 5개까지 살 수 있어요.");
+      const need = P.coins * cnt; if (slotCoinsShort || S.coins < need) return err("coins", "코인이 모자라요.", { need, balance: S.coins });
+      const made = []; for (let i = 0; i < cnt; i++) { const s = { id: S.nextId++, kind: b.kind, status: "waiting_ip", coins: P.coins, krw: P.krw, accountId: null, proxyId: null, autoRenew: true, periodsCharged: 0, label: P.label, managed: P.managed }; S.slots2.unshift(s); made.push(s); }
+      return { ok: true, slots: made, balance: S.coins, waitingIp: cnt };   /* 🔴 산 시점엔 차감 0 — IP 가 붙을 때 빠진다 */ },
+    "account-slot-renew": (b) => { const s = S.slots2.find((x) => x.id === Number(b.id)); if (!s) return err("not_found", "그 자리를 찾을 수 없어요.", { status: 404 });
+      s.autoRenew = !!b.autoRenew; return { ok: true, slot: s }; },
     "managed-runner": (b) => { if (b && (b.devices !== undefined || b.accounts !== undefined)) {
         if (managedDeny) return { ok: false, reason: "plan_limit", step: "plan_feature", feature: "managedRunner", planKey: "starter", error: "대신 돌려주는 PC는 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.", status: 402 };
-        const n = Math.max(1, Math.min(5, Number(b.accounts ?? b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, accounts: n, requestedAt: iso(Date.now()) };
+        const n = Number(b.accounts ?? b.devices) || 0; if (n < 1 || n > 15) return err("accounts", "계정 수는 1~15개 사이로 골라 주세요(지금 요금제 기준).");
+        S.managed = { status: "requested", assigned: 0, devices: n, accounts: n, requestedAt: iso(Date.now()) };
         S.notifications.unshift({ id: S.nextId++, kind: "setup", title: "대신 돌려주는 PC를 신청했어요", desc: "운영자가 확인하고 배정해 드려요 · 보통 하루 안에", link: "/app/runner.html", tone: "info", createdAt: iso(Date.now()) });
-        return { ok: true, status: S.managed.status, devices: n, accounts: n, ...(managedPer === "account" ? { per: "account" } : {}) }; }
+        return { ok: true, status: S.managed.status, accounts: n, devices: n, price: { amountKrw: 25000, vatKrw: 2500, totalKrw: 27500 }, totalKrw: 27500 * n }; }
       /* [R7 §4.5] ?managed=account = 사장님 결정 4 모양(계정당 월요금 · 프록시 포함) — 서버가 per:"account" 를 실으면 화면이 그 단위로 그린다 */
-      const price = managedPer === "account" ? { amountKrw: 25000, vatKrw: 2500, totalKrw: 27500 } : { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 };
-      const perKey = managedPer === "account" ? { per: "account", accounts: S.managed.accounts || S.managed.devices } : {};
-      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price, status: "none", assigned: 0, max: 5, ...perKey };
-      return { ok: true, eligible: true, price, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5, ...perKey }; },
+      const price = { amountKrw: 25000, vatKrw: 2500, totalKrw: 27500 };   // 권장값 흉내(확정은 합동 세션) — 화면은 이 값만 그린다
+      const acc = S.managed.accounts || S.managed.devices;
+      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price, status: "none", assigned: 0, max: 15, planKey: "starter" };
+      return { ok: true, eligible: true, price, status: S.managed.status, assigned: S.managed.assigned, max: 15, planKey: "pro", ...(acc ? { accounts: acc, devices: acc } : {}) }; },
     /* ── [P1R6] §1.4 AM↔AC 코인 이전(키 없으면 준비 중 · 부분 성공 금지) ── */
     "coin-transfer": (b) => { const nw = notWritable(); if (nw) return nw;
       if (amOff) return { ok: false, step: "not_configured", error: "아직 준비 중이에요 · 곧 열려요", status: 200 };
@@ -508,7 +547,10 @@
     "accounts-add": (b) => {
       if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
       if (planLimit === "accounts") return { ok: false, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 3, planKey: "starter", error: "계정은(는) 3개까지예요. Pro 로 바꾸면 더 늘어나요.", status: 402 };
-      if (S.accounts.length >= 5) return err("limit", "이 요금제에서는 계정을 5개까지 연결할 수 있어요.");
+      if (S.accounts.length >= 5) return { ok: false, status: 402, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 5, planKey: "pro",
+        error: "계정은 지금 5개까지예요. 계정 1개를 더 쓰려면 코인으로 살 수 있어요(전용 IP 포함).", balance: S.coins,
+        slotOffer: { offers: [{ kind: "account_slot", coins: 24, krw: 12000, days: 30, label: "계정 1개 더 + 전용 IP", desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 프로그램으로 돌아가요.", managed: false },
+            { kind: "account_slot_managed", coins: 50, krw: 25000, days: 30, label: "관리형 계정 1개", desc: "계정 하나를 더 쓰고, 전용 IP 와 우리 서버 실행까지 포함이에요. PC 를 켜 두지 않아도 돼요.", managed: true }], extraSlots: S.slots2.length, buyPath: "/api/account-slot-buy" } };
       if (S.accounts.some((a) => a.channel === b.channel && a.handle === b.handle)) return err("duplicate", "이미 연결한 계정이에요.");
       if (b.channel === "wordpress" && b.appPassword === "wrong") return err("wp_auth", "워드프레스 로그인 정보를 확인해 주세요.");
       if (["naver_blog", "tistory", "naver_clip"].includes(b.channel) && (!b.loginId || !b.password)) return err("creds", "아이디와 비밀번호를 입력해 주세요.");
@@ -537,7 +579,9 @@
     "topics-list": () => { refreshTick(); const t = S.topicsRefresh;
       const refresh = { running: isRefreshing() };
       if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
-      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate"), templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; }, // [P1R5] templates(레퍼런스 구조) 동봉
+      /* [사장님 실측] 서버는 **연결된 계정의 채널**에서만 소재 채널을 고른다(lib/topics.ts) — 모의도 그래야 «네이버만 보이는» 그 화면이 재현된다 */
+      const only = oneChannel ? "naver_blog" : null;
+      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate").map((x) => (only ? { ...x, channelHint: only } : x)), templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; }, // [P1R5] templates(레퍼런스 구조) 동봉
     "topics-refresh": () => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; refreshTick();
       if (isRefreshing()) return { ok: true, started: false, running: true };
       if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
@@ -553,6 +597,9 @@
       const yt = S.accounts.find((a) => VIDEO_CH.includes(a.channel) && a.status === "active"); // [P1R5] 영상 계정이 있으면 같은 brief 에 영상 piece(§1.1 채널 선택)
       if (yt) pieces.push({ key: "p3", kind: "video", channel: yt.channel, accountId: yt.id, accountHandle: yt.handle, emotionKey: "shorts", angle: "3초 훅 · 비포/애프터", video: videoSpec(0, yt.id, 60, "graphic"), monetize: { affiliate: t.factors.intent !== "info" ? { provider: "coupang", productQuery: "에어프라이어 세척솔", slot: "end" } : null, adDisclosure: true }, schedule: { at: kst(1, 18, 0), slotReason: "쇼츠 저녁 골든타임 18시 · @" + yt.handle + " 오늘 0/" + yt.dailyCap }, coinCost: VIDEO_COIN.video_60 });
       if (!pieces.length) pieces.push({ key: "p1", channel: "naver_blog", accountId: null, accountHandle: null, format: "story", emotionKey: "warm", composition: "experience", lengthHint: { words: 1400 }, images: { count: 6, style: "photo", heroNeeded: true }, monetize: { affiliate: null, adDisclosure: false }, schedule: { at: kst(1, 7, 30), slotReason: "네이버 블로그 아침 골든타임 · 계정은 연결 후 배정" }, coinCost: 7 });
+      /* [B-1 a39b458] 제안 단계 예고 — 첫 spec 이 오늘 자리를 쓸 것이면 usesTodaySlot 을 싣는다(확정이 정본 · 그 사이 자리가 찰 수 있다) */
+      { const first = pieces[0]; const s0 = usedSlotOn && first && S.slots.find((s) => s.date === todayYmd && s.channel === first.channel && !s.pieceId && ["planned", "topic_assigned", "assigned", "no_topic"].includes(s.status));
+        if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
       const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "쓰는 코인은 글 1 + 사진 수예요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
     "director-confirm": (b) => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
@@ -564,12 +611,19 @@
       const need = pieces.reduce((a, p) => a + p.coinCost, 0); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
       if (br._charged) return { ok: true, briefId: br.id, pieceIds: br._pieceIds, coinsCharged: 0, coinsLeft: S.coins, status: 202 };
       S.coins -= need; const ids = []; const t = S.topics.find((x) => x.id === br.topicId);
+      /* [R7 §1.6] 오늘 이미 잡혀 있던 자리(글 없는 planned 계열)를 먼저 쓴다 — 안 그러면 같은 채널에 하루 두 편이 나간다 */
+      let usedSlot = null;
+      if (usedSlotOn && !slotRace) { const first = pieces[0];
+        const s0 = first && S.slots.find((s) => s.date === todayYmd && s.channel === first.channel && !s.pieceId && ["planned", "topic_assigned", "assigned", "no_topic"].includes(s.status));
+        if (s0) { usedSlot = { slotId: s0.id, channel: s0.channel, publishAt: s0.publishAt || kst(0, 18, 30), prevStatus: s0.status }; first._useSlot = s0; if (s0.publishAt) first.schedule.at = s0.publishAt; } }
       for (const p of pieces) { const id = S.nextId++; ids.push(id);
         if (p.kind === "video") { S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "video", title: t?.title || "새 영상", status: "generating", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, coinCost: p.coinCost, bodyHtml: "", meta: { stage: "script", chainStage: { stage: "script", at: iso(Date.now()) }, video: p.video, angle: p.angle, emotionKey: p.emotionKey, scheduleAt: p.schedule.at, tags: [], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined, chainLock: null, chainResume: { count: 0 } }, gate: null, _v0: Date.now() });
           S.slots.push({ id: S.nextId++, date: p.schedule.at ? new Date(new Date(p.schedule.at).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : todayYmd, channel: p.channel, kind: "shorts", accountId: p.accountId, accountHandle: p.accountHandle, status: "producing", publishAt: p.schedule.at, topicTitle: t?.title, pieceId: id, origin: "manual" }); continue; } // [P1R5] §1.2 kind video 행 + slot(shorts)
         S.pieces.push({ id, channel: p.channel, accountHandle: p.accountHandle, kind: "post", format: p.format, title: t?.title || "새 글", status: "generating", stage: "writing", scheduledFor: p.schedule.at, gateOk: false, createdAt: iso(Date.now()), topicTitle: t?.title, regenCount: 0, bodyHtml: p.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: ["에어프라이어청소"], disclosure: p.monetize.affiliate ? DISCLOSURE : null, affiliate: p.monetize.affiliate ? { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece" + id } : undefined }, gate: gate(true), _t0: Date.now() });
+        if (p._useSlot) { Object.assign(p._useSlot, { status: "producing", pieceId: id, topicTitle: t?.title, accountId: p.accountId ?? p._useSlot.accountId, accountHandle: p.accountHandle || p._useSlot.accountHandle }); continue; }   // [R7 §1.6] 그 자리를 쓴다(새로 만들지 않는다)
         S.slots.push({ id: S.nextId++, date: p.schedule.at ? new Date(new Date(p.schedule.at).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : todayYmd, channel: p.channel, kind: "post", accountId: p.accountId, accountHandle: p.accountHandle, status: "producing", publishAt: p.schedule.at, topicTitle: t?.title, pieceId: id, origin: "manual" }); }
-      if (t) t.status = "picked"; br._charged = true; br._pieceIds = ids; return { ok: true, briefId: br.id, pieceIds: ids, coinsCharged: need, coinsLeft: S.coins, status: 202 }; },
+      if (t) t.status = "picked"; br._charged = true; br._pieceIds = ids;
+      return { ok: true, briefId: br.id, pieceIds: ids, coinsCharged: need, coinsLeft: S.coins, ...(usedSlot ? { usedTodaySlot: usedSlot } : {}), status: 202 }; },
     /* §4 글 */
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
@@ -686,17 +740,24 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       const inM = (r, m) => r.day.slice(0, 7) === m;
       const sum = (rs) => rs.reduce((a, r) => a + r.amountKrw, 0);
       const mine = S.revRows.filter((r) => inM(r, month));
-      const bySource = groupKrw(mine, "source").map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
-        const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt; return o; });
+      /* [여정 점검 9 · B3 확인] 라이브에선 연결 안 된 소스에 수익이 없다 — 모의도 그렇게(«키 필요»인데 금액이 붙는 조합을 만들지 않는다) */
+      const bySource = groupKrw(mine, "source").filter(([source]) => { const s = S.revSources.find((x) => x.source === source); return !s || s.status === "connected"; })
+        .map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
+          const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
+          /* [B2 8a71d69] 애드포스트처럼 «예상 수입» 열만 주는 매체 — 서버가 도장을 찍고 노트를 준다(?est=1) */
+          if (estKnob && source === "adpost") { o.amountEstimated = true; o.note = "«예상수입» 열로 읽었어요 — 확정 금액이 아니라 예상치예요"; }   /* [B2 a8de1d5] 이름·문구 모두 서버 것 */
+          return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
-        return { accountId: Number(id), handle: a.handle || "", channel: a.channel || "", krw }; });
+        return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
       const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
-        return { pieceId: Number(id), title: p.title || "제목 없음", channel: p.channel || "naver_blog", krw }; });
+        return p.id ? { pieceId: Number(id), title: p.title || "제목 없는 글", channel: p.channel, krw, ...(p.title ? {} : { untitled: true }) } : { pieceId: Number(id), title: "지운 글", channel: "", krw, deleted: true }; });
       return { ok: true, monthKrw: sum(mine), todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(),
         prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces }; },
     "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const days = groupKrw(S.revRows.filter((r) => r.day >= from && r.day <= to), "day").sort((a, b) => a[0].localeCompare(b[0]));
-      return { ok: true, days: days.map(([day, krw]) => ({ day, krw, freshness: dayFreshness(day) })) }; },
+      /* [B2 a8de1d5] 그 날에 «예상 열» 행이 섞였나 — 없으면 키 자체가 없다(옛 데이터엔 안 붙는다) */
+      const estDay = (day) => estKnob && S.revRows.some((r) => r.day === day && r.source === "adpost");
+      return { ok: true, days: days.map(([day, krw]) => ({ day, krw, freshness: dayFreshness(day), ...(estDay(day) ? { amountEstimated: true } : {}) })) }; },
     "revenue-sources": (b) => {
       if (b && b.action) {
         const s = S.revSources.find((x) => x.source === b.source && (b.accountId == null || x.accountId === Number(b.accountId)));
@@ -748,7 +809,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

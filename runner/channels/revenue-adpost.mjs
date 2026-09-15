@@ -63,10 +63,22 @@ export async function run({ ctx, job, shotKey }) {
       throw PARSE(`수입 표를 찾지 못했어요(table ${table.tables}개 · url=${page.url().slice(0, 60)} · 화면="${seen.slice(0, 80)}")`);
     }
     await shot(page, shotKey, "02-수입표");
-    const parsed = rowsToRevenue("adpost", table.rows.map((r) => ({ dayText: r[table.dayIdx], amountText: r[table.amountIdx], raw: { cells: r.slice(0, 6) } })), { accountId: account.id });
+    /* 🔴 «예상으로 읽었다»·«합계 행을 뺐다»는 **사람 눈에 닿아야 한다**(계산만 하고 아무도 안 읽으면 없는 기능).
+       ⚠️ 이모지 금지(UX 헌장 §3) — 고객 화면에 그대로 나가는 글자다.
+       ⚠️ `notes` 는 **서버에 저장되는 곳이 아직 없다**(러너 콘솔에만 남는다). 화면까지 가는 길은 `raw.amountEstimated`
+          + `raw.amountHead` 쪽이다 — 집계(`lib/revenue/aggregate.ts`)가 그걸 읽어 문구를 만든다. */
+    const scrapeNotes = [
+      ...(table.amountEstimated ? [`«${table.header[table.amountIdx]}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요`] : []),
+      ...(table.summaryRows ? [`합계 행 ${table.summaryRows}줄은 뺐어요(데이터가 아니라 표가 더한 줄)`] : []),
+    ];
+    const parsed = rowsToRevenue("adpost", table.rows.map((r) => ({ dayText: r[table.dayIdx], amountText: r[table.amountIdx], raw: { cells: r.slice(0, 6), ...(table.amountEstimated ? { amountEstimated: true, amountHead: String(table.header[table.amountIdx] ?? "").slice(0, 40) } : {}),
+      /* 🔴 **러너는 `raw` 에 «사실»만 남기고 문장은 서버가 만든다**(메인 판정 2026-09-15).
+         러너 노트를 저장할 자리를 새로 파면 «러너가 하는 말»이 또 하나의 진실 원천이 된다 — 그래서 숫자만 남긴다.
+         `notes` 는 서버가 **버린다**(`RunnerReportOk` 에 칸이 없다) — 화면에 가야 할 것은 전부 여기로. */
+      ...(table.summaryRows ? { rowsDropped: table.summaryRows } : {}) } })), { accountId: account.id });
     if (!parsed.ok) throw PARSE(`${parsed.reason} · 머리글=${JSON.stringify(table.header).slice(0, 80)}`);
 
-    return { revenueRows: parsed.rows, adpostState: "approved", notes: [`수입 ${parsed.rows.length}행(${table.where})`] };
+    return { revenueRows: parsed.rows, adpostState: "approved", notes: [`수입 ${parsed.rows.length}행(${table.where})`, ...scrapeNotes] };
   } catch (e) {
     await failShot(page, shotKey);
     throw e;

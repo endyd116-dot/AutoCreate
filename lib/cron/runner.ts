@@ -34,13 +34,18 @@ import { learnStep } from "./learn";
 import { reapStep } from "./reap";
 import { videoSweepStep } from "./video-sweep";
 import { revenueSyncStep } from "./revenue-sync";
+import { managedRunnerWatchStep } from "./managed-runner-watch";
+import { postAliveStep } from "./post-alive";
 import { billingChargeStep } from "./billing-charge";
 import { trialExpireStep } from "./trial-expire";
 import { csAutoTicketStep } from "./cs-auto-ticket";
 import { runnerCanaryStep } from "./runner-canary";
 import { aiModelWatchStep } from "./ai-model-watch";
 import { tenantPurgeStep } from "./tenant-purge";
+import { slotRenewStep } from "./slot-renew";
+import { pushFanoutStep } from "./push-fanout";
 import { coinReconcileStep } from "./coin-reconcile";
+import { channelOpenedStep } from "./channel-opened";
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -64,10 +69,15 @@ export const STEPS: AnyStep[] = [
   csAutoTicketStep,    // hourly · 러너 실패·결제 실패·계정 정지 3회 → 시스템 티켓(P1R4 §2.1)
   runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
   aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
+  channelOpenedStep,   // hourly · 관심 채널(온보딩에서 고른 planned)이 열리면 1회 알림(P1R7 B3 · 영구 멱등)
   coinReconcileStep,   // hourly(월 06:00 KST 주 1회 · 전역 1잠금) · 코인 원장 대조 — 어긋난 행 있을 때만 감사(P1R7 B3)
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
+  postAliveStep,       // hourly · 발행 7일 뒤 «아직 살아 있나» 1회(P1R7 §2 · 영구 멱등)
+  slotRenewStep,       // hourly(05:00 KST 게이트 = 하루 1회) · **global** — 계정 슬롯 IP 배정·갱신 차감·쉼/복구(P1R7 §3.6)
   publisherStep,       // 5m · due 발행
+  pushFanoutStep,      // 5m · **global** — 알림함 새 행을 기기 푸시로(문구 한 출처 · VAPID 없으면 표시만 · R7 메인 발주)
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
+  managedRunnerWatchStep, // 5m · **global** — 관리형(우리 기기) 러너가 30분 조용하면 운영 감사(P1R7 §2.4)
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];
 

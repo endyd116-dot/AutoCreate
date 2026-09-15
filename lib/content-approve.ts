@@ -24,6 +24,7 @@ import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
 import { personaTerms } from "./content-gen";
+import { countAffiliateLinks } from "./publish/gate";
 
 type Row = Record<string, unknown>;
 const n = (v: unknown) => Number(v || 0);
@@ -98,10 +99,12 @@ export async function checkLinks(html: string): Promise<GateCheck> {
   return { key: LINK_CHECK_KEY, label, pass: true };
 }
 
-/** 본문 HTML 의 제휴 링크 수(쿠팡 도메인 + affiliate 클래스). */
-export function affiliateLinkCount(html: string): number {
-  return (html.match(/class="affiliate"/g) || []).length + (html.match(/href="https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/g) || []).length;
-}
+/**
+ * 본문 HTML 의 제휴 링크 수 — 🔴 **세는 곳은 한 곳**이다(`lib/publish/gate.ts countAffiliateLinks`).
+ *   2026-09-15(C): 여기와 게이트에 같은 셈이 **두 벌** 있었고 둘 다 한 링크를 2개로 셌다(같은 `<a>` 가 class 와 쿠팡 href 를
+ *   둘 다 가져서). 검수창의 «제휴 링크 N개» 와 발행 직전 판정이 갈라지지 않도록 이제 같은 함수를 부른다(AC-29).
+ */
+export const affiliateLinkCount = countAffiliateLinks;
 
 /**
  * recheckPiece — 발행 직전 재검사(승인·수정 공용). 고지·금칙어·제휴 링크 수·유사도 + 12키 게이트.

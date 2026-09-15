@@ -36,14 +36,48 @@ export function parseDayKst(text, now = new Date()) {
   const yNow = Number(today.slice(0, 4));
   let y, mo, d;
   let m;
-  if ((m = /(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})/.exec(s))) { y = Number(m[1]); mo = Number(m[2]); d = Number(m[3]); }
-  else if ((m = /^(\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})/.exec(s))) { y = 2000 + Number(m[1]); mo = Number(m[2]); d = Number(m[3]); }
-  else if ((m = /(\d{1,2})[.\-/월]\s*(\d{1,2})일?/.exec(s))) { y = yNow; mo = Number(m[1]); d = Number(m[2]); }
+  /* 🔴 `yearGiven` — **화면이 연도를 말했나**. 아래 «작년으로 접기»가 이 값에만 걸린다.
+     종전엔 «원문에 네 자리 숫자가 있나»(`!/\d{4}/.test(s)`)로 대신 봤는데, 그건 틀린 대용물이었다:
+     «26.12.31» 은 연도를 **명시**했는데도 점이 끼어 있어 네 자리 연속 숫자가 없다 → 연도 없는 것으로 오해 →
+     **2025-12-31 로 접혔다**(실측 2026-09-15 · `scripts/verify-runner-money.mts`). 수익이 통째로 다른 해에 붙는다. */
+  let yearGiven = false;
+  if ((m = /(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})/.exec(s))) { y = Number(m[1]); mo = Number(m[2]); d = Number(m[3]); yearGiven = true; }
+  else if ((m = /^(\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})/.exec(s))) { y = 2000 + Number(m[1]); mo = Number(m[2]); d = Number(m[3]); yearGiven = true; }
+  /* 🔴 앞뒤로 숫자가 더 붙어 있으면 **날짜가 아니다**(`(?<!\d)` · `(?!\d)`).
+     종전엔 경계가 없어 «1.234»(금액)가 «1월 23일»로 읽혔다 — 뒤의 «4» 를 조용히 버리고 **그럴듯한 날짜**를 만들어 냈다.
+     표의 열이 밀렸을 때 그걸 붙잡는 마지막 방어선이 여기라, 여기서 새면 엉뚱한 날짜에 돈이 붙고 아무도 모른다. */
+  else if ((m = /(?<!\d)(\d{1,2})[.\-/월]\s*(\d{1,2})일?(?!\d)/.exec(s))) { y = yNow; mo = Number(m[1]); d = Number(m[2]); }
   else return null;
   if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) return null;
   let out = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-  if (out > today && y === yNow && !/\d{4}/.test(s)) out = `${y - 1}-${out.slice(5)}`;   // 연도 없는 미래 날짜 = 작년
+  // 연도를 **안 말한** 미래 날짜 = 작년(연말·연초 경계). 말했으면 그대로 믿는다.
+  if (out > today && !yearGiven) out = `${y - 1}-${out.slice(5)}`;
   return out;
+}
+
+/**
+ * 월 단위 표기 → 그 달 **1일**(KST `YYYY-MM-01`). 지원: 2026.09 · 2026-09 · 2026년 9월 · 9월. 못 읽으면 null.
+ *
+ *   🔴 왜 필요한가: 클립 인센티브는 **월별로만** 주는 화면이 있다. 채널 주석은 «월별이면 그 달 1일로 적고»라고
+ *      적어 뒀는데 **그 «적는다»가 구현이 없어서**, 월별 표를 만나면 `parseDayKst` 가 null 을 내고
+ *      표 한 장이 통째로 `parse` 실패했다(2026-09-15 실측). 문서에만 있고 코드에 없던 동작이다.
+ *
+ *   🔴 **일(day)까지 있는 글자는 월로 읽지 않는다.** «2026.09.14» 를 1일로 뭉개면 그날 수익이 그 달 1일로 옮겨 가고,
+ *      합계는 맞는데 날짜별 그래프가 조용히 거짓이 된다. 애매하면 읽지 않는 쪽이다(AC-9).
+ */
+export function parseMonthKst(text, now = new Date()) {
+  const s = normalizeDigits(text).trim();
+  if (!s) return null;
+  // 일까지 있는 모양이면 월이 아니다(위 🔴).
+  if (/(\d{4})[.\-/년]\s*\d{1,2}[.\-/월]\s*\d{1,2}/.test(s)) return null;
+  if (/^\d{2}[.\-/]\d{1,2}[.\-/]\d{1,2}/.test(s)) return null;
+  const yNow = Number(todayKst(now).slice(0, 4));
+  let y, mo, m;
+  if ((m = /(?<!\d)(\d{4})[.\-/년]\s*(\d{1,2})월?(?!\d)/.exec(s))) { y = Number(m[1]); mo = Number(m[2]); }
+  else if ((m = /(?<!\d)(\d{1,2})월(?!\d)/.exec(s))) { y = yNow; mo = Number(m[1]); }   // 연도 없으면 올해
+  else return null;
+  if (!(mo >= 1 && mo <= 12)) return null;
+  return `${y}-${String(mo).padStart(2, "0")}-01`;
 }
 
 /**
@@ -55,7 +89,12 @@ export function rowsToRevenue(source, rows, opts = {}) {
   const out = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    const day = parseDayKst(r.dayText, opts.now);
+    /* 🔴 월 단위 되돌림은 **그 표가 «월»이라고 말했을 때만** 쓴다(`raw.period === "month"` — 채널이 머리글을 보고 넣는다).
+       선언 없이 월 표기를 받아 주면, **열이 밀린 표**(금액 칸에 «2026.08» 같은 게 들어온 경우)를 «성공»으로 읽게 된다.
+       그 선언이 바로 «이 칸은 날짜가 아니라 달이다»라는 화면의 진술이라, 그게 있을 때만 믿는다. */
+    const wantsMonth = !!r.raw && typeof r.raw === "object" && r.raw.period === "month";
+    let day = parseDayKst(r.dayText, opts.now);
+    if (day === null && wantsMonth) day = parseMonthKst(r.dayText, opts.now);
     const amountKrw = parseKrw(r.amountText);
     if (!day) return { ok: false, reason: `날짜를 못 읽음(${i}행: «${String(r.dayText).slice(0, 20)}»)`, at: i };
     if (amountKrw === null) return { ok: false, reason: `금액을 못 읽음(${i}행: «${String(r.amountText).slice(0, 20)}»)`, at: i };

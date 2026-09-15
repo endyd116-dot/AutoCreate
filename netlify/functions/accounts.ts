@@ -19,6 +19,7 @@ import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit as planLimit, requireChannel } from "../../lib/plans";
 import { recordConsents, hasConsent } from "../../lib/billing/consents";
+import { attachAccountToSlot } from "../../lib/account-slots";
 import { encryptObj, credsEncConfigured } from "../../lib/creds-crypto";
 import { q, listAccounts, getAccount, listChannels, connectMethodOf, isChannel, type ChannelKey } from "../../lib/accounts";
 import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUrl, exchangeCode } from "../../lib/oauth-providers";
@@ -37,6 +38,25 @@ async function checkChannel(tid: number, channel: string): Promise<Response | nu
   const g = await requireChannel(tid, channel, label);
   return g.ok ? null : g.res ?? null;
 }
+/**
+ * [P1R7 B3] 연결 가능 게이트 — **아직 못 붙이는 채널에 붙이려는 시도**를 서버가 막는다(화면은 게이트가 아니다 · AC-29·AC-48).
+ *   🔴 **기존 계정이 있으면 통과** — 채널을 껐다 켜는 사이에 «재연결»까지 막히면 멀쩡히 쓰던 고객이 갇힌다(그래서 조건이 둘이다).
+ *   🔴 이 402 는 **돈 문제가 아니다** — `reason:"plan_limit"` 을 **싣지 않는다**(싣는 순간 화면이 요금제 업셀 시트를 띄운다 · `ui.js UI.gate`).
+ *      플랜 게이트(`checkChannel`)가 **먼저** 돌고(메인 판정) 그다음이 이 게이트다: «이 요금제엔 없어요» 가 «아직 준비 중이에요» 보다 상위 사실이다.
+ */
+async function checkConnectable(tid: number, channel: string): Promise<Response | null> {
+  const info = (await listChannels()).find((c) => c.key === channel);
+  if (!info || info.connectable) return null;
+  const [live] = await q(sql`SELECT COUNT(*)::int AS c FROM accounts WHERE tenant_id = ${tid} AND channel = ${channel} AND COALESCE(last_error_kind,'') <> 'removed'`);
+  if (n(live?.c)) return null;                       // 이미 붙여 둔 계정이 있다 = 재연결·추가는 막지 않는다
+  const label = info.label || channel;
+  /* 조사(은/는)는 채널 이름 받침에 따라 달라진다(«네이버 클립은» · «유튜브 쇼츠는») — 쉼표로 끊어 **조사를 쓰지 않는다**(알림 문구와 같은 꼴). */
+  const error = info.connectableReason === "not_open"
+    ? `${label}, 아직 열지 않았어요. 준비되면 알려드릴게요.`
+    : `${label}, 연결을 준비하고 있어요. 준비되면 알려드릴게요.`;   // no_provider_key · no_site_url — 고객에겐 같은 사실(우리가 준비 중)
+  return json({ ok: false, step: "channel_not_connectable", channel, connectableReason: info.connectableReason, error }, 402);
+}
+
 /** [P1R7 §3.3] 자격 보관 동의 — true 면 기록(이미 있으면 그대로) · 키가 없으면 통과 + 감사. false 면 400. */
 async function credsConsent(tid: number, uid: number, body: Record<string, unknown>, channel: string, meta: { ip?: string | null; ua?: string | null }): Promise<Response | null> {
   if (body.agreeCredsStorage === true) { if (!(await hasConsent(tid, "creds_storage"))) await recordConsents(tid, uid, ["creds_storage"], meta); return null; }
@@ -109,7 +129,8 @@ export default async (req: Request): Promise<Response> => {
       let id = await upsertAccount(st.tid, st.channel, handle, ex.token.displayName || null, "oauth", "active");
       if (id === null) { const [row] = await q(sql`SELECT id FROM accounts WHERE tenant_id = ${st.tid} AND channel = ${st.channel} AND handle = ${handle}`); id = n(row?.id); await q(sql`UPDATE accounts SET status = 'active', last_error_kind = NULL, updated_at = NOW() WHERE id = ${id}`); }
       await saveCreds(st.tid, id, "oauth", { ...ex.token }, ex.token.expiresAt);
-      await writeAudit({ tenantId: st.tid, action: "account_add", actorType: "user", actorId: st.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel: st.channel, handle, method: "oauth" } });
+      const oslot = await attachAccountToSlot(st.tid, id, st.uid);   // [P1R7 §3.6] 산 슬롯이 있으면 붙인다(세션 연결과 같은 규칙)
+      await writeAudit({ tenantId: st.tid, action: "account_add", actorType: "user", actorId: st.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel: st.channel, handle, method: "oauth", slotId: oslot?.id ?? null } });
       return back(`connected=${st.channel}`);
     } catch (err) { console.error("[accounts-oauth-return]", err); return back("error=server"); }
   }
@@ -128,7 +149,8 @@ export default async (req: Request): Promise<Response> => {
       const channel = s(b.channel, 24);
       if (!isOAuthChannel(channel)) return badRequest("이 채널은 아이디로 연결해요.", "channel");
       const gate = await checkChannel(tid, channel); if (gate) return gate;            // 🔴 [P1R7 §3.2] 요금제가 먼저 — «준비 중» 보다 «이 요금제엔 없어요» 가 정확한 이유다
-      if (!providerConfigured(channel)) return json({ ok: false, step: "provider_not_configured", error: "준비 중이에요" });
+      const openGate = await checkConnectable(tid, channel); if (openGate) return openGate;   // [P1R7 B3] 그다음이 «지금 붙일 수 있나»(레지스트리·앱 키)
+      if (!providerConfigured(channel)) return json({ ok: false, step: "provider_not_configured", error: "준비 중이에요" });   // 위 게이트를 통과한 예외(기존 계정 보유)용 폴백
       const lim = await checkLimit(tid); if (lim) return lim;
       const consent = await credsConsent(tid, auth.user.uid, b as Record<string, unknown>, channel, { ip: clientIp(req), ua: req.headers.get("user-agent") });   // [P1R7 §3.3] OAuth 토큰도 «맡기는 자격»이다
       if (consent) return consent;
@@ -146,6 +168,7 @@ export default async (req: Request): Promise<Response> => {
       if (/쿠팡|coupang/i.test(handle) || /쿠팡|coupang/i.test(s(b.displayName, 120))) return json({ ok: false, step: "handle_policy", error: "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책)." }, 400);
       // 🔴 [P1R7 §3.2] 요금제 게이트가 **가장 먼저**다 — 요금제에 없는 채널에 «OAuth 로 연결하세요»·«준비 중이에요» 를 먼저 말하면 거짓 안내가 된다.
       const gate = await checkChannel(tid, channel); if (gate) return gate;
+      const openGate = await checkConnectable(tid, channel); if (openGate) return openGate;   // [P1R7 B3] «아직 못 붙이는 채널»에 «자격이 틀렸다»를 돌려주던 것을 바로잡는다
       const method = connectMethodOf(channel);
       if (method === "oauth") return json({ ok: false, step: "oauth_required", error: "이 채널은 «연결하기» 버튼으로 로그인해 주세요." }, 400);
       if (!credsEncConfigured()) return json({ ok: false, step: "creds_key", error: "계정 자격 암호화 키가 설정되지 않았어요. 운영팀에 알려 주세요." }, 500);
@@ -161,8 +184,9 @@ export default async (req: Request): Promise<Response> => {
         const id = await upsertAccount(tid, channel as ChannelKey, handle, displayName, "session", "pending_login");
         if (id === null) return json({ ok: false, step: "duplicate", error: "이미 연결한 계정이에요." }, 409);
         await saveCreds(tid, id, "password", { loginId, password });
-        await writeAudit({ tenantId: tid, action: "account_add", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel, handle, method: "session" } });
-        return json({ ok: true, account: await getAccount(tid, id) }, 201);
+        const slot = await attachAccountToSlot(tid, id, auth.user.uid);   // [P1R7 §3.6] 산 슬롯이 있으면 이 계정에 붙이고 IP 배정(B2)·첫 차감을 시도한다
+        await writeAudit({ tenantId: tid, action: "account_add", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel, handle, method: "session", slotId: slot?.id ?? null } });
+        return json({ ok: true, account: await getAccount(tid, id), ...(slot ? { slot } : {}) }, 201);
       }
       // wordpress — App Password 인증 확인 후 active
       const siteUrl = s(b.siteUrl, 200).replace(/\/+$/, "");
@@ -203,6 +227,23 @@ export default async (req: Request): Promise<Response> => {
         sets.push(sql`persona_id = ${pid || null}`);
       }
       if (b.proxyUrl !== undefined) { const px = s(b.proxyUrl, 200); if (px && !/^(https?|socks5?):\/\//i.test(px)) return badRequest("프록시 주소 형식을 확인해 주세요.", "proxy"); sets.push(sql`proxy_url = ${px || null}`); }
+      /* [P1R7-B2 §2.5-⑦] **계정 묶음** — 한 계정이 정지되면 예약을 같은 묶음의 다른 계정으로 넘긴다(`reassignSlots` 가 이 값을 본다).
+         🔴 표(`account_groups`)와 칸(`accounts.group_id`)은 처음부터 있었는데 **값을 넣는 코드가 0건**이라
+            승계 정렬 키가 늘 NULL — 그룹이 없는 것과 같았다(2026-09-15 grep 실측). 여기가 그 값을 넣는 자리다.
+         이름을 주면 없을 때 만들어 붙인다(«묶음 먼저 만들고 계정에 붙이기» 2단계를 고객에게 시키지 않는다). */
+      if (b.groupName !== undefined || b.groupId !== undefined) {
+        let gid = n(b.groupId) || 0;
+        const gname = s(b.groupName, 60);
+        if (!gid && gname) {
+          const [g] = await q(sql`SELECT id FROM account_groups WHERE tenant_id = ${tid} AND channel = ${acc.channel} AND name = ${gname} LIMIT 1`);
+          gid = n(g?.id) || n((await q(sql`INSERT INTO account_groups (tenant_id, channel, name) VALUES (${tid}, ${acc.channel}, ${gname}) RETURNING id`))[0]?.id);
+        } else if (gid) {
+          // 🔴 남의 묶음·다른 채널 묶음에 붙이지 않는다(교차 누수 · CLAUDE §4.6).
+          const [g] = await q(sql`SELECT id FROM account_groups WHERE tenant_id = ${tid} AND id = ${gid} AND channel = ${acc.channel}`);
+          if (!g) return badRequest("그 묶음을 찾을 수 없어요(채널이 다를 수 있어요).", "group");
+        }
+        sets.push(sql`group_id = ${gid || null}`);
+      }
       if (b.goldenHours !== undefined) {
         const gh = Array.isArray(b.goldenHours) ? [...new Set((b.goldenHours as unknown[]).map(Number).filter((h) => Number.isInteger(h) && h >= 0 && h <= 23))].sort((a, c) => a - c) : [];
         sets.push(sql`golden_hours = ${gh.length ? jsonb(gh) : null}`);

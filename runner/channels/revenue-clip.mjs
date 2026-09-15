@@ -31,7 +31,11 @@ export async function run({ ctx, job, shotKey }) {
     await shot(page, shotKey, `00-로그인(${how})`);
 
     // /signup 리다이렉트는 그 자체가 답(미가입)이라 내용 검사 없이 «도착»으로 본다 · 클립 SPA 는 렌더가 느려 3.5초 준다(실측).
-    const landed = await gotoFirst(page, REPORT_URLS, async (p) => !/nidlogin/i.test(p.url()) && (/\/signup/i.test(p.url()) || await hasContent(p)), 3500);
+    /* 🔴 종전엔 «클립 SPA 는 렌더가 느려 **3.5초 준다**»고 상수를 키워 뒀었다 — 그건 미루는 것이지 푸는 게 아니었다.
+       이제 `gotoFirst` 가 **조건이 참이 될 때까지 훑는다**(준비되면 즉시 나온다 · `scrape.mjs waitFor`).
+       그래서 그 3500 은 `READY_MIN_MS`(4000) 에 묻혀 **아무 일도 안 하는 인자**가 됐다 → 뺐다.
+       (읽으면 뭔가 하는 것처럼 보이는 죽은 인자를 남기지 않는다.) */
+    const landed = await gotoFirst(page, REPORT_URLS, async (p) => !/nidlogin/i.test(p.url()) && (/\/signup/i.test(p.url()) || await hasContent(p)));
     if (!landed) {
       /* 🔴 «못 들어갔다»는 둘이다(AC-10): 로그인으로 튕겼으면 계정 문제(login_fail) · 주소가 전부 404 면 **우리 문제**(parse —
          화면 주소를 아직 모른다 · 실측 필요). 2026-09-14 실측에서 후보 주소 3개가 모두 404 인데 «세션 만료»로 적었다 — 거짓 안내다. */
@@ -52,9 +56,21 @@ export async function run({ ctx, job, shotKey }) {
       throw PARSE(`인센티브 표를 찾지 못했어요(table ${table.tables}개 · url=${page.url().slice(0, 60)} · 화면="${seen.slice(0, 80)}")`);
     }
     await shot(page, shotKey, "02-인센티브표");
-    const parsed = rowsToRevenue("clip", table.rows.map((r) => ({ dayText: r[table.dayIdx], amountText: r[table.amountIdx], raw: { cells: r.slice(0, 6), period: /월/.test(table.header[table.dayIdx]) ? "month" : "day" } })), { accountId: account.id });
+    /* 🔴 «예상으로 읽었다»·«합계 행을 뺐다»는 **사람 눈에 닿아야 한다**(계산만 하고 아무도 안 읽으면 없는 기능).
+       ⚠️ 이모지 금지(UX 헌장 §3) — 고객 화면에 그대로 나가는 글자다.
+       ⚠️ `notes` 는 **서버에 저장되는 곳이 아직 없다**(러너 콘솔에만 남는다). 화면까지 가는 길은 `raw.amountEstimated`
+          + `raw.amountHead` 쪽이다 — 집계(`lib/revenue/aggregate.ts`)가 그걸 읽어 문구를 만든다. */
+    const scrapeNotes = [
+      ...(table.amountEstimated ? [`«${table.header[table.amountIdx]}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요`] : []),
+      ...(table.summaryRows ? [`합계 행 ${table.summaryRows}줄은 뺐어요(데이터가 아니라 표가 더한 줄)`] : []),
+    ];
+    const parsed = rowsToRevenue("clip", table.rows.map((r) => ({ dayText: r[table.dayIdx], amountText: r[table.amountIdx], raw: { cells: r.slice(0, 6), period: /월/.test(table.header[table.dayIdx]) ? "month" : "day", ...(table.amountEstimated ? { amountEstimated: true, amountHead: String(table.header[table.amountIdx] ?? "").slice(0, 40) } : {}),
+      /* 🔴 **러너는 `raw` 에 «사실»만 남기고 문장은 서버가 만든다**(메인 판정 2026-09-15).
+         러너 노트를 저장할 자리를 새로 파면 «러너가 하는 말»이 또 하나의 진실 원천이 된다 — 그래서 숫자만 남긴다.
+         `notes` 는 서버가 **버린다**(`RunnerReportOk` 에 칸이 없다) — 화면에 가야 할 것은 전부 여기로. */
+      ...(table.summaryRows ? { rowsDropped: table.summaryRows } : {}) } })), { accountId: account.id });
     if (!parsed.ok) throw PARSE(`${parsed.reason} · 머리글=${JSON.stringify(table.header).slice(0, 80)}`);
-    return { revenueRows: parsed.rows, notes: [`인센티브 ${parsed.rows.length}행(${table.where})`] };
+    return { revenueRows: parsed.rows, notes: [`인센티브 ${parsed.rows.length}행(${table.where})`, ...scrapeNotes] };
   } catch (e) {
     await failShot(page, shotKey);
     throw e;

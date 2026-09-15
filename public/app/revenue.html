@@ -6,7 +6,7 @@
 <title>수익 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=11">
+<link rel="stylesheet" href="/css/ac.css?v=13">
 </head>
 <body>
 <div class="shell">
@@ -18,7 +18,7 @@
   <span id="mon" style="font-weight:700;font-size:15px"></span>
   <button type="button" class="ic" id="next" aria-label="다음달" style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button>
 </div>
-<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div></div>
+<div class="hl" id="hl" style="padding-top:2px" hidden><div class="say" id="say"></div><div class="num" id="num"></div><div class="tip" id="tip"></div><p class="muted" id="estNote" hidden style="margin:6px 4px 0;font-size:12.5px"></p></div>
 <div id="body"><div class="group"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
   </main>
 </div>
@@ -34,6 +34,13 @@ const todayYmd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul"
 const [TY, TM, TD] = todayYmd.split("-").map(Number);
 const ymdOffKST = (n) => new Date(Date.UTC(TY, TM - 1, TD + n)).toISOString().slice(0, 10);   // 달력 날짜 산수는 UTC 앵커로(기기 시간대 안 탄다)
 let view = { y: TY, m: TM };
+
+/* [B2 a8de1d5] «예상 열» 도장 — 이름은 `amountEstimated` 하나다(bySource·days 둘 다). 문구도 서버가 만든다(`note`).
+   🔴 이름이 둘인 이유를 섞지 마라: `todayEstimatedKrw` = «어느 **소스**에서 왔나»(커넥터 확정치가 아니다) ·
+      `amountEstimated` = «그 소스 안에서 **어느 열**을 읽었나»(매체 표의 «예상수익» 열). 애드핏이 «확정수익» 열을 주면
+      소스는 여전히 estimated 인데 이 도장은 안 찍힌다 — «예상» 필은 **amountEstimated 에만** 단다.
+   🔴 키가 없으면 아무것도 안 그린다(옛 데이터엔 안 붙는다 · AC-9 «없음 ≠ 0»). */
+const estOf = (s) => (s && s.amountEstimated === true ? { note: String(s.note || "") } : null);
 let SUM = null, DAYS = [], SRC = [], accounts = [], PREV_SAME = null; // PREV_SAME = 지난달 «같은 날까지» 합(시안 문장 · 화면이 revenue-daily 로 계산)
 const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
 const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
@@ -91,6 +98,10 @@ function render() {
   }
   UI.$("#hl").hidden = false;
   UI.$("#say").textContent = `${view.m}월에`;
+  /* [B2] 이 달에 «예상 수입» 매체가 섞였으면 그 사실을 한 줄로(합계는 그대로 — 큰 숫자를 흐리게 하지 않는다 · 헌장) */
+  const estSrcs = (SUM.bySource || []).filter(estOf);
+  UI.$("#estNote").hidden = !estSrcs.length;
+  if (estSrcs.length) UI.$("#estNote").textContent = `${estSrcs.map((s) => UI.srcLabel(s.source)).join(" · ")} — 확정이 아니라 예상치예요 · 확정되면 숫자가 바뀔 수 있어요`;
   UI.$("#num").innerHTML = `<span id="big">0원</span> 벌었어요`; // [v4] 잉크 — 초록은 홈 한 곳뿐(화면당 색 3)
   UI.countUp(UI.$("#big"), SUM.monthKrw, won);
   // [v4] 시안 문장: «지난달 같은 날보다 67,300원 더 벌었어요» — 증가만 초록, 감소는 잉크
@@ -117,17 +128,19 @@ function dailyGroup() {
     if (!r) { miss.push(i); bars += `<button type="button" class="none" data-d="${day}" aria-label="${dayLabel(day)} 아직 못 가져왔어요"></button>`; continue; }
     if (!r.krw) { bars += `<button type="button" class="zero" data-d="${day}" aria-label="${dayLabel(day)} 0원"></button>`; continue; }
     const h = Math.max(8, Math.round((r.krw / max) * 100));
-    bars += `<button type="button" class="${r.krw === max ? "top" : ""}" data-d="${day}" style="height:${h}%" aria-label="${dayLabel(day)} ${won(r.krw)}"></button>`;
+    /* [B2] 그 날 «예상 열»이 섞였으면 막대에 점 하나(색은 안 늘린다 · 눌러 보면 말로 나온다) */
+    bars += `<button type="button" class="${r.krw === max ? "top" : ""}${r.amountEstimated ? " est" : ""}" data-d="${day}" style="height:${h}%" aria-label="${dayLabel(day)} ${won(r.krw)}${r.amountEstimated ? " · 예상치 섞임" : ""}"></button>`;
   }
   return `<div class="group" style="margin-bottom:12px"><div class="gt">날마다</div>
     <div class="spark">${bars}</div><div class="spark-x"><span>1일</span><span>${upto}일</span></div>
-    ${miss.length ? `<div class="spark-l">빗금 친 날은 아직 못 가져온 날이에요 · 0원이 아니에요</div>` : ""}</div>`;
+    ${miss.length ? `<div class="spark-l">빗금 친 날은 아직 못 가져온 날이에요 · 0원이 아니에요</div>` : ""}
+    ${DAYS.some((x) => x.amountEstimated) ? `<div class="spark-l">점이 있는 날은 매체가 준 예상치가 섞인 날이에요 · 확정되면 숫자가 바뀔 수 있어요</div>` : ""}</div>`;
 }
 function bindDaily() {
   UI.$$("#body .spark button").forEach((b) => b.onclick = () => {
     UI.$$("#body .spark button").forEach((x) => x.classList.toggle("on", x === b));
     const day = b.dataset.d; const r = DAYS.find((x) => x.day === day);
-    UI.toast(r ? `${dayLabel(day)} · ${won(r.krw)}${r.freshness ? " · " + (UI.FRESH[r.freshness] || "") : ""}` : `${dayLabel(day)} · 아직 못 가져왔어요`);
+    UI.toast(r ? `${dayLabel(day)} · ${won(r.krw)}${r.freshness ? " · " + (UI.FRESH[r.freshness] || "") : ""}${r.amountEstimated ? " · 예상치가 섞여 있어요" : ""}` : `${dayLabel(day)} · 아직 못 가져왔어요`);
   });
 }
 
@@ -138,7 +151,10 @@ function sourceGroup() {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
-    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span></div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+    /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
+       🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
+    const est = estOf(s);
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
   }).join("") + "</div>";
 }
 
@@ -146,13 +162,15 @@ function sourceGroup() {
 function accountGroup() {
   const list = SUM.byAccount || []; if (!list.length) return "";
   const max = Math.max(1, ...list.map((x) => x.krw));
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(a.channel, "sm")}@${UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
 }
 
 /* ④ 글·영상별 TOP 5 */
 function pieceGroup() {
   const list = SUM.topPieces || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => p.deleted
+    ? `<div class="row"${p.channel ? "" : ""}>${p.channel ? UI.mark(p.channel) : ""}<div class="l"><span class="t wrap muted" style="font-weight:500">${UI.esc(p.title || "지운 글")}</span><span class="d">${p.channel ? UI.esc(UI.chLabel(p.channel)) : "지운 글 · 돈은 그대로 세요"}</span></div><span class="r">${won(p.krw)}</span></div>`
+    : `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
 }
 
 /* ⑤ 직접 입력 */

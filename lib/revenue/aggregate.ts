@@ -16,9 +16,18 @@ const kstToday = sql`(NOW() AT TIME ZONE 'Asia/Seoul')::date`;
 
 export interface RevenueSummary {
   monthKrw: number; todayConfirmedKrw: number; todayEstimatedKrw: number; prevMonthKrw: number;
-  bySource: { source: string; krw: number; freshness: Freshness; lastSyncAt?: string }[];
-  byAccount: { accountId: number; handle: string; channel: string; krw: number }[];
-  topPieces: { pieceId: number; title: string; channel: string; krw: number }[];
+  /**
+   * 🔴 `amountEstimated` 는 «**그 매체 표의 «예상» 열을 읽었다**»는 뜻이다(러너 `scrape.mjs` 가 찍는다).
+   *    ⚠️ `todayEstimatedKrw` 의 «예상»과 **다른 말**이다 — 그쪽은 «어느 **소스**에서 왔나»(커넥터 확정치 `CONFIRMED_SOURCES` 가 아니다)이고,
+   *    이쪽은 «그 소스 안에서 **어느 열**을 읽었나»다. 애드포스트는 소스로도 «예상»이고 열로도 «예상수입»이라 둘이 겹쳐 보이지만,
+   *    애드핏이 «확정수익» 열을 주면 소스는 여전히 estimated 인데 이 도장은 **안 찍힌다**. 이름이 겹치면 다음 사람이 섞으니 칸을 갈라 둔다.
+   *    `note` = 서버가 만드는 한 문장(러너 문구를 그대로 안 쓴다 — 화면 어휘는 한 곳에서 정한다 · 이모지 금지).
+   */
+  bySource: { source: string; krw: number; freshness: Freshness; lastSyncAt?: string; amountEstimated?: true; note?: string }[];
+  /** [P1R7 B3] 계정이 지워졌으면 `handle:"지운 계정"` + `deleted:true` · `channel` 은 빈 문자열(마크를 못 그린다). 금액은 그대로 센다 — 합계 = 내역. */
+  byAccount: { accountId: number; handle: string; channel: string; krw: number; deleted?: boolean }[];
+  /** [P1R7 B3] 글이 지워졌으면 `title:"지운 글"` + `deleted:true` · 제목이 비었으면 `"제목 없는 글"` + `untitled:true`. */
+  topPieces: { pieceId: number; title: string; channel: string; krw: number; deleted?: boolean; untitled?: boolean }[];
 }
 export interface HomeRevenue { todayConfirmedKrw: number; todayEstimatedKrw: number; yesterdayKrw: number; monthKrw: number }
 
@@ -48,16 +57,27 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
       COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND source IN (${CONFIRMED_IN})), 0) AS today_confirmed,
       COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND NOT (source IN (${CONFIRMED_IN}))), 0) AS today_estimated
     FROM revenue_daily WHERE tenant_id = ${tid} AND day >= (${start} - interval '1 month')::date`);
+  /* 🔴 `amount_estimated` — 그 소스의 그 기간 행 중 **하나라도** 매체 표의 «예상» 열에서 온 것이면 true.
+     `amount_head` 는 그때 읽은 열 이름(**가장 최근 행** 것 하나 — 여러 날이 섞이면 최신이 지금 화면을 설명한다).
+     BOOL_OR 은 행이 0개면 NULL 을 내므로 아래에서 `=== true` 로만 도장을 찍는다(모르면 안 찍는다 · AC-9). */
   const bySrc = await q(sql`SELECT d.source, COALESCE(SUM(d.amount_krw),0) AS krw, MAX(d.freshness) AS freshness, MAX(d.updated_at) AS last_upd,
+      BOOL_OR(d.raw->>'amountEstimated' = 'true') AS amount_estimated,
+      (array_agg(d.raw->>'amountHead' ORDER BY d.day DESC, d.id DESC)
+         FILTER (WHERE d.raw->>'amountEstimated' = 'true' AND COALESCE(d.raw->>'amountHead','') <> ''))[1] AS amount_head,
+      /* 러너가 «합계» 행을 몇 줄 뺐나(사실) — 문장은 아래에서 서버가 만든다. 숫자가 아니면 NULL 이라 안 센다. */
+      MAX(NULLIF(d.raw->>'rowsDropped','')::int) AS rows_dropped,
       (SELECT MAX(s.last_ok_at) FROM revenue_sources s WHERE s.tenant_id = d.tenant_id AND s.source = d.source) AS last_ok
     FROM revenue_daily d WHERE d.tenant_id = ${tid} AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.tenant_id, d.source ORDER BY krw DESC`);
+  /* [P1R7 B3] 🔴 **LEFT JOIN 이어야 한다** — 예전엔 INNER JOIN 이라 계정·글 행이 사라지면 그 돈이 «어느 계정이»·«잘 번 글»에서 **조용히 빠졌다**.
+     합계(monthKrw)에는 남아 있으니 **합계 ≠ 내역**이 되고, 고객은 «없어진 돈»을 보게 된다. 수익 행은 주인이 사라져도 남는 것이 맞다(회계) —
+     그러니 **«주인 없는 금액»을 서버가 이름 붙여 내려보낸다**(화면이 물음표를 그리지 않게 · 이름은 §RevenueSummary 주석). */
   const byAcc = await q(sql`SELECT d.account_id, a.handle, a.channel, COALESCE(SUM(d.amount_krw),0) AS krw
-    FROM revenue_daily d JOIN accounts a ON a.id = d.account_id AND a.tenant_id = d.tenant_id
+    FROM revenue_daily d LEFT JOIN accounts a ON a.id = d.account_id AND a.tenant_id = d.tenant_id
     WHERE d.tenant_id = ${tid} AND d.account_id IS NOT NULL AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.account_id, a.handle, a.channel ORDER BY krw DESC LIMIT 20`);
   const top = await q(sql`SELECT d.piece_id, p.title, p.channel, COALESCE(SUM(d.amount_krw),0) AS krw
-    FROM revenue_daily d JOIN pieces p ON p.id = d.piece_id AND p.tenant_id = d.tenant_id
+    FROM revenue_daily d LEFT JOIN pieces p ON p.id = d.piece_id AND p.tenant_id = d.tenant_id
     WHERE d.tenant_id = ${tid} AND d.piece_id IS NOT NULL AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.piece_id, p.title, p.channel ORDER BY krw DESC LIMIT 5`);
   return {
@@ -65,19 +85,55 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
     bySource: bySrc.map((r) => {
       const o: RevenueSummary["bySource"][number] = { source: String(r.source), krw: n(r.krw), freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness };
       const at = utcDate(r.last_ok) ?? utcDate(r.last_upd); if (at) o.lastSyncAt = at.toISOString();
+      /* 🔴 문구는 **서버가** 만든다(러너 문장을 그대로 흘리지 않는다 — 화면 어휘는 한 곳 · 이모지 금지 · UX 헌장 §3).
+         러너는 `raw` 에 **사실**만 남긴다(`amountEstimated`·`amountHead`·`rowsDropped`) — 메인 판정 2026-09-15.
+         «러너가 하는 말»을 저장하기 시작하면 그게 또 하나의 진실 원천이 된다. */
+      const parts: string[] = [];
+      if (r.amount_estimated === true) {
+        o.amountEstimated = true;
+        const head = String(r.amount_head ?? "").trim();
+        parts.push(head ? `«${head}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요` : "매체가 준 예상치예요 — 확정 금액이 아니에요");
+      }
+      const dropped = n(r.rows_dropped);
+      // «합계» 행을 뺐다는 사실을 말해 준다 — 고객이 매체 화면과 숫자를 맞춰 볼 때 «왜 다르지»의 답이 된다.
+      if (dropped > 0) parts.push(`매체 표의 합계 행 ${dropped}줄은 뺐어요(같은 돈을 두 번 세지 않으려고요)`);
+      if (parts.length) o.note = parts.join(" · ");
       return o;
     }),
-    byAccount: byAcc.map((r) => ({ accountId: n(r.account_id), handle: String(r.handle), channel: String(r.channel), krw: n(r.krw) })),
-    topPieces: top.map((r) => ({ pieceId: n(r.piece_id), title: String(r.title || ""), channel: String(r.channel), krw: n(r.krw) })),
+    /* [P1R7 B3] 주인이 사라졌거나 이름이 비었으면 **서버가 사람말로 이름 붙인다**(화면이 «?»·«제목 없음»을 그리지 않게).
+       `deleted`/`untitled` 는 화면이 «지운 계정»을 흐리게 그릴 재료 — 금액은 그대로 센다(회계). */
+    byAccount: byAcc.map((r) => {
+      const gone = r.handle === null || r.handle === undefined;
+      const o: RevenueSummary["byAccount"][number] = { accountId: n(r.account_id), handle: gone ? "지운 계정" : String(r.handle), channel: String(r.channel ?? ""), krw: n(r.krw) };
+      if (gone) o.deleted = true;
+      return o;
+    }),
+    topPieces: top.map((r) => {
+      const gone = r.channel === null || r.channel === undefined;      // piece 행 자체가 없다(LEFT JOIN 미스)
+      const title = String(r.title ?? "").trim();
+      const o: RevenueSummary["topPieces"][number] = { pieceId: n(r.piece_id), title: gone ? "지운 글" : (title || "제목 없는 글"), channel: String(r.channel ?? ""), krw: n(r.krw) };
+      if (gone) o.deleted = true; else if (!title) o.untitled = true;
+      return o;
+    }),
   };
 }
 
 /** 일별 막대(§1.4c). 행이 있는 날만 — 0원도 행이면 싣는다 · 없는 날은 키 없음(«수집 안 됨»). */
-export async function daily(tid: number, from: string, to: string): Promise<{ day: string; krw: number; freshness: Freshness }[]> {
+export async function daily(tid: number, from: string, to: string): Promise<{ day: string; krw: number; freshness: Freshness; amountEstimated?: true }[]> {
+  /* `amount_estimated` — 그 날 행 중 하나라도 매체 표의 «예상» 열에서 왔으면 true(§RevenueSummary.bySource 주석과 같은 뜻).
+     날짜별로도 주는 이유: 어떤 날은 확정이 내려오고 어떤 날은 아직 예상일 수 있어, **그 막대만** 다르게 그릴 수 있어야 한다. */
   const rows = await q(sql`SELECT day::text AS d, COALESCE(SUM(amount_krw),0) AS krw,
-      CASE WHEN COUNT(DISTINCT freshness) = 1 THEN MAX(freshness) ELSE 'api' END AS freshness
+      CASE WHEN COUNT(DISTINCT freshness) = 1 THEN MAX(freshness) ELSE 'api' END AS freshness,
+      BOOL_OR(raw->>'amountEstimated' = 'true') AS amount_estimated
     FROM revenue_daily WHERE tenant_id = ${tid} AND day >= ${from}::date AND day <= ${to}::date GROUP BY day ORDER BY day`);
-  return rows.map((r) => ({ day: String(r.d).slice(0, 10), krw: n(r.krw), freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness }));
+  return rows.map((r) => {
+    const o: { day: string; krw: number; freshness: Freshness; amountEstimated?: true } = {
+      day: String(r.d).slice(0, 10), krw: n(r.krw),
+      freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness,
+    };
+    if (r.amount_estimated === true) o.amountEstimated = true;   // 모르면(NULL) 안 찍는다 — AC-9
+    return o;
+  });
 }
 
 /**

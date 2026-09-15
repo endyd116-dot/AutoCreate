@@ -208,6 +208,15 @@ export function cleanupFiles(fileMap) {
   for (const f of fileMap?.values?.() ?? []) { if (f) { try { fs.unlinkSync(f); } catch { /* 무시 */ } } }
 }
 
-/** 사람처럼 잠깐 쉰다(기계적 등간격 클릭을 피한다 — AM 봇탐지 완화 관례). */
+/**
+ * 사람처럼 잠깐 쉰다(기계적 등간격 클릭을 피한다 — AM 봇탐지 완화 관례).
+ *
+ *   🔴 **이건 «쉬는 것»이지 «기다리는 것»이 아니다.** «화면이 준비됐나»를 이 함수로 대신하지 마라 —
+ *      그게 AC-57 의 모양이고, 실제로 두 번 비쌌다(실측 `scripts/verify-runner-wait.mts`):
+ *        · 짧으면 안 그려진 화면을 재고 «내용 없음» → «주소를 못 찾았어요(**우리 버그**)»라는 거짓 보고
+ *        · 길면 준비가 끝나도 끝까지 자서 잡마다 몇 초씩 버린다
+ *      ⇒ 준비 여부는 **조건으로** 본다: `scrape.mjs` 의 `waitFor(page, cond, maxMs)` (되면 즉시 나오고, 안 되면 false).
+ *      ⚠️ 아직 `settle` 로 기다리는 자리가 많이 남아 있다(R8 에서 이어 간다) — 새로 쓰는 코드는 `waitFor` 를 써라.
+ */
 export const settle = (page, min = 400, max = 0) =>
   page.waitForTimeout(max > min ? min + Math.floor(Math.random() * (max - min)) : min).catch(() => {});

@@ -1,7 +1,7 @@
 # HANDOFF.md — AutoCreate 메인 세션 인수인계 (압축/새 세션용 단일 정본)
 
 > 갱신 2026-09-15 · 작성자 = 메인(`autocreate-ca`) · **압축 후 새 메인 세션은 이 문서 + `docs/active/RESUME-TRIGGER.md` 를 먼저 읽는다.**
-> 이 문서는 «지금까지의 서사»다. 규칙은 `CLAUDE.md`, 설계는 `docs/DESIGN.md`, 라운드 계약은 `docs/active/*-contract.md`, 함정은 `docs/rules/PITFALLS.md`(AC-1~51) 가 정본이고 여기서 요약·연결만 한다.
+> 이 문서는 «지금까지의 서사»다. 규칙은 `CLAUDE.md`, 설계는 `docs/DESIGN.md`, 라운드 계약은 `docs/active/*-contract.md`, 함정은 `docs/rules/PITFALLS.md`(AC-1~61) 가 정본이고 여기서 요약·연결만 한다.
 
 ---
 
@@ -10,7 +10,7 @@
 **AutoCreate(AC)** = 부수입을 원하는 개인이 여러 계정으로 글·영상을 AI로 만들어 자동 발행하고 광고·제휴 수익을 한 곳에서 보는 토스형 SaaS. AM(AutoMarketing)의 엔진을 이식하고 겉(제품·화면·계정 모델·수익 집계·결제·운영센터)은 새로 짰다.
 
 - **개발 라운드 전부 종료**: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · R5 · R6 + KICC 이중 MID. 설계(`docs/DESIGN.md`) 대비 미개발 = 외부 선결조건(유튜브 심사 등)이 막은 것 + **§6 «사장님 실측 발견 5건»(진행 중)**.
-- **라이브 = main `7985d37`**(배포 #7 · C «배포 가능» · 라이브 스모크 health 200 · create.html v9 «내 소재 넣기» · runner-download 401) · 로컬 main `012ce66`(B R6 §1 · 미배포 = 배포 #8 후보)(R6.5 전부 머지 · 러너 v1.1.4 ) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
+- **라이브 = main `90364bc`**(배포 #9 · 라이브 확인 `ac.css?v=13` + «연결된 채널의 소재만») · 직전 #8 (`7bedd74` · 2026-09-15 · C «배포 가능» PASS 40·FAIL 0 · 라이브 스모크: `/api/push-key` publicKey 200 · `/api/account-slots` 401 · 설정 «알림 받기») · 이전 배포 #7 (`7985d37` · C «배포 가능» · 라이브 스모크 health 200 · create.html v9 «내 소재 넣기» · runner-download 401) · 로컬 main `012ce66`(B R6 §1 · 미배포 = 배포 #8 후보)(R6.5 전부 머지 · 러너 v1.1.4 ) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
 - **결제(KICC) 실돈 실측 통과**(2026-09-15): 카드 등록(keyin MID) → ₩5,500 청구 → ₩2,000 부분 취소 → ₩3,500 환불 · 카드 최종 0원.
 - 운영센터 `/ops` · `admin`/`admin1234`(**사장님 아직 안 바꿈**) · MIS 허브 SSO 카드 ⑥ 라이브.
 
@@ -46,6 +46,8 @@
 | 5 | `79dfe6a` | R6 내보내기·공유카드·추천인·영수증·관리형 신청·백업 |
 | 6 | `4d06070` | R6 마감(공유 카드 금액 캐시) |
 | **7** | **`7985d37`** | R6.5 사장님 실측 5건(직접 소재·캡션·자동편성 안내·건너뛰기·러너 배포 v1.1.4) + C 수리 4 + 화면 44px | 
+| **8** | **`7bedd74`** | R7 전부(영상 축 개통 · 러너 배포·프록시·워밍업·관리형 계정당 · 탈퇴·파기·플랜 게이트·내부 테스트 제외·계정 더 쓰기·웹푸시 · 화면 전부 · C 검증 PASS 40/FAIL 0) |
+| **9** | **`90364bc`** | 사장님 실측(만들기 «왜 이 채널만») · 러너 v1.1.7 · waitFor 준비 판정 |
 | 핫픽스 | `7ae8e78`→`2278ae7`→`f6c7eaa`→`f935034`→`7e0616e`→**`e7bd0c7`** | 티스토리 HTML · KICC 콜백 POST · 확인용 JSON · 빌키 keyin 고정 · 결과표 · 결제 실패 사유 시트 |
 
 ### 라이브에 있는 것
@@ -61,7 +63,7 @@
 
 ### 라이브 데이터·env(오늘)
 - `channel_registry` 4 active(naver_blog·tistory·blogger·wordpress)/6 planned(유튜브 OAuth 앱 없어 못 켬).
-- env: `FX_USD_KRW=1400`(원가 기준값) · `BGM_LICENSE_VERIFIED=1` · **`KICC_MODE=live`·`KICC_MALL_ID`·`KICC_MALL_ID_KEYIN`·`KICC_API_DOMAIN`(ON 이식)·`KICC_SECRET_KEY`(사장님 제공·is_secret)** · deps `@resvg/resvg-js` + `assets/fonts/Pretendard-*.otf`.
+- env: `FX_USD_KRW=1400`(원가 기준값) · `BGM_LICENSE_VERIFIED=1` · **`VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`(is_secret)·`VAPID_SUBJECT`**(2026-09-15 메인이 생성·등록 · 웹푸시) · **`KICC_MODE=live`·`KICC_MALL_ID`·`KICC_MALL_ID_KEYIN`·`KICC_API_DOMAIN`(ON 이식)·`KICC_SECRET_KEY`(사장님 제공·is_secret)** · deps `@resvg/resvg-js` + `assets/fonts/Pretendard-*.otf`.
 - Neon PITR **1일→7일**(메인 API).
 - **테스트 계정 198 `test@autocreate.kr`/`autocreate12`** = 사장님 결제 테스트 계정 · 빌키 토스뱅크 ****0542 **보존** · **정리 완료 → trial · 자동청구 해제됨**.
 - 보존 4집: 3·13·109·116(pro · MRR 49,000 은 이 집). 🔴 **t189(B2실증 · 티스토리 2FA 세션 보유)은 2026-09-15 정리에서 삭제됨** → 다음 티스토리 실측 때 **사장님 재로그인 1회 필요**(109 세션이 살아 있으면 `--reuse-tid=109`).
@@ -92,7 +94,7 @@
 
 - **Neon** `old-tree-90235056` · DDL `node scripts/neon-migrate.mjs`(0001~0011) · 키 `~/.neon-am-key` · PITR 7일.
 - **Netlify** site `a14524de-ebfa-46e8-a116-dbc87343f276` · PAT `nfp_bB2BR1…`(AM 메모리 `neon-netlify-remote`) · **AC-8** 다른 사이트 secret 은 `****`.
-- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip `autocreate/runner/v1.1.4.zip`+`latest.json`(sha256 53ac918c…)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
+- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip **`autocreate/runner/v1.1.7.zip`**+`latest.json`(sha256 3be28110… · 128,364B · v1.1.7 = R7 러너 고침 전부: 비공개 감지·표 찾기 6·돈/날짜 3·로그인 판정 6·준비 판정)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
 - **KICC**: ON 계약 공용 · MID 2 · live · **빌키 = keyin 고정**(AC-45) · 복귀 주소 등록 불필요·KEYIN 시크릿 불필요(실측 확정) · 개통 정본 `docs/active/KICC-GO-LIVE.md`.
 - 로컬 `.env`(워크트리 6곳 동기): `TEST_TISTORY_*`·`TEST_NAVER_*`·`FX_USD_KRW`·`BGM_LICENSE_VERIFIED`.
 
@@ -123,7 +125,11 @@
 
 ---
 
-## 5B. R7 (2026-09-15 착수)
+## 5B. R7 (2026-09-15 · 진행 중)
+
+**진행**: §1 영상 축 **완료**(토글·계정 없이 영상·mp4 내려받기·올린 주소 적기·홈 해야 할 일 7줄·프레임 지문) · §2 러너/발행 60%(run.bat 열쇠 수리·고객 경로 1바퀴·쓰레드 글·프록시 fail-closed·출구 IP·트래픽 실측·견적서 · 남은 것 노트북 공존·관리형 1대·워밍업·실발행 준비) · §3 B **§3.1~3.5 완료**(탈퇴·파기·플랜 게이트·자격 동의·**내부 테스트 제외**) · §3.6 계정 슬롯 진행 · §4 A **완료**(화면 전부 · 보류 축 3상태 · 판 번호 자동) · B3 조사 잔여 수리 완료 · C §5 준비(API 표면 상시 하니스).
+**오늘 숫자 2개**: AI 원가 **$15.93 → $3.70**(내부 12.23 제외 · 83곳 중 81곳이 내부 · 진짜 고객 0) · 글 1건 트래픽 **≈9~10MB**(가정의 2~4배 과대 · 계정당 월 1GB 미만).
+
 
 **계약 = `docs/active/2026-09-15-P1R7-contract.md` v7.0**(유일한 입력 = 전수조사). 사장님 결정 4: ①영상 채널 켠다 ②실발행 GO(네이버 1건부터) ③요금제 채널 게이트 설계대로 ④관리형 기본·계정당 월요금·프록시 포함.
 담당: B-1 §1 영상 개통 · B2 §2 실발행·러너·관리형 1대 · B §3 탈퇴/게이트/내부 구분 · A §4 화면 · C §5(AC-48 전수 diff 포함) · 메인 §7 DESIGN 갱신.
@@ -156,7 +162,7 @@
 ---
 
 ## 7. 문서 지도
-`CLAUDE.md` · `docs/DESIGN.md` · `docs/rules/PITFALLS.md`(**AC-1~51**) · `PARALLEL_GUIDE.md` · 계약 R1 v1.3/R2 v2.11/R3 v3.5/R4 v4.5(§1.6 KICC)/R5 v5.6/R6 v6.0 · **`docs/active/KICC-GO-LIVE.md`** · `C-HANDOFF.md`·`R5-B-HANDOFF.md` · `SESSION-TRIGGERS.md` · `R6-screen-list.md` · `2026-09-14-R5-presurvey-video.md` · `docs/history/*-C-report.md`(R1~R6) · `docs/screens-v4.html` · `PROJECT_STATE.md`.
+`CLAUDE.md` · `docs/DESIGN.md` · `docs/rules/PITFALLS.md`(**AC-1~61**) · `PARALLEL_GUIDE.md` · 계약 R1 v1.3/R2 v2.11/R3 v3.5/R4 v4.5(§1.6 KICC)/R5 v5.6/R6 v6.0 · **`docs/active/KICC-GO-LIVE.md`** · `C-HANDOFF.md`·`R5-B-HANDOFF.md` · `SESSION-TRIGGERS.md` · `R6-screen-list.md` · `2026-09-14-R5-presurvey-video.md` · `docs/history/*-C-report.md`(R1~R6) · `docs/screens-v4.html` · `PROJECT_STATE.md`.
 
 ## 8. 메인 운영 습관
 판단 필요한 것만 답한다 · 계약은 파일에 먼저 · 세션이 내 오류를 잡으면 그대로 인정(오늘 6번) · 머지 B→B2→A→C · 머지마다 tsc+build+2함수 grep · push=배포 → API ready → 라이브 스모크(증거) → 문서 갱신 · 증거 없는 실증 금지 · 초록도 빨강도 의심 · 사장님께 사람말·결과만 · 창 구분은 보고 첫 줄 · 라이브 변경은 그 창에서 Allow · **사장님이 짚은 건 즉시 발주**.
