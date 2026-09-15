@@ -30,10 +30,10 @@
 
   /* ── [P1R4] 막힘 시트 — 403 writable(readonly|suspended) · 402 plan_limit. 업셀 한 문장 + Primary 1 ──
      🔴 402 는 «요금제» 전용 신호가 아니다 — `step` 으로만 가른다(`channel_not_connectable` 처럼 **돈과 무관한 402** 가 있다 · B3 accounts-add). «402 = 업셀»로 일반화하지 마라. */
-  let gateOpen = false, gateSheet = null;
+  let gateOpen = false;
   UI.gate = function (r) {
     if (!r || r.ok || gateOpen) return false;
-    const done = (html, title, cta, href) => { gateOpen = true; gateSheet = UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
+    const done = (html, title, cta, href) => { gateOpen = true; UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
     if (r.status === 403 && r.step === "writable") {
       if (r.reason === "suspended") return done("결제가 밀려 있어요. 카드를 확인하면 바로 이어서 돼요. 만든 글과 편성표는 그대로예요.", "잠시 멈춰 있어요", "카드 확인하기", "/app/plan.html");
       /* 🔴 [R7 §3.1 · B ba99538] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
@@ -45,16 +45,8 @@
         if (!say) say = r.daysLeft != null ? `${r.daysLeft}일 뒤에 자료가 지워져요. 그때까지는 보기만 할 수 있어요.` : "지금은 보기만 할 수 있어요.";
         return done(UI.esc(say), T, "되돌리러 가기", "/app/settings.html");
       }
-      const opened = done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
-      /* ⏳ 아래는 **받침대(fallback)** 다 — `reason:"closed"` 를 주는 서버(ba99538)는 2026-09-15 현재 `feature/p1r7-back` 에만 있고
-         main 에는 아직 없다. main 에 들어오면 이 블록(GET 한 번)을 통째로 지운다 — 위 분기가 같은 일을 왕복 없이 한다. */
-      const gs = gateSheet;
-      UI.api("/api/account-close", { noGate: true, noRedirect: true }).then((c) => {   // noRedirect — 이 확인 때문에 누구도 로그인 화면으로 튕기지 않게
-        if (!c.ok || !c.closed || !gs || !gs.el.isConnected) return;
-        const h3 = gs.el.querySelector("h3"); if (h3) h3.textContent = "탈퇴를 신청하셨어요";
-        gs.el.querySelector(".sheet-body").innerHTML = `<p class="muted" style="margin:0 0 16px">${UI.esc(UI.dateKST(c.purgeAt))}에 자료가 지워져요. 그때까지는 보기만 할 수 있어요. 되돌리면 하던 대로 다시 쓸 수 있어요.</p><div class="cta"><a class="btn primary" href="/app/settings.html">되돌리러 가기</a></div>`;
-      });
-      return opened;
+      /* 받침대(막힌 자리에서 GET 으로 한 번 더 묻던 것)는 2026-09-15 b229c09 로 걷었다 — 서버가 사유를 실어 준다. */
+      return done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
     }
     if (r.step === "banned_category") { UI.toast(r.error || "이 주제는 만들 수 없어요"); return true; }           // 서버 문구 그대로(카테고리 이름이 들어 있다)
     if (r.step === "ai_cost_cap") return done(UI.esc(r.error || "오늘 AI 사용이 하루 상한에 닿았어요. 내일 다시 이어서 만들 수 있어요."), "오늘은 여기까지예요", "홈으로", "/app/home.html");
@@ -445,13 +437,16 @@
     sponsoredBody: "이 글은 광고주에게서 원고료 등 대가를 받고 작성한 유료 광고입니다.",
     giftBody: "이 글은 광고주에게서 제품(또는 서비스)을 무상으로 제공받아 작성했습니다.",
   };
-  /* 본문 첫머리 고지에 **어느 종류가 이미 실렸나**. 🔴 화면이 판정하지 않는다 — 서버가 넣은 문장이 거기 있는지만 본다. */
+  /* 고지에 **어느 종류가 이미 실렸나**. 🔴 화면이 판정하지 않는다 — 서버가 넣은 문장이 거기 있는지만 본다.
+     `compIn` = 줄글(영상 설명란 첫 줄) · `compOf` = 본문 HTML 첫머리 고지 블록. 문장은 두 자리가 같다(videoDescriptionFirstLine = disclosureTextFor). */
+  UI.compIn = function (text) {
+    const t = String(text || ""); const T = UI.DISCLOSURE_TEXT;
+    return { affiliate: t.includes(T.coupang) || t.includes(T.generic), sponsored: t.includes(T.sponsoredBody), gift: t.includes(T.giftBody), text: t.replace(/\s+/g, " ").trim() };
+  };
   UI.compOf = function (bodyHtml) {
     const s = String(bodyHtml || ""); const i = s.indexOf('class="disclosure"');
     const e = i < 0 ? -1 : s.indexOf("</div>", i);
-    const t = i < 0 || e < 0 ? "" : s.slice(i, e).replace(/<[^>]+>/g, " ");
-    const T = UI.DISCLOSURE_TEXT;
-    return { affiliate: t.includes(T.coupang) || t.includes(T.generic), sponsored: t.includes(T.sponsoredBody), gift: t.includes(T.giftBody), text: t.replace(/\s+/g, " ").trim() };
+    return UI.compIn(i < 0 || e < 0 ? "" : s.slice(i, e).replace(/<[^>]+>/g, " "));
   };
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS 에서 그대로 복사] 🔴 **이 축만 «이대로 예약»을 막는다**(hardFailures).
      나머지 실패는 «알려드리는 것»이다 — 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 안다(골격 반복·최상급이 그렇다). */

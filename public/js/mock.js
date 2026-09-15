@@ -88,7 +88,7 @@
     { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
     { key: "disclosure", label: "대가 고지 첫머리", pass: ok }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true },
     /* [R8-A §2 · B-1] 골격 반복 — 🔴 **소프트**(HARD_GATE_KEYS 밖)라 실패해도 예약은 된다. 사유 문장 모양은 서버 checkStructure 그대로 */
-    { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 70% 미만 · 6편과 견줌)" },
+    { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 75% 미만 · 6편과 견줌)" },
     /* [R8-A §4] 광고 가리킴 — 🔴 **하드**(승인이 막힌다) · 좁은 축이다(광고·배너를 가리키며 누르라고 할 때만) */
     { key: "ad_pointing", label: "광고를 가리키지 않음", pass: gateKnob !== "adpoint", ...(gateKnob === "adpoint" ? { detail: "광고를 가리키며 누르라고 함: «아래 배너 클릭하고 가세요»" } : {}) } ] });
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS] 이 축만 «이대로 예약»을 막는다 — 소프트 실패는 막지 않는다(서버 hardFailures 와 같게) */
@@ -144,7 +144,9 @@
       if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "black_margin") o.detail = "4번 컷 아래 검은 여백 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "forbidden") o.detail = "내부 문자열이 남았어요 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
   const POSTER = "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='540' height='960'><rect width='540' height='960' fill='#191F28'/><rect x='60' y='380' width='420' height='120' rx='16' fill='#2A2A32'/><text x='270' y='452' font-family='sans-serif' font-size='40' font-weight='800' fill='#fff' text-anchor='middle'>에어프라이어 기름때</text></svg>");
   const SRT = "data:text/plain;charset=utf-8," + encodeURIComponent("1\n00:00:00,000 --> 00:00:03,000\n제휴 링크가 있어요\n\n2\n00:00:03,000 --> 00:00:07,500\n눌어붙은 기름, 3분이면 끝나요\n\n3\n00:00:07,500 --> 00:00:13,000\n베이킹소다 한 스푼이 전부예요\n");
-  const VDESC = "이 영상은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n베이킹소다 한 스푼이면 눌어붙은 기름이 녹아요. 준비물과 순서를 58초에 담았어요.\n\n#에어프라이어 #청소 #살림팁";
+  /* 🔴 설명란 첫 줄은 **서버가 만든다**(videoDescriptionFirstLine = disclosureTextFor) — «이 영상은…»으로 고쳐 적어 두면
+     화면이 «고지가 없다»고 읽는다(2026-09-15 발견 · 모의만의 문장이었다). 글·영상이 같은 문장을 쓴다. */
+  const VDESC = DISCLOSURE + "\n베이킹소다 한 스푼이면 눌어붙은 기름이 녹아요. 준비물과 순서를 58초에 담았어요.\n\n#에어프라이어 #청소 #살림팁";
   const videoAssets = () => [{ id: 9001, kind: "video", url: "", meta: { durationMs: 58000, bytes: 8412300, frameCount: 1740 } }, { id: 9002, kind: "srt", url: SRT }, { id: 9003, kind: "thumb", url: POSTER }];
   /* [AC-52] 영상 piece 에도 붙는 글 게이트 칸 — 라벨은 서버 GATE_LABEL 그대로 */
   const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "대가 고지 첫머리", pass: true }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "superlative", label: "최상급에 근거가 있음", pass: true, detail: "0건" }];
@@ -683,7 +685,25 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
     "pieces-regenerate": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; if (p.kind === "video") { p.meta.stage = "script"; p.meta.chainStage = { stage: "script", at: iso(Date.now()) }; p.gate = null; p.gateOk = false; delete p.assets; delete p.blocks; p.body = ""; /* 산출물 삭제 — 안 지우면 이어받기가 «이미 있음»으로 건너뛴다 */ delete p._t0; p._v0 = Date.now(); const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "producing"; return { ok: true, status: "generating" }; } p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; }, // [P1R5] 영상 재생성 = 코인 0 · 처음부터
     "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title;
-      if (p.kind === "video") { if (typeof b.body === "string") { const first = String(p.body || "").split("\n")[0]; const rest = b.body.split("\n").filter((l, i) => !(i === 0 && l === first)); p.body = p.meta.video.disclosure.descriptionFirstLine ? [first, ...rest].join("\n") : b.body; } if (Array.isArray(b.tags)) { p.meta.tags = b.tags.map((x) => String(x).replace(/^#/, "")).filter(Boolean).slice(0, 15); const hb = (p.blocks || []).find((x) => x.type === "hashtags"); if (hb) hb.tags = p.meta.tags; } return { ok: true, gate: p.gate, body: p.body, tags: p.meta.tags }; }   /* [P1R5] 설명란 편집 · 첫 줄 고지는 서버가 잠근다 */
+      if (p.kind === "video") {
+        /* [R8-A fix ① · B-1] 영상에도 «대가 켜기» 입구 — 켜기만 받는다. 고지는 3중(배지·시작 3초 자막·설명란 첫 줄)인데
+           🔴 배지·자막은 **구울 때** 굳는다 — 이미 만들어진 영상엔 없다. 그래서 `needsRerender` 를 실어 준다(문구도 서버 것 그대로). */
+        const vmz = b.monetize || {}; let needsRerender = false;
+        if (vmz.sponsored === true || vmz.gift === true) {
+          if (vmz.sponsored === true) p.meta.sponsored = true;
+          if (vmz.gift === true) p.meta.gift = true;
+          p.meta.adDisclosure = true; p.meta.disclosure = discTextOf(p.meta);
+          const lines = String(p.body || "").split("\n");
+          p.body = [p.meta.disclosure, ...lines.filter((l, i) => !(i === 0 && (l.includes(DISCLOSURE) || l.includes(DISC_SPONSORED) || l.includes(DISC_GIFT))))].join("\n");
+          p.meta.description = p.body;
+          if (p.meta.video) p.meta.video.disclosure = { ...(p.meta.video.disclosure || {}), badge: true, descriptionFirstLine: true };
+          needsRerender = (p.assets || []).some((a) => a.kind === "video");   // 이미 구워진 mp4 가 있으면 다시 구워야 배지가 뜬다
+        }
+        if (typeof b.body === "string") { const first = String(p.body || "").split("\n")[0]; const rest = b.body.split("\n").filter((l, i) => !(i === 0 && l === first)); p.body = p.meta.video.disclosure.descriptionFirstLine ? [first, ...rest].join("\n") : b.body; }
+        if (Array.isArray(b.tags)) { p.meta.tags = b.tags.map((x) => String(x).replace(/^#/, "")).filter(Boolean).slice(0, 15); const hb = (p.blocks || []).find((x) => x.type === "hashtags"); if (hb) hb.tags = p.meta.tags; }
+        return { ok: true, gate: p.gate, body: p.body, tags: p.meta.tags, ...(p.meta.disclosure ? { disclosureFirstLine: String(p.body || "").split("\n")[0] } : {}),
+          ...(needsRerender ? { needsRerender: true, needsRerenderWhy: "이미 만들어진 영상에는 광고 배지가 없어요. 다시 만들어야 화면에 배지와 시작 자막이 들어가요." } : {}) };
+      }   /* [P1R5] 설명란 편집 · 첫 줄 고지는 서버가 잠근다 */
       /* 🔴 여기부터 있던 코드가 윗줄 «//» 주석에 통째로 먹혀 있었다(2026-09-15 발견) — 본문 저장도 게이트 갱신도 안 됐다.
          한 줄 안에서는 «//» 뒤가 전부 주석이다. 줄 가운데 설명은 여러 줄 주석으로만 적는다(같은 사고 세 번째). */
       if (b.bodyHtml) p.bodyHtml = b.bodyHtml.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, "");

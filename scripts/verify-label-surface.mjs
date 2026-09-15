@@ -90,6 +90,16 @@ rec("🔴 글 검사 — 라벨 글자가 서버와 같다(통과형 문장)", g
 const gtUnseen = minus(new Set(gtSrv.keys()), new Set(gtMock.keys()));
 rec("서버에만 있고 모의가 한 번도 안 보여 주는 글 검사 축", gtUnseen.length === 0 ? true : "WARN", gtUnseen.join(" ") || "0개", gtUnseen);
 
+/* ②-b 🔴 **숫자도 낱말이다** — C 실측 2026-09-15: 모의가 «기준 70% 미만»이라 적었는데 서버 상수는 0.75 였다.
+   낱말 대조로는 안 걸린다(문장 틀이 같다). 문턱을 말하는 자리는 **서버 상수에서 읽어 와 견준다**. */
+const numOf = (text, name, mul = 1) => { const m = text.match(new RegExp(`${name}\\s*=\\s*([0-9.]+)`)); return m ? Math.round(Number(m[1]) * mul) : null; };
+const spTs = read("lib/structure-print.ts");
+const overlapSrv = numOf(spTs, "STRUCTURE_OVERLAP_MAX", 100);
+const overlapMock = [...mockJs.matchAll(/기준 (\d+)% 미만/g)].map((m) => Number(m[1]));
+const overlapBad = overlapSrv == null ? ["서버 상수를 못 읽었다"] : overlapMock.filter((n) => n !== overlapSrv).map((n) => `모의 ${n}% ≠ 서버 ${overlapSrv}%`);
+rec("🔴 골격 반복 문턱 숫자가 서버 상수와 같다", overlapBad.length === 0 && overlapMock.length > 0,
+  overlapBad.join(" ") || `${overlapSrv}% · ${overlapMock.length}곳`, overlapBad);
+
 /* ③ 막는 축 목록 — 화면이 이 목록으로 «고쳐야 하는 것»과 «알려 주는 것»을 가른다. 서버와 다르면 둘 중 하나가 거짓말이 된다. */
 const approveTs = read("lib/content-approve.ts");
 /* 이름 **뒤에서부터** 대괄호를 찾는다 — 이름 안의 `string[]` 을 목록으로 잘못 집지 않게. */
