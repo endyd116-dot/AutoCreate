@@ -15,7 +15,7 @@ import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { type GateReport } from "../../lib/ai-tell-gate";
-import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText } from "../../lib/disclosure";
+import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText, compensationOfMeta } from "../../lib/disclosure";
 /* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
 import { recheckPiece, approvePiece } from "../../lib/content-approve";
@@ -77,8 +77,8 @@ const PIECE_SELECT = sql`p.*, a.handle,
 
 
 /** 사용자가 고지를 지웠어도 첫 요소로 되돌린다(§16B.4). */
-function ensureDisclosureHtml(html: string, provider: string | null | undefined): string {
-  const text = disclosureTextFor(provider);
+function ensureDisclosureHtml(html: string, provider: string | null | undefined, comp?: { affiliate?: boolean; sponsored?: boolean; gift?: boolean }): string {
+  const text = comp ? disclosureTextFor({ ...comp, provider: provider ?? null }) : disclosureTextFor(provider);
   const stripped = html.replace(/<div[^>]*class="[^"]*\bdisclosure\b[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi, "");
   return `<div class="disclosure">${text}</div>\n${stripped}`;
 }
@@ -269,11 +269,12 @@ export default async (req: Request): Promise<Response> => {
         /* [P1R5 §3 · A 실물] 영상 설명란 수정 — `{ id, title, body, tags[] }`.
            🔴 첫 줄 고지는 **서버가 되붙인다**(사용자가 지워도 · 글의 «고지 첫 요소» 관례와 같은 급 · §16B.4).
            정본은 `pieces.body`(발행 커넥터가 이걸 올린다) · `meta.description`·`meta.tags`·`meta.youtube` 도 같이 맞춰 둔다(A 가 읽는다). */
-        const need = !!m.affiliate || !!m.affiliateLink || m.adDisclosure === true;
+        const comp = compensationOfMeta(m);            // [R8-A §4] 제휴·협찬·무상 제공
+        const need = comp.need;
         const title = typeof b.title === "string" ? b.title.trim().slice(0, 120) : String(p.title || "");
         let body = typeof b.body === "string" ? String(b.body).replace(/\r/g, "").slice(0, 5000).trim() : String(p.body || "");
         if (need) {
-          const first = videoDescriptionFirstLine(String(((m.affiliate ?? m.affiliateLink ?? {}) as Record<string, unknown>).provider ?? "coupang"));
+          const first = videoDescriptionFirstLine({ affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift, provider: comp.provider ?? "coupang" });
           const rest = body.split("\n").filter((ln, i) => !(i === 0 && isDisclosureText(ln))).join("\n").trimStart();
           body = `${first}\n${rest}`;
         }
@@ -291,10 +292,22 @@ export default async (req: Request): Promise<Response> => {
       const sets: ReturnType<typeof sql>[] = [];
       let bodyHtml = String(p.body || "");
       if (typeof b.title === "string") { const t = b.title.trim().slice(0, 120); if (t) sets.push(sql`title = ${t}`); }
-      const need = !!m.affiliate || m.adDisclosure === true;
+      /* [R8-A §4] 🔴 **대가 켜기는 여기서 받는다**(검수 화면 · A 가 스위치를 붙인다) — `monetize:{sponsored?:true, gift?:true}`.
+         켜기만 받는다: `false` 를 보내도 **내려가지 않는다**. 켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남기 때문이다(메인 판정 2026-09-15).
+         내리려면 글을 버리거나(reject) 다시 만든다 — 그래야 고지가 붙은 채로만 나간다. */
+      const mz = (b.monetize ?? {}) as Record<string, unknown>;
+      const turnOn = { sponsored: mz.sponsored === true, gift: mz.gift === true };
+      if (turnOn.sponsored || turnOn.gift) {
+        await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ ...(turnOn.sponsored ? { sponsored: true } : {}), ...(turnOn.gift ? { gift: true } : {}), adDisclosure: true })} WHERE id = ${id}`);
+        if (turnOn.sponsored) m.sponsored = true;
+        if (turnOn.gift) m.gift = true;
+        m.adDisclosure = true;
+      }
+      const comp = compensationOfMeta(m);
+      const need = comp.need;
       if (typeof b.bodyHtml === "string") {
         bodyHtml = sanitizeHtml(b.bodyHtml);
-        if (need) bodyHtml = ensureDisclosureHtml(bodyHtml, (m.affiliate as Record<string, unknown> | null)?.provider as string | undefined ?? "coupang");
+        if (need) bodyHtml = ensureDisclosureHtml(bodyHtml, comp.provider ?? "coupang", { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift });
         sets.push(sql`body = ${bodyHtml}`);
         sets.push(sql`meta = meta || ${jsonb({ editedByUser: true, editedAt: new Date().toISOString() })}`);
       }

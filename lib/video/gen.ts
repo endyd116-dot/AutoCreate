@@ -230,7 +230,11 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     const blind = scenes.filter((s) => !s.clipKey && !s.imageKey);
     if (blind.length) return await failPiece(tid, pieceId, `장면 ${blind.map((s) => s.idx + 1).join("·")}번의 화면이 비어 있어 멈췄어요.`, slotId);
     const affiliate = !!aff;
-    const firstLine = affiliate ? videoDescriptionFirstLine(aff?.provider ?? "coupang") : "";
+    /* [R8-A §4] 🔴 영상 고지도 **대가 3종** 조건이다 — 예전엔 제휴일 때만 배지·자막이 붙어 «협찬 영상»에 고지가 0이었다.
+       공정위: 영상은 «시작부분과 끝부분 + 영상 중 반복» · «‘더보기’를 눌러야만 보이는 경우는 부적절» → 우리는 3초 자막 + 상시 배지 + 설명 첫 줄. */
+    const comp = { affiliate, sponsored: m2.sponsored === true, gift: m2.gift === true, provider: aff?.provider ?? "coupang" };
+    const needDisc = comp.affiliate || comp.sponsored || comp.gift;
+    const firstLine = needDisc ? videoDescriptionFirstLine(comp) : "";
     const yt = youtubeMetaOf(theScript as never, { firstLine, tags: [] });
     const description = affiliateMeta ? `${yt.description}\n\n${affiliateMeta.productName ?? "상품"} 보러가기: ${affiliateMeta.url}` : yt.description;
     const payload: RenderPayload = {
@@ -240,9 +244,9 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey },
       // BGM: `BGM_LICENSE_VERIFIED=1` + 시드 매니페스트가 있을 때만 깔린다. 둘 중 하나라도 없으면 null = **무음**(계약 §1.4c(3) 정직 경로).
       audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: await resolveBgm({ format, seed: pieceId }), sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
-      overlay: { badge: affiliate ? { text: videoBadgeText(), corner: "tr" } : null, safeZone: safeZoneOf(channel), endcard: { text: theScript.closing.slice(0, 40) } },
+      overlay: { badge: needDisc ? { text: videoBadgeText(comp), corner: "tr" } : null, safeZone: safeZoneOf(channel), endcard: { text: theScript.closing.slice(0, 40) } },
       ...(isVideoChannel(channel) ? { channel } : {}),
-      disclosureCaption: affiliate ? { text: videoOpeningCaption(), untilMs: 3000 } : null,
+      disclosureCaption: needDisc ? { text: videoOpeningCaption(comp), untilMs: 3000 } : null,
     };
     await q(sql`UPDATE pieces SET body = ${description}, blocks = ${jsonb([{ type: "video" }, { type: "srt" }, { type: "hashtags", items: yt.tags }])},
       meta = meta || ${jsonb({ render: payload, youtube: { ...yt, description }, affiliateLink: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, totalMs, cutCount: plans.length, disclosure: affiliate ? firstLine : null, adDisclosure: affiliate })}, updated_at = NOW() WHERE id = ${pieceId}`);

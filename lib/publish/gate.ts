@@ -46,8 +46,9 @@ const DISCLOSURE_RE = /<div[^>]*class="[^"]*\bdisclosure\b[^"]*"[^>]*>[\s\S]*?<\
 const ADSENSE_SLOT_RE = /<div[^>]*class="[^"]*\b(?:adsense|ad-slot)\b[^"]*"[^>]*>\s*<\/div>/gi;
 
 /** 고지를 본문 첫 요소로 강제(있던 것은 전부 제거하고 정본 하나만 둔다). pieces.ts 의 ensureDisclosureHtml 과 같은 규칙. */
-export function ensureDisclosureFirstHtml(html: string, provider: string | null | undefined): string {
-  const text = disclosureTextFor(provider);
+export function ensureDisclosureFirstHtml(html: string, provider: string | null | undefined, comp?: { affiliate?: boolean; sponsored?: boolean; gift?: boolean }): string {
+  /* [R8-A §4] 대가 3종 — 종류를 주면 그 종류의 문장을 전부 싣는다(옛 호출부는 provider 만 줘서 제휴 1종으로 읽힌다). */
+  const text = comp ? disclosureTextFor({ ...comp, provider: provider ?? null }) : disclosureTextFor(provider);
   const stripped = String(html || "").replace(DISCLOSURE_RE, "");
   return `<div class="disclosure">${text}</div>\n${stripped}`;
 }

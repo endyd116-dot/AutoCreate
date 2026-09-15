@@ -32,6 +32,27 @@ const UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos?uploadTy
 /** videos.insert 1,600u — 일 10,000u 면 6건이 한계. 기본 5건으로 여유를 둔다. */
 const DAILY_CAP = Math.max(1, Number(process.env.YOUTUBE_DAILY_INSERT_CAP) || 5);
 const META_TIMEOUT_MS = 20_000;
+/* ═══ [R8-A §4] 해시태그·검색 태그는 **다른 것**이다(공식 문서 실조사 2026-09-15) ═══
+   · 설명란 `#해시태그` — 제목 옆엔 **최대 3개**만 노출 · 60개 초과면 전부 무시 · 과도하면 삭제될 수 있다.
+     https://support.google.com/youtube/answer/6390658
+   · `snippet.tags[]` — «The property value has a **maximum length of 500 characters**» ·
+     공백이 든 태그는 따옴표로 감싼 것처럼 계산된다(«Foo Baz» = 9자). https://developers.google.com/youtube/v3/docs/videos
+   예전엔 같은 15개를 두 곳에 그대로 넣어 ① 설명란이 해시태그 밭이 되고 ② 500자를 넘길 수 있었다(15 × 30자 = 450자 + 따옴표). */
+const DESCRIPTION_HASHTAGS = 4;
+const TAGS_MAX_CHARS = 500;
+/** 검색 태그 — 500자 누적에서 자른다(공백 포함 태그는 +2자로 세어 안전하게). */
+export function youtubeTags(raw: unknown[]): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (const t of raw) {
+    const tag = String(t).replace(/^#/, "").trim().slice(0, 30);
+    if (!tag) continue;
+    const cost = tag.length + (/\s/.test(tag) ? 2 : 0) + (out.length ? 1 : 0);   // 구분자 1자 + 공백 태그의 따옴표 2자
+    if (used + cost > TAGS_MAX_CHARS) break;
+    out.push(tag); used += cost;
+  }
+  return out;
+}
 const UPLOAD_TIMEOUT_MS = 10 * 60_000;
 
 /** 오늘(KST) 이 테넌트가 유튜브로 올린 건수 — posts 로 센다(성공만 남는 표라 과소·과대 0). */
@@ -55,11 +76,14 @@ function buildDescription(piece: PublishPiece): string {
   const lines: string[] = [];
   /* 🔴 첫 줄은 고지. `piece.disclosure` 가 정본(본문 첫 블록과 **같은 문장**) — 없는데 제휴면 문구를 만들어서라도 넣는다.
      설명란에 고지가 빠지면 영상 안 자막만으로는 부족하다(§16B). */
-  const disc = piece.disclosure ?? (piece.affiliate ? disclosureTextFor(piece.affiliate.provider) : null);
+  const disc = piece.disclosure ?? (piece.affiliate ? disclosureTextFor(piece.affiliate.provider) : null);   // [R8-A §4] 협찬·무상 제공은 meta.disclosure 로 이미 완성돼 온다(lib/video/gen)
   if (disc) lines.push(disc);
   const body = String(piece.bodyHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (body) lines.push(body.slice(0, 3_000));
-  if (piece.tags?.length) lines.push(piece.tags.slice(0, 15).map((t) => `#${String(t).replace(/^#/, "")}`).join(" "));
+  /* [R8-A §4] 설명란 해시태그는 **3~5개**만 — 유튜브 공식: «가장 참여도가 높은 해시태그가 **최대 3개까지** 동영상 제목 옆에 표시» ·
+     «60개가 넘으면 각 해시태그를 무시» · «태그를 과도하게 추가하면 업로드 항목 또는 검색결과에서 동영상이 삭제될 수 있습니다»
+     (https://support.google.com/youtube/answer/6390658). 나머지 키워드는 아래 snippet.tags(검색 태그)로 간다 — **둘은 다른 것**이다. */
+  if (piece.tags?.length) lines.push(piece.tags.slice(0, DESCRIPTION_HASHTAGS).map((t) => `#${String(t).replace(/^#/, "").replace(/s+/g, "")}`).join(" "));
   return lines.join("\n\n").slice(0, 4_900);
 }
 
@@ -117,7 +141,7 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
     snippet: {
       title: String(piece.title || "").slice(0, 100),
       description: buildDescription(piece),
-      tags: (piece.tags ?? []).slice(0, 15).map((t) => String(t).replace(/^#/, "").slice(0, 30)),
+      tags: youtubeTags(piece.tags ?? []),
       categoryId: "22",
     },
     status: { privacyStatus, selfDeclaredMadeForKids: false, containsSyntheticMedia: true },

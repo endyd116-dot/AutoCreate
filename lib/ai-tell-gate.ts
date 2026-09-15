@@ -21,19 +21,23 @@
 import type { Block } from "./blocks";
 import { blocksToPlain } from "./blocks";
 import type { WritingContract } from "./writing-contracts";
-import { checkDisclosure } from "./disclosure";
-import { findBannedWords, BLOG_EXTRA_BANNED, normalizeForBanScan } from "./banned-words";
+import { checkDisclosure, compensationOfMeta } from "./disclosure";
+import { findBannedWords, BLOG_EXTRA_BANNED, normalizeForBanScan, classifyBanned, hasEvidenceNear, findAdPointing } from "./banned-words";   // [R8-A §4] 3층 사전 + 근거 판정
+import { isHealthTopic } from "./banned-categories";                                   // [R8-A §4] 건강·의료 소재면 효능 표현이 바로 위법
 import { SAME_BODY_SIMILARITY } from "./similarity";
 
 /** [P1R7 B3] `link_check` 는 **여기(runGate)가 재는 12키가 아니다** — 네트워크가 필요해 `lib/content-approve.ts checkLinks` 가 따로 재서 붙인다(소프트).
  *  어휘를 이 파일에 두는 이유: 화면·감사가 키·라벨을 한 곳에서 읽어야 하기 때문(GATE_KEYS 에는 넣지 않는다 = runGate 는 안 돈다). */
-export type GateKey = "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "link_check" | "structure_repeat";
-export const GATE_KEYS: GateKey[] = ["cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count"];
+export type GateKey = "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "ad_pointing" | "link_check" | "structure_repeat";
+export const GATE_KEYS: GateKey[] = ["cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count", "ad_pointing"];
 export const GATE_LABEL: Record<GateKey, string> = {
   cliche: "상투 표현 없음", para_repeat: "문단 시작이 다양함", bullet_ratio: "불릿이 본문을 대신하지 않음", sentence_variance: "문장 길이가 살아 있음",
-  translationese: "번역투 없음", superlative: "근거 없는 최상급 없음", persona: "내 사정이 들어감", visual_min: "채널 시각 요소 충족",
-  disclosure: "제휴 고지 첫머리", banned_words: "광고법 금칙어 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
+  translationese: "번역투 없음", superlative: "최상급에 근거가 있음", persona: "내 사정이 들어감", visual_min: "채널 시각 요소 충족",
+  disclosure: "대가 고지 첫머리", banned_words: "근거 없이 쓰면 위험한 표현 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
   link_check: "링크 열림",
+  /* [R8-A §4 · 사장님 지시] 🔴 **좁은 축**이다 — «광고·배너»를 **가리키며 누르라**고 할 때만 걸린다(애드센스 계정 정지 사유).
+     독자 행동 유도(계속 읽기·저장·구독)와 우리 제휴 링크 유도는 **여기서 안 잡는다** — 오히려 더 해야 하는 것들이다. */
+  ad_pointing: "광고를 가리키지 않음",
   /* [R8-A §2 · B-1] 골격 반복 — `similarity` 는 **글자**만 봐서, 소제목 수·블록 순서·끝맺음이 매번 같아도 단어만 다르면 통과한다.
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
@@ -140,6 +144,8 @@ export function descriptiveCaptionHit(caption: string): string | null {
 export const TRANSLATIONESE: RegExp[] = [/에\s*의해/g, /되어지(다|고|는|ㅁ)/g, /의\s*경우(에는|에|,)/g, /에\s*대한\s/g, /에\s*관하여/g, /로\s*인해/g, /을\s*가지고\s*있/g, /것으로\s*보(여|입)/g, /하기\s*위한\s/g, /적인\s*측면/g];
 
 const SUPERLATIVE_RE = /최고|최상|1위|일위|100%|100퍼센트|완벽|절대적|무조건|유일한|압도적|끝판왕|역대급|전국\s*최저|최저가/;
+/** [R8-A §4] 같은 정규식의 g 판 — 등장 전부를 훑어 낱말마다 «근거가 붙었나»를 본다. */
+const SUPERLATIVE_RE_G = new RegExp(SUPERLATIVE_RE.source, "g");
 
 function sentencesOf(text: string): string[] {
   return text.replace(/\n+/g, " ").split(/(?<=[.!?…。]|다\.|요\.|죠\.)\s+/).map((s) => s.trim()).filter((s) => s.length >= 2);
@@ -155,7 +161,8 @@ export interface GateInput {
   contract: WritingContract;
   /** 페르소나 사정 어휘(프로필 값을 어절로 쪼갠 것). */
   personaTerms: string[];
-  meta: { affiliate?: unknown; adDisclosure?: boolean } | null;
+  /** [R8-A §4] 대가 3종 — `affiliate`(제휴) · `sponsored`(원고료·PPL) · `gift`(무상 제공). 하나라도 참이면 고지가 필요하다. */
+  meta: { affiliate?: unknown; adDisclosure?: boolean; sponsored?: boolean; gift?: boolean } | null;
   /** 유사도(호출부가 계산 · 없으면 0). */
   similarity?: { score: number; against?: string };
   /** 제목(최상급·금칙어 검사에 포함). */
@@ -181,10 +188,28 @@ export function runGate(inp: GateInput): GateReport {
   // para_repeat
   const paras = blocks.filter((b) => ["hook", "para", "tip"].includes(b.type) && b.text).map((b) => String(b.text).trim());
   const starts = new Map<string, number>();
-  for (const p of paras) { const w = p.split(/\s+/)[0]?.replace(/[^\p{L}\p{N}]/gu, "") || ""; if (w.length >= 1) starts.set(w, (starts.get(w) ?? 0) + 1); }
+  /* [R8-A §2 · B-1 실물 근거] 🔴 임계를 **문단 수에 비례**시킨다.
+     예전 값 `repCount <= 1` 은 «문단 10개짜리 글»을 전제했는데, 실물 한국 블로그는 문단이 50~150개다(티스토리 85 · 워드프레스 150 · B-1 표본 8편).
+     문단이 많으면 «그런데/저는/이때» 로 시작이 겹치는 것은 **자연스러운 한국어**인데도 자동으로 걸렸다.
+     문단 8개 이하에서는 cap = 1 이라 짧은 글엔 회귀가 없다(10개 → 2 · 50개 → 6 · 85개 → 11 · 150개 → 18).
+     한 글자 낱말(«그»·«저»·«이»)은 세지 않는다 — 조사·관형사라 «시작이 같다»의 근거가 못 된다. */
+  for (const p of paras) { const w = p.split(/\s+/)[0]?.replace(/[^\p{L}\p{N}]/gu, "") || ""; if (w.length >= 2) starts.set(w, (starts.get(w) ?? 0) + 1); }
   const rep = [...starts.entries()].filter(([, c]) => c > 1);
   const repCount = rep.reduce((a, [, c]) => a + (c - 1), 0);
-  push("para_repeat", repCount <= 1, repCount > 1 ? `«${rep.map(([w, c]) => `${w}×${c}`).join(", ")}» 로 시작하는 문단이 반복돼요` : undefined);
+  /* 🔴 B-1 이 준 식(`repCount <= ceil(문단수 × 0.12)`)은 **의도대로 동작하지 않는다**(프로브로 확인 · 2026-09-15):
+     `repCount` 는 «겹친 낱말 수»가 아니라 **초과 횟수의 합**이라 문단이 많을수록 선형으로 커진다
+     (문단 60개를 다섯 가지 접속어로 고르게 시작 = repCount 55 > cap 8 → 여전히 실패).
+     그래서 **집중도**로 잰다: 긴 글은 «한 낱말이 문단의 1/4 넘게 시작하는가»만 본다 — 그게 진짜 기계 티다.
+     짧은 글(문단 8개 이하)은 예전 규칙 그대로(회귀 0). */
+  const topStart = [...starts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topShare = paras.length ? (topStart?.[1] ?? 0) / paras.length : 0;
+  const longForm = paras.length > 8;
+  const okRepeat = longForm ? topShare <= 0.25 : repCount <= 1;
+  push("para_repeat", okRepeat, !okRepeat
+    ? (longForm
+      ? `«${topStart?.[0]}» 로 시작하는 문단이 ${topStart?.[1]}개예요(문단 ${paras.length}개 중 ${Math.round(topShare * 100)}% · 25%까지)`
+      : `«${rep.map(([w, c]) => `${w}×${c}`).join(", ")}» 로 시작하는 문단이 반복돼요`)
+    : undefined);
 
   // bullet_ratio
   const bulletChars = blocks.filter((b) => b.type === "list" || b.type === "checklist").reduce((a, b) => a + (b.items ?? []).join("").length, 0);
@@ -204,8 +229,11 @@ export function runGate(inp: GateInput): GateReport {
   push("translationese", tr <= 3, tr > 3 ? `${tr}건: ${[...new Set(trHits)].slice(0, 4).join(", ")}` : undefined);
 
   // superlative
-  const sup = withTitle.match(SUPERLATIVE_RE);
-  push("superlative", !sup, sup ? `«${sup[0]}» — 근거 없는 최상급·확정 표현` : undefined);
+  /* [R8-A §4] 🔴 **근거가 있으면 통과**(표시광고법 §5 는 낱말 금지가 아니라 실증 책임) — B-1 이 넘긴 과차단 건.
+     «판매량 1위(2026년 9월 네이버 쇼핑 기준)» 처럼 같은 문장에 기관·기간·수치가 있으면 법이 허용한다. */
+  const supHits: string[] = [];
+  for (const m of withTitle.matchAll(SUPERLATIVE_RE_G)) { const w = m[0]; if (!hasEvidenceNear(withTitle, w) && !supHits.includes(w)) supHits.push(w); }
+  push("superlative", supHits.length === 0, supHits.length ? `«${supHits.slice(0, 3).join("·")}» — 근거(기관·기간·수치)를 같은 문장에 밝히거나 표현을 낮춰 주세요(표시광고법 §5 실증 책임)` : undefined);
 
   // persona
   const terms = inp.personaTerms.map((t) => t.trim()).filter((t) => t.length >= 2);
@@ -231,8 +259,17 @@ export function runGate(inp: GateInput): GateReport {
   push("disclosure", d.ok, d.detail);
 
   // banned_words
-  const banned = findBannedWords(withTitle, BLOG_EXTRA_BANNED);
-  push("banned_words", banned.length === 0, banned.length ? banned.join(", ") : undefined);
+  /* [R8-A §4] 3층 사전 — hard(차단) · needs_proof(근거 없으면 차단) · tone(감점만 · 여기선 안 센다).
+     문맥: 대가를 받은 글이거나 건강·의료 소재면 식품표시광고법 §8·의료법 §56 이 바로 걸린다. */
+  const comp = compensationOfMeta(inp.meta as Record<string, unknown> | null);
+  const ban = classifyBanned(withTitle, { paid: comp.need, health: isHealthTopic(withTitle) });
+  const banHits = [...ban.hard, ...ban.needsProof];
+  push("banned_words", banHits.length === 0, banHits.length ? banHits.slice(0, 4).map((h) => `«${h.word}»(${h.law})`).join(" · ") : undefined);
+
+  /* [R8-A §4] 광고를 가리키는 표현 — 애드센스 «광고 클릭 유도·광고를 본문처럼 위장» 금지(계정 정지 사유)라 **하드**다.
+     🔴 좁게 본다: 한 문장에 «광고·배너·스폰서» + «클릭·눌러·보고 가» 가 같이 있을 때만. 고지 문장·독자 행동 유도는 안 걸린다. */
+  const pointing = findAdPointing(plain);
+  push("ad_pointing", pointing.length === 0, pointing.length ? `${pointing[0].why}: «${pointing[0].sentence}»` : undefined);
 
   // similarity
   const sim = inp.similarity?.score ?? 0;
@@ -256,13 +293,14 @@ export function buildRewriteInstruction(report: GateReport): string {
       case "bullet_ratio": return `- 불릿이 너무 많다(${c.detail}). 리스트 항목의 절반을 문장으로 풀어 써라.`;
       case "sentence_variance": return `- 문장 길이가 다 비슷하다(${c.detail}). 5~10자 짧은 문장을 30% 섞고, 한 문장은 40자 넘게 이어 써라.`;
       case "translationese": return `- 번역투가 많다(${c.detail}). «~에 의해→~가», «~의 경우→~면», «~로 인해→~때문에» 처럼 한국어 어순으로 고쳐라.`;
-      case "superlative": return `- 근거 없는 최상급(${c.detail})을 지워라. 비교급·구체 사실로 바꾼다.`;
+      case "superlative": return `- 최상급 표현에 근거가 없다(${c.detail}). **같은 문장에** 출처·기간·수치를 붙이거나(예: «2026년 9월 네이버 쇼핑 기준»), 비교급·구체 사실로 바꿔라.`;
       case "persona": return `- 내 사정이 안 들어갔다(${c.detail}). 페르소나 재료 중 1~2개를 실제 장면(언제·어디서)으로 자연스럽게 넣어라.`;
       case "visual_min": return `- 채널 시각 요소가 모자란다(${c.detail}). 구성 시퀀스의 블록 타입을 그대로 채워라.`;
       case "disclosure": return `- 제휴 고지가 첫 블록이어야 한다(${c.detail}).`;
-      case "banned_words": return `- 광고법 금칙어(${c.detail})를 지워라.`;
+      case "banned_words": return `- 근거 없이 쓰면 위험한 표현이다(${c.detail}). 단정·효능 표현은 지우고, 최상급은 근거를 같은 문장에 밝혀라.`;
       case "similarity": return `- 다른 글과 너무 비슷하다(${c.detail}). 도입 장면·소제목·예시를 전부 다른 관점으로 새로 써라(같은 문장 재사용 금지).`;
       case "affiliate_count": return `- 제휴 링크는 2개까지다(${c.detail}).`;
+      case "ad_pointing": return `- 광고·배너를 가리키며 누르라고 하지 마라(${c.detail}). 애드센스 계정 정지 사유다. 독자에게 «다음 글 보기·저장» 같은 **읽기 행동**을 권하는 문장으로 바꿔라.`;
     }
   });
   return `[다시 쓰기 — 직전 원고가 아래 검사에 걸렸다. 같은 실수를 반복하면 이 글은 사람 검수로 넘어간다]\n${lines.join("\n")}\n`;

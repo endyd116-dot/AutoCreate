@@ -21,6 +21,7 @@ import { coinCostOf } from "../coin-table";
 import { toTopic, type Topic } from "../topics";
 import { assignAccount, goalOf, type Affiliate, type PieceSpec } from "../director";
 import { pausedAccountIds } from "../account-slots";
+import { isHealthTopic, HEALTH_FORBIDDEN_FORMATS } from "../banned-categories";   // [R8-A §4] 건강·의료 소재엔 경험담 구성 금지(의료법 §56)
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -79,7 +80,14 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
      그 채널 계약에 없는 구성이면 로테이션으로 돌아가되 **왜 못 썼는지**를 호출자에게 돌려준다(슬롯 note → 화면). */
   const hint = String(slot.formatHint ?? "").trim();
   const hintOk = !!hint && c.formats.includes(hint as FormatKey);
-  const format = pickFormat(c, await recentFormats(tid, acc.id, slot.channel), `${topic.id}:${slot.channel}:${acc.id}`, hintOk ? hint : null) as FormatKey;
+  /* [R8-A §4] 🔴 **건강·의료 소재엔 «경험담» 구성을 쓰지 않는다** — 의료법 §56·시행령 §23 은 «환자에 관한 치료경험담 등
+     소비자로 하여금 치료 효과를 오인하게 할 우려가 있는 내용»을 막는다. 우리 네이버 기본 구성이 경험담이라, 이 줄이 없으면
+     «병원 다녀온 후기» 같은 글이 **구조적으로** 나온다(표현을 아무리 걸러도 형식 자체가 위반). 규칙의 `format_hint` 보다 이게 세다. */
+  const health = isHealthTopic(`${topic.title} ${topic.angle ?? ""}`);
+  const safeFormats = health ? c.formats.filter((f) => !HEALTH_FORBIDDEN_FORMATS.includes(f)) : c.formats;
+  const contractForPick: WritingContract = safeFormats.length && safeFormats.length !== c.formats.length ? { ...c, formats: safeFormats as FormatKey[] } : c;
+  const hintBlockedByHealth = hintOk && health && HEALTH_FORBIDDEN_FORMATS.includes(hint);
+  const format = pickFormat(contractForPick, await recentFormats(tid, acc.id, slot.channel), `${topic.id}:${slot.channel}:${acc.id}`, hintOk && !hintBlockedByHealth ? hint : null) as FormatKey;
   /* 못 쓴 구성은 «사람말»로 남긴다 — 그 구성의 한국어 이름은 그 채널 계약에만 있어서(못 쓰는 채널엔 없다) **고른 구성**을 말한다.
      원래 힌트 문자열은 감사(detail.formatHint)에 남는다. */
   const formatHintIgnored = hint && !hintOk
@@ -96,7 +104,8 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
     key: `${slot.channel}:${acc.id}`, channel: slot.channel, accountId: acc.id, accountHandle: acc.handle,
     format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
     images: { count: imageCount, style: c.images.style, heroNeeded: slot.channel === "naver_blog" || slot.channel === "tistory" },
-    monetize: { affiliate, adDisclosure: !!affiliate },
+    /* [R8-A §4] 자동 경로는 «협찬·무상 제공»을 알 수 없다 — 기본 false. 고객이 검수에서 켠다(켜면 고지가 첫머리에 박힌다). */
+    monetize: { affiliate, sponsored: false, gift: false, adDisclosure: !!affiliate },
     schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(imageCount), angle: topic.angle,
   };
 
