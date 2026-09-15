@@ -10,7 +10,7 @@
 2. CLAUDE.md                  ← 규칙(§3 UX · §4 컨벤션 · §4.5b KST · §4.7 절대 게이트 · §5 병렬 · §8 전본 개발)
 3. docs/rules/PARALLEL_GUIDE.md §2.6 · §4 · §4.5
 4. PROJECT_STATE.md
-5. docs/rules/PITFALLS.md §0 **AC-1~AC-56**(특히 AC-35 require 가드 · AC-36 void 부수효과 · AC-44/45/46 KICC · AC-42 Playwright 확인창)
+5. docs/rules/PITFALLS.md §0 **AC-1~AC-57**(특히 AC-35 require 가드 · AC-36 void 부수효과 · AC-44/45/46 KICC · AC-42 Playwright 확인창)
 6. 필요할 때만: docs/active/KICC-GO-LIVE.md · docs/active/2026-09-15-P1R6-contract.md · docs/DESIGN.md(해당 § 만 · 84KB 통독 금지)
 
 ■ 지금 상황(2026-09-15)
