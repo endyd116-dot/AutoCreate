@@ -32,8 +32,8 @@ async function main() {
       await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort)
         VALUES (${TID}, ${pieceId}, 'clip', ${`probe/${pieceId}/cut${i}.mp4`}, ${jsonb({ costUsd: usd, provider: "probe" })}, ${i})`);
     }
-    await q(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref)
-      VALUES (${TID}, 'video_clip', 'probe', 0, 0, 0.2, ${`piece:${pieceId}:cut0`})`);
+    await q(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, synthetic)
+      VALUES (${TID}, 'video_clip', 'probe', 0, 0, 0.2, ${`piece:${pieceId}:cut0`}, true)`);   /* [P1R8] 실제 호출이 아닌 행은 표시한다(운영 «AI 원가»에서 빠진다) */
 
     const first = await reconcilePieceCost(TID, pieceId);
     const [after1] = await q(sql`SELECT COALESCE(SUM(cost_usd),0) AS usd FROM ai_usage WHERE tenant_id = ${TID} AND ref LIKE ${`%${pieceId}%`}`);

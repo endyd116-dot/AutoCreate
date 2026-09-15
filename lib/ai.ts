@@ -181,10 +181,34 @@ export async function resolveChain(role: AiRole | undefined, codeChain: string[]
 }
 
 /* ───────── 미터링(ai_usage 1행 · 실패 무해) ───────── */
-export async function recordAiUsage(row: { tenantId?: number | null; purpose: string; model: string; inTokens: number; outTokens: number; costUsd: number; ref?: string | null }): Promise<void> {
+/** «우리 집인가» 스냅샷 캐시 — 호출마다 테넌트를 다시 묻지 않게(60초). 값이 바뀌어도 다음 분에 따라온다. */
+const internalCache = new Map<number, { v: boolean; at: number }>();
+async function isInternalTenant(tid: number | null | undefined): Promise<boolean> {
+  const id = Number(tid || 0); if (!id) return false;                       // 테넌트 없는 호출(플랫폼 몫)은 우리 원가 그대로 센다
+  const hit = internalCache.get(id);
+  if (hit && Date.now() - hit.at < 60_000) return hit.v;
   try {
-    await db.execute(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref)
-      VALUES (${row.tenantId ?? null}, ${row.purpose.slice(0, 40)}, ${row.model.slice(0, 60)}, ${Math.trunc(row.inTokens)}, ${Math.trunc(row.outTokens)}, ${row.costUsd.toFixed(6)}, ${row.ref ? String(row.ref).slice(0, 120) : null})`);
+    const rows = (await db.execute(sql`SELECT is_internal FROM tenants WHERE id = ${id}`)) as unknown as { is_internal?: unknown }[];
+    const v = rows[0]?.is_internal === true;
+    internalCache.set(id, { v, at: Date.now() });
+    return v;
+  } catch { return hit?.v ?? false; }                                        // 못 물어봤으면 «아니다»로(원가를 숨기지 않는다)
+}
+
+/** 테스트·운영 도구용 — 방금 바꾼 분류를 바로 반영해야 할 때 캐시를 비운다(평상시엔 60초면 충분하다). */
+export function __clearInternalCache(): void { internalCache.clear(); }
+
+/**
+ * recordAiUsage — AI 호출 1건의 돈 기록. 🔴 **분류를 행에 박는다**(P1R8 · 메인 라이브 실측):
+ *   `is_internal` = 쓰는 순간의 «우리 테스트 집인가» 스냅샷 — 나중에 그 테넌트를 지워도 **분류가 남는다**.
+ *   (종전엔 대시보드가 `NOT EXISTS(tenants…)` 로 판정해서, 부모를 지우면 그 돈이 **고객 비용으로 넘어갔다** — 고아 103행 $9.98.)
+ *   `synthetic` = 실제 호출이 아닌 행(하니스가 상한 시험용으로 적어 넣는 것). 지우지 않고 표시해서 기본 집계에서 뺀다.
+ */
+export async function recordAiUsage(row: { tenantId?: number | null; purpose: string; model: string; inTokens: number; outTokens: number; costUsd: number; ref?: string | null; synthetic?: boolean }): Promise<void> {
+  try {
+    const internal = await isInternalTenant(row.tenantId);
+    await db.execute(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, is_internal, synthetic)
+      VALUES (${row.tenantId ?? null}, ${row.purpose.slice(0, 40)}, ${row.model.slice(0, 60)}, ${Math.trunc(row.inTokens)}, ${Math.trunc(row.outTokens)}, ${row.costUsd.toFixed(6)}, ${row.ref ? String(row.ref).slice(0, 120) : null}, ${internal}, ${row.synthetic === true})`);
   } catch (e) { console.warn("[ai_usage] 기록 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
 }
 
@@ -245,7 +269,9 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
     trace.push({ model, ok: okEff, reason: okEff ? undefined : (parseFailed ? "json_parse_failed" : (r.reason ?? "unknown")), ms: Date.now() - mStart });
     // 실패한 호출도 토큰은 나갔다 — 기록한다(비용은 실제).
     if (r.inputTokens || r.outputTokens) {
-      void recordAiUsage({ tenantId: a.tenantId, purpose: okEff ? a.purpose : `${a.purpose}:fail`, model, inTokens: r.inputTokens, outTokens: r.outputTokens, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), ref: a.ref });
+      /* 🔴 AC-36 — **돈 기록은 await**. 서버리스는 응답을 돌려주면 인보케이션을 끝낸다: 던지고 잊으면 «썼는데 원장에 없는 돈»이 생긴다
+         (실제로 B-1 의 $3.63 이 원장에 없다 · PITFALLS AC-54-③). 쓰기 1회는 수십 ms 다 — 그 값에 원가 정직을 산다. */
+      await recordAiUsage({ tenantId: a.tenantId, purpose: okEff ? a.purpose : `${a.purpose}:fail`, model, inTokens: r.inputTokens, outTokens: r.outputTokens, costUsd: calcCost(model, r.inputTokens, r.outputTokens, r.cachedTokens), ref: a.ref });
     }
     if (okEff) {
       if (cacheKey && r.text) aiCacheSet(cacheKey, { text: r.text, json: parsed, model, inputTokens: r.inputTokens, outputTokens: r.outputTokens, thoughtTokens: r.thoughtTokens });
