@@ -17,11 +17,14 @@ import { tenantOwner } from "../subscription";
 import type { PayRoute } from "../kicc";
 
 const n = (v: unknown) => Number(v || 0);
-export const bkOrderNo = (tid: number, route: PayRoute = "auth", nowMs = Date.now()) => `AC-BK${route === "keyin" ? "K" : ""}-${tid}-${nowMs.toString(36)}`;
-/** 되파싱 — 테넌트와 **등록 라인**(AC-BKK- = 비인증). 옛 `AC-BK-` 는 그대로 인증. */
-export function parseBkOrder(orderNo: string): { tenantId: number; route: PayRoute } | null {
-  const m = /^AC-BK(K?)-(\d{1,12})-[0-9a-z]+$/.exec(String(orderNo ?? "").trim());
-  return m ? { tenantId: Number(m[2]), route: m[1] === "K" ? "keyin" : "auth" } : null;
+/**
+ * 주문번호가 **라인과 용도를 말한다**(콜백엔 세션도 빌키 행도 없다):
+ *   `AC-BK-{tid}-{b36}`(인증) · `AC-BKK-…`(비인증) · 끝에 **`-p`** 면 **확인용 주문**(개통 실측 · 결과를 리다이렉트 대신 JSON 으로 돌려준다).
+ */
+export const bkOrderNo = (tid: number, route: PayRoute = "auth", nowMs = Date.now(), probe = false) => `AC-BK${route === "keyin" ? "K" : ""}-${tid}-${nowMs.toString(36)}${probe ? "-p" : ""}`;
+export function parseBkOrder(orderNo: string): { tenantId: number; route: PayRoute; probe: boolean } | null {
+  const m = /^AC-BK(K?)-(\d{1,12})-[0-9a-z]+(-p)?$/.exec(String(orderNo ?? "").trim());
+  return m ? { tenantId: Number(m[2]), route: m[1] === "K" ? "keyin" : "auth", probe: !!m[3] } : null;
 }
 export function parseBkOrderNo(orderNo: string): number | null { return parseBkOrder(orderNo)?.tenantId ?? null; }
 export function cardFingerprint(masked: string | null | undefined): string | null {
@@ -30,12 +33,12 @@ export function cardFingerprint(masked: string | null | undefined): string | nul
 }
 
 export type StartKeyResult = { ok: true; orderNo: string; url: string; form: Record<string, string> } | { ok: false; step: "not_configured" | "register"; error: string };
-export async function startBillingKey(tid: number, opts: { userAgent?: string | null; returnBase?: string; route?: PayRoute }): Promise<StartKeyResult> {
+export async function startBillingKey(tid: number, opts: { userAgent?: string | null; returnBase?: string; route?: PayRoute; probe?: boolean }): Promise<StartKeyResult> {
   const { isKiccConfigured, registerTrade, deviceTypeFromUA } = await import("../kicc");
   if (!isKiccConfigured()) return { ok: false, step: "not_configured", error: "결제 준비 중이에요 · 곧 열려요" };
   const route: PayRoute = opts.route === "keyin" ? "keyin" : "auth";   // 판정은 lib/pay-route.ts resolvePayRoute 한 곳
   const owner = await tenantOwner(tid);
-  const orderNo = bkOrderNo(tid, route);
+  const orderNo = bkOrderNo(tid, route, Date.now(), opts.probe === true);   // probe = 개통 실측용(결과를 화면에 바로 보여 준다)
   const base = (opts.returnBase || process.env.SITE_URL || "").replace(/\/$/, "");
   const r = await registerTrade({ shopOrderNo: orderNo, amount: 0, goodsName: "결제 수단 등록", isBillingKey: true, returnUrl: `${base}/api/billing-key-return`, customerName: owner.name, customerEmail: owner.email ?? undefined, deviceTypeCode: deviceTypeFromUA(opts.userAgent), route });
   if (!r.success || !r.authPageUrl) return { ok: false, step: "register", error: r.errorMessage || "카드 등록창을 열지 못했어요." };
