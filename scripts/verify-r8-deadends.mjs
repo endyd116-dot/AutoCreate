@@ -110,6 +110,12 @@ const TARGETS = [
   ["캡처 보고 처리(R10-2)", "handleReferenceCaptureReport", "lib/text-style-capture.ts", "러너가 찍어 보내도 서버가 안 받아 «찍었는데 아무 일도 안 난다»"],
   ["비전 읽기(R10-2)", "readTextStyleFromShots", "lib/text-style-read.ts", "캡처를 받아도 모델에 안 보내 스타일이 영영 안 생긴다"],
   ["옷장 저장(R10-4)", "createTextStyle", "lib/text-style-store.ts", "읽은 결과가 저장 한 곳을 안 지나 소독 없이 다른 길로 들어간다"],
+  /* ── [R9R10 · C 2026-09-16] B 목록에 없던 다섯 — 러너 쪽 정의와 «고르기»·«잡 kind»(하나라도 안 불리면 «배웠는데/재 놓고 아무 데도 안 간다») ── */
+  ["번짐 — 문단 경계에서 끊는다(R9-3)", "breakFormatBeforePara", "runner/lib/format-bleed.mjs", "세 겹 중 첫 겹이 안 불려 색이 다음 문단까지 간다(AM 네 번째 판)"],
+  ["번짐 — 발행 직전 자가검사 판정(R9-3)", "bleedVerdict", "runner/lib/format-bleed.mjs", "재 놓고 판정을 안 물어 번진 글이 그대로 나간다"],
+  ["캡처 — 자르기 계획(R10-1)", "planCaptureSlices", "runner/lib/capture-slice.mjs", "러너가 한 장으로 찍어 모델이 밑줄과 굵게를 구분 못 한다"],
+  ["레퍼런스 — 이 글의 스타일을 고른다(R10-4)", "textStyleOf", "lib/text-style-store.ts", "계정에 걸어 둬도 생성이 안 읽어 «옷장»이 장식이 된다(§4.2 영상판과 같은 병)"],
+  ["레퍼런스 — 러너가 찍는다(잡 kind · R10-1)", "reference.capture", "runner/core.mjs", "서버가 잡을 쌓아도 러너가 그 kind 를 안 받아 영영 queued 로 남는다"],
   ["원장 추천(R10-10)", "recommendTextStyle", "lib/text-style-store.ts", "되먹임 원장의 첫 실사용이 정의만 있고 화면에 «이 스타일이 반응이 좋았어요»가 영영 안 뜬다"],
   /* ── [P1R8 §3.3 · B2] 셀렉터 표(recipe) — 이 라운드에 통째로 새로 생긴 사슬이라 **양끝을 다 센다** ── */
   ["셀렉터 표 — 서버가 잡에 실어 준다", "recipeForRunner", "lib/recipe-store.ts", "표를 만들어 놓고 **아무 잡에도 안 실려** 러너가 영영 묶여 온 표만 쓴다"],
@@ -224,9 +230,10 @@ const SURFACES = [
     "로그인 벽·차단에 막힌 고객이 갈 길이 없다", true],
   ["글 레퍼런스 — 복붙(마지막 예비)", "/api/style-reference-text", "netlify/functions/style-reference.ts",
     "마지막 예비 길이 없다(꾸밈이 날아간다고 말해 주는 자리도 같이 없다)", true],
-  ["계정의 옷장 — 읽기(설계 §3.6)", "/api/account-styles", "netlify/functions/account-styles.ts",
+  /* [2026-09-16 C] 🔴 서버 정본 파일은 `style-reference.ts` 하나가 여섯 경로를 config.path 배열로 받는다 — `account-styles.ts` 는 없는 파일이었다(AC-82 · B 가 잡았다). */
+  ["계정의 옷장 — 읽기(설계 §3.6)", "/api/account-styles", "netlify/functions/style-reference.ts",
     "배운 스타일을 어디서도 못 본다", true],
-  ["계정의 옷장 — 기본으로 걸기", "/api/account-style-default", "netlify/functions/account-styles.ts",
+  ["계정의 옷장 — 기본으로 걸기", "/api/account-style-default", "netlify/functions/style-reference.ts",
     "«기본 = 계정에 걸어 둔다»가 화면에 없어 공장이 안 돈다", true],
   ["코인 등급 — 계정 기본값(계약 §13)", "defaultTier", "netlify/functions/accounts.ts",
     "등급 기본값을 정할 자리가 없어 전부 서버 기본(간단히)으로만 만들어진다", true],
@@ -257,7 +264,16 @@ for (const [label, needle, owner0, harm, needApp] of SURFACES) {
   if (!owner) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner0} 를 못 읽었다 — config.path 로도 못 찾았다(검사를 고쳐라)`); continue; }
   const hits = screenCalls(needle);
   const apps = APPS(hits);
-  const ok = needApp ? apps.length > 0 : hits.length > 0;
+  /* 🔴 [2026-09-16 C] «화면 파일»만 세면 **공용 시트를 거치는 길**을 죽은 통로로 오판한다 — A 가 레퍼런스 시트를 ui.js 의 `UI.styleSheet` 한 곳에 두고
+     계정·만들기·직접쓰기·디렉터가 그걸 부른다(설계 «한 곳»). 그래서 ui.js 안에서 needle 을 품은 `UI.xxx = ` 블록을 찾고, 그 xxx 를 화면 파일이 부르면 «화면이 부른다»로 센다.
+     (하나라도 빠지면 여전히 빨강 — ui.js 에 정의만 있고 화면이 안 부르면 그것이 바로 이 축이 잡으려는 병이다.) */
+  const viaUi = (() => {
+    const ui = CODE.get("public/js/ui.js") || "";
+    const blocks = ui.split(/\r?\n(?=  UI\.\w+ = )/);
+    const fns = blocks.filter((b) => b.includes(needle)).map((b) => (b.match(/^  UI\.(\w+) = /) || [])[1]).filter(Boolean);
+    return fns.filter((fn) => [...CODE].some(([pp, c]) => /^public\/(app|ops)\//.test(pp) && c.includes(`UI.${fn}(`)));
+  })();
+  const ok = needApp ? (apps.length > 0 || viaUi.length > 0) : hits.length > 0;
   rec(`🔴 화면이 부르나 — ${label}(\`${needle}\`)`, ok,
     `화면 ${hits.length}곳${hits.length ? ` [${hits.join(" · ")}]` : ""}${needApp ? ` · 그중 화면 파일 ${apps.length}곳` : ""}` + (ok ? "" : ` ⇒ ${harm}`));
 }

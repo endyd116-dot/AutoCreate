@@ -74,13 +74,27 @@ let after = {};
 let runErr = "";
 try { after = runAudit(tmp); } catch (e) { runErr = String(e?.message ?? e).slice(0, 300); }
 
+/**
+ * 🔴 **이름 붙인 예외 — 산출물 자체가 주석인 칸**(2026-09-16 · 메인이 묻고 C 가 정했다 · 갈래 ⓐ).
+ *   C5 «AC-1 출처 헤더»는 «lib/*.ts 헤더 주석에 출처가 있나»를 세는 칸이라, 주석을 지우면 **당연히** 열린다 —
+ *   주석이 기능을 **흉내 낸** 것이 아니라 주석이 **그것 자체**다. 이 검사의 뜻(«주석이 코드를 흉내 내나»)의 밖이다.
+ *   ⚠️ **이 예외가 못 잡게 되는 것**: C5 가 «출처: 없음» 같은 빈말로 닫혀도 여기서는 안 잡힌다 — 그 칸의 값은
+ *      `verify-r8-audit64` 의 C5 판정(헤더 구역에 출처 낱말이 있나)이 지킨다. **다른 칸은 예외가 아니다** — 목록 밖 칸이
+ *      주석으로 닫히면 여전히 빨강이다. 예외는 조용히 먹지 않고 아래에 **반드시 찍는다.**
+ *   부정 대조: `SELFTEST_NO_EXCEPTION=1` 로 돌리면 예외를 끄고 C5 가 다시 빨개져야 한다(이 예외가 «무엇을 가리는지» 보여 준다).
+ */
+const COMMENT_IS_DELIVERABLE = process.env.SELFTEST_NO_EXCEPTION ? [] : ["C5 AC-1 헤더 일괄"];
 const flipped = [];
+const excepted = [];
 if (!runErr) {
   for (const row of Object.keys(base)) {
     const b = base[row], a = after[row];
     if (a === undefined) continue;
     /* 🔴 닫힘 → 열림/일부 로 내려간 칸 = **주석이 세우고 있던 칸**이다. */
-    if (b === "닫힘" && a !== "닫힘") flipped.push([row, b, a]);
+    if (b === "닫힘" && a !== "닫힘") {
+      if (COMMENT_IS_DELIVERABLE.some((x) => row.includes(x))) excepted.push([row, b, a]);
+      else flipped.push([row, b, a]);
+    }
   }
 }
 
@@ -116,14 +130,20 @@ if (runErr) console.log(`🔴 사본에서 하니스가 못 돌았다: ${runErr}
 console.log(`\n■ ① 주석이 세우고 있던 칸 — **${flipped.length}개**`);
 if (!flipped.length && !runErr) console.log("   ✅ 없다. 닫힘 칸은 전부 주석이 아니라 **코드**가 세우고 있다.");
 for (const [row, b, a] of flipped) console.log(`   ✗ ${w(row, 48)} 원본 ${w(b, 6)} → 주석 지우면 ${a} 🔴`);
+for (const [row, b, a] of excepted) console.log(`   △ ${w(row, 48)} 원본 ${w(b, 6)} → 주석 지우면 ${a}  — **이름 붙인 예외**(산출물이 주석인 칸 · 이 검사 밖 · 값은 audit64 C5 판정이 지킨다)`);
+if (COMMENT_IS_DELIVERABLE.length) console.log(`   ⚠️ 예외 목록 ${COMMENT_IS_DELIVERABLE.length}칸: ${COMMENT_IS_DELIVERABLE.join(", ")} — 이 칸이 빈말로 닫혀도 여기서는 안 잡힌다(SELFTEST_NO_EXCEPTION=1 로 끄면 다시 빨강).`);
 
 console.log(`\n■ ② 한국어 낱말로 재는 칸 — ${korRows.length}개(경보 · 틀렸다는 뜻이 아니다)`);
 for (const [name, res] of korRows) console.log(`   · ${w(name, 44)} ${res}`);
 if (!korRows.length) console.log("   ✅ 없다.");
 
 console.log(`\n■ ③ 손으로 든 파일 목록 — ${handLists.length}벌(AC-82)`);
+/* 🔴 [2026-09-16 메인 지적] 목록에 **없는 파일**이 섞여 있으면 그 칸은 «남은 파일이 우연히 있어서» 통과하는 것이다 —
+   남은 파일이 이름을 바꾸는 날 조용히 «없음»이 된다. 경보가 아니라 **실패**로 센다(목록을 고치면 초록이 된다). */
+let staleLists = 0;
 for (const l of handLists) {
   const missing = l.filter((p) => !existsSync(p));
+  if (missing.length) staleLists++;
   console.log(`   · [${l.join(", ")}]${missing.length ? `  🔴 없는 파일 ${missing.join(",")}` : ""}`);
 }
 
@@ -134,5 +154,6 @@ const brokenScan = stripped === 0;
 if (brokenScan) console.log("🔴 **훑은 파일이 0개다 — 이 검사 자체가 고장난 것이다**(«주석으로 닫힌 칸 0» 은 이 경우 근거가 아니다).");
 else console.log(flipped.length
   ? `🔴 **${flipped.length}칸이 주석으로 닫혀 있다** — 그 칸은 제품이 아니라 글자를 센 것이다.`
-  : `✅ 주석으로 닫힌 칸 0 (파일 ${stripped}개에서 주석을 지우고 다시 쟀다).`);
-process.exit(flipped.length || brokenScan || runErr ? 1 : 0);
+  : `✅ 주석으로 닫힌 칸 0 (파일 ${stripped}개에서 주석을 지우고 다시 쟀다${excepted.length ? ` · 이름 붙인 예외 ${excepted.length}칸은 위에 찍었다` : ""}).`);
+if (staleLists) console.log(`🔴 손으로 든 파일 목록 ${staleLists}벌에 없는 파일이 섞여 있다 — 목록을 고쳐라(AC-82).`);
+process.exit(flipped.length || brokenScan || runErr || staleLists ? 1 : 0);
