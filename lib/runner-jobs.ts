@@ -815,7 +815,13 @@ export interface RunnerFormatMarks {
   breaks?: number;
   breakFails?: number;
   /** 발행 직전 자기검사 결과(`runner/lib/format-bleed.mjs`). 🔴 없으면 **«못 쟀다»**이지 «깨끗»이 아니다(AC-92). */
-  bleed?: { total: number; bad: number; pct: number; red: number; center: number; italic: number; underline: number; samples?: string[] };
+  bleed?: { total: number; bad: number; pct: number; red: number; center: number; italic: number; underline: number; bold?: number; samples?: string[] };
+  /**
+   * [R9-11] 티스토리가 **HTML 모드를 못 열어 기본 모드로** 넣은 횟수(0 이면 키가 없다).
+   *   🔴 그때 `<blockquote>`·`<hr>`·`<h2>` 진짜 요소가 **글자 흉내**로 내려앉는다 — 어느 요소가 깎였는지는
+   *      위 `demoted` 에 **같은 어휘**로 실린다(`kind` = 블록 종류 · `why: "no_editor_op"`). 새 칸을 안 만든 이유가 그것이다(AC-75).
+   */
+  htmlMode?: number;
 }
 
 export interface RunnerReportOk {
@@ -904,6 +910,8 @@ export function mergeRunnerFormatMarks(prev: unknown, fm: RunnerFormatMarks): Re
     ...(fm.planned && !p.planned ? { planned: fm.planned } : {}),
     breaks: Number(fm.breaks ?? 0),
     breakFails: Number(fm.breakFails ?? 0),
+    /* [R9-11] 티스토리가 기본 모드로 내려앉았으면 그 사실도 남긴다(0 이면 키를 안 만든다 — «있었는데 0번»과 «해당 없음»은 다르다). */
+    ...(Number(fm.htmlMode ?? 0) > 0 ? { htmlMode: Number(fm.htmlMode) } : {}),
     /* 🔴 **못 쟀으면 키를 안 만든다** — `bleed: null` 로 적으면 «쟀는데 깨끗했다»로 읽힌다(AC-92). */
     ...(fm.bleed ? { bleed: fm.bleed } : {}),
     demoted: [...prevDemoted.filter((d) => d?.by !== "runner"), ...runnerDemoted].slice(0, 80),

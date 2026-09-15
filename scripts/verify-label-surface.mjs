@@ -13,6 +13,14 @@ const JSON_OUT = process.argv.includes("--json");
 const results = [];
 const rec = (step, ok, note = "", detail) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, detail }); return !!ok; };
 const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
+/* 🔴 [2026-09-16 메인] **주석을 걷어 낸 본문** — 서버 정본을 «이름으로 찾아 읽는» 줄들이 주석에 먼저 걸린다.
+   실제로 났다: `lib/coin-table.ts` 20행 주석의 «`COIN_TIERS[k].coins` 는 여기서 파생한다» 한 줄 때문에
+   `/COIN_TIERS[^=]*=\s*\{/` 가 **엉뚱한 블록**(영상 이름표)을 집어 «0등급»이 나왔다 — 제품은 멀쩡한데 **자가 못 본 것**이다.
+   ⇒ 서버 소스를 **구조로 읽는 자리**는 이걸 쓴다(화면·모의 쪽은 원문 그대로 봐도 된다 — 거긴 낱말을 세는 게 목적이다).
+   🔴 형제 하니스 `verify-r8-audit64.mjs`·`verify-r8-deadends.mjs` 가 이미 같은 일을 한다(AC-82 · 자가 여러 벌이면 안 된다). */
+const readCode = (p) => read(p)
+  .replace(/[/][*][\s\S]*?[*][/]/g, " ")
+  .replace(/(^|[^:])[/][/].*/g, "$1 ");   // . 은 줄바꿈을 안 먹는다 — 역슬래시를 아예 안 쓴다(AC-100)
 const walk = (dir, exts, out = []) => {
   let entries = []; try { entries = readdirSync(dir); } catch { return out; }
   for (const f of entries) {
@@ -244,7 +252,7 @@ for (const n of NUMS) {
    왜: 2026-09-15 사장님 승인으로 **글 1편이 7코인 → 1코인**이 됐다. 화면은 «1 + 사진 장수»로 세고 있어서 **7배를 불러 주고 있었다**.
    돈은 낱말보다 더 티 나는 거짓말이다. 게다가 운영센터가 단가를 바꿀 수 있게 됐으니(B ea980a3) 화면에 박은 숫자는 그날로 썩는다.
    🔴 미리보기 표는 **서버 표에서 복사**하고 여기서 견준다. 실제 차감은 언제나 서버 응답(`coinCost`)이다. */
-const coinTs = read("lib/coin-table.ts");
+const coinTs = readCode("lib/coin-table.ts");   // 🔴 주석에 걸리면 엉뚱한 블록을 읽는다(위 readCode 주석)
 const coinSrv = objectMap(coinTs, "COIN_TABLE: Record<CoinItem, number> =") || new Map();
 const coinSrvNum = new Map([...(coinTs.match(/COIN_TABLE: Record<CoinItem, number> = \{([\s\S]*?)\}/)?.[1] ?? "").matchAll(/([a-z_0-9]+)\s*:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
 const coinUi = new Map([...(uiJs.match(/UI\.COIN = \{([^}]*)\}/)?.[1] ?? "").matchAll(/([a-z_0-9]+)\s*:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
@@ -258,7 +266,7 @@ rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.s
    🔴 B 가 머지되기 전엔 서버 표가 없다 — 그때는 △(경고)로 두고, 표가 생기면 **글자·숫자까지** 대조한다. */
 {
   const pickTier = (txt) => new Map([...txt.matchAll(/(simple|standard|premium)\b[^{]*\{([^}]*)\}/g)].map((m) => [m[1], {
-    label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coins: Number((m[2].match(/coins:\s*(\d+)/) || [])[1]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
+    label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coinsRaw: ((m[2].match(/coins:\s*([^,}]+)/) || [])[1] || "").trim(), coins: Number((m[2].match(/coins:\s*(\d+)/) || [])[1]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
   const srvBlock = coinTs.match(/COIN_TIERS[^=]*=\s*\{([\s\S]*?)\n\}/);
   const mockBlock = mockJs.match(/const TIERS = \[([\s\S]*?)\];/);
   const tierMock = new Map([...(mockBlock?.[1] ?? "").matchAll(/key:\s*"(simple|standard|premium)"([^}]*)\}/g)].map((m) => [m[1], {
@@ -271,7 +279,10 @@ rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.s
   rec("🔴 ⑧-c 등급 이름에 «최소»가 없다(사장님)", !minWord, minWord ? "«최소» 가 등급 표에 있다 — 고른 고객이 «내 글은 최소구나» 한다" : "없음");
   if (!srvBlock) rec("⑧-c 등급 표 — 서버 COIN_TIERS 를 아직 못 읽었다(B 머지 전)", "WARN", `모의 ${tierMock.size}등급 · 화면 라벨 ${tierUi.size}개 — 머지 뒤 이 줄이 글자·코인·문장 대조로 바뀐다`);
   else {
-    const srv = pickTier(srvBlock[1]); const diffs = [];
+    /* 🔴 [2026-09-16 메인] B 가 등급 코인을 **숫자로 안 적고** `COIN_TABLE.post_simple` 로 파생시켰다(«값 두 벌 금지» — 옳은 설계다).
+       그런데 이 자는 숫자 리터럴만 읽어 **NaN** 이 났다. ⇒ 참조를 **풀어서** 읽는다. 자가 제품의 좋은 설계를 벌하면 안 된다. */
+    const deref = (v) => { const m = String(v).match(/COIN_TABLE[.]([a-z_0-9]+)/); return m ? coinSrvNum.get(m[1]) : Number(v); };
+    const srv = new Map([...pickTier(srvBlock[1])].map(([k, v]) => [k, { ...v, coins: deref(v.coinsRaw ?? v.coins) }])); const diffs = [];
     for (const [k, v] of srv) { const m = tierMock.get(k);
       if (!m) { diffs.push(`${k}: 모의 없음`); continue; }
       if (m.label !== v.label) diffs.push(`${k}: 모의 라벨 «${m.label}» ≠ 서버 «${v.label}»`);

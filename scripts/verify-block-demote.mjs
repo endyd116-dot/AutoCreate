@@ -164,5 +164,56 @@ console.log("\n[폴백 경로(bodyHtml) — 검수창에서 본문을 고친 글
   ok(unknown.length === 0, `B-98 계획이 내는 op 를 실행부가 **전부 안다**(${[...all].join("·")})`, `모르는 op: ${unknown.join("·")}`);
 }
 
+/* ═══ [R9-11] 🔴 «서식이 깎였다»가 **고객에게 닿나** — CLAUDE §9 ② ═══
+ *
+ *   티스토리 **주 경로는 HTML 모드**라 `<blockquote>`·`<hr>`·`<h2>` **진짜 요소**로 들어간다(네이버보다 세다).
+ *   그런데 HTML 모드를 못 열면 **기본 모드 폴백**이 돌고, 거기선 글자로 흉내 낸다(`“…”` · `———` · 평문 소제목).
+ *   🔴 종전엔 그 사실이 `notes` 한 줄로만 남았고 **서버가 notes 를 버려서** 고객에게 **안 닿았다.**
+ *      §9 는 «막지 않는다»의 대가로 «**사람이 안 보는 경로(자동 승인)에서도 닿게 한다**»를 못 박았다 —
+ *      자동 승인이면 **아무도 모르는 채 깎인 글이 나간다.** 그래서 «있으면 좋은 것»이 아니라 **틀린 것**이었다.
+ */
+console.log("\n[R9-11 «깎였다»가 고객에게 닿나 — 티스토리 기본 모드 폴백]");
+{
+  const TIS = readFileSync(join(ROOT, "runner", "channels", "tistory.mjs"), "utf8");
+  const CORE = readFileSync(join(ROOT, "runner", "core.mjs"), "utf8");
+  const JOBS = readFileSync(join(ROOT, "lib", "runner-jobs.ts"), "utf8");
+
+  /* 🔴 **행동으로 잰다.** 첫판엔 «그 줄이 있나»만 봐서 `if (field)` → `if (false)` 변이가 **초록으로 지나갔다**
+     (AC-99 · 오늘 세 번째다). 그래서 이름 짓는 규칙을 **순수 함수로 빼** 실제로 돌린다. */
+  const { degradedFieldOf } = await import(pathToFileURL(join(ROOT, "runner", "channels", "tistory.mjs")).href);
+  ok(degradedFieldOf({ op: "quote" }) === "quote"
+    && degradedFieldOf({ op: "divider" }) === "divider"
+    && degradedFieldOf({ op: "heading", level: 2 }) === "h2"
+    && degradedFieldOf({ op: "heading", level: 3 }) === "h3"
+    && degradedFieldOf({ op: "check" }) === "checklist",
+    "R-01 🔴 깎인 요소에 **이름을 붙인다**(행동으로 잰다 — 소제목은 level 로 h2/h3 를 가른다)");
+  ok(degradedFieldOf({ op: "para" }) === null && degradedFieldOf({ op: "image" }) === null && degradedFieldOf(null) === null,
+    "R-01b 🔴 대조군 짝 — **원래 평문인 것**(para)과 **진짜로 들어가는 것**(사진)은 «깎였다»로 안 센다(안 깎였는데 칩이 뜨면 거짓말이다)");
+  ok(/const field = degradedFieldOf\(op\);\s+if \(field\) missed\.degraded\.push/.test(TIS),
+    "R-01c 그리고 폴백이 **그 함수를 실제로 부른다**(정의만 있으면 AC-69)");
+  ok(/const formatMarks = missed\.degraded\.length/.test(TIS) && /formatMarks \? \{ formatMarks \} : \{\}/.test(TIS),
+    "R-02 🔴 그 값을 **보고에 싣는다** — `notes` 가 아니라 **칸**으로(notes 는 서버가 버린다)");
+  /* 🔴 **새 이름을 안 만들었나**(AC-75) — 이름이 갈리면 화면이 조용히 아무것도 안 그린다. */
+  const fields = [...TIS.matchAll(/DEGRADED_FIELD = \{([^}]*)\}/g)].map((m) => m[1]).join("");
+  const used = [...fields.matchAll(/(\w+): "(\w+)"/g)].map((m) => m[2]);
+  const known = new Set(Object.keys(JSON.parse(JSON.stringify(
+    /* 화면이 아는 어휘 = `lib/blocks.ts BlockType` — 🔴 **손으로 안 적는다**(늘어나면 저절로 따라간다). */
+    Object.fromEntries(TYPES.map((t) => [t, 1]))))));
+  const unknown = [...new Set([...used, "h2", "h3"])].filter((f) => !known.has(f));
+  ok(unknown.length === 0,
+    `R-03 🔴 «깎인 것»의 이름이 전부 **블록 어휘 그대로**다(새 이름 0 · AC-75) — ${[...new Set(used)].join("·")}`,
+    `블록 어휘에 없는 이름: ${unknown.join("·")}`);
+  ok(/why: "no_editor_op"/.test(TIS),
+    "R-04 사유도 **이미 있는 것**을 쓴다(`no_editor_op` = «블록 자체를 에디터 요소로 못 세웠다»)");
+  /* 🔴 AC-69 — 나르는 자리가 있나. 러너 코어는 **채널을 안 가리고** `publish.*` 전부를 같은 파이프로 보낸다. */
+  ok((CORE.match(/formatMarks: out\.formatMarks/g) || []).length >= 2,
+    "R-05 🔴 러너 코어가 **티스토리 것도** 나른다(네이버와 같은 파이프라 새로 만들 것이 없다)");
+  ok(/htmlMode\?: number;/.test(JOBS) && /\{ htmlMode: Number\(fm\.htmlMode\) \}/.test(JOBS),
+    "R-06 서버가 그 칸을 알고 `piece.meta.formatMarks` 로 합친다");
+  /* 🔴 대조군 짝 — **HTML 모드가 열리면 아무것도 안 싣는다**(깎인 게 없는데 칩이 뜨면 그게 거짓말이다 · AC-68). */
+  ok(/missed\.degraded\.length\s*\?/.test(TIS) && /: null;/.test(TIS.slice(TIS.indexOf("const formatMarks = missed.degraded.length"), TIS.indexOf("const formatMarks = missed.degraded.length") + 200)),
+    "R-07 🔴 대조군 짝 — 깎인 게 **없으면 키 자체를 안 만든다**(안 깎였는데 «깎였어요»가 뜨면 그게 더 나쁘다)");
+}
+
 console.log(`\nverify-block-demote: ${pass}/${fail} (통과/실패)`);
 process.exit(fail ? 1 : 0);
