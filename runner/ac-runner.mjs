@@ -17,6 +17,7 @@
  */
 import { readToken, saveToken, serverBase, maskToken, heartbeat, claim, VERSION } from "./lib/api.mjs";
 import { tick, canary, log, claimableKinds, runnerCaps } from "./core.mjs";
+import { applyUpdate, isNewer, RESTART_EXIT_CODE } from "./lib/update.mjs";
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -94,12 +95,33 @@ async function main() {
   process.on("SIGTERM", bye);
 
   let idleRounds = 0;
+  /* 업데이트 실패는 **다음 하트비트에 실어** 서버에 알린다(전용 요청을 더 만들지 않는다).
+     한 번 실패한 판을 매분 다시 받으러 가지 않도록 그 버전은 기억해 둔다 — 서버가 새 판을 올리면 다시 시도한다. */
+  let updateFailed = null;
+  const updateTried = new Set();
   while (!stop) {
     let sleepSec = 60;
     try {
-      const hb = await heartbeat(token, { jobs: 0, caps: runnerCaps() });
+      const hb = await heartbeat(token, { jobs: 0, caps: runnerCaps(), ...(updateFailed ? { updateFailed } : {}) });
       if (hb?.ok) sleepSec = Number(hb.sleepSec ?? 60) || 60;
       else log(`하트비트 실패: ${String(hb?.error ?? "").slice(0, 80)}`);
+      updateFailed = null;                                  // 보냈으면 비운다(같은 사유를 매번 다시 보내지 않는다)
+
+      /* 🔴 **잡을 집기 전에** 갱신한다. 잡을 들고 있는 동안 자기 파일을 갈아 끼우면
+         돌고 있는 코드와 디스크의 코드가 달라진다 — 그 상태의 실패는 재현조차 안 된다.
+         여기(=집기 직전, 아무것도 안 들고 있음)가 한 바퀴 중 유일하게 안전한 자리다. */
+      const offer = hb?.ok ? hb.update : null;
+      if (offer && isNewer(offer.version) && !updateTried.has(offer.version)) {
+        updateTried.add(offer.version);
+        const r = await applyUpdate(offer, log);
+        if (r.ok) {
+          log("새 판으로 다시 시작할게요(창은 그대로 두세요).");
+          process.exit(RESTART_EXIT_CODE);                  // run.bat/run.sh 가 다시 띄운다
+        }
+        // 🔴 실패해도 **옛 판 그대로 계속 돈다** — 오늘 나가야 할 글이 업데이트 때문에 멈추면 안 된다.
+        log(`업데이트를 건너뜁니다(지금 판으로 계속해요): ${r.reason}`);
+        updateFailed = { version: offer.version, reason: String(r.reason ?? "").slice(0, 200) };
+      }
 
       const { count: done } = await tick({ chromium, token, kinds: claimableKinds(), max: OPT.max, headed: OPT.headed, dryRun: OPT.dryRun });
       if (done) { idleRounds = 0; sleepSec = 5; }

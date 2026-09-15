@@ -56,8 +56,10 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
     blocks: normalizeBlocks(p.blocks) as Block[],
     images: assets.map((a) => {
       const m = (a.meta && typeof a.meta === "object" ? a.meta : {}) as Record<string, unknown>;
-      const img: { url: string; caption?: string; sort?: number } = { url: String(m.url ?? ""), sort: n(a.sort) };
+      const img: { url: string; caption?: string; alt?: string; sort?: number } = { url: String(m.url ?? ""), sort: n(a.sort) };
       if (a.caption) img.caption = String(a.caption);
+      // alt 는 `meta.alt`(B-1 84a2372 가 남긴다). 아직 없는 옛 행이면 캡션으로 내려앉는다 — 지금까지와 같은 동작.
+      if (m.alt) img.alt = String(m.alt).slice(0, 200);
       return img;
     }).filter((i) => !!i.url),
     tags: Array.isArray(meta.tags) ? (meta.tags as unknown[]).map(String).slice(0, 20) : [],
@@ -155,7 +157,7 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
     if (!kind) return { ok: false, reason: "unsupported_channel", retriable: false, error: "아직 이 채널로는 발행할 수 없어요.", detail: piece.channel };
     const payload: RunnerPublishPayload = {
       title: prepared.title, bodyHtml: prepared.bodyHtml, blocks: prepared.blocks,
-      images: prepared.images.map((i) => ({ url: i.url, ...(i.caption ? { caption: i.caption } : {}) })),
+      images: prepared.images.map((i) => ({ url: i.url, ...(i.caption ? { caption: i.caption } : {}), ...(i.alt ? { alt: i.alt } : {}) })),
       tags: prepared.tags, disclosure: prepared.disclosure,
       ...(prepared.scheduledFor ? { scheduledFor: prepared.scheduledFor } : {}),
       ...(opts.slotId ?? prepared.slotId ? { slotId: opts.slotId ?? prepared.slotId } : {}),
