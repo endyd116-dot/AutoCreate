@@ -26,7 +26,15 @@
  *         🔴 «배정됐다»를 «다르다»의 **대용물로 쓰지 않는다**(AC-57 · 프록시는 죽어 있을 수 있다 — 그래서 우리가 출구 IP 를 잰다).
  *       · 프록시가 없으면(= 같은 집 IP) → 30분 그대로. fail-closed 와 같은 결.
  *
- *   ⚠️ **이 값은 한 곳에서만 나온다.** `best-time.ts`·`slots.ts` 가 각자 30 을 적으면 하나가 썩는다(메인 지시).
+ *   ⚠️ **이 값이 나오는 곳은 여기 하나여야 한다** — 각자 30 을 적으면 하나가 썩는다(메인 지시).
+ *      🔴 그런데 내가 그렇게 **적어 놓고 두 자리를 안 고쳤다**(C 검증 2026-09-15 · AC-59 — **내 주석이 거짓이었다**):
+ *        `netlify/functions/slots.ts`(고객이 **시각 바꾸기**) · `netlify/functions/publish-now.ts`(**지금 올리기**).
+ *        하필 **고객이 손으로 만지는 두 자리**라, 편성만 고치고 두면 사장님이 원하신 «10:00 / 10:05» 가
+ *        **바로 그 문에서 옛 30분으로 거절**된다. 지금은 넷 다 여기를 읽는다.
+ *      ⚠️ `best-time.ts ACCOUNT_GAP_MIN` 은 **남아 있다** — `pickPublishAt` 이 `gapMin` 을 못 받았을 때의 폴백이다.
+ *         없애면 순수 함수가 DB 를 알아야 해서 더 나쁘다. **폴백이라는 사실을 그 상수 주석에 적어 뒀다.**
+ *   🔴 고객이 손으로 만지는 자리는 `gapMin`(자동 편성의 안전 기본)이 아니라 **`floorMin`**(고객이 내릴 수 있는 바닥)을 쓴다 —
+ *      우리 기본값으로 고객의 선택을 거절하면 그게 §9 가 금지한 «우리 판단으로 막는 것»이다.
  *   🔴 **판단은 고객에게 넘기되 위험은 말한다** — `risk` 한 줄이 그 용도다. 화면이 그대로 보여 준다.
  */
 import { sql } from "drizzle-orm";
@@ -115,7 +123,11 @@ export function decideGap(inp: GapInput): GapDecision {
 }
 
 /**
- * gapMinFor — 그 계정의 간격 정책. 🔴 **값이 나오는 곳은 여기 하나다**(`best-time.ts`·`slots.ts` 가 읽는다).
+ * gapMinFor — 그 계정의 간격 정책. **이 값의 정본은 여기다.**
+ *   지금 읽는 곳 넷: `lib/director.ts`(발행 예약) · `lib/slots.ts`(편성) ·
+ *   `netlify/functions/slots.ts`(고객이 시각 바꾸기) · `netlify/functions/publish-now.ts`(지금 올리기).
+ *   ⚠️ `best-time.ts ACCOUNT_GAP_MIN` 은 **`pickPublishAt` 이 `gapMin` 을 못 받았을 때의 폴백**으로 남아 있다
+ *      (그 함수는 순수라 DB 를 못 본다). «여기 하나»라고 적어 두면 그게 거짓이 되므로 **실제를 적는다**(AC-59).
  *   같은 테넌트·같은 채널의 다른 계정만 본다(남의 테넌트와는 겹칠 일이 없다).
  */
 export async function gapMinFor(tid: number, accountId: number): Promise<GapDecision> {
