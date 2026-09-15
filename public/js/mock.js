@@ -13,6 +13,8 @@
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
   const ymd = (dayOffset) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); return d.toISOString().slice(0, 10); };
   const todayYmd = ymd(0);
+  const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
+  const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
@@ -607,6 +609,38 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       S.pieces.push({ id, channel: s.channel, accountHandle: s.accountHandle, kind: "post", format: "story", title: s.topicTitle, status: "generating", stage: "writing", scheduledFor: s.publishAt, gateOk: false, createdAt: iso(Date.now()), topicTitle: s.topicTitle, regenCount: 0, bodyHtml: s.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true), _t0: Date.now() });
       s.pieceId = id; s.status = "producing"; return { ok: true, pieceId: id }; },
     /* ── [P1R2] §6 발행함 ── */
+    /* [R7 §1.3 · B-1] 영상 파일 내려받기 — 10분짜리 서명(파일 이름은 서명 안에 있다) · 아직 없으면 no_render + stage */
+    "piece-video": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id")));
+      if (!p) return { ok: false, status: 404, step: "not_found", error: "글을 찾을 수 없어요." };
+      const st = p.meta?.stage;
+      if (vdlKnob === "none" || p.kind !== "video" || st !== "done") return { ok: false, status: 404, step: "no_render", pieceId: p.id, stage: st || "script", error: "아직 영상 파일이 없어요. 다 만들어지면 여기서 받을 수 있어요." };
+      const url = URL.createObjectURL(new Blob([new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])], { type: "application/octet-stream" }));   // 실서버는 서명에 Content-Disposition 이 있어 «받아진다» — 모의는 octet-stream 으로 같은 효과
+      const day = todayYmd.replace(/-/g, "");
+      return { ok: true, pieceId: p.id, channel: p.channel, status: p.status, url, filename: `AC-${p.id}-${day}.mp4`, expiresInSec: 600, bytes: 8_400_000, durationSec: p.meta?.video?.seconds || 60, stage: st };
+    },
+    /* [R7 §1.3 · B-1] 앱에서 직접 올린 주소 적기 — 채널이 쓰는 호스트인지 보고(다른 채널이면 그 채널 이름으로 말한다) 발행함·편성표에 반영 */
+    "post-mark-published": (b) => { const nw = notWritable(); if (nw) return nw;
+      const p = S.pieces.find((x) => x.id === Number(b.pieceId));
+      if (!p) return { ok: false, status: 404, step: "not_found", error: "글을 찾을 수 없어요." };
+      if (["generating", "failed"].includes(p.status)) return { ok: false, status: 400, step: "status", error: "아직 만드는 중이에요. 다 만들어진 뒤에 적어 주세요." };
+      const raw = String(b.url || "").trim();
+      if (raw.length > 300) return { ok: false, status: 400, step: "url", reason: "too_long", error: "주소가 너무 길어요." };
+      let u; try { u = new URL(raw); } catch { return { ok: false, status: 400, step: "url", reason: "parse", error: "주소 모양이 아니에요." }; }
+      if (u.protocol !== "https:") return { ok: false, status: 400, step: "url", reason: "scheme", error: "https:// 로 시작하는 주소여야 해요." };
+      const HOSTS = { naver_blog: ["blog.naver.com"], naver_clip: ["blog.naver.com", "clip.naver.com", "tv.naver.com"], tistory: ["tistory.com"], blogger: ["blogspot.com"], wordpress: ["wordpress.com"], threads: ["threads.net"], instagram: ["instagram.com"], reels: ["instagram.com"], youtube_shorts: ["youtube.com", "youtu.be"], tiktok: ["tiktok.com"] };
+      const host = u.hostname.toLowerCase().replace(/^www\./, "");
+      const okHost = (HOSTS[p.channel] || []).some((h) => host === h || host.endsWith("." + h));
+      if (!okHost) { const other = Object.keys(HOSTS).find((k) => (HOSTS[k] || []).some((h) => host === h || host.endsWith("." + h)));
+        return { ok: false, status: 400, step: "url", reason: other ? "other_channel" : "domain",
+          error: other ? `${CH_LABEL[other] || other} 주소예요. 이 글은 ${CH_LABEL[p.channel] || p.channel}에 올린 주소가 필요해요.` : `${CH_LABEL[p.channel] || p.channel} 주소가 아니에요.` }; }
+      const clean = u.origin + u.pathname;   // 추적 꼬리표(utm_·si)는 서버가 떼어 준다
+      const exist = S.posts.find((x) => x.pieceId === p.id && x.externalUrl);
+      if (exist) return { ok: true, postId: exist.id, pieceId: p.id, channel: p.channel, already: true, url: exist.externalUrl, message: "이미 적어 둔 글이에요. 발행함에서 볼 수 있어요." };
+      const post = { id: S.nextId++, pieceId: p.id, channel: p.channel, accountHandle: p.accountHandle, title: p.title, externalUrl: clean, publishedVia: "manual", publishedAt: iso(Date.now()), status: "published", stats: {}, alive: true };
+      S.posts.unshift(post); p.status = "published"; p.externalUrl = clean;
+      const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "published";
+      return { ok: true, postId: post.id, pieceId: p.id, channel: p.channel, already: false, url: clean, slotId: sl?.id, message: "발행함에 넣었어요. 편성표에서도 «발행됨»으로 보여요." };
+    },
     "posts-list": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999", st = q.get("status") || "all";
       const day = (p) => p.publishedAt ? new Date(new Date(p.publishedAt).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : null;
       return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p })) }; },
@@ -706,7 +740,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

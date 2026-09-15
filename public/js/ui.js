@@ -83,7 +83,57 @@
     try { const url = new URL(location.href); ["key", "reason", "failed", "charged", "trial"].forEach((k) => url.searchParams.delete(k)); history.replaceState(null, "", url.pathname + (url.search || "") + url.hash); } catch { /* empty */ } // 새로고침해도 다시 안 뜨게(모의 손잡이는 남긴다)
   };
 
+  /* [R7 §1.3] 계정 없이 만든 영상의 출구 — ①내려받기 ②앱에서 직접 올림 ③올린 주소 적기.
+     🔴 내려받기 주소는 10분짜리 서명이고 교차 출처라 `<a download>` 가 무시된다 — 파일 이름은 서버가 서명 안에 넣어 준다(화면은 이름을 고르지 않는다). */
+  UI.videoDownload = async function (pieceId, note) {
+    const r = await UI.api("/api/piece-video?id=" + encodeURIComponent(pieceId));
+    if (!r.ok) {
+      if (r.gated) return false;
+      if (r.step === "no_render") { UI.toast(r.error || "아직 영상 파일이 없어요"); return false; }
+      UI.toast(r.error || "영상을 가져오지 못했어요"); return false;
+    }
+    if (note) note.textContent = [r.filename ? `${r.filename} 를 받아요` : "", r.bytes ? UI.mb(r.bytes) : "", "받는 주소는 10분 동안만 살아 있어요"].filter(Boolean).join(" · ");
+    location.href = r.url;   // 같은 창에서 받아진다(파일 이름·Content-Disposition 은 서명 안에 있다)
+    return true;
+  };
+  /* 올린 주소 적기 — 400 step:"url" 이 흔하다(고객이 다른 채널 주소를 붙인다). 서버 문장이 이미 사람말이라 그대로 칸 밑에 붙이고,
+     reason 이 있으면 그 채널의 «이렇게 생긴 주소»를 한 줄 더 보여 준다. */
+  UI.URL_HINT = {
+    youtube_shorts: "youtube.com/shorts/… 또는 youtu.be/… 로 붙여 주세요",
+    reels: "instagram.com/reel/… 로 붙여 주세요",
+    instagram: "instagram.com/p/… 또는 /reel/… 로 붙여 주세요",
+    naver_clip: "blog.naver.com/… 또는 clip.naver.com/… 로 붙여 주세요",
+    naver_blog: "blog.naver.com/아이디/글번호 로 붙여 주세요",
+    tistory: "내 블로그 주소(…tistory.com/글번호)로 붙여 주세요",
+    tiktok: "tiktok.com/@아이디/video/… 로 붙여 주세요",
+    threads: "threads.net/@아이디/post/… 로 붙여 주세요",
+  };
+  UI.markPublishedSheet = function (piece, onDone) {
+    const ch = piece.channel, label = UI.chLabel(ch);
+    UI.sheet(`<p class="muted" style="margin:0 0 10px">${UI.esc(label)} 앱에서 올린 뒤, 그 글 주소를 붙여 주세요. 발행함에 쌓이고 편성표도 «발행됨»으로 바뀌어요.</p>
+      <form id="mpf"><div class="field"><label for="mpu">올린 주소</label><input class="input" id="mpu" name="url" inputmode="url" placeholder="https://" autocomplete="off"><div class="help"></div></div>
+      <p class="muted" style="margin:0 0 8px;font-size:12.5px">${UI.esc(UI.URL_HINT[ch] || "올린 글의 주소를 그대로 붙여 주세요")}</p>
+      <div class="cta" style="position:static;padding:4px 0 8px"><button class="btn primary" type="submit">다 올렸어요</button></div></form>`,
+      { title: "올린 주소 적기", onOpen: (sh, close) => UI.form(sh.querySelector("#mpf"), async (d, f) => {
+        const url = String(d.url || "").trim();
+        if (!url) return UI.fieldError(f, "url", "주소를 붙여 주세요.");
+        const r = await UI.api("/api/post-mark-published", { body: { pieceId: piece.id, url } });
+        if (!r.ok) {
+          if (r.gated) return close();
+          if (r.step === "url") return UI.fieldError(f, "url", `${r.error || "주소를 확인해 주세요."} ${UI.URL_HINT[ch] || ""}`.trim());
+          return UI.fieldError(f, "url", r.error || "적지 못했어요");
+        }
+        close();
+        UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${r.already ? "이미 적어 둔 글이에요" : "올린 글로 적었어요"}</p>
+          <p class="muted" style="margin:0 0 6px">${UI.esc(r.message || "발행함에서 볼 수 있어요.")}</p>
+          <p class="muted" style="margin:0 0 12px;font-size:12.5px">이제 이 글의 수익도 함께 세어요.</p>
+          <div class="cta" style="position:static;padding:0"><a class="btn primary" href="${UI.esc(r.url)}" target="_blank" rel="noopener">올린 글 열기</a></div>`, { title: "" });
+        if (onDone) onDone(r);
+      }) });
+  };
+
   /* ── 포맷 ── */
+  UI.mb = (b) => (b > 0 ? `${(b / 1048576).toFixed(1)}MB` : "");
   UI.won = (n) => (Number(n) || 0).toLocaleString("ko-KR") + "원";
   UI.num = (n) => (Number(n) || 0).toLocaleString("ko-KR");
   UI.utc = (v) => { if (!v) return null; const s = String(v); return /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(s) && !/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? new Date(s.replace(" ", "T") + "Z") : new Date(s); };
@@ -203,7 +253,7 @@
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
   UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], failed: ["danger", "실패"], rejected: ["off", "버림"] };
   /* [P1R2] 슬롯 상태기계 전 상태(DESIGN §5B.6 · 계약 §-1) — 어휘 한 벌 */
-  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], failed: ["danger", "실패"] };
+  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], rejected: ["off", "버림"], failed: ["danger", "실패"] };
   /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
   UI.POST_STATUS = { published: ["ok", "발행됨"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"], uploaded_private: ["warn", "비공개 업로드됨"], publishing: ["off", "올리는 중"] }; // [P1R5] uploaded_private(§7-1) · 릴스 처리 중은 publishing + errorKind video_processing
   /* [P1R5] 영상 어휘 — 계약 v5.1 §0.2 글자 그대로(VideoFormat · VideoSeconds · VideoStage · JudgeGrade · VideoChannel) · 사람말은 여기 한 곳 */
