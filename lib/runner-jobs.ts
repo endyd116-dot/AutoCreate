@@ -212,7 +212,9 @@ export async function registerDevice(tid: number, name: string, kind = "own"): P
       cmd: `run.bat (Windows) · ./run.sh (Mac·Linux)`,
       url: `${siteBase()}/api/runner-download`,
       token,
-      steps: ["내려받은 zip 을 압축 풀기", "run.bat 두 번 클릭(Mac·Linux 는 ./run.sh)", "토큰 붙여넣기"],
+      // 🔴 낱말은 **화면을 따른다**(runner.html 은 «열쇠»라고 한다). 서버·안내문·화면이 다른 말을 쓰면
+      //    고객은 세 낱말을 각각 배워야 한다 — 안내가 갈리는 데서 «어디에 넣으라는 거지»가 나온다.
+      steps: ["내려받은 zip 을 압축 풀기", "run.bat 두 번 클릭(Mac·Linux 는 ./run.sh)", "열쇠 붙여넣기"],
     },
   };
 }
@@ -302,11 +304,11 @@ export type RunnerAuth =
  */
 export async function authRunner(req: Request): Promise<RunnerAuth> {
   const token = String(req.headers.get("x-runner-token") ?? "").trim();
-  if (!token) return { ok: false, reason: "no_token", message: "러너 토큰이 올바르지 않아요." };
+  if (!token) return { ok: false, reason: "no_token", message: "러너 열쇠가 올바르지 않아요." };
   let hash: string;
-  try { hash = hashRunnerToken(token); } catch { return { ok: false, reason: "bad_token", message: "러너 토큰이 올바르지 않아요." }; }
+  try { hash = hashRunnerToken(token); } catch { return { ok: false, reason: "bad_token", message: "러너 열쇠가 올바르지 않아요." }; }
   const [row] = await q(sql`SELECT id, tenant_id, name, kind, fingerprint FROM runner_devices WHERE token_hash = ${hash} LIMIT 1`);
-  if (!row) return { ok: false, reason: "bad_token", message: "러너 토큰이 올바르지 않아요. 앱에서 기기를 다시 등록해 주세요." };
+  if (!row) return { ok: false, reason: "bad_token", message: "러너 열쇠가 올바르지 않아요. 앱에서 기기를 다시 등록해 주세요." };
 
   const device: DeviceRow = { id: n(row.id), tenantId: n(row.tenant_id), name: String(row.name ?? ""), kind: String(row.kind ?? "own") };
   const fp = String(req.headers.get("x-runner-fp") ?? "").trim().toLowerCase();
@@ -322,7 +324,7 @@ export async function authRunner(req: Request): Promise<RunnerAuth> {
     await onOtherDevice(device);
     return {
       ok: false, reason: "other_device",
-      message: "이 토큰은 다른 PC에 연결돼 있어요. 이 컴퓨터에서 쓰시려면 앱에서 기기를 지우고 다시 등록해 주세요.",
+      message: "이 열쇠는 다른 PC에 연결돼 있어요. 이 컴퓨터에서 쓰시려면 앱에서 기기를 지우고 다시 등록해 주세요.",
     };
   }
   return { ok: true, device };

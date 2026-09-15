@@ -41,9 +41,13 @@ export function safeKey(prefix: string, ext: string): string {
  * 🔴 그러나 **이름이 고정인 파일**(예: `runner/latest.json`)에 그 헤더를 쓰면 새로 올려도 옛 값이 한참 읽힌다 —
  *    자동 업데이트가 «조용히» 멈춘다. 그런 파일은 호출부가 짧은 캐시를 직접 준다.
  */
-export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string, cacheControl = "public, max-age=31536000, immutable"): Promise<{ key: string; url: string }> {
+export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string, cacheControl = "public, max-age=31536000, immutable", contentDisposition?: string): Promise<{ key: string; url: string }> {
   const client = getR2Client();
-  await client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: cacheControl }));
+  await client.send(new PutObjectCommand({
+    Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: cacheControl,
+    // 저장해 두는 «이 이름으로 저장» — presign 의 ResponseContentDisposition 이 우선이지만, 서명 없이 열릴 때의 보루다.
+    ...(contentDisposition ? { ContentDisposition: contentDisposition } : {}),
+  }));
   return { key, url: r2PublicUrl(key) };
 }
 
@@ -76,10 +80,23 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 /** 검수 화면이 한 번 열어 끝까지 재생할 만큼(기본 6시간 · 상한 7일 = SigV4 한계). */
 export const PRESIGN_GET_TTL_SEC = Math.min(604_800, Math.max(60, Number(process.env.R2_PRESIGN_TTL_SEC || "21600")));
 
-/** 읽기 서명 URL — 화면이 presign 을 따로 요청하지 않도록 **서버가 채워서** 내려보낸다(A 전제). */
-export async function r2PresignGet(key: string, ttlSec: number = PRESIGN_GET_TTL_SEC): Promise<string> {
+/**
+ * 읽기 서명 URL — 화면이 presign 을 따로 요청하지 않도록 **서버가 채워서** 내려보낸다(A 전제).
+ *
+ * `filename` 을 주면 «이 이름으로 저장» 을 **서명 안에** 담는다(`ResponseContentDisposition`).
+ * 🔴 왜 서명에 담아야 하나(2026-09-15 A 발견): 받는 곳은 R2 도메인이라 **우리 화면과 출처가 다르다** —
+ *    `<a download="...">` 는 cross-origin 에서 **무시된다**. 그래서 이름을 안 담으면 브라우저는 키 이름으로 저장하고,
+ *    고객 다운로드 폴더에는 «v1.1.3.zip» 처럼 **무엇인지 알 수 없는 파일**이 남는다.
+ *    이름은 서명에 들어가므로 나중에 URL 을 만져 바꿀 수도 없다(서명이 깨진다).
+ */
+export async function r2PresignGet(key: string, ttlSec: number = PRESIGN_GET_TTL_SEC, opts: { filename?: string } = {}): Promise<string> {
   const client = getR2Client();
-  return await getSignedUrl(client, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: ttlSec });
+  // 따옴표·역슬래시·개행은 헤더를 깨뜨린다 — 이름은 우리가 만들지만 방어해 둔다(파일명이 헤더 주입 자리가 되지 않게).
+  const safe = String(opts.filename ?? "").replace(/[\r\n"\\]/g, "").slice(0, 120);
+  return await getSignedUrl(client, new GetObjectCommand({
+    Bucket: R2_BUCKET, Key: key,
+    ...(safe ? { ResponseContentDisposition: `attachment; filename="${safe}"` } : {}),
+  }), { expiresIn: ttlSec });
 }
 /** 쓰기 서명 URL — 러너가 mp4·포스터를 직접 PUT 한다(6MB 본문 우회 · 러너에 R2 자격 0). */
 export async function r2PresignPut(key: string, contentType: string, ttlSec = 3600): Promise<string> {

@@ -20,6 +20,8 @@ const DOWNLOAD_TTL_SEC = 600;                       // 10분 — 계약값
 let cache: { at: number; rel: RunnerRelease | null } = { at: 0, rel: null };
 
 export const releaseKey = (version: string) => `autocreate/runner/v${version}.zip`;
+/** 고객 다운로드 폴더에 남을 이름. 🔴 API 응답의 `filename` 과 **같은 값**이어야 한다(화면이 말한 이름과 실제가 달라지지 않게). */
+export const releaseFilename = (version: string) => `autocreate-runner-v${version}.zip`;
 
 /** 지금 배포 중인 판. 없거나 못 읽으면 null(호출부는 «아직 준비 중»으로 정직하게 말한다). */
 export async function latestRelease(): Promise<RunnerRelease | null> {
@@ -50,7 +52,9 @@ export async function latestRelease(): Promise<RunnerRelease | null> {
 export async function presignLatest(): Promise<{ rel: RunnerRelease; url: string } | null> {
   const rel = await latestRelease();
   if (!rel) return null;
-  const url = await r2PresignGet(releaseKey(rel.version), DOWNLOAD_TTL_SEC);
+  /* 🔴 파일명을 **서명에 담는다**. 받는 곳이 R2 도메인이라 우리 화면은 이름을 정할 수 없다(cross-origin 에서 `download` 속성은 무시된다) —
+     담지 않으면 고객 폴더에 «v1.1.3.zip» 이 남아 무엇인지 알 수 없다(2026-09-15 A 발견). */
+  const url = await r2PresignGet(releaseKey(rel.version), DOWNLOAD_TTL_SEC, { filename: releaseFilename(rel.version) });
   return { rel, url };
 }
 
