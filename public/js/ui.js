@@ -618,11 +618,62 @@
      부르는 화면이 **한 곳도 없었다** — 그래서 직접 쓰기 결과 화면과 검수 화면이 **이 한 함수**를 같이 쓴다.
      🔴 거절 사유 문장은 전부 서버 것(`step`: empty·too_big·bad_type·r2·piece) — 상한 숫자를 화면에 박지 않는다(AC-74).
      🔴 내 사진은 코인 0 이다 — 이 길에 코인 호출이 아예 없다(§5D.1 «내 사진만 쓰면 사진도 코인 0»). */
-  UI.photoSheet = function (pieceId, onDone) {
+  /* ── [R8 §10.3 · DESIGN §5C.5] 스톡 사진 — 🔴 **크레딧이 진짜 의무다**(사장님 2026-09-15: 사람·상표 판정은 «무시해도 돼»).
+       Pexels 는 «작가 크레딧 + Pexels 로 가는 눈에 띄는 링크», Pixabay 는 «어디서 왔는지»를 요구한다(lib/stock/pexels.ts·pixabay.ts 헤더).
+       모양은 서버 `lib/photo-source.ts creditLineOf()` 와 같게 짠다 — 주소는 글자 대신 **링크**로 건다(화면이니까). ── */
+  UI.STOCK_WHERE = { pixabay: "Pixabay", pexels: "Pexels" };
+  UI.creditLine = (stock) => { if (!stock || !stock.provider) return ""; const who = String(stock.author || "").trim();
+    const where = UI.STOCK_WHERE[stock.provider] || String(stock.provider); return who ? `${who} · ${where}` : where; };
+
+  /* ── [R8 §10.3] **스톡에서 찾아 붙이기** — 서버 `/api/stock-search`·`/api/stock-attach`.
+     🔴 판정(`verdict` · 사람·상표)은 **그리지 않는다** — 사장님이 «무시해도 돼»라고 하신 축이고, §9 대로 서버는 재서 적어 두기만 한다.
+        화면이 그걸 경고로 그리면 «막지는 않으면서 불안만 주는» 제일 나쁜 모양이 된다(§3 · §9).
+     🔴 못 찾은 까닭은 **서버 문장(`trouble`) 그대로** — «열쇠가 없다»와 «불렀는데 0건»은 다른 말이라 서버가 갈라 준다.
+     🔴 붙일 때 보내는 것은 «어느 검색어의 · 어느 제공사 · 몇 번»뿐이다 — 주소·작가를 화면이 지어 보내면 크레딧이 엉뚱한 곳을 가리킨다
+        (그래서 서버가 `downloadUrl` 을 아예 안 내려 준다 · piece-stock.ts 헤더). ── */
+  UI.stockSheet = function (pieceId, q0, onDone) {
+    let lastQ = "";
+    const card = (c) => `<button type="button" class="stock" data-pick="${UI.esc(c.provider)}:${UI.esc(String(c.id))}" aria-label="${UI.esc(c.alt || "이 사진 넣기")}"><img src="${UI.esc(c.previewUrl)}" alt="${UI.esc(c.alt || "")}" loading="lazy"><small>${UI.esc(UI.creditLine(c))}</small></button>`;
+    UI.sheet(`<div class="field" style="margin-bottom:10px"><input class="input" id="stq" type="search" enterkeyhint="search" placeholder="어떤 사진을 찾을까요" value="${UI.esc(q0 || "")}"><div class="help"></div></div>
+      <div class="cta nobar" style="position:static;padding:0 0 12px"><button class="btn secondary" type="button" id="stGo">찾기</button></div>
+      <p class="muted" id="stNote" style="margin:0 0 10px;font-size:13px;min-height:18px"></p>
+      <div id="stList" class="stockg"></div>
+      <p class="muted" style="margin:12px 0 0;font-size:12.5px">고르시면 저희가 그 사진을 받아 와 글에 넣어요. 작가와 어디서 온 사진인지는 사진마다 적어 둬요.</p>`,
+      { title: "스톡에서 찾기", onOpen: (sh, close) => {
+        const input = sh.querySelector("#stq"), go = sh.querySelector("#stGo"), note = sh.querySelector("#stNote"), list = sh.querySelector("#stList");
+        const search = async () => {
+          const qv = String(input.value || "").trim();
+          if (!qv) { note.textContent = "어떤 사진을 찾을지 적어 주세요"; return; }
+          go.disabled = true; note.textContent = "찾는 중이에요…"; list.innerHTML = "";
+          const r = await UI.api(`/api/stock-search?pieceId=${pieceId}&q=${encodeURIComponent(qv)}`, { noGate: true });
+          go.disabled = false;
+          if (!r.ok && !r.picks) { note.textContent = r.error || "지금은 찾지 못했어요"; return; }   // 사유는 서버 문장 그대로
+          lastQ = qv;
+          const picks = r.picks || [];
+          /* 🔴 못 찾았을 때의 까닭은 서버가 갈라 준다(`trouble`) — 화면이 «없어요» 하나로 뭉치지 않는다. */
+          note.textContent = picks.length ? "" : (r.trouble || "그 낱말로는 사진을 못 찾았어요");
+          list.innerHTML = picks.map(card).join("");
+          UI.$$("[data-pick]", sh).forEach((b) => b.onclick = async () => {
+            const [provider, id] = String(b.dataset.pick).split(":");
+            b.setAttribute("aria-busy", "true"); note.textContent = "넣는 중이에요…";
+            const at = await UI.api("/api/stock-attach", { body: { pieceId, q: lastQ, provider, id } });
+            b.removeAttribute("aria-busy");
+            if (!at.ok) { note.textContent = at.gated ? "" : (at.error || "넣지 못했어요"); return; }
+            note.textContent = "";
+            close(); UI.toast(at.already ? "이미 넣은 사진이에요" : "사진을 넣었어요");
+            if (onDone) onDone(at);
+          });
+        };
+        go.onclick = search;
+        input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); search(); } };
+        if (String(q0 || "").trim()) search();   // 소재 제목으로 한 번 미리 찾아 둔다(빈 격자로 맞지 않게)
+      } });
+  };
+  UI.photoSheet = function (pieceId, onDone, q0) {
     let photos = [];
     /* 행(ListRow) 한 벌 — 🔴 격자 위 작은 ✕ 를 쓰지 않는다(터치 44px 하한 · §13.0 접근성). 마크 38px + 이름 + 44px 단추. */
     const SRC = { customer: "내 사진", stock: "스톡 사진", ai: "AI 사진" };
-    const thumb = (p, i) => `<div class="row" style="padding-left:0;padding-right:0"><span class="mk ph"><img src="${UI.esc(p.url)}" alt="" loading="lazy"></span><div class="l"><span class="t">${UI.esc(p.caption || `사진 ${i + 1}`)}</span><span class="d">${UI.esc(SRC[p.source && p.source.kind] || "내 사진")}</span></div><button type="button" data-drop="${p.id}" aria-label="이 사진 빼기" style="min-height:44px;min-width:44px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
+    const thumb = (p, i) => `<div class="row" style="padding-left:0;padding-right:0"><span class="mk ph"><img src="${UI.esc(p.url)}" alt="" loading="lazy"></span><div class="l"><span class="t">${UI.esc(p.caption || `사진 ${i + 1}`)}</span><span class="d wrap">${UI.esc(SRC[p.source && p.source.kind] || "내 사진")}${p.stock ? ` · ${UI.creditLine(p.stock)}` : ""}</span></div><button type="button" data-drop="${p.id}" aria-label="이 사진 빼기" style="min-height:44px;min-width:44px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
     const draw = (sh) => {
       sh.querySelector("#phList").innerHTML = photos.length ? photos.map(thumb).join("") : '<p class="muted" style="margin:0;font-size:13px">아직 넣은 사진이 없어요.</p>';
       $$("[data-drop]", sh).forEach((b) => b.onclick = async () => {
@@ -633,10 +684,10 @@
         photos = photos.filter((x) => x.id !== Number(b.dataset.drop)); draw(sh); if (onDone) onDone(photos);
       });
     };
-    UI.sheet(`<p class="muted" style="margin:0 0 10px;font-size:13px">JPG·PNG·WEBP 사진을 넣을 수 있어요. 내 사진은 코인이 들지 않아요.</p>
+    UI.sheet(`<p class="muted" style="margin:0 0 10px;font-size:13px">내 사진(JPG·PNG·WEBP)을 올리거나 스톡에서 찾아 넣을 수 있어요. 둘 다 코인이 들지 않아요.</p>
       <div id="phList"><span class="sk" style="width:100%;height:60px"></span></div>
       <p class="muted" id="phNote" style="margin:8px 0 0;font-size:12.5px;min-height:16px"></p>
-      <div class="cta"><button class="btn primary" type="button" id="phPick">사진 고르기</button></div>
+      <div class="cta"><button class="btn secondary" type="button" id="phStock">스톡에서 찾기</button><button class="btn primary" type="button" id="phPick">사진 고르기</button></div>
       <input type="file" id="phFile" accept="image/jpeg,image/png,image/webp" multiple hidden>`,
       { title: "사진 넣기", onOpen: async (sh) => {
         const note = sh.querySelector("#phNote"), file = sh.querySelector("#phFile"), pick = sh.querySelector("#phPick");
@@ -644,6 +695,11 @@
         photos = r.ok ? (r.photos || []) : []; draw(sh);
         if (!r.ok && !r.gated) note.textContent = r.error || "사진을 불러오지 못했어요";
         pick.onclick = () => file.click();
+        /* 스톡은 «찾아서 고르는» 일이라 시트를 한 겹 더 연다 — 끝나면 목록을 다시 읽어 크레딧까지 그린다. */
+        sh.querySelector("#phStock").onclick = () => UI.stockSheet(pieceId, q0, async () => {
+          const rr = await UI.api(`/api/piece-photos?pieceId=${pieceId}`);
+          photos = rr.ok ? (rr.photos || []) : photos; draw(sh); if (onDone) onDone(photos);
+        });
         file.onchange = async () => {
           const list = Array.from(file.files || []); file.value = "";
           if (!list.length) return;

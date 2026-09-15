@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 10;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 11;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -49,6 +49,9 @@
   const aiKeyKnob = qs.get("aikey") || "";
   const aiNoEnc = aiKeyKnob === "noenc";
   const aiFbKnob = qs.get("aifb") === "1";
+  /* [R8 §10.3] 스톡 사진 손잡이 — ?stock=nokey(제공사 열쇠가 안 꽂힘) · ?stock=empty(불렀는데 0건) · 기본은 여섯 장 나온다.
+     🔴 «열쇠 없음»과 «0건»은 **다른 말**이라 서버가 `trouble` 로 갈라 준다 — 화면이 갈라 보여 주는지 재려고 둘 다 둔다. */
+  const stockKnob = qs.get("stock") || "";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -244,6 +247,29 @@
   const AVATAR = "/icon.svg";
   /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
   const COIN = { blog: 1, image: 1, cardnews: 3 };
+  /* [R8 §10.3] 스톡 후보 — 사다리 순서는 서버와 같다(Pixabay 먼저 · lib/stock/index.ts:35).
+     그림은 바깥을 안 부르려고 그 자리에서 그린다(정적 하니스에서도 격자가 그대로 보여야 한다). */
+  const STOCK_PROVIDERS = ["pixabay", "pexels"];
+  const stockSvg = (bg, t) => "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="${bg}"/><text x="120" y="86" font-family="sans-serif" font-size="15" fill="#ffffff" text-anchor="middle">${t}</text></svg>`);
+  const STOCK_BG = ["#7C8BA1", "#96A7B8", "#8FA08A", "#B0A08F", "#8A93AE", "#A08F9E"];
+  const STOCK_WHO = ["Jin Park", "Mira K.", "", "Daniel Cho", "Yuna Seo", "Tom R."];
+  function stockPicks(query) {
+    return STOCK_BG.map((bg, i) => {
+      const provider = STOCK_PROVIDERS[i % 2];
+      const id = `${provider[0]}${1000 + i}`;
+      /* 🔴 사람·상표는 «모르면 null» 이다(제공사가 말해 줄 때만 참·거짓) — «없음 ≠ 아니오»(AC-9). */
+      const people = i === 2 ? true : i === 4 ? false : null;
+      const brand = i === 5 ? true : null;
+      /* 판정은 «대가를 받은 글»일 때만 갈린다(lib/stock-safety.ts) — 모의는 재는 흉내만 내고, **화면은 이걸 안 그려야 한다**. */
+      const verdict = people === true ? { ok: false, code: "people_in_paid", reason: "사람이 알아볼 수 있게 찍힌 스톡 사진은 광고가 들어간 글에 쓸 수 없어요(제품을 보증하는 것처럼 보여요)." }
+        : brand === true ? { ok: false, code: "brand_in_paid", reason: "상표·로고가 찍힌 스톡 사진은 광고가 들어간 글에 쓸 수 없어요." } : { ok: true };
+      return { provider, id, previewUrl: stockSvg(bg, `${query} ${i + 1}`), width: 240, height: 160,
+        author: STOCK_WHO[i] || null,
+        sourceUrl: provider === "pexels" ? `https://www.pexels.com/photo/${id}/` : `https://pixabay.com/photos/${id}/`,
+        licenseUrl: provider === "pexels" ? "https://www.pexels.com/license/" : "https://pixabay.com/service/license-summary/",
+        people, brand, tags: [query, provider], alt: `${query} 사진 ${i + 1}`, verdict };
+    });
+  }
   /* [R8-B §4.4] 🔴 lib/ai-key-byo.ts BYO_ERROR_TEXT **그대로** — 사유 셋은 고객이 할 일이 서로 달라서 갈라 놓은 것이다. */
   const BYO_ERROR_TEXT = {
     invalid: "키가 맞지 않아요. 구글 AI 스튜디오에서 키를 다시 복사해 주세요.",
@@ -1002,6 +1028,47 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "piece-photo-remove": (b) => { const id = Number(b.assetId); let hit = false;
       for (const k of Object.keys(S.photos || {})) { const before = S.photos[k].length; S.photos[k] = S.photos[k].filter((x) => x.id !== id); if (S.photos[k].length !== before) hit = true; }
       return hit ? { ok: true, removedObject: true } : { ok: false, step: "not_found", error: "그 사진을 찾지 못했어요.", status: 404 }; },
+    /* ══ [R8 §10.3 · DESIGN §5C.5] 스톡 사진 — 서버 `netlify/functions/piece-stock.ts` · `lib/stock/` 모양 그대로.
+       🔴 `downloadUrl` 은 **안 내려 준다**(서버가 일부러 뺀다) — 화면은 `previewUrl` 로만 고른다.
+       🔴 `verdict` 는 **싣되 화면은 안 그린다**(사장님 2026-09-15 «무시해도 돼») — 그래서 모의도 «걸린» 사진을 한 장 섞어 둔다:
+          화면이 그걸 경고로 그리면 그 자리에서 빨강이 나야 한다(재려면 걸린 사진이 있어야 한다).
+       🔴 `trouble` 문장은 `lib/stock/index.ts stockTroubleLine()` 글자 그대로. ══ */
+    "stock-search": (_b, q) => {
+      const query = String(q.get("q") || "").trim();
+      if (!query) return err("q", "어떤 사진을 찾을지 알려 주세요.");
+      if (stockKnob === "nokey") return { ok: false, paid: false, picks: [],
+        tried: STOCK_PROVIDERS.map((p) => ({ provider: p, ok: false, count: 0, reason: "no_key", cached: false })),
+        trouble: "사진 제공사 열쇠가 아직 안 꽂혀 있어요. 열쇠를 넣으면 바로 됩니다.",
+        configured: STOCK_PROVIDERS.map((p) => ({ provider: p, configured: false })) };
+      if (stockKnob === "empty") return { ok: false, paid: false, picks: [],
+        tried: STOCK_PROVIDERS.map((p) => ({ provider: p, ok: true, count: 0, reason: "empty", cached: false })),
+        trouble: "그 낱말로는 사진을 못 찾았어요. 다른 낱말로 찾아 보세요.",
+        configured: STOCK_PROVIDERS.map((p) => ({ provider: p, configured: true })) };
+      const picks = stockPicks(query);
+      return { ok: true, paid: false, picks,
+        tried: STOCK_PROVIDERS.map((p) => ({ provider: p, ok: true, count: picks.filter((c) => c.provider === p).length, reason: null, cached: false })),
+        trouble: null, configured: STOCK_PROVIDERS.map((p) => ({ provider: p, configured: true })) };
+    },
+    /* 🔴 붙일 때 받는 것은 «어느 검색어의 · 어느 제공사 · 몇 번»뿐이다 — 주소·작가는 **우리가 다시 꺼낸다**(piece-stock.ts 헤더).
+       그래서 모의도 보내온 값을 쓰지 않고 `stockPicks(q)` 에서 같은 사진을 다시 찾는다. 못 찾으면 서버와 같은 404 다. */
+    "stock-attach": (b) => {
+      const nw = notWritable(); if (nw) return nw;
+      const pid = Number(b.pieceId); if (!pid) return err("pieceId", "어느 글에 붙일 사진인지 알려 주세요.");
+      const query = String(b.q || "").trim(); if (!query) return err("q", "어떤 낱말로 찾은 사진인지 알려 주세요.");
+      const c = stockPicks(query).find((x) => x.provider === b.provider && x.id === String(b.id));
+      if (!c) return { ok: false, error: "그 사진을 다시 찾지 못했어요. 한 번 더 찾아 주세요.", step: "not_in_results", status: 404 };
+      S.photos = S.photos || {}; const list = (S.photos[pid] = S.photos[pid] || []);
+      const key = `stock:${c.provider}:${c.id}`;
+      const dup = list.find((x) => x.source && x.source.key === key);
+      if (dup) return { ok: true, assetId: dup.id, url: dup.url, sourceKey: key, verdict: c.verdict, already: true };
+      const photo = { id: S.nextId++, pieceId: pid, r2Key: key, url: c.previewUrl, caption: null, sort: list.length,
+        source: { kind: "stock", key, addedAt: iso(Date.now()), by: null },
+        /* 🔴 크레딧 재료(작가·출처·라이선스)는 **버리지 않는다** — 키가 죽는 진짜 경로가 그쪽이다(lib/stock/index.ts:22). */
+        stock: { provider: c.provider, id: c.id, author: c.author, sourceUrl: c.sourceUrl, licenseUrl: c.licenseUrl, people: c.people, brand: c.brand, tags: c.tags },
+        createdAt: iso(Date.now()) };
+      list.push(photo);
+      return { ok: true, assetId: photo.id, url: photo.url, sourceKey: key, verdict: c.verdict, already: false };
+    },
     /* ── [P1R2] §2 러너 기기(내 PC 프로그램) ── */
     "runner-list": () => { tick(); return { ok: true, devices: S.devices.map(devRow) }; },
     "runner-register": (b) => { const name = String(b.name || "").trim(); if (!name) return err("name", "기기 이름을 적어 주세요.");
@@ -1183,7 +1250,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

@@ -96,8 +96,8 @@ function renderPhotos() {
   if (P.status !== "in_review" || P.kind === "video") { host.hidden = true; return; }
   const n = (P.images || []).length;
   host.hidden = false;
-  host.innerHTML = `<div class="gt">사진</div><button type="button" class="row tap" id="phGo"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">${n ? `사진 ${n}장` : "내 사진 넣기"}</span><span class="d">JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
-  UI.$("#phGo").onclick = () => UI.photoSheet(P.id, () => load());
+  host.innerHTML = `<div class="gt">사진</div><button type="button" class="row tap" id="phGo"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">${n ? `사진 ${n}장` : "사진 넣기"}</span><span class="d">내 사진이나 스톡 사진 · 둘 다 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
+  UI.$("#phGo").onclick = () => UI.photoSheet(P.id, () => load(), P.title || "");
 }
 /* [R8-A §4 · 법 경로] 대가를 받았나 — 🔴 **켜기만 있다**(서버가 false 를 무시한다).
    켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남기 때문이다. 내리려면 이 글을 버리고 다시 만든다.
