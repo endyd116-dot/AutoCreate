@@ -37,25 +37,39 @@ function fail(res: Response): Fail { return { ok: false, user: null, ops: null, 
 import { sql } from "drizzle-orm";
 import { db } from "../db/index";
 import { writeAudit } from "./audit";
+import { utcDate } from "./db-util";
 
-export type WritableReason = "readonly" | "suspended" | "unknown";
+/** 🔴 [P1R7 §3.1] `closed` 추가 — 탈퇴를 신청한 집도 상태는 `readonly` 라 종전엔 «체험이 끝났어요»가 떴다(그 집엔 거짓말이고,
+ *  정작 필요한 «되돌리기»를 못 찾게 만든다). 이유를 서버에서 가른다. `readonly`(체험 종료)·`suspended`(결제 밀림)는 그대로다. */
+export type WritableReason = "readonly" | "suspended" | "closed" | "unknown";
 export type WritableOk = { ok: true; status: string; res: null };
-export type WritableFail = { ok: false; reason: WritableReason; status: string; res: Response };
+export type WritableFail = { ok: false; reason: WritableReason; status: string; purgeAt?: string; daysLeft?: number; res: Response };
 /** 쓰기(생성·발행·충전 소비)를 막는 테넌트 상태. 열람은 전부 된다(§12.3 «읽기 전용»). */
 export const NON_WRITABLE: ReadonlySet<string> = new Set(["readonly", "suspended", "cancelled"]);
 
 /**
  * requireWritable(tid) — 🔴 **한 곳**(계약 §0.1). produce·publisher·director-confirm·slots-produce-now·pieces-regenerate 가 부른다.
- *   통과 = `tenants.status ∈ {trial, active}` · 막힘 = 403 `{ ok:false, step:"writable", reason:"readonly"|"suspended", error }` —
- *   화면은 reason 으로 «요금제를 고르면 바로 이어서 돼요»(readonly) / «결제가 밀려 있어요»(suspended) 시트를 띄운다.
+ *   통과 = `tenants.status ∈ {trial, active}` · 막힘 = 403 `{ ok:false, step:"writable", reason, error }` —
+ *   화면은 reason 으로 시트를 가른다: «요금제를 고르면 바로 이어서 돼요»(readonly) · «결제가 밀려 있어요»(suspended) ·
+ *   🔴 **«탈퇴를 신청하셨어요 · 되돌릴 수 있어요»(closed)** — 이때는 `purgeAt`·`daysLeft` 도 함께 내려 화면이 **한 번 더 묻지 않게** 한다
+ *   (A 가 임시로 `GET /api/account-close` 왕복을 넣어 두었던 자리 · P1R7 §3.1).
  *   조회 실패는 **막는다**(unknown · 돈이 걸린 경로는 안전측 · AM plan-gate 규율). B2 는 잡 적재 직전에 이 함수를 부른다.
  */
 export async function requireWritable(tid: number): Promise<WritableOk | WritableFail> {
   try {
-    const rows = (await db.execute(sql`SELECT status FROM tenants WHERE id = ${Math.floor(Number(tid) || 0)}`)) as unknown as { status: string }[];
-    const status = String(rows[0]?.status ?? "");
+    const rows = (await db.execute(sql`SELECT status, closed_at, purge_at FROM tenants WHERE id = ${Math.floor(Number(tid) || 0)}`)) as unknown as { status: string; closed_at: unknown; purge_at: unknown }[];
+    const row = rows[0];
+    const status = String(row?.status ?? "");
     if (!status) return { ok: false, reason: "unknown", status, res: json({ ok: false, step: "writable", reason: "unknown", error: "계정 상태를 확인하지 못했어요." }, 403) };
     if (!NON_WRITABLE.has(status)) return { ok: true, status, res: null };
+    /* 탈퇴 신청(= 파기 예약)이 먼저다 — 그 집엔 «체험»도 «결제»도 할 말이 아니다. 예약 칸은 `closed_at`·`purge_at`(P1R7 §3.1). */
+    const purgeAt = utcDate(row?.purge_at);
+    if (row?.closed_at && purgeAt) {
+      const daysLeft = Math.max(0, Math.ceil((purgeAt.getTime() - Date.now()) / 86400_000));
+      const error = `탈퇴를 신청하셨어요. ${daysLeft}일 뒤에 자료가 지워져요 — 그때까지는 보기만 할 수 있고, 되돌리면 하던 대로 다시 쓸 수 있어요.`;
+      return { ok: false, reason: "closed", status, purgeAt: purgeAt.toISOString(), daysLeft,
+        res: json({ ok: false, step: "writable", reason: "closed", error, purgeAt: purgeAt.toISOString(), daysLeft }, 403) };
+    }
     const reason: WritableReason = status === "suspended" ? "suspended" : "readonly";
     const error = reason === "suspended" ? "결제가 밀려 있어서 잠시 멈췄어요. 결제 수단을 확인해 주세요." : "체험이 끝났어요. 요금제를 고르면 바로 이어서 할 수 있어요.";
     return { ok: false, reason, status, res: json({ ok: false, step: "writable", reason, error }, 403) };

@@ -53,16 +53,31 @@ export async function videoPublicUrlOf(tid: number, pieceId: number): Promise<st
   return key ? r2PublicUrl(key) : null;
 }
 
-/** 캡션 — 첫 줄 고지 + 본문 + 태그(#광고 포함). */
+/**
+ * 채널별 태그 상한 — 🔴 **플랫폼이 실제로 받는 수**다(R8-A 정책 조사 §122).
+ *   쓰레드는 «해시태그»가 아니라 **토픽 태그**이고 공식 상한이 **게시물당 1개**다
+ *   («You can include up to 1 topic per post» · https://help.instagram.com/1356090605000312).
+ *   🔴 [2026-09-15 C · R8-A §2.6 실측] 계약 문장(`writing-contracts.ts:244`)은 «토픽 태그 0~1개» 로 고쳐졌는데
+ *      **발행 경로는 안 따라왔다** — 쓰레드가 인스타와 같은 캡션 빌더를 쓰는 바람에 태그 10개가 그대로 실렸다
+ *      (실측: threads 캡션에 `#가을이불 #세탁 … #정보` 10개). 계약만 고치면 생성도 발행도 안 따라온다(AC-63).
+ */
+const TAG_MAX: Readonly<Record<string, number>> = { threads: 1 };
+const TAG_MAX_DEFAULT = 20;
+
+/** 캡션 — 첫 줄 고지 + 본문 + 태그(#광고 포함). 태그 수는 **채널 상한**을 따른다. */
 export function buildCaption(piece: PublishPiece, limit = 2_200): string {
   const lines: string[] = [];
   const disc = piece.disclosure ?? (piece.affiliate ? disclosureTextFor(piece.affiliate.provider) : null);
   if (disc) lines.push(disc);
   const body = String(piece.bodyHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (body) lines.push(body.slice(0, 1_500));
-  const tags = (piece.tags ?? []).slice(0, 20).map((t) => `#${String(t).replace(/^#/, "")}`);
+  const max = TAG_MAX[String(piece.channel ?? "")] ?? TAG_MAX_DEFAULT;
+  const tags = (piece.tags ?? []).slice(0, TAG_MAX_DEFAULT).map((t) => `#${String(t).replace(/^#/, "")}`);
+  /* 🔴 `#광고` 는 맨 앞이다 — 상한이 1인 채널에서는 **이것 하나만** 남는다(태그 자리를 법이 먼저 쓴다).
+     쓰레드는 대가 고지 문장이 이미 본문 첫 줄에 있으므로 이 태그는 보조 표시다. */
   if (piece.affiliate && !tags.some((t) => t === "#광고")) tags.unshift("#광고");
-  if (tags.length) lines.push(tags.join(" "));
+  const shown = tags.slice(0, max);
+  if (shown.length) lines.push(shown.join(" "));
   return lines.join("\n\n").slice(0, limit);
 }
 

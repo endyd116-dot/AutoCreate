@@ -9,25 +9,25 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
+import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, type ConnectMethod } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0)
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
 import { warmupState, effectiveDailyCap, effectiveMinGapMin } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 
 type Row = Record<string, unknown>;
 export const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
 
-export type ConnectMethod = "session" | "app_password" | "oauth";
+/* [P1R8 §5.2] 🔴 채널의 «성질»은 이제 `lib/channel-registry.ts` 한 곳이다 — 여기 있던 세 벌(목록·연결 방식·글 채널)은
+   그 표를 읽는 **얇은 래퍼**로 남긴다(이름·시그니처 그대로라 호출부 40여 곳 무회귀).
+   왜 옮겼나: 채널 하나를 켜려면 네 파일을 맞춰야 했고, 빠뜨리면 조용히 틀린 값이 나왔다(그 파일 헤더에 실측 근거). */
+export type { ConnectMethod } from "./channel-registry";
 export const ALL_CHANNELS = ["naver_blog", "tistory", "blogger", "wordpress", "threads", "instagram", "youtube_shorts", "naver_clip", "reels", "tiktok"] as const;
 export type ChannelKey = typeof ALL_CHANNELS[number];
-export function isChannel(v: unknown): v is ChannelKey { return ALL_CHANNELS.includes(String(v) as ChannelKey); }
+export function isChannel(v: unknown): v is ChannelKey { return isKnownChannel(v); }
 
-/** 연결 방식(계약 §0): naver_blog·tistory·naver_clip = session · wordpress = app_password · 나머지 = oauth. */
-export function connectMethodOf(channel: string): ConnectMethod {
-  if (channel === "naver_blog" || channel === "tistory" || channel === "naver_clip") return "session";
-  if (channel === "wordpress") return "app_password";
-  return "oauth";
-}
-/** 글 채널(이 라운드 생성 대상). */
-export const TEXT_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "tistory", "blogger", "wordpress", "threads"]);
+/** 연결 방식(계약 §0) — 정본은 `lib/channel-registry.ts CHANNELS`. */
+export const connectMethodOf = registryConnectMethodOf;
+/** 글 채널(이 라운드 생성 대상) — 표의 `axis: "text"` 에서 파생. */
+export const TEXT_CHANNELS: ReadonlySet<string> = new Set(TEXT_CHANNEL_KEYS);
 
 export interface AccountRow {
   id: number; channel: string; handle: string; displayName: string | null; avatar: null; status: string;

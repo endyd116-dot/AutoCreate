@@ -9,6 +9,20 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 
+# --- Security note (R8 3.1, 2026-09-15) -----------------------------
+#  On Windows, Chromium seals cookies with AES-256-GCM using a key that
+#  DPAPI binds to the machine + user, and .token permissions are narrowed
+#  with icacls. Neither applies here:
+#    * On Linux without a keyring (gnome-keyring / kwallet), Chromium falls
+#      back to a HARDCODED key -- profile cookies are effectively plaintext.
+#    * On macOS Chromium uses the Keychain, which is stronger, but we have
+#      NOT measured it.
+#  We have not verified either case (no mac/Linux runner exists yet), so we
+#  say so instead of pretending. Treat the runner folder as a secret: do not
+#  put it on a shared machine or a synced/backed-up folder.
+#  This is deferred, not solved. See docs/active/B2-HANDOFF.md.
+# --------------------------------------------------------------------
+
 echo ""
 echo "  AutoCreate Runner"
 echo "  -----------------"
