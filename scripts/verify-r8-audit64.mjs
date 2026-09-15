@@ -36,10 +36,24 @@ const FOUR = [
       const srv = inFile("lib/revenue/types.ts", /DAY_BASIS_NOTE/);
       return s && srv ? ["닫힘", "revenue.html 이 서버 dayBasis 를 그린다(문구는 라벨 하니스가 서버와 대조 중)"] : ["열림", `화면 ${s} 서버 ${srv}`];
     } },
-  { n: 3, name: "`ai-meter.ts`·`ai-key.ts` 이식",
+  /* 🔴 [2026-09-15 메인 지적 · C 수리] 이 행은 **파일 이름으로 세면 안 된다.**
+     설계가 스스로 «`ai-meter` → `lib/billing/ai-cost-cap.ts` 로 **흡수**» 라고 옮겨 적어 뒀다(`docs/DESIGN.md:175`).
+     옛 이름(`lib/ai-meter.ts`)으로 세면 영영 «열림» 이다 — **설계가 이름을 옮긴 항목에서 파일명 검사는 대용물이다**(AC-70 의 새 얼굴).
+     ⇒ 한 줄이 둘을 묶고 있던 것을 **두 칸으로 쪼갠다**. `ai-meter` 는 «그 기능이 도는가» 로, `ai-key` 는 아직 파일도 기능도 없다. */
+  { n: "3a", name: "`ai-meter` → `ai-cost-cap` 흡수(사용량·원가 상한)",
     check: () => {
-      const has = ["lib/ai-meter.ts", "lib/ai-key.ts"].filter((p) => existsSync(p));
-      return has.length === 2 ? ["닫힘", has.join(",")] : ["열림", `파일 ${has.length}/2 — 설계 §3.3 표에 적힌 파일이 없다(CLAUDE §8 전본 규칙)`];
+      const file = existsSync("lib/billing/ai-cost-cap.ts");
+      const callers = ["lib/director.ts", "lib/video/cost.ts"].filter((p) => inFile(p, /checkAiCostCap|requireAiBudget/));
+      const opsDoor = inFile("netlify/functions/ops-ai.ts", /ai-cost-cap|costCap/i);
+      return file && callers.length ? ["닫힘", `lib/billing/ai-cost-cap.ts · 부르는 곳 ${callers.join(",")}${opsDoor ? " · 운영 입구 ops-ai" : ""}`]
+        : ["열림", `파일 ${file} · 부르는 곳 ${callers.length}`];
+    } },
+  { n: "3b", name: "`ai-key`(키 로테이션)",
+    check: () => {
+      const file = existsSync("lib/ai-key.ts");
+      const rotate = inFile("lib/ai.ts", /rotate|keyPool|다음 키/i);
+      return file || rotate ? ["닫힘", `파일 ${file} · 로테이션 ${rotate}`]
+        : ["열림", "키를 여러 개 돌려 쓰는 길 0 — 지금은 키가 1개라 안 아프지만 설계 §3.3 이 요구한다(B-1 발주됨)"];
     } },
   { n: 4, name: "고지 게이트 사유가 홈에 뜨나",
     check: () => {
