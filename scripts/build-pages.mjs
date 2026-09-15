@@ -42,7 +42,7 @@ for (const t of TARGETS) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title} · ${t.suffix}</title>
 ${t.robots ? `<meta name="robots" content="noindex">\n` : ""}${t.manifest ? `<link rel="manifest" href="/manifest.webmanifest">\n` : ""}${FONT}
-<link rel="stylesheet" href="/css/ac.css?v=11">
+<link rel="stylesheet" href="/css/ac.css?v=12">
 </head>
 <body${t.bodyClass ? ` class="${t.bodyClass}"` : ""}>
 <div class="shell">
