@@ -32,10 +32,20 @@ const PRODUCT = [
   ...walk("netlify/functions", [".ts", ".mts"]),
   ...walk("runner", [".mjs", ".js"]),
   ...walk("public", [".js", ".html"]),
-];
+].filter((p) => !/[/]js[/]mock/.test(p));   /* 🔴 [2026-09-16 메인 · b-49] **모의 층은 제품이 아니다.**
+   예전엔 SCREENS 에서만 뺐고 PRODUCT·CODE 에선 **안 뺐다** — 한쪽만 뺀 것이라
+   «모의에만 키를 적어도 바깥 호출처로 세어지는» 구멍이 남아 12줄의 수를 부풀리고 있었다.
+   b-49 가 전수로 쟀다: 빼도 **빨개지는 줄 0개**(수만 준다). */
 const SRC = new Map(PRODUCT.map((p) => [p, read(p)]));
 /** 주석을 걷어 낸 본문 — «주석에만 적혀 있는 호출»을 호출로 세지 않기 위해(AC-59). */
-const CODE = new Map([...SRC].map(([p, t]) => [p, t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")]));
+const CODE = new Map([...SRC].map(([p, t]) => [p, t
+  .replace(/[/][*][\s\S]*?[*][/]/g, " ")
+  .replace(/(^|[^:])[/][/].*/g, "$1 ")
+  .replace(/<!--[\s\S]*?-->/g, " ")]));
+/* 🔴 [2026-09-16 메인 · b-49 가 잡았다] **HTML 주석(<!-- -->)을 안 걷고 있었다.** 표본이 전부 `.ts` 였던 탓이다 —
+   실례: `public/app/settings.html` 의 HTML 주석 한 줄이 `targetChannelOrder` 의 «바깥 호출처»로 세어졌다.
+   🔴 **표본에 없는 고장은 변이로도 안 보인다**(AC-99 ⑨ · b-49 가 자기 §1 을 스스로 되돌리며 찾았다).
+   ⚠️ `//` 쪽은 `.` 이 줄바꿈을 원래 안 먹으므로 **역슬래시 없이** 쓴다(AC-100 — 이 셸이 역슬래시를 한 겹 먹는다). */
 
 /**
  * 이름 하나의 제품 호출처를 센다.
@@ -148,7 +158,12 @@ const TARGETS = [
   ["신조어 — 값이 연령대인가", "toAgeBand", "lib/slang-whitelist.ts", "옛 데이터·오타가 그대로 흘러들어 표가 엉뚱하게 먹거나 안 먹는다"],
   ["신조어 — 사전이 표를 받는 칸", "allowSlang", "lib/banned-words.ts", "사전이 표를 못 받아 연령대와 상관없이 모두 잡힌다(순수 리프 계약을 지키려고 import 대신 값으로 받는다)"],
   /* ── [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 블록만 만들고 **파싱·렌더·러너 중 하나가 빠지면 조용히 0건**이 된다. ── */
-  ["🔴 장소 카드 — 블록이 실제로 흐른다", "place", "lib/blocks.ts", "타입만 만들고 파싱·렌더가 없어 모델이 내도 **조용히 버려진다**"],
+  /* 🔴 [2026-09-16 메인 · b-49 가 잡았다] 옛 심볼은 그냥 `place` 였다 — **너무 흔했다.**
+     진짜 소비처를 **다 가려도 바깥 12곳으로 초록**이었다: AI 프롬프트의 영어 산문(«when a place is implied») ·
+     카메라 지시문 · channel-registry 의 다른 뜻 문자열 · 인라인 CSS `place-items`.
+     🔴 **배선이 내일 통째로 지워져도 초록으로 남는 상태**였다 — «만들면 줄을 박아라»를 지켜 박은 줄인데
+     **그 줄이 초록을 거저 받고 있었다.** ⇒ 그 배선에만 있는 글자로 바꾼다(`lib/blocks.ts:28` 선언). */
+  ["🔴 장소 카드 — 블록이 실제로 흐른다", "place?: { name", "lib/blocks.ts", "타입만 만들고 파싱·렌더가 없어 모델이 내도 **조용히 버려진다**"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {
@@ -226,8 +241,20 @@ const SURFACES = [
   ["옷장 시트를 화면이 연다", "UI.styleSheet", "public/js/ui.js",
     "함수만 있고 여는 화면이 없어 레퍼런스 학습 입구가 0 이 된다", true],
 ];
-for (const [label, needle, owner, harm, needApp] of SURFACES) {
-  if (!read(owner) && !SRC.has(owner)) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner} 를 못 읽었다 — 파일이 옮겨졌나(검사를 고쳐라)`); continue; }
+/* 🔴 [2026-09-16 메인] **서버 정본을 «파일 이름»으로 찾으면 오늘 세 번 틀렸다.**
+   ·E6(감사): «이름만 맞는 파일이 있어서» 가짜 초록 — `ops-center.ts` 는 실제로 `/api/ops-audit` 를 연다
+   ·여기 둘: «이름이 안 맞아서» 가짜 WARN — `/api/account-styles` 를 여는 파일은 `style-reference.ts` 다
+   ⇒ **경로가 진짜 계약이다.** 이름 붙은 파일이 없으면 `config.path` 로 찾는다. */
+const FN_FILES = PRODUCT.filter((p) => p.startsWith("netlify/functions/"));
+const ownerOf = (owner, needle) => {
+  if (read(owner) || SRC.has(owner)) return owner;
+  const api = String(needle).match(/[/]api[/][a-z0-9-]+/);
+  if (!api) return null;
+  return FN_FILES.find((f) => { const t = SRC.get(f) || ""; return t.includes("export const config") && t.includes(api[0]); }) || null;
+};
+for (const [label, needle, owner0, harm, needApp] of SURFACES) {
+  const owner = ownerOf(owner0, needle);
+  if (!owner) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner0} 를 못 읽었다 — config.path 로도 못 찾았다(검사를 고쳐라)`); continue; }
   const hits = screenCalls(needle);
   const apps = APPS(hits);
   const ok = needApp ? apps.length > 0 : hits.length > 0;
