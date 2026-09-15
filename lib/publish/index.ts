@@ -25,7 +25,7 @@ import { publishToBlogger } from "./blogger";
 import { publishToWordpress } from "./wordpress";
 import { publishYoutubeShorts } from "./youtube";
 import { publishReels } from "./instagram";
-import { publishThreadsVideo } from "./threads";
+import { publishThreadsText, publishThreadsVideo } from "./threads";
 import { enqueueJob as enqueueRunnerJob, fleetState, publishJobKindOf, type RunnerJobKind, type RunnerPublishPayload } from "../runner-jobs";
 
 export * from "./contract";
@@ -45,13 +45,13 @@ const BLOCKED_ACCOUNT: ReadonlySet<string> = new Set(["suspended", "disconnected
 
 /** pieces + piece_assets → PublishPiece. B 가 행을 다시 짜지 않도록 B2 가 한 벌만 만든다. */
 export async function loadPublishPiece(tid: number, pieceId: number): Promise<PublishPiece | null> {
-  const [p] = await q(sql`SELECT id, tenant_id, channel, account_id, slot_id, title, body, blocks, meta, status, scheduled_for, external_url, channel_ref
+  const [p] = await q(sql`SELECT id, tenant_id, channel, kind, account_id, slot_id, title, body, blocks, meta, status, scheduled_for, external_url, channel_ref
     FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
   if (!p) return null;
   const meta = (p.meta && typeof p.meta === "object" ? p.meta : {}) as Record<string, unknown>;
   const assets = await q(sql`SELECT caption, meta, sort FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'image' ORDER BY sort`);
   const out: PublishPiece = {
-    id: n(p.id), tenantId: n(p.tenant_id), channel: String(p.channel ?? ""), accountId: n(p.account_id) || null,
+    id: n(p.id), tenantId: n(p.tenant_id), channel: String(p.channel ?? ""), kind: String(p.kind ?? "post"), accountId: n(p.account_id) || null,
     title: String(p.title ?? ""), bodyHtml: String(p.body ?? ""),
     blocks: normalizeBlocks(p.blocks) as Block[],
     images: assets.map((a) => {
@@ -181,7 +181,11 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
     : piece.channel === "wordpress" ? await publishToWordpress(prepared, account)
       : piece.channel === "youtube_shorts" ? await publishYoutubeShorts(prepared, account)
         : piece.channel === "reels" ? await publishReels(prepared, account)
-          : piece.channel === "threads" ? await publishThreadsVideo(prepared, account)
+          /* 🔴 스레드는 **글도 영상도** 되는 채널이다(설계 §2.1 글 P2 + §2.2 영상 P2).
+             종전엔 무조건 영상으로 보내서, 스레드로 예약한 **글은 «올릴 영상이 아직 없어요»로 영원히 막혔다**.
+             채널이 아니라 `piece.kind` 로 가른다 — 채널만 보고는 못 가르는 자리다(P1R7 §2.3). */
+          : piece.channel === "threads"
+            ? (prepared.kind === "video" ? await publishThreadsVideo(prepared, account) : await publishThreadsText(prepared, account))
             : { ok: false as const, reason: "unsupported_channel" as const, retriable: false, error: "아직 이 채널로는 발행할 수 없어요." };
 
   if (!r.ok) {

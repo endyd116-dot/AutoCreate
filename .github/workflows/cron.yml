@@ -1,0 +1,61 @@
+# AutoCreate — 크론 보조(DESIGN §3.1 «Netlify Scheduled + GitHub Actions 보조»)
+#
+# 왜 있나: 우산 2개(`cron-tick-5m`·`cron-tick-hourly`)는 Netlify Scheduled Functions 가 깨운다.
+#   그 스케줄러가 멈추면 **아무도 대신 깨우지 않는다** — 발행·청구·체험 종료가 조용히 선다(조용한 0건 = 이 프로젝트가 반복해 당한 사고).
+#   이 워크플로가 같은 일(`/api/cron-run`)을 **한 벌 더** 한다. 스텝은 전부 멱등이라 두 번 깨워도 두 번 하지 않는다
+#   (produce = produceHour 시 판정 + 자리당 piece 1개 · publisher = due 조회 + finalizePublish 멱등 · billing = next_billing_at).
+#
+# 규율
+#   · 경로는 `/api/cron-run`(사람·검증용 창구) — scheduled 함수에 HTTP 로 들어가면 프로덕션에서 막힌다(PITFALLS AC-12①).
+#   · 시크릿은 **이름만** 여기 적는다: `CRON_SECRET`(= Netlify env 와 같은 값) · `SITE_URL`(https://autocreate-endyd.netlify.app). 등록은 메인.
+#   · `concurrency` 로 같은 우산이 겹쳐 돌지 않게 한다(앞 실행이 늦으면 이번 것은 취소).
+#   · 실패 알림은 GitHub 기본(워크플로 실패 메일) — 별도 알림 배선 없음.
+#   · GitHub 의 스케줄은 **지연될 수 있다**(혼잡 시 수 분~십수 분). 그래서 이것은 «보조»다 — 정시성은 Netlify 가 맡는다.
+name: cron-backup
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 5m 우산 보조(UTC · 업무 시각 판정은 스텝 안에서 KST)
+    - cron: "17 * * * *"     # hourly 우산 보조(정시를 피해 17분 — Netlify 정시 실행과 겹치지 않게)
+  workflow_dispatch:
+    inputs:
+      every:
+        description: "우산 고르기"
+        required: true
+        default: hourly
+        type: choice
+        options: [5m, hourly]
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: cron-backup-${{ github.event.schedule || inputs.every }}
+      cancel-in-progress: false
+    steps:
+      - name: 우산 고르기
+        id: pick
+        run: |
+          if [ -n "${{ inputs.every }}" ]; then EVERY="${{ inputs.every }}";
+          elif [ "${{ github.event.schedule }}" = "17 * * * *" ]; then EVERY="hourly";
+          else EVERY="5m"; fi
+          echo "every=$EVERY" >> "$GITHUB_OUTPUT"
+      - name: cron-run 호출
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SITE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::SITE_URL / CRON_SECRET 시크릿이 없습니다 — 등록 전까지 보조 크론은 돌지 않습니다."; exit 1
+          fi
+          EVERY="${{ steps.pick.outputs.every }}"
+          echo "· every=$EVERY"
+          CODE=$(curl -sS -o /tmp/out.json -w '%{http_code}' --max-time 120 \
+            -X POST "${SITE_URL%/}/api/cron-run?every=$EVERY" -H "x-cron-secret: $CRON_SECRET")
+          echo "· http $CODE"; head -c 2000 /tmp/out.json || true; echo
+          # 200 이 아니면 실패로 남긴다(«돌았는데 아무 일도 안 했다»를 초록으로 덮지 않는다)
+          [ "$CODE" = "200" ]
