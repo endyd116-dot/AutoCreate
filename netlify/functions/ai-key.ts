@@ -19,6 +19,7 @@ import { clientIp } from "../../lib/auth";
 import { q } from "../../lib/accounts";
 import { credsEncConfigured } from "../../lib/creds-crypto";
 import { listByoKeys, saveByoKey, deleteByoKey } from "../../lib/ai-key-byo";
+import { featureOn } from "../../lib/ops/features";   // [2026-09-16] 🔴 지금은 안 판다 — 입구만 닫는다
 
 export const config = { path: ["/api/ai-keys", "/api/ai-key-add", "/api/ai-key-delete", "/api/ai-key-fallback"] };
 const n = (v: unknown) => Number(v || 0);
@@ -29,13 +30,19 @@ export default async (req: Request): Promise<Response> => {
   const auth = requireUser(req); if (!auth.ok) return auth.res;
   const tid = auth.tid; const uid = Number(auth.user.uid);
   try {
+    /* 🔴 [2026-09-16 · 사장님 판단 «수익 관점에서 BYO 안 하는 게 좋겠다»] **입구만 닫는다.**
+       서버·표·하니스는 그대로 살아 있고 운영센터에서 켜면 그 자리에서 이어진다(CLAUDE §8 «키 꽂으면 즉시»).
+       🔴 꺼져 있어도 **500·404 가 아니다** — 화면이 «없는 메뉴»로 조용히 감출 수 있게 `enabled:false` 를 정직하게 준다. */
+    const byoOn = await featureOn("byoAiKey");
     if (path.endsWith("/ai-keys")) {
       if (req.method !== "GET") return json({ ok: false, error: "method" }, 405);
+      if (!byoOn) return json({ ok: true, enabled: false, keys: [], fallback: false, configured: false });
       const [t] = await q(sql`SELECT ai_key_fallback FROM tenants WHERE id = ${tid}`);
       /* 🔴 `configured:false` = 우리가 **안전하게 보관할 수 없는 상태**(보관 열쇠 미설정). 그때는 꽂으라고 하면 안 된다. */
-      return json({ ok: true, keys: await listByoKeys(tid), fallback: t?.ai_key_fallback === true, configured: credsEncConfigured() });
+      return json({ ok: true, enabled: true, keys: await listByoKeys(tid), fallback: t?.ai_key_fallback === true, configured: credsEncConfigured() });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
+    if (!byoOn) return json({ ok: false, step: "disabled", enabled: false, error: "지금은 내 키를 꽂는 기능을 쓰지 않아요." }, 503);
     const w = await requireWritable(tid); if (!w.ok) return w.res;
 
     if (path.endsWith("/ai-key-add")) {
