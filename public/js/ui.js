@@ -175,7 +175,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.15";   // 배포 묶음마다 메인이 올린다(화면에 보이는 유일한 판 번호)
+  UI.APP_VERSION = "2026.09.15";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* ── 포맷 ── */

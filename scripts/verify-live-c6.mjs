@@ -9,6 +9,9 @@ const EMAIL = process.env.TEST_EMAIL || `c+c6-${STAMP}@autocreate.test`;   // �
 const PASSWORD = "Cp1Verify2026x", PASSWORD2 = "Cp1Verify2026y";
 const CRON_SECRET = process.env.CRON_SECRET || "";
 const results = []; const t0 = Date.now();
+/* [P1R7 §3.5] teardown — 이 하니스는 실행마다 **새 테넌트**를 만든다. 안 치우면 라이브에 쌓인다(2026-09-15 대청소 88집의 일부가 이것이었다).
+   보존 id(3·13·109·116·198)와 «살아 있는 구독»은 `_teardown.mjs` 가 먼저 거부한다 — 여기서는 «이번에 만든 집»만 넘긴다. */
+const MADE_TIDS = new Set();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class Jar { constructor() { this.c = new Map(); } absorb(res) { for (const sc of (res.headers.getSetCookie?.() || [])) { const [kv] = sc.split(";"); const i = kv.indexOf("="); const k = kv.slice(0, i).trim(), v = kv.slice(i + 1).trim(); if (/Max-Age=0/i.test(sc)) this.c.delete(k); else this.c.set(k, v); } } header() { return [...this.c].map(([k, v]) => `${k}=${v}`).join("; "); } }
@@ -88,10 +91,25 @@ async function main() {
   const other = new Jar(); await call(other, "/api/auth-login", { body: { email: "c+p1b@autocreate.test", password: "Cp1Verify2026x" } });
   const idor = slots[0] ? await call(other, "/api/slots-skip", { body: { id: slots[0].id } }) : { status: 404 };
   rec("라이브 IDOR(타 테넌트 슬롯 skip) 404", idor.status === 404, `${idor.status}`);
-  console.log(`\n테스트 테넌트: ${EMAIL} (tenant ${tenantId}) — 정리는 운영센터에서`);
-  finish();
+  if (tenantId) MADE_TIDS.add(Number(tenantId));
+  await finish();
 }
-function finish() {
+async function teardown() {
+  if (!MADE_TIDS.size) return;
+  const url = process.env.NETLIFY_DATABASE_URL_UNPOOLED || process.env.NETLIFY_DATABASE_URL;
+  if (!url) return rec("정리(teardown)", false, `DB 주소 없음 — 테스트 테넌트 ${[...MADE_TIDS].join(",")} 가 남았다`);
+  let s = null;
+  try {
+    const { default: postgres } = await import("postgres");
+    s = postgres(url, { ssl: "require", max: 1 });
+    const { teardownRun } = await import("./_teardown.mjs");
+    const r = await teardownRun(s, { tenants: [...MADE_TIDS], label: "C6" });
+    rec("정리(teardown)", !r.failed, r.text);
+  } catch (e) { rec("정리(teardown)", false, String(e?.message ?? e).slice(0, 160)); }
+  finally { if (s) await s.end().catch(() => {}); }
+}
+async function finish() {
+  await teardown();   // 🔴 결과 출력 전에(출력 뒤엔 process.exit 이라 그 뒤 코드는 돌지 않는다)
   const fails = results.filter((r) => r.ok === "FAIL").length, warns = results.filter((r) => r.ok === "WARN").length;
   const w = (x, n) => String(x ?? "").slice(0, n).padEnd(n);
   console.log(`\nC6 라이브 · ${BASE} · ${new Date().toISOString()}\n${"─".repeat(130)}`);
@@ -100,4 +118,4 @@ function finish() {
   mkdirSync("_verify", { recursive: true }); const out = `_verify/live-c6-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
   writeFileSync(out, JSON.stringify({ base: BASE, at: new Date().toISOString(), email: EMAIL, results }, null, 2)); console.log(`→ ${out}`); process.exit(fails ? 1 : 0);
 }
-main().catch((e) => { console.error(e); rec("예외", false, String(e?.stack || e).slice(0, 200)); finish(); });
+main().catch(async (e) => { console.error(e); rec("예외", false, String(e?.stack || e).slice(0, 200)); await finish(); });

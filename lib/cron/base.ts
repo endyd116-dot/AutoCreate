@@ -42,6 +42,8 @@ export interface CronStep {
   /** 계약 §1 의 step 이름 그대로(`slots.roll` 등). 감사 action 은 `cron_` + 점→밑줄(`cron_slots_roll`). */
   key: string;
   every: Every;
+  /** 기본 "tenant"(활성 테넌트를 한 바퀴). `GlobalStep` 은 "global". */
+  scope?: "tenant";
   /**
    * 자동 편성(`settings.autoSchedule`)이 꺼져 있으면 건너뛰나.
    *   🔴 true = 편성표가 만드는 것(roll·assign·produce·review_deadline) — 꺼 뒀는데 글이 생기면 그것이 AC-2 사고다.
@@ -50,6 +52,22 @@ export interface CronStep {
   needsAutoSchedule: boolean;
   run(ctx: TenantCtx): Promise<StepOutcome>;
 }
+
+/**
+ * 테넌트 루프 **밖**에서 한 틱에 한 번 도는 스텝(P1R7 §3.1 `tenant.purge`).
+ *   왜 필요한가: 우산의 테넌트 목록은 **활성(trial|active)** 뿐이다. 탈퇴한 집(readonly)·이미 지워질 집은 그 목록에 없어서
+ *   테넌트 스텝으로 만들면 «등록은 됐는데 아무도 안 도는» 스텝이 된다(조용한 누락 · PITFALLS #7).
+ *   숫자 계약(changed/skipped/detail)은 테넌트 스텝과 같다 — 우산이 같은 모양으로 보고한다(tenants 는 1로 센다).
+ */
+export interface GlobalStepCtx { now: Date; deadline: number; manual: boolean }
+export interface GlobalStep {
+  key: string;
+  every: Every;
+  scope: "global";
+  run(ctx: GlobalStepCtx): Promise<StepOutcome>;
+}
+export type AnyStep = CronStep | GlobalStep;
+export const isGlobalStep = (s: AnyStep): s is GlobalStep => (s as GlobalStep).scope === "global";
 
 /* ───────── KST 소도구 ───────── */
 const KST_MS = 9 * 3600 * 1000;

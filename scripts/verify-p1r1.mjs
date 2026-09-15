@@ -23,6 +23,19 @@ const IS_LIVE = /^https:/.test(BASE);
 const results = [];              // { step, ok, note, evidence }
 const bodies = [];               // 모든 응답 본문(평문 검사용)
 const t0 = Date.now();
+/* [P1R7 §3.5] teardown — 하니스는 스스로 치운다. 이 하니스의 테넌트는 **보존 4집**(C검증)이라 집은 남기고 «이번 실행이 만든 행»만 지운다. */
+const SINCE = new Date(); const MADE_TIDS = new Set();
+let tdSql = null;
+async function teardownDb() { if (tdSql) return tdSql; const url = process.env.NETLIFY_DATABASE_URL_UNPOOLED || process.env.NETLIFY_DATABASE_URL; if (!url) return null; const { default: postgres } = await import("postgres"); tdSql = postgres(url, { ssl: "require", max: 1 }); return tdSql; }
+async function teardown() {
+  try {
+    const s = await teardownDb(); if (!s) return rec("정리(teardown)", false, "DB 주소 없음 — 치우지 못했다");
+    const { teardownRun } = await import("./_teardown.mjs");
+    const r = await teardownRun(s, { tenants: [...MADE_TIDS], since: SINCE, label: "P1R1" });
+    rec("정리(teardown)", !r.failed, r.text);
+    await s.end().catch(() => {});
+  } catch (e) { rec("정리(teardown)", false, String(e?.message ?? e).slice(0, 160)); }
+}
 function rec(step, ok, note = "", evidence = undefined) { results.push({ step, ok: ok ? "PASS" : "FAIL", note, evidence }); return ok; }
 function warn(step, note, evidence) { results.push({ step, ok: "WARN", note, evidence }); }
 
@@ -126,8 +139,9 @@ async function grantCoins(tenantKey, coins) {
 async function main() {
   const jar = new Jar(), jar2 = new Jar();
   const me = await signIn(jar, EMAIL);
-  if (!me?.ok) return finish();
+  if (!me?.ok) return await finish();
   const tenantKey = me.tenant?.key;
+  if (me.tenant?.id) MADE_TIDS.add(Number(me.tenant.id));
 
   // 코인 30 (잔액이 이미 ≥30 이면 생략)
   let bal = await call(jar, "/api/coins-balance");
@@ -182,13 +196,13 @@ async function main() {
   rec("검색량 숫자 존재", withVol.length > 0, `volume 있는 소재 ${withVol.length}/${topics.length}(키 없으면 graceful — 라이브에서 0이면 결함)`);
   rec("앵글 금칙(최고·1위)", !topics.some((t) => /최고|1위|100%/.test(`${t.title} ${t.angle || ""}`)), "");
   const topic = withVol[0] || topics[0];
-  if (!topic) return finish();
+  if (!topic) return await finish();
 
   // 디렉터
   const dp = await call(jar, "/api/director-propose", { body: { topicId: topic.id } });
   rec("director-propose", dp.json?.ok === true, `${dp.status} ${dp.json?.step || ""} ${dp.json?.error || ""}`, `brief id=${dp.json?.brief?.id}`);
   const brief = dp.json?.brief;
-  if (!brief) return finish();
+  if (!brief) return await finish();
   checkShape("Brief 모양", brief, S.brief);
   if (brief.pieces[0]) { checkShape("PieceSpec 모양", brief.pieces[0], S.pieceSpec); checkShape("PieceSpec.images", brief.pieces[0].images, { count: "number", style: "string", heroNeeded: "boolean" }); checkShape("PieceSpec.schedule", brief.pieces[0].schedule, { at: "string", slotReason: "string" }); checkShape("PieceSpec.monetize", brief.pieces[0].monetize, { affiliate: "object|null", adDisclosure: "boolean" }); }
   rec("계정 배정", brief.pieces.length >= 1 && brief.pieces.every((p) => p.accountId && p.accountHandle), brief.pieces.map((p) => `${p.channel}@${p.accountHandle}`).join(" · "));
@@ -200,7 +214,7 @@ async function main() {
   const b0 = (await call(jar, "/api/coins-balance")).json;
   const dc = await call(jar, "/api/director-confirm", { body: { briefId: brief.id } });
   rec("director-confirm", [200, 202].includes(dc.status) && dc.json?.ok === true, `${dc.status} ${dc.json?.step || ""} ${dc.json?.error || ""}`, `pieceIds ${JSON.stringify(dc.json?.pieceIds)}`);
-  if (!dc.json?.ok) return finish();
+  if (!dc.json?.ok) return await finish();
   checkShape("confirm 모양", dc.json, S.confirm);
   const b1 = (await call(jar, "/api/coins-balance")).json;
   rec("코인 차감 = coinsCharged", b0.balance - b1.balance === dc.json.coinsCharged && dc.json.coinsCharged === brief.coinCost, `${b0.balance}→${b1.balance} charged ${dc.json.coinsCharged} (brief ${brief.coinCost})`);
@@ -237,7 +251,7 @@ async function main() {
     for (const f of mine.filter((p) => p.status === "failed")) { const d = await call(jar, "/api/pieces-get", { query: { id: f.id } }); warn(`piece ${f.id} failed`, String(d.json?.piece?.meta?.failReason || "").slice(0, 200)); }
     piece = review[0] || mine[0];
   }
-  if (!piece) return finish();
+  if (!piece) return await finish();
 
   // 상세 · 게이트 · 고지 · 이미지
   const pg = await call(jar, "/api/pieces-get", { query: { id: piece.id } });
@@ -331,10 +345,11 @@ async function main() {
   const x3 = await call(jar2, "/api/pieces-approve", { body: { id: piece.id } });
   rec("IDOR pieces-approve 타 테넌트", x3.json?.ok !== true, `${x3.status}`);
 
-  finish();
+  await finish();
 }
 
-function finish() {
+async function finish() {
+  await teardown();   // 🔴 결과를 찍기 **전에** 치운다(출력 뒤에 process.exit 이 있어 그 뒤 코드는 실행되지 않는다)
   // 자격 평문 0 — 모든 응답 본문에서 비밀번호 값·password 키(요청 아님) 검색
   const leak = bodies.filter((b) => b.text.includes(CRED_PASSWORD));
   rec("자격 평문 0(응답 본문)", leak.length === 0, leak.length ? leak.map((b) => b.path).join(",") : `${bodies.length}개 응답 검사`);
@@ -352,4 +367,4 @@ function finish() {
   process.exit(fails ? 1 : 0);
 }
 
-main().catch((e) => { console.error(e); rec("하니스 예외", false, String(e?.stack || e)); finish(); });
+main().catch(async (e) => { console.error(e); rec("하니스 예외", false, String(e?.stack || e)); await finish(); });   // 예외에도 정리(finally 규율)

@@ -13,6 +13,20 @@ const TARGETS = [
   { dir: "public/ops", suffix: "AutoCreate 운영센터", scripts: ["/js/ui.js?v=8", "/js/ops.js?v=2", "/js/mock-ops.js?v=1"], back: ["tenant.html", "ticket.html", "cs-faq.html", "password.html", "company.html"], fallback: "/ops/", fallbacks: { "company.html": "/ops/plans.html", "tenant.html": "/ops/tenants.html", "ticket.html": "/ops/cs.html", "cs-faq.html": "/ops/cs.html" }, manifest: false, robots: true, titleInBar: true, bodyClass: "ops" }, // 운영센터는 제목 유지(§13.0b «운영 콘솔 예외» · 밀도)
 ];
 
+/* [R7 §4.4] 앱 판 번호 — 사람이 올리는 걸 잊는다. **빌드가 오늘(KST)을 박는다**(설정 «앱 정보»에 보이는 그 값).
+   ui.js 의 상수는 폴백이다(빌드를 안 돌린 사본에서도 칸이 비지 않게) · 날짜가 같으면 파일을 건드리지 않는다(쓸데없는 diff 금지). */
+{
+  const ver = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }).split("-").join(".");
+  const p = "public/js/ui.js"; const src = readFileSync(p, "utf8");
+  const i = src.indexOf("UI.APP_VERSION = \"");
+  if (i < 0) console.warn("[build] ui.js 에 UI.APP_VERSION 이 없다 — 판 번호를 못 박는다");
+  else {
+    const s = i + "UI.APP_VERSION = \"".length; const e = src.indexOf("\"", s);
+    const cur = src.slice(s, e);
+    if (cur !== ver) { writeFileSync(p, src.slice(0, s) + ver + src.slice(e), "utf8"); console.log(`public/js/ui.js: 판 번호 ${cur} → ${ver}`); }
+  }
+}
+
 for (const t of TARGETS) {
   const src = readFileSync(`${t.dir}/_tpl.txt`, "utf8");
   const blocks = src.split(/^=== /m).slice(1); let n = 0;

@@ -25,7 +25,7 @@ import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
 import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
-import { guardSlot, type PieceOrigin } from "./slot-gate";
+import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
 import { checkAiCostCap, requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
 import { findBannedCategory } from "./banned-categories";
@@ -264,7 +264,12 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
 
 /* ───────── confirm ───────── */
 export type ConfirmResult =
-  | { ok: true; briefId: number; pieceIds: number[]; coinsCharged: number; coinsLeft: number }
+  | { ok: true; briefId: number; pieceIds: number[]; coinsCharged: number; coinsLeft: number;
+      /**
+       * [R7 §1.6] 사람이 «만들기»를 눌러 만든 글이 **오늘 이미 잡혀 있던 편성 자리에 들어갔을 때**만 실린다.
+       *   화면은 이걸 보고 «오늘 자리에 넣었어요 — 19:00 에 나가요» 라고 말한다(없으면 종전대로 «새로 잡았어요»).
+       */
+      usedTodaySlot?: { slotId: number; channel: string; publishAt: string; prevStatus: string } }
   | { ok: false; step: "coin_short"; error: string; need: number; have: number }
   | { ok: false; step: string; error: string };
 
@@ -392,6 +397,32 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
     const [rs] = await q(sql`SELECT status, channel FROM slots WHERE tenant_id = ${tid} AND id = ${reuseSlotId}`);
     if (rs) { reuseSlotPrevStatus = String(rs.status); reuseChannel = String(rs.channel); }
   }
+
+  /* ══════════ [R7 §1.6] 수동 «만들기»는 **그날 자동 자리를 쓴다** ══════════
+     종전엔 사람 경로가 늘 **새 자리를 만들었다**. 자동 편성이 잡아 둔 오늘 자리는 그대로 남아,
+     같은 채널에 **하루 두 편**이 나갔다 — 계정 캐던스(daily_cap)를 사람 손으로 우회하는 길이었고,
+     사장님 눈엔 «한 번 눌렀는데 두 개가 올라간» 사고로 보인다.
+     🔴 자동 경로(origin auto)는 손대지 않는다 — 크론은 `opts.slotId` 로 자리를 못 박아 부른다.
+     🔴 코인은 **재차감 0** — 자리를 바꿔 쓰는 것뿐이고 글 1편 값은 아래에서 한 번만 나간다.
+        오히려 그 자리를 나중에 크론이 또 만들 일이 없어져 **한 편 값을 아낀다**.
+     고르는 규칙: 오늘(KST) · 같은 채널 · 아직 글이 안 붙은 자리(`OPEN_SLOT_STATUS` — 슬롯 게이트와 **같은 어휘**) ·
+     같은 계정 자리를 먼저, 그다음 이른 시각 순. */
+  let autoSlot: { id: number; status: string; publishAt: Date | null } | null = null;
+  if (origin === "manual" && !reuseSlotId) {
+    const wantAcc = specs[0].accountId ?? null;
+    const [as0] = await q(sql`SELECT id, status, publish_at FROM slots
+      WHERE tenant_id = ${tid} AND channel = ${specs[0].channel} AND piece_id IS NULL
+        AND slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+        AND status IN (${sql.join([...OPEN_SLOT_STATUS].map((x) => sql`${x}`), sql`, `)})
+      ORDER BY (account_id IS DISTINCT FROM ${wantAcc}), publish_at NULLS LAST, id
+      LIMIT 1`);
+    if (as0) autoSlot = { id: n(as0.id), status: String(as0.status), publishAt: utcDate(as0.publish_at) };
+  }
+  /* 이 아래부터는 «크론이 못 박아 준 자리»와 «오늘 찾아낸 자리»를 한 벌로 다룬다(뒤 로직을 두 벌로 만들지 않는다). */
+  const takeSlotId = reuseSlotId ?? (autoSlot ? autoSlot.id : null);
+  const takeChannel = reuseSlotId ? reuseChannel : specs[0].channel;
+  const takePrevStatus = reuseSlotId ? reuseSlotPrevStatus : (autoSlot ? autoSlot.status : "topic_assigned");
+  let usedTodaySlot: { slotId: number; channel: string; publishAt: string; prevStatus: string } | undefined;
   const created: { pieceId: number; slotId: number; isVideo?: boolean; reused?: { prevStatus: string } }[] = [];
   let charged = 0;
   const rollback = async (reason: string) => {
@@ -418,13 +449,25 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       /* 편성 자리를 빌려 쓰는가(크론) — 아니면 지금처럼 새 자리를 만든다(사람이 «만들기»로 끼워 넣는 글).
          빌려 쓰는 자리는 **채널이 같은 첫 spec 하나**에만 준다(한 자리에 두 글이 들어갈 수 없다). */
       let slotId: number, reused: { prevStatus: string } | undefined;
-      if (reuseSlotId && !usedReuseSlot && s.channel === reuseChannel) {
+      if (takeSlotId && !usedReuseSlot && s.channel === takeChannel) {
         usedReuseSlot = true;
+        /* [R7 §1.6] 나가는 시각 — 자리의 시각이 **아직 안 지났으면 그 시각**으로 간다(자동 편성이 고른 좋은 시간을 버리지 않는다).
+           이미 지난 자리면(09시 자리인데 22시에 눌렀다) 이 글이 원래 잡았던 시각을 쓴다 — 과거로 예약하면 누르자마자 나가 버린다.
+           두 행(piece.scheduled_for · slot.publish_at)이 **같은 값**을 갖게 아래에서 둘 다 쓴다(값이 갈라지면 편성표와 실제가 어긋난다). */
+        const slotAt = autoSlot?.publishAt && autoSlot.publishAt.getTime() > Date.now() ? autoSlot.publishAt : new Date(s.schedule.at);
         const [sl] = await q(sql`UPDATE slots SET piece_id = ${pieceId}, brief_id = ${briefId}, topic_id = ${topicId}, account_id = ${s.accountId},
-            status = ${"producing"}, note = NULL, updated_at = NOW()
-          WHERE tenant_id = ${tid} AND id = ${reuseSlotId} AND piece_id IS NULL RETURNING id`);
+            status = ${"producing"}, note = NULL, publish_at = ${slotAt.toISOString()}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW()
+          WHERE tenant_id = ${tid} AND id = ${takeSlotId} AND piece_id IS NULL RETURNING id`);
         if (!sl) { await rollback("slot_taken"); return { ok: false, step: "slot_gate", error: "편성 자리를 그새 다른 글이 차지했어요." }; }
-        slotId = reuseSlotId; reused = { prevStatus: reuseSlotPrevStatus };
+        slotId = takeSlotId; reused = { prevStatus: takePrevStatus };
+        if (autoSlot) {
+          await q(sql`UPDATE pieces SET scheduled_for = ${slotAt.toISOString()}::timestamptz AT TIME ZONE 'UTC' WHERE id = ${pieceId}`);
+          usedTodaySlot = { slotId, channel: s.channel, publishAt: slotAt.toISOString(), prevStatus: takePrevStatus };
+          /* 감사 1행 — 🔴 **await**(응답을 돌려주면 인보케이션이 끝난다 · `void writeAudit` 금지).
+             «왜 새 자리가 안 생겼나»를 나중에 설명할 수 있어야 한다(편성표에서 자리 수가 안 늘어난 이유). */
+          await writeAudit({ tenantId: tid, action: "manual_used_auto_slot", actorType: "user", actorId, target: `piece:${pieceId}`,
+            detail: { slotId, briefId, channel: s.channel, prevStatus: takePrevStatus, publishAt: slotAt.toISOString(), accountId: s.accountId ?? null }, riskLevel: "low" });
+        }
       } else {
         const slotDate = kstDateStr(new Date(s.schedule.at));
         const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin)
@@ -452,7 +495,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   }
   await Promise.all(created.map((c) => (c.isVideo ? triggerVideo(c.pieceId, tid) : triggerGenerate(c.pieceId, tid))));   // ★C4 fix · [P1R5] 영상은 generate-video-background: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답) · piece 여럿이면 동시에
   const bal = await balance(tid);
-  return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance };
+  return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance, ...(usedTodaySlot ? { usedTodaySlot } : {}) };
 }
 
 /**
