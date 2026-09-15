@@ -24,7 +24,7 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { json } from "../response";
 import { scheduleSettingsOf } from "../slots";
-import type { CronStep, Every, TenantCtx } from "./base";
+import { isGlobalStep, type AnyStep, type Every, type TenantCtx } from "./base";
 import { rollStep } from "./roll";
 import { assignTopicsStep } from "./assign-topics";
 import { produceStep } from "./produce";
@@ -39,6 +39,7 @@ import { trialExpireStep } from "./trial-expire";
 import { csAutoTicketStep } from "./cs-auto-ticket";
 import { runnerCanaryStep } from "./runner-canary";
 import { aiModelWatchStep } from "./ai-model-watch";
+import { tenantPurgeStep } from "./tenant-purge";
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -50,7 +51,7 @@ const TICK_BUDGET_MS = Math.max(3_000, Math.min(600_000, Number(process.env.CRON
 const MIN_STEP_MS = 1_500;
 
 /** 🔴 스텝 등록기 — 계약 §1 표 그대로. 순서 = 의존 순서(roll → assign → produce → review → learn). */
-export const STEPS: CronStep[] = [
+export const STEPS: AnyStep[] = [
   rollStep,            // hourly · 슬롯 생성(멱등)
   assignTopicsStep,    // hourly · 소재 배정
   produceStep,         // hourly(produceHour 시각에만) · D-3 제작
@@ -62,6 +63,7 @@ export const STEPS: CronStep[] = [
   csAutoTicketStep,    // hourly · 러너 실패·결제 실패·계정 정지 3회 → 시스템 티켓(P1R4 §2.1)
   runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
   aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
+  tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
   publisherStep,       // 5m · due 발행
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
   reapStep,            // 5m · 러너 잡 타임아웃 회수
@@ -168,6 +170,27 @@ export async function runTick(every: Every, req: Request, opts: RunTickOpts = {}
     const budgetSkipped: number[] = [];
     const autoOff: number[] = [];
     const details: Record<string, unknown>[] = [];
+
+    /* global 스텝 — 테넌트 루프 밖에서 한 번(탈퇴 파기처럼 «활성 테넌트 목록에 없는 집»을 도는 일).
+       숫자 계약은 같다: tenants 는 1(이 스텝 자체)로 세고 changed/skipped/detail 은 그대로 싣는다. */
+    if (isGlobalStep(step)) {
+      rep.tenants = 1;
+      try {
+        const out = await step.run({ now, deadline: stepDeadline, manual });
+        rep.changed += Math.max(0, out.changed | 0);
+        rep.skipped += Math.max(0, out.skipped | 0);
+        if (out.detail && Object.keys(out.detail).length) rep.detail = out.detail;
+      } catch (e) {
+        rep.errors++;
+        const msg = String((e as Error)?.message ?? e).slice(0, 300);
+        console.error(`[cron:${every}] step=${step.key} (global) 실패 — ${msg}`);
+        await writeAudit({ tenantId: null, action: auditAction(step.key), riskLevel: "medium", target: `cron:${step.key}`, detail: { every, error: msg } });
+      }
+      ran.push(rep);
+      console.log(`[cron:${every}] ${step.key} (global) → changed=${rep.changed} skipped=${rep.skipped} errors=${rep.errors}`);
+      if (rep.changed > 0 || rep.errors > 0) await writeAudit({ tenantId: null, action: auditAction(step.key), riskLevel: rep.errors ? "medium" : "low", target: `cron:${step.key}`, detail: { every, ...rep } });
+      continue;
+    }
 
     for (const t of ordered) {
       if (Date.now() >= stepDeadline) { budgetSkipped.push(t.tid); continue; }

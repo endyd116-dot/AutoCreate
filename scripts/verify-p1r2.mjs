@@ -17,6 +17,8 @@ const IS_LIVE = /^https:/.test(BASE);
 const EVIDENCE_URL = `${BASE.replace(/:8901$/, ":3997")}/index.html`;   // report 의 externalUrl 검증용(200 을 주는 우리 정적 서버)
 
 const results = []; const t0 = Date.now();
+/* [P1R7 §3.5] teardown — 보존 테넌트(C검증)라 집은 남기고 이번 실행 산출물만 정리한다. */
+const SINCE = new Date();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -58,10 +60,10 @@ async function signIn(jar, email) {
 
 /* ══════════════════════ 메인 ══════════════════════ */
 async function main() {
-  if (!CRON_SECRET) return rec("CRON_SECRET", false, ".env 에 없음 — cron-run 을 못 부른다"), finish();
+  if (!CRON_SECRET) return rec("CRON_SECRET", false, ".env 에 없음 — cron-run 을 못 부른다"), await finish();
   const jar = new Jar(), jar2 = new Jar();
-  const me = await signIn(jar, EMAIL); if (!me?.ok) return finish();
-  const me2 = await signIn(jar2, EMAIL2); if (!me2?.ok) return finish();
+  const me = await signIn(jar, EMAIL); if (!me?.ok) return await finish();
+  const me2 = await signIn(jar2, EMAIL2); if (!me2?.ok) return await finish();
   const s = await db();
   const [t1] = await s`SELECT id FROM tenants WHERE key = ${me.tenant.key}`; const [t2] = await s`SELECT id FROM tenants WHERE key = ${me2.tenant.key}`;
   const TID = Number(t1.id), TID2 = Number(t2.id); ALLOWED_TIDS.add(TID); ALLOWED_TIDS.add(TID2);
@@ -538,10 +540,11 @@ async function main() {
     rec("화면 toLocale* (UI.timeKST/dateKST·Asia/Seoul 외) 0건", lines.length === 0, lines.slice(0, 5).join(" | "));
   }
 
-  finish();
+  await finish();
 }
 
-function finish() {
+async function finish() {
+  await teardown();
   const fails = results.filter((r) => r.ok === "FAIL").length, warns = results.filter((r) => r.ok === "WARN").length;
   const w = (x, n) => String(x ?? "").slice(0, n).padEnd(n);
   console.log(`\nP1R2 C 하니스 · ${BASE} · ${new Date().toISOString()}\n${"─".repeat(130)}`);
@@ -554,4 +557,12 @@ function finish() {
   if (sql) sql.end().catch(() => {});
   process.exit(fails ? 1 : 0);
 }
-main().catch((e) => { console.error(e); rec("하니스 예외", false, String(e?.stack || e).slice(0, 300)); finish(); });
+async function teardown() {
+  try {
+    if (!sql) return;
+    const { teardownRun } = await import("./_teardown.mjs");
+    const r = await teardownRun(sql, { tenants: [...ALLOWED_TIDS], since: SINCE, label: "P1R2" });
+    rec("정리(teardown)", !r.failed, r.text);
+  } catch (e) { rec("정리(teardown)", false, String(e?.message ?? e).slice(0, 160)); }
+}
+main().catch(async (e) => { console.error(e); rec("하니스 예외", false, String(e?.stack || e).slice(0, 300)); await finish(); });

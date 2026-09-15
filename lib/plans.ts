@@ -4,26 +4,42 @@
  */
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
+import { TEXT_CHANNELS } from "./accounts";   // 채널 정본은 lib/accounts 하나(§3.2 게이트가 목록을 두 벌 갖지 않는다 · 순환 0 — accounts 는 plans 를 보지 않는다)
 
-export interface PlanLimits { maxAccounts: number; coinsIncluded: number; runnerDevices: number; teamSeats: number; horizonDays: number; maxRules: number | null }
-export interface PlanFeatures { directorEdit: boolean; autoSchedule: boolean; failover: boolean; managedRunner: "no" | "option" | "included"; runnerRevenue: boolean; teamApproval: boolean }
+export interface PlanLimits {
+  maxAccounts: number; coinsIncluded: number; runnerDevices: number; teamSeats: number; horizonDays: number; maxRules: number | null;
+  /** [P1R7 §3.2] 이 요금제가 **새로 연결**할 수 있는 채널(설계 §12.2 · 사장님 결정 3). 없으면 코드 기본값 → 그것도 없으면 제한 없음.
+   *  🔴 소급 금지: 이미 연결한 계정에는 쓰지 않는다(`requireChannel` 은 «추가»에서만 부른다). */
+  channels?: string[];
+}
+export interface PlanFeatures {
+  directorEdit: boolean; autoSchedule: boolean; failover: boolean; managedRunner: "no" | "option" | "included"; runnerRevenue: boolean; teamApproval: boolean;
+  /** [P1R7 §3.2] 리포트 내보내기(ZIP) — 설계 §12.2 Agency 열. DB plans 행에 이 키가 없으면 **코드 기본값**으로 판정한다(없다고 다 막지 않는다). */
+  exportZip?: boolean;
+}
 export interface PlanDef { key: string; name: string; priceMonth: number; priceYear: number; limits: PlanLimits; features: PlanFeatures; public: boolean; recommended: boolean; sort: number }
 
 export const TRIAL_DAYS_DEFAULT = 14;
 
+/* [P1R7 §3.2 · 사장님 결정 3] 요금제별 채널 — 정본은 여기 한 곳.
+ *   Starter = **글 채널 전부 + 쇼츠 1개**(설계 §12.2 «Starter = 글 + 쇼츠») · Pro/Agency = 전부(목록 없음 = 제한 없음).
+ *   🔴 `channel_registry` 에 글 채널이 늘어나면 Starter 도 자동으로 늘어난다 — 목록을 두 벌 적지 않는다(`TEXT_CHANNELS` 가 정본).
+ *   🔴 체험(trial)은 제한 없음: 무엇이든 붙여 보고 고르게 한다(고르기 전에 막으면 팔 수 없다). */
+export const STARTER_CHANNELS: readonly string[] = [...TEXT_CHANNELS, "youtube_shorts"];
+
 export const PLAN_DEFAULTS: PlanDef[] = [
   { key: "trial", name: "체험", priceMonth: 0, priceYear: 0, public: false, recommended: false, sort: 0,
     limits: { maxAccounts: 5, coinsIncluded: 0, runnerDevices: 1, teamSeats: 1, horizonDays: 14, maxRules: null },
-    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "no", runnerRevenue: true, teamApproval: false } },
+    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "no", runnerRevenue: true, teamApproval: false, exportZip: false } },
   { key: "starter", name: "Starter", priceMonth: 19_000, priceYear: 190_000, public: true, recommended: false, sort: 1,
-    limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3 },
-    features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false } },
+    limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3, channels: [...STARTER_CHANNELS] },
+    features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false, exportZip: false } },
   { key: "pro", name: "Pro", priceMonth: 49_000, priceYear: 490_000, public: true, recommended: true, sort: 2,
     limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null },
-    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false } },
+    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false, exportZip: false } },
   { key: "agency", name: "Agency", priceMonth: 149_000, priceYear: 1_490_000, public: true, recommended: false, sort: 3,
     limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null },
-    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true } },
+    features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true, exportZip: true } },
 ];
 
 type PlanRow = { key: string; name: string; price_month: unknown; price_year: unknown; limits: PlanLimits; features: PlanFeatures; public: unknown; recommended: unknown; sort: unknown };
@@ -117,11 +133,55 @@ export type FeatureKey = keyof PlanFeatures;
 /** 기능형 게이트 — managedRunner 는 "no" 만 막힘(option·included 는 통과). */
 export async function requireFeature(tid: number, feature: FeatureKey): Promise<{ ok: true; planKey: string } | { ok: false; planKey: string; res: Response }> {
   const { planKey, plan } = await tenantPlan(tid);
-  const v = plan.features[feature];
+  const v = featureOf(plan, feature);   // DB 행에 키가 없으면 코드 기본값(P1R7 §3.2 · «없는 키» 를 false 로 읽어 Agency 가 막히는 사고 방지)
   const ok = feature === "managedRunner" ? v !== "no" : v === true;
   if (ok) return { ok: true, planKey };
-  const label: Record<FeatureKey, string> = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "계정 자동 승계", managedRunner: "관리형 러너", runnerRevenue: "내 PC 수익 수집", teamApproval: "팀 승인 흐름" };
-  return { ok: false, planKey, res: json({ ok: false, reason: "plan_limit", step: "plan_feature", feature, planKey, error: `${label[feature]}은(는) 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.` }, 402) };
+  const label: Record<FeatureKey, string> = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "계정 자동 승계", managedRunner: "관리형 러너", runnerRevenue: "내 PC 수익 수집", teamApproval: "팀 승인 흐름", exportZip: "리포트 내보내기" };
+  const upsell = feature === "exportZip" ? "Agency" : "Pro";   // 내보내기는 Agency 열(설계 §12.2) — «Pro 로 바꾸면» 이라고 하면 거짓말이 된다
+  return { ok: false, planKey, res: json({ ok: false, reason: "plan_limit", step: "plan_feature", feature, planKey, error: `${label[feature]}은(는) 지금 요금제에 없어요. ${upsell} 로 바꾸면 쓸 수 있어요.` }, 402) };
 }
 /** «첫 발행 전 결제수단 등록» 토글(계약 §1.5 · 플랜 features.requireCardBeforePublish · 기본 false). */
 export function requireCardBeforePublish(plan: PlanDef): boolean { return (plan.features as unknown as Record<string, unknown>).requireCardBeforePublish === true; }
+
+/* ═══════════ P1R7 §3.2 — 채널 게이트 · 내보내기 게이트(사장님 결정 3 · 설계 §12.2) ═══════════
+ *   🔴 **소급 금지**: 이미 연결한 계정은 그대로 쓴다. 이 게이트는 «새로 추가»(계정 추가·OAuth 연결)와 «새 발행»에서만 묻는다.
+ *   🔴 DB `plans` 행에 새 키(limits.channels · features.exportZip)가 아직 없어도 **코드 기본값**으로 판정한다 —
+ *      없는 키를 «false/제한 없음» 중 아무 쪽으로 읽어도 사고가 난다(Agency 가 내보내기를 못 하거나, Starter 가 전 채널을 붙이거나).
+ */
+
+/** 이 플랜이 새로 연결할 수 있는 채널 — DB 값 > 코드 기본값 > (둘 다 없으면) 제한 없음(null). */
+export function planChannelsOf(plan: PlanDef): string[] | null {
+  const fromDb = plan.limits?.channels;
+  if (Array.isArray(fromDb)) return fromDb.length ? fromDb.map(String) : null;   // 빈 배열 = «제한 없음»(전부 막는 뜻이 아니다)
+  const def = PLAN_DEFAULTS.find((p) => p.key === plan.key)?.limits.channels;
+  return Array.isArray(def) && def.length ? [...def] : null;
+}
+/** 기능 값 — DB 행에 키가 없으면 코드 기본값 · 그것도 없으면(모르는 커스텀 플랜) **막지 않는다**. */
+export function featureOf(plan: PlanDef, key: FeatureKey): boolean | string {
+  const v = (plan.features as unknown as Record<string, unknown>)[key];
+  if (v !== undefined && v !== null) return v as boolean | string;
+  const def = PLAN_DEFAULTS.find((p) => p.key === plan.key);
+  if (!def) return true;
+  const dv = (def.features as unknown as Record<string, unknown>)[key];
+  return dv === undefined || dv === null ? true : dv as boolean | string;
+}
+
+export interface ChannelGate { ok: boolean; planKey: string; allowed: string[] | null; res?: Response }
+/**
+ * requireChannel(tid, channel, label?) — 이 요금제로 **이 채널을 새로 연결/발행**해도 되나.
+ *   막히면 402 `{ reason:"plan_limit", step:"plan_channel", channel, allowed, planKey, error }`(A 의 업셀 시트가 읽는 모양 · `plan_limit` 과 같은 계열).
+ *   조회 실패는 통과(보조 게이트 · plans.ts 규율).
+ */
+export async function requireChannel(tid: number, channel: string, label?: string): Promise<ChannelGate> {
+  let planKey = "trial"; let allowed: string[] | null = null;
+  try {
+    const { planKey: k, plan } = await tenantPlan(tid);
+    planKey = k; allowed = planChannelsOf(plan);
+  } catch (e) { console.warn("[plans] requireChannel 조회 실패 — 통과", String((e as Error)?.message ?? e).slice(0, 80)); return { ok: true, planKey, allowed: null }; }
+  if (!allowed || allowed.includes(channel)) return { ok: true, planKey, allowed };
+  const upsell = planKey === "starter" ? "Pro" : planKey === "pro" ? "Agency" : null;
+  const name = label || channel;
+  return { ok: false, planKey, allowed,
+    res: json({ ok: false, reason: "plan_limit", step: "plan_channel", channel, allowed, planKey,
+      error: `이 요금제에서는 ${name}을(를) 새로 연결할 수 없어요.${upsell ? ` ${upsell} 로 바꾸면 쓸 수 있어요.` : ""} 이미 연결한 계정은 그대로 쓸 수 있어요.` }, 402) };
+}

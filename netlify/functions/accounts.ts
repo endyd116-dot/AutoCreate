@@ -1,7 +1,10 @@
 /**
  * 계정 API 묶음(계약 P1R1 §1 v1.1 · DESIGN §7):
  *   GET  /api/accounts-list                → { accounts:[AccountRow], channels:[ChannelInfo] }
- *   POST /api/accounts-add                 { channel, handle, loginId?, password?, siteUrl?, appPassword?, displayName? }
+ *   POST /api/accounts-add                 { channel, handle, loginId?, password?, siteUrl?, appPassword?, displayName?, agreeCredsStorage? }
+ *   [P1R7 §3.2] 채널 게이트 — **새로 연결할 때만** 요금제를 본다(402 `step:"plan_channel"`). 🔴 이미 연결한 계정은 소급해서 막지 않는다.
+ *   [P1R7 §3.3] 자격 보관 동의 — 아이디·비밀번호를 맡기는 채널(session·app_password)은 `agreeCredsStorage:true` 를 받아 `consents(creds_storage)` 1행.
+ *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
  *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize? }
  *   POST /api/accounts-oauth-start         { channel } → { url } | step provider_not_configured
@@ -14,7 +17,8 @@ import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
-import { planOf, checkLimit as planLimit } from "../../lib/plans";
+import { planOf, checkLimit as planLimit, requireChannel } from "../../lib/plans";
+import { recordConsents, hasConsent } from "../../lib/billing/consents";
 import { encryptObj, credsEncConfigured } from "../../lib/creds-crypto";
 import { q, listAccounts, getAccount, listChannels, connectMethodOf, isChannel, type ChannelKey } from "../../lib/accounts";
 import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUrl, exchangeCode } from "../../lib/oauth-providers";
@@ -26,6 +30,20 @@ export const config = { path: ["/api/accounts-list", "/api/accounts-add", "/api/
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 const s = (v: unknown, max = 200) => String(v ?? "").trim().slice(0, max);
+
+/** [P1R7 §3.2] 채널 게이트 — 화면이 쓰는 이름(레지스트리 label)으로 사람말을 만든다. 통과면 null. */
+async function checkChannel(tid: number, channel: string): Promise<Response | null> {
+  const label = (await listChannels()).find((c) => c.key === channel)?.label;
+  const g = await requireChannel(tid, channel, label);
+  return g.ok ? null : g.res ?? null;
+}
+/** [P1R7 §3.3] 자격 보관 동의 — true 면 기록(이미 있으면 그대로) · 키가 없으면 통과 + 감사. false 면 400. */
+async function credsConsent(tid: number, uid: number, body: Record<string, unknown>, channel: string, meta: { ip?: string | null; ua?: string | null }): Promise<Response | null> {
+  if (body.agreeCredsStorage === true) { if (!(await hasConsent(tid, "creds_storage"))) await recordConsents(tid, uid, ["creds_storage"], meta); return null; }
+  if ("agreeCredsStorage" in body) return json({ ok: false, step: "creds_consent", error: "아이디·비밀번호 보관에 동의해 주세요." }, 400);
+  await writeAudit({ tenantId: tid, action: "account_add_no_consent", actorType: "user", actorId: uid, riskLevel: "medium", detail: { channel, note: "agreeCredsStorage 키 없이 연결(옛 화면)" } });
+  return null;
+}
 
 /** 플랜 한도 검사 — P1R4 §1.4: `lib/plans.checkLimit` 한 벌(402 `plan_limit` · used/limit/planKey · A 의 업셀 시트가 이 모양을 읽는다). R1 의 로컬 403 step:limit 은 폐기. */
 async function checkLimit(tid: number): Promise<Response | null> {
@@ -106,11 +124,14 @@ export default async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
 
     if (path.endsWith("/accounts-oauth-start")) {
-      const b = await readJson<{ channel?: string }>(req);
+      const b = await readJson<{ channel?: string; agreeCredsStorage?: boolean }>(req);
       const channel = s(b.channel, 24);
       if (!isOAuthChannel(channel)) return badRequest("이 채널은 아이디로 연결해요.", "channel");
       if (!providerConfigured(channel)) return json({ ok: false, step: "provider_not_configured", error: "준비 중이에요" });
+      const gate = await checkChannel(tid, channel); if (gate) return gate;            // [P1R7 §3.2]
       const lim = await checkLimit(tid); if (lim) return lim;
+      const consent = await credsConsent(tid, auth.user.uid, b as Record<string, unknown>, channel, { ip: clientIp(req), ua: req.headers.get("user-agent") });   // [P1R7 §3.3] OAuth 토큰도 «맡기는 자격»이다
+      if (consent) return consent;
       const url = authorizeUrl(channel, signState({ tid, channel, uid: auth.user.uid }));
       if (!url) return json({ ok: false, step: "provider_not_configured", error: "준비 중이에요" });
       return json({ ok: true, url });
@@ -126,7 +147,10 @@ export default async (req: Request): Promise<Response> => {
       const method = connectMethodOf(channel);
       if (method === "oauth") return json({ ok: false, step: "oauth_required", error: "이 채널은 «연결하기» 버튼으로 로그인해 주세요." }, 400);
       if (!credsEncConfigured()) return json({ ok: false, step: "creds_key", error: "계정 자격 암호화 키가 설정되지 않았어요. 운영팀에 알려 주세요." }, 500);
+      const gate = await checkChannel(tid, channel); if (gate) return gate;            // [P1R7 §3.2] 요금제에 없는 채널 — «새로 추가»만 막는다
       const lim = await checkLimit(tid); if (lim) return lim;
+      const consent = await credsConsent(tid, auth.user.uid, b, channel, { ip: clientIp(req), ua: req.headers.get("user-agent") });   // [P1R7 §3.3]
+      if (consent) return consent;
       const displayName = s(b.displayName, 120) || null;
       const loginId = s(b.loginId, 160);
 

@@ -90,12 +90,36 @@ const UNAVAILABLE: PublishFail = {
   error: "발행 커넥터(lib/publish)가 아직 연결되지 않았어요.",
 };
 
-/** publishPiece — 크론이 부르는 **유일한** 발행 입구. */
+/**
+ * publishPiece — 크론이 부르는 **유일한** 발행 입구.
+ *   [P1R7 §3.2] 요금제 채널 게이트를 **여기서** 본다(계약 §3.2 «발행» 자리). 막히면 `not_publishable`·retriable false —
+ *   재시도해도 요금제가 바뀌기 전엔 같은 답이라 다시 두드리지 않는다. 🔴 소급 금지: 이미 연결한 계정의 글은 막지 않는다
+ *   (계정이 붙어 있는 piece 는 통과 · 계정 없이 채널만 정해 둔 글만 요금제를 본다).
+ */
 export async function publishPiece(tid: number, pieceId: number, opts: PublishOpts = {}): Promise<PublishResult> {
   const impl = await ensureBound();
   if (!impl) return UNAVAILABLE;
+  const gate = await channelGate(tid, pieceId);
+  if (gate) return gate;
   try { return await impl.publishPieceById(tid, pieceId, { actor: "cron", ...opts }); }
   catch (e) { return { ok: false, reason: "channel_error", retriable: true, error: String((e as Error)?.message ?? e).slice(0, 300) }; }
+}
+
+/** 이 글의 채널이 요금제 밖이면 실패 결과, 아니면 null. 계정이 이미 붙어 있으면 **묻지 않는다**(소급 금지). */
+async function channelGate(tid: number, pieceId: number): Promise<PublishFail | null> {
+  try {
+    const { q } = await import("../accounts");
+    const { sql } = await import("drizzle-orm");
+    const rows = (await q(sql`SELECT p.channel, p.account_id FROM pieces p WHERE p.id = ${pieceId} AND p.tenant_id = ${tid}`)) as { channel?: unknown; account_id?: unknown }[];
+    const r = rows[0];
+    if (!r || r.account_id) return null;                       // 글이 없으면 B2 가 판정 · 계정이 붙어 있으면 소급 금지
+    const { requireChannel } = await import("../plans");
+    const g = await requireChannel(tid, String(r.channel ?? ""));
+    if (g.ok) return null;
+    return { ok: false, reason: "not_publishable", retriable: false,
+      error: `지금 요금제에서는 이 채널로 발행할 수 없어요.${g.planKey === "starter" ? " Pro 로 바꾸면 열려요." : ""}`,
+      detail: { planGate: true, planKey: g.planKey, channel: String(r.channel ?? ""), allowed: g.allowed } };
+  } catch (e) { console.warn("[publish-port] 채널 게이트 조회 실패 — 통과", String((e as Error)?.message ?? e).slice(0, 80)); return null; }
 }
 
 /**

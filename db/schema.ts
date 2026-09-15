@@ -844,3 +844,25 @@ export const invoicesR6 = {
 } as const;
 /** ops_settings 행 이름(§1.3) — `company` { name, ceo, bizNo, mailOrderNo, address, email, phone } · 영수증·약관 하단·세금계산서가 모두 이 한 출처를 읽는다. */
 export const opsSettingsKeysR6 = { company: "company", payment: "payment" } as const;
+
+/* === Phase 1 R7 · B(탈퇴·파기 · 플랜 게이트 · 자격 동의 · 내부 테스트 구분 · P1R7-B · 2026-09-15 · drizzle/0014-r7-close-internal.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   계약 docs/active/2026-09-15-P1R7-contract.md §3.1~§3.5. 새 표 0 — tenants 추가 칸 + plans.limits(jsonb) 안의 값뿐.
+ */
+export const tenantsR7 = {
+  /** closed_at · close_reason · close_prev_status — 탈퇴 신청(POST /api/account-close). 상태는 readonly 로 내리고 **되돌릴 수 있게** 직전 상태를 적어 둔다. */
+  closedAt: "closed_at",
+  closeReason: "close_reason",
+  closePrevStatus: "close_prev_status",
+  /** purge_at = closed_at + 30일 · purged_at = 실제 파기(크론 `tenant.purge`). 둘 다 있으면 묘비(status 'purged'). */
+  purgeAt: "purge_at",
+  purgedAt: "purged_at",
+  purgeDueIdx: "tenants_purge_due_idx",
+  /** 파기해도 tenants 행은 남긴다(묘비) — invoices(전자상거래법 5년)가 tenant_id 를 가리키기 때문. 이름·키는 마스킹된다. */
+  purgedStatus: "purged",
+  /** is_internal — 우리 테스트/하니스 집. 운영 대시보드·고객 목록·AI 원가·수익·MRR 의 **기본 집계에서 빠진다**(토글로 보인다). */
+  isInternal: "is_internal",
+  isInternalIdx: "tenants_is_internal_idx",
+} as const;
+/** plans.limits.channels — 이 요금제가 **새로 연결**할 수 있는 채널(없으면 제한 없음). Starter = 글 채널 + youtube_shorts · Pro/Agency = 전부.
+ *  🔴 소급 금지: 이미 연결한 계정은 이 목록과 무관하게 그대로 쓴다(lib/plans.ts requireChannel 은 «새로 추가»에서만 부른다). */
+export const planLimitsR7 = { channels: "channels" } as const;
