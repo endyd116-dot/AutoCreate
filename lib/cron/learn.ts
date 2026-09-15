@@ -53,7 +53,8 @@ export const learnStep: CronStep = {
   needsAutoSchedule: false,   // 사람이 만든 글의 성과도 재야 소재 점수가 산다.
   async run(ctx): Promise<StepOutcome> {
     // 72시간 + 여유까지만 본다(그 뒤엔 잴 마일스톤이 없다).
-    const posts = await q(sql`SELECT po.id, po.piece_id, po.account_id, po.channel, po.stats, po.published_at, p.topic_id
+    /* `po.external_url` — 러너 잡 payload 에 실어야 한다(아래 «러너가 브라우저로 본다» 분기 주석 참조). */
+    const posts = await q(sql`SELECT po.id, po.piece_id, po.account_id, po.channel, po.stats, po.published_at, po.external_url, p.topic_id
       FROM posts po LEFT JOIN pieces p ON p.id = po.piece_id
       WHERE po.tenant_id = ${ctx.tid} AND po.published_at > NOW() - interval '5 days'
       ORDER BY po.published_at DESC LIMIT 200`);
@@ -76,10 +77,25 @@ export const learnStep: CronStep = {
 
       const via = await viaOf(String(po.channel));
       if (via === "runner") {
-        // 러너가 브라우저로 본다 — 같은 (piece, 마일스톤) 잡은 한 번만.
+        /* 러너가 브라우저로 본다 — 같은 (piece, 마일스톤) 잡은 한 번만.
+           🔴 **`externalUrl` 을 반드시 싣는다**(2026-09-15 B2 · 메인 배정).
+              `revenue.stats` 를 처리하는 러너 채널은 `runner/channels/post-alive.mjs` 이고
+              (`runner/core.mjs` 의 `"revenue.stats": postAlive` — **한 채널이 두 kind 를 처리한다**),
+              그 채널은 **첫 줄에서** `payload.externalUrl` 이 없으면 «확인할 글 주소가 없어요»로 즉시 실패한다.
+              claim 도 payload 를 채워 주지 않는다(presign 은 렌더 payload 만).
+              ⇒ 이 칸이 없으면 **실발행이 시작되는 순간 조회수 수집이 전부 실패**한다(실발행 0건이라 잠재 상태였다).
+           ⚠️ `postId` 도 같이 필요하다 — 서버가 결과를 병합할 때 `n(payload.postId)` 로 글을 찾고,
+              없으면 `if (postId)` 가 거짓이라 **병합을 통째로 건너뛴다**(`verify.post_alive` 에서 실제로 그랬다). */
+        const externalUrl = String(po.external_url ?? "").trim();
+        if (!externalUrl) {
+          /* 주소가 없으면 **물어볼 방법이 없다** — 실패할 잡을 만들지 않고 «못 물어봤다»로 센다(0 으로 적지 않는다 · AC-9).
+             마일스톤을 `markQueued` 로 소진하지도 않는다(주소가 생기면 다음 틱에 다시 시도한다). */
+          unavailable++;
+          continue;
+        }
         const job = await enqueueRunnerJob(ctx.tid, {
           kind: "revenue.stats", accountId: po.account_id ? n(po.account_id) : null, pieceId: n(po.piece_id),
-          payload: { postId: n(po.id), milestoneH: m, dedupe: `stats:${n(po.piece_id)}:${m}` }, priority: 80,
+          payload: { postId: n(po.id), externalUrl, milestoneH: m, dedupe: `stats:${n(po.piece_id)}:${m}` }, priority: 80,
         });
         if (job.ok) { queued++; if (!job.already) await markQueued(ctx.tid, n(po.id), [...done, m]); }
         else if (job.unavailable) unavailable++;
