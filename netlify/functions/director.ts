@@ -1,7 +1,8 @@
 /**
  * 디렉터 API(계약 P1R1 §3 v1.1):
  *   POST /api/director-propose { topicId }                → { brief:Brief }
- *   POST /api/director-confirm { briefId, pieces?:[PieceSpecPatch] } → 202 { briefId, pieceIds, coinsCharged, coinsLeft }   // 생성은 배경 함수 · 화면은 pieces-list 폴링
+ *   POST /api/director-confirm { briefId, pieces?:[PieceSpecPatch] } → 202 { briefId, pieceIds, coinsCharged, coinsLeft, usedTodaySlot? }   // 생성은 배경 함수 · 화면은 pieces-list 폴링
+ *     [R7 §1.6] `usedTodaySlot:{ slotId, channel, publishAt, prevStatus }` = 오늘 이미 잡혀 있던 편성 자리에 넣었다(새 자리를 만들지 않았다) → 화면 «오늘 자리에 넣었어요».
  *     ✗ 코인 부족 → { ok:false, step:"coin_short", error, need, have }
  */
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -41,7 +42,7 @@ export default async (req: Request): Promise<Response> => {
       //    사람이 «이대로 만들기»를 누른 경로이므로 편성표의 통제 대상이 아니다(사람이 곧 편성자다).
       const r = await confirm(tid, briefId, Array.isArray(b.pieces) ? b.pieces : [], auth.user.uid, { origin: "manual" });
       if (!r.ok) return json(r, r.step === "coin_short" ? 402 : r.step === "not_found" ? 404 : 400);
-      await writeAudit({ tenantId: tid, action: "director_confirm", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `brief:${briefId}`, detail: { pieceIds: r.pieceIds, coinsCharged: r.coinsCharged } });
+      await writeAudit({ tenantId: tid, action: "director_confirm", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `brief:${briefId}`, detail: { pieceIds: r.pieceIds, coinsCharged: r.coinsCharged, ...(r.usedTodaySlot ? { usedTodaySlot: r.usedTodaySlot } : {}) } });
       return json(r, 202);
     }
     return json({ ok: false, error: "not_found" }, 404);
