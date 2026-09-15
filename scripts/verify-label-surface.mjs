@@ -223,6 +223,25 @@ for (const n of NUMS) {
     `서버 ${want}${n.unit} ↔ 화면 ${n.screen}${n.unit}${want === n.screen ? "" : `  ⇒ 고칠 곳은 ${n.where}`}`);
 }
 
+/* ───────── ⑧ 광고 붙이는 «길»(서버 adsWayOf·adsRemovable ↔ 화면 표) ─────────
+   왜: 채널마다 길이 다르고(우리가 직접 / 내 PC 가 / 아직 없음), **티스토리는 뗄 수 없다**(러너가 읽기만 한다).
+   화면이 이 표를 잘못 들고 있으면 **눌러도 아무 일이 안 나는 단추**가 생긴다 — 없는 되돌리기를 약속하는 것이 가장 나쁘다.
+   🔴 서버에 채널이 하나 늘면 화면 표가 조용히 낡는다 — 그래서 여기서 통째로 견준다. */
+const adsTs = read("lib/ads-connect.ts");
+const wayFn = adsTs.slice(Math.max(0, adsTs.indexOf("export function adsWayOf")), adsTs.indexOf("export function adsRemovable"));
+const waySrv = new Map([...wayFn.matchAll(/case "([a-z_]+)":\s*return "([a-z_]+)"/g)].map((m) => [m[1], m[2]]));
+const wayUi = objectMap(uiJs, "UI.ADS_WAY") || new Map();
+const wayDiff = [...new Set([...waySrv.keys(), ...wayUi.keys()])].filter((k) => waySrv.get(k) !== wayUi.get(k))
+  .map((k) => `${k}: 서버 «${waySrv.get(k) ?? "없음"}» ≠ 화면 «${wayUi.get(k) ?? "없음"}»`);
+rec("🔴 광고 붙이는 길(채널→방법)이 서버와 같다", waySrv.size > 0 && wayDiff.length === 0, wayDiff.join(" | ") || `${waySrv.size}채널`, wayDiff);
+/* 함수 **한 개**만 떠서 본다 — 다음 `\n}` 까지(파일 뒤쪽 감사 문자열까지 긁어오면 목록이 엉뚱해진다) */
+const rmAt = adsTs.indexOf("export function adsRemovable");
+const rmFn = rmAt < 0 ? "" : adsTs.slice(rmAt, adsTs.indexOf("\n}", rmAt));
+const rmSrv = [...new Set([...rmFn.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]))].sort();
+const rmUi = bracketList(uiJs, "UI.ADS_REMOVABLE =").sort();
+rec("🔴 «뗄 수 있는 길» 목록이 서버와 같다(티스토리는 못 뗀다)", rmSrv.length > 0 && rmSrv.join(",") === rmUi.join(","),
+  rmSrv.join(",") === rmUi.join(",") ? `${rmSrv.length}가지` : `서버 «${rmSrv.join(" ")}» ≠ 화면 «${rmUi.join(" ")}»`, { rmSrv, rmUi });
+
 /* ───────── 출력 ───────── */
 if (JSON_OUT) console.log(JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
 else {

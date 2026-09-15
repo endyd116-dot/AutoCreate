@@ -22,6 +22,7 @@ import { jsonb } from "../db-util";
 import { ensureFreshToken } from "./tokens";
 import { r2PublicUrl } from "../r2";
 import { disclosureTextFor } from "../disclosure";
+import { writeAudit } from "../audit";   // [P1R8 §5.1] 파트너십 라벨이 거부되면 조용히 넘기지 않는다
 import type { PublishPiece, PublishAccount, PublishResult } from "./contract";
 
 type Row = Record<string, unknown>;
@@ -105,6 +106,13 @@ function metaError(status: number, json: Record<string, unknown> | null): { reas
   return { reason: "config", retriable: false, error: "인스타그램이 이 영상을 받지 않았어요.", detail: `${status} ${code} ${msg}` };
 }
 
+/** 메타가 «그 파라미터는 못 쓴다»고 답했나 — 라벨만 빼고 한 번 더 만든다(게시물 자체는 나가야 한다). */
+function rejectedPaidLabel(json: Record<string, unknown> | null): boolean {
+  const err = (json?.error ?? {}) as { message?: string; error_user_title?: string; code?: number };
+  const blob = String(err.message ?? "") + " " + String(err.error_user_title ?? "");
+  return blob.includes("is_paid_partnership") || /unknown|invalid parameter|unsupported/i.test(blob);
+}
+
 export async function publishReels(piece: PublishPiece, account: PublishAccount): Promise<PublishResult> {
   const tid = piece.tenantId;
   const META_FIELD = "igCreationId";
@@ -124,8 +132,23 @@ export async function publishReels(piece: PublishPiece, account: PublishAccount)
   if (!creationId) {
     const videoUrl = await videoPublicUrlOf(tid, piece.id);
     if (!videoUrl) return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 영상이 아직 없어요(렌더가 끝나지 않았어요)." };
-    const body = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption: buildCaption(piece), access_token: token });
-    const r = await graph(`${GRAPH}/${encodeURIComponent(igUserId)}/media`, { method: "POST", body }).catch(() => null);
+    /* [P1R8 §5.1] 🔴 **유료 파트너십 라벨** — 대가를 받은 게시물이면 인스타 자체 라벨을 켠다.
+       공식 문서(콘텐츠 게시)에 `is_paid_partnership`(불린 · «Enables the ‘Paid partnership’ label»)이 있다.
+       🔴 **우리 키로 실호출 확인 전이다**(2026-09-15 · 인스타 계정 0 · 채널 planned) — 그래서 **거부당하면 라벨만 빼고 한 번 더** 만든다.
+       캡션 첫 줄의 공정위 고지는 그대로 나가므로, 라벨이 빠져도 «고지 없는 게시물»이 되지는 않는다(AC-9: 빠진 사실은 감사에 남긴다). */
+    const paid = !!piece.disclosure;
+    const mk = (withLabel: boolean) => {
+      const b = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption: buildCaption(piece), access_token: token });
+      if (withLabel) b.set("is_paid_partnership", "true");
+      return graph(`${GRAPH}/${encodeURIComponent(igUserId)}/media`, { method: "POST", body: b }).catch(() => null);
+    };
+    let r = await mk(paid);
+    if (r && paid && (r.status < 200 || r.status >= 300) && rejectedPaidLabel(r.json)) {
+      await writeAudit({ tenantId: tid, action: "instagram_paid_label_rejected", actorType: "system", target: `piece:${piece.id}`,
+        detail: { status: r.status, note: "is_paid_partnership 를 받지 않았다 — 캡션 첫 줄 고지로만 나간다" } })
+        .catch((err: unknown) => console.warn("[instagram] 감사 기록 실패", String((err as Error)?.message ?? err).slice(0, 80)));
+      r = await mk(false);
+    }
     if (!r) return { ok: false, reason: "network", retriable: true, error: "인스타그램에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
     if (r.status < 200 || r.status >= 300) { const c = metaError(r.status, r.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }
     creationId = String(r.json?.id ?? "").trim();
