@@ -323,11 +323,15 @@ export function buildRewriteInstruction(report: GateReport): string {
       (어차피 승인도 막지 않는 축이다 · `HARD_GATE_KEYS` 밖).
    🔴 이 목록은 `lib/content-approve.ts HARD_GATE_KEYS` 와 **같은 뜻**이지만 파일이 다르다 —
       `content-approve` 는 DB 를 보고 이 파일은 순수라서(AC-17) 한쪽을 import 하면 순환이 된다. **두 곳을 같이 고친다.** */
-/* 🔴 **막는 것과 다시 쓰는 것은 다른 잣대다**: 승인을 막는 것은 법·제3자·비가역 셋뿐이지만(§9),
-   **다시 쓰기는 «AI 콜 한 번»이라 위험을 줄이는 값이 있으면 쓴다**. 그래서 소프트여도 `ad_pointing`·`similarity` 는 여기 남는다
-   (애드센스 정지·저품질 판정은 **고객 계정**이 다치는 자리다 — 막지는 않되 한 번은 고쳐 본다).
-   `affiliate_count` 는 뺐다 — 링크 수는 다시 써서 고칠 것이 아니라 **지우면 되는 것**이다(돈 쓸 이유가 없다). */
-export const REWRITE_KEYS: readonly GateKey[] = ["disclosure", "banned_words", "ad_pointing", "similarity"];
+/* 🔴 **막는 것과 다시 쓰는 것은 다른 잣대다**: 승인을 막는 것은 아무것도 없지만(§9 · 하드 0),
+   **다시 쓰기는 «AI 콜 한 번»이라 위험을 줄이는 값이 있으면 쓴다**. 그래서 소프트여도 `ad_pointing` 은 여기 남는다
+   (애드센스 정지는 **고객 계정**이 다치는 자리다 — 막지는 않되 한 번은 고쳐 본다).
+   `affiliate_count` 는 뺐다 — 링크 수는 다시 써서 고칠 것이 아니라 **지우면 되는 것**이다(돈 쓸 이유가 없다).
+   🔴 `similarity` 도 뺐다(C 지적 2026-09-15 · 코드로 확인): `lib/content-gen.ts` 에 **유사도 전용 재작성이 이미 있고**
+      게이트보다 **먼저** 돌며 앵글까지 바꾼다(«반대 경험이나 실패담에서 출발»). 그때 `rewritten = true` 가 서므로
+      게이트 재작성은 **어차피 안 탄다** — 목록에 둬 봤자 «여기 있으니 도는구나»로 읽히는 **거짓 표지**가 된다.
+      (그쪽 재작성이 더 낫기도 하다: 지시문이 구체적이고 앵글까지 바꾼다.) */
+export const REWRITE_KEYS: readonly GateKey[] = ["disclosure", "banned_words", "ad_pointing"];
 /** 다시 쓸 만한 실패가 있나(없으면 한 번 더 쓰지 않는다 = 돈을 아낀다). */
 export function needsRewrite(report: GateReport): boolean {
   return report.checks.some((c) => !c.pass && (REWRITE_KEYS as readonly string[]).includes(c.key));
