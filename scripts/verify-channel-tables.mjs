@@ -7,6 +7,12 @@
  *        — 없으면 «글을 만들어 준다»고 해 놓고 못 만든다.
  *     ② 글 계약에만 있고 표에 없는 채널(오타·유령 채널)
  *     ③ `publishVia: "runner"` 인데 `jobKind` 가 없는 채널 — «러너로 간다»는데 적재할 잡 이름이 없다.
+ *     ④ [P1R8 §3.4] 🔴 `publishVia: "api"` 인데 **`lib/publish/index.ts API_CONNECTORS` 에 없는** 채널
+ *        — «API 로 올린다»고 대답해 놓고 발행하면 «아직 이 채널로는 발행할 수 없어요»가 나온다.
+ *          이건 예전에 `instagram`·`tiktok` 이 폴백 추측으로 «api» 라고 답하던 것과 **같은 종류의 거짓말**이고,
+ *          채널을 늘릴 때 제일 빠뜨리기 쉬운 자리다(표 한 줄은 쓰고 커넥터 배선을 잊는다).
+ *     ⑤ [P1R8 §3.4] 🔴 `retractVia: "api"` 인데 **`lib/publish/retract-api.ts` 에 그 채널 분기가 없는** 것
+ *        — 화면에 «내려 주기» 단추가 켜지는데 누르면 «표와 코드가 갈라졌다»로 실패한다(그 파일 끝줄이 그렇게 말한다).
  *   🔴 두 파일을 **합치지 않고** 검사만 하는 이유: 성격이 다르고(성질 vs 글 계약), R8 §2 에서 다른 세션이 계약 파일을 고치는 중이다.
  *   🔴 읽기 전용 — 고치지 않는다. 어긋나면 종료코드 1.
  *   🔎 출처: AC 신규(계약 P1R8 §5.2 · 생성 2026-09-15) — AM 원본 없음.
@@ -27,8 +33,17 @@ const rows = [...reg.matchAll(/\{\s*key:\s*"([^"]+)"[^}]*\}/g)].map((m) => {
     if (v === "null") return null;
     return v.startsWith("\"") ? v.slice(1, -1) : v;
   };
-  return { key: m[1], publishVia: pick("publishVia"), jobKind: pick("jobKind"), textGen: pick("textGen") === "true" };
+  return { key: m[1], publishVia: pick("publishVia"), retractVia: pick("retractVia"), jobKind: pick("jobKind"), textGen: pick("textGen") === "true" };
 });
+
+/* [P1R8 §3.4] ④⑤의 재료 — **코드에서** 읽는다(문서나 주석이 아니라 · AC-59).
+   `API_CONNECTORS` 는 `{ 채널키: 함수 }` 표라 열쇠만 뽑으면 «배선된 채널»이 된다.
+   retract 는 분기가 `ctx.channel === "wordpress"` 꼴이라 그 글자를 센다. */
+const idx = readFileSync("lib/publish/index.ts", "utf8");
+const connBlock = /const API_CONNECTORS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(idx)?.[1] ?? "";
+const wiredApi = new Set([...connBlock.matchAll(/^\s{2}([a-z_]+):/gm)].map((m) => m[1]));
+const retractSrc = readFileSync("lib/publish/retract-api.ts", "utf8");
+const wiredRetract = new Set([...retractSrc.matchAll(/ctx\.channel\s*===\s*"([a-z_]+)"/g)].map((m) => m[1]));
 /** 글 계약에 있는 채널 키 — `WRITING_CONTRACTS` 의 최상위 키(`naver_blog: {` 꼴). */
 const contractKeys = new Set([...con.matchAll(/^\s{2}([a-z_]+):\s*\{$/gm)].map((m) => m[1]));
 
@@ -36,12 +51,21 @@ const problems = [];
 for (const r of rows) {
   if (r.textGen && !contractKeys.has(r.key)) problems.push(`🔴 ${r.key}: textGen=true 인데 글 계약이 없다 — «글을 만들어 준다»고 해 놓고 못 만든다`);
   if (r.publishVia === "runner" && !r.jobKind) problems.push(`🔴 ${r.key}: 러너 발행인데 jobKind 가 없다 — 적재할 잡 이름이 없다`);
+  if (r.publishVia === "api" && !wiredApi.has(r.key)) problems.push(`🔴 ${r.key}: publishVia=api 인데 lib/publish/index.ts API_CONNECTORS 에 없다 — «올린다»고 답해 놓고 발행이 막힌다`);
+  if (r.retractVia === "api" && !wiredRetract.has(r.key)) problems.push(`🔴 ${r.key}: retractVia=api 인데 lib/publish/retract-api.ts 에 분기가 없다 — «내려 주기» 단추가 켜지는데 눌러도 실패한다`);
 }
+/* 거꾸로도 본다 — 배선은 있는데 표가 «api» 가 아니면 그 커넥터는 **아무도 안 부른다**(AC-69 죽은 통로). */
+for (const k of wiredApi) if (!rows.some((r) => r.key === k && r.publishVia === "api")) problems.push(`🟡 ${k}: 커넥터는 배선돼 있는데 표의 publishVia 가 api 가 아니다 — 부르는 자리가 없다(죽은 통로)`);
 for (const k of contractKeys) if (!rows.some((r) => r.key === k)) problems.push(`🟡 ${k}: 글 계약에는 있는데 채널 표에 없다(유령 채널·오타?)`);
 
 console.log(`채널 표 ${rows.length}행 · 글 계약 ${contractKeys.size}채널`);
 console.log(`  textGen=true: ${rows.filter((r) => r.textGen).map((r) => r.key).join(" ") || "(없음)"}`);
 console.log(`  publishVia=null(아직 못 올림): ${rows.filter((r) => !r.publishVia).map((r) => r.key).join(" ") || "(없음)"}`);
+/* 🔴 **센 것을 찍는다.** 이 줄이 «(없음)» 이면 위 ④⑤는 아무것도 안 본 것이고, 그래도 초록이 뜬다 —
+   그게 이 프로젝트가 제일 싫어하는 모양이라(AC-58 «검사 코드의 catch 가 검사자의 눈을 가린다») 눈에 보이게 둔다. */
+console.log(`  배선된 커넥터(index.ts): ${[...wiredApi].join(" ") || "(없음)"}`);
+console.log(`  배선된 내리기(retract-api.ts): ${[...wiredRetract].join(" ") || "(없음)"}`);
 if (!rows.length || !contractKeys.size) { console.log("🔴 표를 못 읽었다 — 파일 모양이 바뀌었나 본다(검사 자체가 조용히 통과하지 않게 실패로 둔다)"); process.exit(1); }
+if (!wiredApi.size || !wiredRetract.size) { console.log("🔴 커넥터 배선을 못 읽었다 — index.ts·retract-api.ts 의 모양이 바뀌었다(정규식이 빗나갔다)"); process.exit(1); }
 if (problems.length) { console.log("\n" + problems.join("\n")); process.exit(1); }
 console.log("\n✅ 두 표가 어긋나지 않는다");

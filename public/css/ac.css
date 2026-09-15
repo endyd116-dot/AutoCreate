@@ -103,6 +103,9 @@ input,textarea,select{font:inherit;color:inherit}
 .mk.tistory{background:var(--t)} .mk.blogger{background:var(--b)} .mk.wordpress{background:var(--wp)}
 .mk.youtube_shorts{background:var(--y)} .mk.instagram,.mk.reels{background:linear-gradient(135deg,#F58529,#DD2A7B 60%,#8134AF)}
 .mk.threads{background:var(--th)} .mk.tiktok{background:var(--tk)}
+/* [P1R8 §3.4] 다음 Phase 채널 — 색이 없으면 마크가 «칠 안 된 네모»로 뜬다(다른 마크와 나란히 두면 고장으로 보인다). */
+.mk.facebook,.mk.facebook_reels{background:#1877F2} .mk.x{background:#000} .mk.youtube_long{background:var(--y)}
+.mk.brunch{background:#00C6BE;font-size:11px} .mk.naver_clip_post{background:var(--c)}
 .mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money-ink)} .mk.warn{background:var(--warn-soft);color:var(--warn)} .mk.danger{background:var(--danger-soft);color:var(--danger-ink)}
 .mk svg{width:20px;height:20px} .mk.sm{width:28px;height:28px;border-radius:9px;font-size:12px}
 /* [v4] 수익 소스 마크 = 서비스 색(시안 v3 · 채널 마크와 같은 급) */
