@@ -7,6 +7,7 @@
  */
 import { MODEL_OMNI, MODEL_VEO, MODEL_VEO_FAST, MODEL_VEO_LITE, FAL_MODEL_WAN, FAL_MODEL_HAILUO, FAL_MODEL_KLING } from "../../ai-models";
 import type { ClipTier, ProviderKey, VideoSeconds } from "../types";
+import { aiKeysConfigured } from "../../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳 — 🔴 `GEMINI_API_KEYS` 만 꽂은 집에서 여기가 env 를 직접 읽으면 «키 없음»으로 죽는다
 
 export type { ClipTier, ProviderKey };
 
@@ -56,7 +57,9 @@ export function isProviderBanned(...tokens: (string | null | undefined)[]): { ba
 }
 
 export function falAvailable(): boolean { return !!(process.env.FAL_KEY || process.env.FAL_API_KEY || "").trim(); }
-export function geminiAvailable(): boolean { return !!(process.env.GEMINI_API_KEY || "").trim(); }
+/** [R8 · §3.3] 🔴 «키가 있나»도 `lib/ai-key.ts` 한 곳에서 묻는다 — `GEMINI_API_KEYS` 도 키다.
+ *  옛 판은 `GEMINI_API_KEY` 만 봐서, 여러 키만 꽂은 집에서 **영상 provider 사다리가 통째로 «없음»** 이 됐다. */
+export function geminiAvailable(): boolean { return aiKeysConfigured(); }
 
 /**
  * pickProvider — AC 규칙(계약 §0.1-1): Omni 기본 + Veo Lite 폴백 · **15초는 Lite 강제**(원가 역전 방지) · fal 은 FAL_KEY 있을 때만 · kling 은 명시 지정 시만.

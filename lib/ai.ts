@@ -12,6 +12,7 @@
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 import { calcCost } from "./ai-cost";
+import { aiKeysConfigured, leaseAiKey, reportAiKeyOutcome, isRateLimitReason, redactKeys } from "./ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳
 import * as M from "./ai-models";
 import { buildAiCacheKey, tryAiCacheGet, aiCacheSet } from "./ai-cache";   // [P1R7 B3] 5분 응답 캐시(AM 이식)
 import { aiStubActive, aiStubAnswer, AI_STUB_MODEL } from "./ai-stub";   // [R8 §2.1] 글 실호출 대체 스위치(로컬 전용)
@@ -121,7 +122,9 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
     const resp = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
     if (!resp.ok) {
       const errText = await resp.text().catch(() => "");
-      return { ok: false, reason: `gemini_error_${resp.status}: ${errText.slice(0, 200)}`, ...empty };
+      /* 🔴 제공사 오류 본문이 우리가 보낸 주소(`?key=…`)를 되비칠 수 있다. 이 문자열은 로그·trace·감사로 퍼지므로
+         **여기서** 걷어 낸다 — 한 번 새면 지울 수 없는 자리다(`lib/ai-key.ts redactKeys`). */
+      return { ok: false, reason: redactKeys(`gemini_error_${resp.status}: ${errText.slice(0, 200)}`), ...empty };
     }
     const data = (await resp.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string; groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] } }[];
@@ -240,9 +243,11 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
     }
     console.warn(`[ai-stub] purpose «${a.purpose}» 는 스텁이 없다 — **실호출로 간다**(돈이 든다).`);
   }
-  const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
+  /* [R8 · DESIGN §3.3] 🔴 키를 고르는 자리는 **`lib/ai-key.ts` 하나**다(여기서 env 를 직접 읽지 않는다).
+     키가 1개면 늘 그 키라 **오늘과 한 글자도 다르지 않다**. 실제 임대는 시도마다 아래 루프에서 한다 —
+     그래야 한 키가 429 를 맞았을 때 **다음 시도가 다른 키로** 간다. */
   const trace: AiAttempt[] = [];
-  if (!apiKey) return { ok: false, text: null, reason: "no_api_key", trace };
+  if (!aiKeysConfigured()) return { ok: false, text: null, reason: "no_api_key", trace };
   const resolved = await resolveChain(a.role, a.chain);
   const chain = resolved.length ? resolved : [M.MODEL_DEFAULT];
   const mode = a.mode ?? "flash";
@@ -273,7 +278,12 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
       timeoutMs = Math.min(timeoutMs, remaining);
     }
     const mStart = Date.now();
-    const r = await callSingleModel(model, a, apiKey, timeoutMs);
+    /* 🔴 시도마다 빌린다 — 라운드로빈이 여기서 돈다. 키 1개면 늘 같은 키(퇴화형). */
+    const lease = leaseAiKey();
+    const r = await callSingleModel(model, a, lease?.key ?? "", timeoutMs);
+    /* 🔴 결과를 **반드시** 돌려준다 — 안 알려 주면 쉬는 키가 영영 안 생겨 이 기능이 장식이 된다.
+       429·할당량만 그 키를 쉬게 한다. 503·타임아웃은 제공사가 바쁜 것이지 키 잘못이 아니다(`isRateLimitReason` 헤더). */
+    reportAiKeyOutcome(lease, r.ok ? "ok" : isRateLimitReason(r.reason) ? "rate_limited" : "error");
     let parsed: unknown = undefined;
     let parseFailed = false;
     if (r.ok && r.text && a.json && !a.googleSearch) { parsed = parseJsonLoose(r.text); if (parsed === null) parseFailed = true; }

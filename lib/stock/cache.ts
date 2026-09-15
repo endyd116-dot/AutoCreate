@@ -46,8 +46,9 @@ export function queryKeyOf(a: { query: string; count: number; lang?: string }): 
 interface MemEntry { payload: unknown; expiresAt: number }
 const mem = new Map<string, MemEntry>();
 const MEM_MAX = 120;
-/** 열쇠 구분자는 검색어에 못 들어가는 글자여야 한다(파이프·콜론은 `queryKeyOf` 가 이미 쓴다). */
-const memKey = (p: string, k: string) => `${p}${k}`;
+/** 제공사 이름에는 `|` 가 없으므로(pixabay·pexels) 첫 `|` 앞이 곧 제공사다 — 열쇠가 섞이지 않는다.
+ *  ⚠️ 여기에 제어문자를 쓰면 **git 이 이 파일을 binary 로 본다**(2026-09-15 실측 · diff 도 머지도 안 된다). */
+const memKey = (p: string, k: string) => `${p}|${k}`;
 
 function memGet(p: StockProviderName, k: string): unknown | null {
   const e = mem.get(memKey(p, k));

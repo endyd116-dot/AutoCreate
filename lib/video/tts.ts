@@ -7,6 +7,7 @@
  */
 import { MODEL_TTS } from "../ai-models";
 import { recordAiUsage } from "../ai";
+import { leaseAiKey, reportAiKeyOutcome, redactKeys } from "../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳 — 🔴 `GEMINI_API_KEYS` 만 꽂은 집에서 여기가 env 를 직접 읽으면 «키 없음»으로 죽는다
 import { r2Configured, r2Put } from "../r2";
 import { videoStub } from "./types";
 
@@ -151,7 +152,9 @@ export async function synthesizeGemini(a: { tenantId: number; pieceId: number; t
     void recordAiUsage({ tenantId: a.tenantId, purpose: "tts", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
     return { ok: true, key, mime: "audio/wav", bytes: buf.length, durationMs, words, provider: "gemini", costUsd: 0, notes: ["stub"] };
   }
-  const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
+  /* [R8 · §3.3] 🔴 키는 `lib/ai-key.ts` 가 고른다(글·사진·영상과 같은 풀). */
+  const lease = leaseAiKey();
+  const apiKey = lease?.key ?? "";
   if (!apiKey) return { ok: false, reason: "Gemini 키가 없어 음성을 만들 수 없습니다.", costUsd: 0 };
   const voice = isGeminiVoice(a.voice) ? String(a.voice) : "Charon";
   const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 30_000);
@@ -160,7 +163,12 @@ export async function synthesizeGemini(a: { tenantId: number; pieceId: number; t
       method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: base }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } } }),
     });
-    if (!resp.ok) return { ok: false, reason: `Gemini TTS HTTP ${resp.status}: ${(await resp.text().catch(() => "")).slice(0, 120)}`, costUsd: 0, httpStatus: resp.status };
+    if (!resp.ok) {
+      reportAiKeyOutcome(lease, resp.status === 429 ? "rate_limited" : "error");
+      /* 🔴 오류 본문이 우리 주소(`?key=…`)를 되비칠 수 있다 — 사유로 나가기 전에 걷어 낸다. */
+      return { ok: false, reason: redactKeys(`Gemini TTS HTTP ${resp.status}: ${(await resp.text().catch(() => "")).slice(0, 120)}`), costUsd: 0, httpStatus: resp.status };
+    }
+    reportAiKeyOutcome(lease, "ok");
     const data = (await resp.json()) as { candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string }; inline_data?: { data?: string; mime_type?: string } }[] } }[]; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } };
     let b64: string | undefined, mime = "audio/wav";
     for (const p of data.candidates?.[0]?.content?.parts ?? []) { const d = p.inlineData?.data ?? p.inline_data?.data; if (d) { b64 = d; mime = p.inlineData?.mimeType ?? p.inline_data?.mime_type ?? mime; break; } }
