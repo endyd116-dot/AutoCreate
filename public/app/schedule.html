@@ -6,7 +6,7 @@
 <title>편성표 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=9">
+<link rel="stylesheet" href="/css/ac.css?v=10">
 </head>
 <body>
 <div class="shell">
@@ -43,7 +43,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -136,7 +136,9 @@ function slotSheet(s) {
   const act = (id, t, d, ok) => `<button type="button" class="row tap" data-act="${id}" ${ok ? "" : 'disabled style="opacity:.4"'}><div class="l"><span class="t">${t}</span><span class="d wrap">${UI.esc(d)}</span></div>${ok ? UI.chev : ""}</button>`;
   const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
+    ${s.note ? `<div class="banner info" style="margin:4px 0 8px"><span>${UI.esc(s.note)}</span></div>` : ""}
     ${H && H[0] ? `<div class="banner ${warn ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(H[0])}${H[1] ? " · " + UI.esc(H[1]) : ""}</span></div>` : ""}
+    ${s.revenueKrw != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">이 글이 번 돈<small class="muted" style="font-weight:500"> · 최근 30일</small></span><span class="v">${UI.won(s.revenueKrw)}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정</span><span class="v">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "건강한 계정 순으로 자동"}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">발행</span><span class="v">${s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간"}</span></div>
     ${s.reviewDeadline ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">검수 마감</span><span class="v">${UI.dateKST(s.reviewDeadline)} ${UI.timeKST(s.reviewDeadline)}</span></div>` : ""}
@@ -207,33 +209,53 @@ function timeSheet(s, closeParent) {
       };
     } });
 }
-/* ── 자동 편성 켜기 · 3스텝(한 화면 한 질문) ── */
+const HOURS_R = [[6, "06시"], [7, "07시"], [9, "09시"], [12, "12시"], [13, "13시"], [18, "18시"], [20, "20시"], [21, "21시"]];   // [R7 §4.3] 고정 시각(preferred_hour)
+/* 🔴 자동 승인은 크론까지 막히는 플랜 기능이다 — 화면이 «조용하면 발행»을 그려 놓고 실제로 안 되면 거짓말이 된다(B3 rules-list autoApprove).
+   🔴 소급 0: **이미 «조용하면 발행»로 저장해 둔 집은 그대로 나간다** — 그런 집에는 잠그지 않고, 다른 값으로 바꾸면 되돌릴 수 없다고 미리 말한다. */
+const keptAuto = () => D.autoApprove === false && (D.settings || {}).reviewPolicy === "silence_approves";
+const autoApproveOff = () => D.autoApprove === false && !keptAuto();
+const inclSay = (weekly) => { const inc = Number(D.includedCoins || 0); const monthly = Math.round(weekly * 4.3); return inc <= 0 ? "포함분 없음 · 코인으로 채워요" : monthly <= inc ? `이 편성이면 포함분 안이에요` : `달 약 ${UI.num(monthly)}코인 · 포함분을 ${UI.num(monthly - inc)}코인 넘어요`; };
+/* ── 자동 편성 켜기 · 4스텝(한 화면 한 질문) ── */
 function ruleSheet() {
   const chans = [...new Set(accounts.map((a) => a.channel))];
   if (!chans.length) return UI.sheet(`<p class="muted" style="margin:0 0 16px">편성하려면 먼저 계정을 하나 연결해 주세요.</p><div class="cta"><a class="btn primary" href="/app/accounts.html">계정 연결</a></div>`, { title: "먼저 계정을 연결해요" });
   const cur = Object.fromEntries(D.rules.filter((r) => r.active).map((r) => [r.channel, r]));
-  const st = { count: Object.fromEntries(chans.map((c) => [c, cur[c] ? (cur[c].every === "day" ? cur[c].count * 7 : cur[c].every === "month" ? Math.round(cur[c].count / 4) : cur[c].count) : 0])), mode: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountMode || "auto"])), acc: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountId || null])), reviewPolicy: D.settings.reviewPolicy || "silence_approves", produceLeadDays: D.settings.produceLeadDays || 3 };
-  const est = () => chans.reduce((a, c) => a + st.count[c] * perPiece(c), 0);
+  /* [R7 §4.3] 주기·요일·시각은 서버(cadence_rules.every·weekdays·preferred_hour)가 처음부터 받고 있었는데 화면이 안 물어봤다 — 3칸을 연다.
+     count 는 «그 주기 안에서 몇 번»이다(매일=하루 N회 · 주=주 N회 · 월=월 N회) · 요일은 주 N회일 때만 뜻이 있다(안 고르면 서버가 고르게 편다) */
+  const st = { count: Object.fromEntries(chans.map((c) => [c, cur[c] ? cur[c].count : 0])), every: Object.fromEntries(chans.map((c) => [c, cur[c]?.every || "week"])),
+    wd: Object.fromEntries(chans.map((c) => [c, (cur[c]?.weekdays || []).map(Number)])), hour: Object.fromEntries(chans.map((c) => [c, cur[c]?.preferredHour ?? null])),
+    mode: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountMode || "auto"])), acc: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountId || null])), reviewPolicy: D.settings.reviewPolicy || "silence_approves", produceLeadDays: D.settings.produceLeadDays || 3 };
+  const perWeek = (c) => st.every[c] === "day" ? st.count[c] * 7 : st.every[c] === "month" ? st.count[c] / 4 : st.count[c];   // 코인 미리보기는 «주»로 환산해서 견준다
+  const est = () => Math.round(chans.reduce((a, c) => a + perWeek(c) * perPiece(c), 0));
   let step = 1;
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const on = chans.filter((c) => st.count[c] > 0);
-    const prog = `<div class="prog" style="padding:0 0 8px"><i class="${step >= 1 ? "on" : ""}"></i><i class="${step >= 2 ? "on" : ""}"></i><i class="${step >= 3 ? "on" : ""}"></i></div>`;
-    if (step === 1) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>얼마나 자주 올릴까요?</h2><p>채널마다 «주 몇 회». 0이면 그 채널은 쉬어요.</p></div>` + chans.map((c) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))}<small>계정 ${accounts.filter((a) => a.channel === c).length}개${isVideoCh(c) ? " · 영상 60초 · 편당 " + UI.VIDEO_COIN[60] + "코인" : ""}</small></span></div>${UI.stepper("c:" + c, st.count[c], 0, 7, "회")}</div>`).join("") + `<div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
+    const prog = `<div class="prog" style="padding:0 0 8px">${[1, 2, 3, 4].map((i) => `<i class="${step >= i ? "on" : ""}"></i>`).join("")}</div>`;
+    if (step === 1) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>얼마나 자주 올릴까요?</h2><p>채널마다 주기와 횟수. 0이면 그 채널은 쉬어요.</p></div>` + chans.map((c) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))}<small>계정 ${accounts.filter((a) => a.channel === c).length}개${isVideoCh(c) ? " · 영상 60초 · 편당 " + UI.VIDEO_COIN[60] + "코인" : ""}</small></span></div>${UI.stepper("c:" + c, st.count[c], 0, st.every[c] === "day" ? 3 : st.every[c] === "month" ? 31 : 7, "회")}</div>
+      <div style="padding:0 0 10px">${UI.seg("e:" + c, [["day", "매일"], ["week", "주"], ["month", "달"]], st.every[c])}</div>`).join("") + `<div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
     else if (step === 2) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>어느 계정으로?</h2><p>«자동»이면 그날 가장 건강한 계정에 배정해요.</p></div>` + on.map((c) => { const accs = accounts.filter((a) => a.channel === c); return `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))} · 주 ${st.count[c]}회</span></div>${UI.seg("m:" + c, [["auto", "자동"], ["fixed", "고르기"]], st.mode[c])}<div data-pick="${c}" ${st.mode[c] === "fixed" ? "" : "hidden"}>${UI.chips("a:" + c, accs.map((a) => [a.id, "@" + a.handle]), st.acc[c] || accs[0]?.id)}</div></div>`; }).join("") + `<div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="nx">다음</button></div>`;
+    else if (step === 3) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>언제 나갈까요?</h2><p>안 고르면 채널마다 좋은 요일·시간으로 저희가 골라요.</p></div>` + on.map((c) => `<div class="sec" style="display:flex;align-items:center;gap:8px">${UI.mark(c, "sm")}${UI.esc(UI.chLabel(c))}</div>
+      ${st.every[c] === "week" ? `<div style="padding:0 0 6px">${UI.chips("wd:" + c, WD.map((w, i) => [i, w]), st.wd[c], true)}</div><p class="muted" style="margin:0 0 8px;font-size:12.5px">${st.wd[c].length ? `${st.wd[c].length}일 골랐어요${st.wd[c].length !== st.count[c] ? ` · 주 ${st.count[c]}회와 다르면 저희가 맞춰서 나눠요` : ""}` : "요일은 저희가 고를게요"}</p>` : '<p class="muted" style="margin:0 0 8px;font-size:12.5px">요일은 주 N회일 때만 고를 수 있어요</p>'}
+      <div style="padding:0 0 12px">${UI.chips("h:" + c, [["", "자동"], ...HOURS_R], st.hour[c] == null ? "" : String(st.hour[c]))}</div>`).join("")
+      + `<div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="nx">다음</button></div>`;
     else body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>${st.produceLeadDays}일 전에 만들어 두고,<br>조용히 두면 그대로 나가요</h2><p>검수 시간에 아무것도 안 하면 예정대로 발행돼요.</p></div>
-      <div class="sec">검수 방식</div>${UI.seg("rp", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], st.reviewPolicy)}
+      <div class="sec">검수 방식</div>${UI.seg("rp", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], autoApproveOff() ? "require_confirm" : st.reviewPolicy)}
+      ${autoApproveOff() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">자동 승인은 Pro 부터예요 · 지금 요금제에서는 검수에서 한 번 눌러야 나가요 <a href="/app/plan.html" style="font-weight:700;text-decoration:underline">요금제 보기</a></p>' : keptAuto() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">지금 쓰는 «조용하면 발행»은 그대로 유지돼요 · «반드시 확인»으로 바꾸면 이 요금제에서는 되돌릴 수 없어요</p>' : ""}
       <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
-      <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div><div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
+      <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div>
+        ${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}
+        <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
-    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") st.reviewPolicy = v; else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
+    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") st.reviewPolicy = v; else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
     const bk = body.querySelector("#bk"); if (bk) bk.onclick = () => { step--; view(sh, close); };
     const go = body.querySelector("#go"); if (go) go.onclick = async () => {
       go.disabled = true;
-      const rules = chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: "week", count: st.count[c], active: true }; /* [P1R5] kind shorts */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (cur[c]?.preferredHour != null) r.preferredHour = cur[c].preferredHour; if (cur[c]?.weekdays) r.weekdays = cur[c].weekdays; return r; });
+      const rules = chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: st.every[c], count: st.count[c], active: true }; /* [P1R5] kind shorts · [R7 §4.3] 주기·요일·시각 */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (st.hour[c] != null) r.preferredHour = st.hour[c]; if (st.every[c] === "week" && st.wd[c].length) r.weekdays = st.wd[c]; return r; });
       const r = await UI.api("/api/rules-save", { body: { rules } }); go.disabled = false;
       if (!r.ok) { if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); } return UI.toast(r.error || "저장하지 못했어요"); }
-      const s = await UI.api("/api/rules-settings", { body: { autoSchedule: true, reviewPolicy: st.reviewPolicy, produceLeadDays: st.produceLeadDays } }); if (!s.ok) UI.toast(s.error || "설정은 저장하지 못했어요");
+      const s = await UI.api("/api/rules-settings", { body: { autoSchedule: true, reviewPolicy: st.reviewPolicy, produceLeadDays: st.produceLeadDays }, noGate: true });
+      if (!s.ok) UI.toast(s.step === "plan_feature" ? "자동 승인은 Pro 부터예요 · 지금은 검수에서 눌러야 나가요" : s.error || "설정은 저장하지 못했어요");
       close(); UI.done(`자동 편성을 켰어요 · 주 ${r.coinsPerWeek}코인`, load);
     };
   };

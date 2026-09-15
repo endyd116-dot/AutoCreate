@@ -6,7 +6,7 @@
 <title>내 계정 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=9">
+<link rel="stylesheet" href="/css/ac.css?v=10">
 </head>
 <body>
 <div class="shell">
@@ -14,7 +14,7 @@
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
 <div class="hl"><div class="say">안녕하세요</div><div class="num" id="name">…</div><div class="tip" id="plan"></div></div>
-<div class="group" id="accounts"><div class="gt">연결한 계정 <a href="/app/accounts.html">관리</a></div><div class="empty"><span class="mk soft">+</span><h3>첫 계정을 연결해 보세요</h3><p>네이버 블로그·티스토리·유튜브 중 하나면 시작할 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div></div>
+<div class="group" id="accounts"><div class="gt">연결한 계정 <a href="/app/accounts.html">관리</a></div><div class="empty"><span class="mk soft">+</span><h3>첫 계정을 연결해 보세요</h3><p id="accEmpty">지금 열려 있는 채널 하나면 시작할 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div></div>
 <div class="group">
   <div class="gt">올린 글 · 내 PC</div>
   <a class="row tap" href="/app/posts.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span><div class="l"><span class="t">올라간 글</span><span class="d" id="postsDesc">채널에 올라간 글과 조회수</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
@@ -27,7 +27,7 @@
 </div>
 <div class="group">
   <div class="gt">설정</div>
-  <a class="row tap" href="/app/settings.html"><div class="l"><span class="t">계정 · 보안</span><span class="d">비밀번호 · 기기 · 로그아웃</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/settings.html"><div class="l"><span class="t">설정</span><span class="d">영상 만들기 · 비밀번호 · 기기 · 로그아웃</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/support.html"><div class="l"><span class="t">문의하기</span><span class="d">막히는 게 있으면 바로 알려 주세요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <button class="row tap" type="button" id="ref"><div class="l"><span class="t">친구 초대</span><span class="d" id="refd">코드를 나눠 주면 둘 다 코인을 받아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
 </div>
@@ -65,6 +65,12 @@ UI.api("/api/runner-list").then((rl) => {
 UI.api("/api/posts-list?status=published").then((pl) => { if (pl.ok && pl.posts) UI.$("#postsDesc").textContent = pl.posts.length ? `지금까지 ${UI.num(pl.posts.length)}건 올라갔어요` : "아직 올라간 글이 없어요"; });
 // 연결한 계정(실데이터 · A1 과 같은 행) — 채널별 그룹
 const al = await UI.api("/api/accounts-list");
+/* [R7 §4.3] 빈 상태 문구에 채널 이름을 박지 않는다 — 레지스트리에서 «지금 열린» 채널만 읽어 말한다(영상 채널이 열리면 문구가 저절로 따라온다) */
+if (al.ok && !al.accounts.length) {
+  const open = (al.channels || []).filter((c) => c.status === "active").map((c) => c.label || UI.chLabel(c.key));
+  const el = UI.$("#accEmpty");
+  if (el && open.length) el.textContent = `${open.slice(0, 3).join(" · ")}${open.length > 3 ? " 등" : ""} 중 하나면 시작할 수 있어요.`;
+}
 if (al.ok && al.accounts.length) {
   const by = {}; for (const a of al.accounts) (by[a.channel] = by[a.channel] || []).push(a);
   UI.$("#accounts").innerHTML = `<div class="gt">연결한 계정 ${al.accounts.length}개 <a href="/app/accounts.html">관리</a></div>` + Object.entries(by).map(([ch, list]) => list.map((a) => `<a class="row tap" href="/app/accounts.html">${UI.mark(ch)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(ch))} · 오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</a>`).join("")).join("");
