@@ -23,6 +23,7 @@
   const judgePending = qs.get("judgePending") === "1";   // [R7 §1.5] 못 잰 축(보류)이 있는 심사표
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
+  const oneChannel = qs.get("oneCh") === "1";   // [사장님 실측] 네이버 계정만 있는 집 — 소재가 전부 한 채널
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
@@ -160,7 +161,11 @@
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     v: 7, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
-    accounts: fresh ? [] : [
+    /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
+    accounts: fresh ? [] : oneChannel ? [
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
+      { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatar: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
+    ] : [
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
@@ -574,7 +579,9 @@
     "topics-list": () => { refreshTick(); const t = S.topicsRefresh;
       const refresh = { running: isRefreshing() };
       if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
-      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate"), templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; }, // [P1R5] templates(레퍼런스 구조) 동봉
+      /* [사장님 실측] 서버는 **연결된 계정의 채널**에서만 소재 채널을 고른다(lib/topics.ts) — 모의도 그래야 «네이버만 보이는» 그 화면이 재현된다 */
+      const only = oneChannel ? "naver_blog" : null;
+      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate").map((x) => (only ? { ...x, channelHint: only } : x)), templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; }, // [P1R5] templates(레퍼런스 구조) 동봉
     "topics-refresh": () => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; refreshTick();
       if (isRefreshing()) return { ok: true, started: false, running: true };
       if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
@@ -802,7 +809,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
