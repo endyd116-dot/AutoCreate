@@ -35,6 +35,9 @@
   const pubNow = qs.get("pubnow") || "";      // [R8 §4.2] 지금 올리기 — cadence·offline·gate·connector
   const adsApproved = qs.get("ads") === "1";   // [R8 §3.2] 애드센스 승인된 티스토리·워드프레스 계정(광고 붙이기 줄이 보이게)
   const whyNone = qs.get("why") === "none";   /* [R8-A] 형식이 없어 주제군을 못 정한 글(서버가 topicGroup:null 로 준다) */
+  /* [R8CLOSE] 같은 `?why=` 손잡이에 두 갈래 더 — `fit0`(적합도를 못 쟀다) · `nohero`(대표로 쓸 사진이 없다).
+     🔴 둘 다 «못 한 쪽»이다. 잘 된 화면만 보면 **못 한 쪽 문장을 아무도 안 본다**(그래서 거기에 거짓말이 숨는다). */
+  const whyMode = qs.get("why") || "";
   const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
   /* [R8-A2 §5D①·§5E] 직접 쓰기·내리기 손잡이
@@ -110,6 +113,27 @@
   const DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
   const DISC_SPONSORED = "이 글은 광고주에게서 원고료 등 대가를 받고 작성한 유료 광고입니다.";
   const DISC_GIFT = "이 글은 광고주에게서 제품(또는 서비스)을 무상으로 제공받아 작성했습니다.";
+  /* [R8CLOSE §B8·B2·B9] 🔴 **서버가 이미 싣던 줄 셋** — 문장은 전부 서버 파일에서 **글자 그대로** 베꼈다(화면이 다시 짓는지 여기서 재진다).
+       `channelReason` ← lib/director-goal.ts `reason` 의 `flip` 가지 · `personaFit` ← lib/persona-fit.ts `personaFitOf` 의 겹침 가지
+       `hero` ← lib/stock/plan.ts `heroFactOf` 의 `needed && ok` 가지. 🔴 `pinned` 은 서버가 **리터럴 false** 라 여기서도 false 다.
+     ?why=fit0 → 적합도를 **못 쟀을 때**(measured:false). 🔴 그때도 배정은 됐다 — 화면이 «0점»으로 그리면 거짓말이다(AC-9).
+     ?why=nohero → 대표로 쓸 사진이 없을 때. 🔴 그래도 글은 올라간다(§9). */
+  const WHY3 = (mode) => ({
+    channelReason: "티스토리에 광고가 붙어 있어서 먼저 골랐어요 — 지금 수익이 나는 쪽이에요.",
+    personaFit: mode === "fit0"
+      ? { score: 0, matched: [], measured: false, line: "이 계정이 어떤 이야기를 하는지 아직 안 정해서, 잘 맞는지는 못 쟀어요." }
+      : { score: 0.75, matched: ["자취", "요리", "1인 가구"], measured: true, line: "평소 쓰는 이야기(자취 · 요리 · 1인 가구)와 겹쳐요." },
+    hero: mode === "nohero"
+      ? { needed: true, ok: false, index: -1, source: null, made: false, pinned: false, line: "대표로 쓸 사진이 아직 없어요. 사진을 한 장 올리시면 그게 대표가 돼요 — 그대로 두셔도 글은 올라가요." }
+      : { needed: true, ok: true, index: 0, source: "ai", made: false, pinned: false, line: "첫 사진이 대표로 나가요 — 목록과 검색에 이 사진이 같이 보여요." },
+  });
+  /* [R8CLOSE-B2 §5] 🔴 **못 따라 한 축**(`meta.refUnused = [{field, why}]` · lib/video/reference-apply.ts).
+     🔴 `why` 는 **우리끼리 쓰는 말**이다(«렌더»·«프리셋»·«R10 3번») — 화면에 그대로 내면 §13.0 금지어가 실린다.
+        그래서 모의도 서버 글자 그대로 담아 두되, **화면은 축 이름만 그린다**(아래 `renderRefUnused` 주석 참고). */
+  const REF_UNUSED = [
+    { field: "caption", why: "자막 모양이 렌더에 상수로 박혀 있다(프리셋 3개뿐) — 넣을 칸이 없다 · R10 3번" },
+    { field: "camera", why: "컷 안 비트 수만 받았다 — 이동 규칙(푸시인·궤도·팬)은 렌더가 켄번즈 하나뿐이라 못 낸다 · R10 4·5번" },
+  ];
   /* [R8-A2 §2.4] 수치 주장 — 모양은 netlify/functions/pieces.ts:142(`{ summary, items, line }`) 그대로 ·
      `line` 문구는 lib/fact-claims.ts `claimsLine` 이 self=3·risky=2 일 때 내는 글자 그대로(화면이 다시 짓지 않는지 여기서 재진다). */
   const NUM_CLAIMS = { summary: { total: 5, given: 2, self: 3, structural: 0, risky: 2 },
@@ -662,6 +686,10 @@
       /* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **최상위 키**다(settings 안이 아니다) · 기본 꺼짐 */
       if (typeof b.recipeVolunteer === "boolean") S.recipeVolunteer = b.recipeVolunteer;
       if (Array.isArray(b.kinds)) { S.settings.kinds = b.kinds.includes("video") ? ["text", "video"] : ["text"]; S.kindsSet = true; }
+      /* [R8CLOSE §B8] 수익 목표 — 🔴 서버 `ALLOWED_SETTINGS`(tenant-settings.ts:19) 에 `goal` 이 들어가야 살아난다.
+         모의는 **약속대로** 받아 둔다(A·B 동시 발사 관례) — 값은 `lib/director-goal.ts MediaGoal` 네 갈래뿐이고,
+         🔴 빈 문자열은 **열쇠를 지우는 것**이다(«모름»과 «빈 값을 고름»은 다르다 · AC-57). */
+      if (typeof b.goal === "string") { if (["adsense", "adpost", "ypp", "clip_incentive"].includes(b.goal)) S.settings.goal = b.goal; else delete S.settings.goal; }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
       return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer }; },
     "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p })), trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
@@ -885,7 +913,7 @@
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
-      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
+      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
       /* [R8-A §2 · B-1 d6c2359] «왜 이렇게 생겼나» 3축 — 이름·모양은 서버 pieces-get 그대로.
          값은 lib/writing-contracts.ts 의 그 채널 칸에서 복사(label·register·분량·사진).
          🔴 ?why=none = **형식이 없어 주제군을 못 정한 글** — topicGroup 이 null 로 오고 분량이 채널 기본값에서 온다(fromGroup:false). */
@@ -901,7 +929,7 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
           goalRules: NV ? ["r1", "r2", "r3"] : ["r1", "r2"],   /* 🔴 화면은 **가짓수만** 쓴다(모델 지시문이라 글자 그대로 안 보여 준다) */
           actualChars: String(p.bodyHtml || "").replace(/<[^>]+>/g, "").length } };
       /* [R8-A2 §2.4] `?claims=1` 이면 근거 없는 수치가 섞인 글 — 서버가 이미 주던 칸(`meta.numberClaims`)을 화면이 그리는지 본다. */
-      return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], meta: { ...p.meta, ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+      return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], meta: { ...p.meta, ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     /* 🔴 [R8-A2 §9] 승인은 **막지 않는다** — 서버 `HARD_GATE_KEYS = []` 이고, 영상도 `judgeBlockers` 둘(깨진 물건)만 거부한다.
        옛 모의는 `p.gateOk` 가 false 면 막고 P0 면 다 막아서, **시연·스샷에서만 존재하는 가짜 게이트**를 만들고 있었다(AC-52 의 모의 쪽 얼굴).
        🔴 사유 문장은 서버(`lib/content-approve.ts approvePiece`) 글자 그대로. */
