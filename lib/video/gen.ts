@@ -8,7 +8,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../db-util";
-import { refundPiece } from "../coin-ledger";
+import { refundPieceDetailed, refundLine } from "../coin-ledger";
 import { shortsFormOf, type ShortsFormat } from "../writing-contracts";
 import { videoBadgeText, videoDescriptionFirstLine, videoOpeningCaption } from "../disclosure";
 import { decryptObj } from "../creds-crypto";
@@ -53,10 +53,10 @@ async function acquireLock(pieceId: number, by: string): Promise<boolean> {
 async function releaseLock(pieceId: number): Promise<void> { await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ chainLock: null })} WHERE id = ${pieceId}`); }
 
 async function failPiece(tid: number, pieceId: number, reason: string, slotId: number | null): Promise<GenResult> {
-  const refunded = await refundPiece(tid, pieceId);
+  const rf = await refundPieceDetailed(tid, pieceId); const refunded = rf.granted;
   await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", chainLock: null, failReason: reason, refunded })}, updated_at = NOW() WHERE id = ${pieceId}`);
   if (slotId) await q(sql`UPDATE slots SET status = 'failed', note = ${reason.slice(0, 300)}, updated_at = NOW() WHERE id = ${slotId}`);
-  await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"piece_failed"}, ${"영상을 만들지 못했어요"}, ${`${reason.slice(0, 120)} 코인 ${refunded}개는 돌려드렸어요.`}, ${"/app/pieces.html?status=failed"})`);
+  await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"piece_failed"}, ${"영상을 만들지 못했어요"}, ${`${reason.slice(0, 120)} ${refundLine(rf)}`}, ${"/app/pieces.html?status=failed"})`);
   console.error(`[video/gen] piece ${pieceId} 실패: ${reason}`);
   return { ok: false, status: "failed", reason };
 }

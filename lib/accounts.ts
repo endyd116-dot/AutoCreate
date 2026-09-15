@@ -57,6 +57,8 @@ export interface AccountRow {
     risk?: string;
   };
   goldenHours?: number[]; lastPostAt?: string; lastErrorKind?: string; groupId?: number;
+  /** 🔴 `pending_login` 인데 **아직 한 번도 로그인한 적이 없다**(«풀린» 것이 아니라 «처음 붙인» 것). */
+  neverLoggedIn?: true;
   /** [P1R8 §5.3] 묶음 **이름** — 화면이 id 만 받고 이름을 또 물으러 가지 않게 같이 싣는다(승계 단위 · §7.2). */
   groupName?: string;
   personaId?: number;
@@ -113,6 +115,13 @@ export function toAccountRow(r: Row): AccountRow {
   if (Array.isArray(r.golden_hours) && r.golden_hours.length) o.goldenHours = (r.golden_hours as unknown[]).map(Number).filter((n) => Number.isFinite(n));
   const lp = utcDate(r.last_post_at); if (lp) o.lastPostAt = lp.toISOString();
   if (r.last_error_kind) o.lastErrorKind = String(r.last_error_kind);
+  /* 🔴 [2026-09-16] «**처음 붙였다**»와 «**로그인이 풀렸다**»는 `status` 가 **같은 값**(`pending_login`)이라 화면이 못 가른다.
+     그래서 «아직 한 번도 로그인 안 함»을 서버가 **이름 붙여** 준다 — 화면이 `lastErrorKind` 유무로 **추측하게 두지 않는다**.
+     근거: `pending_login` 을 만드는 길은 둘뿐이다 —
+       · 처음 연결(`accounts.ts` 의 `upsertAccount(..., "pending_login")`) → `last_error_kind` **없음**
+       · 로그인 실패·캡차(`applyAccountSignal`) → `last_error_kind` 를 **반드시 함께 적는다**
+     🔴 이 문장이 사장님이 첫 발행 자리에서 읽으실 첫 줄이다 — «다시 로그인»이라고 하면 «언제 했다고?»가 된다. */
+  if (String(r.status) === "pending_login" && !r.last_error_kind) o.neverLoggedIn = true;
   if (r.group_id) o.groupId = Number(r.group_id);
   if (r.group_name) o.groupName = String(r.group_name);
   if (r.persona_id) o.personaId = Number(r.persona_id);

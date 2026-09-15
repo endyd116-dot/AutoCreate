@@ -28,7 +28,7 @@ import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
 import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "../../lib/writing-contracts";
-import { htmlToPlain } from "../../lib/blocks";
+import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -193,8 +193,19 @@ export default async (req: Request): Promise<Response> => {
           length: { min: len.min, max: len.max, fromGroup: !!(grp && wc.lengthByGroup?.[grp]) },
           images: { min: img.min, max: img.max, default: img.default, fromGroup: !!(grp && wc.imagesByGroup?.[grp]) },
           goalRules: wc.goalRules?.[goal] ?? [],       // 실제로 프롬프트에 실린 줄들(없으면 빈 배열)
-          /* 실제 글의 길이 — 계약 폭 안에 있는지 화면이 바로 보여 줄 수 있게. */
-          actualChars: htmlToPlain(String(p.body || "")).length,
+          /* 🔴 [2026-09-16 · A 가 첫 발행 경로에서 찾음] **자가 둘이었다.**
+             여기서는 `htmlToPlain(body).length`(HTML 을 평문으로 · 줄바꿈 유지)로 재고,
+             게이트(`lib/ai-tell-gate.ts`)는 `blocksCharCount(blocks)`(블록 평문 · 공백을 하나로)로 잰다.
+             ⇒ 같은 화면에 «472자»와 «1,840자»가 나란히 떴다. 게이트 주석은 «**세는 자는 하나**다»라고 적혀 있었는데
+                이 줄이 그 말을 어기고 있었다(AC-59 · 주석이 코드보다 앞서 나간 자리).
+             🔴 자를 게이트 쪽으로 모은다 — 계약 폭(`lengthFor`)이 그 자로 정해진 값이라, 그 자로 재야 «폭 안인가»가 말이 된다.
+             🔴 블록이 없는 옛 글만 HTML 로 잰다(없는 것을 있는 척하지 않는다 · `charsFrom` 으로 어느 자인지 같이 말한다). */
+          ...(() => {
+            const blocks = Array.isArray(p.blocks) ? (p.blocks as Parameters<typeof blocksCharCount>[0]) : null;
+            return blocks && blocks.length
+              ? { actualChars: blocksCharCount(blocks), charsFrom: "blocks" as const }
+              : { actualChars: htmlToPlain(String(p.body || "")).length, charsFrom: "body" as const };
+          })(),
         };
       } catch (e) {
         /* 🔴 못 실으면 **빈칸으로 두고 사유를 남긴다** — 기본값으로 채우면 화면이 «이 글에 적용된 값»이라고 거짓말한다(AC-9). */
@@ -301,23 +312,58 @@ export default async (req: Request): Promise<Response> => {
       const regen = n(m.regenCount);
       if (regen >= 1) return json({ ok: false, step: "regen_limit", error: "다시 만들기는 한 번만 할 수 있어요. 직접 수정하거나 새 소재로 만들어 주세요." }, 400);
       const note = String(b.note ?? "").trim().slice(0, 300);
+      /* 🔴 [2026-09-16 · AC-92] 차감이 실패한 **이유를 모를 때 «코인이 부족해요»라고 말하지 않는다.**
+         종전엔 세 자리 모두 이유와 무관하게 «부족해요 · need 0» 이었다 — 원장 쓰기가 실패한 것인데
+         고객은 «충전하면 되겠지»로 읽고 충전해도 또 같은 곳에서 막힌다. `lib/director.ts` 는 이미 둘을 갈라 말하고 있었다(같은 잣대 · AC-47). */
+      const coinFail = (c: { reason?: string; need?: number; balance?: number }) =>
+        c.reason === "insufficient"
+          ? json({ ok: false, step: "coin_short", error: `코인이 ${n(c.need)}개 부족해요.`, need: n(c.need), have: n(c.balance) }, 402)
+          : json({ ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }, 500);
       // 실패로 환급됐던 piece 는 다시 차감(원장 행 삭제 0 · 새 ref `piece:{id}:regen{n}` — 순액은 1회분 · 부족하면 coin_short)
       if (st === "failed" && n(m.refunded) > 0) {
         const { consume, refundPiece } = await import("../../lib/coin-ledger");
         const tag = `piece:${id}:regen${regen + 1}`;
         if (isVideo) {
           // [P1R5 §1.10] 영상은 `videoCoinItem(seconds)` **1건**(이미지 코인 없음).
-          const { videoCoinItem } = await import("../../lib/coin-table");
-          const secs = n(((m.video ?? {}) as Record<string, unknown>).seconds) || 60;
-          const cv = await consume(tid, videoCoinItem(secs as 15 | 30 | 60), tag, { actorId: auth.user.uid, reason: "영상 다시 만들기(환급분 재차감)" });
-          if (!cv.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: cv.reason === "insufficient" ? cv.need : 0, have: cv.balance }, 402);
+          const { videoCoinItem, COIN_TABLE } = await import("../../lib/coin-table");
+          /* 🔴 [2026-09-16 · AC-92] 종전엔 `n(meta.video.seconds) || 60` 이었다 — **길이를 모르면 제일 비싼 60초 값(28코인)**을 물렸다.
+             ② 편성표 견적의 «안 고르면 60초»와는 다른 이야기다. 거기 60 은 **앞으로 실제로 만들어 줄 길이**라 고객이 받는 것과 같지만,
+             여기 60 은 **이미 지나간 일에 대한 추측**이다. 추측으로 돈을 물리지 않는다.
+             🔴 정답은 그 글이 들고 있다 — 처음 차감할 때 쓴 `coinItem` 이 `meta` 에 그대로 있다(`lib/director.ts` 가 적는다 · AC-71).
+                그게 없는 옛 글이면 기록된 길이로, 그것도 없으면 **다시 안 받는다**(모르면 모자라게 받는 쪽으로 틀린다). */
+          const secs = n(((m.video ?? {}) as Record<string, unknown>).seconds);
+          const recorded = String(m.coinItem || "");
+          const item = recorded.startsWith("video") && recorded in COIN_TABLE ? (recorded as keyof typeof COIN_TABLE)
+            : secs > 0 ? videoCoinItem(secs) : null;
+          if (item) {
+            const cv = await consume(tid, item, tag, { actorId: auth.user.uid, reason: "영상 다시 만들기(환급분 재차감)" });
+            if (!cv.ok) return coinFail(cv);
+          } else {
+            /* 무엇을 물렸는지 기록이 없다 — 지어내지 않고 **안 받는다**. 자국은 남긴다(왜 이 글만 공짜였나를 나중에 설명할 수 있게). */
+            await writeAudit({ tenantId: tid, action: "piece_regen_no_recharge", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`,
+              detail: { why: "처음 차감한 코인 항목이 기록에 없음", refunded: n(m.refunded) }, riskLevel: "low" });
+          }
         } else {
-          const imgs = Math.max(0, Math.trunc(n(m.imageCount)));
-          const c1 = await consume(tid, "blog", tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
-          if (!c1.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: c1.reason === "insufficient" ? c1.need : 0, have: c1.balance }, 402);
-          for (let i = 1; i <= imgs; i++) {
-            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `이미지 ${i}/${imgs}(재차감)` });
-            if (!ci.ok) { await refundPiece(tid, id); return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: ci.reason === "insufficient" ? ci.need : 0, have: ci.balance }, 402); }
+          /* 🔴 [2026-09-16] **여기만 옛 식이 남아 있었다.** 사진 **총 장수**(`imageCount`)만큼 `image` 를 물렸다 —
+             새 규칙에서는 **AI 로 구운 사진만**, 그것도 **포함분(1장)을 뺀 나머지**다(`lib/coin-table.ts AI_IMAGES_INCLUDED`).
+             ⇒ 처음에 **1코인**이던 글이 실패 뒤 다시 만들 때 **7코인**으로 불어났다. 고객 돈이 걸린 자리다.
+             🔴 「숫자는 새 식인데 이 자리만 옛 식」 — 코인 수리가 닿지 않은 마지막 호출부였다(A 가 화면에서 같은 과를 찾아 준 덕에 훑었다).
+             카드뉴스는 장수로 안 세고 통째로 한 건이다(`coinFormatOf` 한 곳). */
+          const { AI_IMAGES_INCLUDED } = await import("../../lib/coin-table");
+          /* 🔴 분류는 **그 글이 들고 있다** — 처음 차감할 때 쓴 `coinItem` 이 `meta` 에 적혀 있다(`lib/director.ts` 가 적는다 · AC-71).
+             채널·포맷으로 **다시 고르면** 그 사이 계약이 바뀌었을 때 처음과 다른 값이 나온다(«고르는 자리가 갈린다» · AC-74). */
+          const item = String(m.coinItem || "") === "cardnews" ? "cardnews" : "blog";
+          /* 🔴 **«모른다»를 «1장»으로 바꾸지 않는다**(AC-92). `aiImageCount` 는 R8 뒤에 만든 글에만 있다 —
+             그 값이 **없으면 AI 사진이 몇 장이었는지 우리가 모른다.** 모르면 **글값만** 받는다(모자라게 받는 쪽으로 틀린다).
+             옛 `imageCount`(사진 **총** 장수)로 대신 세면 고객 사진·스톡까지 돈을 받게 된다 — 그게 여기 있던 옛 식이다. */
+          const aiKnown = m.aiImageCount !== undefined && m.aiImageCount !== null;
+          const ai = aiKnown ? Math.max(0, Math.trunc(n(m.aiImageCount))) : 0;
+          const billable = item === "cardnews" ? 0 : Math.max(0, ai - AI_IMAGES_INCLUDED);
+          const c1 = await consume(tid, item, tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
+          if (!c1.ok) return coinFail(c1);
+          for (let i = 1; i <= billable; i++) {
+            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(재차감 · 1장은 글값에 포함)` });
+            if (!ci.ok) { await refundPiece(tid, id); return coinFail(ci); }
           }
         }
       }

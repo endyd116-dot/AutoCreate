@@ -18,10 +18,10 @@ import { HOOK_TYPES, PALETTES } from "./video/scenes";
 import { GEMINI_VOICES } from "./video/tts";
 import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
 import { precheckVideoBudget, triggerVideo } from "./video/gen";
-import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract, isCardnewsChannel, coinFormatOf } from "./writing-contracts";
+import { contractFor, defaultImageCount, shortsFormOf, videoSecondsFor, type FormatKey, type WritingContract, isCardnewsChannel, coinFormatOf } from "./writing-contracts";
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { gapMinFor } from "./publish-gap";
-import { balance, consume, refundPiece } from "./coin-ledger";
+import { balance, consume, refundPiece, refundPieceDetailed, refundLine } from "./coin-ledger";
 import { coinCostOf, videoCoinItem, pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
 import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
@@ -154,11 +154,8 @@ async function recentVideoFormats(tid: number, accountId: number | null, channel
 }
 
 /* ═══ [P1R5 §1.1] 영상 spec — 결정론(같은 brief·같은 계정이면 같은 값) ═══ */
-/** 채널·테넌트 설정 → 이 편의 길이(15|30|60). 채널 상한(클립 채널 30)까지 자른다. */
-export function videoSecondsFor(channel: string, want?: unknown): VideoSeconds {
-  const n0 = Number(want); const base = n0 === 15 || n0 === 30 || n0 === 60 ? n0 : 60;
-  return clampSecondsForChannel(channel, base);
-}
+/* 🔴 [2026-09-16] `videoSecondsFor` 는 `lib/writing-contracts.ts` 로 옮겼다 — 표(`VIDEO_CHANNEL_MAX_SEC`) 옆이 그 함수의 집이고,
+   **디렉터 말고도 부르는 곳이 있다**(편성표 견적). 여기 두었더니 편성표가 못 부르고 «60초»를 혼자 정하고 있었다. */
 /**
  * [P1R6 §2.3] 최종 길이 = **채널 상한 ∩ 포맷 상한**. 요청값에서 내려갔으면 `clampedFrom` 으로 사실을 남긴다
  * (화면이 «30초로 맞췄어요» 를 말한다 · 조용한 하향 금지).
@@ -169,7 +166,7 @@ export function videoSecondsFor(channel: string, want?: unknown): VideoSeconds {
  *    포맷 로테이션이 클립을 고르는 1/3 확률에서 터지는 자리였다. 이제 `shortsFormOf` 가 낸 값을 정본으로 쓴다.
  */
 export function resolveVideoSeconds(channel: string, format: VideoFormat, want?: unknown): { seconds: VideoSeconds; clampedFrom?: VideoSeconds } {
-  const asked = videoSecondsFor(channel, want);                       // 채널 상한
+  const asked = videoSecondsFor(channel, want) as VideoSeconds;       // 채널 상한(정본 = writing-contracts)
   const seconds = shortsFormOf(format, asked).seconds as VideoSeconds; // + 포맷 상한·하한
   // 사실을 남기는 건 «사용자가 골랐는데 내려간» 경우뿐이다 — 기본값(요청 없음)에서 내려간 건 알릴 것이 없다(§2.3 «자동 하향 시»).
   const explicit = want !== undefined && want !== null && Number(want) > 0;
@@ -693,9 +690,11 @@ async function failTrigger(tid: number, pieceId: number, reason: string): Promis
   try {
     const [p] = await q(sql`SELECT slot_id, meta FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} AND status = 'generating'`);
     if (!p) return;   // 이미 다른 경로가 처리함(멱등)
-    const refunded = await refundPiece(tid, pieceId);
+    const rf = await refundPieceDetailed(tid, pieceId);
+    const refunded = rf.granted;
     const meta = (p.meta || {}) as Record<string, unknown>;
-    const body = `«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 시작하지 못했어요. 코인 ${refunded}개는 돌려드렸어요.`;
+    /* 🔴 문장은 `refundLine` 한 곳 — «못 돌려줬다»를 «0개 돌려드렸다»로 말하지 않는다. */
+    const body = `«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 시작하지 못했어요. ${refundLine(rf)}`;
     // piece·slot·알림을 한 왕복으로(왕복이 늘면 동기 함수 한도 안에서 중간에 잘려 «failed 로만 바뀌고 알림은 없는» 반쪽 상태가 된다 — 실측 2026-09-14)
     await q(sql`WITH up AS (
         UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", failReason: reason, refunded })}, updated_at = NOW()

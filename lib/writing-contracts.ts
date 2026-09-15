@@ -439,6 +439,35 @@ export function videoChannelSpec(channel: string): { maxSeconds: 15 | 30 | 60; f
   return { maxSeconds: max, formats };
 }
 
+/**
+ * videoSecondsFor — 채널·테넌트 설정 → **이 편의 길이**(15|30|60). 채널 상한(클립 채널 30)까지 자른다.
+ *   🔴 [2026-09-16] `lib/director.ts` 에 있던 것을 **표 옆으로** 옮겼다 — 값을 쓰는 곳이 디렉터만이 아니다.
+ *      편성표 견적(`lib/slots.ts`)이 이 함수를 못 불러서 **60초라고 혼자 정하고 있었다**(아래 `estimateVideoSeconds` 주석).
+ * 🔴 «고르지 않았다»의 답은 **60**이다 — 이건 날조가 아니라 **우리 기본값**이고, 안 고른 고객에게 실제로 만들어 주는 길이다.
+ *    날조와 기본값의 차이: 기본값은 **그대로 실행된다**(고객이 받는 것과 같다). 날조는 실행과 다른 값을 말한다.
+ */
+export function videoSecondsFor(channel: string, want?: unknown): 15 | 30 | 60 {
+  const n0 = Number(want); const base = n0 === 15 || n0 === 30 || n0 === 60 ? n0 : 60;
+  return clampSecondsForChannel(channel, base);
+}
+
+/**
+ * estimateVideoSeconds — **아직 포맷을 안 고른 자리**(편성표)가 쓸 길이. 견적·코인 값 계산용.
+ *
+ * 🔴 [2026-09-16 · AC-92 훑기에서 나옴] 왜 `videoSecondsFor` 로는 모자라나:
+ *    실제 길이는 **채널 상한 ∩ 포맷 상한**이고(§2.3 `resolveVideoSeconds`), 포맷은 디렉터가 로테이션으로 **나중에** 고른다.
+ *    그런데 포맷은 길이를 **내리기만 하지 않는다** — `shortsFormOf` 는 15초를 30초로 **올린다**(토킹·그래픽 모두).
+ *    ⇒ 「15초로 맞춰 둔 고객에게 편성표가 6코인이라 적고 실제로 12코인을 빼는」 자리가 된다.
+ * 🔴 그래서 **고를 수 있는 포맷 전부를 실제로 돌려 보고 그중 가장 긴 것**을 쓴다 —
+ *    표의 숫자를 여기 베껴 적지 않는다(베낀 검사·베낀 값은 표가 바뀌면 낡는다 · AC-78).
+ *    가장 긴 쪽으로 트는 이유: 견적이 실제보다 **낮으면** 고객이 «적혀 있던 것보다 더 빠졌다»를 겪는다. 그건 돈 이야기라 한쪽으로만 틀려야 한다.
+ */
+export function estimateVideoSeconds(channel: string, want?: unknown): 15 | 30 | 60 {
+  const asked = videoSecondsFor(channel, want);
+  const all = (Object.keys(VIDEO_FORMAT_MAX_SEC) as ShortsFormat[]).map((f) => shortsFormOf(f, asked).seconds);
+  return Math.max(...all) as 15 | 30 | 60;
+}
+
 /** 채널의 최대 초(§6.2 채널 규격) — 15|30|60 중 채널이 허용하는 것. */
 export function clampSecondsForChannel(channel: string, seconds: number): 15 | 30 | 60 {
   const max = VIDEO_CHANNEL_MAX_SEC[channel] ?? 60;

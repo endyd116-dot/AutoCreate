@@ -9,7 +9,7 @@
 import { sql } from "drizzle-orm";
 import { utcDate, jsonb } from "./db-util";
 import { q } from "./accounts";
-import { defaultImageCount, coinFormatOf } from "./writing-contracts";
+import { defaultImageCount, coinFormatOf, estimateVideoSeconds } from "./writing-contracts";
 import { pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
@@ -47,9 +47,13 @@ export function sanitizeSchedulePatch(b: Record<string, unknown>): Partial<Sched
   for (const k of Object.keys(SCHEDULE_DEFAULTS) as (keyof ScheduleSettings)[]) if (k in b) (out as Record<string, unknown>)[k] = merged[k];
   return out;
 }
-export async function readScheduleSettings(tid: number): Promise<ScheduleSettings> {
+/** 테넌트 설정 jsonb 원본 — 편성 변수 8개 **밖**의 값(예: `videoSeconds`)도 봐야 하는 자리가 있다. */
+export async function readSettingsRaw(tid: number): Promise<Record<string, unknown>> {
   const [t] = await q(sql`SELECT settings FROM tenants WHERE id = ${tid}`);
-  return scheduleSettingsOf((t?.settings || {}) as Record<string, unknown>);
+  return (t?.settings || {}) as Record<string, unknown>;
+}
+export async function readScheduleSettings(tid: number): Promise<ScheduleSettings> {
+  return scheduleSettingsOf(await readSettingsRaw(tid));
 }
 
 /* ───────── Rule ───────── */
@@ -85,12 +89,16 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
 /** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60).
  *  [R8 §2.5] 🔴 카드뉴스 = **`cardnews` 한 값(카드 값이 그 안에 들어 있다)**. 여기와 `lib/director.ts pieceCoin` 이
  *  **같은 규칙**이어야 한다 — 갈리면 편성표가 말한 코인과 실제로 빠지는 코인이 달라진다(AC-74 «화면의 숫자도 서버가 정본»). */
-export function coinsPerWeek(rules: Rule[]): number {
+export function coinsPerWeek(rules: Rule[], videoSeconds?: unknown): number {
   return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
     /* [R8] 🔴 기본 경로는 «AI 1장 + 나머지 스톡» 이라 글 한 편이 **1코인**이다(사장님 승인값 2026-09-15).
        사진 총 장수(`defaultImageCount`)로 세면 7코인이 되어 **화면이 옛 값을 말하게** 된다.
        🔴 식은 `pieceCoinCost` **한 곳**에만 있다 — 여기서 다시 적으면 견적과 실제가 갈린다(카드뉴스·영상도 그 함수가 가른다). */
-    const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(r.channel) });
+    /* 🔴 [2026-09-16] 영상은 **길이가 값을 가른다**(video_15 = 6 ↔ video_60 = 28 · 4.6배).
+       종전엔 `seconds` 를 안 넘겨서 `pieceCoinCost` 안의 «없으면 60» 이 대신 답했고, 그래서
+       **고객이 15초로 맞춰 놔도 편성표는 60초 값**을 적었다 — 클립 채널(상한 30초)은 28 이라 적고 12 를 뺐다.
+       고른 값은 `tenants.settings.videoSeconds` 에 있었다. 이제 디렉터와 **같은 함수**로 잰다. */
+    const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(r.channel), seconds: estimateVideoSeconds(r.channel, videoSeconds) });
     return a + weeklyCount(r) * per;
   }, 0));
 }
@@ -271,7 +279,8 @@ const SKIP_CANDIDATE_STATUS = new Set(["planned", "no_topic", "topic_assigned", 
  *   autoSchedule 꺼짐은 여기서 표시하지 않는다(배너가 맡는다).
  */
 export async function listSlots(tid: number, from: string, to: string, now = new Date()): Promise<Slot[]> {
-  const settings = await readScheduleSettings(tid);
+  const rawSettings = await readSettingsRaw(tid);          // 쿼리 수는 그대로(한 번) — 편성 변수 밖의 `videoSeconds` 도 봐야 한다
+  const settings = scheduleSettingsOf(rawSettings);
   const tickAt = nextProduceTickUtc(settings, now);
   const tick = tickAt.getTime();
   /* [R8] «언제 만들어지나»를 말하려면 크론이 보는 것을 **똑같이** 봐야 한다 — 자동 편성 스위치(settings)와 집 상태(requireWritable).
@@ -309,7 +318,7 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     if (pw) {
       o.produceWindow = pw.window; o.produceReason = pw.reason;
       /* «지금 만들기»가 얼마인지 — 누르기 전에 숫자로 안다(A 요청). 식은 `coin-table.pieceCoinCost` 한 곳이라 실제 차감과 갈릴 수 없다. */
-      if (pw.window !== "done") o.coinCost = pieceCoinCost(o.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(o.channel) });
+      if (pw.window !== "done") o.coinCost = pieceCoinCost(o.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(o.channel), seconds: estimateVideoSeconds(o.channel, rawSettings.videoSeconds) });
     }
     return o;
   });

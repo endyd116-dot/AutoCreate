@@ -17,7 +17,7 @@ import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit, tenantPlan, autoApproveAllowed } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
 import { isVideoChannel } from "../../lib/video/types";
-import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
+import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, readSettingsRaw, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
 import { isCardnewsChannel } from "../../lib/writing-contracts";   // [R8 §2.5] «카드뉴스 채널인가» 정본 한 곳
 import { mergeSettings } from "./tenant-settings";
 import { kstDateStr, addDays } from "../../lib/best-time";
@@ -50,10 +50,12 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/rules-list")) {
-      const [rules, settings, maxRules, planInfo] = await Promise.all([listRules(tid), readScheduleSettings(tid), maxRulesOf(tid), tenantPlan(tid)]);
+      /* 🔴 [2026-09-16] 설정 원본을 받는다 — `coinsPerWeek` 가 **고객이 고른 영상 길이**를 알아야 한다(안 넘기면 60초 값으로 적힌다). */
+      const [rules, raw, maxRules, planInfo] = await Promise.all([listRules(tid), readSettingsRaw(tid), maxRulesOf(tid), tenantPlan(tid)]);
+      const settings = scheduleSettingsOf(raw);
       /* [P1R7 B3 · §5B.8] 코인 미리보기는 «주 N코인»만으로는 못 읽는다 — **플랜 포함분과 견줘야** «이 편성이면 포함분 안에서 되나»를 안다.
          화면(A)은 `coinsPerWeek` 와 `includedCoins` 를 나란히 쓴다. 포함분이 0(체험)이면 0 그대로 — 숨기지 않는다. */
-      return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules), maxRules,
+      return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds), maxRules,
         includedCoins: n(planInfo.plan.limits.coinsIncluded), planKey: planInfo.planKey, autoApprove: autoApproveAllowed(planInfo.planKey, planInfo.plan) });
     }
     if (path.endsWith("/slots-list")) {
@@ -109,7 +111,7 @@ export default async (req: Request): Promise<Response> => {
          🔴 화면이 «편수 × 단가»를 스스로 셈하면 단가를 바꾸는 날 화면만 옛 셈으로 남는다(A 지적 · AC-47).
             그래서 `coinsPerWeek` 를 **저장 경로와 같은 함수**에서 준다. ── */
       if (path.endsWith("/rules-estimate")) {
-        const perWeek = coinsPerWeek(clean as Rule[]);
+        const perWeek = coinsPerWeek(clean as Rule[], (await readSettingsRaw(tid)).videoSeconds);
         const perMonth = Math.round(perWeek * 52 / 12);
         const included = (await tenantPlan(tid)).plan.limits.coinsIncluded;
         const out: Record<string, unknown> = { ok: true, coinsPerWeek: perWeek, coinsPerMonth: perMonth, rules: activeCount, limit: maxRules,
@@ -146,11 +148,12 @@ export default async (req: Request): Promise<Response> => {
       for (const r of clean) if (r.id && !r.active) await q(clearFutureSlots(tid, r.id));
       const [chk] = await q(sql`SELECT jsonb_typeof(weekdays) AS t FROM cadence_rules WHERE tenant_id = ${tid} AND weekdays IS NOT NULL ORDER BY id DESC LIMIT 1`);
       if (chk && chk.t !== "array") console.error("[rules-save] weekdays jsonb_typeof !== array", chk);
-      const settings = await readScheduleSettings(tid);
+      const raw = await readSettingsRaw(tid);
+      const settings = scheduleSettingsOf(raw);
       const roll = await rollSlots(tid, settings.horizonDays);
       const rules = await listRules(tid);
       await writeAudit({ tenantId: tid, action: "rules_save", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { rules: rules.length, active: activeCount, slotsCreated: roll.created } });
-      return json({ ok: true, rules, coinsPerWeek: coinsPerWeek(rules), slotsCreated: roll.created });
+      return json({ ok: true, rules, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds), slotsCreated: roll.created });
     }
 
     if (path.endsWith("/rules-settings")) {

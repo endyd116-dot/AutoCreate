@@ -164,7 +164,27 @@ export async function settlePieceCoins(tid: number, pieceId: number, want: numbe
  * 환급 — 그 piece 로 나간 consume 합(ref `piece:{id}` · `piece:{id}:img*` · 재생성 `piece:{id}:regen*`) − 이미 환급한 합 = 순액을 grant.
  *   ref = `refund:piece:{id}:c{누적소비}` — 같은 누적 소비에 두 번 환급되지 않는다(멱등) · 재차감 뒤 다시 실패하면 누적이 달라져 새 환급이 된다. 원장 행은 지우지 않는다.
  */
+/**
+ * 🔴 [2026-09-16 · AC-92 훑기] 환급 **결과**. 종전엔 `Promise<number>` 하나였고 실패해도 **0** 이 나왔다 —
+ *    그래서 네 곳의 알림이 «코인 **0개**는 돌려드렸어요»라고 **돌려주지 못한 것을 돌려줬다고** 말했다.
+ *    «못 돌려줬다»(`failed`)와 «돌려줄 것이 없었다»(`granted 0`)는 **다른 사실**이고, 이 함수만 그 차이를 안다.
+ */
+export interface RefundResult { granted: number; failed: boolean }
+
+/**
+ * 환급 문장 — 🔴 이 말이 사는 곳은 **여기 하나**다(글·영상·스윕·시작 실패 네 곳이 같은 말을 해야 한다).
+ *   · 못 돌려줬으면 **우리 편에서** 말한다 — «알려만 드립니다»로 발 빼지 않는다(CLAUDE §3).
+ *   · 돌려줄 것이 없었으면 «0개 돌려드렸어요»가 아니라 «빠진 코인이 없어요»다(없음 ≠ 0 · AC-9).
+ */
+export function refundLine(r: RefundResult): string {
+  if (r.failed) return "코인은 아직 그대로예요 — 저희가 확인하고 돌려드릴게요.";
+  return r.granted > 0 ? `코인 ${r.granted}개는 돌려드렸어요.` : "빠져나간 코인은 없어요.";
+}
+
 export async function refundPiece(tid: number, pieceId: number): Promise<number> {
+  return (await refundPieceDetailed(tid, pieceId)).granted;
+}
+export async function refundPieceDetailed(tid: number, pieceId: number): Promise<RefundResult> {
   try {
     const [c] = await rows(db, sql`SELECT COALESCE(SUM(-delta),0) AS c FROM coin_ledger
       WHERE tenant_id = ${tid} AND kind = 'consume' AND (ref = ${`piece:${pieceId}`} OR ref LIKE ${`piece:${pieceId}:%`})`);
@@ -172,10 +192,15 @@ export async function refundPiece(tid: number, pieceId: number): Promise<number>
       WHERE tenant_id = ${tid} AND kind = 'grant' AND ref LIKE ${`refund:piece:${pieceId}%`}`);
     const consumed = Number(c?.c || 0), refunded = Number(g?.g || 0);
     const net = consumed - refunded;
-    if (net <= 0) return 0;
+    if (net <= 0) return { granted: 0, failed: false };
     const r = await grant(tid, net, `글을 만들지 못해 돌려드린 코인(piece ${pieceId})`, null, `refund:piece:${pieceId}:c${consumed}`);
-    return r.granted;
-  } catch { return 0; }
+    return { granted: r.granted, failed: false };
+  } catch (e) {
+    /* 🔴 조용히 0 을 돌려주면 «돌려줄 것이 없었다»와 구별이 안 된다 — 그건 돈 이야기다(AC-58 · 삼켜진 실패).
+       `settlePieceCoins` 는 이미 이렇게 남기고 있었는데 **환급만 안 남기고 있었다.** */
+    console.error("[coin-ledger] refundPiece 실패", tid, pieceId, String((e as Error)?.message ?? e).slice(0, 120));
+    return { granted: 0, failed: true };
+  }
 }
 
 export interface LedgerRow { kind: string; bucket: string; delta: number; item?: string; reason?: string; ref?: string; createdAt: string }

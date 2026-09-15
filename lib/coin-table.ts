@@ -68,6 +68,10 @@ export const AI_IMAGES_INCLUDED = 1;
  *   🔴 이 파일은 DB·계약표를 보지 않는다(순수 유지 · AC-17) — 장수·구성은 **호출부가 준다.**
  */
 export function pieceCoinCost(kind: string, aiImageCount: number, opts: { seconds?: number; format?: string } = {}): number {
+  /* 🔴 [2026-09-16] `?? 60` 은 **«모르면 60»이 아니라 «안 고르면 60»**이다 — `writing-contracts.videoSecondsFor` 가
+     안 고른 고객에게 실제로 만들어 주는 길이와 **같은 값**이라 견적과 실물이 갈리지 않는다.
+     🔴 그래도 **부르는 쪽이 넘겨야 한다.** 채널 상한(클립 채널 30초)과 고객이 고른 길이는 여기서 알 수 없다 —
+        편성표가 이걸 안 넘겨서 15초짜리에 60초 값(28코인)을 적던 자리가 있었다. 견적 자리는 `estimateVideoSeconds` 를 쓴다. */
   if (kind === "shorts" || kind === "video") return coinCostOf(videoCoinItem(opts.seconds ?? 60));
   if (opts.format === "cardnews") return coinCostOf("cardnews");
   const ai = Math.max(0, Math.floor(Number(aiImageCount) || 0));

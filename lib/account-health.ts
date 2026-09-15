@@ -278,7 +278,19 @@ export async function recomputeHealth(tenantId: number, accountId: number): Prom
     const score = Math.max(0, Math.min(100, base - 5 * warn - 10 * dead));
     await q(sql`UPDATE accounts SET health_score = ${score}, updated_at = NOW() WHERE id = ${aid} AND tenant_id = ${tid}`);
     return score;
-  } catch { return 100; }
+  } catch (e) {
+    /* 🔴 [2026-09-16 · AC-92 훑기] 종전엔 여기서 **조용히 100** 을 돌려줬다.
+       위의 «기록이 없으면 100»은 **정책**이다(아직 모르니 깎지 않는다 · 고객에게 일관되게 적용된다).
+       그러나 **쿼리가 죽은 것**은 정책이 아니라 사고다 — 그걸 «100점 만점»으로 말하면
+       `accountsTrust` 가 `health < TRUST_MIN_HEALTH` 를 통과시켜 **«처음 몇 편은 봐 주세요»가 아무에게도 안 닿는다**(§9 2번).
+       ⇒ «모른다»의 정직한 답은 **마지막으로 실제로 잰 값**이다. 그것도 못 읽으면 그때는 정책값으로 간다. */
+    console.error("[account-health] recomputeHealth 실패", tid, aid, String((e as Error)?.message ?? e).slice(0, 120));
+    try {
+      const [last] = await q(sql`SELECT health_score FROM accounts WHERE id = ${aid} AND tenant_id = ${tid}`);
+      if (last?.health_score !== null && last?.health_score !== undefined) return n(last.health_score);
+    } catch { /* 두 번째도 못 읽으면 아래 정책값 */ }
+    return 100;
+  }
 }
 
 /**

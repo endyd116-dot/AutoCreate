@@ -69,9 +69,21 @@ export default async (req: Request): Promise<Response> => {
           홈의 나머지(수익·오늘 편성)는 그대로 나온다(CLAUDE §4.1 «보조 SELECT 실패는 빈 배열로 계속»). */
     try {
       // 🔴 러너가 못 넘은 로그인. 위 relogin(suspended·disconnected)과 **다른 상태**다 — 저건 «연결이 끊겼다», 이건 «로그인 창에서 멈췄다»(lib/account-health.ts:64).
-      const pendingLogin = await q(sql`SELECT id, channel, handle FROM accounts
+      const pendingLogin = await q(sql`SELECT id, channel, handle, last_error_kind FROM accounts
         WHERE tenant_id = ${tid} AND status = 'pending_login' AND COALESCE(last_error_kind,'') <> 'removed' ORDER BY id`);
-      for (const a of pendingLogin) todo.push({ kind: "pending_login", title: `@${a.handle} 다시 로그인해 주세요`, desc: "로그인 확인(캡차·2단계)에서 멈췄어요. 한 번만 직접 로그인해 주시면 이어서 올려요", link: "/app/accounts.html", tone: "warn" });
+      /* 🔴 [2026-09-16 · A 가 첫 발행 경로에서 찾음] «처음 붙임»과 «풀림»이 **같은 상태값**이라 이 줄이 둘 다에게
+         «**다시** 로그인해 주세요 / 캡차에서 **멈췄어요**»라고 말하고 있었다 — 방금 계정을 붙인 사람에게는 **둘 다 거짓말**이다
+         («언제 했다고?» · «멈춘 적 없는데?»). 가르는 값은 `last_error_kind` 다(풀림은 그 값을 반드시 함께 적는다).
+         🔴 이 문장이 사장님이 첫 발행 자리에서 읽으실 첫 줄이다. */
+      for (const a of pendingLogin) {
+        const first = !a.last_error_kind;
+        todo.push({ kind: "pending_login",
+          title: first ? `@${a.handle} 로그인 한 번만 해 주세요` : `@${a.handle} 다시 로그인해 주세요`,
+          desc: first
+            ? "계정을 붙였어요. 한 번만 직접 로그인해 주시면 그다음부터는 저희가 올려요"
+            : "로그인 확인(캡차·2단계)에서 멈췄어요. 한 번만 직접 로그인해 주시면 이어서 올려요",
+          link: "/app/accounts.html", tone: "warn" });
+      }
     } catch (e) { console.warn("[home] pending_login 조회 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
 
     try {
