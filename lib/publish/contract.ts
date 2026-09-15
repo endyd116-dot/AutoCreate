@@ -18,7 +18,20 @@ export type { GateReport };
 
 /* ─────────────────────────── 채널 라우팅 ─────────────────────────── */
 
+/**
+ * **커넥터가 어느 길로 올렸나** — 두 값뿐이다. 우리 코드가 올리는 길은 API 아니면 러너다.
+ * 🔴 여기에 `"manual"` 을 넣지 마라. 커넥터는 «사람이 직접 올렸다»를 **반환할 수 없다**(그럴 땐 애초에 안 불린다).
+ *    union 을 넓히는 순간 `publisher.ts` 의 `via` 분기가 «커넥터가 manual 을 돌려줄 수도 있는» 모양이 되어 뜻이 흐려진다.
+ */
 export type PublishVia = "api" | "runner";
+
+/**
+ * **DB `posts.published_via` 에 적히는 값** — 3값이다(`drizzle/0001-init.sql:390`).
+ * 커넥터가 못 만드는 `"manual"`(사람이 앱 밖에서 올리고 주소만 적어 준 것 · B-1 §1.3)이 여기엔 있다.
+ * 🔴 «커넥터가 돌려주는 값»과 «DB 에 적히는 값»은 **다른 개념**이라 타입을 나눈다 —
+ *    한 타입으로 겸용하면 둘 중 하나를 넓혀야 하고, 그러면 다른 쪽의 뜻이 망가진다(B-1 지적 2026-09-15).
+ */
+export type PublishedVia = PublishVia | "manual";
 
 /** 서버(API)에서 바로 발행하는 채널. P1R5 — 영상 3종(유튜브·릴스·스레드)은 **OAuth API** 로 올린다. */
 export const API_PUBLISH_CHANNELS: ReadonlySet<string> = new Set(["blogger", "wordpress", "youtube_shorts", "reels", "threads"]);
@@ -182,7 +195,8 @@ export interface PostStats { views?: number; likes?: number; comments?: number; 
 export interface FinalizeInput {
   externalUrl?: string;
   channelRef?: string;
-  via: PublishVia;
+  /** DB 에 적히는 3값(`api|runner|manual`) — 커넥터 반환(2값)과 다르다. 사람이 직접 올린 건도 여기로 들어온다. */
+  via: PublishedVia;
   /** 알면 준다(러너 report 는 job.account_id). 없으면 piece.account_id 를 쓴다. */
   accountId?: number;
   /** 발행 시각 ISO. 없으면 NOW(). */
