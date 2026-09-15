@@ -31,9 +31,20 @@ export interface ThreadChain {
   parts: string[];
   /** 🔴 조각 상한에 걸려 **버린 글자 수**. 0이 아니면 호출부가 그 사실을 남긴다. */
   dropped: number;
+  /**
+   * 🔴 **문장 한가운데서 끊었나.** 문단·문장·줄 자리를 못 찾아 **낱말이나 글자**에서 잘랐다는 뜻이다.
+   *   이 파일의 존재 이유가 «문장 한가운데서 안 끊는다» 인데, 한 문장이 상한보다 긴 원고에서는 **끊을 수밖에 없다.**
+   *   그때 **조용히 끊지 않는다** — `dropped`(버린 글자)를 말하는 것과 **같은 규율의 남은 반쪽**이다(AC-9).
+   */
+  cutMidSentence: boolean;
+  /** 조각 경계마다 **어디서 끊었는지**(감사 한 줄에 그대로 실린다). 조각이 1개면 빈 배열이다. */
+  cutKinds: CutKind[];
   /** 계약(2~3개)을 넘었나 — 막지 않고 **말한다**. */
   overContract: boolean;
 }
+
+/** 어디서 끊었나 — 앞엣것일수록 «좋은» 자리다. `word`·`char` 는 **문장 한가운데**다. */
+export type CutKind = "end" | "paragraph" | "sentence" | "line" | "word" | "char";
 
 /* ─────────────────────────── 끊을 자리 찾기 ─────────────────────────── */
 
@@ -64,8 +75,15 @@ function breakPoints(s: string): { paragraph: number[]; sentence: number[]; line
  *   🔴 **너무 짧게 끊지 않는다**: 자리를 찾았는데 `limit` 의 40% 도 안 되면 한 급 낮은 자리를 본다
  *      (첫 문단이 한 줄이라고 «한 줄 + 나머지 전부»로 쪼개면 그게 더 이상하다).
  */
-export function cutAt(s: string, limit: number): number {
-  if (s.length <= limit) return s.length;
+export function cutAt(s: string, limit: number): number { return cutAtDetail(s, limit).at; }
+
+/**
+ * `cutAt` 과 같은 일을 하되 **어디서 끊었는지**까지 돌려준다.
+ *   🔴 이게 따로 있는 이유: «문장 한가운데서 끊었다»를 **밖에서 알 수 있어야** 감사에 남길 수 있다.
+ *      종전엔 글자로 자른 사실이 이 함수 안에서 **소리 없이 사라졌다**(AC-9 의 그 모양).
+ */
+export function cutAtDetail(s: string, limit: number): { at: number; kind: CutKind } {
+  if (s.length <= limit) return { at: s.length, kind: "end" };
   const head = s.slice(0, limit + 1);
   const { paragraph, sentence, line } = breakPoints(head);
   const floor = Math.floor(limit * 0.4);
@@ -74,15 +92,16 @@ export function cutAt(s: string, limit: number): number {
     for (const p of arr) if (p <= limit && p > b) b = p;
     return b;
   };
-  for (const arr of [paragraph, sentence, line]) {
+  const kinds: CutKind[] = ["paragraph", "sentence", "line"];
+  for (const [i, arr] of [paragraph, sentence, line].entries()) {
     const p = best(arr);
-    if (p >= floor) return p;
+    if (p >= floor) return { at: p, kind: kinds[i] };
   }
   /* 자연스러운 자리가 없다 — 낱말 경계라도 지킨다. */
   const sp = head.lastIndexOf(" ", limit);
-  if (sp >= floor) return sp + 1;
+  if (sp >= floor) return { at: sp + 1, kind: "word" };
   /* 🔴 여기까지 오면 «한 낱말이 limit 보다 길다»는 뜻이다(주소 같은 것). 그때만 글자로 자른다. */
-  return limit;
+  return { at: limit, kind: "char" };
 }
 
 /* ─────────────────────────── 나누기 ─────────────────────────── */
@@ -106,14 +125,17 @@ export function splitThreadChain(head: string, body: string, tail: string, limit
   /* 🔴 고지·태그만으로 이미 꽉 찼다 — 본문 0자라도 **고지는 반드시 나간다**(법이 먼저 쓴다 · AC-73). */
   if (firstRoom <= 0) {
     const only = [H, T].filter(Boolean).join("\n\n").slice(0, limit);
-    return { parts: [only], dropped: rest.length, overContract: false };
+    return { parts: [only], dropped: rest.length, overContract: false, cutMidSentence: false, cutKinds: [] };
   }
 
   const parts: string[] = [];
+  const cutKinds: CutKind[] = [];
   let dropped = 0;
   for (let i = 0; i < maxParts && rest.length; i++) {
     const room = i === 0 ? firstRoom : limit;
-    const at = cutAt(rest, room);
+    const { at, kind } = cutAtDetail(rest, room);
+    /* 마지막 조각(원문 끝)은 «우리가 끊은 자리»가 아니라 원래 끝이다 — 세지 않는다. */
+    if (kind !== "end") cutKinds.push(kind);
     const chunk = rest.slice(0, at).trim();
     rest = rest.slice(at).trim();
     parts.push(i === 0 ? [H, chunk, T].filter(Boolean).join("\n\n") : chunk);
@@ -122,7 +144,9 @@ export function splitThreadChain(head: string, body: string, tail: string, limit
   }
   if (!parts.length) parts.push([H, T].filter(Boolean).join("\n\n"));
 
-  return { parts, dropped, overContract: parts.length > 3 };
+  /* 🔴 낱말·글자에서 끊었다 = **문장 한가운데**다. 막지 않는다 — **말한다**(§9 · AC-9). */
+  const cutMidSentence = cutKinds.some((k) => k === "word" || k === "char");
+  return { parts, dropped, overContract: parts.length > 3, cutMidSentence, cutKinds };
 }
 
 /* ─────────────────────────── 이어 올리기(순수 루프) ─────────────────────────── */
@@ -133,7 +157,7 @@ export type ThreadPostFn = (text: string, replyToId: string | null) => Promise<{
 export interface ChainRunResult {
   /** 게시된 id 를 순서대로(이어 올린 것 포함). */
   done: string[];
-  /** 끝까지 갔나. false 면 `failed` 에 사유가 있다. */
+  /** 끝까지 갔나. false 면 `detail` 에 사유가 있다(`progress:` 로 시작하면 **올리다 멈춘 게 아니라 못 남겨서 멈춘 것**이다). */
   ok: boolean;
   failedAt?: number;
   detail?: string;
@@ -163,7 +187,13 @@ export async function runThreadChain(
     const r = await post(parts[i], i > 0 ? out[i - 1] : null);
     if (!r.ok) return { done: out, ok: false, failedAt: i, detail: r.detail };
     out.push(r.id);
-    if (onProgress) await onProgress([...out]);
+    /* 🔴 **남기지 못하면 더 올리지 않는다.** «어디까지 올렸나»를 못 적은 채 계속 올리면,
+       다음 틱이 **1조각부터 다시** 올려 같은 글이 두 번 나간다(되돌릴 수 없다).
+       더 올리는 것보다 **여기서 그치는 쪽**이 되돌릴 수 있다 — 호출부가 `progress:` 로 그 사실을 안다. */
+    if (onProgress) {
+      try { await onProgress([...out]); }
+      catch (e) { return { done: out, ok: false, failedAt: i, detail: `progress:${String((e as Error)?.message ?? e).slice(0, 80)}` }; }
+    }
   }
   return { done: out, ok: true };
 }

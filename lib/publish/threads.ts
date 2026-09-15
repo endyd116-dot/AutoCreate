@@ -85,9 +85,23 @@ async function chainState(tid: number, pieceId: number): Promise<{ done: string[
   const done = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
   return { done };
 }
-async function saveChainState(tid: number, pieceId: number, done: string[]): Promise<void> {
+/**
+ * 어디까지 올렸나를 남긴다. 🔴 **쓴 직후 `jsonb_typeof` 확인까지가 쓰기다**(CLAUDE §4.5 · PITFALLS #1).
+ *
+ *   🔴 이 자리가 특히 무서운 이유: 이 칸이 배열로 안 남으면 `chainState` 가 «아무것도 안 올렸다»로 읽고
+ *      **다음 틱이 이미 올라간 조각을 처음부터 다시 올린다.** 조각마다 쌓아서 막아 둔 그 사고가
+ *      **한 겹 아래에서 되살아나는 것**이고, 남의 타임라인에 같은 글이 두 번 나가는 건 **되돌릴 수 없다.**
+ *   개수까지 본다 — 타입만 맞고 내용이 안 들어간 경우도 같은 사고를 낸다.
+ */
+async function saveChainState(tid: number, pieceId: number, done: string[]): Promise<boolean> {
   await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ [CHAIN_FIELD]: done })}, updated_at = NOW()
     WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+  const [chk] = await q(sql`SELECT jsonb_typeof(meta -> ${CHAIN_FIELD}) AS t,
+      CASE WHEN jsonb_typeof(meta -> ${CHAIN_FIELD}) = 'array' THEN jsonb_array_length(meta -> ${CHAIN_FIELD}) ELSE -1 END AS n
+    FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+  const saved = String(chk?.t ?? "") === "array" && Number(chk?.n) === done.length;
+  if (!saved) console.error(`[threads] 🔴 ${CHAIN_FIELD} 이 배열로 안 남았다 piece=${pieceId} typeof=${String(chk?.t)} n=${String(chk?.n)} want=${done.length}`);
+  return saved;
 }
 
 /**
@@ -175,8 +189,26 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
 
   /* 🔴 **한 조각 올릴 때마다 바로 남긴다**(`onProgress`). 마지막에 몰아서 쓰면 2조각을 올리고 죽었을 때
      다음 틱이 1조각부터 다시 올려 **같은 글이 두 번 나간다** — 되돌릴 수 없는 사고다. */
-  const run = await runThreadChain(parts.parts, state.done, post, (done) => saveChainState(tid, piece.id, done));
+  let posted: string[] = [...state.done];
+  let unsaved = "";
+  const run = await runThreadChain(parts.parts, state.done, post, async (done) => {
+    posted = done;
+    if (await saveChainState(tid, piece.id, done)) return;
+    /* 🔴 **여기서 멈춘다.** 어디까지 올렸는지 못 남겼는데 계속 올리면, 다음 틱이 1조각부터 다시 올려
+       **같은 글이 두 번** 나간다. 더 올리는 것보다 **여기서 그치는 쪽이 되돌릴 수 있다.** */
+    unsaved = `${CHAIN_FIELD} 저장 확인 실패(${done.length}조각)`;
+    throw new Error(unsaved);
+  });
   state.done = run.done;
+  if (unsaved) {
+    await writeAudit({ tenantId: tid, action: "threads_chain_state_unsaved", actorType: "system", target: `piece:${piece.id}`,
+      detail: { posted: posted.length, parts: parts.parts.length, note: "올린 자리를 기록하지 못해 이어 올리기를 멈췄다(같은 글이 두 번 나가지 않게)" }, riskLevel: "high" })
+      .catch((e: unknown) => console.warn("[threads] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+    /* 🔴 **성공으로 닫는다** — 실패로 닫으면 `channel_ref` 가 안 남고, 사람이 «다시 올리기»를 누르는 순간
+       **첫 조각부터 또 나간다**(발행 멱등 §4.7 은 `channel_ref` 가 있을 때만 막아 준다).
+       올라간 데까지는 진짜로 올라갔으니 그 주소를 남기고, 못 이은 사실은 **감사로 말한다.** */
+    if (posted.length) return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, posted[0]), channelRef: posted[0] };
+  }
   if (!run.ok) {
     const f = lastFail ?? { reason: "channel_error" as const, retriable: true, error: "스레드에 올리지 못했어요." };
     return { ok: false, reason: f.reason, retriable: f.retriable, error: f.error, detail: `part${(run.failedAt ?? 0) + 1} ${run.detail ?? ""}`.trim() };
@@ -188,8 +220,20 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
       detail: { parts: parts.parts.length, droppedChars: parts.dropped, note: "연결글 조각 상한에 걸려 뒷부분이 안 나갔다" }, riskLevel: "medium" })
       .catch((e: unknown) => console.warn("[threads] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
   }
+  /* 🔴 **문장 한가운데서 끊었으면 말한다** — 버린 글자를 말하는 것과 **같은 규율의 남은 반쪽**이다(AC-9).
+     한 문장이 500자를 넘는 원고에서는 끊을 수밖에 없는데, 그게 **조용히** 일어나면 아무도 모른다. */
+  if (parts.cutMidSentence) {
+    await writeAudit({ tenantId: tid, action: "threads_chain_cut_midsentence", actorType: "system", target: `piece:${piece.id}`,
+      detail: { parts: parts.parts.length, cutKinds: parts.cutKinds, note: "문장 자리를 못 찾아 낱말·글자에서 끊었다(한 문장이 조각 상한보다 길다)" }, riskLevel: "low" })
+      .catch((e: unknown) => console.warn("[threads] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+  }
 
-  await q(sql`UPDATE pieces SET meta = (meta - ${META_FIELD}) - ${CHAIN_FIELD}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
+  /* 끝났으니 이어 올리기 상태는 지운다. 🔴 다만 **어떻게 끊겼는지는 남긴다** — 감사는 운영이 보고,
+     이 칸은 **그 글 화면**이 나중에 보여 줄 재료다(A 가 그릴 때 서버가 이미 갖고 있어야 한다 · AC-52). */
+  const cutNote = parts.cutMidSentence || parts.dropped > 0
+    ? sql` || ${jsonb({ thChainCut: { midSentence: parts.cutMidSentence, kinds: parts.cutKinds, droppedChars: parts.dropped, parts: parts.parts.length } })}`
+    : sql``;
+  await q(sql`UPDATE pieces SET meta = ((meta - ${META_FIELD}) - ${CHAIN_FIELD})${cutNote}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
   /* 🔴 그 글의 주소는 **첫 글**이다 — 답글 주소를 적으면 «글 보기»가 이야기 중간으로 떨어진다. */
   return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, state.done[0]), channelRef: state.done[0] };
 }
