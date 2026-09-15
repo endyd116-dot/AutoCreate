@@ -133,6 +133,9 @@ export default async (req: Request): Promise<Response> => {
       if (m.affiliate && typeof m.affiliate === "object") { const af = m.affiliate as Record<string, unknown>; meta.affiliate = { provider: af.provider, url: af.url, subId: af.subId }; }
       if (m.scheduleAt) meta.scheduleAt = m.scheduleAt;
       if (m.slotReason) meta.slotReason = m.slotReason;
+      /* [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** — 채널이 둘 이상인 집에서만 값이 있다(하나면 고를 것이 없다).
+         `slotReason`(왜 이 시각인가) 과 같은 자리·같은 뜻이다. */
+      if (m.channelReason) meta.channelReason = m.channelReason;
       if (m.angle) meta.angle = m.angle;
       /* [R8 §2.4] 🔴 **수치 주장 표시** — 근거 있는 수치와 없는 수치를 갈라 검수 화면이 보여 준다(A 와 합의한 칸 `numberClaims`).
          🔴 화면 문구는 «틀렸어요»가 아니라 **«우리가 준 자료에 없는 숫자예요 — 확인해 주세요»** 다(`claimsLine`).

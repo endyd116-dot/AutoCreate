@@ -106,6 +106,10 @@ const TARGETS = [
   ["🔴 대표 이미지 — «필요하다»를 읽는 자리", "heroNeeded", "lib/director.ts", "네이버·티스토리 대표 이미지가 «필요하다»고 적히기만 하고 목록·검색에 빈자리로 나간다"],
   ["대표 이미지 — 자리를 정한다", "heroPlanOf", "lib/stock/plan.ts", "사진 자리가 0개인 글에 대표가 영영 안 생긴다(막지 않고 **대신 넣어 주는** 자리다)"],
   ["대표 이미지 — 어떻게 됐는지 말해 준다", "heroFactOf", "lib/stock/plan.ts", "대표가 섰는지 **고객이 볼 길이 없다** — 막지 않기로 했으면 말해 주기가 값이다(§9)"],
+  /* ── [R8CLOSE-B1 §B8] 목표 매체 → 채널 선택. 🔴 **부르는 자리가 `director.propose` 하나뿐**이라 더 죽기 쉽다. ── */
+  ["🔴 목표 매체 → 채널 순서", "targetChannelOrder", "lib/director-goal.ts", "설계 §5.3-1 의 셋째 재료(목표 매체)가 다시 0건이 되고 «목표가 뭐든 같은 채널»로 돌아간다"],
+  ["매체가 살아 있나(라이브 상태)", "mediaLiveOf", "lib/director-goal.ts", "애드센스는 러너가 `linked` 로 적는데 `approved` 만 보면 **영영 «안 붙었다»** 가 된다"],
+  ["왜 이 채널인지 한 줄", "channelReason", "lib/director.ts", "순서는 바뀌는데 **왜 바뀌었는지 아무도 못 본다**(막지 않는 대신 말해 주기로 한 값 · §9)"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {

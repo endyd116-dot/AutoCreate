@@ -201,7 +201,10 @@ const THREE_REST = [
     return [impl ? "닫힘" : "열림", impl ? "seo.ts 가 구조화 데이터를 낸다" : `계약 라벨에 «AEO» 글자만 있다(label=${label}) · seo.ts 구현 0`];
   }],
   ["B7 에디터 실제 요소", () => [yes(inFile("lib/writing-contracts.ts", /editorElements/), ), "0건"]],
-  ["B8 목표 매체 채널 선택", () => [yes(inFile("lib/director.ts", /targetChannel|목표 매체/), ), "0건"]],
+  /* 🔴 [2026-09-16 B-1] 설명줄이 판정을 안 따라가 «닫힘 … 0건» 이라는 모순을 찍고 있었다(B9 와 같은 뿌리).
+     하니스가 거짓말하면 다음 조사가 그걸 믿는다. */
+  ["B8 목표 매체 채널 선택", () => { const on = inFile("lib/director.ts", /targetChannel|목표 매체/);
+    return [yes(on), on ? "director.propose 가 targetChannelOrder 로 순서를 정하고 channelReason 을 남긴다" : "0건"]; }],
   ["B9 `images.heroNeeded` 실동작", () => {
     const written = anyFile(["lib/director.ts", "lib/cron/director-auto.ts"], /heroNeeded:/).length > 0;
     const readBy = anyFile(["lib/content-gen.ts", "lib/ai-image.ts", "netlify/functions/pieces.ts"], /heroNeeded/).length > 0;
