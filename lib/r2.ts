@@ -91,12 +91,32 @@ export const PRESIGN_GET_TTL_SEC = Math.min(604_800, Math.max(60, Number(process
  */
 export async function r2PresignGet(key: string, ttlSec: number = PRESIGN_GET_TTL_SEC, opts: { filename?: string } = {}): Promise<string> {
   const client = getR2Client();
-  // 따옴표·역슬래시·개행은 헤더를 깨뜨린다 — 이름은 우리가 만들지만 방어해 둔다(파일명이 헤더 주입 자리가 되지 않게).
-  const safe = String(opts.filename ?? "").replace(/[\r\n"\\]/g, "").slice(0, 120);
+  const cd = contentDisposition(opts.filename);
   return await getSignedUrl(client, new GetObjectCommand({
     Bucket: R2_BUCKET, Key: key,
-    ...(safe ? { ResponseContentDisposition: `attachment; filename="${safe}"` } : {}),
+    ...(cd ? { ResponseContentDisposition: cd } : {}),
   }), { expiresIn: ttlSec });
+}
+
+/**
+ * «이 이름으로 저장» 헤더 한 줄을 만든다 — **한글 파일이름까지** 간다(RFC 5987).
+ *
+ *   🔴 왜 두 벌을 싣나: `filename="…"` 은 **ASCII 만** 안전하다. 한글을 그대로 넣으면 브라우저마다 다르게 깨지고,
+ *      어떤 브라우저는 헤더 전체를 버린다 — 그러면 고객 폴더에 R2 키 이름(`v1.1.5.zip`·`AC-329-….mp4`)이 남는다.
+ *      RFC 5987 의 `filename*=UTF-8''<percent-encoded>` 가 유니코드용이고, **둘 다 실으면**
+ *      새 브라우저는 `filename*` 을, 옛 브라우저는 ASCII 폴백을 쓴다(표준이 그렇게 고르라고 정해 뒀다).
+ *   🔴 이게 없어서 B-1 이 영상 파일이름에서 **한글 제목을 떨어뜨리고** `AC-329-20260915.mp4` 를 쓰고 있었다 —
+ *      고객이 받는 건 «내 영상 제목»이 아니었다. 프리사인은 교차 출처라 화면의 `<a download>` 도 무시되므로
+ *      **헤더 말고 방법이 없다**(2026-09-15 A·B-1 발견).
+ *   방어: 따옴표·역슬래시·개행은 헤더를 깨뜨리므로 제거하고, ASCII 폴백은 비ASCII 를 `_` 로 바꾼다.
+ */
+export function contentDisposition(filename?: string): string {
+  const raw = String(filename ?? "").replace(/[\r\n"\\]/g, "").trim().slice(0, 120);
+  if (!raw) return "";
+  const ascii = raw.replace(/[^\x20-\x7E]/g, "_").replace(/\s+/g, " ").trim() || "download";
+  // 이름이 전부 ASCII 면 한 벌이면 충분하다(헤더를 괜히 길게 만들지 않는다).
+  if (ascii === raw) return `attachment; filename="${ascii}"`;
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(raw)}`;
 }
 /** 쓰기 서명 URL — 러너가 mp4·포스터를 직접 PUT 한다(6MB 본문 우회 · 러너에 R2 자격 0). */
 export async function r2PresignPut(key: string, contentType: string, ttlSec = 3600): Promise<string> {

@@ -344,6 +344,21 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     const poster = pickSharpest(cands);
     if (!poster) throw BLOCK("encode", "포스터를 뽑지 못했어요.");
 
+    /* ⑤-b 대표 프레임 **지문 재료**(B-1 §1.5 · 서버가 «같은 그림을 여러 계정에 올리는 것»을 잡는 데 쓴다).
+       포스터를 32×32 회색으로 줄여 raw 로 뽑는다 — 새 의존성 0(ffmpeg 이 이미 있다).
+       🔴 **못 만들면 키를 아예 안 보낸다.** 빈 문자열을 보내면 «못 쟀다»와 «닮지 않았다»가 섞이고,
+          서버는 그걸 «지문이 다르다 = 통과»로 읽는다(AC-9). 키가 없으면 서버가 **판정 보류**로 정직하게 처리한다. */
+    let thumbGray;
+    try {
+      const rawPath = join(dir, "tg.raw");
+      await runFfmpeg(bin, ["-y", "-i", poster, "-vf", "scale=32:32,format=gray", "-f", "rawvideo", "-pix_fmt", "gray", rawPath], 30_000);
+      if (existsSync(rawPath)) {
+        const buf = readFileSync(rawPath);
+        // 32×32 회색 = 정확히 1024바이트. 크기가 다르면 뭔가 잘못 뽑힌 것이라 **보내지 않는다**.
+        if (buf.length === 1024) thumbGray = buf.toString("base64");
+      }
+    } catch { /* 지문은 있으면 좋은 것 — 못 만들었다고 영상을 버리지 않는다(키를 안 보내면 그만이다) */ }
+
     /* ⑥ 업로드 — presigned PUT(러너에 R2 자격 0). */
     const bytes = await putTo(p.upload.putUrl, outPath, "video/mp4");
     await putTo(p.upload.posterPutUrl, poster, "image/jpeg");
@@ -361,6 +376,7 @@ export async function run({ ctx, job, shotKey, dryRun }) {
         durationMs, bytes,
         frameCount: m?.frameCount || Math.round((planMs / 1000) * out.fps),
         ...(m ? { containerMs: m.containerMs, videoMs: m.videoMs, audioMs: m.audioMs, plannedMs: planMs, measured: true } : {}),
+        ...(thumbGray ? { thumbGray } : {}),
         ffmpegVersion: _version || undefined,
       },
       notes: [`${sceneFiles.length}장면 · 자막 ${layers.length} · ${(bytes / 1024 / 1024).toFixed(1)}MB`,
