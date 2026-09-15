@@ -10,7 +10,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../db-util";
-import { refundPiece } from "../coin-ledger";
+import { refundPieceDetailed, refundLine } from "../coin-ledger";
 import { triggerVideo } from "../video/gen";
 import { CHAIN_LOCK_MIN, CHAIN_RESUME_MAX, CHAIN_STALE_MIN } from "../video/types";
 import { NOOP, type CronStep, type StepOutcome, type TenantCtx } from "./base";
@@ -47,11 +47,11 @@ export const videoSweepStep: CronStep = {
       }
       const resume = n((meta.chainResume as { count?: number } | undefined)?.count);
       if (resume >= CHAIN_RESUME_MAX) {
-        const refunded = await refundPiece(ctx.tid, pieceId);
+        const rf = await refundPieceDetailed(ctx.tid, pieceId); const refunded = rf.granted;
         const reason = `제작이 멈춰서 멈춤 처리했어요(마지막 단계: ${stage}).`;
         await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", chainLock: null, failReason: reason, refunded })}, updated_at = NOW() WHERE id = ${pieceId}`);
         if (r.slot_id) await q(sql`UPDATE slots SET status = 'failed', note = ${reason}, updated_at = NOW() WHERE id = ${n(r.slot_id)}`);
-        await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${ctx.tid}, ${"piece_failed"}, ${"영상을 만들지 못했어요"}, ${`${reason} 코인 ${refunded}개는 돌려드렸어요.`}, ${"/app/pieces.html?status=failed"})`);
+        await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${ctx.tid}, ${"piece_failed"}, ${"영상을 만들지 못했어요"}, ${`${reason} ${refundLine(rf)}`}, ${"/app/pieces.html?status=failed"})`);
         detail.failed = n(detail.failed) + 1; changed++; continue;
       }
       const hasProgress = !!meta.chainStage;

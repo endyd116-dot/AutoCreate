@@ -27,7 +27,7 @@ import { seasonLine } from "./kr-calendar";
 import { toTopic, type Topic } from "./topics";
 import { decryptObj } from "./creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, type CoupangProduct } from "./affiliate-coupang";
-import { refundPiece, settlePieceCoins } from "./coin-ledger";
+import { refundPieceDetailed, refundLine, settlePieceCoins } from "./coin-ledger";
 import { pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";   // [R8] 사진 값 정산 — 식은 coin-table 한 곳
 import { writeAudit } from "./audit";
 import { AD_LAW_BANNED } from "./banned-words";
@@ -551,10 +551,10 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
   } catch (e) {
     const reason = String((e as Error)?.message ?? e).slice(0, 300);
     console.error(`[content-gen] piece ${pieceId} 실패:`, reason);
-    const refunded = await refundPiece(tid, pieceId);
+    const rf = await refundPieceDetailed(tid, pieceId); const refunded = rf.granted;
     await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ stage: "failed", failReason: reason, refunded })}, updated_at = NOW() WHERE id = ${pieceId}`);
     if (p.slot_id) await q(sql`UPDATE slots SET status = 'failed', note = ${reason}, updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
-    await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"piece_failed"}, ${"글을 만들지 못했어요"}, ${`«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 만들다 문제가 생겼어요. 코인 ${refunded}개는 돌려드렸어요.`}, ${`/app/pieces.html?status=failed`})`);
+    await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"piece_failed"}, ${"글을 만들지 못했어요"}, ${`«${String(meta.angle || "").slice(0, 40) || "글"}» 을(를) 만들다 문제가 생겼어요. ${refundLine(rf)}`}, ${`/app/pieces.html?status=failed`})`);
     return { ok: false, status: "failed", reason };
   }
 }

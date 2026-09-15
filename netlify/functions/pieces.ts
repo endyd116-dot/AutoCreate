@@ -314,11 +314,25 @@ export default async (req: Request): Promise<Response> => {
           const cv = await consume(tid, videoCoinItem(secs as 15 | 30 | 60), tag, { actorId: auth.user.uid, reason: "영상 다시 만들기(환급분 재차감)" });
           if (!cv.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: cv.reason === "insufficient" ? cv.need : 0, have: cv.balance }, 402);
         } else {
-          const imgs = Math.max(0, Math.trunc(n(m.imageCount)));
-          const c1 = await consume(tid, "blog", tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
+          /* 🔴 [2026-09-16] **여기만 옛 식이 남아 있었다.** 사진 **총 장수**(`imageCount`)만큼 `image` 를 물렸다 —
+             새 규칙에서는 **AI 로 구운 사진만**, 그것도 **포함분(1장)을 뺀 나머지**다(`lib/coin-table.ts AI_IMAGES_INCLUDED`).
+             ⇒ 처음에 **1코인**이던 글이 실패 뒤 다시 만들 때 **7코인**으로 불어났다. 고객 돈이 걸린 자리다.
+             🔴 「숫자는 새 식인데 이 자리만 옛 식」 — 코인 수리가 닿지 않은 마지막 호출부였다(A 가 화면에서 같은 과를 찾아 준 덕에 훑었다).
+             카드뉴스는 장수로 안 세고 통째로 한 건이다(`coinFormatOf` 한 곳). */
+          const { AI_IMAGES_INCLUDED } = await import("../../lib/coin-table");
+          /* 🔴 분류는 **그 글이 들고 있다** — 처음 차감할 때 쓴 `coinItem` 이 `meta` 에 적혀 있다(`lib/director.ts` 가 적는다 · AC-71).
+             채널·포맷으로 **다시 고르면** 그 사이 계약이 바뀌었을 때 처음과 다른 값이 나온다(«고르는 자리가 갈린다» · AC-74). */
+          const item = String(m.coinItem || "") === "cardnews" ? "cardnews" : "blog";
+          /* 🔴 **«모른다»를 «1장»으로 바꾸지 않는다**(AC-92). `aiImageCount` 는 R8 뒤에 만든 글에만 있다 —
+             그 값이 **없으면 AI 사진이 몇 장이었는지 우리가 모른다.** 모르면 **글값만** 받는다(모자라게 받는 쪽으로 틀린다).
+             옛 `imageCount`(사진 **총** 장수)로 대신 세면 고객 사진·스톡까지 돈을 받게 된다 — 그게 여기 있던 옛 식이다. */
+          const aiKnown = m.aiImageCount !== undefined && m.aiImageCount !== null;
+          const ai = aiKnown ? Math.max(0, Math.trunc(n(m.aiImageCount))) : 0;
+          const billable = item === "cardnews" ? 0 : Math.max(0, ai - AI_IMAGES_INCLUDED);
+          const c1 = await consume(tid, item, tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
           if (!c1.ok) return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: c1.reason === "insufficient" ? c1.need : 0, have: c1.balance }, 402);
-          for (let i = 1; i <= imgs; i++) {
-            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `이미지 ${i}/${imgs}(재차감)` });
+          for (let i = 1; i <= billable; i++) {
+            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(재차감 · 1장은 글값에 포함)` });
             if (!ci.ok) { await refundPiece(tid, id); return json({ ok: false, step: "coin_short", error: "코인이 부족해요.", need: ci.reason === "insufficient" ? ci.need : 0, have: ci.balance }, 402); }
           }
         }

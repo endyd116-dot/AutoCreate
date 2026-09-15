@@ -84,7 +84,11 @@ export const reviewDeadlineStep: CronStep = {
         if (accId && trust && !trust.trusted) {
           untrusted++;   // 막지 않는다 — 센다(운영이 «아직 처음인 계정으로 자동 발행 중»을 본다)
           if (await notifyOnce(ctx.tid, `trust_review:${accId}`.slice(0, 32), "처음 몇 편은 한 번 보시는 게 좋아요",
-            `${trust.reasons[0] ?? "이 계정은 이제 막 시작했어요"} — 그대로 두면 예정대로 나가요. 검수에서 미리 보실 수도 있어요.`,
+            /* 🔴 [2026-09-16 · AC-92 훑기] 종전엔 `?? "이 계정은 이제 막 시작했어요"` 였다 —
+               지금은 `trusted === reasons.length === 0` 이라 **닿지 않는 문장**이지만, 닿는 날에는
+               **계정 나이에 대한 없는 사실**을 지어내게 된다(오래된 계정에도 «이제 막 시작했어요»라고 한다).
+               사유를 모르면 **사유를 말하지 않는다** — 권하는 말은 그대로 할 수 있다. */
+            `${trust.reasons[0] ? `${trust.reasons[0]} — ` : ""}그대로 두면 예정대로 나가요. 검수에서 미리 보실 수도 있어요.`,
             `/app/piece.html?id=${pieceId}`)) notified++;
           await writeAudit({ tenantId: ctx.tid, action: "auto_approve_untrusted", actorType: "system", target: `piece:${pieceId}`,
             detail: { accountId: accId, evidence: trust.evidence, reasons: trust.reasons, slotId, blocked: false } });

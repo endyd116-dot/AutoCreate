@@ -90,7 +90,13 @@ export async function tenantPlan(tid: number): Promise<{ planKey: string; plan: 
     const rows = (await db.execute(sql`SELECT plan_key, status FROM tenants WHERE id = ${tid}`)) as unknown as { plan_key: string; status: string }[];
     const key = String(rows[0]?.plan_key ?? "trial");
     return { planKey: key, plan: await planOf(key), status: String(rows[0]?.status ?? "trial") };
-  } catch { return { planKey: "trial", plan: PLAN_DEFAULTS[0], status: "trial" }; }
+  } catch (e) {
+    /* 🔴 [2026-09-16 · AC-92 훑기] 못 읽으면 **체험으로 친다** — 한도를 넓게 주는 것보다 좁게 주는 쪽이 안전측이라 값 자체는 이대로 둔다.
+       다만 종전엔 **아무 자국도 안 남겼다**: DB 가 한 번 끊기면 Pro 고객이 조용히 체험 한도가 되고
+       («자동 승인은 Pro 부터» 같은 문장까지 따라 바뀐다) 그게 왜 그랬는지 나중에 아무도 못 찾는다. 자국은 남긴다. */
+    console.error("[plans] tenantPlan 실패 — 체험으로 읽는다", tid, String((e as Error)?.message ?? e).slice(0, 120));
+    return { planKey: "trial", plan: PLAN_DEFAULTS[0], status: "trial" };
+  }
 }
 
 /**
