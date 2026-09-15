@@ -10,7 +10,7 @@
 **AutoCreate(AC)** = 부수입을 원하는 개인이 여러 계정으로 글·영상을 AI로 만들어 자동 발행하고 광고·제휴 수익을 한 곳에서 보는 토스형 SaaS. AM(AutoMarketing)의 엔진을 이식하고 겉(제품·화면·계정 모델·수익 집계·결제·운영센터)은 새로 짰다.
 
 - **개발 라운드 전부 종료**: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · R5 · R6 + KICC 이중 MID. 설계(`docs/DESIGN.md`) 대비 미개발 = 외부 선결조건(유튜브 심사 등)이 막은 것 + **§6 «사장님 실측 발견 5건»(진행 중)**.
-- **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회) · 로컬 main `04a08c7`(B-1·A 머지 · 미배포) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
+- **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회) · 로컬 main `d5e18a7`(B-1·A·B2·B 머지 · 미배포 · 배포 #7 후보) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
 - **결제(KICC) 실돈 실측 통과**(2026-09-15): 카드 등록(keyin MID) → ₩5,500 청구 → ₩2,000 부분 취소 → ₩3,500 환불 · 카드 최종 0원.
 - 운영센터 `/ops` · `admin`/`admin1234`(**사장님 아직 안 바꿈**) · MIS 허브 SSO 카드 ⑥ 라이브.
 
@@ -71,12 +71,13 @@
 | 세션(`ListAgents`) | 역할 | 폴더 | 브랜치 | 압축 시점 상태 |
 |---|---|---|---|---|
 | `autocreate-ca` | 메인 | `AutoCreate` | `main` | — |
-| `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `fix/slots-skip-reason` | `slots-list` 행 `skipReason:"too_soon"`(다음 produceHour 틱 > 발행 시각) 발주 중 |
-| `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | ✅ 머지됨(`c0fbc2b`·`84a2372`·`1a290df` 단독어) · R2 207 잔재 삭제 + `r2Delete` 헬퍼 발주 |
-| `autocreate-b2-e4` | **B2**(러너·발행) | `AutoCreate-B2` | `feature/runner-dist` | 러너 배포 zip·인증 다운로드·자동 업데이트·기기 묶기 발주 중 |
-| `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | ✅ 머지됨(`8dfa5a1`·`f5805d2`) · 🔴 «건너뛰어요» 판정을 서버 `skipReason` 만으로 고치는 중(내 설계 오류) |
+| `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `fix/slots-skip-reason` | ✅ 머지됨(`05a5293`) · 대기 |
+| `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | ✅ 전부 머지됨(`…1a290df`·`2b2bfab` r2Delete 헬퍼) · 대기 |
+| `autocreate-b2-e4` | **B2**(러너·발행) | `AutoCreate-B2` | `feature/runner-dist` | ✅ 머지됨(`99a4a50` 배포 zip·다운로드·자동 업데이트·지문·rotate · `5638765` alt · `17a7f5d`) · DDL 0012 적용 · 대기 |
+| `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | ✅ 머지됨(`8dfa5a1`·`f5805d2`) · 진행 중: «건너뛰어요» = `skipReason` 만(AC-47) + 러너 화면(내려받기 API→url · 열쇠 다시 받기 · 다른 PC 표시) |
 | `autocreate-c-41 [3d0736]` | **C**(검증·새 세션) | `AutoCreate-C` | `verify/p1r6-5` | R6.5 1차 검증 발부(topics-add · 캡션 §5C · A 화면 · 회귀) · 4·5절은 2차 |
-| ~~`autocreate-c-41 [b3f2d6]`~~ ~~`autocreate-b-8a`~~ | 옛 C·옛 B-1 | — | — | 빈 창 |
+| **`autocreate-b-e9`** | **B(새 세션 · 설계 대비 전수조사)** | **`AutoCreate-B3`**(새 워크트리) | `audit/design-2026-09-15` | 🔴 사장님 지시 — `docs/active/2026-09-15-DESIGN-AUDIT-trigger.md` 대로 조사 중 · 산출물 `docs/active/2026-09-15-DESIGN-AUDIT.md` |
+| ~~`autocreate-c-41 [b3f2d6]`~~ ~~`autocreate-b-8a`~~ ~~`autocreate-a-a9`~~ | 옛 C·옛 B-1·옛 A | — | — | 빈 창 |
 
 - 🔴 B·B-1 이 `AutoCreate-B` 폴더를 공유해 창 표시가 같다 → **모든 보고 첫 줄 = `■ 역할 · 폴더 · 브랜치 · 지금:`**(전 세션 적용). 커밋 전 `git branch --show-current`.
 - 🔴 **라이브 데이터 변경은 그 세션 창에서 사장님 Allow** — 메인 승인은 다른 창을 열지 못한다. B 창은 auto 모드라 상자 자체가 안 뜬다(분류기 차단) → 사장님이 모드를 바꾸거나 메인이 직접(사장님 «청소해» 승인 있음 · 메인 창은 node 스크립트로 라이브 DB 쓰기가 됐다: 레지스트리 UPDATE·BGM 시드).
@@ -87,7 +88,7 @@
 
 - **Neon** `old-tree-90235056` · DDL `node scripts/neon-migrate.mjs`(0001~0011) · 키 `~/.neon-am-key` · PITR 7일.
 - **Netlify** site `a14524de-ebfa-46e8-a116-dbc87343f276` · PAT `nfp_bB2BR1…`(AM 메모리 `neon-netlify-remote`) · **AC-8** 다른 사이트 secret 은 `****`.
-- **R2** 버킷 `autocreate` · 버전 관리 없음(AC-37).
+- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip `autocreate/runner/v1.1.3.zip`+`latest.json`) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
 - **KICC**: ON 계약 공용 · MID 2 · live · **빌키 = keyin 고정**(AC-45) · 복귀 주소 등록 불필요·KEYIN 시크릿 불필요(실측 확정) · 개통 정본 `docs/active/KICC-GO-LIVE.md`.
 - 로컬 `.env`(워크트리 6곳 동기): `TEST_TISTORY_*`·`TEST_NAVER_*`·`FX_USD_KRW`·`BGM_LICENSE_VERIFIED`.
 
@@ -124,8 +125,9 @@
 1. ✅ **테스트 정리 완료**(2026-09-15 · 사장님이 B 창에서 직접 Allow · 감사 `ops_live_cleanup`): 160·196·197 삭제 · t189 trial+queued 잡 14 삭제 · **198 trial + `next_billing_at NULL`(10/15 자동청구 해제)** · 빌키 ****0542 보존 · 인보이스 #10 refunded 보존 · 포함코인 33 회수. **MRR 73,000 → 49,000**(116 pro 만) · 활성 유료 1 · 보존 4집 생존.
 2. ✅ **B-1 머지됨(main `04a08c7`)**: `c0fbc2b` `POST /api/topics-add`(400 title·banned_category·duplicate(+topic 동봉)·channel · 429 rate · Topic.source ai|manual · manual 맨 위) · `84a2372` 캡션 §5C(image{prompt,caption?} 분리 · 묘사문 7패턴 금칙 · captionRate naver 0.3/tistory 0.2/blogger·WP 0.5 · alt 는 prompt 파생). 완료: 글 실호출 1건(t207 piece 330 · $0.34 · 캡션 1/6 «자리마다 쪽지랑 같이 올려두니 뿌듯했어요» · 묘사문 0) · 단독어 5개(`1a290df`). 남은 것: R2 `autocreate/207/` 잔재 + `r2Delete` 헬퍼 · B2 몫 `lib/publish/wordpress.ts:71` alt_text 를 `piece_assets.meta.alt` 로.
 3. ✅ **A 머지됨(main `d0b186e`)** · 🔴 정정 진행 중 — «이번엔 건너뛰어요» 화면 규칙(자리 날짜−오늘 < lead)은 **틀렸다**(제작 스텝 창은 «오늘~오늘+lead» = lead 안 자리도 다음 produceHour 틱에 만든다). 서버 `skipReason:"too_soon"`(B) 만으로 판정하게 A 수리 중: `8dfa5a1` «내 소재 넣기» 시트(→ director 직행 · duplicate→기존으로 · «직접» 필 · «검색량 모름») · 자동 편성 꺼짐 배너(홈·편성표 · 켜기 동기화 · 규칙 0 숨김) · «이번엔 건너뛰어요»(skipReason too_soon 우선). 스샷 `_shots/r6f-*.png`.
-4. **B2**: `build-runner.mjs` → R2 zip + `latest.json` · `/api/runner-download`(로그인·플랜 게이트·감사) · 하트비트 자동 업데이트(sha256·옛 판 보존) · 기기 지문 묶기+토큰 재발급 · 셀렉터 서버 배포는 설계 보고.
-5. **C 1차 발부됨**(`verify/p1r6-5` · 보고서 `docs/history/2026-09-15-R6.5-C-report.md`) · B skipReason + A 정정 + B2 머지 뒤 2차 → 배포 #7.
+4. ✅ **B2 머지됨**: `scripts/build-runner.mts`(재현 가능 zip · 의존성 0 zip 코덱) → R2 `autocreate/runner/v1.1.3.zip`+`latest.json` · `/api/runner-download`(로그인·«플랜 한도>0»·감사 · 10분 presign) · 하트비트 자동 업데이트(sha256 · 옛 판 보존) · 기기 지문(`x-runner-fp` 전 요청 · 인증 자리) · `/api/runner-rotate`(지문도 초기화) · 실측 23/23 · 하니스 trial. **셀렉터 서버 배포 = 1단계(표만 · 버전+카나리+폴백) R7 · 2단계(절차 DSL) 보류** · 복제 방어선 = «봐도 못 굴린다»(토큰·테넌트·묶기). 🔴 화면은 A 진행 중(내려받기 버튼이 JSON 새 탭 → API→url).
+5. **C 1차 발부됨**(`verify/p1r6-5` · 보고서 `docs/history/2026-09-15-R6.5-C-report.md`) · A(건너뛰어요 정정 + 러너 화면) 머지 뒤 **2차 발부(러너 배포 절 + skipReason 절)** → 배포 #7.
+6. 🔴 **설계 대비 전수조사**(사장님 지시 · 새 B `autocreate-b-e9`) → 결과 `DESIGN-AUDIT.md` 의 «R7 제안 묶음 3» 이 다음 라운드의 유일한 입력. 사장님이 짚은 것: 영상 축이 고객 화면에 안 보임(레지스트리 planned) · «있지만 안 되는 것» 많음 · 탈퇴 시 R2 파기 없음(B-1 발견).
 
 ### 사장님 결정 대기
 - **실제 발행 GO** — 198 의 12:30 예약 글(@endyd116 실블로그)을 진짜 올릴지(러너를 이 PC 에 붙임 + 네이버 로그인 1회 필요). 러너 패키지가 없어 «집PC」 등록만 된 상태.
