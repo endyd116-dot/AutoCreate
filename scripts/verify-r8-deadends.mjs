@@ -226,7 +226,10 @@ for (const [label, oldSym, oldOwner, newSym, newOwner] of OLD) {
    🔴 **음성·양성 대조를 같이 둔다**: `fxMissing` 은 화면이 **이미 읽는** 키다. 그게 0으로 나오면 **이 검사 자체가 고장 난 것**이다
       (셈법이 틀렸는데 «다 죽었다»고 빨갛게 우는 검사가 제일 나쁘다). */
 {
-  const SCREENS = PRODUCT.filter((p) => p.startsWith("public/"));
+  /* 🔴 [2026-09-16 · A 지적] **모의 층은 «화면»이 아니다.** `public/js/mock*.js` 를 세면
+     «모의에만 키를 적어도 초록»이 된다 — 가짜 초록의 교과서다(A 가 자기 mock 이 초록에 기여하는 걸 보고 알려 줬다).
+     진짜 화면 파일만 센다. */
+  const SCREENS = PRODUCT.filter((p) => p.startsWith("public/") && !/\/js\/mock/.test(p));
   const readsInScreens = (key) => {
     const re = new RegExp(`\\b${key}\\b`);
     return SCREENS.filter((p) => re.test(CODE.get(p) ?? "")).map((p) => p.replace("public/", ""));
