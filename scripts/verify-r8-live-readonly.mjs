@@ -46,12 +46,16 @@ const out = [];
 const say = (s) => out.push(s);
 
 try {
-  /* ③ 먼저 — 이 판이 라이브에 들어간 판인지 알아야 나머지 해석이 선다. */
+  /* ③ 먼저 — 이 판이 라이브에 들어간 판인지 알아야 나머지 해석이 선다.
+     🔴 [2026-09-16 · C 정정] 처음엔 key_source|source 라는 **내가 지어낸 이름**으로 찾고 «칸이 없다»고 적었다.
+        실제 이름은 **byo** 다(drizzle/0032-r8-byo-ai-key.sql:36). 이름을 추측해서 «없다»를 만든 것이라
+        AC-75 를 이 파일에서도 밟은 것이다 — 칸 이름은 **DDL 에서 읽어 온다**.
+     🔴 그리고 이 주석은 템플릿 리터럴 **밖**에 있어야 한다. 안에 넣었다가 주석 속 백틱이 문자열을 끊어 파일이 안 떴다. */
   const cols = await ask("컬럼", `
     SELECT table_name, column_name FROM information_schema.columns
      WHERE table_schema='public'
        AND ((table_name='pieces'    AND column_name IN ('created_by','meta'))
-         OR (table_name='ai_usage'  AND column_name IN ('key_source','source','provider','tenant_id','model','cost_usd'))
+         OR (table_name='ai_usage'  AND column_name IN ('byo','synthetic','is_internal','provider','tenant_id','model','cost_usd'))
          OR (table_name='briefs'    AND column_name='goal'))
      ORDER BY table_name, column_name`);
   const have = new Set((cols.rows ?? []).map((r) => `${r.table_name}.${r.column_name}`));
@@ -62,18 +66,29 @@ try {
 
   /* ① BYO 로 찍힌 ai_usage 가 있나 — 칸 이름을 모르니 있는 칸으로만 묻는다. */
   say(`\n■ ① BYO(고객 키)로 찍힌 AI 사용 행이 있나 — 입구를 껐으니 **0 이어야 한다**`);
-  const keyCol = ["key_source", "source"].find((c) => have.has(`ai_usage.${c}`));
+  const keyCol = ["byo", "key_source", "source"].find((c) => have.has(`ai_usage.${c}`));
   if (!keyCol) {
     say("   🟠 ai_usage 에 «키 출처» 칸이 아직 없다 — **BYO 로 쓴 건과 우리 키로 쓴 건을 사후에 가를 수 없다**.");
     say("      (지금은 입구가 닫혀 있어 사고는 안 나지만, 다시 열 때 이 칸이 먼저 있어야 한다.)");
   } else {
-    const r = await ask("byo", `SELECT ${keyCol} AS k, COUNT(*)::int AS n, ROUND(SUM(COALESCE(cost_usd,0))::numeric, 4) AS usd
-       FROM ai_usage GROUP BY 1 ORDER BY 2 DESC LIMIT 20`);
+    /* 🔴 [2026-09-16 · C 정정] 첫 판은 `byo` 만 세고 «5건 있다 ⇒ 껐다는 기능이 돌았다»고 찍었다 — **틀렸다.**
+       다섯 건은 전부 **합성 스모크**였다(`purpose=smoke:byo` · `model=gemini-x` · `synthetic=true`).
+       AC-71 이 이미 적어 뒀다: «하니스가 쓴 합성 행은 «합성»이라고 표시하고 **기본 집계에서 뺀다**».
+       B 가 표시는 제대로 했는데 **내가 안 뺐다.** ⇒ 합성과 진짜를 **갈라서** 센다(뭉치면 가짜 빨강이 뜬다). */
+    const r = await ask("byo", `SELECT ${keyCol} AS k, COALESCE(synthetic,false) AS syn, COUNT(*)::int AS n,
+         ROUND(SUM(COALESCE(cost_usd,0))::numeric, 4) AS usd
+       FROM ai_usage GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20`);
+    const keys = await ask("keys", `SELECT COUNT(*)::int AS n FROM tenant_ai_keys`);
     if (r.err) say(`   🔴 못 읽었다: ${r.err}`);
     else {
-      for (const x of r.rows) say(`   ${String(x.k ?? "(null)").padEnd(14)} ${String(x.n).padStart(7)}행  $${x.usd}`);
-      const byo = r.rows.filter((x) => /byo|customer|tenant|own/i.test(String(x.k ?? "")));
-      say(`   ⇒ ${byo.length ? `🔴 **BYO 로 찍힌 행이 ${byo.reduce((a, b) => a + b.n, 0)}건 있다** — 껐다는 기능이 돌았다는 뜻이다` : "✅ BYO 로 찍힌 행 0 — 입구가 닫힌 그대로다"}`);
+      for (const x of r.rows) say(`   ${String(x.k ?? "(null)").padEnd(8)} ${x.syn ? "합성" : "진짜"} ${String(x.n).padStart(6)}행  $${x.usd}`);
+      /* `byo` 칸은 boolean 이다 — true 가 «고객 키로 나갔다»(`ai.ts:324` ← `ai-key.ts:114` 에서만 true · 의도 아니고 **사실**). */
+      const real = r.rows.filter((x) => (x.k === true || /^(byo|customer|tenant|own)/i.test(String(x.k ?? ""))) && !x.syn);
+      const syn = r.rows.filter((x) => (x.k === true || /^(byo|customer|tenant|own)/i.test(String(x.k ?? ""))) && x.syn);
+      const nReal = real.reduce((a, b) => a + b.n, 0), nSyn = syn.reduce((a, b) => a + b.n, 0);
+      say(`   ⇒ ${nReal ? `🔴 **진짜 고객 키로 나간 행이 ${nReal}건 있다** — 껐다는 기능이 돌았다는 뜻이다`
+        : `✅ **진짜** 고객 키로 나간 행 0 — 입구가 닫힌 그대로다${nSyn ? ` (합성 스모크 ${nSyn}건은 뺐다 · AC-71)` : ""}`}`);
+      if (!keys.err) say(`   꽂혀 있는 고객 키(tenant_ai_keys): ${keys.rows[0].n}개 ${keys.rows[0].n ? "" : "— 아무도 안 꽂았다"}`);
     }
   }
 
