@@ -22,7 +22,8 @@ import { contractFor, defaultImageCount, shortsFormOf, videoSecondsFor, type For
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { gapMinFor } from "./publish-gap";
 import { balance, consume, refundPiece, refundPieceDetailed, refundLine } from "./coin-ledger";
-import { coinCostOf, videoCoinItem, pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
+import { coinCostOf, videoCoinItem, pieceCoinCost, DEFAULT_COIN_TIER, toCoinTier, plannedAiFor, postItemForCoins, COIN_TIERS, type CoinTier } from "./coin-table";   // [R10-7·9] 등급 — 표는 coin-table 한 곳
+import { imageCountFor } from "./writing-contracts";   // [R10-7] 등급이 굽겠다는 AI 장수만큼 사진 자리(사람·자동 경로 같은 함수)
 import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
@@ -58,6 +59,13 @@ export interface PieceSpec {
    */
   monetize: { affiliate: Affiliate | null; sponsored: boolean; gift: boolean; adDisclosure: boolean };
   schedule: { at: string; slotReason: string }; coinCost: number;
+  /**
+   * [R10-7·9] 🔴 코인 등급(간단히 1 · 보통 2 · 프리미엄 3). 기본값은 **계정마다**(`accounts.quality_tier`) · 글마다 덮어쓰기(`PieceSpecPatch.tier`).
+   *   `images.aiCount` 는 이 등급이 정한다(`plannedAiFor`) · `coinCost` 는 `pieceCoinCost(…, { tier })` 한 식. 영상·카드뉴스엔 없다(값을 안 가른다).
+   */
+  tier?: CoinTier;
+  /** [R10-4] 이 글에만 쓰는 스타일(계정의 옷장 · `text_styles.id`). 없으면 계정 기본 스타일 → 없으면 스타일 없이. */
+  styleId?: number | null;
   /** 추가(계약 외 · A 무시 가능): 채널별로 가른 앵글 — content-gen 재료. */
   angle: string;
   /** [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** 한 줄(사람말). 고객이 «왜 티스토리?»를 물으면 답할 자리다. */
@@ -86,11 +94,15 @@ export interface PieceSpec {
 export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
 export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string; aiCount?: number }; monetize?: { affiliate?: { productQuery: string; slot: string } | null; sponsored?: boolean; gift?: boolean }; schedule?: { at: string }; drop?: true;
   /** [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. */
-  video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number } }
+  video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number };
+  /** [R10-9] 글마다 등급 덮어쓰기(simple|standard|premium) — 사진 자리·AI 장수·코인이 같이 바뀐다. */
+  tier?: string;
+  /** [R10-4] 이 글만 다른 스타일(`text_styles.id` · null = 스타일 없이). */
+  styleId?: number | null }
 
 const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
-/** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적과 실제 차감이 갈릴 수 없게. */
-const pieceCoin = (channel: string, aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format: coinFormatOf(channel, format) });
+/** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적과 실제 차감이 갈릴 수 없게. [R10-7] 등급을 **반드시** 넘긴다(안 넘기면 simple 상한으로 «1 을 말하고 3 을 뺀다»). */
+const pieceCoin = (channel: string, aiCount: number, format: string | undefined, tier: CoinTier) => pieceCoinCost("post", aiCount, { format: coinFormatOf(channel, format), tier });
 
 /* [R8CLOSE-B1 §B8] 🔴 **목표 매체 → 채널 선택**(DESIGN §5.3-1) — 판단은 `lib/director-goal.ts` 한 곳이다.
    여기서는 부르기만 한다: 그 파일 헤더에 «왜 `briefs.goal` 을 재료로 안 쓰는가»(AC-72)를 라이브 수치와 함께 적어 뒀다. */
@@ -345,16 +357,21 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       });
       continue;
     }
-    const imageCount = defaultImageCount(ch);
+    /* [R10-7·9] 🔴 등급 = **계정 기본값**(안 골랐으면 simple = 오늘까지의 글값). 사진 자리는 «계약 기본»과 «등급이 굽겠다는 AI 장수» 중 큰 쪽(`imageCountFor`) ·
+       AI 장수는 등급 상한 안에서(`plannedAiFor`) · 코인은 그 둘로 한 식(`pieceCoin`). 자동 경로(director-auto)와 **같은 세 함수**다. */
+    const tier: CoinTier = acc?.defaultTier ?? DEFAULT_COIN_TIER;
+    const imageCount = imageCountFor(c, null, tier);
+    const aiCount = plannedAiFor(tier, imageCount);
     specs.push({
       key: `${ch}:${acc?.id ?? 0}`, channel: ch, accountId: acc?.id ?? null, accountHandle: acc?.handle ?? null,
       kind: "post",
       format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
-      /* [R8] 🔴 기본은 **AI 1장 + 나머지는 스톡**이다 — 그래야 글 한 편이 1코인이다(사장님 승인값).
-         고객이 «AI 로 더 구워 줘»를 고르면 `images.aiCount` 가 올라가고 그만큼만 더 든다. */
-      images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory", aiCount: Math.min(imageCount, AI_IMAGES_INCLUDED) },
+      /* [R8] 🔴 간단히 = **AI 1장 + 나머지는 스톡** — 글 한 편 1코인(사장님 승인값). 보통·프리미엄은 AI 를 더 굽고(2~3 · 4~5) 그만큼(2 · 3) 든다.
+         고객 사진이 자리를 먹으면 그만큼 덜 굽고 돌려준다(`settlePieceCoins`). */
+      images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory", aiCount },
+      tier, styleId: acc?.defaultStyleId ?? null,   // [R10-4] 계정에 걸어 둔 스타일이 기본 · 글마다 덮어쓰기는 patch
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
-      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(ch, Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
+      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(ch, aiCount, format, tier), angle: topic.angle,
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
       ...(ch === channels[0] ? { channelReason: order.reason } : {}),   // [R8CLOSE-B1 §B8] 순서를 정한 이유는 **맨 앞 채널**에 붙는다
       /* [R8CLOSE-B1 §B2] 🔴 **이 계정에 왜 갔는지** — 낮아도 배정은 됐다. 낮으면 낮다고 말해 준다(막지 않는다 · §9). */
@@ -447,7 +464,23 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
     }
     if (p.format !== undefined) { if (!c.formats.includes(p.format as FormatKey)) return { ok: false, error: "이 채널에서 쓸 수 없는 구성이에요." }; next.format = p.format as FormatKey; next.composition = c.formatLabel[next.format] || next.format; }
     if (p.emotionKey) next.emotionKey = String(p.emotionKey).slice(0, 40);
-    if (p.images?.count !== undefined) next.images.count = Math.max(c.images?.min ?? 0, Math.min(c.images?.max ?? 10, Math.trunc(n(p.images.count))));
+    /* [R10-9] 글마다 등급 덮어쓰기 — 🔴 모르는 값은 거절한다(«premium!» 같은 오타를 simple 로 조용히 접으면 고객은 프리미엄을 골랐다고 믿는다 · AC-92).
+       등급을 바꾸면 사진 자리·AI 장수가 그 등급 기본으로 다시 선다(고객이 images 를 같이 보내면 그게 이긴다 — 아래에서 덮는다). 영상은 등급이 없다. */
+    if (p.tier !== undefined && next.kind !== "video") {
+      const t = toCoinTier(p.tier);
+      if (!t) return { ok: false, error: "등급은 간단히·보통·프리미엄 중 하나예요." };
+      next.tier = t;
+      next.images.count = imageCountFor(c, null, t);
+      next.images.aiCount = plannedAiFor(t, next.images.count);
+    }
+    /* [R10-4] 이 글만 다른 스타일 — 남의 집 스타일은 못 쓴다(교차 누수 · CLAUDE §4.6). null = «스타일 없이». */
+    if (p.styleId !== undefined) {
+      const sid = p.styleId === null ? 0 : Math.floor(Number(p.styleId) || 0);
+      if (sid) { const [st] = await q(sql`SELECT id FROM text_styles WHERE tenant_id = ${tid} AND id = ${sid} AND deleted_at IS NULL`); if (!st) return { ok: false, error: "그 스타일을 찾지 못했어요." }; }
+      next.styleId = sid || null;
+    }
+    const tierMax = next.tier ? Math.max(c.images?.max ?? 10, next.images.count) : (c.images?.max ?? 10);   // 등급이 자리를 계약 상한 위로 올렸으면 그 값까지 허용
+    if (p.images?.count !== undefined) next.images.count = Math.max(c.images?.min ?? 0, Math.min(tierMax, Math.trunc(n(p.images.count))));
     /* [R8] AI 로 구울 장수 — 총 장수를 넘을 수 없다. 🔴 **이 값만 코인을 움직인다**(사진을 더 넣는 것 자체는 공짜). */
     if (p.images?.aiCount !== undefined) next.images.aiCount = Math.max(0, Math.min(next.images.count, Math.trunc(n(p.images.aiCount))));
     if (next.images.aiCount > next.images.count) next.images.aiCount = next.images.count;
@@ -486,7 +519,9 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       next.coinCost = coinCostOf(videoCoinItem(v.seconds));
       out.push(next); continue;
     }
-    next.coinCost = pieceCoin(next.channel, next.images.aiCount, next.format);
+    /* [R10-7] 🔴 옛 spec(등급 전)엔 tier 가 없다 — 그때는 simple 로 **적어서** 셈한다(모르는 것을 모자라게 받는 쪽 · AC-93). 화면엔 그 값이 그대로 실린다. */
+    if (!next.tier) next.tier = DEFAULT_COIN_TIER;
+    next.coinCost = pieceCoin(next.channel, next.images.aiCount, next.format, next.tier);
     out.push(next);
   }
   return { ok: true, specs: out };
@@ -499,7 +534,7 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
  *   🔴 사진을 더 넣는 것은 **공짜**다(내 사진·스톡). `images.aiCount` 만 코인을 움직인다 — 화면에서 다른 질문으로 물어야 한다.
  */
 export async function estimate(tid: number, briefId: number, patches: PieceSpecPatch[] = []): Promise<
-  | { ok: true; coinCost: number; coinsLeft: number; enough: boolean; need: number; pieces: { key: string; channel: string; kind: "post" | "video"; coinCost: number; imageCount: number; aiCount: number }[] }
+  | { ok: true; coinCost: number; coinsLeft: number; enough: boolean; need: number; pieces: { key: string; channel: string; kind: "post" | "video"; coinCost: number; imageCount: number; aiCount: number; tier?: CoinTier; styleId?: number | null }[] }
   | { ok: false; step: string; error: string }> {
   const [b] = await q(sql`SELECT * FROM briefs WHERE tenant_id = ${tid} AND id = ${Math.floor(Number(briefId) || 0)}`);
   if (!b) return { ok: false, step: "not_found", error: "지시서를 찾을 수 없어요." };
@@ -510,7 +545,9 @@ export async function estimate(tid: number, briefId: number, patches: PieceSpecP
   const bal = await balance(tid);
   return {
     ok: true, coinCost, coinsLeft: bal.balance, enough: bal.balance >= coinCost, need: Math.max(0, coinCost - bal.balance),
-    pieces: ap.specs.map((s) => ({ key: s.key, channel: s.channel, kind: s.kind ?? "post", coinCost: s.coinCost, imageCount: s.images.count, aiCount: s.images.aiCount })),
+    /* [R10-9] 등급·스타일도 같이 — 화면이 «이 글은 프리미엄 3코인»을 서버 값으로 그린다(셈 안 한다 · AC-74). 영상엔 tier 가 없다(키 자체를 안 싣는다). */
+    pieces: ap.specs.map((s) => ({ key: s.key, channel: s.channel, kind: s.kind ?? "post", coinCost: s.coinCost, imageCount: s.images.count, aiCount: s.images.aiCount,
+      ...(s.kind !== "video" && s.tier ? { tier: s.tier } : {}), ...(s.kind !== "video" && s.styleId !== undefined ? { styleId: s.styleId } : {}) })),
   };
 }
 
@@ -617,10 +654,17 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       /* [R8 §2.5] 🔴 카드뉴스 — DESIGN §5B.3 의 세 종류 중 하나. 글 축이라 `content-gen` 으로 만들지만
          **편성·코인·검수에서 «글»과 구분된다.** 판정은 `isCardnewsChannel` 하나만 본다(목록을 여기 또 적지 않는다 · AC-57). */
       const isCard = !isVideo && isCardnewsChannel(s.channel);
-      const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : isCard ? "cardnews" : "blog";
+      /* [R10-7] 🔴 글은 등급 항목 **한 행**(post_simple|post_standard|post_premium) — 값은 spec 의 `coinCost`(= `pieceCoinCost(aiCount, tier)` · 견적과 같은 식).
+         옛 spec(등급 전)은 simple 로 적어서 받는다(AC-93). 사진 항목(`image`)을 따로 세던 줄은 내렸다. */
+      const postTier: CoinTier = toCoinTier(s.tier) ?? DEFAULT_COIN_TIER;
+      const postCoins = isVideo || isCard ? 0 : pieceCoinCost("post", s.images.aiCount, { format: coinFormatOf(s.channel, s.format), tier: postTier });
+      const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : isCard ? "cardnews" : postItemForCoins(postCoins);
       const meta = isVideo
         ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: applyRefPalette(s.video, refStyle), affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId, ...(refStyle ? { refStyle } : {}), ...(refUnused.length ? { refUnused } : {}) } : {}) }
-        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}), ...(s.channelReason ? { channelReason: s.channelReason } : {}), ...(s.personaFit ? { personaFit: s.personaFit } : {}) };
+        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0,
+            /* [R10-7·9] 🔴 등급·계획 코인·스타일을 **글이 들고 있는다** — 정산(`settlePieceCoins`)·재차감·검수 화면이 다시 정하지 않고 이 값을 읽는다(«고르는 자리»가 갈리면 그게 곧 사고 · AC-71·74). */
+            ...(isCard ? {} : { tier: postTier, coinPlanned: postCoins }), ...(s.styleId ? { styleId: s.styleId } : {}),
+            ...(s.formatPick ? { formatPick: s.formatPick } : {}), ...(s.channelReason ? { channelReason: s.channelReason } : {}), ...(s.personaFit ? { personaFit: s.personaFit } : {}) };
       /* 🔴 [R8 §4.5] **누가 만들었나**를 적는다 — 자동(크론)은 `actorId` 가 없어 **NULL** 이다.
          기계가 만든 글에 «누가»를 지어내지 않는다(AC-9). 이 값이 없으면 «팀원이 만든 글»을 가릴 수 없다. */
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for, created_by)
@@ -656,17 +700,11 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       }
       await q(sql`UPDATE pieces SET slot_id = ${slotId} WHERE id = ${pieceId}`);
       created.push({ pieceId, slotId, isVideo, ...(reused ? { reused } : {}) });
-      const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : isCard ? `카드뉴스 ${s.images.count}장(${s.channel})` : `블로그 글(${s.channel})` });
+      /* [R10-7] 🔴 글 한 편 = 등급 항목 한 행. 사유에 등급·AI 장수를 적어 «최근 사용»에서 «글 1편(보통) · AI 사진 3장»으로 읽힌다.
+         옛 «포함분을 뺀 사진마다 image 한 행» 은 내렸다 — AI 5장이 5코인이던 식(사장님: «6코인 7코인 지불할 사람은 없다»). */
+      const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : isCard ? `카드뉴스 ${s.images.count}장(${s.channel})` : `글 1편(${COIN_TIERS[postTier].label} · AI 사진 ${s.images.aiCount}장 · ${s.channel})` });
       if (!c1.ok) { await rollback(c1.reason); return c1.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${c1.need}개 부족해요.`, need: c1.need, have: c1.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
       charged += c1.charged;
-      /* 🔴 [R8] **포함분(AI 1장)을 뺀 나머지 AI 사진만** 돈을 받는다. 고객 사진·스톡은 0코인이라 여기서 세지 않는다.
-         카드뉴스는 위 `coinItem` 이 통째로 값을 매기므로(장수로 안 센다) 이 줄을 아예 안 탄다. */
-      const billableImages = isVideo || s.format === "cardnews" ? 0 : Math.max(0, s.images.aiCount - AI_IMAGES_INCLUDED);
-      for (let i = 1; i <= billableImages; i++) {
-        const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(1장은 글값에 포함)` });
-        if (!ci.ok) { await rollback(ci.reason); return ci.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${ci.need}개 부족해요.`, need: ci.need, have: ci.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
-        charged += ci.charged;
-      }
     }
     const [chk] = await q(sql`SELECT jsonb_typeof(meta) AS t FROM pieces WHERE id = ${created[0].pieceId}`);
     if (chk?.t !== "object") console.error("[director] pieces.meta jsonb_typeof !== object", chk);

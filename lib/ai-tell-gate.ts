@@ -22,6 +22,7 @@ import type { Block } from "./blocks";
 import { blocksToPlain, blocksCharCount } from "./blocks";
 import type { WritingContract, TopicGroup } from "./writing-contracts";
 import { lengthFor } from "./writing-contracts";   // [R8 §2.1] 계약 분량 폭(주제군 반영) — 정본 한 곳
+import type { CoinTier } from "./coin-table";       // [R10-8] 등급이 분량 하한을 올린다(같은 함수·같은 tier 로 잰다)
 import { checkDisclosure, compensationOfMeta } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED, normalizeForBanScan, classifyBanned, hasEvidenceNear, findAdPointing } from "./banned-words";   // [R8-A §4] 3층 사전 + 근거 판정
 import { slangAllowedFor, toAgeBand } from "./slang-whitelist";   // [R8CLOSE-B1 §B3] 신조어 화이트리스트(연령대별 · 표는 그 파일 한 곳)
@@ -217,6 +218,8 @@ export interface GateInput {
   title?: string;
   /** [R8 §2.1] 주제군 — 계약 분량 폭이 주제군마다 다르다(`lengthFor`). 없으면 채널 기본 폭. */
   group?: TopicGroup | null;
+  /** [R10-8] 코인 등급 — 보통·프리미엄은 분량 하한이 올라간다(`lengthFor` 세 번째 인자). 🔴 생성이 쓴 등급을 **그대로** 넘긴다(다시 정하면 잣대가 갈린다). */
+  tier?: CoinTier | null;
   /**
    * [R8 §5D] 이 글이 **어떻게 만들어졌나**(`auto`·`manual`·`self`). 판정 자체는 안 바꾸고 **말투만** 바꾼다 —
    *   ①은 사람이 방금 쓴 글이라 «모자란다»는 판정문이 아프게 읽힌다(A 지적 2026-09-15). 같은 정보를 권유형으로 적는다.
@@ -236,7 +239,7 @@ export function runGate(inp: GateInput): GateReport {
      🔴 하한만 걸고 상한은 **적기만** 한다: 짧은 글은 고객 손해지만, 긴 글은 «폭을 넘었다»일 뿐이라 그걸로 재작성(=돈)을 돌리지 않는다.
      🔴 이 줄이 **머지에서 한 번 사라졌다**(2026-09-15) — 축은 선언돼 있는데 `push` 가 없어 `GATE_KEYS` 와 결과가 어긋났다.
         되짚기가 «GATE_KEYS 의 모든 키가 결과에 있나»를 세서 잡았다. */
-  const lenRange = lengthFor(contract, inp.group);
+  const lenRange = lengthFor(contract, inp.group, inp.tier);
   const chars = blocksCharCount(blocks);
   const selfWritten = String(inp.origin ?? "") === "self";
   push("length", chars >= lenRange.min,

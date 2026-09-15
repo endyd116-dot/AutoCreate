@@ -1154,3 +1154,31 @@ export const piecesR8Team = {
 
 /** 켜고 끄는 값은 `tenants.settings.teamApproval`(jsonb) — 🔴 **기본 꺼짐** · 플랜 기능(Agency)이 없으면 안 켜진다. */
 export const tenantSettingsR8Team = { teamApproval: "teamApproval" } as const;
+
+
+/* === Phase 1 R9+R10 · B(계정의 옷장 + 코인 등급 · R9R10-contract §3.1 R10-4·R10-9 · 2026-09-16 · drizzle/0035-r9-text-styles.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   · text_styles — 레퍼런스에서 배운 «어떻게 생겼나»(숫자·목록만 · 문장 0 · 설계 §3.4). 저장 직전 `lib/text-style.ts sanitizeTextStyleForStorage` 가 소독한다.
+ *   · accounts.text_style_id — 계정에 걸어 둔 기본 스타일 · accounts.quality_tier — 계정 기본 코인 등급(NULL = 안 고름 = simple 로 만든다).
+ */
+export const textStyles = pgTable("text_styles", {
+  id:        bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:  bigint("tenant_id", { mode: "number" }).notNull(),
+  /** 어느 계정에서 배웠나(기록). 옷장은 집 단위로 공유한다. */
+  accountId: bigint("account_id", { mode: "number" }),
+  name:      varchar("name", { length: 80 }).notNull(),
+  /** url(러너 캡처) | capture(고객이 찍어 올림) | paste(복붙 · 꾸밈은 못 배운다). */
+  source:    varchar("source", { length: 12 }).notNull().default("url"),
+  sourceUrl: varchar("source_url", { length: 400 }),
+  /** 🔴 `TextStyle`(lib/text-style.ts) — 숫자·불리언·닫힌 enum·BlockType[]·이모지 목록뿐. 자유 문자열 칸이 0 개다. */
+  style:     jsonb("style").notNull().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  /** 고객이 지운 것 — 원장(piece_outcomes.features.styleId)이 가리키므로 행은 지우지 않는다. */
+  deletedAt: timestamp("deleted_at"),
+}, (t) => ({ tenantIdx: index("text_styles_tenant_idx").on(t.tenantId, t.deletedAt, t.id) }));
+
+export const accountsR9Style = {
+  /** 계정에 걸어 둔 기본 스타일(text_styles.id). NULL = 없음. 글마다 덮어쓰기는 `pieces.meta.styleId`. */
+  textStyleId: "text_style_id",
+  /** 계정 기본 코인 등급(simple|standard|premium · 어휘는 `lib/coin-table.ts COIN_TIER_KEYS`). NULL = 안 고름. */
+  qualityTier: "quality_tier",
+} as const;

@@ -31,6 +31,7 @@ import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "..
 import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
 import { formatUnusedOf } from "../../lib/format-marks";           // [R9-5] «못 낸 서식» 사람말 투영(정본은 meta.formatMarks)
 import { formatCapsOf } from "../../lib/channel-registry";         // [R9-4] 채널 꾸밈 표
+import { toCoinTier } from "../../lib/coin-table";                 // [R10-7] 등급 — 글이 들고 있는 값 그대로
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -181,6 +182,16 @@ export default async (req: Request): Promise<Response> => {
       }
       /* [R9-8] 계정 간 유사도(숫자·id 만) — 게이트 축 `cross_account` 와 같은 값. `measured:false` 그대로(«못 쟀다» ≠ 0점). */
       if (m.crossSimilarity && typeof m.crossSimilarity === "object") meta.crossSimilarity = m.crossSimilarity;
+      /* [R10-7·9] 🔴 등급과 **실제로 빠진 코인**(정산 뒤 `coins = {tier, planned, charged, returned, actualAi, line}` · line 은 서버 문장 — «프리미엄으로 만들었는데 내 사진으로 채워서 1코인만 받았어요»).
+         `tier` 는 글이 들고 있는 값 그대로(옛 글엔 없다 → 키 없음 · «간단히»로 위장하지 않는다). `coins` 는 정산이 돈 뒤에만 있다. */
+      { const t = toCoinTier(m.tier); if (t) meta.tier = t; }
+      if (m.coins && typeof m.coins === "object") meta.coins = m.coins;
+      /* [R10-4] 이 글에 쓴 스타일 — id + 사람이 읽는 이름(화면이 id 만 받고 이름을 또 물으러 가지 않게). 지워진 스타일이면 이름 없이 id 만. */
+      if (Number(m.styleId) > 0) {
+        meta.styleId = Math.floor(Number(m.styleId));
+        const [st] = await q(sql`SELECT name FROM text_styles WHERE tenant_id = ${tid} AND id = ${meta.styleId as number}`).catch(() => [] as Row[]);
+        if (st?.name) meta.styleName = String(st.name);
+      }
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount),
@@ -203,7 +214,8 @@ export default async (req: Request): Promise<Response> => {
           : fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
         const [brow] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE tenant_id = ${tid} AND id = ${n(p.brief_id)}`) : [undefined];
         const goal = resolveGoal({ affiliate: !!m.affiliate, briefGoal: brow?.goal as string | null, channel: String(p.channel) });
-        const len = lengthFor(wc, grp), img = imagesFor(wc, grp);
+        /* [R10-8] 분량 폭은 등급에도 달렸다 — 생성·게이트와 **같은 함수·같은 tier**(안 넘기면 «프리미엄 2,000자»를 «1,500자 계약»으로 그린다). */
+        const len = lengthFor(wc, grp, toCoinTier(m.tier)), img = imagesFor(wc, grp);
         detail.topicGroup = grp;                       // null 이면 null — 화면이 «모름»으로 그린다
         detail.goal = goal;
         detail.contract = {
@@ -368,21 +380,23 @@ export default async (req: Request): Promise<Response> => {
              ⇒ 처음에 **1코인**이던 글이 실패 뒤 다시 만들 때 **7코인**으로 불어났다. 고객 돈이 걸린 자리다.
              🔴 「숫자는 새 식인데 이 자리만 옛 식」 — 코인 수리가 닿지 않은 마지막 호출부였다(A 가 화면에서 같은 과를 찾아 준 덕에 훑었다).
              카드뉴스는 장수로 안 세고 통째로 한 건이다(`coinFormatOf` 한 곳). */
-          const { AI_IMAGES_INCLUDED } = await import("../../lib/coin-table");
-          /* 🔴 분류는 **그 글이 들고 있다** — 처음 차감할 때 쓴 `coinItem` 이 `meta` 에 적혀 있다(`lib/director.ts` 가 적는다 · AC-71).
+          const { pieceCoinCost, postItemForCoins, toCoinTier } = await import("../../lib/coin-table");
+          const { coinFormatOf } = await import("../../lib/writing-contracts");
+          /* 🔴 분류는 **그 글이 들고 있다** — 처음 차감할 때 쓴 `coinItem`·`tier` 가 `meta` 에 적혀 있다(`lib/director.ts` 가 적는다 · AC-71).
              채널·포맷으로 **다시 고르면** 그 사이 계약이 바뀌었을 때 처음과 다른 값이 나온다(«고르는 자리가 갈린다» · AC-74). */
-          const item = String(m.coinItem || "") === "cardnews" ? "cardnews" : "blog";
-          /* 🔴 **«모른다»를 «1장»으로 바꾸지 않는다**(AC-92). `aiImageCount` 는 R8 뒤에 만든 글에만 있다 —
-             그 값이 **없으면 AI 사진이 몇 장이었는지 우리가 모른다.** 모르면 **글값만** 받는다(모자라게 받는 쪽으로 틀린다).
-             옛 `imageCount`(사진 **총** 장수)로 대신 세면 고객 사진·스톡까지 돈을 받게 된다 — 그게 여기 있던 옛 식이다. */
-          const aiKnown = m.aiImageCount !== undefined && m.aiImageCount !== null;
-          const ai = aiKnown ? Math.max(0, Math.trunc(n(m.aiImageCount))) : 0;
-          const billable = item === "cardnews" ? 0 : Math.max(0, ai - AI_IMAGES_INCLUDED);
-          const c1 = await consume(tid, item, tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
-          if (!c1.ok) return coinFail(c1);
-          for (let i = 1; i <= billable; i++) {
-            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(재차감 · 1장은 글값에 포함)` });
-            if (!ci.ok) { await refundPiece(tid, id); return coinFail(ci); }
+          if (String(m.coinItem || "") === "cardnews") {
+            const c1 = await consume(tid, "cardnews", tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
+            if (!c1.ok) return coinFail(c1);
+          } else {
+            /* 🔴 **«모른다»를 «1장»으로 바꾸지 않는다**(AC-92). `aiImageCount` 는 R8 뒤에 만든 글에만 있다 —
+               그 값이 **없으면 AI 사진이 몇 장이었는지 우리가 모른다.** 모르면 **글값만**(간단히 1) 받는다(모자라게 받는 쪽으로 틀린다).
+               [R10-7] 등급도 글이 들고 있다 — 없으면(옛 글) simple 상한이라 어차피 1. 식은 견적·첫 차감·정산과 같은 `pieceCoinCost` 한 곳. */
+            const aiKnown = m.aiImageCount !== undefined && m.aiImageCount !== null;
+            const ai = aiKnown ? Math.max(0, Math.trunc(n(m.aiImageCount))) : 0;
+            const tier = toCoinTier(m.tier);
+            const coins = pieceCoinCost("post", ai, { format: coinFormatOf(String(p.channel), String(p.format || m.format || "") || undefined), tier });
+            const c1 = await consume(tid, postItemForCoins(coins), tag, { actorId: auth.user.uid, reason: `다시 만들기(환급분 재차감 · ${tier ?? "간단히"} · AI 사진 ${aiKnown ? ai : "모름"}장)` });
+            if (!c1.ok) return coinFail(c1);
           }
         }
       }

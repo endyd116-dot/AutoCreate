@@ -26,6 +26,7 @@ import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
 import { crossAccountSimilarity } from "./cross-account";   // [R9-8] 계정 간 유사도 — 생성과 **같은 함수**(자가 둘이면 기준이 갈린다)
+import { toCoinTier } from "./coin-table";                  // [R10-8] 등급 → 분량 하한(생성이 적어 둔 값 그대로)
 import { personaTerms } from "./content-gen";
 import { countAffiliateLinks } from "./publish/gate";
 /* [R8-A §2 · B-1] 골격 지문 — 순수 모듈(DB 0). 여기서 최근 글을 읽어 넘겨 준다(ai-tell-gate 는 순수로 둔다 · AC-17). */
@@ -289,8 +290,10 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
   /* [R9-8] 계정 간 — 생성(`content-gen`)과 **같은 창·같은 자**로 다시 잰다(재검사가 다른 자를 들면 «잰 값은 같은데 기준이 다른» 상태가 된다). */
   const cross = await crossAccountSimilarity(tid, n(p.id), p.account_id ? n(p.account_id) : null, plain);
+  /* [R10-8] 생성 때 적어 둔 등급이 정본 — 분량 하한이 등급에 달렸다. 없으면(옛 글) null 그대로(«간단히»로 위장하지 않는다 · lengthFor 가 null 을 채널 폭으로 읽는다). */
+  const tier = toCoinTier(m.tier);
   if (!edited && blocks.length) {
-    const g = runGate({ blocks, contract: c, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, crossAccount: cross.gate, title: String(p.title || ""), group, origin });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, crossAccount: cross.gate, title: String(p.title || ""), group, origin, tier });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
     const stock = await checkStockSafety(tid, p);      // [P1R8 B3] 스톡 사진 안전(광고성 글 + 사람·상표) — 제3자가 다치는 축
@@ -299,7 +302,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
-  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, crossAccount: cross.gate, title: String(p.title || ""), group, origin });
+  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, crossAccount: cross.gate, title: String(p.title || ""), group, origin, tier });
   for (const k of GATE_KEYS) {
     const from = base.checks.find((x) => x.key === k)!;
     if (k === "disclosure") { const d = checkDisclosureHtml(html, need, comp.kinds); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }
