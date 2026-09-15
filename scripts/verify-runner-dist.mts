@@ -87,7 +87,78 @@ async function testTenant(): Promise<{ tid: number; uid: number }> {
   return { tid, uid };
 }
 
+/* ═══════════ 뒷정리(teardown) ═══════════
+ * 🔴 이 함수는 **되돌릴 수 없다.** 그래서 «지울 수 있는 것»을 좁게 정의하고, 조금이라도 어긋나면 던진다.
+ *    실증이 만든 테넌트는 실증이 지운다 — 안 지우면 라이브 운영센터의 «고객» 숫자가 우리 쓰레기로 부풀고,
+ *    그 숫자를 읽는 사람이 속는다(2026-09-15 사장님 지시로 대청소하게 된 이유가 그것이다).
+ * 🔴 **`lib/` 가 아니라 이 검증 파일 안에 둔다.** 운영 코드에서 실수로 import 할 수 있는 자리에
+ *    «테넌트를 통째로 지우는 함수»를 두지 않는다.
+ */
+const PROTECTED_TENANTS = new Set([3, 13, 109, 116]);        // 보존 4집 — 무슨 일이 있어도 안 지운다
+const TEST_KEY = /^(runner-dist-verify|b2ver\d+)$/;          // 내 하니스가 만드는 키만
+
+export async function dropTestTenant(tid: number, log: (s: string) => void = console.log): Promise<void> {
+  if (!Number.isInteger(tid) || tid <= 0) throw new Error(`테넌트 id 가 이상해요: ${tid}`);
+  if (PROTECTED_TENANTS.has(tid)) throw new Error(`보존 테넌트 ${tid} 는 지우지 않습니다.`);
+
+  const [t] = await q(sql`SELECT id, key, name FROM tenants WHERE id = ${tid}`);
+  if (!t) { log(`   · t${tid} 은 이미 없어요`); return; }
+  const key = String(t.key ?? "");
+  // 🔴 «이름이 실증처럼 생겼다» 로는 안 된다 — **키가 내 하니스 것**이어야 지운다.
+  if (!TEST_KEY.test(key)) throw new Error(`t${tid} «${t.name}»(key=${key}) 은 내 실증 테넌트가 아니에요 — 지우지 않습니다.`);
+  // 🔴 돈이 물려 있으면 실증 테넌트일 리 없다. 하나라도 있으면 멈춘다(사람이 본다).
+  const [money] = await q(sql`SELECT
+      (SELECT COUNT(*) FROM subscriptions WHERE tenant_id = ${tid})::int AS subs,
+      (SELECT COUNT(*) FROM invoices      WHERE tenant_id = ${tid})::int AS invs`);
+  if (n(money?.subs) || n(money?.invs)) throw new Error(`t${tid} 에 구독 ${money?.subs}·청구 ${money?.invs} 가 있어요 — 진짜 고객일 수 있어 멈춥니다.`);
+
+  /* 자식부터 지운다. FK 순서를 일일이 외우지 않으려고 **tenant_id 를 가진 표 전부**를 돌리고,
+     서로 물려 실패한 것은 다음 바퀴에 다시 시도한다(최대 5바퀴). 끝내 남으면 그대로 던진다 — 조용히 넘어가지 않는다. */
+  await q(sql`DELETE FROM piece_assets WHERE piece_id IN (SELECT id FROM pieces WHERE tenant_id = ${tid})`);
+  await q(sql`DELETE FROM account_creds WHERE account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tid})`);
+
+  const tabs = await q(sql`SELECT table_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name = 'tenant_id' AND table_name <> 'tenants' ORDER BY table_name`);
+  let left = tabs.map((r) => String(r.table_name));
+  const wiped: string[] = [];
+  for (let pass = 0; pass < 5 && left.length; pass++) {
+    const stuck: string[] = [];
+    for (const name of left) {
+      try {
+        const rows = await q(sql.raw(`DELETE FROM ${name} WHERE tenant_id = ${tid} RETURNING 1`));
+        if (rows.length) wiped.push(`${name}:${rows.length}`);
+      } catch { stuck.push(name); }      // 다른 표가 아직 참조 중 — 다음 바퀴에
+    }
+    left = stuck;
+  }
+  if (left.length) throw new Error(`t${tid}: ${left.join(", ")} 를 못 지웠어요(참조가 남아 있어요)`);
+
+  const gone = await q(sql`DELETE FROM tenants WHERE id = ${tid} RETURNING id`);
+  if (!gone.length) throw new Error(`t${tid} 테넌트 행이 안 지워졌어요`);
+
+  // R2 자산 — 접두 삭제는 `autocreate/{tid}/` 꼴만 받는다(lib/r2.ts 가 거부한다 · 한 줄 실수로 전 테넌트가 날아가지 않게).
+  let r2 = "";
+  try {
+    const { r2Configured, r2DeletePrefix } = await import("../lib/r2");
+    if (r2Configured()) { const d = await r2DeletePrefix(`autocreate/${tid}/`); r2 = ` · R2 ${d.deleted}/${d.listed}개`; }
+  } catch (e) { r2 = ` · R2 정리 실패(${String((e as Error)?.message ?? e).slice(0, 50)})`; }
+
+  log(`   🧹 t${tid} «${t.name}» 지움 — ${wiped.join(" · ") || "딸린 행 없음"}${r2}`);
+}
+
 async function main() {
+  /* `--cleanup=200,189` — 실증은 안 하고 **남아 있는 실증 테넌트만** 지운다(옛 실행이 남긴 것 치우기). */
+  const cleanupArg = process.argv.find((a) => a.startsWith("--cleanup="));
+  if (cleanupArg) {
+    const ids = cleanupArg.slice("--cleanup=".length).split(",").map((x) => Number(x.trim())).filter(Boolean);
+    console.log(`\n── 실증 테넌트 정리 (${ids.join(", ")}) ──`);
+    for (const id of ids) await dropTestTenant(id);
+    const left = await q(sql`SELECT id, key, name FROM tenants WHERE key ~ '^(runner-dist-verify|b2ver[0-9]+)$'`);
+    console.log(`\n   남은 B2 실증 테넌트 ${left.length}개${left.length ? ": " + left.map((r) => `${r.id}(${r.key})`).join(", ") : ""}\n`);
+    await pgClient.end({ timeout: 5 });
+    process.exit(left.length ? 1 : 0);
+  }
+
   console.log("\n── 러너 배포·업데이트·묶기 실증 ──");
   const { port, close } = await startServer();
   const base = `http://127.0.0.1:${port}`;
@@ -97,6 +168,11 @@ async function main() {
   const cookie = `${USER_COOKIE}=${encodeURIComponent(signUserToken({ uid, tid, role: "owner" }))}`;
   console.log(`   테넌트 ${tid} · 사용자 ${uid}\n`);
 
+  /* 🔴 여기부터 **`finally` 로 감싼다.** 실증이 도중에 깨져도 테넌트는 지워야 한다 —
+     «실패한 날의 쓰레기»가 제일 오래 남는다(성공한 날은 누구든 치우지만 실패한 날은 원인부터 보다가 잊는다). */
+  let home = "";
+  try {
+
   /* ───── ① 인증 다운로드 ───── */
   console.log("① 내려받기(로그인·플랜·짧은 링크)");
   const noAuth = await fetch(`${base}/api/runner-download`);
@@ -104,7 +180,8 @@ async function main() {
 
   const r = await fetch(`${base}/api/runner-download`, { headers: { cookie } });
   const dl = await r.json() as { ok?: boolean; url?: string; sha256?: string; bytes?: number; version?: string; filename?: string; expiresInSec?: number; error?: string };
-  if (!dl.ok || !dl.url) { bad(`내려받기 링크를 못 받았다: ${dl.error ?? r.status}`); close(); await pgClient.end({ timeout: 5 }); process.exit(1); }
+  // 🔴 여기서 `process.exit` 하면 아래 finally 가 **안 돈다**(프로세스가 그 자리에서 끝난다) → 테넌트가 남는다. 던진다.
+  if (!dl.ok || !dl.url) { bad(`내려받기 링크를 못 받았다: ${dl.error ?? r.status}`); throw new Error("no_download_link"); }
   ok(`링크 받음 · v${dl.version} · ${Number(dl.bytes).toLocaleString()} bytes · ${dl.expiresInSec}초 유효 · ${dl.filename}`);
 
   const res = await fetch(dl.url);
@@ -124,7 +201,7 @@ async function main() {
 
   /* ───── ② 새 폴더에 풀고 그 러너로 하트비트 ───── */
   console.log("\n② 받은 zip 을 **새 폴더**에 풀고 그 러너로 하트비트");
-  const home = path.join(os.tmpdir(), `ac-runner-dist-${Date.now()}`);
+  home = path.join(os.tmpdir(), `ac-runner-dist-${Date.now()}`);
   const files = zipRead(got);
   const top = files[0]?.name.split("/")[0] ?? "";
   for (const f of files) {
@@ -250,8 +327,12 @@ async function main() {
   const badUrl = await applyUpdate({ version: "9.9.9", url: `${base}/api/nope`, sha256: "0".repeat(64), bytes: 10 }, () => {});
   check(!badUrl.ok, `못 받아도 조용히 옛 판을 지킨다(«${String(badUrl.reason).slice(0, 40)}…»)`, "못 받았는데 성공이라 했다");
 
-  close();
-  rmSync(home, { recursive: true, force: true });
+  } finally {
+    close();
+    if (home) rmSync(home, { recursive: true, force: true });
+    // 뒷정리 실패는 **실패로 센다** — 조용히 남기면 다음 사람이 라이브에서 발견한다.
+    await dropTestTenant(tid).catch((e) => bad(`뒷정리 실패: ${String((e as Error)?.message ?? e).slice(0, 120)}`));
+  }
   console.log(`\n── ${failures ? `✗ ${failures}건 어긋남` : "✓ 전 항목 통과"} ──\n`);
   await pgClient.end({ timeout: 5 });
   process.exit(failures ? 1 : 0);
