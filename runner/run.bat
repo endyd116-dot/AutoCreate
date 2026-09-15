@@ -5,9 +5,21 @@ REM  (ASCII only - Windows console codepage mangles Korean here;
 REM   Korean guidance lives in install.md and in the app screen.)
 REM  AM original: ../AutoMarketing/scripts/runner-start.bat
 REM ============================================================
-setlocal
+REM  enabledelayedexpansion is REQUIRED - see the key block below.
+REM  Without it, a variable SET inside a parenthesised block cannot be READ
+REM  in that same block: %VAR% is substituted when cmd PARSES the block,
+REM  not when it runs. That made the key check always see an empty value,
+REM  so every customer who pasted a key got "No key entered" (found 2026-09-15
+REM  by actually running this file - it had never been exercised end to end).
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 title AutoCreate Runner
+
+REM  The runner prints Korean. Node writes UTF-8 bytes; a Korean Windows console
+REM  defaults to codepage 949 and renders them as garbage ("?щ꼫" instead of "러너").
+REM  Switch this window to UTF-8 so our own messages are readable. Quiet on failure -
+REM  an old console that cannot do 65001 should still run the program.
+chcp 65001 >nul 2>nul
 
 echo.
 echo   AutoCreate Runner
@@ -44,13 +56,14 @@ if not exist ".token" (
   ) else (
     set ACTOKEN=%~1
   )
-  if "%ACTOKEN%"=="" (
+  REM  !VAR! (not %VAR%) - reads the value SET a few lines above, inside this same block.
+  if "!ACTOKEN!"=="" (
     echo   [X] No key entered. Get one from the app: Settings ^> Runner ^> Turn on this PC.
     echo.
     pause
     exit /b 1
   )
-  node ac-runner.mjs --token %ACTOKEN%
+  node ac-runner.mjs --token !ACTOKEN!
   if errorlevel 1 goto :tokenfail
 )
 
