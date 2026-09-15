@@ -14,6 +14,7 @@ import { sql } from "drizzle-orm";
 import { calcCost } from "./ai-cost";
 import * as M from "./ai-models";
 import { buildAiCacheKey, tryAiCacheGet, aiCacheSet } from "./ai-cache";   // [P1R7 B3] 5분 응답 캐시(AM 이식)
+import { aiStubActive, aiStubAnswer, AI_STUB_MODEL } from "./ai-stub";   // [R8 §2.1] 글 실호출 대체 스위치(로컬 전용)
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -204,6 +205,17 @@ export function parseJsonLoose(text: string): unknown | null {
  *   파싱 실패: 같은 모델 1회 재요청(트리거 B1) → 그래도 실패면 다음 모델.
  */
 export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
+  /* [R8 §2.1] 🔴 **글 실호출 대체 스위치**(`AI_STUB=1` · 로컬 전용 · `lib/ai-stub.ts`) — 여기 한 자리에서만 갈린다.
+     프롬프트 조립·블록 수리·게이트·재작성·저장은 그대로 돈다. 아는 purpose 만 답하고 모르면 실호출로 내려간다.
+     🔴 `ai_usage` 에 적지 않는다 — **안 쓴 돈을 쓴 것으로 세면 원가·캡이 거짓말을 한다**(캐시 적중과 같은 취급). */
+  if (aiStubActive()) {
+    const s = aiStubAnswer(a);
+    if (s) {
+      console.info(`[ai-stub] ${a.purpose} — 고정 응답(실호출 0 · 원가 0). 실호출로 돌리려면 AI_STUB 을 끄세요.`);
+      return { ok: true, text: s.text, json: a.json ? s.json : undefined, model: AI_STUB_MODEL, costUsd: 0, inputTokens: 0, outputTokens: 0, thoughtTokens: 0, trace: [{ model: AI_STUB_MODEL, ok: true, reason: "ai_stub", ms: 0 }] };
+    }
+    console.warn(`[ai-stub] purpose «${a.purpose}» 는 스텁이 없다 — **실호출로 간다**(돈이 든다).`);
+  }
   const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
   const trace: AiAttempt[] = [];
   if (!apiKey) return { ok: false, text: null, reason: "no_api_key", trace };
