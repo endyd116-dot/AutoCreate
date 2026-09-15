@@ -82,21 +82,8 @@ export interface PieceSpecPatch { key: string; accountId?: number; format?: stri
   video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number } }
 
 const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
-<<<<<<< HEAD
-/**
- * 편당 코인. 글 = `blog` + 사진 장당 `image`.
- *   [R8 §2.5] 🔴 **카드뉴스는 `cardnews` 한 값**이다 — 카드 값이 그 안에 들어 있다.
- *     왜 장당으로 안 세나: 요금 안내 화면(`/app/coins`)과 운영 표(`ops-coin-prices`)가 **이미 «카드뉴스 3코인»이라고 말하고 있다.**
- *     장당으로 세면 카드 6~8장짜리가 **7~9코인**이 빠져 화면이 말한 값의 두세 배가 된다 — 화면의 숫자도 서버가 정본이다(AC-74).
- *   🔴 이 규칙은 `lib/slots.ts coinsPerWeek` 와 **같아야** 한다(편성표가 미리 보여 주는 값과 실제로 빠지는 값).
- *   ⚠️ 마진은 여기서 정하지 않는다 — 카드 8장은 우리 원가가 ₩589쯤인데 3코인은 ₩1,500이다(약 2.5배 · 글은 7.6배).
- *      코인 표 재설계는 B 몫이고 최종 숫자는 사장님 몫이다(계약 §10.4). **여기서는 화면이 말한 값을 지킨다.**
- */
-const pieceCoin = (imageCount: number, cardnews = false) => (cardnews ? coinCostOf("cardnews") : coinCostOf("blog") + coinCostOf("image") * imageCount);
-=======
 /** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적과 실제 차감이 갈릴 수 없게. */
 const pieceCoin = (aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format });
->>>>>>> feature/p1r8-back
 
 export function goalOf(pieces: { channel: string }[], intent: string): Goal {
   const set = new Set<Goal>();
@@ -334,11 +321,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
          고객이 «AI 로 더 구워 줘»를 고르면 `images.aiCount` 가 올라가고 그만큼만 더 든다. */
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory", aiCount: Math.min(imageCount, AI_IMAGES_INCLUDED) },
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
-<<<<<<< HEAD
-      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(imageCount, isCardnewsChannel(ch)), angle: topic.angle,
-=======
       schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
->>>>>>> feature/p1r8-back
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
     });
   }
@@ -465,11 +448,7 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       next.coinCost = coinCostOf(videoCoinItem(v.seconds));
       out.push(next); continue;
     }
-<<<<<<< HEAD
-    next.coinCost = pieceCoin(next.images.count, isCardnewsChannel(next.channel));
-=======
     next.coinCost = pieceCoin(next.images.aiCount, next.format);
->>>>>>> feature/p1r8-back
     out.push(next);
   }
   return { ok: true, specs: out };
@@ -634,18 +613,11 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : isCard ? `카드뉴스 ${s.images.count}장(${s.channel})` : `블로그 글(${s.channel})` });
       if (!c1.ok) { await rollback(c1.reason); return c1.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${c1.need}개 부족해요.`, need: c1.need, have: c1.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
       charged += c1.charged;
-<<<<<<< HEAD
-      /* 🔴 [R8 §2.5] 카드뉴스는 **장당 코인을 또 받지 않는다** — `cardnews` 한 값에 카드 값이 들어 있다.
-         여기서 또 받으면 3코인이라고 말해 놓고 3+8=11코인이 빠진다(이중 청구). */
-      for (let i = 1; i <= (isVideo || isCard ? 0 : s.images.count); i++) {
-        const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `이미지 ${i}/${s.images.count}` });
-=======
       /* 🔴 [R8] **포함분(AI 1장)을 뺀 나머지 AI 사진만** 돈을 받는다. 고객 사진·스톡은 0코인이라 여기서 세지 않는다.
          카드뉴스는 위 `coinItem` 이 통째로 값을 매기므로(장수로 안 센다) 이 줄을 아예 안 탄다. */
       const billableImages = isVideo || s.format === "cardnews" ? 0 : Math.max(0, s.images.aiCount - AI_IMAGES_INCLUDED);
       for (let i = 1; i <= billableImages; i++) {
         const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(1장은 글값에 포함)` });
->>>>>>> feature/p1r8-back
         if (!ci.ok) { await rollback(ci.reason); return ci.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${ci.need}개 부족해요.`, need: ci.need, have: ci.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
         charged += ci.charged;
       }
