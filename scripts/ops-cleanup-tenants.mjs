@@ -7,6 +7,7 @@
  *     --revenue-test-rows             보호 테넌트 3 의 revenue_daily 테스트 입력(sponsor manual · meta manual · adpost runner)도 지운다
  *     --include-unknown               테스트 도메인이 아닌 이메일(실고객 의심)도 삭제 대상에 넣는다(기본은 제외·경고만)
  *     --no-r2                         R2 접두(autocreate/{tid}/) 삭제를 건너뛴다
+ *     --recent-min=30                 이 분 안에 생긴 테넌트는 건너뛴다(기본 30 · 지금 도는 하니스와의 경합 방지 · 0 이면 끔)
  *
  *   ══ 규칙 ══
  *   · 🔴 보호 목록 하드코딩 PROTECT(3·13·109·116·198) — 무슨 옵션을 줘도 절대 안 지운다.
@@ -32,6 +33,7 @@ const APPLY = flag("--apply");
 const PROTECT = [3, 13, 109, 116, 198];
 const KEEP = opt("--keep").split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
 const TEST_DOMAINS = ["autocreate.test", "test.local", "autocreate.dev", "example.invalid"];
+const RECENT_MIN = opt("--recent-min") === "" ? 30 : Math.max(0, Number(opt("--recent-min")) || 0);   // 방금 생긴 집은 지금 도는 하니스 것일 수 있다
 const NEVER_DELETE_TABLES = new Set(["ai_usage", "tenants"]);
 
 const env = Object.fromEntries(fs.readFileSync(path.join(ROOT, ".env"), "utf8").split("\n").filter((l) => l.includes("=") && !l.startsWith("#")).map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }));
@@ -48,12 +50,14 @@ try {
   const rows = await sql`SELECT t.id, t.name, t.status, t.plan_key, t.created_at,
       (SELECT string_agg(u.email, ',') FROM users u WHERE u.tenant_id = t.id) AS emails,
       (SELECT COUNT(*) FROM billing_keys b WHERE b.tenant_id = t.id AND b.active) AS bk,
-      (SELECT COUNT(*) FROM invoices i WHERE i.tenant_id = t.id AND i.status IN ('paid','refunded')) AS inv
-    FROM tenants t ORDER BY t.id`;
-  const targets = [], unknown = [], kept = [];
+      (SELECT COUNT(*) FROM invoices i WHERE i.tenant_id = t.id AND i.status IN ('paid','refunded')) AS inv,
+      (t.created_at > NOW() - make_interval(mins => ${RECENT_MIN})) AS is_recent
+    FROM tenants t ORDER BY t.id`;   // 시각 비교는 DB 안에서(드라이버 tz 해석 함정 회피 · PITFALLS #4)
+  const targets = [], unknown = [], kept = [], recent = [];
   for (const r of rows) {
     const id = n(r.id);
-    if (protect.has(id)) { kept.push(r); continue; }
+    if (protect.has(id)) { kept.push(r); continue; }   // 🔴 id 보호가 가장 먼저(키·이메일 패턴보다 앞)
+    if (RECENT_MIN > 0 && r.is_recent === true) { recent.push(r); continue; }
     const emails = String(r.emails || "");
     const domains = emails ? emails.split(",").map((e) => e.split("@")[1] || "") : [];
     const isTest = !emails || domains.every((d) => TEST_DOMAINS.includes(d));
@@ -63,6 +67,7 @@ try {
   const tids = targets.map((r) => n(r.id));
   log(`총 ${rows.length} · 남길 ${kept.length}(${kept.map((r) => `${r.id} ${r.name}`).join(" · ")})`);
   if (unknown.length) log(`⚠️ 실고객 의심(테스트 도메인 아님 · 기본 제외): ${unknown.map((r) => `${r.id} ${r.emails}`).join(" · ")}`);
+  if (recent.length) log(`⏳ 최근 ${RECENT_MIN}분 안에 생긴 집(지금 도는 하니스 것일 수 있어 건너뜀): ${recent.map((r) => `${r.id} ${r.name}`).join(" · ")}`);
   const moneyTargets = targets.filter((r) => n(r.bk) > 0 || n(r.inv) > 0);
   if (moneyTargets.length) log(`⚠️ 삭제 대상 중 빌키·결제 인보이스 있는 곳: ${moneyTargets.map((r) => `${r.id}(bk ${r.bk} · inv ${r.inv})`).join(" · ")}`);
   log(`삭제 대상 ${tids.length}곳: ${tids.join(",")}`);
