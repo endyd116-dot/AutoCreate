@@ -61,10 +61,13 @@ export const produceStep: CronStep = {
     const w = await requireWritable(ctx.tid);
     if (!w.ok) return { changed: 0, skipped: 0, detail: { blocked: w.reason } };
     const lead = ctx.settings.produceLeadDays;
-    const slots = await q(sql`SELECT id, channel, account_id, topic_id, publish_at, slot_date::text AS d FROM slots
-      WHERE tenant_id = ${ctx.tid} AND status IN ('topic_assigned','coin_short') AND topic_id IS NOT NULL AND piece_id IS NULL
-        AND slot_date >= ${kstToday()} AND slot_date <= ${kstToday()} + ${lead}::int
-      ORDER BY slot_date, publish_at NULLS LAST, id LIMIT 100`);
+    /* [P1R7 B3] 규칙의 `format_hint` 를 자리와 함께 읽는다(설계 §5B.3 «비우면 디렉터 로테이션» — 비우지 않았으면 그대로 쓴다).
+       LEFT JOIN 이라 규칙이 지워진 옛 자리도 그대로 나온다(자리를 잃지 않는다). */
+    const slots = await q(sql`SELECT s.id, s.channel, s.account_id, s.topic_id, s.publish_at, s.slot_date::text AS d, cr.format_hint
+      FROM slots s LEFT JOIN cadence_rules cr ON cr.id = s.rule_id AND cr.tenant_id = s.tenant_id
+      WHERE s.tenant_id = ${ctx.tid} AND s.status IN ('topic_assigned','coin_short') AND s.topic_id IS NOT NULL AND s.piece_id IS NULL
+        AND s.slot_date >= ${kstToday()} AND s.slot_date <= ${kstToday()} + ${lead}::int
+      ORDER BY s.slot_date, s.publish_at NULLS LAST, s.id LIMIT 100`);
     if (!slots.length) return { changed: 0, skipped: 0 };
 
     const cap = ctx.settings.weeklyCoinCap;
@@ -110,8 +113,16 @@ export const produceStep: CronStep = {
       if (r.ok) {
         made++;
         spent += brief.coinCost;
+        /* [P1R7 B3] 규칙이 정한 구성을 못 썼으면 **자리에 한 줄 남긴다**(조용한 무시 0 · 화면 슬롯 시트가 읽는다).
+           🔴 confirm 이 자리를 빌려 쓰며 `note = NULL` 로 지우므로(director.ts:411) **성공 뒤에** 쓴다. */
+        if (brief.formatHintIgnored) {
+          await q(sql`UPDATE slots SET note = ${brief.formatHintIgnored.reason.slice(0, 300)}, updated_at = NOW()
+            WHERE tenant_id = ${ctx.tid} AND id = ${slot.id}`);
+          await writeAudit({ tenantId: ctx.tid, action: "produce_format_hint_ignored", actorType: "system", target: `slot:${slot.id}`,
+            detail: { formatHint: brief.formatHintIgnored.hint, channel: slot.channel, used: brief.spec.format } });
+        }
         await writeAudit({ tenantId: ctx.tid, action: "piece_auto_produced", actorType: "system", target: `slot:${slot.id}`,
-          detail: { briefId: brief.briefId, pieceIds: r.pieceIds, coinsCharged: r.coinsCharged, topicId: slot.topicId, channel: slot.channel, accountId: brief.spec.accountId } });
+          detail: { briefId: brief.briefId, pieceIds: r.pieceIds, coinsCharged: r.coinsCharged, topicId: slot.topicId, channel: slot.channel, accountId: brief.spec.accountId, ...(slot.formatHint ? { formatHint: slot.formatHint, formatHintUsed: !brief.formatHintIgnored } : {}) } });
         continue;
       }
 
