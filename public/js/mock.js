@@ -76,7 +76,7 @@
   /* [AC-52 · 2026-09-15 · lib/ai-tell-gate.ts GATE_LABEL 에서 그대로 복사] 🔴 라벨은 **통과형 문장**이다 — «문단 시작 반복 ✓» 처럼 명사형이면 뜻이 반대로 읽힌다 */
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
     { key: "cliche", label: "상투 표현 없음", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작이 다양함", pass: true }, { key: "bullet_ratio", label: "불릿이 본문을 대신하지 않음", pass: true, detail: "18%" },
-    { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "근거 없는 최상급 없음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
+    { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "최상급에 근거가 있음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
     { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
     { key: "disclosure", label: "제휴 고지 첫머리", pass: ok }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true } ] });
 
@@ -132,7 +132,7 @@
   const VDESC = "이 영상은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n베이킹소다 한 스푼이면 눌어붙은 기름이 녹아요. 준비물과 순서를 58초에 담았어요.\n\n#에어프라이어 #청소 #살림팁";
   const videoAssets = () => [{ id: 9001, kind: "video", url: "", meta: { durationMs: 58000, bytes: 8412300, frameCount: 1740 } }, { id: 9002, kind: "srt", url: SRT }, { id: 9003, kind: "thumb", url: POSTER }];
   /* [AC-52] 영상 piece 에도 붙는 글 게이트 칸 — 라벨은 서버 GATE_LABEL 그대로 */
-  const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "제휴 고지 첫머리", pass: true }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "superlative", label: "근거 없는 최상급 없음", pass: true, detail: "0건" }];
+  const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "제휴 고지 첫머리", pass: true }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "superlative", label: "최상급에 근거가 있음", pass: true, detail: "0건" }];
   /* 완성 = in_review + 설명란 body(첫 줄 고지) + blocks(video·srt·hashtags) + assets(video·thumb·srt) + gate.judge(§1.4 done) */
   const finishVideo = (p, grade = "P2") => { p.status = grade === "P0" ? "in_review" : "in_review"; p.meta.stage = "done"; p.meta.chainStage = { stage: "done", at: iso(Date.now()) }; p.gateOk = grade !== "P0"; p.body = VDESC; p.blocks = [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["에어프라이어", "청소", "살림팁"] }]; p.assets = videoAssets();
     p.gate = { ok: grade !== "P0", rewritten: grade === "P1", checks: VIDEO_GATE_CHECKS, judge: judgeReport(grade) }; delete p._v0; const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "in_review"; };                                          // [P1R4] §1.5 게이트 견본(ai_cost_cap · banned_category)                                                                    // [P1R4] KICC 키 없음 → «결제 준비 중이에요»(no-op 정직)
