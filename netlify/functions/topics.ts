@@ -5,6 +5,9 @@
  *        코인 0 · 하루 3회(step rate_limit · audit topics_refresh COUNT)
  *        🔴 v2.9(CLAUDE §4.5b): «동기 한도(≈26초) 넘을 것 같으면 재지 말고 처음부터 배경으로» — LLM 1콜 + 검색량 조회라 동기로는 못 끝낸다.
  *        진행·결과는 `topics-list` 의 `refresh` 로 본다(화면이 폴링).
+ *   POST /api/topics-add { title, keyword?, channelHint?, angle? } → { ok, topic:Topic(source "manual") }   // [2026-09-15 · DESIGN §5.1] 소재를 «직접» 넣는 입구
+ *        코인 0 · 하루 20회(429 step rate) · 🔴 requireWritable 을 부르지 않는다(소재 넣기는 생성이 아니다 · readonly 도 넣는다 · 막는 건 디렉터 확정)
+ *        400 step: title(빈값·80자) | banned_category(R4 사전 · 문장 그대로) | duplicate(30일 안 같은 제목 → 기존 topic 동봉)
  *   POST /api/topics-pick { id } → { topic }          // candidate→picked
  *   POST /api/topics-skip { id } → { ok }             // →expired
  */
@@ -13,17 +16,19 @@ import { readJson } from "../../lib/validate";
 import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
-import { listTopics, refreshCountToday, toTopic } from "../../lib/topics";
+import { listTopics, refreshCountToday, toTopic, addManualTopic, addCountToday } from "../../lib/topics";
 import { readRefreshState } from "../../lib/topics-refresh-state";
 import { startTopicsRefresh } from "./topics-refresh-background";
 import { utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/topics-list", "/api/topics-refresh", "/api/topics-pick", "/api/topics-skip"] };
+export const config = { path: ["/api/topics-list", "/api/topics-refresh", "/api/topics-pick", "/api/topics-skip", "/api/topics-add"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const REFRESH_PER_DAY = 3;
+/** 직접 넣기 하루 상한 — 남용 방지(넣는 것 자체는 코인 0이지만 자동 편성 후보를 오염시킬 수 있다). */
+const ADD_PER_DAY = 20;
 const n = (v: unknown) => Number(v || 0);
 
 export default async (req: Request): Promise<Response> => {
@@ -56,6 +61,15 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, started: st.started, running: true }, st.started ? 202 : 200);
     }
 
+    if (path.endsWith("/topics-add")) {
+      /* 🔴 AC-35: requireWritable 을 여기서 부르지 않는다 — 소재 넣기는 생성이 아니다(readonly·suspended 도 넣을 수 있다 · 막는 건 디렉터 확정에서). */
+      const used = await addCountToday(tid);
+      if (used >= ADD_PER_DAY) return json({ ok: false, step: "rate", error: `소재는 하루 ${ADD_PER_DAY}개까지 넣을 수 있어요. 내일 더 넣을 수 있어요.` }, 429);
+      const ba = await readJson<{ title?: unknown; keyword?: unknown; channelHint?: unknown; angle?: unknown }>(req);
+      const r = await addManualTopic(tid, { title: ba.title, keyword: ba.keyword, channelHint: ba.channelHint, angle: ba.angle });
+      if (!r.ok) return json({ ok: false, step: r.step, error: r.error, ...(r.topic ? { topic: r.topic } : {}) }, 400);
+      return json({ ok: true, topic: r.topic, volumeKnown: r.volumeKnown });
+    }
     const b = await readJson<{ id?: number }>(req);
     const id = n(b.id); if (!id) return badRequest("id");
     if (path.endsWith("/topics-pick")) {
