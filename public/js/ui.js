@@ -41,6 +41,7 @@
     if (r.step === "banned_category") { UI.toast(r.error || "이 주제는 만들 수 없어요"); return true; }           // 서버 문구 그대로(카테고리 이름이 들어 있다)
     if (r.step === "ai_cost_cap") return done(UI.esc(r.error || "오늘 AI 사용이 하루 상한에 닿았어요. 내일 다시 이어서 만들 수 있어요."), "오늘은 여기까지예요", "홈으로", "/app/home.html");
     if (r.status === 402 && r.step === "plan_feature") return done(UI.esc(r.error || "지금 요금제에 없는 기능이에요."), "요금제에 없는 기능이에요", "요금제 보기", "/app/plan.html");
+    if (r.status === 402 && r.slotOffer) return false;   // [R7 §3.6] 계정 한도 + 상품 = 화면이 «계정 1개 더 사기»로 받는다(업셀 시트로 덮지 않는다)
     if (r.status === 402 && (r.step === "plan_limit" || r.reason === "plan_limit")) {
       const NAME = { accounts: "계정", runnerDevices: "내 PC 프로그램", teamSeats: "팀원", rules: "편성 규칙", horizonDays: "편성 기간" };
       const unit = { accounts: "개", runnerDevices: "대", teamSeats: "명", rules: "개", horizonDays: "일" }[r.resource] || "개";
@@ -178,6 +179,48 @@
   };
   UI.APP_VERSION = "2026.09.15";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
+
+  /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).
+     🔴 사기 전에 말해야 하는 것 3가지: ①30일마다 코인이 빠진다(자동 갱신 · 끄는 법) ②남은 기간 환불 없음(서버 note 그대로) ③지금은 안 빠진다(IP 준비되면 그때부터 30일). */
+  UI.SLOT_STATE = {
+    waiting_ip: ["off", "IP 준비 중", "준비되면 시작되고 그때부터 30일이에요 · 아직 코인은 안 빠졌어요"],
+    active: ["ok", "쓰는 중", ""],
+    paused: ["warn", "쉬는 중", "코인이 모자라 이 계정만 쉬고 있어요 · 다른 계정은 그대로 나가요"],
+  };
+  UI.slotBuySheet = function ({ offers, note, balance, onDone, title = "계정 1개 더 쓰기" }) {
+    const list = (offers || []).filter((o) => o && o.kind);
+    if (!list.length) return UI.toast("지금은 살 수 있는 상품이 없어요");
+    let kind = list[0].kind, count = 1;
+    const of = (k) => list.find((o) => o.kind === k) || list[0];
+    const card = (o) => `<button type="button" class="row tap" data-kind="${o.kind}"><div class="l"><span class="t">${UI.esc(o.label)}</span><span class="d wrap">${UI.esc(o.desc || "")}</span></div><span class="r">${UI.num(o.coins)}코인<small class="muted" style="display:block;font-weight:500">${UI.won(o.krw)}</small></span></button>`;
+    UI.sheet(`<div id="slotPick">${list.map(card).join("")}</div>
+      <div class="kv" style="padding-left:0;padding-right:0"><span class="k">몇 개</span><span class="v">${UI.stepper("cnt", 1, 1, 5, "개")}</span></div>
+      <div class="kv" style="padding-left:0;padding-right:0"><span class="k">지금 잔액</span><span class="v">${UI.num(balance || 0)}코인</span></div>
+      <div class="group" style="background:var(--ground);margin:8px 0 0"><div class="gt">사기 전에 알아 두세요</div>
+        <p class="muted" id="slotWhen" style="margin:0 16px 6px;font-size:13px"></p>
+        <p class="muted" style="margin:0 16px 6px;font-size:13px">쓰는 동안 <b style="color:var(--ink)">${of(kind).days}일마다 코인이 빠져요</b> · 잔액이 모자라면 그 계정만 쉬어요(다른 계정은 그대로).</p>
+        <p class="muted" style="margin:0 16px 10px;font-size:13px">${UI.esc(note || "남은 기간 환불은 없어요. 다음 갱신만 끌 수 있어요.")}</p>
+      </div>
+      <div class="cta"><button class="btn primary" type="button" id="slotGo"></button></div>`, { title, onOpen: (sh, close) => {
+        const say = () => { const o = of(kind);
+          sh.querySelectorAll("[data-kind]").forEach((b) => b.classList.toggle("on", b.dataset.kind === kind));
+          sh.querySelector("#slotWhen").innerHTML = `지금은 <b style="color:var(--ink)">안 빠져요</b> — 계정을 붙이고 전용 IP 가 준비되면 그때 첫 ${o.days}일치(${UI.num(o.coins)}코인)가 빠지고, 거기서 ${o.days}일이 시작돼요.`;
+          sh.querySelector("#slotGo").textContent = `${UI.num(o.coins * count)}코인으로 사기`; };
+        sh.querySelectorAll("[data-kind]").forEach((b) => b.onclick = () => { kind = b.dataset.kind; say(); });
+        UI.bindSteppers(sh, (_n, v) => { count = v; say(); });
+        say();
+        sh.querySelector("#slotGo").onclick = async (e) => { const btn = e.currentTarget; btn.disabled = true;   /* 🔴 currentTarget 은 await 뒤엔 null 이다 — 먼저 잡아 둔다 */
+          const r = await UI.api("/api/account-slot-buy", { body: { kind, count } }); btn.disabled = false;
+          if (!r.ok) {
+            if (r.gated) return close();
+            if (r.step === "coins") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.num(r.need || 0)}코인이 필요한데 지금 ${UI.num(r.balance || 0)}코인 있어요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: "코인이 모자라요" }); }
+            return UI.toast(r.error || "사지 못했어요");
+          }
+          close();
+          UI.done(r.waitingIp ? "샀어요 · 계정을 붙이면 시작돼요" : "샀어요", () => { if (onDone) onDone(r); });
+        };
+      } });
+  };
 
   /* ── 포맷 ── */
   UI.mb = (b) => (b > 0 ? `${(b / 1048576).toFixed(1)}MB` : "");
@@ -365,7 +408,7 @@
   /* [P1R4] 서버 알림 kind(lib/cron notifyOnce · B 결제·체험) → 아이콘 하나 · 링크 없을 때의 기본 링크 */
   /* [R7 §1.4 · B-1 a1c9801] 홈 «해야 할 일» 7줄 — 새 kind 는 이미 있는 아이콘으로 잇는다(아이콘을 새로 만들지 않는다) */
   /* [AC-52 · 2026-09-15] 서버가 실제로 보내는 kind 를 전수 대조해 채웠다(scripts/verify-label-surface.mjs 가 상시로 잰다) */
-  UI.KIND_ALIAS = { account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+  UI.KIND_ALIAS = { account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
