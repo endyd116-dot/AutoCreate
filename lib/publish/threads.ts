@@ -204,9 +204,21 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
     await writeAudit({ tenantId: tid, action: "threads_chain_state_unsaved", actorType: "system", target: `piece:${piece.id}`,
       detail: { posted: posted.length, parts: parts.parts.length, note: "올린 자리를 기록하지 못해 이어 올리기를 멈췄다(같은 글이 두 번 나가지 않게)" }, riskLevel: "high" })
       .catch((e: unknown) => console.warn("[threads] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+    /* 🔴 **감사만으로는 고객에게 안 닿는다** — 감사는 운영 화면(`public/ops/audit.html`)만 읽는다.
+       그대로 두면 고객 눈엔 «올라갔어요»만 보이고, **자기 스레드가 반만 올라간 걸 독자가 먼저 본다.**
+       CLAUDE §9-2(사람이 안 보는 경로에서도 닿게 한다) 그대로다 ⇒ **그 글 화면이 쓸 재료를 piece 에 남긴다.**
+       🔴 `remain` 은 §9-4(우리가 대신 해 줄 수 있는 것) — 못 올린 글을 **그대로 들고 있어야** 고객이 이어 붙일 수 있다.
+       ⚠️ 이 쓰기도 `meta ||` 라 **방금 실패한 그 길**이다. 안 남을 수 있다 — 그래서 별도 테이블인 **감사가 backstop** 이고,
+          이 칸은 «되면 남는» 재료다. 둘 중 하나는 남는다. */
+    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ thChainPartial: {
+      posted: posted.length, parts: parts.parts.length, why: "state_unsaved",
+      say: `스레드 ${parts.parts.length}조각 중 ${posted.length}조각까지 올라갔어요.`,
+      remain: parts.parts.slice(posted.length),
+    } })}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`)
+      .catch((e: unknown) => console.warn("[threads] 남은 조각 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
     /* 🔴 **성공으로 닫는다** — 실패로 닫으면 `channel_ref` 가 안 남고, 사람이 «다시 올리기»를 누르는 순간
        **첫 조각부터 또 나간다**(발행 멱등 §4.7 은 `channel_ref` 가 있을 때만 막아 준다).
-       올라간 데까지는 진짜로 올라갔으니 그 주소를 남기고, 못 이은 사실은 **감사로 말한다.** */
+       올라간 데까지는 진짜로 올라갔으니 그 주소를 남기고, 못 이은 사실은 **감사 + 위 재료로 말한다.** */
     if (posted.length) return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, posted[0]), channelRef: posted[0] };
   }
   if (!run.ok) {

@@ -140,6 +140,15 @@ export default async (req: Request): Promise<Response> => {
          `measured:false` 를 그대로 싣는다 — «못 쟀다»를 «0점»으로 그리면 화면이 거짓말한다(AC-9). */
       if (m.personaFit && typeof m.personaFit === "object") meta.personaFit = m.personaFit;
       if (m.angle) meta.angle = m.angle;
+      /* [R8CLOSE §B5 · B2] 🔴 쓰레드 **연결글**이 온전히 안 나간 경우 — 그 글 화면이 쓸 재료.
+         `meta` 는 **화이트리스트**라 여기 안 적으면 칸이 DB 에 있어도 **화면까지 길이 없다** — 재료만 만들고 길을 안 내면
+         A 는 그릴 수가 없고, 그러면 «만들어 놓고 아무도 안 쓴다»가 **한 칸 앞에서** 다시 난다.
+         🔴 감사(`threads_chain_*`)는 **운영자만** 본다 — 고객에게 닿는 길은 이 칸뿐이다(CLAUDE §9-2).
+         · `thChainCut`     = 문장 한가운데서 끊었나 · 어디서 끊었나 · 버린 글자
+         · `thChainPartial` = 몇 조각 중 몇까지 올라갔나 + **못 올린 글 그대로**(§9-4 — 고객이 이어 붙일 수 있게)
+         ⚠️ 아직 **화면에 그려진 곳은 0곳**이다(A 몫). 여기까지가 서버가 할 수 있는 데다. */
+      if (m.thChainCut && typeof m.thChainCut === "object") meta.thChainCut = m.thChainCut;
+      if (m.thChainPartial && typeof m.thChainPartial === "object") meta.thChainPartial = m.thChainPartial;
       /* [R8 §2.4] 🔴 **수치 주장 표시** — 근거 있는 수치와 없는 수치를 갈라 검수 화면이 보여 준다(A 와 합의한 칸 `numberClaims`).
          🔴 화면 문구는 «틀렸어요»가 아니라 **«우리가 준 자료에 없는 숫자예요 — 확인해 주세요»** 다(`claimsLine`).
             우리는 그 숫자가 맞는지 **모른다**. 아는 것은 «우리가 준 숫자인가»뿐이다(AC-57). */

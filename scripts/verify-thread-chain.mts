@@ -254,8 +254,20 @@ console.log("\n⑫ 🔴 사슬 — **커넥터가 정말 그러나**(순수 함�
   ok("🔴 못 남기면 이어 올리기를 멈춘다", /if \(await saveChainState\(tid, piece\.id, done\)\) return;/.test(code));
   ok("🔴 멈춘 뒤 channelRef 를 남겨 «다시 올리기»가 첫 조각을 또 안 올리게 한다", /if \(posted\.length\) return \{ ok: true/.test(code));
   ok("못 남긴 사실을 감사로 말한다", /threads_chain_state_unsaved/.test(code));
+  /* 🔴 감사는 **운영자만** 본다(`public/ops/audit.html` 뿐 · 고객 화면이 부르는 곳 0곳).
+     그러니 감사만 쓰면 고객은 «올라갔어요»만 보고 **자기 스레드가 반만 올라간 걸 독자가 먼저 본다**(CLAUDE §9-2). */
+  ok("🔴 고객 화면이 쓸 재료도 piece 에 남긴다(감사는 운영자만 본다)", /thChainPartial/.test(code), "감사에만 남기면 고객에게 안 닿는다 — A 가 그릴 재료가 없다");
+  ok("몇 조각 중 몇까지인지 숫자로 남는다", /posted: posted\.length, parts: parts\.parts\.length/.test(code));
+  ok("🔴 못 올린 글을 그대로 들고 있는다(§9-4 · 고객이 이어 붙일 수 있게)", /remain: parts\.parts\.slice\(posted\.length\)/.test(code));
   ok("🔴 문장 한가운데서 끊었으면 감사로 말한다", /threads_chain_cut_midsentence/.test(code));
   ok("그 글 화면이 쓸 재료도 meta 에 남긴다", /thChainCut/.test(code));
+}
+{
+  /* 🔴 **재료만 만들고 길을 안 내면 한 칸 앞에서 같은 병이 난다.**
+     `pieces` 상세의 `meta` 는 **화이트리스트**다 — 거기 안 적으면 DB 에 있어도 화면까지 **길이 없다.** */
+  const api = readFileSync("netlify/functions/pieces.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+  ok("🔴 상세 API 가 thChainCut 을 내보낸다(화이트리스트라 안 적으면 길이 없다)", /meta\.thChainCut = /.test(api));
+  ok("🔴 상세 API 가 thChainPartial 을 내보낸다", /meta\.thChainPartial = /.test(api));
 }
 
 console.log(`\n${fail ? "🔴" : "✅"} ${pass} 통과 · ${fail} 실패`);
