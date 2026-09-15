@@ -15,9 +15,12 @@
  *     ②아무 그림이나 «정식 라이선스 스톡»이라는 **딱지를 달고** 저장된다 — 그러면 §10.2 에서 금지한 «긁어 오기»를
  *     우리 손으로 열어 주는 셈이다. 호스트를 제공사에 묶으면 둘 다 막히고, 크레딧이 엉뚱한 곳을 가리키지도 않는다.
  *
- *   ══ 🔴 막지 않는 것(CLAUDE §9) ══
- *     B3 판정(`assessStockImage`)이 «광고 글엔 안 맞아요»라고 해도 **붙이는 것을 막지 않는다.**
- *     판정을 `meta.stock.verdict` 에 **적어 두고** 화면·검수가 말하게 한다. 🔴 검사를 지우는 것이 아니라 소프트로 내리는 것이다.
+ *   ══ 🔴 사람·상표로 막지 않는다 — 적어만 둔다(사장님 지시 2026-09-15) ══
+ *     사장님: «픽셀은 해외 채널인데 한국에서 저작권 문제가 걸릴 이유도 일도 없어. 그러니 무시해도 돼.»
+ *     B3 판정(`assessStockImage`)은 **계속 돌려서** `meta.stock.verdict` 에 적는다(§9 «검사를 지우지 마라»).
+ *     다만 그 값으로 **막지도, 순위를 미루지도, 화면에 경고를 그리지도 않는다.** 나중에 필요해지면 그때 켜면 된다 —
+ *     지금 지워 버리면 그때 다시 만들어야 하고, 무엇보다 **그동안의 사진에는 판정이 없어** 되짚을 수가 없다.
+ *   🔴 대신 **크레딧(`meta.stock.author`·`sourceUrl`)은 절대 빠뜨리지 않는다** — 키가 죽는 진짜 경로는 그쪽이다.
  */
 import { sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
@@ -118,7 +121,7 @@ export async function attachStockPhoto(a: {
     kind: "stock", key, addedAt: new Date().toISOString(), by: a.userId ?? null,
     bytes: bytes.length, mime,
   };
-  /* 🔴 판정을 **함께 적는다** — 막지 않는 대신 «이 글엔 이런 위험이 있었어요»를 발행 뒤에도 볼 수 있어야 한다(CLAUDE §9.2). */
+  /* 🔴 판정을 **함께 적는다** — 지금은 아무것도 막지 않지만, 적어 두지 않으면 나중에 되짚을 재료가 0 이 된다(위 헤더). */
   const stockMeta = { ...stock, verdict: { ok: verdict.ok, ...(verdict.code ? { code: verdict.code } : {}), ...(verdict.reason ? { reason: verdict.reason } : {}), ...(verdict.law ? { law: verdict.law } : {}) } };
   const alt = String(a.alt ?? c.alt ?? c.tags.slice(0, 4).join(", ") ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || null;
 

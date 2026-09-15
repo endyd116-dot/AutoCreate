@@ -949,7 +949,7 @@ export const cadenceRulesR8 = {
   preferredMinute: "preferred_minute",
 } as const;
 
-/* === Phase 1 R8 · B-1 스톡 사진(DDL 0026-r8-stock-cache.sql) === */
+/* === Phase 1 R8 · B-1 스톡 사진(DDL 0028-r8-stock-cache.sql) === */
 /**
  * 스톡 제공사 응답 보관 — 🔴 **약관이 요구한 캐시**다(Pixabay «Requests must be cached for 24 hours»).
  *   🔴 이 표에 `tenant_id` 가 없는 것은 §4.6 의 의도된 예외다: 담기는 것이 **제공사의 공개 검색 결과**이지 고객의 것이 아니다.

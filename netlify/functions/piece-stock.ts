@@ -18,8 +18,9 @@
  *   ══ 지키는 것 ══
  *     · 테넌트 스코프는 `auth.tid` 로만(본문의 tenantId 를 믿지 않는다).
  *     · 붙이기는 `requireWritable` 을 지난다(새 내용을 만드는 길이다). **찾기는 막지 않는다**(고르기까지는 돈이 들지 않는다).
- *     · 🔴 **판정으로 막지 않는다**(CLAUDE §9) — 사람·상표·«모름»은 `verdict` 로 **말해 주고** 붙이는 것은 허락한다.
- *       대신 판정이 «아니오»인 사진을 붙이면 감사에 남긴다(발행 뒤에도 «이 글엔 이런 위험이 있었어요»를 볼 수 있게 · §9.2).
+ *     · 🔴 **사람·상표로 막지도 미루지도 않는다**(사장님 2026-09-15 «픽셀은 해외 채널인데 … 무시해도 돼»).
+ *       판정(`verdict`)은 **계속 재서 사진에 적어 둘 뿐**이고(§9 «검사를 지우지 마라») 순위·화면 경고로 쓰지 않는다.
+ *       감사에는 남긴다 — 나중에 «그때 무엇이 걸렸었나»를 되짚을 수 있어야 정렬을 다시 켤지 판단할 수 있다.
  */
 import { sql } from "drizzle-orm";
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -67,7 +68,7 @@ async function doSearch(tid: number, req: Request): Promise<Response> {
   const query = String(p.get("q") ?? "").trim();
   if (!query) return badRequest("어떤 사진을 찾을지 알려 주세요.", "q");
   const pieceId = n(p.get("pieceId"));
-  /* 글을 알려 주면 그 글의 성격(광고가 들어갔나)에 맞춰 순위를 매긴다. 안 알려 주면 정보성으로 본다. */
+  /* 글을 알려 주면 그 글의 성격(광고가 들어갔나)을 판정에 실어 준다. 🔴 순위에는 안 쓴다 — 적어 둘 뿐이다(사장님 지시 2026-09-15). */
   const paid = pieceId ? await paidOf(tid, pieceId) : false;
 
   const r = await searchStock({

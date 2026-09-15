@@ -1,5 +1,5 @@
 /**
- * lib/stock/index.ts — **스톡 사진 사다리**(Pixabay 1순위 → Pexels 2순위) + «이 글에 써도 되나»를 **말해 주기**.
+ * lib/stock/index.ts — **스톡 사진 사다리**(Pixabay 1순위 → Pexels 2순위) + «이 글에 써도 되나» 판정을 **적어 두기**.
  *   계약 P1R8 §10.3·§10.4 · DESIGN §5C.5 조달 순서 · 조사 `docs/active/2026-09-15-image-sourcing-policy.md`.
  *   🔎 출처: AC 신규(B-1 · 2026-09-15) — AM 원본 없음.
  *
@@ -8,17 +8,20 @@
  *     사장님: «사진을 스톡으로 가져오고 **1장(많아야 2장)만 메인만 AI 로**». 그 «스톡으로 가져오는» 자리가 여기다.
  *     🔴 **사진 «수»는 깎지 않는다**(계약 §10.3) — 6장을 3장으로 줄이면 글이 약해진다. 바뀌는 것은 **어디서 가져오나**뿐이다.
  *
- *   ══ 🔴 막지 않는다. 고른다. (CLAUDE §9 · 사장님 전역 지시 2026-09-15) ══
- *     §9 가 하드 게이트를 0개로 내리면서 «스톡 사람/상표»도 소프트가 됐다. 그래서 여기서는 —
- *       · B3 `lib/stock-safety.ts assessStockImage()` 를 **그대로 부른다**(게이트를 다시 만들지 않는다).
- *       · 판정 결과로 **막지 않는다.** 대신 **순위를 바꾸고**(안전한 것을 위로) 사진마다 판정을 **달아 보낸다**.
- *       · 화면·검수가 그 판정을 읽어 «무엇이 · 왜 · 어떻게»를 세 줄로 말한다(§9 의 «말해 주기»).
- *     🔴 순위 바꾸기는 게이트가 아니라 §9.4 «우리가 대신 해 줄 수 있는 것은 대신 해 준다» 다.
+ *   ══ 🔴 사람·상표로 **거르지도 미루지도 않는다** (사장님 지시 2026-09-15) ══
+ *     사장님: **«픽셀은 해외 채널인데 한국에서 저작권 문제가 걸릴 이유도 일도 없어. 그러니 무시해도 돼.»**
+ *     실질도 그렇다 — Pexels·Pixabay 라이선스가 **상업적 사용을 허락**하므로 정상 경로로 쓰면 다툼이 날 자리가 거의 없다.
+ *     그리고 두 제공사 다 `people`·`brand` 를 **응답에 주지 않아** 광고성 글에서는 거의 전부가 «모르겠다»로 나온다 —
+ *     그 값으로 순위를 미루면 **좋은 사진이 뒤로 밀리는 값만 치르고 얻는 것이 없다.**
+ *       · 그래서 `assessStockImage()` 를 **여전히 부르고 결과를 사진에 적어 두되**(§9 «검사를 지우지 마라»)
+ *         **순위에는 쓰지 않는다.** 순서는 제공사 사다리 순서 그대로다.
+ *       · 화면도 이걸 **경고로 그리지 않는다** — 필요하면 «참고» 정도(메인 전달 2026-09-15).
+ *       · 🔴 나중에 필요해지면 **정렬만 다시 켜면 된다.** 판정은 계속 쌓이고 있다.
  *
- *   ══ 🔴 알고 쓰는 사실 하나 ══
- *     **Pixabay·Pexels 둘 다 `people`·`brand` 를 응답에 주지 않는다.** 그래서 광고성 글에서는 거의 모든 후보가
- *     `unknown_in_paid`(«모르겠다»)로 나온다. 이걸 **막기로** 뒀다면 광고성 글의 스톡은 **100% 막혔을** 것이다.
- *     우리가 할 수 있는 최선은 ①태그 힌트로 사람·상표 냄새가 나는 것을 뒤로 미루고 ②«확인 못 했다»고 정직하게 말하는 것이다(AC-9·AC-60).
+ *   ══ 🔴 그래서 남는 위험은 «저작권»이 아니라 «약관»이다 — 그 둘은 그대로 지킨다 ══
+ *     키가 죽는 경로는 사람·상표가 아니라 ①**크레딧 미표기**(Pexels 는 작가 크레딧 + Pexels 링크가 의무)
+ *     ②**캐시·호출 상한 위반**(Pixabay 24시간 캐시 · 100req/60s)이다.
+ *     사장님이 «무시해도 된다»고 하신 것은 **사람·상표 판정**이지 약관 준수가 아니다 — `cache.ts` 와 `creditLineOf` 가 그 둘을 맡는다.
  */
 import { assessStockImage, type StockVerdict } from "../stock-safety";
 import { pixabay } from "./pixabay";
@@ -45,26 +48,14 @@ export function stockStatus(): { provider: StockProviderName; configured: boolea
 }
 
 /**
- * 판정 나쁜 순서 — **뒤로 미룰 순서**다(막는 순서가 아니다).
- *   통과(0) → 모르겠다(1) → 사람이 찍혔다(2) → 상표가 찍혔다(3).
- *   🔴 «모르겠다»를 «사람이 찍혔다»보다 앞에 두는 이유: 전자는 **우리가 못 잰 것**이고 후자는 **재서 걸린 것**이다(AC-9 «못 쟀어요»는 «나쁘다»가 아니다).
- */
-function rank(v: StockVerdict): number {
-  if (v.ok) return 0;
-  if (v.code === "unknown_in_paid") return 1;
-  if (v.code === "people_in_paid") return 2;
-  return 3;
-}
-
-/**
  * 스톡 사진 찾기 — 사다리를 타고 내려가며 필요한 만큼 모은다.
  *
  * @param a.query   찾을 낱말(소재 제목·장면 묘사).
  * @param a.paid    🔴 **대가를 받은 글인가**(제휴·협찬·무상 제공). `lib/disclosure.ts compensationOfMeta().need` 와 같은 값을 넣는다.
- *                  이 값에 따라 B3 판정이 갈린다 — 정보성 글에서는 사람·상표 조항이 «상업적 사용»을 전제하므로 전부 통과한다.
+ *                  이 값에 따라 B3 판정이 갈린다. 🔴 **판정은 적어 둘 뿐 거르거나 미루지 않는다**(위 헤더).
  * @param a.provider 특정 제공사만(화면에서 골랐을 때). 안 주면 사다리 전부.
  *
- * @returns `picks` 는 **이미 순위가 매겨져** 있다. `tried` 는 제공사마다 무슨 일이 있었나 —
+ * @returns `picks` 는 **제공사 사다리 순서 그대로**이고 사진마다 판정(`verdict`)이 달려 있다. `tried` 는 제공사마다 무슨 일이 있었나 —
  *          🔴 «키 없음»과 «불렀는데 0건»을 화면이 갈라 말할 수 있어야 한다(`no_key` vs `empty`).
  */
 export async function searchStock(a: {
@@ -88,18 +79,18 @@ export async function searchStock(a: {
     picks.push(...out.candidates);
   }
 
-  const ranked = rankStockPicks(picks, a.paid);
-  return { ok: ranked.length > 0, picks: ranked.slice(0, want), tried };
+  const marked = markStockPicks(picks, a.paid);
+  return { ok: marked.length > 0, picks: marked.slice(0, want), tried };
 }
 
 /**
- * 후보마다 B3 판정을 달고 **순위를 매긴다**. 🔴 **거르지 않는다** — 길이가 줄지 않는다(CLAUDE §9).
- *   들어온 순서(= 제공사 사다리 순서)는 판정이 같을 때 그대로 유지된다(안정 정렬).
+ * 후보마다 B3 판정을 **달기만** 한다.
+ *   🔴 **거르지도 않고 순서도 안 바꾼다**(사장님 지시 2026-09-15 · 위 헤더). 들어온 순서 = 제공사 사다리 순서 그대로.
+ *   판정은 `verdict` 에 실려 `piece_assets.meta.stock.verdict` 로 저장된다 — **쌓아 두는 값**이지 지금 쓰는 값이 아니다.
+ *   (나중에 정렬이 필요해지면 여기서 `sort` 한 줄이면 된다. 그래서 판정을 지우지 않았다 · §9 «검사를 지우지 마라».)
  */
-export function rankStockPicks(candidates: readonly StockCandidate[], paid: boolean): StockPick[] {
-  const picks: StockPick[] = candidates.map((c) => ({ ...c, verdict: assessStockImage(toStockMeta(c), { paid }) }));
-  picks.sort((x, y) => rank(x.verdict) - rank(y.verdict));
-  return picks;
+export function markStockPicks(candidates: readonly StockCandidate[], paid: boolean): StockPick[] {
+  return candidates.map((c) => ({ ...c, verdict: assessStockImage(toStockMeta(c), { paid }) }));
 }
 
 /**

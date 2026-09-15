@@ -16,8 +16,9 @@
  *
  *   ══ 🔴 안 하는 것 ══
  *     `people`·`brand` 를 짐작해서 채우지 않는다 — Pexels 응답에도 그런 필드가 **없다** → 언제나 `null`(모름 · AC-57).
- *     🔴 이게 라이선스상 제일 아픈 자리다: Pexels 는 «Don't **imply endorsement** … by people or brands» 를 요구하는데
- *     **그 판정에 필요한 값을 제공사가 주지 않는다.** 그래서 우리는 태그 힌트로 **순위를 낮출** 뿐 «없다»고 단정하지 않는다.
+ *     🔴 Pexels 는 «Don't **imply endorsement** … by people or brands» 를 요구하는데 **그 판정에 필요한 값을 주지 않는다.**
+ *     사장님 판단(2026-09-15)은 «그건 무시해도 된다» 이고, 실질도 라이선스가 상업적 사용을 허락하므로 맞다 —
+ *     그래서 판정은 `index.ts` 가 **적어 두기만** 하고 순위에 쓰지 않는다. 🔴 대신 **크레딧은 절대 빠뜨리지 않는다**(그게 진짜 의무다).
  */
 import { STOCK_TIMEOUT_MS, type StockCandidate, type StockProvider, type StockSearchOutcome } from "./types";
 import { queryKeyOf, rateAllows, readCache, writeCache } from "./cache";

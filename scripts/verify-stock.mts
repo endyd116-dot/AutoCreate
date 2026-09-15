@@ -10,12 +10,12 @@
  *
  *   ══ 음성 대조를 반드시 같이 돈다 ══
  *     «전부 통과»만 찍고 실은 아무것도 안 보는 검사가 제일 나쁘다(AC-58). 그래서 **걸려야 하는 것**을 같이 넣는다:
- *     남의 호스트 · http · 도메인 흉내 · «모름»이 «없음»으로 바뀌지 않는가 · 순위가 **거르지는 않는가**.
+ *     남의 호스트 · http · 도메인 흉내 · «모름»이 «없음»으로 바뀌지 않는가 · **순서를 바꾸지는 않는가**(사장님 지시의 회귀 방어선).
  */
 import { hostAllowed } from "../lib/stock/types";
 import { parsePixabayBody, PIXABAY_IMAGE_HOSTS } from "../lib/stock/pixabay";
 import { parsePexelsBody, PEXELS_IMAGE_HOSTS } from "../lib/stock/pexels";
-import { rankStockPicks, toStockMeta, stockTroubleLine, searchStock } from "../lib/stock";
+import { markStockPicks, toStockMeta, stockTroubleLine, searchStock } from "../lib/stock";
 import { creditLineOf, isSourceKey, stockSourceKey } from "../lib/photo-source";
 import type { StockCandidate } from "../lib/stock/types";
 
@@ -105,7 +105,7 @@ const PEXELS_SAMPLE = {
     leaked.length ? `🔴 뚫렸다: ${leaked.map(([u, , why]) => `${why}(${u})`).join(" · ")}` : `${bad.length}종 전부 막았다`);
 }
 
-/* ═══ ③ 판정과 순위 — 🔴 **거르지 않고 미루기만** 하는가(CLAUDE §9) ═══════════════ */
+/* ═══ ③ 판정 — 🔴 **거르지도 미루지도 않는가**(사장님 지시 2026-09-15) ═══════════════ */
 const cand = (id: string, tags: string[]): StockCandidate => ({
   provider: "pixabay", id, downloadUrl: `https://pixabay.com/get/${id}.jpg`, previewUrl: `https://cdn.pixabay.com/${id}.jpg`,
   width: 800, height: 600, author: "someone", sourceUrl: `https://pixabay.com/photo-${id}/`,
@@ -114,20 +114,22 @@ const cand = (id: string, tags: string[]): StockCandidate => ({
 const POOL = [cand("a", ["logo", "storefront"]), cand("b", ["woman", "portrait"]), cand("c", ["mountain", "sky"])];
 {
   /* 정보성 글 — 사람·상표 조항은 «상업적 사용»을 전제하므로 전부 통과해야 한다. */
-  const info = rankStockPicks(POOL, false);
-  rec("③ 정보성 글에서는 전부 통과(조항이 «상업적 사용» 전제)", info.length === 3 && info.every((p) => p.verdict.ok),
+  const info = markStockPicks(POOL, false);
+  rec("③ 정보성 글에서는 판정이 전부 통과(조항이 «상업적 사용» 전제)", info.length === 3 && info.every((p) => p.verdict.ok),
     `${info.filter((p) => p.verdict.ok).length}/3 통과`);
 
-  /* 광고성 글 — 판정은 갈리되 **한 장도 사라지지 않아야** 한다. */
-  const paid = rankStockPicks(POOL, true);
-  rec("③ 🔴 광고성 글에서도 **한 장도 안 거른다**(§9 하드 게이트 0)", paid.length === 3,
-    paid.length === 3 ? "3장 그대로 · 순서만 바뀐다" : `🔴 ${3 - paid.length}장이 사라졌다 — 이건 게이트다`);
+  const paid = markStockPicks(POOL, true);
+  rec("③ 🔴 광고성 글에서도 **한 장도 안 거른다**", paid.length === 3,
+    paid.length === 3 ? "3장 그대로" : `🔴 ${3 - paid.length}장이 사라졌다 — 이건 게이트다`);
+  /* 🔴 여기가 사장님 지시의 회귀 방어선이다 — 누가 «안전한 것을 위로» 정렬을 다시 넣으면 이 줄이 빨개진다.
+     들어온 순서(제공사 사다리 순서)가 a·b·c 그대로여야 한다(판정이 갈려도). */
   const order = paid.map((p) => p.id).join("");
-  rec("③ 순위: 모름 → 사람 → 상표 순으로 뒤로 민다", order === "cba",
-    `순서 = ${order} (기대 cba · c=모름 b=사람힌트 a=상표힌트) · 판정 = ${paid.map((p) => `${p.id}:${p.verdict.code ?? "ok"}`).join(" ")}`);
-  rec("③ 🔴 판정에 사람이 읽을 사유와 근거 약관이 함께 온다(§9.1 «또렷하게»)",
-    paid.every((p) => p.verdict.ok || (!!p.verdict.reason && !!p.verdict.law)),
-    paid.map((p) => (p.verdict.reason ? `${p.id}✓사유` : `${p.id}✗`)).join(" "));
+  rec("③ 🔴 사람·상표로 **순서를 바꾸지 않는다**(사장님 «무시해도 돼»)", order === "abc",
+    `순서 = ${order} (기대 abc = 들어온 순서 그대로) · 판정 = ${paid.map((p) => `${p.id}:${p.verdict.code ?? "ok"}`).join(" ")}`);
+  /* 🔴 순위에 안 쓴다고 **재지 않는 것이 아니다**(§9 «검사를 지우지 마라») — 판정은 계속 쌓여 저장된다. */
+  rec("③ 🔴 그래도 판정은 계속 잰다 — 사유·근거 약관이 남는다(나중에 정렬만 켜면 된다)",
+    paid.some((p) => !p.verdict.ok) && paid.every((p) => p.verdict.ok || (!!p.verdict.reason && !!p.verdict.law)),
+    paid.map((p) => `${p.id}:${p.verdict.code ?? "ok"}`).join(" "));
 }
 
 /* ═══ ④ 기록·되짚기·크레딧 ═════════════════════════════════════════════════ */
