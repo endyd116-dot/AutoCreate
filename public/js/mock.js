@@ -35,7 +35,10 @@
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
     ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
     ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
-  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const o = { key, label, category, publishVia, status: chOpen ? "active" : status, connectMethod, configured }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const st = chOpen ? "active" : status;
+    /* [B3 020fb15] 서버가 주는 한 칸 — 라이브 실측: 블로거는 status=active 인데 우리 앱 키가 없어 못 붙는다 */
+    const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
+    const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -63,11 +66,12 @@
 
   const DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
   // [v1.1] GateKey 12 · 순서 고정(5C.2 8검사 + 16B 4검사)
+  /* [AC-52 · 2026-09-15 · lib/ai-tell-gate.ts GATE_LABEL 에서 그대로 복사] 🔴 라벨은 **통과형 문장**이다 — «문단 시작 반복 ✓» 처럼 명사형이면 뜻이 반대로 읽힌다 */
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
-    { key: "cliche", label: "상투적 표현", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작 반복", pass: true }, { key: "bullet_ratio", label: "글머리표 비율", pass: true, detail: "18%" },
-    { key: "sentence_variance", label: "문장 길이 변화", pass: true }, { key: "translationese", label: "번역투", pass: true, detail: "0건" }, { key: "superlative", label: "과장 표현", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
-    { key: "persona", label: "페르소나 재료", pass: true, detail: "3곳" }, { key: "visual_min", label: "사진 수", pass: true, detail: "8장" },
-    { key: "disclosure", label: "제휴 고지 첫 블록", pass: ok }, { key: "banned_words", label: "금칙어", pass: true, detail: "0건" }, { key: "similarity", label: "다른 계정 글과 유사도", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 수", pass: true, detail: "1개" } ] });
+    { key: "cliche", label: "상투 표현 없음", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작이 다양함", pass: true }, { key: "bullet_ratio", label: "불릿이 본문을 대신하지 않음", pass: true, detail: "18%" },
+    { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "근거 없는 최상급 없음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
+    { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
+    { key: "disclosure", label: "제휴 고지 첫머리", pass: ok }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true } ] });
 
   const fresh = qs.get("fresh") === "1";
   const runnerOn = qs.get("runner") === "on";
@@ -112,14 +116,16 @@
     variant: { hookType: HOOKS[i % HOOKS.length], palette: PALETTES[(Number(accountId || 0) + i) % PALETTES.length], voiceId: VOICES[i % VOICES.length].voiceId },
     variantLabels: { hook: HOOK_KO[HOOKS[i % HOOKS.length]], palette: PALETTE_KO[PALETTES[(Number(accountId || 0) + i) % PALETTES.length]], voiceId: VOICES[i % VOICES.length].name }, /* 사람말은 서버가 붙인다(화면 하드코딩 0) */
     cuts: format === "clip" ? 3 : seconds >= 60 ? 9 : 5, disclosure: { badge: true, descriptionFirstLine: true } });
-  const JUDGE_AXES = [["hook3s", "훅 3초 안에"], ["caption_sync", "자막 싱크"], ["frame_gap", "프레임 공백"], ["loop_seam", "루프 이음새"], ["cut_quality", "컷 화질"], ["policy", "정책 · 고지"], ["similarity", "계정 간 변주"], ["audio", "소리 정규화"], ["duration_fit", "길이 맞음"]];
-  const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "cut_quality") || (grade === "P0" && key === "policy"); const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
-      if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "cut_quality") o.detail = "4번 컷 화질 낮음 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "policy") o.detail = "정책 위반 의심 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
+  /* [AC-52 · 2026-09-15 · lib/video/judge.ts AXIS_LABEL 에서 그대로 복사] 🔴 손으로 고치지 마라 — 서버가 정본이고, 다르면 verify-label-surface 가 빨강이다 */
+  const JUDGE_AXES = [["hook_first", "첫 컷이 훅"], ["safe_area", "자막·배지가 안전영역 안"], ["reading_time", "자막 읽을 시간 충분"], ["text_broken", "깨진 글자 없음"], ["black_margin", "검은 여백 없음"], ["frames_not_blank", "빈 프레임 없음"], ["cut_rhythm", "컷 리듬 살아 있음"], ["forbidden", "금칙·내부 문자열 없음"], ["disclosure", "제휴 고지(배지·자막·설명란)"], ["duration_fit", "길이 규격 안"], ["similarity", "다른 계정 영상과 겹치지 않음"]];
+  const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "black_margin") || (grade === "P0" && key === "forbidden");   /* [AC-52] 서버 GRADE_OF 의 P1·P0 축으로 */ const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
+      if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "black_margin") o.detail = "4번 컷 아래 검은 여백 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "forbidden") o.detail = "내부 문자열이 남았어요 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
   const POSTER = "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='540' height='960'><rect width='540' height='960' fill='#191F28'/><rect x='60' y='380' width='420' height='120' rx='16' fill='#2A2A32'/><text x='270' y='452' font-family='sans-serif' font-size='40' font-weight='800' fill='#fff' text-anchor='middle'>에어프라이어 기름때</text></svg>");
   const SRT = "data:text/plain;charset=utf-8," + encodeURIComponent("1\n00:00:00,000 --> 00:00:03,000\n제휴 링크가 있어요\n\n2\n00:00:03,000 --> 00:00:07,500\n눌어붙은 기름, 3분이면 끝나요\n\n3\n00:00:07,500 --> 00:00:13,000\n베이킹소다 한 스푼이 전부예요\n");
   const VDESC = "이 영상은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n베이킹소다 한 스푼이면 눌어붙은 기름이 녹아요. 준비물과 순서를 58초에 담았어요.\n\n#에어프라이어 #청소 #살림팁";
   const videoAssets = () => [{ id: 9001, kind: "video", url: "", meta: { durationMs: 58000, bytes: 8412300, frameCount: 1740 } }, { id: 9002, kind: "srt", url: SRT }, { id: 9003, kind: "thumb", url: POSTER }];
-  const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "제휴 고지(배지 · 시작 자막 · 설명란 첫 줄)", pass: true }, { key: "banned_words", label: "금칙어", pass: true, detail: "0건" }, { key: "superlative", label: "과장 표현", pass: true, detail: "0건" }];
+  /* [AC-52] 영상 piece 에도 붙는 글 게이트 칸 — 라벨은 서버 GATE_LABEL 그대로 */
+  const VIDEO_GATE_CHECKS = [{ key: "disclosure", label: "제휴 고지 첫머리", pass: true }, { key: "banned_words", label: "광고법 금칙어 없음", pass: true, detail: "0건" }, { key: "superlative", label: "근거 없는 최상급 없음", pass: true, detail: "0건" }];
   /* 완성 = in_review + 설명란 body(첫 줄 고지) + blocks(video·srt·hashtags) + assets(video·thumb·srt) + gate.judge(§1.4 done) */
   const finishVideo = (p, grade = "P2") => { p.status = grade === "P0" ? "in_review" : "in_review"; p.meta.stage = "done"; p.meta.chainStage = { stage: "done", at: iso(Date.now()) }; p.gateOk = grade !== "P0"; p.body = VDESC; p.blocks = [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["에어프라이어", "청소", "살림팁"] }]; p.assets = videoAssets();
     p.gate = { ok: grade !== "P0", rewritten: grade === "P1", checks: VIDEO_GATE_CHECKS, judge: judgeReport(grade) }; delete p._v0; const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "in_review"; };                                          // [P1R4] §1.5 게이트 견본(ai_cost_cap · banned_category)                                                                    // [P1R4] KICC 키 없음 → «결제 준비 중이에요»(no-op 정직)
@@ -223,15 +229,15 @@
     tickets: fresh ? [] : [{ id: 702, subject: "네이버 글이 안 올라가요", status: "progress", createdAt: iso(now - 26 * 3600e3), updatedAt: iso(now - 2 * 3600e3), messages: [{ from: "customer", text: "어제부터 네이버에 글이 안 올라가요. 프로그램은 켜 두었어요.", at: iso(now - 26 * 3600e3) }, { from: "operator", text: "확인해 보니 네이버 로그인이 풀려 있어요. «내 계정 → 다시 로그인»을 눌러 주시면 PC 프로그램이 로그인 창을 열어요.", at: iso(now - 2 * 3600e3) }] }, { id: 690, subject: "코인 만료가 언제인가요", status: "resolved", createdAt: iso(now - 9 * 86400e3), updatedAt: iso(now - 8 * 86400e3), messages: [{ from: "customer", text: "충전한 코인은 언제까지 쓸 수 있나요?", at: iso(now - 9 * 86400e3) }, { from: "operator", text: "충전한 코인은 1년, 플랜 포함 코인은 그달 말까지예요.", at: iso(now - 8 * 86400e3) }] }],
     topicsRefresh: null, // [v2.9] { startedAt, finishedAt?, added?, error? } — tenants.settings.topicsRefresh 자리
     /* ── [P1R3] 수익(계약 §1.4 · DESIGN §9) ── */
-    revRows: revEmpty ? [] : revSeed(),          // revenue_daily 행 — 수집 못 한 날은 «행 자체가 없다»(AC-9)
-    revSources: revEmpty ? [] : [
+    revRows: revEmpty || fresh ? [] : revSeed(),   // [여정 점검 12] ?fresh=1 = 새로 가입한 집 — 수익 행이 남아 있으면 «첫 화면»을 영영 못 본다          // revenue_daily 행 — 수집 못 한 날은 «행 자체가 없다»(AC-9)
+    revSources: revEmpty || fresh ? [] : [
       { id: 1, source: "adsense", accountId: 2, method: "api", status: "connected", lastSyncAt: iso(now - 6 * 3600e3) },
       { id: 2, source: "adpost", accountId: 1, method: "runner", status: "connected", lastSyncAt: iso(now - 11 * 3600e3) },
       { id: 3, source: "coupang", accountId: 1, method: "api", status: "connected", lastSyncAt: iso(now - 3 * 3600e3) },
       { id: 4, source: "youtube", accountId: 4, method: "api", status: "not_configured" },
       { id: 5, source: "adfit", accountId: 2, method: "runner", status: "error", lastSyncAt: iso(now - 3 * 86400e3), lastError: "auth" },
     ],
-    adState: revEmpty ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
+    adState: revEmpty || fresh ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 7) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -381,6 +387,9 @@
       if (S.reassigned) todo.push({ kind: "reassign", title: `@${S.reassigned.fromHandle} 계정이 정지됐어요`, desc: `글 ${S.reassigned.moved}건을 @${S.reassigned.toHandle} 로 옮겼어요`, link: "/app/accounts.html", tone: "warn" });
       if (review) { const one = review === 1 ? S.pieces.find((p) => p.status === "in_review") : null; todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: one ? `/app/piece.html?id=${one.id}` : "/app/pieces.html", tone: "info" }); } // ★C fix: 1건이면 그 글로
       if (S.slots.some((s) => s.status === "no_topic" && s.date >= todayYmd)) todo.push({ kind: "slot_no_topic", title: "소재가 떨어졌어요", desc: "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", link: "/app/create.html", tone: "warn" }); // ★C fix: 소재는 create.html
+      /* [여정 점검 13] 체험 끝·결제 멈춤은 **서버 todo(kind:"plan")가 정본** — 모의도 같은 줄을 보낸다(화면은 이제 안 얹는다) */
+      if (blocked === "readonly") todo.push({ kind: "plan", title: "체험이 끝났어요 — 요금제를 골라 주세요", desc: "만든 글과 편성표는 그대로예요. 요금제를 고르면 바로 이어서 돼요.", link: "/app/plan.html", tone: "warn" });
+      else if (blocked === "suspended") todo.push({ kind: "plan", title: "결제가 안 돼서 잠시 멈췄어요", desc: "카드를 확인하면 바로 이어서 돼요.", link: "/app/plan.html", tone: "warn" });
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: `${CHANNELS.filter((c) => c.status === "active").slice(0, 3).map((c) => c.label).join(" · ") || "지금 열린 채널"} 중 하나면 돼요`, link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
@@ -694,12 +703,14 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       const inM = (r, m) => r.day.slice(0, 7) === m;
       const sum = (rs) => rs.reduce((a, r) => a + r.amountKrw, 0);
       const mine = S.revRows.filter((r) => inM(r, month));
-      const bySource = groupKrw(mine, "source").map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
-        const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt; return o; });
+      /* [여정 점검 9 · B3 확인] 라이브에선 연결 안 된 소스에 수익이 없다 — 모의도 그렇게(«키 필요»인데 금액이 붙는 조합을 만들지 않는다) */
+      const bySource = groupKrw(mine, "source").filter(([source]) => { const s = S.revSources.find((x) => x.source === source); return !s || s.status === "connected"; })
+        .map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
+          const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt; return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
-        return { accountId: Number(id), handle: a.handle || "", channel: a.channel || "", krw }; });
+        return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
       const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
-        return { pieceId: Number(id), title: p.title || "제목 없음", channel: p.channel || "naver_blog", krw }; });
+        return p.id ? { pieceId: Number(id), title: p.title || "제목 없는 글", channel: p.channel, krw, ...(p.title ? {} : { untitled: true }) } : { pieceId: Number(id), title: "지운 글", channel: "", krw, deleted: true }; });
       return { ok: true, monthKrw: sum(mine), todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(),
         prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces }; },
     "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
