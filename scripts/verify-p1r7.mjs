@@ -183,6 +183,7 @@ async function main() {
 
   /* ══ alive — ⑤ AC-55 «틀린 성공»: 공개/비공개 정확일치 · 로그아웃 상태로 열어 보기 ══ */
   if (SECTIONS.has("alive")) {
+    const { tid: aliveTid } = await newTenant("alive");
     const ti = existsSync("runner/channels/tistory.mjs") ? readFileSync("runner/channels/tistory.mjs", "utf8") : "";
     if (!ti) warn("⑤ 티스토리 «공개» 선택", "runner/channels/tistory.mjs 없음");
     else {
@@ -195,16 +196,17 @@ async function main() {
       rec("⑤ 티스토리 — «공개» **단독** 셀렉터 0(부분일치로 «비공개»를 누르는 길 0)", bare.length === 0, bare.length ? `🔴 ${bare.join(" | ")}` : "단독 후보 없음(«공개 발행»·«발행하기»만)");
       rec("⑤ 발행 뒤 확인창·완료 신호를 **읽고** 성공을 말한다(주장 불신)", /confirm|dialog|완료|발행됨|toast/.test(ti), "");
     }
-    const pa = existsSync("runner/channels/post-alive.mjs") ? readFileSync("runner/channels/post-alive.mjs", "utf8") : "";
-    if (!pa) warn("⑤ 로그아웃 상태로 열어 보기(post_alive)", "runner/channels/post-alive.mjs 없음");
-    else {
-      /* 🔴 로그인한 브라우저로 열면 **비공개 글도 보인다** — «살아 있다» 가 거짓이 된다. 새 컨텍스트(쿠키 0)로 열어야 진짜다. */
-      const anon = /newContext\(|incognito|storageState:\s*(undefined|null|\{\s*\})|clearCookies/.test(pa);
-      rec("🔴 ⑤ 살아 있나 확인은 **로그아웃 상태**로 연다(로그인 상태면 비공개도 보여 «틀린 성공»)", anon, anon ? "새 컨텍스트/쿠키 0" : "🔴 로그인 컨텍스트로 연다");
-      rec("⑤ 404·비공개·삭제를 가려 말한다(«안 보임» 한 덩어리 금지)", /(404|없어졌|비공개|삭제)/.test(pa), "");
-    }
-    const [kinds] = await s`SELECT COUNT(*) AS c FROM pg_type WHERE typname = 'x'`.catch(() => [{ c: 0 }]);   // 접속 확인용(무해)
-    void kinds;
+    /* 🔴 [2026-09-15 메인 교차확인] 판정 기준을 바꿨다 — 러너가 쿠키를 지우고 여는지가 아니다.
+       `post-alive.mjs` 는 `launchPersistentContext` 라 쿠키를 지우면 **그 계정이 로그아웃**되어 고객이 다시 로그인해야 한다(B2 판단·메인 채택).
+       그래서 러너의 `alive` 는 «생존» 신호일 뿐이고, **공개 여부는 쿠키 없는 서버가 한 번 더 열어** 도장을 찍는다.
+       내 첫 검사는 «수리가 이 파일에 있을 것» 이라고 지레짐작해 빨강을 냈다 — 수리는 다른 자리에 있었다. */
+    const { execFileSync: exPub } = await import("node:child_process");
+    let po = "";
+    try { po = String(exPub("npx", ["tsx", "--env-file=.env", "scripts/verify-p1r7-public-probe.mts", "--tid", String(aliveTid)], { encoding: "utf8", shell: true, timeout: 180_000, stdio: ["ignore", "pipe", "pipe"] })); }
+    catch (e) { po = String(e?.stdout || "") + String(e?.stderr || e?.message || ""); }
+    const pl = po.split(/\r?\n/).filter((l) => l.startsWith("RESULT "));
+    if (!pl.length) rec("⑤ 공개 도장 프로브 실행", false, po.slice(-150).replace(/\s+/g, " "));
+    for (const l of pl) { try { const x = JSON.parse(l.slice(7)); rec(x.step, x.ok, x.note); } catch { /* */ } }
   }
 
   /* ══ extra — ⑥ 계정 더 쓰기 멱등(기간 번호) · waiting_ip 는 차감 0 ══ */
