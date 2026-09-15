@@ -45,7 +45,11 @@ export const GATE_LABEL: Record<GateKey, string> = {
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
 };
-export interface GateCheck { key: GateKey; label: string; pass: boolean; detail?: string }
+export interface GateCheck { key: GateKey; label: string; pass: boolean; detail?: string;
+  /** [P1R8 §9] 화면이 «무겁게/가볍게»를 **서버 값으로** 그린다(화면이 정하면 축을 늘릴 때마다 낡는다 · A 요청). */
+  weight?: "high" | "normal";
+  /** 실패했을 때 «어떻게 하면 되나» 한 줄(서버 문장 — 두 곳이 다른 말을 하지 않게). */
+  how?: string }
 export interface GateReport {
   ok: boolean; checks: GateCheck[]; rewritten: boolean;
   /** [P1R5 §1.4-6] 영상 심사 결과 — «GateKey 12 중 영상에 해당하는 것 + judge». 글 piece 에는 없다.
@@ -177,7 +181,8 @@ export function runGate(inp: GateInput): GateReport {
   const plain = blocksToPlain(blocks);
   const withTitle = `${inp.title ?? ""}\n${plain}`;
   const checks: GateCheck[] = [];
-  const push = (key: GateKey, pass: boolean, detail?: string) => { const c: GateCheck = { key, label: GATE_LABEL[key], pass }; if (detail) c.detail = detail; checks.push(c); };
+  /* [P1R8 §9] 모든 칸에 **무게·어떻게**를 실어 내보낸다 — 화면이 키 목록을 보고 스스로 정하지 않게(대용물 금지). */
+  const push = (key: GateKey, pass: boolean, detail?: string) => { const c: GateCheck = { key, label: GATE_LABEL[key], pass }; if (detail) c.detail = detail; checks.push(decorateCheck(c)); };
 
   // cliche — 본문 상투구 + [2026-09-15 §5C] **사진 캡션의 묘사문**(«~놓여 있는 모습» = 그림 지시문이 캡션으로 새어 나온 것 · 사장님 실측 piece 329)
   const hits = CLICHES.filter((c) => c.re.test(plain)).map((c) => c.label);
@@ -307,4 +312,65 @@ export function buildRewriteInstruction(report: GateReport): string {
     }
   });
   return `[다시 쓰기 — 직전 원고가 아래 검사에 걸렸다. 같은 실수를 반복하면 이 글은 사람 검수로 넘어간다]\n${lines.join("\n")}\n`;
+}
+
+/* ═══ [P1R8 §9] 🔴 «다시 쓰기»를 부르는 축은 **좁다** — 사장님 전역 지시 «게이트는 최소화하라» ═══
+   예전엔 `report.ok` 가 **하나라도** 빨가면 글을 **통째로 다시 썼다**(AI 콜 2배 = 그 글의 돈이 두 배).
+   그런데 그 안에는 «사진 6장 중 5장»·«상투 표현 1건»·«골격이 최근 글과 닮음» 같은 **취향에 가까운 축**이 섞여 있다.
+   🔴 실제로 돈이 새던 자리: `blogger`·`wordpress` 계약이 `visualMin.faq = 1` 로 FAQ 를 요구하는데
+      같은 계약의 `tiers.optional` 이 FAQ 를 **빼기도 한다** → 빠진 글마다 재작성이 돌았다(계약의 두 부분이 싸운다).
+   ⇒ **다시 쓰기는 «고치면 법·정책을 지킬 수 있는 축»이 빨갈 때만** 부른다. 나머지는 **그대로 두고 사람에게 보여 준다**
+      (어차피 승인도 막지 않는 축이다 · `HARD_GATE_KEYS` 밖).
+   🔴 이 목록은 `lib/content-approve.ts HARD_GATE_KEYS` 와 **같은 뜻**이지만 파일이 다르다 —
+      `content-approve` 는 DB 를 보고 이 파일은 순수라서(AC-17) 한쪽을 import 하면 순환이 된다. **두 곳을 같이 고친다.** */
+/* 🔴 **막는 것과 다시 쓰는 것은 다른 잣대다**: 승인을 막는 것은 법·제3자·비가역 셋뿐이지만(§9),
+   **다시 쓰기는 «AI 콜 한 번»이라 위험을 줄이는 값이 있으면 쓴다**. 그래서 소프트여도 `ad_pointing`·`similarity` 는 여기 남는다
+   (애드센스 정지·저품질 판정은 **고객 계정**이 다치는 자리다 — 막지는 않되 한 번은 고쳐 본다).
+   `affiliate_count` 는 뺐다 — 링크 수는 다시 써서 고칠 것이 아니라 **지우면 되는 것**이다(돈 쓸 이유가 없다). */
+export const REWRITE_KEYS: readonly GateKey[] = ["disclosure", "banned_words", "ad_pointing", "similarity"];
+/** 다시 쓸 만한 실패가 있나(없으면 한 번 더 쓰지 않는다 = 돈을 아낀다). */
+export function needsRewrite(report: GateReport): boolean {
+  return report.checks.some((c) => !c.pass && (REWRITE_KEYS as readonly string[]).includes(c.key));
+}
+
+/* ═══ [P1R8 §9] 🔴 «막지 않는 대신 **또렷하게 말한다**» — 그러려면 화면이 **무게**를 알아야 한다 ═══
+   하드가 0이 되면 «고지 누락»도 «골격 반복»도 화면에서 똑같은 얼굴이 된다. 그러면 고객은 **둘 다 넘긴다**.
+   🔴 무게를 화면이 키 목록 보고 정하면 **서버가 축을 늘릴 때마다 화면이 낡는다**(AC-52·AC-57 · A 요청 2026-09-15) —
+      그래서 **서버가 값으로 준다**. `how` 도 서버 문장이다(두 곳이 다른 말을 하지 않게).
+   high = 법·제3자·**고객 계정이 다칠 수 있는 것** · normal = 글의 질(넘겨도 계정이 안 죽는다). */
+export type GateWeight = "high" | "normal";
+export const GATE_WEIGHT: Record<GateKey, GateWeight> = {
+  disclosure: "high",        // 표시광고법·공정위 — 안 붙으면 고객이 과징금
+  banned_words: "high",      // 표시광고법 §5 · 식품표시광고법 §8 · 의료법 §56
+  stock_safe: "high",        // 저작권·초상권 — 제3자가 다친다
+  ad_pointing: "high",       // 애드센스 계정 정지·해지 사유(법은 아니지만 계정이 죽는다)
+  similarity: "high",        // 중복이 쌓이면 저품질 판정 → 계정이 죽는다
+  affiliate_count: "normal",
+  superlative: "normal", cliche: "normal", para_repeat: "normal", bullet_ratio: "normal",
+  sentence_variance: "normal", translationese: "normal", persona: "normal",
+  visual_min: "normal", link_check: "normal", structure_repeat: "normal",
+};
+/** «어떻게 하면 되나» 한 줄(사람말 · 화면이 그대로 쓴다). `detail` 은 «무엇이»까지만 말한다. */
+export const GATE_HOW: Record<GateKey, string> = {
+  disclosure: "검수에서 «대가를 받았나»를 켜면 첫머리 문장이 자동으로 들어가요.",
+  banned_words: "단정·효능 표현은 지우고, 최상급은 같은 문장에 근거(기관·기간·수치)를 붙여 주세요.",
+  stock_safe: "사람·상표가 없는 사진으로 바꾸거나, 이 글에서 광고를 빼 주세요.",
+  ad_pointing: "광고·배너를 가리키는 문장을 지우고 «다음 글 보기»처럼 읽기 행동을 권해 주세요.",
+  similarity: "도입 장면·소제목·예시를 다른 관점으로 바꿔 주세요.",
+  affiliate_count: "제휴 링크를 2개까지만 남겨 주세요.",
+  superlative: "«1위»·«최고» 옆에 출처·기간·수치를 적거나 표현을 낮춰 주세요.",
+  cliche: "«~에 대해 알아보겠습니다» 류 상투 문장을 실제 장면으로 바꿔 주세요.",
+  para_repeat: "같은 말로 시작하는 문단이 몰려 있어요 — 시작을 바꿔 주세요.",
+  bullet_ratio: "불릿이 본문을 대신하고 있어요 — 문장으로 풀어 주세요.",
+  sentence_variance: "문장 길이가 비슷해요 — 짧은 문장을 섞어 주세요.",
+  translationese: "«~에 의해»·«~의 경우» 같은 번역투를 한국어 어순으로 바꿔 주세요.",
+  persona: "내 사정(언제·어디서·무엇을)을 한두 군데 넣어 주세요.",
+  visual_min: "이 채널에서 흔한 구성 요소가 모자라요 — 사진·소제목을 조금 더 넣어 주세요.",
+  link_check: "안 열리는 링크가 있어요 — 주소를 고치거나 빼 주세요.",
+  structure_repeat: "최근 글과 구조가 닮았어요 — 다음 글은 다른 구성으로 써 주세요.",
+};
+/** 체크 한 칸에 무게·«어떻게»를 채워 준다(실패한 칸만 `how` 를 싣는다 — 통과한 칸에 방법은 잡음이다). */
+export function decorateCheck(c: GateCheck): GateCheck {
+  const w = GATE_WEIGHT[c.key] ?? "normal";
+  return { ...c, weight: w, ...(c.pass ? {} : { how: GATE_HOW[c.key] }) };
 }

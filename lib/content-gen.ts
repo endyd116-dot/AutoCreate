@@ -14,7 +14,7 @@ import { CHAIN_HIGH } from "./ai-models";
 import { generateImage, type ImageAspect } from "./ai-image";
 import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, type RenderImage } from "./blocks";
-import { runGate, buildRewriteInstruction, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
+import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
 import { ensureDisclosureFirst, disclosureTextFor } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
 import { seasonLine } from "./kr-calendar";
@@ -275,7 +275,9 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     await setStage(pieceId, "checking");
     const gateInput = (blocks: Block[], title: string) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${otherPlain[sim.index]?.id}` : undefined }, title });
     let report: GateReport = runGate(gateInput(draft.blocks, draft.title));
-    if (!report.ok && !rewritten) {
+    /* [P1R8 §9] 🔴 **다시 쓰기는 좁은 축에서만** — 예전엔 소프트 축 하나만 빨개도 글을 통째로 다시 써서 **그 글의 AI 비용이 두 배**였다.
+       (사진 한 장 모자람·상투 표현 1건·골격 닮음 …은 승인도 안 막는 축이다. 보여 주고 사람이 고치면 된다 · REWRITE_KEYS 주석 참고) */
+    if (needsRewrite(report) && !rewritten) {
       const inst = buildRewriteInstruction(report);
       const second = await write(inst);
       const r2 = runGate(gateInput(second.blocks, second.title));
