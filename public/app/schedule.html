@@ -43,7 +43,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${(D.settings && D.settings.produceLeadDays) || 3}일 전에 만들기 때문` : ""}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 너무 가까운 자리는 회색 «이번엔 건너뛰어요»
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -68,8 +68,9 @@ function autoBanner() {
   UI.$("#autoBnT").textContent = `자동 편성이 꺼져 있어요 — 켜면 ${D.settings.produceLeadDays || 3}일 전에 글을 만들어 드려요`;
   UI.$("#autoOn").onclick = async (e) => { e.target.disabled = true; const s = await UI.api("/api/tenant-settings", { body: { autoSchedule: true } }); e.target.disabled = false; if (!s.ok) return UI.toast(s.error || "켜지 못했어요"); UI.toast("자동 편성을 켰어요"); await load(); };
 }
-/* ③ 이번엔 건너뛰는 자리 — 서버 skipReason:"too_soon" 우선 · 없으면 화면이 (자리 날짜 − 오늘) < produceLeadDays 로 판정(이 하나는 화면 계산 허용 · 설정값은 rules-settings 응답) */
-const tooSoon = (s) => { if (s.skipReason) return s.skipReason === "too_soon"; if (s.pieceId || !["planned", "topic_assigned", "assigned"].includes(s.status)) return false; const lead = (D.settings && D.settings.produceLeadDays) || 3; const days = Math.round((new Date(s.date + "T00:00:00") - new Date(ymd(today) + "T00:00:00")) / 86400e3); return days >= 0 && days < lead; };
+/* ③ 이번엔 건너뛰는 자리 — 서버 skipReason:"too_soon" 만 본다(화면 계산 없음 · 키 없으면 필 없음). 서버는 매일 produceHour 에 글을 만들고, 그 전에 오는 자리만 건너뛴다 — 며칠 남았는지는 판정 근거가 아니다 */
+const tooSoon = (s) => s.skipReason === "too_soon";
+const produceH = () => { const [h, m] = String((D.settings && D.settings.produceHour) || "06:00").split(":").map((x) => parseInt(x, 10)); return `${Number.isFinite(h) ? h : 6}시${m ? ` ${m}분` : ""}`; }; // rules-settings 의 «06:00» → «6시»
 function render() {
   autoBanner();
   const two = mode === "two";
@@ -119,7 +120,7 @@ function slotSheet(s) {
   const busy = ["publishing", "producing"].includes(s.status);
   const can = { topic: !s.pieceId && !done && !busy, time: !done && !busy, make: !s.pieceId && !!s.topicTitle && !done && !busy, skip: !done && !busy };
   const H = {
-    too_soon: ["이번엔 건너뛰어요", `${(D.settings && D.settings.produceLeadDays) || 3}일 전에 만들기라 이 자리는 못 만들어요 · 다음 자리부터 만들어요 · 지금 만들기는 돼요`, null, null],
+    too_soon: ["이번엔 건너뛰어요", `글은 매일 ${produceH()}에 만드는데 이 자리는 그 전이에요 · 지금 만들기는 돼요`, null, null],
     no_topic: ["아직 소재가 없어요", "소재를 고르면 예정대로 만들어요", "소재 고르기", "topic"],
     coin_short: ["코인이 모자라 못 만들었어요", "충전하면 다음 만드는 시각에 이어서 만들어요", "충전하기", "/app/coins.html"],
     awaiting_runner: ["내 PC 프로그램이 꺼져 있어요", "켜 두면 기다리던 이 글이 바로 올라가요", "켜는 법 보기", "/app/runner.html"],
@@ -134,7 +135,7 @@ function slotSheet(s) {
   const dSkip = can.skip ? "이날은 쉬고 다음 편성은 그대로 나가요" : "이미 지나간 편성이에요";
   const act = (id, t, d, ok) => `<button type="button" class="row tap" data-act="${id}" ${ok ? "" : 'disabled style="opacity:.4"'}><div class="l"><span class="t">${t}</span><span class="d wrap">${UI.esc(d)}</span></div>${ok ? UI.chev : ""}</button>`;
   const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
-  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</div>
+  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
     ${H && H[0] ? `<div class="banner ${warn ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(H[0])}${H[1] ? " · " + UI.esc(H[1]) : ""}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정</span><span class="v">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "건강한 계정 순으로 자동"}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">발행</span><span class="v">${s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간"}</span></div>

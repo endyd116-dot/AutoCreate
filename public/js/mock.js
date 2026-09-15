@@ -136,7 +136,7 @@
   }
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
-    v: 6, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
+    v: 7, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     accounts: fresh ? [] : [
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false } },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
@@ -218,7 +218,7 @@
     adState: revEmpty ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 6) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 7) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   if (autoOff) { S.settings.autoSchedule = false; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
@@ -247,6 +247,8 @@
     const cs = free.find((s) => s.date >= ymd(5) && s !== nt); if (cs) { cs.status = "coin_short"; cs.topicTitle = cs.topicTitle || S.topics[2]?.title; }
     const ar = S.slots.find((s) => s.date === todayYmd && s.channel === "naver_blog");
     if (ar) { ar.status = "awaiting_runner"; ar.topicTitle = ar.topicTitle || S.topics[0]?.title; }
+    // [실측 정정] 오늘 만드는 시각(06:00)이 지난 자리 하나 — 글이 없으니 서버가 «이번엔 건너뛰어요»(slots-list skipReason:"too_soon")라 말한다(지금 만들기는 된다)
+    S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "planned", publishAt: kst(0, 8, 0), topicTitle: S.topics[4]?.title, origin: "auto" });
     // 오늘 «확인 필요» 한 건(발행함 703·piece 506 과 같은 글) — 없으면 만들어 둔다
     S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "awaiting_manual", publishAt: kst(0, 11, 0), topicTitle: "가을 이불 세탁, 건조기 없이 뽀송하게", pieceId: 506, origin: "auto" });
   }
@@ -548,8 +550,10 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3 }),
     "rules-save": (b) => { if ((b.rules || []).filter((r) => r.active !== false).length > 3) return err("limit", "이 요금제에서는 규칙을 3개까지 만들 수 있어요."); const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
     "rules-settings": (b) => { for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
-    "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999"; const lead = S.settings.produceLeadDays || 3;
-      return { ok: true, slots: S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => { const o = { ...s }; const days = Math.round((new Date(s.date + "T00:00:00Z") - new Date(todayYmd + "T00:00:00Z")) / 86400e3); if (!s.pieceId && ["planned", "topic_assigned", "assigned"].includes(s.status) && days >= 0 && days < lead) o.skipReason = "too_soon"; return o; }) }; }, // [실측] produceLeadDays 안의 planned 자리 = 이번엔 건너뛴다(서버가 말한다)
+    "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999";
+      const list = S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => ({ ...s }));
+      const skip = list.find((s) => s.date === todayYmd && !s.pieceId && ["planned", "topic_assigned", "assigned"].includes(s.status)); if (skip) skip.skipReason = "too_soon"; // [실측 정정] 오늘 만드는 시각(produceHour)이 지난 글 없는 자리 1개에만 서버가 too_soon 을 싣는다 · 나머지는 키 없음(화면 계산 금지)
+      return { ok: true, slots: list }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
     "slots-assign-topic": (b) => { if (bannedTopic) return err("banned_category", "도박·사행성 주제는 만들 수 없어요."); tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
