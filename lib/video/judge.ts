@@ -31,6 +31,9 @@ export const TAIL_TOLERANCE_MS = Number(process.env.VIDEO_TAIL_TOLERANCE_MS || "
 const AXIS_LABEL: Record<string, string> = { hook_first: "첫 컷이 훅", safe_area: "자막·배지가 안전영역 안", reading_time: "자막 읽을 시간 충분", text_broken: "깨진 글자 없음", black_margin: "검은 여백 없음", frames_not_blank: "빈 프레임 없음", cut_rhythm: "컷 리듬 살아 있음", forbidden: "금칙·내부 문자열 없음", disclosure: "제휴 고지(배지·자막·설명란)", duration_fit: "길이 규격 안", similarity: "다른 계정 영상과 겹치지 않음" };
 const GRADE_OF: Record<string, JudgeGrade> = { forbidden: "P0", disclosure: "P0", duration_fit: "P0", frames_not_blank: "P0", text_broken: "P1", black_margin: "P1", safe_area: "P1", hook_first: "P1", similarity: "P1", reading_time: "P2", cut_rhythm: "P2" };
 const axis = (key: string, pass: boolean, detail?: string): JudgeAxis => ({ key, label: AXIS_LABEL[key] ?? key, pass, grade: GRADE_OF[key] ?? "P2", ...(detail ? { detail } : {}) });
+/** [R7 §1.5] «못 쟀다»를 «괜찮다»로 접지 않는다(AC-33 · AC-9) — 막지는 않지만(`pass:true`) 잰 척도 하지 않는다.
+    실패한 축에는 붙이지 않는다: 떨어뜨릴 만큼은 쟀다는 뜻이라 보류가 아니다. */
+const pendingIf = (a: JudgeAxis, pending: boolean): JudgeAxis => (pending && a.pass ? { ...a, pending: true } : a);
 
 /* ═══ 결정론 축(페이로드) ═══ */
 export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string, unknown>, report?: Partial<RenderReport> | null, hookText?: string): { axes: JudgeAxis[]; repairedPayload: RenderPayload | null } {
@@ -85,7 +88,7 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
     const detail = !okDur ? `길이 ${Math.round(dur / 100) / 10}s(규격 ${Math.round(p.out.maxSeconds * 0.6)}~${p.out.maxSeconds}s)`
       : !okTail ? `컨테이너 ${(containerMs / 1000).toFixed(2)}s 가 영상 ${(videoMs / 1000).toFixed(2)}s 보다 ${(tailMs / 1000).toFixed(2)}s 길어요 — 끝에 정지 화면이 붙어 있어요`
         : measured ? undefined : "러너가 잰 값이 아니라 계획값 — 꼬리 판정 보류(러너 ffprobe 필요)";
-    axes.push(axis("duration_fit", okDur && okTail, detail));
+    axes.push(pendingIf(axis("duration_fit", okDur && okTail, detail), !measured));   // 꼬리(컨테이너−영상)를 못 쟀다 → 통과 표시를 하지 않는다
     /* frames_not_blank — 🔴 **바이트 크기로 «빈 영상»을 의심하지 않는다**(B2 실측: 단색 6초 mp4 = 31KB · H.264 는 디테일이 없으면 그만큼만 쓴다).
        예전 기준(>150KB)은 저디테일 실사(단색 배경 토킹 컷)의 멀쩡한 영상을 P0 로 죽였다.
        판정은 **프레임이 실제로 있는가**(길이 + 프레임 수)로 하고, 바이트는 «헤더만 있는 파일»(8KB 미만)만 거른다. */
@@ -95,18 +98,19 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
        조건이 있는데 이빨이 없는 상태였다. 실측이 오면 그 두 조건이 그때 비로소 산다. */
     const noFrames = dur <= 0 || (measured && frameCount > 0 && frameCount < 10);
     const framesShort = measured && frameCount > 0 && videoMs > 0 && frameCount < Math.floor((videoMs / 1000) * p.out.fps * 0.5);
-    axes.push(axis("frames_not_blank", !headerOnly && !noFrames && !framesShort,
+    axes.push(pendingIf(axis("frames_not_blank", !headerOnly && !noFrames && !framesShort,
       headerOnly ? `파일 ${bytes}B — 헤더만 있는 파일(빈 영상)`
         : noFrames ? (dur <= 0 ? "길이 0 — 프레임이 없음" : `프레임 ${frameCount}장 — 빈 영상`)
           : framesShort ? `프레임 ${frameCount}장 — ${(videoMs / 1000).toFixed(1)}초 ${p.out.fps}fps 에 한참 못 미쳐요(끊긴 인코딩)`
-            : measured ? undefined : "프레임 수가 계획값 — 판정 보류(러너 ffprobe 필요)"));
+            : measured ? undefined : "프레임 수가 계획값 — 판정 보류(러너 ffprobe 필요)"), !measured));
   }
   return { axes, repairedPayload: repaired };
 }
 
 /* ═══ 비전 축(포스터 + 컷 대표 프레임) ═══ */
 async function visionAxes(tenantId: number, pieceId: number, keys: string[]): Promise<{ axes: JudgeAxis[]; blind: boolean; grayHash?: string }> {
-  if (videoStub()) { void recordAiUsage({ tenantId, purpose: "video_judge", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${pieceId}:judge` }); return { axes: [axis("text_broken", true, "stub"), axis("black_margin", true, "stub"), axis("frames_not_blank", true, "stub")], blind: false }; }
+  if (videoStub()) { void recordAiUsage({ tenantId, purpose: "video_judge", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${pieceId}:judge` }); /* 스텁은 **판정한 게 아니다** — 보류로 표시해 하니스 초록이 «증거»로 둔갑하지 않게 한다(#9 «하니스 green ≠ 증거»). */
+    return { axes: [pendingIf(axis("text_broken", true, "스텁 — 실제 판정 아님"), true), pendingIf(axis("black_margin", true, "스텁 — 실제 판정 아님"), true), pendingIf(axis("frames_not_blank", true, "스텁 — 실제 판정 아님"), true)], blind: false }; }
   const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
   const parts: Record<string, unknown>[] = [];
   for (const k of keys.slice(0, 4)) { const obj = await r2Get(k); if (obj) parts.push({ inlineData: { mimeType: obj.contentType.startsWith("image/") ? obj.contentType : "image/jpeg", data: Buffer.from(obj.bytes).toString("base64") } }); }
@@ -127,16 +131,52 @@ async function visionAxes(tenantId: number, pieceId: number, keys: string[]): Pr
   finally { clearTimeout(t); }
 }
 
-/** 계정 간 프레임 지문 비교(§1.9) — 러너가 report 에 32×32 그레이(thumbGray base64)를 실었을 때만. 없으면 통과(판정 불능은 미달이 아니다 · AC-9). */
-async function similarityAxis(tenantId: number, pieceId: number, accountId: number | null, thumbGrayB64: string | null | undefined): Promise<JudgeAxis> {
-  if (!thumbGrayB64) return axis("similarity", true, "지문 없음(러너 미제공) — 대본 유사도만 적용");
-  const gray = Buffer.from(thumbGrayB64, "base64"); if (gray.length < 1024) return axis("similarity", true, "지문 길이 부족");
-  const hash = phashFromGray32(gray);
+/**
+ * 계정 간 프레임 지문 비교(§1.9 · §6.2 «중복 업로드 판정 회피» · §16B.3 유튜브 반복 콘텐츠).
+ *
+ *   ══ [R7 §1.5] 종전엔 «지문 없음 = 통과» 였다 ══
+ *     러너가 지문을 한 번도 보낸 적이 없어서(`runner/channels/render-video.mjs` 전송 0 · 2026-09-15 설계감사 19번)
+ *     이 축은 **늘 초록이었다**. 게이트가 있는데 아무것도 막지 않는 상태 — 있는 줄 알고 안심하는 게 더 나쁘다.
+ *     이제 셋을 가른다:
+ *       ① 지문이 있다        → 실제로 잰다(해밍 거리)
+ *       ② 지문이 없는데 견줄 상대도 없다 → **진짜 통과**(겹칠 대상이 아예 없다 — 못 잰 게 아니다)
+ *       ③ 지문이 없는데 견줄 상대는 있다 → **판정 보류**(AC-33 · «없음»을 «괜찮음»으로 접지 않는다)
+ */
+async function similarityAxis(tenantId: number, pieceId: number, accountId: number | null, fp: { gray?: string | null; phash?: string | null }): Promise<JudgeAxis> {
+  /* 내 지문 — 러너가 그레이를 보냈으면 여기서 해시하고, 이미 해시해서 보냈으면 그걸 쓴다(둘 중 하나면 된다). */
+  let hash = "";
+  if (fp.gray) { const g = Buffer.from(fp.gray, "base64"); if (g.length >= 1024) hash = phashFromGray32(g); }
+  if (!hash && fp.phash && /^[0-9a-f]{16}$/i.test(String(fp.phash))) hash = String(fp.phash).toLowerCase();
+
+  /* 견줄 상대 — 같은 테넌트의 **다른 계정** 최근 14일 영상.
+     🔴 계정이 없는 영상(§1.2 수동 «만들기»)은 뺄 계정 자체가 없다 — 그때는 테넌트의 다른 영상 전부와 견준다.
+        `account_id IS DISTINCT FROM NULL` 은 NULL 끼리를 «같다»로 보아 **다른 무계정 영상을 통째로 건너뛴다**(= 손으로 올리는 사람은 검사를 못 받는다). */
+  const scope = accountId ? sql`AND account_id IS DISTINCT FROM ${accountId}` : sql``;
+  const others = await q(sql`SELECT id, meta->>'frameHash' AS h FROM pieces
+    WHERE tenant_id = ${tenantId} AND kind = 'video' AND id <> ${pieceId} ${scope}
+      AND created_at > NOW() - interval '14 days' ORDER BY id DESC LIMIT 50`);
+
+  if (!hash) {
+    // ② 견줄 상대가 없으면 못 잰 게 아니라 **겹칠 일이 없는 것**이다 — 보류로 겁주지 않는다.
+    if (!others.length) return axis("similarity", true, "견줄 다른 계정 영상이 없어요");
+    // ③ 상대는 있는데 내 지문이 없다 — 판정 보류.
+    return pendingIf(axis("similarity", true, `영상 지문이 오지 않아 못 쟀어요(견줄 영상 ${others.length}편) — 내 PC 프로그램이 대표 프레임을 보내야 잽니다`), true);
+  }
+
   await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ frameHash: hash })} WHERE id = ${pieceId}`);
-  const others = await q(sql`SELECT id, meta->>'frameHash' AS h FROM pieces WHERE tenant_id = ${tenantId} AND kind = 'video' AND id <> ${pieceId} AND account_id IS DISTINCT FROM ${accountId} AND created_at > NOW() - interval '14 days' AND meta->>'frameHash' IS NOT NULL LIMIT 50`);
+  const withHash = others.filter((o) => o.h);
+  if (!withHash.length) {
+    // 내 지문은 있는데 상대 지문이 하나도 없다 — 견줄 게 없으니 이번엔 잴 수 없다(다음 영상부터 이어진다).
+    return others.length
+      ? pendingIf(axis("similarity", true, `견줄 영상 ${others.length}편에 아직 지문이 없어요 — 다음 영상부터 견줍니다`), true)
+      : axis("similarity", true, "견줄 다른 계정 영상이 없어요");
+  }
   let best: { id: number; d: number } | null = null;
-  for (const o of others) { const d = hammingHex(hash, String(o.h)); if (!best || d < best.d) best = { id: n(o.id), d }; }
-  return axis("similarity", !best || best.d > PHASH_SIMILAR_MAX_DISTANCE, best && best.d <= PHASH_SIMILAR_MAX_DISTANCE ? `다른 계정 영상 #${best.id} 과 프레임 지문 거리 ${best.d}(≤${PHASH_SIMILAR_MAX_DISTANCE})` : undefined);
+  for (const o of withHash) { const d = hammingHex(hash, String(o.h)); if (!best || d < best.d) best = { id: n(o.id), d }; }
+  const tooClose = !!best && best.d <= PHASH_SIMILAR_MAX_DISTANCE;
+  return axis("similarity", !tooClose,
+    tooClose ? `다른 계정 영상 #${best!.id} 과 프레임 지문 거리 ${best!.d}(≤${PHASH_SIMILAR_MAX_DISTANCE}) — 훅·팔레트를 바꿔 다시 만들어 주세요`
+      : `가장 가까운 영상과 거리 ${best!.d}(기준 >${PHASH_SIMILAR_MAX_DISTANCE} · ${withHash.length}편과 견줌)`);
 }
 
 /** judgeVideo(pieceId) — 계약 §5. piece.meta.render(페이로드)·piece_assets(video/thumb)·meta 로 판정. 수리된 페이로드는 meta.render 에 다시 넣는다. */
@@ -155,13 +195,14 @@ export async function judgeVideo(pieceId: number): Promise<JudgeResult> {
         ...(vmeta.measured === true ? { containerMs: n(vmeta.containerMs), videoMs: n(vmeta.videoMs), audioMs: n(vmeta.audioMs), measured: true } : {}) }
     : null, String(meta.hook ?? ""));
   const vis = await visionAxes(tid, pieceId, [thumb?.r2_key, ...assets.filter((a) => a.kind === "clip").slice(0, 2).map((a) => a.r2_key)].filter(Boolean).map(String));
-  const sim = await similarityAxis(tid, pieceId, p.account_id ? n(p.account_id) : null, String(vmeta.thumbGray ?? "") || null);
+  const sim = await similarityAxis(tid, pieceId, p.account_id ? n(p.account_id) : null, { gray: String(vmeta.thumbGray ?? "") || null, phash: String(vmeta.framePhash ?? "") || null });
   // 비전이 결정론 축(safe_area·frames_not_blank)과 겹치면 «둘 중 실패»를 채택 — 비전 불능이면 결정론만
   const byKey = new Map<string, JudgeAxis>();
   for (const a of det.axes) byKey.set(a.key, a);
   for (const a of vis.axes) { const cur = byKey.get(a.key); byKey.set(a.key, cur && !cur.pass ? cur : a); }
   byKey.set("similarity", sim);
-  if (vis.blind) { for (const k of ["text_broken", "black_margin"]) if (!byKey.has(k)) byKey.set(k, axis(k, true, VISION_BLIND_REASON)); }
+  // [R7 §1.5] 비전이 못 돌았으면 그 축은 **보류**다 — 종전엔 사유만 달고 초록으로 보였다(AC-33 «없음»을 «괜찮음»으로 접지 않는다).
+  if (vis.blind) { for (const k of ["text_broken", "black_margin"]) if (!byKey.has(k)) byKey.set(k, pendingIf(axis(k, true, VISION_BLIND_REASON), true)); }
   const axes = ["hook_first", "safe_area", "reading_time", "text_broken", "black_margin", "frames_not_blank", "cut_rhythm", "forbidden", "disclosure", "duration_fit", "similarity"].map((k) => byKey.get(k)).filter((a): a is JudgeAxis => !!a);
   const fails = axes.filter((a) => !a.pass);
   const grade: JudgeGrade = fails.some((a) => a.grade === "P0") ? "P0" : fails.some((a) => a.grade === "P1") ? "P1" : fails.length ? "P2" : "P2";

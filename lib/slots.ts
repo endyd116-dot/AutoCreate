@@ -124,7 +124,7 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
   // ★C4 fix: 건너뛴(skipped) 슬롯도 «이미 있다»로 센다 — 빼면 다음 roll 이 사용자가 건너뛴 날을 되살린다(AC-2 «주 0회로 뒀는데 계속» 계열).
   const have = new Set(existing.filter((e) => e.rule_id).map((e) => `${n(e.rule_id)}:${String(e.d).slice(0, 10)}`));
   const takenBy = new Map<string, Date[]>();   // `${channel}:${date}` → 시각
-  for (const e of existing) { if (String(e.status) === "skipped") continue; const at = utcDate(e.publish_at); if (!at) continue; const k = `${e.channel}:${String(e.d).slice(0, 10)}`; takenBy.set(k, [...(takenBy.get(k) ?? []), at]); }   // 건너뛴 슬롯은 시각을 점유하지 않는다
+  for (const e of existing) { if (String(e.status) === "skipped" || String(e.status) === "rejected") continue; const at = utcDate(e.publish_at); if (!at) continue; const k = `${e.channel}:${String(e.d).slice(0, 10)}`; takenBy.set(k, [...(takenBy.get(k) ?? []), at]); }   // [P1R7 B3] 버린(rejected) 자리도 건너뛴(skipped) 자리와 같이 — 그 시각을 점유하지 않는다
   const accounts = await q(sql`SELECT id, golden_hours FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
   const golden = new Map(accounts.map((a) => [n(a.id), Array.isArray(a.golden_hours) ? (a.golden_hours as unknown[]).map(Number) : null]));
   let created = 0, checked = 0;

@@ -203,7 +203,9 @@ export default async (req: Request): Promise<Response> => {
       if (!["in_review", "draft", "failed", "scheduled", "approved"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 버릴 수 없어요." }, 400);
       const reason = String(b.reason ?? "").trim().slice(0, 300);
       await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: reason || null })}, updated_at = NOW() WHERE id = ${id}`);
-      if (p.slot_id) await q(sql`UPDATE slots SET status = 'skipped', note = ${reason || "버림"}, updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
+      /* [P1R7 B3] 자리는 'rejected' — 'skipped' 는 «이날은 쉰다»(사용자가 편성표에서 건너뛴 날)라 둘을 한 어휘로 두면
+         편성표에서 «내가 버린 글»과 «쉬는 날»이 같은 칩으로 보인다(전수조사 §5B.6). 자리를 다시 만들지 않는 것은 둘 다 같다. */
+      if (p.slot_id) await q(sql`UPDATE slots SET status = 'rejected', note = ${reason || "버림"}, updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
       await writeAudit({ tenantId: tid, action: "piece_reject", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { reason } });
       return json({ ok: true, status: "rejected" });
     }

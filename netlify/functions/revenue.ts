@@ -23,7 +23,7 @@ import { kstDateStr, addDays } from "../../lib/best-time";
 import { summary, daily } from "../../lib/revenue/aggregate";
 import { upsertRevenueRows } from "../../lib/revenue/upsert";
 import { asSource, ensureSourceRow, listSourceRows, saveSourceCreds } from "../../lib/revenue/index";
-import { FRESHNESS_OF, type RevenueSource } from "../../lib/revenue/types";
+import { FRESHNESS_OF, DAY_BASIS_OF, DAY_BASIS_NOTE, type RevenueSource } from "../../lib/revenue/types";
 import { exchangeRevenueCode, googleAppConfigured, revenueAuthorizeUrl, signRevenueState, verifyRevenueState, type RevenueGoogleKind } from "../../lib/revenue/google-oauth";
 import { sql } from "drizzle-orm";
 
@@ -83,6 +83,9 @@ export default async (req: Request): Promise<Response> => {
         if (s.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
         if (s.lastError && s.status !== "connected") o.lastError = s.lastError;
         const cfg = s.config; if (cfg?.googleAccount) o.label = String(cfg.googleAccount);
+        /* [P1R7 B3 · §13.5] 그 매체가 세는 «하루»가 KST 가 아니면 화면이 밝힌다 — 우리는 날짜를 옮기지 않는다(매체 리포트와 숫자를 맞춘다). */
+        const basis = DAY_BASIS_OF[s.source as RevenueSource]; const note = DAY_BASIS_NOTE[basis];
+        if (basis && basis !== "kst") { o.dayBasis = basis; if (note) o.dayBasisNote = note; }
         return o;
       }) });
     }

@@ -13,6 +13,12 @@
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
   const ymd = (dayOffset) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); return d.toISOString().slice(0, 10); };
   const todayYmd = ymd(0);
+  const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
+  const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
+  const managedPer = qs.get("managed") === "account" ? "account" : "";   // [R7 §4.5] 계정당 요금 모양(서버가 per 를 실을 때)
+  const planKnob = qs.get("plan") || "";
+  const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
+  const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -27,7 +33,7 @@
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
     ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
     ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
-  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const o = { key, label, category, publishVia, status, connectMethod, configured }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const o = { key, label, category, publishVia, status: chOpen ? "active" : status, connectMethod, configured }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   const BODY_NAVER = `<p>주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. 세 번 실패하고 네 번째에 깨끗해진 방법을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -73,6 +79,7 @@
   const mailOff = qs.get("mail") === "0";
   const runnerDl = qs.get("runnerDl") || "";       // [러너 배포] 내려받기 손잡이 — plan(403 step:"plan") · none(503 step:"no_release") · 기본 = 10분 링크
   const otherPc = qs.get("otherPc") === "1";       // [러너 배포] 다른 PC 가 이 열쇠로 켜려 한 기기 1대(otherDeviceAt · 있을 때만 키가 온다)
+  const kindsKnob = qs.get("kinds") || "";   // [R7 §1.1] text = 영상 꺼짐 · none = 저장된 적 없음(kindsSet false) · 기본 = 글+영상
   const companyOff = qs.get("company") === "0";   // [P1R6 §1.3] 회사 정보 없음 → 약관 하단·영수증 «준비 중»
   const uploadKnob = qs.get("upload") || "";   // [P1R6 §1.1] 사진 첨부 — off = R2 미설정(not_configured) · fail = PUT 실패
   const autoOff = qs.get("autoOff") === "1";  // [실측] 자동 편성 꺼짐(규칙은 있음) — 홈·편성표 맨 위 한 줄      // [P1R6] 가입 인증 메일 실패 흉내(배너 · 다시 보내기)
@@ -180,7 +187,8 @@
       { id: 2, channel: "tistory", kind: "post", accountMode: "fixed", accountId: 2, every: "week", count: 2, weekdays: [2, 4], preferredHour: 13, active: true },
       { id: 3, channel: "youtube_shorts", kind: "shorts", accountMode: "auto", every: "week", count: 2, weekdays: [2, 5], preferredHour: 18, active: true }, // [P1R5] kind shorts 규칙(주 2회 · 편당 video_60)
     ],
-    settings: { autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
+    kindsSet: kindsKnob !== "none",   // [R7 §1.1] 온보딩을 안 거친 테넌트(?kinds=none) — 토글은 보이고 꺼짐
+    settings: { kinds: kindsKnob === "text" || kindsKnob === "none" ? ["text"] : ["text", "video"], autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: planKnob === "starter" && !keptAuto ? "require_confirm" : "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
     /* ── [P1R2] 러너 기기(계약 §2) · 발행함(§6) · 재로그인 잡(§7.2) · 알림함 ── */
     devices: fresh ? [] : [{ id: 901, name: "집 PC", kind: "own", online: runnerOn, bound: true, lastSeenAt: iso(now - 2 * 3600e3), version: "1.1.3", jobsWaiting: 2, caps: { ffmpeg: !noFfmpeg, ffmpegVersion: noFfmpeg ? undefined : "7.1" } },
@@ -224,6 +232,9 @@
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 7) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  /* [R7 §4.3] 라이브 표본처럼 «몇 자리에만» 사람말이 실려 있다(18건 중 5건) — 서버 slots.note 가 이제 화면으로 나온다 */
+  if (!S.slotNotes) { const cand = S.slots.filter((s) => s.date >= todayYmd).slice(0, 3); S.slotNotes = {};
+    if (cand[0]) S.slotNotes[cand[0].id] = "정지된 계정에서 넘겨받았어요"; if (cand[2]) S.slotNotes[cand[2].id] = "소재가 겹쳐 다른 소재로 바꿨어요"; }
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
   if (autoOff) { S.settings.autoSchedule = false; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
@@ -367,11 +378,15 @@
       if (S.reassigned) todo.push({ kind: "reassign", title: `@${S.reassigned.fromHandle} 계정이 정지됐어요`, desc: `글 ${S.reassigned.moved}건을 @${S.reassigned.toHandle} 로 옮겼어요`, link: "/app/accounts.html", tone: "warn" });
       if (review) { const one = review === 1 ? S.pieces.find((p) => p.status === "in_review") : null; todo.push({ kind: "review", title: `봐주실 글 ${review}건이 있어요`, desc: "내일 나가기 전에 확인해 주세요", link: one ? `/app/piece.html?id=${one.id}` : "/app/pieces.html", tone: "info" }); } // ★C fix: 1건이면 그 글로
       if (S.slots.some((s) => s.status === "no_topic" && s.date >= todayYmd)) todo.push({ kind: "slot_no_topic", title: "소재가 떨어졌어요", desc: "편성표에 자리는 있는데 쓸 소재가 없어요. «만들기»에서 소재를 새로 뽑아 주세요.", link: "/app/create.html", tone: "warn" }); // ★C fix: 소재는 create.html
-      if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: "네이버 블로그·티스토리·유튜브 중 하나면 돼요", link: "/app/accounts.html", tone: "info" });
+      if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: `${CHANNELS.filter((c) => c.status === "active").slice(0, 3).map((c) => c.label).join(" · ") || "지금 열린 채널"} 중 하나면 돼요`, link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
       return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length, produceLeadDays: S.settings.produceLeadDays }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
-    "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule; return { ok: true, settings: S.settings }; },
+    /* [R7 §1.1] GET = 지금 값 · POST = 병합. kinds 는 서버가 정규화한다(«글»은 항상 남는다 · 영상만 토글) */
+    "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule;
+      if (Array.isArray(b.kinds)) { S.settings.kinds = b.kinds.includes("video") ? ["text", "video"] : ["text"]; S.kindsSet = true; }
+      const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
+      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet }; },
     "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p })), trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
@@ -450,13 +465,16 @@
       inv.taxInvoice = { status: "requested", requestedAt: iso(Date.now()) }; S.taxProfile = { bizNo: b.bizNo, bizName: b.bizName, email: b.email };
       return { ok: true, taxInvoice: inv.taxInvoice }; },
     /* ── [P1R6] §3.1 관리형 러너 신청(플랜 게이트 · 요금은 서버 값) ── */
-    "managed-runner": (b) => { if (b && b.devices !== undefined) {
+    "managed-runner": (b) => { if (b && (b.devices !== undefined || b.accounts !== undefined)) {
         if (managedDeny) return { ok: false, reason: "plan_limit", step: "plan_feature", feature: "managedRunner", planKey: "starter", error: "대신 돌려주는 PC는 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.", status: 402 };
-        const n = Math.max(1, Math.min(5, Number(b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, requestedAt: iso(Date.now()) };
+        const n = Math.max(1, Math.min(5, Number(b.accounts ?? b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, accounts: n, requestedAt: iso(Date.now()) };
         S.notifications.unshift({ id: S.nextId++, kind: "setup", title: "대신 돌려주는 PC를 신청했어요", desc: "운영자가 확인하고 배정해 드려요 · 보통 하루 안에", link: "/app/runner.html", tone: "info", createdAt: iso(Date.now()) });
-        return { ok: true, status: S.managed.status, devices: n }; }
-      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: "none", assigned: 0, max: 5 };
-      return { ok: true, eligible: true, price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5 }; },
+        return { ok: true, status: S.managed.status, devices: n, accounts: n, ...(managedPer === "account" ? { per: "account" } : {}) }; }
+      /* [R7 §4.5] ?managed=account = 사장님 결정 4 모양(계정당 월요금 · 프록시 포함) — 서버가 per:"account" 를 실으면 화면이 그 단위로 그린다 */
+      const price = managedPer === "account" ? { amountKrw: 25000, vatKrw: 2500, totalKrw: 27500 } : { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 };
+      const perKey = managedPer === "account" ? { per: "account", accounts: S.managed.accounts || S.managed.devices } : {};
+      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price, status: "none", assigned: 0, max: 5, ...perKey };
+      return { ok: true, eligible: true, price, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5, ...perKey }; },
     /* ── [P1R6] §1.4 AM↔AC 코인 이전(키 없으면 준비 중 · 부분 성공 금지) ── */
     "coin-transfer": (b) => { const nw = notWritable(); if (nw) return nw;
       if (amOff) return { ok: false, step: "not_configured", error: "아직 준비 중이에요 · 곧 열려요", status: 200 };
@@ -472,6 +490,8 @@
     "faqs": () => ({ ok: true, faqs: [{ id: 1, q: "코인은 언제까지 쓸 수 있나요?", a: "충전한 코인은 1년, 플랜에 포함된 코인은 그달 말까지예요." }, { id: 2, q: "네이버·티스토리는 왜 내 PC 프로그램이 필요한가요?", a: "두 곳은 바깥에서 글을 넣는 길이 없어서 PC 프로그램이 대신 올려요." }, { id: 3, q: "환불은 어떻게 되나요?", a: "미사용 코인은 충전 후 7일 안에 환불돼요. 구독은 기간 말에 해지돼요." }] }),
     /* [P1R6 §1.1] 첨부 = presign PUT — 화면은 이 주소로 파일 바이트를 그대로 올린다(아래 fetch 가로채기가 R2 를 흉내) */
     /* [P1R6 §1.3] 공개 회사 정보 — 약관·개인정보·유료약관 하단이 읽는다(운영센터 «회사 정보» 한 출처) */
+    /* [R7 §4.4] 웹푸시 — 서버 몫(공개키·구독 저장)이 아직 없다. 모의도 «준비 중»으로 정직하게 답한다(있는 척하면 화면이 «켰어요»라고 거짓말한다) */
+    "push-key": () => ({ ok: false, status: 503, step: "not_configured", error: "기기 알림은 아직 준비 중이에요." }),
     "company": () => ({ ok: true, company: companyOff ? null : { name: "주식회사 오토크리에이트", ceo: "홍두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 1길 10, 5층", email: "help@autocreate.kr", phone: "02-1234-5678" } }),
     "support-upload-url": (b) => { if (uploadKnob === "off") return { ok: false, step: "not_configured", error: "사진 첨부는 아직 준비 중이에요. 글로 적어 주시면 돼요." };
       const ext = String(b.ext || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -562,12 +582,16 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
       const body = p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; },
     /* §5 규칙·슬롯 */
-    "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3 }),
+    /* [R7 §4.3 · B3] 코인 미리보기·자동 승인 판정 재료 — 포함분 0(체험)도 0 그대로 싣는다 */
+    "rules-list": () => ({ ok: true, rules: S.rules, settings: S.settings, coinsPerWeek: coinsPerWeek(), maxRules: 3, includedCoins: planKnob === "starter" ? 40 : 150, planKey: planKnob || "pro", autoApprove: planKnob !== "starter" }),
     "rules-save": (b) => { if ((b.rules || []).filter((r) => r.active !== false).length > 3) return err("limit", "이 요금제에서는 규칙을 3개까지 만들 수 있어요."); const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
-    "rules-settings": (b) => { for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
+    "rules-settings": (b) => { if (planKnob === "starter" && !keptAuto && b.reviewPolicy === "silence_approves") return { ok: false, status: 402, reason: "plan_limit", step: "plan_feature", feature: "autoApprove", planKey: "starter", error: "«조용하면 발행»은 Pro 요금제부터 쓸 수 있어요. 지금 요금제에서는 발행 전에 한 번 확인해 주세요." }; for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const list = S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => ({ ...s }));
       const skip = list.find((s) => s.date === todayYmd && !s.pieceId && ["planned", "topic_assigned", "assigned"].includes(s.status)); if (skip) skip.skipReason = "too_soon"; // [실측 정정] 오늘 만드는 시각(produceHour)이 지난 글 없는 자리 1개에만 서버가 too_soon 을 싣는다 · 나머지는 키 없음(화면 계산 금지)
+      /* [R7 §4.3 · B3] note = 서버가 그 자리에 적어 둔 사람말(있을 때만) · revenueKrw = 30일 수익(수집 행이 없으면 키 자체가 없다) */
+      for (const s of list) { const seed = S.slotNotes && S.slotNotes[s.id]; if (seed) s.note = seed;
+        if (s.status === "published" && s.pieceId) s.revenueKrw = (s.pieceId * 137) % 9000 + 800; }
       return { ok: true, slots: list }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
@@ -591,6 +615,38 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       S.pieces.push({ id, channel: s.channel, accountHandle: s.accountHandle, kind: "post", format: "story", title: s.topicTitle, status: "generating", stage: "writing", scheduledFor: s.publishAt, gateOk: false, createdAt: iso(Date.now()), topicTitle: s.topicTitle, regenCount: 0, bodyHtml: s.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true), _t0: Date.now() });
       s.pieceId = id; s.status = "producing"; return { ok: true, pieceId: id }; },
     /* ── [P1R2] §6 발행함 ── */
+    /* [R7 §1.3 · B-1] 영상 파일 내려받기 — 10분짜리 서명(파일 이름은 서명 안에 있다) · 아직 없으면 no_render + stage */
+    "piece-video": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id")));
+      if (!p) return { ok: false, status: 404, step: "not_found", error: "글을 찾을 수 없어요." };
+      const st = p.meta?.stage;
+      if (vdlKnob === "none" || p.kind !== "video" || st !== "done") return { ok: false, status: 404, step: "no_render", pieceId: p.id, stage: st || "script", error: "아직 영상 파일이 없어요. 다 만들어지면 여기서 받을 수 있어요." };
+      const url = URL.createObjectURL(new Blob([new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])], { type: "application/octet-stream" }));   // 실서버는 서명에 Content-Disposition 이 있어 «받아진다» — 모의는 octet-stream 으로 같은 효과
+      const day = todayYmd.replace(/-/g, "");
+      return { ok: true, pieceId: p.id, channel: p.channel, status: p.status, url, filename: `AC-${p.id}-${day}.mp4`, expiresInSec: 600, bytes: 8_400_000, durationSec: p.meta?.video?.seconds || 60, stage: st };
+    },
+    /* [R7 §1.3 · B-1] 앱에서 직접 올린 주소 적기 — 채널이 쓰는 호스트인지 보고(다른 채널이면 그 채널 이름으로 말한다) 발행함·편성표에 반영 */
+    "post-mark-published": (b) => { const nw = notWritable(); if (nw) return nw;
+      const p = S.pieces.find((x) => x.id === Number(b.pieceId));
+      if (!p) return { ok: false, status: 404, step: "not_found", error: "글을 찾을 수 없어요." };
+      if (["generating", "failed"].includes(p.status)) return { ok: false, status: 400, step: "status", error: "아직 만드는 중이에요. 다 만들어진 뒤에 적어 주세요." };
+      const raw = String(b.url || "").trim();
+      if (raw.length > 300) return { ok: false, status: 400, step: "url", reason: "too_long", error: "주소가 너무 길어요." };
+      let u; try { u = new URL(raw); } catch { return { ok: false, status: 400, step: "url", reason: "parse", error: "주소 모양이 아니에요." }; }
+      if (u.protocol !== "https:") return { ok: false, status: 400, step: "url", reason: "scheme", error: "https:// 로 시작하는 주소여야 해요." };
+      const HOSTS = { naver_blog: ["blog.naver.com"], naver_clip: ["blog.naver.com", "clip.naver.com", "tv.naver.com"], tistory: ["tistory.com"], blogger: ["blogspot.com"], wordpress: ["wordpress.com"], threads: ["threads.net"], instagram: ["instagram.com"], reels: ["instagram.com"], youtube_shorts: ["youtube.com", "youtu.be"], tiktok: ["tiktok.com"] };
+      const host = u.hostname.toLowerCase().replace(/^www\./, "");
+      const okHost = (HOSTS[p.channel] || []).some((h) => host === h || host.endsWith("." + h));
+      if (!okHost) { const other = Object.keys(HOSTS).find((k) => (HOSTS[k] || []).some((h) => host === h || host.endsWith("." + h)));
+        return { ok: false, status: 400, step: "url", reason: other ? "other_channel" : "domain",
+          error: other ? `${CH_LABEL[other] || other} 주소예요. 이 글은 ${CH_LABEL[p.channel] || p.channel}에 올린 주소가 필요해요.` : `${CH_LABEL[p.channel] || p.channel} 주소가 아니에요.` }; }
+      const clean = u.origin + u.pathname;   // 추적 꼬리표(utm_·si)는 서버가 떼어 준다
+      const exist = S.posts.find((x) => x.pieceId === p.id && x.externalUrl);
+      if (exist) return { ok: true, postId: exist.id, pieceId: p.id, channel: p.channel, already: true, url: exist.externalUrl, message: "이미 적어 둔 글이에요. 발행함에서 볼 수 있어요." };
+      const post = { id: S.nextId++, pieceId: p.id, channel: p.channel, accountHandle: p.accountHandle, title: p.title, externalUrl: clean, publishedVia: "manual", publishedAt: iso(Date.now()), status: "published", stats: {}, alive: true };
+      S.posts.unshift(post); p.status = "published"; p.externalUrl = clean;
+      const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "published";
+      return { ok: true, postId: post.id, pieceId: p.id, channel: p.channel, already: false, url: clean, slotId: sl?.id, message: "발행함에 넣었어요. 편성표에서도 «발행됨»으로 보여요." };
+    },
     "posts-list": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999", st = q.get("status") || "all";
       const day = (p) => p.publishedAt ? new Date(new Date(p.publishedAt).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : null;
       return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p })) }; },
@@ -690,7 +746,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

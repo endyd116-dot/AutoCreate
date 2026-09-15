@@ -43,6 +43,61 @@ export function judgeBlockers(gate: GateReport): { key: string; label: string; d
   return (gate.judge?.axes ?? []).filter((a) => !a.pass && a.grade === "P0").map((a) => ({ key: a.key, label: a.label, ...(a.detail ? { detail: a.detail } : {}) }));
 }
 
+/* ═══════════ [P1R7 B3] 링크 열림 검사 — **소프트**(경고) · DESIGN §4.2 «코드 게이트(…링크)» · AM `content-link-verify` 자리 ═══════════
+ *   🔴 **하드가 아니다**(HARD_GATE_KEYS 에 넣지 않는다): 링크가 안 열리는 건 우리 잘못이 아닐 수 있고(상대 사이트 점검 중·봇 차단),
+ *      하드로 걸면 그날 발행이 통째로 멈춘다. 그래서 «발행은 가되 검수 화면이 말해 주는» 자리다.
+ *   🔴 **리다이렉트는 정상이다** — 제휴 링크(쿠팡 딥링크)는 원래 여러 번 튄다. **최종 200 이면 통과**.
+ *   🔴 **못 잰 것은 실패가 아니다**(AC-9): 네트워크가 막힌 환경·타임아웃은 `pass:true` + «확인 못 함» 으로 둔다.
+ *      «없음»을 «깨졌음»으로 적으면 고객이 멀쩡한 글을 고치러 간다.
+ *   비용 상한: 링크 **3개까지 · 전체 3초**(병렬 · 크론이 200건을 도는 자리라 편당 상한이 곧 틱 예산이다).
+ */
+export const LINK_CHECK_KEY = "link_check" as const;
+const LINK_CHECK_MAX = 3;
+const LINK_CHECK_MS = 3000;
+
+/** 본문 HTML 에서 바깥 링크(http/https)만 · 중복 제거 · 앞에서 N개. */
+export function outboundLinks(html: string, max = LINK_CHECK_MAX): string[] {
+  const out: string[] = [];
+  for (const m of String(html || "").matchAll(/href="(https?:\/\/[^"]+)"/gi)) {
+    const u = m[1].replace(/&amp;/g, "&");
+    if (!out.includes(u)) out.push(u);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * HEAD(리다이렉트 따라감) → 최종 상태.
+ *   🔴 **HEAD 가 나쁘게 답하면 GET 으로 한 번 더 확인한 뒤에야 «죽었다»고 한다** — 멀쩡한 사이트가 HEAD 에 404·403 을 주는 일이 흔하다
+ *      (실측 2026-09-15: daum.net 은 HEAD 404 · GET 200). 한 번 더 묻지 않으면 고객이 멀쩡한 글을 고치러 간다 —
+ *      거짓 경고 한 번이 이 검사를 영영 못 믿게 만든다.
+ */
+async function linkAlive(url: string, signal: AbortSignal): Promise<{ ok: boolean; status: number | null }> {
+  try {
+    const head = await fetch(url, { method: "HEAD", redirect: "follow", signal });
+    if (head.status < 400) return { ok: true, status: head.status };
+    const get = await fetch(url, { method: "GET", redirect: "follow", signal });   // HEAD 를 싫어하는 서버 확인
+    return { ok: get.status < 400, status: get.status };
+  } catch { return { ok: false, status: null }; }   // 네트워크·타임아웃 = 판정 불가(호출자가 실패로 세지 않는다)
+}
+
+/** 링크 검사 1건 → GateCheck. 링크가 없으면 통과(검사할 것이 없다). */
+export async function checkLinks(html: string): Promise<GateCheck> {
+  const label = GATE_LABEL[LINK_CHECK_KEY];
+  const links = outboundLinks(html);
+  if (!links.length) return { key: LINK_CHECK_KEY, label, pass: true };
+  const signal = AbortSignal.timeout(LINK_CHECK_MS);
+  const results = await Promise.all(links.map(async (u) => ({ u, ...(await linkAlive(u, signal)) })));
+  const dead = results.filter((r) => r.status !== null && !r.ok);        // 상대가 «없다»고 답한 것만 실패
+  const unknown = results.filter((r) => r.status === null);              // 못 잰 것 — 실패로 세지 않는다(AC-9)
+  if (dead.length) {
+    const host = (u: string) => { try { return new URL(u).host; } catch { return u.slice(0, 40); } };
+    return { key: LINK_CHECK_KEY, label, pass: false, detail: dead.map((d) => `${host(d.u)}(${d.status})`).join(" · ") + " 가 안 열려요" };
+  }
+  if (unknown.length === results.length) return { key: LINK_CHECK_KEY, label, pass: true, detail: "지금은 확인하지 못했어요(네트워크)" };
+  return { key: LINK_CHECK_KEY, label, pass: true };
+}
+
 /** 본문 HTML 의 제휴 링크 수(쿠팡 도메인 + affiliate 클래스). */
 export function affiliateLinkCount(html: string): number {
   return (html.match(/class="affiliate"/g) || []).length + (html.match(/href="https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/g) || []).length;
@@ -68,7 +123,9 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
   if (!edited && blocks.length) {
-    return runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: m.adDisclosure === true }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: m.adDisclosure === true }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
+    const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
+    return { ...g, checks: [...g.checks, link], ok: g.ok && link.pass };
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
   const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || "") });
@@ -89,6 +146,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     if (k === "banned_words") { const b = findBannedWords(`${p.title}\n${plain}`, BLOG_EXTRA_BANNED); checks.push({ key: k, label: GATE_LABEL[k], pass: !b.length, ...(b.length ? { detail: b.join(", ") } : {}) }); continue; }
     checks.push(from);
   }
+  checks.push(await checkLinks(html));   // [P1R7 B3] 소프트 링크 검사(HTML 정본 경로도 같은 한 벌)
   return { ok: checks.every((x) => x.pass), checks, rewritten: false };
 }
 

@@ -6,7 +6,7 @@
 <title>홈 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=9">
+<link rel="stylesheet" href="/css/ac.css?v=11">
 </head>
 <body>
 <div class="shell">
@@ -29,7 +29,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=7"></script>
+<script src="/js/ui.js?v=8"></script>
 <script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
@@ -71,7 +71,9 @@
   // 해야 할 일
   const todo = UI.$("#todo");
   if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;
-  else todo.innerHTML = r.todo.map((t) => `<a class="row tap" href="${t.link}">${UI.kindMark(t.kind, t.tone)}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.desc)}</span></div>${UI.chev}</a>`).join("");
+  /* [R7 §1.4] 서버가 주는 count(몇 건인지)·pieceId(1건이면 그 글로 바로) 를 그대로 쓴다 — 화면이 세거나 고르지 않는다 */
+  else todo.innerHTML = r.todo.map((t) => { const href = t.pieceId ? `/app/piece.html?id=${t.pieceId}` : t.link;
+    return `<a class="row tap" href="${href}">${UI.kindMark(t.kind, t.tone)}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.desc)}</span></div>${t.count > 1 ? `<span class="pill ${t.tone === "warn" || t.tone === "danger" ? "warn" : "off"}">${UI.num(t.count)}건</span>` : ""}${UI.chev}</a>`; }).join("");
   // 알림 안 읽음 표시(종)
   if (r.unread) { const bell = UI.$(".appbar .ic"); if (bell) { bell.style.position = "relative"; bell.insertAdjacentHTML("beforeend", '<span class="dot danger" style="position:absolute;top:7px;right:7px"></span>'); bell.setAttribute("aria-label", `알림 ${r.unread}개`); } }
   // 오늘 편성
