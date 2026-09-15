@@ -5,7 +5,9 @@
  *   POST /api/ops-refund { orderNo, amountKrw?, reason? } → 코인 주문(AC-COIN-) = lib/billing/coin-refund(미사용분 비례 · 회수) · 구독 주문 = resolveRefund(부분·전액) → KICC 취소 → refunded_krw
  *   GET  /api/ops-billing-keys?q&page                     → { ok, keys:[BillingKey], total, page }
  *   GET  /api/ops-receivables                             → { ok, receivables:[Receivable], total, overdueKrw }   실패 뒤 아직 안 걷힌 구독 청구(테넌트별 합)
- *   POST /api/ops-tax-invoice { invoiceId, kind?:"tax_invoice"|"cash_receipt", note? } → 요청 기록(tax_doc_requested_at · detail.taxDoc) — 실발급은 KICC 키 뒤
+ *   POST /api/ops-tax-invoice { invoiceId, kind?:"tax_invoice"|"cash_receipt", note? } → 요청 기록(tax_status requested · tax_doc_requested_at · detail.taxDoc)
+ *   POST /api/ops-tax-invoice { invoiceId, status:"issued", url? }              → [P1R6 §1.2] 홈택스에서 발행한 뒤 «발행됨» 표시(tax_issued_at · tax_url · 고객 알림 · 감사) — 고객 화면 «발행됨» 필 + 문서 열기
+ *        행의 taxInvoice{ status, requestedAt?, issuedAt?, url? } · taxRequestedAt(운영 화면 키) 로 보인다.
  *   GET  /api/ops-payment-settings                        → { ok, payment:{ keyinEnabled, keyinLabel, keyinNotice }, keyinMidConfigured, mode }   (§1.6 결제 라인 토글)
  *   POST /api/ops-payment-settings { keyinEnabled?, keyinLabel?, keyinNotice? } → 저장 + 감사(high). 🔴 MID·secret 값 자체는 응답·감사에 싣지 않는다(등록 여부 boolean 만).
  *   🔴 돈 계산은 billing-math(resolveRefund) · 금액 3개(amount·vat·total) 따로 · 청구 상태 갱신은 applyChargeResult 한 벌(재시도도 chargeTenant 를 통해).
@@ -26,6 +28,7 @@ import { routeOfMid, isKeyinMidConfigured, getKiccConfig } from "../../lib/kicc"
 import { paymentPolicy } from "../../lib/pay-route";
 import { readOpsSetting, writeOpsSetting } from "../../lib/ops/settings";
 import { kstMonthRange, pageOf, within } from "../../lib/ops/period";
+import { taxInvoiceOf, markTaxIssued } from "../../lib/billing/tax";
 
 export const config = { path: ["/api/ops-invoices", "/api/ops-invoice-retry", "/api/ops-refund", "/api/ops-billing-keys", "/api/ops-receivables", "/api/ops-tax-invoice", "/api/ops-payment-settings"] };
 const n = (v: unknown) => Number(v || 0);
@@ -49,7 +52,9 @@ function invoiceRow(r: Record<string, unknown>): Record<string, unknown> {
   if (r.plan_key) o.planKey = String(r.plan_key);
   if (r.last_error) o.lastError = String(r.last_error).slice(0, 200);
   if (r.pg_mid) o.payRoute = routeOfMid(String(r.pg_mid));   // 어느 결제 라인이었나(§1.6 · MID 값은 싣지 않는다)
-  const td = iso(r.tax_doc_requested_at); if (td) o.taxDocRequestedAt = td;
+  const td = iso(r.tax_doc_requested_at); if (td) { o.taxDocRequestedAt = td; o.taxRequestedAt = td; }   // taxRequestedAt = 운영 화면(public/ops/billing.html)이 읽는 이름
+  o.taxInvoice = taxInvoiceOf(r);   // [P1R6 §1.2] 고객 화면과 같은 모양
+  if (r.tax_biz && typeof r.tax_biz === "object") o.taxBiz = r.tax_biz;   // 요청 시점 사업자 정보 { bizNo, bizName, email }
   return o;
 }
 
@@ -193,18 +198,23 @@ export default async (req: Request): Promise<Response> => {
 
     /* ── 세금계산서/현금영수증 요청 기록 ── */
     if (path.endsWith("/ops-tax-invoice")) {
-      const b = await readJson<{ invoiceId?: number; kind?: string; note?: string }>(req);
+      const b = await readJson<{ invoiceId?: number; kind?: string; note?: string; status?: string; url?: string }>(req);
       const id = n(b.invoiceId); if (!id) return badRequest("invoiceId");
+      if (b.status === "issued") {   // [P1R6 §1.2] «발행됨» 처리
+        const r = await markTaxIssued(id, { url: b.url, actorId: o.ops.oid, ip });
+        if (!r.ok) return json({ ok: false, error: r.error, step: r.step }, r.status ?? 400);
+        return json({ ok: true, invoiceId: r.invoiceId, taxInvoice: r.taxInvoice, issued: true });
+      }
       const kind = b.kind === "cash_receipt" ? "cash_receipt" : "tax_invoice";
       const [inv] = await q(sql`SELECT id, tenant_id, status, detail FROM invoices WHERE id = ${id}`);
       if (!inv) return json({ ok: false, error: "인보이스가 없어요.", step: "not_found" }, 404);
       if (String(inv.status) !== "paid") return badRequest("결제된 인보이스만 요청할 수 있어요.", "status");
       const taxDoc = { kind, requestedBy: o.ops.oid, note: String(b.note ?? "").slice(0, 300), status: "requested" };
-      await q(sql`UPDATE invoices SET tax_doc_requested_at = COALESCE(tax_doc_requested_at, NOW()), detail = COALESCE(detail, '{}'::jsonb) || ${jsonb({ taxDoc })}, updated_at = NOW() WHERE id = ${id}`);
+      await q(sql`UPDATE invoices SET tax_status = CASE WHEN tax_status = 'issued' THEN tax_status ELSE 'requested' END, tax_doc_requested_at = COALESCE(tax_doc_requested_at, NOW()), detail = COALESCE(detail, '{}'::jsonb) || ${jsonb({ taxDoc })}, updated_at = NOW() WHERE id = ${id}`);
       const [chk] = await q(sql`SELECT jsonb_typeof(detail) AS t FROM invoices WHERE id = ${id}`);
       if (chk && chk.t !== "object") console.error("[ops-billing] invoices.detail jsonb_typeof 이상", chk);   // PITFALLS #1
       await writeAudit({ tenantId: n(inv.tenant_id), action: "ops_tax_doc_request", actorType: "operator", actorId: o.ops.oid, ip, target: `invoice:${id}`, detail: taxDoc });
-      return json({ ok: true, invoiceId: id, taxDoc, issued: false, note: "실발급은 KICC 키 등록 뒤에 열려요 — 지금은 요청만 기록했어요." });
+      return json({ ok: true, invoiceId: id, taxDoc, issued: false, note: "요청을 기록했어요 — 홈택스에서 발행한 뒤 «발행됨» 으로 바꿔 주세요." });
     }
     return json({ ok: false, error: "not found" }, 404);
   } catch (err) { return jsonError("ops_billing", err); }

@@ -9,7 +9,7 @@
  *   POST /api/billing-key-start { probe? }                → { ok, url, form, orderNo } | { ok:false, step:"not_configured" }   // 🔴 빌키 = keyin MID 고정(등록돼 있으면 · 토글 무관 · lib/billing/billing-key.ts)
  *   GET|POST /api/billing-key-return …KICC 콜백          → 302 /app/plan.html?key=ok|fail&reason=…   🔴 KICC 는 **POST form** 으로 돌아온다(2026-09-15 실측) — 쿼리만 읽으면 못 받는다(lib/billing/callback.ts)
  *   POST /api/billing-key-remove                         → { ok, removed }
- *   GET  /api/invoices?year=                             → { ok, rows:[{ id, kind, period, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedKrw? }] }
+ *   GET  /api/invoices?year=                             → { ok, rows:[{ id, kind, period, amountKrw, vatKrw, totalKrw, status, paidAt?, refundedKrw?, taxInvoice{ status, requestedAt?, issuedAt?, url? } }] }   (한 장은 GET /api/invoice?id= · netlify/functions/invoice.ts)
  *   🔴 결제 경로는 본인만(denyIfImpersonating) · 부가세 별도(금액 3개 따로) · KICC 없으면 no-op 정직.
  */
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -24,6 +24,7 @@ import { requirePaidTerms } from "../../lib/billing/consents";
 import { keyinOption } from "../../lib/pay-route";
 import { readKiccCallback, callbackAudit } from "../../lib/billing/callback";
 import { parseBkOrder } from "../../lib/billing/billing-key";
+import { taxInvoiceOf } from "../../lib/billing/tax";
 import { writeAudit } from "../../lib/audit";
 import { redeemCoupon, validateCoupon } from "../../lib/billing/promotions";
 import { sql } from "drizzle-orm";
@@ -70,13 +71,14 @@ export default async (req: Request): Promise<Response> => {
     }
     if (path.endsWith("/invoices")) {
       const year = /^\d{4}$/.test(url.searchParams.get("year") || "") ? url.searchParams.get("year")! : null;
-      const rows = await q(sql`SELECT id, kind, period, amount, vat_krw, total_krw, status, paid_at, refunded_krw, order_no, plan_key, created_at FROM invoices WHERE tenant_id = ${tid}
+      const rows = await q(sql`SELECT id, kind, period, amount, vat_krw, total_krw, status, paid_at, refunded_krw, order_no, plan_key, created_at, tax_status, tax_doc_requested_at, tax_issued_at, tax_url FROM invoices WHERE tenant_id = ${tid}
         ${year ? sql`AND to_char(COALESCE(paid_at, created_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul', 'YYYY') = ${year}` : sql``} ORDER BY id DESC LIMIT 200`);
       return json({ ok: true, rows: rows.map((r) => {
         const o: Record<string, unknown> = { id: n(r.id), kind: String(r.kind), period: String(r.period), amountKrw: n(r.amount), vatKrw: n(r.vat_krw), totalKrw: n(r.total_krw) || n(r.amount) + n(r.vat_krw), status: String(r.status), createdAt: utcDate(r.created_at)?.toISOString() ?? "" };
         const pa = utcDate(r.paid_at); if (pa) o.paidAt = pa.toISOString();
         if (n(r.refunded_krw)) o.refundedKrw = n(r.refunded_krw);
         if (r.order_no) o.orderNo = String(r.order_no); if (r.plan_key) o.planKey = String(r.plan_key);
+        o.taxInvoice = taxInvoiceOf(r);   // [P1R6 §1.2] { status:none|requested|issued, requestedAt?, issuedAt?, url? }
         return o;
       }) });
     }

@@ -22,6 +22,7 @@ import { vatOf, subscriptionAfterDiscount, prorateUpgradeSupply, dunningSchedule
 import { grantIncluded } from "./coin-ledger";
 import { createTicket } from "./cs";
 import { pendingKrwCoupon, markCouponConverted, validateCoupon } from "./billing/promotions";
+import { rewardReferralOnPaid } from "./referral";
 import { jsonb, utcDate } from "./db-util";
 import { planOf, loadPlans, type PlanDef } from "./plans";
 
@@ -169,8 +170,9 @@ export async function applyChargeResult(tid: number, r: ChargeOutcome, now = new
     const plan = await planOf(r.planKey);
     const g = await grantIncluded(tid, plan.limits.coinsIncluded, kstMonthOf(now));
     await markCouponConverted(tid, r.orderNo);   // 쿠폰 성과(전환) · krw 쿠폰은 1회 소진
+    const referral = await rewardReferralOnPaid(tid, { orderNo: r.orderNo, invoiceId: n(inv?.id) || null, source: `subscription:${r.source}` });   // [P1R6 §1.1] 피추천인 첫 유료 결제 → 양쪽 보상(멱등 · 절대 안 던진다)
     await writeAudit({ tenantId: tid, action: "billing_attempt", actorType: r.source === "ops" ? "operator" : "system", actorId: r.actorId ?? null, target: `invoice:${n(inv?.id)}`,
-      detail: { ok: true, source: r.source, planKey: r.planKey, cycle: r.cycle, period: r.period, supplyKrw: r.supplyKrw, vatKrw: r.vatKrw, totalKrw: r.totalKrw, orderNo: r.orderNo, pgTid: r.pgTid ?? null, includedGranted: g.granted, keepPeriod: !!r.keepPeriod } });
+      detail: { ok: true, source: r.source, planKey: r.planKey, cycle: r.cycle, period: r.period, supplyKrw: r.supplyKrw, vatKrw: r.vatKrw, totalKrw: r.totalKrw, orderNo: r.orderNo, pgTid: r.pgTid ?? null, includedGranted: g.granted, keepPeriod: !!r.keepPeriod, referral: referral.status } });
     return { ok: true, status: "active", planKey: r.planKey, invoiceId: n(inv?.id) || null, nextBillingAt: r.keepPeriod ? undefined : end.toISOString(), includedGranted: g.granted };
   }
 

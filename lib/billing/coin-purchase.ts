@@ -21,6 +21,7 @@ import { purchaseCoins, balance } from "../coin-ledger";
 import { applyBonusCoins } from "./promotions";
 import { jsonb } from "../db-util";
 import { activeBillingKey, tenantOwner } from "../subscription";
+import { rewardReferralOnPaid } from "../referral";
 import { coinOrderNo, findPack, packIdOfCode, parseCoinOrderNo, type CoinPack } from "./packs";
 import type { PayRoute } from "../kicc";
 
@@ -57,8 +58,10 @@ async function settle(tid: number, orderNo: string, pack: CoinPack, pgTid: strin
   const p = await purchaseCoins(tid, pack.coins, orderNo, { actorId, reason: `코인 충전 ${pack.coins.toLocaleString("ko-KR")}개(₩${(pack.krw + vatOf(pack.krw)).toLocaleString("ko-KR")} · 유효 1년)` });
   // 이벤트 보너스(계약 §2.1 ops-promotions bonus_coin · ref bonus:{orderNo} 멱등) — 충전이 실제로 기입된 뒤에만.
   const bonus = p.already ? { bonus: 0, promoId: null } : await applyBonusCoins(tid, orderNo, pack.id, pack.coins, actorId);
-  await writeAudit({ tenantId: tid, action: "coin_purchase", actorType: actorId ? "user" : "system", actorId, target: `order:${orderNo}`, detail: { packId: pack.id, coins: pack.coins, krw: pack.krw, vatKrw: vatOf(pack.krw), pgTid, granted: p.granted, already: p.already, invoiceId, bonus: bonus.bonus } });
-  return { balance: bonus.bonus ? (await balance(tid)).balance : p.balance, invoiceId, already: p.already, bonus: bonus.bonus };
+  // [P1R6 §1.1] 코인 충전도 «유료 결제» — 피추천인의 첫 결제면 양쪽 추천 보상(멱등 · 절대 안 던진다). 재정산(already)엔 부르지 않는다.
+  const referral = p.already ? null : await rewardReferralOnPaid(tid, { orderNo, invoiceId, source: "coin" });
+  await writeAudit({ tenantId: tid, action: "coin_purchase", actorType: actorId ? "user" : "system", actorId, target: `order:${orderNo}`, detail: { packId: pack.id, coins: pack.coins, krw: pack.krw, vatKrw: vatOf(pack.krw), pgTid, granted: p.granted, already: p.already, invoiceId, bonus: bonus.bonus, referral: referral?.status ?? null } });
+  return { balance: bonus.bonus || referral?.status === "rewarded" ? (await balance(tid)).balance : p.balance, invoiceId, already: p.already, bonus: bonus.bonus };
 }
 
 export async function startCoinPurchase(tid: number, packId: unknown, opts: { actorId: number; userAgent?: string | null; returnBase?: string; route?: PayRoute }): Promise<StartResult> {
