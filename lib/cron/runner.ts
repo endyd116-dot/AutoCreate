@@ -40,6 +40,8 @@ import { csAutoTicketStep } from "./cs-auto-ticket";
 import { runnerCanaryStep } from "./runner-canary";
 import { aiModelWatchStep } from "./ai-model-watch";
 import { tenantPurgeStep } from "./tenant-purge";
+import { slotRenewStep } from "./slot-renew";
+import { pushFanoutStep } from "./push-fanout";
 import { coinReconcileStep } from "./coin-reconcile";
 
 /**
@@ -66,7 +68,9 @@ export const STEPS: AnyStep[] = [
   aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
   coinReconcileStep,   // hourly(월 06:00 KST 주 1회 · 전역 1잠금) · 코인 원장 대조 — 어긋난 행 있을 때만 감사(P1R7 B3)
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
+  slotRenewStep,       // hourly(05:00 KST 게이트 = 하루 1회) · **global** — 계정 슬롯 IP 배정·갱신 차감·쉼/복구(P1R7 §3.6)
   publisherStep,       // 5m · due 발행
+  pushFanoutStep,      // 5m · **global** — 알림함 새 행을 기기 푸시로(문구 한 출처 · VAPID 없으면 표시만 · R7 메인 발주)
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
   reapStep,            // 5m · 러너 잡 타임아웃 회수
 ];

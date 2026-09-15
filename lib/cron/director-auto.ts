@@ -20,6 +20,7 @@ import { contractFor, pickFormat, defaultImageCount, type FormatKey, type Writin
 import { coinCostOf } from "../coin-table";
 import { toTopic, type Topic } from "../topics";
 import { assignAccount, goalOf, type Affiliate, type PieceSpec } from "../director";
+import { pausedAccountIds } from "../account-slots";
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -59,7 +60,10 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
   const topic = toTopic(trow);
   if (!["candidate", "picked"].includes(topic.status)) return { ok: false, step: "topic_state", error: "이미 쓴 소재예요." };
 
-  const accounts = await listAccounts(tid);
+  /* [P1R7 §3.6] 코인이 모자라 «쉬는» 계정 슬롯의 계정은 자동 편성에서 뺀다 — 그 계정만 쉬고 나머지는 그대로 돈다.
+     🔴 사람이 만드는 경로(director.propose)는 막지 않는다(고객이 직접 누르는 건 자기 판단). */
+  const paused = new Set(await pausedAccountIds(tid));
+  const accounts = (await listAccounts(tid)).filter((a) => !paused.has(a.id));
   let acc: AccountRow | null = null;
   if (slot.accountId) {
     const fixed = accounts.find((a) => a.id === slot.accountId) ?? null;

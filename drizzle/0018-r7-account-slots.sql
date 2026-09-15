@@ -25,3 +25,9 @@ CREATE INDEX IF NOT EXISTS account_slots_due_idx ON account_slots(expires_at) WH
 -- 한 계정에 슬롯 하나 · 한 IP 에 슬롯 하나(연좌제 방지 = B2 accounts_proxy_uniq 와 같은 규율)
 CREATE UNIQUE INDEX IF NOT EXISTS account_slots_account_uniq ON account_slots(account_id) WHERE account_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS account_slots_proxy_uniq ON account_slots(proxy_id) WHERE proxy_id IS NOT NULL;
+
+-- ── 기간 카운터(2026-09-15 스모크에서 잡은 구멍 2개의 최종 수리) ──
+--   멱등 키를 «달(YYYYMM)» 로 하면 31일 달의 1일 구매가 같은 달 31일 갱신과 겹쳐 **한 달치를 공짜로** 준다.
+--   «날짜(YYYYMMDD)» 로 해도 같은 날 안에서 개시·복구가 겹치면 이미 받은 키를 다시 만나 **안 받고 재개**된다.
+--   그래서 기간에 **번호**를 붙인다: ref = `slot:{id}:{periods_charged+1}` — 기간마다 유일하고, 재시도는 같은 번호라 멱등이다.
+ALTER TABLE account_slots ADD COLUMN IF NOT EXISTS periods_charged integer NOT NULL DEFAULT 0;

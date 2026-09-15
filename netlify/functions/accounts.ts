@@ -19,6 +19,7 @@ import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit as planLimit, requireChannel } from "../../lib/plans";
 import { recordConsents, hasConsent } from "../../lib/billing/consents";
+import { attachAccountToSlot } from "../../lib/account-slots";
 import { encryptObj, credsEncConfigured } from "../../lib/creds-crypto";
 import { q, listAccounts, getAccount, listChannels, connectMethodOf, isChannel, type ChannelKey } from "../../lib/accounts";
 import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUrl, exchangeCode } from "../../lib/oauth-providers";
@@ -109,7 +110,8 @@ export default async (req: Request): Promise<Response> => {
       let id = await upsertAccount(st.tid, st.channel, handle, ex.token.displayName || null, "oauth", "active");
       if (id === null) { const [row] = await q(sql`SELECT id FROM accounts WHERE tenant_id = ${st.tid} AND channel = ${st.channel} AND handle = ${handle}`); id = n(row?.id); await q(sql`UPDATE accounts SET status = 'active', last_error_kind = NULL, updated_at = NOW() WHERE id = ${id}`); }
       await saveCreds(st.tid, id, "oauth", { ...ex.token }, ex.token.expiresAt);
-      await writeAudit({ tenantId: st.tid, action: "account_add", actorType: "user", actorId: st.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel: st.channel, handle, method: "oauth" } });
+      const oslot = await attachAccountToSlot(st.tid, id, st.uid);   // [P1R7 §3.6] 산 슬롯이 있으면 붙인다(세션 연결과 같은 규칙)
+      await writeAudit({ tenantId: st.tid, action: "account_add", actorType: "user", actorId: st.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel: st.channel, handle, method: "oauth", slotId: oslot?.id ?? null } });
       return back(`connected=${st.channel}`);
     } catch (err) { console.error("[accounts-oauth-return]", err); return back("error=server"); }
   }
@@ -161,8 +163,9 @@ export default async (req: Request): Promise<Response> => {
         const id = await upsertAccount(tid, channel as ChannelKey, handle, displayName, "session", "pending_login");
         if (id === null) return json({ ok: false, step: "duplicate", error: "이미 연결한 계정이에요." }, 409);
         await saveCreds(tid, id, "password", { loginId, password });
-        await writeAudit({ tenantId: tid, action: "account_add", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel, handle, method: "session" } });
-        return json({ ok: true, account: await getAccount(tid, id) }, 201);
+        const slot = await attachAccountToSlot(tid, id, auth.user.uid);   // [P1R7 §3.6] 산 슬롯이 있으면 이 계정에 붙이고 IP 배정(B2)·첫 차감을 시도한다
+        await writeAudit({ tenantId: tid, action: "account_add", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel, handle, method: "session", slotId: slot?.id ?? null } });
+        return json({ ok: true, account: await getAccount(tid, id), ...(slot ? { slot } : {}) }, 201);
       }
       // wordpress — App Password 인증 확인 후 active
       const siteUrl = s(b.siteUrl, 200).replace(/\/+$/, "");
