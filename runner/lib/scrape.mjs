@@ -108,13 +108,42 @@ export async function hasContent(page, minChars = 40) {
 /** 서비스별 404 문구 — 네이버·카카오 공통으로 흔한 것들. */
 export const NOT_FOUND_RE = /페이지 주소를 확인|페이지를 찾을 수 없|삭제된 것 같아요|존재하지 않는 페이지|요청하신 페이지|잘못된 접근|404 Not Found|Page not found/i;
 
+/**
+ * 🔴 «준비됐나»를 **조건으로** 판정한다 — 잠으로 대신하지 않는다(2026-09-15 · AC-57 의 같은 모양).
+ *
+ *   종전엔 `waitForTimeout(settleMs)` 한 번 자고 **딱 한 번** 봤다. 그래서 양쪽으로 갈라졌다(실측 · `scripts/verify-runner-wait.mts`):
+ *     · 1.2초 뒤에 그려지는 화면을 300ms 만에 재고 «내용 없음» → 채널이 «주소를 못 찾았어요(**우리 버그**)»라고
+ *       거짓 보고를 낸다. 화면은 멀쩡했다. (클립 채널에 «SPA 는 렌더가 느려 3.5초 준다»고 **상수를 키운 자국**이 남아 있다 —
+ *       상수를 키우는 건 이 문제를 미루는 것이지 푸는 게 아니다.)
+ *     · 대기값이 크면 **준비가 끝나도 끝까지 잔다**(실측: 8000 을 주면 8067ms). 잡마다 몇 초씩 크론 예산을 갉아먹는다.
+ *   ⇒ 조건이 참이 될 때까지 훑고, 되면 **즉시** 나오고, 안 되면 «안 됐다»고 말한다.
+ *
+ *   @returns 조건이 참이 됐나(true) / 시간 안에 안 됐나(false) — «못 기다렸다»를 «참»으로 바꾸지 않는다(AC-9).
+ */
+export async function waitFor(page, cond, maxMs, pollMs = 250) {
+  const deadline = Date.now() + Math.max(0, Number(maxMs) || 0);
+  for (;;) {
+    if (await cond(page).catch(() => false)) return true;
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
+    await page.waitForTimeout(Math.min(pollMs, left)).catch(() => {});
+  }
+}
+
+/**
+ * 🔴 «준비됐나»를 볼 때의 **최소 기다림**. 호출자가 더 짧은 값을 줘도 이만큼은 본다.
+ *   호출자의 값은 원래 «사람처럼 쉬는 시간»(봇탐지 완화)이라 **준비 판정의 예산으로는 너무 짧다** —
+ *   그 둘을 한 숫자로 쓰던 것이 위 두 실패의 뿌리다. 훑기는 준비되면 바로 나오므로 이 값을 키워도 평소 비용은 0 이다.
+ */
+export const READY_MIN_MS = 4000;
+
 /** 후보 주소를 차례로 열어 «로그인 요구»가 아니고 판정 함수가 true 인 첫 화면에 선다. */
 export async function gotoFirst(page, urls, accept, settleMs = 2500) {
   for (const url of urls) {
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 40_000 });
-      await page.waitForTimeout(settleMs);
-      const ok = await accept(page);
+      // `settleMs` 는 이제 «잘 시간»이 아니라 «**최대** 기다릴 시간»이다(준비되면 그 전에 나온다).
+      const ok = await waitFor(page, accept, Math.max(Number(settleMs) || 0, READY_MIN_MS));
       // 주소 실측을 위한 자취 — 후보마다 «어디로 갔고 무엇이 보였나»를 남긴다(RUNNER_DEBUG=1).
       if (process.env.RUNNER_DEBUG === "1") console.log(`    · gotoFirst ${url} → ${page.url().slice(0, 70)} · ${ok ? "도착" : "거절"} · "${(await visibleText(page, 120))}"`);
       if (ok) return url;

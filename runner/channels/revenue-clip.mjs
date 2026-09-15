@@ -31,7 +31,11 @@ export async function run({ ctx, job, shotKey }) {
     await shot(page, shotKey, `00-로그인(${how})`);
 
     // /signup 리다이렉트는 그 자체가 답(미가입)이라 내용 검사 없이 «도착»으로 본다 · 클립 SPA 는 렌더가 느려 3.5초 준다(실측).
-    const landed = await gotoFirst(page, REPORT_URLS, async (p) => !/nidlogin/i.test(p.url()) && (/\/signup/i.test(p.url()) || await hasContent(p)), 3500);
+    /* 🔴 종전엔 «클립 SPA 는 렌더가 느려 **3.5초 준다**»고 상수를 키워 뒀었다 — 그건 미루는 것이지 푸는 게 아니었다.
+       이제 `gotoFirst` 가 **조건이 참이 될 때까지 훑는다**(준비되면 즉시 나온다 · `scrape.mjs waitFor`).
+       그래서 그 3500 은 `READY_MIN_MS`(4000) 에 묻혀 **아무 일도 안 하는 인자**가 됐다 → 뺐다.
+       (읽으면 뭔가 하는 것처럼 보이는 죽은 인자를 남기지 않는다.) */
+    const landed = await gotoFirst(page, REPORT_URLS, async (p) => !/nidlogin/i.test(p.url()) && (/\/signup/i.test(p.url()) || await hasContent(p)));
     if (!landed) {
       /* 🔴 «못 들어갔다»는 둘이다(AC-10): 로그인으로 튕겼으면 계정 문제(login_fail) · 주소가 전부 404 면 **우리 문제**(parse —
          화면 주소를 아직 모른다 · 실측 필요). 2026-09-14 실측에서 후보 주소 3개가 모두 404 인데 «세션 만료»로 적었다 — 거짓 안내다. */
