@@ -1,6 +1,6 @@
 /* mock-ops.js — 운영센터(P1R4 계약 v4.0 §2)의 모양대로 가짜 응답을 돌려주는 개발용 층. mock.js 와 같은 규칙:
    🔴 `?mock=1` 이 없으면 즉시 return — 운영 코드 무접촉. 키 이름은 계약 글자 그대로(행 모양이 없는 메뉴는 A 제안 모양 · 메인 보고 2026-09-14).
-   손잡이: `?role=super_admin|admin|operator`(역할별 메뉴·403) · `?fx=0`(환율 없음 → aiCost.fxMissing) · `?fresh=1`(빈 상태). 상태는 sessionStorage(acMockOps). */
+   손잡이: `?role=super_admin|admin|operator`(역할별 메뉴·403) · `?fx=0`(환율 없음 → aiCost.fxMissing) · `?fresh=1`(빈 상태) · `?over=0`(안은 몫 0 → «아직 없어요») · `?ai=0`(AI 호출 0건). 상태는 sessionStorage(acMockOps). */
 (function () {
   const qs = new URLSearchParams(location.search);
   if (qs.get("mock") !== "1" || !window.UI) return;
@@ -14,6 +14,8 @@
   const role = ["super_admin", "admin", "operator"].includes(qs.get("role")) ? qs.get("role") : "super_admin";
   const fresh = qs.get("fresh") === "1";
   const fxMissing = qs.get("fx") === "0";
+  const overZero = qs.get("over") === "0";   // [R8 · E1] «우리가 안은 몫» 0 — 🔴 0 도 키가 온다(«없음» 이 아니다 · AC-9)
+  const aiZero = qs.get("ai") === "0";      // [R8 · E1] 이달 AI 호출 0건 — 분해 줄이 통째로 빈 경로
   const companyOff = qs.get("company") === "0";   // [P1R6 §1.3] 회사 정보 비어 있음(영수증·약관 «준비 중» 경로)
   const VAT = (a) => Math.round(a * 0.1);
   const inv = (id, tenantId, tenantName, kind, period, amountKrw, status, paidAgoH, extra = {}) => ({ id, tenantId, tenantName, kind, period, amountKrw, vatKrw: VAT(amountKrw), totalKrw: amountKrw + VAT(amountKrw), status, attempts: status === "failed" ? 2 : 1, ...(status === "paid" ? { paidAt: iso(now - paidAgoH * 3600e3), receiptUrl: `https://autocreate-endyd.netlify.app/r/${id}` } : {}), ...(status === "failed" ? { failedAt: iso(now - paidAgoH * 3600e3), nextRetryAt: iso(now + 20 * 3600e3) } : {}), ...extra });
@@ -141,7 +143,18 @@
       const subscriptionKrw = sum(paid.filter((i) => i.kind === "subscription"), (i) => i.amountKrw), coinKrw = sum(paid.filter((i) => i.kind === "coin"), (i) => i.amountKrw);
       const mrr = sum(S.plans, (p) => p.mrrKrw); const usd = 212.4;
       return { ok: true, revenue: { todayKrw: 5000, monthKrw: subscriptionKrw + coinKrw, subscriptionKrw, coinKrw }, mrr, arr: mrr * 12, signups: { today: 1, month: 9 }, trialToPaidPct: 21.4, activeTenants: S.tenants.filter((t) => t.status === "active").length, churn: { month: 2, pct: 2.8 },
-        coins: { soldKrw: coinKrw, consumed: 1840 }, aiCost: fxMissing ? { usd, fxMissing: true } : { usd, krw: Math.round(usd * 1390), fxMissing: false }, ...(fxMissing ? {} : { marginKrw: subscriptionKrw + coinKrw - Math.round(usd * 1390) }),
+        coins: { soldKrw: coinKrw, consumed: 1840 },
+        /* [R8 · E1] 🔴 서버가 내는 모양 그대로 — 분해까지 다 싣는다(화면이 다 그리는지 여기서 보인다).
+           `byPurpose`·`byModel` 은 **돈 순**, `byProvider` 는 🔴 **호출 수 순**(싼 것을 많이 부르는 쪽이 진짜 의존처다). */
+        aiCost: { ...(fxMissing ? { usd, fxMissing: true } : { usd, krw: Math.round(usd * 1390), fxMissing: false }),
+          calls: aiZero ? 0 : 4581,
+          byPurpose: aiZero ? [] : [{ purpose: "image", usd: 121.4, calls: 1820 }, { purpose: "content", usd: 58.2, calls: 1240 }, { purpose: "video_script", usd: 18.9, calls: 412 }, { purpose: "director", usd: 9.1, calls: 806 }, { purpose: "topics", usd: 4.8, calls: 303 }],
+          byModel: aiZero ? [] : [{ model: "gemini-2.5-flash-image", usd: 121.4, calls: 1820 }, { model: "gemini-2.5-flash", usd: 72.1, calls: 2349 }, { model: "gemini-2.5-pro", usd: 18.9, calls: 412 }],
+          byProvider: aiZero ? [] : [{ provider: "gemini", calls: 4581, usd: 212.4 }],
+          overPlan: overZero || aiZero ? { coins: 0, pieces: 0 } : { coins: 14, pieces: 9 },
+          excluded: aiZero ? { internalUsd: 0, syntheticUsd: 0, orphanUsd: 0, byoUsd: 0, byoCalls: 0, totalUsd: 0, calls: 0 }
+            : { internalUsd: 6.4, syntheticUsd: 1.02, orphanUsd: 0, byoUsd: 11.8, byoCalls: 260, totalUsd: 19.22, calls: 402 } },
+        ...(fxMissing ? {} : { marginKrw: subscriptionKrw + coinKrw - Math.round(usd * 1390) }),
         published: { byChannel: [{ channel: "naver_blog", n: 412 }, { channel: "tistory", n: 288 }, { channel: "blogger", n: 51 }, { channel: "wordpress", n: 23 }] }, revenueCollectedKrw: 8412300 }; },
     /* ── 고객 ── */
     "ops-tenants": (_b, q) => { const s = (q.get("q") || "").toLowerCase(), st = q.get("status") || "", pl = q.get("plan") || "";

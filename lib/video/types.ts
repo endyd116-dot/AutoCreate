@@ -186,7 +186,16 @@ export const PALETTE_LABELS_KO: Readonly<Record<string, string>> = {
   "sage green and sand": "세이지",
   "charcoal and coral": "차콜",
 };
-export function paletteLabelKo(palette: unknown): string { return PALETTE_LABELS_KO[String(palette ?? "")] ?? "기본"; }
+/**
+ * 🔴 [R8CLOSE · B2] 표에 없는 값은 «기본»이 아니라 **«따로 정한 색»**이다.
+ *   레퍼런스를 붙이면 `variant.palette` 에 **배워 온 색 문장**이 들어간다(`director.ts refPalette`).
+ *   그때 칩이 «기본»이라고 말하면 **고객이 보는 말과 그림이 어긋난다** — 기본값으로 굽는 줄 알지만 실제는 레퍼런스 색이다.
+ *   영문 프롬프트 문구를 그대로 보여 주지도 않는다(§13.0 «말은 사람말»).
+ */
+export function paletteLabelKo(palette: unknown): string {
+  const key = String(palette ?? "").trim();
+  return PALETTE_LABELS_KO[key] ?? (key ? "따로 정한 색" : "기본");
+}
 
 /** 훅 연출 사람말 이름 — 키 = `scenes.ts HOOK_TYPES`. */
 export const HOOK_LABELS_KO: Readonly<Record<string, string>> = {

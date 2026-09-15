@@ -24,6 +24,7 @@ import type { WritingContract, TopicGroup } from "./writing-contracts";
 import { lengthFor } from "./writing-contracts";   // [R8 §2.1] 계약 분량 폭(주제군 반영) — 정본 한 곳
 import { checkDisclosure, compensationOfMeta } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED, normalizeForBanScan, classifyBanned, hasEvidenceNear, findAdPointing } from "./banned-words";   // [R8-A §4] 3층 사전 + 근거 판정
+import { slangAllowedFor, toAgeBand } from "./slang-whitelist";   // [R8CLOSE-B1 §B3] 신조어 화이트리스트(연령대별 · 표는 그 파일 한 곳)
 import { isHealthTopic } from "./banned-categories";                                   // [R8-A §4] 건강·의료 소재면 효능 표현이 바로 위법
 import { SAME_BODY_SIMILARITY } from "./similarity";
 
@@ -196,6 +197,8 @@ export interface GateInput {
   contract: WritingContract;
   /** 페르소나 사정 어휘(프로필 값을 어절로 쪼갠 것). */
   personaTerms: string[];
+  /** [R8CLOSE-B1 §B3] 페르소나 연령대 — 신조어 화이트리스트가 이걸 본다(`lib/slang-whitelist.ts`). 모르면 생략(넓게 잡는다). */
+  ageBand?: string | null;
   /** [R8-A §4] 대가 3종 — `affiliate`(제휴) · `sponsored`(원고료·PPL) · `gift`(무상 제공). 하나라도 참이면 고지가 필요하다. */
   meta: { affiliate?: unknown; adDisclosure?: boolean; sponsored?: boolean; gift?: boolean } | null;
   /** 유사도(호출부가 계산 · 없으면 0). */
@@ -319,7 +322,9 @@ export function runGate(inp: GateInput): GateReport {
   /* [R8-A §4] 3층 사전 — hard(차단) · needs_proof(근거 없으면 차단) · tone(감점만 · 여기선 안 센다).
      문맥: 대가를 받은 글이거나 건강·의료 소재면 식품표시광고법 §8·의료법 §56 이 바로 걸린다. */
   const comp = compensationOfMeta(inp.meta as Record<string, unknown> | null);
-  const ban = classifyBanned(withTitle, { paid: comp.need, health: isHealthTopic(withTitle) });
+  /* [R8CLOSE-B1 §B3] 🔴 **신조어 화이트리스트를 검사가 실제로 본다**(표만 만들고 안 보면 이 칸은 안 닫힌다).
+     `tone` 층에만 먹는다 — 법 축은 연령대로 봐주지 않는다. */
+  const ban = classifyBanned(withTitle, { paid: comp.need, health: isHealthTopic(withTitle), allowSlang: slangAllowedFor(toAgeBand(inp.ageBand)) });
   const banHits = [...ban.hard, ...ban.needsProof];
   push("banned_words", banHits.length === 0, banHits.length ? banHits.slice(0, 4).map((h) => `«${h.word}»(${h.law})`).join(" · ") : undefined);
 

@@ -3,7 +3,7 @@
  *   🔴 HTML class 는 계약 §4B(v1.3) 글자 그대로: div.disclosure(첫 요소) · nav.toc>ol>li · p.summary · a.affiliate>img+span>b.name/em.price+span.go · div.adsense(빈 박스 · «광고» 라벨은 A CSS ::before)
  *   · dl.faq>dt/dd · p.tip · ul.check>li · p.tags · blockquote · hr · figure>img+figcaption · table · h2/h3/p/ul 표준. 러너는 이 class 로 에디터 실요소로 되돌린다(R2).
  */
-export type BlockType = "hook" | "para" | "h2" | "h3" | "quote" | "list" | "checklist" | "table" | "image" | "divider" | "tip" | "faq" | "hashtags" | "disclosure" | "adsense" | "toc" | "summary" | "affiliate";
+export type BlockType = "hook" | "para" | "h2" | "h3" | "quote" | "list" | "checklist" | "table" | "image" | "divider" | "tip" | "faq" | "hashtags" | "disclosure" | "adsense" | "toc" | "summary" | "affiliate" | "place";
 export interface Block {
   type: BlockType;
   text?: string;
@@ -16,6 +16,14 @@ export interface Block {
   /** [2026-09-15] 그림 생성용 묘사(영문 가능 · 사람·로고·글자 없는 장면) — 화면·발행에 **절대 나가지 않는다**. `alt` 는 여기서 짧게 파생한다. */
   prompt?: string;
   affiliate?: { productName: string; url: string; imageUrl?: string; price?: number };
+  /**
+   * [R8CLOSE-B1 §B4] **장소/링크 카드**(DESIGN §5C.3 네이버 블로그 시각 요소 「장소/링크카드」).
+   *   🔴 **에디터의 «장소» 카드가 아니다.** 러너 op 어휘에 장소 카드가 **없고**(`runner/channels/naver-blog.mjs` 실측 2026-09-16),
+   *      에디터에서 장소를 검색해 꽂는 것은 B7 «에디터 실제 요소»(R10)와 같은 일이다.
+   *      ⇒ 지금 우리가 **할 수 있는 길**로 내려앉힌다: 본문 링크 카드(HTML 채널) · 지도 링크 한 줄(네이버 러너).
+   *      `asCard:false` 가 그 사실을 적는 칸이다 — «장소 카드를 넣었다»고 말하면 그게 거짓말이다.
+   */
+  place?: { name: string; url?: string; address?: string; note?: string };
 }
 export interface RenderImage { url: string; caption?: string; alt?: string }
 
@@ -41,6 +49,15 @@ export function renderBlocksHtml(blocks: Block[], channel: string, images: Rende
         const rows = b.rows ?? []; if (!rows.length) break;
         const [head, ...body] = rows;
         out.push(`<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+        break;
+      }
+      /* [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 **링크가 없으면 아무것도 안 그린다**(빈 카드는 카드가 아니다). */
+      case "place": {
+        const p = b.place; if (!p?.name) break;
+        const inner = [`<strong>${esc(p.name)}</strong>`, p.address ? `<span class="addr">${esc(p.address)}</span>` : "", p.note ? `<span class="note">${esc(p.note)}</span>` : ""].filter(Boolean).join("");
+        out.push(p.url
+          ? `<aside class="place"><a href="${esc(p.url)}" rel="noopener">${inner}</a></aside>`
+          : `<aside class="place">${inner}</aside>`);
         break;
       }
       case "image": {
@@ -129,7 +146,7 @@ export function blocksCharCount(blocks: Block[]): number { return blocksToPlain(
 
 /** 블록 정규화 — 모델 출력의 느슨한 모양을 계약 모양으로. 모르는 type 은 para 로. */
 export function normalizeBlocks(raw: unknown): Block[] {
-  const TYPES = new Set<BlockType>(["hook", "para", "h2", "h3", "quote", "list", "checklist", "table", "image", "divider", "tip", "faq", "hashtags", "disclosure", "adsense", "toc", "summary", "affiliate"]);
+  const TYPES = new Set<BlockType>(["hook", "para", "h2", "h3", "quote", "list", "checklist", "table", "image", "divider", "tip", "faq", "hashtags", "disclosure", "adsense", "toc", "summary", "affiliate", "place"]);
   const list = Array.isArray(raw) ? raw : [];
   const out: Block[] = [];
   for (const x of list) {
@@ -143,6 +160,20 @@ export function normalizeBlocks(raw: unknown): Block[] {
     if (typeof o.caption === "string" && o.caption.trim()) b.caption = o.caption.trim();
     if (typeof o.prompt === "string" && o.prompt.trim()) b.prompt = o.prompt.trim().slice(0, 600);
     if (Number.isInteger(Number(o.imageIndex)) && o.imageIndex !== undefined && o.imageIndex !== null) b.imageIndex = Number(o.imageIndex);
+    /* [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 이 파싱이 없으면 모델이 내도 **조용히 버려진다**(블록 타입만 만들면 안 닫힌다).
+       `url` 은 http(s) 만 받는다: `javascript:` 가 본문 `<a href>` 로 나가면 그건 우리가 심는 구멍이다. */
+    if (o.place && typeof o.place === "object") {
+      const p = o.place as Record<string, unknown>;
+      const name = String(p.name ?? "").trim();
+      if (name) {
+        const url = String(p.url ?? "").trim();
+        b.place = { name: name.slice(0, 80),
+          ...(String(url).toLowerCase().startsWith("http://") || String(url).toLowerCase().startsWith("https://") ? { url: url.slice(0, 400) } : {}),
+          ...(String(p.address ?? "").trim() ? { address: String(p.address).trim().slice(0, 120) } : {}),
+          ...(String(p.note ?? "").trim() ? { note: String(p.note).trim().slice(0, 60) } : {}) };
+      }
+    }
+    if (type === "place" && !b.place) continue;                 // 이름 없는 장소 블록은 빈 카드다 — 버린다
     if (type === "para" && !b.text && !b.items) continue;
     if ((type === "list" || type === "checklist") && !b.items) continue;
     if (type === "table" && !b.rows) continue;

@@ -103,6 +103,13 @@ export interface BanContext {
   paid?: boolean;
   /** 건강·의료·식품 소재인가(`lib/banned-categories.ts isHealthTopic`). */
   health?: boolean;
+  /**
+   * [R8CLOSE-B1 §B3] 🔴 **이 계정에서 잡지 않을 요즘 말**(신조어 화이트리스트 · DESIGN §5C.4).
+   *   표는 `lib/slang-whitelist.ts` 한 곳이다 — 🔴 **여기로 import 하지 않고 낱말만 받는다**:
+   *   이 파일은 «순수 리프(임포트 0)»가 계약이고, 사전이 표를 끌어오면 그 계약이 깨진다.
+   *   🔴 `tone` 층에만 먹는다. 법(`hard`·`needs_proof`)은 **연령대로 봐주지 않는다** — 20대라고 «100% 보장»이 되지 않는다.
+   */
+  allowSlang?: readonly string[];
 }
 const LAW = {
   hard: "표시광고법 §5(실증 책임) · 절대적 표현",
@@ -131,7 +138,11 @@ export function classifyBanned(text: unknown, ctx: BanContext = {}): { hard: Ban
     if (hasEvidenceNear(text, w)) continue;                 // 근거와 함께 쓰였으면 통과(법이 허용한다)
     out.needsProof.push({ word: w, layer: "needs_proof", law: LAW.proof });
   }
-  for (const w of BANNED_TONE) if (has(w)) out.tone.push({ word: w, layer: "tone", law: LAW.tone });
+  /* [R8CLOSE-B1 §B3] 🔴 연령대에 맞는 요즘 말은 **과장 어투로 치지 않는다.**
+     이 줄이 없으면 다음 사람이 신조어를 한 줄 넣는 순간 20대 계정 글이 반려되고 재작성이 돌아 **돈이 두 배**가 된다
+     (2026-09-15 `visualMin.faq` 사고와 같은 모양 — 네이버 글 10편 중 8편 재작성). */
+  const allow = new Set((ctx.allowSlang ?? []).map((w) => normalizeForBanScan(w)).filter(Boolean));
+  for (const w of BANNED_TONE) if (has(w) && !allow.has(normalizeForBanScan(w))) out.tone.push({ word: w, layer: "tone", law: LAW.tone });
   return out;
 }
 

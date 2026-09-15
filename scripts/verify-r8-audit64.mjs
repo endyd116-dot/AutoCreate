@@ -217,9 +217,35 @@ const THREE_REST = [
     return [sameBriefOrAccount ? "🟠 일부" : "열림",
       "🔴 같은 brief **또는 같은 계정** 30일만 본다 — **다른 brief·다른 계정끼리는 안 본다**. 설계 §4.3 «계정 간 중복 0» 은 아직 반쪽"];
   }],
-  ["B2 페르소나 적합도 LLM", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/content-approve.ts"], /personaFit|적합도/).length), "0건"]],
-  ["B3 신조어 화이트리스트", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/banned-words.ts"], /slangWhitelist|신조어/).length), "0건"]],
-  ["B4 장소 카드", () => [yes(anyFile(["lib/blocks.ts", "lib/writing-contracts.ts"], /placeCard|장소 카드/).length), "0건"]],
+  /* 🔴 [2026-09-16 B-1] 보던 자리가 **틀렸다.** 적합도는 «다 쓴 글을 재는 것»(ai-tell-gate·content-approve)이 아니라
+     **«계정을 고르는 것»**(DESIGN §5.3-2 배정)이다. 엉뚱한 파일을 보고 있으면 진짜로 만들어도 영영 열림이고,
+     반대로 그 파일에 «적합도»라는 낱말만 스쳐도 닫힘이 된다(AC-78 의 다음 층 — 검사가 **엉뚱한 곳**을 본다).
+     ⇒ 판정기(`lib/persona-fit.ts`)가 있고 **두 경로가 다 배정에 쓰는가**로 바꾼다. 느슨해진 게 아니라 더 조인 것이다.
+     🔴 이름에 «LLM» 이 붙어 있지만 **LLM 은 일부러 안 붙였다**(메인 지시 · 돈이 두 배) — 글자로 재고 못 잰 축은 «못 쟀다»로 적는다. */
+  ["B2 페르소나 적합도", () => {
+    const has = inFile("lib/persona-fit.ts", /personaFitOf/);
+    const human = inFile("lib/director.ts", /assignAccount.accounts, ch, fit.bonus./);
+    const auto = inFile("lib/cron/director-auto.ts", /assignAccount.accounts, slot.channel, fit.bonus./);
+    return [yes(has && human && auto), has ? `판정기 ${has} · 사람 경로 ${human} · 자동 경로 ${auto}` : "0건"];
+  }],
+  /* 🔴 [2026-09-16 B-1] 종전 판정은 **주석에 «신조어»라는 낱말만 스쳐도 닫힘**이었다(두 파일 본문 검색).
+     표만 만들고 아무도 안 봐도 통과한다 — AC-69 가 말하는 «정의가 있나»식 검사다.
+     ⇒ ①표가 있고 ②검사가 본다(게이트가 allowSlang 을 넘긴다) ③프롬프트가 본다, **셋 다**로 조인다. */
+  ["B3 신조어 화이트리스트", () => {
+    const table = inFile("lib/slang-whitelist.ts", /SLANG_BY_AGE/);
+    const gate = inFile("lib/ai-tell-gate.ts", /allowSlang: slangAllowedFor/);
+    const prompt = inFile("lib/content-gen.ts", /slangPromptLine/);
+    return [yes(table && gate && prompt), table ? `표 ${table} · 검사 ${gate} · 프롬프트 ${prompt}` : "0건"];
+  }],
+  /* 🔴 [2026-09-16 B-1] 종전 판정은 주석에 «장소 카드»만 스쳐도 닫힘이었다(B3 와 같은 모양).
+     ⇒ ①블록 어휘에 있고 ②러너가 **실제로 내려앉히고** ③🔴 계약이 스스로 안 싸우는가(visualMin 에 안 넣었나), 셋으로 조인다.
+     ③ 이 없으면 2026-09-15 `visualMin.faq` 사고(네이버 글 10편 중 8편 재작성 · 돈 두 배)를 그대로 다시 낸다. */
+  ["B4 장소 카드", () => {
+    const block = inFile("lib/blocks.ts", /place.: . name: string/);
+    const runner = inFile("runner/lib/plan.mjs", /장소 카드는 아직 못 넣어서/);
+    const notForced = !inFile("lib/writing-contracts.ts", /visualMin: .[^}]*place/);
+    return [yes(block && runner && notForced), block ? `블록 ${block} · 러너 링크대체 ${runner} · visualMin 에 안 넣음 ${notForced}` : "0건"];
+  }],
   /* [R8CLOSE §B5 · B2 2026-09-16] 🔴 **낱말로 세면 주석만 있어도 «닫힘»이 된다**(AC-59).
      종전 `/연결글|threadChain|reply_to/` 는 «연결글은 아직 없다»라고 **적어 두기만 해도** 통과했다.
      이 칸이 묻는 건 두 가지고, 둘 다 **동작**이다:
@@ -241,7 +267,10 @@ const THREE_REST = [
     return [impl ? "닫힘" : "열림", impl ? "seo.ts 가 구조화 데이터를 낸다" : `계약 라벨에 «AEO» 글자만 있다(label=${label}) · seo.ts 구현 0`];
   }],
   ["B7 에디터 실제 요소", () => [yes(inFile("lib/writing-contracts.ts", /editorElements/), ), "0건"]],
-  ["B8 목표 매체 채널 선택", () => [yes(inFile("lib/director.ts", /targetChannel|목표 매체/), ), "0건"]],
+  /* 🔴 [2026-09-16 B-1] 설명줄이 판정을 안 따라가 «닫힘 … 0건» 이라는 모순을 찍고 있었다(B9 와 같은 뿌리).
+     하니스가 거짓말하면 다음 조사가 그걸 믿는다. */
+  ["B8 목표 매체 채널 선택", () => { const on = inFile("lib/director.ts", /targetChannel|목표 매체/);
+    return [yes(on), on ? "director.propose 가 targetChannelOrder 로 순서를 정하고 channelReason 을 남긴다" : "0건"]; }],
   ["B9 `images.heroNeeded` 실동작", () => {
     const written = anyFile(["lib/director.ts", "lib/cron/director-auto.ts"], /heroNeeded:/).length > 0;
     const readBy = anyFile(["lib/content-gen.ts", "lib/ai-image.ts", "netlify/functions/pieces.ts"], /heroNeeded/).length > 0;

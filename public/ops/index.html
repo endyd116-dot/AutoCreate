@@ -6,7 +6,7 @@
 <title>매출 · AutoCreate 운영센터</title>
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=20">
+<link rel="stylesheet" href="/css/ac.css?v=21">
 </head>
 <body class="ops">
 <div class="shell">
@@ -15,13 +15,30 @@
     <div class="appbar"><span class="ph"></span><span class="ttl">매출</span><span class="sp"></span></div>
 <div class="hl"><div class="say" id="say">이번 달</div><div class="num" id="rev">…</div><div class="tip" id="tip"></div></div>
 <div class="group"><div class="gt">구독 · 코인</div><div class="bars" id="bars"></div><div class="kv"><span class="k">AI 원가(이달)</span><span class="v" id="ai">—</span></div><div class="kv"><span class="k">마진</span><span class="v" id="margin">—</span></div></div>
+<!-- [R8 · E1 · B 계약 2026-09-16] 🔴 서버(`/api/ops-dashboard`)는 AI 원가를 **용도·모델·제공사·안은 몫·뺀 몫**으로 다 내는데
+     이 화면은 합계 한 줄(usd·krw·fxMissing)만 그렸다 — 「다 만들어 놓고 아무도 안 부른다」의 그 병.
+     🔴 **용도별이 맨 위**다: 합계만 보면 「글이 비싸다」는 오해가 난다(실측: 글 3편 $0.98 중 사진 18장이 $0.83 = 85%). -->
+<div class="group"><div class="gt">AI 원가 — 무엇에 썼나<span class="muted" style="font-weight:500">달러 기준</span></div>
+  <div class="bars ai" id="aiPurpose"></div>
+  <div class="kv"><span class="k">부른 횟수(이달)</span><span class="v" id="aiCalls">—</span></div>
+  <div class="kv"><span class="k">우리가 안은 몫</span><span class="v" id="aiOver">—</span></div>
+  <p class="muted" id="aiOverWhy" style="margin:0 16px 10px;font-size:12.5px;line-height:1.5"></p>
+  <p class="muted" id="aiExcluded" style="margin:0 16px 12px;font-size:12.5px;line-height:1.5"></p>
+</div>
+<div class="ops-two">
+  <div class="group"><div class="gt">모델별 — 무엇이 돈을 먹나</div><div class="bars ai" id="aiModel"></div></div>
+  <!-- 🔴 제공사별은 **호출 수** 로 줄 세워 온다(B). 돈으로 다시 정렬하지 않는다 — 「어디에 많이 기대고 있나」를 보는 값이라
+       싼 것을 많이 부르는 쪽이 진짜 의존처다(실측: gemini 5회 $0.005 가 anthropic 1회 $0.100 앞).
+       🔴 지금은 제공사가 하나뿐이라 늘 한 줄이다 — 그게 사실이니 「한 줄뿐이네」로 숨기지 않는다. -->
+  <div class="group"><div class="gt">제공사별 — 어디에 기대고 있나</div><div class="bars ai" id="aiProvider"></div></div>
+</div>
 <div class="group"><div class="gt">고객</div><div class="stat4" id="stat"></div></div>
 <div class="group"><div class="gt">발행 · 수익 회수</div><div class="bars" id="pub"></div><div class="kv"><span class="k">고객 수익 회수 총액(이달)</span><span class="v" id="crev">—</span></div><div class="kv"><span class="k">코인 판매 · 소비(이달)</span><span class="v" id="coins">—</span></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=25"></script>
-<script src="/js/ops.js?v=2"></script>
+<script src="/js/ops.js?v=3"></script>
 <script src="/js/mock-ops.js?v=1"></script>
 <script>
 (async () => {
@@ -37,6 +54,31 @@ UI.$("#bars").innerHTML = [["구독", rv.subscriptionKrw || 0], ["코인", rv.co
 const ai = r.aiCost || {};
 UI.$("#ai").innerHTML = ai.fxMissing ? `<span class="pill warn">원가 미환산</span> <span class="muted" style="font-weight:500">$${(ai.usd || 0).toFixed(2)} · 환율(FX_USD_KRW)을 넣어 주세요</span>` : `${UI.won(ai.krw || 0)} <span class="muted" style="font-weight:500">($${(ai.usd || 0).toFixed(2)})</span>`;
 UI.$("#margin").innerHTML = r.marginKrw == null ? `<span class="muted" style="font-weight:500">원가가 환산돼야 계산해요</span>` : `<b class="${r.marginKrw >= 0 ? "up" : ""}" style="color:${r.marginKrw >= 0 ? "var(--money-ink)" : "var(--ink)"}">${UI.won(r.marginKrw)}</b>`;
+/* ── [R8 · E1] AI 원가 분해 — 서버가 내는 값을 **다** 그린다 ────────────────────────────────
+   🔴 0 을 «없음» 으로 감추지 않는다(AC-9): 줄이 비면 «아직 없어요», 값이 0이면 0 을 적는다. */
+const usd = (v) => { const n = Number(v) || 0; return "$" + (n === 0 ? "0" : n < 0.01 ? n.toFixed(4).replace(/0+$/, "") : n.toFixed(2)); };
+/* 막대: `by` 로 길이를 재고(용도·모델은 돈 · 제공사는 호출 수) **서버가 준 순서 그대로** 그린다(다시 정렬하지 않는다). */
+const aiBars = (el, rows, name, by, val, empty) => {
+  const box = UI.$(el); if (!box) return;
+  if (!rows.length) { box.innerHTML = `<p class="muted" style="margin:2px 0 4px;font-size:13px">${empty}</p>`; return; }
+  const mx = Math.max(1, ...rows.map(by));
+  box.innerHTML = rows.map((x, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.esc(name(x))}</span><span class="track"><span class="fill" style="width:${Math.round((by(x) / mx) * 100)}%"></span></span><span class="v">${val(x)}</span></div>`).join("");
+};
+const calls = (x) => `<span class="muted">${UI.num(x.calls || 0)}회</span>`;
+aiBars("#aiPurpose", ai.byPurpose || [], (x) => OPS.aiPurpose(x.purpose), (x) => x.usd || 0, (x) => `<b>${usd(x.usd)}</b> · ${calls(x)}`, "이달 AI 호출이 아직 없어요");
+aiBars("#aiModel", ai.byModel || [], (x) => x.model || "(모름)", (x) => x.usd || 0, (x) => `<b>${usd(x.usd)}</b> · ${calls(x)}`, "아직 없어요");
+aiBars("#aiProvider", ai.byProvider || [], (x) => x.provider || "(모름)", (x) => x.calls || 0, (x) => `<b>${UI.num(x.calls || 0)}회</b> · ${usd(x.usd)}`, "아직 없어요");
+UI.$("#aiCalls").textContent = ai.calls == null ? "못 쟀어요" : `${UI.num(ai.calls)}회`;
+/* 🔴 «우리가 안은 몫» = 고객이 계획보다 AI 사진을 더 써서 **더 받지 않기로 한** 코인.
+   손실로만 읽히면 안 된다 — 이건 «스톡이 비어서 AI 가 다 구웠다» 는 **신호**라 재고를 채우라는 말이다. */
+const ov = ai.overPlan || {};
+UI.$("#aiOver").innerHTML = ov.coins > 0 ? `${UI.num(ov.coins)}코인 · ${UI.num(ov.pieces || 0)}편` : `<span class="muted" style="font-weight:500">아직 없어요</span>`;
+UI.$("#aiOverWhy").textContent = ov.coins > 0 ? "고객이 계획보다 AI 사진을 더 써서 더 받지 않은 몫이에요. 스톡 사진이 비어서 AI 가 다 구웠다는 뜻이라, 재고를 채우면 줄어요." : "";
+/* «왜 이 숫자가 작아 보이나» 의 답 — 🔴 숨긴 게 아니라 **가른 것**이다. */
+const ex = ai.excluded || {};
+UI.$("#aiExcluded").textContent = ex.totalUsd > 0 || ex.calls > 0
+  ? `여기서 가른 몫 ${usd(ex.totalUsd)}(${UI.num(ex.calls || 0)}회) — 우리 내부 집 ${usd(ex.internalUsd)} · 하니스 ${usd(ex.syntheticUsd)} · 주인 없는 집 ${usd(ex.orphanUsd)} · 고객이 자기 키로 쓴 몫 ${usd(ex.byoUsd)}(${UI.num(ex.byoCalls || 0)}회). 위 숫자는 우리가 실제로 낸 돈만이에요.`
+  : "가른 몫은 없어요 — 위 숫자가 이달 AI 원가 전부예요.";
 const st = (k, v) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`;
 UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", `${r.trialToPaidPct ?? 0}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", `${r.churn?.month ?? 0} · ${r.churn?.pct ?? 0}%`);
 const bc = (r.published && r.published.byChannel) || []; const pm = Math.max(1, ...bc.map((x) => x.n));
