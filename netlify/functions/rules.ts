@@ -13,7 +13,7 @@ import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
-import { planOf, checkLimit } from "../../lib/plans";
+import { planOf, checkLimit, tenantPlan, autoApproveAllowed } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
 import { isVideoChannel } from "../../lib/video/types";
 import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, type Rule, type RuleKind } from "../../lib/slots";
@@ -48,8 +48,11 @@ export default async (req: Request): Promise<Response> => {
   const url = new URL(req.url); const path = routeOf(req);
   try {
     if (path.endsWith("/rules-list")) {
-      const [rules, settings, maxRules] = await Promise.all([listRules(tid), readScheduleSettings(tid), maxRulesOf(tid)]);
-      return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules), maxRules });
+      const [rules, settings, maxRules, planInfo] = await Promise.all([listRules(tid), readScheduleSettings(tid), maxRulesOf(tid), tenantPlan(tid)]);
+      /* [P1R7 B3 · §5B.8] 코인 미리보기는 «주 N코인»만으로는 못 읽는다 — **플랜 포함분과 견줘야** «이 편성이면 포함분 안에서 되나»를 안다.
+         화면(A)은 `coinsPerWeek` 와 `includedCoins` 를 나란히 쓴다. 포함분이 0(체험)이면 0 그대로 — 숨기지 않는다. */
+      return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules), maxRules,
+        includedCoins: n(planInfo.plan.limits.coinsIncluded), planKey: planInfo.planKey, autoApprove: autoApproveAllowed(planInfo.planKey, planInfo.plan) });
     }
     if (path.endsWith("/slots-list")) {
       const today = kstDateStr(new Date());
@@ -127,6 +130,21 @@ export default async (req: Request): Promise<Response> => {
       const patch = sanitizeSchedulePatch(b);
       if (!Object.keys(patch).length) return badRequest("바꿀 값이 없어요.");
       if (patch.horizonDays !== undefined) { const c = await checkLimit(tid, "horizonDays", patch.horizonDays); if (!c.ok) return c.res!; }   // P1R4 §1.4 달력 기간 상한
+      /* [P1R7 B3 · DESIGN §5B.9] 자동 승인(«조용하면 발행»)은 Pro 부터.
+         🔴 **소급 금지** — 이미 그렇게 저장해 둔 집은 그대로 둔다(«검수를 안 누르면 글이 안 나가는» 상태로 조용히 바뀌면 고객은 모른다).
+            그래서 «저장된 값이 이미 silence_approves 인가»로 가른다(기본값이 아니라 **저장된 값**). 새로 바꾸는 것만 막는다. */
+      if (patch.reviewPolicy === "silence_approves") {
+        const [trow] = await q(sql`SELECT settings FROM tenants WHERE id = ${tid}`);
+        const storedPolicy = ((trow?.settings ?? {}) as Record<string, unknown>).reviewPolicy;
+        if (storedPolicy !== "silence_approves") {
+          const { planKey, plan } = await tenantPlan(tid);
+          if (!autoApproveAllowed(planKey, plan)) {
+            await writeAudit({ tenantId: tid, action: "rules_settings_auto_approve_blocked", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { planKey } });
+            return json({ ok: false, reason: "plan_limit", step: "plan_feature", feature: "autoApprove", planKey,
+              error: "«조용하면 발행»은 Pro 요금제부터 쓸 수 있어요. 지금 요금제에서는 발행 전에 한 번 확인해 주세요." }, 402);
+          }
+        }
+      }
       const merged = await mergeSettings(tid, patch as Record<string, unknown>);
       const settings = scheduleSettingsOf(merged);
       // horizon·quietDays 가 바뀌면 달력을 다시 채운다(멱등)

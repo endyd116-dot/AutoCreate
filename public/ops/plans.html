@@ -15,6 +15,7 @@
     <div class="appbar"><span class="ph"></span><span class="ttl">요금제</span><span class="sp"></span></div>
 <div class="ops-two" id="cards"></div>
 <div class="group"><div class="gt">코인 팩 · 단가 <span class="muted" style="font-weight:500">부가세 별도 · 코드 기본값 위에 DB 오버레이</span><button type="button" id="editCoins" style="color:var(--ink);font-weight:600;font-size:12.5px">고치기</button></div><div id="packs"></div><div id="table"></div></div>
+<div class="group"><div class="gt">회사 정보 <span class="muted" style="font-weight:500">영수증 공급자 · 약관 하단 · 세금계산서가 읽는 한 곳</span></div><a class="row tap" href="/ops/company.html"><div class="l"><span class="t">회사 정보 7칸</span><span class="d" id="coDesc">상호 · 대표 · 사업자등록번호 · 통신판매업 신고 · 주소 · 메일 · 전화</span></div><span id="coPill"></span></a></div>
 <div class="group"><div class="gt">가격 개정 <button type="button" id="newPrice" style="color:var(--ink);font-weight:600;font-size:12.5px">개정 예약</button></div><p class="muted" style="margin:0 16px 8px;font-size:13px">기존 고객은 고지 발송 → 적용일 이후 첫 청구부터. 가격을 잠근(price_locked) 고객은 그대로예요.</p><div id="events"></div></div>
   </main>
 </div>
@@ -68,6 +69,10 @@ UI.$("#newPrice").onclick = () => { if (!P) return; const dayIn = (n) => new Dat
     <div class="group" style="background:var(--ground)"><div class="gt">고객이 받을 고지 미리보기</div><p id="pv" class="muted" style="margin:0 16px 12px;font-size:13.5px;color:var(--ink)">—</p></div>
     <div class="cta"><button class="btn primary" type="submit">개정 예약</button></div></form>`, { title: "가격 개정", onOpen: (sh, close) => { UI.bindChips(sh); const ta = sh.querySelector("[name=noticeText]"); ta.addEventListener("input", () => { sh.querySelector("#pv").textContent = ta.value || "—"; });
       UI.form(sh.querySelector("#ef"), async (d, f) => { const r = await UI.api("/api/ops-price-event", { body: { planKey: UI.chipVal(sh, "planKey"), newPriceKrw: Number(d.newPriceKrw), effectiveAt: d.effectiveAt + "T00:00:00+09:00", noticeText: d.noticeText }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, r.step === "effectiveAt" ? "effectiveAt" : r.step === "noticeText" ? "noticeText" : "newPriceKrw", r.error); close(); UI.done("개정을 예약했어요 · 고지가 나가요", load); }); } }); };
+/* 회사 정보 — 채워졌는지만 한 줄로(값은 회사 정보 화면에서) */
+UI.api("/api/ops-company", { noRedirect: true }).then((c) => { if (!c.ok) return;
+  UI.$("#coPill").innerHTML = c.configured ? '<span class="pill ok">영수증에 나가요</span>' : '<span class="pill warn">아직 안 나가요</span>';
+  if (c.configured) UI.$("#coDesc").textContent = [c.name, c.bizNo].filter(Boolean).join(" · "); });
 load();
 })();
 </script>

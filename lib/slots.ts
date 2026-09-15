@@ -161,7 +161,11 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
 }
 
 /* ───────── Slot 투영 ───────── */
-export interface Slot { id: number; date: string; channel: string; kind: string; accountId?: number; accountHandle?: string; status: string; publishAt?: string; reviewDeadline?: string; topicTitle?: string; pieceId?: number; origin: "auto" | "manual"; skipReason?: "too_soon" }
+export interface Slot { id: number; date: string; channel: string; kind: string; accountId?: number; accountHandle?: string; status: string; publishAt?: string; reviewDeadline?: string; topicTitle?: string; pieceId?: number; origin: "auto" | "manual"; skipReason?: "too_soon";
+  /** [P1R7 B3] 그 자리에 서버가 남긴 사람말 한 줄(예: 규칙이 정한 구성을 못 썼을 때 · 실패 사유). 없으면 키를 안 싣는다. */
+  note?: string;
+  /** [P1R7 B3 · DESIGN §5B.2 D+1] 이 자리의 글이 **지금까지 번 돈**(원 · revenue_daily 의 piece 귀속 합). 0원이어도 값이 있으면 싣는다 — «아직 못 가져옴»과 «0원»은 다르다(AC-9). */
+  revenueKrw?: number }
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -186,7 +190,11 @@ const SKIP_CANDIDATE_STATUS = new Set(["planned", "no_topic", "topic_assigned", 
 export async function listSlots(tid: number, from: string, to: string, now = new Date()): Promise<Slot[]> {
   const settings = await readScheduleSettings(tid);
   const tick = nextProduceTickUtc(settings, now).getTime();
-  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
+  /* [P1R7 B3 · §5B.2 D+1] 수익 되먹임 — 그 자리의 piece 에 귀속된 `revenue_daily` 합을 함께 읽는다(글별 TOP5 와 같은 원천 · lib/revenue/aggregate).
+     🔴 수집 행이 하나도 없으면 SUM 이 NULL 이고, 그때는 키를 안 싣는다 — «아직 못 가져옴»을 «0원 벌었다»로 그리지 않게(AC-9). */
+  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title,
+      (SELECT SUM(rd.amount_krw)::int FROM revenue_daily rd WHERE rd.tenant_id = s.tenant_id AND rd.piece_id = s.piece_id) AS revenue_krw
+    FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
     WHERE s.tenant_id = ${tid} AND s.slot_date >= ${from}::date AND s.slot_date <= ${to}::date ORDER BY s.slot_date, s.publish_at NULLS LAST, s.id`);
   return rows.map((r) => {
     const o: Slot = { id: n(r.id), date: String(r.d).slice(0, 10), channel: String(r.channel), kind: String(r.kind || "post"), status: String(r.status), origin: r.origin === "manual" ? "manual" : "auto" };
@@ -196,6 +204,8 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     const rd = utcDate(r.review_deadline); if (rd) o.reviewDeadline = rd.toISOString();
     if (r.topic_title) o.topicTitle = String(r.topic_title);
     if (r.piece_id) o.pieceId = n(r.piece_id);
+    if (r.note) o.note = String(r.note).slice(0, 300);
+    if (r.revenue_krw !== null && r.revenue_krw !== undefined) o.revenueKrw = n(r.revenue_krw);
     if (!r.piece_id && SKIP_CANDIDATE_STATUS.has(o.status)) {
       const [y, m, d] = o.date.split("-").map(Number);
       const publishMs = pa ? pa.getTime() : Date.UTC(y, m - 1, d, 23, 59, 0) - KST_MS_LOCAL;   // publish_at 없으면 그날 KST 23:59

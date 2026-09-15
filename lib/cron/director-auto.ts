@@ -38,10 +38,13 @@ async function recentFormats(tid: number, accountId: number | null, channel: str
   return rows.map((r) => String(r.format || "")).filter(Boolean);
 }
 
-export interface AutoSlot { id: number; channel: string; accountId: number | null; topicId: number; publishAt: Date | null; date: string }
+/** [P1R7 B3] `formatHint` = 그 자리를 만든 규칙(`cadence_rules.format_hint`)이 못 박은 구성. 없으면 로테이션(설계 §5B.3 «비우면 디렉터 로테이션»). */
+export interface AutoSlot { id: number; channel: string; accountId: number | null; topicId: number; publishAt: Date | null; date: string; formatHint?: string }
 
 export type AutoBrief =
-  | { ok: true; briefId: number; spec: PieceSpec; topic: Topic; coinCost: number }
+  | { ok: true; briefId: number; spec: PieceSpec; topic: Topic; coinCost: number;
+      /** [P1R7 B3] 규칙이 못 박은 구성을 **못 썼을 때**만 실린다 — 호출자가 슬롯 note 에 남긴다(조용한 무시 0). */
+      formatHintIgnored?: { hint: string; reason: string } }
   | { ok: false; step: "no_topic" | "no_account" | "topic_state"; error: string };
 
 /**
@@ -68,7 +71,17 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
   if (!acc) return { ok: false, step: "no_account", error: `${slot.channel} 에 오늘 글을 올릴 수 있는 계정이 없어요.` };
 
   const c = await contractFor(slot.channel);
-  const format = pickFormat(c, await recentFormats(tid, acc.id, slot.channel), `${topic.id}:${slot.channel}:${acc.id}`) as FormatKey;
+  /* [P1R7 B3] 규칙의 `format_hint` 를 **실제로 읽는다**(전수조사: 저장은 되는데 읽는 코드가 0이었다).
+     그 채널 계약에 없는 구성이면 로테이션으로 돌아가되 **왜 못 썼는지**를 호출자에게 돌려준다(슬롯 note → 화면). */
+  const hint = String(slot.formatHint ?? "").trim();
+  const hintOk = !!hint && c.formats.includes(hint as FormatKey);
+  const format = pickFormat(c, await recentFormats(tid, acc.id, slot.channel), `${topic.id}:${slot.channel}:${acc.id}`, hintOk ? hint : null) as FormatKey;
+  /* 못 쓴 구성은 «사람말»로 남긴다 — 그 구성의 한국어 이름은 그 채널 계약에만 있어서(못 쓰는 채널엔 없다) **고른 구성**을 말한다.
+     원래 힌트 문자열은 감사(detail.formatHint)에 남는다. */
+  const formatHintIgnored = hint && !hintOk
+    /* 조사(으로/로)가 라벨 끝 글자에 따라 달라져 «…구성으로» 로 고정한다(«비교 후기»으로 같은 어색한 문장 0). */
+    ? { hint, reason: `규칙에 정해 둔 구성은 ${(c.label.split(" · ")[0] || slot.channel)}에서 쓸 수 없어 «${c.formatLabel[format] || format}» 구성으로 만들었어요.` }
+    : undefined;
   const imageCount = defaultImageCount(slot.channel);
   const intent = topic.factors.intent;
   const affiliate: Affiliate | null = intent === "commercial" ? { provider: "coupang", productQuery: topic.title, slot: "mid" }
@@ -85,7 +98,7 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
 
   // 사람말 3줄(LLM 0 · 결정론) — 검수 화면이 «왜 이렇게 만들었나»를 말할 수 있어야 한다.
   const reasons = [
-    `편성표에 잡힌 ${slot.date.slice(5).replace("-", "/")} 자리라 ${acc.handle ? `@${acc.handle}` : slot.channel}에 ${spec.composition} 구성으로 써요.`,
+    `편성표에 잡힌 ${slot.date.slice(5).replace("-", "/")} 자리라 ${acc.handle ? `@${acc.handle}` : slot.channel}에 ${spec.composition} 구성으로 써요${hintOk ? "(규칙에서 정한 구성이에요)" : ""}.`,
     topic.factors.volume ? `«${topic.title}»는 한 달에 ${topic.factors.volume.toLocaleString()}번 검색돼요${topic.factors.competition === "low" ? " · 경쟁이 낮은 편이에요" : ""}.`
       : topic.factors.seasonal ? `${topic.factors.seasonal} 시즌이라 지금 올리면 좋아요.` : "직전 글과 다른 구성이라 계정이 단조로워 보이지 않아요.",
     affiliate ? "상품을 찾는 글이라 제휴 링크와 고지 문구를 넣어요." : "발행 3일 전에 미리 만들어 두고, 조용하면 그대로 나가요.",
@@ -97,7 +110,7 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
   const briefId = n(b?.id);
   const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE tenant_id = ${tid} AND id = ${briefId}`);
   if (chk?.t !== "array") console.error("[director-auto] briefs.pieces jsonb_typeof !== array", chk);   // 쓴 직후 확인까지가 쓰기다(PITFALLS #1)
-  return { ok: true, briefId, spec, topic, coinCost: spec.coinCost };
+  return { ok: true, briefId, spec, topic, coinCost: spec.coinCost, ...(formatHintIgnored ? { formatHintIgnored } : {}) };
 }
 
 /** 슬롯 행(DB) → AutoSlot. */
@@ -105,5 +118,6 @@ export function toAutoSlot(r: Record<string, unknown>): AutoSlot {
   return {
     id: n(r.id), channel: String(r.channel), accountId: r.account_id ? n(r.account_id) : null,
     topicId: n(r.topic_id), publishAt: utcDate(r.publish_at), date: String(r.d ?? "").slice(0, 10),
+    ...(r.format_hint ? { formatHint: String(r.format_hint) } : {}),   // [P1R7 B3] produce 의 SELECT 가 규칙에서 함께 읽어 온다
   };
 }

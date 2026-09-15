@@ -1,7 +1,7 @@
 # HANDOFF.md — AutoCreate 메인 세션 인수인계 (압축/새 세션용 단일 정본)
 
 > 갱신 2026-09-15 · 작성자 = 메인(`autocreate-ca`) · **압축 후 새 메인 세션은 이 문서 + `docs/active/RESUME-TRIGGER.md` 를 먼저 읽는다.**
-> 이 문서는 «지금까지의 서사»다. 규칙은 `CLAUDE.md`, 설계는 `docs/DESIGN.md`, 라운드 계약은 `docs/active/*-contract.md`, 함정은 `docs/rules/PITFALLS.md`(AC-1~48) 가 정본이고 여기서 요약·연결만 한다.
+> 이 문서는 «지금까지의 서사»다. 규칙은 `CLAUDE.md`, 설계는 `docs/DESIGN.md`, 라운드 계약은 `docs/active/*-contract.md`, 함정은 `docs/rules/PITFALLS.md`(AC-1~50) 가 정본이고 여기서 요약·연결만 한다.
 
 ---
 
@@ -142,7 +142,11 @@
 - **러너 방향 3개**: ①관리형 기본 vs 옵션 ②요금 단위(계정당/대당) ③프록시 비용 포함/별도 → **R7**(러너 팜 · 계정별 주거용 프록시(`proxyUrl` 자리 있음) · 셀렉터 서버 배포).
 - 116(pro · MRR 49,000)을 0 으로 할지.
 
-### 사장님 액션(바깥)
+### 사장님 액션 — 🔴 **전부 `docs/active/2026-09-15-OWNER-CHECKLIST.md` 로 모았다**(사장님 지시 2026-09-15: «내가 해야 될 것들은 모든 개발 끝나면 마지막으로 메인이랑 진행하면서 조율하자»)
+- **어떤 세션도 사장님을 기다리며 멈추지 않는다** — 준비(리허설·명령 한 줄·되돌리기)까지 하고 다음 일로 간다. 실행은 개발 끝난 뒤 합동 세션에서 한 번에.
+- 합동 세션 9항목(실발행·티스토리 재로그인·대청소 Allow·회사 정보·admin 비번·채널 개통 확인·관리형 가격·AM 코인 키·라이브 한 바퀴) · 바깥 절차 4(유튜브 심사·법률·키·KICC 코드)는 언제든 먼저 시작 가능.
+
+### (옛) 사장님 액션(바깥)
 1 **유튜브 OAuth 앱 + 심사**(영상 채널 열쇠 · 수 주) · 2 약관 법률 검토·통신판매업 · 3 사업자 정보(회사 정보)·admin 비번 · 4 TYPECAST·쿠팡·Meta·Threads 키 · KICC 결제수단 코드(간편결제) · ~~복귀 주소~~ ~~KEYIN 시크릿~~.
 
 ### R7 후보
@@ -151,7 +155,7 @@
 ---
 
 ## 7. 문서 지도
-`CLAUDE.md` · `docs/DESIGN.md` · `docs/rules/PITFALLS.md`(**AC-1~48**) · `PARALLEL_GUIDE.md` · 계약 R1 v1.3/R2 v2.11/R3 v3.5/R4 v4.5(§1.6 KICC)/R5 v5.6/R6 v6.0 · **`docs/active/KICC-GO-LIVE.md`** · `C-HANDOFF.md`·`R5-B-HANDOFF.md` · `SESSION-TRIGGERS.md` · `R6-screen-list.md` · `2026-09-14-R5-presurvey-video.md` · `docs/history/*-C-report.md`(R1~R6) · `docs/screens-v4.html` · `PROJECT_STATE.md`.
+`CLAUDE.md` · `docs/DESIGN.md` · `docs/rules/PITFALLS.md`(**AC-1~50**) · `PARALLEL_GUIDE.md` · 계약 R1 v1.3/R2 v2.11/R3 v3.5/R4 v4.5(§1.6 KICC)/R5 v5.6/R6 v6.0 · **`docs/active/KICC-GO-LIVE.md`** · `C-HANDOFF.md`·`R5-B-HANDOFF.md` · `SESSION-TRIGGERS.md` · `R6-screen-list.md` · `2026-09-14-R5-presurvey-video.md` · `docs/history/*-C-report.md`(R1~R6) · `docs/screens-v4.html` · `PROJECT_STATE.md`.
 
 ## 8. 메인 운영 습관
 판단 필요한 것만 답한다 · 계약은 파일에 먼저 · 세션이 내 오류를 잡으면 그대로 인정(오늘 6번) · 머지 B→B2→A→C · 머지마다 tsc+build+2함수 grep · push=배포 → API ready → 라이브 스모크(증거) → 문서 갱신 · 증거 없는 실증 금지 · 초록도 빨강도 의심 · 사장님께 사람말·결과만 · 창 구분은 보고 첫 줄 · 라이브 변경은 그 창에서 Allow · **사장님이 짚은 건 즉시 발주**.

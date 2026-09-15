@@ -14,11 +14,15 @@
   const role = ["super_admin", "admin", "operator"].includes(qs.get("role")) ? qs.get("role") : "super_admin";
   const fresh = qs.get("fresh") === "1";
   const fxMissing = qs.get("fx") === "0";
+  const companyOff = qs.get("company") === "0";   // [P1R6 §1.3] 회사 정보 비어 있음(영수증·약관 «준비 중» 경로)
   const VAT = (a) => Math.round(a * 0.1);
   const inv = (id, tenantId, tenantName, kind, period, amountKrw, status, paidAgoH, extra = {}) => ({ id, tenantId, tenantName, kind, period, amountKrw, vatKrw: VAT(amountKrw), totalKrw: amountKrw + VAT(amountKrw), status, attempts: status === "failed" ? 2 : 1, ...(status === "paid" ? { paidAt: iso(now - paidAgoH * 3600e3), receiptUrl: `https://autocreate-endyd.netlify.app/r/${id}` } : {}), ...(status === "failed" ? { failedAt: iso(now - paidAgoH * 3600e3), nextRetryAt: iso(now + 20 * 3600e3) } : {}), ...extra });
 
+  const CO_FIELDS = ["name", "ceo", "bizNo", "mailOrderNo", "address", "email", "phone"];
   const seed = () => ({
     nextId: 5000,
+    company: companyOff ? { name: "", ceo: "", bizNo: "", mailOrderNo: "", address: "", email: "", phone: "", updatedBy: null, updatedAt: null }
+      : { name: "주식회사 오토크리에이트", ceo: "홍두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 1길 10, 5층", email: "help@autocreate.kr", phone: "02-1234-5678", updatedBy: 1, updatedAt: iso(now - 3 * 86400e3) },
     operators: [
       { id: 1, email: "endyd1116@gmail.com", name: "두현", role: "super_admin", ssoSubject: "mis:1", active: true, lastLoginAt: iso(now - 600e3) },
       { id: 2, email: "ops-admin@autocreate.dev", name: "운영 관리자", role: "admin", active: true, lastLoginAt: iso(now - 5 * 3600e3) },
@@ -52,7 +56,7 @@
     coinPrices: { packs: [{ id: "pack_100", krw: 50000, coins: 100, bonusPct: 0 }, { id: "pack_220", krw: 100000, coins: 220, bonusPct: 10 }, { id: "pack_720", krw: 300000, coins: 720, bonusPct: 20 }, { id: "pack_trial", krw: 5000, coins: 10, bonusPct: 0, oncePerTenant: true }], table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 } },
     priceEvents: fresh ? [] : [{ id: 401, planKey: "pro", oldPriceKrw: 45000, newPriceKrw: 49000, effectiveAt: iso(now - 30 * 86400e3), noticeText: "Pro 요금이 10월 1일 청구분부터 월 49,000원(부가세 별도)으로 바뀌어요.", noticedAt: iso(now - 61 * 86400e3), status: "applied", affected: 22 }],
     invoices: fresh ? [] : [
-      inv(9001, 2, "요리하는 집", "subscription", thisMonth, 49000, "paid", 30),
+      { ...inv(9001, 2, "요리하는 집", "subscription", thisMonth, 49000, "paid", 30), taxRequestedAt: iso(now - 20 * 3600e3), taxInvoice: { status: "requested", requestedAt: iso(now - 20 * 3600e3) }, taxBiz: { bizNo: "220-88-12345", bizName: "요리하는 집", email: "cook@example.com" } }, // [P1R6 §1.2] 고객이 증빙을 요청한 행
       inv(9002, 4, "에이전시 K", "subscription", thisMonth, 149000, "paid", 28),
       inv(9003, 3, "팁스고", "subscription", thisMonth, 19000, "failed", 20),
       { ...inv(9004, 2, "요리하는 집", "coin", "AC-COIN-20260912-0007", 100000, "paid", 50), payRoute: "keyin" }, // [§1.6] 비인증(카드번호 직접 입력) 라인으로 결제된 행
@@ -183,8 +187,27 @@
         S.audit.unshift({ id: S.nextId++, action: "ops_payment_settings", actor_type: "operator", actor_id: me().id, tenant_id: null, target: "payment", risk_level: "high", created_at: iso(Date.now()), detail: { keyinEnabled: P.keyinEnabled } });
         return { ok: true, payment: { ...P }, keyinMidConfigured: keyinMid, effective: P.keyinEnabled && keyinMid }; }
       return { ok: true, payment: { ...P }, keyinMidConfigured: keyinMid, kiccConfigured: true, mode: "test" }; },
+    /* [P1R6 §1.3] 회사 정보 7칸 — 영수증 supplier · 약관 하단 · 세금계산서가 읽는 한 출처(ops_settings.company) */
+    "ops-company": (b) => { if (need("super_admin")) return forbid(); const C = S.company;
+      if (b && Object.keys(b).length) {
+        const patch = {}; for (const k of CO_FIELDS) { if (b[k] === undefined) continue; const v = String(b[k] ?? "").replace(/\s+/g, " ").trim();
+          if (k === "bizNo") { const d = v.replace(/\D/g, ""); const f = d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}` : v; if (f && !/^\d{3}-\d{2}-\d{5}$/.test(f)) return err("bizNo", "사업자등록번호는 숫자 10자리예요(000-00-00000)."); patch[k] = f; continue; }
+          if (k === "email" && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return err("email", "메일 주소 모양이 아니에요.");
+          patch[k] = k === "email" ? v.toLowerCase() : v; }
+        const changed = CO_FIELDS.filter((k) => patch[k] !== undefined && patch[k] !== C[k]);
+        Object.assign(C, patch); C.updatedBy = me().id; C.updatedAt = iso(Date.now());
+        S.audit.unshift({ id: S.nextId++, action: "ops_company_update", actor_type: "operator", actor_id: me().id, tenant_id: null, target: "ops_settings:company", risk_level: "high", created_at: iso(Date.now()), detail: { changed } });
+        return { ok: true, ...C, configured: !!(C.name && C.bizNo), changed }; }
+      return { ok: true, ...C, configured: !!(C.name && C.bizNo) }; },
     "ops-receivables": () => { if (need("admin")) return forbid(); return { ok: true, rows: S.receivables }; },
-    "ops-tax-invoice": (b) => { if (need("admin")) return forbid(); const i = S.invoices.find((x) => x.id === Number(b.invoiceId)); if (!i) return err("invoiceId", "인보이스가 없어요.", { status: 404 }); i.taxRequestedAt = iso(Date.now()); return { ok: true, status: "requested", note: "KICC 키가 꽂히면 실발급돼요 · 지금은 요청만 기록" }; },
+    "ops-tax-invoice": (b) => { if (need("admin")) return forbid(); const i = S.invoices.find((x) => x.id === Number(b.invoiceId)); if (!i) return err("invoiceId", "인보이스가 없어요.", { status: 404 });
+      if (b.status === "issued") { const url = String(b.url || "").trim();   // [P1R6 §1.2] 홈택스에서 발행한 뒤 «발행됨» 표시(문서 주소는 선택 · https 만)
+        if (url && !new RegExp("^https://", "i").test(url)) return err("url", "문서 주소는 https:// 로 시작해야 해요.");
+        i.taxRequestedAt = i.taxRequestedAt || iso(Date.now());
+        i.taxInvoice = { status: "issued", requestedAt: i.taxRequestedAt, issuedAt: iso(Date.now()), ...(url ? { url } : {}) };
+        S.audit.unshift({ id: S.nextId++, action: "ops_tax_doc_issued", actor_type: "operator", actor_id: me().id, tenant_id: i.tenantId, target: "invoice:" + i.id, risk_level: "normal", created_at: iso(Date.now()), detail: { url: url || null } });
+        return { ok: true, invoiceId: i.id, taxInvoice: i.taxInvoice, issued: true }; }
+      i.taxRequestedAt = iso(Date.now()); i.taxInvoice = { status: "requested", requestedAt: i.taxRequestedAt }; return { ok: true, status: "requested", note: "KICC 키가 꽂히면 실발급돼요 · 지금은 요청만 기록" }; },
     /* ── CS ── */
     "ops-tickets": (_b, q) => { const f = (k) => q.get(k) || ""; const rows = S.tickets.filter((t) => (!f("status") || t.status === f("status")) && (!f("priority") || t.priority === f("priority")) && (!f("assignee") || String(t.assignee?.id) === f("assignee")) && (!f("tag") || t.tags.includes(f("tag")))).sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")); return { ok: true, tickets: rows, page: 1, total: rows.length }; },
     "ops-ticket": (_b, q) => { const t = S.tickets.find((x) => x.id === Number(q.get("id"))); if (!t) return err("id", "티켓이 없어요.", { status: 404 }); const ten = tn(t.tenantId) || {};

@@ -183,14 +183,22 @@ export const publisherStep: CronStep = {
       }
 
       const next = terminal ? "failed" : "awaiting_manual";
-      const why = HUMAN[reason] ?? "발행에 실패했어요";
+      /* 🔴 «계정이 없다»가 **두 가지 다른 상황**이 됐다(P1R7 §1.2 이후).
+         ① 글: 계정을 연결하지 않은 것 → «계정을 연결해 주세요» 가 맞다.
+         ② 영상: **일부러 계정 없이 만든 것**(계정 없이 영상 만들기) → 연결하라고 하면 틀린 안내다.
+            그 경우 할 일은 «내려받아 직접 올리기» 이고, 발행함 시트가 그 아래에 내려받기·주소 적기를 붙인다.
+         같은 reason 에 같은 문구를 주면 ②의 고객은 하지 않아도 될 일을 하러 간다. */
+      const why = (reason === "no_account" && String(p.kind) === "video")
+        ? "앱에서 직접 올려 주세요 — 영상을 내려받아 올리면 돼요"
+        : HUMAN[reason] ?? "발행에 실패했어요";
       await q(sql`UPDATE pieces SET status = ${next}, meta = meta || ${jsonb({ publishAttempts: attempts, failReason: `${why} (${reason})`, lastPublishError: String(r.error).slice(0, 300) })}, updated_at = NOW()
         WHERE tenant_id = ${ctx.tid} AND id = ${pieceId}`);
       if (slotId) await setSlot(ctx.tid, slotId, next === "failed" ? "failed" : "awaiting_manual", why);
       if (next === "failed") failed++; else manual++;
       await notifyOnce(ctx.tid, next === "failed" ? "publish_failed" : "publish_manual",
         next === "failed" ? "글을 올리지 못했어요" : "직접 올려 주셔야 해요",
-        `«${title}» — ${why}. 발행함에서 본문을 복사해 직접 올리거나, 문제를 고치고 다시 시도해 주세요.`,
+        // 영상은 «본문을 복사해» 가 말이 안 된다 — 할 일이 내려받아 올리기다.
+        `«${title}» — ${why}. ${String(p.kind) === "video" ? "발행함에서 영상을 내려받아 올리고, 올린 주소를 적어 주세요." : "발행함에서 본문을 복사해 직접 올리거나, 문제를 고치고 다시 시도해 주세요."}`,
         `/app/posts.html?status=${next === "failed" ? "failed" : "awaiting_manual"}`, { withinHours: 6 });
       await writeAudit({ tenantId: ctx.tid, action: "publish_failed", actorType: "system", riskLevel: "medium", target: `piece:${pieceId}`,
         detail: { reason, attempts, retriable: r.retriable, to: next, error: String(r.error).slice(0, 300), slotId } });

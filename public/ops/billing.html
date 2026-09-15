@@ -33,6 +33,29 @@ let status = "", PAY = null;
 const IST = { paid: ["ok", "결제됨"], failed: ["danger", "실패"], pending: ["off", "대기"], refunded: ["warn", "환불"] };
 const canEdit = OPS.can(op, "admin"); // 결제 토글은 admin+ (§0.2 · operator 는 잠금 표시)
 const routePill = (r) => r === "keyin" ? ' <span class="pill off">직접입력</span>' : ""; // 인증 라인은 기본이라 표시하지 않는다
+const HTTPS = new RegExp("^https://", "i");
+/* [P1R6 §1.2] 세금계산서 — 실발행은 홈택스에서 사람이 한다. 화면은 «요청됨»을 보여 주고, 발행한 뒤 «발행됨»으로 바꾼다(문서 주소는 선택 · https 만).
+   🔴 상태는 서버가 준 taxInvoice.status(none·requested·issued) 만 본다 — 화면이 날짜로 추측하지 않는다. */
+const taxCell = (x) => { const ti = x.taxInvoice || {};
+  if (ti.status === "issued") return OPS.pill(["ok", "발행됨"]) + (ti.url ? ` <a class="lk" href="${UI.esc(ti.url)}" target="_blank" rel="noopener">문서</a>` : "") + `<div class="muted" style="font-size:12px">${OPS.dt(ti.issuedAt)}</div>`;
+  if (ti.status === "requested") return OPS.pill(["warn", "요청됨"]) + `<div class="muted" style="font-size:12px">${OPS.dt(ti.requestedAt || x.taxRequestedAt)}</div>`;
+  return '<span class="muted">—</span>'; };
+function taxSheet(x) {
+  const biz = x.taxBiz || {};
+  UI.sheet(`<p class="muted" style="margin:0 0 10px;font-size:13.5px">홈택스에서 발행한 뒤 여기서 «발행됨»으로 바꿔 주세요. 고객 요금제 화면과 알림에 그대로 보여요.</p>
+    <div class="kv"><span class="k">청구서</span><span class="v">${UI.esc(x.tenantName)} · ${UI.esc(x.period)} · ${UI.won(x.totalKrw)}</span></div>
+    ${biz.bizNo || biz.bizName || biz.email
+      ? `<div class="kv"><span class="k">요청 시점 사업자</span><span class="v" style="font-weight:500;max-width:70%;text-align:right">${UI.esc([biz.bizName, biz.bizNo, biz.email].filter(Boolean).join(" · "))}</span></div>`
+      : '<p class="muted" style="margin:6px 0 0;font-size:12.5px">고객이 남긴 사업자 정보가 없어요 — 요청 없이 먼저 발행하는 경우예요.</p>'}
+    <form id="tf"><div class="field"><label>문서 주소 <span class="muted" style="font-weight:500">· 선택 · https 로 시작</span></label><input class="input" name="url" placeholder="https://" maxlength="300"><div class="help"></div></div>
+    <div class="cta" style="position:static;padding:4px 0 8px"><button class="btn primary" type="submit">발행됨으로 표시</button></div></form>`,
+    { title: "세금계산서", onOpen: (sh, close) => UI.form(sh.querySelector("#tf"), async (d, f) => {
+      const url = String(d.url || "").trim();
+      if (url && !HTTPS.test(url)) return UI.fieldError(f, "url", "문서 주소는 https:// 로 시작해야 해요.");
+      const r = await UI.api("/api/ops-tax-invoice", { body: { invoiceId: x.id, status: "issued", ...(url ? { url } : {}) }, noRedirect: true });
+      if (!r.ok) return UI.fieldError(f, "url", r.error || "바꾸지 못했어요");
+      close(); UI.toast("발행됨으로 표시했어요 · 고객에게 알림이 갔어요"); load(); }) });
+}
 /* [§1.6(5)] 결제 라인 토글 — 🔴 MID·시크릿 값은 응답에 없다(boolean 만) · 정책 × MID = effective 를 한 줄로 */
 function renderPay(r) {
   PAY = r; const pol = r.payment || {}; const eff = pol.keyinEnabled && r.keyinMidConfigured;
@@ -63,14 +86,15 @@ async function load() {
     { h: "고객", f: (x) => `<b>${UI.esc(x.tenantName)}</b>` }, { h: "종류", f: (x) => x.kind === "coin" ? `코인 <span class="muted">${UI.esc(x.period)}</span>` : `구독 <span class="muted">${UI.esc(x.period)}</span>` },
     { h: "공급가", r: true, f: (x) => UI.won(x.amountKrw) }, { h: "부가세", r: true, f: (x) => UI.won(x.vatKrw) }, { h: "청구", r: true, f: (x) => `<b>${UI.won(x.totalKrw)}</b>` },
     { h: "상태", f: (x) => OPS.pill(IST[x.status] || ["off", x.status]) + routePill(x.payRoute) + (x.status === "failed" ? ` <span class="muted">${x.attempts}회 · 다음 ${OPS.dt(x.nextRetryAt)}</span>` : "") },
-    { h: "언제", f: (x) => OPS.dt(x.paidAt || x.failedAt) },
-    { h: "", f: (x) => [x.status === "failed" ? `<button type="button" class="lk" data-retry="${x.id}">다시 시도</button>` : "", x.kind === "coin" && x.status === "paid" ? `<button type="button" class="lk" data-refund="${UI.esc(x.period)}">환불</button>` : "", x.status === "paid" ? `<button type="button" class="lk" data-tax="${x.id}">${x.taxRequestedAt ? "증빙 요청됨" : "증빙"}</button>` : "", x.receiptUrl ? `<a class="lk" href="${UI.esc(x.receiptUrl)}" target="_blank" rel="noopener">영수증</a>` : ""].filter(Boolean).join(" · ") },
+    { h: "언제", f: (x) => OPS.dt(x.paidAt || x.failedAt) }, { h: "세금계산서", f: taxCell },
+    { h: "", f: (x) => [x.status === "failed" ? `<button type="button" class="lk" data-retry="${x.id}">다시 시도</button>` : "", x.kind === "coin" && x.status === "paid" ? `<button type="button" class="lk" data-refund="${UI.esc(x.period)}">환불</button>` : "", x.status === "paid" && (x.taxInvoice || {}).status !== "issued" ? `<button type="button" class="lk" data-issued="${x.id}">발행됨으로 표시</button>` : "", x.status === "paid" && !(x.taxInvoice || {}).status ? `<button type="button" class="lk" data-tax="${x.id}">증빙 요청</button>` : "", x.receiptUrl ? `<a class="lk" href="${UI.esc(x.receiptUrl)}" target="_blank" rel="noopener">영수증</a>` : ""].filter(Boolean).join(" · ") },
   ], i.rows || []);
   UI.$("#recv").innerHTML = OPS.table([{ h: "고객", f: (x) => `<b>${UI.esc(x.tenantName)}</b>` }, { h: "미수", r: true, f: (x) => UI.won(x.overdueKrw) }, { h: "연체", r: true, f: (x) => `${x.overdueDays}일` }, { h: "시도", r: true, f: (x) => `${x.attempts}회` }, { h: "사유", f: (x) => UI.esc(x.lastFailReason || "") }], rcv.ok ? rcv.rows || [] : []);
   UI.$("#keys").innerHTML = OPS.table([{ h: "고객", f: (x) => `<b>${UI.esc(x.tenantName)}</b>` }, { h: "카드", f: (x) => `${UI.esc(x.brand)} ${UI.esc(x.last4)}${routePill(x.payRoute)}` }, { h: "상태", f: (x) => OPS.pill(x.active ? ["ok", "유효"] : ["warn", "실패"]) }, { h: "갱신", f: (x) => OPS.dt(x.updatedAt) }], k.ok ? k.rows || [] : []);
   UI.$$("[data-retry]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/ops-invoice-retry", { body: { id: Number(b.dataset.retry) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.toast(r.invoice.status === "paid" ? "결제됐어요" : `다시 시도 예약 · ${r.invoice.attempts}회째`); load(); });
   UI.$$("[data-refund]").forEach((b) => b.onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 8px">주문 <b style="font-family:ui-monospace,monospace">${UI.esc(b.dataset.refund)}</b></p><p class="muted" style="margin:0 0 12px;font-size:13px">규칙 5: 미사용분만 · 회수 ≤ 잔량 · 7일 · 단가 = 결제액 ÷ 받은 코인 · 부분 환불 없음</p><div id="rc"></div>`, { title: "코인 환불", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "이 주문을 환불할까요? 미사용 코인은 회수돼요.", async () => { const r = await UI.api("/api/ops-refund", { body: { orderNo: b.dataset.refund }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "환불하지 못했어요"); close(); UI.toast(`${UI.won(r.refundKrw)} 환불 · ${r.revoked}코인 회수`); load(); }) }));
   UI.$$("[data-tax]").forEach((b) => b.onclick = async () => { const r = await UI.api("/api/ops-tax-invoice", { body: { invoiceId: Number(b.dataset.tax) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.toast(r.note || "요청했어요"); load(); });
+  UI.$$("[data-issued]").forEach((b) => b.onclick = () => { const x = (i.rows || []).find((r) => r.id === Number(b.dataset.issued)); if (x) taxSheet(x); });
 }
 UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.s; load(); });
 load();

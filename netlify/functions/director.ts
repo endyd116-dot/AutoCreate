@@ -26,7 +26,7 @@ export default async (req: Request): Promise<Response> => {
     if (path.endsWith("/director-propose")) {
       const b = await readJson<{ topicId?: number }>(req);
       const topicId = n(b.topicId); if (!topicId) return badRequest("topicId");
-      const r = await propose(tid, topicId);
+      const r = await propose(tid, topicId, { origin: "manual" });   // [R7 §1.2] 사람이 «만들기»를 누른 경로 — 계정 없이도 영상을 낼 수 있다
       if (!r.ok) return json(r, r.step === "not_found" ? 404 : 400);
       await writeAudit({ tenantId: tid, action: "director_propose", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `brief:${r.brief.id}`, detail: { topicId, pieces: r.brief.pieces.length, coinCost: r.brief.coinCost } });
       return json({ ok: true, brief: r.brief });
