@@ -65,9 +65,9 @@ async function call(pathname, token, body, timeoutMs = 30_000) {
     let json = null;
     try { json = await r.json(); } catch { /* 본문 없음 */ }
     /* 🔴 401 을 한 문구로 뭉치지 않는다(2026-09-15 실측으로 잡음). 서버는 «토큰이 틀렸다»와
-       «이 토큰은 다른 PC 에 묶여 있다»를 구분해서 말해 주는데, 여기서 덮어쓰면 고객은 엉뚱한 일을 하게 된다
+       «이 열쇠는 다른 PC 에 묶여 있다»를 구분해서 말해 주는데, 여기서 덮어쓰면 고객은 엉뚱한 일을 하게 된다
        (토큰을 다시 복사해 넣으며 «왜 안 되지»를 반복한다 · AC-10 우리 탓/계정 탓 가르기와 같은 규율). */
-    if (r.status === 401) return { ok: false, status: 401, error: String(json?.error || "러너 토큰이 올바르지 않아요. 앱에서 기기를 다시 등록해 주세요.") };
+    if (r.status === 401) return { ok: false, status: 401, error: String(json?.error || "러너 열쇠가 올바르지 않아요. 앱에서 기기를 다시 등록해 주세요.") };
     if (!r.ok) return { ok: false, status: r.status, error: String(json?.error ?? `서버 오류 ${r.status}`) };
     return json ?? { ok: false, error: "빈 응답" };
   } catch (e) {

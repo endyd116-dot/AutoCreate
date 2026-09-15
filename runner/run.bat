@@ -36,16 +36,16 @@ if not exist "node_modules\playwright" (
   echo.
 )
 
-REM --- 3) Token ------------------------------------------------------
+REM --- 3) Key (the app screen calls this the "key") -------------------
 if not exist ".token" (
   if "%~1"=="" (
-    echo   Paste the token from the app screen ^(starts with acr_^)
-    set /p ACTOKEN=  Token:
+    echo   Paste the key from the app screen ^(starts with acr_^)
+    set /p ACTOKEN=  Key:
   ) else (
     set ACTOKEN=%~1
   )
   if "%ACTOKEN%"=="" (
-    echo   [X] No token entered. Get one from the app: Settings ^> Runner ^> Turn on this PC.
+    echo   [X] No key entered. Get one from the app: Settings ^> Runner ^> Turn on this PC.
     echo.
     pause
     exit /b 1
@@ -84,7 +84,7 @@ exit /b 1
 
 :tokenfail
 echo.
-echo   [X] Could not save the token. Copy it again from the app screen.
+echo   [X] Could not save the key. Copy it again from the app screen.
 echo.
 pause
 exit /b 1

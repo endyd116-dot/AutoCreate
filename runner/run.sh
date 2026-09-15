@@ -32,19 +32,19 @@ if [ ! -d "node_modules/playwright" ]; then
   echo ""
 fi
 
-# --- 3) Token -------------------------------------------------------
+# --- 3) Key (the app screen calls this the "key") --------------------
 if [ ! -f ".token" ]; then
   if [ $# -ge 1 ]; then
     ACTOKEN="$1"
   else
-    printf "  Paste the token from the app screen (starts with acr_)\n  Token: "
+    printf "  Paste the key from the app screen (starts with acr_)\n  Key: "
     read -r ACTOKEN
   fi
   if [ -z "${ACTOKEN:-}" ]; then
-    echo "  [X] No token entered. Get one from the app: Settings > Runner > Turn on this PC."
+    echo "  [X] No key entered. Get one from the app: Settings > Runner > Turn on this PC."
     exit 1
   fi
-  node ac-runner.mjs --token "$ACTOKEN" || { echo "  [X] Could not save the token."; exit 1; }
+  node ac-runner.mjs --token "$ACTOKEN" || { echo "  [X] Could not save the key."; exit 1; }
 fi
 
 # --- 4) Run (restart loop) ------------------------------------------

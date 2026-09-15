@@ -25,7 +25,7 @@ import { clientIp } from "../../lib/auth";
 import { writeAudit } from "../../lib/audit";
 import { getAccount } from "../../lib/accounts";
 import { checkLimit, tenantPlan } from "../../lib/plans";
-import { presignLatest } from "../../lib/runner-release";
+import { presignLatest, releaseFilename } from "../../lib/runner-release";
 import {
   registerDevice, listDevices, removeDevice, rotateDeviceToken, authRunner, heartbeat,
   claimJobs, reportJob, releaseJob, saveRunnerSession, enqueueJob, fleetState, latestSessionJob,
@@ -141,7 +141,7 @@ export default async (req: Request): Promise<Response> => {
         target: `runner_release:${got.rel.version}`, detail: { version: got.rel.version, bytes: got.rel.bytes, planKey },
       });
       // 파일명을 우리가 정해 준다(브라우저가 presigned 키 이름으로 저장하지 않게).
-      const filename = `autocreate-runner-v${got.rel.version}.zip`;
+      const filename = releaseFilename(got.rel.version);   // 🔴 서명에 담은 이름과 **같은 값**이어야 한다(lib/runner-release.ts)
       return json({ ok: true, version: got.rel.version, bytes: got.rel.bytes, sha256: got.rel.sha256, filename, url: got.url, expiresInSec: 600, ...(got.rel.notes ? { notes: got.rel.notes } : {}) });
     }
 

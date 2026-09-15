@@ -107,7 +107,15 @@ async function main() {
   if (!dl.ok || !dl.url) { bad(`내려받기 링크를 못 받았다: ${dl.error ?? r.status}`); close(); await pgClient.end({ timeout: 5 }); process.exit(1); }
   ok(`링크 받음 · v${dl.version} · ${Number(dl.bytes).toLocaleString()} bytes · ${dl.expiresInSec}초 유효 · ${dl.filename}`);
 
-  const got = Buffer.from(await (await fetch(dl.url)).arrayBuffer());
+  const res = await fetch(dl.url);
+  /* 🔴 **고객 폴더에 남을 이름**까지 본다(2026-09-15 A 발견). 받는 곳은 R2 도메인이라 우리 화면이 이름을 정할 수 없고
+     (cross-origin 에서 `<a download>` 는 무시된다), 서명에 안 담으면 «v1.1.3.zip» 이라는 정체불명 파일이 남는다.
+     «링크가 열렸다» 로는 절대 안 잡히는 종류의 실패라 응답 헤더를 직접 읽는다. */
+  const cd = String(res.headers.get("content-disposition") ?? "");
+  check(cd.includes(`filename="${dl.filename}"`),
+    `내려받으면 «${dl.filename}» 으로 저장된다(서명에 담겼다)`,
+    `저장 이름이 안 정해진다 — content-disposition="${cd || "(없음)"}" · 고객 폴더에 키 이름으로 남는다`);
+  const got = Buffer.from(await res.arrayBuffer());
   const digest = createHash("sha256").update(got).digest("hex");
   check(digest === dl.sha256, `진짜 내려받아 sha256 일치(${digest.slice(0, 16)}…)`, `내려받은 파일의 sha256 이 다르다(${digest.slice(0, 16)} ≠ ${String(dl.sha256).slice(0, 16)})`);
 
