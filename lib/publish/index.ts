@@ -222,13 +222,14 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
  */
 
 /**
- * 포트용 채널 판정 — 포트의 `PublishViaOfFn` 은 null 을 모른다.
- *   아직 발행을 못 하는 채널(클립·쓰레드…)은 «라우팅상» 포트의 기본 규칙과 같은 답을 주고,
- *   실제 차단은 `publish()` 가 `unsupported_channel` 로 한다(판정기 두 벌 금지 · PITFALLS #11-b).
- *   🔴 엄격한 판정(«못 올리는 채널 = null»)이 필요하면 `contract.ts` 의 동명 함수를 쓴다.
+ * 포트용 채널 판정 — **표 하나만 본다**(`lib/channel-registry.ts`).
+ *   🔴 [P1R8 §5.2] 예전엔 표에 없으면 `connectMethodOf` 로 **추측**했다(«oauth 니까 api 겠지»).
+ *      그래서 커넥터가 없는 `instagram`·`tiktok` 이 «API 로 올릴 수 있다»고 대답했다(2026-09-15 프로브로 확인).
+ *      = 없는 것을 기본값으로 위장(AC-9) + 연결 방식이라는 **대용물로 발행 경로를 판정**(AC-57).
+ *      이제 **모르면 null** 이고, 호출부가 «아직 올릴 수 없다»로 막는다. 채널을 켜는 사람이 표에 값을 넣어야 한다.
  */
-export function publishViaOf(channel: string): "api" | "runner" {
-  return strictPublishViaOf(channel) ?? (connectMethodOf(channel) === "session" ? "runner" : "api");
+export function publishViaOf(channel: string): "api" | "runner" | null {
+  return strictPublishViaOf(channel);
 }
 
 /** 포트용 러너 잡 적재 어댑터(포트 시그니처: `(tid, input) => { ok, jobId, already? }`). */

@@ -15,6 +15,7 @@
  *      · 계정 status 전이(cooldown/suspended/pending_login) → B 의 `lib/account-health.ts classifyAndApply`(정적 배선).
  *        여기선 신호(last_error_kind)만 쓰고 그 함수에 넘긴다 — status 를 직접 쓰지 않는다.
  */
+import { jobKindOf as registryJobKindOf } from "./channel-registry";   // [P1R8 §5.2] 러너 잡 이름 정본(순수 리프 · 순환 0)
 import crypto from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index";
@@ -82,13 +83,15 @@ export function priorityOf(kind: RunnerJobKind): number { return JOB_PRIORITY[ki
 
 /** 채널 → 발행 잡 이름. 러너 채널이 아니면 null. */
 export function publishJobKindOf(channel: string): RunnerJobKind | null {
-  if (channel === "naver_blog") return "publish.naver_blog";
-  if (channel === "tistory") return "publish.tistory";
-  /* P1R5 — 네이버 클립은 공개 API 가 없어 러너 잡으로 예약해 두고 **스텁**으로 정직하게 막는다(§2.3).
-     유튜브·릴스·스레드는 **API 채널**이라 여기서 러너 잡을 만들지 않는다(lib/publish/{youtube,instagram,threads}.ts). */
-  if (channel === "naver_clip") return "publish.naver_clip";
-  return null;
+  /* [P1R8 §5.2] 🔴 채널 목록을 여기서 또 적지 않는다 — 정본은 `lib/channel-registry.ts CHANNELS` 의 `jobKind` 칸이다.
+     예전엔 이 함수가 채널 이름을 직접 나열해서, 채널 하나를 켤 때 맞춰야 할 자리가 네 곳이었다(그 파일 헤더에 실측 근거).
+     표의 값이 우리 잡 이름 목록(`RunnerJobKind`)에 없는 글자면 **null** 이다 — 모르는 잡 이름을 만들어 내지 않는다.
+     (네이버 클립은 표에 `publish.naver_clip` 이 있고, 실제 러너 채널은 스텁이라 정직하게 막힌다 · §2.3.) */
+  const kind = registryJobKindOf(channel);
+  return kind && (PUBLISH_JOB_KINDS as readonly string[]).includes(kind) ? (kind as RunnerJobKind) : null;
 }
+/** 발행 잡 이름 화이트리스트 — 표의 글자가 이 중 하나일 때만 잡을 만든다(오타·새 채널의 임시값 차단). */
+const PUBLISH_JOB_KINDS = ["publish.naver_blog", "publish.tistory", "publish.naver_clip"] as const;
 
 /** 잡 상태(스키마 varchar(12)). */
 export type RunnerJobStatus = "queued" | "claimed" | "done" | "failed" | "released";

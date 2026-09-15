@@ -103,6 +103,10 @@ export const learnStep: CronStep = {
         continue;
       }
 
+      /* [P1R8 §5.2] 🔴 `via === null` = **아직 올릴·볼 코드가 없는 채널**(표에 발행 경로가 없다).
+         예전엔 판정기가 «모르면 api» 로 추측해서 여기까지 내려왔고, 있지도 않은 커넥터에 물어본 뒤
+         «못 물어봤다»로 셌다. 이제는 그 자리에서 «못 물어봤다»로 세고 넘어간다(0 으로 적지 않는다 · AC-9). */
+      if (via === null) { unavailable++; continue; }
       const r = await fetchPostStats(ctx.tid, n(po.piece_id));
       if (!r) { unavailable++; continue; }   // 못 물어봤다 — 0 으로 적지 않는다.
       const next: Record<string, unknown> = {
