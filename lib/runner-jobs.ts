@@ -797,6 +797,21 @@ export async function claimJobs(
 
 /* ─────────────────────────── 보고(report) ─────────────────────────── */
 
+/** [R9-2] 인라인 서식 뜻 다섯 — 러너 `runner/lib/plan.mjs MARK_KINDS` 와 **같은 어휘**(두 벌이면 갈린다). */
+export type FormatMarkKind = "value" | "line" | "row" | "bold" | "underline" | "italic";
+export type FormatMarkCount = Record<FormatMarkKind, number>;
+export interface RunnerFormatMarks {
+  planned?: FormatMarkCount | null;
+  kept?: FormatMarkCount | null;
+  applied?: FormatMarkCount | null;
+  demoted?: { kind: string; why: string; sample?: string }[];
+  /** 🔴 서식 끊기가 **몇 번 돌았나 / 몇 번 실패했나** — 실패가 곧 «그 뒤 문단이 앞 서식을 물려받았다»는 뜻이다. */
+  breaks?: number;
+  breakFails?: number;
+  /** 발행 직전 자기검사 결과(`runner/lib/format-bleed.mjs`). 🔴 없으면 **«못 쟀다»**이지 «깨끗»이 아니다(AC-92). */
+  bleed?: { total: number; bad: number; pct: number; red: number; center: number; italic: number; underline: number; samples?: string[] };
+}
+
 export interface RunnerReportOk {
   ok: true;
   externalUrl?: string; channelRef?: string;
@@ -814,6 +829,14 @@ export interface RunnerReportOk {
   /** 이 잡이 실제로 나간 IP(계약 §2.5-4 · 프록시 배정 계정만). 서버가 `accounts.last_exit_ip` 에 적는다. */
   exitIp?: string;
   shotKey?: string;
+  /**
+   * [R9-2/5] 🔴 **서식을 «실제로 냈나»** — 러너가 보내는 **사실**이다(문장이 아니다 · 아래 `notes` 주석의 규율 그대로).
+   *   `planned` 계획이 내려던 수 · `kept` 글당 상한을 먹인 뒤 남은 수 · `applied` 에디터에서 **실제로 누른** 수.
+   *   🔴 셋을 한 숫자로 뭉치지 않는다 — «상한 때문»인지 «에디터가 안 받아서»인지 못 가리면 다음 수리가 추측에서 시작한다.
+   *   `demoted[].why` 는 **내부 용어**다(`budget`·`too_long`·`url_para`·`block_unsupported`·`channel_unsupported`·`caret_drift`·`range_invalid`).
+   *   ⚠️ 화면에 그대로 내보내지 마라(AC-91) — `applyFormatMarksToPiece` 가 `field` 로 옮겨 적고, 문장은 화면이 만든다.
+   */
+  formatMarks?: RunnerFormatMarks;
   /* 🔴 **`notes` 는 여기 없다 — 러너가 보내도 서버가 버린다.** 일부러 그렇다(메인 판정 2026-09-15).
      러너 노트를 저장할 자리를 새로 파면 «러너가 하는 말»이 또 하나의 진실 원천이 되고,
      화면 문구가 러너 판(zip)에 묶여 버린다(고치려면 러너를 다시 배포해야 한다).
@@ -842,6 +865,69 @@ export interface RunnerSealReport { sealNote?: string }
 export type RunnerReportBody = (RunnerReportOk | RunnerReportFail) & RunnerRecipeReport & RunnerSealReport;
 
 export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found" | "private"; block?: RunnerBlock }
+
+/**
+ * 러너 보고를 **그 글에 이미 있는 기록과 합친다**(순수 · 2026-09-16 B2↔B 합의 · 합치는 쪽은 B).
+ *
+ *   🔴 **저장은 `meta.formatMarks` 한 곳뿐이다.** `meta.formatUnused` 를 따로 쓰지 않는다 —
+ *      화면이 쓰는 `formatUnused` 는 `pieces-get` 이 **매번 투영**한다(저장이 두 벌이면 갈린다).
+ *   🔴 **생성 때 서버가 쓴 `planned`·`kept` 를 러너 보고가 덮지 않는다** — 러너는 «실제로 눌렀나»(applied)와
+ *      «누르다 못 낸 것»(demoted)을 아는 쪽이고, «내려던 것»은 서버가 아는 쪽이다. 각자 아는 것만 쓴다.
+ *   🔴 `demoted` 는 **덮지 않고 붙인다** — 서버 강등(생성 때)과 러너 강등(발행 때)은 **다른 사건**이다.
+ *      러너 것에는 `by:"runner"` 를 박아 둔다(나중에 «어디서 깎였나»를 물을 수 있게).
+ *   🔴 **재보고 멱등** — 같은 잡이 두 번 보고해도 러너 강등이 두 벌로 쌓이지 않는다(앞 러너 것을 걷고 새로 붙인다).
+ *   ⚠️ 러너 보고를 **믿되 자른다**(길이·개수 상한) — 러너는 고객 PC 에서 돈다.
+ *
+ *   ⓘ B 가 `lib/format-marks.ts mergeRunnerFormatMarks` 로 같은 일을 하는 순수 함수를 만들고 있다.
+ *     머지 때 **그쪽이 정본**이고 이 함수 본문은 그 호출 한 줄로 바뀐다(모양은 같게 맞춰 뒀다).
+ */
+export function mergeRunnerFormatMarks(prev: unknown, fm: RunnerFormatMarks): Record<string, unknown> {
+  const p = (prev && typeof prev === "object" ? { ...(prev as Record<string, unknown>) } : {}) as Record<string, unknown>;
+  const prevDemoted = Array.isArray(p.demoted) ? (p.demoted as Record<string, unknown>[]) : [];
+  const runnerDemoted = (fm.demoted ?? []).slice(0, 40).map((d) => ({
+    kind: String(d.kind ?? "").slice(0, 24),
+    why: String(d.why ?? "").slice(0, 32),
+    ...(d.sample ? { sample: String(d.sample).slice(0, 20) } : {}),
+    by: "runner" as const,
+  }));
+  const out: Record<string, unknown> = {
+    ...p,
+    /* 러너가 아는 것만 덮는다. 모르면(키 없음) **앞 값을 그대로 둔다** — `?? null` 로 지우면 서버 기록이 사라진다. */
+    ...(fm.applied ? { applied: fm.applied } : {}),
+    ...(fm.kept ? { kept: fm.kept } : {}),
+    ...(fm.planned && !p.planned ? { planned: fm.planned } : {}),
+    breaks: Number(fm.breaks ?? 0),
+    breakFails: Number(fm.breakFails ?? 0),
+    /* 🔴 **못 쟀으면 키를 안 만든다** — `bleed: null` 로 적으면 «쟀는데 깨끗했다»로 읽힌다(AC-92). */
+    ...(fm.bleed ? { bleed: fm.bleed } : {}),
+    demoted: [...prevDemoted.filter((d) => d?.by !== "runner"), ...runnerDemoted].slice(0, 80),
+    runnerReportedAt: new Date().toISOString(),
+  };
+  return out;
+}
+
+/**
+ * [R9-2/5] 🔴 **«못 낸 서식»을 그 글에 적는다** — 영상의 `meta.refUnused` 와 **같은 모양**(설계 §2.1e).
+ *
+ *   🔴 **왜 여기서 쓰나**: 값을 만들어 놓고 읽는 쪽을 안 만들면 그게 「만들어 놓고 아무도 안 부른다」다(AC-69 · 계약 §4-5).
+ *      러너가 사실을 보내고 → 여기서 piece 에 적고 → 검수 화면(A)이 `field` 를 사람말 칩으로 그린다. 사슬이 여기서 이어진다.
+ *   ⚠️ `why`(내부어)도 같이 남긴다 — 화면은 안 그리지만 **우리가 고칠 때** 그게 유일한 단서다(AC-91 은 «화면에 내보내지 마라»이지 «버려라»가 아니다).
+ *   🔴 jsonb 부분갱신 금지(PITFALLS #1) — read → merge → write.
+ */
+export async function applyFormatMarksToPiece(tid: number, pieceId: number, fm: RunnerFormatMarks | undefined): Promise<void> {
+  if (!pieceId || !fm) return;
+  try {
+    const [row] = await q(sql`SELECT meta FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
+    if (!row) return;
+    const cur = (row.meta && typeof row.meta === "object" ? { ...(row.meta as Record<string, unknown>) } : {}) as Record<string, unknown>;
+    const merged = mergeRunnerFormatMarks(cur.formatMarks, fm);
+    await q(sql`UPDATE pieces SET meta = ${jsonb({ ...cur, formatMarks: merged })}, updated_at = NOW()
+      WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+  } catch (e) {
+    /* 보조 갱신 실패는 발행을 되돌리지 않는다 — 다만 **조용히 넘어가지 않는다**(AC-58: 삼킨 검사가 판정을 뒤집는다). */
+    console.warn("[runner-jobs] formatMarks 기록 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 140));
+  }
+}
 
 /**
  * 러너 주장을 믿지 않는다(계약 §2 · DESIGN §8.3) — 보고된 URL 을 서버가 직접 확인한다.
@@ -1022,6 +1108,34 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     return { ok: true, status: "failed", reason: "proxy" };
   }
 
+  /* ── 🔴 `"format_bleed"` — **우리 러너가 방금 망쳤다**(R9-3 · `runner/lib/format-bleed.mjs`) ──
+     `proxy`·`parse` 와 **같은 부류**다: 전이표 7종 밖 · **계정 잘못이 아니다**(전이 0) · 우리가 고친다.
+     러너가 글을 다 쓰고 발행 버튼을 누르기 **직전에** 자기가 쓴 글을 다시 재서, 문단의 30%(`RUNNER_FORMAT_BLEED_MAX_PCT`)
+     이상이 빨강·가운데·기울임·밑줄로 **통째로 물들었으면** 발행을 멈춘 것이다.
+     ⚠️ **이건 CLAUDE §9 의 게이트가 아니다**(계약 §4-1) — «고객 글에 대한 우리 판단»이 아니라 **작업 품질 검사**다.
+        고객이 고를 일이 아니라 우리 도구의 고장이고, 그대로 나가면 사장님이 **발행물로** 알게 된다.
+     🔴 **재시도한다** — 에디터를 처음부터 다시 몰면 안 물드는 경우가 많다(결정적 고장이면 3회 뒤 사람에게 넘어간다).
+        코인은 piece 당 1회라 재시도가 고객 돈을 더 쓰지 않는다(CLAUDE §4.7). */
+  if (result.ok !== true && String((result as RunnerReportFail).errorKind) === "format_bleed") {
+    const fail = result as RunnerReportFail;
+    const attempts = n(j.attempts);
+    const canRetry = attempts < MAX_ATTEMPTS;
+    await q(sql`UPDATE runner_jobs SET status = ${canRetry ? "queued" : "failed"}, claimed_by = NULL, claimed_at = NULL, error_kind = 'format_bleed',
+        result = ${jsonb({ ok: false, errorKind: "format_bleed", detail: String(fail.detail ?? "").slice(0, 300), shotKey: fail.shotKey ?? null, attempts })},
+        due_at = ${canRetry ? sql`NOW() + (${Math.min(30, (attempts + 1) * 5)} * INTERVAL '1 minute')` : sql`NULL`},
+        updated_at = NOW() WHERE id = ${jobId}`);
+    if (!canRetry && pieceId) {
+      /* 🔴 고객에게 «계정을 다시 로그인하세요»라고 하면 **거짓 안내**다 — 계정은 멀쩡하다(AC-10 · 분류기 원칙 ④). */
+      await failPublishPiece(tid, pieceId, classifyRunnerBlock("selector_changed",
+        "글은 다 썼는데 글자 꾸밈이 뒷 문단까지 번져서, 그대로 올리지 않고 멈췄어요. 저희가 고칠 부분이라 담당이 확인합니다."), fail.shotKey);
+    }
+    await writeAudit({
+      tenantId: tid, action: "runner_job_failed", actorType: "system", riskLevel: "high", target: `runner_job:${jobId}`,
+      detail: { kind, errorKind: "format_bleed", ourBug: true, accountId, attempts, retry: canRetry, detail: String(fail.detail ?? "").slice(0, 200) },
+    });
+    return { ok: true, status: canRetry ? "queued" : "failed", reason: "format_bleed" };
+  }
+
   if (result.ok !== true && String((result as RunnerReportFail).errorKind) === "parse") {
     const fail = result as RunnerReportFail;
     await q(sql`UPDATE runner_jobs SET status = 'failed', claimed_by = NULL, claimed_at = NULL, error_kind = 'parse',
@@ -1136,6 +1250,10 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   const channelRef = okBody.channelRef ? String(okBody.channelRef).slice(0, 160) : undefined;
 
   if (kind.startsWith("publish.")) {
+    /* [R9-2/5] 🔴 서식 사실을 그 글에 적는다 — 주소 회수보다 **먼저** 한다.
+       아래 «주소가 없다»·«글을 못 찾았다» 가지에서 return 해 버리면 그 자리에서 서식 기록이 통째로 사라지는데,
+       서식은 **올라간 글의 사실**이라 주소 회수와 운명을 같이할 이유가 없다(그 글은 이미 채널에 있다). */
+    await applyFormatMarksToPiece(tid, pieceId ?? 0, okBody.formatMarks);
     if (!externalUrl) {
       // 성공이라는데 글 주소가 없다 = 확정할 수 없다(정직).
       const block = classifyRunnerBlock("unknown", "내 PC 프로그램이 성공을 알렸지만 글 주소를 싣지 않았어요.");

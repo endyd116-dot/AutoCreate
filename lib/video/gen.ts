@@ -246,7 +246,9 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       pieceId, tenantId: tid,
       out: { w: 1080, h: 1920, fps: 30, maxSeconds: seconds, crf: 20 },
       scenes,
-      captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey },
+      /* [R10-6] 🔴 배워 온 자막 모양을 **렌더까지 보낸다** — 여기가 빠지면 `reference-apply` 가 만든 값을
+         **아무도 안 부른다**(AC-69: 정의가 있나가 아니라 부르나). 값이 없으면 키 자체가 없고 렌더는 종전 상수로 그린다. */
+      captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey, ...(refStyle?.captionType ? { type: refStyle.captionType } : {}) },
       // BGM: `BGM_LICENSE_VERIFIED=1` + 시드 매니페스트가 있을 때만 깔린다. 둘 중 하나라도 없으면 null = **무음**(계약 §1.4c(3) 정직 경로).
       audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: await resolveBgm({ format, seed: pieceId }), sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
       overlay: { badge: needDisc ? { text: videoBadgeText(comp), corner: "tr" } : null, safeZone: safeZoneOf(channel), endcard: { text: theScript.closing.slice(0, 40) } },

@@ -36,6 +36,31 @@ export interface TemplateStyle {
   hookPrinciple?: string;
   /** 카메라 문법(컷당 비트 수·이동 규칙). */
   camera?: string;
+
+  /* ═══ [R10-6] 🔴 사장님이 더하라 하신 칸 — «디자인·타이포그래피·자막·영상 스피드» ═══
+   *
+   *   원칙(설계 §2.2 · B2 실측 2026-09-16): **우리가 못 내는 축은 배우지 않는다 — 배워도 장식이다.**
+   *   ⇒ 아래는 전부 **지금 렌더가 받을 수 있는 축**이다(자막이 HTML/CSS 라 원리상 되고, 상수를 값으로 열었다).
+   *   🔴 **일부러 뺀 둘**: `captionMotion`(글자 등장 방식) · `transition`(컷 전환).
+   *      자막은 구절당 PNG **한 장**이라 «애니메이션 도중» 프레임이 없고, 씬은 `concat` 으로만 이어 하드컷뿐이다.
+   *      만들려면 **렌더 구조를 바꿔야** 하고 그건 따로 잡는 일이다(계약서 §3.2 R11). 배울 칸에서 뺀다.
+   *   🔴 전부 **선택**이다 — 모델이 못 읽으면 `undefined` 고, 그게 «못 읽었다»다. 기본값으로 메우지 않는다(AC-92).
+   */
+  /** 자막 글자(굵기 100~900 · 외곽선 px · 그림자 세기 0~3). 렌더가 CSS 로 그대로 그린다. */
+  typography?: { weight?: number; strokeWidth?: number; shadow?: "none" | "soft" | "hard" };
+  /** 자막 자리·줄 수·강조색 — 🔴 `maxCharsPerLine` 이 «2줄 이내»를 **우연**에서 **규칙**으로 바꾸는 값이다. */
+  captionPlace?: { position?: "top" | "middle" | "bottom"; maxCharsPerLine?: number; accentColor?: string };
+  /** 속도 — 컷당 초 · 영상 전체 길이(초). 🔴 «cut every 5s» 같은 글에서 숫자를 읽는다. */
+  speed?: { secPerCut?: number; totalSec?: number };
+  /** 디자인 — 쓰는 색 수 · 가로 여백(px). 안전영역은 채널이 정하므로 배우지 않는다(우리가 이미 안다). */
+  design?: { colorCount?: number; sideMargin?: number };
+  /**
+   * 🟠 말 속도(0.5~2.0). 🔴 **이번 라운드는 «저장까지»다**(트리거 B2-6).
+   *   손잡이는 `lib/tts-typecast.ts` 에 이미 있지만(0.5~2.0 클램프) 이 값을 실제로 넘기는 것은 **새 규칙**이다 —
+   *   나레이션 길이가 바뀌면 **자막 시각·컷 창·전체 길이가 전부 따라 움직인다**(작은 일이 아니다).
+   *   ⇒ 배워서 저장하고 `refUnused` 에 «아직 반영 안 함»으로 남긴다. 반영은 다음 라운드(R11).
+   */
+  audioTempo?: number;
 }
 export interface ShortsTemplate {
   id: number;
@@ -48,6 +73,11 @@ export interface ShortsTemplate {
 }
 
 const line = (v: unknown, cap: number): string => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, cap);
+/** 값이 하나라도 있으면 그 객체를, 전부 못 읽었으면 `undefined`. 🔴 **빈 객체를 저장하지 않는다** — «{}» 는 «읽었는데 비었다»로 읽힌다. */
+const compact = <T extends object>(o: T): T | undefined => {
+  const e = Object.entries(o).filter(([, v]) => v !== undefined);
+  return e.length ? (Object.fromEntries(e) as T) : undefined;
+};
 const slug = (v: unknown, cap: number): string =>
   String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, cap);
 
@@ -84,6 +114,37 @@ export function sanitizeTemplate(raw: unknown): { name: string; structure: strin
     hookPrinciple: line(hookRaw.principle, 80),
     camera: line(vg.camera, 240),
   };
+
+  /* [R10-6] 새 칸 — 🔴 **허용 목록 안에서만** 산다(§3.5 «금지 목록이면 새 키로 새는 구멍이 영원히 남는다»).
+     아래에 없는 키는 모델이 무엇을 실어 보내도 저장 모양에 **자리가 없다.**
+     🔴 그리고 **못 읽은 축은 키 자체를 안 만든다** — `undefined` 가 «못 읽었다»다(0·"normal" 로 메우지 않는다 · AC-92). */
+  const num = (v: unknown, lo: number, hi: number): number | undefined => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n * 100) / 100 : undefined;
+  };
+  const hex = (v: unknown): string | undefined => {
+    const s = String(v ?? "").trim();
+    return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : undefined;
+  };
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined => {
+    const s = String(v ?? "").trim().toLowerCase() as T;
+    return allowed.includes(s) ? s : undefined;
+  };
+  const ty = (vg.typography && typeof vg.typography === "object" ? vg.typography : {}) as Record<string, unknown>;
+  const cp = (vg.captionPlace && typeof vg.captionPlace === "object" ? vg.captionPlace : {}) as Record<string, unknown>;
+  const sp = (vg.speed && typeof vg.speed === "object" ? vg.speed : {}) as Record<string, unknown>;
+  const dz = (vg.design && typeof vg.design === "object" ? vg.design : {}) as Record<string, unknown>;
+
+  const typography = compact({ weight: num(ty.weight, 100, 900), strokeWidth: num(ty.strokeWidth, 0, 12), shadow: pick(ty.shadow, ["none", "soft", "hard"] as const) });
+  const captionPlace = compact({ position: pick(cp.position, ["top", "middle", "bottom"] as const), maxCharsPerLine: num(cp.maxCharsPerLine, 4, 40), accentColor: hex(cp.accentColor) });
+  const speed = compact({ secPerCut: num(sp.secPerCut, 0.5, 20), totalSec: num(sp.totalSec, 5, 180) });
+  const design = compact({ colorCount: num(dz.colorCount, 1, 8), sideMargin: num(dz.sideMargin, 0, 200) });
+  if (typography) style.typography = typography;
+  if (captionPlace) style.captionPlace = captionPlace;
+  if (speed) style.speed = speed;
+  if (design) style.design = design;
+  const tempo = num(vg.audioTempo, 0.5, 2.0);
+  if (tempo !== undefined) style.audioTempo = tempo;
   return { name: line(r.name ?? r.title ?? st.title, 80) || "구조 템플릿", structure, hookType, style };
 }
 
@@ -112,9 +173,22 @@ JSON 스키마:
     "camera": "카메라 문법(컷당 비트 수·이동 규칙)",
     "captionStyle": "자막 배치 문법",
     "pace": "호흡·컷 속도",
-    "rules": ["연출 규칙 최대 6개"]
+    "rules": ["연출 규칙 최대 6개"],
+
+    "typography":  {"weight": "자막 글자 굵기 100~900 숫자", "strokeWidth": "글자 외곽선 두께 px(없으면 0)", "shadow": "none|soft|hard"},
+    "captionPlace":{"position": "top|middle|bottom", "maxCharsPerLine": "자막 한 줄 글자 수(세어 본 값)", "accentColor": "강조 낱말 색 #RRGGBB"},
+    "speed":       {"secPerCut": "컷 하나가 머무는 초(재 본 값)", "totalSec": "영상 전체 길이 초"},
+    "design":      {"colorCount": "화면에 쓰는 색 가짓수", "sideMargin": "자막 좌우 여백 px(1080 폭 기준 환산)"},
+    "audioTempo":  "말 속도 배수 0.5~2.0(보통이면 1.0)"
   }
-}`;
+}
+
+🔴 **모르면 그 키를 빼라. 지어내지 마라.** 「보통」·「평범」으로 메운 값은 **틀린 값보다 나쁘다** —
+   우리가 그걸 «재 봤더니 그렇더라»로 믿고 영상에 그대로 넣는다.
+
+🔴 **묻지 않는 것 둘**(일부러 뺐다): **글자 등장 방식(모션)** 과 **컷 전환(디졸브·슬라이드·와이프)**.
+   우리 렌더가 낼 수 없다 — 자막은 구절당 정지 PNG 한 장이고, 씬은 이어 붙이기만 해서 전부 하드컷이다.
+   배워 와도 넣을 데가 없으니 **묻지 않는다**(물으면 토큰만 쓰고 «못 냈어요» 칸만 늘어난다).`;
 
 /** 스텁(계약 §1.4b) — 실호출 없이 고정 구조. 저장 모양·게이트는 실경로와 같게 통과시킨다. */
 function stubRaw(): unknown {
