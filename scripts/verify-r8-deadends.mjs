@@ -109,6 +109,20 @@ const TARGETS = [
   ["🔴 대표 이미지 — «필요하다»를 읽는 자리", "heroNeeded", "lib/director.ts", "네이버·티스토리 대표 이미지가 «필요하다»고 적히기만 하고 목록·검색에 빈자리로 나간다"],
   ["대표 이미지 — 자리를 정한다", "heroPlanOf", "lib/stock/plan.ts", "사진 자리가 0개인 글에 대표가 영영 안 생긴다(막지 않고 **대신 넣어 주는** 자리다)"],
   ["대표 이미지 — 어떻게 됐는지 말해 준다", "heroFactOf", "lib/stock/plan.ts", "대표가 섰는지 **고객이 볼 길이 없다** — 막지 않기로 했으면 말해 주기가 값이다(§9)"],
+  /* ── [R8CLOSE-B1 §B8] 목표 매체 → 채널 선택. 🔴 **부르는 자리가 `director.propose` 하나뿐**이라 더 죽기 쉽다. ── */
+  ["🔴 목표 매체 → 채널 순서", "targetChannelOrder", "lib/director-goal.ts", "설계 §5.3-1 의 셋째 재료(목표 매체)가 다시 0건이 되고 «목표가 뭐든 같은 채널»로 돌아간다"],
+  ["매체가 살아 있나(라이브 상태)", "mediaLiveOf", "lib/director-goal.ts", "애드센스는 러너가 `linked` 로 적는데 `approved` 만 보면 **영영 «안 붙었다»** 가 된다"],
+  ["왜 이 채널인지 한 줄", "channelReason", "lib/director.ts", "순서는 바뀌는데 **왜 바뀌었는지 아무도 못 본다**(막지 않는 대신 말해 주기로 한 값 · §9)"],
+  /* ── [R8CLOSE-B1 §B2] 페르소나 적합도 — 🔴 **양끝을 다 센다**(재는 쪽 · 배정이 쓰는 쪽). ── */
+  ["🔴 페르소나 적합도 — 잰다", "personaFitOf", "lib/persona-fit.ts", "배정이 다시 건강도·캐던스만 보게 되고 캠핑 계정과 재테크 계정에 같은 소재가 떨어진다"],
+  ["🔴 페르소나 적합도 — 배정이 쓴다", "personaFitsFor", "lib/persona-fit.ts", "재기만 하고 **순위를 안 바꾼다** — 설계 §5.3-2 의 셋째 재료가 또 장식이 된다"],
+  ["페르소나 적합도 — 가산점 천장", "personaFitBonus", "lib/persona-fit.ts", "천장 없이 더하면 적합도가 건강도를 이겨 **아픈 계정에 글이 몰린다**(순위가 아니라 게이트가 된다)"],
+  ["왜 이 계정인지 한 줄", "personaFit", "lib/director.ts", "낮아도 배정은 됐는데 **낮다는 걸 아무도 못 본다**(막지 않는 대신 말해 주기로 한 값 · §9)"],
+  /* ── [R8CLOSE-B1 §B3] 신조어 화이트리스트 — 🔴 **표·검사·프롬프트 세 끝을 다 센다**(표만 살아 있기 제일 쉬운 모양이다). ── */
+  ["🔴 신조어 표 — 검사가 본다", "slangAllowedFor", "lib/slang-whitelist.ts", "표만 있고 검사가 안 봐서, 다음 사람이 신조어를 목록에 넣는 순간 20대 글이 반려되고 재작성이 돈다(돈 두 배)"],
+  ["🔴 신조어 표 — 프롬프트가 본다", "slangPromptLine", "lib/slang-whitelist.ts", "«쓰지 마라»만 있고 «써도 된다»가 없어 20대 계정 글이 계속 무난한 말로만 나온다"],
+  ["신조어 — 값이 연령대인가", "toAgeBand", "lib/slang-whitelist.ts", "옛 데이터·오타가 그대로 흘러들어 표가 엉뚱하게 먹거나 안 먹는다"],
+  ["신조어 — 사전이 표를 받는 칸", "allowSlang", "lib/banned-words.ts", "사전이 표를 못 받아 연령대와 상관없이 모두 잡힌다(순수 리프 계약을 지키려고 import 대신 값으로 받는다)"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {
