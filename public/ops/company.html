@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>회사 정보 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=9">
+</head>
+<body class="ops">
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/plans.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">회사 정보</span><span class="sp"></span></div>
+<div class="group"><div class="gt">회사 정보 <span class="muted" style="font-weight:500">영수증 공급자 · 약관 하단 · 세금계산서가 모두 이 7칸을 읽어요</span><span id="lock"></span></div>
+<div id="state" class="muted" style="padding:0 16px 10px;font-size:13px">불러오는 중이에요…</div>
+<form id="cf" style="padding:0 4px"></form>
+</div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=7"></script>
+<script src="/js/ops.js?v=2"></script>
+<script src="/js/mock-ops.js?v=1"></script>
+<script>
+(async () => {
+const op = await OPS.boot("plans"); if (!op) return;   // 회사 정보는 최고 관리자만(읽기도) — 못 보는 역할은 boot 가 제 메뉴로 돌린다
+const F = [["name", "상호", "예: 주식회사 오토크리에이트", 80], ["ceo", "대표자", "예: 홍두현", 40], ["bizNo", "사업자등록번호", "000-00-00000", 12], ["mailOrderNo", "통신판매업 신고번호", "예: 2026-서울강남-01234", 40], ["address", "주소", "예: 서울특별시 강남구 …", 200], ["email", "메일", "예: help@autocreate.kr", 160], ["phone", "전화", "예: 02-000-0000", 30]];
+const canEdit = OPS.can(op, "super_admin");
+let names = {};
+function render(c) {
+  UI.$("#lock").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
+  const who = c.updatedBy ? (names[c.updatedBy] || `운영자 #${c.updatedBy}`) : null;
+  UI.$("#state").innerHTML = (c.configured ? '<span class="pill ok">영수증·약관에 나가요</span>' : '<span class="pill warn">아직 안 나가요</span>')
+    + ` <span style="font-weight:500">${c.configured ? "영수증 공급자와 약관 하단이 이 값을 그대로 보여 줘요." : "상호와 사업자등록번호가 있어야 영수증에 공급자가 나와요(그전엔 «준비 중»)."}</span>`
+    + (c.updatedAt ? `<br><span style="font-weight:500">마지막 수정 ${OPS.dt(c.updatedAt)}${who ? " · " + UI.esc(who) : ""}</span>` : "");
+  UI.$("#cf").innerHTML = F.map(([k, label, ph, max]) => `<div class="field"><label for="${k}">${label}</label><input class="input" id="${k}" name="${k}" maxlength="${max}" placeholder="${UI.esc(ph)}" value="${UI.esc(c[k] || "")}" autocomplete="off"><div class="help"></div></div>`).join("")
+    + `<div class="cta" style="position:static;padding:4px 12px 12px"><button class="btn primary" type="submit">저장</button></div>`;
+  UI.form(UI.$("#cf"), async (d, f) => {
+    if (!canEdit) return UI.toast("최고 관리자만 바꿀 수 있어요");
+    F.forEach(([k]) => UI.fieldError(f, k, ""));
+    const r = await UI.api("/api/ops-company", { body: Object.fromEntries(F.map(([k]) => [k, d[k] ?? ""])), noRedirect: true });
+    if (!r.ok) { const step = F.some(([k]) => k === r.step) ? r.step : "name"; UI.fieldError(f, step, r.error || "저장하지 못했어요"); const el = f.querySelector(`[name="${step}"]`); if (el) el.focus(); return; }
+    UI.toast(r.changed && r.changed.length ? `${r.changed.length}칸 저장했어요` : "바뀐 값이 없어요"); render(r);
+  });
+  OPS.lock(op, "super_admin", UI.$("#cf"));
+}
+const [c, ops] = await Promise.all([UI.api("/api/ops-company", { noRedirect: true }), UI.api("/api/ops-operators", { noRedirect: true })]);
+if (ops.ok) names = Object.fromEntries((ops.operators || ops.rows || []).map((o) => [o.id, o.name || o.email]));
+if (!c.ok) { UI.$("#state").textContent = c.error || "불러오지 못했어요"; UI.$("#cf").innerHTML = ""; } else render(c);
+})();
+</script>
+</body>
+</html>
