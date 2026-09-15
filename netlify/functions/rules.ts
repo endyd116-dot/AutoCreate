@@ -2,6 +2,7 @@
  * 편성 규칙·슬롯 API(계약 P1R1 §5 v1.1):
  *   GET  /api/rules-list                      → { rules:[Rule], settings:ScheduleSettings, coinsPerWeek, maxRules }
  *   [P1R5 B-1 수정] Rule.kind = "post" | "shorts" — 영상 채널(youtube_shorts·naver_clip·reels·threads)이면 shorts 로 저장하고 슬롯도 그 kind 로 굴러간다(글 크론이 영상 슬롯을 집지 않는다).
+ *   POST /api/rules-estimate { rules:[RuleInput] } → { coinsPerWeek, coinsPerMonth, rules, limit, overLimit, shortfallNote? }   // 🔴 아무것도 쓰지 않는다 · rules-save 와 **같은 검사·같은 식**
  *   POST /api/rules-save { rules:[RuleInput] } → { rules, coinsPerWeek, slotsCreated }   // 전체 교체(있는 id 갱신 · 없는 id 비활성) → rollSlots 1회 · 활성 > maxRules 면 step limit
  *   POST /api/rules-settings Partial<ScheduleSettings> → { settings }                   // tenant-settings.mergeSettings 재사용(같은 jsonb 한 경로)
  *   GET  /api/slots-list?from=&to=            → { slots:[Slot] }
@@ -22,7 +23,7 @@ import { mergeSettings } from "./tenant-settings";
 import { kstDateStr, addDays } from "../../lib/best-time";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/rules-list", "/api/rules-save", "/api/rules-settings", "/api/slots-list", "/api/slots-skip"] };
+export const config = { path: ["/api/rules-list", "/api/rules-save", "/api/rules-estimate", "/api/rules-settings", "/api/slots-list", "/api/slots-skip"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
@@ -63,7 +64,7 @@ export default async (req: Request): Promise<Response> => {
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
 
-    if (path.endsWith("/rules-save")) {
+    if (path.endsWith("/rules-estimate") || path.endsWith("/rules-save")) {
       const b = await readJson<{ rules?: Record<string, unknown>[] }>(req);
       const input = Array.isArray(b.rules) ? b.rules : [];
       const clean: (Omit<Rule, "id"> & { id?: number })[] = [];
@@ -104,6 +105,23 @@ export default async (req: Request): Promise<Response> => {
       }
       const maxRules = await maxRulesOf(tid);
       const activeCount = clean.filter((r) => r.active).length;
+      /* ── [R8] 견적은 **여기서 끝난다** — 검사는 저장과 똑같이 받고, 쓰기는 하나도 안 한다.
+         🔴 화면이 «편수 × 단가»를 스스로 셈하면 단가를 바꾸는 날 화면만 옛 셈으로 남는다(A 지적 · AC-47).
+            그래서 `coinsPerWeek` 를 **저장 경로와 같은 함수**에서 준다. ── */
+      if (path.endsWith("/rules-estimate")) {
+        const perWeek = coinsPerWeek(clean as Rule[]);
+        const perMonth = Math.round(perWeek * 52 / 12);
+        const included = (await tenantPlan(tid)).plan.limits.coinsIncluded;
+        const out: Record<string, unknown> = { ok: true, coinsPerWeek: perWeek, coinsPerMonth: perMonth, rules: activeCount, limit: maxRules,
+          overLimit: maxRules !== null && activeCount > maxRules };
+        /* 🔴 요금제에 든 코인으로 이 계획을 **끝까지 못 미는** 경우를 **저장 전에** 말해 준다.
+           §3b 에서 «막혔다가 아니라 속았다로 읽힌다»고 적은 그 자리다 — 달 중간에 멈추는 걸 나중에 알면 그게 속은 것이다. */
+        if (included > 0 && perMonth > included) {
+          const days = Math.max(1, Math.floor(included / Math.max(1, perWeek / 7)));
+          out.shortfallNote = `이 계획대로면 한 달에 ${perMonth}코인이 들어요. 요금제에 든 ${included}코인으로는 약 ${days}일치예요 — 코인을 채우거나 횟수를 줄여 주세요.`;
+        }
+        return json(out);
+      }
       // P1R4 §1.4 — 402 plan_limit 모양(used/limit/planKey). «저장하려는 활성 규칙 수»가 한도를 넘나(checkLimit 는 현재 수 기준이라 여기선 요청값으로 직접 잰다).
       if (maxRules !== null && activeCount > maxRules) { const [t] = await q(sql`SELECT plan_key FROM tenants WHERE id = ${tid}`); return json({ ok: false, reason: "plan_limit", step: "plan_limit", resource: "rules", used: activeCount, limit: maxRules, planKey: String(t?.plan_key ?? "trial"), error: `편성 규칙은 ${maxRules}개까지예요. Pro 로 바꾸면 제한이 없어요.` }, 402); }
       const existing = await listRules(tid);

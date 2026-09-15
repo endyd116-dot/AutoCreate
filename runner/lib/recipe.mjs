@@ -16,20 +16,34 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+/* 🔴 **`fileURLToPath` 를 쓴다 — 손으로 자르지 않는다.**
+   처음엔 `new URL(import.meta.url).pathname` 에서 앞 슬래시만 떼었는데, 그 값은 **퍼센트 인코딩된 URL 경로**다
+   (한글 폴더는 `%EC%9E%91%EC%97%85`, 공백은 `%20`). 그래서 열쇠 파일이 zip 안 제자리에 **멀쩡히 들어 있는데도**
+   러너가 못 읽었다 — 그리고 «못 읽음 = 없음 = 정상»이라 **오류 한 줄 없이 영영 폴백**이었다.
+   zip 을 실제로 풀어서 돌려 보고서야 잡혔다(2026-09-15 · 코드를 읽어서는 안 보인다). */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * 표 서명을 검증할 공개키(SPKI PEM).
- *   🔴 **아직 비어 있을 수 있다** — 열쇠를 만들기 전에는 서버도 표를 안 만들고 러너도 안 받는다.
- *      그 상태가 «고장»이 아니라 **지금 정상**이다(묶여 온 표로 돈다 · 키 꽂으면 즉시 가동).
+ *
+ *   🔴 **이 파일은 «없는 것이 정상»이다.** 리포에는 두지 않는다 —
+ *      `scripts/build-runner.mts` 가 env `RECIPE_PUBLIC_KEY` 를 읽어 **zip 을 묶을 때 써 넣는다**.
+ *      열쇠를 아직 안 만들었으면 zip 에 이 파일이 **아예 안 들어가고**, 그러면 러너는
+ *      **묶여 온 셀렉터로 그대로 잘 돈다**(발행에 지장 0). 그건 «고장»이 아니라 **키 꽂기 전의 정상 상태**다.
+ *      ⇒ 여기서 «파일이 없다»를 오류로 다루지 않는 이유가 그것이다. 조용히 빈 문자열을 돌려주고,
+ *         **왜 서버 표를 안 썼는지는 `decideRecipe` 가 문장으로 말한다**(그 문장이 보고·화면까지 간다).
+ *
+ *   🔴 개인키를 여기 두지 마라 — 이 폴더는 **고객 PC** 다. 빌드가 «PUBLIC KEY» 인지 확인하고 아니면 멈춘다.
  */
 export function publicKeyPem() {
   try {
     const p = path.join(HERE, "..", "recipe-key.pem");
     const s = fs.readFileSync(p, "utf8").trim();
+    /* 내용이 공개키가 아니면(주석만 있거나 개인키가 붙었거나) **안 쓴다** — 있는 척하지 않는다. */
     return s.includes("BEGIN PUBLIC KEY") ? s : "";
-  } catch { return ""; }
+  } catch { return ""; }   // 없음 = 정상(위 주석)
 }
 
 /** 서버(`lib/recipe.ts canonicalRecipe`)와 **글자 하나까지 같은** 정규화. 여기가 갈리면 전 러너가 폴백으로 내려앉는다. */

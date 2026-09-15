@@ -103,6 +103,11 @@ export function toTicketRow(r: Record<string, unknown>): Record<string, unknown>
     createdAt: utcDate(r.created_at)?.toISOString() ?? "", updatedAt: utcDate(r.updated_at)?.toISOString() ?? "",
   };
   if (r.assignee_id) o.assignee = { id: n(r.assignee_id), name: r.assignee_name ? String(r.assignee_name) : "" };
+  /* [R8 §4.3] 🔴 **주인 없는 문의**(앱 밖에서 왔는데 우리 고객을 못 찾은 것) — 운영자가 한 눈에 보고 집을 붙일 수 있어야 한다.
+     `tenantId: null` 만으로는 «시스템 티켓»과 구분이 안 된다. 보낸 사람이 있으면 그게 사람이 온 자리다. */
+  if (r.from_email) o.fromEmail = String(r.from_email);
+  if (r.from_name) o.fromName = String(r.from_name);
+  if (!o.tenantId && r.from_email) o.unclaimed = true;
   const sla = utcDate(r.sla_due_at); if (sla) o.slaDueAt = sla.toISOString();
   if (r.satisfaction !== null && r.satisfaction !== undefined) o.rating = n(r.satisfaction) > 0;
   return o;

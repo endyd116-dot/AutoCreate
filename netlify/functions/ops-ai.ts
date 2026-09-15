@@ -1,6 +1,7 @@
 /**
  * 운영센터 — AI 엔진(계약 P1R4 §2.2 · DESIGN §10 전문). 🔴 모델 무배포 갱신·카나리·자동/수동·원가 상한.
- *   GET  /api/ops-ai-models    → { ok, roles:[{ role, codeChain, chain, candidate, canaryPct, prevChain, candidateAt, appliedAt }], settings:{ updateMode, candidates } }
+ *   GET  /api/ops-ai-models    → { ok, roles:[{ role, codeChain, chain, candidate, canaryPct, prevChain, candidateAt, appliedAt }], settings:{ updateMode, candidates },
+ *                                  keys:{ count, perInstance:true, items:[{ label:"key#1", resting, restsUntilSec, rested, used }] } }   // [R8 §3.3] 키 로테이션 — 🔴 키 값은 안 싣는다
  *   POST /api/ops-ai-apply     { role, chain:[model], canaryPct }  → { ok, role, chain, candidate, canaryPct }   // canaryPct<100=카나리·=100=전량 적용
  *   POST /api/ops-ai-rollback  { role }                            → { ok, role, chain }                          // prev_chain 복원 + 후보 폐기
  *   POST /api/ops-ai-mode      { mode: "manual"|"auto" }           → { ok, updateMode }
@@ -19,6 +20,7 @@ import { jsonb, utcDate } from "../../lib/db-util";
 import { sql } from "drizzle-orm";
 import { callGemini } from "../../lib/ai";
 import { CHAIN_HIGH, CHAIN_LOW, CHAIN_DIRECTOR, CHAIN_LANDING_GEN, CHAIN_IMAGE, ALL_DECLARED_MODELS } from "../../lib/ai-models";
+import { aiKeyCount, aiKeyStats } from "../../lib/ai-key";   // [R8 · §3.3] 키 로테이션 — 어느 키가 몇 번 쉬었나(키 값은 안 싣는다)
 
 export const config = { path: ["/api/ops-ai-models", "/api/ops-ai-apply", "/api/ops-ai-rollback", "/api/ops-ai-mode", "/api/ops-ai-cost-cap"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
@@ -64,7 +66,11 @@ export default async (req: Request): Promise<Response> => {
       });
       // 원가 상한은 테넌트별(tenants.settings.aiCostCapKrwPerDay · B 판정) — 전역 값을 여기 싣지 않는다.
       const [s] = await q(sql`SELECT update_mode, candidates FROM ai_settings WHERE id = 'global'`);
-      return json({ ok: true, roles, settings: { updateMode: String(s?.update_mode ?? "manual"), candidates: s?.candidates ?? [] } });
+      /* [R8 · DESIGN §3.3] 🔴 **어느 키가 몇 번 쉬었나** — 운영이 보는 숫자.
+         🔴 키 값도 끝 4자도 안 싣는다. 순번(`key#2`)이면 운영자가 `GEMINI_API_KEYS` 의 몇 번째인지 안다(`lib/ai-key.ts` 헤더).
+         ⚠️ 이 숫자는 **이 함수 인스턴스가 본 것**이다(콜드 스타트마다 0). «전체 합계»가 아니라는 뜻이고, 화면도 그렇게 말해야 한다. */
+      return json({ ok: true, roles, settings: { updateMode: String(s?.update_mode ?? "manual"), candidates: s?.candidates ?? [] },
+        keys: { count: aiKeyCount(), perInstance: true, items: aiKeyStats() } });
     }
 
     // ── 여기부터 변경 = super_admin 전용(엔진은 플랫폼 설정 · 메인 결정 4) ──

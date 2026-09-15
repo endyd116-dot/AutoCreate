@@ -5,7 +5,7 @@
  *   GET  /api/runner-list                                                 → { devices:[RunnerDevice] }
  *   GET  /api/runner-download                                             → { version, bytes, sha256, filename, url(10분), expiresInSec }
  *   POST /api/runner-rotate          { id }                               → { device:{ id, name, token } }          // 옛 토큰 즉사 · 지문 초기화
- *   POST /api/runner-remove          { id }                               → { ok:true }
+ *   POST /api/runner-remove          { id, lostDevice? }                   → { ok:true, purgedKeys? }   // 🔴 lostDevice=true 면 봉인 열쇠 폐기(되돌릴 수 없다)
  *   POST /api/accounts-relogin       { id }                               → { job:{ id, status, updatedAt? } }      // §6B
  *   GET  /api/accounts-relogin?id=                                        → { job:{...}|null, account:AccountRow }
  *   [러너 토큰 x-runner-token · 지문 x-runner-fp]
@@ -26,6 +26,7 @@ import { writeAudit } from "../../lib/audit";
 import { getAccount } from "../../lib/accounts";
 import { checkLimit, tenantPlan } from "../../lib/plans";
 import { presignLatest, releaseFilename } from "../../lib/runner-release";
+import { purgeProfileKeys } from "../../lib/profile-seal";   // [P1R8 §3.1] 기기 분실 시 봉인 열쇠 폐기(훔쳐 간 봉인본을 영영 못 열게)
 import {
   registerDevice, listDevices, removeDevice, rotateDeviceToken, authRunner, heartbeat,
   claimJobs, reportJob, releaseJob, saveRunnerSession, enqueueJob, fleetState, latestSessionJob,
@@ -189,12 +190,26 @@ export default async (req: Request): Promise<Response> => {
     }
 
     if (path.endsWith("/runner-remove")) {
-      const b = await readJson<{ id?: unknown }>(req);
+      const b = await readJson<{ id?: unknown; lostDevice?: unknown }>(req);
       const id = n(b.id);
       if (!id) return badRequest("id");
       const removed = await removeDevice(tid, id);
       if (!removed) return json({ ok: false, error: "기기를 찾을 수 없어요.", step: "not_found" }, 404);
-      return json({ ok: true });
+
+      /* [P1R8 §3.1 · 설계 §4.3] 🔴 **«잃어버렸어요» 일 때만** 프로필 봉인 열쇠를 폐기한다.
+         이 순간부터 훔쳐 간 `.sealed` 는 **영원히 안 열린다** — DPAPI 로는 못 하는 일이고 이 설계의 진짜 값이다.
+         🔴 **기본 동작(그냥 기기 제거)에는 절대 붙이지 않는다** — 안 쓰는 PC 정리와 분실은 다르고,
+            붙이면 «정리했더니 전 계정이 로그아웃»이 된다.
+         🔴 **토큰 재발급(`runner-rotate`)에도 붙이지 않는다** — 거긴 «PC 를 바꿨다»에도 쓰는 문이라
+            열쇠를 지우면 멀쩡한 이사가 전 계정 재로그인이 된다(설계 §4.3).
+         대가: 그 집 계정은 **다시 로그인해야 한다.** 화면이 그 값을 먼저 말하고 고객이 누를 때만 온다. */
+      let purged = 0;
+      if (b.lostDevice === true) {
+        purged = await purgeProfileKeys(tid);
+        await writeAudit({ tenantId: tid, action: "runner_device_lost", actorType: "user", actorId: auth.user.uid, ip: clientIp(req),
+          target: `runner_device:${id}`, detail: { purgedKeys: purged }, riskLevel: "high" });
+      }
+      return json({ ok: true, ...(b.lostDevice === true ? { purgedKeys: purged } : {}) });
     }
 
     if (path.endsWith("/accounts-relogin")) {

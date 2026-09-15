@@ -1,8 +1,10 @@
 /**
  * 운영센터 · CS 메뉴(계약 §2.1 `ops-cs.ts` · §2.4(5) 행 모양 · DESIGN §11.4 CS «티켓함 + 상세 3단»). 권한: 열람·답변·담당·해결·우선순위 = operator 이상 · 매크로·FAQ 편집 = admin 이상.
- *   GET  /api/ops-tickets?status&priority&assignee&tag&q&page → { ok, tickets:[Ticket], total, page }
+ *   GET  /api/ops-tickets?status&priority&assignee&tag&q&page&source&unclaimed → { ok, tickets:[Ticket], total, page }
+ *        [R8 §4.3] `source`=app|email|kakao|system · `unclaimed=1` = 🔴 **바깥에서 왔는데 우리 고객을 못 찾은 문의**(운영자가 집을 붙여 준다)
  *   GET  /api/ops-ticket?id                                    → { ok, ticket, messages:[{ id, from, text, at, attachments?, internal? }], context, macros:[{ id, title, text }] }
  *   POST /api/ops-ticket-reply { id, text, macroId?, internal?, attachments? } → 답변(고객 앱 알림 + 대표 메일 · internal 은 운영 메모 · 첫 답변 시각)
+ *   POST /api/ops-ticket-claim  { id, tenantId }  — [R8 §4.3] 주인 없는 문의에 고객을 붙인다(맥락은 그때 새로 받아 적는다 · 이미 주인 있으면 400)
  *   POST /api/ops-ticket-assign { id, assigneeId } · /api/ops-ticket-resolve { id } · /api/ops-ticket-priority { id, priority } · /api/ops-ticket-update { id, status?, tags?, priority?, assigneeId? }
  *   GET/POST /api/ops-macros   { id?, title, text, tags?, active? }  · GET/POST /api/ops-faqs { id?, q, a, order?, public?, category? }
  *   GET  /api/ops-cs-stats    → { ok, open, avgFirstReplyMin, slaMissPct, satisfactionPct, windowDays }   (최근 30일 · 없음은 null)
@@ -18,10 +20,11 @@ import { q } from "../../lib/accounts";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { sendEmail, simpleMail, siteUrl } from "../../lib/email";
 import { createTicket, toTicketRow, ticketContext, SLA_HOURS, type TicketPriority, type TicketStatus } from "../../lib/cs";
+import { subjectWithRef } from "../../lib/cs-inbound";   // [R8 §4.3] 나가는 메일 제목의 실타래 표시 — 답장이 티켓으로 돌아오게
 import { tenantOwner } from "../../lib/subscription";
 import { pageOf } from "../../lib/ops/period";
 
-export const config = { path: ["/api/ops-tickets", "/api/ops-ticket", "/api/ops-ticket-reply", "/api/ops-ticket-assign", "/api/ops-ticket-resolve", "/api/ops-ticket-priority", "/api/ops-ticket-update", "/api/ops-ticket-create", "/api/ops-macros", "/api/ops-faqs", "/api/ops-cs-stats"] };
+export const config = { path: ["/api/ops-tickets", "/api/ops-ticket-claim", "/api/ops-ticket", "/api/ops-ticket-reply", "/api/ops-ticket-assign", "/api/ops-ticket-resolve", "/api/ops-ticket-priority", "/api/ops-ticket-update", "/api/ops-ticket-create", "/api/ops-macros", "/api/ops-faqs", "/api/ops-cs-stats"] };
 const n = (v: unknown) => Number(v || 0);
 const iso = (v: unknown) => utcDate(v)?.toISOString();
 const STATUSES: TicketStatus[] = ["open", "progress", "hold", "resolved"];
@@ -50,7 +53,9 @@ async function notifyCustomer(tid: number, ticketId: number, subject: string, ki
   const body = kind === "ticket_replied" ? `«${subject.slice(0, 40)}» 문의에 답변을 남겼어요.` : `«${subject.slice(0, 40)}» 문의를 해결로 표시했어요. 아직 문제가 있으면 다시 남겨 주세요.`;
   const link = `/app/support.html?id=${ticketId}`;
   await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${kind}, ${title}, ${body}, ${link})`);
-  try { const owner = await tenantOwner(tid); if (owner.email) await sendEmail(owner.email, `[AutoCreate] ${title}`, simpleMail(title, body, { label: "답변 보기", url: `${siteUrl()}${link}` })); } catch { /* 메일은 보조 */ }
+  /* 🔴 [R8 §4.3] 제목에 `[AC-{id}]` 를 박는다 — 고객이 이 메일에 **답장**하면 그 답장이 `cs-inbound` 에서 **이 티켓으로 돌아온다**.
+     이 글자가 없으면 답장은 대표 메일함에서 끝나고, 티켓함은 «답이 없는 고객»이라고 거짓말을 한다. */
+  try { const owner = await tenantOwner(tid); if (owner.email) await sendEmail(owner.email, subjectWithRef(`[AutoCreate] ${title}`, ticketId), simpleMail(title, body, { label: "답변 보기", url: `${siteUrl()}${link}` })); } catch { /* 메일은 보조 */ }
 }
 
 export default async (req: Request): Promise<Response> => {
@@ -66,15 +71,43 @@ export default async (req: Request): Promise<Response> => {
       const assignee = url.searchParams.get("assignee");   // 숫자 = 그 운영자 · "me" · "none"
       const s = (url.searchParams.get("q") || "").trim().toLowerCase();
       const { page, size, offset } = pageOf(url);
+      /* [R8 §4.3] 유입 경로 거르개 — 설계가 «한 목록»이라 했으니 **기본은 섞어 보여 주고**, 고르고 싶을 때만 좁힌다. */
+      const source = (url.searchParams.get("source") || "").trim();
+      /* 🔴 «주인 없는 문의» = 바깥에서 왔는데 우리 고객을 못 찾은 것. 이게 따로 안 보이면 **아무도 안 본다** —
+         그 사람은 답을 기다리는데 티켓함에서는 이름 없는 줄 하나일 뿐이다. */
+      const unclaimed = ["1", "true", "yes"].includes((url.searchParams.get("unclaimed") || "").toLowerCase());
       const assigneeSql: SQL = assignee === "me" ? sql`k.assignee_id = ${o.ops.oid}` : assignee === "none" ? sql`k.assignee_id IS NULL` : n(assignee) ? sql`k.assignee_id = ${n(assignee)}` : sql`TRUE`;
       const where: SQL = sql`(${status} = '' OR (${status} = 'unresolved' AND k.status <> 'resolved') OR k.status = ${status}) AND (${priority} = '' OR k.priority = ${priority})
         AND (${tag} = '' OR k.tags ? ${tag}) AND ${assigneeSql}
-        AND (${s} = '' OR LOWER(k.subject) LIKE ${"%" + s + "%"} OR LOWER(COALESCE(t.name, '')) LIKE ${"%" + s + "%"})`;
+        AND (${source} = '' OR COALESCE(k.source, k.channel) = ${source})
+        AND (${!unclaimed} OR (k.tenant_id IS NULL AND k.from_email IS NOT NULL))
+        AND (${s} = '' OR LOWER(k.subject) LIKE ${"%" + s + "%"} OR LOWER(COALESCE(t.name, '')) LIKE ${"%" + s + "%"} OR LOWER(COALESCE(k.from_email, '')) LIKE ${"%" + s + "%"})`;
       const [cnt] = await q(sql`SELECT COUNT(*) AS c FROM tickets k LEFT JOIN tenants t ON t.id = k.tenant_id WHERE ${where}`);
       const rows = await q(sql`${TICKET_SELECT} WHERE ${where}
         ORDER BY CASE k.status WHEN 'open' THEN 0 WHEN 'progress' THEN 1 WHEN 'hold' THEN 2 ELSE 3 END, CASE k.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, k.sla_due_at NULLS LAST, k.id DESC
         LIMIT ${size} OFFSET ${offset}`);
       return json({ ok: true, tickets: rows.map(toTicketRow), total: n(cnt?.c), page, size });
+    }
+
+    /* ── [R8 §4.3] 🔴 **주인 없는 문의에 집을 붙인다** ──
+       바깥에서 온 문의는 보낸 메일 주소로 고객을 찾는다. 못 찾으면 `tenant_id` 가 빈 채로 남는데(버리지 않으려고),
+       그 상태로는 **플랜·러너·최근 오류 같은 맥락이 하나도 없어** 운영자가 답을 못 한다.
+       그래서 운영자가 «이 집 사람이네»를 누르면 그때 붙이고, 맥락을 **그 시점에 새로 받아 적는다.**
+       🔴 이미 주인이 있는 티켓은 **바꾸지 않는다** — 남의 집 문의를 다른 집에 옮기는 길은 만들지 않는다(옮기면 그 집 사람이 남의 문의를 본다). */
+    if (path.endsWith("/ops-ticket-claim")) {
+      if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
+      const b = await readJson<{ id?: unknown; tenantId?: unknown }>(req);
+      const id = n(b.id), tenantId = n(b.tenantId);
+      if (!id || !tenantId) return badRequest("티켓과 고객을 골라 주세요.", "id");
+      const [k] = await q(sql`SELECT id, tenant_id, from_email FROM tickets WHERE id = ${id}`);
+      if (!k) return json({ ok: false, error: "티켓을 찾을 수 없어요.", step: "not_found" }, 404);
+      if (k.tenant_id) return json({ ok: false, step: "already", error: "이미 고객이 연결된 문의예요." }, 400);
+      const [t] = await q(sql`SELECT id, name FROM tenants WHERE id = ${tenantId}`);
+      if (!t) return json({ ok: false, error: "그 고객을 찾을 수 없어요.", step: "tenant" }, 404);
+      const context = await ticketContext(tenantId);
+      await q(sql`UPDATE tickets SET tenant_id = ${tenantId}, context = ${jsonb(context)}, updated_at = NOW() WHERE id = ${id}`);
+      await writeAudit({ tenantId, action: "ops_ticket_claim", actorType: "operator", actorId: o.ops.oid, ip, target: `ticket:${id}`, detail: { fromEmail: k.from_email ? String(k.from_email) : null } });
+      return json({ ok: true, ticketId: id, tenantId, tenantName: String(t.name ?? "") });
     }
 
     /* ── 상세 3단 ── */

@@ -15,6 +15,9 @@ export const tenants = pgTable("tenants", {
   status:      varchar("status", { length: 16 }).notNull().default("trial"),
   trialEndsAt: timestamp("trial_ends_at"),
   settings:    jsonb("settings").notNull().default({}),
+  /** [R8 §3.3 · B2 · drizzle/0051] 🔴 «먼저 받아 볼래요» 옵트인 — **기본 꺼짐**. 옵트인 없이 고객을 카나리로 쓰지 않는다.
+   *  AI 모델 카나리와 다른 점: 저쪽은 우리 서버 안에서 글자만 바뀌지만, recipe 는 **남의 계정에서 버튼을 누른다.** */
+  recipeVolunteer: boolean("recipe_volunteer").notNull().default(false),
   createdAt:   timestamp("created_at").notNull().defaultNow(),
   updatedAt:   timestamp("updated_at").notNull().defaultNow(),
 });
@@ -998,3 +1001,77 @@ export const pieceOutcomes = pgTable("piece_outcomes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({ tenantIdx: index("piece_outcomes_tenant_idx").on(t.tenantId, t.id) }));
+
+
+/* === Phase R8 §3.3 (B2 · drizzle/0051-r8-recipe.sql) === */
+
+/**
+ * [R8 §3.3 · B2 2026-09-15] 셀렉터 표(recipe) — 러너가 «무엇을 누를지»를 서버가 내려 준다.
+ *   🔴 **한 번 올린 version 의 내용은 안 바꾼다** — «같은 버전인데 다른 표»가 돌면 사고 때 무엇이 돌았는지 영영 모른다.
+ *   `body` 는 서명(Ed25519)까지 붙은 채로 러너에 **그 값 그대로** 내려간다.
+ */
+export const recipes = pgTable("recipes", {
+  version:    varchar("version", { length: 40 }).primaryKey(),
+  channel:    varchar("channel", { length: 24 }).notNull(),
+  minRunner:  varchar("min_runner", { length: 20 }).notNull().default("0.0.0"),
+  body:       jsonb("body").notNull(),
+  rollbackTo: varchar("rollback_to", { length: 40 }),
+  note:       varchar("note", { length: 300 }),
+  createdAt:  timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({ channelIdx: index("recipes_channel_idx").on(t.channel, t.createdAt) }));
+
+/**
+ * [R8 §3.3 · B2] 채널마다 «지금 퍼진 판»과 «시험 중인 판».
+ *   🔴 `stage` = canary → own → volunteer → all. **넓히는 것은 KST 평일 10~18시에만, 좁히는 것은 언제나.**
+ *   `current_version` 이 NULL 이면 러너는 zip 에 묶여 온 표로 일한다(정상 동작이지 실패가 아니다).
+ */
+export const recipeRollouts = pgTable("recipe_rollouts", {
+  channel:          varchar("channel", { length: 24 }).primaryKey(),
+  currentVersion:   varchar("current_version", { length: 40 }),
+  candidateVersion: varchar("candidate_version", { length: 40 }),
+  stage:            varchar("stage", { length: 12 }).notNull().default("canary"),
+  stageSince:       timestamp("stage_since").notNull().defaultNow(),
+  promotedAt:       timestamp("promoted_at"),
+  rolledBackAt:     timestamp("rolled_back_at"),
+  rollbackReason:   varchar("rollback_reason", { length: 300 }),
+  updatedAt:        timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** [R8 §3.3 · B2] 기존 표에 더한 칸 — 선언만(값은 B2 코드가 쓴다). */
+export const canaryRunsR8 = {
+  /** 이 카나리가 **어느 표를 시험했나**. 없으면 «오늘 통과했다»가 어느 판에 대한 말인지 모르는 말이 된다. */
+  recipeVersion: "recipe_version",   // varchar(40)
+  stage: "stage",                    // varchar(12)
+} as const;
+
+export const runnerJobsR8 = {
+  /**
+   * 🔴 이 잡이 **실제로 쓴 셀렉터 표**. NULL = 묶여 온 표로 돌았다.
+   *   자동 복귀 판정의 **유일한 정직한 근거**다 — 없으면 «셀렉터가 깨졌다»를 보고도
+   *   새 표 탓인지 옛 표 탓인지 구분할 수 없고, 멀쩡한 판을 되돌리거나 깨진 판을 안 되돌린다.
+   */
+  recipeVersion: "recipe_version",   // varchar(40) · index (recipe_version, status)
+} as const;
+
+
+/* === Phase 1 R8 · B(CS 바깥 유입 · P1R8-B §4.3 · 2026-09-15 · drizzle/0031-r8-cs-inbound.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   `tickets.channel` 에 email·kakao 값은 처음부터 있었는데 **그 길로 들어올 문이 없었다** — 답변 메일에 온 답장은 대표 메일함에서 끝났다.
+ *   새 표 0 · 전부 추가 칸.
+ */
+export const ticketsR8 = {
+  /** 바깥 대화의 실타래 id(메일 스레드·카카오 방). 같은 값이면 **같은 티켓에 이어 붙인다**. */
+  externalRef: "external_ref",
+  /** 🔴 테넌트를 못 찾은 유입의 보낸 사람 — **못 찾았다고 버리지 않는다**(버리면 그 사람은 답을 영영 못 받는다). */
+  fromEmail: "from_email",
+  fromName: "from_name",
+  externalRefIdx: "tickets_external_ref_idx",
+  unclaimedIdx: "tickets_unclaimed_idx",
+} as const;
+
+export const ticketMessagesR8 = {
+  /** 🔴 공급사 메시지 id — **멱등의 전부**. 메일·카카오 웹훅은 재시도가 규격이라 이 유일 제약이 없으면 한 통이 세 번 붙는다. */
+  externalId: "external_id",
+  externalUniq: "ticket_messages_external_uniq",
+  /** 그 말이 들어온 길(app|email|kakao|ops). 한 티켓 안에 길이 섞일 수 있어 **줄마다** 적는다. */
+  source: "source",
+} as const;

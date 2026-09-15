@@ -17,6 +17,7 @@
  */
 import { jobKindOf as registryJobKindOf } from "./channel-registry";   // [P1R8 §5.2] 러너 잡 이름 정본(순수 리프 · 순환 0)
 import { recipeForRunner } from "./recipe-store";                      // [P1R8 §3.3] 셀렉터 표 — claim 에 실어 보낸다
+import { ensureProfileKey, sealWantedFor } from "./profile-seal";       // [P1R8 §3.1] 프로필 봉인 열쇠(약하다고 «잰» 기기에만)
 import type { SignedRecipe } from "./recipe";
 import crypto from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
@@ -147,6 +148,12 @@ export interface RunnerJobAccount {
   expectExitIp?: string;
   /** 저장된 세션 쿠키(있으면 로그인 단계를 건너뛴다). */
   cookies?: unknown[];
+  /**
+   * [P1R8 §3.1] 🔴 **프로필 봉인 열쇠**(hex 64자 · 이 잡에만). 있으면 러너가 잡 시작에 프로필을 풀고 끝에 다시 봉한다.
+   *   없으면 **아무것도 안 한다**(지금까지와 같은 동작) — 없는 게 정상인 기기가 대부분이다(설계 §5: 약한 기기부터).
+   *   🔴 쿠키가 이미 가는 그 길에 실어 **평문 표면을 늘리지 않는다**(DESIGN §7.1 «평문 표면 2곳»).
+   */
+  profileSealKey?: string;
   /** 자동 로그인용 아이디/비밀번호(쿠키가 없거나 만료됐을 때).
    *   method — 로그인 방식. 티스토리는 «카카오 계정» 경유가 다수라 러너가 길을 갈라야 한다(실측 2026-09-14). */
   login?: { id: string; pw: string; method?: "self" | "kakao" };
@@ -580,7 +587,7 @@ export async function enqueueJob(inp: EnqueueInput): Promise<{ id: number; creat
 /* ─────────────────────────── 선점(claim) ─────────────────────────── */
 
 /** 계정 자격 복호화 — 🔴 claim 전용. 반환값은 응답 본문 외 어디에도 쓰지 않는다(로그 금지). */
-async function loadAccountForRunner(tid: number, accountId: number): Promise<RunnerJobAccount | null> {
+async function loadAccountForRunner(tid: number, accountId: number, sealCaps?: unknown): Promise<RunnerJobAccount | null> {
   /* 프록시는 두 자리에서 온다(계약 §2.5): 새 방식 `accounts.proxy_id → proxies`(암호문) · 옛 방식 `accounts.proxy_url`(평문 칸).
      🔴 옛 칸을 지우지 않는다 — 쓰던 계정이 그대로 돌아야 한다(소급 0). 새 배정이 있으면 그것을 **우선**한다. */
   const [a] = await q(sql`SELECT a.id, a.channel, a.handle, a.browser_profile_key, a.proxy_url, a.proxy_id,
@@ -613,6 +620,15 @@ async function loadAccountForRunner(tid: number, accountId: number): Promise<Run
     const o = decryptObj<{ cookies?: unknown[] }>(String(c.enc ?? ""));
     if (o && Array.isArray(o.cookies) && o.cookies.length) out.cookies = o.cookies;
   }
+  /* [P1R8 §3.1] 봉인 열쇠 — 🔴 **이 기기가 «약하다»고 잰 경우에만**(설계 §5 · `sealWantedFor`).
+     Windows·맥은 OS 가 이미 기기에 묶어 잠그므로 켜 봐야 «폐기 가능성»만 얻고 **잃을 것(봉인이 깨져 로그인 상실)은 그대로**다.
+     🔴 «리눅스면»이 아니라 «**약하다고 쟀으면**»이다 — 추정이 아니라 측정으로 고른다(AC-57).
+     ⚠️ 실패해도 던지지 않는다 — 열쇠를 못 만들었다고 발행을 멈추면 그게 §4.2 fail-open 을 어기는 첫 자리다. */
+  if (sealCaps !== undefined && sealWantedFor(sealCaps)) {
+    try { const k = await ensureProfileKey(tid, accountId); if (k) out.profileSealKey = k; }
+    catch (e) { console.warn("[runner-jobs] 봉인 열쇠 발급 실패(봉인 없이 진행)", String((e as Error)?.message ?? e).slice(0, 120)); }
+  }
+
   /* ② 🔴 쿠키가 유효하면 id/pw 는 **싣지 않는다**(메인 조건 (나) 2026-09-14).
         평문 표면은 «필요할 때만» 열린다 — 세션이 살아 있는데 비밀번호까지 내보낼 이유가 없다. */
   if (!out.cookies) {
@@ -683,9 +699,11 @@ export async function claimJobs(
   if (!want.length) return [];
   /* 표를 고르는 재료 — 러너 판(minRunner 비교)과 «먼저 받아 볼래요» 옵트인. 한 번만 묻는다.
      🔴 관리형 기기는 `tenant_id` 가 NULL 이라 LEFT JOIN 이어야 한다(INNER 로 하면 관리형이 통째로 사라진다). */
-  const [dev] = await q(sql`SELECT d.version, t.recipe_volunteer
+  const [dev] = await q(sql`SELECT d.version, d.caps, t.recipe_volunteer
      FROM runner_devices d LEFT JOIN tenants t ON t.id = d.tenant_id WHERE d.id = ${device.id} LIMIT 1`);
   const runnerVersion = String(dev?.version ?? "");
+  /* [P1R8 §3.1] 이 기기가 스스로 잰 «로그인 정보 보관 상태» — 봉인을 켤지 여기서 갈린다(위 profileSealKey 주석). */
+  const deviceCaps = dev?.caps ?? null;
   const tenantVolunteer = dev?.recipe_volunteer === true;
   const dryRunClaim = opts.canary === true;
   const lim = Math.min(Math.max(1, Math.floor(Number(max) || 1)), 10);
@@ -741,7 +759,7 @@ export async function claimJobs(
       job.payload = signed as RunnerPayload;
     }
     if (accountId) {
-      job.account = await loadAccountForRunner(device.tenantId, accountId);
+      job.account = await loadAccountForRunner(device.tenantId, accountId, deviceCaps);
       /* 🔴 자격 평문이 실제로 실린 건에 대해서만 **계정 1건당 1행** 감사(메인 조건 (가) 2026-09-14).
             무엇이 나갔는지는 남기지 않는다 — 나갔다는 «사실»과 종류(cookies/login)만. */
       if (job.account && (job.account.cookies || job.account.login)) {
@@ -815,7 +833,13 @@ export interface RunnerReportFail { ok: false; errorKind?: unknown; detail?: str
  *   `recipeVersion` 이 **없으면 묶여 온 표**로 돈 것이다 — 그것도 사실이라 `runner_jobs.recipe_version` 이 NULL 로 남는다.
  */
 export interface RunnerRecipeReport { recipeVersion?: string; recipeFellBack?: string }
-export type RunnerReportBody = (RunnerReportOk | RunnerReportFail) & RunnerRecipeReport;
+/**
+ * [P1R8 §3.1] 봉인이 **깨진 채 돌았다**는 사실. 🔴 성공한 잡에도 실린다 —
+ *   fail-open 이라 발행은 되지만, 그러면 그 잡 동안 **로그인이 평문으로 놓여 있었다**.
+ *   조용히 지나가면 «봉인을 켰다»고 믿는 채로 몇 주가 간다(§9 «말해 주기» · 설계 §4.2).
+ */
+export interface RunnerSealReport { sealNote?: string }
+export type RunnerReportBody = (RunnerReportOk | RunnerReportFail) & RunnerRecipeReport & RunnerSealReport;
 
 export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found" | "private"; block?: RunnerBlock }
 
@@ -967,6 +991,11 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     /* 🔴 «표를 줬는데 안 썼다»는 **조용하면 안 된다**(설계 §6.2) — 안 남기면 «전부 새 표를 쓰는 줄» 안다. */
     if (fb) await writeAudit({ tenantId: tid, action: "recipe_fell_back", actorType: "system", target: `runner_job:${jobId}`,
       detail: { deviceId: device.id, why: fb }, riskLevel: "medium" }).catch(() => {});
+    /* [P1R8 §3.1] 🔴 봉인이 깨진 채 돌았으면 남긴다 — 성공·실패 가르기 **전**이라 어느 갈래로 나가도 빠지지 않는다.
+       발행은 막지 않는다(fail-open) 대신 **우리가 안다**. 안 남기면 «켰다»고 믿는 채로 몇 주가 간다. */
+    const sn = String((result as RunnerSealReport).sealNote ?? "").slice(0, 200);
+    if (sn) await writeAudit({ tenantId: tid, action: "profile_seal_failed", actorType: "system", target: `runner_job:${jobId}`,
+      detail: { deviceId: device.id, accountId: accountId || null, why: sn }, riskLevel: "high" }).catch(() => {});
   }
 
   /* ── 실패(parse) — 계약 P1R3 §2.1 · 우리 버그 · 계정 전이 0 · 0 으로 채우지 않는다(AC-9) ── */

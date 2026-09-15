@@ -15,7 +15,7 @@
  *   🔴 만든 zip 을 **되읽어 원본과 바이트 대조**한 뒤에만 올린다(PITFALLS #9 — 「만들었다」는 「열린다」가 아니다).
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { contentDisposition, r2Configured, r2Head, r2Put, R2_BUCKET } from "../lib/r2";
@@ -93,6 +93,51 @@ async function main() {
   if (!entries.length) throw new Error("넣을 파일이 하나도 없어요(경로가 맞나요?)");
   for (const must of ["ac-runner.mjs", "core.mjs", "package.json", "run.bat", "run.sh", "install.md", "lib/api.mjs", "lib/zip.mjs", "lib/update.mjs"]) {
     if (!entries.some((e) => e.name === must)) throw new Error(`꼭 있어야 할 «${must}» 가 빠졌어요 — 이 zip 으로는 러너가 못 돕니다.`);
+  }
+
+  /* ═══ [P1R8 §3.3] 🔴 셀렉터 표 검증용 **공개키는 리포가 아니라 env 에서** zip 으로 들어간다 ═══
+     왜 파일로 안 두나(메인 지적 2026-09-15):
+       · 빈 자리를 리포에 두면 언젠가 누가 거기에 **개인키**를 붙여 넣고 그대로 깃에 올라간다.
+         **빈 자리는 사고를 막는 게 아니라 사고의 자리를 만들어 두는 것**이다.
+       · 도구는 이름부터 본다 — `.pem` 이 있다는 것만으로 푸시가 «열쇠 유출»로 막힌다(실제로 막혔다).
+     그리고 🔴 **파일로 뒀으면 애초에 닿지도 않았다**: `.pem` 은 `ALLOW_EXT` 밖이라 zip 에서 **통째로 빠졌다**
+     (실측: «건너뜀(확장자 밖): recipe-key.pem»). 공개키를 붙여 넣어도 러너엔 영영 안 갔을 것이다 —
+     내가 방금 만든 죽은 통로였다(AC-69 · «양끝은 있는데 가운데가 없다»).
+     ⇒ env 에서 읽어 **여기서 만들어 넣는다**. 공개키와 개인키가 **같은 env 짝**이라 «공개키만 옛날 것»이 생길 수 없다.
+     ⇒ env 가 비면 **파일 자체를 안 넣는다** — 러너는 묶여 온 표로 그대로 돈다(정상 상태 · 발행 지장 0). */
+  /* ⚠️ env 칸에 줄바꿈을 못 넣는 곳이 있어 «백슬래시 n» 으로 적어 오는 경우가 있다 — 그걸 진짜 줄바꿈으로 되돌린다.
+     🔴 이 한 줄을 스크립트로 깁다가 이스케이프를 먹혀 **파일을 두 번 깨뜨렸다**(AC-67) —
+        그래서 정규식을 `String.raw` 로 박아 둔다. 다음 사람도 여기서 같은 실수를 한다. */
+  const pubPem = String(process.env.RECIPE_PUBLIC_KEY ?? "").split(String.raw`\n`).join("\n").trim();
+  if (pubPem) {
+    /* 🔴 **개인키면 빌드를 세운다.** 이 zip 은 고객 PC 로 간다 — 여기서 못 막으면 막을 자리가 없다.
+       (아래 비밀 스캔도 한 번 더 잡지만, 그건 «무엇이 들어갔나»를 보는 그물이고 이건 «무엇을 넣는가»의 문이다.) */
+    if (!pubPem.includes("BEGIN PUBLIC KEY") || /BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY/.test(pubPem)) {
+      console.error("");
+      console.error("  ✗ RECIPE_PUBLIC_KEY 가 공개키가 아니에요 — 빌드를 세웁니다(«-----BEGIN PUBLIC KEY-----» 로 시작해야 합니다).");
+      process.exit(1);
+    }
+    entries.push({ name: "recipe-key.pem", data: Buffer.from(`${pubPem}\n`, "utf8"), mode: 0o644 });
+    /* 🔴 **넣었다 ≠ 러너가 읽는다.** 2026-09-15 실측: 열쇠가 zip 안 **제자리에 멀쩡히 들어 있는데도**
+       러너가 못 읽었다 — `import.meta.url` 의 pathname 을 손으로 잘라 써서 퍼센트 인코딩(한글 폴더·공백)이
+       그대로 남았기 때문이다. 그리고 «못 읽음 = 없음 = 정상»이라 **오류 한 줄 없이 영영 폴백**이었다.
+       ⇒ 러너가 실제로 쓰는 그 함수(`publicKeyPem`)를 **여기서 불러 본다**. «zip 에 있나»가 아니라 «**읽히나**»다.
+       리포에 `.pem` 을 안 두므로(gitignore) 이 자리에서 잠깐 써 보고 지운다 — 다른 길이 없다. */
+    const probe = await import(pathToFileURL(path.join(RUNNER, "lib/recipe.mjs")).href) as { publicKeyPem: () => string };
+    const keyPath = path.join(RUNNER, "recipe-key.pem");
+    const had = existsSync(keyPath);
+    if (!had) writeFileSync(keyPath, `${pubPem}\n`, "utf8");
+    const readable = probe.publicKeyPem();
+    if (!had) { try { unlinkSync(keyPath); } catch { /* 못 지워도 빌드를 막지 않는다(gitignore 가 받쳐 준다) */ } }
+    if (!readable) {
+      console.error("");
+      console.error("  ✗ 공개키를 넣었는데 **러너가 그 파일을 못 읽습니다** — 경로 계산이 틀렸어요(runner/lib/recipe.mjs publicKeyPem).");
+      console.error("    이대로 내보내면 셀렉터 표가 **영영 조용히 안 먹습니다**. 빌드를 세웁니다.");
+      process.exit(1);
+    }
+    console.log("   · 셀렉터 표 공개키를 넣었습니다(env RECIPE_PUBLIC_KEY · 러너가 읽는 것까지 확인 ✓)");
+  } else {
+    console.log("   · 셀렉터 표 공개키 없음 → 러너는 묶여 온 셀렉터로 돕니다(정상 · 발행 지장 없음)");
   }
 
   const leaks = scanSecrets(entries);
