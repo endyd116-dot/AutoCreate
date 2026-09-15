@@ -34,6 +34,24 @@ export type ConnectMethod = "session" | "app_password" | "oauth";
 export type PublishVia = "api" | "runner";
 export type ChannelKindAxis = "text" | "video";
 
+/* ═══ [R9-4 · B · 2026-09-16] 🔴 채널이 **낼 수 있는 꾸밈** 표 (설계 §2.1d · §2.1e) ═══
+ *   근거: 네이버·티스토리는 형광펜이 되고 **쓰레드는 글자뿐**이며 **AM 당근 러너에는 서식이 0건**이다 — 「서식은 채널마다 다르다」가 AM 에서 사실로 서 있다.
+ *   앞 여섯(bold·underline·italic·value·line·row)은 `lib/blocks.ts MarkKind` 와 **같은 글자**다(B2·A 합의 어휘). 뒤는 블록 요소(러너가 에디터 실요소로 내릴 수 있나).
+ *   🔴 **모르면 `null`** — 이 파일의 사상 그대로(«추측 폴백 제거 · 모르면 null»). `false` 는 «확인했고 못 낸다», `null` 은 «아직 안 재 봤다».
+ *      «모른다»를 «false»로 바꾸면 화면이 «못 내요»라고 거짓말을 한다(AC-92). 러너가 올려 보고 발행 뒤 `formatMarks` 에 적는다.
+ *   읽는 곳: `blocks.ts markRendererFor`(false 는 태그를 벗긴다) · `content-gen.ts`(true 인 종류만 모델에게 시킨다) · `pieces-get.formatCaps`(화면) · 러너 payload. */
+export type FormatCapKey = "bold" | "underline" | "italic" | "value" | "line" | "row" | "emoji" | "quote" | "table" | "checklist" | "faq" | "toc" | "divider" | "image" | "place";
+export const FORMAT_CAP_KEYS: readonly FormatCapKey[] = ["bold", "underline", "italic", "value", "line", "row", "emoji", "quote", "table", "checklist", "faq", "toc", "divider", "image", "place"];
+/** 인라인 마크 여섯(= `blocks.ts MarkKind`) — 표 안의 앞 여섯 칸. 모델에게 시킬 수 있는 종류를 고를 때 이 목록만 본다. */
+export const INLINE_MARK_CAP_KEYS: readonly FormatCapKey[] = ["bold", "underline", "italic", "value", "line", "row"];
+export type FormatCaps = Record<FormatCapKey, boolean | null>;
+/** 표 한 행 만들기 — `base` 로 전부 채우고 `over` 만 덮는다. */
+function caps(over: Partial<FormatCaps>, base: boolean | null): FormatCaps {
+  const o = {} as FormatCaps;
+  for (const k of FORMAT_CAP_KEYS) o[k] = k in over ? (over[k] as boolean | null) : base;
+  return o;
+}
+
 export interface ChannelSpec {
   /** DB `channel_registry.key` 와 같은 글자. */
   key: string;
@@ -68,42 +86,61 @@ export interface ChannelSpec {
    *   커넥터가 붙는 라운드에 이 칸을 true 로 바꾼다.
    */
   textGen: boolean;
+  /**
+   * [R9-4] 🔴 이 채널이 **낼 수 있는 꾸밈**(위 `FormatCaps`). `null` = 표 자체가 없다(영상 채널 · 화면을 한 번도 안 연 러너 채널).
+   *   칸 하나가 `null` = 그 종류는 아직 안 재 봤다. 러너 채널의 값은 **B2 실측**(2026-09-16 · naver_blog)이고, HTML 채널은 우리가 태그를 직접 보내므로 «낼 수 있다».
+   */
+  formatCaps: FormatCaps | null;
   /** 사람이 읽는 메모(왜 null 인지 등) — 화면에 쓰지 않는다. */
   note?: string;
 }
+
+/* ─── [R9-4] 채널 부류별 표 — 행에 그대로 붙인다(부류가 같으면 같은 표 · 채널 이름으로 분기하지 않는다) ─── */
+/** 네이버 블로그(러너 · B2 실측 2026-09-16): value·line·row·bold·underline ✅(선택 적용 경로 · 캐럿 토글 안 씀) · 글자색/배경색은 네이버 팔레트 중 가장 가까운 색을 러너가 고른다(헥사 지정 불가 · AM 실측).
+ *  🔴 italic 은 **false** — «못 낸다»가 아니라 **«안 낸다»**다(B2 2026-09-16): 낼 수는 있지만 기울임은 발행 직전 자가검사(`measureFormatBleed`)가 **번짐 증상으로 세는 축**이라
+ *     우리가 일부러 켜면 우리 글을 우리가 잡아 발행이 멈춘다(계약의 두 부분이 싸우는 자리 · 9/15 `visualMin.faq` 사고와 같은 모양). 아는 것을 null 로 두면 그게 AC-92 의 반대 방향이다.
+ *  블록 요소: AM op 어휘가 title·heading·para·quote·image·divider·tagline 이라 quote·divider·image 는 되고, table·checklist·faq·toc·place 는 B2-3(18종→7종 내리기) 결과로 채운다 — 그때까지 null. */
+const CAPS_NAVER: FormatCaps = caps({ bold: true, underline: true, value: true, line: true, row: true, italic: false, emoji: true, quote: true, divider: true, image: true }, null);
+/** 티스토리(러너): 이번 라운드에 B2 가 잰다 — 이모지(타자)만 true, 나머지 **모른다**(null). «모른다»를 false 로 바꾸지 않는다(AC-92). */
+const CAPS_TISTORY: FormatCaps = caps({ emoji: true }, null);
+/** HTML 을 우리가 직접 보내는 채널(블로거·워드프레스): 태그(`<mark>`·`<u>`·`<em>`·`<strong>`·표·목록·인용)를 그대로 싣는다 — 워드프레스 KSES 허용 목록에 mark·u·em·strong·table 이 있고 블로거는 HTML 을 그대로 받는다. 테마가 어떻게 그리느냐는 우리 밖. */
+const CAPS_HTML: FormatCaps = caps({}, true);
+/** 글자만 받는 API 채널(쓰레드·X·페이스북·인스타 캡션): 꾸밈 태그가 **없다**(플랫폼 사실 · 우리 판단 아님). 이모지·사진만 된다. */
+const CAPS_PLAIN: FormatCaps = caps({ emoji: true, image: true }, false);
 
 /**
  * 채널 성질 표 — **행 하나 = 채널 하나**.
  *   순서는 «글 먼저 · 영상 나중»(화면 정렬은 DB `sort` 가 따로 정한다).
  */
 export const CHANNELS: readonly ChannelSpec[] = [
-  { key: "naver_blog", connect: "session", publishVia: "runner", jobKind: "publish.naver_blog", retractVia: "runner", axis: "text", textGen: true },
-  { key: "tistory", connect: "session", publishVia: "runner", jobKind: "publish.tistory", retractVia: "runner", axis: "text", textGen: true },
-  { key: "blogger", connect: "oauth", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true },
-  { key: "wordpress", connect: "app_password", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true },
-  { key: "threads", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: true, note: "글·영상 둘 다 올린다(축은 글로 센다 · lib/video/types 의 영상 채널 목록과 다른 축)" },
+  { key: "naver_blog", connect: "session", publishVia: "runner", jobKind: "publish.naver_blog", retractVia: "runner", axis: "text", textGen: true, formatCaps: CAPS_NAVER },
+  { key: "tistory", connect: "session", publishVia: "runner", jobKind: "publish.tistory", retractVia: "runner", axis: "text", textGen: true, formatCaps: CAPS_TISTORY },
+  { key: "blogger", connect: "oauth", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true, formatCaps: CAPS_HTML },
+  { key: "wordpress", connect: "app_password", publishVia: "api", jobKind: null, retractVia: "api", axis: "text", textGen: true, formatCaps: CAPS_HTML },
+  { key: "threads", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: true, formatCaps: CAPS_PLAIN, note: "글·영상 둘 다 올린다(축은 글로 센다 · lib/video/types 의 영상 채널 목록과 다른 축)" },
   /* [P1R8 §3.4] 피드·카드뉴스 커넥터가 생겼다(`lib/publish/instagram.ts publishInstagramFeed` — 사진 1장 / 캐러셀 2~10장).
      🔴 `textGen` 은 **아직 false** 다 — 글 계약에 format 이 1종뿐이라 10편 중 9편이 «골격 75% 이상 겹침»에 걸린다(B-1 실측).
         카드뉴스 계약이 보강된 뒤에 켠다. «올릴 수 있다»와 «써 줄 수 있다»는 다른 칸이다. */
-  { key: "instagram", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: false, note: "피드·카드뉴스 발행 O · 🔴 인스타 API 에는 **삭제가 없다** → retract 는 null(직접 내려 주세요). textGen 은 카드뉴스 계약 보강 후." },
+  { key: "instagram", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "text", textGen: false, formatCaps: CAPS_PLAIN, note: "피드·카드뉴스 발행 O · 🔴 인스타 API 에는 **삭제가 없다** → retract 는 null(직접 내려 주세요). textGen 은 카드뉴스 계약 보강 후." },
   /* [P1R8 §3.4] 페이스북 페이지 — 글·사진(설계 §2.1 P3). 삭제는 `DELETE /{post-id}` 로 **된다**(페이지 토큰). */
-  { key: "facebook", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, note: "페이지 글·사진. 🔴 발행은 **페이지 토큰**으로 한다(사용자 토큰 아님 · lib/publish/facebook.ts 머리말). textGen 은 페북용 글 계약이 생긴 뒤." },
+  { key: "facebook", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, formatCaps: CAPS_PLAIN, note: "페이지 글·사진. 🔴 발행은 **페이지 토큰**으로 한다(사용자 토큰 아님 · lib/publish/facebook.ts 머리말). textGen 은 페북용 글 계약이 생긴 뒤." },
   /* [P1R8 §3.4] X(트위터) — 설계 §2.1 «API(유료) · P4 선택». 🔴 한글은 한 자가 2로 세어진다(lib/publish/x.ts weightedLen). */
-  { key: "x", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, note: "쓰기가 유료 플랜이다. 삭제는 DELETE /2/tweets/{id} 로 된다. 영상은 아직 못 올린다(글·사진만)." },
+  /* [R9-9 · B2 2026-09-16] X 영상 — 옛 주석 «영상은 사진과 다른 처리 대기 단계가 붙는다» 는 틀렸다: initialize/append/finalize 는 사진과 **똑같고** 영상만 finalize 응답에 processing_info 가 붙는다 ⇒ «없는 길»이 아니라 «안 만든 길»이라 만들었다(`lib/publish/x.ts`). 우리 키 실호출은 아직(X 계정 0 · AC-50). */
+  { key: "x", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, formatCaps: CAPS_PLAIN, note: "쓰기가 유료 플랜이다. 삭제는 DELETE /2/tweets/{id} 로 된다. 영상은 2026-09-16 에 열었다 — 사진과 같은 청크 업로드에 «처리 대기» 한 단계를 더한 것이라 «없는 길»이 아니라 «안 만든 길»이었다(우리 키로 실호출 검증은 아직)." },
   /* [P1R8 §3.4] 브런치 — 🔴 **일부러 null** 이다. 아래 «못 채운 칸» 주석 참조. */
-  { key: "brunch", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 러너 채널인데 **셀렉터를 한 번도 못 쟀다**(작가 승인 계정이 없어 화면을 연 적이 없다). 추측으로 채우지 않는다 — 아래 주석." },
-  { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
+  { key: "brunch", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, formatCaps: null, note: "🔴 러너 채널인데 **셀렉터를 한 번도 못 쟀다**(작가 승인 계정이 없어 화면을 연 적이 없다). 추측으로 채우지 않는다 — 아래 주석." },
+  { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
   /* [P1R8 §3.4] 유튜브 롱폼 — 쇼츠와 **같은 `videos.insert`**(lib/publish/youtube.ts publishYoutube · 주소만 다르다).
      🔴 쿼터는 채널이 아니라 **구글 프로젝트** 단위라 쇼츠와 합산해 센다(todayUploads). */
-  { key: "youtube_long", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "쇼츠와 같은 API·같은 동의·같은 쿼터. retract 는 쇼츠와 같은 이유로 null." },
-  { key: "naver_clip", connect: "session", publishVia: "runner", retractVia: null, jobKind: "publish.naver_clip", axis: "video", textGen: false, note: "러너 스텁 — 잡은 쌓이되 사람이 올린다(§2.3)" },
+  { key: "youtube_long", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "쇼츠와 같은 API·같은 동의·같은 쿼터. retract 는 쇼츠와 같은 이유로 null." },
+  { key: "naver_clip", connect: "session", publishVia: "runner", retractVia: null, jobKind: "publish.naver_clip", axis: "video", textGen: false, formatCaps: null, note: "러너 스텁 — 잡은 쌓이되 사람이 올린다(§2.3)" },
   /* [P1R8 §3.4] 클립 «게시물형»(텍스트+이미지 · 설계 §2.1 P3) — 🔴 **일부러 null**. 아래 «못 채운 칸» 주석 참조. */
-  { key: "naver_clip_post", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, note: "🔴 영상 클립과 **다른 채널**이다(텍스트+이미지 게시물형 · 2026 확대). 업로드 경로를 실측한 적이 없다 — 아래 주석." },
-  { key: "reels", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false },
+  { key: "naver_clip_post", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, formatCaps: null, note: "🔴 영상 클립과 **다른 채널**이다(텍스트+이미지 게시물형 · 2026 확대). 업로드 경로를 실측한 적이 없다 — 아래 주석." },
+  { key: "reels", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null },
   /* [P1R8 §3.4] 페북 릴스 — 페이지 릴스 3단계 업로드(`publishFacebookReels`). 삭제는 페이지 글과 같은 `DELETE /{id}`. */
-  { key: "facebook_reels", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "video", textGen: false, note: "페이지 릴스(start→rupload→finish). 페이지 토큰으로 올린다." },
+  { key: "facebook_reels", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "페이지 릴스(start→rupload→finish). 페이지 토큰으로 올린다." },
   /* [P1R8 §3.4] 틱톡 — 커넥터가 생겼다(`lib/publish/tiktok.ts`). 🔴 **삭제 API 가 없어** retract 는 null. */
-  { key: "tiktok", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, note: "🔴 심사 전엔 «본인만 보기» 고정(플랫폼 사실 · 우리 게이트 아님) · PULL_FROM_URL 은 도메인 소유 확인 필요 · **삭제 API 없음** → retract null" },
+  { key: "tiktok", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "🔴 심사 전엔 «본인만 보기» 고정(플랫폼 사실 · 우리 게이트 아님) · PULL_FROM_URL 은 도메인 소유 확인 필요 · **삭제 API 없음** → retract null" },
 ];
 
 /* ═══ [P1R8 §3.4] 🔴 **«못 채운 칸»을 왜 안 채웠나** — `brunch` · `naver_clip_post` ═══
@@ -165,6 +202,25 @@ export function canRetract(channel: string): boolean {
 /** 러너 잡 이름. 러너 채널이 아니거나 모르는 채널이면 null. */
 export function jobKindOf(channel: string): string | null {
   return channelSpec(channel)?.jobKind ?? null;
+}
+
+/**
+ * [R9-4] 이 채널이 낼 수 있는 꾸밈 표. 🔴 모르는 채널·표 없는 채널은 **null**(추측 0) — 화면은 «올려 봐야 알아요», 렌더는 벗기지 않는다.
+ *   같은 표를 화면(`pieces-get.formatCaps`)·러너 payload·생성 프롬프트가 본다 — 세 곳이 다른 표를 들지 않는다.
+ */
+export function formatCapsOf(channel: string): FormatCaps | null {
+  return channelSpec(channel)?.formatCaps ?? null;
+}
+/** 칸 하나 — `true`(된다) · `false`(확인했고 안 된다) · `null`(모른다). */
+export function formatCapOf(channel: string, key: FormatCapKey): boolean | null {
+  const t = formatCapsOf(channel);
+  return t ? t[key] : null;
+}
+/** 🔴 모델에게 **시켜도 되는** 인라인 마크 종류 — 표가 `true` 인 것만. null(모름)은 시키지 않는다(배워도 못 내면 장식이고, 모르면서 시키면 «못 냈어요»가 매 글에 뜬다). */
+export function inlineMarksAllowed(channel: string): FormatCapKey[] {
+  const t = formatCapsOf(channel);
+  if (!t) return [];
+  return INLINE_MARK_CAP_KEYS.filter((k) => t[k] === true);
 }
 
 /** 서버(API)로 발행하는 채널 집합 — 표에서 파생(예전 `API_PUBLISH_CHANNELS` 자리). */

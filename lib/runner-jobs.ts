@@ -15,7 +15,7 @@
  *      · 계정 status 전이(cooldown/suspended/pending_login) → B 의 `lib/account-health.ts classifyAndApply`(정적 배선).
  *        여기선 신호(last_error_kind)만 쓰고 그 함수에 넘긴다 — status 를 직접 쓰지 않는다.
  */
-import { jobKindOf as registryJobKindOf } from "./channel-registry";   // [P1R8 §5.2] 러너 잡 이름 정본(순수 리프 · 순환 0)
+import { jobKindOf as registryJobKindOf, type FormatCaps } from "./channel-registry";   // [P1R8 §5.2] 러너 잡 이름 정본(순수 리프 · 순환 0) · [R9-4] 꾸밈 표 타입
 import { recipeForRunner } from "./recipe-store";                      // [P1R8 §3.3] 셀렉터 표 — claim 에 실어 보낸다
 import { ensureProfileKey, sealWantedFor } from "./profile-seal";       // [P1R8 §3.1] 프로필 봉인 열쇠(약하다고 «잰» 기기에만)
 import type { SignedRecipe } from "./recipe";
@@ -118,6 +118,8 @@ export interface RunnerPublishPayload {
   slotId?: number;
   /** 티스토리 카테고리·공개설정 등 채널 옵션. */
   options?: Record<string, unknown>;
+  /** [R9-4] 서버가 믿는 «이 채널이 낼 수 있는 꾸밈» 표(`lib/channel-registry.ts formatCaps` · true|false|null). 러너는 `blocks[].marks` 를 이 표로 거른다. 표가 없으면 null. */
+  formatCaps?: FormatCaps | null;
 }
 /* ─────────────────────────── 영상 렌더(P1R5 §2.1) ───────────────────────────
  *   🔴 러너는 **payload 만 보고 굽는다**(서버에 다시 묻지 않는다).

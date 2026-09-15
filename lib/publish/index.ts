@@ -19,6 +19,7 @@ import { db } from "../../db/index";
 import { jsonb, utcDate } from "../db-util";
 import { writeAudit } from "../audit";
 import { normalizeBlocks, type Block } from "../blocks";
+import { formatCapsOf } from "../channel-registry";   // [R9-4] 채널 꾸밈 표 — 러너 payload 에 같이 싣는다
 import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishImage, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
 import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
@@ -200,6 +201,8 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
       title: prepared.title, bodyHtml: prepared.bodyHtml, blocks: prepared.blocks,
       images: prepared.images.map((i) => ({ url: i.url, ...(i.caption ? { caption: i.caption } : {}), ...(i.alt ? { alt: i.alt } : {}) })),
       tags: prepared.tags, disclosure: prepared.disclosure,
+      /* [R9-4] 서버가 믿는 꾸밈 표를 러너도 본다 — `blocks[].marks` 를 어디까지 누를지 러너가 같은 표로 정한다(표가 없으면 null). */
+      formatCaps: formatCapsOf(piece.channel),
       ...(prepared.scheduledFor ? { scheduledFor: prepared.scheduledFor } : {}),
       ...(opts.slotId ?? prepared.slotId ? { slotId: opts.slotId ?? prepared.slotId } : {}),
     };

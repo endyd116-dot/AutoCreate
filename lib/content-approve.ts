@@ -25,6 +25,7 @@ import { runGate, GATE_KEYS, GATE_LABEL, decorateCheck, type GateReport, type Ga
 import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
+import { crossAccountSimilarity } from "./cross-account";   // [R9-8] 계정 간 유사도 — 생성과 **같은 함수**(자가 둘이면 기준이 갈린다)
 import { personaTerms } from "./content-gen";
 import { countAffiliateLinks } from "./publish/gate";
 /* [R8-A §2 · B-1] 골격 지문 — 순수 모듈(DB 0). 여기서 최근 글을 읽어 넘겨 준다(ai-tell-gate 는 순수로 둔다 · AC-17). */
@@ -113,6 +114,7 @@ export const SELF_GATE_LEVEL: Readonly<Record<string, SelfGateLevel>> = {
   disclosure: "soft", banned_words: "soft", ad_pointing: "soft",
   stock_safe: "soft",                         // [P1R8 B3] 스톡 사진(사람·상표) — 제3자가 다치는 축이지만 **막지는 않는다**(§9 최종)
   affiliate_count: "soft", similarity: "soft", superlative: "soft",
+  cross_account: "soft",                      // [R9-8] 사람이 쓴 글도 다른 계정 글과 겹치면 계정이 묶인다 — AI 티 축이 아니라 계정 축이다
   length: "soft", visual_min: "soft", link_check: "soft",
 };
 export function selfGateLevelOf(key: string): SelfGateLevel { return SELF_GATE_LEVEL[key] ?? "soft"; }
@@ -285,8 +287,10 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const ageBandStr = typeof ageBand === "string" && ageBand ? ageBand : null;
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
+  /* [R9-8] 계정 간 — 생성(`content-gen`)과 **같은 창·같은 자**로 다시 잰다(재검사가 다른 자를 들면 «잰 값은 같은데 기준이 다른» 상태가 된다). */
+  const cross = await crossAccountSimilarity(tid, n(p.id), p.account_id ? n(p.account_id) : null, plain);
   if (!edited && blocks.length) {
-    const g = runGate({ blocks, contract: c, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || ""), group, origin });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, crossAccount: cross.gate, title: String(p.title || ""), group, origin });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
     const stock = await checkStockSafety(tid, p);      // [P1R8 B3] 스톡 사진 안전(광고성 글 + 사람·상표) — 제3자가 다치는 축
@@ -295,7 +299,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
-  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || ""), group, origin });
+  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, crossAccount: cross.gate, title: String(p.title || ""), group, origin });
   for (const k of GATE_KEYS) {
     const from = base.checks.find((x) => x.key === k)!;
     if (k === "disclosure") { const d = checkDisclosureHtml(html, need, comp.kinds); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }

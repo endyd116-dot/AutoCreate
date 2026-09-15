@@ -29,6 +29,8 @@ import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
 import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "../../lib/writing-contracts";
 import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
+import { formatUnusedOf } from "../../lib/format-marks";           // [R9-5] «못 낸 서식» 사람말 투영(정본은 meta.formatMarks)
+import { formatCapsOf } from "../../lib/channel-registry";         // [R9-4] 채널 꾸밈 표
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -164,9 +166,26 @@ export default async (req: Request): Promise<Response> => {
          이 화이트리스트에 없어서 **화면까지 오는 길이 아예 없었다.** `numberClaims` 가 겪은 그 자리인데 **한 칸 더 앞이다**
          (그땐 서버가 보내긴 했고, 이건 안 보냈다). 모양은 `[{ field, why }]` — 왜 못 썼는지를 사람말로 들고 있다. */
       if (Array.isArray(m.refUnused) && m.refUnused.length) meta.refUnused = m.refUnused;
+      /* [R9-5 · B] 🔴 **이 채널에서 못 낸 서식** — 영상 `refUnused` 와 같은 모양(`[{field, label, why, n}]`) 이라 A 가 그 화면을 그대로 쓴다.
+         정본은 `meta.formatMarks`(내부 · 생성 + 발행 뒤 러너 append) 이고 여기서 **매번 투영**한다(저장 두 벌 금지). `label` 은 서버 정본(AC-52) · `why` 는 화면이 안 그린다(AC-91).
+         비어 있으면 키를 안 싣는다(«없음»을 «[]»로 보내면 화면이 빈 칸을 그린다). */
+      { const fu = formatUnusedOf(m.formatMarks); if (fu.length) meta.formatUnused = fu; }
+      if (m.formatMarks && typeof m.formatMarks === "object") {
+        const fm = m.formatMarks as Record<string, unknown>;
+        /* 러너 자가검사 값도 같이 — `bleed` 가 **없으면 «못 쟀다»**(키를 만들지 않는다 · AC-92). `breakFails > 0` 은 «뒤 문단이 앞 서식을 물려받았을 수 있다»는 뜻이라 값이 있다. */
+        const fs: Record<string, unknown> = {};
+        if (typeof fm.bleed === "number") fs.bleed = fm.bleed;
+        if (typeof fm.breakFails === "number") fs.breakFails = fm.breakFails;
+        if (fm.runnerReportedAt) fs.reportedAt = fm.runnerReportedAt;
+        if (Object.keys(fs).length) meta.formatSelfCheck = fs;
+      }
+      /* [R9-8] 계정 간 유사도(숫자·id 만) — 게이트 축 `cross_account` 와 같은 값. `measured:false` 그대로(«못 쟀다» ≠ 0점). */
+      if (m.crossSimilarity && typeof m.crossSimilarity === "object") meta.crossSimilarity = m.crossSimilarity;
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
-        meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };
+        meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount),
+        /* [R9-4] 이 채널이 낼 수 있는 꾸밈 표(`true|false|null`) — 화면이 «이 채널에서 되는지는 올려 봐야 알아요»(null)를 말할 재료. 표가 없으면 null. */
+        formatCaps: formatCapsOf(String(p.channel)) };
 
       /* ══ [R8-A fix ③] «이 글이 왜 이렇게 생겼나» 3축 — A 검수 화면의 `?why=1` 자리 ══
          🔴 **계약 파일의 기본값이 아니라 «이 글에 적용된 값»**이다(AC-57 대용물 금지). 셋이 갈리면 화면이 거짓말을 한다.
