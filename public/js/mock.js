@@ -15,6 +15,7 @@
   const todayYmd = ymd(0);
   const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
   const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
+  const managedPer = qs.get("managed") === "account" ? "account" : "";   // [R7 §4.5] 계정당 요금 모양(서버가 per 를 실을 때)
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
@@ -464,13 +465,16 @@
       inv.taxInvoice = { status: "requested", requestedAt: iso(Date.now()) }; S.taxProfile = { bizNo: b.bizNo, bizName: b.bizName, email: b.email };
       return { ok: true, taxInvoice: inv.taxInvoice }; },
     /* ── [P1R6] §3.1 관리형 러너 신청(플랜 게이트 · 요금은 서버 값) ── */
-    "managed-runner": (b) => { if (b && b.devices !== undefined) {
+    "managed-runner": (b) => { if (b && (b.devices !== undefined || b.accounts !== undefined)) {
         if (managedDeny) return { ok: false, reason: "plan_limit", step: "plan_feature", feature: "managedRunner", planKey: "starter", error: "대신 돌려주는 PC는 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.", status: 402 };
-        const n = Math.max(1, Math.min(5, Number(b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, requestedAt: iso(Date.now()) };
+        const n = Math.max(1, Math.min(5, Number(b.accounts ?? b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, accounts: n, requestedAt: iso(Date.now()) };
         S.notifications.unshift({ id: S.nextId++, kind: "setup", title: "대신 돌려주는 PC를 신청했어요", desc: "운영자가 확인하고 배정해 드려요 · 보통 하루 안에", link: "/app/runner.html", tone: "info", createdAt: iso(Date.now()) });
-        return { ok: true, status: S.managed.status, devices: n }; }
-      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: "none", assigned: 0, max: 5 };
-      return { ok: true, eligible: true, price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5 }; },
+        return { ok: true, status: S.managed.status, devices: n, accounts: n, ...(managedPer === "account" ? { per: "account" } : {}) }; }
+      /* [R7 §4.5] ?managed=account = 사장님 결정 4 모양(계정당 월요금 · 프록시 포함) — 서버가 per:"account" 를 실으면 화면이 그 단위로 그린다 */
+      const price = managedPer === "account" ? { amountKrw: 25000, vatKrw: 2500, totalKrw: 27500 } : { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 };
+      const perKey = managedPer === "account" ? { per: "account", accounts: S.managed.accounts || S.managed.devices } : {};
+      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price, status: "none", assigned: 0, max: 5, ...perKey };
+      return { ok: true, eligible: true, price, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5, ...perKey }; },
     /* ── [P1R6] §1.4 AM↔AC 코인 이전(키 없으면 준비 중 · 부분 성공 금지) ── */
     "coin-transfer": (b) => { const nw = notWritable(); if (nw) return nw;
       if (amOff) return { ok: false, step: "not_configured", error: "아직 준비 중이에요 · 곧 열려요", status: 200 };
