@@ -190,6 +190,23 @@
 
 ## §3.3 디벨롭 — 고칠 것 (지금 할 수 있는 것부터)
 
+### ✅ 친 것 (2026-09-15 · 메인 발주 · 커밋은 아래 §3.5)
+
+| 무엇 | 어디 | 상태 |
+|---|---|---|
+| A 채널별 안전영역 | `types.ts SAFE_ZONE_OF` · `gen.ts` · 렌더러 폴백 | ✅ |
+| B `safe_area` 축을 «진짜 재는 축»으로 | `judge.ts checkSafeArea` | ✅ (A 와 한 커밋) |
+| C 자막 2줄 규칙 | `judge.ts checkCaptionLines`(신설 축 `caption_lines` · P2) | ✅ |
+| 배지 자리 | 렌더러 `top: safe.top`(종전 `safe.top-140` = 상단 UI 안) | ✅ |
+| `gen.ts:101` 버려지던 `contractFor` | 호출·주석 제거 | ✅ |
+| 음성 대조 | `scripts/verify-video-safe-area.mts` **17/17** | ✅ |
+
+🔴 **소급 0**: `safe_area` 는 P1(기록·통과) · `caption_lines` 는 P2(수리·기록)라 **이미 만든 영상을 막지 않는다.**
+옛 payload 로 재개되는 piece 는 «아래 300px < 필요 390px» 라는 **기록만** 남는다 — 그게 사실이니 남는 게 맞다.
+
+⚠️ **러너 판 올려야 반영된다**: `render-video.mjs` 가 바뀌었다. 지금 배포판은 **v1.1.7** 이라 이 고침이 안 들어 있다.
+메인이 이 브랜치를 머지하면 **v1.1.8 을 구워야** 고객 러너의 배지·좌우 여백이 고쳐진다(서버가 보내는 `safeZone` 값은 머지 즉시 반영된다).
+
 ### A. 🔴 안전영역을 채널별로 (지금 할 수 있다 · 근거 확실)
 ```
 SAFE_ZONE: { youtube_shorts: {top:180, bottom:390}, instagram_reels: {top:220, bottom:450},
