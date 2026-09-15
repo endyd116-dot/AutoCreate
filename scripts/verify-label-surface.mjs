@@ -90,16 +90,6 @@ rec("🔴 글 검사 — 라벨 글자가 서버와 같다(통과형 문장)", g
 const gtUnseen = minus(new Set(gtSrv.keys()), new Set(gtMock.keys()));
 rec("서버에만 있고 모의가 한 번도 안 보여 주는 글 검사 축", gtUnseen.length === 0 ? true : "WARN", gtUnseen.join(" ") || "0개", gtUnseen);
 
-/* ②-b 🔴 **숫자도 낱말이다** — C 실측 2026-09-15: 모의가 «기준 70% 미만»이라 적었는데 서버 상수는 0.75 였다.
-   낱말 대조로는 안 걸린다(문장 틀이 같다). 문턱을 말하는 자리는 **서버 상수에서 읽어 와 견준다**. */
-const numOf = (text, name, mul = 1) => { const m = text.match(new RegExp(`${name}\\s*=\\s*([0-9.]+)`)); return m ? Math.round(Number(m[1]) * mul) : null; };
-const spTs = read("lib/structure-print.ts");
-const overlapSrv = numOf(spTs, "STRUCTURE_OVERLAP_MAX", 100);
-const overlapMock = [...mockJs.matchAll(/기준 (\d+)% 미만/g)].map((m) => Number(m[1]));
-const overlapBad = overlapSrv == null ? ["서버 상수를 못 읽었다"] : overlapMock.filter((n) => n !== overlapSrv).map((n) => `모의 ${n}% ≠ 서버 ${overlapSrv}%`);
-rec("🔴 골격 반복 문턱 숫자가 서버 상수와 같다", overlapBad.length === 0 && overlapMock.length > 0,
-  overlapBad.join(" ") || `${overlapSrv}% · ${overlapMock.length}곳`, overlapBad);
-
 /* ③ 막는 축 목록 — 화면이 이 목록으로 «고쳐야 하는 것»과 «알려 주는 것»을 가른다. 서버와 다르면 둘 중 하나가 거짓말이 된다. */
 const approveTs = read("lib/content-approve.ts");
 /* 이름 **뒤에서부터** 대괄호를 찾는다 — 이름 안의 `string[]` 을 목록으로 잘못 집지 않게. */
@@ -192,6 +182,46 @@ const dbDiff = [...dbSrv].filter(([k, v]) => dbMock.get(k) !== v).map(([k]) => k
 const dbExtra = minus(new Set(dbMock.keys()), new Set(dbSrv.keys()));
 rec("🔴 매체 기준일 안내 — 모의 문구가 서버와 글자까지 같다", dbSrv.size > 0 && dbDiff.length === 0 && dbExtra.length === 0,
   [...dbDiff, ...dbExtra].join(" ") || `서버 ${dbSrv.size}종`, [...dbDiff, ...dbExtra]);
+
+/* ───────── ⑦ 🔴 **숫자**도 서버가 정본이다(C · R8-A §4 · 2026-09-15) ─────────
+   왜 늘렸나: 이 하니스는 여태 **낱말만** 봤다. 그런데 R8-A 에서 화면이 «기준 70% 미만» 이라 말하는데
+   서버 정본 `STRUCTURE_OVERLAP_MAX` 는 **0.75** 인 것이 나왔다 — 라벨은 글자까지 같은데 **숫자가 달랐다.**
+   고객은 그 숫자를 보고 «내 글은 안 걸리겠네» 를 판단한다. 틀린 숫자는 틀린 라벨과 똑같이 거짓말이다.
+   규약: 서버 상수를 이름으로 떠서, 화면·모의가 그 규칙을 **말하는 자리**의 숫자와 맞춘다.
+   🔴 본문 예시 숫자(«10분 담그기» 같은 글감)는 규칙이 아니므로 대상이 아니다 — 규칙을 말하는 문구만 고른다. */
+const printTs = read("lib/structure-print.ts");
+const num = (text, re) => { const m = text.match(re); return m ? Number(m[1]) : null; };
+
+const NUMS = [
+  {
+    what: "골격 겹침 기준(structure_repeat)",
+    server: num(printTs, /STRUCTURE_OVERLAP_MAX\s*=\s*([0-9.]+)/),
+    scale: 100, unit: "%",
+    screen: (() => { const m = (uiJs + mockJs).match(/기준\s*([0-9]+)\s*%\s*미만/); return m ? Number(m[1]) : null; })(),
+    where: "public/js/mock.js «기준 N% 미만»",
+  },
+  {
+    what: "자막 최대 줄 수(caption_lines)",
+    server: num(judgeTs, /CAPTION_MAX_LINES\s*=\s*([0-9]+)/),
+    scale: 1, unit: "줄",
+    screen: (() => { const m = (uiJs + mockJs).match(/자막\s*([0-9]+)\s*줄/); return m ? Number(m[1]) : null; })(),
+    where: "public/js/mock.js «자막 N줄»",
+  },
+  {
+    what: "제휴 링크 상한(affiliate_count)",
+    server: num(gateTs, /제휴 링크\s*([0-9]+)개 이하/) ?? num(approveTs, /links\s*<=\s*([0-9]+)/),
+    scale: 1, unit: "개",
+    screen: (() => { const m = (uiJs + mockJs).match(/제휴 링크\s*([0-9]+)\s*개/); return m ? Number(m[1]) : null; })(),
+    where: "public/js/mock.js «제휴 링크 N개»",
+  },
+];
+for (const n of NUMS) {
+  if (n.server === null) { rec(`⑦ 숫자 — ${n.what}(서버 상수를 못 떴다)`, "WARN", "정규식이 서버 상수를 못 찾았다 — 상수 이름이 바뀌었나"); continue; }
+  if (n.screen === null) { rec(`⑦ 숫자 — ${n.what}(화면이 아직 안 말한다)`, "WARN", `서버 ${n.server * n.scale}${n.unit} · 화면에 그 문구 없음`); continue; }
+  const want = Math.round(n.server * n.scale * 1000) / 1000;
+  rec(`🔴 ⑦ 숫자 — ${n.what} 가 서버와 같다`, want === n.screen,
+    `서버 ${want}${n.unit} ↔ 화면 ${n.screen}${n.unit}${want === n.screen ? "" : `  ⇒ 고칠 곳은 ${n.where}`}`);
+}
 
 /* ───────── 출력 ───────── */
 if (JSON_OUT) console.log(JSON.stringify({ at: new Date().toISOString(), results }, null, 2));

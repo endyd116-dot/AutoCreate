@@ -154,7 +154,7 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
  *   투명 배경으로 찍어 ffmpeg 가 영상 위에 얹는다. 안전여백(safeZone)은 payload 가 준다.
  *   폰트는 러너 동봉 Pretendard 를 쓰되, 없으면 시스템 산세리프로 내려간다(글자가 사라지지 않게).
  */
-function buildOverlayHtml(payload) {
+export function buildOverlayHtml(payload) {
   const { out, overlay, captions } = payload;
   /* 🔴 폴백을 **가장 보수적인 값**으로 바꿨다(R8-A §3 · 2026-09-15). 종전 폴백 220/300 은
      쇼츠·릴스·틱톡 **셋 다 미달**이라, 서버가 채널값을 안 보내면 자막이 UI 에 먹혔다. 모르면 안전한 쪽(AC-9). */
