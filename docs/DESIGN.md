@@ -140,7 +140,7 @@ flowchart LR
   end
   DB[(Neon PostgreSQL)]
   R2[(R2 스토리지)]
-  subgraph Runner[AutoCreate 러너 · 고객 PC 또는 관리형]
+  subgraph Runner[AutoCreate 러너 · 관리형(기본) 또는 고객 PC]
     RQ[큐 소비: 발행·렌더·세션·수익 스크랩]
     BR[계정별 브라우저 프로필]
   end
@@ -174,6 +174,7 @@ flowchart LR
 | 글 생성 | `content-gen.ts` · `content-image.ts` | 그대로 · **썸네일·태그는 AC 자체 구현**(태그 = `hashtags` 블록을 채널별 집필 계약이 정한다 · 대표 이미지 = 본문 첫 사진) — 두 파일을 만들지 않는다 |
 | 쇼츠 공장 | `shorts-script.ts`(팩트체크 대본) · `shorts-scenes.ts` · `creative-render.ts` · `creative-tts.ts` · `shorts-captions.ts` · `video-render.ts`(BGM) · `video-providers/*` · `shorts-loop.ts` | 이식 + 디벨롭(§6) |
 | 발행 커넥터 | `publish-threads/instagram/facebook.ts` · `naver-publish-verify.ts` | 그대로 + 신규(블로거·WP·유튜브·틱톡) |
+| 주소 정본 | `lib/site-url.ts` — 🔴 **`backgroundBase()`(지금 이 배포가 자기를 부르는 주소)와 `publicBase()`(고객에게 주는 정본 주소)는 다르다.** 하나로 두면 로컬 개발이 **라이브 배경 함수를 부른다**(2026-09-15 실제 사고 · AC-53/54) | AC 신규 |
 | 러너 | `content-runner.ts`(큐 상태기계) · `runner-jobs.ts` · `runner-block.ts`(차단 사유 분류) · `scripts/content-runner-core.mjs` · `naver-blog-runner.mjs` · `run.bat`(zip 배포 · `scripts/build-runner.mts`) | 이식 + 다계정 프로필(§8) |
 | 채널 자격 | `channel-creds.ts`(AES-256-GCM) · `channel-accounts.ts`(연결 상태 판정) | **핵심 변경**: 테넌트당 1연결 → **계정 N개** |
 | 품질 게이트 | `ad-law-banned.ts`(광고법 금칙어) · `ad-copy-similarity.ts`(유사도) · `content-link-verify.ts` | 그대로(계정 간 중복 검사에 재사용) |
@@ -581,7 +582,8 @@ accounts
   status: active | cooldown | limited | suspended | disconnected | pending_login
   health_score(0~100) · last_error_kind · last_post_at · posts_today
   daily_cap · min_gap_min · golden_hours(jsonb)
-  browser_profile_key(러너 프로필 폴더) · proxy_url(선택)
+  browser_profile_key(러너 프로필 폴더) · proxy_url(선택 · 관리형은 우리가 배정 §7.3b)
+  warmup_off(워밍업 해제 · §7.4) · group_id(니치 묶음 · `account_groups`) · avatar
   monetize: { adsense_pub?, adpost_media_id?, coupang_subid_prefix?, ... }
 account_groups (같은 채널·같은 니치 묶음 → 페일오버 단위)
 ```
@@ -611,6 +613,17 @@ account_groups (같은 채널·같은 니치 묶음 → 페일오버 단위)
 - 같은 시각 다계정 동시 발행 금지 — 슬롯 스케줄러가 계정 간 최소 간격 강제.
 - 본문 유사도 게이트(계정 간).
 
+### 7.4 계정 워밍업 — «새 계정을 처음부터 자동으로 쓰지 않는다»
+
+정본 `lib/warmup.ts` · 계정별 `warmup_off` 로 해제. 🔴 **프록시보다 앞선 방어다**(`docs/active/2026-09-15-proxy-cost.md` §6 의 1번) — 새 계정이 첫날부터 하루 3편을 올리면 IP 가 아무리 깨끗해도 잡힌다.
+- 새 계정은 2~4주에 걸쳐 **캐던스를 서서히 올린다**(daily_cap 을 시간에 따라 낮게 눌러 둔다).
+- 워밍업 중에도 편성표는 정상으로 보이고, **왜 오늘 1편인지**를 화면이 한 줄로 말한다(조용히 0건 금지 · §4.7).
+
+### 7.5 채널 «지금 붙일 수 있나» — `connectable`(+사유)
+
+`channel_registry.status` 는 **우리가 문을 열었나**를 말하고, `connectable`(`lib/accounts.ts`)은 **지금 이 고객이 실제로 붙일 수 있나**를 말한다. 🔴 **둘은 다르다** —
+열려 있는데 앱 키가 없으면 고객은 **눌러도 아무 일이 안 난다**(라이브에서 `blogger` 가 실제로 그랬다). 그래서 사유를 함께 내려보내고 화면은 «곧 연결할 수 있어요»로 **정직하게** 말한다.
+
 ---
 
 ## 8. 러너
@@ -621,6 +634,8 @@ account_groups (같은 채널·같은 니치 묶음 → 페일오버 단위)
 |---|---|---|
 | **관리형 러너**(🔴 **기본** · Q3) | 우리 서버·노트북(러너 팜 · 계정 프로필 격리 · **계정당 전용 IP 포함**) | 전 플랜 · **계정당 월요금** |
 | **내 PC 러너** | 고객 PC(Windows 런처 `run.bat` · zip 내려받기 → 열쇠 1회 → 자동 업데이트) | 전 플랜 · 직접 돌리고 싶은 사람의 선택지 |
+
+- **관리형 감시** `managed.watch`(`lib/cron/managed-runner-watch.ts`) — 우리 기기가 죽으면 **운영이 먼저 안다**(고객이 «왜 안 올라가지?» 하기 전에). 관리형이 기본이 된 이상 이건 옵션이 아니다.
 
 ### 8.2 잡 종류(`runner_jobs.kind`)
 `publish.naver_blog` · `publish.tistory` · `publish.naver_clip` · `publish.brunch` · `render.video` · `session.login`(헤드풀 재로그인) · `session.verify` · `revenue.adpost` · `revenue.adfit` · `revenue.clip` · `verify.post_alive`
@@ -670,6 +685,8 @@ account_groups (같은 채널·같은 니치 묶음 → 페일오버 단위)
 ### 9.3 화면
 - 홈 큰 숫자 = **오늘 번 돈**(사장님 확정 2026-09-14 · 두 값을 합쳐 그리지 않는다): **확정** = 오늘 날짜에 대해 하루치를 확정으로 주는 소스(애드센스·쿠팡·수동 입력)의 합 → 진하게 · **예상** = 아직 부분 수집뿐인 소스(애드포스트·유튜브)의 오늘치 → 회색 작게 «예상». «어제보다 ±N원» 은 어제 전체 합과 비교. (이전 문구 «어제까지 확정 + 오늘 추정» 은 두 가지로 읽혀 폐기 — 그 읽기로는 어제 대비가 항상 0원이 된다.)
 - 수익 탭: 이번달 총합 → 소스별 → 계정별 → **글/영상별 TOP 5**(«이 글이 이번 달 38,200원»). 신선도 배지.
+- 🔴 **값에 도장이 셋 붙는다**(서로 다른 축 · `lib/revenue/types.ts`): **신선도**(`freshness` = 누가 가져왔나 · api/runner/manual) · **예상 도장**(`amountEstimated` = 확정 열을 읽었나 예상 열을 읽었나) · **매체 기준일**(`dayBasis`·`dayBasisNote` = 그 매체의 «어제»가 우리 «어제»와 같은가 · 애드센스는 PT).
+  셋을 하나로 뭉치면 화면이 거짓말을 한다 — «API 가 줬으니 확정»도, «오늘 값이니 오늘»도 참이 아니다. **기준일은 옮기지 않고 밝히기만 한다**(§13.5).
 - «수익 나는 소재 학습»: piece 수익을 topic factor로 되먹임(AM `performance` 팩터 자리).
 
 ---
@@ -732,7 +749,9 @@ AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스�
 
 ### 11.4 종합 운영센터 `/ops` (관리자 모드 · 사장님 요청 2026-09-14 «요금제·CS까지 종합 운영센터»)
 
-운영자만 진입(SSO 또는 로컬). 고객 화면과 같은 디자인 언어, 밀도만 높인다(표 허용). 좌측 레일 메뉴 12개 — **매출·고객·요금제·이벤트·결제·CS·러너·AI·채널·공지·운영진·감사**:
+운영자만 진입(SSO 또는 로컬). 고객 화면과 같은 디자인 언어, 밀도만 높인다(표 허용).
+
+> 🔴 **운영 숫자에서 내부 테스트를 뺀다**(`lib/ops/internal.ts` · `tenants.is_internal`). 우리 하니스·검증이 만든 집과 원가가 섞이면 **«고객이 91집»처럼 보이는데 진짜 고객은 0집**이 된다(2026-09-15 실제로 그랬다). 빼고 보는 것이 기본이고, 화면은 «내부 제외»를 한 줄로 밝힌다. 좌측 레일 메뉴 12개 — **매출·고객·요금제·이벤트·결제·CS·러너·AI·채널·공지·운영진·감사**:
 
 | 메뉴 | 하는 일 | 데이터 |
 |---|---|---|
@@ -783,6 +802,15 @@ AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스�
 | 체험 | **14일 · Pro 기능 전부 · 코인은 유료**(§12.3) | | |
 
 > 근거: 코인 원가(글 ~₩60·이미지 ~₩30·60초 영상 ~₩8,000) 대비 포함분이 마진 안에 있고, 사용자의 «계정 수»가 자연스러운 업셀 축이다.
+
+#### 12.2b 계정 슬롯 상품 — **코인으로 사는 계정 1개**(사장님 지시 2026-09-15)
+
+> «계정 1개도 코인으로 살 수 있게 하자. 프록시를 통한 계정 구매는 우리가 하더라도, 쓰는 고객에게는 **마진을 붙여서** 나가야지.»
+
+- 요금제 계정 수를 넘겨 **한 개씩 더** 살 수 있다. 정본 `lib/account-slots.ts` · **30일권** · 크론 `slot.renew` 가 갱신.
+- 상품은 둘: **«계정 + 전용 IP»** / **«관리형 계정»**(우리가 돌려 준다). 원가표 `docs/active/2026-09-15-proxy-cost.md` §7 · **판매가는 사장님 결정**(체크리스트 12번).
+- 🔴 **멱등 키는 기간 번호로** — `{yyyymm}`·`{yyyymmdd}` 는 둘 다 «공짜 달»이 새는 구멍이 있었다(2026-09-15 B 발견).
+- 관리형 러너 요금은 **계정당 월요금 · 프록시 포함**(`lib/plans.ts` 상수 · 요금제 칸이 아니다 · Q3).
 
 ### 12.3 무료 체험(사장님 확정 2026-09-14) — «구독은 14일 무료, 코인은 무료 아님»
 - 가입 즉시 **14일** 체험 · Pro 기능 전부(디렉터 손보기·자동 편성·페일오버) · 계정 5개까지.
@@ -853,6 +881,12 @@ AM Phase 10 R1(`auth-register/verify/forgot/reset`) 그대로 + 온보딩 3스�
 
 ### 13.2 정보 구조(하단 탭 5)
 `홈` · `만들기` · `편성표`(§5B) · `수익` · `내 계정`
+
+#### 13.2b 알림 — 앱 밖까지 닿는다
+
+- **웹푸시 구독**(`lib/push.ts` · VAPID · 기기당 끝점 · 한 사람이 **3기기**까지). 크론 `push.fanout`(5분)이 알림 INSERT 를 밖으로 내보낸다 — 🔴 알림을 만드는 자리가 46곳이라 **각 자리에서 보내지 않고 한곳에서 모아 보낸다**.
+- 채널 알림 2종: **`channel_opened`**(«열렸어요» — 심사·키가 풀린 순간 자동으로 나간다) · **`channel_soon`**(«곧 연결할 수 있어요»). `lib/cron/channel-opened.ts`.
+- 알림 낱말은 **서버가 정본**이다 — 화면·모의가 다른 낱말을 쓰면 `scripts/verify-label-surface.mjs` 가 빨강이 된다.
 
 ### 13.3 핵심 화면
 
@@ -968,6 +1002,7 @@ DDL 규칙: AM §4.5(추가형 DDL 자율·`scripts/neon-migrate.mjs`·`drizzle-
 - **광고·제휴 고지** 자동 삽입(공정위 표시광고법·쿠팡 파트너스 문구).
 - 광고법 금칙어·과장 표현: AM `findBannedWord`·`checkSeoClaims` 게이트.
 - 팩트체크: 쇼츠 대본 검색 그라운딩(AM) · 글은 «검증된 팩트만» 원칙 + 수치 주장 표시.
+- 🔴 **게이트는 두 종류다** — **하드**(막는다: 고지·금칙 HARD·`ad_pointing`·의료 경험담)와 **소프트**(알려 주기만: 발행 전 **링크 열림 검사** `lib/content-approve.ts LINK_CHECK_KEY` · 골격 반복 `structure_repeat` · 금칙 TONE 층). 화면은 둘을 **다르게** 보여 준다(«예약할 수 있어요 · 막지 않아요»). 소프트를 하드처럼 그리면 고객이 고칠 수 없는 것 앞에서 멈춘다.
 - 저작권: BGM 라이선스 게이트 · 이미지는 생성만(스톡 크롤링 0).
 - 개인정보: 계정 이메일·연락처 최소 · 파기 요청 시 `purged_at`.
 
