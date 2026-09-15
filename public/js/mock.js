@@ -738,7 +738,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
         .map(([source, krw]) => { const s = S.revSources.find((x) => x.source === source);
           const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
           /* [B2 8a71d69] 애드포스트처럼 «예상 수입» 열만 주는 매체 — 서버가 도장을 찍고 노트를 준다(?est=1) */
-          if (estKnob && source === "adpost") { o.estimated = true; o.note = "⚠️ «예상수입» 열로 읽었어요 — 확정 금액이 아니라 예상치예요"; }
+          if (estKnob && source === "adpost") { o.amountEstimated = true; o.note = "«예상수입» 열로 읽었어요 — 확정 금액이 아니라 예상치예요"; }   /* [B2 a8de1d5] 이름·문구 모두 서버 것 */
           return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
         return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
@@ -748,7 +748,9 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
         prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces }; },
     "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const days = groupKrw(S.revRows.filter((r) => r.day >= from && r.day <= to), "day").sort((a, b) => a[0].localeCompare(b[0]));
-      return { ok: true, days: days.map(([day, krw]) => ({ day, krw, freshness: dayFreshness(day) })) }; },
+      /* [B2 a8de1d5] 그 날에 «예상 열» 행이 섞였나 — 없으면 키 자체가 없다(옛 데이터엔 안 붙는다) */
+      const estDay = (day) => estKnob && S.revRows.some((r) => r.day === day && r.source === "adpost");
+      return { ok: true, days: days.map(([day, krw]) => ({ day, krw, freshness: dayFreshness(day), ...(estDay(day) ? { amountEstimated: true } : {}) })) }; },
     "revenue-sources": (b) => {
       if (b && b.action) {
         const s = S.revSources.find((x) => x.source === b.source && (b.accountId == null || x.accountId === Number(b.accountId)));
