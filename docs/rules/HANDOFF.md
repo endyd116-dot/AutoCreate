@@ -62,7 +62,9 @@
 - env: `FX_USD_KRW=1400`(원가 기준값) · `BGM_LICENSE_VERIFIED=1` · **`KICC_MODE=live`·`KICC_MALL_ID`·`KICC_MALL_ID_KEYIN`·`KICC_API_DOMAIN`(ON 이식)·`KICC_SECRET_KEY`(사장님 제공·is_secret)** · deps `@resvg/resvg-js` + `assets/fonts/Pretendard-*.otf`.
 - Neon PITR **1일→7일**(메인 API).
 - **테스트 계정 198 `test@autocreate.kr`/`autocreate12`** = 사장님 결제 테스트 계정 · 빌키 토스뱅크 ****0542 **보존** · **정리 완료 → trial · 자동청구 해제됨**.
-- 보존 4집: 3·13·109·116(pro · MRR 49,000 은 이 집).
+- 보존 4집: 3·13·109·116(pro · MRR 49,000 은 이 집). 🔴 **t189(B2실증 · 티스토리 2FA 세션 보유)은 2026-09-15 정리에서 삭제됨** → 다음 티스토리 실측 때 **사장님 재로그인 1회 필요**(109 세션이 살아 있으면 `--reuse-tid=109`).
+- **테스트 테넌트 대청소(2026-09-15 · 사장님 지시)**: B `scripts/ops-cleanup-tenants.mjs`(information_schema 자동 열거 · FK 위상 정렬 · 보호 5곳 id 하드코딩 3·13·109·116·198 · `--dry-run` 기본 · `--keep=` · `--revenue-test-rows` · R2 `r2DeletePrefix` 연동 · 감사 `ops_live_cleanup`) — 드라이런 91곳/1,853행/R2 887 · apply 는 B 창 사장님 Allow. B2 하니스 teardown(`finally` · 보존 id 우선 거부) 추가 · t200·t189 삭제. **규칙: 하니스는 끝에 자기 테넌트를 지운다(정리문 0 인 하니스 5개 = R7 항목)**.
+- 운영 대시보드 «AI 원가 ₩15,820($11.30)」 = 전부 개발 검증(이미지 78% · C·B 하니스 9/13~14 · 198 $0.32 · B-1 $0.34) — 고객 0. «수익 회수 195,710」 = 전부 테스트 입력(R3 스모크·C·전수조사 수동 입력 + 애드포스트 스크랩 3,710) — 고객 0. R7 후보: 운영 숫자에서 내부 테스트 제외 표시.
 
 ---
 
