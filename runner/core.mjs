@@ -7,7 +7,7 @@
  *   🔴 실패는 **정직 분류**다(계약 §2 RunnerErrorKind). 못 했으면 못 했다고 보고한다 — «성공»으로 만들지 않는다.
  */
 import { claim, report, release, heartbeat } from "./lib/api.mjs";
-import { openContext, applyCookies, exitIp, shotKeyFor, SHOTS_ON } from "./lib/browser.mjs";
+import { openContext, applyCookies, exitIp, meterContext, shotKeyFor, SHOTS_ON } from "./lib/browser.mjs";
 import { planEditorOps, disclosureIsFirst } from "./lib/plan.mjs";
 
 import * as naverBlog from "./channels/naver-blog.mjs";
@@ -99,9 +99,9 @@ export async function runJob(args) {
   /* 🔴 실제로 나간 IP 는 **성공이든 실패든** 보고돼야 한다(계약 §2.5-4) — 서버가 `accounts.last_exit_ip` 에 적고
      «두 계정이 같은 IP» 를 운영에 경고한다. 반환 지점이 여러 곳이라, 한 군데서 얹도록 감싼다
      (반환마다 손으로 붙이면 언젠가 하나를 빠뜨리고, 그러면 그 계정만 조용히 기록이 빈다). */
-  const seen = { ip: null };
+  const seen = { ip: null, bytes: null };
   const r = await runJobInner(args, seen);
-  return seen.ip ? { ...r, exitIp: seen.ip } : r;
+  return { ...r, ...(seen.ip ? { exitIp: seen.ip } : {}), ...(seen.bytes ? { bytes: seen.bytes } : {}) };
 }
 
 async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
@@ -112,6 +112,7 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
   const shotKey = shotKeyFor(job.id);
   const wantHeaded = headed || NEEDS_HEADED.has(job.kind);
   let ctx = null;
+  let meter = null;                          // 이 잡이 쓴 트래픽(프록시 GB 원가 산정 · finally 에서 걷는다)
 
   try {
     const plan = job.kind.startsWith("publish.") ? planEditorOps(job.payload ?? {}) : { ops: [], tags: [], stats: { notes: [] } };
@@ -127,6 +128,9 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
       proxyUrl: account.proxyUrl,
       headed: wantHeaded,
     });
+    /* 이 잡이 쓴 트래픽을 센다(프록시 GB 과금 원가 산정 · 계약 §2.5 원가표).
+       🔴 **IP 확인보다 먼저 붙인다** — 그래야 확인에 쓴 바이트도 같이 세어 «잡 1건의 진짜 비용»이 된다. */
+    meter = meterContext(ctx);
     /* 🔴 프록시를 배정받은 계정이면 **나가는 IP 를 잡 시작 때 한 번 확인한다**(계약 P1R7 §2.5-4).
        «프록시를 걸었다»와 «그 IP 로 나간다»는 다르다 — 프록시가 죽으면 우리는 프록시를 쓴다고 믿으면서
        집 IP 로 계정을 굴리게 되고, 그게 사장님이 걱정하는 연좌제를 **우리도 모르게** 만든다.
@@ -189,6 +193,13 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     result.shotKey = shotKey;
     return result;
   } finally {
+    /* 🔴 컨텍스트를 닫기 **전에** 계측값을 걷는다(닫으면 CDP 세션이 사라진다).
+       성공·실패·예외 어느 길로 나가도 여기를 지나므로, «실패한 잡의 트래픽»도 빠짐없이 센다 —
+       실패가 오히려 더 많이 쓰는 경우(재시도·타임아웃)가 있어서 그쪽이 원가에는 더 중요하다. */
+    if (meter?.attached) {
+      seen.bytes = { rx: meter.rx, tx: meter.tx, requests: meter.requests };
+      log(`  · 이 잡이 쓴 트래픽 ↓${(meter.rx / 1048576).toFixed(2)}MB ↑${(meter.tx / 1048576).toFixed(2)}MB (요청 ${meter.requests}건)`);
+    }
     if (ctx) { try { await ctx.close(); } catch { /* 무시 */ } }
   }
 }

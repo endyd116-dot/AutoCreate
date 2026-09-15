@@ -79,6 +79,42 @@ export async function openContext({ chromium }, { profileKey, proxyUrl, headed, 
 }
 
 /**
+ * 이 컨텍스트가 쓴 **실제 트래픽**을 센다(계약 P1R7 §2.5 원가표 — 메인 발주 2026-09-15).
+ *
+ *   왜 필요한가: 프록시 요금이 «IP 당»이냐 «GB 당»이냐로 갈리는데, 지금 원가표는 «글 1건 = 20~40MB»라는
+ *   **가정**으로 서 있다. 그 가정이 2배만 틀려도 어느 쪽이 싼지가 뒤집힌다 — 그러니 재야 한다.
+ *
+ *   🔴 **받은 바이트는 CDP `Network.dataReceived`(encodedDataLength)** — 실제 전선 위 바이트다.
+ *      `response.body().length` 로 세면 **압축 풀린 크기**라 과대계상된다(gzip 이 3~5배).
+ *   ⚠️ 보낸 바이트는 정확한 신호가 없어 **요청 본문 길이의 합**으로 근사한다(헤더·TLS 는 못 센다).
+ *      이미지 업로드가 업링크의 거의 전부라 이 근사로도 «몇 MB 냐»는 맞는다 — 그 한계를 표에 같이 적는다.
+ *   끄고 켤 수 있게 둔다(`RUNNER_METER=0`) — 계측이 문제를 만들면 계측부터 끌 수 있어야 한다.
+ */
+export function meterContext(ctx) {
+  const m = { rx: 0, tx: 0, requests: 0, attached: 0 };
+  if (String(process.env.RUNNER_METER ?? "1") === "0") return m;
+  const attach = async (page) => {
+    try {
+      const cdp = await ctx.newCDPSession(page);
+      await cdp.send("Network.enable");
+      cdp.on("Network.dataReceived", (e) => { m.rx += Number(e.encodedDataLength || 0); });
+      cdp.on("Network.requestWillBeSent", (e) => {
+        m.requests++;
+        const pd = e?.request?.postData;
+        if (typeof pd === "string") m.tx += Buffer.byteLength(pd, "utf8");
+        else if (Number(e?.request?.postDataEntries?.length)) {
+          for (const x of e.request.postDataEntries) if (x?.bytes) m.tx += Buffer.from(String(x.bytes), "base64").length;
+        }
+      });
+      m.attached++;
+    } catch { /* 계측 실패로 잡을 막지 않는다 — 없는 숫자는 0 이 아니라 «못 쟀다»로 다룬다(호출부가 attached 로 판단) */ }
+  };
+  ctx.pages().forEach(attach);
+  ctx.on("page", attach);
+  return m;
+}
+
+/**
  * 지금 이 브라우저가 **실제로 어느 IP 로 나가는가**(계약 P1R7 §2.5-4).
  *
  *   🔴 왜 필요한가: 프록시를 «걸었다»와 «그 IP 로 나간다»는 다르다. 프록시가 죽거나 인증이 막히면
