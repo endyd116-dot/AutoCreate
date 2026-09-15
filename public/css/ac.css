@@ -305,6 +305,9 @@ input,textarea,select{font:inherit;color:inherit}
 .desc-edit{padding:0 16px 12px} .desc-edit .lead{font-size:14px;color:var(--sub);background:var(--ground);border-radius:12px;padding:10px 12px;line-height:1.5} .desc-edit .rest{font-size:15px;line-height:1.7;padding:10px 2px;min-height:44px;outline:none;white-space:pre-wrap;word-break:keep-all} .desc-edit .rest:focus{background:var(--ground);border-radius:12px;padding:10px 12px}
 .pill.judge{margin-left:6px}
 .gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
+/* [R8-A] 알려 주는 축(막지 않는다) — 실패해도 빨강이 아니다. 긴 사유는 줄을 바꿔 아래로(가로 넘침 0) */
+.gate{flex-wrap:wrap} .gate .g{flex-wrap:wrap} .gate .g.soft i{background:var(--brand-soft);color:var(--sub)} .gate .g.soft span{color:var(--sub)}
+.gate .g.no small,.gate .g.soft small{white-space:normal;margin-left:0;flex:1 0 100%;padding-left:30px;line-height:1.45}
 [contenteditable="true"]{outline:none;border-radius:8px;transition:box-shadow var(--dur) var(--ease)} [contenteditable="true"]:focus{box-shadow:0 0 0 2px var(--sel)}
 
 /* ── 터치 하한 44px(§13.0 접근성) — 보이는 크기는 그대로 두고 «누르는 영역»만 투명 오버레이로 44×44 이상 넓힌다 ──

@@ -85,6 +85,43 @@ const gtMissing = minus(new Set(gtMock.keys()), new Set(gtSrv.keys()));
 const gtLabelDiff = [...gtMock].filter(([k, v]) => gtSrv.has(k) && gtSrv.get(k) !== v).map(([k, v]) => `${k}: 모의 «${v}» ≠ 서버 «${gtSrv.get(k)}»`);
 rec("🔴 글 검사 — 모의 키 − 서버 키 = 0", gtMissing.length === 0, gtMissing.join(" ") || `서버 ${gtSrv.size}칸 · 모의 ${gtMock.size}칸`, gtMissing);
 rec("🔴 글 검사 — 라벨 글자가 서버와 같다(통과형 문장)", gtLabelDiff.length === 0, gtLabelDiff.slice(0, 4).join(" | ") || "같음", gtLabelDiff);
+/* 🔴 위 두 줄은 «모의 ⊂ 서버»만 본다 — **서버에 축이 생겨도 화면이 안 그리면 조용하다**(2026-09-15: structure_repeat·ad_pointing 이 그렇게 지나갔다).
+   영상 축엔 이미 같은 검사가 있었는데 글 축엔 없었다. 🔴 새 축은 «화면에 한 번이라도 보이나»까지가 완료다(CLAUDE §4.8). */
+const gtUnseen = minus(new Set(gtSrv.keys()), new Set(gtMock.keys()));
+rec("서버에만 있고 모의가 한 번도 안 보여 주는 글 검사 축", gtUnseen.length === 0 ? true : "WARN", gtUnseen.join(" ") || "0개", gtUnseen);
+
+/* ③ 막는 축 목록 — 화면이 이 목록으로 «고쳐야 하는 것»과 «알려 주는 것»을 가른다. 서버와 다르면 둘 중 하나가 거짓말이 된다. */
+const approveTs = read("lib/content-approve.ts");
+/* 이름 **뒤에서부터** 대괄호를 찾는다 — 이름 안의 `string[]` 을 목록으로 잘못 집지 않게. */
+const bracketList = (text, name) => { const i = text.indexOf(name); if (i < 0) return []; const s = text.indexOf("[", i + name.length), e = text.indexOf("]", s);
+  return s < 0 || e < 0 ? [] : [...text.slice(s, e).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]); };
+const hardSrv = bracketList(approveTs, "HARD_GATE_KEYS: readonly string[] =");
+const hardUi = bracketList(uiJs, "UI.GATE_HARD =");
+rec("🔴 «예약을 막는 축» 목록이 서버와 같다", hardSrv.length > 0 && hardSrv.join(",") === hardUi.join(","),
+  hardSrv.join(",") === hardUi.join(",") ? `${hardSrv.length}축` : `서버 «${hardSrv.join(" ")}» ≠ 화면 «${hardUi.join(" ")}»`, { hardSrv, hardUi });
+
+/* ④ 대가 고지 — 문장 하나가 달라도 «고객이 볼 문구»가 달라진다(법 문구라 더 그렇다) */
+const discTs = read("lib/disclosure.ts");
+const dtSrv = objectMap(discTs, "DISCLOSURE_TEXT") || new Map();
+const dtUi = objectMap(uiJs, "UI.DISCLOSURE_TEXT") || new Map();
+const dtKeys = ["coupang", "generic", "sponsoredBody", "giftBody"];   // 화면이 쓰는 4문장(배지·짧은 라벨은 영상 쪽)
+const dtDiff = dtKeys.filter((k) => dtSrv.get(k) !== dtUi.get(k));
+rec("🔴 대가 고지 문장이 서버와 글자까지 같다(화면)", dtSrv.size > 0 && dtDiff.length === 0, dtDiff.join(" ") || `${dtKeys.length}문장`, dtDiff);
+const dtMockMiss = dtKeys.filter((k) => k !== "generic" && !mockJs.includes(dtSrv.get(k) ?? "\u0000"));
+rec("대가 고지 문장이 모의에도 그대로 있다", dtMockMiss.length === 0 ? true : "WARN", dtMockMiss.join(" ") || "같음", dtMockMiss);
+const clSrv = objectMap(discTs, "COMPENSATION_LABEL") || new Map();
+const clUi = objectMap(uiJs, "UI.COMP_LABEL") || new Map();
+const clDiff = [...clSrv].filter(([k, v]) => clUi.get(k) !== v).map(([k]) => k);
+rec("🔴 대가 종류 이름이 서버와 같다", clSrv.size > 0 && clDiff.length === 0, clDiff.join(" ") || `${clSrv.size}종`, clDiff);
+
+/* ⑤ 주제군·수익 목적 — 서버엔 **값만** 있고 한국말은 화면이 정본이다. 값이 서버 타입과 어긋나면 화면이 빈칸을 그린다. */
+const wcTs = read("lib/writing-contracts.ts");
+const unionOf = (name) => new Set([...((wcTs.match(new RegExp(`export type ${name} =([^;]*);`))?.[1] ?? "").matchAll(/"([a-z_]+)"/g))].map((m) => m[1]));
+const groupSrv = unionOf("TopicGroup"), goalSrv = unionOf("RevenueGoal");
+const groupUi = new Set((objectMap(uiJs, "UI.GROUP_LABEL") || new Map()).keys());
+const goalUi = new Set((objectMap(uiJs, "UI.GOAL_LABEL") || new Map()).keys());
+const gMiss = [...minus(groupSrv, groupUi), ...minus(goalSrv, goalUi)];
+rec("주제군·수익 목적 — 서버 값에 화면 낱말이 다 있다", gMiss.length === 0, gMiss.join(" ") || `${groupSrv.size}+${goalSrv.size}종`, gMiss);
 
 /* ───────── ③ 상태 어휘 — 서버가 쓰는 값에 화면 낱말이 다 있나(없으면 영문이 그대로 뜬다) ───────── */
 const ddlEnum = (table, col) => {
@@ -152,6 +189,6 @@ else {
   const w = (x, n) => String(x ?? "").slice(0, n).padEnd(n);
   console.log(`\n라벨 표면 전수 diff(AC-52) · ${new Date().toISOString()}\n${"─".repeat(124)}`);
   for (const r of results) console.log(`${r.ok === "PASS" ? "✓" : r.ok === "WARN" ? "△" : "✗"} ${w(r.step, 58)} ${w(r.note, 62)}`);
-  console.log(`${"─".repeat(124)}\n정본 = 서버(lib/video/judge.ts · lib/ai-tell-gate.ts · lib/revenue/types.ts · drizzle · notifyOnce) · 다르면 고칠 곳은 public/js/{ui,mock}.js`);
+  console.log(`${"─".repeat(124)}\n정본 = 서버(lib/video/judge.ts · lib/ai-tell-gate.ts · lib/revenue/types.ts · lib/disclosure.ts · lib/content-approve.ts · drizzle · notifyOnce) · 다르면 고칠 곳은 public/js/{ui,mock}.js`);
 }
 process.exit(results.some((r) => r.ok === "FAIL") ? 1 : 0);
