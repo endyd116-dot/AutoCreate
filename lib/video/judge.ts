@@ -11,6 +11,7 @@ import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { MODEL_VISION } from "../ai-models";
 import { recordAiUsage } from "../ai";
+import { leaseAiKey, reportAiKeyOutcome, isRateLimitReason } from "../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳 — 🔴 `GEMINI_API_KEYS` 만 꽂은 집에서 여기가 env 를 직접 읽으면 «키 없음»으로 죽는다
 import { r2Get } from "../r2";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "../banned-words";
 import { checkVideoDisclosure } from "../disclosure";
@@ -162,7 +163,9 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
 async function visionAxes(tenantId: number, pieceId: number, keys: string[]): Promise<{ axes: JudgeAxis[]; blind: boolean; grayHash?: string }> {
   if (videoStub()) { void recordAiUsage({ tenantId, purpose: "video_judge", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${pieceId}:judge` }); /* 스텁은 **판정한 게 아니다** — 보류로 표시해 하니스 초록이 «증거»로 둔갑하지 않게 한다(#9 «하니스 green ≠ 증거»). */
     return { axes: [pendingIf(axis("text_broken", true, "스텁 — 실제 판정 아님"), true), pendingIf(axis("black_margin", true, "스텁 — 실제 판정 아님"), true), pendingIf(axis("frames_not_blank", true, "스텁 — 실제 판정 아님"), true)], blind: false }; }
-  const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
+  /* [R8 · §3.3] 🔴 키는 `lib/ai-key.ts` 가 고른다 — 글·사진과 **같은 풀**이라 한쪽이 맞은 429 를 여기서도 안다. */
+  const lease = leaseAiKey();
+  const apiKey = lease?.key ?? "";
   const parts: Record<string, unknown>[] = [];
   for (const k of keys.slice(0, 4)) { const obj = await r2Get(k); if (obj) parts.push({ inlineData: { mimeType: obj.contentType.startsWith("image/") ? obj.contentType : "image/jpeg", data: Buffer.from(obj.bytes).toString("base64") } }); }
   if (!apiKey || !parts.length) return { axes: [], blind: true };
@@ -171,7 +174,12 @@ async function visionAxes(tenantId: number, pieceId: number, keys: string[]): Pr
   try {
     const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_VISION}:generateContent?key=${apiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
       body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 1024 + 2048, thinkingConfig: { thinkingBudget: 2048 } } }) });
-    if (!resp.ok) return { axes: [], blind: true };
+    if (!resp.ok) {
+      /* 🔴 429 면 그 키를 쉬게 한다 — 안 알려 주면 로테이션이 장식이 된다. 그 밖(503·500)은 키 탓이 아니다. */
+      reportAiKeyOutcome(lease, isRateLimitReason(`gemini_error_${resp.status}`) ? "rate_limited" : "error");
+      return { axes: [], blind: true };
+    }
+    reportAiKeyOutcome(lease, "ok");
     const data = (await resp.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[]; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number } };
     const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();   // AC-26: parts 전체를 잇는다(사고 파트 뒤에 본문)
     void recordAiUsage({ tenantId, purpose: "video_judge", model: MODEL_VISION, inTokens: data.usageMetadata?.promptTokenCount ?? 0, outTokens: (data.usageMetadata?.candidatesTokenCount ?? 0) + (data.usageMetadata?.thoughtsTokenCount ?? 0), costUsd: JUDGE_COST_USD, ref: `piece:${pieceId}:judge` });

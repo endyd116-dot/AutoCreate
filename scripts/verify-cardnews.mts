@@ -13,7 +13,7 @@
  *
  *   🔴 한계(정직): 이건 **골격**까지다. «모델이 정말 30자로 쓰나»는 실호출로만 알 수 있고 아직 안 했다(AC-9).
  */
-import { WRITING_CONTRACTS, structureFor, imagesFor, contractSelfConflicts, isCardnewsChannel, type FormatKey, type TopicGroup } from "../lib/writing-contracts";
+import { WRITING_CONTRACTS, structureFor, imagesFor, contractSelfConflicts, isCardnewsChannel, coinFormatOf, type FormatKey, type TopicGroup } from "../lib/writing-contracts";
 import { structurePrint, structureOverlap, STRUCTURE_OVERLAP_MAX } from "../lib/structure-print";
 import type { Block } from "../lib/blocks";
 import { coinsPerWeek, toRuleKind, type Rule } from "../lib/slots";
@@ -131,16 +131,24 @@ const printOf = (types: string[]) => structurePrint(types.map((t) => ({ type: t 
 
 /* ═══ ⑦ 🔴 코인 — 편성표가 말하는 값과 실제로 빠지는 값이 같은가(AC-74) ═══════ */
 {
-  /* 화면(`/app/coins`)·운영 표가 이미 «카드뉴스 3코인»이라고 말하고 있다. 서버가 그 값을 지켜야 한다. */
-  const rule: Rule = { id: 1, channel: "instagram", kind: "cardnews", accountMode: "auto", every: "week", count: 1, active: true };
-  const weekly = coinsPerWeek([rule]);
-  rec("⑦ 🔴 편성표가 미리 보여 주는 값 = 화면이 말한 «카드뉴스 3코인»", weekly === COIN_TABLE.cardnews,
-    `주 1회 = ${weekly}코인 (COIN_TABLE.cardnews = ${COIN_TABLE.cardnews})`);
+  /* 🔴 **숫자를 여기 베껴 적지 않는다.** 2026-09-15 에 사장님이 «글 한 편에 AI 사진 1장 포함»을 승인하면서
+     글 한 편이 7코인 → 1코인이 됐고, 숫자를 박아 뒀던 이 검사가 그때 빨개졌다(그건 검사가 제 일을 한 것이다).
+     그래서 이제는 **값이 아니라 «두 자리가 같은가»** 를 잰다 — 사장님이 값을 또 바꿔도 이 줄은 안 낡는다.
+       · `coinsPerWeek` = 편성표가 **미리 보여 주는** 값
+       · `pieceCoinCost` = 실제로 **차감하는** 식(정본 한 곳 · `director.ts pieceCoin` 도 이걸 부른다)
+     둘이 갈리면 화면이 거짓말을 한다. */
+  const cardRule: Rule = { id: 1, channel: "instagram", kind: "cardnews", accountMode: "auto", every: "week", count: 1, active: true };
+  const cardWeekly = coinsPerWeek([cardRule]);
+  const cardTruth = pieceCoinCost("post", AI_IMAGES_INCLUDED, { format: coinFormatOf("instagram") });
+  rec("⑦ 🔴 카드뉴스: 편성표 견적 = 실제 차감식", cardWeekly === cardTruth,
+    `견적 ${cardWeekly}코인 ↔ 차감식 ${cardTruth}코인`);
+  rec("⑦ 카드뉴스는 `cardnews` 한 값이다(화면 «카드뉴스 N코인»과 같은 출처)", cardTruth === COIN_TABLE.cardnews,
+    `COIN_TABLE.cardnews = ${COIN_TABLE.cardnews}`);
 
-  /* 🔴 음성 대조 — 카드 장당으로 또 받으면 3 이 아니라 7~9 가 된다(이중 청구). 그 값과 **다르다**는 것을 보인다. */
+  /* 🔴 음성 대조 — 카드 장당으로 또 받으면 이중 청구다. 그 값과 **다르다**는 것을 보인다. */
   const perCard = COIN_TABLE.blog + COIN_TABLE.image * imagesFor(IG, "review").default;
-  rec("⑦ 🔴 음성 대조 — 장당으로 셌다면 나왔을 값과 다르다(이중 청구 아님)", weekly !== perCard,
-    `카드뉴스 ${weekly}코인 ↔ 장당으로 셌다면 ${perCard}코인(카드 ${imagesFor(IG, "review").default}장) — 화면은 ${COIN_TABLE.cardnews} 이라고 말한다`);
+  rec("⑦ 🔴 음성 대조 — 장당으로 셌다면 나왔을 값과 다르다(이중 청구 아님)", cardWeekly !== perCard,
+    `카드뉴스 ${cardWeekly}코인 ↔ 장당으로 셌다면 ${perCard}코인(카드 ${imagesFor(IG, "review").default}장)`);
 
   /* 🔴 [2026-09-15 C 수리] 이 줄은 **옛 코인 값**이었다(«blog 1 + 사진 장당 1» = 7 기대).
      사장님 승인 재설계로 **글 1편 = 1코인(AI 사진 1장 포함) · AI 사진 «추가»만 장당 1코인 · 고객 사진·스톡은 0** 이 됐다.
@@ -160,6 +168,14 @@ const printOf = (types: string[]) => structurePrint(types.map((t) => ({ type: t 
   /* 🔴 **바닥 쪽 대조** — AI 를 0장 써도 글값 1코인 아래로는 안 내려간다(음수·0 청구 0). */
   rec("⑦ 바닥 — AI 사진 0장이어도 글값 1코인(0·음수로 안 떨어진다)",
     pieceCoinCost("post", 0) === COIN_TABLE.blog, `AI 0장 → ${pieceCoinCost("post", 0)}코인`);
+  /* 🔴 [메인 머지 2026-09-15] 위(C)는 **값**을 재고 아래(B-1)는 **구조**를 잰다 — 둘 다 남긴다.
+     값 대조는 «얼마인가»가 사장님 승인값과 맞는지 보고, 구조 대조는 «견적과 실제 차감이 같은 식인가»를 본다.
+     값이 또 바뀌면 위는 COIN_TABLE 을 따라 같이 움직이고(리터럴 7 을 베껴 적었던 것이 낡았던 이유다) 아래는 애초에 안 낡는다.
+     `blogRule`·`blogWeekly` 는 위에서 이미 만들었으니 다시 만들지 않는다. */
+  const blogTruth = pieceCoinCost("post", AI_IMAGES_INCLUDED, { format: coinFormatOf("naver_blog") });
+  rec("⑦ 🔴 글 채널: 편성표 견적 = 실제 차감식", blogWeekly === blogTruth, `견적 ${blogWeekly}코인 ↔ 차감식 ${blogTruth}코인`);
+  rec("⑦ 글 채널과 카드뉴스가 서로 다른 값으로 간다(둘이 같아지면 하나가 잘못 접힌 것)", blogWeekly !== cardWeekly,
+    `글 ${blogWeekly}코인 · 카드뉴스 ${cardWeekly}코인`);
 }
 
 const w = (x: unknown, n: number) => String(x ?? "").slice(0, n).padEnd(n);

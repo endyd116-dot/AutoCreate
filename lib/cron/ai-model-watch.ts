@@ -17,20 +17,25 @@ import { writeAudit } from "../audit";
 import { jsonb } from "../db-util";
 import { ALL_DECLARED_MODELS, CHAIN_HIGH } from "../ai-models";
 import { verifyModel, type ModelTest } from "../ai-verify";
+import { leaseAiKey, reportAiKeyOutcome } from "../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳
 import { kstHour, type CronStep, type TenantCtx, type StepOutcome, NOOP } from "./base";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** models.list — API 가 주는 이름만(우리가 짓지 않는다). generateContent 지원 gemini 계열만. */
 async function listRemoteModels(): Promise<string[]> {
-  const key = String(process.env.GEMINI_API_KEY ?? "").trim();
+  /* [R8 · §3.3] 🔴 여기도 같은 풀에서 빌린다 — `GEMINI_API_KEYS` 만 꽂으면 옛 판은 목록을 통째로 빈 배열로 돌려줬다
+     (그러면 «새 모델이 없다»로 보이지 «키를 못 읽었다»로는 안 보인다 — 조용한 거짓말이다). */
+  const listLease = leaseAiKey();
+  const key = listLease?.key ?? "";
   if (!key) return [];
   const out: string[] = [];
   let pageToken = "";
   for (let i = 0; i < 5; i++) {
     const url = `${GEMINI_BASE}?pageSize=200&key=${encodeURIComponent(key)}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
     const r = await fetch(url, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    if (!r || !r.ok) break;
+    if (!r || !r.ok) { reportAiKeyOutcome(listLease, r && r.status === 429 ? "rate_limited" : "error"); break; }
+    reportAiKeyOutcome(listLease, "ok");
     const j = (await r.json().catch(() => null)) as { models?: { name?: string; supportedGenerationMethods?: string[] }[]; nextPageToken?: string } | null;
     for (const m of j?.models ?? []) {
       const name = String(m?.name ?? "").replace(/^models\//, "");
@@ -113,7 +118,17 @@ export const aiModelWatchStep: CronStep = {
     const candidates: { model: string; tested: ModelTest | null; at: string }[] = [];
     let testedCount = 0;
     for (const m of news) {
-      if (testedCount < 3 && Date.now() < deadline - 2_000) { candidates.push({ model: m, tested: await verifyModel(m, { deadline }), at: new Date().toISOString() }); testedCount++; }
+      if (testedCount < 3 && Date.now() < deadline - 2_000) {
+        /* [R8 · §3.3] 🔴 키를 **골라서 넘긴다** — `ai-verify.ts` 는 import 0 을 지켜야 해서 스스로 고를 수 없다(그 파일 헤더).
+           여기가 모델을 실제로 불러 보는 자리라 할당량을 먹는다: 늘 1번 키만 때리면 그 키만 먼저 닳는다. */
+        const lease = leaseAiKey();
+        const tested = await verifyModel(m, { deadline, ...(lease ? { apiKey: lease.key } : {}) });
+        /* 네 축이 **전부 null** 이면 «판정 불가»다(예산·네트워크·할당량) — 그중 할당량만 키 탓이라 구분할 수가 없어
+           🔴 **키를 쉬게 하지 않는다**(`error`). 잘못 쉬게 하면 멀쩡한 키가 논다(AC-9 «모르면 모른다»). */
+        const anyOk = tested.text === true || tested.json === true || tested.googleSearch === true || tested.image === true;
+        reportAiKeyOutcome(lease, anyOk ? "ok" : "error");
+        candidates.push({ model: m, tested, at: new Date().toISOString() }); testedCount++;
+      }
       else candidates.push({ model: m, tested: null, at: new Date().toISOString() });
     }
     await q(sql`UPDATE ai_settings SET candidates = ${jsonb(candidates)}, updated_at = NOW() WHERE id = 'global'`);
