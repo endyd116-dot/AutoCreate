@@ -42,10 +42,16 @@ export default async (req: Request): Promise<Response> => {
       // 🔴 어떤 경우에도 흔적을 남긴다(값 금지 · 이름만) — 파라미터가 어긋나도 30초에 안다(AC-9 · 2026-09-15 사고).
       const tid0 = p.orderNo ? parseBkOrder(p.orderNo)?.tenantId ?? null : null;
       await writeAudit({ tenantId: tid0, action: "billing_key_callback", actorType: "system", riskLevel: "medium", detail: callbackAudit(p) });
-      if (!p.orderNo || !p.authorizationId) return redirect(`/app/plan.html?key=fail&reason=params`);
-      if (!p.success) return redirect(`/app/plan.html?key=fail&reason=${encodeURIComponent(p.resCd || "cancelled")}`);
+      /* 🔴 확인용 주문(`AC-BK…-p`)은 **리다이렉트 대신 JSON** 을 돌려준다(개통 실측 전용).
+         왜: 고객 화면(plan.html)은 로그인 벽이라, 결제창에서 돌아오면 «로그인 창»만 보이고 **결과가 안 보인다**(2026-09-15 실측 · 사장님이 두 번 헛걸음).
+         실제 고객 주문에는 절대 걸리지 않는다 — 표식은 **우리가 만든 주문번호**에만 있고, 새는 정보는 리다이렉트 쿼리로도 이미 나가던 것뿐이다. */
+      const probe = tid0 !== null && parseBkOrder(p.orderNo)?.probe === true;
+      const out = (body: Record<string, unknown>, to: string) => probe ? json(body) : redirect(to);
+      if (!p.orderNo || !p.authorizationId) return out({ ok: false, step: "params", error: "결제창이 보낸 값이 비어 있어요.", got: p.keys }, `/app/plan.html?key=fail&reason=params`);
+      if (!p.success) return out({ ok: false, step: "pg", resCd: p.resCd, error: p.resMsg || "결제창에서 취소됐어요." }, `/app/plan.html?key=fail&reason=${encodeURIComponent(p.resCd || "cancelled")}`);
       const r = await approveBillingKey(p.authorizationId, p.orderNo);
-      return redirect(r.ok ? `/app/plan.html?key=ok${r.trialEndedByFp ? "&trial=reused" : ""}` : `/app/plan.html?key=fail&reason=approve`);
+      if (!r.ok) return out({ ok: false, step: "approve", error: r.reason }, `/app/plan.html?key=fail&reason=approve`);
+      return out({ ok: true, step: "done", last4: r.last4, brand: r.brand, trialEndedByFp: r.trialEndedByFp }, `/app/plan.html?key=ok${r.trialEndedByFp ? "&trial=reused" : ""}`);
     }
 
     const auth = requireUser(req); if (!auth.ok) return auth.res;
@@ -97,7 +103,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, periodEnd: r.periodEnd, cancelAtPeriodEnd: on });
     }
     if (path.endsWith("/billing-key-start")) {
-      const r = await startBillingKey(tid, { userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL, route: await resolvePayRoute(b) });
+      const r = await startBillingKey(tid, { userAgent: req.headers.get("user-agent"), returnBase: process.env.SITE_URL, route: await resolvePayRoute(b), probe: b.probe === true });
       if (!r.ok) return json({ ok: false, step: r.step, error: r.error }, 200);
       return json({ ok: true, url: r.url, form: r.form, orderNo: r.orderNo });
     }
