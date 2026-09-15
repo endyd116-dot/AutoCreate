@@ -6,9 +6,18 @@
   --brand:#191F28; --on-brand:#FFFFFF; --brand-soft:#F2F4F6; --sel:#191F28;
   --money:#1FA97A; --money-soft:#E5F7EF; --warn:#F5A623; --warn-soft:#FFF4E0; --warn-ink:#965900; --danger:#F04452; --danger-soft:#FFEBEE;
   /* [R8 §6.1] 🔴 **글자로 쓰는 색은 따로** — 채움색(막대·마크)은 브랜드 그대로 두고, 글자만 WCAG AA(4.5:1)를 넘게 어둡게 잡는다.
-     흰 바탕·회색 바탕 **둘 다** 넘어야 한다(--ground 가 더 빡빡하다). 잰 값은 scratchpad/shot.mjs 가 화면마다 다시 잰다. */
+     흰 바탕·회색 바탕 **둘 다** 넘어야 한다(--ground 가 더 빡빡하다).
+     🔴 [2026-09-16 · A 실측] 잰 값을 여기 적어 둔다 — 재는 자리가 git 밖(scratchpad)이라 **다음 사람은 이 줄 말고는 볼 것이 없다**:
+        라이트 --muted 5.03/4.56 · --money-ink 5.32/4.83 · --danger-ink 5.76/5.22 · --warn-ink 5.64/5.11 (흰/회색)
+        다크   --muted 5.33/5.88 · --money-ink 7.56/8.34 · --danger-ink 5.87/6.47 · --warn-ink 9.12/10.07
+        토큰 쌍 32개 · 미달 0. 🔴 **토큰이 통과해도 화면은 통과가 아니다** — 이번에 미달 넷이 전부 토큰 밖에 있었다
+        (손으로 박은 #B26A00 · 채널 초록을 글자로 쓴 태그 · `.mk.warn` 만 채움색을 글자로 씀 · 끝난 단계 흰 ✓). */
   --money-ink:#127A57; --danger-ink:#C32633;
   --n:#03C75A; --t:#FF5A2C; --b:#F58C1E; --y:#FF0000; --c:#00B18F; --i:#E1306C; --th:#101010; --wp:#21759B; --tk:#010101;
+  /* [R8 · 대비] 🔴 **채널 색을 «글자»로 쓰는 자리 하나**(네이버 미리보기 태그)를 위한 짝 — 브랜드 초록 그대로는 흰 바탕에서 **2.25:1** 이다.
+     채움색 `--n` 은 손대지 않는다(마크·체크박스는 그 색이어야 네이버로 보인다 · 마크는 aria-hidden 이라 글자가 아니다).
+     색상(hue)·채도는 그대로 두고 명도만 내렸다 — 흰 5.19:1 · 회색 바탕 4.71:1. 다크에서는 브랜드 초록이 이미 7:1 이라 그대로 쓴다. */
+  --n-ink:#027E39;
   --font:Pretendard,"Pretendard Variable",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
   --r-sec:20px; --r-btn:16px; --r-mk:12px; --gutter:16px; --cta-h:54px; --row-h:56px; --tab-h:62px;
   --ease:cubic-bezier(.2,.8,.2,1); --dur:180ms;
@@ -16,12 +25,12 @@
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
   --ground:#17171C; --surface:#202027; --ink:#F2F4F6; --sub:#C3C8CF; --muted:#8B95A1; --faint:#5C6470; --line:#2C2C35; --press:#2A2A32;
   --brand:#F2F4F6; --on-brand:#191F28; --brand-soft:#2A2A32; --sel:#F2F4F6;
-  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A; --money-ink:#34C88F; --danger-ink:#FF6B75;
+  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A; --money-ink:#34C88F; --danger-ink:#FF6B75; --n-ink:#03C75A;
 }}
 :root[data-theme="dark"]{
   --ground:#17171C; --surface:#202027; --ink:#F2F4F6; --sub:#C3C8CF; --muted:#8B95A1; --faint:#5C6470; --line:#2C2C35; --press:#2A2A32;
   --brand:#F2F4F6; --on-brand:#191F28; --brand-soft:#2A2A32; --sel:#F2F4F6;
-  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A; --money-ink:#34C88F; --danger-ink:#FF6B75;
+  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A; --money-ink:#34C88F; --danger-ink:#FF6B75; --n-ink:#03C75A;
 }
 *{box-sizing:border-box} html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100dvh}
@@ -106,7 +115,9 @@ input,textarea,select{font:inherit;color:inherit}
 /* [P1R8 §3.4] 다음 Phase 채널 — 색이 없으면 마크가 «칠 안 된 네모»로 뜬다(다른 마크와 나란히 두면 고장으로 보인다). */
 .mk.facebook,.mk.facebook_reels{background:#1877F2} .mk.x{background:#000} .mk.youtube_long{background:var(--y)}
 .mk.brunch{background:#00C6BE;font-size:11px} .mk.naver_clip_post{background:var(--c)}
-.mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money-ink)} .mk.warn{background:var(--warn-soft);color:var(--warn)} .mk.danger{background:var(--danger-soft);color:var(--danger-ink)}
+/* 🔴 [R8 · 대비] `.mk.warn` 만 혼자 **채움색**(--warn)을 글자로 쓰고 있었다 — 연노랑 바탕 위 1.8:1 이라 사실상 안 보인다.
+   money·danger 는 이미 `-ink` 짝을 쓰고 있었으니 warn 도 같은 줄을 선다(5.17:1). 셋이 같은 규칙을 따라야 다음에 또 갈라지지 않는다. */
+.mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money-ink)} .mk.warn{background:var(--warn-soft);color:var(--warn-ink)} .mk.danger{background:var(--danger-soft);color:var(--danger-ink)}
 .mk svg{width:20px;height:20px} .mk.sm{width:28px;height:28px;border-radius:9px;font-size:12px}
 /* [v4] 수익 소스 마크 = 서비스 색(시안 v3 · 채널 마크와 같은 급) */
 .mk.src-adsense{background:#4285F4} .mk.src-youtube{background:var(--y)} .mk.src-coupang{background:#E53238} .mk.src-adpost{background:var(--n)} .mk.src-adfit{background:#FEE500;color:var(--ink)} .mk.src-clip{background:var(--c)}
@@ -146,7 +157,9 @@ input,textarea,select{font:inherit;color:inherit}
 .steps{display:flex;flex-direction:column;gap:10px;padding:8px 4px}
 .steps .st{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted)} .steps .st.on{color:var(--ink);font-weight:600} .steps .st.done{color:var(--sub)}
 .steps .st i{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;flex:none;font-size:11px;font-style:normal}
-.steps .st.on i{border-color:var(--ink)} .steps .st.done i{background:var(--money);border-color:var(--money-ink);color:#fff}
+/* 🔴 [R8 · 대비] 끝난 단계 동그라미의 흰 ✓ 가 초록 위에서 **2.99:1**(다크 2.14:1)이었다 — «끝났다»를 말하는 표시인데 잘 안 보였다.
+   채움을 `--money-ink` 로 내리고 글자를 `--on-brand`(라이트 흰 · 다크 잉크)로 잡는다 → 라이트 5.32:1 · 다크 7.73:1. */
+.steps .st.on i{border-color:var(--ink)} .steps .st.done i{background:var(--money-ink);border-color:var(--money-ink);color:var(--on-brand)}
 
 /* 한 화면 한 질문 */
 .step-h{padding:16px 4px 4px} .step-h h1,.step-h h2{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.3;margin:0;text-wrap:balance}
@@ -349,7 +362,7 @@ input,textarea,select{font:inherit;color:inherit}
 .preview.naver_blog blockquote::before,.preview.naver_blog blockquote::after{content:"";display:block;width:36px;height:2px;background:var(--ink);margin:0 auto 10px} .preview.naver_blog blockquote::after{margin:10px auto 0}
 .preview.naver_blog hr{border-top:0;height:8px;background:radial-gradient(circle,var(--faint) 1.5px,transparent 2px) center/12px 8px repeat-x}
 .preview.naver_blog ul.check{list-style:none;padding:0} .preview.naver_blog ul.check li{padding-left:28px;position:relative} .preview.naver_blog ul.check li::before{content:"";position:absolute;left:0;top:7px;width:16px;height:16px;border-radius:4px;background:var(--n)} .preview.naver_blog ul.check li::after{content:"";position:absolute;left:5px;top:9px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
-.preview.naver_blog .tags{color:var(--n)} .preview.naver_blog img{border-radius:4px}
+.preview.naver_blog .tags{color:var(--n-ink)} .preview.naver_blog img{border-radius:4px}   /* [R8 · 대비] 브랜드 초록 그대로는 2.25:1 이었다 — 글자용 짝(--n-ink)으로 5.19:1 */
 .preview.tistory{font-family:var(--font);line-height:1.75} .preview.tistory h2{border-bottom:2px solid var(--ink);padding-bottom:6px} .preview.tistory h3{color:var(--sub)}
 .preview.tistory blockquote{margin:14px 0;padding:10px 16px;border-left:4px solid var(--t);background:var(--ground);border-radius:0 8px 8px 0}
 .preview.tistory ul.check{list-style:none;padding:0} .preview.tistory ul.check li{padding-left:24px;position:relative} .preview.tistory ul.check li::before{content:"✓";position:absolute;left:0;color:var(--t);font-weight:800}
