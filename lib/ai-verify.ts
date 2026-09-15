@@ -29,7 +29,15 @@ async function probe(model: string, apiKey: string, body: unknown, deadline: num
   } catch { return null; }                                 // 타임아웃/네트워크 = 판정 불가
 }
 
-/** 모델 하나를 실측 4종. apiKey 미지정이면 env GEMINI_API_KEY. deadline 미지정이면 30초. */
+/**
+ * 모델 하나를 실측 4종. deadline 미지정이면 30초.
+ *   🔴 [R8 · §3.3] **키는 호출부가 골라서 넘긴다**(`opts.apiKey`) — 고르는 자리는 `lib/ai-key.ts` **하나**다.
+ *      이 파일이 그걸 직접 import 하지 않는 이유는 위 헤더의 «import 0» 때문이다:
+ *      `scripts/verify-ai-models.mjs` 가 이 파일을 **Node 타입 스트립으로 그대로 로드**해서, 확장자 없는 import 가 있으면 깨진다.
+ *      ⇒ 부르는 쪽 둘(`lib/cron/ai-model-watch.ts` · `scripts/verify-ai-models.mjs`)이 `leaseAiKey()` 로 골라 넘긴다.
+ *   아래 env 폴백은 **아무도 안 넘겼을 때의 마지막 줄**이다(옛 호출부 무회귀). `GEMINI_API_KEYS` 만 꽂은 집에서는
+ *   이 폴백이 비므로, 새 호출부는 반드시 `opts.apiKey` 를 넘긴다.
+ */
 export async function verifyModel(model: string, opts: { apiKey?: string; deadline?: number } = {}): Promise<ModelTest> {
   const apiKey = String(opts.apiKey ?? process.env.GEMINI_API_KEY ?? "").trim();
   const deadline = opts.deadline ?? Date.now() + 30_000;

@@ -6,6 +6,7 @@
  */
 import { calcCost } from "../../ai-cost";
 import { recordAiUsage } from "../../ai";
+import { leaseAiKey, reportAiKeyOutcome, isRateLimitReason, redactKeys } from "../../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳 — 🔴 `GEMINI_API_KEYS` 만 꽂은 집에서 여기가 env 를 직접 읽으면 «키 없음»으로 죽는다
 import { r2Configured, r2Put, safeKey } from "../../r2";
 import { PROVIDERS, estimateClipCostUsd, fallbackProvider, type ProviderSpec } from "./registry";
 import { omniGenerate, omniEditRetry, type OmniGenerateResult } from "./omni";
@@ -50,7 +51,10 @@ async function callProvider(spec: ProviderSpec, inp: GenerateClipInput, apiKey: 
 
 /** generateClip — provider 호출 → mp4 회수 → R2 `autocreate/{tid}/{pieceId}/clips/…` → 비용 기록. 실패 시 사다리 1단 폴백(정책 차단 제외). */
 export async function generateClip(inp: GenerateClipInput): Promise<GenerateClipResult> {
-  const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
+  /* [R8 · §3.3] 🔴 키는 `lib/ai-key.ts` 가 고른다(글·사진과 같은 풀). 여기서 env 를 직접 읽으면
+     `GEMINI_API_KEYS` 만 꽂은 집에서 영상만 «키 없음»으로 죽는다. */
+  const keyLease = leaseAiKey();
+  const apiKey = keyLease?.key ?? "";
   if (!r2Configured()) return { ok: false, reason: "r2_not_configured", provider: inp.providerKey };
   if (videoStub()) {
     // 로컬 하니스(계약 §1.4b) — provider 호출 없이 고정 응답. R2 에는 «스텁» 표식이 든 자리 채움 바이트를 둔다(키가 없으면 payload 가 거짓말이 된다).
@@ -67,8 +71,11 @@ export async function generateClip(inp: GenerateClipInput): Promise<GenerateClip
     if (spec.gateway !== "fal" && !apiKey) return { ok: false, reason: "no_api_key", provider: spec.key };
     if (inp.mode === "i2v" && !spec.i2v) { spec = fallbackProvider(spec.key); continue; }
     const r = await callProvider(spec, inp, apiKey);
+    /* 🔴 [R8 · §3.3] 빌렸으면 **결과를 돌려준다** — 안 알려 주면 쉬는 키가 영영 안 생겨 로테이션이 장식이 된다.
+       429·할당량만 그 키를 쉬게 한다(정책 차단·모델 거부는 키 잘못이 아니다). */
+    if (spec.gateway !== "fal") reportAiKeyOutcome(keyLease, r.ok ? "ok" : isRateLimitReason(r.reason) ? "rate_limited" : "error");
     if (!r.ok) {
-      console.warn(`[video/providers] ${spec.key} 컷 ${inp.cutIdx} 실패: ${r.reason}`);
+      console.warn(`[video/providers] ${spec.key} 컷 ${inp.cutIdx} 실패: ${redactKeys(r.reason)}`);
       if (r.policyBlocked) return { ok: false, reason: r.reason, policyBlocked: true, provider: spec.key };
       spec = inp.edit ? null : fallbackProvider(spec.key);   // 편집 재생성은 폴백 없음(같은 interaction 이 없다)
       continue;
