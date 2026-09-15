@@ -37,43 +37,54 @@ const SRC = new Map(PRODUCT.map((p) => [p, read(p)]));
 /** 주석을 걷어 낸 본문 — «주석에만 적혀 있는 호출»을 호출로 세지 않기 위해(AC-59). */
 const CODE = new Map([...SRC].map(([p, t]) => [p, t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")]));
 
-/** 이름 하나의 제품 호출처를 센다. `ownerFile` 은 정의가 있는 파일(자기 자신은 안 센다). */
+/**
+ * 이름 하나의 제품 호출처를 센다.
+ *   🔴 [2026-09-15 C 수리] 첫 판은 **정의 파일을 통째로 뺐다.** 그래서 «자기 파일 안에서 불리는» 함수가
+ *      «제품 호출 0곳» 이라는 **가짜 빨강**으로 나왔다(`channelSpec`·`classifyFpBinding` — 둘 다 자기 파일이 쓴다).
+ *      죽은 통로의 뜻은 «아무도 안 부른다» 이지 «남의 파일이 안 부른다» 가 아니다.
+ *   ⇒ 정의 파일도 센다. 다만 **정의 줄 자체**(`export function X` · `const X =` · `type X`)는 호출이 아니라서 뺀다.
+ */
 function callSites(name, ownerFile) {
-  const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b${esc}\\b`);
+  const defRe = new RegExp(`^\\s*(export\\s+)?(async\\s+)?(function|const|let|var|type|interface|class)\\s+${esc}\\b`);
   const hits = [];
-  let importOnly = 0;
+  let importOnly = 0, own = 0;
   for (const [p, code] of CODE) {
-    if (p === ownerFile) continue;
     const lines = code.split("\n").filter((l) => re.test(l));
     if (!lines.length) continue;
-    const real = lines.filter((l) => !/^\s*import\b/.test(l) && !/^\s*export\s+\{/.test(l) && !/^\s*}\s*from\s+/.test(l));
-    if (real.length) hits.push(`${p}(${real.length})`);
-    else importOnly++;
+    const real = lines.filter((l) => !/^\s*import\b/.test(l) && !/^\s*export\s+\{/.test(l) && !/^\s*}\s*from\s+/.test(l) && !defRe.test(l));
+    if (!real.length) { importOnly++; continue; }
+    if (p === ownerFile) own += real.length; else hits.push(`${p}(${real.length})`);
   }
-  return { hits, importOnly };
+  return { hits, importOnly, own };
 }
 
 /* ═══ R8 에서 새로 생긴 것들 — «만들었다»고 보고된 물건의 목록 ═══
    각 항목: [사람이 읽는 이름, 심볼, 정의 파일, 이게 죽으면 무슨 일이 나나] */
 const TARGETS = [
   ["간격 정책(사장님 «10:00/10:05»)", "gapMinFor", "lib/publish-gap.ts", "편성이 옛 상수 30분을 계속 써서 계정을 붙여 올릴 수 없다"],
-  ["간격 정책 — 고객이 내릴 수 있는 바닥", "floorMin", "lib/publish-gap.ts", "«5분까지 내릴 수 있다»가 화면에 영영 안 닿는다"],
-  ["채널 «성질» 정본", "channelTraits", "lib/channel-registry.ts", "채널마다 다른 성질을 각자 추측해서 또 갈라진다"],
-  ["내려 주기", "canRetract", "lib/publish/retract.ts", "«내릴 수 있다»를 아무도 안 물어 유튜브가 조용히 열린다"],
-  ["코인 원가 오버레이", "coinCostOverlay", "lib/plans.ts", "운영자가 고친 코인 값이 아무 데도 안 닿는다"],
-  ["본문 글자 수", "blocksCharCount", "lib/blocks.ts", "분량 판정이 대용물(태그 길이)로 흐른다"],
-  ["러너 지문 구속", "verifyFingerprint", "lib/runner-jobs.ts", "훔친 토큰이 다른 PC 에서 그대로 통한다"],
+  ["간격 정책 — 고객이 내릴 수 있는 바닥", "floorMin", "lib/publish-gap.ts", "«5분까지 내릴 수 있다»가 화면에 영영 안 닿는다", "external"],
+  ["채널 «성질» 정본", "channelSpec", "lib/channel-registry.ts", "채널마다 다른 성질을 각자 추측해서 또 갈라진다"],
+  ["내려 주기 — 할 수 있나", "canRetract", "lib/channel-registry.ts", "«내릴 수 있다»를 아무도 안 물어 유튜브가 조용히 열린다"],
+  ["내려 주기 — 실제 수행", "retractPost", "lib/publish/retract.ts", "«내려 줘» 단추가 아무것도 안 한다"],
+  ["코인 단가 정본", "coinCostOf", "lib/coin-table.ts", "운영자가 고친 코인 값이 아무 데도 안 닿는다"],
+  ["본문 글자 수", "blocksCharCount", "lib/blocks.ts", "분량 판정이 대용물(태그 길이)로 흐른다", "external"],
+  ["러너 지문 구속", "classifyFpBinding", "lib/runner-jobs.ts", "훔친 토큰이 다른 PC 에서 그대로 통한다"],
 ];
 
-for (const [label, sym, owner, harm] of TARGETS) {
+for (const [label, sym, owner, harm, mode] of TARGETS) {
   const ownerSrc = read(owner);
   const defined = ownerSrc.includes(sym);
   if (!defined) { rec(`죽은 통로 — ${label}(\`${sym}\`)`, "WARN", `정의 파일 ${owner} 에서 이름을 못 찾았다 — 이름이 바뀌었나(검사를 고쳐라)`); continue; }
-  const { hits, importOnly } = callSites(sym, owner);
-  const ok = hits.length > 0;
+  const { hits, importOnly, own } = callSites(sym, owner);
+  /* 🔴 `external` = **남이 읽으라고 만든 값**(화면·편성이 소비할 값). 자기 파일 안 등장은 타입 선언·자기 참조라 «소비»가 아니다.
+     함수는 자기 파일이 써도 «쓰인다»가 맞지만, 내보내려고 만든 **값**은 바깥에서 읽혀야 산 것이다.
+     🔴 이 구분이 없으면 `floorMin` 이 «자기 파일 8곳»으로 **초록이 되어 버린다**(그 8곳은 전부 타입·자기 참조다). */
+  const ok = mode === "external" ? hits.length > 0 : hits.length + own > 0;
   rec(`🔴 죽은 통로 — ${label}(\`${sym}\`) 을 **제품이 부른다**`, ok,
-    ok ? `호출 ${hits.join(" · ")}`
-       : `제품 호출 **0곳**${importOnly ? `(임포트만 ${importOnly}곳)` : ""} ⇒ ${harm}`);
+    `바깥 ${hits.length}곳${hits.length ? ` [${hits.join(" · ")}]` : ""} · 자기 파일 ${own}곳${importOnly ? ` · 임포트만 ${importOnly}곳` : ""}`
+    + (mode === "external" ? " (바깥에서 읽혀야 산 값)" : "") + (ok ? "" : ` ⇒ ${harm}`));
 }
 
 /* ═══ 짝 검사: 옛 상수가 아직 살아 있나 — 새 정본을 만들었는데 옛 값이 그대로면 «하나가 썩는다»(AC-64) ═══ */
