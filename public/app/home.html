@@ -19,6 +19,7 @@
       <div class="num" id="hlnum"><span class="sk" style="display:inline-block;width:60%"></span></div>
       <div class="tip" id="tip"><span class="sk" style="display:inline-block;width:160px"></span></div>
     </a>
+    <div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
     <div class="group" id="todo"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
     <div class="group" id="slots"><div class="gt">오늘 편성</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
     <div class="group">
@@ -79,6 +80,10 @@
   slots.innerHTML = `<div class="gt">오늘 편성 <a href="/app/schedule.html">전체</a></div>` + (r.todaySlots.length
     ? r.todaySlots.map((s) => { const p = PILL[s.status] || ["off", s.status]; return `<a class="row tap" href="${s.status === "in_review" && s.pieceId ? `/app/piece.html?id=${s.pieceId}` : "/app/schedule.html"}"><span class="mk ${s.channel}">${(UI.CH[s.channel] || {}).mark || "?"}</span><div class="l"><span class="t">${UI.esc(s.title || "소재 정하는 중")}</span><span class="d">${s.handle ? "@" + UI.esc(s.handle) : "계정 자동"} · ${UI.timeKST(s.publishAt) || "시간 자동"}</span></div><span class="pill ${p[0]}">${p[1]}</span></a>`; }).join("")
     : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘 나갈 글이 없어요</span><span class="d">자동 편성을 켜면 내일부터 채워져요</span></div></div>`);
+  // [사장님 실측] 규칙이 있는데 자동 편성이 꺼져 있으면 맨 위 한 줄(홈 토글과 같은 API)
+  const bn = UI.$("#autoBn"); bn.hidden = !(r.auto.rules && !r.auto.enabled);
+  if (!bn.hidden) { UI.$("#autoBnT").textContent = `자동 편성이 꺼져 있어요 — 켜면 ${(r.auto.produceLeadDays) || 3}일 전에 글을 만들어 드려요`;
+    UI.$("#autoOn").onclick = async (e) => { e.target.disabled = true; const s = await UI.api("/api/tenant-settings", { body: { autoSchedule: true } }); e.target.disabled = false; if (!s.ok) return UI.toast(s.error || "켜지 못했어요"); UI.toast("자동 편성을 켰어요"); bn.hidden = true; UI.$("#auto").setAttribute("aria-checked", "true"); }; }
   // 자동 편성 토글
   const tg = UI.$("#auto"); tg.setAttribute("aria-checked", String(!!r.auto.enabled));
   const autoDesc = async () => {

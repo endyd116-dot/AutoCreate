@@ -14,6 +14,7 @@
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="sp"></span></div>
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
+<div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
 <div class="seg" id="mode"><button type="button" data-m="two" class="on">2주</button><button type="button" data-m="month">월</button></div>
 <div class="group" id="cal"></div>
 <div id="feed" hidden></div>
@@ -42,7 +43,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행(점 상태색 동일)
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${(D.settings && D.settings.produceLeadDays) || 3}일 전에 만들기 때문` : ""}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 너무 가까운 자리는 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -60,7 +61,17 @@ function calCell(d, k, dim) {
   const ds = slots.filter((s) => s.date === k && s.status !== "skipped").slice(0, 3);
   return `<button type="button" class="dd ${dim ? "dim" : ""} ${k === ymd(today) ? "today" : ""} ${k === sel ? "sel" : ""}" data-d="${k}">${d.getDate()}<span class="dots">${ds.map((s) => `<i class="${dotCls(s.status)}"></i>`).join("")}</span></button>`;
 }
+/* [사장님 실측] 자동 편성이 꺼져 있으면 «소재 정하는 중»이 영영 남는다 — 규칙이 있는데 꺼져 있을 때만 맨 위 한 줄 + 켜기(홈 토글과 같은 API) */
+function autoBanner() {
+  const bn = UI.$("#autoBn"); const active = D.rules.filter((r) => r.active).length; const off = D.settings && D.settings.autoSchedule === false;
+  bn.hidden = !(active && off); if (bn.hidden) return;
+  UI.$("#autoBnT").textContent = `자동 편성이 꺼져 있어요 — 켜면 ${D.settings.produceLeadDays || 3}일 전에 글을 만들어 드려요`;
+  UI.$("#autoOn").onclick = async (e) => { e.target.disabled = true; const s = await UI.api("/api/tenant-settings", { body: { autoSchedule: true } }); e.target.disabled = false; if (!s.ok) return UI.toast(s.error || "켜지 못했어요"); UI.toast("자동 편성을 켰어요"); await load(); };
+}
+/* ③ 이번엔 건너뛰는 자리 — 서버 skipReason:"too_soon" 우선 · 없으면 화면이 (자리 날짜 − 오늘) < produceLeadDays 로 판정(이 하나는 화면 계산 허용 · 설정값은 rules-settings 응답) */
+const tooSoon = (s) => { if (s.skipReason) return s.skipReason === "too_soon"; if (s.pieceId || !["planned", "topic_assigned", "assigned"].includes(s.status)) return false; const lead = (D.settings && D.settings.produceLeadDays) || 3; const days = Math.round((new Date(s.date + "T00:00:00") - new Date(ymd(today) + "T00:00:00")) / 86400e3); return days >= 0 && days < lead; };
 function render() {
+  autoBanner();
   const two = mode === "two";
   UI.$("#prev").hidden = two; UI.$("#next").hidden = two;
   UI.$("#mon").textContent = two ? `${today.getMonth() + 1}월` : `${view.getMonth() + 1}월${view.getFullYear() !== today.getFullYear() ? " " + view.getFullYear() : ""}`;
@@ -108,13 +119,14 @@ function slotSheet(s) {
   const busy = ["publishing", "producing"].includes(s.status);
   const can = { topic: !s.pieceId && !done && !busy, time: !done && !busy, make: !s.pieceId && !!s.topicTitle && !done && !busy, skip: !done && !busy };
   const H = {
+    too_soon: ["이번엔 건너뛰어요", `${(D.settings && D.settings.produceLeadDays) || 3}일 전에 만들기라 이 자리는 못 만들어요 · 다음 자리부터 만들어요 · 지금 만들기는 돼요`, null, null],
     no_topic: ["아직 소재가 없어요", "소재를 고르면 예정대로 만들어요", "소재 고르기", "topic"],
     coin_short: ["코인이 모자라 못 만들었어요", "충전하면 다음 만드는 시각에 이어서 만들어요", "충전하기", "/app/coins.html"],
     awaiting_runner: ["내 PC 프로그램이 꺼져 있어요", "켜 두면 기다리던 이 글이 바로 올라가요", "켜는 법 보기", "/app/runner.html"],
     awaiting_manual: ["올리지 못했어요", "본문을 복사해 직접 올릴 수 있어요", "직접 올리기", "/app/posts.html?status=awaiting_manual"],
     in_review: ["봐 주실 글이 있어요", "그냥 두면 예정대로 나가요", "글 보러 가기", s.pieceId ? "/app/piece.html?id=" + s.pieceId : null],
     published: ["올라갔어요", "", "올라간 글 보기", "/app/posts.html"],
-  }[s.status] || (s.pieceId ? [null, null, "글 보기", "/app/piece.html?id=" + s.pieceId] : null);
+  }[tooSoon(s) ? "too_soon" : s.status] || (s.pieceId ? [null, null, "글 보기", "/app/piece.html?id=" + s.pieceId] : null);
   const warn = ["coin_short", "awaiting_runner", "awaiting_manual"].includes(s.status);
   const dTopic = can.topic ? (s.topicTitle ? "다른 소재로 바꿔요" : "소재를 골라요") : s.pieceId ? "글을 이미 만들어서 바꿀 수 없어요" : "이미 지나간 편성이에요";
   const dTime = can.time ? (s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간") : "이미 지나간 편성이에요";

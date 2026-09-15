@@ -7,7 +7,8 @@
 - 라이브: https://autocreate-endyd.netlify.app (GitHub `main` push → 자동 배포) · 아직 빈 사이트(README만).
 
 ## 2. 현재 상태 (2026-09-15 · 배포 #5 완료 — **개발 라운드 전부 종료**)
-- ✅ **라이브 = main `4d06070`**(배포 #6 · R6 마감 · 공유 카드 금액 캐시 수리) — 스모크: 화면 6종 · 가입 `mailSent:true` · **forgot 무누설**(있는/없는 계정 응답 동일) · 공유카드 0원 `step:"empty"` · 관리형 러너 `eligible:false` + **정가 30,000/3,000/33,000** · 채널 영상 상한(clip **30** · shorts/reels 60) · 백업 상태(**PITR 7일** · `r2Versioning:"unsupported"`).
+- ✅ **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회: 티스토리 HTML · KICC 콜백 POST(AC-44) · 빌키 keyin 고정(AC-45) · 결제 실패 사유) · **KICC 실돈 실측 통과 2026-09-15**(카드 등록→₩5,500→부분 취소→환불 · 카드 0원) · 테스트 정리 완료(MRR 49,000 · 198 trial · 자동청구 해제) · 사장님 실측 발견 5건 수리 중(B-1·A 완료 대기 · B2 러너 배포 진행) → **배포 #7 예정** · 서사 정본 `docs/rules/HANDOFF.md`
+- (배포 #6 스모크) — 스모크: 화면 6종 · 가입 `mailSent:true` · **forgot 무누설**(있는/없는 계정 응답 동일) · 공유카드 0원 `step:"empty"` · 관리형 러너 `eligible:false` + **정가 30,000/3,000/33,000** · 채널 영상 상한(clip **30** · shorts/reels 60) · 백업 상태(**PITR 7일** · `r2Versioning:"unsupported"`).
 - 배포 이력: #1 `d2a4994` · #2 `e33807d`(+`ebbe372`) · #3 `0f3ec44` · #4 `e5458f8` · #5 `79dfe6a` · **#6 `4d06070`**(R6 마감).
 - ✅ **라운드 전부 완료**: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · R5 · **R6**(내보내기 ZIP · 공유 카드 PNG · 추천인 · 영수증 인쇄 · 세금계산서 · 회사 정보 · 관리형 러너 신청 · AM↔AC 코인 이전(AC 쪽) · 티스토리 HTML 모드는 사장님 GO 대기 · 백업 확인 · AC-36 감사/메일 전수) + **KICC 이중 MID**(ON 구별 · 키 등록 완료 · `mode:live` · 1단계 거래등록 통과).
 - 함정 노트 **AC-41** 까지(하루에 30건 추가 · 전부 실측).
