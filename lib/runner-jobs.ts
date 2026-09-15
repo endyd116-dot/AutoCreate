@@ -16,6 +16,8 @@
  *        여기선 신호(last_error_kind)만 쓰고 그 함수에 넘긴다 — status 를 직접 쓰지 않는다.
  */
 import { jobKindOf as registryJobKindOf } from "./channel-registry";   // [P1R8 §5.2] 러너 잡 이름 정본(순수 리프 · 순환 0)
+import { recipeForRunner } from "./recipe-store";                      // [P1R8 §3.3] 셀렉터 표 — claim 에 실어 보낸다
+import type { SignedRecipe } from "./recipe";
 import crypto from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index";
@@ -159,6 +161,14 @@ export interface RunnerJob {
   account: RunnerJobAccount | null;
   priority: number;
   attempts: number;
+  /**
+   * [P1R8 §3.3] 이 잡에 쓸 **셀렉터 표**(서명 포함). 없으면 러너는 **zip 에 묶여 온 표**로 일한다 — 정상 동작이지 실패가 아니다.
+   *   🔴 **새 엔드포인트를 만들지 않고 claim 에 실었다.** 이유 둘:
+   *     ① 러너가 표를 필요로 하는 순간이 정확히 «이 채널의 이 잡을 집었을 때»다 — 잡과 표가 **같이 오면 어긋날 수 없다**.
+   *     ② 카나리도 claim 으로 잡을 집으므로(`runner/core.mjs canary`) **같은 길을 그대로 시험한다**
+   *        (시험하는 길과 실제로 도는 길이 갈리면 그 카나리는 대용물이다 · AC-57).
+   */
+  recipe?: SignedRecipe;
 }
 
 export interface RunnerDevice {
@@ -493,15 +503,20 @@ export async function heartbeat(device: DeviceRow, body: { version?: unknown; jo
     const step = String(c.step ?? "").slice(0, 40);
     const detail = String(c.detail ?? "").slice(0, 300);
     const shotKey = c.shotKey ? String(c.shotKey).slice(0, 80) : null;
+    /* [P1R8 §3.3 · DDL 0051] 🔴 **어느 표를 시험했나.** 이 칸이 없으면 «오늘 카나리가 통과했다»는
+       **어느 판에 대한 통과인지 모르는 말**이고, 그 말로는 승격을 판정할 수 없다(설계 §3). */
+    const recipeVersion = c.recipeVersion ? String(c.recipeVersion).slice(0, 40) : null;
+    const stage = c.stage ? String(c.stage).slice(0, 12) : null;
     await writeAudit({
       tenantId: device.tenantId, action: "runner_canary", actorType: "system", target: `runner_device:${device.id}`,
       detail: { ok, channel, step, detail }, riskLevel: ok === false ? "high" : "low",
     });
     // 🔴 P1R4 §2.2 — canary_runs 에 적재(ops-canary·크론 runner.canary 평가가 읽는다). 하루·채널당 1행(KST 오늘 · UPSERT 덮어쓰기).
     if (channel) {
-      await q(sql`INSERT INTO canary_runs (day, channel, ok, step, detail, shot_key, ran_at)
-        VALUES ((NOW() AT TIME ZONE 'Asia/Seoul')::date, ${channel}, ${ok}, ${step || null}, ${detail || null}, ${shotKey}, NOW())
-        ON CONFLICT (day, channel) DO UPDATE SET ok = EXCLUDED.ok, step = EXCLUDED.step, detail = EXCLUDED.detail, shot_key = EXCLUDED.shot_key, ran_at = NOW()`).catch((e) => console.error("[canary] upsert", e));
+      await q(sql`INSERT INTO canary_runs (day, channel, ok, step, detail, shot_key, recipe_version, stage, ran_at)
+        VALUES ((NOW() AT TIME ZONE 'Asia/Seoul')::date, ${channel}, ${ok}, ${step || null}, ${detail || null}, ${shotKey}, ${recipeVersion}, ${stage}, NOW())
+        ON CONFLICT (day, channel) DO UPDATE SET ok = EXCLUDED.ok, step = EXCLUDED.step, detail = EXCLUDED.detail, shot_key = EXCLUDED.shot_key,
+          recipe_version = EXCLUDED.recipe_version, stage = EXCLUDED.stage, ran_at = NOW()`).catch((e) => console.error("[canary] upsert", e));
     }
   }
   /* 🔴 러너가 «업데이트 하다 실패했다»고 말하면 **반드시 남긴다**(계약 «러너 배포» ③).
@@ -656,9 +671,23 @@ async function presignRenderPayload(tid: number, pieceId: number, raw: Record<st
   return p;
 }
 
-export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max = 3): Promise<RunnerJob[]> {
+export async function claimJobs(
+  device: DeviceRow,
+  kinds: RunnerJobKind[],
+  max = 3,
+  /** [P1R8 §3.3] `canary` = 러너의 드라이런(`--canary`). 🔴 **러너만 아는 사실**이라 러너가 말해 준다 —
+   *  서버는 claim 만 보고는 «시험»과 «진짜»를 구분할 수 없다. 이 값이 표 배포 0단계의 청중을 가른다. */
+  opts: { canary?: boolean } = {},
+): Promise<RunnerJob[]> {
   const want = (kinds.length ? kinds : [...RUNNER_JOB_KINDS]).filter(isRunnerJobKind);
   if (!want.length) return [];
+  /* 표를 고르는 재료 — 러너 판(minRunner 비교)과 «먼저 받아 볼래요» 옵트인. 한 번만 묻는다.
+     🔴 관리형 기기는 `tenant_id` 가 NULL 이라 LEFT JOIN 이어야 한다(INNER 로 하면 관리형이 통째로 사라진다). */
+  const [dev] = await q(sql`SELECT d.version, t.recipe_volunteer
+     FROM runner_devices d LEFT JOIN tenants t ON t.id = d.tenant_id WHERE d.id = ${device.id} LIMIT 1`);
+  const runnerVersion = String(dev?.version ?? "");
+  const tenantVolunteer = dev?.recipe_volunteer === true;
+  const dryRunClaim = opts.canary === true;
   const lim = Math.min(Math.max(1, Math.floor(Number(max) || 1)), 10);
   const kindList = sql.join(want.map((k) => sql`${k}`), sql`, `);
   const rows = await q(sql`
@@ -724,6 +753,18 @@ export async function claimJobs(device: DeviceRow, kinds: RunnerJobKind[], max =
         });
       }
     }
+    /* [P1R8 §3.3] 이 채널의 셀렉터 표를 함께 싣는다(위 `recipe` 주석).
+       🔴 **못 주면 안 준다** — 표가 없거나·서명이 안 맞거나·러너 판이 낮으면 키를 아예 안 만든다.
+          빈 객체를 보내면 러너가 «서버 표를 받았다»로 읽고 묶여 온 표를 버린다(모른다 ≠ 빈 표 · AC-9).
+       ⚠️ 여기서 던지면 **claim 전체가 죽는다** — 표는 편의고 발행이 본업이라, 실패는 삼키고 로그만 남긴다. */
+    if (job.account?.channel) {
+      try {
+        const got = await recipeForRunner(job.account.channel, runnerVersion, {
+          canary: dryRunClaim, managed: device.kind === "managed", volunteer: tenantVolunteer,
+        });
+        if (got) job.recipe = got.recipe;
+      } catch (e) { console.warn("[runner-jobs] recipe 첨부 실패(묶여 온 표로 갑니다)", String((e as Error)?.message ?? e).slice(0, 120)); }
+    }
     jobs.push(job);
   }
   if (jobs.length) {
@@ -768,7 +809,13 @@ export interface RunnerReportOk {
  *      계정 전이 0 · 재시도 무의미 · audit high 로 종결한다(전이표에 넣지 않는다 — 표는 B 의 정본).
  */
 export interface RunnerReportFail { ok: false; errorKind?: unknown; detail?: string; shotKey?: string; exitIp?: string }
-export type RunnerReportBody = RunnerReportOk | RunnerReportFail;
+/**
+ * [P1R8 §3.3] 성공·실패 **양쪽**에 실리는 «어느 셀렉터 표로 돌았나».
+ *   🔴 실패에만 실으면 «잘 도는 표»를 셀 수 없고, 성공에만 실으면 자동 복귀의 근거가 사라진다.
+ *   `recipeVersion` 이 **없으면 묶여 온 표**로 돈 것이다 — 그것도 사실이라 `runner_jobs.recipe_version` 이 NULL 로 남는다.
+ */
+export interface RunnerRecipeReport { recipeVersion?: string; recipeFellBack?: string }
+export type RunnerReportBody = (RunnerReportOk | RunnerReportFail) & RunnerRecipeReport;
 
 export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found" | "private"; block?: RunnerBlock }
 
@@ -909,6 +956,18 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
 
   // 🔴 성공·실패를 가르기 **전에** 적는다 — 실패한 잡의 출구 IP 야말로 알아야 하는 값이다(§2.5-4).
   await recordExitIp(tid, accountId || null, (result as { exitIp?: unknown }).exitIp);
+
+  /* [P1R8 §3.3] 🔴 **어느 표로 돌았나를 성공·실패 가르기 전에 적는다** — 출구 IP 와 같은 이유다.
+     실패한 잡이야말로 «어느 표 때문인가»를 알아야 하는 건인데, 아래 분기들은 각자 다른 자리에서 반환한다.
+     한 군데서 적지 않으면 언젠가 한 갈래를 빠뜨리고, 그러면 그 실패만 조용히 표에 안 묶인다(AC-56). */
+  {
+    const rv = String((result as RunnerRecipeReport).recipeVersion ?? "").slice(0, 40);
+    if (rv) await q(sql`UPDATE runner_jobs SET recipe_version = ${rv} WHERE id = ${jobId}`).catch(() => []);
+    const fb = String((result as RunnerRecipeReport).recipeFellBack ?? "").slice(0, 200);
+    /* 🔴 «표를 줬는데 안 썼다»는 **조용하면 안 된다**(설계 §6.2) — 안 남기면 «전부 새 표를 쓰는 줄» 안다. */
+    if (fb) await writeAudit({ tenantId: tid, action: "recipe_fell_back", actorType: "system", target: `runner_job:${jobId}`,
+      detail: { deviceId: device.id, why: fb }, riskLevel: "medium" }).catch(() => {});
+  }
 
   /* ── 실패(parse) — 계약 P1R3 §2.1 · 우리 버그 · 계정 전이 0 · 0 으로 채우지 않는다(AC-9) ── */
   /* `"proxy"`(계약 P1R7 §2.5) — `"parse"` 와 **같은 부류**다: 전이표 7종 밖 · 계정 잘못 아님(전이 0) · **우리가 고친다**.

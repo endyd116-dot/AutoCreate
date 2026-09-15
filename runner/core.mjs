@@ -6,9 +6,10 @@
  *      재사용하면 앞 계정 세션이 남아 «다른 계정에 글이 올라간다».
  *   🔴 실패는 **정직 분류**다(계약 §2 RunnerErrorKind). 못 했으면 못 했다고 보고한다 — «성공»으로 만들지 않는다.
  */
-import { claim, report, release, heartbeat } from "./lib/api.mjs";
+import { claim, report, release, heartbeat, VERSION } from "./lib/api.mjs";
 import { openContext, applyCookies, exitIp, meterContext, shotKeyFor, SHOTS_ON, PROFILES_DIR } from "./lib/browser.mjs";
 import { probeFleet } from "./lib/profile-seal.mjs";   // [P1R8 §3.1] 로그인 정보가 실제로 잠겨 있나(읽기만)
+import { makeRecipe } from "./lib/recipe.mjs";         // [P1R8 §3.3] 서버가 내려 준 셀렉터 표(못 믿으면 묶여 온 표)
 import { planEditorOps, disclosureIsFirst } from "./lib/plan.mjs";
 
 import * as naverBlog from "./channels/naver-blog.mjs";
@@ -109,9 +110,18 @@ export async function runJob(args) {
   /* 🔴 실제로 나간 IP 는 **성공이든 실패든** 보고돼야 한다(계약 §2.5-4) — 서버가 `accounts.last_exit_ip` 에 적고
      «두 계정이 같은 IP» 를 운영에 경고한다. 반환 지점이 여러 곳이라, 한 군데서 얹도록 감싼다
      (반환마다 손으로 붙이면 언젠가 하나를 빠뜨리고, 그러면 그 계정만 조용히 기록이 빈다). */
-  const seen = { ip: null, bytes: null };
+  const seen = { ip: null, bytes: null, recipeVersion: null, recipeFellBack: "" };
   const r = await runJobInner(args, seen);
-  return { ...r, ...(seen.ip ? { exitIp: seen.ip } : {}), ...(seen.bytes ? { bytes: seen.bytes } : {}) };
+  /* [P1R8 §3.3] 🔴 **어느 표로 돌았나를 성공·실패 양쪽에 싣는다.**
+     실패에만 실으면 «잘 도는 표»를 셀 수 없고, 성공에만 실으면 자동 복귀 판정의 근거가 사라진다.
+     `recipeFellBack` 은 «묶여 온 표로 내려앉은 이유» — 운영이 «몇 대가 되돌아갔나»를 보는 값이다(설계 §6.2). */
+  return {
+    ...r,
+    ...(seen.ip ? { exitIp: seen.ip } : {}),
+    ...(seen.bytes ? { bytes: seen.bytes } : {}),
+    ...(seen.recipeVersion ? { recipeVersion: seen.recipeVersion } : {}),
+    ...(seen.recipeFellBack ? { recipeFellBack: seen.recipeFellBack } : {}),
+  };
 }
 
 async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
@@ -123,6 +133,7 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
   const wantHeaded = headed || NEEDS_HEADED.has(job.kind);
   let ctx = null;
   let meter = null;                          // 이 잡이 쓴 트래픽(프록시 GB 원가 산정 · finally 에서 걷는다)
+  let recipe = null;                         // [P1R8 §3.3] 이 잡이 실제로 쓴 셀렉터 표(묶여 온 것이면 version null)
 
   try {
     const plan = job.kind.startsWith("publish.") ? planEditorOps(job.payload ?? {}) : { ops: [], tags: [], stats: { notes: [] } };
@@ -166,7 +177,18 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     const applied = await applyCookies(ctx, account.cookies);
     if (applied) log(`  · 저장된 로그인 사용(쿠키 ${applied}개)`);
 
-    const out = await handler.run({ ctx, job, plan, token, shotKey, dryRun });
+    /* [P1R8 §3.3] 서버가 이 잡과 **함께** 내려 준 셀렉터 표. 못 믿으면 `version: null` 이고 묶여 온 표로 돈다.
+       🔴 결과에 `recipeVersion` 을 실어 보낸다 — 서버가 «이 실패가 어느 표 때문인가»를 되짚어 자동 복귀를 판정한다.
+          안 실으면 셀렉터 실패를 보고도 새 표 탓인지 옛 표 탓인지 **구분할 수 없고**, 그러면 멀쩡한 판을 되돌린다. */
+    recipe = makeRecipe(job.recipe, handler.BUNDLED_SELECTORS ?? {}, VERSION);
+    seen.recipeVersion = recipe.version;
+    /* 🔴 «표를 받았는데 안 썼다»일 때만 이유를 싣는다 — 애초에 표가 안 온 경우(기능이 아직 안 켜짐)까지 실으면
+       운영 화면의 «되돌아간 러너» 숫자가 **전 대수**가 되어 신호가 죽는다. */
+    if (job.recipe && !recipe.version) seen.recipeFellBack = recipe.fellBackWhy;
+    if (recipe.version) log(`  · 셀렉터 표 ${recipe.version}(서버)`);
+    else if (job.recipe) log(`  · 셀렉터 표: 묶여 온 것으로 갑니다 — ${recipe.fellBackWhy}`);
+
+    const out = await handler.run({ ctx, job, plan, token, shotKey, dryRun, recipe });
 
     // 🔴 shotKey 를 함께 돌려준다 — 카나리가 이 키를 하트비트에 실어야 운영이 «깨진 화면»을 찾아간다(없으면 canary_runs.shot_key 가 늘 비었다).
     if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [] };
@@ -274,7 +296,7 @@ export async function tick({ chromium, token, kinds, max, headed, dryRun }) {
  */
 export async function canary({ chromium, token, headed }) {
   const kinds = ["publish.naver_blog", "publish.tistory"];
-  const res = await claim(token, kinds, 1);
+  const res = await claim(token, kinds, 1, { canary: true });
   if (!res?.ok) { log(`카나리: 큐를 읽지 못했어요 — ${String(res?.error ?? "").slice(0, 80)}`); return null; }
   const job = (res.jobs ?? [])[0];
   if (!job) {
@@ -297,6 +319,9 @@ export async function canary({ chromium, token, headed }) {
       detail: result.ok ? (result.notes ?? []).join(" · ") : String(result.detail ?? ""),
       // 🔴 실패했을 때 «어느 화면에서 깨졌나»를 운영이 바로 열 수 있게(ops-canary·down 제안 감사에 그대로 실린다).
       shotKey: result.shotKey ?? null,
+      /* [P1R8 §3.3] 🔴 **어느 표를 시험했나.** 없으면 묶여 온 표를 시험한 것이고, 그것도 사실이다 —
+         이 값이 없으면 «오늘 통과했다»가 어느 판에 대한 말인지 알 수 없어 승격을 판정할 수 없다(설계 §3). */
+      recipeVersion: result.recipeVersion ?? null,
     },
   }).catch(() => {});
   log(result.ok ? "카나리 ✓ 임시저장까지 정상(셀렉터 살아 있음)" : ok === null ? `카나리 · 판정 불가(${result.errorKind}) — 셀렉터 아님` : `카나리 ✗ ${result.errorKind}: ${result.detail}`);

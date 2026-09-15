@@ -73,6 +73,17 @@ const TARGETS = [
   ["러너 지문 구속", "classifyFpBinding", "lib/runner-jobs.ts", "훔친 토큰이 다른 PC 에서 그대로 통한다"],
   ["스톡 사진 찾기(§10 사진값)", "searchStock", "lib/stock/index.ts", "사진이 전부 AI 로만 만들어져 편당 원가의 85%가 그대로 남는다"],
   ["스톡 사진 붙이기(§10 사진값)", "attachStockPhoto", "lib/stock/attach.ts", "찾기만 되고 글에 못 붙여 «고를 수는 있는데 쓸 수는 없는» 기능이 된다"],
+  /* ── [P1R8 §3.3 · B2] 셀렉터 표(recipe) — 이 라운드에 통째로 새로 생긴 사슬이라 **양끝을 다 센다** ── */
+  ["셀렉터 표 — 서버가 잡에 실어 준다", "recipeForRunner", "lib/recipe-store.ts", "표를 만들어 놓고 **아무 잡에도 안 실려** 러너가 영영 묶여 온 표만 쓴다"],
+  ["셀렉터 표 — 운영이 올린다", "putRecipe", "lib/recipe-store.ts", "표를 **넣을 길이 없어** 배포 기계가 통째로 죽은 채 초록으로 보인다"],
+  ["셀렉터 표 — 넓히기", "promoteCandidate", "lib/recipe-store.ts", "후보가 영원히 카나리 단계에 머문다(화면엔 «시험 중»으로 보인다)"],
+  ["셀렉터 표 — 되돌리기", "rollbackCandidate", "lib/recipe-store.ts", "깨진 표가 퍼진 채 아무도 못 되돌린다"],
+  /* 🔴 제품이 부르는 이름은 `makeRecipe` 다 — 판정 자체(`decideRecipe`)는 **일부러 안쪽에 두고**
+     하니스(`scripts/verify-recipe.mts`)로만 직접 잰다(순수 함수라 그래야 양성·음성을 같은 수로 잴 수 있다).
+     그래서 여기서 세는 것은 «제품이 실제로 부르는 문»이어야 한다 — 이 검사가 그걸 짚어 줘서 고쳤다. */
+  ["셀렉터 표 — 러너가 믿을지 판정", "makeRecipe", "runner/lib/recipe.mjs", "검증 없이 쓰거나 멀쩡한 표를 다 버린다(둘 다 조용하다)"],
+  ["🔴 셀렉터 표 — 채널이 실제로 그 값을 쓰나", "BUNDLED_SELECTORS", "runner/channels/tistory.mjs", "표를 내려 줘도 채널이 **옛 상수**를 그대로 써서 배포가 아무것도 안 바꾼다"],
+  ["로그인 보관 상태 — 잰다", "probeFleet", "runner/lib/profile-seal.mjs", "«리눅스가 몇 대인가»를 영영 모른 채 봉인을 만들지 말지 정하게 된다"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {

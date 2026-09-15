@@ -83,7 +83,9 @@ export default async (req: Request): Promise<Response> => {
 
       if (action === "claim") {
         const kinds = (Array.isArray(b.kinds) ? b.kinds : []).filter(isRunnerJobKind) as RunnerJobKind[];
-        const jobs = await claimJobs(device, kinds, n(b.max) || 3);
+        /* [P1R8 §3.3 · B2] `canary` = 러너의 드라이런이라는 **러너만 아는 사실**. 셀렉터 표를 «시험 단계»로 줄지 가른다.
+           🔴 이 값으로 잡을 고르지는 않는다 — 큐·선점은 그대로다(시험과 진짜가 **같은 길**을 지나야 카나리가 대용물이 아니다). */
+        const jobs = await claimJobs(device, kinds, n(b.max) || 3, { canary: b.canary === true });
         return json({ ok: true, jobs });
       }
       if (action === "report") {
