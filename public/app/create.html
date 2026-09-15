@@ -28,7 +28,7 @@ await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
 let accountsN = null, busy = false, timer = null, templates = []; // [P1R5] shorts_templates(레퍼런스 구조)
 function sub(t) { const f = t.factors || {}; const parts = [];
-  if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); else if (t.source === "manual") parts.push("검색량 모름"); if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
+  if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); else parts.push("검색량 모름"); // volume 키가 없으면 «모름»(0 아님) — 직접·AI 구분 없이(B-1 확정) if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
   const tp = t.factors?.structureTemplateId ? templates.find((x) => x.id === t.factors.structureTemplateId) : null; if (tp) parts.push(`구조: ${UI.esc(tp.name)}`); // [P1R5] 레퍼런스 구조 부제
   return parts.length ? parts.join(" · ") : UI.esc(t.angle || ""); }
 /* [v2.9] 소재 뽑기는 배경 작업 — 도는 동안은 스켈레톤 + 한 문장, 5초마다 다시 본다(떠났다 와도 같은 상태) */
