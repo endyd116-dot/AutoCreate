@@ -57,7 +57,11 @@
   const pwKnob = qs.get("pw") || "";
   /* [R8-B §4.5] 팀 손잡이 — ?team=member(나는 팀원이다 · 부르는 단추가 없어야 한다) · ?team=full(자리가 다 찼다)
      · ?team=nomail(메일이 안 나갔다 — 그때 «보냈어요»라고 하면 거짓말이다) · ?team=solo(혼자 쓰는 집)
-     ?invite=dead(초대 링크가 죽었다) · ?invite=exists(그 주소를 이미 쓴다) · ?invite=seat(그 사이 자리가 찼다) */
+     ?invite=dead(초대 링크가 죽었다) · ?invite=exists(그 주소를 이미 쓴다) · ?invite=seat(그 사이 자리가 찼다)
+     🔴 [R8 §4.5 · 팀 승인] 같은 손잡이에 **역할 둘**을 더 걸었다 — 하나로는 이 흐름의 양쪽을 못 본다:
+        ?team=member → 승인을 누르면 서버와 **같은 403·같은 문장**(내가 못 하는 일)
+        ?team=owner  → 알림함에 `team_review` 1건(주인이 안 보면 그 글이 그대로 멈춘다)
+        손잡이가 없으면 이 둘은 주인 계정 한 벌로는 영영 안 보인다 — 못 보는 화면은 스샷도 헌장 검사도 못 받는다(§4.8). */
   const teamKnob = qs.get("team") || "";
   const inviteKnob = qs.get("invite") || "";
 
@@ -376,6 +380,9 @@
     ],
     reloginJobs: {},
     notifications: fresh ? [] : [
+      /* [R8 §4.5] 🔴 주인만 받는 알림(`lib/team.ts notifyOwnersWaiting` · 하루 한 번). 제목·본문·링크 **서버 글자 그대로**.
+         아이콘은 `review`(soft) 가 아니라 **`review_wait`(주의)** 다 — 마감 자동 승인이 이 글을 안 집기 때문에 주인이 안 보면 그대로 멈춘다. */
+      ...(teamKnob === "owner" ? [{ id: 800, kind: "team_review", title: "팀원이 만든 글 2건이 기다리고 있어요", desc: "보시고 승인하시면 편성표대로 나가요. 승인 전에는 나가지 않아요.", link: "/app/pieces.html?status=in_review", tone: "warn", createdAt: iso(now - 40 * 60e3) }] : []),
       { id: 801, kind: "reassign", title: "@life_c 계정이 정지됐어요", desc: "예약된 글 3건을 @cook_a 로 옮겼어요", link: "/app/accounts.html", tone: "warn", createdAt: iso(now - 5 * 3600e3) },
       { id: 802, kind: "publish", title: "글 1건이 올라가지 못했어요", desc: "«가을 이불 세탁» · 채널 화면이 바뀌었어요", link: "/app/posts.html", tone: "warn", createdAt: iso(now - 4 * 3600e3) },
       { id: 803, kind: "publish", title: "@cook_a 에 글이 올라갔어요", desc: "에어프라이어 청소, 눌어붙은 기름 3분 컷", link: "/app/posts.html", tone: "info", createdAt: iso(now - 26 * 3600e3), readAt: iso(now - 20 * 3600e3) },
@@ -899,6 +906,9 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
        옛 모의는 `p.gateOk` 가 false 면 막고 P0 면 다 막아서, **시연·스샷에서만 존재하는 가짜 게이트**를 만들고 있었다(AC-52 의 모의 쪽 얼굴).
        🔴 사유 문장은 서버(`lib/content-approve.ts approvePiece`) 글자 그대로. */
     "pieces-approve": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 });
+      /* [R8 §4.5] 팀 승인 — 🔴 **403**(권한)이다. 400(상태)으로 흉내 내면 화면이 «지금 못 하는 일»로 그려도 모의가 통과시킨다.
+         문장은 `lib/content-approve.ts:394` «member» 가지 글자 그대로. */
+      if (teamKnob === "member") return err("team_approval", "이 글은 이 집의 주인이 보고 나서 나가요. 주인에게 알려 드렸어요.", { status: 403 });
       const broke = ((p.gate && p.gate.judge && p.gate.judge.axes) || []).filter((a) => !a.pass && a.grade === "P0" && JUDGE_BLOCK.includes(a.key));
       if (broke.length) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate });
       p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },

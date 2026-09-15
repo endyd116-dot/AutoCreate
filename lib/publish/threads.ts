@@ -17,6 +17,10 @@ import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { ensureFreshToken } from "./tokens";
 import { buildCaption, videoPublicUrlOf } from "./instagram";
+// [R8CLOSE §B5] 연결글 — 문단·문장 자리에서 끊는 순수 함수(하니스 `scripts/verify-thread-chain.mts`).
+import { splitThreadChain, runThreadChain, THREADS_MAX } from "./thread-chain";
+import { disclosureTextFor } from "../disclosure";
+import { writeAudit } from "../audit";
 import type { PublishPiece, PublishAccount, PublishResult } from "./contract";
 
 type Row = Record<string, unknown>;
@@ -69,6 +73,42 @@ async function threadsAuth(tid: number, account: PublishAccount): Promise<{ ok: 
   return { ok: true, token: tok.token.accessToken, userId };
 }
 
+/* ═══ [R8CLOSE §B5] 연결글 — 상태와 조각 만들기 ═══ */
+
+/** 어디까지 올렸나(게시된 id 를 순서대로). 중간에 죽어도 **이미 올린 조각을 다시 안 올린다**. */
+const CHAIN_FIELD = "thChain";
+
+async function chainState(tid: number, pieceId: number): Promise<{ done: string[] }> {
+  const [p] = await q(sql`SELECT meta FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId} LIMIT 1`);
+  const meta = (p?.meta && typeof p.meta === "object" ? p.meta : {}) as Record<string, unknown>;
+  const raw = meta[CHAIN_FIELD];
+  const done = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+  return { done };
+}
+async function saveChainState(tid: number, pieceId: number, done: string[]): Promise<void> {
+  await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ [CHAIN_FIELD]: done })}, updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+}
+
+/**
+ * 이 글을 연결글 조각으로 나눈다.
+ *   🔴 **고지와 태그를 본문과 따로 뽑아** 첫 조각에 붙인다(`splitThreadChain` 머리말):
+ *     · 고지 = §16B(법) · 공정위는 «본문 중간»을 부적절한 위치로 본다
+ *     · 태그 = 쓰레드는 게시물당 **토픽 태그 1개**이고, 사람들이 타고 들어오는 건 **첫 글**이다.
+ *       🔴 `buildCaption` 을 그대로 쓰면 태그가 **맨 뒤 = 마지막 조각**에 붙어 아무도 안 본다(AC-73 의 다음 칸).
+ */
+function threadPartsOf(piece: PublishPiece) {
+  const disc = piece.disclosure ?? (piece.affiliate ? disclosureTextFor(piece.affiliate.provider) : null);
+  /* 태그는 인스타와 **같은 표**(`TAG_MAX.threads = 1`)를 쓴다 — 상한을 여기서 다시 적지 않는다. */
+  const tags = (piece.tags ?? []).map((t) => `#${String(t).replace(/^#/, "")}`);
+  if (piece.affiliate && !tags.some((t) => t === "#광고")) tags.unshift("#광고");
+  const tail = tags.slice(0, THREADS_TAG_MAX).join(" ");
+  const body = String(piece.bodyHtml || "").replace(/<[^>]+>/g, " ").replace(/\s{2,}/g, " ").replace(/ ?\n ?/g, "\n").trim();
+  return splitThreadChain(disc ?? "", body, tail, THREADS_MAX);
+}
+/** 쓰레드 토픽 태그 상한 — 공식 «게시물당 1개»(R8-A §4 · instagram.ts TAG_MAX 와 같은 값). */
+const THREADS_TAG_MAX = 1;
+
 /** 게시 결과 id → 사람이 여는 주소. */
 const threadsUrl = (handle: string, id: string) => {
   const h = String(handle || "").replace(/^@/, "");
@@ -83,9 +123,12 @@ const threadsUrl = (handle: string, id: string) => {
  *      로 둔 것과 어긋난다(B2 전수조사 §2.1 «쓰레드» 행).
  *   🔴 영상과 **단계 수가 다르다**: 텍스트는 컨테이너를 만들자마자 바로 게시할 수 있다(처리 대기가 없다).
  *      영상 경로의 폴링을 그대로 베끼면 30초를 헛기다리고 `video_processing` 으로 되돌아가 **영원히 안 올라간다**.
- *   🔴 본문 **첫 줄이 고지**(§16B) — `buildCaption` 이 그 규칙을 지키는 단일 출처라 글도 그걸 쓴다.
- *      스레드 글자 상한 500 도 거기서 지킨다.
- *   중복 게시 0: 컨테이너 id 를 `piece.meta` 에 남겨 재시도 때 재사용한다(영상과 같은 규율).
+ *   🔴 본문 **첫 줄이 고지**(§16B).
+ *   🔴 [R8CLOSE §B5] **연결글**(«500자 이하 · 스레드 2~3개 연결»)이라 `buildCaption` 을 **안 쓴다** —
+ *      그 함수는 고지·본문·태그를 한 덩이로 붙이고 끝에서 자르는데, 그러면 ①문장 한가운데서 끊기고
+ *      ②태그가 **마지막 조각**에 붙어 아무도 안 본다. 여기는 `threadPartsOf` 로 셋을 **따로 뽑아** 첫 조각에 싣는다.
+ *      (영상 경로는 한 덩이라 지금도 `buildCaption` 이 맞다 — 두 경로가 다른 이유가 이것이다.)
+ *   중복 게시 0: 올린 조각의 게시 id 를 `piece.meta.thChain` 에 **한 조각씩** 남긴다(영상과 같은 규율).
  */
 export async function publishThreadsText(piece: PublishPiece, account: PublishAccount): Promise<PublishResult> {
   const tid = piece.tenantId;
@@ -93,32 +136,62 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
   if (!auth.ok) return auth.res;
   const { token, userId } = auth;
 
-  const text = buildCaption(piece, 500);
-  if (!text.trim()) return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 내용이 비어 있어요." };
-
-  /* ① 컨테이너(있으면 재사용) */
-  let creationId = await savedId(tid, piece.id);
-  if (!creationId) {
-    const body = new URLSearchParams({ media_type: "TEXT", text, access_token: token });
-    const r = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads`, { method: "POST", body }).catch(() => null);
-    if (!r) return { ok: false, reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
-    if (r.status < 200 || r.status >= 300) { const c = thError(r.status, r.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }
-    creationId = String(r.json?.id ?? "").trim();
-    if (!creationId) return { ok: false, reason: "channel_error", retriable: true, error: "스레드가 업로드 번호를 주지 않았어요.", detail: "no_creation_id" };
-    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ [META_FIELD]: creationId })}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
+  /* [R8CLOSE §B5] 🔴 **연결글**(DESIGN §5C.1 «500자 이하 · 스레드 2~3개 연결»).
+     종전엔 `buildCaption(piece, 500)` 으로 **500자에서 그냥 자르고 한 덩이**로 올렸다 —
+     넘친 글은 **조용히 사라졌고** 잘린 자리는 문장 한가운데였다. 계약엔 «2~3개 연결»이 적혀 있었는데 구현이 0이었다
+     (AC-73 과 같은 모양 — 계약만 고쳐지고 발행 경로가 안 따라온 자리).
+     이제 `splitThreadChain` 이 **문단 → 문장 → 줄** 순서로 끊을 자리를 찾고, 커넥터가 **답글로 잇는다**. */
+  const parts = threadPartsOf(piece);
+  if (!parts.parts.length || !parts.parts[0].trim()) {
+    return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 내용이 비어 있어요." };
   }
 
-  /* ② 게시 — 텍스트는 처리 대기가 없다(그래서 여기엔 폴링이 없다). */
-  const pub = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads_publish`, {
-    method: "POST", body: new URLSearchParams({ creation_id: creationId, access_token: token }),
-  }).catch(() => null);
-  if (!pub) return { ok: false, reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
-  if (pub.status < 200 || pub.status >= 300) { const c = thError(pub.status, pub.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }
-  const id = String(pub.json?.id ?? "").trim();
-  if (!id) return { ok: false, reason: "channel_error", retriable: true, error: "올렸는데 스레드가 게시 번호를 주지 않았어요.", detail: "no_media_id" };
+  /* 어디까지 올렸나 — 🔴 **중간에 죽어도 첫 글을 두 번 올리지 않는다**(중복 게시가 이 채널에서 제일 무서운 사고다).
+     `done` 에 **게시된 id** 를 순서대로 쌓고, 다음 조각은 **바로 앞 id 의 답글**로 붙인다. */
+  const state = await chainState(tid, piece.id);
 
-  await q(sql`UPDATE pieces SET meta = meta - ${META_FIELD}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
-  return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, id), channelRef: id };
+  /* 한 조각 올리기 = 컨테이너 → 게시. 텍스트는 처리 대기가 없다(그래서 폴링이 없다 · 영상 경로와 다른 점).
+     🔴 루프 자체는 `runThreadChain`(순수)이 돈다 — «2번째가 1번째의 답글인가»·«이미 올린 걸 또 올리나»를
+        하니스가 직접 물을 수 있어야 하기 때문이다(AC-73 이 그 질문을 아무도 안 물어서 났다). */
+  let lastFail: { reason: "network" | "channel_error" | "auth_failed" | "config"; retriable: boolean; error: string } | null = null;
+  const post = async (text: string, replyToId: string | null) => {
+    const body = new URLSearchParams({ media_type: "TEXT", text, access_token: token });
+    if (replyToId) body.set("reply_to_id", replyToId);
+    const r = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads`, { method: "POST", body }).catch(() => null);
+    if (!r) { lastFail = { reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." }; return { ok: false as const, detail: "network" }; }
+    if (r.status < 200 || r.status >= 300) { const c = thError(r.status, r.json); lastFail = { reason: c.reason, retriable: c.retriable, error: c.error }; return { ok: false as const, detail: c.detail }; }
+    const creationId = String(r.json?.id ?? "").trim();
+    if (!creationId) { lastFail = { reason: "channel_error", retriable: true, error: "스레드가 업로드 번호를 주지 않았어요." }; return { ok: false as const, detail: "no_creation_id" }; }
+
+    const pub = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads_publish`, {
+      method: "POST", body: new URLSearchParams({ creation_id: creationId, access_token: token }),
+    }).catch(() => null);
+    if (!pub) { lastFail = { reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." }; return { ok: false as const, detail: "network_publish" }; }
+    if (pub.status < 200 || pub.status >= 300) { const c = thError(pub.status, pub.json); lastFail = { reason: c.reason, retriable: c.retriable, error: c.error }; return { ok: false as const, detail: c.detail }; }
+    const id = String(pub.json?.id ?? "").trim();
+    if (!id) { lastFail = { reason: "channel_error", retriable: true, error: "올렸는데 스레드가 게시 번호를 주지 않았어요." }; return { ok: false as const, detail: "no_media_id" }; }
+    return { ok: true as const, id };
+  };
+
+  /* 🔴 **한 조각 올릴 때마다 바로 남긴다**(`onProgress`). 마지막에 몰아서 쓰면 2조각을 올리고 죽었을 때
+     다음 틱이 1조각부터 다시 올려 **같은 글이 두 번 나간다** — 되돌릴 수 없는 사고다. */
+  const run = await runThreadChain(parts.parts, state.done, post, (done) => saveChainState(tid, piece.id, done));
+  state.done = run.done;
+  if (!run.ok) {
+    const f = lastFail ?? { reason: "channel_error" as const, retriable: true, error: "스레드에 올리지 못했어요." };
+    return { ok: false, reason: f.reason, retriable: f.retriable, error: f.error, detail: `part${(run.failedAt ?? 0) + 1} ${run.detail ?? ""}`.trim() };
+  }
+
+  /* 🔴 글자를 버렸으면 **말한다**(조용히 사라지게 두지 않는다 · AC-9). 막지는 않는다 — 글은 이미 나갔다. */
+  if (parts.dropped > 0) {
+    await writeAudit({ tenantId: tid, action: "threads_chain_truncated", actorType: "system", target: `piece:${piece.id}`,
+      detail: { parts: parts.parts.length, droppedChars: parts.dropped, note: "연결글 조각 상한에 걸려 뒷부분이 안 나갔다" }, riskLevel: "medium" })
+      .catch((e: unknown) => console.warn("[threads] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+  }
+
+  await q(sql`UPDATE pieces SET meta = (meta - ${META_FIELD}) - ${CHAIN_FIELD}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
+  /* 🔴 그 글의 주소는 **첫 글**이다 — 답글 주소를 적으면 «글 보기»가 이야기 중간으로 떨어진다. */
+  return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, state.done[0]), channelRef: state.done[0] };
 }
 
 export async function publishThreadsVideo(piece: PublishPiece, account: PublishAccount): Promise<PublishResult> {

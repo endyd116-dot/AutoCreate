@@ -2244,11 +2244,19 @@ await load();
 <div class="group" id="photos" hidden></div>
 <div class="group" id="claims" hidden></div>
 <div class="group" id="gate" hidden></div>
+<div class="group" id="teamwait" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
 --- script ---
 await UI.boot("home");
 const id = Number(UI.qs.get("id")); if (!id) { UI.go("/app/pieces.html"); return; }
 let P = null, dirty = false;
+/* [R8 §4.5] 🔴 **팀 승인** — 서버가 403(권한)으로 준다(`netlify/functions/pieces.ts` · step `team_approval`).
+   🔴 `UI.gate` 는 403 을 `step === "writable"` 일 때만 시트로 받는다 — `team_approval` 은 거기 안 걸려서 **아무 일도 안 난 것처럼 보인다.**
+      그래서 이 화면이 직접 그린다.
+   🔴 **«권한이 없어요»라고 쓰지 않는다**(CLAUDE §3) — 이건 «내가 못 하는 일»이지만 **혼나는 일이 아니다.** 문장은 서버 것 그대로 쓴다
+      (`lib/content-approve.ts` — «이 글은 이 집의 주인이 보고 나서 나가요. 주인에게 알려 드렸어요.»). 화면이 다시 짓지 않는다.
+   🔴 단추는 **잠그지 않는다** — 주인이 팀 승인을 끄면 그 순간 되는 일이고, 잠가 두면 화면이 서버보다 엄해진다(§9). */
+let teamWait = "";
 const more = document.createElement("button"); more.type = "button"; more.className = "ic"; more.setAttribute("aria-label", "더보기"); more.innerHTML = UI.dots; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(more);
 /* 고지 블록 = bodyHtml 첫 요소 .disclosure(발행물 정본 · §16B) — 편집 불가 · 지워지면 되살린다 */
 let discHtml = "";
@@ -2383,7 +2391,9 @@ function judgeSay(j) {
 function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || ["off", j.grade] : null;
   return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P1 1회 재생성 · P2 기록</span></div>${(j?.axes || []).some((a) => a.pending) ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${(j.axes || []).filter((a) => a.pending).length}가지는 아직 못 쟀어요 — ${UI.esc(((j.axes || []).find((a) => a.pending) || {}).detail || "잴 재료가 아직 안 왔어요")}</p>` : ""}${judgeSay(j)}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade);
     /* [R7 §1.5] 3상태: 보류(pending · 잴 재료가 없어 판정을 못 했다) → 실패 → 통과. 🔴 보류를 ✓ 로 그리지 않는다(못 쟀는데 초록 = 거짓말) */
-    const style = a.pending ? "background:var(--ground);color:var(--muted)" : a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger-ink)" : "background:var(--warn-soft);color:#B26A00";
+    /* 🔴 [R8 §6.1 · 대비] 여기에 `#B26A00` 이 **손으로 박혀 있었다** — 토큰 `--warn-ink` 를 4.5:1 넘게 고친 뒤에도 이 줄만 옛 색으로 남아
+       영상 심사 P1 배지가 혼자 3.97:1 이었다(--warn-soft 위). 색을 토큰 밖에 적으면 **고쳐도 안 따라온다** — 토큰으로 되돌린다. */
+    const style = a.pending ? "background:var(--ground);color:var(--muted)" : a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger-ink)" : "background:var(--warn-soft);color:var(--warn-ink)";
     /* 보류의 detail 은 이미 «…못 쟀어요» 라 꼬리표를 또 붙이면 같은 말이 두 번 나온다 — detail 이 있으면 그것만 */
     /* [R8-A2 §9] «차단»이라는 낱말을 뺐다 — 이제 막는 것은 **깨진 물건 둘**뿐이고 나머지 P0 는 그대로 나갈 수 있다. */
     const tail = a.pending ? (a.detail ? "" : "아직 못 쟀어요") : a.pass ? "✓" : g === "P0" ? (UI.JUDGE_BLOCK.includes(a.key) ? "! 다시 만들어야 해요" : "! 꼭 보세요") : "P1 재생성 통과";
@@ -2422,11 +2432,23 @@ function renderVideo(editable) {
   bindVideoOut();
   if (editable && !dirty) { const mark = () => { if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ["#vttl", "#vdesc", "#vtags"].forEach((s) => pane.querySelector(s).addEventListener("input", mark)); }
 }
+/* [R8 §4.5] 🔴 **주인을 기다린다** — 시트는 한 번 지나가고 만다. 승인이 막힌 사실은 **화면에 남아 있어야** 한다(§9-1 «또렷하게»).
+   🔴 문구 한 줄은 서버 것(`teamWait`)이고, 화면이 보태는 것은 «이 글이 지금 어디 있나» 하나뿐이다 —
+      새 사실을 지어내면 그게 곧 «화면만 아는 말»이 된다(AC-52). */
+function renderTeamWait() {
+  const host = UI.$("#teamwait");
+  if (!teamWait) { host.hidden = true; return; }
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">주인이 보고 나서 나가요</div>'
+    + `<p class="muted" style="margin:0 16px 10px;font-size:13px">${UI.esc(teamWait)}</p>`
+    + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">이 글은 «봐주세요»에 그대로 있어요. 고치실 것이 있으면 지금 고쳐 두시면 돼요.</p>';
+}
 function render() {
   const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = P.status === "in_review"; const video = P.kind === "video";
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
+  renderTeamWait();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true; UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);
@@ -2494,6 +2516,16 @@ async function approve() {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
   const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
   if (!r.ok) { if (r.gated) return;
+    /* 🔴 [R8 §4.5] **팀 승인 403** — «지금 못 하는 일»(상태)이 아니라 «내가 못 하는 일»(권한)이라 다른 얼굴로 그린다.
+       🔴 우리가 건 게이트가 **아니다** — 그 집 주인이 자기 팀에 건 규칙이라 §9 밖이다. 그래서 «막았어요»가 아니라 «기다려요»로 쓴다.
+       🔴 되돌릴 길 대신 **다음에 무엇이 일어나는지**를 준다(주인에게 이미 알렸다 — 그 문장도 서버 것이다). 단추는 «알겠어요» 하나. */
+    if (r.step === "team_approval") {
+      teamWait = String(r.error || ""); renderTeamWait();
+      return UI.sheet(`<p class="muted" style="margin:0 0 8px">${UI.esc(teamWait || "이 글은 이 집의 주인이 보고 나서 나가요.")}</p>
+        <p class="muted" style="margin:0 0 16px;font-size:13px">이 글은 «봐주세요»에 그대로 있어요. 고치실 것이 있으면 지금 고쳐 두시면 돼요.</p>
+        <div class="cta"><button class="btn primary" type="button" data-ok>알겠어요</button></div>`,
+        { title: "주인이 보고 나서 나가요", onOpen: (sh, close) => { const ok = sh.querySelector("[data-ok]"); if (ok) ok.onclick = close; } });
+    }
     /* 🔴 [R8-A2 §9] 여기까지 오는 길은 이제 **«깨진 영상» 하나**다 — 서버 `HARD_GATE_KEYS = []` 이고 영상도 `judgeBlockers` 둘(UI.JUDGE_BLOCK)뿐이다.
        그래서 «고치면 예약할 수 있어요»(옛 문장)는 이제 거짓말이다. 사실 한 줄 → 어떻게 하면 되는지 → 우리가 대신 해 주는 것, 그 차례로 적고
        **그 길(다시 만들기)을 그 자리에서 연다**(§9-4). */

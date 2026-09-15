@@ -220,7 +220,19 @@ const THREE_REST = [
   ["B2 페르소나 적합도 LLM", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/content-approve.ts"], /personaFit|적합도/).length), "0건"]],
   ["B3 신조어 화이트리스트", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/banned-words.ts"], /slangWhitelist|신조어/).length), "0건"]],
   ["B4 장소 카드", () => [yes(anyFile(["lib/blocks.ts", "lib/writing-contracts.ts"], /placeCard|장소 카드/).length), "0건"]],
-  ["B5 쓰레드 연결글", () => [yes(inFile("lib/publish/threads.ts", /연결글|threadChain|reply_to/), ), "0건"]],
+  /* [R8CLOSE §B5 · B2 2026-09-16] 🔴 **낱말로 세면 주석만 있어도 «닫힘»이 된다**(AC-59).
+     종전 `/연결글|threadChain|reply_to/` 는 «연결글은 아직 없다»라고 **적어 두기만 해도** 통과했다.
+     이 칸이 묻는 건 두 가지고, 둘 다 **동작**이다:
+       ① 나눈 조각을 **정말 이어 올리나**(`reply_to_id` 를 넘기나) — 안 넘기면 서로 모르는 낱개 글이 된다(AC-73)
+       ② 그 루프를 **제품이 부르나**(`runThreadChain`) — 만들어만 두면 종전 경로가 그대로 돈다(AC-69) */
+  ["B5 쓰레드 연결글", () => {
+    const chains = inFile("lib/publish/threads.ts", /reply_to_id/);
+    const wired = inFile("lib/publish/threads.ts", /runThreadChain\s*\(/);
+    const splits = inFile("lib/publish/thread-chain.ts", /export function splitThreadChain/);
+    return [yes(chains && wired && splits),
+      chains && wired && splits ? "나누기 + reply_to_id 로 이어 올리기 + 커넥터가 부른다"
+        : `빠진 것: ${[!splits && "나누기", !chains && "reply_to_id", !wired && "커넥터 배선"].filter(Boolean).join(" · ")}`];
+  }],
   ["B6 블로거·WP AEO 규격", () => {
     /* 🔴 낱말 «AEO» 는 계약의 visual 라벨(«FAQ(AEO)»)에도 있다 — 그건 **규격 구현이 아니다**(대용물 · AC-57).
        규격이라면 seo.ts 가 구조화 데이터·질문형 헤딩을 실제로 내보내야 한다. */

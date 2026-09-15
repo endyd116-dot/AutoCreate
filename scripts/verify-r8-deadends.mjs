@@ -91,6 +91,9 @@ const TARGETS = [
   ["셀렉터 표 — 러너가 믿을지 판정", "makeRecipe", "runner/lib/recipe.mjs", "검증 없이 쓰거나 멀쩡한 표를 다 버린다(둘 다 조용하다)"],
   ["🔴 셀렉터 표 — 채널이 실제로 그 값을 쓰나", "BUNDLED_SELECTORS", "runner/channels/tistory.mjs", "표를 내려 줘도 채널이 **옛 상수**를 그대로 써서 배포가 아무것도 안 바꾼다"],
   ["로그인 보관 상태 — 잰다", "probeFleet", "runner/lib/profile-seal.mjs", "«리눅스가 몇 대인가»를 영영 모른 채 봉인을 만들지 말지 정하게 된다"],
+  /* ── [R8CLOSE §B5] 쓰레드 연결글 — 🔴 **계약만 고치고 발행이 안 따라오는** 그 모양(AC-73)을 막는 사슬 ── */
+  ["쓰레드 연결글 — 나눈다", "splitThreadChain", "lib/publish/thread-chain.ts", "계약엔 «2~3개 연결»인데 발행은 500자에서 그냥 잘라 **넘친 글이 조용히 사라진다**"],
+  ["🔴 쓰레드 연결글 — 이어 올린다", "runThreadChain", "lib/publish/thread-chain.ts", "조각이 **서로 모르는 낱개 글**로 나간다 — 셋 다 200 이라 어느 검사도 못 잡는다(AC-73)"],
   /* ── [P1R8 §3.1] 프로필 봉인 — 새로 생긴 사슬이라 **양끝을 다 센다**(서버가 열쇠를 주나 · 러너가 실제로 봉하나) ── */
   ["봉인 — 서버가 열쇠를 준다", "ensureProfileKey", "lib/profile-seal.ts", "열쇠를 만들어 놓고 **잡에 안 실려** 러너가 영영 봉하지 못한다"],
   ["봉인 — 누구에게 켤지 고른다", "sealWantedFor", "lib/profile-seal.ts", "약하다고 «잰» 기기 대신 전 기기에 켜져 멀쩡한 윈도우에 새 위험을 심는다"],

@@ -83,7 +83,7 @@
      체험 D-3 남음은 서버가 안 보내므로 그 줄만 화면이 얹는다. */
   // 해야 할 일
   const todo = UI.$("#todo");
-  if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;
+  if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money" aria-hidden="true">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;
   /* [R7 §1.4] 서버가 주는 count(몇 건인지)·pieceId(1건이면 그 글로 바로) 를 그대로 쓴다 — 화면이 세거나 고르지 않는다 */
   else todo.innerHTML = r.todo.map((t) => { const href = t.pieceId ? `/app/piece.html?id=${t.pieceId}` : t.link;
     return `<a class="row tap" href="${href}">${UI.kindMark(t.kind, t.tone)}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.desc)}</span></div>${t.count > 1 ? `<span class="pill ${t.tone === "warn" || t.tone === "danger" ? "warn" : "off"}">${UI.num(t.count)}건</span>` : ""}${UI.chev}</a>`; }).join("");
@@ -93,7 +93,7 @@
   const PILL = { ...UI.SLOT_STATUS, scheduled: ["off", "예약"], approved: ["off", "예약"] };
   const slots = UI.$("#slots");
   slots.innerHTML = `<div class="gt">오늘 편성 <a href="/app/schedule.html">전체</a></div>` + (r.todaySlots.length
-    ? r.todaySlots.map((s) => { const p = PILL[s.status] || ["off", s.status]; return `<a class="row tap" href="${s.status === "in_review" && s.pieceId ? `/app/piece.html?id=${s.pieceId}` : "/app/schedule.html"}"><span class="mk ${s.channel}">${(UI.CH[s.channel] || {}).mark || "?"}</span><div class="l"><span class="t">${UI.esc(s.title || "소재 정하는 중")}</span><span class="d">${s.handle ? "@" + UI.esc(s.handle) : "계정 자동"} · ${UI.timeKST(s.publishAt) || "시간 자동"}</span></div><span class="pill ${p[0]}">${p[1]}</span></a>`; }).join("")
+    ? r.todaySlots.map((s) => { const p = PILL[s.status] || ["off", s.status]; return `<a class="row tap" href="${s.status === "in_review" && s.pieceId ? `/app/piece.html?id=${s.pieceId}` : "/app/schedule.html"}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.title || "소재 정하는 중")}</span><span class="d">${s.handle ? "@" + UI.esc(s.handle) : "계정 자동"} · ${UI.timeKST(s.publishAt) || "시간 자동"}</span></div><span class="pill ${p[0]}">${p[1]}</span></a>`; }).join("")
     : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘 나갈 글이 없어요</span><span class="d">자동 편성을 켜면 다음 자리부터 채워져요</span></div></div>`);
   // [사장님 실측] 규칙이 있는데 자동 편성이 꺼져 있으면 맨 위 한 줄(홈 토글과 같은 API)
   const bn = UI.$("#autoBn"); bn.hidden = !(r.auto.rules && !r.auto.enabled);
