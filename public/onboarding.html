@@ -69,7 +69,7 @@
   UI.$("#back").onclick = () => { if (step > 1) { step--; show(); } else history.back(); };
   /* [여정 점검 6 · B3 확인] 고른 값은 이미 저장되고(tenants.settings.channels) 채널이 열리면 서버가 알림을 준다 — 화면은 그 약속을 한 줄로 말한다 */
   const soonNote = () => { const el = UI.$("#soonNote"); if (!el) return; const picked = CH.filter((c) => sel.channels.includes(c.key) && soon(c)).map((c) => c.label || UI.chLabel(c.key));
-    el.hidden = !picked.length; el.textContent = picked.length ? `${picked.join(" · ")}는 아직 연결 준비 중이에요 — 열리면 알려드릴게요.` : ""; };
+    el.hidden = !picked.length; el.textContent = picked.length ? `${picked.join(" · ")} — 아직 연결 준비 중이에요 · 열리면 알려드릴게요.` : ""; };
   UI.$("#next").onclick = async () => {
     if (step < 3) { step++; show(); return; }
     const r = await UI.api("/api/onboarding", { body: { kinds: sel.kinds, channels: sel.channels } });
