@@ -157,7 +157,9 @@ export function pieceCoinCost(kind: string, aiImageCount: number, opts: { second
      🔴 등급을 모르면(옛 글 · 안 넘긴 호출) 상한이 **simple(1)** 이다 — 모르는 것으로 돈을 물릴 땐 모자라게 받는 쪽으로만(AC-93).
         옛 식 `blog + image×(ai−1)` 은 AI 5장에 5코인이었다(사장님: «6코인 7코인 지불할 사람은 없다»). */
   const ai = Math.max(0, Math.floor(Number(aiImageCount) || 0));
-  const cap = COIN_TIERS[opts.tier ?? DEFAULT_COIN_TIER].coins;
+  /* 🔴 [C 실측 2026-09-16] 타입은 CoinTier 지만 **런타임엔 meta 의 옛 값·오타**가 들어온다 — `COIN_TIERS["abc"]` 로 던지면 정산의 try/catch 가 삼켜
+     «환급 0 = 더 받는 쪽»으로 틀린다(AC-93 의 반대 방향). 여기서 한 번 더 걸러 **모르면 simple** 로 떨어뜨린다(문자열은 `toCoinTier` 가 대소문자·공백까지 받는다). */
+  const cap = COIN_TIERS[toCoinTier(opts.tier) ?? DEFAULT_COIN_TIER].coins;
   return Math.min(cap, coinsForAiImages(ai));
 }
 

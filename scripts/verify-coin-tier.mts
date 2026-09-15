@@ -46,6 +46,9 @@ console.log("③ 🔴 AC-93 — 모르면 제일 싼 쪽으로만 · 견적 = �
 {
   const unknowns: unknown[] = [undefined, null, "", "gold", "PREMIUM!", 3, {}];
   ok("모르는 등급 → 상한 1(AI 5장이어도 1)", unknowns.every((u) => pieceCoinCost("post", 5, { tier: toCoinTier(u) }) === 1));
+  /* 🔴 [C 실측] toCoinTier 를 **안 거친** 생짜 문자열이 함수에 직접 오는 길(meta.tier 옛 값·오타) — 던지면 정산이 삼켜 «더 받는 쪽»이 된다. 던지지 않고 1 이어야 한다. */
+  const rawTier = (v: unknown) => { try { return pieceCoinCost("post", 5, { tier: v as never }); } catch { return "throw"; } };
+  ok("생짜 이상값(«abc»·«PREMIUM »·NaN)이 함수에 직접 와도 던지지 않고 1 — 대문자·공백은 등급으로 읽는다", rawTier("abc") === 1 && rawTier(NaN) === 1 && rawTier("PREMIUM ") === 3 && rawTier(" standard") === 2, JSON.stringify([rawTier("abc"), rawTier(NaN), rawTier("PREMIUM "), rawTier(" standard")]));
   ok("toCoinTier — 대소문자 · 공백은 받고 오타는 null", toCoinTier(" Premium ") === "premium" && toCoinTier("gold") === null && toCoinTier(3) === null);
   /* 견적(디렉터 propose)과 차감(confirm)과 정산(content-gen)이 **같은 함수·같은 인자**를 쓴다 — 값으로 확인: 등급 × AI 0~12 × 채널·포맷 */
   const bad: string[] = [];

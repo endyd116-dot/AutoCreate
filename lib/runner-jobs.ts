@@ -61,12 +61,15 @@ export type RunnerJobKind =
   | "ads.setup_tistory" | "ads.status_blogger"
   | "ads.setup_blogger" | "ads.revert_blogger"
   // P1R5 §0.2 — 영상: 렌더(러너가 굽는다) · 유튜브 쇼츠 · 네이버 클립(스텁).
-  | "render.video" | "publish.youtube_shorts" | "publish.naver_clip";
+  | "render.video" | "publish.youtube_shorts" | "publish.naver_clip"
+  // [R10-1·2 · B2↔B 2026-09-16] 글 레퍼런스 캡처 — 러너가 폰 폭으로 찍어 넘기고(`runner/channels/reference-capture.mjs`) 서버가 읽고 즉시 버린다(`lib/text-style-capture.ts`).
+  | "reference.capture";
 export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
   "publish.naver_blog", "publish.tistory", "session.login", "session.verify", "verify.post_alive", "revenue.stats", "publish.retract",
   "revenue.adpost", "revenue.adfit", "revenue.clip", "ads.setup_tistory", "ads.status_blogger",
   "ads.setup_blogger", "ads.revert_blogger",
   "render.video", "publish.youtube_shorts", "publish.naver_clip",
+  "reference.capture",
 ];
 export function isRunnerJobKind(v: unknown): v is RunnerJobKind { return RUNNER_JOB_KINDS.includes(String(v) as RunnerJobKind); }
 /** 수익 스크랩 잡(report 에 `revenueRows` 가 실린다). `revenue.stats` 는 글 통계라 여기 안 든다. */
@@ -84,6 +87,7 @@ export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.free
   "ads.setup_tistory": 30, "ads.status_blogger": 30,
   "ads.setup_blogger": 30, "ads.revert_blogger": 30,
   "verify.post_alive": 40,
+  "reference.capture": 45,   // [R10-1] 고객이 지금 기다리는 일이라 통계·수익 스크랩보다 앞 · 발행·세션보다는 뒤
   "revenue.stats": 50,
   "revenue.adpost": 60, "revenue.adfit": 60, "revenue.clip": 60,
 });
@@ -1084,6 +1088,13 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     const sn = String((result as RunnerSealReport).sealNote ?? "").slice(0, 200);
     if (sn) await writeAudit({ tenantId: tid, action: "profile_seal_failed", actorType: "system", target: `runner_job:${jobId}`,
       detail: { deviceId: device.id, accountId: accountId || null, why: sn }, riskLevel: "high" }).catch(() => {});
+  }
+
+  /* ── [R10-2 · B] 레퍼런스 캡처 — 본체는 `lib/text-style-capture.ts`(부를 때 가져온다 · AC-17). 🔴 여기서 읽고 **버린다**(`runner_jobs.result` 에 그림 0 · 남의 글 한 장도 안 남는다).
+     아래 전이표(계정 상태·발행 실패)를 **타지 않는다** — 남의 글을 못 연 것은 계정 잘못이 아니다. ── */
+  if (kind === "reference.capture") {
+    const { handleReferenceCaptureReport } = await import("./text-style-capture");
+    return handleReferenceCaptureReport({ id: jobId, tenantId: tid, accountId: accountId || null, payload, attempts: n(j.attempts) }, result as unknown as Record<string, unknown>);
   }
 
   /* ── 실패(parse) — 계약 P1R3 §2.1 · 우리 버그 · 계정 전이 0 · 0 으로 채우지 않는다(AC-9) ── */

@@ -48,6 +48,8 @@ export interface SelfPieceInput {
   title: string; bodyHtml: string;
   slotId?: number | null; scheduleAt?: string | null;
   monetize?: { sponsored?: boolean; gift?: boolean; affiliate?: unknown } | null;
+  /** [R10-4 · §5D] «내가 쓰되 구성만 그 틀로» — 빌려 쓴 스타일(`text_styles.id`). 되먹임 원장이 «이 스타일로 쓴 글»로 묶는다. */
+  styleId?: number | null;
 }
 export type SelfPieceResult =
   | { ok: true; pieceId: number; status: "in_review"; origin: "self"; coins: { charged: number; ref: string };
@@ -75,6 +77,12 @@ export async function createSelfPiece(a: SelfPieceInput): Promise<SelfPieceResul
     sponsored: mon.sponsored === true, gift: mon.gift === true,
     ...(mon.affiliate && typeof mon.affiliate === "object" ? { affiliate: mon.affiliate } : {}),
   };
+  /* [R10-4] 빌려 쓴 스타일 — 남의 집·지운 스타일은 못 쓴다. 있으면 meta 에 적고(검수 화면 «이 스타일로 썼어요») 원장에 실린다. */
+  if (n(a.styleId)) {
+    const [st] = await q(sql`SELECT id FROM text_styles WHERE tenant_id = ${tid} AND id = ${n(a.styleId)} AND deleted_at IS NULL`);
+    if (!st) return bad("style", "그 스타일을 찾지 못했어요.");
+    meta.styleId = n(a.styleId);
+  }
   const comp = compensationOfMeta(meta);
   if (comp.need) body = withDisclosure(body, { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift, provider: comp.provider ?? "coupang" });
   meta.adDisclosure = comp.need;

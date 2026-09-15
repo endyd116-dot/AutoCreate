@@ -33,6 +33,8 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPieceDetailed, refundLine, settlePieceCoins } from "./coin-ledger";
 import { pieceCoinCost, AI_IMAGES_INCLUDED, toCoinTier, DEFAULT_COIN_TIER, tierCoinsLine, type CoinTier } from "./coin-table";   // [R8] 사진 값 정산 — 식은 coin-table 한 곳 · [R10-7] 등급
 import { tierPromptLines } from "./writing-contracts";   // [R10-8] 등급별 «어떻게 채우나» 줄(구조는 structureFor 가 넣는다)
+import { textStylePromptLines, applyTextStyleShape } from "./text-style";   // [R10-4] 계정의 옷장 — 배운 «생김새»를 프롬프트와 골격에 얹는다(순수)
+import { textStyleOf } from "./text-style-store";                           // [R10-4] 이 글의 스타일(글마다 덮어쓰기 → 계정 기본)
 import { writeAudit } from "./audit";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
@@ -124,7 +126,9 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
   /** [R9-1] 이 채널에서 시켜도 되는 인라인 마크 종류(`inlineMarksAllowed`). 없으면 마크 줄이 안 실린다. */
   marksAllowed?: readonly string[];
   /** [R10-8] 코인 등급 — 분량 하한(`lengthFor`)과 «어떻게 채우나» 줄(`tierPromptLines`)이 여기 달렸다. 없으면 간단히(= 오늘까지의 글). */
-  tier?: CoinTier | null }): { system: string; user: string } {
+  tier?: CoinTier | null;
+  /** [R10-4] 계정의 옷장 — 배운 «생김새» 줄(`textStylePromptLines`)과 이름. 없으면 줄이 안 실린다(무회귀). */
+  style?: { name: string; lines: string[] } | null }): { system: string; user: string } {
   const c = a.c;
   const len = lengthFor(c, a.group, a.tier);
   /* 문단 하나가 져야 할 몫 — 계약 하한 ÷ (이 구성의 예상 분량) × (문단 하나의 예상 분량).
@@ -143,6 +147,8 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
     ...(goalRules.length ? ["", `[①-b 이 글의 수익 목적 — ${a.goal}]`, ...goalRules.map((r) => `· ${r}`)] : []),
     /* [R10-8] 등급별 채우기 규칙 — 🔴 구조(목록·표·체크리스트·FAQ)는 ②칸의 시퀀스가 이미 들고 있다(`applyQualityTier`). 여기는 그 블록을 **어떻게** 채우나만(부탁 · AC-63). */
     ...(tierPromptLines(a.tier).length ? ["", `[①-c 이 글의 등급 — ${a.tier === "premium" ? "프리미엄" : "보통"}]`, ...tierPromptLines(a.tier)] : []),
+    /* [R10-4] 🔴 «이렇게 생기게 써라»지 «이 문장을 베껴라»가 아니다 — 저장물에 문장이 없으니 베낄 것도 없다(§3.5). */
+    ...(a.style?.lines.length ? ["", `[①-d 이 계정의 글 모양 — «${a.style.name}»에서 배움]`, ...a.style.lines] : []),
     `· 분량: 본문 ${len.min.toLocaleString()}~${len.max.toLocaleString()}자(공백 포함 · 고지·해시태그 제외)${a.group ? ` — 이 글은 «${a.group === "review" ? "후기·리뷰" : a.group === "info" ? "정보성" : "생활정보"}» 라 이 폭이다` : ""}. 하한에 못 미치면 반려된다 — 모자라면 장면·사실을 더 담고 같은 말을 반복하지 않는다.`,
     /* 🔴 [R8 §2.1 · AC-63] 총량만 말하면 안 따라온다 — 실측에서 **블록을 12→17개로 늘리자 글이 오히려 짧아졌다**(1,849→1,503자).
        모델이 «총 분량 감각»을 스스로 갖고 블록이 늘면 나눠 담기 때문이다. 그래서 **문단 하나의 깊이**를 못 박는다.
@@ -287,7 +293,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const topic = toTopic(trow);
     const channel = String(p.channel);
     const accountId = p.account_id ? n(p.account_id) : null;
-    const [acc] = accountId ? await q(sql`SELECT id, handle, persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${accountId}`) : [undefined];
+    const [acc] = accountId ? await q(sql`SELECT id, handle, persona_id, text_style_id FROM accounts WHERE tenant_id = ${tid} AND id = ${accountId}`) : [undefined];
     const persona = await loadPersona(tid, acc?.persona_id ? n(acc.persona_id) : null);
     const c = await contractFor(channel, meta.emotionKey ? String(meta.emotionKey) : null);
     const format = (c.formats.includes(String(p.format) as FormatKey) ? String(p.format) : c.formats[0]) as FormatKey;
@@ -300,7 +306,14 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     /* [R8-A §2] 🔴 골격을 **글마다 다르게** 낸다 — 계약이 내는 골격이 3~5가지뿐이라 4편째부터 반드시 겹쳤다(스모크 실측).
        seed 는 pieceId — 같은 글은 다시 만들어도 같은 골격이다(재생성 멱등). 3단(필수/선택/억제)은 `applyTiers` 가 적용한다. */
     const group = topicGroupOf({ format, intent: topic.factors?.intent ?? null, title: topic.title });
-    const structure = structureFor(c, format, imageCount, affiliate, pieceId, group, tier);
+    /* [R10-4] 🔴 **계정의 옷장** — 이 글만 다르게(`meta.styleId`) → 계정에 걸어 둔 것(`accounts.text_style_id`) → 없으면 스타일 없이.
+       지운 스타일이면 스타일 없이 쓰고 **적는다**(조용히 빼지 않는다 · AC-9). 글이 실제로 입은 옷의 id 를 meta 에 남겨 원장이 «이 스타일로 쓴 글»로 묶는다. */
+    const wantStyleId = Number(meta.styleId) > 0 ? Math.floor(Number(meta.styleId)) : (acc?.text_style_id ? n(acc.text_style_id) : 0);
+    const styleRow = wantStyleId ? await textStyleOf(tid, wantStyleId) : null;
+    if (wantStyleId && !styleRow) console.warn(`[content-gen] piece ${pieceId} 스타일 #${wantStyleId} 을 찾지 못해 스타일 없이 쓴다`);
+    /* 🔴 R8-A §3.7 — 골격을 갈아끼우지 않고 «생김새»만 얹는다(`applyTextStyleShape`) · 이 글도 `structure_repeat` 가 그대로 잰다. */
+    const baseStructure = structureFor(c, format, imageCount, affiliate, pieceId, group, tier);
+    const structure = styleRow ? applyTextStyleShape(baseStructure, styleRow.style, c, pieceId) : baseStructure;
     /* 이 글의 수익 목적 — brief 에 있으면 그걸, 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스). 제휴가 붙은 글은 affiliate 가 이긴다. */
     const [bg] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE id = ${n(p.brief_id)}`) : [undefined];
     /* 🔴 정본 한 곳 — 검수 화면(pieces-get)도 같은 함수를 본다. 출처까지 받아 **왜 이 목적인지**를 meta 에 남긴다(C · R8-A §1.2).
@@ -322,10 +335,13 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const otherPlain = others.map((o) => ({ id: n(o.id), text: htmlToPlain(String(o.body)) }));
     /* [R9-1] 이 채널에서 시켜도 되는 인라인 마크 — 표가 true 인 것만(모르면 안 시킨다). 없으면 프롬프트에 줄이 안 실린다(무회귀). */
     const marksAllowed = inlineMarksAllowed(channel);
+    /* [R10-4] 배운 «생김새» 줄 — 강조 줄은 이 채널이 낼 수 있는 마크로만 말한다(못 내는 걸 시키면 «못 냈어요»가 매 글에 뜬다). */
+    const styleLines = styleRow ? textStylePromptLines(styleRow.style, marksAllowed) : [];
+    const stylePrompt = styleRow ? { name: styleRow.name, lines: styleLines } : null;
 
     await setStage(pieceId, "writing");
     const write = async (rewrite?: string, angleOverride?: string) => {
-      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, rewrite, goal, group, marksAllowed, tier });
+      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, rewrite, goal, group, marksAllowed, tier, style: stylePrompt });
       const r = await callGeminiJson<{ title?: string; blocks?: unknown; tags?: unknown; affiliateChoice?: unknown }>({ purpose: "content", chain: CHAIN_HIGH, role: "high", system: pr.system, user: pr.user, tenantId: tid, ref: `piece:${pieceId}`, mode: "pro", maxOutputTokens: 12_000, timeoutMs: 180_000 });
       if (!r.ok) throw new Error(`글 생성 실패(${r.reason})`);
       const markDrops: MarkDrop[] = [];
@@ -534,6 +550,9 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       formatMarks: draft.formatMarks,
       /* [R9-8] 🔴 **계정 간 유사도** — 숫자·id 만(본문 0). `measured:false` 는 «못 쟀다»지 «0점»이 아니다(AC-9). 게이트 축 `cross_account` 가 같은 값을 말한다. */
       crossSimilarity: cross.meta,
+      /* [R10-4] 🔴 이 글이 **실제로 입은 옷** — 계정 기본에서 왔든 글마다 골랐든 id 를 여기 적는다(원장·검수 화면이 이 칸을 읽는다). 못 찾은 스타일은 사람말로 적는다. */
+      ...(styleRow ? { styleId: styleRow.id, styleApplied: { id: styleRow.id, name: styleRow.name, lines: styleLines.length, from: Number(meta.styleId) > 0 ? "piece" : "account" } } : {}),
+      ...(wantStyleId && !styleRow ? { styleUnused: { id: wantStyleId, why: "그 스타일을 찾지 못해서(지웠거나 없는 스타일) 스타일 없이 썼어요." } } : {}),
       /* [R8 §2.1] 🔴 주제군을 **적어 둔다**. 검수·재검사가 다시 계산하면 재료가 달라 값이 갈린다 —
          여기서는 `intent` 를 알지만(소재에서 온다) 검수 시점엔 없어서 `intent:null` 로 계산되고 있었다.
          분량 폭이 주제군에 달렸으니, 갈리면 **잰 값은 같은데 기준이 다른** 상태가 된다. */
