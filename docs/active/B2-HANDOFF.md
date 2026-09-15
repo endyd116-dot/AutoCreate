@@ -66,6 +66,22 @@
 | **DDL 번호는 «파일 만들기 직전에» 확인** | `ls | tail -1` 을 보고도 파일을 먼저 써서 두 번 겹쳤다(AC-49) |
 | **셸이 역슬래시를 먹는다** | `sed`·`perl`·`node -e` 가 조용히 0건 치환. **바꾼 개수를 찍어** 확인해야 한다 |
 
+## 3B. 🔴 이 영역에서 제일 비싼 한 줄
+
+> **모를 때 `login_fail` 을 쓰지 마라. 모르면 `unknown` 이다.**
+
+전이표(`lib/account-health.ts`)에서 `login_fail`·`captcha` 는 계정을 **`pending_login`** 으로 밀고 고객에게 «다시 로그인하세요»를 시킨다.
+그래서 **이유를 모를 때 `login_fail` 을 쓰면** ①멀쩡한 계정이 멈추고 ②고객이 헛일을 하고
+③ **시키는 대로 재로그인을 반복하는 것이 캡차를 부른다** — 우리는 이미 한 번 그랬다(job #16 · AC-19).
+`unknown` 은 계정을 안 건드리고 건강도만 깎는다. 모를 때 맞는 칸은 그쪽이다(AC-10 «우리 버그와 계정 문제를 섞지 마라»).
+판정 근거는 `runner/lib/auth-*.mjs` 의 `classify*LoginWall`(순수 함수) · 검사는 `scripts/verify-runner-auth.mts`.
+
+## 3C. 러너와 서버의 경계 — **러너는 사실, 서버는 문장**
+
+메인 판정(2026-09-15): 러너 `notes` 를 저장하지 않는다(`RunnerReportOk` 에 칸이 없다 — 보내도 버려진다).
+러너 노트를 저장하면 «러너가 하는 말»이 또 하나의 진실 원천이 되고, **화면 문구가 러너 판(zip)에 묶인다**(고치려면 재배포).
+⇒ 러너는 `raw` 에 **사실**만(`amountEstimated`·`amountHead`·`rowsDropped`), **문장은 `lib/revenue/aggregate.ts` 가 만든다.**
+
 ## 4. 결정해 둔 것 (다시 묻지 말 것)
 
 - 러너 배포는 **zip + R2 + presigned**. npm 패키지로 안 판다(`npx ac-runner` 는 존재한 적 없다).

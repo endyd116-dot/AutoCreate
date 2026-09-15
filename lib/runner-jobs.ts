@@ -645,6 +645,12 @@ export interface RunnerReportOk {
   /** 이 잡이 실제로 나간 IP(계약 §2.5-4 · 프록시 배정 계정만). 서버가 `accounts.last_exit_ip` 에 적는다. */
   exitIp?: string;
   shotKey?: string;
+  /* 🔴 **`notes` 는 여기 없다 — 러너가 보내도 서버가 버린다.** 일부러 그렇다(메인 판정 2026-09-15).
+     러너 노트를 저장할 자리를 새로 파면 «러너가 하는 말»이 또 하나의 진실 원천이 되고,
+     화면 문구가 러너 판(zip)에 묶여 버린다(고치려면 러너를 다시 배포해야 한다).
+     ⇒ **러너는 «사실»만 구조화해 보낸다**(예: `revenueRows[].raw.amountEstimated`·`amountHead`·`rowsDropped`)
+        **문장은 서버가 만든다**(`lib/revenue/aggregate.ts`). 화면에 가야 할 것을 `notes` 에 담지 마라 — 사라진다.
+     (러너 콘솔 로그로는 여전히 쓸모 있어서 러너 쪽 `notes` 자체는 남겨 뒀다.) */
 }
 /**
  * 실패 보고. `errorKind` 는 계약 P1R2 §2 의 7종 **또는 `"parse"`**(P1R3 §2.1 — 파싱 실패를 0 으로 채우지 않는다 · AC-9).

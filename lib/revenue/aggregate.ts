@@ -64,6 +64,8 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
       BOOL_OR(d.raw->>'amountEstimated' = 'true') AS amount_estimated,
       (array_agg(d.raw->>'amountHead' ORDER BY d.day DESC, d.id DESC)
          FILTER (WHERE d.raw->>'amountEstimated' = 'true' AND COALESCE(d.raw->>'amountHead','') <> ''))[1] AS amount_head,
+      /* 러너가 «합계» 행을 몇 줄 뺐나(사실) — 문장은 아래에서 서버가 만든다. 숫자가 아니면 NULL 이라 안 센다. */
+      MAX(NULLIF(d.raw->>'rowsDropped','')::int) AS rows_dropped,
       (SELECT MAX(s.last_ok_at) FROM revenue_sources s WHERE s.tenant_id = d.tenant_id AND s.source = d.source) AS last_ok
     FROM revenue_daily d WHERE d.tenant_id = ${tid} AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.tenant_id, d.source ORDER BY krw DESC`);
@@ -83,12 +85,19 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
     bySource: bySrc.map((r) => {
       const o: RevenueSummary["bySource"][number] = { source: String(r.source), krw: n(r.krw), freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness };
       const at = utcDate(r.last_ok) ?? utcDate(r.last_upd); if (at) o.lastSyncAt = at.toISOString();
+      /* 🔴 문구는 **서버가** 만든다(러너 문장을 그대로 흘리지 않는다 — 화면 어휘는 한 곳 · 이모지 금지 · UX 헌장 §3).
+         러너는 `raw` 에 **사실**만 남긴다(`amountEstimated`·`amountHead`·`rowsDropped`) — 메인 판정 2026-09-15.
+         «러너가 하는 말»을 저장하기 시작하면 그게 또 하나의 진실 원천이 된다. */
+      const parts: string[] = [];
       if (r.amount_estimated === true) {
         o.amountEstimated = true;
-        // 문구는 **서버가** 만든다(러너 문장을 그대로 흘리지 않는다 — 화면 어휘는 한 곳 · 이모지 금지 · UX 헌장 §3).
         const head = String(r.amount_head ?? "").trim();
-        o.note = head ? `«${head}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요` : "매체가 준 예상치예요 — 확정 금액이 아니에요";
+        parts.push(head ? `«${head}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요` : "매체가 준 예상치예요 — 확정 금액이 아니에요");
       }
+      const dropped = n(r.rows_dropped);
+      // «합계» 행을 뺐다는 사실을 말해 준다 — 고객이 매체 화면과 숫자를 맞춰 볼 때 «왜 다르지»의 답이 된다.
+      if (dropped > 0) parts.push(`매체 표의 합계 행 ${dropped}줄은 뺐어요(같은 돈을 두 번 세지 않으려고요)`);
+      if (parts.length) o.note = parts.join(" · ");
       return o;
     }),
     /* [P1R7 B3] 주인이 사라졌거나 이름이 비었으면 **서버가 사람말로 이름 붙인다**(화면이 «?»·«제목 없음»을 그리지 않게).
