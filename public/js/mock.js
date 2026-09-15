@@ -8,6 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
+  const MOCK_V = 8;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -24,6 +25,8 @@
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const oneChannel = qs.get("oneCh") === "1";   // [사장님 실측] 네이버 계정만 있는 집 — 소재가 전부 한 채널
+  const closedKnob = qs.get("closed") === "1";  // [R7 §3.1] 이미 탈퇴를 신청해 둔 집(파기 예약 중)
+  const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
@@ -160,7 +163,9 @@
   }
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
-    v: 7, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
+    v: MOCK_V, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100,
+    /* [R7 §3.1] 탈퇴 예약 — 서버는 tenants.closed_at·purge_at 에 둔다. null = 신청 안 한 집 */
+    close: closedKnob ? { closedAt: iso(now - 2 * 86400e3), purgeAt: iso(now + 28 * 86400e3), reason: null } : null, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
     accounts: fresh ? [] : oneChannel ? [
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
@@ -252,7 +257,7 @@
     adState: revEmpty || fresh ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== 7) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
+  if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== MOCK_V) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
   /* [R7 §4.3] 라이브 표본처럼 «몇 자리에만» 사람말이 실려 있다(18건 중 5건) — 서버 slots.note 가 이제 화면으로 나온다 */
   if (!S.slotNotes) { const cand = S.slots.filter((s) => s.date >= todayYmd).slice(0, 3); S.slotNotes = {};
     if (cand[0]) S.slotNotes[cand[0].id] = "정지된 계정에서 넘겨받았어요"; if (cand[2]) S.slotNotes[cand[2].id] = "소재가 겹쳐 다른 소재로 바꿨어요"; }
@@ -369,9 +374,16 @@
     if (Date.now() > deadline) return NO("window", base); if (unused <= 0) return NO("used", base); return { ...NO("no_lot", base), eligible: true, reason: null }; };
   const delay = (ms = 260) => new Promise((r) => setTimeout(r, ms));
 
+  /* [AC-52 · 2026-09-15 · lib/revenue/types.ts 에서 그대로 복사] 🔴 손으로 고치지 마라 — 다르면 scripts/verify-label-surface.mjs 가 빨강 */
+  const DAY_BASIS_NOTE = {
+    pt: "이 매체는 미국 시간 기준으로 하루를 세요 — 한국 날짜와 하루가 어긋날 수 있어요.",
+    provider: "이 매체가 세는 하루 기준을 아직 확인하지 못했어요 — 한국 날짜와 다를 수 있어요.",
+  };
+  const BASIS_OF = { adsense: "pt", youtube: "pt", coupang: "kst", adpost: "kst", adfit: "kst", clip: "kst", aliexpress: "provider", linkprice: "provider", meta: "kst", tiktok: "kst", x: "kst", sponsor: "kst", manual: "kst" };
+
   /* ── 라우트 ── */
   const R = {
-    "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: qs.get("mail") !== "0", mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: blocked === "suspended" ? "starter" : "trial", status: blocked || "trial", trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: blocked ? 0 : 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: qs.get("imp") === "1" ? { byName: "운영 관리자", startedAt: iso(now - 5 * 60e3), until: iso(now + 55 * 60e3) } : null }),
+    "auth-me": () => ({ ok: true, user: { id: 1, email: "mock@autocreate.dev", name: "모의 고객", role: "owner", emailVerified: qs.get("mail") !== "0", mustChangePassword: false }, tenant: { id: 1, key: "mock", name: "모의", planKey: blocked === "suspended" ? "starter" : "trial", status: blocked || (S.close ? "readonly" : "trial"), trialEndsAt: iso(now + 9 * 86400e3), trialDaysLeft: blocked || S.close ? 0 : 9, settings: { autoSchedule: S.settings.autoSchedule } }, coins: S.coins, impersonation: qs.get("imp") === "1" ? { byName: "운영 관리자", startedAt: iso(now - 5 * 60e3), until: iso(now + 55 * 60e3) } : null }),
     "auth-refresh": () => ({ ok: true }),
     "auth-register": (b) => { const code = String(b.referralCode || "").trim().toUpperCase();
       if (code && code !== S.referral.code.slice(0, 4) + "OK" && !/^[A-Z0-9]{8}$/.test(code)) return { ok: false, step: "referral", error: "그런 추천 코드는 없어요. 다시 확인해 주세요.", status: 400 };
@@ -774,7 +786,9 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       }
       return { ok: true, sources: S.revSources.map((s) => { const o = { id: s.id, source: s.source, method: s.method, status: revError === s.source ? "error" : s.status };
         if (s.accountId) o.accountId = s.accountId; if (s.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
-        const le = revError === s.source ? "auth" : s.lastError; if (le) o.lastError = le; return o; }) }; },
+        const le = revError === s.source ? "auth" : s.lastError; if (le) o.lastError = le;
+        const basis = BASIS_OF[s.source]; if (basis && basis !== "kst") { o.dayBasis = basis; if (DAY_BASIS_NOTE[basis]) o.dayBasisNote = DAY_BASIS_NOTE[basis]; }   // [B3 6a5ab40] KST 가 아닌 매체만 말한다
+        return o; }) }; },
     "revenue-manual": (b) => {
       if (!b.source) return err("source", "어디서 번 돈인지 골라 주세요.");
       if (!/^\d{4}-\d\d-\d\d$/.test(b.day || "")) return err("day", "날짜를 골라 주세요.");
@@ -791,6 +805,22 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
         const src = ["adpost", "ypp", "adsense", "clip"].includes(b.source) ? b.source : null; if (!src) return err("source", "어느 매체인지 골라 주세요.");
         S.adState[src][id] = b.action === "approved" ? "approved" : "pending"; return { ok: true, accounts: eligibility() }; }
       return { ok: true, thresholds: AD_THRESHOLDS, links: AD_LINKS, accounts: eligibility() }; },
+    /* [R7 §3.1] 탈퇴 · 되돌리기 — 서버 account-close.ts 그대로: 신청하면 즉시 «보기만» + 30일 뒤 파기 예약 · 그 전엔 되돌린다.
+       🔴 문구·날짜는 서버가 준다 — 화면은 받아 쓴다. graceDays 도 서버 값(화면에 30을 박지 않는다). */
+    "account-close": (b, _q, opts) => {
+      const GRACE = 30;
+      if (!opts || !opts.body) {   // GET — 설정·홈이 «예약 중인가»를 묻는 자리
+        if (!S.close) return { ok: true, closed: false, graceDays: GRACE };
+        return { ok: true, closed: true, closedAt: S.close.closedAt, purgeAt: S.close.purgeAt, daysLeft: Math.max(0, Math.ceil((new Date(S.close.purgeAt).getTime() - Date.now()) / 86400e3)), graceDays: GRACE };
+      }
+      if (closeSub) return { ok: false, step: "subscription", error: "구독이 아직 살아 있어요. 요금제 화면에서 해지한 뒤에 탈퇴해 주세요.", status: 400 };
+      if (S.close) return { ok: true, closedAt: S.close.closedAt, purgeAt: S.close.purgeAt, graceDays: GRACE, already: true };   // 멱등
+      const at = Date.now();
+      S.close = { closedAt: iso(at), purgeAt: iso(at + GRACE * 86400e3), reason: String(b.reason || "").slice(0, 200) || null };
+      S.notifications.unshift({ id: S.nextId++, kind: "account_closing", title: "탈퇴가 접수됐어요", desc: "30일 뒤에 데이터가 지워져요. 그 전에는 «되돌리기»로 그대로 돌아올 수 있어요. 지금은 보기만 할 수 있어요.", link: "/app/settings.html", tone: "warn", createdAt: iso(at) });
+      return { ok: true, closedAt: S.close.closedAt, purgeAt: S.close.purgeAt, graceDays: GRACE };
+    },
+    "account-restore": () => { S.close = null; return { ok: true, status: "trial", closed: false, graceDays: 30 }; },
     /* §6 코인 */
     "coins-balance": () => { const purchased = Math.max(0, S.billing.ledger.filter((l) => l.bucket === "purchased").reduce((a, l) => a + l.amount, 0)); return { ok: true, balance: S.coins, included: Math.max(0, S.coins - purchased), purchased, recent: S.billing.ledger.slice(0, 20).map((l) => ({ kind: l.kind, delta: l.amount, item: l.item, reason: l.reason, createdAt: l.at })) }; },
   };
@@ -799,7 +829,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
   UI.api = async function (path, opts = {}) {
     const u = new URL(path, location.origin); const name = u.pathname.replace(/^\/api\//, "");
     const h = R[name]; if (!h) return real(path, opts);
-    await delay(); const r = h(opts.body || {}, u.searchParams); save();
+    await delay(); const r = h(opts.body || {}, u.searchParams, opts); save();
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
   /* [P1R6 §1.1] 모의 R2 — presign 주소로 가는 PUT 만 가로챈다(나머지 fetch 는 그대로) */
@@ -809,7 +839,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

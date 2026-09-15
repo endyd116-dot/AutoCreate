@@ -6,7 +6,7 @@
 <title>홈 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=13">
+<link rel="stylesheet" href="/css/ac.css?v=14">
 </head>
 <body>
 <div class="shell">
@@ -19,6 +19,7 @@
       <div class="num" id="hlnum"><span class="sk" style="display:inline-block;width:60%"></span></div>
       <div class="tip" id="tip"><span class="sk" style="display:inline-block;width:160px"></span></div>
     </a>
+    <div class="banner" id="closeBn" hidden><span id="closeBnT"></span><button type="button" id="closeUndo">되돌리기</button></div>
     <div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
     <div class="group" id="todo"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
     <div class="group" id="slots"><div class="gt">오늘 편성</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
@@ -29,8 +30,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=8"></script>
-<script src="/js/mock.js?v=8"></script>
+<script src="/js/ui.js?v=9"></script>
+<script src="/js/mock.js?v=9"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
@@ -44,6 +45,17 @@
     const el = UI.$("#notice"); el.hidden = false; el.className = "banner" + (pick.kind === "incident" ? "" : " info");
     el.innerHTML = `<span>${UI.esc(pick.title)}</span><button type="button" aria-label="닫기" style="text-decoration:none;font-size:18px;line-height:1">×</button>`;
     el.querySelector("button").onclick = () => { el.hidden = true; try { localStorage.setItem("acNoticeSeen", JSON.stringify([...seen, pick.id])); } catch { /* empty */ } };
+  });
+  /* [R7 §3.1] 탈퇴를 신청해 두면 홈에서도 계속 보인다 — 예약해 놓고 잊어서 30일 뒤 조용히 사라지는 일이 없게.
+     🔴 «보기만» 상태(readonly)일 때만 물어본다 — 체험이 끝난 집과 탈퇴한 집이 서버에선 같은 상태라, 어느 쪽인지는 이 한 번으로만 갈린다. */
+  if (me.tenant && me.tenant.status === "readonly") UI.api("/api/account-close", { noGate: true }).then((c) => {
+    if (!c.ok || !c.closed) return;
+    const bn = UI.$("#closeBn"); bn.hidden = false;
+    UI.$("#closeBnT").textContent = `${UI.dateKST(c.purgeAt)}에 자료가 지워져요${c.daysLeft != null ? ` · ${c.daysLeft}일 남았어요` : ""}`;
+    UI.$("#closeUndo").onclick = async (e) => { e.target.disabled = true;
+      const rr = await UI.api("/api/account-restore", { body: {}, noGate: true });
+      if (!rr.ok) { e.target.disabled = false; return UI.toast(rr.error || "되돌리지 못했어요"); }
+      bn.hidden = true; UI.toast("탈퇴를 되돌렸어요 · 하던 대로 쓰시면 돼요"); };
   });
   const r = await UI.api("/api/home-summary");
   if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }

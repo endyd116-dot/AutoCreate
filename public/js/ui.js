@@ -30,13 +30,22 @@
 
   /* ── [P1R4] 막힘 시트 — 403 writable(readonly|suspended) · 402 plan_limit. 업셀 한 문장 + Primary 1 ──
      🔴 402 는 «요금제» 전용 신호가 아니다 — `step` 으로만 가른다(`channel_not_connectable` 처럼 **돈과 무관한 402** 가 있다 · B3 accounts-add). «402 = 업셀»로 일반화하지 마라. */
-  let gateOpen = false;
+  let gateOpen = false, gateSheet = null;
   UI.gate = function (r) {
     if (!r || r.ok || gateOpen) return false;
-    const done = (html, title, cta, href) => { gateOpen = true; UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
+    const done = (html, title, cta, href) => { gateOpen = true; gateSheet = UI.sheet(`<p class="muted" style="margin:0 0 16px">${html}</p><div class="cta"><a class="btn primary" href="${href}">${cta}</a></div>`, { title, onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => { gateOpen = false; }); } }); return true; };
     if (r.status === 403 && r.step === "writable") {
       if (r.reason === "suspended") return done("결제가 밀려 있어요. 카드를 확인하면 바로 이어서 돼요. 만든 글과 편성표는 그대로예요.", "잠시 멈춰 있어요", "카드 확인하기", "/app/plan.html");
-      return done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
+      const opened = done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
+      /* 🔴 [R7 §3.1] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
+         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 막힌 그 순간에 한 번만 물어보고(GET) 탈퇴한 집이면 시트를 바꿔 준다. */
+      const gs = gateSheet;
+      UI.api("/api/account-close", { noGate: true, noRedirect: true }).then((c) => {   // noRedirect — 이 확인 때문에 누구도 로그인 화면으로 튕기지 않게
+        if (!c.ok || !c.closed || !gs || !gs.el.isConnected) return;
+        const h3 = gs.el.querySelector("h3"); if (h3) h3.textContent = "탈퇴를 신청하셨어요";
+        gs.el.querySelector(".sheet-body").innerHTML = `<p class="muted" style="margin:0 0 16px">${UI.esc(UI.dateKST(c.purgeAt))}에 자료가 지워져요. 그때까지는 보기만 할 수 있어요. 되돌리면 하던 대로 다시 쓸 수 있어요.</p><div class="cta"><a class="btn primary" href="/app/settings.html">되돌리러 가기</a></div>`;
+      });
+      return opened;
     }
     if (r.step === "banned_category") { UI.toast(r.error || "이 주제는 만들 수 없어요"); return true; }           // 서버 문구 그대로(카테고리 이름이 들어 있다)
     if (r.step === "ai_cost_cap") return done(UI.esc(r.error || "오늘 AI 사용이 하루 상한에 닿았어요. 내일 다시 이어서 만들 수 있어요."), "오늘은 여기까지예요", "홈으로", "/app/home.html");
