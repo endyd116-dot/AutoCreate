@@ -13,6 +13,7 @@
  *     ⑤ 통과해야 하는 것도 같은 수만큼(AC-68) — 짧은 글은 **한 덩이 그대로**(무회귀)
  */
 import { splitThreadChain, runThreadChain, cutAt, THREADS_MAX, MAX_PARTS } from "../lib/publish/thread-chain";
+import { readFileSync } from "node:fs";
 
 let pass = 0; let fail = 0;
 const ok = (name: string, cond: boolean, extra = "") => {
@@ -195,6 +196,66 @@ console.log("⑨ 🔴 중간에 실패하면 — 앞에 올린 것은 **살려 �
   eq("어디서 멈췄나", r.failedAt, 1);
   ok("사유를 그대로 전한다", String(r.detail).includes("429"));
   eq("실패 뒤로는 안 올린다", calls.length, 2);
+}
+
+console.log("\n⑩ 🔴 «문장 한가운데를 끊었나»가 **밖으로 나온다**(B-1 이 찾은 것 · AC-9 의 남은 반쪽)");
+{
+  /* 통과해야 하는 쪽부터(AC-68) — 평범한 원고는 문장 자리에서 끊기니 **깃발이 서면 안 된다.** */
+  const r = splitThreadChain(DISC, long, TAG, 200, MAX_PARTS);
+  ok("여러 조각으로 나뉘었다", r.parts.length >= 2);
+  eq("🔴 평범한 글은 문장 한가운데가 아니다", r.cutMidSentence, false);
+  ok("끊은 자리는 문단·문장·줄뿐", r.cutKinds.every((k) => k === "paragraph" || k === "sentence" || k === "line"), JSON.stringify(r.cutKinds));
+}
+{
+  const r = splitThreadChain("", "짧은 글 하나.", "", 200, MAX_PARTS);
+  eq("한 덩이면 끊은 자리가 없다", r.cutKinds, []);
+  eq("한 덩이면 깃발도 안 선다", r.cutMidSentence, false);
+}
+{
+  /* 🔴 한 낱말이 상한보다 길다(주소 같은 것) — **글자로 자를 수밖에 없고**, 그때는 말해야 한다. */
+  const r = splitThreadChain("", "x".repeat(300), "", 100, MAX_PARTS);
+  eq("🔴 글자로 끊었다고 말한다", r.cutMidSentence, true);
+  ok("어디서 끊었는지도 말한다", r.cutKinds.includes("char"), JSON.stringify(r.cutKinds));
+  eq("글자는 안 버렸다", r.parts.join("").length, 300);
+}
+{
+  /* 문장부호도 종결어미도 없이 낱말만 이어진 원고 — 낱말 경계로 끊지만 **그래도 문장 한가운데**다. */
+  const r = splitThreadChain("", Array.from({ length: 60 }, (_, i) => `단어${i}`).join(" "), "", 100, MAX_PARTS);
+  eq("🔴 낱말에서 끊어도 문장 한가운데다", r.cutMidSentence, true);
+  ok("낱말 자리로 끊었다", r.cutKinds.includes("word"), JSON.stringify(r.cutKinds));
+}
+
+console.log("\n⑪ 🔴 **어디까지 올렸는지 못 남기면 더 안 올린다** — 중복 게시를 막는 마지막 빗장");
+{
+  const calls: string[] = [];
+  const post = async (text: string) => { calls.push(text); return { ok: true as const, id: `id${calls.length}` }; };
+  const r = await runThreadChain(["가", "나", "다"], [], post, async () => { throw new Error("thChain 저장 확인 실패"); });
+  ok("끝까지 안 간다", !r.ok);
+  eq("🔴 한 조각 올리고 멈춘다(두 번째를 안 올린다)", calls.length, 1);
+  eq("올린 것은 남는다", r.done, ["id1"]);
+  ok("«못 남겨서» 멈춘 것임을 알린다", String(r.detail).startsWith("progress:"), String(r.detail));
+}
+{
+  /* 통과 쪽(AC-68) — 잘 남으면 끝까지 간다. */
+  const calls: string[] = [];
+  const post = async (text: string) => { calls.push(text); return { ok: true as const, id: `id${calls.length}` }; };
+  const saved: string[][] = [];
+  const r = await runThreadChain(["가", "나", "다"], [], post, async (d) => { saved.push([...d]); });
+  ok("잘 남으면 끝까지 간다", r.ok);
+  eq("세 조각 다 올린다", calls.length, 3);
+  eq("🔴 한 조각 올릴 때마다 남긴다(마지막에 몰아서가 아니다)", saved.length, 3);
+}
+
+console.log("\n⑫ 🔴 사슬 — **커넥터가 정말 그러나**(순수 함수 검사는 이걸 절대 못 잡는다 · AC-69)");
+{
+  const code = readFileSync("lib/publish/threads.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+  ok("🔴 쓴 직후 jsonb_typeof 로 확인한다(CLAUDE §4.5 · PITFALLS #1)", /jsonb_typeof\(meta -> \$\{CHAIN_FIELD\}\)/.test(code), "확인 없이 쓰면 그 칸이 안 남아도 모른다 — 다음 틱이 1조각부터 다시 올린다");
+  ok("개수까지 본다(타입만 맞고 비어 있어도 같은 사고다)", /jsonb_array_length/.test(code));
+  ok("🔴 못 남기면 이어 올리기를 멈춘다", /if \(await saveChainState\(tid, piece\.id, done\)\) return;/.test(code));
+  ok("🔴 멈춘 뒤 channelRef 를 남겨 «다시 올리기»가 첫 조각을 또 안 올리게 한다", /if \(posted\.length\) return \{ ok: true/.test(code));
+  ok("못 남긴 사실을 감사로 말한다", /threads_chain_state_unsaved/.test(code));
+  ok("🔴 문장 한가운데서 끊었으면 감사로 말한다", /threads_chain_cut_midsentence/.test(code));
+  ok("그 글 화면이 쓸 재료도 meta 에 남긴다", /thChainCut/.test(code));
 }
 
 console.log(`\n${fail ? "🔴" : "✅"} ${pass} 통과 · ${fail} 실패`);
