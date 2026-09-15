@@ -24,6 +24,7 @@ import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideo
 import { resolveBgm } from "./bgm";
 import { enqueueRender } from "./render-queue";
 import { r2Put } from "../r2";
+import { backgroundBase } from "../site-url";   // [AC-53/54] 자기 배경 함수 호출 = «이 배포» · 로컬에서 라이브면 던진다
 import {
   CHAIN_BUDGET_MS, CHAIN_LOCK_MIN, CHAIN_RESUME_MAX, videoStub,
   type CutPlan, type RenderPayload, type RenderScene, type ScriptLine, type VideoFormat, type VideoSeconds, type VideoSpec, type VideoStage,
@@ -267,8 +268,13 @@ async function handOff(tid: number, pieceId: number, stage: VideoStage, meta: Re
 /** 배경 함수 호출(계약 §1.2·§1.4 · AC-16: 실패를 삼키지 않는다 · netlify dev 는 background 를 동기 실행하므로 타임아웃은 «닿았다»로 본다 · AC-12). */
 export async function triggerVideo(pieceId: number, tid: number, resume = false): Promise<boolean> {
   const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
-  const site = String(process.env.SITE_URL ?? "").replace(/\/$/, "");
-  if (!secret || !site) { const missing = !secret ? "INTERNAL_SECRET" : "SITE_URL"; await failPiece(tid, pieceId, `서버 설정(${missing})이 없어 만들기를 시작하지 못했어요.`, null); return false; }
+  if (!secret) { await failPiece(tid, pieceId, "서버 설정(INTERNAL_SECRET)이 없어 만들기를 시작하지 못했어요.", null); return false; }
+  /* 🔴 [AC-53/54] «지금 돌고 있는 이 배포»를 부른다. 종전엔 `SITE_URL`(정본=라이브)을 봐서 로컬 netlify dev 가 **라이브** 배경 함수를 불렀고,
+     라이브엔 `VIDEO_PROVIDER_STUB` 이 없어 진짜 Veo·TTS 가 돌았다(2026-09-15 B-1 실측 $3.63). `backgroundBase` 는 로컬에서 라이브면 던진다 —
+     그 실패는 삼키지 않고 piece failed + 환급 + 알림으로 남긴다(AC-16). */
+  let site: string;
+  try { site = backgroundBase(); }
+  catch (e) { await failPiece(tid, pieceId, String((e as Error)?.message ?? "서버 주소가 없어 만들기를 시작하지 못했어요."), null); return false; }
   try {
     const r = await fetch(`${site}/api/generate-video-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid, resume }), signal: AbortSignal.timeout(6_000) });
     if (r.status !== 202 && !r.ok) { await failPiece(tid, pieceId, `만들기를 시작하지 못했어요(서버 응답 ${r.status}).`, null); return false; }

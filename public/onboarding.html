@@ -17,12 +17,13 @@
     <div class="step-h"><h1>어떤 걸로<br>벌고 싶어요?</h1><p>둘 다 골라도 돼요. 나중에 바꿀 수 있어요.</p></div>
     <div class="choices">
       <button type="button" class="choice on" data-k="text"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h11l3 3v13H5z M8 12h8M8 16h8M8 8h4"/></svg></span><span><span class="ct">글</span><span class="cd" style="display:block">네이버 블로그 · 티스토리<br>애드포스트 · 애드센스</span></span></button>
-      <button type="button" class="choice on" data-k="video"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span><span><span class="ct">영상 <span class="pill off" id="videoSoon" hidden style="vertical-align:2px">곧 열려요</span></span><span class="cd" style="display:block">쇼츠 · 클립 · 릴스<br>유튜브 수익 · 제휴</span></span></button>
+      <button type="button" class="choice on" data-k="video"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/></svg></span><span><span class="ct">영상 <span class="pill off" id="videoSoon" hidden style="vertical-align:2px">채널은 곧 열려요</span></span><span class="cd" style="display:block">쇼츠 · 클립 · 릴스<small id="videoNote" hidden style="display:block;color:var(--muted);font-size:11.5px;margin-top:2px">지금도 만들어 둘 수 있어요 · 올리는 건 채널이 열리면</small><br>유튜브 수익 · 제휴</span></span></button>
     </div>
   </section>
   <section id="s2" hidden>
     <div class="step-h"><h1>어디에 올릴까요?</h1><p>지금은 고르기만 해요. 계정 연결은 다음에 해도 돼요.</p></div>
     <div class="cg" id="cg"></div>
+      <p class="muted" id="soonNote" hidden style="margin:8px 2px 0;font-size:12.5px"></p>
   </section>
   <section id="s3" hidden>
     <div class="step-h"><h1>글은 3일 전에<br>미리 보여드릴게요</h1><p>소재부터 발행까지 알아서 돌아가요. 발행 전 3일 동안 고치거나 뺄 수 있고, 조용히 두면 그대로 나가요.</p></div>
@@ -57,7 +58,8 @@
   function renderChannels() {
     const list = CH.filter((c) => sel.kinds.includes(c.category === "video" ? "video" : "text") && c.status !== "down");
     UI.$("#cg").innerHTML = list.map((c) => `<button type="button" class="cgi ${sel.channels.includes(c.key) ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${soon(c) ? '<span class="pill off" style="background:var(--press)">곧 열려요</span>' : UI.esc(SUB[c.key] || "")}</small></button>`).join("");
-    UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.channels = UI.$$("#cg .cgi.on").map((x) => x.dataset.k); });
+    UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.channels = UI.$$("#cg .cgi.on").map((x) => x.dataset.k); soonNote(); });
+    soonNote();
   }
   function show() {
     [1, 2, 3].forEach((i) => { UI.$("#s" + i).hidden = i !== step; UI.$$("#prog i")[i - 1].classList.toggle("on", i <= step); });
@@ -65,6 +67,9 @@
     if (step === 2) renderChannels();
   }
   UI.$("#back").onclick = () => { if (step > 1) { step--; show(); } else history.back(); };
+  /* [여정 점검 6 · B3 확인] 고른 값은 이미 저장되고(tenants.settings.channels) 채널이 열리면 서버가 알림을 준다 — 화면은 그 약속을 한 줄로 말한다 */
+  const soonNote = () => { const el = UI.$("#soonNote"); if (!el) return; const picked = CH.filter((c) => sel.channels.includes(c.key) && soon(c)).map((c) => c.label || UI.chLabel(c.key));
+    el.hidden = !picked.length; el.textContent = picked.length ? `${picked.join(" · ")} — 아직 연결 준비 중이에요 · 열리면 알려드릴게요.` : ""; };
   UI.$("#next").onclick = async () => {
     if (step < 3) { step++; show(); return; }
     const r = await UI.api("/api/onboarding", { body: { kinds: sel.kinds, channels: sel.channels } });
@@ -73,7 +78,10 @@
   };
   (async () => { const me = await UI.api("/api/auth-me"); if (me.ok && me.tenant?.trialDaysLeft != null) UI.$("#trial").textContent = me.tenant.trialDaysLeft + "일 남음"; })();
   (async () => { const r = await UI.api("/api/accounts-list"); if (r.ok && Array.isArray(r.channels) && r.channels.length) CH = r.channels;
-    UI.$("#videoSoon").hidden = CH.some((c) => c.category === "video" && c.status === "active"); // 영상 채널이 하나도 안 열렸으면 첫 단계 타일에도 칩
+    /* [여정 점검 5] 영상 «채널 연결»은 아직이어도 **만들어 두는 건 지금도 된다**(R7 §1.2) — «곧 열려요»로만 말하면 계정 연결 화면의 «그동안에도 만들어 둘 수 있어요»와 어긋난다 */
+    const videoClosed = !CH.some((c) => c.category === "video" && c.status === "active");
+    UI.$("#videoSoon").hidden = !videoClosed;
+    const vn = UI.$("#videoNote"); if (vn) vn.hidden = !videoClosed;
     if (step === 2) renderChannels(); })();
   show();
 </script>

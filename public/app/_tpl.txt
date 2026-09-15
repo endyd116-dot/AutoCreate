@@ -501,13 +501,15 @@ function sourceGroup() {
 function accountGroup() {
   const list = SUM.byAccount || []; if (!list.length) return "";
   const max = Math.max(1, ...list.map((x) => x.krw));
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(a.channel, "sm")}@${UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
 }
 
 /* ④ 글·영상별 TOP 5 */
 function pieceGroup() {
   const list = SUM.topPieces || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => p.deleted
+    ? `<div class="row"${p.channel ? "" : ""}>${p.channel ? UI.mark(p.channel) : ""}<div class="l"><span class="t wrap muted" style="font-weight:500">${UI.esc(p.title || "지운 글")}</span><span class="d">${p.channel ? UI.esc(UI.chLabel(p.channel)) : "지운 글 · 돈은 그대로 세요"}</span></div><span class="r">${won(p.krw)}</span></div>`
+    : `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
 }
 
 /* ⑤ 직접 입력 */
@@ -625,8 +627,11 @@ async function load() {
   D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
   const chs = (D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false })))
     .filter((c) => c.status !== "down" || cnt[c.key]); // [R7 §4.1] 아직 안 열린 채널도 흐리게 보여 준다(숨기면 «영상이 통째로 없는» 화면이 된다 · 내려간 채널만 뺀다)
-  const soon = (c) => c.status && c.status !== "active" && !cnt[c.key];   // 아직 안 열린 채널(연결된 계정이 있으면 쓰던 대로 쓴다)
-  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? "곧 열려요" : (SUB[c.key] || "")}</small></button>`).join("");
+  /* [B3 020fb15] 🔴 «지금 붙일 수 있나»는 서버가 connectable 한 칸으로 말한다 — 화면이 status·configured 를 조합하지 않는다.
+     (라이브에서 blogger 는 status=active 인데 우리 앱 키가 없어 못 붙는다 — 조합했으면 이 경우가 «붙을 수 있는 칸»으로 보였다) */
+  const soon = (c) => (c.connectable === false || (c.connectable === undefined && c.status && c.status !== "active")) && !cnt[c.key];
+  const soonWord = (c) => (c.connectableReason === "not_open" || (!c.connectableReason && c.status !== "active")) ? "곧 열려요" : "준비 중이에요";
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? soonWord(c) : (SUB[c.key] || "")}</small></button>`).join("");
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
@@ -645,9 +650,12 @@ async function load() {
 /* [R7 §4.1] 아직 안 열린 채널 — 왜 지금은 못 붙는지 한 문장으로. 버튼 0(할 수 있는 게 없을 때 Primary 를 만들지 않는다) */
 function soonSheet(c) {
   const label = c.label || UI.chLabel(c.key);
-  const why = c.category === "video" ? "영상 채널은 심사와 연결 준비가 끝나는 대로 열려요." : "이 채널은 연결 준비가 끝나는 대로 열려요.";
-  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">준비 중이에요 · 곧 열려요</p>
-    <p class="muted" style="margin:0 0 10px">${UI.esc(why)} 열리면 이 자리에서 바로 연결할 수 있어요.</p>
+  /* 왜 못 붙는지는 서버가 사유로 말한다: not_open = 채널이 아직 안 열렸다 · no_provider_key·no_site_url = 열렸는데 우리 준비가 남았다(고객 잘못 아님) */
+  const why = c.connectableReason === "no_provider_key" || c.connectableReason === "no_site_url"
+    ? "채널은 열렸는데 저희 연결 준비가 남았어요. 끝나는 대로 바로 붙일 수 있어요."
+    : c.category === "video" ? "영상 채널은 심사와 연결 준비가 끝나는 대로 열려요." : "이 채널은 연결 준비가 끝나는 대로 열려요.";
+  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${c.connectableReason === "not_open" || !c.connectableReason ? "준비 중이에요 · 곧 열려요" : "곧 연결할 수 있어요"}</p>
+    <p class="muted" style="margin:0 0 10px">${UI.esc(why)}${c.connectableReason === "no_provider_key" || c.connectableReason === "no_site_url" ? "" : " 열리면 이 자리에서 바로 연결할 수 있어요."}</p>
     <p class="muted" style="margin:0;font-size:12.5px">그동안에도 ${c.category === "video" ? "영상은 만들어 둘 수 있어요 — 만든 영상은 내려받아 앱에서 직접 올리면 돼요." : "다른 채널로는 그대로 나가요."}</p>`, { title: label });
 }
 function connectSheet(c) {
@@ -1419,8 +1427,9 @@ function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || [
   return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${(j?.axes || []).some((a) => a.pending) ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${(j.axes || []).filter((a) => a.pending).length}가지는 아직 못 쟀어요 — ${UI.esc(((j.axes || []).find((a) => a.pending) || {}).detail || "잴 재료가 아직 안 왔어요")}</p>` : ""}${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade);
     /* [R7 §1.5] 3상태: 보류(pending · 잴 재료가 없어 판정을 못 했다) → 실패 → 통과. 🔴 보류를 ✓ 로 그리지 않는다(못 쟀는데 초록 = 거짓말) */
     const style = a.pending ? "background:var(--ground);color:var(--muted)" : a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger)" : "background:var(--warn-soft);color:#B26A00";
-    const tail = a.pending ? "아직 못 쟀어요" : a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과";
-    return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${style}">${UI.esc(a.label)}${a.detail ? " " + UI.esc(a.detail) : ""} ${tail}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
+    /* 보류의 detail 은 이미 «…못 쟀어요» 라 꼬리표를 또 붙이면 같은 말이 두 번 나온다 — detail 이 있으면 그것만 */
+    const tail = a.pending ? (a.detail ? "" : "아직 못 쟀어요") : a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과";
+    return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${style}">${UI.esc(a.label)}${a.detail ? " " + UI.esc(a.detail) : ""}${tail ? " " + tail : ""}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
 const LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 const assetOf = (kind) => (P.assets || []).find((a) => a.kind === kind) || null;
 const mmss = (ms) => { const s = Math.round((ms || 0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -1565,10 +1574,11 @@ async function load() { const r = await UI.api("/api/runner-list"); if (!r.ok) {
 async function loadManaged() {
   const r = await UI.api("/api/managed-runner", { noGate: true }); const g = UI.$("#managed"); if (!r.ok) { g.hidden = true; return; }
   g.hidden = false; const pr = r.price || {};
-  const per = r.per === "account" ? "account" : "device"; const cnt = (per === "account" ? r.accounts : r.devices) || 1; const unit = per === "account" ? "계정" : "대";
-  const body = r.status === "requested" ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><div class="l"><span class="t">신청을 확인하는 중이에요</span><span class="d">${cnt}${unit} · 보통 하루 안에 배정해 드려요</span></div><span class="pill warn">검토 중</span></div>`
+  /* [B2 §2.4 · 사장님 결정 4] 관리형은 **계정당** 월요금 · 전용 IP 포함 — accounts 로만 센다(devices 는 곧 빠진다) · 값은 서버 price 만 그린다(권장값도 서버에 · 화면 상수 금지) */
+  const cnt = r.accounts || r.devices || 1;
+  const body = r.status === "requested" ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><div class="l"><span class="t">신청을 확인하는 중이에요</span><span class="d">계정 ${cnt}개 · 보통 하루 안에 배정해 드려요</span></div><span class="pill warn">검토 중</span></div>`
     : r.status === "active" ? `<div class="row"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">${r.assigned}대가 대신 돌고 있어요</span><span class="d">내 PC를 켜 두지 않아도 글·영상이 나가요</span></div><span class="pill ok">쓰는 중</span></div>`
-    : `<button type="button" class="row tap" id="mreq"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">대신 돌려주는 PC 신청</span><span class="d">${pr.totalKrw ? `${per === "account" ? "계정마다" : "한 대"} ${UI.won(pr.totalKrw)}/월(부가세 포함)` : "요금은 신청할 때 알려드려요"} · 내 PC를 켜 두지 않아도 돼요</span></div>${UI.chev}</button>`;
+    : `<button type="button" class="row tap" id="mreq"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">대신 돌려주는 PC 신청</span><span class="d">${pr.totalKrw ? `계정 1개 ${UI.won(pr.amountKrw)}/월(부가세 별도 · 전용 IP 포함)` : "요금은 신청할 때 알려드려요"} · 내 PC를 켜 두지 않아도 돼요</span></div>${UI.chev}</button>`;
   UI.$("#mbody").innerHTML = body + (r.eligible === false ? `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">지금 요금제에는 없는 기능이에요 · 눌러 보면 어떤 요금제에서 되는지 알려드려요</p>` : "");
   const b = UI.$("#mreq"); if (b) b.onclick = () => mSheet(r);
 }
@@ -1577,21 +1587,19 @@ function mSheet(r) {
      🔴 세는 단위도 값도 서버가 정본이다 — `per:"account"` 면 계정 수로 세고, 아니면 예전처럼 대수로 센다(화면이 단위를 지어내지 않는다).
      🔴 금액은 서버가 준 단가 × 개수만 한다(부가세를 화면에서 계산하지 않는다 · §12.0). */
   const pr = r.price || {};
-  const per = r.per === "account" ? "account" : "device";
-  const U = per === "account" ? { word: "계정", unit: "개", head: "계정마다", sub: "계정이 많으면 나눠서 돌려요" } : { word: "대", unit: "대", head: "한 대", sub: "계정이 많으면 나눠서 돌려요" };
-  const nMax = r.max || 5;
-  const cur = (per === "account" ? r.accounts : r.devices) || 1;
-  UI.sheet(`<p class="muted" style="margin:0 0 8px">저희가 대신 돌리는 PC예요. 내 PC를 켜 두지 않아도 네이버·티스토리 글과 영상이 예정대로 나가요.${per === "account" ? " 계정마다 다른 곳에서 접속하도록 통신 회선까지 포함이에요." : ""}</p>
-    <div class="fr"><div class="fl">${per === "account" ? "몇 계정" : "몇 대"}<small>${UI.esc(U.sub)}</small></div>${UI.stepper("dev", cur, 1, nMax, U.unit)}</div>
-    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${U.head} 요금(부가세 별도)</span><span class="v" id="mAmt">${UI.won(pr.amountKrw || 0)}</span></div>
+  const nMax = r.max || 1;                              // max = 플랜 최대 계정 수(기기 수 아님)
+  const cur = Math.min(nMax, r.accounts || r.devices || 1);
+  UI.sheet(`<p class="muted" style="margin:0 0 8px">저희가 대신 돌리는 PC예요. 내 PC를 켜 두지 않아도 네이버·티스토리 글과 영상이 예정대로 나가요. 계정마다 전용 IP 로 접속해요.</p>
+    <div class="fr"><div class="fl">계정 몇 개<small>돌려 드릴 계정 수 · 지금 요금제는 ${nMax}개까지</small></div>${UI.stepper("dev", cur, 1, nMax, "개")}</div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정 1개 요금(부가세 별도 · 전용 IP 포함)</span><span class="v" id="mAmt">${UI.won(pr.amountKrw || 0)}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v" id="mVat">${UI.won(pr.vatKrw || 0)}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">한 달에</span><span class="v" id="mTot" style="font-weight:800">${UI.won(pr.totalKrw || 0)}</span></div>
-    ${per === "account" ? '<p class="muted" style="margin:8px 0 0;font-size:12.5px">회선(프록시) 요금이 이 값에 들어 있어요 · 따로 내지 않아요.</p>' : ""}
+    <p class="muted" style="margin:8px 0 0;font-size:12.5px">전용 IP 요금이 이 값에 들어 있어요 · 따로 내지 않아요.</p>
     <p class="muted" style="margin:10px 0 0;font-size:13px">신청하면 운영자가 확인하고 배정해 드려요. 배정된 달부터 청구돼요.</p>
     <div class="cta"><button class="btn primary" type="button" id="go">신청하기</button></div>`, { title: "대신 돌려주는 PC", onOpen: (sh, close) => {
       const upd = (n) => { sh.querySelector("#mAmt").textContent = UI.won((pr.amountKrw || 0) * n); sh.querySelector("#mVat").textContent = UI.won((pr.vatKrw || 0) * n); sh.querySelector("#mTot").textContent = UI.won((pr.totalKrw || 0) * n); }; // 대수 배수는 서버 단가 × n(계산이 아니라 곱)
       UI.bindSteppers(sh, (n2, v) => upd(v));
-      sh.querySelector("#go").onclick = async () => { const nSel = UI.stepVal(sh, "dev"); const rr = await UI.api("/api/managed-runner", { body: per === "account" ? { accounts: nSel } : { devices: nSel } });
+      sh.querySelector("#go").onclick = async () => { const rr = await UI.api("/api/managed-runner", { body: { accounts: UI.stepVal(sh, "dev") } });
         if (!rr.ok) return rr.gated ? close() : UI.toast(rr.error || "신청하지 못했어요");
         close(); UI.done("신청했어요 · 배정되면 알려드려요", loadManaged); };
     } });
@@ -1702,7 +1710,7 @@ const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(
 function row(p) {
   if (privateOf(p)) return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d" style="display:flex;align-items:center;gap:6px;overflow:visible;flex-wrap:wrap">${UI.pill(UI.POST_STATUS, p.status)}<span>공개 전환 필요</span></span></div><a class="lk" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;min-height:44px;display:inline-flex;align-items:center" data-stop>스튜디오 ›</a></button>`;
   const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
-  const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}가 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
+  const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}에서 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
   return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
 }
 function render() {
@@ -1733,7 +1741,7 @@ function postSheet(p) {
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${processingOf(p) ? '<span class="pill off">처리 중</span>' : UI.pill(UI.POST_STATUS, p.status)}</div>
     ${stuckOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(p.errorKind))}${p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div>` : ""}
     ${privateOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>심사 전엔 비공개로 올라가요 · 유튜브 스튜디오에서 «공개»로 바꾸면 사람들에게 보여요</span></div>` : ""}
-    ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}가 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}
+    ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}에서 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}
     ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
     ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : p.publishedVia === "manual" ? "직접 올림" : "채널 연동"}</span></div>` : ""}
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
