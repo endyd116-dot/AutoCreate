@@ -489,5 +489,6 @@
   /* ── 화면 이동(개발용 mock.js 가 감싸 mock=1 을 이어 붙인다) ── */
   UI.go = (href) => location.assign(href);
   /* ── 바텀시트 폼 안 «확인 한 번 더»(팝업 모달 금지 · 시트 안 인라인 확인) ── */
-  UI.confirmRow = (host, msg, onYes) => { host.innerHTML = `<p class="muted" style="margin:8px 0 12px">${UI.esc(msg)}</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn danger" type="button" data-yes>네, 할게요</button></div>`; host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; }; host.querySelector("[data-yes]").onclick = onYes; };
+  /* `yes` 를 주면 «네, 할게요» 대신 **그 동작의 이름**을 쓴다 — 되돌릴 수 없는 일일수록 단추가 무슨 일을 하는지 말해야 한다(§5E). */
+  UI.confirmRow = (host, msg, onYes, yes) => { host.innerHTML = `<p class="muted" style="margin:8px 0 12px">${UI.esc(msg)}</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn danger" type="button" data-yes>${UI.esc(yes || "네, 할게요")}</button></div>`; host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; }; host.querySelector("[data-yes]").onclick = onYes; };
 })();

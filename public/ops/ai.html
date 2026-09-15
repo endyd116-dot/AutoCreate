@@ -21,7 +21,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=13"></script>
+<script src="/js/ui.js?v=14"></script>
 <script src="/js/ops.js?v=2"></script>
 <script src="/js/mock-ops.js?v=1"></script>
 <script>
@@ -30,7 +30,7 @@ const op = await OPS.boot("ai"); if (!op) return;
 const canEdit = OPS.can(op, "super_admin");
 const ROLE = { high: "글(고급)", low: "글(가벼움)", director: "디렉터", landing: "랜딩", image: "사진" };
 const mono = (a) => `<span style="font-family:ui-monospace,monospace;font-size:12.5px">${UI.esc((a || []).join(" → ") || "—")}</span>`;
-const tri = (v) => v === true ? '<span style="color:var(--money);font-weight:800">✓</span>' : v === false ? '<span style="color:var(--danger);font-weight:800">✗</span>' : '<span class="muted" title="판정 불가">—</span>';
+const tri = (v) => v === true ? '<span style="color:var(--money-ink);font-weight:800">✓</span>' : v === false ? '<span style="color:var(--danger-ink);font-weight:800">✗</span>' : '<span class="muted" title="판정 불가">—</span>';
 let A;
 async function load() {
   const r = await UI.api("/api/ops-ai-models", { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } A = r; const s = r.settings || {};

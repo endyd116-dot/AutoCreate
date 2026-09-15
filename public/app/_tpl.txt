@@ -58,7 +58,7 @@ async function load(poll = false) {
   if (!r.topics.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p></div>`; bindAdd(); bindChf(); return; }
   const shown = chFilter ? r.topics.filter((t) => (t.channelHint || "naver_blog") === chFilter) : r.topics;
   if (!shown.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>${UI.esc(UI.chLabel(chFilter))} 소재가 아직 없어요</h3><p>«전체»로 보거나 새로 뽑아 보세요.</p></div>`; bindAdd(); bindChf(); return; }
-  g.innerHTML = head + BUSY + shown.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}${t.source === "manual" ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">직접</span>' : ""}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
+  g.innerHTML = head + BUSY + shown.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}${t.source === "manual" ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">직접</span>' : ""}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
   bindAdd(); bindChf();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
   UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
@@ -262,14 +262,36 @@ async function topicSheet(s, closeParent) {
   const r = await UI.api("/api/topics-list?status=candidate");
   const list = (r.ok ? r.topics : []).filter((t) => t.title !== s.topicTitle);
   const used = new Set(slots.filter((x) => x.id !== s.id && x.topicTitle).map((x) => x.topicTitle)); // 30일 중복 회피 — 서버도 같은 자로 거른다
-  UI.sheet(list.length
-    ? list.map((t) => { const dup = used.has(t.title); return `<button type="button" class="row tap" data-t="${t.id}" ${dup ? 'disabled style="opacity:.4"' : ""}>${UI.mark(t.channelHint || s.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${dup ? "다른 날에 이미 편성됐어요" : UI.esc(topicSub(t))}</span></div>${dup ? "" : UI.chev}</button>`; }).join("")
-    : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">고를 소재가 없어요</h3><p>«만들기»에서 새로 뽑으면 여기에도 나와요.</p><a class="btn primary sm" href="/app/create.html">소재 뽑으러 가기</a></div>`,
+  /* [R8 · 사장님 지시] 🔴 **여기서 바로 적을 수 있어야 한다.** 종전엔 «이미 뽑아 둔 후보»만 보여 줘서,
+     «미스터 트롯이 유행이네»를 지금 떠올리면 만들기로 나갔다 → 소재 만들고 → 돌아와 붙이는 **세 걸음**이었다.
+     `topics-add`(코인 0) 로 만들고 그 id 로 바로 `slots-assign-topic` — 한 걸음. 거절 문장은 만들기 화면과 **같은 것**을 쓴다(두 곳이 다른 말을 하지 않게). */
+  const assign = async (topicId, say) => {
+    const rr = await UI.api("/api/slots-assign-topic", { body: { slotId: s.id, topicId: Number(topicId) } });
+    if (!rr.ok) { if (!rr.gated) UI.toast(rr.error || "소재를 바꾸지 못했어요"); return false; }
+    UI.toast(say); await reload(closeParent); return true;
+  };
+  UI.sheet(`<form id="ntf"><div class="field"><label>직접 적기 <span class="muted" style="font-weight:500">· 코인 0</span></label><input class="input" name="title" maxlength="80" required placeholder="예: 미스터 트롯 투표하는 법" autocomplete="off"><div class="help"></div></div>
+      <div id="ndup"></div><div class="cta nobar" style="position:static;padding:0 0 4px"><button class="btn primary" type="submit">이 자리에 넣기</button></div></form>
+    <div class="sec">또는 뽑아 둔 소재에서</div>`
+    + (list.length
+      ? list.map((t) => { const dup = used.has(t.title); return `<button type="button" class="row tap" data-t="${t.id}" ${dup ? 'disabled style="opacity:.4"' : ""}>${UI.mark(t.channelHint || s.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${dup ? "다른 날에 이미 편성됐어요" : UI.esc(topicSub(t))}</span></div>${dup ? "" : UI.chev}</button>`; }).join("")
+      : `<div class="empty" style="padding:12px 16px"><p style="margin:0">뽑아 둔 소재가 없어요 · <a href="/app/create.html" style="font-weight:700;text-decoration:underline">소재 뽑으러 가기</a></p></div>`),
     { title: "어떤 소재로 바꿀까요", onOpen: (sh, close) => {
-      sh.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => {
-        const rr = await UI.api("/api/slots-assign-topic", { body: { slotId: s.id, topicId: Number(b.dataset.t) } });
-        if (!rr.ok) return rr.gated ? undefined : UI.toast(rr.error || "소재를 바꾸지 못했어요");
-        close(); UI.toast("소재를 바꿨어요"); await reload(closeParent);
+      sh.querySelectorAll("[data-t]").forEach((b) => b.onclick = async () => { if (await assign(b.dataset.t, "소재를 바꿨어요")) close(); });
+      UI.form(sh.querySelector("#ntf"), async (d, f) => {
+        const r2 = await UI.api("/api/topics-add", { body: { title: d.title.trim(), channelHint: s.channel } });
+        if (!r2.ok) {
+          /* 🔴 순서가 뜻이다 — 금지 주제는 **칸 밑에** 사유를 붙인다(만들기 화면과 같은 차례 · UI.gate 가 이미 토스트로도 말한다).
+             `gated` 를 먼저 보면 시트가 닫혀 «왜 안 됐는지»가 사라진다. */
+          if (r2.step === "banned_category") return UI.fieldError(f, "title", r2.error || "이 주제는 만들 수 없어요");
+          if (r2.gated) return close();
+          if (r2.step === "duplicate" && (r2.topic || r2.existing)) { const ex = r2.topic || r2.existing;
+            sh.querySelector("#ndup").innerHTML = `<div class="banner" style="margin:0 0 8px"><span>30일 안에 같은 소재가 있어요 · 그걸로 넣을까요?</span><button type="button" id="ndupGo">그걸로</button></div>`;
+            sh.querySelector("#ndupGo").onclick = async () => { if (await assign(ex.id, "그 소재로 넣었어요")) close(); }; return; }
+          if (r2.step === "rate") return UI.fieldError(f, "title", r2.error || "오늘은 여기까지예요 · 내일 다시 넣어 주세요");
+          return UI.fieldError(f, "title", r2.error || "소재를 넣지 못했어요");
+        }
+        if (await assign(r2.topic.id, "소재를 넣었어요 · 만들 때 이 소재로 써요")) close();
       });
     } });
 }
@@ -328,7 +350,7 @@ function ruleOneSheet(rule) {
       <div class="sec">몇 시에</div>${UI.chips("hr", [["", "자동"], ...HOURS_R], s.hour == null ? "" : String(s.hour))}
       <div class="sec">어느 계정으로</div>${UI.seg("md", [["auto", "자동"], ["fixed", "고르기"]], s.mode)}
       <div data-pick ${s.mode === "fixed" ? "" : "hidden"} style="padding-top:8px">${UI.chips("ac", accs.map((a) => [a.id, "@" + a.handle]), s.acc || accs[0]?.id)}</div>
-      <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
+      <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger-ink)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
     UI.bindSteppers(body, (n, v) => { if (n === "cnt") { s.count = v; view(sh, close); } });
     UI.bindChips(body, (n, v) => {
       if (n === "ch") { s.channel = v; s.acc = null; view(sh, close); } else if (n === "ev") { s.every = v; view(sh, close); }
@@ -883,7 +905,7 @@ async function detailSheet(a) {
   <div class="fr"><div class="fl">애드센스<small>티스토리·블로거·워드프레스</small></div>${a.monetize?.adsense ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
   <div style="padding:0 0 8px"><input class="input" id="as" placeholder="pub-0000000000000000" autocomplete="off"></div>
   <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>
-  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rmc"></div></div>`;
+  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger-ink);width:100%">연결 해제</button><div id="rmc"></div></div>`;
   UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
@@ -931,7 +953,7 @@ await load();
 <div class="group">
   <button class="row tap" type="button" id="pw"><div class="l"><span class="t">비밀번호 바꾸기</span><span class="d">바꾸면 다른 기기는 로그아웃돼요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
   <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
-  <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
+  <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger-ink)">로그아웃</span></div></button>
 </div>
 <div class="group" id="notig"><div class="gt">알림</div>
   <div class="fr"><div class="fl" id="notiT">기기 알림 받기<small id="notiD">확인할 게 생기면 바로 알려드려요</small></div><button class="toggle" type="button" id="noti" aria-checked="false" aria-label="기기 알림 받기"></button></div>
@@ -1059,7 +1081,7 @@ function drawClose() {
   if (!CLOSE) { bn.innerHTML = ""; row.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
   if (!CLOSE.closed) {
     bn.innerHTML = "";
-    row.innerHTML = `<button class="row tap" type="button" id="closeGo"><div class="l"><span class="t" style="color:var(--danger)">계정 탈퇴</span><span class="d">신청해도 ${CLOSE.graceDays}일 안에는 되돌릴 수 있어요</span></div>${UI.chev}</button>`;
+    row.innerHTML = `<button class="row tap" type="button" id="closeGo"><div class="l"><span class="t" style="color:var(--danger-ink)">계정 탈퇴</span><span class="d">신청해도 ${CLOSE.graceDays}일 안에는 되돌릴 수 있어요</span></div>${UI.chev}</button>`;
     UI.$("#closeGo").onclick = closeSheet; return;
   }
   const left = CLOSE.daysLeft != null ? ` · ${CLOSE.daysLeft}일 남았어요` : "";
@@ -1142,7 +1164,7 @@ async function load() {
   if (S.plan.cycle && st === "active") cycle = S.plan.cycle; UI.$$("#cycle button").forEach((x) => x.classList.toggle("on", x.dataset.c === cycle));
   renderCards();
   const bk = S.billingKey || {};
-  UI.$("#card").innerHTML = `<div class="gt">결제 카드</div>` + (bk.has ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></span><div class="l"><span class="t">${UI.esc(bk.brand || "카드")}${bk.last4 ? ` ····${UI.esc(bk.last4)}` : ""}</span><span class="d">자동 결제에 써요</span></div><button type="button" class="btn sm secondary" id="cardChange">바꾸기</button><button type="button" class="btn sm ghost" id="cardRemove" style="color:var(--danger)">지우기</button></div>`
+  UI.$("#card").innerHTML = `<div class="gt">결제 카드</div>` + (bk.has ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></span><div class="l"><span class="t">${UI.esc(bk.brand || "카드")}${bk.last4 ? ` ····${UI.esc(bk.last4)}` : ""}</span><span class="d">자동 결제에 써요</span></div><button type="button" class="btn sm secondary" id="cardChange">바꾸기</button><button type="button" class="btn sm ghost" id="cardRemove" style="color:var(--danger-ink)">지우기</button></div>`
     : `<button type="button" class="row tap" id="cardAdd"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">카드 등록하기</span><span class="d">등록하면 요금제를 고를 수 있어요 · 카드 정보는 결제사에만 저장돼요</span></div>${UI.chev}</button>`);
   const cb = UI.$("#cardAdd") || UI.$("#cardChange"); if (cb) cb.onclick = addCard;
   const rm = UI.$("#cardRemove"); if (rm) rm.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "카드 지우기", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "카드를 지우면 다음 청구가 실패해요. 새 카드를 곧 등록해 주세요.", async () => { const r = await UI.api("/api/billing-key-remove", { body: {} }); if (!r.ok) return UI.toast(r.error || "지우지 못했어요"); close(); UI.toast(r.removed ? "카드를 지웠어요" : "등록된 카드가 없어요"); load(); }) });
@@ -1150,7 +1172,7 @@ async function load() {
   UI.$$("[data-inv]").forEach((el) => el.onclick = () => receipt(INV[Number(el.dataset.inv)]));
   const c = UI.$("#cancel"); c.hidden = !paying();
   c.innerHTML = S.cancelAtPeriodEnd ? `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t">해지 되돌리기</span><span class="d">${S.periodEnd ? UI.dateKST(S.periodEnd) + "에 끝나기로 되어 있어요" : "해지가 예약되어 있어요"} · 되돌리면 그대로 이어져요</span></div>${UI.chev}</button>`
-    : `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t" style="color:var(--danger)">구독 해지</span><span class="d">이번 기간 끝까지 쓰고 다음 청구가 없어요</span></div></button>`;
+    : `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t" style="color:var(--danger-ink)">구독 해지</span><span class="d">이번 기간 끝까지 쓰고 다음 청구가 없어요</span></div></button>`;
   const cbtn = UI.$("#cancelBtn"); if (cbtn) cbtn.onclick = S.cancelAtPeriodEnd ? revert : cancel;
 }
 const nameOf = (k) => (PLANS.find((p) => p.key === k) || {}).name || k;
@@ -1491,10 +1513,10 @@ async function load() {
 function render() {
   const live = pieces.filter((p) => !p.drop);
   UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
-  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--faint)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
+  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
     : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
   const tot = total();
-  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger-ink)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
   UI.$("#why").innerHTML = `<div class="group"><div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div></div>`;
   UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
 }
@@ -1715,7 +1737,7 @@ async function compOn(kind, close) {
 function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || ["off", j.grade] : null;
   return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${(j?.axes || []).some((a) => a.pending) ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${(j.axes || []).filter((a) => a.pending).length}가지는 아직 못 쟀어요 — ${UI.esc(((j.axes || []).find((a) => a.pending) || {}).detail || "잴 재료가 아직 안 왔어요")}</p>` : ""}${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade);
     /* [R7 §1.5] 3상태: 보류(pending · 잴 재료가 없어 판정을 못 했다) → 실패 → 통과. 🔴 보류를 ✓ 로 그리지 않는다(못 쟀는데 초록 = 거짓말) */
-    const style = a.pending ? "background:var(--ground);color:var(--muted)" : a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger)" : "background:var(--warn-soft);color:#B26A00";
+    const style = a.pending ? "background:var(--ground);color:var(--muted)" : a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger-ink)" : "background:var(--warn-soft);color:#B26A00";
     /* 보류의 detail 은 이미 «…못 쟀어요» 라 꼬리표를 또 붙이면 같은 말이 두 번 나온다 — detail 이 있으면 그것만 */
     const tail = a.pending ? (a.detail ? "" : "아직 못 쟀어요") : a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과";
     return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${style}">${UI.esc(a.label)}${a.detail ? " " + UI.esc(a.detail) : ""}${tail ? " " + tail : ""}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
@@ -1853,7 +1875,7 @@ async function regen(close) { const r = await UI.api("/api/pieces-regenerate", {
 function bindCta() { const s = UI.$("#save"); if (s) s.onclick = save; const a = UI.$("#approve"); if (a) a.onclick = approve; const g = UI.$("#regen"); if (g) g.onclick = () => askRegen(); }
 more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
   <button type="button" class="row tap" id="regen2" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : P.kind === "video" ? "지금 영상은 사라지고 처음부터 · 코인 0 · 1회" : "코인은 더 안 들어요 · 1회"}</span></div></button>
-  <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger)">버리기</span><span class="d">${P.kind === "video" ? "이 영상은 올리지 않아요" : "이 글은 발행하지 않아요"}</span></div></button></div><div id="rc"></div>`, { title: P.kind === "video" ? "이 영상을" : "이 글을", onOpen: (sh, close) => {
+  <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger-ink)">버리기</span><span class="d">${P.kind === "video" ? "이 영상은 올리지 않아요" : "이 글은 발행하지 않아요"}</span></div></button></div><div id="rc"></div>`, { title: P.kind === "video" ? "이 영상을" : "이 글을", onOpen: (sh, close) => {
     sh.querySelector("#regen2").onclick = () => askRegen(close);
     sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), P.kind === "video" ? "이 영상을 버릴까요? 되돌릴 수 없어요." : "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
   } });
@@ -1947,7 +1969,7 @@ function deviceSheet(d) {
     ${unbound ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">아직 한 번도 안 켰어요. 열쇠를 넣고 프로그램을 켜면 이 PC 에 묶여요.</p>` : d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
     <div style="margin:12px 0 0"><button type="button" class="row tap" id="rot"><div class="l"><span class="t">열쇠 다시 받기</span><span class="d wrap">PC 를 바꿨거나 열쇠가 새어 나간 것 같을 때 · 옛 열쇠는 바로 못 써요</span></div>${UI.chev}</button><div id="rc2"></div></div>
     ${d.version ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">프로그램 v${UI.esc(d.version)}</p>` : ""}
-    <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
+    <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger-ink);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
       const ff = sh.querySelector("#ffm"); if (ff) ff.onclick = () => { close(); ffmpegSheet(); } // [P1R5] caps.ffmpeg=false → 설치 안내(침묵 금지 · §2.2)
       sh.querySelector("#rot").onclick = () => UI.confirmRow(sh.querySelector("#rc2"), "지금 켜 둔 내 PC 프로그램은 멈춰요 · 새 열쇠를 넣어야 다시 켜져요", async () => {
         const r = await UI.api("/api/runner-rotate", { body: { id: d.id } }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "열쇠를 다시 받지 못했어요");
@@ -2062,6 +2084,28 @@ function render() {
 }
 async function load() { const r = await UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render(); }
 
+/* [R8 §3 · DESIGN §5E] «내려 줘» — 고객이 누르면 **우리가 대신** 내린다(우리가 일방적으로 내리는 길은 만들지 않는다).
+   🔴 `canRetract` 가 false 인 채널(유튜브·쓰레드 …)엔 **단추를 만들지 않는다** — 삭제 권한이 없어서다. 대신 그 글로 가는 길을 준다.
+      없는 되돌리기를 단추로 만들면 눌러도 아무 일이 안 난다(티스토리 «광고 떼기»와 같은 규율).
+   🔴 되돌릴 수 없는 동작이라 한 번 묻는다 — 단추 이름은 «네»가 아니라 **«내릴게요»**(무슨 일이 일어나는지 단추가 말한다).
+   🔴 코인은 안 든다(retract 경로에 consume 호출 0 · 우리 잘못이든 마음이 바뀌었든 내리는 데 돈을 받지 않는다). */
+const retractable = (p) => p.status === "published" && !p.retractedAt;
+const retractBtn = (p) => (retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
+const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
+  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}은 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
+function bindRetract(p, sh, close) {
+  const b = sh.querySelector("#rt"); if (!b) return;
+  b.onclick = () => UI.confirmRow(sh.querySelector("#rtc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
+    b.disabled = true;
+    const r = await UI.api("/api/post-retract", { body: { postId: p.id } });
+    b.disabled = false;
+    const say = UI.esc(r.message || r.error || "");
+    close();
+    setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta">${r.openUrl ? `<a class="btn primary" href="${UI.esc(r.openUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
+      { title: r.ok ? "" : "내리지 못했어요", onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; const bg = s2.previousSibling; if (bg) bg.addEventListener("click", load); } }), 300);
+    await load();
+  }, "내릴게요");
+}
 /* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유 · [P1R5] 비공개 업로드 → 스튜디오) */
 function postSheet(p) {
   if (!p) return;
@@ -2082,9 +2126,12 @@ function postSheet(p) {
       ${stuckOf(p) && isVideoPost(p) ? `<button class="btn secondary" type="button" id="vdl2">영상 내려받기</button>` : ""}
       ${stuckOf(p) ? `<button class="btn ${p.externalUrl ? "secondary" : "primary"}" type="button" id="cp">${isVideoPost(p) ? "올린 주소 적기" : "본문 복사하기"}</button>` : ""}
       ${p.pieceId ? `<a class="btn ghost" href="/app/piece.html?id=${p.pieceId}">${privateOf(p) || processingOf(p) ? "영상 보기" : "글 보기"}</a>` : ""}
+      ${retractBtn(p)}
     </div>
+    <div id="rtc"></div>${retractSay(p)}
     ${stuckOf(p) ? `<p class="muted" id="vdlNote2" style="margin:4px 0 0;font-size:13px">${isVideoPost(p) ? `영상을 받아 ${UI.esc(UI.chLabel(p.channel))} 앱에서 올린 뒤, 그 주소를 적어 주세요.` : `복사한 본문을 ${UI.esc(UI.chLabel(p.channel))} 에 붙여 넣으면 그대로 올라가요.`}</p>` : ""}`,
     { title: "", onOpen: (sh, close) => {
+      bindRetract(p, sh, close);
       const dl2 = sh.querySelector("#vdl2"); if (dl2) dl2.onclick = async () => { dl2.disabled = true; await UI.videoDownload(p.pieceId, sh.querySelector("#vdlNote2")); dl2.disabled = false; };
       const cp = sh.querySelector("#cp"); if (!cp) return;
       if (isVideoPost(p)) { cp.onclick = () => { close(); UI.markPublishedSheet({ id: p.pieceId, channel: p.channel }, load); }; return; }
@@ -2137,7 +2184,7 @@ function gauge(label, now, need, unit) {
 const STATE_PILL = { none: ["off", "아직 신청 전"], pending: ["warn", "심사 중"], approved: ["ok", "승인됨"] };
 const srcPill = (s) => { const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured; return `<span class="pill ${st[0]}">${st[1]}</span>`; };
 const srcSub = (s) => (s && s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
-const btn = (attr, label, danger = false) => `<button type="button" class="btn sm ${danger ? "ghost" : "secondary"}" ${attr}${danger ? ' style="color:var(--danger)"' : ""}>${label}</button>`;
+const btn = (attr, label, danger = false) => `<button type="button" class="btn sm ${danger ? "ghost" : "secondary"}" ${attr}${danger ? ' style="color:var(--danger-ink)"' : ""}>${label}</button>`;
 const bar = (...bs) => `<div style="display:flex;gap:8px;padding:2px 16px 10px;flex-wrap:wrap">${bs.filter(Boolean).join("")}</div>`;
 function card(title, desc, inner) {
   return `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(title)}</div><p class="muted" style="margin:0 16px 6px;font-size:13px">${UI.esc(desc)}</p>${inner}</div>`;
