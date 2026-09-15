@@ -35,6 +35,9 @@ export const GATE_LABEL: Record<GateKey, string> = {
   /* [R8 §2.1 · B-1] 🔴 **분량** — 여태 **아무도 안 쟀다**. `blocksCharCount`(공백 포함 · 고지·태그 제외)는 있었는데 **부르는 곳이 0** 이었다(AC-29).
      그래서 «계약 1,500자»가 선언으로만 있고, 실제로는 절반(C 실호출 3편 평균 736자)이 나와도 아무 표시가 없었다.
      🔴 **소프트**다(HARD_GATE_KEYS 밖) — 짧다고 발행을 막으면 공장이 선다. 대신 **재작성 지시**로 이어진다(AC-63 «다른 층의 손잡이»).
+     🔴 **근거를 못 박아 둔다: SEO 가 아니다.** 구글은 «콘텐츠 길이 자체는 순위 결정과 관련 없다»고 직접 말한다(B3 조사 · DESIGN §5C.6).
+        맞는 근거는 둘뿐이다 — ①**실물이 그렇다**(R8-A 표본: 티스토리 8,500~12,500자) ②**얇은 글은 사람이 안 읽는다**.
+        여기에 «SEO 때문»이라고 적으면 다음 사람이 그 근거를 무너뜨리고 손잡이를 통째로 뺀다.
      `runGate` 안에서 돈다(순수 · DB·AI 0) — `link_check`·`structure_repeat` 와 달리 밖에서 잴 것이 없다. */
   length: "분량이 계약 폭 안",
   cliche: "상투 표현 없음", para_repeat: "문단 시작이 다양함", bullet_ratio: "불릿이 본문을 대신하지 않음", sentence_variance: "문장 길이가 살아 있음",
@@ -48,6 +51,20 @@ export const GATE_LABEL: Record<GateKey, string> = {
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
 };
+export type GateWeight = "high" | "mid" | "low";
+/**
+ * [R8 §9] 축의 **무게** — 정본은 여기 한 곳이다(화면이 제 표를 들고 있으면 서버와 갈린다 · AC-52).
+ *   🔴 무게는 «막는다»가 아니다 — 막는 게이트는 0개다. 무게는 **읽는 순서**다.
+ *   `high` 법·계정이 걸린다(고지·금칙·광고 클릭 유도) · `mid` 플랫폼·품질에 실제 영향 · `low` 다듬으면 좋은 것.
+ */
+export const GATE_WEIGHT: Readonly<Record<string, GateWeight>> = {
+  disclosure: "high", banned_words: "high", ad_pointing: "high",
+  affiliate_count: "mid", similarity: "mid", superlative: "mid", length: "mid", visual_min: "mid", link_check: "mid",
+  cliche: "low", para_repeat: "low", bullet_ratio: "low", sentence_variance: "low", translationese: "low", persona: "low", structure_repeat: "low",
+};
+/** 모르는 축은 `mid` — 새 축이 조용히 맨 아래로 밀리지도, 맨 위로 튀지도 않게. */
+export function gateWeightOf(key: string): GateWeight { return GATE_WEIGHT[key] ?? "mid"; }
+
 export interface GateCheck {
   key: GateKey; label: string; pass: boolean; detail?: string;
   /**
@@ -58,6 +75,17 @@ export interface GateCheck {
   skipped?: boolean;
   /** 왜 안 쟀나 — 지금은 `"self"` 하나(직접 쓴 글). */
   skipReason?: string;
+  /**
+   * [R8 §9] 이 축이 이 글에서 **도는가** — `soft`(돌고 말해 준다) · `off`(안 쟀다).
+   *   🔴 **`hard` 는 없다** — 막는 게이트는 0개다(사장님 지시 2026-09-15 · «말해 주기로 내려. 고객 계정이야»).
+   *      검사를 지운 것이 **아니다**: 계속 돌고 결과를 보여 준다. 막지만 않는다.
+   */
+  level?: "soft" | "off";
+  /**
+   * [R8 §9] 🔴 **무게** — 막지 않는 대신 «가벼운 것과 무거운 것이 같은 얼굴»이면 아무도 안 읽는다(A 요청).
+   *   `high` 법·계정 정지 위험(대가 고지 누락 · 금칙 · 광고 클릭 유도) · `mid` 플랫폼·품질에 실제로 영향 · `low` 다듬기.
+   */
+  weight?: GateWeight;
 }
 export interface GateReport {
   ok: boolean; checks: GateCheck[]; rewritten: boolean;
@@ -197,7 +225,7 @@ export function runGate(inp: GateInput): GateReport {
   const plain = blocksToPlain(blocks);
   const withTitle = `${inp.title ?? ""}\n${plain}`;
   const checks: GateCheck[] = [];
-  const push = (key: GateKey, pass: boolean, detail?: string) => { const c: GateCheck = { key, label: GATE_LABEL[key], pass }; if (detail) c.detail = detail; checks.push(c); };
+  const push = (key: GateKey, pass: boolean, detail?: string) => { const c: GateCheck = { key, label: GATE_LABEL[key], pass, weight: gateWeightOf(key) }; if (detail) c.detail = detail; checks.push(c); };
 
   /* [R8 §2.1] 분량 — **세는 자는 하나**다(`blocksCharCount` · 계약 주석 «공백 포함 평문» 그대로 · `lib/blocks.ts`).
      🔴 하한만 걸고 상한은 **적기만** 한다: 짧은 글은 고객 손해지만, 긴 글은 손해가 아니라 «폭을 넘었다»일 뿐이라

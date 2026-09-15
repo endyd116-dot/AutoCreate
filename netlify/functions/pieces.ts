@@ -53,6 +53,8 @@ function pieceRow(r: Row): Record<string, unknown> {
   const g = (r.gate_report && typeof r.gate_report === "object" ? r.gate_report : null) as GateReport | null;
   const o: Record<string, unknown> = {
     id: n(r.id), channel: String(r.channel), accountHandle: r.handle ? String(r.handle) : null, kind: String(r.kind || "post"), format: String(r.format || ""),
+    /* [R8 §5D] 어떻게 만들어졌나 — `self` 면 화면이 «내가 쓴 글»로 그리고 AI 티 얘기를 꺼내지 않는다(A 요청). 옛 글은 "auto". */
+    origin: String(r.origin || "auto"),
     title: String(r.title || ""), status: String(r.status), stage: stageOf(r), gateOk: g ? !!g.ok : false, createdAt: utcDate(r.created_at)?.toISOString() ?? "",
   };
   const sf = utcDate(r.scheduled_for); if (sf) o.scheduledFor = sf.toISOString();

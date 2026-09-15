@@ -19,7 +19,7 @@ import { q } from "./accounts";
 import { jsonb, utcDate } from "./db-util";
 import { contractFor, topicGroupOf, type TopicGroup } from "./writing-contracts";   // [R8 §2.1] 주제군 — 분량 폭이 여기에 달렸다
 import { type Block, htmlToPlain } from "./blocks";
-import { runGate, GATE_KEYS, GATE_LABEL, type GateReport, type GateCheck } from "./ai-tell-gate";
+import { runGate, GATE_KEYS, GATE_LABEL, gateWeightOf, type GateReport, type GateCheck } from "./ai-tell-gate";
 import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
@@ -65,24 +65,53 @@ export const LINK_CHECK_KEY = "link_check" as const;
 export const STRUCTURE_KEY = "structure_repeat" as const;
 
 /**
- * [R8 §5D.3-3] 🔴 **직접 쓴 글(`origin:"self"`)에서 재지 않는 축** — «AI 같다»를 사람 글에 들이대는 것은 뜻이 없다.
- *   여기 없는 축은 **전부 그대로 돈다** — 고지·금칙 3층·`ad_pointing`·제휴 링크 상한·최상급 근거·중복(법과 검색은 «누가 썼나»를 안 따진다).
- *   🔴 `length`·`visual_min` 은 **AI 티 축이 아니라 «채널 계약»** 이라 돈다(둘 다 소프트라 막지 않고 «이러면 더 잘 읽혀요»로 말한다 · A 합의 2026-09-15).
- *   🔴 **목록은 여기 하나다** — 화면이 제 목록을 들고 있으면 서버와 갈린다(AC-52).
+ * [R8 §5D.3-3 · §9] 🔴 **직접 쓴 글(`origin:"self"`)의 게이트 적용표** — **두 값**이다: `soft`(돌고 말해 준다) · `off`(안 쟀다).
+ *
+ *   ══ 왜 하드가 없나(사장님 지시 2026-09-15 · CLAUDE §9) ══
+ *     «말해 주기로 내려. **고객 계정이야. 우리가 책임지는 게 아니야.**» — 막는 게이트는 **0개**다.
+ *     🔴 **검사를 지우는 게 아니다.** 계속 돌고 결과를 보여 준다. 막지만 않는다 — 말해 주려면 재야 한다.
+ *     🔴 «막으면 공장이 선다» — 고객이 «알아서 올려»를 켰는데 우리가 조용히 안 올리면 그게 더 나쁘다.
+ *
+ *   ══ 안 재는 것은 하나뿐 ══
+ *     **AI 티 계열 + `structure_repeat`** — 사람이 쓴 글에 «AI 같다»를 들이대는 것은 뜻이 없고, 골격도 우리가 만든 것이 아니다.
+ *     🔴 **모르는 축은 `soft`**(`selfGateLevelOf`) — 새 축이 조용히 «안 재는 쪽»으로 기우는 것을 막는다.
+ *     무게(`weight`)는 `lib/ai-tell-gate.ts GATE_WEIGHT` 한 곳이다 — 막지 않는 대신 **읽는 순서**를 준다.
  */
-export const SELF_SKIPPED_GATE_KEYS: readonly string[] = [
-  "cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "persona", STRUCTURE_KEY,
-];
+export type SelfGateLevel = "soft" | "off";
+export const SELF_GATE_LEVEL: Readonly<Record<string, SelfGateLevel>> = {
+  /* ── 안 잰다: «AI 같다»를 사람 글에 들이대는 것은 뜻이 없다 ── */
+  cliche: "off", para_repeat: "off", bullet_ratio: "off", sentence_variance: "off", translationese: "off", persona: "off",
+  [STRUCTURE_KEY]: "off",                     // 우리가 만든 골격이 아니다
+  /* ── 돈다(말해 준다) — 법이든 플랫폼이든 채널 계약이든 **막지는 않는다** ── */
+  disclosure: "soft", banned_words: "soft", ad_pointing: "soft",
+  affiliate_count: "soft", similarity: "soft", superlative: "soft",
+  length: "soft", visual_min: "soft", link_check: "soft",
+};
+export function selfGateLevelOf(key: string): SelfGateLevel { return SELF_GATE_LEVEL[key] ?? "soft"; }
+
+/** `off` 인 축들 — 화면·모의가 목록으로 쓸 때. 정본은 `SELF_GATE_LEVEL` 이다(목록을 따로 들고 있으면 서버와 갈린다 · AC-52). */
+export const SELF_SKIPPED_GATE_KEYS: readonly string[] = Object.entries(SELF_GATE_LEVEL).filter(([, v]) => v === "off").map(([k]) => k);
 
 /**
- * 게이트 결과에 ① 정책을 입힌다 — **축을 빼지 않고 «안 쟀다»로 표시**한다(«조용히 다 끄기» 금지 · §4.7).
+ * 게이트 결과에 ① 정책을 입힌다 — 축을 **빼지 않고** `level` 을 붙이고, `off` 는 «안 쟀다»로 표시한다(«조용히 다 끄기» 금지 · §4.7).
  *   🔴 왜 «돌리고 나서 버리나»: `runGate` 안에 «사람 글이면 건너뛰기» 분기를 넣으면 그 문은 나중에 안 닫힌다(AC-65).
- *      순수 함수는 그대로 두고, **쓰는 쪽에서 값을 버린다** — 버린 값은 응답에도 안 싣는다(잰 척하지 않는다).
+ *      순수 함수는 그대로 두고 **쓰는 쪽에서 값을 버린다** — 버린 값은 응답에도 안 싣는다(잰 척하지 않는다).
+ *   `ok` 는 «모든 검사를 통과했나»라는 **알림**이다 — 막는 것과는 상관이 없다(막는 축이 0개다).
  */
+/**
+ * [R8 §9] 보고서의 모든 축에 **무게**를 채운다 — `runGate` 밖에서 만든 축(고지 HTML 판정·링크·골격)도 빠지지 않게 **한 자리**에서 입힌다.
+ *   🔴 만드는 자리마다 손으로 붙이면 한 군데는 반드시 빠진다(스모크에서 실제로 빠졌다).
+ */
+function withWeights(report: GateReport): GateReport {
+  return { ...report, checks: report.checks.map((c) => (c.weight ? c : { ...c, weight: gateWeightOf(c.key) })) };
+}
+
 export function applySelfGatePolicy(report: GateReport): GateReport {
-  const checks = report.checks.map((c) => SELF_SKIPPED_GATE_KEYS.includes(c.key)
-    ? { key: c.key, label: c.label, pass: true, skipped: true, skipReason: "self", detail: "사람이 쓴 글이라 이 검사는 하지 않았어요" }
-    : c);
+  const checks: GateCheck[] = report.checks.map((c) => {
+    const level = selfGateLevelOf(c.key);
+    if (level === "off") return { key: c.key, label: c.label, pass: true, skipped: true, skipReason: "self", level, weight: c.weight, detail: "사람이 쓴 글이라 이 검사는 하지 않았어요" };
+    return { ...c, level };
+  });
   return { ...report, checks, ok: checks.every((c) => c.pass) };
 }
 
@@ -205,7 +234,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || ""), group, origin });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
-    const full: GateReport = { ...g, checks: [...g.checks, link, st], ok: g.ok && link.pass && st.pass };
+    const full: GateReport = withWeights({ ...g, checks: [...g.checks, link, st], ok: g.ok && link.pass && st.pass });
     return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
@@ -229,7 +258,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   }
   checks.push(await checkLinks(html));   // [P1R7 B3] 소프트 링크 검사(HTML 정본 경로도 같은 한 벌)
   /* [R8 §5D] 직접 쓴 글은 HTML 이 정본이라 **이 경로로 온다** — ① 정책은 여기서도 같이 입힌다(한 곳만 입히면 화면이 갈린다). */
-  const out: GateReport = { ok: checks.every((x) => x.pass), checks, rewritten: false };
+  const out: GateReport = withWeights({ ok: checks.every((x) => x.pass), checks, rewritten: false });
   return origin === "self" ? applySelfGatePolicy(out) : out;
 }
 
@@ -306,6 +335,10 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date } = {
   if (st !== "in_review" && st !== "draft") return { ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." };
 
   const gate = await recheckPiece(tid, p);
+  /* [R8 §9] 직접 쓴 글은 **자기 표**로 막는다 — 플랫폼 정책은 하드가 아니다(막으면 공장이 선다).
+     🔴 AI 가 쓴 글의 표(`HARD_GATE_KEYS`)는 B3 이 §9 잣대로 다시 세는 중이다 — 두 곳에서 각자 좁히지 않게 여기선 갈래만 둔다. */
+  /* [R8 §9] 🔴 막는 축은 **0개**다(`HARD_GATE_KEYS` 를 B3 이 비운다) — 갈래를 여기 또 만들지 않는다.
+     검사는 계속 돌고 결과는 `gate` 로 나간다. 막지만 않는다. */
   const hard = hardFailures(gate);
   const judged = judgeBlockers(gate);   // [P1R5] 영상 심사 P0(정책·고지·길이·빈 프레임)도 승인을 막는다 · P1/P2 는 통과
   if (hard.length || judged.length) {

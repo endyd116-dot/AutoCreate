@@ -113,7 +113,11 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
       info: ["hook", "image", "para", "quote", "image", "list", "para", "image", "image", "divider", "para", "image", "tip", "image", "hashtags"],
     },
     visual: ["사진 6~10장 + 캡션", "인용구(핵심 한 줄)", "구분선", "체크리스트", "소제목", "해시태그 5~10"],
-    visualMin: { quote: 1, divider: 1, image: 6, hashtags: 5 },
+    /* 🔴 [R8 §9 · 2026-09-15] **요구를 우리가 늘 채울 수 있는 것만 남긴다** — `visual_min` 은 막지는 않지만 빨개지면 **재작성(=돈)** 을 부른다.
+       뺀 것: ①`tiers.optional` 이 뺄 수 있는 칸(계약이 스스로 싸웠다 · `contractSelfConflicts` 가 0 이 되게)
+       ②사진 장수 — 조달이 «AI 1장 + 고객·스톡»으로 바뀌므로 **늘 보장되는 1장**만 요구한다(6장을 요구하면 조달을 못 바꾼다).
+       ③FAQ — 근거였던 검색 리치 결과가 2025-05-08 지원 중단이라 **SEO 값이 0**이고, 실물도 글마다 다르다(R8-A). */
+    visualMin: { image: 1, hashtags: 5 },
     length: { min: 1500, max: 2500 },
     titleStyle: "naver", titleExample: "에어프라이어 청소, 3분이면 새것처럼",
     images: { min: 6, max: 10, default: 6, style: "photo", aspect: "4:3", captionRate: 0.3 },
@@ -163,7 +167,11 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
       guide: ["toc", "para", "h2", "para", "adsense", "image", "h2", "checklist", "para", "h2", "para", "image", "table", "h2", "adsense", "summary", "faq"],
     },
     visual: ["목차", "H2/H3", "표", "요약 박스", "굵게 강조", "이미지 2~4장", "애드센스 자리 2곳(첫 H2 뒤·마지막 H2 앞)", "FAQ"],
-    visualMin: { h2: 3, tableOrList: 1, adsense: 2, image: 2 },
+    /* 🔴 [R8 §9 · 2026-09-15] **요구를 우리가 늘 채울 수 있는 것만 남긴다** — `visual_min` 은 막지는 않지만 빨개지면 **재작성(=돈)** 을 부른다.
+       뺀 것: ①`tiers.optional` 이 뺄 수 있는 칸(계약이 스스로 싸웠다 · `contractSelfConflicts` 가 0 이 되게)
+       ②사진 장수 — 조달이 «AI 1장 + 고객·스톡»으로 바뀌므로 **늘 보장되는 1장**만 요구한다(6장을 요구하면 조달을 못 바꾼다).
+       ③FAQ — 근거였던 검색 리치 결과가 2025-05-08 지원 중단이라 **SEO 값이 0**이고, 실물도 글마다 다르다(R8-A). */
+    visualMin: { h2: 3, adsense: 2, image: 1 },
     length: { min: 1800, max: 3000 },
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
     images: { min: 2, max: 4, default: 3, style: "photo", aspect: "16:9", captionRate: 0.2 },
@@ -210,7 +218,11 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
       listicle: ["para", "h2", "list", "para", "image", "h2", "para", "h2", "table", "image", "summary", "faq"],
     },
     visual: ["H2/H3", "표", "FAQ(AEO)", "이미지 alt"],
-    visualMin: { h2: 3, faq: 1, image: 1 },
+    /* 🔴 [R8 §9 · 2026-09-15] **요구를 우리가 늘 채울 수 있는 것만 남긴다** — `visual_min` 은 막지는 않지만 빨개지면 **재작성(=돈)** 을 부른다.
+       뺀 것: ①`tiers.optional` 이 뺄 수 있는 칸(계약이 스스로 싸웠다 · `contractSelfConflicts` 가 0 이 되게)
+       ②사진 장수 — 조달이 «AI 1장 + 고객·스톡»으로 바뀌므로 **늘 보장되는 1장**만 요구한다(6장을 요구하면 조달을 못 바꾼다).
+       ③FAQ — 근거였던 검색 리치 결과가 2025-05-08 지원 중단이라 **SEO 값이 0**이고, 실물도 글마다 다르다(R8-A). */
+    visualMin: { h2: 3, image: 1 },
     length: { min: 1200, max: 2000 },
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
     images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9", captionRate: 0.5 },
@@ -288,7 +300,11 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
       listicle: ["para", "h2", "list", "para", "image", "h2", "para", "h2", "table", "image", "summary", "faq"],
     },
     visual: ["H2/H3", "표", "FAQ(AEO)", "이미지 alt", "영문 slug"],
-    visualMin: { h2: 3, faq: 1, image: 1 },
+    /* 🔴 [R8 §9 · 2026-09-15] **요구를 우리가 늘 채울 수 있는 것만 남긴다** — `visual_min` 은 막지는 않지만 빨개지면 **재작성(=돈)** 을 부른다.
+       뺀 것: ①`tiers.optional` 이 뺄 수 있는 칸(계약이 스스로 싸웠다 · `contractSelfConflicts` 가 0 이 되게)
+       ②사진 장수 — 조달이 «AI 1장 + 고객·스톡»으로 바뀌므로 **늘 보장되는 1장**만 요구한다(6장을 요구하면 조달을 못 바꾼다).
+       ③FAQ — 근거였던 검색 리치 결과가 2025-05-08 지원 중단이라 **SEO 값이 0**이고, 실물도 글마다 다르다(R8-A). */
+    visualMin: { h2: 3, image: 1 },
     length: { min: 1200, max: 2000 },
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
     images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9", captionRate: 0.5 },
@@ -612,6 +628,39 @@ function endWithAction(seq: BlockType[], c: WritingContract): BlockType[] {
  *        `maxOutputTokens`·재작성 지시로 잡는다. 지금 어림값은 **실측 215자** 를 쓴다(늘리는 양이 과하지 않게).
  */
 const CHARS: Partial<Record<BlockType, number>> = { para: 420, hook: 260, h2: 30, h3: 25, list: 140, checklist: 130, table: 150, quote: 40, tip: 90, faq: 240, summary: 120, toc: 0, image: 0, divider: 0, adsense: 0, hashtags: 0, disclosure: 0, affiliate: 0 };
+/**
+ * 🔴 [R8 §9 · B-1 2026-09-15] **계약이 스스로 싸우는 자리**를 찾는다 — 게이트를 최소화하라는 규칙(CLAUDE §9)의 짝이다.
+ *   `visualMin` 이 **요구**하는 블록을 `tiers.optional`·`suppress` 가 **뺄 수 있으면**, 빠진 글마다 `visual_min` 이 빨개지고
+ *   그 빨강이 **재작성을 부른다 = 돈이 두 배**다. 막는 게이트가 아니어도 «돈이 드는 게이트»는 게이트다.
+ *   ⇒ 값이 바뀔 때마다 되짚기가 이 함수를 불러 **0 인지** 본다. 사람이 눈으로 맞추면 다음 사람이 또 어긋낸다.
+ */
+export function contractSelfConflicts(c: WritingContract): string[] {
+  const out: string[] = [];
+  const t = c.tiers;
+  if (!t) return out;
+  const soft = new Set<BlockType>([...(t.optional ?? []), ...(t.suppress ?? [])]);
+  /** `visualMin` 의 칸 이름 → 그 칸을 채우는 블록 타입(하나라도 있으면 채워진다). */
+  const NEED: Partial<Record<keyof VisualMin, BlockType[]>> = {
+    quote: ["quote"], divider: ["divider"], image: ["image"], h2: ["h2"], checklist: ["checklist"],
+    hashtags: ["hashtags"], adsense: ["adsense"], faq: ["faq"], tableOrList: ["table", "list", "checklist"],
+  };
+  for (const [key, want] of Object.entries(c.visualMin ?? {}) as [keyof VisualMin, number][]) {
+    if (!want) continue;
+    /* 🔴 **사진은 tiers 가 정하지 않는다** — `structureFor` 가 `imageCount` 에 맞춰 뺀 만큼 **다시 넣는다**.
+       그래서 사진의 싸움은 «tiers 가 뺀다»가 아니라 «**요구가 우리가 넣는 장수보다 많다**»다. 그쪽으로 잰다. */
+    if (key === "image") {
+      const have = Math.min(imagesFor(c, null).default, imagesFor(c, "review").default, imagesFor(c, "info").default, imagesFor(c, "life").default);
+      if (want > have) out.push(`visualMin.image=${want} 인데 우리가 넣는 사진은 적게는 ${have}장이다`);
+      continue;
+    }
+    const types = NEED[key] ?? [];
+    if (!types.length) continue;
+    /* 그 칸을 채울 수 있는 타입이 **전부** «빠질 수 있는» 쪽이면 싸운다(하나라도 required 면 안전하다). */
+    if (types.every((x) => soft.has(x))) out.push(`visualMin.${key}=${want} 인데 tiers 가 ${types.join("·")} 를 뺄 수 있다`);
+  }
+  return out;
+}
+
 export function estimateChars(seq: BlockType[]): number { return seq.reduce((a, b) => a + (CHARS[b] ?? 0), 0); }
 
 export function expandForLength(seq: BlockType[], c: WritingContract, group: TopicGroup | null | undefined, seed: number): BlockType[] {
