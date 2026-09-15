@@ -6,7 +6,7 @@
 <title>내 PC 프로그램 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=15">
+<link rel="stylesheet" href="/css/ac.css?v=17">
 </head>
 <body>
 <div class="shell">
@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=14"></script>
-<script src="/js/mock.js?v=14"></script>
+<script src="/js/ui.js?v=16"></script>
+<script src="/js/mock.js?v=17"></script>
 <script>
 (async () => {
 await UI.boot("account");
@@ -95,6 +95,22 @@ function mSheet(r) {
 }
 
 /* 기기 시트(상태 · 다른 PC 시도 · 열쇠 다시 받기 · 해제) — 지문 값은 오지 않는다(«있었나 · 몇 번» 만) */
+/* [P1R8 §3.1 · B2] 🔴 **로그인 정보가 이 PC 에 어떻게 보관되나** — 막지 않는 대신 **또렷하게 말한다**(CLAUDE §9-1).
+   위험한 것은 «지나가는 회색 글씨»가 되면 안 되므로, `weak` 일 때만 배너로 **무엇이·왜·어떻게**를 적는다.
+   🔴 «못 쟀다»(unknown)를 «안전»으로 접지 않는다 — 그때도 한 줄로 그렇게 말한다(AC-9). */
+function sealRow(d) {
+  const s = d.caps && d.caps.profileSeal; if (!s) return "";
+  if (s.state === "weak") {
+    return `<div class="banner warn" style="margin:8px 0 0"><span><b>이 PC 는 로그인 정보를 약하게 보관해요.</b><br>`
+      + `브라우저가 공개된 고정 열쇠로 잠가서, <b>이 폴더를 복사해 가면 로그인이 열립니다</b>.<br>`
+      + `공유 PC·동기화 폴더(원드라이브·드롭박스)에 두지 마세요.</span></div>`;
+  }
+  const label = s.state === "unknown" ? "확인 못 했어요" : s.state === "none" ? "아직 없어요" : "이 PC 에 묶여 있어요";
+  const pill = s.state === "unknown" ? "off" : s.state === "none" ? "off" : "ok";
+  return `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">로그인 정보 보관</span>`
+    + `<span class="v"><span class="pill ${pill}">${label}</span></span></div>`;
+}
+
 function deviceSheet(d) {
   if (!d) return;
   const unbound = !d.bound && d.status !== "online";
@@ -104,6 +120,7 @@ function deviceSheet(d) {
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">기다리는 글</span><span class="v">${d.jobsWaiting || 0}건</span></div>
     ${d.caps ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상 굽기(ffmpeg)</span><span class="v">${d.caps.ffmpeg === false ? '<span class="pill warn">없음</span>' : `<span class="pill ok">있음</span>${d.caps.ffmpegVersion ? " " + UI.esc(d.caps.ffmpegVersion) : ""}`}</span></div>` : ""}
     ${d.caps && d.caps.ffmpeg === false ? `<div class="banner" style="margin:8px 0 0"><span>ffmpeg 가 없어 영상을 굽지 못해요 · 글 올리기는 그대로 돼요</span><button type="button" id="ffm">설치 안내</button></div>` : ""}
+    ${sealRow(d)}
     ${unbound ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">아직 한 번도 안 켰어요. 열쇠를 넣고 프로그램을 켜면 이 PC 에 묶여요.</p>` : d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
     <div style="margin:12px 0 0"><button type="button" class="row tap" id="rot"><div class="l"><span class="t">열쇠 다시 받기</span><span class="d wrap">PC 를 바꿨거나 열쇠가 새어 나간 것 같을 때 · 옛 열쇠는 바로 못 써요</span></div>${UI.chev}</button><div id="rc2"></div></div>
     ${d.version ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">프로그램 v${UI.esc(d.version)}</p>` : ""}

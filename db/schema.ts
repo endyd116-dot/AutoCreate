@@ -241,6 +241,8 @@ export const accounts = pgTable("accounts", {
   goldenHours:       jsonb("golden_hours"),
   browserProfileKey: varchar("browser_profile_key", { length: 64 }),
   proxyUrl:          varchar("proxy_url", { length: 200 }),
+  /** [R8 · B3] 계정 프로필 사진(https). OAuth 응답에서 공짜로 받거나 고객이 직접. 🔴 없으면 NULL — 기본 그림으로 채우지 않는다(«아직 없음»을 화면이 그릴 수 있어야 한다 · AC-9). drizzle/0025-r8-account-avatar.sql */
+  avatarUrl:         varchar("avatar_url", { length: 400 }),
   monetize:          jsonb("monetize").notNull().default({}),
   createdAt:         timestamp("created_at").notNull().defaultNow(),
   updatedAt:         timestamp("updated_at").notNull().defaultNow(),
@@ -944,6 +946,11 @@ export const aiUsageR8 = {
   /** 실제 호출이 아닌 행(하니스가 상한 시험용으로 적는 것) — 지우지 않고 표시해서 기본 집계에서 뺀다. */
   synthetic: "synthetic",
 } as const;
+/** [R8 · B3] accounts.avatar_url — 🔴 이 칸만은 **위 `accounts` 정의 안에** 직접 넣었다(메인 지시 2026-09-15).
+ *  `db/schema.ts` 는 코드가 질의에 쓰는 표가 아니라 **DDL 과 1:1 로 맞추는 기록**이고, 계정 사진은 B3·A 가 `accounts` 를 통째로 읽는 자리라
+ *  이름 표(`accountsR8`)로 두면 화면이 못 찾는다. 다른 라운드 정의는 하나도 안 건드렸다(추가만). drizzle/0025-r8-account-avatar.sql
+ */
+export const accountsR8 = { avatarUrl: "avatar_url" } as const;
 export const cadenceRulesR8 = {
   /** 규칙이 못 박은 «분»(0~59 · NULL = 00). 사장님 안 «A 10:00 · B 10:05 · A 11:00» 을 규칙 3행으로 표현한다. */
   preferredMinute: "preferred_minute",
@@ -972,3 +979,22 @@ export const stockCache = pgTable("stock_cache", {
   providerCreatedIdx: index("stock_cache_provider_created_idx").on(t.provider, t.createdAt),
   expiresIdx: index("stock_cache_expires_idx").on(t.expiresAt),
 }));
+
+/* === Phase R8 §5F === */
+/**
+ * [R8 §5F · B-1 2026-09-15 · drizzle/0029] 되먹임 원장 ① «모으기» — 글마다 **만들 때의 모습**과 **나갈 때의 위험**을 한 행으로.
+ *   🔴 성과(조회·수익)는 여기 **복사하지 않는다** — `posts.stats` · `revenue_daily.piece_id` 에 이미 있고, 읽을 때 join 한다.
+ *   🔴 되먹임은 아직 0 이다(모으기만). 집계는 표본 수백 건 · 모델은 수천 건 뒤.
+ */
+export const pieceOutcomes = pgTable("piece_outcomes", {
+  id:        bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:  bigint("tenant_id", { mode: "number" }).notNull(),
+  pieceId:   bigint("piece_id", { mode: "number" }).notNull().unique(),
+  channel:   varchar("channel", { length: 24 }).notNull(),
+  accountId: bigint("account_id", { mode: "number" }),
+  origin:    varchar("origin", { length: 8 }).notNull().default("auto"),
+  features:  jsonb("features").notNull().default({}),
+  risks:     jsonb("risks"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ tenantIdx: index("piece_outcomes_tenant_idx").on(t.tenantId, t.id) }));

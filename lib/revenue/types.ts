@@ -5,8 +5,19 @@
  *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 
-/** 소스 어휘(계약 §1.4b(4) 최종). 화면·집계·enum 검사가 전부 이 목록을 본다. */
-export const REVENUE_SOURCES = ["adsense", "youtube", "coupang", "aliexpress", "linkprice", "adpost", "adfit", "clip", "meta", "tiktok", "x", "sponsor", "manual"] as const;
+/**
+ * 소스 어휘(계약 §1.4b(4) 최종). 화면·집계·enum 검사가 전부 이 목록을 본다.
+ *
+ * [P1R8 §3.4] 🔴 **텐핑·애드픽·쇼핑커넥트를 더했다 — 그런데 «커넥터»가 아니라 «이름»을 준 것이다.** 이유를 적어 둔다:
+ *   셋 다 **공개 API 가 없다**(링크프라이스와 다른 점이다 — 그쪽은 API 가 있어서 커넥터가 있다).
+ *   그래서 자동 회수는 ①러너 스크랩 ②수동 입력 둘 중 하나인데, **우리는 세 곳의 화면을 한 번도 열어 본 적이 없다.**
+ *   본 적 없는 화면에 스크랩 셀렉터를 박는 것이 이 프로젝트에서 제일 비싼 실수였다(AC-42·AC-43 · 티스토리 이틀).
+ *   ⇒ 지금 정직한 상태는 **수동**이고, 그래도 **이름을 갖는 것만으로 값이 크다**:
+ *      종전에는 텐핑 수익을 넣으면 «그 외»로 뭉개져 **어디서 번 돈인지 화면이 말하지 못했다.**
+ *      이제 소스별 집계·내보내기·홈의 «오늘 번 돈»이 세 매체를 **따로** 센다.
+ *   🔴 나중에 스크랩·API 가 생기면 **`FRESHNESS_OF` 한 줄만** 바꾸면 된다(어휘를 다시 안 만든다).
+ */
+export const REVENUE_SOURCES = ["adsense", "youtube", "coupang", "aliexpress", "linkprice", "adpost", "adfit", "clip", "tenping", "adpick", "shopping_connect", "meta", "tiktok", "x", "sponsor", "manual"] as const;
 export type RevenueSource = typeof REVENUE_SOURCES[number];
 export function isRevenueSource(v: unknown): v is RevenueSource { return typeof v === "string" && (REVENUE_SOURCES as readonly string[]).includes(v); }
 
@@ -16,13 +27,40 @@ export type Freshness = "api" | "runner" | "manual";
 export const FRESHNESS_OF: Readonly<Record<RevenueSource, Freshness>> = {
   adsense: "api", youtube: "api", coupang: "api", aliexpress: "api", linkprice: "api",
   adpost: "runner", adfit: "runner", clip: "runner",
+  /* [P1R8 §3.4] 공개 API 없음 · 화면 미실측 → 지금은 수동. 길이 생기면 **이 줄만** 바꾼다(위 어휘 주석). */
+  tenping: "manual", adpick: "manual", shopping_connect: "manual",
   meta: "manual", tiktok: "manual", x: "manual", sponsor: "manual", manual: "manual",
 };
+
+/**
+ * 🔴 **수동으로 넣을 수 있는 소스와 그 이름** — 서버가 정본이다(AC-52·AC-74 «화면이 낱말도 숫자도 갖지 않는다»).
+ *   종전에는 목록이 **세 곳**에 손으로 적혀 있었다: `netlify/functions/revenue.ts MANUAL_SOURCES`(받는 쪽) ·
+ *   `public/app/revenue.html MSRC`(고르는 쪽) · 그리고 이 표. 셋이 갈리면 **화면에는 있는데 서버가 400** 이 된다.
+ *   ⇒ 목록은 `FRESHNESS_OF` 에서 **파생**하고, 이름만 여기 적는다.
+ */
+export const MANUAL_SOURCE_LABEL: Readonly<Partial<Record<RevenueSource, string>>> = {
+  sponsor: "협찬·광고비",
+  tenping: "텐핑",
+  adpick: "애드픽",
+  shopping_connect: "네이버 쇼핑커넥트",
+  meta: "메타",
+  tiktok: "틱톡",
+  x: "엑스",
+  manual: "그 외",
+};
+/** 수동 입력을 받는 소스 집합 — 🔴 손으로 적지 않는다(`FRESHNESS_OF` 가 «manual» 이라고 말한 것들). */
+export const MANUAL_SOURCES: ReadonlySet<RevenueSource> =
+  new Set(REVENUE_SOURCES.filter((s) => FRESHNESS_OF[s] === "manual"));
+/** 화면이 그대로 그리는 «어디서 받았나요» 목록(순서 = 위 라벨 표 순서). */
+export const MANUAL_SOURCE_CHOICES: readonly { key: RevenueSource; label: string }[] =
+  (Object.keys(MANUAL_SOURCE_LABEL) as RevenueSource[])
+    .filter((k) => MANUAL_SOURCES.has(k))
+    .map((k) => ({ key: k, label: MANUAL_SOURCE_LABEL[k] as string }));
 /**
  * «오늘 확정» 소스(DESIGN §9.3 · 계약 §1.4 v3.2): 오늘 날짜에 대해 하루치를 확정으로 주는 소스.
  *   나머지(adpost·adfit·clip·youtube)는 부분 수집 = «예상». 홈의 큰 숫자가 이 표로 갈라진다 — 합쳐서 한 숫자로 내리지 않는다.
  */
-export const CONFIRMED_SOURCES: ReadonlySet<RevenueSource> = new Set(["adsense", "coupang", "aliexpress", "linkprice", "meta", "tiktok", "x", "sponsor", "manual"]);
+export const CONFIRMED_SOURCES: ReadonlySet<RevenueSource> = new Set(["adsense", "coupang", "aliexpress", "linkprice", "tenping", "adpick", "shopping_connect", "meta", "tiktok", "x", "sponsor", "manual"]);
 
 /**
  * [P1R7 B3 · DESIGN §13.5 «외부 값»] **그 매체의 «집계일»이 KST 인가.**
@@ -36,6 +74,7 @@ export const DAY_BASIS_OF: Readonly<Record<RevenueSource, DayBasis>> = {
   adsense: "pt", youtube: "pt",                     // 구글 리포트는 계정 시간대(대개 PT) 기준일 — 한국 자정과 다르다
   coupang: "kst", adpost: "kst", adfit: "kst", clip: "kst",   // 국내 매체 = 한국 날짜
   aliexpress: "provider", linkprice: "provider",    // 문서 확인 전 — 확인되면 kst/pt 로 바꾼다
+  tenping: "kst", adpick: "kst", shopping_connect: "kst",   // [P1R8 §3.4] 국내 매체 · 사람이 KST 로 적는다
   meta: "kst", tiktok: "kst", x: "kst", sponsor: "kst", manual: "kst",   // 사람이 KST 로 적는다
 };
 /** 화면에 한 줄로 붙일 말(없으면 KST 라 굳이 말하지 않는다). */

@@ -6,7 +6,7 @@
 <title>검수 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=15">
+<link rel="stylesheet" href="/css/ac.css?v=17">
 </head>
 <body>
 <div class="shell">
@@ -23,8 +23,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=14"></script>
-<script src="/js/mock.js?v=14"></script>
+<script src="/js/ui.js?v=16"></script>
+<script src="/js/mock.js?v=17"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -39,16 +39,27 @@ function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".
 /* [R8-A] 🔴 **막는 축과 알려 주는 축을 달리 그린다** — 서버는 `HARD_GATE_KEYS` 5개(UI.GATE_HARD)로만 예약을 막는다(hardFailures).
    골격 반복·최상급·링크 열림은 **소프트**라 실패해도 예약이 된다. 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 알고
    고치러 간다(그게 이번에 서버가 축을 늘리면서 커진 위험이다). 🔴 사유(detail)는 서버 문장 그대로. */
-const gateRow = (c) => { const soft = !c.pass && !UI.GATE_HARD.includes(c.key);
-  return `<div class="g ${c.pass ? "" : soft ? "soft" : "no"}"><i>${c.pass ? "✓" : soft ? "i" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`; };
+/* [R8 §9 · 사장님 «말해 주기로 내려»] 🔴 **막는 축이 없다**(`UI.GATE_HARD` 는 서버를 복사하는데 이제 빈 배열이다).
+   막지 않는 대신 화면이 더 말해야 한다: ①또렷하게 ②어떻게 하면 되는지 ③되돌릴 수 있다는 것.
+   🔴 **가벼운 것과 무거운 것이 같은 얼굴이면 안 된다** — 고지 누락(법)과 골격 반복(글의 질)이 같아 보이면 둘 다 넘긴다.
+      무게는 **서버가 준다**(`weight: "high"|"normal"`) — 화면이 키를 보고 정하면 그게 대용물이다(AC-57).
+   🔴 «어떻게»(`how`)도 서버 문장이다. 실패한 칸에만 온다. */
+const isHigh = (c) => !c.pass && c.weight === "high";
+const gateRow = (c) => {
+  const cls = c.pass ? "" : isHigh(c) ? "hi" : "soft";
+  return `<div class="g ${cls}"><i>${c.pass ? "✓" : isHigh(c) ? "!" : "i"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}${!c.pass && c.how ? `<small class="how">${UI.esc(c.how)}</small>` : ""}</div>`;
+};
 function gateList(g) {
   const checks = g.checks || [];
-  const hard = checks.filter((c) => !c.pass && UI.GATE_HARD.includes(c.key));
-  const soft = checks.filter((c) => !c.pass && !UI.GATE_HARD.includes(c.key));
-  const pill = hard.length ? '<span class="pill warn">확인 필요</span>' : '<span class="pill ok">' + (soft.length ? "예약할 수 있어요" : "통과") + '</span>';
-  const say = hard.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${hard.length}가지를 고쳐야 예약할 수 있어요.</p>`
-    : soft.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">아래 ${soft.length}가지는 알려드리는 것이라 예약을 막지 않아요.</p>` : "";
-  return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>`;
+  const bad = checks.filter((c) => !c.pass);
+  const high = bad.filter(isHigh);
+  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
+  /* 🔴 «고쳐야 예약할 수 있어요»는 이제 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
+  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
+  /* ③ 되돌릴 수 있다 — 막지 않는 대신 «나가도 되돌릴 수 있다»가 보여야 «말해 주기»가 정직해진다.
+     🔴 채널마다 우리가 대신 내릴 수 있는지 다르니 약속하지 않는다(발행함에서 그 채널의 길을 그대로 말한다). */
+  const back = bad.length ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.</p>' : "";
+  return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>${back}`;
 }
 /* [R8-A §2 · B-1 d6c2359] «이 글이 왜 이렇게 생겼나» — 서버가 **그 글에 실제로 적용된** 값을 준다(`topicGroup`·`goal`·`contract`).
    🔴 계약표의 기본값이 아니라 «이 글에 쓰인 값»이다 — 화면이 계약표를 베껴 와 «아마 이럴 것»이라고 그리지 않는다(정본은 lib/writing-contracts.ts · AC-52).

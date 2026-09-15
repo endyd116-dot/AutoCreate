@@ -18,7 +18,7 @@ import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate } from "./stock/plan
 import { listPhotos } from "./piece-photos";                     // 내가 올린 사진(옛 B-1) — 조달 순서 ①
 import { aiSourceKey } from "./photo-source";
 import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
-import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, type RenderImage } from "./blocks";
+import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, blocksCharCount, type RenderImage } from "./blocks";
 import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
 import { ensureDisclosureFirst, disclosureTextFor, compensationOfMeta } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
@@ -29,6 +29,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
+import { recordOutcome, riskOf } from "./outcomes";   // [R8 §5F] 되먹임 원장 — «만들 때의 모습»을 남긴다
 import { findNumericClaims, summarizeClaims } from "./fact-claims";   // [R8 §2.4] 수치 주장 표시(순수)
 import { lengthFor, topicGroupOf, resolveGoalDetail, estimateChars, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳) + [R8 §2.1] 분량 추정표
 
@@ -452,6 +453,36 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     await q(sql`UPDATE pieces SET title = ${draft.title}, body = ${bodyHtml}, blocks = ${jsonb(draft.blocks)}, meta = ${jsonb(nextMeta)}, gate_report = ${jsonb(report)}, status = ${"in_review"}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(blocks) AS b, jsonb_typeof(meta) AS m, jsonb_typeof(gate_report) AS g FROM pieces WHERE id = ${pieceId}`);
     if (chk?.b !== "array" || chk?.m !== "object" || chk?.g !== "object") console.error("[content-gen] jsonb_typeof 이상", chk);
+
+    /* [R8 §5F · B-1] 🔴 **되먹임 원장** — «이 글이 어떤 모습이었나»를 **만든 자리에서** 남긴다.
+       발행 뒤에 piece 를 되읽으면 그 사이 수정·재생성으로 달라진다. 지금 안 박으면 나중에 복원할 길이 없다.
+       성과(조회·수익)는 여기 복사하지 않는다 — 읽을 때 `posts.stats`·`revenue_daily` 와 join 한다.
+       🔴 원장이 실패해도 글은 그대로 간다(원장은 «있으면 좋은 것»). 대신 조용히 넘기지 않는다(AC-58 · `recordOutcome` 안에서 크게 적는다). */
+    const lenRange = lengthFor(c, group);
+    /* 사진 출처 — 스톡·고객 사진이 붙는 경로(B-1(신) `lib/stock/`)가 `meta.photoMix` 를 남기면 그 값이 정본이다.
+       🔴 없으면 **우리가 실제로 구운 수**만 적는다(지어내지 않는다 — 지금은 전부 AI 다). */
+    const mixFromLoop = { ai: okImages, ...(imageFailures ? { failed: imageFailures } : {}) };
+    const photoMix = (meta.photoMix && typeof meta.photoMix === "object" ? meta.photoMix : mixFromLoop) as Record<string, number>;
+    await recordOutcome({
+      tenantId: tid, pieceId, accountId,
+      features: {
+        channel, origin: String(p.origin ?? "auto"), format, topicGroup: group, goal, goalSource: goalRes.source,
+        /* [§5F + §라] 이 글이 노린 **검색어** — `lib/topics.ts` 가 `factors.keyword` 를 저장하기 시작하면 **저절로** 실린다(B-1(신) 몫).
+           🔴 타입에 아직 없어서 느슨하게 읽는다 — 그 파일을 내가 건드리면 두 세션이 같은 파일에서 부딪친다.
+           🔴 없으면 **안 싣는다**: 소재 제목으로 대신하면 모델이 «틀린 문구»를 노린다(AC-57 · 그게 지금 나 있는 구멍이다). */
+        ...(() => { const kw = (topic.factors as unknown as Record<string, unknown>)?.keyword; return kw ? { keyword: String(kw).slice(0, 80) } : {}; })(),
+        structureHash: structureHash(sPrint),
+        structure: { seq: sPrint.seq, h2: sPrint.h2, h3: sPrint.h3, images: sPrint.images, toc: sPrint.toc, ending: sPrint.ending, blocks: sPrint.blocks },
+        chars: blocksCharCount(draft.blocks), lengthMin: lenRange.min, lengthMax: lenRange.max,
+        photoMix,
+        paid: { affiliate: !!affiliateMeta || affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true },
+        ...(meta.formatPick && typeof meta.formatPick === "object"
+          ? { formatPick: { overlap: n((meta.formatPick as Record<string, unknown>).overlap), compared: n((meta.formatPick as Record<string, unknown>).compared), switched: (meta.formatPick as Record<string, unknown>).switched === true } }
+          : {}),
+        rewritten, model: draft.model,
+      },
+      risk: riskOf(report),
+    });
     if (p.slot_id) await q(sql`UPDATE slots SET status = 'in_review', updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
     return { ok: true, status: "in_review" };
   } catch (e) {

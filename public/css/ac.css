@@ -103,6 +103,9 @@ input,textarea,select{font:inherit;color:inherit}
 .mk.tistory{background:var(--t)} .mk.blogger{background:var(--b)} .mk.wordpress{background:var(--wp)}
 .mk.youtube_shorts{background:var(--y)} .mk.instagram,.mk.reels{background:linear-gradient(135deg,#F58529,#DD2A7B 60%,#8134AF)}
 .mk.threads{background:var(--th)} .mk.tiktok{background:var(--tk)}
+/* [P1R8 §3.4] 다음 Phase 채널 — 색이 없으면 마크가 «칠 안 된 네모»로 뜬다(다른 마크와 나란히 두면 고장으로 보인다). */
+.mk.facebook,.mk.facebook_reels{background:#1877F2} .mk.x{background:#000} .mk.youtube_long{background:var(--y)}
+.mk.brunch{background:#00C6BE;font-size:11px} .mk.naver_clip_post{background:var(--c)}
 .mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money-ink)} .mk.warn{background:var(--warn-soft);color:var(--warn)} .mk.danger{background:var(--danger-soft);color:var(--danger-ink)}
 .mk svg{width:20px;height:20px} .mk.sm{width:28px;height:28px;border-radius:9px;font-size:12px}
 /* [v4] 수익 소스 마크 = 서비스 색(시안 v3 · 채널 마크와 같은 급) */
@@ -357,3 +360,11 @@ input,textarea,select{font:inherit;color:inherit}
 .preview a.affiliate{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px;margin:0 0 16px;text-decoration:none;color:inherit} .preview a.affiliate img{width:72px;height:72px;border-radius:10px;object-fit:cover;flex:none;min-height:0;background:var(--press)} .preview a.affiliate .name{display:block;font-weight:700;font-size:14.5px;line-height:1.4} .preview a.affiliate .price{display:block;color:var(--sub);font-size:13.5px;margin-top:2px;font-variant-numeric:tabular-nums} .preview a.affiliate .go{margin-left:auto;font-size:12.5px;color:var(--muted);white-space:nowrap}
 .preview div.adsense{border:1px dashed var(--faint);border-radius:8px;padding:22px 14px;text-align:center;color:var(--muted);font-size:12.5px;margin:0 0 16px;position:relative} .preview div.adsense::before{content:"광고";position:absolute;top:6px;left:8px;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--ground);border-radius:4px;padding:1px 5px}
 .preview dl.faq{margin:0 0 16px} .preview dl.faq dt{font-weight:700;margin:10px 0 2px} .preview dl.faq dt::before{content:"Q. "} .preview dl.faq dd{margin:0;color:var(--sub)} .preview dl.faq dd::before{content:"A. "}
+
+/* [R8 §6.1] 당겨서 새로고침 — 🔴 **손짓과 같은 세로 축**으로만 움직인다(도는 것 0 · 헌장 «모션 한 방향»).
+   글자만으로 상태를 말한다: 당겨서 → 놓으면 → 새로고침 중. 햅틱은 되는 기기에서만 조용히(문구로 약속하지 않는다). */
+.ptr{position:fixed;top:0;left:0;right:0;z-index:60;height:44px;display:grid;place-items:center;background:var(--surface);color:var(--sub);font-size:13px;font-weight:600;border-bottom:1px solid var(--line);transform:translateY(-44px);will-change:transform}
+/* [R8 §9] 무거운 지적(법·제3자·계정) — 막지는 않지만 **가벼운 것과 같은 얼굴이면 안 된다**. 서버가 준 weight 로만 가른다.
+   «어떻게 하면 되는지»(how)는 줄을 바꿔 아래에(사유와 방법이 한 줄에 붙으면 둘 다 안 읽힌다). */
+.gate .g.hi i{background:var(--danger-soft);color:var(--danger-ink)} .gate .g.hi span{color:var(--ink);font-weight:700}
+.gate .g small.how{white-space:normal;margin-left:0;flex:1 0 100%;padding-left:30px;color:var(--sub);line-height:1.45}

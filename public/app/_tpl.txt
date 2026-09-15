@@ -98,6 +98,7 @@ async function addSheet() {
 UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>쇼츠 · 릴스 링크</label><input class="input" name="url" type="url" required placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url"><div class="help"></div></div><p class="muted" style="margin:0 0 4px;font-size:13px">링크의 훅·서사·스타일을 구조로 배워 다음 소재부터 «구조: …»로 붙여요. 영상을 베끼지 않아요.</p>${templates.length ? `<div class="sec">배운 구조</div>${templates.map((x) => `<div class="row" style="padding-left:0;padding-right:0;min-height:44px"><div class="l"><span class="t" style="font-size:14px">${UI.esc(x.name)}</span><span class="d">${(x.structure || []).slice(0, 3).map(UI.esc).join(" → ")}</span></div></div>`).join("")}` : ""}<div class="cta"><button class="btn primary" type="submit">구조 배우기</button></div></form>`, { title: "레퍼런스로 구조 배우기", onOpen: (sh, close) => UI.form(sh.querySelector("#rf"), async (d, f) => {
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
+UI.pullToRefresh(load);   /* [R8 §6.1] 소재 목록은 «새 소식» 화면이라 당겨서 새로고침이 맞다 */
 await load();
 === schedule.html | schedule | 편성표 | two ===
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
@@ -315,6 +316,10 @@ function timeSheet(s, closeParent) {
     } });
 }
 const HOURS_R = [[6, "06시"], [7, "07시"], [9, "09시"], [12, "12시"], [13, "13시"], [18, "18시"], [20, "20시"], [21, "21시"]];   // [R7 §4.3] 고정 시각(preferred_hour)
+/* [R8 · B 765e2a0] 분(preferred_minute) — 사장님 «10:00 · 10:05 · 11:00»이 규칙 셋으로 선다.
+   🔴 5분 단위만 고르게 한다: 서버는 0~59 를 받지만 계정 사이 간격 정책에 밀려 1분 단위는 뜻이 없다(B 권고).
+   🔴 시각을 «자동»으로 두면 분은 뜻이 없다 — 그래서 시각을 고른 뒤에만 보인다. */
+const MIN_R = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => [m, `${String(m).padStart(2, "0")}분`]);
 /* 🔴 자동 승인은 크론까지 막히는 플랜 기능이다 — 화면이 «조용하면 발행»을 그려 놓고 실제로 안 되면 거짓말이 된다(B3 rules-list autoApprove).
    🔴 소급 0: **이미 «조용하면 발행»로 저장해 둔 집은 그대로 나간다** — 그런 집에는 잠그지 않고, 다른 값으로 바꾸면 되돌릴 수 없다고 미리 말한다. */
 const keptAuto = () => D.autoApprove === false && (D.settings || {}).reviewPolicy === "silence_approves";
@@ -325,7 +330,7 @@ const inclSay = (weekly) => { const inc = Number(D.includedCoins || 0); const mo
    화면이 «채널당 하나»로 묶어 버려서 «네이버 아침 3회 + 저녁 2회»나 «계정마다 다른 주기»를 만들 길이 아예 없었다(서버는 되는데 화면만 1:1).
    🔴 저장은 **늘 전체 목록**이다 — 서버는 목록에 없는 규칙을 끈다(그게 곧 «지우기»다). 한 줄만 고쳐도 나머지를 같이 보낸다. */
 const everySay = (r) => (r.every === "day" ? `하루 ${r.count}회` : r.every === "month" ? `달 ${r.count}회` : `주 ${r.count}회`);
-const ruleSay = (r) => [everySay(r), r.every === "week" && (r.weekdays || []).length ? (r.weekdays || []).map((i) => WD[Number(i)]).join("·") : "", r.preferredHour != null ? `${String(r.preferredHour).padStart(2, "0")}시` : "시각 자동",
+const ruleSay = (r) => [everySay(r), r.every === "week" && (r.weekdays || []).length ? (r.weekdays || []).map((i) => WD[Number(i)]).join("·") : "", r.preferredHour != null ? `${String(r.preferredHour).padStart(2, "0")}:${String(r.preferredMinute || 0).padStart(2, "0")}` : "시각 자동",
   r.accountMode === "fixed" && r.accountId ? "@" + (accounts.find((a) => a.id === r.accountId)?.handle || "") : "계정 자동"].filter(Boolean).join(" · ");
 const activeRules = () => (D.rules || []).filter((r) => r.active !== false);
 function rulesListSheet() {
@@ -340,7 +345,7 @@ function ruleOneSheet(rule) {
   const chans = [...new Set(accounts.map((a) => a.channel))];
   if (!chans.length) return UI.sheet(`<p class="muted" style="margin:0 0 16px">편성하려면 먼저 계정을 하나 연결해 주세요.</p><div class="cta"><a class="btn primary" href="/app/accounts.html">계정 연결</a></div>`, { title: "먼저 계정을 연결해요" });
   const s = { channel: rule?.channel || chans[0], every: rule?.every || "week", count: rule?.count || 3, wd: (rule?.weekdays || []).map(Number),
-    hour: rule?.preferredHour ?? null, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
+    hour: rule?.preferredHour ?? null, min: rule?.preferredMinute ?? 0, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const accs = accounts.filter((a) => a.channel === s.channel);
     body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}
@@ -348,6 +353,8 @@ function ruleOneSheet(rule) {
       <div style="padding:0 0 10px">${UI.seg("ev", [["day", "매일"], ["week", "주"], ["month", "달"]], s.every)}</div>
       ${s.every === "week" ? `<div class="sec">어느 요일</div>${UI.chips("wd", WD.map((w, i) => [i, w]), s.wd, true)}<p class="muted" style="margin:6px 0 0;font-size:12.5px">${s.wd.length ? `${s.wd.length}일 골랐어요` : "안 고르면 저희가 골라요"}</p>` : ""}
       <div class="sec">몇 시에</div>${UI.chips("hr", [["", "자동"], ...HOURS_R], s.hour == null ? "" : String(s.hour))}
+      ${s.hour == null ? "" : `<div class="sec">몇 분에 <span class="muted" style="font-weight:500">· 5분 단위</span></div>${UI.chips("mi", MIN_R, String(s.min || 0))}
+      <p class="muted" style="margin:6px 0 0;font-size:12.5px">계정끼리 너무 붙어 나가면 자리가 뒤로 밀릴 수 있어요 — 그때는 편성표에 그 까닭이 적혀요.</p>`}
       <div class="sec">어느 계정으로</div>${UI.seg("md", [["auto", "자동"], ["fixed", "고르기"]], s.mode)}
       <div data-pick ${s.mode === "fixed" ? "" : "hidden"} style="padding-top:8px">${UI.chips("ac", accs.map((a) => [a.id, "@" + a.handle]), s.acc || accs[0]?.id)}</div>
       <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger-ink)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
@@ -355,14 +362,15 @@ function ruleOneSheet(rule) {
     UI.bindChips(body, (n, v) => {
       if (n === "ch") { s.channel = v; s.acc = null; view(sh, close); } else if (n === "ev") { s.every = v; view(sh, close); }
       else if (n === "wd") { s.wd = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); }
-      else if (n === "hr") s.hour = v === "" ? null : Number(v);
+      else if (n === "hr") { s.hour = v === "" ? null : Number(v); view(sh, close); }
+      else if (n === "mi") s.min = Number(v);
       else if (n === "md") { s.mode = v; body.querySelector("[data-pick]").hidden = v !== "fixed"; }
       else if (n === "ac") s.acc = Number(v);
     });
     const one = () => { const r = { channel: s.channel, kind: isVideoCh(s.channel) ? "shorts" : "post", accountMode: s.mode, every: s.every, count: s.count, active: true };
       if (rule?.id) r.id = rule.id;
       if (s.mode === "fixed") r.accountId = s.acc || accounts.find((a) => a.channel === s.channel)?.id;
-      if (s.hour != null) r.preferredHour = s.hour;
+      if (s.hour != null) { r.preferredHour = s.hour; r.preferredMinute = s.min || 0; }   /* 🔴 분은 시각이 있을 때만 뜻이 있다(서버도 그렇게 읽는다) */
       if (s.every === "week" && s.wd.length) r.weekdays = s.wd;
       return r; };
     const send = async (list, btn, say) => { btn.disabled = true;
@@ -439,6 +447,14 @@ function renderSide() {
     </div>`;
   const b = UI.$("#sideRules"); if (b) b.onclick = settingsSheet;
 }
+/* [R8 §9] 🔴 **자동 승인을 켜는 자리에서 «무엇을 켜는 것인지» 말한다.**
+   발행 전 검사가 이제 아무것도 막지 않으니, 조용히 두면 **지적이 있는 글도 그대로 나간다** — 그 사실을 켜는 순간에 말하지 않으면
+   «말해 주기»가 아무에게도 안 닿는다(그러면 우리는 그냥 검사를 끈 것이다). 🔴 겁주지 않고 사실만: 나간 뒤에도 발행함에서 볼 수 있다. */
+/* 🔴 말투(CLAUDE §3 · 사장님 2026-09-15): 위협도 면피도 쓰지 않는다. «알려만 드렸다»는 발 빼는 말이라 금지.
+   사실 한 줄 → 우리가 해 주는 것 → 고객이 할 수 있는 것, 이 차례로만 적는다. */
+const rpSay = (v) => (v === "silence_answers" || v === "silence_approves"
+  ? "검수 시간에 아무것도 안 하시면 예정대로 올라가요 · 주요 안내는 미리 알려드리고, 올라간 뒤에도 «올라간 글»에서 다시 볼 수 있어요"
+  : "올리기 전에 검수에서 한 번 눌러 주시면 나가요");
 /* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
 function settingsSheet() {
   const S = { horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [], ...D.settings };
@@ -453,11 +469,12 @@ function settingsSheet() {
     <div class="sec">글은 며칠 전에 만들까요</div>${UI.chips("produceLeadDays", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], S.produceLeadDays)}
     <div class="sec">만드는 시각</div>${UI.chips("produceHour", [["06:00", "06:00"], ["09:00", "09:00"]], S.produceHour)}
     <div class="sec">검수 방식</div>${UI.seg("reviewPolicy", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], S.reviewPolicy)}
+    <p class="muted" id="rpSay" style="margin:6px 0 0;font-size:12.5px">${rpSay(S.reviewPolicy)}</p>
     <div class="sec">발행 시간</div>${UI.seg("bestTimeMode", [["auto", "채널 최적 시간"], ["fixed", "정한 시간만"]], S.bestTimeMode)}
     <div class="sec">주간 코인 상한</div>${UI.seg("capMode", [["plan", "플랜 포함분"], ["custom", "직접 정하기"]], S.weeklyCoinCap == null ? "plan" : "custom")}<div id="capBox" ${S.weeklyCoinCap == null ? "hidden" : ""} style="padding:8px 0 0">${UI.stepper("cap", S.weeklyCoinCap || 50, 10, 500, "코인", 10)}</div>
     <div class="sec">쉬는 날 <span class="muted" style="font-weight:500">· 앞으로 4주 · 여러 날 가능</span></div>${qcal}
     <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>`, { title: "편성 설정", onOpen: (sh, close) => {
-      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; });
+      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; if (n === "reviewPolicy") sh.querySelector("#rpSay").textContent = rpSay(v); });   /* [R8 §9] 켜는 순간에 무엇을 켜는 것인지 */
       sh.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => { const k = b.dataset.q; quiet.has(k) ? quiet.delete(k) : quiet.add(k); b.classList.toggle("sel", quiet.has(k)); });
       UI.toggle(sh.querySelector("#auto"), (on) => { if (on && !active.length) { UI.toast("먼저 규칙을 만들어 주세요"); return false; } });
       /* [R8 §6.2] 이미 규칙이 있으면 **목록**으로(한 채널에 여럿을 둘 수 있다) · 처음이면 마법사 그대로 */
@@ -472,6 +489,7 @@ function settingsSheet() {
 gear.onclick = settingsSheet;
 UI.$("#prev").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); await loadSlots(); render(); };
 UI.$("#next").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); await loadSlots(); render(); };
+UI.pullToRefresh(load);
 await load();
 === revenue.html | revenue | 수익 ===
 <div style="display:flex;align-items:center;gap:2px;padding:6px 0 0">
@@ -633,12 +651,18 @@ function pieceGroup() {
 
 /* ⑤ 직접 입력 */
 function manualGroup() {
-  return `<div class="group"><button type="button" class="row tap" id="manual"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 받은 수익 넣기</span><span class="d">협찬비·메타·틱톡처럼 자동으로 못 가져오는 것</span></div>${UI.chev}</button></div>`;
+  return `<div class="group"><button type="button" class="row tap" id="manual"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">직접 받은 수익 넣기</span><span class="d">협찬비·텐핑·애드픽처럼 자동으로 못 가져오는 것</span></div>${UI.chev}</button></div>`;
 }
 function bindManual() { const b = UI.$("#manual"); if (b) b.onclick = manualSheet; }
 
 async function manualSheet() {
-  const MSRC = [["sponsor", "협찬·광고비"], ["meta", "메타"], ["tiktok", "틱톡"], ["x", "엑스"], ["manual", "그 외"]];
+  /* [P1R8 §3.4 · B2] 🔴 고를 수 있는 매체와 **이름은 서버가 정본**이다(/api/revenue-sources manualSources).
+     화면이 목록을 갖고 있으면 매체가 늘 때마다 두 곳을 맞춰야 하고, 빠뜨리면 새 매체가 영영 안 보인다(AC-52).
+     서버를 못 부르면 옛 목록으로 내려앉는다 — 시트가 안 열리는 것보다 낫다. */
+  const sr = await UI.api("/api/revenue-sources");
+  const MSRC = (sr.ok && Array.isArray(sr.manualSources) && sr.manualSources.length)
+    ? sr.manualSources.map((m) => [m.key, m.label])
+    : [["sponsor", "협찬·광고비"], ["meta", "메타"], ["tiktok", "틱톡"], ["x", "엑스"], ["manual", "그 외"]];
   const DAYS3 = [[todayYmd, "오늘"], [ymdOff(-1), "어제"], [ymdOff(-2), "그제"]];
   const pl = await UI.api("/api/pieces-list?status=published");
   const pieces = pl.ok ? (pl.pieces || []).slice(0, 8) : [];
@@ -1628,6 +1652,7 @@ async function load() { const r = await UI.api("/api/pieces-list?status=all"); i
   if (all.some((p) => p.kind === "video" && p.status === "generating")) { const d = await UI.api("/api/runner-list"); if (d.ok) runnerOn = (d.devices || []).some((x) => x.status === "online" && x.caps?.ffmpeg !== false); } // 합성 단계 칩(러너 꺼짐 · ffmpeg 없음)
   render(); }
 UI.$$("#seg button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; render(); });
+UI.pullToRefresh(load);   /* [R8 §6.1] «봐주세요»가 올라오는 화면 — 당겨서 확인하는 자리 */
 await load();
 === piece.html | home | 검수 ===
 <div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
@@ -1650,16 +1675,27 @@ function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".
 /* [R8-A] 🔴 **막는 축과 알려 주는 축을 달리 그린다** — 서버는 `HARD_GATE_KEYS` 5개(UI.GATE_HARD)로만 예약을 막는다(hardFailures).
    골격 반복·최상급·링크 열림은 **소프트**라 실패해도 예약이 된다. 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 알고
    고치러 간다(그게 이번에 서버가 축을 늘리면서 커진 위험이다). 🔴 사유(detail)는 서버 문장 그대로. */
-const gateRow = (c) => { const soft = !c.pass && !UI.GATE_HARD.includes(c.key);
-  return `<div class="g ${c.pass ? "" : soft ? "soft" : "no"}"><i>${c.pass ? "✓" : soft ? "i" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`; };
+/* [R8 §9 · 사장님 «말해 주기로 내려»] 🔴 **막는 축이 없다**(`UI.GATE_HARD` 는 서버를 복사하는데 이제 빈 배열이다).
+   막지 않는 대신 화면이 더 말해야 한다: ①또렷하게 ②어떻게 하면 되는지 ③되돌릴 수 있다는 것.
+   🔴 **가벼운 것과 무거운 것이 같은 얼굴이면 안 된다** — 고지 누락(법)과 골격 반복(글의 질)이 같아 보이면 둘 다 넘긴다.
+      무게는 **서버가 준다**(`weight: "high"|"normal"`) — 화면이 키를 보고 정하면 그게 대용물이다(AC-57).
+   🔴 «어떻게»(`how`)도 서버 문장이다. 실패한 칸에만 온다. */
+const isHigh = (c) => !c.pass && c.weight === "high";
+const gateRow = (c) => {
+  const cls = c.pass ? "" : isHigh(c) ? "hi" : "soft";
+  return `<div class="g ${cls}"><i>${c.pass ? "✓" : isHigh(c) ? "!" : "i"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}${!c.pass && c.how ? `<small class="how">${UI.esc(c.how)}</small>` : ""}</div>`;
+};
 function gateList(g) {
   const checks = g.checks || [];
-  const hard = checks.filter((c) => !c.pass && UI.GATE_HARD.includes(c.key));
-  const soft = checks.filter((c) => !c.pass && !UI.GATE_HARD.includes(c.key));
-  const pill = hard.length ? '<span class="pill warn">확인 필요</span>' : '<span class="pill ok">' + (soft.length ? "예약할 수 있어요" : "통과") + '</span>';
-  const say = hard.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${hard.length}가지를 고쳐야 예약할 수 있어요.</p>`
-    : soft.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">아래 ${soft.length}가지는 알려드리는 것이라 예약을 막지 않아요.</p>` : "";
-  return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>`;
+  const bad = checks.filter((c) => !c.pass);
+  const high = bad.filter(isHigh);
+  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
+  /* 🔴 «고쳐야 예약할 수 있어요»는 이제 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
+  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
+  /* ③ 되돌릴 수 있다 — 막지 않는 대신 «나가도 되돌릴 수 있다»가 보여야 «말해 주기»가 정직해진다.
+     🔴 채널마다 우리가 대신 내릴 수 있는지 다르니 약속하지 않는다(발행함에서 그 채널의 길을 그대로 말한다). */
+  const back = bad.length ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.</p>' : "";
+  return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>${back}`;
 }
 /* [R8-A §2 · B-1 d6c2359] «이 글이 왜 이렇게 생겼나» — 서버가 **그 글에 실제로 적용된** 값을 준다(`topicGroup`·`goal`·`contract`).
    🔴 계약표의 기본값이 아니라 «이 글에 쓰인 값»이다 — 화면이 계약표를 베껴 와 «아마 이럴 것»이라고 그리지 않는다(정본은 lib/writing-contracts.ts · AC-52).
@@ -1957,6 +1993,22 @@ function mSheet(r) {
 }
 
 /* 기기 시트(상태 · 다른 PC 시도 · 열쇠 다시 받기 · 해제) — 지문 값은 오지 않는다(«있었나 · 몇 번» 만) */
+/* [P1R8 §3.1 · B2] 🔴 **로그인 정보가 이 PC 에 어떻게 보관되나** — 막지 않는 대신 **또렷하게 말한다**(CLAUDE §9-1).
+   위험한 것은 «지나가는 회색 글씨»가 되면 안 되므로, `weak` 일 때만 배너로 **무엇이·왜·어떻게**를 적는다.
+   🔴 «못 쟀다»(unknown)를 «안전»으로 접지 않는다 — 그때도 한 줄로 그렇게 말한다(AC-9). */
+function sealRow(d) {
+  const s = d.caps && d.caps.profileSeal; if (!s) return "";
+  if (s.state === "weak") {
+    return `<div class="banner warn" style="margin:8px 0 0"><span><b>이 PC 는 로그인 정보를 약하게 보관해요.</b><br>`
+      + `브라우저가 공개된 고정 열쇠로 잠가서, <b>이 폴더를 복사해 가면 로그인이 열립니다</b>.<br>`
+      + `공유 PC·동기화 폴더(원드라이브·드롭박스)에 두지 마세요.</span></div>`;
+  }
+  const label = s.state === "unknown" ? "확인 못 했어요" : s.state === "none" ? "아직 없어요" : "이 PC 에 묶여 있어요";
+  const pill = s.state === "unknown" ? "off" : s.state === "none" ? "off" : "ok";
+  return `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">로그인 정보 보관</span>`
+    + `<span class="v"><span class="pill ${pill}">${label}</span></span></div>`;
+}
+
 function deviceSheet(d) {
   if (!d) return;
   const unbound = !d.bound && d.status !== "online";
@@ -1966,6 +2018,7 @@ function deviceSheet(d) {
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">기다리는 글</span><span class="v">${d.jobsWaiting || 0}건</span></div>
     ${d.caps ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상 굽기(ffmpeg)</span><span class="v">${d.caps.ffmpeg === false ? '<span class="pill warn">없음</span>' : `<span class="pill ok">있음</span>${d.caps.ffmpegVersion ? " " + UI.esc(d.caps.ffmpegVersion) : ""}`}</span></div>` : ""}
     ${d.caps && d.caps.ffmpeg === false ? `<div class="banner" style="margin:8px 0 0"><span>ffmpeg 가 없어 영상을 굽지 못해요 · 글 올리기는 그대로 돼요</span><button type="button" id="ffm">설치 안내</button></div>` : ""}
+    ${sealRow(d)}
     ${unbound ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">아직 한 번도 안 켰어요. 열쇠를 넣고 프로그램을 켜면 이 PC 에 묶여요.</p>` : d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
     <div style="margin:12px 0 0"><button type="button" class="row tap" id="rot"><div class="l"><span class="t">열쇠 다시 받기</span><span class="d wrap">PC 를 바꿨거나 열쇠가 새어 나간 것 같을 때 · 옛 열쇠는 바로 못 써요</span></div>${UI.chev}</button><div id="rc2"></div></div>
     ${d.version ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">프로그램 v${UI.esc(d.version)}</p>` : ""}
@@ -2060,7 +2113,11 @@ const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(
 
 function row(p) {
   if (privateOf(p)) return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d" style="display:flex;align-items:center;gap:6px;overflow:visible;flex-wrap:wrap">${UI.pill(UI.POST_STATUS, p.status)}<span>공개 전환 필요</span></span></div><a class="lk" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;min-height:44px;display:inline-flex;align-items:center" data-stop>스튜디오 ›</a></button>`;
-  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
+  /* [R8 §9] 🔴 **나간 뒤에 보이는 것이 이제 유일하게 남은 안전장치다** — 발행 직전 게이트까지 내렸으니(사장님 결정),
+     «그때 이런 지적이 있었다»를 목록에서 바로 짚어 준다. 자동 승인이면 아무도 화면을 안 보고 나갔다는 뜻이라 더 그렇다.
+     🔴 무게는 서버가 읽어 준 것(`riskHigh`)만 쓴다 — 옛 글은 무게가 없어 **개수만** 온다(없는 것을 «무거움»으로 지어내지 않는다). */
+  const risk = p.riskCount ? `<span class="pill ${p.riskHigh ? "warn" : "off"}" style="margin-left:6px">${p.riskHigh ? "꼭 보세요" : "안내"} ${p.riskCount}</span>` : "";
+  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `${risk}<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
   const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}에서 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
   return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
 }
@@ -2120,6 +2177,7 @@ function postSheet(p) {
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
     ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
+    ${p.riskCount ? `<div class="banner ${p.riskHigh ? "" : "info"}" style="margin:8px 0 0"><span>이 글엔 못 지킨 게 ${p.riskCount}가지 있어요 · 지금이라도 고치거나 내릴 수 있어요</span>${p.pieceId ? `<a href="/app/piece.html?id=${p.pieceId}" style="font-weight:700;text-decoration:underline;white-space:nowrap">무엇인지 보기</a>` : ""}</div>` : ""}
     <div class="cta" style="flex-direction:column">
       ${privateOf(p) ? `<a class="btn primary" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener">유튜브 스튜디오 열기</a>` : ""}
       ${p.externalUrl ? `<a class="btn ${privateOf(p) ? "secondary" : "primary"}" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">${privateOf(p) ? "올라간 영상 보기(비공개)" : "올라간 글 열기"}</a>` : ""}

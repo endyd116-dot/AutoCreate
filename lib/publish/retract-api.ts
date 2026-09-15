@@ -1,6 +1,7 @@
 /**
  * lib/publish/retract-api.ts — **API 채널에서 글을 지운다**(DESIGN §5E · R8 §3).
- *   지금 길이 있는 곳은 둘뿐이다: **워드프레스**·**블로거**. 나머지는 `channel-registry.retractVia` 가 `null` 이라 여기 오지 않는다.
+ *   길이 있는 곳: **워드프레스** · **블로거** · [P1R8 §3.4] **페이스북**(페이지 글·릴스) · **X**.
+ *   나머지는 `channel-registry.retractVia` 가 `null` 이라 여기 오지 않는다 — 🔴 **인스타·틱톡은 삭제 API 자체가 없다.**
  *
  *   🔴 **«올릴 수 있다»가 «내릴 수 있다»가 아니다**(2026-09-15 실측):
  *     · `wordpress` — 앱 비밀번호 그대로 `DELETE /wp-json/wp/v2/posts/{id}?force=true`. **추가 권한 없음.**
@@ -71,6 +72,41 @@ export async function retractViaApi(tid: number, ctx: Ctx): Promise<RetractApiRe
     if (r.status === 401 || r.status === 403) return { ok: false, error: "블로거가 권한을 거절했어요. 블로거를 다시 연결해 주세요.", detail: r.text };
     if (r.status >= 200 && r.status < 300) return { ok: true, alreadyGone: false };
     return { ok: false, error: "블로거에서 글을 내리지 못했어요.", detail: `HTTP ${r.status} ${r.text}` };
+  }
+
+  /* [P1R8 §3.4] 페이스북 — 페이지 글·릴스 둘 다 `DELETE /{id}` 하나로 지운다.
+     🔴 **페이지 토큰**으로 지운다(사용자 토큰으로는 권한이 없다 · `lib/publish/facebook.ts` 머리말과 같은 함정). */
+  if (ctx.channel === "facebook" || ctx.channel === "facebook_reels") {
+    const tok = await ensureFreshToken(tid, ctx.accountId, ctx.channel, "");
+    if (!tok.ok) return { ok: false, error: "페이스북 연결이 풀렸어요. 다시 연결한 뒤 내려 주세요." };
+    const pageToken = String((tok.token.extra as Record<string, unknown> | undefined)?.pageAccessToken ?? "").trim();
+    if (!pageToken) return { ok: false, error: "이 페이지를 고칠 권한을 못 받았어요. 페이스북을 다시 연결해 주세요.", detail: "no_page_access_token" };
+    const id = String(ctx.channelRef || "").trim();
+    if (!id) return { ok: false, error: "그 글의 번호를 몰라서 내리지 못했어요. 직접 내려 주세요." };
+    const r = await call(`https://graph.facebook.com/v21.0/${encodeURIComponent(id)}?access_token=${encodeURIComponent(pageToken)}`, { method: "DELETE" })
+      .catch((e) => ({ status: 0, text: String((e as Error)?.message ?? e).slice(0, 200) }));
+    /* 메타는 «없는 개체»를 404 가 아니라 **200 + error.code 100** 으로 줄 때가 있다 — 그것도 «없음»이라 성공이다. */
+    if (r.status === 404 || r.status === 410 || /"code":\s*100/.test(r.text)) return { ok: true, alreadyGone: true };
+    if (r.status === 401 || r.status === 403) return { ok: false, error: "페이스북이 권한을 거절했어요. 페이스북을 다시 연결해 주세요.", detail: r.text };
+    if (r.status >= 200 && r.status < 300) return { ok: true, alreadyGone: false };
+    return { ok: false, error: "페이스북에서 글을 내리지 못했어요.", detail: `HTTP ${r.status} ${r.text}` };
+  }
+
+  /* [P1R8 §3.4] X — `DELETE /2/tweets/{id}`. 성공 본문은 `{ data:{ deleted:true } }`.
+     🔴 X 는 **없는 글을 지워도 200 + deleted:false** 를 준다 — 그것도 «없음»이라 성공으로 센다(§5E.3 «없음이 성공»). */
+  if (ctx.channel === "x") {
+    const tok = await ensureFreshToken(tid, ctx.accountId, "x", "");
+    if (!tok.ok) return { ok: false, error: "X 연결이 풀렸어요. 다시 연결한 뒤 내려 주세요." };
+    const id = String(ctx.channelRef || idFromUrl(ctx.externalUrl)).trim();
+    if (!id) return { ok: false, error: "그 글의 번호를 몰라서 내리지 못했어요. 직접 내려 주세요." };
+    const r = await call(`https://api.twitter.com/2/tweets/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${tok.token.accessToken}` },
+    }).catch((e) => ({ status: 0, text: String((e as Error)?.message ?? e).slice(0, 200) }));
+    if (r.status === 404 || r.status === 410) return { ok: true, alreadyGone: true };
+    if (r.status === 401) return { ok: false, error: "X 로그인이 만료됐어요. 다시 연결한 뒤 내려 주세요.", detail: r.text };
+    if (r.status === 403) return { ok: false, error: "X 가 삭제를 거절했어요. 담당이 확인합니다.", detail: r.text };
+    if (r.status >= 200 && r.status < 300) return { ok: true, alreadyGone: /"deleted"\s*:\s*false/.test(r.text) };
+    return { ok: false, error: "X 에서 글을 내리지 못했어요.", detail: `HTTP ${r.status} ${r.text}` };
   }
 
   /* 🔴 여기 오면 표(`channel-registry.retractVia`)와 이 파일이 **갈라진 것**이다 — 조용히 성공시키지 않는다. */

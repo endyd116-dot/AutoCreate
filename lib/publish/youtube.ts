@@ -75,9 +75,15 @@ export function youtubeTags(raw: unknown[]): string[] {
 const UPLOAD_TIMEOUT_MS = 10 * 60_000;
 
 /** 오늘(KST) 이 테넌트가 유튜브로 올린 건수 — posts 로 센다(성공만 남는 표라 과소·과대 0). */
+/**
+ * 오늘 유튜브에 몇 개 올렸나(KST 기준).
+ *   🔴 [P1R8 §3.4] **쇼츠와 롱폼을 같이 센다** — 쿼터는 채널 키가 아니라 **구글 프로젝트** 단위이기 때문이다.
+ *      롱폼을 따로 세면 «쇼츠 5 + 롱폼 5 = 10건»이 되어 우리가 먼저 막으려던 403 을 그대로 맞는다
+ *      (그리고 403 을 맞으면 그날 **나머지 발행이 전부** 막힌다 — 그래서 우리가 먼저 센다).
+ */
 async function todayUploads(tid: number): Promise<number> {
   const [r] = await q(sql`SELECT COUNT(*) c FROM posts
-    WHERE tenant_id = ${tid} AND channel = 'youtube_shorts'
+    WHERE tenant_id = ${tid} AND channel IN ('youtube_shorts', 'youtube_long')
       AND created_at >= ((date_trunc('day', (NOW() AT TIME ZONE 'Asia/Seoul')) AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'UTC')`);
   return n(r?.c);
 }
@@ -127,11 +133,16 @@ function classify(status: number, json: Record<string, unknown> | null): { reaso
   return { reason: "config", retriable: false, error: "유튜브가 이 영상을 받지 않았어요.", detail: `${status} ${why} ${msg}` };
 }
 
+/** [P1R8 §3.4] 유튜브 축은 두 채널이다 — 올리는 코드는 **한 벌**이고 주소와 계정 채널만 갈린다. */
+export type YoutubeChannel = "youtube_shorts" | "youtube_long";
+
 /**
- * 쇼츠 업로드. 성공하면 `{ ok:true, via:"api", externalUrl, channelRef:videoId }`.
+ * 유튜브 업로드(쇼츠·롱폼 공용). 성공하면 `{ ok:true, via:"api", externalUrl, channelRef:videoId }`.
  *   🔴 posts 행·piece 상태는 만들지 않는다 — 호출부(배경 함수)가 `finalizePublish` 로 한 곳에서 쓴다.
+ *   🔴 **쇼츠와 롱폼의 차이는 «길이»뿐**이고 API 는 같다(`videos.insert`). 그래서 분기를 만들지 않고 **주소만** 가른다 —
+ *      «짧으면 쇼츠 자리에 뜬다»는 유튜브가 알아서 정하는 것이지 우리가 플래그로 켜는 것이 아니다.
  */
-export async function publishYoutubeShorts(piece: PublishPiece, account: PublishAccount): Promise<PublishResult> {
+export async function publishYoutube(piece: PublishPiece, account: PublishAccount, channel: YoutubeChannel = "youtube_shorts"): Promise<PublishResult> {
   const tid = piece.tenantId;
 
   // ① 쿼터 회로 — 맞고 나서 배우지 않는다(403 을 맞으면 그날 나머지가 전부 막힌다).
@@ -149,7 +160,7 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
   if (!head || head.bytes <= 0) return { ok: false, reason: "not_publishable", retriable: false, error: "영상 파일을 찾지 못했어요.", detail: asset.key.slice(0, 80) };
 
   // ③ 토큰
-  let tok = await ensureFreshToken(tid, account.id, "youtube_shorts", account.handle);
+  let tok = await ensureFreshToken(tid, account.id, channel, account.handle);
   if (!tok.ok) {
     if (tok.reason === "provider_not_configured") return { ok: false, reason: "provider_not_configured", retriable: false, error: "유튜브 연결이 아직 준비 중이에요." };
     if (tok.reason === "no_creds") return { ok: false, reason: "no_creds", retriable: false, error: "유튜브 계정을 다시 연결해 주세요." };
@@ -197,7 +208,7 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
 
   // 401 = 토큰 — 강제 갱신 후 딱 한 번 재시도(무한 금지 · blogger 관례).
   if (s.status === 401) {
-    tok = await ensureFreshToken(tid, account.id, "youtube_shorts", account.handle, true);
+    tok = await ensureFreshToken(tid, account.id, channel, account.handle, true);
     if (!tok.ok) return { ok: false, reason: "auth_failed", retriable: false, error: "유튜브 로그인이 만료됐어요. 다시 연결해 주세요.", detail: tok.detail };
     try { s = await start(tok.token.accessToken); }
     catch (e) { return { ok: false, reason: "network", retriable: true, error: "유튜브에 연결하지 못했어요.", detail: String((e as Error)?.message ?? e).slice(0, 160) }; }
@@ -254,5 +265,15 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
   const videoId = String(upJson?.id ?? "").trim();
   if (!videoId) return { ok: false, reason: "channel_error", retriable: true, error: "올렸는데 유튜브가 영상 번호를 주지 않았어요.", detail: "no_video_id" };
 
-  return { ok: true, via: "api", externalUrl: `https://www.youtube.com/shorts/${videoId}`, channelRef: videoId };
+  /* 주소만 갈린다 — `/shorts/…` 는 짧은 영상 전용 뷰어라 롱폼을 그 주소로 적으면 유튜브가 `/watch` 로 되돌린다.
+     되돌려지긴 하지만 **우리가 적은 주소가 그 글의 주소가 아닌 것**은 그대로라, 처음부터 맞게 적는다. */
+  const externalUrl = channel === "youtube_long"
+    ? `https://www.youtube.com/watch?v=${videoId}`
+    : `https://www.youtube.com/shorts/${videoId}`;
+  return { ok: true, via: "api", externalUrl, channelRef: videoId };
 }
+
+/** 쇼츠 — 종전 이름 그대로(호출부 무회귀). */
+export const publishYoutubeShorts = (piece: PublishPiece, account: PublishAccount): Promise<PublishResult> => publishYoutube(piece, account, "youtube_shorts");
+/** [P1R8 §3.4] 롱폼 — 같은 코드·다른 주소. */
+export const publishYoutubeLong = (piece: PublishPiece, account: PublishAccount): Promise<PublishResult> => publishYoutube(piece, account, "youtube_long");

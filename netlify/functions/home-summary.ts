@@ -13,7 +13,6 @@ import { homeRevenue } from "../../lib/revenue/aggregate";
    · planOf·autoApproveAllowed: «조용하면 발행»을 이 요금제가 쓸 수 있나(B3 가 크론 review-deadline 에 건 게이트와 같은 함수) */
 import { summarizeSlotBlocks } from "../../lib/slot-gate";
 import { planOf, autoApproveAllowed } from "../../lib/plans";
-import { HARD_GATE_KEYS } from "../../lib/content-approve";   // [R8 §4.1] 발행을 막는 게이트 키(정본) — 홈이 목록을 따로 갖지 않는다
 import { GATE_LABEL, type GateKey } from "../../lib/ai-tell-gate";   // 🔴 라벨 정본은 서버(AC-52) — 화면이 문구를 지어내지 않는다
 /* [R7 §1.4] 열린 채널 이름은 `channel_registry` 가 정본이다 — 고객 «계정 연결» 그리드가 그리는 기준(`status='active'`)과 같은 곳을 본다.
    문자열로 박아 두면 채널이 열리고 닫힐 때마다 사람이 문구를 고치러 와야 하고, 그러다 못 붙이는 채널을 계속 권하게 된다(A 실측 지적 2026-09-15). */
@@ -82,43 +81,51 @@ export default async (req: Request): Promise<Response> => {
           (SELECT MIN(id) FROM pieces WHERE tenant_id = ${tid} AND status = 'awaiting_manual') AS manual_first,
           (SELECT COUNT(*) FROM slots WHERE tenant_id = ${tid} AND status = 'coin_short') AS coin_c,
           (SELECT to_char(MIN(slot_date), 'FMMM"월" FMDD"일"') FROM slots WHERE tenant_id = ${tid} AND status = 'coin_short') AS coin_first`);
-      /* ══════════ [R8 §4.1] 🔴 **고지·금칙어 게이트로 막힌 글** — 홈에 사유가 없던 자리 ══════════
-         왜 급한가: 대가 고지(제휴·협찬·무상제공)가 없으면 발행이 **막힌다**. 그런데 홈 «해야 할 일» 13종에 그 사유가 없어서
-         고객은 «글이 왜 안 나가지»만 본다(CLAUDE §4.7 «조용히 0건 금지» 를 정면으로 어긴 자리). 막는 경로가 둘이다:
-           ① 자동 승인 중단(`slots.review_deadline` → awaiting_manual · meta.failReason «자동 승인을 멈췄어요 — …»)
-           ② 발행 직전 거부(`publisher` → awaiting_manual · reason "gate")
-         둘 다 `pieces.gate_report.checks[]` 에 **어떤 항목이 떨어졌는지**가 남아 있다 — 그 낱말을 그대로 홈에 올린다.
-         🔴 아래 «직접 올려야 할 게 N건» 과 **겹치지 않게** 뺀다: 게이트로 막힌 글의 할 일은 «직접 올리기»가 아니라 «고치고 다시 승인»이다. */
-      let gateRows: Record<string, unknown>[] = [];
-      let gateManual = 0, gateTotal = 0, gateFirst = 0;
+      /* ══════════ [R8 §4.1 → §9 최종] 🔴 **«막혔어요»가 아니라 «이 위험을 안고 나가요»** ══════════
+         처음 이 자리를 만들 때는 «고지·금칙어 게이트로 **막힌** 글»이었다. 그 뒤 사장님이 전역으로 정하셨다 —
+         **«말해 주기로 내려. 고객 계정이야. 우리가 책임지는 게 아니야.»** (`lib/content-approve.ts HARD_GATE_KEYS = []`).
+         🔴 그래서 **막는 판정은 하나도 없다.** 그런데 검사는 그대로 다 돌고 `gate_report.checks[]` 에 그대로 남는다.
+            남은 일은 **그 표시를 사람이 볼 수 있게 올리는 것**이다 — 안 올리면 «검사했는데 아무도 안 봤다»가 되고,
+            그건 «조용히 0건»(CLAUDE §4.7)의 가장 나쁜 형태다(우리는 알았는데 고객만 몰랐다).
+         🔴 kind 는 `review_blocked` 그대로 둔다(화면 낱말이 이미 있다 · AC-52). **뜻만 바뀐다** — A 에 한 줄 보냈다.
+         🔴 «직접 올려야 할 게 N건»(awaiting_manual)과 겹치지 않게 그 상태는 **여기서 빼고 센다** — 같은 글을 두 줄로 세면 숫자를 못 믿는다. */
+      let warnRows: Record<string, unknown>[] = [];
+      let warnPre = 0, warnPost = 0, warnFirst = 0;
       try {
-        gateRows = await q(sql`SELECT c->>'key' AS key,
-            COUNT(DISTINCT p.id)::int AS n,
-            COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'awaiting_manual')::int AS manual_n,
-            MIN(p.id)::int AS first_id
+        const [wc] = await q(sql`SELECT
+            COUNT(DISTINCT p.id) FILTER (WHERE p.status <> 'published')::int AS pre_n,
+            COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'published')::int AS post_n,
+            MIN(p.id) FILTER (WHERE p.status <> 'published')::int AS pre_first,
+            MIN(p.id) FILTER (WHERE p.status = 'published')::int AS post_first
           FROM pieces p, LATERAL jsonb_array_elements(p.gate_report -> 'checks') c
-          WHERE p.tenant_id = ${tid} AND p.status IN ('in_review', 'draft', 'awaiting_manual')
-            AND jsonb_typeof(p.gate_report -> 'checks') = 'array'
-            AND c->>'pass' = 'false' AND c->>'key' IN (${sql.join(HARD_GATE_KEYS.map((k) => sql`${k}`), sql`, `)})
-          GROUP BY 1 ORDER BY 2 DESC, 1`);
-        const [gt] = await q(sql`SELECT COUNT(DISTINCT p.id)::int AS n,
-            COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'awaiting_manual')::int AS manual_n, MIN(p.id)::int AS first_id
-          FROM pieces p, LATERAL jsonb_array_elements(p.gate_report -> 'checks') c
-          WHERE p.tenant_id = ${tid} AND p.status IN ('in_review', 'draft', 'awaiting_manual')
-            AND jsonb_typeof(p.gate_report -> 'checks') = 'array'
-            AND c->>'pass' = 'false' AND c->>'key' IN (${sql.join(HARD_GATE_KEYS.map((k) => sql`${k}`), sql`, `)})`);
-        gateTotal = n(gt?.n); gateManual = n(gt?.manual_n); gateFirst = n(gt?.first_id);
-      } catch (e) { console.warn("[home] 게이트 사유 조회 실패 — 그 행만 빠진다", String((e as Error)?.message ?? e).slice(0, 120)); }
-      if (gateTotal) {
-        /* 사유는 **많이 걸린 순서 3개까지**(서버 라벨 그대로 · 첫 낱말이 보통 «대가 고지 첫머리»다). */
-        const why = gateRows.slice(0, 3).map((r) => GATE_LABEL[String(r.key) as GateKey] ?? String(r.key)).filter(Boolean).join(" · ");
-        todo.push({ kind: "review_blocked", title: `발행 전 확인이 필요한 글이 ${gateTotal}건 있어요`, count: gateTotal,
-          desc: `${why || "확인 필요"} — 고치고 승인하면 그 자리에서 다시 나가요`,
-          link: gateTotal === 1 && gateFirst ? `/app/piece.html?id=${gateFirst}` : "/app/pieces.html?status=in_review", tone: "warn",
-          ...(gateTotal === 1 && gateFirst ? { pieceId: gateFirst } : {}) });
+          WHERE p.tenant_id = ${tid} AND p.status IN ('draft', 'in_review', 'approved', 'scheduled', 'published')
+            AND jsonb_typeof(p.gate_report -> 'checks') = 'array' AND c->>'pass' = 'false'`);
+        warnPre = n(wc?.pre_n); warnPost = n(wc?.post_n);
+        warnFirst = warnPre ? n(wc?.pre_first) : n(wc?.post_first);
+        if (warnPre || warnPost) {
+          warnRows = await q(sql`SELECT c->>'key' AS key,
+              COUNT(DISTINCT p.id) FILTER (WHERE p.status <> 'published')::int AS pre_n,
+              COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'published')::int AS post_n
+            FROM pieces p, LATERAL jsonb_array_elements(p.gate_report -> 'checks') c
+            WHERE p.tenant_id = ${tid} AND p.status IN ('draft', 'in_review', 'approved', 'scheduled', 'published')
+              AND jsonb_typeof(p.gate_report -> 'checks') = 'array' AND c->>'pass' = 'false'
+            GROUP BY 1 ORDER BY 2 DESC, 3 DESC, 1`);
+        }
+      } catch (e) { console.warn("[home] 위험 표시 조회 실패 — 그 행만 빠진다", String((e as Error)?.message ?? e).slice(0, 120)); }
+      if (warnPre || warnPost) {
+        /* 사유는 **많이 걸린 순서 3개까지** · 라벨은 서버 정본 그대로(AC-52 · 화면이 문구를 지어내지 않는다). */
+        const key = warnPre ? "pre_n" : "post_n";
+        const why = warnRows.filter((r) => n(r[key])).slice(0, 3).map((r) => GATE_LABEL[String(r.key) as GateKey] ?? String(r.key)).filter(Boolean).join(" · ");
+        const one = (warnPre || warnPost) === 1 && warnFirst;
+        todo.push(warnPre
+          ? { kind: "review_blocked", title: `이 위험을 안고 나갈 글이 ${warnPre}건 있어요`, count: warnPre,
+              desc: `${why || "확인이 필요한 표시가 있어요"} — 막지는 않았어요. 그대로 두시면 이 상태로 나가요${warnPost ? ` (이미 나간 글 ${warnPost}건에도 같은 표시가 있어요)` : ""}`,
+              link: one ? `/app/piece.html?id=${warnFirst}` : "/app/pieces.html?status=in_review", tone: "warn", ...(one ? { pieceId: warnFirst } : {}) }
+          : { kind: "review_blocked", title: `이 위험을 안고 나간 글이 ${warnPost}건 있어요`, count: warnPost,
+              desc: `${why || "확인이 필요한 표시가 있어요"} — 막지 않았어요. 지금이라도 고치거나 내릴 수 있어요`,
+              link: one ? `/app/piece.html?id=${warnFirst}` : "/app/posts.html", tone: "warn", ...(one ? { pieceId: warnFirst } : {}) });
       }
-      /* 🔴 게이트로 막힌 것은 위에서 말했으니 여기서 뺀다 — 같은 글을 두 줄로 세면 «몇 건인지» 를 못 믿게 된다. */
-      const manualC = Math.max(0, n(stuck?.manual_c) - gateManual), manualVideo = n(stuck?.manual_video_c), manualFirst = n(stuck?.manual_first);
+      const manualC = n(stuck?.manual_c), manualVideo = n(stuck?.manual_video_c), manualFirst = n(stuck?.manual_first);
       if (manualC) {
         /* 영상이 섞여 있으면 §1.3 흐름(내려받기 → 앱에서 올리기 → 주소 적기)을 가리킨다. 글뿐이면 종전대로 «직접 올려 주세요». */
         const videoC = Math.min(manualVideo, manualC);   // 게이트 몫을 뺀 뒤라 영상 수가 합계를 넘지 않게

@@ -6,7 +6,7 @@
 <title>홈 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=15">
+<link rel="stylesheet" href="/css/ac.css?v=17">
 </head>
 <body>
 <div class="shell">
@@ -30,8 +30,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=14"></script>
-<script src="/js/mock.js?v=14"></script>
+<script src="/js/ui.js?v=16"></script>
+<script src="/js/mock.js?v=17"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
@@ -122,6 +122,9 @@
     UI.toast(on ? "자동 편성을 켰어요" : "자동 편성을 껐어요");
   });
   if (r.notices.length) UI.$("#notices").innerHTML = r.notices.map((n) => `<div class="banner ${n.kind === "incident" ? "" : "info"}"><span>${UI.esc(n.title)}</span></div>`).join("");
+  /* [R8 §6.1] 당겨서 새로고침 — 홈은 «오늘 얼마 벌었나»를 확인하러 다시 여는 화면이라 이 손짓이 가장 자연스럽다.
+     🔴 홈은 한 번에 그리는 화면(부분 갱신 함수가 없다)이라 통째로 다시 읽는다 — 화면이 절반만 새것이 되는 것보다 낫다. */
+  UI.pullToRefresh(() => new Promise((ok) => { location.reload(); setTimeout(ok, 3000); }));
 })();
 </script>
 </body>

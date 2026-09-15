@@ -6,7 +6,7 @@
 <title>올라간 글 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=15">
+<link rel="stylesheet" href="/css/ac.css?v=17">
 </head>
 <body>
 <div class="shell">
@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=14"></script>
-<script src="/js/mock.js?v=14"></script>
+<script src="/js/ui.js?v=16"></script>
+<script src="/js/mock.js?v=17"></script>
 <script>
 (async () => {
 await UI.boot("schedule");
@@ -34,7 +34,11 @@ const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(
 
 function row(p) {
   if (privateOf(p)) return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d" style="display:flex;align-items:center;gap:6px;overflow:visible;flex-wrap:wrap">${UI.pill(UI.POST_STATUS, p.status)}<span>공개 전환 필요</span></span></div><a class="lk" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;min-height:44px;display:inline-flex;align-items:center" data-stop>스튜디오 ›</a></button>`;
-  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
+  /* [R8 §9] 🔴 **나간 뒤에 보이는 것이 이제 유일하게 남은 안전장치다** — 발행 직전 게이트까지 내렸으니(사장님 결정),
+     «그때 이런 지적이 있었다»를 목록에서 바로 짚어 준다. 자동 승인이면 아무도 화면을 안 보고 나갔다는 뜻이라 더 그렇다.
+     🔴 무게는 서버가 읽어 준 것(`riskHigh`)만 쓴다 — 옛 글은 무게가 없어 **개수만** 온다(없는 것을 «무거움»으로 지어내지 않는다). */
+  const risk = p.riskCount ? `<span class="pill ${p.riskHigh ? "warn" : "off"}" style="margin-left:6px">${p.riskHigh ? "꼭 보세요" : "안내"} ${p.riskCount}</span>` : "";
+  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `${risk}<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
   const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}에서 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
   return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
 }
@@ -94,6 +98,7 @@ function postSheet(p) {
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
     ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
+    ${p.riskCount ? `<div class="banner ${p.riskHigh ? "" : "info"}" style="margin:8px 0 0"><span>이 글엔 못 지킨 게 ${p.riskCount}가지 있어요 · 지금이라도 고치거나 내릴 수 있어요</span>${p.pieceId ? `<a href="/app/piece.html?id=${p.pieceId}" style="font-weight:700;text-decoration:underline;white-space:nowrap">무엇인지 보기</a>` : ""}</div>` : ""}
     <div class="cta" style="flex-direction:column">
       ${privateOf(p) ? `<a class="btn primary" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener">유튜브 스튜디오 열기</a>` : ""}
       ${p.externalUrl ? `<a class="btn ${privateOf(p) ? "secondary" : "primary"}" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">${privateOf(p) ? "올라간 영상 보기(비공개)" : "올라간 글 열기"}</a>` : ""}

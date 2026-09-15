@@ -9,7 +9,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
-import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, type ConnectMethod } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0)
+import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, type ConnectMethod } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0)
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 
@@ -20,8 +20,12 @@ export const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unkn
    그 표를 읽는 **얇은 래퍼**로 남긴다(이름·시그니처 그대로라 호출부 40여 곳 무회귀).
    왜 옮겼나: 채널 하나를 켜려면 네 파일을 맞춰야 했고, 빠뜨리면 조용히 틀린 값이 나왔다(그 파일 헤더에 실측 근거). */
 export type { ConnectMethod } from "./channel-registry";
-export const ALL_CHANNELS = ["naver_blog", "tistory", "blogger", "wordpress", "threads", "instagram", "youtube_shorts", "naver_clip", "reels", "tiktok"] as const;
-export type ChannelKey = typeof ALL_CHANNELS[number];
+/* 🔴 [P1R8 §3.4] **표에서 파생한다** — 여기에 채널 이름을 다시 적지 않는다.
+   종전엔 손으로 적은 열 개짜리 배열이었고, R8 에서 채널을 여섯 개 늘리자마자 이 목록만 **옛 열 개로 남았다**.
+   이 배열은 `listChannels()` 의 폴백(레지스트리 표가 비었을 때)에 쓰이므로, 어긋나면 «DB 가 비면 새 채널이 사라지는»
+   조용한 결함이 된다 — 정본이 둘이면 언젠가 갈라진다(이 파일이 §5.2 에서 이미 배운 것). */
+export const ALL_CHANNELS = CHANNEL_KEYS;
+export type ChannelKey = string;
 export function isChannel(v: unknown): v is ChannelKey { return isKnownChannel(v); }
 
 /** 연결 방식(계약 §0) — 정본은 `lib/channel-registry.ts CHANNELS`. */
