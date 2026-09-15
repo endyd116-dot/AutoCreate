@@ -132,6 +132,8 @@ export interface RunnerJobAccount {
   channel: string;
   profileKey: string;
   proxyUrl?: string;
+  /** 이 프록시의 기대 출구 IP — 러너가 실측 IP 와 다르면 발행을 멈춘다(계약 §2.5-4). */
+  expectExitIp?: string;
   /** 저장된 세션 쿠키(있으면 로그인 단계를 건너뛴다). */
   cookies?: unknown[];
   /** 자동 로그인용 아이디/비밀번호(쿠키가 없거나 만료됐을 때).
@@ -452,13 +454,27 @@ export async function enqueueJob(inp: EnqueueInput): Promise<{ id: number; creat
 
 /** 계정 자격 복호화 — 🔴 claim 전용. 반환값은 응답 본문 외 어디에도 쓰지 않는다(로그 금지). */
 async function loadAccountForRunner(tid: number, accountId: number): Promise<RunnerJobAccount | null> {
-  const [a] = await q(sql`SELECT id, channel, handle, browser_profile_key, proxy_url FROM accounts WHERE tenant_id = ${tid} AND id = ${accountId} LIMIT 1`);
+  /* 프록시는 두 자리에서 온다(계약 §2.5): 새 방식 `accounts.proxy_id → proxies`(암호문) · 옛 방식 `accounts.proxy_url`(평문 칸).
+     🔴 옛 칸을 지우지 않는다 — 쓰던 계정이 그대로 돌아야 한다(소급 0). 새 배정이 있으면 그것을 **우선**한다. */
+  const [a] = await q(sql`SELECT a.id, a.channel, a.handle, a.browser_profile_key, a.proxy_url, a.proxy_id,
+      p.url_enc AS p_enc, p.last_exit_ip AS p_ip, p.status AS p_status
+    FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
+    WHERE a.tenant_id = ${tid} AND a.id = ${accountId} LIMIT 1`);
   if (!a) return null;
   const out: RunnerJobAccount = {
     id: n(a.id), handle: String(a.handle ?? ""), channel: String(a.channel ?? ""),
     profileKey: String(a.browser_profile_key || `t${tid}-a${n(a.id)}`),
   };
-  if (a.proxy_url) out.proxyUrl = String(a.proxy_url);   // 러너용 원문(마스킹 안 함 — 이 응답 밖으로 나가면 안 된다)
+  if (a.p_enc) {
+    const dec = decryptObj<{ url?: string }>(String(a.p_enc));
+    // 🔴 복호화가 안 되면 **직결로 내려앉히지 않는다** — 프록시를 배정받은 계정이 집 IP 로 나가는 게 이 기능이 막으려는 바로 그것이다.
+    if (dec?.url) out.proxyUrl = String(dec.url);
+    else throw Object.assign(new Error("proxy_decrypt_failed"), { code: "PROXY_DECRYPT" });
+    // 기대 출구 IP — 러너가 실제 IP 와 대조해 다르면 멈춘다(프록시가 죽고 조용히 우회한 상태를 여기서 잡는다).
+    if (a.p_ip) out.expectExitIp = String(a.p_ip);
+  } else if (a.proxy_url) {
+    out.proxyUrl = String(a.proxy_url);   // 러너용 원문(마스킹 안 함 — 이 응답 밖으로 나가면 안 된다)
+  }
   const creds = await q(sql`SELECT kind, enc, expires_at FROM account_creds
     WHERE account_id = ${accountId} AND purged_at IS NULL AND kind IN ('cookies','password') ORDER BY id DESC`);
 
@@ -624,6 +640,8 @@ export interface RunnerReportOk {
   monetize?: { bloggerTemplateBackup?: string; adsenseInserted?: boolean; reverted?: boolean; detail?: string };
   /** `render.video`(P1R5 §2.1) — 러너가 구운 mp4. 🔴 서버가 R2 HEAD 로 확인하기 전엔 «성공»이 아니다. */
   render?: RunnerRenderResult;
+  /** 이 잡이 실제로 나간 IP(계약 §2.5-4 · 프록시 배정 계정만). 서버가 `accounts.last_exit_ip` 에 적는다. */
+  exitIp?: string;
   shotKey?: string;
 }
 /**
@@ -631,7 +649,7 @@ export interface RunnerReportOk {
  *   🔴 "parse" 는 전이표(`lib/account-health.ts` 7종) **밖**이다 — 계정 문제가 아니라 **우리 버그**(화면이 바뀌었거나 파서가 틀렸다).
  *      계정 전이 0 · 재시도 무의미 · audit high 로 종결한다(전이표에 넣지 않는다 — 표는 B 의 정본).
  */
-export interface RunnerReportFail { ok: false; errorKind?: unknown; detail?: string; shotKey?: string }
+export interface RunnerReportFail { ok: false; errorKind?: unknown; detail?: string; shotKey?: string; exitIp?: string }
 export type RunnerReportBody = RunnerReportOk | RunnerReportFail;
 
 export interface ReportOutcome { ok: boolean; status: RunnerJobStatus; reason?: string; postId?: number; verified?: "server" | "unverified" | "not_found"; block?: RunnerBlock }
@@ -701,6 +719,33 @@ async function failPublishPiece(tid: number, pieceId: number, block: RunnerBlock
 }
 
 /** 러너 보고 반영. 잡이 claimed 가 아니면 무시(이중 report 안전 · 멱등). */
+/**
+ * 러너가 실제로 나간 IP 를 적는다(계약 §2.5-4) — 성공·실패 모두.
+ *   🔴 «프록시를 걸었다»가 아니라 **«그 IP 로 나갔다»의 유일한 증거**다. 여기 안 적으면 아무도 확인할 수 없다.
+ *   🔴 두 계정이 같은 IP 로 나가면 그 자체가 연좌제 위험이라 **운영 감사에 남긴다**(고객 알림은 아니다 —
+ *      프록시를 안 산 고객에겐 정상 상태이고, 판단은 운영이 한다).
+ */
+async function recordExitIp(tid: number, accountId: number | null, ip: unknown): Promise<void> {
+  const v = String(ip ?? "").trim();
+  if (!accountId || !/^[0-9a-f.:]{3,45}$/i.test(v)) return;
+  try {
+    await q(sql`UPDATE accounts SET last_exit_ip = ${v}, last_exit_ip_at = NOW() WHERE id = ${accountId}`);
+    await q(sql`UPDATE proxies SET last_exit_ip = ${v}, last_check_at = NOW(), status = 'active', updated_at = NOW()
+      WHERE id = (SELECT proxy_id FROM accounts WHERE id = ${accountId})`);
+    const shared = await q(sql`SELECT id, handle FROM accounts
+      WHERE tenant_id = ${tid} AND last_exit_ip = ${v} AND id <> ${accountId} AND status <> 'disconnected' LIMIT 5`);
+    if (shared.length) {
+      await writeAudit({
+        tenantId: tid, action: "accounts_share_exit_ip", actorType: "system", riskLevel: "medium",
+        target: `account:${accountId}`,
+        detail: { ip: v, withAccountIds: shared.map((r) => n(r.id)), note: "같은 IP 로 나가는 계정이 둘 이상 — 한 계정이 정지되면 같이 묶일 수 있다" },
+      });
+    }
+  } catch (e) {
+    console.error("[runner-jobs] exit ip 기록", (e as Error)?.message ?? e);   // 기록 실패로 보고 자체를 막지 않는다
+  }
+}
+
 export async function reportJob(device: DeviceRow, jobId: number, result: RunnerReportBody): Promise<ReportOutcome> {
   const [j] = await q(sql`SELECT id, tenant_id, kind, account_id, piece_id, payload, status, attempts FROM runner_jobs
     WHERE id = ${jobId} AND tenant_id = ${device.tenantId} LIMIT 1`);
@@ -713,7 +758,33 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   const accountId = n(j.account_id);
   const payload = (j.payload && typeof j.payload === "object" ? j.payload : {}) as Record<string, unknown>;
 
+  // 🔴 성공·실패를 가르기 **전에** 적는다 — 실패한 잡의 출구 IP 야말로 알아야 하는 값이다(§2.5-4).
+  await recordExitIp(tid, accountId || null, (result as { exitIp?: unknown }).exitIp);
+
   /* ── 실패(parse) — 계약 P1R3 §2.1 · 우리 버그 · 계정 전이 0 · 0 으로 채우지 않는다(AC-9) ── */
+  /* `"proxy"`(계약 P1R7 §2.5) — `"parse"` 와 **같은 부류**다: 전이표 7종 밖 · 계정 잘못 아님(전이 0) · **우리가 고친다**.
+     프록시가 죽었거나 주소가 깨졌거나, 걸긴 걸었는데 다른 IP 로 나갔다. 재시도해도 같은 답이 오므로 종결하고 감사에 남긴다.
+     🔴 이걸 `login_fail`·`captcha` 로 분류하면 고객에게 «다시 로그인하세요» 라고 **거짓 안내**를 하게 된다(AC-10). */
+  if (result.ok !== true && String((result as RunnerReportFail).errorKind) === "proxy") {
+    const fail = result as RunnerReportFail;
+    await q(sql`UPDATE runner_jobs SET status = 'failed', claimed_by = NULL, claimed_at = NULL, error_kind = 'proxy',
+        result = ${jsonb({ ok: false, errorKind: "proxy", detail: String(fail.detail ?? "").slice(0, 300), shotKey: fail.shotKey ?? null, attempts: n(j.attempts) })},
+        due_at = NULL, updated_at = NOW() WHERE id = ${jobId}`);
+    if (accountId) {
+      await q(sql`UPDATE proxies SET status = 'down', last_check_at = NOW(), updated_at = NOW()
+        WHERE id = (SELECT proxy_id FROM accounts WHERE id = ${accountId})`).catch(() => {});
+      await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+        VALUES (${tid}, ${"proxy_down"}, ${"IP 연결이 끊겨 잠시 멈췄어요"},
+                ${"이 계정 전용 IP 가 응답하지 않아 글을 올리지 않았어요. 다른 계정과 같은 IP 로 나가지 않도록 일부러 멈춘 거예요 — 저희가 바로 손보겠습니다."},
+                ${"/app/accounts.html"})`).catch(() => {});
+    }
+    await writeAudit({
+      tenantId: tid, action: "runner_job_failed", actorType: "system", riskLevel: "high", target: `runner_job:${jobId}`,
+      detail: { kind, errorKind: "proxy", ourBug: true, accountId, detail: String(fail.detail ?? "").slice(0, 200) },
+    });
+    return { ok: true, status: "failed", reason: "proxy" };
+  }
+
   if (result.ok !== true && String((result as RunnerReportFail).errorKind) === "parse") {
     const fail = result as RunnerReportFail;
     await q(sql`UPDATE runner_jobs SET status = 'failed', claimed_by = NULL, claimed_at = NULL, error_kind = 'parse',
