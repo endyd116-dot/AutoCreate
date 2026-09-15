@@ -10,7 +10,7 @@
 **AutoCreate(AC)** = 부수입을 원하는 개인이 여러 계정으로 글·영상을 AI로 만들어 자동 발행하고 광고·제휴 수익을 한 곳에서 보는 토스형 SaaS. AM(AutoMarketing)의 엔진을 이식하고 겉(제품·화면·계정 모델·수익 집계·결제·운영센터)은 새로 짰다.
 
 - **개발 라운드 전부 종료**: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · R5 · R6 + KICC 이중 MID. 설계(`docs/DESIGN.md`) 대비 미개발 = 외부 선결조건(유튜브 심사 등)이 막은 것 + **§6 «사장님 실측 발견 5건»(진행 중)**.
-- **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회) · 로컬 main `5582363`(R6.5 전부 머지 · 미배포 · C 2차 뒤 배포 #7) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
+- **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회) · 로컬 main `cc45885`(R6.5 전부 머지 · 러너 v1.1.4 · 미배포 · C 2차 뒤 배포 #7) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
 - **결제(KICC) 실돈 실측 통과**(2026-09-15): 카드 등록(keyin MID) → ₩5,500 청구 → ₩2,000 부분 취소 → ₩3,500 환불 · 카드 최종 0원.
 - 운영센터 `/ops` · `admin`/`admin1234`(**사장님 아직 안 바꿈**) · MIS 허브 SSO 카드 ⑥ 라이브.
 
@@ -88,7 +88,7 @@
 
 - **Neon** `old-tree-90235056` · DDL `node scripts/neon-migrate.mjs`(0001~0011) · 키 `~/.neon-am-key` · PITR 7일.
 - **Netlify** site `a14524de-ebfa-46e8-a116-dbc87343f276` · PAT `nfp_bB2BR1…`(AM 메모리 `neon-netlify-remote`) · **AC-8** 다른 사이트 secret 은 `****`.
-- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip `autocreate/runner/v1.1.3.zip`+`latest.json`) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
+- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip `autocreate/runner/v1.1.4.zip`+`latest.json`(sha256 53ac918c…)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
 - **KICC**: ON 계약 공용 · MID 2 · live · **빌키 = keyin 고정**(AC-45) · 복귀 주소 등록 불필요·KEYIN 시크릿 불필요(실측 확정) · 개통 정본 `docs/active/KICC-GO-LIVE.md`.
 - 로컬 `.env`(워크트리 6곳 동기): `TEST_TISTORY_*`·`TEST_NAVER_*`·`FX_USD_KRW`·`BGM_LICENSE_VERIFIED`.
 
@@ -126,7 +126,7 @@
 2. ✅ **B-1 머지됨(main `04a08c7`)**: `c0fbc2b` `POST /api/topics-add`(400 title·banned_category·duplicate(+topic 동봉)·channel · 429 rate · Topic.source ai|manual · manual 맨 위) · `84a2372` 캡션 §5C(image{prompt,caption?} 분리 · 묘사문 7패턴 금칙 · captionRate naver 0.3/tistory 0.2/blogger·WP 0.5 · alt 는 prompt 파생). 완료: 글 실호출 1건(t207 piece 330 · $0.34 · 캡션 1/6 «자리마다 쪽지랑 같이 올려두니 뿌듯했어요» · 묘사문 0) · 단독어 5개(`1a290df`). 남은 것: R2 `autocreate/207/` 잔재 + `r2Delete` 헬퍼 · B2 몫 `lib/publish/wordpress.ts:71` alt_text 를 `piece_assets.meta.alt` 로.
 3. ✅ **A 머지됨(main `d0b186e`)** · 🔴 정정 진행 중 — «이번엔 건너뛰어요» 화면 규칙(자리 날짜−오늘 < lead)은 **틀렸다**(제작 스텝 창은 «오늘~오늘+lead» = lead 안 자리도 다음 produceHour 틱에 만든다). 서버 `skipReason:"too_soon"`(B) 만으로 판정하게 A 수리 중: `8dfa5a1` «내 소재 넣기» 시트(→ director 직행 · duplicate→기존으로 · «직접» 필 · «검색량 모름») · 자동 편성 꺼짐 배너(홈·편성표 · 켜기 동기화 · 규칙 0 숨김) · «이번엔 건너뛰어요»(skipReason too_soon 우선). 스샷 `_shots/r6f-*.png`.
 4. ✅ **B2 머지됨**: `scripts/build-runner.mts`(재현 가능 zip · 의존성 0 zip 코덱) → R2 `autocreate/runner/v1.1.3.zip`+`latest.json` · `/api/runner-download`(로그인·«플랜 한도>0»·감사 · 10분 presign) · 하트비트 자동 업데이트(sha256 · 옛 판 보존) · 기기 지문(`x-runner-fp` 전 요청 · 인증 자리) · `/api/runner-rotate`(지문도 초기화) · 실측 23/23 · 하니스 trial. **셀렉터 서버 배포 = 1단계(표만 · 버전+카나리+폴백) R7 · 2단계(절차 DSL) 보류** · 복제 방어선 = «봐도 못 굴린다»(토큰·테넌트·묶기). 🔴 화면은 A 진행 중(내려받기 버튼이 JSON 새 탭 → API→url).
-5. ✅ R6.5 코드 전부 main(`5582363`) · **C 1차 진행 중 · 2차(skipReason·러너 배포 절) 예고됨** → «배포 가능» → 배포 #7. 남은 한 줄: B2 Content-Disposition(파일명 `autocreate-runner-v1.1.3.zip`)·«열쇠 붙여넣기».
+5. ✅ R6.5 코드 전부 main(`5582363`) · **C 1차 진행 중 · 2차(skipReason·러너 배포 절) 예고됨** → «배포 가능» → 배포 #7. ✅ B2 `8c627dd` 파일명 서명(`autocreate-runner-v1.1.4.zip`)·«열쇠» 통일 머지.
 6. 🔴 **설계 대비 전수조사**(사장님 지시 · **분담**: 새 B 통합+§0·1·3·5B·13·17·19+특별 항목 / B2 §2·8·9 / B-1 §4·5·5C·16B·6·10 / B §7·11·12·14·15·16 / A 시안↔화면 · 각자 `docs/active/audit/2026-09-15-<역할>.md`) → 결과 `DESIGN-AUDIT.md` 의 «R7 제안 묶음 3» 이 다음 라운드의 유일한 입력. 사장님이 짚은 것: 영상 축이 고객 화면에 안 보임(레지스트리 planned) · «있지만 안 되는 것» 많음 · 탈퇴 시 R2 파기 없음(B-1 발견).
 
 ### 사장님 결정 대기
