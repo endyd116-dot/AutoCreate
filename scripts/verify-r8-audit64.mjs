@@ -363,7 +363,10 @@ const THREE_REST = [
   }],
   ["E3 티켓 한 화면", () => [yes(existsSync("public/ops/cs.html")), "public/ops/cs.html"]],
   ["E4 AM↔AC 코인 이전", () => [yes(inFile("netlify/functions/coin-transfer.ts", /amDebit/)), "coin-transfer → am-bridge amDebit (칸12 에서 이리로 옮김)"]],
-  ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/am-bridge.ts"], /syncPr\s*[(=:]/).length), "0건(주석 말고 **코드**로 센다)"]],
+  /* 🔴 [2026-09-16 · B] 보는 자리를 고쳤다 — 원래 `lib/am-bridge.ts`(AM↔AC 코인 다리)를 보고 있었는데 **거기가 아니다.**
+     정본 동기화는 «DB 오버레이를 `lib/ai-models.ts` 로 되돌리는 PR»이라 그 코드는 `lib/ai-models-sync.ts` 에 산다.
+     🔴 **검사를 맞추려고 코드를 엉뚱한 파일에 넣지 않는다** — 그러면 검사는 초록인데 물건은 남의 집에 있다. */
+  ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/ai-models-sync.ts", "netlify/functions/ops-ai-sync.ts"], /openSyncPr|정본 동기화/).length), "오버레이가 파일과 갈라진 채 굳으면 «파일이 정본»이 거짓말이 된다"]],
   ["E6 운영자 화면 조정", () => [yes(existsSync("netlify/functions/ops-center.ts")), "ops-center"]],
   ["F 팀 축 4(시트·초대·accept·팀 승인)", () => {
     /* 🔴 [2026-09-16 · C] 옛 판은 `SERVER_TEXT`(= referral.ts·ops-center.ts·cs.ts 셋)에서 팀을 찾았다 — **팀과 아무 상관없는 파일 셋**이라

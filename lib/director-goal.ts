@@ -63,7 +63,8 @@ export interface ChannelOrder {
   /** 이 집에서 실제로 돈이 들어오는 매체. 없으면 null. */
   goal: MediaGoal | null;
   /** 값이 어디서 왔나 — 🔴 안 남기면 다음 사람이 또 헤맨다(`resolveGoalDetail.source` 와 같은 관례). */
-  goalSource: "붙은 광고" | "심사 중인 광고" | "소재" | "없음";
+  /** 🔴 «고객이 고른 것»이 제일 세다 — 우리 추정(광고·소재)보다 앞선다. */
+  goalSource: "고객이 고른 것" | "붙은 광고" | "심사 중인 광고" | "소재" | "없음";
   /** 🔴 **왜 이 순서인가** — 사람말 한 줄. `pieces.meta.channelReason` 으로 나간다. */
   reason: string;
 }
@@ -80,6 +81,12 @@ export function targetChannelOrder(a: {
   channelHint: string | null;
   /** 켠 계정들의 `{ channel, monetize }` — `accounts.monetize` 원본. */
   accounts: readonly { channel: string; monetize?: Record<string, unknown> | null }[];
+  /**
+   * 🔴 [2026-09-16] 고객이 **직접 고른 목표 매체**(`tenants.settings.goal`).
+   *   · `null`(«모르겠어요») = **지금 동작 그대로**다 — 기본값을 만들지 않는다(«모름»을 «애드센스»로 바꾸면 그게 거짓말이다 · AC-9).
+   *   · 고른 값이 있으면 그 매체 채널을 **앞세우기만** 한다 — 🔴 **켠 채널은 하나도 빼지 않는다**(순서만 · §9 «있는 길을 막지 않는다»).
+   */
+  goal?: MediaGoal | null;
 }): ChannelOrder {
   const connected = [...new Set(a.connected.filter(Boolean))];
   /* 채널별로 **가장 좋은 상태**를 취한다 — 같은 채널 계정이 여럿이면 하나라도 붙었으면 붙은 것이다. */
@@ -98,15 +105,22 @@ export function targetChannelOrder(a: {
      `sort` 는 Node 에서 **안정 정렬**이라 상태가 같으면 원래 순서가 그대로 남는다. */
   const byLive = (arr: readonly string[]) => [...arr].sort((x, y) => rank[live.get(y) ?? "off"] - rank[live.get(x) ?? "off"]);
   const head = flip ? byLive(on) : hint ? [hint] : [];
-  const channels = [...head, ...byLive(connected.filter((c) => !head.includes(c)))];
+  let channels = [...head, ...byLive(connected.filter((c) => !head.includes(c)))];
+  /* 🔴 고객이 고른 목표가 있으면 **그 매체 채널을 맨 앞으로** — 빼지 않고 **순서만** 바꾼다.
+     이게 «우리 추정»보다 앞서는 이유: 광고가 어디 붙었는지는 우리가 재지만, **무엇을 하고 싶은지는 고객만 안다.** */
+  const chosen = a.goal ? channels.filter((c) => CHANNEL_MEDIA[c] === a.goal) : [];
+  if (chosen.length) channels = [...chosen, ...channels.filter((c) => !chosen.includes(c))];
   const top = channels[0] ?? null;
   const goal = top && live.get(top) !== "off" ? CHANNEL_MEDIA[top] ?? null : null;
+  /* 🔴 «고객이 고른 것»이 **제일 앞이다** — 이 값이 없으면 화면이 «왜 티스토리?»에 «고객이 고르셨어요»를 못 말한다(A2 지적). */
   const goalSource: ChannelOrder["goalSource"] = !top ? "없음"
+    : chosen.includes(top) ? "고객이 고른 것"
     : live.get(top) === "on" ? "붙은 광고" : live.get(top) === "waiting" ? "심사 중인 광고" : hint === top ? "소재" : "없음";
   const name = (ch: string | null) => CH_SAY[ch ?? ""] ?? ch ?? "";
   /* 🔴 조사 — «네이버 블로그**이** 소재에도 맞고» 처럼 틀리면 그 한 글자가 «사람이 쓴 글»을 깬다(CLAUDE §3 사람말). */
   const ga = (w: string) => `${w}${hasFinal(w) ? "이" : "가"}`;
   const reason = !top ? "고를 채널이 없어요."
+    : chosen.includes(top) ? `${name(top)}부터 올려 볼게요 — 고르신 목표에 맞는 채널이에요.`
     : flip ? `${name(top)}에 광고가 붙어 있어서 먼저 골랐어요 — 지금 수익이 나는 쪽이에요.`
       : live.get(top) === "on" ? `${ga(name(top))} 소재에도 맞고 광고도 붙어 있어요.`
         : hint === top ? `이 소재는 ${name(top)}에서 잘 읽혀요.${on.length === 0 ? " 아직 광고가 붙은 채널이 없어서 소재에 맞춰 골랐어요." : ""}`

@@ -9,6 +9,7 @@ import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
+import { toAgeBand, type AgeBand } from "../../lib/slang-whitelist";   // [2026-09-16] 나이대 — 값은 다섯뿐(자유문자열이 아니다)
 import { clientIp } from "../../lib/auth";
 import { jsonb } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
@@ -19,13 +20,21 @@ export const config = { path: ["/api/personas-list", "/api/personas-save"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 
-export interface PersonaProfile { region?: string; family?: string; job?: string; home?: string; brands?: string[]; tone?: string; interests?: string[]; banned?: string[]; signature?: string }
+export interface PersonaProfile { region?: string; family?: string; job?: string; home?: string; brands?: string[]; tone?: string; interests?: string[]; banned?: string[]; signature?: string;
+  /** 🔴 [2026-09-16] 나이대 — 값은 다섯뿐(`10s`~`50s`). 자유문자열이 아니다. */
+  ageBand?: AgeBand }
 const STR_KEYS = ["region", "family", "job", "home", "tone", "signature"] as const;
 const ARR_KEYS = ["brands", "interests", "banned"] as const;
 
 export function sanitizeProfile(p: unknown): PersonaProfile {
   const src = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
   const out: PersonaProfile = {};
+  /* 🔴 [2026-09-16 · A2 가 화면 만들기 전에 찾음] `ageBand` 가 없어서 **저장할 때도 돌려줄 때도 잘려 나갔다** —
+     이 함수가 양쪽에서 돌기 때문이다. 넣어도 안 남고 남아도 화면에 안 오는 상태였다.
+     🔴 `STR_KEYS` 에 그냥 넣지 않는다 — 그러면 200자 자유문자열이 된다. 값은 **다섯뿐**이라 목록으로 검사한다.
+     🔴 아니면 **키를 아예 안 싣는다** — «모름»과 «30대»는 다르다(AC-57). */
+  const ab = toAgeBand(src.ageBand);
+  if (ab) out.ageBand = ab;
   for (const k of STR_KEYS) { const v = String(src[k] ?? "").trim().slice(0, 200); if (v) out[k] = v; }
   for (const k of ARR_KEYS) {
     const v = Array.isArray(src[k]) ? (src[k] as unknown[]).map((x) => String(x ?? "").trim().slice(0, 60)).filter(Boolean).slice(0, 20) : [];

@@ -16,7 +16,10 @@ import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/onboarding", "/api/tenant-settings"] };
-const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt", "teamApproval"]);
+const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt", "teamApproval",
+  /* 🔴 [2026-09-16 · A2 가 화면 만들기 전에 찾음] `goal` 이 여기 없어서 **POST 해도 조용히 버려졌다** —
+     고객이 «목표 매체»를 고르고 저장한 뒤 새로고침하면 사라지는 상태였다. 화이트리스트가 값을 먹는 자리다. */
+  "goal"]);
 const CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress", "threads", "instagram", "youtube_shorts", "naver_clip", "reels", "tiktok"]);
 
 /**

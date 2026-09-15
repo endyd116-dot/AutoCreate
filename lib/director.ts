@@ -285,7 +285,13 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
      «붙었다/심사 중/없다»를 가르려면 상태 글자가 있어야 한다. */
   const monRows = await q(sql`SELECT channel, monetize FROM accounts WHERE tenant_id = ${tid}
     AND COALESCE(last_error_kind,'') <> 'removed' AND status NOT IN ('suspended','disconnected')`);
-  const order = targetChannelOrder({ connected, channelHint: topic.channelHint,
+  /* 🔴 [2026-09-16] 고객이 고른 **목표 매체**를 넘긴다 — 없으면 `null`(지금 동작 그대로).
+     위에서 이미 읽은 `tset` 를 쓴다(같은 값을 두 번 묻지 않는다). */
+  const chosenGoal = (() => {
+    const g = tset.goal;
+    return typeof g === "string" && g ? (g as Parameters<typeof targetChannelOrder>[0]["goal"]) : null;
+  })();
+  const order = targetChannelOrder({ connected, channelHint: topic.channelHint, goal: chosenGoal,
     accounts: monRows.map((r) => ({ channel: String(r.channel), monetize: (r.monetize ?? {}) as Record<string, unknown> })) });
   const channels = order.channels.slice(0, 3);
 

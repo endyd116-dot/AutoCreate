@@ -151,6 +151,10 @@ export default async (req: Request): Promise<Response> => {
          `line` 은 서버가 정본이다(화면이 따로 지으면 두 곳이 갈린다 · `numberClaims` 와 같은 관례).
          🔴 `pinned:false` 를 **그대로 싣는다** — «에디터에서 대표로 콕 집었다»고 화면이 말하면 그게 거짓말이다(B7 · R10). */
       if (m.hero && typeof m.hero === "object") meta.hero = m.hero;
+      /* [2026-09-16 · A2 가 화면 만들기 전에 찾음] 🔴 **참고 글에서 못 쓴 것** — `lib/director.ts` 가 `meta.refUnused` 에 적는데
+         이 화이트리스트에 없어서 **화면까지 오는 길이 아예 없었다.** `numberClaims` 가 겪은 그 자리인데 **한 칸 더 앞이다**
+         (그땐 서버가 보내긴 했고, 이건 안 보냈다). 모양은 `[{ field, why }]` — 왜 못 썼는지를 사람말로 들고 있다. */
+      if (Array.isArray(m.refUnused) && m.refUnused.length) meta.refUnused = m.refUnused;
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };
