@@ -13,9 +13,12 @@
  *
  *   🔴 한계(정직): 이건 **골격**까지다. «모델이 정말 30자로 쓰나»는 실호출로만 알 수 있고 아직 안 했다(AC-9).
  */
-import { WRITING_CONTRACTS, structureFor, imagesFor, contractSelfConflicts, type FormatKey, type TopicGroup } from "../lib/writing-contracts";
+import { WRITING_CONTRACTS, structureFor, imagesFor, contractSelfConflicts, isCardnewsChannel, type FormatKey, type TopicGroup } from "../lib/writing-contracts";
 import { structurePrint, structureOverlap, STRUCTURE_OVERLAP_MAX } from "../lib/structure-print";
 import type { Block } from "../lib/blocks";
+import { coinsPerWeek, toRuleKind, type Rule } from "../lib/slots";
+import { COIN_TABLE } from "../lib/coin-table";
+import { CHANNELS } from "../lib/channel-registry";
 
 const results: { step: string; ok: boolean; note: string }[] = [];
 const rec = (step: string, ok: boolean, note = "") => { results.push({ step, ok: !!ok, note }); };
@@ -110,6 +113,40 @@ const printOf = (types: string[]) => structurePrint(types.map((t) => ({ type: t 
     conflicts.length === 0, conflicts.length ? `🔴 ${conflicts.join(" / ")}` : "충돌 0");
   const all = Object.entries(WRITING_CONTRACTS).flatMap(([k, v]) => contractSelfConflicts(v).map((x) => `${k}: ${x}`));
   rec("⑤ 다른 채널도 그대로다(내가 건드려 깨뜨리지 않았다)", all.length === 0, all.length ? `🔴 ${all.join(" / ")}` : "전 채널 충돌 0");
+}
+
+/* ═══ ⑥ 편성 kind — DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스» 세 번째가 통째로 없었다 ═══ */
+{
+  rec("⑥ RuleKind 가 cardnews 를 받는다", toRuleKind("cardnews") === "cardnews", `"cardnews"→${toRuleKind("cardnews")}`);
+  /* 🔴 음성 대조 — 모르는 값이 조용히 cardnews 가 되면 엉뚱한 채널이 카드뉴스로 편성된다. */
+  rec("⑥ 🔴 음성 대조 — 모르는 값은 post 로 접힌다(cardnews 로 새지 않는다)",
+    toRuleKind("card") === "post" && toRuleKind("") === "post" && toRuleKind(null) === "post" && toRuleKind("CARDNEWS") === "post",
+    `"card"→${toRuleKind("card")} · ""→${toRuleKind("")} · null→${toRuleKind(null)} · "CARDNEWS"→${toRuleKind("CARDNEWS")}`);
+
+  /* «카드뉴스 채널인가»는 **정본 한 곳**(`isCardnewsChannel`)만 본다 — 목록을 또 만들면 갈라진다(AC-57). */
+  const cardCh = CHANNELS.filter((c) => isCardnewsChannel(c.key)).map((c) => c.key);
+  rec("⑥ 카드뉴스 채널 = 인스타 하나(계약의 cardText 가 정의다 · 목록을 따로 안 둔다)",
+    cardCh.length === 1 && cardCh[0] === "instagram", cardCh.join(" · ") || "없음");
+}
+
+/* ═══ ⑦ 🔴 코인 — 편성표가 말하는 값과 실제로 빠지는 값이 같은가(AC-74) ═══════ */
+{
+  /* 화면(`/app/coins`)·운영 표가 이미 «카드뉴스 3코인»이라고 말하고 있다. 서버가 그 값을 지켜야 한다. */
+  const rule: Rule = { id: 1, channel: "instagram", kind: "cardnews", accountMode: "auto", every: "week", count: 1, active: true };
+  const weekly = coinsPerWeek([rule]);
+  rec("⑦ 🔴 편성표가 미리 보여 주는 값 = 화면이 말한 «카드뉴스 3코인»", weekly === COIN_TABLE.cardnews,
+    `주 1회 = ${weekly}코인 (COIN_TABLE.cardnews = ${COIN_TABLE.cardnews})`);
+
+  /* 🔴 음성 대조 — 카드 장당으로 또 받으면 3 이 아니라 7~9 가 된다(이중 청구). 그 값과 **다르다**는 것을 보인다. */
+  const perCard = COIN_TABLE.blog + COIN_TABLE.image * imagesFor(IG, "review").default;
+  rec("⑦ 🔴 음성 대조 — 장당으로 셌다면 나왔을 값과 다르다(이중 청구 아님)", weekly !== perCard,
+    `카드뉴스 ${weekly}코인 ↔ 장당으로 셌다면 ${perCard}코인(카드 ${imagesFor(IG, "review").default}장) — 화면은 ${COIN_TABLE.cardnews} 이라고 말한다`);
+
+  /* 글 채널은 그대로여야 한다(내가 건드려 깨뜨리지 않았다). */
+  const blogRule: Rule = { id: 2, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 1, active: true };
+  const blogWeekly = coinsPerWeek([blogRule]);
+  rec("⑦ 글 채널 코인은 그대로(blog 1 + 사진 장당 1)", blogWeekly === COIN_TABLE.blog + COIN_TABLE.image * 6,
+    `네이버 주 1회 = ${blogWeekly}코인(기대 ${COIN_TABLE.blog + COIN_TABLE.image * 6})`);
 }
 
 const w = (x: unknown, n: number) => String(x ?? "").slice(0, n).padEnd(n);

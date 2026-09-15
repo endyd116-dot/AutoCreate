@@ -717,6 +717,16 @@ const CHARS: Partial<Record<BlockType, number>> = { para: 420, hook: 260, h2: 30
  *   그 빨강이 **재작성을 부른다 = 돈이 두 배**다. 막는 게이트가 아니어도 «돈이 드는 게이트»는 게이트다.
  *   ⇒ 값이 바뀔 때마다 되짚기가 이 함수를 불러 **0 인지** 본다. 사람이 눈으로 맞추면 다음 사람이 또 어긋낸다.
  */
+/**
+ * [R8 §2.5] 🔴 **«이 채널은 카드뉴스인가»의 정본 한 곳.**
+ *   목록을 따로 두지 않는다 — 판정 기준이 곧 뜻이다: **사진이 «카드»인 채널**(`cardText` 가 있는 채널)이 카드뉴스다.
+ *   목록을 새로 만들면 채널이 늘 때 한쪽만 고쳐져 갈라진다(AC-57 · 오늘 채널 «성질» 표를 한 곳으로 모은 것과 같은 이유).
+ *   편성(`RuleKind`)·생성(`pieces.kind`)·코인이 **전부 이 함수 하나**를 본다.
+ */
+export function isCardnewsChannel(channel: string): boolean {
+  return !!WRITING_CONTRACTS[String(channel)]?.cardText;
+}
+
 export function contractSelfConflicts(c: WritingContract): string[] {
   const out: string[] = [];
   const t = c.tiers;
