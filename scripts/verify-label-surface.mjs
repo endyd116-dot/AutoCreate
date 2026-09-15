@@ -81,7 +81,15 @@ rec("서버에만 있고 모의가 한 번도 안 보여 주는 심사 축", axU
 const gtSrv = objectMap(gateTs, "GATE_LABEL") || new Map();
 const gtMock = new Map();
 for (const m of mockJs.matchAll(/\{\s*key:\s*"([a-z_0-9]+)",\s*label:\s*"([^"]*)"/g)) gtMock.set(m[1], m[2]);
-const gtMissing = minus(new Set(gtMock.keys()), new Set(gtSrv.keys()));
+/* [R9R10-A · 2026-09-16] 🔴 **B 가 서버에 넣었고 A 가 모의에 먼저 베낀 축** — 머지 순서(B → A)라 A 워크트리에는 서버 축이 아직 없다.
+   여기 적힌 키만 «모의에만 있음»을 △ 로 내린다. 서버에 그 키가 생기면 이 목록이 **거짓**이 되므로 «지워라» 경고를 낸다(썩은 허용 목록 방지 · AC-82). */
+const PENDING_FROM_B = { cross_account: "feature/r9-back c922b28 · GATE_LABEL «다른 내 계정 글과 겹치지 않음»" };
+const gtMissingAll = minus(new Set(gtMock.keys()), new Set(gtSrv.keys()));
+const gtPending = gtMissingAll.filter((k) => PENDING_FROM_B[k]);
+const gtMissing = gtMissingAll.filter((k) => !PENDING_FROM_B[k]);
+if (gtPending.length) rec("글 검사 — 모의가 B 머지 전에 먼저 베낀 축(머지되면 대조로 바뀐다)", "WARN", gtPending.map((k) => `${k} ← ${PENDING_FROM_B[k]}`).join(" | "), gtPending);
+const gtStale = Object.keys(PENDING_FROM_B).filter((k) => gtSrv.has(k));
+if (gtStale.length) rec("⚠️ PENDING_FROM_B 에 남은 키가 서버에 이미 있다 — 목록에서 지워라", "WARN", gtStale.join(" "), gtStale);
 const gtLabelDiff = [...gtMock].filter(([k, v]) => gtSrv.has(k) && gtSrv.get(k) !== v).map(([k, v]) => `${k}: 모의 «${v}» ≠ 서버 «${gtSrv.get(k)}»`);
 rec("🔴 글 검사 — 모의 키 − 서버 키 = 0", gtMissing.length === 0, gtMissing.join(" ") || `서버 ${gtSrv.size}칸 · 모의 ${gtMock.size}칸`, gtMissing);
 rec("🔴 글 검사 — 라벨 글자가 서버와 같다(통과형 문장)", gtLabelDiff.length === 0, gtLabelDiff.slice(0, 4).join(" | ") || "같음", gtLabelDiff);

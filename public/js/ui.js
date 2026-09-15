@@ -511,7 +511,7 @@
         마감 자동 승인이 이 글을 **아예 안 집기 때문에**(lib/cron/review-deadline.ts) 주인이 안 보면 그대로 멈춰 있다. 그래서 주의(`review_wait`)다.
         링크는 서버가 실어 준다(`/app/pieces.html?status=in_review`) — KIND_LINK 에 또 적지 않는다(두 출처 금지). */
   UI.KIND_ALIAS = { gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
-    ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", plan_changed: "card", price_change: "card", price_change_cancelled: "card",
+    ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "system", /* [R9R10-A · B c922b28] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
     awaiting_manual: "publish", pending_login: "account", slot_gate: "setup", forcedByPlan: "review", slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
@@ -845,10 +845,10 @@
    *   🔴 서버 값이 없으면 **아무 등급도 그리지 않는다** — «못 불러왔어요» 한 줄. 화면이 표를 지어 그리면 그날부터 서버와 갈린다.
    *   `data-chips` 라 `UI.chipVal`·`UI.bindChips` 를 그대로 쓴다(선택 = `.on`).
    */
-  UI.tierRows = (name, tiers, sel, { note = true } = {}) => {
+  UI.tierRows = (name, tiers, sel, { note = true, noteText = "" } = {}) => {   /* noteText = 서버 tierNote(accounts-list·plans-list · B c922b28) — 있으면 그것을 쓴다(한 벌) */
     if (!Array.isArray(tiers) || !tiers.length) return '<p class="muted" style="margin:0;font-size:13px">등급 정보를 아직 못 불러왔어요 · 지금 값으로 그대로 만들어요.</p>';
     return `<div class="tierpick" data-chips="${UI.esc(name)}">${tiers.map((t) => `<button type="button" class="row tap ${String(sel) === String(t.key) ? "on" : ""}" data-v="${UI.esc(t.key)}"><div class="l"><span class="t">${UI.esc(t.label || UI.TIER_LABEL[t.key] || t.key)}</span><span class="d wrap">${UI.esc(t.say || "")}</span></div><span class="r">${UI.num(t.coins)}코인</span></button>`).join("")}</div>`
-      + (note ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.TIER_NOTE}</p>` : "");
+      + (note ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.esc(noteText || UI.TIER_NOTE)}</p>` : "");
   };
   /** 스타일 고르는 칩 — 맨 앞은 «이 계정 기본»(`""`). 배운 스타일이 없으면 칩 대신 빈 문자열(부르는 쪽이 «배우기» 줄을 낸다). */
   UI.styleChips = (name, styles, sel, first = "이 계정 기본") => (Array.isArray(styles) && styles.length ? UI.chips(name, [["", first], ...styles.map((s) => [s.id, s.name])], sel == null ? "" : sel) : "");

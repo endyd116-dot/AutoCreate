@@ -166,7 +166,7 @@
      high = 법·제3자·고객 계정이 다치는 것 · normal = 글의 질. `how` 는 **실패한 칸에만** 실린다(서버 decorateCheck 와 같다). */
   const GATE_WEIGHT = { disclosure: "high", banned_words: "high", stock_safe: "high", ad_pointing: "high", similarity: "high",
     affiliate_count: "normal", superlative: "normal", cliche: "normal", para_repeat: "normal", bullet_ratio: "normal",
-    sentence_variance: "normal", translationese: "normal", persona: "normal", visual_min: "normal", link_check: "normal", structure_repeat: "normal" };
+    sentence_variance: "normal", translationese: "normal", persona: "normal", visual_min: "normal", link_check: "normal", structure_repeat: "normal", cross_account: "high" };   /* cross_account = 계정 하나 = IP 하나를 지키는 축(B-4 · 위험도 1번) */
   const GATE_HOW = {
     disclosure: "검수에서 «대가를 받았나»를 켜면 첫머리 문장이 자동으로 들어가요.",
     banned_words: "단정·효능 표현은 지우고, 최상급은 같은 문장에 근거(기관·기간·수치)를 붙여 주세요.",
@@ -176,6 +176,7 @@
     affiliate_count: "제휴 링크를 2개까지만 남겨 주세요.",
     superlative: "«1위»·«최고» 옆에 출처·기간·수치를 적거나 표현을 낮춰 주세요.",
     structure_repeat: "소제목 수·순서·끝맺음을 바꿔 보세요.",
+    cross_account: "다른 계정에 올린 글과 도입·소제목·예시를 다르게 잡아 주세요 — 한 계정에서만 올리는 것도 방법이에요.",   /* [R9R10 · B-4] 서버 GATE_HOW 가 정본 — 머지 때 글자를 맞춘다 */
   };
   const decorate = (c) => ({ ...c, weight: GATE_WEIGHT[c.key] || "normal", ...(c.pass || !GATE_HOW[c.key] ? {} : { how: GATE_HOW[c.key] }) });
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
@@ -189,6 +190,9 @@
     { key: "disclosure", label: "대가 고지 첫머리", pass: ok }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true },
     /* [R8-A §2 · B-1] 골격 반복 — 🔴 **소프트**(HARD_GATE_KEYS 밖)라 실패해도 예약은 된다. 사유 문장 모양은 서버 checkStructure 그대로 */
     { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 75% 미만 · 6편과 견줌)" },
+    /* [R9R10 · B-4 · B c922b28 GATE_LABEL 그대로] 🔴 **유사도 «계정 간»** — 같은 집의 다른 계정·다른 brief 글과도 본다(계정 하나 = IP 하나 · 위험도 1번).
+       막지 않는다(§9) · 못 쟀으면 skipped:true 로 «못 쟀어요»(AC-9). ?gate=xacc → 못 잰 갈래 · ?gate=xaccdup → 겹친 갈래(소프트 · 예약은 된다) */
+    { key: "cross_account", label: "다른 내 계정 글과 겹치지 않음", pass: gateKnob !== "xaccdup", ...(gateKnob === "xacc" ? { skipped: true, detail: "다른 계정에 견줄 글이 아직 없어 못 쟀어요" } : gateKnob === "xaccdup" ? { detail: "@life_c 의 글 #488 과 71% 닮았어요 — 같은 사람이 여러 계정에서 비슷한 글을 올리면 플랫폼이 먼저 봐요" } : { detail: "내 다른 계정 글 4편과 견줌 · 가장 닮은 글 22%" }) },
     /* [R8-A §4] 광고 가리킴 — 🔴 **하드**(승인이 막힌다) · 좁은 축이다(광고·배너를 가리키며 누르라고 할 때만) */
     { key: "ad_pointing", label: "광고를 가리키지 않음", pass: gateKnob !== "adpoint", ...(gateKnob === "adpoint" ? { detail: "광고를 가리키며 누르라고 함: «아래 배너 클릭하고 가세요»" } : {}) } ].map(decorate) });
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS] 이 축만 «이대로 예약»을 막는다 — 소프트 실패는 막지 않는다(서버 hardFailures 와 같게) */
@@ -305,6 +309,7 @@
     { key: "standard", coins: 2, label: "보통", aiImages: [2, 3], chars: 1500, say: "AI가 사진 2~3장 · 목록·표까지 1,500자쯤" },
     { key: "premium", coins: 3, label: "프리미엄", aiImages: [4, 5], chars: 2000, say: "AI가 사진 4~5장 · 자주 묻는 질문까지 2,000자쯤" },
   ];
+  const TIER_NOTE = "내 사진을 올리면 AI 사진을 대신하거나 더 얹어요 — 코인은 안 늘어요";   /* 서버 tierNote(B c922b28) 와 같은 글자 */
   const tierOf = (k) => TIERS.find((t) => t.key === k) || null;
   /* 서버 규칙(B): 등급 안 고른 계정은 simple — 모르면 모자라게 받는 쪽(AC-93). */
   const tierCoins = (k) => { const t = tierOf(k); return t ? t.coins : TIERS[0].coins; };
@@ -767,7 +772,7 @@
       if (typeof b.goal === "string") { if (["adsense", "adpost", "ypp", "clip_incentive"].includes(b.goal)) S.settings.goal = b.goal; else delete S.settings.goal; }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
       return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer }; },
-    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p, piecesByTier: Object.fromEntries(TIERS.map((t) => [t.key, Math.floor(p.limits.coinsIncluded / t.coins)])) })), tiers: TIERS.map((t) => ({ ...t })),   /* [R9R10-A] «이 요금제로 몇 편» — 서버가 셈 · tiers 라벨도 같이(요금제 화면은 accounts-list 를 안 부른다 · C 지적) */ trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
+    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p, piecesByTier: Object.fromEntries(TIERS.map((t) => [t.key, Math.floor(p.limits.coinsIncluded / t.coins)])) })), tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE,   /* [R9R10-A] «이 요금제로 몇 편» — 서버가 셈 · tiers 라벨도 같이(요금제 화면은 accounts-list 를 안 부른다 · C 지적) */ trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
       const o = { ok: true, plan: p ? { key: p.key, name: p.name, priceKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), cycle: B.cycle } : { key: "trial", name: "체험", priceKrw: 0, vatKrw: 0, totalKrw: 0, cycle: B.cycle }, status: blocked || (paid ? "active" : "trial"), cancelAtPeriodEnd: B.cancelAtPeriodEnd, billingKey: B.billingKey ? { has: true, last4: B.billingKey.last4, brand: B.billingKey.brand } : { has: false }, vatNote: "부가세 별도" };
@@ -899,7 +904,7 @@
     "upload": (b) => { if (!b.dataBase64 || !b.contentType) return err("file", "사진을 골라 주세요."); if (String(b.dataBase64).length > 4e6) return err("size", "3MB 이하 사진만 붙일 수 있어요."); return { ok: true, key: "autocreate/1/support/" + Date.now() + "-" + String(b.filename || "img").replace(/[^\w.-]/g, "_"), url: "" }; },
     "notices": () => ({ ok: true, notices: qs.get("incident") === "0" ? [] : [{ id: 801, kind: "incident", title: "네이버 발행이 늦어요 · 네이버 쪽 점검", body: "14:00 부터 네이버 블로그 발행이 30분쯤 밀리고 있어요. 예약은 그대로 나가요.", startsAt: iso(now - 2 * 3600e3), endsAt: iso(now + 4 * 3600e3), channels: ["naver_blog"] }, { id: 802, kind: "notice", title: "9월 25일 새벽 2시 점검(10분)", startsAt: iso(now - 3600e3), endsAt: iso(now + 11 * 86400e3) }] }),
     /* §1 계정 */
-    "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS, tiers: TIERS.map((t) => ({ ...t })) }),   /* [R9R10-A] tiers = 서버 COIN_TIERS 그대로 */
+    "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS, tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE }),   /* [R9R10-A] tiers = 서버 COIN_TIERS 그대로 */
     "accounts-add": (b) => {
       if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
       if (planLimit === "accounts") return { ok: false, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 3, planKey: "starter", error: "계정은(는) 3개까지예요. Pro 로 바꾸면 더 늘어나요.", status: 402 };
