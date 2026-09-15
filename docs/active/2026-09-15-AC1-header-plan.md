@@ -2,7 +2,8 @@
 
 > 작성 2026-09-15 · B3 · 전수조사 §1 «AC-1 «AM 원본 경로·복사일» 헤더» 🟠 의 실행 계획.
 > 🔴 **없는 출처를 지어내지 않는다**(메인 지시) — 근거가 없으면 «AM 원본 불명»으로 적고 넘어간다.
-> 기준 커밋 main `c5e6fc1` · 대상 = `lib/**/*.ts` 중 **출처 문장이 헤더에 없는 66개**(전체 135개 중 69개는 이미 «AM 원본: …» 또는 «AC 신규»를 적어 두었다).
+> 기준 커밋 main `0ec1bd4` · 대상 = `lib/**/*.ts` 중 **되짚을 출처가 없는 70개**(전체 135개 중 65개는 이미 «AM 경로» 또는 «AC 신규»를 적어 두었다).
+> 🔴 **목록은 찍는 순간 낡는다** — 실행 직전에 `node scripts/check-am-origin.mjs` 를 다시 돌린다(§4). 이 문서의 숫자는 그날의 사진이다.
 
 ---
 
@@ -21,7 +22,11 @@
 
 ---
 
-## 1. A군 — AM 을 말하고 있는데 **형식만** 다르다 (9개 · 문장을 AC-1 형식으로)
+## 1. A군 — AM 을 말하고 있는데 **되짚을 경로가 없다** (12개 · 경로+시점을 넣는다)
+
+> 🔴 판정 기준을 한 번 고쳤다: AC-1 이 요구하는 것은 «**어디서 왔는지 되짚을 수 있는가**»(경로 + 시점)이지 «AM 원본:» 이라는 **문구**가 아니다.
+>    그래서 `lib/publish/blogger.ts` 처럼 «AC 신규 … 관례 출처: `../AutoMarketing/lib/publish-threads.ts`» 로 적힌 파일은 **건드리지 않는다**(이미 되짚을 수 있다).
+>    문구만 맞추려고 멀쩡한 헤더 수십 개를 고치면 그건 규율이 아니라 잡음이다.
 
 | 파일 | 지금 문장(요약) | 넣을 헤더 줄 | 근거 |
 |---|---|---|---|
@@ -33,9 +38,13 @@
 | `lib/billing/price-events.ts` | «AM `plan_price_events` 계승» | `AM 원본: ../AutoMarketing/lib/billing.ts plan_price_events (관례 계승 2026-09-14)` | 헤더 명시 |
 | `lib/video/bgm.ts` | «AM `video-render.ts BGM_LIBRARY` 정본» | `AM 원본: ../AutoMarketing/lib/video-render.ts BGM_LIBRARY (무드 표 이식 2026-09-15)` | 본문 명시 |
 | `lib/video/providers/index.ts` | «AM 관례(video-clips.ts …)» | `AM 원본: ../AutoMarketing/lib/video-clips.ts (관례 이식 2026-09-15)` | 헤더 명시 |
+| `lib/account-health.ts` | «AM 관례: runner-block 의 실패 분류를 계정 상태로» | `AM 원본: ../AutoMarketing/lib/runner-block.ts (분류 관례 이식 2026-09-14 · 전이표는 AC §7.2)` | 헤더가 AM 심볼을 말하는데 **경로가 없다** |
+| `lib/slots.ts` | «AM 관례: editorial-board-slots(슬롯 원장…)» | `AM 원본: ../AutoMarketing/lib/editorial-board-slots.ts · organic-cadence.ts (관례 이식 2026-09-14 · 표·변수는 AC §5B)` | 같음 |
+| `lib/cron/video-sweep.ts` | «AM 원본 교훈: SHORTSBILL 실측…» | `AM 원본: ../AutoMarketing 없음 — 교훈만(SHORTSBILL 실측) · AC 신규 2026-09-15` | 🔴 «원본»이라 썼지만 **파일 이식이 아니라 교훈**이다 — 그대로 적는다 |
+| `lib/am-bridge.ts` | «AM 쪽 배선은 AM 계약 합의 뒤» | `AC 신규(P1R6 §1.4 · 2026-09-15) — AM 쪽 대응 코드는 아직 없다(계약 합의 전)` | AM 파일이 **아직 없다**(미래 연결) |
 | `lib/coin-reconcile.ts` | «AM `coin-reconcile.ts` 자리» | `AC 신규(2026-09-15 · AM 재사용 맵의 coin-reconcile 자리 — **코드는 AC 원장 규약으로 새로 씀**. AM 원본 복사 0)` | 🔴 이름은 같지만 **내가 오늘 새로 썼다** — «이식»이라 적으면 거짓이 된다 |
 
-## 2. B군 — AC 라운드가 만든 것 (57개 · «AC 신규(계약 §…)» 한 줄)
+## 2. B군 — AC 라운드가 만든 것 (58개 · «AC 신규(계약 §…)» 한 줄)
 
 > 전부 생성 커밋이 AC 라운드 계약이다. 헤더 한 줄은 `AC 신규(계약 P1Rn §x · YYYY-MM-DD)` 꼴로 통일한다.
 
@@ -66,8 +75,24 @@
 
 ## 4. 실행 방법 (메인 «시작해» 뒤 · 한 커밋)
 
-1. A군 9개 — 기존 문장을 지우지 말고 **첫 줄 바로 아래**에 `*   AM 원본: … (… YYYY-MM-DD)` 한 줄 추가.
-2. B군 57개 — 헤더 첫 블록에 `*   AC 신규(계약 P1Rn §x · YYYY-MM-DD)` 한 줄 추가. 날짜는 **생성 커밋 날짜**(git log)를 쓴다(오늘 날짜로 적으면 거짓).
+### 4.0 🔴 먼저 — 목록을 **그 자리에서 다시 뽑는다**(이 문서는 그날의 사진이다)
+
+라운드마다 `lib/*.ts` 가 새로 생긴다(오늘만 `channel-url.ts`·`coin-reconcile.ts`·`am-bridge.ts` 셋). 손으로 갱신하면 반드시 빠뜨린다.
+
+```bash
+# ① 지금 기준 대상·분류를 다시 뽑는다(읽기 전용 · A/B/C 군과 근거를 찍는다)
+node scripts/check-am-origin.mjs --since 0ec1bd4        # 이 문서를 찍은 커밋 이후 새로 생긴 lib 파일에 🆕 표시
+# ② 기계 판독이 필요하면
+node scripts/check-am-origin.mjs --json > _verify/ac1.json
+# (AM 리포가 다른 곳에 있으면) AM_LIB_DIR=/path/to/AutoMarketing/lib node scripts/check-am-origin.mjs
+```
+- 🆕 로 나온 파일은 **이 문서의 표에 없다** — 그 자리에서 같은 규칙(§0)으로 A/B/C 를 정하고 헤더를 넣는다.
+- 🔴 C군(근거 없음)이 나오면 **«AM 원본 불명»** 으로 적는다. 지어내지 않는다.
+
+### 4.1 그다음
+
+1. A군 12개 — 기존 문장을 지우지 말고 **첫 줄 바로 아래**에 `*   AM 원본: … (… YYYY-MM-DD)` 한 줄 추가.
+2. B군 58개 — 헤더 첫 블록에 `*   AC 신규(계약 P1Rn §x · YYYY-MM-DD)` 한 줄 추가. 날짜는 **생성 커밋 날짜**(git log)를 쓴다(오늘 날짜로 적으면 거짓).
 3. 🔴 **코드 한 줄도 건드리지 않는다** — 주석만. 끝나고 `tsc --noEmit` 으로 파일이 깨지지 않았는지 확인.
 4. 🔴 **AC-38**(제어 문자) 주의: 주석에 붙여 넣는 문자는 일반 텍스트만. 커밋 뒤 `grep -rlP '[\x00-\x08\x0b\x0c\x0e-\x1f]' lib/` 로 0 확인.
 5. 커밋 1개 · 메시지에 «A군 9(형식) · B군 57(AC 신규 표기) · 불명 0» 과 이 문서 경로.
