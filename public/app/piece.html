@@ -6,7 +6,7 @@
 <title>검수 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=21">
+<link rel="stylesheet" href="/css/ac.css?v=22">
 </head>
 <body>
 <div class="shell">
@@ -21,6 +21,7 @@
 <div class="group" id="photos" hidden></div>
 <div class="group" id="claims" hidden></div>
 <div class="group" id="refunused" hidden></div>
+<div class="group" id="fmtunused" hidden></div>
 <div class="group" id="thchain" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="group" id="teamwait" hidden></div>
@@ -28,8 +29,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=26"></script>
-<script src="/js/mock.js?v=28"></script>
+<script src="/js/ui.js?v=27"></script>
+<script src="/js/mock.js?v=29"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -96,6 +97,12 @@ function renderWhy(videoOnly) {
      🔴 대표가 없어도 **막지 않는다** — 서버 문장이 «그대로 두셔도 글은 올라가요»로 이미 그렇게 말한다(§9). */
   if (!videoOnly && m.hero && m.hero.line) h += kv("대표 사진", String(m.hero.line));
   if (c && c.register) h += kv("말투", String(c.register));
+  /* [R9R10-A · A-5·A-6] 등급 · 든 코인 · 스타일 — 🔴 전부 서버 값(`meta.tier` · `meta.coins{planned,charged,returned,line}` · `meta.styleName`). 화면이 셈하지 않는다(AC-74).
+     🔴 **덜 받고 돌려준 일은 서버 문장(line)으로 말한다** — 조용히 돌려주면 고객이 모른다(트리거 A-5). line 이 없으면 숫자만 적고 사연을 지어내지 않는다(AC-9).
+     🔴 모르는 등급 키는 안 그린다(영어 키를 내보내지 않는다). */
+  if (!videoOnly && m.tier && UI.TIER_LABEL[m.tier]) h += kv("등급", UI.TIER_LABEL[m.tier]);
+  if (!videoOnly && m.coins && typeof m.coins.charged === "number") h += kv("든 코인", `${UI.num(m.coins.charged)}코인`, m.coins.line ? String(m.coins.line) : (Number(m.coins.returned) > 0 ? `${UI.num(m.coins.returned)}코인은 돌려드렸어요` : ""));
+  if (!videoOnly && m.styleName) h += kv("스타일", String(m.styleName), "레퍼런스에서 배운 모양으로 썼어요");
   if (!videoOnly && m.angle) h += kv("잡은 방향", String(m.angle));
   /* [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** — `slotReason`(왜 이 시각인가) 과 **같은 자리·같은 뜻**이라 나란히 둔다(서버 주석이 그렇게 적혀 있다).
      채널이 하나인 집엔 값이 아예 안 온다(고를 것이 없으니 까닭도 없다) — 그때 «자동으로 골랐어요» 같은 말을 **지어내지 않는다**. */
@@ -161,14 +168,48 @@ function renderThreadChain() {
   const cp = UI.$("#thCopy");
   if (cp) cp.onclick = async () => { const ok = await UI.copy(remain.join("\n\n")); UI.toast(ok ? "남은 글을 복사했어요" : "복사가 안 됐어요 · 위 글을 길게 눌러 복사해 주세요"); };
 }
+/* [R9R10-A · R9-7] 🔴 **같은 화면을 글 서식에도 쓴다**(트리거 A-2 «새로 짓지 마라») — 영상 `refUnused` 와 글 `formatUnused` 가 같은 칩 줄(`unusedChips`)을 지난다. */
+const unusedChips = (names) => `<div class="chips" style="padding:0 16px 10px;gap:6px">${names.map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px">${UI.esc(x)}</span>`).join("")}</div>`;
 function renderRefUnused() {
   const host = UI.$("#refunused"); const list = ((P.meta || {}).refUnused || []).filter((x) => x && x.field);
   if (!list.length) { host.hidden = true; return; }
   const names = [...new Set(list.map((x) => REF_FIELD_SAY[x.field] || "그 밖"))];
   host.hidden = false;
-  host.innerHTML = '<div class="gt">이건 못 따라 했어요</div>'
-    + `<div class="chips" style="padding:0 16px 10px;gap:6px">${names.map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px">${UI.esc(x)}</span>`).join("")}</div>`
+  host.innerHTML = '<div class="gt">이건 못 따라 했어요</div>' + unusedChips(names)
     + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">참고한 영상에서 ${names.length}가지는 지금 우리 편집기로 못 내요. 나머지는 그대로 배워서 만들었어요.</p>`;
+}
+/* ══ [R9R10-A · R9-7 · 설계 §2.1e] 🔴 **이 채널에선 못 낸 꾸밈** — 서버가 `meta.formatUnused = [{field, label, why}]` 로 남긴다(B 확정 2026-09-16 · 영상 refUnused 와 같은 모양).
+     · `label` 은 **서버 정본**(MARK_LABEL) — 화면은 그 글자를 쓰고, 비었을 때만 UI.MARK_LABEL 로 부른다(영어 칸 이름을 내보내지 않는다 · AC-91).
+     · 🔴 `why` 는 러너·서버 어휘(budget · too_long · url_para · block_unsupported · channel_unsupported · caret_drift · range_invalid)라 **안 그린다**(AC-91).
+       다만 `url_para`·`caret_drift` 는 **우리가 일부러 한 일**이라 «못 냈어요»로만 보이면 고장처럼 읽힌다(B2) — 그 둘만 화면이 제 말로 한 줄 붙인다.
+     · 🔴 기울임(italic)은 «못 낸다»가 아니라 **일부러 안 낸다**(글이 번져 보이는 축 · B2) — 그렇게 말한다.
+     · 🔴 `formatCaps` 가 null 인 종류(모름 · 티스토리 형광펜 등)가 본문에 있으면 «올려 봐야 알아요»로 미리 말한다(B: 그런 마크는 벗기지 않고 발행 뒤 같은 칸에 적힌다).
+     · 겁주지 않는다(§3) · 막지 않는다(§9) — 글 내용은 그대로라는 사실을 같이 준다. 발행 뒤에도 그대로 보인다(§9-2). */
+const FMT_WHY_SAY = { url_para: "주소가 링크로 살아야 해서 꾸밈을 뺐어요", caret_drift: "자리가 어긋나서 안 칠했어요" };
+const CAP_IN_BODY = { bold: /<strong\b/i, underline: /<u\b/i, italic: /<em\b/i, value: /class="value"/, line: /class="line"/, row: /class="row"/, quote: /<blockquote/i, table: /<table/i, checklist: /class="check"/, faq: /class="faq"/, toc: /class="toc"/, divider: /<hr\b/i, image: /<figure/i, place: /class="place"/, emoji: /\p{Extended_Pictographic}/u };
+function capsUnknownInBody() {
+  const caps = P.formatCaps; if (!caps || typeof caps !== "object" || P.kind === "video") return [];
+  const body = String(P.bodyHtml || "");
+  return Object.keys(CAP_IN_BODY).filter((k) => caps[k] === null && CAP_IN_BODY[k].test(body)).map((k) => UI.MARK_LABEL[k] || k);
+}
+function renderFmtUnused() {
+  const host = UI.$("#fmtunused"); if (P.kind === "video") { host.hidden = true; return; }
+  const all = ((P.meta || {}).formatUnused || []).filter((x) => x && x.field);
+  const nameOf = (x) => x.label || UI.MARK_LABEL[x.field] || "그 밖";
+  const italic = all.filter((x) => x.field === "italic"), list = all.filter((x) => x.field !== "italic");
+  const unknown = capsUnknownInBody();
+  if (!all.length && !unknown.length) { host.hidden = true; return; }
+  const names = [...new Set(list.map(nameOf))];
+  let h = "";
+  if (names.length) {
+    h += unusedChips(names) + `<p class="muted" style="margin:0 16px 6px;font-size:12.5px">${UI.esc(UI.chLabel(P.channel))}에서는 ${names.length}가지 꾸밈을 못 실었어요. 글 내용은 그대로예요.</p>`;
+    const lines = [...new Set(list.filter((x) => FMT_WHY_SAY[x.why]).map((x) => `${nameOf(x)} — ${FMT_WHY_SAY[x.why]}`))];
+    if (lines.length) h += `<div style="padding:0 16px 6px">${lines.map((l) => `<p class="muted" style="margin:0 0 4px;font-size:12.5px">${UI.esc(l)}</p>`).join("")}</div>`;
+  }
+  if (italic.length) h += '<p class="muted" style="margin:0 16px 6px;font-size:12.5px">기울임은 일부러 안 넣어요 — 글이 번져 보이기 쉬운 꾸밈이라서요.</p>';
+  if (unknown.length) h += `<p class="muted" style="margin:0 16px 6px;font-size:12.5px">${UI.esc(unknown.join(" · "))}${unknown.length > 1 ? "은" : "는"} ${UI.esc(UI.chLabel(P.channel))}에서 되는지 아직 몰라요 · 올려 봐야 알아요. 안 되면 올라간 뒤 여기에 적어 드려요.</p>`;
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">${names.length ? "이 채널에선 못 낸 꾸밈" : italic.length ? "일부러 안 넣은 꾸밈" : "올려 봐야 아는 꾸밈"}</div>` + h + '<div style="height:6px"></div>';
 }
 /* ══ [R8-A2 §2.4] 🔴 **수치 주장 표시** — 서버(`netlify/functions/pieces.ts:142`)가 `meta.numberClaims = { summary, items, line }` 을
      **이미 실어 보내고 있었는데** 검수 화면이 한 번도 안 그렸다(`grep -n "numberClaims" public/app/piece.html` = 0).
@@ -319,7 +360,7 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  renderTeamWait(); renderRefUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
+  renderTeamWait(); renderRefUnused(); renderFmtUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; renderWhy(true); UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);

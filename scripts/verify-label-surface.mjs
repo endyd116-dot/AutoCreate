@@ -252,6 +252,42 @@ const coinDiff = [...coinUi].filter(([k, v]) => coinSrvNum.get(k) !== v).map(([k
 rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.size > 0 && coinUi.size > 0 && coinDiff.length === 0,
   coinDiff.join(" | ") || `${coinUi.size}종 · 글 ${coinSrvNum.get("blog")}코인`, coinDiff);
 
+/* ───────── ⑧-c 🔴 **코인 등급 표**(서버 COIN_TIERS ↔ 모의 TIERS ↔ 화면 UI.TIER_LABEL) — [R9R10-A · 2026-09-16] ─────────
+   왜: 사장님이 «간단히 1 · 보통 2 · 프리미엄 3»을 정하셨고 «최소»라는 말은 쓰지 말라 하셨다. 라벨·코인·설명 문장(say)이 세 곳에 있다 —
+   정본은 서버 `lib/coin-table.ts COIN_TIERS`(B 채택 · docs/active/2026-09-16-R9R10-AB-keys.md §11). 모의는 accounts-list.tiers 로 실어 주고 화면은 셈 없이 그린다(AC-74).
+   🔴 B 가 머지되기 전엔 서버 표가 없다 — 그때는 △(경고)로 두고, 표가 생기면 **글자·숫자까지** 대조한다. */
+{
+  const pickTier = (txt) => new Map([...txt.matchAll(/(simple|standard|premium)\b[^{]*\{([^}]*)\}/g)].map((m) => [m[1], {
+    label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coins: Number((m[2].match(/coins:\s*(\d+)/) || [])[1]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
+  const srvBlock = coinTs.match(/COIN_TIERS[^=]*=\s*\{([\s\S]*?)\n\}/);
+  const mockBlock = mockJs.match(/const TIERS = \[([\s\S]*?)\];/);
+  const tierMock = new Map([...(mockBlock?.[1] ?? "").matchAll(/key:\s*"(simple|standard|premium)"([^}]*)\}/g)].map((m) => [m[1], {
+    label: (m[2].match(/label:\s*"([^"]*)"/) || [])[1], coins: Number((m[2].match(/coins:\s*(\d+)/) || [])[1]), say: (m[2].match(/say:\s*"([^"]*)"/) || [])[1] }]));
+  const tierUi = objectMap(uiJs, "UI.TIER_LABEL =") || new Map();
+  const WANT = { simple: "간단히", standard: "보통", premium: "프리미엄" };   // 사장님 확정 낱말 — 서버가 아직 없을 때도 이 셋은 지킨다
+  const bad0 = Object.entries(WANT).filter(([k, v]) => tierUi.get(k) !== v || (tierMock.get(k) || {}).label !== v).map(([k, v]) => `${k}: 화면 «${tierUi.get(k) ?? "없음"}» · 모의 «${(tierMock.get(k) || {}).label ?? "없음"}» ≠ «${v}»`);
+  rec("🔴 ⑧-c 등급 이름 셋(간단히·보통·프리미엄)이 화면·모의에 그대로 있다", tierMock.size === 3 && tierUi.size === 3 && bad0.length === 0, bad0.join(" | ") || "3등급", bad0);
+  const minWord = [...(mockBlock?.[1] ?? ""), ...(uiJs.match(/UI\.TIER_LABEL = \{[^}]*\}/)?.[0] ?? "")].join("").includes("최소");
+  rec("🔴 ⑧-c 등급 이름에 «최소»가 없다(사장님)", !minWord, minWord ? "«최소» 가 등급 표에 있다 — 고른 고객이 «내 글은 최소구나» 한다" : "없음");
+  if (!srvBlock) rec("⑧-c 등급 표 — 서버 COIN_TIERS 를 아직 못 읽었다(B 머지 전)", "WARN", `모의 ${tierMock.size}등급 · 화면 라벨 ${tierUi.size}개 — 머지 뒤 이 줄이 글자·코인·문장 대조로 바뀐다`);
+  else {
+    const srv = pickTier(srvBlock[1]); const diffs = [];
+    for (const [k, v] of srv) { const m = tierMock.get(k);
+      if (!m) { diffs.push(`${k}: 모의 없음`); continue; }
+      if (m.label !== v.label) diffs.push(`${k}: 모의 라벨 «${m.label}» ≠ 서버 «${v.label}»`);
+      if (m.coins !== v.coins) diffs.push(`${k}: 모의 ${m.coins}코인 ≠ 서버 ${v.coins}코인`);
+      if (v.say && m.say !== v.say) diffs.push(`${k}: 모의 문장 ≠ 서버 «${v.say}»`);
+      if (tierUi.get(k) !== v.label) diffs.push(`${k}: 화면 라벨 «${tierUi.get(k) ?? "없음"}» ≠ 서버 «${v.label}»`); }
+    rec("🔴 ⑧-c 등급 표(라벨·코인·문장)가 서버 COIN_TIERS 와 같다", srv.size === 3 && diffs.length === 0, diffs.slice(0, 4).join(" | ") || `${srv.size}등급 · ${[...srv].map(([k, v]) => `${v.label} ${v.coins}`).join(" · ")}`, diffs);
+  }
+  /* 서식·블록 이름표 — 서버 MARK_LABEL(B) 이 정본. formatUnused[].label 은 서버가 실어 주지만, 화면의 예비 맵(UI.MARK_LABEL)이 같은 낱말을 쓰는지 본다. */
+  const markSrv = objectMap(serverText, "MARK_LABEL") || new Map();
+  const markUi = objectMap(uiJs, "UI.MARK_LABEL =") || new Map();
+  if (!markSrv.size) rec("⑧-d 서식 이름표 — 서버 MARK_LABEL 을 아직 못 읽었다(B 머지 전)", "WARN", `화면 예비 맵 ${markUi.size}개`);
+  else { const md = [...markSrv].filter(([k, v]) => markUi.has(k) && markUi.get(k) !== v).map(([k, v]) => `${k}: 화면 «${markUi.get(k)}» ≠ 서버 «${v}»`);
+    rec("🔴 ⑧-d 서식 이름표가 서버 MARK_LABEL 과 같다(겹치는 키)", md.length === 0, md.slice(0, 4).join(" | ") || `서버 ${markSrv.size}개 · 겹침 ${[...markSrv.keys()].filter((k) => markUi.has(k)).length}개`, md); }
+}
+
 /* ───────── ⑧ 광고 붙이는 «길»(서버 adsWayOf·adsRemovable ↔ 화면 표) ─────────
    왜: 채널마다 길이 다르고(우리가 직접 / 내 PC 가 / 아직 없음), **티스토리는 뗄 수 없다**(러너가 읽기만 한다).
    화면이 이 표를 잘못 들고 있으면 **눌러도 아무 일이 안 나는 단추**가 생긴다 — 없는 되돌리기를 약속하는 것이 가장 나쁘다.

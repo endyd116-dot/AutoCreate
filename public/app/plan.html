@@ -6,7 +6,7 @@
 <title>요금제 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=21">
+<link rel="stylesheet" href="/css/ac.css?v=22">
 </head>
 <body>
 <div class="shell">
@@ -23,8 +23,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=26"></script>
-<script src="/js/mock.js?v=28"></script>
+<script src="/js/ui.js?v=27"></script>
+<script src="/js/mock.js?v=29"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -105,6 +105,7 @@ function renderCards() {
       <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}${isCur ? '<span class="pill ok">지금</span>' : ""}</div>${price(p)}
       <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
       <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
+      ${p.piecesByTier ? `<div class="kv"><span class="k" style="white-space:nowrap;flex:none;padding-right:12px">글로 치면</span><span class="v wrap" style="white-space:normal;text-align:right;font-size:13px">${Object.keys(UI.TIER_LABEL).filter((k) => p.piecesByTier[k] != null).map((k) => `${UI.TIER_LABEL[k]} ${UI.num(p.piecesByTier[k])}편`).join(" · ")}</span></div>` : ""}
       <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
       <div class="kv"><span class="k">편성 규칙</span><span class="v">${p.limits.maxRules == null ? "제한 없음" : p.limits.maxRules + "개"}</span></div>
       <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>

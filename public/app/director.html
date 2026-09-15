@@ -6,7 +6,7 @@
 <title>디렉터 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=21">
+<link rel="stylesheet" href="/css/ac.css?v=22">
 </head>
 <body>
 <div class="shell">
@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=26"></script>
-<script src="/js/mock.js?v=28"></script>
+<script src="/js/ui.js?v=27"></script>
+<script src="/js/mock.js?v=29"></script>
 <script>
 (async () => {
 const me = await UI.boot("create"); if (!me) return;
@@ -30,7 +30,7 @@ const topicId = Number(UI.qs.get("topicId")); if (!topicId) { UI.go("/app/create
 const STYLE = [["photo", "사진"], ["illust", "일러스트"], ["infographic", "인포그래픽"]];
 const FORMATS = Object.entries(UI.FORMAT);
 const TIMES = [["07:30", "07:30"], ["12:00", "12:00"], ["21:00", "21:00"], ["18:00", "18:00"]];
-let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null;
+let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null, TIERS = [], STYLES = {};   /* [R9R10-A] TIERS = 서버 accounts-list.tiers · STYLES = 계정별 옷장 */
 const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
 const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
 const isVideo = (p) => p.kind === "video";
@@ -46,28 +46,39 @@ const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.chann
      네이버를 **7코인**이라 적던 바로 그 셈이다 — 편성표에서는 걷어 냈는데 디렉터에는 남아 있었다.
    🔴 글 1편 = 1코인이고 **AI 로 구운 장만** 더 든다(사진 장수는 공짜 질문 — 내 사진·스톡이 채운다).
      화면 셈은 서버가 아직 말 안 해 준 동안의 미리보기일 뿐이고, 총액은 `director-estimate` 가 확정한다. */
+/* [R9R10-A · A-5] 🔴 글 코인은 **서버 값만**(`coinCost` = 등급 코인 · 식은 lib/coin-table.ts pieceCoinCost 한 곳). 없으면 `null`(«코인 확인 중») —
+     «1 + 사진 수»로 다시 세지 않는다(AC-74 · 그 셈이 오늘 네이버를 7코인이라 적던 자리다). 총액·시트 합계 모두 director-estimate 가 답한다. */
 const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0)
-  : (typeof p.coinCost === "number" ? p.coinCost : UI.COIN.blog + Math.max(0, (p.images?.aiCount ?? 1) - 1));
-const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
+  : (typeof p.coinCost === "number" ? p.coinCost : null);
+const coinSay = (n) => (typeof n === "number" ? `${UI.num(n)}코인` : "코인 확인 중");
+const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + (cost(p) || 0), 0);
 const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
   /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
      «사진 6장»만 적으면 고객은 «6코인이겠지»로 읽는다(그게 옛 값이었다). 그래서 AI 장수를 따로 적는다. */
-  : [UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
+  : [p.tier && UI.TIER_LABEL[p.tier] ? `${UI.TIER_LABEL[p.tier]} · ${coinSay(cost(p))}` : coinSay(cost(p)), UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
 
 async function load() {
   const [r, a, t] = await Promise.all([UI.api("/api/director-propose", { body: { topicId } }), UI.api("/api/accounts-list"), topicTitle ? null : UI.api("/api/topics-list?status=candidate")]);
   if (!r.ok) { UI.toast(r.error || "제안을 만들지 못했어요"); setTimeout(() => UI.go("/app/create.html"), 900); return; }
   brief = r.brief; pieces = brief.pieces.map((p) => JSON.parse(JSON.stringify(p))); accounts = a.ok ? a.accounts : [];
   CHV = Object.fromEntries((a.ok ? a.channels || [] : []).filter((c) => c.video).map((c) => [c.key, c.video]));
+  TIERS = a.ok ? (a.tiers || []) : [];   /* [R9R10-A] 등급표 = 서버 값(없으면 등급 줄을 안 그린다) */
+  /* [R9R10-A] 글마다 스타일을 덮어쓰려면 그 계정의 옷장을 알아야 한다 — 글 piece 의 계정마다 한 번 읽는다(못 읽으면 칩을 안 그린다 · 지어내지 않는다) */
+  const accIds = [...new Set(pieces.filter((p) => !isVideo(p) && p.accountId).map((p) => p.accountId))];
+  await Promise.all(accIds.map(async (id) => { const r = await UI.api(`/api/account-styles?accountId=${id}`, { noGate: true }); if (r.ok) STYLES[id] = { styles: r.styles || [], defaultStyleId: r.defaultStyleId ?? null }; }));
   clamped = pieces.map((p) => isVideo(p) && p.video.clampedFrom ? { was: p.video.clampedFrom, now: p.video.seconds } : clampSec(p)).filter(Boolean)[0] || null; // 서버가 clampedFrom 을 주면 그 말을 쓰고, 없으면 화면이 포맷 상한으로 내린다
   if (!topicTitle && t?.ok) topicTitle = (t.topics.find((x) => x.id === brief.topicId) || {}).title || "";
   render();
 }
+function drawTargets() {
+  const live = pieces.filter((p) => !p.drop);
+  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
+    : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
+}
 function render() {
   const live = pieces.filter((p) => !p.drop);
   UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
-  UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
-    : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
+  drawTargets();
   drawKv(total(), brief.coinsLeft);
   estKv();   // 🔴 서버가 같은 손질로 다시 재 준다 — 답이 오면 위 숫자를 갈아 끼운다
 
@@ -76,10 +87,10 @@ function render() {
 }
 /* ── 손보기 시트(DESIGN §5.5 항목 전부 + [P1R5] 영상 섹션: 포맷 3 · 길이 15/30/60 · 목소리 · 계정 변주(읽기 전용) · 코인 재계산) ── */
 function editSheet() {
-  const voices = brief.voices || [];
+  const voices = brief.voices || []; let sheetRead = null;   /* [R9R10-A] 시트의 지금 값을 읽는 함수 — 합계(서버 견적)와 «적용»이 같은 것을 읽는다 */
   const html = pieces.map((p, i) => { const accs = accounts.filter((a) => a.channel === p.channel); const emo = Object.entries(UI.EMOTION); if (p.emotionKey && !UI.EMOTION[p.emotionKey]) emo.unshift([p.emotionKey, p.emotionKey]);
     const hhmm = UI.timeKST(p.schedule.at); const dayOff = dayWord(p.schedule.at) === "모레" ? 2 : 1;
-    const head = `<div class="fr" style="border:0"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(p.channel, "sm")}<span>${UI.esc(UI.chLabel(p.channel))}${isVideo(p) ? " · 영상" : ""}<small data-cost>${p.drop ? "이번엔 안 만들어요" : `${cost(p)}코인`}</small></span></div><button class="toggle" type="button" data-drop aria-checked="${!p.drop}" aria-label="이 채널 만들기"></button></div>`;
+    const head = `<div class="fr" style="border:0"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(p.channel, "sm")}<span>${UI.esc(UI.chLabel(p.channel))}${isVideo(p) ? " · 영상" : ""}<small data-cost>${p.drop ? "이번엔 안 만들어요" : coinSay(cost(p))}</small></span></div><button class="toggle" type="button" data-drop aria-checked="${!p.drop}" aria-label="이 채널 만들기"></button></div>`;
     const acc = accs.length ? `<div class="sec">계정</div>${UI.seg("acc", accs.map((a) => [a.id, "@" + a.handle]), p.accountId)}` : `<div class="sec">계정</div><p class="muted" style="margin:0;font-size:13px">연결된 ${UI.esc(UI.chLabel(p.channel))} 계정이 없어요 · <a href="/app/accounts.html" style="text-decoration:underline">계정 연결</a></p>`;
     const when = `<div class="sec">언제</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${UI.seg("day", [[1, "내일"], [2, "모레"]], dayOff)}${UI.chips("time", TIMES.some(([v]) => v === hhmm) ? TIMES : [[hhmm, hhmm], ...TIMES], hhmm)}</div>`;
     if (isVideo(p)) { const v = p.video; const vo = voices.find((x) => x.voiceId === v.voice?.voiceId); const others = pieces.filter((q) => isVideo(q) && q !== p);
@@ -95,13 +106,16 @@ function editSheet() {
     return `<section data-i="${i}" style="padding:4px 0 12px;${i ? "border-top:1px solid var(--line);margin-top:8px" : ""}">${head}<div data-body ${p.drop ? "hidden" : ""}>${acc}
       <div class="sec">감성</div>${UI.chips("emo", emo, p.emotionKey)}
       <div class="sec">구성</div>${UI.chips("fmt", FORMATS, p.format)}
-      <div class="fr"><div class="fl">이미지<small>1장 = 1코인</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
+      <div class="sec">등급</div>${UI.tierRows("tier", TIERS, p.tier || "")}
+      ${STYLES[p.accountId] && STYLES[p.accountId].styles.length ? `<div class="sec">스타일 <span class="muted" style="font-weight:500">이번 글만</span></div>${UI.styleChips("wstyle", STYLES[p.accountId].styles, p.styleId ?? "", STYLES[p.accountId].defaultStyleId ? "이 계정 기본" : "그대로")}` : ""}
+      <div class="fr"><div class="fl">사진 자리<small>등급의 AI 사진 말고는 내 사진·스톡으로 채워요 · 코인은 안 늘어요</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
       ${UI.seg("style", STYLE, p.images?.style || "photo")}
       <div class="fr"><div class="fl">제휴 상품 넣기<small>고지 문구는 자동으로 붙어요</small></div><button class="toggle" type="button" data-aff aria-checked="${!!p.monetize?.affiliate}" aria-label="제휴"></button></div>
       <div data-affbody ${p.monetize?.affiliate ? "" : "hidden"}><input class="input" data-pq placeholder="상품 검색어 · 예: 에어프라이어 세척솔" value="${UI.esc(p.monetize?.affiliate?.productQuery || "")}" style="margin-bottom:8px">${UI.seg("slot", [["mid", "중간"], ["end", "끝"], ["both", "둘 다"]], p.monetize?.affiliate?.slot || "end")}</div>
       ${when}</div></section>`; }).join("");
   UI.sheet((clamped ? `<div class="banner" style="margin:0 0 8px"><span>${clamped.now}초로 맞췄어요 — 이 채널은 ${clamped.now}초까지 올라가요</span></div>` : "") + html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
     UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh, (n, v, g) => {
+      if (n === "tier" || n === "wstyle" || n === "fmt") sum(sh);   /* [R9R10-A] 등급·구성이 바뀌면 서버 견적을 다시 받는다 */
       if (n === "vfmt") { const sec = g.closest("section"); const p = pieces[Number(sec.dataset.i)]; p.video.format = v; const w = sec.querySelector("[data-secwrap]"); if (w) { w.innerHTML = secChips(p); UI.bindChips(w, (n2, v2) => { if (n2 === "vsec") { const c = UI.VIDEO_COIN[Number(v2)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; sum(sh); } }); const cur = Number(UI.chipVal(w, "vsec")); sec.querySelector("[data-vcoin]").textContent = UI.VIDEO_COIN[cur] ?? 0; sum(sh); } }
       if (n === "vsec") { const sec = g.closest("section"); const c = UI.VIDEO_COIN[Number(v)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; const cur = pieces[Number(sec.dataset.i)]; const hint = sec.querySelector("[data-vhint]"); hint.textContent = Number(v) !== cur.video.seconds ? `${cur.video.seconds}초 ${cost(cur)}코인 → ${v}초 ${c}코인` : ""; sum(sh); } });
     sh.querySelectorAll("section").forEach((sec) => {
@@ -109,22 +123,33 @@ function editSheet() {
       UI.toggle(tg, (on) => { body.hidden = !on; sum(sh); });
       const aff = sec.querySelector("[data-aff]"); UI.toggle(aff, (on) => { sec.querySelector("[data-affbody]").hidden = !on; });
     });
-    sh.querySelector("#apply").onclick = () => {
-      sh.querySelectorAll("section").forEach((sec) => { const p = pieces[Number(sec.dataset.i)];
+    const readSheet = () => { const out = pieces.map((p) => JSON.parse(JSON.stringify(p)));
+      sh.querySelectorAll("section").forEach((sec) => { const p = out[Number(sec.dataset.i)];
         p.drop = sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true"; if (p.drop) return;
         const acc = UI.chipVal(sec, "acc"); if (acc != null) { p.accountId = Number(acc); p.accountHandle = (accounts.find((a) => a.id === Number(acc)) || {}).handle || null; }
         const affOn = sec.querySelector("[data-aff]").getAttribute("aria-checked") === "true";
         if (isVideo(p)) { const v = p.video; v.format = UI.chipVal(sec, "vfmt") || v.format; v.seconds = Number(UI.chipVal(sec, "vsec") || v.seconds); const vid = UI.chipVal(sec, "voice"); if (vid) { v.voice = { ...(v.voice || {}), voiceId: vid }; v.variant = { ...(v.variant || {}), voiceId: vid }; }
           p.monetize = { ...(p.monetize || {}), affiliate: affOn ? { provider: "coupang", productQuery: sec.querySelector("[data-pq]").value.trim(), slot: "end" } : null, adDisclosure: affOn }; v.disclosure = { badge: affOn, descriptionFirstLine: affOn }; }
         else { p.emotionKey = UI.chipVal(sec, "emo") || p.emotionKey; p.format = UI.chipVal(sec, "fmt") || p.format;
+          const tv = UI.chipVal(sec, "tier"); if (tv) p.tier = tv;   /* [R9R10-A] 등급 — 코인은 서버 견적이 답한다(화면 셈 0) */
+          if (sec.querySelector('[data-chips="wstyle"]')) { const sv = UI.chipVal(sec, "wstyle"); p.styleId = sv ? Number(sv) : null; }
           p.images = { ...(p.images || {}), count: UI.stepVal(sec, "img"), style: UI.chipVal(sec, "style") || "photo" };
           p.monetize = { ...(p.monetize || {}), affiliate: affOn ? { provider: "coupang", productQuery: sec.querySelector("[data-pq]").value.trim(), slot: UI.chipVal(sec, "slot") || "end" } : null, adDisclosure: affOn }; }
         p.schedule = { ...(p.schedule || {}), at: kstAt(Number(UI.chipVal(sec, "day") || 1), UI.chipVal(sec, "time") || "07:30") };
-        p.coinCost = cost(p); });
-      close(); render(); UI.toast("적용했어요");
-    };
+        if (isVideo(p)) p.coinCost = cost(p); else if (p.tier !== pieces[Number(sec.dataset.i)].tier) p.coinCost = null; });   /* 글 코인은 서버가 다시 말해 줄 때까지 «확인 중» */
+      return out; };
+    sheetRead = readSheet;
+    sh.querySelector("#apply").onclick = () => { pieces = readSheet(); close(); render(); UI.toast("적용했어요"); };
   } });
-  function sum(sh) { let t = 0; sh.querySelectorAll("section").forEach((sec) => { if (sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true") return; t += sec.hasAttribute("data-video") ? (UI.VIDEO_COIN[Number(UI.chipVal(sec, "vsec"))] ?? 0) : 1 + UI.stepVal(sec, "img"); }); const el = sh.querySelector("#sum"); if (el) el.textContent = t; }
+  /* 🔴 [R9R10-A] 시트 안의 합계도 **서버 견적**이다 — 옛 «1 + 사진 수» 셈을 지웠다(AC-74). 답이 올 때까지 «…» · 늦게 온 답은 버린다 · 못 받으면 «?»(0 으로 그리지 않는다 · AC-9). */
+  let sumSeq = 0, sumTimer = null;
+  function sum(sh) { const el = sh.querySelector("#sum"); if (el) el.textContent = "…"; clearTimeout(sumTimer); sumTimer = setTimeout(async () => {
+    const my = ++sumSeq; const tmp = sheetRead ? sheetRead() : pieces; const body = { briefId: brief.id }; const ps = patchesOf(tmp); if (ps.length) body.pieces = ps;
+    const r = await UI.api("/api/director-estimate", { body, noGate: true }); if (my !== sumSeq) return;
+    const el2 = sh.querySelector("#sum"); if (!el2) return;
+    if (!r.ok) { el2.textContent = "?"; return; }
+    el2.textContent = UI.num(r.coinCost);
+    for (const e of r.pieces || []) { const sec = [...sh.querySelectorAll("section")].find((x) => tmp[Number(x.dataset.i)] && tmp[Number(x.dataset.i)].key === e.key); const c = sec && sec.querySelector("[data-cost]"); if (c && typeof e.coinCost === "number" && sec.querySelector("[data-drop]").getAttribute("aria-checked") === "true") c.textContent = coinSay(e.coinCost); } }, 250); }
 }
 /* [R8 · director-estimate] 🔴 «얼마 드나»는 **서버가 확정한다**(`{ coinCost, coinsLeft, enough, need }`).
      화면 셈은 답이 올 때까지의 미리보기이고, 답이 오면 그 자리를 갈아 끼운다.
@@ -143,12 +168,16 @@ async function estKv() {
   const body = { briefId: brief.id }; const ps = patchesOf(); if (ps.length) body.pieces = ps;
   const r = await UI.api("/api/director-estimate", { body, noGate: true });
   if (my !== estSeq || !r.ok) return;   // 늦게 온 답이 새 답을 덮지 않게 · 못 쟀으면 미리보기를 그대로 둔다
+  /* [R9R10-A] 글마다의 코인도 서버 답으로 갈아 끼운다(등급을 바꾼 뒤 «확인 중»이던 자리) */
+  let changed = false; for (const e of r.pieces || []) { const p = pieces.find((x) => x.key === e.key); if (p && typeof e.coinCost === "number" && p.coinCost !== e.coinCost) { p.coinCost = e.coinCost; changed = true; } }
+  if (changed) drawTargets();
   drawKv(r.coinCost, r.coinsLeft, r.enough ? null : r.need);
 }
 /* 🔴 견적에 보낼 손질과 만들기에 보낼 손질은 **같아야** 한다 — 둘을 따로 지으면 «견적과 실제가 다른» 화면이 된다(rules 쪽과 같은 규율). */
-function patchesOf() {
-  return pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
+function patchesOf(list = pieces) {
+  return list.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
     const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
+    if (!isVideo(p) && p.tier !== o.tier) patch.tier = p.tier; if (!isVideo(p) && (p.styleId || null) !== (o.styleId || null)) patch.styleId = p.styleId || null;   /* [R9R10-A] 등급·스타일(이번 글만) — 견적과 확정이 같은 손질을 보낸다 */
     if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style || p.images.aiCount !== o.images.aiCount)) patch.images = { count: p.images.count, style: p.images.style, ...(p.images.aiCount != null ? { aiCount: p.images.aiCount } : {}) };   /* [R8] aiCount = AI 로 구울 장수(여기만 돈이 든다) */
     if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
     if (isVideo(p)) { const v = {}; if (p.video.format !== o.video.format) v.format = p.video.format; if (p.video.seconds !== o.video.seconds) v.seconds = p.video.seconds; if (p.video.voice?.voiceId !== o.video.voice?.voiceId) v.voiceId = p.video.voice.voiceId; if (Object.keys(v).length) patch.video = v; } // PieceSpecPatch.video(§1.1)
