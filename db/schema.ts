@@ -794,3 +794,23 @@ export const runnerDevicesR7 = {
   fpMismatchAt: "fp_mismatch_at",
   fpMismatchCount: "fp_mismatch_count",
 } as const;
+
+/* === Phase 1 R6 · 관리형 러너 신청(P1R6-B2 · drizzle/0011-r6-b2-managed-runner.sql 과 짝 · 2026-09-15 전수조사 §14 🟠 수리 — DDL 과 칸·형 1:1) ===
+ *   append-only(CLAUDE §4.4). B2 가 DDL 만 내고 선언은 B 몫이었는데 빠져 있던 것.
+ */
+export const managedRunnerRequests = pgTable("managed_runner_requests", {
+  id:          bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:    bigint("tenant_id", { mode: "number" }).notNull(),
+  devices:     integer("devices").notNull().default(1),                      // 몇 대를 맡기고 싶은가
+  status:      varchar("status", { length: 12 }).notNull().default("requested"),   // requested | active | rejected | cancelled
+  planKey:     varchar("plan_key", { length: 24 }),                          // 신청 시점 플랜
+  amountKrw:   integer("amount_krw").notNull().default(0),                   // 대당 공급가(부가세 별도) 스냅샷
+  vatKrw:      integer("vat_krw").notNull().default(0),
+  totalKrw:    integer("total_krw").notNull().default(0),                    // devices 반영 합계
+  note:        text("note"),                                                 // 고객 요청사항 · 운영 메모
+  requestedBy: bigint("requested_by", { mode: "number" }),                   // users.id
+  decidedBy:   bigint("decided_by", { mode: "number" }),                     // operators.id
+  decidedAt:   timestamp("decided_at"),
+  createdAt:   timestamp("created_at").notNull().defaultNow(),
+  updatedAt:   timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ tenantIdx: index("managed_runner_requests_tenant_idx").on(t.tenantId, t.status) }));
