@@ -54,10 +54,22 @@ if not exist ".token" (
   if errorlevel 1 goto :tokenfail
 )
 
-REM --- 4) Run --------------------------------------------------------
+REM --- 4) Run (restart loop) -----------------------------------------
+REM  Exit code 75 means "I just updated myself, start me again"
+REM  (runner\lib\update.mjs). Any other code ends the loop, so a real
+REM  crash or Ctrl+C still stops the program instead of spinning.
 echo   Running. Keep this window open. Press Ctrl+C to stop.
 echo.
+:runloop
 node ac-runner.mjs
+if errorlevel 76 goto :stopped
+if errorlevel 75 (
+  echo.
+  echo   Updated - restarting ...
+  echo.
+  goto :runloop
+)
+:stopped
 echo.
 echo   Runner stopped.
 pause

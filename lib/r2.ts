@@ -36,9 +36,14 @@ export function safeKey(prefix: string, ext: string): string {
   return `${p}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${e}`;
 }
 
-export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string): Promise<{ key: string; url: string }> {
+/**
+ * 기본 캐시는 **영구·불변**이다 — 우리 키는 대부분 `safeKey()` 로 이름이 매번 달라서 그래도 된다.
+ * 🔴 그러나 **이름이 고정인 파일**(예: `runner/latest.json`)에 그 헤더를 쓰면 새로 올려도 옛 값이 한참 읽힌다 —
+ *    자동 업데이트가 «조용히» 멈춘다. 그런 파일은 호출부가 짧은 캐시를 직접 준다.
+ */
+export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string, cacheControl = "public, max-age=31536000, immutable"): Promise<{ key: string; url: string }> {
   const client = getR2Client();
-  await client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: "public, max-age=31536000, immutable" }));
+  await client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: cacheControl }));
   return { key, url: r2PublicUrl(key) };
 }
 
