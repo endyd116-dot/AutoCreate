@@ -22,6 +22,7 @@ import type { Block } from "./blocks";
 import { blocksToPlain, blocksCharCount } from "./blocks";
 import type { WritingContract, TopicGroup } from "./writing-contracts";
 import { lengthFor } from "./writing-contracts";   // [R8 §2.1] 계약 분량 폭(주제군 반영) — 정본 한 곳
+import type { CoinTier } from "./coin-table";       // [R10-8] 등급이 분량 하한을 올린다(같은 함수·같은 tier 로 잰다)
 import { checkDisclosure, compensationOfMeta } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED, normalizeForBanScan, classifyBanned, hasEvidenceNear, findAdPointing } from "./banned-words";   // [R8-A §4] 3층 사전 + 근거 판정
 import { slangAllowedFor, toAgeBand } from "./slang-whitelist";   // [R8CLOSE-B1 §B3] 신조어 화이트리스트(연령대별 · 표는 그 파일 한 곳)
@@ -30,8 +31,8 @@ import { SAME_BODY_SIMILARITY } from "./similarity";
 
 /** [P1R7 B3] `link_check` 는 **여기(runGate)가 재는 12키가 아니다** — 네트워크가 필요해 `lib/content-approve.ts checkLinks` 가 따로 재서 붙인다(소프트).
  *  어휘를 이 파일에 두는 이유: 화면·감사가 키·라벨을 한 곳에서 읽어야 하기 때문(GATE_KEYS 에는 넣지 않는다 = runGate 는 안 돈다). */
-export type GateKey = "length" | "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "ad_pointing" | "link_check" | "stock_safe" | "structure_repeat";
-export const GATE_KEYS: GateKey[] = ["length", "cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count", "ad_pointing"];
+export type GateKey = "length" | "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "cross_account" | "affiliate_count" | "ad_pointing" | "link_check" | "stock_safe" | "structure_repeat";
+export const GATE_KEYS: GateKey[] = ["length", "cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "cross_account", "affiliate_count", "ad_pointing"];
 export const GATE_LABEL: Record<GateKey, string> = {
   /* [R8 §2.1 · B-1] 🔴 **분량** — 여태 **아무도 안 쟀다**. `blocksCharCount`(공백 포함 · 고지·태그 제외)는 있었는데 **부르는 곳이 0** 이었다(AC-29).
      그래서 «계약 1,500자»가 선언으로만 있고, 실제로는 절반(C 실호출 3편 평균 736자)이 나와도 아무 표시가 없었다.
@@ -44,6 +45,11 @@ export const GATE_LABEL: Record<GateKey, string> = {
   cliche: "상투 표현 없음", para_repeat: "문단 시작이 다양함", bullet_ratio: "불릿이 본문을 대신하지 않음", sentence_variance: "문장 길이가 살아 있음",
   translationese: "번역투 없음", superlative: "최상급에 근거가 있음", persona: "내 사정이 들어감", visual_min: "채널 시각 요소 충족",
   disclosure: "대가 고지 첫머리", banned_words: "근거 없이 쓰면 위험한 표현 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
+  /* [R9-8 · B · 2026-09-16] 🔴 **계정 간 유사도** — R8 잔여 «위험도 1번». `similarity` 는 «같은 brief»·«같은 계정 30일»만 봤다.
+     우리 고객은 **계정 하나 = IP 하나**로 여러 계정을 굴린다 — IP 는 돈 주고 나눠 놓고 **글 내용 쪽엔 그 방어가 없었다.** 플랫폼이 제일 먼저 잡는 게 그것이다.
+     같은 집의 **다른 계정** 최근 30일 글과 견준다(교차 테넌트는 보지 않는다 · 설계 §5F «집계된 숫자만»). 🔴 막지 않는다(§9) — 재고 말해 준다.
+     🔴 견줄 다른 계정 글이 없거나 이 글에 계정이 없으면 **«못 쟀어요»**(skipped · 통과 ✓ 로 그리지 않는다 · AC-9). */
+  cross_account: "다른 내 계정 글과 겹치지 않음",
   link_check: "링크 열림",
   /* [R8-A §4 · 사장님 지시] 🔴 **좁은 축**이다 — «광고·배너»를 **가리키며 누르라**고 할 때만 걸린다(애드센스 계정 정지 사유).
      독자 행동 유도(계속 읽기·저장·구독)와 우리 제휴 링크 유도는 **여기서 안 잡는다** — 오히려 더 해야 하는 것들이다. */
@@ -203,10 +209,17 @@ export interface GateInput {
   meta: { affiliate?: unknown; adDisclosure?: boolean; sponsored?: boolean; gift?: boolean } | null;
   /** 유사도(호출부가 계산 · 없으면 0). */
   similarity?: { score: number; against?: string };
+  /**
+   * [R9-8] 계정 간 유사도 — 호출부가 같은 집의 **다른 계정** 글과 견준 값. 🔴 `measured:false` 면 «못 쟀다»로 싣는다(0점이 아니다 · AC-9).
+   *   `reason` = 왜 못 쟀나(`no_account` 이 글에 계정이 없다 · `no_other_account_posts` 견줄 다른 계정 글이 없다). 통째로 안 주면 «못 쟀다».
+   */
+  crossAccount?: { measured: boolean; score: number; against?: string; reason?: string };
   /** 제목(최상급·금칙어 검사에 포함). */
   title?: string;
   /** [R8 §2.1] 주제군 — 계약 분량 폭이 주제군마다 다르다(`lengthFor`). 없으면 채널 기본 폭. */
   group?: TopicGroup | null;
+  /** [R10-8] 코인 등급 — 보통·프리미엄은 분량 하한이 올라간다(`lengthFor` 세 번째 인자). 🔴 생성이 쓴 등급을 **그대로** 넘긴다(다시 정하면 잣대가 갈린다). */
+  tier?: CoinTier | null;
   /**
    * [R8 §5D] 이 글이 **어떻게 만들어졌나**(`auto`·`manual`·`self`). 판정 자체는 안 바꾸고 **말투만** 바꾼다 —
    *   ①은 사람이 방금 쓴 글이라 «모자란다»는 판정문이 아프게 읽힌다(A 지적 2026-09-15). 같은 정보를 권유형으로 적는다.
@@ -226,7 +239,7 @@ export function runGate(inp: GateInput): GateReport {
      🔴 하한만 걸고 상한은 **적기만** 한다: 짧은 글은 고객 손해지만, 긴 글은 «폭을 넘었다»일 뿐이라 그걸로 재작성(=돈)을 돌리지 않는다.
      🔴 이 줄이 **머지에서 한 번 사라졌다**(2026-09-15) — 축은 선언돼 있는데 `push` 가 없어 `GATE_KEYS` 와 결과가 어긋났다.
         되짚기가 «GATE_KEYS 의 모든 키가 결과에 있나»를 세서 잡았다. */
-  const lenRange = lengthFor(contract, inp.group);
+  const lenRange = lengthFor(contract, inp.group, inp.tier);
   const chars = blocksCharCount(blocks);
   const selfWritten = String(inp.origin ?? "") === "self";
   push("length", chars >= lenRange.min,
@@ -337,6 +350,16 @@ export function runGate(inp: GateInput): GateReport {
   const sim = inp.similarity?.score ?? 0;
   push("similarity", sim < SAME_BODY_SIMILARITY, sim >= SAME_BODY_SIMILARITY ? `유사도 ${Math.round(sim * 100)}%(${inp.similarity?.against ?? "다른 글"})` : undefined);
 
+  /* [R9-8] cross_account — 같은 집의 **다른 계정** 글과. 🔴 못 쟀으면 `skipped` 로 싣는다(«통과»와 구별 · 조용히 빼지 않는다 — GATE_KEYS 의 모든 키가 결과에 있어야 한다). */
+  const ca = inp.crossAccount;
+  if (!ca || !ca.measured) {
+    const reason = ca?.reason ?? "not_measured";
+    checks.push(decorateCheck({ key: "cross_account", label: GATE_LABEL.cross_account, pass: true, skipped: true, skipReason: reason, level: "off",
+      detail: reason === "no_account" ? "이 글엔 계정이 없어서 다른 계정 글과는 못 견줬어요" : "견줄 다른 계정 글이 아직 없어서 못 쟀어요" }));
+  } else {
+    push("cross_account", ca.score < SAME_BODY_SIMILARITY, ca.score >= SAME_BODY_SIMILARITY ? `유사도 ${Math.round(ca.score * 100)}%(${ca.against ?? "다른 계정 글"})` : undefined);
+  }
+
   // affiliate_count
   const links = cnt("affiliate") + (plain.match(/https?:\/\/(link\.coupang|coupa\.ng|www\.coupang)/g)?.length ?? 0);
   push("affiliate_count", links <= 2, links > 2 ? `제휴 링크 ${links}개(2개 이하)` : undefined);
@@ -362,6 +385,7 @@ export function buildRewriteInstruction(report: GateReport): string {
       case "disclosure": return `- 제휴 고지가 첫 블록이어야 한다(${c.detail}).`;
       case "banned_words": return `- 근거 없이 쓰면 위험한 표현이다(${c.detail}). 단정·효능 표현은 지우고, 최상급은 근거를 같은 문장에 밝혀라.`;
       case "similarity": return `- 다른 글과 너무 비슷하다(${c.detail}). 도입 장면·소제목·예시를 전부 다른 관점으로 새로 써라(같은 문장 재사용 금지).`;
+      case "cross_account": return `- 같은 사람의 다른 계정 글과 너무 비슷하다(${c.detail}). 플랫폼이 «같은 사람이 여러 계정»으로 묶는 신호다 — 소재의 다른 면(반대 경험·다른 독자·다른 계절)에서 출발해 도입·소제목·예시·순서를 전부 새로 써라.`;
       case "affiliate_count": return `- 제휴 링크는 2개까지다(${c.detail}).`;
       case "ad_pointing": return `- 광고·배너를 가리키며 누르라고 하지 마라(${c.detail}). 애드센스 계정 정지 사유다. 독자에게 «다음 글 보기·저장» 같은 **읽기 행동**을 권하는 문장으로 바꿔라.`;
     }
@@ -404,6 +428,7 @@ export const GATE_WEIGHT: Record<GateKey, GateWeight> = {
   stock_safe: "high",        // 저작권·초상권 — 제3자가 다친다
   ad_pointing: "high",       // 애드센스 계정 정지·해지 사유(법은 아니지만 계정이 죽는다)
   similarity: "high",        // 중복이 쌓이면 저품질 판정 → 계정이 죽는다
+  cross_account: "high",     // [R9-8] 계정 여럿이 같은 글을 내면 «같은 사람» 판정 → 계정이 **묶여서** 죽는다(IP 나눈 값이 헛돈다)
   affiliate_count: "normal",
   length: "normal",           // [R8 §2.1 · B-1] 채널 계약(실물이 그렇다 · 얇으면 안 읽힌다) — 넘겨도 계정이 안 죽는다
   superlative: "normal", cliche: "normal", para_repeat: "normal", bullet_ratio: "normal",
@@ -418,6 +443,7 @@ export const GATE_HOW: Record<GateKey, string> = {
   stock_safe: "사람·상표가 없는 사진으로 바꾸거나, 이 글에서 광고를 빼 주세요.",
   ad_pointing: "광고·배너를 가리키는 문장을 지우고 «다음 글 보기»처럼 읽기 행동을 권해 주세요.",
   similarity: "도입 장면·소제목·예시를 다른 관점으로 바꿔 주세요.",
+  cross_account: "다른 계정에 올린 글과 닮았어요 — 이 계정 독자에게 맞는 다른 면(경험·계절·예시)으로 바꿔 주세요. 다시 만들기를 누르면 저희가 다른 관점으로 써 드려요.",
   affiliate_count: "제휴 링크를 2개까지만 남겨 주세요.",
   superlative: "«1위»·«최고» 옆에 출처·기간·수치를 적거나 표현을 낮춰 주세요.",
   cliche: "«~에 대해 알아보겠습니다» 류 상투 문장을 실제 장면으로 바꿔 주세요.",

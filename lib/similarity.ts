@@ -41,3 +41,12 @@ export function maxSimilarity(text: string, others: string[]): { score: number; 
  */
 export const CROSS_ACCOUNT_SIMILARITY = 0.6;
 export const CROSS_ACCOUNT_DAYS = 14;
+
+/**
+ * [R9-8 · B · 2026-09-16] 🔴 **본문** 계정 간 유사도(R8 잔여 «위험도 1번») — 위의 편성 단계 게이트(제목·도입부 · 14일)와 **다른 자**다.
+ *   `content-gen.ts` 가 같은 집의 **다른 계정** 최근 `CROSS_ACCOUNT_BODY_DAYS` 일 글(최대 `CROSS_ACCOUNT_BODY_LIMIT` 편)과 본문 2-gram 자카드로 견준다.
+ *   임계는 `SAME_BODY_SIMILARITY`(본문 자 하나 · 같은 계정 30일과 같은 잣대) — «다른 계정이면 더 엄하게»는 실측 없이 못 박지 않는다.
+ *   🔴 교차 테넌트는 보지 않는다(설계 §5F «집계된 숫자만») · 🔴 막지 않는다(§9) — 재고 말해 주고, 겹치면 한 번 다시 쓴다.
+ */
+export const CROSS_ACCOUNT_BODY_DAYS = 30;
+export const CROSS_ACCOUNT_BODY_LIMIT = 24;

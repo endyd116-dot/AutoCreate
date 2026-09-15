@@ -17,7 +17,8 @@ import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit, tenantPlan, autoApproveAllowed } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
 import { isVideoChannel } from "../../lib/video/types";
-import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, readSettingsRaw, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
+import { listRules, coinsPerWeek, ruleTierOf, rollSlots, readScheduleSettings, readSettingsRaw, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
+import { listAccounts } from "../../lib/accounts";   // [R10-9] 규칙 견적을 계정 등급으로 세려면 계정 목록이 필요하다
 import { isCardnewsChannel } from "../../lib/writing-contracts";   // [R8 §2.5] «카드뉴스 채널인가» 정본 한 곳
 import { mergeSettings } from "./tenant-settings";
 import { kstDateStr, addDays } from "../../lib/best-time";
@@ -51,11 +52,12 @@ export default async (req: Request): Promise<Response> => {
   try {
     if (path.endsWith("/rules-list")) {
       /* 🔴 [2026-09-16] 설정 원본을 받는다 — `coinsPerWeek` 가 **고객이 고른 영상 길이**를 알아야 한다(안 넘기면 60초 값으로 적힌다). */
-      const [rules, raw, maxRules, planInfo] = await Promise.all([listRules(tid), readSettingsRaw(tid), maxRulesOf(tid), tenantPlan(tid)]);
+      const [rules, raw, maxRules, planInfo, accounts] = await Promise.all([listRules(tid), readSettingsRaw(tid), maxRulesOf(tid), tenantPlan(tid), listAccounts(tid)]);
       const settings = scheduleSettingsOf(raw);
       /* [P1R7 B3 · §5B.8] 코인 미리보기는 «주 N코인»만으로는 못 읽는다 — **플랜 포함분과 견줘야** «이 편성이면 포함분 안에서 되나»를 안다.
          화면(A)은 `coinsPerWeek` 와 `includedCoins` 를 나란히 쓴다. 포함분이 0(체험)이면 0 그대로 — 숨기지 않는다. */
-      return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds), maxRules,
+      /* [R10-9] 🔴 규칙마다 계정 등급으로 센다(`ruleTierOf`) — 안 넘기면 프리미엄 계정의 편성표가 1코인이라 말한다. */
+      return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds, (r) => ruleTierOf(r, accounts)), maxRules,
         includedCoins: n(planInfo.plan.limits.coinsIncluded), planKey: planInfo.planKey, autoApprove: autoApproveAllowed(planInfo.planKey, planInfo.plan) });
     }
     if (path.endsWith("/slots-list")) {
@@ -111,7 +113,8 @@ export default async (req: Request): Promise<Response> => {
          🔴 화면이 «편수 × 단가»를 스스로 셈하면 단가를 바꾸는 날 화면만 옛 셈으로 남는다(A 지적 · AC-47).
             그래서 `coinsPerWeek` 를 **저장 경로와 같은 함수**에서 준다. ── */
       if (path.endsWith("/rules-estimate")) {
-        const perWeek = coinsPerWeek(clean as Rule[], (await readSettingsRaw(tid)).videoSeconds);
+        const accounts = await listAccounts(tid);
+        const perWeek = coinsPerWeek(clean as Rule[], (await readSettingsRaw(tid)).videoSeconds, (r) => ruleTierOf(r, accounts));
         const perMonth = Math.round(perWeek * 52 / 12);
         const included = (await tenantPlan(tid)).plan.limits.coinsIncluded;
         const out: Record<string, unknown> = { ok: true, coinsPerWeek: perWeek, coinsPerMonth: perMonth, rules: activeCount, limit: maxRules,
@@ -152,8 +155,9 @@ export default async (req: Request): Promise<Response> => {
       const settings = scheduleSettingsOf(raw);
       const roll = await rollSlots(tid, settings.horizonDays);
       const rules = await listRules(tid);
+      const accounts = await listAccounts(tid);
       await writeAudit({ tenantId: tid, action: "rules_save", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { rules: rules.length, active: activeCount, slotsCreated: roll.created } });
-      return json({ ok: true, rules, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds), slotsCreated: roll.created });
+      return json({ ok: true, rules, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds, (r) => ruleTierOf(r, accounts)), slotsCreated: roll.created });
     }
 
     if (path.endsWith("/rules-settings")) {

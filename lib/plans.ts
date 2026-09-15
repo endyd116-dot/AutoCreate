@@ -11,7 +11,10 @@ import { COIN_KRW } from "./coin-table";   // [P1R7 §3.2] 채널 정본은 lib/
 export interface PlanLimits { maxAccounts: number; coinsIncluded: number; runnerDevices: number; teamSeats: number; horizonDays: number; maxRules: number | null;
   /** [P1R7 §3.2] 이 요금제가 **새로 연결**할 수 있는 채널(설계 §12.2 · 사장님 결정 3). 없으면 코드 기본값 → 그것도 없으면 제한 없음.
    *  🔴 소급 금지: 이미 연결한 계정에는 쓰지 않는다(`requireChannel` 은 «새로 추가·계정 없는 발행»에서만). */
-  channels?: string[] }
+  channels?: string[];
+  /** [R10-2 · 사장님 «레퍼런스는 코인 안 받는다 · 요금제별 달에 몇 개 한도만»] 글 레퍼런스(스타일 배우기) **월 한도**. 라이브 plans 행엔 없는 키라 `textStylesPerMonthOf` 가 코드 기본값으로 메운다.
+   *  ⚠️ 값(5/10/30/100)은 B 가 잡은 **임시값**이다 — 사장님이 정하신 숫자가 아니다. 운영센터 `plans.limits` 에서 바꿀 수 있다. */
+  textStylesPerMonth?: number }
 export interface PlanFeatures { directorEdit: boolean; autoSchedule: boolean; failover: boolean; managedRunner: "no" | "option" | "included"; runnerRevenue: boolean; teamApproval: boolean;
   /** [P1R7 B3] «조용하면 그대로 발행»(DESIGN §5B.9 · Starter 제외). 라이브 plans 행엔 없는 키라 `autoApproveAllowed` 가 코드 기본값으로 메운다. */
   autoApprove?: boolean;
@@ -29,16 +32,16 @@ export const STARTER_CHANNELS: readonly string[] = [...TEXT_CHANNELS, "youtube_s
 
 export const PLAN_DEFAULTS: PlanDef[] = [
   { key: "trial", name: "체험", priceMonth: 0, priceYear: 0, public: false, recommended: false, sort: 0,
-    limits: { maxAccounts: 5, coinsIncluded: 0, runnerDevices: 1, teamSeats: 1, horizonDays: 14, maxRules: null },
+    limits: { maxAccounts: 5, coinsIncluded: 0, runnerDevices: 1, teamSeats: 1, horizonDays: 14, maxRules: null, textStylesPerMonth: 5 },
     features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "no", runnerRevenue: true, teamApproval: false, autoApprove: true, exportZip: false } },
   { key: "starter", name: "Starter", priceMonth: 19_000, priceYear: 190_000, public: true, recommended: false, sort: 1,
-    limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3, channels: [...STARTER_CHANNELS] },   // [P1R7 §3.2] Starter = 글 + 쇼츠
+    limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3, channels: [...STARTER_CHANNELS], textStylesPerMonth: 10 },   // [P1R7 §3.2] Starter = 글 + 쇼츠
     features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false, autoApprove: false, exportZip: false } },   // [P1R7 B3] 자동 승인은 Pro 부터(DESIGN §5B.9)
   { key: "pro", name: "Pro", priceMonth: 49_000, priceYear: 490_000, public: true, recommended: true, sort: 2,
-    limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null },
+    limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null, textStylesPerMonth: 30 },
     features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false, autoApprove: true, exportZip: false } },
   { key: "agency", name: "Agency", priceMonth: 149_000, priceYear: 1_490_000, public: true, recommended: false, sort: 3,
-    limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null },
+    limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null, textStylesPerMonth: 100 },
     features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true, autoApprove: true, exportZip: true } },   // [P1R7 §3.2] 내보내기는 Agency 열
 ];
 
@@ -182,6 +185,15 @@ export async function requireFeature(tid: number, feature: FeatureKey): Promise<
  *      그래서 DDL·라이브 UPDATE 0 으로 오늘부터 맞게 돈다. 운영자가 나중에 값을 넣으면 그 값이 이긴다.
  *   🔴 모르는 플랜 키(운영자가 새로 만든 플랜)는 **허용** — 모른다고 고객을 막지 않는다(조용한 정지 0).
  */
+/** [R10-2] 글 레퍼런스 월 한도 — DB 값 > 코드 기본값 > (둘 다 없으면) 5. 🔴 0 도 값이다(운영자가 잠근 것) — `??` 로만 메운다. */
+export function textStylesPerMonthOf(plan: PlanDef): number {
+  const v = (plan.limits as unknown as Record<string, unknown>)?.textStylesPerMonth;
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
+  const def = PLAN_DEFAULTS.find((p) => p.key === plan.key);
+  const dv = def?.limits.textStylesPerMonth;
+  return typeof dv === "number" ? dv : 5;
+}
+
 export function autoApproveAllowed(planKey: string, plan: PlanDef): boolean {
   const v = (plan.features as unknown as Record<string, unknown>).autoApprove;
   if (typeof v === "boolean") return v;
