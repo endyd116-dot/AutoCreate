@@ -96,7 +96,11 @@ export async function breakFormatBeforePara(state, freshBlock) {
 export function measureFormatBleedIn(env) {
   const doc = (env && env.document) || document;
   const gcs = (env && env.getComputedStyle) || getComputedStyle;
-  const out = { total: 0, bad: 0, red: 0, center: 0, italic: 0, underline: 0, pct: 0, samples: [] };
+  /* 🔴 소제목 크기 — **굵게를 세려면 이 숫자가 필요하다**(아래 `bold` 참조). 러너가 자기 상수를 넘겨 준다.
+     안 넘어오면 러너 기본값과 **같은 값**을 쓴다(그 값이 그대로 실행되므로 기본값이지 날조가 아니다 · AC-93). */
+  const headSize = Number((env && env.headingSize) || 19);
+  const bodySize = Number((env && env.bodySize) || 15);
+  const out = { total: 0, bad: 0, red: 0, center: 0, italic: 0, underline: 0, bold: 0, pct: 0, samples: [] };
   const isRed = (c) => {
     const m = String(c || "").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
     if (!m) return false;
@@ -116,11 +120,20 @@ export function measureFormatBleedIn(env) {
     const italic = all((s) => gcs(s).fontStyle === "italic") || ps.fontStyle === "italic";
     const under = all((s) => (gcs(s).textDecorationLine || "").includes("underline"))
       || (ps.textDecorationLine || "").includes("underline");
+    /* 🔴 **굵게도 센다**(2026-09-16 C 실측으로 더했다). AM #800·#801 이 바로 **굵게 번짐**이었는데
+       내 첫 판은 빨강·가운데·기울임·밑줄만 세어, value/bold 마크만 있는 글이 **통째로 굵게 나가도 0%** 였다.
+       ⚠️ 그런데 **소제목은 원래 굵다** — 크기로 가른다: 굵으면서 **본문 크기**면 번짐, **소제목 크기**면 정상이다.
+          (이 한 줄이 없으면 소제목이 많은 글이 전부 «번졌다»가 되어 검사가 무용지물이 된다 · AC-68.) */
+    const wgt = (s) => { const w = String(gcs(s).fontWeight || ""); return w === "bold" || Number(w) >= 600; };
+    const sizeOf = (s) => parseInt(String(gcs(s).fontSize || "0"), 10) || 0;
+    const looksHeading = spans.length > 0 && spans.every((s) => sizeOf(s) >= headSize) && headSize > bodySize;
+    const bold = !looksHeading && (all(wgt) || (spans.length === 0 && wgt(p)));
     if (red) out.red++;
     if (center) out.center++;
     if (italic) out.italic++;
     if (under) out.underline++;
-    if (red || center || italic || under) {
+    if (bold) out.bold++;
+    if (red || center || italic || under || bold) {
       out.bad++;
       if (out.samples.length < 3) out.samples.push((p.textContent || "").trim().slice(0, 30));
     }
@@ -129,9 +142,12 @@ export function measureFormatBleedIn(env) {
   return out;
 }
 
-/** 브라우저에서 잰다. 못 재면 `null` — 🔴 **«못 쟀다»를 «0% 깨끗»으로 바꾸지 않는다**(AC-92). */
-export async function measureFormatBleed(ctx) {
-  return await ctx.evaluate(measureFormatBleedIn).catch(() => null);
+/**
+ * 브라우저에서 잰다. 못 재면 `null` — 🔴 **«못 쟀다»를 «0% 깨끗»으로 바꾸지 않는다**(AC-92).
+ * @param sizes `{ headingSize, bodySize }` — 굵게를 «소제목»과 «번짐»으로 가르는 데 쓴다(러너 상수를 그대로 넘긴다).
+ */
+export async function measureFormatBleed(ctx, sizes) {
+  return await ctx.evaluate(measureFormatBleedIn, sizes ?? null).catch(() => null);
 }
 
 /**
@@ -141,11 +157,12 @@ export async function measureFormatBleed(ctx) {
  */
 export function bleedVerdict(bleed) {
   if (!bleed || !(bleed.total > 0)) return { measured: false, stop: false, line: "서식 번짐: 잴 문단이 없어 못 쟀어요" };
-  const line = `서식 번짐 검사: ${bleed.bad}/${bleed.total} 문단(${bleed.pct}%) — 빨강 ${bleed.red} · 가운데 ${bleed.center} · 기울임 ${bleed.italic} · 밑줄 ${bleed.underline}`;
+  const counts = `빨강 ${bleed.red} · 가운데 ${bleed.center} · 기울임 ${bleed.italic} · 밑줄 ${bleed.underline} · 굵게 ${bleed.bold ?? 0}`;
+  const line = `서식 번짐 검사: ${bleed.bad}/${bleed.total} 문단(${bleed.pct}%) — ${counts}`;
   const stop = bleed.pct >= FORMAT_BLEED_MAX_PCT;
   const reason = stop
     ? `서식 번짐 ${bleed.bad}/${bleed.total} 문단(${bleed.pct}% ≥ ${FORMAT_BLEED_MAX_PCT}%) — 발행을 멈췄어요.`
-      + ` 빨강 ${bleed.red} · 가운데 ${bleed.center} · 기울임 ${bleed.italic} · 밑줄 ${bleed.underline}.`
+      + ` ${counts}.`
       + ` 예시 문단: ${(bleed.samples || []).map((s) => `«${s}»`).join(" / ")}`
     : "";
   return { measured: true, stop, line, reason };

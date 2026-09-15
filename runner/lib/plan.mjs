@@ -359,7 +359,9 @@ function opsFromHtml(html) {
     const cls = (/class="([^"]*)"/i.exec(attrs)?.[1] ?? "").split(/\s+/);
     const text = clean(unescapeHtml(inner));
     if (tag === "div" && cls.includes("disclosure")) { if (text) ops.push({ op: "quote", text, role: "disclosure" }); continue; }
-    if (tag === "div" && cls.includes("adsense")) continue;
+    /* 🔴 폴백 경로에서도 «안 냈다»를 적는다 — 블록 정본 경로만 적으면 **검수창에서 고친 글에서만** 조용히 사라진다
+       (2026-09-16 C 가 두 경로를 대 보고 잡았다 · 조용한 0건 금지 · PITFALLS #7). */
+    if (tag === "div" && cls.includes("adsense")) { ops.push({ op: "note", text: "광고 코드는 에디터 본문에 못 넣어서 뺐습니다" }); continue; }
     if (tag === "h2") { if (text) ops.push({ op: "heading", text, level: 2 }); continue; }
     if (tag === "h3") { if (text) ops.push({ op: "heading", text, level: 3 }); continue; }
     if (tag === "blockquote") { if (text) ops.push({ op: "quote", text }); continue; }
