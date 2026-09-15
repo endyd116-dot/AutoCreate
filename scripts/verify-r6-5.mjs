@@ -224,7 +224,7 @@ async function main() {
       const sha = buf ? createHash("sha256").update(buf).digest("hex") : "";
       rec("⑤ 🔴 받은 zip 의 sha256 = 응답 sha256(실대조)", !!buf && sha === dl.json.sha256 && buf.length === dl.json.bytes, `${buf?.length}B · ${sha.slice(0, 16)}… vs ${String(dl.json.sha256).slice(0, 16)}…`);
       let manifest = null;
-      try { const { execFileSync } = await import("node:child_process"); const o = String(execFileSync("npx", ["tsx", "--env-file=.env", "scripts/verify-r6-5-latest-probe.mts"], { encoding: "utf8", shell: true, timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] })); manifest = JSON.parse(o.trim().split(/\r?\n/).pop()); } catch { /* */ }
+      try { const { execFileSync } = await import("node:child_process"); const o = String(execFileSync("npx", ["tsx", "--env-file=.env", "scripts/verify-r6-5-latest-probe.mts"], { encoding: "utf8", shell: true, timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] })); manifest = JSON.parse(o.slice(o.indexOf("{"))); } catch { /* latest.json 은 pretty 여러 줄 — 첫 { 부터 통째로 파싱 */ }
       rec("⑤ R2 latest.json 의 sha256·version 이 응답과 같다", !!manifest && manifest.sha256 === dl.json.sha256 && manifest.version === dl.json.version, manifest ? `latest.json v${manifest.version} sha ${String(manifest.sha256).slice(0, 12)}…` : "latest.json 못 읽음");
       rec("⑤ zip 이 진짜 zip(PK 시그니처)", !!buf && buf[0] === 0x50 && buf[1] === 0x4b, buf ? `${buf.slice(0, 2).toString("latin1")}` : "-");
     }
