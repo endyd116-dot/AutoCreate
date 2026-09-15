@@ -27,13 +27,16 @@ import { SAME_BODY_SIMILARITY } from "./similarity";
 
 /** [P1R7 B3] `link_check` 는 **여기(runGate)가 재는 12키가 아니다** — 네트워크가 필요해 `lib/content-approve.ts checkLinks` 가 따로 재서 붙인다(소프트).
  *  어휘를 이 파일에 두는 이유: 화면·감사가 키·라벨을 한 곳에서 읽어야 하기 때문(GATE_KEYS 에는 넣지 않는다 = runGate 는 안 돈다). */
-export type GateKey = "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "link_check";
+export type GateKey = "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "link_check" | "structure_repeat";
 export const GATE_KEYS: GateKey[] = ["cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count"];
 export const GATE_LABEL: Record<GateKey, string> = {
   cliche: "상투 표현 없음", para_repeat: "문단 시작이 다양함", bullet_ratio: "불릿이 본문을 대신하지 않음", sentence_variance: "문장 길이가 살아 있음",
   translationese: "번역투 없음", superlative: "근거 없는 최상급 없음", persona: "내 사정이 들어감", visual_min: "채널 시각 요소 충족",
   disclosure: "제휴 고지 첫머리", banned_words: "광고법 금칙어 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
   link_check: "링크 열림",
+  /* [R8-A §2 · B-1] 골격 반복 — `similarity` 는 **글자**만 봐서, 소제목 수·블록 순서·끝맺음이 매번 같아도 단어만 다르면 통과한다.
+     `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
+  structure_repeat: "최근 글과 구조가 다름",
 };
 export interface GateCheck { key: GateKey; label: string; pass: boolean; detail?: string }
 export interface GateReport {
