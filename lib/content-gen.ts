@@ -21,7 +21,9 @@ import { seasonLine } from "./kr-calendar";
 import { toTopic, type Topic } from "./topics";
 import { decryptObj } from "./creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, type CoupangProduct } from "./affiliate-coupang";
-import { refundPiece } from "./coin-ledger";
+import { refundPiece, settlePieceCoins } from "./coin-ledger";
+import { pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";   // [R8] 사진 값 정산 — 식은 coin-table 한 곳
+import { writeAudit } from "./audit";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
 import { recordOutcome, riskOf } from "./outcomes";   // [R8 §5F] 되먹임 원장 — «만들 때의 모습»을 남긴다
@@ -364,6 +366,27 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
        🔴 없으면 **우리가 실제로 구운 수**만 적는다(지어내지 않는다 — 지금은 전부 AI 다). */
     const mixFromLoop = { ai: okImages, ...(imageFailures ? { failed: imageFailures } : {}) };
     const photoMix = (meta.photoMix && typeof meta.photoMix === "object" ? meta.photoMix : mixFromLoop) as Record<string, number>;
+
+    /* ══ [R8 · 사장님 승인 2026-09-15] 🔴 **사진 값 정산 — 덜 썼으면 돌려준다. 더 받지는 않는다.** ══
+       코인은 **AI 로 구운 사진**에만 붙는다(고객 사진·스톡은 우리 원가가 0이라 0코인). 그런데 사진은
+       «내 사진 → 스톡 → AI» 순서로 채워져서 **실제로 AI 를 몇 장 구웠는지는 만들어 봐야 안다.**
+       그래서 선차감은 계획값(`meta.aiImageCount`)으로 하고 여기서 실제 값으로 맞춘다.
+       🔴 **실제가 계획보다 많아도 더 받지 않는다** — 그 몫은 우리가 안고, 감사에 숫자로 남긴다(조용히 먹지 않는다).
+          그래야 «스톡이 비어서 AI 가 다 구웠다»가 운영에 보이고, 재고를 채울 신호가 된다. */
+    try {
+      const plannedAi = Math.max(0, Math.floor(Number(meta.aiImageCount ?? AI_IMAGES_INCLUDED) || 0));
+      const actualAi = Math.max(0, Math.floor(Number(photoMix.ai ?? 0) || 0));
+      const want = pieceCoinCost("post", Math.min(plannedAi, actualAi), { format });
+      const back = await settlePieceCoins(tid, pieceId, want);
+      if (back > 0) {
+        await writeAudit({ tenantId: tid, action: "piece_coin_settled", actorType: "system", target: `piece:${pieceId}`,
+          detail: { plannedAi, actualAi, want, refunded: back, photoMix } });
+      } else if (actualAi > plannedAi) {
+        /* 🔴 우리가 안은 몫 — 더 받지 않기로 한 값이다. 숫자로 남겨야 «스톡 재고가 비었다»를 운영이 본다. */
+        await writeAudit({ tenantId: tid, action: "piece_ai_over_plan", actorType: "system", riskLevel: "low", target: `piece:${pieceId}`,
+          detail: { plannedAi, actualAi, absorbed: pieceCoinCost("post", actualAi, { format }) - pieceCoinCost("post", plannedAi, { format }), photoMix } });
+      }
+    } catch (e) { console.error("[content-gen] 사진 값 정산 실패 — 글은 그대로 간다", String((e as Error)?.message ?? e).slice(0, 120)); }
     await recordOutcome({
       tenantId: tid, pieceId, accountId,
       features: {

@@ -45,3 +45,32 @@ export function videoCoinItem(seconds: number | null | undefined): CoinItem {
   if (s <= 35) return "video_30";
   return "video_60";
 }
+
+/**
+ * [R8 · 🔴 사장님 승인 2026-09-15 «좋다. 시작해»] **AI_IMAGES_INCLUDED — 글 한 편에 AI 사진 1장이 포함된다.**
+ *   왜 이 값이 생겼나: 네이버 글 한 편이 **7코인(₩3,500)** 이었다. 요금제 포함 코인으로는 Pro 가 월 21편이라
+ *   설계가 말하는 «하루 3편(월 90편)» 의 1/4 이었다 — 표가 약속한 것과 실제가 4.5배 어긋났다(docs/active/2026-09-15-coin-economy.md §3b).
+ *   🔴 값을 내릴 수 있게 된 근거는 **원가가 실제로 내려갔다**는 것이다: 사진을 «내 사진 → 스톡 → AI» 순서로 채우면서
+ *      네이버 편당 원가가 ₩458 → ₩134 가 됐다(B-1). 원가 없이 값만 내리면 그건 그냥 손해다.
+ *   🔴 **고객 사진·스톡 사진은 0코인**이다 — 우리 원가가 0이기 때문이다. 코인은 «우리가 돈 쓴 곳»에만 붙는다.
+ */
+export const AI_IMAGES_INCLUDED = 1;
+
+/**
+ * [R8] pieceCoinCost — **한 편에 드는 코인**. 🔴 이 식이 사는 곳은 여기 하나다.
+ *   전에는 `lib/slots.ts coinsPerWeek` 와 `lib/cron/director-auto.ts pieceCoin` 이 **각자 적고 있었다** —
+ *   둘이 갈리면 «견적»과 «실제 차감»이 달라진다(고객이 가장 못 참는 종류의 어긋남 · AC-74).
+ *
+ *   · 글    = `blog`(1) + `image`(1) × **AI 로 구울 장수에서 포함분(1장)을 뺀 수**
+ *   · 카드뉴스 = `cardnews`(3) — 🔴 인스타는 장수로 세지 않는다. 화면(`/app/coins`)이 이미 «카드뉴스 3코인»이라 말하고 있어서
+ *              장수로 세면 7~9코인이 빠진다(화면이 말한 값의 두세 배 · AC-74).
+ *   · 영상   = 길이 구간(`videoCoinItem`)
+ *   🔴 이 파일은 DB·계약표를 보지 않는다(순수 유지 · AC-17) — 장수·구성은 **호출부가 준다.**
+ */
+export function pieceCoinCost(kind: string, aiImageCount: number, opts: { seconds?: number; format?: string } = {}): number {
+  if (kind === "shorts" || kind === "video") return coinCostOf(videoCoinItem(opts.seconds ?? 60));
+  if (opts.format === "cardnews") return coinCostOf("cardnews");
+  const ai = Math.max(0, Math.floor(Number(aiImageCount) || 0));
+  return coinCostOf("blog") + coinCostOf("image") * Math.max(0, ai - AI_IMAGES_INCLUDED);
+}
+
