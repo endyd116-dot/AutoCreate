@@ -50,17 +50,23 @@ function gateList(g) {
     : soft.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">아래 ${soft.length}가지는 알려드리는 것이라 예약을 막지 않아요.</p>` : "";
   return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>`;
 }
-/* [R8-A §2] «이 글이 왜 이렇게 생겼나» — 채널 계약 · 주제군 · 수익 목적.
-   🔴 지금 `pieces-get` 이 주는 건 channel·format·angle·slotReason 뿐이다. `topicGroup`·`goal`·`contract.summary` 는 **아직 안 온다**(메인에 발주 중) —
-      오면 이 줄들이 저절로 켜진다. 🔴 화면이 채널 계약표를 베껴 와 «아마 이럴 것»이라고 그리지 않는다(정본은 lib/writing-contracts.ts · AC-52). */
+/* [R8-A §2 · B-1 d6c2359] «이 글이 왜 이렇게 생겼나» — 서버가 **그 글에 실제로 적용된** 값을 준다(`topicGroup`·`goal`·`contract`).
+   🔴 계약표의 기본값이 아니라 «이 글에 쓰인 값»이다 — 화면이 계약표를 베껴 와 «아마 이럴 것»이라고 그리지 않는다(정본은 lib/writing-contracts.ts · AC-52).
+   🔴 `topicGroup: null` 은 **«모름»이다**(형식이 없어 못 정한 글) — 기본값으로 위장하지 않고 모른다고 적는다(AC-9·AC-57).
+   🔴 `fromGroup` = 그 분량·사진 수가 «주제군에서 온 값»인지 «채널 고정값»인지 — 어디서 온 숫자인지까지 말한다.
+   🔴 `goalRules` 는 **모델에게 주는 지시문**이다(이모지·굵게·«이미지 alt» 같은 말이 섞여 있다) — 글자 그대로 화면에 올리지 않고 **가짓수**만 말한다.
+      고객이 읽을 문장이 필요하면 서버가 따로 내려 줘야 한다(메인에 보고). */
 function renderWhy() {
-  const host = UI.$("#why"); const m = P.meta || {};
-  const kv = (k, v) => `<div class="kv"><span class="k">${UI.esc(k)}</span><span class="v wrap" style="white-space:normal;text-align:right">${UI.esc(v)}</span></div>`;
+  const host = UI.$("#why"); const m = P.meta || {}; const c = P.contract || null;
+  const kv = (k, v, sub) => `<div class="kv"><span class="k">${UI.esc(k)}</span><span class="v wrap" style="white-space:normal;text-align:right">${UI.esc(v)}${sub ? `<small class="muted" style="display:block;font-weight:500;font-size:12px">${UI.esc(sub)}</small>` : ""}</span></div>`;
+  const src = (fromGroup) => (fromGroup ? "주제군에 맞춘 값" : "이 채널 기본값");
   let h = "";
-  h += kv("채널", `${UI.chLabel(P.channel)}${UI.FORMAT[P.format] ? " · " + UI.FORMAT[P.format] : ""}`);
-  if (UI.GROUP_LABEL[P.topicGroup]) h += kv("주제군", UI.GROUP_LABEL[P.topicGroup]);
-  if (UI.GOAL_LABEL[P.goal]) h += kv("수익 목적", UI.GOAL_LABEL[P.goal]);
-  if (P.contract && P.contract.summary) h += kv("이렇게 쓰기로", String(P.contract.summary));
+  h += kv("채널", c && c.label ? c.label : UI.chLabel(P.channel), c && c.formatLabel ? c.formatLabel : UI.FORMAT[P.format] || "");
+  if (c) h += kv("주제군", UI.GROUP_LABEL[P.topicGroup] || "아직 몰라요", UI.GROUP_LABEL[P.topicGroup] ? "" : "형식이 정해지지 않아 채널 기본값으로 썼어요");
+  if (c && UI.GOAL_LABEL[P.goal]) h += kv("수익 목적", UI.GOAL_LABEL[P.goal], (c.goalRules || []).length ? `이 목적에 맞춘 규칙 ${c.goalRules.length}가지를 지켜 썼어요` : "이 목적에 따로 맞춘 규칙은 없어요");
+  if (c && c.length) h += kv("분량", `${UI.num(c.length.min)}~${UI.num(c.length.max)}자`, `${src(c.length.fromGroup)}${c.actualChars ? ` · 지금 글은 ${UI.num(c.actualChars)}자` : ""}`);
+  if (c && c.images) h += kv("사진", `${c.images.min}~${c.images.max}장`, src(c.images.fromGroup));
+  if (c && c.register) h += kv("말투", String(c.register));
   if (m.angle) h += kv("잡은 방향", String(m.angle));
   if (m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
   host.hidden = false; host.innerHTML = '<div class="gt">이 글이 왜 이렇게 생겼나</div>' + h;
@@ -92,9 +98,9 @@ function compSheet(kind) {
 }
 async function compOn(kind, close) {
   if (dirty) { if (close) close(); return UI.toast("먼저 «수정 저장»을 눌러 주세요"); }
-  /* 🔴 **본문을 같이 보낸다** — 서버는 `bodyHtml` 이 올 때만 고지를 본문에 넣는다(pieces.ts pieces-update).
-     안 보내면 meta 만 켜지고 «대가 고지 첫머리»(하드 축)가 빨강인 채 남아 예약이 막힌다. 고친 글이 아니라 **지금 있는 글 그대로** 보낸다. */
-  const r = await UI.api("/api/pieces-update", { body: { id, monetize: { [kind]: true }, bodyHtml: cleanBody(UI.$("#body")) } });
+  /* 🔴 **본문은 보내지 않는다**(B-1 d6c2359) — 서버가 저장된 본문에 고지를 되붙여 준다. 본문을 같이 보내면
+     «사람이 글을 고쳤다»(`editedByUser`)로 기록돼 다음 검사 기준이 블록에서 HTML 로 바뀐다. 손대지 않은 글에 그 표를 남기지 않는다. */
+  const r = await UI.api("/api/pieces-update", { body: { id, monetize: { [kind]: true } } });
   if (!r.ok) return UI.toast(r.error || "밝히지 못했어요");
   if (close) close();
   if (r.bodyHtml) { P.bodyHtml = r.bodyHtml; const body = UI.$("#body"); body.innerHTML = r.bodyHtml; lockDisc(body); }

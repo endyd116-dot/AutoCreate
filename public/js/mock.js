@@ -27,9 +27,9 @@
   const oneChannel = qs.get("oneCh") === "1";   // [사장님 실측] 네이버 계정만 있는 집 — 소재가 전부 한 채널
   const closedKnob = qs.get("closed") === "1";  // [R7 §3.1] 이미 탈퇴를 신청해 둔 집(파기 예약 중)
   const gateKnob = qs.get("gate") || "";        // [R8-A] soft = 골격 반복이 걸린 글(막지 않는다) · adpoint = 광고 가리킴(막는다)
-  /* [R8-A §2] 🔴 `topicGroup`·`goal`·`contract` 는 **서버가 아직 안 준다**(pieces-get 이 안 싣는다 · 메인에 발주 중).
-     기본은 꺼 둔다 — 모의가 켜 두면 «화면에 이미 있는 것»처럼 보여 발주가 잊힌다. 값은 서버 어휘 그대로(TopicGroup·RevenueGoal). */
-  const whyKnob = qs.get("why") === "1";
+  /* [R8-A §2 · B-1 d6c2359] `topicGroup`·`goal`·`contract` 를 서버가 준다(pieces-get).
+     값은 서버 어휘 그대로(TopicGroup·RevenueGoal). */
+  const whyNone = qs.get("why") === "none";   /* [R8-A] 형식이 없어 주제군을 못 정한 글(서버가 topicGroup:null 로 준다) */
   const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
 
@@ -664,8 +664,20 @@
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
       if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
-      /* [R8-A §2] 🔴 아래 세 칸은 **아직 서버에 없다**(?why=1 로만 켜진다) — 화면이 «오면 저절로 켜지게» 만들어 둔 자리다 */
-      const why = whyKnob ? { topicGroup: "review", goal: p.channel === "naver_blog" ? "adpost" : "adsense", contract: { summary: p.channel === "naver_blog" ? "사진 6장 이상 · 1,200~2,500자 · 목차·FAQ·요약은 안 써요" : "1,500~3,000자 · 목차·FAQ는 넣을 수 있어요 · 광고 자리 2곳" } } : {};
+      /* [R8-A §2 · B-1 d6c2359] «왜 이렇게 생겼나» 3축 — 이름·모양은 서버 pieces-get 그대로.
+         값은 lib/writing-contracts.ts 의 그 채널 칸에서 복사(label·register·분량·사진).
+         🔴 ?why=none = **형식이 없어 주제군을 못 정한 글** — topicGroup 이 null 로 오고 분량이 채널 기본값에서 온다(fromGroup:false). */
+      const NV = p.channel === "naver_blog";
+      const grp = whyNone ? null : "review";
+      const why = {
+        topicGroup: grp, goal: NV ? "adpost" : "adsense",
+        contract: { channel: p.channel, label: NV ? "네이버 블로그 · 경험담·친근" : "티스토리 · 정보·정리",
+          format: whyNone ? null : (p.format || null), formatLabel: whyNone ? null : (NV ? "경험담(계기→해봄→결과→팁)" : "비교 후기"),
+          register: NV ? "구어 존댓말 «~했어요 / ~더라고요 / ~거든요» · 1인칭 경험" : "격식 존댓말 «~합니다 / ~입니다» 를 바탕으로, 권유 «~해 보세요»·질문 «~일까요?» 를 섞는 정리 톤",
+          length: grp ? (NV ? { min: 1200, max: 2500, fromGroup: true } : { min: 1500, max: 3000, fromGroup: true }) : (NV ? { min: 1500, max: 3000, fromGroup: false } : { min: 3000, max: 12000, fromGroup: false }),
+          images: NV ? { min: 6, max: 10, default: 6, fromGroup: false } : (grp ? { min: 5, max: 10, default: 7, fromGroup: true } : { min: 2, max: 4, default: 3, fromGroup: false }),
+          goalRules: NV ? ["r1", "r2", "r3"] : ["r1", "r2"],   /* 🔴 화면은 **가짓수만** 쓴다(모델 지시문이라 글자 그대로 안 보여 준다) */
+          actualChars: String(p.bodyHtml || "").replace(/<[^>]+>/g, "").length } };
       return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     "pieces-approve": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.kind === "video" && p.gate?.judge?.grade === "P0") return err("gate", "심사에서 막혔어요 · 다시 만들거나 버려 주세요.", { gate: p.gate }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
