@@ -64,6 +64,46 @@ const results = [];
  *  🔴 칸 수를 안 달면 줄을 세는 것과 칸을 세는 것이 갈려 분모가 또 흔들린다(오늘 «64·66·67» 로 세 번 흔들렸다). */
 const rec = (row, state, why, w = 1, split = null) => results.push({ row, state, why, w, split });
 
+/* ══ [화면 축] 🔴 **판정에 안 쓴다. 출력에만 붙는다.** ══
+   CLAUDE §4.8 «완료 = 화면에서 쓸 수 있을 때» 를 **자가 안 재는 칸**을 눈에 보이게 하려는 표시다.
+   🔴 «화면에 이 낱말이 있나»로 재지 않는다 — 그건 가짜 빨강을 만든다(§8.3: 유사도·장소 카드는
+      `UI.gateList`·`bodyHtml` 이 **일반 렌더**로 그려서 열쇠 낱말이 화면에 있을 이유가 없다).
+   🔴 조각은 «그 칸을 가리키는 가장 짧고 안 바뀔 말»로 고른다. 칸 이름을 통째로 적으면 이름이 조금만 바뀌어도 미분류가 된다. */
+const SCREEN_AXIS = [
+  ["④-1 탈퇴", "고객"], ["④-2 매체 기준일", "고객"], ["④-3a", "운영"], ["④-3b", "해당없음"],
+  ["④-4 고지 게이트", "고객"], ["④-5 WP 사이드바", "고객"], ["④-6 `publish-now`", "고객"],
+  ["④-7 `avatar`", "고객"], ["④-8 `account_groups`", "고객"], ["④-9 CS 이메일", "운영"],
+  ["④-10 팩트체크", "고객"], ["④-11 러너 PC 세션", "해당없음"], ["④-12 클립", "고객"],
+  ["`lib/channel-registry.ts` 정본 통합", "해당없음"], ["고지 축(", "고객"],
+  ["편성·규칙 화면", "고객"], ["자동승인 «신뢰 계정»", "고객"],
+  ["A1 클립 게시물형", "고객"], ["A2 인스타 피드", "고객"], ["A3 페북", "고객"], ["A4 X(글)", "고객"],
+  ["A5 브런치", "고객"], ["A6 틱톡", "고객"], ["A7 페북릴스", "고객"], ["A8 텐핑", "고객"],
+  ["A9 쇼핑커넥트", "고객"], ["A10 `publish.brunch`", "해당없음"], ["A11 커넥터 신규", "해당없음"],
+  ["A12 §17 P5", "고객"],
+  ["B1 유사도", "고객"], ["B2 페르소나 적합도", "고객"], ["B3 신조어", "고객"], ["B4 장소 카드", "고객"],
+  ["B5 쓰레드 연결글", "고객"], ["B6 블로거·WP AEO", "해당없음"], ["B7 에디터 실제 요소", "해당없음"],
+  ["B8 목표 매체", "고객"], ["B9 `images.heroNeeded`", "고객"],
+  ["C1 소재 90일", "해당없음"], ["C2 추천인 코인 화면", "고객"], ["C3 brief 상태", "고객"],
+  ["C4 piece 상태", "해당없음"], ["C5 AC-1 헤더", "해당없음"],
+  ["D 접근성", "고객"],
+  ["E1 AI 원가", "운영"], ["E2 추천인 이벤트", "해당없음"], ["E3 티켓 한 화면", "운영"],
+  ["E4 AM↔AC", "고객"], ["E5 정본 동기화", "운영"], ["E6 운영자 화면 조정", "운영"],
+  ["F 팀 축", "고객"], ["H1 카드뉴스 kind", "고객"], ["H3 상태 16종", "고객"],
+  ["I 러너 트레이 앱", "해당없음"],
+];
+/* 🔴 «이 칸이 public/ 을 지목하나» — 판정에 안 쓴다. 자를 고치면 **저절로 따라온다**(사람 표가 안 낡는다). */
+const _selfLines = read("scripts/verify-r8-audit64.mjs").split("\n");
+const _rowStarts = _selfLines.map((l, i) => ((/^\s*\["(.+?)", \(\) =>/.test(l) || /^\s*\{ (?:n: .*?)?name: "(.+?)"/.test(l)) ? i : -1)).filter((i) => i >= 0);
+const READS_SCREEN = new Map();
+_rowStarts.forEach((s, k) => {
+  const nm = (_selfLines[s].match(/\["(.+?)"/) || _selfLines[s].match(/name: "(.+?)"/) || [])[1] || "";
+  const body = stripComments(_selfLines.slice(s, _rowStarts[k + 1] ?? _selfLines.length).join("\n"));
+  if (nm) READS_SCREEN.set(nm, /"public\//.test(body) || /\bSC\b/.test(body));
+});
+const axisOf = (row) => { const h = SCREEN_AXIS.find(([k]) => row.includes(k)); return h ? h[1] : "미분류"; };
+const readsScreenOf = (row) => { for (const [nm, v] of READS_SCREEN) if (row.includes(nm)) return v; return null; };
+
+
 /* ══ ④ 진짜 미개발 12행 — 조사 §10.3-④ 표 그대로 ══ */
 const FOUR = [
   { n: 1, name: "탈퇴 버튼이 앱에 있나",
@@ -531,5 +571,25 @@ else {
 ■ **${T}칸 중 닫힘 ${C} · 일부 ${P} · 열림 ${O} (${Math.round((C / T) * 100)}%)**  ← 사장님 보고용 한 줄` +
     (D ? `
    (분모 = ③54 + ④13 = 67 중 **안 만들기로 결정한 ${D}칸을 뺐다** — 없는 항목을 미개발로 세면 그것도 거짓말이다 · AC-75)` : "  (분모 = ③54 + ④13)"));
+
+/* 🔴 표가 칸을 못 따라가면 **큰 소리로** 말한다 — 조용히 빠지는 것이 이 표의 유일한 실패다. */
+const _axisHits = new Map(SCREEN_AXIS.map(([k]) => [k, 0]));
+const _unmatched = [], _doubled = [];
+for (const r of results) {
+  const hits = SCREEN_AXIS.filter(([k]) => r.row.includes(k));
+  hits.forEach(([k]) => _axisHits.set(k, _axisHits.get(k) + 1));
+  if (hits.length === 0) _unmatched.push(r.row);
+  if (hits.length > 1) _doubled.push(`${r.row} → ${hits.map(([k]) => k).join(" / ")}`);
+}
+const _deadKeys = [..._axisHits].filter(([, n]) => n === 0).map(([k]) => k);
+const _orphan = results.filter((r) => readsScreenOf(r.row) === null);
+if (_unmatched.length) console.log(`🔴 화면 축 표에 **없는 칸 ${_unmatched.length}개** — 새 칸이 생겼으면 SCREEN_AXIS 에 한 줄 더해라: ${_unmatched.join(" · ")}`);
+if (_doubled.length)   console.log(`🔴 화면 축 표에 **두 번 걸리는 칸 ${_doubled.length}개** — 조각이 너무 짧다: ${_doubled.join(" · ")}`);
+if (_deadKeys.length)  console.log(`🔴 화면 축 표에 **아무 칸도 안 가리키는 조각 ${_deadKeys.length}개** — 칸 이름이 바뀌었다: ${_deadKeys.join(" · ")}`);
+if (_orphan.length)    console.log(`🔴 «화면을 보나»를 **못 잰 칸 ${_orphan.length}개** — 칸 선언 모양이 바뀌었다(위 _rowStarts 정규식): ${_orphan.map((r) => r.row).join(" · ")}`);
+const _blind = results.filter((r) => ["고객", "운영"].includes(axisOf(r.row)) && readsScreenOf(r.row) === false && r.state === "닫힘");
+console.log(`   닫힘 가운데 ${_blind.length}칸은 «서버에 있다»까지만 보고 셌어요 — 화면에 실제로 보이는지는 이 숫자가 말해 주지 않아요.`);
+console.log(`   (어느 칸인지·왜 그런지는 docs/active/2026-09-16-audit-measure-review.md §8·§12)`);
+
 }
 process.exit(0);
