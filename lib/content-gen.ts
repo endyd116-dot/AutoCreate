@@ -142,7 +142,12 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
     "[③ 재료]",
     `소재: ${a.topic.title}`,
     `앵글(이 글의 관점): ${a.angle}`,
-    `검색어: ${a.topic.title.replace(/[,·]/g, " ")}${a.topic.factors.volume ? ` (월 검색 ${a.topic.factors.volume.toLocaleString()})` : ""}`,
+    /* 🔴 [R8-라 · DESIGN §5C.6-2] **잰 낱말을 그대로 준다.** 옛 줄은 «검색어: {소재 제목} (월 검색 N)» 이었는데
+       N 은 제목이 아니라 `bestVolume()` 이 고른 **다른 낱말**의 값이었다 — 모델이 틀린 문구를 노리고 썼다(AC-57 대용물).
+       🔴 그리고 **못 찾았으면 검색량 줄 자체를 뺀다.** 제목으로 대신 채우면 같은 거짓말이 이름만 바꿔 돌아온다(AC-9 «모르면 모른다»). */
+    a.topic.factors.keyword
+      ? `목표 검색어(이 낱말이 본문에 자연스럽게 들어가야 한다): ${a.topic.factors.keyword}${a.topic.factors.volume ? ` (월 검색 ${a.topic.factors.volume.toLocaleString()})` : ""}`
+      : "",
     a.personaFacts.length ? `내 사정(1~2개를 실제 장면으로 자연스럽게 · 나열 금지): ${a.personaFacts.join(" / ")}` : "내 사정: 1인 가구 직장인(넓게)",
     a.persona.tone ? `말투 힌트: ${a.persona.tone}` : "",
     a.persona.banned?.length ? `쓰지 말 것: ${a.persona.banned.join(", ")}` : "",
