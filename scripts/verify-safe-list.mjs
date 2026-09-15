@@ -1,0 +1,77 @@
+/**
+ * scripts/verify-safe-list.mjs — 🔴 **어느 검사를 «다 돌려도» 되나**(C · 2026-09-16).
+ *   사용: node scripts/verify-safe-list.mjs          (목록만 찍는다 · 아무것도 안 돌린다)
+ *         node scripts/verify-safe-list.mjs --run    (🔴 **안전한 것만** 차례로 돌리고 종료코드를 찍는다)
+ *
+ *   ══ 왜 ══
+ *   2026-09-16 C 가 «전수 검사»를 한다며 `for f in scripts/verify-*.mjs` 로 **통째로** 돌렸다.
+ *   그 안에 **라이브에 가입을 만드는 하니스**가 섞여 있었다(`verify-live-c6.mjs` — 실제로 테넌트가 생겼다).
+ *   🔴 «라이브는 읽기만»이라는 지시를 지키고 있다고 **믿으면서** 어긴 것이다. 다행히 그 하니스들은 스스로 치우지만,
+ *   teardown 이 실패하는 날엔 라이브에 쌓인다(2026-09-15 대청소 88집의 일부가 그것이었다).
+ *
+ *   ⇒ **글로브로 검사를 돌리지 않는다.** 이 파일이 세 갈래로 갈라 준다:
+ *     · `safe`  — 파일만 읽는다. 언제나 돌려도 된다.
+ *     · `live`  — 🔴 **라이브에 쓴다**(가입·발행·결제). 사람이 뜻을 갖고 하나씩 돌린다.
+ *     · `needs` — 돌리려면 뭔가 더 있어야 한다(개발 서버·인자·실호출 = 돈).
+ *
+ *   🔴 갈래는 **파일을 읽어서** 정한다 — 손으로 든 목록이면 새 하니스가 생길 때마다 낡는다(AC-82).
+ */
+import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+
+const files = readdirSync("scripts").filter((f) => /^verify-.*\.(mjs|mts)$/.test(f)).sort();
+
+/**
+ * 🔴 이 낱말들이 있으면 **밖으로 나가거나 라이브를 만진다**고 본다(의심되면 안전한 쪽으로 — `live` 로 민다).
+ *   🔴 [2026-09-16 고침] 첫 판은 «쓰기»만 봤다 — 그래서 **라이브 DB 에 붙어 읽기만 하는** 하니스 둘
+ *      (`verify-coin-reconcile`·`verify-r8a-text-probe`)이 `safe` 로 떨어졌고, 연결이 끊기자 «실패 2건»으로 찍혔다.
+ *      읽기여도 **라이브에 붙는 것은 safe 가 아니다**: 네트워크가 나쁜 날 빨강이 되고, 접속 수를 먹고, 무엇보다
+ *      «언제나 돌려도 되는 것»이라는 이 갈래의 뜻과 다르다. ⇒ **DB·네트워크에 닿으면 전부 `live`**.
+ */
+const WRITES = /\bfetch\s*\(|BASE_URL|autocreate-endyd|\/api\/auth-register|teardownRun|sql`\s*(INSERT|UPDATE|DELETE)|NETLIFY_DATABASE_URL|from "postgres"|db\/index|\.\.\/db\b/i;
+/** 개발 서버·인자·실호출이 필요한 것. */
+const NEEDS = /localhost:\d+|process\.argv\[2\]|사용법:|GEMINI_API_KEY/;
+/** 🔴 «읽기만»이라고 **스스로 못 박은** 파일은 그 말을 믿되, 쓰기 낱말이 있으면 그 말보다 코드가 이긴다. */
+const SAYS_READONLY = /읽기만|읽기 전용|SELECT 만/;
+
+const groups = { safe: [], live: [], needs: [] };
+for (const f of files) {
+  const src = readFileSync(`scripts/${f}`, "utf8");
+  const writes = WRITES.test(src);
+  const needs = NEEDS.test(src);
+  if (writes) groups.live.push([f, SAYS_READONLY.test(src) ? "🟠 «읽기만»이라 적혀 있는데 쓰기 낱말이 있다 — 사람이 확인" : "라이브에 쓰거나 밖으로 나간다"]);
+  else if (needs) groups.needs.push([f, "개발 서버·인자·실호출이 필요"]);
+  else groups.safe.push([f, "파일만 읽는다"]);
+}
+
+const RUN = process.argv.includes("--run");
+console.log(`\n검사 갈래 — «전부 돌린다»가 안전하지 않다 · ${new Date().toISOString()}\n${"─".repeat(112)}`);
+console.log(`■ safe ${groups.safe.length}개 — 언제나 돌려도 된다`);
+for (const [f] of groups.safe) console.log(`   · ${f}`);
+console.log(`\n■ 🔴 live ${groups.live.length}개 — **라이브에 쓴다. 글로브로 돌리지 마라.**`);
+for (const [f, why] of groups.live) console.log(`   · ${f}  (${why})`);
+console.log(`\n■ needs ${groups.needs.length}개 — 뭔가 더 있어야 돈다`);
+for (const [f, why] of groups.needs) console.log(`   · ${f}  (${why})`);
+console.log(`${"─".repeat(112)}`);
+
+if (!RUN) { console.log("목록만 찍었다. 안전한 것만 돌리려면 --run."); process.exit(0); }
+
+let bad = 0;
+console.log("\n안전한 것만 돌린다(종료코드):");
+for (const [f] of groups.safe) {
+  if (f === "verify-safe-list.mjs") continue;
+  /* 🔴 [2026-09-16] 첫 판은 `execFileSync("npx", ["tsx", …])` 였다 — **Windows 에서 `npx` 는 `npx.cmd`** 라
+     `execFileSync` 가 못 찾고 통째로 던졌다. 그래서 `.mts` **33개가 전부 «실패»로** 찍혔다 —
+     바로 앞에서 손으로 돌렸을 땐 46 통과였는데도. **내 실행기가 거짓 빨강을 낸 것**이다(AC-67 의 사촌:
+     이번엔 셸이 아니라 «셸이 아니어서» 났다). ⇒ `shell: true` 로 부르고, **한 개도 못 돌면 고장으로 센다**. */
+  const isTs = f.endsWith(".mts");
+  const cmd = isTs ? `npx tsx scripts/${f}` : `"${process.execPath}" scripts/${f}`;
+  let code = 0;
+  /* 🔴 **파이프로 넘기지 않는다** — `| tail` 을 쓰면 실패해도 0 이 온다(AC-67). 종료코드를 그대로 받는다. */
+  try { execFileSync(cmd, { stdio: "ignore", shell: true }); } catch (e) { code = e.status ?? 1; }
+  if (code) bad++;
+  console.log(`  ${code ? "✗" : "✓"} ${f}=${code}`);
+}
+console.log(`${"─".repeat(112)}`);
+console.log(bad ? `🔴 실패 ${bad}개` : `✅ 안전한 검사 ${groups.safe.length - 1}개 전부 통과`);
+process.exit(bad ? 1 : 0);
