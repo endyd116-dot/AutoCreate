@@ -899,3 +899,49 @@ export const accountSlots = pgTable("account_slots", {
 /** 갱신 차감 멱등 ref = `slot:{slotId}:{periods_charged+1}`(coin_ledger 유니크) — 기간마다 유일 · 재시도는 같은 번호라 두 번 안 받는다.
  *  ⚠️ «달(YYYYMM)» 은 31일 달 1일 구매가 같은 달 31일 갱신과 겹쳐 한 달치 공짜 · «날짜» 는 같은 날 개시→쉼→재개가 겹친다(둘 다 스모크에서 잡음). */
 export const accountSlotsR7 = { refPrefix: "slot:", dueIdx: "account_slots_due_idx", accountUniq: "account_slots_account_uniq", proxyUniq: "account_slots_proxy_uniq" } as const;
+
+/* === Phase 1 R8 · B(신고 대응 · 분 단위 편성 · AI 원가 분류 · P1R8-B · 2026-09-15 · drizzle/0022~0024 와 동시 · CLAUDE §4.4 append-only) === */
+/** 침해 통지 접수·대응(DESIGN §5E.2). 🔴 «우리가 남의 플랫폼 글을 내리기»는 없다 — 우리 안에서 막고·세우고·알리고·단계 정지까지. */
+export const takedownNotices = pgTable("takedown_notices", {
+  id:             bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:       bigint("tenant_id", { mode: "number" }).notNull(),
+  pieceId:        bigint("piece_id", { mode: "number" }),
+  postId:         bigint("post_id", { mode: "number" }),
+  accountId:      bigint("account_id", { mode: "number" }),
+  channel:        varchar("channel", { length: 24 }),
+  externalUrl:    varchar("external_url", { length: 500 }),
+  /** copyright | defamation | privacy | policy | other */
+  kind:           varchar("kind", { length: 16 }).notNull().default("copyright"),
+  claimant:       varchar("claimant", { length: 160 }),
+  evidence:       text("evidence"),
+  /** 🔴 고객에게 보이는 **사람말 사유** — «침해 통지»라고만 쓰면 뭘 해야 할지 모른다(5자 미만이면 접수 거부). */
+  reason:         text("reason"),
+  /** 원문 해시 — 같은 본문으로 다시 구워도 막는 기준(`lib/takedown.ts contentHash`). */
+  contentHash:    varchar("content_hash", { length: 64 }),
+  receivedBy:     bigint("received_by", { mode: "number" }),
+  receivedAt:     timestamp("received_at").notNull().defaultNow(),
+  dueAt:          timestamp("due_at").notNull(),
+  /** open | customer_removed | retracted | disconnected | suspended | dismissed | resolved */
+  status:         varchar("status", { length: 16 }).notNull().default("open"),
+  disconnectedAt: timestamp("disconnected_at"),
+  suspendedAt:    timestamp("suspended_at"),
+  resolvedAt:     timestamp("resolved_at"),
+  resolvedBy:     bigint("resolved_by", { mode: "number" }),
+  resolution:     text("resolution"),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ tenantIdx: index("takedown_tenant_idx").on(t.tenantId, t.status) }));
+export const postsR8 = {
+  /** 내려간 사실만 적는다 — **행은 지우지 않는다**(수익 귀속·감사가 남아야 한다 · DESIGN §5E.3). */
+  retractedAt: "retracted_at", retractReason: "retract_reason",
+} as const;
+export const aiUsageR8 = {
+  /** 쓰는 순간의 «우리 테스트 집인가» 스냅샷 — 🔴 부모(tenants)를 지워도 분류가 남는다(고아 103행 $9.98 사고). */
+  isInternal: "is_internal",
+  /** 실제 호출이 아닌 행(하니스가 상한 시험용으로 적는 것) — 지우지 않고 표시해서 기본 집계에서 뺀다. */
+  synthetic: "synthetic",
+} as const;
+export const cadenceRulesR8 = {
+  /** 규칙이 못 박은 «분»(0~59 · NULL = 00). 사장님 안 «A 10:00 · B 10:05 · A 11:00» 을 규칙 3행으로 표현한다. */
+  preferredMinute: "preferred_minute",
+} as const;

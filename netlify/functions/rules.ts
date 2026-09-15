@@ -80,6 +80,8 @@ export default async (req: Request): Promise<Response> => {
           accountId = n(a.id);
         }
         const ph = r.preferredHour === null || r.preferredHour === undefined || r.preferredHour === "" ? undefined : Math.trunc(n(r.preferredHour));
+        /* [R8] 분까지 못 박기(사장님 안 «10:05»). 🔴 시각을 안 정한 규칙에는 분을 받지 않는다 — «분만 5분»은 뜻이 없다. */
+        const pm = r.preferredMinute === null || r.preferredMinute === undefined || r.preferredMinute === "" ? undefined : Math.trunc(n(r.preferredMinute));
         /* [P1R5 B-1 수정] kind — 영상 채널이면 shorts(요청이 말하지 않아도 채널이 정한다 · 글 채널에 shorts 를 넣지 않는다).
            🔴 플랜 한도(maxRules)는 kind 와 무관한 «규칙 개수» 합산이다 — 아래 activeCount 가 그대로 센다(채널·종류별 한도 아님). */
         const kind: RuleKind = isVideoChannel(channel) ? "shorts" : (String(r.kind) === "shorts" ? "shorts" : "post");
@@ -89,6 +91,7 @@ export default async (req: Request): Promise<Response> => {
         if (accountId) o.accountId = accountId;
         if (weekdays.length) o.weekdays = weekdays;
         if (ph !== undefined && ph >= 0 && ph <= 23) o.preferredHour = ph;
+        if (o.preferredHour !== undefined && pm !== undefined && pm >= 0 && pm <= 59) o.preferredMinute = pm;
         if (r.formatHint) o.formatHint = String(r.formatHint).slice(0, 24);
         clean.push(o);
       }
@@ -101,11 +104,11 @@ export default async (req: Request): Promise<Response> => {
       for (const r of clean) {
         if (r.id && existing.some((e) => e.id === r.id)) {
           await q(sql`UPDATE cadence_rules SET channel = ${r.channel}, kind = ${r.kind}, account_mode = ${r.accountMode}, account_id = ${r.accountId ?? null}, every = ${r.every}, count = ${r.count},
-            weekdays = ${r.weekdays ? jsonb(r.weekdays) : null}, preferred_hour = ${r.preferredHour ?? null}, format_hint = ${r.formatHint ?? null}, active = ${r.active} WHERE tenant_id = ${tid} AND id = ${r.id}`);
+            weekdays = ${r.weekdays ? jsonb(r.weekdays) : null}, preferred_hour = ${r.preferredHour ?? null}, preferred_minute = ${r.preferredMinute ?? null}, format_hint = ${r.formatHint ?? null}, active = ${r.active} WHERE tenant_id = ${tid} AND id = ${r.id}`);
           keep.add(r.id);
         } else {
-          const [row] = await q(sql`INSERT INTO cadence_rules (tenant_id, channel, kind, account_mode, account_id, every, count, weekdays, preferred_hour, format_hint, active)
-            VALUES (${tid}, ${r.channel}, ${r.kind}, ${r.accountMode}, ${r.accountId ?? null}, ${r.every}, ${r.count}, ${r.weekdays ? jsonb(r.weekdays) : null}, ${r.preferredHour ?? null}, ${r.formatHint ?? null}, ${r.active}) RETURNING id`);
+          const [row] = await q(sql`INSERT INTO cadence_rules (tenant_id, channel, kind, account_mode, account_id, every, count, weekdays, preferred_hour, preferred_minute, format_hint, active)
+            VALUES (${tid}, ${r.channel}, ${r.kind}, ${r.accountMode}, ${r.accountId ?? null}, ${r.every}, ${r.count}, ${r.weekdays ? jsonb(r.weekdays) : null}, ${r.preferredHour ?? null}, ${r.preferredMinute ?? null}, ${r.formatHint ?? null}, ${r.active}) RETURNING id`);
           keep.add(n(row?.id));
         }
       }

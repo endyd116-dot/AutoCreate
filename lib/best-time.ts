@@ -36,11 +36,17 @@ export interface PickArgs {
   goldenHours?: number[] | null;
   /** 규칙 고정 시각 — 있으면 이 시각만(bestTimeMode fixed). */
   preferredHour?: number | null;
+  /** [R8] 규칙 고정 **분**(0~59 · 사장님 안 «10:05»). preferredHour 가 있을 때만 쓴다. */
+  preferredMinute?: number | null;
   /** 같은 테넌트·같은 채널에서 이미 잡힌 시각들(UTC) — 30분 간격. */
   taken: Date[];
   /** 같은 계정의 이미 잡힌 시각들(UTC) — min_gap 준수. */
   takenSameAccount?: Date[];
   minGapMin?: number;
+  /** [R8] 같은 채널 **다른 계정**과의 간격(분). 🔴 값은 `lib/publish-gap.ts gapMinFor`(B2)가 정한다 — 여기서 다시 적지 않는다. 없으면 30. */
+  gapMin?: number;
+  /** [R8] 고객이 **시각을 못 박았을 때** 허용하는 최소 간격(분) — 전용 IP 가 확인된 계정끼리는 5분까지(B2 `floorMin`). 없으면 gapMin. */
+  gapFloorMin?: number;
   /** 시작 날짜(KST 'YYYY-MM-DD') — 기본 오늘. */
   fromDate?: string;
   now?: Date;
@@ -49,8 +55,11 @@ export interface PickArgs {
 }
 
 /** 후보 시각 목록(KST h:m). */
-export function candidatesFor(channel: string, goldenHours?: number[] | null, preferredHour?: number | null): { h: number; m: number }[] {
-  if (typeof preferredHour === "number" && preferredHour >= 0 && preferredHour <= 23) return [{ h: preferredHour, m: 0 }];
+export function candidatesFor(channel: string, goldenHours?: number[] | null, preferredHour?: number | null, preferredMinute?: number | null): { h: number; m: number }[] {
+  if (typeof preferredHour === "number" && preferredHour >= 0 && preferredHour <= 23) {
+    const m = typeof preferredMinute === "number" && preferredMinute >= 0 && preferredMinute <= 59 ? Math.floor(preferredMinute) : 0;
+    return [{ h: preferredHour, m }];   // [R8] 못 박은 시각은 **분까지** 그대로(«10:05»)
+  }
   if (Array.isArray(goldenHours) && goldenHours.length) return goldenHours.filter((h) => h >= 0 && h <= 23).map((h) => ({ h, m: 0 }));
   return BEST_HOURS[channel] ?? [{ h: 9, m: 0 }];
 }
@@ -67,21 +76,27 @@ export function pickPublishAt(a: PickArgs): { at: Date; reason: string } {
   const now = a.now ?? new Date();
   const lead = 20 * 60_000;   // 지금부터 최소 20분 뒤
   const start = a.fromDate ?? kstDateStr(now);
-  const cands = candidatesFor(a.channel, a.goldenHours, a.preferredHour);
-  const gapAcc = Math.max(ACCOUNT_GAP_MIN, a.minGapMin ?? 0);
+  const cands = candidatesFor(a.channel, a.goldenHours, a.preferredHour, a.preferredMinute);
+  /* 🔴 [R8] 같은 채널 다른 계정과의 간격은 **정책이 정한다**(B2 `gapMinFor` → 호출부가 넘긴다).
+     고객이 시각을 못 박았으면 «바닥»(floor)까지 좁힐 수 있다 — 전용 IP 가 확인된 계정끼리는 5분.
+     그래야 사장님 안(«A 10:00 · B 10:05»)이 **정책이 허락하는 만큼** 그대로 선다. */
+  const pinned = typeof a.preferredHour === "number";
+  const crossGap = Math.max(1, pinned ? (a.gapFloorMin ?? a.gapMin ?? ACCOUNT_GAP_MIN) : (a.gapMin ?? ACCOUNT_GAP_MIN));
+  const gapAcc = Math.max(crossGap, a.minGapMin ?? 0);
   const maxDays = a.maxDaysAhead ?? 14;
   for (let d = 0; d <= maxDays; d++) {
     const date = addDays(start, d);
     for (const c of cands) {
       for (let shift = 0; shift <= 3; shift++) {
-        const at = new Date(kstToUtc(date, c.h, c.m).getTime() + shift * ACCOUNT_GAP_MIN * 60_000);
+        const at = new Date(kstToUtc(date, c.h, c.m).getTime() + shift * crossGap * 60_000);
         if (at.getTime() < now.getTime() + lead) continue;
-        if (conflicts(at, a.taken, ACCOUNT_GAP_MIN)) continue;
+        if (conflicts(at, a.taken, crossGap)) continue;
         if (a.takenSameAccount && conflicts(at, a.takenSameAccount, gapAcc)) continue;
-        const hh = String(c.h).padStart(2, "0"), mm = String(c.m + shift * ACCOUNT_GAP_MIN).padStart(2, "0");
+        const kk = new Date(at.getTime() + 9 * 3600_000);
+        const hh = String(kk.getUTCHours()).padStart(2, "0"), mm = String(kk.getUTCMinutes()).padStart(2, "0");
         const why = a.preferredHour != null ? "규칙에 고정한 시각" : a.goldenHours?.length ? "이 계정의 골든타임" : "이 채널에서 반응이 좋은 시각";
         const dayWord = d === 0 ? "오늘" : d === 1 ? "내일" : `${date.slice(5).replace("-", "/")}`;
-        return { at, reason: `${dayWord} ${hh}:${mm} — ${why}${shift ? " · 다른 계정과 30분 간격" : ""}` };
+        return { at, reason: `${dayWord} ${hh}:${mm} — ${why}${shift ? ` · 다른 계정과 ${crossGap}분 간격` : ""}` };
       }
     }
   }

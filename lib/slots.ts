@@ -13,6 +13,7 @@ import { defaultImageCount } from "./writing-contracts";
 import { coinCostOf, videoCoinItem } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
+import { gapMinFor } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -52,12 +53,13 @@ export async function readScheduleSettings(tid: number): Promise<ScheduleSetting
 /* ───────── Rule ───────── */
 /** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다. */
 export type RuleKind = "post" | "shorts";
-export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; formatHint?: string; active: boolean }
+export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; preferredMinute?: number; formatHint?: string; active: boolean }
 export function toRule(r: Row): Rule {
   const o: Rule = { id: n(r.id), channel: String(r.channel), kind: (String(r.kind) === "shorts" ? "shorts" : "post"), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
   if (r.account_id) o.accountId = n(r.account_id);
   if (Array.isArray(r.weekdays) && r.weekdays.length) o.weekdays = (r.weekdays as unknown[]).map(Number).filter((d) => d >= 0 && d <= 6);
   if (r.preferred_hour !== null && r.preferred_hour !== undefined) o.preferredHour = n(r.preferred_hour);
+  if (r.preferred_minute !== null && r.preferred_minute !== undefined) o.preferredMinute = n(r.preferred_minute);   // [R8] 분까지 못 박기(옛 규칙은 없으면 00)
   if (r.format_hint) o.formatHint = String(r.format_hint);
   return o;
 }
@@ -128,6 +130,8 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
   for (const e of existing) { if (String(e.status) === "skipped" || String(e.status) === "rejected") continue; const at = utcDate(e.publish_at); if (!at) continue; const k = `${e.channel}:${String(e.d).slice(0, 10)}`; takenBy.set(k, [...(takenBy.get(k) ?? []), at]); }   // [P1R7 B3] 버린(rejected) 자리도 건너뛴(skipped) 자리와 같이 — 그 시각을 점유하지 않는다
   const accounts = await q(sql`SELECT id, golden_hours FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
   const golden = new Map(accounts.map((a) => [n(a.id), Array.isArray(a.golden_hours) ? (a.golden_hours as unknown[]).map(Number) : null]));
+  /** 계정별 간격 정책(B2 `gapMinFor`)을 이 한 바퀴 동안 한 번만 묻는다 — 규칙 수만큼 질의하지 않게. */
+  const gapCache = new Map<number, Awaited<ReturnType<typeof gapMinFor>>>();
   let created = 0, checked = 0;
   for (let d = 0; d <= horizon; d++) {
     const date = addDays(today, d);
@@ -138,15 +142,20 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
       const key = `${r.id}:${date}`;
       if (have.has(key)) continue;
       const accountId = r.accountMode === "fixed" && r.accountId ? r.accountId : null;
-      const preferred = settings.bestTimeMode === "fixed" ? (r.preferredHour ?? null) : (r.preferredHour ?? null);
-      const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred);
+      const preferred = r.preferredHour ?? null;
+      const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred, r.preferredMinute ?? null);
+      /* 🔴 [R8] 같은 채널 다른 계정과의 간격 = **정책 한 곳**(B2 `lib/publish-gap.ts gapMinFor`).
+         전용 IP 가 확인된 계정끼리는 바닥이 5분이라, 고객이 못 박은 «10:00 / 10:05» 가 그대로 선다.
+         계정을 안 정한 규칙(auto)은 기본 간격(30분)으로 둔다 — 누구로 나갈지 모르니 보수적으로. */
+      const gap = accountId ? (gapCache.get(accountId) ?? await (async () => { const g = await gapMinFor(tid, accountId); gapCache.set(accountId, g); return g; })()) : null;
+      const crossGap = Math.max(1, preferred !== null ? (gap?.floorMin ?? ACCOUNT_GAP_MIN) : (gap?.gapMin ?? ACCOUNT_GAP_MIN));
       const tk = `${r.channel}:${date}`; const taken = takenBy.get(tk) ?? [];
       let at: Date | null = null;
       for (const c of cands) {
         for (let shift = 0; shift <= 3 && !at; shift++) {
-          const t = new Date(kstToUtc(date, c.h, c.m).getTime() + shift * ACCOUNT_GAP_MIN * 60_000);
+          const t = new Date(kstToUtc(date, c.h, c.m).getTime() + shift * crossGap * 60_000);
           if (t.getTime() < now.getTime() + 20 * 60_000) continue;
-          if (taken.some((x) => Math.abs(x.getTime() - t.getTime()) < ACCOUNT_GAP_MIN * 60_000)) continue;
+          if (taken.some((x) => Math.abs(x.getTime() - t.getTime()) < crossGap * 60_000)) continue;
           at = t;
         }
         if (at) break;
