@@ -494,6 +494,11 @@ export async function contractFor(channel: string, emotionKey?: string | null): 
 }
 
 /** 채널의 기본 이미지 수(coinsPerWeek·디렉터 imageCount). */
+/** [R8] 그 채널이 **한 가지 구성만** 쓰면 그 구성(인스타 = `cardnews`). 🔴 값 매기는 방식이 갈린다 — 카드뉴스는 장수로 안 세고 통째로 3코인이다. */
+export function soleFormatOf(channel: string): FormatKey | null {
+  const c = WRITING_CONTRACTS[channel];
+  return c && c.formats.length === 1 ? c.formats[0] : null;
+}
 export function defaultImageCount(channel: string): number { return (WRITING_CONTRACTS[channel] ?? WRITING_CONTRACTS.naver_blog).images.default; }
 
 /** 문자열 시드 → 결정론 해시(AM hashSeed). */

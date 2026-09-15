@@ -2,6 +2,8 @@
  * 디렉터 API(계약 P1R1 §3 v1.1):
  *   POST /api/director-propose { topicId }                → { brief:Brief }
  *   POST /api/director-confirm { briefId, pieces?:[PieceSpecPatch] } → 202 { briefId, pieceIds, coinsCharged, coinsLeft, usedTodaySlot? }   // 생성은 배경 함수 · 화면은 pieces-list 폴링
+ *   POST /api/director-estimate { briefId, pieces?:[PieceSpecPatch] } → { coinCost, coinsLeft, enough, need, pieces:[{key,channel,kind,coinCost,imageCount,aiCount}] }
+ *     🔴 **누르기 전에 몇 코인인지.** 아무것도 쓰지 않는다 · confirm 과 같은 `applyPatches` 를 타서 견적과 실제가 갈릴 수 없다.
  *     [R7 §1.6] `usedTodaySlot:{ slotId, channel, publishAt, prevStatus }` = 오늘 이미 잡혀 있던 편성 자리에 넣었다(새 자리를 만들지 않았다) → 화면 «오늘 자리에 넣었어요».
  *     ✗ 코인 부족 → { ok:false, step:"coin_short", error, need, have }
  */
@@ -10,10 +12,10 @@ import { readJson } from "../../lib/validate";
 import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
-import { propose, confirm, type PieceSpecPatch } from "../../lib/director";
+import { propose, confirm, estimate, type PieceSpecPatch } from "../../lib/director";
 import { requireFeature } from "../../lib/plans";
 
-export const config = { path: ["/api/director-propose", "/api/director-confirm"] };
+export const config = { path: ["/api/director-propose", "/api/director-confirm", "/api/director-estimate"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
@@ -31,6 +33,12 @@ export default async (req: Request): Promise<Response> => {
       if (!r.ok) return json(r, r.step === "not_found" ? 404 : 400);
       await writeAudit({ tenantId: tid, action: "director_propose", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `brief:${r.brief.id}`, detail: { topicId, pieces: r.brief.pieces.length, coinCost: r.brief.coinCost } });
       return json({ ok: true, brief: r.brief });
+    }
+    if (path.endsWith("/director-estimate")) {
+      const b = await readJson<{ briefId?: unknown; pieces?: unknown }>(req);
+      const briefId = Number(b.briefId || 0); if (!briefId) return badRequest("briefId");
+      const r = await estimate(tid, briefId, Array.isArray(b.pieces) ? (b.pieces as PieceSpecPatch[]) : []);
+      return r.ok ? json(r) : json(r, r.step === "not_found" ? 404 : 400);
     }
     if (path.endsWith("/director-confirm")) {
       const w = await requireWritable(tid); if (!w.ok) return w.res;   // 체험 종료(readonly)·정지(suspended)면 생성 금지(P1R4 §1.3)

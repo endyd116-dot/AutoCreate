@@ -66,7 +66,10 @@ export interface ConsumeOpts {
  *   같은 (tid,'consume',ref) 가 이미 있으면 charged 0 · ok true(재생성·수리·재시도 무료).
  */
 export async function consume(tid: number, item: CoinItem, ref: string, opts: ConsumeOpts = {}): Promise<ConsumeResult> {
-  const cost = Number.isFinite(opts.cost) && (opts.cost as number) > 0 ? Math.floor(opts.cost as number) : coinCostOf(item);
+  /* 🔴 [R8] **운영센터 단가 오버레이를 여기서 읽는다.** 전에는 `coinCostOverlay()` 가 **어디서도 안 불렸다** —
+     운영센터에서 값을 바꾸면 화면 견적만 바뀌고 **실제 차감은 코드 표 그대로**였다(가장 나쁜 종류: «바꿨는데 안 바뀐 줄 모른다»).
+     오버레이를 못 읽으면 코드 표로 간다(값을 못 읽었다고 공짜로 주지 않는다 · fail-closed). */
+  const cost = Number.isFinite(opts.cost) && (opts.cost as number) > 0 ? Math.floor(opts.cost as number) : await priceOf(item);
   const key = String(ref || "").trim();
   const allowPurchased = typeof opts.allowPurchased === "boolean" ? opts.allowPurchased : (opts.auto ? await autoUsePurchased(tid) : true);
   const label = (opts.reason || COIN_ITEM_LABEL[item] || item).slice(0, 200);
@@ -123,6 +126,38 @@ export async function grant(tid: number, coins: number, reason: string, actorId:
     const b = await balance(tid);
     return { ok: false, granted: 0, balance: b.balance };
   }
+}
+
+/** [R8] 단가 한 곳 — 운영센터 오버레이 → 없거나 못 읽으면 코드 표. 🔴 «못 읽음»을 «0원»으로 읽지 않는다(AC-9). */
+async function priceOf(item: CoinItem): Promise<number> {
+  try {
+    const { coinCostOverlay } = await import("./billing/packs");
+    const v = await coinCostOverlay(item);
+    return Number.isFinite(v) && v >= 0 ? Math.floor(v) : coinCostOf(item);
+  } catch (e) { console.warn("[coin-ledger] 오버레이 단가 읽기 실패 — 코드 표로", String((e as Error)?.message ?? e).slice(0, 80)); return coinCostOf(item); }
+}
+
+/**
+ * [R8 · 사장님 승인 2026-09-15] settlePieceCoins — **덜 썼으면 돌려준다. 더 받지는 않는다.**
+ *   선차감은 «계획한 AI 사진 장수»로 한다. 그런데 **실제로 AI 를 몇 장 구웠는지는 만들어 봐야 안다** —
+ *   사진이 «내 사진 → 스톡 → AI» 순서로 채워져서 스톡이 먼저 가져갈 수 있기 때문이다.
+ *   🔴 **더 받지 않는다**: 실제가 계획보다 많아도 추가 차감은 없다. 그 몫은 우리가 안고, **감사에 남긴다**(조용히 먹지 않는다).
+ *   🔴 재생성(`piece:{id}:regen*`)은 **건드리지 않는다** — 그건 이 정산의 대상이 아니다(고객이 따로 누른 것).
+ *   반환: 돌려준 코인 수(0이면 정산할 것 없음).
+ */
+export async function settlePieceCoins(tid: number, pieceId: number, want: number): Promise<number> {
+  try {
+    const target = Math.max(0, Math.floor(Number(want) || 0));
+    const [c] = await rows(db, sql`SELECT COALESCE(SUM(-delta),0) AS c FROM coin_ledger
+      WHERE tenant_id = ${tid} AND kind = 'consume' AND (ref = ${`piece:${pieceId}`} OR ref LIKE ${`piece:${pieceId}:img%`})`);
+    const [g] = await rows(db, sql`SELECT COALESCE(SUM(delta),0) AS g FROM coin_ledger
+      WHERE tenant_id = ${tid} AND kind = 'grant' AND ref LIKE ${`refund:piece:${pieceId}:settle%`}`);
+    const consumed = Number(c?.c || 0), refunded = Number(g?.g || 0);
+    const back = consumed - refunded - target;
+    if (back <= 0) return 0;
+    const r = await grant(tid, back, `사진을 덜 써서 돌려드린 코인(piece ${pieceId})`, null, `refund:piece:${pieceId}:settle:c${consumed}`);
+    return r.granted;
+  } catch (e) { console.error("[coin-ledger] settlePieceCoins 실패", tid, pieceId, String((e as Error)?.message ?? e).slice(0, 120)); return 0; }
 }
 
 /**

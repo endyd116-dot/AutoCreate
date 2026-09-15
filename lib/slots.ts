@@ -9,8 +9,8 @@
 import { sql } from "drizzle-orm";
 import { utcDate, jsonb } from "./db-util";
 import { q } from "./accounts";
-import { defaultImageCount } from "./writing-contracts";
-import { coinCostOf, videoCoinItem } from "./coin-table";
+import { defaultImageCount, soleFormatOf } from "./writing-contracts";
+import { pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
 import { gapMinFor } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다
@@ -87,9 +87,15 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
  *  **같은 규칙**이어야 한다 — 갈리면 편성표가 말한 코인과 실제로 빠지는 코인이 달라진다(AC-74 «화면의 숫자도 서버가 정본»). */
 export function coinsPerWeek(rules: Rule[]): number {
   return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
+<<<<<<< HEAD
     const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60))
       : r.kind === "cardnews" ? coinCostOf("cardnews")
       : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
+=======
+    /* [R8] 🔴 기본 경로는 «AI 1장 + 나머지 스톡» 이라 글 한 편이 **1코인**이다(사장님 승인값).
+       사진 총 장수(`defaultImageCount`)로 세면 7코인이 되어 **화면이 옛 값을 말하게** 된다. */
+    const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: soleFormatOf(r.channel) ?? undefined });
+>>>>>>> feature/p1r8-back
     return a + weeklyCount(r) * per;
   }, 0));
 }
@@ -244,7 +250,10 @@ export interface Slot { id: number; date: string; channel: string; kind: string;
    *  🔴 잣대는 `lib/produce-window.ts` 한 곳이고 크론 `slots.produce` 가 같은 목록을 읽는다. 건너뜀·반려 자리엔 **키를 안 싣는다**(해당 없음). */
   produceWindow?: ProduceWindow;
   /** 그 판정의 **사람말 한 줄**. `missed` 는 반드시 «지금 할 수 있는 일»로 끝난다. */
-  produceReason?: string }
+  produceReason?: string;
+  /** [R8] **아직 안 만든 자리**에만 싣는다 — «지금 만들기»를 누르면 들어갈 코인(`slots-produce-now` 가 실제로 차감하는 것과 **같은 식**).
+   *  🔴 이미 만든 자리엔 안 싣는다(그 코인은 이미 나갔다 — «또 든다»로 읽히면 안 된다). */
+  coinCost?: number }
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -302,7 +311,11 @@ export async function listSlots(tid: number, from: string, to: string, now = new
       nextTickMs: tick, nextTickText: tickText, leadDays: settings.produceLeadDays,
       autoSchedule: settings.autoSchedule, blockedReason, note: o.note ?? null,
     });
-    if (pw) { o.produceWindow = pw.window; o.produceReason = pw.reason; }
+    if (pw) {
+      o.produceWindow = pw.window; o.produceReason = pw.reason;
+      /* «지금 만들기»가 얼마인지 — 누르기 전에 숫자로 안다(A 요청). 식은 `coin-table.pieceCoinCost` 한 곳이라 실제 차감과 갈릴 수 없다. */
+      if (pw.window !== "done") o.coinCost = pieceCoinCost(o.kind, AI_IMAGES_INCLUDED, { format: soleFormatOf(o.channel) ?? undefined });
+    }
     return o;
   });
 }

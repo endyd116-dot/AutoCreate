@@ -22,7 +22,7 @@ import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, t
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { gapMinFor } from "./publish-gap";
 import { balance, consume, refundPiece } from "./coin-ledger";
-import { coinCostOf, videoCoinItem } from "./coin-table";
+import { coinCostOf, videoCoinItem, pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
 import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
@@ -43,7 +43,12 @@ export interface Affiliate { provider: "coupang"; productQuery: string; slot: "m
 export interface PieceSpec {
   key: string; channel: string; accountId: number | null; accountHandle: string | null;
   format: FormatKey; emotionKey: string; composition: string; lengthHint: { words: number };
-  images: { count: number; style: "photo" | "illust" | "infographic"; heroNeeded: boolean };
+  /**
+   * `count` = 글에 들어갈 **사진 총 장수** · `aiCount` = 그중 **AI 로 구울 장수**(나머지는 내 사진·스톡이 채운다).
+   * 🔴 [R8] **코인은 `aiCount` 로만 매긴다** — 고객 사진·스톡은 우리 원가가 0이라 0코인이다.
+   *    그래서 화면에서 «사진을 더 넣을까»와 «AI 로 구울까»는 **다른 질문**이다(앞은 공짜, 뒤는 돈).
+   */
+  images: { count: number; style: "photo" | "illust" | "infographic"; heroNeeded: boolean; aiCount: number };
   /**
    * [R8-A §4] 대가 3종 — `adDisclosure` 는 **셋의 OR 결과**(파생값)다. 화면·서버가 따로 계산하지 않게 여기서 한 번 정한다.
    *   🔴 `sponsored`(원고료·PPL)·`gift`(제품 무상 제공)는 **우리가 알 수 없다** — 고객이 켜는 값이라 자동 경로 기본값은 false.
@@ -72,11 +77,12 @@ export interface PieceSpec {
   usesTodaySlot?: { slotId: number; publishAt: string };
 }
 export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
-export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null; sponsored?: boolean; gift?: boolean }; schedule?: { at: string }; drop?: true;
+export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string; aiCount?: number }; monetize?: { affiliate?: { productQuery: string; slot: string } | null; sponsored?: boolean; gift?: boolean }; schedule?: { at: string }; drop?: true;
   /** [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. */
   video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number } }
 
 const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
+<<<<<<< HEAD
 /**
  * 편당 코인. 글 = `blog` + 사진 장당 `image`.
  *   [R8 §2.5] 🔴 **카드뉴스는 `cardnews` 한 값**이다 — 카드 값이 그 안에 들어 있다.
@@ -87,6 +93,10 @@ const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?
  *      코인 표 재설계는 B 몫이고 최종 숫자는 사장님 몫이다(계약 §10.4). **여기서는 화면이 말한 값을 지킨다.**
  */
 const pieceCoin = (imageCount: number, cardnews = false) => (cardnews ? coinCostOf("cardnews") : coinCostOf("blog") + coinCostOf("image") * imageCount);
+=======
+/** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적과 실제 차감이 갈릴 수 없게. */
+const pieceCoin = (aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format });
+>>>>>>> feature/p1r8-back
 
 export function goalOf(pieces: { channel: string }[], intent: string): Goal {
   const set = new Set<Goal>();
@@ -309,7 +319,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
         format: (video.format === "clip" ? "story" : video.format === "talking" ? "qna" : "info") as FormatKey,
         emotionKey: "script", composition: `${video.seconds}초 ${video.format === "graphic" ? "그래픽 스토리" : video.format === "talking" ? "토킹" : "클립"}`,
         lengthHint: { words: Math.round(video.seconds * 4.6 * 0.85 / 2.2) },
-        images: { count: 0, style: "photo", heroNeeded: false },
+        images: { count: 0, style: "photo", heroNeeded: false, aiCount: 0 },
         monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
         schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: coinCostOf(videoCoinItem(video.seconds)), angle: topic.angle,
       });
@@ -320,9 +330,15 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       key: `${ch}:${acc?.id ?? 0}`, channel: ch, accountId: acc?.id ?? null, accountHandle: acc?.handle ?? null,
       kind: "post",
       format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
-      images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory" },
+      /* [R8] 🔴 기본은 **AI 1장 + 나머지는 스톡**이다 — 그래야 글 한 편이 1코인이다(사장님 승인값).
+         고객이 «AI 로 더 구워 줘»를 고르면 `images.aiCount` 가 올라가고 그만큼만 더 든다. */
+      images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory", aiCount: Math.min(imageCount, AI_IMAGES_INCLUDED) },
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
+<<<<<<< HEAD
       schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(imageCount, isCardnewsChannel(ch)), angle: topic.angle,
+=======
+      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
+>>>>>>> feature/p1r8-back
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
     });
   }
@@ -411,6 +427,9 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
     if (p.format !== undefined) { if (!c.formats.includes(p.format as FormatKey)) return { ok: false, error: "이 채널에서 쓸 수 없는 구성이에요." }; next.format = p.format as FormatKey; next.composition = c.formatLabel[next.format] || next.format; }
     if (p.emotionKey) next.emotionKey = String(p.emotionKey).slice(0, 40);
     if (p.images?.count !== undefined) next.images.count = Math.max(c.images?.min ?? 0, Math.min(c.images?.max ?? 10, Math.trunc(n(p.images.count))));
+    /* [R8] AI 로 구울 장수 — 총 장수를 넘을 수 없다. 🔴 **이 값만 코인을 움직인다**(사진을 더 넣는 것 자체는 공짜). */
+    if (p.images?.aiCount !== undefined) next.images.aiCount = Math.max(0, Math.min(next.images.count, Math.trunc(n(p.images.aiCount))));
+    if (next.images.aiCount > next.images.count) next.images.aiCount = next.images.count;
     if (p.images?.style && ["photo", "illust", "infographic"].includes(p.images.style)) next.images.style = p.images.style as PieceSpec["images"]["style"];
     /* [R8-A §4] 협찬·무상 제공 — 🔴 **끄는 길을 두지 않는다**: 여기서는 «켜기»만 받는다(false 를 보내도 내려가지 않는다).
        켜고 만든 뒤 끄면 «고지 없는 글»이 남기 때문이다. 내리려면 글을 버리거나 재검수로 다시 만든다(메인 판정 2026-09-15). */
@@ -446,10 +465,36 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       next.coinCost = coinCostOf(videoCoinItem(v.seconds));
       out.push(next); continue;
     }
+<<<<<<< HEAD
     next.coinCost = pieceCoin(next.images.count, isCardnewsChannel(next.channel));
+=======
+    next.coinCost = pieceCoin(next.images.aiCount, next.format);
+>>>>>>> feature/p1r8-back
     out.push(next);
   }
   return { ok: true, specs: out };
+}
+
+/**
+ * [R8 · 사장님 코인값 승인 2026-09-15] estimate — **누르기 전에 몇 코인인지.** 아무것도 쓰지 않는다(견적만).
+ *   🔴 왜 서버가 재는가: 화면이 «1 + AI 장수 − 1» 을 **다시 적으면** 값을 바꿀 때 한 쪽이 썩는다(AC-47).
+ *      `confirm` 과 **같은 `applyPatches`** 를 타므로 «견적에서 본 숫자»와 «실제로 빠진 숫자»가 갈릴 수 없다.
+ *   🔴 사진을 더 넣는 것은 **공짜**다(내 사진·스톡). `images.aiCount` 만 코인을 움직인다 — 화면에서 다른 질문으로 물어야 한다.
+ */
+export async function estimate(tid: number, briefId: number, patches: PieceSpecPatch[] = []): Promise<
+  | { ok: true; coinCost: number; coinsLeft: number; enough: boolean; need: number; pieces: { key: string; channel: string; kind: "post" | "video"; coinCost: number; imageCount: number; aiCount: number }[] }
+  | { ok: false; step: string; error: string }> {
+  const [b] = await q(sql`SELECT * FROM briefs WHERE tenant_id = ${tid} AND id = ${Math.floor(Number(briefId) || 0)}`);
+  if (!b) return { ok: false, step: "not_found", error: "지시서를 찾을 수 없어요." };
+  const base = (Array.isArray(b.pieces) ? b.pieces : []) as PieceSpec[];
+  const ap = await applyPatches(tid, base, Array.isArray(patches) ? patches : []);
+  if (!ap.ok) return { ok: false, step: "patch", error: ap.error };
+  const coinCost = ap.specs.reduce((a, s) => a + s.coinCost, 0);
+  const bal = await balance(tid);
+  return {
+    ok: true, coinCost, coinsLeft: bal.balance, enough: bal.balance >= coinCost, need: Math.max(0, coinCost - bal.balance),
+    pieces: ap.specs.map((s) => ({ key: s.key, channel: s.channel, kind: s.kind ?? "post", coinCost: s.coinCost, imageCount: s.images.count, aiCount: s.images.aiCount })),
+  };
 }
 
 export async function confirm(tid: number, briefId: number, patches: PieceSpecPatch[] = [], actorId: number | null = null, opts: ConfirmOpts = {}): Promise<ConfirmResult> {
@@ -552,7 +597,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : isCard ? "cardnews" : "blog";
       const meta = isVideo
         ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
-        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}) };
+        : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}) };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : isCard ? "cardnews" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);
@@ -589,10 +634,18 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : isCard ? `카드뉴스 ${s.images.count}장(${s.channel})` : `블로그 글(${s.channel})` });
       if (!c1.ok) { await rollback(c1.reason); return c1.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${c1.need}개 부족해요.`, need: c1.need, have: c1.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
       charged += c1.charged;
+<<<<<<< HEAD
       /* 🔴 [R8 §2.5] 카드뉴스는 **장당 코인을 또 받지 않는다** — `cardnews` 한 값에 카드 값이 들어 있다.
          여기서 또 받으면 3코인이라고 말해 놓고 3+8=11코인이 빠진다(이중 청구). */
       for (let i = 1; i <= (isVideo || isCard ? 0 : s.images.count); i++) {
         const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `이미지 ${i}/${s.images.count}` });
+=======
+      /* 🔴 [R8] **포함분(AI 1장)을 뺀 나머지 AI 사진만** 돈을 받는다. 고객 사진·스톡은 0코인이라 여기서 세지 않는다.
+         카드뉴스는 위 `coinItem` 이 통째로 값을 매기므로(장수로 안 센다) 이 줄을 아예 안 탄다. */
+      const billableImages = isVideo || s.format === "cardnews" ? 0 : Math.max(0, s.images.aiCount - AI_IMAGES_INCLUDED);
+      for (let i = 1; i <= billableImages; i++) {
+        const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(1장은 글값에 포함)` });
+>>>>>>> feature/p1r8-back
         if (!ci.ok) { await rollback(ci.reason); return ci.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${ci.need}개 부족해요.`, need: ci.need, have: ci.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
         charged += ci.charged;
       }
