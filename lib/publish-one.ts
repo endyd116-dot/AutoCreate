@@ -20,6 +20,7 @@ import { jsonb, utcDate } from "./db-util";
 import { classifyAndApply } from "./account-health";
 import { kstTimeText, notifyOnce, setSlot } from "./cron/base";
 import { publishPiece, runnerOffline, type PublishFailReason } from "./cron/publish-port";
+import { takedownBlock } from "./takedown";
 
 const n = (v: unknown) => Number(v || 0);
 export const MAX_ATTEMPTS = 3;
@@ -86,6 +87,17 @@ export async function publishOne(tid: number, p: PublishOneRow, opts: { now?: Da
   const pieceId = n(p.id), slotId = p.slot_id ? n(p.slot_id) : null;
   const meta = (p.meta && typeof p.meta === "object" ? p.meta : {}) as Record<string, unknown>;
   const title = String(p.title || "글");
+
+  /* 🔴 [R8 · DESIGN §5E.2-①] 신고가 접수된 글은 **다시 나가지 않는다**(같은 본문으로 다시 구워도 막힌다).
+     재시도 대상이 아니다 — 통지가 풀리기 전엔 같은 답이라 `not_publishable`(terminal) 로 종결한다. */
+  const blocked = await takedownBlock(tid, p);
+  if (blocked.blocked) {
+    await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ failReason: `${blocked.message ?? "신고로 막힌 글"} (takedown)`, takedownNoticeId: blocked.noticeId ?? null })}, updated_at = NOW()
+      WHERE tenant_id = ${tid} AND id = ${pieceId} AND status NOT IN ('published', 'publishing')`);
+    if (slotId) await setSlot(tid, slotId, "failed", "신고로 막힌 글이에요");
+    await writeAudit({ tenantId: tid, action: "publish_blocked_takedown", actorType: actor === "user" ? "user" : "system", riskLevel: "high", target: `piece:${pieceId}`, detail: { noticeId: blocked.noticeId ?? null } });
+    return { kind: "failed", reason: "not_publishable", why: blocked.message ?? "신고로 막힌 글이에요", error: `takedown:${blocked.noticeId ?? "?"}` };
+  }
 
   /* [P1R5 B-1] 영상 = 배경 업로드로 넘긴다(동기 26초 안에 mp4 를 못 올린다). 호출 실패는 삼키지 않는다(AC-16). */
   if (String(p.kind) === "video") {

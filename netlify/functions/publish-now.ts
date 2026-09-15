@@ -3,7 +3,7 @@
  *   지금까지는 승인 뒤 **5분 크론**만 있었다 — 고객이 «지금 올려»를 누를 길이 없었다.
  *
  *   → { ok:true, state:"published"|"queued"|"publishing"|"already", pieceId, postUrl?, runner?:{ online, offlineMin? }, message }
- *   400 `step`: "state"(승인 전·이미 나간 글) · "cadence"(오늘 한도·간격) · "gate"(발행 전 검사) · "publish"(그 밖의 실패 · 사람말 why)
+ *   400 `step`: "state"(승인 전·이미 나간 글) · "cadence"(오늘 한도·간격) · "takedown"(신고로 막힌 글) · "gate"(발행 전 검사) · "publish"(그 밖의 실패 · 사람말 why)
  *   403 쓰기 게이트(체험 종료·정지·탈퇴) · 503 `step:"connector"`(발행 커넥터 미연결 — 상태를 건드리지 않았다)
  *
  *   🔴 **발행 규칙은 크론과 한 벌**(`lib/publish-one.ts`) — 여기서 상태 전이를 다시 쓰지 않는다(두 벌이면 갈라진다).
@@ -25,6 +25,7 @@ import { ACCOUNT_GAP_MIN } from "../../lib/best-time";
 import { publishOne } from "../../lib/publish-one";
 import { publishPortStatus } from "../../lib/cron/publish-port";
 import { pausedAccountIds } from "../../lib/account-slots";
+import { takedownBlock } from "../../lib/takedown";
 
 export const config = { path: "/api/publish-now" };
 const n = (v: unknown) => Number(v || 0);
@@ -40,7 +41,7 @@ export default async (req: Request): Promise<Response> => {
     const pieceId = n(b.pieceId); if (!pieceId) return badRequest("어떤 글을 올릴지 골라 주세요.", "pieceId");
     const w = await requireWritable(tid); if (!w.ok) return w.res;
 
-    const [p] = await q(sql`SELECT p.id, p.title, p.channel, p.kind, p.status, p.account_id, p.slot_id, p.meta, p.scheduled_for,
+    const [p] = await q(sql`SELECT p.id, p.title, p.channel, p.kind, p.status, p.account_id, p.slot_id, p.meta, p.scheduled_for, p.body,
         a.handle, a.status AS account_status, a.daily_cap, a.min_gap_min, a.posts_today, a.last_post_at, a.created_at AS account_created_at, a.opened_at, a.warmup_off,
         (SELECT COUNT(*) FROM posts x WHERE x.account_id = a.id
            AND (x.published_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date >= (date_trunc('week', (NOW() AT TIME ZONE 'Asia/Seoul'))::date)) AS posts_this_week
@@ -61,6 +62,11 @@ export default async (req: Request): Promise<Response> => {
         ? "먼저 검수에서 승인해 주세요. 승인하면 바로 올릴 수 있어요."
         : "지금 상태로는 올릴 수 없어요. 발행함에서 상태를 확인해 주세요." }, 400);
     }
+
+    /* ── [R8 · DESIGN §5E.2-①] 신고로 막힌 글은 누르기 전에 말한다(발행 경로에서도 다시 막지만, 여기서 사람말을 준다) ── */
+    const tk = await takedownBlock(tid, p);
+    if (tk.blocked) return json({ ok: false, step: "takedown", noticeId: tk.noticeId ?? null,
+      error: tk.message ?? "신고가 접수된 글이라 다시 올릴 수 없어요.", reason: tk.reason ?? undefined }, 400);
 
     /* ── 캐던스(§4.7) — 계정이 있는 글만. 영상처럼 계정 없이 만든 글은 이 검사를 건너뛴다(올릴 계정이 없으면 아래 publishOne 이 사람말로 답한다). ── */
     const accountId = p.account_id ? n(p.account_id) : 0;
