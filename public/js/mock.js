@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 8;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 9;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -37,6 +37,13 @@
   const whyNone = qs.get("why") === "none";   /* [R8-A] 형식이 없어 주제군을 못 정한 글(서버가 topicGroup:null 로 준다) */
   const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
+  /* [R8-A2 §5D①·§5E] 직접 쓰기·내리기 손잡이
+     ?self=cadence → 직접 쓰기가 캐던스 400(publish-now 와 **같은 모양**) · ?self=noacc → 계정이 없어 자리를 못 잡은 길(notice)
+     ?td=open → 살아 있는 신고 1건(대신 내릴 수 있는 채널) · ?td=noway → 우리가 못 내리는 채널(유튜브) · ?td=done → 끝난 신고만
+     ?claims=1 → 근거 없는 수치가 섞인 글(§2.4 표시가 보이게) */
+  const selfKnob = qs.get("self") || "";
+  const tdKnob = qs.get("td") || "";
+  const claimsKnob = qs.get("claims") === "1";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -83,6 +90,16 @@
   const DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
   const DISC_SPONSORED = "이 글은 광고주에게서 원고료 등 대가를 받고 작성한 유료 광고입니다.";
   const DISC_GIFT = "이 글은 광고주에게서 제품(또는 서비스)을 무상으로 제공받아 작성했습니다.";
+  /* [R8-A2 §2.4] 수치 주장 — 모양은 netlify/functions/pieces.ts:142(`{ summary, items, line }`) 그대로 ·
+     `line` 문구는 lib/fact-claims.ts `claimsLine` 이 self=3·risky=2 일 때 내는 글자 그대로(화면이 다시 짓지 않는지 여기서 재진다). */
+  const NUM_CLAIMS = { summary: { total: 5, given: 2, self: 3, structural: 0, risky: 2 },
+    items: [
+      { num: "12,800", context: "세척솔 세트가 12,800원이에요", basis: "self", kind: "money", blockIndex: 4, risky: true },
+      { num: "37%", context: "37% 더 빨리 말라요", basis: "self", kind: "percent", blockIndex: 6, risky: true },
+      { num: "3", context: "3분이면 끝나요", basis: "self", kind: "count", blockIndex: 2, risky: false },
+      { num: "10", context: "10분만 담가요", basis: "given", kind: "count", blockIndex: 3, risky: false },
+    ],
+    line: "직접 확인이 필요한 숫자가 3개 있어요(그중 금액·비율 2개). 우리가 준 자료에 없는 숫자예요." };
   /* 여러 종류면 **문장을 전부 싣는다**(순서 고정: 제휴 → 원고료 → 무상 제공 · normalizeCompensation 과 같다) */
   const discTextOf = (meta) => [meta.affiliate ? DISCLOSURE : "", meta.sponsored ? DISC_SPONSORED : "", meta.gift ? DISC_GIFT : ""].filter(Boolean).join(" ");
   // [v1.1] GateKey 12 · 순서 고정(5C.2 8검사 + 16B 4검사)
@@ -107,6 +124,10 @@
     { key: "cliche", label: "상투 표현 없음", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작이 다양함", pass: true }, { key: "bullet_ratio", label: "불릿이 본문을 대신하지 않음", pass: true, detail: "18%" },
     { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "최상급에 근거가 있음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
     { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
+    /* [R8-A2] 🔴 이 둘은 서버에 축이 **있는데 화면이 한 번도 안 보여 준 것**이다(하니스가 «서버에만 있는 축»으로 세고 있었다).
+       새 축은 «화면에 한 번이라도 보이나»까지가 완료다(CLAUDE §4.8) — 사유 문장 모양은 서버 것 그대로. */
+    { key: "length", label: "분량이 계약 폭 안", pass: true, detail: "1,840자(계약 1,200~2,500자)" },
+    { key: "stock_safe", label: "스톡 사진이 쓸 수 있는 것", pass: true, detail: "스톡 사진이 없어요(우리가 만든 그림·고객 사진)" },
     { key: "disclosure", label: "대가 고지 첫머리", pass: ok }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true },
     /* [R8-A §2 · B-1] 골격 반복 — 🔴 **소프트**(HARD_GATE_KEYS 밖)라 실패해도 예약은 된다. 사유 문장 모양은 서버 checkStructure 그대로 */
     { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 75% 미만 · 6편과 견줌)" },
@@ -115,6 +136,14 @@
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS] 이 축만 «이대로 예약»을 막는다 — 소프트 실패는 막지 않는다(서버 hardFailures 와 같게) */
   const HARD = [];   /* [R8 §9] 🔴 서버 HARD_GATE_KEYS 가 빈 배열이 됐다 — 막는 축은 하나도 없다(사장님 «말해 주기로 내려») */
   const gateOkOf = (g) => !((g && g.checks) || []).some((c) => !c.pass && HARD.includes(c.key));
+  /* [R8-A2 · lib/content-approve.ts judgeBlockers `BROKEN` 그대로] 영상 심사 P0 중 **깨진 물건** 둘만 서버가 거부한다(게이트가 아니라 불량품). */
+  const JUDGE_BLOCK = ["frames_not_blank", "duration_fit"];
+  /* [R8-A2 · lib/content-approve.ts SELF_GATE_LEVEL 에서 `off` 인 축 그대로] 직접 쓴 글에서 **안 재는** 축 — «조용히 다 끄기»가 아니라 «안 쟀다»로 실어 보낸다. */
+  const SELF_OFF = ["cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "persona", "structure_repeat"];
+  const selfGate = (g) => { const checks = g.checks.map((c) => (SELF_OFF.includes(c.key)
+    ? { key: c.key, label: c.label, pass: true, skipped: true, skipReason: "self", level: "off", weight: c.weight, detail: "사람이 쓴 글이라 이 검사는 하지 않았어요" }
+    : { ...c, level: "soft" }));
+    return { ...g, checks, ok: checks.every((c) => c.pass) };   /* `ok` 계산도 서버(applySelfGatePolicy)와 같게 — 다르면 알약 색이 갈린다 */ };
 
   const fresh = qs.get("fresh") === "1";
   const runnerOn = qs.get("runner") === "on";
@@ -313,6 +342,12 @@
     /* [R8 §3.2] 워드프레스만 «지금 붙었나»를 우리가 안다(위젯 id 를 우리가 넣는다) — 나머지는 러너가 하고 우리는 모른다(AC-9) */
     adsAttached: {},
     retracted: {},   /* [R8 §5E] 내린 글(postId → 내린 시각) */
+    /* [R8-A2 §5E.2] 내 글에 들어온 신고 — 모양은 lib/takedown.ts `TakedownView` 그대로(kindLabel 은 서버가 붙여 준다).
+       기본은 **0건**이다: 신고는 드물다 · ?td= 로만 켠다(없는 걱정을 기본 화면에 두지 않는다). */
+    takedowns: tdKnob === "open" ? [{ id: 9101, status: "open", kind: "copyright", kindLabel: "저작권", reason: "본문에 쓰인 사진 두 장이 저작권자의 것이라는 통지가 들어왔어요.", channel: "naver_blog", externalUrl: "https://blog.naver.com/cook_a/223456789", pieceId: 505, accountId: 1, receivedAt: iso(now - 2 * 86400e3), dueAt: iso(now + 5 * 86400e3), daysLeft: 5, claimant: "OO스튜디오", canRetract: true, retractAvailable: true }]
+      : tdKnob === "noway" ? [{ id: 9102, status: "open", kind: "policy", kindLabel: "채널 정책 위반", reason: "영상 배경 음악이 채널 정책에 맞지 않는다는 통지가 들어왔어요.", channel: "youtube_shorts", externalUrl: "https://youtube.com/shorts/mock509", pieceId: 509, accountId: 4, receivedAt: iso(now - 86400e3), dueAt: iso(now + 6 * 86400e3), daysLeft: 6, claimant: "유튜브", canRetract: false, retractAvailable: false }]
+      : tdKnob === "done" ? [{ id: 9103, status: "resolved", kind: "defamation", kindLabel: "명예훼손·비방", reason: "확인 결과 문제가 없어 종결했어요.", channel: "tistory", pieceId: 504, receivedAt: iso(now - 20 * 86400e3), dueAt: iso(now - 13 * 86400e3), daysLeft: 0, canRetract: true, retractAvailable: true }] : [],
+    photos: {},      /* [R8-A2 §5D.4] pieceId → 내 사진 목록(piece_assets kind=image) */
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== MOCK_V) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -322,6 +357,9 @@
   /* [R8-A] 검사 손잡이가 켜졌으면 그 글의 gate 를 다시 만든다 + 예약을 막는 것은 **하드 축뿐**(서버 hardFailures 와 같게) */
   for (const p of S.pieces) { if (!p.gate || p.kind === "video") continue; if (gateKnob) p.gate = gate(true); p.gateOk = gateOkOf(p.gate); }
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
+  /* [R8-A2 §5E] 🔴 신고 손잡이는 **씨앗 뒤에도 다시 건다** — 상태가 sessionStorage 에 남아 있어서 화면을 옮기며 `?td=` 를 바꿔도
+     첫 값이 그대로 따라다녔다(그래서 «못 내리는 채널» 길을 시연할 수 없었다 · 왕복 검사에서 잡혔다). `runner` 손잡이와 같은 자리. */
+  if (qs.has("td")) { S.takedowns = seed().takedowns; save(); }
   if (autoOff) { S.settings.autoSchedule = false; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 
@@ -486,9 +524,11 @@
       return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length, produceLeadDays: S.settings.produceLeadDays }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
     /* [R7 §1.1] GET = 지금 값 · POST = 병합. kinds 는 서버가 정규화한다(«글»은 항상 남는다 · 영상만 토글) */
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule;
+      /* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **최상위 키**다(settings 안이 아니다) · 기본 꺼짐 */
+      if (typeof b.recipeVolunteer === "boolean") S.recipeVolunteer = b.recipeVolunteer;
       if (Array.isArray(b.kinds)) { S.settings.kinds = b.kinds.includes("video") ? ["text", "video"] : ["text"]; S.kindsSet = true; }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
-      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet }; },
+      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer }; },
     "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p })), trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
@@ -721,8 +761,15 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
           images: NV ? { min: 6, max: 10, default: 6, fromGroup: false } : (grp ? { min: 5, max: 10, default: 7, fromGroup: true } : { min: 2, max: 4, default: 3, fromGroup: false }),
           goalRules: NV ? ["r1", "r2", "r3"] : ["r1", "r2"],   /* 🔴 화면은 **가짓수만** 쓴다(모델 지시문이라 글자 그대로 안 보여 준다) */
           actualChars: String(p.bodyHtml || "").replace(/<[^>]+>/g, "").length } };
-      return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }], meta: p.meta, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
-    "pieces-approve": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.kind === "video" && p.gate?.judge?.grade === "P0") return err("gate", "심사에서 막혔어요 · 다시 만들거나 버려 주세요.", { gate: p.gate }); if (!p.gateOk) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate }); p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
+      /* [R8-A2 §2.4] `?claims=1` 이면 근거 없는 수치가 섞인 글 — 서버가 이미 주던 칸(`meta.numberClaims`)을 화면이 그리는지 본다. */
+      return { ok: true, piece: { ...pieceRow(p), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], meta: { ...p.meta, ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+    /* 🔴 [R8-A2 §9] 승인은 **막지 않는다** — 서버 `HARD_GATE_KEYS = []` 이고, 영상도 `judgeBlockers` 둘(깨진 물건)만 거부한다.
+       옛 모의는 `p.gateOk` 가 false 면 막고 P0 면 다 막아서, **시연·스샷에서만 존재하는 가짜 게이트**를 만들고 있었다(AC-52 의 모의 쪽 얼굴).
+       🔴 사유 문장은 서버(`lib/content-approve.ts approvePiece`) 글자 그대로. */
+    "pieces-approve": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 });
+      const broke = ((p.gate && p.gate.judge && p.gate.judge.axes) || []).filter((a) => !a.pass && a.grade === "P0" && JUDGE_BLOCK.includes(a.key));
+      if (broke.length) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate });
+      p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
     "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
     "pieces-regenerate": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (p.regenCount >= 1) return err("regen_limit", "다시 만들기는 한 번만 할 수 있어요."); p.regenCount++; p.status = "generating"; if (p.kind === "video") { p.meta.stage = "script"; p.meta.chainStage = { stage: "script", at: iso(Date.now()) }; p.gate = null; p.gateOk = false; delete p.assets; delete p.blocks; p.body = ""; /* 산출물 삭제 — 안 지우면 이어받기가 «이미 있음»으로 건너뛴다 */ delete p._t0; p._v0 = Date.now(); const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "producing"; return { ok: true, status: "generating" }; } p.stage = "writing"; p._t0 = Date.now(); return { ok: true, status: "generating" }; }, // [P1R5] 영상 재생성 = 코인 0 · 처음부터
     "pieces-update": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); if (b.title) p.title = b.title;
@@ -855,6 +902,88 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (runner) return { ok: true, state: "queued", message: "내 PC 프로그램이 켜지면 그 글을 내릴게요. 끝나면 정말 내려갔는지 한 번 더 확인해요.", ...(p.externalUrl ? { openUrl: p.externalUrl } : {}) };
       return { ok: true, state: "done", message: "글을 내렸어요. 정말 내려갔는지 한 번 더 확인할게요." };
     },
+    /* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 내 글에 들어온 신고 — 모양·문장은 netlify/functions/takedown.ts · lib/takedown.ts 그대로. 🔴 코인 0. ══ */
+    "takedowns": () => ({ ok: true, notices: S.takedowns || [] }),
+    "takedown-action": (b) => {
+      const nt = (S.takedowns || []).find((x) => x.id === Number(b.id)); if (!nt) return { ok: false, error: "그 신고를 찾을 수 없어요.", step: "not_found", status: 404 };
+      if (b.action === "removed") { nt.status = "customer_removed";
+        return { ok: true, status: "customer_removed", verifying: nt.canRetract, message: nt.canRetract ? "확인해 볼게요 — 잠시 뒤 결과를 알려 드려요." : "알려 주셔서 고마워요. 운영팀이 확인할게요." }; }
+      if (b.action === "retract") {
+        /* 🔴 길이 없는 채널은 **정직하게** 400 + 그 글 주소 — 없는 길을 단추로 만들지 않는다(§5E.3 · 화면은 이 응답으로 «직접 내리시면 돼요»를 그린다) */
+        if (!nt.retractAvailable || !nt.canRetract) return { ok: false, step: "not_configured", status: 400,
+          error: "이 채널은 아직 대신 내려 드릴 수 없어요. 채널에서 직접 내려 주세요 — 내리시면 «직접 내렸어요»를 눌러 주세요.", ...(nt.externalUrl ? { url: nt.externalUrl } : {}) };
+        return { ok: true, queued: true, message: "대신 내려 드릴게요. 내려간 뒤 정말 없는지 확인까지 하고 알려 드려요." };
+      }
+      return err("action", "action 은 removed 또는 retract 예요.");
+    },
+    /* ══ [R8-A2 · DESIGN §5D①] 직접 쓰기 — 모양·사유 문장은 netlify/functions/pieces-self.ts · lib/piece-self.ts 그대로. ══
+       🔴 코인은 **원장에서 읽은 값**을 돌려준다(리터럴 0 이 아니다) — 화면이 그 값을 그리는지 여기서 같이 재진다(AC-74).
+       🔴 게이트는 **그대로 지나고**, AI 티 축만 «안 쟀다»로 실려 온다(selfGate). 막지 않는다. */
+    "pieces-self": (b) => {
+      const nw = notWritable(); if (nw) return nw;
+      const channel = String(b.channel || "");
+      if (!CHANNELS.some((c) => c.key === channel && c.category === "text")) return err("channel", "이 채널에는 글을 올릴 수 없어요.");
+      const title = String(b.title || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      if (!title) return err("title", "제목을 적어 주세요.");
+      const html = String(b.bodyHtml || "");
+      if (html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().length < 30) return err("body", "본문이 너무 짧아요. 30자 이상 적어 주세요.");
+      const accs = S.accounts.filter((a) => a.channel === channel && ["active", "pending_login"].includes(a.status));
+      let accountId = Number(b.accountId) || 0;
+      if (accountId && !accs.some((a) => a.id === accountId)) return err("account", "고른 계정을 찾지 못했어요.");
+      if (!accountId) { if (accs.length === 1) accountId = accs[0].id; else if (accs.length > 1) return err("account", "어느 계정에 올릴지 골라 주세요."); }
+      if (selfKnob === "noacc") accountId = 0;
+      let at = "", sl = null;
+      if (b.slotId) { sl = S.slots.find((x) => x.id === Number(b.slotId));
+        if (!sl) return err("slot", "그 편성 자리를 찾지 못했어요.");
+        if (sl.pieceId) return err("slot", "그 자리엔 이미 다른 글이 들어가 있어요.");
+        if (sl.channel !== channel) return err("slot", "그 자리는 다른 채널의 자리예요.");
+        at = sl.publishAt; if (!accountId && sl.accountId) accountId = sl.accountId;
+      } else { if (!b.scheduleAt) return err("when", "언제 올릴지 골라 주세요."); at = String(b.scheduleAt);
+        if (new Date(at).getTime() < Date.now() - 60000) return err("when", "지난 시각으로는 예약할 수 없어요."); }
+      /* 🔴 캐던스 400 은 `publish-now` 와 **한 글자도 다르지 않은 모양**이다 — 화면이 같은 함수로 그리는지 여기서 재진다. */
+      if (selfKnob === "cadence") { const t = new Date(Date.now() + 90 * 60e3);
+        const hhmm = t.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
+        return { ok: false, step: "cadence", status: 400, retryAt: iso(t.getTime()), gapMin: 180, error: `이 계정은 글 사이를 180분 띄워요. ${hhmm}부터 올릴 수 있어요.` }; }
+      const mon = b.monetize || {};
+      /* 🔴 여러 가지를 받았으면 **전부** 밝힌다(서버 disclosureTextFor 와 같게 · 한 마디로 뭉뚱그리면 종류를 감춘 셈이 된다) */
+      const comp = [mon.affiliate ? DISCLOSURE : "", mon.sponsored ? DISC_SPONSORED : "", mon.gift ? DISC_GIFT : ""].filter(Boolean).join(" ") || null;
+      const id = S.nextId++;
+      const acc = S.accounts.find((a) => a.id === accountId) || null;
+      const p = { id, channel, accountId: accountId || null, accountHandle: acc ? acc.handle : null, kind: "post", format: "", origin: "self",
+        title, status: "in_review", stage: "done", scheduledFor: at, gateOk: true, createdAt: iso(Date.now()), topicTitle: "", regenCount: 0,
+        bodyHtml: (comp ? `<div class="disclosure">${comp}</div>\n` : "") + html, meta: { tags: [], disclosure: comp, origin: "self", editedByUser: true, ...(mon.affiliate ? { affiliate: mon.affiliate } : {}) },
+        gate: selfGate(gate(true)) };
+      S.pieces.unshift(p);
+      let slot = null;
+      if (sl) { sl.pieceId = id; sl.status = "in_review"; sl.origin = "self"; slot = { id: sl.id, publishAt: sl.publishAt }; }
+      else if (accountId) { const ns = { id: S.nextId++, date: at.slice(0, 10), channel, kind: "post", accountId, accountHandle: acc ? acc.handle : null, pieceId: id, publishAt: at, status: "in_review", origin: "self" }; S.slots.push(ns); slot = { id: ns.id, publishAt: at }; }
+      /* 원장에 «0으로 기록» 한 줄 — «안 깎았다»가 아니라 «0 이었다»가 남아야 나중에 «왜 공짜였나»를 답한다(§5D.3-2) */
+      const ref = `self:piece:${id}`;
+      S.billing.ledger.unshift({ at: iso(Date.now()), kind: "consume", bucket: "included", amount: 0, ref, item: "self", reason: "직접 쓴 글 — AI 를 쓰지 않았어요" });
+      const charged = -S.billing.ledger.filter((l) => l.ref === ref).reduce((a, l) => a + l.amount, 0);
+      return { ok: true, pieceId: id, status: "in_review", origin: "self", coins: { charged, ref }, gate: p.gate, slot,
+        ...(slot ? {} : { notice: "계정을 아직 연결하지 않아 편성표 자리는 잡지 못했어요. 계정을 연결하면 예약할 수 있고, 지금도 글은 저장돼 있어요." }) };
+    },
+    /* ══ [R8-A2 · DESIGN §5D.4] 내 사진 — 모양·사유 문장은 netlify/functions/piece-photos.ts · lib/photo-source.ts 그대로. 🔴 내 사진은 코인 0. ══ */
+    "piece-photos": (_b, q) => ({ ok: true, pieceId: Number(q.get("pieceId")), photos: (S.photos || {})[Number(q.get("pieceId"))] || [] }),
+    "piece-photo-add": (b) => {
+      const nw = notWritable(); if (nw) return nw;
+      const pid = Number(b.pieceId); if (!pid) return err("pieceId", "어느 글에 붙일 사진인지 알려 주세요.");
+      const b64 = String(b.dataBase64 || ""); if (!b64) return err("empty", "사진 파일이 비어 있어요.");
+      if (b64.length > Math.ceil(4 * 1024 * 1024 * 4 / 3) + 1024) return err("too_big", "사진 한 장은 4MB까지 올릴 수 있어요. 조금 줄여서 다시 올려 주세요.");
+      /* 🔴 형식은 **첫 바이트**로 본다(확장자는 보내는 쪽이 정하는 값이다) — base64 머리글자로 흉내 낸다. */
+      if (!/^(\/9j\/|iVBORw0KGgo|UklGR)/.test(b64)) return err("bad_type", "JPG·PNG·WEBP 사진만 올릴 수 있어요.");
+      S.photos = S.photos || {}; const list = (S.photos[pid] = S.photos[pid] || []);
+      const key = `customer:sha256:${b64.length}:${b64.slice(0, 24)}`;
+      const dup = list.find((x) => x.source && x.source.key === key);
+      if (dup) return { ok: true, photo: dup, already: true };
+      const mime = b64.startsWith("/9j/") ? "image/jpeg" : b64.startsWith("iVBORw0KGgo") ? "image/png" : "image/webp";
+      const photo = { id: S.nextId++, pieceId: pid, r2Key: key, url: `data:${mime};base64,${b64}`, caption: String(b.filename || "").slice(0, 120) || null, sort: list.length, source: { kind: "customer", key, addedAt: iso(Date.now()), filename: b.filename || "", mime }, stock: null, createdAt: iso(Date.now()) };
+      list.push(photo); return { ok: true, photo, already: false };
+    },
+    "piece-photo-remove": (b) => { const id = Number(b.assetId); let hit = false;
+      for (const k of Object.keys(S.photos || {})) { const before = S.photos[k].length; S.photos[k] = S.photos[k].filter((x) => x.id !== id); if (S.photos[k].length !== before) hit = true; }
+      return hit ? { ok: true, removedObject: true } : { ok: false, step: "not_found", error: "그 사진을 찾지 못했어요.", status: 404 }; },
     /* ── [P1R2] §2 러너 기기(내 PC 프로그램) ── */
     "runner-list": () => { tick(); return { ok: true, devices: S.devices.map(devRow) }; },
     "runner-register": (b) => { const name = String(b.name || "").trim(); if (!name) return err("name", "기기 이름을 적어 주세요.");
@@ -970,6 +1099,14 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (pubNow === "cadence") { const at = new Date(Date.now() + 90 * 60e3);
         const hhmm = at.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
         return { ok: false, step: "cadence", status: 400, retryAt: iso(at.getTime()), gapMin: 180, error: `이 계정은 글 사이를 180분 띄워요. ${hhmm}부터 올릴 수 있어요.` }; }
+      /* [R8 §9 · B b2662c9] 🔴 **우리가 권하는 값**에 닿았을 뿐이고 고객이 정한 값은 남았다 — 그때만 «이번 한 번만» 길을 준다(`canOverride`).
+         `?pubnow=warmup` = 그 갈래 · `?pubnow=mycap` = **고객이 스스로 정한 값**에 닿은 갈래(넘길 길이 없다 · 단추를 그리면 안 된다). */
+      if (pubNow === "warmup" && !b.warmupOverride) return { ok: false, step: "cadence", status: 400, capped: true, dailyCap: 1, customerCap: 5, postsToday: 1,
+        canOverride: true, overrideKey: "warmupOverride", confirmLabel: "이번 한 번만 올릴게요",
+        risk: "만든 지 얼마 안 된 계정이라 천천히 올리는 중이에요. 하루에 여러 건이 몰리면 채널이 이상하게 볼 수 있어요.",
+        error: "새 계정이라 오늘은 1건까지만 권해 드려요. 그래도 이번 한 번은 올리시겠어요?" };
+      if (pubNow === "mycap") return { ok: false, step: "cadence", status: 400, capped: true, dailyCap: 5, customerCap: 5, postsToday: 5,
+        error: "오늘 이 계정으로 5건까지 올리기로 정해 두셨어요. 내일 다시 올리거나 다른 계정을 써 주세요." };
       if (pubNow === "offline") { p.status = "publishing"; return { ok: true, state: "publishing", pieceId: p.id, runner: { online: false }, message: "내 PC 프로그램이 꺼져 있어요. 켜면 기다리던 글이 바로 나가요." }; }
       p.status = "published"; p.publishedAt = iso(Date.now()); p.externalUrl = `https://blog.naver.com/${p.accountHandle || "mock"}/22${S.nextId++}`;
       const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "published";
@@ -1009,7 +1146,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

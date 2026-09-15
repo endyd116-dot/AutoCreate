@@ -110,15 +110,24 @@ function screenSide() {
   rec("🔴 ④ «클릭 유도» 라는 낱말이 화면에 0건(뭉뚱그리면 ②③ 까지 죽는다)", !/클릭\s*유도/.test(all),
     /클릭\s*유도/.test(all) ? "화면에 있다" : "0건 · 축 이름은 «광고를 가리키지 않음»");
 
-  /* 막는 축 5개가 서버와 같은가(AC-52). */
-  const srvHard = (approveTs.match(/HARD_GATE_KEYS[^=]*=\s*\[([^\]]+)\]/) ?? [])[1] ?? "";
-  const uiHard = (uiJs.match(/UI\.GATE_HARD\s*=\s*\[([^\]]+)\]/) ?? [])[1] ?? "";
-  const norm = (s) => s.split(",").map((x) => x.trim().replace(/['"]/g, "")).filter(Boolean).sort().join(",");
-  rec("🔴 ④ 막는 축 목록이 서버와 글자까지 같다", srvHard && norm(srvHard) === norm(uiHard), `서버 [${norm(srvHard)}] ↔ 화면 [${norm(uiHard)}]`);
+  /* 막는 축 목록이 서버와 같은가(AC-52).
+     🔴 [R8-A2 수리] `[^\]]+` 는 **빈 배열을 못 읽는다** — R8 §9 로 `HARD_GATE_KEYS = []` 가 되면서
+        «못 찾았다»와 «비어 있다»가 한 덩어리가 되어 이 줄이 **정답인데 빨갛게** 나오고 있었다.
+        `verify-label-surface.mjs` 가 같은 자리에서 이미 고친 것을 여기만 안 따라왔다(하니스 둘이 갈리면 하나는 거짓말이다). */
+  const listOf = (text, re) => { const m = text.match(re); return m ? [...m[1].matchAll(/["']([a-z_]+)["']/g)].map((x) => x[1]) : null; };
+  const srvHard = listOf(approveTs, /HARD_GATE_KEYS[^=]*=\s*\[([^\]]*)\]/);
+  const uiHard = listOf(uiJs, /UI\.GATE_HARD\s*=\s*\[([^\]]*)\]/);
+  const same = srvHard !== null && uiHard !== null && [...srvHard].sort().join(",") === [...uiHard].sort().join(",");
+  rec("🔴 ④ 막는 축 목록이 서버와 글자까지 같다", same,
+    srvHard === null ? "서버에서 HARD_GATE_KEYS 를 못 읽었다" : uiHard === null ? "화면에서 UI.GATE_HARD 를 못 읽었다"
+      : same ? (srvHard.length ? `${srvHard.length}축 [${srvHard.join(" ")}]` : "0축 — 막는 축이 없다(§9)") : `서버 [${srvHard.join(" ")}] ↔ 화면 [${uiHard.join(" ")}]`);
 
-  /* 소프트 축은 «막지 않아요» 로 보이나. */
-  rec("④ 알려 주는 축은 «예약을 막지 않아요» 로 보인다", /막지\s*않아요/.test(pieceHtml),
-    /막지\s*않아요/.test(pieceHtml) ? "검수 화면에 그 문장이 있다" : "그 문장이 없다");
+  /* 소프트 축은 «막지 않아요» 로 보이나.
+     🔴 [R8-A2] 검사 줄은 `piece.html` 에서 **`ui.js` 로 올라갔다**(검수 화면과 직접 쓰기 화면이 같이 쓴다) — 두 파일을 같이 본다.
+        파일만 보고 «없다»고 하면 옮겼다는 이유로 빨개진다(그건 화면이 말을 안 한다는 뜻이 아니다). */
+  const gateSurface = `${pieceHtml}\n${uiJs}`;
+  rec("④ 알려 주는 축은 «예약을 막지 않아요» 로 보인다", /막지\s*않아요/.test(gateSurface),
+    /막지\s*않아요/.test(gateSurface) ? "검수·직접 쓰기가 같이 쓰는 검사 줄에 그 문장이 있다" : "그 문장이 없다");
 
   /* 새 축 2개가 화면에 뜨나. */
   rec("④ 새 축 2개가 화면 어휘에 있다(structure_repeat 소프트 · ad_pointing 하드)",
@@ -152,4 +161,7 @@ console.log(`\nR8-A §4 화면 한 바퀴 · ${BASE} · ${new Date().toISOString
 for (const r of results) console.log(`${r.ok === "WARN" ? "△" : r.ok ? "✓" : "✗"} ${w(r.step, 62)} ${w(r.note, 64)}`);
 const pass = results.filter((r) => r.ok === true).length, fail = results.filter((r) => r.ok === false).length, warn = results.filter((r) => r.ok === "WARN").length;
 console.log(`${"─".repeat(130)}\nPASS ${pass} · FAIL ${fail} · WARN ${warn}`);
-process.exit(fail ? 1 : 0);
+/* 🔴 [R8-A2 수리] `process.exit()` 를 바로 부르면 윈도우에서 **닫히는 중인 소켓**과 겹쳐 libuv 가 죽는다
+   (`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`) — 그러면 **FAIL 0 인데 종료코드가 127** 로 나온다.
+   «검사는 종료코드로 본다»(AC-67)를 통째로 무너뜨리는 자리라, 코드만 세워 두고 남은 연결이 다 닫힌 뒤 스스로 끝나게 둔다. */
+process.exitCode = fail ? 1 : 0;

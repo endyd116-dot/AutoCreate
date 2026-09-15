@@ -6,7 +6,7 @@
 <title>올라간 글 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=18">
+<link rel="stylesheet" href="/css/ac.css?v=19">
 </head>
 <body>
 <div class="shell">
@@ -19,8 +19,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=19"></script>
-<script src="/js/mock.js?v=19"></script>
+<script src="/js/ui.js?v=21"></script>
+<script src="/js/mock.js?v=20"></script>
 <script>
 (async () => {
 await UI.boot("schedule");
@@ -46,21 +46,37 @@ function render() {
   const shown = posts.filter((p) => tab === "all" || p.status === tab || (tab === "published" && privateOf(p)));
   UI.$$("#seg button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   const host = UI.$("#list");
+  /* 🔴 신고는 **탭과 상관없이** 맨 위에 — 목록이 비어 있어도(거른 탭이어도) 보여야 한다. 겁주지 않는 한 문장 + 갈 길(§3·§9-1). */
+  const live = notices.filter((n) => UI.TAKEDOWN_ACTIVE.includes(n.status));
+  const tdBn = live.length ? `<div class="banner" style="margin:0 0 12px"><span>내 글에 들어온 신고가 ${live.length}건 있어요 · 직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요</span><button type="button" id="tdGo">확인하기</button></div>` : "";
+  const bindTd = () => { const b = UI.$("#tdGo"); if (b) b.onclick = () => (live.length === 1 ? UI.takedownSheet(live[0], load) : UI.go("/app/settings.html#takedown")); };
   if (!shown.length) {
     const E = { all: ["아직 올라간 글이 없어요", "편성표를 확인해 보세요", "/app/schedule.html", "편성표 보기"], published: ["아직 올라간 글이 없어요", "예약한 시각이 되면 여기에 쌓여요", "/app/schedule.html", "편성표 보기"], awaiting_manual: ["직접 올릴 글이 없어요", "올리지 못한 글이 생기면 여기에 모아 드려요", null, null] }[tab];
-    host.innerHTML = `<div class="group"><div class="empty"><h3>${E[0]}</h3><p>${E[1]}</p>${E[2] ? `<a class="btn primary sm" href="${E[2]}">${E[3]}</a>` : ""}</div></div>`;
-    return;
+    host.innerHTML = tdBn + `<div class="group"><div class="empty"><h3>${E[0]}</h3><p>${E[1]}</p>${E[2] ? `<a class="btn primary sm" href="${E[2]}">${E[3]}</a>` : ""}</div></div>`;
+    bindTd(); return;
   }
   const stuck = shown.filter(stuckOf), priv = shown.filter(privateOf), proc = shown.filter(processingOf), rest = shown.filter((p) => !stuckOf(p) && !privateOf(p) && !processingOf(p));
   const days = [];
   for (const p of rest) { const k = dayOf(p); let g = days.find((x) => x.k === k); if (!g) { g = { k, list: [] }; days.push(g); } g.list.push(p); }
-  host.innerHTML = (stuck.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">직접 올려야 해요 ${stuck.length}건</div>${stuck.map(row).join("")}</div>` : "")
+  host.innerHTML = tdBn + (stuck.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">직접 올려야 해요 ${stuck.length}건</div>${stuck.map(row).join("")}</div>` : "")
     + (priv.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">공개로 바꿔 주세요 ${priv.length}건</div>${priv.map(row).join("")}<p class="muted" style="margin:0 16px 12px;font-size:12.5px">유튜브 앱 심사 전엔 비공개로 올라가요 · 스튜디오에서 «공개»로 바꾸면 끝나요</p></div>` : "")
     + (proc.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">처리 중 ${proc.length}건</div>${proc.map(row).join("")}</div>` : "")
     + days.map((g) => `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(g.k)} · ${g.list.length}건</div>${g.list.map(row).join("")}</div>`).join("");
+  bindTd();
   UI.$$("#list .row[data-id]").forEach((b) => b.onclick = (e) => { if (e.target.closest("[data-stop]")) return; postSheet(posts.find((p) => p.id === Number(b.dataset.id))); });
 }
-async function load() { const r = await UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render(); }
+/* [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **신고는 나간 뒤에 오는 일**이라 «올라간 글»에서 보여야 한다 — 설정 화면에만 두면
+   나간 글을 보러 온 사람에게는 영영 안 닿는다(알림을 놓친 고객이 여기서 다시 만난다).
+   🔴 신고가 붙은 글은 «이 글 내리기»(`post-retract`) 대신 **«신고에 답하기»** 를 준다: 같은 «내리기»가 두 문으로 갈리면
+      고객이 어느 쪽을 눌러야 신고가 끝나는지 알 수 없다(신고를 끝내는 문은 `takedown-action` 쪽이다). */
+let notices = [];
+const noticeOf = (p) => notices.find((n) => UI.TAKEDOWN_ACTIVE.includes(n.status) && ((p.pieceId && n.pieceId === p.pieceId) || (p.externalUrl && n.externalUrl === p.externalUrl)));
+async function load() {
+  const [r, t] = await Promise.all([UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`), UI.api("/api/takedowns", { noGate: true })]);
+  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  notices = t.ok ? (t.notices || []) : [];   /* 못 읽으면 빈 채로 둔다 — 없는 신고를 지어내지 않는다(AC-9) */
+  posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render();
+}
 
 /* [R8 §3 · DESIGN §5E] «내려 줘» — 고객이 누르면 **우리가 대신** 내린다(우리가 일방적으로 내리는 길은 만들지 않는다).
    🔴 `canRetract` 가 false 인 채널(유튜브·쓰레드 …)엔 **단추를 만들지 않는다** — 삭제 권한이 없어서다. 대신 그 글로 가는 길을 준다.
@@ -68,10 +84,14 @@ async function load() { const r = await UI.api(`/api/posts-list?status=${tab ===
    🔴 되돌릴 수 없는 동작이라 한 번 묻는다 — 단추 이름은 «네»가 아니라 **«내릴게요»**(무슨 일이 일어나는지 단추가 말한다).
    🔴 코인은 안 든다(retract 경로에 consume 호출 0 · 우리 잘못이든 마음이 바뀌었든 내리는 데 돈을 받지 않는다). */
 const retractable = (p) => p.status === "published" && !p.retractedAt;
-const retractBtn = (p) => (retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
+/* 🔴 신고가 붙은 글은 **«신고에 답하기» 한 문**으로 모은다 — 같은 «내리기»가 두 문이면 어느 쪽이 신고를 끝내는지 알 수 없다. */
+const retractBtn = (p) => (noticeOf(p) ? '<button class="btn ghost" type="button" id="tdAns" style="color:var(--danger-ink)">신고에 답하기</button>'
+  : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
 const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
-  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}은 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
+  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}${UI.josa(UI.chLabel(p.channel))} 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
 function bindRetract(p, sh, close) {
+  const ans = sh.querySelector("#tdAns");
+  if (ans) { ans.onclick = () => { const n = noticeOf(p); close(); setTimeout(() => UI.takedownSheet(n, load), 300); }; return; }
   const b = sh.querySelector("#rt"); if (!b) return;
   b.onclick = () => UI.confirmRow(sh.querySelector("#rtc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
     b.disabled = true;
@@ -90,6 +110,7 @@ function postSheet(p) {
   const s = p.stats || {};
   const stat = [s.views != null ? `조회 ${UI.num(s.views)}` : null, s.likes != null ? `좋아요 ${UI.num(s.likes)}` : null, s.comments != null ? `댓글 ${UI.num(s.comments)}` : null].filter(Boolean).join(" · ");
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${processingOf(p) ? '<span class="pill off">처리 중</span>' : UI.pill(UI.POST_STATUS, p.status)}</div>
+    ${noticeOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>이 글에 «${UI.esc(noticeOf(p).kindLabel)}» 신고가 들어왔어요 · ${UI.esc(noticeOf(p).reason || "")}</span></div>` : ""}
     ${stuckOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(p.errorKind))}${p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div>` : ""}
     ${privateOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>심사 전엔 비공개로 올라가요 · 유튜브 스튜디오에서 «공개»로 바꾸면 사람들에게 보여요</span></div>` : ""}
     ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}에서 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}

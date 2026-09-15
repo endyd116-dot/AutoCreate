@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>직접 쓰기 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=19">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/create.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
+<div class="step-h"><h1>직접 쓰신 글을 올려 드릴게요</h1><p>제목과 본문만 적으면 편성표에 넣어 드려요 · AI를 안 써서 코인은 들지 않아요.</p></div>
+<div id="form">
+<div class="group" id="where"><div class="gt">어디에</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="what"><div class="gt">무엇을</div>
+  <div class="desc-edit">
+    <div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">제목</div>
+    <div class="rest" id="ttl" contenteditable="true" role="textbox" aria-label="제목" data-ph="예: 에어프라이어 기름때, 3분이면 지워져요" style="font-weight:700;min-height:44px"></div>
+    <div class="muted" style="font-size:12px;font-weight:600;margin:12px 0 4px">본문</div>
+    <div class="rest" id="body" contenteditable="true" role="textbox" aria-label="본문" data-ph="빈 줄로 문단을 나눠 주세요." style="min-height:220px"></div>
+  </div>
+  <p class="muted" id="cnt" style="margin:0 16px 12px;font-size:12.5px">본문 0자</p>
+</div>
+<div class="group" id="when"><div class="gt">언제 올릴까요</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="comp"><div class="gt">대가를 받았나요</div>
+  <div class="fr"><div class="fl">원고료·PPL을 받았어요<small>켜면 글 첫머리에 고지 한 줄을 저희가 넣어 드려요</small></div><button class="toggle" type="button" data-comp="sponsored" aria-checked="false" aria-label="원고료·PPL을 받았어요"></button></div>
+  <div class="fr"><div class="fl">제품·서비스를 무상으로 받았어요<small>켜면 글 첫머리에 고지 한 줄을 저희가 넣어 드려요</small></div><button class="toggle" type="button" data-comp="gift" aria-checked="false" aria-label="제품·서비스를 무상으로 받았어요"></button></div>
+  <div class="fr"><div class="fl">제휴 링크가 들어 있어요<small>어디 제휴인지 고르면 그 고지 문장이 첫머리에 들어가요</small></div><button class="toggle" type="button" data-comp="affiliate" aria-checked="false" aria-label="제휴 링크가 들어 있어요"></button></div>
+  <div id="affPick" hidden style="padding:0 16px 12px"></div>
+  <p class="muted" style="margin:0 16px 12px;font-size:12.5px">받은 게 있으면 켜 주세요 · 고지 문장은 저희가 첫머리에 넣어 드려요.</p>
+</div>
+</div>
+<div id="result" hidden></div>
+<div class="cta" id="cta"><button class="btn primary" type="button" id="go">편성표에 넣기</button></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=21"></script>
+<script src="/js/mock.js?v=20"></script>
+<script>
+(async () => {
+await UI.boot("create");
+/* ══ [R8-A2 · DESIGN §5D①] 🔴 **내가 직접 쓰기** — 사장님이 «주요 골자»라 하신 세 길 중 ①.
+     서버(`POST /api/pieces-self` · `lib/piece-self.ts`)는 R8 에 **완성**돼 있었는데 **부르는 화면이 한 곳도 없었다**
+     (`grep -rl "/api/pieces-self" public/` = 0). 이 화면이 그 문이다 — «정의가 있나»가 아니라 «제품이 부르나»(AC-69).
+
+   🔴 계약(서버 정본에서 글자 그대로 옮겼다 · netlify/functions/pieces-self.ts):
+     POST /api/pieces-self { channel, accountId?, title, bodyHtml, slotId? | scheduleAt?, monetize?{sponsored,gift,affiliate} }
+       200 { ok, pieceId, status:"in_review", origin:"self", coins:{charged,ref}, gate:{ok,checks[]}, slot:{id,publishAt}|null, notice? }
+       400 step:"cadence" (+retryAt·gapMin·dailyCap·postsToday·capped) — `publish-now` 와 **같은 모양**이라 **같은 함수**가 그린다(`UI.cannotSheet`)
+       400 step:"channel"|"title"|"body"|"when"|"slot"|"account"
+
+   🔴 코인은 **서버가 원장에서 읽은 값**(`coins.charged`)을 그린다 — «0코인»을 글자로 박지 않는다(AC-74).
+      1코인이 붙는 날이 오면 화면만 0 이라고 계속 말하게 된다.
+   🔴 **막지 않는다** — 검사에 걸려도 그대로 예약된다(§9 하드 게이트 0개). 대신 또렷하게 말하고, 되돌릴 길을 같은 자리에서 준다.
+   🔴 시각은 KST 고정(§4.5b) — `datetime-local` 을 쓰지 않는다(그 값엔 시간대가 없다). 날짜·시각 셈은 `UI.atKST` 한 곳. */
+let accounts = [], channels = [], slots = [], sending = false;
+const st = { channel: "", accountId: null, when: "slot", slotId: null, date: UI.ymdKST(), time: "09:00", mon: { sponsored: false, gift: false, affiliate: false }, aff: "coupang" };
+/* 제휴처 이름은 **수익 화면과 같은 어휘**를 쓴다(UI.SRC) — 여기서 새 낱말을 만들면 두 화면이 다른 말을 한다.
+   🔴 «그 밖»(manual)은 서버에서 쿠팡 전용 문구가 아닌 **일반 제휴 문구**로 나간다(lib/disclosure.ts disclosureSentence). */
+const AFF = ["coupang", "linkprice", "aliexpress", "manual"];
+const plainOf = (el) => (el.innerText || "").replace(/ /g, " ");
+/* 본문 → bodyHtml: 빈 줄로 문단을 가르고 한 줄 바꿈은 <br>. 🔴 붙여넣은 서식은 싣지 않는다 —
+   무엇이 나갈지 화면에서 본 그대로여야 한다(서버가 한 번 더 소독한다 · lib/piece-self.ts sanitizeUserHtml). */
+const bodyHtml = () => plainOf(UI.$("#body")).split(/\n{2,}/).map((s) => s.trim()).filter(Boolean).map((s) => `<p>${UI.esc(s).replace(/\n/g, "<br>")}</p>`).join("\n");
+
+/* ── 어디에 ── */
+function renderWhere() {
+  const host = UI.$("#where");
+  /* 🔴 «글 채널»은 서버가 말한다(`channels[].category`) — 화면에 채널 이름을 박지 않는다(채널이 늘면 저절로 따라온다).
+     정지된 계정은 뺀다 — 거기로는 못 나간다(소재 화면과 같은 규율). */
+  const textCh = new Set(channels.filter((c) => c.category === "text").map((c) => c.key));
+  const mine = accounts.filter((a) => textCh.has(a.channel) && a.status !== "suspended");
+  const chList = [...new Set(mine.map((a) => a.channel))];
+  if (!chList.length) {
+    host.innerHTML = '<div class="gt">어디에</div><div class="empty"><h3>먼저 글 채널 계정을 연결해 주세요</h3><p>연결하면 그 채널의 편성표 자리에 바로 걸 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>';
+    UI.$("#cta").hidden = true; return;
+  }
+  if (!chList.includes(st.channel)) { st.channel = chList[0]; st.accountId = null; }
+  const accs = mine.filter((a) => a.channel === st.channel);
+  if (!accs.some((a) => a.id === st.accountId)) st.accountId = accs.length === 1 ? accs[0].id : (st.accountId && accs.some((a) => a.id === st.accountId) ? st.accountId : (accs[0] ? accs[0].id : null));
+  const cur = accs.find((a) => a.id === st.accountId) || null;
+  host.innerHTML = '<div class="gt">어디에</div>'
+    + (chList.length > 1 ? `<div style="padding:0 12px 8px">${UI.chips("ch", chList.map((c) => [c, UI.chLabel(c)]), st.channel)}</div>` : "")
+    + `<div class="row">${UI.mark(st.channel)}<div class="l"><span class="t">${UI.esc(UI.chLabel(st.channel))}</span><span class="d">${cur ? `@${UI.esc(cur.handle)} · 오늘 ${cur.postsToday}/${cur.dailyCap}` : "계정을 골라 주세요"}</span></div></div>`
+    + (accs.length > 1 ? `<div style="padding:0 12px 12px">${UI.chips("acc", accs.map((a) => [a.id, "@" + a.handle]), st.accountId)}</div>` : "");
+  UI.bindChips(host, (name, v) => {
+    if (name === "ch") { st.channel = v; st.accountId = null; st.slotId = null; renderWhere(); renderWhen(); }
+    else if (name === "acc") { st.accountId = Number(v) || null; renderWhere(); }
+  });
+}
+
+/* ── 언제 올릴까요 — ①편성표 빈자리를 빌리거나 ②시각을 직접 고른다(서버 계약의 slotId | scheduleAt 그대로) ── */
+const freeSlots = () => slots.filter((s) => !s.pieceId && s.channel === st.channel && s.publishAt && UI.utc(s.publishAt).getTime() > Date.now()
+  && !["published", "publishing", "skipped", "failed", "rejected"].includes(s.status));
+function renderWhen() {
+  const host = UI.$("#when"); const free = freeSlots();
+  if (st.when === "slot" && !free.length) st.when = "time";
+  if (st.when === "slot" && !free.some((s) => s.id === st.slotId)) st.slotId = free[0] ? free[0].id : null;
+  const days = [0, 1, 2, 3].map((k) => { const d = UI.plusYmd(UI.ymdKST(), k); return [d, UI.dayLabelKST(d)]; });
+  if (!days.some(([d]) => d === st.date)) st.date = days[0][0];
+  host.innerHTML = '<div class="gt">언제 올릴까요</div>'
+    + `<div style="padding:0 16px 10px">${UI.seg("how", [["slot", "편성표 빈자리"], ["time", "시각 정하기"]], st.when)}</div>`
+    + (st.when === "slot"
+      ? (free.length
+        ? free.slice(0, 8).map((s) => `<button type="button" class="row tap" data-slot="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(UI.dayLabelKST(s.date))} ${UI.esc(UI.timeKST(s.publishAt))}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"}${s.topicTitle ? " · " + UI.esc(s.topicTitle) + " 자리" : ""}</span></div>${s.id === st.slotId ? '<span class="pill ok">여기</span>' : ""}</button>`).join("")
+        : '<p class="muted" style="margin:0 16px 12px;font-size:13px">앞으로 30일 안에 비어 있는 자리가 없어요 · «시각 정하기»로 새 자리를 만들 수 있어요.</p>')
+      : `<div style="padding:0 16px 8px">${UI.seg("d", days, st.date)}</div><div style="padding:0 12px 12px">${UI.chips("t", UI.TIMES, st.time)}</div>`)
+    + (st.when === "slot" && free.length ? '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">그 자리에 만들려던 글 대신 이 글이 나가요.</p>' : "")
+    + (st.when === "time" ? '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">같은 계정 글끼리는 시간을 띄워야 해서, 너무 붙으면 언제부터 되는지 알려 드려요.</p>' : "");
+  UI.bindChips(host, (name, v) => { if (name === "how") { st.when = v; renderWhen(); } else if (name === "d") st.date = v; else if (name === "t") st.time = v; });
+  UI.$$("#when [data-slot]").forEach((b) => b.onclick = () => { st.slotId = Number(b.dataset.slot); renderWhen(); });
+}
+
+/* ── 대가 — 🔴 여기선 켜고 끌 수 있다(아직 만들기 전이라 되돌릴 수 있다). 만든 뒤엔 검수 화면에서 «켜기»만 된다. ── */
+function bindComp() {
+  UI.$$("#comp [data-comp]").forEach((b) => UI.toggle(b, (on) => {
+    st.mon[b.dataset.comp] = on;
+    if (b.dataset.comp === "affiliate") {
+      const pick = UI.$("#affPick"); pick.hidden = !on;
+      if (on) { pick.innerHTML = `<div class="muted" style="font-size:12px;font-weight:600;margin:0 4px 6px">어디 제휴인가요</div>${UI.chips("aff", AFF.map((k) => [k, UI.srcLabel(k)]), st.aff)}`; UI.bindChips(pick, (n2, v) => { if (n2 === "aff") st.aff = v; }); }
+    }
+    return true;
+  }));
+}
+
+/* ── 보내기 ── */
+async function send() {
+  if (sending) return; const btn = UI.$("#go");
+  const title = plainOf(UI.$("#ttl")).replace(/\s+/g, " ").trim();
+  const html = bodyHtml();
+  const body = { channel: st.channel, title, bodyHtml: html, monetize: { sponsored: st.mon.sponsored, gift: st.mon.gift, ...(st.mon.affiliate ? { affiliate: { provider: st.aff } } : {}) } };
+  if (st.accountId) body.accountId = st.accountId;
+  if (st.when === "slot" && st.slotId) body.slotId = st.slotId; else body.scheduleAt = UI.atKST(st.date, st.time);
+  sending = true; btn.disabled = true; btn.textContent = "넣는 중…";
+  const r = await UI.api("/api/pieces-self", { body });
+  sending = false; btn.disabled = false; btn.textContent = "편성표에 넣기";
+  if (!r.ok) {
+    if (r.gated) return;
+    /* 🔴 캐던스는 `publish-now` 와 같은 모양이라 **같은 함수**가 그린다 — 두 화면이 다른 말을 하면 그게 버그다.
+       문장(«몇 시부터 올릴 수 있어요»)은 서버가 만든 것이고, 화면은 제목만 이 자리에 맞춘다. */
+    if (r.step === "cadence") return UI.cannotSheet(r, "그 시각엔 올리기 어려워요");
+    const FIELD = { title: "#what", body: "#what", channel: "#where", account: "#where", when: "#when", slot: "#when" };
+    const at = FIELD[r.step]; if (at) UI.$(at).scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    return UI.toast(r.error || "넣지 못했어요");
+  }
+  renderResult(r);
+}
+
+/* ── 넣은 뒤 — 🔴 여기가 §9 «말해 주기»가 실제로 닿는 자리다: ①코인 ②자리 ③검사 결과 ④되돌릴 길.
+      막지 않으니 **예약 단추는 늘 눌린다** — 고치고 낼지 그대로 낼지 고르는 것은 고객이다. ── */
+function renderResult(r) {
+  UI.$("#form").hidden = true;
+  const res = UI.$("#result"); res.hidden = false;
+  const when = r.slot ? `${UI.dateKST(r.slot.publishAt)} ${UI.timeKST(r.slot.publishAt)}` : "";
+  const coin = Number(r.coins && r.coins.charged) || 0;
+  res.innerHTML = `<div class="group"><div class="gt">글을 저장했어요</div>
+      <div class="kv"><span class="k">올릴 시각</span><span class="v">${when ? UI.esc(when) : "아직 자리를 못 잡았어요"}</span></div>
+      <div class="kv"><span class="k">든 코인</span><span class="v">${UI.num(coin)}코인</span></div>
+      ${coin === 0 ? '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">AI를 안 써서 코인이 들지 않았어요.</p>' : ""}
+      ${r.notice ? `<p class="muted" style="margin:0 16px 12px;font-size:13px">${UI.esc(r.notice)}</p>` : ""}</div>
+    <div class="group" id="gate"></div>
+    <div class="group"><div class="gt">사진</div>
+      <button type="button" class="row tap" id="ph"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">내 사진 넣기</span><span class="d" id="phD">JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+    </div>`;
+  UI.$("#gate").innerHTML = UI.gateList(r.gate || { checks: [] });
+  UI.$("#ph").onclick = () => UI.photoSheet(r.pieceId, (ps) => { UI.$("#phD").textContent = ps.length ? `${ps.length}장 넣었어요 · 내 사진은 코인이 들지 않아요` : "JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요"; });
+  const cta = UI.$("#cta"); cta.hidden = false;
+  cta.innerHTML = `<a class="btn secondary" href="/app/piece.html?id=${r.pieceId}" style="flex:0 0 40%">글 보기</a><button class="btn primary" type="button" id="ok">이대로 예약할게요</button>`;
+  UI.$("#ok").onclick = async (e) => {
+    e.target.disabled = true;
+    const a = await UI.api("/api/pieces-approve", { body: { id: r.pieceId } });
+    e.target.disabled = false;
+    if (!a.ok) { if (a.gated) return; return UI.toast(a.error || "예약하지 못했어요"); }
+    UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
+  };
+}
+
+/* 길잡이 글은 «비었을 때만» 보이게 — 브라우저가 넣는 <br> 하나 때문에 :empty 가 깨진다(그래서 손으로 비운다). */
+function bindEditors() {
+  const cnt = UI.$("#cnt");
+  ["#ttl", "#body"].forEach((sel) => { const el = UI.$(sel);
+    el.addEventListener("input", () => { if (!plainOf(el).trim()) el.innerHTML = ""; cnt.textContent = `본문 ${UI.num(plainOf(UI.$("#body")).trim().length)}자`; });
+    el.addEventListener("paste", (e) => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData("text/plain"); document.execCommand("insertText", false, t); });
+  });
+}
+
+async function load() {
+  const [a, s] = await Promise.all([UI.api("/api/accounts-list"), UI.api(`/api/slots-list?from=${UI.ymdKST()}&to=${UI.plusYmd(UI.ymdKST(), 30)}`)]);
+  if (!a.ok) { if (!a.gated) UI.toast(a.error || "계정을 불러오지 못했어요"); return; }
+  accounts = a.accounts || []; channels = a.channels || [];
+  /* 🔴 자리를 못 읽어도 화면은 선다 — «시각 정하기»로는 그대로 쓸 수 있다(못 읽은 것을 «자리 0개»로 그리지 않는다 · AC-9). */
+  slots = s.ok ? (s.slots || []) : [];
+  if (!s.ok && !s.gated) st.when = "time";
+  renderWhere(); renderWhen();
+}
+bindComp(); bindEditors();
+UI.$("#go").onclick = send;
+await load();
+})();
+</script>
+</body>
+</html>

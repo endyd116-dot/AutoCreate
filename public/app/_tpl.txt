@@ -1,6 +1,11 @@
 PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스크립트 입력. 형식: === 파일명 | 탭키 | 제목 ===  본문HTML  --- script ---  JS
 === create.html | create | 만들기 ===
-<div class="step-h"><h1>오늘은 어떤 소재로 벌까요?</h1><p>«디렉터에게» 보내면 채널·계정·구성·시각을 정해 드려요.</p></div>
+<div class="step-h"><h1>오늘은 어떻게 써 볼까요?</h1><p>셋 중 아무거나 고르면 돼요 · 오늘은 직접 쓰고 내일은 맡겨도 돼요.</p></div>
+<div class="group" id="ways"><div class="gt">쓰는 길</div>
+  <button type="button" class="row tap" id="wayAi"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg></span><div class="l"><span class="t">AI에게 맡기기</span><span class="d">소재만 고르면 채널·계정·구성·시각까지 정해 드려요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <a class="row tap" href="/app/write.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14 6l4 4"/></svg></span><div class="l"><span class="t">내가 직접 쓰기</span><span class="d">제목과 본문을 직접 쓰고 편성표에 걸어요 · AI를 안 써서 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/pieces.html?tab=in_review"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/><path d="M12 15l7.5-7.5a1.8 1.8 0 0 0-2.5-2.5L9.5 12.5 9 15z"/></svg></span><div class="l"><span class="t">AI가 쓴 걸 내가 고치기</span><span class="d" id="wayFixD">만들어 둔 글을 열어 고친 뒤 예약해요 · 고쳐도 코인은 더 안 들어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
@@ -108,6 +113,195 @@ UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>�
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
 UI.pullToRefresh(load);   /* [R8 §6.1] 소재 목록은 «새 소식» 화면이라 당겨서 새로고침이 맞다 */
+/* [R8-A2 §5D.1] 🔴 **셋은 «모드»가 아니라 «입구»다** — 미리 고르는 설정이 아니라 그때그때 고르는 것이다(사장님 «이것이 다 가능하게 하는 게 주요 골자»).
+   «맡기기»는 이 화면 아래 소재 목록이 곧 그 길이라 **같은 화면 안에서** 데려간다(없는 화면으로 보내지 않는다). */
+UI.$("#wayAi").onclick = () => { const g = UI.$("#topics"); if (g) g.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); };
+await load();
+/* «고치기»는 **만들어 둔 글이 몇 편인지**를 같이 말한다 — 못 세면 기본 문장을 그대로 둔다(«0편»을 지어내지 않는다 · AC-9). */
+UI.api("/api/pieces-list?status=in_review").then((r) => { if (!r.ok) return; const n = (r.pieces || []).length;
+  if (n) UI.$("#wayFixD").textContent = `지금 봐주세요가 ${n}편 있어요 · 열어서 고친 뒤 예약하면 돼요`; });
+=== write.html | create | 직접 쓰기 ===
+<div class="step-h"><h1>직접 쓰신 글을 올려 드릴게요</h1><p>제목과 본문만 적으면 편성표에 넣어 드려요 · AI를 안 써서 코인은 들지 않아요.</p></div>
+<div id="form">
+<div class="group" id="where"><div class="gt">어디에</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="what"><div class="gt">무엇을</div>
+  <div class="desc-edit">
+    <div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">제목</div>
+    <div class="rest" id="ttl" contenteditable="true" role="textbox" aria-label="제목" data-ph="예: 에어프라이어 기름때, 3분이면 지워져요" style="font-weight:700;min-height:44px"></div>
+    <div class="muted" style="font-size:12px;font-weight:600;margin:12px 0 4px">본문</div>
+    <div class="rest" id="body" contenteditable="true" role="textbox" aria-label="본문" data-ph="빈 줄로 문단을 나눠 주세요." style="min-height:220px"></div>
+  </div>
+  <p class="muted" id="cnt" style="margin:0 16px 12px;font-size:12.5px">본문 0자</p>
+</div>
+<div class="group" id="when"><div class="gt">언제 올릴까요</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div class="group" id="comp"><div class="gt">대가를 받았나요</div>
+  <div class="fr"><div class="fl">원고료·PPL을 받았어요<small>켜면 글 첫머리에 고지 한 줄을 저희가 넣어 드려요</small></div><button class="toggle" type="button" data-comp="sponsored" aria-checked="false" aria-label="원고료·PPL을 받았어요"></button></div>
+  <div class="fr"><div class="fl">제품·서비스를 무상으로 받았어요<small>켜면 글 첫머리에 고지 한 줄을 저희가 넣어 드려요</small></div><button class="toggle" type="button" data-comp="gift" aria-checked="false" aria-label="제품·서비스를 무상으로 받았어요"></button></div>
+  <div class="fr"><div class="fl">제휴 링크가 들어 있어요<small>어디 제휴인지 고르면 그 고지 문장이 첫머리에 들어가요</small></div><button class="toggle" type="button" data-comp="affiliate" aria-checked="false" aria-label="제휴 링크가 들어 있어요"></button></div>
+  <div id="affPick" hidden style="padding:0 16px 12px"></div>
+  <p class="muted" style="margin:0 16px 12px;font-size:12.5px">받은 게 있으면 켜 주세요 · 고지 문장은 저희가 첫머리에 넣어 드려요.</p>
+</div>
+</div>
+<div id="result" hidden></div>
+<div class="cta" id="cta"><button class="btn primary" type="button" id="go">편성표에 넣기</button></div>
+--- script ---
+await UI.boot("create");
+/* ══ [R8-A2 · DESIGN §5D①] 🔴 **내가 직접 쓰기** — 사장님이 «주요 골자»라 하신 세 길 중 ①.
+     서버(`POST /api/pieces-self` · `lib/piece-self.ts`)는 R8 에 **완성**돼 있었는데 **부르는 화면이 한 곳도 없었다**
+     (`grep -rl "/api/pieces-self" public/` = 0). 이 화면이 그 문이다 — «정의가 있나»가 아니라 «제품이 부르나»(AC-69).
+
+   🔴 계약(서버 정본에서 글자 그대로 옮겼다 · netlify/functions/pieces-self.ts):
+     POST /api/pieces-self { channel, accountId?, title, bodyHtml, slotId? | scheduleAt?, monetize?{sponsored,gift,affiliate} }
+       200 { ok, pieceId, status:"in_review", origin:"self", coins:{charged,ref}, gate:{ok,checks[]}, slot:{id,publishAt}|null, notice? }
+       400 step:"cadence" (+retryAt·gapMin·dailyCap·postsToday·capped) — `publish-now` 와 **같은 모양**이라 **같은 함수**가 그린다(`UI.cannotSheet`)
+       400 step:"channel"|"title"|"body"|"when"|"slot"|"account"
+
+   🔴 코인은 **서버가 원장에서 읽은 값**(`coins.charged`)을 그린다 — «0코인»을 글자로 박지 않는다(AC-74).
+      1코인이 붙는 날이 오면 화면만 0 이라고 계속 말하게 된다.
+   🔴 **막지 않는다** — 검사에 걸려도 그대로 예약된다(§9 하드 게이트 0개). 대신 또렷하게 말하고, 되돌릴 길을 같은 자리에서 준다.
+   🔴 시각은 KST 고정(§4.5b) — `datetime-local` 을 쓰지 않는다(그 값엔 시간대가 없다). 날짜·시각 셈은 `UI.atKST` 한 곳. */
+let accounts = [], channels = [], slots = [], sending = false;
+const st = { channel: "", accountId: null, when: "slot", slotId: null, date: UI.ymdKST(), time: "09:00", mon: { sponsored: false, gift: false, affiliate: false }, aff: "coupang" };
+/* 제휴처 이름은 **수익 화면과 같은 어휘**를 쓴다(UI.SRC) — 여기서 새 낱말을 만들면 두 화면이 다른 말을 한다.
+   🔴 «그 밖»(manual)은 서버에서 쿠팡 전용 문구가 아닌 **일반 제휴 문구**로 나간다(lib/disclosure.ts disclosureSentence). */
+const AFF = ["coupang", "linkprice", "aliexpress", "manual"];
+const plainOf = (el) => (el.innerText || "").replace(/ /g, " ");
+/* 본문 → bodyHtml: 빈 줄로 문단을 가르고 한 줄 바꿈은 <br>. 🔴 붙여넣은 서식은 싣지 않는다 —
+   무엇이 나갈지 화면에서 본 그대로여야 한다(서버가 한 번 더 소독한다 · lib/piece-self.ts sanitizeUserHtml). */
+const bodyHtml = () => plainOf(UI.$("#body")).split(/\n{2,}/).map((s) => s.trim()).filter(Boolean).map((s) => `<p>${UI.esc(s).replace(/\n/g, "<br>")}</p>`).join("\n");
+
+/* ── 어디에 ── */
+function renderWhere() {
+  const host = UI.$("#where");
+  /* 🔴 «글 채널»은 서버가 말한다(`channels[].category`) — 화면에 채널 이름을 박지 않는다(채널이 늘면 저절로 따라온다).
+     정지된 계정은 뺀다 — 거기로는 못 나간다(소재 화면과 같은 규율). */
+  const textCh = new Set(channels.filter((c) => c.category === "text").map((c) => c.key));
+  const mine = accounts.filter((a) => textCh.has(a.channel) && a.status !== "suspended");
+  const chList = [...new Set(mine.map((a) => a.channel))];
+  if (!chList.length) {
+    host.innerHTML = '<div class="gt">어디에</div><div class="empty"><h3>먼저 글 채널 계정을 연결해 주세요</h3><p>연결하면 그 채널의 편성표 자리에 바로 걸 수 있어요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>';
+    UI.$("#cta").hidden = true; return;
+  }
+  if (!chList.includes(st.channel)) { st.channel = chList[0]; st.accountId = null; }
+  const accs = mine.filter((a) => a.channel === st.channel);
+  if (!accs.some((a) => a.id === st.accountId)) st.accountId = accs.length === 1 ? accs[0].id : (st.accountId && accs.some((a) => a.id === st.accountId) ? st.accountId : (accs[0] ? accs[0].id : null));
+  const cur = accs.find((a) => a.id === st.accountId) || null;
+  host.innerHTML = '<div class="gt">어디에</div>'
+    + (chList.length > 1 ? `<div style="padding:0 12px 8px">${UI.chips("ch", chList.map((c) => [c, UI.chLabel(c)]), st.channel)}</div>` : "")
+    + `<div class="row">${UI.mark(st.channel)}<div class="l"><span class="t">${UI.esc(UI.chLabel(st.channel))}</span><span class="d">${cur ? `@${UI.esc(cur.handle)} · 오늘 ${cur.postsToday}/${cur.dailyCap}` : "계정을 골라 주세요"}</span></div></div>`
+    + (accs.length > 1 ? `<div style="padding:0 12px 12px">${UI.chips("acc", accs.map((a) => [a.id, "@" + a.handle]), st.accountId)}</div>` : "");
+  UI.bindChips(host, (name, v) => {
+    if (name === "ch") { st.channel = v; st.accountId = null; st.slotId = null; renderWhere(); renderWhen(); }
+    else if (name === "acc") { st.accountId = Number(v) || null; renderWhere(); }
+  });
+}
+
+/* ── 언제 올릴까요 — ①편성표 빈자리를 빌리거나 ②시각을 직접 고른다(서버 계약의 slotId | scheduleAt 그대로) ── */
+const freeSlots = () => slots.filter((s) => !s.pieceId && s.channel === st.channel && s.publishAt && UI.utc(s.publishAt).getTime() > Date.now()
+  && !["published", "publishing", "skipped", "failed", "rejected"].includes(s.status));
+function renderWhen() {
+  const host = UI.$("#when"); const free = freeSlots();
+  if (st.when === "slot" && !free.length) st.when = "time";
+  if (st.when === "slot" && !free.some((s) => s.id === st.slotId)) st.slotId = free[0] ? free[0].id : null;
+  const days = [0, 1, 2, 3].map((k) => { const d = UI.plusYmd(UI.ymdKST(), k); return [d, UI.dayLabelKST(d)]; });
+  if (!days.some(([d]) => d === st.date)) st.date = days[0][0];
+  host.innerHTML = '<div class="gt">언제 올릴까요</div>'
+    + `<div style="padding:0 16px 10px">${UI.seg("how", [["slot", "편성표 빈자리"], ["time", "시각 정하기"]], st.when)}</div>`
+    + (st.when === "slot"
+      ? (free.length
+        ? free.slice(0, 8).map((s) => `<button type="button" class="row tap" data-slot="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(UI.dayLabelKST(s.date))} ${UI.esc(UI.timeKST(s.publishAt))}</span><span class="d">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"}${s.topicTitle ? " · " + UI.esc(s.topicTitle) + " 자리" : ""}</span></div>${s.id === st.slotId ? '<span class="pill ok">여기</span>' : ""}</button>`).join("")
+        : '<p class="muted" style="margin:0 16px 12px;font-size:13px">앞으로 30일 안에 비어 있는 자리가 없어요 · «시각 정하기»로 새 자리를 만들 수 있어요.</p>')
+      : `<div style="padding:0 16px 8px">${UI.seg("d", days, st.date)}</div><div style="padding:0 12px 12px">${UI.chips("t", UI.TIMES, st.time)}</div>`)
+    + (st.when === "slot" && free.length ? '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">그 자리에 만들려던 글 대신 이 글이 나가요.</p>' : "")
+    + (st.when === "time" ? '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">같은 계정 글끼리는 시간을 띄워야 해서, 너무 붙으면 언제부터 되는지 알려 드려요.</p>' : "");
+  UI.bindChips(host, (name, v) => { if (name === "how") { st.when = v; renderWhen(); } else if (name === "d") st.date = v; else if (name === "t") st.time = v; });
+  UI.$$("#when [data-slot]").forEach((b) => b.onclick = () => { st.slotId = Number(b.dataset.slot); renderWhen(); });
+}
+
+/* ── 대가 — 🔴 여기선 켜고 끌 수 있다(아직 만들기 전이라 되돌릴 수 있다). 만든 뒤엔 검수 화면에서 «켜기»만 된다. ── */
+function bindComp() {
+  UI.$$("#comp [data-comp]").forEach((b) => UI.toggle(b, (on) => {
+    st.mon[b.dataset.comp] = on;
+    if (b.dataset.comp === "affiliate") {
+      const pick = UI.$("#affPick"); pick.hidden = !on;
+      if (on) { pick.innerHTML = `<div class="muted" style="font-size:12px;font-weight:600;margin:0 4px 6px">어디 제휴인가요</div>${UI.chips("aff", AFF.map((k) => [k, UI.srcLabel(k)]), st.aff)}`; UI.bindChips(pick, (n2, v) => { if (n2 === "aff") st.aff = v; }); }
+    }
+    return true;
+  }));
+}
+
+/* ── 보내기 ── */
+async function send() {
+  if (sending) return; const btn = UI.$("#go");
+  const title = plainOf(UI.$("#ttl")).replace(/\s+/g, " ").trim();
+  const html = bodyHtml();
+  const body = { channel: st.channel, title, bodyHtml: html, monetize: { sponsored: st.mon.sponsored, gift: st.mon.gift, ...(st.mon.affiliate ? { affiliate: { provider: st.aff } } : {}) } };
+  if (st.accountId) body.accountId = st.accountId;
+  if (st.when === "slot" && st.slotId) body.slotId = st.slotId; else body.scheduleAt = UI.atKST(st.date, st.time);
+  sending = true; btn.disabled = true; btn.textContent = "넣는 중…";
+  const r = await UI.api("/api/pieces-self", { body });
+  sending = false; btn.disabled = false; btn.textContent = "편성표에 넣기";
+  if (!r.ok) {
+    if (r.gated) return;
+    /* 🔴 캐던스는 `publish-now` 와 같은 모양이라 **같은 함수**가 그린다 — 두 화면이 다른 말을 하면 그게 버그다.
+       문장(«몇 시부터 올릴 수 있어요»)은 서버가 만든 것이고, 화면은 제목만 이 자리에 맞춘다. */
+    if (r.step === "cadence") return UI.cannotSheet(r, "그 시각엔 올리기 어려워요");
+    const FIELD = { title: "#what", body: "#what", channel: "#where", account: "#where", when: "#when", slot: "#when" };
+    const at = FIELD[r.step]; if (at) UI.$(at).scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    return UI.toast(r.error || "넣지 못했어요");
+  }
+  renderResult(r);
+}
+
+/* ── 넣은 뒤 — 🔴 여기가 §9 «말해 주기»가 실제로 닿는 자리다: ①코인 ②자리 ③검사 결과 ④되돌릴 길.
+      막지 않으니 **예약 단추는 늘 눌린다** — 고치고 낼지 그대로 낼지 고르는 것은 고객이다. ── */
+function renderResult(r) {
+  UI.$("#form").hidden = true;
+  const res = UI.$("#result"); res.hidden = false;
+  const when = r.slot ? `${UI.dateKST(r.slot.publishAt)} ${UI.timeKST(r.slot.publishAt)}` : "";
+  const coin = Number(r.coins && r.coins.charged) || 0;
+  res.innerHTML = `<div class="group"><div class="gt">글을 저장했어요</div>
+      <div class="kv"><span class="k">올릴 시각</span><span class="v">${when ? UI.esc(when) : "아직 자리를 못 잡았어요"}</span></div>
+      <div class="kv"><span class="k">든 코인</span><span class="v">${UI.num(coin)}코인</span></div>
+      ${coin === 0 ? '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">AI를 안 써서 코인이 들지 않았어요.</p>' : ""}
+      ${r.notice ? `<p class="muted" style="margin:0 16px 12px;font-size:13px">${UI.esc(r.notice)}</p>` : ""}</div>
+    <div class="group" id="gate"></div>
+    <div class="group"><div class="gt">사진</div>
+      <button type="button" class="row tap" id="ph"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">내 사진 넣기</span><span class="d" id="phD">JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+    </div>`;
+  UI.$("#gate").innerHTML = UI.gateList(r.gate || { checks: [] });
+  UI.$("#ph").onclick = () => UI.photoSheet(r.pieceId, (ps) => { UI.$("#phD").textContent = ps.length ? `${ps.length}장 넣었어요 · 내 사진은 코인이 들지 않아요` : "JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요"; });
+  const cta = UI.$("#cta"); cta.hidden = false;
+  cta.innerHTML = `<a class="btn secondary" href="/app/piece.html?id=${r.pieceId}" style="flex:0 0 40%">글 보기</a><button class="btn primary" type="button" id="ok">이대로 예약할게요</button>`;
+  UI.$("#ok").onclick = async (e) => {
+    e.target.disabled = true;
+    const a = await UI.api("/api/pieces-approve", { body: { id: r.pieceId } });
+    e.target.disabled = false;
+    if (!a.ok) { if (a.gated) return; return UI.toast(a.error || "예약하지 못했어요"); }
+    UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
+  };
+}
+
+/* 길잡이 글은 «비었을 때만» 보이게 — 브라우저가 넣는 <br> 하나 때문에 :empty 가 깨진다(그래서 손으로 비운다). */
+function bindEditors() {
+  const cnt = UI.$("#cnt");
+  ["#ttl", "#body"].forEach((sel) => { const el = UI.$(sel);
+    el.addEventListener("input", () => { if (!plainOf(el).trim()) el.innerHTML = ""; cnt.textContent = `본문 ${UI.num(plainOf(UI.$("#body")).trim().length)}자`; });
+    el.addEventListener("paste", (e) => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData("text/plain"); document.execCommand("insertText", false, t); });
+  });
+}
+
+async function load() {
+  const [a, s] = await Promise.all([UI.api("/api/accounts-list"), UI.api(`/api/slots-list?from=${UI.ymdKST()}&to=${UI.plusYmd(UI.ymdKST(), 30)}`)]);
+  if (!a.ok) { if (!a.gated) UI.toast(a.error || "계정을 불러오지 못했어요"); return; }
+  accounts = a.accounts || []; channels = a.channels || [];
+  /* 🔴 자리를 못 읽어도 화면은 선다 — «시각 정하기»로는 그대로 쓸 수 있다(못 읽은 것을 «자리 0개»로 그리지 않는다 · AC-9). */
+  slots = s.ok ? (s.slots || []) : [];
+  if (!s.ok && !s.gated) st.when = "time";
+  renderWhere(); renderWhen();
+}
+bindComp(); bindEditors();
+UI.$("#go").onclick = send;
 await load();
 === schedule.html | schedule | 편성표 | two ===
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
@@ -421,12 +615,14 @@ function ruleSheet() {
     else body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>${st.produceLeadDays}일 전에 만들어 두고,<br>조용히 두면 그대로 나가요</h2><p>검수 시간에 아무것도 안 하면 예정대로 발행돼요.</p></div>
       <div class="sec">검수 방식</div>${UI.seg("rp", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], autoApproveOff() ? "require_confirm" : st.reviewPolicy)}
       ${autoApproveOff() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">자동 승인은 Pro 부터예요 · 지금 요금제에서는 검수에서 한 번 눌러야 나가요 <a href="/app/plan.html" style="font-weight:700;text-decoration:underline">요금제 보기</a></p>' : keptAuto() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">지금 쓰는 «조용하면 발행»은 그대로 유지돼요 · «반드시 확인»으로 바꾸면 이 요금제에서는 되돌릴 수 없어요</p>' : ""}
+      <p class="muted" id="rpSay2" style="margin:6px 0 0;font-size:12.5px">${rpSay(autoApproveOff() ? "require_confirm" : st.reviewPolicy)}</p>
       <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
       <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div>
         ${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
-    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") st.reviewPolicy = v; else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
+    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") { st.reviewPolicy = v; const sy = body.querySelector("#rpSay2"); if (sy) sy.textContent = rpSay(v); }   /* [R8 §9-2] 🔴 켜는 **그 순간에** 무엇을 켜는 것인지 말한다 — «사람이 안 보는 경로»가 생기는 자리가 여기다 */
+      else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
     const bk = body.querySelector("#bk"); if (bk) bk.onclick = () => { step--; view(sh, close); };
     const go = body.querySelector("#go"); if (go) go.onclick = async () => {
@@ -814,7 +1010,7 @@ function soonSheet(c) {
 }
 function connectSheet(c) {
   const k = c.key, label = c.label || UI.chLabel(k);
-  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 발행할 때만 러너가 열어요.</p>
+  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 올릴 때만 내 PC 프로그램이 열어요.</p>
     <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
     <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="off" required><div class="help"></div></div>
     <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off" placeholder="예: 요리하는 A"></div>
@@ -976,6 +1172,7 @@ await load();
 === settings.html | account | 설정 ===
 <div class="step-h"><h1>설정</h1></div>
 <div id="closeBn"></div>
+<div class="group" id="takedown" hidden></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
@@ -993,6 +1190,9 @@ await load();
 <div class="group" id="notig"><div class="gt">알림</div>
   <div class="fr"><div class="fl" id="notiT">기기 알림 받기<small id="notiD">확인할 게 생기면 바로 알려드려요</small></div><button class="toggle" type="button" id="noti" aria-checked="false" aria-label="기기 알림 받기"></button></div>
   <p class="muted" id="notiWhy" style="margin:0 16px 10px;font-size:12.5px" hidden></p>
+</div>
+<div class="group" id="volg" hidden><div class="gt">새 방식</div>
+  <div class="fr"><div class="fl">새 방식을 먼저 써 볼래요<small>더 빨리 좋아지지만, 드물게 발행이 한 번 실패할 수 있어요. 언제든 끄실 수 있어요.</small></div><button class="toggle" type="button" id="vol" aria-checked="false" aria-label="새 방식을 먼저 써 볼래요"></button></div>
 </div>
 <div class="group" id="expg"><div class="gt">내 자료</div><div id="exp"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 <div class="group" id="appg"><div class="gt">앱 정보</div>
@@ -1051,6 +1251,22 @@ async function loadNoti() {
   });
 }
 loadNoti();
+/* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **좋은 것만 말하지 않는다**: 뜻은 «아직 검증 안 된 자동 조작 표로 내 계정이 먼저 돈다»이고,
+   잘못되면 그 집 발행이 한 번 실패한다. 그래서 문구에 그 사실을 적고, **권유 배지·기본 켜짐을 만들지 않는다**(기본은 꺼짐이 설계다).
+   🔴 서버가 이 칸을 모르면(옛 서버) **줄 자체를 그리지 않는다** — 켜도 아무 일이 안 일어나는 토글을 두지 않으려고. */
+async function loadVolunteer() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  if (!r.ok || typeof r.recipeVolunteer !== "boolean") return;
+  const g = UI.$("#volg"), tg = UI.$("#vol"); g.hidden = false;
+  tg.setAttribute("aria-checked", r.recipeVolunteer ? "true" : "false");
+  UI.toggle(tg, async (next) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { recipeVolunteer: next } });
+    if (!rr.ok) { UI.toast(rr.gated ? "" : rr.error || "바꾸지 못했어요"); return false; }
+    UI.toast(rr.recipeVolunteer ? "새 방식을 먼저 써 볼게요" : "원래 방식으로 돌렸어요");
+    return rr.recipeVolunteer === next ? undefined : false;   // 서버가 아니라면 서버 쪽을 따른다
+  });
+}
+loadVolunteer();
 UI.$("#appVer").textContent = UI.APP_VERSION;
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
@@ -1164,6 +1380,28 @@ function closeSheet() {
     } });
 }
 loadClose();
+
+/* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **내 글에 들어온 신고** — 서버가 보내는 알림·메일의 링크가 바로 이 자리다
+     (`/app/settings.html#takedown` · lib/takedown.ts:153 · lib/cron/takedown-watch.ts:31). 그 링크는 여태 **아무 데도 아닌 곳**을 가리키고 있었다:
+     통지를 받은 고객이 «확인하러 가기»를 눌러도 설정 화면만 열렸다(기능이 없는 것보다 안 보이는 사고 · AC-69).
+   🔴 두 갈래(직접 내렸다 / 대신 내려 달라)는 `UI.takedownSheet` 한 곳이 그린다 — 발행함도 같은 함수를 쓴다(두 화면이 다른 말을 하지 않게).
+   🔴 살아 있는 신고가 없으면 **이 섹션을 아예 안 그린다** — 없는 걱정을 만들지 않는다. 끝난 신고는 있을 때만 접어서 보여 준다. */
+async function loadTakedown() {
+  const r = await UI.api("/api/takedowns", { noGate: true });
+  const host = UI.$("#takedown");
+  if (!r.ok || !(r.notices || []).length) { host.hidden = true; return; }
+  const live = r.notices.filter((n) => UI.TAKEDOWN_ACTIVE.includes(n.status));
+  const done = r.notices.filter((n) => !UI.TAKEDOWN_ACTIVE.includes(n.status));
+  const row = (n) => `<button type="button" class="row tap" data-td="${n.id}">${n.channel ? UI.mark(n.channel) : '<span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v5M12 17h.01"/><path d="M10.3 3.9L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>'}<div class="l"><span class="t wrap">${UI.esc(n.kindLabel)} 신고</span><span class="d wrap">${UI.esc(n.reason || "")}</span></div>${UI.pill(UI.TAKEDOWN_STATUS, n.status)}<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">내 글에 들어온 신고 ${live.length ? `<span class="pill warn">${live.length}</span>` : ""}</div>`
+    + (live.length ? live.map(row).join("") + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요 · 내리는 데 코인은 들지 않아요.</p>' : "")
+    + (done.length ? `<div class="gt" style="padding-top:4px">지난 신고 ${done.length}건</div>${done.map(row).join("")}` : "");
+  UI.$$("#takedown [data-td]").forEach((b) => b.onclick = () => UI.takedownSheet(r.notices.find((n) => n.id === Number(b.dataset.td)), loadTakedown));
+  /* 알림·메일이 `#takedown` 으로 보내는데 그때 이 섹션은 아직 숨어 있었다 — 그려진 **뒤에** 데려간다. */
+  if (location.hash === "#takedown") host.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+loadTakedown();
 
 === plan.html | account | 요금제 ===
 <div class="hl"><div class="say" id="say">지금은</div><div class="num" id="cur">…</div><div class="tip" id="curTip"></div></div>
@@ -1673,6 +1911,8 @@ await load();
 <div id="vpane" hidden></div>
 <div class="group" id="why" hidden></div>
 <div class="group" id="comp" hidden></div>
+<div class="group" id="photos" hidden></div>
+<div class="group" id="claims" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
 --- script ---
@@ -1693,23 +1933,13 @@ function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".
    🔴 **가벼운 것과 무거운 것이 같은 얼굴이면 안 된다** — 고지 누락(법)과 골격 반복(글의 질)이 같아 보이면 둘 다 넘긴다.
       무게는 **서버가 준다**(`weight: "high"|"normal"`) — 화면이 키를 보고 정하면 그게 대용물이다(AC-57).
    🔴 «어떻게»(`how`)도 서버 문장이다. 실패한 칸에만 온다. */
-const isHigh = (c) => !c.pass && c.weight === "high";
-const gateRow = (c) => {
-  const cls = c.pass ? "" : isHigh(c) ? "hi" : "soft";
-  return `<div class="g ${cls}"><i>${c.pass ? "✓" : isHigh(c) ? "!" : "i"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}${!c.pass && c.how ? `<small class="how">${UI.esc(c.how)}</small>` : ""}</div>`;
-};
-function gateList(g) {
-  const checks = g.checks || [];
-  const bad = checks.filter((c) => !c.pass);
-  const high = bad.filter(isHigh);
-  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
-  /* 🔴 «고쳐야 예약할 수 있어요»는 이제 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
-  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
-  /* ③ 되돌릴 수 있다 — 막지 않는 대신 «나가도 되돌릴 수 있다»가 보여야 «말해 주기»가 정직해진다.
-     🔴 채널마다 우리가 대신 내릴 수 있는지 다르니 약속하지 않는다(발행함에서 그 채널의 길을 그대로 말한다). */
-  const back = bad.length ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.</p>' : "";
-  return `<div class="gt">발행 전 검사 ${pill}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}${say}<div class="gate">${checks.map(gateRow).join("")}</div>${back}`;
-}
+/* 🔴 [R8-A2] 줄 그리기는 **`ui.js` 한 곳**으로 올렸다(`UI.gateRow`·`UI.gateList`) — 직접 쓰기(§5D①) 화면이 같은 결과를 받으면서
+   두 화면이 각자 그리면 축이 늘 때마다 한쪽만 낡기 때문이다. 여기서는 «이 글이 어느 상태인가»에 맞는 **제목과 되돌릴 길**만 정한다.
+   🔴 나간 뒤에도 본다(§9-2) — 자동 승인으로 나간 글은 아무도 검수창을 안 봤다는 뜻이라 «그때 이런 지적이 있었다»가 여기 남아야 한다. */
+const gateRow = UI.gateRow;
+const gateList = (g) => (P && P.status === "published"
+  ? UI.gateList(g, { title: "이 글에 있던 지적", back: "지금이라도 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요." })
+  : UI.gateList(g));
 /* [R8-A §2 · B-1 d6c2359] «이 글이 왜 이렇게 생겼나» — 서버가 **그 글에 실제로 적용된** 값을 준다(`topicGroup`·`goal`·`contract`).
    🔴 계약표의 기본값이 아니라 «이 글에 쓰인 값»이다 — 화면이 계약표를 베껴 와 «아마 이럴 것»이라고 그리지 않는다(정본은 lib/writing-contracts.ts · AC-52).
    🔴 `topicGroup: null` 은 **«모름»이다**(형식이 없어 못 정한 글) — 기본값으로 위장하지 않고 모른다고 적는다(AC-9·AC-57).
@@ -1730,6 +1960,31 @@ function renderWhy() {
   if (m.angle) h += kv("잡은 방향", String(m.angle));
   if (m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
   host.hidden = false; host.innerHTML = '<div class="gt">이 글이 왜 이렇게 생겼나</div>' + h;
+}
+/* ══ [R8-A2 §2.4] 🔴 **수치 주장 표시** — 서버(`netlify/functions/pieces.ts:142`)가 `meta.numberClaims = { summary, items, line }` 을
+     **이미 실어 보내고 있었는데** 검수 화면이 한 번도 안 그렸다(`grep -n "numberClaims" public/app/piece.html` = 0).
+   🔴 «틀렸어요»가 **아니다** — 우리는 그 숫자가 맞는지 모른다. 아는 것은 «우리가 준 자료에 있던 숫자인가»뿐이다(AC-57).
+   🔴 문구는 서버 한 출처(`lib/fact-claims.ts claimsLine` → `line`) — 화면이 다시 짓지 않는다. 확인할 게 없으면 서버가 `line` 을 안 준다(없는 걱정을 만들지 않는다).
+   🔴 **막지 않는다** — 그대로 내보낼 수 있다(§9). */
+function renderClaims() {
+  const host = UI.$("#claims"); const nc = (P.meta || {}).numberClaims;
+  if (!nc || !nc.line) { host.hidden = true; return; }
+  const items = (nc.items || []).filter((x) => x.basis === "self");
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">직접 확인이 필요한 숫자</div>'
+    + `<p class="muted" style="margin:0 16px 10px;font-size:13px">${UI.esc(nc.line)}</p>`
+    + (items.length ? `<div class="chips" style="padding:0 16px 10px;gap:6px">${items.slice(0, 12).map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${x.risky ? "background:var(--warn-soft);color:var(--warn-ink)" : ""}">${UI.esc(x.num)}${x.context ? " · " + UI.esc(String(x.context).slice(0, 24)) : ""}</span>`).join("")}</div>` : "")
+    + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">${P.status === "in_review" ? "맞는 숫자면 그대로 두시면 돼요 · 고치실 거면 위 본문에서 바로 고칠 수 있어요." : "맞는 숫자면 그대로 두시면 돼요."}</p>`;
+}
+/* [R8-A2 §5D.4] 🔴 **내 사진 넣기** — 서버(`/api/piece-photo-add`)는 R8 에 완성인데 부르는 화면이 한 곳도 없었다.
+   설계가 «사진 업로드가 ①의 전제»라고 못 박은 자리다(§5D.3-4) — 직접 쓴 글에도, AI 가 쓴 글에도 내 사진을 넣을 수 있어야 한다. */
+function renderPhotos() {
+  const host = UI.$("#photos");
+  if (P.status !== "in_review" || P.kind === "video") { host.hidden = true; return; }
+  const n = (P.images || []).length;
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">사진</div><button type="button" class="row tap" id="phGo"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">${n ? `사진 ${n}장` : "내 사진 넣기"}</span><span class="d">JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
+  UI.$("#phGo").onclick = () => UI.photoSheet(P.id, () => load());
 }
 /* [R8-A §4 · 법 경로] 대가를 받았나 — 🔴 **켜기만 있다**(서버가 false 를 무시한다).
    켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남기 때문이다. 내리려면 이 글을 버리고 다시 만든다.
@@ -1783,12 +2038,25 @@ async function compOn(kind, close) {
   if (r.needsRerender) setTimeout(() => rerenderSheet(r.needsRerenderWhy || "이미 만들어진 영상에는 광고 배지가 없어요. 다시 만들어야 화면에 배지와 시작 자막이 들어가요."), 400);
 }
 /* [P1R5] 영상 심사 = gate.judge(§1.4 done · grade P0/P1/P2 · axes label 만) + 기존 checks */
+/* [R8-A2 §9] 🔴 P0 한 줄을 **세 줄**로 — 막지 않는 대신 «무엇이 · 왜 · 어떻게 하면 되는지»를 또렷하게 말한다(겁주지 않는다 · §3).
+   🔴 «깨진 물건»(UI.JUDGE_BLOCK)과 «심사에 걸린 것»은 **다른 얘기다**: 앞은 올려도 채널이 안 받고, 뒤는 그대로 올릴 수 있다.
+      둘을 같은 말로 뭉뚱그리면 고객이 멀쩡한 영상을 버린다. 어느 쪽인지는 **서버 목록**으로 가른다(화면이 키를 보고 정하지 않는다). */
+function judgeSay(j) {
+  if (!j || j.grade !== "P0") return j && j.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : "";
+  const p0 = (j.axes || []).filter((a) => !a.pass && a.grade === "P0");
+  const broke = p0.filter((a) => UI.JUDGE_BLOCK.includes(a.key));
+  const what = UI.esc((broke[0] || p0[0] || {}).label || "심사");
+  return broke.length
+    ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">«${what}» 에서 영상 파일이 잘못 나왔어요.<br>이대로 올리면 채널이 받아 주지 않아요.<br>«다시 만들기»를 누르면 새로 구워요 · 코인은 더 안 들어요.</p>`
+    : `<p class="muted" style="margin:0 16px 8px;font-size:13px">«${what}» 를 세 번 고쳐도 통과하지 못했어요.<br>막지는 않아요 — 이대로 예약하실 수 있어요.<br>고치고 싶으시면 «다시 만들기»를 눌러 주세요 · 코인은 더 안 들어요.</p>`;
+}
 function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || ["off", j.grade] : null;
-  return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${(j?.axes || []).some((a) => a.pending) ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${(j.axes || []).filter((a) => a.pending).length}가지는 아직 못 쟀어요 — ${UI.esc(((j.axes || []).find((a) => a.pending) || {}).detail || "잴 재료가 아직 안 왔어요")}</p>` : ""}${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade);
+  return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P1 1회 재생성 · P2 기록</span></div>${(j?.axes || []).some((a) => a.pending) ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${(j.axes || []).filter((a) => a.pending).length}가지는 아직 못 쟀어요 — ${UI.esc(((j.axes || []).find((a) => a.pending) || {}).detail || "잴 재료가 아직 안 왔어요")}</p>` : ""}${judgeSay(j)}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade);
     /* [R7 §1.5] 3상태: 보류(pending · 잴 재료가 없어 판정을 못 했다) → 실패 → 통과. 🔴 보류를 ✓ 로 그리지 않는다(못 쟀는데 초록 = 거짓말) */
     const style = a.pending ? "background:var(--ground);color:var(--muted)" : a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger-ink)" : "background:var(--warn-soft);color:#B26A00";
     /* 보류의 detail 은 이미 «…못 쟀어요» 라 꼬리표를 또 붙이면 같은 말이 두 번 나온다 — detail 이 있으면 그것만 */
-    const tail = a.pending ? (a.detail ? "" : "아직 못 쟀어요") : a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과";
+    /* [R8-A2 §9] «차단»이라는 낱말을 뺐다 — 이제 막는 것은 **깨진 물건 둘**뿐이고 나머지 P0 는 그대로 나갈 수 있다. */
+    const tail = a.pending ? (a.detail ? "" : "아직 못 쟀어요") : a.pass ? "✓" : g === "P0" ? (UI.JUDGE_BLOCK.includes(a.key) ? "! 다시 만들어야 해요" : "! 꼭 보세요") : "P1 재생성 통과";
     return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${style}">${UI.esc(a.label)}${a.detail ? " " + UI.esc(a.detail) : ""}${tail ? " " + tail : ""}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
 const LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 const assetOf = (kind) => (P.assets || []).find((a) => a.kind === kind) || null;
@@ -1829,13 +2097,17 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true;
+  if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true; UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);
     renderComp();   // [R8 §5.1] 영상에도 «대가를 받았나요» — 협찬 영상에 고지를 켤 자리가 아무 데도 없었다
     if (P.gate) { gate.hidden = false; gate.innerHTML = judgeList(P.gate); } else gate.hidden = true;
     cta.hidden = false;
-    if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve" ${P.gate?.judge?.grade === "P0" ? "disabled" : ""}>이대로 예약</button>`; bindCta(); }
+    /* 🔴 [R8-A2 §9] **화면에 남은 마지막 하드 게이트를 열었다** — 여기가 `grade === "P0"` 이면 «이대로 예약»을 `disabled` 로 잠그던 자리다.
+       서버는 이미 `HARD_GATE_KEYS = []` 라 막는 축이 0개이고, 영상도 **«물건이 깨진 것» 둘**(UI.JUDGE_BLOCK)만 거부한다.
+       화면만 잠가 두면 «서버는 되는데 화면이 안 되는» 자리가 되고, 그건 §9 가 내린 바로 그 게이트다.
+       🔴 판정은 **그대로 둔다** — 지운 게 아니라 소프트로 내린 것이다(§9 «검사를 지우지 마라»). 무엇이·왜·어떻게는 judgeList 가 세 줄로 말한다. */
+    if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
     else if (P.status === "published" && P.externalUrl) cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">올라간 영상 보기</a>`;
     else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     else cta.hidden = true;
@@ -1845,7 +2117,7 @@ function render() {
   const ttl = UI.$("#ttl"); ttl.textContent = P.title || ""; ttl.contentEditable = editable ? "true" : "false";
   UI.$("#by").innerHTML = `${UI.mark(P.channel, "sm")}<span>${P.accountHandle ? "@" + UI.esc(P.accountHandle) : ""} · ${UI.esc(UI.FORMAT[P.format] || P.format || "")}${P.meta?.tags?.length ? " · #" + P.meta.tags.map(UI.esc).join(" #") : ""}</span>`;
   const body = UI.$("#body"); body.innerHTML = P.bodyHtml || ""; body.contentEditable = editable ? "true" : "false"; lockDisc(body);
-  renderWhy(); renderComp();
+  renderWhy(); renderComp(); renderPhotos(); renderClaims();
   if (P.gate) { gate.hidden = false; gate.innerHTML = gateList(P.gate); } else gate.hidden = true;
   cta.hidden = false;
   if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button>`; bindCta(); }
@@ -1860,14 +2132,16 @@ function render() {
 const NOW_OK = ["scheduled", "approved"];
 const nowBtn = () => `<button class="btn primary" type="button" id="pubNow">지금 올리기</button>`;
 function bindNow() { const b = UI.$("#pubNow"); if (b) b.onclick = () => publishNow(b); }
-async function publishNow(btn) {
+async function publishNow(btn, override) {
   btn.disabled = true; btn.textContent = "올리는 중…";
-  const r = await UI.api("/api/publish-now", { body: { pieceId: id } });
+  /* [R8 §9 · B] 🔴 넘기기는 **그 회차만**이다 — 저장하지 않는다(다음 번엔 다시 물어본다). 키 이름도 서버가 준 것을 쓴다. */
+  const r = await UI.api("/api/publish-now", { body: { pieceId: id, ...(override ? { [override]: true } : {}) } });
   btn.disabled = false; btn.textContent = "지금 올리기";
   const say = UI.esc(r.message || r.error || "");
+  /* 🔴 [R8-A2] «안 돼요» 시트는 `UI.cannotSheet` 한 곳이다 — 캐던스 400 은 `pieces-self`(직접 쓰기)와 **같은 모양**이라
+     두 화면이 같은 사유에 다른 말을 하면 그게 버그다. 문장은 전부 서버 것(`message`·`error`). */
   if (!r.ok) { if (r.gated) return;   // 체험 끝·정지·탈퇴는 UI.gate 가 이미 말했다
-    return UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><button class="btn secondary" type="button" data-ok>알겠어요</button></div>`,
-      { title: "지금은 올릴 수 없어요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } }); }
+    return UI.cannotSheet(r, null, (key) => publishNow(btn, key)); }
   if (r.postUrl) return UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><a class="btn primary" href="${UI.esc(r.postUrl)}" target="_blank" rel="noopener">올라간 글 보기</a></div>`,
     { title: "올렸어요", onOpen: (sh, close) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => load()); } });
   if (r.runner && r.runner.online === false) return UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><a class="btn primary" href="/app/runner.html">내 PC 프로그램 보기</a></div>`,
@@ -1890,7 +2164,20 @@ async function approve() {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
   const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
   if (!r.ok) { if (r.gated) return;
-    if (r.step === "gate" && r.gate) return UI.sheet(`<p class="muted" style="margin:0 0 8px">${P.kind === "video" ? UI.esc(r.error || "심사에서 막혔어요") : "아래 항목을 고치면 예약할 수 있어요. 글을 고친 뒤 «수정 저장»을 누르면 다시 검사해요."}</p><div class="gate" style="padding:4px 0 8px">${(r.gate.checks || []).map(gateRow).join("")}</div><div class="cta"><button class="btn secondary" type="button" data-ok>${P.kind === "video" ? "알겠어요" : "글 고치러 가기"}</button></div>`, { title: P.kind === "video" ? "예약할 수 없어요" : "발행 전 확인이 필요해요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
+    /* 🔴 [R8-A2 §9] 여기까지 오는 길은 이제 **«깨진 영상» 하나**다 — 서버 `HARD_GATE_KEYS = []` 이고 영상도 `judgeBlockers` 둘(UI.JUDGE_BLOCK)뿐이다.
+       그래서 «고치면 예약할 수 있어요»(옛 문장)는 이제 거짓말이다. 사실 한 줄 → 어떻게 하면 되는지 → 우리가 대신 해 주는 것, 그 차례로 적고
+       **그 길(다시 만들기)을 그 자리에서 연다**(§9-4). */
+    if (r.step === "gate" && r.gate) {
+      const broke = ((r.gate.judge || {}).axes || []).filter((a) => !a.pass && a.grade === "P0" && UI.JUDGE_BLOCK.includes(a.key));
+      return UI.sheet(`<p class="muted" style="margin:0 0 8px">${UI.esc(r.error || "지금은 예약할 수 없어요")}${broke.length ? "<br>이대로 올리면 채널이 받아 주지 않아요." : ""}</p>
+        ${broke.length ? `<div class="gate" style="padding:4px 0 8px">${broke.map((a) => `<div class="g hi"><i>!</i><span>${UI.esc(a.label)}</span>${a.detail ? `<small>${UI.esc(a.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}
+        ${(r.gate.checks || []).length ? `<div class="gate" style="padding:4px 0 8px">${(r.gate.checks || []).map(gateRow).join("")}</div>` : ""}
+        <div class="cta">${P.regenCount >= 1 ? '<button class="btn secondary" type="button" data-ok>알겠어요</button>' : '<button class="btn primary" type="button" data-regen>다시 만들기</button>'}</div>`,
+        { title: broke.length ? "영상 파일이 잘못 나왔어요" : "지금은 예약할 수 없어요", onOpen: (sh, close) => {
+          const ok = sh.querySelector("[data-ok]"); if (ok) ok.onclick = close;
+          const rg = sh.querySelector("[data-regen]"); if (rg) rg.onclick = () => askRegen(close);
+        } });
+    }
     return UI.toast(r.error || "예약하지 못했어요");
   }
   UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
@@ -2155,21 +2442,37 @@ function render() {
   const shown = posts.filter((p) => tab === "all" || p.status === tab || (tab === "published" && privateOf(p)));
   UI.$$("#seg button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   const host = UI.$("#list");
+  /* 🔴 신고는 **탭과 상관없이** 맨 위에 — 목록이 비어 있어도(거른 탭이어도) 보여야 한다. 겁주지 않는 한 문장 + 갈 길(§3·§9-1). */
+  const live = notices.filter((n) => UI.TAKEDOWN_ACTIVE.includes(n.status));
+  const tdBn = live.length ? `<div class="banner" style="margin:0 0 12px"><span>내 글에 들어온 신고가 ${live.length}건 있어요 · 직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요</span><button type="button" id="tdGo">확인하기</button></div>` : "";
+  const bindTd = () => { const b = UI.$("#tdGo"); if (b) b.onclick = () => (live.length === 1 ? UI.takedownSheet(live[0], load) : UI.go("/app/settings.html#takedown")); };
   if (!shown.length) {
     const E = { all: ["아직 올라간 글이 없어요", "편성표를 확인해 보세요", "/app/schedule.html", "편성표 보기"], published: ["아직 올라간 글이 없어요", "예약한 시각이 되면 여기에 쌓여요", "/app/schedule.html", "편성표 보기"], awaiting_manual: ["직접 올릴 글이 없어요", "올리지 못한 글이 생기면 여기에 모아 드려요", null, null] }[tab];
-    host.innerHTML = `<div class="group"><div class="empty"><h3>${E[0]}</h3><p>${E[1]}</p>${E[2] ? `<a class="btn primary sm" href="${E[2]}">${E[3]}</a>` : ""}</div></div>`;
-    return;
+    host.innerHTML = tdBn + `<div class="group"><div class="empty"><h3>${E[0]}</h3><p>${E[1]}</p>${E[2] ? `<a class="btn primary sm" href="${E[2]}">${E[3]}</a>` : ""}</div></div>`;
+    bindTd(); return;
   }
   const stuck = shown.filter(stuckOf), priv = shown.filter(privateOf), proc = shown.filter(processingOf), rest = shown.filter((p) => !stuckOf(p) && !privateOf(p) && !processingOf(p));
   const days = [];
   for (const p of rest) { const k = dayOf(p); let g = days.find((x) => x.k === k); if (!g) { g = { k, list: [] }; days.push(g); } g.list.push(p); }
-  host.innerHTML = (stuck.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">직접 올려야 해요 ${stuck.length}건</div>${stuck.map(row).join("")}</div>` : "")
+  host.innerHTML = tdBn + (stuck.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">직접 올려야 해요 ${stuck.length}건</div>${stuck.map(row).join("")}</div>` : "")
     + (priv.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">공개로 바꿔 주세요 ${priv.length}건</div>${priv.map(row).join("")}<p class="muted" style="margin:0 16px 12px;font-size:12.5px">유튜브 앱 심사 전엔 비공개로 올라가요 · 스튜디오에서 «공개»로 바꾸면 끝나요</p></div>` : "")
     + (proc.length ? `<div class="group" style="margin-bottom:12px"><div class="gt">처리 중 ${proc.length}건</div>${proc.map(row).join("")}</div>` : "")
     + days.map((g) => `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(g.k)} · ${g.list.length}건</div>${g.list.map(row).join("")}</div>`).join("");
+  bindTd();
   UI.$$("#list .row[data-id]").forEach((b) => b.onclick = (e) => { if (e.target.closest("[data-stop]")) return; postSheet(posts.find((p) => p.id === Number(b.dataset.id))); });
 }
-async function load() { const r = await UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render(); }
+/* [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **신고는 나간 뒤에 오는 일**이라 «올라간 글»에서 보여야 한다 — 설정 화면에만 두면
+   나간 글을 보러 온 사람에게는 영영 안 닿는다(알림을 놓친 고객이 여기서 다시 만난다).
+   🔴 신고가 붙은 글은 «이 글 내리기»(`post-retract`) 대신 **«신고에 답하기»** 를 준다: 같은 «내리기»가 두 문으로 갈리면
+      고객이 어느 쪽을 눌러야 신고가 끝나는지 알 수 없다(신고를 끝내는 문은 `takedown-action` 쪽이다). */
+let notices = [];
+const noticeOf = (p) => notices.find((n) => UI.TAKEDOWN_ACTIVE.includes(n.status) && ((p.pieceId && n.pieceId === p.pieceId) || (p.externalUrl && n.externalUrl === p.externalUrl)));
+async function load() {
+  const [r, t] = await Promise.all([UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`), UI.api("/api/takedowns", { noGate: true })]);
+  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  notices = t.ok ? (t.notices || []) : [];   /* 못 읽으면 빈 채로 둔다 — 없는 신고를 지어내지 않는다(AC-9) */
+  posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render();
+}
 
 /* [R8 §3 · DESIGN §5E] «내려 줘» — 고객이 누르면 **우리가 대신** 내린다(우리가 일방적으로 내리는 길은 만들지 않는다).
    🔴 `canRetract` 가 false 인 채널(유튜브·쓰레드 …)엔 **단추를 만들지 않는다** — 삭제 권한이 없어서다. 대신 그 글로 가는 길을 준다.
@@ -2177,10 +2480,14 @@ async function load() { const r = await UI.api(`/api/posts-list?status=${tab ===
    🔴 되돌릴 수 없는 동작이라 한 번 묻는다 — 단추 이름은 «네»가 아니라 **«내릴게요»**(무슨 일이 일어나는지 단추가 말한다).
    🔴 코인은 안 든다(retract 경로에 consume 호출 0 · 우리 잘못이든 마음이 바뀌었든 내리는 데 돈을 받지 않는다). */
 const retractable = (p) => p.status === "published" && !p.retractedAt;
-const retractBtn = (p) => (retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
+/* 🔴 신고가 붙은 글은 **«신고에 답하기» 한 문**으로 모은다 — 같은 «내리기»가 두 문이면 어느 쪽이 신고를 끝내는지 알 수 없다. */
+const retractBtn = (p) => (noticeOf(p) ? '<button class="btn ghost" type="button" id="tdAns" style="color:var(--danger-ink)">신고에 답하기</button>'
+  : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
 const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
-  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}은 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
+  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}${UI.josa(UI.chLabel(p.channel))} 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
 function bindRetract(p, sh, close) {
+  const ans = sh.querySelector("#tdAns");
+  if (ans) { ans.onclick = () => { const n = noticeOf(p); close(); setTimeout(() => UI.takedownSheet(n, load), 300); }; return; }
   const b = sh.querySelector("#rt"); if (!b) return;
   b.onclick = () => UI.confirmRow(sh.querySelector("#rtc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
     b.disabled = true;
@@ -2199,6 +2506,7 @@ function postSheet(p) {
   const s = p.stats || {};
   const stat = [s.views != null ? `조회 ${UI.num(s.views)}` : null, s.likes != null ? `좋아요 ${UI.num(s.likes)}` : null, s.comments != null ? `댓글 ${UI.num(s.comments)}` : null].filter(Boolean).join(" · ");
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(UI.chLabel(p.channel))}</span></div>${processingOf(p) ? '<span class="pill off">처리 중</span>' : UI.pill(UI.POST_STATUS, p.status)}</div>
+    ${noticeOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>이 글에 «${UI.esc(noticeOf(p).kindLabel)}» 신고가 들어왔어요 · ${UI.esc(noticeOf(p).reason || "")}</span></div>` : ""}
     ${stuckOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(p.errorKind))}${p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></div>` : ""}
     ${privateOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>심사 전엔 비공개로 올라가요 · 유튜브 스튜디오에서 «공개»로 바꾸면 사람들에게 보여요</span></div>` : ""}
     ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}에서 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}

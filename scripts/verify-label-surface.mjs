@@ -100,6 +100,14 @@ const bracketList = (text, name) => { const i = text.indexOf(name); if (i < 0) r
 const hardSrv = bracketList(approveTs, "HARD_GATE_KEYS: readonly string[] =");
 const hardUi = bracketList(uiJs, "UI.GATE_HARD =");
 const hardSame = hardSrv !== null && hardUi !== null && hardSrv.join(",") === hardUi.join(",");
+/* [R8-A2] 🔴 영상 쪽 «막는 축»도 같이 잰다 — 글은 `HARD_GATE_KEYS = []` 로 0개가 됐지만, 영상은 **깨진 물건 둘**(`judgeBlockers` 의 `BROKEN`)이 남아 있다.
+   화면(`UI.JUDGE_BLOCK`)은 그 둘을 보고 «다시 만들면 돼요»와 «그대로 올릴 수 있어요»를 가른다 — 두 목록이 갈리면 **멀쩡한 영상을 버리라고 말한다.** */
+const jbSrv = bracketList(approveTs, 'const BROKEN = new Set(');
+const jbUi = bracketList(uiJs, "UI.JUDGE_BLOCK =");
+const jbSame = jbSrv !== null && jbUi !== null && [...jbSrv].sort().join(",") === [...jbUi].sort().join(",");
+rec("🔴 영상 «깨진 물건» 목록이 서버와 같다(그것만 막는다)", jbSame,
+  jbSrv === null ? "서버에서 judgeBlockers 의 BROKEN 을 못 읽었다" : jbUi === null ? "화면에서 UI.JUDGE_BLOCK 을 못 읽었다"
+    : jbSame ? `${jbSrv.length}축 — ${jbSrv.join(" ")}` : `서버 «${jbSrv.join(" ") || "없음"}» ≠ 화면 «${jbUi.join(" ") || "없음"}»`, { jbSrv, jbUi });
 rec("🔴 «예약을 막는 축» 목록이 서버와 같다", hardSame,
   hardSrv === null ? "서버에서 HARD_GATE_KEYS 를 못 읽었다" : hardUi === null ? "화면에서 UI.GATE_HARD 를 못 읽었다"
     : hardSame ? (hardSrv.length ? `${hardSrv.length}축` : "0축 — 막는 축이 없다(§9)") : `서버 «${hardSrv.join(" ") || "없음"}» ≠ 화면 «${hardUi.join(" ") || "없음"}»`, { hardSrv, hardUi });
@@ -150,12 +158,14 @@ rec("🔴 글 상태 — 서버가 쓰는 값에 화면 낱말이 다 있다", p
 const mockSlotStatus = setOf(/status:\s*"([a-z_]+)"/g, mockJs);
 /* 서버 어휘의 «우주» = DDL 주석에 적힌 모든 열거값(-- a|b|c) + 코드가 쓰는 상태 — 표마다 손으로 적지 않는다 */
 const ddlVocab = new Set();
-/* «a(설명) | b | c(설명)» 처럼 괄호 설명이 끼어도 값만 뜬다 — 주석을 사람이 읽기 좋게 써도 어휘가 빠지지 않게 */
+/* «a(설명) | b | c(설명)» 처럼 괄호 설명이 끼어도 값만 뜬다 — 주석을 사람이 읽기 좋게 써도 어휘가 빠지지 않게.
+   🔴 [R8-A2 수리] 한 칸에 **값이 둘** 있는 주석(«open(접수) → customer_removed(고객이 내림) | …» · takedown_notices)에서
+      앞의 하나만 떠서 `customer_removed` 가 «모의가 지어낸 값»으로 WARN 이 났다. 칸마다 **전부** 뜬다. */
 for (const line of ddl.split("\n")) {
   const cm = line.includes("--") ? line.slice(line.indexOf("--") + 2) : "";
   if (!cm.includes("|")) continue;
-  const parts = cm.split("|").map((x) => (x.match(/[a-z_]{3,}/) || [""])[0]).filter(Boolean);
-  if (parts.length >= 2) for (const v of parts) ddlVocab.add(v);
+  const parts = cm.split("|").map((x) => x.match(/[a-z_]{3,}/g) || []).filter((x) => x.length);
+  if (parts.length >= 2) for (const vs of parts) for (const v of vs) ddlVocab.add(v);
 }
 const mockSlotUnknown = minus(mockSlotStatus, new Set([...slotSrv, ...pieceSrv, ...uiPost.keys(), ...ddlVocab, "not_configured", "none", "progress", "done", "queued", "running", "connected", "error", "requested"]));
 rec("모의가 쓰는 상태 값이 서버 어휘 안에 있다", mockSlotUnknown.length === 0 ? true : "WARN", mockSlotUnknown.join(" ") || "전부 서버 어휘", mockSlotUnknown);
@@ -173,7 +183,10 @@ rec("홈 해야 할 일 kind — 화면 아이콘이 다 있다", todoNoIcon.len
 
 /* ───────── ⑤ 모의 알림·todo kind 도 서버 어휘 안인지 ───────── */
 const mockKind = setOf(/kind:\s*"([a-z_0-9]+)"/g, mockJs);
-const mockKindUnknown = minus(mockKind, new Set([...srvNotify, ...srvTodo, ...known, ...ddlVocab, "post", "shorts", "video", "own", "managed", "coin", "subscription", "tax_invoice", "cash_receipt", "srt", "thumb", "notice", "incident"]));
+/* 🔴 이 regex 는 `kind:` 라는 **이름만** 보기 때문에 알림과 상관없는 칸(사진 출처 kind · 수치 주장 kind)까지 집는다 —
+   [R8-A2] 그 둘을 허용 목록에 적는다(lib/photo-source.ts PhotoSourceKind · lib/fact-claims.ts ClaimKind). */
+const mockKindUnknown = minus(mockKind, new Set([...srvNotify, ...srvTodo, ...known, ...ddlVocab, "post", "shorts", "video", "own", "managed", "coin", "subscription", "tax_invoice", "cash_receipt", "srt", "thumb", "notice", "incident",
+  "customer", "stock", "money", "percent", "year", "count", "structural"]));
 rec("모의 알림·해야 할 일 kind 가 서버 어휘 안에 있다", mockKindUnknown.length === 0 ? true : "WARN", mockKindUnknown.join(" ") || "전부 서버 어휘", mockKindUnknown);
 
 /* ───────── ⑥ 매체 «기준일» 안내(서버 DAY_BASIS_NOTE ↔ 모의) ─────────
@@ -257,6 +270,35 @@ const rmSrv = [...new Set([...rmFn.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]))].
 const rmUi = bracketList(uiJs, "UI.ADS_REMOVABLE =").sort();
 rec("🔴 «뗄 수 있는 길» 목록이 서버와 같다(티스토리는 못 뗀다)", rmSrv.length > 0 && rmSrv.join(",") === rmUi.join(","),
   rmSrv.join(",") === rmUi.join(",") ? `${rmSrv.length}가지` : `서버 «${rmSrv.join(" ")}» ≠ 화면 «${rmUi.join(" ")}»`, { rmSrv, rmUi });
+
+/* ───────── ⑨ 🔴 **시스템 용어가 시트 안에 숨어 있지 않나**(정적) ─────────
+   왜: 화면 감사(scratchpad/shot.mjs)는 **열려 있는 화면만** 본다 — 바텀시트 안 문구는 열어야 보인다.
+   2026-09-15 실측: 계정 연결 시트가 «발행할 때만 **러너**가 열어요»라고 말하고 있었다(고객 금지어 · §13.0 «러너»→«내 PC 프로그램»).
+   그래서 **만들어진 화면 파일의 글자**를 통째로 훑는다 — 열리든 안 열리든 잡힌다.
+   🔴 주석·API 경로(`/api/runner-list`·`runnerOn`)는 뺀다 — 코드가 그 낱말을 쓰는 것은 금지가 아니다(고객이 읽는 글자만 본다). */
+const CUSTOMER_BANNED = ["러너", "테넌트", "잡 상태"];
+/* 🔴 약관·방침은 뺀다 — 거기서는 «내 PC 프로그램»(러너) 처럼 **한 번 정의하는 것**이 오히려 맞다(법 문서의 용어 정의).
+   운영센터도 뺀다(§13.0b 운영 콘솔 예외 — 운영자는 그 낱말로 일한다). 고객이 **쓰면서 읽는 화면**만 본다. */
+const LEGAL = ["terms.html", "privacy.html", "paid-terms.html"];
+const pageFiles = [...walk("public/app", [".html"]), ...walk("public", [".html"]).filter((p) => !p.includes("/ops/") && !p.includes("/app/"))]
+  .filter((p) => !LEGAL.includes(p.split("/").pop()));
+const wordHits = [];
+for (const f of pageFiles) {
+  /* 🔴 여러 줄 주석은 **줄 수를 지키며** 지운다 — 줄마다 «/*» 만 보면 이어지는 줄이 코드로 잘못 읽힌다(줄 번호가 어긋나면 못 찾는다) */
+  const txt = read(f).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
+  txt.split("\n").forEach((line, i) => {
+    const code = line.split("//")[0];
+    for (const w of CUSTOMER_BANNED) {
+      let at = -1;
+      while ((at = code.indexOf(w, at + 1)) >= 0) {
+        const before = code[at - 1] ?? " ", after = code[at + w.length] ?? " ";
+        if (/[A-Za-z\-_/]/.test(before) || /[A-Za-z\-_/]/.test(after)) continue;   // runner-list·runnerOn 같은 이름은 뺀다
+        wordHits.push(`${f.split("/").pop()}:${i + 1} «${w}» — ${code.slice(Math.max(0, at - 24), at + 24).trim()}`);
+      }
+    }
+  });
+}
+rec("🔴 시트 안까지 — 고객 화면에 시스템 용어 0", wordHits.length === 0, wordHits.slice(0, 3).join(" | ") || `${pageFiles.length}장 훑음`, wordHits);
 
 /* ───────── 출력 ───────── */
 if (JSON_OUT) console.log(JSON.stringify({ at: new Date().toISOString(), results }, null, 2));

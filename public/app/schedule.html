@@ -6,7 +6,7 @@
 <title>편성표 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=18">
+<link rel="stylesheet" href="/css/ac.css?v=19">
 </head>
 <body>
 <div class="shell">
@@ -23,8 +23,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=19"></script>
-<script src="/js/mock.js?v=19"></script>
+<script src="/js/ui.js?v=21"></script>
+<script src="/js/mock.js?v=20"></script>
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
@@ -330,12 +330,14 @@ function ruleSheet() {
     else body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>${st.produceLeadDays}일 전에 만들어 두고,<br>조용히 두면 그대로 나가요</h2><p>검수 시간에 아무것도 안 하면 예정대로 발행돼요.</p></div>
       <div class="sec">검수 방식</div>${UI.seg("rp", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], autoApproveOff() ? "require_confirm" : st.reviewPolicy)}
       ${autoApproveOff() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">자동 승인은 Pro 부터예요 · 지금 요금제에서는 검수에서 한 번 눌러야 나가요 <a href="/app/plan.html" style="font-weight:700;text-decoration:underline">요금제 보기</a></p>' : keptAuto() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">지금 쓰는 «조용하면 발행»은 그대로 유지돼요 · «반드시 확인»으로 바꾸면 이 요금제에서는 되돌릴 수 없어요</p>' : ""}
+      <p class="muted" id="rpSay2" style="margin:6px 0 0;font-size:12.5px">${rpSay(autoApproveOff() ? "require_confirm" : st.reviewPolicy)}</p>
       <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
       <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div>
         ${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
-    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") st.reviewPolicy = v; else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
+    UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") { st.reviewPolicy = v; const sy = body.querySelector("#rpSay2"); if (sy) sy.textContent = rpSay(v); }   /* [R8 §9-2] 🔴 켜는 **그 순간에** 무엇을 켜는 것인지 말한다 — «사람이 안 보는 경로»가 생기는 자리가 여기다 */
+      else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
     const bk = body.querySelector("#bk"); if (bk) bk.onclick = () => { step--; view(sh, close); };
     const go = body.querySelector("#go"); if (go) go.onclick = async () => {

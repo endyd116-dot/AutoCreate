@@ -6,7 +6,7 @@
 <title>설정 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=18">
+<link rel="stylesheet" href="/css/ac.css?v=19">
 </head>
 <body>
 <div class="shell">
@@ -15,6 +15,7 @@
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
 <div class="step-h"><h1>설정</h1></div>
 <div id="closeBn"></div>
+<div class="group" id="takedown" hidden></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
@@ -33,6 +34,9 @@
   <div class="fr"><div class="fl" id="notiT">기기 알림 받기<small id="notiD">확인할 게 생기면 바로 알려드려요</small></div><button class="toggle" type="button" id="noti" aria-checked="false" aria-label="기기 알림 받기"></button></div>
   <p class="muted" id="notiWhy" style="margin:0 16px 10px;font-size:12.5px" hidden></p>
 </div>
+<div class="group" id="volg" hidden><div class="gt">새 방식</div>
+  <div class="fr"><div class="fl">새 방식을 먼저 써 볼래요<small>더 빨리 좋아지지만, 드물게 발행이 한 번 실패할 수 있어요. 언제든 끄실 수 있어요.</small></div><button class="toggle" type="button" id="vol" aria-checked="false" aria-label="새 방식을 먼저 써 볼래요"></button></div>
+</div>
 <div class="group" id="expg"><div class="gt">내 자료</div><div id="exp"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 <div class="group" id="appg"><div class="gt">앱 정보</div>
   <div class="kv"><span class="k">판 번호</span><span class="v" id="appVer">—</span></div>
@@ -44,8 +48,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=19"></script>
-<script src="/js/mock.js?v=19"></script>
+<script src="/js/ui.js?v=21"></script>
+<script src="/js/mock.js?v=20"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -96,6 +100,22 @@ async function loadNoti() {
   });
 }
 loadNoti();
+/* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **좋은 것만 말하지 않는다**: 뜻은 «아직 검증 안 된 자동 조작 표로 내 계정이 먼저 돈다»이고,
+   잘못되면 그 집 발행이 한 번 실패한다. 그래서 문구에 그 사실을 적고, **권유 배지·기본 켜짐을 만들지 않는다**(기본은 꺼짐이 설계다).
+   🔴 서버가 이 칸을 모르면(옛 서버) **줄 자체를 그리지 않는다** — 켜도 아무 일이 안 일어나는 토글을 두지 않으려고. */
+async function loadVolunteer() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  if (!r.ok || typeof r.recipeVolunteer !== "boolean") return;
+  const g = UI.$("#volg"), tg = UI.$("#vol"); g.hidden = false;
+  tg.setAttribute("aria-checked", r.recipeVolunteer ? "true" : "false");
+  UI.toggle(tg, async (next) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { recipeVolunteer: next } });
+    if (!rr.ok) { UI.toast(rr.gated ? "" : rr.error || "바꾸지 못했어요"); return false; }
+    UI.toast(rr.recipeVolunteer ? "새 방식을 먼저 써 볼게요" : "원래 방식으로 돌렸어요");
+    return rr.recipeVolunteer === next ? undefined : false;   // 서버가 아니라면 서버 쪽을 따른다
+  });
+}
+loadVolunteer();
 UI.$("#appVer").textContent = UI.APP_VERSION;
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
@@ -209,6 +229,28 @@ function closeSheet() {
     } });
 }
 loadClose();
+
+/* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **내 글에 들어온 신고** — 서버가 보내는 알림·메일의 링크가 바로 이 자리다
+     (`/app/settings.html#takedown` · lib/takedown.ts:153 · lib/cron/takedown-watch.ts:31). 그 링크는 여태 **아무 데도 아닌 곳**을 가리키고 있었다:
+     통지를 받은 고객이 «확인하러 가기»를 눌러도 설정 화면만 열렸다(기능이 없는 것보다 안 보이는 사고 · AC-69).
+   🔴 두 갈래(직접 내렸다 / 대신 내려 달라)는 `UI.takedownSheet` 한 곳이 그린다 — 발행함도 같은 함수를 쓴다(두 화면이 다른 말을 하지 않게).
+   🔴 살아 있는 신고가 없으면 **이 섹션을 아예 안 그린다** — 없는 걱정을 만들지 않는다. 끝난 신고는 있을 때만 접어서 보여 준다. */
+async function loadTakedown() {
+  const r = await UI.api("/api/takedowns", { noGate: true });
+  const host = UI.$("#takedown");
+  if (!r.ok || !(r.notices || []).length) { host.hidden = true; return; }
+  const live = r.notices.filter((n) => UI.TAKEDOWN_ACTIVE.includes(n.status));
+  const done = r.notices.filter((n) => !UI.TAKEDOWN_ACTIVE.includes(n.status));
+  const row = (n) => `<button type="button" class="row tap" data-td="${n.id}">${n.channel ? UI.mark(n.channel) : '<span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v5M12 17h.01"/><path d="M10.3 3.9L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>'}<div class="l"><span class="t wrap">${UI.esc(n.kindLabel)} 신고</span><span class="d wrap">${UI.esc(n.reason || "")}</span></div>${UI.pill(UI.TAKEDOWN_STATUS, n.status)}<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">내 글에 들어온 신고 ${live.length ? `<span class="pill warn">${live.length}</span>` : ""}</div>`
+    + (live.length ? live.map(row).join("") + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요 · 내리는 데 코인은 들지 않아요.</p>' : "")
+    + (done.length ? `<div class="gt" style="padding-top:4px">지난 신고 ${done.length}건</div>${done.map(row).join("")}` : "");
+  UI.$$("#takedown [data-td]").forEach((b) => b.onclick = () => UI.takedownSheet(r.notices.find((n) => n.id === Number(b.dataset.td)), loadTakedown));
+  /* 알림·메일이 `#takedown` 으로 보내는데 그때 이 섹션은 아직 숨어 있었다 — 그려진 **뒤에** 데려간다. */
+  if (location.hash === "#takedown") host.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+loadTakedown();
 })();
 </script>
 </body>

@@ -58,6 +58,11 @@ function pages(ids) {
     { key: "support", url: q("/app/support.html"), sheet: ["button:has-text('문의')"] },
     { key: "terms", url: "/terms.html", sheet: [] }, { key: "privacy", url: "/privacy.html", sheet: [] }, { key: "paid-terms", url: "/paid-terms.html", sheet: [] }, { key: "automation-notice", url: "/automation-notice.html", sheet: [] },
     { key: "register", url: "/register.html", sheet: [] },
+    /* [R8-A2] 🔴 새로 배선한 화면은 **여기 줄을 박는 것까지가 그 기능이다**(CLAUDE §4.8) — 목록에 없으면 헌장·콘솔 오류를 아무도 안 잰다.
+       직접 쓰기(§5D①) · 신고함(§5E.2 · `?td=open` 으로 살아 있는 신고 1건) · 수치 주장(§2.4 · `?claims=1`). */
+    { key: "write", url: q("/app/write.html"), sheet: [] },
+    { key: "settings-takedown", url: q("/app/settings.html?td=open"), sheet: ["#takedown .row.tap"] },
+    { key: "piece-claims", url: q(`/app/piece.html?id=${ids.pieceId || 501}&claims=1`), sheet: [] },
   ].filter((p) => !process.env.PAGES || process.env.PAGES.split(",").includes(p.key));
 }
 /* 운영센터 16장(OPS=1) — 로그인은 ops-login · 데스크톱 위주 */
