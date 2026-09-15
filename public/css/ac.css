@@ -2,9 +2,12 @@
    규칙: 색 = 회색 + 잉크 + 초록 1 · 컬러는 채널 마크에만 · 카드 대신 그룹 섹션(R20·테두리/그림자 0) · 8px 그리드 · 모션 한 방향
    컴포넌트 12: AppBar · BigNumber(.hl) · ListRow(.row) · StatusChip(.pill) · BottomSheet · PrimaryCTA(.btn) · StepBar · Skeleton · EmptyState · Toast · Toggle · SegmentedTabs */
 :root{
-  --ground:#F2F4F6; --surface:#FFFFFF; --ink:#191F28; --sub:#4E5968; --muted:#8B95A1; --faint:#B0B8C1; --line:#EEF0F3; --press:#E8EBEE;
+  --ground:#F2F4F6; --surface:#FFFFFF; --ink:#191F28; --sub:#4E5968; --muted:#66707C; --faint:#B0B8C1; --line:#EEF0F3; --press:#E8EBEE;
   --brand:#191F28; --on-brand:#FFFFFF; --brand-soft:#F2F4F6; --sel:#191F28;
-  --money:#1FA97A; --money-soft:#E5F7EF; --warn:#F5A623; --warn-soft:#FFF4E0; --warn-ink:#B26A00; --danger:#F04452; --danger-soft:#FFEBEE;
+  --money:#1FA97A; --money-soft:#E5F7EF; --warn:#F5A623; --warn-soft:#FFF4E0; --warn-ink:#965900; --danger:#F04452; --danger-soft:#FFEBEE;
+  /* [R8 §6.1] 🔴 **글자로 쓰는 색은 따로** — 채움색(막대·마크)은 브랜드 그대로 두고, 글자만 WCAG AA(4.5:1)를 넘게 어둡게 잡는다.
+     흰 바탕·회색 바탕 **둘 다** 넘어야 한다(--ground 가 더 빡빡하다). 잰 값은 scratchpad/shot.mjs 가 화면마다 다시 잰다. */
+  --money-ink:#127A57; --danger-ink:#C32633;
   --n:#03C75A; --t:#FF5A2C; --b:#F58C1E; --y:#FF0000; --c:#00B18F; --i:#E1306C; --th:#101010; --wp:#21759B; --tk:#010101;
   --font:Pretendard,"Pretendard Variable",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
   --r-sec:20px; --r-btn:16px; --r-mk:12px; --gutter:16px; --cta-h:54px; --row-h:56px; --tab-h:62px;
@@ -13,12 +16,12 @@
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
   --ground:#17171C; --surface:#202027; --ink:#F2F4F6; --sub:#C3C8CF; --muted:#8B95A1; --faint:#5C6470; --line:#2C2C35; --press:#2A2A32;
   --brand:#F2F4F6; --on-brand:#191F28; --brand-soft:#2A2A32; --sel:#F2F4F6;
-  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A;
+  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A; --money-ink:#34C88F; --danger-ink:#FF6B75;
 }}
 :root[data-theme="dark"]{
   --ground:#17171C; --surface:#202027; --ink:#F2F4F6; --sub:#C3C8CF; --muted:#8B95A1; --faint:#5C6470; --line:#2C2C35; --press:#2A2A32;
   --brand:#F2F4F6; --on-brand:#191F28; --brand-soft:#2A2A32; --sel:#F2F4F6;
-  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A;
+  --money:#34C88F; --money-soft:#123326; --warn:#F5B84A; --warn-soft:#3A2A0C; --warn-ink:#F5B84A; --danger:#FF6B75; --danger-soft:#3D1A1A; --money-ink:#34C88F; --danger-ink:#FF6B75;
 }
 *{box-sizing:border-box} html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100dvh}
@@ -73,10 +76,10 @@ input,textarea,select{font:inherit;color:inherit}
 .hl{padding:8px 4px 6px}
 .hl .say{font-size:15px;color:var(--sub);font-weight:500}
 .hl .num{font-size:30px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.2;margin-top:2px;text-wrap:balance}
-.hl .num em{font-style:normal;color:var(--money)}
+.hl .num em{font-style:normal;color:var(--money-ink)}
 .hl .num .est{font-size:15px;font-weight:600;color:var(--muted);letter-spacing:0;white-space:nowrap}
 .hl .tip{font-size:13px;color:var(--muted);margin-top:6px}
-.hl .tip b{color:var(--ink);font-weight:700} .hl .tip b.up{color:var(--money)} /* [v4] 증가만 초록 · 감소는 잉크 중립(빨강 금지) */
+.hl .tip b{color:var(--ink);font-weight:700} .hl .tip b.up{color:var(--money-ink)} /* [v4] 증가만 초록 · 감소는 잉크 중립(빨강 금지) */
 @media (min-width:641px){ .hl .num{font-size:40px} }
 
 /* 그룹 섹션 */
@@ -92,7 +95,7 @@ input,textarea,select{font:inherit;color:inherit}
 .row .d{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .row .r{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:700;white-space:nowrap;display:flex;align-items:center;gap:8px;font-size:14.5px;flex:none}
 .row .r.mut{color:var(--muted);font-weight:500;font-size:13px}
-.chev{width:16px;height:16px;color:var(--faint);flex:none}
+.chev{width:16px;height:16px;color:var(--muted);flex:none}
 
 /* 채널 마크 */
 .mk{width:38px;height:38px;border-radius:var(--r-mk);display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;flex:none;letter-spacing:-.02em}
@@ -100,7 +103,7 @@ input,textarea,select{font:inherit;color:inherit}
 .mk.tistory{background:var(--t)} .mk.blogger{background:var(--b)} .mk.wordpress{background:var(--wp)}
 .mk.youtube_shorts{background:var(--y)} .mk.instagram,.mk.reels{background:linear-gradient(135deg,#F58529,#DD2A7B 60%,#8134AF)}
 .mk.threads{background:var(--th)} .mk.tiktok{background:var(--tk)}
-.mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money)} .mk.warn{background:var(--warn-soft);color:var(--warn)} .mk.danger{background:var(--danger-soft);color:var(--danger)}
+.mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money-ink)} .mk.warn{background:var(--warn-soft);color:var(--warn)} .mk.danger{background:var(--danger-soft);color:var(--danger-ink)}
 .mk svg{width:20px;height:20px} .mk.sm{width:28px;height:28px;border-radius:9px;font-size:12px}
 /* [v4] 수익 소스 마크 = 서비스 색(시안 v3 · 채널 마크와 같은 급) */
 .mk.src-adsense{background:#4285F4} .mk.src-youtube{background:var(--y)} .mk.src-coupang{background:#E53238} .mk.src-adpost{background:var(--n)} .mk.src-adfit{background:#FEE500;color:var(--ink)} .mk.src-clip{background:var(--c)}
@@ -108,8 +111,8 @@ input,textarea,select{font:inherit;color:inherit}
 
 /* 4 StatusChip */
 .pill{font-size:12px;font-weight:700;border-radius:8px;padding:3px 8px;white-space:nowrap;flex:none}
-.pill.ok{background:var(--money-soft);color:var(--money)} .pill.warn{background:var(--warn-soft);color:var(--warn-ink)}
-.pill.danger{background:var(--danger-soft);color:var(--danger)} .pill.off{background:var(--ground);color:var(--muted)} .pill.ink{background:var(--brand-soft);color:var(--ink)}
+.pill.ok{background:var(--money-soft);color:var(--money-ink)} .pill.warn{background:var(--warn-soft);color:var(--warn-ink)}
+.pill.danger{background:var(--danger-soft);color:var(--danger-ink)} .pill.off{background:var(--ground);color:var(--muted)} .pill.ink{background:var(--brand-soft);color:var(--ink)}
 .dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
 .dot.ok{background:var(--money)} .dot.warn{background:var(--warn)} .dot.danger{background:var(--danger)} .dot.off{background:var(--faint)}
 
@@ -126,12 +129,12 @@ input,textarea,select{font:inherit;color:inherit}
 .btn:active{transform:scale(.97)} .btn[disabled]{opacity:.35;pointer-events:none}
 .btn.primary{background:var(--brand);color:var(--on-brand)} .btn.secondary{background:var(--press);color:var(--ink)} .btn.ghost{background:transparent;color:var(--sub);height:44px;font-weight:600}
 .btn.sm{height:40px;font-size:14px;border-radius:12px;flex:none;padding:0 14px}
-.btn.danger{background:var(--danger-soft);color:var(--danger)} .btn.w40{flex:0 0 40%}
+.btn.danger{background:var(--danger-soft);color:var(--danger-ink)} .btn.w40{flex:0 0 40%}
 @media (min-width:641px){ .cta{position:static;padding:20px 0 0;background:none;justify-content:flex-end} .btn{flex:0 1 auto;min-width:160px;height:48px} .btn.w40{flex:0 1 auto} .cta.nobar{padding-bottom:0} }
 
 /* 하단 탭 */
 .tabs{position:fixed;left:0;right:0;bottom:0;height:var(--tab-h);border-top:1px solid var(--line);display:flex;justify-content:space-around;align-items:center;padding:0 6px max(4px,env(safe-area-inset-bottom));background:var(--surface);z-index:7}
-.tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:44px;font-size:10.5px;color:var(--faint);font-weight:600;width:56px;transition:color var(--dur) var(--ease)} /* 눌리는 영역 세로 44 이상(§13.0 · 조사 09-15) — 보이는 모양은 그대로 */
+.tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:44px;font-size:10.5px;color:var(--muted);font-weight:600;width:56px;transition:color var(--dur) var(--ease)} /* 눌리는 영역 세로 44 이상(§13.0 · 조사 09-15) — 보이는 모양은 그대로 */
 .tab svg{width:23px;height:23px} .tab.on{color:var(--ink)}
 @media (min-width:641px){ .tabs{display:none} }
 
@@ -140,7 +143,7 @@ input,textarea,select{font:inherit;color:inherit}
 .steps{display:flex;flex-direction:column;gap:10px;padding:8px 4px}
 .steps .st{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted)} .steps .st.on{color:var(--ink);font-weight:600} .steps .st.done{color:var(--sub)}
 .steps .st i{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;flex:none;font-size:11px;font-style:normal}
-.steps .st.on i{border-color:var(--ink)} .steps .st.done i{background:var(--money);border-color:var(--money);color:#fff}
+.steps .st.on i{border-color:var(--ink)} .steps .st.done i{background:var(--money);border-color:var(--money-ink);color:#fff}
 
 /* 한 화면 한 질문 */
 .step-h{padding:16px 4px 4px} .step-h h1,.step-h h2{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.3;margin:0;text-wrap:balance}
@@ -159,13 +162,13 @@ input,textarea,select{font:inherit;color:inherit}
 .field label{font-size:13px;color:var(--muted);font-weight:600}
 .input{height:52px;border-radius:14px;background:var(--ground);border:2px solid transparent;padding:0 16px;font-size:16px;width:100%;transition:border-color var(--dur) var(--ease)}
 .page.white .input{background:var(--ground)} .input:focus{outline:none;border-color:var(--sel);background:var(--surface)}
-.input.err{border-color:var(--danger)} .field .help{font-size:12.5px;color:var(--danger);min-height:16px}
+.input.err{border-color:var(--danger-ink)} .field .help{font-size:12.5px;color:var(--danger-ink);min-height:16px}
 .kv{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-size:14px} .kv+.kv{border-top:1px solid var(--line)}
 .kv .k{color:var(--muted)} .kv .v{font-weight:700;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px}
 
 /* 12 SegmentedTabs */
 .seg{display:inline-flex;background:var(--press);border-radius:12px;padding:3px;margin:4px 4px 0}
-.seg button{padding:5px 14px;border-radius:9px;font-size:13px;color:var(--muted);font-weight:600;transition:background var(--dur) var(--ease),color var(--dur) var(--ease)}
+.seg button{padding:5px 14px;border-radius:9px;font-size:13px;color:var(--sub);font-weight:600;transition:background var(--dur) var(--ease),color var(--dur) var(--ease)}
 .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
 
 /* 막대·달력 */
@@ -181,7 +184,7 @@ input,textarea,select{font:inherit;color:inherit}
 .spark button.est{position:relative} .spark button.est::after{content:"";position:absolute;top:-7px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--muted)} /* [B2] 그 날 «예상 열»이 섞였다 — 색은 안 늘린다 */
 .spark button.zero{height:2px!important;background:var(--line);border-radius:2px}
 .spark button.none{height:100%!important;background:repeating-linear-gradient(45deg,var(--line) 0 3px,transparent 3px 6px);border-radius:3px}
-.spark-x{display:flex;justify-content:space-between;padding:0 16px 2px;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.spark-x{display:flex;justify-content:space-between;padding:0 16px 2px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .spark-l{padding:2px 16px 12px;font-size:12px;color:var(--muted)}
 /* [P1R3] 조건 게이지(애드포스트 글·방문 / YPP 구독·조회) — 단색 · 충족 시 초록 */
 .gauge{padding:2px 0 6px} .gauge+.gauge{padding-top:6px}
@@ -190,7 +193,7 @@ input,textarea,select{font:inherit;color:inherit}
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:8px 10px 10px;text-align:center;font-size:12px}
 .cal .wd{color:var(--muted);font-weight:600;font-size:11px;padding-bottom:2px}
 .cal .dd{height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:12px;font-variant-numeric:tabular-nums;font-weight:500;border:0;width:100%}
-.cal .dd.today{background:var(--brand);color:var(--on-brand);font-weight:700} .cal .dd.sel{outline:2px solid var(--sel);outline-offset:-2px} .cal .dd.dim{color:var(--faint)}
+.cal .dd.today{background:var(--brand);color:var(--on-brand);font-weight:700} .cal .dd.sel{outline:2px solid var(--sel);outline-offset:-2px} .cal .dd.dim{color:var(--muted)}
 .cal .dots{display:flex;gap:2px;height:4px} .cal .dots i{width:4px;height:4px;border-radius:50%;background:var(--faint);display:block}
 .cal .dots i.ok{background:var(--money)} .cal .dots i.warn{background:var(--warn)} .cal .dots i.danger{background:var(--danger)} .cal .dd.today .dots i{background:currentColor;opacity:.7}
 
@@ -259,7 +262,7 @@ input,textarea,select{font:inherit;color:inherit}
 .auth .links{display:flex;justify-content:center;gap:18px;font-size:13.5px;padding:8px 0 0} .auth .links a{display:inline-flex;align-items:center;min-height:44px;padding:0 4px}
 .auth .links a{color:var(--muted);font-weight:500}
 .auth .links a:hover{color:var(--ink)}
-.auth .foot{margin-top:auto;padding-top:28px;text-align:center;font-size:12px;color:var(--faint)}
+.auth .foot{margin-top:auto;padding-top:28px;text-align:center;font-size:12px;color:var(--muted)}
 @media (min-width:641px){
   .page.auth{background:var(--ground);padding:40px 16px}
   .auth-in{background:var(--surface);border-radius:24px;padding:36px 32px 32px;max-width:420px}
@@ -304,7 +307,7 @@ input,textarea,select{font:inherit;color:inherit}
 .lockline{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--line);line-height:1.4} .lockline svg{width:14px;height:14px;flex:none}
 .desc-edit{padding:0 16px 12px} .desc-edit .lead{font-size:14px;color:var(--sub);background:var(--ground);border-radius:12px;padding:10px 12px;line-height:1.5} .desc-edit .rest{font-size:15px;line-height:1.7;padding:10px 2px;min-height:44px;outline:none;white-space:pre-wrap;word-break:keep-all} .desc-edit .rest:focus{background:var(--ground);border-radius:12px;padding:10px 12px}
 .pill.judge{margin-left:6px}
-.gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
+.gate{padding:2px 16px 10px;display:flex;flex-direction:column;gap:8px} .gate .g{display:flex;align-items:center;gap:10px;font-size:14px} .gate .g i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;font-style:normal;font-size:12px;font-weight:800;background:var(--money-soft);color:var(--money-ink)} .gate .g.no i{background:var(--warn-soft);color:var(--warn-ink)} .gate .g small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
 /* [R8-A] 알려 주는 축(막지 않는다) — 실패해도 빨강이 아니다. 긴 사유는 줄을 바꿔 아래로(가로 넘침 0) */
 .gate{flex-wrap:wrap} .gate .g{flex-wrap:wrap} .gate .g.soft i{background:var(--brand-soft);color:var(--sub)} .gate .g.soft span{color:var(--sub)}
 .gate .g.no small,.gate .g.soft small{white-space:normal;margin-left:0;flex:1 0 100%;padding-left:30px;line-height:1.45}
@@ -325,7 +328,7 @@ input,textarea,select{font:inherit;color:inherit}
 
 /* ── P1R2 추가(2026-09-14) — 프리미티브 2개(.input 과 같은 급 · 컴포넌트 아님): 토큰·설치 명령 상자 · 행 우측 외부 링크 자국 ── */
 .code{background:var(--ground);border-radius:12px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;word-break:break-all;color:var(--ink);user-select:all;display:block}
-.ext{width:15px;height:15px;color:var(--faint);flex:none}
+.ext{width:15px;height:15px;color:var(--muted);flex:none}
 
 /* 검수 미리보기 — 채널 렌더(콘텐츠 스타일 · 컴포넌트 아님) */
 .preview{background:var(--surface);border-radius:var(--r-sec);padding:20px 20px 24px;font-size:15px;line-height:1.8;color:var(--ink);word-break:keep-all;overflow-wrap:anywhere}

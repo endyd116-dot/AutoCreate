@@ -17,7 +17,7 @@ UI.$("#bars").innerHTML = [["구독", rv.subscriptionKrw || 0], ["코인", rv.co
 // 🔴 원가는 환율이 없으면 «원가 미환산» — 0 으로 그리지 않는다(계약 §0.1)
 const ai = r.aiCost || {};
 UI.$("#ai").innerHTML = ai.fxMissing ? `<span class="pill warn">원가 미환산</span> <span class="muted" style="font-weight:500">$${(ai.usd || 0).toFixed(2)} · 환율(FX_USD_KRW)을 넣어 주세요</span>` : `${UI.won(ai.krw || 0)} <span class="muted" style="font-weight:500">($${(ai.usd || 0).toFixed(2)})</span>`;
-UI.$("#margin").innerHTML = r.marginKrw == null ? `<span class="muted" style="font-weight:500">원가가 환산돼야 계산해요</span>` : `<b class="${r.marginKrw >= 0 ? "up" : ""}" style="color:${r.marginKrw >= 0 ? "var(--money)" : "var(--ink)"}">${UI.won(r.marginKrw)}</b>`;
+UI.$("#margin").innerHTML = r.marginKrw == null ? `<span class="muted" style="font-weight:500">원가가 환산돼야 계산해요</span>` : `<b class="${r.marginKrw >= 0 ? "up" : ""}" style="color:${r.marginKrw >= 0 ? "var(--money-ink)" : "var(--ink)"}">${UI.won(r.marginKrw)}</b>`;
 const st = (k, v) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`;
 UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", `${r.trialToPaidPct ?? 0}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", `${r.churn?.month ?? 0} · ${r.churn?.pct ?? 0}%`);
 const bc = (r.published && r.published.byChannel) || []; const pm = Math.max(1, ...bc.map((x) => x.n));
@@ -324,7 +324,7 @@ let status = "", priority = "", mine = false;
 const TST = { open: ["warn", "열림"], progress: ["ink", "진행"], hold: ["off", "보류"], resolved: ["ok", "해결"] };
 const PRI = { urgent: ["danger", "긴급"], high: ["warn", "높음"], normal: ["off", "보통"], low: ["off", "낮음"] };
 const SRC = { app: "앱", email: "메일", kakao: "카카오", system: "자동" };
-const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; const m = Math.round((UI.utc(t.slaDueAt).getTime() - Date.now()) / 60e3); return m < 0 ? `<span style="color:var(--danger);font-weight:700">${-m}분 지남</span>` : m < 60 ? `<span style="color:var(--warn-ink);font-weight:700">${m}분</span>` : `${Math.round(m / 60)}시간`; };
+const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; const m = Math.round((UI.utc(t.slaDueAt).getTime() - Date.now()) / 60e3); return m < 0 ? `<span style="color:var(--danger-ink);font-weight:700">${-m}분 지남</span>` : m < 60 ? `<span style="color:var(--warn-ink);font-weight:700">${m}분</span>` : `${Math.round(m / 60)}시간`; };
 async function load() {
   const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}`, { noRedirect: true })]);
   if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", s.avgFirstReplyMin == null ? "—" : `${s.avgFirstReplyMin}분`], ["SLA 놓침", s.slaMissPct == null ? "—" : `${s.slaMissPct}%`], ["만족", s.satisfactionPct == null ? "—" : `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
@@ -429,7 +429,7 @@ async function load() {
   /* 카나리 매트릭스 — channels[{channel, today, history[{day,ok,step}]}] → 날짜 × 채널 · ok true/false/null(AC-9) */
   const chans = c.ok ? c.channels || [] : []; const days = [...new Set(chans.flatMap((x) => x.history.map((h) => h.day)))].sort().reverse();
   const cell = (x, d) => { const h = x.history.find((y) => y.day === d); if (!h) return '<span class="muted">—</span>'; const shot = x.today && x.today.ranAt && x.today.ranAt.slice(0, 10) === d && x.today.shotKey ? ` <a class="lk" href="#" data-shot="${UI.esc(x.today.shotKey)}" style="font-weight:500;color:var(--muted)">스냅샷</a>` : "";
-    return h.ok === null ? `<span class="muted" title="판정 불가">—</span>${h.step ? ` <span class="muted">${UI.esc(STEP[h.step] || h.step)}</span>` : ""}` : h.ok ? `<span style="color:var(--money);font-weight:800">✓</span>${shot}` : `<span style="color:var(--danger);font-weight:800">✗</span> <span class="muted">${UI.esc(STEP[h.step] || h.step || "")}</span>${shot}`; };
+    return h.ok === null ? `<span class="muted" title="판정 불가">—</span>${h.step ? ` <span class="muted">${UI.esc(STEP[h.step] || h.step)}</span>` : ""}` : h.ok ? `<span style="color:var(--money-ink);font-weight:800">✓</span>${shot}` : `<span style="color:var(--danger-ink);font-weight:800">✗</span> <span class="muted">${UI.esc(STEP[h.step] || h.step || "")}</span>${shot}`; };
   UI.$("#canary").innerHTML = days.length ? OPS.table([{ h: "날짜(KST)", f: (d) => d }, ...chans.map((x) => ({ h: UI.chLabel(x.channel), f: (d) => cell(x, d) }))], days) : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">아직 카나리 결과가 없어요 · 러너가 «ac-runner --canary» 로 보내면 여기 쌓여요</span></div></div>`;
   UI.$$("[data-shot]").forEach((a) => a.onclick = (e) => { e.preventDefault(); UI.toast(`스냅샷 ${a.dataset.shot} · R2 저장소에서 열려요`); });
 }
@@ -445,7 +445,7 @@ const op = await OPS.boot("ai"); if (!op) return;
 const canEdit = OPS.can(op, "super_admin");
 const ROLE = { high: "글(고급)", low: "글(가벼움)", director: "디렉터", landing: "랜딩", image: "사진" };
 const mono = (a) => `<span style="font-family:ui-monospace,monospace;font-size:12.5px">${UI.esc((a || []).join(" → ") || "—")}</span>`;
-const tri = (v) => v === true ? '<span style="color:var(--money);font-weight:800">✓</span>' : v === false ? '<span style="color:var(--danger);font-weight:800">✗</span>' : '<span class="muted" title="판정 불가">—</span>';
+const tri = (v) => v === true ? '<span style="color:var(--money-ink);font-weight:800">✓</span>' : v === false ? '<span style="color:var(--danger-ink);font-weight:800">✗</span>' : '<span class="muted" title="판정 불가">—</span>';
 let A;
 async function load() {
   const r = await UI.api("/api/ops-ai-models", { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } A = r; const s = r.settings || {};

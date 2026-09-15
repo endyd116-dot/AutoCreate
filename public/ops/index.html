@@ -36,7 +36,7 @@ UI.$("#bars").innerHTML = [["구독", rv.subscriptionKrw || 0], ["코인", rv.co
 // 🔴 원가는 환율이 없으면 «원가 미환산» — 0 으로 그리지 않는다(계약 §0.1)
 const ai = r.aiCost || {};
 UI.$("#ai").innerHTML = ai.fxMissing ? `<span class="pill warn">원가 미환산</span> <span class="muted" style="font-weight:500">$${(ai.usd || 0).toFixed(2)} · 환율(FX_USD_KRW)을 넣어 주세요</span>` : `${UI.won(ai.krw || 0)} <span class="muted" style="font-weight:500">($${(ai.usd || 0).toFixed(2)})</span>`;
-UI.$("#margin").innerHTML = r.marginKrw == null ? `<span class="muted" style="font-weight:500">원가가 환산돼야 계산해요</span>` : `<b class="${r.marginKrw >= 0 ? "up" : ""}" style="color:${r.marginKrw >= 0 ? "var(--money)" : "var(--ink)"}">${UI.won(r.marginKrw)}</b>`;
+UI.$("#margin").innerHTML = r.marginKrw == null ? `<span class="muted" style="font-weight:500">원가가 환산돼야 계산해요</span>` : `<b class="${r.marginKrw >= 0 ? "up" : ""}" style="color:${r.marginKrw >= 0 ? "var(--money-ink)" : "var(--ink)"}">${UI.won(r.marginKrw)}</b>`;
 const st = (k, v) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`;
 UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", `${r.trialToPaidPct ?? 0}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", `${r.churn?.month ?? 0} · ${r.churn?.pct ?? 0}%`);
 const bc = (r.published && r.published.byChannel) || []; const pm = Math.max(1, ...bc.map((x) => x.n));

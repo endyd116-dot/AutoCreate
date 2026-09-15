@@ -195,7 +195,7 @@ async function detailSheet(a) {
   <div class="fr"><div class="fl">애드센스<small>티스토리·블로거·워드프레스</small></div>${a.monetize?.adsense ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
   <div style="padding:0 0 8px"><input class="input" id="as" placeholder="pub-0000000000000000" autocomplete="off"></div>
   <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>
-  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rmc"></div></div>`;
+  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger-ink);width:100%">연결 해제</button><div id="rmc"></div></div>`;
   UI.sheet(html, { title: "계정 설정", onOpen: (sh, close) => {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);

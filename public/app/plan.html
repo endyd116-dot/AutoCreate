@@ -52,7 +52,7 @@ async function load() {
   if (S.plan.cycle && st === "active") cycle = S.plan.cycle; UI.$$("#cycle button").forEach((x) => x.classList.toggle("on", x.dataset.c === cycle));
   renderCards();
   const bk = S.billingKey || {};
-  UI.$("#card").innerHTML = `<div class="gt">결제 카드</div>` + (bk.has ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></span><div class="l"><span class="t">${UI.esc(bk.brand || "카드")}${bk.last4 ? ` ····${UI.esc(bk.last4)}` : ""}</span><span class="d">자동 결제에 써요</span></div><button type="button" class="btn sm secondary" id="cardChange">바꾸기</button><button type="button" class="btn sm ghost" id="cardRemove" style="color:var(--danger)">지우기</button></div>`
+  UI.$("#card").innerHTML = `<div class="gt">결제 카드</div>` + (bk.has ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></span><div class="l"><span class="t">${UI.esc(bk.brand || "카드")}${bk.last4 ? ` ····${UI.esc(bk.last4)}` : ""}</span><span class="d">자동 결제에 써요</span></div><button type="button" class="btn sm secondary" id="cardChange">바꾸기</button><button type="button" class="btn sm ghost" id="cardRemove" style="color:var(--danger-ink)">지우기</button></div>`
     : `<button type="button" class="row tap" id="cardAdd"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">카드 등록하기</span><span class="d">등록하면 요금제를 고를 수 있어요 · 카드 정보는 결제사에만 저장돼요</span></div>${UI.chev}</button>`);
   const cb = UI.$("#cardAdd") || UI.$("#cardChange"); if (cb) cb.onclick = addCard;
   const rm = UI.$("#cardRemove"); if (rm) rm.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "카드 지우기", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "카드를 지우면 다음 청구가 실패해요. 새 카드를 곧 등록해 주세요.", async () => { const r = await UI.api("/api/billing-key-remove", { body: {} }); if (!r.ok) return UI.toast(r.error || "지우지 못했어요"); close(); UI.toast(r.removed ? "카드를 지웠어요" : "등록된 카드가 없어요"); load(); }) });
@@ -60,7 +60,7 @@ async function load() {
   UI.$$("[data-inv]").forEach((el) => el.onclick = () => receipt(INV[Number(el.dataset.inv)]));
   const c = UI.$("#cancel"); c.hidden = !paying();
   c.innerHTML = S.cancelAtPeriodEnd ? `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t">해지 되돌리기</span><span class="d">${S.periodEnd ? UI.dateKST(S.periodEnd) + "에 끝나기로 되어 있어요" : "해지가 예약되어 있어요"} · 되돌리면 그대로 이어져요</span></div>${UI.chev}</button>`
-    : `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t" style="color:var(--danger)">구독 해지</span><span class="d">이번 기간 끝까지 쓰고 다음 청구가 없어요</span></div></button>`;
+    : `<button class="row tap" type="button" id="cancelBtn"><div class="l"><span class="t" style="color:var(--danger-ink)">구독 해지</span><span class="d">이번 기간 끝까지 쓰고 다음 청구가 없어요</span></div></button>`;
   const cbtn = UI.$("#cancelBtn"); if (cbtn) cbtn.onclick = S.cancelAtPeriodEnd ? revert : cancel;
 }
 const nameOf = (k) => (PLANS.find((p) => p.key === k) || {}).name || k;
