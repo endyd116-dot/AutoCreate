@@ -11,6 +11,7 @@
  *   🔴 AC-17 순환 0 — 이 파일이 `runner-jobs` 를 import 하는 **한 방향**만 있다.
  *      `runner-jobs.reportJob` 은 반대로 이 파일을 **함수 안에서 동적으로** 부른다(정적이면 순환).
  *   🔴 멱등 — piece 당 열린 `render.video` 는 1개(enqueueJob dedupe) · 같은 key 로 두 번 finalize 해도 자산이 겹치지 않는다.
+ *   🔎 출처: AC 신규(계약 P1R5-B2 2.1 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";

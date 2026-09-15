@@ -5,6 +5,7 @@
  *   ③ `effective_at` 이 지나면 `applyDuePriceEvents()` 가 plans 의 표시가를 새 가격으로 바꾸고 status `applied`(멱등 · ops-plans 조회·청구 크론이 부른다).
  *   🔴 `subscriptions.price_locked_krw` 가 있는 테넌트는 quotePlan 에서 고정가가 이기므로 개정의 영향을 받지 않는다(고지 대상에서도 뺀다).
  *   plans.price_month/price_year 를 직접 고치는 경로는 없다 — 신규 플랜 생성(고객 0)만 예외.
+ *   🔎 AM 원본: ../AutoMarketing/lib/billing.ts plan_price_events (관례 계승 2026-09-14)
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

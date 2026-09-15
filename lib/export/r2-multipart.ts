@@ -3,6 +3,7 @@
  *   ZIP 을 만들면서 **8MB 씩 올린다** — 편당 5~30MB 인 영상이 여러 편이면 «다 만들어 한 번에 올리기»는 배경 함수 메모리를 넘긴다.
  *   S3 규약: 마지막을 뺀 모든 파트는 **5MB 이상**이어야 한다 → 8MB 로 모았다가 보낸다.
  *   🔴 실패하면 `abort()` 로 **반쪽 업로드를 지운다**(R2 에 미완성 조각이 남아 요금만 먹는 일 0 · 조용한 실패 0).
+ *   🔎 출처: AC 신규(계약 P1R6-B-1 §2.1 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from "@aws-sdk/client-s3";
 import { getR2Client, R2_BUCKET } from "../r2";

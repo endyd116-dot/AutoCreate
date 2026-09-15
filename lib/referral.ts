@@ -9,6 +9,7 @@
  *   ④ 🔴 남용: 같은 `card_fp`(빌키 지문 · trial_fp) 가 양쪽에 있으면 보상 0 + `referral_blocked_at`(한 번 막히면 끝) · 이메일 자기추천은 가입 때 400.
  *      체험만 하고 안 낸 초대는 «첫 결제 전»(rewarded false) 그대로 — 결제 성공이 조건.
  *   🔴 결제 경로에서 부르는 `rewardReferralOnPaid` 는 **절대 던지지 않는다**(결제는 이미 성공 · 추천 실패가 청구 장부를 깨면 안 된다).
+ *   🔎 출처: AC 신규(계약 P1R6-B §1.1~§1.4 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";

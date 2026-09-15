@@ -9,6 +9,7 @@
  *   🔴 래스터라이저는 **이 파일의 `toPng` 하나 뒤**에 있다 — 바꿀 일이 생기면 그 함수 본문만 바꾼다(호출부·API·화면 무변경).
  *      Netlify 리눅스 컨테이너엔 한글 글꼴이 없다 → `loadSystemFonts:false` + 우리 OTF 만(없으면 전부 네모).
  *      번들 설정은 `netlify.toml`(`external_node_modules` + `[functions."share-card"] included_files`) — 메인이 넣었다.
+ *   🔎 출처: AC 신규(계약 P1R6-B-1 §2.2 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";

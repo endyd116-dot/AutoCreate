@@ -15,6 +15,7 @@
  *     day 는 KST YYYY-MM-DD 문자열이어야 한다(Date 바인딩 금지 · AC-5). source 는 enum. raw 는 jsonb 헬퍼(PITFALLS #1).
  *     🔴 raw 에 토큰·키가 실리면 안 된다 — 커넥터가 책임지지만 여기서도 흔한 키 이름을 한 번 걸러 낸다(방어선 2).
  *   이 파일은 `runner-jobs`·`publish/**` 를 import 하지 않는다(AC-17).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

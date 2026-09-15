@@ -5,6 +5,7 @@
  *      ⚠️ B2 의 함수는 **테넌트 전역**이다 — 테넌트마다 부르면 같은 일을 N 번 한다. 그래서 한 틱에 **한 번만** 부른다(아래 tickGuard).
  *   ② 계정 회복 — `cooldown` 24시간 경과 → `active` · `posts_today` KST 자정 리셋(`lib/account-health.sweepAccountStates`).
  *      `pending_login` 은 시간으로 풀지 않는다 — 사람이 다시 로그인해야 끝난다(러너 `session.login` 이 성공하면 B2 가 active 로 올린다).
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sweepAccountStates } from "../account-health";
 import { type CronStep, type StepOutcome } from "./base";

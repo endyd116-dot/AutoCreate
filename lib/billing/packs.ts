@@ -4,6 +4,7 @@
  *   🔴 AC-6: 오버레이는 **모양이 같을 때만** 받는다(pack = {krw,coins,bonusPct,oncePerTenant,active} · item = {coins} · 숫자 아닌 값은 무시).
  *   주문번호: `AC-COIN-{tid}-{packCode}-{base36ms}`(≤40자 · 콜백에 세션이 없어 되파싱한다 · AM 의 `AM-COIN-` 규약 이식 · 접두만 AC).
  *   부가세(§12.0 별도): 팩 가격 = 공급가 · 청구 = 공급가 + vatOf. 응답엔 krw·vatKrw·totalKrw 를 따로.
+ *   🔎 AM 원본: ../AutoMarketing/lib/coin-ledger.ts COIN_PACKS (값 동일 · DB 오버레이는 AC 추가 2026-09-14)
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

@@ -9,6 +9,7 @@
  *     (B2 가 SCOPES 에 애널리틱스 스코프를 더하면 그때부터 한 번의 동의로 둘 다 된다 — 메인에 보고함.)
  *   재사용하는 것: 앱 키(같은 env `GOOGLE_OAUTH_CLIENT_ID/SECRET`) · **토큰 갱신은 `refreshAccessToken("blogger", …)`**(구글 공통 · import 만).
  *   저장: `revenue_sources.cred_enc`(AES-256-GCM) · 러너에 내려보내지 않는다(평문 표면 0).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { refreshAccessToken, tokenNeedsRefresh, type OAuthToken } from "../oauth-providers";

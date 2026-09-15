@@ -9,6 +9,7 @@
  *   보내는 시점: 크론 5분 스텝 `push.fanout`(lib/cron/push-fanout.ts)이 **아직 안 쏜 알림**(`notifications.pushed_at IS NULL`)을 모아 쏜다.
  *      왜 그 자리인가: 알림 INSERT 자리가 코드 곳곳에 46군데다 — 한 곳(팬아웃)에서 쏘면 «어떤 알림은 푸시가 안 가는» 구멍이 안 생긴다.
  *      대신 최대 5분 늦다(정직하게 적어 둔다).
+ *   🔎 출처: AC 신규(계약 §3.6·푸시 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";

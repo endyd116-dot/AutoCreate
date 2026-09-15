@@ -15,6 +15,7 @@
  *
  *   🔴 안전장치(B2 teardown 방식 그대로 · 순서까지 같다): ①보호 id 먼저 거부 ②상태 확인(기한·구독) ③실행.
  *   🔴 `purgeTenant` 는 «기한이 지났다»를 **자기가 다시 확인한다** — 부르는 쪽 실수로 살아 있는 집이 지워지지 않게.
+ *   🔎 출처: AC 신규(계약 P1R7-B §3 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { q } from "./accounts";

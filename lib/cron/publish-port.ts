@@ -11,6 +11,7 @@
  *       · 안 꽂혀 있으면 첫 호출에서 `lib/publish/index` 를 **동적으로** 찾아본다(있으면 자동 연결 · 없으면 unavailable).
  *     🔴 미연결 반환은 `{ ok:false, unavailable:true }` — B2 의 실패 사유 `reason:"config"` 와 **다르다**.
  *        섞으면 «커넥터가 아직 없다» 가 «이 글은 못 나간다(failed)» 로 둔갑해 멀쩡한 글을 죽인다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { connectMethodOf } from "../accounts";
 

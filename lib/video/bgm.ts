@@ -8,6 +8,7 @@
  *   🔴 매니페스트가 없거나 못 읽어도 `null`(막지 않고 무음) — BGM 은 보조다. 실패가 영상 제작을 세우지 않는다.
  *
  *   고르기는 **결정론**: 같은 piece 는 늘 같은 곡(재생성·이어달리기에서 음악이 바뀌지 않는다).
+ *   🔎 AM 원본: ../AutoMarketing/lib/video-render.ts BGM_LIBRARY (무드 표 이식 2026-09-15)
  */
 import { r2Get } from "../r2";
 

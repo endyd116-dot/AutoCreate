@@ -6,6 +6,7 @@
  *     ① Date 객체를 sql 템플릿에 바인딩하지 않는다 — `.toISOString()` 문자열 + `::timestamptz AT TIME ZONE 'UTC'`.
  *     ② «이번 주(KST)»·«오늘(KST)» 같은 경계는 SQL 안에서 만든다(`kstWeekStartUtc()`·`kstTodayUtc()`) — 드라이버 시간대 변환 0.
  *     ③ 예외는 «지금 KST 몇 시인가»(`kstHour`) 뿐이다 — DB 를 타지 않는 순수 산술(+9h)이라 드라이버 tz 와 무관하다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { q } from "../accounts";

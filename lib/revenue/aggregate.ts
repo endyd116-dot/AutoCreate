@@ -3,6 +3,7 @@
  *   🔴 KST: `day` 는 KST 날짜 칸이다 — «오늘»·«이번 달»·«어제» 경계는 SQL `(NOW() AT TIME ZONE 'Asia/Seoul')::date` 로 만든다(PITFALLS #4 · §0).
  *   🔴 오늘 확정/예상은 **합치지 않는다**(§1.4 v3.2): confirmed = CONFIRMED_SOURCES 의 오늘치 · estimated = 나머지(adpost·adfit·clip·youtube)의 오늘치.
  *   🔴 `days[]` 는 **행이 있는 날만**(0원도 행이면 싣는다 = 수집됐고 0원) · 행이 없는 날은 키가 없다 = «수집 안 됨»(§1.4c · AC-9).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

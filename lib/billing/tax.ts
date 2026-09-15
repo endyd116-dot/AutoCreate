@@ -4,6 +4,7 @@
  *   프로필 = tenants.settings.taxProfile { bizNo, bizName, email } — 한 번 적으면 다음 청구서부터 그대로(화면이 채워 보여준다).
  *   실발급(홈택스 전자세금계산서)은 사람이 한다: 운영센터 «발행됨» 처리(`POST /api/ops-tax-invoice { status:"issued", url? }`) → 화면 «발행됨» 필 + 문서 열기.
  *   운영센터 R4 호환: detail.taxDoc 도 같이 적는다(ops-billing 이 읽던 자리) · 감사 `tax_invoice_request`(고객) · `ops_tax_doc_issued`(운영자).
+ *   🔎 출처: AC 신규(계약 P1R6-B §1.1~§1.4 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

@@ -2,6 +2,7 @@
  * lib/video/render-notify.ts — «내 PC 프로그램을 켜 주세요» 알림 한 곳(계약 P1R5 §7-2).
  *   렌더는 고객 PC 가 한다. 꺼져 있으면 **말해 줘야** 한다 — 조용히 멈춰 있으면 고객은 이유를 모른다.
  *   🔴 같은 말을 하루에 여러 번 하지 않는다(알림이 곧 «끄는 이유»가 된다 · cron/base notifyOnce 와 같은 관례).
+ *   🔎 출처: AC 신규(계약 P1R5-B2 2.3·7-2 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";

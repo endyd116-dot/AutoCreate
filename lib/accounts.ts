@@ -2,6 +2,7 @@
  * lib/accounts.ts — 계정 행 투영(AccountRow · 계약 §1 v1.1) + 채널 연결 방식 + 공용 조회. DESIGN §7.1.
  *   🔴 응답·로그 어디에도 자격 평문 0 — hasCreds(boolean)·monetize 불리언만. proxyUrl 은 호스트만.
  *   «삭제»는 소프트: status disconnected + last_error_kind 'removed'(자격 purged_at). 같은 핸들 재연결 시 그 행을 되살린다.
+ *   🔎 출처: AC 신규(계약 P1R1-B3 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { db } from "../db/index";
 import { sql, type SQL } from "drizzle-orm";

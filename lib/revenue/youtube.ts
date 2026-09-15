@@ -4,6 +4,7 @@
  *   귀속: video id → `posts.channel_ref` → piece(+account). 매칭 안 되는 영상 수익은 소스 계정(accountId)으로 남긴다(버리지 않는다).
  *   ⚠️ 유튜브 수익은 «예상(estimated)»이고 며칠 뒤 확정된다 — CONFIRMED_SOURCES 밖(홈에서 «예상»으로 그린다) · 7일 되돌아 덮어쓴다.
  *   🔴 [P1R7 B3 · §13.5 «외부 값»] **day 차원은 태평양 시간(PT) 기준일**이다 — 옮기지 않고 그대로 쓰고(`DAY_BASIS_OF.youtube = "pt"`), 화면이 기준을 밝힌다. ⬜ 실측은 키가 온 뒤.
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

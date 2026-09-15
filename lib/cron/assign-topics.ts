@@ -3,7 +3,7 @@
  *   매시 · `topicLeadDays` 안에 든 `planned` 슬롯마다 편성자가 소재 1개를 배정한다: planned → topic_assigned.
  *
  *   ══ 고르는 규칙(결정론) ══
- *     후보 = `topics.status='candidate'` ∧ 만료 전 ∧ **30일 안에 같은 norm_key 를 쓴 적 없음**(중복 발행 방지 · lib/topics normKey 규약 그대로).
+ *     후보 = `topics.status='candidate'` ∧ 만료 전 ∧ **90일 안에 같은 norm_key 를 쓴 적 없음**(DESIGN §19 정본 · 중복 발행 방지 · lib/topics normKey 규약 그대로).
  *     우선순위 = ① 그 슬롯 채널과 `channel_hint` 가 맞는 것 ② score 높은 순 ③ id 큰 순(최신).
  *     채널이 안 맞아도 «없는 것보다 낫다» — 힌트는 힌트다(디렉터가 produce 에서 그 채널에 맞게 앵글을 가른다).
  *
@@ -16,6 +16,7 @@
  *
  *   ⚠️ 경합: 같은 소재를 두 슬롯이 가져가지 못하게 **CAS**(`UPDATE topics SET status='picked' WHERE status='candidate' RETURNING id`)로 집는다.
  *      0행이면 남이 먼저 가져간 것 — 조용히 다음 후보로 간다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
@@ -31,7 +32,7 @@ interface Cand { id: number; normKey: string; hint: string; score: number; title
 /** 최근 글(계정 간 유사도 게이트 재료) — 제목 + 도입부(첫 300자). */
 interface RecentPiece { accountId: number | null; text: string }
 
-/** 후보 소재 — 30일 중복 회피 포함. 한 번 읽어 메모리에서 소모한다(슬롯마다 다시 뒤지면 같은 자리를 두 번 집는다 · AM SlotPool 교훈). */
+/** 후보 소재 — 90일 중복 회피 포함(DESIGN §19). 한 번 읽어 메모리에서 소모한다(슬롯마다 다시 뒤지면 같은 자리를 두 번 집는다 · AM SlotPool 교훈). */
 async function loadCandidates(tid: number, limit: number): Promise<Cand[]> {
   const rows = await q(sql`SELECT t.id, t.norm_key, t.channel_hint, t.score, t.title, t.angle, t.source FROM topics t
     WHERE t.tenant_id = ${tid} AND t.status = 'candidate' AND (t.expires_at IS NULL OR t.expires_at > NOW())

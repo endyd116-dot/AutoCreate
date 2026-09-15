@@ -4,6 +4,7 @@
  *   rollSlots: 오늘(KST)~+horizonDays · 규칙마다 weekdays(비면 count 를 주 안에 균등 분산 · 결정론) · every month = count 를 달 안에 균등 분산 · every day = 매일 1개(같은 rule·date 1개가 원장 규칙)
  *              · quietDays 제외 · publish_at = best-time(계정 미정이면 채널 첫 후보 · 같은 채널 슬롯끼리 30분 간격) · bestTimeMode fixed 면 preferredHour 만 · status planned · origin auto.
  *   🔴 이 라운드는 슬롯 생성까지 — 소재 배정·D-3 제작·발행 크론은 R2. 슬롯 없는 자동 생성 금지(AC-2)는 R2 produce 스텝의 게이트.
+ *   🔎 AM 원본: ../AutoMarketing/lib/editorial-board-slots.ts · organic-cadence.ts (관례 이식 2026-09-14 · 표·변수는 AC §5B)
  */
 import { sql } from "drizzle-orm";
 import { utcDate, jsonb } from "./db-util";

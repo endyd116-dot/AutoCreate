@@ -3,6 +3,7 @@
  *   env: R2_ACCOUNT_ID · R2_ENDPOINT(선택) · R2_ACCESS_KEY_ID · R2_SECRET_ACCESS_KEY · R2_BUCKET · R2_PUBLIC_BASE(선택 — 공개 버킷 도메인).
  *   공개 URL: R2_PUBLIC_BASE 가 있으면 `${base}/${key}` · 없으면 우리 서빙 함수 `/api/r2-image?key=`(netlify/functions/r2-image.ts).
  *   graceful: 미설정이면 r2Configured()=false — 호출부가 정직하게 «이미지 저장소 미설정»으로 처리.
+ *   🔎 출처: AC 신규(계약 P1R1-B1 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 

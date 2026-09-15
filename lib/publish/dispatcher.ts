@@ -15,6 +15,7 @@
  *   ⚠️ 실제로 태우려면 `undici` 가 필요하다(Node 내장 fetch 는 dispatcher 를 받지만 `ProxyAgent` 는 별도 패키지다).
  *      지금 의존성에 **없다** — 그래서 켜면 «패키지가 없다»고 **정직하게 던진다**(조용히 직결로 내려앉지 않는다).
  *      내려앉으면 «프록시를 쓰는 줄 알았는데 우리 IP 로 나가는» 바로 그 사고가 된다(§2.5 구멍 1 과 같은 함정).
+ *   🔎 출처: AC 신규(계약 P1R7-B2 2.5-⑦⑤ · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { decryptObj } from "../creds-crypto";
 import { sql } from "drizzle-orm";
