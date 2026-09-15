@@ -495,7 +495,7 @@
   /* [AC-52 · 2026-09-15] 서버가 실제로 보내는 kind 를 전수 대조해 채웠다(scripts/verify-label-surface.mjs 가 상시로 잰다) */
   /* [R8 §9 · B3] `gate_risk` — 위험이 있는 채로 승인됐다(자동 승인처럼 아무도 화면을 안 보는 길을 위해 서버가 1회 보낸다) · «검수»와 같은 얼굴
      [R8 · B] `takedown_*` — 침해 신고. 🔴 «알림»이 아니라 **해야 끝나는 일**이라 주의 계열(reassign)로 · 🔴 «곧 정지됩니다»로 쓰지 않는다(자동 정지는 없다) */
-  UI.KIND_ALIAS = { gate_risk: "review", takedown_notice: "reassign", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+  UI.KIND_ALIAS = { gate_risk: "review", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",

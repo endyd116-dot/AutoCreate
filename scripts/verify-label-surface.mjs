@@ -271,6 +271,35 @@ const rmUi = bracketList(uiJs, "UI.ADS_REMOVABLE =").sort();
 rec("🔴 «뗄 수 있는 길» 목록이 서버와 같다(티스토리는 못 뗀다)", rmSrv.length > 0 && rmSrv.join(",") === rmUi.join(","),
   rmSrv.join(",") === rmUi.join(",") ? `${rmSrv.length}가지` : `서버 «${rmSrv.join(" ")}» ≠ 화면 «${rmUi.join(" ")}»`, { rmSrv, rmUi });
 
+/* ───────── ⑨ 🔴 **시스템 용어가 시트 안에 숨어 있지 않나**(정적) ─────────
+   왜: 화면 감사(scratchpad/shot.mjs)는 **열려 있는 화면만** 본다 — 바텀시트 안 문구는 열어야 보인다.
+   2026-09-15 실측: 계정 연결 시트가 «발행할 때만 **러너**가 열어요»라고 말하고 있었다(고객 금지어 · §13.0 «러너»→«내 PC 프로그램»).
+   그래서 **만들어진 화면 파일의 글자**를 통째로 훑는다 — 열리든 안 열리든 잡힌다.
+   🔴 주석·API 경로(`/api/runner-list`·`runnerOn`)는 뺀다 — 코드가 그 낱말을 쓰는 것은 금지가 아니다(고객이 읽는 글자만 본다). */
+const CUSTOMER_BANNED = ["러너", "테넌트", "잡 상태"];
+/* 🔴 약관·방침은 뺀다 — 거기서는 «내 PC 프로그램»(러너) 처럼 **한 번 정의하는 것**이 오히려 맞다(법 문서의 용어 정의).
+   운영센터도 뺀다(§13.0b 운영 콘솔 예외 — 운영자는 그 낱말로 일한다). 고객이 **쓰면서 읽는 화면**만 본다. */
+const LEGAL = ["terms.html", "privacy.html", "paid-terms.html"];
+const pageFiles = [...walk("public/app", [".html"]), ...walk("public", [".html"]).filter((p) => !p.includes("/ops/") && !p.includes("/app/"))]
+  .filter((p) => !LEGAL.includes(p.split("/").pop()));
+const wordHits = [];
+for (const f of pageFiles) {
+  /* 🔴 여러 줄 주석은 **줄 수를 지키며** 지운다 — 줄마다 «/*» 만 보면 이어지는 줄이 코드로 잘못 읽힌다(줄 번호가 어긋나면 못 찾는다) */
+  const txt = read(f).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
+  txt.split("\n").forEach((line, i) => {
+    const code = line.split("//")[0];
+    for (const w of CUSTOMER_BANNED) {
+      let at = -1;
+      while ((at = code.indexOf(w, at + 1)) >= 0) {
+        const before = code[at - 1] ?? " ", after = code[at + w.length] ?? " ";
+        if (/[A-Za-z\-_/]/.test(before) || /[A-Za-z\-_/]/.test(after)) continue;   // runner-list·runnerOn 같은 이름은 뺀다
+        wordHits.push(`${f.split("/").pop()}:${i + 1} «${w}» — ${code.slice(Math.max(0, at - 24), at + 24).trim()}`);
+      }
+    }
+  });
+}
+rec("🔴 시트 안까지 — 고객 화면에 시스템 용어 0", wordHits.length === 0, wordHits.slice(0, 3).join(" | ") || `${pageFiles.length}장 훑음`, wordHits);
+
 /* ───────── 출력 ───────── */
 if (JSON_OUT) console.log(JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
 else {

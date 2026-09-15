@@ -19,7 +19,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=20"></script>
+<script src="/js/ui.js?v=21"></script>
 <script src="/js/mock.js?v=20"></script>
 <script>
 (async () => {
@@ -69,7 +69,7 @@ function soonSheet(c) {
 }
 function connectSheet(c) {
   const k = c.key, label = c.label || UI.chLabel(k);
-  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 발행할 때만 러너가 열어요.</p>
+  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 올릴 때만 내 PC 프로그램이 열어요.</p>
     <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
     <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="off" required><div class="help"></div></div>
     <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off" placeholder="예: 요리하는 A"></div>
