@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=21"></script>
-<script src="/js/mock.js?v=20"></script>
+<script src="/js/ui.js?v=24"></script>
+<script src="/js/mock.js?v=26"></script>
 <script>
 (async () => {
 const me = await UI.boot("create"); if (!me) return;
@@ -42,8 +42,12 @@ let CHV = {};
 const vfmts = (ch) => (CHV[ch] && CHV[ch].formats) || [];                               // [{key,label,maxSeconds}] — 이 채널에서 되는 포맷
 const fmtMax = (ch, fmt) => { const f = vfmts(ch).find((x) => x.key === fmt); return f ? f.maxSeconds : (CHV[ch] && CHV[ch].maxSeconds) || 60; }; // 🔴 포맷 상한만 본다(교집합 계산 0)
 const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.channel, p.video.format); if (p.video.seconds > m) { const was = p.video.seconds; p.video.seconds = m; p.coinCost = UI.VIDEO_COIN[m] ?? p.coinCost; return { was, now: m }; } return null; };
-/* 코인 = 글 1 + 사진 수 · 영상은 초 구간제(videoCoinItem · 정본은 서버 coinCost) */
-const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0) : 1 + (p.images?.count || 0);
+/* 🔴 [R8 · AC-52] 코인은 **서버가 준 `coinCost` 가 정본**이다. 여기 있던 «1 + 사진 장수»는 2026-09-15 에
+     네이버를 **7코인**이라 적던 바로 그 셈이다 — 편성표에서는 걷어 냈는데 디렉터에는 남아 있었다.
+   🔴 글 1편 = 1코인이고 **AI 로 구운 장만** 더 든다(사진 장수는 공짜 질문 — 내 사진·스톡이 채운다).
+     화면 셈은 서버가 아직 말 안 해 준 동안의 미리보기일 뿐이고, 총액은 `director-estimate` 가 확정한다. */
+const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0)
+  : (typeof p.coinCost === "number" ? p.coinCost : UI.COIN.blog + Math.max(0, (p.images?.aiCount ?? 1) - 1));
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
 const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
   /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
@@ -64,8 +68,9 @@ function render() {
   UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
   UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
     : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
-  const tot = total();
-  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger-ink)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+  drawKv(total(), brief.coinsLeft);
+  estKv();   // 🔴 서버가 같은 손질로 다시 재 준다 — 답이 오면 위 숫자를 갈아 끼운다
+
   UI.$("#why").innerHTML = `<div class="group"><div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div></div>`;
   UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
 }
@@ -121,15 +126,38 @@ function editSheet() {
   } });
   function sum(sh) { let t = 0; sh.querySelectorAll("section").forEach((sec) => { if (sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true") return; t += sec.hasAttribute("data-video") ? (UI.VIDEO_COIN[Number(UI.chipVal(sec, "vsec"))] ?? 0) : 1 + UI.stepVal(sec, "img"); }); const el = sh.querySelector("#sum"); if (el) el.textContent = t; }
 }
-/* ── 만들기 ── */
-async function make() {
-  const btn = UI.$("#make"); btn.disabled = true;
-  const patches = pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
+/* [R8 · director-estimate] 🔴 «얼마 드나»는 **서버가 확정한다**(`{ coinCost, coinsLeft, enough, need }`).
+     화면 셈은 답이 올 때까지의 미리보기이고, 답이 오면 그 자리를 갈아 끼운다.
+   🔴 못 불러오면 **미리보기를 그대로 둔다** — 값을 지우거나 0 으로 만들지 않는다(«없음 ≠ 0» · AC-9).
+   🔴 모자랄 때도 **막지 않는다**(§9) — 얼마가 모자란지 한 줄 적고, 충전하러 가는 길을 같이 준다. */
+function drawKv(tot, left, need) {
+  const short = left - tot < 0;
+  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${UI.num(tot)}코인</span></div>`
+    + `<div class="kv"><span class="k">남는 코인</span><span class="v" ${short ? 'style="color:var(--danger-ink)"' : ""}>${UI.num(left - tot)}코인</span></div>`
+    + (short ? `<div class="kv"><span class="k wrap">코인이 모자라요</span><span class="v wrap" style="font-weight:600;text-align:right">${UI.num(need != null ? need : tot - left)}코인만 채우면 이대로 만들어요 · <a href="/app/coins.html" style="text-decoration:underline">충전하기</a></span></div>` : "")
+    + `<div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+}
+let estSeq = 0;
+async function estKv() {
+  const my = ++estSeq;
+  const body = { briefId: brief.id }; const ps = patchesOf(); if (ps.length) body.pieces = ps;
+  const r = await UI.api("/api/director-estimate", { body, noGate: true });
+  if (my !== estSeq || !r.ok) return;   // 늦게 온 답이 새 답을 덮지 않게 · 못 쟀으면 미리보기를 그대로 둔다
+  drawKv(r.coinCost, r.coinsLeft, r.enough ? null : r.need);
+}
+/* 🔴 견적에 보낼 손질과 만들기에 보낼 손질은 **같아야** 한다 — 둘을 따로 지으면 «견적과 실제가 다른» 화면이 된다(rules 쪽과 같은 규율). */
+function patchesOf() {
+  return pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
     const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
     if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style || p.images.aiCount !== o.images.aiCount)) patch.images = { count: p.images.count, style: p.images.style, ...(p.images.aiCount != null ? { aiCount: p.images.aiCount } : {}) };   /* [R8] aiCount = AI 로 구울 장수(여기만 돈이 든다) */
     if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
     if (isVideo(p)) { const v = {}; if (p.video.format !== o.video.format) v.format = p.video.format; if (p.video.seconds !== o.video.seconds) v.seconds = p.video.seconds; if (p.video.voice?.voiceId !== o.video.voice?.voiceId) v.voiceId = p.video.voice.voiceId; if (Object.keys(v).length) patch.video = v; } // PieceSpecPatch.video(§1.1)
     if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
+}
+/* ── 만들기 ── */
+async function make() {
+  const btn = UI.$("#make"); btn.disabled = true;
+  const patches = patchesOf();
   const body = { briefId: brief.id }; if (patches.length) body.pieces = patches;
   const r = await UI.api("/api/director-confirm", { body }); btn.disabled = false;
   if (!r.ok) { if (r.gated) return;

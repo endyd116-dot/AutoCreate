@@ -142,6 +142,10 @@ const SURFACES = [
     "함수만 있고 여는 화면이 없어 또 «정의는 있는데 부르는 자리가 없는 것»이 된다", true],
   ["사진 시트를 화면이 연다", "UI.photoSheet", "public/js/ui.js",
     "함수만 있고 여는 화면이 없어 사진을 넣을 길이 여전히 없다", true],
+  ["팀 — 자리를 늘리는 길(§4.5)", "/api/team-invite", "netlify/functions/team.ts",
+    "요금표가 «Agency 팀 자리 5개»를 **팔면서 늘릴 길이 0**이 된다(§4.8 «완료 = 화면에서 쓸 수 있을 때»의 반대)", true],
+  ["팀 — 초대를 거두는 길(§4.5)", "/api/team-revoke", "netlify/functions/team.ts",
+    "잘못 보낸 초대가 **영영 자리를 먹은 채** 남는다(대기 중 초대도 자리를 센다)", true],
   ["발행 전 검사 줄을 두 화면이 같이 쓴다", "UI.gateList", "public/js/ui.js",
     "검수 화면과 직접 쓰기 화면이 각자 그려, 축이 늘 때마다 한쪽만 낡는다(AC-52 의 화면 쪽 얼굴)", true],
 ];
@@ -152,6 +156,31 @@ for (const [label, needle, owner, harm, needApp] of SURFACES) {
   const ok = needApp ? apps.length > 0 : hits.length > 0;
   rec(`🔴 화면이 부르나 — ${label}(\`${needle}\`)`, ok,
     `화면 ${hits.length}곳${hits.length ? ` [${hits.join(" · ")}]` : ""}${needApp ? ` · 그중 화면 파일 ${apps.length}곳` : ""}` + (ok ? "" : ` ⇒ ${harm}`));
+}
+
+/* ═══ [R8-B §4.5] 🔴 **서버가 메일·알림에 박아 보내는 주소에 그 파일이 정말 있나** ═══
+   위의 SURFACES 는 «화면이 서버를 부르나»를 센다. 그런데 반대 방향의 죽은 통로가 하나 더 있다:
+   **서버가 고객에게 보내는 링크가 없는 파일을 가리키는 것.** 이건 아무 검사에도 안 걸린다 —
+   서버는 정상이고(`siteUrl()/app/team-accept.html?token=` 을 메일에 잘 싣는다), 화면 스샷도 그 화면이 없으니 못 본다.
+   고객만 안다: 초대 메일의 단추를 눌렀는데 **404** 다. 2026-09-16 에 팀 시트에서 실제로 그랬다(A 가 눈으로 찾았다).
+   🔴 서버 코드에서 `/app/....html` 문자열을 **전부 긁어** `public/` 에 그 파일이 있는지 본다. 새 링크를 만들면 자동으로 걸린다.
+   🔴 `#해시`·`?쿼리`는 떼고 본다 — `/app/settings.html#takedown` 은 파일로는 `settings.html` 이다. */
+{
+  const LINK_RE = /["'`](\/app\/[A-Za-z0-9_-]+\.html)(?:[?#][^"'`]*)?["'`]/g;
+  const miss = new Map();   // 없는 파일 → 그걸 가리키는 서버 자리
+  let seen = 0;
+  for (const [f, code] of CODE) {
+    if (f.startsWith("public/") || f.startsWith("scripts/") || f.startsWith("docs/")) continue;   // 서버·러너 쪽만 본다
+    for (const m of code.matchAll(LINK_RE)) {
+      const p = m[1]; seen++;
+      if (read(`public${p}`)) continue;
+      if (!miss.has(p)) miss.set(p, []);
+      miss.get(p).push(f);
+    }
+  }
+  const lines = [...miss].map(([p, fs]) => `${p} ← ${[...new Set(fs)].join(" · ")}`);
+  rec("🔴 서버가 보내는 링크가 없는 화면을 가리키지 않는다", miss.size === 0,
+    lines.length ? lines.slice(0, 3).join(" | ") + " ⇒ 고객이 메일·알림의 단추를 누르면 404 다" : `서버가 가리키는 화면 주소 ${seen}곳 전부 있다`, lines);
 }
 
 /* 🔴 [R8-A2 §9] **화면이 서버보다 엄하면 그것도 게이트다** — 서버는 `HARD_GATE_KEYS = []` 인데

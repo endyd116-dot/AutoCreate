@@ -267,10 +267,10 @@ function renderResult(r) {
       ${r.notice ? `<p class="muted" style="margin:0 16px 12px;font-size:13px">${UI.esc(r.notice)}</p>` : ""}</div>
     <div class="group" id="gate"></div>
     <div class="group"><div class="gt">사진</div>
-      <button type="button" class="row tap" id="ph"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">내 사진 넣기</span><span class="d" id="phD">JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+      <button type="button" class="row tap" id="ph"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">사진 넣기</span><span class="d" id="phD">내 사진이나 스톡 사진 · 둘 다 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
     </div>`;
   UI.$("#gate").innerHTML = UI.gateList(r.gate || { checks: [] });
-  UI.$("#ph").onclick = () => UI.photoSheet(r.pieceId, (ps) => { UI.$("#phD").textContent = ps.length ? `${ps.length}장 넣었어요 · 내 사진은 코인이 들지 않아요` : "JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요"; });
+  UI.$("#ph").onclick = () => UI.photoSheet(r.pieceId, (ps) => { UI.$("#phD").textContent = ps.length ? `${ps.length}장 넣었어요 · 코인은 들지 않아요` : "내 사진이나 스톡 사진 · 둘 다 코인이 들지 않아요"; });
   const cta = UI.$("#cta"); cta.hidden = false;
   cta.innerHTML = `<a class="btn secondary" href="/app/piece.html?id=${r.pieceId}" style="flex:0 0 40%">글 보기</a><button class="btn primary" type="button" id="ok">이대로 예약할게요</button>`;
   UI.$("#ok").onclick = async (e) => {
@@ -306,6 +306,7 @@ await load();
 === schedule.html | schedule | 편성표 | two ===
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
 <div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
+<div id="pwBn"></div>
 <div class="seg" id="mode"><button type="button" data-m="two" class="on">2주</button><button type="button" data-m="month">월</button></div>
 <div class="group" id="cal"></div>
 <div id="feed" hidden></div>
@@ -331,7 +332,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}${pwRowSay(s) ? `<span class="d wrap" style="color:var(--${s.produceWindow === "missed" ? "warn-ink" : "muted"})">${UI.esc(pwRowSay(s))}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -359,8 +360,39 @@ function autoBanner() {
 /* ③ 이번엔 건너뛰는 자리 — 서버 skipReason:"too_soon" 만 본다(화면 계산 없음 · 키 없으면 필 없음). 서버는 매일 produceHour 에 글을 만들고, 그 전에 오는 자리만 건너뛴다 — 며칠 남았는지는 판정 근거가 아니다 */
 const tooSoon = (s) => s.skipReason === "too_soon";
 const produceH = () => { const [h, m] = String((D.settings && D.settings.produceHour) || "06:00").split(":").map((x) => parseInt(x, 10)); return `${Number.isFinite(h) ? h : 6}시${m ? ` ${m}분` : ""}`; }; // rules-settings 의 «06:00» → «6시»
+/* [R8-B · lib/produce-window.ts] 🔴 «이 자리는 언제 글이 만들어지나»는 **서버가 잰다** — 화면이 크론 판정을 흉내 내지 않는다(AC-47·AC-70).
+     크론 `slots.produce` 와 편성표가 **같은 파일 하나**를 읽으므로, 화면이 여기서 다시 세면 그날로 둘이 갈린다.
+   🔴 키가 없으면 **아무것도 안 그린다** — 건너뜀·반려는 «만들 자리»가 아니다. «없음»은 «pending 아님»이 아니라 «해당 없음»이다(AC-9).
+   🔴 `missed` 를 **빨강으로 그리지 않는다** — «못 만든다»가 아니라 «지금 만들기가 유일한 길»이라는 뜻이다.
+      빨강은 고장의 색인데 이건 고장이 아니다. 대신 **«지금 만들기»를 바로 옆에 둔다**(§9-3·§9-4 — 말해 주는 김에 길도 같이).
+   🔴 사유 문장은 서버 것 그대로다(`produceReason`) — 막힌 집·자동 꺼짐·날짜 지남이 **저마다 다른 할 일**로 끝난다. */
+const pwSay = (s) => (s.produceWindow === "pending" || s.produceWindow === "missed") ? String(s.produceReason || "") : "";
+/* 🔴 돈은 서버 값이 정본(`coinCost`) — 화면 표는 서버가 말 안 해 줄 때의 미리보기일 뿐이다(AC-52 코인 7배 사고). */
+const slotCoin = (s) => (typeof s.coinCost === "number" ? s.coinCost : coinOf(s.channel));
+/* 🔴 집 전체가 같은 까닭이면 **줄마다 되풀이하지 않는다** — 열 줄에 같은 말을 적는 것은 «또렷하게»가 아니라 소음이다.
+     §9-1 은 «또렷하게»를 말하지 «한 번 더»를 말하지 않는다. 그래서 같은 문장이 두 자리 이상에 걸리면 **위에 한 번**만 말하고,
+     그 자리만의 까닭(날짜가 지났다·이 자리는 직접 만들어 달라)은 **그 줄에** 남긴다. 시트에서는 늘 그 자리 문장을 보여 준다. */
+let PW_SHARED = [];
+function pwScan(list) { const c = new Map(); for (const s of list) { const t = pwSay(s); if (t) c.set(t, (c.get(t) || 0) + 1); }
+  PW_SHARED = [...c].filter(([, n]) => n > 1).map(([t]) => t); }
+const pwRowSay = (s) => { const t = pwSay(s); return t && !PW_SHARED.includes(t) ? t : ""; };
+function pwBanner() {
+  const host = UI.$("#pwBn");
+  /* 🔴 여러 자리가 걸린 까닭도 «미룸(pending)»이면 조용한 색, «자동으로는 안 만들어짐(missed)»이면 눈에 띄는 색.
+     둘 다 **빨강이 아니다** — 고장이 아니라 알려 주는 일이다. */
+  /* 🔴 위 «자동 편성이 꺼져 있어요 + 켜기» 배너가 이미 같은 말을 하고 있으면 **두 번 말하지 않는다** — 그쪽엔 켜는 단추까지 있다.
+     서버 문장을 글자로 알아보는 방식이라 서버가 문구를 바꾸면 이 가림이 풀린다. 🔴 **그쪽으로 틀린 게 낫다**:
+     그때 생기는 일은 «배너가 둘»이지 «말을 안 해 줌»이 아니다(§9-1 — 덜 말하는 쪽으로 틀리지 않는다). */
+  const autoSaid = !UI.$("#autoBn").hidden;
+  const shared = PW_SHARED.filter((t) => !(autoSaid && t.includes("자동 만들기를 꺼")));
+  const miss = shared.filter((t) => slots.some((s) => s.produceWindow === "missed" && s.produceReason === t));
+  const rest = shared.filter((t) => !miss.includes(t));
+  host.innerHTML = [...miss.map((t) => [t, ""]), ...rest.map((t) => [t, " info"])]
+    .map(([t, cls]) => `<div class="banner${cls}" style="margin:0 0 8px"><span>${UI.esc(t)}</span></div>`).join("");
+}
 function render() {
   autoBanner();
+  pwScan(slots); pwBanner();
   const two = mode === "two";
   UI.$("#prev").hidden = two; UI.$("#next").hidden = two;
   UI.$("#mon").textContent = two ? `${today.getMonth() + 1}월` : `${view.getMonth() + 1}월${view.getFullYear() !== today.getFullYear() ? " " + view.getFullYear() : ""}`;
@@ -420,12 +452,13 @@ function slotSheet(s) {
   const warn = ["coin_short", "awaiting_runner", "awaiting_manual"].includes(s.status);
   const dTopic = can.topic ? (s.topicTitle ? "다른 소재로 바꿔요" : "소재를 골라요") : s.pieceId ? "글을 이미 만들어서 바꿀 수 없어요" : "이미 지나간 편성이에요";
   const dTime = can.time ? (s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간") : "이미 지나간 편성이에요";
-  const dMake = !s.topicTitle ? "먼저 소재를 정해 주세요" : s.pieceId ? "이 편성은 이미 글이 있어요" : `${coinOf(s.channel)}코인이 들어요 · 다시 만들기는 무료`;
+  const dMake = !s.topicTitle ? "먼저 소재를 정해 주세요" : s.pieceId ? "이 편성은 이미 글이 있어요" : `${slotCoin(s)}코인이 들어요 · 다시 만들기는 무료`;
   const dSkip = can.skip ? "이날은 쉬고 다음 편성은 그대로 나가요" : "이미 지나간 편성이에요";
   const act = (id, t, d, ok) => `<button type="button" class="row tap" data-act="${id}" ${ok ? "" : 'disabled style="opacity:.4"'}><div class="l"><span class="t">${t}</span><span class="d wrap">${UI.esc(d)}</span></div>${ok ? UI.chev : ""}</button>`;
   const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
     ${s.note ? `<div class="banner info" style="margin:4px 0 8px"><span>${UI.esc(s.note)}</span></div>` : ""}
+    ${pwSay(s) ? `<div class="banner ${s.produceWindow === "missed" ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(pwSay(s))}</span>${s.produceWindow === "missed" && can.make ? `<button type="button" data-act="make">지금 만들기</button>` : ""}</div>` : ""}
     ${H && H[0] ? `<div class="banner ${warn ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(H[0])}${H[1] ? " · " + UI.esc(H[1]) : ""}</span></div>` : ""}
     ${s.revenueKrw != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">이 글이 번 돈<small class="muted" style="font-weight:500"> · 최근 30일</small></span><span class="v">${UI.won(s.revenueKrw)}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정</span><span class="v">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "건강한 계정 순으로 자동"}</span></div>
@@ -443,12 +476,12 @@ function slotSheet(s) {
         if (b.dataset.act === "time") return timeSheet(s, close);
         if (b.dataset.act === "make") {
           bar.hidden = true;
-          host.innerHTML = `<p class="muted" style="margin:8px 0 12px">지금 만들면 ${coinOf(s.channel)}코인을 써요. 다시 만들기와 수정은 코인이 안 들어요.</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn primary" type="button" data-yes>지금 만들기</button></div>`;
+          host.innerHTML = `<p class="muted" style="margin:8px 0 12px">지금 만들면 ${slotCoin(s)}코인을 써요. 다시 만들기와 수정은 코인이 안 들어요.</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn primary" type="button" data-yes>지금 만들기</button></div>`;
           host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; bar.hidden = false; };
           host.querySelector("[data-yes]").onclick = async (e) => { e.target.disabled = true;
             const r = await UI.api("/api/slots-produce-now", { body: { slotId: s.id } }); e.target.disabled = false;
             if (!r.ok) { if (r.gated) return close();
-              if (r.step === "coin_short") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? 0}코인이 있고 ${r.need ?? coinOf(s.channel)}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: "코인이 모자라요" }); }
+              if (r.step === "coin_short") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${r.have ?? 0}코인이 있고 ${r.need ?? slotCoin(s)}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: "코인이 모자라요" }); }
               return UI.toast(r.error || "만들기를 시작하지 못했어요");
             }
             close(); UI.done("만들기 시작했어요", () => UI.go("/app/pieces.html?tab=generating"));
@@ -562,6 +595,10 @@ function ruleOneSheet(rule) {
       <p class="muted" style="margin:6px 0 0;font-size:12.5px">계정끼리 너무 붙어 나가면 자리가 뒤로 밀릴 수 있어요 — 그때는 편성표에 그 까닭이 적혀요.</p>`}
       <div class="sec">어느 계정으로</div>${UI.seg("md", [["auto", "자동"], ["fixed", "고르기"]], s.mode)}
       <div data-pick ${s.mode === "fixed" ? "" : "hidden"} style="padding-top:8px">${UI.chips("ac", accs.map((a) => [a.id, "@" + a.handle]), s.acc || accs[0]?.id)}</div>
+      ${""/* [R8 · rules-estimate] 🔴 **고치기 전에** 얼마나 드는지 말한다 — 여태 이 자리는 저장한 **뒤에야** 코인을 알려 줬다.
+             🔴 숫자는 서버가 «저장과 같은 식»으로 재 준다(화면이 편수 × 단가를 셈하면 단가 바뀌는 날 화면만 옛 셈이다 · AC-47).
+             🔴 못 쟀으면 이 칸을 **통째로 감춘다** — 0 이라고 적지 않는다(«없음 ≠ 0» · AC-9). */}
+      <div class="group" id="estBox" hidden style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est1">—</span>코인</span></div><div id="estNote1"></div></div>
       <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger-ink)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
     UI.bindSteppers(body, (n, v) => { if (n === "cnt") { s.count = v; view(sh, close); } });
     UI.bindChips(body, (n, v) => {
@@ -584,6 +621,15 @@ function ruleOneSheet(rule) {
       close(); UI.toast(`${say} · 주 ${r.coinsPerWeek}코인`); await load();
     };
     const others = activeRules().filter((x) => !rule || x.id !== rule.id).map((x) => ({ id: x.id, channel: x.channel, kind: x.kind, accountMode: x.accountMode, accountId: x.accountId, every: x.every, count: x.count, weekdays: x.weekdays, preferredHour: x.preferredHour, active: true }));
+    (async () => {   // 🔴 고치는 중에도 값이 따라 움직인다(고른 뒤에 알면 늦다)
+      if (!s.count) return;
+      const r = await UI.api("/api/rules-estimate", { body: { rules: [...others, one()] }, noGate: true });
+      const box = body.querySelector("#estBox"); if (!box || !r.ok) return;   // 못 쟀으면 그냥 안 보여 준다
+      box.hidden = false;
+      box.querySelector("#est1").textContent = UI.num(r.coinsPerWeek);
+      box.querySelector("#estNote1").innerHTML = r.shortfallNote
+        ? `<div class="kv"><span class="k wrap">요금제 포함분</span><span class="v wrap" style="font-weight:600;text-align:right">${UI.esc(r.shortfallNote)}</span></div>` : "";
+    })();
     body.querySelector("#save").onclick = (e) => { if (!s.count) return UI.toast("1회 이상으로 해 주세요"); send([...others, one()], e.currentTarget, rule ? "규칙을 고쳤어요" : "규칙을 추가했어요"); };
     const del = body.querySelector("#del");
     if (del) del.onclick = (e) => { const btn = e.currentTarget; UI.confirmRow(body.querySelector(".cta"), "이 규칙을 지울까요? 아직 안 나간 자리는 사라져요.", () => send(others, btn, "규칙을 지웠어요")); };
@@ -601,6 +647,22 @@ function ruleSheet() {
     mode: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountMode || "auto"])), acc: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountId || null])), reviewPolicy: D.settings.reviewPolicy || "silence_approves", produceLeadDays: D.settings.produceLeadDays || 3 };
   const perWeek = (c) => st.every[c] === "day" ? st.count[c] * 7 : st.every[c] === "month" ? st.count[c] / 4 : st.count[c];   // 코인 미리보기는 «주»로 환산해서 견준다
   const est = () => Math.round(chans.reduce((a, c) => a + perWeek(c) * perPiece(c), 0));
+  /* 🔴 저장에 보낼 모양과 견적에 보낼 모양은 **같아야** 한다 — 서버가 «같은 검사·같은 식»으로 재 주는 값이라(rules.ts §R8),
+     여기서 둘을 따로 만들면 «견적과 실제가 다른» 화면이 된다. 한 곳에서 짓는다. */
+  const ruleInputs = () => chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: st.every[c], count: st.count[c], active: true }; /* [P1R5] kind shorts · [R7 §4.3] 주기·요일·시각 */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (st.hour[c] != null) r.preferredHour = st.hour[c]; if (st.every[c] === "week" && st.wd[c].length) r.weekdays = st.wd[c]; return r; });
+  /* [R8 · rules-estimate] 🔴 **켜기 전에** 서버가 같은 식으로 재 준다 — 화면의 «편수 × 단가»는 단가를 바꾸는 날 옛 셈으로 남는다(AC-47·AC-52).
+     🔴 `shortfallNote` 는 «요금제 포함분으로는 달 중간에 멈춘다»를 **저장 전에** 말해 주는 서버 문장이다.
+        나중에 알면 그건 막힌 게 아니라 속은 것이다 — 그래서 화면이 셈해서 흉내 내지 않고 그 문장을 그대로 싣는다.
+     🔴 못 불러오면 **화면 미리보기를 그대로 둔다** — 값을 지우지 않는다(«없음 ≠ 0» · AC-9). */
+  async function estServer(body) {
+    const r = await UI.api("/api/rules-estimate", { body: { rules: ruleInputs() }, noGate: true });
+    if (!r.ok) return;
+    const e = body.querySelector("#est"); if (e) e.textContent = UI.num(r.coinsPerWeek);
+    const host = body.querySelector("#estNote"); if (!host) return;
+    host.innerHTML = r.shortfallNote
+      ? `<div class="kv"><span class="k wrap">요금제 포함분</span><span class="v wrap" style="font-weight:600;text-align:right">${UI.esc(r.shortfallNote)}</span></div>`
+      : (D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v">${UI.num(D.includedCoins)}코인/달 · 이 편성이면 포함분 안이에요</span></div>` : "");
+  }
   let step = 1;
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const on = chans.filter((c) => st.count[c] > 0);
@@ -618,17 +680,17 @@ function ruleSheet() {
       <p class="muted" id="rpSay2" style="margin:6px 0 0;font-size:12.5px">${rpSay(autoApproveOff() ? "require_confirm" : st.reviewPolicy)}</p>
       <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
       <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div>
-        ${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}
+        <div id="estNote">${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}</div>${""/* 🔴 서버가 답하면 이 칸을 통째로 갈아 끼운다(estServer) — 화면 셈은 답이 올 때까지의 미리보기다 */}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
     UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") { st.reviewPolicy = v; const sy = body.querySelector("#rpSay2"); if (sy) sy.textContent = rpSay(v); }   /* [R8 §9-2] 🔴 켜는 **그 순간에** 무엇을 켜는 것인지 말한다 — «사람이 안 보는 경로»가 생기는 자리가 여기다 */
       else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
     const bk = body.querySelector("#bk"); if (bk) bk.onclick = () => { step--; view(sh, close); };
+    if (step === 4) estServer(body);   // 🔴 켜기 전에 서버가 **같은 식**으로 다시 잰다(화면 셈은 그때까지의 미리보기)
     const go = body.querySelector("#go"); if (go) go.onclick = async () => {
       go.disabled = true;
-      const rules = chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: st.every[c], count: st.count[c], active: true }; /* [P1R5] kind shorts · [R7 §4.3] 주기·요일·시각 */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (st.hour[c] != null) r.preferredHour = st.hour[c]; if (st.every[c] === "week" && st.wd[c].length) r.weekdays = st.wd[c]; return r; });
-      const r = await UI.api("/api/rules-save", { body: { rules } }); go.disabled = false;
+      const r = await UI.api("/api/rules-save", { body: { rules: ruleInputs() } }); go.disabled = false;
       if (!r.ok) { if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); } return UI.toast(r.error || "저장하지 못했어요"); }
       const s = await UI.api("/api/rules-settings", { body: { autoSchedule: true, reviewPolicy: st.reviewPolicy, produceLeadDays: st.produceLeadDays }, noGate: true });
       if (!s.ok) UI.toast(s.step === "plan_feature" ? "자동 승인은 Pro 부터예요 · 지금은 검수에서 눌러야 나가요" : s.error || "설정은 저장하지 못했어요");
@@ -1176,6 +1238,11 @@ await load();
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
+<div class="group"><a class="row tap" href="/app/team.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c1-3 3.6-4.6 6.5-4.6S14.5 16 15.5 19"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.4c2 .7 3.4 2.2 4 4.6"/></svg></span><div class="l"><span class="t">팀</span><span class="d" id="teamD">함께 쓸 사람을 부를 수 있어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a></div>
+<div class="group" id="ai-key"><div class="gt">내 AI 키</div><div id="akBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="akFbg" hidden><div class="gt">내 키가 안 될 때</div>
+  <div class="fr"><div class="fl">저희 키로 대신 만들기<small id="akFbD">내 키가 안 되면 그 회차는 만들지 않고 알려드려요</small></div><button class="toggle" type="button" id="akFb" aria-checked="false" aria-label="내 키가 안 될 때 저희 키로 대신 만들기"></button></div>
+</div>
 <div class="group">
   <div class="gt">계정 · 보안</div>
   <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
@@ -1381,6 +1448,122 @@ function closeSheet() {
 }
 loadClose();
 
+/* ══ [R8-B §4.4 · DESIGN §3.3] 🔴 **내 AI 키** — 서버 `netlify/functions/ai-key.ts`
+     (GET `/api/ai-keys` → `{ keys:[{id,label,status,masked,lastOkAt,lastErrorKind,resting}], fallback, configured }` · POST `ai-key-add`·`ai-key-delete`·`ai-key-fallback`).
+     알림 `ai_key_fallback` 의 링크가 **바로 이 자리**다(`/app/settings.html#ai-key` · lib/ai-key-byo.ts noteFallback) — 그래서 그려진 뒤에 데려간다.
+   🔴 **평문 키는 어디에도 안 온다** — 서버가 주는 건 `masked` 뿐이다. 그러니 «키 보기»를 만들지 않는다(화면이 키를 되보여 줄 길 자체가 없다).
+   🔴 `configured:false` = «안전하게 맡아 둘 수 없는 상태». 그때는 **꽂는 자리를 아예 안 그린다** — 넣어도 저장이 안 되는 칸을 두지 않는다(서버 주석과 같은 뜻).
+   🔴 실패 사유 셋(`invalid`·`quota`·`forbidden`)은 **할 일이 서로 달라서** 갈라 놓은 것이다. 문장은 서버 정본(`UI.BYO_ERROR_TEXT` · 하니스 ㉗이 대조).
+   🔴 대신 만들기는 **기본 꺼짐**이고 **켤 때 무엇을 켜는지 먼저 말한다**(CLAUDE §9-2). 끄는 건 한 번에 꺼진다(§9-3 되돌릴 길).
+      문구에 «코인 N개»를 쓰지 않는다 — 지금은 편당 코인 말고 더 받는 게 없다(돈 문장은 서버 것만 · lib/ai-key-byo.ts noteFallback 주석). */
+const AK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l2 2M14 9l2 2"/></svg>';
+let AK = null;
+const akPill = (k) => k.status === "invalid" ? '<span class="pill danger">안 돼요</span>' : k.resting ? '<span class="pill warn">잠깐 쉬어요</span>' : '<span class="pill ok">쓰는 중</span>';
+function akLine(k) {
+  if (k.status === "invalid") return UI.BYO_ERROR_TEXT[k.lastErrorKind] || "지금은 이 키로 만들지 못하고 있어요";
+  if (k.resting) return UI.BYO_ERROR_TEXT.quota;
+  return k.lastOkAt ? `${UI.ago(k.lastOkAt)} 이 키로 만들었어요` : "아직 이 키로 만든 적이 없어요";   // 🔴 «없음 ≠ 0»(AC-9) — 안 쓴 것이지 0번 성공한 게 아니다
+}
+const akFbSay = (on) => on ? "내 키가 안 되면 저희 키로 대신 만들어 드리고, 그때마다 알려드려요" : "내 키가 안 되면 그 회차는 만들지 않고 알려드려요";
+async function loadAiKeys() {
+  const r = await UI.api("/api/ai-keys", { noGate: true });
+  AK = r.ok ? r : null;
+  drawAiKeys();
+  if (location.hash === "#ai-key") UI.$("#ai-key").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+function drawAiKeys() {
+  const host = UI.$("#akBody"), fbg = UI.$("#akFbg");
+  fbg.hidden = true;
+  if (!AK) { host.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
+  if (!AK.configured) {
+    /* 🔴 꽂으라고 하지 않는다. ①사실 ②그동안 어떻게 되는지 ③우리가 대신 하는 것 — 겁주지 않는다(CLAUDE §3). */
+    host.innerHTML = `<div class="row"><span class="mk soft">${AK_ICON}</span><div class="l"><span class="t">지금은 내 키를 맡아 둘 수 없어요</span><span class="d wrap">안전하게 맡아 두는 준비가 아직이에요. 그동안은 저희 키로 만들어 드리고, 준비되면 이 자리에서 꽂으실 수 있어요.</span></div></div>`;
+    return;
+  }
+  const keys = AK.keys || [];
+  host.innerHTML = keys.map((k) => `<button type="button" class="row tap" data-ak="${k.id}"><span class="mk ${k.status === "invalid" ? "warn" : "soft"}">${AK_ICON}</span><div class="l"><span class="t wrap">${UI.esc(k.label)} <span class="muted" style="font-weight:500">${UI.esc(k.masked)}</span></span><span class="d wrap">${UI.esc(akLine(k))}</span></div>${akPill(k)}${UI.chev}</button>`).join("")
+    + `<button type="button" class="row tap" id="akAdd"><div class="l"><span class="t">${keys.length ? "키 하나 더 꽂기" : "내 키 꽂기"}</span><span class="d wrap">${keys.length ? "쉬거나 안 되는 키는 건너뛰고 다음 키로 만들어요" : "지금은 저희 키로 만들고 있어요 · 내 키를 꽂으면 그 키로 만들어요"}</span></div>${UI.chev}</button>`;
+  UI.$$("#akBody [data-ak]").forEach((b) => b.onclick = () => akSheet(keys.find((k) => k.id === Number(b.dataset.ak))));
+  UI.$("#akAdd").onclick = akAddSheet;
+  /* 🔴 꽂은 키가 하나도 없으면 이 토글은 **뜻이 없다**(안 꽂으면 늘 저희 키다) — 없는 길을 만들지 않는다. */
+  if (!keys.length) return;
+  fbg.hidden = false;
+  const tg = UI.$("#akFb"); tg.setAttribute("aria-checked", AK.fallback ? "true" : "false");
+  UI.$("#akFbD").textContent = akFbSay(!!AK.fallback);
+  if (!tg.dataset.bound) { tg.dataset.bound = "1"; UI.toggle(tg, async (next) => { if (next) { akFbAsk(); return false; } return await akFbSet(false); }); }
+}
+/* 켜는 쪽만 한 단계 더 — «무엇을 켜는지»를 읽고 나서 켠다(끄는 쪽은 한 번에 꺼진다). */
+function akFbAsk() {
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">내 키가 안 되는 <b style="color:var(--ink)">그 회차만</b> 저희 키로 대신 만들어 드려요. 대신 만든 날은 알림으로 알려드리고, 여기서 언제든 다시 끄실 수 있어요.</p>
+    <p class="muted" style="margin:0">꺼 두시면 내 키가 안 되는 회차는 만들지 않고 알려드려요.</p>
+    <div class="cta"><button class="btn primary" type="button" id="akFbGo">켜기</button></div>`,
+    { title: "대신 만들기를 켤까요?", onOpen: (sh, close) => { sh.querySelector("#akFbGo").onclick = async (e) => { e.target.disabled = true; const r = await akFbSet(true); e.target.disabled = false; if (r !== false) close(); }; } });
+}
+async function akFbSet(on) {
+  const r = await UI.api("/api/ai-key-fallback", { body: { on } });
+  if (!r.ok) { UI.toast(r.gated ? "" : r.error || "바꾸지 못했어요"); return false; }
+  AK.fallback = r.fallback;
+  UI.$("#akFb").setAttribute("aria-checked", r.fallback ? "true" : "false");
+  UI.$("#akFbD").textContent = akFbSay(r.fallback);
+  UI.toast(r.message || (r.fallback ? "대신 만들기를 켰어요" : "대신 만들기를 껐어요"));   // 🔴 돈이 걸린 문장은 서버 것을 그대로
+  return r.fallback === on ? undefined : false;
+}
+function akSheet(k) {
+  if (!k) return;
+  const bad = k.status === "invalid";
+  UI.sheet(`<div class="kv"><span class="k">키</span><span class="v">${UI.esc(k.masked)}</span></div>
+    <div class="kv"><span class="k">상태</span><span class="v">${akPill(k)}</span></div>
+    ${k.lastOkAt ? `<div class="kv"><span class="k">마지막으로 쓴 때</span><span class="v">${UI.esc(UI.dateKST(k.lastOkAt))} ${UI.esc(UI.timeKST(k.lastOkAt))}</span></div>` : ""}
+    <p class="muted" style="margin:12px 0 0">${UI.esc(akLine(k))}</p>
+    ${bad ? `<p class="muted" style="margin:6px 0 0">고친 키는 <a href="${UI.AI_KEY_URL}" target="_blank" rel="noopener">구글 AI 스튜디오</a>에서 다시 복사하실 수 있어요. 새 키를 꽂으면 바로 그 키로 만들어요.</p>` : ""}
+    <div id="akDel"></div>
+    <div class="cta" id="akCta">${bad ? `<button class="btn primary" type="button" id="akRe">새 키 꽂기</button>` : ""}<button class="btn secondary" type="button" id="akDelGo">이 키 빼기</button></div>`,
+    { title: k.label, onOpen: (sh, close) => {
+      const re = sh.querySelector("#akRe"); if (re) re.onclick = () => { close(); setTimeout(akAddSheet, 300); };
+      sh.querySelector("#akDelGo").onclick = () => {
+        const h = sh.querySelector("#akDel"), cta = sh.querySelector("#akCta");
+        /* 🔴 되돌릴 수 없는 동작이라 한 단계 확인한다(§9 «게이트»가 아니라 고객을 위한 확인). 쓴 기록이 남는다는 것도 같이 말한다. */
+        UI.confirmRow(h, "이 키를 빼면 다시 꽂기 전까지 저희 키로 만들어요. 이 키로 만든 기록은 그대로 남아요.", async (e) => {
+          e.target.disabled = true;
+          const r = await UI.api("/api/ai-key-delete", { body: { id: k.id } });
+          e.target.disabled = false;
+          if (!r.ok) { if (!r.gated) UI.toast(r.error || "빼지 못했어요"); return; }
+          close(); await loadAiKeys(); UI.toast("키를 뺐어요");
+        }, "네, 뺄게요");
+        const no = h.querySelector("[data-no]"), prev = no.onclick;
+        no.onclick = () => { prev(); cta.hidden = false; };
+        cta.hidden = true;
+      };
+    } });
+}
+function akAddSheet() {
+  UI.sheet(`<form id="akf">
+      <div class="field"><label>AI 키</label><input class="input" name="key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="구글 AI 스튜디오에서 복사한 키"><div class="note">구글 AI 스튜디오에서 만든 키를 붙여넣어 주세요 · <a href="${UI.AI_KEY_URL}" target="_blank" rel="noopener">키 만들러 가기</a></div><div class="help"></div></div>
+      <div class="field"><label>이름 <span class="muted" style="font-weight:500">· 안 적어도 돼요</span></label><input class="input" name="label" type="text" maxlength="40" placeholder="내 키"><div class="help"></div></div>
+      <p class="muted" style="margin:0;font-size:13px">꽂을 때 그 키로 한 번 걸어 보고, <b style="color:var(--ink)">되는 것만</b> 맡아 둬요. 맡아 둔 키는 잠가서 보관하고 다시 보여 드리지 않아요.</p>
+      <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="submit">꽂기</button></div></form>`,
+    { title: "내 키 꽂기", onOpen: (sh, close) => {
+      const f = sh.querySelector("#akf"), go = f.querySelector('button[type="submit"]');
+      UI.form(f, async (d) => {
+        UI.fieldError(f, "key", "");
+        go.textContent = "확인하는 중…";   // 🔴 진짜로 그 키로 한 번 걸어 보느라 몇 초 걸린다 — 멈춘 것처럼 보이지 않게
+        const body = { key: String(d.key || "").trim() }; if (String(d.label || "").trim()) body.label = String(d.label).trim();
+        const r = await UI.api("/api/ai-key-add", { body });
+        go.textContent = "꽂기";
+        if (!r.ok) {
+          if (r.gated) return;
+          if (r.step === "not_configured") { close(); return UI.toast(r.error || "지금은 꽂을 수 없어요"); }
+          return UI.fieldError(f, "key", r.error || "꽂지 못했어요");   // invalid·quota·forbidden — 문장은 서버 것 그대로(할 일이 서로 다르다)
+        }
+        close(); await loadAiKeys(); UI.toast("내 키를 꽂았어요 · 이제 이 키로 만들어요");
+      });
+    } });
+}
+loadAiKeys();
+/* [R8-B §4.5] 설정의 «팀» 줄 — 자리 수는 **서버가 센 값**이다(대기 중 초대도 먹는다). 못 불러오면 원래 한 줄을 그대로 둔다. */
+(async () => { const r = await UI.api("/api/team", { noGate: true }); if (!r.ok) return;
+  UI.$("#teamD").textContent = r.seats.limit == null ? `${r.seats.used}명이 함께 쓰고 있어요` : `자리 ${r.seats.used}/${r.seats.limit} 쓰는 중이에요`; })();
+
 /* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **내 글에 들어온 신고** — 서버가 보내는 알림·메일의 링크가 바로 이 자리다
      (`/app/settings.html#takedown` · lib/takedown.ts:153 · lib/cron/takedown-watch.ts:31). 그 링크는 여태 **아무 데도 아닌 곳**을 가리키고 있었다:
      통지를 받은 고객이 «확인하러 가기»를 눌러도 설정 화면만 열렸다(기능이 없는 것보다 안 보이는 사고 · AC-69).
@@ -1402,6 +1585,125 @@ async function loadTakedown() {
   if (location.hash === "#takedown") host.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 loadTakedown();
+
+=== team.html | account | 팀 ===
+<div class="step-h"><h1>함께 쓰는 사람</h1><p id="seats">불러오는 중이에요</p></div>
+<div class="group"><div class="gt">우리 팀</div><div id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="invg" hidden><div class="gt" id="invt">보낸 초대</div><div id="invites"></div></div>
+<div class="cta" id="cta" hidden><button class="btn primary" type="button" id="add">팀원 부르기</button></div>
+--- script ---
+const me = await UI.boot("account"); if (!me) return;
+/* ══ [R8-B §4.5 · DESIGN §11] 팀 — 서버 `netlify/functions/team.ts`
+     GET `/api/team` → `{ members, invites, seats:{used,limit}, isOwner }` · POST `team-invite`·`team-revoke`·`team-remove`(소유자만).
+   🔴 **왜 이 화면이 필요했나**: 요금표가 «Agency 팀 자리 5개»를 **팔고 있었는데 늘릴 길이 0이었다**(§4.8 «완료 = 화면에서 쓸 수 있을 때»의 반대).
+   🔴 **대기 중 초대도 자리를 먹는다** — 서버가 `seats.used` 에 이미 넣어 준다. 화면이 다시 세지 않는다(두 곳에서 세면 갈린다 · AC-47).
+   🔴 `limit: null` = **제한 없음**이다. «0개»가 아니다 — «없음 ≠ 0»(AC-9).
+   🔴 팀원에게는 초대 목록도 부르는 단추도 **안 그린다** — 눌러도 403 인 단추를 두지 않는다(없는 길 · §9 밖).
+   🔴 자리가 다 차면(402 `seat`) **막는 게 아니라 계약**이다(§9 «이 규칙 밖») — 서버 문장 그대로 + 요금제로 가는 길.
+   🔴 **메일이 안 나가도 초대는 살아 있다** — 서버가 `mailSent:false` 면 `link` 를 돌려준다. 그때 «보냈어요»라고 하면 거짓말이므로
+      «메일이 안 나갔어요 · 이 링크를 직접 보내 주세요» + 복사를 준다(막다른 길을 만들지 않는다 · 메인 확인 2026-09-16). ══ */
+let T = null;
+const ROLE = { owner: ["ink", "주인"], member: ["off", "팀원"] };
+const nameOf = (m) => m.name || m.email.split("@")[0];
+const face = (t) => `<span class="mk soft">${UI.esc(String(t || "?").trim().slice(0, 1).toUpperCase())}</span>`;
+
+async function load() { const r = await UI.api("/api/team"); T = r.ok ? r : null; draw(); }
+function draw() {
+  const list = UI.$("#list"), invg = UI.$("#invg"), cta = UI.$("#cta"), seats = UI.$("#seats");
+  if (!T) { seats.textContent = ""; invg.hidden = true; cta.hidden = true;
+    list.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
+  const lim = T.seats.limit;
+  seats.textContent = lim == null
+    ? `${T.seats.used}명이 함께 쓰고 있어요 · 자리 수는 제한이 없어요`
+    : `자리 ${T.seats.used}/${lim} · 아직 안 받은 초대도 자리를 차지해요`;
+  list.innerHTML = (T.members || []).map((m) => {
+    const tag = `${UI.esc(nameOf(m))}${m.me ? ' <span class="pill off">나</span>' : ""}`;
+    const meta = `${UI.esc(m.email)}${m.joinedAt ? " · " + UI.dateKST(m.joinedAt) + "부터" : ""}`;
+    /* 뺄 수 있는 사람만 누를 수 있게 — 주인 자신과 팀원 화면에서는 그냥 줄이다(누르면 403 인 줄을 만들지 않는다) */
+    const can = T.isOwner && !m.me && m.role !== "owner";
+    return can
+      ? `<button type="button" class="row tap" data-off="${m.id}">${face(nameOf(m))}<div class="l"><span class="t wrap">${tag}</span><span class="d wrap">${meta}</span></div>${UI.pill(ROLE, m.role)}${UI.chev}</button>`
+      : `<div class="row">${face(nameOf(m))}<div class="l"><span class="t wrap">${tag}</span><span class="d wrap">${meta}</span></div>${UI.pill(ROLE, m.role)}</div>`;
+  }).join("");
+  UI.$$("#list [data-off]").forEach((b) => b.onclick = () => offSheet((T.members || []).find((m) => m.id === Number(b.dataset.off))));
+  const inv = T.invites || [];
+  invg.hidden = !inv.length;
+  if (inv.length) {
+    UI.$("#invt").textContent = `보낸 초대 ${inv.length}건`;
+    UI.$("#invites").innerHTML = inv.map((v) => `<div class="row">${face(v.email)}<div class="l"><span class="t wrap">${UI.esc(v.email)}</span><span class="d wrap">${v.expired ? "기한이 지났어요 · 다시 보내 주세요" : `${UI.dateKST(v.expiresAt)}까지 받으면 돼요`}</span></div><button type="button" data-rev="${v.id}" style="min-height:44px;padding:0 10px;font-weight:700;color:var(--sub);text-decoration:underline;flex:none">거두기</button></div>`).join("");
+    UI.$$("#invites [data-rev]").forEach((b) => b.onclick = async () => { b.disabled = true;
+      const r = await UI.api("/api/team-revoke", { body: { id: Number(b.dataset.rev) } }); b.disabled = false;
+      if (!r.ok) return UI.toast(r.error || "거두지 못했어요");   // 문장은 서버 것(이미 받았을 수도 있다)
+      UI.toast("초대를 거뒀어요"); await load(); });
+  }
+  cta.hidden = !T.isOwner;
+  if (T.isOwner) UI.$("#add").onclick = inviteSheet;
+}
+
+/* 🔴 되돌릴 수 없는 동작이라 한 단계 확인한다(§9 밖 — 고객을 위한 확인). 무엇이 남고 무엇이 없어지는지 같이 말한다. */
+function offSheet(m) {
+  if (!m) return;
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(nameOf(m))} 님은 이제 이 집의 글·계정·수익을 볼 수 없게 돼요.</p>
+    <p class="muted" style="margin:0">그분이 만든 글과 올린 글은 <b style="color:var(--ink)">그대로 남아요</b>.</p>
+    <div id="offc"></div><div class="cta" id="offCta"><button class="btn secondary" type="button" id="offGo">팀에서 빼기</button></div>`,
+    { title: UI.esc(nameOf(m)), onOpen: (sh, close) => {
+      sh.querySelector("#offGo").onclick = () => {
+        const h = sh.querySelector("#offc"), bar = sh.querySelector("#offCta");
+        UI.confirmRow(h, "빼고 나면 다시 부르셔야 들어올 수 있어요.", async (e) => {
+          e.target.disabled = true;
+          const r = await UI.api("/api/team-remove", { body: { userId: m.id } });
+          e.target.disabled = false;
+          if (!r.ok) { if (!r.gated) UI.toast(r.error || "빼지 못했어요"); return; }
+          close(); await load(); UI.toast("팀에서 뺐어요");
+        }, "네, 뺄게요");
+        const no = h.querySelector("[data-no]"), prev = no.onclick;
+        no.onclick = () => { prev(); bar.hidden = false; };
+        bar.hidden = true;
+      };
+    } });
+}
+
+function inviteSheet() {
+  const lim = T && T.seats.limit;
+  UI.sheet(`<form id="tf">
+      <div class="field"><label>이메일</label><input class="input" name="email" type="email" inputmode="email" autocomplete="off" required placeholder="함께 일할 분의 주소"><div class="note">${lim == null ? "자리 수는 제한이 없어요" : `지금 자리 ${T.seats.used}/${lim}`} · 초대 링크는 7일 동안 살아 있어요</div><div class="help"></div></div>
+      <p class="muted" style="margin:0;font-size:13px">부른 분은 이 집의 글·계정·수익을 <b style="color:var(--ink)">함께 보고 함께 만들 수</b> 있어요. 요금제와 결제는 주인만 바꿔요.</p>
+      <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="submit">부르기</button></div></form>
+    <div id="tafter"></div>`,
+    { title: "팀원 부르기", onOpen: (sh, close) => {
+      const f = sh.querySelector("#tf"), go = f.querySelector('button[type="submit"]');
+      UI.form(f, async (d) => {
+        UI.fieldError(f, "email", "");
+        go.textContent = "보내는 중…";
+        const r = await UI.api("/api/team-invite", { body: { email: String(d.email || "").trim() } });
+        go.textContent = "부르기";
+        if (!r.ok) {
+          if (r.gated) return;
+          /* 자리가 다 찼다 = 돈·계약이다(§9 밖). 문장은 서버 것 그대로 두고 요금제로 가는 길만 붙인다. */
+          if (r.step === "seat") { close(); return setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "자리가 다 찼어요" }), 300); }
+          return UI.fieldError(f, "email", r.error || "부르지 못했어요");
+        }
+        if (r.mailSent === false && r.link) {
+          /* 🔴 메일이 안 나갔는데 «보냈어요»라고 하면 거짓말이다 — 초대는 살아 있으니 **전할 길**을 그 자리에서 준다. */
+          f.hidden = true;
+          sh.querySelector("#tafter").innerHTML = `<p class="muted" style="margin:0 0 8px">초대는 만들어 뒀는데 <b style="color:var(--ink)">메일이 나가지 않았어요</b>. 아래 링크를 직접 보내 주시면 그대로 들어올 수 있어요.</p>
+            <div class="field"><input class="input" id="tlink" readonly value="${UI.esc(r.link)}"></div>
+            <p class="muted" style="margin:0;font-size:12.5px">${UI.esc(UI.dateKST(r.expiresAt))}까지 쓸 수 있어요.</p>
+            <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="button" id="tcopy">링크 복사</button></div>`;
+          sh.querySelector("#tcopy").onclick = async (e) => {
+            const el = sh.querySelector("#tlink"); el.select();
+            try { await navigator.clipboard.writeText(r.link); } catch { document.execCommand("copy"); }
+            e.target.textContent = "복사했어요";
+          };
+          await load();
+          return;
+        }
+        close(); await load(); UI.toast("초대 메일을 보냈어요");
+      });
+    } });
+}
+load();
+UI.pullToRefresh(load);
 
 === plan.html | account | 요금제 ===
 <div class="hl"><div class="say" id="say">지금은</div><div class="num" id="cur">…</div><div class="tip" id="curTip"></div></div>
@@ -1768,8 +2070,12 @@ let CHV = {};
 const vfmts = (ch) => (CHV[ch] && CHV[ch].formats) || [];                               // [{key,label,maxSeconds}] — 이 채널에서 되는 포맷
 const fmtMax = (ch, fmt) => { const f = vfmts(ch).find((x) => x.key === fmt); return f ? f.maxSeconds : (CHV[ch] && CHV[ch].maxSeconds) || 60; }; // 🔴 포맷 상한만 본다(교집합 계산 0)
 const clampSec = (p) => { if (!isVideo(p)) return null; const m = fmtMax(p.channel, p.video.format); if (p.video.seconds > m) { const was = p.video.seconds; p.video.seconds = m; p.coinCost = UI.VIDEO_COIN[m] ?? p.coinCost; return { was, now: m }; } return null; };
-/* 코인 = 글 1 + 사진 수 · 영상은 초 구간제(videoCoinItem · 정본은 서버 coinCost) */
-const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0) : 1 + (p.images?.count || 0);
+/* 🔴 [R8 · AC-52] 코인은 **서버가 준 `coinCost` 가 정본**이다. 여기 있던 «1 + 사진 장수»는 2026-09-15 에
+     네이버를 **7코인**이라 적던 바로 그 셈이다 — 편성표에서는 걷어 냈는데 디렉터에는 남아 있었다.
+   🔴 글 1편 = 1코인이고 **AI 로 구운 장만** 더 든다(사진 장수는 공짜 질문 — 내 사진·스톡이 채운다).
+     화면 셈은 서버가 아직 말 안 해 준 동안의 미리보기일 뿐이고, 총액은 `director-estimate` 가 확정한다. */
+const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost ?? 0)
+  : (typeof p.coinCost === "number" ? p.coinCost : UI.COIN.blog + Math.max(0, (p.images?.aiCount ?? 1) - 1));
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + cost(p), 0);
 const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
   /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
@@ -1790,8 +2096,9 @@ function render() {
   UI.$("#big").innerHTML = `${topicTitle ? UI.esc(topicTitle) + ",<br>" : ""}${live.length}곳에 만들까요?`;
   UI.$("#targets").innerHTML = live.length ? live.map((p) => `<div class="row">${UI.mark(p.channel)}<div class="l"><span class="t">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : `<span class="muted">계정 연결 후 배정</span>`}${isVideo(p) ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d wrap">${UI.esc(desc(p))}${!isVideo(p) && p.angle ? " · " + UI.esc(p.angle) : ""}<br><span style="color:var(--muted)">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)} 자리에 들어가요 · 자동 편성이 잡아 둔 자리를 이 글이 써요` : UI.esc(p.schedule?.slotReason || "")}</span></span></div><div class="r mut">${p.usesTodaySlot ? `오늘 ${UI.timeKST(p.usesTodaySlot.publishAt)}` : `${dayWord(p.schedule.at)} ${UI.timeKST(p.schedule.at)}`}</div></div>`).join("")
     : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
-  const tot = total();
-  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger-ink)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+  drawKv(total(), brief.coinsLeft);
+  estKv();   // 🔴 서버가 같은 손질로 다시 재 준다 — 답이 오면 위 숫자를 갈아 끼운다
+
   UI.$("#why").innerHTML = `<div class="group"><div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div></div>`;
   UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
 }
@@ -1847,15 +2154,38 @@ function editSheet() {
   } });
   function sum(sh) { let t = 0; sh.querySelectorAll("section").forEach((sec) => { if (sec.querySelector("[data-drop]").getAttribute("aria-checked") !== "true") return; t += sec.hasAttribute("data-video") ? (UI.VIDEO_COIN[Number(UI.chipVal(sec, "vsec"))] ?? 0) : 1 + UI.stepVal(sec, "img"); }); const el = sh.querySelector("#sum"); if (el) el.textContent = t; }
 }
-/* ── 만들기 ── */
-async function make() {
-  const btn = UI.$("#make"); btn.disabled = true;
-  const patches = pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
+/* [R8 · director-estimate] 🔴 «얼마 드나»는 **서버가 확정한다**(`{ coinCost, coinsLeft, enough, need }`).
+     화면 셈은 답이 올 때까지의 미리보기이고, 답이 오면 그 자리를 갈아 끼운다.
+   🔴 못 불러오면 **미리보기를 그대로 둔다** — 값을 지우거나 0 으로 만들지 않는다(«없음 ≠ 0» · AC-9).
+   🔴 모자랄 때도 **막지 않는다**(§9) — 얼마가 모자란지 한 줄 적고, 충전하러 가는 길을 같이 준다. */
+function drawKv(tot, left, need) {
+  const short = left - tot < 0;
+  UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${UI.num(tot)}코인</span></div>`
+    + `<div class="kv"><span class="k">남는 코인</span><span class="v" ${short ? 'style="color:var(--danger-ink)"' : ""}>${UI.num(left - tot)}코인</span></div>`
+    + (short ? `<div class="kv"><span class="k wrap">코인이 모자라요</span><span class="v wrap" style="font-weight:600;text-align:right">${UI.num(need != null ? need : tot - left)}코인만 채우면 이대로 만들어요 · <a href="/app/coins.html" style="text-decoration:underline">충전하기</a></span></div>` : "")
+    + `<div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
+}
+let estSeq = 0;
+async function estKv() {
+  const my = ++estSeq;
+  const body = { briefId: brief.id }; const ps = patchesOf(); if (ps.length) body.pieces = ps;
+  const r = await UI.api("/api/director-estimate", { body, noGate: true });
+  if (my !== estSeq || !r.ok) return;   // 늦게 온 답이 새 답을 덮지 않게 · 못 쟀으면 미리보기를 그대로 둔다
+  drawKv(r.coinCost, r.coinsLeft, r.enough ? null : r.need);
+}
+/* 🔴 견적에 보낼 손질과 만들기에 보낼 손질은 **같아야** 한다 — 둘을 따로 지으면 «견적과 실제가 다른» 화면이 된다(rules 쪽과 같은 규율). */
+function patchesOf() {
+  return pieces.map((p, i) => { const o = brief.pieces[i]; if (p.drop) return { key: p.key, drop: true };
     const patch = { key: p.key }; if (p.accountId !== o.accountId) patch.accountId = p.accountId; if (p.format !== o.format) patch.format = p.format; if (p.emotionKey !== o.emotionKey) patch.emotionKey = p.emotionKey;
     if (!isVideo(p) && (p.images.count !== o.images.count || p.images.style !== o.images.style || p.images.aiCount !== o.images.aiCount)) patch.images = { count: p.images.count, style: p.images.style, ...(p.images.aiCount != null ? { aiCount: p.images.aiCount } : {}) };   /* [R8] aiCount = AI 로 구울 장수(여기만 돈이 든다) */
     if (JSON.stringify(p.monetize.affiliate) !== JSON.stringify(o.monetize.affiliate)) patch.monetize = { affiliate: p.monetize.affiliate ? { productQuery: p.monetize.affiliate.productQuery, slot: p.monetize.affiliate.slot } : null };
     if (isVideo(p)) { const v = {}; if (p.video.format !== o.video.format) v.format = p.video.format; if (p.video.seconds !== o.video.seconds) v.seconds = p.video.seconds; if (p.video.voice?.voiceId !== o.video.voice?.voiceId) v.voiceId = p.video.voice.voiceId; if (Object.keys(v).length) patch.video = v; } // PieceSpecPatch.video(§1.1)
     if (p.schedule.at !== o.schedule.at) patch.schedule = { at: p.schedule.at }; return Object.keys(patch).length > 1 ? patch : null; }).filter(Boolean);
+}
+/* ── 만들기 ── */
+async function make() {
+  const btn = UI.$("#make"); btn.disabled = true;
+  const patches = patchesOf();
   const body = { briefId: brief.id }; if (patches.length) body.pieces = patches;
   const r = await UI.api("/api/director-confirm", { body }); btn.disabled = false;
   if (!r.ok) { if (r.gated) return;
@@ -1983,8 +2313,8 @@ function renderPhotos() {
   if (P.status !== "in_review" || P.kind === "video") { host.hidden = true; return; }
   const n = (P.images || []).length;
   host.hidden = false;
-  host.innerHTML = `<div class="gt">사진</div><button type="button" class="row tap" id="phGo"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">${n ? `사진 ${n}장` : "내 사진 넣기"}</span><span class="d">JPG·PNG·WEBP · 내 사진은 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
-  UI.$("#phGo").onclick = () => UI.photoSheet(P.id, () => load());
+  host.innerHTML = `<div class="gt">사진</div><button type="button" class="row tap" id="phGo"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-6 6"/></svg></span><div class="l"><span class="t">${n ? `사진 ${n}장` : "사진 넣기"}</span><span class="d">내 사진이나 스톡 사진 · 둘 다 코인이 들지 않아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
+  UI.$("#phGo").onclick = () => UI.photoSheet(P.id, () => load(), P.title || "");
 }
 /* [R8-A §4 · 법 경로] 대가를 받았나 — 🔴 **켜기만 있다**(서버가 false 를 무시한다).
    켜고 발행한 뒤 끄면 «고지 없이 나간 글»이 남기 때문이다. 내리려면 이 글을 버리고 다시 만든다.

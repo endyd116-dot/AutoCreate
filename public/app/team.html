@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>팀 · AutoCreate</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=19">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
+<div class="step-h"><h1>함께 쓰는 사람</h1><p id="seats">불러오는 중이에요</p></div>
+<div class="group"><div class="gt">우리 팀</div><div id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="invg" hidden><div class="gt" id="invt">보낸 초대</div><div id="invites"></div></div>
+<div class="cta" id="cta" hidden><button class="btn primary" type="button" id="add">팀원 부르기</button></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=24"></script>
+<script src="/js/mock.js?v=26"></script>
+<script>
+(async () => {
+const me = await UI.boot("account"); if (!me) return;
+/* ══ [R8-B §4.5 · DESIGN §11] 팀 — 서버 `netlify/functions/team.ts`
+     GET `/api/team` → `{ members, invites, seats:{used,limit}, isOwner }` · POST `team-invite`·`team-revoke`·`team-remove`(소유자만).
+   🔴 **왜 이 화면이 필요했나**: 요금표가 «Agency 팀 자리 5개»를 **팔고 있었는데 늘릴 길이 0이었다**(§4.8 «완료 = 화면에서 쓸 수 있을 때»의 반대).
+   🔴 **대기 중 초대도 자리를 먹는다** — 서버가 `seats.used` 에 이미 넣어 준다. 화면이 다시 세지 않는다(두 곳에서 세면 갈린다 · AC-47).
+   🔴 `limit: null` = **제한 없음**이다. «0개»가 아니다 — «없음 ≠ 0»(AC-9).
+   🔴 팀원에게는 초대 목록도 부르는 단추도 **안 그린다** — 눌러도 403 인 단추를 두지 않는다(없는 길 · §9 밖).
+   🔴 자리가 다 차면(402 `seat`) **막는 게 아니라 계약**이다(§9 «이 규칙 밖») — 서버 문장 그대로 + 요금제로 가는 길.
+   🔴 **메일이 안 나가도 초대는 살아 있다** — 서버가 `mailSent:false` 면 `link` 를 돌려준다. 그때 «보냈어요»라고 하면 거짓말이므로
+      «메일이 안 나갔어요 · 이 링크를 직접 보내 주세요» + 복사를 준다(막다른 길을 만들지 않는다 · 메인 확인 2026-09-16). ══ */
+let T = null;
+const ROLE = { owner: ["ink", "주인"], member: ["off", "팀원"] };
+const nameOf = (m) => m.name || m.email.split("@")[0];
+const face = (t) => `<span class="mk soft">${UI.esc(String(t || "?").trim().slice(0, 1).toUpperCase())}</span>`;
+
+async function load() { const r = await UI.api("/api/team"); T = r.ok ? r : null; draw(); }
+function draw() {
+  const list = UI.$("#list"), invg = UI.$("#invg"), cta = UI.$("#cta"), seats = UI.$("#seats");
+  if (!T) { seats.textContent = ""; invg.hidden = true; cta.hidden = true;
+    list.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">지금은 불러오지 못했어요</span></div></div>`; return; }
+  const lim = T.seats.limit;
+  seats.textContent = lim == null
+    ? `${T.seats.used}명이 함께 쓰고 있어요 · 자리 수는 제한이 없어요`
+    : `자리 ${T.seats.used}/${lim} · 아직 안 받은 초대도 자리를 차지해요`;
+  list.innerHTML = (T.members || []).map((m) => {
+    const tag = `${UI.esc(nameOf(m))}${m.me ? ' <span class="pill off">나</span>' : ""}`;
+    const meta = `${UI.esc(m.email)}${m.joinedAt ? " · " + UI.dateKST(m.joinedAt) + "부터" : ""}`;
+    /* 뺄 수 있는 사람만 누를 수 있게 — 주인 자신과 팀원 화면에서는 그냥 줄이다(누르면 403 인 줄을 만들지 않는다) */
+    const can = T.isOwner && !m.me && m.role !== "owner";
+    return can
+      ? `<button type="button" class="row tap" data-off="${m.id}">${face(nameOf(m))}<div class="l"><span class="t wrap">${tag}</span><span class="d wrap">${meta}</span></div>${UI.pill(ROLE, m.role)}${UI.chev}</button>`
+      : `<div class="row">${face(nameOf(m))}<div class="l"><span class="t wrap">${tag}</span><span class="d wrap">${meta}</span></div>${UI.pill(ROLE, m.role)}</div>`;
+  }).join("");
+  UI.$$("#list [data-off]").forEach((b) => b.onclick = () => offSheet((T.members || []).find((m) => m.id === Number(b.dataset.off))));
+  const inv = T.invites || [];
+  invg.hidden = !inv.length;
+  if (inv.length) {
+    UI.$("#invt").textContent = `보낸 초대 ${inv.length}건`;
+    UI.$("#invites").innerHTML = inv.map((v) => `<div class="row">${face(v.email)}<div class="l"><span class="t wrap">${UI.esc(v.email)}</span><span class="d wrap">${v.expired ? "기한이 지났어요 · 다시 보내 주세요" : `${UI.dateKST(v.expiresAt)}까지 받으면 돼요`}</span></div><button type="button" data-rev="${v.id}" style="min-height:44px;padding:0 10px;font-weight:700;color:var(--sub);text-decoration:underline;flex:none">거두기</button></div>`).join("");
+    UI.$$("#invites [data-rev]").forEach((b) => b.onclick = async () => { b.disabled = true;
+      const r = await UI.api("/api/team-revoke", { body: { id: Number(b.dataset.rev) } }); b.disabled = false;
+      if (!r.ok) return UI.toast(r.error || "거두지 못했어요");   // 문장은 서버 것(이미 받았을 수도 있다)
+      UI.toast("초대를 거뒀어요"); await load(); });
+  }
+  cta.hidden = !T.isOwner;
+  if (T.isOwner) UI.$("#add").onclick = inviteSheet;
+}
+
+/* 🔴 되돌릴 수 없는 동작이라 한 단계 확인한다(§9 밖 — 고객을 위한 확인). 무엇이 남고 무엇이 없어지는지 같이 말한다. */
+function offSheet(m) {
+  if (!m) return;
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(nameOf(m))} 님은 이제 이 집의 글·계정·수익을 볼 수 없게 돼요.</p>
+    <p class="muted" style="margin:0">그분이 만든 글과 올린 글은 <b style="color:var(--ink)">그대로 남아요</b>.</p>
+    <div id="offc"></div><div class="cta" id="offCta"><button class="btn secondary" type="button" id="offGo">팀에서 빼기</button></div>`,
+    { title: UI.esc(nameOf(m)), onOpen: (sh, close) => {
+      sh.querySelector("#offGo").onclick = () => {
+        const h = sh.querySelector("#offc"), bar = sh.querySelector("#offCta");
+        UI.confirmRow(h, "빼고 나면 다시 부르셔야 들어올 수 있어요.", async (e) => {
+          e.target.disabled = true;
+          const r = await UI.api("/api/team-remove", { body: { userId: m.id } });
+          e.target.disabled = false;
+          if (!r.ok) { if (!r.gated) UI.toast(r.error || "빼지 못했어요"); return; }
+          close(); await load(); UI.toast("팀에서 뺐어요");
+        }, "네, 뺄게요");
+        const no = h.querySelector("[data-no]"), prev = no.onclick;
+        no.onclick = () => { prev(); bar.hidden = false; };
+        bar.hidden = true;
+      };
+    } });
+}
+
+function inviteSheet() {
+  const lim = T && T.seats.limit;
+  UI.sheet(`<form id="tf">
+      <div class="field"><label>이메일</label><input class="input" name="email" type="email" inputmode="email" autocomplete="off" required placeholder="함께 일할 분의 주소"><div class="note">${lim == null ? "자리 수는 제한이 없어요" : `지금 자리 ${T.seats.used}/${lim}`} · 초대 링크는 7일 동안 살아 있어요</div><div class="help"></div></div>
+      <p class="muted" style="margin:0;font-size:13px">부른 분은 이 집의 글·계정·수익을 <b style="color:var(--ink)">함께 보고 함께 만들 수</b> 있어요. 요금제와 결제는 주인만 바꿔요.</p>
+      <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="submit">부르기</button></div></form>
+    <div id="tafter"></div>`,
+    { title: "팀원 부르기", onOpen: (sh, close) => {
+      const f = sh.querySelector("#tf"), go = f.querySelector('button[type="submit"]');
+      UI.form(f, async (d) => {
+        UI.fieldError(f, "email", "");
+        go.textContent = "보내는 중…";
+        const r = await UI.api("/api/team-invite", { body: { email: String(d.email || "").trim() } });
+        go.textContent = "부르기";
+        if (!r.ok) {
+          if (r.gated) return;
+          /* 자리가 다 찼다 = 돈·계약이다(§9 밖). 문장은 서버 것 그대로 두고 요금제로 가는 길만 붙인다. */
+          if (r.step === "seat") { close(); return setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "자리가 다 찼어요" }), 300); }
+          return UI.fieldError(f, "email", r.error || "부르지 못했어요");
+        }
+        if (r.mailSent === false && r.link) {
+          /* 🔴 메일이 안 나갔는데 «보냈어요»라고 하면 거짓말이다 — 초대는 살아 있으니 **전할 길**을 그 자리에서 준다. */
+          f.hidden = true;
+          sh.querySelector("#tafter").innerHTML = `<p class="muted" style="margin:0 0 8px">초대는 만들어 뒀는데 <b style="color:var(--ink)">메일이 나가지 않았어요</b>. 아래 링크를 직접 보내 주시면 그대로 들어올 수 있어요.</p>
+            <div class="field"><input class="input" id="tlink" readonly value="${UI.esc(r.link)}"></div>
+            <p class="muted" style="margin:0;font-size:12.5px">${UI.esc(UI.dateKST(r.expiresAt))}까지 쓸 수 있어요.</p>
+            <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="button" id="tcopy">링크 복사</button></div>`;
+          sh.querySelector("#tcopy").onclick = async (e) => {
+            const el = sh.querySelector("#tlink"); el.select();
+            try { await navigator.clipboard.writeText(r.link); } catch { document.execCommand("copy"); }
+            e.target.textContent = "복사했어요";
+          };
+          await load();
+          return;
+        }
+        close(); await load(); UI.toast("초대 메일을 보냈어요");
+      });
+    } });
+}
+load();
+UI.pullToRefresh(load);
+})();
+</script>
+</body>
+</html>

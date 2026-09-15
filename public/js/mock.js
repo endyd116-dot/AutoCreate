@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 9;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 13;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -44,6 +44,22 @@
   const selfKnob = qs.get("self") || "";
   const tdKnob = qs.get("td") || "";
   const claimsKnob = qs.get("claims") === "1";
+  /* [R8-B §4.4] 내 AI 키 손잡이 — ?aikey=ok|invalid|resting|noenc (기본: 안 꽂은 집) · ?aifb=1 = 대신 만들기를 이미 켜 둔 집
+     🔴 `noenc` 는 «맡아 둘 수 없는 상태»(서버 `configured:false`)다 — 그때 화면이 꽂는 자리를 안 그리는지 보려고 둔다. */
+  const aiKeyKnob = qs.get("aikey") || "";
+  const aiNoEnc = aiKeyKnob === "noenc";
+  const aiFbKnob = qs.get("aifb") === "1";
+  /* [R8 §10.3] 스톡 사진 손잡이 — ?stock=nokey(제공사 열쇠가 안 꽂힘) · ?stock=empty(불렀는데 0건) · 기본은 여섯 장 나온다.
+     🔴 «열쇠 없음»과 «0건»은 **다른 말**이라 서버가 `trouble` 로 갈라 준다 — 화면이 갈라 보여 주는지 재려고 둘 다 둔다. */
+  const stockKnob = qs.get("stock") || "";
+  /* [R8-B] «언제 만들어지나» 손잡이 — ?pw=auto(자동 편성을 꺼 둔 집) · ?pw=blocked(체험 끝) · 기본은 서버 잣대 그대로.
+     🔴 `missed` 를 화면이 **빨강으로 그리지 않는지** 재려면 missed 가 실제로 나와야 한다. */
+  const pwKnob = qs.get("pw") || "";
+  /* [R8-B §4.5] 팀 손잡이 — ?team=member(나는 팀원이다 · 부르는 단추가 없어야 한다) · ?team=full(자리가 다 찼다)
+     · ?team=nomail(메일이 안 나갔다 — 그때 «보냈어요»라고 하면 거짓말이다) · ?team=solo(혼자 쓰는 집)
+     ?invite=dead(초대 링크가 죽었다) · ?invite=exists(그 주소를 이미 쓴다) · ?invite=seat(그 사이 자리가 찼다) */
+  const teamKnob = qs.get("team") || "";
+  const inviteKnob = qs.get("invite") || "";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -239,9 +255,54 @@
   const AVATAR = "/icon.svg";
   /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
   const COIN = { blog: 1, image: 1, cardnews: 3 };
+  /* [R8 §10.3] 스톡 후보 — 사다리 순서는 서버와 같다(Pixabay 먼저 · lib/stock/index.ts:35).
+     그림은 바깥을 안 부르려고 그 자리에서 그린다(정적 하니스에서도 격자가 그대로 보여야 한다). */
+  const STOCK_PROVIDERS = ["pixabay", "pexels"];
+  const stockSvg = (bg, t) => "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="${bg}"/><text x="120" y="86" font-family="sans-serif" font-size="15" fill="#ffffff" text-anchor="middle">${t}</text></svg>`);
+  const STOCK_BG = ["#7C8BA1", "#96A7B8", "#8FA08A", "#B0A08F", "#8A93AE", "#A08F9E"];
+  const STOCK_WHO = ["Jin Park", "Mira K.", "", "Daniel Cho", "Yuna Seo", "Tom R."];
+  function stockPicks(query) {
+    return STOCK_BG.map((bg, i) => {
+      const provider = STOCK_PROVIDERS[i % 2];
+      const id = `${provider[0]}${1000 + i}`;
+      /* 🔴 사람·상표는 «모르면 null» 이다(제공사가 말해 줄 때만 참·거짓) — «없음 ≠ 아니오»(AC-9). */
+      const people = i === 2 ? true : i === 4 ? false : null;
+      const brand = i === 5 ? true : null;
+      /* 판정은 «대가를 받은 글»일 때만 갈린다(lib/stock-safety.ts) — 모의는 재는 흉내만 내고, **화면은 이걸 안 그려야 한다**. */
+      const verdict = people === true ? { ok: false, code: "people_in_paid", reason: "사람이 알아볼 수 있게 찍힌 스톡 사진은 광고가 들어간 글에 쓸 수 없어요(제품을 보증하는 것처럼 보여요)." }
+        : brand === true ? { ok: false, code: "brand_in_paid", reason: "상표·로고가 찍힌 스톡 사진은 광고가 들어간 글에 쓸 수 없어요." } : { ok: true };
+      return { provider, id, previewUrl: stockSvg(bg, `${query} ${i + 1}`), width: 240, height: 160,
+        author: STOCK_WHO[i] || null,
+        sourceUrl: provider === "pexels" ? `https://www.pexels.com/photo/${id}/` : `https://pixabay.com/photos/${id}/`,
+        licenseUrl: provider === "pexels" ? "https://www.pexels.com/license/" : "https://pixabay.com/service/license-summary/",
+        people, brand, tags: [query, provider], alt: `${query} 사진 ${i + 1}`, verdict };
+    });
+  }
+  /* [R8-B §4.4] 🔴 lib/ai-key-byo.ts BYO_ERROR_TEXT **그대로** — 사유 셋은 고객이 할 일이 서로 달라서 갈라 놓은 것이다. */
+  const BYO_ERROR_TEXT = {
+    invalid: "키가 맞지 않아요. 구글 AI 스튜디오에서 키를 다시 복사해 주세요.",
+    quota: "키가 이번 한도에 걸렸어요. 한도가 풀리면 다시 만들어요.",
+    forbidden: "이 키에 권한이 없어요. 키를 만든 프로젝트에서 Generative Language API 를 켜 주세요.",
+  };
   const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
   const seed = () => ({
     v: MOCK_V, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100,
+    /* [R8-B §4.4] 내 AI 키(tenant_ai_keys) — 🔴 **평문은 여기에도 없다**: `masked` 는 서버 `maskSecret` 과 같은 모양(앞 2자 + 별 8개).
+       `resting` 은 «한도에 걸려 60초 쉬는 중»이고 status 는 그대로 active 다(쉬는 키는 건너뛰고 다음 키로 간다 · lib/ai-key-byo.ts byoKeyFor). */
+    aiKeys: aiKeyKnob === "ok" ? [{ id: 91, label: "내 키", provider: "gemini", status: "active", masked: "AI********", lastOkAt: iso(now - 2 * 3600e3), lastErrorAt: null, lastErrorKind: null, resting: false }]
+      : aiKeyKnob === "invalid" ? [{ id: 91, label: "내 키", provider: "gemini", status: "invalid", masked: "AI********", lastOkAt: iso(now - 3 * 86400e3), lastErrorAt: iso(now - 40 * 60e3), lastErrorKind: "invalid", resting: false }]
+      : aiKeyKnob === "resting" ? [{ id: 91, label: "내 키", provider: "gemini", status: "active", masked: "AI********", lastOkAt: iso(now - 10 * 60e3), lastErrorAt: iso(now - 30e3), lastErrorKind: "quota", resting: true }]
+      : [],
+    aiFallback: aiFbKnob,
+    /* [R8-B §4.5] 팀 — 🔴 `seats.used` 에는 **아직 안 받은 초대도** 들어간다(서버가 그렇게 센다 · 화면이 다시 세지 않는다).
+       🔴 `limit: null` = 제한 없음(«0개»가 아니다 · AC-9). */
+    team: {
+      members: teamKnob === "solo" ? [{ id: 1, email: "mock@autocreate.dev", name: "두현", role: "owner", joinedAt: iso(now - 40 * 86400e3), me: true }]
+        : [{ id: 1, email: "mock@autocreate.dev", name: "두현", role: "owner", joinedAt: iso(now - 40 * 86400e3), ...(teamKnob === "member" ? {} : { me: true }) },
+           { id: 2, email: "mina@example.com", name: "미나", role: "member", joinedAt: iso(now - 9 * 86400e3), ...(teamKnob === "member" ? { me: true } : {}) }],
+      /* 보낸 초대는 **손잡이로만** 둔다 — 기본 모의 집(Pro)은 자리가 2개라, 늘 초대 하나가 떠 있으면 한도를 넘긴 집이 기본이 된다. */
+      invites: (teamKnob === "pending" || teamKnob === "full" || teamKnob === "nomail") ? [{ id: 31, email: "jun@example.com", invitedAt: iso(now - 2 * 86400e3), expiresAt: iso(now + 5 * 86400e3), expired: false }] : [],
+    },
     /* [R7 §3.1] 탈퇴 예약 — 서버는 tenants.closed_at·purge_at 에 둔다. null = 신청 안 한 집 */
     close: closedKnob ? { closedAt: iso(now - 2 * 86400e3), purgeAt: iso(now + 28 * 86400e3), reason: null } : null, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
@@ -392,6 +453,54 @@
     // 오늘 «확인 필요» 한 건(발행함 703·piece 506 과 같은 글) — 없으면 만들어 둔다
     S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "awaiting_manual", publishAt: kst(0, 11, 0), topicTitle: "가을 이불 세탁, 건조기 없이 뽀송하게", pieceId: 506, origin: "auto" });
   }
+  /* ══ [R8-B · lib/produce-window.ts 그대로] «이 자리는 언제 글이 만들어지나» — 🔴 **잣대는 서버에 한 개**이고 모의는 그 결과를 흉내 낸다.
+       세 값: `pending`(차례가 온다 · 고객 할 일 없음) · `missed`(자동으로는 더 안 만든다 = «지금 만들기»가 유일한 길) · `done`(이미 있다).
+       🔴 버린 자리(건너뜀·반려)는 **키를 안 싣는다** — «해당 없음»이지 «pending 아님»이 아니다(AC-9).
+       🔴 문장은 «못 만든다»로 끝내지 않고 **고객이 지금 할 수 있는 일**로 끝난다(§3 말투 · 서버 BLOCKED_TEXT 와 같은 결). ══ */
+  const PW_DROPPED = ["skipped", "rejected"];
+  const PW_PRODUCED = ["producing", "in_review", "approved", "scheduled", "publishing", "published"];
+  const pwTickText = () => (new Date().getHours() < 6 ? "오늘 오전 6시" : "내일 오전 6시");
+  function produceWindowOf(s) {
+    if (PW_DROPPED.includes(s.status)) return null;
+    if (s.pieceId || PW_PRODUCED.includes(s.status)) return { window: "done", reason: s.status === "published" ? "올라갔어요." : "글이 준비됐어요." };
+    if (pwKnob === "blocked") return { window: "missed", reason: "체험이 끝나서 새 글은 자동으로 안 만들어져요. 요금제를 고르시면 기다리던 자리부터 이어서 만들어요." };
+    if (pwKnob === "auto" || !S.settings.autoSchedule) return { window: "missed", reason: "자동 만들기를 꺼 두셨어요. 이 자리는 «지금 만들기»를 누르시면 바로 만들어요." };
+    if (s.status === "awaiting_manual" || s.status === "failed") return { window: "missed", reason: `${s.note ? s.note + " " : ""}이 자리는 «지금 만들기»로 직접 만들어 주세요.` };
+    const lead = Number(S.settings.produceLeadDays || 3);
+    const opens = (() => { const p = s.date.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2] - lead)).toISOString().slice(0, 10); })();
+    if (opens > todayYmd) return { window: "pending", reason: `발행 ${lead}일 전인 ${opens.slice(5).replace("-", "/")}부터 만들기 시작해요.` };
+    if (s.date < todayYmd) return { window: "missed", reason: `${s.date.slice(5).replace("-", "/")} 자리인데 그날이 지났어요. 지금 만들면 바로 올라가요.` };
+    /* 🔴 다음 만들기 시각이 발행 시각보다 늦으면 기다려도 못 만든다 — 이게 missed 의 본래 뜻이다(서버 ⑦). */
+    if (s.skipReason === "too_soon") return { window: "missed", reason: `다음 자동 만들기 시각(${pwTickText()})이 이 자리보다 늦어요. 지금 만들면 제시간에 올라가요.` };
+    if (s.status === "coin_short") return { window: "pending", reason: `코인이 모자라 미뤘어요. 충전하시면 ${pwTickText()}에 이어서 만들어요.` };
+    if (s.status === "no_topic") return { window: "pending", reason: `쓸 만한 소재를 아직 못 찾았어요. 소재가 정해지면 ${pwTickText()}에 만들어요.` };
+    if (s.status === "planned") return { window: "pending", reason: `소재를 먼저 정하고 ${pwTickText()}에 만들어요.` };
+    return { window: "pending", reason: `${pwTickText()}에 만들어요.` };
+  }
+  /* [R8] 🔴 손질(PieceSpecPatch)을 먹이는 자리는 **한 곳**이다 — 견적(`director-estimate`)과 만들기(`director-confirm`)가
+     따로 셈하면 «견적과 실제가 다른» 화면이 된다(서버도 estimate·confirm 이 같은 함수를 본다).
+     🔴 글 코인 = `COIN.blog` + **AI 로 구운 여분 장수**. 여기 있던 «1 + 사진 장수»는 네이버를 7코인이라 적던 그 셈이다(AC-52). */
+  function applyPatches(br, patches) {
+    const pieces = br.pieces.map((p) => ({ ...p }));
+    for (const patch of patches || []) {
+      const i = pieces.findIndex((p) => p.key === patch.key); if (i < 0) continue;
+      if (patch.drop) { pieces.splice(i, 1); continue; }
+      const p = pieces[i];
+      if (patch.accountId !== undefined) { p.accountId = patch.accountId; p.accountHandle = S.accounts.find((a) => a.id === patch.accountId)?.handle || null; }
+      if (patch.format) p.format = patch.format;
+      if (patch.emotionKey) p.emotionKey = patch.emotionKey;
+      if (patch.images && p.images) Object.assign(p.images, patch.images);
+      if (patch.monetize && "affiliate" in patch.monetize) p.monetize.affiliate = patch.monetize.affiliate ? { provider: "coupang", ...patch.monetize.affiliate } : null;
+      if (patch.schedule && patch.schedule.at) p.schedule.at = patch.schedule.at;
+      if (p.kind === "video") { const v = patch.video || {};
+        if (v.format) p.video.format = v.format; if (v.seconds) p.video.seconds = Number(v.seconds); if (v.cuts) p.video.cuts = Number(v.cuts);
+        if (v.voiceId) { p.video.voice.voiceId = v.voiceId; p.video.variant.voiceId = v.voiceId; }
+        if (v.palette) p.video.variant.palette = v.palette; if (v.hookType) p.video.variant.hookType = v.hookType;
+        p.coinCost = VIDEO_COIN[videoCoinItem(p.video.seconds)];
+      } else p.coinCost = COIN.blog + Math.max(0, ((p.images && p.images.aiCount != null ? p.images.aiCount : 1) - 1));
+    }
+    return pieces;
+  }
   const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0); // [P1R5] shorts = video_60 단가(§1.10)
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
@@ -498,10 +607,29 @@
       const runnerDue = S.slots.filter((s) => RUNNER_CH.includes(s.channel) && s.date >= todayYmd && !["skipped", "published"].includes(s.status)).length;
       /* [R8 §4.1 · B] 발행 전 검사에 걸린 글 — 🔴 B 가 새 kind 를 만들지 않고 화면에 이미 있는 `review_blocked` 를 썼다.
          사유는 서버 GATE_LABEL 그대로 앞 3개(첫 낱말이 보통 «대가 고지 첫머리»다). */
-      const gateStuck = S.pieces.filter((p) => p.status === "in_review" && p.gate && (p.gate.checks || []).some((c) => !c.pass && ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"].includes(c.key)));
-      if (gateStuck.length) todo.push({ kind: "review_blocked", title: `발행 전 확인이 필요한 글이 ${gateStuck.length}건 있어요`, count: gateStuck.length,
-        desc: `${[...new Set(gateStuck.flatMap((p) => (p.gate.checks || []).filter((c) => !c.pass).map((c) => c.label)))].slice(0, 3).join(" · ")} — 고치고 승인하면 그 자리에서 다시 나가요`,
-        link: gateStuck.length === 1 ? `/app/piece.html?id=${gateStuck[0].id}` : "/app/pieces.html?status=in_review", tone: "warn", ...(gateStuck.length === 1 ? { pieceId: gateStuck[0].id } : {}) });
+      /* 🔴 [R8 · home-summary.ts] **뜻이 바뀐 자리**다 — 종전엔 «게이트에 막힌 글»이었는데, 사장님이 전역으로 내리셔서
+         (`HARD_GATE_KEYS = []`) 막는 판정이 하나도 없다. 그래도 검사는 그대로 다 돌고 표시가 남는다.
+         🔴 남은 일은 **그 표시를 사람이 볼 수 있게 올리는 것**이다 — 안 올리면 «검사했는데 아무도 안 봤다»가 되고
+            그게 «조용히 0건»의 가장 나쁜 형태다(우리는 알았는데 고객만 몰랐다).
+         🔴 kind 는 `review_blocked` 그대로다(화면 낱말이 이미 있다 · AC-52). 나가기 전(pre)과 나간 뒤(post)를 갈라 센다.
+         🔴 «직접 올려야 할 글»(awaiting_manual)은 여기서 빼고 센다 — 같은 글을 두 줄로 세면 숫자를 못 믿는다. */
+      const WARN_ST = ["draft", "in_review", "approved", "scheduled", "published"];
+      const warnAll = S.pieces.filter((p) => WARN_ST.includes(p.status) && p.gate && (p.gate.checks || []).some((c) => !c.pass));
+      const warnPre = warnAll.filter((p) => p.status !== "published"), warnPost = warnAll.filter((p) => p.status === "published");
+      if (warnPre.length || warnPost.length) {
+        const src = warnPre.length ? warnPre : warnPost;
+        const cnt = new Map();   // 사유는 **많이 걸린 순 3개**까지 · 라벨은 서버 정본 그대로(화면이 문구를 지어내지 않는다)
+        for (const p of src) for (const c of p.gate.checks) if (!c.pass) cnt.set(c.label, (cnt.get(c.label) || 0) + 1);
+        const why = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l]) => l).join(" · ") || "확인이 필요한 표시가 있어요";
+        const one = src.length === 1 ? src[0] : null;
+        todo.push(warnPre.length
+          ? { kind: "review_blocked", title: `이 위험을 안고 나갈 글이 ${warnPre.length}건 있어요`, count: warnPre.length,
+              desc: `${why} — 막지는 않았어요. 그대로 두시면 이 상태로 나가요${warnPost.length ? ` (이미 나간 글 ${warnPost.length}건에도 같은 표시가 있어요)` : ""}`,
+              link: one ? `/app/piece.html?id=${one.id}` : "/app/pieces.html?status=in_review", tone: "warn", ...(one ? { pieceId: one.id } : {}) }
+          : { kind: "review_blocked", title: `이 위험을 안고 나간 글이 ${warnPost.length}건 있어요`, count: warnPost.length,
+              desc: `${why} — 막지 않았어요. 지금이라도 고치거나 내릴 수 있어요`,
+              link: one ? `/app/piece.html?id=${one.id}` : "/app/posts.html", tone: "warn", ...(one ? { pieceId: one.id } : {}) });
+      }
       // 정지 계정은 아래 «승계» 한 줄로만 알린다(같은 사건을 두 줄로 쓰지 않는다)
       for (const a of S.accounts.filter((a) => ["pending_login", "disconnected"].includes(a.status)))
         todo.push({ kind: "account", title: a.status === "pending_login" ? `@${a.handle} 다시 로그인이 필요해요` : `@${a.handle} 연결이 끊겼어요`, desc: UI.chLabel(a.channel), link: "/app/accounts.html", tone: "warn" });
@@ -720,11 +848,15 @@
         if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
       const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "쓰는 코인은 글 1 + 사진 수예요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
+    /* [R8 · director-estimate] 🔴 **아무것도 쓰지 않고** 손질된 값으로 얼마 드는지만 답한다 — 화면이 «1 + 사진 장수»로 셈하던 자리를 대신한다. */
+    "director-estimate": (b) => { const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
+      const pieces = applyPatches(br, b.pieces);
+      const coinCost = pieces.reduce((a, p) => a + (p.coinCost || 0), 0);
+      return { ok: true, coinCost, coinsLeft: S.coins, enough: coinCost <= S.coins, need: Math.max(0, coinCost - S.coins),
+        pieces: pieces.map((p) => ({ key: p.key, channel: p.channel, kind: p.kind || "post", coinCost: p.coinCost, imageCount: p.images?.count ?? 0, aiCount: p.images?.aiCount ?? 0 })) };
+    },
     "director-confirm": (b) => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });
-      let pieces = br.pieces.map((p) => ({ ...p })); for (const patch of b.pieces || []) { const i = pieces.findIndex((p) => p.key === patch.key); if (i < 0) continue; if (patch.drop) { pieces.splice(i, 1); continue; }
-        const p = pieces[i]; if (patch.accountId !== undefined) { p.accountId = patch.accountId; p.accountHandle = S.accounts.find((a) => a.id === patch.accountId)?.handle || null; } if (patch.format) p.format = patch.format; if (patch.emotionKey) p.emotionKey = patch.emotionKey;
-        if (patch.images && p.images) Object.assign(p.images, patch.images); if (patch.monetize && "affiliate" in patch.monetize) p.monetize.affiliate = patch.monetize.affiliate ? { provider: "coupang", ...patch.monetize.affiliate } : null; if (patch.schedule?.at) p.schedule.at = patch.schedule.at;
-        if (p.kind === "video") { const v = patch.video || {}; if (v.format) p.video.format = v.format; if (v.seconds) p.video.seconds = Number(v.seconds); if (v.cuts) p.video.cuts = Number(v.cuts); if (v.voiceId) { p.video.voice.voiceId = v.voiceId; p.video.variant.voiceId = v.voiceId; } if (v.palette) p.video.variant.palette = v.palette; if (v.hookType) p.video.variant.hookType = v.hookType; p.coinCost = VIDEO_COIN[videoCoinItem(p.video.seconds)]; } else p.coinCost = 1 + p.images.count; } // [P1R5] PieceSpecPatch.video · 코인 = videoCoinItem(seconds)
+      let pieces = applyPatches(br, b.pieces);
       if (videoBudget === "0" && pieces.some((p) => p.kind === "video")) return { ok: false, step: "budget", error: "이번 달 영상 제작 한도에 닿았어요. 다음 달에 다시 만들 수 있어요." }; // §1.2 달러 캡 선검사(코인 차감 전)
       const need = pieces.reduce((a, p) => a + p.coinCost, 0); if (need > S.coins) return err("coin_short", `코인이 ${need - S.coins}개 부족해요.`, { need, have: S.coins });
       if (br._charged) return { ok: true, briefId: br.id, pieceIds: br._pieceIds, coinsCharged: 0, coinsLeft: S.coins, status: 202 };
@@ -811,6 +943,20 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "rules-save": (b) => { const want = (b.rules || []).filter((r) => r.active !== false).length; const cap = planKnob === "pro" || planKnob === "agency" ? null : 3;
       if (cap !== null && want > cap) return { ok: false, status: 402, reason: "plan_limit", step: "plan_limit", resource: "rules", used: want, limit: cap, planKey: planKnob || "trial", error: `편성 규칙은 ${cap}개까지예요. Pro 로 바꾸면 제한이 없어요.` };
       const before = S.slots.length; S.rules = (b.rules || []).map((r, i) => ({ id: r.id || S.nextId++, kind: "post", active: true, ...r })); S.slots = S.slots.filter((s) => s.origin === "manual" || S.rules.some((r) => r.channel === s.channel)); rollSlots(); return { ok: true, rules: S.rules, coinsPerWeek: coinsPerWeek(), slotsCreated: S.slots.length - before }; },
+    /* [R8 · rules.ts] 견적 — 🔴 **아무것도 쓰지 않는다**. 저장과 **같은 식**으로 재 주는 자리라 화면이 «편수 × 단가»를 따로 셈하지 않아도 된다.
+       🔴 `shortfallNote` 는 «요금제 포함분으로는 달 중간에 멈춘다»를 **저장 전에** 말해 주는 문장이다(서버 글자 그대로).
+          나중에 알면 막힌 게 아니라 속은 것이다 — 그래서 저장 전에 말한다. */
+    "rules-estimate": (b) => {
+      const rules = (b.rules || []).filter((r) => r.active !== false);
+      const perWeek = Math.round(rules.reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.every === "month" ? r.count / 4 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0));
+      const perMonth = Math.round(perWeek * 52 / 12);
+      const included = planKnob === "starter" ? 40 : 150;
+      const cap = planKnob === "pro" || planKnob === "agency" ? null : 3;
+      const out = { ok: true, coinsPerWeek: perWeek, coinsPerMonth: perMonth, rules: rules.length, limit: cap, overLimit: cap !== null && rules.length > cap };
+      if (included > 0 && perMonth > included) { const days = Math.max(1, Math.floor(included / Math.max(1, perWeek / 7)));
+        out.shortfallNote = `이 계획대로면 한 달에 ${perMonth}코인이 들어요. 요금제에 든 ${included}코인으로는 약 ${days}일치예요 — 코인을 채우거나 횟수를 줄여 주세요.`; }
+      return out;
+    },
     "rules-settings": (b) => { if (planKnob === "starter" && !keptAuto && b.reviewPolicy === "silence_approves") return { ok: false, status: 402, reason: "plan_limit", step: "plan_feature", feature: "autoApprove", planKey: "starter", error: "«조용하면 발행»은 Pro 요금제부터 쓸 수 있어요. 지금 요금제에서는 발행 전에 한 번 확인해 주세요." }; for (const k of ["autoSchedule", "horizonDays", "topicLeadDays", "produceLeadDays", "produceHour", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays"]) if (b[k] !== undefined) S.settings[k] = b[k]; S.slots = S.slots.filter((s) => s.origin === "manual" || !(S.settings.quietDays || []).includes(s.date)); rollSlots(); return { ok: true, settings: S.settings }; },
     "slots-list": (_b, q) => { tick(); const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const list = S.slots.filter((s) => s.date >= from && s.date <= to).sort((a, b) => (a.publishAt || "").localeCompare(b.publishAt || "")).map((s) => ({ ...s }));
@@ -818,6 +964,11 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       /* [R7 §4.3 · B3] note = 서버가 그 자리에 적어 둔 사람말(있을 때만) · revenueKrw = 30일 수익(수집 행이 없으면 키 자체가 없다) */
       for (const s of list) { const seed = S.slotNotes && S.slotNotes[s.id]; if (seed) s.note = seed;
         if (s.status === "published" && s.pieceId) s.revenueKrw = (s.pieceId * 137) % 9000 + 800; }
+      /* [R8-B] 🔴 «언제 만들어지나» + 그 자리의 코인 — 서버 lib/slots.ts 가 싣는 그 자리다(`done` 이면 코인은 안 싣는다).
+         화면은 이 값만 읽고 **스스로 다시 재지 않는다**(AC-47). */
+      for (const s of list) { const pw = produceWindowOf(s); if (!pw) continue;
+        s.produceWindow = pw.window; s.produceReason = pw.reason;
+        if (pw.window !== "done") s.coinCost = s.kind === "shorts" ? VIDEO_COIN.video_60 : s.kind === "cardnews" ? COIN.cardnews : COIN.blog; }
       return { ok: true, slots: list }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
@@ -984,6 +1135,47 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "piece-photo-remove": (b) => { const id = Number(b.assetId); let hit = false;
       for (const k of Object.keys(S.photos || {})) { const before = S.photos[k].length; S.photos[k] = S.photos[k].filter((x) => x.id !== id); if (S.photos[k].length !== before) hit = true; }
       return hit ? { ok: true, removedObject: true } : { ok: false, step: "not_found", error: "그 사진을 찾지 못했어요.", status: 404 }; },
+    /* ══ [R8 §10.3 · DESIGN §5C.5] 스톡 사진 — 서버 `netlify/functions/piece-stock.ts` · `lib/stock/` 모양 그대로.
+       🔴 `downloadUrl` 은 **안 내려 준다**(서버가 일부러 뺀다) — 화면은 `previewUrl` 로만 고른다.
+       🔴 `verdict` 는 **싣되 화면은 안 그린다**(사장님 2026-09-15 «무시해도 돼») — 그래서 모의도 «걸린» 사진을 한 장 섞어 둔다:
+          화면이 그걸 경고로 그리면 그 자리에서 빨강이 나야 한다(재려면 걸린 사진이 있어야 한다).
+       🔴 `trouble` 문장은 `lib/stock/index.ts stockTroubleLine()` 글자 그대로. ══ */
+    "stock-search": (_b, q) => {
+      const query = String(q.get("q") || "").trim();
+      if (!query) return err("q", "어떤 사진을 찾을지 알려 주세요.");
+      if (stockKnob === "nokey") return { ok: false, paid: false, picks: [],
+        tried: STOCK_PROVIDERS.map((p) => ({ provider: p, ok: false, count: 0, reason: "no_key", cached: false })),
+        trouble: "사진 제공사 열쇠가 아직 안 꽂혀 있어요. 열쇠를 넣으면 바로 됩니다.",
+        configured: STOCK_PROVIDERS.map((p) => ({ provider: p, configured: false })) };
+      if (stockKnob === "empty") return { ok: false, paid: false, picks: [],
+        tried: STOCK_PROVIDERS.map((p) => ({ provider: p, ok: true, count: 0, reason: "empty", cached: false })),
+        trouble: "그 낱말로는 사진을 못 찾았어요. 다른 낱말로 찾아 보세요.",
+        configured: STOCK_PROVIDERS.map((p) => ({ provider: p, configured: true })) };
+      const picks = stockPicks(query);
+      return { ok: true, paid: false, picks,
+        tried: STOCK_PROVIDERS.map((p) => ({ provider: p, ok: true, count: picks.filter((c) => c.provider === p).length, reason: null, cached: false })),
+        trouble: null, configured: STOCK_PROVIDERS.map((p) => ({ provider: p, configured: true })) };
+    },
+    /* 🔴 붙일 때 받는 것은 «어느 검색어의 · 어느 제공사 · 몇 번»뿐이다 — 주소·작가는 **우리가 다시 꺼낸다**(piece-stock.ts 헤더).
+       그래서 모의도 보내온 값을 쓰지 않고 `stockPicks(q)` 에서 같은 사진을 다시 찾는다. 못 찾으면 서버와 같은 404 다. */
+    "stock-attach": (b) => {
+      const nw = notWritable(); if (nw) return nw;
+      const pid = Number(b.pieceId); if (!pid) return err("pieceId", "어느 글에 붙일 사진인지 알려 주세요.");
+      const query = String(b.q || "").trim(); if (!query) return err("q", "어떤 낱말로 찾은 사진인지 알려 주세요.");
+      const c = stockPicks(query).find((x) => x.provider === b.provider && x.id === String(b.id));
+      if (!c) return { ok: false, error: "그 사진을 다시 찾지 못했어요. 한 번 더 찾아 주세요.", step: "not_in_results", status: 404 };
+      S.photos = S.photos || {}; const list = (S.photos[pid] = S.photos[pid] || []);
+      const key = `stock:${c.provider}:${c.id}`;
+      const dup = list.find((x) => x.source && x.source.key === key);
+      if (dup) return { ok: true, assetId: dup.id, url: dup.url, sourceKey: key, verdict: c.verdict, already: true };
+      const photo = { id: S.nextId++, pieceId: pid, r2Key: key, url: c.previewUrl, caption: null, sort: list.length,
+        source: { kind: "stock", key, addedAt: iso(Date.now()), by: null },
+        /* 🔴 크레딧 재료(작가·출처·라이선스)는 **버리지 않는다** — 키가 죽는 진짜 경로가 그쪽이다(lib/stock/index.ts:22). */
+        stock: { provider: c.provider, id: c.id, author: c.author, sourceUrl: c.sourceUrl, licenseUrl: c.licenseUrl, people: c.people, brand: c.brand, tags: c.tags },
+        createdAt: iso(Date.now()) };
+      list.push(photo);
+      return { ok: true, assetId: photo.id, url: photo.url, sourceKey: key, verdict: c.verdict, already: false };
+    },
     /* ── [P1R2] §2 러너 기기(내 PC 프로그램) ── */
     "runner-list": () => { tick(); return { ok: true, devices: S.devices.map(devRow) }; },
     "runner-register": (b) => { const name = String(b.name || "").trim(); if (!name) return err("name", "기기 이름을 적어 주세요.");
@@ -1128,6 +1320,70 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       return { ok: true, closedAt: S.close.closedAt, purgeAt: S.close.purgeAt, graceDays: GRACE };
     },
     "account-restore": () => { S.close = null; return { ok: true, status: "trial", closed: false, graceDays: 30 }; },
+    /* [R8-B §4.4] 내 AI 키 — 서버 `netlify/functions/ai-key.ts` · `lib/ai-key-byo.ts` 모양 그대로.
+       🔴 사유 셋의 문장은 서버 `BYO_ERROR_TEXT` **글자 그대로**(화면 `UI.BYO_ERROR_TEXT` 와 하니스 ㉗이 셋을 대조한다).
+       🔴 꽂을 때 서버는 **그 키로 한 번 걸어 본다** — 모의는 그 대신 넣은 글자로 갈라 준다:
+          20자 미만 → invalid · «quota» 포함 → quota · «forbid» 포함 → forbidden · 그 밖 → 성공.
+          (세 갈래를 화면이 서로 다르게 그리는지 재려면 세 갈래로 들어갈 길이 있어야 한다.) */
+    /* ══ [R8-B §4.5 · DESIGN §11] 팀 — 서버 `netlify/functions/team.ts` · `lib/team.ts` 모양 그대로.
+       🔴 자리 수는 요금제 한도(`teamSeats` 1/2/5)다. **돈·계약 축이라 §9 밖** — 막는 게 우리 판단이 아니다.
+       🔴 대기 중 초대도 자리를 먹는다 — 안 그러면 초대 5통 뿌리고 다 받아 한도가 뚫린다.
+       🔴 문장은 전부 서버 `lib/team.ts` 글자 그대로. ══ */
+    "team": () => { const t = S.team; const isOwner = teamKnob !== "member";
+      const limit = teamKnob === "full" ? 2 : planKnob === "agency" ? 5 : planKnob === "starter" ? 1 : 2;
+      const used = t.members.length + t.invites.filter((v) => !v.expired).length;
+      return { ok: true, members: t.members, invites: isOwner ? t.invites : [], seats: { used, limit }, isOwner }; },
+    "team-invite": (b) => { if (teamKnob === "member") return { ok: false, step: "owner_only", error: "팀은 이 집의 주인만 바꿀 수 있어요.", status: 403 };
+      const mail = String(b.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return err("email", "이메일 주소를 다시 확인해 주세요.");
+      const t = S.team;
+      if (t.members.some((m) => m.email.toLowerCase() === mail)) return { ok: false, step: "exists", error: "이미 팀에 있는 분이에요.", status: 400 };
+      if (t.invites.some((v) => v.email.toLowerCase() === mail)) return { ok: false, step: "pending", error: "그 주소로 보낸 초대가 아직 살아 있어요. 철회하고 다시 보내실 수 있어요.", status: 400 };
+      const limit = teamKnob === "full" ? 2 : planKnob === "agency" ? 5 : planKnob === "starter" ? 1 : 2;
+      const used = t.members.length + t.invites.filter((v) => !v.expired).length;
+      if (used >= limit) return { ok: false, step: "seat", error: `지금 요금제는 팀 자리가 ${limit}개예요. 요금제를 올리면 더 부를 수 있어요.`, used, limit, status: 402 };
+      const id = S.nextId++; const expiresAt = iso(Date.now() + 7 * 86400e3);
+      t.invites.push({ id, email: mail, invitedAt: iso(Date.now()), expiresAt, expired: false });
+      /* 🔴 메일이 안 나가도 초대는 **살아 있다** — 그때 링크를 돌려주어 주인이 직접 전할 수 있게 한다(막다른 길 금지). */
+      const mailSent = teamKnob !== "nomail";
+      return { ok: true, inviteId: id, expiresAt, mailSent, ...(mailSent ? {} : { link: `${location.origin}/app/team-accept.html?token=mocktoken${id}` }), status: 201 };
+    },
+    "team-revoke": (b) => { if (teamKnob === "member") return { ok: false, step: "owner_only", error: "팀은 이 집의 주인만 바꿀 수 있어요.", status: 403 };
+      const i = S.team.invites.findIndex((v) => v.id === Number(b.id));
+      if (i < 0) return { ok: false, step: "not_found", error: "이미 받았거나 거둔 초대예요.", status: 404 };
+      S.team.invites.splice(i, 1); return { ok: true }; },
+    "team-remove": (b) => { if (teamKnob === "member") return { ok: false, step: "owner_only", error: "팀은 이 집의 주인만 바꿀 수 있어요.", status: 403 };
+      const uid = Number(b.userId); const m = S.team.members.find((x) => x.id === uid);
+      if (!m) return { ok: false, step: "not_found", error: "그분을 찾을 수 없어요.", status: 404 };
+      if (m.me) return { ok: false, step: "self", error: "스스로를 뺄 수는 없어요.", status: 400 };
+      if (m.role === "owner") return { ok: false, step: "owner", error: "이 집의 주인은 뺄 수 없어요.", status: 400 };
+      S.team.members = S.team.members.filter((x) => x.id !== uid); return { ok: true }; },
+    /* 🔴 아래 둘은 **로그인 없이** 돈다 — 받는 사람은 아직 우리 고객이 아니다. */
+    "team-invite-info": (_b, q) => {
+      if (!String(q.get("token") || "")) return { ok: false, step: "invite", error: "초대 링크가 올바르지 않아요.", status: 410 };
+      if (inviteKnob === "dead") return { ok: false, step: "invite", error: "이 초대는 기한이 지났어요.", status: 410 };
+      return { ok: true, tenantName: "두현의 작업실", email: "jun@example.com" }; },
+    "team-accept": (b) => {
+      if (!String(b.token || "")) return err("token", "초대 링크가 올바르지 않아요.");
+      if (String(b.password || "").length < 8) return err("password", "비밀번호는 8자 이상으로 정해 주세요.");
+      if (inviteKnob === "dead") return { ok: false, step: "invite", error: "이 초대는 기한이 지났어요.", status: 410 };
+      if (inviteKnob === "seat") return { ok: false, step: "seat", error: "그 사이에 팀 자리가 다 찼어요. 초대한 분께 알려 주세요.", status: 409 };
+      if (inviteKnob === "exists") return { ok: false, step: "exists", error: "그 주소는 이미 쓰고 있어요. 그 계정으로 로그인해 주세요.", status: 409 };
+      return { ok: true, tenantName: "두현의 작업실", status: 201 }; },
+    "ai-keys": () => ({ ok: true, keys: S.aiKeys, fallback: S.aiFallback, configured: !aiNoEnc }),
+    "ai-key-add": (b) => {
+      if (aiNoEnc) return { ok: false, step: "not_configured", error: "지금은 키를 안전하게 보관할 수 없어요. 운영팀에 알려 주세요.", status: 503 };
+      const k = String(b.key || "").trim();
+      const kind = k.length < 20 ? "invalid" : /quota/i.test(k) ? "quota" : /forbid/i.test(k) ? "forbidden" : null;
+      if (kind) return { ok: false, step: kind, error: BYO_ERROR_TEXT[kind], status: 400 };
+      const id = S.nextId++;
+      S.aiKeys.push({ id, label: String(b.label || "내 키").slice(0, 40), provider: "gemini", status: "active", masked: k.slice(0, 2) + "*".repeat(Math.min(8, Math.max(3, k.length - 2))), lastOkAt: iso(Date.now()), lastErrorAt: null, lastErrorKind: null, resting: false });
+      return { ok: true, id, keys: S.aiKeys, status: 201 };
+    },
+    /* 🔴 뺀 키로 쓴 기록(ai_usage)은 서버가 **남긴다** — 모의엔 그 표가 없지만 화면 문구가 그렇게 말하므로 여기 적어 둔다. */
+    "ai-key-delete": (b) => { const i = S.aiKeys.findIndex((k) => k.id === Number(b.id)); if (i < 0) return { ok: false, error: "그 키를 찾을 수 없어요.", step: "not_found", status: 404 }; S.aiKeys.splice(i, 1); return { ok: true, keys: S.aiKeys }; },
+    "ai-key-fallback": (b) => { S.aiFallback = b.on === true; return { ok: true, fallback: S.aiFallback,
+      message: S.aiFallback ? "내 키가 안 될 때는 저희 키로 대신 만들어 드려요. 그때마다 알려 드릴게요." : "이제 내 키가 안 되면 그 회차는 만들지 않고 알려만 드려요." }; },
     /* §6 코인 */
     "coins-balance": () => { const purchased = Math.max(0, S.billing.ledger.filter((l) => l.bucket === "purchased").reduce((a, l) => a + l.amount, 0)); return { ok: true, balance: S.coins, included: Math.max(0, S.coins - purchased), purchased, recent: S.billing.ledger.slice(0, 20).map((l) => ({ kind: l.kind, delta: l.amount, item: l.item, reason: l.reason, createdAt: l.at })) }; },
   };
@@ -1146,7 +1402,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
