@@ -17,7 +17,7 @@
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";
 import { jsonb, utcDate } from "./db-util";
-import { contractFor } from "./writing-contracts";
+import { contractFor, topicGroupOf, type TopicGroup } from "./writing-contracts";   // [R8 §2.1] 주제군 — 분량 폭이 여기에 달렸다
 import { type Block, htmlToPlain } from "./blocks";
 import { runGate, GATE_KEYS, GATE_LABEL, type GateReport, type GateCheck } from "./ai-tell-gate";
 import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
@@ -147,6 +147,17 @@ export const affiliateLinkCount = countAffiliateLinks;
  * recheckPiece — 발행 직전 재검사(승인·수정 공용). 고지·금칙어·제휴 링크 수·유사도 + 12키 게이트.
  *   블록이 정본이면 블록 기준, 사용자가 HTML 을 고쳤으면(`meta.editedByUser`) HTML 기준(구조 검사는 태그로 근사).
  */
+/**
+ * [R8 §2.1] 그 글에 **적용된** 주제군 — 생성 때 적어 둔 값이 정본이고, 없을 때만(옛 글) 형식·제목으로 다시 잰다.
+ *   🔴 다시 잴 때는 `intent` 가 없다 — 생성 때와 다른 답이 나올 수 있다. 그래서 적어 두는 쪽이 먼저다.
+ */
+function groupOfMeta(m: Record<string, unknown>, p: Row): TopicGroup | null {
+  const saved = String(m.topicGroup ?? "");
+  if (saved === "review" || saved === "info" || saved === "life") return saved;
+  const fmt = String(p.format || m.format || "") || null;
+  return fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.title ?? "") }) : null;
+}
+
 export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   if (String(p.kind) === "video") return await recheckVideoPiece(tid, p);
   const m = (p.meta || {}) as Record<string, unknown>;
@@ -156,6 +167,9 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const plain = htmlToPlain(html);
   const comp = compensationOfMeta(m);                       // [R8-A §4] 대가 3종(제휴·협찬·무상 제공) — 하나라도 참이면 고지가 필요하다
   const need = comp.need;
+  /* [R8 §2.1] 분량 폭은 **주제군**에 달렸다. 생성 때 적어 둔 값을 그대로 쓴다 — 여기서 다시 계산하면 `intent` 가 없어 다른 답이 나온다.
+     그러면 «잰 값은 같은데 기준이 다른» 상태가 된다(AC-70 의 사촌). */
+  const group = groupOfMeta(m, p);
   const checks: GateCheck[] = [];
   const c = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
   const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(p.account_id)}`) : [undefined];
@@ -164,13 +178,13 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
   if (!edited && blocks.length) {
-    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || ""), group });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
     return { ...g, checks: [...g.checks, link, st], ok: g.ok && link.pass && st.pass };
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
-  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || "") });
+  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || ""), group });
   for (const k of GATE_KEYS) {
     const from = base.checks.find((x) => x.key === k)!;
     if (k === "disclosure") { const d = checkDisclosureHtml(html, need, comp.kinds); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }

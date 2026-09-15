@@ -80,9 +80,9 @@ export function stubTargetChars(prompt: string): number {
 
 /** 목표 글자 수를 채우는 블록 배열 — `fixBlocks` 가 계약 골격으로 다시 빚으므로 **재료**만 준다. */
 function stubBlocks(target: number): Block[] {
-  /* 🔴 글자 수는 **공백을 뺀 본문 기준**으로 센다 — 계약의 `length.min/max` 와 `estimateChars` 가 그 기준이라,
-     여기서 공백까지 세면 «시킨 대로 썼다»는 스텁이 실제로는 20% 짧게 나온다(실측으로 잡았다). */
-  const lenOf = (t: string) => t.replace(/\s/g, "").length;
+  /* 🔴 세는 자는 **하나**다 — 계약(`length` 주석 «공백 포함 평문»)·게이트(`blocksCharCount`)와 같은 규칙으로 센다.
+     처음엔 공백을 뺐다가 스모크에서 어긋났다. 분량을 다루는 자리에서 **세는 규칙이 다르면 그 자체가 오차**다. */
+  const lenOf = (t: string) => t.replace(/\s+/g, " ").length;
   const out: Block[] = [{ type: "hook", text: `${MARK} 아래는 파이프라인 점검용 채움글입니다.` }];
   let chars = lenOf(out[0].text!);
   let i = 0, sec = 0;

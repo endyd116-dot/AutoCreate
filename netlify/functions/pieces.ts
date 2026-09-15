@@ -145,7 +145,10 @@ export default async (req: Request): Promise<Response> => {
         /* 🔴 **없는 format 을 `formats[0]` 으로 메우지 않는다** — 그러면 «모름»이 «info» 로 위장되고
            주제군·분량이 그 거짓값에서 흘러나온다(AC-57 대용물 금지 · 스모크에서 실제로 걸렸다). 없으면 없는 대로 둔다. */
         const fmt = String(p.format || m.format || "") || null;
-        const grp = fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
+        /* [R8 §2.1] 생성 때 적어 둔 주제군이 **정본**이다(그때는 intent 를 안다). 없을 때만 형식·제목으로 다시 잰다. */
+        const saved = String(m.topicGroup ?? "");
+        const grp = (saved === "review" || saved === "info" || saved === "life") ? saved as "review" | "info" | "life"
+          : fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
         const [brow] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE tenant_id = ${tid} AND id = ${n(p.brief_id)}`) : [undefined];
         const goal = resolveGoal({ affiliate: !!m.affiliate, briefGoal: brow?.goal as string | null, channel: String(p.channel) });
         const len = lengthFor(wc, grp), img = imagesFor(wc, grp);
