@@ -12,8 +12,8 @@ import { q } from "./accounts";
 import { defaultImageCount } from "./writing-contracts";
 import { coinCostOf, videoCoinItem } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
-import { gapMinFor } from "./publish-gap";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
+import { gapMinFor } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -53,12 +53,13 @@ export async function readScheduleSettings(tid: number): Promise<ScheduleSetting
 /* ───────── Rule ───────── */
 /** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다. */
 export type RuleKind = "post" | "shorts";
-export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; formatHint?: string; active: boolean }
+export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; preferredMinute?: number; formatHint?: string; active: boolean }
 export function toRule(r: Row): Rule {
   const o: Rule = { id: n(r.id), channel: String(r.channel), kind: (String(r.kind) === "shorts" ? "shorts" : "post"), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
   if (r.account_id) o.accountId = n(r.account_id);
   if (Array.isArray(r.weekdays) && r.weekdays.length) o.weekdays = (r.weekdays as unknown[]).map(Number).filter((d) => d >= 0 && d <= 6);
   if (r.preferred_hour !== null && r.preferred_hour !== undefined) o.preferredHour = n(r.preferred_hour);
+  if (r.preferred_minute !== null && r.preferred_minute !== undefined) o.preferredMinute = n(r.preferred_minute);   // [R8] 분까지 못 박기(옛 규칙은 없으면 00)
   if (r.format_hint) o.formatHint = String(r.format_hint);
   return o;
 }
@@ -129,12 +130,13 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
   for (const e of existing) { if (String(e.status) === "skipped" || String(e.status) === "rejected") continue; const at = utcDate(e.publish_at); if (!at) continue; const k = `${e.channel}:${String(e.d).slice(0, 10)}`; takenBy.set(k, [...(takenBy.get(k) ?? []), at]); }   // [P1R7 B3] 버린(rejected) 자리도 건너뛴(skipped) 자리와 같이 — 그 시각을 점유하지 않는다
   const accounts = await q(sql`SELECT id, golden_hours FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
   const golden = new Map(accounts.map((a) => [n(a.id), Array.isArray(a.golden_hours) ? (a.golden_hours as unknown[]).map(Number) : null]));
-  /* [R8] 🔴 간격은 **`publish-gap.ts` 한 곳**에서 온다(계정마다 «우리가 무엇을 아는가»가 다르다 — §6.3b).
-     루프 안에서 매번 DB 를 치지 않게 **규칙에 고정된 계정만 미리 한 번씩** 읽어 둔다. */
-  const gapCache = new Map<number, number>();
+  /* [R8] 🔴 간격은 **`publish-gap.ts` 한 곳**에서 온다(계정마다 «우리가 무엇을 아는가»가 다르다).
+     루프 안에서 매번 DB 를 치지 않게 **규칙에 고정된 계정만 미리 한 번씩** 읽어 둔다.
+     🔴 값을 통째로 담는다 — `gapMin`(자동 기본)과 `floorMin`(고객이 못 박은 시각의 바닥)이 **둘 다** 필요하다. */
+  const gapCache = new Map<number, Awaited<ReturnType<typeof gapMinFor>>>();
   for (const fixedId of new Set(rules.filter((r) => r.accountMode === "fixed" && r.accountId).map((r) => n(r.accountId)))) {
     if (!fixedId) continue;
-    try { gapCache.set(fixedId, (await gapMinFor(tid, fixedId)).gapMin); } catch { /* 못 읽으면 기본(안전)을 쓴다 */ }
+    try { gapCache.set(fixedId, await gapMinFor(tid, fixedId)); } catch { /* 못 읽으면 기본(안전)을 쓴다 */ }
   }
   let created = 0, checked = 0;
   for (let d = 0; d <= horizon; d++) {
@@ -146,23 +148,28 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
       const key = `${r.id}:${date}`;
       if (have.has(key)) continue;
       const accountId = r.accountMode === "fixed" && r.accountId ? r.accountId : null;
-      const preferred = settings.bestTimeMode === "fixed" ? (r.preferredHour ?? null) : (r.preferredHour ?? null);
-      const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred);
+      const preferred = r.preferredHour ?? null;
+      /* [R8 · B] 시:분 — 사장님 «10:00 / 10:05 / 11:00» 이 규칙 3개로 그대로 선다(옛 규칙은 분이 NULL = 00분 · 소급 0). */
+      const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred, r.preferredMinute ?? null);
       const tk = `${r.channel}:${date}`; const taken = takenBy.get(tk) ?? [];
-      /* 계정이 고정된 규칙만 계정별 값을 쓴다 — 자동 배정 규칙은 «누가 올릴지»를 아직 모르므로 **기본(안전)**이다. */
-      const gapMin = accountId ? (gapCache.get(accountId) ?? ACCOUNT_GAP_MIN) : ACCOUNT_GAP_MIN;
+      /* 🔴 [R8] 같은 채널 다른 계정과의 간격 = **정책 한 곳**(B2 `lib/publish-gap.ts gapMinFor`) — 여기에 30 을 다시 적지 않는다.
+         **고객이 시각을 못 박은 규칙**은 `floorMin`(러너가 «실제로 재서» 출구 IP 가 다를 때만 5분까지) → 10:00 / 10:05 가 그대로 선다.
+         계정을 안 정한 auto 규칙은 `gapMin`(누구로 나갈지 모르니 보수적). */
+      const gap = accountId ? (gapCache.get(accountId) ?? await (async () => { const g = await gapMinFor(tid, accountId); gapCache.set(accountId, g); return g; })()) : null;
+      const crossGap = Math.max(1, preferred !== null ? (gap?.floorMin ?? ACCOUNT_GAP_MIN) : (gap?.gapMin ?? ACCOUNT_GAP_MIN));
       /* 🔴 계정마다 **다른** 흔들림 · 같은 (계정·날짜·시각)이면 **늘 같은 값**
-         (편성은 여러 번 돈다 — 돌 때마다 시각이 움직이면 «어제 본 시각»과 달라지고 슬롯이 두 번 잡힌다). */
-      const spread = accountId ? Math.max(0, Math.min(7, Math.floor(gapMin / 4))) : 0;
+         (편성은 여러 번 돈다 — 돌 때마다 시각이 움직이면 «어제 본 시각»과 달라지고 슬롯이 두 번 잡힌다).
+         🔴 **고객이 못 박은 시각은 흔들지 않는다** — 10:05 라고 적었는데 우리가 10:08 로 밀면 약속을 어긴 것이다. */
+      const spread = accountId && preferred === null ? Math.max(0, Math.min(7, Math.floor(crossGap / 4))) : 0;
       let at: Date | null = null;
       for (const c of cands) {
         /* 🔴 새벽은 자동으로 잡지 않는다 — 다만 고객이 **규칙에 직접 적은 시각**(`preferred`)은 막지 않는다(말로만 알린다 · `nightRisk`). */
         if (preferred == null && isNightHour(c.h)) continue;
         const jit = spread ? jitterMinutes(`acc:${accountId}|${date}|${c.h}:${c.m}`, spread) : 0;
         for (let shift = 0; shift <= 3 && !at; shift++) {
-          const t = new Date(kstToUtc(date, c.h, c.m).getTime() + (shift * gapMin + jit) * 60_000);
+          const t = new Date(kstToUtc(date, c.h, c.m).getTime() + (shift * crossGap + jit) * 60_000);
           if (t.getTime() < now.getTime() + 20 * 60_000) continue;
-          if (taken.some((x) => Math.abs(x.getTime() - t.getTime()) < gapMin * 60_000)) continue;
+          if (taken.some((x) => Math.abs(x.getTime() - t.getTime()) < crossGap * 60_000)) continue;
           at = t;
         }
         if (at) break;

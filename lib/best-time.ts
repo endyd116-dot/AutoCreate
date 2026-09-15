@@ -79,6 +79,8 @@ export interface PickArgs {
   goldenHours?: number[] | null;
   /** 규칙 고정 시각 — 있으면 이 시각만(bestTimeMode fixed). */
   preferredHour?: number | null;
+  /** [R8] 규칙 고정 **분**(0~59 · 사장님 안 «10:05»). preferredHour 가 있을 때만 쓴다. */
+  preferredMinute?: number | null;
   /** 같은 테넌트·같은 채널에서 이미 잡힌 시각들(UTC) — 30분 간격. */
   taken: Date[];
   /** 같은 계정의 이미 잡힌 시각들(UTC) — min_gap 준수. */
@@ -86,6 +88,8 @@ export interface PickArgs {
   minGapMin?: number;
   /** 🔴 채널 내 간격(분) — `lib/publish-gap.ts gapMinFor()` 가 준 값. 없으면 `ACCOUNT_GAP_MIN`(기본 30). */
   gapMin?: number;
+  /** [R8] 고객이 **시각을 못 박았을 때** 허용하는 최소 간격(분) — 전용 IP 가 확인된 계정끼리는 5분까지(B2 `floorMin`). 없으면 gapMin. */
+  gapFloorMin?: number;
   /** 🔴 계정마다 다른 흔들림의 씨앗(보통 `acc:{accountId}`). **없으면 흔들지 않는다** — 옛 호출부의 동작을 안 바꾼다. */
   jitterSeed?: string;
   /** 흔들림 폭(±분 · 기본 7). 간격보다 크면 충돌만 만들므로 간격의 1/4 로 자른다. */
@@ -100,8 +104,11 @@ export interface PickArgs {
 }
 
 /** 후보 시각 목록(KST h:m). */
-export function candidatesFor(channel: string, goldenHours?: number[] | null, preferredHour?: number | null): { h: number; m: number }[] {
-  if (typeof preferredHour === "number" && preferredHour >= 0 && preferredHour <= 23) return [{ h: preferredHour, m: 0 }];
+export function candidatesFor(channel: string, goldenHours?: number[] | null, preferredHour?: number | null, preferredMinute?: number | null): { h: number; m: number }[] {
+  if (typeof preferredHour === "number" && preferredHour >= 0 && preferredHour <= 23) {
+    const m = typeof preferredMinute === "number" && preferredMinute >= 0 && preferredMinute <= 59 ? Math.floor(preferredMinute) : 0;
+    return [{ h: preferredHour, m }];   // [R8] 못 박은 시각은 **분까지** 그대로(«10:05»)
+  }
   if (Array.isArray(goldenHours) && goldenHours.length) return goldenHours.filter((h) => h >= 0 && h <= 23).map((h) => ({ h, m: 0 }));
   return BEST_HOURS[channel] ?? [{ h: 9, m: 0 }];
 }
@@ -118,13 +125,16 @@ export function pickPublishAt(a: PickArgs): { at: Date; reason: string } {
   const now = a.now ?? new Date();
   const lead = 20 * 60_000;   // 지금부터 최소 20분 뒤
   const start = a.fromDate ?? kstDateStr(now);
-  const cands = candidatesFor(a.channel, a.goldenHours, a.preferredHour);
-  /* 🔴 간격은 **`publish-gap.ts` 가 정한 값**을 쓴다(계정마다 «우리가 무엇을 아는가»가 다르다).
-     못 받았으면 기본 30 — 값이 두 곳에 적히면 하나가 썩으므로 여기서 새로 정하지 않는다. */
-  const gapCh = Math.max(1, Math.floor(a.gapMin ?? ACCOUNT_GAP_MIN));
-  const gapAcc = Math.max(gapCh, a.minGapMin ?? 0);
-  /* 흔들림 폭은 간격의 1/4 을 넘지 않는다 — 간격보다 크게 흔들면 충돌만 만들고 제자리로 밀려난다. */
-  const spread = a.jitterSeed ? Math.max(0, Math.min(Math.floor(a.jitterSpreadMin ?? 7), Math.floor(gapCh / 4))) : 0;
+  const cands = candidatesFor(a.channel, a.goldenHours, a.preferredHour, a.preferredMinute);
+  /* 🔴 [R8] 같은 채널 다른 계정과의 간격은 **정책이 정한다**(B2 `gapMinFor` → 호출부가 넘긴다 · 여기서 새로 정하지 않는다).
+     고객이 시각을 못 박았으면 «바닥»(floor)까지 좁힐 수 있다 — 러너가 **실제로 재서** 출구 IP 가 다른 계정끼리는 5분.
+     그래야 사장님 안(«A 10:00 · B 10:05»)이 **정책이 허락하는 만큼** 그대로 선다. */
+  const pinned = typeof a.preferredHour === "number";
+  const crossGap = Math.max(1, Math.floor(pinned ? (a.gapFloorMin ?? a.gapMin ?? ACCOUNT_GAP_MIN) : (a.gapMin ?? ACCOUNT_GAP_MIN)));
+  const gapAcc = Math.max(crossGap, a.minGapMin ?? 0);
+  /* 흔들림 폭은 간격의 1/4 을 넘지 않는다 — 간격보다 크게 흔들면 충돌만 만들고 제자리로 밀려난다.
+     🔴 **고객이 못 박은 시각은 흔들지 않는다**(10:05 라고 적었는데 우리가 10:08 로 밀면 약속을 어긴 것이다). */
+  const spread = a.jitterSeed && !pinned ? Math.max(0, Math.min(Math.floor(a.jitterSpreadMin ?? 7), Math.floor(crossGap / 4))) : 0;
   const maxDays = a.maxDaysAhead ?? 14;
   for (let d = 0; d <= maxDays; d++) {
     const date = addDays(start, d);
@@ -134,9 +144,9 @@ export function pickPublishAt(a: PickArgs): { at: Date; reason: string } {
       /* 🔴 계정마다 **다른** 폭으로, 그러나 **늘 같은** 값으로 흔든다(결정론 — 편성이 여러 번 돌아도 시각이 안 움직인다). */
       const jit = spread ? jitterMinutes(`${a.jitterSeed}|${date}|${c.h}:${c.m}`, spread) : 0;
       for (let shift = 0; shift <= 3; shift++) {
-        const at = new Date(kstToUtc(date, c.h, c.m).getTime() + (shift * gapCh + jit) * 60_000);
+        const at = new Date(kstToUtc(date, c.h, c.m).getTime() + (shift * crossGap + jit) * 60_000);
         if (at.getTime() < now.getTime() + lead) continue;
-        if (conflicts(at, a.taken, gapCh)) continue;
+        if (conflicts(at, a.taken, crossGap)) continue;
         if (a.takenSameAccount && conflicts(at, a.takenSameAccount, gapAcc)) continue;
         /* 표시 시각은 **실제 잡힌 시각**에서 읽는다 — 흔들림이 들어가면 c.h:c.m 과 달라진다
            (계산한 값을 그대로 쓰면 화면이 «10:00»이라는데 실제로는 10:04 에 나가는 어긋남이 생긴다). */
@@ -144,7 +154,7 @@ export function pickPublishAt(a: PickArgs): { at: Date; reason: string } {
         const hh = String(kst.getUTCHours()).padStart(2, "0"), mm = String(kst.getUTCMinutes()).padStart(2, "0");
         const why = a.preferredHour != null ? "규칙에 고정한 시각" : a.goldenHours?.length ? "이 계정의 골든타임" : "이 채널에서 반응이 좋은 시각";
         const dayWord = d === 0 ? "오늘" : d === 1 ? "내일" : `${date.slice(5).replace("-", "/")}`;
-        return { at, reason: `${dayWord} ${hh}:${mm} — ${why}${shift ? ` · 다른 계정과 ${gapCh}분 간격` : ""}` };
+        return { at, reason: `${dayWord} ${hh}:${mm} — ${why}${shift ? ` · 다른 계정과 ${crossGap}분 간격` : ""}` };
       }
     }
   }

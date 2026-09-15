@@ -23,6 +23,8 @@ const n = (v: unknown) => Number(v || 0);
 const WARN_KINDS: ReadonlySet<string> = new Set([
   "account_suspended", "account_relogin", "publish_failed", "publish_manual", "publish_blocked",
   "runner_offline", "piece_failed", "review_blocked", "review_missed", "coin_short",
+  // [R8 · DESIGN §5E.2] 신고는 «기한 안에 고객이 해야 끝나는» 일이다 — 알려 주기만 하면 기한이 지나간다.
+  "takedown_notice", "takedown_due_soon", "takedown_escalated",
 ]);
 
 export interface NotificationRow { id: number; kind: string; title: string; desc?: string; link?: string; tone: "warn" | "info"; createdAt: string; readAt?: string }

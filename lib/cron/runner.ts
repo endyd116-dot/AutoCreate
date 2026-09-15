@@ -43,6 +43,7 @@ import { runnerCanaryStep } from "./runner-canary";
 import { aiModelWatchStep } from "./ai-model-watch";
 import { tenantPurgeStep } from "./tenant-purge";
 import { slotRenewStep } from "./slot-renew";
+import { takedownWatchStep } from "./takedown-watch";
 import { pushFanoutStep } from "./push-fanout";
 import { coinReconcileStep } from "./coin-reconcile";
 import { channelOpenedStep } from "./channel-opened";
@@ -78,6 +79,7 @@ export const STEPS: AnyStep[] = [
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
   postAliveStep,       // hourly · 발행 7일 뒤 «아직 살아 있나» 1회(P1R7 §2 · 영구 멱등)
   slotRenewStep,       // hourly(05:00 KST 게이트 = 하루 1회) · **global** — 계정 슬롯 IP 배정·갱신 차감·쉼/복구(P1R7 §3.6)
+  takedownWatchStep,   // hourly(10:00 KST 게이트 = 하루 1회) · **global** — 신고 기한 D-1 안내 · 기한 초과는 **운영 대기열로만**(자동 정지 0 · DESIGN §5E.2)
   publisherStep,       // 5m · due 발행
   pushFanoutStep,      // 5m · **global** — 알림함 새 행을 기기 푸시로(문구 한 출처 · VAPID 없으면 표시만 · R7 메인 발주)
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
