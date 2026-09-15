@@ -11,10 +11,9 @@
 //
 //   🔴 첫 판에서 내 정규식이 헐거워 **가짜 닫힘 3건**을 만들었다(팩트체크가 `video/cost.ts` 에, 딥링크가 `affiliate-coupang.ts` 에,
 //      CS 가 `referral.ts` 에 걸렸다). 그래서 이 판은 행마다 **틀릴 수 없는 근거**(파일 경로 + 그 파일 안의 특정 문자열)로 좁혔다.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync as existsSync0 } from "node:fs";
 
 const JSON_OUT = process.argv.includes("--json");
-const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
 /* [2026-09-16 메인 · b-49 실측] 주석을 걷어 낸 본문 — «주석에만 적혀 있는 것»을 만든 것으로 세지 않는다(AC-59).
    b-49 가 찔러 보니 11칸 중 **9칸**이 주석 한 줄로 닫혔다(A10·B7·B8·H1·E4·C1·A12·C2·H3).
    지금 당장 틀린 값은 아니었지만(주석 덕에 초록인 칸 0) «계획을 주석에 적는 우리 관습»과 만나는 순간 거짓말이 된다.
@@ -25,6 +24,28 @@ const stripComments = (t) => t
   .replace(/\/\*[\s\S]*?\*\//g, " ")
   .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
   .replace(/<!--[\s\S]*?-->/g, " ");
+/* ══ [자 점검용 손잡이 셋] (b-49 설계 · 2026-09-16) 🔴 **환경변수가 없으면 아래 셋은 전부 항등식이다** ══
+   AC_HIDE="경로[,경로…]"    그 파일을 **빈 파일**로 읽는다(+ existsSync 도 false) — «이 칸이 정말 그 파일을 읽나»
+   AC_INJECT="경로::글[§§…]"  읽히는 내용 **뒤에 한 줄** 덧댄다(디스크는 안 건드린다) — «이 칸이 닫힐 수 있는 자인가»
+   AC_STRIP=1                모든 파일을 **주석 지운 본문**으로 읽는다 — «이 칸이 주석을 세고 있나»
+   🔴 **판정 로직은 한 줄도 안 바뀐다** — 바꾸는 것은 «읽히는 내용»뿐이다.
+   ⚠️ `AC_INJECT` 의 글에 `::` 나 `§§` 를 넣지 마라(구분자다).
+   ⚠️ 🔴 **③C5 는 손잡이가 안 먹는다** — `read()` 를 안 쓰고 `readdirSync` + 자기 `headerOf()` 로 돈다. 그 칸은 직접 변이로 재라.
+   근거: `docs/active/2026-09-16-audit-measure-review.md` — 이 손잡이로 가짜 초록 둘(④7·E6)을 찾았다. */
+const AC_HIDE = (process.env.AC_HIDE || "").split(",").filter(Boolean);
+const AC_INJECT = (process.env.AC_INJECT || "").split("§§").filter(Boolean).map((x) => x.split("::"));
+const AC_STRIP = process.env.AC_STRIP === "1";
+/** 경로 끝맞춤(윈도우 역슬래시도 받는다). */
+const acPath = (p) => String(p).split(String.fromCharCode(92)).join("/");
+const acHidden = (p) => AC_HIDE.length > 0 && AC_HIDE.some((h) => acPath(p).endsWith(h));
+const existsSync = (p) => (acHidden(p) ? false : existsSync0(p));
+const read = (p) => {
+  if (acHidden(p)) return "";
+  let t; try { t = readFileSync(p, "utf8"); } catch { return ""; }
+  if (AC_STRIP) t = stripComments(t);
+  for (const [ip, txt] of AC_INJECT) if (acPath(p).endsWith(ip)) t += "\n" + txt;
+  return t;
+};
 /** 그 파일 안에 그 패턴이 있나 — **파일을 지목**해서 본다(전역 grep 은 엉뚱한 파일에 걸린다). 🔴 주석은 뺀 본문에서 본다. */
 const inFile = (p, re) => re.test(stripComments(read(p)));
 const anyFile = (ps, re) => ps.filter((p) => inFile(p, re));
@@ -397,7 +418,21 @@ const THREE_REST = [
      정본 동기화는 «DB 오버레이를 `lib/ai-models.ts` 로 되돌리는 PR»이라 그 코드는 `lib/ai-models-sync.ts` 에 산다.
      🔴 **검사를 맞추려고 코드를 엉뚱한 파일에 넣지 않는다** — 그러면 검사는 초록인데 물건은 남의 집에 있다. */
   ["E5 정본 동기화 PR", () => [yes(anyFile(["lib/ai-models-sync.ts", "netlify/functions/ops-ai-sync.ts"], /openSyncPr|정본 동기화/).length), "오버레이가 파일과 갈라진 채 굳으면 «파일이 정본»이 거짓말이 된다"]],
-  ["E6 운영자 화면 조정", () => [yes(existsSync("netlify/functions/ops-center.ts")), "ops-center"]],
+  /* 🔴 [2026-09-16 메인 · b-49 가 잡았다] 옛 판은 `existsSync("netlify/functions/ops-center.ts")` **파일 이름 하나**로 셌다.
+     그런데 그 파일이 서비스하는 경로는 **`/api/ops-audit`** 이고(`:12`), 화면이 부르는 엔드포인트 어디에도 `ops-center` 가 없다.
+     **이름만 맞는 파일이 있어서 초록**이었다(AC-70). 기능은 실제로 **다른 곳**에 다 있다:
+       ①서버 `netlify/functions/ops-tenants.ts` 가 `/api/ops-impersonate`·`-end` 를 서비스
+       ②운영 화면 `public/ops/tenant.html` 의 `#imp` 가 부른다(정본은 `public/ops/_tpl.txt`)
+       ③🔴 고객 화면 `public/js/ui.js` 가 «운영자가 보고 있어요» 배너를 그린다(`impBanner`)
+     ⇒ 셋을 다 본다. 하나라도 끊기면 빨개진다 — **화면 축까지 재는 칸**이다. */
+  ["E6 운영자 화면 조정", () => {
+    const srv = inFile("netlify/functions/ops-tenants.ts", /ops-impersonate/);
+    const ops = inFile("public/ops/tenant.html", /ops-impersonate/);
+    const cust = inFile("public/js/ui.js", /impBanner/);
+    return srv && ops && cust
+      ? ["닫힘", "ops-tenants.ts 가 /api/ops-impersonate 를 열고 · ops/tenant.html 이 부르고 · ui.js 가 «운영자가 보고 있어요» 배너를 그린다"]
+      : ["🟠 일부", `서버 ${srv} 운영화면 ${ops} 고객배너 ${cust}`];
+  }],
   ["F 팀 축 4(시트·초대·accept·팀 승인)", () => {
     /* 🔴 [2026-09-16 · C] 옛 판은 `SERVER_TEXT`(= referral.ts·ops-center.ts·cs.ts 셋)에서 팀을 찾았다 — **팀과 아무 상관없는 파일 셋**이라
        lib/team.ts·netlify/functions/team.ts·public/app/team.html 이 다 생긴 뒤에도 «전수 0건»을 찍었다(**가짜 열림 4칸**).
