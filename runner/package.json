@@ -1,6 +1,6 @@
 {
   "name": "ac-runner",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "private": true,
   "type": "module",
   "description": "AutoCreate 내 PC 러너 — 서버 큐에서 발행 잡을 받아 브라우저로 글을 올린다(zip 배포 · 자동 업데이트).",

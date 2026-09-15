@@ -97,7 +97,28 @@ async function main() {
 
   const leaks = scanSecrets(entries);
   if (leaks.length) { console.error("\n  ✗ zip 에 비밀이 섞였어요 — 빌드를 세웁니다:"); for (const l of leaks) console.error(`     · ${l}`); process.exit(1); }
-  console.log(`   파일 ${entries.length}개 · 원본 ${entries.reduce((s, e) => s + e.data.length, 0).toLocaleString()} bytes · 비밀 스캔 ✓`);
+
+  /* 🔴 [P1R8 §3.5] **줄끝 검사 — 이건 실제로 나간 적이 있는 결함이다.**
+     2026-09-15 실측: `run.bat` 이 **LF 전용**으로 저장돼 있었고, 그 상태에서 cmd.exe 의 `goto` 는
+     **바이트 오프셋으로 뛰다가 줄 중간에 착지한다** — `--autostart` 를 눌렀는데 그 줄이 무시되고
+     러너가 그냥 실행됐다(고객이 누른 것과 **다른 일**이 일어난다 · 오류 메시지 하나 없이).
+     `.gitattributes` 로 못 박았지만 그건 **git 의 규칙**이고, 여기는 **실제로 나가는 바이트**를 본다 —
+     둘은 다른 층이고, «설정했다»는 «그렇다»가 아니다(AC-66). 어긋나면 빌드를 세운다. */
+  const eol: string[] = [];
+  for (const e of entries) {
+    const isBat = /\.(bat|cmd)$/i.test(e.name);
+    const isSh = /\.sh$/i.test(e.name);
+    if (!isBat && !isSh) continue;
+    const crlf = e.data.toString("latin1").split("\r\n").length - 1;
+    const lines = e.data.toString("latin1").split("\n").length - 1;
+    if (isBat && crlf < lines) eol.push(`${e.name} → 배치 파일인데 CRLF 가 아니다(CRLF ${crlf}/${lines}줄) · goto 가 줄 중간에 착지한다`);
+    if (isSh && crlf > 0) eol.push(`${e.name} → 셸 스크립트인데 CR 가 섞였다(${crlf}줄) · «\\r: command not found» 가 난다`);
+  }
+  if (eol.length) { console.error("\n  ✗ 줄끝이 틀렸어요 — 빌드를 세웁니다:"); for (const l of eol) console.error(`     · ${l}`); process.exit(1); }
+  /* 🔴 **센 것을 찍는다** — 0개면 이 검사는 아무것도 안 본 것이고, 그래도 빌드는 초록으로 지나간다(AC-58). */
+  const scripts = entries.filter((e) => /\.(bat|cmd|sh)$/i.test(e.name)).map((e) => e.name);
+  if (!scripts.length) { console.error("\n  ✗ 실행 스크립트(.bat/.sh)가 하나도 안 잡혔어요 — 줄끝 검사가 헛돌았습니다."); process.exit(1); }
+  console.log(`   파일 ${entries.length}개 · 원본 ${entries.reduce((s, e) => s + e.data.length, 0).toLocaleString()} bytes · 비밀 스캔 ✓ · 줄끝 ✓(${scripts.join(" ")})`);
 
   /* 🔴 zip 안을 **한 폴더로 감싼다**. 안 그러면 «여기에 압축 풀기» 를 누른 고객의 다운로드 폴더에
      파일 28개가 쏟아진다 — 그 뒤엔 어느 게 우리 건지 아무도 모른다. 폴더 이름에 버전을 넣지 않는 이유는,
