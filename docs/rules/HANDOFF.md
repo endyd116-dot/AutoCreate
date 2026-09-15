@@ -1,7 +1,7 @@
 # HANDOFF.md — AutoCreate 메인 세션 인수인계 (압축/새 세션용 단일 정본)
 
 > 갱신 2026-09-15 · 작성자 = 메인(`autocreate-ca`) · **압축 후 새 메인 세션은 이 문서 + `docs/active/RESUME-TRIGGER.md` 를 먼저 읽는다.**
-> 이 문서는 «지금까지의 서사»다. 규칙은 `CLAUDE.md`, 설계는 `docs/DESIGN.md`, 라운드 계약은 `docs/active/*-contract.md`, 함정은 `docs/rules/PITFALLS.md`(AC-1~47) 가 정본이고 여기서 요약·연결만 한다.
+> 이 문서는 «지금까지의 서사»다. 규칙은 `CLAUDE.md`, 설계는 `docs/DESIGN.md`, 라운드 계약은 `docs/active/*-contract.md`, 함정은 `docs/rules/PITFALLS.md`(AC-1~48) 가 정본이고 여기서 요약·연결만 한다.
 
 ---
 
@@ -52,7 +52,7 @@
 - **수익**: 커넥터 5종(키 없으면 `not_configured` 정직) · 러너 스크랩 3종(**애드포스트 전 구간 라이브 실증**) · 홈 «오늘 번 돈»(확정+예상) · 신청 조건 게이지 · 학습 되먹임.
 - **장사**: 체험 14일 → readonly · 코인(팩 3 + pack_trial) · 구독(월/연) · **KICC 이중 MID(auth/keyin · pg_mid · secretForMid)** · 플랜 게이트 · 운영센터 12메뉴 · 자동 티켓 · 원격접속 · 약관 4문서(«법률 검토 전») · 회사 정보.
 - **영상**: provider 사다리(Omni·Veo·fal·스텁) · TTS(타입캐스트/Gemini) · SRT · **11축 심사 3등급(ffprobe 실측)** · 원가 관문(`checkAiCostCap` 재사용 · 소프트 통과/하드 ×3 환급) · 프레임 지문 · 러너 렌더(ffmpeg·BGM 12곡·배지) · 출구(유튜브 private·릴스·쓰레드·클립 스텁) · 화면 8.
-- **R6**: 내보내기 ZIP(7일) · 공유 카드 PNG(핸들 숨김 기본) · 추천인 · 영수증 인쇄 · 세금계산서 요청 · 관리형 러너 신청 · 백업 상태(PITR 7일 · R2 버전관리 없음) · AC-36 await 전수 · 티스토리 HTML 모드.
+- **R6**: 내보내기 ZIP(7일) · 공유 카드 PNG(핸들 숨김 기본) · 관리형 러너 신청 · 백업 상태(PITR 7일 · R2 버전관리 없음) · AC-36 await 전수 · 티스토리 HTML 모드. 🔴 **R6 §1(B 몫 · 추천인·영수증 페이지·세금계산서·회사 정보·AM↔AC 코인 이전)은 화면만 있고 서버가 없다**(2026-09-15 전수조사 발견 · AC-48 · `feature/p1r6-back` 으로 B 발주 중).
 
 ### 러너 실증 매트릭스
 네이버 ✓(사진·서식·카나리) · 티스토리 ✓(HTML 모드 · **세션이 짧아 사람 2FA 필요** · `--reuse-tid=109` 는 티스토리 전용 회피책) · 블로거/WP 자격 없음 정직 정지 · **실제 «발행» 0건**(전부 임시저장). 🔴 **러너 배포 패키지 없음**(다운로드 404 · `npx ac-runner` 는 존재하지 않는 패키지 · B2 수리 중).
@@ -73,7 +73,7 @@
 | 세션(`ListAgents`) | 역할 | 폴더 | 브랜치 | 압축 시점 상태 |
 |---|---|---|---|---|
 | `autocreate-ca` | 메인 | `AutoCreate` | `main` | — |
-| `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `audit/design-b` | 전수조사 §7·§11·§12·§14·§15·§16 → `audit/2026-09-15-B.md` |
+| `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `ops/cleanup-tenants`→`feature/p1r6-back` | 대청소 apply(사장님 Allow 대기 · 88곳) · 🔴 **R6 §1 서버 구현 발주**(추천인·invoice·tax·ops-company·coin-transfer) |
 | `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | 전수조사 §4·§5·§5C·§16B·§6·§10(영상 축 고객 경로) → `audit/2026-09-15-B1.md` |
 | `autocreate-b2-e4` | **B2**(러너·발행) | `AutoCreate-B2` | `feature/runner-dist` | ✅ 머지됨(`99a4a50` 배포 zip·다운로드·자동 업데이트·지문·rotate · `5638765` alt · `17a7f5d`) · `bbec8ce` runner-list 신호) · DDL 0012 적용 · 한 줄(Content-Disposition·«열쇠») 뒤 전수조사 §2·§8·§9 → `audit/2026-09-15-B2.md` |
 | `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | ✅ 전부 머지됨(`…f982d0d` 건너뛰어요 정정 · `4a7c45e` 러너 화면) · 조사 1건: 시안 v4 ↔ 실제 화면 표(`audit/2026-09-15-A.md`) |
@@ -129,7 +129,7 @@
 3. ✅ **A 머지됨(main `d0b186e`)** · 🔴 정정 진행 중 — «이번엔 건너뛰어요» 화면 규칙(자리 날짜−오늘 < lead)은 **틀렸다**(제작 스텝 창은 «오늘~오늘+lead» = lead 안 자리도 다음 produceHour 틱에 만든다). 서버 `skipReason:"too_soon"`(B) 만으로 판정하게 A 수리 중: `8dfa5a1` «내 소재 넣기» 시트(→ director 직행 · duplicate→기존으로 · «직접» 필 · «검색량 모름») · 자동 편성 꺼짐 배너(홈·편성표 · 켜기 동기화 · 규칙 0 숨김) · «이번엔 건너뛰어요»(skipReason too_soon 우선). 스샷 `_shots/r6f-*.png`.
 4. ✅ **B2 머지됨**: `scripts/build-runner.mts`(재현 가능 zip · 의존성 0 zip 코덱) → R2 `autocreate/runner/v1.1.3.zip`+`latest.json` · `/api/runner-download`(로그인·«플랜 한도>0»·감사 · 10분 presign) · 하트비트 자동 업데이트(sha256 · 옛 판 보존) · 기기 지문(`x-runner-fp` 전 요청 · 인증 자리) · `/api/runner-rotate`(지문도 초기화) · 실측 23/23 · 하니스 trial. **셀렉터 서버 배포 = 1단계(표만 · 버전+카나리+폴백) R7 · 2단계(절차 DSL) 보류** · 복제 방어선 = «봐도 못 굴린다»(토큰·테넌트·묶기). 🔴 화면은 A 진행 중(내려받기 버튼이 JSON 새 탭 → API→url).
 5. ✅ R6.5 코드 전부 main(`5582363`) · **C 1차 진행 중 · 2차(skipReason·러너 배포 절) 예고됨** → «배포 가능» → 배포 #7. ✅ B2 `8c627dd` 파일명 서명(`autocreate-runner-v1.1.4.zip`)·«열쇠» 통일 머지.
-6. 🔴 **설계 대비 전수조사**(사장님 지시 · **분담**: 새 B 통합+§0·1·3·5B·13·17·19+특별 항목 / B2 §2·8·9 / B-1 §4·5·5C·16B·6·10 / B §7·11·12·14·15·16 / A 시안↔화면 · 각자 `docs/active/audit/2026-09-15-<역할>.md`) → 결과 `DESIGN-AUDIT.md` 의 «R7 제안 묶음 3» 이 다음 라운드의 유일한 입력. 사장님이 짚은 것: 영상 축이 고객 화면에 안 보임(레지스트리 planned) · «있지만 안 되는 것» 많음 · 탈퇴 시 R2 파기 없음(B-1 발견).
+6. ✅ **설계 대비 전수조사 완료**(main `0ec19ed` · `docs/active/2026-09-15-DESIGN-AUDIT.md` 562행 · ✅373 🟡29 🟠81 🔒10 ❌33 ➖32 · §0.2 상위 20 · §0.3 영상 축 = **미개통 + 뒤 두 칸(mp4 받기·주소 적기) 없음** · §0.4 R7 묶음 3 · §0.5 설계 문장 갱신 후보 · §0.6 사장님 결정 7) → **R7 계약의 유일한 입력**. (분담: 새 B 통합+§0·1·3·5B·13·17·19+특별 항목 / B2 §2·8·9 / B-1 §4·5·5C·16B·6·10 / B §7·11·12·14·15·16 / A 시안↔화면 · 각자 `docs/active/audit/2026-09-15-<역할>.md`) → 결과 `DESIGN-AUDIT.md` 의 «R7 제안 묶음 3» 이 다음 라운드의 유일한 입력. 사장님이 짚은 것: 영상 축이 고객 화면에 안 보임(레지스트리 planned) · «있지만 안 되는 것» 많음 · 탈퇴 시 R2 파기 없음(B-1 발견).
 
 ### 사장님 결정 대기
 - **실제 발행 GO** — 198 의 12:30 예약 글(@endyd116 실블로그)을 진짜 올릴지(러너를 이 PC 에 붙임 + 네이버 로그인 1회 필요). 러너 패키지가 없어 «집PC」 등록만 된 상태.
@@ -145,7 +145,7 @@
 ---
 
 ## 7. 문서 지도
-`CLAUDE.md` · `docs/DESIGN.md` · `docs/rules/PITFALLS.md`(**AC-1~47**) · `PARALLEL_GUIDE.md` · 계약 R1 v1.3/R2 v2.11/R3 v3.5/R4 v4.5(§1.6 KICC)/R5 v5.6/R6 v6.0 · **`docs/active/KICC-GO-LIVE.md`** · `C-HANDOFF.md`·`R5-B-HANDOFF.md` · `SESSION-TRIGGERS.md` · `R6-screen-list.md` · `2026-09-14-R5-presurvey-video.md` · `docs/history/*-C-report.md`(R1~R6) · `docs/screens-v4.html` · `PROJECT_STATE.md`.
+`CLAUDE.md` · `docs/DESIGN.md` · `docs/rules/PITFALLS.md`(**AC-1~48**) · `PARALLEL_GUIDE.md` · 계약 R1 v1.3/R2 v2.11/R3 v3.5/R4 v4.5(§1.6 KICC)/R5 v5.6/R6 v6.0 · **`docs/active/KICC-GO-LIVE.md`** · `C-HANDOFF.md`·`R5-B-HANDOFF.md` · `SESSION-TRIGGERS.md` · `R6-screen-list.md` · `2026-09-14-R5-presurvey-video.md` · `docs/history/*-C-report.md`(R1~R6) · `docs/screens-v4.html` · `PROJECT_STATE.md`.
 
 ## 8. 메인 운영 습관
 판단 필요한 것만 답한다 · 계약은 파일에 먼저 · 세션이 내 오류를 잡으면 그대로 인정(오늘 6번) · 머지 B→B2→A→C · 머지마다 tsc+build+2함수 grep · push=배포 → API ready → 라이브 스모크(증거) → 문서 갱신 · 증거 없는 실증 금지 · 초록도 빨강도 의심 · 사장님께 사람말·결과만 · 창 구분은 보고 첫 줄 · 라이브 변경은 그 창에서 Allow · **사장님이 짚은 건 즉시 발주**.
