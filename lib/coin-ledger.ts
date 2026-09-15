@@ -251,3 +251,28 @@ export async function grantIncluded(tid: number, coins: number, month: string, a
     return { ok: true, granted: r.length ? c : 0, already: !r.length };
   } catch (e) { if ((e as { code?: string })?.code === "23505") return { ok: true, granted: 0, already: true }; console.error("[coin-ledger] grantIncluded", e); return { ok: false, granted: 0, already: false }; }
 }
+
+/* ═══════════ P1R6 §1.4 — AM↔AC 코인 이전(들어오는 쪽) ═══════════ */
+export interface TransferInResult { ok: boolean; granted: number; already: boolean; balance: number; expiresAt: string | null; error?: string }
+/**
+ * transferIn(tid, coins, ref, source:"AM") — 다른 서비스(AM)에서 **이미 차감된** 코인을 여기 원장에 넣는다(호출부가 «AM 차감 성공 뒤» 순서를 지킨다).
+ *   kind `transfer` · bucket `purchased` · **만료 = AC 기준 +365일**(§1.4b · AM 잔여 만료를 승계하지 않는다) · ref = `transfer:AM:{amOrderNo}` 멱등(같은 주문 두 번째는 already·0).
+ *   환불 규칙: 이 묶음은 coin_orders 가 없으므로 «충전 환불» 대상이 아니다(lotOfOrder 가 못 찾는다) — 돌려보내는 건 AM 계약 몫.
+ */
+export async function transferIn(tid: number, coins: number, ref: string, source: "AM", opts: { actorId?: number | null; now?: Date; reason?: string } = {}): Promise<TransferInResult> {
+  const c = Math.floor(Number(coins)); const r = String(ref ?? "").trim();
+  if (!Number.isFinite(c) || c <= 0 || !r.startsWith(`transfer:${source}:`)) { const b = await balance(tid); return { ok: false, granted: 0, already: false, balance: b.balance, expiresAt: null, error: "invalid_transfer" }; }
+  const now = opts.now ?? new Date();
+  const expiresAt = new Date(now.getTime() + PURCHASE_VALID_DAYS * 86400_000).toISOString();
+  try {
+    const ins = await rows(db, sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason, actor_id, expires_at)
+      VALUES (${tid}, ${"transfer"}, ${"purchased"}, ${c}, ${r}, ${(opts.reason ?? `${source} 에서 가져온 코인 ${c.toLocaleString("ko-KR")}개(유효 1년)`).slice(0, 200)}, ${opts.actorId ?? null}, ${expiresAt}::timestamptz AT TIME ZONE 'UTC')
+      ON CONFLICT (tenant_id, kind, ref, bucket) WHERE ref IS NOT NULL DO NOTHING RETURNING id`);
+    const b = await balance(tid);
+    return { ok: true, granted: ins.length ? c : 0, already: !ins.length, balance: b.balance, expiresAt };
+  } catch (e) {
+    if ((e as { code?: string })?.code === "23505") { const b = await balance(tid); return { ok: true, granted: 0, already: true, balance: b.balance, expiresAt }; }
+    console.error("[coin-ledger] transferIn failed", e); const b = await balance(tid);
+    return { ok: false, granted: 0, already: false, balance: b.balance, expiresAt: null, error: String((e as Error)?.message ?? e).slice(0, 200) };
+  }
+}

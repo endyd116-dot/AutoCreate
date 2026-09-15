@@ -814,3 +814,33 @@ export const managedRunnerRequests = pgTable("managed_runner_requests", {
   createdAt:   timestamp("created_at").notNull().defaultNow(),
   updatedAt:   timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({ tenantIdx: index("managed_runner_requests_tenant_idx").on(t.tenantId, t.status) }));
+
+/* === Phase 1 R6 · B(추천인 · 세금계산서 · 회사 정보 · 코인 이전 · P1R6-B · 2026-09-15 · drizzle/0013-r6-referral-tax.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   계약 docs/active/2026-09-15-P1R6-contract.md §1.1~§1.4. 새 표 없음 — 전부 추가 칸 + ops_settings 행.
+ */
+export const tenantsR6 = {
+  /** referral_code varchar(8) — 테넌트당 1개 · 대문자+숫자(혼동 글자 0/O/1/I 제외) · 부분 유니크(NULL 제외) · 처음 `GET /api/referral` 때 발급. */
+  referralCode: "referral_code",
+  referralCodeUniq: "tenants_referral_code_uniq",
+  /** referred_by bigint — 가입 때 넣은 추천인 테넌트 id(1회 · 바꾸지 않는다). NULL = 추천 없이 가입. */
+  referredBy: "referred_by",
+  referredByIdx: "tenants_referred_by_idx",
+  /** referral_rewarded_at — 피추천인 첫 유료 결제 성공으로 **양쪽** 보상이 나간 시각(멱등 근거는 coin_ledger ref `referral:{inviter}:{invitee}`). */
+  referralRewardedAt: "referral_rewarded_at",
+  /** referral_blocked_at · referral_block_reason(card_fp|email_alias|email_domain) — 남용 판정으로 보상을 막은 기록. 한 번 막히면 끝(다음 결제에 다시 안 준다). */
+  referralBlockedAt: "referral_blocked_at",
+  referralBlockReason: "referral_block_reason",
+  /** settings.taxProfile { bizNo, bizName, email } — 세금계산서 «다음부터 자동» 프로필(§1.2 · 새 칸 대신 settings jsonb). */
+  taxProfileKey: "taxProfile",
+} as const;
+export const invoicesR6 = {
+  /** tax_status varchar(12) NOT NULL DEFAULT 'none' — none | requested | issued. 요청 시각은 R4 의 tax_doc_requested_at 을 그대로 쓴다. */
+  taxStatus: "tax_status",
+  taxIssuedAt: "tax_issued_at",
+  /** tax_url varchar(300) — 발행된 문서 주소(운영센터가 «발행됨» 처리하며 넣는다). */
+  taxUrl: "tax_url",
+  /** tax_biz jsonb { bizNo, bizName, email } — 요청 시점의 사업자 정보 스냅샷(프로필이 나중에 바뀌어도 이 청구서는 그때 값). */
+  taxBiz: "tax_biz",
+} as const;
+/** ops_settings 행 이름(§1.3) — `company` { name, ceo, bizNo, mailOrderNo, address, email, phone } · 영수증·약관 하단·세금계산서가 모두 이 한 출처를 읽는다. */
+export const opsSettingsKeysR6 = { company: "company", payment: "payment" } as const;
