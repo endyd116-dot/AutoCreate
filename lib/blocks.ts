@@ -48,7 +48,7 @@ export const MARK_KINDS: readonly MarkKind[] = ["value", "line", "row", "bold", 
 export interface InlineMark { s: number; e: number; kind: MarkKind }
 /** 사람말 라벨 — 🔴 화면 라벨의 **정본**(AC-52 · 화면은 베껴 쓰지 않고 서버가 실어 준 label 을 그린다). */
 export const MARK_LABEL: Record<MarkKind, string> = {
-  value: "핵심 숫자·낱말 강조", line: "문장 형광펜", row: "나열 강조", bold: "굵게", underline: "밑줄", italic: "기울임",
+  value: "핵심 강조", line: "형광펜", row: "나열 강조", bold: "굵게", underline: "밑줄", italic: "기울임",   // 칩 글자 — A 화면과 같은 낱말(라벨 하니스 ⑧-d 가 대조한다)
 };
 /** HTML 채널(블로거·워드프레스)과 검수 미리보기가 그리는 태그 — A 와 합의한 글자 그대로(`.preview mark.line …` CSS 가 이 class 를 본다). */
 export const MARK_HTML: Record<MarkKind, [string, string]> = {

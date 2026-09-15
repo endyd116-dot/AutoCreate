@@ -177,8 +177,10 @@ export default async (req: Request): Promise<Response> => {
         const fm = m.formatMarks as Record<string, unknown>;
         /* 러너 자가검사 값도 같이 — `bleed` 가 **없으면 «못 쟀다»**(키를 만들지 않는다 · AC-92). `breakFails > 0` 은 «뒤 문단이 앞 서식을 물려받았을 수 있다»는 뜻이라 값이 있다. */
         const fs: Record<string, unknown> = {};
-        if (typeof fm.bleed === "number") fs.bleed = fm.bleed;
+        const bl = fm.bleed as { pct?: unknown } | number | undefined;
+        if (typeof bl === "number") fs.bleed = bl; else if (bl && typeof bl === "object" && typeof bl.pct === "number") fs.bleed = bl.pct;   // 번진 문단 비율(%) · 없으면 «못 쟀다»
         if (typeof fm.breakFails === "number") fs.breakFails = fm.breakFails;
+        if (typeof fm.htmlMode === "number" && fm.htmlMode > 0) fs.htmlMode = fm.htmlMode;   // [R9-11] 티스토리 기본 모드로 내려앉은 횟수
         if (fm.runnerReportedAt) fs.reportedAt = fm.runnerReportedAt;
         if (Object.keys(fs).length) meta.formatSelfCheck = fs;
       }

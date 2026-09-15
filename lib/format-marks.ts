@@ -39,7 +39,12 @@ export interface FormatMarks {
   demoted: MarkDemotion[];
   breaks?: number;
   breakFails?: number;
-  bleed?: number;
+  /** 발행 직전 자가검사(`runner/lib/format-bleed.mjs`) — 번진 문단 비율(pct)과 증상별 수(red·center·italic·underline·bold). 🔴 키가 없으면 «못 쟀다»(러너가 null 을 보내면 키를 안 만든다 · 0 으로 넣으면 화면이 «깨끗했다»로 읽는다).
+   *  🔴 `bold` 는 2026-09-16 부터 세기 시작한 축 — 옛 글엔 키가 없고 그건 «0건»이 아니라 «그때는 안 쟀다»다(`?? 0` 로 읽지 않는다 · AC-92).
+   *  🔴 러너의 `samples`(번진 문단의 실물 조각)는 **여기 싣지 않는다** — 실물 예시는 **러너 로그에만 있다**(B2 합의 · meta 를 무겁게 하지 않는다 · «왜 예시 문단이 안 보이지»의 답이 이 줄이다). */
+  bleed?: { pct: number; total?: number; bad?: number; red?: number; center?: number; italic?: number; underline?: number; bold?: number };
+  /** [R9-11] 티스토리가 HTML 모드를 못 열어 기본 모드로 내려앉은 횟수 — 🔴 0 이면 키를 안 만든다(B2 · 강등 자체는 `demoted[{kind:블록, why:"no_editor_op"}]` 로 같이 온다). */
+  htmlMode?: number;
   /** 러너 보고를 받은 시각(UTC ISO) — 있으면 «발행 뒤 본 것»이다. */
   runnerReportedAt?: string;
 }
@@ -47,7 +52,7 @@ export interface FormatMarks {
 /** 사람말 라벨 — 마크 여섯 + 블록 요소. 화면 칩 정본(AC-52). 모르는 키는 키 그대로 돌려준다(지어내지 않는다). */
 export const FIELD_LABEL: Record<string, string> = {
   ...MARK_LABEL,
-  emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진",
+  emoji: "이모지", quote: "인용", table: "표", list: "목록", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진",
   place: "장소·링크 카드", h2: "소제목", h3: "작은 소제목", summary: "요약", tip: "한 줄 팁", hashtags: "해시태그", affiliate: "제휴 링크", adsense: "광고 자리",
   color: "글자색", align: "가운데 정렬", hook: "첫 줄",
 };
@@ -73,7 +78,25 @@ export const WHY_SAY: Record<string, string> = {
      앞은 «에디터 요소를 배우자», 뒤는 «조각을 실을 칸을 만들자» — 한 칸으로 뭉치면 그 차이가 안 보인다. */
   no_editor_op: "이 채널 편집기에 그 요소가 없어 글로 풀어 넣었어요.",
   block_unsupported: "목록·표 안에는 꾸밈을 실을 칸이 없어 글자만 그대로 실었어요.",
+  /* [R9-11 · B2 제기 2026-09-16] 티스토리 HTML 모드를 못 열면 인용은 «"…"», 구분선은 «———»로 대신 들어간다 — 장식이지 요소가 아니다.
+     러너가 세기는 했는데 서버가 note 를 버려 고객이 몰랐다(§9 ①② 위반). 이제 같은 칸(`demoted[{kind:"quote"|"divider", why:"html_mode_fallback"}]`)으로 온다. */
+  html_mode_fallback: "편집기 HTML 모드를 열지 못해 이 요소는 글자(따옴표·줄)로 대신 들어갔어요 — 글에서 직접 고치실 수 있어요.",
 };
+
+/**
+ * [R9-11 · §9-②] 🔴 **사람이 안 보는 경로(자동 승인)에서도 닿게** — 발행 뒤 강등이 있으면 알림 한 통의 제목·본문(사람말 · §3 말투).
+ *   순수 함수 — 러너 보고를 받는 쪽(`lib/runner-jobs.ts applyFormatMarksToPiece` · B2)이 부르고 notifications 에 넣는다. 강등이 0이면 null(알림을 만들지 않는다).
+ */
+export function formatDemotionNotice(fm: unknown, pieceTitle?: string | null): { title: string; body: string } | null {
+  const rows = formatUnusedOf(fm).filter((r) => r.n > 0);
+  if (!rows.length) return null;
+  const head = rows.slice(0, 3).map((r) => `${r.label}${r.n > 1 ? ` ${r.n}곳` : ""}`).join(" · ");
+  const more = rows.length > 3 ? ` 외 ${rows.length - 3}가지` : "";
+  return {
+    title: "이 글에서 못 낸 꾸밈이 있어요",
+    body: `${pieceTitle ? `«${String(pieceTitle).slice(0, 30)}» — ` : ""}${head}${more}. 글자는 그대로 실렸고, 글을 열면 무엇이 어떻게 들어갔는지 보여 드려요. 고치고 싶으면 글에서 직접 바꾸실 수 있어요.`,
+  };
+}
 export function whySay(why: string): string { return WHY_SAY[why] ?? "이 채널에서는 내지 못해 글자만 그대로 실었어요."; }
 
 /** 종류별 수 — planned 에 적는 값. 0 인 종류는 키를 안 만든다(«없음»과 «0»을 가르는 관례 · AC-9). */
@@ -135,6 +158,19 @@ export function buildFormatMarks(plannedBlocks: Block[], keptBlocks: Block[], de
   return { planned: countMarks(plannedBlocks), kept: countMarks(keptBlocks), demoted: demoted.map(clampDemotion) };
 }
 
+/** 자가검사 값 — 러너는 `{ total, bad, pct, red, center, italic, underline, bold?, samples? }` 를 보낸다(B2 `format-bleed.mjs`). 숫자 칸만 받고 `samples` 는 버린다. 옛 모양(숫자 하나)은 pct 로 읽는다. 못 읽으면 null(«못 쟀다»). */
+export function bleedOf(v: unknown): FormatMarks["bleed"] | null {
+  if (typeof v === "number") return Number.isFinite(v) && v >= 0 ? { pct: Math.round(v * 10) / 10 } : null;
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const pick = (k: string): number | undefined => { const n = Number(o[k]); return o[k] !== undefined && o[k] !== null && Number.isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : undefined; };
+  const pct = pick("pct");
+  if (pct === undefined) return null;
+  const out: NonNullable<FormatMarks["bleed"]> = { pct };
+  for (const k of ["total", "bad", "red", "center", "italic", "underline", "bold"] as const) { const n = pick(k); if (n !== undefined) out[k] = Math.floor(n); }
+  return out;
+}
+
 const clampDemotion = (d: MarkDemotion): MarkDemotion => ({
   kind: String(d.kind ?? "?").slice(0, 24), why: String(d.why ?? "?").slice(0, 24),
   ...(d.sample ? { sample: String(d.sample).slice(0, 20) } : {}), ...(d.by ? { by: d.by } : {}),
@@ -149,7 +185,8 @@ export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new
   const base: FormatMarks = p
     ? { planned: { ...(p.planned ?? {}) }, ...(p.kept ? { kept: { ...p.kept } } : {}), ...(p.applied ? { applied: { ...p.applied } } : {}),
         demoted: [...(p.demoted ?? [])].map(clampDemotion),
-        ...(typeof p.breaks === "number" ? { breaks: p.breaks } : {}), ...(typeof p.breakFails === "number" ? { breakFails: p.breakFails } : {}), ...(typeof p.bleed === "number" ? { bleed: p.bleed } : {}) }
+        ...(typeof p.breaks === "number" ? { breaks: p.breaks } : {}), ...(typeof p.breakFails === "number" ? { breakFails: p.breakFails } : {}),
+        ...(bleedOf(p.bleed) ? { bleed: bleedOf(p.bleed)! } : {}), ...(typeof p.htmlMode === "number" && p.htmlMode > 0 ? { htmlMode: p.htmlMode } : {}) }
     : { planned: {}, demoted: [] };
   const r = (report && typeof report === "object" ? report : {}) as Record<string, unknown>;
   const counts = (v: unknown): Record<string, number> => {
@@ -163,10 +200,11 @@ export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new
   /* 러너의 `kept` 는 서버 `kept` 와 같아야 정상이다 — 다르면 러너 값을 **덮지 않고** 서버 값을 둔다(서버가 내려보낸 수가 사실이다). 서버 값이 없을 때만 받는다. */
   if (!base.kept) { const k = counts(r.kept); if (Object.keys(k).length) base.kept = k as Partial<Record<MarkKind, number>>; }
   const num = (v: unknown): number | undefined => { const n = Number(v); return v !== undefined && v !== null && Number.isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : undefined; };
-  const breaks = num(r.breaks), breakFails = num(r.breakFails), bleed = num(r.bleed);
+  const breaks = num(r.breaks), breakFails = num(r.breakFails), bleed = bleedOf(r.bleed), htmlMode = num(r.htmlMode);
   if (breaks !== undefined) base.breaks = Math.floor(breaks);
   if (breakFails !== undefined) base.breakFails = Math.floor(breakFails);
-  if (bleed !== undefined) base.bleed = bleed;   // 🔴 없으면 안 만든다 — «못 쟀다»는 «0%»가 아니다
+  if (bleed) base.bleed = bleed;   // 🔴 없으면 안 만든다 — «못 쟀다»는 «0%»가 아니다
+  if (htmlMode !== undefined && htmlMode > 0) base.htmlMode = Math.floor(htmlMode);   // [R9-11] 0 이면 키 없음
   const dem = Array.isArray(r.demoted) ? r.demoted.slice(0, 60) : [];
   for (const x of dem) {
     const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;

@@ -95,9 +95,11 @@ console.log("⑤ 투영·합치기");
   ok("normalizeBlocks — 어긋난 마크는 drops 로 나온다", drops.length === 1 && drops[0].why === "range_invalid");
   const fm = buildFormatMarks([{ type: "para", text: "x", marks: [{ s: 0, e: 1, kind: "value" }, { s: 0, e: 1, kind: "line" }] }], [{ type: "para", text: "x", marks: [{ s: 0, e: 1, kind: "value" }] }], [...dropsToDemotions(drops), { kind: "line", why: "channel_unsupported", by: "server" }]);
   ok("planned{value:1,line:1} · kept{value:1}", fm.planned.value === 1 && fm.planned.line === 1 && fm.kept?.value === 1 && !fm.kept?.line, JSON.stringify(fm));
-  const merged = mergeRunnerFormatMarks(fm, { applied: { value: 1, bogus: -3 }, kept: { value: 9 }, demoted: [{ kind: "table", why: "no_editor_op", sample: "이 표는 스무 자가 넘는 긴 표본 문장입니다 정말로" }, { kind: "value", why: "caret_drift" }], breaks: 7, breakFails: 1, bleed: 12.34 });
+  const merged = mergeRunnerFormatMarks(fm, { applied: { value: 1, bogus: -3 }, kept: { value: 9 }, demoted: [{ kind: "table", why: "no_editor_op", sample: "이 표는 스무 자가 넘는 긴 표본 문장입니다 정말로" }, { kind: "value", why: "caret_drift" }], breaks: 7, breakFails: 1,
+    bleed: { total: 40, bad: 5, pct: 12.34, red: 1, center: 0, italic: 2, underline: 2, bold: 0, samples: ["고객 본문 조각은 안 싣는다"] }, htmlMode: 2 });
   ok("러너 보고 — applied 는 받고 음수는 버리고, kept 는 서버 값이 이기고, 강등은 append(by:runner) · sample 20자", merged.applied?.value === 1 && merged.applied?.bogus === undefined && merged.kept?.value === 1 && merged.demoted.length === 4 && merged.demoted[2].by === "runner" && (merged.demoted[2].sample?.length ?? 0) <= 20, JSON.stringify(merged));
-  ok("breaks·breakFails·bleed 가 실린다(bleed 12.3)", merged.breaks === 7 && merged.breakFails === 1 && merged.bleed === 12.3);
+  ok("breaks·breakFails·bleed(B2 모양 · pct 12.3 · samples 는 버림)·htmlMode 가 실린다", merged.breaks === 7 && merged.breakFails === 1 && merged.bleed?.pct === 12.3 && merged.bleed?.italic === 2 && !("samples" in (merged.bleed ?? {})) && merged.htmlMode === 2, JSON.stringify(merged.bleed));
+  ok("옛 모양(bleed 숫자 하나)도 pct 로 읽는다 · htmlMode 0 이면 키 없음", mergeRunnerFormatMarks(fm, { bleed: 3 }).bleed?.pct === 3 && !("htmlMode" in mergeRunnerFormatMarks(fm, { htmlMode: 0 })));
   const again = mergeRunnerFormatMarks(merged, { demoted: [{ kind: "table", why: "no_editor_op", sample: "이 표는 스무 자가 넘는 긴 표본 문장입니다 정말로" }] });
   ok("재보고 멱등 — 같은 강등이 두 번 쌓이지 않는다", again.demoted.length === 4);
   const noBleed = mergeRunnerFormatMarks(fm, { applied: { value: 1 } });

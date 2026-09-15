@@ -13,21 +13,6 @@ export type CoinItem =
      `blog`(1)·`image`(1)은 옛 글(등급 전)의 원장 행과 카드뉴스 재차감이 아직 부르므로 남긴다. */
   | "post_simple" | "post_standard" | "post_premium";
 
-export const COIN_TABLE: Record<CoinItem, number> = {
-  image: 1, sns: 1, blog: 1, cardnews: 3, landing: 4, video_clip: 2, video_15: 6, video_30: 12, video_60: 28,
-  persona: 15, image_regen: 1, video_pro: 100, managed_extra: 30, hero_ad: 1,
-  account_slot: 0, account_slot_managed: 0,   // 0 = «표에 값 없음» — 호출부가 lib/plans.ts 값을 넘긴다(두 벌 금지)
-  post_simple: 1, post_standard: 2, post_premium: 3,   // [R10-7] 등급 코인 — `COIN_TIERS[k].coins` 는 여기서 파생한다(값 두 벌 금지)
-};
-export const COIN_ITEM_LABEL: Record<CoinItem, string> = {
-  video_60: "숏폼 영상 60초", video_30: "숏폼 영상 30초", video_15: "짧은 영상 15초", video_clip: "짧은 클립 2~5초",
-  cardnews: "카드뉴스 세트", blog: "블로그 글 1건", sns: "SNS 글 1건", landing: "랜딩 1종", image: "이미지 1장",
-  persona: "새 페르소나·전략", image_regen: "이미지 재생성 1장", video_pro: "전문가 영상(외주 제작)",
-  managed_extra: "매니징 초과 요청 처리", hero_ad: "랜딩 히어로 광고판",
-  account_slot: "계정 1개 + 전용 IP(30일)", account_slot_managed: "관리형 계정 1개(30일)",
-  post_simple: "글 1편(간단히)", post_standard: "글 1편(보통)", post_premium: "글 1편(프리미엄)",
-};
-
 /* ═══ [R10-7·8·9 · 사장님 2026-09-16 «글 1개에 6코인 7코인 지불할 사람은 없다 — 최소/중간/최상 퀄리티로 값을 매기자»] ═══
  *   🔴 **등급 셋 · 식은 `pieceCoinCost` 한 곳.** 화면 말은 «간단히 · 보통 · 프리미엄»(«최소»라는 말은 쓰지 않는다 — 고른 고객이 «내 글은 최소구나» 한다).
  *   | 등급 | AI 사진 | 코인 | 분량(쯤) | 구성 | 검색 최적화 |
@@ -45,10 +30,27 @@ export const COIN_TIER_KEYS: readonly CoinTier[] = ["simple", "standard", "premi
 export const DEFAULT_COIN_TIER: CoinTier = "simple";
 export interface CoinTierDef { key: CoinTier; label: string; coins: number; aiImages: [number, number]; chars: number; say: string }
 export const COIN_TIERS: Record<CoinTier, CoinTierDef> = {
-  simple:   { key: "simple",   label: "간단히",   coins: COIN_TABLE.post_simple,   aiImages: [1, 1], chars: 1000, say: "AI가 사진 1장 · 핵심만 1,000자쯤" },
-  standard: { key: "standard", label: "보통",     coins: COIN_TABLE.post_standard, aiImages: [2, 3], chars: 1500, say: "AI가 사진 2~3장 · 목록·표까지 1,500자쯤" },
-  premium:  { key: "premium",  label: "프리미엄", coins: COIN_TABLE.post_premium,  aiImages: [4, 5], chars: 2000, say: "AI가 사진 4~5장 · 자주 묻는 질문까지 2,000자쯤" },
+  simple:   { key: "simple",   label: "간단히",   coins: 1,   aiImages: [1, 1], chars: 1000, say: "AI가 사진 1장 · 핵심만 1,000자쯤" },
+  standard: { key: "standard", label: "보통",     coins: 2, aiImages: [2, 3], chars: 1500, say: "AI가 사진 2~3장 · 목록·표까지 1,500자쯤" },
+  premium:  { key: "premium",  label: "프리미엄", coins: 3,  aiImages: [4, 5], chars: 2000, say: "AI가 사진 4~5장 · 자주 묻는 질문까지 2,000자쯤" },
 };
+
+export const COIN_TABLE: Record<CoinItem, number> = {
+  image: 1, sns: 1, blog: 1, cardnews: 3, landing: 4, video_clip: 2, video_15: 6, video_30: 12, video_60: 28,
+  persona: 15, image_regen: 1, video_pro: 100, managed_extra: 30, hero_ad: 1,
+  account_slot: 0, account_slot_managed: 0,   // 0 = «표에 값 없음» — 호출부가 lib/plans.ts 값을 넘긴다(두 벌 금지)
+  post_simple: COIN_TIERS.simple.coins, post_standard: COIN_TIERS.standard.coins, post_premium: COIN_TIERS.premium.coins,   // [R10-7] 등급 코인 — 사장님 표(위 등급 표)에서 파생한다(값 두 벌 금지)
+};
+export const COIN_ITEM_LABEL: Record<CoinItem, string> = {
+  video_60: "숏폼 영상 60초", video_30: "숏폼 영상 30초", video_15: "짧은 영상 15초", video_clip: "짧은 클립 2~5초",
+  cardnews: "카드뉴스 세트", blog: "블로그 글 1건", sns: "SNS 글 1건", landing: "랜딩 1종", image: "이미지 1장",
+  persona: "새 페르소나·전략", image_regen: "이미지 재생성 1장", video_pro: "전문가 영상(외주 제작)",
+  managed_extra: "매니징 초과 요청 처리", hero_ad: "랜딩 히어로 광고판",
+  account_slot: "계정 1개 + 전용 IP(30일)", account_slot_managed: "관리형 계정 1개(30일)",
+  post_simple: "글 1편(간단히)", post_standard: "글 1편(보통)", post_premium: "글 1편(프리미엄)",
+};
+
+
 /** 화면에 내려보내는 배열 꼴(accounts-list.tiers · plans-list.tiers — A 합의 모양 그대로). */
 export const COIN_TIER_LIST: readonly CoinTierDef[] = COIN_TIER_KEYS.map((k) => COIN_TIERS[k]);
 /** 사장님 문장 — 화면이 그대로 그린다(정본 한 곳). */
