@@ -10,7 +10,7 @@
 **AutoCreate(AC)** = 부수입을 원하는 개인이 여러 계정으로 글·영상을 AI로 만들어 자동 발행하고 광고·제휴 수익을 한 곳에서 보는 토스형 SaaS. AM(AutoMarketing)의 엔진을 이식하고 겉(제품·화면·계정 모델·수익 집계·결제·운영센터)은 새로 짰다.
 
 - **개발 라운드 전부 종료**: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · R5 · R6 + KICC 이중 MID. 설계(`docs/DESIGN.md`) 대비 미개발 = 외부 선결조건(유튜브 심사 등)이 막은 것 + **§6 «사장님 실측 발견 5건»(진행 중)**.
-- **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회) · 로컬 main `d5e18a7`(B-1·A·B2·B 머지 · 미배포 · 배포 #7 후보) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
+- **라이브 = main `e7bd0c7`**(배포 #6 + 핫픽스 6회) · 로컬 main `5582363`(R6.5 전부 머지 · 미배포 · C 2차 뒤 배포 #7) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
 - **결제(KICC) 실돈 실측 통과**(2026-09-15): 카드 등록(keyin MID) → ₩5,500 청구 → ₩2,000 부분 취소 → ₩3,500 환불 · 카드 최종 0원.
 - 운영센터 `/ops` · `admin`/`admin1234`(**사장님 아직 안 바꿈**) · MIS 허브 SSO 카드 ⑥ 라이브.
 
@@ -71,12 +71,12 @@
 | 세션(`ListAgents`) | 역할 | 폴더 | 브랜치 | 압축 시점 상태 |
 |---|---|---|---|---|
 | `autocreate-ca` | 메인 | `AutoCreate` | `main` | — |
-| `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `fix/slots-skip-reason` | ✅ 머지됨(`05a5293`) · 대기 |
-| `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | ✅ 전부 머지됨(`…1a290df`·`2b2bfab` r2Delete 헬퍼) · 대기 |
-| `autocreate-b2-e4` | **B2**(러너·발행) | `AutoCreate-B2` | `feature/runner-dist` | ✅ 머지됨(`99a4a50` 배포 zip·다운로드·자동 업데이트·지문·rotate · `5638765` alt · `17a7f5d`) · DDL 0012 적용 · 대기 |
-| `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | ✅ 머지됨(`8dfa5a1`·`f5805d2`) · 진행 중: «건너뛰어요» = `skipReason` 만(AC-47) + 러너 화면(내려받기 API→url · 열쇠 다시 받기 · 다른 PC 표시) |
+| `autocreate-b-ae` | **B**(결제·운영센터·감사) | `AutoCreate-B` | `audit/design-b` | 전수조사 §7·§11·§12·§14·§15·§16 → `audit/2026-09-15-B.md` |
+| `autocreate-b-53` | **B-1**(영상·내보내기·소재) | 창은 `AutoCreate-B` · **`cd ../AutoCreate-B1`** 로 일함 | `feature/p1r6-back1` | 전수조사 §4·§5·§5C·§16B·§6·§10(영상 축 고객 경로) → `audit/2026-09-15-B1.md` |
+| `autocreate-b2-e4` | **B2**(러너·발행) | `AutoCreate-B2` | `feature/runner-dist` | ✅ 머지됨(`99a4a50` 배포 zip·다운로드·자동 업데이트·지문·rotate · `5638765` alt · `17a7f5d`) · `bbec8ce` runner-list 신호) · DDL 0012 적용 · 한 줄(Content-Disposition·«열쇠») 뒤 전수조사 §2·§8·§9 → `audit/2026-09-15-B2.md` |
+| `autocreate-a-cc` | **A**(화면) | `AutoCreate-A` | `feature/p1r6-front` | ✅ 전부 머지됨(`…f982d0d` 건너뛰어요 정정 · `4a7c45e` 러너 화면) · 조사 1건: 시안 v4 ↔ 실제 화면 표(`audit/2026-09-15-A.md`) |
 | `autocreate-c-41 [3d0736]` | **C**(검증·새 세션) | `AutoCreate-C` | `verify/p1r6-5` | R6.5 1차 검증 발부(topics-add · 캡션 §5C · A 화면 · 회귀) · 4·5절은 2차 |
-| **`autocreate-b-e9`** | **B(새 세션 · 설계 대비 전수조사)** | **`AutoCreate-B3`**(새 워크트리) | `audit/design-2026-09-15` | 🔴 사장님 지시 — `docs/active/2026-09-15-DESIGN-AUDIT-trigger.md` 대로 조사 중 · 산출물 `docs/active/2026-09-15-DESIGN-AUDIT.md` |
+| **`autocreate-b-e9`** | **B(새 세션 · 설계 대비 전수조사)** | **`AutoCreate-B3`**(새 워크트리) | `audit/design-2026-09-15` | 🔴 사장님 지시 — 트리거 `docs/active/2026-09-15-DESIGN-AUDIT-trigger.md` · 자기 몫 §0·1·3·5B·13·17·19 + 특별 항목 a·b·c + **통합**(`docs/active/2026-09-15-DESIGN-AUDIT.md` · 상위 20 은 직접 되짚기) |
 | ~~`autocreate-c-41 [b3f2d6]`~~ ~~`autocreate-b-8a`~~ ~~`autocreate-a-a9`~~ | 옛 C·옛 B-1·옛 A | — | — | 빈 창 |
 
 - 🔴 B·B-1 이 `AutoCreate-B` 폴더를 공유해 창 표시가 같다 → **모든 보고 첫 줄 = `■ 역할 · 폴더 · 브랜치 · 지금:`**(전 세션 적용). 커밋 전 `git branch --show-current`.
@@ -126,8 +126,8 @@
 2. ✅ **B-1 머지됨(main `04a08c7`)**: `c0fbc2b` `POST /api/topics-add`(400 title·banned_category·duplicate(+topic 동봉)·channel · 429 rate · Topic.source ai|manual · manual 맨 위) · `84a2372` 캡션 §5C(image{prompt,caption?} 분리 · 묘사문 7패턴 금칙 · captionRate naver 0.3/tistory 0.2/blogger·WP 0.5 · alt 는 prompt 파생). 완료: 글 실호출 1건(t207 piece 330 · $0.34 · 캡션 1/6 «자리마다 쪽지랑 같이 올려두니 뿌듯했어요» · 묘사문 0) · 단독어 5개(`1a290df`). 남은 것: R2 `autocreate/207/` 잔재 + `r2Delete` 헬퍼 · B2 몫 `lib/publish/wordpress.ts:71` alt_text 를 `piece_assets.meta.alt` 로.
 3. ✅ **A 머지됨(main `d0b186e`)** · 🔴 정정 진행 중 — «이번엔 건너뛰어요» 화면 규칙(자리 날짜−오늘 < lead)은 **틀렸다**(제작 스텝 창은 «오늘~오늘+lead» = lead 안 자리도 다음 produceHour 틱에 만든다). 서버 `skipReason:"too_soon"`(B) 만으로 판정하게 A 수리 중: `8dfa5a1` «내 소재 넣기» 시트(→ director 직행 · duplicate→기존으로 · «직접» 필 · «검색량 모름») · 자동 편성 꺼짐 배너(홈·편성표 · 켜기 동기화 · 규칙 0 숨김) · «이번엔 건너뛰어요»(skipReason too_soon 우선). 스샷 `_shots/r6f-*.png`.
 4. ✅ **B2 머지됨**: `scripts/build-runner.mts`(재현 가능 zip · 의존성 0 zip 코덱) → R2 `autocreate/runner/v1.1.3.zip`+`latest.json` · `/api/runner-download`(로그인·«플랜 한도>0»·감사 · 10분 presign) · 하트비트 자동 업데이트(sha256 · 옛 판 보존) · 기기 지문(`x-runner-fp` 전 요청 · 인증 자리) · `/api/runner-rotate`(지문도 초기화) · 실측 23/23 · 하니스 trial. **셀렉터 서버 배포 = 1단계(표만 · 버전+카나리+폴백) R7 · 2단계(절차 DSL) 보류** · 복제 방어선 = «봐도 못 굴린다»(토큰·테넌트·묶기). 🔴 화면은 A 진행 중(내려받기 버튼이 JSON 새 탭 → API→url).
-5. **C 1차 발부됨**(`verify/p1r6-5` · 보고서 `docs/history/2026-09-15-R6.5-C-report.md`) · A(건너뛰어요 정정 + 러너 화면) 머지 뒤 **2차 발부(러너 배포 절 + skipReason 절)** → 배포 #7.
-6. 🔴 **설계 대비 전수조사**(사장님 지시 · 새 B `autocreate-b-e9`) → 결과 `DESIGN-AUDIT.md` 의 «R7 제안 묶음 3» 이 다음 라운드의 유일한 입력. 사장님이 짚은 것: 영상 축이 고객 화면에 안 보임(레지스트리 planned) · «있지만 안 되는 것» 많음 · 탈퇴 시 R2 파기 없음(B-1 발견).
+5. ✅ R6.5 코드 전부 main(`5582363`) · **C 1차 진행 중 · 2차(skipReason·러너 배포 절) 예고됨** → «배포 가능» → 배포 #7. 남은 한 줄: B2 Content-Disposition(파일명 `autocreate-runner-v1.1.3.zip`)·«열쇠 붙여넣기».
+6. 🔴 **설계 대비 전수조사**(사장님 지시 · **분담**: 새 B 통합+§0·1·3·5B·13·17·19+특별 항목 / B2 §2·8·9 / B-1 §4·5·5C·16B·6·10 / B §7·11·12·14·15·16 / A 시안↔화면 · 각자 `docs/active/audit/2026-09-15-<역할>.md`) → 결과 `DESIGN-AUDIT.md` 의 «R7 제안 묶음 3» 이 다음 라운드의 유일한 입력. 사장님이 짚은 것: 영상 축이 고객 화면에 안 보임(레지스트리 planned) · «있지만 안 되는 것» 많음 · 탈퇴 시 R2 파기 없음(B-1 발견).
 
 ### 사장님 결정 대기
 - **실제 발행 GO** — 198 의 12:30 예약 글(@endyd116 실블로그)을 진짜 올릴지(러너를 이 PC 에 붙임 + 네이버 로그인 1회 필요). 러너 패키지가 없어 «집PC」 등록만 된 상태.
