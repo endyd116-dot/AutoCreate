@@ -6,7 +6,8 @@
  *   [P1R7 §3.3] 자격 보관 동의 — 아이디·비밀번호를 맡기는 채널(session·app_password)은 `agreeCredsStorage:true` 를 받아 `consents(creds_storage)` 1행.
  *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
- *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize? }
+ *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl? }
+ *     · [P1R8 §5.3] `avatarUrl` = 계정 사진(https 만 · 빈 문자열이면 지운다) · `groupName` 은 없으면 만들어 붙인다(같은 채널 안에서만).
  *   POST /api/accounts-oauth-start         { channel } → { url } | step provider_not_configured
  *   GET  /api/accounts-oauth-return?state&code → 302 /app/accounts.html?connected=<channel>
  *   🔴 자격 평문 0(응답·로그·감사). 암호화 = lib/creds-crypto(CREDS_ENC_KEY 폴백 없음 → 정직 500 step creds_key).
@@ -129,6 +130,12 @@ export default async (req: Request): Promise<Response> => {
       let id = await upsertAccount(st.tid, st.channel, handle, ex.token.displayName || null, "oauth", "active");
       if (id === null) { const [row] = await q(sql`SELECT id FROM accounts WHERE tenant_id = ${st.tid} AND channel = ${st.channel} AND handle = ${handle}`); id = n(row?.id); await q(sql`UPDATE accounts SET status = 'active', last_error_kind = NULL, updated_at = NOW() WHERE id = ${id}`); }
       await saveCreds(st.tid, id, "oauth", { ...ex.token }, ex.token.expiresAt);
+      /* [P1R8 §5.3] 프로필 사진 — 토큰 교환 응답에 **이미 들어 있을 때만** 넣는다(추가 호출 0 · 없으면 NULL 그대로).
+         🔴 `COALESCE` 를 쓰지 않고 «있을 때만 UPDATE» 한다 — 고객이 직접 넣은 사진을 재연결이 덮어쓰지 않게. */
+      if (ex.token.avatarUrl && /^https:\/\//i.test(ex.token.avatarUrl)) {
+        await q(sql`UPDATE accounts SET avatar_url = ${ex.token.avatarUrl.slice(0, 400)}, updated_at = NOW()
+          WHERE tenant_id = ${st.tid} AND id = ${id} AND avatar_url IS NULL`);
+      }
       const oslot = await attachAccountToSlot(st.tid, id, st.uid);   // [P1R7 §3.6] 산 슬롯이 있으면 붙인다(세션 연결과 같은 규칙)
       await writeAudit({ tenantId: st.tid, action: "account_add", actorType: "user", actorId: st.uid, ip: clientIp(req), target: `account:${id}`, detail: { channel: st.channel, handle, method: "oauth", slotId: oslot?.id ?? null } });
       return back(`connected=${st.channel}`);
@@ -225,6 +232,13 @@ export default async (req: Request): Promise<Response> => {
         const pid = n(b.personaId);
         if (pid) { const [p] = await q(sql`SELECT id FROM personas WHERE tenant_id = ${tid} AND id = ${pid}`); if (!p) return badRequest("페르소나를 찾을 수 없어요.", "persona"); }
         sets.push(sql`persona_id = ${pid || null}`);
+      }
+      /* [P1R8 §5.3] 계정 사진 — 고객이 직접 넣거나 지운다(빈 문자열 = 지우기).
+         🔴 **https 만** 받는다: http 사진을 우리 화면(https)에 걸면 브라우저가 막아서 «넣었는데 안 보인다»가 된다. */
+      if (b.avatarUrl !== undefined) {
+        const av = s(b.avatarUrl, 400);
+        if (av && !/^https:\/\//i.test(av)) return badRequest("사진 주소는 https 로 시작해야 해요.", "avatarUrl");
+        sets.push(sql`avatar_url = ${av || null}`);
       }
       if (b.proxyUrl !== undefined) { const px = s(b.proxyUrl, 200); if (px && !/^(https?|socks5?):\/\//i.test(px)) return badRequest("프록시 주소 형식을 확인해 주세요.", "proxy"); sets.push(sql`proxy_url = ${px || null}`); }
       /* [P1R7-B2 §2.5-⑦] **계정 묶음** — 한 계정이 정지되면 예약을 같은 묶음의 다른 계정으로 넘긴다(`reassignSlots` 가 이 값을 본다).
