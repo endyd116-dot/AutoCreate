@@ -156,7 +156,10 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
  */
 function buildOverlayHtml(payload) {
   const { out, overlay, captions } = payload;
-  const safe = overlay?.safeZone ?? { top: 220, bottom: 300 };
+  /* 🔴 폴백을 **가장 보수적인 값**으로 바꿨다(R8-A §3 · 2026-09-15). 종전 폴백 220/300 은
+     쇼츠·릴스·틱톡 **셋 다 미달**이라, 서버가 채널값을 안 보내면 자막이 UI 에 먹혔다. 모르면 안전한 쪽(AC-9). */
+  const safe = overlay?.safeZone ?? { top: 220, bottom: 450, side: 60 };
+  const side = Number(safe.side ?? 60);
   const preset = captions?.preset ?? "keyword_center";
   const size = preset === "talking_big" ? 92 : preset === "clip_top" ? 64 : 78;
   const pos = preset === "clip_top" ? `top:${safe.top}px;` : `bottom:${safe.bottom}px;`;
@@ -165,10 +168,13 @@ function buildOverlayHtml(payload) {
   @font-face{font-family:Pretendard;src:local("Pretendard"),local("Pretendard Variable");}
   html,body{margin:0;padding:0;background:transparent;width:${out.w}px;height:${out.h}px;overflow:hidden;}
   body{font-family:Pretendard,"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
-  #cap{position:absolute;left:60px;right:60px;${pos}text-align:center;font-weight:800;font-size:${size}px;line-height:1.25;
+  #cap{position:absolute;left:${side}px;right:${side}px;${pos}text-align:center;font-weight:800;font-size:${size}px;line-height:1.25;
        color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.75),0 0 6px rgba(0,0,0,.9);white-space:pre-wrap;}
   #cap .kw{color:#ffe14d;}
-  #badge{position:absolute;top:${Math.max(24, safe.top - 140)}px;right:44px;padding:14px 24px;border-radius:999px;
+  /* 배지는 안전영역 «안»에 둔다. 종전 safe.top - 140 은 안전영역 위쪽 바깥이라,
+     쇼츠(상단 UI 180px) 기준 top=80px 로 배지가 통째로 UI 에 가려졌다 — 그 배지가 제휴 고지다(16B).
+     품질 문제가 아니라 정책 문제라 자리를 안으로 들였다. */
+  #badge{position:absolute;top:${safe.top}px;right:${Math.max(side, 44)}px;padding:14px 24px;border-radius:999px;
          background:rgba(0,0,0,.62);color:#fff;font-size:34px;font-weight:700;}
   #end{position:absolute;left:80px;right:80px;top:50%;transform:translateY(-50%);text-align:center;color:#fff;
        font-size:72px;font-weight:800;line-height:1.3;text-shadow:0 4px 18px rgba(0,0,0,.8);}

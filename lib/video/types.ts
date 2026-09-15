@@ -13,6 +13,31 @@ export type JudgeGrade = "P0" | "P1" | "P2";
 export type TtsProvider = "typecast" | "gemini";
 
 export const VIDEO_CHANNELS: ReadonlySet<string> = new Set<VideoChannel>(["youtube_shorts", "naver_clip", "reels", "threads"]);
+
+/**
+ * 🔴 **채널별 안전영역**(R8-A §3 · 2026-09-15). 1080×1920 기준으로 **플랫폼 UI 가 화면을 가리는 띠의 두께**다 —
+ *   `top`·`bottom` 만큼은 글자를 두면 안 된다. 좌우는 `side`.
+ *
+ *   🔴 종전엔 이 값이 **한 벌(220/300)로 전 채널 공용**이었고, 게다가 `RenderPayload` 에 **리터럴 타입**으로 박혀 있어
+ *      («safeZone: { top: 220; bottom: 300 }») 채널별로 다르게 두는 것이 **타입 차원에서 불가능**했다.
+ *      그 한 벌의 아래(300)가 **쇼츠·릴스·틱톡 셋 다 미달**이라, 자막 마지막 줄이 채널명·설명 UI 에 먹히고 있었다
+ *      (쇼츠 기준 90px 침범 · 자막 한 줄 높이가 97.5px 이니 사실상 한 줄이 통째로 가려진다).
+ *
+ *   ⚠️ **네이버 클립은 공개 수치를 못 찾았다**(공식 크리에이터 문서 접근 불가 · 우리 계정도 아직 미가입).
+ *      그래서 «모르면 안전한 쪽»으로 **가장 보수적인 값**(릴스와 같게)을 쓴다 — 가입해서 실측하면 좁힌다.
+ *   ⚠️ `threads` 는 영상 채널 목록에 있지만 세로 숏폼 UI 가 릴스와 같은 계열이라 릴스 값을 따른다(**추정**).
+ */
+export const SAFE_ZONE_OF: Readonly<Record<VideoChannel, { top: number; bottom: number; side: number }>> = Object.freeze({
+  youtube_shorts: { top: 180, bottom: 390, side: 60 },   // 공개 가이드(안전영역 900×1350)
+  reels:          { top: 220, bottom: 450, side: 60 },   // 공개 가이드(안전영역 1010×1280 · 아래 420~450 중 넓은 쪽)
+  naver_clip:     { top: 220, bottom: 450, side: 60 },   // ⚠️ 추정 — 공개 수치 없음 · 가장 보수적인 값
+  threads:        { top: 220, bottom: 450, side: 60 },   // ⚠️ 추정
+});
+/** 채널을 모를 때(옛 piece·수동 호출) — 가장 보수적인 값. «모르면 안전한 쪽»(AC-9). */
+export const SAFE_ZONE_FALLBACK: { top: number; bottom: number; side: number } = { top: 220, bottom: 450, side: 60 };
+export function safeZoneOf(channel: unknown): { top: number; bottom: number; side: number } {
+  return SAFE_ZONE_OF[String(channel) as VideoChannel] ?? SAFE_ZONE_FALLBACK;
+}
 export const VIDEO_FORMATS: readonly VideoFormat[] = ["graphic", "talking", "clip"];
 export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60];
 export const VIDEO_STAGES: readonly VideoStage[] = ["script", "tts", "clips", "render", "judging", "done", "failed"];
@@ -79,7 +104,11 @@ export interface RenderPayload {
   scenes: RenderScene[];
   captions: { preset: "keyword_center" | "talking_big" | "clip_top"; phrases: RenderPhrase[]; srtKey: string };
   audio: { narration: { key: string; startMs: number }[]; bgm: { key: string; gainDb: -18 } | null; sfx: [] | null; loudnorm: { I: -16; TP: -1.5; LRA: 11 } };
-  overlay: { badge: { text: string; corner: "tr" } | null; safeZone: { top: 220; bottom: 300 }; endcard: { text: string; url?: string } | null };
+  /* 🔴 `safeZone` 은 **채널마다 다르다**(`SAFE_ZONE_OF`) — 종전의 리터럴 타입 `{top:220;bottom:300}` 을 열었다.
+     리터럴이면 «고치는 것» 자체가 타입 오류라, 틀린 값이 고쳐질 수 없는 상태였다. */
+  overlay: { badge: { text: string; corner: "tr" } | null; safeZone: { top: number; bottom: number; side?: number }; endcard: { text: string; url?: string } | null };
+  /** 어느 채널로 나가는가 — 안전영역 판정이 이걸로 갈린다(없으면 가장 보수적인 값). */
+  channel?: VideoChannel;
   disclosureCaption: { text: string; untilMs: 3000 } | null;
   /** B2 가 claim 시 채운다(presigned PUT) — B 는 비워 둔다. */
   upload?: { putUrl: string; key: string; posterPutUrl: string; posterKey: string };
