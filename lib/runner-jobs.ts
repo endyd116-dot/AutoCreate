@@ -97,7 +97,8 @@ export interface RunnerPublishPayload {
   title: string;
   bodyHtml: string;
   blocks: Block[];
-  images: { url: string; caption?: string }[];
+  /** caption = 독자가 보는 한 줄(대부분 없다) · alt = 안 보이는 접근성 설명(§5C · B-1 84a2372). 둘은 다른 칸이다. */
+  images: { url: string; caption?: string; alt?: string }[];
   tags: string[];
   disclosure: string | null;
   scheduledFor?: string;
