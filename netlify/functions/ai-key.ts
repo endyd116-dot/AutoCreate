@@ -74,7 +74,8 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, fallback: b.on,
         message: b.on
           ? "내 키가 안 될 때는 저희 키로 대신 만들어 드려요. 그때마다 알려 드릴게요."
-          : "이제 내 키가 안 되면 그 회차는 만들지 않고 알려만 드려요." });
+          /* 🔴 [CLAUDE §3] «알려만 드려요» 는 **발을 빼는 말**이라 쓰지 않는다 — 우리가 무엇을 하는지로 말한다. */
+          : "이제는 내 키로만 만들어요. 키가 안 될 때는 그 회차를 건너뛰고 바로 알려 드릴게요." });
     }
 
     return json({ ok: false, error: "not_found" }, 404);

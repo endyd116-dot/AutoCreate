@@ -89,7 +89,7 @@ export function decideGap(inp: GapInput): GapDecision {
   if (!inp.hasProxy) {
     return {
       gapMin: ACCOUNT_GAP_MIN_DEFAULT, floorMin: ACCOUNT_GAP_MIN_DEFAULT, basis: "shared_ip",
-      risk: "이 계정들은 같은 인터넷 주소로 나가요. 시간을 붙이면 «한 사람이 여러 계정을 돌린다»로 보일 수 있어서 30분 간격을 지킵니다.",
+      risk: "이 계정들은 같은 인터넷 주소로 나가요. 시간을 벌려 두면 계정마다 따로 움직이는 것처럼 보여서, 30분 간격을 기본으로 지켜 드려요.",
     };
   }
   /* 🔴 **«배정됐다»가 «다르다»가 아니다.** 프록시가 죽어 있으면 우리 집 IP 로 나간다 —
@@ -107,7 +107,7 @@ export function decideGap(inp: GapInput): GapDecision {
   if (sameIp) {
     return {
       gapMin: ACCOUNT_GAP_MIN_DEFAULT, floorMin: ACCOUNT_GAP_MIN_DEFAULT, basis: "shared_ip",
-      risk: "이 계정과 같은 인터넷 주소를 쓰는 계정이 있어요. 시간을 붙이면 함께 정지될 수 있어서 30분 간격을 지킵니다.",
+      risk: "이 계정과 같은 인터넷 주소를 쓰는 계정이 있어요. 서로 시간을 벌려 두는 편이 안전해서 30분 간격을 기본으로 지켜 드려요.",
     };
   }
   if (unmeasured) {
