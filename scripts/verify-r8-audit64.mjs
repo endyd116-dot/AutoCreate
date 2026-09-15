@@ -104,8 +104,14 @@ const FOUR = [
     } },
   { n: 11, name: "러너 PC 세션 파일 암호화",
     check: () => {
-      const hits = anyFile(["runner/lib/browser.mjs", "runner/lib/profile.mjs", "runner/index.mjs"], /createCipheriv|aes-256|encrypt/i);
-      return hits.length ? ["닫힘", hits.join(",")] : ["열림", "runner 자체 코드에 암호화 0(node_modules 매치는 남의 코드다) — 고객 PC 에 세션이 평문"];
+      /* 🔴 [메인 2026-09-16 · AC-75] 옛 파일 이름으로 재고 있었다. B2 가 §3.1 에서 **`runner/lib/profile-seal.mjs`** 로 만들었고
+         `runner/core.mjs` 가 실제로 `sealProfile`·`unsealProfile` 을 부른다(:155·:259) · `ac-runner.mjs` 가 `sealLine` 을 부른다.
+         🔴 «있나»가 아니라 «**제품이 부르나**»까지 본다 — 파일만 있고 안 부르면 이 칸은 안 닫힌다(AC-69). */
+      const has = anyFile(["runner/lib/profile-seal.mjs", "runner/lib/browser.mjs", "runner/lib/profile.mjs", "runner/index.mjs"], /createCipheriv|aes-256|encrypt/i);
+      const used = anyFile(["runner/core.mjs", "runner/ac-runner.mjs"], /sealProfile|unsealProfile|profile-seal/);
+      if (has.length && used.length) return ["닫힘", `${has.join(",")} · 부르는 곳 ${used.join(",")}`];
+      if (has.length) return ["열림", `암호화는 있는데 **부르는 곳이 0**이다(${has.join(",")}) — 만들어 놓고 아무도 안 쓴다`];
+      return ["열림", "runner 자체 코드에 암호화 0(node_modules 매치는 남의 코드다) — 고객 PC 에 세션이 평문"];
     } },
   { n: 12, name: "클립 «앱에서 올리기» 딥링크",
     check: () => {
@@ -251,7 +257,12 @@ const THREE_REST = [
   ["F 팀 축 4(시트·초대·accept·팀 승인)", () => [yes(SERVER_TEXT.includes("team-invite") || SERVER_TEXT.includes("team_members")), "lib·netlify·public 전수 0건"]],
   ["H1 카드뉴스 kind", () => [yes(inFile("lib/slots.ts", /cardnews/)), "verify-cardnews PASS 20"]],
   ["H3 상태 16종", () => [yes(inFile("public/js/ui.js", /UI\.SLOT_STATUS/)), "UI.SLOT_STATUS 17종"]],
-  ["I 러너 트레이 앱 2", () => [yes(existsSync("runner/tray.mjs") || existsSync("runner/tray")), "트레이 앱 파일 0"]],
+  /* 🔴 [메인 2026-09-16] **안 만들기로 결정한 항목**이다(DESIGN §8.1 · 사유 `docs/active/2026-09-15-runner-tray-decision.md`).
+     AC-75 가 적은 그대로 — «**없는 항목을 미개발로 세는 것도 거짓말이다**». 진척률이 실제보다 낮게 나오고,
+     아무도 안 만들 일을 다음 라운드가 계속 떠안는다. ⇒ «열림»이 아니라 **분모에서 뺀다**(아래 DROPPED).
+     🔴 되살아나면(=누가 트레이를 만들면) 설계와 어긋난 것이니 **빨갛게** 잡는다. */
+  ["I 러너 트레이 앱 2 — **안 만들기로 결정**", () => [existsSync("runner/tray.mjs") || existsSync("runner/tray") ? "열림" : "제외",
+    "DESIGN §8.1 · 자동 시작 옵트인으로 대체(재부팅 복귀만 진짜 문제였다) · 자기 PC 러너 실고객 0명", null]],
 ];
 for (const [name, fn] of THREE_REST) {
   let out = fn();
@@ -284,14 +295,17 @@ else {
      칸 = 조사 §10.3 의 ③54 + ④13(ai-meter/ai-key 를 쪼갠 값 · 메인 확정 2026-09-15). */
   /* 🔴 묶음 행은 **내부 내역(split)** 이 있으면 그걸로 센다 — 없으면 행 전체가 한 상태다.
      split 없이 «일부» 를 칸 수만큼 세면 «일부» 가 부풀고 닫힘·열림이 둘 다 과소평가된다(첫 판에 일부 15 가 그렇게 나왔다). */
-  let C = 0, P = 0, O = 0;
+  let C = 0, P = 0, O = 0, D = 0;
   for (const r of results) {
     const w = r.w ?? 1;
     if (r.split) { C += r.split[0]; P += r.split[1]; O += r.split[2]; continue; }
+    if (r.state === "제외") { D += w; continue; }   // 🔴 «안 만들기로 결정» 은 분모 밖이다(AC-75)
     if (r.state === "닫힘") C += w; else if (String(r.state).startsWith("🟠")) P += w; else O += w;
   }
   const T = C + P + O;
   console.log(`
-■ **${T}칸 중 닫힘 ${C} · 일부 ${P} · 열림 ${O} (${Math.round((C / T) * 100)}%)**  ← 사장님 보고용 한 줄(분모 = ③54 + ④13)`);
+■ **${T}칸 중 닫힘 ${C} · 일부 ${P} · 열림 ${O} (${Math.round((C / T) * 100)}%)**  ← 사장님 보고용 한 줄` +
+    (D ? `
+   (분모 = ③54 + ④13 = 67 중 **안 만들기로 결정한 ${D}칸을 뺐다** — 없는 항목을 미개발로 세면 그것도 거짓말이다 · AC-75)` : "  (분모 = ③54 + ④13)"));
 }
 process.exit(0);
