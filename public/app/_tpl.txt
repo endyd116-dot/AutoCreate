@@ -521,7 +521,7 @@ await load();
 </div>
 <div class="group">
   <div class="gt">설정</div>
-  <a class="row tap" href="/app/settings.html"><div class="l"><span class="t">계정 · 보안</span><span class="d">비밀번호 · 기기 · 로그아웃</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/app/settings.html"><div class="l"><span class="t">설정</span><span class="d">영상 만들기 · 비밀번호 · 기기 · 로그아웃</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/support.html"><div class="l"><span class="t">문의하기</span><span class="d">막히는 게 있으면 바로 알려 주세요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <button class="row tap" type="button" id="ref"><div class="l"><span class="t">친구 초대</span><span class="d" id="refd">코드를 나눠 주면 둘 다 코인을 받아요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
 </div>
@@ -574,9 +574,10 @@ async function load() {
   const r = await UI.api("/api/accounts-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
   const chs = (D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false })))
-    .filter((c) => !c.status || c.status === "active" || cnt[c.key]); // [v4] 가동 전 채널은 숨긴다(이미 연결된 계정이 있으면 남긴다)
-  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : (SUB[c.key] || "")}</small></button>`).join("");
-  UI.$$("#cg .cgi").forEach((b) => b.onclick = () => connectSheet(chs.find((c) => c.key === b.dataset.k)));
+    .filter((c) => c.status !== "down" || cnt[c.key]); // [R7 §4.1] 아직 안 열린 채널도 흐리게 보여 준다(숨기면 «영상이 통째로 없는» 화면이 된다 · 내려간 채널만 뺀다)
+  const soon = (c) => c.status && c.status !== "active" && !cnt[c.key];   // 아직 안 열린 채널(연결된 계정이 있으면 쓰던 대로 쓴다)
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? "곧 열려요" : (SUB[c.key] || "")}</small></button>`).join("");
+  UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
     ? D.accounts.map((a) => { const relogin = a.status === "pending_login";
@@ -591,6 +592,14 @@ async function load() {
 }
 
 /* ── 연결 시트(채널 방식별 · 계약 §1) ── */
+/* [R7 §4.1] 아직 안 열린 채널 — 왜 지금은 못 붙는지 한 문장으로. 버튼 0(할 수 있는 게 없을 때 Primary 를 만들지 않는다) */
+function soonSheet(c) {
+  const label = c.label || UI.chLabel(c.key);
+  const why = c.category === "video" ? "영상 채널은 심사와 연결 준비가 끝나는 대로 열려요." : "이 채널은 연결 준비가 끝나는 대로 열려요.";
+  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">준비 중이에요 · 곧 열려요</p>
+    <p class="muted" style="margin:0 0 10px">${UI.esc(why)} 열리면 이 자리에서 바로 연결할 수 있어요.</p>
+    <p class="muted" style="margin:0;font-size:12.5px">그동안에도 ${c.category === "video" ? "영상은 만들어 둘 수 있어요 — 만든 영상은 내려받아 앱에서 직접 올리면 돼요." : "다른 채널로는 그대로 나가요."}</p>`, { title: label });
+}
 function connectSheet(c) {
   const k = c.key, label = c.label || UI.chLabel(k);
   if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 발행할 때만 러너가 열어요.</p>
@@ -743,9 +752,13 @@ function personaSheet(parent, a) {
   }) });
 }
 await load();
-=== settings.html | account | 계정 · 보안 ===
-<div class="step-h"><h1>계정 · 보안</h1></div>
+=== settings.html | account | 설정 ===
+<div class="step-h"><h1>설정</h1></div>
+<div class="group" id="kindsg"><div class="gt">만드는 것</div>
+  <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
+</div>
 <div class="group">
+  <div class="gt">계정 · 보안</div>
   <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
   <div class="kv"><span class="k">이메일 인증</span><span class="v" id="verified"></span></div>
   <div id="mailBn"></div>
@@ -758,6 +771,27 @@ await load();
 <div class="group" id="expg"><div class="gt">내 자료</div><div id="exp"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 --- script ---
 const me = await UI.boot("account"); if (!me) return;
+/* [R7 §1.1] 영상 만들기 — GET/POST /api/tenant-settings { kinds, kindsSet }.
+   🔴 «글»은 밑바탕이라 서버가 항상 남긴다(영상만 켜는 길은 없다) · kindsSet=false(온보딩 안 거친 테넌트)도 토글은 보이고 «꺼짐» 이다.
+   영상 채널이 하나도 연결 안 돼 있어도 켤 수 있다 — 만든 뒤 «앱에서 직접 올리기» 로 간다(§1.2). */
+async function loadKinds() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  const on = r.ok && (r.kinds || []).includes("video");
+  const tg = UI.$("#kinds"); tg.setAttribute("aria-checked", on ? "true" : "false");
+  sayKinds(on);
+  UI.toggle(tg, async (next) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { kinds: next ? ["text", "video"] : ["text"] } });
+    if (!rr.ok) { UI.toast(rr.gated ? "" : rr.error || "바꾸지 못했어요"); return false; }
+    const now = (rr.kinds || []).includes("video"); sayKinds(now);
+    UI.toast(now ? "영상도 만들어요" : "이제 글만 만들어요");
+    return now === next ? undefined : false;   // 서버 정규형이 내 조작과 다르면 서버 쪽을 따른다
+  });
+}
+function sayKinds(on) {
+  UI.$("#kindT").firstChild.nodeValue = on ? "글과 영상을 만들어요" : "글만 만들어요";
+  UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
+}
+loadKinds();
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
 /* [P1R6] 인증 메일 «다시 보내기» — 가입 때 메일이 못 갔거나(mail=0) 아직 인증 전이면 배너 한 줄. 인증은 문이 아니라 배너라 가입·사용은 막지 않는다 */
@@ -1292,7 +1326,7 @@ function cleanBody(body) { const c = body.cloneNode(true); c.querySelectorAll(".
 function gateList(g) { return `<div class="gt">발행 전 검사 ${g.ok ? '<span class="pill ok">통과</span>' : '<span class="pill warn">확인 필요</span>'}</div>${g.rewritten ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 번 고쳐 썼어요</p>' : ""}<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>`; }
 /* [P1R5] 영상 심사 = gate.judge(§1.4 done · grade P0/P1/P2 · axes label 만) + 기존 checks */
 function judgeList(g) { const j = g.judge; const jp = j ? UI.JUDGE[j.grade] || ["off", j.grade] : null;
-  return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade); return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger)" : "background:var(--warn-soft);color:#B26A00"}" title="${UI.esc(a.detail || "")}">${UI.esc(a.label)} ${a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과"}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
+  return `<div class="gt">심사 ${jp ? `<span class="pill ${jp[0]}">${jp[1]}</span>` : ""}<span class="muted" style="font-weight:500;margin-left:auto">P0 차단 · P1 1회 재생성 · P2 기록</span></div>${j?.grade === "P0" ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">세 번 고쳐도 통과하지 못해 사람이 봐 주셔야 해요 · 다시 만들거나 버려 주세요</p>' : j?.repaired ? '<p class="muted" style="margin:0 16px 8px;font-size:13px">한 컷을 다시 만들어 통과했어요</p>' : ""}<div class="chips" style="padding:0 16px 10px;gap:6px">${(j?.axes || []).map((a) => { const g = a.grade || (a.pass ? "P2" : j.grade); return `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px;${a.pass ? "" : g === "P0" ? "background:var(--danger-soft);color:var(--danger)" : "background:var(--warn-soft);color:#B26A00"}">${UI.esc(a.label)}${a.detail ? " " + UI.esc(a.detail) : ""} ${a.pass ? "✓" : g === "P0" ? "! 차단" : "P1 재생성 통과"}</span>`; }).join("")}</div>${(g.checks || []).length ? `<div class="gate">${g.checks.map((c) => `<div class="g ${c.pass ? "" : "no"}"><i>${c.pass ? "✓" : "!"}</i><span>${UI.esc(c.label)}</span>${c.detail ? `<small>${UI.esc(c.detail)}</small>` : ""}</div>`).join("")}</div>` : ""}`; }
 const LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 const assetOf = (kind) => (P.assets || []).find((a) => a.kind === kind) || null;
 const mmss = (ms) => { const s = Math.round((ms || 0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };

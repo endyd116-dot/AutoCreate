@@ -3,18 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>계정 · 보안 · AutoCreate</title>
+<title>설정 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=9">
+<link rel="stylesheet" href="/css/ac.css?v=10">
 </head>
 <body>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
-<div class="step-h"><h1>계정 · 보안</h1></div>
+<div class="step-h"><h1>설정</h1></div>
+<div class="group" id="kindsg"><div class="gt">만드는 것</div>
+  <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
+</div>
 <div class="group">
+  <div class="gt">계정 · 보안</div>
   <div class="kv"><span class="k">이메일</span><span class="v" id="email"></span></div>
   <div class="kv"><span class="k">이메일 인증</span><span class="v" id="verified"></span></div>
   <div id="mailBn"></div>
@@ -33,6 +37,27 @@
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
+/* [R7 §1.1] 영상 만들기 — GET/POST /api/tenant-settings { kinds, kindsSet }.
+   🔴 «글»은 밑바탕이라 서버가 항상 남긴다(영상만 켜는 길은 없다) · kindsSet=false(온보딩 안 거친 테넌트)도 토글은 보이고 «꺼짐» 이다.
+   영상 채널이 하나도 연결 안 돼 있어도 켤 수 있다 — 만든 뒤 «앱에서 직접 올리기» 로 간다(§1.2). */
+async function loadKinds() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  const on = r.ok && (r.kinds || []).includes("video");
+  const tg = UI.$("#kinds"); tg.setAttribute("aria-checked", on ? "true" : "false");
+  sayKinds(on);
+  UI.toggle(tg, async (next) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { kinds: next ? ["text", "video"] : ["text"] } });
+    if (!rr.ok) { UI.toast(rr.gated ? "" : rr.error || "바꾸지 못했어요"); return false; }
+    const now = (rr.kinds || []).includes("video"); sayKinds(now);
+    UI.toast(now ? "영상도 만들어요" : "이제 글만 만들어요");
+    return now === next ? undefined : false;   // 서버 정규형이 내 조작과 다르면 서버 쪽을 따른다
+  });
+}
+function sayKinds(on) {
+  UI.$("#kindT").firstChild.nodeValue = on ? "글과 영상을 만들어요" : "글만 만들어요";
+  UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
+}
+loadKinds();
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
 /* [P1R6] 인증 메일 «다시 보내기» — 가입 때 메일이 못 갔거나(mail=0) 아직 인증 전이면 배너 한 줄. 인증은 문이 아니라 배너라 가입·사용은 막지 않는다 */
