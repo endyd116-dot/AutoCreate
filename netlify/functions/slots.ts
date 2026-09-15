@@ -12,6 +12,7 @@
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireUser, requireWritable } from "../../lib/guards";
+import { gapMinFor } from "../../lib/publish-gap";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { utcDate } from "../../lib/db-util";
@@ -85,10 +86,18 @@ export default async (req: Request): Promise<Response> => {
       if (at.getTime() < Date.now() + 10 * 60_000) return json({ ok: false, step: "too_soon", error: "지금보다 10분 이상 뒤로 잡아 주세요." }, 400);
       if (at.getTime() > Date.now() + 90 * 86400_000) return json({ ok: false, step: "too_far", error: "석 달 안으로 잡아 주세요." }, 400);
 
-      // 캐던스 검사(CLAUDE §4.7) — 같은 채널 계정 간 30분 · 그 계정의 min_gap_min.
+      /* 캐던스 검사(CLAUDE §4.7) — 같은 채널 계정 간 간격 · 그 계정의 min_gap_min.
+         🔴 [R8] 간격 값은 **`lib/publish-gap.ts` 한 곳**에서 온다(계정마다 «우리가 무엇을 아는가»가 다르다).
+         ⚠️ 여기가 **고객이 손으로 시각을 바꾸는 자리**다 — 편성(`lib/slots.ts`)만 고치고 여기를 두면
+            사장님이 원하신 «10:00 / 10:05» 가 **바로 이 문에서 옛 30분으로 거절**된다(C 검증이 짚었다).
+            내가 «값이 나오는 곳은 여기 하나다»라고 주석에 적어 놓고 **두 자리를 안 고쳤다**(AC-59 — 내 주석이 거짓이었다). */
       const accountId = s.account_id ? n(s.account_id) : null;
       const [acc] = accountId ? await q(sql`SELECT min_gap_min, handle FROM accounts WHERE tenant_id = ${tid} AND id = ${accountId}`) : [undefined];
-      const gapAcc = Math.max(ACCOUNT_GAP_MIN, n(acc?.min_gap_min));
+      const gapDec = accountId ? await gapMinFor(tid, accountId) : null;
+      /* 🔴 고객이 **직접 바꾸는 값**이라 그가 내릴 수 있는 **바닥**(floorMin)까지 받아 준다 —
+         자동 편성이 쓰는 `gapMin`(안전 기본)으로 거절하면 §9 의 «우리 판단으로 막지 말라»에 어긋난다. */
+      const gapCh = gapDec ? gapDec.floorMin : ACCOUNT_GAP_MIN;
+      const gapAcc = Math.max(gapCh, n(acc?.min_gap_min));
       const neighbours = await q(sql`SELECT account_id, publish_at FROM slots
         WHERE tenant_id = ${tid} AND id <> ${slotId} AND channel = ${String(s.channel)} AND publish_at IS NOT NULL
           AND status NOT IN ('skipped','failed','reassigned')
@@ -102,7 +111,13 @@ export default async (req: Request): Promise<Response> => {
         if (accountId && n(x.account_id) === accountId && diffMin < gapAcc) {
           return json({ ok: false, step: "cadence", error: `같은 계정의 다른 글과 ${gapAcc}분 이상 띄워 주세요.` }, 409);
         }
-        if (diffMin < ACCOUNT_GAP_MIN) return json({ ok: false, step: "cadence", error: `같은 채널의 다른 글과 ${ACCOUNT_GAP_MIN}분 이상 띄워 주세요.` }, 409);
+        /* 🔴 여기가 **실제로 거절하는 줄**이다 — 위에서 값만 고치고 이 줄을 두면 아무것도 안 바뀐다.
+           `gapCh` 는 그 계정이 내릴 수 있는 바닥이고, 왜 그 값인지는 `gapDec.risk` 가 말한다(막지 않고 말한다 · §9). */
+        if (diffMin < gapCh) {
+          return json({ ok: false, step: "cadence", gapMin: gapCh,
+            error: `같은 채널의 다른 글과 ${gapCh}분 이상 띄워 주세요.`,
+            ...(gapDec?.risk ? { risk: gapDec.risk } : {}) }, 409);
+        }
       }
 
       const newDate = kstDateStr(at);

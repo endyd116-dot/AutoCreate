@@ -20,8 +20,8 @@ import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { q } from "../../lib/accounts";
 import { utcDate } from "../../lib/db-util";
-import { effectiveDailyCap, effectiveMinGapMin } from "../../lib/warmup";
-import { ACCOUNT_GAP_MIN } from "../../lib/best-time";
+import { effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "../../lib/warmup";
+import { gapMinFor } from "../../lib/publish-gap";
 import { publishOne } from "../../lib/publish-one";
 import { publishPortStatus } from "../../lib/cron/publish-port";
 import { pausedAccountIds } from "../../lib/account-slots";
@@ -37,7 +37,10 @@ export default async (req: Request): Promise<Response> => {
   const auth = requireUser(req); if (!auth.ok) return auth.res;
   const tid = auth.tid; const uid = Number(auth.user.uid);
   try {
-    const b = await readJson<{ pieceId?: unknown }>(req);
+    const b = await readJson<{ pieceId?: unknown; warmupOverride?: unknown }>(req);
+    /* 🔴 [CLAUDE §9] 고객이 «이번 주 권장량을 넘겨서라도 올릴래»를 **직접 눌렀나**.
+       저장하지 않는다 — **그 회차만**이다(끄는 것은 계정 설정의 `warmup_off` 가 따로 있다). */
+    const warmupOverride = b.warmupOverride === true;
     const pieceId = n(b.pieceId); if (!pieceId) return badRequest("어떤 글을 올릴지 골라 주세요.", "pieceId");
     const w = await requireWritable(tid); if (!w.ok) return w.res;
 
@@ -78,11 +81,19 @@ export default async (req: Request): Promise<Response> => {
         return json({ ok: false, step: "cadence", error: "이 계정은 코인이 모자라 쉬고 있어요. 코인을 채우면 바로 올릴 수 있어요." }, 400);
       }
       const warm = { openedAt: (p.opened_at as string | null) ?? null, createdAt: (p.account_created_at as string | null) ?? null, off: p.warmup_off === true, postsThisWeek: n(p.posts_this_week) };
-      const cap = effectiveDailyCap(n(p.daily_cap) || 2, warm);
+      /* 🔴 [R8 · CLAUDE §9] 워밍업은 **우리 추정**이지 규칙이 아니다 — 고객이 «이번만 올릴래»를 **직접 눌렀으면** 넘겨 준다.
+         끄는 게 아니라 **그 회차만**이고 저장하지 않는다. `daily_cap`(고객이 정한 값)은 그대로 지킨다. */
+      const cap = effectiveDailyCap(n(p.daily_cap) || 2, warm, new Date(), { override: warmupOverride });
       if (n(p.posts_today) >= cap) {
+        const risk = warmupRisk(warm);
+        /* 🔴 **막을 거면 넘길 길과 이유를 같이 준다**(§9-1 «무엇이·왜·어떻게»).
+           `canOverride` 를 보고 화면이 «그래도 올릴래요» 단추를 띄운다 — 지금은 «내일 다시»만 있어 길이 없었다. */
+        const byWarmup = cap === 0 && n(p.daily_cap) > 0 && !warmupOverride;
         return json({ ok: false, step: "cadence", capped: true, dailyCap: cap, postsToday: n(p.posts_today),
+          ...(byWarmup ? { canOverride: true, overrideKey: "warmupOverride" } : {}),
+          ...(risk ? { risk } : {}),
           error: cap === 0
-            ? "이 계정은 이번 주 몫을 다 썼어요(새 계정은 천천히 늘려요). 내일 다시 올려 주세요."
+            ? "이 계정은 이번 주 권장량을 다 썼어요(새 계정은 천천히 늘려요)."
             : `오늘 이 계정으로 ${cap}건까지 올릴 수 있어요. 내일 다시 올리거나 다른 계정을 써 주세요.` }, 400);
       }
       const gapMin = effectiveMinGapMin(n(p.min_gap_min) || 180, warm);
@@ -94,15 +105,20 @@ export default async (req: Request): Promise<Response> => {
             error: `이 계정은 글 사이를 ${gapMin}분 띄워요. ${kstAt(nextOk)}부터 올릴 수 있어요.` }, 400);
         }
       }
-      /* 🔴 같은 채널의 **다른 계정** 과도 30분을 띄운다(§7.3 · 같은 채널에 몰아 올리면 묶여 보인다). */
+      /* 🔴 같은 채널의 **다른 계정** 과도 간격을 띄운다(§7.3 · 같은 채널에 몰아 올리면 묶여 보인다).
+         [R8] 간격은 **`lib/publish-gap.ts` 한 곳**에서 온다 — 여기가 **고객이 «지금 올리기»를 직접 누르는 자리**라
+         그가 내릴 수 있는 **바닥**(floorMin)을 쓴다(자동 편성이 쓰는 안전 기본으로 거절하면 §9 에 어긋난다).
+         ⚠️ 종전엔 상수 30 이었다 — 편성만 고치고 여기를 두면 «10:00 / 10:05» 가 **이 문에서 거절**된다. */
+      const gapDec = await gapMinFor(tid, accountId);
+      const gapCh = gapDec.floorMin;
       const [near] = await q(sql`SELECT MAX(x.published_at) AS at FROM posts x JOIN accounts b ON b.id = x.account_id
         WHERE x.tenant_id = ${tid} AND b.channel = ${String(p.channel)} AND x.account_id <> ${accountId}
-          AND x.published_at > NOW() - make_interval(mins => ${ACCOUNT_GAP_MIN})`);
+          AND x.published_at > NOW() - make_interval(mins => ${gapCh})`);
       const nearAt = utcDate(near?.at);
       if (nearAt) {
-        const nextOk = new Date(nearAt.getTime() + ACCOUNT_GAP_MIN * 60_000);
-        return json({ ok: false, step: "cadence", retryAt: nextOk.toISOString(), gapMin: ACCOUNT_GAP_MIN,
-          error: `같은 채널에 방금 다른 계정으로 글이 나갔어요. ${kstAt(nextOk)}부터 올릴 수 있어요(계정끼리 ${ACCOUNT_GAP_MIN}분 띄워요).` }, 400);
+        const nextOk = new Date(nearAt.getTime() + gapCh * 60_000);
+        return json({ ok: false, step: "cadence", retryAt: nextOk.toISOString(), gapMin: gapCh, risk: gapDec.risk,
+          error: `같은 채널에 방금 다른 계정으로 글이 나갔어요. ${kstAt(nextOk)}부터 올릴 수 있어요(계정끼리 ${gapCh}분 띄워요).` }, 400);
       }
     }
 
