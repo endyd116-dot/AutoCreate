@@ -14,6 +14,7 @@
  *   🔴 **영구 멱등**이다. `enqueueJob` 의 `dedupe` 는 «살아 있는 잡»만 막으므로(끝난 잡은 또 만든다)
  *      여기서는 **`posts.stats.alive7At` 표식**으로 «이미 걸었다»를 기억한다 —
  *      적재 시점에 찍으므로 잡이 실패해도 **다시 쌓이지 않는다**(잡 자체의 재시도는 큐가 한다).
+ *   🔎 출처: AC 신규(계약 P1R7-B2 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";

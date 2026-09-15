@@ -6,6 +6,7 @@
  *   🔴 전역 스텝인데 우산은 테넌트마다 run() 을 부른다 → `canary_runs(day='eval')` 유니크로 **하루 1회만** 평가(나머지 테넌트 호출은 skip).
  *   AC-9: ok 는 true/false/null(판정 불가). null 은 실패로 세지 않는다(티스토리 세션 없음 등).
  *   AC-17: publish·runner-jobs 를 최상단 import 하지 않는다(이 파일은 순수 SQL + 알림만).
+ *   🔎 출처: AC 신규(계약 P1R4-B2 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

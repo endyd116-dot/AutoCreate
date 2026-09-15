@@ -2,6 +2,7 @@
  * lib/revenue/common.ts — 커넥터 공통 소도구(자격 복호화 · HTTP · 실패 분류 · KST 날짜 · 환율).
  *   🔴 자격은 AES-256-GCM(`CREDS_ENC_KEY` 폴백 없음 · lib/creds-crypto). 평문은 커넥터 함수 안에서만 산다 — 반환값·raw·로그에 싣지 않는다.
  *   🔴 이 파일은 `runner-jobs`·`publish/**` 를 import 하지 않는다(AC-17).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { decryptObj, credsEncConfigured } from "../creds-crypto";
 import type { SyncFail, SyncFailReason } from "./types";

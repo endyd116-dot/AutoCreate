@@ -6,6 +6,7 @@
  *   🔴 **global 스텝**이다(테넌트 루프 밖). 탈퇴한 집은 status readonly 라 우산의 활성 테넌트 목록(trial|active)에 없다 —
  *      테넌트 스텝으로 만들면 «아무도 안 도는 스텝»이 된다.
  *   🔴 한 틱에 최대 5집만 파기한다(R2 삭제가 느릴 수 있다 · 남은 곳은 다음 틱 = 1시간 뒤 · 기한은 이미 지났으니 급하지 않다).
+ *   🔎 출처: AC 신규(계약 P1R7-B §3 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

@@ -4,6 +4,7 @@
  *   응답 `{ result:"0", order_list:[{ day:"YYYYMMDD", u_id, sales, commission, status, ... }] }` — u_id 가 우리가 붙인 subId(=piece_{id}).
  *   자격: `cred_enc` = { affiliateId, authKey }. 금액은 KRW(국내). 범위가 두 달에 걸치면 월별로 두 번 부른다.
  *   ⚠️ 링크프라이스 실적은 승인(확정)까지 상태가 바뀐다 — 7일 되돌아 덮어쓰는 기본 범위가 그 흐름을 흡수한다.
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { pieceIdFromSubId } from "./upsert";
 import { classifyHttp, fail, httpJson, inRange, parseMoney, readCreds, toKstDay } from "./common";

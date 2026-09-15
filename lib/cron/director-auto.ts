@@ -12,6 +12,7 @@
  *
  *   🔴 이 파일은 **brief 를 만들어 주기만 한다.** piece 생성·코인 차감·롤백·배경 호출은 `lib/director.ts confirm()` 한 경로다
  *      (두 벌을 만들면 «코인은 차감됐는데 piece 가 없는» 사고가 갈라진 경로에서만 난다 · PITFALLS #11-b).
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q, listAccounts, type AccountRow } from "../accounts";

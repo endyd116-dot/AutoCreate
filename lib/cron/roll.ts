@@ -3,6 +3,7 @@
  *   본체는 R1 의 `lib/slots.ts rollSlots` 그대로 — 이 스텝은 «언제·어느 테넌트에» 만 맡는다(로직 두 벌 금지 · PITFALLS #11-b).
  *   멱등: rollSlots 가 (rule_id, slot_date) 중복을 만들지 않는다 → 매시 돌아도 하루치가 한 번만 생긴다(changed 는 새로 만든 수).
  *   자동 편성이 꺼져 있으면 돌지 않는다(needsAutoSchedule) — «주 0회로 뒀는데 계속 만들어지는» 사고의 첫 문(AC-2).
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { rollSlots } from "../slots";
 import type { CronStep, StepOutcome } from "./base";

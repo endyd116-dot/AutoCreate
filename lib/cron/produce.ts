@@ -20,6 +20,7 @@
  *     ④ 자리는 `producing`(confirm 이 쓴다).
  *        🔴 그 뒤 `in_review`·`failed` 동기화는 **`lib/content-gen.ts` 한 곳**이다(배경 함수 말미 · 이 스텝은 손대지 않는다).
  *     ⑤ 실제 잔액 부족 → `coin_short` + 알림. ⑥ 슬롯 게이트 거부 → 자리를 그대로 두고 감사에만(이미 게이트가 남겼다).
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

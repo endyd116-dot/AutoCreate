@@ -4,6 +4,7 @@
  *   🔴 «없음»을 «0원»으로 쓰지 않는다(AC-9): 실패는 행을 만들지 않고 `revenue_sources.status/last_error/fail_count` 로 남긴다.
  *      **`not_configured` 는 에러가 아니다** — status 는 `not_configured` 그대로, fail_count 도 세지 않는다(재시도·알림 대상 아님).
  *   🔴 `runner-jobs`·`publish/**` 최상단 import 0(AC-17).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

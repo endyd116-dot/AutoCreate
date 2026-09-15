@@ -3,6 +3,7 @@
  *   🔴 영수증(`GET /api/invoice` 의 supplier) · 약관 하단(`GET /api/company`) · 세금계산서 모두 **이 한 출처**를 읽는다 — 코드에 상호·사업자번호를 박지 않는다.
  *   supplierOf(): 상호·사업자등록번호가 비어 있으면 null → 화면 «준비 중» 한 줄(금액·결제일은 그대로 보인다).
  *   쓰기는 super_admin 만(netlify/functions/ops-company.ts · 감사 high). 읽기는 60초 캐시(lib/ops/settings.ts).
+ *   🔎 출처: AC 신규(계약 P1R6-B §1.1~§1.4 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

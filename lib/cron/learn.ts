@@ -18,6 +18,7 @@
  *     ② `bestHoursFor()` — 계정별로 «최근 30일 성과가 가장 좋았던 발행 시각(KST)»(§5B.5 «auto» 의 학습 항목).
  *        ⚠️ `accounts.golden_hours` 에 **쓰지 않는다** — 그 칸은 사용자가 고정하는 값이다(`/api/accounts-update` 가 쓴다).
  *           학습값으로 덮으면 사용자가 고른 시각이 조용히 사라진다. 대신 이 함수를 편성(rollSlots)이 **읽어** 후보 순서를 정한다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

@@ -9,6 +9,7 @@
  *   🔴 모델 이름 문자열은 여기서 만들지 않는다 — 전부 `ALL_DECLARED_MODELS`·`CHAIN_HIGH`(코드) 와 `models.list`(API) 에서 온다.
  *   🔴 AC-17: publish·runner-jobs 를 최상단 import 하지 않는다(순수 SQL + Gemini + 알림).
  *   전역 스텝 — 발굴 잠금은 `ai_settings.watched_at`(원자적 UPDATE · 6일 안이면 skip). 승격 점검은 멱등(24h·canary_pct<100 행만).
+ *   🔎 출처: AC 신규(계약 P1R4-B2 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

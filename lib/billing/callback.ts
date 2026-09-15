@@ -9,6 +9,7 @@
  *   ✓ 이름 폴백: 주문번호 `shopOrderNo|shoporderno|shop_order_no|pgOrderNo|o` · 승인번호 `authorizationId|authorizationid|authorization_id`.
  *   ✓ 성공 판정: `resCd === "0000"` 또는 (`resCd` 없고 `authorizationId` 있음) — ON 판 그대로.
  *   🔴 값은 로그·감사에 싣지 않는다 — **받은 키 이름 목록과 method 만**(카드·승인번호가 감사에 남으면 안 된다).
+ *   🔎 출처: AC 신규(계약 KICC 복귀 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 export interface CallbackParams {
   method: string;

@@ -1,4 +1,7 @@
-/** lib/email.ts — Resend 발송(키 없으면 콘솔 로그 · graceful). AM lib/email.ts 축약 이식(2026-09-14). */
+/**
+ * lib/email.ts — Resend 발송(키 없으면 콘솔 로그 · graceful). AM lib/email.ts 축약 이식(2026-09-14).
+ *   🔎 출처: AC 신규(계약 phase0 · 생성 커밋 2026-09-14) — 본문의 «AM lib/email.ts 축약 이식»이 되짚을 경로다: ../AutoMarketing/lib/email.ts
+ */
 export async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM || "AutoCreate <onboarding@resend.dev>";

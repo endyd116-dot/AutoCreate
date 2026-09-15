@@ -5,6 +5,7 @@
  *   판정: chainStage 있으면 이어달리기 재디스패치(상한 3) · 없으면 처음부터 · 상한 초과 → failed + 환급 + 알림.
  *   🔴 잠금(meta.chainLock 20분)을 먼저 본다 — 이미 도는 편은 건드리지 않는다. stage 'render' 는 러너 잡이 살아 있으면 건드리지 않는다(reap 이 회수).
  *   회차 상한 5건(비용 폭주 0 · 한 편 재개 = 컷 생성비).
+ *   🔎 AM 원본: ../AutoMarketing 없음 — 교훈만(SHORTSBILL 실측) · AC 신규 2026-09-15
  */
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";

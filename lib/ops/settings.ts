@@ -4,6 +4,7 @@
  *   첫 손님 = `payment` { keyinEnabled(기본 false) · keyinLabel? · keyinNotice? } — 결제 라인 정책(`lib/pay-route.ts`).
  *   🔴 읽기 실패는 **기본값으로 통과**(결제가 설정 조회 때문에 막히면 안 된다) · 60초 캐시(무배포 토글이 1분 안에 먹는다).
  *   🔴 jsonb 쓰기는 `jsonb()` + 쓴 직후 `jsonb_typeof` 확인(PITFALLS #1).
+ *   🔎 출처: AC 신규(계약 KICC 이중 MID · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

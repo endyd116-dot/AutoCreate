@@ -8,6 +8,7 @@
  *   Brief.goal: tistory/blogger/wordpress 계정 → adsense · naver_blog → adpost · intent commercial → affiliate · 섞이면 mixed.
  *   [P1R5 B-1] 영상 분기 — PieceSpec.kind "video" + video{format,seconds,provider,voice,variant,cuts,disclosure} · 코인 = videoCoinItem(seconds) 1회(이미지 코인 0) ·
  *     달러 캡 선검사(코인 차감 «전») · 배경 함수는 generate-video-background. 슬롯 게이트·롤백·멱등은 글과 **같은 경로**(우회 0).
+ *   🔎 AM 원본: ../AutoMarketing/lib/content-director.ts (관례 이식 2026-09-14 · 결정 규칙은 AC §5.3 으로 새로)
  */
 import { sql } from "drizzle-orm";
 import { jsonb, utcDate } from "./db-util";

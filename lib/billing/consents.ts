@@ -3,6 +3,7 @@
  *   가입: `consents:{ terms, privacy, paidTerms, automationNotice }` → 표 `consents`(kind·version·시각·IP). 결제 첫 회: `agreePaidTerms:true` 없고
  *   `paid_terms` 동의가 0건이면 400 «유료 약관에 동의해 주세요»(그 뒤엔 다시 묻지 않는다 · 메인 승인).
  *   문서 버전은 여기 상수 한 곳(A 의 문서 파일과 같은 낱말). 문서를 고치면 버전을 올린다 — 그러면 재동의 대상이 된다.
+ *   🔎 출처: AC 신규(계약 P1R4-B §1·§2 코인·구독·체험·게이트·남용 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

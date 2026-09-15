@@ -2,6 +2,7 @@
  * lib/video/types.ts — 영상 축 어휘·페이로드 정본(계약 P1R5 §0.2 · §1.1 · §2.1 · §5 — 글자 그대로). 순수(임포트 0).
  *   B(생성 두뇌)·B2(러너·출구)·A(화면 mock)가 같은 파일을 본다. 어휘를 늘리면 칸 폭(AC-21/30)을 같이 잰다:
  *   VideoStage ≤ 8자 · format ≤ 8자 · pieces.format varchar(24) · piece_assets.kind varchar(12).
+ *   🔎 출처: AC 신규(계약 P1R5-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 export type VideoFormat = "graphic" | "talking" | "clip";
 export type VideoSeconds = 15 | 30 | 60;

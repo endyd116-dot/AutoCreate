@@ -8,6 +8,7 @@
  *     ② 운영센터 정책 `payment.keyinEnabled === true`(기본 false)
  *     ③ `KICC_MALL_ID_KEYIN`(비인증 MID)이 실제로 등록돼 있다
  *   ③ 이 있는 이유: MID 가 비기 전에 정책만 켜지면 인증 MID 로 비인증 화면 코드를 보내 결제창이 아예 안 뜬다.
+ *   🔎 출처: AC 신규(계약 KICC 이중 MID · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { isKeyinMidConfigured, type PayRoute } from "./kicc";
 import { readOpsSetting } from "./ops/settings";

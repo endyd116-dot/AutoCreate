@@ -3,6 +3,7 @@
  *   `settings.aiCostCapKrwPerDay`(없으면 플랜 기본값 PLAN_CAP_KRW) · `ai_usage.cost_usd` 의 **오늘(KST)** 합 × 환율(R3 fxToKrw · env FX_USD_KRW).
  *   초과 → 생성 거부 + 고객 알림 1건/일 + **운영 이상치 알림**(audit risk high · ops 대시보드가 읽는다).
  *   🔴 환율이 없으면 «원가 미환산» — 상한을 **잴 수 없으므로 막지 않는다**(0 으로 접어 통과시키는 것과 다르다 — `fxMissing:true` 를 응답·감사에 남긴다 · §0.1).
+ *   🔎 AM 원본: ../AutoMarketing/lib/ai-meter.ts (관례 이식 2026-09-14 · 상한은 AC 플랜별 KRW)
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

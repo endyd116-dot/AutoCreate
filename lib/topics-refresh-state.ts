@@ -10,6 +10,7 @@
  *      `startedAt` 이 `STALE_MIN` 분을 넘으면 **running=false 로 본다**(저장값을 고치지 않고 «읽을 때» 판정 —
  *      되살아난 배경 함수가 나중에 결과를 써도 그대로 반영된다).
  *   🔴 `error` 는 **사람말 한 문장**만 담는다. 화면이 그 문장을 그대로 띄운다 — 「fetch failed」 같은 건 넣지 않는다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";

@@ -1,4 +1,7 @@
-/** lib/validate.ts — 입력 검증 소도구(zod 얇은 래퍼) + 공용 헬퍼. */
+/**
+ * lib/validate.ts — 입력 검증 소도구(zod 얇은 래퍼) + 공용 헬퍼.
+ *   🔎 출처: AC 신규(계약 phase0 · 생성 커밋 2026-09-14) — AM 원본 없음.
+ */
 import { z } from "zod";
 
 export const emailSchema = z.string().trim().toLowerCase().email().max(160);

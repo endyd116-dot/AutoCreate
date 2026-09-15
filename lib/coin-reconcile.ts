@@ -14,6 +14,7 @@
  *       ⑤ 만료 규칙 — 충전분(`purchased`)에 만료 없음(1년 · §12.1) · 월 포함분(`ref included:…`)에 만료 없음(그달 말)
  *          🔴 운영자 지급·환급은 만료가 없는 것이 **정상**이라 세지 않는다(정상을 결함으로 세면 아무도 이 표를 안 본다).
  *   🔴 **읽기만 한다** — INSERT·UPDATE·DELETE 0. 고칠지는 사람이 정한다(원장 행을 지우는 순간 추적이 끊긴다).
+ *   🔎 출처: AC 신규(2026-09-15 · AM 재사용 맵의 coin-reconcile 자리 — 코드는 AC 원장 규약으로 새로 씀. AM 원본 복사 0)
  */
 import { sql } from "drizzle-orm";
 import { db } from "../db/index";

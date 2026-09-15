@@ -2,6 +2,7 @@
  * lib/ops/period.ts — 운영센터 집계용 **KST 월 범위**(계약 §2.1 «전부 KST 월» · §13.5).
  *   DB 의 timestamp(without tz)는 UTC 로 저장돼 있다. KST 월의 [시작, 끝) 을 UTC Date 로 만들어 `${ts(start)}::timestamptz AT TIME ZONE 'UTC'` 로 비교한다(AC-5 · Date 바인딩 금지).
  *   `?month=YYYY-MM` 이 없으면 이번 달(KST). 잘못된 값이면 이번 달로(운영 화면이 빈 표를 보는 것보다 낫다 · 응답의 `month` 로 무엇을 집계했는지 알린다).
+ *   🔎 출처: AC 신규(계약 P1R4-B §2.1·§2.3 운영센터 6메뉴 + 원격접속 60분 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql, type SQL } from "drizzle-orm";
 

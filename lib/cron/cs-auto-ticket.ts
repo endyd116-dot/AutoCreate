@@ -5,6 +5,7 @@
  *     ② 결제 실패   subscriptions.fail_count ≥ 3            → `billing_fail:{tid}:{period}`   (applyChargeResult 가 정지 때 같은 키로 만든다 — 열려 있으면 건너뜀)
  *     ③ 계정 정지   audit account_transition action=suspend ≥ 3 → `account_suspended:{tid}:{KST 주}` 태그 계정 · high
  *   열린 같은 키가 있으면 **아무것도 하지 않는다**(매시간 메시지가 붙어 시끄러워지는 것을 막는다). 해결된 뒤 다음 주에 또 반복되면 새 티켓.
+ *   🔎 출처: AC 신규(계약 P1R4-B §2.1·§2.3 운영센터 6메뉴 + 원격접속 60분 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

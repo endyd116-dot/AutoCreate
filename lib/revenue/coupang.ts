@@ -4,6 +4,7 @@
  *   응답 data[] 행에 `date`·`commission`·`subId`(·`orderId` 등) — subId = `piece_{pieceId}`(R1 규약 · lib/affiliate-coupang.subIdFor) 로 piece 직결.
  *   서명·호출은 R1 의 `coupangCall`(같은 서명기 한 벌). 키는 계정별 `revenue_sources.cred_enc` → 없으면 env(COUPANG_PARTNERS_*) 폴백.
  *   ⚠️ 쿠팡은 subId 없는 실적(직접 링크·타 경로)도 준다 — piece 미귀속으로 소스 계정에 남긴다(버리지 않는다).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { coupangCall, envCoupangKeys, type CoupangKeys } from "../affiliate-coupang";
 import { pieceIdFromSubId } from "./upsert";

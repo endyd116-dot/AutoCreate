@@ -11,6 +11,7 @@
  *
  *   접속 주소(`url_enc`)는 계정 자격과 같은 취급이다 — 이 파일은 **복호화하지 않는다**.
  *   푸는 자리는 러너 claim 한 곳뿐(`lib/runner-jobs.ts loadAccountForRunner`).
+ *   🔎 출처: AC 신규(계약 AC-53 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { db } from "../db/index";

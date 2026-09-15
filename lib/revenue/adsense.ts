@@ -6,6 +6,7 @@
  *   자격: `revenue_sources.cred_enc` = OAuthToken(JSON · AES-256-GCM). 만료 임박은 ensureFresh 가 갱신 → `credPatch` 로 돌려주면 호출부가 저장.
  *   🔴 [P1R7 B3 · §13.5 «외부 값»] **DATE 차원은 애드센스 계정 시간대(대개 PT) 기준일**이다 — 우리는 **옮기지 않고 그대로 쓴다**(옮기면 매체 리포트와
  *      숫자가 어긋나 «우리 화면이 틀렸다»가 된다). 대신 `DAY_BASIS_OF.adsense = "pt"` 로 **화면이 «미국 시간 기준»을 한 줄로 밝힌다**. ⬜ 실측은 키가 온 뒤.
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

@@ -1,6 +1,7 @@
 /**
  * lib/plans.ts — 구독 플랜 정본(코드 기본값) + 체험 정책. DB `plans` 표가 있으면 DB가 이긴다(운영센터 «요금제»에서 편집 · DESIGN §11.4).
  *   DESIGN §12.2(Q2 가정) · §12.3 체험 14일·코인 무료 X.
+ *   🔎 AM 원본: ../AutoMarketing/lib/plan-gate.ts (관례만 · 코드 이식 0 — AC 축 6개라 두 함수로 새로 씀 2026-09-14)
  */
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
