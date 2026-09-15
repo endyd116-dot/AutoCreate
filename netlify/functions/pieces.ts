@@ -28,7 +28,7 @@ import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
 import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "../../lib/writing-contracts";
-import { htmlToPlain } from "../../lib/blocks";
+import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -184,8 +184,19 @@ export default async (req: Request): Promise<Response> => {
           length: { min: len.min, max: len.max, fromGroup: !!(grp && wc.lengthByGroup?.[grp]) },
           images: { min: img.min, max: img.max, default: img.default, fromGroup: !!(grp && wc.imagesByGroup?.[grp]) },
           goalRules: wc.goalRules?.[goal] ?? [],       // 실제로 프롬프트에 실린 줄들(없으면 빈 배열)
-          /* 실제 글의 길이 — 계약 폭 안에 있는지 화면이 바로 보여 줄 수 있게. */
-          actualChars: htmlToPlain(String(p.body || "")).length,
+          /* 🔴 [2026-09-16 · A 가 첫 발행 경로에서 찾음] **자가 둘이었다.**
+             여기서는 `htmlToPlain(body).length`(HTML 을 평문으로 · 줄바꿈 유지)로 재고,
+             게이트(`lib/ai-tell-gate.ts`)는 `blocksCharCount(blocks)`(블록 평문 · 공백을 하나로)로 잰다.
+             ⇒ 같은 화면에 «472자»와 «1,840자»가 나란히 떴다. 게이트 주석은 «**세는 자는 하나**다»라고 적혀 있었는데
+                이 줄이 그 말을 어기고 있었다(AC-59 · 주석이 코드보다 앞서 나간 자리).
+             🔴 자를 게이트 쪽으로 모은다 — 계약 폭(`lengthFor`)이 그 자로 정해진 값이라, 그 자로 재야 «폭 안인가»가 말이 된다.
+             🔴 블록이 없는 옛 글만 HTML 로 잰다(없는 것을 있는 척하지 않는다 · `charsFrom` 으로 어느 자인지 같이 말한다). */
+          ...(() => {
+            const blocks = Array.isArray(p.blocks) ? (p.blocks as Parameters<typeof blocksCharCount>[0]) : null;
+            return blocks && blocks.length
+              ? { actualChars: blocksCharCount(blocks), charsFrom: "blocks" as const }
+              : { actualChars: htmlToPlain(String(p.body || "")).length, charsFrom: "body" as const };
+          })(),
         };
       } catch (e) {
         /* 🔴 못 실으면 **빈칸으로 두고 사유를 남긴다** — 기본값으로 채우면 화면이 «이 글에 적용된 값»이라고 거짓말한다(AC-9). */

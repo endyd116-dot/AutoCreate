@@ -234,9 +234,13 @@ export async function checkStockSafety(tid: number, p: Row): Promise<GateCheck> 
     return { key: STOCK_KEY, label, pass: true, detail: "사진 출처를 읽지 못했어요(검사 못 함)" };
   }
   const stocks = rows.map((r) => ({ id: n(r.id), src: stockSourceOf(r.meta) })).filter((x): x is { id: number; src: NonNullable<ReturnType<typeof stockSourceOf>> } => !!x.src);
-  if (!stocks.length) return { key: STOCK_KEY, label, pass: true, ...(paid ? { detail: "스톡 사진이 없어요(우리가 만든 그림·고객 사진)" } : {}) };
+  /* 🔴 [2026-09-16 · A 가 찾음] 설명을 **판정에서 만든다**(AC-80).
+     종전엔 광고성 글일 때만 설명을 달아서, 아닐 때는 화면에 «스톡 사진이 쓸 수 있는 것 ✓» 만 떴다 —
+     그건 **우리가 검사하지 않은 것을 확인했다고 말하는 것**이다. 여기서 `pass:true` 의 뜻은 «쓸 수 있다»가 아니라
+     **«검사할 것이 없었다»**이고, 그 차이를 아는 것은 이 함수뿐이다. 그래서 **늘** 설명을 단다. */
+  if (!stocks.length) return { key: STOCK_KEY, label, pass: true, detail: "스톡 사진이 없어요 — 검사할 것이 없었어요(우리가 만든 그림·고객 사진)" };
   const bad = stocks.map((x) => ({ id: x.id, v: assessStockImage(x.src, { paid }) })).filter((x) => !x.v.ok);
-  if (!bad.length) return { key: STOCK_KEY, label, pass: true, detail: `스톡 ${stocks.length}장 확인` };
+  if (!bad.length) return { key: STOCK_KEY, label, pass: true, detail: `스톡 ${stocks.length}장 — 광고가 들어간 글에도 쓸 수 있어요` };
   const first = bad[0];
   return { key: STOCK_KEY, label, pass: false, detail: `사진 ${bad.length}장: ${first.v.reason}${first.v.law ? ` (${first.v.law})` : ""}` };
 }
