@@ -17,6 +17,7 @@ import { parsePixabayBody, PIXABAY_IMAGE_HOSTS } from "../lib/stock/pixabay";
 import { parsePexelsBody, PEXELS_IMAGE_HOSTS } from "../lib/stock/pexels";
 import { markStockPicks, toStockMeta, stockTroubleLine, searchStock } from "../lib/stock";
 import { creditLineOf, isSourceKey, stockSourceKey } from "../lib/photo-source";
+import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate } from "../lib/stock/plan";
 import type { StockCandidate } from "../lib/stock/types";
 
 const results: { step: string; ok: boolean; note: string }[] = [];
@@ -151,16 +152,42 @@ const POOL = [cand("a", ["logo", "storefront"]), cand("b", ["woman", "portrait"]
   rec("④ 🔴 음성 대조 — 내 사진은 크레딧 줄을 안 만든다", mine === null, `결과 = ${String(mine)}`);
 }
 
-/* ═══ ⑤ 키가 없을 때 — «0건»이 아니라 «아직 안 꽂혔다»로 말하는가 ═══════════════ */
+/* ═══ ⑤ 조달 계획 — «어디서 가져올지»를 정하는 순수 함수(`lib/stock/plan.ts`) ═══════════ */
+{
+  /* 대표는 **첫 이미지 블록**이다 — 블록 순서가 뒤섞여 들어와도 «제일 작은 번호»여야 한다. */
+  rec("⑤ 대표는 첫 이미지 블록(번호가 뒤섞여도)", heroIndexOf([3, 0, 1, 2]) === 0 && heroIndexOf([2, 5]) === 2,
+    `[3,0,1,2]→${heroIndexOf([3, 0, 1, 2])} · [2,5]→${heroIndexOf([2, 5])}`);
+  rec("⑤ 🔴 사진이 없으면 대표도 없다(-1) — 0 으로 접히면 0번 자리를 대표로 착각한다", heroIndexOf([]) === -1, String(heroIndexOf([])));
+
+  /* 검색어는 **짧아야** 맞는 사진이 온다. 군더더기(총정리·추천·후기)와 연도 숫자는 뺀다. */
+  const qa = stockQueryOf("에어프라이어 청소 방법 총정리 2026");
+  rec("⑤ 검색어: 군더더기·숫자를 빼고 낱말 3개까지", qa === "에어프라이어 청소", `"${qa}"`);
+  const qb = stockQueryOf("가을 산책하기 좋은 서울 공원 베스트 10");
+  rec("⑤ 검색어: 긴 제목도 3낱말로 (긴 문장을 그대로 넣으면 0건이 된다)", qb.split(" ").length <= 3, `"${qb}"`);
+  rec("⑤ 🔴 빈 제목이면 빈 검색어 — 지어내지 않는다", stockQueryOf("") === "", `"${stockQueryOf("")}"`);
+
+  /* 같은 글에 같은 사진이 두 번 들어가면 두 번째는 «이미 있다»로 접혀 **그 자리가 빈 채 남는다**. */
+  const used = new Set<string>();
+  const a1 = takeCandidate(POOL, used), a2 = takeCandidate(POOL, used), a3 = takeCandidate(POOL, used), a4 = takeCandidate(POOL, used);
+  rec("⑤ 🔴 같은 사진을 두 번 주지 않는다(두 번째는 그 자리를 빈 채 남긴다)",
+    a1?.id === "a" && a2?.id === "b" && a3?.id === "c" && a4 === null,
+    `${[a1, a2, a3].map((x) => x?.id).join("")} 그다음 ${String(a4)}`);
+
+  const m = emptyMix();
+  rec("⑤ 사진 출처 세기는 0 에서 시작한다(없는 출처를 1 로 시작하면 원장이 거짓이 된다)",
+    m.ai === 0 && m.stock === 0 && m.customer === 0 && m.failed === 0, JSON.stringify(m));
+}
+
+/* ═══ ⑥ 키가 없을 때 — «0건»이 아니라 «아직 안 꽂혔다»로 말하는가 ═══════════════ */
 {
   const hadPixabay = process.env.PIXABAY_API_KEY, hadPexels = process.env.PEXELS_API_KEY;
   delete process.env.PIXABAY_API_KEY; delete process.env.PEXELS_API_KEY;
   const r = await searchStock({ query: "가을 산책", paid: false });
   const allNoKey = r.tried.length === 2 && r.tried.every((t) => t.reason === "no_key");
-  rec("⑤ 키가 없으면 제공사를 부르지 않고 «열쇠 없음»이라고 말한다", allNoKey && !r.ok,
+  rec("⑥ 키가 없으면 제공사를 부르지 않고 «열쇠 없음»이라고 말한다", allNoKey && !r.ok,
     `tried = ${r.tried.map((t) => `${t.provider}:${t.reason}`).join(" ")}`);
   const line = stockTroubleLine(r.tried);
-  rec("⑤ 🔴 «0건»과 «아직 안 켰다»를 갈라 말한다(CLAUDE §8 «키 꽂으면 즉시 가동»)",
+  rec("⑥ 🔴 «0건»과 «아직 안 켰다»를 갈라 말한다(CLAUDE §8 «키 꽂으면 즉시 가동»)",
     !!line && line.includes("열쇠"), String(line));
   if (hadPixabay !== undefined) process.env.PIXABAY_API_KEY = hadPixabay;
   if (hadPexels !== undefined) process.env.PEXELS_API_KEY = hadPexels;

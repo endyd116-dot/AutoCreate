@@ -53,11 +53,18 @@ export async function readScheduleSettings(tid: number): Promise<ScheduleSetting
 }
 
 /* ───────── Rule ───────── */
-/** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다. */
-export type RuleKind = "post" | "shorts";
+/** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다.
+ *  [R8 §2.5] 🔴 **`cardnews` 추가** — DESIGN §5B.3 이 말한 세 가지 중 **하나가 통째로 없었다**(계약은 있는데 편성·생성·검수에 없었다).
+ *  카드뉴스는 글 축이라 `content-gen` 으로 만들지만, 편성에서 «글 주 3회»와 «카드뉴스 주 3회»는 **다른 주문**이고 **코인 값도 다르다**. */
+export type RuleKind = "post" | "shorts" | "cardnews";
+/** 문자열 → RuleKind(모르는 값은 "post"). 읽는 자리가 여럿이라 한 곳에 둔다. */
+export function toRuleKind(v: unknown): RuleKind {
+  const x = String(v ?? "");
+  return x === "shorts" ? "shorts" : x === "cardnews" ? "cardnews" : "post";
+}
 export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; preferredMinute?: number; formatHint?: string; active: boolean }
 export function toRule(r: Row): Rule {
-  const o: Rule = { id: n(r.id), channel: String(r.channel), kind: (String(r.kind) === "shorts" ? "shorts" : "post"), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
+  const o: Rule = { id: n(r.id), channel: String(r.channel), kind: toRuleKind(r.kind), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
   if (r.account_id) o.accountId = n(r.account_id);
   if (Array.isArray(r.weekdays) && r.weekdays.length) o.weekdays = (r.weekdays as unknown[]).map(Number).filter((d) => d >= 0 && d <= 6);
   if (r.preferred_hour !== null && r.preferred_hour !== undefined) o.preferredHour = n(r.preferred_hour);
@@ -75,10 +82,14 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
   if (r.every === "month") return r.count * 12 / 52;
   return r.weekdays?.length ? Math.min(r.count, r.weekdays.length) || r.weekdays.length : r.count;
 }
-/** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60). */
+/** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60).
+ *  [R8 §2.5] 🔴 카드뉴스 = **`cardnews` 한 값(카드 값이 그 안에 들어 있다)**. 여기와 `lib/director.ts pieceCoin` 이
+ *  **같은 규칙**이어야 한다 — 갈리면 편성표가 말한 코인과 실제로 빠지는 코인이 달라진다(AC-74 «화면의 숫자도 서버가 정본»). */
 export function coinsPerWeek(rules: Rule[]): number {
   return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
-    const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60)) : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
+    const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60))
+      : r.kind === "cardnews" ? coinCostOf("cardnews")
+      : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
     return a + weeklyCount(r) * per;
   }, 0));
 }

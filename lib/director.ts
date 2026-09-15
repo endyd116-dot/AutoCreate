@@ -18,7 +18,7 @@ import { HOOK_TYPES, PALETTES } from "./video/scenes";
 import { GEMINI_VOICES } from "./video/tts";
 import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
 import { precheckVideoBudget, triggerVideo } from "./video/gen";
-import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract } from "./writing-contracts";
+import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract, isCardnewsChannel } from "./writing-contracts";
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { gapMinFor } from "./publish-gap";
 import { balance, consume, refundPiece } from "./coin-ledger";
@@ -77,7 +77,16 @@ export interface PieceSpecPatch { key: string; accountId?: number; format?: stri
   video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number } }
 
 const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
-const pieceCoin = (imageCount: number) => coinCostOf("blog") + coinCostOf("image") * imageCount;
+/**
+ * 편당 코인. 글 = `blog` + 사진 장당 `image`.
+ *   [R8 §2.5] 🔴 **카드뉴스는 `cardnews` 한 값**이다 — 카드 값이 그 안에 들어 있다.
+ *     왜 장당으로 안 세나: 요금 안내 화면(`/app/coins`)과 운영 표(`ops-coin-prices`)가 **이미 «카드뉴스 3코인»이라고 말하고 있다.**
+ *     장당으로 세면 카드 6~8장짜리가 **7~9코인**이 빠져 화면이 말한 값의 두세 배가 된다 — 화면의 숫자도 서버가 정본이다(AC-74).
+ *   🔴 이 규칙은 `lib/slots.ts coinsPerWeek` 와 **같아야** 한다(편성표가 미리 보여 주는 값과 실제로 빠지는 값).
+ *   ⚠️ 마진은 여기서 정하지 않는다 — 카드 8장은 우리 원가가 ₩589쯤인데 3코인은 ₩1,500이다(약 2.5배 · 글은 7.6배).
+ *      코인 표 재설계는 B 몫이고 최종 숫자는 사장님 몫이다(계약 §10.4). **여기서는 화면이 말한 값을 지킨다.**
+ */
+const pieceCoin = (imageCount: number, cardnews = false) => (cardnews ? coinCostOf("cardnews") : coinCostOf("blog") + coinCostOf("image") * imageCount);
 
 export function goalOf(pieces: { channel: string }[], intent: string): Goal {
   const set = new Set<Goal>();
@@ -313,7 +322,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory" },
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
-      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(imageCount), angle: topic.angle,
+      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(imageCount, isCardnewsChannel(ch)), angle: topic.angle,
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
     });
   }
@@ -437,7 +446,7 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       next.coinCost = coinCostOf(videoCoinItem(v.seconds));
       out.push(next); continue;
     }
-    next.coinCost = pieceCoin(next.images.count);
+    next.coinCost = pieceCoin(next.images.count, isCardnewsChannel(next.channel));
     out.push(next);
   }
   return { ok: true, specs: out };
@@ -537,12 +546,15 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   try {
     for (const s of specs) {
       const isVideo = s.kind === "video" && !!s.video;
-      const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : "blog";
+      /* [R8 §2.5] 🔴 카드뉴스 — DESIGN §5B.3 의 세 종류 중 하나. 글 축이라 `content-gen` 으로 만들지만
+         **편성·코인·검수에서 «글»과 구분된다.** 판정은 `isCardnewsChannel` 하나만 본다(목록을 여기 또 적지 않는다 · AC-57). */
+      const isCard = !isVideo && isCardnewsChannel(s.channel);
+      const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : isCard ? "cardnews" : "blog";
       const meta = isVideo
         ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
         : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}) };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
-        VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
+        VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : isCard ? "cardnews" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
       const pieceId = n(p?.id);
       /* 편성 자리를 빌려 쓰는가(크론) — 아니면 지금처럼 새 자리를 만든다(사람이 «만들기»로 끼워 넣는 글).
          빌려 쓰는 자리는 **채널이 같은 첫 spec 하나**에만 준다(한 자리에 두 글이 들어갈 수 없다). */
@@ -569,15 +581,17 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       } else {
         const slotDate = kstDateStr(new Date(s.schedule.at));
         const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin)
-          VALUES (${tid}, ${slotDate}::date, ${s.channel}, ${isVideo ? "shorts" : "post"}, ${s.accountId}, ${topicId}, ${briefId}, ${pieceId}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${"producing"}, ${origin}) RETURNING id`);
+          VALUES (${tid}, ${slotDate}::date, ${s.channel}, ${isVideo ? "shorts" : isCard ? "cardnews" : "post"}, ${s.accountId}, ${topicId}, ${briefId}, ${pieceId}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${"producing"}, ${origin}) RETURNING id`);
         slotId = n(sl?.id);
       }
       await q(sql`UPDATE pieces SET slot_id = ${slotId} WHERE id = ${pieceId}`);
       created.push({ pieceId, slotId, isVideo, ...(reused ? { reused } : {}) });
-      const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : `블로그 글(${s.channel})` });
+      const c1 = await consume(tid, coinItem, `piece:${pieceId}`, { actorId, auto: origin === "auto", reason: isVideo ? `${s.video!.seconds}초 영상(${s.channel})` : isCard ? `카드뉴스 ${s.images.count}장(${s.channel})` : `블로그 글(${s.channel})` });
       if (!c1.ok) { await rollback(c1.reason); return c1.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${c1.need}개 부족해요.`, need: c1.need, have: c1.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
       charged += c1.charged;
-      for (let i = 1; i <= (isVideo ? 0 : s.images.count); i++) {
+      /* 🔴 [R8 §2.5] 카드뉴스는 **장당 코인을 또 받지 않는다** — `cardnews` 한 값에 카드 값이 들어 있다.
+         여기서 또 받으면 3코인이라고 말해 놓고 3+8=11코인이 빠진다(이중 청구). */
+      for (let i = 1; i <= (isVideo || isCard ? 0 : s.images.count); i++) {
         const ci = await consume(tid, "image", `piece:${pieceId}:img${i}`, { actorId, auto: origin === "auto", reason: `이미지 ${i}/${s.images.count}` });
         if (!ci.ok) { await rollback(ci.reason); return ci.reason === "insufficient" ? { ok: false, step: "coin_short", error: `코인이 ${ci.need}개 부족해요.`, need: ci.need, have: ci.have } : { ok: false, step: "coin_write", error: "코인 차감에 실패했어요. 잠시 후 다시 해 주세요." }; }
         charged += ci.charged;
