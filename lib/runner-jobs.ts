@@ -908,10 +908,16 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
       bytes: head.bytes,                                   // 🔴 실측값(러너 주장 아님)
       frameCount: num(r.frameCount),
       ...(measured ? { containerMs: num(r.containerMs), videoMs: num(r.videoMs), audioMs: num(r.audioMs), plannedMs: num(r.plannedMs), measured: true } : {}),
+      /* [R7 §1.5 · B-1] 프레임 지문 — 위 경고 그대로다. 여기서 안 담으면 러너가 보내도 **이 줄에서 사라지고**
+         심사 `similarity` 는 영영 «판정 보류»로 주저앉는다(AC-33 재발). 모양이 아니면 아예 안 담는다(빈 값으로 채우지 않는다). */
+      ...(typeof r.thumbGray === "string" && r.thumbGray.length >= 1_000 && r.thumbGray.length <= 8_192 ? { thumbGray: r.thumbGray } : {}),
+      ...(typeof r.framePhash === "string" && /^[0-9a-f]{16}$/i.test(r.framePhash) ? { framePhash: r.framePhash.toLowerCase() } : {}),
     });
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, key: r.key, posterKey: r.posterKey ?? null, bytes: head.bytes, durationMs: r.durationMs ?? null, frameCount: r.frameCount ?? null,
         ...(measured ? { containerMs: r.containerMs ?? null, videoMs: r.videoMs ?? null, audioMs: r.audioMs ?? null, measured: true } : {}),
+        // 지문 원문(1.3KB)은 잡 결과에 싣지 않는다 — «왔나»만 남긴다(러너 버전별 배포 확인용).
+        fingerprint: (typeof r.thumbGray === "string" && r.thumbGray.length >= 1_000) ? "gray" : (typeof r.framePhash === "string" ? "phash" : null),
         ffmpegVersion: r.ffmpegVersion ?? null, next: fin.next })},
       updated_at = NOW() WHERE id = ${jobId}`);
     return { ok: fin.ok, status: "done", reason: fin.next };
