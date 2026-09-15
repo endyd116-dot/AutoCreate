@@ -60,7 +60,11 @@ export async function run({ ctx, job, shotKey }) {
       ...(table.amountEstimated ? [`«${table.header[table.amountIdx]}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요`] : []),
       ...(table.summaryRows ? [`합계 행 ${table.summaryRows}줄은 뺐어요(데이터가 아니라 표가 더한 줄)`] : []),
     ];
-    const parsed = rowsToRevenue("clip", table.rows.map((r) => ({ dayText: r[table.dayIdx], amountText: r[table.amountIdx], raw: { cells: r.slice(0, 6), period: /월/.test(table.header[table.dayIdx]) ? "month" : "day", ...(table.amountEstimated ? { amountEstimated: true, amountHead: String(table.header[table.amountIdx] ?? "").slice(0, 40) } : {}) } })), { accountId: account.id });
+    const parsed = rowsToRevenue("clip", table.rows.map((r) => ({ dayText: r[table.dayIdx], amountText: r[table.amountIdx], raw: { cells: r.slice(0, 6), period: /월/.test(table.header[table.dayIdx]) ? "month" : "day", ...(table.amountEstimated ? { amountEstimated: true, amountHead: String(table.header[table.amountIdx] ?? "").slice(0, 40) } : {}),
+      /* 🔴 **러너는 `raw` 에 «사실»만 남기고 문장은 서버가 만든다**(메인 판정 2026-09-15).
+         러너 노트를 저장할 자리를 새로 파면 «러너가 하는 말»이 또 하나의 진실 원천이 된다 — 그래서 숫자만 남긴다.
+         `notes` 는 서버가 **버린다**(`RunnerReportOk` 에 칸이 없다) — 화면에 가야 할 것은 전부 여기로. */
+      ...(table.summaryRows ? { rowsDropped: table.summaryRows } : {}) } })), { accountId: account.id });
     if (!parsed.ok) throw PARSE(`${parsed.reason} · 머리글=${JSON.stringify(table.header).slice(0, 80)}`);
     return { revenueRows: parsed.rows, notes: [`인센티브 ${parsed.rows.length}행(${table.where})`, ...scrapeNotes] };
   } catch (e) {
