@@ -7,8 +7,8 @@
  *   🔴 실패는 **정직 분류**다(계약 §2 RunnerErrorKind). 못 했으면 못 했다고 보고한다 — «성공»으로 만들지 않는다.
  */
 import { claim, report, release, heartbeat, VERSION } from "./lib/api.mjs";
-import { openContext, applyCookies, exitIp, meterContext, shotKeyFor, SHOTS_ON, PROFILES_DIR } from "./lib/browser.mjs";
-import { probeFleet } from "./lib/profile-seal.mjs";   // [P1R8 §3.1] 로그인 정보가 실제로 잠겨 있나(읽기만)
+import { openContext, applyCookies, exitIp, meterContext, shotKeyFor, SHOTS_ON, PROFILES_DIR, profileDir } from "./lib/browser.mjs";
+import { probeFleet, sealProfile, unsealProfile } from "./lib/profile-seal.mjs";   // [P1R8 §3.1] 잠겨 있나(측정) + 봉인·해제
 import { makeRecipe } from "./lib/recipe.mjs";         // [P1R8 §3.3] 서버가 내려 준 셀렉터 표(못 믿으면 묶여 온 표)
 import { planEditorOps, disclosureIsFirst } from "./lib/plan.mjs";
 
@@ -110,7 +110,7 @@ export async function runJob(args) {
   /* 🔴 실제로 나간 IP 는 **성공이든 실패든** 보고돼야 한다(계약 §2.5-4) — 서버가 `accounts.last_exit_ip` 에 적고
      «두 계정이 같은 IP» 를 운영에 경고한다. 반환 지점이 여러 곳이라, 한 군데서 얹도록 감싼다
      (반환마다 손으로 붙이면 언젠가 하나를 빠뜨리고, 그러면 그 계정만 조용히 기록이 빈다). */
-  const seen = { ip: null, bytes: null, recipeVersion: null, recipeFellBack: "" };
+  const seen = { ip: null, bytes: null, recipeVersion: null, recipeFellBack: "", sealNote: "" };
   const r = await runJobInner(args, seen);
   /* [P1R8 §3.3] 🔴 **어느 표로 돌았나를 성공·실패 양쪽에 싣는다.**
      실패에만 실으면 «잘 도는 표»를 셀 수 없고, 성공에만 실으면 자동 복귀 판정의 근거가 사라진다.
@@ -121,6 +121,8 @@ export async function runJob(args) {
     ...(seen.bytes ? { bytes: seen.bytes } : {}),
     ...(seen.recipeVersion ? { recipeVersion: seen.recipeVersion } : {}),
     ...(seen.recipeFellBack ? { recipeFellBack: seen.recipeFellBack } : {}),
+    /* 🔴 봉인이 **깨진 채 돌았다**는 사실은 조용히 지나가면 안 된다(§9 «말해 주기») — 성공한 잡도 마찬가지다. */
+    ...(seen.sealNote ? { sealNote: seen.sealNote } : {}),
   };
 }
 
@@ -142,6 +144,17 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
        고칠 수 있는 자리가 아니므로 **발행하지 않고** 정직하게 돌려보낸다 — 서버가 awaiting_manual 로 남긴다. */
     if (job.kind.startsWith("publish.") && !disclosureIsFirst(plan, job.payload ?? {})) {
       return { ok: false, errorKind: "unknown", detail: "제휴 고지가 본문 첫머리가 아니라 올리지 않았어요(정책)." };
+    }
+
+    /* [P1R8 §3.1] 🔴 **브라우저를 열기 전에** 봉인을 푼다 — 크로미움이 파일을 잡은 뒤엔 못 바꾼다.
+       열쇠가 없으면(대부분의 기기) **아무 일도 안 한다** — 지금까지와 같은 동작이다.
+       🔴 fail-open: 못 풀어도 **멈추지 않는다**. 있던 평문으로 그냥 간다(없으면 다시 로그인하게 되지만,
+          «안전을 위해 고객 공장을 세우는» 거래는 안 한다 · 설계 §4.2). 대신 사유를 보고에 싣는다. */
+    const profileDirForJob = profileDir(account.profileKey || `job-${job.id}`);
+    if (account.profileSealKey) {
+      const u = unsealProfile(profileDirForJob, account.profileSealKey);
+      if (u.ok && !u.skipped) log(`  · 저장된 로그인을 풀었어요(봉인 ${u.files}개)`);
+      else if (!u.ok) { seen.sealNote = `풀기 실패: ${u.why}`; log(`  ⚠ 봉인을 풀지 못했어요 — 그대로 진행합니다(${u.why})`); }
     }
 
     ctx = await openContext({ chromium }, {
@@ -239,6 +252,15 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
       log(`  · 이 잡이 쓴 트래픽 ↓${(meter.rx / 1048576).toFixed(2)}MB ↑${(meter.tx / 1048576).toFixed(2)}MB (요청 ${meter.requests}건)`);
     }
     if (ctx) { try { await ctx.close(); } catch { /* 무시 */ } }
+    /* [P1R8 §3.1] 🔴 **컨텍스트를 닫은 뒤에** 봉한다 — 크로미움이 쿠키 DB 를 놓아야 온전한 파일을 담는다.
+       실패하면 **평문을 안 지운다**(fail-open) — 봉인이 깨진 날 고객이 로그인을 잃는 게 제일 나쁜 결과다. */
+    if (account.profileSealKey) {
+      try {
+        const sres = sealProfile(profileDir(account.profileKey || `job-${job.id}`), account.profileSealKey);
+        if (sres.ok) log(`  · 저장된 로그인을 다시 잠갔어요(파일 ${sres.files}개)`);
+        else { seen.sealNote = `봉하기 실패: ${sres.why}`; log(`  ⚠ 로그인을 다시 잠그지 못했어요(${sres.why})`); }
+      } catch (e) { seen.sealNote = `봉하기 오류: ${String(e?.message ?? e).slice(0, 80)}`; }
+    }
   }
 }
 

@@ -135,3 +135,131 @@ export function sealLine(r) {
   if (r.state === "os" || r.state === "keyring") return `  · 로그인 정보 보관: ${r.why} (로그인 ${r.sealed ?? 0}개)`;
   return `  · 로그인 정보 보관: ${r.why}`;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+ * [P1R8 §3.1 · 설계 §4] 🔴 **봉인** — 서버가 잡마다 내려 주는 열쇠로 프로필의 «세션 부분»만 잠근다
+ *   메인 승인 2026-09-15(설계 §8 네 가지).
+ *
+ *   ══ 무엇을 파는가 ══
+ *     **«폴더를 복사해 가면 안 열린다.»** 그뿐이다 — 그 PC 에서 그 사용자로 코드를 돌릴 수 있는 사람은 원리상 못 막는다.
+ *     그래도 진짜 값이 있고, **DPAPI 로는 못 하는 것이 하나 더** 있다: 🔴 **폐기**(서버가 열쇠를 지우면 훔쳐 간 봉인본은 영영 안 열린다).
+ *
+ *   ══ 🔴 fail-open — 프록시와 정반대다 ══
+ *     프록시는 fail-closed 였다(잘못 나가면 연좌제). 여기는 **반대**다:
+ *     봉인이 깨졌다고 잡을 멈추면 **고객이 로그인을 잃고, 재로그인 반복이 캡차를 부른다**(AC-19 · 우리가 이미 한 번 그랬다).
+ *     ⇒ 풀기 실패 = 있던 평문 그대로 쓴다 · 봉하기 실패 = **평문을 안 지운다**. 대신 **조용히 넘어가지 않는다**(사유를 보고에 싣는다).
+ *     메인 말: «우리 안전장치가 고객 공장을 세우면 그건 안전이 아니라 고장이다.»
+ *
+ *   ══ 무엇을 담는가 — **전부가 아니다** ══
+ *     크로미움 프로필은 캐시 때문에 수백 MB 다. 잡마다 그걸 암·복호화하면 발행이 느려지고 디스크가 닳는다.
+ *     세션을 지닌 것만 담는다(아래 `SESSION_PATHS`). 🔴 `Cache`·`Code Cache`·`GPUCache` 는 **안 담는다**(크고 값이 없다).
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+import crypto from "node:crypto";
+import { zipRead, zipWrite } from "./zip.mjs";
+
+/** 봉인 파일 이름 — 프로필 폴더 **옆**에 둔다(안에 두면 자기가 자기를 담는다). */
+export const sealedPathFor = (dir) => `${dir}.sealed`;
+
+/**
+ * 담을 것 — «세션을 지닌 것»만. 폴더면 통째로, 파일이면 그 파일만.
+ *   🔴 크로미움 96 이후 쿠키가 `Network/` 로 옮겨 갔다 — **둘 다** 본다(한쪽만 담으면 판에 따라 조용히 로그인을 잃는다).
+ */
+const SESSION_PATHS = [
+  "Default/Network/Cookies", "Default/Network/Cookies-journal",
+  "Default/Cookies", "Default/Cookies-journal",
+  "Default/Local Storage", "Default/IndexedDB", "Default/Login Data", "Default/Preferences",
+];
+
+const MAGIC = "ACSEAL1";
+const keyBuf = (hex) => (/^[0-9a-f]{64}$/i.test(String(hex ?? "")) ? Buffer.from(String(hex), "hex") : null);
+
+/** 폴더·파일을 zip 항목으로 모은다(없는 것은 그냥 건너뛴다 — 프로필마다 있는 파일이 다르다). */
+function collectSession(dir) {
+  const out = [];
+  const walk = (abs, rel) => {
+    let st; try { st = fs.statSync(abs); } catch { return; }
+    if (st.isDirectory()) {
+      let names = []; try { names = fs.readdirSync(abs); } catch { return; }
+      for (const nm of names) walk(path.join(abs, nm), `${rel}/${nm}`);
+    } else if (st.isFile()) {
+      try { out.push({ name: rel, data: fs.readFileSync(abs), mode: 0o600 }); } catch { /* 잠긴 파일은 건너뛴다 */ }
+    }
+  };
+  for (const rel of SESSION_PATHS) walk(path.join(dir, ...rel.split("/")), rel);
+  return out;
+}
+
+const rmQuiet = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* 못 지워도 진행 */ } };
+
+/**
+ * 🔴 **봉하기** — 세션 파일들을 한 덩이로 묶어 AES-256-GCM 으로 잠그고, **평문 원본을 지운다**.
+ *   실패하면 **평문을 안 지운다**(fail-open). 반환 `{ ok, why }` — `why` 는 보고에 실린다.
+ */
+export function sealProfile(dir, keyHex) {
+  const key = keyBuf(keyHex);
+  if (!key) return { ok: false, why: "봉인 열쇠가 없거나 모양이 아니에요" };
+  try {
+    const files = collectSession(dir);
+    if (!files.length) return { ok: false, why: "봉할 세션 파일이 없어요(아직 로그인한 적이 없는 프로필)" };
+    const packed = zipWrite(files.map((f) => ({ ...f, mtime: new Date("2020-01-01T00:00:00Z") })));
+    const iv = crypto.randomBytes(12);
+    const c = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const enc = Buffer.concat([c.update(packed), c.final()]);
+    const blob = Buffer.concat([Buffer.from(MAGIC, "utf8"), iv, c.getAuthTag(), enc]);
+
+    /* 🔴 **먼저 쓰고, 되읽어 확인하고, 그다음에 지운다.** 순서가 바뀌면 봉인이 깨진 날 로그인이 통째로 사라진다.
+       임시 파일에 쓰고 제자리 교체 — 쓰다가 죽어도 옛 봉인본이 남는다(자동 업데이트와 같은 규율). */
+    const sealed = sealedPathFor(dir);
+    const tmp = `${sealed}.tmp`;
+    fs.writeFileSync(tmp, blob);
+    const check = unsealBlob(fs.readFileSync(tmp), key);
+    if (!check.ok) { rmQuiet(tmp); return { ok: false, why: `봉했는데 되읽기가 안 돼요(${check.why}) — 평문을 그대로 둡니다` }; }
+    fs.renameSync(tmp, sealed);
+
+    for (const rel of SESSION_PATHS) rmQuiet(path.join(dir, ...rel.split("/")));
+    return { ok: true, why: "", files: files.length, bytes: blob.length };
+  } catch (e) {
+    return { ok: false, why: String(e?.message ?? e).slice(0, 120) };
+  }
+}
+
+/** 봉인 덩이 → zip 항목들(순수 · 하니스가 직접 부른다). */
+export function unsealBlob(blob, key) {
+  try {
+    if (!Buffer.isBuffer(blob) || blob.length < MAGIC.length + 28) return { ok: false, why: "봉인 파일이 너무 짧아요" };
+    if (blob.subarray(0, MAGIC.length).toString("utf8") !== MAGIC) return { ok: false, why: "우리 봉인 파일이 아니에요" };
+    const iv = blob.subarray(MAGIC.length, MAGIC.length + 12);
+    const tag = blob.subarray(MAGIC.length + 12, MAGIC.length + 28);
+    const d = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    d.setAuthTag(tag);
+    const packed = Buffer.concat([d.update(blob.subarray(MAGIC.length + 28)), d.final()]);
+    return { ok: true, why: "", files: zipRead(packed) };
+  } catch (e) {
+    /* 🔴 열쇠가 다르면 여기로 온다 — **그게 이 기능이 파는 것**이다(복사해 가면 안 열린다). */
+    return { ok: false, why: `열쇠가 맞지 않거나 파일이 손상됐어요(${String(e?.message ?? e).slice(0, 60)})` };
+  }
+}
+
+/**
+ * 🔴 **풀기** — 봉인본이 있으면 프로필 폴더에 되돌려 놓는다.
+ *   봉인본이 없으면 «할 일 없음»이고 **실패가 아니다**(처음 켠 프로필 · 아직 안 켠 기능).
+ *   못 풀면 **있던 평문 그대로** 쓴다(fail-open) — 그리고 그 사실을 말한다.
+ */
+export function unsealProfile(dir, keyHex) {
+  const sealed = sealedPathFor(dir);
+  if (!fs.existsSync(sealed)) return { ok: true, why: "", skipped: true };
+  const key = keyBuf(keyHex);
+  if (!key) return { ok: false, why: "봉인본은 있는데 열쇠가 없어요 — 저장된 로그인을 못 씁니다" };
+  const got = unsealBlob(fs.readFileSync(sealed), key);
+  if (!got.ok) return { ok: false, why: got.why };
+  try {
+    for (const f of got.files) {
+      const abs = path.join(dir, ...String(f.name).split("/"));
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, f.data);
+    }
+    return { ok: true, why: "", files: got.files.length };
+  } catch (e) {
+    return { ok: false, why: String(e?.message ?? e).slice(0, 120) };
+  }
+}
