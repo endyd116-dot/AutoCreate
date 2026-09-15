@@ -103,7 +103,7 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${(D.settings && D.settings.produceLeadDays) || 3}일 전에 만들기 때문` : ""}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 너무 가까운 자리는 회색 «이번엔 건너뛰어요»
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.kind === "shorts" ? '<span class="pill ink" style="font-size:11px;padding:1px 6px;margin-right:4px">영상</span>' : ""}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -128,8 +128,9 @@ function autoBanner() {
   UI.$("#autoBnT").textContent = `자동 편성이 꺼져 있어요 — 켜면 ${D.settings.produceLeadDays || 3}일 전에 글을 만들어 드려요`;
   UI.$("#autoOn").onclick = async (e) => { e.target.disabled = true; const s = await UI.api("/api/tenant-settings", { body: { autoSchedule: true } }); e.target.disabled = false; if (!s.ok) return UI.toast(s.error || "켜지 못했어요"); UI.toast("자동 편성을 켰어요"); await load(); };
 }
-/* ③ 이번엔 건너뛰는 자리 — 서버 skipReason:"too_soon" 우선 · 없으면 화면이 (자리 날짜 − 오늘) < produceLeadDays 로 판정(이 하나는 화면 계산 허용 · 설정값은 rules-settings 응답) */
-const tooSoon = (s) => { if (s.skipReason) return s.skipReason === "too_soon"; if (s.pieceId || !["planned", "topic_assigned", "assigned"].includes(s.status)) return false; const lead = (D.settings && D.settings.produceLeadDays) || 3; const days = Math.round((new Date(s.date + "T00:00:00") - new Date(ymd(today) + "T00:00:00")) / 86400e3); return days >= 0 && days < lead; };
+/* ③ 이번엔 건너뛰는 자리 — 서버 skipReason:"too_soon" 만 본다(화면 계산 없음 · 키 없으면 필 없음). 서버는 매일 produceHour 에 글을 만들고, 그 전에 오는 자리만 건너뛴다 — 며칠 남았는지는 판정 근거가 아니다 */
+const tooSoon = (s) => s.skipReason === "too_soon";
+const produceH = () => { const [h, m] = String((D.settings && D.settings.produceHour) || "06:00").split(":").map((x) => parseInt(x, 10)); return `${Number.isFinite(h) ? h : 6}시${m ? ` ${m}분` : ""}`; }; // rules-settings 의 «06:00» → «6시»
 function render() {
   autoBanner();
   const two = mode === "two";
@@ -179,7 +180,7 @@ function slotSheet(s) {
   const busy = ["publishing", "producing"].includes(s.status);
   const can = { topic: !s.pieceId && !done && !busy, time: !done && !busy, make: !s.pieceId && !!s.topicTitle && !done && !busy, skip: !done && !busy };
   const H = {
-    too_soon: ["이번엔 건너뛰어요", `${(D.settings && D.settings.produceLeadDays) || 3}일 전에 만들기라 이 자리는 못 만들어요 · 다음 자리부터 만들어요 · 지금 만들기는 돼요`, null, null],
+    too_soon: ["이번엔 건너뛰어요", `글은 매일 ${produceH()}에 만드는데 이 자리는 그 전이에요 · 지금 만들기는 돼요`, null, null],
     no_topic: ["아직 소재가 없어요", "소재를 고르면 예정대로 만들어요", "소재 고르기", "topic"],
     coin_short: ["코인이 모자라 못 만들었어요", "충전하면 다음 만드는 시각에 이어서 만들어요", "충전하기", "/app/coins.html"],
     awaiting_runner: ["내 PC 프로그램이 꺼져 있어요", "켜 두면 기다리던 이 글이 바로 올라가요", "켜는 법 보기", "/app/runner.html"],
@@ -194,7 +195,7 @@ function slotSheet(s) {
   const dSkip = can.skip ? "이날은 쉬고 다음 편성은 그대로 나가요" : "이미 지나간 편성이에요";
   const act = (id, t, d, ok) => `<button type="button" class="row tap" data-act="${id}" ${ok ? "" : 'disabled style="opacity:.4"'}><div class="l"><span class="t">${t}</span><span class="d wrap">${UI.esc(d)}</span></div>${ok ? UI.chev : ""}</button>`;
   const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
-  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${UI.pill(UI.SLOT_STATUS, s.status)}</div>
+  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
     ${H && H[0] ? `<div class="banner ${warn ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(H[0])}${H[1] ? " · " + UI.esc(H[1]) : ""}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">계정</span><span class="v">${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "건강한 계정 순으로 자동"}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">발행</span><span class="v">${s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간"}</span></div>
@@ -1367,7 +1368,17 @@ await load();
 --- script ---
 await UI.boot("account");
 let devices = [], timer = null;
-const DL = { url: "", cmd: "" };
+/* [러너 배포] 내려받기 — 공개 URL 이 아니라 로그인·요금제를 지난 사람에게 그때그때 주는 10분 링크. 버튼 → UI.api → ok 면 location.href(zip 은 화면을 떠나지 않고 받아진다)
+   403 step:"plan" → 요금제 시트(등록 한도 시트와 같은 것) · 503 step:"no_release" → «준비 중» 토스트(오류가 아니다 · 고칠 사람이 우리) · readonly 는 UI.gate 가 막는다 */
+const MB = (b) => (b > 0 ? `${(b / 1048576).toFixed(1)}MB` : "");
+async function download(btn, note, close) {
+  btn.disabled = true; const r = await UI.api("/api/runner-download"); btn.disabled = false;
+  if (!r.ok) { if (r.gated) return; if (r.step === "plan") { if (close) close(); return planSheet(r.error); } if (r.step === "no_release") return UI.toast(r.error || "프로그램을 준비 중이에요 · 잠시 뒤 다시 눌러 주세요"); return UI.toast(r.error || "내려받지 못했어요 · 다시 눌러 주세요"); }
+  if (note) note.textContent = [r.version ? `v${r.version}` : "", MB(r.bytes), "링크는 10분 동안만"].filter(Boolean).join(" · ");
+  location.href = r.url;
+}
+function planSheet(msg) { UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(msg || "지금 요금제에는 «내 PC에서 켜기»가 없어요. 요금제를 바꾸면 바로 받을 수 있어요.")}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
+const DL_BTN = (id, noteId) => `<div style="padding:0 0 12px"><button class="btn secondary sm" type="button" id="${id}" style="width:100%">프로그램 내려받기</button><p class="muted" id="${noteId}" style="margin:6px 0 0;font-size:12.5px;text-align:center;min-height:16px"></p></div>`;
 const PC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';
 
 function render() {
@@ -1380,8 +1391,9 @@ function render() {
     : on.length ? `${UI.ago(last) || "방금 전"} 응답${waiting ? ` · 올릴 글 ${waiting}건` : " · 올릴 글 없음"}${noFf ? " · 영상은 ffmpeg 설치 후" : ""}`
     : `마지막 응답 ${UI.ago(last) || "오래전"}${waiting ? ` · 글 ${waiting}건이 기다려요` : ""}`;
   const list = UI.$("#list");
+  // [러너 배포] otherDeviceAt(있을 때만 온다 · «0번» 없음) · bound 없음 = 아직 한 번도 안 켠 기기 · 지문 값은 응답에 없다(있어도 안 그린다)
   list.innerHTML = devices.length
-    ? `<div class="gt">연결한 PC ${devices.length}대</div>` + devices.map((d) => `<button type="button" class="row tap" data-id="${d.id}"><span class="mk ${d.status === "online" ? "money" : "soft"}">${PC}</span><div class="l"><span class="t">${UI.esc(d.name)}</span><span class="d">${d.version ? "버전 " + UI.esc(d.version) + " · " : ""}${d.status === "online" ? (d.jobsWaiting ? `올릴 글 ${d.jobsWaiting}건` : "올릴 글 없음") : "마지막 응답 " + UI.esc(UI.ago(d.lastSeenAt) || "오래전")}${d.caps && d.caps.ffmpeg === false ? " · 영상을 굽지 못해요" : ""}</span></div>${d.caps && d.caps.ffmpeg === false ? '<span class="pill warn">ffmpeg 없음</span>' : `<span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status === "online" ? "켜짐" : "꺼짐"}</span>`}${UI.chev}</button>`).join("")
+    ? `<div class="gt">연결한 PC ${devices.length}대</div>` + devices.map((d) => `<button type="button" class="row tap" data-id="${d.id}"><span class="mk ${d.status === "online" ? "money" : "soft"}">${PC}</span><div class="l"><span class="t">${UI.esc(d.name)}</span><span class="d${d.otherDeviceAt ? " wrap" : ""}">${d.otherDeviceAt ? `${d.otherDeviceCount || 1}번 · ${UI.dateKST(d.otherDeviceAt)} ${UI.timeKST(d.otherDeviceAt)}` : !d.bound && d.status !== "online" ? "열쇠를 넣고 프로그램을 켜면 여기에 잡혀요" : d.status === "online" ? (d.jobsWaiting ? `올릴 글 ${d.jobsWaiting}건` : "올릴 글 없음") : "마지막 응답 " + UI.esc(UI.ago(d.lastSeenAt) || "오래전")}${d.caps && d.caps.ffmpeg === false ? " · 영상을 굽지 못해요" : ""}</span></div>${d.otherDeviceAt ? '<span class="pill warn">다른 PC에서 켜졌어요</span>' : d.caps && d.caps.ffmpeg === false ? '<span class="pill warn">ffmpeg 없음</span>' : !d.bound && d.status !== "online" ? '<span class="pill off">아직 안 켰어요</span>' : `<span class="pill ${d.status === "online" ? "ok" : "off"}">${d.status === "online" ? "켜짐" : "꺼짐"}</span>`}${UI.chev}</button>`).join("")
     : `<div class="empty"><span class="mk soft">${PC}</span><h3>아직 연결한 PC가 없어요</h3><p>늘 켜 두는 PC 한 대면 돼요. 아래에서 3분이면 끝나요.</p></div>`;
   UI.$$("#list .row[data-id]").forEach((b) => b.onclick = () => deviceSheet(devices.find((d) => d.id === Number(b.dataset.id))));
   const wait = devices.some((d) => d.status !== "online");
@@ -1415,18 +1427,24 @@ function mSheet(r) {
     } });
 }
 
-/* 기기 시트(상태 + 해제) */
+/* 기기 시트(상태 · 다른 PC 시도 · 열쇠 다시 받기 · 해제) — 지문 값은 오지 않는다(«있었나 · 몇 번» 만) */
 function deviceSheet(d) {
   if (!d) return;
-  UI.sheet(`<div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v">${d.status === "online" ? '<span class="pill ok">켜짐</span>' : '<span class="pill off">꺼짐</span>'}</span></div>
+  const unbound = !d.bound && d.status !== "online";
+  UI.sheet(`<div class="kv" style="padding-left:0;padding-right:0"><span class="k">상태</span><span class="v">${d.status === "online" ? '<span class="pill ok">켜짐</span>' : unbound ? '<span class="pill off">아직 안 켰어요</span>' : '<span class="pill off">꺼짐</span>'}</span></div>
+    ${d.otherDeviceAt ? `<div class="banner" style="margin:8px 0"><span>${UI.esc(UI.ago(d.otherDeviceAt) || "조금 전")}에 다른 PC 가 이 열쇠로 켜려 했어요${d.otherDeviceCount > 1 ? ` · ${d.otherDeviceCount}번` : ""} · 내가 아니면 열쇠를 다시 받으세요</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">마지막 응답</span><span class="v">${UI.esc(UI.ago(d.lastSeenAt) || "아직 없음")}</span></div>
-    ${d.version ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">버전</span><span class="v">${UI.esc(d.version)}</span></div>` : ""}
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">기다리는 글</span><span class="v">${d.jobsWaiting || 0}건</span></div>
     ${d.caps ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상 굽기(ffmpeg)</span><span class="v">${d.caps.ffmpeg === false ? '<span class="pill warn">없음</span>' : `<span class="pill ok">있음</span>${d.caps.ffmpegVersion ? " " + UI.esc(d.caps.ffmpegVersion) : ""}`}</span></div>` : ""}
     ${d.caps && d.caps.ffmpeg === false ? `<div class="banner" style="margin:8px 0 0"><span>ffmpeg 가 없어 영상을 굽지 못해요 · 글 올리기는 그대로 돼요</span><button type="button" id="ffm">설치 안내</button></div>` : ""}
-    ${d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
+    ${unbound ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">아직 한 번도 안 켰어요. 열쇠를 넣고 프로그램을 켜면 이 PC 에 묶여요.</p>` : d.status !== "online" ? `<p class="muted" style="margin:12px 0 0;font-size:13.5px">이 PC에서 프로그램을 켜면 기다리던 글이 바로 올라가요.</p>` : ""}
+    <div style="margin:12px 0 0"><button type="button" class="row tap" id="rot"><div class="l"><span class="t">열쇠 다시 받기</span><span class="d wrap">PC 를 바꿨거나 열쇠가 새어 나간 것 같을 때 · 옛 열쇠는 바로 못 써요</span></div>${UI.chev}</button><div id="rc2"></div></div>
+    ${d.version ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">프로그램 v${UI.esc(d.version)}</p>` : ""}
     <div style="padding:16px 0 0"><button class="btn ghost" type="button" id="rm" style="color:var(--danger);width:100%">연결 해제</button><div id="rc"></div></div>`, { title: d.name, onOpen: (sh, close) => {
       const ff = sh.querySelector("#ffm"); if (ff) ff.onclick = () => { close(); ffmpegSheet(); } // [P1R5] caps.ffmpeg=false → 설치 안내(침묵 금지 · §2.2)
+      sh.querySelector("#rot").onclick = () => UI.confirmRow(sh.querySelector("#rc2"), "지금 켜 둔 내 PC 프로그램은 멈춰요 · 새 열쇠를 넣어야 다시 켜져요", async () => {
+        const r = await UI.api("/api/runner-rotate", { body: { id: d.id } }); if (!r.ok) return r.gated ? close() : UI.toast(r.error || "열쇠를 다시 받지 못했어요");
+        close(); keySheet({ name: d.name, token: r.device.token, install: r.install, done: "새 열쇠로 바꿨어요 · 프로그램에 넣고 켜 주세요" }); }); // 평문 열쇠는 이 응답 1회뿐 — 등록 때와 같은 «다시 볼 수 없어요» 화면
       sh.querySelector("#rm").onclick = () => UI.confirmRow(sh.querySelector("#rc"), `${d.name} 연결을 해제할까요? 이 PC로는 더 이상 글을 올리지 않아요.`, async () => {
         const r = await UI.api("/api/runner-remove", { body: { id: d.id } }); if (!r.ok) return UI.toast(r.error || "해제하지 못했어요");
         close(); UI.toast("연결을 해제했어요"); load(); });
@@ -1445,49 +1463,55 @@ function ffmpegSheet() {
       sh.querySelector("#re").onclick = async () => { close(); await load(); UI.toast(devices.some((d) => d.caps && d.caps.ffmpeg === false) ? "아직 ffmpeg 가 안 보여요 · 프로그램을 껐다 켜 주세요" : "ffmpeg 를 찾았어요"); };
     } });
 }
-/* 켜기 3스텝(한 화면 한 질문 · 열쇠는 1회만 보여 준다) */
-function addSheet() {
-  let step = 1, name = "", token = "";
-  const view = (sh, close) => {
+/* 열쇠 화면(등록·재발급 공용) — 평문 열쇠는 이 화면 1회뿐(다시 볼 수 없다 · DESIGN §7.1) · 다음 화면의 순서는 서버 install.steps 를 **그대로** 번호 목록으로(문구를 다시 짜지 않는다 · 두 곳에서 갈리면 안내가 또 틀어진다) */
+const STEPS_FALLBACK = ["내려받은 zip 을 압축 풀기", "run.bat 두 번 클릭(Mac·Linux 는 ./run.sh)", "토큰 붙여넣기"]; // install 이 아예 안 왔을 때만(옛 서버) — 서버 문구와 같은 줄
+function keyFlow(sh, close, k) {
+  let step = 2; const steps = (k.install && k.install.steps && k.install.steps.length) ? k.install.steps : STEPS_FALLBACK;
+  const view = () => {
     const body = sh.querySelector(".sheet-body");
-    const prog = `<div class="prog" style="padding:0 0 8px"><i class="on"></i><i class="${step >= 2 ? "on" : ""}"></i><i class="${step >= 3 ? "on" : ""}"></i></div>`;
-    if (step === 1) {
-      body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>이 PC를 뭐라고 부를까요?</h2><p>나중에 어느 PC인지 알아보기 위한 이름이에요.</p></div>
-        <div class="field"><input class="input" id="nm" value="${UI.esc(name)}" placeholder="예: 집 PC" maxlength="20" autocomplete="off"><div class="help"></div></div>
-        <div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
-      body.querySelector("#nx").onclick = async () => {
-        name = body.querySelector("#nm").value.trim();
-        if (!name) { body.querySelector(".help").textContent = "이름을 적어 주세요."; return; }
-        const btn = body.querySelector("#nx"); btn.disabled = true;
-        const r = await UI.api("/api/runner-register", { body: { name, kind: "own" } }); btn.disabled = false;
-        if (!r.ok) {
-          if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
-          body.querySelector(".help").textContent = r.error || "등록하지 못했어요"; return;
-        }
-        token = r.device.token; DL.url = (r.install || {}).url || ""; DL.cmd = (r.install || {}).cmd || ""; step = 2; view(sh, close);
-      };
-      setTimeout(() => { const el = body.querySelector("#nm"); if (el) el.focus(); }, 60);
-    } else if (step === 2) {
+    const prog = k.prog ? `<div class="prog" style="padding:0 0 8px"><i class="on"></i><i class="on"></i><i class="${step >= 3 ? "on" : ""}"></i></div>` : "";
+    if (step === 2) {
       body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>열쇠를 복사해 두세요</h2><p>이 열쇠로 내 PC와 연결해요.</p></div>
-        <code class="code" id="tk">${UI.esc(token)}</code>
+        <code class="code" id="tk">${UI.esc(k.token)}</code>
         <div class="banner" style="margin:12px 0 0"><span>이 화면을 닫으면 다시 볼 수 없어요</span></div>
         <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="cp">열쇠 복사하기</button><button class="btn ghost" type="button" id="nx">복사했어요 · 다음</button></div>`;
-      body.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(token)) ? "복사했어요" : "복사하지 못했어요 · 길게 눌러 복사해 주세요");
-      body.querySelector("#nx").onclick = () => { step = 3; view(sh, close); };
+      body.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(k.token)) ? "복사했어요" : "복사하지 못했어요 · 길게 눌러 복사해 주세요");
+      body.querySelector("#nx").onclick = () => { step = 3; view(); };
     } else {
-      body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>세 가지만 하면 끝나요</h2><p>PC에서 한 번만 하면 돼요.</p></div>
-        <div class="steps" style="padding:8px 0 4px"><div class="st on"><i>1</i>프로그램 내려받기</div></div>
-        <div style="padding:0 0 12px">${DL.url ? `<a class="btn secondary sm" href="${UI.esc(DL.url)}" target="_blank" rel="noopener" style="width:100%">프로그램 내려받기</a>` : `<p class="muted" style="margin:0;font-size:13.5px">받는 곳 주소는 준비되면 여기에 나와요.</p>`}</div>
-        <div class="steps" style="padding:4px 0"><div class="st on"><i>2</i>열쇠 붙여넣기</div></div>
-        <div style="padding:0 0 8px">${DL.cmd ? `<code class="code">${UI.esc(DL.cmd)}</code><button class="btn ghost" type="button" id="cp2" style="width:100%">이 줄 복사하기</button>` : ""}</div>
-        <div class="steps" style="padding:4px 0"><div class="st on"><i>3</i>켜 둔 채로 두기</div></div>
+      body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>${["한", "두", "세", "네", "다섯"][steps.length - 1] || steps.length} 가지만 하면 끝나요</h2><p>PC에서 한 번만 하면 돼요.</p></div>
+        ${DL_BTN("dl", "dlNote")}
+        <div class="steps" style="padding:4px 0 8px">${steps.map((s, i) => `<div class="st on"><i>${i + 1}</i>${UI.esc(s)}</div>`).join("")}</div>
+        ${k.install && k.install.cmd ? `<p class="muted" style="margin:0 0 8px;font-size:12.5px">실행 파일 · ${UI.esc(k.install.cmd)}</p>` : ""}
         <p class="muted" style="margin:0 0 4px;font-size:13.5px">창을 닫지 말고 켜 두면, 예약한 시각에 알아서 올라가요.</p>
         <div class="cta"><button class="btn primary" type="button" id="fin">다 했어요</button></div>`;
-      const cp2 = body.querySelector("#cp2"); if (cp2) cp2.onclick = async () => UI.toast((await UI.copy(DL.cmd)) ? "복사했어요" : "복사하지 못했어요");
-      body.querySelector("#fin").onclick = () => { close(); UI.done(`${name} 을(를) 연결했어요`, load); };
+      body.querySelector("#dl").onclick = (e) => download(e.currentTarget, body.querySelector("#dlNote"), close);
+      body.querySelector("#fin").onclick = () => { close(); UI.done(k.done, load); };
     }
   };
-  UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => view(sh, close) });
+  view();
+}
+function keySheet(k) { UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => keyFlow(sh, close, k) }); }
+/* 켜기 3스텝(한 화면 한 질문 · 열쇠는 1회만 보여 준다) — 이름 → 열쇠 → 서버 안내 3줄 */
+function addSheet() {
+  UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => {
+    const body = sh.querySelector(".sheet-body");
+    body.innerHTML = `<div class="prog" style="padding:0 0 8px"><i class="on"></i><i></i><i></i></div><div class="step-h" style="padding-top:4px"><h2>이 PC를 뭐라고 부를까요?</h2><p>나중에 어느 PC인지 알아보기 위한 이름이에요.</p></div>
+      <div class="field"><input class="input" id="nm" placeholder="예: 집 PC" maxlength="20" autocomplete="off"><div class="help"></div></div>
+      <div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
+    body.querySelector("#nx").onclick = async () => {
+      const name = body.querySelector("#nm").value.trim();
+      if (!name) { body.querySelector(".help").textContent = "이름을 적어 주세요."; return; }
+      const btn = body.querySelector("#nx"); btn.disabled = true;
+      const r = await UI.api("/api/runner-register", { body: { name, kind: "own" } }); btn.disabled = false;
+      if (!r.ok) {
+        if (r.gated) return close();
+        if (r.step === "limit") { close(); return planSheet(r.error); }
+        body.querySelector(".help").textContent = r.error || "등록하지 못했어요"; return;
+      }
+      keyFlow(sh, close, { name, token: r.device.token, install: r.install, prog: true, done: `${name} 을(를) 연결했어요` });
+    };
+    setTimeout(() => { const el = body.querySelector("#nm"); if (el) el.focus(); }, 60);
+  } });
 }
 UI.$("#add").onclick = addSheet;
 await load();
