@@ -208,7 +208,7 @@ async function main() {
     const SOFT_USD = Math.round(((capKrw * 1.5) / FX) * 100) / 100;    // 일일 상한의 1.5배 = 소프트 구간(막으면 안 된다)
     const HARD_USD = Math.round(((capKrw * 3.6) / FX) * 100) / 100;    // ×3 초과 = 하드
     const useRef = (tag) => `r5cost-${tag}-${STAMP}`;
-    const spend = async (usd, tag, tid = TID) => { guard(tid); await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref) VALUES (${tid}, 'video_clip', 'c-stub', 0, 0, ${usd}, ${useRef(tag)})`; };
+    const spend = async (usd, tag, tid = TID) => { guard(tid); await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, synthetic) VALUES (${tid}, 'video_clip', 'c-stub', 0, 0, ${usd}, ${useRef(tag)}, true)`; };
     const clearSpend = async (tag, tid = TID) => { guard(tid); await s`DELETE FROM ai_usage WHERE tenant_id = ${tid} AND ref = ${useRef(tag)}`; };
     /** 아직 안 쓴 소재 하나. 🔴 같은 소재로 두 번 제안하면 `step:"topic_state"`(«이미 쓴 소재예요»)라 캡 판정이 가려진다 — 절마다 새 소재로 간다. */
     const freshTopic = async () => {
