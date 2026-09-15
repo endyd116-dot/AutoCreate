@@ -110,7 +110,7 @@ export default async (req: Request): Promise<Response> => {
             MIN(p.id) FILTER (WHERE p.status <> 'published')::int AS pre_first,
             MIN(p.id) FILTER (WHERE p.status = 'published')::int AS post_first
           FROM pieces p, LATERAL jsonb_array_elements(p.gate_report -> 'checks') c
-          WHERE p.tenant_id = ${tid} AND p.status IN ('draft', 'in_review', 'approved', 'scheduled', 'published')
+          WHERE p.tenant_id = ${tid} AND p.status IN ('draft', 'in_review', 'edited', 'approved', 'scheduled', 'published')
             AND jsonb_typeof(p.gate_report -> 'checks') = 'array' AND c->>'pass' = 'false'`);
         warnPre = n(wc?.pre_n); warnPost = n(wc?.post_n);
         warnFirst = warnPre ? n(wc?.pre_first) : n(wc?.post_first);
@@ -119,7 +119,7 @@ export default async (req: Request): Promise<Response> => {
               COUNT(DISTINCT p.id) FILTER (WHERE p.status <> 'published')::int AS pre_n,
               COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'published')::int AS post_n
             FROM pieces p, LATERAL jsonb_array_elements(p.gate_report -> 'checks') c
-            WHERE p.tenant_id = ${tid} AND p.status IN ('draft', 'in_review', 'approved', 'scheduled', 'published')
+            WHERE p.tenant_id = ${tid} AND p.status IN ('draft', 'in_review', 'edited', 'approved', 'scheduled', 'published')
               AND jsonb_typeof(p.gate_report -> 'checks') = 'array' AND c->>'pass' = 'false'
             GROUP BY 1 ORDER BY 2 DESC, 3 DESC, 1`);
         }
@@ -157,7 +157,7 @@ export default async (req: Request): Promise<Response> => {
       if (n(slotP?.c)) todo.push({ kind: "account_slot", title: `계정 ${n(slotP.c)}개가 코인이 모자라 쉬고 있어요`, count: n(slotP.c),
         desc: `코인 ${n(slotP.coins) * n(slotP.c)}개를 채우면 그 계정만 바로 다시 돌아가요(다른 계정은 그대로 돌고 있어요)`, link: "/app/coins.html", tone: "warn" });
     } catch (e) { console.warn("[home] 멈춘 글·자리 조회 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
-    const [review] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid} AND status = 'in_review'`);
+    const [review] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid} AND status IN ('in_review', 'edited')`);   // [R9-9 C4] 고친 글도 «봐주실 글»이다
     /* 🔴 `forcedByPlan` 이면 «내일 나가기 전에 확인해 주세요»는 **거짓말**이 된다 — 승인하지 않으면 그 글은 아예 안 나간다(B3 크론이 마감 뒤 awaiting_manual 로 내린다). */
     /* 🔴 [R8 §4.5] 팀 승인이 켜진 집 — «봐주실 글»에 **주인을 기다리는 몫**을 한 줄로 얹는다.
        🔴 **새 kind 를 만들지 않는다**: 같은 글들이라 행을 둘로 나누면 «몇 건인지»를 못 믿게 된다(오늘 게이트 행에서 겪은 그 모양).

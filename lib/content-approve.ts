@@ -53,6 +53,15 @@ const n = (v: unknown) => Number(v || 0);
    🔴 **검사를 끈 것이 아니다** — 모든 축은 그대로 돌고(`runGate`), 결과는 `gate_report` 에 그대로 남고, 화면·알림이 **말해 준다**.
       바뀐 것은 «막는 판정» 하나뿐이다. **축을 지우거나 판정 로직을 빼면 «말해 주기»의 재료가 사라진다.** */
 export const HARD_GATE_KEYS: readonly string[] = [];
+
+/**
+ * [R9-9 · ③C4 · B 2026-09-16] 🔴 **piece 상태 `edited`** — DESIGN §5B.6 «수정은 자리의 상태가 아니라 **글의 상태**다».
+ *   사람이 검수에서 제목·본문을 고치면 글은 `in_review` → `edited` 로 간다(`pieces-update`). **자리(slot)는 `in_review` 그대로**(자리 어휘에 edited 는 없다 · 2026-09-15 메인 결정).
+ *   `edited` 는 «봐주세요»의 한 갈래다 — 승인·거절·다시 만들기·마감 자동 승인·홈 «봐주실 글»·팀 승인 셈 **전부 in_review 와 같이** 다룬다. 이 목록이 그 정본이다(낱개로 `'in_review'` 를 또 적지 않는다).
+ *   `meta.editedByUser` 는 **다른 것**이다(재검사가 블록 대신 HTML 을 보게 하는 표시 · 대가만 켜도 안 찍힌다) — 상태는 «사람 손이 닿은 글»을 화면이 가르는 값이다.
+ */
+export const REVIEW_PIECE_STATUSES: readonly string[] = ["in_review", "edited"];
+export const EDITED_PIECE_STATUS = "edited";
 /** 이 게이트 결과가 승인을 막는가. */
 export function hardFailures(gate: GateReport): GateCheck[] {
   return gate.checks.filter((c) => !c.pass && HARD_GATE_KEYS.includes(c.key));
@@ -419,7 +428,7 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date; by?:
     const at = utcDate(p.scheduled_for)?.toISOString() ?? now.toISOString();
     return { ok: true, status: "scheduled", scheduledFor: at, gate: (p.gate_report && typeof p.gate_report === "object" ? p.gate_report : { ok: true, checks: [], rewritten: false }) as GateReport, alreadyScheduled: true };
   }
-  if (st !== "in_review" && st !== "draft") return { ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." };
+  if (!REVIEW_PIECE_STATUSES.includes(st) && st !== "draft") return { ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." };
 
   const gate = await recheckPiece(tid, p);
   const hard = hardFailures(gate);      // [P1R8 §9] 지금은 늘 빈 배열이다 — 막는 축이 없다(`HARD_GATE_KEYS` 주석)

@@ -22,7 +22,7 @@ import { type GateReport } from "../../lib/ai-tell-gate";
 import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText, compensationOfMeta, videoBadgeText, videoOpeningCaption } from "../../lib/disclosure";
 /* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
-import { recheckPiece, approvePiece } from "../../lib/content-approve";
+import { recheckPiece, approvePiece, REVIEW_PIECE_STATUSES, EDITED_PIECE_STATUS } from "../../lib/content-approve";   // [R9-9 C4] «봐주세요» 상태 정본(in_review·edited)
 import { triggerGenerate } from "../../lib/director";
 import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
@@ -39,7 +39,7 @@ export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/piec
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
-const STATUSES = new Set(["generating", "draft", "in_review", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);
+const STATUSES = new Set(["generating", "draft", "in_review", "edited", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);   // [R9-9 C4] edited = 사람이 고친 «봐주세요»
 
 /** 글 스텝 3(writing·images·checking) · [P1R5] 영상 스텝 6(`VideoStage` = script·tts·clips·render·judging·done — A 가 «대본→목소리→장면→합성→검사→완료» 로 그린다). */
 const VIDEO_STAGES = ["script", "tts", "clips", "render", "judging", "done", "failed"];
@@ -107,7 +107,9 @@ export default async (req: Request): Promise<Response> => {
       const status = url.searchParams.get("status") || "all";
       const rows = status === "all"
         ? await q(sql`SELECT ${PIECE_SELECT} FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tid} ORDER BY p.id DESC LIMIT 200`)
-        : STATUSES.has(status) ? await q(sql`SELECT ${PIECE_SELECT} FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tid} AND p.status = ${status} ORDER BY p.id DESC LIMIT 200`) : [];
+        /* [R9-9 C4] `?status=in_review` 는 고친 글(edited)도 같이 — «봐주세요» 화면이 사람 손이 닿은 글을 잃지 않게(정본 `REVIEW_PIECE_STATUSES`). */
+        : STATUSES.has(status) ? await q(sql`SELECT ${PIECE_SELECT} FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tid}
+            AND p.status IN (${sql.join((status === "in_review" ? REVIEW_PIECE_STATUSES : [status]).map((s) => sql`${s}`), sql`, `)}) ORDER BY p.id DESC LIMIT 200`) : [];
       return json({ ok: true, pieces: rows.map(pieceRow) });
     }
     if (path.endsWith("/pieces-get")) {
@@ -316,7 +318,7 @@ export default async (req: Request): Promise<Response> => {
     }
     if (path.endsWith("/pieces-reject")) {
       if (st === "rejected") return json({ ok: true, status: "rejected" });
-      if (!["in_review", "draft", "failed", "scheduled", "approved"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 버릴 수 없어요." }, 400);
+      if (!["in_review", "edited", "draft", "failed", "scheduled", "approved"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 버릴 수 없어요." }, 400);
       const reason = String(b.reason ?? "").trim().slice(0, 300);
       await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: reason || null })}, updated_at = NOW() WHERE id = ${id}`);
       /* [P1R7 B3] 자리는 'rejected' — 'skipped' 는 «이날은 쉰다»(사용자가 편성표에서 건너뛴 날)라 둘을 한 어휘로 두면
@@ -339,7 +341,7 @@ export default async (req: Request): Promise<Response> => {
         }
         return json({ ok: true, status: "generating" });
       }
-      if (!["in_review", "draft", "failed", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 다시 만들 수 없어요." }, 400);
+      if (!["in_review", "edited", "draft", "failed", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 다시 만들 수 없어요." }, 400);
       const regen = n(m.regenCount);
       if (regen >= 1) return json({ ok: false, step: "regen_limit", error: "다시 만들기는 한 번만 할 수 있어요. 직접 수정하거나 새 소재로 만들어 주세요." }, 400);
       const note = String(b.note ?? "").trim().slice(0, 300);
@@ -417,7 +419,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, status: "generating" }, 202);
     }
     if (path.endsWith("/pieces-update")) {
-      if (!["in_review", "draft", "scheduled", "approved", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 수정할 수 없어요." }, 400);
+      if (!["in_review", "edited", "draft", "scheduled", "approved", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 수정할 수 없어요." }, 400);
       if (String(p.kind || "post") === "video") {
         /* [P1R5 §3 · A 실물] 영상 설명란 수정 — `{ id, title, body, tags[] }`.
            🔴 첫 줄 고지는 **서버가 되붙인다**(사용자가 지워도 · 글의 «고지 첫 요소» 관례와 같은 급 · §16B.4).
@@ -472,6 +474,8 @@ export default async (req: Request): Promise<Response> => {
         await q(sql`UPDATE pieces SET title = ${title}, body = ${body},
           meta = meta || ${jsonb({ description: body, tags, youtube: { ...yt, title, description: body, tags }, ...(vEdited ? { editedByUser: true, editedAt: new Date().toISOString() } : {}) })},
           updated_at = NOW() WHERE id = ${id}`);
+        /* [R9-9 C4] 사람이 고쳤으면 **글의 상태**가 `edited` 로 간다(DESIGN §5B.6 · 자리는 그대로). 검수 대기(in_review·draft)일 때만 — 예약된 글을 고쳐도 예약은 유지된다. */
+        if (vEdited && (REVIEW_PIECE_STATUSES.includes(st) || st === "draft")) await q(sql`UPDATE pieces SET status = ${EDITED_PIECE_STATUS} WHERE id = ${id}`);
         const [p2] = await q(sql`SELECT p.* FROM pieces p WHERE p.id = ${id}`);
         const gate = await recheckPiece(tid, p2);
         await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
@@ -508,6 +512,10 @@ export default async (req: Request): Promise<Response> => {
         const withDisc = ensureDisclosureHtml(bodyHtml, comp.provider ?? "coupang", { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift });
         if (withDisc !== bodyHtml) { bodyHtml = withDisc; sets.push(sql`body = ${bodyHtml}`); }
       }
+      /* [R9-9 C4] 🔴 **사람이 제목·본문을 고쳤으면 글의 상태가 `edited`** — DESIGN §5B.6 «수정은 자리의 상태가 아니라 글의 상태다»(자리는 in_review 그대로 · recheckPiece 가 다시 잰다).
+         대가만 켠 것은 «고침»이 아니다(`editedByUser` 규율과 같은 선). 검수 대기(in_review·edited·draft)일 때만 — 예약된 글을 손보면 예약은 유지된다. */
+      const humanEdited = typeof b.bodyHtml === "string" || (typeof b.title === "string" && !!b.title.trim());
+      if (humanEdited && (REVIEW_PIECE_STATUSES.includes(st) || st === "draft")) sets.push(sql`status = ${EDITED_PIECE_STATUS}`);
       /* 대가를 켰으면 «바꾼 것»이 있는 것이다 — 본문이 이미 고지를 갖고 있어 `sets` 가 비어도 400 을 내지 않는다(위 UPDATE 로 meta 는 이미 섰다). */
       if (!sets.length && !(turnOn.sponsored || turnOn.gift)) return badRequest("바꿀 값이 없어요.");
       if (!sets.length) sets.push(sql`updated_at = NOW()`);

@@ -1182,3 +1182,10 @@ export const accountsR9Style = {
   /** 계정 기본 코인 등급(simple|standard|premium · 어휘는 `lib/coin-table.ts COIN_TIER_KEYS`). NULL = 안 고름. */
   qualityTier: "quality_tier",
 } as const;
+
+
+/* === Phase 1 R9 · B(piece 상태 `edited` · R9-9 ③C4 · 2026-09-16 · DDL 없음 — status 는 varchar 라 어휘만 늘었다 · CLAUDE §4.4 append-only) ===
+ *   DESIGN §5B.6 «수정은 자리의 상태가 아니라 **글의 상태**다» — 사람이 검수에서 제목·본문을 고치면 `pieces.status` 가 `in_review` → `edited`. 자리(slots)는 `in_review` 그대로(자리 어휘에 edited 는 없다).
+ *   정본 목록은 `lib/content-approve.ts REVIEW_PIECE_STATUSES = ['in_review','edited']` — 승인·거절·다시 만들기·마감 자동 승인·홈·팀 승인이 전부 그 목록을 본다.
+ *   `meta.editedByUser` 는 다른 것이다(재검사가 HTML 을 보게 하는 표시). */
+export const piecesR9Status = { edited: "edited", review: ["in_review", "edited"] } as const;

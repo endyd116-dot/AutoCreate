@@ -61,7 +61,7 @@ export const reviewDeadlineStep: CronStep = {
     if (policy === "silence_approves") {
       // 마감이 지난 in_review — review_deadline 은 D-0 02:00 KST 로 박혀 있다(UTC 저장 · 비교도 UTC).
       const due = await q(sql`SELECT p.*, s.id AS sid FROM slots s JOIN pieces p ON p.id = s.piece_id
-        WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status = 'in_review'
+        WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status IN ('in_review', 'edited')   /* [R9-9 C4] 고친 글(edited)도 «조용하면 발행»의 대상 — 고치고 떠난 것도 조용한 것이다 */
           AND s.review_deadline IS NOT NULL AND s.review_deadline <= NOW() AND ${NOT_SILENT}
         ORDER BY s.publish_at NULLS LAST, s.id LIMIT 200`);
       /* [P1R8 §5.2 → §9] 🔴 **신뢰 계정은 «막는 축»이 아니라 «알려 주는 축»이다**(사장님 전역 지시 2026-09-15 · CLAUDE §9 «게이트는 최소화»).
@@ -118,7 +118,7 @@ export const reviewDeadlineStep: CronStep = {
       // require_confirm — 자동 승인 0. D-0 08:00 에 한 번 부르고, 발행 시각을 넘기면 «안 나갔다»를 남긴다.
       if (hour === 8) {
         const [today] = await q(sql`SELECT COUNT(*) AS c, MIN(s.publish_at) AS first_at FROM slots s JOIN pieces p ON p.id = s.piece_id
-          WHERE s.tenant_id = ${ctx.tid} AND s.slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date AND p.status = 'in_review'`);
+          WHERE s.tenant_id = ${ctx.tid} AND s.slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date AND p.status IN ('in_review', 'edited')`);
         const cnt = n(today?.c);
         const when = kstTimeText(utcDate(today?.first_at), ctx.now);   // 문구 속 시각은 KST(§13.5)
         const why = forcedByPlan
@@ -128,7 +128,7 @@ export const reviewDeadlineStep: CronStep = {
           `${why}${when ? ` 첫 글은 ${when} 예정이에요.` : ""}`, "/app/pieces.html?status=in_review", { byKind: true })) notified++;
       }
       const late = await q(sql`SELECT p.id, p.title, s.id AS sid FROM slots s JOIN pieces p ON p.id = s.piece_id
-        WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status = 'in_review'
+        WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status IN ('in_review', 'edited')
           AND s.publish_at IS NOT NULL AND s.publish_at <= NOW() ORDER BY s.id LIMIT 200`);
       for (const p of late) {
         const pieceId = n(p.id), slotId = n(p.sid);
