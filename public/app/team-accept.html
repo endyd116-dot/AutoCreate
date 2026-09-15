@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>초대 받기 · AutoCreate</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=19">
+</head>
+<!--
+  [R8-B §4.5] 초대 받기 — 🔴 **로그인 없이 열린다.** 서버가 초대 메일에 이 주소를 그대로 박아 보낸다
+  (`netlify/functions/team.ts` → `${siteUrl()}/app/team-accept.html?token=…`). 여태 그 주소는 **없는 파일**이었다.
+  🔴 그래서 이 파일만 `/app/` 안에서 **손으로 쓴 맨 페이지**다 — `UI.boot()`(탭·레일·401 → 로그인) 를 타면
+     초대받은 사람이 **자기 계정을 만들기도 전에 로그인 화면으로 튕긴다**. 받는 사람은 아직 우리 고객이 아니다.
+  🔴 `UI.api` 에 `noRedirect: true` 를 붙인다 — 401 로 로그인 화면에 끌려가면 같은 사고다.
+  🔴 링크가 죽었을 때(410 · 7일 지남·거둠·이미 받음) **막다른 길을 만들지 않는다**: 까닭은 서버 문장 그대로 적고,
+     «부른 분께 다시 보내 달라고 하기»와 «로그인» 두 길을 준다.
+-->
+<body>
+<main class="page auth">
+  <div class="auth-in">
+    <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 12 6l5 11"/><path d="M9.5 13.5h5"/></svg></i><b>AutoCreate</b></div>
+    <div id="body">
+      <h1>초대를 확인하고 있어요</h1>
+      <p class="sub">잠시만요.</p>
+    </div>
+  </div>
+</main>
+<script src="/js/ui.js?v=24"></script>
+<script src="/js/mock.js?v=26"></script>
+<script>
+(async () => {
+  const host = UI.$("#body");
+  const token = UI.qs.get("token") || "";
+  /* 링크가 망가진 채로 열렸을 때 — 주소를 고쳐 보라는 말은 소용없다. 부른 분께 다시 받는 길을 준다. */
+  const dead = (say) => { host.innerHTML = `<h1>이 초대는 지금 쓸 수 없어요</h1>
+    <p class="sub">${UI.esc(say)}</p>
+    <p class="sub">부르신 분께 초대를 다시 보내 달라고 하시면 바로 들어오실 수 있어요.</p>
+    <div class="cta"><a class="btn secondary" href="/login.html">로그인</a></div>`; };
+  if (!token) return dead("초대 링크가 올바르지 않아요.");
+
+  const info = await UI.api(`/api/team-invite-info?token=${encodeURIComponent(token)}`, { noRedirect: true, noGate: true });
+  if (!info.ok) return dead(info.error || "초대 링크가 만료됐거나 거둬졌어요.");   // 사유는 서버 문장 그대로
+
+  host.innerHTML = `<h1>${UI.esc(info.tenantName)}에서<br>함께 일하자고 부르셨어요</h1>
+    <p class="sub">비밀번호만 정하시면 바로 시작해요. 이미 확인된 주소라 인증 메일은 안 보내요.</p>
+    <form id="f" novalidate>
+      <div class="field"><label for="email">이메일</label><input class="input" id="email" type="email" value="${UI.esc(info.email)}" readonly><div class="note">부르신 분이 적은 주소예요</div></div>
+      <div class="field"><label for="name">이름 또는 닉네임 <span class="muted" style="font-weight:500">· 안 적어도 돼요</span></label><input class="input" id="name" name="name" type="text" autocomplete="nickname" maxlength="80" placeholder="예: 두현"><div class="help"></div></div>
+      <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="new-password" required placeholder="8자 이상"><div class="help"></div></div>
+      <p class="sub" style="margin:2px 0 0">들어오시면 이 집의 글·계정·수익을 <b style="color:var(--ink)">함께 보고 함께 만들 수</b> 있어요. 요금제와 결제는 주인만 바꿔요.</p>
+      <div class="cta"><button class="btn primary" type="submit">함께 시작하기</button></div>
+    </form>`;
+
+  const f = UI.$("#f"), go = f.querySelector('button[type="submit"]');
+  UI.form(f, async (d) => {
+    UI.fieldError(f, "password", "");
+    go.textContent = "들어가는 중…";
+    const body = { token, password: String(d.password || "") };
+    const nm = String(d.name || "").trim(); if (nm) body.name = nm;
+    const r = await UI.api("/api/team-accept", { body, noRedirect: true, noGate: true });
+    go.textContent = "함께 시작하기";
+    if (!r.ok) {
+      /* 🔴 세 갈래가 **할 일이 서로 다르다**: 링크가 죽음(410) · 그 사이 자리가 참(409 seat) · 이미 쓰는 주소(409 exists).
+         앞의 둘은 이 화면에서 할 수 있는 일이 없으니 다른 길로 데려가고, 비밀번호 문제만 그 칸에 적는다. */
+      if (r.step === "invite") return dead(r.error || "초대 링크가 만료됐거나 거둬졌어요.");
+      if (r.step === "seat") return dead(r.error || "그 사이에 팀 자리가 다 찼어요.");
+      if (r.step === "exists") { host.innerHTML = `<h1>그 주소는 이미 쓰고 있어요</h1>
+        <p class="sub">${UI.esc(r.error)}</p>
+        <div class="cta"><a class="btn primary" href="/login.html">로그인하러 가기</a></div>`; return; }
+      return UI.fieldError(f, "password", r.error || "지금은 들어갈 수 없어요");
+    }
+    UI.done(`${r.tenantName || "팀"}에 들어왔어요`, () => UI.go("/app/home.html"));
+  });
+})();
+</script>
+</body>
+</html>

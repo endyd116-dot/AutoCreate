@@ -388,3 +388,8 @@ input,textarea,select{font:inherit;color:inherit}
 .stockg .stock img{display:block;width:100%;height:104px;object-fit:cover;background:var(--press)}
 .stockg .stock small{display:block;color:var(--sub);font-size:11.5px;line-height:1.35;padding:5px 8px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stockg .stock[aria-busy="true"]{opacity:.5}
+
+/* 🔴 `.field .help` 는 **오류 칸**이다(늘 빨강 · `UI.fieldError` 가 쓴다). 안내 문장을 여기 넣으면 아무 일 없는데도 경고처럼 보인다
+   — 2026-09-16 팀 초대·AI 키 칸에서 실제로 그랬다. 안내는 `.note` 에 적고, 오류는 그 아래 `.help` 에 따로 뜬다. */
+.field .note{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+.field .note a{font-weight:700;text-decoration:underline}

@@ -629,6 +629,8 @@
      🔴 판정(`verdict` · 사람·상표)은 **그리지 않는다** — 사장님이 «무시해도 돼»라고 하신 축이고, §9 대로 서버는 재서 적어 두기만 한다.
         화면이 그걸 경고로 그리면 «막지는 않으면서 불안만 주는» 제일 나쁜 모양이 된다(§3 · §9).
      🔴 못 찾은 까닭은 **서버 문장(`trouble`) 그대로** — «열쇠가 없다»와 «불렀는데 0건»은 다른 말이라 서버가 갈라 준다.
+     🔴 **크레딧은 우리가 넣어 준다**(B f7e593a · lib/publish/gate.ts ensurePhotoCreditHtml) — 발행 본문 끝에 «사진 출처» 한 벌이 멱등으로 붙는다.
+        §9-4 «우리가 대신 해 줄 수 있는 것은 대신»의 자리다(고지 문장과 같은 결). 그래서 화면이 고객에게 시키지 않고 «실어 드려요»라고 말한다.
      🔴 붙일 때 보내는 것은 «어느 검색어의 · 어느 제공사 · 몇 번»뿐이다 — 주소·작가를 화면이 지어 보내면 크레딧이 엉뚱한 곳을 가리킨다
         (그래서 서버가 `downloadUrl` 을 아예 안 내려 준다 · piece-stock.ts 헤더). ── */
   UI.stockSheet = function (pieceId, q0, onDone) {
@@ -638,7 +640,7 @@
       <div class="cta nobar" style="position:static;padding:0 0 12px"><button class="btn secondary" type="button" id="stGo">찾기</button></div>
       <p class="muted" id="stNote" style="margin:0 0 10px;font-size:13px;min-height:18px"></p>
       <div id="stList" class="stockg"></div>
-      <p class="muted" style="margin:12px 0 0;font-size:12.5px">고르시면 저희가 그 사진을 받아 와 글에 넣어요. 작가와 어디서 온 사진인지는 사진마다 적어 둬요.</p>`,
+      <p class="muted" style="margin:12px 0 0;font-size:12.5px">고르시면 저희가 그 사진을 받아 와 글에 넣어요. 작가와 출처는 글 아래 «사진 출처»에 저희가 함께 실어 드려요.</p>`,
       { title: "스톡에서 찾기", onOpen: (sh, close) => {
         const input = sh.querySelector("#stq"), go = sh.querySelector("#stGo"), note = sh.querySelector("#stNote"), list = sh.querySelector("#stList");
         const search = async () => {

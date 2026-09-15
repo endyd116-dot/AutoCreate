@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 12;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 13;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -55,6 +55,11 @@
   /* [R8-B] «언제 만들어지나» 손잡이 — ?pw=auto(자동 편성을 꺼 둔 집) · ?pw=blocked(체험 끝) · 기본은 서버 잣대 그대로.
      🔴 `missed` 를 화면이 **빨강으로 그리지 않는지** 재려면 missed 가 실제로 나와야 한다. */
   const pwKnob = qs.get("pw") || "";
+  /* [R8-B §4.5] 팀 손잡이 — ?team=member(나는 팀원이다 · 부르는 단추가 없어야 한다) · ?team=full(자리가 다 찼다)
+     · ?team=nomail(메일이 안 나갔다 — 그때 «보냈어요»라고 하면 거짓말이다) · ?team=solo(혼자 쓰는 집)
+     ?invite=dead(초대 링크가 죽었다) · ?invite=exists(그 주소를 이미 쓴다) · ?invite=seat(그 사이 자리가 찼다) */
+  const teamKnob = qs.get("team") || "";
+  const inviteKnob = qs.get("invite") || "";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -289,6 +294,15 @@
       : aiKeyKnob === "resting" ? [{ id: 91, label: "내 키", provider: "gemini", status: "active", masked: "AI********", lastOkAt: iso(now - 10 * 60e3), lastErrorAt: iso(now - 30e3), lastErrorKind: "quota", resting: true }]
       : [],
     aiFallback: aiFbKnob,
+    /* [R8-B §4.5] 팀 — 🔴 `seats.used` 에는 **아직 안 받은 초대도** 들어간다(서버가 그렇게 센다 · 화면이 다시 세지 않는다).
+       🔴 `limit: null` = 제한 없음(«0개»가 아니다 · AC-9). */
+    team: {
+      members: teamKnob === "solo" ? [{ id: 1, email: "mock@autocreate.dev", name: "두현", role: "owner", joinedAt: iso(now - 40 * 86400e3), me: true }]
+        : [{ id: 1, email: "mock@autocreate.dev", name: "두현", role: "owner", joinedAt: iso(now - 40 * 86400e3), ...(teamKnob === "member" ? {} : { me: true }) },
+           { id: 2, email: "mina@example.com", name: "미나", role: "member", joinedAt: iso(now - 9 * 86400e3), ...(teamKnob === "member" ? { me: true } : {}) }],
+      /* 보낸 초대는 **손잡이로만** 둔다 — 기본 모의 집(Pro)은 자리가 2개라, 늘 초대 하나가 떠 있으면 한도를 넘긴 집이 기본이 된다. */
+      invites: (teamKnob === "pending" || teamKnob === "full" || teamKnob === "nomail") ? [{ id: 31, email: "jun@example.com", invitedAt: iso(now - 2 * 86400e3), expiresAt: iso(now + 5 * 86400e3), expired: false }] : [],
+    },
     /* [R7 §3.1] 탈퇴 예약 — 서버는 tenants.closed_at·purge_at 에 둔다. null = 신청 안 한 집 */
     close: closedKnob ? { closedAt: iso(now - 2 * 86400e3), purgeAt: iso(now + 28 * 86400e3), reason: null } : null, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
@@ -1311,6 +1325,51 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
        🔴 꽂을 때 서버는 **그 키로 한 번 걸어 본다** — 모의는 그 대신 넣은 글자로 갈라 준다:
           20자 미만 → invalid · «quota» 포함 → quota · «forbid» 포함 → forbidden · 그 밖 → 성공.
           (세 갈래를 화면이 서로 다르게 그리는지 재려면 세 갈래로 들어갈 길이 있어야 한다.) */
+    /* ══ [R8-B §4.5 · DESIGN §11] 팀 — 서버 `netlify/functions/team.ts` · `lib/team.ts` 모양 그대로.
+       🔴 자리 수는 요금제 한도(`teamSeats` 1/2/5)다. **돈·계약 축이라 §9 밖** — 막는 게 우리 판단이 아니다.
+       🔴 대기 중 초대도 자리를 먹는다 — 안 그러면 초대 5통 뿌리고 다 받아 한도가 뚫린다.
+       🔴 문장은 전부 서버 `lib/team.ts` 글자 그대로. ══ */
+    "team": () => { const t = S.team; const isOwner = teamKnob !== "member";
+      const limit = teamKnob === "full" ? 2 : planKnob === "agency" ? 5 : planKnob === "starter" ? 1 : 2;
+      const used = t.members.length + t.invites.filter((v) => !v.expired).length;
+      return { ok: true, members: t.members, invites: isOwner ? t.invites : [], seats: { used, limit }, isOwner }; },
+    "team-invite": (b) => { if (teamKnob === "member") return { ok: false, step: "owner_only", error: "팀은 이 집의 주인만 바꿀 수 있어요.", status: 403 };
+      const mail = String(b.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return err("email", "이메일 주소를 다시 확인해 주세요.");
+      const t = S.team;
+      if (t.members.some((m) => m.email.toLowerCase() === mail)) return { ok: false, step: "exists", error: "이미 팀에 있는 분이에요.", status: 400 };
+      if (t.invites.some((v) => v.email.toLowerCase() === mail)) return { ok: false, step: "pending", error: "그 주소로 보낸 초대가 아직 살아 있어요. 철회하고 다시 보내실 수 있어요.", status: 400 };
+      const limit = teamKnob === "full" ? 2 : planKnob === "agency" ? 5 : planKnob === "starter" ? 1 : 2;
+      const used = t.members.length + t.invites.filter((v) => !v.expired).length;
+      if (used >= limit) return { ok: false, step: "seat", error: `지금 요금제는 팀 자리가 ${limit}개예요. 요금제를 올리면 더 부를 수 있어요.`, used, limit, status: 402 };
+      const id = S.nextId++; const expiresAt = iso(Date.now() + 7 * 86400e3);
+      t.invites.push({ id, email: mail, invitedAt: iso(Date.now()), expiresAt, expired: false });
+      /* 🔴 메일이 안 나가도 초대는 **살아 있다** — 그때 링크를 돌려주어 주인이 직접 전할 수 있게 한다(막다른 길 금지). */
+      const mailSent = teamKnob !== "nomail";
+      return { ok: true, inviteId: id, expiresAt, mailSent, ...(mailSent ? {} : { link: `${location.origin}/app/team-accept.html?token=mocktoken${id}` }), status: 201 };
+    },
+    "team-revoke": (b) => { if (teamKnob === "member") return { ok: false, step: "owner_only", error: "팀은 이 집의 주인만 바꿀 수 있어요.", status: 403 };
+      const i = S.team.invites.findIndex((v) => v.id === Number(b.id));
+      if (i < 0) return { ok: false, step: "not_found", error: "이미 받았거나 거둔 초대예요.", status: 404 };
+      S.team.invites.splice(i, 1); return { ok: true }; },
+    "team-remove": (b) => { if (teamKnob === "member") return { ok: false, step: "owner_only", error: "팀은 이 집의 주인만 바꿀 수 있어요.", status: 403 };
+      const uid = Number(b.userId); const m = S.team.members.find((x) => x.id === uid);
+      if (!m) return { ok: false, step: "not_found", error: "그분을 찾을 수 없어요.", status: 404 };
+      if (m.me) return { ok: false, step: "self", error: "스스로를 뺄 수는 없어요.", status: 400 };
+      if (m.role === "owner") return { ok: false, step: "owner", error: "이 집의 주인은 뺄 수 없어요.", status: 400 };
+      S.team.members = S.team.members.filter((x) => x.id !== uid); return { ok: true }; },
+    /* 🔴 아래 둘은 **로그인 없이** 돈다 — 받는 사람은 아직 우리 고객이 아니다. */
+    "team-invite-info": (_b, q) => {
+      if (!String(q.get("token") || "")) return { ok: false, step: "invite", error: "초대 링크가 올바르지 않아요.", status: 410 };
+      if (inviteKnob === "dead") return { ok: false, step: "invite", error: "이 초대는 기한이 지났어요.", status: 410 };
+      return { ok: true, tenantName: "두현의 작업실", email: "jun@example.com" }; },
+    "team-accept": (b) => {
+      if (!String(b.token || "")) return err("token", "초대 링크가 올바르지 않아요.");
+      if (String(b.password || "").length < 8) return err("password", "비밀번호는 8자 이상으로 정해 주세요.");
+      if (inviteKnob === "dead") return { ok: false, step: "invite", error: "이 초대는 기한이 지났어요.", status: 410 };
+      if (inviteKnob === "seat") return { ok: false, step: "seat", error: "그 사이에 팀 자리가 다 찼어요. 초대한 분께 알려 주세요.", status: 409 };
+      if (inviteKnob === "exists") return { ok: false, step: "exists", error: "그 주소는 이미 쓰고 있어요. 그 계정으로 로그인해 주세요.", status: 409 };
+      return { ok: true, tenantName: "두현의 작업실", status: 201 }; },
     "ai-keys": () => ({ ok: true, keys: S.aiKeys, fallback: S.aiFallback, configured: !aiNoEnc }),
     "ai-key-add": (b) => {
       if (aiNoEnc) return { ok: false, step: "not_configured", error: "지금은 키를 안전하게 보관할 수 없어요. 운영팀에 알려 주세요.", status: 503 };
@@ -1343,7 +1402,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

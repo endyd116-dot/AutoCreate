@@ -19,6 +19,7 @@
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
+<div class="group"><a class="row tap" href="/app/team.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c1-3 3.6-4.6 6.5-4.6S14.5 16 15.5 19"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.4c2 .7 3.4 2.2 4 4.6"/></svg></span><div class="l"><span class="t">팀</span><span class="d" id="teamD">함께 쓸 사람을 부를 수 있어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a></div>
 <div class="group" id="ai-key"><div class="gt">내 AI 키</div><div id="akBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 <div class="group" id="akFbg" hidden><div class="gt">내 키가 안 될 때</div>
   <div class="fr"><div class="fl">저희 키로 대신 만들기<small id="akFbD">내 키가 안 되면 그 회차는 만들지 않고 알려드려요</small></div><button class="toggle" type="button" id="akFb" aria-checked="false" aria-label="내 키가 안 될 때 저희 키로 대신 만들기"></button></div>
@@ -52,8 +53,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=23"></script>
-<script src="/js/mock.js?v=25"></script>
+<script src="/js/ui.js?v=24"></script>
+<script src="/js/mock.js?v=26"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -324,7 +325,7 @@ function akSheet(k) {
 }
 function akAddSheet() {
   UI.sheet(`<form id="akf">
-      <div class="field"><label>AI 키</label><input class="input" name="key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="구글 AI 스튜디오에서 복사한 키"><div class="help">구글 AI 스튜디오에서 만든 키를 붙여넣어 주세요 · <a href="${UI.AI_KEY_URL}" target="_blank" rel="noopener">키 만들러 가기</a></div></div>
+      <div class="field"><label>AI 키</label><input class="input" name="key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="구글 AI 스튜디오에서 복사한 키"><div class="note">구글 AI 스튜디오에서 만든 키를 붙여넣어 주세요 · <a href="${UI.AI_KEY_URL}" target="_blank" rel="noopener">키 만들러 가기</a></div><div class="help"></div></div>
       <div class="field"><label>이름 <span class="muted" style="font-weight:500">· 안 적어도 돼요</span></label><input class="input" name="label" type="text" maxlength="40" placeholder="내 키"><div class="help"></div></div>
       <p class="muted" style="margin:0;font-size:13px">꽂을 때 그 키로 한 번 걸어 보고, <b style="color:var(--ink)">되는 것만</b> 맡아 둬요. 맡아 둔 키는 잠가서 보관하고 다시 보여 드리지 않아요.</p>
       <div class="cta nobar" style="position:static;padding:14px 0 0"><button class="btn primary" type="submit">꽂기</button></div></form>`,
@@ -346,6 +347,9 @@ function akAddSheet() {
     } });
 }
 loadAiKeys();
+/* [R8-B §4.5] 설정의 «팀» 줄 — 자리 수는 **서버가 센 값**이다(대기 중 초대도 먹는다). 못 불러오면 원래 한 줄을 그대로 둔다. */
+(async () => { const r = await UI.api("/api/team", { noGate: true }); if (!r.ok) return;
+  UI.$("#teamD").textContent = r.seats.limit == null ? `${r.seats.used}명이 함께 쓰고 있어요` : `자리 ${r.seats.used}/${r.seats.limit} 쓰는 중이에요`; })();
 
 /* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 🔴 **내 글에 들어온 신고** — 서버가 보내는 알림·메일의 링크가 바로 이 자리다
      (`/app/settings.html#takedown` · lib/takedown.ts:153 · lib/cron/takedown-watch.ts:31). 그 링크는 여태 **아무 데도 아닌 곳**을 가리키고 있었다:
