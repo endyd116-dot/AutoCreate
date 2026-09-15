@@ -510,10 +510,15 @@
     const t = String(text || ""); const T = UI.DISCLOSURE_TEXT;
     return { affiliate: t.includes(T.coupang) || t.includes(T.generic), sponsored: t.includes(T.sponsoredBody), gift: t.includes(T.giftBody), text: t.replace(/\s+/g, " ").trim() };
   };
+  /* 🔴 [R8-A2 수리 · 스샷에서 잡았다] 옛 판은 `class="disclosure"` **자리부터** 잘라서, 여는 태그의 남은 꼬리(`class="disclosure">`)가
+     사람이 읽는 문장 앞에 그대로 붙어 나왔다 — `<[^>]+>` 는 `<` 로 시작하는 것만 지우는데 자른 조각엔 `<` 가 없었기 때문이다.
+     판정(`includes`)은 문장이 들어 있어 맞았고 **보이는 글자만 틀렸다** — 그래서 하니스가 못 잡고 스샷에서만 보였다(PITFALLS #9).
+     ⇒ **여는 태그의 `>` 다음부터** 자른다. */
   UI.compOf = function (bodyHtml) {
     const s = String(bodyHtml || ""); const i = s.indexOf('class="disclosure"');
-    const e = i < 0 ? -1 : s.indexOf("</div>", i);
-    return UI.compIn(i < 0 || e < 0 ? "" : s.slice(i, e).replace(/<[^>]+>/g, " "));
+    const gt = i < 0 ? -1 : s.indexOf(">", i);
+    const e = gt < 0 ? -1 : s.indexOf("</div>", gt);
+    return UI.compIn(gt < 0 || e < 0 ? "" : s.slice(gt + 1, e).replace(/<[^>]+>/g, " "));
   };
   /* [R8 §3.2 · 2026-09-15 · lib/ads-connect.ts adsWayOf·adsRemovable 에서 그대로 복사] 🔴 손으로 고치지 마라 — 하니스가 서버와 대조한다.
      «광고를 붙이는 길»은 채널마다 다르다: 워드프레스는 우리가 바로 넣고, 티스토리·블로거는 내 PC 프로그램이 브라우저로 한다.
@@ -562,7 +567,8 @@
     const high = bad.filter(UI.gateHigh);
     const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
     /* 🔴 «고쳐야 예약할 수 있어요»는 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
-    const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
+    /* 🔴 «예약을 막지 않아요»를 **글자로** 말한다 — 이게 §9 의 값이다(막지 않는 대신 또렷하게). 하니스가 이 문장을 지킨다. */
+    const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}예약을 막지 않아요 — 그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
     /* 못 잰 축이 있으면 **몇 개인지 먼저 말한다** — 초록 옆에 회색 줄만 끼워 두면 못 보고 «다 통과»로 읽는다. */
     const skip = skipped.length ? `<p class="muted" style="margin:0 16px 8px;font-size:12.5px">${skipped.length}가지는 이 글에 맞지 않아 재지 않았어요.</p>` : "";
     const back = opts.back === false ? "" : `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">${UI.esc(opts.back || "올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.")}</p>`;

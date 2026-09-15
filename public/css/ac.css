@@ -374,7 +374,7 @@ input,textarea,select{font:inherit;color:inherit}
 .gate .g.skip small{white-space:normal;margin-left:0;flex:1 0 100%;padding-left:30px;line-height:1.45}
 /* [R8-A2 §5D①] 직접 쓰기 — 편집 영역의 길잡이 글(시트 밖 긴 글이라 .input 이 아니라 편집 영역을 쓴다 · 설명란 편집과 같은 프리미티브).
    🔴 색은 `--muted`(4.5:1) — `--faint` 는 다크에서 2.71:1 이라 글자로 못 쓴다(§13.4 정정). */
-.desc-edit .rest[data-ph]:empty::before{content:attr(data-ph);color:var(--muted);pointer-events:none}
+.desc-edit .rest[data-ph]:empty::before{content:attr(data-ph);color:var(--muted);font-weight:500;pointer-events:none}
 /* [R8 §5.3] 계정 사진 — 사진이 있으면 사진, 없으면 채널 마크(기본 그림은 안 만든다 · «있음»과 «없음»이 같은 얼굴이 되지 않게).
    사진 위에도 **어느 채널인지**는 작은 배지로 계속 보인다(계정이 여럿이면 그게 먼저 필요하다). */
 .mk.ph{background:var(--press);position:relative;overflow:visible}

@@ -100,6 +100,14 @@ const bracketList = (text, name) => { const i = text.indexOf(name); if (i < 0) r
 const hardSrv = bracketList(approveTs, "HARD_GATE_KEYS: readonly string[] =");
 const hardUi = bracketList(uiJs, "UI.GATE_HARD =");
 const hardSame = hardSrv !== null && hardUi !== null && hardSrv.join(",") === hardUi.join(",");
+/* [R8-A2] 🔴 영상 쪽 «막는 축»도 같이 잰다 — 글은 `HARD_GATE_KEYS = []` 로 0개가 됐지만, 영상은 **깨진 물건 둘**(`judgeBlockers` 의 `BROKEN`)이 남아 있다.
+   화면(`UI.JUDGE_BLOCK`)은 그 둘을 보고 «다시 만들면 돼요»와 «그대로 올릴 수 있어요»를 가른다 — 두 목록이 갈리면 **멀쩡한 영상을 버리라고 말한다.** */
+const jbSrv = bracketList(approveTs, 'const BROKEN = new Set(');
+const jbUi = bracketList(uiJs, "UI.JUDGE_BLOCK =");
+const jbSame = jbSrv !== null && jbUi !== null && [...jbSrv].sort().join(",") === [...jbUi].sort().join(",");
+rec("🔴 영상 «깨진 물건» 목록이 서버와 같다(그것만 막는다)", jbSame,
+  jbSrv === null ? "서버에서 judgeBlockers 의 BROKEN 을 못 읽었다" : jbUi === null ? "화면에서 UI.JUDGE_BLOCK 을 못 읽었다"
+    : jbSame ? `${jbSrv.length}축 — ${jbSrv.join(" ")}` : `서버 «${jbSrv.join(" ") || "없음"}» ≠ 화면 «${jbUi.join(" ") || "없음"}»`, { jbSrv, jbUi });
 rec("🔴 «예약을 막는 축» 목록이 서버와 같다", hardSame,
   hardSrv === null ? "서버에서 HARD_GATE_KEYS 를 못 읽었다" : hardUi === null ? "화면에서 UI.GATE_HARD 를 못 읽었다"
     : hardSame ? (hardSrv.length ? `${hardSrv.length}축` : "0축 — 막는 축이 없다(§9)") : `서버 «${hardSrv.join(" ") || "없음"}» ≠ 화면 «${hardUi.join(" ") || "없음"}»`, { hardSrv, hardUi });

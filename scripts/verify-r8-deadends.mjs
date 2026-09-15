@@ -103,6 +103,54 @@ for (const [label, sym, owner, harm, mode] of TARGETS) {
     + (mode === "external" ? " (바깥에서 읽혀야 산 값)" : "") + (ok ? "" : ` ⇒ ${harm}`));
 }
 
+/* ═══ [R8-A2] 🔴 **한 층 위의 죽은 통로 — «서버는 다 됐는데 화면이 부르나»** ═══
+   위의 TARGETS 는 «lib 의 이름을 제품이 부르나»를 센다. 그런데 2026-09-15 하루를 여덟 번 관통한 사고는 한 층 위였다:
+   **핸들러가 완성인데 `public/**` 이 그 경로를 한 번도 안 부른다.** 정의로 세면 전부 초록이고(파일도 있고 `config.path` 도 있다),
+   화면 스샷으로도 안 잡힌다(그 화면 자체가 없으니까). 유일하게 잡는 방법은 «**화면이 이 문자열을 부르나**»를 세는 것이다.
+   🔴 주석은 호출로 세지 않는다 — CODE 는 주석을 걷어 낸 본문이다(AC-59 · «주석에 적어 둔 것»은 «한다»가 아니다).
+   🔴 새 API 를 만들면 **여기에 한 줄 박는 것까지가 그 기능이다**(CLAUDE §4.8) — 안 박으면 다음 라운드에 또 죽은 통로가 된다. */
+const SCREEN = [...CODE].filter(([p]) => p.startsWith("public/"));
+const screenCalls = (needle) => SCREEN.filter(([, code]) => code.includes(needle)).map(([p]) => p);
+const APPS = (hits) => hits.filter((p) => /^public\/(app|ops)\//.test(p));
+
+/** [사람이 읽는 이름, 화면이 불러야 하는 문자열, 서버 정본 파일, 안 부르면 무슨 일이 나나, 화면 파일에서까지 불려야 하나] */
+const SURFACES = [
+  ["직접 쓰기(§5D① · 사장님 «주요 골자»)", "/api/pieces-self", "netlify/functions/pieces-self.ts",
+    "AI 를 안 쓰고 내 글을 올리는 길이 화면에 없어, 자기 글을 올리려면 **AI 로 한 편 만들어 코인을 쓰고 통째로 덮어써야** 한다", true],
+  ["내리기 — 신고 목록(§5E.2 ③)", "/api/takedowns", "netlify/functions/takedown.ts",
+    "통지를 받은 고객이 알림의 «확인하러 가기»를 눌러도 **아무 데도 아닌 곳**이 열린다(서버가 `/app/settings.html#takedown` 으로 보낸다)", true],
+  ["내리기 — 두 갈래 답(§5E.2 ⑤)", "/api/takedown-action", "netlify/functions/takedown.ts",
+    "«제가 직접 내렸어요»·«대신 내려 주세요»를 누를 자리가 없어 신고가 영영 안 끝난다", false],
+  ["수치 주장 표시(§2.4)", "numberClaims", "netlify/functions/pieces.ts",
+    "서버가 실어 보내는 «우리가 준 자료에 없는 숫자»를 검수 화면이 안 그려, 근거 없는 수치가 그대로 나간다", true],
+  ["내 사진 넣기(§5D.4 «①의 전제»)", "/api/piece-photo-add", "netlify/functions/piece-photos.ts",
+    "직접 쓰기가 **글자만 쓰는 길**이 된다(설계가 «사진 업로드가 ①의 전제»라고 못 박은 자리다)", false],
+  ["신고 두 갈래 시트를 화면이 연다", "UI.takedownSheet", "public/js/ui.js",
+    "함수만 있고 여는 화면이 없어 또 «정의는 있는데 부르는 자리가 없는 것»이 된다", true],
+  ["사진 시트를 화면이 연다", "UI.photoSheet", "public/js/ui.js",
+    "함수만 있고 여는 화면이 없어 사진을 넣을 길이 여전히 없다", true],
+  ["발행 전 검사 줄을 두 화면이 같이 쓴다", "UI.gateList", "public/js/ui.js",
+    "검수 화면과 직접 쓰기 화면이 각자 그려, 축이 늘 때마다 한쪽만 낡는다(AC-52 의 화면 쪽 얼굴)", true],
+];
+for (const [label, needle, owner, harm, needApp] of SURFACES) {
+  if (!read(owner) && !SRC.has(owner)) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner} 를 못 읽었다 — 파일이 옮겨졌나(검사를 고쳐라)`); continue; }
+  const hits = screenCalls(needle);
+  const apps = APPS(hits);
+  const ok = needApp ? apps.length > 0 : hits.length > 0;
+  rec(`🔴 화면이 부르나 — ${label}(\`${needle}\`)`, ok,
+    `화면 ${hits.length}곳${hits.length ? ` [${hits.join(" · ")}]` : ""}${needApp ? ` · 그중 화면 파일 ${apps.length}곳` : ""}` + (ok ? "" : ` ⇒ ${harm}`));
+}
+
+/* 🔴 [R8-A2 §9] **화면이 서버보다 엄하면 그것도 게이트다** — 서버는 `HARD_GATE_KEYS = []` 인데
+   `piece.html` 이 `grade === "P0"` 일 때 «이대로 예약»을 `disabled` 로 잠그고 있었다. 되살아나면 여기서 잡는다.
+   🔴 판정을 지우라는 게 아니다(§9 «검사를 지우지 마라») — **잠그지만 말라**는 것이라 `grade === "P0"` 자체는 세지 않는다. */
+{
+  const pieceHtml = CODE.get("public/app/piece.html") ?? "";
+  const locks = [...pieceHtml.matchAll(/grade\s*===\s*"P0"\s*\?\s*"disabled"/g)].length;
+  rec("🔴 화면에 남은 하드 게이트 — 심사 P0 로 «이대로 예약»을 잠그지 않는다", locks === 0,
+    locks ? `piece.html 이 ${locks}곳에서 단추를 잠근다 ⇒ 서버는 막지 않는데 화면만 막는다(§9 가 내린 바로 그 게이트다)` : "잠그는 자리 0곳 — 판정은 그대로 두고 단추만 열려 있다");
+}
+
 /* ═══ 짝 검사: 옛 상수가 아직 살아 있나 — 새 정본을 만들었는데 옛 값이 그대로면 «하나가 썩는다»(AC-64) ═══ */
 const OLD = [
   ["간격 30분 상수", "ACCOUNT_GAP_MIN", "lib/best-time.ts", "gapMinFor", "lib/publish-gap.ts"],
