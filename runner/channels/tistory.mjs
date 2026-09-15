@@ -374,6 +374,29 @@ async function readBodyText(page) {
   return "";
 }
 
+/**
+ * [R9-11] 🔴 **기본 모드에서 «진짜 요소»가 장식으로 내려앉는 자리** — op → 고객 화면이 아는 이름.
+ *
+ *   HTML 모드에서는 `<blockquote>`·`<hr>`·`<h2>` 진짜 요소로 들어가는데, 기본 모드 폴백은 **글자로 흉내**낸다
+ *   (인용 → `“…”` · 구분선 → `———` · 소제목 → 평문). 글은 나가지만 **모양이 깎인다.**
+ *   🔴 종전엔 그 사실이 `notes` 한 줄로만 남았고 **서버가 notes 를 버려서 고객에게 안 닿았다**(CLAUDE §9 ② 위반 —
+ *      자동 승인이면 아무도 모르는 채 깎인 글이 나간다). 이제 **구조화된 칸**으로 올려 검수 화면 칩에 그대로 실린다.
+ *   🔴 **새 이름을 만들지 않는다**(AC-75) — 여기 오른쪽은 전부 `lib/blocks.ts BlockType` 어휘 그대로고,
+ *      사유도 이미 있는 `no_editor_op`(«블록 자체를 에디터 요소로 못 세웠다»)를 쓴다.
+ */
+const DEGRADED_FIELD = { quote: "quote", divider: "divider", list: "list", check: "checklist", faq: "faq", link: "affiliate" };
+
+/**
+ * op 하나 → «깎였다»고 적을 이름(없으면 `null` = 원래 평문이라 깎일 것이 없다).
+ *   🔴 **순수 함수로 뺐다** — 안 그러면 검사가 «그 줄이 있나»만 보고 **«도나»는 못 본다.**
+ *      실제로 첫판에 `if (field)` 를 `if (false)` 로 바꾼 변이가 **초록으로 지나갔다**(AC-99 · 오늘 세 번째다).
+ */
+export function degradedFieldOf(op) {
+  if (!op || typeof op !== "object") return null;
+  if (op.op === "heading") return Number(op.level) === 3 ? "h3" : "h2";
+  return DEGRADED_FIELD[op.op] ?? null;
+}
+
 /** 기본 모드 폴백 — ops 를 연주한다(장식은 줄지만 글은 나간다). */
 async function playOpsFallback(page, plan, files, shotKey, missed) {
   const where = await focusEditorBody(page);
@@ -404,6 +427,9 @@ async function playOpsFallback(page, plan, files, shotKey, missed) {
       : op.op === "quote" ? `“${op.text}”` : op.op === "divider" ? "———"
         : op.op === "link" ? `${op.text} ${op.url}` : String(op.text ?? "");
     if (!text) continue;
+    /* 🔴 **깎인 것을 센다** — 글자로 흉내 냈으면 «넣었다»가 아니다. */
+    const field = degradedFieldOf(op);
+    if (field) missed.degraded.push({ kind: field, why: "no_editor_op", sample: String(op.text ?? "").slice(0, 20) });
     if (wrote) await page.keyboard.press("Enter").catch(() => {});
     await page.keyboard.insertText(text);
     wrote = true;
@@ -571,7 +597,8 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
   if (!host) throw BLOCK("login_fail", "티스토리 블로그 주소(핸들)가 없어요. 계정을 다시 연결해 주세요.");
 
   const page = ctx.pages()[0] ?? await ctx.newPage();
-  const missed = { image: 0, imageDownload: 0, htmlMode: 0 };
+  /* [R9-11] `degraded` — 기본 모드에서 **진짜 요소가 장식으로 내려앉은** 목록(구조화 · 고객 화면까지 간다). */
+  const missed = { image: 0, imageDownload: 0, htmlMode: 0, degraded: [] };
   /* 🔴 실패 스냅샷은 모든 단계를 덮는다(네이버와 같은 수리 · 2026-09-14 실측에서 로그인 실패 시 사진이 0장이었다). */
   let files = null;
   try {
@@ -643,8 +670,14 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
     notes.push(...titleNotes);
     notes.push(...(plan.stats.notes ?? []));
 
+    /* [R9-11] 🔴 «서식이 깎였다»를 **구조화된 칸**으로 올린다 — `notes` 는 서버가 버린다(그래서 고객에게 안 닿았다).
+       네이버와 **같은 모양·같은 파이프**(`formatMarks.demoted`)라 서버도 화면도 새로 만들 것이 없다.
+       ⚠️ 말투는 화면이 만든다 — 여기서는 «사실»만 보낸다(«이 글은 인용구가 따옴표로 대신 들어갔어요»는 화면 몫). */
+    const formatMarks = missed.degraded.length
+      ? { demoted: missed.degraded.slice(0, 40), htmlMode: missed.htmlMode }
+      : null;
     const out = await finishPublish(page, plan, job.payload?.options, shotKey, dryRun);
-    return { ...out, notes: [...notes, ...(out.notes ?? [])] };
+    return { ...out, notes: [...notes, ...(out.notes ?? [])], ...(formatMarks ? { formatMarks } : {}) };
   }
   } catch (e) {
     await failShot(page, shotKey);

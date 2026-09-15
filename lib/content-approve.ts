@@ -25,6 +25,8 @@ import { runGate, GATE_KEYS, GATE_LABEL, decorateCheck, type GateReport, type Ga
 import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "./banned-words";
 import { maxSimilarity } from "./similarity";
+import { crossAccountSimilarity } from "./cross-account";   // [R9-8] 계정 간 유사도 — 생성과 **같은 함수**(자가 둘이면 기준이 갈린다)
+import { toCoinTier } from "./coin-table";                  // [R10-8] 등급 → 분량 하한(생성이 적어 둔 값 그대로)
 import { personaTerms } from "./content-gen";
 import { countAffiliateLinks } from "./publish/gate";
 /* [R8-A §2 · B-1] 골격 지문 — 순수 모듈(DB 0). 여기서 최근 글을 읽어 넘겨 준다(ai-tell-gate 는 순수로 둔다 · AC-17). */
@@ -51,6 +53,15 @@ const n = (v: unknown) => Number(v || 0);
    🔴 **검사를 끈 것이 아니다** — 모든 축은 그대로 돌고(`runGate`), 결과는 `gate_report` 에 그대로 남고, 화면·알림이 **말해 준다**.
       바뀐 것은 «막는 판정» 하나뿐이다. **축을 지우거나 판정 로직을 빼면 «말해 주기»의 재료가 사라진다.** */
 export const HARD_GATE_KEYS: readonly string[] = [];
+
+/**
+ * [R9-9 · ③C4 · B 2026-09-16] 🔴 **piece 상태 `edited`** — DESIGN §5B.6 «수정은 자리의 상태가 아니라 **글의 상태**다».
+ *   사람이 검수에서 제목·본문을 고치면 글은 `in_review` → `edited` 로 간다(`pieces-update`). **자리(slot)는 `in_review` 그대로**(자리 어휘에 edited 는 없다 · 2026-09-15 메인 결정).
+ *   `edited` 는 «봐주세요»의 한 갈래다 — 승인·거절·다시 만들기·마감 자동 승인·홈 «봐주실 글»·팀 승인 셈 **전부 in_review 와 같이** 다룬다. 이 목록이 그 정본이다(낱개로 `'in_review'` 를 또 적지 않는다).
+ *   `meta.editedByUser` 는 **다른 것**이다(재검사가 블록 대신 HTML 을 보게 하는 표시 · 대가만 켜도 안 찍힌다) — 상태는 «사람 손이 닿은 글»을 화면이 가르는 값이다.
+ */
+export const REVIEW_PIECE_STATUSES: readonly string[] = ["in_review", "edited"];
+export const EDITED_PIECE_STATUS = "edited";
 /** 이 게이트 결과가 승인을 막는가. */
 export function hardFailures(gate: GateReport): GateCheck[] {
   return gate.checks.filter((c) => !c.pass && HARD_GATE_KEYS.includes(c.key));
@@ -113,6 +124,7 @@ export const SELF_GATE_LEVEL: Readonly<Record<string, SelfGateLevel>> = {
   disclosure: "soft", banned_words: "soft", ad_pointing: "soft",
   stock_safe: "soft",                         // [P1R8 B3] 스톡 사진(사람·상표) — 제3자가 다치는 축이지만 **막지는 않는다**(§9 최종)
   affiliate_count: "soft", similarity: "soft", superlative: "soft",
+  cross_account: "soft",                      // [R9-8] 사람이 쓴 글도 다른 계정 글과 겹치면 계정이 묶인다 — AI 티 축이 아니라 계정 축이다
   length: "soft", visual_min: "soft", link_check: "soft",
 };
 export function selfGateLevelOf(key: string): SelfGateLevel { return SELF_GATE_LEVEL[key] ?? "soft"; }
@@ -285,8 +297,12 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const ageBandStr = typeof ageBand === "string" && ageBand ? ageBand : null;
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
+  /* [R9-8] 계정 간 — 생성(`content-gen`)과 **같은 창·같은 자**로 다시 잰다(재검사가 다른 자를 들면 «잰 값은 같은데 기준이 다른» 상태가 된다). */
+  const cross = await crossAccountSimilarity(tid, n(p.id), p.account_id ? n(p.account_id) : null, plain);
+  /* [R10-8] 생성 때 적어 둔 등급이 정본 — 분량 하한이 등급에 달렸다. 없으면(옛 글) null 그대로(«간단히»로 위장하지 않는다 · lengthFor 가 null 을 채널 폭으로 읽는다). */
+  const tier = toCoinTier(m.tier);
   if (!edited && blocks.length) {
-    const g = runGate({ blocks, contract: c, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || ""), group, origin });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, crossAccount: cross.gate, title: String(p.title || ""), group, origin, tier });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
     const stock = await checkStockSafety(tid, p);      // [P1R8 B3] 스톡 사진 안전(광고성 글 + 사람·상표) — 제3자가 다치는 축
@@ -295,7 +311,7 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
-  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || ""), group, origin });
+  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, ageBand: ageBandStr, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, crossAccount: cross.gate, title: String(p.title || ""), group, origin, tier });
   for (const k of GATE_KEYS) {
     const from = base.checks.find((x) => x.key === k)!;
     if (k === "disclosure") { const d = checkDisclosureHtml(html, need, comp.kinds); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }
@@ -412,7 +428,7 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date; by?:
     const at = utcDate(p.scheduled_for)?.toISOString() ?? now.toISOString();
     return { ok: true, status: "scheduled", scheduledFor: at, gate: (p.gate_report && typeof p.gate_report === "object" ? p.gate_report : { ok: true, checks: [], rewritten: false }) as GateReport, alreadyScheduled: true };
   }
-  if (st !== "in_review" && st !== "draft") return { ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." };
+  if (!REVIEW_PIECE_STATUSES.includes(st) && st !== "draft") return { ok: false, step: "state", error: "지금 상태에서는 승인할 수 없어요." };
 
   const gate = await recheckPiece(tid, p);
   const hard = hardFailures(gate);      // [P1R8 §9] 지금은 늘 빈 배열이다 — 막는 축이 없다(`HARD_GATE_KEYS` 주석)

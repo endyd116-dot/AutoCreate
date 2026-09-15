@@ -22,6 +22,7 @@
 import { ensureFreshToken } from "./tokens";
 import { disclosureTextFor } from "../disclosure";
 import { writeAudit } from "../audit";
+import { videoPublicUrlOf } from "./instagram";   // [R9-9] 구운 mp4 의 공개 주소 — 인스타·페북·X 가 **같은 한 벌**을 쓴다
 import type { PublishPiece, PublishAccount, PublishResult } from "./contract";
 
 const API = "https://api.twitter.com/2";
@@ -147,17 +148,68 @@ async function uploadPhoto(token: string, imageUrl: string): Promise<string | nu
   } catch { return null; }
 }
 
+/* ───────── [R9-9] 영상 — 사진과 **같은 청크 업로드**에 «처리 대기» 한 단계가 더 붙는다 ───────── */
+
+const MAX_VIDEO_BYTES = 512 * 1024 * 1024;   // X 의 영상 상한(공식 512MB) — 우리 쇼츠는 한참 아래다
+const PROC_TRIES = 12;
+const PROC_WAIT_MS = 5_000;
+
+/**
+ * 🔴 **왜 종전에 «못 올린다»였나**(2026-09-16 재측정 · B2):
+ *   옛 주석은 「영상 업로드는 사진과 다른 처리 대기 단계가 붙는데 우리 키로 왕복해 본 적이 없다」였다.
+ *   다시 재 보니 **«다른 길»이 아니라 «같은 길 + 한 단계»**다 — `initialize/append/finalize` 는 사진과 **똑같고**,
+ *   영상만 `finalize` 응답에 `processing_info` 가 붙어 «아직 처리 중»을 말한다. 그 한 단계가 이 함수다.
+ *   ⇒ 🔴 **«없는 길»이 아니라 «안 만든 길»이었다.** 없는 길은 그대로 두는 게 맞지만(CLAUDE §9) 안 만든 길은 만든다(§8).
+ *
+ * 🔴 **우리 키로 실호출해 본 적은 아직 없다**(X 계정 0 · 2026-09-16). 그래서:
+ *   ① 실패하면 **글만 올리지 않는다** — 영상이 빠진 글은 실패보다 나쁘다(옛 주석의 판단을 그대로 지킨다).
+ *   ② 처리 중이면 «실패»가 아니라 **«다음 틱에»**(retriable) 로 돌려준다.
+ * @returns media_id | null(못 올렸다) | "pending"(아직 처리 중 — 다음 틱에)
+ */
+async function uploadVideo(token: string, videoUrl: string): Promise<string | null | "pending"> {
+  try {
+    const src = await fetch(videoUrl).catch(() => null);
+    if (!src?.ok) return null;
+    const buf = Buffer.from(await src.arrayBuffer());
+    if (!buf.byteLength || buf.byteLength > MAX_VIDEO_BYTES) return null;
+
+    const init = await xfetch(`${API}/media/upload/initialize`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ media_type: "video/mp4", total_bytes: buf.byteLength, media_category: "tweet_video" }),
+    });
+    const mediaId = String(init.json?.data?.id ?? init.json?.id ?? "").trim();
+    if (!mediaId) return null;
+
+    for (let i = 0, seg = 0; i < buf.byteLength; i += CHUNK, seg++) {
+      const fd = new FormData();
+      fd.set("segment_index", String(seg));
+      fd.set("media", new Blob([buf.subarray(i, Math.min(i + CHUNK, buf.byteLength))]));
+      const ap = await xfetch(`${API}/media/upload/${encodeURIComponent(mediaId)}/append`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd }, 120_000);
+      if (ap.status < 200 || ap.status >= 300) return null;
+    }
+    const fin = await xfetch(`${API}/media/upload/${encodeURIComponent(mediaId)}/finalize`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    if (fin.status < 200 || fin.status >= 300) return null;
+
+    /* 🔴 **여기가 사진과 다른 유일한 한 단계.** `processing_info` 가 없으면 이미 끝난 것이다(짧은 영상은 그렇다). */
+    let info = (fin.json?.data?.processing_info ?? fin.json?.processing_info ?? null) as { state?: string; check_after_secs?: number } | null;
+    for (let i = 0; i < PROC_TRIES && info && info.state && info.state !== "succeeded"; i++) {
+      if (info.state === "failed") return null;
+      await new Promise((r) => setTimeout(r, Math.min(30_000, Math.max(PROC_WAIT_MS, Number(info?.check_after_secs ?? 0) * 1000))));
+      const st = await xfetch(`${API}/media/upload?media_id=${encodeURIComponent(mediaId)}&command=STATUS`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      if (!st) return "pending";
+      info = (st.json?.data?.processing_info ?? st.json?.processing_info ?? null) as typeof info;
+      if (!info) break;                       // 처리 정보가 사라졌다 = 끝났다
+    }
+    /* 🔴 아직 처리 중이면 **«성공»으로 만들지 않는다** — 그 상태로 트윗을 올리면 X 가 거절하거나 빈 영상이 붙는다. */
+    if (info && info.state && info.state !== "succeeded") return "pending";
+    return mediaId;
+  } catch { return null; }
+}
+
 /* ───────── 정본 ───────── */
 
 export async function publishToX(piece: PublishPiece, account: PublishAccount): Promise<PublishResult> {
   const tid = piece.tenantId;
-  /* 🔴 **영상은 아직 못 올린다.** X 의 영상 업로드는 사진과 다른 처리 대기 단계가 붙는데 우리 키로 왕복해 본 적이 없다.
-     글만 올려 놓고 «올렸다»고 하면 고객은 **영상이 빠진 글**을 보게 된다 — 그건 실패보다 나쁘다.
-     («없는 길»을 정직하게 말하는 자리 · CLAUDE §9 의 «게이트가 아니라 사실».) */
-  if (piece.kind === "video") {
-    return { ok: false, reason: "unsupported_channel", retriable: false,
-      error: "X 에는 아직 영상을 올려 드릴 수 없어요. 글만 올릴 수 있어요.", detail: "x_video_not_supported" };
-  }
   const tok = await ensureFreshToken(tid, account.id, "x", account.handle);
   if (!tok.ok) {
     if (tok.reason === "provider_not_configured") return { ok: false, reason: "provider_not_configured", retriable: false, error: "X 연결이 아직 준비 중이에요." };
@@ -170,6 +222,25 @@ export async function publishToX(piece: PublishPiece, account: PublishAccount): 
   if (!text.trim()) return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 내용이 비어 있어요." };
 
   /* 사진은 **있으면 좋은 것**이다 — 첫 장만 시도하고, 안 되면 글만 올린다. */
+  /* [R9-9] 🔴 **영상 글** — 사진과 달리 «있으면 좋은 것»이 아니다. 영상이 본체라 **못 올리면 글도 안 올린다**
+     (옛 주석의 판단을 그대로 지킨다: 「글만 올려 놓고 «올렸다»고 하면 고객은 **영상이 빠진 글**을 보게 된다」). */
+  if (piece.kind === "video") {
+    const videoUrl = await videoPublicUrlOf(tid, piece.id);
+    if (!videoUrl) return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 영상이 아직 없어요(만드는 중이에요)." };
+    const vid = await uploadVideo(token, videoUrl);
+    if (vid === "pending") {
+      return { ok: false, reason: "channel_error", retriable: true, error: "X 가 영상을 처리하는 중이에요. 잠시 뒤 다시 올릴게요.", detail: "x_video_processing" };
+    }
+    if (!vid) {
+      /* 🔴 실패를 **조용히 글만 올리기로** 바꾸지 않는다(AC-93 ③ — 실패를 0 으로 바꾸지 마라의 발행판). */
+      await writeAudit({ tenantId: tid, action: "x_video_upload_failed", actorType: "system", target: `piece:${piece.id}`,
+        detail: { note: "영상 업로드 실패 — 글만 올리지 않고 멈췄다(우리 키로 아직 실호출 검증 전인 경로다)" }, riskLevel: "high" })
+        .catch((e: unknown) => console.warn("[x] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+      return { ok: false, reason: "channel_error", retriable: true, error: "X 에 영상을 올리지 못했어요. 잠시 후 다시 시도할게요.", detail: "x_video_upload_failed" };
+    }
+    return await postTweet(tid, piece, token, text, vid);
+  }
+
   const first = (piece.images ?? []).map((i) => String(i.url || "").trim()).find(Boolean) ?? "";
   let mediaId: string | null = null;
   if (first) {
@@ -181,6 +252,13 @@ export async function publishToX(piece: PublishPiece, account: PublishAccount): 
     }
   }
 
+  return await postTweet(tid, piece, token, text, mediaId, account.handle);
+}
+
+/** 트윗 한 건 올리기 — 🔴 **글 경로와 영상 경로가 같은 함수를 쓴다**(두 벌이면 한쪽만 고치는 사고가 난다). */
+async function postTweet(
+  tid: number, piece: PublishPiece, token: string, text: string, mediaId: string | null, handleIn?: string,
+): Promise<PublishResult> {
   const body: Record<string, unknown> = { text };
   if (mediaId) body.media = { media_ids: [mediaId] };
 
@@ -193,6 +271,7 @@ export async function publishToX(piece: PublishPiece, account: PublishAccount): 
 
   const id = String(r.json?.data?.id ?? "").trim();
   if (!id) return { ok: false, reason: "channel_error", retriable: true, error: "올렸는데 X 가 글 번호를 주지 않았어요.", detail: "no_tweet_id" };
-  const handle = String(account.handle || "i").replace(/^@/, "");
+  const handle = String(handleIn || "i").replace(/^@/, "");
+  void tid;
   return { ok: true, via: "api", externalUrl: `https://x.com/${encodeURIComponent(handle)}/status/${id}`, channelRef: id };
 }

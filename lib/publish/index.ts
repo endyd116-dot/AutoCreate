@@ -19,6 +19,7 @@ import { db } from "../../db/index";
 import { jsonb, utcDate } from "../db-util";
 import { writeAudit } from "../audit";
 import { normalizeBlocks, type Block } from "../blocks";
+import { formatCapsOf } from "../channel-registry";   // [R9-4] 채널 꾸밈 표 — 러너 payload 에 같이 싣는다
 import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishImage, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
 import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
@@ -99,6 +100,20 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
     status: String(p.status ?? ""),
   };
   if (n(p.slot_id)) out.slotId = n(p.slot_id);
+  /* [R9-9] 🔴 **허용 목록에 넣는 것까지가 «값을 만든 것»이다.** 2026-09-16 하루에 허용 목록 **세 곳**이
+     값을 조용히 먹었다(`ALLOWED_SETTINGS`·`sanitizeProfile`·`pieces-get meta`) — 여기가 네 번째가 되지 않게 한다. */
+  if (Array.isArray(meta.productTags)) {
+    const tags = (meta.productTags as unknown[])
+      .map((t) => (t && typeof t === "object" ? t : {}) as Record<string, unknown>)
+      .map((t) => ({
+        productId: String(t.productId ?? t.product_id ?? "").trim(),
+        ...(Number.isFinite(Number(t.x)) ? { x: Number(t.x) } : {}),
+        ...(Number.isFinite(Number(t.y)) ? { y: Number(t.y) } : {}),
+      }))
+      .filter((t) => t.productId)
+      .slice(0, 5);   // 인스타 한 장짜리 사진의 상한(공식 문서)
+    if (tags.length) out.productTags = tags;
+  }
   if (meta.affiliate && typeof meta.affiliate === "object") {
     const af = meta.affiliate as Record<string, unknown>;
     out.affiliate = { provider: String(af.provider ?? "coupang"), url: String(af.url ?? ""), ...(af.subId ? { subId: String(af.subId) } : {}) };
@@ -200,6 +215,8 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
       title: prepared.title, bodyHtml: prepared.bodyHtml, blocks: prepared.blocks,
       images: prepared.images.map((i) => ({ url: i.url, ...(i.caption ? { caption: i.caption } : {}), ...(i.alt ? { alt: i.alt } : {}) })),
       tags: prepared.tags, disclosure: prepared.disclosure,
+      /* [R9-4] 서버가 믿는 꾸밈 표를 러너도 본다 — `blocks[].marks` 를 어디까지 누를지 러너가 같은 표로 정한다(표가 없으면 null). */
+      formatCaps: formatCapsOf(piece.channel),
       ...(prepared.scheduledFor ? { scheduledFor: prepared.scheduledFor } : {}),
       ...(opts.slotId ?? prepared.slotId ? { slotId: opts.slotId ?? prepared.slotId } : {}),
     };

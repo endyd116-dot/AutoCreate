@@ -103,7 +103,26 @@ export interface RenderPayload {
   tenantId: number;
   out: { w: 1080; h: 1920; fps: 30; maxSeconds: VideoSeconds; crf: 20 };
   scenes: RenderScene[];
-  captions: { preset: "keyword_center" | "talking_big" | "clip_top"; phrases: RenderPhrase[]; srtKey: string };
+  captions: {
+    preset: "keyword_center" | "talking_big" | "clip_top";
+    phrases: RenderPhrase[];
+    srtKey: string;
+    /**
+     * [R10-6] 자막 모양 — 🔴 **안 주면 렌더가 종전 상수 그대로** 그린다(무회귀).
+     *   2026-09-16 에 `render-video.mjs buildOverlayHtml` 의 상수를 이 칸으로 열었다. 레퍼런스가 배워 온 값이
+     *   `lib/video/reference-apply.ts applied.captionType` 을 거쳐 여기로 온다.
+     *   🔴 **크기(`size`)는 일부러 안 받는다** — 자막 크기는 프리셋이 정하고 그건 **고객이 고르는 값**이다.
+     *      레퍼런스가 덮으면 화면 칩이 말하는 것과 영상이 달라진다(AC-52).
+     *   🔴 `maxCharsPerLine` 에 **기본값이 없다** — 지어내면 심사(`judge.ts` 2줄)와 숫자가 두 벌이 된다(AC-92).
+     */
+    type?: {
+      weight?: number; size?: number; lineHeight?: number;
+      color?: string; accentColor?: string; shadow?: string;
+      strokeWidth?: number; strokeColor?: string;
+      position?: "top" | "middle" | "bottom"; side?: number;
+      maxCharsPerLine?: number;
+    };
+  };
   audio: { narration: { key: string; startMs: number }[]; bgm: { key: string; gainDb: -18 } | null; sfx: [] | null; loudnorm: { I: -16; TP: -1.5; LRA: 11 } };
   /* 🔴 `safeZone` 은 **채널마다 다르다**(`SAFE_ZONE_OF`) — 종전의 리터럴 타입 `{top:220;bottom:300}` 을 열었다.
      리터럴이면 «고치는 것» 자체가 타입 오류라, 틀린 값이 고쳐질 수 없는 상태였다. */

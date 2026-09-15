@@ -9,8 +9,8 @@
 import { sql } from "drizzle-orm";
 import { utcDate, jsonb } from "./db-util";
 import { q } from "./accounts";
-import { defaultImageCount, coinFormatOf, estimateVideoSeconds } from "./writing-contracts";
-import { pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
+import { defaultImageCount, coinFormatOf, estimateVideoSeconds, estimateAiImagesFor } from "./writing-contracts";
+import { pieceCoinCost, DEFAULT_COIN_TIER, toCoinTier, COIN_TIERS, type CoinTier } from "./coin-table";   // [R10-7] 등급 — 편성표 견적도 계정 등급으로 센다
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
 import { gapMinFor } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다
@@ -89,7 +89,23 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
 /** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60).
  *  [R8 §2.5] 🔴 카드뉴스 = **`cardnews` 한 값(카드 값이 그 안에 들어 있다)**. 여기와 `lib/director.ts pieceCoin` 이
  *  **같은 규칙**이어야 한다 — 갈리면 편성표가 말한 코인과 실제로 빠지는 코인이 달라진다(AC-74 «화면의 숫자도 서버가 정본»). */
-export function coinsPerWeek(rules: Rule[], videoSeconds?: unknown): number {
+/**
+ * [R10-7 · R10-9] 규칙 → 그 규칙이 만들 글의 **코인 등급**. 계정이 못 박힌 규칙은 그 계정 등급 · 자동 배정 규칙은 **그 채널 계정들 중 제일 높은 등급**.
+ *   🔴 왜 «제일 높은»인가: 견적은 «고객이 내는 값 ≤ 고객에게 말한 값»이어야 한다(C 의 자 · AC-93). 어느 계정에 갈지 모르는데 낮은 등급으로 말하면 «1 을 말하고 3 을 뺀다»가 조용히 생긴다.
+ *   계정이 하나도 없으면 simple — 그건 «만들 수 없는 규칙»이라 어느 값이든 안 빠진다.
+ */
+export function ruleTierOf(r: Pick<Rule, "channel" | "accountMode" | "accountId">, accounts: readonly { id: number; channel: string; defaultTier: CoinTier | null }[]): CoinTier {
+  if (r.accountMode === "fixed" && r.accountId) {
+    const a = accounts.find((x) => x.id === r.accountId);
+    return a?.defaultTier ?? DEFAULT_COIN_TIER;
+  }
+  let best: CoinTier = DEFAULT_COIN_TIER;
+  for (const a of accounts) if (a.channel === r.channel && a.defaultTier && COIN_TIERS[a.defaultTier].coins > COIN_TIERS[best].coins) best = a.defaultTier;
+  return best;
+}
+
+/** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). `tierOf` 를 안 넘기면 전부 simple(옛 호출 · 계정 등급을 모르는 자리는 낮게 말하는 쪽으로만 틀린다). */
+export function coinsPerWeek(rules: Rule[], videoSeconds?: unknown, tierOf: (r: Rule) => CoinTier = () => DEFAULT_COIN_TIER): number {
   return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
     /* [R8] 🔴 기본 경로는 «AI 1장 + 나머지 스톡» 이라 글 한 편이 **1코인**이다(사장님 승인값 2026-09-15).
        사진 총 장수(`defaultImageCount`)로 세면 7코인이 되어 **화면이 옛 값을 말하게** 된다.
@@ -98,7 +114,9 @@ export function coinsPerWeek(rules: Rule[], videoSeconds?: unknown): number {
        종전엔 `seconds` 를 안 넘겨서 `pieceCoinCost` 안의 «없으면 60» 이 대신 답했고, 그래서
        **고객이 15초로 맞춰 놔도 편성표는 60초 값**을 적었다 — 클립 채널(상한 30초)은 28 이라 적고 12 를 뺐다.
        고른 값은 `tenants.settings.videoSeconds` 에 있었다. 이제 디렉터와 **같은 함수**로 잰다. */
-    const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(r.channel), seconds: estimateVideoSeconds(r.channel, videoSeconds) });
+    /* [R10-7] 🔴 등급도 넘긴다 — 안 넘기면 `pieceCoinCost` 가 simple 상한(1)으로 답해 프리미엄 계정의 편성표가 «1 을 말하고 3 을 뺀다»(C 의 자 ⑥이 이 자리를 잡는다). */
+    const tier = tierOf(r);
+    const per = pieceCoinCost(r.kind, estimateAiImagesFor(r.channel, tier), { format: coinFormatOf(r.channel), seconds: estimateVideoSeconds(r.channel, videoSeconds), tier });
     return a + weeklyCount(r) * per;
   }, 0));
 }
@@ -256,7 +274,9 @@ export interface Slot { id: number; date: string; channel: string; kind: string;
   produceReason?: string;
   /** [R8] **아직 안 만든 자리**에만 싣는다 — «지금 만들기»를 누르면 들어갈 코인(`slots-produce-now` 가 실제로 차감하는 것과 **같은 식**).
    *  🔴 이미 만든 자리엔 안 싣는다(그 코인은 이미 나갔다 — «또 든다»로 읽히면 안 된다). */
-  coinCost?: number }
+  coinCost?: number;
+  /** [R10-9] 이 자리가 만들 글의 코인 등급 — 계정 기본값(계정 미정이면 그 채널 계정 중 제일 높은 등급 · `ruleTierOf` 와 같은 규칙). `coinCost` 와 같이 실린다. */
+  tier?: CoinTier }
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -288,6 +308,9 @@ export async function listSlots(tid: number, from: string, to: string, now = new
   const w = await requireWritable(tid).catch(() => null);
   const blockedReason = w && !w.ok ? w.reason : null;
   const todayKst = kstDateStr(now);
+  /* [R10-9] 계정 기본 등급 — 자리마다 «지금 만들기가 몇 코인»을 그 계정 등급으로 센다(한 번에 읽는다 · 계정 30개면 쿼리 30번이 아니라 1번). 못 읽으면 빈 목록 = 전부 simple(낮게 말하는 쪽). */
+  const tierRows = await q(sql`SELECT id, channel, quality_tier FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`).catch(() => [] as Row[]);
+  const tierAccounts = tierRows.map((r) => ({ id: n(r.id), channel: String(r.channel), defaultTier: toCoinTier(r.quality_tier) }));
   const tickText = `${tickAt.getTime() < kstToUtc(addDays(todayKst, 1), 0, 0).getTime() ? "오늘" : "내일"} ${new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "numeric", minute: "2-digit" }).format(tickAt)}`;
   /* [P1R7 B3 · §5B.2 D+1] 수익 되먹임 — 그 자리의 piece 에 귀속된 `revenue_daily` 합을 함께 읽는다(글별 TOP5 와 같은 원천 · lib/revenue/aggregate).
      🔴 수집 행이 하나도 없으면 SUM 이 NULL 이고, 그때는 키를 안 싣는다 — «아직 못 가져옴»을 «0원 벌었다»로 그리지 않게(AC-9). */
@@ -317,8 +340,13 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     });
     if (pw) {
       o.produceWindow = pw.window; o.produceReason = pw.reason;
-      /* «지금 만들기»가 얼마인지 — 누르기 전에 숫자로 안다(A 요청). 식은 `coin-table.pieceCoinCost` 한 곳이라 실제 차감과 갈릴 수 없다. */
-      if (pw.window !== "done") o.coinCost = pieceCoinCost(o.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(o.channel), seconds: estimateVideoSeconds(o.channel, rawSettings.videoSeconds) });
+      /* «지금 만들기»가 얼마인지 — 누르기 전에 숫자로 안다(A 요청). 식은 `coin-table.pieceCoinCost` 한 곳이라 실제 차감과 갈릴 수 없다.
+         [R10-9] 등급은 그 자리의 계정 기본값(계정 미정이면 채널 계정 중 제일 높은 등급) — `ruleTierOf` 와 같은 규칙. */
+      if (pw.window !== "done") {
+        const tier = ruleTierOf({ channel: o.channel, accountMode: o.accountId ? "fixed" : "auto", accountId: o.accountId }, tierAccounts);
+        o.tier = tier;
+        o.coinCost = pieceCoinCost(o.kind, estimateAiImagesFor(o.channel, tier), { format: coinFormatOf(o.channel), seconds: estimateVideoSeconds(o.channel, rawSettings.videoSeconds), tier });
+      }
     }
     return o;
   });

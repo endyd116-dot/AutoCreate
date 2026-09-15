@@ -32,10 +32,20 @@ const PRODUCT = [
   ...walk("netlify/functions", [".ts", ".mts"]),
   ...walk("runner", [".mjs", ".js"]),
   ...walk("public", [".js", ".html"]),
-];
+].filter((p) => !/[/]js[/]mock/.test(p));   /* 🔴 [2026-09-16 메인 · b-49] **모의 층은 제품이 아니다.**
+   예전엔 SCREENS 에서만 뺐고 PRODUCT·CODE 에선 **안 뺐다** — 한쪽만 뺀 것이라
+   «모의에만 키를 적어도 바깥 호출처로 세어지는» 구멍이 남아 12줄의 수를 부풀리고 있었다.
+   b-49 가 전수로 쟀다: 빼도 **빨개지는 줄 0개**(수만 준다). */
 const SRC = new Map(PRODUCT.map((p) => [p, read(p)]));
 /** 주석을 걷어 낸 본문 — «주석에만 적혀 있는 호출»을 호출로 세지 않기 위해(AC-59). */
-const CODE = new Map([...SRC].map(([p, t]) => [p, t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")]));
+const CODE = new Map([...SRC].map(([p, t]) => [p, t
+  .replace(/[/][*][\s\S]*?[*][/]/g, " ")
+  .replace(/(^|[^:])[/][/].*/g, "$1 ")
+  .replace(/<!--[\s\S]*?-->/g, " ")]));
+/* 🔴 [2026-09-16 메인 · b-49 가 잡았다] **HTML 주석(<!-- -->)을 안 걷고 있었다.** 표본이 전부 `.ts` 였던 탓이다 —
+   실례: `public/app/settings.html` 의 HTML 주석 한 줄이 `targetChannelOrder` 의 «바깥 호출처»로 세어졌다.
+   🔴 **표본에 없는 고장은 변이로도 안 보인다**(AC-99 ⑨ · b-49 가 자기 §1 을 스스로 되돌리며 찾았다).
+   ⚠️ `//` 쪽은 `.` 이 줄바꿈을 원래 안 먹으므로 **역슬래시 없이** 쓴다(AC-100 — 이 셸이 역슬래시를 한 겹 먹는다). */
 
 /**
  * 이름 하나의 제품 호출처를 센다.
@@ -80,6 +90,33 @@ const TARGETS = [
   ["카드뉴스 채널 판정(§2.5)", "isCardnewsChannel", "lib/writing-contracts.ts", "편성·코인·생성이 각자 «인스타면 카드뉴스»를 따로 적어 언젠가 갈라진다"],
   ["수치 주장 표시(§2.4)", "findNumericClaims", "lib/fact-claims.ts", "«근거 없는 수치 금지»가 프롬프트에만 있고 지키는지 아무도 안 재는 상태로 돌아간다"],
   ["수치 주장 문구(§2.4)", "claimsLine", "lib/fact-claims.ts", "검수 화면이 «확인해 주세요»를 제 문장으로 또 지어 서버와 갈린다", "external"],
+  /* ── [R9+R10 · B 2026-09-16] 서식·유사도·등급·옷장 — «정의가 있나»가 아니라 «제품이 부르나»(계약 §4-3 · AC-69) ── */
+  ["인라인 마크 검증(R9-1)", "validateMarks", "lib/blocks.ts", "모델이 낸 marks 가 검증 없이 렌더로 흘러 겹침·범위 밖 마크가 조용히 사라지거나 깨진다"],
+  ["마크 렌더(R9-1)", "inlineMarked", "lib/blocks.ts", "marks 를 적어도 HTML 에 태그가 안 나와 «적기만 하고 아무도 안 그린다»가 된다"],
+  ["채널 꾸밈 표(R9-4)", "formatCapsOf", "lib/channel-registry.ts", "표를 만들어 놓고 렌더·프롬프트·화면·러너 아무도 안 봐서 «못 내는 채널에 마크를 시킨다»"],
+  ["모델에게 시킬 마크(R9-1)", "inlineMarksAllowed", "lib/channel-registry.ts", "채널 표가 있어도 프롬프트가 안 읽어 쓰레드에 형광펜을 시킨다"],
+  ["마크 상한(R9-1)", "applyMarkBudget", "lib/format-marks.ts", "AM 실측 상한(value 12 · line 6)이 러너에만 있고 서버는 무제한으로 보낸다"],
+  ["못 낸 서식 투영(R9-5)", "formatUnusedOf", "lib/format-marks.ts", "meta.formatMarks 가 쌓여도 검수 화면까지 길이 없어 «만들어 놓고 아무도 안 부른다»"],
+  ["러너 서식 보고 합치기(R9-5)", "mergeRunnerFormatMarks", "lib/format-marks.ts", "러너가 강등을 보고해도 서버 planned 를 덮어쓰거나 append 안 되어 «발행 뒤 못 낸 것»이 사라진다"],
+  ["계정 간 유사도(R9-8)", "crossAccountSimilarity", "lib/cross-account.ts", "IP 는 나눠 놓고 글 내용은 계정끼리 안 견줘 «같은 사람이 여러 계정» 판정을 못 막는다(위험도 1번)"],
+  ["등급 코인 식(R10-7)", "coinsForAiImages", "lib/coin-table.ts", "«덜 구우면 덜 받는다»가 표에만 있고 정산·재차감이 옛 식으로 돈다"],
+  ["등급별 골격(R10-8)", "applyQualityTier", "lib/writing-contracts.ts", "프리미엄이 사진 수만 다르고 글은 같아 «프리미엄»이 거짓말이 된다"],
+  ["규칙 등급(R10-9)", "ruleTierOf", "lib/slots.ts", "편성표가 계정 등급을 안 읽어 프리미엄 계정에 «주 3코인»이라 말하고 9 를 뺀다"],
+  ["정산 문장(R10-9)", "tierCoinsLine", "lib/coin-table.ts", "덜 받고 돌려준 걸 조용히 돌려줘서 고객이 모른다"],
+  ["요금제 몇 편(R10-9)", "piecesByTier", "lib/coin-table.ts", "화면이 «150코인 → 몇 편»을 스스로 셈해 단가가 바뀌는 날 화면만 옛 셈으로 남는다"],
+  ["스타일 소독기(R10-3)", "sanitizeTextStyleForStorage", "lib/text-style.ts", "저장 직전 소독이 안 돌아 남의 문장이 jsonb 에 남는다(저작권 게이트가 문 밖에 있는 상태)"],
+  ["스타일 → 프롬프트(R10-4)", "textStylePromptLines", "lib/text-style.ts", "배운 스타일이 DB 에만 쌓이고 글에 한 줄도 안 닿는다(영상 refStyle 이 겪은 그것)"],
+  ["스타일 → 골격(R10-4)", "applyTextStyleShape", "lib/text-style.ts", "배운 구성 요소(인용·표·결론 위치)가 프롬프트 문장으로만 가서 구조가 이긴다(AC-63)"],
+  ["캡처 보고 처리(R10-2)", "handleReferenceCaptureReport", "lib/text-style-capture.ts", "러너가 찍어 보내도 서버가 안 받아 «찍었는데 아무 일도 안 난다»"],
+  ["비전 읽기(R10-2)", "readTextStyleFromShots", "lib/text-style-read.ts", "캡처를 받아도 모델에 안 보내 스타일이 영영 안 생긴다"],
+  ["옷장 저장(R10-4)", "createTextStyle", "lib/text-style-store.ts", "읽은 결과가 저장 한 곳을 안 지나 소독 없이 다른 길로 들어간다"],
+  /* ── [R9R10 · C 2026-09-16] B 목록에 없던 다섯 — 러너 쪽 정의와 «고르기»·«잡 kind»(하나라도 안 불리면 «배웠는데/재 놓고 아무 데도 안 간다») ── */
+  ["번짐 — 문단 경계에서 끊는다(R9-3)", "breakFormatBeforePara", "runner/lib/format-bleed.mjs", "세 겹 중 첫 겹이 안 불려 색이 다음 문단까지 간다(AM 네 번째 판)"],
+  ["번짐 — 발행 직전 자가검사 판정(R9-3)", "bleedVerdict", "runner/lib/format-bleed.mjs", "재 놓고 판정을 안 물어 번진 글이 그대로 나간다"],
+  ["캡처 — 자르기 계획(R10-1)", "planCaptureSlices", "runner/lib/capture-slice.mjs", "러너가 한 장으로 찍어 모델이 밑줄과 굵게를 구분 못 한다"],
+  ["레퍼런스 — 이 글의 스타일을 고른다(R10-4)", "textStyleOf", "lib/text-style-store.ts", "계정에 걸어 둬도 생성이 안 읽어 «옷장»이 장식이 된다(§4.2 영상판과 같은 병)"],
+  ["레퍼런스 — 러너가 찍는다(잡 kind · R10-1)", "reference.capture", "runner/core.mjs", "서버가 잡을 쌓아도 러너가 그 kind 를 안 받아 영영 queued 로 남는다"],
+  ["원장 추천(R10-10)", "recommendTextStyle", "lib/text-style-store.ts", "되먹임 원장의 첫 실사용이 정의만 있고 화면에 «이 스타일이 반응이 좋았어요»가 영영 안 뜬다"],
   /* ── [P1R8 §3.3 · B2] 셀렉터 표(recipe) — 이 라운드에 통째로 새로 생긴 사슬이라 **양끝을 다 센다** ── */
   ["셀렉터 표 — 서버가 잡에 실어 준다", "recipeForRunner", "lib/recipe-store.ts", "표를 만들어 놓고 **아무 잡에도 안 실려** 러너가 영영 묶여 온 표만 쓴다"],
   ["셀렉터 표 — 운영이 올린다", "putRecipe", "lib/recipe-store.ts", "표를 **넣을 길이 없어** 배포 기계가 통째로 죽은 채 초록으로 보인다"],
@@ -127,7 +164,12 @@ const TARGETS = [
   ["신조어 — 값이 연령대인가", "toAgeBand", "lib/slang-whitelist.ts", "옛 데이터·오타가 그대로 흘러들어 표가 엉뚱하게 먹거나 안 먹는다"],
   ["신조어 — 사전이 표를 받는 칸", "allowSlang", "lib/banned-words.ts", "사전이 표를 못 받아 연령대와 상관없이 모두 잡힌다(순수 리프 계약을 지키려고 import 대신 값으로 받는다)"],
   /* ── [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 블록만 만들고 **파싱·렌더·러너 중 하나가 빠지면 조용히 0건**이 된다. ── */
-  ["🔴 장소 카드 — 블록이 실제로 흐른다", "place", "lib/blocks.ts", "타입만 만들고 파싱·렌더가 없어 모델이 내도 **조용히 버려진다**"],
+  /* 🔴 [2026-09-16 메인 · b-49 가 잡았다] 옛 심볼은 그냥 `place` 였다 — **너무 흔했다.**
+     진짜 소비처를 **다 가려도 바깥 12곳으로 초록**이었다: AI 프롬프트의 영어 산문(«when a place is implied») ·
+     카메라 지시문 · channel-registry 의 다른 뜻 문자열 · 인라인 CSS `place-items`.
+     🔴 **배선이 내일 통째로 지워져도 초록으로 남는 상태**였다 — «만들면 줄을 박아라»를 지켜 박은 줄인데
+     **그 줄이 초록을 거저 받고 있었다.** ⇒ 그 배선에만 있는 글자로 바꾼다(`lib/blocks.ts:28` 선언). */
+  ["🔴 장소 카드 — 블록이 실제로 흐른다", "place?: { name", "lib/blocks.ts", "타입만 만들고 파싱·렌더가 없어 모델이 내도 **조용히 버려진다**"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {
@@ -188,9 +230,10 @@ const SURFACES = [
     "로그인 벽·차단에 막힌 고객이 갈 길이 없다", true],
   ["글 레퍼런스 — 복붙(마지막 예비)", "/api/style-reference-text", "netlify/functions/style-reference.ts",
     "마지막 예비 길이 없다(꾸밈이 날아간다고 말해 주는 자리도 같이 없다)", true],
-  ["계정의 옷장 — 읽기(설계 §3.6)", "/api/account-styles", "netlify/functions/account-styles.ts",
+  /* [2026-09-16 C] 🔴 서버 정본 파일은 `style-reference.ts` 하나가 여섯 경로를 config.path 배열로 받는다 — `account-styles.ts` 는 없는 파일이었다(AC-82 · B 가 잡았다). */
+  ["계정의 옷장 — 읽기(설계 §3.6)", "/api/account-styles", "netlify/functions/style-reference.ts",
     "배운 스타일을 어디서도 못 본다", true],
-  ["계정의 옷장 — 기본으로 걸기", "/api/account-style-default", "netlify/functions/account-styles.ts",
+  ["계정의 옷장 — 기본으로 걸기", "/api/account-style-default", "netlify/functions/style-reference.ts",
     "«기본 = 계정에 걸어 둔다»가 화면에 없어 공장이 안 돈다", true],
   ["코인 등급 — 계정 기본값(계약 §13)", "defaultTier", "netlify/functions/accounts.ts",
     "등급 기본값을 정할 자리가 없어 전부 서버 기본(간단히)으로만 만들어진다", true],
@@ -205,11 +248,32 @@ const SURFACES = [
   ["옷장 시트를 화면이 연다", "UI.styleSheet", "public/js/ui.js",
     "함수만 있고 여는 화면이 없어 레퍼런스 학습 입구가 0 이 된다", true],
 ];
-for (const [label, needle, owner, harm, needApp] of SURFACES) {
-  if (!read(owner) && !SRC.has(owner)) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner} 를 못 읽었다 — 파일이 옮겨졌나(검사를 고쳐라)`); continue; }
+/* 🔴 [2026-09-16 메인] **서버 정본을 «파일 이름»으로 찾으면 오늘 세 번 틀렸다.**
+   ·E6(감사): «이름만 맞는 파일이 있어서» 가짜 초록 — `ops-center.ts` 는 실제로 `/api/ops-audit` 를 연다
+   ·여기 둘: «이름이 안 맞아서» 가짜 WARN — `/api/account-styles` 를 여는 파일은 `style-reference.ts` 다
+   ⇒ **경로가 진짜 계약이다.** 이름 붙은 파일이 없으면 `config.path` 로 찾는다. */
+const FN_FILES = PRODUCT.filter((p) => p.startsWith("netlify/functions/"));
+const ownerOf = (owner, needle) => {
+  if (read(owner) || SRC.has(owner)) return owner;
+  const api = String(needle).match(/[/]api[/][a-z0-9-]+/);
+  if (!api) return null;
+  return FN_FILES.find((f) => { const t = SRC.get(f) || ""; return t.includes("export const config") && t.includes(api[0]); }) || null;
+};
+for (const [label, needle, owner0, harm, needApp] of SURFACES) {
+  const owner = ownerOf(owner0, needle);
+  if (!owner) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner0} 를 못 읽었다 — config.path 로도 못 찾았다(검사를 고쳐라)`); continue; }
   const hits = screenCalls(needle);
   const apps = APPS(hits);
-  const ok = needApp ? apps.length > 0 : hits.length > 0;
+  /* 🔴 [2026-09-16 C] «화면 파일»만 세면 **공용 시트를 거치는 길**을 죽은 통로로 오판한다 — A 가 레퍼런스 시트를 ui.js 의 `UI.styleSheet` 한 곳에 두고
+     계정·만들기·직접쓰기·디렉터가 그걸 부른다(설계 «한 곳»). 그래서 ui.js 안에서 needle 을 품은 `UI.xxx = ` 블록을 찾고, 그 xxx 를 화면 파일이 부르면 «화면이 부른다»로 센다.
+     (하나라도 빠지면 여전히 빨강 — ui.js 에 정의만 있고 화면이 안 부르면 그것이 바로 이 축이 잡으려는 병이다.) */
+  const viaUi = (() => {
+    const ui = CODE.get("public/js/ui.js") || "";
+    const blocks = ui.split(/\r?\n(?=  UI\.\w+ = )/);
+    const fns = blocks.filter((b) => b.includes(needle)).map((b) => (b.match(/^  UI\.(\w+) = /) || [])[1]).filter(Boolean);
+    return fns.filter((fn) => [...CODE].some(([pp, c]) => /^public\/(app|ops)\//.test(pp) && c.includes(`UI.${fn}(`)));
+  })();
+  const ok = needApp ? (apps.length > 0 || viaUi.length > 0) : hits.length > 0;
   rec(`🔴 화면이 부르나 — ${label}(\`${needle}\`)`, ok,
     `화면 ${hits.length}곳${hits.length ? ` [${hits.join(" · ")}]` : ""}${needApp ? ` · 그중 화면 파일 ${apps.length}곳` : ""}` + (ok ? "" : ` ⇒ ${harm}`));
 }

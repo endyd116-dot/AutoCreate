@@ -12,6 +12,7 @@ import { providerConfigured, providerMissing } from "./oauth-providers";
 import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, type ConnectMethod } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0)
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
+import { toCoinTier, type CoinTier } from "./coin-table";   // [R10-9] 계정 기본 등급(표는 coin-table 한 곳 · 순수 리프)
 
 type Row = Record<string, unknown>;
 export const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -64,12 +65,17 @@ export interface AccountRow {
   personaId?: number;
   proxyUrl?: string; browserProfileKey: string; hasCreds: boolean;
   monetize: { coupang: boolean; adpost: boolean; adsense: boolean };
+  /** [R10-9] 🔴 계정 기본 코인 등급(simple|standard|premium). **null = 안 고름**(서버는 simple 로 만든다 — 오늘까지의 글값과 같아서 기본값이지 날조가 아니다 · AC-93). 화면은 null 을 «아직 안 골랐어요»로 그린다. */
+  defaultTier: CoinTier | null;
+  /** [R10-4] 계정에 걸어 둔 글 스타일(`text_styles.id`). null = 없음. */
+  defaultStyleId: number | null;
 }
 
 /** SELECT 조각 — accounts a + 자격 존재 여부 서브쿼리. */
 export const ACCOUNT_SELECT = sql`
   a.id, a.channel, a.handle, a.display_name, a.status, a.health_score, a.posts_today, a.daily_cap, a.min_gap_min, a.golden_hours,
   a.last_post_at, a.last_error_kind, a.group_id, a.persona_id, a.proxy_url, a.browser_profile_key, a.monetize, a.avatar_url,
+  a.quality_tier, a.text_style_id,   /* [R10-9 · R10-4] 계정 기본 등급 · 계정에 걸어 둔 스타일(drizzle/0035) — 없으면 NULL(«안 고름») */
   (SELECT g.name FROM account_groups g WHERE g.id = a.group_id AND g.tenant_id = a.tenant_id) AS group_name,
   a.created_at, a.opened_at, a.warmup_off,
   /* 워밍업(§2.6)이 보는 «이번 주 몇 건 올렸나» — 주는 **KST 월요일 시작**이다(DESIGN §13.5 · UTC 로 세면 월요일 새벽이 지난주가 된다). */
@@ -87,6 +93,8 @@ export function toAccountRow(r: Row): AccountRow {
     avatar: r.avatar_url ? String(r.avatar_url) : null,
     browserProfileKey: String(r.browser_profile_key || `t0-a${r.id}`), hasCreds: r.has_creds === true,
     monetize: { coupang: r.has_coupang === true, adpost: !!mon.adpostMediaId, adsense: !!mon.adsensePub },
+    defaultTier: toCoinTier(r.quality_tier),            // 모르는 값·NULL → null(«안 고름»)
+    defaultStyleId: Number(r.text_style_id) > 0 ? Number(r.text_style_id) : null,
   };
   /* 🔴 워밍업(§2.6) — **`dailyCap` 을 유효값으로 바꿔서 내보낸다.**
      캐던스를 보는 자리가 셋(director·director-auto·account-health)이라 게이트를 하나 더 만들면 넷이 된다.

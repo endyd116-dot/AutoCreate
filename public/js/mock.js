@@ -61,6 +61,7 @@
      ?ref=fail|blocked|timeout|notfound → 주소로 배우기가 그 갈래로 실패 · ?ref=norunner → 열어 줄 PC 가 없다 · ?ref=quota → 이번 달 한도를 다 씀
      ?styles=0 → 배운 스타일이 없는 집 · ?rec=0 → 표본이 적어 추천을 못 하는 집 */
   const fmtKnob = qs.get("fmt") === "1", settleKnob = qs.get("settle") === "1", refKnob = qs.get("ref") || "", noStyles = qs.get("styles") === "0", recNone = qs.get("rec") === "0";
+  const fscKnob = qs.get("fsc") === "1", styleGone = qs.get("styleGone") === "1";   /* ?fsc=1 러너 자가검사 값이 온 글 · ?styleGone=1 지운 스타일이라 못 입은 글 */
   /* [R8-B §4.4] 내 AI 키 손잡이 — ?aikey=ok|invalid|resting|noenc (기본: 안 꽂은 집) · ?aifb=1 = 대신 만들기를 이미 켜 둔 집
      🔴 `noenc` 는 «맡아 둘 수 없는 상태»(서버 `configured:false`)다 — 그때 화면이 꽂는 자리를 안 그리는지 보려고 둔다. */
   const aiKeyKnob = qs.get("aikey") || "";
@@ -321,7 +322,7 @@
   const FMT_UNUSED = [
     { field: "underline", label: "밑줄", why: "주소가 든 문단은 링크가 먼저라 꾸밈을 뺐어요.", n: 1 },
     { field: "table", label: "표", why: "목록·표 안에는 꾸밈을 실을 칸이 없어 글자만 그대로 실었어요.", n: 1 },
-    { field: "value", label: "핵심 숫자·낱말 강조", why: "편집기에서 자리를 정확히 못 잡아 그 꾸밈은 뺐어요 — 글자는 그대로예요.", n: 2 },
+    { field: "value", label: "핵심 강조", why: "편집기에서 자리를 정확히 못 잡아 그 꾸밈은 뺐어요 — 글자는 그대로예요.", n: 2 },
     { field: "italic", label: "기울임", why: "이 채널에서는 낼 수 없는 꾸밈이라 글자만 그대로 실었어요.", n: 1 },
     { field: "row", label: "나열 강조", why: "한 글에 너무 많으면 오히려 읽기 어려워서 앞쪽 몇 곳만 남겼어요.", n: 3 },
   ];
@@ -1033,7 +1034,11 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
           goalRules: NV ? ["r1", "r2", "r3"] : ["r1", "r2"],   /* 🔴 화면은 **가짓수만** 쓴다(모델 지시문이라 글자 그대로 안 보여 준다) */
           actualChars: String(p.bodyHtml || "").replace(/<[^>]+>/g, "").length } };
       /* [R8-A2 §2.4] `?claims=1` 이면 근거 없는 수치가 섞인 글 — 서버가 이미 주던 칸(`meta.numberClaims`)을 화면이 그리는지 본다. */
-      return { ok: true, piece: { ...pieceRow(p), ...(thKnob ? { channel: "threads", status: "published", externalUrl: "https://www.threads.net/@cook_a/post/mock" } : {}), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], formatCaps: FORMAT_CAPS[thKnob ? "threads" : p.channel] ?? null, meta: { ...p.meta, ...pieceCoinsMeta(p), ...(fmtKnob && p.id === 501 ? { formatUnused: FMT_UNUSED } : {}), ...(p.id === 501 && !noStyles && !p.meta.styleId ? { styleId: 701, styleName: styleNameOf(701) } : {}), ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode), ...(thKnob === "partial" || thKnob === "both" ? { thChainPartial: TH_PARTIAL } : {}), ...(thKnob === "cut" || thKnob === "both" ? { thChainCut: TH_CUT } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
+      return { ok: true, piece: { ...pieceRow(p), ...(thKnob ? { channel: "threads", status: "published", externalUrl: "https://www.threads.net/@cook_a/post/mock" } : {}), ...why, bodyHtml: withDisc(p.bodyHtml), blocks: bodyToBlocks(p), images: [{ url: "", caption: "10분 담가 둔 바스켓", sort: 0 }, ...((S.photos || {})[p.id] || []).map((x, i) => ({ url: x.url, caption: x.caption || "", sort: i + 1 }))], formatCaps: FORMAT_CAPS[thKnob ? "threads" : p.channel] ?? null, meta: { ...p.meta, ...pieceCoinsMeta(p), ...(fmtKnob && p.id === 501 ? { formatUnused: FMT_UNUSED } : {}), ...(p.id === 501 && !noStyles && !p.meta.styleId && !styleGone ? { styleId: 701, styleName: styleNameOf(701), styleApplied: { id: 701, name: styleNameOf(701), lines: 6, from: "account" } } : {}),
+        ...(p.id === 501 && styleGone ? { styleUnused: { id: 799, why: "그 스타일을 찾지 못해서(지웠거나 없는 스타일) 스타일 없이 썼어요." } } : {}),
+        /* [R9-8 · lib/cross-account.ts CrossAccountMeta] measured:false = 못 쟀다(0점 아님) */
+        ...(p.kind !== "video" && p.id === 501 ? { crossSimilarity: gateKnob === "xacc" ? { measured: false, score: 0, compared: 0, reason: "견줄 다른 계정 글이 아직 없어서 못 쟀어요" } : gateKnob === "xaccdup" ? { measured: true, score: 0.71, compared: 4, against: { pieceId: 488, accountId: 3 } } : { measured: true, score: 0.22, compared: 4, against: { pieceId: 505, accountId: 3 } } } : {}),
+        ...(fscKnob && p.id === 501 ? { formatSelfCheck: { bleed: 12, breakFails: 1, htmlMode: 2, reportedAt: iso(now - 3600e3) } } : {}), ...(claimsKnob ? { numberClaims: NUM_CLAIMS } : {}), ...WHY3(whyMode), ...(thKnob === "partial" || thKnob === "both" ? { thChainPartial: TH_PARTIAL } : {}), ...(thKnob === "cut" || thKnob === "both" ? { thChainCut: TH_CUT } : {}) }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount } }; },
     /* 🔴 [R8-A2 §9] 승인은 **막지 않는다** — 서버 `HARD_GATE_KEYS = []` 이고, 영상도 `judgeBlockers` 둘(깨진 물건)만 거부한다.
        옛 모의는 `p.gateOk` 가 false 면 막고 P0 면 다 막아서, **시연·스샷에서만 존재하는 가짜 게이트**를 만들고 있었다(AC-52 의 모의 쪽 얼굴).
        🔴 사유 문장은 서버(`lib/content-approve.ts approvePiece`) 글자 그대로. */
@@ -1545,7 +1550,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["fmt", "settle", "ref", "styles", "rec", "runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["fmt", "settle", "ref", "styles", "rec", "fsc", "styleGone", "runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

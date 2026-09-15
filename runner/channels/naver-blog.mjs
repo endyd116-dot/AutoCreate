@@ -16,6 +16,7 @@
  */
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
 import { BLOCK, ensureNaverLogin } from "../lib/auth-naver.mjs";   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
+import { createFormatState, markFormatDirty, breakFormatBeforePara, measureFormatBleed, bleedVerdict } from "../lib/format-bleed.mjs";
 
 const B_TITLE = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
 const B_EDITOR = ".se-content, .se-container, .se-components-wrap";
@@ -166,7 +167,32 @@ const TOOLBAR_SELECTORS = {
     'button[data-name="horizontal-line"]',
     'button[aria-label="구분선 추가"]',
   ],
+  /* [R9-2] 🔴 **사람이 보는 이름으로도 찾는다** — AM 이 실물 툴팁으로 확정했다(2026-08-20 밤 사장님):
+     「글자색과 글자 배경색은 팔레트가 아니라 **상단 기능창**에 있고, 툴팁 이름이 «글자색 변경»·«글자 배경색 변경»이다」.
+     클래스 하나만 믿으면 네이버가 클래스를 바꾸는 날 조용히 0건이 된다 — 이름은 남는다. */
+  hilite: [
+    "button.se-background-color-toolbar-button",
+    'button[aria-label*="배경색"]:not([aria-label*="글자색"])',
+    'button[title*="배경색"]',
+  ],
+  fontColor: [
+    "button.se-font-color-toolbar-button",
+    'button[aria-label*="글자색"]:not([aria-label*="배경"])',
+    'button[title*="글자색"]:not([title*="배경"])',
+  ],
+  underline: [
+    "button.se-underline-toolbar-button",
+    'button[aria-label*="밑줄"]',
+    'button[title*="밑줄"]',
+  ],
 };
+
+/* ═══ [R9-2] 강조 팔레트 — AM 실측 정본(팔레트에 **실제로 있는** 색) ═══
+   🔴 `aria-label` 에 헥사가 들어 있다고 믿지 마라 — AM 이 그렇게 적어 뒀다가 셀렉터가 **영원히 0건**이었고
+      하루를 버렸다. 라벨이 아니라 **실제 칠해진 배경색**으로 고른다(아래 pickPaletteIndex). */
+const HILITE_HEX = ["#fff8b2", "#bdfbfa", "#c2f4db", "#fdd5f5", "#e3fdc8"];   // 형광펜(배경)
+const FONTCOLOR_HEX = ["#ff0010"];                                            // 글자색(팔레트 실측 확인분)
+const MARK_COLOR_FIXED = process.env.RUNNER_MARK_COLOR || "";                  // 지정 시 그 색으로 고정(수동 override)
 
 /** 소제목·본문 글자 크기(AM 정본값). 🔴 켠 것은 반드시 끈다 — 아래 setFontSize 주석. */
 const HEADING_FONT_SIZE = String(process.env.RUNNER_HEADING_SIZE || "19");
@@ -214,6 +240,108 @@ async function sizeLastTyped(page, ctx, len) {
   return done;
 }
 
+/* ═══════════ [R9-2] 인라인 서식 — «치고 나서 되짚어 잡아 칠한다» ═══════════
+ *
+ *   🔴 **왜 캐럿 토글이 아닌가.** 이 에디터는 `getSelection()` 이 **항상 빈 문자열**이다(AM 실물 5/5) —
+ *      캐럿에 굵게·색·밑줄이 켜져 있는지 **읽을 방법이 없다.** 읽지 못하는 상태를 토글로 끄는 것은 추측이고,
+ *      틀리면 **반대로 켜 버린다**(AM 이 `Ctrl+U` 를 금지한 바로 그 이유 · 이 파일도 안 쓴다).
+ *   ⇒ 대신 **선택 범위에** 먹인다: 평문으로 치고 → `Shift+ArrowLeft × len` 으로 방금 친 만큼 잡고 →
+ *      도구모음을 누르고 → `ArrowRight` 로 푼다. 상태를 읽을 필요도, 토글할 필요도 없다.
+ *      🔴 우리 `sizeLastTyped` 가 **이미 이 모양**이다 — 같은 뼈대에 색·밑줄을 얹는다(새 길을 내지 않는다).
+ *   🔴 그리고 **칠한 직후 `markFormatDirty`** — 거기가 번짐의 출발점이다(`lib/format-bleed.mjs` 머리말).
+ */
+
+/** 색 순번 — 「칠한 티」를 없앤다(짝수=형광펜·홀수=글자색). 잡마다 새로 만든다(전역이면 다음 글이 앞 글 순번을 이어받는다). */
+function createMarkSeq() { return { n: 0, hilite: 0, fontColor: 0 }; }
+
+/**
+ * 🔴 칠하기 **전에** «무엇을 잡았는지» 확인한다(AM #736 — 실물에서 문단이 한복판에서 갈렸다).
+ *   `Shift+ArrowLeft` 가 «방금 친 구절»이 아니라 엉뚱한 곳을 잡고 있으면 — 조각을 친 직후 에디터가
+ *   컴포넌트를 만들며 캐럿을 옮기면 그때부터 좌표가 어긋난다 — **칠하지 않고 물러난다.**
+ *   ⚠️ 선택 «쓰기»는 못 읽어도 **마지막 문단의 꼬리**는 DOM 으로 정확히 읽힌다. 그 비대칭을 쓴다.
+ *   안 칠한 강조는 아쉬울 뿐이지만, **잘못 칠한 강조는 글을 망가뜨린다.**
+ */
+async function tailMatches(ctx, expect) {
+  const tail = await ctx.evaluate(() => {
+    const ps = document.querySelectorAll(".se-component.se-text .se-text-paragraph");
+    return (ps[ps.length - 1]?.textContent ?? "").slice(-80);
+  }).catch(() => "");
+  if (!tail) return true;                       // 못 읽었으면 막지 않는다(AC-92 — «모른다»를 «어긋났다»로 바꾸지 않는다)
+  const norm = (s) => String(s).replace(/\s+/g, "");
+  return norm(tail).endsWith(norm(expect));
+}
+
+/** 팔레트에서 **실제 칠해진 색**이 가장 가까운 칸을 고른다. 너무 멀면 -1(엉뚱한 색을 칠하지 않는다). */
+async function pickPaletteIndex(ctx, hex) {
+  const want = { r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16) };
+  return await ctx.evaluate((w) => {
+    const els = [...document.querySelectorAll(".se-color-palette")];
+    let best = -1, bestD = Infinity;
+    els.forEach((e, i) => {
+      if ((e.className || "").toString().includes("no-col")) return;   // «색 없음» 칸은 건너뛴다
+      const m = getComputedStyle(e).backgroundColor.match(/(\d+),\s*(\d+),\s*(\d+)/);
+      if (!m) return;
+      const d = (+m[1] - w.r) ** 2 + (+m[2] - w.g) ** 2 + (+m[3] - w.b) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return bestD <= 3000 ? best : -1;
+  }, want).catch(() => -1);
+}
+
+/**
+ * 방금 친 `len` 글자에 마크 하나를 먹인다. @returns "ok" | "caret_drift" | "channel_unsupported"
+ *   🔴 실패 사유를 **갈라서** 돌려준다 — «안 됐다» 한 덩어리로 세면 다음 사람이 또 헤맨다(AM 이 전부 catch 로 삼켜
+ *      형광펜 0개로 나간 날 로그가 아무 말도 안 했다).
+ */
+async function applyMark(page, ctx, len, expect, kind, seq, fmt) {
+  const cap = kind === "line" ? 140 : kind === "underline" ? 80 : 60;
+  if (!len || len > cap) return "channel_unsupported";
+  /* `expect` 가 있으면 «내가 방금 친 것을 잡고 있나»를 확인한다. 문단 가운데를 되짚어 칠할 때는
+     호출자가 문단 전체를 한 번 대조해 두므로 여기서는 건너뛴다(그때 `expect` 를 안 준다). */
+  if (expect && !(await tailMatches(ctx, expect))) return "caret_drift";
+
+  for (let i = 0; i < len; i++) await page.keyboard.press("Shift+ArrowLeft").catch(() => {});
+
+  let ok = false;
+  try {
+    if (kind === "bold" || kind === "value" || kind === "row") {
+      /* 굵게는 «점·나열·굵게»에만 — 문장 전체(line)를 굵게 하면 문단이 통째로 무거워져 오히려 안 읽힌다(AM). */
+      await page.keyboard.press("Control+b").catch(() => {});
+      ok = true;
+    }
+    if (kind !== "bold") {
+      /* 🔴 면 강조(line)는 **배경색**이 맞다(AM 2026-08-21) — 문장 전체를 빨간 글씨로 두면 경고문처럼 읽힌다.
+         나열(row)은 순번을 안 쓴다(항목마다 색이 돌면 알록달록해져 «통일»이 깨진다 — 사장님 지적). */
+      const n = seq.n++;
+      const useHilite = kind === "underline" ? false : (!MARK_COLOR_FIXED && (kind === "line" || kind === "row" || n % 2 === 0));
+      if (kind === "underline") {
+        ok = await clickToolbarItem(ctx, "underline");
+        if (!ok) return "channel_unsupported";
+      } else {
+        const hex = MARK_COLOR_FIXED
+          || (useHilite ? (kind === "row" ? HILITE_HEX[0] : HILITE_HEX[seq.hilite++ % HILITE_HEX.length])
+            : FONTCOLOR_HEX[seq.fontColor++ % FONTCOLOR_HEX.length]);
+        const opened = await clickToolbarItem(ctx, useHilite ? "hilite" : "fontColor");
+        if (!opened) { await page.keyboard.press("ArrowRight").catch(() => {}); return "channel_unsupported"; }
+        await settle(page, 500);
+        const idx = await pickPaletteIndex(ctx, hex);
+        if (idx >= 0) { await ctx.locator(".se-color-palette").nth(idx).click({ timeout: 2000 }).catch(() => { ok = false; }); ok = true; }
+        else {
+          await page.keyboard.press("Escape").catch(() => {});
+          console.log(`  · 강조 ${useHilite ? "형광펜" : "글자색"} 실패 — 팔레트에서 ${hex} 근처 색을 못 찾았어요.`);
+        }
+      }
+    }
+  } catch { /* 아래 해제로 내려간다 */ }
+
+  /* 🔴 선택 해제는 **반드시 키보드로**(AM 9차 · DB 원문 대조로 확정) — DOM Range 로 풀었더니 강조 구절이 통째로 증발했다. */
+  await page.keyboard.press("ArrowRight").catch(() => {});
+  /* 🔴 **칠한 직후**가 번짐의 출발점이다. 켰든 못 켰든 «건드렸으면» 적는다 —
+     못 켰다고 깨끗하다는 보장이 없다(팔레트를 열었다 닫은 것도 캐럿을 건드린다). */
+  markFormatDirty(fmt, `${kind} 적용`);
+  return ok ? "ok" : "channel_unsupported";
+}
+
 async function attachImage(page, ctx, file, missed) {
   const sels = ['button[data-name="image"]', ".se-toolbar-item-image button", 'button[title*="사진"]', 'button:has-text("사진")'];
   for (const sel of sels) {
@@ -249,6 +377,70 @@ async function attachImage(page, ctx, file, missed) {
  *      끝에 **새 글 칸**을 만든다. 새 칸은 비어 있어 한복판에 끼어들 수가 없다.
  *   ⚠️ «본문 추가»는 hover 영역이라 isVisible 이 false 로 나올 때가 있다 — 안 보이면 끝으로 스크롤 + force.
  */
+/** 문서의 `.se-component` 수 — «새 칸이 **정말** 생겼나»를 세는 자(클릭 성공 여부가 아니라 **결과**를 본다). */
+const compCount = (ctx) => ctx.evaluate(() => document.querySelectorAll(".se-component").length).catch(() => -1);
+
+/**
+ * «본문 추가»를 누른다(세 겹). 🔴 **누르기만 한다** — 생겼는지 판정은 호출자 몫이다.
+ *   실측(2026-09-14 `runner/probe-editor.mjs` 덤프):
+ *     · `button.se-canvas-bottom-button __edge-area` — **존재하지만 `vis:false`**(hover 영역이라 Playwright 가 숨김으로 본다)
+ *     · `div.se-canvas-bottom` — 그 **보이는 부모**(텍스트 «본문 추가»)
+ *   종전엔 버튼이 안 보이면 force 클릭만 했는데 그게 자주 빗나가 «본문 추가» 실패가 글당 6건 났다(실측).
+ *   ⇒ 보이는 부모를 먼저 누르고, 그다음 버튼 force, 마지막으로 DOM 직접 이벤트까지 세 겹.
+ */
+async function clickAddTextBlock(page, ctx) {
+  const btn = ctx.locator(".se-canvas-bottom-button").first();
+  const box = ctx.locator(".se-canvas-bottom").first();
+  await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+  if (await btn.isVisible({ timeout: 800 }).catch(() => false)) await btn.click({ timeout: 4000 }).catch(() => {});
+  else if (await box.isVisible({ timeout: 800 }).catch(() => false)) await box.click({ timeout: 4000 }).catch(() => {});
+  else await btn.click({ timeout: 3000, force: true }).catch(() => {});
+  await settle(page, 500);
+}
+
+/** DOM 에서 직접 이벤트를 쏜다 — 마지막 안전벨트(AM `clickEditable` 관례). */
+async function dispatchAddTextBlock(ctx) {
+  await ctx.evaluate(() => {
+    const el = document.querySelector(".se-canvas-bottom-button") || document.querySelector(".se-canvas-bottom");
+    if (!el) return false;
+    el.scrollIntoView({ block: "end" });
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: x, clientY: y }));
+    }
+    return true;
+  }).catch(() => false);
+}
+
+/**
+ * 🔴 **무조건 새 글 칸을 만들고 캐럿을 거기 둔다**(AM `freshTextBlockForUrl` 과 **같은 뜻**).
+ *
+ *   ⚠️ **이 함수가 없어서 «번짐 끊기»가 통째로 무력했다**(2026-09-16 C 가 진짜 Chromium 으로 잡았다).
+ *      나는 이식 계획서에 「`freshTextBlockForUrl` 은 이미 우리 안에 있다 — `moveCaretToEnd` 가 같은 일을 한다」고
+ *      적었는데 **틀렸다**: `moveCaretToEnd` 는 «마지막 컴포넌트가 글이 **아닐 때만**» 새 칸을 만든다.
+ *      그런데 서식을 칠한 **직후엔 마지막이 언제나 글**이라 그 분기에 영영 못 들어가고, 남은 경로(문단 클릭 + End)는
+ *      **인라인 span 안에 캐럿을 둔다** — 서식이 그대로 이어진다. AM 은 **조건 없이** 누른다. 그 한 줄 차이였다.
+ *      ⇒ 실측: 밑줄 마크 뒤 평문 3문단이 **통문단 밑줄** · `--mutate=break` 로 끊기를 빼도 **결과가 같았다**
+ *        (= 끊기가 있으나 없으나 같다 = 아무 일도 안 하고 있었다).
+ *
+ *   🔴 **«눌렀다»가 아니라 «생겼다»로 판정한다.** 종전 `breaks` 는 클릭 성공을 세고 있었고, 그래서
+ *      `breaks:4 · breakFails:0` 인데 **새 칸은 0개**였다 — 숫자가 거짓말을 했다(AC-9 의 계수판).
+ */
+async function freshTextBlock(page, ctx) {
+  const before = await compCount(ctx);
+  if (before < 0) return false;
+  await clickAddTextBlock(page, ctx);
+  if ((await compCount(ctx)) <= before) { await dispatchAddTextBlock(ctx); await settle(page, 600); }
+  if ((await compCount(ctx)) <= before) return false;   // 🔴 안 생겼으면 실패다(«눌렀으니 됐겠지» 금지)
+
+  /* 칸을 «만드는 것»과 캐럿이 «거기 가는 것»은 다른 일이다(AM #747) — 만든 칸을 실제로 클릭해 데려온다. */
+  const fresh = ctx.locator(".se-component.se-text").last().locator(".se-text-paragraph").last();
+  const ok = await fresh.click({ timeout: 2500 }).then(() => true).catch(() => false);
+  await page.keyboard.press("End").catch(() => {});
+  return ok;
+}
+
 async function moveCaretToEnd(page, ctx, missed) {
   try {
     const lastIsText = async () => await ctx.evaluate(() => {
@@ -258,32 +450,8 @@ async function moveCaretToEnd(page, ctx, missed) {
     }).catch(() => false);
 
     if (!(await lastIsText())) {
-      /* 🔴 «본문 추가» 실측(2026-09-14 `runner/probe-editor.mjs` 덤프):
-           · `button.se-canvas-bottom-button __edge-area` — **존재하지만 `vis:false`**(hover 영역이라 Playwright 가 숨김으로 본다)
-           · `div.se-canvas-bottom` — 그 **보이는 부모**(텍스트 «본문 추가»)
-         종전엔 버튼이 안 보이면 force 클릭만 했는데 그게 자주 빗나가 «본문 추가» 실패가 글당 6건 났다(실측).
-         ⇒ 보이는 부모를 먼저 누르고, 그다음 버튼 force, 마지막으로 DOM 직접 클릭까지 세 겹으로 간다. */
-      const btn = ctx.locator(".se-canvas-bottom-button").first();
-      const box = ctx.locator(".se-canvas-bottom").first();
-      await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-      if (await btn.isVisible({ timeout: 800 }).catch(() => false)) await btn.click({ timeout: 4000 }).catch(() => {});
-      else if (await box.isVisible({ timeout: 800 }).catch(() => false)) await box.click({ timeout: 4000 }).catch(() => {});
-      else await btn.click({ timeout: 3000, force: true }).catch(() => {});
-      await settle(page, 500);
-      if (!(await lastIsText())) {
-        // 마지막 안전벨트 — 클릭 판정에 걸리면 DOM 에서 직접 이벤트를 쏜다(AM clickEditable 관례).
-        await ctx.evaluate(() => {
-          const el = document.querySelector(".se-canvas-bottom-button") || document.querySelector(".se-canvas-bottom");
-          if (!el) return false;
-          el.scrollIntoView({ block: "end" });
-          const r = el.getBoundingClientRect();
-          const x = r.left + r.width / 2, y = r.top + r.height / 2;
-          for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-            el.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: x, clientY: y }));
-          }
-          return true;
-        }).catch(() => false);
-      }
+      await clickAddTextBlock(page, ctx);
+      if (!(await lastIsText())) await dispatchAddTextBlock(ctx);
       await settle(page, 600);
       /* 🔴 «본문 추가»가 실패했으면 **여기서 멈춘다**. 아래 폴백(마지막 글 문단 클릭)은 컴포넌트 **앞**의
          문단을 짚어 캐럿을 **문서 한복판**에 꽂는다 — 그러면 다음 문장이 앞 문단 사이에 끼어들어
@@ -423,23 +591,115 @@ async function sweepFormatting(page, ctx, plan, missed) {
   return { checked: rows.length, headingWrong, repaired };
 }
 
-async function playOps(page, ctx, plan, files, shotKey, missed) {
+/**
+ * @param fmt  `createFormatState()` 한 벌(안 주면 안에서 만든다). 🔴 **하니스가 잡마다 새 상태로** 돌릴 수 있게 열어 둔다.
+ * @param applied  실제로 «누른» 마크 수를 담는 그릇(계획의 `planned`·`kept` 와 짝 — 계획에 있는 것과 실제로 낸 것은 다르다).
+ */
+export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = createFormatState(), applied = null) {
   let wrote = false;
+  const seq = createMarkSeq();
+  const acc = applied ?? { value: 0, line: 0, row: 0, bold: 0, underline: 0 };
+  /* 🔴 **경계용 `fresh` 는 `moveCaretToEnd` 가 아니다**(2026-09-16 C 실측으로 고쳤다).
+     `moveCaretToEnd` 는 «마지막이 글이 **아닐 때만**» 새 칸을 만든다 — 서식을 칠한 직후엔 마지막이 **언제나 글**이라
+     그 분기에 영영 못 들어가고, 남은 경로(문단 클릭+End)는 **인라인 span 안에 캐럿을 둬 서식을 그대로 잇는다.**
+     ⇒ 끊기는 **무조건 새 칸을 만드는** 함수여야 한다. 두 함수는 이름이 비슷할 뿐 **다른 일**이다. */
+  const fresh = () => freshTextBlock(page, ctx);
+
+  /* 🔴 **문단 경계의 규칙**(AM 이 URL 전용 방어를 «한 곳의 규칙»으로 올린 그 자리).
+     앞 문단이 색·굵게·밑줄·인용을 남겼으면 **새 글 칸**에서 시작한다 — 새 칸은 서식을 안 물려받는다(실측 성질).
+     깨끗하면 아무 일도 안 한다(왕복 0 · 무회귀). 🔴 **이 한 줄이 «어느 지점부터 끝까지»를 문단 하나에 가둔다.** */
+  const boundary = () => breakFormatBeforePara(fmt, fresh);
+
+  /* 🔴 **끊기가 새 칸을 만들었으면 Enter 를 또 치지 않는다** — 새 칸이 곧 새 줄이다.
+     둘 다 하면 마크가 있는 글마다 **빈 줄이 하나씩 쌓인다**(AM 은 이걸 감수했지만 우리는 «생겼나»를 값으로 알고 있으니 안 해도 된다). */
   const type = async (text) => {
-    if (wrote) await page.keyboard.press("Enter").catch(() => {});
+    const broke = await boundary();
+    if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
     await page.keyboard.insertText(String(text));
     wrote = true;
   };
 
+  /** 조각들을 **치면서 바로** 칠한다(되돌아가지 않는다 — AM 8차 확정: 「다 쓰고 나중에 칠하기」는 실물이 무너졌다). */
+  /** 조각 하나를 못 냈다고 적는다 — 🔴 조용히 안 버린다(AC-9 · A 가 사람말 칩으로 그린다). */
+  const noteMarkFail = (kind, why, sample) => {
+    missed.markFail = missed.markFail ?? [];
+    if (missed.markFail.length < 40) missed.markFail.push({ kind, why, sample: String(sample).slice(0, 24) });
+  };
+
+  /**
+   * 🔴 **문단을 먼저 전부 평문으로 치고, 그다음 되짚어 칠한다**(2026-09-16 C 실측으로 뒤집었다).
+   *
+   *   ══ 왜 바꿨나 — «조각 경계»는 아무도 안 끊고 있었다 ══
+   *     종전엔 «치고 바로 칠하기»였다. 그러면 칠한 뒤 `ArrowRight` 로 푼 **캐럿이 서식 span 안**에 남고,
+   *     이어서 다음 조각을 치면 그 조각이 **서식을 물려받는다.** C 가 진짜 Chromium 으로 잡은 실물:
+   *       계획 «밑줄 한 토막»(5자) → 실물 **21자**(문단 끝까지 밑줄) · 계획 «12,400원» → «12,400원 입니다.»
+   *     문단 **경계**는 `freshTextBlock` 이 끊지만 조각 **경계**는 끊는 사람이 없었다.
+   *     🔴 그리고 이건 «통문단»이 아니라 «부분»이라 `measureFormatBleedIn` 도 **못 본다** — 자가검사가 통과시킨다.
+   *
+   *   ══ ⚠️ AM 은 이 길에서 한 번 실패했다 — 그래서 무엇이 다른지 적어 둔다 ══
+   *     AM 주석: 「문단을 다 쓰고 나중에 칠하기」는 실물이 무너졌다(노란 도배·문단 두 동강) —
+   *     **에디터가 컴포넌트를 만들며 문단 구조를 바꾸면 «끝에서 N번째» 좌표가 통째로 어긋난다.**
+   *     그 컴포넌트는 **주소가 만드는 링크카드**였다. 우리는 다르다:
+   *       ① 🔴 **주소가 든 문단은 계획층이 강조를 통째로 걷는다**(`url_para`) — 마크가 있는 문단엔 URL 이 **없다**.
+   *          ⇒ 칠하는 동안 비동기로 생길 컴포넌트가 없다(AM 이 무너진 그 조건이 성립하지 않는다).
+   *       ② 🔴 칠하기 **전에 문단 글자를 통째로 대조**한다 — 어긋나면 **한 조각도 안 칠하고 물러난다.**
+   *          AM 에는 이 대조가 없었다(`colorLastTyped` 의 꼬리 확인은 그 사고 **뒤에** 생겼다).
+   *       ③ 좌표는 **문단 끝에서 왼쪽으로만** 간다(`End` 를 안 쓴다 — 문단이 줄바꿈되면 `End` 는 **줄 끝**이라 틀린다).
+   *     그래도 남는 위험은 있다 ⇒ 어긋나면 **안 칠하고 `caret_drift` 로 적는다.** 안 칠한 강조는 아쉬울 뿐이지만
+   *     잘못 칠한 강조는 글을 망가뜨린다(AM #736 의 결론 그대로).
+   */
+  const typeParts = async (op) => {
+    const parts = (Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }])
+      .filter((p) => p.t);
+    const broke = await boundary();
+    if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
+
+    /* ① 전부 평문으로 — 이 순간 문단 안에 **서식 span 이 하나도 없다**(물려받을 것이 없다). */
+    const joined = parts.map((p) => p.t).join("");
+    await page.keyboard.insertText(joined);
+    wrote = true;
+    await settle(page, 300, 600);
+
+    /* 조각마다 문단 안 위치 [s, e) — 칠하기는 글자 수를 **안 바꾸므로** 이 좌표는 끝까지 유효하다. */
+    let at = 0;
+    const spans = parts.map((p) => { const s = at; at += p.t.length; return { p, s, e: at }; }).filter((x) => x.p.mark);
+    if (!spans.length) return;
+
+    /* ② 🔴 칠하기 전에 **문단 글자를 통째로 대조**한다(AM 에 없던 문). 어긋나면 한 조각도 안 칠한다. */
+    if (!(await tailMatches(ctx, joined.slice(-60)))) {
+      for (const x of spans) noteMarkFail(x.p.mark, "caret_drift", x.p.t);
+      return;
+    }
+
+    /* ③ 오른쪽 조각부터 되짚어 칠한다 — 캐럿은 문단 끝에 있고 **왼쪽으로만** 간다. */
+    let fromEnd = 0;                                   // 문단 끝에서 캐럿까지 몇 글자인가
+    for (const x of [...spans].sort((a, b) => b.e - a.e)) {
+      const stepLeft = (joined.length - x.e) - fromEnd;
+      for (let i = 0; i < stepLeft; i++) await page.keyboard.press("ArrowLeft").catch(() => {});
+      /* `expect` 를 안 넘긴다 — 꼬리 대조는 위에서 문단 전체로 이미 했다(가운데를 칠할 땐 꼬리가 기댓값과 다르다). */
+      const r = await applyMark(page, ctx, x.e - x.s, "", x.p.mark, seq, fmt);
+      if (r === "ok") acc[x.p.mark] = (acc[x.p.mark] ?? 0) + 1;
+      else noteMarkFail(x.p.mark, r, x.p.t);
+      /* 칠한 뒤 `ArrowRight` 로 풀면 캐럿은 그 조각의 **끝**에 있다. */
+      fromEnd = joined.length - x.e;
+      await settle(page, 400, 900);                    // 팔레트가 닫히고 커서 서식이 확정된 뒤에 다음 조각으로
+    }
+  };
+
   for (const op of plan.ops) {
     switch (op.op) {
-      case "para": await type(op.text); await settle(page, 250, 600); break;
+      case "para":
+        if (Array.isArray(op.parts) && op.parts.some((p) => p.mark)) await typeParts(op);
+        else await type(op.text);
+        await settle(page, 250, 600);
+        break;
       case "note": break;   // 사람이 읽는 메모 — 본문에 넣지 않는다(보고에만 실린다)
       case "heading": {
         /* 🔴 소제목 = «굵게 + 글자 크기»다(AM 정본). 스마트에디터 ONE 에는 h2 버튼이 없다 —
            내가 추측으로 쓴 `data-name="header2"` 는 존재하지 않아 **소제목이 본문과 똑같이 나갔다**
            (2026-09-14 실증 스냅샷에서 «결론부터»가 평문이었다). 크기는 **반드시 되돌린다**(sizeLastTyped). */
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        const brokeH = await boundary();     // 🔴 소제목도 문단이다 — 앞 문단의 색을 물려받으면 소제목이 빨개진다
+        if (wrote && !brokeH) await page.keyboard.press("Enter").catch(() => {});
         const text = String(op.text);
         await page.keyboard.press("Control+b").catch(() => {});
         await page.keyboard.type(text, { delay: 6 }).catch(async () => { await page.keyboard.insertText(text); });
@@ -452,7 +712,8 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
         break;
       }
       case "quote": {
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        const brokeQ = await boundary();
+        if (wrote && !brokeQ) await page.keyboard.press("Enter").catch(() => {});
         const opened = await clickToolbarItem(ctx, "quotation");
         if (!opened) {
           missed.quote++;
@@ -460,6 +721,9 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
           await page.keyboard.press("Enter").catch(() => {});
         } else {
           await page.keyboard.type(String(op.text), { delay: 6 }).catch(async () => { await page.keyboard.insertText(String(op.text)); });
+          /* 🔴 인용은 **그 자체가 색·가운데·기울임**이다 — 빠져나와도 캐럿에 남는다(사장님이 보신 «가운데·기울임 번짐»).
+             AM 이 이 자리에 `markFormatDirty("인용구(색·정렬·기울임)")` 를 박아 뒀고, 그게 변이 m3 의 축이다. */
+          markFormatDirty(fmt, "인용구(색·정렬·기울임)");
           await settle(page, 500, 1200);
           await escapeQuote(page, ctx, missed);
         }
@@ -524,7 +788,12 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
           if (++stable >= 4) break;
         }
         await moveCaretToEnd(page, ctx, missed);
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        /* 🔴 **태그 줄도 문단이다**(2026-09-16 · 끊기 사고를 고치다 같은 병을 여기서 하나 더 찾았다).
+           종전엔 여기만 `boundary()` 를 안 지났다 — 앞 문단이 색·밑줄을 남겼으면 **해시태그 줄이 통째로 물든다.**
+           🔴 그리고 태그는 **글의 마지막 줄**이라 뒤에 아무 문단도 없다 = **아무도 대신 끊어 주지 않는다.**
+           `moveCaretToEnd` 는 여기서 새 칸을 안 만든다(마지막이 글이라 조건에 안 걸린다) — 그게 이 병의 같은 뿌리다. */
+        const brokeTags = await boundary();
+        if (wrote && !brokeTags) await page.keyboard.press("Enter").catch(() => {});
         await page.keyboard.insertText(String(op.text));
         wrote = true;
         await settle(page, 300);
@@ -534,7 +803,9 @@ async function playOps(page, ctx, plan, files, shotKey, missed) {
     }
   }
   await shot(page, shotKey, "03-본문완성", true);
-  return wrote;
+  /* 🔴 «썼나»만 돌려주면 서식을 **실제로 냈는지**를 아무도 못 본다 — 계획(planned/kept)과 실물(applied)은 다르다.
+     `fmt` 도 같이 돌린다: 끊기가 몇 번 돌았나(`breaks`)·몇 번 실패했나(`breakFails`)가 곧 번짐의 크기다. */
+  return { wrote, applied: acc, fmt };
 }
 
 /** 발행 레이어의 태그란. 실패해도 발행은 계속(본문 끝 해시태그로 이중 포착). */
@@ -706,8 +977,9 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
     // ④ 본문
     if (!(await clickEditable(ed, S.body))) throw BLOCK("selector_changed", "본문 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
     files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
-    const wrote = await playOps(page, ed, plan, files, shotKey, missed);
-    if (!wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");
+    const fmt = createFormatState();
+    const played = await playOps(page, ed, plan, files, shotKey, missed, fmt);
+    if (!played.wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");
 
     /* 🔴 발행 직전 서식 스윕 — 계획과 실물을 대조한다(실패해도 발행은 계속). */
     const sweep = await sweepFormatting(page, ed, plan, missed).catch(() => ({ checked: 0, headingWrong: 0, repaired: 0 }));
@@ -725,11 +997,40 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
     if (missed.image) notes.push(`사진 버튼 ${missed.image}건 미발견`);
     if (missed.imageDownload) notes.push(`사진 ${missed.imageDownload}장 내려받기 실패`);
     if (missed.imageSettle) notes.push(`사진 ${missed.imageSettle}건 자리 확인 실패`);
+    if (fmt.breakFails) notes.push(`🔴 서식 끊기 ${fmt.breakFails}건 실패 — 그 뒤 문단이 앞 서식을 물려받았을 수 있어요`);
     notes.push(...(plan.stats.notes ?? []));
 
-    if (dryRun) { await saveDraft(page, ed, shotKey); return { dryRun: true, notes }; }
+    /* [R9-2/5] 🔴 서식 재료를 보고에 싣는다 — 서버(B)가 `meta.formatUnused` 로 옮겨 적고 화면(A)이 사람말 칩으로 그린다.
+       계획이 **내려던 것**(planned) · 상한을 넘긴 뒤 **남은 것**(kept) · 실제로 **누른 것**(applied) 셋이 다 다르다.
+       ⚠️ 셋을 한 숫자로 뭉치면 «상한 때문»인지 «에디터가 안 받아서»인지 못 가린다 — 다음 수리가 추측에서 시작한다. */
+    const formatMarks = {
+      planned: plan.stats.marks?.planned ?? null,
+      kept: plan.stats.marks?.kept ?? null,
+      applied: played.applied,
+      demoted: [...(plan.stats.demoted ?? []), ...(missed.markFail ?? [])],
+      breaks: fmt.breaks,
+      breakFails: fmt.breakFails,
+    };
+
+    /* ═══ 🔴 발행 직전 자기검사 — 이 라운드에서 가장 중요한 문 ═══
+       ⚠️ **이건 CLAUDE §9 가 말하는 게이트가 아니다**(계약서 §4-1). «고객 글에 대한 우리 판단»이 아니라
+          **«우리 러너가 방금 망쳤다»**는 작업 품질 검사다 — 고객이 쓴 글이 아니라 *우리가 누른 버튼*을 잰다.
+          글 전체가 빨강·가운데·기울임으로 물든 것은 «고객의 선택»이 아니라 **우리 도구의 고장**이고,
+          그대로 나가면 사장님이 **발행물로** 알게 된다(실제로 그랬다). 조용히 나가느니 멈추는 게 낫다.
+       🔴 임시저장(dryRun)도 잰다 — 카나리가 «멀쩡하다»고 말한 뒤 본 발행에서 터지면 카나리가 무슨 소용인가. */
+    const bleed = await measureFormatBleed(ed, { headingSize: Number(HEADING_FONT_SIZE) || 19, bodySize: Number(BODY_FONT_SIZE) || 15 });
+    const verdict = bleedVerdict(bleed);
+    notes.push(verdict.line);
+    if (bleed) formatMarks.bleed = bleed;
+    if (verdict.stop) {
+      await shot(page, shotKey, "05-서식번짐-발행중단", true).catch(() => {});
+      console.error(`  · 🔴 ${verdict.reason}`);
+      throw BLOCK("format_bleed", verdict.reason);
+    }
+
+    if (dryRun) { await saveDraft(page, ed, shotKey); return { dryRun: true, notes, formatMarks }; }
     const out = await publishNow(page, ed, plan.tags, blogId, shotKey, job.payload?.title, job.payload?.options?.category);
-    return { ...out, notes };
+    return { ...out, notes, formatMarks };
   } catch (e) {
     await failShot(page, shotKey);
     throw e;

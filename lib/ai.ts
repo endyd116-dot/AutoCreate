@@ -77,6 +77,12 @@ export interface CallGeminiArgs {
    */
   fileUri?: string | null;
   fileMimeType?: string | null;
+  /**
+   * [R10-2 · B] **그림 직독** — 캡처(base64)를 `inlineData` 로 싣는다(글 레퍼런스 · 폰 폭 캡처 2~6장). `fileUri` 와 같이 text 파트보다 **앞**.
+   *   🔴 응답 캐시를 **안 탄다** — 키가 글자만 보므로 «같은 프롬프트 · 다른 캡처»가 5분 안에 같은 답으로 돌아온다(남의 글 A 의 모양을 B 에 붙인다).
+   *   🔴 여기서도 저장하지 않는다 — 요청 본문에 실려 나가고 끝이다(로그에도 안 찍는다).
+   */
+  inlineImages?: { mime: string; data: string }[] | null;
 }
 
 /* ───────── 사고 몫(AM ★THINKCAP) ───────── */
@@ -111,6 +117,7 @@ async function callSingleModel(model: string, a: CallGeminiArgs, apiKey: string,
   };
   const parts: Record<string, unknown>[] = [];
   if (a.fileUri) parts.push({ fileData: { fileUri: a.fileUri, ...(a.fileMimeType ? { mimeType: a.fileMimeType } : {}) } });   // 🔴 text 보다 앞(§1.11)
+  for (const im of a.inlineImages ?? []) if (im?.data) parts.push({ inlineData: { mimeType: im.mime || "image/jpeg", data: im.data } });   // [R10-2] 캡처 직독 — 역시 text 보다 앞
   parts.push({ text: a.user });
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts }],
@@ -259,7 +266,7 @@ export async function callGemini(a: CallGeminiArgs): Promise<AiOk | AiFail> {
   /* [P1R7 B3] 응답 캐시(AM `ai-cache` 이식) — 같은 입력이 5분 안에 다시 오면 **돈을 두 번 쓰지 않는다**.
      🔴 `googleSearch` 는 캐시하지 않는다(«지금»을 묻는 호출 — 5분 전 답이 틀릴 수 있다).
      🔴 적중은 `ai_usage` 에 기록하지 않는다(안 쓴 돈을 쓴 것으로 세면 원가·캡이 거짓말을 한다) · `costUsd:0` · `cached:true`. */
-  const cacheKey = a.googleSearch ? null
+  const cacheKey = a.googleSearch || (a.inlineImages && a.inlineImages.length) ? null   // [R10-2] 그림 직독은 캐시 밖 — 키가 글자만 봐서 «다른 캡처 · 같은 답»이 난다
     : buildAiCacheKey({ tenantId: a.tenantId ?? null, purpose: a.purpose, chain, role: a.role, system: a.system, user: a.user, json: a.json, mode, temperature: a.temperature, maxOutputTokens: a.maxOutputTokens });
   if (cacheKey) {
     const hit = tryAiCacheGet(cacheKey);

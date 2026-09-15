@@ -22,13 +22,16 @@ import { type GateReport } from "../../lib/ai-tell-gate";
 import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText, compensationOfMeta, videoBadgeText, videoOpeningCaption } from "../../lib/disclosure";
 /* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
-import { recheckPiece, approvePiece } from "../../lib/content-approve";
+import { recheckPiece, approvePiece, REVIEW_PIECE_STATUSES, EDITED_PIECE_STATUS } from "../../lib/content-approve";   // [R9-9 C4] «봐주세요» 상태 정본(in_review·edited)
 import { triggerGenerate } from "../../lib/director";
 import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
 import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "../../lib/writing-contracts";
 import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
+import { formatUnusedOf } from "../../lib/format-marks";           // [R9-5] «못 낸 서식» 사람말 투영(정본은 meta.formatMarks)
+import { formatCapsOf } from "../../lib/channel-registry";         // [R9-4] 채널 꾸밈 표
+import { toCoinTier } from "../../lib/coin-table";                 // [R10-7] 등급 — 글이 들고 있는 값 그대로
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
@@ -36,7 +39,7 @@ export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/piec
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
-const STATUSES = new Set(["generating", "draft", "in_review", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);
+const STATUSES = new Set(["generating", "draft", "in_review", "edited", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);   // [R9-9 C4] edited = 사람이 고친 «봐주세요»
 
 /** 글 스텝 3(writing·images·checking) · [P1R5] 영상 스텝 6(`VideoStage` = script·tts·clips·render·judging·done — A 가 «대본→목소리→장면→합성→검사→완료» 로 그린다). */
 const VIDEO_STAGES = ["script", "tts", "clips", "render", "judging", "done", "failed"];
@@ -104,7 +107,9 @@ export default async (req: Request): Promise<Response> => {
       const status = url.searchParams.get("status") || "all";
       const rows = status === "all"
         ? await q(sql`SELECT ${PIECE_SELECT} FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tid} ORDER BY p.id DESC LIMIT 200`)
-        : STATUSES.has(status) ? await q(sql`SELECT ${PIECE_SELECT} FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tid} AND p.status = ${status} ORDER BY p.id DESC LIMIT 200`) : [];
+        /* [R9-9 C4] `?status=in_review` 는 고친 글(edited)도 같이 — «봐주세요» 화면이 사람 손이 닿은 글을 잃지 않게(정본 `REVIEW_PIECE_STATUSES`). */
+        : STATUSES.has(status) ? await q(sql`SELECT ${PIECE_SELECT} FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tid}
+            AND p.status IN (${sql.join((status === "in_review" ? REVIEW_PIECE_STATUSES : [status]).map((s) => sql`${s}`), sql`, `)}) ORDER BY p.id DESC LIMIT 200`) : [];
       return json({ ok: true, pieces: rows.map(pieceRow) });
     }
     if (path.endsWith("/pieces-get")) {
@@ -164,9 +169,38 @@ export default async (req: Request): Promise<Response> => {
          이 화이트리스트에 없어서 **화면까지 오는 길이 아예 없었다.** `numberClaims` 가 겪은 그 자리인데 **한 칸 더 앞이다**
          (그땐 서버가 보내긴 했고, 이건 안 보냈다). 모양은 `[{ field, why }]` — 왜 못 썼는지를 사람말로 들고 있다. */
       if (Array.isArray(m.refUnused) && m.refUnused.length) meta.refUnused = m.refUnused;
+      /* [R9-5 · B] 🔴 **이 채널에서 못 낸 서식** — 영상 `refUnused` 와 같은 모양(`[{field, label, why, n}]`) 이라 A 가 그 화면을 그대로 쓴다.
+         정본은 `meta.formatMarks`(내부 · 생성 + 발행 뒤 러너 append) 이고 여기서 **매번 투영**한다(저장 두 벌 금지). `label` 은 서버 정본(AC-52) · `why` 는 화면이 안 그린다(AC-91).
+         비어 있으면 키를 안 싣는다(«없음»을 «[]»로 보내면 화면이 빈 칸을 그린다). */
+      { const fu = formatUnusedOf(m.formatMarks); if (fu.length) meta.formatUnused = fu; }
+      if (m.formatMarks && typeof m.formatMarks === "object") {
+        const fm = m.formatMarks as Record<string, unknown>;
+        /* 러너 자가검사 값도 같이 — `bleed` 가 **없으면 «못 쟀다»**(키를 만들지 않는다 · AC-92). `breakFails > 0` 은 «뒤 문단이 앞 서식을 물려받았을 수 있다»는 뜻이라 값이 있다. */
+        const fs: Record<string, unknown> = {};
+        const bl = fm.bleed as { pct?: unknown } | number | undefined;
+        if (typeof bl === "number") fs.bleed = bl; else if (bl && typeof bl === "object" && typeof bl.pct === "number") fs.bleed = bl.pct;   // 번진 문단 비율(%) · 없으면 «못 쟀다»
+        if (typeof fm.breakFails === "number") fs.breakFails = fm.breakFails;
+        if (typeof fm.htmlMode === "number" && fm.htmlMode > 0) fs.htmlMode = fm.htmlMode;   // [R9-11] 티스토리 기본 모드로 내려앉은 횟수
+        if (fm.runnerReportedAt) fs.reportedAt = fm.runnerReportedAt;
+        if (Object.keys(fs).length) meta.formatSelfCheck = fs;
+      }
+      /* [R9-8] 계정 간 유사도(숫자·id 만) — 게이트 축 `cross_account` 와 같은 값. `measured:false` 그대로(«못 쟀다» ≠ 0점). */
+      if (m.crossSimilarity && typeof m.crossSimilarity === "object") meta.crossSimilarity = m.crossSimilarity;
+      /* [R10-7·9] 🔴 등급과 **실제로 빠진 코인**(정산 뒤 `coins = {tier, planned, charged, returned, actualAi, line}` · line 은 서버 문장 — «프리미엄으로 만들었는데 내 사진으로 채워서 1코인만 받았어요»).
+         `tier` 는 글이 들고 있는 값 그대로(옛 글엔 없다 → 키 없음 · «간단히»로 위장하지 않는다). `coins` 는 정산이 돈 뒤에만 있다. */
+      { const t = toCoinTier(m.tier); if (t) meta.tier = t; }
+      if (m.coins && typeof m.coins === "object") meta.coins = m.coins;
+      /* [R10-4] 이 글에 쓴 스타일 — id + 사람이 읽는 이름(화면이 id 만 받고 이름을 또 물으러 가지 않게). 지워진 스타일이면 이름 없이 id 만. */
+      if (Number(m.styleId) > 0) {
+        meta.styleId = Math.floor(Number(m.styleId));
+        const [st] = await q(sql`SELECT name FROM text_styles WHERE tenant_id = ${tid} AND id = ${meta.styleId as number}`).catch(() => [] as Row[]);
+        if (st?.name) meta.styleName = String(st.name);
+      }
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
-        meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };
+        meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount),
+        /* [R9-4] 이 채널이 낼 수 있는 꾸밈 표(`true|false|null`) — 화면이 «이 채널에서 되는지는 올려 봐야 알아요»(null)를 말할 재료. 표가 없으면 null. */
+        formatCaps: formatCapsOf(String(p.channel)) };
 
       /* ══ [R8-A fix ③] «이 글이 왜 이렇게 생겼나» 3축 — A 검수 화면의 `?why=1` 자리 ══
          🔴 **계약 파일의 기본값이 아니라 «이 글에 적용된 값»**이다(AC-57 대용물 금지). 셋이 갈리면 화면이 거짓말을 한다.
@@ -184,7 +218,8 @@ export default async (req: Request): Promise<Response> => {
           : fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
         const [brow] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE tenant_id = ${tid} AND id = ${n(p.brief_id)}`) : [undefined];
         const goal = resolveGoal({ affiliate: !!m.affiliate, briefGoal: brow?.goal as string | null, channel: String(p.channel) });
-        const len = lengthFor(wc, grp), img = imagesFor(wc, grp);
+        /* [R10-8] 분량 폭은 등급에도 달렸다 — 생성·게이트와 **같은 함수·같은 tier**(안 넘기면 «프리미엄 2,000자»를 «1,500자 계약»으로 그린다). */
+        const len = lengthFor(wc, grp, toCoinTier(m.tier)), img = imagesFor(wc, grp);
         detail.topicGroup = grp;                       // null 이면 null — 화면이 «모름»으로 그린다
         detail.goal = goal;
         detail.contract = {
@@ -285,7 +320,7 @@ export default async (req: Request): Promise<Response> => {
     }
     if (path.endsWith("/pieces-reject")) {
       if (st === "rejected") return json({ ok: true, status: "rejected" });
-      if (!["in_review", "draft", "failed", "scheduled", "approved"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 버릴 수 없어요." }, 400);
+      if (!["in_review", "edited", "draft", "failed", "scheduled", "approved"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 버릴 수 없어요." }, 400);
       const reason = String(b.reason ?? "").trim().slice(0, 300);
       await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: reason || null })}, updated_at = NOW() WHERE id = ${id}`);
       /* [P1R7 B3] 자리는 'rejected' — 'skipped' 는 «이날은 쉰다»(사용자가 편성표에서 건너뛴 날)라 둘을 한 어휘로 두면
@@ -308,7 +343,7 @@ export default async (req: Request): Promise<Response> => {
         }
         return json({ ok: true, status: "generating" });
       }
-      if (!["in_review", "draft", "failed", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 다시 만들 수 없어요." }, 400);
+      if (!["in_review", "edited", "draft", "failed", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 다시 만들 수 없어요." }, 400);
       const regen = n(m.regenCount);
       if (regen >= 1) return json({ ok: false, step: "regen_limit", error: "다시 만들기는 한 번만 할 수 있어요. 직접 수정하거나 새 소재로 만들어 주세요." }, 400);
       const note = String(b.note ?? "").trim().slice(0, 300);
@@ -349,21 +384,23 @@ export default async (req: Request): Promise<Response> => {
              ⇒ 처음에 **1코인**이던 글이 실패 뒤 다시 만들 때 **7코인**으로 불어났다. 고객 돈이 걸린 자리다.
              🔴 「숫자는 새 식인데 이 자리만 옛 식」 — 코인 수리가 닿지 않은 마지막 호출부였다(A 가 화면에서 같은 과를 찾아 준 덕에 훑었다).
              카드뉴스는 장수로 안 세고 통째로 한 건이다(`coinFormatOf` 한 곳). */
-          const { AI_IMAGES_INCLUDED } = await import("../../lib/coin-table");
-          /* 🔴 분류는 **그 글이 들고 있다** — 처음 차감할 때 쓴 `coinItem` 이 `meta` 에 적혀 있다(`lib/director.ts` 가 적는다 · AC-71).
+          const { pieceCoinCost, postItemForCoins, toCoinTier } = await import("../../lib/coin-table");
+          const { coinFormatOf } = await import("../../lib/writing-contracts");
+          /* 🔴 분류는 **그 글이 들고 있다** — 처음 차감할 때 쓴 `coinItem`·`tier` 가 `meta` 에 적혀 있다(`lib/director.ts` 가 적는다 · AC-71).
              채널·포맷으로 **다시 고르면** 그 사이 계약이 바뀌었을 때 처음과 다른 값이 나온다(«고르는 자리가 갈린다» · AC-74). */
-          const item = String(m.coinItem || "") === "cardnews" ? "cardnews" : "blog";
-          /* 🔴 **«모른다»를 «1장»으로 바꾸지 않는다**(AC-92). `aiImageCount` 는 R8 뒤에 만든 글에만 있다 —
-             그 값이 **없으면 AI 사진이 몇 장이었는지 우리가 모른다.** 모르면 **글값만** 받는다(모자라게 받는 쪽으로 틀린다).
-             옛 `imageCount`(사진 **총** 장수)로 대신 세면 고객 사진·스톡까지 돈을 받게 된다 — 그게 여기 있던 옛 식이다. */
-          const aiKnown = m.aiImageCount !== undefined && m.aiImageCount !== null;
-          const ai = aiKnown ? Math.max(0, Math.trunc(n(m.aiImageCount))) : 0;
-          const billable = item === "cardnews" ? 0 : Math.max(0, ai - AI_IMAGES_INCLUDED);
-          const c1 = await consume(tid, item, tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
-          if (!c1.ok) return coinFail(c1);
-          for (let i = 1; i <= billable; i++) {
-            const ci = await consume(tid, "image", `${tag}:img${i}`, { actorId: auth.user.uid, reason: `AI 사진 ${i + AI_IMAGES_INCLUDED}장째(재차감 · 1장은 글값에 포함)` });
-            if (!ci.ok) { await refundPiece(tid, id); return coinFail(ci); }
+          if (String(m.coinItem || "") === "cardnews") {
+            const c1 = await consume(tid, "cardnews", tag, { actorId: auth.user.uid, reason: "다시 만들기(환급분 재차감)" });
+            if (!c1.ok) return coinFail(c1);
+          } else {
+            /* 🔴 **«모른다»를 «1장»으로 바꾸지 않는다**(AC-92). `aiImageCount` 는 R8 뒤에 만든 글에만 있다 —
+               그 값이 **없으면 AI 사진이 몇 장이었는지 우리가 모른다.** 모르면 **글값만**(간단히 1) 받는다(모자라게 받는 쪽으로 틀린다).
+               [R10-7] 등급도 글이 들고 있다 — 없으면(옛 글) simple 상한이라 어차피 1. 식은 견적·첫 차감·정산과 같은 `pieceCoinCost` 한 곳. */
+            const aiKnown = m.aiImageCount !== undefined && m.aiImageCount !== null;
+            const ai = aiKnown ? Math.max(0, Math.trunc(n(m.aiImageCount))) : 0;
+            const tier = toCoinTier(m.tier);
+            const coins = pieceCoinCost("post", ai, { format: coinFormatOf(String(p.channel), String(p.format || m.format || "") || undefined), tier });
+            const c1 = await consume(tid, postItemForCoins(coins), tag, { actorId: auth.user.uid, reason: `다시 만들기(환급분 재차감 · ${tier ?? "간단히"} · AI 사진 ${aiKnown ? ai : "모름"}장)` });
+            if (!c1.ok) return coinFail(c1);
           }
         }
       }
@@ -384,7 +421,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, status: "generating" }, 202);
     }
     if (path.endsWith("/pieces-update")) {
-      if (!["in_review", "draft", "scheduled", "approved", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 수정할 수 없어요." }, 400);
+      if (!["in_review", "edited", "draft", "scheduled", "approved", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 수정할 수 없어요." }, 400);
       if (String(p.kind || "post") === "video") {
         /* [P1R5 §3 · A 실물] 영상 설명란 수정 — `{ id, title, body, tags[] }`.
            🔴 첫 줄 고지는 **서버가 되붙인다**(사용자가 지워도 · 글의 «고지 첫 요소» 관례와 같은 급 · §16B.4).
@@ -439,6 +476,8 @@ export default async (req: Request): Promise<Response> => {
         await q(sql`UPDATE pieces SET title = ${title}, body = ${body},
           meta = meta || ${jsonb({ description: body, tags, youtube: { ...yt, title, description: body, tags }, ...(vEdited ? { editedByUser: true, editedAt: new Date().toISOString() } : {}) })},
           updated_at = NOW() WHERE id = ${id}`);
+        /* [R9-9 C4] 사람이 고쳤으면 **글의 상태**가 `edited` 로 간다(DESIGN §5B.6 · 자리는 그대로). 검수 대기(in_review·draft)일 때만 — 예약된 글을 고쳐도 예약은 유지된다. */
+        if (vEdited && (REVIEW_PIECE_STATUSES.includes(st) || st === "draft")) await q(sql`UPDATE pieces SET status = ${EDITED_PIECE_STATUS} WHERE id = ${id}`);
         const [p2] = await q(sql`SELECT p.* FROM pieces p WHERE p.id = ${id}`);
         const gate = await recheckPiece(tid, p2);
         await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)} WHERE id = ${id}`);
@@ -475,6 +514,10 @@ export default async (req: Request): Promise<Response> => {
         const withDisc = ensureDisclosureHtml(bodyHtml, comp.provider ?? "coupang", { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift });
         if (withDisc !== bodyHtml) { bodyHtml = withDisc; sets.push(sql`body = ${bodyHtml}`); }
       }
+      /* [R9-9 C4] 🔴 **사람이 제목·본문을 고쳤으면 글의 상태가 `edited`** — DESIGN §5B.6 «수정은 자리의 상태가 아니라 글의 상태다»(자리는 in_review 그대로 · recheckPiece 가 다시 잰다).
+         대가만 켠 것은 «고침»이 아니다(`editedByUser` 규율과 같은 선). 검수 대기(in_review·edited·draft)일 때만 — 예약된 글을 손보면 예약은 유지된다. */
+      const humanEdited = typeof b.bodyHtml === "string" || (typeof b.title === "string" && !!b.title.trim());
+      if (humanEdited && (REVIEW_PIECE_STATUSES.includes(st) || st === "draft")) sets.push(sql`status = ${EDITED_PIECE_STATUS}`);
       /* 대가를 켰으면 «바꾼 것»이 있는 것이다 — 본문이 이미 고지를 갖고 있어 `sets` 가 비어도 400 을 내지 않는다(위 UPDATE 로 meta 는 이미 섰다). */
       if (!sets.length && !(turnOn.sponsored || turnOn.gift)) return badRequest("바꿀 값이 없어요.");
       if (!sets.length) sets.push(sql`updated_at = NOW()`);

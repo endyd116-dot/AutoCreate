@@ -40,6 +40,7 @@ export default async (req: Request): Promise<Response> => {
       title: String(b.title ?? ""),
       bodyHtml: String(b.bodyHtml ?? ""),
       slotId: n(b.slotId) || null,
+      styleId: n(b.styleId) || null,   // [R10-4] «구성만 그 틀로» 빌려 쓴 스타일(A 합의 body.styleId)
       scheduleAt: b.scheduleAt ? String(b.scheduleAt) : null,
       monetize: { sponsored: mon.sponsored === true, gift: mon.gift === true, affiliate: mon.affiliate },
     });

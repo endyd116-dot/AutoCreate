@@ -1,5 +1,6 @@
 /**
  * lib/team.ts — **팀 시트**(소유자가 팀원을 부른다 · 계약 P1R8-B §4.5 · DESIGN §11 «소유자가 «팀원 초대» → 같은 테넌트 member»).
+ *   🔎 출처: AC 신규(계약 P1R8-B §4.5 · 생성 커밋 `fae3352` 2026-09-16) — AM 원본 없음(`../AutoMarketing/lib/` 에 같은 이름 없음 · 2026-09-16 확인).
  *
  *   ══ 무엇이 없었나 ══
  *     `plans.limits.teamSeats`(1/2/5)가 **요금표에 있고 `checkLimit` 도 세고 있었는데**, 🔴 **팀원을 늘릴 길이 없었다.**
@@ -70,7 +71,7 @@ export async function needsOwnerApproval(tid: number, createdBy: unknown): Promi
 export async function notifyOwnersWaiting(tid: number): Promise<void> {
   try {
     const [c] = await q(sql`SELECT COUNT(*)::int AS c FROM pieces p
-      WHERE p.tenant_id = ${Math.floor(tid)} AND p.status = 'in_review' AND p.created_by IS NOT NULL
+      WHERE p.tenant_id = ${Math.floor(tid)} AND p.status IN ('in_review', 'edited') AND p.created_by IS NOT NULL
         AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.created_by AND u.tenant_id = p.tenant_id AND u.role <> 'owner')`);
     const cnt = n(c?.c);
     if (!cnt) return;
@@ -87,7 +88,7 @@ export async function waitingForOwner(tid: number): Promise<{ count: number; fir
   try {
     if (!(await teamApprovalOn(tid))) return { count: 0, firstId: 0 };
     const [r] = await q(sql`SELECT COUNT(*)::int AS c, MIN(p.id)::int AS first_id FROM pieces p
-      WHERE p.tenant_id = ${Math.floor(tid)} AND p.status = 'in_review' AND p.created_by IS NOT NULL
+      WHERE p.tenant_id = ${Math.floor(tid)} AND p.status IN ('in_review', 'edited') AND p.created_by IS NOT NULL   /* [R9-9 C4] 팀원이 고친 글도 주인이 봐야 한다 */
         AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.created_by AND u.tenant_id = p.tenant_id AND u.role <> 'owner')`);
     return { count: n(r?.c), firstId: n(r?.first_id) };
   } catch { return { count: 0, firstId: 0 }; }

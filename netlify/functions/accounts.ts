@@ -23,6 +23,7 @@ import { recordConsents, hasConsent } from "../../lib/billing/consents";
 import { attachAccountToSlot } from "../../lib/account-slots";
 import { encryptObj, credsEncConfigured } from "../../lib/creds-crypto";
 import { q, listAccounts, getAccount, listChannels, connectMethodOf, isChannel, type ChannelKey } from "../../lib/accounts";
+import { COIN_TIER_LIST, COIN_TIER_NOTE, toCoinTier } from "../../lib/coin-table";   // [R10-9] 등급 표(글자 정본) · 계정 기본 등급 검증
 import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUrl, exchangeCode } from "../../lib/oauth-providers";
 import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
@@ -150,7 +151,8 @@ export default async (req: Request): Promise<Response> => {
   try {
     if (path.endsWith("/accounts-list")) {
       const [accounts, channels] = await Promise.all([listAccounts(tid), listChannels()]);
-      return json({ ok: true, accounts, channels });
+      /* [R10-9] 등급 표를 같이 싣는다 — 계정 화면·디렉터·직접 쓰기가 다 accounts-list 를 이미 부른다(A 합의). 글자(label·say)는 서버 정본. */
+      return json({ ok: true, accounts, channels, tiers: COIN_TIER_LIST, tierNote: COIN_TIER_NOTE });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
 
@@ -244,6 +246,20 @@ export default async (req: Request): Promise<Response> => {
         sets.push(sql`avatar_url = ${av || null}`);
       }
       if (b.proxyUrl !== undefined) { const px = s(b.proxyUrl, 200); if (px && !/^(https?|socks5?):\/\//i.test(px)) return badRequest("프록시 주소 형식을 확인해 주세요.", "proxy"); sets.push(sql`proxy_url = ${px || null}`); }
+      /* [R10-9] 🔴 계정 기본 등급 — 같은 사람이 수익 블로그는 프리미엄, 취미 계정은 간단히. null·"" = «안 고름»으로 되돌리기(= simple 로 만든다).
+         모르는 값은 거절한다(조용히 simple 로 접으면 고객은 프리미엄을 골랐다고 믿는다 · AC-92). 어휘는 `COIN_TIER_KEYS` 한 곳. */
+      if (b.defaultTier !== undefined) {
+        const raw = b.defaultTier === null ? "" : String(b.defaultTier).trim();
+        const t = raw ? toCoinTier(raw) : null;
+        if (raw && !t) return badRequest("등급은 간단히·보통·프리미엄 중 하나예요.", "defaultTier");
+        sets.push(sql`quality_tier = ${t}`);
+      }
+      /* [R10-4] 계정에 걸어 둔 스타일 — null = 벗기기. 남의 집 스타일·지운 스타일은 못 건다(교차 누수 · CLAUDE §4.6). */
+      if (b.defaultStyleId !== undefined) {
+        const sid = b.defaultStyleId === null || b.defaultStyleId === "" ? 0 : Math.floor(n(b.defaultStyleId));
+        if (sid) { const [st] = await q(sql`SELECT id FROM text_styles WHERE tenant_id = ${tid} AND id = ${sid} AND deleted_at IS NULL`); if (!st) return badRequest("그 스타일을 찾지 못했어요.", "defaultStyleId"); }
+        sets.push(sql`text_style_id = ${sid || null}`);
+      }
       /* [P1R7-B2 §2.5-⑦] **계정 묶음** — 한 계정이 정지되면 예약을 같은 묶음의 다른 계정으로 넘긴다(`reassignSlots` 가 이 값을 본다).
          🔴 표(`account_groups`)와 칸(`accounts.group_id`)은 처음부터 있었는데 **값을 넣는 코드가 0건**이라
             승계 정렬 키가 늘 NULL — 그룹이 없는 것과 같았다(2026-09-15 grep 실측). 여기가 그 값을 넣는 자리다.

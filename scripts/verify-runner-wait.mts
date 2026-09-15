@@ -14,13 +14,15 @@
  *   실행: npx --yes tsx scripts/verify-runner-wait.mts
  */
 import http from "node:http";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { requirePlaywright } from "./lib/find-playwright.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const req = createRequire(path.join(ROOT, "runner", "package.json"));
-const { chromium } = req("playwright") as typeof import("playwright");
+/* 🔴 [2026-09-16 메인] 예전엔 `createRequire(runner/package.json)` 였다 — 그런데 `runner/node_modules` 는
+   **B2·C 폴더에만** 있어서 메인·A·B 폴더에서는 이 검사가 **늘 빨강**이었다(제품이 아니라 재료 문제).
+   ⇒ 없으면 옆 리포에서 빌리고, 그래도 없으면 **exit 2(«못 쟀다»)** 로 끝낸다 — «통과»라고 말하지 않는다. */
+const { chromium } = (await requirePlaywright()) as typeof import("playwright");
 const { gotoFirst, hasContent } = await import(pathToFileURL(path.join(ROOT, "runner", "lib", "scrape.mjs")).href) as {
   gotoFirst: (p: unknown, urls: string[], accept: (p: unknown) => Promise<boolean>, settleMs?: number) => Promise<string | null>;
   hasContent: (p: unknown, min?: number) => Promise<boolean>;

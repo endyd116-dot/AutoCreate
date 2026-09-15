@@ -838,8 +838,8 @@
      🔴 코인 수·사진 수·글자 수·설명 문장(`say`)은 **여기 안 적는다** — 서버 `accounts-list.tiers[]` 가 준다(AC-74 · 화면이 셈을 다시 하지 않는다).
         여기엔 주제군 라벨(`UI.GROUP_LABEL`)과 같은 자리로 **이름만** 둔다(검수 화면처럼 `tiers` 를 안 부르는 자리가 `meta.tier` 를 사람말로 바꿀 때 쓴다). */
   UI.TIER_LABEL = { simple: "간단히", standard: "보통", premium: "프리미엄" };
-  /* 사장님 확정 문구 — 사진을 더 올려도 코인이 안 는다는 사실. 등급을 고르는 자리마다 같은 문장을 쓴다(한 곳). */
-  UI.TIER_NOTE = "내 사진을 올리면 AI 사진을 대신하거나 더 얹어요 — 코인은 안 늘어요";
+  /* 🔴 등급 밑 주석(«내 사진을 올리면 … 코인은 안 늘어요»)은 **서버 tierNote 만** 쓴다(accounts-list·plans-list · lib/coin-table.ts COIN_TIER_NOTE). 화면 사본을 두지 않는다 —
+     같은 문장이 두 벌이면 사장님 문장이 갈린다(AC-52 · 2026-09-16 메인 지적). 서버가 안 주면 그 줄을 안 그린다. */
   /**
    * 등급 고르는 줄 셋. `tiers` = 서버 값(`[{key,label,coins,say}]`).
    *   🔴 서버 값이 없으면 **아무 등급도 그리지 않는다** — «못 불러왔어요» 한 줄. 화면이 표를 지어 그리면 그날부터 서버와 갈린다.
@@ -848,7 +848,7 @@
   UI.tierRows = (name, tiers, sel, { note = true, noteText = "" } = {}) => {   /* noteText = 서버 tierNote(accounts-list·plans-list · B c922b28) — 있으면 그것을 쓴다(한 벌) */
     if (!Array.isArray(tiers) || !tiers.length) return '<p class="muted" style="margin:0;font-size:13px">등급 정보를 아직 못 불러왔어요 · 지금 값으로 그대로 만들어요.</p>';
     return `<div class="tierpick" data-chips="${UI.esc(name)}">${tiers.map((t) => `<button type="button" class="row tap ${String(sel) === String(t.key) ? "on" : ""}" data-v="${UI.esc(t.key)}"><div class="l"><span class="t">${UI.esc(t.label || UI.TIER_LABEL[t.key] || t.key)}</span><span class="d wrap">${UI.esc(t.say || "")}</span></div><span class="r">${UI.num(t.coins)}코인</span></button>`).join("")}</div>`
-      + (note ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.esc(noteText || UI.TIER_NOTE)}</p>` : "");
+      + (note && noteText ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.esc(noteText)}</p>` : "");
   };
   /** 스타일 고르는 칩 — 맨 앞은 «이 계정 기본»(`""`). 배운 스타일이 없으면 칩 대신 빈 문자열(부르는 쪽이 «배우기» 줄을 낸다). */
   UI.styleChips = (name, styles, sel, first = "이 계정 기본") => (Array.isArray(styles) && styles.length ? UI.chips(name, [["", first], ...styles.map((s) => [s.id, s.name])], sel == null ? "" : sel) : "");
@@ -870,7 +870,7 @@
   /* [R9R10-A · B 확정 2026-09-16] 서식·블록 이름표 — 🔴 `meta.formatUnused[].label` 은 **서버가 실어 준다**(정본 MARK_LABEL). 이 맵은 ①서버 label 이 비었을 때의 예비
      ②`formatCaps` 가 null(«올려 봐야 알아요»)인 종류를 부를 때만 쓴다. 어휘 = 마크 7(bold·underline·italic·value·line·row·emoji) + 블록 타입. */
   /* [2026-09-16 · lib/blocks.ts MARK_LABEL + lib/format-marks.ts FIELD_LABEL(feature/r9-back) 에서 **글자 그대로** 복사 — 하니스 ⑧-d 가 대조한다 · 손으로 고치지 마라] */
-  UI.MARK_LABEL = { value: "핵심 숫자·낱말 강조", line: "문장 형광펜", row: "나열 강조", bold: "굵게", underline: "밑줄", italic: "기울임",   /* 2026-09-16 · main 에 머지된 lib/blocks.ts MARK_LABEL 글자 그대로(메인 확정) — ⑧-d 가 대조 */
+  UI.MARK_LABEL = { value: "핵심 강조", line: "형광펜", row: "나열 강조", bold: "굵게", underline: "밑줄", italic: "기울임",   /* 2026-09-16 · main 에 머지된 lib/blocks.ts MARK_LABEL 글자 그대로(B 판 «핵심 강조»·«형광펜» · 메인 확정) — ⑧-d 가 대조 */
     emoji: "이모지", quote: "인용", table: "표", checklist: "체크리스트", faq: "자주 묻는 질문", toc: "목차", divider: "구분선", image: "사진", list: "목록",
     place: "장소·링크 카드", h2: "소제목", h3: "작은 소제목", summary: "요약", tip: "한 줄 팁", hashtags: "해시태그", affiliate: "제휴 링크", adsense: "광고 자리",
     color: "글자색", align: "가운데 정렬", hook: "첫 줄" };

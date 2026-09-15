@@ -61,6 +61,10 @@ export interface FeatureSnapshot {
   /** 다시 썼나 · 어느 모델이 썼나. */
   rewritten?: boolean;
   model?: string;
+  /** [R10-7] 어느 코인 등급으로 썼나(simple|standard|premium). 옛 글엔 없다. */
+  tier?: string;
+  /** [R10-10] 어느 스타일(`text_styles.id`)로 썼나 — 되먹임 원장의 **첫 실사용**(«이 스타일로 쓴 글이 반응이 좋았어요»)이 이 칸으로 묶는다. 없으면 «스타일 없이». */
+  styleId?: number;
 }
 
 /**
@@ -162,7 +166,7 @@ export interface StatBucket { key: string; samples: number; avgViews: number | n
  *      «3편 기준»과 «300편 기준»을 같은 얼굴로 말하지 않기 위해서다(§5F.3-6).
  *   🔴 **조회를 못 잰 글은 평균에서 뺀다** — 0 으로 세면 «아직 안 재진 글»이 평균을 끌어내린다(AC-9).
  */
-export async function outcomeStats(by: "origin" | "channel" | "topicGroup" | "goal" | "format", opts: { tenantId?: number | null } = {}): Promise<StatBucket[]> {
+export async function outcomeStats(by: "origin" | "channel" | "topicGroup" | "goal" | "format" | "styleId" | "tier", opts: { tenantId?: number | null } = {}): Promise<StatBucket[]> {
   const col = by === "origin" ? sql`o.origin` : by === "channel" ? sql`o.channel` : sql`o.features->>${by}`;
   const scope = opts.tenantId ? sql`AND o.tenant_id = ${opts.tenantId}` : sql``;
   const rows = await q(sql`

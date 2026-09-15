@@ -57,6 +57,12 @@ console.log(`${"─".repeat(112)}`);
 if (!RUN) { console.log("목록만 찍었다. 안전한 것만 돌리려면 --run."); process.exit(0); }
 
 let bad = 0;
+/* [2026-09-16 메인] **«못 쟀다»와 «틀렸다»를 가른다.**
+   `exit 2` 는 이 리포 18곳이 이미 «잴 재료가 없다»(playwright 없음 · 인자 없음 · DB URL 없음)로 쓰고 있다.
+   그걸 «실패»로 세면 **폴더마다 빨강 개수가 달라지고**, 그러면 곧 아무도 빨강을 안 본다(AC-95).
+   => `2` 는 **못 쟀음**으로 따로 세고 전체 종료코드를 더럽히지 않는다. 대신 **끝줄에 반드시 적는다** —
+   조용히 넘기면 그게 «안 재고 통과했다»가 된다(AC-9). */
+let unmeasured = 0;
 console.log("\n안전한 것만 돌린다(종료코드):");
 for (const [f] of groups.safe) {
   if (f === "verify-safe-list.mjs") continue;
@@ -69,9 +75,12 @@ for (const [f] of groups.safe) {
   let code = 0;
   /* 🔴 **파이프로 넘기지 않는다** — `| tail` 을 쓰면 실패해도 0 이 온다(AC-67). 종료코드를 그대로 받는다. */
   try { execFileSync(cmd, { stdio: "ignore", shell: true }); } catch (e) { code = e.status ?? 1; }
-  if (code) bad++;
-  console.log(`  ${code ? "✗" : "✓"} ${f}=${code}`);
+  if (code === 2) unmeasured++;
+  else if (code) bad++;
+  console.log(`  ${code === 2 ? "⊘" : code ? "✗" : "✓"} ${f}=${code}${code === 2 ? "  (못 쟀음 — 잴 재료가 없다)" : ""}`);
 }
 console.log(`${"─".repeat(112)}`);
-console.log(bad ? `🔴 실패 ${bad}개` : `✅ 안전한 검사 ${groups.safe.length - 1}개 전부 통과`);
+const ran = groups.safe.length - 1 - unmeasured;
+console.log(bad ? `🔴 실패 ${bad}개` : `✅ 실제로 잰 ${ran}개 전부 통과`);
+if (unmeasured) console.log(`⊘ 못 쟀음 ${unmeasured}개 — **통과가 아니다.** 재료를 걸고 다시 돌려라(위 안내 참고).`);
 process.exit(bad ? 1 : 0);
