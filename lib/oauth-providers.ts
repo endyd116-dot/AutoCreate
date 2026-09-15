@@ -37,6 +37,16 @@ export function providerConfigured(channel: string): boolean {
   if (!isOAuthChannel(channel)) return true;
   return !!appCreds(PROVIDER_OF[channel]) && !!SITE();
 }
+/**
+ * [P1R7 B3] **왜** 준비가 안 됐나 — 화면이 «준비 중이에요» 한 줄을 넘어 «우리가 할 일인지»를 가를 수 있게.
+ *   `null` = 준비됨 · `no_provider_key` = 앱 키 없음(우리 몫) · `no_site_url` = `SITE_URL` 미설정(콜백 주소를 못 만든다 · 배포 설정 몫).
+ */
+export function providerMissing(channel: string): "no_provider_key" | "no_site_url" | null {
+  if (!isOAuthChannel(channel)) return null;
+  if (!appCreds(PROVIDER_OF[channel])) return "no_provider_key";
+  if (!SITE()) return "no_site_url";
+  return null;
+}
 
 /* ───────── state 서명 ───────── */
 const STATE_TTL_MS = 10 * 60_000;
