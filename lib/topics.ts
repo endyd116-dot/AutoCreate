@@ -22,7 +22,7 @@ import { CHAIN_DIRECTOR } from "./ai-models";
 import { lookupVolumes, normKw, type KeywordVolume } from "./naver-volume";
 import { lookupGrowth } from "./naver-datalab";
 import { seasonalFor, seasonLine } from "./kr-calendar";
-import { listAccounts, TEXT_CHANNELS } from "./accounts";
+import { listAccounts, TEXT_CHANNELS, isChannel } from "./accounts";
 import { VIDEO_CHANNELS } from "./video/types";          // 순수 어휘 파일(AC-17 순환 0 — types 는 아무것도 import 하지 않는다)
 import { listTemplates } from "./video/reference";       // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { AD_LAW_BANNED, normalizeForBanScan } from "./banned-words";
@@ -38,7 +38,9 @@ export interface TopicFactors {
   /** [P1R5 §1.11] 레퍼런스 구조 템플릿(`shorts_templates.id`) — 영상 후보에만 붙는다. 디렉터가 `meta.structure` 로 옮겨 대본 프롬프트의 «서사 단계»가 된다. */
   structureTemplateId?: number;
 }
-export interface Topic { id: number; title: string; angle: string; channelHint: string; score: number; status: string; factors: TopicFactors; expiresAt: string }
+export interface Topic { id: number; title: string; angle: string; channelHint: string; score: number; status: string; factors: TopicFactors; expiresAt: string;
+  /** "ai"(추천) | "manual"(내가 넣은 것 · 화면이 «직접» 필을 단다 · 목록·자동 편성에서 먼저) */
+  source: string }
 
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 export function demandScore(volume: number | undefined): number {
@@ -199,13 +201,13 @@ export function toTopic(r: Row): Topic {
   if (f.seasonal) factors.seasonal = String(f.seasonal);
   factors.performance = Number(f.performance) || 0;
   if (Number.isFinite(Number(f.structureTemplateId)) && Number(f.structureTemplateId) > 0) factors.structureTemplateId = Number(f.structureTemplateId);
-  return { id: Number(r.id), title: String(r.title), angle: String(r.angle ?? ""), channelHint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), status: String(r.status), factors, expiresAt: utcDate(r.expires_at)?.toISOString() ?? "" };
+  return { id: Number(r.id), title: String(r.title), angle: String(r.angle ?? ""), channelHint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), status: String(r.status), factors, expiresAt: utcDate(r.expires_at)?.toISOString() ?? "", source: String(r.source ?? "ai") };
 }
 
 export async function listTopics(tid: number, status = "candidate"): Promise<Topic[]> {
   const rows = status === "all"
-    ? await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} ORDER BY score DESC, id DESC LIMIT 100`)
-    : await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND status = ${status} AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY score DESC, id DESC LIMIT 100`);
+    ? await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} ORDER BY (source = 'manual') DESC, score DESC, id DESC LIMIT 100`)
+    : await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND status = ${status} AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY (source = 'manual') DESC, score DESC, id DESC LIMIT 100`);   // 🔴 [topics-add] 내가 넣은 소재가 맨 위 — 점수를 부풀리지 않고 정렬 키로
   return rows.map(toTopic);
 }
 
@@ -263,4 +265,75 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
   console.log(`[topics] refresh tid=${tid} ${Date.now() - t0}ms (ctx ${lap.ctx} · llm ${lap.llm} · 검색량 ${lap.volumes} · 트렌드 ${lap.growth} · 저장 ${Date.now() - t0 - lap.ctx - lap.llm - lap.volumes - lap.growth}) added=${added}`);
   if (!volumesKnown) console.warn(`[topics] tid=${tid} 검색량 미상(키워드툴 키 없음 또는 실패) — volume 키 생략`);
   return { added, skipped, volumesKnown, growthKnown };
+}
+
+/* ═══════════ [2026-09-15 · 사장님 실측 · DESIGN §5.1] 소재를 «직접» 넣는 입구 ═══════════
+ *   만들기 화면에 소재를 직접 넣는 길이 없었다(AI 추천 중 고르기·새로 뽑기·넘김·레퍼런스뿐) — «디렉터는 소재만 받으면 구성·배치를 결정»의
+ *   **소재를 주는 입구**를 AI 추천 하나로만 만든 설계 누락. 고객이 첫날 부딪히는 벽이라 코인 0 · readonly 도 넣을 수 있다(막는 건 디렉터 확정에서).
+ *   · 검색량: `keyword`(없으면 title)로 네이버 1회 조회 — 실패해도 topic 은 만든다. 🔴 못 재면 `volume` 을 **적지 않는다**(0 으로 적지 않는다 · AC-9 «못 재는 것을 괜찮다로 접지 않는다»).
+ *   · 금칙 카테고리: R4 사전 그대로(`findBannedCategory` · 문장도 디렉터와 같은 것).
+ *   · 중복: 30일 안 같은 제목(norm_key)이면 만들지 않고 기존 것을 돌려준다(`step:"duplicate"`).
+ *   · 이 소재는 목록 **맨 위**(`source:"manual"` 정렬 키) · 자동 편성(assign_topics)도 먼저 집는다(점수는 부풀리지 않는다).
+ */
+export type AddTopicResult =
+  | { ok: true; topic: Topic; volumeKnown: boolean }
+  | { ok: false; step: "title" | "banned_category" | "duplicate" | "channel"; error: string; topic?: Topic };
+
+export async function addManualTopic(tid: number, a: { title: unknown; keyword?: unknown; channelHint?: unknown; angle?: unknown }): Promise<AddTopicResult> {
+  const title = String(a.title ?? "").replace(/\s+/g, " ").trim();
+  if (!title) return { ok: false, step: "title", error: "소재를 한 줄로 적어 주세요." };
+  if ([...title].length > 80) return { ok: false, step: "title", error: "소재는 80자까지 적을 수 있어요." };
+  const keyword = String(a.keyword ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+  const angle = String(a.angle ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+
+  // 금칙 카테고리(성인·도박·의료 과장·비방·불법) — R4 사전 · 디렉터와 같은 문장 · 감사
+  const banned = findBannedCategory(`${title} ${keyword} ${angle}`);
+  if (banned) {
+    await writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "user", riskLevel: "medium", detail: { category: banned.category, word: banned.word, title: title.slice(0, 80), source: "manual" } });
+    return { ok: false, step: "banned_category", error: `${banned.label} 주제는 만들 수 없어요.` };
+  }
+
+  // 채널 힌트 — 없으면 연결 계정의 첫 채널 · 계정 0 이면 naver_blog
+  let channelHint = String(a.channelHint ?? "").trim();
+  if (channelHint && !isChannel(channelHint)) return { ok: false, step: "channel", error: "고를 수 없는 채널이에요." };
+  if (!channelHint) {
+    const accounts = await listAccounts(tid);
+    channelHint = accounts[0]?.channel ?? "naver_blog";
+  }
+
+  // 중복 — 30일 안 같은 제목이면 만들지 않는다(기존 것을 돌려준다 · 상태 무관)
+  const nk = normKey(title);
+  const [dup] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} AND created_at > NOW() - interval '30 days' ORDER BY id DESC LIMIT 1`);
+  if (dup) return { ok: false, step: "duplicate", error: "같은 소재가 이미 있어요. 아래에서 그걸 쓰면 돼요.", topic: toTopic(dup) };
+
+  // 검색량 1회 — 실패해도 만든다 · 못 재면 적지 않는다(AC-9)
+  const factors: TopicFactors = { intent: "info", pain: 0.6, performance: 0 };
+  let volumeKnown = false;
+  let compIdx: string | undefined;
+  try {
+    const seeds = [...new Set([keyword, title].filter(Boolean))];
+    const vols = await lookupVolumes(seeds, 8_000);
+    const bv = bestVolume(seeds, vols);
+    if (bv.volume !== undefined) { factors.volume = bv.volume; volumeKnown = true; }
+    compIdx = bv.compIdx;
+    const comp = competitionOf(compIdx); if (comp) factors.competition = comp;
+  } catch (e) { console.warn("[topics-add] 검색량 조회 실패(소재는 만든다):", String((e as Error)?.message ?? e).slice(0, 100)); }
+  const seasonal = seasonalFor(`${title} ${angle}`);
+  if (seasonal.label) factors.seasonal = seasonal.label;
+  const score = computeScore({ demand: demandScore(factors.volume), intent: intentScore("info"), pain: 0.6, compGap: compGapScore(compIdx), difficulty: channelDifficulty(channelHint), seasonal: seasonal.weight, performance: 1 });
+
+  const [row] = await q(sql`INSERT INTO topics (tenant_id, title, angle, norm_key, channel_hint, source, factors, score, status, expires_at)
+    VALUES (${tid}, ${title}, ${angle || null}, ${nk}, ${channelHint}, ${"manual"}, ${jsonb(factors)}, ${score}, ${"candidate"}, NOW() + interval '30 days') RETURNING *`);
+  const [chk] = await q(sql`SELECT jsonb_typeof(factors) AS t FROM topics WHERE id = ${Number(row.id)}`);
+  if (chk?.t !== "object") console.error("[topics-add] factors jsonb_typeof !== object", chk);
+  // 🔴 감사는 await(`void writeAudit` 금지)
+  await writeAudit({ tenantId: tid, action: "topic_added", actorType: "user", riskLevel: "medium", target: `topic:${Number(row.id)}`, detail: { title: title.slice(0, 80), keyword: keyword || null, channelHint, volumeKnown, volume: factors.volume ?? null } });
+  return { ok: true, topic: toTopic(row), volumeKnown };
+}
+
+/** 오늘(KST) 직접 넣은 횟수 — 감사 행이 곧 횟수(topics-refresh 관례). */
+export async function addCountToday(tid: number): Promise<number> {
+  const [r] = await q(sql`SELECT COUNT(*) AS c FROM audit_logs WHERE tenant_id = ${tid} AND action = 'topic_added'
+    AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date = (NOW() AT TIME ZONE 'Asia/Seoul')::date`);
+  return Number(r?.c || 0);
 }

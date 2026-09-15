@@ -105,6 +105,29 @@ export const CLICHES: { re: RegExp; label: string }[] = [
 ];
 
 /** 번역투 — «~에 의해» «~되어지다» «~의 경우» «~에 대한» «~에 관하여» «~로 인해» «~에 있어» (cliche 와 겹치는 3종은 cliche 가 먼저 센다). */
+/**
+ * [2026-09-15 §5C.2] 사진 캡션 **묘사문** 패턴 — 이런 캡션은 사람이 쓴 게 아니라 **그림 생성 프롬프트**가 새어 나온 것이다.
+ *   사장님 실측: «원목 테이블 위에 정갈하게 포장된 명절 선물 상자가 놓여 있는 모습» 이 그대로 발행됐다.
+ *   사람 캡션은 감상·맥락이다(«팀원들 줄 거라 포장 예쁜 걸로 골랐어요» · «이게 3만원대라니»). `content-gen.fixBlocks` 가 생성 단계에서 **떨어뜨리고**,
+ *   여기서는 손으로 고친 HTML 까지 다시 잰다(cliche 축).
+ */
+export const DESCRIPTIVE_CAPTION: { re: RegExp; label: string }[] = [
+  { re: /(는|은|인|된|한|의)\s*모습[.!…]?$/, label: "~하는 모습" },
+  { re: /놓여\s*(있|져\s*있)/, label: "~이 놓여 있는" },
+  { re: /보여\s*주(는|고\s*있)/, label: "~를 보여주는" },
+  { re: /담(긴|고\s*있는|아낸)\s*(장면|모습|사진|이미지|컷)/, label: "~을 담은 장면" },
+  { re: /(장면|풍경|이미지|사진|정경|전경)[.!…]?$/, label: "~장면·풍경 으로 끝남" },
+  { re: /클로즈업|배경으로\s*(한|하는)|위에\s*(정갈|가지런|나란|깔끔)(하|히)|근접\s*촬영/, label: "묘사 관용구" },
+  { re: /(있는|하는|되는|된)\s*(테이블|책상|주방|거실|공간|책상\s*위)[.!…]?$/, label: "장소로 끝나는 묘사" },
+];
+/** 캡션이 묘사문이면 걸린 라벨, 아니면 null. */
+export function descriptiveCaptionHit(caption: string): string | null {
+  const s = String(caption ?? "").trim();
+  if (!s) return null;
+  for (const p of DESCRIPTIVE_CAPTION) if (p.re.test(s)) return p.label;
+  return null;
+}
+
 export const TRANSLATIONESE: RegExp[] = [/에\s*의해/g, /되어지(다|고|는|ㅁ)/g, /의\s*경우(에는|에|,)/g, /에\s*대한\s/g, /에\s*관하여/g, /로\s*인해/g, /을\s*가지고\s*있/g, /것으로\s*보(여|입)/g, /하기\s*위한\s/g, /적인\s*측면/g];
 
 const SUPERLATIVE_RE = /최고|최상|1위|일위|100%|100퍼센트|완벽|절대적|무조건|유일한|압도적|끝판왕|역대급|전국\s*최저|최저가/;
@@ -137,8 +160,13 @@ export function runGate(inp: GateInput): GateReport {
   const checks: GateCheck[] = [];
   const push = (key: GateKey, pass: boolean, detail?: string) => { const c: GateCheck = { key, label: GATE_LABEL[key], pass }; if (detail) c.detail = detail; checks.push(c); };
 
-  // cliche
+  // cliche — 본문 상투구 + [2026-09-15 §5C] **사진 캡션의 묘사문**(«~놓여 있는 모습» = 그림 지시문이 캡션으로 새어 나온 것 · 사장님 실측 piece 329)
   const hits = CLICHES.filter((c) => c.re.test(plain)).map((c) => c.label);
+  for (const b of blocks) {
+    if (b.type !== "image" || !b.caption) continue;
+    const d = descriptiveCaptionHit(b.caption);
+    if (d) hits.push(`사진 캡션이 묘사문(${d}): «${b.caption.slice(0, 20)}»`);
+  }
   push("cliche", hits.length === 0, hits.length ? `${hits.length}건: ${hits.slice(0, 5).join(", ")}` : undefined);
 
   // para_repeat

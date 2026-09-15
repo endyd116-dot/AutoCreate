@@ -14,7 +14,7 @@ import { CHAIN_HIGH } from "./ai-models";
 import { generateImage, type ImageAspect } from "./ai-image";
 import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, type RenderImage } from "./blocks";
-import { runGate, buildRewriteInstruction, CLICHES, type GateReport } from "./ai-tell-gate";
+import { runGate, buildRewriteInstruction, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
 import { ensureDisclosureFirst, disclosureTextFor } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
 import { seasonLine } from "./kr-calendar";
@@ -71,7 +71,8 @@ function blockSchemaLine(): string {
   return [
     "블록 JSON 모양(type 별 필수 필드):",
     "hook{text} · para{text · 2~4문장} · h2{text} · h3{text} · quote{text · 핵심 한 줄} · list{items[]} · checklist{items[]} · table{rows[][] · 첫 행은 헤더}",
-    "image{caption · 본문 문맥에 맞는 사진 설명 한 문장(사람·로고·글자 없는 장면) · imageIndex 는 0부터 순서대로} · divider{} · tip{text, items?} · faq{items[] · 각 항목 \"질문 | 답\"}",
+    "image{prompt · 그림을 «만들기 위한» 장면 묘사 한 문장(영문 가능 · 사람·로고·글자 없는 장면 · 이건 독자에게 안 보인다) · caption? · 독자가 보는 한 줄(아래 규칙) · imageIndex 는 0부터 순서대로} · divider{} · tip{text, items?} · faq{items[] · 각 항목 \"질문 | 답\"}",
+    "🔴 image.caption 규칙: 사진 대부분엔 **caption 을 넣지 않는다**(블로거는 사진마다 설명을 달지 않는다 · 3장 중 1장 정도만). 넣을 땐 **글쓴이 말투로 25자 이내의 감상·맥락**(예: «팀원들 줄 거라 포장 예쁜 걸로 골랐어요» · «이게 3만원대라니»). 🔴 «~하는 모습» «~이 놓여 있는» «~를 보여주는» 같은 **장면 설명문은 절대 금지** — 그건 prompt 에만 쓴다.",
     "hashtags{items[] · 5~10개 · # 없이} · toc{} · summary{text 또는 items[]} · disclosure{}(시스템이 채운다 · 비워 둠) · adsense{}(빈 블록) · affiliate{}(시스템이 채운다 · 비워 둠)",
   ].join("\n");
 }
@@ -119,15 +120,52 @@ function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic:
 }
 
 /* ───────── 블록 후처리 ───────── */
-function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingContract, affiliate: boolean, provider: string | null): Block[] {
+/** 캡션 자리 뽑기(결정론) — 같은 글이면 늘 같은 사진에 캡션이 붙는다(재생성 때 왔다 갔다 하지 않게). */
+function captionSlots(count: number, rate: number, seed: number): Set<number> {
+  const want = Math.round(count * Math.max(0, Math.min(1, rate)));
+  const picked = new Set<number>();
+  if (!count || !want) return picked;
+  let x = (seed >>> 0) || 1;
+  const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => {   // 시드 섞기(간단 LCG)
+    x = (x * 1103515245 + 12345) >>> 0; const ra = (x >> 8) & 0xffff;
+    x = (x * 1103515245 + 12345) >>> 0; const rb = (x >> 8) & 0xffff;
+    return (ra ^ a) - (rb ^ b);
+  });
+  for (const i of order.slice(0, want)) picked.add(i);
+  return picked;
+}
+const seedOf = (s: string) => { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+
+export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingContract, affiliate: boolean, provider: string | null, seedText = ""): Block[] {
   let blocks = normalizeBlocks(raw);
-  // image 블록에 imageIndex 부여(순서대로) · 캡션 없으면 앞 문단에서 만든다
+  /* image 블록 — [2026-09-15 §5C 수리] **prompt(그림 지시)** 와 **caption(사람이 읽는 한 줄)** 을 가른다.
+     종전엔 한 문장이 두 일을 해서 «~놓여 있는 모습» 묘사문이 캡션으로 발행됐다(사장님 실측 piece 329).
+     · prompt 가 없으면(옛 모델 응답·caption 만 온 경우) 옛 caption 을 prompt 로 옮긴다 — 그림에는 묘사문이 맞다.
+     · caption 은 ①묘사문이면 버리고 ②25자를 넘으면 버리고 ③`images.captionRate` 만큼만 남긴다(전부 달면 그것도 AI 티) ④앞 문단에서 지어내지 않는다. */
+  const imgCount = blocks.filter((b) => b.type === "image").length;
+  // 1차: prompt/caption 을 가르고 묘사문·과장(25자 초과) 캡션을 버린다
   let idx = 0;
   blocks = blocks.map((b, i) => {
     if (b.type !== "image") return b;
+    const my = idx++;
     const prev = blocks.slice(0, i).reverse().find((x) => (x.type === "para" || x.type === "hook") && x.text);
-    return { ...b, imageIndex: idx++, caption: b.caption || (prev?.text ? String(prev.text).split(/[.!?]\s/)[0].slice(0, 60) : c.label) };
+    const legacyCaptionIsPrompt = !b.prompt && !!b.caption && (descriptiveCaptionHit(b.caption) !== null || [...b.caption].length > 25);
+    const prompt = b.prompt || (legacyCaptionIsPrompt ? b.caption : null) || (prev?.text ? String(prev.text).split(/[.!?]\s/)[0].slice(0, 120) : c.label);
+    let caption = legacyCaptionIsPrompt ? undefined : b.caption;
+    if (caption && (descriptiveCaptionHit(caption) || [...caption].length > 25)) caption = undefined;
+    const out: Block = { ...b, imageIndex: my, prompt };
+    if (caption) out.caption = caption; else delete out.caption;
+    return out;
   });
+  // 2차: 비율 — **유효한 캡션이 있는 사진 중에서** `round(전체 × captionRate)` 장만 남긴다(결정론 · 같은 글이면 같은 자리).
+  //       전체 사진에서 자리를 먼저 뽑으면 «캡션이 있던 사진»과 어긋나 멀쩡한 캡션을 버리고 0장이 될 수 있다.
+  const withCap = blocks.filter((b) => b.type === "image" && b.caption).map((b) => b.imageIndex as number);
+  const keepN = Math.round(imgCount * Math.max(0, Math.min(1, c.images.captionRate ?? 0)));
+  if (withCap.length > keepN) {
+    const pick = captionSlots(withCap.length, keepN / withCap.length, seedOf(seedText || c.channel));
+    const keep = new Set(withCap.filter((_, k) => pick.has(k)));
+    blocks = blocks.map((b) => (b.type === "image" && b.caption && !keep.has(b.imageIndex as number)) ? (({ caption: _c, ...rest }) => rest)(b) : b);
+  }
   // 계약 이미지 수 이상은 자른다(코인 = 확정한 수)
   const wantImages = structure.filter((t) => t === "image").length;
   let seen = 0;
@@ -197,7 +235,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, lengthWords, rewrite });
       const r = await callGeminiJson<{ title?: string; blocks?: unknown; tags?: unknown; affiliateChoice?: unknown }>({ purpose: "content", chain: CHAIN_HIGH, role: "high", system: pr.system, user: pr.user, tenantId: tid, ref: `piece:${pieceId}`, mode: "pro", maxOutputTokens: 12_000, timeoutMs: 180_000 });
       if (!r.ok) throw new Error(`글 생성 실패(${r.reason})`);
-      const blocks = fixBlocks(r.data?.blocks, structure, c, affiliate, aff?.provider ?? null);
+      const blocks = fixBlocks(r.data?.blocks, structure, c, affiliate, aff?.provider ?? null, `${pieceId}:${topic.title}`);   // seed = 같은 글이면 캡션 자리가 늘 같다
       const title = String(r.data?.title ?? topic.title).trim().slice(0, 80) || topic.title;
       const tags = (Array.isArray(r.data?.tags) ? r.data.tags : []).map((t) => String(t ?? "").replace(/^#/, "").trim()).filter(Boolean).slice(0, 10);
       const choice = Number.isInteger(Number(r.data?.affiliateChoice)) ? Number(r.data?.affiliateChoice) : 0;
@@ -248,15 +286,19 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     await q(sql`DELETE FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'image'`);
     for (const b of imageBlocks) {
       const i = b.imageIndex ?? images.length;
-      const prompt = `${b.caption || topic.title}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
+      /* [§5C 수리] 그림은 **prompt** 로 만든다(묘사문은 여기서만 쓴다). caption 은 사람이 읽는 한 줄이고 대부분 없다.
+         alt 는 접근성용 — prompt 에서 짧게 파생(화면에 안 보이고 러너는 alt 를 타이핑하지 않는다 · naver-blog.mjs 확인). */
+      const scene = b.prompt || b.caption || topic.title;
+      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
+      const alt = String(scene).replace(/\s+/g, " ").trim().slice(0, 60);
       const r = await generateImage({ prompt, aspect: c.images.aspect as ImageAspect, tenantId: tid, ref: `piece:${pieceId}:img${i + 1}`, keyPrefix: `autocreate/${tid}/${pieceId}` });
       if (r.ok) {
         okImages++;
-        images[i] = { url: r.url, caption: b.caption, alt: b.caption };
-        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${r.key}, ${b.caption ?? null}, ${jsonb({ url: r.url, model: r.model, mime: r.mime })}, ${i})`);
+        images[i] = { url: r.url, caption: b.caption, alt };
+        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"image"}, ${r.key}, ${b.caption ?? null}, ${jsonb({ url: r.url, model: r.model, mime: r.mime, alt, prompt: String(scene).slice(0, 300) })}, ${i})`);
       } else {
         console.warn(`[content-gen] piece ${pieceId} 이미지 ${i} 실패: ${r.reason}`);
-        images[i] = { url: "", caption: b.caption, alt: b.caption };
+        images[i] = { url: "", caption: b.caption, alt };
       }
     }
     if (imageBlocks.length && okImages === 0) throw new Error("이미지를 한 장도 만들지 못했어요.");

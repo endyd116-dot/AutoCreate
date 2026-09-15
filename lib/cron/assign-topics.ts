@@ -37,7 +37,7 @@ async function loadCandidates(tid: number, limit: number): Promise<Cand[]> {
     WHERE t.tenant_id = ${tid} AND t.status = 'candidate' AND (t.expires_at IS NULL OR t.expires_at > NOW())
       AND NOT EXISTS (SELECT 1 FROM topics u WHERE u.tenant_id = t.tenant_id AND u.norm_key = t.norm_key
                         AND u.status IN ('used','picked') AND COALESCE(u.used_at, u.created_at) > NOW() - interval '30 days')
-    ORDER BY t.score DESC, t.id DESC LIMIT ${Math.max(1, Math.min(200, limit))}`);
+    ORDER BY (t.source = 'manual') DESC, t.score DESC, t.id DESC LIMIT ${Math.max(1, Math.min(200, limit))}`);   // [topics-add] 사용자가 직접 넣은 소재가 우선(점수는 그대로)
   return rows.map((r) => ({ id: n(r.id), normKey: String(r.norm_key ?? ""), hint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), title: String(r.title ?? ""), angle: String(r.angle ?? "") }));
 }
 

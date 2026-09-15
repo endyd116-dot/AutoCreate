@@ -36,7 +36,8 @@ export interface WritingContract {
   /** 제목 스타일: naver(검색어 앞 + 감정 뒤) · google(연도+총정리) · hook(첫 줄 훅) · card(30자) · script(대본). */
   titleStyle: "naver" | "google" | "hook" | "card" | "script";
   titleExample: string;
-  images: { min: number; max: number; default: number; style: "photo" | "illust" | "infographic"; aspect: "4:3" | "1:1" | "9:16" | "16:9" };
+  /** [2026-09-15 §5C] captionRate = 캡션을 다는 사진 비율(0~1). 🔴 기본은 «없음» — 네이버 블로거 대부분 사진마다 캡션을 안 단다(전부 달면 그것도 AI 티). */
+  images: { min: number; max: number; default: number; style: "photo" | "illust" | "infographic"; aspect: "4:3" | "1:1" | "9:16" | "16:9"; captionRate: number };
   /** 이모지 허용(문단당). */
   emojiPerParagraph: number;
   /** 글 채널인가(이 라운드 생성 대상). */
@@ -70,7 +71,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     visualMin: { quote: 1, divider: 1, image: 6, hashtags: 5 },
     length: { min: 1500, max: 2500 },
     titleStyle: "naver", titleExample: "에어프라이어 청소, 3분이면 새것처럼",
-    images: { min: 6, max: 10, default: 6, style: "photo", aspect: "4:3" },
+    images: { min: 6, max: 10, default: 6, style: "photo", aspect: "4:3", captionRate: 0.3 },
     emojiPerParagraph: 0, text: true,
   },
   tistory: {
@@ -96,7 +97,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     visualMin: { h2: 3, tableOrList: 1, adsense: 2, image: 2 },
     length: { min: 1800, max: 3000 },
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
-    images: { min: 2, max: 4, default: 3, style: "photo", aspect: "16:9" },
+    images: { min: 2, max: 4, default: 3, style: "photo", aspect: "16:9", captionRate: 0.2 },
     emojiPerParagraph: 0, text: true,
   },
   blogger: {
@@ -120,7 +121,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     visualMin: { h2: 3, faq: 1, image: 1 },
     length: { min: 1200, max: 2000 },
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
-    images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9" },
+    images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9", captionRate: 0.5 },
     emojiPerParagraph: 0, text: true,
   },
   threads: {
@@ -140,7 +141,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     visualMin: { image: 1 },
     length: { min: 120, max: 500 },
     titleStyle: "hook", titleExample: "에어프라이어 3분 청소법, 진짜 됨",
-    images: { min: 0, max: 1, default: 1, style: "photo", aspect: "1:1" },
+    images: { min: 0, max: 1, default: 1, style: "photo", aspect: "1:1", captionRate: 0 },
     emojiPerParagraph: 1, text: true,
   },
   instagram: {
@@ -155,7 +156,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     visualMin: { hashtags: 5 },
     length: { min: 150, max: 400 },
     titleStyle: "card", titleExample: "에어프라이어 청소 3단계",
-    images: { min: 6, max: 8, default: 6, style: "infographic", aspect: "1:1" },
+    images: { min: 6, max: 8, default: 6, style: "infographic", aspect: "1:1", captionRate: 0 },
     emojiPerParagraph: 1, text: false,
   },
   wordpress: {
@@ -178,7 +179,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     visualMin: { h2: 3, faq: 1, image: 1 },
     length: { min: 1200, max: 2000 },
     titleStyle: "google", titleExample: "2026 에어프라이어 청소 방법 총정리",
-    images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9" },
+    images: { min: 1, max: 3, default: 2, style: "photo", aspect: "16:9", captionRate: 0.5 },
     emojiPerParagraph: 0, text: true,
   },
   /* 영상 대본 3채널 — 같은 계약(§5C.1 «쇼츠·클립·릴스 대본» 1행). 생성은 Phase 3 · 계약은 지금 전부. */
@@ -267,7 +268,7 @@ function shortsContract(channel: string, label: string, aspect: "9:16"): Writing
     visualMin: {},
     length: { min: 60, max: 235 },
     titleStyle: "script", titleExample: "에어프라이어, 3분 만에 새것 되는 법",
-    images: { min: 0, max: 0, default: 0, style: "photo", aspect },
+    images: { min: 0, max: 0, default: 0, style: "photo", aspect, captionRate: 0 },
     emojiPerParagraph: 0, text: false,
   };
 }
