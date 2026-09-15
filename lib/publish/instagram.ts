@@ -134,6 +134,17 @@ function rejectedPaidLabel(json: Record<string, unknown> | null): boolean {
   return blob.includes("is_paid_partnership") || /unknown|invalid parameter|unsupported/i.test(blob);
 }
 
+/**
+ * [R9-9] 메타가 «쇼핑 태그는 못 쓴다»고 답했나 — 태그만 빼고 한 번 더 올린다(게시물 자체는 나가야 한다).
+ *   🔴 **넓게 잡는다**: 승인 안 남 · 카탈로그 없음 · 상품 id 가 이 계정 것이 아님 · 파라미터 자체를 모름 —
+ *      전부 «태그를 빼면 되는» 같은 처방이다. 좁게 잡아 못 알아보면 **글 전체가 안 올라간다**(그게 더 나쁘다).
+ */
+function rejectedProductTags(json: Record<string, unknown> | null): boolean {
+  const err = (json?.error ?? {}) as { message?: string; error_user_title?: string; error_user_msg?: string };
+  const blob = `${err.message ?? ""} ${err.error_user_title ?? ""} ${err.error_user_msg ?? ""}`;
+  return /product_tag/i.test(blob) || /shopping|catalog|merchant|product/i.test(blob);
+}
+
 /** 토큰 + ig 사용자 id — 릴스·피드 두 경로가 **똑같이** 쓰는 앞머리(갈리면 한쪽만 고치는 사고가 난다). */
 async function igAuth(tid: number, account: PublishAccount, channel: "reels" | "instagram"):
   Promise<{ ok: true; token: string; igUserId: string } | { ok: false; res: PublishResult }> {
@@ -181,9 +192,24 @@ export async function publishInstagramFeed(piece: PublishPiece, account: Publish
 
     const caption = buildCaption(piece);
     const paid = !!piece.disclosure;
-    const mk = (extra: Record<string, string>, withLabel: boolean) => {
+    /* [R9-9 · §5.1] 🔴 **인스타 쇼핑 태그**(고지 축 4행 중 마지막).
+       공식 문서(콘텐츠 게시)에 `product_tags` 가 있다 — 한 장짜리 사진은 `[{product_id, x, y}]`, 캐러셀은 자식마다 붙인다.
+       🔴 **우리 키로 실호출 확인 전이다**(인스타 계정 0 · Instagram Shopping 승인도 안 났다) —
+          유료 파트너십 라벨과 **똑같은 모양**으로 둔다: 거부당하면 **태그만 빼고 한 번 더** 올리고 감사에 남긴다.
+          «상품이 안 붙었다»고 게시물을 못 올리면 그게 우리가 만든 게이트다(CLAUDE §9).
+       ⚠️ 캐러셀에는 **안 붙인다** — 자식마다 좌표가 달라야 하는데 어느 사진의 어디인지 우리가 모른다.
+          모르는 것을 지어내 붙이면 엉뚱한 사진에 상품이 달린다(AC-92). 그건 «못 붙였다»로 적는다. */
+    const shopTags = (piece.productTags ?? []).slice(0, 5);
+    const mk = (extra: Record<string, string>, withLabel: boolean, withTags: boolean) => {
       const b = new URLSearchParams({ ...extra, caption, access_token: token });
       if (withLabel) b.set("is_paid_partnership", "true");
+      if (withTags && shopTags.length && extra.image_url) {
+        b.set("product_tags", JSON.stringify(shopTags.map((t) => ({
+          product_id: t.productId,
+          ...(Number.isFinite(t.x) ? { x: t.x } : {}),
+          ...(Number.isFinite(t.y) ? { y: t.y } : {}),
+        }))));
+      }
       return graph(`${GRAPH}/${encodeURIComponent(igUserId)}/media`, { method: "POST", body: b }).catch(() => null);
     };
 
@@ -200,12 +226,27 @@ export async function publishInstagramFeed(piece: PublishPiece, account: Publish
       else return { ok: false, reason: "channel_error", retriable: true, error: "인스타그램이 사진을 받지 못했어요. 잠시 후 다시 시도할게요.", detail: "carousel_children_0" };
     }
 
-    let r = await mk(base, paid);
+    const wantTags = shopTags.length > 0 && !!base.image_url;
+    let r = await mk(base, paid, wantTags);
+    /* 🔴 **쇼핑 태그를 먼저 떨군다** — 라벨(고지)보다 상품(수익)이 덜 중요하다. 순서가 바뀌면
+       태그 때문에 거부당한 글에서 **고지 라벨이 먼저 빠진다**(법이 걸린 쪽을 먼저 버리는 셈이다 · AC-73 ③). */
+    if (r && wantTags && (r.status < 200 || r.status >= 300) && rejectedProductTags(r.json)) {
+      await writeAudit({ tenantId: tid, action: "instagram_product_tags_rejected", actorType: "system", target: `piece:${piece.id}`,
+        detail: { status: r.status, surface: "feed", tags: shopTags.length, note: "product_tags 를 받지 않았다 — 상품 없이 올린다(쇼핑 승인·카탈로그 확인 필요)" } })
+        .catch((err: unknown) => console.warn("[instagram] 감사 기록 실패", String((err as Error)?.message ?? err).slice(0, 80)));
+      r = await mk(base, paid, false);
+    }
     if (r && paid && (r.status < 200 || r.status >= 300) && rejectedPaidLabel(r.json)) {
       await writeAudit({ tenantId: tid, action: "instagram_paid_label_rejected", actorType: "system", target: `piece:${piece.id}`,
         detail: { status: r.status, surface: "feed", note: "is_paid_partnership 를 받지 않았다 — 캡션 첫 줄 고지로만 나간다" } })
         .catch((err: unknown) => console.warn("[instagram] 감사 기록 실패", String((err as Error)?.message ?? err).slice(0, 80)));
-      r = await mk(base, false);
+      r = await mk(base, false, false);
+    }
+    /* 🔴 캐러셀이라 못 붙였으면 **그것도 적는다** — 조용히 빠지면 고객은 «왜 상품이 안 붙지»를 영영 모른다(AC-9). */
+    if (shopTags.length && !base.image_url) {
+      await writeAudit({ tenantId: tid, action: "instagram_product_tags_skipped", actorType: "system", target: `piece:${piece.id}`,
+        detail: { surface: "feed", tags: shopTags.length, why: "여러 장(캐러셀)이라 어느 사진의 어디에 붙일지 몰라 안 붙였다" } })
+        .catch(() => {});
     }
     if (!r) return { ok: false, reason: "network", retriable: true, error: "인스타그램에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
     if (r.status < 200 || r.status >= 300) { const c = metaError(r.status, r.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }

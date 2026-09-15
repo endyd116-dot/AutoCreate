@@ -1,5 +1,7 @@
 /**
  * lib/kicc.ts — KICC(이지페이) 결제 어댑터. **이중 MID 판**(인증/비인증 라인 · pg_mid 보존).
+ *   🔎 출처: **AM 원본 있음** — 아래 두 줄이 정본이다(HamkkeWorkOn `lib/adapters/payment/kicc.ts` 298줄 · 복사일 2026-09-14 / 그전 판 AM `../AutoMarketing/lib/kicc.ts`). AC 첫 커밋 `258869e` 2026-09-14.
+ *     🔴 이 줄은 **새 사실이 아니다** — 조사 하니스가 낱말 «AM 원본»으로만 찾아서 못 읽던 것을 규약대로 적어 둔 것이다.
  *   원본: HamkkeWorkOn `lib/adapters/payment/kicc.ts`(298줄 · 복사일 2026-09-14) — 그 사업자의 KICC 계약을 AC 가 함께 쓴다(사장님 지시).
  *   그전 판: AM `../AutoMarketing/lib/kicc.ts`(단일 MID · 2026-09-14 복사) — 이 파일이 대체한다.
  *

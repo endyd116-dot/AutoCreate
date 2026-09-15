@@ -85,6 +85,16 @@ export interface PublishPiece {
   /** 고지 문구(없으면 null). bodyHtml 첫 요소 `<div class="disclosure">` 와 같은 문장. */
   disclosure: string | null;
   affiliate?: { provider: string; url: string; subId?: string };
+  /**
+   * [R9-9 · §5.1 고지 축 4행 중 마지막] **인스타 쇼핑 태그** — 사진 위에 상품을 붙이는 값.
+   *   🔴 **유튜브 쇼핑 태그와 다르다**: 유튜브는 API 에 칸 자체가 없어 «우리가 못 단다»가 사실이지만
+   *      인스타는 `POST /{ig-user}/media` 에 `product_tags` 가 **있다**(Instagram Shopping 승인 + 카탈로그 필요).
+   *      ⇒ «없는 길»이 아니라 **«외부 선결조건»**이다 — 코드를 먼저 완성하고 «키 꽂으면 즉시»로 둔다(CLAUDE §8).
+   *   🔴 우리 키로 **실호출해 본 적 없다**(2026-09-16 인스타 계정 0). 거부당하면 태그만 빼고 한 번 더 올리고
+   *      **빠진 사실을 감사에 남긴다**(AC-9) — 유료 파트너십 라벨과 **같은 모양**이다.
+   *   `x`·`y` 는 사진 위 좌표(0~1). 캐러셀이 아니라 **한 장짜리 사진**일 때만 좌표가 뜻이 있다.
+   */
+  productTags?: { productId: string; x?: number; y?: number }[];
   /** 예약 시각 ISO(러너 표시·블로거 published 용). */
   scheduledFor?: string;
   /** 멱등 판정 재료 — 하나라도 있으면 재발행 0. */
