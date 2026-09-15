@@ -24,7 +24,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=16"></script>
-<script src="/js/mock.js?v=16"></script>
+<script src="/js/mock.js?v=17"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -53,9 +53,9 @@ function gateList(g) {
   const checks = g.checks || [];
   const bad = checks.filter((c) => !c.pass);
   const high = bad.filter(isHigh);
-  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">알려드릴 게 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
+  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
   /* 🔴 «고쳐야 예약할 수 있어요»는 이제 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
-  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정에 걸리는 것이라 꼭 보셔야 해요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
+  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
   /* ③ 되돌릴 수 있다 — 막지 않는 대신 «나가도 되돌릴 수 있다»가 보여야 «말해 주기»가 정직해진다.
      🔴 채널마다 우리가 대신 내릴 수 있는지 다르니 약속하지 않는다(발행함에서 그 채널의 길을 그대로 말한다). */
   const back = bad.length ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.</p>' : "";

@@ -832,7 +832,11 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       /* [R8 §3 · B2 lib/channel-registry.ts retractVia] 🔴 **우리가 대신 내릴 수 있는 채널만** true — 유튜브·쓰레드는 삭제 권한이 없다.
          화면은 이 값으로 단추를 켜고 끈다(없는 되돌리기를 단추로 만들지 않게). */
       const CAN_RETRACT = { naver_blog: true, tistory: true, blogger: true, wordpress: true, naver_clip: false, youtube_shorts: false, reels: false, threads: false, instagram: false, tiktok: false };
-      return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p, canRetract: CAN_RETRACT[p.channel] !== false, ...(S.retracted[p.id] ? { retractedAt: S.retracted[p.id] } : {}) })) }; },
+      /* [R8 §9 · B3] 🔴 나간 뒤에도 «그때 이런 지적이 있었다»를 본다 — 저장된 보고서에서 **실패 칸 수**와 **무거운 것이 있었나**를 읽는다.
+         무게가 없는 옛 보고서는 개수만 온다(없는 것을 «무거움»으로 지어내지 않는다). */
+      const riskOf = (p) => { const pc = S.pieces.find((x) => x.id === p.pieceId); const bad = ((pc && pc.gate && pc.gate.checks) || []).filter((c) => !c.pass);
+        return bad.length ? { riskCount: bad.length, ...(bad.some((c) => c.weight === "high") ? { riskHigh: true } : {}) } : {}; };
+      return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p, canRetract: CAN_RETRACT[p.channel] !== false, ...riskOf(p), ...(S.retracted[p.id] ? { retractedAt: S.retracted[p.id] } : {}) })) }; },
     /* [R8 §3 · DESIGN §5E] «내려 줘» — 문장·상태는 lib/publish/retract.ts 그대로. 🔴 코인 0(consume 호출이 아예 없다) */
     "post-retract": (b) => {
       const p = S.posts.find((x) => x.id === Number(b.postId)); if (!p) return { ok: false, state: "not_found", message: "그 글을 찾을 수 없어요.", status: 404 };
