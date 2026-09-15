@@ -27,7 +27,8 @@ const ERROR_KINDS = new Set(["login_fail", "captcha", "rate_limited", "suspended
 export interface PostRow {
   id: number; pieceId: number; channel: string; accountHandle: string | null; title: string;
   status: "published" | "awaiting_manual" | "failed";
-  externalUrl?: string; publishedVia?: "api" | "runner"; publishedAt?: string;
+  /** [R7 §1.3] `manual` = 사람이 손으로 올리고 `/api/post-mark-published` 로 주소를 적은 글(계정 없이 만든 영상의 정상 경로다 · DDL 0001 부터 있던 3번째 값). */
+  externalUrl?: string; publishedVia?: "api" | "runner" | "manual"; publishedAt?: string;
   stats: { views?: number; likes?: number; comments?: number; lastSyncAt?: string };
   alive: boolean; errorKind?: string; failReason?: string;
 }
@@ -74,7 +75,7 @@ export default async (req: Request): Promise<Response> => {
       };
       const urlStr = String(r.po_url || r.p_url || "");
       if (urlStr) o.externalUrl = urlStr;
-      if (r.published_via === "api" || r.published_via === "runner") o.publishedVia = r.published_via;
+      if (r.published_via === "api" || r.published_via === "runner" || r.published_via === "manual") o.publishedVia = r.published_via;
       const at = utcDate(r.po_at) ?? utcDate(r.p_at); if (at) o.publishedAt = at.toISOString();
       for (const k of ["views", "likes", "comments"] as const) if (Number.isFinite(Number(st[k])) && st[k] !== null && st[k] !== undefined) o.stats[k] = Number(st[k]);
       const sync = utcDate(st.lastSyncAt); if (sync) o.stats.lastSyncAt = sync.toISOString();
