@@ -38,6 +38,54 @@ export async function isNaverLoggedIn(page) {
   } catch { return false; }
 }
 
+/**
+ * classifyNaverLoginWall — 로그인 시도 뒤 «무슨 벽에 막혔나»를 **순수하게** 가른다(2026-09-15 · 순수 함수로 분리).
+ *   @returns { kind, message } | null(벽 없음 = 통과)
+ *
+ *   🔴 이 판정이 계정 상태를 움직인다(`lib/account-health.ts` 전이표):
+ *        `login_fail`·`captcha` → 계정을 **`pending_login`** 으로 밀고 고객에게 «다시 로그인하세요»를 시킨다.
+ *        `unknown`             → 계정은 **그대로**, 건강도만 깎인다(계정 잘못이 아니다).
+ *      그래서 **모를 때 login_fail 을 쓰면 안 된다** — 멀쩡한 계정을 멈춰 세우고, 고객이 시키는 대로 재로그인을
+ *      반복하면 그게 캡차를 부른다(이 파일 위쪽 job #16 실측이 바로 그 경로였다).
+ *
+ *   🔴 **종전에 여기 마지막 줄이 «아이디 또는 비밀번호가 맞지 않아요» 였다.** 로그인 화면에 남아 있기만 하면
+ *      이유를 불문하고 그렇게 말했다 — 제출이 안 먹었든, 네이버가 새 안내 화면을 띄웠든, 느렸든.
+ *      맞는 비밀번호를 쓴 고객에게 «비밀번호가 틀렸다»고 하고 계정을 세우는 것이라, **거짓 안내 + 비싼 부작용**이다.
+ *      ⇒ 네이버가 **그렇게 말할 때만** 그렇게 부른다. 아니면 «끝나지 않았어요»(unknown)로 정직하게 남긴다(AC-10·AC-9).
+ *
+ *   🔴 순수 함수인 이유: 실계정 로그인은 **시도 자체가 캡차를 부른다**(AC-19). 그래서 화면 모양만 넣어 돌려 본다
+ *      (`scripts/verify-runner-auth.mts`).
+ */
+export function classifyNaverLoginWall(url, seen, hasCaptchaEl = false) {
+  const u = String(url ?? "");
+  const t = String(seen ?? "");
+  /* 🔴 벽 판정은 **로그인 도메인/화면일 때만** 한다. 성공해서 블로그로 넘어왔는데 그 글에 «2단계 인증» 같은
+     낱말이 있다고 실패로 뒤집으면, 멀쩡한 계정을 멈춰 세운다(성공을 실패로 만드는 게 제일 나쁘다). */
+  const onAuth = /nid\.naver\.com|nidlogin|captcha|deviceConfirm|idSafetyRelease|deviceRegist|need2|otp/i.test(u);
+  if (!onAuth) return null;
+
+  if (/captcha/i.test(u) || hasCaptchaEl) return { kind: "captcha", message: "네이버가 자동입력 방지(캡차)를 띄웠어요." };
+  /* «처음 보는 기기»와 «보호조치»는 **다른 일**이다. 한 문구로 뭉뚱그리면 고객이 엉뚱한 걸 하고 돌아온다. */
+  if (/idSafetyRelease/i.test(u)) {
+    return { kind: "login_fail", message: "네이버가 이 계정에 **보호조치**를 걸었어요. 네이버에서 직접 해제한 뒤 «다시 로그인»을 눌러 주세요." };
+  }
+  if (/deviceConfirm|deviceRegist/i.test(u)) {
+    return { kind: "login_fail", message: "네이버가 «처음 보는 기기»라며 등록을 요구했어요. 창에서 직접 로그인해 기기를 등록해 주세요." };
+  }
+  if (/need2|otp/i.test(u) || /2단계 인증/.test(t)) {
+    return { kind: "login_fail", message: "이 계정은 **2단계 인증**이 켜져 있어 자동 로그인이 되지 않아요(비밀번호를 다시 넣어도 안 풀려요). 창에서 직접 로그인해 주세요." };
+  }
+  if (!/nidlogin/i.test(u)) return null;                       // 로그인 화면을 벗어났다 = 통과
+
+  // 네이버가 **자기 입으로** 자격 오류라고 말할 때만 그렇게 부른다.
+  if (/아이디 또는 비밀번호를? 잘못|비밀번호가 일치하지|등록되지 않은 아이디|다시 확인해\s*주세요/.test(t)) {
+    return { kind: "login_fail", message: "아이디 또는 비밀번호가 맞지 않아요." };
+  }
+  /* 🔴 여기가 핵심 — **이유를 모르면 모른다고 한다.** 계정은 건드리지 않고(unknown = 전이 없음) 화면 글자를 남겨
+     사람이 무엇이 있었는지 볼 수 있게 한다. 모르는 것을 «비밀번호 틀림»으로 바꾸지 않는다(AC-9). */
+  return { kind: "unknown", message: `네이버 로그인이 끝나지 않았어요(이유를 확인하지 못했어요) — 화면="${t.slice(0, 120)}"` };
+}
+
 /** id/pw 자동 로그인. 캡차·기기등록·2단계는 **정직 실패**(사람이 해야 풀린다). */
 export async function naverLogin(page, id, pw) {
   await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -75,12 +123,11 @@ export async function naverLogin(page, id, pw) {
   }
 
   const url = page.url();
-  if (/captcha/i.test(url) || (await page.locator("#captcha, .captcha_wrap").count().catch(() => 0)) > 0) {
-    throw BLOCK("captcha", "네이버가 자동입력 방지(캡차)를 띄웠어요.");
-  }
-  if (/deviceConfirm|idSafetyRelease|deviceRegist/i.test(url)) throw BLOCK("login_fail", "네이버가 «처음 보는 기기»라며 등록을 요구했어요.");
-  if (/need2|otp/i.test(url)) throw BLOCK("login_fail", "이 계정은 2단계 인증이 켜져 있어 자동 로그인이 되지 않아요.");
-  if (/nidlogin/i.test(page.url())) throw BLOCK("login_fail", "아이디 또는 비밀번호가 맞지 않아요.");
+  const hasCaptchaEl = (await page.locator("#captcha, .captcha_wrap").count().catch(() => 0)) > 0;
+  // 🔴 판정은 **화면에 보이는 글자**로(원본 HTML 로 재면 스크립트 속 낱말에 오분류된다 — 카카오 쪽에서 피 본 함정).
+  const seen = ((await page.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+  const wall = classifyNaverLoginWall(url, seen, hasCaptchaEl);
+  if (wall) throw BLOCK(wall.kind, wall.message);
 }
 
 /** 로그인 보장 — 쿠키가 살아 있으면 건너뛰고, 아니면 id/pw 로 들어간다. */

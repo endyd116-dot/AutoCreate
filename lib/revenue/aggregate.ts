@@ -16,7 +16,14 @@ const kstToday = sql`(NOW() AT TIME ZONE 'Asia/Seoul')::date`;
 
 export interface RevenueSummary {
   monthKrw: number; todayConfirmedKrw: number; todayEstimatedKrw: number; prevMonthKrw: number;
-  bySource: { source: string; krw: number; freshness: Freshness; lastSyncAt?: string }[];
+  /**
+   * 🔴 `amountEstimated` 는 «**그 매체 표의 «예상» 열을 읽었다**»는 뜻이다(러너 `scrape.mjs` 가 찍는다).
+   *    ⚠️ `todayEstimatedKrw` 의 «예상»과 **다른 말**이다 — 그쪽은 «어느 **소스**에서 왔나»(커넥터 확정치 `CONFIRMED_SOURCES` 가 아니다)이고,
+   *    이쪽은 «그 소스 안에서 **어느 열**을 읽었나»다. 애드포스트는 소스로도 «예상»이고 열로도 «예상수입»이라 둘이 겹쳐 보이지만,
+   *    애드핏이 «확정수익» 열을 주면 소스는 여전히 estimated 인데 이 도장은 **안 찍힌다**. 이름이 겹치면 다음 사람이 섞으니 칸을 갈라 둔다.
+   *    `note` = 서버가 만드는 한 문장(러너 문구를 그대로 안 쓴다 — 화면 어휘는 한 곳에서 정한다 · 이모지 금지).
+   */
+  bySource: { source: string; krw: number; freshness: Freshness; lastSyncAt?: string; amountEstimated?: true; note?: string }[];
   /** [P1R7 B3] 계정이 지워졌으면 `handle:"지운 계정"` + `deleted:true` · `channel` 은 빈 문자열(마크를 못 그린다). 금액은 그대로 센다 — 합계 = 내역. */
   byAccount: { accountId: number; handle: string; channel: string; krw: number; deleted?: boolean }[];
   /** [P1R7 B3] 글이 지워졌으면 `title:"지운 글"` + `deleted:true` · 제목이 비었으면 `"제목 없는 글"` + `untitled:true`. */
@@ -50,7 +57,13 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
       COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND source IN (${CONFIRMED_IN})), 0) AS today_confirmed,
       COALESCE(SUM(amount_krw) FILTER (WHERE day = ${kstToday} AND NOT (source IN (${CONFIRMED_IN}))), 0) AS today_estimated
     FROM revenue_daily WHERE tenant_id = ${tid} AND day >= (${start} - interval '1 month')::date`);
+  /* 🔴 `amount_estimated` — 그 소스의 그 기간 행 중 **하나라도** 매체 표의 «예상» 열에서 온 것이면 true.
+     `amount_head` 는 그때 읽은 열 이름(**가장 최근 행** 것 하나 — 여러 날이 섞이면 최신이 지금 화면을 설명한다).
+     BOOL_OR 은 행이 0개면 NULL 을 내므로 아래에서 `=== true` 로만 도장을 찍는다(모르면 안 찍는다 · AC-9). */
   const bySrc = await q(sql`SELECT d.source, COALESCE(SUM(d.amount_krw),0) AS krw, MAX(d.freshness) AS freshness, MAX(d.updated_at) AS last_upd,
+      BOOL_OR(d.raw->>'amountEstimated' = 'true') AS amount_estimated,
+      (array_agg(d.raw->>'amountHead' ORDER BY d.day DESC, d.id DESC)
+         FILTER (WHERE d.raw->>'amountEstimated' = 'true' AND COALESCE(d.raw->>'amountHead','') <> ''))[1] AS amount_head,
       (SELECT MAX(s.last_ok_at) FROM revenue_sources s WHERE s.tenant_id = d.tenant_id AND s.source = d.source) AS last_ok
     FROM revenue_daily d WHERE d.tenant_id = ${tid} AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.tenant_id, d.source ORDER BY krw DESC`);
@@ -70,6 +83,12 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
     bySource: bySrc.map((r) => {
       const o: RevenueSummary["bySource"][number] = { source: String(r.source), krw: n(r.krw), freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness };
       const at = utcDate(r.last_ok) ?? utcDate(r.last_upd); if (at) o.lastSyncAt = at.toISOString();
+      if (r.amount_estimated === true) {
+        o.amountEstimated = true;
+        // 문구는 **서버가** 만든다(러너 문장을 그대로 흘리지 않는다 — 화면 어휘는 한 곳 · 이모지 금지 · UX 헌장 §3).
+        const head = String(r.amount_head ?? "").trim();
+        o.note = head ? `«${head}» 열로 읽었어요 — 확정 금액이 아니라 예상치예요` : "매체가 준 예상치예요 — 확정 금액이 아니에요";
+      }
       return o;
     }),
     /* [P1R7 B3] 주인이 사라졌거나 이름이 비었으면 **서버가 사람말로 이름 붙인다**(화면이 «?»·«제목 없음»을 그리지 않게).
@@ -91,11 +110,21 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
 }
 
 /** 일별 막대(§1.4c). 행이 있는 날만 — 0원도 행이면 싣는다 · 없는 날은 키 없음(«수집 안 됨»). */
-export async function daily(tid: number, from: string, to: string): Promise<{ day: string; krw: number; freshness: Freshness }[]> {
+export async function daily(tid: number, from: string, to: string): Promise<{ day: string; krw: number; freshness: Freshness; amountEstimated?: true }[]> {
+  /* `amount_estimated` — 그 날 행 중 하나라도 매체 표의 «예상» 열에서 왔으면 true(§RevenueSummary.bySource 주석과 같은 뜻).
+     날짜별로도 주는 이유: 어떤 날은 확정이 내려오고 어떤 날은 아직 예상일 수 있어, **그 막대만** 다르게 그릴 수 있어야 한다. */
   const rows = await q(sql`SELECT day::text AS d, COALESCE(SUM(amount_krw),0) AS krw,
-      CASE WHEN COUNT(DISTINCT freshness) = 1 THEN MAX(freshness) ELSE 'api' END AS freshness
+      CASE WHEN COUNT(DISTINCT freshness) = 1 THEN MAX(freshness) ELSE 'api' END AS freshness,
+      BOOL_OR(raw->>'amountEstimated' = 'true') AS amount_estimated
     FROM revenue_daily WHERE tenant_id = ${tid} AND day >= ${from}::date AND day <= ${to}::date GROUP BY day ORDER BY day`);
-  return rows.map((r) => ({ day: String(r.d).slice(0, 10), krw: n(r.krw), freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness }));
+  return rows.map((r) => {
+    const o: { day: string; krw: number; freshness: Freshness; amountEstimated?: true } = {
+      day: String(r.d).slice(0, 10), krw: n(r.krw),
+      freshness: (["api", "runner", "manual"].includes(String(r.freshness)) ? String(r.freshness) : "api") as Freshness,
+    };
+    if (r.amount_estimated === true) o.amountEstimated = true;   // 모르면(NULL) 안 찍는다 — AC-9
+    return o;
+  });
 }
 
 /**
