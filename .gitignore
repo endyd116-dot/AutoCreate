@@ -47,3 +47,9 @@ runner/tmp/
 # 로컬 스모크·검증 스크립트(PITFALLS #16 — _* 는 커밋하지 않는다)
 scripts/_smoke/
 assets/fonts/*.ttf
+
+# 🔴 열쇠 파일은 리포에 두지 않는다 — 빈 자리도 두지 않는다(누가 거기에 개인키를 붙여 넣는다 · 2026-09-15).
+#    러너 공개키는 빌드가 env `RECIPE_PUBLIC_KEY` 에서 zip 에 써 넣는다(scripts/build-runner.mts).
+*.pem
+*.key
+!*.pem.example
