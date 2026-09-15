@@ -40,6 +40,14 @@ export async function run({ ctx, job }) {
   const body = ((await page.locator("body").innerText().catch(() => "")) || "");
   const gone = /삭제(된|되었)|존재하지 않는 (글|페이지)|페이지를 찾을 수 없|비공개( 글)?입니다/.test(body);
   if (gone) return { stats: {}, alive: false, notes: ["글이 삭제·비공개 상태예요"] };
+  /* 🔴 **여기서 «살아 있다»는 «남이 볼 수 있다»가 아니다**(2026-09-15 · AC-55 뒷정리).
+     이 잡은 **그 계정으로 로그인된 프로필**에서 돈다(`core.mjs` 가 `profileKey` + `applyCookies` 로 연다) —
+     글쓴이 자신의 눈에는 **비공개 글도 멀쩡하게 보인다.** 그래서 바로 위의 «비공개입니다» 검사는
+     구조적으로 **남의 비공개 글에만** 걸리고, **우리가 비공개로 올린 글은 영원히 못 잡는다.**
+     ⚠️ 여기서 쿠키를 지우거나 다른 컨텍스트를 여는 방법은 쓰지 않는다 — 이 컨텍스트는 영구 프로필이라
+        (`launchPersistentContext`) 쿠키를 건드리면 **그 계정이 로그아웃된다.**
+     ⇒ 공개 여부 판정은 **쿠키가 없는 서버**가 한다(`lib/runner-jobs.ts verifyPublishedUrl` — 같은 주소를 한 번 더 연다).
+        러너는 «내 눈에는 살아 있다»까지만 말한다. 그 한계를 노트에 남겨 둔다(조용한 과장 금지). */
 
   const stats = {};
   const channel = String(job.account?.channel ?? "");
@@ -60,7 +68,7 @@ export async function run({ ctx, job }) {
     }
   }
 
-  const notes = [];
+  const notes = ["살아 있는지는 로그인된 내 눈으로 본 것 — 공개 여부는 서버가 따로 확인합니다"];
   if (stats.views === undefined) notes.push("조회수는 화면에서 찾지 못했어요(안 싣습니다)");
   // ⏰ lastSyncAt 은 서버가 UTC 로 찍는다(저장 UTC · 표시 KST — DESIGN §13.5). 러너는 숫자만 보낸다.
   return { stats, alive: true, notes };

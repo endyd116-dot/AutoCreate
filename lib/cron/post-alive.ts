@@ -38,8 +38,9 @@ export const postAliveStep: CronStep = {
        🔴 러너 채널만 본다 — API 채널(블로거·WP·유튜브)은 우리가 API 로 상태를 읽을 수 있고,
           러너가 브라우저로 열 이유가 없다(러너 시간은 발행에 쓴다). */
     const rows = await q(sql`
-      SELECT p.id, p.piece_id, p.account_id, p.external_url, p.channel
+      SELECT p.id, p.piece_id, p.account_id, p.external_url, p.channel, pc.title
         FROM posts p
+        LEFT JOIN pieces pc ON pc.id = p.piece_id
        WHERE p.tenant_id = ${ctx.tid}
          AND p.external_url IS NOT NULL
          AND p.published_at < NOW() - (${ALIVE_CHECK_DAYS} * INTERVAL '1 day')
@@ -67,8 +68,17 @@ export const postAliveStep: CronStep = {
         tenantId: ctx.tid, kind: "verify.post_alive",
         accountId: r.account_id ? n(r.account_id) : null,
         pieceId: r.piece_id ? n(r.piece_id) : null,
-        // 🔴 칸 이름은 `externalUrl` 이다(러너 `post-alive.mjs:25` 가 그 이름으로 읽는다 — `url` 로 보내면 «주소가 없어요»로 실패한다).
-        payload: { externalUrl: String(r.external_url), channel: String(r.channel ?? "") } as never,
+        /* 🔴 칸 이름 두 개가 **둘 다** 있어야 이 기능이 성립한다. 하나만 있으면 조용히 아무 일도 안 일어난다:
+             · `externalUrl` — **러너**가 이 이름으로 읽는다(`post-alive.mjs`). 없으면 «확인할 글 주소가 없어요»로 실패.
+             · `postId`      — **서버**가 이 이름으로 읽는다(`runner-jobs.ts` «통계·생존 확인» 분기 `n(payload.postId)`).
+                               🔴 없으면 `if (postId)` 가 거짓이라 **병합을 통째로 건너뛴다** — 러너가 «죽었다»를
+                               정확히 판정해 보내도 그 답이 **버려진다**. 처음 이 스텝을 쓸 때 이 칸을 빠뜨려서,
+                               «삭제 감지»가 코드상으로는 완성인데 실제로는 한 글자도 안 적히는 상태였다.
+                               `posts.stats.alive='false'` 는 `account-health.ts` 가 건강점수에서 −10 을 깎는 재료다.
+           (선례: `lib/cron/learn.ts` 의 `revenue.stats` 적재도 `payload.postId` 로 같은 분기를 탄다.) */
+        /* `title` 은 **서버**가 쓴다 — 같은 주소를 쿠키 없이 한 번 더 열어 «남이 볼 수 있나»를 볼 때,
+           제목이 있어야 «정말 그 글이 보인다»를 말할 수 있다(제목이 없으면 블로그 첫 화면으로 튕긴 것도 «찾았다»가 된다). */
+        payload: { externalUrl: String(r.external_url), channel: String(r.channel ?? ""), postId, title: String(r.title ?? "") } as never,
         dedupe: true,
       });
       made++;
