@@ -7,12 +7,21 @@
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 
-export type BlockType = "hook" | "para" | "h2" | "h3" | "quote" | "list" | "checklist" | "table" | "image" | "divider" | "tip" | "faq" | "hashtags" | "disclosure" | "adsense" | "toc" | "summary" | "affiliate";
+/**
+ * 🔴 [R8CLOSE-B1 §B4 · 2026-09-16] **블록 어휘는 `lib/blocks.ts` 한 곳이다.**
+ *   여기엔 같은 이름의 목록이 **한 벌 더** 적혀 있었다 — 두 벌이면 갈린다. `place` 를 blocks.ts 에 더하자마자
+ *   이 파일이 «그런 블록 없다»고 해서 바로 드러났다(오늘 코인·말투에서 겪은 «표 두 벌»과 같은 모양 · AC-78).
+ *   ⇒ 여기서는 **다시 적지 않고 그대로 가져온다.** 이름은 그대로 내보내서 부르는 쪽은 아무것도 안 바꿔도 된다.
+ */
+export type { BlockType } from "./blocks";
+import type { BlockType } from "./blocks";
 /* [R8 §2.5] `steps` 추가 — 인스타 카드뉴스의 «단계형». format 이 1종뿐이라 골격이 100% 겹치던 것을 다섯으로 늘리며 생겼다.
    🔴 새 열쇠를 더하면 **화면 라벨(`public/js/ui.js UI.FORMAT`)도 같이** 더해야 한다 — 안 그러면 화면에 빈칸이 뜬다(AC-52 계열). */
 export type FormatKey = "story" | "info" | "listicle" | "compare" | "qna" | "guide" | "cardnews" | "steps";
 
-export interface VisualMin { quote?: number; divider?: number; image?: number; h2?: number; tableOrList?: number; adsense?: number; checklist?: number; hashtags?: number; faq?: number }
+export interface VisualMin { quote?: number; divider?: number; image?: number; h2?: number; tableOrList?: number; adsense?: number; checklist?: number; hashtags?: number; faq?: number;
+  /** [R8CLOSE-B1 §B4] 🔴 **아무 채널도 안 쓴다**(일부러). 칸만 둔 이유는 다음 사람이 넣는 순간 `contractSelfConflicts` 가 잡게 하려는 것이다. */
+  place?: number }
 
 /* ═══════════ [R8-A §2 · B-1 2026-09-15] 계약의 «성격»을 바꾼 세 축 ═══════════
  *   조사 결론(`docs/active/2026-09-15-R8A-voice-text.md`): 우리 계약은 **실물이 아니라 «SEO 블로그가 말하는 이상적인 글»**을 베끼고 있었다.
@@ -124,7 +133,7 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
       qna: ["hook", "image", "quote", "h3", "para", "image", "h3", "para", "image", "h3", "para", "image", "divider", "checklist", "image", "tip", "image", "hashtags"],
       info: ["hook", "image", "para", "quote", "image", "list", "para", "image", "image", "divider", "para", "image", "tip", "image", "hashtags"],
     },
-    visual: ["사진 6~10장 + 캡션", "인용구(핵심 한 줄)", "구분선", "체크리스트", "소제목", "해시태그 5~10"],
+    visual: ["사진 6~10장 + 캡션", "인용구(핵심 한 줄)", "구분선", "체크리스트", "소제목", "해시태그 5~10", "장소/링크 카드"],
     /* 🔴 [R8 §9 · 2026-09-15] **요구를 우리가 늘 채울 수 있는 것만 남긴다** — `visual_min` 은 막지는 않지만 빨개지면 **재작성(=돈)** 을 부른다.
        뺀 것: ①`tiers.optional` 이 뺄 수 있는 칸(계약이 스스로 싸웠다 · `contractSelfConflicts` 가 0 이 되게)
        ②사진 장수 — 조달이 «AI 1장 + 고객·스톡»으로 바뀌므로 **늘 보장되는 1장**만 요구한다(6장을 요구하면 조달을 못 바꾼다).
@@ -139,6 +148,13 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     lengthByGroup: { review: { min: 1200, max: 2500 }, info: { min: 1500, max: 3000 }, life: { min: 1000, max: 2200 } },
     tiers: {
       required: ["hook", "para", "image"],
+      /* 🔴 [R8CLOSE-B1 §B4] `place`(장소/링크 카드)는 **어느 칸에도 없다** — 일부러다.
+         처음엔 `optional` 에 넣었는데, `expandForLength` 가 분량을 채우려고 optional 을 끌어다 쓰는 바람에
+         **네이버 글 네 구성 전부에 장소 블록이 박혔다**(하니스 ②가 잡았다). 그러면 장소가 없는 소재에도
+         자리가 생기고, 모델은 그 자리를 **지어낸 상호·주소**로 채운다 — 사진 캡션 묘사문보다 나쁘다
+         (고객이 손님을 엉뚱한 데로 보낸다). 2026-09-15 `visualMin.faq` 사고와 **같은 뿌리**다.
+         ⇒ 골격은 장소를 **강제하지 않는다.** 대신 프롬프트가 «소재에 실제로 장소가 나오면 하나 넣어도 된다»고
+           **허락**한다(`lib/content-gen.ts`). 있으면 넣고 없으면 안 넣는다 — 그게 «막지도 강제하지도 않는다»다. */
       optional: ["quote", "divider", "checklist", "tip", "list", "h3"],
       /* 🔴 목차·FAQ·요약은 네이버 블로그에서 흔하지 않다(스마트에디터에 그런 관례가 없다). 넣으면 «검색 최적화 글» 티가 난다. */
       suppress: ["toc", "faq", "summary", "adsense"],
@@ -715,7 +731,7 @@ function endWithAction(seq: BlockType[], c: WritingContract): BlockType[] {
  *      ⇒ 분량은 «문장으로도 구조로도» 안 잡히는 **세 번째 경우**다. 다음 라운드 후보: 블록마다 «최소 몇 자» 를 적어 주거나,
  *        `maxOutputTokens`·재작성 지시로 잡는다. 지금 어림값은 **실측 215자** 를 쓴다(늘리는 양이 과하지 않게).
  */
-const CHARS: Partial<Record<BlockType, number>> = { para: 420, hook: 260, h2: 30, h3: 25, list: 140, checklist: 130, table: 150, quote: 40, tip: 90, faq: 240, summary: 120, toc: 0, image: 0, divider: 0, adsense: 0, hashtags: 0, disclosure: 0, affiliate: 0 };
+const CHARS: Partial<Record<BlockType, number>> = { para: 420, hook: 260, h2: 30, h3: 25, list: 140, checklist: 130, table: 150, quote: 40, tip: 90, faq: 240, summary: 120, toc: 0, image: 0, divider: 0, adsense: 0, hashtags: 0, disclosure: 0, affiliate: 0, place: 40 };
 /**
  * 🔴 [R8 §9 · B-1 2026-09-15] **계약이 스스로 싸우는 자리**를 찾는다 — 게이트를 최소화하라는 규칙(CLAUDE §9)의 짝이다.
  *   `visualMin` 이 **요구**하는 블록을 `tiers.optional`·`suppress` 가 **뺄 수 있으면**, 빠진 글마다 `visual_min` 이 빨개지고
@@ -755,6 +771,9 @@ export function contractSelfConflicts(c: WritingContract): string[] {
   const NEED: Partial<Record<keyof VisualMin, BlockType[]>> = {
     quote: ["quote"], divider: ["divider"], image: ["image"], h2: ["h2"], checklist: ["checklist"],
     hashtags: ["hashtags"], adsense: ["adsense"], faq: ["faq"], tableOrList: ["table", "list", "checklist"],
+    /* [R8CLOSE-B1 §B4] 🔴 **지금 `visualMin.place` 를 쓰는 채널은 없다**(일부러 안 넣었다).
+       그래도 여기 적어 두는 이유: 다음 사람이 넣는 순간 `contractSelfConflicts` 가 **바로 잡아 주게** 하려는 것이다. */
+    place: ["place"],
   };
   for (const [key, want] of Object.entries(c.visualMin ?? {}) as [keyof VisualMin, number][]) {
     if (!want) continue;

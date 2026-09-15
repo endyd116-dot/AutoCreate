@@ -209,7 +209,15 @@ const THREE_REST = [
     const prompt = inFile("lib/content-gen.ts", /slangPromptLine/);
     return [yes(table && gate && prompt), table ? `표 ${table} · 검사 ${gate} · 프롬프트 ${prompt}` : "0건"];
   }],
-  ["B4 장소 카드", () => [yes(anyFile(["lib/blocks.ts", "lib/writing-contracts.ts"], /placeCard|장소 카드/).length), "0건"]],
+  /* 🔴 [2026-09-16 B-1] 종전 판정은 주석에 «장소 카드»만 스쳐도 닫힘이었다(B3 와 같은 모양).
+     ⇒ ①블록 어휘에 있고 ②러너가 **실제로 내려앉히고** ③🔴 계약이 스스로 안 싸우는가(visualMin 에 안 넣었나), 셋으로 조인다.
+     ③ 이 없으면 2026-09-15 `visualMin.faq` 사고(네이버 글 10편 중 8편 재작성 · 돈 두 배)를 그대로 다시 낸다. */
+  ["B4 장소 카드", () => {
+    const block = inFile("lib/blocks.ts", /place.: . name: string/);
+    const runner = inFile("runner/lib/plan.mjs", /장소 카드는 아직 못 넣어서/);
+    const notForced = !inFile("lib/writing-contracts.ts", /visualMin: .[^}]*place/);
+    return [yes(block && runner && notForced), block ? `블록 ${block} · 러너 링크대체 ${runner} · visualMin 에 안 넣음 ${notForced}` : "0건"];
+  }],
   ["B5 쓰레드 연결글", () => [yes(inFile("lib/publish/threads.ts", /연결글|threadChain|reply_to/), ), "0건"]],
   ["B6 블로거·WP AEO 규격", () => {
     /* 🔴 낱말 «AEO» 는 계약의 visual 라벨(«FAQ(AEO)»)에도 있다 — 그건 **규격 구현이 아니다**(대용물 · AC-57).
