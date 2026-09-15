@@ -73,6 +73,10 @@ const TARGETS = [
   ["러너 지문 구속", "classifyFpBinding", "lib/runner-jobs.ts", "훔친 토큰이 다른 PC 에서 그대로 통한다"],
   ["스톡 사진 찾기(§10 사진값)", "searchStock", "lib/stock/index.ts", "사진이 전부 AI 로만 만들어져 편당 원가의 85%가 그대로 남는다"],
   ["스톡 사진 붙이기(§10 사진값)", "attachStockPhoto", "lib/stock/attach.ts", "찾기만 되고 글에 못 붙여 «고를 수는 있는데 쓸 수는 없는» 기능이 된다"],
+  /* [2026-09-16 메인] 🔴 A 가 «크레딧 함수를 부르는 곳이 0» 을 잡았다 — 하니스가 못 봤던 자리라 여기에 박는다.
+     스톡 약관이 작가·출처 표기를 요구하고, 그게 빠지면 **키가 죽어 스톡이 통째로 멈춘다**(편당 원가 세 배). */
+  ["스톡 사진 크레딧 — 본문에 넣어 준다", "ensurePhotoCreditHtml", "lib/publish/gate.ts", "스톡 작가·출처가 발행 본문에 안 실려 약관을 어기고 키가 죽는다"],
+  ["스톡 사진 크레딧 — 줄을 만든다", "creditLines", "lib/photo-source.ts", "크레딧 문장을 만드는 기계가 하니스에서만 돌고 제품에서는 안 돈다"],
   ["카드뉴스 채널 판정(§2.5)", "isCardnewsChannel", "lib/writing-contracts.ts", "편성·코인·생성이 각자 «인스타면 카드뉴스»를 따로 적어 언젠가 갈라진다"],
   ["수치 주장 표시(§2.4)", "findNumericClaims", "lib/fact-claims.ts", "«근거 없는 수치 금지»가 프롬프트에만 있고 지키는지 아무도 안 재는 상태로 돌아간다"],
   ["수치 주장 문구(§2.4)", "claimsLine", "lib/fact-claims.ts", "검수 화면이 «확인해 주세요»를 제 문장으로 또 지어 서버와 갈린다", "external"],

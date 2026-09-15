@@ -22,11 +22,15 @@ import { GATE_LABEL, type GateCheck, type GateReport } from "../ai-tell-gate";
 import { checkDisclosureHtml, disclosureTextFor } from "../disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "../banned-words";
 import { htmlToPlain } from "../blocks";
+import { creditLines } from "../photo-source";
+import type { PublishImage } from "./contract";
 
 export interface GateSubject {
   channel: string;
   title: string;
   bodyHtml: string;
+  /** [2026-09-16] 크레딧을 쓰기 위한 재료 — 스톡 사진이 있으면 본문 끝에 «작가 · Pexels (주소)» 한 벌이 붙는다. */
+  images?: PublishImage[];
   /** 제휴가 붙은 글인가(meta.affiliate 또는 meta.adDisclosure). */
   affiliate?: { provider?: string } | null;
   adDisclosure?: boolean;
@@ -93,6 +97,29 @@ export function countAffiliateLinks(html: string): number {
 /** 애드센스를 붙일 수 있는 채널(네이버 블로그는 애드포스트라 제외). */
 export const ADSENSE_CHANNELS: ReadonlySet<string> = new Set(["tistory", "blogger", "wordpress"]);
 
+const CREDIT_RE = /<div[^>]*class="[^"]*photo-credit[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi;
+
+/**
+ * 🔴 스톡 사진 크레딧을 **본문 끝에 넣어 준다**(2026-09-16 메인 · A 가 «부르는 곳 0» 을 잡았다).
+ *
+ *   왜 여기인가: 이건 **막는 일이 아니라 대신 해 주는 일**이다(CLAUDE §9-4 — 고지 문장을 넣어 주는 것과 같은 자리).
+ *   왜 해야 하는가: Pexels·Pixabay 약관이 **작가·출처 표기를 요구**하고, `lib/stock/index.ts:22` 가 스스로
+ *     «**키가 죽는 진짜 경로는 크레딧 미표기**»라고 적어 뒀다. 키가 죽으면 **스톡이 통째로 멈춘다**
+ *     — 그러면 사진이 다시 전부 AI 로 구워지고 편당 원가가 세 배가 된다(2026-09-15 실측 ₩134 → ₩458).
+ *   🔴 사장님이 «무시해도 된다»고 하신 것은 **사람·상표 판정**이지 **약관 준수가 아니다**(`lib/stock/index.ts:24`).
+ *
+ *   멱등: 이미 붙어 있던 크레딧 덩이는 지우고 정본 하나만 둔다(고지와 같은 규칙).
+ *   스톡이 하나도 없으면 **아무것도 안 붙인다**(빈 덩이를 남의 블로그에 남기지 않는다).
+ */
+export function ensurePhotoCreditHtml(html: string, images: PublishImage[] | undefined): string {
+  const lines = creditLines((images ?? []).map((i) => ({ source: i.source ?? null, stock: i.stock ?? null })));
+  const stripped = String(html || "").replace(CREDIT_RE, "");
+  if (!lines.length) return stripped;
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `${stripped}
+<div class="photo-credit"><p>사진 출처</p><ul>${lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div>`;
+}
+
 /**
  * runPublishGate — 발행 직전 준비 + 검사.
  *   🔴 `ok` 는 **«검사를 다 지났나»**일 뿐 **«발행해도 되나»가 아니다**(`CLAUDE.md §9` · 사장님 2026-09-15).
@@ -111,6 +138,9 @@ export function runPublishGate(subject: GateSubject, account?: GateAccountHints)
 
   // ② 애드센스 자리 실체화(채널이 받을 수 있을 때만).
   html = ADSENSE_CHANNELS.has(subject.channel) ? materializeAdsense(html, account?.adsensePub) : materializeAdsense(html, undefined);
+
+  // ②-b 🔴 스톡 사진 크레딧 — 막는 게 아니라 **대신 넣어 준다**(§9-4 · 고지와 같은 자리).
+  html = ensurePhotoCreditHtml(html, subject.images);
 
   // ③ 센다.
   const checks: GateCheck[] = [];
