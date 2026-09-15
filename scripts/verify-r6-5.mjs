@@ -150,8 +150,10 @@ async function main() {
     const lines = o.split(/\r?\n/).filter((l) => l.startsWith("RESULT "));
     if (!lines.length) rec("캡션 프로브 실행", false, o.slice(-150).replace(/\s+/g, " "));
     for (const l of lines) { try { const x = JSON.parse(l.slice(7)); rec(x.step, x.ok, x.note); } catch { /* */ } }
-    const wp = existsSync("lib/publish/wordpress.ts") ? readFileSync("lib/publish/wordpress.ts", "utf8") : "";
-    rec("wordpress alt_text — 캡션 없으면 alt 도 빈다(B2 잇는 중 · 결함 기록만)", /alt_text:\s*caption/.test(wp) ? "WARN" : !/alt_text:\s*caption/.test(wp), /alt_text:\s*caption/.test(wp) ? "wordpress.ts:71 `alt_text: caption` — 캡션 기본 없음이라 alt 가 빈다 · B2 몫" : "alt 가 prompt 파생으로 바뀜");
+    // 주석에 적힌 «종전엔 alt_text: caption» 을 코드로 세지 않는다(내가 세 번째 밟는 함정) — 코드줄만 본다.
+    const wpCode = (existsSync("lib/publish/wordpress.ts") ? readFileSync("lib/publish/wordpress.ts", "utf8") : "").split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    const altFromAlt = /alt_text:\s*altText\b/.test(wpCode), altFromCaption = /JSON\.stringify\([^\n]*alt_text:\s*caption\b/.test(wpCode);   // 블록 주석 안 설명줄(«종전엔 alt_text: caption»)이 아니라 **실제 body 조립줄**만
+    rec("wordpress alt — 캡션과 분리(alt_text: altText · B2 5638765) · 캡션 없어도 alt 가 빈다 0", altFromAlt && !altFromCaption, altFromAlt ? "alt_text: altText" : altFromCaption ? "🔴 alt_text: caption 잔존" : "alt_text 못 찾음");
   }
 
   /* ══ tooSoon — ④ «이번엔 건너뛰어요» = 서버 `skipReason:"too_soon"`(다음 제작 틱 > 발행 시각) · 5경우 + 타 테넌트 ══ */
