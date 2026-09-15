@@ -40,7 +40,7 @@ function extOf(url: string, contentType: string): string {
 }
 
 /** 이미지 1장 업로드 → 워드프레스 URL. 실패는 null(그 장만 원본 URL 로 남는다 — 발행을 막지 않는다). */
-async function uploadMedia(site: string, auth: string, imageUrl: string, caption?: string): Promise<string | null> {
+async function uploadMedia(site: string, auth: string, imageUrl: string, caption?: string, alt?: string): Promise<string | null> {
   try {
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     let buf: ArrayBuffer; let ct: string;
@@ -64,11 +64,17 @@ async function uploadMedia(site: string, auth: string, imageUrl: string, caption
     if (up.status < 200 || up.status >= 300) return null;
     const id = Number(up.json?.id ?? 0);
     const srcUrl = String(up.json?.source_url ?? "").trim();
-    if (id && caption) {
-      // 캡션은 실패해도 무시(이미지는 이미 올라갔다).
+    /* 🔴 alt 와 caption 을 **따로** 보낸다(§5C · B-1 84a2372 이후).
+       종전엔 `alt_text: caption` 이었는데, 캡션이 «대부분 없다»로 바뀌면서 그대로 두면 **alt 가 통째로 빈다** —
+       스크린리더에서 사진이 사라지고 이미지 검색에서도 빠진다. alt 는 없으면 캡션으로, 그것도 없으면 빈 값.
+       🔴 캡션이 없어도 alt 만 있으면 보내야 하므로 조건도 «둘 중 하나라도 있으면» 으로 넓힌다
+          (종전 `if (id && caption)` 은 캡션 없는 사진의 alt 를 **영영 안 보냈다**). */
+    const altText = String(alt ?? caption ?? "").slice(0, 200);
+    if (id && (caption || altText)) {
+      // 실패해도 무시(이미지는 이미 올라갔다).
       await wpFetch(`${site}/wp-json/wp/v2/media/${id}`, {
         method: "POST", headers: { Authorization: auth, "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ caption, alt_text: caption }),
+        body: JSON.stringify({ ...(caption ? { caption } : {}), alt_text: altText }),
       }).catch(() => null);
     }
     return srcUrl || null;
@@ -108,7 +114,7 @@ export async function publishToWordpress(piece: PublishPiece, account: PublishAc
   for (const img of piece.images) {
     const url = String(img.url || "").trim();
     if (!url || !html.includes(url)) continue;
-    const wpUrl = await uploadMedia(site, auth, url, img.caption);
+    const wpUrl = await uploadMedia(site, auth, url, img.caption, img.alt);
     if (wpUrl) html = html.split(url).join(wpUrl);
   }
 

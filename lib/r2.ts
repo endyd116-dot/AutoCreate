@@ -36,9 +36,18 @@ export function safeKey(prefix: string, ext: string): string {
   return `${p}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${e}`;
 }
 
-export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string): Promise<{ key: string; url: string }> {
+/**
+ * 기본 캐시는 **영구·불변**이다 — 우리 키는 대부분 `safeKey()` 로 이름이 매번 달라서 그래도 된다.
+ * 🔴 그러나 **이름이 고정인 파일**(예: `runner/latest.json`)에 그 헤더를 쓰면 새로 올려도 옛 값이 한참 읽힌다 —
+ *    자동 업데이트가 «조용히» 멈춘다. 그런 파일은 호출부가 짧은 캐시를 직접 준다.
+ */
+export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string, cacheControl = "public, max-age=31536000, immutable", contentDisposition?: string): Promise<{ key: string; url: string }> {
   const client = getR2Client();
-  await client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: "public, max-age=31536000, immutable" }));
+  await client.send(new PutObjectCommand({
+    Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: cacheControl,
+    // 저장해 두는 «이 이름으로 저장» — presign 의 ResponseContentDisposition 이 우선이지만, 서명 없이 열릴 때의 보루다.
+    ...(contentDisposition ? { ContentDisposition: contentDisposition } : {}),
+  }));
   return { key, url: r2PublicUrl(key) };
 }
 
@@ -71,10 +80,23 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 /** 검수 화면이 한 번 열어 끝까지 재생할 만큼(기본 6시간 · 상한 7일 = SigV4 한계). */
 export const PRESIGN_GET_TTL_SEC = Math.min(604_800, Math.max(60, Number(process.env.R2_PRESIGN_TTL_SEC || "21600")));
 
-/** 읽기 서명 URL — 화면이 presign 을 따로 요청하지 않도록 **서버가 채워서** 내려보낸다(A 전제). */
-export async function r2PresignGet(key: string, ttlSec: number = PRESIGN_GET_TTL_SEC): Promise<string> {
+/**
+ * 읽기 서명 URL — 화면이 presign 을 따로 요청하지 않도록 **서버가 채워서** 내려보낸다(A 전제).
+ *
+ * `filename` 을 주면 «이 이름으로 저장» 을 **서명 안에** 담는다(`ResponseContentDisposition`).
+ * 🔴 왜 서명에 담아야 하나(2026-09-15 A 발견): 받는 곳은 R2 도메인이라 **우리 화면과 출처가 다르다** —
+ *    `<a download="...">` 는 cross-origin 에서 **무시된다**. 그래서 이름을 안 담으면 브라우저는 키 이름으로 저장하고,
+ *    고객 다운로드 폴더에는 «v1.1.3.zip» 처럼 **무엇인지 알 수 없는 파일**이 남는다.
+ *    이름은 서명에 들어가므로 나중에 URL 을 만져 바꿀 수도 없다(서명이 깨진다).
+ */
+export async function r2PresignGet(key: string, ttlSec: number = PRESIGN_GET_TTL_SEC, opts: { filename?: string } = {}): Promise<string> {
   const client = getR2Client();
-  return await getSignedUrl(client, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: ttlSec });
+  // 따옴표·역슬래시·개행은 헤더를 깨뜨린다 — 이름은 우리가 만들지만 방어해 둔다(파일명이 헤더 주입 자리가 되지 않게).
+  const safe = String(opts.filename ?? "").replace(/[\r\n"\\]/g, "").slice(0, 120);
+  return await getSignedUrl(client, new GetObjectCommand({
+    Bucket: R2_BUCKET, Key: key,
+    ...(safe ? { ResponseContentDisposition: `attachment; filename="${safe}"` } : {}),
+  }), { expiresIn: ttlSec });
 }
 /** 쓰기 서명 URL — 러너가 mp4·포스터를 직접 PUT 한다(6MB 본문 우회 · 러너에 R2 자격 0). */
 export async function r2PresignPut(key: string, contentType: string, ttlSec = 3600): Promise<string> {
@@ -88,4 +110,53 @@ export async function r2Head(key: string): Promise<{ bytes: number; contentType:
     const r = await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
     return { bytes: Number(r.ContentLength || 0), contentType: String(r.ContentType || "application/octet-stream") };
   } catch { return null; }
+}
+
+/* ═══════════ 삭제(2026-09-15 · 메인 발주) — 🔴 되돌릴 수 없다. R2 는 버전 관리가 없다(AC-37). ═══════════
+ *   쓰는 곳: 테스트 잔재 정리 · (앞으로) 테넌트 삭제·탈퇴 · 내보내기 만료 정리. 지금 리포에 테넌트 삭제 흐름은 **없다**(호출처 0 · 2026-09-15 grep).
+ *   🔴 접두 삭제는 **테넌트 접두(`autocreate/{tid}/`)만** 받는다 — `autocreate/` 통째나 공용 `autocreate/bgm/` 은 거부한다(한 줄 실수로 전 테넌트 자산이 날아가는 일 0).
+ *   삭제 전에 몇 개인지 세고(`dryRun`) 지운 키 수를 돌려준다 — «지웠다»는 말은 숫자와 함께만. */
+import { DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+
+export async function r2Delete(key: string): Promise<boolean> {
+  if (!/^autocreate\/[^/]+\/.+/.test(key)) throw new Error(`[R2] 삭제 거부 — 테넌트 자산 키가 아닙니다: ${key}`);
+  const client = getR2Client();
+  try { await client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key })); return true; }
+  catch (e) { console.error("[R2] delete 실패", key, String((e as Error)?.message ?? e).slice(0, 120)); return false; }
+}
+
+/** 접두 아래 키 목록(페이지 전부 · 상한 `max`). 목록만 — 지우지 않는다. */
+export async function r2ListPrefix(prefix: string, max = 5000): Promise<string[]> {
+  const client = getR2Client();
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const r = await client.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: prefix, ContinuationToken: token, MaxKeys: 1000 }));
+    for (const o of r.Contents ?? []) if (o.Key) keys.push(o.Key);
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token && keys.length < max);
+  return keys.slice(0, max);
+}
+
+/**
+ * r2DeletePrefix — 테넌트 접두 아래를 전부 지운다. 🔴 `autocreate/{tid}/` 꼴만(숫자 tid) · 공용 접두 거부.
+ *   `dryRun:true` 면 세기만 한다. 반환 = { listed, deleted, failed }.
+ */
+export async function r2DeletePrefix(prefix: string, opts: { dryRun?: boolean; max?: number } = {}): Promise<{ listed: number; deleted: number; failed: number; keys: string[] }> {
+  if (!/^autocreate\/\d+\/$/.test(prefix)) throw new Error(`[R2] 접두 삭제 거부 — 'autocreate/{tid}/' 꼴만 받습니다: ${prefix}`);
+  const keys = await r2ListPrefix(prefix, opts.max ?? 5000);
+  if (opts.dryRun || !keys.length) return { listed: keys.length, deleted: 0, failed: 0, keys };
+  const client = getR2Client();
+  let deleted = 0, failed = 0;
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000);
+    try {
+      const r = await client.send(new DeleteObjectsCommand({ Bucket: R2_BUCKET, Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true } }));
+      const errs = r.Errors?.length ?? 0;
+      failed += errs; deleted += batch.length - errs;
+      for (const e of r.Errors ?? []) console.error("[R2] 접두 삭제 실패", e.Key, e.Message);
+    } catch (e) { failed += batch.length; console.error("[R2] 접두 삭제 배치 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
+  }
+  console.log(`[R2] ${prefix} 아래 ${deleted}/${keys.length} 삭제${failed ? ` · 실패 ${failed}` : ""}`);
+  return { listed: keys.length, deleted, failed, keys };
 }
