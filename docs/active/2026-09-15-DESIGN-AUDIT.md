@@ -115,6 +115,20 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | B (➖ 14 전체) | §7·§11·§12·§14·§15·§16 | `tenant_members`→users.role · `sessions`→JWT · `login_attempts`→users 칸 · `topic_sources`→topics.factors · `piece_gates`→gate_report · `schedules`→slots · `runner_heartbeats`→last_seen_at · `ai_model_probes`→ai_settings · `assets-presign`→서버 presign · 크론 6→우산 2 · 2FA Phase 4 · FK 방향 · 코인 이전 Phase 5 … | 표·API 이름을 코드에 맞춰 §14·§15 갱신 | `audit/2026-09-15-B.md` |
 | B2 (➖ 6 전체) | §2·§8 | 상태 어휘 `live|beta|planned|paused` ↔ 실제 `active|planned|down` · 런처 파일명 · §8.2 잡 목록 누락 5종 · §8.3 API 경로 표기 · 클립 게시물형/영상 두 행 · 정본 파일명 | `audit/2026-09-15-B2.md` |
 
+### 0.5b 문구 규칙 — 값이 들어가는 자리엔 **조사를 붙이지 않는다**(2026-09-15 · 실측에서 나왔다)
+
+라이브 응답이 «**네이버 클립 는** 아직 열지 않았어요»로 나왔다. 한국어 조사(은/는·이/가·을/를)는 **앞 낱말의 받침**에 따라 달라지는데,
+채널·계정·글 이름처럼 **값이 들어오는 자리**는 받침을 미리 알 수 없다(«네이버 클립**은**» · «유튜브 쇼츠**는**» · «블로거**는**»).
+
+| 쓰지 마라 | 이렇게 | 쓰는 곳 |
+|---|---|---|
+| `{이름} 는 아직…` | **`{이름}, 아직 열지 않았어요`**(쉼표로 끊는다) | 게이트·오류 문장 |
+| `{이름} 을 연결했어요` | **`{이름} 연결이 열렸어요`**(조사 없는 명사구) | 알림 제목 |
+| `{핸들} 이 정지됐어요` | **`@{핸들} · 정지됐어요`** 또는 «계정이 정지됐어요» | 알림·배너 |
+
+🔴 **조사를 꼭 써야 하면 값을 앞에 두지 말고 문장을 바꾼다** — 받침 판정 코드(유니코드 종성 계산)를 넣지 마라. 문장을 바꾸는 쪽이 싸고 안 틀린다.
+적용처(2026-09-15): `netlify/functions/accounts.ts checkConnectable` · `lib/cron/channel-opened.ts` 두 문구 · 이후 새 문구도 이 규칙으로.
+
 ### 0.6 사장님 결정이 필요한 것
 
 1. **레지스트리 개통** — `youtube_shorts`·`naver_clip`·`reels`(·threads·instagram) 을 `active` 로 켤지(운영센터 «채널» 1클릭 · 켜면 그리드에 뜨고 OAuth 채널은 «준비 중이에요» 정직 표기). 켜지 않으면 R7 묶음 1 은 의미가 없다.
@@ -578,6 +592,9 @@ COMMIT;
 | §3.3 `coin-reconcile` | 🟠 원장 대조 0 | 판정기 `lib/coin-reconcile.ts` 한 벌 + 크론 `coin.reconcile`(월 06:00 KST · 전역 1잠금 · 0건이면 감사 0) | `9ec12f0` | 충전 미지급 검사는 라이브 `coin_orders` 0행이라 ⬜ |
 | §3.3 `ai-cache` | 🟠 응답 캐시 0 | AM 이식(5분 TTL · tenantId 키 · googleSearch 제외 · **적중은 `ai_usage` 0 · `costUsd` 0**) | `d2f0b21` | `ai-key`(키 로테이션)는 R8 보류 |
 | §13.5 외부 값 «기준일» | 🟠 매체 집계일이 KST 와 달라도 말 안 함 | `DAY_BASIS_OF`/`DAY_BASIS_NOTE` + `revenue-sources` 응답 `dayBasis` · **날짜는 옮기지 않는다** | `6a5ab40` | 화면 한 줄(A) · ⬜ 실측은 키 뒤 |
+| §9.3 수익 내역 | (조사 밖 · A 여정에서 나옴) | 🔴 `byAccount`·`topPieces` 가 **INNER JOIN** 이라 계정·글이 지워지면 그 돈이 내역에서 빠지고 합계엔 남았다(합계 ≠ 내역) → LEFT JOIN + 서버가 이름 부여(«지운 계정»·«지운 글»·«제목 없는 글» + `deleted`/`untitled`) | `24d16d6` | 화면 표시는 A |
+| §2 채널 개통 | 🟠 온보딩에서 고른 planned 채널이 «사라진다» | 관심 채널이 열리면 알림 — **«지금 붙일 수 있나»(앱 키)로 문구를 가른다**: `channel_opened`(붙일 수 있다) · `channel_soon`(키 대기) · 키가 꽂히면 «열렸어요»가 한 번 더 · 스텝 `waitingKeys` | `24d16d6` `f9ae8bb` | 화면 한 줄은 A |
+| §2·§7.1 계정 연결 | 🟠 `blogger` 는 active 인데 키가 없어 **눌러도 안 붙는다**(그리드엔 뜬다) | `accounts-list.channels[].connectable` + 사유 3(`not_open`·`no_provider_key`·`no_site_url`) · `accounts-add`·`oauth-start` 에 402 `channel_not_connectable`(**기존 계정 예외**) | `020fb15` `63a9ede` | 그리드·시트 문구는 A |
 | §19 법 라이선스 표 | 🟠 약관에 한 줄뿐 | `docs/rules/LICENSES.md`(폰트 OFL · BGM 12곡 CC0 · AI provider·금지 3종 · ffmpeg 는 우리가 배포 안 함) | `001dccf` | 법률 검토 때 같이 본다 |
 
 **다른 세션의 정정도 여기 모은다**
@@ -586,8 +603,9 @@ COMMIT;
 |---|---|---|---|---|
 | B2 자가 정정(2026-09-15) | `verify.post_alive` ✅ | **🟡(코드만)** — 러너 채널 파일·잡 kind·report 처리까지 있는데 **적재하는 코드가 0** 이라 한 번도 돈 적이 없다 | 내가 되짚음: `enqueue*` 호출 5곳(`account-health`=session.login · `learn`=revenue.stats · `revenue-sync`=revenue.* · `publish/index`=publish.* · 러너 큐) **어디에도 없다** · 그래서 `account-health` 의 «발행 후 삭제» 감점(`posts.stats->>alive=false`)이 **영영 0**(AC-29 «있는 게이트가 안 지킨다»의 잡 판) | **R7 B2 §2** — 발행 성공 **7일 뒤 1회** · hourly 적재 · 멱등 `post:{id}:alive7` |
 
-**되짚기에서 나온 것 2개(기록감)**
+**되짚기에서 나온 것 4개(기록감)**
 - 잠금 SQL 경합: 주 1회 선점을 `{day:null}` 로 INSERT 하면 **첫 주에 두 번째 테넌트 호출이 통과해 대조가 두 번 돈다**(프로브로 재현 → VALUES 에 오늘 날짜를 바로 넣어 수정). «ON CONFLICT 로 막았다»는 첫 삽입이 조건을 만족할 때만 참이다.
+- 🔴 **막는 응답에 «돈 이야기»를 섞지 않는다**: `channel_not_connectable` 402 에 `reason:"plan_limit"` 을 실었다면 화면(`ui.js UI.gate`)이 **요금제 업셀 시트**를 띄웠을 것이다 — «아직 안 연 채널»에 «요금제 보기»가 뜨는 꼴. 같은 상태코드라도 **신호(step)는 갈라 쓴다**(메인 판정: 402 유지 · 200 으로 낮추면 «막혔다»가 HTTP 층에서 안 보여 로그·하니스가 «성공»으로 센다).
 - 링크 검사 거짓 경고: `daum.net` 은 **HEAD 404 · GET 200** 이다. 한 번만 물으면 멀쩡한 사이트가 «안 열려요»로 뜨고, 그 한 번이 이 검사를 영영 못 믿게 만든다 → HEAD 가 나쁘면 GET 으로 재확인한 뒤에야 실패로 센다.
 
 ### §9-a 채워질 자리 — B2 §2.5 `proxies` 표(값 대기 중)
