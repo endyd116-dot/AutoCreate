@@ -35,6 +35,7 @@ import { reapStep } from "./reap";
 import { videoSweepStep } from "./video-sweep";
 import { revenueSyncStep } from "./revenue-sync";
 import { managedRunnerWatchStep } from "./managed-runner-watch";
+import { postAliveStep } from "./post-alive";
 import { billingChargeStep } from "./billing-charge";
 import { trialExpireStep } from "./trial-expire";
 import { csAutoTicketStep } from "./cs-auto-ticket";
@@ -69,6 +70,7 @@ export const STEPS: AnyStep[] = [
   channelOpenedStep,   // hourly · 관심 채널(온보딩에서 고른 planned)이 열리면 1회 알림(P1R7 B3 · 영구 멱등)
   coinReconcileStep,   // hourly(월 06:00 KST 주 1회 · 전역 1잠금) · 코인 원장 대조 — 어긋난 행 있을 때만 감사(P1R7 B3)
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
+  postAliveStep,       // hourly · 발행 7일 뒤 «아직 살아 있나» 1회(P1R7 §2 · 영구 멱등)
   publisherStep,       // 5m · due 발행
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
   managedRunnerWatchStep, // 5m · **global** — 관리형(우리 기기) 러너가 30분 조용하면 운영 감사(P1R7 §2.4)
