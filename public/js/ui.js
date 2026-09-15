@@ -481,6 +481,10 @@
     reassign: ["warn", '<path d="M4 8h13l-3-3M20 16H7l3 3"/>'],
     publish: ["warn", '<path d="M12 20V5M6 11l6-6 6 6"/>'],
     review: ["soft", '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'],
+    /* [R8 §4.5] 🔴 **기다리는 검수** — `review` 와 **같은 눈 모양**인데 색만 주의(warn)다.
+       왜 색을 올리나: 이건 «봐 주세요»가 아니라 «아무도 안 보면 그 글이 나가지 못한 채 남는다»이다(팀 승인 · 자동 승인에서 뺀 글).
+       🔴 새 그림을 만들지 않는다(495줄 규칙) — 같은 얼굴의 다른 색. */
+    review_wait: ["warn", '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'],
     account: ["warn", '<circle cx="9" cy="9" r="4"/><path d="M12.5 12.5L20 20M17 17l2-2"/>'],
     coin: ["money", '<circle cx="12" cy="12" r="8"/><path d="M9 9l3 4 3-4M12 13v4"/>'],
     setup: ["soft", '<path d="M12 5v14M5 12h14"/>'],
@@ -494,8 +498,11 @@
   /* [R7 §1.4 · B-1 a1c9801] 홈 «해야 할 일» 7줄 — 새 kind 는 이미 있는 아이콘으로 잇는다(아이콘을 새로 만들지 않는다) */
   /* [AC-52 · 2026-09-15] 서버가 실제로 보내는 kind 를 전수 대조해 채웠다(scripts/verify-label-surface.mjs 가 상시로 잰다) */
   /* [R8 §9 · B3] `gate_risk` — 위험이 있는 채로 승인됐다(자동 승인처럼 아무도 화면을 안 보는 길을 위해 서버가 1회 보낸다) · «검수»와 같은 얼굴
-     [R8 · B] `takedown_*` — 침해 신고. 🔴 «알림»이 아니라 **해야 끝나는 일**이라 주의 계열(reassign)로 · 🔴 «곧 정지됩니다»로 쓰지 않는다(자동 정지는 없다) */
-  UI.KIND_ALIAS = { gate_risk: "review", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+     [R8 · B] `takedown_*` — 침해 신고. 🔴 «알림»이 아니라 **해야 끝나는 일**이라 주의 계열(reassign)로 · 🔴 «곧 정지됩니다»로 쓰지 않는다(자동 정지는 없다)
+     [R8 §4.5 · B] `team_review` — 팀원이 만든 글이 주인을 기다린다(`lib/team.ts notifyOwnersWaiting`). 🔴 `review`(soft) 로 잇지 마라 —
+        마감 자동 승인이 이 글을 **아예 안 집기 때문에**(lib/cron/review-deadline.ts) 주인이 안 보면 그대로 멈춰 있다. 그래서 주의(`review_wait`)다.
+        링크는 서버가 실어 준다(`/app/pieces.html?status=in_review`) — KIND_LINK 에 또 적지 않는다(두 출처 금지). */
+  UI.KIND_ALIAS = { gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
