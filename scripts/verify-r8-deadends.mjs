@@ -233,6 +233,46 @@ for (const [label, oldSym, oldOwner, newSym, newOwner] of OLD) {
     + (oldHits.length && !newHits.length ? " ⇒ 🔴 **새 정본은 아무도 안 부르고 옛 값이 전부 돌고 있다**" : ""));
 }
 
+/* ═══ [2026-09-16 · C 가 잡은 E1 · B 수리] 🔴 **서버가 내는 AI 원가 분해를 화면이 읽나** ═══
+   이 병은 오늘 열다섯 번 잡은 그것인데 **방향이 반대라 더 나쁘다**: 서버·순수 하니스가 다 초록이라 아무도 안 본다.
+   🔴 그리고 C 가 보고한 것보다 **넓었다** — `byProvider` 만이 아니라 `calls`·`byPurpose`·`byModel`·`excluded`·`overPlan` 이 **다 안 읽혔다**.
+      `public/ops/index.html` 은 `aiCost` 에서 `usd`·`krw`·`fxMissing` 셋만 그린다(실측).
+
+   🔴 **왜 위 심볼 목록에 안 넣었나**: 저 셈법은 «정의 파일이 자기를 쓰면 호출로 센다»(C 의 가짜 빨강 수리).
+      그런데 **응답 키**는 자기 파일이 «쓰는» 게 당연하다 — 그건 소비가 아니라 **생산**이다. 그대로 넣으면 **늘 초록인 가짜 검사**가 된다.
+      ⇒ «누가 읽나»는 **읽는 쪽(public/**)에서** 세야 한다.
+
+   🔴 **음성·양성 대조를 같이 둔다**: `fxMissing` 은 화면이 **이미 읽는** 키다. 그게 0으로 나오면 **이 검사 자체가 고장 난 것**이다
+      (셈법이 틀렸는데 «다 죽었다»고 빨갛게 우는 검사가 제일 나쁘다). */
+{
+  const SCREENS = PRODUCT.filter((p) => p.startsWith("public/"));
+  const readsInScreens = (key) => {
+    const re = new RegExp(`\\b${key}\\b`);
+    return SCREENS.filter((p) => re.test(CODE.get(p) ?? "")).map((p) => p.replace("public/", ""));
+  };
+  /* 양성 대조 — 이게 0이면 셈법이 고장 난 것이다. */
+  const control = readsInScreens("fxMissing");
+  rec("🔴 사슬 검사 자체가 도나(양성 대조 · 화면이 이미 읽는 키)", control.length > 0,
+    control.length ? `fxMissing 을 화면 ${control.length}곳이 읽는다 [${control.slice(0, 2).join(" ")}]` : "🔴 대조 키마저 0 — 이 검사의 셈법이 고장 났다(빨강을 믿지 마라)");
+
+  const AI_KEYS = [
+    ["제공사별(호출 수 기준)", "byProvider", "«어디에 많이 기대고 있나»를 서버만 알고 운영자는 영영 못 본다"],
+    ["용도별(무엇이 비싼가)", "byPurpose", "«사진이 85%»를 서버만 알고 화면은 합계 한 줄만 보여 준다"],
+    ["모델별", "byModel", "어떤 모델이 돈을 먹는지 화면에서 못 본다"],
+    ["우리가 안은 몫", "overPlan", "«스톡이 비어서 AI 가 다 구웠다»는 신호가 감사에만 남는다"],
+    ["뺀 몫(내부·하니스·고객 키)", "excluded", "«왜 이 숫자가 작아 보이나»를 화면이 설명하지 못한다"],
+    /* 🔴 «호출 수»는 따로 안 센다 — 키가 `aiCost.calls` 인데 `calls` 는 화면 어디에나 있는 낱말이라
+       **가짜 초록**이 나온다. 위 두 줄(`byPurpose`·`byProvider`)이 줄마다 `calls` 를 이미 들고 있어 그걸 그리면 같이 닿는다.
+       🔴 재지 못하는 것을 «재는 척»하지 않는다(AC-9). */
+  ];
+  for (const [label, key, harm] of AI_KEYS) {
+    /* `excluded`·`calls` 는 흔한 낱말이라 **`aiCost` 를 같이 읽는 화면**에서만 센다(엉뚱한 곳을 세지 않게). */
+    const where = readsInScreens(key).filter((p) => /aiCost/.test(CODE.get(`public/${p}`) ?? "") || key === "byProvider" || key === "overPlan");
+    rec(`🔴 운영 화면이 «AI 원가 — ${label}»(\`${key}\`)을 읽나`, where.length > 0,
+      where.length ? `화면 ${where.length}곳 [${where.slice(0, 3).join(" ")}]` : `읽는 화면 0곳 — ${harm}`);
+  }
+}
+
 /* ═══ 주석이 코드보다 앞서 나가지 않았나(AC-59) ═══ */
 const gapSrc = read("lib/publish-gap.ts");
 const claimsSingleSource = /값이 나오는 곳은 여기 하나다|한 곳에서만 나온다/.test(gapSrc);
