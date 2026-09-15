@@ -78,12 +78,13 @@ UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>�
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
 await load();
-=== schedule.html | schedule | 편성표 ===
+=== schedule.html | schedule | 편성표 | two ===
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
 <div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
 <div class="seg" id="mode"><button type="button" data-m="two" class="on">2주</button><button type="button" data-m="month">월</button></div>
 <div class="group" id="cal"></div>
 <div id="feed" hidden></div>
+<aside class="aside desk-only" id="side"></aside>
 <div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 const me = await UI.boot("schedule"); if (!me) return;
@@ -149,6 +150,7 @@ function render() {
   UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
   UI.$$("#cal .dd").forEach((b) => b.onclick = () => { sel = b.dataset.d; render(); if (two) { const g = UI.$(`#feed [data-day="${sel}"]`); if (g) g.scrollIntoView({ behavior: "smooth", block: "start" }); else UI.toast("이날은 나갈 글이 없어요"); } });
   const feed = UI.$("#feed"), day = UI.$("#day"); feed.hidden = !two; day.hidden = two;
+  renderSide();
   // 규칙도 편성도 없으면 빈 상태 하나
   if (!active.length && !slots.length) { const host = two ? feed : day; host.innerHTML = `<div class="group"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
   if (two) {
@@ -320,6 +322,23 @@ function ruleSheet() {
     };
   };
   UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => { view(sh, close); } });
+}
+/* [R7 §4.4 · DESIGN §13.3b] 데스크톱 우측 300 패널 — 화면을 옮겨 다니지 않고 «오늘»과 규칙을 같이 본다(좁은 화면에는 아예 없다 · 없던 내용을 폰에 밀어 넣지 않는다) */
+function renderSide() {
+  const side = UI.$("#side"); if (!side) return;
+  const k = ymd(today); const ls = daySlots(k).filter((s) => s.status !== "skipped");
+  const active = (D.rules || []).filter((r) => r.active);
+  const done = ls.filter((s) => s.status === "published").length;
+  const rows = ls.length ? ls.map((s) => `<div class="row" style="min-height:44px">${UI.mark(s.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${tooSoon(s) ? '<span class="pill off">건너뜀</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>`).join("")
+    : '<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘은 나갈 글이 없어요</span></div></div>';
+  const ruleRows = active.map((r) => `<div class="row" style="min-height:40px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:13.5px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회</span><span class="d">${(r.weekdays || []).length ? r.weekdays.map((w) => WD[w]).join("·") : "요일 자동"}${r.preferredHour != null ? " · " + String(r.preferredHour).padStart(2, "0") + "시" : ""}</span></div></div>`).join("");
+  side.innerHTML = `<div class="group"><div class="gt">오늘</div>${rows}</div>
+    <div class="group"><div class="gt">자동 편성</div>
+      <div class="row" style="min-height:44px"><div class="l"><span class="t" style="font-size:14px">${D.settings && D.settings.autoSchedule ? "켜져 있어요" : "꺼져 있어요"}</span><span class="d">${active.length ? "규칙 " + active.length + "개 · 오늘 " + done + "/" + ls.length + "건 나갔어요" : "규칙이 아직 없어요"}</span></div></div>
+      ${ruleRows}
+      <div style="padding:8px 0 0"><button class="btn secondary sm" type="button" id="sideRules" style="width:100%">편성 설정</button></div>
+    </div>`;
+  const b = UI.$("#sideRules"); if (b) b.onclick = settingsSheet;
 }
 /* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
 function settingsSheet() {
@@ -799,7 +818,17 @@ await load();
   <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
   <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
 </div>
+<div class="group" id="notig"><div class="gt">알림</div>
+  <div class="fr"><div class="fl" id="notiT">기기 알림 받기<small id="notiD">확인할 게 생기면 바로 알려드려요</small></div><button class="toggle" type="button" id="noti" aria-checked="false" aria-label="기기 알림 받기"></button></div>
+  <p class="muted" id="notiWhy" style="margin:0 16px 10px;font-size:12.5px" hidden></p>
+</div>
 <div class="group" id="expg"><div class="gt">내 자료</div><div id="exp"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="appg"><div class="gt">앱 정보</div>
+  <div class="kv"><span class="k">판 번호</span><span class="v" id="appVer">—</span></div>
+  <a class="row tap" href="/app/support.html"><div class="l"><span class="t">문의하기</span><span class="d">막히는 게 있으면 바로 알려 주세요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/terms.html"><div class="l"><span class="t">이용약관</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/privacy.html"><div class="l"><span class="t">개인정보 처리방침</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
 --- script ---
 const me = await UI.boot("account"); if (!me) return;
 /* [R7 §1.1] 영상 만들기 — GET/POST /api/tenant-settings { kinds, kindsSet }.
@@ -823,6 +852,33 @@ function sayKinds(on) {
   UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
 }
 loadKinds();
+/* [R7 §4.4] 기기 알림 — 권한 + 구독이 **둘 다** 돼야 «켜진» 것이다. 하나라도 안 되면 그 이유를 한 줄로 말한다(켰다고 거짓말하지 않는다).
+   iOS 는 «홈 화면에 추가» 한 뒤에만 알림을 받을 수 있다(사파리 제약) — 그 한 줄만 보여 준다. */
+async function loadNoti() {
+  const tg = UI.$("#noti"), why = UI.$("#notiWhy"), desc = UI.$("#notiD");
+  const st = UI.pushState();
+  const say = (on, line) => { tg.setAttribute("aria-checked", on ? "true" : "false"); why.hidden = !line; why.textContent = line || ""; desc.textContent = on ? "새 소식이 오면 이 기기로 알려드려요" : "확인할 게 생기면 바로 알려드려요"; };
+  if (!st.can) { tg.disabled = true; tg.classList.add("locked");
+    return say(false, st.ios && !st.iosStandalone ? "아이폰은 «공유 → 홈 화면에 추가» 로 앱처럼 설치하면 알림을 받을 수 있어요" : "이 브라우저는 기기 알림을 지원하지 않아요 · 알림함에서는 그대로 볼 수 있어요"); }
+  if (st.ios && !st.iosStandalone) { tg.disabled = true; tg.classList.add("locked"); return say(false, "아이폰은 «공유 → 홈 화면에 추가» 로 앱처럼 설치하면 알림을 받을 수 있어요"); }
+  if (st.perm === "denied") { tg.disabled = true; tg.classList.add("locked"); return say(false, "브라우저 설정에서 알림을 막아 두셨어요 · 주소창 옆 자물쇠에서 다시 켤 수 있어요"); }
+  UI.swReady();
+  say(await UI.pushSubscribed(), "");
+  UI.toggle(tg, async (next) => {
+    if (!next) { await UI.pushDisable(); say(false, ""); UI.toast("이 기기 알림을 껐어요"); return; }
+    const r = await UI.pushEnable();
+    if (r.ok) { say(true, ""); UI.toast("이 기기로 알림을 보내드려요"); return; }
+    const LINE = { denied: "브라우저 설정에서 알림을 막아 두셨어요 · 주소창 옆 자물쇠에서 다시 켤 수 있어요",
+      dismissed: "알림 허용을 누르지 않으셨어요 · 다시 눌러 주세요",
+      no_server: "기기 알림은 아직 준비 중이에요 · 그때까지는 알림함에서 그대로 볼 수 있어요",
+      sw: "이 브라우저에서 알림을 켤 수 없어요 · 알림함에서는 그대로 볼 수 있어요",
+      subscribe: "알림을 켜지 못했어요 · 잠시 뒤 다시 해 주세요", save: "알림을 켜지 못했어요 · 잠시 뒤 다시 해 주세요", unsupported: "이 브라우저는 기기 알림을 지원하지 않아요" };
+    say(false, LINE[r.step] || "알림을 켜지 못했어요");
+    return false;   // 못 켰으면 토글도 도로 꺼진다
+  });
+}
+loadNoti();
+UI.$("#appVer").textContent = UI.APP_VERSION;
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
 /* [P1R6] 인증 메일 «다시 보내기» — 가입 때 메일이 못 갔거나(mail=0) 아직 인증 전이면 배너 한 줄. 인증은 문이 아니라 배너라 가입·사용은 막지 않는다 */
@@ -1183,11 +1239,11 @@ UI.$("#ask").onclick = () => { files = []; UI.sheet(`<form id="f"><div class="fi
     UI.form(sh.querySelector("#f"), async (d, f) => { const r = await UI.api("/api/support-ticket", { body: { subject: d.subject, text: d.text, attachments: files.map((x) => x.key) } }); if (!r.ok) return UI.fieldError(f, r.step === "subject" ? "subject" : "text", r.error || "보내지 못했어요"); close(); UI.done("보냈어요 · 답변은 알림으로", load); });
   } }); };
 await load();
-=== director.html | create | 디렉터 ===
+=== director.html | create | 디렉터 | two ===
 <div class="confirm"><div class="q">이 소재로</div><div class="big" id="big"><span class="sk" style="display:inline-block;width:70%"></span></div></div>
 <div class="group" id="targets"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="kv"></div>
-<div class="group" id="why"></div>
+<aside class="aside" id="why"></aside>
 <div class="cta" id="cta" hidden><button class="btn secondary w40" type="button" id="edit">손보기</button><button class="btn primary" type="button" id="make">만들기</button></div>
 --- script ---
 const me = await UI.boot("create"); if (!me) return;
@@ -1229,7 +1285,7 @@ function render() {
     : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
   const tot = total();
   UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
-  UI.$("#why").innerHTML = `<div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div>`;
+  UI.$("#why").innerHTML = `<div class="group"><div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div></div>`;
   UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
 }
 /* ── 손보기 시트(DESIGN §5.5 항목 전부 + [P1R5] 영상 섹션: 포맷 3 · 길이 15/30/60 · 목소리 · 계정 변주(읽기 전용) · 코인 재계산) ── */
@@ -1373,9 +1429,14 @@ function renderVideo(editable) {
     <div class="vside">
       <div class="kv"><span class="k">포맷</span><span class="v">${UI.esc(UI.vlabel(v))}</span></div>
       <div class="kv"><span class="k">컷 · 목소리</span><span class="v">${v.cuts || "—"}컷 · ${UI.esc(P.meta?.tts?.provider === "gemini" ? "기본 음성" : "타입캐스트")}</span></div>
-      <div class="kv"><span class="k">자막</span><span class="v">${srt?.url ? `<a href="${UI.esc(srt.url)}" download="subtitles.srt" style="display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:-8px 0">SRT 내려받기<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></a>` : "—"}</span></div>
+      <div class="kv"><span class="k">자막</span><span class="v">${srt?.url ? `<a href="${UI.esc(srt.url)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:-8px 0">SRT 내려받기<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></a>` : "—"}</span></div>
       ${disc.badge ? `<div class="kv"><span class="k">제휴 표시</span><span class="v" style="font-size:12.5px">배지 · 시작 3초 자막 · 설명란 첫 줄</span></div>` : ""}
+      <div class="kv"><span class="k">영상 파일</span><span class="v"><button type="button" id="vdl" class="btn secondary sm">내려받기</button></span></div>
     </div></div>
+    <p class="muted" id="vdlNote" style="margin:6px 16px 0;font-size:12.5px;min-height:16px"></p>
+    <div class="group" style="margin-top:12px"><div class="gt">직접 올렸다면</div>
+      <button type="button" class="row tap" id="vmark"><div class="l"><span class="t">올린 주소 적기</span><span class="d wrap">앱에서 직접 올렸다면 그 주소를 적어 주세요 · 발행함·수익에 함께 잡혀요</span></div>${UI.chev}</button>
+    </div>
     <div class="group" style="margin-top:12px"><div class="gt">설명란 <span class="muted" style="font-weight:500">${editable ? "제목·설명·태그를 고칠 수 있어요" : ""}</span></div>
       <div class="desc-edit"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">제목</div><div id="vttl" class="rest" style="padding:6px 2px;font-weight:700;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(P.title || "")}</div>
         ${lead ? `<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div><div class="lead">${UI.esc(lead)}</div>` : '<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div>'}
@@ -1384,6 +1445,7 @@ function renderVideo(editable) {
       ${E ? `<div class="lockline" style="border-top:1px solid var(--line);color:var(--sub)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 19h8"/></svg><span style="white-space:normal">마지막 컷에 «${UI.esc(E.text)}»${E.url ? ` · ${UI.esc(E.url)}` : ""}</span></div>` : ""}
       <div class="desc-edit" style="padding-top:8px"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">태그</div><div id="vtags" class="rest" style="padding:6px 2px;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(tags.map((x) => "#" + x).join(" "))}</div></div>
     </div>`;
+  bindVideoOut();
   if (editable && !dirty) { const mark = () => { if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ["#vttl", "#vdesc", "#vtags"].forEach((s) => pane.querySelector(s).addEventListener("input", mark)); }
 }
 function render() {
@@ -1432,6 +1494,11 @@ async function approve() {
     return UI.toast(r.error || "예약하지 못했어요");
   }
   UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
+}
+/* [R7 §1.3] 영상 파일 내려받기 · 직접 올린 주소 적기 — 유튜브 자동 업로드가 열리기 전의 정식 출구(계정 없이 만든 영상도 이 길로 나간다) */
+function bindVideoOut() {
+  const dl = UI.$("#vdl"); if (dl) dl.onclick = async () => { dl.disabled = true; await UI.videoDownload(P.id, UI.$("#vdlNote")); dl.disabled = false; };
+  const mk = UI.$("#vmark"); if (mk) mk.onclick = () => UI.markPublishedSheet(P, load);   // 성공 시트는 그대로 두고 뒤에서 이 화면만 새로 읽는다(화면을 빼앗지 않는다)
 }
 /* 영상 다시 만들기는 지금 영상·자막을 지우고 처음부터 만든다(서버가 산출물 삭제 — 안 지우면 같은 영상이 또 나온다) */
 function askRegen(close) { if (P.kind !== "video") return regen(close);
@@ -1491,24 +1558,33 @@ async function load() { const r = await UI.api("/api/runner-list"); if (!r.ok) {
 async function loadManaged() {
   const r = await UI.api("/api/managed-runner", { noGate: true }); const g = UI.$("#managed"); if (!r.ok) { g.hidden = true; return; }
   g.hidden = false; const pr = r.price || {};
-  const body = r.status === "requested" ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><div class="l"><span class="t">신청을 확인하는 중이에요</span><span class="d">${r.devices || 1}대 · 보통 하루 안에 배정해 드려요</span></div><span class="pill warn">검토 중</span></div>`
+  const per = r.per === "account" ? "account" : "device"; const cnt = (per === "account" ? r.accounts : r.devices) || 1; const unit = per === "account" ? "계정" : "대";
+  const body = r.status === "requested" ? `<div class="row"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><div class="l"><span class="t">신청을 확인하는 중이에요</span><span class="d">${cnt}${unit} · 보통 하루 안에 배정해 드려요</span></div><span class="pill warn">검토 중</span></div>`
     : r.status === "active" ? `<div class="row"><span class="mk money"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">${r.assigned}대가 대신 돌고 있어요</span><span class="d">내 PC를 켜 두지 않아도 글·영상이 나가요</span></div><span class="pill ok">쓰는 중</span></div>`
-    : `<button type="button" class="row tap" id="mreq"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">대신 돌려주는 PC 신청</span><span class="d">${pr.totalKrw ? `한 대 ${UI.won(pr.totalKrw)}/월(부가세 포함)` : "요금은 신청할 때 알려드려요"} · 내 PC를 켜 두지 않아도 돼요</span></div>${UI.chev}</button>`;
+    : `<button type="button" class="row tap" id="mreq"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="l"><span class="t">대신 돌려주는 PC 신청</span><span class="d">${pr.totalKrw ? `${per === "account" ? "계정마다" : "한 대"} ${UI.won(pr.totalKrw)}/월(부가세 포함)` : "요금은 신청할 때 알려드려요"} · 내 PC를 켜 두지 않아도 돼요</span></div>${UI.chev}</button>`;
   UI.$("#mbody").innerHTML = body + (r.eligible === false ? `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">지금 요금제에는 없는 기능이에요 · 눌러 보면 어떤 요금제에서 되는지 알려드려요</p>` : "");
   const b = UI.$("#mreq"); if (b) b.onclick = () => mSheet(r);
 }
 function mSheet(r) {
+  /* [R7 §4.5 · 사장님 결정 4] 관리형은 «계정당 월요금 · 프록시 포함»이다.
+     🔴 세는 단위도 값도 서버가 정본이다 — `per:"account"` 면 계정 수로 세고, 아니면 예전처럼 대수로 센다(화면이 단위를 지어내지 않는다).
+     🔴 금액은 서버가 준 단가 × 개수만 한다(부가세를 화면에서 계산하지 않는다 · §12.0). */
   const pr = r.price || {};
-  UI.sheet(`<p class="muted" style="margin:0 0 8px">저희가 대신 돌리는 PC예요. 내 PC를 켜 두지 않아도 네이버·티스토리 글과 영상이 예정대로 나가요.</p>
-    <div class="fr"><div class="fl">몇 대<small>계정이 많으면 나눠서 돌려요</small></div>${UI.stepper("dev", r.devices || 1, 1, r.max || 5, "대")}</div>
-    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">요금(부가세 별도)</span><span class="v" id="mAmt">${UI.won(pr.amountKrw || 0)}</span></div>
+  const per = r.per === "account" ? "account" : "device";
+  const U = per === "account" ? { word: "계정", unit: "개", head: "계정마다", sub: "계정이 많으면 나눠서 돌려요" } : { word: "대", unit: "대", head: "한 대", sub: "계정이 많으면 나눠서 돌려요" };
+  const nMax = r.max || 5;
+  const cur = (per === "account" ? r.accounts : r.devices) || 1;
+  UI.sheet(`<p class="muted" style="margin:0 0 8px">저희가 대신 돌리는 PC예요. 내 PC를 켜 두지 않아도 네이버·티스토리 글과 영상이 예정대로 나가요.${per === "account" ? " 계정마다 다른 곳에서 접속하도록 통신 회선까지 포함이에요." : ""}</p>
+    <div class="fr"><div class="fl">${per === "account" ? "몇 계정" : "몇 대"}<small>${UI.esc(U.sub)}</small></div>${UI.stepper("dev", cur, 1, nMax, U.unit)}</div>
+    <div class="kv" style="padding-left:0;padding-right:0"><span class="k">${U.head} 요금(부가세 별도)</span><span class="v" id="mAmt">${UI.won(pr.amountKrw || 0)}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">부가세 10%</span><span class="v" id="mVat">${UI.won(pr.vatKrw || 0)}</span></div>
     <div class="kv" style="padding-left:0;padding-right:0"><span class="k">한 달에</span><span class="v" id="mTot" style="font-weight:800">${UI.won(pr.totalKrw || 0)}</span></div>
+    ${per === "account" ? '<p class="muted" style="margin:8px 0 0;font-size:12.5px">회선(프록시) 요금이 이 값에 들어 있어요 · 따로 내지 않아요.</p>' : ""}
     <p class="muted" style="margin:10px 0 0;font-size:13px">신청하면 운영자가 확인하고 배정해 드려요. 배정된 달부터 청구돼요.</p>
     <div class="cta"><button class="btn primary" type="button" id="go">신청하기</button></div>`, { title: "대신 돌려주는 PC", onOpen: (sh, close) => {
       const upd = (n) => { sh.querySelector("#mAmt").textContent = UI.won((pr.amountKrw || 0) * n); sh.querySelector("#mVat").textContent = UI.won((pr.vatKrw || 0) * n); sh.querySelector("#mTot").textContent = UI.won((pr.totalKrw || 0) * n); }; // 대수 배수는 서버 단가 × n(계산이 아니라 곱)
       UI.bindSteppers(sh, (n2, v) => upd(v));
-      sh.querySelector("#go").onclick = async () => { const rr = await UI.api("/api/managed-runner", { body: { devices: UI.stepVal(sh, "dev") } });
+      sh.querySelector("#go").onclick = async () => { const nSel = UI.stepVal(sh, "dev"); const rr = await UI.api("/api/managed-runner", { body: per === "account" ? { accounts: nSel } : { devices: nSel } });
         if (!rr.ok) return rr.gated ? close() : UI.toast(rr.error || "신청하지 못했어요");
         close(); UI.done("신청했어요 · 배정되면 알려드려요", loadManaged); };
     } });
@@ -1611,6 +1687,7 @@ await UI.boot("schedule");
 const EXT = '<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 let tab = UI.qs.get("status") || "all", posts = [];
 const stuckOf = (p) => p.status === "awaiting_manual" || p.status === "failed";
+const isVideoPost = (p) => UI.VIDEO_CH.includes(p.channel);   // [R7 §1.3] 영상은 «본문 복사»가 아니라 «파일 내려받기 → 앱에서 올리기 → 주소 적기»
 const privateOf = (p) => p.status === "uploaded_private";                                  // [P1R5] 심사 전 비공개 업로드(posts.status · §7-1)
 const processingOf = (p) => p.status === "publishing" && p.errorKind === "video_processing"; // [P1R5] 릴스 컨테이너 처리 중(retriable)
 const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(x).toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); const d = k(UI.utc(p.publishedAt)), t0 = k(new Date()), y = k(new Date(Date.now() - 86400e3)); return d === t0 ? "오늘" : d === y ? "어제" : UI.dateKST(p.publishedAt, { weekday: "short" }); };
@@ -1651,19 +1728,22 @@ function postSheet(p) {
     ${privateOf(p) ? `<div class="banner" style="margin:4px 0 8px"><span>심사 전엔 비공개로 올라가요 · 유튜브 스튜디오에서 «공개»로 바꾸면 사람들에게 보여요</span></div>` : ""}
     ${processingOf(p) ? `<p class="muted" style="margin:4px 0 8px;font-size:13.5px">${UI.esc(UI.chLabel(p.channel))}가 영상을 처리하는 중이에요 · 몇 분 뒤 자동으로 다시 올려요</p>` : ""}
     ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
-    ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : "채널 연동"}</span></div>` : ""}
+    ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : p.publishedVia === "manual" ? "직접 올림" : "채널 연동"}</span></div>` : ""}
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
     ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
     <div class="cta" style="flex-direction:column">
       ${privateOf(p) ? `<a class="btn primary" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener">유튜브 스튜디오 열기</a>` : ""}
       ${p.externalUrl ? `<a class="btn ${privateOf(p) ? "secondary" : "primary"}" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">${privateOf(p) ? "올라간 영상 보기(비공개)" : "올라간 글 열기"}</a>` : ""}
-      ${stuckOf(p) ? `<button class="btn ${p.externalUrl ? "secondary" : "primary"}" type="button" id="cp">본문 복사하기</button>` : ""}
+      ${stuckOf(p) && isVideoPost(p) ? `<button class="btn secondary" type="button" id="vdl2">영상 내려받기</button>` : ""}
+      ${stuckOf(p) ? `<button class="btn ${p.externalUrl ? "secondary" : "primary"}" type="button" id="cp">${isVideoPost(p) ? "올린 주소 적기" : "본문 복사하기"}</button>` : ""}
       ${p.pieceId ? `<a class="btn ghost" href="/app/piece.html?id=${p.pieceId}">${privateOf(p) || processingOf(p) ? "영상 보기" : "글 보기"}</a>` : ""}
     </div>
-    ${stuckOf(p) ? `<p class="muted" style="margin:4px 0 0;font-size:13px">복사한 본문을 ${UI.esc(UI.chLabel(p.channel))} 에 붙여 넣으면 그대로 올라가요.</p>` : ""}`,
-    { title: "", onOpen: (sh) => {
+    ${stuckOf(p) ? `<p class="muted" id="vdlNote2" style="margin:4px 0 0;font-size:13px">${isVideoPost(p) ? `영상을 받아 ${UI.esc(UI.chLabel(p.channel))} 앱에서 올린 뒤, 그 주소를 적어 주세요.` : `복사한 본문을 ${UI.esc(UI.chLabel(p.channel))} 에 붙여 넣으면 그대로 올라가요.`}</p>` : ""}`,
+    { title: "", onOpen: (sh, close) => {
+      const dl2 = sh.querySelector("#vdl2"); if (dl2) dl2.onclick = async () => { dl2.disabled = true; await UI.videoDownload(p.pieceId, sh.querySelector("#vdlNote2")); dl2.disabled = false; };
       const cp = sh.querySelector("#cp"); if (!cp) return;
+      if (isVideoPost(p)) { cp.onclick = () => { close(); UI.markPublishedSheet({ id: p.pieceId, channel: p.channel }, load); }; return; }
       cp.onclick = async () => {
         cp.disabled = true; const r = await UI.api(`/api/pieces-get?id=${p.pieceId}`); cp.disabled = false;
         if (!r.ok) return UI.toast(r.error || "본문을 가져오지 못했어요");

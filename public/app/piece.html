@@ -6,7 +6,7 @@
 <title>검수 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=10">
+<link rel="stylesheet" href="/css/ac.css?v=11">
 </head>
 <body>
 <div class="shell">
@@ -21,7 +21,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=7"></script>
+<script src="/js/ui.js?v=8"></script>
 <script src="/js/mock.js?v=8"></script>
 <script>
 (async () => {
@@ -53,9 +53,14 @@ function renderVideo(editable) {
     <div class="vside">
       <div class="kv"><span class="k">포맷</span><span class="v">${UI.esc(UI.vlabel(v))}</span></div>
       <div class="kv"><span class="k">컷 · 목소리</span><span class="v">${v.cuts || "—"}컷 · ${UI.esc(P.meta?.tts?.provider === "gemini" ? "기본 음성" : "타입캐스트")}</span></div>
-      <div class="kv"><span class="k">자막</span><span class="v">${srt?.url ? `<a href="${UI.esc(srt.url)}" download="subtitles.srt" style="display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:-8px 0">SRT 내려받기<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></a>` : "—"}</span></div>
+      <div class="kv"><span class="k">자막</span><span class="v">${srt?.url ? `<a href="${UI.esc(srt.url)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:-8px 0">SRT 내려받기<svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg></a>` : "—"}</span></div>
       ${disc.badge ? `<div class="kv"><span class="k">제휴 표시</span><span class="v" style="font-size:12.5px">배지 · 시작 3초 자막 · 설명란 첫 줄</span></div>` : ""}
+      <div class="kv"><span class="k">영상 파일</span><span class="v"><button type="button" id="vdl" class="btn secondary sm">내려받기</button></span></div>
     </div></div>
+    <p class="muted" id="vdlNote" style="margin:6px 16px 0;font-size:12.5px;min-height:16px"></p>
+    <div class="group" style="margin-top:12px"><div class="gt">직접 올렸다면</div>
+      <button type="button" class="row tap" id="vmark"><div class="l"><span class="t">올린 주소 적기</span><span class="d wrap">앱에서 직접 올렸다면 그 주소를 적어 주세요 · 발행함·수익에 함께 잡혀요</span></div>${UI.chev}</button>
+    </div>
     <div class="group" style="margin-top:12px"><div class="gt">설명란 <span class="muted" style="font-weight:500">${editable ? "제목·설명·태그를 고칠 수 있어요" : ""}</span></div>
       <div class="desc-edit"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">제목</div><div id="vttl" class="rest" style="padding:6px 2px;font-weight:700;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(P.title || "")}</div>
         ${lead ? `<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div><div class="lead">${UI.esc(lead)}</div>` : '<div class="muted" style="font-size:12px;font-weight:600;margin:8px 0 4px">설명</div>'}
@@ -64,6 +69,7 @@ function renderVideo(editable) {
       ${E ? `<div class="lockline" style="border-top:1px solid var(--line);color:var(--sub)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 19h8"/></svg><span style="white-space:normal">마지막 컷에 «${UI.esc(E.text)}»${E.url ? ` · ${UI.esc(E.url)}` : ""}</span></div>` : ""}
       <div class="desc-edit" style="padding-top:8px"><div class="muted" style="font-size:12px;font-weight:600;margin-bottom:4px">태그</div><div id="vtags" class="rest" style="padding:6px 2px;min-height:36px" ${editable ? 'contenteditable="true"' : ""}>${UI.esc(tags.map((x) => "#" + x).join(" "))}</div></div>
     </div>`;
+  bindVideoOut();
   if (editable && !dirty) { const mark = () => { if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ["#vttl", "#vdesc", "#vtags"].forEach((s) => pane.querySelector(s).addEventListener("input", mark)); }
 }
 function render() {
@@ -112,6 +118,11 @@ async function approve() {
     return UI.toast(r.error || "예약하지 못했어요");
   }
   UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
+}
+/* [R7 §1.3] 영상 파일 내려받기 · 직접 올린 주소 적기 — 유튜브 자동 업로드가 열리기 전의 정식 출구(계정 없이 만든 영상도 이 길로 나간다) */
+function bindVideoOut() {
+  const dl = UI.$("#vdl"); if (dl) dl.onclick = async () => { dl.disabled = true; await UI.videoDownload(P.id, UI.$("#vdlNote")); dl.disabled = false; };
+  const mk = UI.$("#vmark"); if (mk) mk.onclick = () => UI.markPublishedSheet(P, load);   // 성공 시트는 그대로 두고 뒤에서 이 화면만 새로 읽는다(화면을 빼앗지 않는다)
 }
 /* 영상 다시 만들기는 지금 영상·자막을 지우고 처음부터 만든다(서버가 산출물 삭제 — 안 지우면 같은 영상이 또 나온다) */
 function askRegen(close) { if (P.kind !== "video") return regen(close);

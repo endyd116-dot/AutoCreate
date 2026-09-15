@@ -13,6 +13,9 @@
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
   const ymd = (dayOffset) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); return d.toISOString().slice(0, 10); };
   const todayYmd = ymd(0);
+  const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
+  const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
+  const managedPer = qs.get("managed") === "account" ? "account" : "";   // [R7 §4.5] 계정당 요금 모양(서버가 per 를 실을 때)
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
@@ -462,13 +465,16 @@
       inv.taxInvoice = { status: "requested", requestedAt: iso(Date.now()) }; S.taxProfile = { bizNo: b.bizNo, bizName: b.bizName, email: b.email };
       return { ok: true, taxInvoice: inv.taxInvoice }; },
     /* ── [P1R6] §3.1 관리형 러너 신청(플랜 게이트 · 요금은 서버 값) ── */
-    "managed-runner": (b) => { if (b && b.devices !== undefined) {
+    "managed-runner": (b) => { if (b && (b.devices !== undefined || b.accounts !== undefined)) {
         if (managedDeny) return { ok: false, reason: "plan_limit", step: "plan_feature", feature: "managedRunner", planKey: "starter", error: "대신 돌려주는 PC는 지금 요금제에 없어요. Pro 로 바꾸면 쓸 수 있어요.", status: 402 };
-        const n = Math.max(1, Math.min(5, Number(b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, requestedAt: iso(Date.now()) };
+        const n = Math.max(1, Math.min(5, Number(b.accounts ?? b.devices) || 1)); S.managed = { status: "requested", assigned: 0, devices: n, accounts: n, requestedAt: iso(Date.now()) };
         S.notifications.unshift({ id: S.nextId++, kind: "setup", title: "대신 돌려주는 PC를 신청했어요", desc: "운영자가 확인하고 배정해 드려요 · 보통 하루 안에", link: "/app/runner.html", tone: "info", createdAt: iso(Date.now()) });
-        return { ok: true, status: S.managed.status, devices: n }; }
-      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: "none", assigned: 0, max: 5 };
-      return { ok: true, eligible: true, price: { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 }, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5 }; },
+        return { ok: true, status: S.managed.status, devices: n, accounts: n, ...(managedPer === "account" ? { per: "account" } : {}) }; }
+      /* [R7 §4.5] ?managed=account = 사장님 결정 4 모양(계정당 월요금 · 프록시 포함) — 서버가 per:"account" 를 실으면 화면이 그 단위로 그린다 */
+      const price = managedPer === "account" ? { amountKrw: 25000, vatKrw: 2500, totalKrw: 27500 } : { amountKrw: 30000, vatKrw: 3000, totalKrw: 33000 };
+      const perKey = managedPer === "account" ? { per: "account", accounts: S.managed.accounts || S.managed.devices } : {};
+      if (managedDeny) return { ok: true, eligible: false, reason: "plan_feature", price, status: "none", assigned: 0, max: 5, ...perKey };
+      return { ok: true, eligible: true, price, status: S.managed.status, assigned: S.managed.assigned, devices: S.managed.devices, max: 5, ...perKey }; },
     /* ── [P1R6] §1.4 AM↔AC 코인 이전(키 없으면 준비 중 · 부분 성공 금지) ── */
     "coin-transfer": (b) => { const nw = notWritable(); if (nw) return nw;
       if (amOff) return { ok: false, step: "not_configured", error: "아직 준비 중이에요 · 곧 열려요", status: 200 };
@@ -484,6 +490,8 @@
     "faqs": () => ({ ok: true, faqs: [{ id: 1, q: "코인은 언제까지 쓸 수 있나요?", a: "충전한 코인은 1년, 플랜에 포함된 코인은 그달 말까지예요." }, { id: 2, q: "네이버·티스토리는 왜 내 PC 프로그램이 필요한가요?", a: "두 곳은 바깥에서 글을 넣는 길이 없어서 PC 프로그램이 대신 올려요." }, { id: 3, q: "환불은 어떻게 되나요?", a: "미사용 코인은 충전 후 7일 안에 환불돼요. 구독은 기간 말에 해지돼요." }] }),
     /* [P1R6 §1.1] 첨부 = presign PUT — 화면은 이 주소로 파일 바이트를 그대로 올린다(아래 fetch 가로채기가 R2 를 흉내) */
     /* [P1R6 §1.3] 공개 회사 정보 — 약관·개인정보·유료약관 하단이 읽는다(운영센터 «회사 정보» 한 출처) */
+    /* [R7 §4.4] 웹푸시 — 서버 몫(공개키·구독 저장)이 아직 없다. 모의도 «준비 중»으로 정직하게 답한다(있는 척하면 화면이 «켰어요»라고 거짓말한다) */
+    "push-key": () => ({ ok: false, status: 503, step: "not_configured", error: "기기 알림은 아직 준비 중이에요." }),
     "company": () => ({ ok: true, company: companyOff ? null : { name: "주식회사 오토크리에이트", ceo: "홍두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 1길 10, 5층", email: "help@autocreate.kr", phone: "02-1234-5678" } }),
     "support-upload-url": (b) => { if (uploadKnob === "off") return { ok: false, step: "not_configured", error: "사진 첨부는 아직 준비 중이에요. 글로 적어 주시면 돼요." };
       const ext = String(b.ext || "").toLowerCase().replace(/[^a-z]/g, "");
@@ -607,6 +615,38 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       S.pieces.push({ id, channel: s.channel, accountHandle: s.accountHandle, kind: "post", format: "story", title: s.topicTitle, status: "generating", stage: "writing", scheduledFor: s.publishAt, gateOk: false, createdAt: iso(Date.now()), topicTitle: s.topicTitle, regenCount: 0, bodyHtml: s.channel === "tistory" ? BODY_TISTORY : BODY_NAVER, meta: { tags: [], disclosure: null }, gate: gate(true), _t0: Date.now() });
       s.pieceId = id; s.status = "producing"; return { ok: true, pieceId: id }; },
     /* ── [P1R2] §6 발행함 ── */
+    /* [R7 §1.3 · B-1] 영상 파일 내려받기 — 10분짜리 서명(파일 이름은 서명 안에 있다) · 아직 없으면 no_render + stage */
+    "piece-video": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id")));
+      if (!p) return { ok: false, status: 404, step: "not_found", error: "글을 찾을 수 없어요." };
+      const st = p.meta?.stage;
+      if (vdlKnob === "none" || p.kind !== "video" || st !== "done") return { ok: false, status: 404, step: "no_render", pieceId: p.id, stage: st || "script", error: "아직 영상 파일이 없어요. 다 만들어지면 여기서 받을 수 있어요." };
+      const url = URL.createObjectURL(new Blob([new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])], { type: "application/octet-stream" }));   // 실서버는 서명에 Content-Disposition 이 있어 «받아진다» — 모의는 octet-stream 으로 같은 효과
+      const day = todayYmd.replace(/-/g, "");
+      return { ok: true, pieceId: p.id, channel: p.channel, status: p.status, url, filename: `AC-${p.id}-${day}.mp4`, expiresInSec: 600, bytes: 8_400_000, durationSec: p.meta?.video?.seconds || 60, stage: st };
+    },
+    /* [R7 §1.3 · B-1] 앱에서 직접 올린 주소 적기 — 채널이 쓰는 호스트인지 보고(다른 채널이면 그 채널 이름으로 말한다) 발행함·편성표에 반영 */
+    "post-mark-published": (b) => { const nw = notWritable(); if (nw) return nw;
+      const p = S.pieces.find((x) => x.id === Number(b.pieceId));
+      if (!p) return { ok: false, status: 404, step: "not_found", error: "글을 찾을 수 없어요." };
+      if (["generating", "failed"].includes(p.status)) return { ok: false, status: 400, step: "status", error: "아직 만드는 중이에요. 다 만들어진 뒤에 적어 주세요." };
+      const raw = String(b.url || "").trim();
+      if (raw.length > 300) return { ok: false, status: 400, step: "url", reason: "too_long", error: "주소가 너무 길어요." };
+      let u; try { u = new URL(raw); } catch { return { ok: false, status: 400, step: "url", reason: "parse", error: "주소 모양이 아니에요." }; }
+      if (u.protocol !== "https:") return { ok: false, status: 400, step: "url", reason: "scheme", error: "https:// 로 시작하는 주소여야 해요." };
+      const HOSTS = { naver_blog: ["blog.naver.com"], naver_clip: ["blog.naver.com", "clip.naver.com", "tv.naver.com"], tistory: ["tistory.com"], blogger: ["blogspot.com"], wordpress: ["wordpress.com"], threads: ["threads.net"], instagram: ["instagram.com"], reels: ["instagram.com"], youtube_shorts: ["youtube.com", "youtu.be"], tiktok: ["tiktok.com"] };
+      const host = u.hostname.toLowerCase().replace(/^www\./, "");
+      const okHost = (HOSTS[p.channel] || []).some((h) => host === h || host.endsWith("." + h));
+      if (!okHost) { const other = Object.keys(HOSTS).find((k) => (HOSTS[k] || []).some((h) => host === h || host.endsWith("." + h)));
+        return { ok: false, status: 400, step: "url", reason: other ? "other_channel" : "domain",
+          error: other ? `${CH_LABEL[other] || other} 주소예요. 이 글은 ${CH_LABEL[p.channel] || p.channel}에 올린 주소가 필요해요.` : `${CH_LABEL[p.channel] || p.channel} 주소가 아니에요.` }; }
+      const clean = u.origin + u.pathname;   // 추적 꼬리표(utm_·si)는 서버가 떼어 준다
+      const exist = S.posts.find((x) => x.pieceId === p.id && x.externalUrl);
+      if (exist) return { ok: true, postId: exist.id, pieceId: p.id, channel: p.channel, already: true, url: exist.externalUrl, message: "이미 적어 둔 글이에요. 발행함에서 볼 수 있어요." };
+      const post = { id: S.nextId++, pieceId: p.id, channel: p.channel, accountHandle: p.accountHandle, title: p.title, externalUrl: clean, publishedVia: "manual", publishedAt: iso(Date.now()), status: "published", stats: {}, alive: true };
+      S.posts.unshift(post); p.status = "published"; p.externalUrl = clean;
+      const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "published";
+      return { ok: true, postId: post.id, pieceId: p.id, channel: p.channel, already: false, url: clean, slotId: sl?.id, message: "발행함에 넣었어요. 편성표에서도 «발행됨»으로 보여요." };
+    },
     "posts-list": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999", st = q.get("status") || "all";
       const day = (p) => p.publishedAt ? new Date(new Date(p.publishedAt).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : null;
       return { ok: true, posts: S.posts.filter((p) => { const d = day(p); return (d === null || (d >= from && d <= to)) && (st === "all" || p.status === st); }).sort((a, b) => (b.publishedAt || "9999").localeCompare(a.publishedAt || "9999")).map((p) => ({ ...p })) }; },
@@ -706,7 +746,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
