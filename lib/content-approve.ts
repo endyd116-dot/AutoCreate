@@ -365,7 +365,12 @@ export async function recheckVideoPiece(tid: number, p: Row): Promise<GateReport
 export type ApproveResult =
   | { ok: true; status: "scheduled"; scheduledFor: string; gate: GateReport; alreadyScheduled?: boolean }
   | { ok: false; step: "gate"; gate: GateReport; error: string }
-  | { ok: false; step: "state"; error: string };
+  | { ok: false; step: "state"; error: string }
+  /** 🔴 [R8 §4.5] 그 집이 «팀 승인»을 켰고 이 글은 **팀원이 만든 것**이다 — 주인이 봐야 나간다(우리 판단이 아니라 그 집 규칙). */
+  | { ok: false; step: "team_approval"; error: string };
+
+/** 승인을 누른 사람 — 없으면 **자동 경로**(크론)다. */
+export interface ApproveBy { uid: number; role: "owner" | "member" }
 
 /**
  * approvePiece — 승인 전이 **한 곳**: 게이트 재검사 → approved+scheduled(piece·slot 동시) → 감사는 호출부가.
@@ -374,8 +379,25 @@ export type ApproveResult =
  *   시각: piece.scheduled_for → meta.scheduleAt → +1시간. 지금으로부터 5분 안이면 15분 뒤로 민다(발행 직전 승인 사고 방지).
  *     ⚠️ 자동 승인(D-0 02:00)은 발행 시각이 보통 몇 시간 뒤라 이 보정에 걸리지 않는다 — 걸린다면 그 자체가 «너무 늦게 승인됐다»는 신호다.
  */
-export async function approvePiece(tid: number, p: Row, opts: { now?: Date } = {}): Promise<ApproveResult> {
+export async function approvePiece(tid: number, p: Row, opts: { now?: Date; by?: ApproveBy | null } = {}): Promise<ApproveResult> {
   const id = n(p.id);
+  /* 🔴 [R8 §4.5] **팀 승인** — 그 집이 켰고 이 글을 팀원이 만들었으면 **주인만** 승인할 수 있다.
+     · 우리 판단이 아니다(§9 밖) — 그 집 사장이 자기 직원에게 건 규칙이다.
+     · 🔴 **자동 경로(크론)는 여기 오지 않는다** — 마감 자동 승인에서 아예 빼 둔다(`lib/cron/review-deadline.ts`).
+       그러지 않으면 «사람이 봐야 한다»는 그 집 규칙이 **우리 크론에 먹힌다.**
+     · 「막혔다」가 아니라 **「기다리는 중」**이라 문구도 그렇게 쓴다. */
+  if (String(p.status) === "in_review" && p.created_by) {
+    const { needsOwnerApproval } = await import("./team");
+    if (await needsOwnerApproval(tid, p.created_by)) {
+      const role = opts.by?.role;
+      if (role !== "owner") {
+        return { ok: false, step: "team_approval",
+          error: role === "member"
+            ? "이 글은 이 집의 주인이 보고 나서 나가요. 주인에게 알려 드렸어요."
+            : "이 글은 이 집의 주인이 보고 나서 나가요." };
+      }
+    }
+  }
   const st = String(p.status);
   const now = opts.now ?? new Date();
   if (st === "scheduled" || st === "approved") {

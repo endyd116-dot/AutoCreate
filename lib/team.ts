@@ -18,7 +18,7 @@ import { sql } from "drizzle-orm";
 import crypto from "node:crypto";
 import { q } from "./accounts";
 import { writeAudit } from "./audit";
-import { checkLimit } from "./plans";
+import { checkLimit, featureOf, planOf, tenantPlan } from "./plans";
 
 const n = (v: unknown) => Number(v || 0);
 /** 초대가 살아 있는 기간. 길면 «누가 언제 들어올지 모르는 문»이 오래 열려 있다. */
@@ -29,6 +29,69 @@ const newToken = () => crypto.randomBytes(24).toString("base64url");
 
 export interface TeamMember { id: number; email: string; name: string; role: "owner" | "member"; joinedAt: string | null; me?: true }
 export interface TeamInvite { id: number; email: string; invitedAt: string; expiresAt: string; expired: boolean }
+
+/* ═══════════ 팀 승인 흐름(§4.5 · 메인 승인 2026-09-16) ═══════════
+   🔴 **우리 판단이 아니다**(CLAUDE §9 밖) — **그 집 사장이 자기 직원에게 건 규칙**이다.
+      §9 가 내리라는 건 «우리 판단으로 고객 계정을 막는 것»이고, 이건 «돈·계약»과 같은 칸이다.
+   🔴 **기본 꺼짐** — 오늘 세 번째 같은 규율이다(러너 자동 시작 · BYO · 이것). 몰래 안 켠다.
+   🔴 «막혔다»가 아니라 **«기다리는 중»**이다 — 그래서 owner 에게 **알림 + 홈 해야 할 일**이 가야 한다.
+      안 가면 그 글은 **조용히 사라진다**(CLAUDE §4.7). */
+
+/** 이 집이 팀 승인을 켰나 — **플랜 기능(Agency)** 과 **그 집 스위치**가 둘 다 참일 때만. */
+export async function teamApprovalOn(tid: number): Promise<boolean> {
+  try {
+    const [t] = await q(sql`SELECT settings FROM tenants WHERE id = ${Math.floor(tid)}`);
+    const s = (t?.settings && typeof t.settings === "object" ? t.settings : {}) as Record<string, unknown>;
+    if (s.teamApproval !== true) return false;   // 🔴 기본 꺼짐
+    const { plan } = await tenantPlan(Math.floor(tid));
+    return featureOf(plan, "teamApproval") === true;
+  } catch { return false; }   // 못 읽으면 «안 켰다» — 우리가 대신 막지 않는다(§9)
+}
+
+/**
+ * needsOwnerApproval — 이 글이 **owner 를 기다려야 하나**.
+ *   🔴 자동(크론)으로 만든 글은 `created_by` 가 **NULL** 이라 해당 없음 — 기계가 만든 글에 «누가 만들었나»는 없다.
+ *   🔴 owner 가 만든 글도 해당 없음 — 자기가 만든 걸 자기가 또 승인할 이유가 없다.
+ */
+export async function needsOwnerApproval(tid: number, createdBy: unknown): Promise<boolean> {
+  const uid = Math.floor(Number(createdBy) || 0);
+  if (!uid) return false;
+  if (!(await teamApprovalOn(tid))) return false;
+  try {
+    const [u] = await q(sql`SELECT role FROM users WHERE tenant_id = ${Math.floor(tid)} AND id = ${uid}`);
+    return !!u && String(u.role) !== "owner";
+  } catch { return false; }
+}
+
+/**
+ * notifyOwnersWaiting — 🔴 **주인에게 알린다.** 이게 없으면 그 글은 조용히 사라진다.
+ *   하루 한 번(KST)만 — 글마다 알리면 알림함이 도배되고, 도배된 알림은 **안 읽는 알림**이다.
+ */
+export async function notifyOwnersWaiting(tid: number): Promise<void> {
+  try {
+    const [c] = await q(sql`SELECT COUNT(*)::int AS c FROM pieces p
+      WHERE p.tenant_id = ${Math.floor(tid)} AND p.status = 'in_review' AND p.created_by IS NOT NULL
+        AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.created_by AND u.tenant_id = p.tenant_id AND u.role <> 'owner')`);
+    const cnt = n(c?.c);
+    if (!cnt) return;
+    await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+      SELECT ${Math.floor(tid)}, ${"team_review"}, ${`팀원이 만든 글 ${cnt}건이 기다리고 있어요`},
+             ${"보시고 승인하시면 편성표대로 나가요. 승인 전에는 나가지 않아요."}, ${"/app/pieces.html?status=in_review"}
+      WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE tenant_id = ${Math.floor(tid)} AND kind = 'team_review'
+        AND created_at >= (date_trunc('day', (NOW() AT TIME ZONE 'Asia/Seoul')) AT TIME ZONE 'Asia/Seoul'))`);
+  } catch (e) { console.warn("[team] 대기 알림 실패", String((e as Error)?.message ?? e).slice(0, 100)); }
+}
+
+/** 이 집에서 **주인을 기다리는 글** 수(홈 «해야 할 일» · 0이면 0을 그대로 준다 — «없음»과 «0»은 다르다). */
+export async function waitingForOwner(tid: number): Promise<{ count: number; firstId: number }> {
+  try {
+    if (!(await teamApprovalOn(tid))) return { count: 0, firstId: 0 };
+    const [r] = await q(sql`SELECT COUNT(*)::int AS c, MIN(p.id)::int AS first_id FROM pieces p
+      WHERE p.tenant_id = ${Math.floor(tid)} AND p.status = 'in_review' AND p.created_by IS NOT NULL
+        AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.created_by AND u.tenant_id = p.tenant_id AND u.role <> 'owner')`);
+    return { count: n(r?.c), firstId: n(r?.first_id) };
+  } catch { return { count: 0, firstId: 0 }; }
+}
 
 /** 이 집 사람들 + 살아 있는 초대 + 남은 자리. */
 export async function teamOf(tid: number, meUid?: number): Promise<{ members: TeamMember[]; invites: TeamInvite[]; seats: { used: number; limit: number | null } }> {
