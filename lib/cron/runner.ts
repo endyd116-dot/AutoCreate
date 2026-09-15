@@ -41,6 +41,7 @@ import { runnerCanaryStep } from "./runner-canary";
 import { aiModelWatchStep } from "./ai-model-watch";
 import { tenantPurgeStep } from "./tenant-purge";
 import { coinReconcileStep } from "./coin-reconcile";
+import { channelOpenedStep } from "./channel-opened";
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -64,6 +65,7 @@ export const STEPS: AnyStep[] = [
   csAutoTicketStep,    // hourly · 러너 실패·결제 실패·계정 정지 3회 → 시스템 티켓(P1R4 §2.1)
   runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
   aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
+  channelOpenedStep,   // hourly · 관심 채널(온보딩에서 고른 planned)이 열리면 1회 알림(P1R7 B3 · 영구 멱등)
   coinReconcileStep,   // hourly(월 06:00 KST 주 1회 · 전역 1잠금) · 코인 원장 대조 — 어긋난 행 있을 때만 감사(P1R7 B3)
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
   publisherStep,       // 5m · due 발행
