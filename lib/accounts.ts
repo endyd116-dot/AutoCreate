@@ -8,7 +8,8 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
-import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0 — writing-contracts 는 db·drizzle 만 본다)
+import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
+import { warmupState, effectiveDailyCap, effectiveMinGapMin } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 
 type Row = Record<string, unknown>;
 export const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -29,7 +30,14 @@ export const TEXT_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "tistor
 
 export interface AccountRow {
   id: number; channel: string; handle: string; displayName: string | null; avatar: null; status: string;
-  healthScore: number; postsToday: number; dailyCap: number; minGapMin: number;
+  healthScore: number; postsToday: number;
+  /** 🔴 **유효** 하루 상한 — 워밍업 중이면 낮아진 값이다(게이트는 이걸 본다). */
+  dailyCap: number;
+  /** 고객이 정한 원래 상한(워밍업 중일 때만 실린다) — 화면이 «원래 2건인데 지금은 1건»을 말할 수 있게. */
+  dailyCapBase?: number;
+  minGapMin: number;
+  /** 워밍업 중일 때만(§2.6). 화면은 `label` 을 그대로 쓰면 된다. */
+  warmup?: { week: number; weeklyQuota: number | null; label: string; postsThisWeek: number };
   goldenHours?: number[]; lastPostAt?: string; lastErrorKind?: string; groupId?: number; personaId?: number;
   proxyUrl?: string; browserProfileKey: string; hasCreds: boolean;
   monetize: { coupang: boolean; adpost: boolean; adsense: boolean };
@@ -39,6 +47,11 @@ export interface AccountRow {
 export const ACCOUNT_SELECT = sql`
   a.id, a.channel, a.handle, a.display_name, a.status, a.health_score, a.posts_today, a.daily_cap, a.min_gap_min, a.golden_hours,
   a.last_post_at, a.last_error_kind, a.group_id, a.persona_id, a.proxy_url, a.browser_profile_key, a.monetize,
+  a.created_at, a.opened_at, a.warmup_off,
+  /* 워밍업(§2.6)이 보는 «이번 주 몇 건 올렸나» — 주는 **KST 월요일 시작**이다(DESIGN §13.5 · UTC 로 세면 월요일 새벽이 지난주가 된다). */
+  (SELECT COUNT(*) FROM posts p WHERE p.account_id = a.id
+     AND (p.published_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
+         >= (date_trunc('week', (NOW() AT TIME ZONE 'Asia/Seoul'))::date)) AS posts_this_week,
   EXISTS(SELECT 1 FROM account_creds c WHERE c.account_id = a.id AND c.purged_at IS NULL AND c.kind IN ('password','app_password','oauth','cookies')) AS has_creds,
   EXISTS(SELECT 1 FROM account_creds c WHERE c.account_id = a.id AND c.purged_at IS NULL AND c.kind = 'coupang') AS has_coupang`;
 
@@ -50,6 +63,19 @@ export function toAccountRow(r: Row): AccountRow {
     browserProfileKey: String(r.browser_profile_key || `t0-a${r.id}`), hasCreds: r.has_creds === true,
     monetize: { coupang: r.has_coupang === true, adpost: !!mon.adpostMediaId, adsense: !!mon.adsensePub },
   };
+  /* 🔴 워밍업(§2.6) — **`dailyCap` 을 유효값으로 바꿔서 내보낸다.**
+     캐던스를 보는 자리가 셋(director·director-auto·account-health)이라 게이트를 하나 더 만들면 넷이 된다.
+     대신 **게이트가 읽는 값 자체**를 유효값으로 만들면 그 셋이 코드를 안 고쳐도 워밍업을 따른다.
+     고객이 정한 원래 값은 `dailyCapBase` 로 함께 내보낸다 — 화면은 «원래 2건인데 지금은 1건»을 말할 수 있어야 한다. */
+  const wIn = { openedAt: r.opened_at as string | null, createdAt: r.created_at as string | null,
+    off: r.warmup_off === true, postsThisWeek: Number(r.posts_this_week ?? 0) };
+  const w = warmupState(wIn);
+  if (w.active) {
+    o.dailyCapBase = o.dailyCap;
+    o.dailyCap = effectiveDailyCap(o.dailyCap, wIn);
+    o.minGapMin = effectiveMinGapMin(o.minGapMin, wIn);
+    o.warmup = { week: w.week, weeklyQuota: w.weeklyQuota, label: w.label, postsThisWeek: wIn.postsThisWeek };
+  }
   if (Array.isArray(r.golden_hours) && r.golden_hours.length) o.goldenHours = (r.golden_hours as unknown[]).map(Number).filter((n) => Number.isFinite(n));
   const lp = utcDate(r.last_post_at); if (lp) o.lastPostAt = lp.toISOString();
   if (r.last_error_kind) o.lastErrorKind = String(r.last_error_kind);

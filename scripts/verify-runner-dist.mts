@@ -95,7 +95,9 @@ async function testTenant(): Promise<{ tid: number; uid: number }> {
  *    «테넌트를 통째로 지우는 함수»를 두지 않는다.
  */
 const PROTECTED_TENANTS = new Set([3, 13, 109, 116]);        // 보존 4집 — 무슨 일이 있어도 안 지운다
-const TEST_KEY = /^(runner-dist-verify|b2ver\d+)$/;          // 내 하니스가 만드는 키만
+/** 내 하니스가 만드는 키만. 🔴 여기 없는 키는 **지우지 않는다** — 새 실증을 만들 때마다 이 목록에 먼저 넣는다.
+ *  (`r7-runner-walk` = P1R7 §2.2 «고객 경로 1바퀴» 가 쓴 테넌트 · 그때 목록에 안 넣어 남아 있었다) */
+const TEST_KEY = /^(runner-dist-verify|b2ver\d+|r7-runner-walk)$/;
 
 export async function dropTestTenant(tid: number, log: (s: string) => void = console.log): Promise<void> {
   if (!Number.isInteger(tid) || tid <= 0) throw new Error(`테넌트 id 가 이상해요: ${tid}`);

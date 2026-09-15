@@ -21,6 +21,7 @@ import { db } from "../db/index";
 import { jsonb, utcDate } from "./db-util";
 import { decryptObj, encryptObj } from "./creds-crypto";
 import { writeAudit } from "./audit";
+import { publicBase } from "./site-url";
 import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
 import { classifyAndApply } from "./account-health";
 import { finalizePublish } from "./publish/finalize";
@@ -184,9 +185,10 @@ export function hashRunnerToken(token: string): string {
 }
 function newRunnerToken(): string { return `acr_${crypto.randomBytes(24).toString("base64url")}`; }
 
-function siteBase(): string {
-  return String(process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.SITE_URL || "https://autocreate-endyd.netlify.app").replace(/\/$/, "");
-}
+/* 🔴 여기서 만드는 주소는 고객에게 **주고 남는다**(설치 안내에 박히고, 고객이 복사해 둔다) → 정본 우선 `publicBase()`.
+   종전엔 `URL` 을 먼저 봐서 **배포 프리뷰에서 등록하면 며칠 뒤 죽는 주소**가 안내에 박혔다.
+   자기 호출용 `backgroundBase()`(이 배포)와 **일부러 다른 함수**다 — 하나로 합치면 둘 중 하나가 반드시 틀린다(AC-53). */
+const siteBase = publicBase;
 
 export interface RegisteredDevice {
   device: { id: number; name: string; token: string };
