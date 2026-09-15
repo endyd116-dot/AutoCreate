@@ -9,7 +9,7 @@
 import { sql } from "drizzle-orm";
 import { utcDate, jsonb } from "./db-util";
 import { q } from "./accounts";
-import { defaultImageCount, soleFormatOf } from "./writing-contracts";
+import { defaultImageCount, coinFormatOf } from "./writing-contracts";
 import { pieceCoinCost, AI_IMAGES_INCLUDED } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
@@ -90,7 +90,7 @@ export function coinsPerWeek(rules: Rule[]): number {
     /* [R8] 🔴 기본 경로는 «AI 1장 + 나머지 스톡» 이라 글 한 편이 **1코인**이다(사장님 승인값 2026-09-15).
        사진 총 장수(`defaultImageCount`)로 세면 7코인이 되어 **화면이 옛 값을 말하게** 된다.
        🔴 식은 `pieceCoinCost` **한 곳**에만 있다 — 여기서 다시 적으면 견적과 실제가 갈린다(카드뉴스·영상도 그 함수가 가른다). */
-    const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: soleFormatOf(r.channel) ?? undefined });
+    const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(r.channel) });
     return a + weeklyCount(r) * per;
   }, 0));
 }
@@ -309,7 +309,7 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     if (pw) {
       o.produceWindow = pw.window; o.produceReason = pw.reason;
       /* «지금 만들기»가 얼마인지 — 누르기 전에 숫자로 안다(A 요청). 식은 `coin-table.pieceCoinCost` 한 곳이라 실제 차감과 갈릴 수 없다. */
-      if (pw.window !== "done") o.coinCost = pieceCoinCost(o.kind, AI_IMAGES_INCLUDED, { format: soleFormatOf(o.channel) ?? undefined });
+      if (pw.window !== "done") o.coinCost = pieceCoinCost(o.kind, AI_IMAGES_INCLUDED, { format: coinFormatOf(o.channel) });
     }
     return o;
   });

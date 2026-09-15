@@ -17,7 +17,7 @@ import { attachStockPhoto } from "./stock/attach";
 import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate } from "./stock/plan";
 import { listPhotos } from "./piece-photos";                     // 내가 올린 사진(옛 B-1) — 조달 순서 ①
 import { aiSourceKey } from "./photo-source";
-import { contractFor, structureFor, type WritingContract, type FormatKey } from "./writing-contracts";
+import { contractFor, structureFor, coinFormatOf, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, blocksCharCount, type RenderImage } from "./blocks";
 import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
 import { ensureDisclosureFirst, disclosureTextFor, compensationOfMeta } from "./disclosure";
@@ -475,7 +475,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     try {
       const plannedAi = Math.max(0, Math.floor(Number(meta.aiImageCount ?? AI_IMAGES_INCLUDED) || 0));
       const actualAi = Math.max(0, Math.floor(Number(photoMix.ai ?? 0) || 0));
-      const want = pieceCoinCost("post", Math.min(plannedAi, actualAi), { format });
+      const want = pieceCoinCost("post", Math.min(plannedAi, actualAi), { format: coinFormatOf(channel, format) });
       const back = await settlePieceCoins(tid, pieceId, want);
       if (back > 0) {
         await writeAudit({ tenantId: tid, action: "piece_coin_settled", actorType: "system", target: `piece:${pieceId}`,
@@ -483,7 +483,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       } else if (actualAi > plannedAi) {
         /* 🔴 우리가 안은 몫 — 더 받지 않기로 한 값이다. 숫자로 남겨야 «스톡 재고가 비었다»를 운영이 본다. */
         await writeAudit({ tenantId: tid, action: "piece_ai_over_plan", actorType: "system", riskLevel: "low", target: `piece:${pieceId}`,
-          detail: { plannedAi, actualAi, absorbed: pieceCoinCost("post", actualAi, { format }) - pieceCoinCost("post", plannedAi, { format }), photoMix } });
+          detail: { plannedAi, actualAi, absorbed: pieceCoinCost("post", actualAi, { format: coinFormatOf(channel, format) }) - pieceCoinCost("post", plannedAi, { format: coinFormatOf(channel, format) }), photoMix } });
       }
     } catch (e) { console.error("[content-gen] 사진 값 정산 실패 — 글은 그대로 간다", String((e as Error)?.message ?? e).slice(0, 120)); }
     await recordOutcome({

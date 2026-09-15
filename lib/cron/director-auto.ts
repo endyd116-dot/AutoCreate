@@ -17,7 +17,7 @@
 import { sql } from "drizzle-orm";
 import { q, listAccounts, type AccountRow } from "../accounts";
 import { jsonb, utcDate } from "../db-util";
-import { contractFor, defaultImageCount, type FormatKey, type WritingContract } from "../writing-contracts";
+import { contractFor, defaultImageCount, coinFormatOf, type FormatKey, type WritingContract } from "../writing-contracts";
 import { pieceCoinCost, AI_IMAGES_INCLUDED } from "../coin-table";
 import { toTopic, type Topic } from "../topics";
 import { assignAccount, goalOf, type Affiliate, type PieceSpec } from "../director";
@@ -34,7 +34,7 @@ function wordsOf(c: WritingContract): number {
   return Number.isFinite(w) && w > 0 ? w : 900;
 }
 /** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적(`slots-list.coinCost`)과 **같은 숫자**여야 한다. */
-const pieceCoin = (aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format });
+const pieceCoin = (channel: string, aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format: coinFormatOf(channel, format) });
 
 /** 그 계정(없으면 그 채널)의 최근 format — 로테이션 재료. 사람 경로와 같은 질의. */
 async function recentFormats(tid: number, accountId: number | null, channel: string): Promise<string[]> {
@@ -132,7 +132,7 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
     images: { count: imageCount, style: c.images.style, heroNeeded: slot.channel === "naver_blog" || slot.channel === "tistory", aiCount: Math.min(imageCount, AI_IMAGES_INCLUDED) },
     /* [R8-A §4] 자동 경로는 «협찬·무상 제공»을 알 수 없다 — 기본 false. 고객이 검수에서 켠다(켜면 고지가 첫머리에 박힌다). */
     monetize: { affiliate, sponsored: false, gift: false, adDisclosure: !!affiliate },
-    schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
+    schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(slot.channel, Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
     formatPick: fpick,   // [R8 §2.2] 왜 이 구성인지 — 사람 경로와 **같은 자리**(pieces.meta.formatPick)
   };
 

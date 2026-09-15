@@ -732,6 +732,20 @@ export function isCardnewsChannel(channel: string): boolean {
   return !!WRITING_CONTRACTS[String(channel)]?.cardText;
 }
 
+/**
+ * [R8 · 메인 2026-09-15] 🔴 **코인 식에 넘길 `format` 은 «고른 골격»이 아니라 «채널의 성질»이다.**
+ *   코인 재설계 뒤 인스타 계약이 골격 5종(cardnews·steps·listicle·compare·qna)으로 늘었다.
+ *   그 순간 `soleFormatOf`(«골격이 하나일 때만 돌려준다»)가 **null** 이 되고, 고른 골격이 `steps` 면
+ *   코인 식이 «카드뉴스» 갈래를 못 타 **글값(1코인)** 으로 떨어졌다 — 카드 8장을 굽고 1코인만 받는다.
+ *   실제로 `verify-cardnews` ⑦ 이 이걸 잡았다(편성표 견적 1 ↔ 화면 «카드뉴스 3코인»).
+ *   🔴 그래서 판정은 **채널 하나**(`isCardnewsChannel` · `cardText` 가 정의)로 모은다 — 골격이 몇 종으로 늘든 값이 안 흔들린다.
+ *   `lib/coin-table.ts` 는 계약표를 보지 않는 순수 파일이라(AC-17) **호출부가 주는 것이 맞다** — 그 «호출부»가 여기 하나다.
+ */
+export function coinFormatOf(channel: string, picked?: string | null): string | undefined {
+  if (isCardnewsChannel(channel)) return "cardnews";
+  return picked ?? soleFormatOf(channel) ?? undefined;
+}
+
 export function contractSelfConflicts(c: WritingContract): string[] {
   const out: string[] = [];
   const t = c.tiers;

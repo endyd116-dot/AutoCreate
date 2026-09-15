@@ -18,7 +18,7 @@ import { HOOK_TYPES, PALETTES } from "./video/scenes";
 import { GEMINI_VOICES } from "./video/tts";
 import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
 import { precheckVideoBudget, triggerVideo } from "./video/gen";
-import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract, isCardnewsChannel } from "./writing-contracts";
+import { contractFor, defaultImageCount, shortsFormOf, clampSecondsForChannel, type FormatKey, type WritingContract, isCardnewsChannel, coinFormatOf } from "./writing-contracts";
 import { pickPublishAt, kstDateStr } from "./best-time";
 import { gapMinFor } from "./publish-gap";
 import { balance, consume, refundPiece } from "./coin-ledger";
@@ -83,7 +83,7 @@ export interface PieceSpecPatch { key: string; accountId?: number; format?: stri
 
 const wordsOf = (c: WritingContract) => { const w = Math.round(((c.length?.min ?? 1500) + (c.length?.max ?? 2500)) / 2 / 2.2); return Number.isFinite(w) ? w : 900; };   // 한국어 글자→어절 근사
 /** [R8] 식은 `lib/coin-table.ts pieceCoinCost` 한 곳 — 화면 견적과 실제 차감이 갈릴 수 없게. */
-const pieceCoin = (aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format });
+const pieceCoin = (channel: string, aiCount: number, format?: string) => pieceCoinCost("post", aiCount, { format: coinFormatOf(channel, format) });
 
 export function goalOf(pieces: { channel: string }[], intent: string): Goal {
   const set = new Set<Goal>();
@@ -321,7 +321,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
          고객이 «AI 로 더 구워 줘»를 고르면 `images.aiCount` 가 올라가고 그만큼만 더 든다. */
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory", aiCount: Math.min(imageCount, AI_IMAGES_INCLUDED) },
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
-      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
+      schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(ch, Math.min(imageCount, AI_IMAGES_INCLUDED), format), angle: topic.angle,
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
     });
   }
@@ -448,7 +448,7 @@ async function applyPatches(tid: number, specs: PieceSpec[], patches: PieceSpecP
       next.coinCost = coinCostOf(videoCoinItem(v.seconds));
       out.push(next); continue;
     }
-    next.coinCost = pieceCoin(next.images.aiCount, next.format);
+    next.coinCost = pieceCoin(next.channel, next.images.aiCount, next.format);
     out.push(next);
   }
   return { ok: true, specs: out };
