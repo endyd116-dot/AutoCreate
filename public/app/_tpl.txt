@@ -447,6 +447,14 @@ function renderSide() {
     </div>`;
   const b = UI.$("#sideRules"); if (b) b.onclick = settingsSheet;
 }
+/* [R8 §9] 🔴 **자동 승인을 켜는 자리에서 «무엇을 켜는 것인지» 말한다.**
+   발행 전 검사가 이제 아무것도 막지 않으니, 조용히 두면 **지적이 있는 글도 그대로 나간다** — 그 사실을 켜는 순간에 말하지 않으면
+   «말해 주기»가 아무에게도 안 닿는다(그러면 우리는 그냥 검사를 끈 것이다). 🔴 겁주지 않고 사실만: 나간 뒤에도 발행함에서 볼 수 있다. */
+/* 🔴 말투(CLAUDE §3 · 사장님 2026-09-15): 위협도 면피도 쓰지 않는다. «알려만 드렸다»는 발 빼는 말이라 금지.
+   사실 한 줄 → 우리가 해 주는 것 → 고객이 할 수 있는 것, 이 차례로만 적는다. */
+const rpSay = (v) => (v === "silence_answers" || v === "silence_approves"
+  ? "검수 시간에 아무것도 안 하시면 예정대로 올라가요 · 주요 안내는 미리 알려드리고, 올라간 뒤에도 «올라간 글»에서 다시 볼 수 있어요"
+  : "올리기 전에 검수에서 한 번 눌러 주시면 나가요");
 /* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
 function settingsSheet() {
   const S = { horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [], ...D.settings };
@@ -461,11 +469,12 @@ function settingsSheet() {
     <div class="sec">글은 며칠 전에 만들까요</div>${UI.chips("produceLeadDays", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], S.produceLeadDays)}
     <div class="sec">만드는 시각</div>${UI.chips("produceHour", [["06:00", "06:00"], ["09:00", "09:00"]], S.produceHour)}
     <div class="sec">검수 방식</div>${UI.seg("reviewPolicy", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], S.reviewPolicy)}
+    <p class="muted" id="rpSay" style="margin:6px 0 0;font-size:12.5px">${rpSay(S.reviewPolicy)}</p>
     <div class="sec">발행 시간</div>${UI.seg("bestTimeMode", [["auto", "채널 최적 시간"], ["fixed", "정한 시간만"]], S.bestTimeMode)}
     <div class="sec">주간 코인 상한</div>${UI.seg("capMode", [["plan", "플랜 포함분"], ["custom", "직접 정하기"]], S.weeklyCoinCap == null ? "plan" : "custom")}<div id="capBox" ${S.weeklyCoinCap == null ? "hidden" : ""} style="padding:8px 0 0">${UI.stepper("cap", S.weeklyCoinCap || 50, 10, 500, "코인", 10)}</div>
     <div class="sec">쉬는 날 <span class="muted" style="font-weight:500">· 앞으로 4주 · 여러 날 가능</span></div>${qcal}
     <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>`, { title: "편성 설정", onOpen: (sh, close) => {
-      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; });
+      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; if (n === "reviewPolicy") sh.querySelector("#rpSay").textContent = rpSay(v); });   /* [R8 §9] 켜는 순간에 무엇을 켜는 것인지 */
       sh.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => { const k = b.dataset.q; quiet.has(k) ? quiet.delete(k) : quiet.add(k); b.classList.toggle("sel", quiet.has(k)); });
       UI.toggle(sh.querySelector("#auto"), (on) => { if (on && !active.length) { UI.toast("먼저 규칙을 만들어 주세요"); return false; } });
       /* [R8 §6.2] 이미 규칙이 있으면 **목록**으로(한 채널에 여럿을 둘 수 있다) · 처음이면 마법사 그대로 */
@@ -1674,9 +1683,9 @@ function gateList(g) {
   const checks = g.checks || [];
   const bad = checks.filter((c) => !c.pass);
   const high = bad.filter(isHigh);
-  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">알려드릴 게 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
+  const pill = high.length ? `<span class="pill warn">꼭 보세요 ${high.length}</span>` : bad.length ? `<span class="pill off">안내 ${bad.length}</span>` : '<span class="pill ok">통과</span>';
   /* 🔴 «고쳐야 예약할 수 있어요»는 이제 거짓말이다 — 고칠 게 있어도 예약된다. 고르는 것은 고객이다. */
-  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정에 걸리는 것이라 꼭 보셔야 해요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
+  const say = bad.length ? `<p class="muted" style="margin:0 16px 8px;font-size:13px">${high.length ? `${high.length}가지는 법·계정과 얽힌 것이라 먼저 보시는 게 좋아요. ` : ""}그대로 내보낼 수도, 고치고 내보낼 수도 있어요.</p>` : "";
   /* ③ 되돌릴 수 있다 — 막지 않는 대신 «나가도 되돌릴 수 있다»가 보여야 «말해 주기»가 정직해진다.
      🔴 채널마다 우리가 대신 내릴 수 있는지 다르니 약속하지 않는다(발행함에서 그 채널의 길을 그대로 말한다). */
   const back = bad.length ? '<p class="muted" style="margin:0 16px 10px;font-size:12.5px">올린 뒤에 마음이 바뀌면 «올라간 글»에서 내릴 수 있어요 · 채널에 따라 직접 내려야 할 수도 있어요.</p>' : "";
@@ -2081,7 +2090,11 @@ const dayOf = (p) => { if (!p.publishedAt) return ""; const k = (x) => new Date(
 
 function row(p) {
   if (privateOf(p)) return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d" style="display:flex;align-items:center;gap:6px;overflow:visible;flex-wrap:wrap">${UI.pill(UI.POST_STATUS, p.status)}<span>공개 전환 필요</span></span></div><a class="lk" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;min-height:44px;display:inline-flex;align-items:center" data-stop>스튜디오 ›</a></button>`;
-  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
+  /* [R8 §9] 🔴 **나간 뒤에 보이는 것이 이제 유일하게 남은 안전장치다** — 발행 직전 게이트까지 내렸으니(사장님 결정),
+     «그때 이런 지적이 있었다»를 목록에서 바로 짚어 준다. 자동 승인이면 아무도 화면을 안 보고 나갔다는 뜻이라 더 그렇다.
+     🔴 무게는 서버가 읽어 준 것(`riskHigh`)만 쓴다 — 옛 글은 무게가 없어 **개수만** 온다(없는 것을 «무거움»으로 지어내지 않는다). */
+  const risk = p.riskCount ? `<span class="pill ${p.riskHigh ? "warn" : "off"}" style="margin-left:6px">${p.riskHigh ? "꼭 보세요" : "안내"} ${p.riskCount}</span>` : "";
+  const right = stuckOf(p) ? UI.pill(UI.POST_STATUS, p.status) : processingOf(p) ? '<span class="pill off">처리 중</span>' : `${risk}<span class="r mut">${p.publishedAt ? UI.timeKST(p.publishedAt) : ""}</span>${p.externalUrl ? EXT : ""}`;
   const sub = stuckOf(p) ? UI.errk(p.errorKind) : processingOf(p) ? `${UI.chLabel(p.channel)}에서 처리하는 중 · 곧 다시 확인해요` : (p.stats && p.stats.views != null ? "조회 " + UI.num(p.stats.views) : UI.chLabel(p.channel));
   return `<button type="button" class="row tap" data-id="${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 없음")}</span><span class="d">@${UI.esc(p.accountHandle || "")} · ${UI.esc(sub)}</span></div>${right}</button>`;
 }
@@ -2141,6 +2154,7 @@ function postSheet(p) {
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
     ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
+    ${p.riskCount ? `<div class="banner ${p.riskHigh ? "" : "info"}" style="margin:8px 0 0"><span>이 글엔 못 지킨 게 ${p.riskCount}가지 있어요 · 지금이라도 고치거나 내릴 수 있어요</span>${p.pieceId ? `<a href="/app/piece.html?id=${p.pieceId}" style="font-weight:700;text-decoration:underline;white-space:nowrap">무엇인지 보기</a>` : ""}</div>` : ""}
     <div class="cta" style="flex-direction:column">
       ${privateOf(p) ? `<a class="btn primary" href="${UI.studioUrl(p.channelRef)}" target="_blank" rel="noopener">유튜브 스튜디오 열기</a>` : ""}
       ${p.externalUrl ? `<a class="btn ${privateOf(p) ? "secondary" : "primary"}" href="${UI.esc(p.externalUrl)}" target="_blank" rel="noopener">${privateOf(p) ? "올라간 영상 보기(비공개)" : "올라간 글 열기"}</a>` : ""}
