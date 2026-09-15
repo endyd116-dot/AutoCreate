@@ -14,6 +14,7 @@ import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
+import { claimsLine, type ClaimSummary } from "../../lib/fact-claims";   // [R8 §2.4] 수치 주장 표시 — 문구 한 출처
 import { clientIp } from "../../lib/auth";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
@@ -133,6 +134,13 @@ export default async (req: Request): Promise<Response> => {
       if (m.scheduleAt) meta.scheduleAt = m.scheduleAt;
       if (m.slotReason) meta.slotReason = m.slotReason;
       if (m.angle) meta.angle = m.angle;
+      /* [R8 §2.4] 🔴 **수치 주장 표시** — 근거 있는 수치와 없는 수치를 갈라 검수 화면이 보여 준다(A 와 합의한 칸 `numberClaims`).
+         🔴 화면 문구는 «틀렸어요»가 아니라 **«우리가 준 자료에 없는 숫자예요 — 확인해 주세요»** 다(`claimsLine`).
+            우리는 그 숫자가 맞는지 **모른다**. 아는 것은 «우리가 준 숫자인가»뿐이다(AC-57). */
+      if (m.numberClaims && typeof m.numberClaims === "object") {
+        const nc = m.numberClaims as { summary?: ClaimSummary; items?: unknown };
+        if (nc.summary) meta.numberClaims = { summary: nc.summary, items: Array.isArray(nc.items) ? nc.items : [], line: claimsLine(nc.summary) };
+      }
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };

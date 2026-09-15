@@ -16,7 +16,8 @@ import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit, tenantPlan, autoApproveAllowed } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
 import { isVideoChannel } from "../../lib/video/types";
-import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, type Rule, type RuleKind } from "../../lib/slots";
+import { listRules, coinsPerWeek, rollSlots, readScheduleSettings, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
+import { isCardnewsChannel } from "../../lib/writing-contracts";   // [R8 §2.5] «카드뉴스 채널인가» 정본 한 곳
 import { mergeSettings } from "./tenant-settings";
 import { kstDateStr, addDays } from "../../lib/best-time";
 import { sql } from "drizzle-orm";
@@ -83,9 +84,15 @@ export default async (req: Request): Promise<Response> => {
         /* [R8] 분까지 못 박기(사장님 안 «10:05»). 🔴 시각을 안 정한 규칙에는 분을 받지 않는다 — «분만 5분»은 뜻이 없다. */
         const pm = r.preferredMinute === null || r.preferredMinute === undefined || r.preferredMinute === "" ? undefined : Math.trunc(n(r.preferredMinute));
         /* [P1R5 B-1 수정] kind — 영상 채널이면 shorts(요청이 말하지 않아도 채널이 정한다 · 글 채널에 shorts 를 넣지 않는다).
+           [R8 §2.5] 🔴 **카드뉴스 채널이면 cardnews** — 같은 규칙이다: **채널이 정하지 요청이 정하지 않는다.**
+           판정은 `isCardnewsChannel` 하나만 본다(목록을 여기 또 적으면 채널이 늘 때 한쪽만 고쳐진다 · AC-57).
            🔴 플랜 한도(maxRules)는 kind 와 무관한 «규칙 개수» 합산이다 — 아래 activeCount 가 그대로 센다(채널·종류별 한도 아님). */
-        const kind: RuleKind = isVideoChannel(channel) ? "shorts" : (String(r.kind) === "shorts" ? "shorts" : "post");
+        const kind: RuleKind = isVideoChannel(channel) ? "shorts"
+          : isCardnewsChannel(channel) ? "cardnews"
+          : toRuleKind(r.kind) === "shorts" ? "shorts" : "post";
         if (kind === "shorts" && !isVideoChannel(channel)) return badRequest("이 채널은 영상 편성을 지원하지 않아요.", "kind");
+        /* 🔴 카드뉴스가 아닌 채널에 카드뉴스를 달라고 하면 거절한다 — «되는 척»을 만들지 않는다(그 채널엔 카드 계약이 없다). */
+        if (toRuleKind(r.kind) === "cardnews" && !isCardnewsChannel(channel)) return badRequest("이 채널은 카드뉴스 편성을 지원하지 않아요.", "kind");
         const o: Omit<Rule, "id"> & { id?: number } = { channel, kind, accountMode, every, count, active: r.active !== false };
         if (n(r.id)) o.id = n(r.id);
         if (accountId) o.accountId = accountId;

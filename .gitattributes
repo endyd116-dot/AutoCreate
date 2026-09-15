@@ -1,0 +1,18 @@
+# 🔴 줄바꿈 정본 — 소스는 LF (2026-09-15 메인 결정)
+#   오늘 머지 4번 중 3번이 줄바꿈 때문에 **파일 전체 충돌**이었고, 그 과정에서 게이트 축 하나가 조용히 증발했다
+#   (내용 충돌 2곳이 700줄 속에 숨는다). 새로 쓰는 파일부터 LF 로 맞춘다.
+#   ⚠️ **전체 정규화(`git add --renormalize .`)는 브랜치가 다 비었을 때 한 번에** — 지금 하면 다섯 창의 브랜치가 통째로 충돌한다.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.otf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.mp4 binary
+*.mp3 binary

@@ -8,7 +8,9 @@ import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 
 export type BlockType = "hook" | "para" | "h2" | "h3" | "quote" | "list" | "checklist" | "table" | "image" | "divider" | "tip" | "faq" | "hashtags" | "disclosure" | "adsense" | "toc" | "summary" | "affiliate";
-export type FormatKey = "story" | "info" | "listicle" | "compare" | "qna" | "guide" | "cardnews";
+/* [R8 §2.5] `steps` 추가 — 인스타 카드뉴스의 «단계형». format 이 1종뿐이라 골격이 100% 겹치던 것을 다섯으로 늘리며 생겼다.
+   🔴 새 열쇠를 더하면 **화면 라벨(`public/js/ui.js UI.FORMAT`)도 같이** 더해야 한다 — 안 그러면 화면에 빈칸이 뜬다(AC-52 계열). */
+export type FormatKey = "story" | "info" | "listicle" | "compare" | "qna" | "guide" | "cardnews" | "steps";
 
 export interface VisualMin { quote?: number; divider?: number; image?: number; h2?: number; tableOrList?: number; adsense?: number; checklist?: number; hashtags?: number; faq?: number }
 
@@ -72,6 +74,16 @@ export interface WritingContract {
   imagesByGroup?: Partial<Record<TopicGroup, { min: number; max: number; default: number }>>;
   /** 블록 3단(필수/선택/억제) — 없으면 `structure` 배열을 그대로 쓴다. */
   tiers?: BlockTiers;
+  /**
+   * [R8 §2.5] 🔴 **이 채널의 사진은 «사진»이 아니라 «카드»다** — 카드마다 글자가 얹힌다(인스타 카드뉴스).
+   *   있으면 세 가지가 달라진다:
+   *     ① `captionRate` 를 무시하고 **모든 카드가 caption 을 갖는다**(글 채널은 «대부분 캡션 없음»이 실물이지만,
+   *        카드뉴스에서 글자 없는 카드는 **카드가 아니다**).
+   *     ② caption 길이 상한이 25자가 아니라 `max` 다.
+   *     ③ 프롬프트가 «카드 한 장 = 한 메시지»를 블록 스키마 자리에서 말한다.
+   *   🔴 묘사문 금칙(«~하는 모습»)은 **그대로 적용된다** — 카드 글자는 장면 설명이 아니라 독자가 가져갈 한 마디다.
+   */
+  cardText?: { max: number };
   /**
    * 수익 목적별 규칙 — **프롬프트에 그대로 실린다**.
    *   🔴 사장님 질문(2026-09-15): «같은 네이버라도 수익 목적에 따라 글 구성을 다 달리해야 하나?»
@@ -270,15 +282,43 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     channel: "instagram", emotionKey: "cardnews", label: "인스타 카드뉴스 · 짧고 단정",
     reader: "썸네일을 넘기며 보는 사람 — 카드 한 장에 한 메시지",
     register: "짧고 단정한 명사형·구어 «~하기 / ~해요»",
-    rules: ["표지 1장 → 핵심 5장 → CTA 1장. 카드당 30자 이내.", "한 카드에 한 메시지. 숫자·단계로 구조를 준다.", "캡션은 2~3줄 + 해시태그 5~10."],
-    formats: ["cardnews"],
-    formatLabel: { cardnews: "카드뉴스(표지→핵심 5→CTA)" },
-    structure: { cardnews: ["hook", "list", "list", "list", "list", "list", "tip", "hashtags"] },
-    visual: ["카드 6~8장", "큰 텍스트"],
-    visualMin: { hashtags: 5 },
+    /* [R8 §2.5] 🔴 옛 판은 «표지 1장 → 핵심 5장 → CTA 1장»을 **규칙(문장)으로만** 적고 골격에는 image 블록이 **한 개도 없었다**.
+       그러면 `structureFor` 가 사진 6장을 **맨 앞에 몰아 넣는다**(붙일 `para` 가 없어 `lastIndexOf("para") = -1` → 전부 index 1).
+       = 표지도 CTA 도 없는 «카드 6장 뭉치 + 목록 5개»가 나온다. AC-63 그대로다 — **규칙과 구조가 싸우면 구조가 이긴다.**
+       그래서 골격에 카드를 **자리마다 박았다**. 카드 한 장 = image 블록 하나다. */
+    rules: [
+      "🔴 **카드 한 장 = image 블록 하나**다. 카드마다 `caption` 을 단다 — 그 한 줄이 카드 위에 얹히는 글자다(30자 이내).",
+      "🔴 **첫 카드는 표지**(제목을 그대로 베끼지 말고 한 번 더 좁힌다) · **마지막 카드는 행동 유도**(저장·다음 글·프로필). 가운데는 핵심 하나씩.",
+      "한 카드에 한 메시지. 두 가지를 한 카드에 넣지 않는다. 숫자·단계로 구조를 준다.",
+      "🔴 카드 글자는 **장면 설명이 아니다** — «~하는 모습» «~이 놓여 있는» 금지. 읽는 사람이 바로 가져갈 한 마디를 쓴다.",
+      "게시물 본문(캡션)은 2~3줄이면 충분하다 — 카드에서 이미 다 말했다. 해시태그 5~10개.",
+    ],
+    /* 🔴 [R8 §2.5] format 이 **1종뿐이라 모든 글의 골격이 같았다** — `structure_repeat` 축이 10편 중 9편을 잡는다.
+       (`structurePrint` 는 **블록 타입 순서**를 본다 · 한 가지 골격이면 두 번째 글부터 100% 겹친다.)
+       다섯으로 늘리되 **순서가 실제로 다르게** 짰다 — 카드 수·곁들이는 블록·끝맺음을 셋 다 달리한다. */
+    formats: ["cardnews", "steps", "listicle", "compare", "qna"],
+    formatLabel: {
+      cardnews: "카드뉴스(표지→핵심→CTA)", steps: "단계형(1단계씩 한 카드)", listicle: "N가지형(하나씩 넘기며)",
+      compare: "비교형(A vs B 표)", qna: "문답형(궁금한 것부터)",
+    },
+    structure: {
+      cardnews: ["hook", "image", "image", "image", "image", "image", "image", "tip", "para", "hashtags"],
+      steps: ["hook", "image", "checklist", "image", "image", "image", "image", "image", "summary", "hashtags"],
+      listicle: ["hook", "list", "image", "image", "image", "image", "image", "image", "tip", "hashtags"],
+      compare: ["hook", "image", "table", "image", "image", "image", "image", "image", "quote", "hashtags"],
+      qna: ["hook", "image", "image", "image", "image", "image", "image", "faq", "para", "hashtags"],
+    },
+    visual: ["카드 6~8장", "카드마다 30자 이내 한 줄", "표지 카드", "마지막 카드는 행동 유도"],
+    /* 🔴 `image: 6` 은 계약과 **싸우지 않는다** — 아래 `images.default`·`imagesByGroup` 이 전부 6장 이상이다
+       (`contractSelfConflicts` 가 이 둘을 대조한다 · CLAUDE §9 «최소치도 게이트다»). */
+    visualMin: { image: 6, hashtags: 5 },
     length: { min: 150, max: 400 },
     titleStyle: "card", titleExample: "에어프라이어 청소 3단계",
     images: { min: 6, max: 8, default: 6, style: "infographic", aspect: "1:1", captionRate: 0 },
+    /* 🔴 카드 수도 주제군마다 다르다(§2.5 «카드 6~8장»). 후기는 보여 줄 것이 많고 정보성은 짧게 끝난다. */
+    imagesByGroup: { review: { min: 6, max: 8, default: 8 }, info: { min: 6, max: 8, default: 6 }, life: { min: 6, max: 8, default: 7 } },
+    /* 🔴 카드 글자 — `captionRate: 0` 을 **덮는다**(카드뉴스에서 글자 없는 카드는 카드가 아니다 · `cardText` 필드 설명). */
+    cardText: { max: 30 },
     emojiPerParagraph: 1, text: false,
   },
   wordpress: {
@@ -677,6 +717,16 @@ const CHARS: Partial<Record<BlockType, number>> = { para: 420, hook: 260, h2: 30
  *   그 빨강이 **재작성을 부른다 = 돈이 두 배**다. 막는 게이트가 아니어도 «돈이 드는 게이트»는 게이트다.
  *   ⇒ 값이 바뀔 때마다 되짚기가 이 함수를 불러 **0 인지** 본다. 사람이 눈으로 맞추면 다음 사람이 또 어긋낸다.
  */
+/**
+ * [R8 §2.5] 🔴 **«이 채널은 카드뉴스인가»의 정본 한 곳.**
+ *   목록을 따로 두지 않는다 — 판정 기준이 곧 뜻이다: **사진이 «카드»인 채널**(`cardText` 가 있는 채널)이 카드뉴스다.
+ *   목록을 새로 만들면 채널이 늘 때 한쪽만 고쳐져 갈라진다(AC-57 · 오늘 채널 «성질» 표를 한 곳으로 모은 것과 같은 이유).
+ *   편성(`RuleKind`)·생성(`pieces.kind`)·코인이 **전부 이 함수 하나**를 본다.
+ */
+export function isCardnewsChannel(channel: string): boolean {
+  return !!WRITING_CONTRACTS[String(channel)]?.cardText;
+}
+
 export function contractSelfConflicts(c: WritingContract): string[] {
   const out: string[] = [];
   const t = c.tiers;

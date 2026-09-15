@@ -14,6 +14,8 @@ import { coinCostOf, videoCoinItem } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
 import { gapMinFor } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다
+import { requireWritable } from "./guards";
+import { produceWindowOf, type ProduceWindow } from "./produce-window";   // [R8] «언제 만들어지나»의 **정본** — 크론 produce 와 같은 잣대(AC-47/AC-70)
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -51,11 +53,18 @@ export async function readScheduleSettings(tid: number): Promise<ScheduleSetting
 }
 
 /* ───────── Rule ───────── */
-/** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다. */
-export type RuleKind = "post" | "shorts";
+/** [P1R5 B-1 수정] kind 에 "shorts" 추가 — 편성표가 영상도 굴린다(계약 P1R5 §3 · DESIGN §5B.3 «글 · 쇼츠 · 카드뉴스»). 슬롯·크론은 이 값을 그대로 물려받는다.
+ *  [R8 §2.5] 🔴 **`cardnews` 추가** — DESIGN §5B.3 이 말한 세 가지 중 **하나가 통째로 없었다**(계약은 있는데 편성·생성·검수에 없었다).
+ *  카드뉴스는 글 축이라 `content-gen` 으로 만들지만, 편성에서 «글 주 3회»와 «카드뉴스 주 3회»는 **다른 주문**이고 **코인 값도 다르다**. */
+export type RuleKind = "post" | "shorts" | "cardnews";
+/** 문자열 → RuleKind(모르는 값은 "post"). 읽는 자리가 여럿이라 한 곳에 둔다. */
+export function toRuleKind(v: unknown): RuleKind {
+  const x = String(v ?? "");
+  return x === "shorts" ? "shorts" : x === "cardnews" ? "cardnews" : "post";
+}
 export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; preferredMinute?: number; formatHint?: string; active: boolean }
 export function toRule(r: Row): Rule {
-  const o: Rule = { id: n(r.id), channel: String(r.channel), kind: (String(r.kind) === "shorts" ? "shorts" : "post"), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
+  const o: Rule = { id: n(r.id), channel: String(r.channel), kind: toRuleKind(r.kind), accountMode: r.account_mode === "fixed" ? "fixed" : "auto", every: (["day", "week", "month"].includes(String(r.every)) ? String(r.every) : "week") as Rule["every"], count: Math.max(1, n(r.count)), active: r.active !== false };
   if (r.account_id) o.accountId = n(r.account_id);
   if (Array.isArray(r.weekdays) && r.weekdays.length) o.weekdays = (r.weekdays as unknown[]).map(Number).filter((d) => d >= 0 && d <= 6);
   if (r.preferred_hour !== null && r.preferred_hour !== undefined) o.preferredHour = n(r.preferred_hour);
@@ -73,10 +82,14 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
   if (r.every === "month") return r.count * 12 / 52;
   return r.weekdays?.length ? Math.min(r.count, r.weekdays.length) || r.weekdays.length : r.count;
 }
-/** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60). */
+/** coinsPerWeek = Σ(활성 규칙 주환산 × 편당 코인). 글 = blog 1 + image×채널 기본 · [P1R5] 영상 = 길이 구간(기본 60초 = video_60).
+ *  [R8 §2.5] 🔴 카드뉴스 = **`cardnews` 한 값(카드 값이 그 안에 들어 있다)**. 여기와 `lib/director.ts pieceCoin` 이
+ *  **같은 규칙**이어야 한다 — 갈리면 편성표가 말한 코인과 실제로 빠지는 코인이 달라진다(AC-74 «화면의 숫자도 서버가 정본»). */
 export function coinsPerWeek(rules: Rule[]): number {
   return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
-    const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60)) : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
+    const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60))
+      : r.kind === "cardnews" ? coinCostOf("cardnews")
+      : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
     return a + weeklyCount(r) * per;
   }, 0));
 }
@@ -111,6 +124,42 @@ export function ruleHitsDate(r: Rule, dateStr: string): boolean {
   return spreadMonthDays(r.count, daysInMonthOf(dateStr)).includes(dom);
 }
 
+/** [R8] 아직 안 넣은 자리 한 줄. 루프는 **무엇을 넣을지만** 정하고, 넣는 일은 아래 `insertSlots` 가 한 번에 한다. */
+interface PendingSlot { ruleId: number; date: string; channel: string; kind: string; accountId: number | null; at: Date; reviewDeadline: Date }
+
+/** 한 문장에 넣는 최대 행 수. 파라미터 상한(65535)에 닿지 않게 끊는다 — 행당 10개 × 500 = 5,000. */
+const SLOT_INSERT_CHUNK = 500;
+
+/**
+ * insertSlots — 자리를 **한 문장으로** 넣는다(메인 승인 2026-09-15 · 왕복 N → 1).
+ *
+ *   ══ 왜 ══
+ *   한 줄씩 넣으면 왕복이 자리 수만큼 난다. 규칙 3개 × 14일 = 45번이고, Pro·Agency 는 **규칙 무제한 + 30일**이라
+ *   자리 수에 천장이 없다. 이 PC → Neon 왕복 192ms(실측)에서 이미 30초 벽에 닿았다.
+ *
+ *   ══ 🔴 안 바뀌는 것 ══
+ *   **무엇을 넣을지는 하나도 안 바뀐다.** 멱등은 위 루프의 `have`(= 이미 있는 (rule_id, slot_date))가 걸렀고,
+ *   같은 시각 점유는 `takenBy` 가 걸렀다. 여기서는 **넣는 방법만** 바꾼다. 순서도 루프가 만든 순서 그대로다.
+ *
+ *   ══ 바뀌는 것 하나(더 나은 쪽) ══
+ *   실패하면 그 묶음은 **하나도 안 들어간다**(전에는 중간까지 들어가고 멈췄다 — 30초 벽에서 실제로 그랬다).
+ *   반환은 «넣으라고 시킨 수»가 아니라 **실제로 들어간 행 수**(RETURNING).
+ */
+async function insertSlots(tid: number, rows: PendingSlot[]): Promise<number> {
+  let created = 0;
+  for (let i = 0; i < rows.length; i += SLOT_INSERT_CHUNK) {
+    const chunk = rows.slice(i, i + SLOT_INSERT_CHUNK);
+    const values = sql.join(
+      chunk.map((r) => sql`(${tid}, ${r.ruleId}, ${r.date}::date, ${r.channel}, ${r.kind}, ${r.accountId}::bigint, ${r.at.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${r.reviewDeadline.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${"planned"}, ${"auto"})`),
+      sql`, `,
+    );
+    const out = await q(sql`INSERT INTO slots (tenant_id, rule_id, slot_date, channel, kind, account_id, publish_at, review_deadline, status, origin)
+      VALUES ${values} RETURNING 1 AS x`);
+    created += out.length;
+  }
+  return created;
+}
+
 /**
  * rollSlots — 오늘~+horizonDays 슬롯 생성(멱등 · (rule_id, slot_date) 중복 0 · quietDays 제외 · 오늘 지난 시각 제외).
  *   반환 = 새로 만든 수.
@@ -138,7 +187,8 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
     if (!fixedId) continue;
     try { gapCache.set(fixedId, await gapMinFor(tid, fixedId)); } catch { /* 못 읽으면 기본(안전)을 쓴다 */ }
   }
-  let created = 0, checked = 0;
+  let checked = 0;
+  const pending: PendingSlot[] = [];   // [R8] 모아서 한 문장으로 — 아래 `insertSlots`
   for (let d = 0; d <= horizon; d++) {
     const date = addDays(today, d);
     if (quiet.has(date)) continue;
@@ -176,11 +226,11 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
       }
       if (!at) continue;   // 오늘 후보가 전부 지났다 — 내일부터
       const reviewDeadline = new Date(kstToUtc(date, 2, 0).getTime());   // D-0 02:00 KST(silence_approves 마감 · §5B.7)
-      await q(sql`INSERT INTO slots (tenant_id, rule_id, slot_date, channel, kind, account_id, publish_at, review_deadline, status, origin)
-        VALUES (${tid}, ${r.id}, ${date}::date, ${r.channel}, ${r.kind}, ${accountId}, ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${reviewDeadline.toISOString()}::timestamptz AT TIME ZONE 'UTC', ${"planned"}, ${"auto"})`);
-      have.add(key); takenBy.set(tk, [...taken, at]); created++;
+      pending.push({ ruleId: r.id, date, channel: r.channel, kind: r.kind, accountId, at, reviewDeadline });
+      have.add(key); takenBy.set(tk, [...taken, at]);   // 🔴 «이미 잡았다»는 **메모리에서** 바로 선다 — 다음 규칙·다음 날이 같은 자리를 또 잡지 않게(넣는 시점과 무관)
     }
   }
+  const created = await insertSlots(tid, pending);
   return { created, checked };
 }
 
@@ -189,7 +239,12 @@ export interface Slot { id: number; date: string; channel: string; kind: string;
   /** [P1R7 B3] 그 자리에 서버가 남긴 사람말 한 줄(예: 규칙이 정한 구성을 못 썼을 때 · 실패 사유). 없으면 키를 안 싣는다. */
   note?: string;
   /** [P1R7 B3 · DESIGN §5B.2 D+1] 이 자리의 글이 **지금까지 번 돈**(원 · revenue_daily 의 piece 귀속 합). 0원이어도 값이 있으면 싣는다 — «아직 못 가져옴»과 «0원»은 다르다(AC-9). */
-  revenueKrw?: number }
+  revenueKrw?: number;
+  /** [R8] 이 자리의 글이 **언제 만들어지나** — `pending`(차례가 남았다) · `missed`(자동으론 더 안 만든다 = **지금 만들기가 유일한 길**) · `done`(이미 있다).
+   *  🔴 잣대는 `lib/produce-window.ts` 한 곳이고 크론 `slots.produce` 가 같은 목록을 읽는다. 건너뜀·반려 자리엔 **키를 안 싣는다**(해당 없음). */
+  produceWindow?: ProduceWindow;
+  /** 그 판정의 **사람말 한 줄**. `missed` 는 반드시 «지금 할 수 있는 일»로 끝난다. */
+  produceReason?: string }
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -213,7 +268,14 @@ const SKIP_CANDIDATE_STATUS = new Set(["planned", "no_topic", "topic_assigned", 
  */
 export async function listSlots(tid: number, from: string, to: string, now = new Date()): Promise<Slot[]> {
   const settings = await readScheduleSettings(tid);
-  const tick = nextProduceTickUtc(settings, now).getTime();
+  const tickAt = nextProduceTickUtc(settings, now);
+  const tick = tickAt.getTime();
+  /* [R8] «언제 만들어지나»를 말하려면 크론이 보는 것을 **똑같이** 봐야 한다 — 자동 편성 스위치(settings)와 집 상태(requireWritable).
+     🔴 produce 스텝의 첫 두 줄(`needsAutoSchedule` · `requireWritable`)이 곧 이 판정이다. 여기서 다시 해석하지 않는다. */
+  const w = await requireWritable(tid).catch(() => null);
+  const blockedReason = w && !w.ok ? w.reason : null;
+  const todayKst = kstDateStr(now);
+  const tickText = `${tickAt.getTime() < kstToUtc(addDays(todayKst, 1), 0, 0).getTime() ? "오늘" : "내일"} ${new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "numeric", minute: "2-digit" }).format(tickAt)}`;
   /* [P1R7 B3 · §5B.2 D+1] 수익 되먹임 — 그 자리의 piece 에 귀속된 `revenue_daily` 합을 함께 읽는다(글별 TOP5 와 같은 원천 · lib/revenue/aggregate).
      🔴 수집 행이 하나도 없으면 SUM 이 NULL 이고, 그때는 키를 안 싣는다 — «아직 못 가져옴»을 «0원 벌었다»로 그리지 않게(AC-9). */
   const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title,
@@ -230,11 +292,17 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     if (r.piece_id) o.pieceId = n(r.piece_id);
     if (r.note) o.note = String(r.note).slice(0, 300);
     if (r.revenue_krw !== null && r.revenue_krw !== undefined) o.revenueKrw = n(r.revenue_krw);
-    if (!r.piece_id && SKIP_CANDIDATE_STATUS.has(o.status)) {
-      const [y, m, d] = o.date.split("-").map(Number);
-      const publishMs = pa ? pa.getTime() : Date.UTC(y, m - 1, d, 23, 59, 0) - KST_MS_LOCAL;   // publish_at 없으면 그날 KST 23:59
-      if (publishMs <= tick) o.skipReason = "too_soon";
-    }
+    const [y, m, d] = o.date.split("-").map(Number);
+    const publishMs = pa ? pa.getTime() : Date.UTC(y, m - 1, d, 23, 59, 0) - KST_MS_LOCAL;   // publish_at 없으면 그날 KST 23:59
+    if (!r.piece_id && SKIP_CANDIDATE_STATUS.has(o.status) && publishMs <= tick) o.skipReason = "too_soon";
+    /* [R8] 🔴 같은 값(publishMs · tick)으로 «언제 만들어지나»까지 판정한다 — `skipReason` 과 `produceWindow` 가 **다른 눈금을 쓰면 안 된다**.
+       판정 자체는 `lib/produce-window.ts`(크론 produce 와 공유)에 있고 여기서는 넘기기만 한다. */
+    const pw = produceWindowOf({
+      status: o.status, hasPiece: !!r.piece_id, slotDate: o.date, todayKst, publishAtMs: publishMs,
+      nextTickMs: tick, nextTickText: tickText, leadDays: settings.produceLeadDays,
+      autoSchedule: settings.autoSchedule, blockedReason, note: o.note ?? null,
+    });
+    if (pw) { o.produceWindow = pw.window; o.produceReason = pw.reason; }
     return o;
   });
 }

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orbit — AI 콘텐츠 운영실</title>
+  <meta name="description" content="다계정 AI 콘텐츠 제작과 업로드 현황을 탐색하는 클릭형 프로토타입">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2311172a'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%237c5cff'/%3E%3Cellipse cx='32' cy='32' rx='24' ry='11' fill='none' stroke='%23c7bfff' stroke-width='5' transform='rotate(-24 32 32)'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg:#f4f5f9; --panel:#fff; --ink:#151828; --muted:#71758b; --line:#e7e8ef;
+      --nav:#11172a; --nav2:#171e34; --purple:#7558f6; --purple-soft:#eeeafd;
+      --green:#14a778; --orange:#f59a3d; --red:#e55262; --shadow:0 14px 38px rgba(25,27,50,.08);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    html{font-size:16px}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:Pretendard,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;line-height:1.5}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr}
+    .sidebar{position:sticky;top:0;height:100vh;background:var(--nav);color:#fff;padding:24px 18px;display:flex;flex-direction:column;z-index:10}
+    .brand{display:flex;align-items:center;gap:11px;padding:0 9px 28px;font-size:1.18rem;font-weight:800;letter-spacing:-.02em}
+    .brand-mark{width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,#9a83ff,#6550e8);display:grid;place-items:center;box-shadow:0 8px 20px #6f59ef66}
+    .brand-mark:after{content:"";width:11px;height:11px;border:3px solid white;border-radius:50%}
+    .nav-label{padding:0 10px;margin:10px 0 7px;color:#7f879f;font-size:.72rem;font-weight:700;letter-spacing:.12em}
+    .nav-item{border:0;background:transparent;color:#aeb4c8;width:100%;height:45px;padding:0 12px;border-radius:11px;display:flex;align-items:center;gap:12px;text-align:left;font-weight:650}
+    .nav-item:hover,.nav-item.active{background:var(--nav2);color:#fff}
+    .nav-item.active{box-shadow:inset 3px 0 var(--purple)}
+    .nav-icon{width:20px;text-align:center;font-size:1.05rem}
+    .nav-count{margin-left:auto;background:#2a3149;color:#dfe2ec;border-radius:999px;padding:2px 8px;font-size:.72rem}
+    .sidebar-bottom{margin-top:auto;border-top:1px solid #283049;padding:18px 8px 0}
+    .operator{display:flex;align-items:center;gap:10px}
+    .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#ffd9c1,#e89c77);display:grid;place-items:center;color:#563224;font-size:.8rem;font-weight:800}
+    .operator small{display:block;color:#858da6}
+    main{min-width:0}
+    .topbar{height:76px;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 34px;position:sticky;top:0;z-index:6}
+    .crumb{font-size:.88rem;color:var(--muted)}
+    .crumb strong{color:var(--ink)}
+    .top-actions{display:flex;gap:10px;align-items:center}
+    .icon-btn{width:39px;height:39px;border:1px solid var(--line);background:#fff;border-radius:11px;color:#555b70}
+    .primary-btn,.secondary-btn{border:0;border-radius:11px;padding:11px 17px;font-weight:750;display:inline-flex;align-items:center;gap:8px}
+    .primary-btn{background:var(--purple);color:#fff;box-shadow:0 8px 18px #7558f638}
+    .primary-btn:hover{background:#6549df}
+    .secondary-btn{background:#fff;color:var(--ink);border:1px solid var(--line)}
+    .content{padding:30px 34px 60px;max-width:1600px;margin:0 auto}
+    .page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:24px}
+    h1{font-size:1.75rem;letter-spacing:-.04em;margin:0 0 5px}
+    h2{font-size:1.2rem;letter-spacing:-.025em;margin:0}
+    h3{font-size:1rem;margin:0}
+    .subtitle{color:var(--muted);margin:0;font-size:.92rem}
+    .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:14px;margin-bottom:22px}
+    .today-live{display:grid;grid-template-columns:minmax(220px,1.15fr) repeat(3,minmax(150px,.72fr));gap:10px;background:linear-gradient(118deg,#171d31,#242849);border-radius:18px;padding:12px;margin-bottom:16px;color:#fff;box-shadow:0 14px 30px rgba(18,23,42,.14)}
+    .live-intro{padding:12px 14px;display:flex;flex-direction:column;justify-content:center}.live-label{display:flex;align-items:center;gap:8px;color:#c8cce0;font-size:.75rem;font-weight:750}.live-dot{width:8px;height:8px;border-radius:50%;background:#39d99a;box-shadow:0 0 0 5px rgba(57,217,154,.12);animation:livePulse 1.8s infinite}.live-intro strong{font-size:1.1rem;margin:7px 0 2px}.live-updated{font-size:.7rem;color:#8f97b2}
+    .today-stat{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.075);border-radius:13px;padding:12px 14px;display:grid;grid-template-columns:38px 1fr;gap:10px;align-items:center}.today-icon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(255,255,255,.1);font-size:1rem}.today-stat label{display:block;color:#b8bed4;font-size:.7rem;font-weight:720}.today-stat strong{display:inline-block;font-size:1.35rem;line-height:1.05;margin-top:3px}.today-stat small{color:#aab2ca;font-size:.68rem;margin-left:4px}.today-stat.uploaded{border-color:rgba(57,217,154,.25);background:rgba(57,217,154,.09)}.today-stat.bump strong{animation:numberBump .38s ease}
+    .prototype-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px}.prototype-card{background:#fff;border:1px solid var(--line);border-radius:15px;padding:17px}.prototype-card .eyebrow{color:var(--muted);font-size:.72rem;font-weight:750}.prototype-card strong{display:block;font-size:1.28rem;margin:6px 0 2px}.prototype-list{display:flex;flex-direction:column;gap:9px}.prototype-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 13px;background:#fafafd;border:1px solid #eff0f4;border-radius:11px;font-size:.8rem}.prototype-row b{display:block}.prototype-row small{display:block;color:var(--muted);margin-top:2px}.setting-toggle{width:38px;height:22px;border:0;border-radius:999px;background:#d9dbe4;padding:3px}.setting-toggle:after{content:"";display:block;width:16px;height:16px;border-radius:50%;background:#fff;transition:.18s}.setting-toggle.on{background:var(--purple)}.setting-toggle.on:after{transform:translateX(16px)}
+    .metric{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 19px;box-shadow:0 2px 8px rgba(20,24,45,.025)}
+    .metric-top{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:.8rem;font-weight:650}
+    .metric-icon{width:32px;height:32px;border-radius:9px;background:var(--purple-soft);color:var(--purple);display:grid;place-items:center}
+    .metric-value{font-size:1.65rem;font-weight:820;letter-spacing:-.04em;margin:10px 0 2px}
+    .delta{font-size:.76rem;color:var(--green);font-weight:700}.delta.neutral{color:var(--muted)}
+    .platform-tabs{background:#e8e9ef;border-radius:13px;padding:5px;display:flex;gap:4px;width:max-content;margin-bottom:18px;max-width:100%;overflow:auto}
+    .platform-tab{border:0;background:transparent;padding:9px 15px;border-radius:9px;color:#6e7285;font-size:.86rem;font-weight:700;white-space:nowrap}
+    .platform-tab.active{background:#fff;color:var(--ink);box-shadow:0 3px 10px #2b304015}
+    .platform-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 4px 14px rgba(26,29,49,.03);overflow:hidden}
+    .panel-head{padding:19px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .filters{display:flex;gap:9px;align-items:center}
+    .search{position:relative}.search input{height:38px;width:230px;border:1px solid var(--line);border-radius:10px;padding:0 12px 0 35px;background:#fafafd;outline:none}
+    .search input:focus{border-color:#bcb1f9;box-shadow:0 0 0 3px #7558f615}
+    .search:before{content:"⌕";position:absolute;left:12px;top:6px;color:#7b8094;font-size:1.1rem}
+    select{height:38px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:0 32px 0 11px;color:#5e6377}
+    .table-wrap{overflow:auto}
+    table{width:100%;border-collapse:collapse;min-width:1480px}
+    th{background:#fafafd;color:#85899b;font-size:.73rem;text-align:left;padding:12px 18px;font-weight:750;white-space:nowrap}
+    td{padding:15px 18px;border-top:1px solid #f0f1f5;font-size:.84rem;vertical-align:middle}
+    tbody tr{transition:.15s;background:#fff}
+    tbody tr:hover{background:#faf9ff}
+    .account-cell{display:flex;align-items:center;gap:11px;min-width:210px}
+    .platform-logo{width:39px;height:39px;border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:850;font-size:.78rem;flex:none}
+    .account-name{font-weight:760}.account-email{color:var(--muted);font-size:.74rem;margin-top:2px}
+    .status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;font-size:.72rem;font-weight:750;background:#eaf8f3;color:#087756}
+    .status.warn{background:#fff3e5;color:#a75b08}.status.pause{background:#f0f1f5;color:#6c7184}
+    .status:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+    .kind{display:inline-flex;border:1px solid var(--line);border-radius:7px;padding:4px 7px;color:#62677a;background:#fff;font-size:.72rem;font-weight:650}
+    .views{font-weight:760}.time{color:var(--muted)}
+    .service-tabs{display:flex;gap:8px;margin:-7px 0 18px;padding-left:2px}
+    .service-tab{border:1px solid var(--line);background:#fff;color:#62677a;border-radius:10px;padding:9px 14px;font-size:.82rem;font-weight:750}
+    .service-tab.active{background:#e9fbf1;border-color:#9ce4bd;color:#08794b;box-shadow:0 4px 12px rgba(20,167,120,.1)}
+    .context-metrics{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+    .context-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 17px}
+    .context-card label{display:block;color:var(--muted);font-size:.74rem;font-weight:700}.context-card strong{display:block;font-size:1.28rem;margin:5px 0 1px;letter-spacing:-.03em}.context-card small{font-size:.72rem;color:var(--green);font-weight:700}
+    .trend{display:inline-flex;align-items:center;gap:6px;border-radius:9px;padding:6px 9px;font-size:.75rem;font-weight:800;white-space:nowrap}.trend.up{color:#07845b;background:#e7f8f1}.trend.flat{color:#986014;background:#fff3df}.trend.down{color:#c33e50;background:#fdecef}
+    .trend-detail{display:block;color:var(--muted);font-size:.68rem;font-weight:600;margin-top:3px}
+    .progress-chip{display:inline-flex;align-items:center;gap:7px;border-radius:9px;background:#f1efff;color:#6248dc;padding:6px 9px;font-size:.73rem;font-weight:780;white-space:nowrap}.progress-chip.done{background:#e8f8f2;color:#087a56}.progress-chip.scheduled{background:#e9f2ff;color:#2563a9}
+    .progress-timeline{display:grid;gap:0;margin-top:4px}.progress-row{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:start;min-height:48px;position:relative}.progress-row:not(:last-child):before{content:"";position:absolute;left:13px;top:26px;bottom:-3px;width:2px;background:#e2e3ea}.progress-row.complete:not(:last-child):before{background:#9ddfca}.progress-node{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#eff0f4;color:#8c90a0;font-size:.7rem;font-weight:800;z-index:1}.progress-row.complete .progress-node{background:#daf4e9;color:#087a56}.progress-row.current .progress-node{background:var(--purple);color:#fff;box-shadow:0 0 0 5px #7558f617}.progress-copy b{display:block;font-size:.84rem}.progress-copy span{font-size:.72rem;color:var(--muted)}.progress-time{font-size:.72rem;color:var(--muted);white-space:nowrap}
+    .trend-summary{display:flex;align-items:center;gap:14px}.trend-arrow{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;font-size:1.5rem;font-weight:900}.trend-arrow.up{background:#e7f8f1;color:#07845b}.trend-arrow.flat{background:#fff3df;color:#986014}.trend-arrow.down{background:#fdecef;color:#c33e50}.trend-summary strong{display:block;font-size:1.1rem}.trend-summary p{margin:3px 0 0;color:var(--muted);font-size:.78rem}
+    .calendar-toolbar{display:flex;align-items:center;gap:12px}.month-title{font-size:1.25rem;font-weight:820;min-width:120px;text-align:center}.calendar-layout{display:grid;grid-template-columns:minmax(720px,1.55fr) minmax(300px,.55fr);gap:18px}.calendar-panel{overflow:auto}.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(112px,1fr));min-width:784px;background:var(--line);gap:1px}.weekday{background:#f7f7fa;padding:11px;text-align:center;color:#7f8496;font-size:.75rem;font-weight:800}.weekday:first-child{color:#dc4a5b}.weekday:last-child{color:#3d67c7}.day-cell{border:0;background:#fff;min-height:139px;padding:11px;text-align:left;display:flex;flex-direction:column;gap:6px;transition:.15s}.day-cell:hover{background:#faf9ff}.day-cell.selected{background:#f4f1ff;box-shadow:inset 0 0 0 2px var(--purple)}.day-cell.empty{background:#fafafd;cursor:default}.day-num{font-weight:820;font-size:.86rem}.day-num.today{width:27px;height:27px;background:var(--purple);color:#fff;border-radius:50%;display:grid;place-items:center;margin:-4px}.day-total{font-size:.78rem;font-weight:800;color:#282c3d;margin:4px 0 1px}.day-badges{display:flex;flex-direction:column;gap:3px}.day-badge{font-size:.68rem;color:#5f6476;display:flex;justify-content:space-between;gap:5px}.day-badge i{width:6px;height:6px;border-radius:50%;margin-top:3px;flex:none}.day-badge span:first-of-type{margin-right:auto}.calendar-side{max-height:760px;display:flex;flex-direction:column}.schedule-list{overflow:auto;padding:4px 18px 18px}.schedule-item{padding:13px 0;border-bottom:1px solid #eff0f4}.schedule-item:last-child{border-bottom:0}.schedule-channel{display:flex;align-items:center;gap:7px;font-size:.72rem;color:var(--muted)}.schedule-channel i{width:7px;height:7px;border-radius:50%}.schedule-title{font-size:.83rem;font-weight:750;margin:5px 0 3px}.schedule-time{font-size:.72rem;color:var(--muted)}
+    .open-btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 10px;color:#5b6173;font-weight:700}
+    .open-btn:hover{border-color:#afa2f8;color:var(--purple)}
+    .pagination{padding:15px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;color:var(--muted);font-size:.8rem}
+    .pages{display:flex;gap:5px}.page-btn{border:1px solid var(--line);background:#fff;border-radius:7px;min-width:30px;height:30px}.page-btn.active{background:var(--nav);color:#fff;border-color:var(--nav)}
+    .hidden{display:none!important}
+    .detail-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(310px,.7fr);gap:18px}
+    .account-hero{padding:22px;display:flex;align-items:center;gap:16px}
+    .account-hero .platform-logo{width:56px;height:56px;border-radius:16px;font-size:1rem}
+    .hero-meta{display:flex;gap:9px;align-items:center;margin-top:7px;color:var(--muted);font-size:.8rem;flex-wrap:wrap}
+    .hero-actions{margin-left:auto;display:flex;gap:8px}
+    .mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 22px 22px}
+    .mini{background:#f8f8fb;border-radius:12px;padding:13px}.mini label{display:block;color:var(--muted);font-size:.72rem}.mini strong{display:block;margin-top:5px;font-size:1.05rem}
+    .section-pad{padding:20px 22px}.rule{height:1px;background:var(--line);margin:17px 0}
+    .info-list{display:grid;grid-template-columns:130px 1fr;gap:13px 16px;font-size:.86rem}.info-list dt{color:var(--muted)}.info-list dd{margin:0;font-weight:620}
+    .password{font-family:ui-monospace,monospace;letter-spacing:.12em;color:#7e8395}
+    .notice{padding:12px 13px;border-radius:11px;background:#fff6e9;color:#8c5b16;font-size:.78rem;margin-top:16px}
+    .recent-item{display:grid;grid-template-columns:48px 1fr auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f1f5}
+    .recent-item:last-child{border-bottom:0}.thumb{width:48px;height:58px;border-radius:9px;background:linear-gradient(145deg,#242c49,#7558f6);display:grid;place-items:center;color:#fff;font-size:.68rem;font-weight:800}
+    .recent-title{font-size:.83rem;font-weight:700}.recent-meta{font-size:.72rem;color:var(--muted);margin-top:3px}.recent-stat{text-align:right;font-size:.78rem;font-weight:700}
+    .stepper{display:flex;gap:4px;margin:3px 0 24px}.step{height:5px;flex:1;border-radius:9px;background:#dedfe7}.step.active{background:var(--purple)}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:17px}
+    .field{display:flex;flex-direction:column;gap:7px}.field.full{grid-column:1/-1}.field label{font-size:.8rem;font-weight:750}
+    .field input,.field textarea,.field select{width:100%;border:1px solid var(--line);border-radius:11px;background:#fbfbfd;padding:11px 12px;outline:none;color:var(--ink)}
+    .field textarea{min-height:116px;resize:vertical}.field input:focus,.field textarea:focus,.field select:focus{border-color:#ada0f7;box-shadow:0 0 0 3px #7558f612}
+    .choice-row{display:flex;gap:9px;flex-wrap:wrap}.choice{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 12px;color:#606579;font-size:.8rem;font-weight:700}.choice.active{border-color:var(--purple);background:var(--purple-soft);color:#5f43df}
+    .composer-main{display:flex;flex-direction:column;gap:18px}.section-number{width:34px;height:34px;border-radius:11px;background:var(--purple-soft);color:var(--purple);display:grid;place-items:center;font-weight:850;flex:none}.panel-title{display:flex;align-items:center;gap:12px}.section-tag{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:#eef8f4;color:#087a56;font-size:.72rem;font-weight:800}.benchmark-tools{display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,.72fr);gap:16px}.upload-zone{min-height:158px;border:1.5px dashed #c9c4e6;border-radius:14px;background:#faf9ff;padding:22px;display:flex;align-items:center;justify-content:center;text-align:center;color:#62677b;transition:.15s}.upload-zone:hover{border-color:var(--purple);background:#f6f3ff}.upload-icon{width:42px;height:42px;border-radius:13px;background:var(--purple-soft);color:var(--purple);display:grid;place-items:center;margin:0 auto 9px;font-size:1.2rem}.upload-zone b{display:block;color:var(--ink);font-size:.9rem}.upload-zone small{display:block;margin-top:4px;font-size:.72rem}.reference-add{border:1px solid var(--line);border-radius:14px;padding:16px;background:#fbfbfd}.reference-add h3{margin-bottom:5px}.reference-add p{font-size:.74rem;color:var(--muted);margin:0 0 13px}.input-action{display:flex;gap:7px}.input-action input{min-width:0;flex:1;border:1px solid var(--line);border-radius:10px;padding:10px 11px;background:#fff;outline:none}.input-action input:focus{border-color:#ada0f7;box-shadow:0 0 0 3px #7558f612}.reference-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}.reference-card{min-width:0;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff;display:grid;grid-template-columns:38px minmax(0,1fr);gap:3px 8px;align-items:center}.reference-thumb{width:38px;height:46px;border-radius:9px;background:linear-gradient(145deg,#202942,#8065ff);color:#fff;display:grid;place-items:center;font-size:.58rem;font-weight:800;grid-row:1/3}.reference-card b{display:block;font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reference-card small{display:block;color:var(--muted);font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reference-state{grid-column:2;color:var(--green);font-size:.66rem;font-weight:800}.analysis-box{margin-top:17px;border:1px solid #ddd8fb;background:#faf9ff;border-radius:14px;padding:16px}.analysis-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:13px}.analysis-status{display:flex;align-items:center;gap:7px;color:#666b7f;font-size:.74rem;font-weight:750}.analysis-status:before{content:"";width:7px;height:7px;border-radius:50%;background:#a4a8b6}.analysis-status.ready{color:#087a56}.analysis-status.ready:before{background:var(--green);box-shadow:0 0 0 4px #14a77818}.style-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.style-item{background:#fff;border:1px solid #eceaf8;border-radius:10px;padding:10px}.style-item label{display:block;color:#85899b;font-size:.66rem;font-weight:800;margin-bottom:3px}.style-item strong{display:block;font-size:.76rem}.profile-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:9px;margin-top:15px;padding-top:14px;border-top:1px solid #e7e3f8}.profile-row label{grid-column:1/-1;font-size:.77rem;font-weight:800}.profile-row select{width:100%;min-width:0}.rights-check{display:flex;align-items:flex-start;gap:8px;margin-top:13px;color:#73778a;font-size:.72rem}.rights-check input{margin-top:3px;accent-color:var(--purple)}.selected-style-banner{display:flex;align-items:center;gap:12px;padding:13px 14px;background:linear-gradient(100deg,#f0ecff,#faf9ff);border:1px solid #ddd6ff;border-radius:12px;margin-bottom:18px}.selected-style-banner .spark{width:34px;height:34px;border-radius:10px;background:var(--purple);color:#fff;display:grid;place-items:center;flex:none}.selected-style-banner b{display:block;font-size:.8rem}.selected-style-banner>div>span{display:block;color:var(--muted);font-size:.71rem;margin-top:2px}.composer-side{display:flex;flex-direction:column;gap:14px}.flow-card{padding:15px 16px;background:#171d31;color:#fff;border-radius:14px}.flow-card b{display:block;font-size:.82rem}.flow-steps{display:flex;align-items:center;gap:6px;margin-top:11px;color:#aeb5ca;font-size:.67rem}.flow-steps span{background:#292f45;border-radius:7px;padding:5px 7px}.flow-steps i{font-style:normal;color:#777f99}.helper-note{font-size:.71rem;color:var(--muted);margin:5px 0 0}
+    .composer-side .panel{position:sticky;top:96px}.selected-list{display:flex;flex-direction:column;gap:9px;margin-top:14px}.selected-account{display:flex;align-items:center;gap:9px;padding:10px;background:#f8f8fb;border-radius:10px;font-size:.8rem}.selected-account .platform-logo{width:30px;height:30px;border-radius:9px;font-size:.6rem}
+    .bottom-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:22px}
+    .mobile-top{display:none}
+    .toast{position:fixed;right:24px;bottom:24px;background:#171c2e;color:#fff;border-radius:12px;padding:13px 16px;box-shadow:var(--shadow);font-size:.84rem;z-index:30;animation:pop .25s ease}
+    @keyframes pop{from{transform:translateY(10px);opacity:0}}
+    @keyframes livePulse{50%{opacity:.45;transform:scale(.82)}}@keyframes numberBump{50%{transform:scale(1.12);color:#76f0bd}}
+    @media(max-width:1180px){.calendar-layout{grid-template-columns:1fr}.calendar-side{max-height:none}.schedule-list{max-height:440px}}
+    @media(max-width:1050px){.metric-grid,.context-metrics{grid-template-columns:repeat(2,1fr)}.today-live{grid-template-columns:1fr 1fr}.live-intro{grid-column:1/-1}.prototype-grid{grid-template-columns:1fr 1fr}.detail-grid{grid-template-columns:1fr}.composer-side .panel{position:static}.mini-grid{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:900px){.benchmark-tools{grid-template-columns:1fr}.reference-list{grid-template-columns:1fr 1fr}.style-grid{grid-template-columns:1fr 1fr}}
+    @media(max-width:760px){.shell{display:block}.sidebar{display:none}.mobile-top{display:flex}.topbar{height:66px;padding:0 17px}.content{padding:22px 16px 45px}.metric-grid,.context-metrics{grid-template-columns:1fr 1fr;gap:10px}.today-live{grid-template-columns:1fr 1fr;padding:9px}.live-intro{padding:9px}.today-stat{grid-template-columns:32px 1fr;padding:10px}.today-icon{width:32px;height:32px}.today-stat strong{font-size:1.18rem}.today-stat.uploaded{grid-column:1/-1}.prototype-grid{grid-template-columns:1fr}.metric{padding:14px}.metric-value{font-size:1.3rem}.page-head{align-items:flex-end}.page-head .subtitle{max-width:230px}.panel-head{align-items:flex-start;flex-direction:column}.filters{width:100%}.search{flex:1}.search input{width:100%}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.hero-actions{width:100%;margin:10px 0 0}.account-hero{flex-wrap:wrap}.mini-grid{grid-template-columns:1fr 1fr}.top-actions .icon-btn{display:none}.calendar-toolbar{width:100%;justify-content:space-between}.reference-list,.style-grid{grid-template-columns:1fr}.input-action{flex-direction:column}.profile-row{align-items:stretch;flex-direction:column}.flow-steps{flex-wrap:wrap}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark"></span> Orbit</div>
+    <div class="nav-label">운영</div>
+    <button class="nav-item active" data-route="dashboard"><span class="nav-icon">▦</span>통합 대시보드</button>
+    <button class="nav-item" data-route="composer"><span class="nav-icon">✦</span>콘텐츠 만들기</button>
+    <button class="nav-item" data-route="calendar"><span class="nav-icon">◫</span>업로드 캘린더<span class="nav-count">527</span></button>
+    <button class="nav-item" data-route="analytics"><span class="nav-icon">↗</span>성과 분석</button>
+    <div class="nav-label">관리</div>
+    <button class="nav-item" data-route="connections"><span class="nav-icon">◎</span>계정 연결<span class="nav-count">80</span></button>
+    <button class="nav-item" data-route="personas"><span class="nav-icon">♙</span>페르소나</button>
+    <button class="nav-item" data-route="settings"><span class="nav-icon">⚙</span>환경 설정</button>
+    <div class="sidebar-bottom"><div class="operator"><div class="avatar">AM</div><div><b>운영 관리자</b><small>admin@orbit.invalid</small></div></div></div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <div class="mobile-top"><strong>Orbit</strong></div>
+      <div class="crumb" id="crumb"><strong>통합 대시보드</strong> · 전체 운영 현황</div>
+      <div class="top-actions"><button class="icon-btn" aria-label="검색" data-toast="통합 검색은 다음 단계에서 연결됩니다.">⌕</button><button class="icon-btn" aria-label="알림" data-toast="업로드 주의 알림 3건이 있습니다.">♢</button><button class="primary-btn" data-route="composer">＋ 새 콘텐츠</button></div>
+    </header>
+
+    <section class="content" id="dashboardView">
+      <div class="page-head"><div><h1>콘텐츠 운영 현황</h1><p class="subtitle">80개 계정의 업로드와 성과를 한눈에 확인하세요.</p></div><button class="secondary-btn" id="dashboardRefresh">↻ 새로고침</button></div>
+      <section class="today-live" aria-label="오늘 콘텐츠 제작 현황">
+        <div class="live-intro"><span class="live-label"><i class="live-dot"></i> 실시간 집계</span><strong>오늘 만든 콘텐츠 <span id="todayTotal">29</span>개</strong><span class="live-updated" id="liveUpdated">방금 업데이트</span></div>
+        <article class="today-stat" id="videoStat"><span class="today-icon">▶</span><div><label>영상 제작</label><strong id="todayVideos">18</strong><small>개</small></div></article>
+        <article class="today-stat" id="textStat"><span class="today-icon">▤</span><div><label>글 콘텐츠</label><strong id="todayTexts">11</strong><small>개</small></div></article>
+        <article class="today-stat uploaded" id="uploadStat"><span class="today-icon">⇧</span><div><label>업로드 완료</label><strong id="todayUploads">21</strong><small>/ 29개</small></div></article>
+      </section>
+      <div class="metric-grid">
+        <article class="metric"><div class="metric-top">연결 계정 <span class="metric-icon">◎</span></div><div class="metric-value">80</div><div class="delta">● 74개 정상 연결</div></article>
+        <article class="metric"><div class="metric-top">최근 24시간 조회 <span class="metric-icon">↗</span></div><div class="metric-value">428.6K</div><div class="delta">↑ 18.4% 어제 대비</div></article>
+        <article class="metric"><div class="metric-top">예약 콘텐츠 <span class="metric-icon">◫</span></div><div class="metric-value">12</div><div class="delta neutral">오늘 4건 게시 예정</div></article>
+        <article class="metric"><div class="metric-top">확인 필요 <span class="metric-icon">!</span></div><div class="metric-value">3</div><div class="delta" style="color:var(--orange)">토큰 만료 · 업로드 실패</div></article>
+      </div>
+      <div class="platform-tabs" id="platformTabs"></div>
+      <div class="service-tabs hidden" id="serviceTabs"></div>
+      <div class="context-metrics" id="contextMetrics"></div>
+      <section class="panel">
+        <div class="panel-head"><div><h2 id="listTitle">YouTube 계정</h2><p class="subtitle" id="listSubtitle">20개 채널의 최신 상태</p></div><div class="filters"><div class="search"><input id="accountSearch" aria-label="계정 검색" placeholder="계정명 또는 주제 검색"></div><select id="statusFilter" aria-label="연결 상태"><option value="all">모든 상태</option><option value="정상">정상</option><option value="확인 필요">확인 필요</option><option value="일시 정지">일시 정지</option></select></div></div>
+        <div class="table-wrap"><table><thead><tr><th>계정</th><th>주제</th><th>연결</th><th>진행상황</th><th>채널 추세</th><th>최근 콘텐츠</th><th>형식</th><th id="metricHeader">핵심 지표</th><th>다음 업로드</th><th></th></tr></thead><tbody id="accountRows"></tbody></table></div>
+        <div class="pagination"><span id="rowSummary">총 20개 계정</span><div class="pages"><button class="page-btn active">1</button><button class="page-btn">2</button></div></div>
+      </section>
+    </section>
+
+    <section class="content hidden" id="analyticsView">
+      <div class="page-head"><div><h1>성과 분석</h1><p class="subtitle">플랫폼과 채널별 성과 흐름을 비교합니다.</p></div><button class="secondary-btn" data-toast="성과 보고서를 준비했습니다. (프로토타입)">보고서 내보내기</button></div>
+      <div class="prototype-grid"><article class="prototype-card"><span class="eyebrow">최근 7일 조회수</span><strong>3.84M</strong><span class="delta">↑ 14.8% 이전 7일 대비</span></article><article class="prototype-card"><span class="eyebrow">신규 팔로워·구독자</span><strong>+8,492</strong><span class="delta">↑ 6.2% 성장</span></article><article class="prototype-card"><span class="eyebrow">평균 참여율</span><strong>7.6%</strong><span class="delta neutral">목표 7.0% 이상</span></article></div>
+      <section class="panel"><div class="panel-head"><div><h2>채널 성과 흐름</h2><p class="subtitle">상승·정체·하락 채널의 우선순위</p></div><select aria-label="분석 기간"><option>최근 7일</option><option>최근 30일</option></select></div><div class="section-pad prototype-list"><div class="prototype-row"><div><b>퇴근앞당김 연구소</b><small>YouTube · 조회수 284.6K</small></div><span class="trend up">↗ 상승</span></div><div class="prototype-row"><div><b>고정비 체크노트</b><small>TikTok · 9월 3일부터 변화 없음</small></div><span class="trend flat">→ 정체</span></div><div class="prototype-row"><div><b>생활 속 과학 한컷</b><small>Naver 클립 · 조회수 42.1K</small></div><span class="trend down">↘ 하락</span></div></div></section>
+    </section>
+
+    <section class="content hidden" id="connectionsView">
+      <div class="page-head"><div><h1>계정 연결</h1><p class="subtitle">플랫폼별 연결 상태와 갱신 필요 계정을 관리합니다.</p></div><button class="primary-btn" data-toast="새 계정 연결 창을 열었습니다. (프로토타입)">＋ 계정 연결</button></div>
+      <div class="prototype-grid"><article class="prototype-card"><span class="eyebrow">정상 연결</span><strong>74</strong><span class="delta">● 자동 게시 가능</span></article><article class="prototype-card"><span class="eyebrow">갱신 필요</span><strong>3</strong><span class="delta" style="color:var(--orange)">오늘 확인 필요</span></article><article class="prototype-card"><span class="eyebrow">일시 정지</span><strong>3</strong><span class="delta neutral">사용자 설정</span></article></div>
+      <section class="panel"><div class="panel-head"><div><h2>플랫폼 연결 현황</h2><p class="subtitle">표시된 정보는 화면 확인용 더미 값입니다.</p></div></div><div class="section-pad prototype-list"><div class="prototype-row"><div><b>YouTube</b><small>20개 채널 · 마지막 동기화 2분 전</small></div><span class="status">정상 19</span></div><div class="prototype-row"><div><b>Instagram</b><small>20개 계정 · 마지막 동기화 4분 전</small></div><span class="status warn">확인 2</span></div><div class="prototype-row"><div><b>TikTok</b><small>20개 계정 · 마지막 동기화 1분 전</small></div><span class="status">정상 18</span></div><div class="prototype-row"><div><b>Naver</b><small>20개 ID · 클립/블로그/카페 연결</small></div><span class="status">정상 20</span></div></div></section>
+    </section>
+
+    <section class="content hidden" id="personasView">
+      <div class="page-head"><div><h1>페르소나</h1><p class="subtitle">계정별 말투와 대상 독자, 콘텐츠 목적을 관리합니다.</p></div><button class="primary-btn" data-toast="새 페르소나 작성 화면을 열었습니다. (프로토타입)">＋ 페르소나 만들기</button></div>
+      <div class="prototype-grid"><article class="prototype-card"><span class="eyebrow">사용 중인 페르소나</span><strong>24</strong><span class="delta neutral">80개 계정에 적용</span></article><article class="prototype-card"><span class="eyebrow">이번 주 수정</span><strong>6</strong><span class="delta">최신 반응 반영</span></article><article class="prototype-card"><span class="eyebrow">검토 필요</span><strong>2</strong><span class="delta" style="color:var(--orange)">성과 정체 계정</span></article></div>
+      <section class="panel"><div class="panel-head"><div><h2>페르소나 라이브러리</h2><p class="subtitle">카드를 눌러 상세 설정으로 이동합니다.</p></div></div><div class="section-pad prototype-list"><button class="prototype-row" data-toast="바쁜 직장인 페르소나를 열었습니다."><div><b>바쁜 30대 직장인</b><small>결론 먼저 · 60초 이내 · 실용 정보</small></div><span class="kind">12개 계정</span></button><button class="prototype-row" data-toast="소상공인 운영자 페르소나를 열었습니다."><div><b>효율을 중시하는 소상공인</b><small>근거와 숫자 · 신청 조건 · 체크리스트</small></div><span class="kind">18개 계정</span></button><button class="prototype-row" data-toast="생활정보 탐색자 페르소나를 열었습니다."><div><b>생활정보를 빠르게 찾는 사용자</b><small>친근한 말투 · 과장 금지 · 저장 유도</small></div><span class="kind">21개 계정</span></button></div></section>
+    </section>
+
+    <section class="content hidden" id="settingsView">
+      <div class="page-head"><div><h1>환경 설정</h1><p class="subtitle">제작, 검수, 알림과 업로드 기본값을 설정합니다.</p></div><button class="primary-btn" data-toast="설정이 저장되었습니다. (프로토타입)">설정 저장</button></div>
+      <div class="detail-grid"><section class="panel"><div class="panel-head"><div><h2>자동화 기본값</h2><p class="subtitle">새 콘텐츠 생성 시 기본으로 적용됩니다.</p></div></div><div class="section-pad prototype-list"><div class="prototype-row"><div><b>생성 후 검수 필수</b><small>승인 전에는 게시하지 않습니다.</small></div><button class="setting-toggle on" aria-label="생성 후 검수 필수"></button></div><div class="prototype-row"><div><b>업로드 30분 전 알림</b><small>담당자에게 최종 확인을 요청합니다.</small></div><button class="setting-toggle on" aria-label="업로드 전 알림"></button></div><div class="prototype-row"><div><b>성과 저하 자동 알림</b><small>7일 평균보다 15% 낮으면 알립니다.</small></div><button class="setting-toggle" aria-label="성과 저하 자동 알림"></button></div></div></section><aside><section class="panel"><div class="panel-head"><h2>기본 제작 설정</h2></div><div class="section-pad form-grid"><div class="field full"><label>기본 조사 범위</label><select><option>공식 기관·신뢰 매체 우선</option></select></div><div class="field full"><label>기본 검수 담당자</label><input value="운영 관리자"></div><div class="field full"><label>기본 업로드 간격</label><select><option>계정별 추천 시간 사용</option><option>3일 간격</option></select></div></div></section></aside></div>
+    </section>
+
+    <section class="content hidden" id="detailView">
+      <div class="page-head"><div><button class="secondary-btn" data-route="dashboard">← 계정 목록</button></div></div>
+      <div class="detail-grid">
+        <div>
+          <section class="panel" id="detailHero"></section>
+          <section class="panel" style="margin-top:18px"><div class="panel-head"><div><h2>진행상황</h2><p class="subtitle">현재 콘텐츠가 업로드되기까지의 단계</p></div><span class="progress-chip" id="progressHeadline">진행 중</span></div><div class="section-pad"><div class="progress-timeline" id="progressTimeline"></div></div></section>
+          <section class="panel" style="margin-top:18px"><div class="panel-head"><h2>최근 콘텐츠</h2><button class="secondary-btn" data-toast="전체 콘텐츠 목록은 다음 단계에서 연결됩니다.">전체 보기</button></div><div class="section-pad" id="recentContent"></div></section>
+        </div>
+        <aside>
+          <section class="panel"><div class="panel-head"><h2>계정 설정</h2><button class="open-btn" data-toast="수정 기능은 다음 단계에서 연결됩니다.">수정</button></div><div class="section-pad" id="accountInfo"></div></section>
+          <section class="panel" style="margin-top:18px"><div class="panel-head"><h2>채널 추세</h2></div><div class="section-pad" id="trendPanel"></div></section>
+          <section class="panel" style="margin-top:18px"><div class="panel-head"><h2>다음 업로드 제안</h2></div><div class="section-pad"><b id="nextTime">오늘 오후 8:30</b><p class="subtitle" style="margin-top:5px">최근 반응이 가장 높았던 시간대를 기준으로 한 더미 제안입니다.</p><div class="bottom-actions"><button class="primary-btn" data-route="composer">이 계정으로 만들기</button></div></div></section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="content hidden" id="calendarView">
+      <div class="page-head"><div><h1>업로드 캘린더</h1><p class="subtitle">날짜별 전체 업로드 물량과 플랫폼 배분을 확인하세요.</p></div><div class="calendar-toolbar"><button class="secondary-btn" id="prevMonth" aria-label="이전 달">←</button><div class="month-title">2026년 9월</div><button class="secondary-btn" id="nextMonth" aria-label="다음 달">→</button></div></div>
+      <div class="metric-grid"><article class="metric"><div class="metric-top">이번 달 업로드 <span class="metric-icon">◫</span></div><div class="metric-value">527</div><div class="delta">↑ 지난달보다 32건</div></article><article class="metric"><div class="metric-top">오늘 예정 <span class="metric-icon">15</span></div><div class="metric-value">17</div><div class="delta neutral">오후 7시 이후 11건</div></article><article class="metric"><div class="metric-top">제작 진행 중 <span class="metric-icon">↻</span></div><div class="metric-value">46</div><div class="delta neutral">더빙 단계 14건</div></article><article class="metric"><div class="metric-top">일정 충돌 <span class="metric-icon">!</span></div><div class="metric-value">2</div><div class="delta" style="color:var(--orange)">검토가 필요합니다</div></article></div>
+      <div class="calendar-layout"><section class="panel calendar-panel"><div class="calendar-grid" id="calendarGrid"></div></section><aside class="panel calendar-side"><div class="panel-head"><div><h2 id="calendarDetailTitle">9월 17일 목요일</h2><p class="subtitle" id="calendarDetailSummary">총 18개 콘텐츠</p></div></div><div class="schedule-list" id="scheduleList"></div></aside></div>
+    </section>
+
+    <section class="content hidden" id="composerView">
+      <div class="page-head"><div><h1>새 콘텐츠 만들기</h1><p class="subtitle">벤치마크로 표현 방식을 학습하고, 오늘의 소재를 결합해 계정별 초안을 만듭니다.</p></div><button class="secondary-btn" data-route="dashboard">× 닫기</button></div>
+      <div class="stepper"><span class="step active"></span><span class="step active"></span><span class="step"></span><span class="step"></span></div>
+      <div class="detail-grid">
+        <div class="composer-main">
+          <section class="panel"><div class="panel-head"><div class="panel-title"><span class="section-number">1</span><div><h2>벤치마크 스타일 학습</h2><p class="subtitle">참고 콘텐츠 여러 개에서 표현 규칙을 분석해 재사용할 스타일로 저장합니다.</p></div></div><span class="section-tag">● 자료 3개 등록됨</span></div><div class="section-pad">
+            <div class="benchmark-tools">
+              <button class="upload-zone" id="uploadReference"><span><span class="upload-icon">⇧</span><b>참고 콘텐츠 파일 올리기</b><small>영상 · 이미지 · 대본 · 자막 파일을 여러 개 선택</small></span></button>
+              <div class="reference-add"><h3>링크로 추가</h3><p>YouTube, Instagram, Naver 등 공개 링크를 등록하세요.</p><div class="input-action"><input id="referenceUrl" aria-label="참고 콘텐츠 링크" placeholder="https://"><button class="open-btn" id="addReference">추가</button></div><p class="helper-note">서로 다른 도입·전개 사례를 3개 이상 권장합니다.</p></div>
+            </div>
+            <div class="reference-list" id="referenceList">
+              <article class="reference-card"><span class="reference-thumb">SHORTS</span><div><b>정책 설명 숏츠 A</b><small>00:58 · 영상/자막</small></div><span class="reference-state">분석됨</span></article>
+              <article class="reference-card"><span class="reference-thumb" style="background:linear-gradient(145deg,#384a3e,#27a76b)">REELS</span><div><b>정보형 릴스 B</b><small>00:43 · 영상/음성</small></div><span class="reference-state">분석됨</span></article>
+              <article class="reference-card"><span class="reference-thumb" style="background:linear-gradient(145deg,#714332,#f59a3d)">SCRIPT</span><div><b>성과 우수 대본 C</b><small>1,240자 · 대본</small></div><span class="reference-state">분석됨</span></article>
+            </div>
+            <div class="analysis-box">
+              <div class="analysis-head"><div><h3>추출된 스타일 규칙</h3><p class="helper-note">등록된 자료의 공통 특징을 편집 가능한 값으로 정리합니다.</p></div><span class="analysis-status ready" id="analysisStatus">분석 완료</span></div>
+              <div class="style-grid">
+                <div class="style-item"><label>폰트</label><strong>Pretendard ExtraBold</strong></div><div class="style-item"><label>목소리</label><strong>차분한 여성 · 1.08×</strong></div><div class="style-item"><label>기승전결</label><strong>문제 → 숫자 → 해법</strong></div><div class="style-item"><label>내용 전개</label><strong>결론 먼저 · 3단 구성</strong></div>
+                <div class="style-item"><label>디자인</label><strong>고대비 · 보라 포인트</strong></div><div class="style-item"><label>자막</label><strong>2줄 이내 · 핵심어 강조</strong></div><div class="style-item"><label>영상 편집</label><strong>2.4초 컷 · 줌 전환</strong></div><div class="style-item"><label>이미지 소스</label><strong>실사 B-roll · 문서 캡처</strong></div>
+              </div>
+              <div class="profile-row"><label for="styleProfile">사용할 스타일</label><select id="styleProfile"><option value="정책 한 장 · 빠른 설명형">정책 한 장 · 빠른 설명형</option><option value="생활정보 · 친근한 대화형">생활정보 · 친근한 대화형</option><option value="비즈니스 · 숫자 강조형">비즈니스 · 숫자 강조형</option></select><button class="secondary-btn" id="analyzeStyle">다시 분석</button><button class="primary-btn" id="useStyle">이 스타일 사용</button></div>
+              <label class="rights-check"><input type="checkbox" id="rightsCheck" checked><span>이 자료와 음성은 직접 소유했거나 사용 허락을 받았습니다. 타인의 목소리는 동의 없이 복제하지 않습니다.</span></label>
+            </div>
+          </div></section>
+          <section class="panel"><div class="panel-head"><div class="panel-title"><span class="section-number">2</span><div><h2>오늘 만들 소재 입력</h2><p class="subtitle">위에서 선택한 스타일에 오늘의 내용과 제작 조건을 결합합니다.</p></div></div></div><div class="section-pad">
+            <div class="selected-style-banner"><span class="spark">✦</span><div><b>적용 스타일 · <span id="activeStyleName">정책 한 장 · 빠른 설명형</span></b><span>폰트, 음성 톤, 전개 방식, 디자인, 자막 및 편집 규칙을 초안에 반영합니다.</span></div></div>
+            <div class="form-grid">
+              <div class="field full"><label for="topic">오늘의 소재</label><textarea id="topic" placeholder="예: 직장인이 오늘부터 줄일 수 있는 고정비 5가지">9월부터 달라지는 소상공인 지원 정책을 쉽게 설명해줘. 신청 조건과 놓치기 쉬운 부분을 포함해줘.</textarea></div>
+              <div class="field"><label for="source">내용 조사 범위</label><select id="source"><option>공식 기관·신뢰 매체 우선</option><option>내가 제공한 자료만</option><option>웹 전체 탐색</option></select></div>
+              <div class="field"><label for="deadline">업로드 희망 시각</label><input id="deadline" type="datetime-local" value="2026-09-15T20:30"></div>
+              <div class="field full"><label>콘텐츠 형식</label><div class="choice-row"><button class="choice active">숏폼 영상</button><button class="choice">롱폼 영상</button><button class="choice">카드뉴스</button><button class="choice">텍스트 포스트</button></div></div>
+              <div class="field full"><label>내용 참고자료</label><div class="input-action"><input id="materialUrl" placeholder="기사, 공식문서 또는 내 자료 링크"><button class="open-btn" data-toast="내용 참고자료 링크가 등록되었습니다.">자료 추가</button></div></div>
+              <div class="field full"><label>추가 조건</label><input value="60초 이내, 핵심 숫자는 화면에 크게 표시, 과장 표현 금지"></div>
+            </div><div class="bottom-actions"><button class="secondary-btn" data-toast="스타일과 소재가 함께 임시 저장되었습니다.">임시 저장</button><button class="primary-btn" id="generateBtn">스타일 적용해 초안 생성 →</button></div>
+          </div></section>
+        </div>
+        <aside class="composer-side"><div class="flow-card"><b>현재 제작 흐름</b><div class="flow-steps"><span>스타일 학습</span><i>→</i><span>소재 결합</span><i>→</i><span>계정별 변환</span></div></div><section class="panel"><div class="panel-head"><div><h2>대상 계정</h2><p class="subtitle"><span id="selectedCount">3</span>개 선택됨</p></div><button class="open-btn" id="addAccountBtn">계정 추가</button></div><div class="section-pad"><div class="selected-list" id="selectedAccounts"></div><div class="notice">계정별 페르소나와 플랫폼 형식에 맞게 선택한 스타일을 변환합니다. 생성 후 검수·승인을 거쳐 공식 연결 방식으로 게시합니다.</div></div></section></aside>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+  const platforms={
+    youtube:{label:'YouTube',short:'YT',color:'#f04444',formats:['Shorts','롱폼']},
+    instagram:{label:'Instagram',short:'IG',color:'#c44ac0',formats:['Reels','카드뉴스']},
+    tiktok:{label:'TikTok',short:'TT',color:'#171c2c',formats:['숏폼','슬라이드']},
+    naver:{label:'Naver',short:'N',color:'#20c66a',formats:['클립','블로그','카페']}
+  };
+  const services={clip:{label:'클립',format:'클립'},blog:{label:'블로그',format:'블로그'},cafe:{label:'카페',format:'카페 글'}};
+  const themes=['퇴근앞당김 연구소','엑셀 한칸 해결','사장님 한시간 절약','살림검증실','작은돈 테크','천천히 디지털','지원서 한문장','고정비 체크노트','한평 더 쓰기','한끼 원가노트','집수리 첫걸음','오늘 한상황 영어','월급 옆 경제','생활 속 과학 한컷','반려생활 관찰일지','만드는 현장노트','지도 한장 역사','작은반전 극장','장면의 이유','정책 한장 설명'];
+  const topics=['업무 생산성','엑셀 실무','소상공인 운영','생활 실험','생활 재테크','디지털 적응','취업 문장','고정비 절약','공간 활용','식비 관리','셀프 집수리','실전 영어','경제 상식','생활 과학','반려생활','제작 현장','역사 교양','숏드라마','영상 해설','정책 정보'];
+  const titles=['오늘부터 바로 줄이는 고정비 5가지','대부분 놓치는 신청 조건 3가지','이 기능 하나로 30분 아꼈습니다','알고 보면 잘못 쓰고 있던 생활 상식','60초 만에 끝내는 이번 주 핵심 정리','초보자가 가장 많이 하는 실수','9월부터 달라지는 지원 정책 한 장 정리','저장해두면 돈 되는 체크리스트'];
+  const nextTimes=['9월 17일 19:40','9월 18일 07:50','9월 18일 12:20','9월 19일 20:30','9월 20일 08:10'];
+  const trendTypes=[{key:'up',label:'상승',symbol:'↗',copy:'최근 7일 +18.4%'},{key:'flat',label:'정체',symbol:'→',copy:'최근 12일 ±1.2%'},{key:'down',label:'하락',symbol:'↘',copy:'최근 5일 -9.7%'}];
+  const progressBase=['소재확보 완료','대본작성 완료','영상소스 완료','더빙 완료','콘텐츠 제작 완료','임시저장 완료','업로드 예정','업로드 완료'];
+  const metricSets={
+    youtube:[['총 구독자','184.2K','↑ 3.8%'],['최근 24시간 조회','428.6K','↑ 18.4%'],['평균 시청 유지율','68.4%','↑ 2.1%p'],['댓글','3,842','↑ 284개']],
+    instagram:[['총 팔로워','216.8K','↑ 5.2%'],['최근 7일 도달','892.4K','↑ 12.8%'],['저장','18.6K','↑ 9.1%'],['참여율','7.4%','↑ 0.8%p']],
+    tiktok:[['총 팔로워','304.1K','↑ 6.7%'],['최근 24시간 조회','711.3K','↑ 21.2%'],['좋아요','84.5K','↑ 14.6%'],['공유','12.8K','↑ 8.3%']],
+    clip:[['총 팔로워','96.4K','↑ 4.1%'],['최근 24시간 조회','226.8K','↑ 15.7%'],['좋아요','31.2K','↑ 11.4%'],['댓글','4,184','↑ 326개']],
+    blog:[['월 방문자','684.2K','↑ 7.8%'],['지난 7일 방문자','172.6K','↑ 9.3%'],['어제 방문자','28.4K','↑ 5.1%'],['이웃','42.8K','↑ 640명']],
+    cafe:[['총 회원','128.7K','↑ 2.8%'],['지난 7일 방문','314.5K','↑ 6.4%'],['신규 게시글','1,284','↑ 104건'],['댓글','18.9K','↑ 8.8%']]
+  };
+  const accounts=[];
+  function makeAccount(platform,i,service=null){
+    const p=platforms[platform]; const salt=platform.length+(service?service.length:0); const trend=trendTypes[(i+salt)%3];
+    return {id:platform+'-'+(service?service+'-':'')+(i+1),platform,service,name:themes[i],email:`orbit.${platform}.${String(i+1).padStart(2,'0')}@example.invalid`,password:'••••••••••••',topic:topics[i],status:i===6||i===16?'확인 필요':i===12?'일시 정지':'정상',format:service?services[service].format:p.formats[i%p.formats.length],title:titles[(i+salt)%titles.length],views:(8.4+i*3.73+(salt%3)*2.1).toFixed(1)+'K',followers:(1.2+i*.46).toFixed(1)+'K',total:(128+i*37)+'K',next:nextTimes[(i+salt)%nextTimes.length],cycle:[2,3,4,3,5][i%5]+'일 주기',progressIndex:(i+salt)%8,trend,trendSince:['9월 3일부터','9월 7일부터','9월 10일부터'][i%3],uploadAt:nextTimes[(i+2)%nextTimes.length],persona:['시간이 부족한 30대 직장인','매장 운영 효율을 높이고 싶은 자영업자','실생활 정보를 빠르게 확인하려는 20–40대'][i%3],consumer:['짧고 바로 적용 가능한 설명 선호','근거와 숫자가 포함된 실용 정보 선호','친근하지만 과장 없는 말투 선호'][i%3]};
+  }
+  ['youtube','instagram','tiktok'].forEach(key=>themes.forEach((_,i)=>accounts.push(makeAccount(key,i))));
+  Object.keys(services).forEach(service=>themes.forEach((_,i)=>accounts.push(makeAccount('naver',i,service))));
+  let currentPlatform='youtube',currentService='clip',selectedId='youtube-1',selectedCalendarDay=17;
+  const todayCounts={videos:18,texts:11,uploads:21};
+  const $=s=>document.querySelector(s);const $$=s=>[...document.querySelectorAll(s)];
+  const logo=a=>`<span class="platform-logo" style="background:${platforms[a.platform].color}">${platforms[a.platform].short}</span>`;
+  const trendBadge=a=>`<span class="trend ${a.trend.key}">${a.trend.symbol} ${a.trend.label}</span><span class="trend-detail">${a.trendSince} · ${a.trend.copy}</span>`;
+  function stageLabel(a){if(a.progressIndex===3)return '더빙 진행 중';if(a.progressIndex===6)return a.uploadAt+' 업로드 예정';return progressBase[a.progressIndex]}
+  function progressClass(a){return a.progressIndex===7?'done':a.progressIndex===6?'scheduled':''}
+  function rowMetric(a){
+    if(a.platform==='youtube')return `조회 ${a.views} · 유지율 ${58+a.id.length%18}%`;
+    if(a.platform==='instagram')return `도달 ${a.views} · 저장 ${(420+parseInt(a.id.split('-').pop())*31).toLocaleString()}`;
+    if(a.platform==='tiktok')return `조회 ${a.views} · 좋아요 ${(1.1+parseInt(a.id.split('-').pop())*.2).toFixed(1)}K`;
+    if(a.service==='blog')return `어제 ${a.views} · 7일 ${(parseFloat(a.views)*6.4).toFixed(1)}K`;
+    if(a.service==='cafe')return `방문 ${a.views} · 댓글 ${340+parseInt(a.id.split('-').pop())*18}`;
+    return `조회 ${a.views} · 좋아요 ${(1.4+parseInt(a.id.split('-').pop())*.18).toFixed(1)}K`;
+  }
+  function metricHeader(){if(currentPlatform==='youtube')return '조회·유지율';if(currentPlatform==='instagram')return '도달·저장';if(currentPlatform==='tiktok')return '조회·좋아요';if(currentService==='blog')return '방문자';if(currentService==='cafe')return '방문·댓글';return '조회·좋아요'}
+  function renderTabs(){
+    $('#platformTabs').innerHTML=Object.entries(platforms).map(([k,p])=>`<button class="platform-tab ${k===currentPlatform?'active':''}" data-platform="${k}"><span class="platform-dot" style="background:${p.color}"></span>${p.label} <small>${k==='naver'?'20 ID':'20'}</small></button>`).join('');
+    $$('[data-platform]').forEach(b=>b.onclick=()=>{currentPlatform=b.dataset.platform;renderTabs();renderRows()});renderServiceTabs();renderContextMetrics();
+  }
+  function renderServiceTabs(){
+    const wrap=$('#serviceTabs');wrap.classList.toggle('hidden',currentPlatform!=='naver');
+    wrap.innerHTML=Object.entries(services).map(([k,s])=>`<button class="service-tab ${k===currentService?'active':''}" data-service="${k}">${s.label} <small>20</small></button>`).join('');
+    $$('[data-service]').forEach(b=>b.onclick=()=>{currentService=b.dataset.service;renderServiceTabs();renderContextMetrics();renderRows()});
+  }
+  function renderContextMetrics(){const key=currentPlatform==='naver'?currentService:currentPlatform;$('#contextMetrics').innerHTML=metricSets[key].map((m,i)=>`<article class="context-card"><label>${m[0]}</label><strong>${m[1]}</strong><small>${m[2]} 이전 기간 대비</small></article>`).join('')}
+  function renderRows(){
+    const q=$('#accountSearch').value.trim().toLowerCase(),status=$('#statusFilter').value,p=platforms[currentPlatform];
+    const rows=accounts.filter(a=>a.platform===currentPlatform&&(currentPlatform!=='naver'||a.service===currentService)&&(status==='all'||a.status===status)&&(!q||(a.name+a.topic+a.email).toLowerCase().includes(q)));
+    $('#listTitle').textContent=currentPlatform==='naver'?`Naver · ${services[currentService].label} 채널`:p.label+' 계정';$('#listSubtitle').textContent=currentPlatform==='naver'?'동일한 20개 네이버 ID에 연결된 서비스 채널':'20개 채널의 최신 상태';$('#rowSummary').textContent=`총 ${rows.length}개 채널`;$('#metricHeader').textContent=metricHeader();
+    $('#accountRows').innerHTML=rows.map(a=>`<tr tabindex="0" data-id="${a.id}"><td><div class="account-cell">${logo(a)}<div><div class="account-name">${a.name}</div><div class="account-email">${a.email}${a.service?' · '+services[a.service].label:''}</div></div></div></td><td>${a.topic}</td><td><span class="status ${a.status==='확인 필요'?'warn':a.status==='일시 정지'?'pause':''}">${a.status}</span></td><td><span class="progress-chip ${progressClass(a)}">${stageLabel(a)}</span></td><td>${trendBadge(a)}</td><td>${a.title}</td><td><span class="kind">${a.format}</span></td><td class="views">${rowMetric(a)}</td><td><b>${a.next}</b><span class="trend-detail">${a.cycle} 설정</span></td><td><button class="open-btn" data-open="${a.id}">열기 →</button></td></tr>`).join('')||`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">검색 결과가 없습니다.</td></tr>`;
+    $$('[data-open]').forEach(b=>b.onclick=e=>{e.stopPropagation();openDetail(b.dataset.open)});$$('tr[data-id]').forEach(r=>{r.onclick=()=>openDetail(r.dataset.id);r.onkeydown=e=>{if(e.key==='Enter')openDetail(r.dataset.id)}});
+  }
+  function detailMetricSet(a){
+    if(a.platform==='naver'&&a.service==='blog')return [['월 방문자',(parseFloat(a.views)*24.1).toFixed(1)+'K'],['지난 7일',(parseFloat(a.views)*6.4).toFixed(1)+'K'],['어제 방문자',a.views],['이웃',a.followers]];
+    if(a.platform==='naver'&&a.service==='cafe')return [['회원',a.followers],['지난 7일 방문',(parseFloat(a.views)*7.2).toFixed(1)+'K'],['게시글','284'],['댓글','1,842']];
+    if(a.platform==='instagram')return [['팔로워',a.followers],['최근 도달',a.views],['저장','1,284'],['댓글','842']];
+    return [['팔로워',a.followers],['누적 조회',a.total],['최근 24시간',a.views],['좋아요',(parseFloat(a.views)*.13).toFixed(1)+'K']];
+  }
+  function renderProgress(a){
+    const times=['09:10','10:05','11:40','13:20','15:10','16:45',a.uploadAt.split(' ').slice(-1)[0],'게시 후'];
+    $('#progressHeadline').className='progress-chip '+progressClass(a);$('#progressHeadline').textContent=stageLabel(a);
+    $('#progressTimeline').innerHTML=progressBase.map((label,i)=>{const isComplete=i<a.progressIndex||(a.progressIndex===7&&i===7);const isCurrent=i===a.progressIndex&&a.progressIndex!==7;let title=label;if(i===3&&isCurrent)title='더빙 진행 중';if(i===6)title=a.uploadAt+' 업로드 예정';return `<div class="progress-row ${isComplete?'complete':''} ${isCurrent?'current':''}"><span class="progress-node">${isComplete?'✓':i+1}</span><div class="progress-copy"><b>${title}</b><span>${isComplete?'완료 기록 저장됨':isCurrent?'현재 작업 중':'앞 단계 완료 후 시작'}</span></div><span class="progress-time">${i<=a.progressIndex?times[i]:''}</span></div>`}).join('');
+  }
+  function openDetail(id){selectedId=id;const a=accounts.find(x=>x.id===id),p=platforms[a.platform],m=detailMetricSet(a);
+    $('#detailHero').innerHTML=`<div class="account-hero">${logo(a)}<div><h1>${a.name}</h1><div class="hero-meta"><span>${p.label}${a.service?' · '+services[a.service].label:''}</span><span>·</span><span>${a.email}</span><span class="status ${a.status==='확인 필요'?'warn':a.status==='일시 정지'?'pause':''}">${a.status}</span></div></div><div class="hero-actions"><button class="secondary-btn" data-toast="성과 보고서 다운로드는 다음 단계에서 연결됩니다.">보고서</button><button class="primary-btn" data-route="composer">＋ 콘텐츠 만들기</button></div></div><div class="mini-grid">${m.map(x=>`<div class="mini"><label>${x[0]}</label><strong>${x[1]}</strong></div>`).join('')}</div>`;
+    $('#accountInfo').innerHTML=`<dl class="info-list"><dt>사용자 페르소나</dt><dd>${a.persona}</dd><dt>소비자 페르소나</dt><dd>${a.consumer}</dd><dt>계정 주제</dt><dd>${a.topic}</dd><dt>주요 형식</dt><dd>${a.format}</dd><dt>업로드 주기</dt><dd>${a.cycle}</dd><dt>로그인 이메일</dt><dd>${a.email}</dd><dt>비밀번호</dt><dd class="password">${a.password}</dd><dt>연결 방식</dt><dd>OAuth 연결 예정</dd></dl><div class="notice">동일한 네이버 이메일로 클립·블로그·카페 채널을 각각 관리할 수 있습니다. 표시된 계정 정보는 더미입니다.</div>`;
+    $('#trendPanel').innerHTML=`<div class="trend-summary"><div class="trend-arrow ${a.trend.key}">${a.trend.symbol}</div><div><strong>${a.trend.label} 중 · ${a.trend.copy}</strong><p>${a.trendSince} 현재 흐름이 이어지고 있습니다.</p></div></div><div class="rule"></div><p class="subtitle">최근 7일 조회·방문·반응률을 직전 기간과 비교한 더미 분석입니다.</p>`;
+    $('#recentContent').innerHTML=[0,1,2,3].map((_,i)=>`<div class="recent-item"><div class="thumb">${a.format}</div><div><div class="recent-title">${titles[(accounts.indexOf(a)+i)%titles.length]}</div><div class="recent-meta">${i+1}일 전 · ${a.format} · 게시 완료</div></div><div class="recent-stat">${(parseFloat(a.views)/(i+1)).toFixed(1)}K<br><span class="time">${a.service==='blog'?'방문':'조회'}</span></div></div>`).join('');
+    $('#nextTime').textContent=`${a.next} · ${a.cycle}`;renderProgress(a);bindDynamic();showView('detail');
+  }
+  function calendarCounts(day){return {youtube:2+day%4,instagram:3+(day*2)%5,tiktok:2+(day*3)%4,naver:3+(day*5)%6}}
+  function dayEvents(day){const counts=calendarCounts(day),events=[];Object.entries(counts).forEach(([platform,count])=>{for(let i=0;i<count;i++){const service=platform==='naver'?Object.keys(services)[(day+i)%3]:null;const pool=accounts.filter(a=>a.platform===platform&&(platform!=='naver'||a.service===service));const a=pool[(day*3+i)%pool.length];events.push({platform,service,name:a.name,title:titles[(day+i+platform.length)%titles.length],time:`${String(7+(i*3)%15).padStart(2,'0')}:${i%2?'40':'10'}`})}});return events.sort((a,b)=>a.time.localeCompare(b.time))}
+  function renderCalendar(){
+    const weekdays=['일','월','화','수','목','금','토'];let html=weekdays.map(d=>`<div class="weekday">${d}</div>`).join('')+'<button class="day-cell empty" disabled></button><button class="day-cell empty" disabled></button>';
+    for(let day=1;day<=30;day++){const c=calendarCounts(day),total=Object.values(c).reduce((a,b)=>a+b,0);html+=`<button class="day-cell ${day===selectedCalendarDay?'selected':''}" data-day="${day}"><span class="day-num ${day===15?'today':''}">${day}</span><span class="day-total">총 ${total}개</span><span class="day-badges"><span class="day-badge"><i style="background:${platforms.naver.color}"></i><span>네이버</span><b>${c.naver}</b></span><span class="day-badge"><i style="background:${platforms.instagram.color}"></i><span>인스타</span><b>${c.instagram}</b></span><span class="day-badge"><i style="background:${platforms.youtube.color}"></i><span>유튜브</span><b>${c.youtube}</b></span><span class="day-badge"><i style="background:${platforms.tiktok.color}"></i><span>틱톡</span><b>${c.tiktok}</b></span></span></button>`}$('#calendarGrid').innerHTML=html;$$('[data-day]').forEach(b=>b.onclick=()=>{selectedCalendarDay=Number(b.dataset.day);renderCalendar();renderCalendarDetail()});
+  }
+  function renderCalendarDetail(){const ev=dayEvents(selectedCalendarDay),weekday=['일','월','화','수','목','금','토'][new Date(2026,8,selectedCalendarDay).getDay()];$('#calendarDetailTitle').textContent=`9월 ${selectedCalendarDay}일 ${weekday}요일`;$('#calendarDetailSummary').textContent=`총 ${ev.length}개 콘텐츠`;$('#scheduleList').innerHTML=ev.map(e=>`<div class="schedule-item"><div class="schedule-channel"><i style="background:${platforms[e.platform].color}"></i>${platforms[e.platform].label}${e.service?' '+services[e.service].label:''} · ${e.name}</div><div class="schedule-title">${e.title}</div><div class="schedule-time">${e.time} 업로드 예정</div></div>`).join('')}
+  function renderSelected(){const ids=[selectedId,'instagram-4','tiktok-8'];const list=[...new Set(ids)].map(id=>accounts.find(a=>a.id===id)).filter(Boolean);$('#selectedCount').textContent=list.length;$('#selectedAccounts').innerHTML=list.map(a=>`<div class="selected-account">${logo(a)}<div><b>${a.name}</b><div class="account-email">${platforms[a.platform].label}${a.service?' '+services[a.service].label:''} · ${a.format}</div></div></div>`).join('')}
+  function renderTodayCounts(bump=false){const total=todayCounts.videos+todayCounts.texts;$('#todayTotal').textContent=total;$('#todayVideos').textContent=todayCounts.videos;$('#todayTexts').textContent=todayCounts.texts;$('#todayUploads').textContent=todayCounts.uploads;$('#uploadStat').querySelector('small').textContent=`/ ${total}개`;$('#liveUpdated').textContent=new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date())+' 기준';if(bump){$$('.today-stat').forEach(x=>{x.classList.remove('bump');void x.offsetWidth;x.classList.add('bump')})}}
+  function showView(view){
+    ['dashboard','detail','calendar','composer','analytics','connections','personas','settings'].forEach(v=>$('#'+v+'View').classList.toggle('hidden',v!==view));$$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.route===view||(view==='detail'&&n.dataset.route==='dashboard')));
+    const crumbs={dashboard:'<strong>통합 대시보드</strong> · 전체 운영 현황',detail:'<strong>계정 상세</strong> · 진행상황과 성과',calendar:'<strong>업로드 캘린더</strong> · 2026년 9월',composer:'<strong>콘텐츠 만들기</strong> · 스타일 학습 + 소재 입력',analytics:'<strong>성과 분석</strong> · 채널별 흐름',connections:'<strong>계정 연결</strong> · 플랫폼 관리',personas:'<strong>페르소나</strong> · 계정별 대상과 말투',settings:'<strong>환경 설정</strong> · 자동화 기본값'};$('#crumb').innerHTML=crumbs[view];if(view==='dashboard')renderTodayCounts();if(view==='composer')renderSelected();if(view==='calendar'){renderCalendar();renderCalendarDetail()}window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function toast(msg){const old=$('.toast');if(old)old.remove();const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
+  function bindDynamic(){$$('[data-route]').forEach(b=>b.onclick=()=>showView(b.dataset.route));$$('[data-toast]').forEach(b=>b.onclick=()=>toast(b.dataset.toast))}
+  $('#accountSearch').addEventListener('input',renderRows);$('#statusFilter').addEventListener('change',renderRows);$$('.choice').forEach(b=>b.onclick=()=>{$$('.choice').forEach(x=>x.classList.remove('active'));b.classList.add('active')});
+  $('#uploadReference').onclick=()=>toast('파일 선택 창을 여는 영역입니다. 여러 파일을 한 번에 등록할 수 있습니다.');
+  $('#addReference').onclick=()=>{const input=$('#referenceUrl');if(!input.value.trim()){toast('추가할 참고 콘텐츠 링크를 입력해주세요.');input.focus();return}const card=document.createElement('article');card.className='reference-card';card.innerHTML='<span class="reference-thumb" style="background:linear-gradient(145deg,#263451,#4f8de8)">LINK</span><div><b>추가 참고 콘텐츠</b><small>링크 · 분석 대기</small></div><span class="reference-state" style="color:#986014">대기</span>';$('#referenceList').appendChild(card);input.value='';$('#analysisStatus').className='analysis-status';$('#analysisStatus').textContent='재분석 필요';toast('참고 콘텐츠가 추가되었습니다.');};
+  $('#analyzeStyle').onclick=()=>{const status=$('#analysisStatus');status.className='analysis-status';status.textContent='분석 중…';toast('폰트, 음성, 구성, 디자인과 편집 특징을 분석합니다.');setTimeout(()=>{status.className='analysis-status ready';status.textContent='분석 완료'},900)};
+  $('#useStyle').onclick=()=>{if(!$('#rightsCheck').checked){toast('자료와 음성의 사용 권리를 먼저 확인해주세요.');return}const name=$('#styleProfile').value;$('#activeStyleName').textContent=name;toast(name+' 스타일을 오늘의 소재에 적용했습니다.');};
+  $('#generateBtn').onclick=()=>{if(!$('#rightsCheck').checked){toast('벤치마크 자료의 사용 권리를 먼저 확인해주세요.');return}const kind=$('.choice.active').textContent;if(kind.includes('영상'))todayCounts.videos+=3;else todayCounts.texts+=3;toast($('#activeStyleName').textContent+' 스타일로 3개 계정의 초안 생성을 시작했습니다.');};$('#addAccountBtn').onclick=()=>toast('계정 선택 창은 다음 화면으로 확장할 수 있습니다.');$('#prevMonth').onclick=()=>toast('8월 캘린더는 다음 프로토타입에서 연결됩니다.');$('#nextMonth').onclick=()=>toast('10월 캘린더는 다음 프로토타입에서 연결됩니다.');
+  $('#dashboardRefresh').onclick=()=>{renderTodayCounts(true);toast('오늘 제작·업로드 현황을 방금 갱신했습니다.');};$$('.setting-toggle').forEach(b=>b.onclick=()=>{b.classList.toggle('on');toast('설정값을 변경했습니다. 저장 버튼을 눌러 적용하세요.')});
+  renderTabs();renderRows();renderCalendar();renderCalendarDetail();renderTodayCounts();bindDynamic();setInterval(()=>renderTodayCounts(),30000);
+</script>
+</body>
+</html>
