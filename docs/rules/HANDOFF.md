@@ -92,7 +92,7 @@
 
 - **Neon** `old-tree-90235056` · DDL `node scripts/neon-migrate.mjs`(0001~0011) · 키 `~/.neon-am-key` · PITR 7일.
 - **Netlify** site `a14524de-ebfa-46e8-a116-dbc87343f276` · PAT `nfp_bB2BR1…`(AM 메모리 `neon-netlify-remote`) · **AC-8** 다른 사이트 secret 은 `****`.
-- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip `autocreate/runner/v1.1.4.zip`+`latest.json`(sha256 53ac918c…)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
+- **R2** 버킷 **`siren-uploads`**(MIS·AM 과 공유 · 우리 키는 전부 `autocreate/` 접두 아래 · 러너 zip **`autocreate/runner/v1.1.6.zip`**+`latest.json`(sha256 738c0925… · v1.1.5 run.bat 열쇠 수리 · v1.1.6 프록시 fail-closed·출구 IP·트래픽 계측·프레임 지문)) · 버전 관리 없음(AC-37) · 삭제 헬퍼 `r2DeletePrefix` 는 `autocreate/{tid}/` 꼴만.
 - **KICC**: ON 계약 공용 · MID 2 · live · **빌키 = keyin 고정**(AC-45) · 복귀 주소 등록 불필요·KEYIN 시크릿 불필요(실측 확정) · 개통 정본 `docs/active/KICC-GO-LIVE.md`.
 - 로컬 `.env`(워크트리 6곳 동기): `TEST_TISTORY_*`·`TEST_NAVER_*`·`FX_USD_KRW`·`BGM_LICENSE_VERIFIED`.
 
@@ -123,7 +123,11 @@
 
 ---
 
-## 5B. R7 (2026-09-15 착수)
+## 5B. R7 (2026-09-15 · 진행 중)
+
+**진행**: §1 영상 축 **완료**(토글·계정 없이 영상·mp4 내려받기·올린 주소 적기·홈 해야 할 일 7줄·프레임 지문) · §2 러너/발행 60%(run.bat 열쇠 수리·고객 경로 1바퀴·쓰레드 글·프록시 fail-closed·출구 IP·트래픽 실측·견적서 · 남은 것 노트북 공존·관리형 1대·워밍업·실발행 준비) · §3 B **§3.1~3.5 완료**(탈퇴·파기·플랜 게이트·자격 동의·**내부 테스트 제외**) · §3.6 계정 슬롯 진행 · §4 A **완료**(화면 전부 · 보류 축 3상태 · 판 번호 자동) · B3 조사 잔여 수리 완료 · C §5 준비(API 표면 상시 하니스).
+**오늘 숫자 2개**: AI 원가 **$15.93 → $3.70**(내부 12.23 제외 · 83곳 중 81곳이 내부 · 진짜 고객 0) · 글 1건 트래픽 **≈9~10MB**(가정의 2~4배 과대 · 계정당 월 1GB 미만).
+
 
 **계약 = `docs/active/2026-09-15-P1R7-contract.md` v7.0**(유일한 입력 = 전수조사). 사장님 결정 4: ①영상 채널 켠다 ②실발행 GO(네이버 1건부터) ③요금제 채널 게이트 설계대로 ④관리형 기본·계정당 월요금·프록시 포함.
 담당: B-1 §1 영상 개통 · B2 §2 실발행·러너·관리형 1대 · B §3 탈퇴/게이트/내부 구분 · A §4 화면 · C §5(AC-48 전수 diff 포함) · 메인 §7 DESIGN 갱신.
