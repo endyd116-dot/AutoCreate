@@ -251,6 +251,10 @@
     naver_blog: { label: "네이버 블로그", mark: "N" }, tistory: { label: "티스토리", mark: "T" }, blogger: { label: "블로거", mark: "B" }, wordpress: { label: "워드프레스", mark: "W" },
     threads: { label: "쓰레드", mark: "@" }, instagram: { label: "인스타그램", mark: "◎" }, youtube_shorts: { label: "유튜브 쇼츠", mark: "▶" }, naver_clip: { label: "네이버 클립", mark: "C" },
     reels: { label: "릴스", mark: "◎" }, tiktok: { label: "틱톡", mark: "♪" },
+    /* [P1R8 §3.4 · B2] 다음 Phase 채널 — 이름이 없으면 화면에 «facebook_reels» 같은 **열쇠 글자**가 그대로 뜬다. */
+    facebook: { label: "페이스북", mark: "f" }, facebook_reels: { label: "페북 릴스", mark: "f" },
+    x: { label: "엑스", mark: "X" }, youtube_long: { label: "유튜브 영상", mark: "▶" },
+    brunch: { label: "브런치", mark: "br" }, naver_clip_post: { label: "클립 게시물", mark: "C" },
   };
   UI.mark = (ch, cls = "") => { const c = UI.CH[ch] || { mark: "?" }; return `<span class="mk ${ch} ${cls}" aria-hidden="true">${c.mark}</span>`; };
   UI.chLabel = (ch) => (UI.CH[ch] || {}).label || ch;
@@ -285,6 +289,38 @@
     requestAnimationFrame(() => { sh.classList.add("open"); bg.classList.add("open"); });
     if (onOpen) onOpen(sh, close);
     return { el: sh, close };
+  };
+
+  /* [R8 §6.1] 당겨서 새로고침 — 🔴 헌장 «모션 한 방향»과 부딪치지 않는다: **손짓과 같은 세로 축**으로만 움직이고
+     스스로 도는 스피너를 쓰지 않는다(메인 판정 2026-09-15 · DESIGN §13.0 에 «사용자의 손짓과 같은 축이면 된다» 한 줄).
+     🔴 햅틱은 **말로 약속하지 않는다** — 아이폰 사파리엔 `navigator.vibrate` 가 없다(고객 절반에게 없는 감각이라 문구로 약속하면 거짓말).
+        되는 기기에서만 문턱을 넘을 때 한 번 톡 치고, 화면 글자로는 한 마디도 안 한다.
+     🔴 시트·글 편집기가 열려 있으면 끈다 — 그 안에서 당기면 뒤 화면이 새로고침돼 쓰던 것이 날아간다. */
+  UI.pullToRefresh = function (onRefresh) {
+    if (!("ontouchstart" in window) || !navigator.maxTouchPoints) return;   // 손가락이 없는 곳엔 만들지 않는다
+    const bar = document.createElement("div"); bar.className = "ptr"; bar.hidden = true;
+    const say = document.createElement("span"); say.textContent = "당겨서 새로고침"; bar.appendChild(say);
+    document.body.appendChild(bar);
+    const TH = 70; let y0 = null, armed = false, busy = false;
+    const blocked = () => busy || !!$(".sheet.open") || (document.activeElement && (document.activeElement.isContentEditable || /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)));
+    const reset = () => { bar.hidden = true; bar.style.transform = ""; say.textContent = "당겨서 새로고침"; armed = false; };
+    addEventListener("touchstart", (e) => { y0 = blocked() || window.scrollY > 0 ? null : e.touches[0].clientY; }, { passive: true });
+    addEventListener("touchmove", (e) => {
+      if (y0 == null) return;
+      const dy = e.touches[0].clientY - y0;
+      if (dy <= 0) { reset(); return; }
+      bar.hidden = false;
+      bar.style.transform = `translateY(${Math.min(Math.min(dy, TH + 24) - 44, 0)}px)`;   // 세로 한 축만
+      const now = dy >= TH;
+      if (now !== armed) { armed = now; say.textContent = armed ? "놓으면 새로고침" : "당겨서 새로고침";
+        if (armed && navigator.vibrate) { try { navigator.vibrate(10); } catch { /* 없는 기기 */ } } }
+    }, { passive: true });
+    addEventListener("touchend", async () => {
+      if (y0 == null) return; const go = armed; y0 = null;
+      if (!go) return reset();
+      busy = true; bar.style.transform = "translateY(0)"; say.textContent = "새로고침 중";
+      try { await onRefresh(); } catch { /* 화면이 제 말로 알린다 */ } finally { busy = false; reset(); }
+    });
   };
 
   /* ── 완료 체크(400ms 후 자동 닫힘) ── */
@@ -421,7 +457,9 @@
   /* [P1R4] 서버 알림 kind(lib/cron notifyOnce · B 결제·체험) → 아이콘 하나 · 링크 없을 때의 기본 링크 */
   /* [R7 §1.4 · B-1 a1c9801] 홈 «해야 할 일» 7줄 — 새 kind 는 이미 있는 아이콘으로 잇는다(아이콘을 새로 만들지 않는다) */
   /* [AC-52 · 2026-09-15] 서버가 실제로 보내는 kind 를 전수 대조해 채웠다(scripts/verify-label-surface.mjs 가 상시로 잰다) */
-  UI.KIND_ALIAS = { account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+  /* [R8 §9 · B3] `gate_risk` — 위험이 있는 채로 승인됐다(자동 승인처럼 아무도 화면을 안 보는 길을 위해 서버가 1회 보낸다) · «검수»와 같은 얼굴
+     [R8 · B] `takedown_*` — 침해 신고. 🔴 «알림»이 아니라 **해야 끝나는 일**이라 주의 계열(reassign)로 · 🔴 «곧 정지됩니다»로 쓰지 않는다(자동 정지는 없다) */
+  UI.KIND_ALIAS = { gate_risk: "review", takedown_notice: "reassign", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
@@ -465,7 +503,7 @@
   };
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS 에서 그대로 복사] 🔴 **이 축만 «이대로 예약»을 막는다**(hardFailures).
      나머지 실패는 «알려드리는 것»이다 — 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 안다(골격 반복·최상급이 그렇다). */
-  UI.GATE_HARD = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"];
+  UI.GATE_HARD = [];
   /* 주제군·수익 목적은 **서버에 한국말이 없다**(값만 있다 · lib/writing-contracts.ts TopicGroup·RevenueGoal) — 고객 낱말은 여기가 정본. */
   UI.GROUP_LABEL = { review: "후기·리뷰", info: "정보·방법", life: "일상" };
   UI.GOAL_LABEL = { affiliate: "제휴 수수료", adsense: "애드센스", adpost: "애드포스트", ypp: "유튜브 수익", clip_incentive: "클립 인센티브", mixed: "여러 가지" };

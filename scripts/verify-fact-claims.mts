@@ -51,6 +51,10 @@ const B = (o: Partial<Block> & { type: string }) => o as Block;
     cs.map((c) => `${c.num}:${c.basis}/${c.kind}`).join(" · "));
   rec("② 🔴 그중 **금액·비율**은 risky 로 따로 센다(틀리면 표시광고법으로 가는 둘)", s.risky === 2,
     JSON.stringify(s));
+  /* 🔴 A 요청 — 화면이 다시 계산하지 않게 항목에도 `risky` 를 싣는다. 항목과 요약이 **같은 함수**를 봐야 안 갈린다. */
+  rec("② 🔴 항목의 risky 와 요약의 risky 가 같다(화면이 다시 세지 않는다)",
+    cs.filter((c) => c.risky).length === s.risky && cs.every((c) => c.risky === (c.basis === "self" && (c.kind === "money" || c.kind === "percent"))),
+    `항목 ${cs.filter((c) => c.risky).length}개 ↔ 요약 ${s.risky}개`);
   rec("② 화면 문구가 «틀렸다»고 말하지 않는다", (claimsLine(s) ?? "").includes("확인이 필요한") && !(claimsLine(s) ?? "").includes("틀"),
     String(claimsLine(s)));
 }
@@ -63,6 +67,8 @@ const B = (o: Partial<Block> & { type: string }) => o as Block;
   ];
   const cs = findNumericClaims(blocks, PROMPT);
   const s = summarizeClaims(cs);
+  /* 🔴 음성 대조 — 구조를 세는 말은 risky 가 **아니어야** 한다. 여기가 true 로 새면 화면이 시끄러워진다. */
+  rec("③ 🔴 음성 대조 — structural 은 risky 가 아니다", cs.every((c) => !c.risky), `risky ${cs.filter((c) => c.risky).length}개`);
   rec("③ «3단계»·«3가지» 는 structural 로 갈린다(같은 무게로 보여 주면 진짜 위험한 숫자가 묻힌다)",
     cs.every((c) => c.kind === "structural") && s.self === 0 && s.risky === 0,
     `${cs.map((c) => `${c.num}:${c.kind}`).join(" · ")} → ${JSON.stringify(s)}`);

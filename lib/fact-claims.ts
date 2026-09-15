@@ -36,6 +36,12 @@ export interface NumericClaim {
   kind: ClaimKind;
   /** 몇 번째 블록인가 — 검수 화면이 그 블록으로 스크롤한다. */
   blockIndex: number;
+  /**
+   * 🔴 **직접 확인이 꼭 필요한 숫자인가** = 우리가 안 준 **돈·비율**(틀리면 표시광고법으로 가는 둘).
+   *   화면이 `basis`·`kind` 로 **다시 계산하지 않게** 항목에 실어 보낸다(A 요청 2026-09-15) —
+   *   다시 계산하게 두면 우리가 셈을 바꾸는 날 **화면만 옛 셈으로** 남는다(AC-57 · 같은 판정을 두 곳에서 하지 않는다).
+   */
+  risky: boolean;
 }
 
 /** 숫자 한 덩이 — 천 단위 쉼표·소수점까지. 🔴 앞뒤 경계를 둬 «1.234»(금액)를 날짜로 읽던 사고를 피한다(AC-57 사촌). */
@@ -93,12 +99,20 @@ export function findNumericClaims(blocks: Block[], promptUser: string): NumericC
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
-        num, basis, kind, blockIndex: i,
+        num, basis, kind, blockIndex: i, risky: isRisky(basis, kind),
         context: text.slice(Math.max(0, start - 20), start + num.length + 20).replace(/\s+/g, " ").trim().slice(0, 60),
       });
     }
   });
   return out;
+}
+
+/**
+ * 🔴 **«직접 확인이 꼭 필요한가»의 판정 한 곳.** 항목(`risky`)과 요약(`summary.risky`)이 **같은 함수**를 본다 —
+ *   두 곳에서 따로 세면 언젠가 «항목은 3개인데 요약은 2개»가 된다(AC-57).
+ */
+function isRisky(basis: ClaimBasis, kind: ClaimKind): boolean {
+  return basis === "self" && (kind === "money" || kind === "percent");
 }
 
 /** 검수 화면·되짚기가 쓰는 한 줄 요약. 🔴 «구조를 세는 숫자»는 **따로 센다**(위험한 숫자가 묻히지 않게). */
@@ -108,11 +122,9 @@ export function summarizeClaims(claims: NumericClaim[]): ClaimSummary {
   for (const c of claims) {
     if (c.kind === "structural") { s.structural++; continue; }
     if (c.basis === "given") s.given++;
-    else {
-      s.self++;
-      /* 🔴 **위험한 숫자** = 우리가 안 준 **돈·비율**. 틀리면 표시광고법으로 가는 것이 이 둘이다. */
-      if (c.kind === "money" || c.kind === "percent") s.risky++;
-    }
+    else s.self++;
+    /* 🔴 항목이 이미 들고 있는 값을 그대로 센다 — 여기서 다시 판정하면 항목과 요약이 갈린다(`isRisky` 한 곳). */
+    if (c.risky) s.risky++;
   }
   return s;
 }
