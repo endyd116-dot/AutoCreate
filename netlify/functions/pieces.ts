@@ -244,9 +244,11 @@ export default async (req: Request): Promise<Response> => {
     const st = String(p.status);
 
     if (path.endsWith("/pieces-approve")) {
-      const r = await approvePiece(tid, p);
+      const r = await approvePiece(tid, p, { by: { uid: Number(auth.user.uid), role: String(auth.user.role) === "owner" ? "owner" : "member" } });
       if (!r.ok) return r.step === "gate"
         ? json({ ok: false, step: "gate", error: r.error, gate: r.gate }, 409)
+        /* 🔴 팀 승인은 **403**(권한)이지 400(상태)이 아니다 — 화면이 «내가 못 하는 일»과 «지금 못 하는 일»을 갈라 그려야 한다. */
+        : r.step === "team_approval" ? json({ ok: false, step: "team_approval", error: r.error }, 403)
         : json({ ok: false, step: "state", error: r.error }, 400);
       if (!r.alreadyScheduled) await writeAudit({ tenantId: tid, action: "piece_approve", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { scheduledFor: r.scheduledFor, gateOk: r.gate.ok } });
       return json({ ok: true, status: "scheduled", scheduledFor: r.scheduledFor });

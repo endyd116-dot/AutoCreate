@@ -577,8 +577,10 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const meta = isVideo
         ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
         : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}) };
-      const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
-        VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : isCard ? "cardnews" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);
+      /* 🔴 [R8 §4.5] **누가 만들었나**를 적는다 — 자동(크론)은 `actorId` 가 없어 **NULL** 이다.
+         기계가 만든 글에 «누가»를 지어내지 않는다(AC-9). 이 값이 없으면 «팀원이 만든 글»을 가릴 수 없다. */
+      const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for, created_by)
+        VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : isCard ? "cardnews" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC', ${actorId ?? null}) RETURNING id`);
       const pieceId = n(p?.id);
       /* 편성 자리를 빌려 쓰는가(크론) — 아니면 지금처럼 새 자리를 만든다(사람이 «만들기»로 끼워 넣는 글).
          빌려 쓰는 자리는 **채널이 같은 첫 spec 하나**에만 준다(한 자리에 두 글이 들어갈 수 없다). */

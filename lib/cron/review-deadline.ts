@@ -30,6 +30,7 @@ import { q } from "../accounts";
 import { writeAudit } from "../audit";
 import { jsonb, utcDate } from "../db-util";
 import { approvePiece } from "../content-approve";
+import { needsOwnerApproval, notifyOwnersWaiting } from "../team";   // [R8 §4.5] 팀 승인이 걸린 글은 마감 자동 승인에서 뺀다
 import { kstHour, kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { planOf, autoApproveAllowed } from "../plans";   // [P1R7 B3] 자동 승인 플랜 게이트(§5B.9)
 import { accountsTrust } from "../account-trust";       // [P1R8 §9] 신뢰는 **알려 주는 축**이다 — 막지 않는다(사장님 지시 2026-09-15)
@@ -45,6 +46,8 @@ export const reviewDeadlineStep: CronStep = {
   needsAutoSchedule: true,
   async run(ctx): Promise<StepOutcome> {
     let approved = 0, blocked = 0, pending = 0, notified = 0, untrusted = 0;
+    /* [R8 §4.5] 주인을 기다리느라 이번에 안 건드린 글 수 — 🔴 «조용히 0건»이 되지 않게 **센다**. */
+    let teamWaitTotal = 0;
     const hour = kstHour(ctx.now);
 
     /* [P1R7 B3] 플랜 게이트 — «저장된 값 없음 + 플랜이 자동 승인 불가» 일 때만 require_confirm 처럼 판정한다(위 주석). */
@@ -69,9 +72,13 @@ export const reviewDeadlineStep: CronStep = {
          🔴 워밍업도 여기서 막지 않는다 — 계정 보호는 **발행량**이 하는 일이고 이미 `effectiveDailyCap` 이 하루 상한으로 막는다.
             같은 것을 두 곳에서 막으면 «왜 안 나가지»가 두 배로 어려워진다(AC-29 «게이트 호출처는 한 곳»). */
       const trustMap = await accountsTrust(ctx.tid, due.map((x) => n(x.account_id)).filter(Boolean));
+      /* 🔴 [R8 §4.5] **팀 승인이 걸린 글은 «조용하면 발행»에서 뺀다.**
+         그 집이 «사람이 봐야 한다»를 켰는데 우리 크론이 마감에 자동 승인하면 **그 집 규칙이 우리 기계에 먹힌다.**
+         대신 **주인에게 알린다**(하루 한 번) — 안 알리면 그 글은 조용히 사라진다(CLAUDE §4.7). */
       for (const p of due) {
         if (Date.now() >= ctx.deadline) { pending++; continue; }
         const pieceId = n(p.id), slotId = n(p.sid);
+        if (p.created_by && await needsOwnerApproval(ctx.tid, p.created_by)) { teamWaitTotal++; continue; }
         const accId = n(p.account_id);
         const trust = accId ? trustMap.get(accId) : undefined;
         if (accId && trust && !trust.trusted) {
@@ -91,6 +98,8 @@ export const reviewDeadlineStep: CronStep = {
           continue;
         }
         if (r.step === "state") { pending++; continue; }   // 그새 사람이 바꿨다 — 다음 주기가 다시 본다
+        /* 🔴 위에서 이미 걸렀지만 한 겹 더 — 이 크론이 그 집 «팀 승인»을 절대 대신 누르지 않게(두 겹으로 막는 값이 있는 자리다). */
+        if (r.step === "team_approval") { teamWaitTotal++; continue; }
         // 🔴 게이트 하드 실패 = 자동으로 내보내지 않는다.
         blocked++;
         const why = r.gate.checks.filter((c) => !c.pass).map((c) => c.label).slice(0, 3).join(" · ") || "확인 필요";
@@ -126,7 +135,9 @@ export const reviewDeadlineStep: CronStep = {
       }
     }
 
-    const out: StepOutcome = { changed: approved + blocked, skipped: pending };
+    /* 🔴 기다리는 글이 있으면 **주인에게 알린다** — 이게 «조용히 0건 금지»의 짝이다. */
+    if (teamWaitTotal) await notifyOwnersWaiting(ctx.tid);
+    const out: StepOutcome = { changed: approved + blocked, skipped: pending + teamWaitTotal };
     // 🔴 `stored` 는 **저장된 원본**(대개 없음)이다 — 기본값을 적으면 «왜 require_confirm 이 됐나»를 감사에서 못 읽는다.
     const detail: Record<string, unknown> = { policy, ...(forcedByPlan ? { forcedByPlan: true, planKey: ctx.planKey, stored: ctx.raw.reviewPolicy ?? null } : {}) };
     if (approved) detail.approved = approved;

@@ -28,6 +28,8 @@ const WARN_KINDS: ReadonlySet<string> = new Set([
   /* [R8 §4.4] 🔴 «내 키가 안 되어 대신 만들었어요» — 알려 주기만 하면 **그동안 우리 돈이 계속 나간다**(키가 «틀림»이면 저절로 안 낫는다).
      고객이 키를 고쳐 꽂아야 끝나는 일이라 warn 이다. */
   "ai_key_fallback",
+  /* [R8 §4.5] 🔴 팀원이 만든 글은 **주인이 봐야 나간다** — 알려 주기만 하고 아무도 안 보면 그 글은 조용히 사라진다(CLAUDE §4.7). */
+  "team_review",
 ]);
 
 export interface NotificationRow { id: number; kind: string; title: string; desc?: string; link?: string; tone: "warn" | "info"; createdAt: string; readAt?: string }

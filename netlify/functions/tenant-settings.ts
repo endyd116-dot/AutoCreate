@@ -16,7 +16,7 @@ import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/onboarding", "/api/tenant-settings"] };
-const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt"]);
+const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt", "teamApproval"]);
 const CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress", "threads", "instagram", "youtube_shorts", "naver_clip", "reels", "tiktok"]);
 
 /**
@@ -96,6 +96,14 @@ export default async (req: Request): Promise<Response> => {
     }
     // [R7 §1.1] `kinds` 는 정규화해서 저장한다 — 화면이 무엇을 보내든 «글은 항상 · 영상은 토글» 한 모양으로 수렴(덮어쓰기 금지).
     if ("kinds" in patch) patch.kinds = normalizeKinds(patch.kinds);
+    /* 🔴 [R8 §4.5] «팀 승인»은 **요금제 기능**이다(Agency) — 없는 요금제에서 켜지면 «켰는데 안 되는» 상태가 된다.
+       끄는 것은 언제나 되게 둔다(되돌릴 길은 막지 않는다). */
+    if (patch.teamApproval === true) {
+      const { requireFeature } = await import("../../lib/plans");
+      const f = await requireFeature(auth.tid, "teamApproval");
+      if (!f.ok) return f.res!;
+    }
+    if ("teamApproval" in patch) patch.teamApproval = patch.teamApproval === true;
     const settings = await mergeSettings(auth.tid, patch);
     await writeAudit({ tenantId: auth.tid, action: "tenant_settings_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: patch });
     return json({ ok: true, settings, ...kindsView(settings), ...(volunteerChanged !== null ? { recipeVolunteer: volunteerChanged } : {}) });

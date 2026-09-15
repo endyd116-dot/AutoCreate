@@ -1139,3 +1139,18 @@ export const usersR8Team = {
   pendingUniq: "team_invites_pending_uniq",
   tokenUniq: "team_invites_token_uniq",
 } as const;
+
+
+/* === Phase 1 R8 · B(디렉터 팀 승인 · P1R8-B §4.5 · 2026-09-16 · drizzle/0034-r8-team-approval.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   플랜 기능 키 `teamApproval` 이 **선언만** 돼 있고 흐름이 없었다 — «팀 승인»이라 팔면서 승인이 없었다.
+ *   🔴 이 흐름은 **우리 판단이 아니다**(CLAUDE §9 밖) — 그 집 사장이 자기 직원에게 건 규칙이다.
+ */
+export const piecesR8Team = {
+  /** 🔴 누가 만들었나(users.id). **자동(크론)은 NULL** — 기계 글에 «누가»를 지어내지 않는다(AC-9).
+   *  사람이 팀에서 나가도 이 값은 그대로 둔다 — 누가 만들었는지는 사실이고, 사람이 나갔다고 사실이 바뀌지 않는다. */
+  createdBy: "created_by",
+  createdByIdx: "pieces_created_by_idx",
+} as const;
+
+/** 켜고 끄는 값은 `tenants.settings.teamApproval`(jsonb) — 🔴 **기본 꺼짐** · 플랜 기능(Agency)이 없으면 안 켜진다. */
+export const tenantSettingsR8Team = { teamApproval: "teamApproval" } as const;

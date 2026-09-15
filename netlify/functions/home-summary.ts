@@ -147,9 +147,17 @@ export default async (req: Request): Promise<Response> => {
     } catch (e) { console.warn("[home] 멈춘 글·자리 조회 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
     const [review] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid} AND status = 'in_review'`);
     /* 🔴 `forcedByPlan` 이면 «내일 나가기 전에 확인해 주세요»는 **거짓말**이 된다 — 승인하지 않으면 그 글은 아예 안 나간다(B3 크론이 마감 뒤 awaiting_manual 로 내린다). */
+    /* 🔴 [R8 §4.5] 팀 승인이 켜진 집 — «봐주실 글»에 **주인을 기다리는 몫**을 한 줄로 얹는다.
+       🔴 **새 kind 를 만들지 않는다**: 같은 글들이라 행을 둘로 나누면 «몇 건인지»를 못 믿게 된다(오늘 게이트 행에서 겪은 그 모양).
+       🔴 그리고 이건 «막혔다»가 아니라 **«기다리는 중»**이다 — 그래서 tone 도 그대로 두고 문구만 사실을 더한다. */
+    let teamWait = { count: 0, firstId: 0 };
+    try { const { waitingForOwner } = await import("../../lib/team"); teamWait = await waitingForOwner(tid); }
+    catch (e) { console.warn("[home] 팀 대기 조회 실패 — 그 한 줄만 빠진다", String((e as Error)?.message ?? e).slice(0, 100)); }
     if (n(review?.c)) todo.push({ kind: "review", title: `봐주실 글 ${n(review.c)}건이 있어요`, count: n(review.c),
-      desc: forcedByPlan ? "승인하지 않으면 오늘은 나가지 않아요" : "내일 나가기 전에 확인해 주세요",
-      link: "/app/pieces.html?status=in_review", tone: forcedByPlan ? "warn" : "info" });
+      desc: teamWait.count
+        ? `그중 ${teamWait.count}건은 팀원이 만든 글이라 주인이 보셔야 나가요`
+        : forcedByPlan ? "승인하지 않으면 오늘은 나가지 않아요" : "내일 나가기 전에 확인해 주세요",
+      link: "/app/pieces.html?status=in_review", tone: forcedByPlan || teamWait.count ? "warn" : "info" });
     /* [R7 §1.4] 요금제 때문에 «조용하면 발행»이 막힌 상태 — 왜 기다리면 안 되는지와 푸는 길(요금제)을 따로 한 줄로.
        🔴 kind 는 B3 감사 detail 의 키와 **글자 그대로** 같게 뒀다(`review-deadline.ts:110` detail.forcedByPlan) —
           홈에서 본 줄과 감사에 남은 사실을 한 단어로 grep 해 잇기 위해서다. 볼 글이 0건이면 행을 만들지 않는다(규칙만 떠 있으면 잔소리다). */
