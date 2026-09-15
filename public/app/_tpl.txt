@@ -78,12 +78,13 @@ UI.$("#ref").onclick = () => UI.sheet(`<form id="rf"><div class="field"><label>�
   const r = await UI.api("/api/topics-reference", { body: { url: d.url.trim() } }); if (!r.ok) return r.gated ? close() : UI.fieldError(f, "url", r.error || "구조를 배우지 못했어요");
   close(); UI.done(`구조를 배웠어요 · ${r.template?.name || ""}`, load); }) });
 await load();
-=== schedule.html | schedule | 편성표 ===
+=== schedule.html | schedule | 편성표 | two ===
 <div class="hl" style="padding-bottom:0;display:flex;align-items:center;gap:6px"><button type="button" class="ic" id="prev" aria-label="지난달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg></button><div class="num" style="font-size:22px;margin:0" id="mon">편성표</div><button type="button" class="ic" id="next" aria-label="다음달" hidden style="width:32px;height:32px;display:grid;place-items:center;border-radius:10px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><path d="M9 5l7 7-7 7"/></svg></button><span class="muted" style="font-size:13.5px;font-weight:600;margin-left:4px" id="stat"></span></div>
 <div class="banner" id="autoBn" hidden><span id="autoBnT">자동 편성이 꺼져 있어요</span><button type="button" id="autoOn">켜기</button></div>
 <div class="seg" id="mode"><button type="button" data-m="two" class="on">2주</button><button type="button" data-m="month">월</button></div>
 <div class="group" id="cal"></div>
 <div id="feed" hidden></div>
+<aside class="aside desk-only" id="side"></aside>
 <div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 const me = await UI.boot("schedule"); if (!me) return;
@@ -149,6 +150,7 @@ function render() {
   UI.$("#cal").innerHTML = `<div class="cal">${h}</div>`;
   UI.$$("#cal .dd").forEach((b) => b.onclick = () => { sel = b.dataset.d; render(); if (two) { const g = UI.$(`#feed [data-day="${sel}"]`); if (g) g.scrollIntoView({ behavior: "smooth", block: "start" }); else UI.toast("이날은 나갈 글이 없어요"); } });
   const feed = UI.$("#feed"), day = UI.$("#day"); feed.hidden = !two; day.hidden = two;
+  renderSide();
   // 규칙도 편성도 없으면 빈 상태 하나
   if (!active.length && !slots.length) { const host = two ? feed : day; host.innerHTML = `<div class="group"><div class="empty"><span class="mk soft">▦</span><h3>규칙 하나면 한 달치가 알아서 나가요</h3><p>채널마다 «주 몇 회»만 정하면 소재 배정·제작·발행까지 편성돼요.</p><button class="btn primary sm" type="button" id="mkRule">자동 편성 켜기</button></div></div>`; UI.$("#mkRule").onclick = () => ruleSheet(); return; }
   if (two) {
@@ -320,6 +322,23 @@ function ruleSheet() {
     };
   };
   UI.sheet(`<div class="sheet-body"></div>`, { title: "", onOpen: (sh, close) => { view(sh, close); } });
+}
+/* [R7 §4.4 · DESIGN §13.3b] 데스크톱 우측 300 패널 — 화면을 옮겨 다니지 않고 «오늘»과 규칙을 같이 본다(좁은 화면에는 아예 없다 · 없던 내용을 폰에 밀어 넣지 않는다) */
+function renderSide() {
+  const side = UI.$("#side"); if (!side) return;
+  const k = ymd(today); const ls = daySlots(k).filter((s) => s.status !== "skipped");
+  const active = (D.rules || []).filter((r) => r.active);
+  const done = ls.filter((s) => s.status === "published").length;
+  const rows = ls.length ? ls.map((s) => `<div class="row" style="min-height:44px">${UI.mark(s.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${tooSoon(s) ? '<span class="pill off">건너뜀</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>`).join("")
+    : '<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘은 나갈 글이 없어요</span></div></div>';
+  const ruleRows = active.map((r) => `<div class="row" style="min-height:40px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:13.5px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회</span><span class="d">${(r.weekdays || []).length ? r.weekdays.map((w) => WD[w]).join("·") : "요일 자동"}${r.preferredHour != null ? " · " + String(r.preferredHour).padStart(2, "0") + "시" : ""}</span></div></div>`).join("");
+  side.innerHTML = `<div class="group"><div class="gt">오늘</div>${rows}</div>
+    <div class="group"><div class="gt">자동 편성</div>
+      <div class="row" style="min-height:44px"><div class="l"><span class="t" style="font-size:14px">${D.settings && D.settings.autoSchedule ? "켜져 있어요" : "꺼져 있어요"}</span><span class="d">${active.length ? "규칙 " + active.length + "개 · 오늘 " + done + "/" + ls.length + "건 나갔어요" : "규칙이 아직 없어요"}</span></div></div>
+      ${ruleRows}
+      <div style="padding:8px 0 0"><button class="btn secondary sm" type="button" id="sideRules" style="width:100%">편성 설정</button></div>
+    </div>`;
+  const b = UI.$("#sideRules"); if (b) b.onclick = settingsSheet;
 }
 /* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
 function settingsSheet() {
@@ -799,7 +818,17 @@ await load();
   <button class="row tap" type="button" id="outAll"><div class="l"><span class="t">모든 기기에서 로그아웃</span><span class="d">«로그인 유지»로 남은 기기까지 전부</span></div></button>
   <button class="row tap" type="button" id="out"><div class="l"><span class="t" style="color:var(--danger)">로그아웃</span></div></button>
 </div>
+<div class="group" id="notig"><div class="gt">알림</div>
+  <div class="fr"><div class="fl" id="notiT">기기 알림 받기<small id="notiD">확인할 게 생기면 바로 알려드려요</small></div><button class="toggle" type="button" id="noti" aria-checked="false" aria-label="기기 알림 받기"></button></div>
+  <p class="muted" id="notiWhy" style="margin:0 16px 10px;font-size:12.5px" hidden></p>
+</div>
 <div class="group" id="expg"><div class="gt">내 자료</div><div id="exp"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="appg"><div class="gt">앱 정보</div>
+  <div class="kv"><span class="k">판 번호</span><span class="v" id="appVer">—</span></div>
+  <a class="row tap" href="/app/support.html"><div class="l"><span class="t">문의하기</span><span class="d">막히는 게 있으면 바로 알려 주세요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/terms.html"><div class="l"><span class="t">이용약관</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+  <a class="row tap" href="/privacy.html"><div class="l"><span class="t">개인정보 처리방침</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
+</div>
 --- script ---
 const me = await UI.boot("account"); if (!me) return;
 /* [R7 §1.1] 영상 만들기 — GET/POST /api/tenant-settings { kinds, kindsSet }.
@@ -823,6 +852,33 @@ function sayKinds(on) {
   UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
 }
 loadKinds();
+/* [R7 §4.4] 기기 알림 — 권한 + 구독이 **둘 다** 돼야 «켜진» 것이다. 하나라도 안 되면 그 이유를 한 줄로 말한다(켰다고 거짓말하지 않는다).
+   iOS 는 «홈 화면에 추가» 한 뒤에만 알림을 받을 수 있다(사파리 제약) — 그 한 줄만 보여 준다. */
+async function loadNoti() {
+  const tg = UI.$("#noti"), why = UI.$("#notiWhy"), desc = UI.$("#notiD");
+  const st = UI.pushState();
+  const say = (on, line) => { tg.setAttribute("aria-checked", on ? "true" : "false"); why.hidden = !line; why.textContent = line || ""; desc.textContent = on ? "새 소식이 오면 이 기기로 알려드려요" : "확인할 게 생기면 바로 알려드려요"; };
+  if (!st.can) { tg.disabled = true; tg.classList.add("locked");
+    return say(false, st.ios && !st.iosStandalone ? "아이폰은 «공유 → 홈 화면에 추가» 로 앱처럼 설치하면 알림을 받을 수 있어요" : "이 브라우저는 기기 알림을 지원하지 않아요 · 알림함에서는 그대로 볼 수 있어요"); }
+  if (st.ios && !st.iosStandalone) { tg.disabled = true; tg.classList.add("locked"); return say(false, "아이폰은 «공유 → 홈 화면에 추가» 로 앱처럼 설치하면 알림을 받을 수 있어요"); }
+  if (st.perm === "denied") { tg.disabled = true; tg.classList.add("locked"); return say(false, "브라우저 설정에서 알림을 막아 두셨어요 · 주소창 옆 자물쇠에서 다시 켤 수 있어요"); }
+  UI.swReady();
+  say(await UI.pushSubscribed(), "");
+  UI.toggle(tg, async (next) => {
+    if (!next) { await UI.pushDisable(); say(false, ""); UI.toast("이 기기 알림을 껐어요"); return; }
+    const r = await UI.pushEnable();
+    if (r.ok) { say(true, ""); UI.toast("이 기기로 알림을 보내드려요"); return; }
+    const LINE = { denied: "브라우저 설정에서 알림을 막아 두셨어요 · 주소창 옆 자물쇠에서 다시 켤 수 있어요",
+      dismissed: "알림 허용을 누르지 않으셨어요 · 다시 눌러 주세요",
+      no_server: "기기 알림은 아직 준비 중이에요 · 그때까지는 알림함에서 그대로 볼 수 있어요",
+      sw: "이 브라우저에서 알림을 켤 수 없어요 · 알림함에서는 그대로 볼 수 있어요",
+      subscribe: "알림을 켜지 못했어요 · 잠시 뒤 다시 해 주세요", save: "알림을 켜지 못했어요 · 잠시 뒤 다시 해 주세요", unsupported: "이 브라우저는 기기 알림을 지원하지 않아요" };
+    say(false, LINE[r.step] || "알림을 켜지 못했어요");
+    return false;   // 못 켰으면 토글도 도로 꺼진다
+  });
+}
+loadNoti();
+UI.$("#appVer").textContent = UI.APP_VERSION;
 UI.$("#email").textContent = me.user.email;
 UI.$("#verified").innerHTML = me.user.emailVerified ? '<span class="pill ok">완료</span>' : '<span class="pill warn">대기</span>';
 /* [P1R6] 인증 메일 «다시 보내기» — 가입 때 메일이 못 갔거나(mail=0) 아직 인증 전이면 배너 한 줄. 인증은 문이 아니라 배너라 가입·사용은 막지 않는다 */
@@ -1183,11 +1239,11 @@ UI.$("#ask").onclick = () => { files = []; UI.sheet(`<form id="f"><div class="fi
     UI.form(sh.querySelector("#f"), async (d, f) => { const r = await UI.api("/api/support-ticket", { body: { subject: d.subject, text: d.text, attachments: files.map((x) => x.key) } }); if (!r.ok) return UI.fieldError(f, r.step === "subject" ? "subject" : "text", r.error || "보내지 못했어요"); close(); UI.done("보냈어요 · 답변은 알림으로", load); });
   } }); };
 await load();
-=== director.html | create | 디렉터 ===
+=== director.html | create | 디렉터 | two ===
 <div class="confirm"><div class="q">이 소재로</div><div class="big" id="big"><span class="sk" style="display:inline-block;width:70%"></span></div></div>
 <div class="group" id="targets"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 <div class="group" id="kv"></div>
-<div class="group" id="why"></div>
+<aside class="aside" id="why"></aside>
 <div class="cta" id="cta" hidden><button class="btn secondary w40" type="button" id="edit">손보기</button><button class="btn primary" type="button" id="make">만들기</button></div>
 --- script ---
 const me = await UI.boot("create"); if (!me) return;
@@ -1229,7 +1285,7 @@ function render() {
     : `<div class="empty" style="padding:24px 16px"><p>모두 뺐어요. 손보기에서 하나는 켜 주세요.</p></div>`;
   const tot = total();
   UI.$("#kv").innerHTML = `<div class="kv"><span class="k">쓰는 코인</span><span class="v">${tot}코인</span></div><div class="kv"><span class="k">남는 코인</span><span class="v" ${brief.coinsLeft - tot < 0 ? 'style="color:var(--danger)"' : ""}>${brief.coinsLeft - tot}코인</span></div><div class="kv"><span class="k">검수</span><span class="v">${brief.mode === "auto" ? "검수 없이 예약해요" : "다 되면 바로 보여드려요"}</span></div>`;
-  UI.$("#why").innerHTML = `<div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div>`;
+  UI.$("#why").innerHTML = `<div class="group"><div class="gt">왜 이렇게 정했나요</div><div class="reasons">${(brief.reasons || []).map((s) => `<p>${UI.esc(s)}</p>`).join("")}</div></div>`;
   UI.$("#cta").hidden = false; UI.$("#make").disabled = !live.length;
 }
 /* ── 손보기 시트(DESIGN §5.5 항목 전부 + [P1R5] 영상 섹션: 포맷 3 · 길이 15/30/60 · 목소리 · 계정 변주(읽기 전용) · 코인 재계산) ── */

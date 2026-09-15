@@ -1,6 +1,7 @@
 // scripts/build-pages.mjs — public/app/_tpl.txt · public/ops/_tpl.txt(간이 템플릿) → *.html 생성. 셸(레일·탭·appbar)을 한 곳에서 관리.
 //   사용: node scripts/build-pages.mjs   (템플릿을 고치면 다시 실행 · 생성물도 커밋 — Netlify 빌드 커맨드 없음)
-//   블록 형식: === 파일명 | 탭키 | 제목 [| white] ===  본문HTML  --- script ---  JS(async 함수 안에서 실행)
+//   블록 형식: === 파일명 | 탭키 | 제목 [| white two] ===  본문HTML  --- script ---  JS(async 함수 안에서 실행)
+//   4번째 칸: white = 흰 페이지(.page.white) · two = 데스크톱 우측 300 패널(.page.two · ≥1100px · DESIGN §13.3b) · 둘 다면 "white two"
 //   [v4] 고객 화면 앱바에는 제목 텍스트를 넣지 않는다(시안 v3·v4 — 제목은 문장형 헤드라인이 맡는다 · <title> 은 유지) · 4번째 칸 white = 흰 페이지(.page.white)
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -27,12 +28,12 @@ for (const t of TARGETS) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title} · ${t.suffix}</title>
 ${t.robots ? `<meta name="robots" content="noindex">\n` : ""}${t.manifest ? `<link rel="manifest" href="/manifest.webmanifest">\n` : ""}${FONT}
-<link rel="stylesheet" href="/css/ac.css?v=10">
+<link rel="stylesheet" href="/css/ac.css?v=11">
 </head>
 <body${t.bodyClass ? ` class="${t.bodyClass}"` : ""}>
 <div class="shell">
   <nav class="rail" aria-label="메뉴"></nav>
-  <main class="page${flag === "white" ? " white" : ""}" id="page">
+  <main class="page${/white/.test(flag || "") ? " white" : ""}${/two/.test(flag || "") ? " two" : ""}" id="page">
     <div class="appbar">${back ? BACK((t.fallbacks || {})[file] || t.fallback) : `<span class="ph"></span>`}${t.titleInBar ? `<span class="ttl">${title}</span>` : ""}<span class="sp"></span></div>
 ${html.trim()}
   </main>

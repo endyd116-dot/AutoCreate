@@ -104,9 +104,11 @@
     instagram: "instagram.com/p/… 또는 /reel/… 로 붙여 주세요",
     naver_clip: "blog.naver.com/… 또는 clip.naver.com/… 로 붙여 주세요",
     naver_blog: "blog.naver.com/아이디/글번호 로 붙여 주세요",
-    tistory: "내 블로그 주소(…tistory.com/글번호)로 붙여 주세요",
+    tistory: "…tistory.com/글번호 또는 직접 쓰시는 주소로 붙여 주세요",
     tiktok: "tiktok.com/@아이디/video/… 로 붙여 주세요",
     threads: "threads.net/@아이디/post/… 로 붙여 주세요",
+    blogger: "…blogspot.com/… 또는 직접 쓰시는 주소로 붙여 주세요",
+    wordpress: "…wordpress.com/… 또는 직접 쓰시는 주소로 붙여 주세요",
   };
   UI.markPublishedSheet = function (piece, onDone) {
     const ch = piece.channel, label = UI.chLabel(ch);
@@ -131,6 +133,50 @@
         if (onDone) onDone(r);
       }) });
   };
+
+  /* [R7 §4.4] 알림 — 서비스워커는 «알림»만 맡는다(오프라인 캐시 안 한다 · public/sw.js).
+     🔴 기기 알림은 «권한»과 «구독» 두 단계다: 권한만 받고 서버에 구독을 못 보내면 알림은 **안 온다** — 화면이 «켰어요»라고 말하면 거짓말이 된다.
+     그래서 서버 키(/api/push-key)가 없으면 그 상태를 그대로 말한다(준비 중). */
+  UI.swReady = function () {
+    if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+    return navigator.serviceWorker.register("/sw.js").catch(() => null);
+  };
+  UI.pushState = function () {
+    const iosStandalone = window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return { can: false, ios, iosStandalone, perm: "unsupported" };
+    return { can: true, ios, iosStandalone, perm: Notification.permission };
+  };
+  const b64 = (s) => { const pad = "=".repeat((4 - (s.length % 4)) % 4); const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
+  /** 켜기: 권한 → 서버 공개키 → 구독 → 서버 저장. 어느 칸에서 막혀도 «어디서 막혔는지»를 돌려준다(조용한 실패 금지). */
+  UI.pushEnable = async function () {
+    const st = UI.pushState();
+    if (!st.can) return { ok: false, step: "unsupported" };
+    let perm = st.perm;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") return { ok: false, step: perm === "denied" ? "denied" : "dismissed" };
+    const reg = await UI.swReady(); if (!reg) return { ok: false, step: "sw" };
+    const ready = await navigator.serviceWorker.ready;
+    const key = await UI.api("/api/push-key", { noRedirect: true, noGate: true });
+    if (!key.ok || !key.publicKey) return { ok: false, step: "no_server", perm };
+    try {
+      const sub = await ready.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key.publicKey) });
+      const r = await UI.api("/api/push-subscribe", { body: sub.toJSON(), noGate: true });
+      if (!r.ok) return { ok: false, step: "save", error: r.error };
+      return { ok: true };
+    } catch (e) { return { ok: false, step: "subscribe", error: String((e && e.message) || e) }; }
+  };
+  UI.pushDisable = async function () {
+    try { const ready = await navigator.serviceWorker.ready; const sub = await ready.pushManager.getSubscription();
+      if (sub) { await UI.api("/api/push-unsubscribe", { body: { endpoint: sub.endpoint }, noGate: true }).catch(() => null); await sub.unsubscribe(); } } catch { /* 이미 없으면 그만 */ }
+    return { ok: true };
+  };
+  UI.pushSubscribed = async function () {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+    try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
+  };
+  UI.APP_VERSION = "2026.09.15";   // 배포 묶음마다 메인이 올린다(화면에 보이는 유일한 판 번호)
+
 
   /* ── 포맷 ── */
   UI.mb = (b) => (b > 0 ? `${(b / 1048576).toFixed(1)}MB` : "");
@@ -219,6 +265,7 @@
     const me = await UI.api("/api/auth-me");
     if (!me.ok) return null;
     UI.me = me; UI.shell(active, me);
+    UI.swReady();   // [R7 §4.4] 알림용 서비스워커는 앱에 들어오면 등록해 둔다(권한을 나중에 켜도 바로 받을 수 있게)
     if (me.impersonation) UI.impBanner(me.impersonation);
     // 활동 시 슬라이딩 연장(탭 복귀·5분 주기)
     document.addEventListener("visibilitychange", () => { if (!document.hidden) fetch("/api/auth-refresh", { method: "POST", credentials: "same-origin" }); });
@@ -315,7 +362,8 @@
     money: ["money", '<path d="M12 3v18M17 7H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6"/>'],
   };
   /* [P1R4] 서버 알림 kind(lib/cron notifyOnce · B 결제·체험) → 아이콘 하나 · 링크 없을 때의 기본 링크 */
-  UI.KIND_ALIAS = { slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
+  /* [R7 §1.4 · B-1 a1c9801] 홈 «해야 할 일» 7줄 — 새 kind 는 이미 있는 아이콘으로 잇는다(아이콘을 새로 만들지 않는다) */
+  UI.KIND_ALIAS = { awaiting_manual: "publish", pending_login: "account", slot_gate: "setup", forcedByPlan: "review", slot_no_topic: "setup", topics_assigned: "setup", coin_cap: "coin", coin_short: "coin", produce_no_account: "account", publish_blocked: "publish", revenue_error: "money", review_blocked: "review", review_confirm: "review", review_missed: "review", runner_offline: "runner",
     trial_d3: "clock", trial_d1: "clock", trial_d0: "clock", trial_ended: "clock", trial_reused: "clock", billing_failed: "card", billing_suspended: "card", subscription_suspended_no_key: "card", subscription_cancelled: "card", card_required: "card", ai_cost_cap: "gauge", coin_refunded: "money", export_ready: "coin", referral: "coin" };
   UI.KIND_LINK = { trial_d3: "/app/plan.html", trial_d1: "/app/plan.html", trial_d0: "/app/plan.html", trial_ended: "/app/plan.html", trial_reused: "/app/plan.html", billing_failed: "/app/plan.html", billing_suspended: "/app/plan.html", subscription_suspended_no_key: "/app/plan.html", subscription_cancelled: "/app/plan.html", card_required: "/app/plan.html",
     coin_refunded: "/app/coins.html", export_ready: "/app/settings.html", referral: "/app/account.html", coin_cap: "/app/coins.html", coin_short: "/app/coins.html", ai_cost_cap: "/app/home.html", slot_no_topic: "/app/create.html", runner_offline: "/app/runner.html", revenue_error: "/app/ad-media.html" };

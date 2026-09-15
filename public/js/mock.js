@@ -486,6 +486,8 @@
     "faqs": () => ({ ok: true, faqs: [{ id: 1, q: "코인은 언제까지 쓸 수 있나요?", a: "충전한 코인은 1년, 플랜에 포함된 코인은 그달 말까지예요." }, { id: 2, q: "네이버·티스토리는 왜 내 PC 프로그램이 필요한가요?", a: "두 곳은 바깥에서 글을 넣는 길이 없어서 PC 프로그램이 대신 올려요." }, { id: 3, q: "환불은 어떻게 되나요?", a: "미사용 코인은 충전 후 7일 안에 환불돼요. 구독은 기간 말에 해지돼요." }] }),
     /* [P1R6 §1.1] 첨부 = presign PUT — 화면은 이 주소로 파일 바이트를 그대로 올린다(아래 fetch 가로채기가 R2 를 흉내) */
     /* [P1R6 §1.3] 공개 회사 정보 — 약관·개인정보·유료약관 하단이 읽는다(운영센터 «회사 정보» 한 출처) */
+    /* [R7 §4.4] 웹푸시 — 서버 몫(공개키·구독 저장)이 아직 없다. 모의도 «준비 중»으로 정직하게 답한다(있는 척하면 화면이 «켰어요»라고 거짓말한다) */
+    "push-key": () => ({ ok: false, status: 503, step: "not_configured", error: "기기 알림은 아직 준비 중이에요." }),
     "company": () => ({ ok: true, company: companyOff ? null : { name: "주식회사 오토크리에이트", ceo: "홍두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 1길 10, 5층", email: "help@autocreate.kr", phone: "02-1234-5678" } }),
     "support-upload-url": (b) => { if (uploadKnob === "off") return { ok: false, step: "not_configured", error: "사진 첨부는 아직 준비 중이에요. 글로 적어 주시면 돼요." };
       const ext = String(b.ext || "").toLowerCase().replace(/[^a-z]/g, "");
