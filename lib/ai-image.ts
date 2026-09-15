@@ -6,6 +6,7 @@
  *   graceful: 실패 { ok:false, reason } — 호출부가 «이미지 없음»으로 진행할지 정한다(생성 함수는 실패 시 piece failed).
  */
 import { CHAIN_IMAGE } from "./ai-models";
+import { aiKeysConfigured, leaseAiKey, reportAiKeyOutcome, isRateLimitReason, redactKeys } from "./ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳
 import { calcCost } from "./ai-cost";
 import { recordAiUsage, resolveChain } from "./ai";
 import { r2Configured, r2Put, safeKey } from "./r2";
@@ -51,7 +52,8 @@ async function callImageModel(model: string, prompt: string, aspect: string | nu
     });
     if (!resp.ok) {
       const t = await resp.text().catch(() => "");
-      return { ok: false, reason: `gemini_error_${resp.status}: ${t.slice(0, 160)}` };
+      /* 🔴 오류 본문에 우리 주소(`?key=…`)가 되비칠 수 있다 — 로그로 퍼지기 전에 걷어 낸다. */
+      return { ok: false, reason: redactKeys(`gemini_error_${resp.status}: ${t.slice(0, 160)}`) };
     }
     const data = (await resp.json()) as {
       candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string }; inline_data?: { data?: string; mime_type?: string } }[] } }[];
@@ -79,15 +81,18 @@ export async function generateImage(a: GenerateImageArgs): Promise<GenerateImage
     console.info("[ai-stub] image — 고정 응답(실호출 0 · 원가 0 · R2 쓰기 0)");
     return { ok: true, url: st.url, key: st.key, model: AI_STUB_MODEL, mime: st.mime, costUsd: 0 };
   }
-  const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
-  if (!apiKey) return { ok: false, reason: "no_api_key" };
+  /* [R8 · §3.3] 🔴 키는 `lib/ai-key.ts` 한 곳에서 고른다 — 글 축(`lib/ai.ts`)과 **같은 풀**을 봐야
+     한쪽이 맞은 429 를 다른 쪽이 안다(따로 읽으면 쉬게 해도 다른 길로 계속 때린다). */
+  if (!aiKeysConfigured()) return { ok: false, reason: "no_api_key" };
   if (!r2Configured()) return { ok: false, reason: "r2_not_configured" };
   const prompt = `${IMAGE_SYSTEM_RULES}\n\nScene: ${String(a.prompt || "").trim().slice(0, 1200)}`;
   const aspect = a.aspect && GEMINI_ASPECTS.has(a.aspect) ? a.aspect : "4:3";
   const chain = await resolveChain("image", CHAIN_IMAGE);
   let lastReason = "no_model";
   for (const model of chain) {
-    const r = await callImageModel(model, prompt, aspect, apiKey, a.timeoutMs ?? 90_000);
+    const lease = leaseAiKey();
+    const r = await callImageModel(model, prompt, aspect, lease?.key ?? "", a.timeoutMs ?? 90_000);
+    reportAiKeyOutcome(lease, r.ok ? "ok" : isRateLimitReason(r.reason) ? "rate_limited" : "error");
     if (!r.ok) { lastReason = r.reason; console.warn(`[ai-image] ${model} 실패: ${r.reason}`); if (/401|403|no_api_key/.test(r.reason)) break; continue; }
     const costUsd = calcCost(model, r.inTok, r.outTok);
     /* 🔴 AC-36 — 돈 기록은 **await**(이미지는 원가의 85%다 · 메인 실측 2026-09-15: 글 3편 $0.98 중 사진 18장이 $0.83).

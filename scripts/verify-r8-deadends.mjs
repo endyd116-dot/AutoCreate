@@ -87,6 +87,9 @@ const TARGETS = [
   ["셀렉터 표 — 러너가 믿을지 판정", "makeRecipe", "runner/lib/recipe.mjs", "검증 없이 쓰거나 멀쩡한 표를 다 버린다(둘 다 조용하다)"],
   ["🔴 셀렉터 표 — 채널이 실제로 그 값을 쓰나", "BUNDLED_SELECTORS", "runner/channels/tistory.mjs", "표를 내려 줘도 채널이 **옛 상수**를 그대로 써서 배포가 아무것도 안 바꾼다"],
   ["로그인 보관 상태 — 잰다", "probeFleet", "runner/lib/profile-seal.mjs", "«리눅스가 몇 대인가»를 영영 모른 채 봉인을 만들지 말지 정하게 된다"],
+  /* ── [P1R8 §3.3 · B-1] AI 키 로테이션 — **양끝을 다 센다**(고르는 쪽·알려 주는 쪽) ── */
+  ["AI 키 고르기(§3.3)", "leaseAiKey", "lib/ai-key.ts", "호출부가 각자 env 를 읽어, 한 키가 맞은 429 를 나머지가 몰라 계속 때린다"],
+  ["🔴 AI 키 결과 알리기(§3.3)", "reportAiKeyOutcome", "lib/ai-key.ts", "이걸 안 부르면 쉬는 키가 **영영 안 생겨** 로테이션이 장식이 된다(«만들어 놓고 아무도 안 부른다»)"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {
