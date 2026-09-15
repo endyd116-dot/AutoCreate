@@ -226,7 +226,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     /* [R8-A §2] 🔴 골격을 **글마다 다르게** 낸다 — 계약이 내는 골격이 3~5가지뿐이라 4편째부터 반드시 겹쳤다(스모크 실측).
        seed 는 pieceId — 같은 글은 다시 만들어도 같은 골격이다(재생성 멱등). 3단(필수/선택/억제)은 `applyTiers` 가 적용한다. */
     const group = topicGroupOf({ format, intent: topic.factors?.intent ?? null, title: topic.title });
-    const structure = structureFor(c, format, imageCount, affiliate, pieceId);
+    const structure = structureFor(c, format, imageCount, affiliate, pieceId, group);
     /* 이 글의 수익 목적 — brief 에 있으면 그걸, 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스). 제휴가 붙은 글은 affiliate 가 이긴다. */
     const [bg] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE id = ${n(p.brief_id)}`) : [undefined];
     const goal = affiliate ? "affiliate" : (String(bg?.goal ?? "") || (channel === "naver_blog" ? "adpost" : "adsense"));

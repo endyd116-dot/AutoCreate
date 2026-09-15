@@ -144,9 +144,11 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
   tistory: {
     channel: "tistory", emotionKey: "info", label: "티스토리 · 정보·정리",
     reader: "검색으로 들어온 사람 — 답을 빨리, 정확히 얻고 싶은 독자",
-    register: "격식 존댓말 «~합니다 / ~입니다» · 정리해 주는 전문가 톤",
+    register: "격식 존댓말 «~합니다 / ~입니다» 를 바탕으로, 권유 «~해 보세요»·질문 «~일까요?» 를 섞는 정리 톤",
     rules: [
-      "정보를 정리해 주는 «~합니다/~입니다» 로 쓴다. 감탄·이모지 없이 담백하게.",
+      /* [R8-A 실물] 티스토리 4편 종결어미: ~습니다 60~70% + **~세요·~나요? 15~25%**. 순수 «~합니다» 는 실물이 아니다. */
+      "바탕은 «~합니다/~입니다» 지만 **열 문장 중 두세 문장은 «~해 보세요»(권유)나 «~일까요?»(질문)** 로 쓴다. 전부 «~합니다» 로 끝나면 기계가 쓴 티가 난다.",
+      "🔴 문단 하나는 **2~3문장**이다. 네 문장이 넘으면 문단을 나눈다(모바일에서 벽처럼 보인다).",
       "서론-본론-결론. 첫 문단에서 이 글이 답하는 질문을 한 줄로 짚고 시작한다.",
       "표·체크리스트·요약 박스로 한눈에 보이게 한다. 굵게 강조는 문단당 최대 1곳.",
       "근거 없는 수치·최상급 금지. 조건·예외를 «주의» 로 분리해 적는다.",
@@ -193,7 +195,9 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     reader: "구글 검색·AI 답변엔진으로 들어온 사람",
     register: "격식 존댓말 «~합니다» · 간결한 SEO 정보",
     rules: [
-      "티스토리와 같은 «~합니다» 정보 톤. 첫 문단 150자 안에 핵심 답을 준다(메타 설명으로 그대로 쓰인다).",
+      "티스토리와 같은 정보 톤. 바탕은 «~합니다» 지만 **열 문장 중 두세 문장은 «~해 보세요»·«~일까요?»** 로 섞는다(전부 «~합니다» 면 기계 티가 난다).",
+      "🔴 문단 하나는 **2~3문장**. 네 문장이 넘으면 나눈다.",
+      "첫 문단 150자 안에 핵심 답을 준다(메타 설명으로 그대로 쓰인다).",
       "FAQ 3문답(질문은 실제 검색 문장)으로 마무리한다.",
       "이미지 alt 는 장면 설명으로 서로 다르게.",
       "근거 없는 수치·최상급 금지.",
@@ -266,7 +270,9 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     reader: "구글 검색·AI 답변엔진으로 들어온 사람",
     register: "격식 존댓말 «~합니다» · 간결한 SEO 정보 · 영문 slug·메타",
     rules: [
-      "티스토리와 같은 «~합니다» 정보 톤. 첫 문단 150자 안에 핵심 답(메타 설명).",
+      "티스토리와 같은 정보 톤. 바탕은 «~합니다» 지만 **열 문장 중 두세 문장은 «~해 보세요»·«~일까요?»** 로 섞는다.",
+      "🔴 문단 하나는 **2~3문장**. 네 문장이 넘으면 나눈다.",
+      "첫 문단 150자 안에 핵심 답(메타 설명).",
       "FAQ 3문답으로 마무리. 이미지 alt 는 장면 설명.",
       "근거 없는 수치·최상급 금지.",
     ],
@@ -518,10 +524,44 @@ function endWithAction(seq: BlockType[], c: WritingContract): BlockType[] {
   return out;
 }
 
+/**
+ * [R8-A §2 · AC-63] **분량을 구조로 맞춘다.**
+ *   🔴 실호출 1편 실측: 티스토리 정보성 목표 3,000~12,000자인데 **1,849자**가 나왔다.
+ *      프롬프트에 «3,000~12,000자» 라고 **적어 놨는데도** 그랬다 — 프롬프트 ②칸이 «블록 시퀀스를 순서·개수 그대로» 라고 강제하니
+ *      **블록 수가 곧 분량**이다(규칙과 구조가 싸우면 구조가 이긴다 · AC-63).
+ *   ⇒ 목표 하한에 닿을 때까지 **`h2`+`para` 쌍을 늘린다**(가끔 `list`). 늘리는 자리는 seed 로 흩어 골격이 또 굳지 않게 한다.
+ *   🔴 **그런데 이것만으로는 분량이 안 늘어난다 — 2번째 실호출로 확인했다(2026-09-15).**
+ *      블록을 12개 → 17개로 늘렸더니 글은 1,849자 → **1,503자**가 됐다(오히려 줄었다).
+ *      블록당 글자 수가 460자 → **215자**로 떨어진 것이다 — **모델이 총 분량 감각을 스스로 갖고, 블록이 늘면 나눠 담는다.**
+ *      ⇒ 분량은 «문장으로도 구조로도» 안 잡히는 **세 번째 경우**다. 다음 라운드 후보: 블록마다 «최소 몇 자» 를 적어 주거나,
+ *        `maxOutputTokens`·재작성 지시로 잡는다. 지금 어림값은 **실측 215자** 를 쓴다(늘리는 양이 과하지 않게).
+ */
+const CHARS: Partial<Record<BlockType, number>> = { para: 420, hook: 260, h2: 30, h3: 25, list: 140, checklist: 130, table: 150, quote: 40, tip: 90, faq: 240, summary: 120, toc: 0, image: 0, divider: 0, adsense: 0, hashtags: 0, disclosure: 0, affiliate: 0 };
+export function estimateChars(seq: BlockType[]): number { return seq.reduce((a, b) => a + (CHARS[b] ?? 0), 0); }
+
+export function expandForLength(seq: BlockType[], c: WritingContract, group: TopicGroup | null | undefined, seed: number): BlockType[] {
+  if (!c.tiers) return seq;
+  const target = lengthFor(c, group).min;
+  if (estimateChars(seq) >= target) return seq;
+  const rnd = seeded(seed * 31 + 7);
+  const out = [...seq];
+  /* 꼬리(해시태그·행동 유도·FAQ)는 건드리지 않는다 — 그 앞까지가 본체다. */
+  const tailTypes: BlockType[] = ["hashtags", "tip", "faq"];
+  let body = out.length; while (body > 0 && tailTypes.includes(out[body - 1])) body--;
+  let guard = 0;
+  while (estimateChars(out) < target && guard++ < 40) {
+    const at = 1 + Math.floor(rnd() * Math.max(1, body - 1));
+    const add: BlockType[] = rnd() < 0.25 && !c.tiers.suppress.includes("list") ? ["h2", "para", "list"] : ["h2", "para"];
+    out.splice(at, 0, ...add);
+    body += add.length;
+  }
+  return out;
+}
+
 /** `seed` 를 주면 3단(필수/선택/억제)을 적용해 골격을 글마다 다르게 낸다. 안 주면 종전 그대로(무회귀). */
-export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean, seed?: number): BlockType[] {
+export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean, seed?: number, group?: TopicGroup | null): BlockType[] {
   const raw = [...(c.structure[format] ?? c.structure[c.formats[0]] ?? NAVER_STORY)];
-  const base = seed === undefined ? raw : endWithAction(applyTiers(raw, c, seed), c);
+  const base = seed === undefined ? raw : endWithAction(expandForLength(applyTiers(raw, c, seed), c, group, seed), c);
   let imgs = base.filter((b) => b === "image").length;
   const out: BlockType[] = [];
   for (const b of base) { if (b === "image" && imgs > imageCount) { imgs--; continue; } out.push(b); }
