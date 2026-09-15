@@ -61,7 +61,7 @@
 
 ### 라이브 데이터·env(오늘)
 - `channel_registry` 4 active(naver_blog·tistory·blogger·wordpress)/6 planned(유튜브 OAuth 앱 없어 못 켬).
-- env: `FX_USD_KRW=1400`(원가 기준값) · `BGM_LICENSE_VERIFIED=1` · **`KICC_MODE=live`·`KICC_MALL_ID`·`KICC_MALL_ID_KEYIN`·`KICC_API_DOMAIN`(ON 이식)·`KICC_SECRET_KEY`(사장님 제공·is_secret)** · deps `@resvg/resvg-js` + `assets/fonts/Pretendard-*.otf`.
+- env: `FX_USD_KRW=1400`(원가 기준값) · `BGM_LICENSE_VERIFIED=1` · **`VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`(is_secret)·`VAPID_SUBJECT`**(2026-09-15 메인이 생성·등록 · 웹푸시) · **`KICC_MODE=live`·`KICC_MALL_ID`·`KICC_MALL_ID_KEYIN`·`KICC_API_DOMAIN`(ON 이식)·`KICC_SECRET_KEY`(사장님 제공·is_secret)** · deps `@resvg/resvg-js` + `assets/fonts/Pretendard-*.otf`.
 - Neon PITR **1일→7일**(메인 API).
 - **테스트 계정 198 `test@autocreate.kr`/`autocreate12`** = 사장님 결제 테스트 계정 · 빌키 토스뱅크 ****0542 **보존** · **정리 완료 → trial · 자동청구 해제됨**.
 - 보존 4집: 3·13·109·116(pro · MRR 49,000 은 이 집). 🔴 **t189(B2실증 · 티스토리 2FA 세션 보유)은 2026-09-15 정리에서 삭제됨** → 다음 티스토리 실측 때 **사장님 재로그인 1회 필요**(109 세션이 살아 있으면 `--reuse-tid=109`).
