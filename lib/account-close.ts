@@ -57,6 +57,9 @@ export async function closeAccount(tid: number, opts: { reason?: string; actorId
   if (!u) return await closeAccount(tid, opts);   // 동시에 두 번 눌렀다 — 위의 already 경로로 다시 읽는다
   const closedAt = utcDate(u.closed_at)?.toISOString(), purgeAt = utcDate(u.purge_at)?.toISOString();
   await writeAudit({ tenantId: tid, action: "account_close", actorType: "user", actorId: opts.actorId ?? null, ip: opts.ip ?? null, riskLevel: "high", detail: { prevStatus: prev, purgeAt, graceDays: CLOSE_GRACE_DAYS, reason } });
+  /* [2026-09-16 · A 가 잡았다] `/app/index.html` 은 **없는 파일**이었다 — 탈퇴를 되돌린 고객이
+     이 알림을 누르면 404 였다. 하필 «돌아와 주셔서 다행»인 그 순간이다.
+     SPA 가 아니라(`netlify.toml:34` «/app/* 는 파일 그대로») 리다이렉트로도 안 걸린다. */
   await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"account_closing"}, ${"탈퇴가 접수됐어요"},
     ${`${CLOSE_GRACE_DAYS}일 뒤에 데이터가 지워져요. 그 전에는 «되돌리기»로 그대로 돌아올 수 있어요. 지금은 보기만 할 수 있어요.`}, ${"/app/settings.html"})`);
   return { ok: true, closedAt, purgeAt, prevStatus: prev };
@@ -73,7 +76,7 @@ export async function restoreAccount(tid: number, opts: { actorId?: number | nul
   await q(sql`UPDATE tenants SET status = ${back}, readonly_at = ${back === "readonly" ? sql`readonly_at` : sql`NULL`}, closed_at = NULL, close_reason = NULL,
     close_prev_status = NULL, purge_at = NULL, updated_at = NOW() WHERE id = ${tid}`);
   await writeAudit({ tenantId: tid, action: "account_restore", actorType: "user", actorId: opts.actorId ?? null, ip: opts.ip ?? null, riskLevel: "high", detail: { restoredTo: back } });
-  await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"account_restored"}, ${"탈퇴를 되돌렸어요"}, ${"데이터는 그대로예요. 하던 대로 쓰시면 돼요."}, ${"/app/index.html"})`);
+  await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"account_restored"}, ${"탈퇴를 되돌렸어요"}, ${"데이터는 그대로예요. 하던 대로 쓰시면 돼요."}, ${"/app/home.html"})`);
   return { ok: true, status: back };
 }
 
