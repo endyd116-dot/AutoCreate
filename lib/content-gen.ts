@@ -29,6 +29,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
+import { findNumericClaims, summarizeClaims } from "./fact-claims";   // [R8 §2.4] 수치 주장 표시(순수)
 import { lengthFor, topicGroupOf, resolveGoalDetail, estimateChars, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳) + [R8 §2.1] 분량 추정표
 
 const n = (v: unknown) => Number(v || 0);
@@ -293,7 +294,9 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       const title = String(r.data?.title ?? topic.title).trim().slice(0, 80) || topic.title;
       const tags = (Array.isArray(r.data?.tags) ? r.data.tags : []).map((t) => String(t ?? "").replace(/^#/, "").trim()).filter(Boolean).slice(0, 10);
       const choice = Number.isInteger(Number(r.data?.affiliateChoice)) ? Number(r.data?.affiliateChoice) : 0;
-      return { blocks, title, tags, choice, model: r.model };
+      /* 🔴 [R8 §2.4] `pr.user` 를 **들고 나온다** — 수치 판정이 «우리가 준 숫자»를 재료 목록에서 다시 조립하면
+         프롬프트와 언젠가 갈라진다. 실제로 보낸 그 문자열을 그대로 봐야 갈릴 수가 없다(AC-70 «같은 입력»). */
+      return { blocks, title, tags, choice, model: r.model, promptUser: pr.user };
     };
 
     let draft = await write();
@@ -427,11 +430,20 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     /* [R8-A §2 · B-1] 골격 지문을 같이 남긴다 — 🔴 **여기서 안 적으면 `structure_repeat` 축은 견줄 재료가 0 이라 영영 «못 쟀어요» 다**(AC-29).
        영상의 `meta.frameHash` 와 같은 자리·같은 뜻(그림 지문 ↔ 골격 지문). 추가형이라 옛 글엔 없고, 없는 글은 견주기에서 빠진다. */
     const sPrint = structurePrint(draft.blocks);
+    /* [R8 §2.4] 수치 주장 — **재작성까지 끝난 최종 블록**으로 잰다(초안으로 재면 화면과 본문이 갈린다). */
+    const claims = findNumericClaims(draft.blocks, draft.promptUser);
+    const claimSummary = summarizeClaims(claims);
+    if (claimSummary.risky) console.info(`[content-gen] piece ${pieceId} 확인 필요한 금액·비율 ${claimSummary.risky}개(우리가 준 자료에 없는 숫자)`);
     const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: (affiliate || meta.sponsored === true || meta.gift === true) ? disclosureTextFor({ affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true, provider: aff?.provider ?? null }) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
       structurePrint: sPrint, structureHash: structureHash(sPrint),
       /* [R8 §10 · §5F] 🔴 이 글의 사진이 **어디서 왔나**(장수만). 되먹임 원장이 이 칸을 읽는다(옛 B-1 과 칸 이름 합의 2026-09-15).
          🔴 **실제로 붙은 것만 센다** — «AI 1장일 것이다»로 채우면 그게 대용물이고 원장 전체가 거짓이 된다(AC-57). */
       photoMix: mix,
+      /* [R8 §2.4] 🔴 **수치 주장 표시** — 프롬프트 ⑤칸이 «근거 없는 수치 금지»라고 말만 하고 **아무도 안 쟀다**.
+         여기서 잰다: 글 안의 숫자를 «우리가 준 것(given)»과 «모델이 만든 것(self)»으로 가른다.
+         🔴 **«맞나»를 재는 게 아니다** — 그건 우리가 알 수 없다. «누가 만든 숫자인가»까지다(`lib/fact-claims.ts` 헤더).
+         🔴 막지 않는다(§9) — 검수 화면이 보여 주고 사람이 확인한다. A 와 합의한 칸 이름: `numberClaims`. */
+      numberClaims: { summary: claimSummary, items: claims.slice(0, 40) },
       /* [R8 §2.1] 🔴 주제군을 **적어 둔다**. 검수·재검사가 다시 계산하면 재료가 달라 값이 갈린다 —
          여기서는 `intent` 를 알지만(소재에서 온다) 검수 시점엔 없어서 `intent:null` 로 계산되고 있었다.
          분량 폭이 주제군에 달렸으니, 갈리면 **잰 값은 같은데 기준이 다른** 상태가 된다. */
