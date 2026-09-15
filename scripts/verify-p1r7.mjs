@@ -1,5 +1,5 @@
 // scripts/verify-p1r7.mjs — P1R7 §5 검증 하니스(C). 지금은 **특별검사 ②③ + 회귀** 뼈대 — §1·§2 머지 뒤 실발행 되짚기를 잇는다.
-//   사용: node scripts/verify-p1r7.mjs   (BASE_URL 기본 http://localhost:8901 · SECTIONS=surface,gate,close,purge,regress,cleanup)
+//   사용: node scripts/verify-p1r7.mjs   (BASE_URL 기본 http://localhost:8901 · SECTIONS=surface,pin,gate,close,purge,alive,extra,regress,cleanup)
 //   🔴 규율: 증거 동반 · **빨강은 먼저 내 검사를 의심**(C-HANDOFF 머리) · 실행 중 소스 편집 금지(AC-34) · 테스트 테넌트만 ·
 //           보존 4집(3·13·109·116) 금지 · **정리까지가 검증**(teardown 은 finally · 보존 id 우선 거부).
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -7,7 +7,7 @@ if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36);
 const EMAIL = process.env.TEST_EMAIL || `c+r7-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
-const SECTIONS = new Set((process.env.SECTIONS || "surface,gate,close,purge,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "surface,pin,gate,close,purge,alive,extra,regress,cleanup").split(","));
 const results = []; const t0 = Date.now();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
@@ -36,8 +36,29 @@ async function newTenant(tag) {
   return { jar, tid, email, reg: r };
 }
 
+/**
+ * 🔴 [AC-54] **돌리기 전에 서버에게 묻는다** — «지금 답하는 게 어느 배포·어느 번들이냐».
+ *   2026-09-15 B-1 이 옛 서버와 이야기하다 라이브 Veo·TTS 로 $3.63 을 태웠다. «바꿨다» 는 «반영됐다» 가 아니다.
+ *   로컬을 겨눴는데 `dev:false` 거나 `deploy` 가 라이브면 **한 줄도 더 진행하지 않는다**.
+ */
+async function preflight() {
+  const local = /localhost|127\.0\.0\.1/.test(BASE);
+  const h = await call(null, "/api/health");
+  const j = h.json ?? {};
+  const keys = ["deploy", "commit", "dev", "loadedAt", "stub"].filter((k) => k in j);
+  rec("④ /api/health 5키(deploy·commit·dev·loadedAt·stub)", keys.length === 5, `${h.status} ${keys.join(",") || "없음"} · deploy ${j.deploy ?? "-"} · dev ${j.dev} · stub ${j.stub}`);
+  if (!local) return true;
+  const ok = j.dev === true && !/autocreate-endyd\.netlify\.app/.test(String(j.deploy ?? ""));
+  rec("🔴 ④ 선검사 — 로컬을 겨눴으면 답하는 서버도 로컬이어야 한다(옛 서버·라이브면 즉시 중단)", ok,
+    `BASE ${BASE} · 서버 dev=${j.dev} deploy=${j.deploy ?? "없음"} loadedAt=${j.loadedAt ?? "-"}`);
+  if (!ok) return false;
+  rec("④ 스텁 손잡이가 **서버 런타임에 실제로** 들어갔다(셸에서 켰다고 믿지 않는다)", j.stub === true || j.stub === "1", `stub=${JSON.stringify(j.stub)}`);
+  return true;
+}
+
 async function main() {
   const s = await db();
+  if (!(await preflight())) { rec("중단", false, "선검사 실패 — 옛 서버·라이브와 이야기하면 돈이 나간다(AC-53/54)"); return finish(); }
 
   /* ══ surface — ① AC-48 전수 diff(상시 하니스를 이 절이 그대로 부른다) ══ */
   if (SECTIONS.has("surface")) {
@@ -61,7 +82,7 @@ async function main() {
       /* 🔴 소급 금지의 핵심: **게이트가 생기기 전에 연결해 둔 계정**이 그대로 쓰여야 한다.
          Starter 가 못 쓰는 채널(reels)을 Pro 상태에서 먼저 연결해 두고 → Starter 로 내린 뒤 확인한다. */
       await s`UPDATE tenants SET plan_key = 'pro' WHERE id = ${tid}`;
-      const okAdd = await call(jar, "/api/accounts-connect", { body: { channel: "reels", handle: `c_r7_reels_${STAMP}` } });
+      const okAdd = await call(jar, "/api/accounts-add", { body: { channel: "reels", handle: `c_r7_reels_${STAMP}` } });
       const [pre] = await s`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key)
         VALUES (${tid}, 'reels', ${`c_r7_pre_${STAMP}`}, 'oauth', 'active', ${`t${tid}-reels`}) RETURNING id`;
       await s`UPDATE tenants SET plan_key = 'starter' WHERE id = ${tid}`;
@@ -69,7 +90,7 @@ async function main() {
       const kept = (list.json?.accounts || []).filter((a) => a.channel === "reels");
       rec("🔴 ② 소급 금지 — Starter 로 내려가도 **이미 연결한 계정은 목록에 그대로**(갑자기 못 쓰는 일 0)",
         kept.length >= 1 && kept.every((a) => a.status !== "blocked"), `reels 계정 ${kept.length}개 · 상태 ${[...new Set(kept.map((a) => a.status))].join(",")}`, `account ${pre?.id}`);
-      const addNow = await call(jar, "/api/accounts-connect", { body: { channel: "reels", handle: `c_r7_new_${STAMP}` } });
+      const addNow = await call(jar, "/api/accounts-add", { body: { channel: "reels", handle: `c_r7_new_${STAMP}` } });
       rec("② …그러나 **새로 추가**는 막힌다(402/403 plan_feature · 사람말 + «요금제 보기»)",
         [402, 403].includes(addNow.status) && /plan/.test(String(addNow.json?.step ?? "")) && /요금제/.test(String(addNow.json?.error ?? "")),
         `${addNow.status} ${addNow.json?.step} «${String(addNow.json?.error || "").slice(0, 44)}» (Pro 일 때 추가: ${okAdd.status})`);
@@ -92,11 +113,11 @@ async function main() {
       guard(tid);
       const cl = await call(jar, "/api/account-close", { body: { reason: "C R7 검증" } });
       const [t1] = await s`SELECT status, purge_at FROM tenants WHERE id = ${tid}`;
-      const days = t1?.purge_at ? Math.round((new Date(String(t1.purge_at).replace(" ", "T") + "Z").getTime() - Date.now()) / 86400_000) : 0;
+      const days = t1?.purge_at ? Math.round((new Date(t1.purge_at).getTime() - Date.now()) / 86400_000) : 0;
       rec("③ 탈퇴 → 즉시 readonly + purge_at = 30일 뒤", cl.json?.ok === true && String(t1?.status) === "readonly" && days >= 29 && days <= 31,
         `${cl.status} status ${t1?.status} · purge_at ${t1?.purge_at ?? "없음"}(${days}일)`);
-      const write = await call(jar, "/api/topics-refresh", { body: {} });
-      rec("③ 예약 중에는 새로 만들 수 없다(readonly)", [403, 429].includes(write.status) || write.json?.step === "writable", `${write.status} ${write.json?.step ?? "-"}`);
+      const write = await call(jar, "/api/slots-produce-now", { body: { slotId: 1 } });   // 🔴 slots-produce-now 는 requireWritable 이 **not_found 보다 먼저** 온다(slots-skip 은 반대라 404 가 먼저)
+      rec("③ 예약 중에는 새로 만들 수 없다(readonly · requireWritable 자리에서)", write.status === 403 && write.json?.step === "writable", `${write.status} ${write.json?.step ?? "-"}`);
       const rs = await call(jar, "/api/account-restore", { body: {} });
       const [t2] = await s`SELECT status, purge_at FROM tenants WHERE id = ${tid}`;
       rec("🔴 ③ 30일 안에는 **되돌릴 수 있다**(복구 → purge_at 없음 · 쓰기 가능)", rs.json?.ok === true && !t2?.purge_at && String(t2?.status) !== "readonly",
@@ -116,7 +137,7 @@ async function main() {
         VALUES (${tid}, 'subscription', ${"2026-09"}, 19000, 1900, 20900, 'paid', NOW())`.catch(() => {});
       await call(jar, "/api/account-close", { body: {} });
       await s`UPDATE tenants SET purge_at = NOW() - interval '1 day' WHERE id = ${tid}`;   // 기한 지난 것으로
-      const c = await cron("daily", tid); const st = stepOf(c, "tenant.purge");
+      const c = await cron("hourly", tid); const st = stepOf(c, "tenant.purge");   // hourly·global(04시 게이트는 manual 이면 통과)
       const [t3] = await s`SELECT id, status FROM tenants WHERE id = ${tid}`;
       const [left] = await s`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${tid}`;
       rec("🔴 ③ 기한 지난 집은 실제로 파기된다(글 행 0)", !!st && Number(left?.c) === 0, `step ${JSON.stringify(st || {}).slice(0, 80)} · pieces ${left?.c} · tenant ${t3?.status ?? "행 없음"}`, `piece ${pc?.id}`);
@@ -141,6 +162,81 @@ async function main() {
       } catch { /* */ }
       const [keep] = await s`SELECT COUNT(*) AS c FROM tenants WHERE id IN (3,13,109,116)`;
       rec("🔴 ③ 보존 4집은 파기 대상이 될 수 없다(purge_at 이 붙지 않는다 · 4집 생존)", Number(keep?.c) === 4, `보존 ${keep?.c}/4 · ${refused}`);
+    }
+  }
+
+  /* ══ pin — ④ AC-53 안전핀 음성 대조: netlify dev 인데 라이브를 가리키면 **던지는가** ══ */
+  if (SECTIONS.has("pin")) {
+    const { execFileSync } = await import("node:child_process");
+    let o = "";
+    try { o = String(execFileSync("npx", ["tsx", "scripts/verify-p1r7-pin-probe.mts"], { encoding: "utf8", shell: true, timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] })); }
+    catch (e) { o = String(e?.stdout || "") + String(e?.stderr || e?.message || ""); }
+    const lines = o.split(/\r?\n/).filter((l) => l.startsWith("RESULT "));
+    if (!lines.length) rec("④ 안전핀 프로브 실행", false, o.slice(-150).replace(/\s+/g, " "));
+    for (const l of lines) { try { const x = JSON.parse(l.slice(7)); rec(x.step, x.ok, x.note); } catch { /* */ } }
+  }
+
+  /* ══ alive — ⑤ AC-55 «틀린 성공»: 공개/비공개 정확일치 · 로그아웃 상태로 열어 보기 ══ */
+  if (SECTIONS.has("alive")) {
+    const ti = existsSync("runner/channels/tistory.mjs") ? readFileSync("runner/channels/tistory.mjs", "utf8") : "";
+    if (!ti) warn("⑤ 티스토리 «공개» 선택", "runner/channels/tistory.mjs 없음");
+    else {
+      /* 🔴 «공개» 를 부분일치로 찾으면 «비공개» 가 걸린다 — 그러면 비공개로 올려 놓고 «발행 성공» 이라고 말한다(틀린 성공). */
+      /* 🔴 has-text() 는 부분일치라 has-text('공개') 가 «비공개»를 집는다(B2 2026-09-15 실측).
+         그래서 재는 것은 «정확일치를 쓰는가» 가 아니라 **«공개» 단독 후보가 남아 있지 않은가** 다(«공개 발행» 은 정상). */
+      // 🔴 주석에 적힌 «`button:has-text('공개')` 가 «비공개»를 집는다» 설명을 코드로 세면 영영 빨갛다(네 번째 밟는 함정) — 코드줄만.
+      const tiCode = ti.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+      const bare = [...tiCode.matchAll(/has-text\(\s*['"]공개['"]\s*\)/g)].map((m) => m[0]);
+      rec("⑤ 티스토리 — «공개» **단독** 셀렉터 0(부분일치로 «비공개»를 누르는 길 0)", bare.length === 0, bare.length ? `🔴 ${bare.join(" | ")}` : "단독 후보 없음(«공개 발행»·«발행하기»만)");
+      rec("⑤ 발행 뒤 확인창·완료 신호를 **읽고** 성공을 말한다(주장 불신)", /confirm|dialog|완료|발행됨|toast/.test(ti), "");
+    }
+    const pa = existsSync("runner/channels/post-alive.mjs") ? readFileSync("runner/channels/post-alive.mjs", "utf8") : "";
+    if (!pa) warn("⑤ 로그아웃 상태로 열어 보기(post_alive)", "runner/channels/post-alive.mjs 없음");
+    else {
+      /* 🔴 로그인한 브라우저로 열면 **비공개 글도 보인다** — «살아 있다» 가 거짓이 된다. 새 컨텍스트(쿠키 0)로 열어야 진짜다. */
+      const anon = /newContext\(|incognito|storageState:\s*(undefined|null|\{\s*\})|clearCookies/.test(pa);
+      rec("🔴 ⑤ 살아 있나 확인은 **로그아웃 상태**로 연다(로그인 상태면 비공개도 보여 «틀린 성공»)", anon, anon ? "새 컨텍스트/쿠키 0" : "🔴 로그인 컨텍스트로 연다");
+      rec("⑤ 404·비공개·삭제를 가려 말한다(«안 보임» 한 덩어리 금지)", /(404|없어졌|비공개|삭제)/.test(pa), "");
+    }
+    const [kinds] = await s`SELECT COUNT(*) AS c FROM pg_type WHERE typname = 'x'`.catch(() => [{ c: 0 }]);   // 접속 확인용(무해)
+    void kinds;
+  }
+
+  /* ══ extra — ⑥ 계정 더 쓰기 멱등(기간 번호) · waiting_ip 는 차감 0 ══ */
+  if (SECTIONS.has("extra")) {
+    const { jar, tid } = await newTenant("extra");
+    if (!tid) warn("⑥ 계정 더 쓰기", "테스트 집 생성 실패");
+    else {
+      guard(tid);
+      await s`UPDATE tenants SET plan_key = 'starter' WHERE id = ${tid}`;
+      await s`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason) VALUES (${tid}, 'grant', 'included', 300, ${"r7x:" + STAMP}, 'R7 하니스')`;
+      const bal = async () => Number((await call(jar, "/api/coins-balance")).json?.balance ?? 0);
+      const offers = await call(jar, "/api/account-slots");
+      const kind = (offers.json?.offers || [])[0]?.kind;
+      rec("⑥ 상품 목록을 서버가 준다(offers[].kind·coins·days · 화면 상수 0)", !!kind, `offers ${(offers.json?.offers || []).map((o) => `${o.kind}:${o.coins}코인/${o.days}일`).join(" ") || "없음"}`);
+      const b0 = await bal();
+      const buy = await call(jar, "/api/account-slot-buy", { body: { kind, count: 1 } });
+      const b1 = await bal();
+      const [sl] = await s`SELECT id, status, periods_charged, coins_per_period FROM account_slots WHERE tenant_id = ${tid} ORDER BY id DESC LIMIT 1`;
+      /* 🔴 계약: **IP 가 붙기 전(waiting_ip)에는 한 코인도 받지 않는다** — «없는 걸 팔지 않는다». 내 첫 검사는 여기서 차감을 기대해 틀렸다. */
+      rec("🔴 ⑥ 구매 직후는 waiting_ip · **차감 0**(IP 가 준비되기 전엔 안 받는다)",
+        [200, 201].includes(buy.status) && String(sl?.status) === "waiting_ip" && b1 === b0 && Number(sl?.periods_charged) === 0,
+        `${buy.status} · slot ${sl?.id} ${sl?.status} · 코인 ${b0}→${b1} · periods_charged ${sl?.periods_charged}`, sl?.id ? `account_slot ${sl.id}` : undefined);
+      if (sl?.id) {
+        // IP 가 붙은 상태를 만든 뒤 갱신 크론을 **두 번** 돌린다 — 기간 번호가 같으면 두 번째는 공짜가 아니라 **안 받는다**.
+        const [acc] = await s`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, browser_profile_key) VALUES (${tid}, 'naver_blog', ${"c_r7x_" + STAMP}, 'session', 'active', ${`t${tid}-nb`}) RETURNING id`;
+        await s`UPDATE account_slots SET status = 'active', account_id = ${Number(acc.id)}, expires_at = NOW() - interval '1 hour', periods_charged = 0 WHERE id = ${Number(sl.id)}`;
+        const c1 = await cron("hourly", tid); const b2 = await bal();
+        const [s1] = await s`SELECT periods_charged, status FROM account_slots WHERE id = ${Number(sl.id)}`;
+        const c2 = await cron("hourly", tid); const b3 = await bal();
+        const [s2] = await s`SELECT periods_charged, status FROM account_slots WHERE id = ${Number(sl.id)}`;
+        rec("🔴 ⑥ 기간 번호 멱등 — 갱신 크론을 두 번 돌려도 **한 기간에 한 번만** 받는다(같은 날 쉼→재개·31일 달)",
+          Number(s1?.periods_charged) === 1 && Number(s2?.periods_charged) === 1 && b2 < b0 && b3 === b2,
+          `1회차 코인 ${b0}→${b2}(기간 ${s1?.periods_charged}) · 2회차 ${b2}→${b3}(기간 ${s2?.periods_charged}) · ${JSON.stringify(stepOf(c2, "account.slot_renew") || stepOf(c1, "account.slot_renew") || {}).slice(0, 60)}`);
+        const led = await s`SELECT ref, delta FROM coin_ledger WHERE tenant_id = ${tid} AND ref LIKE ${"slot:" + Number(sl.id) + ":%"} ORDER BY id`;
+        rec("⑥ 원장에 기간별 ref 1행씩(같은 기간 두 줄 0)", led.length === new Set(led.map((x) => x.ref)).size && led.length >= 1, led.map((x) => `${x.ref}:${x.delta}`).join(" ") || "행 0");
+      }
+      await s`UPDATE tenants SET plan_key = 'trial' WHERE id = ${tid}`;
     }
   }
 
