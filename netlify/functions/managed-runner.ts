@@ -18,7 +18,7 @@ import { requireUser, requireWritable } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { q } from "../../lib/accounts";
 import { utcDate } from "../../lib/db-util";
-import { tenantPlan, requireFeature, managedRunnerUnitKrw, MANAGED_RUNNER_PRICE_KRW } from "../../lib/plans";
+import { tenantPlan, requireFeature, managedRunnerUnitKrw, MANAGED_RUNNER_ACCOUNT_KRW } from "../../lib/plans";
 import { vatOf } from "../../lib/billing-math";
 import { sql } from "drizzle-orm";
 
@@ -44,14 +44,16 @@ export default async (req: Request): Promise<Response> => {
     const { planKey, plan } = await tenantPlan(tid);
     const grade = plan.features.managedRunner;              // no | option | included
     const eligible = grade !== "no";
-    const unit = managedRunnerUnitKrw(plan);                 // 이 플랜이 **실제로 내는** 대당 공급가(Agency=0)
+    const unit = managedRunnerUnitKrw(plan);                 // 이 플랜이 **실제로 내는** 계정당 공급가(Agency=0 · 프록시 포함가)
     /* 🔴 화면에 보일 가격은 «못 쓴다»와 «공짜다»를 구분해야 한다 — 둘 다 0원으로 내보내면
        Starter 화면에 «관리형 러너 ₩0» 이 떠서 **공짜처럼 읽힌다**(스모크에서 실제로 그렇게 나왔다).
-       못 쓰는 플랜에는 **안내용 정가**(Pro 기준)를 보여 준다 — «Pro 로 바꾸면 대당 얼마»가 화면의 할 말이다.
+       못 쓰는 플랜에는 **안내용 정가**(Pro 기준)를 보여 준다 — «Pro 로 바꾸면 계정당 얼마»가 화면의 할 말이다.
        실제 청구는 신청 시점 스냅샷(total_krw)이고 거기엔 언제나 `unit` 이 들어간다(안내가가 새지 않는다). */
-    const shownUnit = eligible ? unit : MANAGED_RUNNER_PRICE_KRW;
+    const shownUnit = eligible ? unit : MANAGED_RUNNER_ACCOUNT_KRW;
     const price = { amountKrw: shownUnit, vatKrw: vatOf(shownUnit), totalKrw: shownUnit + vatOf(shownUnit) };
-    const max = n(plan.limits.runnerDevices) || 1;
+    /* 🔴 상한이 «대수»가 아니라 **계정 수**다(사장님 결정 4). 기기 한도(runnerDevices)로 막으면
+       계정 5개를 맡기려는 Pro 고객이 «2대까지»에 걸린다 — 단위가 다른 값으로 막는 것은 버그다. */
+    const max = n(plan.limits.maxAccounts) || 1;
 
     if (req.method === "GET") {
       const assigned = await assignedCount(tid);
@@ -61,7 +63,8 @@ export default async (req: Request): Promise<Response> => {
       const out: Record<string, unknown> = { ok: true, eligible, price, status, assigned, max, planKey };
       if (!eligible) out.reason = "지금 요금제에는 관리형 러너가 없어요. Pro 로 바꾸면 신청할 수 있어요.";
       if (grade === "included") out.reason = "Agency 요금제에는 관리형 러너가 포함돼 있어요(추가 요금 없음).";
-      if (open) { out.devices = n(open.devices); out.requestedAt = utcDate(open.created_at)?.toISOString(); }
+      // 새 이름으로 내보내되 옛 이름도 함께 둔다(A 화면이 바뀌는 동안 깨지지 않게 · 바뀌면 devices 를 뺀다).
+      if (open) { out.accounts = n(open.accounts) || n(open.devices); out.devices = out.accounts; out.requestedAt = utcDate(open.created_at)?.toISOString(); }
       return json(out);
     }
 
@@ -71,39 +74,41 @@ export default async (req: Request): Promise<Response> => {
     const w = await requireWritable(tid); if (!w.ok) return w.res;
     const feat = await requireFeature(tid, "managedRunner"); if (!feat.ok) return feat.res;   // Starter → 402 plan_feature
 
-    const b = await readJson<{ devices?: unknown; note?: unknown }>(req);
-    const devices = n(b.devices);
-    if (devices < 1 || devices > max) {
-      return badRequest(`대수는 1~${max}대 사이로 골라 주세요(지금 요금제 기준).`, "devices");
+    const b = await readJson<{ accounts?: unknown; devices?: unknown; note?: unknown }>(req);
+    // 화면이 새 이름(accounts)으로 보내고, 아직 안 바뀐 화면은 옛 이름(devices)으로 보낸다 — 둘 다 받는다.
+    const accounts = n(b.accounts) || n(b.devices);
+    if (accounts < 1 || accounts > max) {
+      return badRequest(`계정 수는 1~${max}개 사이로 골라 주세요(지금 요금제 기준).`, "accounts");
     }
     const assigned = await assignedCount(tid);
     if (assigned >= max) {
-      return json({ ok: false, step: "already", error: `이미 ${assigned}대가 배정돼 있어요. 더 필요하면 문의해 주세요.` }, 409);
+      return json({ ok: false, step: "already", error: `이미 ${assigned}개가 배정돼 있어요. 더 필요하면 문의해 주세요.` }, 409);
     }
     const note = String(b.note ?? "").slice(0, 500) || null;
-    const totalKrw = (unit + vatOf(unit)) * devices;
+    const totalKrw = (unit + vatOf(unit)) * accounts;
 
     /* 열린 신청이 있으면 **새로 만들지 않고 고친다**(부분 유니크 인덱스가 중복을 막는다 ·
        운영 목록이 같은 집 신청서로 지저분해지지 않게). */
     const open = await openRequest(tid);
     if (open) {
-      await q(sql`UPDATE managed_runner_requests SET devices = ${devices}, plan_key = ${planKey},
+      await q(sql`UPDATE managed_runner_requests SET accounts = ${accounts}, devices = ${accounts}, plan_key = ${planKey},
           amount_krw = ${unit}, vat_krw = ${vatOf(unit)}, total_krw = ${totalKrw},
           note = COALESCE(${note}, note), updated_at = NOW() WHERE id = ${n(open.id)}`);
     } else {
-      await q(sql`INSERT INTO managed_runner_requests (tenant_id, devices, status, plan_key, amount_krw, vat_krw, total_krw, note, requested_by)
-        VALUES (${tid}, ${devices}, 'requested', ${planKey}, ${unit}, ${vatOf(unit)}, ${totalKrw}, ${note}, ${n(auth.user.uid)})`);
+      await q(sql`INSERT INTO managed_runner_requests (tenant_id, accounts, devices, status, plan_key, amount_krw, vat_krw, total_krw, note, requested_by)
+        VALUES (${tid}, ${accounts}, ${accounts}, 'requested', ${planKey}, ${unit}, ${vatOf(unit)}, ${totalKrw}, ${note}, ${n(auth.user.uid)})`);
     }
 
     // 🔴 감사·알림은 await(계약 §0 — 던지고 잊지 않는다).
     await writeAudit({ tenantId: tid, action: open ? "managed_runner_request_update" : "managed_runner_request",
       actorType: "user", actorId: n(auth.user.uid), target: `tenant:${tid}`,
-      detail: { devices, planKey, amountKrw: unit, totalKrw }, riskLevel: "medium" });
+      detail: { accounts, planKey, amountKrw: unit, totalKrw }, riskLevel: "medium" });
     await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
       VALUES (${tid}, ${"managed_runner"}, ${"관리형 러너 신청을 받았어요"},
-              ${`${devices}대 신청이 접수됐어요. 담당이 확인하고 준비되면 알려 드릴게요.`}, ${"/app/runner.html"})`);
+              ${`계정 ${accounts}개 신청이 접수됐어요. 담당이 확인하고 준비되면 알려 드릴게요.`}, ${"/app/runner.html"})`);
 
-    return json({ ok: true, status: "requested", devices, price, totalKrw });
+    // 옛 이름도 함께(A 화면 전환 중 호환 · 전환되면 devices 를 뺀다).
+    return json({ ok: true, status: "requested", accounts, devices: accounts, price, totalKrw });
   } catch (err) {
     return jsonError("managed_runner", err);
   }
