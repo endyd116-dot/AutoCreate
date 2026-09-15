@@ -221,6 +221,13 @@ input,textarea,select{font:inherit;color:inherit}
 .done-full .ck svg{width:44px;height:44px;color:#fff} .done-full p{margin-top:16px;font-size:18px;font-weight:700}
 @keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
 /* 배너(원격접속·체험) */
+/* [R7 §3.1] 위험 동작 한 단계 확인 — 체크 1개(시트 안에서만 · 누르는 영역 44) */
+.chk{display:flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink)}
+.chk input{position:absolute;width:0;height:0;opacity:0}
+.chk i{flex:none;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--line);background:var(--surface);position:relative;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.chk input:checked+i{background:var(--ink);border-color:var(--ink)}
+.chk input:checked+i::after{content:"";position:absolute;left:7px;top:3px;width:5px;height:10px;border:solid var(--surface);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.chk input:focus-visible+i{outline:2px solid var(--sel);outline-offset:2px}
 .banner{background:var(--warn-soft);color:var(--warn-ink);border-radius:14px;padding:10px 14px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .banner.info{background:var(--brand-soft);color:var(--ink)}
 .banner button{font-weight:700;text-decoration:underline;white-space:nowrap;flex:none}
