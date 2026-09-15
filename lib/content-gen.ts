@@ -14,7 +14,7 @@ import { CHAIN_HIGH } from "./ai-models";
 import { generateImage, type ImageAspect } from "./ai-image";
 import { searchStock, stockConfigured, stockTroubleLine, type StockCandidate } from "./stock";   // [R8 §10] 사진 조달 — 편당 원가의 85%가 사진이다
 import { attachStockPhoto } from "./stock/attach";
-import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate } from "./stock/plan";
+import { emptyMix, heroIndexOf, stockQueryOf, takeCandidate, heroPlanOf, heroFactOf, HERO_PROMPT_HINT, type HeroFact } from "./stock/plan";
 import { listPhotos } from "./piece-photos";                     // 내가 올린 사진(옛 B-1) — 조달 순서 ①
 import { aiSourceKey } from "./photo-source";
 import { contractFor, structureFor, coinFormatOf, type WritingContract, type FormatKey } from "./writing-contracts";
@@ -353,7 +353,24 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
        🔴 **사진 «수»는 깎지 않는다**(§10.3) — 바뀌는 것은 «어디서 가져오나»뿐이고, 못 채우면 AI 가 메운다. */
     await setStage(pieceId, "images");
     const images: RenderImage[] = [];
-    const imageBlocks = draft.blocks.filter((b) => b.type === "image");
+    /* ══ [R8CLOSE-B1 §B9] 🔴 **대표 이미지 — 여기가 `heroNeeded` 를 «읽는» 자리다.**
+       종전엔 `director` 가 적고 `piece.meta` 로 나르기만 하고 **읽는 곳이 0** 이었다(죽은 통로).
+       판단은 `lib/stock/plan.ts` 에 순수 함수로 있다 — 여기서는 **부르기만** 한다. */
+    const heroNeeded = meta.heroNeeded === true;
+    let imageBlocks = draft.blocks.filter((b) => b.type === "image");
+    let heroPlan = heroPlanOf(heroNeeded, imageBlocks.map((b, k) => b.imageIndex ?? k));
+    if (heroPlan.made) {
+      /* 🔴 **막는 게 아니라 대신 해 주는 것**(§9-④ `ensureDisclosureHtml` 과 같은 자리).
+         네이버·티스토리는 본문 첫 사진이 목록·검색에 같이 보이는데, 사진 자리가 0개면 그 자리가 빈 채로 나간다.
+         🔴 코인은 안 는다 — 정산이 `min(계획, 실제)` 로 받는다(아래 «사진 값 정산»). 더 구운 몫은 우리가 안는다. */
+      const at = draft.blocks.findIndex((b) => b.type === "para" || b.type === "hook");
+      draft.blocks.splice(at >= 0 ? at + 1 : 0, 0, { type: "image", imageIndex: 0, prompt: `${topic.title}. ${String(meta.angle || topic.angle || "")}`.trim().slice(0, 160) });
+      imageBlocks = draft.blocks.filter((b) => b.type === "image");
+      heroPlan = { ...heroPlanOf(heroNeeded, imageBlocks.map((b, k) => b.imageIndex ?? k)), made: true };
+      console.info(`[content-gen] piece ${pieceId} 대표 사진 자리가 없어 한 자리 만들었다(채널 ${channel})`);
+    }
+    /** 대표 자리에 실제로 무엇이 붙었나 — 아래 세 갈래(내 사진·스톡·AI)가 각자 적는다. */
+    let heroSource: HeroFact["source"] = null;
     let okImages = 0;
     const mix = emptyMix();
 
@@ -366,7 +383,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const mine = await listPhotos(tid, pieceId);          // 남은 것 = 내 사진뿐(올린 순서)
     let mineAt = 0;
 
-    const heroIdx = heroIndexOf(imageBlocks.map((b, k) => b.imageIndex ?? k));
+    const heroIdx = heroPlan.index >= 0 ? heroPlan.index : heroIndexOf(imageBlocks.map((b, k) => b.imageIndex ?? k));
     /* 스톡은 **글마다 한 번**만 찾는다(블록마다 찾으면 Pixabay 100req/60초를 금방 먹는다 · `lib/stock/plan.ts` 헤더).
        대표 1장은 AI 라 그만큼 빼고, 내 사진이 있으면 그만큼 더 뺀다. */
     const paidPiece = compensationOfMeta(meta).need;
@@ -393,7 +410,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
         const mp = mine[mineAt++];
         await q(sql`UPDATE piece_assets SET sort = ${i} WHERE tenant_id = ${tid} AND id = ${mp.id}`);
         images[i] = { url: mp.url, caption: b.caption ?? mp.caption ?? undefined, alt };
-        okImages++; mix.customer++;
+        okImages++; mix.customer++; if (i === heroIdx) heroSource = "customer";
         continue;
       }
 
@@ -405,17 +422,18 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
             tenantId: tid, pieceId, userId: null, candidate: cand,
             caption: b.caption ?? null, alt, sort: i, paid: paidPiece,
           });
-          if (st.ok) { images[i] = { url: st.url, caption: b.caption, alt }; okImages++; mix.stock++; continue; }
+          if (st.ok) { images[i] = { url: st.url, caption: b.caption, alt }; okImages++; mix.stock++; if (i === heroIdx) heroSource = "stock"; continue; }
           /* 🔴 스톡이 실패하면 **조용히 비우지 않고** 아래 AI 로 내려간다 — 사진 수를 깎지 않는다(§10.3). */
           console.warn(`[content-gen] piece ${pieceId} 스톡 ${i} 실패(${st.step}) — AI 로 메운다`);
         }
       }
 
       /* ③ AI — 대표 1장, 그리고 위에서 못 채운 자리. 🔴 «상한»이 아니라 «맨 뒤»다(`lib/stock/plan.ts` 헤더). */
-      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.`;
+      /* [R8CLOSE-B1 §B9] 대표 자리면 «작게 잘려 보인다» 한 줄을 더한다 — **호출 수는 그대로**라 값이 안 든다. */
+      const prompt = `${scene}. Context: ${topic.title}. Style: ${c.images.style === "illust" ? "flat illustration" : c.images.style === "infographic" ? "clean infographic without text" : "natural photo"}.${heroNeeded && i === heroIdx ? ` ${HERO_PROMPT_HINT}` : ""}`;
       const r = await generateImage({ prompt, aspect: c.images.aspect as ImageAspect, tenantId: tid, ref: `piece:${pieceId}:img${i + 1}`, keyPrefix: `autocreate/${tid}/${pieceId}` });
       if (r.ok) {
-        okImages++; mix.ai++;
+        okImages++; mix.ai++; if (i === heroIdx) heroSource = "ai";
         images[i] = { url: r.url, caption: b.caption, alt };
         /* 🔴 AI 사진에도 `meta.source` 를 적는다 — 세 길이 **같은 칸**에 적혀야 되짚기가 한 길이 된다(`lib/photo-source.ts` 헤더).
            그리고 위의 DELETE 가 «AI 인가»를 이 칸으로 판정한다 — 안 적으면 옛 행 취급으로만 지워진다. */
@@ -442,6 +460,10 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       /* [R8 §10 · §5F] 🔴 이 글의 사진이 **어디서 왔나**(장수만). 되먹임 원장이 이 칸을 읽는다(옛 B-1 과 칸 이름 합의 2026-09-15).
          🔴 **실제로 붙은 것만 센다** — «AI 1장일 것이다»로 채우면 그게 대용물이고 원장 전체가 거짓이 된다(AC-57). */
       photoMix: mix,
+      /* [R8CLOSE-B1 §B9] 🔴 **대표 이미지가 어떻게 됐나.** `heroNeeded` 가 «적히기만» 하던 것을 끝낸 자리다.
+         `pinned:false` 는 거짓말을 막는 칸이다 — 에디터에서 «대표»로 콕 집는 건 아직 못 한다(B7 · R10).
+         🔴 막지 않는다: 대표가 못 서도 글은 그대로 `in_review` 로 간다(재작성도 안 돌린다 · 돈이 두 배). */
+      hero: heroFactOf(heroPlan, heroSource),
       /* [R8 §2.4] 🔴 **수치 주장 표시** — 프롬프트 ⑤칸이 «근거 없는 수치 금지»라고 말만 하고 **아무도 안 쟀다**.
          여기서 잰다: 글 안의 숫자를 «우리가 준 것(given)»과 «모델이 만든 것(self)»으로 가른다.
          🔴 **«맞나»를 재는 게 아니다** — 그건 우리가 알 수 없다. «누가 만든 숫자인가»까지다(`lib/fact-claims.ts` 헤더).

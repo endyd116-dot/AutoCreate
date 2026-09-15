@@ -141,6 +141,10 @@ export default async (req: Request): Promise<Response> => {
         const nc = m.numberClaims as { summary?: ClaimSummary; items?: unknown };
         if (nc.summary) meta.numberClaims = { summary: nc.summary, items: Array.isArray(nc.items) ? nc.items : [], line: claimsLine(nc.summary) };
       }
+      /* [R8CLOSE-B1 §B9] 🔴 **대표 이미지** — `heroNeeded` 가 «적히기만» 하던 것을 검수 화면까지 잇는다(칸 이름 `hero`).
+         `line` 은 서버가 정본이다(화면이 따로 지으면 두 곳이 갈린다 · `numberClaims` 와 같은 관례).
+         🔴 `pinned:false` 를 **그대로 싣는다** — «에디터에서 대표로 콕 집었다»고 화면이 말하면 그게 거짓말이다(B7 · R10). */
+      if (m.hero && typeof m.hero === "object") meta.hero = m.hero;
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount) };

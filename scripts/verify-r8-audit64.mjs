@@ -205,7 +205,9 @@ const THREE_REST = [
   ["B9 `images.heroNeeded` 실동작", () => {
     const written = anyFile(["lib/director.ts", "lib/cron/director-auto.ts"], /heroNeeded:/).length > 0;
     const readBy = anyFile(["lib/content-gen.ts", "lib/ai-image.ts", "netlify/functions/pieces.ts"], /heroNeeded/).length > 0;
-    return [readBy ? "닫힘" : "열림", `적는 곳 ${written} · **읽는 곳 ${readBy}** ⇒ 죽은 통로(대표 이미지가 안 붙는다)`];
+    /* 🔴 [2026-09-16 B-1] 설명줄이 **판정을 따라가지 않아** «읽는 곳 true ⇒ 죽은 통로» 라는 모순을 찍고 있었다.
+       하니스가 거짓말하면 다음 조사가 그걸 믿는다(AC-78 «값을 베낀 검사는 낡는다» 와 같은 뿌리). */
+    return [readBy ? "닫힘" : "열림", `적는 곳 ${written} · **읽는 곳 ${readBy}**${readBy ? " ⇒ content-gen 이 대표 자리를 세우고 meta.hero 로 말해 준다" : " ⇒ 죽은 통로(대표 이미지가 안 붙는다)"}`];
   }],
   /* C. 인프라·규율 8행(레지스트리 2·신뢰계정 1 은 위 THREE 에서 이미 셌다) */
   ["C1 소재 90일", () => [yes(inFile("lib/cron/assign-topics.ts", /interval '90 days'/)), "주석 아니라 실제 쿼리"]],
