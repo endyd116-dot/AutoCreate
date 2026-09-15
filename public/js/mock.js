@@ -16,6 +16,7 @@
   const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
   const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
   const managedPer = qs.get("managed") === "account" ? "account" : "";   // [R7 §4.5] 계정당 요금 모양(서버가 per 를 실을 때)
+  const judgePending = qs.get("judgePending") === "1";   // [R7 §1.5] 못 잰 축(보류)이 있는 심사표
   const planKnob = qs.get("plan") || "";
   const keptAuto = qs.get("kept") === "1";       // [R7 §4.3] 이미 «조용하면 발행»로 저장해 둔 Starter 집(소급 0)          // [R7 §4.3] starter = 자동 승인 불가(autoApprove false · 포함분 40)
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
@@ -110,8 +111,9 @@
     variant: { hookType: HOOKS[i % HOOKS.length], palette: PALETTES[(Number(accountId || 0) + i) % PALETTES.length], voiceId: VOICES[i % VOICES.length].voiceId },
     variantLabels: { hook: HOOK_KO[HOOKS[i % HOOKS.length]], palette: PALETTE_KO[PALETTES[(Number(accountId || 0) + i) % PALETTES.length]], voiceId: VOICES[i % VOICES.length].name }, /* 사람말은 서버가 붙인다(화면 하드코딩 0) */
     cuts: format === "clip" ? 3 : seconds >= 60 ? 9 : 5, disclosure: { badge: true, descriptionFirstLine: true } });
-  const JUDGE_AXES = [["hook3s", "훅 3초 안에"], ["caption_sync", "자막 싱크"], ["frame_gap", "프레임 공백"], ["loop_seam", "루프 이음새"], ["cut_quality", "컷 화질"], ["policy", "정책 · 고지"], ["similarity", "계정 간 변주"], ["audio", "소리 정규화"]];
-  const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "cut_quality") || (grade === "P0" && key === "policy"); const o = { key, label, pass: !bad, grade: bad ? grade : "P2" }; if (grade === "P1" && key === "cut_quality") o.detail = "4번 컷 화질 낮음 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "policy") o.detail = "정책 위반 의심 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
+  const JUDGE_AXES = [["hook3s", "훅 3초 안에"], ["caption_sync", "자막 싱크"], ["frame_gap", "프레임 공백"], ["loop_seam", "루프 이음새"], ["cut_quality", "컷 화질"], ["policy", "정책 · 고지"], ["similarity", "계정 간 변주"], ["audio", "소리 정규화"], ["duration_fit", "길이 맞음"]];
+  const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "cut_quality") || (grade === "P0" && key === "policy"); const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
+      if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "cut_quality") o.detail = "4번 컷 화질 낮음 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "policy") o.detail = "정책 위반 의심 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
   const POSTER = "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='540' height='960'><rect width='540' height='960' fill='#191F28'/><rect x='60' y='380' width='420' height='120' rx='16' fill='#2A2A32'/><text x='270' y='452' font-family='sans-serif' font-size='40' font-weight='800' fill='#fff' text-anchor='middle'>에어프라이어 기름때</text></svg>");
   const SRT = "data:text/plain;charset=utf-8," + encodeURIComponent("1\n00:00:00,000 --> 00:00:03,000\n제휴 링크가 있어요\n\n2\n00:00:03,000 --> 00:00:07,500\n눌어붙은 기름, 3분이면 끝나요\n\n3\n00:00:07,500 --> 00:00:13,000\n베이킹소다 한 스푼이 전부예요\n");
   const VDESC = "이 영상은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n베이킹소다 한 스푼이면 눌어붙은 기름이 녹아요. 준비물과 순서를 58초에 담았어요.\n\n#에어프라이어 #청소 #살림팁";
@@ -746,7 +748,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
