@@ -2,6 +2,15 @@
  * runner/channels/post-alive.mjs — 발행한 글이 살아 있나 · 조회수는 얼마나(계약 §2 `verify.post_alive`·`revenue.stats`).
  *   DESIGN §7.2 health_score 재료(«발행 후 삭제» 감지) · §5B.7 learn 스텝의 러너 채널 경로.
  *
+ *   🔴 **이 한 파일이 두 종류의 잡을 처리한다**(`runner/core.mjs`: `"verify.post_alive"` · `"revenue.stats"` 둘 다 여기로 온다).
+ *      그래서 **잡을 만드는 쪽이 두 군데**다 — `lib/cron/post-alive.ts`(생존) · `lib/cron/learn.ts`(조회수).
+ *      🔴 payload 칸이 빠지면 **오류가 아니라 침묵**이다. 두 잡이 요구하는 칸이 다르다:
+ *        · `externalUrl` — **두 잡 다 필수.** **여기**(아래 첫 줄)가 읽는다. 없으면 «확인할 글 주소가 없어요»로 즉시 실패.
+ *        · `postId`      — **두 잡 다 필수.** **서버**가 결과 병합에 쓴다. 없으면 병합을 통째로 건너뛴다(답이 버려진다).
+ *        · `title`       — **`verify.post_alive` 만.** 서버가 «남이 볼 수 있나»를 볼 때 쓴다(없으면 공개 판정을 안 한다).
+ *      실제로 2026-09-15 에 `post-alive.ts` 는 `postId` 를, `learn.ts` 는 `externalUrl` 을 각각 빠뜨려
+ *      **양쪽이 서로 다른 칸을 빠뜨린 상태**였다. 칸을 늘리려면 **두 곳을 같이** 보고 고쳐라.
+ *
  *   🔴 정직 규율 — **모르면 모른다고 한다.**
  *      · alive 는 «404/410 이면 false», 「우리가 못 읽었다」는 false 가 아니라 `unknown`(서버가 상태를 뒤집지 않는다).
  *      · 조회수는 화면에 숫자가 실제로 보일 때만 싣는다. 0 을 지어내지 않는다(빈 키를 안 싣는 게 계약이다).
