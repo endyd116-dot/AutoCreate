@@ -22,6 +22,7 @@ import { db } from "../../db/index";
 import { ensureFreshToken } from "./tokens";
 import { r2PresignGet, r2Head } from "../r2";
 import { disclosureTextFor } from "../disclosure";
+import { writeAudit } from "../audit";   // [P1R8 §5.1] 유료 프로모션 플래그가 거부되면 조용히 넘기지 않는다
 import type { PublishPiece, PublishAccount, PublishResult } from "./contract";
 
 type Row = Record<string, unknown>;
@@ -29,6 +30,24 @@ const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 
 const UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
+/**
+ * [P1R8 §5.1] 🔴 **유료 프로모션 공개**(공정위 + 유튜브 정책 둘 다의 요구).
+ *   · 유튜브: 스튜디오 체크박스 «동영상에 간접 광고, 스폰서십, 직접 광고와 같은 유료 프로모션이 포함되어 있음» →
+ *     시청자에게 «동영상이 시작될 때 10초간» 공개 메시지. https://support.google.com/youtube/answer/154235
+ *   · 공정위: 그래도 **영상 내 표시**가 따로 필요하다(«더보기»만으로는 부족) — 우리는 3초 자막 + 상시 배지로 이미 한다.
+ *   🔴 **이 필드가 쓰기 가능한지는 확정하지 못했다**(2026-09-15 조사): `videos.insert` 의 `part` 목록에는
+ *      `paidProductPlacementDetails` 가 있는데, 문서의 «writable properties» 목록에는 없다.
+ *      그래서 **넣어 보고, 거부당하면 빼고 한 번 더 올린다** — 그리고 그 사실을 감사에 남긴다(조용히 빠지지 않게 · AC-9).
+ *      영상 안의 자막·배지가 이미 법을 지키고 있어, 이 플래그가 빠져도 «고지 없는 영상»이 나가지는 않는다.
+ */
+const PAID_PART = "paidProductPlacementDetails";
+const uploadUrlWith = (paid: boolean): string => (paid ? `${UPLOAD_URL},${PAID_PART}` : UPLOAD_URL);
+/** 구글이 «그 필드는 못 쓴다»고 답했나 — 그러면 플래그만 빼고 한 번 더 올린다(영상 자체는 나가야 한다). */
+function rejectedPaidField(json: Record<string, unknown> | null): boolean {
+  const err = (json?.error ?? {}) as { message?: string; errors?: { reason?: string; message?: string }[] };
+  const blob = `${err.message ?? ""} ${(err.errors ?? []).map((e) => `${e.reason ?? ""} ${e.message ?? ""}`).join(" ")}`;
+  return blob.includes(PAID_PART) || /unexpected|invalid.*part|not writable|badRequest/i.test(blob);
+}
 /** videos.insert 1,600u — 일 10,000u 면 6건이 한계. 기본 5건으로 여유를 둔다. */
 const DAILY_CAP = Math.max(1, Number(process.env.YOUTUBE_DAILY_INSERT_CAP) || 5);
 const META_TIMEOUT_MS = 20_000;
@@ -83,7 +102,9 @@ function buildDescription(piece: PublishPiece): string {
   /* [R8-A §4] 설명란 해시태그는 **3~5개**만 — 유튜브 공식: «가장 참여도가 높은 해시태그가 **최대 3개까지** 동영상 제목 옆에 표시» ·
      «60개가 넘으면 각 해시태그를 무시» · «태그를 과도하게 추가하면 업로드 항목 또는 검색결과에서 동영상이 삭제될 수 있습니다»
      (https://support.google.com/youtube/answer/6390658). 나머지 키워드는 아래 snippet.tags(검색 태그)로 간다 — **둘은 다른 것**이다. */
-  if (piece.tags?.length) lines.push(piece.tags.slice(0, DESCRIPTION_HASHTAGS).map((t) => `#${String(t).replace(/^#/, "").replace(/s+/g, "")}`).join(" "));
+  /* 🔴 해시태그에는 공백이 들어갈 수 없다 — 공백만 지운다(`\s`). 2026-09-15 한때 `/s+/` 로 적혀 **낱말 속 s 가 지워졌다**
+     («#shorts» → «#hort») — 패치 스크립트가 역슬래시를 먹은 자국이다. 정규식은 눈으로 한 번 더 본다. */
+  if (piece.tags?.length) lines.push(piece.tags.slice(0, DESCRIPTION_HASHTAGS).map((t) => `#${String(t).replace(/^#/, "").replace(/\s+/g, "")}`).join(" "));
   return lines.join("\n\n").slice(0, 4_900);
 }
 
@@ -137,7 +158,9 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
 
   // 🔴 심사 전 기본은 비공개. 사람이 명시로 켰을 때만 공개.
   const privacyStatus = process.env.YOUTUBE_PUBLIC_ALLOWED === "1" ? "public" : "private";
-  const meta = {
+  /* [P1R8 §5.1] 대가를 받은 영상인가 — `disclosure` 는 제휴·협찬·무상 제공 **셋 중 하나라도** 있으면 채워져 온다(lib/disclosure). */
+  const paid = !!piece.disclosure;
+  const metaBase = {
     snippet: {
       title: String(piece.title || "").slice(0, 100),
       description: buildDescription(piece),
@@ -146,11 +169,13 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
     },
     status: { privacyStatus, selfDeclaredMadeForKids: false, containsSyntheticMedia: true },
   };
+  let meta = paid ? { ...metaBase, [PAID_PART]: { hasPaidProductPlacement: true } } : metaBase;
+  let paidFlagDropped = false;
 
   const start = async (accessToken: string) => {
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), META_TIMEOUT_MS);
     try {
-      const r = await fetch(UPLOAD_URL, {
+      const r = await fetch(uploadUrlWith(paid && !paidFlagDropped), {
         method: "POST", signal: ctrl.signal,
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -176,6 +201,18 @@ export async function publishYoutubeShorts(piece: PublishPiece, account: Publish
     if (!tok.ok) return { ok: false, reason: "auth_failed", retriable: false, error: "유튜브 로그인이 만료됐어요. 다시 연결해 주세요.", detail: tok.detail };
     try { s = await start(tok.token.accessToken); }
     catch (e) { return { ok: false, reason: "network", retriable: true, error: "유튜브에 연결하지 못했어요.", detail: String((e as Error)?.message ?? e).slice(0, 160) }; }
+  }
+  /* [P1R8 §5.1] 🔴 유료 프로모션 플래그를 구글이 거부하면 **플래그만 빼고 한 번 더** 올린다.
+     영상 안 자막·배지가 이미 고지를 지고 있으므로 «고지 없는 영상»이 나가지는 않는다.
+     🔴 대신 **조용히 넘어가지 않는다** — 감사에 남겨 다음 사람이 «API 로는 못 켠다»를 사실로 알게 한다(AC-9). */
+  if (paid && !paidFlagDropped && (s.status < 200 || s.status >= 300) && rejectedPaidField(s.json)) {
+    paidFlagDropped = true;
+    meta = metaBase;
+    await writeAudit({ tenantId: tid, action: "youtube_paid_flag_rejected", actorType: "system", target: `piece:${piece.id}`,
+      detail: { status: s.status, note: "videos.insert 가 paidProductPlacementDetails 를 받지 않았다 — 영상 내 자막·배지로만 고지", error: String((s.json?.error as { message?: string } | undefined)?.message ?? "").slice(0, 200) } })
+      .catch((err: unknown) => console.warn("[youtube] 감사 기록 실패", String((err as Error)?.message ?? err).slice(0, 80)));
+    try { s = await start(tok.token.accessToken); }
+    catch (e) { return { ok: false, reason: "network", retriable: true, error: "유튜브에 연결하지 못했어요.", detail: String((e as Error)?.message ?? e).slice(0, 200) }; }
   }
   if (s.status < 200 || s.status >= 300 || !s.location) {
     const c = classify(s.status, s.json);
