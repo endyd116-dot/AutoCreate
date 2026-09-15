@@ -448,6 +448,14 @@
   /* [P1R2] RunnerErrorKind → 사람말(계약 §2) · 계정·발행함이 같이 쓰는 한 벌 */
   UI.ERRK = { login_fail: "로그인이 풀렸어요", captcha: "보안 문자 확인이 필요해요", rate_limited: "채널이 잠시 막았어요", suspended: "채널에서 정지됐어요", selector_changed: "채널 화면이 바뀌었어요", network: "네트워크가 끊겼어요", unknown: "알 수 없는 문제예요" };
   UI.errk = (k) => UI.ERRK[k] || k || "";
+  /* [R8 리허설 · A · 2026-09-16] 🔴 «처음 붙였다»와 «로그인이 풀렸다»는 **다른 일**인데 상태값은 `pending_login` 하나뿐이다.
+     가르는 재료는 서버에 **이미 있다** — `lastErrorKind` 는 실제로 실패했을 때만 실린다(NULL 이면 아예 안 온다 · `lib/accounts.ts` `if (r.last_error_kind)`).
+     🔴 그런데 화면이 `lastErrorKind || "login_fail"` 로 **기본값을 지어냈다**(AC-74 의 축소판) — 그래서 한 번도 로그인한 적 없는 계정한테
+        «로그인이 풀렸어요»라고 했다. **사장님이 첫 계정을 붙이고 그 자리에서 읽으실 바로 그 문장이다**(«내가 뭘 잘못했나»가 된다).
+     ⇒ 가르는 자리는 **여기 한 곳**이다(계정 목록·자세히·시트·끝맺음이 다 이걸 쓴다 — 네 군데가 따로 말하면 또 갈린다). */
+  UI.loginState = (a) => (a && a.lastErrorKind)
+    ? { first: false, why: UI.errk(a.lastErrorKind), cta: "다시 로그인", lead: "의 로그인이 풀렸어요", done: "다시 로그인했어요" }
+    : { first: true, why: "아직 로그인 전이에요 · 한 번만 하면 돼요", cta: "로그인하기", lead: "로 로그인할 차례예요", done: "로그인했어요" };
   UI.pill = (map, s) => { const p = map[s] || ["off", s]; return `<span class="pill ${p[0]}">${UI.esc(p[1])}</span>`; };
   /* 달력 점 색 = 알약 색과 같은 자(초록·주황·빨강·회색) */
   UI.slotDot = (s) => (UI.SLOT_STATUS[s] || ["off"])[0].replace("off", "");
@@ -747,6 +755,17 @@
      🔴 **길이 없는 채널엔 단추를 만들지 않는다**(§5E.3 · 티스토리 «광고 떼기»에서 배운 것) — 눌러도 아무 일이 안 나는 단추를 만들지 않는다.
         대신 그 주소로 가는 길을 준다: **게이트가 아니라 사실이다**(§9 «없는 길»).
      🔴 문장은 전부 서버 것(`message`·`error`) · 코인 0 · 되돌릴 수 없는 동작이라 확인은 한 번 둔다(§9 밖 — 고객을 위한 확인이다). */
+  /* [R8 리허설 · A · 2026-09-16] 🔴 배너가 «저희가 대신 내려 드릴 수도 있어요»를 **채널을 안 가리고** 말하고 있었다 —
+     유튜브처럼 우리가 못 내리는 곳인데도 그랬다. 시트는 아래 `noWay` 로 바로 말하는데 **배너만 달랐다**(열어 봐야 진실을 안다).
+     🔴 «없는 길»을 있는 것처럼 말하는 자리라 작아 보여도 §9 다(§9 는 «없는 길을 열라»가 아니라 «있는 길을 막지 말라»이고,
+        없는 길을 **있다고 말하는 것**은 그보다 나쁘다 — 고객이 기다리다 기한을 넘긴다).
+     판정 재료는 시트와 **같은 것**을 쓴다(`canRetract && retractAvailable` · 서버 값). */
+  UI.takedownLead = (live) => {
+    const mine = (live || []).filter((n) => n.canRetract && n.retractAvailable).length;
+    return mine === (live || []).length ? "직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요"
+      : mine === 0 ? "저희가 대신 내려 드릴 수 없는 곳이라 직접 내리시면 돼요"
+      : `${mine}건은 저희가 대신 내려 드릴 수 있어요`;
+  };
   UI.takedownSheet = function (nt, onDone) {
     const live = UI.TAKEDOWN_ACTIVE.includes(nt.status);
     const canRetract = live && nt.canRetract && nt.retractAvailable;

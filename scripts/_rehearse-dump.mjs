@@ -57,12 +57,17 @@ const STEPS = [
   ["4b-piece-adpoint",  "/app/piece.html?mock=1&id=501&gate=adpoint",    "④광고 가리킴이 걸린 글"],
   ["4c-pubnow-cadence", "/app/piece.html?mock=1&id=501&pubnow=cadence",  "④지금 올리기 — 캐던스에 걸린 길"],
   ["4d-pubnow-offline", "/app/piece.html?mock=1&id=501&pubnow=offline",  "④지금 올리기 — 내 PC 가 꺼져 있다"],
+  ["4f-pubnow-ok",      "/app/piece.html?mock=1&id=503",                 "④예약된 글에 «지금 올리기» 가 있나", "pubNow"],
+  ["4c2-pubnow-cad",    "/app/piece.html?mock=1&id=503&pubnow=cadence",  "④🔴 지금 올리기 — 캐던스에 걸린 길(막지 않고 말하나)", "pubNow"],
+  ["4d2-pubnow-off",    "/app/piece.html?mock=1&id=503&pubnow=offline",  "④🔴 지금 올리기 — 내 PC 가 꺼져 있다", "pubNow"],
+  ["4g-pubnow-gate",    "/app/piece.html?mock=1&id=503&pubnow=gate",     "④지금 올리기 — 검사에 걸린 길", "pubNow"],
   ["5a-posts",          "/app/posts.html?mock=1",                        "⑤나간 글 — 주소가 열리나 · 내리기가 보이나"],
   ["4e-approve",        "/app/piece.html?mock=1&id=501",                 "④🔴 «이대로 발행 예약» 을 실제로 눌러 본다", "approve"],
   ["5a2-post-open",     "/app/posts.html?mock=1",                        "⑤나간 글 한 줄을 열면 «글 보기»·«내리기» 가 있나", "openPost"],
   ["5c2-td-open",       "/app/posts.html?mock=1&td=noway",               "⑤🔴 못 내리는 채널인데 배너는 «대신 내려 드릴 수도»라고 한다 — 열면 뭐라 하나", "openTd"],
   ["5b-revenue",        "/app/revenue.html?mock=1",                      "⑤수익 화면에 그 계정이 뜨나"],
   ["5c-td-noway",       "/app/posts.html?mock=1&td=noway",               "⑤우리가 못 내리는 채널"],
+  ["5d-td-open",        "/app/posts.html?mock=1&td=open",                "⑤음성 대조 — 우리가 **대신 내릴 수 있는** 채널이면 원래 문장이 나오나"],
   ["6a-notifications",  "/app/notifications.html?mock=1",                "⑥알림함 — 실패가 어떻게 말해지나"],
   ["6b-home-fail",      "/app/home.html?mock=1&runner=off",              "⑥러너가 꺼진 집의 홈"],
 ];
@@ -124,6 +129,11 @@ for (const [key, path, desc, act] of STEPS) {
       const b = await page.$(".banner button, .banner a");
       if (b) { await b.click(); await page.waitForTimeout(900); note = `«${(await b.textContent()).trim()}» 눌렀다`; }
       else note = "🔴 신고 배너에 누를 것이 없다";
+    }
+    if (act === "pubNow") {
+      const b = await page.$("#pubNow");
+      if (b) { await b.click(); await page.waitForTimeout(1600); note = "«지금 올리기» 눌렀다"; }
+      else note = "🔴 «지금 올리기» 단추가 없다(이 글 상태로는 안 나오는 길)";
     }
     const text = await page.evaluate(() => {
       /* 🔴 `offsetParent !== null` 만 보면 **바텀시트(position:fixed)를 통째로 못 본다** — 시트가 이 제품의 주 손잡이다. */
