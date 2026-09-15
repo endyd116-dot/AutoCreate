@@ -288,7 +288,7 @@
     quota: "키가 이번 한도에 걸렸어요. 한도가 풀리면 다시 만들어요.",
     forbidden: "이 키에 권한이 없어요. 키를 만든 프로젝트에서 Generative Language API 를 켜 주세요.",
   };
-  const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수(코인 = 글 1 + 사진 수)
+  const IMG = { naver_blog: 6, tistory: 3, blogger: 2, wordpress: 2, threads: 1 }; // 채널 기본 사진 수 — 🔴 코인과 무관하다(글 한 편 = 1코인 · AI 사진 1장 포함 · 아래 507줄이 그 식이다)
   const seed = () => ({
     v: MOCK_V, coins: 60, refreshCount: 0, autoSchedule: false, nextId: 100,
     /* [R8-B §4.4] 내 AI 키(tenant_ai_keys) — 🔴 **평문은 여기에도 없다**: `masked` 는 서버 `maskSecret` 과 같은 모양(앞 2자 + 별 8개).
@@ -853,7 +853,7 @@
       /* [B-1 a39b458] 제안 단계 예고 — 첫 spec 이 오늘 자리를 쓸 것이면 usesTodaySlot 을 싣는다(확정이 정본 · 그 사이 자리가 찰 수 있다) */
       { const first = pieces[0]; const s0 = usedSlotOn && first && S.slots.find((s) => s.date === todayYmd && s.channel === first.channel && !s.pieceId && ["planned", "topic_assigned", "assigned", "no_topic"].includes(s.status));
         if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
-      const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "쓰는 코인은 글 1 + 사진 수예요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
+      const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "글 한 편에 1코인이에요 · AI 사진 1장이 들어 있고, 더 쓰셔도 그만큼 더 받지 않아요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
     /* [R8 · director-estimate] 🔴 **아무것도 쓰지 않고** 손질된 값으로 얼마 드는지만 답한다 — 화면이 «1 + 사진 장수»로 셈하던 자리를 대신한다. */
     "director-estimate": (b) => { const br = S.briefs[b.briefId]; if (!br) return err("not_found", "제안을 찾을 수 없어요.", { status: 404 });

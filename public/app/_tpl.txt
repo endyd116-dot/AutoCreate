@@ -1047,11 +1047,11 @@ async function load() {
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
-    ? D.accounts.map((a) => { const relogin = a.status === "pending_login";
-        const sub = relogin ? UI.errk(a.lastErrorKind || "login_fail") : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요" : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
+    ? D.accounts.map((a) => { const relogin = a.status === "pending_login"; const ls = UI.loginState(a);
+        const sub = relogin ? ls.why : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요" : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
         const head = `${UI.accMark(a)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
         return relogin
-          ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">다시 로그인</button></div>`
+          ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">${ls.cta}</button></div>`
           : `<div class="row">${head}${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</div>`; }).join("")
     : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">아직 연결한 계정이 없어요</h3><p>위에서 채널 마크를 누르면 바로 연결할 수 있어요.</p></div>`);
   UI.$$("#list [data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
@@ -1128,11 +1128,12 @@ async function reloginSheet(a) {
   if (!online) return UI.sheet(`<p class="muted" style="margin:0 0 4px">내 PC 프로그램이 채널 로그인 창을 열어 줘요. 지금은 꺼져 있어서 열 수 없어요.</p>
     <p class="muted" style="margin:0 0 16px;font-size:13px">켜 두면 이 계정뿐 아니라 기다리던 글도 함께 올라가요.</p>
     <div class="cta"><a class="btn primary" href="/app/runner.html">내 PC 프로그램 켜기</a></div>`, { title: "먼저 프로그램을 켜 주세요" });
-  UI.sheet(`<p class="muted" style="margin:0 0 4px">@${UI.esc(a.handle)} 의 로그인이 풀렸어요. 내 PC 프로그램이 ${UI.esc(UI.chLabel(a.channel))} 로그인 창을 열어요.</p>
+  const ls = UI.loginState(a);
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">@${UI.esc(a.handle)} ${ls.lead} 내 PC 프로그램이 ${UI.esc(UI.chLabel(a.channel))} 로그인 창을 열어요.</p>
     <p class="muted" style="margin:0 0 8px;font-size:13px">보안 문자가 나오면 그 창에서 직접 입력해 주세요. 비밀번호는 저장된 것을 씁니다.</p>
     <div id="rst">${reloginSteps(null)}</div><div id="rerr"></div>
     <div class="cta" id="rcta"><button class="btn primary" type="button" id="go">로그인 창 열기</button></div>`,
-    { title: "다시 로그인", onOpen: (sh, close) => {
+    { title: ls.cta, onOpen: (sh, close) => {
       const st = sh.querySelector("#rst"), box = sh.querySelector("#rerr"), cta = sh.querySelector("#rcta");
       sh.querySelector("#go").onclick = async (e) => {
         e.target.disabled = true;
@@ -1153,7 +1154,7 @@ async function reloginSheet(a) {
             if (me2 && me2.status === "active") status = "done";
           } else if (acc && acc.status === "active") status = "done";
           st.innerHTML = reloginSteps(status === "failed" ? "running" : status || "queued");
-          if (status === "done") { close(); UI.done(`@${a.handle} 다시 로그인했어요`, load); return; }
+          if (status === "done") { close(); UI.done(`@${a.handle} ${ls.done}`, load); return; }
           if (status === "failed") { box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>로그인 창에서 끝내지 못했어요</span></div>`; cta.hidden = false; e.target.disabled = false; return; }
           if (Date.now() - t0 > 120000) { box.innerHTML = `<div class="banner" style="margin:8px 0 0"><span>아직 끝나지 않았어요 · PC 화면을 확인해 주세요</span></div>`; cta.hidden = false; e.target.disabled = false; return; }
           setTimeout(tick, 2000);
@@ -1176,7 +1177,7 @@ async function detailSheet(a) {
     : badSrc.length ? `${okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") || "연결됨 없음"} · ${UI.srcLabel(badSrc[0].source)} 끊김`
     : okSrc.length ? okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") : "키를 넣으면 바로 가져와요";
   const html = `<div class="row" style="padding-left:0;padding-right:0">${UI.accMark(a)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(UI.chLabel(a.channel))} · ${a.lastPostAt ? "마지막 발행 " + UI.dateKST(a.lastPostAt) : "아직 발행 전"}</span></div>${UI.pill(UI.ACC_STATUS, a.status)}</div>
-  ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.errk(a.lastErrorKind || "login_fail"))}</span><button type="button" id="relogin">다시 로그인</button></div>`
+  ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.loginState(a).why)}</span><button type="button" id="relogin">${UI.loginState(a).cta}</button></div>`
     : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
     : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
   ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
@@ -1578,7 +1579,7 @@ async function loadTakedown() {
   const row = (n) => `<button type="button" class="row tap" data-td="${n.id}">${n.channel ? UI.mark(n.channel) : '<span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v5M12 17h.01"/><path d="M10.3 3.9L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>'}<div class="l"><span class="t wrap">${UI.esc(n.kindLabel)} 신고</span><span class="d wrap">${UI.esc(n.reason || "")}</span></div>${UI.pill(UI.TAKEDOWN_STATUS, n.status)}<svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>`;
   host.hidden = false;
   host.innerHTML = `<div class="gt">내 글에 들어온 신고 ${live.length ? `<span class="pill warn">${live.length}</span>` : ""}</div>`
-    + (live.length ? live.map(row).join("") + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요 · 내리는 데 코인은 들지 않아요.</p>' : "")
+    + (live.length ? live.map(row).join("") + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">${UI.takedownLead(live)} · 내리는 데 코인은 들지 않아요.</p>` : "")
     + (done.length ? `<div class="gt" style="padding-top:4px">지난 신고 ${done.length}건</div>${done.map(row).join("")}` : "");
   UI.$$("#takedown [data-td]").forEach((b) => b.onclick = () => UI.takedownSheet(r.notices.find((n) => n.id === Number(b.dataset.td)), loadTakedown));
   /* 알림·메일이 `#takedown` 으로 보내는데 그때 이 섹션은 아직 숨어 있었다 — 그려진 **뒤에** 데려간다. */
@@ -2806,7 +2807,7 @@ function render() {
   const host = UI.$("#list");
   /* 🔴 신고는 **탭과 상관없이** 맨 위에 — 목록이 비어 있어도(거른 탭이어도) 보여야 한다. 겁주지 않는 한 문장 + 갈 길(§3·§9-1). */
   const live = notices.filter((n) => UI.TAKEDOWN_ACTIVE.includes(n.status));
-  const tdBn = live.length ? `<div class="banner" style="margin:0 0 12px"><span>내 글에 들어온 신고가 ${live.length}건 있어요 · 직접 내리셔도 되고, 저희가 대신 내려 드릴 수도 있어요</span><button type="button" id="tdGo">확인하기</button></div>` : "";
+  const tdBn = live.length ? `<div class="banner" style="margin:0 0 12px"><span>내 글에 들어온 신고가 ${live.length}건 있어요 · ${UI.takedownLead(live)}</span><button type="button" id="tdGo">확인하기</button></div>` : "";
   const bindTd = () => { const b = UI.$("#tdGo"); if (b) b.onclick = () => (live.length === 1 ? UI.takedownSheet(live[0], load) : UI.go("/app/settings.html#takedown")); };
   if (!shown.length) {
     const E = { all: ["아직 올라간 글이 없어요", "편성표를 확인해 보세요", "/app/schedule.html", "편성표 보기"], published: ["아직 올라간 글이 없어요", "예약한 시각이 되면 여기에 쌓여요", "/app/schedule.html", "편성표 보기"], awaiting_manual: ["직접 올릴 글이 없어요", "올리지 못한 글이 생기면 여기에 모아 드려요", null, null] }[tab];
