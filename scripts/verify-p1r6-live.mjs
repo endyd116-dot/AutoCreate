@@ -194,19 +194,18 @@ async function main() {
     const csvEntry = buf ? zipEntries(buf).find((e) => /\.csv$/i.test(e.name)) : null;
     if (csvEntry && buf) { const raw = zipRead(buf, csvEntry); rec("수익 CSV BOM·«(KST)»(라이브)", raw[0] === 0xef && /\(KST\)/.test(raw.toString("utf8")), `${csvEntry.name}`); }
   }
-  finish(madeTenants, opId);
+  await finish(madeTenants, opId);
 }
 async function finish(tenants = [], opId = 0) {
   const s = sql;
   if (s) {
-    for (const t of tenants) {
-      if (KEEP.has(t)) continue;
-      try { await s.unsafe(`DELETE FROM piece_assets WHERE piece_id IN (SELECT id FROM pieces WHERE tenant_id=$1)`, [t]); } catch { /* */ }
-      for (const tb of ["revenue_daily", "posts", "runner_jobs", "coin_ledger", "ai_usage", "notifications", "audit_logs", "slots", "pieces", "briefs", "cadence_rules", "accounts", "topics"]) { try { await s.unsafe(`DELETE FROM ${tb} WHERE tenant_id=$1`, [t]); } catch { /* */ } }
-      try { await s.unsafe(`UPDATE tenants SET plan_key='trial', settings = settings - 'export' WHERE id=$1`, [t]); } catch { /* */ }
-    }
-    if (opId) { try { await s.unsafe(`DELETE FROM audit_logs WHERE actor_id=$1 AND actor_type='operator'`, [opId]); } catch { /* */ } try { await s.unsafe(`DELETE FROM operators WHERE id=$1`, [opId]); } catch { /* */ } }
-    rec("정리(테스트 테넌트·임시 operator)", true, `tenants ${tenants.join(",") || "-"} · operator ${opId || "-"}`);
+    /* [P1R7 §3.5] 공용 teardown — 예전엔 **행만 지우고 집(tenants)은 남겼다**(그래서 라이브에 테스트 테넌트가 쌓였다 · 대청소 88집).
+       이제 하니스가 만든 집은 통째로 지운다. 보존 id(3·13·109·116·198)와 «살아 있는 구독»은 `_teardown.mjs` 가 먼저 거부한다. */
+    try {
+      const { teardownRun } = await import("./_teardown.mjs");
+      const r = await teardownRun(s, { tenants, operatorIds: opId ? [opId] : [], label: "P1R6-live" });
+      rec("정리(teardown)", !r.failed, `${r.text} · operator ${opId || "-"}`);
+    } catch (e) { rec("정리(teardown)", false, String(e?.message ?? e).slice(0, 160)); }
   }
   const fails = results.filter((r) => r.ok === "FAIL").length, warns = results.filter((r) => r.ok === "WARN").length;
   const w = (x, n) => String(x ?? "").slice(0, n).padEnd(n);

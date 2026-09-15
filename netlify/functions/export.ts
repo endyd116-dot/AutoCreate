@@ -3,13 +3,14 @@
  *   POST /api/export-start { kinds:["post","video","revenue"], from, to } → **202** { ok:true, started:true }
  *        · 이미 만드는 중이면 { ok:true, started:false, running:true }(횟수·자원을 갉아먹지 않는다 · topics-refresh 관례)
  *   GET  /api/export-status → { ok:true, export:{ running, startedAt, finishedAt, progress, url, expiresAt, bytes, files, error } }
- *   코인 0 · 하루 3회(감사 `export_start` COUNT · topics-refresh 와 같은 패턴) · `requireWritable`.
+ *   코인 0 · 하루 3회(감사 `export_start` COUNT · topics-refresh 와 같은 패턴) · `requireWritable` · **Agency 전용**(P1R7 §3.2 · 402 `step:"plan_feature"`).
  *   🔴 만든 ZIP 은 **presigned 7일** — 만료된 링크는 `export-status` 가 아예 주지 않는다(죽은 «받기» 버튼 금지 · state.ts).
  */
 import { sql } from "drizzle-orm";
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireUser, requireWritable } from "../../lib/guards";
+import { requireFeature } from "../../lib/plans";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { q } from "../../lib/accounts";
@@ -40,6 +41,8 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, export: await readExportState(tid) });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
+    // [P1R7 §3.2] 내보내기는 Agency 열(설계 §12.2) — Starter/Pro 는 402 plan_feature. 🔴 이미 만들어 둔 ZIP 의 «받기»(export-status)는 막지 않는다.
+    const feat = await requireFeature(tid, "exportZip"); if (!feat.ok) return feat.res;
     const w = await requireWritable(tid); if (!w.ok) return w.res;
 
     // 이미 만드는 중이면 횟수를 쓰지 않는다(중복 요청이 상한을 갉아먹지 않게 · topics-refresh 와 같은 모양).

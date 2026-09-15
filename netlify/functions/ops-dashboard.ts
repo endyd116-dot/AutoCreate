@@ -6,6 +6,8 @@
  *   돈 규칙: 매출 = **공급가**(invoices.amount · 부가세 제외 · 환불분은 공급가로 환산해 뺀다). 부가세는 매출이 아니다(§12.0).
  *   🔴 «없음 ≠ 0»(AC-9): 환율이 없으면 aiCost.krw 를 싣지 않고 fxMissing:true · marginKrw 도 싣지 않는다. 전환율은 코호트가 없으면 null.
  *   R1 화면(public/ops/index.html)이 읽던 `month`·`tenants` 객체는 과도기 동안 같이 싣는다(계약 모양엔 없는 키 · A 가 R4 화면으로 바꾸면 뗀다). 집계한 달은 `period`.
+ *   🔴 [P1R7 §3.4] **내부 테스트 테넌트는 기본 집계에서 뺀다**(`tenants.is_internal` · 사장님 질문 «AI 원가 15,820원이 뭐냐»). `?internal=1` 이면 포함.
+ *      응답 `internal:{ excluded, tenants }` 로 «몇 집을 뺐는지»를 같이 말한다 — 숫자가 줄어든 이유를 화면이 설명할 수 있어야 한다.
  */
 import { sql } from "drizzle-orm";
 import { json, jsonError } from "../../lib/response";
@@ -16,6 +18,7 @@ import { paidPlanKeys } from "../../lib/subscription";
 import { fxToKrw } from "../../lib/revenue/common";
 import { COIN_KRW } from "../../lib/coin-table";
 import { kstMonthRange, ts, within } from "../../lib/ops/period";
+import { excludeInternal, excludeInternalSelf, includeInternalOf } from "../../lib/ops/internal";
 
 export const config = { path: "/api/ops-dashboard" };
 const n = (v: unknown) => Number(v || 0);
@@ -27,6 +30,8 @@ export default async (req: Request): Promise<Response> => {
   const o = await requireAdmin(req); if (!o.ok) return o.res;
   const url = new URL(req.url);
   const r = kstMonthRange(url.searchParams.get("month"));
+  const inc = includeInternalOf(url);                 // [P1R7 §3.4] 기본 false = 내부 테스트 제외
+  const notInternal = excludeInternal(sql`tenant_id`, inc);
   try {
     const paidAt = sql`paid_at`;
     // ① 매출(공급가) — 이번 달 · 오늘 · 구독/코인 분리. refunded 행도 공급가에서 환불분을 뺀 만큼은 매출.
@@ -35,13 +40,13 @@ export default async (req: Request): Promise<Response> => {
         COALESCE(SUM(CASE WHEN ${within(paidAt, r)} AND kind = 'subscription' THEN amount - ${supplyOfTotal} END), 0) AS sub_krw,
         COALESCE(SUM(CASE WHEN ${within(paidAt, r)} AND kind = 'coin' THEN amount - ${supplyOfTotal} END), 0) AS coin_krw,
         COALESCE(SUM(CASE WHEN paid_at >= ${ts(r.todayStart)} THEN amount - ${supplyOfTotal} END), 0) AS today_krw
-      FROM invoices WHERE status IN ('paid', 'refunded') AND paid_at IS NOT NULL`);
+      FROM invoices WHERE status IN ('paid', 'refunded') AND paid_at IS NOT NULL${notInternal}`);
 
     // ② MRR — 활성 유료 테넌트의 월 환산 공급가(가입 시점 고정가 > 플랜가 · 연납은 /12 · 할인 반영).
     const plans = await loadPlans();
     const paid = new Set(await paidPlanKeys());
     const subs = await q(sql`SELECT t.plan_key, s.cycle, s.price_locked_krw, s.discount_pct, s.discount_until
-      FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id = t.id WHERE t.status = 'active'`);
+      FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id = t.id WHERE t.status = 'active'${excludeInternalSelf(sql`t`, inc)}`);
     let mrr = 0; const byPlan = new Map<string, number>();
     for (const s of subs) {
       const key = String(s.plan_key); if (!paid.has(key)) continue;
@@ -67,11 +72,11 @@ export default async (req: Request): Promise<Response> => {
         -- 전환 코호트: 이번 달 가입 중 체험이 끝났거나 유료가 된 곳 / 그중 유료 활성
         COUNT(*) FILTER (WHERE ${within(created, r)} AND (trial_ends_at <= NOW() OR (status = 'active' AND plan_key <> 'trial'))) AS cohort,
         COUNT(*) FILTER (WHERE ${within(created, r)} AND status = 'active' AND plan_key <> 'trial') AS converted
-      FROM tenants`);
+      FROM tenants t WHERE TRUE${excludeInternalSelf(sql`t`, inc)}`);
     const cohort = n(t?.cohort), converted = n(t?.converted);
     const trialToPaidPct = cohort > 0 ? Math.round(converted * 100 / cohort) : null;
     const [ch] = await q(sql`SELECT COUNT(DISTINCT tenant_id) AS c FROM audit_logs
-      WHERE action IN ('subscription_cancelled', 'subscription_suspended_no_key') AND ${within(created, r)}`);
+      WHERE action IN ('subscription_cancelled', 'subscription_suspended_no_key') AND ${within(created, r)}${notInternal}`);
     const churnMonth = n(ch?.c);
     const churnBase = n(t?.active) + churnMonth;
     const churn = { month: churnMonth, pct: churnBase > 0 ? Math.round(churnMonth * 1000 / churnBase) / 10 : 0 };
@@ -79,19 +84,20 @@ export default async (req: Request): Promise<Response> => {
     // ④ 코인 — 판매(공급가) · 소비(코인 수)
     const [coins] = await q(sql`SELECT
         COALESCE(SUM(CASE WHEN kind = 'coin' AND status IN ('paid','refunded') AND ${within(paidAt, r)} THEN amount - ${supplyOfTotal} END), 0) AS sold_krw
-      FROM invoices`);
-    const [cons] = await q(sql`SELECT COALESCE(-SUM(delta), 0) AS consumed FROM coin_ledger WHERE kind = 'consume' AND ${within(created, r)}`);
+      FROM invoices WHERE TRUE${notInternal}`);
+    const [cons] = await q(sql`SELECT COALESCE(-SUM(delta), 0) AS consumed FROM coin_ledger WHERE kind = 'consume' AND ${within(created, r)}${notInternal}`);
 
     // ⑤ AI 원가 — usd 합 · 환율 없으면 미환산(0 아님)
-    const [ai] = await q(sql`SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM ai_usage WHERE ${within(created, r)}`);
+    const [ai] = await q(sql`SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM ai_usage WHERE ${within(created, r)}${notInternal}`);
     const usd = Math.round(n(ai?.usd) * 10000) / 10000;
     const fx = fxToKrw(usd, "USD", {});
     const aiCost: Record<string, unknown> = fx ? { usd, krw: fx.krw, fxMissing: false } : { usd, fxMissing: true };
 
     // ⑥ 채널별 발행 · 고객이 걷은 수익(revenue_daily · KST day 는 이미 날짜)
-    const pub = await q(sql`SELECT channel, COUNT(*) AS c FROM posts WHERE ${within(sql`published_at`, r)} GROUP BY channel ORDER BY c DESC`);
-    const [collected] = await q(sql`SELECT COALESCE(SUM(amount_krw), 0) AS krw FROM revenue_daily WHERE day >= ${r.month + "-01"}::date AND day < (${r.month + "-01"}::date + interval '1 month')`);
-    const [tk] = await q(sql`SELECT COUNT(*) FILTER (WHERE status IN ('open','progress')) AS open FROM tickets`);
+    const pub = await q(sql`SELECT channel, COUNT(*) AS c FROM posts WHERE ${within(sql`published_at`, r)}${notInternal} GROUP BY channel ORDER BY c DESC`);
+    const [collected] = await q(sql`SELECT COALESCE(SUM(amount_krw), 0) AS krw FROM revenue_daily WHERE day >= ${r.month + "-01"}::date AND day < (${r.month + "-01"}::date + interval '1 month')${notInternal}`);
+    const [tk] = await q(sql`SELECT COUNT(*) FILTER (WHERE status IN ('open','progress')) AS open FROM tickets WHERE TRUE${notInternal}`);
+    const [intl] = await q(sql`SELECT COUNT(*)::int AS c FROM tenants WHERE is_internal`);
 
     const revenue = { todayKrw: n(rev?.today_krw), monthKrw: n(rev?.month_krw), subscriptionKrw: n(rev?.sub_krw), coinKrw: n(rev?.coin_krw) };
     const body: Record<string, unknown> = {
@@ -104,6 +110,7 @@ export default async (req: Request): Promise<Response> => {
       published: { byChannel: pub.map((p) => ({ channel: String(p.channel), n: n(p.c) })) },
       revenueCollectedKrw: n(collected?.krw),
       openTickets: n(tk?.open),
+      internal: { excluded: !inc, tenants: n(intl?.c) },   // [P1R7 §3.4] «내부 N집을 뺀 숫자입니다» 를 화면이 말할 수 있게
     };
     if (fx) body.marginKrw = revenue.monthKrw - fx.krw;
     // ── R1 화면 호환(과도기 · public/ops/index.html 이 `month`·`tenants` 객체를 읽는다 · 계약 모양엔 없는 키라 충돌 없음) ──

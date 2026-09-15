@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { r2Configured, r2Head, r2Put, R2_BUCKET } from "../lib/r2";
+import { contentDisposition, r2Configured, r2Head, r2Put, R2_BUCKET } from "../lib/r2";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const RUNNER = path.join(ROOT, "runner");
@@ -141,7 +141,7 @@ async function main() {
   }
 
   // 서명 없이 열릴 때를 위한 보루로 이름을 오브젝트에도 박아 둔다(presign 의 ResponseContentDisposition 이 우선).
-  await r2Put(key, zip, "application/zip", undefined, `attachment; filename="autocreate-runner-v${version}.zip"`);
+  await r2Put(key, zip, "application/zip", undefined, contentDisposition(`autocreate-runner-v${version}.zip`));
   const latest = { version, sha256: hash, bytes: zip.length, releasedAt: new Date().toISOString(), notes: String(process.env.RUNNER_NOTES ?? "").slice(0, 200) };
   /* 🔴 `latest.json` 은 **바뀌는 파일**이다 — r2Put 의 기본 immutable 캐시를 그대로 쓰면
         새 버전을 올려도 한동안 옛 값이 읽힌다(자동 업데이트가 조용히 멈춘다). 짧은 캐시로 올린다. */

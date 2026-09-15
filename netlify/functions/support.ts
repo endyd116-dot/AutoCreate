@@ -6,7 +6,8 @@
  *   POST /api/support-ticket-message { id, text, attachments? } → 내 문의에 이어 쓰기(해결된 티켓이면 다시 open)
  *   POST /api/support-rate { id, helpful:boolean } → 만족도(해결된 내 티켓만 · 1탭)
  *   POST /api/support-upload-url { ext, contentType } → { ok, key, uploadUrl, url }   R2 presigned PUT(60초 · 이미지만 · 5MB 는 화면이 막는다) · R2 없으면 step not_configured 정직
- *   GET  /api/faqs                           → { ok, faqs:[{ id, q, a, order, category? }] } (공개 · 로그인 불필요)
+ *   GET  /api/faqs                           → { ok, faqs:[{ id, q, a, order, category?, pinned? }] } (공개 · 로그인 불필요)
+ *        🔴 [P1R7 §3.3] 첫 줄은 **자동화 범위 고정 행**(`lib/legal.ts SCOPE_FAQ` · «댓글·DM 은 하지 않아요») — DB 에 없고 지워지지도 않는다.
  *   옛 경로 /api/support-ticket-create { subject, body } 는 그대로 받는다(R1 화면 호환).
  */
 import { sql } from "drizzle-orm";
@@ -19,6 +20,8 @@ import { q } from "../../lib/accounts";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { createTicket } from "../../lib/cs";
 import { r2Configured, r2PublicUrl, safeKey, getR2Client, R2_BUCKET } from "../../lib/r2";
+
+import { SCOPE_FAQ } from "../../lib/legal";
 
 export const config = { path: ["/api/support-ticket", "/api/support-ticket-create", "/api/support-tickets", "/api/support-ticket-message", "/api/support-rate", "/api/support-upload-url", "/api/faqs"] };
 const n = (v: unknown) => Number(v || 0);
@@ -48,7 +51,8 @@ export default async (req: Request): Promise<Response> => {
   try {
     if (path.endsWith("/faqs")) {
       const rows = await q(sql`SELECT id, question, answer, category, sort FROM faqs WHERE public = true ORDER BY sort, id`);
-      return json({ ok: true, faqs: rows.map((r) => ({ id: n(r.id), q: String(r.question), a: String(r.answer), order: n(r.sort), ...(r.category ? { category: String(r.category) } : {}) })) });
+      const faqs = rows.map((r) => ({ id: n(r.id), q: String(r.question), a: String(r.answer), order: n(r.sort), ...(r.category ? { category: String(r.category) } : {}) }));
+      return json({ ok: true, faqs: [{ ...SCOPE_FAQ }, ...faqs] });
     }
     const auth = requireUser(req); if (!auth.ok) return auth.res;
     const tid = auth.tid;
