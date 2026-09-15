@@ -44,6 +44,16 @@ const connBlock = /const API_CONNECTORS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(idx)?.[1
 const wiredApi = new Set([...connBlock.matchAll(/^\s{2}([a-z_]+):/gm)].map((m) => m[1]));
 const retractSrc = readFileSync("lib/publish/retract-api.ts", "utf8");
 const wiredRetract = new Set([...retractSrc.matchAll(/ctx\.channel\s*===\s*"([a-z_]+)"/g)].map((m) => m[1]));
+
+/* [P1R8 §3.4] ⑥⑦의 재료 — 채널 «이름»은 **세 곳**에 있다. 셋이 갈리면 조용히 이상해진다:
+     · `scripts/seed-plans.mjs` — 새 설치가 DB 에 넣는 이름(그리고 DDL 이 라이브에 넣는 그 값)
+     · `public/js/ui.js UI.CH`  — 화면이 쓰는 이름. **없으면 «facebook_reels» 라는 열쇠 글자가 그대로 뜬다**
+   ⇒ 표에 있는 채널은 둘 다에 있어야 하고, 이름은 **글자까지 같아야** 한다(AC-52 «모의가 서버와 다른 낱말»). */
+const seedSrc = readFileSync("scripts/seed-plans.mjs", "utf8");
+const seedLabel = new Map([...seedSrc.matchAll(/\["([a-z_]+)",\s*"([^"]+)",\s*"(?:text|video)"/g)].map((m) => [m[1], m[2]]));
+const uiSrc = readFileSync("public/js/ui.js", "utf8");
+const uiBlock = /UI\.CH\s*=\s*\{([\s\S]*?)\n\s*\};/.exec(uiSrc)?.[1] ?? "";
+const uiLabel = new Map([...uiBlock.matchAll(/([a-z_]+):\s*\{\s*label:\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
 /** 글 계약에 있는 채널 키 — `WRITING_CONTRACTS` 의 최상위 키(`naver_blog: {` 꼴). */
 const contractKeys = new Set([...con.matchAll(/^\s{2}([a-z_]+):\s*\{$/gm)].map((m) => m[1]));
 
@@ -53,6 +63,10 @@ for (const r of rows) {
   if (r.publishVia === "runner" && !r.jobKind) problems.push(`🔴 ${r.key}: 러너 발행인데 jobKind 가 없다 — 적재할 잡 이름이 없다`);
   if (r.publishVia === "api" && !wiredApi.has(r.key)) problems.push(`🔴 ${r.key}: publishVia=api 인데 lib/publish/index.ts API_CONNECTORS 에 없다 — «올린다»고 답해 놓고 발행이 막힌다`);
   if (r.retractVia === "api" && !wiredRetract.has(r.key)) problems.push(`🔴 ${r.key}: retractVia=api 인데 lib/publish/retract-api.ts 에 분기가 없다 — «내려 주기» 단추가 켜지는데 눌러도 실패한다`);
+  if (!seedLabel.has(r.key)) problems.push(`🔴 ${r.key}: scripts/seed-plans.mjs 에 없다 — 새로 깐 DB 에는 이 채널이 통째로 없다`);
+  if (!uiLabel.has(r.key)) problems.push(`🔴 ${r.key}: public/js/ui.js UI.CH 에 없다 — 화면에 «${r.key}» 라는 열쇠 글자가 그대로 뜬다`);
+  const [a, b] = [seedLabel.get(r.key), uiLabel.get(r.key)];
+  if (a && b && a !== b) problems.push(`🟡 ${r.key}: 이름이 다르다 — 시드 «${a}» ↔ 화면 «${b}»(같은 채널을 서로 다른 말로 부른다)`);
 }
 /* 거꾸로도 본다 — 배선은 있는데 표가 «api» 가 아니면 그 커넥터는 **아무도 안 부른다**(AC-69 죽은 통로). */
 for (const k of wiredApi) if (!rows.some((r) => r.key === k && r.publishVia === "api")) problems.push(`🟡 ${k}: 커넥터는 배선돼 있는데 표의 publishVia 가 api 가 아니다 — 부르는 자리가 없다(죽은 통로)`);
@@ -66,6 +80,8 @@ console.log(`  publishVia=null(아직 못 올림): ${rows.filter((r) => !r.publi
 console.log(`  배선된 커넥터(index.ts): ${[...wiredApi].join(" ") || "(없음)"}`);
 console.log(`  배선된 내리기(retract-api.ts): ${[...wiredRetract].join(" ") || "(없음)"}`);
 if (!rows.length || !contractKeys.size) { console.log("🔴 표를 못 읽었다 — 파일 모양이 바뀌었나 본다(검사 자체가 조용히 통과하지 않게 실패로 둔다)"); process.exit(1); }
+console.log(`  이름표: 시드 ${seedLabel.size}개 · 화면 ${uiLabel.size}개`);
 if (!wiredApi.size || !wiredRetract.size) { console.log("🔴 커넥터 배선을 못 읽었다 — index.ts·retract-api.ts 의 모양이 바뀌었다(정규식이 빗나갔다)"); process.exit(1); }
+if (!seedLabel.size || !uiLabel.size) { console.log("🔴 이름표를 못 읽었다 — seed-plans.mjs·ui.js 의 모양이 바뀌었다(정규식이 빗나갔다)"); process.exit(1); }
 if (problems.length) { console.log("\n" + problems.join("\n")); process.exit(1); }
 console.log("\n✅ 두 표가 어긋나지 않는다");
