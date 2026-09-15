@@ -10,7 +10,7 @@
 **AutoCreate(AC)** = 부수입을 원하는 개인이 여러 계정으로 글·영상을 AI로 만들어 자동 발행하고 광고·제휴 수익을 한 곳에서 보는 토스형 SaaS. AM(AutoMarketing)의 엔진을 이식하고 겉(제품·화면·계정 모델·수익 집계·결제·운영센터)은 새로 짰다.
 
 - **개발 라운드 전부 종료**: Phase 0 · R1 · R2 · R3 · ui-v4 · R4 · R5 · R6 + KICC 이중 MID. 설계(`docs/DESIGN.md`) 대비 미개발 = 외부 선결조건(유튜브 심사 등)이 막은 것 + **§6 «사장님 실측 발견 5건»(진행 중)**.
-- **라이브 = main `7bedd74`**(배포 #8 · 2026-09-15 · C «배포 가능» PASS 40·FAIL 0 · 라이브 스모크: `/api/push-key` publicKey 200 · `/api/account-slots` 401 · 설정 «알림 받기») · 이전 배포 #7 (`7985d37` · C «배포 가능» · 라이브 스모크 health 200 · create.html v9 «내 소재 넣기» · runner-download 401) · 로컬 main `012ce66`(B R6 §1 · 미배포 = 배포 #8 후보)(R6.5 전부 머지 · 러너 v1.1.4 ) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
+- **라이브 = main `90364bc`**(배포 #9 · 라이브 확인 `ac.css?v=13` + «연결된 채널의 소재만») · 직전 #8 (`7bedd74` · 2026-09-15 · C «배포 가능» PASS 40·FAIL 0 · 라이브 스모크: `/api/push-key` publicKey 200 · `/api/account-slots` 401 · 설정 «알림 받기») · 이전 배포 #7 (`7985d37` · C «배포 가능» · 라이브 스모크 health 200 · create.html v9 «내 소재 넣기» · runner-download 401) · 로컬 main `012ce66`(B R6 §1 · 미배포 = 배포 #8 후보)(R6.5 전부 머지 · 러너 v1.1.4 ) · https://autocreate-endyd.netlify.app · GitHub `endyd116-dot/AutoCreate` · push = 배포(메인 단독)
 - **결제(KICC) 실돈 실측 통과**(2026-09-15): 카드 등록(keyin MID) → ₩5,500 청구 → ₩2,000 부분 취소 → ₩3,500 환불 · 카드 최종 0원.
 - 운영센터 `/ops` · `admin`/`admin1234`(**사장님 아직 안 바꿈**) · MIS 허브 SSO 카드 ⑥ 라이브.
 
@@ -47,6 +47,7 @@
 | 6 | `4d06070` | R6 마감(공유 카드 금액 캐시) |
 | **7** | **`7985d37`** | R6.5 사장님 실측 5건(직접 소재·캡션·자동편성 안내·건너뛰기·러너 배포 v1.1.4) + C 수리 4 + 화면 44px | 
 | **8** | **`7bedd74`** | R7 전부(영상 축 개통 · 러너 배포·프록시·워밍업·관리형 계정당 · 탈퇴·파기·플랜 게이트·내부 테스트 제외·계정 더 쓰기·웹푸시 · 화면 전부 · C 검증 PASS 40/FAIL 0) |
+| **9** | **`90364bc`** | 사장님 실측(만들기 «왜 이 채널만») · 러너 v1.1.7 · waitFor 준비 판정 |
 | 핫픽스 | `7ae8e78`→`2278ae7`→`f6c7eaa`→`f935034`→`7e0616e`→**`e7bd0c7`** | 티스토리 HTML · KICC 콜백 POST · 확인용 JSON · 빌키 keyin 고정 · 결과표 · 결제 실패 사유 시트 |
 
 ### 라이브에 있는 것
