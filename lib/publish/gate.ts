@@ -3,13 +3,20 @@
  *   AC 신규 2026-09-14(B2). 순수에 가깝다 — DB·네트워크 접근 0(호출자가 저장한다).
  *
  *   왜 «또» 검사하나: 검수창에서 사람이 본문을 고칠 수 있고(고지 삭제 포함), 승인 후 발행까지 시간이 뜬다.
- *   **남의 서버로 나가기 직전**이 마지막 기회다 — 여기서 막지 못하면 쿠팡은 수익 몰수, 애드센스는 계정 정지가 현실이다(§16B 머리말).
+ *   **남의 서버로 나가기 직전**이 마지막으로 **볼** 기회다.
+ *
+ *   🔴 **2026-09-15 사장님 지시(`CLAUDE.md §9`)**: «말해 주기로 내려. **고객 계정이야. 우리가 책임지는 게 아니야.**»
+ *      ⇒ **여기서 발행을 세우지 않는다.** 검사는 그대로 돌고 결과를 남기지만, 호출부(`lib/publish/index.ts`)가
+ *         `ok:false` 로 막던 것을 없앴다. 쿠팡 수익 몰수·애드센스 정지는 **위험이지 우리가 대신 판단할 일이 아니다** —
+ *         우리 몫은 **또렷하게 말하고**(감사 `publish_gate_risks` · `gate_report` 저장 · 발행함 표시)
+ *         **되돌릴 길**(§5E «이 글 내리기»)을 같이 주는 것이다.
+ *      🔴 **①고지 복원은 그대로 한다** — 그건 막는 게 아니라 **대신 넣어 주는 것**이라 §9-4(«대신 해 줄 건 대신»)에 맞는다.
  *
  *   하는 일 3가지
  *     ① 고지 복원 — 제휴 글인데 `<div class="disclosure">` 가 첫 요소가 아니면 **정본 문구로 다시 넣는다**(§16B.1 본문 첫머리).
  *     ② 애드센스 자리 실체화 — `<div class="adsense"></div>` 를 계정의 애드센스 코드로 바꾸고 «광고» 라벨을 붙인다(§16B.3
  *        «광고 자리 본문과 혼동 금지»). 애드센스 키가 없으면 빈 자리를 **지운다**(빈 div 를 남기지 않는다).
- *     ③ 세는 것 3가지 — 고지·광고법 금칙어·제휴 링크 ≤2. 하나라도 실패면 **발행 금지**(경고 아님).
+ *     ③ 세는 것 3가지 — 고지·광고법 금칙어·제휴 링크 ≤2. 🔴 **실패해도 발행은 나간다**(경고다 · 위 §9).
  */
 import { GATE_LABEL, type GateCheck, type GateReport } from "../ai-tell-gate";
 import { checkDisclosureHtml, disclosureTextFor } from "../disclosure";
@@ -87,7 +94,10 @@ export function countAffiliateLinks(html: string): number {
 export const ADSENSE_CHANNELS: ReadonlySet<string> = new Set(["tistory", "blogger", "wordpress"]);
 
 /**
- * runPublishGate — 발행 직전 준비 + 검사. 실패면 발행 금지(`{ ok:false }` → 호출자가 awaiting_manual).
+ * runPublishGate — 발행 직전 준비 + 검사.
+ *   🔴 `ok` 는 **«검사를 다 지났나»**일 뿐 **«발행해도 되나»가 아니다**(`CLAUDE.md §9` · 사장님 2026-09-15).
+ *      호출부는 이 값으로 **막지 않는다** — 감사·`gate_report`·화면에 쓰고 **그대로 내보낸다.**
+ *      막고 싶어지거든 §9 를 먼저 읽어라. 되돌리지 말고 이유를 읽으라고 남기는 줄이다.
  *   검사 키는 §4 GateKey 어휘 그대로 3개(disclosure·banned_words·affiliate_count) — A 화면이 같은 label 로 그린다.
  */
 export function runPublishGate(subject: GateSubject, account?: GateAccountHints): PublishGateResult {

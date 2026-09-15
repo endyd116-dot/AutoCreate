@@ -162,17 +162,25 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
     { channel: piece.channel, title: piece.title, bodyHtml: piece.bodyHtml, affiliate: piece.affiliate ?? null, adDisclosure: !!piece.disclosure },
     { adsensePub: String((account.monetize as Record<string, unknown> | undefined)?.adsensePub ?? "") },
   );
-  if (gate.changed && !opts.dryRun) {
+  /* 🔴 [§9] `gate_report` 는 **늘** 저장한다 — 종전엔 본문이 바뀐 경우에만 썼는데,
+     이제 막지 않으므로 «나갈 때 어떤 위험이 있었나»가 **남는 유일한 자리**다(발행함·되먹임 원장이 읽는다). */
+  if (!opts.dryRun) {
     // 고친 본문을 저장한다 — «올린 것 = 저장된 것»(검수창·발행함이 같은 본문을 본다).
     try { await q(sql`UPDATE pieces SET body = ${gate.bodyHtml}, gate_report = ${jsonb(gate.report)}, updated_at = NOW() WHERE id = ${piece.id}`); }
     catch (e) { console.error("[publish] body persist failed", e); }
   }
-  if (!gate.ok) {
+  /* 🔴 [CLAUDE §9 · 사장님 2026-09-15 «말해 주기로 내려. 고객 계정이야. 우리가 책임지는 게 아니야.»]
+     **여기서 발행을 세우지 않는다.** 종전에는 `ok:false → reason:"gate"` 로 막고 고객에게 «직접 올려 주세요»를 줬는데,
+     그 계정은 고객 것이고 **막힌 고객에게는 푸는 길이 없었다**(§9 «막으면 공장이 선다»).
+     대신 ①감사에 남기고 ②위 `gate_report` 로 **나간 뒤에도 발행함에서 보이게** 하고(§9-2) ③그대로 내보낸다.
+     되돌릴 길은 §5E «이 글 내리기»가 준다(§9-3).
+     🔴 **검사를 끈 것이 아니다** — `runPublishGate` 는 그대로 돌고, ①고지 복원도 그대로 한다(§9-4 «대신 해 줄 건 대신»). */
+  if (!gate.ok && !opts.dryRun) {
     await writeAudit({
-      tenantId: piece.tenantId, action: "publish_gate_blocked", actorType: "system", target: `piece:${piece.id}`,
-      detail: { failed: gate.report.checks.filter((c) => !c.pass).map((c) => c.key) }, riskLevel: "medium",
+      tenantId: piece.tenantId, action: "publish_gate_risks", actorType: "system", target: `piece:${piece.id}`,
+      detail: { risks: gate.report.checks.filter((c) => !c.pass).map((c) => ({ key: c.key, detail: c.detail ?? null })), note: "막지 않고 내보냄(CLAUDE §9)" },
+      riskLevel: "medium",
     });
-    return { ok: false, reason: "gate", retriable: false, error: "발행 전 확인이 필요해요.", gate: gate.report };
   }
   const prepared: PublishPiece = { ...piece, bodyHtml: gate.bodyHtml };
 

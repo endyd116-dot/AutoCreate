@@ -6,7 +6,7 @@
 <title>편성표 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="/css/ac.css?v=16">
+<link rel="stylesheet" href="/css/ac.css?v=17">
 </head>
 <body>
 <div class="shell">
@@ -23,8 +23,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=15"></script>
-<script src="/js/mock.js?v=14"></script>
+<script src="/js/ui.js?v=16"></script>
+<script src="/js/mock.js?v=16"></script>
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
@@ -234,6 +234,10 @@ function timeSheet(s, closeParent) {
     } });
 }
 const HOURS_R = [[6, "06시"], [7, "07시"], [9, "09시"], [12, "12시"], [13, "13시"], [18, "18시"], [20, "20시"], [21, "21시"]];   // [R7 §4.3] 고정 시각(preferred_hour)
+/* [R8 · B 765e2a0] 분(preferred_minute) — 사장님 «10:00 · 10:05 · 11:00»이 규칙 셋으로 선다.
+   🔴 5분 단위만 고르게 한다: 서버는 0~59 를 받지만 계정 사이 간격 정책에 밀려 1분 단위는 뜻이 없다(B 권고).
+   🔴 시각을 «자동»으로 두면 분은 뜻이 없다 — 그래서 시각을 고른 뒤에만 보인다. */
+const MIN_R = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => [m, `${String(m).padStart(2, "0")}분`]);
 /* 🔴 자동 승인은 크론까지 막히는 플랜 기능이다 — 화면이 «조용하면 발행»을 그려 놓고 실제로 안 되면 거짓말이 된다(B3 rules-list autoApprove).
    🔴 소급 0: **이미 «조용하면 발행»로 저장해 둔 집은 그대로 나간다** — 그런 집에는 잠그지 않고, 다른 값으로 바꾸면 되돌릴 수 없다고 미리 말한다. */
 const keptAuto = () => D.autoApprove === false && (D.settings || {}).reviewPolicy === "silence_approves";
@@ -244,7 +248,7 @@ const inclSay = (weekly) => { const inc = Number(D.includedCoins || 0); const mo
    화면이 «채널당 하나»로 묶어 버려서 «네이버 아침 3회 + 저녁 2회»나 «계정마다 다른 주기»를 만들 길이 아예 없었다(서버는 되는데 화면만 1:1).
    🔴 저장은 **늘 전체 목록**이다 — 서버는 목록에 없는 규칙을 끈다(그게 곧 «지우기»다). 한 줄만 고쳐도 나머지를 같이 보낸다. */
 const everySay = (r) => (r.every === "day" ? `하루 ${r.count}회` : r.every === "month" ? `달 ${r.count}회` : `주 ${r.count}회`);
-const ruleSay = (r) => [everySay(r), r.every === "week" && (r.weekdays || []).length ? (r.weekdays || []).map((i) => WD[Number(i)]).join("·") : "", r.preferredHour != null ? `${String(r.preferredHour).padStart(2, "0")}시` : "시각 자동",
+const ruleSay = (r) => [everySay(r), r.every === "week" && (r.weekdays || []).length ? (r.weekdays || []).map((i) => WD[Number(i)]).join("·") : "", r.preferredHour != null ? `${String(r.preferredHour).padStart(2, "0")}:${String(r.preferredMinute || 0).padStart(2, "0")}` : "시각 자동",
   r.accountMode === "fixed" && r.accountId ? "@" + (accounts.find((a) => a.id === r.accountId)?.handle || "") : "계정 자동"].filter(Boolean).join(" · ");
 const activeRules = () => (D.rules || []).filter((r) => r.active !== false);
 function rulesListSheet() {
@@ -259,7 +263,7 @@ function ruleOneSheet(rule) {
   const chans = [...new Set(accounts.map((a) => a.channel))];
   if (!chans.length) return UI.sheet(`<p class="muted" style="margin:0 0 16px">편성하려면 먼저 계정을 하나 연결해 주세요.</p><div class="cta"><a class="btn primary" href="/app/accounts.html">계정 연결</a></div>`, { title: "먼저 계정을 연결해요" });
   const s = { channel: rule?.channel || chans[0], every: rule?.every || "week", count: rule?.count || 3, wd: (rule?.weekdays || []).map(Number),
-    hour: rule?.preferredHour ?? null, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
+    hour: rule?.preferredHour ?? null, min: rule?.preferredMinute ?? 0, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const accs = accounts.filter((a) => a.channel === s.channel);
     body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}
@@ -267,6 +271,8 @@ function ruleOneSheet(rule) {
       <div style="padding:0 0 10px">${UI.seg("ev", [["day", "매일"], ["week", "주"], ["month", "달"]], s.every)}</div>
       ${s.every === "week" ? `<div class="sec">어느 요일</div>${UI.chips("wd", WD.map((w, i) => [i, w]), s.wd, true)}<p class="muted" style="margin:6px 0 0;font-size:12.5px">${s.wd.length ? `${s.wd.length}일 골랐어요` : "안 고르면 저희가 골라요"}</p>` : ""}
       <div class="sec">몇 시에</div>${UI.chips("hr", [["", "자동"], ...HOURS_R], s.hour == null ? "" : String(s.hour))}
+      ${s.hour == null ? "" : `<div class="sec">몇 분에 <span class="muted" style="font-weight:500">· 5분 단위</span></div>${UI.chips("mi", MIN_R, String(s.min || 0))}
+      <p class="muted" style="margin:6px 0 0;font-size:12.5px">계정끼리 너무 붙어 나가면 자리가 뒤로 밀릴 수 있어요 — 그때는 편성표에 그 까닭이 적혀요.</p>`}
       <div class="sec">어느 계정으로</div>${UI.seg("md", [["auto", "자동"], ["fixed", "고르기"]], s.mode)}
       <div data-pick ${s.mode === "fixed" ? "" : "hidden"} style="padding-top:8px">${UI.chips("ac", accs.map((a) => [a.id, "@" + a.handle]), s.acc || accs[0]?.id)}</div>
       <div class="cta">${rule ? '<button class="btn ghost" type="button" id="del" style="flex:0 0 30%;color:var(--danger-ink)">지우기</button>' : ""}<button class="btn primary" type="button" id="save">${rule ? "고치기" : "추가"}</button></div>`;
@@ -274,14 +280,15 @@ function ruleOneSheet(rule) {
     UI.bindChips(body, (n, v) => {
       if (n === "ch") { s.channel = v; s.acc = null; view(sh, close); } else if (n === "ev") { s.every = v; view(sh, close); }
       else if (n === "wd") { s.wd = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); }
-      else if (n === "hr") s.hour = v === "" ? null : Number(v);
+      else if (n === "hr") { s.hour = v === "" ? null : Number(v); view(sh, close); }
+      else if (n === "mi") s.min = Number(v);
       else if (n === "md") { s.mode = v; body.querySelector("[data-pick]").hidden = v !== "fixed"; }
       else if (n === "ac") s.acc = Number(v);
     });
     const one = () => { const r = { channel: s.channel, kind: isVideoCh(s.channel) ? "shorts" : "post", accountMode: s.mode, every: s.every, count: s.count, active: true };
       if (rule?.id) r.id = rule.id;
       if (s.mode === "fixed") r.accountId = s.acc || accounts.find((a) => a.channel === s.channel)?.id;
-      if (s.hour != null) r.preferredHour = s.hour;
+      if (s.hour != null) { r.preferredHour = s.hour; r.preferredMinute = s.min || 0; }   /* 🔴 분은 시각이 있을 때만 뜻이 있다(서버도 그렇게 읽는다) */
       if (s.every === "week" && s.wd.length) r.weekdays = s.wd;
       return r; };
     const send = async (list, btn, say) => { btn.disabled = true;
@@ -391,6 +398,7 @@ function settingsSheet() {
 gear.onclick = settingsSheet;
 UI.$("#prev").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); await loadSlots(); render(); };
 UI.$("#next").onclick = async () => { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); await loadSlots(); render(); };
+UI.pullToRefresh(load);
 await load();
 })();
 </script>

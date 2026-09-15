@@ -32,6 +32,7 @@ import { reviewDeadlineStep } from "./review-deadline";
 import { publisherStep } from "./publisher";
 import { learnStep } from "./learn";
 import { reapStep } from "./reap";
+import { stockCacheSweepStep } from "./stock-cache-sweep";   // [R8 §10 · B-1] 스톡 캐시 만료분 청소
 import { videoSweepStep } from "./video-sweep";
 import { revenueSyncStep } from "./revenue-sync";
 import { managedRunnerWatchStep } from "./managed-runner-watch";
@@ -85,6 +86,7 @@ export const STEPS: AnyStep[] = [
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
   managedRunnerWatchStep, // 5m · **global** — 관리형(우리 기기) 러너가 30분 조용하면 운영 감사(P1R7 §2.4)
   reapStep,            // 5m · 러너 잡 타임아웃 회수
+  stockCacheSweepStep, // hourly · **global** — 스톡 제공사 응답 캐시에서 **만료된 행만** 치운다(P1R8 §10 · 만료 전은 약관이 요구한 24시간 보관이라 안 지운다)
 ];
 
 export type { Every } from "./base";

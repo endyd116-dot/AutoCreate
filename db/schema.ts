@@ -948,3 +948,27 @@ export const cadenceRulesR8 = {
   /** 규칙이 못 박은 «분»(0~59 · NULL = 00). 사장님 안 «A 10:00 · B 10:05 · A 11:00» 을 규칙 3행으로 표현한다. */
   preferredMinute: "preferred_minute",
 } as const;
+
+/* === Phase 1 R8 · B-1 스톡 사진(DDL 0028-r8-stock-cache.sql) === */
+/**
+ * 스톡 제공사 응답 보관 — 🔴 **약관이 요구한 캐시**다(Pixabay «Requests must be cached for 24 hours»).
+ *   🔴 이 표에 `tenant_id` 가 없는 것은 §4.6 의 의도된 예외다: 담기는 것이 **제공사의 공개 검색 결과**이지 고객의 것이 아니다.
+ *      집마다 따로 담으면 약관이 요구한 캐시가 무의미해지고 요청 상한에 집 수만큼 빨리 닿는다(DDL 헤더에 근거).
+ *   상한 세기도 이 표가 한다 — 실제 호출만 행을 만들므로 «최근 창 안 행 수» = «최근 창 안 호출 수».
+ */
+export const stockCache = pgTable("stock_cache", {
+  id:        bigserial("id", { mode: "number" }).primaryKey(),
+  /** pixabay | pexels */
+  provider:  varchar("provider", { length: 16 }).notNull(),
+  /** 정규화한 검색어 + 장수 + 언어(`lib/stock/cache.ts queryKeyOf`). */
+  queryKey:  text("query_key").notNull(),
+  /** 제공사 응답 원문 그대로(가공하지 않는다 — 파싱을 고쳐도 다시 부를 필요가 없다). */
+  payload:   jsonb("payload").notNull().default({}),
+  /** 🔴 «실제로 부른 시각» = 상한 세기의 기준. */
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+}, (t) => ({
+  providerQueryUk: uniqueIndex("stock_cache_provider_query_uk").on(t.provider, t.queryKey),
+  providerCreatedIdx: index("stock_cache_provider_created_idx").on(t.provider, t.createdAt),
+  expiresIdx: index("stock_cache_expires_idx").on(t.expiresAt),
+}));

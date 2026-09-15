@@ -86,6 +86,22 @@
   const discTextOf = (meta) => [meta.affiliate ? DISCLOSURE : "", meta.sponsored ? DISC_SPONSORED : "", meta.gift ? DISC_GIFT : ""].filter(Boolean).join(" ");
   // [v1.1] GateKey 12 · 순서 고정(5C.2 8검사 + 16B 4검사)
   /* [AC-52 · 2026-09-15 · lib/ai-tell-gate.ts GATE_LABEL 에서 그대로 복사] 🔴 라벨은 **통과형 문장**이다 — «문단 시작 반복 ✓» 처럼 명사형이면 뜻이 반대로 읽힌다 */
+  /* [R8 §9 · AC-52 · lib/ai-tell-gate.ts GATE_WEIGHT·GATE_HOW 에서 그대로 복사] 🔴 손으로 고치지 마라.
+     high = 법·제3자·고객 계정이 다치는 것 · normal = 글의 질. `how` 는 **실패한 칸에만** 실린다(서버 decorateCheck 와 같다). */
+  const GATE_WEIGHT = { disclosure: "high", banned_words: "high", stock_safe: "high", ad_pointing: "high", similarity: "high",
+    affiliate_count: "normal", superlative: "normal", cliche: "normal", para_repeat: "normal", bullet_ratio: "normal",
+    sentence_variance: "normal", translationese: "normal", persona: "normal", visual_min: "normal", link_check: "normal", structure_repeat: "normal" };
+  const GATE_HOW = {
+    disclosure: "검수에서 «대가를 받았나»를 켜면 첫머리 문장이 자동으로 들어가요.",
+    banned_words: "단정·효능 표현은 지우고, 최상급은 같은 문장에 근거(기관·기간·수치)를 붙여 주세요.",
+    stock_safe: "사람·상표가 없는 사진으로 바꾸거나, 이 글에서 광고를 빼 주세요.",
+    ad_pointing: "광고·배너를 가리키는 문장을 지우고 «다음 글 보기»처럼 읽기 행동을 권해 주세요.",
+    similarity: "도입 장면·소제목·예시를 다른 관점으로 바꿔 주세요.",
+    affiliate_count: "제휴 링크를 2개까지만 남겨 주세요.",
+    superlative: "«1위»·«최고» 옆에 출처·기간·수치를 적거나 표현을 낮춰 주세요.",
+    structure_repeat: "소제목 수·순서·끝맺음을 바꿔 보세요.",
+  };
+  const decorate = (c) => ({ ...c, weight: GATE_WEIGHT[c.key] || "normal", ...(c.pass || !GATE_HOW[c.key] ? {} : { how: GATE_HOW[c.key] }) });
   const gate = (ok = true) => ({ ok, rewritten: !ok, checks: [
     { key: "cliche", label: "상투 표현 없음", pass: true, detail: "0건" }, { key: "para_repeat", label: "문단 시작이 다양함", pass: true }, { key: "bullet_ratio", label: "불릿이 본문을 대신하지 않음", pass: true, detail: "18%" },
     { key: "sentence_variance", label: "문장 길이가 살아 있음", pass: true }, { key: "translationese", label: "번역투 없음", pass: true, detail: "0건" }, { key: "superlative", label: "최상급에 근거가 있음", pass: ok, detail: ok ? "0건" : "«최고» 2건" },
@@ -94,9 +110,9 @@
     /* [R8-A §2 · B-1] 골격 반복 — 🔴 **소프트**(HARD_GATE_KEYS 밖)라 실패해도 예약은 된다. 사유 문장 모양은 서버 checkStructure 그대로 */
     { key: "structure_repeat", label: "최근 글과 구조가 다름", pass: gateKnob !== "soft", detail: gateKnob === "soft" ? "최근 글 #499 과 구조가 78% 겹쳐요 — 다음 글은 다른 구성으로 써 주세요" : "가장 닮은 글과 41%(기준 75% 미만 · 6편과 견줌)" },
     /* [R8-A §4] 광고 가리킴 — 🔴 **하드**(승인이 막힌다) · 좁은 축이다(광고·배너를 가리키며 누르라고 할 때만) */
-    { key: "ad_pointing", label: "광고를 가리키지 않음", pass: gateKnob !== "adpoint", ...(gateKnob === "adpoint" ? { detail: "광고를 가리키며 누르라고 함: «아래 배너 클릭하고 가세요»" } : {}) } ] });
+    { key: "ad_pointing", label: "광고를 가리키지 않음", pass: gateKnob !== "adpoint", ...(gateKnob === "adpoint" ? { detail: "광고를 가리키며 누르라고 함: «아래 배너 클릭하고 가세요»" } : {}) } ].map(decorate) });
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS] 이 축만 «이대로 예약»을 막는다 — 소프트 실패는 막지 않는다(서버 hardFailures 와 같게) */
-  const HARD = ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"];
+  const HARD = [];   /* [R8 §9] 🔴 서버 HARD_GATE_KEYS 가 빈 배열이 됐다 — 막는 축은 하나도 없다(사장님 «말해 주기로 내려») */
   const gateOkOf = (g) => !((g && g.checks) || []).some((c) => !c.pass && HARD.includes(c.key));
 
   const fresh = qs.get("fresh") === "1";
@@ -234,7 +250,7 @@
       { id: 509, channel: clipPiece ? "naver_clip" : "youtube_shorts", accountHandle: clipPiece ? "clip_e" : "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" }, endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
     ],
     rules: fresh ? [] : [
-      { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, active: true },
+      { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, preferredMinute: null, active: true },
       { id: 2, channel: "tistory", kind: "post", accountMode: "fixed", accountId: 2, every: "week", count: 2, weekdays: [2, 4], preferredHour: 13, active: true },
       { id: 3, channel: "youtube_shorts", kind: "shorts", accountMode: "auto", every: "week", count: 2, weekdays: [2, 5], preferredHour: 18, active: true }, // [P1R5] kind shorts 규칙(주 2회 · 편당 video_60)
     ],
@@ -316,7 +332,7 @@
         const acc = r.accountMode === "fixed" ? S.accounts.find((a) => a.id === r.accountId) : S.accounts.find((a) => a.channel === r.channel && a.status === "active");
         const piece = d <= 2 ? S.pieces.find((p) => p.channel === r.channel && p.status !== "published" && !S.slots.some((s) => s.pieceId === p.id)) : null;
         const status = d === 0 && r.channel === "tistory" ? "published" : piece ? (piece.status === "in_review" ? "in_review" : "scheduled") : "planned";
-        S.slots.push({ id: S.nextId++, date, channel: r.channel, kind: r.kind === "shorts" ? "shorts" : "post", accountId: acc?.id, accountHandle: acc?.handle, status, publishAt: kst(d, r.preferredHour || 9, 30), reviewDeadline: kst(d - 1, 21), topicTitle: piece?.title || (d < 7 ? S.topics[d % S.topics.length]?.title : undefined), pieceId: piece?.id, origin: "auto" }); // [P1R5] kind shorts
+        S.slots.push({ id: S.nextId++, date, channel: r.channel, kind: r.kind === "shorts" ? "shorts" : "post", accountId: acc?.id, accountHandle: acc?.handle, status, publishAt: kst(d, r.preferredHour || 9, r.preferredHour != null && r.preferredMinute != null ? r.preferredMinute : 30), reviewDeadline: kst(d - 1, 21), topicTitle: piece?.title || (d < 7 ? S.topics[d % S.topics.length]?.title : undefined), pieceId: piece?.id, origin: "auto" }); // [P1R5] kind shorts
       }
     }
   }
