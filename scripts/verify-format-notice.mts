@@ -37,7 +37,7 @@ console.log("\n[① 깎인 글 — 알림이 나오나]");
 
 console.log("\n[② 🔴 겁주지 않는다(§3) · 되돌릴 길(§9-3)]");
 {
-  const say = formatDemotionNotice(demoted("quote"), "제목");
+  const say = formatDemotionNotice(demoted("quote"), "제목", "tistory");
   const body = String(say?.body ?? "");
   ok(!/정지|불이익|책임은|알려만|위반|주의하세요|될 수 있습니다\.?$/.test(body),
     "N-05 🔴 위협·책임 전가·겁주는 조건절 **0**(§3 — «주요 안내는 사전에 알려드려요» 쪽)", body);
@@ -45,6 +45,32 @@ console.log("\n[② 🔴 겁주지 않는다(§3) · 되돌릴 길(§9-3)]");
     "N-06 🔴 **사실 한 줄이 먼저다** — «글자는 그대로 실렸다»(무엇이 그런가 · §3 ①)", body);
   ok(/바꾸실 수 있어요|다시 올릴 수 있어요|고쳐서/.test(body),
     "N-07 🔴 **되돌릴 길을 함께 준다**(§9-3) — 말해 주기는 되돌릴 길이 있어야 정직하다", body);
+}
+
+/* ═══ 🔴 ②b 되돌릴 길은 **채널마다 다르다**(§5E) — 세 갈래를 다 잰다 ═══
+ *   §9-3 의 조건은 «**우리가 실제로 해 줄 수 있는 길**»이다. 못 내리는 채널에 «내려 드릴게요»라고 하면
+ *   그건 **없는 길을 약속하는 것**이고, §9-4(«대신 해 줄 수 있는 것은 대신 해 준다»)의 반대다.
+ *   ⚠️ 이 셋을 다 안 재면 «한 갈래만 맞는 문장»이 세 갈래에 다 나가도 초록이다. */
+console.log("\n[②b 🔴 되돌릴 길 — 채널 세 갈래]");
+{
+  const say = (ch?: string) => String(formatDemotionNotice(demoted("quote"), "제목", ch)?.body ?? "");
+  const canRetract = say("tistory");
+  ok(/내렸다가|다시 올릴 수 있어요/.test(canRetract),
+    "N-13 🔴 **내릴 수 있는 채널**(티스토리·네이버 = 러너가 내려 준다)에는 «내렸다가 고쳐서 다시 올릴 수 있어요»", canRetract);
+  ok(/내렸다가|다시 올릴 수 있어요/.test(say("naver_blog")), "N-13b 네이버도 같다");
+
+  const cannot = say("instagram");
+  ok(/채널에서 직접/.test(cannot) && !/내렸다가|다시 올릴 수 있어요/.test(cannot),
+    "N-14 🔴 **못 내리는 채널**(인스타 = 삭제 API 가 없다)에는 «내려 드릴게요»라고 **안 한다** — 없는 길을 약속하지 않는다", cannot);
+  ok(/채널에서 직접/.test(say("threads")), "N-14b 쓰레드도 같다(삭제 엔드포인트를 확인 못 했다)");
+
+  /* 🔴 **채널을 모를 때** — 되돌릴 길 문장을 **아예 안 낸다**. «모른다»를 «이 길이 있다»로 바꾸지 않는다(AC-92). */
+  const unknown = say(undefined);
+  ok(!/바꾸실 수 있어요|다시 올릴 수 있어요|내렸다가/.test(unknown),
+    "N-15 🔴 **채널을 모르면 되돌릴 길을 지어내지 않는다**(«모른다»를 «이 길이 있다»로 바꾸지 않는다 · AC-92)", unknown);
+  ok(unknown.length > 0 && /그대로 실렸|글자는/.test(unknown),
+    "N-15b 그래도 **무엇이 깎였는지는 말한다**(모르는 한 칸 때문에 아는 것까지 입을 닫지 않는다)", unknown);
+  ok(say("") === unknown, "N-15c 빈 채널도 «모름»과 같게 다룬다");
 }
 
 console.log("\n[③ 🔴 대조군 짝 — 안 깎였으면 **안 간다**]");
