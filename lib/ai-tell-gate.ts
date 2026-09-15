@@ -19,8 +19,9 @@
  *   순수 모듈(DB·AI 0).
  */
 import type { Block } from "./blocks";
-import { blocksToPlain } from "./blocks";
-import type { WritingContract } from "./writing-contracts";
+import { blocksToPlain, blocksCharCount } from "./blocks";
+import type { WritingContract, TopicGroup } from "./writing-contracts";
+import { lengthFor } from "./writing-contracts";   // [R8 §2.1] 계약 분량 폭(주제군 반영) — 정본 한 곳
 import { checkDisclosure, compensationOfMeta } from "./disclosure";
 import { findBannedWords, BLOG_EXTRA_BANNED, normalizeForBanScan, classifyBanned, hasEvidenceNear, findAdPointing } from "./banned-words";   // [R8-A §4] 3층 사전 + 근거 판정
 import { isHealthTopic } from "./banned-categories";                                   // [R8-A §4] 건강·의료 소재면 효능 표현이 바로 위법
@@ -28,9 +29,17 @@ import { SAME_BODY_SIMILARITY } from "./similarity";
 
 /** [P1R7 B3] `link_check` 는 **여기(runGate)가 재는 12키가 아니다** — 네트워크가 필요해 `lib/content-approve.ts checkLinks` 가 따로 재서 붙인다(소프트).
  *  어휘를 이 파일에 두는 이유: 화면·감사가 키·라벨을 한 곳에서 읽어야 하기 때문(GATE_KEYS 에는 넣지 않는다 = runGate 는 안 돈다). */
-export type GateKey = "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "ad_pointing" | "link_check" | "stock_safe" | "structure_repeat";
-export const GATE_KEYS: GateKey[] = ["cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count", "ad_pointing"];
+export type GateKey = "length" | "cliche" | "para_repeat" | "bullet_ratio" | "sentence_variance" | "translationese" | "superlative" | "persona" | "visual_min" | "disclosure" | "banned_words" | "similarity" | "affiliate_count" | "ad_pointing" | "link_check" | "stock_safe" | "structure_repeat";
+export const GATE_KEYS: GateKey[] = ["length", "cliche", "para_repeat", "bullet_ratio", "sentence_variance", "translationese", "superlative", "persona", "visual_min", "disclosure", "banned_words", "similarity", "affiliate_count", "ad_pointing"];
 export const GATE_LABEL: Record<GateKey, string> = {
+  /* [R8 §2.1 · B-1] 🔴 **분량** — 여태 **아무도 안 쟀다**. `blocksCharCount`(공백 포함 · 고지·태그 제외)는 있었는데 **부르는 곳이 0** 이었다(AC-29).
+     그래서 «계약 1,500자»가 선언으로만 있고, 실제로는 절반(C 실호출 3편 평균 736자)이 나와도 아무 표시가 없었다.
+     🔴 **소프트**다(HARD_GATE_KEYS 밖) — 짧다고 발행을 막으면 공장이 선다. 대신 **재작성 지시**로 이어진다(AC-63 «다른 층의 손잡이»).
+     🔴 **근거를 못 박아 둔다: SEO 가 아니다.** 구글은 «콘텐츠 길이 자체는 순위 결정과 관련 없다»고 직접 말한다(B3 조사 · DESIGN §5C.6).
+        맞는 근거는 둘뿐이다 — ①**실물이 그렇다**(R8-A 표본: 티스토리 8,500~12,500자) ②**얇은 글은 사람이 안 읽는다**.
+        여기에 «SEO 때문»이라고 적으면 다음 사람이 그 근거를 무너뜨리고 손잡이를 통째로 뺀다.
+     `runGate` 안에서 돈다(순수 · DB·AI 0) — `link_check`·`structure_repeat` 와 달리 밖에서 잴 것이 없다. */
+  length: "분량이 계약 폭 안",
   cliche: "상투 표현 없음", para_repeat: "문단 시작이 다양함", bullet_ratio: "불릿이 본문을 대신하지 않음", sentence_variance: "문장 길이가 살아 있음",
   translationese: "번역투 없음", superlative: "최상급에 근거가 있음", persona: "내 사정이 들어감", visual_min: "채널 시각 요소 충족",
   disclosure: "대가 고지 첫머리", banned_words: "근거 없이 쓰면 위험한 표현 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
@@ -45,11 +54,30 @@ export const GATE_LABEL: Record<GateKey, string> = {
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
 };
-export interface GateCheck { key: GateKey; label: string; pass: boolean; detail?: string;
-  /** [P1R8 §9] 화면이 «무겁게/가볍게»를 **서버 값으로** 그린다(화면이 정하면 축을 늘릴 때마다 낡는다 · A 요청). */
+export interface GateCheck {
+  key: GateKey; label: string; pass: boolean; detail?: string;
+  /**
+   * [P1R8 §9 · B3] 화면이 «무겁게/가볍게»를 **서버 값으로** 그린다(화면이 정하면 축을 늘릴 때마다 낡는다 · A 요청).
+   *   🔴 B-1 은 처음 `high|mid|low` 세 값으로 냈다가 **B3 의 두 값에 맞췄다** — 무게 표가 두 곳이면 그게 곧 갈라짐이다(AC-52).
+   */
   weight?: "high" | "normal";
-  /** 실패했을 때 «어떻게 하면 되나» 한 줄(서버 문장 — 두 곳이 다른 말을 하지 않게). */
-  how?: string }
+  /** [P1R8 §9 · B3] 실패했을 때 «어떻게 하면 되나» 한 줄(서버 문장 — 두 곳이 다른 말을 하지 않게). */
+  how?: string;
+  /**
+   * [R8 §5D.3-3 · B-1] **이 축은 재지 않았다**(사람이 직접 쓴 글에 AI 티 축을 들이대지 않는다).
+   *   🔴 «조용히 다 끄기» 금지라 **빠뜨리지 않고 실어 보낸다** — 화면이 이 칸을 보고 «안 했어요»로 그리고,
+   *      `pass:true` 를 초록 ✓ 로 **그리지 않는다**(못 잰 것을 통과로 그리지 않는 규율 · AC-33).
+   */
+  skipped?: boolean;
+  /** 왜 안 쟀나 — 지금은 `"self"` 하나(직접 쓴 글). */
+  skipReason?: string;
+  /**
+   * [R8 §9 · B-1] 이 축이 이 글에서 **도는가** — `soft`(돌고 말해 준다) · `off`(안 쟀다).
+   *   🔴 **`hard` 는 없다** — 막는 게이트는 0개다(사장님 지시 2026-09-15 · «말해 주기로 내려. 고객 계정이야»).
+   *      검사를 지운 것이 **아니다**: 계속 돌고 결과를 보여 준다. 막지만 않는다.
+   */
+  level?: "soft" | "off";
+}
 export interface GateReport {
   ok: boolean; checks: GateCheck[]; rewritten: boolean;
   /** [P1R5 §1.4-6] 영상 심사 결과 — «GateKey 12 중 영상에 해당하는 것 + judge». 글 piece 에는 없다.
@@ -174,6 +202,13 @@ export interface GateInput {
   similarity?: { score: number; against?: string };
   /** 제목(최상급·금칙어 검사에 포함). */
   title?: string;
+  /** [R8 §2.1] 주제군 — 계약 분량 폭이 주제군마다 다르다(`lengthFor`). 없으면 채널 기본 폭. */
+  group?: TopicGroup | null;
+  /**
+   * [R8 §5D] 이 글이 **어떻게 만들어졌나**(`auto`·`manual`·`self`). 판정 자체는 안 바꾸고 **말투만** 바꾼다 —
+   *   ①은 사람이 방금 쓴 글이라 «모자란다»는 판정문이 아프게 읽힌다(A 지적 2026-09-15). 같은 정보를 권유형으로 적는다.
+   */
+  origin?: string | null;
 }
 
 export function runGate(inp: GateInput): GateReport {
@@ -181,8 +216,22 @@ export function runGate(inp: GateInput): GateReport {
   const plain = blocksToPlain(blocks);
   const withTitle = `${inp.title ?? ""}\n${plain}`;
   const checks: GateCheck[] = [];
-  /* [P1R8 §9] 모든 칸에 **무게·어떻게**를 실어 내보낸다 — 화면이 키 목록을 보고 스스로 정하지 않게(대용물 금지). */
+  /* [P1R8 §9 · B3] 모든 칸에 **무게·어떻게**를 실어 내보낸다 — 화면이 키 목록을 보고 스스로 정하지 않게(대용물 금지). */
   const push = (key: GateKey, pass: boolean, detail?: string) => { const c: GateCheck = { key, label: GATE_LABEL[key], pass }; if (detail) c.detail = detail; checks.push(decorateCheck(c)); };
+
+  /* [R8 §2.1 · B-1] 분량 — **세는 자는 하나**다(`blocksCharCount` · 계약 주석 «공백 포함 평문» 그대로 · `lib/blocks.ts`).
+     🔴 하한만 걸고 상한은 **적기만** 한다: 짧은 글은 고객 손해지만, 긴 글은 «폭을 넘었다»일 뿐이라 그걸로 재작성(=돈)을 돌리지 않는다.
+     🔴 이 줄이 **머지에서 한 번 사라졌다**(2026-09-15) — 축은 선언돼 있는데 `push` 가 없어 `GATE_KEYS` 와 결과가 어긋났다.
+        되짚기가 «GATE_KEYS 의 모든 키가 결과에 있나»를 세서 잡았다. */
+  const lenRange = lengthFor(contract, inp.group);
+  const chars = blocksCharCount(blocks);
+  const selfWritten = String(inp.origin ?? "") === "self";
+  push("length", chars >= lenRange.min,
+    chars >= lenRange.min
+      ? `${chars.toLocaleString()}자(${selfWritten ? "이 채널에서 잘 읽히는 " : "계약 "}${lenRange.min.toLocaleString()}~${lenRange.max.toLocaleString()}자)${chars > lenRange.max ? " — 폭보다 길다" : ""}`
+      : selfWritten
+        ? `${lenRange.min.toLocaleString()}자쯤이면 더 잘 읽혀요 — 지금 ${chars.toLocaleString()}자예요(안 고쳐도 올라갑니다)`
+        : `${chars.toLocaleString()}자 — 계약 하한 ${lenRange.min.toLocaleString()}자에 ${(lenRange.min - chars).toLocaleString()}자 모자란다`);
 
   // cliche — 본문 상투구 + [2026-09-15 §5C] **사진 캡션의 묘사문**(«~놓여 있는 모습» = 그림 지시문이 캡션으로 새어 나온 것 · 사장님 실측 piece 329)
   const hits = CLICHES.filter((c) => c.re.test(plain)).map((c) => c.label);
@@ -296,6 +345,7 @@ export function buildRewriteInstruction(report: GateReport): string {
   if (!fails.length) return "";
   const lines = fails.map((c) => {
     switch (c.key) {
+      case "length": return `- 분량이 모자란다(${c.detail}). 🔴 **문단 수를 늘리지 말고**(구성 시퀀스는 그대로) 각 문단을 더 깊게 써라 — 장면(언제·어디서·무엇을)·구체적 사실·직접 겪은 예를 문단마다 2~3문장씩 더 넣는다. 같은 말을 바꿔 쓰거나 요약을 덧붙여 늘리지 마라.`;
       case "cliche": return `- 상투 표현을 전부 지워라(${c.detail}). «~에 대해 알아보겠습니다·마무리하며·오늘은 ~를 소개» 같은 도입·마무리 문구 없이 장면·사실로 바로 들어간다.`;
       case "para_repeat": return `- 문단 첫 어절이 겹친다(${c.detail}). 각 문단을 다른 말(시간·장소·판단·질문)로 시작해라.`;
       case "bullet_ratio": return `- 불릿이 너무 많다(${c.detail}). 리스트 항목의 절반을 문장으로 풀어 써라.`;
@@ -350,6 +400,7 @@ export const GATE_WEIGHT: Record<GateKey, GateWeight> = {
   ad_pointing: "high",       // 애드센스 계정 정지·해지 사유(법은 아니지만 계정이 죽는다)
   similarity: "high",        // 중복이 쌓이면 저품질 판정 → 계정이 죽는다
   affiliate_count: "normal",
+  length: "normal",           // [R8 §2.1 · B-1] 채널 계약(실물이 그렇다 · 얇으면 안 읽힌다) — 넘겨도 계정이 안 죽는다
   superlative: "normal", cliche: "normal", para_repeat: "normal", bullet_ratio: "normal",
   sentence_variance: "normal", translationese: "normal", persona: "normal",
   visual_min: "normal", link_check: "normal", structure_repeat: "normal",
@@ -357,6 +408,7 @@ export const GATE_WEIGHT: Record<GateKey, GateWeight> = {
 /** «어떻게 하면 되나» 한 줄(사람말 · 화면이 그대로 쓴다). `detail` 은 «무엇이»까지만 말한다. */
 export const GATE_HOW: Record<GateKey, string> = {
   disclosure: "검수에서 «대가를 받았나»를 켜면 첫머리 문장이 자동으로 들어가요.",
+  length: "장면·사실을 더 담아 **문단을 깊게** 써 주세요(문단 수를 늘리는 것보다 낫습니다).",
   banned_words: "단정·효능 표현은 지우고, 최상급은 같은 문장에 근거(기관·기간·수치)를 붙여 주세요.",
   stock_safe: "사람·상표가 없는 사진으로 바꾸거나, 이 글에서 광고를 빼 주세요.",
   ad_pointing: "광고·배너를 가리키는 문장을 지우고 «다음 글 보기»처럼 읽기 행동을 권해 주세요.",

@@ -53,6 +53,8 @@ function pieceRow(r: Row): Record<string, unknown> {
   const g = (r.gate_report && typeof r.gate_report === "object" ? r.gate_report : null) as GateReport | null;
   const o: Record<string, unknown> = {
     id: n(r.id), channel: String(r.channel), accountHandle: r.handle ? String(r.handle) : null, kind: String(r.kind || "post"), format: String(r.format || ""),
+    /* [R8 §5D] 어떻게 만들어졌나 — `self` 면 화면이 «내가 쓴 글»로 그리고 AI 티 얘기를 꺼내지 않는다(A 요청). 옛 글은 "auto". */
+    origin: String(r.origin || "auto"),
     title: String(r.title || ""), status: String(r.status), stage: stageOf(r), gateOk: g ? !!g.ok : false, createdAt: utcDate(r.created_at)?.toISOString() ?? "",
   };
   const sf = utcDate(r.scheduled_for); if (sf) o.scheduledFor = sf.toISOString();
@@ -145,7 +147,10 @@ export default async (req: Request): Promise<Response> => {
         /* 🔴 **없는 format 을 `formats[0]` 으로 메우지 않는다** — 그러면 «모름»이 «info» 로 위장되고
            주제군·분량이 그 거짓값에서 흘러나온다(AC-57 대용물 금지 · 스모크에서 실제로 걸렸다). 없으면 없는 대로 둔다. */
         const fmt = String(p.format || m.format || "") || null;
-        const grp = fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
+        /* [R8 §2.1] 생성 때 적어 둔 주제군이 **정본**이다(그때는 intent 를 안다). 없을 때만 형식·제목으로 다시 잰다. */
+        const saved = String(m.topicGroup ?? "");
+        const grp = (saved === "review" || saved === "info" || saved === "life") ? saved as "review" | "info" | "life"
+          : fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.topic_title ?? p.title ?? "") }) : null;
         const [brow] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE tenant_id = ${tid} AND id = ${n(p.brief_id)}`) : [undefined];
         const goal = resolveGoal({ affiliate: !!m.affiliate, briefGoal: brow?.goal as string | null, channel: String(p.channel) });
         const len = lengthFor(wc, grp), img = imagesFor(wc, grp);

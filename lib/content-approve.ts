@@ -19,7 +19,7 @@ import { sql } from "drizzle-orm";
 import { q } from "./accounts";
 import { writeAudit } from "./audit";   // [P1R8 §9] «말하고 통과» 를 감사에 남긴다
 import { jsonb, utcDate } from "./db-util";
-import { contractFor } from "./writing-contracts";
+import { contractFor, topicGroupOf, type TopicGroup } from "./writing-contracts";   // [R8 §2.1] 주제군 — 분량 폭이 여기에 달렸다
 import { type Block, htmlToPlain } from "./blocks";
 import { runGate, GATE_KEYS, GATE_LABEL, decorateCheck, type GateReport, type GateCheck } from "./ai-tell-gate";
 import { checkDisclosureHtml, checkVideoDisclosure } from "./disclosure";
@@ -90,6 +90,51 @@ async function notifyGateRisk(tid: number, pieceId: number, title: string, risks
  */
 export const LINK_CHECK_KEY = "link_check" as const;
 export const STRUCTURE_KEY = "structure_repeat" as const;
+
+/**
+ * [R8 §5D.3-3 · §9] 🔴 **직접 쓴 글(`origin:"self"`)의 게이트 적용표** — **두 값**이다: `soft`(돌고 말해 준다) · `off`(안 쟀다).
+ *
+ *   ══ 왜 하드가 없나(사장님 지시 2026-09-15 · CLAUDE §9) ══
+ *     «말해 주기로 내려. **고객 계정이야. 우리가 책임지는 게 아니야.**» — 막는 게이트는 **0개**다.
+ *     🔴 **검사를 지우는 게 아니다.** 계속 돌고 결과를 보여 준다. 막지만 않는다 — 말해 주려면 재야 한다.
+ *     🔴 «막으면 공장이 선다» — 고객이 «알아서 올려»를 켰는데 우리가 조용히 안 올리면 그게 더 나쁘다.
+ *
+ *   ══ 안 재는 것은 하나뿐 ══
+ *     **AI 티 계열 + `structure_repeat`** — 사람이 쓴 글에 «AI 같다»를 들이대는 것은 뜻이 없고, 골격도 우리가 만든 것이 아니다.
+ *     🔴 **모르는 축은 `soft`**(`selfGateLevelOf`) — 새 축이 조용히 «안 재는 쪽»으로 기우는 것을 막는다.
+ *     무게(`weight`)는 `lib/ai-tell-gate.ts GATE_WEIGHT` 한 곳이다 — 막지 않는 대신 **읽는 순서**를 준다.
+ */
+export type SelfGateLevel = "soft" | "off";
+export const SELF_GATE_LEVEL: Readonly<Record<string, SelfGateLevel>> = {
+  /* ── 안 잰다: «AI 같다»를 사람 글에 들이대는 것은 뜻이 없다 ── */
+  cliche: "off", para_repeat: "off", bullet_ratio: "off", sentence_variance: "off", translationese: "off", persona: "off",
+  [STRUCTURE_KEY]: "off",                     // 우리가 만든 골격이 아니다
+  /* ── 돈다(말해 준다) — 법이든 플랫폼이든 채널 계약이든 **막지는 않는다** ── */
+  disclosure: "soft", banned_words: "soft", ad_pointing: "soft",
+  stock_safe: "soft",                         // [P1R8 B3] 스톡 사진(사람·상표) — 제3자가 다치는 축이지만 **막지는 않는다**(§9 최종)
+  affiliate_count: "soft", similarity: "soft", superlative: "soft",
+  length: "soft", visual_min: "soft", link_check: "soft",
+};
+export function selfGateLevelOf(key: string): SelfGateLevel { return SELF_GATE_LEVEL[key] ?? "soft"; }
+
+/** `off` 인 축들 — 화면·모의가 목록으로 쓸 때. 정본은 `SELF_GATE_LEVEL` 이다(목록을 따로 들고 있으면 서버와 갈린다 · AC-52). */
+export const SELF_SKIPPED_GATE_KEYS: readonly string[] = Object.entries(SELF_GATE_LEVEL).filter(([, v]) => v === "off").map(([k]) => k);
+
+/**
+ * 게이트 결과에 ① 정책을 입힌다 — 축을 **빼지 않고** `level` 을 붙이고, `off` 는 «안 쟀다»로 표시한다(«조용히 다 끄기» 금지 · §4.7).
+ *   🔴 왜 «돌리고 나서 버리나»: `runGate` 안에 «사람 글이면 건너뛰기» 분기를 넣으면 그 문은 나중에 안 닫힌다(AC-65).
+ *      순수 함수는 그대로 두고 **쓰는 쪽에서 값을 버린다** — 버린 값은 응답에도 안 싣는다(잰 척하지 않는다).
+ *   `ok` 는 «모든 검사를 통과했나»라는 **알림**이다 — 막는 것과는 상관이 없다(막는 축이 0개다).
+ */
+
+export function applySelfGatePolicy(report: GateReport): GateReport {
+  const checks: GateCheck[] = report.checks.map((c) => {
+    const level = selfGateLevelOf(c.key);
+    if (level === "off") return { key: c.key, label: c.label, pass: true, skipped: true, skipReason: "self", level, weight: c.weight, detail: "사람이 쓴 글이라 이 검사는 하지 않았어요" };
+    return { ...c, level };
+  });
+  return { ...report, checks, ok: checks.every((c) => c.pass) };
+}
 
 /**
  * [R8-A §2 · B-1] **골격 반복** — 같은 테넌트·같은 채널의 최근 글과 **구조**가 얼마나 겹치나.
@@ -200,6 +245,17 @@ export async function checkStockSafety(tid: number, p: Row): Promise<GateCheck> 
  * recheckPiece — 발행 직전 재검사(승인·수정 공용). 고지·금칙어·제휴 링크 수·유사도 + 12키 게이트.
  *   블록이 정본이면 블록 기준, 사용자가 HTML 을 고쳤으면(`meta.editedByUser`) HTML 기준(구조 검사는 태그로 근사).
  */
+/**
+ * [R8 §2.1] 그 글에 **적용된** 주제군 — 생성 때 적어 둔 값이 정본이고, 없을 때만(옛 글) 형식·제목으로 다시 잰다.
+ *   🔴 다시 잴 때는 `intent` 가 없다 — 생성 때와 다른 답이 나올 수 있다. 그래서 적어 두는 쪽이 먼저다.
+ */
+function groupOfMeta(m: Record<string, unknown>, p: Row): TopicGroup | null {
+  const saved = String(m.topicGroup ?? "");
+  if (saved === "review" || saved === "info" || saved === "life") return saved;
+  const fmt = String(p.format || m.format || "") || null;
+  return fmt ? topicGroupOf({ format: fmt, intent: null, title: String(p.title ?? "") }) : null;
+}
+
 export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   if (String(p.kind) === "video") return await recheckVideoPiece(tid, p);
   const m = (p.meta || {}) as Record<string, unknown>;
@@ -209,6 +265,11 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const plain = htmlToPlain(html);
   const comp = compensationOfMeta(m);                       // [R8-A §4] 대가 3종(제휴·협찬·무상 제공) — 하나라도 참이면 고지가 필요하다
   const need = comp.need;
+  /* [R8 §2.1] 분량 폭은 **주제군**에 달렸다. 생성 때 적어 둔 값을 그대로 쓴다 — 여기서 다시 계산하면 `intent` 가 없어 다른 답이 나온다.
+     그러면 «잰 값은 같은데 기준이 다른» 상태가 된다(AC-70 의 사촌). */
+  const group = groupOfMeta(m, p);
+  /* [R8 §5D] 어떻게 만들어졌나 — 판정 말투(분량)와 ①에서 안 재는 축을 가르는 값. 옛 글은 "auto". */
+  const origin = String(p.origin ?? "auto");
   const checks: GateCheck[] = [];
   const c = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
   const [acc] = p.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(p.account_id)}`) : [undefined];
@@ -217,15 +278,16 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
   const others = await q(sql`SELECT id, body FROM pieces WHERE tenant_id = ${tid} AND id <> ${n(p.id)} AND body IS NOT NULL AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const sim = maxSimilarity(plain, others.map((o) => htmlToPlain(String(o.body))));
   if (!edited && blocks.length) {
-    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || "") });
+    const g = runGate({ blocks, contract: c, personaTerms: terms, meta: { affiliate: m.affiliate ?? m.affiliateHint ?? null, adDisclosure: comp.need, sponsored: comp.sponsored, gift: comp.gift }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${others[sim.index]?.id}` : undefined }, title: String(p.title || ""), group, origin });
     const link = await checkLinks(html);   // [P1R7 B3] 소프트 — 승인을 막지 않는다(HARD_GATE_KEYS 밖)
     const st = await checkStructure(tid, p, blocks);   // [R8-A B-1] 소프트 — 골격이 매번 같으면 AI 티다
-    const stock = await checkStockSafety(tid, p);      // [P1R8] 하드 — 광고성 글 + 사람·상표 스톡은 라이선스 위반
+    const stock = await checkStockSafety(tid, p);      // [P1R8 B3] 스톡 사진 안전(광고성 글 + 사람·상표) — 제3자가 다치는 축
     /* [P1R8 §9] 🔴 여기서 만든 칸도 **같은 손**을 거친다 — 무게·«어떻게»가 빠진 칸이 하나라도 있으면 화면이 그 축만 다르게 그린다. */
-    return { ...g, checks: [...g.checks, link, st, stock].map(decorateCheck), ok: g.ok && link.pass && st.pass && stock.pass };
+    const full: GateReport = { ...g, checks: [...g.checks, link, st, stock].map(decorateCheck), ok: g.ok && link.pass && st.pass && stock.pass };
+    return origin === "self" ? applySelfGatePolicy(full) : full;
   }
   // bodyHtml 정본 — 같은 12키(구조 검사는 HTML 태그로 근사)
-  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || "") });
+  const base = runGate({ blocks: [{ type: "para", text: plain }], contract: { ...c, visualMin: {} }, personaTerms: terms, meta: { affiliate: null, adDisclosure: false }, similarity: { score: sim.score }, title: String(p.title || ""), group, origin });
   for (const k of GATE_KEYS) {
     const from = base.checks.find((x) => x.key === k)!;
     if (k === "disclosure") { const d = checkDisclosureHtml(html, need, comp.kinds); checks.push({ key: k, label: GATE_LABEL[k], pass: d.ok, ...(d.detail ? { detail: d.detail } : {}) }); continue; }
@@ -244,8 +306,10 @@ export async function recheckPiece(tid: number, p: Row): Promise<GateReport> {
     checks.push(from);
   }
   checks.push(await checkLinks(html));   // [P1R7 B3] 소프트 링크 검사(HTML 정본 경로도 같은 한 벌)
-  checks.push(await checkStockSafety(tid, p));   // [P1R8] 스톡 사진 안전(HTML 정본 경로도 같은 한 벌 · 두 경로가 갈라지지 않게)
-  return { ok: checks.every((x) => x.pass), checks: checks.map(decorateCheck), rewritten: false };
+  checks.push(await checkStockSafety(tid, p));   // [P1R8 B3] 스톡 사진 안전(HTML 정본 경로도 같은 한 벌 · 두 경로가 갈라지지 않게)
+  /* [R8 §5D · B-1] 직접 쓴 글은 HTML 이 정본이라 **이 경로로 온다** — ① 정책(안 잰 축 표시)은 여기서도 같이 입힌다(한 곳만 입히면 화면이 갈린다). */
+  const out: GateReport = { ok: checks.every((x) => x.pass), checks: checks.map(decorateCheck), rewritten: false };
+  return origin === "self" ? applySelfGatePolicy(out) : out;
 }
 
 /** [P1R5 §1.4-6] 영상에 해당하는 GateKey — HTML 을 전제하는 4키(visual_min·affiliate_count·bullet_ratio·para_repeat)는 영상에 뜻이 없어 빼고, 나머지 8키를 **대본 말**로 잰다. */

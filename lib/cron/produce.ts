@@ -123,7 +123,7 @@ export const produceStep: CronStep = {
             detail: { formatHint: brief.formatHintIgnored.hint, channel: slot.channel, used: brief.spec.format } });
         }
         await writeAudit({ tenantId: ctx.tid, action: "piece_auto_produced", actorType: "system", target: `slot:${slot.id}`,
-          detail: { briefId: brief.briefId, pieceIds: r.pieceIds, coinsCharged: r.coinsCharged, topicId: slot.topicId, channel: slot.channel, accountId: brief.spec.accountId, ...(slot.formatHint ? { formatHint: slot.formatHint, formatHintUsed: !brief.formatHintIgnored } : {}) } });
+          detail: { briefId: brief.briefId, pieceIds: r.pieceIds, coinsCharged: r.coinsCharged, topicId: slot.topicId, channel: slot.channel, accountId: brief.spec.accountId, ...(slot.formatHint ? { formatHint: slot.formatHint, formatHintUsed: !brief.formatHintIgnored } : {}), ...(brief.formatSwitched ? { formatSwitched: brief.formatSwitched } : {}) } });
         continue;
       }
 

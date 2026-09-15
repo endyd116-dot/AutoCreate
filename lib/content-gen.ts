@@ -24,7 +24,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
-import { lengthFor, topicGroupOf, resolveGoalDetail, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳)
+import { lengthFor, topicGroupOf, resolveGoalDetail, estimateChars, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳) + [R8 §2.1] 분량 추정표
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -78,9 +78,14 @@ function blockSchemaLine(): string {
     "hashtags{items[] · 5~10개 · # 없이} · toc{} · summary{text 또는 items[]} · disclosure{}(시스템이 채운다 · 비워 둠) · adsense{}(빈 블록) · affiliate{}(시스템이 채운다 · 비워 둠)",
   ].join("\n");
 }
-function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic: Topic; angle: string; persona: PersonaProfile; personaFacts: string[]; affiliateCands: CoupangProduct[] | null; affiliateQuery: string | null; lengthWords: number; rewrite?: string; goal?: string | null; group?: TopicGroup | null }): { system: string; user: string } {
+/** [R8 §2.1] 되짚기가 «무엇이 프롬프트에 실렸나»를 **직접** 볼 수 있게 내보낸다 — 소스를 grep 하는 것은 증거가 아니다(AC-64). */
+export function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic: Topic; angle: string; persona: PersonaProfile; personaFacts: string[]; affiliateCands: CoupangProduct[] | null; affiliateQuery: string | null; rewrite?: string; goal?: string | null; group?: TopicGroup | null }): { system: string; user: string } {
   const c = a.c;
   const len = lengthFor(c, a.group);
+  /* 문단 하나가 져야 할 몫 — 계약 하한 ÷ (이 구성의 예상 분량) × (문단 하나의 예상 분량).
+     🔴 숫자를 지어내지 않는다: `estimateChars` 는 우리가 이미 `expandForLength` 에서 쓰는 **같은 추정표**다(잣대 하나). */
+  const estTotal = estimateChars(a.structure) || 1;
+  const paraFloor = Math.max(150, Math.round((estimateChars(["para"]) * len.min / estTotal) / 10) * 10);
   /* 🔴 [R8-A §2] 수익 목적별 규칙 — 2026-09-15 확인: `briefs.goal` 이 여기까지 **한 번도 안 왔다**(grep 0).
      그래서 «애드센스 목적»과 «애드포스트 목적»이 글을 한 글자도 바꾸지 않았다(선언만 있고 분기 0 · AC-59 계열).
      사장님 질문 «같은 네이버라도 수익 목적에 따라 글 구성을 달리해야 하나?» 의 답이 이 줄들이다. */
@@ -92,6 +97,10 @@ function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic:
     ...c.rules.map((r) => `· ${r}`),
     ...(goalRules.length ? ["", `[①-b 이 글의 수익 목적 — ${a.goal}]`, ...goalRules.map((r) => `· ${r}`)] : []),
     `· 분량: 본문 ${len.min.toLocaleString()}~${len.max.toLocaleString()}자(공백 포함 · 고지·해시태그 제외)${a.group ? ` — 이 글은 «${a.group === "review" ? "후기·리뷰" : a.group === "info" ? "정보성" : "생활정보"}» 라 이 폭이다` : ""}. 하한에 못 미치면 반려된다 — 모자라면 장면·사실을 더 담고 같은 말을 반복하지 않는다.`,
+    /* 🔴 [R8 §2.1 · AC-63] 총량만 말하면 안 따라온다 — 실측에서 **블록을 12→17개로 늘리자 글이 오히려 짧아졌다**(1,849→1,503자).
+       모델이 «총 분량 감각»을 스스로 갖고 블록이 늘면 나눠 담기 때문이다. 그래서 **문단 하나의 깊이**를 못 박는다.
+       이 지시는 ②칸(«순서·개수 그대로»)과 **부딪치지 않는다** — 블록 수가 아니라 한 블록 안의 깊이를 말하기 때문이다. */
+    `· 문단 깊이: 본문 문단(para) 하나는 **최소 ${paraFloor.toLocaleString()}자**(3~5문장). 문단 수를 늘려서 분량을 채우지 마라 — 블록 수는 ②가 정한다.`,
     "",
     "[② 구성 — 아래 블록 시퀀스를 «순서·개수 그대로» 채운다(타입 추가·생략 금지)]",
     a.structure.map((t, i) => `${i + 1}.${t}`).join(" → "),
@@ -122,7 +131,6 @@ function buildPrompt(a: { c: WritingContract; structure: Block["type"][]; topic:
     a.persona.signature ? `마무리 서명(마지막 문단 끝에 그대로): ${a.persona.signature}` : "",
     `계절: ${seasonLine()}`,
     a.affiliateCands?.length ? `제휴 상품 후보(하나를 골라 본문 문맥에 자연스럽게 녹인다 · 가격은 아래 값만): ${a.affiliateCands.map((p, i) => `${i}) ${p.productName} · ${p.productPrice.toLocaleString()}원`).join(" / ")}` : a.affiliateQuery ? `제휴 의도 상품(«${a.affiliateQuery}») — 링크는 시스템이 넣는다. 본문에서 그 물건을 쓴 장면을 1곳 넣어라.` : "",
-    `분량 목표: 약 ${a.lengthWords} 어절`,
   ].filter(Boolean).join("\n");
   return { system, user };
 }
@@ -238,7 +246,6 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const angle = String(meta.angle || topic.angle || "");
     const pFacts = personaMaterial(persona.profile, pieceId);
     const terms = personaTerms(persona.profile);
-    const lengthWords = n(meta.lengthWords) || Math.round((c.length.min + c.length.max) / 4.4);
 
     // 제휴 후보(계정 쿠팡 키 → 3후보)
     let affCands: CoupangProduct[] | null = null; let keys: CoupangKeys | null = null;
@@ -251,7 +258,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
 
     await setStage(pieceId, "writing");
     const write = async (rewrite?: string, angleOverride?: string) => {
-      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, lengthWords, rewrite, goal, group });
+      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, rewrite, goal, group });
       const r = await callGeminiJson<{ title?: string; blocks?: unknown; tags?: unknown; affiliateChoice?: unknown }>({ purpose: "content", chain: CHAIN_HIGH, role: "high", system: pr.system, user: pr.user, tenantId: tid, ref: `piece:${pieceId}`, mode: "pro", maxOutputTokens: 12_000, timeoutMs: 180_000 });
       if (!r.ok) throw new Error(`글 생성 실패(${r.reason})`);
       const blocks = fixBlocks(r.data?.blocks, structure, c, affiliate, aff?.provider ?? null, `${pieceId}:${topic.title}`, { sponsored: meta.sponsored === true, gift: meta.gift === true });   // seed = 같은 글 · [R8-A §4] 대가 3종이면 캡션 자리가 늘 같다
@@ -262,30 +269,37 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     };
 
     let draft = await write();
-    let rewritten = false;
-    // 유사도 — 임계 초과면 앵글을 바꿔 1회 재생성
-    let sim = maxSimilarity(blocksToPlain(draft.blocks), otherPlain.map((o) => o.text));
-    if (sim.score >= SAME_BODY_SIMILARITY && otherPlain.length) {
-      const inst = `[다시 쓰기 — 이 글은 이미 있는 글(#${otherPlain[sim.index].id})과 ${Math.round(sim.score * 100)}% 겹친다. 도입 장면·소제목·예시·순서를 전부 다른 관점으로 새로 써라. 같은 문장 재사용 금지.]\n`;
-      draft = await write(inst, `${angle} — 다른 관점: 반대 경험이나 실패담에서 출발`);
-      rewritten = true;
-      sim = maxSimilarity(blocksToPlain(draft.blocks), otherPlain.map((o) => o.text));
-    }
+    const simOf = (d: typeof draft) => maxSimilarity(blocksToPlain(d.blocks), otherPlain.map((o) => o.text));
+    let sim = simOf(draft);
 
     await setStage(pieceId, "checking");
-    const gateInput = (blocks: Block[], title: string) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: sim.score, against: sim.index >= 0 ? `글 #${otherPlain[sim.index]?.id}` : undefined }, title });
-    let report: GateReport = runGate(gateInput(draft.blocks, draft.title));
-    /* [P1R8 §9] 🔴 **다시 쓰기는 좁은 축에서만** — 예전엔 소프트 축 하나만 빨개도 글을 통째로 다시 써서 **그 글의 AI 비용이 두 배**였다.
-       (사진 한 장 모자람·상투 표현 1건·골격 닮음 …은 승인도 안 막는 축이다. 보여 주고 사람이 고치면 된다 · REWRITE_KEYS 주석 참고) */
-    if (needsRewrite(report) && !rewritten) {
-      const inst = buildRewriteInstruction(report);
-      const second = await write(inst);
-      const r2 = runGate(gateInput(second.blocks, second.title));
-      // 더 나아졌으면 채택(통과 수 기준) · 아니면 첫 원고를 사람에게
-      if (r2.ok || r2.checks.filter((x) => x.pass).length >= report.checks.filter((x) => x.pass).length) { draft = second; report = r2; }
+    const gateInput = (blocks: Block[], title: string, s: typeof sim) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: s.score, against: s.index >= 0 ? `글 #${otherPlain[s.index]?.id}` : undefined }, title, group });   // [R8 §2.1] group — 분량 축이 계약과 **같은 폭**으로 재게(안 주면 채널 기본 폭이라 잣대가 갈린다)
+    let report: GateReport = runGate(gateInput(draft.blocks, draft.title, sim));
+
+    /* 🔴 [R8 §2.1 + §9] 다시 쓰기는 **한 번**이고, **좁은 축에서만** 돈다. 두 수리가 여기서 만난다.
+       ① [§2.1 · B-1] 종전엔 ①유사도 재생성 ②게이트 재작성이 **따로** 있었고, ①이 돌면 `rewritten` 이 서서 ②가 통째로 건너뛰었다 —
+          즉 겹쳐서 다시 쓴 글은 **고지·금칙이 걸려도** 다시 쓰라는 말을 한 번도 못 들었다(C 가 main 에서 독립으로 같은 것을 찾았다).
+          ⇒ 게이트를 **먼저** 돌리고 겹침과 게이트 지적을 **한 프롬프트에 합쳐** 한 번만 다시 쓴다(호출 수는 그대로 2).
+       ② [§9 · B3] 그 «한 번»도 **계정이 다치는 축**에서만 돈다(`REWRITE_KEYS`) — 상투 표현 하나로 글 값을 두 배 만들지 않는다.
+          🔴 축을 지운 게 아니다: 판정은 다 돌고 `gate_report` 에 남는다. **재작성을 부르는 조건만** 좁혔다.
+       🔴 지시문(`buildRewriteInstruction`)은 **좁히지 않는다** — 어차피 한 번 쓰는 값이라, 이왕 고칠 때 품질 지적도 같이 말해 주는 편이 낫다. */
+    const simBad = sim.score >= SAME_BODY_SIMILARITY && otherPlain.length > 0;
+    let rewritten = false;
+    if (simBad || needsRewrite(report)) {
+      const simInst = simBad
+        ? `[다시 쓰기 — 이 글은 이미 있는 글(#${otherPlain[sim.index].id})과 ${Math.round(sim.score * 100)}% 겹친다. 도입 장면·소제목·예시·순서를 전부 다른 관점으로 새로 써라. 같은 문장 재사용 금지.]\n`
+        : "";
+      const inst = `${simInst}${buildRewriteInstruction(report)}`;
+      const second = await write(inst, simBad ? `${angle} — 다른 관점: 반대 경험이나 실패담에서 출발` : undefined);
+      const sim2 = simOf(second);
+      const r2 = runGate(gateInput(second.blocks, second.title, sim2));
+      /* 채택 기준: 겹쳐서 다시 썼으면 **덜 겹치는 쪽**이 우선(그게 다시 쓴 이유다) · 아니면 통과 수가 많은 쪽.
+         나빠졌으면 첫 원고를 사람에게 보낸다 — 둘 다 나쁘면 고르는 것이 아니라 사람에게 넘기는 것이 맞다. */
+      const better = simBad ? (sim2.score < sim.score || r2.ok) : (r2.ok || r2.checks.filter((x) => x.pass).length >= report.checks.filter((x) => x.pass).length);
+      if (better) { draft = second; report = r2; sim = sim2; }
       report = { ...report, rewritten: true };
       rewritten = true;
-    } else if (rewritten) report = { ...report, rewritten: true };
+    }
 
     // 제휴 링크 블록(딥링크 · affiliate_links)
     let affiliateMeta: { provider: string; url: string; subId: string; productName?: string } | null = null;
@@ -331,6 +345,10 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const sPrint = structurePrint(draft.blocks);
     const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: (affiliate || meta.sponsored === true || meta.gift === true) ? disclosureTextFor({ affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true, provider: aff?.provider ?? null }) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
       structurePrint: sPrint, structureHash: structureHash(sPrint),
+      /* [R8 §2.1] 🔴 주제군을 **적어 둔다**. 검수·재검사가 다시 계산하면 재료가 달라 값이 갈린다 —
+         여기서는 `intent` 를 알지만(소재에서 온다) 검수 시점엔 없어서 `intent:null` 로 계산되고 있었다.
+         분량 폭이 주제군에 달렸으니, 갈리면 **잰 값은 같은데 기준이 다른** 상태가 된다. */
+      topicGroup: group,
       goal, goalSource: goalRes.source, ...(goalRes.briefGoalIgnored ? { briefGoalIgnored: goalRes.briefGoalIgnored } : {}) };
     await q(sql`UPDATE pieces SET title = ${draft.title}, body = ${bodyHtml}, blocks = ${jsonb(draft.blocks)}, meta = ${jsonb(nextMeta)}, gate_report = ${jsonb(report)}, status = ${"in_review"}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(blocks) AS b, jsonb_typeof(meta) AS m, jsonb_typeof(gate_report) AS g FROM pieces WHERE id = ${pieceId}`);

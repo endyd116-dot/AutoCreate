@@ -9,6 +9,7 @@ import { CHAIN_IMAGE } from "./ai-models";
 import { calcCost } from "./ai-cost";
 import { recordAiUsage, resolveChain } from "./ai";
 import { r2Configured, r2Put, safeKey } from "./r2";
+import { aiStubImagesActive, aiStubImage, AI_STUB_MODEL } from "./ai-stub";   // [R8 §2.1] 사진만 고정 응답(글 실험에서 값의 85%를 버리지 않게)
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 /** Gemini 이미지가 받는 비율 값(그 외는 보내지 않는다 — 400 방지). */
@@ -70,6 +71,14 @@ async function callImageModel(model: string, prompt: string, aspect: string | nu
 }
 
 export async function generateImage(a: GenerateImageArgs): Promise<GenerateImageResult> {
+  /* [R8 §2.1] 사진 대체 스위치(`AI_STUB_IMAGE=1` · 로컬 전용 · `lib/ai-stub.ts`) — R2 에도 아무것도 쓰지 않는다.
+     🔴 `ai_usage` 에 적지 않는다(안 쓴 돈을 세지 않는다) · 원가 0 · 모델 «stub».
+     🔴 이미지 **블록**은 그대로 둔다 — 블록을 빼면 `visual_min` 축이 걸려 실험에 잡음이 낀다. 끄는 것은 «굽기»뿐이다. */
+  if (aiStubImagesActive()) {
+    const st = aiStubImage();
+    console.info("[ai-stub] image — 고정 응답(실호출 0 · 원가 0 · R2 쓰기 0)");
+    return { ok: true, url: st.url, key: st.key, model: AI_STUB_MODEL, mime: st.mime, costUsd: 0 };
+  }
   const apiKey = String(process.env.GEMINI_API_KEY ?? "").trim();
   if (!apiKey) return { ok: false, reason: "no_api_key" };
   if (!r2Configured()) return { ok: false, reason: "r2_not_configured" };
