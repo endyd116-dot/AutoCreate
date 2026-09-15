@@ -500,10 +500,28 @@ export function topicGroupOf(a: { format?: string | null; intent?: string | null
   return null;
 }
 
+/**
+ * [R8-A §2 실호출 검증에서 잡은 것 2026-09-15] **끝맺음을 «다음 행동 한 줄»로 바꾼다.**
+ *   🔴 `goalRules` 에 «끝맺음은 다음 행동 한 줄»을 적어 놨는데 **글은 여전히 FAQ 로 끝났다.**
+ *      원인: 프롬프트 ②칸이 «블록 시퀀스를 순서·개수 **그대로** 채운다(추가·생략 금지)» 라고 강제한다 —
+ *      즉 **규칙(①-b)과 구조(②)가 싸우면 구조가 이긴다.** 말로만 고치면 안 되고 **구조를 고쳐야** 한다.
+ *      (이게 «계약만 고치면 생성이 따라오나»의 답이다 — 문장만 고치면 안 따라온다.)
+ */
+function endWithAction(seq: BlockType[], c: WritingContract): BlockType[] {
+  if (!c.tiers || c.tiers.suppress.includes("tip")) return seq;
+  const out = [...seq];
+  const last = out[out.length - 1];
+  if (last === "tip") return out;
+  /* 해시태그는 진짜 마지막이다(네이버) — 그 앞에 넣는다. */
+  const at = last === "hashtags" ? out.length - 1 : out.length;
+  out.splice(at, 0, "tip");
+  return out;
+}
+
 /** `seed` 를 주면 3단(필수/선택/억제)을 적용해 골격을 글마다 다르게 낸다. 안 주면 종전 그대로(무회귀). */
 export function structureFor(c: WritingContract, format: FormatKey, imageCount: number, affiliate: boolean, seed?: number): BlockType[] {
   const raw = [...(c.structure[format] ?? c.structure[c.formats[0]] ?? NAVER_STORY)];
-  const base = seed === undefined ? raw : applyTiers(raw, c, seed);
+  const base = seed === undefined ? raw : endWithAction(applyTiers(raw, c, seed), c);
   let imgs = base.filter((b) => b === "image").length;
   const out: BlockType[] = [];
   for (const b of base) { if (b === "image" && imgs > imageCount) { imgs--; continue; } out.push(b); }
