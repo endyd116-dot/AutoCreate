@@ -114,6 +114,8 @@ export interface OAuthToken {
   externalId: string;
   handle: string;
   displayName?: string;
+  /** [P1R8 §5.3] 프로필 사진(https) — **이미 받은 응답에 있을 때만**. 추가 호출을 하지 않는다(없으면 안 싣는다 · AC-9). */
+  avatarUrl?: string;
   /** 채널별 부가(블로거 blogId·유튜브 channelId·IG ig_user_id·페이지 토큰 등). */
   extra?: Record<string, unknown>;
 }
@@ -152,7 +154,11 @@ export async function exchangeCode(channel: OAuthChannel, code: string): Promise
         const c = await jfetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", bearer);
         const ch = c.json?.items?.[0];
         if (!ch?.id) return { ok: false, reason: "youtube_no_channel" };
-        return { ok: true, token: { accessToken: at, refreshToken: t.json.refresh_token, expiresAt: isoIn(t.json.expires_in), externalId: String(ch.id), handle: String(ch.snippet?.customUrl || ch.snippet?.title || ch.id).replace(/^@/, ""), displayName: String(ch.snippet?.title || ""), extra: { channelId: String(ch.id) } } };
+        return { ok: true, token: { accessToken: at, refreshToken: t.json.refresh_token, expiresAt: isoIn(t.json.expires_in), externalId: String(ch.id), handle: String(ch.snippet?.customUrl || ch.snippet?.title || ch.id).replace(/^@/, ""), displayName: String(ch.snippet?.title || ""),
+          /* [P1R8 §5.3] 프로필 사진은 **이미 받은 이 응답 안에** 있다(`part=snippet` 의 thumbnails) — 추가 호출 0. 없으면 안 싣는다. */
+          ...(ch.snippet?.thumbnails?.default?.url || ch.snippet?.thumbnails?.medium?.url
+            ? { avatarUrl: String(ch.snippet.thumbnails.medium?.url || ch.snippet.thumbnails.default.url) } : {}),
+          extra: { channelId: String(ch.id) } } };
       }
       case "meta": {
         const q = new URLSearchParams({ client_id: app.id, client_secret: app.secret, redirect_uri: redirect, code });

@@ -30,7 +30,10 @@ export const connectMethodOf = registryConnectMethodOf;
 export const TEXT_CHANNELS: ReadonlySet<string> = new Set(TEXT_CHANNEL_KEYS);
 
 export interface AccountRow {
-  id: number; channel: string; handle: string; displayName: string | null; avatar: null; status: string;
+  id: number; channel: string; handle: string; displayName: string | null;
+  /** [P1R8 §5.3] 프로필 사진(https) — **없으면 null**. 예전엔 타입부터 `null` 로 굳어 있어 값이 들어갈 자리가 없었다(전수조사 ④7). */
+  avatar: string | null;
+  status: string;
   healthScore: number; postsToday: number;
   /** 🔴 **유효** 하루 상한 — 워밍업 중이면 낮아진 값이다(게이트는 이걸 본다). */
   dailyCap: number;
@@ -39,7 +42,10 @@ export interface AccountRow {
   minGapMin: number;
   /** 워밍업 중일 때만(§2.6). 화면은 `label` 을 그대로 쓰면 된다. */
   warmup?: { week: number; weeklyQuota: number | null; label: string; postsThisWeek: number };
-  goldenHours?: number[]; lastPostAt?: string; lastErrorKind?: string; groupId?: number; personaId?: number;
+  goldenHours?: number[]; lastPostAt?: string; lastErrorKind?: string; groupId?: number;
+  /** [P1R8 §5.3] 묶음 **이름** — 화면이 id 만 받고 이름을 또 물으러 가지 않게 같이 싣는다(승계 단위 · §7.2). */
+  groupName?: string;
+  personaId?: number;
   proxyUrl?: string; browserProfileKey: string; hasCreds: boolean;
   monetize: { coupang: boolean; adpost: boolean; adsense: boolean };
 }
@@ -47,7 +53,8 @@ export interface AccountRow {
 /** SELECT 조각 — accounts a + 자격 존재 여부 서브쿼리. */
 export const ACCOUNT_SELECT = sql`
   a.id, a.channel, a.handle, a.display_name, a.status, a.health_score, a.posts_today, a.daily_cap, a.min_gap_min, a.golden_hours,
-  a.last_post_at, a.last_error_kind, a.group_id, a.persona_id, a.proxy_url, a.browser_profile_key, a.monetize,
+  a.last_post_at, a.last_error_kind, a.group_id, a.persona_id, a.proxy_url, a.browser_profile_key, a.monetize, a.avatar_url,
+  (SELECT g.name FROM account_groups g WHERE g.id = a.group_id AND g.tenant_id = a.tenant_id) AS group_name,
   a.created_at, a.opened_at, a.warmup_off,
   /* 워밍업(§2.6)이 보는 «이번 주 몇 건 올렸나» — 주는 **KST 월요일 시작**이다(DESIGN §13.5 · UTC 로 세면 월요일 새벽이 지난주가 된다). */
   (SELECT COUNT(*) FROM posts p WHERE p.account_id = a.id
@@ -59,8 +66,9 @@ export const ACCOUNT_SELECT = sql`
 export function toAccountRow(r: Row): AccountRow {
   const mon = (r.monetize && typeof r.monetize === "object" ? r.monetize : {}) as Record<string, unknown>;
   const o: AccountRow = {
-    id: Number(r.id), channel: String(r.channel), handle: String(r.handle), displayName: (r.display_name as string) ?? null, avatar: null,
+    id: Number(r.id), channel: String(r.channel), handle: String(r.handle), displayName: (r.display_name as string) ?? null,
     status: String(r.status), healthScore: Number(r.health_score ?? 100), postsToday: Number(r.posts_today ?? 0), dailyCap: Number(r.daily_cap ?? 2), minGapMin: Number(r.min_gap_min ?? 180),
+    avatar: r.avatar_url ? String(r.avatar_url) : null,
     browserProfileKey: String(r.browser_profile_key || `t0-a${r.id}`), hasCreds: r.has_creds === true,
     monetize: { coupang: r.has_coupang === true, adpost: !!mon.adpostMediaId, adsense: !!mon.adsensePub },
   };
@@ -81,6 +89,7 @@ export function toAccountRow(r: Row): AccountRow {
   const lp = utcDate(r.last_post_at); if (lp) o.lastPostAt = lp.toISOString();
   if (r.last_error_kind) o.lastErrorKind = String(r.last_error_kind);
   if (r.group_id) o.groupId = Number(r.group_id);
+  if (r.group_name) o.groupName = String(r.group_name);
   if (r.persona_id) o.personaId = Number(r.persona_id);
   const px = maskProxyUrl(r.proxy_url as string); if (px) o.proxyUrl = px;
   return o;
