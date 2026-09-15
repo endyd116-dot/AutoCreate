@@ -28,7 +28,8 @@
     return out;
   };
 
-  /* ── [P1R4] 막힘 시트 — 403 writable(readonly|suspended) · 402 plan_limit. 업셀 한 문장 + Primary 1 ── */
+  /* ── [P1R4] 막힘 시트 — 403 writable(readonly|suspended) · 402 plan_limit. 업셀 한 문장 + Primary 1 ──
+     🔴 402 는 «요금제» 전용 신호가 아니다 — `step` 으로만 가른다(`channel_not_connectable` 처럼 **돈과 무관한 402** 가 있다 · B3 accounts-add). «402 = 업셀»로 일반화하지 마라. */
   let gateOpen = false;
   UI.gate = function (r) {
     if (!r || r.ok || gateOpen) return false;
