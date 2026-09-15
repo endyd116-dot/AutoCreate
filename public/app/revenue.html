@@ -146,13 +146,15 @@ function sourceGroup() {
 function accountGroup() {
   const list = SUM.byAccount || []; if (!list.length) return "";
   const max = Math.max(1, ...list.map((x) => x.krw));
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(a.channel, "sm")}@${UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
 }
 
 /* ④ 글·영상별 TOP 5 */
 function pieceGroup() {
   const list = SUM.topPieces || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">잘 번 글</div>` + list.map((p) => p.deleted
+    ? `<div class="row"${p.channel ? "" : ""}>${p.channel ? UI.mark(p.channel) : ""}<div class="l"><span class="t wrap muted" style="font-weight:500">${UI.esc(p.title || "지운 글")}</span><span class="d">${p.channel ? UI.esc(UI.chLabel(p.channel)) : "지운 글 · 돈은 그대로 세요"}</span></div><span class="r">${won(p.krw)}</span></div>`
+    : `<a class="row tap" href="/app/piece.html?id=${p.pieceId}">${UI.mark(p.channel)}<div class="l"><span class="t wrap">${UI.esc(p.title)}</span><span class="d">${UI.esc(UI.chLabel(p.channel))}</span></div><span class="r">${won(p.krw)}</span>${UI.chev}</a>`).join("") + "</div>";
 }
 
 /* ⑤ 직접 입력 */

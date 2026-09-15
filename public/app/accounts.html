@@ -36,8 +36,11 @@ async function load() {
   D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
   const chs = (D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false })))
     .filter((c) => c.status !== "down" || cnt[c.key]); // [R7 §4.1] 아직 안 열린 채널도 흐리게 보여 준다(숨기면 «영상이 통째로 없는» 화면이 된다 · 내려간 채널만 뺀다)
-  const soon = (c) => c.status && c.status !== "active" && !cnt[c.key];   // 아직 안 열린 채널(연결된 계정이 있으면 쓰던 대로 쓴다)
-  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? "곧 열려요" : (SUB[c.key] || "")}</small></button>`).join("");
+  /* [B3 020fb15] 🔴 «지금 붙일 수 있나»는 서버가 connectable 한 칸으로 말한다 — 화면이 status·configured 를 조합하지 않는다.
+     (라이브에서 blogger 는 status=active 인데 우리 앱 키가 없어 못 붙는다 — 조합했으면 이 경우가 «붙을 수 있는 칸»으로 보였다) */
+  const soon = (c) => (c.connectable === false || (c.connectable === undefined && c.status && c.status !== "active")) && !cnt[c.key];
+  const soonWord = (c) => (c.connectableReason === "not_open" || (!c.connectableReason && c.status !== "active")) ? "곧 열려요" : "준비 중이에요";
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? soonWord(c) : (SUB[c.key] || "")}</small></button>`).join("");
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
@@ -56,9 +59,12 @@ async function load() {
 /* [R7 §4.1] 아직 안 열린 채널 — 왜 지금은 못 붙는지 한 문장으로. 버튼 0(할 수 있는 게 없을 때 Primary 를 만들지 않는다) */
 function soonSheet(c) {
   const label = c.label || UI.chLabel(c.key);
-  const why = c.category === "video" ? "영상 채널은 심사와 연결 준비가 끝나는 대로 열려요." : "이 채널은 연결 준비가 끝나는 대로 열려요.";
-  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">준비 중이에요 · 곧 열려요</p>
-    <p class="muted" style="margin:0 0 10px">${UI.esc(why)} 열리면 이 자리에서 바로 연결할 수 있어요.</p>
+  /* 왜 못 붙는지는 서버가 사유로 말한다: not_open = 채널이 아직 안 열렸다 · no_provider_key·no_site_url = 열렸는데 우리 준비가 남았다(고객 잘못 아님) */
+  const why = c.connectableReason === "no_provider_key" || c.connectableReason === "no_site_url"
+    ? "채널은 열렸는데 저희 연결 준비가 남았어요. 끝나는 대로 바로 붙일 수 있어요."
+    : c.category === "video" ? "영상 채널은 심사와 연결 준비가 끝나는 대로 열려요." : "이 채널은 연결 준비가 끝나는 대로 열려요.";
+  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${c.connectableReason === "not_open" || !c.connectableReason ? "준비 중이에요 · 곧 열려요" : "곧 연결할 수 있어요"}</p>
+    <p class="muted" style="margin:0 0 10px">${UI.esc(why)}${c.connectableReason === "no_provider_key" || c.connectableReason === "no_site_url" ? "" : " 열리면 이 자리에서 바로 연결할 수 있어요."}</p>
     <p class="muted" style="margin:0;font-size:12.5px">그동안에도 ${c.category === "video" ? "영상은 만들어 둘 수 있어요 — 만든 영상은 내려받아 앱에서 직접 올리면 돼요." : "다른 채널로는 그대로 나가요."}</p>`, { title: label });
 }
 function connectSheet(c) {
