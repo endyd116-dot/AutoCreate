@@ -200,7 +200,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 3.3 | 디렉터(content-director·content-tone) 확장 | ✅ | `director.ts` · `writing-contracts.ts`(AM 헤더) | | | |
 | 3.3 | 글 생성(content-gen·content-image·**thumbnail**·**tags**) 그대로 | ➖ **(설계 문장 갱신 후보)** | `content-gen.ts`·`ai-image.ts` ✓ · `content-thumbnail`·`content-tags` **안 만든다** — AC 는 태그를 `hashtags` 블록(채널 계약)이, 대표 이미지를 첫 사진이 맡는다(메인 판단 2026-09-15 «AC 는 자체 구현») | | §0.5 로 이관 | |
 | 3.3 | 쇼츠 공장 9종 이식 + 디벨롭 | ✅ | `lib/video/{script,scenes,tts,tts-typecast,captions,bgm,providers/*}` · `runner/channels/render-video.mjs` · shorts-loop 은 슬롯 크론 흡수(R5 지도) · B-1 §6 | | | |
-| 3.3 | 발행 커넥터(threads/instagram/**facebook**·naver-publish-verify) + 신규(블로거·WP·유튜브·**틱톡**) | 🟠 | threads(video)·instagram(reels)·`post-alive.mjs` ✓ · blogger·wordpress·youtube ✓ · **facebook 0 · tiktok 0** | 페북·틱톡 발행 없음 | Phase 5 | M |
+| 3.3 | 발행 커넥터(threads/instagram/**facebook**·naver-publish-verify) + 신규(블로거·WP·유튜브·**틱톡**) | 🟠 | threads(video)·instagram(reels) ✓ · blogger·wordpress·youtube ✓ · **facebook 0 · tiktok 0** · 🔴 `post-alive.mjs`(러너)·`verify.post_alive`(kind)는 있으나 **적재 코드 0** — `learn.ts` 는 `revenue.stats` 만 넣는다(B2 자가 정정 2026-09-15 · 내가 grep 으로 되짚음: `enqueue*` 호출 5곳 어디에도 없다) | 페북·틱톡 발행 없음 · **«발행 후 삭제 감지»가 한 번도 돈 적 없다**(`account-health` 의 health 감점 `stats->alive=false` 가 영영 0 = AC-29 계열) | 페북·틱톡 Phase 5 · post_alive 적재는 **R7 B2 §2**(발행 7일 뒤 1회 · hourly · 멱등 `post:{id}:alive7`) | M |
 | 3.3 | 러너(content-runner·runner-jobs·runner-block·core·naver-blog-runner·runner-start.bat) | ✅ | `lib/runner-jobs.ts` · `runner-block.ts` · `runner/core.mjs` · `channels/naver-blog.mjs` · `run.bat` | | | |
 | 3.3 | 채널 자격(channel-creds·channel-accounts) → 계정 N개 | ✅ | `creds-crypto.ts`(AES-GCM · `CREDS_ENC_KEY` 폴백 없음) · `accounts.ts` · `account_creds` | | | |
 | 3.3 | 품질 게이트(ad-law-banned·ad-copy-similarity·**content-link-verify**) | ✅ **(R7 수리 `6a5ab40` · 소프트 게이트 `link_check`)** | `banned-words.ts`·`similarity.ts` ✓ · **content-link-verify 0**(발행 전 본문 링크 확인 없음 · 발행 후 `post_alive` 만) | §4.2 «코드 게이트(…링크)»의 링크 검사가 없다 | ai-tell-gate 에 link HEAD 1검사 | S |
@@ -479,7 +479,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 |---|---|---|---|---|
 | `audit/2026-09-15-B1.md`(187689c) | 143 | ✅103 🟡4 🟠15 🔒2 ❌9 ➖9 | §4.2 자동승인(계정 단위 아님 · 🟠) · 영상 a 절 · mp4 내려받기 · kinds 켜기 | 전부 동의 · 내 지적 2건(홈 해야 할 일 🟠 · «직접 올린 주소 적기» ❌ 신설)을 B-1 이 코드로 되짚어 반영 · a 절도 «문을 열어도 뒤 두 칸이 막힘»으로 같아졌다 |
 | `audit/2026-09-15-B.md` | 137 | ✅106 🟠6 ❌10 ➖14 🔒1 | §11.4 추천인·세금계산서·회사 정보 · §12.2 채널 게이트 | **✅ 2건을 🟠 로 정정**(8.2) |
-| `audit/2026-09-15-B2.md` | 80 | ✅33 🟡19 🟠11 🔒1 ❌12 ➖3 ⬜1 | §2 영상 채널 · 러너 배포 · 수익 0행 | 전부 동의 · «➖ 6 = 설계 문장» 0.5 에 수록 |
+| `audit/2026-09-15-B2.md` | 80 | ✅33 🟡19 🟠11 🔒1 ❌12 ➖3 ⬜1 | §2 영상 채널 · 러너 배포 · 수익 0행 | 전부 동의 · «➖ 6 = 설계 문장» 0.5 에 수록 · 🔴 **자가 정정 1건 반영**(2026-09-15): `verify.post_alive` ✅ → **🟡(코드만)** — 러너 파일·kind·report 처리까지 있는데 **잡을 넣는 코드가 0** 이라 한 번도 돈 적이 없다(내가 grep 으로 되짚어 확인). 규칙은 R7 에서 정함(발행 성공 7일 뒤 1회 · hourly 적재 · 멱등 `post:{id}:alive7` · B2 §2) |
 | `audit/2026-09-15-A.md` | 16장 | 🟠 6 · ⬜1 | 준비 중 타일 · 온보딩 칩 · `${UI.chev}`(main 에서 수리됨 cd913a7) · 탭 42px | ⬜(영상 planned 여부)는 이 문서가 라이브로 판정 → 🟠 |
 
 ### 8.2 다른 파일의 ✅ 중 상위 20 후보를 내가 되짚은 결과(자기 영역 감싸기 방지)
@@ -580,6 +580,21 @@ COMMIT;
 | §13.5 외부 값 «기준일» | 🟠 매체 집계일이 KST 와 달라도 말 안 함 | `DAY_BASIS_OF`/`DAY_BASIS_NOTE` + `revenue-sources` 응답 `dayBasis` · **날짜는 옮기지 않는다** | `6a5ab40` | 화면 한 줄(A) · ⬜ 실측은 키 뒤 |
 | §19 법 라이선스 표 | 🟠 약관에 한 줄뿐 | `docs/rules/LICENSES.md`(폰트 OFL · BGM 12곡 CC0 · AI provider·금지 3종 · ffmpeg 는 우리가 배포 안 함) | `001dccf` | 법률 검토 때 같이 본다 |
 
+**다른 세션의 정정도 여기 모은다**
+
+| 출처 | 조사 때 | 정정 | 근거 | 남은 것 |
+|---|---|---|---|---|
+| B2 자가 정정(2026-09-15) | `verify.post_alive` ✅ | **🟡(코드만)** — 러너 채널 파일·잡 kind·report 처리까지 있는데 **적재하는 코드가 0** 이라 한 번도 돈 적이 없다 | 내가 되짚음: `enqueue*` 호출 5곳(`account-health`=session.login · `learn`=revenue.stats · `revenue-sync`=revenue.* · `publish/index`=publish.* · 러너 큐) **어디에도 없다** · 그래서 `account-health` 의 «발행 후 삭제» 감점(`posts.stats->>alive=false`)이 **영영 0**(AC-29 «있는 게이트가 안 지킨다»의 잡 판) | **R7 B2 §2** — 발행 성공 **7일 뒤 1회** · hourly 적재 · 멱등 `post:{id}:alive7` |
+
 **되짚기에서 나온 것 2개(기록감)**
 - 잠금 SQL 경합: 주 1회 선점을 `{day:null}` 로 INSERT 하면 **첫 주에 두 번째 테넌트 호출이 통과해 대조가 두 번 돈다**(프로브로 재현 → VALUES 에 오늘 날짜를 바로 넣어 수정). «ON CONFLICT 로 막았다»는 첫 삽입이 조건을 만족할 때만 참이다.
 - 링크 검사 거짓 경고: `daum.net` 은 **HEAD 404 · GET 200** 이다. 한 번만 물으면 멀쩡한 사이트가 «안 열려요»로 뜨고, 그 한 번이 이 검사를 영영 못 믿게 만든다 → HEAD 가 나쁘면 GET 으로 재확인한 뒤에야 실패로 센다.
+
+### §9-b R8 후보(이 조사에서 나왔고 R7 범위 밖으로 민 것 · 메인 결정 2026-09-15)
+
+| 조사 § | 항목 | 왜 R8 인가 | 크기 |
+|---|---|---|---|
+| §4.2 · §5.5 | **«신뢰 계정»만 자동승인** — 설계 문장은 계정 단위인데 코드는 테넌트 단위(`reviewPolicy`) + R7 부터 플랜 게이트 | 설계가 옳고 코드가 덜 됐다(문장은 그대로 둔다) · 계정 건강도·성공률로 «믿을 만한 계정»을 갈라 그 계정만 조용히 자동 승인하는 축이 필요 | M |
+| §3.3 | `ai-key`(키 로테이션) 미이식 | 지금 `GEMINI_API_KEY` 가 1개라 아프지 않다 — 키가 늘거나 한도에 부딪힐 때 | S |
+| §13.0b | 소재 카드 **«위로 = 나중에»** 3방향 스와이프 | 좌우 + 버튼 폴백이 있어 **못 하는 동작이 없다** | S |
+| §13.0 | 당겨서 새로고침 · 확정 동작 햅틱 | 같은 이유 · 헌장 «모션 한 방향»과 상충 소지도 있어 한 번 더 판단 필요 | S |
