@@ -126,6 +126,8 @@ const TARGETS = [
   ["🔴 신조어 표 — 프롬프트가 본다", "slangPromptLine", "lib/slang-whitelist.ts", "«쓰지 마라»만 있고 «써도 된다»가 없어 20대 계정 글이 계속 무난한 말로만 나온다"],
   ["신조어 — 값이 연령대인가", "toAgeBand", "lib/slang-whitelist.ts", "옛 데이터·오타가 그대로 흘러들어 표가 엉뚱하게 먹거나 안 먹는다"],
   ["신조어 — 사전이 표를 받는 칸", "allowSlang", "lib/banned-words.ts", "사전이 표를 못 받아 연령대와 상관없이 모두 잡힌다(순수 리프 계약을 지키려고 import 대신 값으로 받는다)"],
+  /* ── [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 블록만 만들고 **파싱·렌더·러너 중 하나가 빠지면 조용히 0건**이 된다. ── */
+  ["🔴 장소 카드 — 블록이 실제로 흐른다", "place", "lib/blocks.ts", "타입만 만들고 파싱·렌더가 없어 모델이 내도 **조용히 버려진다**"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {

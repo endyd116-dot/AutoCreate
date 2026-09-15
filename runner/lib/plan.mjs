@@ -82,6 +82,21 @@ function opsFromBlocks(blocks, images) {
         if (url) ops.push({ op: "link", text: name, url });
         break;
       }
+      /* [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 **에디터의 «장소» 카드는 아직 못 넣는다.**
+         스마트에디터에서 장소를 검색해 꽂는 것은 B7 «에디터 실제 요소»(R10)와 같은 일이라 여기 없다.
+         🔴 «있는 척»을 하지 않는다: 우리가 할 수 있는 길(링크 한 줄)로 **내려앉히고**, 못 한 것을 `note` 로 남긴다
+         (`note` 는 본문에 안 들어가고 보고에만 실린다 — 위 `case "note"` 참조). */
+      case "place": {
+        const pl = b?.place ?? {};
+        const name = clean(pl.name);
+        if (!name) break;
+        const url = String(pl.url ?? "").trim();
+        const line = [name, clean(pl.address), clean(pl.note)].filter(Boolean).join(" · ");
+        if (url) ops.push({ op: "link", text: line, url });
+        else ops.push({ op: "para", text: line });
+        ops.push({ op: "note", text: "장소 카드는 아직 못 넣어서 링크로 넣었습니다" });
+        break;
+      }
       case "adsense":
         /* 애드센스 코드는 스크립트라 네이버·티스토리 에디터 본문에 그대로 넣을 수 없다.
            서버 게이트가 채널별로 이미 정리했다(네이버는 제거) — 러너는 아무것도 하지 않는다. */

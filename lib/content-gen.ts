@@ -103,6 +103,11 @@ function blockSchemaLine(card?: { max: number } | null): string {
     "블록 JSON 모양(type 별 필수 필드):",
     "hook{text} · para{text · 2~4문장} · h2{text} · h3{text} · quote{text · 핵심 한 줄} · list{items[]} · checklist{items[]} · table{rows[][] · 첫 행은 헤더}",
     "image{prompt · 그림을 «만들기 위한» 장면 묘사 한 문장(영문 가능 · 사람·로고·글자 없는 장면 · 이건 독자에게 안 보인다) · caption? · 독자가 보는 한 줄(아래 규칙) · imageIndex 는 0부터 순서대로} · divider{} · tip{text, items?} · faq{items[] · 각 항목 \"질문 | 답\"}",
+    /* [R8CLOSE-B1 §B4] 🔴 **어휘에 없으면 모델은 영영 안 낸다.** 그리고 «지어내지 마라»를 같이 말해야 한다 —
+       없는 가게 이름·없는 주소가 본문에 실리면 그건 사진 캡션 묘사문보다 나쁘다(고객이 손님을 엉뚱한 데로 보낸다). */
+    /* [R8CLOSE-B1 §B4] 🔴 이 한 줄이 «시퀀스 그대로» 규칙의 **유일한 예외**다 — 골격은 장소를 강제하지 않고,
+       소재에 진짜 장소가 나올 때만 모델이 하나 더한다. 없으면 안 넣는다(지어낸 상호가 제일 나쁘다). */
+    "place{place:{name, url?, address?, note?}} · 🔴 **소재나 재료에 실제로 나온 장소일 때만** 시퀀스와 별개로 **한 개까지** 넣어도 된다. 안 나오면 넣지 마라(지어낸 상호·주소 절대 금지 · url 은 http/https 만).",
     "🔴 image.caption 규칙: 사진 대부분엔 **caption 을 넣지 않는다**(블로거는 사진마다 설명을 달지 않는다 · 3장 중 1장 정도만). 넣을 땐 **글쓴이 말투로 25자 이내의 감상·맥락**(예: «팀원들 줄 거라 포장 예쁜 걸로 골랐어요» · «이게 3만원대라니»). 🔴 «~하는 모습» «~이 놓여 있는» «~를 보여주는» 같은 **장면 설명문은 절대 금지** — 그건 prompt 에만 쓴다.",
     "hashtags{items[] · 5~10개 · # 없이} · toc{} · summary{text 또는 items[]} · disclosure{}(시스템이 채운다 · 비워 둠) · adsense{}(빈 블록) · affiliate{}(시스템이 채운다 · 비워 둠)",
   ].join("\n");
