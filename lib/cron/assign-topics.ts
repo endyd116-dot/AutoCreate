@@ -27,18 +27,18 @@ import { htmlToPlain } from "../blocks";
 
 const n = (v: unknown) => Number(v || 0);
 
-interface Cand { id: number; normKey: string; hint: string; score: number; title: string; angle: string }
+interface Cand { id: number; normKey: string; hint: string; score: number; title: string; angle: string; manual: boolean }
 /** 최근 글(계정 간 유사도 게이트 재료) — 제목 + 도입부(첫 300자). */
 interface RecentPiece { accountId: number | null; text: string }
 
 /** 후보 소재 — 30일 중복 회피 포함. 한 번 읽어 메모리에서 소모한다(슬롯마다 다시 뒤지면 같은 자리를 두 번 집는다 · AM SlotPool 교훈). */
 async function loadCandidates(tid: number, limit: number): Promise<Cand[]> {
-  const rows = await q(sql`SELECT t.id, t.norm_key, t.channel_hint, t.score, t.title, t.angle FROM topics t
+  const rows = await q(sql`SELECT t.id, t.norm_key, t.channel_hint, t.score, t.title, t.angle, t.source FROM topics t
     WHERE t.tenant_id = ${tid} AND t.status = 'candidate' AND (t.expires_at IS NULL OR t.expires_at > NOW())
       AND NOT EXISTS (SELECT 1 FROM topics u WHERE u.tenant_id = t.tenant_id AND u.norm_key = t.norm_key
                         AND u.status IN ('used','picked') AND COALESCE(u.used_at, u.created_at) > NOW() - interval '30 days')
     ORDER BY (t.source = 'manual') DESC, t.score DESC, t.id DESC LIMIT ${Math.max(1, Math.min(200, limit))}`);   // [topics-add] 사용자가 직접 넣은 소재가 우선(점수는 그대로)
-  return rows.map((r) => ({ id: n(r.id), normKey: String(r.norm_key ?? ""), hint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), title: String(r.title ?? ""), angle: String(r.angle ?? "") }));
+  return rows.map((r) => ({ id: n(r.id), normKey: String(r.norm_key ?? ""), hint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), title: String(r.title ?? ""), angle: String(r.angle ?? ""), manual: String(r.source ?? "") === "manual" }));
 }
 
 /**
@@ -65,7 +65,10 @@ function pickFor(pool: Cand[], channel: string, taken: Set<string>, reject?: (c:
   for (const c of pool) {
     if (taken.has(c.normKey)) continue;
     if (reject && reject(c)) continue;
-    const key = (c.hint === channel ? 1_000_000 : 0) + c.score;
+    /* 🔴 [2026-09-15 C · R6.5] 채널 힌트 일치 > **내가 넣은 소재** > 점수. 종전엔 힌트 + 점수만 봐서 `loadCandidates` 의
+       «manual 먼저» 정렬이 여기서 점수 max 로 다시 고르는 순간 **사라졌다**(실측: 점수 95 AI 후보가 점수 12 «내 소재»보다 먼저 배정 · 슬롯 278:475 · 279:476).
+       사용자가 직접 넣은 소재는 힌트가 맞으면 점수와 무관하게 먼저 집는다(점수 자체는 부풀리지 않는다). */
+    const key = (c.hint === channel ? 2_000_000 : 0) + (c.manual ? 1_000_000 : 0) + c.score;
     if (key > bestKey) { bestKey = key; best = c; }
   }
   return best;
