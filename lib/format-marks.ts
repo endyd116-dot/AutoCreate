@@ -39,7 +39,9 @@ export interface FormatMarks {
   demoted: MarkDemotion[];
   breaks?: number;
   breakFails?: number;
-  /** 발행 직전 자가검사(`runner/lib/format-bleed.mjs`) — 번진 문단 비율(pct)과 증상별 수(red·center·italic·underline·bold). 🔴 키가 없으면 «못 쟀다». `samples`(고객 본문 조각)는 싣지 않는다(meta 를 무겁게 하지 않는다). */
+  /** 발행 직전 자가검사(`runner/lib/format-bleed.mjs`) — 번진 문단 비율(pct)과 증상별 수(red·center·italic·underline·bold). 🔴 키가 없으면 «못 쟀다»(러너가 null 을 보내면 키를 안 만든다 · 0 으로 넣으면 화면이 «깨끗했다»로 읽는다).
+   *  🔴 `bold` 는 2026-09-16 부터 세기 시작한 축 — 옛 글엔 키가 없고 그건 «0건»이 아니라 «그때는 안 쟀다»다(`?? 0` 로 읽지 않는다 · AC-92).
+   *  🔴 러너의 `samples`(번진 문단의 실물 조각)는 **여기 싣지 않는다** — 실물 예시는 **러너 로그에만 있다**(B2 합의 · meta 를 무겁게 하지 않는다 · «왜 예시 문단이 안 보이지»의 답이 이 줄이다). */
   bleed?: { pct: number; total?: number; bad?: number; red?: number; center?: number; italic?: number; underline?: number; bold?: number };
   /** [R9-11] 티스토리가 HTML 모드를 못 열어 기본 모드로 내려앉은 횟수 — 🔴 0 이면 키를 안 만든다(B2 · 강등 자체는 `demoted[{kind:블록, why:"no_editor_op"}]` 로 같이 온다). */
   htmlMode?: number;
