@@ -155,6 +155,11 @@ export interface RunnerDevice {
   status: "online" | "offline";
   lastSeenAt?: string; version?: string;
   jobsWaiting: number;
+  /** 이 기기가 «내 PC» 로 묶였나(처음 켠 PC 가 정해졌나). 화면이 «열쇠 다시 받기» 를 권할지 판단한다. */
+  bound?: boolean;
+  /** 다른 PC 에서 이 토큰으로 접속을 시도한 마지막 시각·횟수(계약 «묶기» ②).
+   *  🔴 **지문 값 자체는 절대 내보내지 않는다** — 화면이 알아야 할 것은 «있었나/몇 번»뿐이다. */
+  otherDeviceAt?: string; otherDeviceCount?: number;
 }
 
 /* ─────────────────────────── 기기·토큰 ─────────────────────────── */
@@ -216,6 +221,7 @@ export async function registerDevice(tid: number, name: string, kind = "own"): P
 export async function listDevices(tid: number): Promise<RunnerDevice[]> {
   const rows = await q(sql`
     SELECT d.id, d.name, d.kind, d.last_seen_at, d.version,
+           (d.fingerprint IS NOT NULL) AS bound, d.fp_mismatch_at, d.fp_mismatch_count,
            (d.last_seen_at IS NOT NULL AND d.last_seen_at > NOW() - (${ONLINE_WINDOW_MIN} * INTERVAL '1 minute')) AS is_online,
            (SELECT COUNT(*) FROM runner_jobs j WHERE j.tenant_id = d.tenant_id AND j.status = 'queued') AS jobs_waiting
       FROM runner_devices d WHERE d.tenant_id = ${tid} ORDER BY d.id`);
@@ -227,6 +233,11 @@ export async function listDevices(tid: number): Promise<RunnerDevice[]> {
     };
     const s = iso(r.last_seen_at); if (s) o.lastSeenAt = s;
     if (r.version) o.version = String(r.version);
+    if (r.bound === true) o.bound = true;
+    /* 🔴 «없음»과 «0번»을 구분해서 보낸다 — 시도가 있었던 기기만 화면에 경고가 뜨게(AC-9 3값 규율의 같은 정신).
+       횟수만 0으로 늘 보내면 화면이 «0번 있었어요» 같은 말을 하게 되거나, 조건을 화면이 또 짜야 한다. */
+    const fp = iso(r.fp_mismatch_at);
+    if (fp) { o.otherDeviceAt = fp; o.otherDeviceCount = n(r.fp_mismatch_count); }
     return o;
   });
 }
