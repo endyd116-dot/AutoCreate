@@ -7,7 +7,8 @@
  *   🔴 실패는 **정직 분류**다(계약 §2 RunnerErrorKind). 못 했으면 못 했다고 보고한다 — «성공»으로 만들지 않는다.
  */
 import { claim, report, release, heartbeat } from "./lib/api.mjs";
-import { openContext, applyCookies, exitIp, meterContext, shotKeyFor, SHOTS_ON } from "./lib/browser.mjs";
+import { openContext, applyCookies, exitIp, meterContext, shotKeyFor, SHOTS_ON, PROFILES_DIR } from "./lib/browser.mjs";
+import { probeFleet } from "./lib/profile-seal.mjs";   // [P1R8 §3.1] 로그인 정보가 실제로 잠겨 있나(읽기만)
 import { planEditorOps, disclosureIsFirst } from "./lib/plan.mjs";
 
 import * as naverBlog from "./channels/naver-blog.mjs";
@@ -68,7 +69,13 @@ export function claimableKinds() {
 
 /** 하트비트에 실을 이 PC 의 능력(§2.4) — 지금은 ffmpeg 유무·버전. */
 export function runnerCaps() {
-  return renderVideo.caps();
+  /* [P1R8 §3.1 · 0단계] 🔴 **이 PC 의 로그인 정보가 실제로 잠겨 있나**를 같이 올린다(읽기만 · 아무것도 안 바꾼다).
+     봉인을 만들지 말지를 정하려면 **리눅스 기기가 몇 대인지**부터 알아야 하는데 `runner_devices` 에 OS 칸이 없었다.
+     설계: `docs/active/2026-09-15-runner-profile-seal-design.md` §7. */
+  let profileSeal;
+  try { profileSeal = probeFleet(PROFILES_DIR); }
+  catch (e) { profileSeal = { platform: process.platform, profiles: 0, state: "unknown", copySafe: null, why: String(e?.message ?? e).slice(0, 120), weak: 0, unknown: 0 }; }
+  return { ...renderVideo.caps(), profileSeal };
 }
 /** 수익 스크랩 잡 — report 에 `revenueRows` 를 싣는다(서버가 upsert · 러너는 DB 를 안 본다). */
 const REVENUE_KINDS = new Set(["revenue.adpost", "revenue.adfit", "revenue.clip"]);
