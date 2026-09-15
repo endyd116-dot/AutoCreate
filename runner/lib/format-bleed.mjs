@@ -112,9 +112,13 @@ export function measureFormatBleedIn(env) {
   for (const p of paras) {
     out.total++;
     const ps = gcs(p);
-    /* 문단이 «통째로» 물들었나 — 글자를 가진 자식 span 이 전부 그 서식이어야 1표(부분 강조는 정상 · 우리 글의 의도다). */
+    /* 문단이 «통째로» 물들었나 — 글자를 가진 자식 span 이 전부 그 서식이어야 1표(부분 강조는 정상 · 우리 글의 의도다).
+       🔴 **`<p>` 바로 밑의 «맨 텍스트»도 글자다**(2026-09-16 C 지적). 종전엔 span 만 세어서
+       «앞머리 평문 + 서식 span 하나»가 **통문단으로 읽혔다** — C 의 가짜 에디터에서 거짓 양성 3/8 이 그렇게 났다.
+       ⚠️ 거짓 양성은 «정상 글의 발행을 막는다» — 못 잡는 것보다 이쪽이 고객에게 더 아프다(AC-68). */
     const spans = [...p.querySelectorAll("span")].filter((s) => (s.textContent || "").trim().length > 0);
-    const all = (fn) => spans.length > 0 && spans.every(fn);
+    const bareText = [...p.childNodes].some((n) => n.nodeType === 3 && String(n.nodeValue || "").trim().length > 0);
+    const all = (fn) => !bareText && spans.length > 0 && spans.every(fn);
     const red = all((s) => isRed(gcs(s).color)) || isRed(ps.color);
     const center = ps.textAlign === "center";
     const italic = all((s) => gcs(s).fontStyle === "italic") || ps.fontStyle === "italic";

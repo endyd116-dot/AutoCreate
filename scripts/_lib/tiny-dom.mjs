@@ -24,6 +24,19 @@ export function el(tag, opts = {}) {
     parent: null,
   };
   for (const c of opts.children ?? []) { c.parent = node; node.children.push(c); }
+  /** 🔴 **맨 텍스트 노드**(span 에 안 감싸인 글자) — 실제 에디터에 섞여 나온다(2026-09-16 C 지적).
+   *   판정 함수가 `childNodes` 의 `nodeType === 3` 으로 이걸 본다. 없으면 «앞머리 평문 + 서식 span 하나»가
+   *   **통문단으로 읽혀 정상 글의 발행을 막는다** — 그래서 셈 DOM 도 이 노드를 낼 수 있어야 한다. */
+  node.bare = String(opts.bare ?? "");
+  Object.defineProperty(node, "childNodes", {
+    get() {
+      const out = [];
+      if (node.bare) out.push({ nodeType: 3, nodeValue: node.bare });
+      if (!node.children.length && node.text) out.push({ nodeType: 3, nodeValue: node.text });
+      for (const c of node.children) out.push(c);
+      return out;
+    },
+  });
   Object.defineProperty(node, "textContent", { get() { return nodeText(node); } });
   node.closest = (sel) => closest(node, sel);
   node.querySelectorAll = (sel) => queryAll(node, sel);
@@ -31,8 +44,9 @@ export function el(tag, opts = {}) {
 }
 
 function nodeText(n) {
-  if (!n.children.length) return n.text;
-  return n.children.map(nodeText).join("");
+  const own = String(n.bare ?? "");
+  if (!n.children.length) return own + n.text;
+  return own + n.children.map(nodeText).join("");
 }
 
 /** `.a.b` 또는 `tag` 하나. 그 밖의 문법(속성·`>`·`,`)은 **던진다** — 쓰는 순간 알아채라고. */
@@ -99,7 +113,8 @@ export function para(text, opts = {}) {
   const spanStyles = opts.spans && opts.spans.length ? opts.spans : [{}];
   const chunk = Math.ceil(text.length / spanStyles.length);
   const spans = spanStyles.map((st, i) => el("span", { style: st, text: text.slice(i * chunk, (i + 1) * chunk) }));
-  return el("p", { cls: "se-text-paragraph", style: opts.p ?? {}, children: spans });
+  /** `bare` 를 주면 **span 에 안 감싸인 앞머리 글자**가 같이 붙는다(실제 에디터에 섞여 나오는 모양). */
+  return el("p", { cls: "se-text-paragraph", style: opts.p ?? {}, bare: opts.bare ?? "", children: spans });
 }
 
 export const textComponent = (paras) => el("div", { cls: "se-component se-text", children: paras });
