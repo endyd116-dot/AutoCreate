@@ -29,6 +29,10 @@
   const gateKnob = qs.get("gate") || "";        // [R8-A] soft = 골격 반복이 걸린 글(막지 않는다) · adpoint = 광고 가리킴(막는다)
   /* [R8-A §2 · B-1 d6c2359] `topicGroup`·`goal`·`contract` 를 서버가 준다(pieces-get).
      값은 서버 어휘 그대로(TopicGroup·RevenueGoal). */
+  const clipPiece = qs.get("clip") === "1";    // [R8 §3.2] 509 를 네이버 클립 영상으로(우리가 못 올리는 채널 — 넘겨주는 길이 보이게)
+  const clipVerified = qs.get("clipApp") === "1";  // 앱으로 열리는지 재 봤다고 치는 손잡이(기본은 안 쟀다)
+  const pubNow = qs.get("pubnow") || "";      // [R8 §4.2] 지금 올리기 — cadence·offline·gate·connector
+  const adsApproved = qs.get("ads") === "1";   // [R8 §3.2] 애드센스 승인된 티스토리·워드프레스 계정(광고 붙이기 줄이 보이게)
   const whyNone = qs.get("why") === "none";   /* [R8-A] 형식이 없어 주제군을 못 정한 글(서버가 topicGroup:null 로 준다) */
   const closeSub = qs.get("closeSub") === "1";  // [R7 §3.1] 구독이 살아 있어 탈퇴가 거부되는 길
   const chOpen = qs.get("chOpen") === "1";   // [R7 §4.1] 채널 레지스트리가 다 열린 상태(계정 그리드에서 흐린 칸이 사라진다) · 🔴 레지스트리보다 먼저 선언(TDZ)
@@ -198,6 +202,8 @@
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false } },
       { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+      /* [R8 §3.2] ?ads=1 일 때만 — 워드프레스는 «우리가 직접 위젯을 넣는» 유일한 길이라 그 갈래를 화면에서 보려면 계정이 하나 있어야 한다 */
+      ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatar: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
@@ -225,7 +231,7 @@
       { id: 506, channel: "naver_blog", accountHandle: "cook_a", kind: "post", format: "guide", title: "가을 이불 세탁, 건조기 없이 뽀송하게", status: "awaiting_manual", stage: "done", scheduledFor: iso(now - 4 * 3600e3), gateOk: true, createdAt: iso(now - 2 * 86400e3), topicTitle: "가을 이불 세탁", regenCount: 0, bodyHtml: BODY_NAVER, meta: { tags: ["이불세탁"], disclosure: null }, gate: gate(true) },
       /* [P1R5] 영상 piece(kind video · §1.2 행 모양) — 508 만드는 중(?stage= 로 단계 고정 · 없으면 시간 따라 진행) · 509 봐주세요(?judge= 로 등급) */
       { id: 508, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "에어프라이어 기름때, 3분이면 끝", status: "generating", scheduledFor: kst(1, 18, 0), gateOk: false, createdAt: iso(now - 300e3), topicTitle: "에어프라이어 청소법", regenCount: 0, coinCost: 28, bodyHtml: "", meta: { stage: "script", chainStage: { stage: "script", at: iso(now - 300e3) }, video: videoSpec(0, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, tags: ["에어프라이어", "청소"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece508" }, chainResume: { count: 0 } }, gate: null, _v0: now - 9500 },
-      { id: 509, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" }, endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
+      { id: 509, channel: clipPiece ? "naver_clip" : "youtube_shorts", accountHandle: clipPiece ? "clip_e" : "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" }, endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
     ],
     rules: fresh ? [] : [
       { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, active: true },
@@ -277,7 +283,9 @@
       { id: 4, source: "youtube", accountId: 4, method: "api", status: "not_configured" },
       { id: 5, source: "adfit", accountId: 2, method: "runner", status: "error", lastSyncAt: iso(now - 3 * 86400e3), lastError: "auth" },
     ],
-    adState: revEmpty || fresh ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
+    adState: revEmpty || fresh ? { adpost: {}, adsense: {}, ypp: {}, clip: {} } : { adpost: { 1: "none", 3: "approved" }, adsense: adsApproved ? { 2: "approved", 5: "approved" } : { 2: "none" }, ypp: {}, clip: {} },  // [v3.5] 소스별 × 계정별 신청 상태(«가입 완료했어요»로 바뀐다)
+    /* [R8 §3.2] 워드프레스만 «지금 붙었나»를 우리가 안다(위젯 id 를 우리가 넣는다) — 나머지는 러너가 하고 우리는 모른다(AC-9) */
+    adsAttached: {},
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== MOCK_V) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -423,6 +431,12 @@
       const online = S.devices.filter((d) => d.online).length;
       const RUNNER_CH = CHANNELS.filter((c) => c.publishVia === "runner").map((c) => c.key);
       const runnerDue = S.slots.filter((s) => RUNNER_CH.includes(s.channel) && s.date >= todayYmd && !["skipped", "published"].includes(s.status)).length;
+      /* [R8 §4.1 · B] 발행 전 검사에 걸린 글 — 🔴 B 가 새 kind 를 만들지 않고 화면에 이미 있는 `review_blocked` 를 썼다.
+         사유는 서버 GATE_LABEL 그대로 앞 3개(첫 낱말이 보통 «대가 고지 첫머리»다). */
+      const gateStuck = S.pieces.filter((p) => p.status === "in_review" && p.gate && (p.gate.checks || []).some((c) => !c.pass && ["disclosure", "banned_words", "affiliate_count", "similarity", "ad_pointing"].includes(c.key)));
+      if (gateStuck.length) todo.push({ kind: "review_blocked", title: `발행 전 확인이 필요한 글이 ${gateStuck.length}건 있어요`, count: gateStuck.length,
+        desc: `${[...new Set(gateStuck.flatMap((p) => (p.gate.checks || []).filter((c) => !c.pass).map((c) => c.label)))].slice(0, 3).join(" · ")} — 고치고 승인하면 그 자리에서 다시 나가요`,
+        link: gateStuck.length === 1 ? `/app/piece.html?id=${gateStuck[0].id}` : "/app/pieces.html?status=in_review", tone: "warn", ...(gateStuck.length === 1 ? { pieceId: gateStuck[0].id } : {}) });
       // 정지 계정은 아래 «승계» 한 줄로만 알린다(같은 사건을 두 줄로 쓰지 않는다)
       for (const a of S.accounts.filter((a) => ["pending_login", "disconnected"].includes(a.status)))
         todo.push({ kind: "account", title: a.status === "pending_login" ? `@${a.handle} 다시 로그인이 필요해요` : `@${a.handle} 연결이 끊겼어요`, desc: UI.chLabel(a.channel), link: "/app/accounts.html", tone: "warn" });
@@ -756,7 +770,14 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (vdlKnob === "none" || p.kind !== "video" || st !== "done") return { ok: false, status: 404, step: "no_render", pieceId: p.id, stage: st || "script", error: "아직 영상 파일이 없어요. 다 만들어지면 여기서 받을 수 있어요." };
       const url = URL.createObjectURL(new Blob([new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])], { type: "application/octet-stream" }));   // 실서버는 서명에 Content-Disposition 이 있어 «받아진다» — 모의는 octet-stream 으로 같은 효과
       const day = todayYmd.replace(/-/g, "");
-      return { ok: true, pieceId: p.id, channel: p.channel, status: p.status, url, filename: `AC-${p.id}-${day}.mp4`, expiresInSec: 600, bytes: 8_400_000, durationSec: p.meta?.video?.seconds || 60, stage: st };
+      /* [R8 §3.2 · B2 lib/manual-upload.ts] 우리가 못 올리는 채널(클립)이면 **넘겨주는 길**도 같이 — 문장·걸음은 서버 것 그대로.
+         🔴 `appOpenVerified:false` = «앱으로 열린다»를 우리가 재 보지 않았다. 화면이 그렇게 쓰면 안 된다. */
+      const handoff = p.channel === "naver_clip" ? {
+        channel: "naver_clip", label: "네이버 클립", openUrl: "https://clip.naver.com/", openLabel: "네이버 클립 열기", appOpenVerified: clipVerified,
+        steps: ["휴대폰에서 이 화면을 열어 주세요(알림을 누르면 바로 옵니다).", "«영상 받기»를 눌러 휴대폰에 저장해 주세요.", "네이버 앱에서 클립으로 올린 다음, 올린 주소를 여기에 붙여 넣어 주세요."],
+        why: "네이버 클립은 휴대폰 앱에서만 올릴 수 있어요(공개된 업로드 방법이 없어요).",
+      } : null;
+      return { ok: true, pieceId: p.id, channel: p.channel, status: p.status, url, filename: `AC-${p.id}-${day}.mp4`, expiresInSec: 600, bytes: 8_400_000, durationSec: p.meta?.video?.seconds || 60, stage: st, ...(handoff ? { handoff } : {}) };
     },
     /* [R7 §1.3 · B-1] 앱에서 직접 올린 주소 적기 — 채널이 쓰는 호스트인지 보고(다른 채널이면 그 채널 이름으로 말한다) 발행함·편성표에 반영 */
     "post-mark-published": (b) => { const nw = notWritable(); if (nw) return nw;
@@ -867,10 +888,43 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       return { ok: true }; },
     /* ── [P1R3] §1.5 신청 조건 ── */
     "ad-eligibility": (b) => {
+      /* [R8 §3.2 · B2 lib/ads-connect.ts] 광고를 실제로 붙이기·떼기 — 문장은 서버 것 그대로.
+         🔴 티스토리는 러너가 **상태를 읽기만** 해서 뗄 수 없다(«붙이기»도 실은 확인이다) · 길이 없는 채널은 정직하게 막는다. */
+      if (b && (b.action === "connect_ads" || b.action === "disconnect_ads")) {
+        const nw = notWritable(); if (nw) return nw;
+        const id = Number(b.accountId); const a = S.accounts.find((x) => x.id === id);
+        if (!a) return { ok: false, way: null, state: "no_account", message: "계정을 찾을 수 없어요.", status: 409 };
+        const way = { wordpress: "wp_widget", tistory: "runner_tistory", blogger: "runner_blogger" }[a.channel] || null;
+        const back = (o) => ({ ...o, connect: o, accounts: eligibility(), thresholds: AD_THRESHOLDS, links: AD_LINKS, status: o.ok ? 200 : 409 });
+        if (!way) return back({ ok: false, way: null, state: "unsupported", message: `«${a.channel}» 은 아직 광고를 자동으로 붙일 수 없어요. 준비되면 이 화면에서 바로 눌러 붙일 수 있어요.` });
+        if (b.action === "disconnect_ads" && way === "runner_tistory") return back({ ok: false, way, state: "unsupported", message: "티스토리 광고는 티스토리 «수익» 설정에서 직접 꺼 주세요. 우리가 대신 끄지는 않아요." });
+        if (way === "wp_widget") { const on = b.action === "connect_ads"; S.adsAttached[id] = on;
+          return back({ ok: true, way, state: on ? "done" : "removed", message: on ? "사이드바에 광고를 넣었어요." : "광고를 뺐어요. 원래 위젯은 그대로 있어요." }); }
+        return back({ ok: true, way, state: "queued", message: way === "runner_tistory" ? "내 PC 프로그램이 켜지면 티스토리 광고 연결 상태를 확인할게요."
+          : b.action === "connect_ads" ? "내 PC 프로그램이 켜지면 블로그에 광고를 넣을게요." : "내 PC 프로그램이 켜지면 광고를 빼고 원래대로 돌려놓을게요." });
+      }
       if (b && b.action) { const id = Number(b.accountId); if (!id) return err("accountId", "계정을 골라 주세요.");
         const src = ["adpost", "ypp", "adsense", "clip"].includes(b.source) ? b.source : null; if (!src) return err("source", "어느 매체인지 골라 주세요.");
         S.adState[src][id] = b.action === "approved" ? "approved" : "pending"; return { ok: true, accounts: eligibility() }; }
       return { ok: true, thresholds: AD_THRESHOLDS, links: AD_LINKS, accounts: eligibility() }; },
+    /* [R8 §4.2 · B] «지금 올리기» — 예약된 글을 5분 크론까지 기다리지 않고 내보낸다. 문장·모양은 netlify/functions/publish-now.ts 그대로.
+       ?pubnow= cadence(간격에 걸림) · offline(내 PC 가 꺼져 있다) · gate(검사에 걸림) · connector(발행 준비 전) */
+    "publish-now": (b) => {
+      const nw = notWritable(); if (nw) return nw;
+      const p = S.pieces.find((x) => x.id === Number(b.pieceId)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 });
+      if (p.status === "published") return { ok: true, state: "already", pieceId: p.id, ...(p.externalUrl ? { postUrl: p.externalUrl } : {}), message: "이미 올라간 글이에요." };
+      if (!["scheduled", "approved"].includes(p.status)) return { ok: false, step: "state", status: 400,
+        error: p.status === "in_review" || p.status === "draft" ? "먼저 검수에서 승인해 주세요. 승인하면 바로 올릴 수 있어요." : "지금 상태로는 올릴 수 없어요. 발행함에서 상태를 확인해 주세요." };
+      if (pubNow === "connector") return { ok: false, step: "connector", status: 503, error: "발행 준비가 아직 끝나지 않았어요. 준비되면 예약한 시간에 자동으로 나가요." };
+      if (pubNow === "gate") return { ok: false, step: "gate", status: 400, error: "발행 전 검사에 걸렸어요. 검수 화면에서 고치고 다시 승인해 주세요." };
+      if (pubNow === "cadence") { const at = new Date(Date.now() + 90 * 60e3);
+        const hhmm = at.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
+        return { ok: false, step: "cadence", status: 400, retryAt: iso(at.getTime()), gapMin: 180, error: `이 계정은 글 사이를 180분 띄워요. ${hhmm}부터 올릴 수 있어요.` }; }
+      if (pubNow === "offline") { p.status = "publishing"; return { ok: true, state: "publishing", pieceId: p.id, runner: { online: false }, message: "내 PC 프로그램이 꺼져 있어요. 켜면 기다리던 글이 바로 나가요." }; }
+      p.status = "published"; p.publishedAt = iso(Date.now()); p.externalUrl = `https://blog.naver.com/${p.accountHandle || "mock"}/22${S.nextId++}`;
+      const sl = S.slots.find((s) => s.pieceId === p.id); if (sl) sl.status = "published";
+      return { ok: true, state: "published", pieceId: p.id, postUrl: p.externalUrl, message: `«${p.title}» 을(를) 올렸어요.` };
+    },
     /* [R7 §3.1] 탈퇴 · 되돌리기 — 서버 account-close.ts 그대로: 신청하면 즉시 «보기만» + 30일 뒤 파기 예약 · 그 전엔 되돌린다.
        🔴 문구·날짜는 서버가 준다 — 화면은 받아 쓴다. graceDays 도 서버 값(화면에 30을 박지 않는다). */
     "account-close": (b, _q, opts) => {
@@ -905,7 +959,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";

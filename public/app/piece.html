@@ -23,8 +23,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=12"></script>
-<script src="/js/mock.js?v=12"></script>
+<script src="/js/ui.js?v=13"></script>
+<script src="/js/mock.js?v=13"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -177,6 +177,7 @@ function render() {
     cta.hidden = false;
     if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve" ${P.gate?.judge?.grade === "P0" ? "disabled" : ""}>이대로 예약</button>`; bindCta(); }
     else if (P.status === "published" && P.externalUrl) cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">올라간 영상 보기</a>`;
+    else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     else cta.hidden = true;
     return; }
   UI.$("#vpane").hidden = true;
@@ -189,8 +190,29 @@ function render() {
   cta.hidden = false;
   if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button>`; bindCta(); }
   else if (P.status === "published" && P.externalUrl) { cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">발행된 글 보기</a>`; }
+  else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
   else cta.hidden = true;
   if (editable && !dirty) { const mark = () => { restoreDisc(body); if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ttl.addEventListener("input", mark); body.addEventListener("input", mark); }
+}
+/* [R8 §4.2] «지금 올리기» — 예약해 둔 글을 5분 크론까지 기다리지 않고 지금 내보낸다(POST /api/publish-now).
+   🔴 문구는 **전부 서버 것**이다(`message`·`error`) — «몇 시부터 가능»도 서버가 만든 문장이다(캐던스 계산이 서버에 있다).
+   🔴 결과가 셋이다: 나갔다(주소까지) · 내 PC 가 올리는 중(꺼져 있으면 그 사실) · 못 올린다(까닭). 셋을 한 토스트로 뭉뚱그리지 않는다. */
+const NOW_OK = ["scheduled", "approved"];
+const nowBtn = () => `<button class="btn primary" type="button" id="pubNow">지금 올리기</button>`;
+function bindNow() { const b = UI.$("#pubNow"); if (b) b.onclick = () => publishNow(b); }
+async function publishNow(btn) {
+  btn.disabled = true; btn.textContent = "올리는 중…";
+  const r = await UI.api("/api/publish-now", { body: { pieceId: id } });
+  btn.disabled = false; btn.textContent = "지금 올리기";
+  const say = UI.esc(r.message || r.error || "");
+  if (!r.ok) { if (r.gated) return;   // 체험 끝·정지·탈퇴는 UI.gate 가 이미 말했다
+    return UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><button class="btn secondary" type="button" data-ok>알겠어요</button></div>`,
+      { title: "지금은 올릴 수 없어요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } }); }
+  if (r.postUrl) return UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><a class="btn primary" href="${UI.esc(r.postUrl)}" target="_blank" rel="noopener">올라간 글 보기</a></div>`,
+    { title: "올렸어요", onOpen: (sh, close) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => load()); } });
+  if (r.runner && r.runner.online === false) return UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><a class="btn primary" href="/app/runner.html">내 PC 프로그램 보기</a></div>`,
+    { title: "기다리고 있어요", onOpen: (sh) => { const bg = sh.previousSibling; if (bg) bg.addEventListener("click", () => load()); } });
+  UI.toast(r.message || "올렸어요"); await load();
 }
 async function load() { const r = await UI.api(`/api/pieces-get?id=${id}`); if (!r.ok) { UI.toast(r.error || "글을 찾을 수 없어요"); setTimeout(() => UI.go("/app/pieces.html"), 900); return; } P = r.piece; dirty = false; render(); }
 async function save() {
@@ -215,8 +237,24 @@ async function approve() {
 }
 /* [R7 §1.3] 영상 파일 내려받기 · 직접 올린 주소 적기 — 유튜브 자동 업로드가 열리기 전의 정식 출구(계정 없이 만든 영상도 이 길로 나간다) */
 function bindVideoOut() {
-  const dl = UI.$("#vdl"); if (dl) dl.onclick = async () => { dl.disabled = true; await UI.videoDownload(P.id, UI.$("#vdlNote")); dl.disabled = false; };
+  const dl = UI.$("#vdl"); if (dl) dl.onclick = async () => { dl.disabled = true; await UI.videoDownload(P.id, UI.$("#vdlNote"), { onHandoff: handoffSheet }); dl.disabled = false; };
   const mk = UI.$("#vmark"); if (mk) mk.onclick = () => UI.markPublishedSheet(P, load);   // 성공 시트는 그대로 두고 뒤에서 이 화면만 새로 읽는다(화면을 빼앗지 않는다)
+}
+/* [R8 §3.2 · B2] «앱에서 올리기» — 우리가 못 올리는 채널(네이버 클립)의 정식 출구.
+   🔴 세 걸음·까닭·주소·단추 이름 **전부 서버 것**(lib/manual-upload.ts) — 화면이 지어내면 실제로 안 되는 길을 알려 주게 된다.
+   🔴 `appOpenVerified` 가 false 면 «앱으로 열려요»라고 쓰지 않는다(폰에서 재 보지 않았다 · B2 가 일부러 둔 스위치). */
+function handoffSheet(r) {
+  const h = r.handoff;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">${UI.esc(h.why)}</p>
+    <div class="steps" style="padding:4px 0 10px">${(h.steps || []).map((s, i) => `<div class="st ${i === 0 ? "on" : ""}"><i>${i + 1}</i>${UI.esc(s)}</div>`).join("")}</div>
+    ${h.appOpenVerified ? '<p class="muted" style="margin:0 0 8px;font-size:12.5px">휴대폰에서는 앱으로 바로 열려요.</p>' : ""}
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="hdl">영상 받기</button>
+      <a class="btn secondary" href="${UI.esc(h.openUrl)}" target="_blank" rel="noopener">${UI.esc(h.openLabel)}</a>
+      <button class="btn ghost" type="button" id="hmark">올린 주소 적기</button></div>`,
+    { title: `${UI.esc(h.label)}에 올리기`, onOpen: (sh, close) => {
+      sh.querySelector("#hdl").onclick = () => { location.href = r.url; };            // 서명은 10분 — 시트를 열어 둔 채로 받아도 된다
+      sh.querySelector("#hmark").onclick = () => { close(); setTimeout(() => UI.markPublishedSheet(P, load), 300); };
+    } });
 }
 /* 영상 다시 만들기는 지금 영상·자막을 지우고 처음부터 만든다(서버가 산출물 삭제 — 안 지우면 같은 영상이 또 나온다) */
 function askRegen(close) { if (P.kind !== "video") return regen(close);

@@ -97,7 +97,7 @@
 
   /* [R7 §1.3] 계정 없이 만든 영상의 출구 — ①내려받기 ②앱에서 직접 올림 ③올린 주소 적기.
      🔴 내려받기 주소는 10분짜리 서명이고 교차 출처라 `<a download>` 가 무시된다 — 파일 이름은 서버가 서명 안에 넣어 준다(화면은 이름을 고르지 않는다). */
-  UI.videoDownload = async function (pieceId, note) {
+  UI.videoDownload = async function (pieceId, note, opts = {}) {
     const r = await UI.api("/api/piece-video?id=" + encodeURIComponent(pieceId));
     if (!r.ok) {
       if (r.gated) return false;
@@ -105,6 +105,9 @@
       UI.toast(r.error || "영상을 가져오지 못했어요"); return false;
     }
     if (note) note.textContent = [r.filename ? `${r.filename} 를 받아요` : "", r.bytes ? UI.mb(r.bytes) : "", "받는 주소는 10분 동안만 살아 있어요"].filter(Boolean).join(" · ");
+    /* [R8 §3.2] 🔴 **우리가 못 올리는 채널**(클립)이면 파일만 던지지 않는다 — 서버가 준 «넘겨주는 길»을 화면이 연다.
+       종전엔 파일 주소만 줘서, 고객은 «앱에서 올려 주세요»를 듣고도 폰으로 어떻게 가져가는지를 몰랐다. */
+    if (r.handoff && opts.onHandoff) { opts.onHandoff(r); return true; }
     location.href = r.url;   // 같은 창에서 받아진다(파일 이름·Content-Disposition 은 서명 안에 있다)
     return true;
   };
@@ -447,6 +450,18 @@
     const s = String(bodyHtml || ""); const i = s.indexOf('class="disclosure"');
     const e = i < 0 ? -1 : s.indexOf("</div>", i);
     return UI.compIn(i < 0 || e < 0 ? "" : s.slice(i, e).replace(/<[^>]+>/g, " "));
+  };
+  /* [R8 §3.2 · 2026-09-15 · lib/ads-connect.ts adsWayOf·adsRemovable 에서 그대로 복사] 🔴 손으로 고치지 마라 — 하니스가 서버와 대조한다.
+     «광고를 붙이는 길»은 채널마다 다르다: 워드프레스는 우리가 바로 넣고, 티스토리·블로거는 내 PC 프로그램이 브라우저로 한다.
+     🔴 **티스토리는 뗄 수 없다**(러너가 상태를 읽기만 한다) — 그래서 «떼기» 단추를 만들지 않고, 직접 끄는 길을 말한다.
+        없는 되돌리기를 단추로 만들면 눌러도 아무 일이 안 난다. */
+  UI.ADS_WAY = { wordpress: "wp_widget", tistory: "runner_tistory", blogger: "runner_blogger" };
+  UI.ADS_REMOVABLE = ["wp_widget", "runner_blogger"];
+  UI.ADS_SAY = {
+    wp_widget: { on: "광고 붙이기", onSay: "사이드바에 광고 자리를 넣어요", off: "광고 떼기", offSay: "원래 위젯은 그대로 둬요" },
+    runner_blogger: { on: "광고 붙이기", onSay: "내 PC 프로그램이 켜지면 블로그에 넣어요", off: "광고 떼기", offSay: "내 PC 프로그램이 켜지면 빼요" },
+    /* 🔴 티스토리는 «붙이기»가 아니라 **확인**이다 — 서버가 하는 일이 그것뿐이라 단추 이름도 그렇게 적는다. */
+    runner_tistory: { on: "광고 연결 상태 확인", onSay: "내 PC 프로그램이 켜지면 연결됐는지 확인해요", note: "티스토리 광고는 티스토리 «수익» 설정에서 직접 꺼 주세요. 우리가 대신 끄지는 않아요." },
   };
   /* [R8-A · lib/content-approve.ts HARD_GATE_KEYS 에서 그대로 복사] 🔴 **이 축만 «이대로 예약»을 막는다**(hardFailures).
      나머지 실패는 «알려드리는 것»이다 — 전부 같은 빨강으로 그리면 고객이 멀쩡한 글을 못 내는 줄 안다(골격 반복·최상급이 그렇다). */

@@ -18,8 +18,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=12"></script>
-<script src="/js/mock.js?v=12"></script>
+<script src="/js/ui.js?v=13"></script>
+<script src="/js/mock.js?v=13"></script>
 <script>
 (async () => {
 await UI.boot("revenue");
@@ -60,6 +60,27 @@ const bar = (...bs) => `<div style="display:flex;gap:8px;padding:2px 16px 10px;f
 function card(title, desc, inner) {
   return `<div class="group" style="margin-bottom:12px"><div class="gt">${UI.esc(title)}</div><p class="muted" style="margin:0 16px 6px;font-size:13px">${UI.esc(desc)}</p>${inner}</div>`;
 }
+/* [R8 §3.2 · B2] 광고를 **실제로** 붙이고 뗀다 — 여태 화면엔 «신청했어요» 자기신고만 있었고, 서버 부품은 다 있는데 부르는 사람이 없었다.
+   🔴 채널마다 길이 다르다(`UI.ADS_WAY`) · 🔴 **티스토리는 뗄 수 없다** — «떼기» 단추를 만들지 않고 직접 끄는 길을 말한다.
+   🔴 승인 전에는 붙일 것이 없다(광고 코드가 없다) — 승인된 계정에만 이 줄이 뜬다. */
+function adsBar(a, state) {
+  if (state !== "approved") return "";
+  const way = UI.ADS_WAY[a.channel]; if (!way) return "";   // 길이 없는 채널엔 단추를 만들지 않는다
+  const say = UI.ADS_SAY[way];
+  const can = UI.ADS_REMOVABLE.includes(way);
+  return bar(btn(`data-ads="connect" data-acc="${a.accountId}"`, say.on), can && btn(`data-ads="disconnect" data-acc="${a.accountId}"`, say.off, true))
+    + `<p class="muted" style="margin:-4px 16px 10px;font-size:12.5px">${UI.esc(say.onSay)}${say.note ? " · " + UI.esc(say.note) : ""}</p>`;
+}
+/* 결과 문장은 **서버가 만든다**(message) — 붙었는지 예약됐는지 이미 붙어 있었는지가 그 안에 있다. 화면이 고쳐 쓰지 않는다. */
+async function adsDo(kind, accountId, b) {
+  b.disabled = true;
+  const r = await UI.api("/api/ad-eligibility", { body: { action: kind === "connect" ? "connect_ads" : "disconnect_ads", accountId } });
+  b.disabled = false;
+  const say = UI.esc(r.message || r.error || (r.ok ? "됐어요" : "지금은 할 수 없어요"));
+  if (r.ok && r.accounts) { EL.accounts = r.accounts; render(); }
+  UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><button class="btn secondary" type="button" data-ok>알겠어요</button></div>`,
+    { title: r.ok ? "" : "그대로 두었어요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
+}
 /* 계정 행 + 아래 버튼 줄 — 카드마다 같은 자리에 같은 것(통일성) */
 const accRow = (a, sub, pill) => `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(sub)}</span></div>${pill}</div>`;
 const gaugeRow = (a, gauges, pill) => `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><div style="padding:6px 0 0">${gauges}</div></div>${pill}</div>`;
@@ -83,7 +104,8 @@ function render() {
       const pill = s && s.status === "connected" ? srcPill(s) : `<span class="pill ${st[0]}">${st[1]}</span>`;
       const sub = s && s.status === "connected" ? srcSub(s) : state === "approved" ? "구글로 연결하면 수익을 매일 가져와요" : state === "pending" ? "심사가 끝나면 알려 주세요" : "가입하고 사이트를 추가해 주세요";
       return accRow(a, sub, pill) + bar(btn(`data-how="adsense" data-acc="${a.accountId}"`, "신청 방법"), state !== "approved" && !(s && s.status === "connected") && btn(`data-done="adsense" data-acc="${a.accountId}"`, "가입 완료했어요"),
-        (state === "approved" || (s && s.status !== "connected")) && btn(`data-connect="adsense" data-acc="${a.accountId}"`, s && s.status === "connected" ? "다시 연결" : "구글로 연결"), s && s.status === "connected" && btn(`data-off="adsense" data-acc="${a.accountId}"`, "끊기", true)); }).join(""));
+        (state === "approved" || (s && s.status !== "connected")) && btn(`data-connect="adsense" data-acc="${a.accountId}"`, s && s.status === "connected" ? "다시 연결" : "구글로 연결"), s && s.status === "connected" && btn(`data-off="adsense" data-acc="${a.accountId}"`, "끊기", true))
+        + adsBar(a, state); }).join(""));
 
   /* ③ 유튜브 — 조건 게이지 + 구글 동의(수익 스코프는 따로 · v3.5) */
   const yt = EL.accounts.filter((a) => a.ypp);
@@ -117,6 +139,7 @@ function render() {
   UI.$$("#body [data-key]").forEach((b) => b.onclick = () => keySheet(b.dataset.key));
   UI.$$("#body [data-connect]").forEach((b) => b.onclick = () => googleConnect(b.dataset.connect, acc(b), b));
   UI.$$("#body [data-off]").forEach((b) => b.onclick = () => disconnect(b.dataset.off, acc(b)));
+  UI.$$("#body [data-ads]").forEach((b) => b.onclick = () => adsDo(b.dataset.ads, acc(b), b));
 }
 
 /* 한 화면 한 단계 — 신청 방법 3단계 + 외부 새 창 */
