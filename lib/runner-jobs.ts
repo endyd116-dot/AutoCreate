@@ -304,7 +304,10 @@ export type RunnerAuth =
  *      쓰던 사람이 업데이트 하나로 갑자기 못 쓰게 되는 일은 만들지 않는다.
  *    · 이미 묶인 값과 다르면 거절하고 횟수를 센다(알림 문구는 호출부가 — 여기선 DB 를 한 번만 만진다).
  *    · `kind='managed'`(우리 팜)은 묶지 않는다 — 우리가 옮기고 다시 띄우는 기계라 지문이 정당하게 바뀐다.
- *    · 지문을 **안 보내는 옛 러너도 그대로 돈다**(없으면 검사하지 않는다) — 다 올라온 뒤에 조여도 늦지 않다.
+ *    · 🔴 **지문 없는 요청은 «이미 묶인 기기»면 거절한다**(R8 §3.1 · 2026-09-15).
+ *      종전엔 «안 보내면 검사하지 않는다 — 다 올라온 뒤에 조여도 늦지 않다»였는데, 그 문이 **닫히지 않았다**:
+ *      토큰을 복사한 사람이 헤더를 빼기만 하면 구속을 피하고, 그 토큰으로 claim 하면 자격이 평문으로 나간다.
+ *      **아직 안 묶인 기기**(지문 이전 판)는 종전대로 통과 — 쓰던 사람이 업데이트 하나로 멈추지 않게.
  */
 export async function authRunner(req: Request): Promise<RunnerAuth> {
   const token = String(req.headers.get("x-runner-token") ?? "").trim();
@@ -315,23 +318,73 @@ export async function authRunner(req: Request): Promise<RunnerAuth> {
   if (!row) return { ok: false, reason: "bad_token", message: "러너 열쇠가 올바르지 않아요. 앱에서 기기를 다시 등록해 주세요." };
 
   const device: DeviceRow = { id: n(row.id), tenantId: n(row.tenant_id), name: String(row.name ?? ""), kind: String(row.kind ?? "own") };
-  const fp = String(req.headers.get("x-runner-fp") ?? "").trim().toLowerCase();
-  if (device.kind === "managed" || !/^[0-9a-f]{64}$/.test(fp)) return { ok: true, device };
+  if (device.kind === "managed") return { ok: true, device };          // 우리 팜 — 옮겨 다니는 기계라 안 묶는다
 
-  const bound = String(row.fingerprint ?? "").trim().toLowerCase();
-  if (!bound) {
-    await q(sql`UPDATE runner_devices SET fingerprint = ${fp}, fingerprint_at = NOW() WHERE id = ${device.id} AND fingerprint IS NULL`);
-    return { ok: true, device };
+  const d = classifyFpBinding(String(row.fingerprint ?? ""), req.headers.get("x-runner-fp"));
+  switch (d.action) {
+    case "pass": return { ok: true, device };
+    case "bind":
+      await q(sql`UPDATE runner_devices SET fingerprint = ${d.fp}, fingerprint_at = NOW() WHERE id = ${device.id} AND fingerprint IS NULL`);
+      return { ok: true, device };
+    case "refuse_missing":
+      await q(sql`UPDATE runner_devices SET fp_mismatch_at = NOW(), fp_mismatch_count = fp_mismatch_count + 1 WHERE id = ${device.id}`);
+      // 🔴 거절은 조용하면 안 된다 — 진짜 복제 시도면 이 기록이 **유일한 신호**다(메인 지시).
+      await writeAudit({
+        tenantId: device.tenantId, action: "runner_fp_missing", actorType: "system",
+        target: `runner_device:${device.id}`, detail: { name: device.name, fpState: d.fpState }, riskLevel: "high",
+      });
+      return { ok: false, reason: "other_device", message: d.message };
+    case "refuse_other":
+      await q(sql`UPDATE runner_devices SET fp_mismatch_at = NOW(), fp_mismatch_count = fp_mismatch_count + 1 WHERE id = ${device.id}`);
+      await onOtherDevice(device);
+      return { ok: false, reason: "other_device", message: d.message };
   }
-  if (bound !== fp) {
-    await q(sql`UPDATE runner_devices SET fp_mismatch_at = NOW(), fp_mismatch_count = fp_mismatch_count + 1 WHERE id = ${device.id}`);
-    await onOtherDevice(device);
+}
+
+/** 지문 헤더의 상태 — 🔴 «아예 없음»과 «형식이 틀림»을 **가른다**(메인 지시 2026-09-15).
+    뭉쳐 두면 나중에 지문 형식만 바뀌었을 때(해시 길이 변경 등) 원인을 못 찾는다 — 둘은 전혀 다른 사건이다. */
+export type FpState = "ok" | "absent" | "malformed";
+export type FpDecision =
+  | { action: "pass"; fpState: FpState }
+  | { action: "bind"; fpState: "ok"; fp: string }
+  | { action: "refuse_missing"; fpState: "absent" | "malformed"; message: string }
+  | { action: "refuse_other"; fpState: "ok"; message: string };
+
+/**
+ * classifyFpBinding — «이 요청을 받아 줄 것인가»를 **순수하게** 가른다(R8 §3.1 · 2026-09-15).
+ *
+ *   🔴 **호환을 위해 열어 둔 문이 닫히지 않고 있었다.** 종전 한 줄:
+ *        `if (managed || !/^[0-9a-f]{64}$/.test(fp)) return { ok: true, device }`
+ *      «지문을 안 보내면 **구속을 통째로 건너뛴다**»는 뜻이었다. 그래서 `.token` 을 복사한 사람이
+ *      **헤더를 빼기만 하면** 묶임을 피했고, 그 토큰으로 `claim` 하면 서버가 **계정 자격을 평문으로** 내려 준다
+ *      (설계상 평문 표면 2곳 중 하나). 즉 세션 파일이 암호화돼 있어도 **토큰 하나면 새 세션을 받아 간다.**
+ *
+ *   이제: **이미 묶인 기기**는 지문 없는 요청을 거절한다(v1.1.x 러너는 모든 요청에 싣는다 — 안 싣는 건 우리 러너가 아니다).
+ *        **아직 안 묶인 기기**(지문 이전 판)는 종전대로 통과 — 쓰던 사람이 업데이트 하나로 멈추지 않게.
+ *   ⚠️ 2026-09-15 실측: 등록 16대 중 **묶인 기기 0대** — 이 문을 닫아도 **오늘 멈추는 기기는 없다**.
+ *      바꿔 말하면 이 구속은 **여태 한 번도 실제로 작동한 적이 없다** — 라이브로는 «되는지» 못 본다.
+ *      그래서 순수 함수로 뽑았다: `scripts/verify-runner-fp.mts` 가 DB 없이 전부 먹여 본다(AC-33).
+ */
+export function classifyFpBinding(boundRaw: string | null | undefined, header: string | null | undefined): FpDecision {
+  const raw = String(header ?? "").trim();
+  const fp = raw.toLowerCase();
+  const fpState: FpState = !raw ? "absent" : /^[0-9a-f]{64}$/.test(fp) ? "ok" : "malformed";
+  const bound = String(boundRaw ?? "").trim().toLowerCase();
+
+  if (bound && fpState !== "ok") {
     return {
-      ok: false, reason: "other_device",
-      message: "이 열쇠는 다른 PC에 연결돼 있어요. 이 컴퓨터에서 쓰시려면 앱에서 기기를 지우고 다시 등록해 주세요.",
+      action: "refuse_missing", fpState,
+      message: fpState === "absent"
+        ? "이 열쇠는 특정 PC에 연결돼 있어요. 최신 프로그램으로 실행해 주세요(옛 버전은 기기 확인 정보를 보내지 않아요)."
+        : "기기 확인 정보가 올바르지 않아요. 프로그램을 다시 설치해 주세요.",
     };
   }
-  return { ok: true, device };
+  if (fpState !== "ok") return { action: "pass", fpState };            // 안 묶인 옛 기기 — 묶을 값이 없으니 그대로 통과
+  if (!bound) return { action: "bind", fpState, fp };
+  if (bound !== fp) {
+    return { action: "refuse_other", fpState, message: "이 열쇠는 다른 PC에 연결돼 있어요. 이 컴퓨터에서 쓰시려면 앱에서 기기를 지우고 다시 등록해 주세요." };
+  }
+  return { action: "pass", fpState };
 }
 
 /**
