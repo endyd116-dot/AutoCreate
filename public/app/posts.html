@@ -88,7 +88,7 @@ const retractable = (p) => p.status === "published" && !p.retractedAt;
 const retractBtn = (p) => (noticeOf(p) ? '<button class="btn ghost" type="button" id="tdAns" style="color:var(--danger-ink)">신고에 답하기</button>'
   : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
 const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
-  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}은 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
+  : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}${UI.josa(UI.chLabel(p.channel))} 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
 function bindRetract(p, sh, close) {
   const ans = sh.querySelector("#tdAns");
   if (ans) { ans.onclick = () => { const n = noticeOf(p); close(); setTimeout(() => UI.takedownSheet(n, load), 300); }; return; }

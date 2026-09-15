@@ -357,6 +357,9 @@
   /* [R8-A] 검사 손잡이가 켜졌으면 그 글의 gate 를 다시 만든다 + 예약을 막는 것은 **하드 축뿐**(서버 hardFailures 와 같게) */
   for (const p of S.pieces) { if (!p.gate || p.kind === "video") continue; if (gateKnob) p.gate = gate(true); p.gateOk = gateOkOf(p.gate); }
   if (qs.has("runner")) { for (const d of S.devices) d.online = runnerOn; save(); }
+  /* [R8-A2 §5E] 🔴 신고 손잡이는 **씨앗 뒤에도 다시 건다** — 상태가 sessionStorage 에 남아 있어서 화면을 옮기며 `?td=` 를 바꿔도
+     첫 값이 그대로 따라다녔다(그래서 «못 내리는 채널» 길을 시연할 수 없었다 · 왕복 검사에서 잡혔다). `runner` 손잡이와 같은 자리. */
+  if (qs.has("td")) { S.takedowns = seed().takedowns; save(); }
   if (autoOff) { S.settings.autoSchedule = false; save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
 

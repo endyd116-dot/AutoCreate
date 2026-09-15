@@ -245,6 +245,16 @@
   /* 큰 수는 만·억으로 줄여 쓴다 — «2,140,000 / 10,000,000» 은 한 줄에 안 들어간다 */
   UI.numShort = (n) => { n = Number(n) || 0; if (n >= 1e8) return (n / 1e8).toFixed(n % 1e8 ? 1 : 0).replace(/\.0$/, "") + "억"; if (n >= 1e4) return UI.num(Math.round(n / 1e4)) + "만"; return UI.num(n); };
   UI.esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  /* [R8-A2] 조사 — «유튜브 쇼츠**은**» 처럼 틀린 조사가 나오면 그 문장은 사람말이 아니다(§3 «말은 사람말»).
+     채널 이름은 서버가 주는 값이라 **문장에 박아 둘 수 없다** — 받침을 재서 고른다.
+     🔴 한글이 아닌 끝(영문·숫자)은 **받침을 못 잰다** — 그때는 받침 없는 쪽으로 둔다(짐작을 «판정»으로 부르지 않는다 · AC-9). */
+  UI.josa = (word, pair = "은는") => {
+    const P = { "은는": ["은", "는"], "이가": ["이", "가"], "을를": ["을", "를"], "과와": ["과", "와"], "으로로": ["으로", "로"] }[pair] || ["", ""];
+    const s = String(word ?? ""); const c = s.charCodeAt(s.length - 1);
+    if (!(c >= 0xac00 && c <= 0xd7a3)) return P[1];
+    const jong = (c - 0xac00) % 28;
+    return jong === 0 ? P[1] : (pair === "으로로" && jong === 8 ? P[1] : P[0]);   // ㄹ 받침은 «로»
+  };
 
   /* ── 채널 ── */
   UI.CH = {
@@ -666,7 +676,7 @@
     const open = nt.externalUrl ? `<a class="btn secondary" href="${UI.esc(nt.externalUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : "";
     /* 🔴 우리가 못 내리는 자리는 **그렇다고 말한다** — «안 돼요»가 아니라 «여기서는 저희가 못 내려요 · 이 주소에서 직접 내리시면 돼요». */
     const noWay = live && !canRetract
-      ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(nt.channel ? `${UI.chLabel(nt.channel)}은 저희가 대신 내려 드릴 수 없어요.` : "이 신고는 저희가 올린 글로 이어지지 않아요.")} 그 글에서 직접 내리신 뒤 «제가 직접 내렸어요»를 눌러 주세요.</p>` : "";
+      ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(nt.channel ? `${UI.chLabel(nt.channel)}${UI.josa(UI.chLabel(nt.channel))} 저희가 대신 내려 드릴 수 없어요.` : "이 신고는 저희가 올린 글로 이어지지 않아요.")} 그 글에서 직접 내리신 뒤 «제가 직접 내렸어요»를 눌러 주세요.</p>` : "";
     UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${nt.channel ? UI.mark(nt.channel) : ""}<div class="l"><span class="t wrap">${UI.esc(nt.kindLabel || "신고")}</span><span class="d">${UI.esc(nt.claimant || "신고 접수")}</span></div>${UI.pill(UI.TAKEDOWN_STATUS, nt.status)}</div>
       <p class="muted" style="margin:4px 0 10px;font-size:13.5px;line-height:1.55;white-space:normal">${UI.esc(nt.reason || "")}</p>
       <div class="kv" style="padding-left:0;padding-right:0"><span class="k">받은 날</span><span class="v">${UI.esc(UI.dateKST(nt.receivedAt))}</span></div>
