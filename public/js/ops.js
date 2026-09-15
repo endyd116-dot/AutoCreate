@@ -44,6 +44,14 @@
     if (cur && !O.can(r.operator, cur[4])) { const first = O.menus(r.operator)[0]; if (first) { location.replace(first[2] + (location.search.includes("mock=1") ? (first[2].includes("?") ? "&" : "?") + location.search.slice(1) : "")); return null; } }
     O.shell(active, r.operator); return r.operator;
   };
+  /* [R8 · E1] AI 원가 분해의 사람말 — `ai_usage.purpose` 는 코드값이라 화면에 그대로 내지 않는다(§3 «시스템 용어 금지»).
+     🔴 표에 없는 값은 **코드값 그대로** 낸다(«기타»로 뭉치면 새 용도가 생겨도 아무도 모른다 · AC-9). */
+  const AI_PURPOSE = { content: "글", image: "사진", director: "디렉터", topics: "소재", tts: "목소리",
+    video_script: "영상 대본", video_clip: "영상 장면", video_reference: "참고 영상", video_judge: "영상 심사",
+    video_factcheck: "사실 확인", video_factfix: "사실 고치기", video_reconcile: "영상 맞추기",
+    verify: "점검", ops_verify: "운영 점검", reset: "초기화" };
+  O.aiPurpose = (p) => AI_PURPOSE[p] || (p || "(모름)");
+
   O.status = (s) => ({ trial: ["ink", "체험"], active: ["ok", "이용 중"], past_due: ["warn", "미납"], readonly: ["warn", "읽기 전용"], suspended: ["danger", "정지"], closed: ["off", "종료"] }[s] || ["off", s]);
   O.pill = (arr) => `<span class="pill ${arr[0]}">${UI.esc(arr[1])}</span>`;
   O.won = (n) => (n == null ? "—" : UI.won(n));

@@ -193,6 +193,9 @@ input,textarea,select{font:inherit;color:inherit}
 .bar .n{width:96px;flex:none;color:var(--sub);font-weight:500;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .bar .n .mk{flex:none}
 .bar .track{flex:1;height:10px;border-radius:999px;background:var(--ground);overflow:hidden} .bar .fill{height:100%;border-radius:999px;background:var(--faint);transition:width 600ms var(--ease)} .bar.top .fill{background:var(--ink)}
 .bar .v{width:64px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+/* [R8 · E1] AI 원가 분해 막대 — 이름(모델명)도 값(«$0.83 · 18회»)도 길다. 같은 컴포넌트에 칸만 넓힌다(새 차트를 만들지 않는다 · §13.0 다색 차트 금지 그대로). */
+.bars.ai .bar{font-size:13px} .bars.ai .bar .n{width:104px} .bars.ai .bar .v{width:104px;font-weight:600} .bars.ai .bar .v b{font-weight:800}
+@media (max-width:380px){ .bars.ai .bar .n{width:76px} .bars.ai .bar .v{width:92px} }
 /* [P1R3] 일별 수익 — .bars 와 같은 급의 차트(단색 + 강조 1 · 다색 금지). 빗금 = 수집 못 한 날(«0원»이 아니다 · AC-9) */
 .spark{display:flex;align-items:flex-end;gap:3px;height:92px;padding:12px 16px 4px}
 .spark button{flex:1;min-width:3px;align-self:flex-end;border-radius:3px 3px 0 0;background:var(--faint);display:block;transition:background var(--dur) var(--ease)}
