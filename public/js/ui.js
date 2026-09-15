@@ -38,7 +38,9 @@
       if (r.reason === "suspended") return done("결제가 밀려 있어요. 카드를 확인하면 바로 이어서 돼요. 만든 글과 편성표는 그대로예요.", "잠시 멈춰 있어요", "카드 확인하기", "/app/plan.html");
       const opened = done("체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요. 보는 건 지금도 다 돼요.", "이어서 하려면", "요금제 고르기", "/app/plan.html");
       /* 🔴 [R7 §3.1] **탈퇴를 신청한 집도 서버 상태는 같은 readonly** 라 여기로 온다 — 그 집에 «체험이 끝났어요 · 요금제 고르기»는
-         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 막힌 그 순간에 한 번만 물어보고(GET) 탈퇴한 집이면 시트를 바꿔 준다. */
+         거짓말이고, 정작 필요한 «되돌리기»를 못 찾게 만든다. 막힌 그 순간에 한 번만 물어보고(GET) 탈퇴한 집이면 시트를 바꿔 준다.
+         ⏳ **임시다**(2026-09-15 메인 결정 · B 에 발주): 서버가 403 에 `reason:"closed"` + `purgeAt`·`daysLeft` 를 실어 주면
+            이 왕복을 통째로 지우고 위 `suspended` 처럼 `reason` 한 줄로 가른다. 그때까지만 산다. */
       const gs = gateSheet;
       UI.api("/api/account-close", { noGate: true, noRedirect: true }).then((c) => {   // noRedirect — 이 확인 때문에 누구도 로그인 화면으로 튕기지 않게
         if (!c.ok || !c.closed || !gs || !gs.el.isConnected) return;
