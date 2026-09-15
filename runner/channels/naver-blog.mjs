@@ -375,6 +375,70 @@ async function attachImage(page, ctx, file, missed) {
  *      끝에 **새 글 칸**을 만든다. 새 칸은 비어 있어 한복판에 끼어들 수가 없다.
  *   ⚠️ «본문 추가»는 hover 영역이라 isVisible 이 false 로 나올 때가 있다 — 안 보이면 끝으로 스크롤 + force.
  */
+/** 문서의 `.se-component` 수 — «새 칸이 **정말** 생겼나»를 세는 자(클릭 성공 여부가 아니라 **결과**를 본다). */
+const compCount = (ctx) => ctx.evaluate(() => document.querySelectorAll(".se-component").length).catch(() => -1);
+
+/**
+ * «본문 추가»를 누른다(세 겹). 🔴 **누르기만 한다** — 생겼는지 판정은 호출자 몫이다.
+ *   실측(2026-09-14 `runner/probe-editor.mjs` 덤프):
+ *     · `button.se-canvas-bottom-button __edge-area` — **존재하지만 `vis:false`**(hover 영역이라 Playwright 가 숨김으로 본다)
+ *     · `div.se-canvas-bottom` — 그 **보이는 부모**(텍스트 «본문 추가»)
+ *   종전엔 버튼이 안 보이면 force 클릭만 했는데 그게 자주 빗나가 «본문 추가» 실패가 글당 6건 났다(실측).
+ *   ⇒ 보이는 부모를 먼저 누르고, 그다음 버튼 force, 마지막으로 DOM 직접 이벤트까지 세 겹.
+ */
+async function clickAddTextBlock(page, ctx) {
+  const btn = ctx.locator(".se-canvas-bottom-button").first();
+  const box = ctx.locator(".se-canvas-bottom").first();
+  await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+  if (await btn.isVisible({ timeout: 800 }).catch(() => false)) await btn.click({ timeout: 4000 }).catch(() => {});
+  else if (await box.isVisible({ timeout: 800 }).catch(() => false)) await box.click({ timeout: 4000 }).catch(() => {});
+  else await btn.click({ timeout: 3000, force: true }).catch(() => {});
+  await settle(page, 500);
+}
+
+/** DOM 에서 직접 이벤트를 쏜다 — 마지막 안전벨트(AM `clickEditable` 관례). */
+async function dispatchAddTextBlock(ctx) {
+  await ctx.evaluate(() => {
+    const el = document.querySelector(".se-canvas-bottom-button") || document.querySelector(".se-canvas-bottom");
+    if (!el) return false;
+    el.scrollIntoView({ block: "end" });
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: x, clientY: y }));
+    }
+    return true;
+  }).catch(() => false);
+}
+
+/**
+ * 🔴 **무조건 새 글 칸을 만들고 캐럿을 거기 둔다**(AM `freshTextBlockForUrl` 과 **같은 뜻**).
+ *
+ *   ⚠️ **이 함수가 없어서 «번짐 끊기»가 통째로 무력했다**(2026-09-16 C 가 진짜 Chromium 으로 잡았다).
+ *      나는 이식 계획서에 「`freshTextBlockForUrl` 은 이미 우리 안에 있다 — `moveCaretToEnd` 가 같은 일을 한다」고
+ *      적었는데 **틀렸다**: `moveCaretToEnd` 는 «마지막 컴포넌트가 글이 **아닐 때만**» 새 칸을 만든다.
+ *      그런데 서식을 칠한 **직후엔 마지막이 언제나 글**이라 그 분기에 영영 못 들어가고, 남은 경로(문단 클릭 + End)는
+ *      **인라인 span 안에 캐럿을 둔다** — 서식이 그대로 이어진다. AM 은 **조건 없이** 누른다. 그 한 줄 차이였다.
+ *      ⇒ 실측: 밑줄 마크 뒤 평문 3문단이 **통문단 밑줄** · `--mutate=break` 로 끊기를 빼도 **결과가 같았다**
+ *        (= 끊기가 있으나 없으나 같다 = 아무 일도 안 하고 있었다).
+ *
+ *   🔴 **«눌렀다»가 아니라 «생겼다»로 판정한다.** 종전 `breaks` 는 클릭 성공을 세고 있었고, 그래서
+ *      `breaks:4 · breakFails:0` 인데 **새 칸은 0개**였다 — 숫자가 거짓말을 했다(AC-9 의 계수판).
+ */
+async function freshTextBlock(page, ctx) {
+  const before = await compCount(ctx);
+  if (before < 0) return false;
+  await clickAddTextBlock(page, ctx);
+  if ((await compCount(ctx)) <= before) { await dispatchAddTextBlock(ctx); await settle(page, 600); }
+  if ((await compCount(ctx)) <= before) return false;   // 🔴 안 생겼으면 실패다(«눌렀으니 됐겠지» 금지)
+
+  /* 칸을 «만드는 것»과 캐럿이 «거기 가는 것»은 다른 일이다(AM #747) — 만든 칸을 실제로 클릭해 데려온다. */
+  const fresh = ctx.locator(".se-component.se-text").last().locator(".se-text-paragraph").last();
+  const ok = await fresh.click({ timeout: 2500 }).then(() => true).catch(() => false);
+  await page.keyboard.press("End").catch(() => {});
+  return ok;
+}
+
 async function moveCaretToEnd(page, ctx, missed) {
   try {
     const lastIsText = async () => await ctx.evaluate(() => {
@@ -384,32 +448,8 @@ async function moveCaretToEnd(page, ctx, missed) {
     }).catch(() => false);
 
     if (!(await lastIsText())) {
-      /* 🔴 «본문 추가» 실측(2026-09-14 `runner/probe-editor.mjs` 덤프):
-           · `button.se-canvas-bottom-button __edge-area` — **존재하지만 `vis:false`**(hover 영역이라 Playwright 가 숨김으로 본다)
-           · `div.se-canvas-bottom` — 그 **보이는 부모**(텍스트 «본문 추가»)
-         종전엔 버튼이 안 보이면 force 클릭만 했는데 그게 자주 빗나가 «본문 추가» 실패가 글당 6건 났다(실측).
-         ⇒ 보이는 부모를 먼저 누르고, 그다음 버튼 force, 마지막으로 DOM 직접 클릭까지 세 겹으로 간다. */
-      const btn = ctx.locator(".se-canvas-bottom-button").first();
-      const box = ctx.locator(".se-canvas-bottom").first();
-      await ctx.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-      if (await btn.isVisible({ timeout: 800 }).catch(() => false)) await btn.click({ timeout: 4000 }).catch(() => {});
-      else if (await box.isVisible({ timeout: 800 }).catch(() => false)) await box.click({ timeout: 4000 }).catch(() => {});
-      else await btn.click({ timeout: 3000, force: true }).catch(() => {});
-      await settle(page, 500);
-      if (!(await lastIsText())) {
-        // 마지막 안전벨트 — 클릭 판정에 걸리면 DOM 에서 직접 이벤트를 쏜다(AM clickEditable 관례).
-        await ctx.evaluate(() => {
-          const el = document.querySelector(".se-canvas-bottom-button") || document.querySelector(".se-canvas-bottom");
-          if (!el) return false;
-          el.scrollIntoView({ block: "end" });
-          const r = el.getBoundingClientRect();
-          const x = r.left + r.width / 2, y = r.top + r.height / 2;
-          for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-            el.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: x, clientY: y }));
-          }
-          return true;
-        }).catch(() => false);
-      }
+      await clickAddTextBlock(page, ctx);
+      if (!(await lastIsText())) await dispatchAddTextBlock(ctx);
       await settle(page, 600);
       /* 🔴 «본문 추가»가 실패했으면 **여기서 멈춘다**. 아래 폴백(마지막 글 문단 클릭)은 컴포넌트 **앞**의
          문단을 짚어 캐럿을 **문서 한복판**에 꽂는다 — 그러면 다음 문장이 앞 문단 사이에 끼어들어
@@ -557,7 +597,11 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
   let wrote = false;
   const seq = createMarkSeq();
   const acc = applied ?? { value: 0, line: 0, row: 0, bold: 0, underline: 0 };
-  const fresh = () => moveCaretToEnd(page, ctx, missed);
+  /* 🔴 **경계용 `fresh` 는 `moveCaretToEnd` 가 아니다**(2026-09-16 C 실측으로 고쳤다).
+     `moveCaretToEnd` 는 «마지막이 글이 **아닐 때만**» 새 칸을 만든다 — 서식을 칠한 직후엔 마지막이 **언제나 글**이라
+     그 분기에 영영 못 들어가고, 남은 경로(문단 클릭+End)는 **인라인 span 안에 캐럿을 둬 서식을 그대로 잇는다.**
+     ⇒ 끊기는 **무조건 새 칸을 만드는** 함수여야 한다. 두 함수는 이름이 비슷할 뿐 **다른 일**이다. */
+  const fresh = () => freshTextBlock(page, ctx);
 
   /* 🔴 **문단 경계의 규칙**(AM 이 URL 전용 방어를 «한 곳의 규칙»으로 올린 그 자리).
      앞 문단이 색·굵게·밑줄·인용을 남겼으면 **새 글 칸**에서 시작한다 — 새 칸은 서식을 안 물려받는다(실측 성질).
@@ -919,7 +963,7 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
           글 전체가 빨강·가운데·기울임으로 물든 것은 «고객의 선택»이 아니라 **우리 도구의 고장**이고,
           그대로 나가면 사장님이 **발행물로** 알게 된다(실제로 그랬다). 조용히 나가느니 멈추는 게 낫다.
        🔴 임시저장(dryRun)도 잰다 — 카나리가 «멀쩡하다»고 말한 뒤 본 발행에서 터지면 카나리가 무슨 소용인가. */
-    const bleed = await measureFormatBleed(ed);
+    const bleed = await measureFormatBleed(ed, { headingSize: Number(HEADING_FONT_SIZE) || 19, bodySize: Number(BODY_FONT_SIZE) || 15 });
     const verdict = bleedVerdict(bleed);
     notes.push(verdict.line);
     if (bleed) formatMarks.bleed = bleed;

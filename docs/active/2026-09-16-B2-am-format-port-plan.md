@@ -34,7 +34,25 @@ AM 은 이 셋이 러너 본문 여기저기 흩어져 있다. 🔴 우리는 **
 | `measureFormatBleed(page)` | 같음 — **`page.evaluate` 에 넘길 순수 본문을 `export` 로 따로 뺀다** | 하니스가 **그 함수 원문 그대로** DOM 에 돌려야 한다(복제 0 · 두 벌이면 다음 수리 때 갈린다) |
 | `FORMAT_BLEED_MAX_PCT` | `RUNNER_FORMAT_BLEED_MAX_PCT \|\| 30` — **상수 한 곳** | 숫자를 코드 여러 곳에 흩지 않는다(트리거 명시) |
 
-🔴 **`freshTextBlockForUrl` 은 이미 우리 안에 있다** — `naver-blog.mjs moveCaretToEnd` 가 같은 일(`.se-canvas-bottom-button` 으로 끝에 새 글 칸)을 한다. **새로 만들지 않고 그것을 부른다**(AC-69 의 반대 방향 — 있는 것을 또 만드는 것도 같은 병이다).
+~~🔴 **`freshTextBlockForUrl` 은 이미 우리 안에 있다** — `moveCaretToEnd` 가 같은 일을 한다. 새로 만들지 않고 그것을 부른다.~~
+
+### 🔴 **위 줄은 틀렸다** — 이 문서가 낸 유일한 실제 사고다(2026-09-16 · C 가 진짜 Chromium 으로 잡았다)
+
+**두 함수는 같은 일을 하지 않는다.**
+- AM `freshTextBlockForUrl` — **조건 없이** «본문 추가»를 누른다.
+- 우리 `moveCaretToEnd` — «마지막 컴포넌트가 글이 **아닐 때만**» 누른다. 글이면 **그 문단을 클릭하고 End** 를 칠 뿐이다.
+
+🔴 **서식을 칠한 직후엔 마지막이 언제나 글**이다. ⇒ 새 칸을 만드는 분기에 **영영 못 들어가고**, 남은 경로는
+**인라인 span 안에 캐럿을 둔다** — 서식이 그대로 이어진다. **끊기가 통째로 무력했다.**
+실측: 밑줄 마크 뒤 평문 3문단이 통문단 밑줄 · **끊기를 아예 빼 봐도 결과가 같았다**(= 아무 일도 안 하고 있었다).
+그리고 `breaks` 는 «클릭 성공»을 세고 있어서 `breaks:4 · breakFails:0` 인데 **새 칸은 0개**였다 — 숫자가 거짓말을 했다.
+
+⇒ 수리: **`freshTextBlock()` 을 따로 만든다**(무조건 새 칸 · `lastIsText` 조건 없음 · **«생겼나»로 판정**).
+«본문 추가» 세 겹 클릭만 `clickAddTextBlock`·`dispatchAddTextBlock` 으로 빼 둘이 나눠 쓴다.
+
+🔴 **교훈**: 「있는 것을 또 만들지 마라」(AC-69 의 반대 방향)를 지키려다 **없는 것을 있다고 쳤다.**
+재사용 판단은 **이름이 아니라 «그 함수가 어느 조건에서 무엇을 하는가»**로 한다 —
+`moveCaretToEnd` 는 «컴포넌트 뒤에서 끝으로 가기»고 `freshTextBlock` 은 «무조건 새 칸 만들기»다. 겹치는 건 **클릭 세 겹뿐**이었다.
 
 ### ② 서식 적용 경로 → `naver-blog.mjs` 안 (AM `writeParts`·`colorLastTyped` 의 AC 판)
 
