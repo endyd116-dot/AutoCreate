@@ -56,6 +56,9 @@ export interface ConsumeOpts {
   allowPurchased?: boolean;
   reason?: string;
   actorId?: number | null;
+  /** [P1R7 §3.6] 표에 값이 없는 **정액 상품**(계정 슬롯 30일권)의 코인 수. 지정하면 COIN_TABLE 대신 이 값으로 차감한다.
+   *  🔴 생성 1건 원가(표)를 이걸로 덮어쓰지 않는다 — 값이 표에 있는 item 은 그대로 표를 쓴다(두 벌 금지). */
+  cost?: number;
 }
 
 /**
@@ -63,7 +66,7 @@ export interface ConsumeOpts {
  *   같은 (tid,'consume',ref) 가 이미 있으면 charged 0 · ok true(재생성·수리·재시도 무료).
  */
 export async function consume(tid: number, item: CoinItem, ref: string, opts: ConsumeOpts = {}): Promise<ConsumeResult> {
-  const cost = coinCostOf(item);
+  const cost = Number.isFinite(opts.cost) && (opts.cost as number) > 0 ? Math.floor(opts.cost as number) : coinCostOf(item);
   const key = String(ref || "").trim();
   const allowPurchased = typeof opts.allowPurchased === "boolean" ? opts.allowPurchased : (opts.auto ? await autoUsePurchased(tid) : true);
   const label = (opts.reason || COIN_ITEM_LABEL[item] || item).slice(0, 200);

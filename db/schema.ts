@@ -868,3 +868,34 @@ export const tenantsR7 = {
 /** plans.limits.channels — 이 요금제가 **새로 연결**할 수 있는 채널(없으면 제한 없음). Starter = 글 채널 + youtube_shorts · Pro/Agency = 전부.
  *  🔴 소급 금지: 이미 연결한 계정은 이 목록과 무관하게 그대로 쓴다(lib/plans.ts requireChannel 은 «새로 추가»에서만 부른다). */
 export const planLimitsR7 = { channels: "channels" } as const;
+
+/* === Phase 1 R7 · §3.6 «계정 1개 + 전용 IP» 30일권(P1R7-B · 2026-09-15 · drizzle/0018-r7-account-slots.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   사장님 지시: «계정 1개도 코인으로 구매할 수 있게 · 프록시는 우리가 사더라도 고객에겐 마진을 붙여서».
+ *   🔴 값(24·50코인)은 표가 아니라 `lib/plans.ts ACCOUNT_SLOT_PRODUCTS`(원가 근거 docs/active/2026-09-15-proxy-cost.md · 판매가 확정은 합동 세션 12번).
+ */
+export const accountSlots = pgTable("account_slots", {
+  id:             bigserial("id", { mode: "number" }).primaryKey(),
+  tenantId:       bigint("tenant_id", { mode: "number" }).notNull(),
+  /** account_slot(내 PC 러너 + 전용 IP) | account_slot_managed(+ 우리 서버 실행). */
+  kind:           varchar("kind", { length: 24 }).notNull(),
+  /** waiting_ip(재고 대기 · **미차감**) | active | paused(코인 부족 · 그 계정만 쉼) | cancelled. */
+  status:         varchar("status", { length: 16 }).notNull().default("waiting_ip"),
+  /** 구매 시점 가격 스냅샷(코인/30일) — 나중에 값이 바뀌어도 쓰던 사람 요금은 그대로. */
+  coinsPerPeriod: integer("coins_per_period").notNull(),
+  accountId:      bigint("account_id", { mode: "number" }),   // 이 슬롯으로 늘린 계정(유일)
+  proxyId:        bigint("proxy_id", { mode: "number" }),     // 배정된 전용 IP(B2 proxies · 유일)
+  autoRenew:      boolean("auto_renew").notNull().default(true),
+  startedAt:      timestamp("started_at"),
+  expiresAt:      timestamp("expires_at"),
+  lastChargedAt:  timestamp("last_charged_at"),
+  /** 지금까지 받은 기간 수(0 = 아직 안 받음 · waiting_ip). 다음 멱등 키 = 이 값 + 1. */
+  periodsCharged: integer("periods_charged").notNull().default(0),
+  pausedAt:       timestamp("paused_at"),
+  cancelledAt:    timestamp("cancelled_at"),
+  note:           text("note"),
+  createdAt:      timestamp("created_at").notNull().defaultNow(),
+  updatedAt:      timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({ tenantIdx: index("account_slots_tenant_idx").on(t.tenantId, t.status) }));
+/** 갱신 차감 멱등 ref = `slot:{slotId}:{periods_charged+1}`(coin_ledger 유니크) — 기간마다 유일 · 재시도는 같은 번호라 두 번 안 받는다.
+ *  ⚠️ «달(YYYYMM)» 은 31일 달 1일 구매가 같은 달 31일 갱신과 겹쳐 한 달치 공짜 · «날짜» 는 같은 날 개시→쉼→재개가 겹친다(둘 다 스모크에서 잡음). */
+export const accountSlotsR7 = { refPrefix: "slot:", dueIdx: "account_slots_due_idx", accountUniq: "account_slots_account_uniq", proxyUniq: "account_slots_proxy_uniq" } as const;
