@@ -61,15 +61,21 @@ function startServer(): Promise<{ port: number; close: () => void }> {
   return new Promise((r) => server.listen(0, "127.0.0.1", () => r({ port: (server.address() as { port: number }).port, close: () => server.close() })));
 }
 
-/** 실증용 테넌트 — 러너가 있는 플랜이면 된다. 없으면 만든다(이름으로 찾아 재사용 · 쓰레기를 늘리지 않는다). */
+/**
+ * 실증용 테넌트 — 러너가 있는 플랜이면 된다. 없으면 만든다(이름으로 찾아 재사용 · 쓰레기를 늘리지 않는다).
+ *   🔴 **`trial` 로 만든다.** 처음엔 `pro` 로 했는데, 그러면 실증을 돌릴 때마다 라이브 대시보드에
+ *      «유료 고객» 한 줄이 생긴다(구독행 0이라 매출엔 영향 없지만 **숫자를 읽는 사람이 속는다**).
+ *      trial 도 `runnerDevices: 1` 이라 게이트를 그대로 통과하고, 오히려 **러너가 있는 가장 낮은 플랜**으로
+ *      확인하는 셈이라 검증으로도 더 낫다.
+ */
 async function testTenant(): Promise<{ tid: number; uid: number }> {
   const [t] = await q(sql`SELECT id FROM tenants WHERE name = '러너배포실증' LIMIT 1`);
   let tid = n(t?.id);
   if (!tid) {
-    const [ins] = await q(sql`INSERT INTO tenants (key, name, plan_key, status) VALUES ('runner-dist-verify', '러너배포실증', 'pro', 'active') RETURNING id`);
+    const [ins] = await q(sql`INSERT INTO tenants (key, name, plan_key, status) VALUES ('runner-dist-verify', '러너배포실증', 'trial', 'active') RETURNING id`);
     tid = n(ins?.id);
   } else {
-    await q(sql`UPDATE tenants SET plan_key = 'pro', status = 'active' WHERE id = ${tid}`);
+    await q(sql`UPDATE tenants SET plan_key = 'trial', status = 'active' WHERE id = ${tid}`);
   }
   const [u] = await q(sql`SELECT id FROM users WHERE tenant_id = ${tid} ORDER BY id LIMIT 1`);
   let uid = n(u?.id);
