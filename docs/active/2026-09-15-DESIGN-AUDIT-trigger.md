@@ -1,7 +1,8 @@
 # 설계 대비 구현 전수조사(DESIGN AUDIT) — 트리거 · 2026-09-15
 
 > 사장님 지시(2026-09-15): «R1~R6 다 끝냈다고 했는데 문제가 있다. **최초 설계도 대비 구현된 것·안 된 것을 전수조사**해서 더 개발할 것을 진단해라. 영상 관련은 전부 빠져 있고, 기능은 있지만 제대로 안 되는 것도 너무 많다.»
-> 담당 = **B(새 세션)** · 폴더 `AutoCreate-B` · 브랜치 `audit/design-2026-09-15`(main 에서) · 산출물 `docs/active/2026-09-15-DESIGN-AUDIT.md`.
+> 담당 = **B(새 세션 `autocreate-b-e9`)** · 🔴 폴더는 **새 워크트리 `AutoCreate-B3`**(`AutoCreate-B` 는 B·B-1 이 쓰는 중이라 브랜치를 바꾸면 그들 작업이 깨진다) · 브랜치 `audit/design-2026-09-15`(main 에서) · 산출물 `docs/active/2026-09-15-DESIGN-AUDIT.md`.
+> 셋업(1회 · Git Bash): `cd "C:/Users/Administrator/Desktop/작업/dev/AutoCreate" && git worktree add ../AutoCreate-B3 -b audit/design-2026-09-15 main && cd ../AutoCreate-B3 && cp ../AutoCreate/.env .env && npm ci`
 
 ---
 
