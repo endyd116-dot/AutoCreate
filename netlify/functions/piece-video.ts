@@ -2,7 +2,8 @@
  * 계정 없이 만든 영상을 **내 손으로 올리는** 두 걸음(계약 R7 §1.3). 한 이야기라 한 파일에 둔다
  *   (§1.2 로 계정 없이도 영상이 만들어지게 됐다 → 그 영상이 **밖으로 나가는 문**이 여기다. 문이 없으면 §1.2 는 창고에 쌓기만 한다).
  *
- *   GET  /api/piece-video?id=                      → { ok, pieceId, url(10분), filename, bytes, durationSec, channel, expiresInSec }
+ *   GET  /api/piece-video?id=                      → { ok, pieceId, url(10분), filename, bytes, durationSec, channel, expiresInSec,
+ *                                                       handoff? }  ← 우리가 못 올리는 채널(클립)일 때만: { openUrl, openLabel, appOpenVerified, steps[], why }
  *                                                     · 영상 파일이 아직 없으면 404 `step:"no_render"`(+ stage 로 «어디까지 왔나»)
  *   POST /api/post-mark-published { pieceId, url } → { ok, postId, pieceId, already, url, channelRef?, slotId?, channel }
  *                                                     · 400 `step:"url"`(https·채널 도메인 대조) · 400 `step:"status"` · 403 `step:"tenant"` · 404 `step:"not_found"`
@@ -22,6 +23,7 @@ import { clientIp } from "../../lib/auth";
 import { q } from "../../lib/accounts";
 import { r2PresignGet, r2Head, r2Configured } from "../../lib/r2";
 import { videoFilename } from "../../lib/video/types";
+import { manualHandoffFor } from "../../lib/manual-upload";
 import { checkPublishedUrl, channelLabelKo } from "../../lib/channel-url";
 import { finalizePublish } from "../../lib/publish/finalize";
 import type { FinalizeInput } from "../../lib/publish/contract";
@@ -93,12 +95,18 @@ async function getVideo(tid: number, req: Request): Promise<Response> {
   const filename = videoFilename(id, row.title);
   const url = await r2PresignGet(key, DOWNLOAD_TTL_SEC, { filename });
 
+  /* 🔴 «우리가 못 올리는 채널»이면 **넘겨주는 길을 같이 내려보낸다**(R8 §3.2 · DESIGN §1031 «앱에서 올리기» 폴백).
+     종전엔 파일 받는 주소만 줬다 — 고객은 «클립은 앱에서 올려 주세요»를 듣고도 **어떻게 폰으로 가져가는지**를 몰랐다.
+     ⚠️ `handoff.appOpenVerified` 가 false 면 화면이 «앱으로 바로 열려요»라고 쓰면 안 된다(우리가 폰에서 재 보지 않았다). */
+  const handoff = manualHandoffFor(String(row.channel ?? ""));
+
   return json({
     ok: true, pieceId: id, channel: String(row.channel ?? ""), status: String(row.status),
     url, filename, expiresInSec: DOWNLOAD_TTL_SEC,
     bytes: head.bytes || n(am.bytes),                 // 실측(HEAD)이 먼저 — 러너가 적어 둔 값은 예비다
     durationSec: durationMs ? Math.round(durationMs / 100) / 10 : 0,
     ...(stage ? { stage } : {}),
+    ...(handoff ? { handoff } : {}),
   });
 }
 

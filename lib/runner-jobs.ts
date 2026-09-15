@@ -22,6 +22,7 @@ import { db } from "../db/index";
 import { jsonb, utcDate } from "./db-util";
 import { decryptObj, encryptObj } from "./creds-crypto";
 import { writeAudit } from "./audit";
+import { pieceLink } from "./manual-upload";
 import { publicBase } from "./site-url";
 import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
 import { classifyAndApply } from "./account-health";
@@ -913,8 +914,12 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
         meta = meta || ${jsonb({ failReason: "네이버 클립은 아직 자동 업로드를 지원하지 않아요", manualChannel: "naver_clip" })},
         updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId}`);
     }
+    /* 🔴 알림은 **그 글로** 보낸다(R8 §3.2). 종전엔 목록(`/app/pieces.html`)으로 보냈는데,
+       이 알림의 다음 걸음은 **폰에서 그 영상을 받는 것**이라 목록에 떨어뜨리면 고객이 다시 찾아 들어가야 한다.
+       푸시를 탭하면 그 글 화면으로 바로 가고, 거기서 «영상 받기»가 보인다(`/api/piece-video` 의 `handoff`). */
     await notify(tid, "manual_upload", "클립은 앱에서 올려 주세요",
-      "영상은 다 만들어 뒀어요. 네이버 클립은 아직 자동 업로드가 안 돼서, 만들어 둔 영상을 네이버 앱에서 올려 주세요.", "/app/pieces.html");
+      "영상은 다 만들어 뒀어요. 네이버 클립은 휴대폰 앱에서만 올릴 수 있어서, 휴대폰에서 이 알림을 눌러 영상을 받은 뒤 올려 주세요.",
+      pieceLink(pieceId));
     await writeAudit({ tenantId: tid, action: "publish_not_supported", actorType: "system", target: `piece:${pieceId || jobId}`,
       detail: { kind, channel: "naver_clip" }, riskLevel: "low" });
     return { ok: true, status: "failed", reason: "not_supported_yet" };
