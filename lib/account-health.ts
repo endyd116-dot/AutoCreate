@@ -179,9 +179,21 @@ export async function reassignSlots(accountId: number, opts: { tenantId?: number
     if (!slots.length) return out;
 
     // 받을 수 있는 계정 — 같은 그룹 우선(정렬 키), 오늘 남은 여유를 세며 나눠 준다.
+    /* 🔴 [P1R7-B2 §2.5-⑦] **같은 IP 로는 옮기지 않는다.**
+       정지는 IP 단위로 번지는 일이 많다(사장님 지시 «한 IP 에서 하나 정지되면 연좌제처럼 다 죽는다»).
+       그런데 승계는 «살아 있는 계정»만 보고 골라서, **방금 정지된 계정과 같은 IP 를 쓰는 계정**으로 옮길 수 있었다 —
+       그러면 옮긴 자리가 며칠 뒤 같이 죽는다. 옮기는 행위가 사고를 키우는 셈이다.
+       두 가지로 거른다: ①같은 프록시(`proxy_id`) ②실제로 같은 IP 로 나간 기록(`last_exit_ip`).
+       ⚠️ 프록시가 없는 계정끼리는 둘 다 NULL 이라 못 가른다(전부 같은 회선이다) — 그건 IP 를 사야 풀리는 문제고,
+          여기서 «NULL 은 서로 다르다»고 우기지 않는다(그러면 안전한 척하게 된다). */
+    const [me] = await q(sql`SELECT proxy_id, last_exit_ip FROM accounts WHERE id = ${aid}`);
+    const myProxy = n(me?.proxy_id) || null;
+    const myIp = me?.last_exit_ip ? String(me.last_exit_ip) : null;
     const cands = await q(sql`SELECT id, handle, daily_cap, posts_today, health_score, group_id FROM accounts
       WHERE tenant_id = ${tid} AND channel = ${channel} AND id <> ${aid} AND status = 'active'
         AND COALESCE(last_error_kind,'') <> 'removed' AND posts_today < daily_cap
+        ${myProxy ? sql`AND (proxy_id IS NULL OR proxy_id <> ${myProxy})` : sql``}
+        ${myIp ? sql`AND (last_exit_ip IS NULL OR last_exit_ip <> ${myIp})` : sql``}
       ORDER BY (group_id IS NOT DISTINCT FROM ${groupId}) DESC, health_score DESC, id`);
     /* ★C(P1R2) fix: 여유는 **날짜별**이다. 종전엔 `daily_cap − posts_today`(= 오늘 남은 칸)를 앞으로의 슬롯 **전부**의 예산으로 써서
        한 주치 9자리 중 2자리만 옮기고 7자리를 정지 계정에 그대로 남겼다(실측 2026-09-14 · moved 2 · unmoved 7 — 남은 자리는 발행 때 account_blocked 로 멈춘다).

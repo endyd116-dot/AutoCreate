@@ -227,6 +227,23 @@ export default async (req: Request): Promise<Response> => {
         sets.push(sql`persona_id = ${pid || null}`);
       }
       if (b.proxyUrl !== undefined) { const px = s(b.proxyUrl, 200); if (px && !/^(https?|socks5?):\/\//i.test(px)) return badRequest("프록시 주소 형식을 확인해 주세요.", "proxy"); sets.push(sql`proxy_url = ${px || null}`); }
+      /* [P1R7-B2 §2.5-⑦] **계정 묶음** — 한 계정이 정지되면 예약을 같은 묶음의 다른 계정으로 넘긴다(`reassignSlots` 가 이 값을 본다).
+         🔴 표(`account_groups`)와 칸(`accounts.group_id`)은 처음부터 있었는데 **값을 넣는 코드가 0건**이라
+            승계 정렬 키가 늘 NULL — 그룹이 없는 것과 같았다(2026-09-15 grep 실측). 여기가 그 값을 넣는 자리다.
+         이름을 주면 없을 때 만들어 붙인다(«묶음 먼저 만들고 계정에 붙이기» 2단계를 고객에게 시키지 않는다). */
+      if (b.groupName !== undefined || b.groupId !== undefined) {
+        let gid = n(b.groupId) || 0;
+        const gname = s(b.groupName, 60);
+        if (!gid && gname) {
+          const [g] = await q(sql`SELECT id FROM account_groups WHERE tenant_id = ${tid} AND channel = ${acc.channel} AND name = ${gname} LIMIT 1`);
+          gid = n(g?.id) || n((await q(sql`INSERT INTO account_groups (tenant_id, channel, name) VALUES (${tid}, ${acc.channel}, ${gname}) RETURNING id`))[0]?.id);
+        } else if (gid) {
+          // 🔴 남의 묶음·다른 채널 묶음에 붙이지 않는다(교차 누수 · CLAUDE §4.6).
+          const [g] = await q(sql`SELECT id FROM account_groups WHERE tenant_id = ${tid} AND id = ${gid} AND channel = ${acc.channel}`);
+          if (!g) return badRequest("그 묶음을 찾을 수 없어요(채널이 다를 수 있어요).", "group");
+        }
+        sets.push(sql`group_id = ${gid || null}`);
+      }
       if (b.goldenHours !== undefined) {
         const gh = Array.isArray(b.goldenHours) ? [...new Set((b.goldenHours as unknown[]).map(Number).filter((h) => Number.isInteger(h) && h >= 0 && h <= 23))].sort((a, c) => a - c) : [];
         sets.push(sql`golden_hours = ${gh.length ? jsonb(gh) : null}`);
