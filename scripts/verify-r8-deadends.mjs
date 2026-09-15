@@ -115,6 +115,11 @@ const TARGETS = [
   ["🔴 페르소나 적합도 — 배정이 쓴다", "personaFitsFor", "lib/persona-fit.ts", "재기만 하고 **순위를 안 바꾼다** — 설계 §5.3-2 의 셋째 재료가 또 장식이 된다"],
   ["페르소나 적합도 — 가산점 천장", "personaFitBonus", "lib/persona-fit.ts", "천장 없이 더하면 적합도가 건강도를 이겨 **아픈 계정에 글이 몰린다**(순위가 아니라 게이트가 된다)"],
   ["왜 이 계정인지 한 줄", "personaFit", "lib/director.ts", "낮아도 배정은 됐는데 **낮다는 걸 아무도 못 본다**(막지 않는 대신 말해 주기로 한 값 · §9)"],
+  /* ── [R8CLOSE-B1 §B3] 신조어 화이트리스트 — 🔴 **표·검사·프롬프트 세 끝을 다 센다**(표만 살아 있기 제일 쉬운 모양이다). ── */
+  ["🔴 신조어 표 — 검사가 본다", "slangAllowedFor", "lib/slang-whitelist.ts", "표만 있고 검사가 안 봐서, 다음 사람이 신조어를 목록에 넣는 순간 20대 글이 반려되고 재작성이 돈다(돈 두 배)"],
+  ["🔴 신조어 표 — 프롬프트가 본다", "slangPromptLine", "lib/slang-whitelist.ts", "«쓰지 마라»만 있고 «써도 된다»가 없어 20대 계정 글이 계속 무난한 말로만 나온다"],
+  ["신조어 — 값이 연령대인가", "toAgeBand", "lib/slang-whitelist.ts", "옛 데이터·오타가 그대로 흘러들어 표가 엉뚱하게 먹거나 안 먹는다"],
+  ["신조어 — 사전이 표를 받는 칸", "allowSlang", "lib/banned-words.ts", "사전이 표를 못 받아 연령대와 상관없이 모두 잡힌다(순수 리프 계약을 지키려고 import 대신 값으로 받는다)"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {

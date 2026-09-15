@@ -200,7 +200,15 @@ const THREE_REST = [
     const auto = inFile("lib/cron/director-auto.ts", /assignAccount.accounts, slot.channel, fit.bonus./);
     return [yes(has && human && auto), has ? `판정기 ${has} · 사람 경로 ${human} · 자동 경로 ${auto}` : "0건"];
   }],
-  ["B3 신조어 화이트리스트", () => [yes(anyFile(["lib/ai-tell-gate.ts", "lib/banned-words.ts"], /slangWhitelist|신조어/).length), "0건"]],
+  /* 🔴 [2026-09-16 B-1] 종전 판정은 **주석에 «신조어»라는 낱말만 스쳐도 닫힘**이었다(두 파일 본문 검색).
+     표만 만들고 아무도 안 봐도 통과한다 — AC-69 가 말하는 «정의가 있나»식 검사다.
+     ⇒ ①표가 있고 ②검사가 본다(게이트가 allowSlang 을 넘긴다) ③프롬프트가 본다, **셋 다**로 조인다. */
+  ["B3 신조어 화이트리스트", () => {
+    const table = inFile("lib/slang-whitelist.ts", /SLANG_BY_AGE/);
+    const gate = inFile("lib/ai-tell-gate.ts", /allowSlang: slangAllowedFor/);
+    const prompt = inFile("lib/content-gen.ts", /slangPromptLine/);
+    return [yes(table && gate && prompt), table ? `표 ${table} · 검사 ${gate} · 프롬프트 ${prompt}` : "0건"];
+  }],
   ["B4 장소 카드", () => [yes(anyFile(["lib/blocks.ts", "lib/writing-contracts.ts"], /placeCard|장소 카드/).length), "0건"]],
   ["B5 쓰레드 연결글", () => [yes(inFile("lib/publish/threads.ts", /연결글|threadChain|reply_to/), ), "0건"]],
   ["B6 블로거·WP AEO 규격", () => {

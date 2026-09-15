@@ -20,6 +20,7 @@ import { aiSourceKey } from "./photo-source";
 import { contractFor, structureFor, coinFormatOf, type WritingContract, type FormatKey } from "./writing-contracts";
 import { type Block, normalizeBlocks, renderBlocksHtml, htmlToPlain, blocksToPlain, blocksCharCount, type RenderImage } from "./blocks";
 import { runGate, buildRewriteInstruction, needsRewrite, CLICHES, descriptiveCaptionHit, type GateReport } from "./ai-tell-gate";
+import { slangPromptLine, toAgeBand, AGE_SAY } from "./slang-whitelist";   // [R8CLOSE-B1 §B3] 신조어 화이트리스트(표는 그 파일 한 곳)
 import { ensureDisclosureFirst, disclosureTextFor, compensationOfMeta } from "./disclosure";
 import { maxSimilarity, SAME_BODY_SIMILARITY } from "./similarity";
 import { seasonLine } from "./kr-calendar";
@@ -38,7 +39,13 @@ import { lengthFor, topicGroupOf, resolveGoalDetail, estimateChars, type TopicGr
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
 
-export interface PersonaProfile { region?: string; family?: string; job?: string; home?: string; brands?: string[]; tone?: string; interests?: string[]; banned?: string[]; signature?: string }
+export interface PersonaProfile { region?: string; family?: string; job?: string; home?: string; brands?: string[]; tone?: string; interests?: string[]; banned?: string[]; signature?: string;
+  /**
+   * [R8CLOSE-B1 §B3] 페르소나 **연령대**(DESIGN §5C.4 「신조어는 페르소나 연령대에 맞게 사전 화이트리스트」).
+   *   🔴 2026-09-16 라이브 `personas.profile` 에 이 칸은 **0건**이다 — 고객이 나이를 적는 자리가 아직 없다(A 몫).
+   *      추가형이라 옛 페르소나는 그대로 `undefined` 고, 모르면 **넓게 잡는다**(안 잡는다 · `lib/slang-whitelist.ts`).
+   */
+  ageBand?: string }
 
 /* ───────── 재료 ───────── */
 async function loadPersona(tid: number, personaId: number | null): Promise<{ id: number; name: string; profile: PersonaProfile }> {
@@ -154,6 +161,9 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
       : "",
     a.personaFacts.length ? `내 사정(1~2개를 실제 장면으로 자연스럽게 · 나열 금지): ${a.personaFacts.join(" / ")}` : "내 사정: 1인 가구 직장인(넓게)",
     a.persona.tone ? `말투 힌트: ${a.persona.tone}` : "",
+    /* [R8CLOSE-B1 §B3] 🔴 **화이트리스트의 반쪽은 «써도 된다» 다.** 모델은 놔두면 무난한 말로만 쓴다 —
+       20대 계정인데 그러면 «그 나이 사람이 쓴 글»이 안 된다. 🔴 호출 수가 안 늘어 **값이 0원**이다. */
+    slangPromptLine(toAgeBand(a.persona.ageBand)),
     a.persona.banned?.length ? `쓰지 말 것: ${a.persona.banned.join(", ")}` : "",
     a.persona.signature ? `마무리 서명(마지막 문단 끝에 그대로): ${a.persona.signature}` : "",
     `계절: ${seasonLine()}`,
@@ -307,7 +317,8 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     let sim = simOf(draft);
 
     await setStage(pieceId, "checking");
-    const gateInput = (blocks: Block[], title: string, s: typeof sim) => ({ blocks, contract: c, personaTerms: terms, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: s.score, against: s.index >= 0 ? `글 #${otherPlain[s.index]?.id}` : undefined }, title, group });   // [R8 §2.1] group — 분량 축이 계약과 **같은 폭**으로 재게(안 주면 채널 기본 폭이라 잣대가 갈린다)
+    /* [R8CLOSE-B1 §B3] 🔴 **검사도 표를 본다** — 프롬프트만 보면 «쓰라고 해 놓고 잡는» 꼴이 된다(재작성 = 돈 두 배). */
+    const gateInput = (blocks: Block[], title: string, s: typeof sim) => ({ blocks, contract: c, personaTerms: terms, ageBand: persona.profile.ageBand ?? null, meta: { affiliate: aff, adDisclosure: affiliate }, similarity: { score: s.score, against: s.index >= 0 ? `글 #${otherPlain[s.index]?.id}` : undefined }, title, group });   // [R8 §2.1] group — 분량 축이 계약과 **같은 폭**으로 재게(안 주면 채널 기본 폭이라 잣대가 갈린다)
     let report: GateReport = runGate(gateInput(draft.blocks, draft.title, sim));
 
     /* 🔴 [R8 §2.1 + §9] 다시 쓰기는 **한 번**이고, **좁은 축에서만** 돈다. 두 수리가 여기서 만난다.
@@ -464,6 +475,8 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
          `pinned:false` 는 거짓말을 막는 칸이다 — 에디터에서 «대표»로 콕 집는 건 아직 못 한다(B7 · R10).
          🔴 막지 않는다: 대표가 못 서도 글은 그대로 `in_review` 로 간다(재작성도 안 돌린다 · 돈이 두 배). */
       hero: heroFactOf(heroPlan, heroSource),
+      /* [R8CLOSE-B1 §B3] 어느 연령대로 썼나 — 🔴 **모르면 안 싣는다**(«30대»로 채우면 그게 대용물이다 · AC-57). */
+      ...(toAgeBand(persona.profile.ageBand) ? { slangBand: { band: toAgeBand(persona.profile.ageBand), line: `${AGE_SAY[toAgeBand(persona.profile.ageBand)!]}가 쓰는 말로 썼어요.` } } : {}),
       /* [R8 §2.4] 🔴 **수치 주장 표시** — 프롬프트 ⑤칸이 «근거 없는 수치 금지»라고 말만 하고 **아무도 안 쟀다**.
          여기서 잰다: 글 안의 숫자를 «우리가 준 것(given)»과 «모델이 만든 것(self)»으로 가른다.
          🔴 **«맞나»를 재는 게 아니다** — 그건 우리가 알 수 없다. «누가 만든 숫자인가»까지다(`lib/fact-claims.ts` 헤더).
