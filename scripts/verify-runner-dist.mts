@@ -171,6 +171,19 @@ async function main() {
   const still = await run(["--peek"]);
   check(still.status === 0, "원래 PC 는 그대로 잘 된다(애먼 사람 막지 않는다)", "원래 PC 까지 막혔다");
 
+  /* 화면(A)이 «다른 PC 에서 켜졌어요» 를 그리려면 **기기 목록에 그 값이 실려 있어야** 한다.
+     알림만 있고 목록이 조용하면, 알림을 지운 고객은 다시 확인할 방법이 없다. */
+  const list = await (await fetch(`${base}/api/runner-list`, { headers: { cookie } })).json() as {
+    devices?: { id: number; version?: string; bound?: boolean; otherDeviceAt?: string; otherDeviceCount?: number }[];
+  };
+  const mine = (list.devices ?? []).find((d) => d.id === reg.device.id);
+  check(mine?.bound === true, "기기 목록이 «이 PC 에 묶였다» 를 알려 준다", "목록에 bound 가 없다");
+  check(!!mine?.otherDeviceAt && Number(mine?.otherDeviceCount) > 0,
+    `기기 목록이 다른 PC 시도를 알려 준다(${mine?.otherDeviceCount}번 · ${String(mine?.otherDeviceAt).slice(0, 19)})`,
+    "목록에 다른 PC 시도가 안 실린다 — 화면이 그릴 재료가 없다");
+  check(!JSON.stringify(list).includes("fingerprint"), "지문 값 자체는 화면으로 나가지 않는다", "🔴 지문이 응답에 섞여 나간다");
+  check(mine?.version === dl.version, `기기 목록에 판 번호가 실린다(v${mine?.version})`, "목록에 version 이 없다");
+
   /* ───── ③-b 토큰 재발급(PC 교체·유출 수습) ───── */
   console.log("\n③-b 토큰 재발급 — 옛 토큰은 죽고, 새 PC 는 다시 묶일 수 있어야 한다");
   const rot = await fetch(`${base}/api/runner-rotate`, {
