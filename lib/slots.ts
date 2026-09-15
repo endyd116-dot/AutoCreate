@@ -87,15 +87,10 @@ export function weeklyCount(r: Pick<Rule, "every" | "count" | "weekdays">): numb
  *  **같은 규칙**이어야 한다 — 갈리면 편성표가 말한 코인과 실제로 빠지는 코인이 달라진다(AC-74 «화면의 숫자도 서버가 정본»). */
 export function coinsPerWeek(rules: Rule[]): number {
   return Math.round(rules.filter((r) => r.active).reduce((a, r) => {
-<<<<<<< HEAD
-    const per = r.kind === "shorts" ? coinCostOf(videoCoinItem(60))
-      : r.kind === "cardnews" ? coinCostOf("cardnews")
-      : coinCostOf("blog") + coinCostOf("image") * defaultImageCount(r.channel);
-=======
-    /* [R8] 🔴 기본 경로는 «AI 1장 + 나머지 스톡» 이라 글 한 편이 **1코인**이다(사장님 승인값).
-       사진 총 장수(`defaultImageCount`)로 세면 7코인이 되어 **화면이 옛 값을 말하게** 된다. */
+    /* [R8] 🔴 기본 경로는 «AI 1장 + 나머지 스톡» 이라 글 한 편이 **1코인**이다(사장님 승인값 2026-09-15).
+       사진 총 장수(`defaultImageCount`)로 세면 7코인이 되어 **화면이 옛 값을 말하게** 된다.
+       🔴 식은 `pieceCoinCost` **한 곳**에만 있다 — 여기서 다시 적으면 견적과 실제가 갈린다(카드뉴스·영상도 그 함수가 가른다). */
     const per = pieceCoinCost(r.kind, AI_IMAGES_INCLUDED, { format: soleFormatOf(r.channel) ?? undefined });
->>>>>>> feature/p1r8-back
     return a + weeklyCount(r) * per;
   }, 0));
 }
