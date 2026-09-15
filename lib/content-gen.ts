@@ -74,7 +74,20 @@ async function coupangKeysFor(tid: number, accountId: number | null): Promise<Co
 }
 
 /* ───────── 프롬프트 6칸 ───────── */
-function blockSchemaLine(): string {
+function blockSchemaLine(card?: { max: number } | null): string {
+  /* 🔴 [R8 §2.5] 카드뉴스는 caption 규칙이 **정반대**다(글 채널은 «대부분 안 단다» · 카드뉴스는 «전부 단다»).
+     같은 문장을 두 채널에 주면 모델이 둘 중 하나를 어긴다 — 그래서 **채널에 따라 다른 줄을 준다**(AC-63). */
+  if (card) {
+    return [
+      "블록 JSON 모양(type 별 필수 필드):",
+      "hook{text · 표지 카드에 얹을 한 줄} · list{items[]} · checklist{items[]} · table{rows[][] · 첫 행은 헤더} · quote{text · 핵심 한 줄} · para{text · 게시물 본문 2~3줄} · tip{text, items?} · faq{items[] · 각 항목 \"질문 | 답\"} · summary{text 또는 items[]}",
+      `image{prompt · 카드 **그림**을 만들기 위한 장면 묘사 한 문장(영문 가능 · 글자·사람·로고 없는 배경 · 독자에게 안 보인다) · **caption 필수** · 카드 위에 얹히는 글자 ${card.max}자 이내 · imageIndex 는 0부터 순서대로}`,
+      `🔴 image.caption 규칙(카드뉴스): **모든 카드에 caption 을 단다**(빠뜨린 카드는 빈 카드가 된다). ${card.max}자 이내 · 한 카드에 한 메시지.`,
+      "🔴 **첫 image = 표지 카드**(제목을 그대로 베끼지 말고 한 번 더 좁힌다) · **마지막 image = 행동 유도**(저장하기·다음 글·프로필 보기). 가운데는 핵심 하나씩.",
+      "🔴 caption 에 «~하는 모습» «~이 놓여 있는» «~를 보여주는» 같은 **장면 설명문 금지** — 그건 prompt 에만 쓴다.",
+      "hashtags{items[] · 5~10개 · # 없이} · disclosure{}(시스템이 채운다 · 비워 둠)",
+    ].join("\n");
+  }
   return [
     "블록 JSON 모양(type 별 필수 필드):",
     "hook{text} · para{text · 2~4문장} · h2{text} · h3{text} · quote{text · 핵심 한 줄} · list{items[]} · checklist{items[]} · table{rows[][] · 첫 행은 헤더}",
@@ -109,7 +122,7 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
     "",
     "[② 구성 — 아래 블록 시퀀스를 «순서·개수 그대로» 채운다(타입 추가·생략 금지)]",
     a.structure.map((t, i) => `${i + 1}.${t}`).join(" → "),
-    blockSchemaLine(),
+    blockSchemaLine(c.cardText ?? null),
     "",
     "[④ 한국 규칙]",
     "· 가격은 원화(부가세 포함) · 단위는 한국 관행(평/㎡ 병기 · ℓ · cm). 한국 브랜드·한국 계절·한국 검색 습관.",
@@ -170,10 +183,13 @@ export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingCo
     if (b.type !== "image") return b;
     const my = idx++;
     const prev = blocks.slice(0, i).reverse().find((x) => (x.type === "para" || x.type === "hook") && x.text);
-    const legacyCaptionIsPrompt = !b.prompt && !!b.caption && (descriptiveCaptionHit(b.caption) !== null || [...b.caption].length > 25);
+    /* [R8 §2.5] 🔴 카드뉴스는 상한이 다르다 — 카드 글자는 25자가 아니라 계약이 정한 `cardText.max`(인스타 30자)다.
+       🔴 묘사문 금칙은 **그대로** 적용한다: 카드 위에 «~하는 모습»이 얹히면 그건 카드가 아니라 사진 설명이다. */
+    const capMax = c.cardText?.max ?? 25;
+    const legacyCaptionIsPrompt = !b.prompt && !!b.caption && (descriptiveCaptionHit(b.caption) !== null || [...b.caption].length > capMax);
     const prompt = b.prompt || (legacyCaptionIsPrompt ? b.caption : null) || (prev?.text ? String(prev.text).split(/[.!?]\s/)[0].slice(0, 120) : c.label);
     let caption = legacyCaptionIsPrompt ? undefined : b.caption;
-    if (caption && (descriptiveCaptionHit(caption) || [...caption].length > 25)) caption = undefined;
+    if (caption && (descriptiveCaptionHit(caption) || [...caption].length > capMax)) caption = undefined;
     const out: Block = { ...b, imageIndex: my, prompt };
     if (caption) out.caption = caption; else delete out.caption;
     return out;
@@ -181,7 +197,9 @@ export function fixBlocks(raw: unknown, structure: Block["type"][], c: WritingCo
   // 2차: 비율 — **유효한 캡션이 있는 사진 중에서** `round(전체 × captionRate)` 장만 남긴다(결정론 · 같은 글이면 같은 자리).
   //       전체 사진에서 자리를 먼저 뽑으면 «캡션이 있던 사진»과 어긋나 멀쩡한 캡션을 버리고 0장이 될 수 있다.
   const withCap = blocks.filter((b) => b.type === "image" && b.caption).map((b) => b.imageIndex as number);
-  const keepN = Math.round(imgCount * Math.max(0, Math.min(1, c.images.captionRate ?? 0)));
+  /* 🔴 [R8 §2.5] 카드뉴스는 **비율로 솎지 않는다** — 카드는 전부 글자를 갖는다(`captionRate` 를 덮는다).
+     글 채널의 «대부분 캡션 없음»은 실물 근거가 있는 규칙이지만, 카드뉴스에 그걸 적용하면 **빈 카드가 남는다.** */
+  const keepN = c.cardText ? withCap.length : Math.round(imgCount * Math.max(0, Math.min(1, c.images.captionRate ?? 0)));
   if (withCap.length > keepN) {
     const pick = captionSlots(withCap.length, keepN / withCap.length, seedOf(seedText || c.channel));
     const keep = new Set(withCap.filter((_, k) => pick.has(k)));
