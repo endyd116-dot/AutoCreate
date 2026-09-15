@@ -108,7 +108,9 @@ async function call(pathname, token, body, timeoutMs = 30_000) {
 }
 
 export const heartbeat = (token, body) => call("/api/runner-heartbeat", token, { version: VERSION, ...body });
-export const claim = (token, kinds, max) => call("/api/runner-queue", token, { action: "claim", kinds, max });
+/* [P1R8 §3.3] `opts.canary` = **러너만 아는 사실**(이건 드라이런이다). 서버는 claim 만 보고는 시험과 진짜를 구분할 수 없고,
+   그 구분이 셀렉터 표 배포의 0단계 청중을 가른다. 🔴 잡을 고르는 규칙은 **바뀌지 않는다** — 시험과 진짜가 같은 길을 지나야 한다. */
+export const claim = (token, kinds, max, opts = {}) => call("/api/runner-queue", token, { action: "claim", kinds, max, ...(opts.canary ? { canary: true } : {}) });
 export const report = (token, jobId, result) => call("/api/runner-queue", token, { action: "report", jobId, result });
 export const release = (token, jobId, reason) => call("/api/runner-queue", token, { action: "release", jobId, reason });
 export const uploadSession = (token, accountId, cookies, verifiedAt) =>

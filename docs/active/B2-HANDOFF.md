@@ -104,6 +104,34 @@
 | 셀렉터 표 서버 배포(1단계) | B2 | **설계 끝**(`2026-09-15-recipe-canary-design.md` · 커밋 88e7135). 🔴 카나리는 이미 둘 있다(셀렉터·AI모델) — 그 위에 얹는다. 발주 전 필요: `canary_runs` 유니크 교체 = **파괴적 DDL · 사장님 승인** |
 | 팜 관리 화면(대수·배정·모니터) | A | 다음 라운드 |
 
+## 5B. R8 §3 에서 더한 것 (2026-09-15 · 새 B2 세션)
+
+| 파일 | 무엇 |
+|---|---|
+| `lib/publish/{facebook,x,tiktok}.ts` · `instagram.ts`(피드·캐러셀) · `youtube.ts`(롱폼) | 다음 Phase 채널 커넥터. 🔴 **커넥터를 쓴 뒤에** `channel-registry.publishVia` 를 채웠다 |
+| `lib/publish/seo.ts` | WP `excerpt`·`slug`(로마자) + **Article JSON-LD 만**. 🔴 FAQPage·HowTo 는 **하지 않기로 한 것**(둘 다 구글이 지원 중단) |
+| `runner/lib/profile-seal.mjs` | 로그인 정보가 실제로 잠겨 있나(읽기만). 🔴 같은 `v10` 이 윈도우=DPAPI · 맥=키체인 · **리눅스=하드코딩** |
+| `lib/recipe.ts` · `lib/recipe-store.ts` · `runner/lib/recipe.mjs` · `lib/cron/recipe-rollout.ts` | 셀렉터 표 서버 배포(Ed25519 · 못 믿으면 묶여 온 표) |
+| `.gitattributes` | 🔴 `*.bat = crlf` — main 의 `* eol=lf` 를 **뒤에서 덮는다**(gitattributes 는 나중 줄이 이긴다) |
+
+### 🔴 이번에 밟은 것 — 같은 데서 또 넘어지지 말 것
+
+| 함정 | 무엇이 일어났나 |
+|---|---|
+| 🔴 **`run.bat` 이 LF 전용이었다** | cmd.exe 의 `goto` 는 **바이트 오프셋으로 뛴다** — CR 가 없으면 **줄 중간에 착지**하고 그 자리부터를 명령으로 읽는다. `--autostart` 가 통째로 무시되고 러너가 그냥 실행됐다(**오류 한 줄 없이 «다른 일»**). 이미 있던 `goto :npmfail`·`:runloop` 도 같은 지뢰 위였다. ⇒ CRLF + `.gitattributes` + **빌드가 바이트를 다시 본다**(설정했다 ≠ 그렇다 · AC-66) |
+| 🔴 **postgres jsonb 가 키 순서를 뒤섞는다** | 실측: 보낸 `version,channel,…,sig` → 돌아온 `sig,waits,channel,…` · 중첩까지(`title,publish,zzz,aaa` → `aaa,zzz,title,publish`). **정규화가 없으면 표를 꺼내는 순간 모든 서명이 깨지고** 전 러너가 조용히 폴백된다 |
+| 🔴 **`caps` 가 화면에 한 번도 안 갔다** | 서버는 R5 부터 저장했는데 `listDevices` 가 SELECT 를 안 했다. 화면은 `d.caps.ffmpeg === false` 를 **네 곳**에서 읽는다 — «ffmpeg 없음» 칩이 **뜰 수가 없었다**. `grep caps` 로는 양끝이 다 나와 초록이다(AC-56 «가운데만 없다») |
+| 🔴 **인스타 주소가 열린 적이 없다** | `media_publish` id 는 숫자인데 permalink 는 짧은 코드다. 발행은 «성공»인데 «글 보기»만 조용히 죽는다 ⇒ permalink 를 물어보고 **못 받으면 주소를 안 만든다** |
+| **파이썬으로 파일을 고칠 때 줄끝** | `io.open(p,"w")` 는 윈도우에서 `
+` 을 **CRLF 로 바꾼다** — 파일 전체가 diff 로 뜬다. ⇒ `newline=""` 로 읽고 쓰고, **원래 줄끝을 보존**한다. 리포에 CRLF 파일과 LF 파일이 섞여 있어(전체 정규화 전) **파일마다 확인**해야 한다 |
+| **«없는 함수»를 쓸 뻔** | 운영 화면에 `UI.confirm`·`OPS.lock()` 을 썼는데 그런 시그니처가 없다(실제는 `UI.sheet`+`UI.confirmRow` · `OPS.lockPill`). 기존 화면이 쓰는 패턴을 먼저 본다 |
+
+### 열려 있는 것(R8 §3 잔여)
+- 🔴 **프로필 봉인 본체는 안 만들었다** — 설계만(`docs/active/2026-09-15-runner-profile-seal-design.md` §8 승인 4가지). 승인 뒤 구현.
+- 🔴 **러너 v1.2.0 을 R2 에 안 올렸다** — 고객 러너가 자동으로 받아 가는 **대외 배포**라 메인 확인 뒤.
+- **recipe 서명 열쇠 미발급** — `node scripts/gen-recipe-key.mjs` → env 둘 + `runner/recipe-key.pem`. 없으면 묶여 온 표로 도는 **정상 상태**.
+- **brunch · naver_clip_post** — 계정 1개 + 화면 1회 실측이면 열린다(사장님 체크리스트 15번).
+
 ## 6. 재개 절차
 
 ```

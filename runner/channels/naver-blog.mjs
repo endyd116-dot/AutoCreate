@@ -17,9 +17,18 @@
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
 import { BLOCK, ensureNaverLogin } from "../lib/auth-naver.mjs";   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
 
-const TITLE_SEL = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
-const EDITOR_SEL = ".se-content, .se-container, .se-components-wrap";
-const BODY_SEL = ".se-component.se-text .se-text-paragraph";
+const B_TITLE = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
+const B_EDITOR = ".se-content, .se-container, .se-components-wrap";
+const B_BODY = ".se-component.se-text .se-text-paragraph";
+
+/* ═══ [P1R8 §3.3] 셀렉터 표 — 🔴 **여기 값은 «묶여 온 표»(zip 안의 기본값)다** ═══
+   서버가 서명된 표를 내려 주면 그 칸이 이깁니다. 못 주거나 못 믿으면 **이 값 그대로** 돕니다.
+   🔴 `S` 가 모듈 변수인 것이 안전한 이유 = 러너는 잡을 **한 건씩 순차로** 돈다(`core.mjs tick`).
+      동시 실행을 만들게 되면 **여기를 먼저 고쳐야 한다**.
+   ⚠️ 도구모음(`TOOLBAR_SELECTORS`)은 아직 표에 안 넣었다 — 종류가 많고 실패해도 **서식만 깎이지 글은 나간다**.
+      먼저 «못 올린다»를 만드는 세 칸(제목·에디터·본문)부터 서버가 고칠 수 있게 한다. */
+export const BUNDLED_SELECTORS = { title: B_TITLE, editor: B_EDITOR, body: B_BODY };
+let S = { ...BUNDLED_SELECTORS };
 
 /* ───────────────────── 팝업·레이어 ───────────────────── */
 
@@ -71,10 +80,10 @@ async function openEditor(page, blogId, shotKey) {
   for (let round = 0; round < 8 && !ready; round++) {
     await dismissPromoLayers(page);
     await dismissEditorPopups(page);
-    if (await page.locator(`${EDITOR_SEL}, ${TITLE_SEL}`).first().isVisible({ timeout: 2000 }).catch(() => false)) { ctx = page; ready = true; break; }
+    if (await page.locator(`${S.editor}, ${S.title}`).first().isVisible({ timeout: 2000 }).catch(() => false)) { ctx = page; ready = true; break; }
     for (const fr of page.frames()) {
       if (fr === page.mainFrame()) continue;
-      if (await fr.locator(`${EDITOR_SEL}, ${TITLE_SEL}`).first().isVisible({ timeout: 1200 }).catch(() => false)) {
+      if (await fr.locator(`${S.editor}, ${S.title}`).first().isVisible({ timeout: 1200 }).catch(() => false)) {
         ctx = fr; ready = true; await dismissEditorPopups(fr); break;
       }
     }
@@ -667,7 +676,10 @@ async function publishNow(page, ctx, tags, blogId, shotKey, title, categoryHint)
  * run — 잡 1건. ctx 는 호출자가 연 **이 잡 전용** 컨텍스트다(AC-3).
  * @returns { externalUrl, channelRef, notes } · dryRun 이면 { dryRun:true, notes }
  */
-export async function run({ ctx, job, plan, shotKey, dryRun }) {
+export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
+  /* [P1R8 §3.3] 서버 표가 있으면 그 칸만 덮는다(나머지는 묶여 온 값 그대로). */
+  S = { ...BUNDLED_SELECTORS };
+  if (recipe) for (const k of Object.keys(BUNDLED_SELECTORS)) { const v = recipe.sel(k); if (v && v !== BUNDLED_SELECTORS[k]) S[k] = v; }
   const account = job.account ?? {};
   const blogId = String(account.handle ?? "").replace(/^@/, "").trim();
   if (!blogId) throw BLOCK("login_fail", "블로그 아이디(핸들)가 없어요. 계정을 다시 연결해 주세요.");
@@ -687,12 +699,12 @@ export async function run({ ctx, job, plan, shotKey, dryRun }) {
     const ed = await openEditor(page, blogId, shotKey);
 
     // ③ 제목
-    if (!(await clickEditable(ed, TITLE_SEL))) throw BLOCK("selector_changed", "제목 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+    if (!(await clickEditable(ed, S.title))) throw BLOCK("selector_changed", "제목 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
     await page.keyboard.insertText(String(job.payload?.title ?? ""));
     await settle(page, 600);
 
     // ④ 본문
-    if (!(await clickEditable(ed, BODY_SEL))) throw BLOCK("selector_changed", "본문 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+    if (!(await clickEditable(ed, S.body))) throw BLOCK("selector_changed", "본문 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
     files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
     const wrote = await playOps(page, ed, plan, files, shotKey, missed);
     if (!wrote) throw BLOCK("selector_changed", "본문에 한 글자도 넣지 못했어요.");

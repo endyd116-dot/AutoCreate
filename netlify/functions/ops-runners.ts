@@ -7,6 +7,11 @@
  *        · action="release" { id }               — 그 기기가 물고 있는 claimed 잡을 큐로 되돌린다(수동 페일오버)
  *        · action="remove"  { id }               — 기기 제거(물던 잡은 먼저 큐로)
  *   GET  /api/ops-canary?days=14     → { ok, days, channels:[{ channel, today:{ok,step,shotKey,ranAt}|null, history:[{ day, ok, step }] }] }  // §19 셀렉터 카나리 결과
+ *   GET  /api/ops-recipe             → { ok, signing, fellBack24h, channels:[{ channel, current, candidate, stage, heldHours, why, harm, canary }] }
+ *   POST /api/ops-recipe             { action:"put"|"promote"|"rollback", … }   // super_admin
+ *        · put      { recipe:{version,channel,minRunner,selectors,…}, note? } — 서명해서 넣고 **0단계(카나리)부터** 시작
+ *        · promote  { channel } — 🔴 **한 단계만** 넓힌다(시간 게이트·체류·카나리 전부 통과 시 · 안 되면 **왜인지** 돌려준다)
+ *        · rollback { channel, reason } — 🔴 **언제나 된다**(좁히는 것은 시간 제한 없음)
  *   권한: 조회 operator+ · 변경 admin+.
  */
 import { json, jsonError, badRequest } from "../../lib/response";
@@ -16,9 +21,12 @@ import { writeAudit } from "../../lib/audit";
 import { q } from "../../lib/accounts";
 import { utcDate } from "../../lib/db-util";
 import { ONLINE_WINDOW_MIN } from "../../lib/runner-jobs";
+// [P1R8 §3.3] 셀렉터 표 — 등록·배포 상태·되돌리기. 🔴 «만들어 놓고 부르는 자리가 없는 것»이 제일 안 보인다(AC-69).
+import { RECIPE_CHANNELS, recipeSigningConfigured, type RecipeBody } from "../../lib/recipe";
+import { getRollout, promoteCandidate, putRecipe, rollbackCandidate, candidateHarmSignal } from "../../lib/recipe-store";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/ops-runners", "/api/ops-runner-assign", "/api/ops-canary"] };
+export const config = { path: ["/api/ops-runners", "/api/ops-runner-assign", "/api/ops-canary", "/api/ops-recipe"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 
@@ -81,6 +89,68 @@ export default async (req: Request): Promise<Response> => {
         if (day === today && !entry.today) entry.today = { ok: rec.ok, step: rec.step, shotKey: rec.shotKey, ranAt: rec.ranAt };
       }
       return json({ ok: true, days, channels: [...byChannel.values()] });
+    }
+
+    /* [P1R8 §3.3] 셀렉터 표 — 지금 어느 판이 어디까지 퍼졌나 · **왜 아직 대기 중인가**(설계 §9).
+       🔴 «대기 중»의 이유를 안 보여 주면 멈춰 있는 것과 도는 것을 구분할 수 없다 — 이 프로젝트가 제일 싫어하는 모양. */
+    if (path.endsWith("/ops-recipe") && req.method === "GET") {
+      const g = await requireAdmin(req, ["operator", "admin", "super_admin"]); if (!g.ok) return g.res;
+      const out: unknown[] = [];
+      /* 🔴 **묶여 온 표로 되돌아간 러너 수** — 조용한 복귀를 드러낸다(설계 §6.2 «안 보이면 전부 새 표를 쓰는 줄 안다»). */
+      const [fb] = await q(sql`SELECT COUNT(*) c FROM audit_logs
+        WHERE action = 'recipe_fell_back' AND created_at > NOW() - INTERVAL '24 hours'`);
+      for (const channel of RECIPE_CHANNELS) {
+        const ro = await getRollout(channel);
+        const harm = ro?.candidateVersion ? await candidateHarmSignal(channel) : { rollback: false, why: "", fails: 0, tenants: 0 };
+        /* 🔴 «왜 아직 대기 중인가»를 **실제 판정 함수로** 묻는다 — 화면이 조건을 다시 짜면 서버와 갈린다(AC-74).
+           `new Date(0)` 은 «절대 승격되지 않는 시각»이라 조회가 부작용을 내지 않는다(조회가 배포를 일으키면 안 된다). */
+        const p = ro?.candidateVersion ? await promoteCandidate(channel, new Date(0)) : null;
+        const [c] = await q(sql`SELECT COUNT(*) FILTER (WHERE ok = true) AS good, COUNT(*) FILTER (WHERE ok = false) AS bad,
+            COUNT(*) FILTER (WHERE ok IS NULL) AS unknown
+          FROM canary_runs WHERE channel = ${channel} AND recipe_version = ${ro?.candidateVersion ?? ""}`);
+        const heldH = ro?.stageSince ? (Date.now() - Date.parse(ro.stageSince)) / 3_600_000 : 0;
+        out.push({
+          channel, current: ro?.currentVersion ?? null, candidate: ro?.candidateVersion ?? null,
+          stage: ro?.stage ?? null, stageSince: ro?.stageSince ?? null, heldHours: Math.round(heldH * 10) / 10,
+          why: p && !p.ok ? p.why : "", rolledBackAt: ro?.rolledBackAt ?? null, rollbackReason: ro?.rollbackReason ?? null,
+          harm: { fails: harm.fails, tenants: harm.tenants, wouldRollback: harm.rollback, why: harm.why },
+          canary: { good: n(c?.good), bad: n(c?.bad), unknown: n(c?.unknown) },
+        });
+      }
+      return json({ ok: true, signing: recipeSigningConfigured(), fellBack24h: n(fb?.c), channels: out });
+    }
+
+    if (path.endsWith("/ops-recipe")) {
+      const g = await requireAdmin(req, ["super_admin"]); if (!g.ok) return g.res;
+      if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
+      const b = await readJson<Record<string, unknown>>(req);
+      const action = String(b.action ?? "");
+
+      if (action === "put") {
+        const r = await putRecipe((b.recipe ?? {}) as RecipeBody, String(b.note ?? ""));
+        if (!r.ok) return badRequest(r.error, "recipe");
+        await writeAudit({ tenantId: null, action: "ops_recipe_put", actorType: "user",
+          target: `recipe:${r.version}`, detail: { note: String(b.note ?? "").slice(0, 200) }, riskLevel: "medium" });
+        return json({ ok: true, version: r.version, stage: "canary" });
+      }
+      if (action === "promote") {
+        const channel = String(b.channel ?? "");
+        if (!RECIPE_CHANNELS.includes(channel)) return badRequest("표를 내려 주는 채널이 아니에요.", "channel");
+        const r = await promoteCandidate(channel);
+        /* 🔴 못 넓혔으면 **왜인지 그대로 돌려준다** — «안 됩니다»만 주면 운영자가 추측하게 된다. */
+        if (!r.ok) return json({ ok: false, step: "hold", error: r.why }, 409);
+        return json({ ok: true, stage: r.stage ?? "all" });
+      }
+      if (action === "rollback") {
+        const channel = String(b.channel ?? "");
+        const reason = String(b.reason ?? "").slice(0, 300) || "운영자가 되돌렸어요";
+        if (!RECIPE_CHANNELS.includes(channel)) return badRequest("표를 내려 주는 채널이 아니에요.", "channel");
+        /* 🔴 되돌리기는 **시간 게이트가 없다**(설계 §8) — 좁히는 것은 언제나. */
+        const done = await rollbackCandidate(channel, reason);
+        if (!done) return json({ ok: false, step: "no_candidate", error: "되돌릴 후보가 없어요." }, 409);
+        return json({ ok: true });
+      }
+      return badRequest("action 은 put·promote·rollback 중 하나예요.", "action");
     }
 
     if (path.endsWith("/ops-runner-assign")) {
