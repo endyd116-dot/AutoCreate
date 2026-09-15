@@ -18,7 +18,8 @@
  *     프리뷰도 막는 이유: 프리뷰는 **같은 Neon DB** 를 본다 — 거기서 만든 가짜 글을 크론이 집어 발행할 수 있다.
  *
  *   ══ 손잡이 ══
- *     `AI_STUB=1`          — 켠다(로컬 전용).
+ *     `AI_STUB=1`          — 글·사진 다 고정 응답(로컬 전용).
+ *     `AI_STUB_IMAGE=1`    — **사진만** 고정 응답(글은 진짜로 부른다). §2.1 실호출은 이 모드로 돈다 — 값의 85%가 사진이다.
  *     `AI_STUB_CHARS=736`  — 본문 글자 수를 **못 박는다**. 안 주면 프롬프트가 요구한 분량을 그대로 따른다(=말 잘 듣는 모델).
  *                            🔴 C 가 실측한 «계약 1,500자인데 실제 736자» 를 **0원으로 재현**하는 자리다(§2.1).
  *   🔎 출처: AC 신규(계약 R8 §2.1 · B-1 · 2026-09-15) — AM 원본 없음.
@@ -32,15 +33,33 @@ export const AI_STUB_MODEL = "stub";
  * 지금 이 런타임에서 글 스텁이 **실제로** 켜져 있나.
  *   🔴 «셸에서 켰다»가 아니라 «이 프로세스에 들어왔나»를 묻는다(AC-54). `/api/health` 의 `aiStub` 가 같은 값을 답한다.
  */
-export function aiStubActive(): boolean {
-  if (String(process.env.AI_STUB ?? "").trim() !== "1") return false;
+function localOnly(name: string): boolean {
+  if (String(process.env[name] ?? "").trim() !== "1") return false;
   const onNetlify = String(process.env.NETLIFY ?? "").trim() === "true";
   const isDev = String(process.env.NETLIFY_DEV ?? "").trim() === "true";
   if (onNetlify && !isDev) {
-    console.error("[ai-stub] 🔴 배포 런타임이라 AI_STUB 을 무시한다 — 가짜 본문이 고객 계정에 나갈 수 있다. 실호출로 진행한다.");
+    console.error(`[ai-stub] 🔴 배포 런타임이라 ${name} 을 무시한다 — 가짜 본문·가짜 사진이 고객 계정에 나갈 수 있다. 실호출로 진행한다.`);
     return false;
   }
   return true;
+}
+
+export function aiStubActive(): boolean { return localOnly("AI_STUB"); }
+
+/**
+ * 사진만 고정 응답으로 — **글은 진짜로** 부르고 싶을 때(§2.1 실호출 실험).
+ *   🔴 근거(메인이 `ai_usage` 원장에서 뜯은 값): 3편 $0.9819 중 **사진 18장이 $0.8337(85%)**, 글 6호출은 $0.1482(15%).
+ *      글만 보는 실험에 사진을 굽는 것은 **값의 85%를 버리는 것**이다.
+ *   🔴 분량 측정에는 영향이 없다: `blocksCharCount` 는 image 블록을 애초에 안 센다.
+ *      그리고 **이미지 블록은 그대로 둔다**(사진 «생성»만 끈다) — 블록을 빼면 `visual_min` 축이 걸려 실험에 잡음이 낀다.
+ *   `AI_STUB=1` 이면 사진도 당연히 스텁이다.
+ */
+export function aiStubImagesActive(): boolean { return localOnly("AI_STUB_IMAGE") || aiStubActive(); }
+
+/** 스텁 사진 — 회색 1칸 SVG(데이터 URI). R2 에 아무것도 쓰지 않는다. */
+export function aiStubImage(): { url: string; key: string; mime: string } {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#d9d9d9"/><text x="320" y="240" font-size="28" text-anchor="middle" fill="#666">AI_STUB</text></svg>`;
+  return { url: `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`, key: `stub/${Date.now()}.svg`, mime: "image/svg+xml" };
 }
 
 /** 스텁 본문임을 **본문 안에서** 알아보게 하는 표식 — 실수로 발행돼도 첫 줄에서 들킨다. */
