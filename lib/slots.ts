@@ -11,7 +11,8 @@ import { utcDate, jsonb } from "./db-util";
 import { q } from "./accounts";
 import { defaultImageCount } from "./writing-contracts";
 import { coinCostOf, videoCoinItem } from "./coin-table";
-import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN } from "./best-time";
+import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
+import { gapMinFor } from "./publish-gap";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
 
 const n = (v: unknown) => Number(v || 0);
@@ -128,6 +129,13 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
   for (const e of existing) { if (String(e.status) === "skipped" || String(e.status) === "rejected") continue; const at = utcDate(e.publish_at); if (!at) continue; const k = `${e.channel}:${String(e.d).slice(0, 10)}`; takenBy.set(k, [...(takenBy.get(k) ?? []), at]); }   // [P1R7 B3] 버린(rejected) 자리도 건너뛴(skipped) 자리와 같이 — 그 시각을 점유하지 않는다
   const accounts = await q(sql`SELECT id, golden_hours FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
   const golden = new Map(accounts.map((a) => [n(a.id), Array.isArray(a.golden_hours) ? (a.golden_hours as unknown[]).map(Number) : null]));
+  /* [R8] 🔴 간격은 **`publish-gap.ts` 한 곳**에서 온다(계정마다 «우리가 무엇을 아는가»가 다르다 — §6.3b).
+     루프 안에서 매번 DB 를 치지 않게 **규칙에 고정된 계정만 미리 한 번씩** 읽어 둔다. */
+  const gapCache = new Map<number, number>();
+  for (const fixedId of new Set(rules.filter((r) => r.accountMode === "fixed" && r.accountId).map((r) => n(r.accountId)))) {
+    if (!fixedId) continue;
+    try { gapCache.set(fixedId, (await gapMinFor(tid, fixedId)).gapMin); } catch { /* 못 읽으면 기본(안전)을 쓴다 */ }
+  }
   let created = 0, checked = 0;
   for (let d = 0; d <= horizon; d++) {
     const date = addDays(today, d);
@@ -141,12 +149,20 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
       const preferred = settings.bestTimeMode === "fixed" ? (r.preferredHour ?? null) : (r.preferredHour ?? null);
       const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred);
       const tk = `${r.channel}:${date}`; const taken = takenBy.get(tk) ?? [];
+      /* 계정이 고정된 규칙만 계정별 값을 쓴다 — 자동 배정 규칙은 «누가 올릴지»를 아직 모르므로 **기본(안전)**이다. */
+      const gapMin = accountId ? (gapCache.get(accountId) ?? ACCOUNT_GAP_MIN) : ACCOUNT_GAP_MIN;
+      /* 🔴 계정마다 **다른** 흔들림 · 같은 (계정·날짜·시각)이면 **늘 같은 값**
+         (편성은 여러 번 돈다 — 돌 때마다 시각이 움직이면 «어제 본 시각»과 달라지고 슬롯이 두 번 잡힌다). */
+      const spread = accountId ? Math.max(0, Math.min(7, Math.floor(gapMin / 4))) : 0;
       let at: Date | null = null;
       for (const c of cands) {
+        /* 🔴 새벽은 자동으로 잡지 않는다 — 다만 고객이 **규칙에 직접 적은 시각**(`preferred`)은 막지 않는다(말로만 알린다 · `nightRisk`). */
+        if (preferred == null && isNightHour(c.h)) continue;
+        const jit = spread ? jitterMinutes(`acc:${accountId}|${date}|${c.h}:${c.m}`, spread) : 0;
         for (let shift = 0; shift <= 3 && !at; shift++) {
-          const t = new Date(kstToUtc(date, c.h, c.m).getTime() + shift * ACCOUNT_GAP_MIN * 60_000);
+          const t = new Date(kstToUtc(date, c.h, c.m).getTime() + (shift * gapMin + jit) * 60_000);
           if (t.getTime() < now.getTime() + 20 * 60_000) continue;
-          if (taken.some((x) => Math.abs(x.getTime() - t.getTime()) < ACCOUNT_GAP_MIN * 60_000)) continue;
+          if (taken.some((x) => Math.abs(x.getTime() - t.getTime()) < gapMin * 60_000)) continue;
           at = t;
         }
         if (at) break;
