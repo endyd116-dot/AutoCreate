@@ -16,3 +16,7 @@ CREATE INDEX IF NOT EXISTS tenants_purge_due_idx ON tenants (purge_at) WHERE pur
 --   우리 도메인 메일·하니스 키(verify-·smoke-·r6-…)는 자동 true(lib/ops/internal.ts) · 운영자가 손으로 켜고 끌 수도 있다.
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS is_internal boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS tenants_is_internal_idx ON tenants (is_internal) WHERE is_internal = true;
+
+-- ── 내부 표시 «손이 이긴다» 기록(2026-09-15 스모크에서 발견: 운영자가 끈 것을 크론이 다시 켰다) ──
+--   운영자가 is_internal 을 직접 지정한 순간을 남기고, 자동 규칙(lib/ops/internal.ts syncInternalFlags)은 이 칸이 있는 집을 건너뛴다.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS internal_manual_at timestamp;

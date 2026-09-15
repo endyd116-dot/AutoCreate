@@ -19,7 +19,11 @@
  *   · 삭제 전 스냅샷 감사 1행(`ops_live_cleanup` · tid 목록·표별 행 수·옵션) → 삭제 → 되읽기(남은 테넌트·활성 유료·activeTenants).
  *   · R2: 삭제 tid 마다 lib/r2.ts `r2DeletePrefix("autocreate/{tid}/")`(dryRun 연동 · R2 미설정이면 건너뛴다).
  *   · DB 풀은 이 스크립트 하나(postgres · max 1) — lib 풀을 같이 열지 않는다(AC-41).
- */
+ *   🔴 **합동 세션 직전에 드라이런을 다시 돌린다**(사장님 체크리스트 3번 · docs/active/2026-09-15-OWNER-CHECKLIST.md).
+ *      테넌트 수는 매일 달라진다(하니스가 만들고 teardown 이 지운다) — 어제 숫자로 --apply 하면 «지울 줄 몰랐던 집»이 섞인다.
+ *      순서: ① `node scripts/ops-cleanup-tenants.mjs --revenue-test-rows` (드라이런 · 숫자 갱신) → ② 사장님 Allow → ③ 같은 명령 + `--apply`.
+ *   ℹ️ 지우지 않고 **숫자만 깨끗하게** 하려면 `tenants.is_internal`(P1R7 §3.4) 로 충분하다 — 대시보드·고객 목록·AI 원가·MRR 이 내부 집을 뺀다.
+*/
 import postgres from "postgres";
 import fs from "node:fs";
 import path from "node:path";

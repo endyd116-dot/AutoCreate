@@ -135,14 +135,18 @@ export default async (req: Request): Promise<Response> => {
       if (b.status && !TENANT_STATUSES.includes(b.status)) return badRequest("status");
       const trialIso = b.trialEndsAt ? utcDate(b.trialEndsAt)?.toISOString() ?? null : null;
       if (b.trialEndsAt && !trialIso) return badRequest("trialEndsAt");
+      /* 🔴 파라미터에 **형을 붙인다**(`::text`·`::boolean`) — 안 붙이면 전부 NULL 로 들어올 때 42P18(«파라미터 형을 못 정한다»)로 터진다.
+         2026-09-15 실측: `{ id, isInternal:false }` 만 보내면 나머지가 NULL 이 되어 이 UPDATE 가 통째로 실패했다(PITFALLS · ops-cs 와 같은 함정). */
+      const st = b.status || null;
       await q(sql`UPDATE tenants SET
-          plan_key = COALESCE(${b.planKey || null}, plan_key),
-          status = COALESCE(${b.status || null}, status),
-          readonly_at = CASE WHEN ${b.status || null} = 'readonly' THEN COALESCE(readonly_at, NOW()) WHEN ${b.status || null} IS NULL THEN readonly_at ELSE NULL END,
-          suspended_at = CASE WHEN ${b.status || null} = 'suspended' THEN COALESCE(suspended_at, NOW()) WHEN ${b.status || null} IS NULL THEN suspended_at ELSE NULL END,
+          plan_key = COALESCE(${b.planKey || null}::text, plan_key),
+          status = COALESCE(${st}::text, status),
+          readonly_at = CASE WHEN ${st}::text = 'readonly' THEN COALESCE(readonly_at, NOW()) WHEN ${st}::text IS NULL THEN readonly_at ELSE NULL END,
+          suspended_at = CASE WHEN ${st}::text = 'suspended' THEN COALESCE(suspended_at, NOW()) WHEN ${st}::text IS NULL THEN suspended_at ELSE NULL END,
           trial_ends_at = COALESCE(${trialIso}::timestamptz AT TIME ZONE 'UTC', trial_ends_at),
-          ops_note = COALESCE(${typeof b.note === "string" ? b.note.slice(0, 2000) : null}, ops_note),
-          is_internal = COALESCE(${typeof b.isInternal === "boolean" ? b.isInternal : null}, is_internal),
+          ops_note = COALESCE(${typeof b.note === "string" ? b.note.slice(0, 2000) : null}::text, ops_note),
+          is_internal = COALESCE(${typeof b.isInternal === "boolean" ? b.isInternal : null}::boolean, is_internal),   -- 🔴 형 붙이지 않으면 42P18(파라미터 형 추론 불가 · PITFALLS)
+          internal_manual_at = CASE WHEN ${typeof b.isInternal === "boolean" ? b.isInternal : null}::boolean IS NULL THEN internal_manual_at ELSE NOW() END,   -- 손이 이긴다(크론이 다시 안 켠다)
           updated_at = NOW() WHERE id = ${id}`);
       if (b.priceLockedKrw !== undefined) {   // 가격 고정(계약 §2.1 ops-plans «price_locked_krw 있는 테넌트는 유지») — 장부가 없으면(체험) 만들어 둔다
         const locked = b.priceLockedKrw === null ? null : Math.max(0, Math.floor(n(b.priceLockedKrw)));

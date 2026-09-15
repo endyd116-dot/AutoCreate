@@ -862,6 +862,8 @@ export const tenantsR7 = {
   /** is_internal — 우리 테스트/하니스 집. 운영 대시보드·고객 목록·AI 원가·수익·MRR 의 **기본 집계에서 빠진다**(토글로 보인다). */
   isInternal: "is_internal",
   isInternalIdx: "tenants_is_internal_idx",
+  /** internal_manual_at — 운영자가 is_internal 을 손으로 지정한 시각. 있으면 자동 규칙(크론)이 건드리지 않는다(손이 이긴다). */
+  internalManualAt: "internal_manual_at",
 } as const;
 /** plans.limits.channels — 이 요금제가 **새로 연결**할 수 있는 채널(없으면 제한 없음). Starter = 글 채널 + youtube_shorts · Pro/Agency = 전부.
  *  🔴 소급 금지: 이미 연결한 계정은 이 목록과 무관하게 그대로 쓴다(lib/plans.ts requireChannel 은 «새로 추가»에서만 부른다). */

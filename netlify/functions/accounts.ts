@@ -127,8 +127,8 @@ export default async (req: Request): Promise<Response> => {
       const b = await readJson<{ channel?: string; agreeCredsStorage?: boolean }>(req);
       const channel = s(b.channel, 24);
       if (!isOAuthChannel(channel)) return badRequest("이 채널은 아이디로 연결해요.", "channel");
+      const gate = await checkChannel(tid, channel); if (gate) return gate;            // 🔴 [P1R7 §3.2] 요금제가 먼저 — «준비 중» 보다 «이 요금제엔 없어요» 가 정확한 이유다
       if (!providerConfigured(channel)) return json({ ok: false, step: "provider_not_configured", error: "준비 중이에요" });
-      const gate = await checkChannel(tid, channel); if (gate) return gate;            // [P1R7 §3.2]
       const lim = await checkLimit(tid); if (lim) return lim;
       const consent = await credsConsent(tid, auth.user.uid, b as Record<string, unknown>, channel, { ip: clientIp(req), ua: req.headers.get("user-agent") });   // [P1R7 §3.3] OAuth 토큰도 «맡기는 자격»이다
       if (consent) return consent;
@@ -144,10 +144,11 @@ export default async (req: Request): Promise<Response> => {
       const handle = s(b.handle, 120);
       if (!handle) return badRequest("아이디(핸들)를 적어 주세요.", "handle");
       if (/쿠팡|coupang/i.test(handle) || /쿠팡|coupang/i.test(s(b.displayName, 120))) return json({ ok: false, step: "handle_policy", error: "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책)." }, 400);
+      // 🔴 [P1R7 §3.2] 요금제 게이트가 **가장 먼저**다 — 요금제에 없는 채널에 «OAuth 로 연결하세요»·«준비 중이에요» 를 먼저 말하면 거짓 안내가 된다.
+      const gate = await checkChannel(tid, channel); if (gate) return gate;
       const method = connectMethodOf(channel);
       if (method === "oauth") return json({ ok: false, step: "oauth_required", error: "이 채널은 «연결하기» 버튼으로 로그인해 주세요." }, 400);
       if (!credsEncConfigured()) return json({ ok: false, step: "creds_key", error: "계정 자격 암호화 키가 설정되지 않았어요. 운영팀에 알려 주세요." }, 500);
-      const gate = await checkChannel(tid, channel); if (gate) return gate;            // [P1R7 §3.2] 요금제에 없는 채널 — «새로 추가»만 막는다
       const lim = await checkLimit(tid); if (lim) return lim;
       const consent = await credsConsent(tid, auth.user.uid, b, channel, { ip: clientIp(req), ua: req.headers.get("user-agent") });   // [P1R7 §3.3]
       if (consent) return consent;
