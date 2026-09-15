@@ -111,7 +111,7 @@ export async function checkLimit(tid: number, resource: LimitResource, requested
         extraSlots = await activeSlotCount(tid);
         limit = L.maxAccounts + extraSlots; label = "계정"; break;
       }
-      case "runnerDevices": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM runner_devices WHERE tenant_id = ${tid}`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.runnerDevices; label = "내 PC 러너"; break; }
+      case "runnerDevices": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM runner_devices WHERE tenant_id = ${tid}`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.runnerDevices; label = "내 PC 프로그램"; break; }
       case "teamSeats": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM users WHERE tenant_id = ${tid}`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.teamSeats; label = "팀원"; break; }
       case "rules": { const r = (await db.execute(sql`SELECT COUNT(*)::int AS c FROM cadence_rules WHERE tenant_id = ${tid} AND active = true`)) as unknown as { c: number }[]; used = Number(r[0]?.c ?? 0); limit = L.maxRules; label = "편성 규칙"; break; }
       case "horizonDays": { used = Math.max(0, Math.floor(Number(requested) || 0)); limit = L.horizonDays; label = "달력 기간(일)"; break; }
@@ -166,7 +166,7 @@ export async function requireFeature(tid: number, feature: FeatureKey): Promise<
   /* [P1R7 §3.2] 그 밖의 키도 **없으면 코드 기본값**으로 판정한다(`featureOf`) — 새 키(exportZip)를 넣을 때마다 라이브 plans 행을 고치지 않게. */
   const ok = feature === "managedRunner" ? v !== "no" : feature === "autoApprove" ? autoApproveAllowed(planKey, plan) : featureOf(plan, feature) === true;
   if (ok) return { ok: true, planKey };
-  const label: Record<FeatureKey, string> = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "계정 자동 승계", managedRunner: "관리형 러너", runnerRevenue: "내 PC 수익 수집", teamApproval: "팀 승인 흐름", autoApprove: "«조용하면 발행»(자동 승인)", exportZip: "리포트 내보내기" };
+  const label: Record<FeatureKey, string> = { directorEdit: "디렉터 손보기", autoSchedule: "자동 편성", failover: "계정 자동 승계", managedRunner: "우리 서버가 대신 돌려 주기", runnerRevenue: "내 PC 로 수익 모으기", teamApproval: "팀 승인 흐름", autoApprove: "«조용하면 발행»(자동 승인)", exportZip: "리포트 내보내기" };
   const upsell = feature === "exportZip" ? "Agency" : "Pro";   // 내보내기는 Agency 열(설계 §12.2) — «Pro 로 바꾸면» 은 거짓말이 된다
   return { ok: false, planKey, res: json({ ok: false, reason: "plan_limit", step: "plan_feature", feature, planKey, error: `${label[feature]}은(는) 지금 요금제에 없어요. ${upsell} 로 바꾸면 쓸 수 있어요.` }, 402) };
 }
@@ -252,7 +252,7 @@ export interface AccountSlotProduct {
 }
 export const ACCOUNT_SLOT_PRODUCTS: Readonly<Record<AccountSlotKind, AccountSlotProduct>> = {
   account_slot: { kind: "account_slot", coins: 24, label: "계정 1개 더 + 전용 IP",
-    desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 러너로 돌아가요.", managed: false },
+    desc: "계정 하나를 더 쓰고, 그 계정만의 IP 를 드려요. 내 PC 프로그램으로 돌아가요.", managed: false },
   account_slot_managed: { kind: "account_slot_managed", coins: 50, label: "관리형 계정 1개",
     desc: "계정 하나를 더 쓰고, 전용 IP 와 **우리 서버 실행**까지 포함이에요. PC 를 켜 두지 않아도 돼요.", managed: true },
 };

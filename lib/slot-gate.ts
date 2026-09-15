@@ -84,7 +84,7 @@ export async function guardSlot(input: SlotGateInput): Promise<SlotGateResult> {
   // 사람 경로 = 예외. 슬롯이 붙어 있으면 그대로 존중하고, 없으면 없는 대로 통과.
   if (origin === "manual" || origin === "self") return { ok: true, slotId };
 
-  if (tenantId <= 0) return { ok: false, slotId: null, code: "gate_unavailable", reason: "테넌트를 알 수 없어 편성 대조를 못 했어요." };
+  if (tenantId <= 0) return { ok: false, slotId: null, code: "gate_unavailable", reason: "어느 집 글인지 알 수 없어 편성표와 대조하지 못했어요." };
 
   if (!slotId) {
     const reason = "편성표에 없는 자동 생성이에요 — 편성 슬롯의 몫만 만듭니다.";
@@ -107,7 +107,7 @@ export async function guardSlot(input: SlotGateInput): Promise<SlotGateResult> {
   let bad: { code: SlotGateCode; reason: string } | null = null;
   if (!row) bad = { code: "slot_not_found", reason: `편성 자리 #${slotId} 이 없어요(다른 집 것이거나 지워졌어요).` };
   else if (channel && String(row.channel) !== channel) bad = { code: "slot_wrong_channel", reason: `편성 자리 #${slotId} 은 ${row.channel} 자리인데 ${channel} 글을 넣으려 했어요.` };
-  else if (row.piece_id) bad = { code: "slot_taken", reason: `편성 자리 #${slotId} 은 이미 글 #${Number(row.piece_id)} 이 차지했어요.` };
+  else if (row.piece_id) bad = { code: "slot_taken", reason: `편성 자리 #${slotId} 은 이미 다른 글이 차지했어요.` };
   else if (!OPEN_SLOT_STATUS.has(String(row.status))) bad = { code: "slot_bad_status", reason: `편성 자리 #${slotId} 은 '${row.status}' 라 새 글을 받지 않아요.` };
 
   if (bad) {

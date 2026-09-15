@@ -192,7 +192,7 @@ export default async (req: Request): Promise<Response> => {
       const b = await readJson<{ id?: number }>(req);
       const id = n(b.id); if (!id) return badRequest("id");
       const [s] = await q(sql`SELECT id, status, piece_id FROM slots WHERE tenant_id = ${tid} AND id = ${id}`);
-      if (!s) return json({ ok: false, error: "슬롯을 찾을 수 없어요.", step: "not_found" }, 404);
+      if (!s) return json({ ok: false, error: "그 자리를 찾을 수 없어요.", step: "not_found" }, 404);
       if (["published", "publishing"].includes(String(s.status))) return json({ ok: false, step: "state", error: "이미 나간 글은 건너뛸 수 없어요." }, 400);
       await q(sql`UPDATE slots SET status = 'skipped', updated_at = NOW() WHERE id = ${id}`);
       if (s.piece_id) await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: "편성표에서 건너뜀" })}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(s.piece_id)} AND status IN ('generating','draft','in_review','approved','scheduled')`);
