@@ -73,6 +73,8 @@
   const mailOff = qs.get("mail") === "0";
   const runnerDl = qs.get("runnerDl") || "";       // [러너 배포] 내려받기 손잡이 — plan(403 step:"plan") · none(503 step:"no_release") · 기본 = 10분 링크
   const otherPc = qs.get("otherPc") === "1";       // [러너 배포] 다른 PC 가 이 열쇠로 켜려 한 기기 1대(otherDeviceAt · 있을 때만 키가 온다)
+  const companyOff = qs.get("company") === "0";   // [P1R6 §1.3] 회사 정보 없음 → 약관 하단·영수증 «준비 중»
+  const uploadKnob = qs.get("upload") || "";   // [P1R6 §1.1] 사진 첨부 — off = R2 미설정(not_configured) · fail = PUT 실패
   const autoOff = qs.get("autoOff") === "1";  // [실측] 자동 편성 꺼짐(규칙은 있음) — 홈·편성표 맨 위 한 줄      // [P1R6] 가입 인증 메일 실패 흉내(배너 · 다시 보내기)
   let resendAt = 0;                             // 60초 쿨다운(서버 audit 로 재는 것을 흉내)
   const supplierOff = qs.get("supplier") === "0", shareOff = qs.get("share") === "0", managedDeny = qs.get("managed") === "deny", exportRunning = qs.get("export") === "running", exportFail = qs.get("export") === "fail", amOff = qs.get("amOff") === "1";
@@ -468,6 +470,15 @@
     "support-tickets": () => ({ ok: true, tickets: S.tickets.map((t) => ({ id: t.id, subject: t.subject, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, rating: t.rating, messages: t.messages })) }),
     "support-rate": (b) => { const t = S.tickets.find((x) => x.id === Number(b.id)); if (!t) return err("id", "문의가 없어요.", { status: 404 }); t.rating = !!b.helpful; return { ok: true }; },
     "faqs": () => ({ ok: true, faqs: [{ id: 1, q: "코인은 언제까지 쓸 수 있나요?", a: "충전한 코인은 1년, 플랜에 포함된 코인은 그달 말까지예요." }, { id: 2, q: "네이버·티스토리는 왜 내 PC 프로그램이 필요한가요?", a: "두 곳은 바깥에서 글을 넣는 길이 없어서 PC 프로그램이 대신 올려요." }, { id: 3, q: "환불은 어떻게 되나요?", a: "미사용 코인은 충전 후 7일 안에 환불돼요. 구독은 기간 말에 해지돼요." }] }),
+    /* [P1R6 §1.1] 첨부 = presign PUT — 화면은 이 주소로 파일 바이트를 그대로 올린다(아래 fetch 가로채기가 R2 를 흉내) */
+    /* [P1R6 §1.3] 공개 회사 정보 — 약관·개인정보·유료약관 하단이 읽는다(운영센터 «회사 정보» 한 출처) */
+    "company": () => ({ ok: true, company: companyOff ? null : { name: "주식회사 오토크리에이트", ceo: "홍두현", bizNo: "123-45-67890", mailOrderNo: "2026-서울강남-01234", address: "서울특별시 강남구 테헤란로 1길 10, 5층", email: "help@autocreate.kr", phone: "02-1234-5678" } }),
+    "support-upload-url": (b) => { if (uploadKnob === "off") return { ok: false, step: "not_configured", error: "사진 첨부는 아직 준비 중이에요. 글로 적어 주시면 돼요." };
+      const ext = String(b.ext || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (!["png", "jpg", "jpeg", "webp"].includes(ext)) return err("ext", "png·jpg·webp 이미지만 첨부할 수 있어요.");
+      const contentType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+      const key = `autocreate/support/1/${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      return { ok: true, key, uploadUrl: location.origin + "/mock-r2/" + encodeURIComponent(key), url: location.origin + "/mock-r2/" + encodeURIComponent(key), contentType, expiresIn: 60 }; },
     "upload": (b) => { if (!b.dataBase64 || !b.contentType) return err("file", "사진을 골라 주세요."); if (String(b.dataBase64).length > 4e6) return err("size", "3MB 이하 사진만 붙일 수 있어요."); return { ok: true, key: "autocreate/1/support/" + Date.now() + "-" + String(b.filename || "img").replace(/[^\w.-]/g, "_"), url: "" }; },
     "notices": () => ({ ok: true, notices: qs.get("incident") === "0" ? [] : [{ id: 801, kind: "incident", title: "네이버 발행이 늦어요 · 네이버 쪽 점검", body: "14:00 부터 네이버 블로그 발행이 30분쯤 밀리고 있어요. 예약은 그대로 나가요.", startsAt: iso(now - 2 * 3600e3), endsAt: iso(now + 4 * 3600e3), channels: ["naver_blog"] }, { id: 802, kind: "notice", title: "9월 25일 새벽 2시 점검(10분)", startsAt: iso(now - 3600e3), endsAt: iso(now + 11 * 86400e3) }] }),
     /* §1 계정 */
@@ -672,8 +683,14 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     await delay(); const r = h(opts.body || {}, u.searchParams); save();
     const status = r.status || 200; const out = { ...r, status, ok: !!r.ok }; if (!opts.noGate && UI.gate(out)) out.gated = true; return out; // 실서버 UI.api 와 같은 게이트 처리
   };
+  /* [P1R6 §1.1] 모의 R2 — presign 주소로 가는 PUT 만 가로챈다(나머지 fetch 는 그대로) */
+  const rawFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => { const u = String((input && input.url) || input || "");
+    if (u.includes("/mock-r2/")) return Promise.resolve(new Response(null, { status: uploadKnob === "fail" ? 500 : 200 }));
+    return rawFetch(input, init); };
+
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
