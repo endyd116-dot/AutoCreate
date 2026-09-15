@@ -149,3 +149,33 @@ export const HOOK_LABELS_KO: Readonly<Record<string, string>> = {
   contrast: "반전으로 시작",
 };
 export function hookLabelKo(hookType: unknown): string { return HOOK_LABELS_KO[String(hookType ?? "")] ?? "기본"; }
+
+/* ═══════════ 내려받는 mp4 파일 이름 — **한 곳**(계약 R7 §1.3 · B2 `lib/runner-release.ts releaseFilename` 관례) ═══════════
+ *   🔴 ASCII 만 쓴다. 이름은 R2 서명 안의 `Content-Disposition` 으로 전달되는데(`lib/r2.ts r2PresignGet`),
+ *      거기 담기는 건 `filename="…"` 한 벌뿐이다 — RFC 5987 의 `filename*=UTF-8''…` 가 없으면 한글은 브라우저마다 깨진다.
+ *      (프리사인 URL 은 교차 출처라 `<a download="한글.mp4">` 도 무시된다 — 헤더 말고는 이름을 줄 방법이 없다.)
+ *      그래서 제목의 한글은 떨어뜨리고, 남는 글자가 없으면 KST 날짜를 쓴다: `AC-329-20260915.mp4`.
+ *      `filename*` 을 같이 싣는 건 `lib/r2.ts`(B2 영역) 수정이 필요해 메인에 보고했다 — 꽂히면 이 함수만 바꾸면 된다. */
+
+/** 오늘(KST) `YYYYMMDD`. 순수 산술(+9h) — `lib/cron/base.ts kstHour` 와 같은 근거(드라이버 tz 무관 · CLAUDE §4.5b). */
+export function kstDateCompact(now: Date = new Date()): string {
+  return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+/** 제목 → 파일이름에 쓸 ASCII 토막. 남는 게 없으면 `fallback`. */
+export function videoSlug(title: unknown, fallback: string): string {
+  const s = String(title ?? "")
+    .normalize("NFKD")                    // é → e + 결합부호(아래서 떨어진다). 한글은 자모로 갈라져 역시 떨어진다.
+    .replace(/[^\x20-\x7E]/g, " ")        // 비ASCII 전부 공백으로
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40).replace(/-+$/, "")
+    .toLowerCase();
+  return s || fallback;
+}
+
+/** `AC-{pieceId}-{slug}.mp4` — 화면·응답·헤더가 모두 이 한 함수를 쓴다(이름이 두 벌이 되지 않게). */
+export function videoFilename(pieceId: unknown, title: unknown, now: Date = new Date()): string {
+  const id = Math.floor(Number(pieceId) || 0);
+  return `AC-${id}-${videoSlug(title, kstDateCompact(now))}.mp4`;
+}
