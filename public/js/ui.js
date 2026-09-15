@@ -562,6 +562,15 @@
   /* 주제군·수익 목적은 **서버에 한국말이 없다**(값만 있다 · lib/writing-contracts.ts TopicGroup·RevenueGoal) — 고객 낱말은 여기가 정본. */
   UI.GROUP_LABEL = { review: "후기·리뷰", info: "정보·방법", life: "일상" };
   UI.GOAL_LABEL = { affiliate: "제휴 수수료", adsense: "애드센스", adpost: "애드포스트", ypp: "유튜브 수익", clip_incentive: "클립 인센티브", mixed: "여러 가지" };
+  /* [R8CLOSE §B8] 고객이 **고를 수 있는** 목표 매체 — 🔴 `lib/director-goal.ts MediaGoal` 네 갈래 그대로다(`affiliate`·`mixed` 는 고르는 값이 아니라 **역산한 값**이라 뺐다).
+     🔴 맨 앞이 «모르겠어요»(`""`)이고 그게 **기본**이다 — 지금은 붙어 있는 광고로 추정해서 잘 돌고 있으니 억지로 고르게 하지 않는다(§9).
+        «모름»을 «아무거나»로 바꿔 적지 마라: 고르지 않은 것과 «여러 가지»를 고른 것은 다르다(AC-57). */
+  UI.GOAL_PICK = [["", "모르겠어요"], ["adpost", UI.GOAL_LABEL.adpost], ["adsense", UI.GOAL_LABEL.adsense], ["ypp", UI.GOAL_LABEL.ypp], ["clip_incentive", UI.GOAL_LABEL.clip_incentive]];
+  /* [R8CLOSE §B3] 페르소나 연령대 — 🔴 **서버가 정본**(`lib/slang-whitelist.ts AGE_SAY`). 글자까지 같아야 한다.
+     🔴 값이 없으면 `null`(«모름») — `"30s"` 같은 기본값으로 채우지 않는다(대용물 금지 · AC-57).
+     🔴 모르면 **넓게 잡는다**(서버 `UNKNOWN_ALLOWS_ALL`) — 안 적어도 지금과 똑같이 돌아간다. 화면도 그렇게 말한다. */
+  UI.AGE_SAY = { "10s": "10대", "20s": "20대", "30s": "30대", "40s": "40대", "50s": "50대" };
+  UI.AGE_PICK = [["", "모르겠어요"], ...Object.entries(UI.AGE_SAY)];
 
   /* ══ [R8-A2 §9] 발행 전 검사 줄 — 🔴 **한 곳에서 그린다**(검수 화면과 직접 쓰기 화면이 같은 말을 하도록).
      원래 `public/app/piece.html` 안에만 있었고, 직접 쓰기(§5D①)가 같은 결과를 받게 되면서 여기로 올렸다 —

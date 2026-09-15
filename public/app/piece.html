@@ -20,6 +20,7 @@
 <div class="group" id="comp" hidden></div>
 <div class="group" id="photos" hidden></div>
 <div class="group" id="claims" hidden></div>
+<div class="group" id="refunused" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="group" id="teamwait" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
@@ -77,10 +78,42 @@ function renderWhy() {
   if (c && UI.GOAL_LABEL[P.goal]) h += kv("수익 목적", UI.GOAL_LABEL[P.goal], (c.goalRules || []).length ? `이 목적에 맞춘 규칙 ${c.goalRules.length}가지를 지켜 썼어요` : "이 목적에 따로 맞춘 규칙은 없어요");
   if (c && c.length) h += kv("분량", `${UI.num(c.length.min)}~${UI.num(c.length.max)}자`, `${src(c.length.fromGroup)}${c.actualChars ? ` · 지금 글은 ${UI.num(c.actualChars)}자` : ""}`);
   if (c && c.images) h += kv("사진", `${c.images.min}~${c.images.max}장`, src(c.images.fromGroup));
+  /* [R8CLOSE-B1 §B9] 🔴 **대표 사진** — `heroNeeded` 가 «적히기만» 하던 것을 검수까지 잇는다(`pieces.ts` 가 `meta.hero` 로 싣는다).
+     🔴 문장은 서버 한 출처(`lib/stock/plan.ts heroFactOf` → `line`) — 화면이 다시 짓지 않는다(AC-74).
+     🔴 **«대표로 고정됐어요»라고 쓰지 않는다** — `pinned` 는 서버가 리터럴 `false` 로 박는다(에디터에서 콕 집는 동작이 아직 없다 · R10).
+        그래서 `pinned` 를 읽지도 않는다: 읽으면 언젠가 «true 면 이렇게»를 쓰게 되고 그게 곧 거짓말이 된다.
+     🔴 대표가 없어도 **막지 않는다** — 서버 문장이 «그대로 두셔도 글은 올라가요»로 이미 그렇게 말한다(§9). */
+  if (m.hero && m.hero.line) h += kv("대표 사진", String(m.hero.line));
   if (c && c.register) h += kv("말투", String(c.register));
   if (m.angle) h += kv("잡은 방향", String(m.angle));
+  /* [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** — `slotReason`(왜 이 시각인가) 과 **같은 자리·같은 뜻**이라 나란히 둔다(서버 주석이 그렇게 적혀 있다).
+     채널이 하나인 집엔 값이 아예 안 온다(고를 것이 없으니 까닭도 없다) — 그때 «자동으로 골랐어요» 같은 말을 **지어내지 않는다**. */
+  if (m.channelReason) h += kv("이 채널인 까닭", String(m.channelReason));
   if (m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
+  /* [R8CLOSE-B1 §B2] 🔴 **왜 이 계정인가** — 적합도가 낮아도 **배정은 됐다**(§9 막지 않는다 · 순위만 달라졌다).
+     🔴 점수(`score`)는 안 그린다 — 고객이 고칠 수 있는 숫자가 아니고, 숫자를 보여 주면 «몇 점이어야 하나»를 묻게 된다(§13.0 숫자 1개).
+     🔴 `measured:false`(못 쟀다)일 때도 **서버 `line` 이 그 사실을 그대로 말한다** — 화면이 0점으로 그리면 그게 거짓말이다(AC-9). */
+  if (m.personaFit && m.personaFit.line) h += kv("이 계정인 까닭", String(m.personaFit.line));
   host.hidden = false; host.innerHTML = '<div class="gt">이 글이 왜 이렇게 생겼나</div>' + h;
+}
+/* ══ [R8CLOSE-B2] 🔴 **이건 못 따라 했어요** — 레퍼런스에서 배웠지만 우리가 못 내는 축을 서버가 `meta.refUnused = [{field, why}]` 로 남긴다
+     (`lib/video/reference-apply.ts`). «조용히 버리지 않는다»는 규율의 **화면 쪽 반쪽**이다 — 서버만 적어 두면 아무도 안 본다.
+   🔴 **`why` 를 그대로 그리지 않는다.** 그 문장은 **우리끼리 쓰는 말**이다 — «렌더»·«프리셋»·«켄번즈»·«R10 3번»·«fast|normal|hold» 가 들어 있고
+      고객 화면에 시스템 낱말은 금지다(§13.0). 🔴 그리고 `scripts/verify-server-words.mjs` 는 사람이 읽는 칸으로 `error·message·title·body·desc·…`
+      만 보고 **`why:` 는 안 본다** — 그래서 이 문장들은 하니스를 그냥 통과한다. «검사가 통과했다»가 «고객 말이다»는 아니다(AC-52 의 빈틈).
+      ⇒ 화면은 **어느 축을 못 냈는지**만 사람말로 말한다. 까닭은 우리 몫이다.
+   🔴 «못 했다»를 사과나 경고로 쓰지 않는다(§3) — 사실 한 줄, 그리고 **나머지는 배웠다**는 사실을 같이 준다.
+   🔴 모르는 축 이름이 오면 **영어 칸 이름을 그대로 내보내지 않는다**(그게 곧 시스템 용어다) — «그 밖»으로 센다.
+   🔴 없으면 아무것도 안 그린다. */
+const REF_FIELD_SAY = { caption: "자막 모양", camera: "카메라 움직임", pace: "컷 빠르기", rules: "연출 규칙", style: "화면 분위기", palette: "색", hookPrinciple: "첫 3초 훅" };
+function renderRefUnused() {
+  const host = UI.$("#refunused"); const list = ((P.meta || {}).refUnused || []).filter((x) => x && x.field);
+  if (!list.length) { host.hidden = true; return; }
+  const names = [...new Set(list.map((x) => REF_FIELD_SAY[x.field] || "그 밖"))];
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">이건 못 따라 했어요</div>'
+    + `<div class="chips" style="padding:0 16px 10px;gap:6px">${names.map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px">${UI.esc(x)}</span>`).join("")}</div>`
+    + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">참고한 영상에서 ${names.length}가지는 지금 우리 편집기로 못 내요. 나머지는 그대로 배워서 만들었어요.</p>`;
 }
 /* ══ [R8-A2 §2.4] 🔴 **수치 주장 표시** — 서버(`netlify/functions/pieces.ts:142`)가 `meta.numberClaims = { summary, items, line }` 을
      **이미 실어 보내고 있었는데** 검수 화면이 한 번도 안 그렸다(`grep -n "numberClaims" public/app/piece.html` = 0).
@@ -231,7 +264,7 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  renderTeamWait();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
+  renderTeamWait(); renderRefUnused();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true; UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);

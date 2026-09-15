@@ -185,7 +185,7 @@ async function detailSheet(a) {
   <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">활동 시간대<small>여러 개 골라도 돼요 · 안 고르면 채널 기본 시간</small></div>${UI.chips("hours", HOURS, a.goldenHours || [], true)}</div>
-  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div></div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div><button type="button" class="btn ghost sm" id="pedit" style="margin-top:8px;align-self:flex-start" hidden>고른 페르소나 고치기</button></div>
   <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
   <div class="sec">수익 매체</div>
   <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
@@ -215,17 +215,36 @@ async function detailSheet(a) {
 }
 function personaChips(sel) { return UI.chips("persona", [...personas.map((p) => [p.id, p.name]), ["new", "+ 새로 만들기"]], sel ?? ""); }
 function bindPersona(sh, a) {
-  UI.bindChips(sh, (name, v) => { if (name === "persona" && v === "new") personaSheet(sh, a); });
+  /* [R8CLOSE §B3] 🔴 **고치는 길이 없었다** — 페르소나는 «만들기»만 있고 고칠 자리가 없어서, 이미 만든 페르소나는
+     연령대를 영영 못 적는다(서버 `personas-save` 는 `id` 를 받아 고칠 수 있는데 부르는 화면이 없었다 · AC-69 와 같은 모양). */
+  const pe = sh.querySelector("#pedit");
+  const show = (v) => { if (pe) pe.hidden = !(v && v !== "new" && personas.some((p) => String(p.id) === String(v))); };
+  UI.bindChips(sh, (name, v) => { if (name !== "persona") return; if (v === "new") { show(null); personaSheet(sh, a); return; } show(v); });
+  show(UI.chipVal(sh, "persona"));
+  if (pe) pe.onclick = () => { const id = UI.chipVal(sh, "persona"); const cur = personas.find((p) => String(p.id) === String(id)); if (cur) personaSheet(sh, a, cur); };
 }
-function personaSheet(parent, a) {
+/* [R8CLOSE-B1 §B3] 🔴 **연령대 한 칸** — 서버(`lib/slang-whitelist.ts`)가 «요즘 말을 잡을지»를 이 값으로 가른다.
+     🔴 **«모르겠어요»가 기본이고, 안 적어도 지금과 똑같이 돈다**(서버 `UNKNOWN_ALLOWS_ALL = true` — 모르면 넓게 잡는다).
+        그래서 이 칸은 «채워야 하는 칸»이 아니다. 별표도 «필수»도 붙이지 않고, 안 고르면 **키를 아예 안 보낸다.**
+     🔴 안내는 `.note`(회색)다 — `.field .help` 는 **오류 전용(늘 빨강)**이라 아무 일 없는데 경고처럼 보인다.
+   🔴 **서버가 `ageBand` 를 받도록 뚫려야 값이 남는다**(`netlify/functions/personas.ts sanitizeProfile` 화이트리스트에
+      `ageBand` 가 없으면 저장할 때도 돌려줄 때도 잘려 나간다). B 에 계약을 넘겼다 — 그 줄이 없으면 **눌러도 값이 안 남는다.** */
+function personaSheet(parent, a, cur) {
   const F = [["region", "지역", "예: 경기 남부"], ["family", "가족", "예: 아이 둘"], ["job", "직업", "예: 회사원"], ["home", "집", "예: 아파트 25평"], ["brands", "쓰는 브랜드", "쉼표로 여러 개"], ["tone", "말투", "예: 친근한 구어 «~했어요»"], ["interests", "관심사", "쉼표로 여러 개"], ["banned", "금지어", "쉼표로 여러 개"], ["signature", "서명", "글 끝에 붙는 한 줄"]];
-  UI.sheet(`<form id="pf" autocomplete="off"><p class="muted" style="margin:0 0 8px">넓게 적어도 돼요. 글마다 이 재료를 조금씩 섞어요.</p><div class="field"><label>이름</label><input class="input" name="name" required placeholder="예: 30대 맞벌이 주부"></div>${F.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input class="input" name="${k}" placeholder="${ph}"></div>`).join("")}<div class="cta"><button class="btn primary" type="submit">만들기</button></div></form>`, { title: "새 페르소나", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d) => {
+  const pv = (k) => UI.esc(Array.isArray((cur?.profile || {})[k]) ? (cur.profile[k] || []).join(", ") : ((cur?.profile || {})[k] ?? ""));
+  UI.sheet(`<form id="pf" autocomplete="off"><p class="muted" style="margin:0 0 8px">넓게 적어도 돼요. 글마다 이 재료를 조금씩 섞어요.</p><div class="field"><label>이름</label><input class="input" name="name" required placeholder="예: 30대 맞벌이 주부" value="${UI.esc(cur?.name ?? "")}"></div><div class="field"><label>연령대</label>${UI.chips("age", UI.AGE_PICK, (cur?.profile || {}).ageBand ?? "")}<p class="note">안 고르셔도 돼요. 고르시면 그 또래가 쓰는 말을 그대로 살려서 써요.</p></div>${F.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input class="input" name="${k}" placeholder="${ph}" value="${pv(k)}"></div>`).join("")}<div class="cta"><button class="btn primary" type="submit">${cur ? "저장" : "만들기"}</button></div></form>`, { title: cur ? "페르소나 고치기" : "새 페르소나", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#pf"), async (d) => {
     const list = (s) => s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined;
     const profile = { region: d.region || undefined, family: d.family || undefined, job: d.job || undefined, home: d.home || undefined, brands: list(d.brands), tone: d.tone || undefined, interests: list(d.interests), banned: list(d.banned), signature: d.signature || undefined };
-    const r = await UI.api("/api/personas-save", { body: { name: d.name, profile } }); if (!r.ok) return UI.toast(r.error || "만들지 못했어요");
-    personas.push(r.persona); close(); UI.toast("페르소나를 만들었어요");
+    /* 🔴 «모름»이면 **키를 안 싣는다** — 빈 문자열을 보내면 서버 눈에는 «빈 값을 골랐다»로 보인다(«모름»과 «고름»은 다르다 · AC-57). */
+    const age = UI.chipVal(sh, "age"); if (age) profile.ageBand = age;
+    const r = await UI.api("/api/personas-save", { body: { ...(cur ? { id: cur.id } : {}), name: d.name, profile } }); if (!r.ok) return UI.toast(r.error || (cur ? "저장하지 못했어요" : "만들지 못했어요"));
+    if (cur) { const i = personas.findIndex((p) => p.id === r.persona.id); if (i >= 0) personas[i] = r.persona; } else personas.push(r.persona);
+    /* 🔴 **서버가 돌려준 것으로 판정한다** — `sanitizeProfile` 화이트리스트에 `ageBand` 가 없으면 이 값은 **조용히 버려진다**.
+       그때 «저장했어요»라고 하면 그게 거짓말이다. 나머지는 저장됐으니 «그것만 아직»이라고 말한다(겁주지 않는다 · §3). */
+    const kept = !age || String((r.persona.profile || {}).ageBand || "") === String(age);
+    close(); UI.toast(kept ? (cur ? "저장했어요" : "페르소나를 만들었어요") : "저장했어요 · 연령대는 아직 저장되지 않아요");
     const pz = parent.querySelector("#pz"); pz.innerHTML = personaChips(r.persona.id); bindPersona(parent, a);
-  }) });
+  }); } });
 }
 await load();
 })();

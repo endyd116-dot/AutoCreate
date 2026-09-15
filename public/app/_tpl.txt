@@ -1188,7 +1188,7 @@ async function detailSheet(a) {
   <div class="fr"><div class="fl">하루 최대<small>이보다 많이 예약하지 않아요</small></div>${UI.stepper("cap", a.dailyCap ?? 2, 1, 10, "개")}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 간격<small>같은 계정에 연달아 올리지 않는 최소 간격</small></div>${UI.chips("gap", [[60, "60분"], [180, "180분"], [360, "360분"]], a.minGapMin ?? 180)}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">활동 시간대<small>여러 개 골라도 돼요 · 안 고르면 채널 기본 시간</small></div>${UI.chips("hours", HOURS, a.goldenHours || [], true)}</div>
-  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div></div>
+  <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div><button type="button" class="btn ghost sm" id="pedit" style="margin-top:8px;align-self:flex-start" hidden>고른 페르소나 고치기</button></div>
   <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
   <div class="sec">수익 매체</div>
   <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
@@ -1218,17 +1218,36 @@ async function detailSheet(a) {
 }
 function personaChips(sel) { return UI.chips("persona", [...personas.map((p) => [p.id, p.name]), ["new", "+ 새로 만들기"]], sel ?? ""); }
 function bindPersona(sh, a) {
-  UI.bindChips(sh, (name, v) => { if (name === "persona" && v === "new") personaSheet(sh, a); });
+  /* [R8CLOSE §B3] 🔴 **고치는 길이 없었다** — 페르소나는 «만들기»만 있고 고칠 자리가 없어서, 이미 만든 페르소나는
+     연령대를 영영 못 적는다(서버 `personas-save` 는 `id` 를 받아 고칠 수 있는데 부르는 화면이 없었다 · AC-69 와 같은 모양). */
+  const pe = sh.querySelector("#pedit");
+  const show = (v) => { if (pe) pe.hidden = !(v && v !== "new" && personas.some((p) => String(p.id) === String(v))); };
+  UI.bindChips(sh, (name, v) => { if (name !== "persona") return; if (v === "new") { show(null); personaSheet(sh, a); return; } show(v); });
+  show(UI.chipVal(sh, "persona"));
+  if (pe) pe.onclick = () => { const id = UI.chipVal(sh, "persona"); const cur = personas.find((p) => String(p.id) === String(id)); if (cur) personaSheet(sh, a, cur); };
 }
-function personaSheet(parent, a) {
+/* [R8CLOSE-B1 §B3] 🔴 **연령대 한 칸** — 서버(`lib/slang-whitelist.ts`)가 «요즘 말을 잡을지»를 이 값으로 가른다.
+     🔴 **«모르겠어요»가 기본이고, 안 적어도 지금과 똑같이 돈다**(서버 `UNKNOWN_ALLOWS_ALL = true` — 모르면 넓게 잡는다).
+        그래서 이 칸은 «채워야 하는 칸»이 아니다. 별표도 «필수»도 붙이지 않고, 안 고르면 **키를 아예 안 보낸다.**
+     🔴 안내는 `.note`(회색)다 — `.field .help` 는 **오류 전용(늘 빨강)**이라 아무 일 없는데 경고처럼 보인다.
+   🔴 **서버가 `ageBand` 를 받도록 뚫려야 값이 남는다**(`netlify/functions/personas.ts sanitizeProfile` 화이트리스트에
+      `ageBand` 가 없으면 저장할 때도 돌려줄 때도 잘려 나간다). B 에 계약을 넘겼다 — 그 줄이 없으면 **눌러도 값이 안 남는다.** */
+function personaSheet(parent, a, cur) {
   const F = [["region", "지역", "예: 경기 남부"], ["family", "가족", "예: 아이 둘"], ["job", "직업", "예: 회사원"], ["home", "집", "예: 아파트 25평"], ["brands", "쓰는 브랜드", "쉼표로 여러 개"], ["tone", "말투", "예: 친근한 구어 «~했어요»"], ["interests", "관심사", "쉼표로 여러 개"], ["banned", "금지어", "쉼표로 여러 개"], ["signature", "서명", "글 끝에 붙는 한 줄"]];
-  UI.sheet(`<form id="pf" autocomplete="off"><p class="muted" style="margin:0 0 8px">넓게 적어도 돼요. 글마다 이 재료를 조금씩 섞어요.</p><div class="field"><label>이름</label><input class="input" name="name" required placeholder="예: 30대 맞벌이 주부"></div>${F.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input class="input" name="${k}" placeholder="${ph}"></div>`).join("")}<div class="cta"><button class="btn primary" type="submit">만들기</button></div></form>`, { title: "새 페르소나", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d) => {
+  const pv = (k) => UI.esc(Array.isArray((cur?.profile || {})[k]) ? (cur.profile[k] || []).join(", ") : ((cur?.profile || {})[k] ?? ""));
+  UI.sheet(`<form id="pf" autocomplete="off"><p class="muted" style="margin:0 0 8px">넓게 적어도 돼요. 글마다 이 재료를 조금씩 섞어요.</p><div class="field"><label>이름</label><input class="input" name="name" required placeholder="예: 30대 맞벌이 주부" value="${UI.esc(cur?.name ?? "")}"></div><div class="field"><label>연령대</label>${UI.chips("age", UI.AGE_PICK, (cur?.profile || {}).ageBand ?? "")}<p class="note">안 고르셔도 돼요. 고르시면 그 또래가 쓰는 말을 그대로 살려서 써요.</p></div>${F.map(([k, l, ph]) => `<div class="field"><label>${l}</label><input class="input" name="${k}" placeholder="${ph}" value="${pv(k)}"></div>`).join("")}<div class="cta"><button class="btn primary" type="submit">${cur ? "저장" : "만들기"}</button></div></form>`, { title: cur ? "페르소나 고치기" : "새 페르소나", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#pf"), async (d) => {
     const list = (s) => s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined;
     const profile = { region: d.region || undefined, family: d.family || undefined, job: d.job || undefined, home: d.home || undefined, brands: list(d.brands), tone: d.tone || undefined, interests: list(d.interests), banned: list(d.banned), signature: d.signature || undefined };
-    const r = await UI.api("/api/personas-save", { body: { name: d.name, profile } }); if (!r.ok) return UI.toast(r.error || "만들지 못했어요");
-    personas.push(r.persona); close(); UI.toast("페르소나를 만들었어요");
+    /* 🔴 «모름»이면 **키를 안 싣는다** — 빈 문자열을 보내면 서버 눈에는 «빈 값을 골랐다»로 보인다(«모름»과 «고름»은 다르다 · AC-57). */
+    const age = UI.chipVal(sh, "age"); if (age) profile.ageBand = age;
+    const r = await UI.api("/api/personas-save", { body: { ...(cur ? { id: cur.id } : {}), name: d.name, profile } }); if (!r.ok) return UI.toast(r.error || (cur ? "저장하지 못했어요" : "만들지 못했어요"));
+    if (cur) { const i = personas.findIndex((p) => p.id === r.persona.id); if (i >= 0) personas[i] = r.persona; } else personas.push(r.persona);
+    /* 🔴 **서버가 돌려준 것으로 판정한다** — `sanitizeProfile` 화이트리스트에 `ageBand` 가 없으면 이 값은 **조용히 버려진다**.
+       그때 «저장했어요»라고 하면 그게 거짓말이다. 나머지는 저장됐으니 «그것만 아직»이라고 말한다(겁주지 않는다 · §3). */
+    const kept = !age || String((r.persona.profile || {}).ageBand || "") === String(age);
+    close(); UI.toast(kept ? (cur ? "저장했어요" : "페르소나를 만들었어요") : "저장했어요 · 연령대는 아직 저장되지 않아요");
     const pz = parent.querySelector("#pz"); pz.innerHTML = personaChips(r.persona.id); bindPersona(parent, a);
-  }) });
+  }); } });
 }
 await load();
 === settings.html | account | 설정 ===
@@ -1237,6 +1256,12 @@ await load();
 <div class="group" id="takedown" hidden></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
+</div>
+<!-- [R8CLOSE §B8] 🔴 **지금은 붙어 있는 광고로 추정한다** — 고객이 고를 자리가 없어서(`tenants.settings.goal` 라이브 0건) 그 기계가 추정값으로만 돌았다.
+     🔴 **고르게 만들지 않는다** — «모르겠어요»가 기본이고, 그대로 두셔도 지금처럼 잘 돌아간다(§9).
+     🔴 고르셔도 **켜 둔 채널은 하나도 안 빠진다** — 순서만 바뀜다(서버 `targetChannelOrder` 와 같은 약속). -->
+<div class="group" id="goalg"><div class="gt">수익</div>
+  <button class="row tap" type="button" id="goalRow"><div class="l"><span class="t" id="goalT">어디서 벌고 싶으세요</span><span class="d wrap" id="goalD">고르시면 그 쪽이 잘 되는 채널을 먼저 써요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
 </div>
 <div class="group"><a class="row tap" href="/app/team.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c1-3 3.6-4.6 6.5-4.6S14.5 16 15.5 19"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.4c2 .7 3.4 2.2 4 4.6"/></svg></span><div class="l"><span class="t">팀</span><span class="d" id="teamD">함께 쓸 사람을 부를 수 있어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a></div>
 <div class="group" id="ai-key"><div class="gt">내 AI 키</div><div id="akBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
@@ -1292,6 +1317,45 @@ function sayKinds(on) {
   UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
 }
 loadKinds();
+/* [R8CLOSE-B1 §B8] «어디서 벌고 싶으세요» — GET/POST /api/tenant-settings { goal }.
+   🔴 **«모르겠어요»(값 없음)가 기본**이다. 그때 서버는 지금처럼 **붙어 있는 광고를 보고 추정**한다(`lib/director-goal.ts`) —
+      그게 이미 잘 돌고 있으니 억지로 고르게 하지 않는다(§9). 별표도 «필수»도 «설정을 완료하세요»도 없다.
+   🔴 고른 값은 **순서만 바꾼다** — 켠 채널은 하나도 안 빠진다. 그래서 «이 채널은 못 써요» 같은 말을 쓰지 않는다.
+   🔴 **서버가 `goal` 을 받도록 뚫려야 값이 남는다**: `netlify/functions/tenant-settings.ts` 의 `ALLOWED_SETTINGS` 에
+      `goal` 이 없으면 POST 해도 **조용히 버려진다**. B 에 계약을 넘겼다 — 그 줄 전에는 눌러도 값이 안 남는다.
+   🔴 서버가 읽어 주는 값만 그린다 — 화면이 «내가 방금 고른 값»을 기억해서 그리면 저장이 안 됐는데 된 것처럼 보인다. */
+let goalNow = "";
+function sayGoal() {
+  const l = goalNow ? UI.GOAL_LABEL[goalNow] : "";
+  UI.$("#goalT").textContent = l ? `${l}로 벌고 싶어요` : "어디서 벌고 싶으세요";
+  UI.$("#goalD").textContent = l
+    ? "이 쪽이 잘 되는 채널을 먼저 써요 · 켜 두신 채널은 그대로 다 써요"
+    : "안 고르셔도 돼요 · 지금은 붙어 있는 광고를 보고 알아서 골라요";
+}
+async function loadGoal() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  goalNow = (r.ok && r.settings && typeof r.settings.goal === "string") ? r.settings.goal : "";
+  sayGoal();
+  UI.$("#goalRow").onclick = () => goalSheet();
+}
+function goalSheet() {
+  const row = ([v, l]) => `<button class="row tap" type="button" data-g="${UI.esc(v)}"><div class="l"><span class="t">${UI.esc(l)}</span>${v === "" ? '<span class="d wrap">지금처럼 붙어 있는 광고를 보고 알아서 골라요</span>' : ""}</div>${String(goalNow) === String(v) ? '<span class="pill ok">고른 것</span>' : ""}</button>`;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">고르시면 그 쪽이 잘 되는 채널을 먼저 써요. 켜 두신 채널이 빠지지는 않아요.</p>
+    <div class="group" style="margin:0 -4px">${UI.GOAL_PICK.map(row).join("")}</div>`,
+    { title: "어디서 벌고 싶으세요", onOpen: (sh, close) => {
+      sh.querySelectorAll("[data-g]").forEach((b) => b.onclick = async () => {
+        const v = b.dataset.g;
+        if (String(v) === String(goalNow)) return close();
+        const rr = await UI.api("/api/tenant-settings", { body: { goal: v } });
+        if (!rr.ok) return UI.toast(rr.gated ? "" : rr.error || "바꾸지 못했어요");
+        /* 🔴 **서버가 돌려준 것만 믿는다** — 서버가 이 열쇠를 아직 안 받으면 값이 그대로다. 그때 화면이 «바꿨어요»라고 하면 거짓말이다. */
+        goalNow = (rr.settings && typeof rr.settings.goal === "string") ? rr.settings.goal : "";
+        sayGoal(); close();
+        UI.toast(String(goalNow) === String(v) ? (goalNow ? "그 쪽을 먼저 써 볼게요" : "알아서 고를게요") : "아직 저장되지 않았어요");
+      });
+    } });
+}
+loadGoal();
 /* [R7 §4.4] 기기 알림 — 권한 + 구독이 **둘 다** 돼야 «켜진» 것이다. 하나라도 안 되면 그 이유를 한 줄로 말한다(켰다고 거짓말하지 않는다).
    iOS 는 «홈 화면에 추가» 한 뒤에만 알림을 받을 수 있다(사파리 제약) — 그 한 줄만 보여 준다. */
 async function loadNoti() {
@@ -2243,6 +2307,7 @@ await load();
 <div class="group" id="comp" hidden></div>
 <div class="group" id="photos" hidden></div>
 <div class="group" id="claims" hidden></div>
+<div class="group" id="refunused" hidden></div>
 <div class="group" id="gate" hidden></div>
 <div class="group" id="teamwait" hidden></div>
 <div class="cta" id="cta" hidden><button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn primary" type="button" id="approve">이대로 발행 예약</button></div>
@@ -2294,10 +2359,42 @@ function renderWhy() {
   if (c && UI.GOAL_LABEL[P.goal]) h += kv("수익 목적", UI.GOAL_LABEL[P.goal], (c.goalRules || []).length ? `이 목적에 맞춘 규칙 ${c.goalRules.length}가지를 지켜 썼어요` : "이 목적에 따로 맞춘 규칙은 없어요");
   if (c && c.length) h += kv("분량", `${UI.num(c.length.min)}~${UI.num(c.length.max)}자`, `${src(c.length.fromGroup)}${c.actualChars ? ` · 지금 글은 ${UI.num(c.actualChars)}자` : ""}`);
   if (c && c.images) h += kv("사진", `${c.images.min}~${c.images.max}장`, src(c.images.fromGroup));
+  /* [R8CLOSE-B1 §B9] 🔴 **대표 사진** — `heroNeeded` 가 «적히기만» 하던 것을 검수까지 잇는다(`pieces.ts` 가 `meta.hero` 로 싣는다).
+     🔴 문장은 서버 한 출처(`lib/stock/plan.ts heroFactOf` → `line`) — 화면이 다시 짓지 않는다(AC-74).
+     🔴 **«대표로 고정됐어요»라고 쓰지 않는다** — `pinned` 는 서버가 리터럴 `false` 로 박는다(에디터에서 콕 집는 동작이 아직 없다 · R10).
+        그래서 `pinned` 를 읽지도 않는다: 읽으면 언젠가 «true 면 이렇게»를 쓰게 되고 그게 곧 거짓말이 된다.
+     🔴 대표가 없어도 **막지 않는다** — 서버 문장이 «그대로 두셔도 글은 올라가요»로 이미 그렇게 말한다(§9). */
+  if (m.hero && m.hero.line) h += kv("대표 사진", String(m.hero.line));
   if (c && c.register) h += kv("말투", String(c.register));
   if (m.angle) h += kv("잡은 방향", String(m.angle));
+  /* [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** — `slotReason`(왜 이 시각인가) 과 **같은 자리·같은 뜻**이라 나란히 둔다(서버 주석이 그렇게 적혀 있다).
+     채널이 하나인 집엔 값이 아예 안 온다(고를 것이 없으니 까닭도 없다) — 그때 «자동으로 골랐어요» 같은 말을 **지어내지 않는다**. */
+  if (m.channelReason) h += kv("이 채널인 까닭", String(m.channelReason));
   if (m.slotReason) h += kv("이 시각인 까닭", String(m.slotReason));
+  /* [R8CLOSE-B1 §B2] 🔴 **왜 이 계정인가** — 적합도가 낮아도 **배정은 됐다**(§9 막지 않는다 · 순위만 달라졌다).
+     🔴 점수(`score`)는 안 그린다 — 고객이 고칠 수 있는 숫자가 아니고, 숫자를 보여 주면 «몇 점이어야 하나»를 묻게 된다(§13.0 숫자 1개).
+     🔴 `measured:false`(못 쟀다)일 때도 **서버 `line` 이 그 사실을 그대로 말한다** — 화면이 0점으로 그리면 그게 거짓말이다(AC-9). */
+  if (m.personaFit && m.personaFit.line) h += kv("이 계정인 까닭", String(m.personaFit.line));
   host.hidden = false; host.innerHTML = '<div class="gt">이 글이 왜 이렇게 생겼나</div>' + h;
+}
+/* ══ [R8CLOSE-B2] 🔴 **이건 못 따라 했어요** — 레퍼런스에서 배웠지만 우리가 못 내는 축을 서버가 `meta.refUnused = [{field, why}]` 로 남긴다
+     (`lib/video/reference-apply.ts`). «조용히 버리지 않는다»는 규율의 **화면 쪽 반쪽**이다 — 서버만 적어 두면 아무도 안 본다.
+   🔴 **`why` 를 그대로 그리지 않는다.** 그 문장은 **우리끼리 쓰는 말**이다 — «렌더»·«프리셋»·«켄번즈»·«R10 3번»·«fast|normal|hold» 가 들어 있고
+      고객 화면에 시스템 낱말은 금지다(§13.0). 🔴 그리고 `scripts/verify-server-words.mjs` 는 사람이 읽는 칸으로 `error·message·title·body·desc·…`
+      만 보고 **`why:` 는 안 본다** — 그래서 이 문장들은 하니스를 그냥 통과한다. «검사가 통과했다»가 «고객 말이다»는 아니다(AC-52 의 빈틈).
+      ⇒ 화면은 **어느 축을 못 냈는지**만 사람말로 말한다. 까닭은 우리 몫이다.
+   🔴 «못 했다»를 사과나 경고로 쓰지 않는다(§3) — 사실 한 줄, 그리고 **나머지는 배웠다**는 사실을 같이 준다.
+   🔴 모르는 축 이름이 오면 **영어 칸 이름을 그대로 내보내지 않는다**(그게 곧 시스템 용어다) — «그 밖»으로 센다.
+   🔴 없으면 아무것도 안 그린다. */
+const REF_FIELD_SAY = { caption: "자막 모양", camera: "카메라 움직임", pace: "컷 빠르기", rules: "연출 규칙", style: "화면 분위기", palette: "색", hookPrinciple: "첫 3초 훅" };
+function renderRefUnused() {
+  const host = UI.$("#refunused"); const list = ((P.meta || {}).refUnused || []).filter((x) => x && x.field);
+  if (!list.length) { host.hidden = true; return; }
+  const names = [...new Set(list.map((x) => REF_FIELD_SAY[x.field] || "그 밖"))];
+  host.hidden = false;
+  host.innerHTML = '<div class="gt">이건 못 따라 했어요</div>'
+    + `<div class="chips" style="padding:0 16px 10px;gap:6px">${names.map((x) => `<span class="chip" style="height:32px;padding:0 12px;font-size:12.5px">${UI.esc(x)}</span>`).join("")}</div>`
+    + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">참고한 영상에서 ${names.length}가지는 지금 우리 편집기로 못 내요. 나머지는 그대로 배워서 만들었어요.</p>`;
 }
 /* ══ [R8-A2 §2.4] 🔴 **수치 주장 표시** — 서버(`netlify/functions/pieces.ts:142`)가 `meta.numberClaims = { summary, items, line }` 을
      **이미 실어 보내고 있었는데** 검수 화면이 한 번도 안 그렸다(`grep -n "numberClaims" public/app/piece.html` = 0).
@@ -2448,7 +2545,7 @@ function render() {
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
-  renderTeamWait();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
+  renderTeamWait(); renderRefUnused();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; UI.$("#why").hidden = true; UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);

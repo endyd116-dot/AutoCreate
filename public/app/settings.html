@@ -19,6 +19,12 @@
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
+<!-- [R8CLOSE §B8] 🔴 **지금은 붙어 있는 광고로 추정한다** — 고객이 고를 자리가 없어서(`tenants.settings.goal` 라이브 0건) 그 기계가 추정값으로만 돌았다.
+     🔴 **고르게 만들지 않는다** — «모르겠어요»가 기본이고, 그대로 두셔도 지금처럼 잘 돌아간다(§9).
+     🔴 고르셔도 **켜 둔 채널은 하나도 안 빠진다** — 순서만 바뀜다(서버 `targetChannelOrder` 와 같은 약속). -->
+<div class="group" id="goalg"><div class="gt">수익</div>
+  <button class="row tap" type="button" id="goalRow"><div class="l"><span class="t" id="goalT">어디서 벌고 싶으세요</span><span class="d wrap" id="goalD">고르시면 그 쪽이 잘 되는 채널을 먼저 써요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+</div>
 <div class="group"><a class="row tap" href="/app/team.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 19c1-3 3.6-4.6 6.5-4.6S14.5 16 15.5 19"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.4c2 .7 3.4 2.2 4 4.6"/></svg></span><div class="l"><span class="t">팀</span><span class="d" id="teamD">함께 쓸 사람을 부를 수 있어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a></div>
 <div class="group" id="ai-key"><div class="gt">내 AI 키</div><div id="akBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 <div class="group" id="akFbg" hidden><div class="gt">내 키가 안 될 때</div>
@@ -79,6 +85,45 @@ function sayKinds(on) {
   UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
 }
 loadKinds();
+/* [R8CLOSE-B1 §B8] «어디서 벌고 싶으세요» — GET/POST /api/tenant-settings { goal }.
+   🔴 **«모르겠어요»(값 없음)가 기본**이다. 그때 서버는 지금처럼 **붙어 있는 광고를 보고 추정**한다(`lib/director-goal.ts`) —
+      그게 이미 잘 돌고 있으니 억지로 고르게 하지 않는다(§9). 별표도 «필수»도 «설정을 완료하세요»도 없다.
+   🔴 고른 값은 **순서만 바꾼다** — 켠 채널은 하나도 안 빠진다. 그래서 «이 채널은 못 써요» 같은 말을 쓰지 않는다.
+   🔴 **서버가 `goal` 을 받도록 뚫려야 값이 남는다**: `netlify/functions/tenant-settings.ts` 의 `ALLOWED_SETTINGS` 에
+      `goal` 이 없으면 POST 해도 **조용히 버려진다**. B 에 계약을 넘겼다 — 그 줄 전에는 눌러도 값이 안 남는다.
+   🔴 서버가 읽어 주는 값만 그린다 — 화면이 «내가 방금 고른 값»을 기억해서 그리면 저장이 안 됐는데 된 것처럼 보인다. */
+let goalNow = "";
+function sayGoal() {
+  const l = goalNow ? UI.GOAL_LABEL[goalNow] : "";
+  UI.$("#goalT").textContent = l ? `${l}로 벌고 싶어요` : "어디서 벌고 싶으세요";
+  UI.$("#goalD").textContent = l
+    ? "이 쪽이 잘 되는 채널을 먼저 써요 · 켜 두신 채널은 그대로 다 써요"
+    : "안 고르셔도 돼요 · 지금은 붙어 있는 광고를 보고 알아서 골라요";
+}
+async function loadGoal() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  goalNow = (r.ok && r.settings && typeof r.settings.goal === "string") ? r.settings.goal : "";
+  sayGoal();
+  UI.$("#goalRow").onclick = () => goalSheet();
+}
+function goalSheet() {
+  const row = ([v, l]) => `<button class="row tap" type="button" data-g="${UI.esc(v)}"><div class="l"><span class="t">${UI.esc(l)}</span>${v === "" ? '<span class="d wrap">지금처럼 붙어 있는 광고를 보고 알아서 골라요</span>' : ""}</div>${String(goalNow) === String(v) ? '<span class="pill ok">고른 것</span>' : ""}</button>`;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px">고르시면 그 쪽이 잘 되는 채널을 먼저 써요. 켜 두신 채널이 빠지지는 않아요.</p>
+    <div class="group" style="margin:0 -4px">${UI.GOAL_PICK.map(row).join("")}</div>`,
+    { title: "어디서 벌고 싶으세요", onOpen: (sh, close) => {
+      sh.querySelectorAll("[data-g]").forEach((b) => b.onclick = async () => {
+        const v = b.dataset.g;
+        if (String(v) === String(goalNow)) return close();
+        const rr = await UI.api("/api/tenant-settings", { body: { goal: v } });
+        if (!rr.ok) return UI.toast(rr.gated ? "" : rr.error || "바꾸지 못했어요");
+        /* 🔴 **서버가 돌려준 것만 믿는다** — 서버가 이 열쇠를 아직 안 받으면 값이 그대로다. 그때 화면이 «바꿨어요»라고 하면 거짓말이다. */
+        goalNow = (rr.settings && typeof rr.settings.goal === "string") ? rr.settings.goal : "";
+        sayGoal(); close();
+        UI.toast(String(goalNow) === String(v) ? (goalNow ? "그 쪽을 먼저 써 볼게요" : "알아서 고를게요") : "아직 저장되지 않았어요");
+      });
+    } });
+}
+loadGoal();
 /* [R7 §4.4] 기기 알림 — 권한 + 구독이 **둘 다** 돼야 «켜진» 것이다. 하나라도 안 되면 그 이유를 한 줄로 말한다(켰다고 거짓말하지 않는다).
    iOS 는 «홈 화면에 추가» 한 뒤에만 알림을 받을 수 있다(사파리 제약) — 그 한 줄만 보여 준다. */
 async function loadNoti() {
