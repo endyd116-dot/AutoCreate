@@ -28,9 +28,12 @@
 <script>
 (async () => {
 await UI.boot("revenue");
-const KST = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
-const today = KST(); const todayYmd = today.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
-let view = { y: today.getFullYear(), m: today.getMonth() + 1 };
+/* 🔴 [R7 §4.3 · 조사 상위 7] KST 달력 날짜는 **한 번만** 옮긴다 — 시프트한 Date 에 timeZone 을 또 걸면 기기 시간대만큼 하루가 더 밀린다
+   (UTC+9 기기에서만 맞아 보였다 · 해외·여행 중 기기에서 «오늘»과 이번 달이 어긋났다). 이제 KST 달력 날짜 문자열 하나를 정본으로 쓴다. */
+const todayYmd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });   // "2026-09-15"
+const [TY, TM, TD] = todayYmd.split("-").map(Number);
+const ymdOffKST = (n) => new Date(Date.UTC(TY, TM - 1, TD + n)).toISOString().slice(0, 10);   // 달력 날짜 산수는 UTC 앵커로(기기 시간대 안 탄다)
+let view = { y: TY, m: TM };
 let SUM = null, DAYS = [], SRC = [], accounts = [], PREV_SAME = null; // PREV_SAME = 지난달 «같은 날까지» 합(시안 문장 · 화면이 revenue-daily 로 계산)
 const mkey = () => `${view.y}-${String(view.m).padStart(2, "0")}`;
 const isThisMonth = () => mkey() === todayYmd.slice(0, 7);
@@ -75,7 +78,7 @@ async function load() {
 }
 
 function render() {
-  UI.$("#mon").textContent = view.y === today.getFullYear() ? `${view.m}월` : `${view.y}년 ${view.m}월`;
+  UI.$("#mon").textContent = view.y === TY ? `${view.m}월` : `${view.y}년 ${view.m}월`;
   UI.$("#next").disabled = isThisMonth();
   const connected = SRC.filter((x) => x.status === "connected").length;
   const body = UI.$("#body");
@@ -187,7 +190,7 @@ async function manualSheet() {
       };
     } });
 }
-function ymdOff(n) { const d = new Date(today); d.setDate(today.getDate() + n); return d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); }
+function ymdOff(n) { return ymdOffKST(n); }
 
 UI.$("#prev").onclick = () => { view.m--; if (view.m < 1) { view.m = 12; view.y--; } load(); };
 UI.$("#next").onclick = () => { if (isThisMonth()) return; view.m++; if (view.m > 12) { view.m = 1; view.y++; } load(); };
