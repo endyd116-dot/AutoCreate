@@ -25,6 +25,8 @@ import { recheckPiece } from "./content-approve";
 import { compensationOfMeta, disclosureTextFor } from "./disclosure";
 import { kstDateStr } from "./best-time";
 import type { GateReport } from "./ai-tell-gate";
+import { blocksCharCount, htmlToPlain } from "./blocks";
+import { recordOutcome, riskOf } from "./outcomes";   // [R8 §5F] 되먹임 원장 — 직접 쓴 글도 같은 자리에
 
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 
@@ -148,6 +150,22 @@ export async function createSelfPiece(a: SelfPieceInput): Promise<SelfPieceResul
   const [row] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId}`);
   const gate = await recheckPiece(tid, row as Record<string, unknown>);
   await q(sql`UPDATE pieces SET gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+
+  /* [R8 §5F] 🔴 **되먹임 원장** — 직접 쓴 글도 같은 자리에 남긴다. `origin:"self"` 가 이 원장의 핵심 칸이다:
+     «사람이 쓴 글»과 «AI 가 쓴 글»의 성과를 가를 수 있어야 사장님 지시(«어떻게 쓰는 것이 잘 되나»)에 답할 수 있다.
+     🔴 `format` 은 null 그대로 둔다 — 우리가 고른 적이 없다(«info» 로 채우면 원장이 거짓이 된다). */
+  const plainBody = htmlToPlain(body);
+  await recordOutcome({
+    tenantId: tid, pieceId, accountId: accountId || null,
+    features: {
+      channel, origin: "self", format: null,
+      chars: blocksCharCount([{ type: "para", text: plainBody }]),
+      paid: { affiliate: comp.affiliate, sponsored: comp.sponsored, gift: comp.gift },
+      /* 사진은 이 시점엔 **아직 안 붙었다**(글을 만든 뒤 `piece-photo-add` 로 올린다) — 그래서 **안 싣는다**.
+         0 으로 채우면 «사진 없는 글»과 «아직 안 올린 글»이 구별되지 않는다(AC-9). */
+    },
+    risk: riskOf(gate),
+  });
 
   return {
     ok: true, pieceId, status: "in_review", origin: "self",

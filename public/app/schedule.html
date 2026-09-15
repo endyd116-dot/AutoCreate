@@ -24,7 +24,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=16"></script>
-<script src="/js/mock.js?v=16"></script>
+<script src="/js/mock.js?v=17"></script>
 <script>
 (async () => {
 const me = await UI.boot("schedule"); if (!me) return;
@@ -365,6 +365,14 @@ function renderSide() {
     </div>`;
   const b = UI.$("#sideRules"); if (b) b.onclick = settingsSheet;
 }
+/* [R8 §9] 🔴 **자동 승인을 켜는 자리에서 «무엇을 켜는 것인지» 말한다.**
+   발행 전 검사가 이제 아무것도 막지 않으니, 조용히 두면 **지적이 있는 글도 그대로 나간다** — 그 사실을 켜는 순간에 말하지 않으면
+   «말해 주기»가 아무에게도 안 닿는다(그러면 우리는 그냥 검사를 끈 것이다). 🔴 겁주지 않고 사실만: 나간 뒤에도 발행함에서 볼 수 있다. */
+/* 🔴 말투(CLAUDE §3 · 사장님 2026-09-15): 위협도 면피도 쓰지 않는다. «알려만 드렸다»는 발 빼는 말이라 금지.
+   사실 한 줄 → 우리가 해 주는 것 → 고객이 할 수 있는 것, 이 차례로만 적는다. */
+const rpSay = (v) => (v === "silence_answers" || v === "silence_approves"
+  ? "검수 시간에 아무것도 안 하시면 예정대로 올라가요 · 주요 안내는 미리 알려드리고, 올라간 뒤에도 «올라간 글»에서 다시 볼 수 있어요"
+  : "올리기 전에 검수에서 한 번 눌러 주시면 나가요");
 /* ── 설정 시트(ScheduleSettings 변수 8 + 규칙 요약) ── */
 function settingsSheet() {
   const S = { horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [], ...D.settings };
@@ -379,11 +387,12 @@ function settingsSheet() {
     <div class="sec">글은 며칠 전에 만들까요</div>${UI.chips("produceLeadDays", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], S.produceLeadDays)}
     <div class="sec">만드는 시각</div>${UI.chips("produceHour", [["06:00", "06:00"], ["09:00", "09:00"]], S.produceHour)}
     <div class="sec">검수 방식</div>${UI.seg("reviewPolicy", [["silence_approves", "조용하면 발행"], ["require_confirm", "반드시 확인"]], S.reviewPolicy)}
+    <p class="muted" id="rpSay" style="margin:6px 0 0;font-size:12.5px">${rpSay(S.reviewPolicy)}</p>
     <div class="sec">발행 시간</div>${UI.seg("bestTimeMode", [["auto", "채널 최적 시간"], ["fixed", "정한 시간만"]], S.bestTimeMode)}
     <div class="sec">주간 코인 상한</div>${UI.seg("capMode", [["plan", "플랜 포함분"], ["custom", "직접 정하기"]], S.weeklyCoinCap == null ? "plan" : "custom")}<div id="capBox" ${S.weeklyCoinCap == null ? "hidden" : ""} style="padding:8px 0 0">${UI.stepper("cap", S.weeklyCoinCap || 50, 10, 500, "코인", 10)}</div>
     <div class="sec">쉬는 날 <span class="muted" style="font-weight:500">· 앞으로 4주 · 여러 날 가능</span></div>${qcal}
     <div class="cta"><button class="btn primary" type="button" id="save">저장</button></div>`, { title: "편성 설정", onOpen: (sh, close) => {
-      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; });
+      UI.bindSteppers(sh); UI.bindChips(sh, (n, v) => { if (n === "capMode") sh.querySelector("#capBox").hidden = v !== "custom"; if (n === "reviewPolicy") sh.querySelector("#rpSay").textContent = rpSay(v); });   /* [R8 §9] 켜는 순간에 무엇을 켜는 것인지 */
       sh.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => { const k = b.dataset.q; quiet.has(k) ? quiet.delete(k) : quiet.add(k); b.classList.toggle("sel", quiet.has(k)); });
       UI.toggle(sh.querySelector("#auto"), (on) => { if (on && !active.length) { UI.toast("먼저 규칙을 만들어 주세요"); return false; } });
       /* [R8 §6.2] 이미 규칙이 있으면 **목록**으로(한 채널에 여럿을 둘 수 있다) · 처음이면 마법사 그대로 */
