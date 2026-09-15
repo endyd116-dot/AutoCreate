@@ -15,8 +15,18 @@ import { readFileSync, existsSync } from "node:fs";
 
 const JSON_OUT = process.argv.includes("--json");
 const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
-/** 그 파일 안에 그 패턴이 있나 — **파일을 지목**해서 본다(전역 grep 은 엉뚱한 파일에 걸린다). */
-const inFile = (p, re) => re.test(read(p));
+/* [2026-09-16 메인 · b-49 실측] 주석을 걷어 낸 본문 — «주석에만 적혀 있는 것»을 만든 것으로 세지 않는다(AC-59).
+   b-49 가 찔러 보니 11칸 중 **9칸**이 주석 한 줄로 닫혔다(A10·B7·B8·H1·E4·C1·A12·C2·H3).
+   지금 당장 틀린 값은 아니었지만(주석 덕에 초록인 칸 0) «계획을 주석에 적는 우리 관습»과 만나는 순간 거짓말이 된다.
+   형제 하니스 `verify-r8-deadends.mjs` 가 이미 같은 일을 한다 — **자가 두 벌인 게 제일 나쁘다**(AC-82).
+   HTML 주석도 같이 건다(C2 가 `<!-- -->` 로 닫혔다).
+   [예외] ③C5 는 **산출물 자체가 주석**이라 `read()` 를 그대로 쓴다(아래 headerOf). */
+const stripComments = (t) => t
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+  .replace(/<!--[\s\S]*?-->/g, " ");
+/** 그 파일 안에 그 패턴이 있나 — **파일을 지목**해서 본다(전역 grep 은 엉뚱한 파일에 걸린다). 🔴 주석은 뺀 본문에서 본다. */
+const inFile = (p, re) => re.test(stripComments(read(p)));
 const anyFile = (ps, re) => ps.filter((p) => inFile(p, re));
 
 const results = [];
@@ -79,8 +89,17 @@ const FOUR = [
     } },
   { n: 7, name: "`avatar`(계정 사진)",
     check: () => {
-      const fixed = inFile("lib/accounts.ts", /avatar:\s*null/);
-      return fixed ? ["열림", "lib/accounts.ts 가 여전히 `avatar: null` 고정 — 값이 어디서도 안 온다"] : ["닫힘", "고정값 아님"];
+      /* 🔴 [2026-09-16 메인 · b-49 가 잡았다] 옛 판은 «`avatar: null` 고정이 **없으면** 닫힘»이라는 **부정형**이었다.
+         그래서 `lib/accounts.ts` 를 **통째로 가려도 «닫힘»**이 나왔다 — 파일이 지워져도·이름이 바뀌어도 초록이다.
+         그 «닫힘»은 «계정 사진이 된다»가 아니라 «**내가 아는 나쁜 모양을 못 찾았다**»였다(AC-87 의 제일 비싼 얼굴).
+         ⇒ **긍정 증거**로 바꾼다 — 읽고 · 싣고 · **화면이 그린다**(머리말 ③ 규율 그대로). 이웃 칸 6·8 과 같은 모양이다. */
+      const sel = inFile("lib/accounts.ts", /a\.avatar_url/);
+      const map = inFile("lib/accounts.ts", /avatar:\s*r\.avatar_url/);
+      const ui = inFile("public/js/ui.js", /\.avatar/);
+      const fixed = inFile("lib/accounts.ts", /avatar:\s*null\s*[,}]/);
+      return sel && map && ui && !fixed
+        ? ["닫힘", "accounts.ts 가 avatar_url 을 읽어 싣고 ui.js 가 그린다"]
+        : ["🟠 일부", `SELECT ${sel} 매핑 ${map} 화면 ${ui}${fixed ? " · 🔴 avatar: null 고정이 남아 있다" : ""}`];
     } },
   { n: 8, name: "`account_groups` 표·화면",
     check: () => {
@@ -122,7 +141,9 @@ const FOUR = [
       /* 🔴 [메인 2026-09-16 · AC-75] 옛 파일 이름으로 재고 있었다. B2 가 §3.1 에서 **`runner/lib/profile-seal.mjs`** 로 만들었고
          `runner/core.mjs` 가 실제로 `sealProfile`·`unsealProfile` 을 부른다(:155·:259) · `ac-runner.mjs` 가 `sealLine` 을 부른다.
          🔴 «있나»가 아니라 «**제품이 부르나**»까지 본다 — 파일만 있고 안 부르면 이 칸은 안 닫힌다(AC-69). */
-      const has = anyFile(["runner/lib/profile-seal.mjs", "runner/lib/browser.mjs", "runner/lib/profile.mjs", "runner/index.mjs"], /createCipheriv|aes-256|encrypt/i);
+      /* 🔴 [2026-09-16 메인] `runner/lib/profile.mjs`·`runner/index.mjs` 는 **없는 파일**이었다(C 의 자가검사가 물었다 · AC-82).
+         지금은 앞 둘이 있어 통과하지만, 앞 둘이 이름을 바꾸면 **죽은 경로만 남아 조용히 «없음»**이 된다. */
+      const has = anyFile(["runner/lib/profile-seal.mjs", "runner/lib/browser.mjs"], /createCipheriv|aes-256|encrypt/i);
       const used = anyFile(["runner/core.mjs", "runner/ac-runner.mjs"], /sealProfile|unsealProfile|profile-seal/);
       /* 🔴 [2026-09-16 · C 재검] **서버 마디를 같이 본다.** 러너가 아무리 불러도 `account.profileSealKey` 가 안 내려오면
          러너의 그 if 는 영영 거짓이고 봉인은 한 번도 안 돈다. C 가 사슬 여섯 마디를 직접 따라갔다:
@@ -216,7 +237,9 @@ const THREE_REST = [
     const route = inFile("lib/publish/index.ts", /facebook:|x:|tiktok:/);
     return [yes(table && route), "표 1곳 + 라우팅 1곳 + 모듈 1개 — R8 에서 페북·X·틱톡·인스타피드·롱폼이 이 길로 붙었다"];
   }],
-  ["A12 §17 P5(릴스 90초)", () => [yes(inFile("lib/video/types.ts", /VideoSeconds = 15 \| 30 \| 60 \| 90/)),
+  /* 🔴 [2026-09-16 메인 · b-49 실측] 옛 판은 **타입 별칭 글자**를 봤다 — 실제 배열 `VIDEO_SECONDS` 에 90 을 넣어도 **열림 그대로**였다.
+     «90초를 진짜로 켜도 빨강이 안 풀리는 자»다. ⇒ **실제로 고를 수 있는 값**(런타임 배열)을 본다. */
+  ["A12 §17 P5(릴스 90초)", () => [yes(inFile("lib/video/types.ts", /VIDEO_SECONDS[^=]*=\s*\[[^\]]*90/)),
     "VIDEO_SECONDS 에 90 없음 · 🔴 «AM↔AC 코인 이전»은 운영 축 E4 로 옮겼다(원표가 같은 것을 두 칸에 적었다)"]],
   /* B. 글 품질 축 9행 */
   ["B1 유사도 «계정 간» 중복 0", () => {
