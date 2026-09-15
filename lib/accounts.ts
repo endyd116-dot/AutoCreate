@@ -7,7 +7,7 @@ import { db } from "../db/index";
 import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
-import { providerConfigured } from "./oauth-providers";
+import { providerConfigured, providerMissing } from "./oauth-providers";
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0 — writing-contracts 는 db·drizzle 만 본다)
 
 type Row = Record<string, unknown>;
@@ -72,6 +72,15 @@ export async function getAccount(tid: number, id: number): Promise<AccountRow | 
 
 export interface ChannelInfo {
   key: string; label: string; category: string; publishVia: string; status: string; connectMethod: ConnectMethod; configured: boolean;
+  /**
+   * [P1R7 B3] **지금 이 채널에 계정을 붙일 수 있나** — 화면은 이 한 칸만 보면 된다(`status`·`configured` 를 화면이 조합하지 않는다).
+   *   🔴 «레지스트리가 켜졌다»와 «붙일 수 있다»는 다르다: 라이브 `blogger` 는 `status='active'` 인데 `GOOGLE_OAUTH_CLIENT_ID` 가 없어
+   *      그리드에 떠 있고 **눌러도 안 붙는다**(2026-09-15 실측 · AC-52 «말과 실제가 다름»). 그 상태를 서버가 사유와 함께 말한다.
+   *   `reason`: `not_open`(레지스트리가 아직 planned/down) · `no_provider_key`(켜졌는데 우리 앱 키가 없다 — 우리가 할 일) ·
+   *             `no_site_url`(SITE_URL 미설정 — 콜백 주소를 못 만든다).
+   */
+  connectable: boolean;
+  connectableReason?: "not_open" | "no_provider_key" | "no_site_url";
   /** [P1R6 §2.3] 영상 채널이면 규격 — 🔴 **화면이 숫자를 갖지 않는다**(«클립은 30초까지» 를 화면에 적지 않는다).
    *  `maxSeconds` = 채널 상한(naver_clip 30 · 나머지 60 · 릴스 90 은 Phase 5) · `formats[].maxSeconds` = 채널·포맷 상한 중 작은 쪽.
    *  정본은 `lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC`·`VIDEO_FORMAT_MAX_SEC` 한 곳. */
@@ -85,7 +94,14 @@ export async function listChannels(): Promise<ChannelInfo[]> {
   return rows.map((r) => {
     const key = String(r.key);
     const video = videoChannelSpec(key);
-    return { key, label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status: String(r.status),
-      connectMethod: connectMethodOf(key), configured: providerConfigured(key), ...(video ? { video } : {}) };
+    const status = String(r.status);
+    /* [P1R7 B3] 붙일 수 있나 = 레지스트리가 열렸고(active) **우리 앱 키까지** 있을 때. 둘 중 하나라도 아니면 사유를 싣는다. */
+    const missing = providerMissing(key);
+    const open = status === "active";
+    const connectable = open && !missing;
+    const reason: ChannelInfo["connectableReason"] = !open ? "not_open" : (missing ?? undefined);
+    return { key, label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status,
+      connectMethod: connectMethodOf(key), configured: providerConfigured(key), connectable,
+      ...(reason ? { connectableReason: reason } : {}), ...(video ? { video } : {}) };
   });
 }
