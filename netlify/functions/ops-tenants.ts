@@ -1,8 +1,11 @@
 /**
  * 운영센터 · 고객 메뉴(계약 §2.1 `ops-tenants.ts` · §2.3 원격접속 · DESIGN §11.4). R1 `ops-center.ts` 에서 쪼갬 — 옛 경로·응답 키는 그대로 살리고 R4 몫을 더한다.
- *   GET  /api/ops-tenants?q&plan&status&page        목록(표) — 플랜·상태·체험 D-·코인·계정 수·마지막 발행·건강 · `page`·`total`
+ *   GET  /api/ops-tenants?q&plan&status&page&internal 목록(표) — 플랜·상태·체험 D-·코인·계정 수·마지막 발행·건강 · `page`·`total`
+ *        🔴 [P1R7 §3.4] **내부 테스트 집(`is_internal`)은 기본 목록에서 빠진다** · `?internal=1` 이면 같이 보인다(행에 `isInternal:true`).
+ *        응답 `internal:{ excluded, hidden }` = 이번 조건에서 숨긴 집 수 — «몇 집이 안 보이는지»를 화면이 말할 수 있어야 한다.
  *   GET  /api/ops-tenant?id                          상세 — 계정/러너/편성 상태 · **셋업 체크리스트 `setup:{ accounts, adMedia, rules, firstPublish }`**(v4 이름 · R1 이름 폐기) · 구독 장부 · 카드 · 인보이스 · 티켓 · 메모
- *   POST /api/ops-tenant-update { id, planKey?, status?, trialEndsAt?, note?, priceLockedKrw? }   (admin) — 정본 직접 수정(감사 high) · priceLockedKrw = 가입 시점 가격 고정(가격 개정이 못 건드림 · null 로 해제)
+ *   POST /api/ops-tenant-update { id, planKey?, status?, trialEndsAt?, note?, priceLockedKrw?, isInternal? }   (admin) — 정본 직접 수정(감사 high) · priceLockedKrw = 가입 시점 가격 고정(가격 개정이 못 건드림 · null 로 해제)
+ *        isInternal = «내부 테스트» 손 표시(P1R7 §3.4) — 자동 규칙(우리 도메인·하니스 키)으로 켜진 것도 여기서 끌 수 있다(손이 이긴다 · 크론이 다시 켜지 않는다).
  *   POST /api/ops-coins-grant  { id, coins, reason }                             (admin) — +는 grant(included·만료 없음) · −는 회수(포함분 잔량까지만)
  *   POST /api/ops-trial-extend { id, days }                                      (admin) — 체험 연장 · readonly 였으면 trial 로 복귀 + 알림
  *   POST /api/ops-plan-change  { id, planKey, cycle?, charge? }                  (admin) — charge:true 면 실제 청구(changePlan · source ops) · 아니면 무상 전환(장부·포함분·감사)
@@ -22,6 +25,7 @@ import { readLedger, activeBillingKey, changePlan, kstMonthOf, periodEndOf, isPa
 import { q } from "../../lib/accounts";
 import { utcDate } from "../../lib/db-util";
 import { pageOf, ts } from "../../lib/ops/period";
+import { excludeInternalSelf, includeInternalOf } from "../../lib/ops/internal";
 import { jsonWithCookies } from "./_resp";
 
 export const config = { path: ["/api/ops-tenants", "/api/ops-tenant", "/api/ops-tenant-update", "/api/ops-coins-grant", "/api/ops-trial-extend", "/api/ops-plan-change", "/api/ops-tenant-note", "/api/ops-impersonate", "/api/ops-impersonate-end"] };
@@ -35,7 +39,7 @@ const ADMIN = ["admin", "super_admin"] as const;
 function tenantRow(r: Record<string, unknown>, now: number): Record<string, unknown> {
   const o: Record<string, unknown> = {
     id: n(r.id), key: String(r.key), name: String(r.name), planKey: String(r.plan_key), status: String(r.status),
-    createdAt: iso(r.created_at) ?? "", ownerEmail: r.owner_email ? String(r.owner_email) : null,
+    createdAt: iso(r.created_at) ?? "", ownerEmail: r.owner_email ? String(r.owner_email) : null, isInternal: r.is_internal === true,
     accounts: n(r.accounts), coins: n(r.coins), lastPostAt: iso(r.last_post_at) ?? null,
     runners: { online: n(r.runners_online), total: n(r.runners_total) }, openTickets: n(r.open_tickets),
   };
@@ -58,10 +62,13 @@ export default async (req: Request): Promise<Response> => {
       const status = (url.searchParams.get("status") || "").trim();
       const plan = (url.searchParams.get("plan") || "").trim();
       const { page, size, offset } = pageOf(url);
-      const where: SQL = sql`(${s} = '' OR LOWER(t.name) LIKE ${"%" + s + "%"} OR LOWER(t.key) LIKE ${"%" + s + "%"} OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND LOWER(u.email) LIKE ${"%" + s + "%"}))
+      const inc = includeInternalOf(url);   // [P1R7 §3.4] 기본 = 내부 테스트 집 제외
+      const base: SQL = sql`(${s} = '' OR LOWER(t.name) LIKE ${"%" + s + "%"} OR LOWER(t.key) LIKE ${"%" + s + "%"} OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND LOWER(u.email) LIKE ${"%" + s + "%"}))
           AND (${status} = '' OR t.status = ${status}) AND (${plan} = '' OR t.plan_key = ${plan})`;
+      const where: SQL = sql`${base}${excludeInternalSelf(sql`t`, inc)}`;
       const [cnt] = await q(sql`SELECT COUNT(*) AS c FROM tenants t WHERE ${where}`);
-      const rows = await q(sql`SELECT t.id, t.key, t.name, t.plan_key, t.status, t.trial_ends_at, t.created_at, t.ops_note,
+      const [hid] = await q(sql`SELECT COUNT(*)::int AS c FROM tenants t WHERE ${base} AND t.is_internal`);
+      const rows = await q(sql`SELECT t.id, t.key, t.name, t.plan_key, t.status, t.trial_ends_at, t.created_at, t.ops_note, t.is_internal,
           (SELECT email FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner' ORDER BY id LIMIT 1) AS owner_email,
           (SELECT COUNT(*) FROM accounts a WHERE a.tenant_id = t.id) AS accounts,
           (SELECT AVG(health_score) FROM accounts a WHERE a.tenant_id = t.id) AS health,
@@ -73,7 +80,7 @@ export default async (req: Request): Promise<Response> => {
         FROM tenants t WHERE ${where}
         ORDER BY t.created_at DESC LIMIT ${size} OFFSET ${offset}`);
       const now = Date.now();
-      return json({ ok: true, tenants: rows.map((r) => tenantRow(r, now)), total: n(cnt?.c), page, size });
+      return json({ ok: true, tenants: rows.map((r) => tenantRow(r, now)), total: n(cnt?.c), page, size, internal: { excluded: !inc, hidden: inc ? 0 : n(hid?.c) } });
     }
 
     /* ── 상세 ── */
@@ -121,20 +128,25 @@ export default async (req: Request): Promise<Response> => {
     /* ── 정본 직접 수정(admin) ── */
     if (path.endsWith("/ops-tenant-update")) {
       const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
-      const b = await readJson<{ id?: number; planKey?: string; status?: string; trialEndsAt?: string; note?: string; priceLockedKrw?: number | null }>(req);
+      const b = await readJson<{ id?: number; planKey?: string; status?: string; trialEndsAt?: string; note?: string; priceLockedKrw?: number | null; isInternal?: boolean }>(req);
       const id = n(b.id); if (!id) return badRequest("id");
       const plans = await loadPlans();
       if (b.planKey && !plans.find((p) => p.key === b.planKey)) return badRequest("없는 플랜이에요.", "plan");
       if (b.status && !TENANT_STATUSES.includes(b.status)) return badRequest("status");
       const trialIso = b.trialEndsAt ? utcDate(b.trialEndsAt)?.toISOString() ?? null : null;
       if (b.trialEndsAt && !trialIso) return badRequest("trialEndsAt");
+      /* 🔴 파라미터에 **형을 붙인다**(`::text`·`::boolean`) — 안 붙이면 전부 NULL 로 들어올 때 42P18(«파라미터 형을 못 정한다»)로 터진다.
+         2026-09-15 실측: `{ id, isInternal:false }` 만 보내면 나머지가 NULL 이 되어 이 UPDATE 가 통째로 실패했다(PITFALLS · ops-cs 와 같은 함정). */
+      const st = b.status || null;
       await q(sql`UPDATE tenants SET
-          plan_key = COALESCE(${b.planKey || null}, plan_key),
-          status = COALESCE(${b.status || null}, status),
-          readonly_at = CASE WHEN ${b.status || null} = 'readonly' THEN COALESCE(readonly_at, NOW()) WHEN ${b.status || null} IS NULL THEN readonly_at ELSE NULL END,
-          suspended_at = CASE WHEN ${b.status || null} = 'suspended' THEN COALESCE(suspended_at, NOW()) WHEN ${b.status || null} IS NULL THEN suspended_at ELSE NULL END,
+          plan_key = COALESCE(${b.planKey || null}::text, plan_key),
+          status = COALESCE(${st}::text, status),
+          readonly_at = CASE WHEN ${st}::text = 'readonly' THEN COALESCE(readonly_at, NOW()) WHEN ${st}::text IS NULL THEN readonly_at ELSE NULL END,
+          suspended_at = CASE WHEN ${st}::text = 'suspended' THEN COALESCE(suspended_at, NOW()) WHEN ${st}::text IS NULL THEN suspended_at ELSE NULL END,
           trial_ends_at = COALESCE(${trialIso}::timestamptz AT TIME ZONE 'UTC', trial_ends_at),
-          ops_note = COALESCE(${typeof b.note === "string" ? b.note.slice(0, 2000) : null}, ops_note),
+          ops_note = COALESCE(${typeof b.note === "string" ? b.note.slice(0, 2000) : null}::text, ops_note),
+          is_internal = COALESCE(${typeof b.isInternal === "boolean" ? b.isInternal : null}::boolean, is_internal),   -- 🔴 형 붙이지 않으면 42P18(파라미터 형 추론 불가 · PITFALLS)
+          internal_manual_at = CASE WHEN ${typeof b.isInternal === "boolean" ? b.isInternal : null}::boolean IS NULL THEN internal_manual_at ELSE NOW() END,   -- 손이 이긴다(크론이 다시 안 켠다)
           updated_at = NOW() WHERE id = ${id}`);
       if (b.priceLockedKrw !== undefined) {   // 가격 고정(계약 §2.1 ops-plans «price_locked_krw 있는 테넌트는 유지») — 장부가 없으면(체험) 만들어 둔다
         const locked = b.priceLockedKrw === null ? null : Math.max(0, Math.floor(n(b.priceLockedKrw)));
@@ -143,7 +155,7 @@ export default async (req: Request): Promise<Response> => {
           VALUES (${id}, ${b.planKey || sql`(SELECT plan_key FROM tenants WHERE id = ${id})`}, ${"pending"}, ${"month"}, NOW(), NOW(), ${locked}, NOW())
           ON CONFLICT (tenant_id) DO UPDATE SET price_locked_krw = EXCLUDED.price_locked_krw, updated_at = NOW()`);
       }
-      await writeAudit({ tenantId: id, action: "ops_tenant_update", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { planKey: b.planKey, status: b.status, trialEndsAt: trialIso, note: b.note, priceLockedKrw: b.priceLockedKrw } });
+      await writeAudit({ tenantId: id, action: "ops_tenant_update", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { planKey: b.planKey, status: b.status, trialEndsAt: trialIso, note: b.note, priceLockedKrw: b.priceLockedKrw, isInternal: b.isInternal } });
       return json({ ok: true });
     }
 

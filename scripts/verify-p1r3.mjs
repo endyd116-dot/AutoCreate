@@ -12,6 +12,8 @@ const EMAIL = process.env.TEST_EMAIL || "c+p1@autocreate.test", EMAIL2 = process
 const PASSWORD = process.env.TEST_PASSWORD || "Cp1Verify2026x";
 const CRON_SECRET = process.env.CRON_SECRET || "";
 const results = []; const t0 = Date.now();
+/* [P1R7 §3.5] teardown — 보존 테넌트(C검증)라 집은 남기고 이번 실행 산출물만 정리한다. */
+const SINCE = new Date();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -41,9 +43,9 @@ async function signIn(jar, email) {
 const kst = (d) => new Date(d.getTime() + 9 * 3600e3); const ymd = (d) => kst(d).toISOString().slice(0, 10);
 
 async function main() {
-  if (!CRON_SECRET) return rec("CRON_SECRET", false, "없음"), finish();
+  if (!CRON_SECRET) return rec("CRON_SECRET", false, "없음"), await finish();
   const jar = new Jar(), jar2 = new Jar();
-  const me = await signIn(jar, EMAIL); const me2 = await signIn(jar2, EMAIL2); if (!me?.ok || !me2?.ok) return finish();
+  const me = await signIn(jar, EMAIL); const me2 = await signIn(jar2, EMAIL2); if (!me?.ok || !me2?.ok) return await finish();
   const s = await db();
   const [t1] = await s`SELECT id FROM tenants WHERE key = ${me.tenant.key}`; const [t2] = await s`SELECT id FROM tenants WHERE key = ${me2.tenant.key}`;
   const TID = Number(t1.id), TID2 = Number(t2.id); ALLOWED.add(TID); ALLOWED.add(TID2); guard(TID);
@@ -214,9 +216,10 @@ async function main() {
   // 정리: 수익 소스 오류 상태 원복(테스트)
   await s`UPDATE revenue_sources SET status = 'connected', fail_count = 0, last_error = NULL, last_error_kind = NULL WHERE tenant_id = ${TID} AND source = 'adpost'`;
   await s`UPDATE tenants SET settings = settings - 'revenueSyncHour' WHERE id = ${TID}`;
-  finish();
+  await finish();
 }
-function finish() {
+async function finish() {
+  await teardown();
   const fails = results.filter((r) => r.ok === "FAIL").length, warns = results.filter((r) => r.ok === "WARN").length;
   const w = (x, n) => String(x ?? "").slice(0, n).padEnd(n);
   console.log(`\nP1R3 C 하니스 · ${BASE} · ${new Date().toISOString()}\n${"─".repeat(130)}`);
@@ -226,4 +229,12 @@ function finish() {
   writeFileSync(out, JSON.stringify({ base: BASE, at: new Date().toISOString(), results }, null, 2)); console.log(`→ ${out}`);
   if (sql) sql.end().catch(() => {}); process.exit(fails ? 1 : 0);
 }
-main().catch((e) => { console.error(e); rec("하니스 예외", false, String(e?.stack || e).slice(0, 300)); finish(); });
+async function teardown() {
+  try {
+    if (!sql) return;
+    const { teardownRun } = await import("./_teardown.mjs");
+    const r = await teardownRun(sql, { tenants: [...ALLOWED], since: SINCE, label: "P1R3" });
+    rec("정리(teardown)", !r.failed, r.text);
+  } catch (e) { rec("정리(teardown)", false, String(e?.message ?? e).slice(0, 160)); }
+}
+main().catch(async (e) => { console.error(e); rec("하니스 예외", false, String(e?.stack || e).slice(0, 300)); await finish(); });
