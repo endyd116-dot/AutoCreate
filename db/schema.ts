@@ -1052,3 +1052,26 @@ export const runnerJobsR8 = {
    */
   recipeVersion: "recipe_version",   // varchar(40) · index (recipe_version, status)
 } as const;
+
+
+/* === Phase 1 R8 · B(CS 바깥 유입 · P1R8-B §4.3 · 2026-09-15 · drizzle/0031-r8-cs-inbound.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   `tickets.channel` 에 email·kakao 값은 처음부터 있었는데 **그 길로 들어올 문이 없었다** — 답변 메일에 온 답장은 대표 메일함에서 끝났다.
+ *   새 표 0 · 전부 추가 칸.
+ */
+export const ticketsR8 = {
+  /** 바깥 대화의 실타래 id(메일 스레드·카카오 방). 같은 값이면 **같은 티켓에 이어 붙인다**. */
+  externalRef: "external_ref",
+  /** 🔴 테넌트를 못 찾은 유입의 보낸 사람 — **못 찾았다고 버리지 않는다**(버리면 그 사람은 답을 영영 못 받는다). */
+  fromEmail: "from_email",
+  fromName: "from_name",
+  externalRefIdx: "tickets_external_ref_idx",
+  unclaimedIdx: "tickets_unclaimed_idx",
+} as const;
+
+export const ticketMessagesR8 = {
+  /** 🔴 공급사 메시지 id — **멱등의 전부**. 메일·카카오 웹훅은 재시도가 규격이라 이 유일 제약이 없으면 한 통이 세 번 붙는다. */
+  externalId: "external_id",
+  externalUniq: "ticket_messages_external_uniq",
+  /** 그 말이 들어온 길(app|email|kakao|ops). 한 티켓 안에 길이 섞일 수 있어 **줄마다** 적는다. */
+  source: "source",
+} as const;
