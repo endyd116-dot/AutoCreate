@@ -24,7 +24,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys, t
 import { refundPiece } from "./coin-ledger";
 import { AD_LAW_BANNED } from "./banned-words";
 import { structurePrint, structureHash } from "./structure-print";   // [R8-A §2] 골격 지문(순수)
-import { lengthFor, topicGroupOf, resolveGoal, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳)
+import { lengthFor, topicGroupOf, resolveGoalDetail, type TopicGroup } from "./writing-contracts";   // [R8-A §2] 주제군 갈래·수익 목적(정본 한 곳)
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -230,7 +230,11 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const structure = structureFor(c, format, imageCount, affiliate, pieceId, group);
     /* 이 글의 수익 목적 — brief 에 있으면 그걸, 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스). 제휴가 붙은 글은 affiliate 가 이긴다. */
     const [bg] = p.brief_id ? await q(sql`SELECT goal FROM briefs WHERE id = ${n(p.brief_id)}`) : [undefined];
-    const goal = resolveGoal({ affiliate, briefGoal: bg?.goal as string | null, channel });   // 🔴 정본 한 곳 — 검수 화면(pieces-get)도 같은 함수를 본다
+    /* 🔴 정본 한 곳 — 검수 화면(pieces-get)도 같은 함수를 본다. 출처까지 받아 **왜 이 목적인지**를 meta 에 남긴다(C · R8-A §1.2).
+       brief 가 `mixed` 라 채널 기본으로 떨어진 경우가 라이브의 절반이 넘는다 — 안 남기면 다음 사람이 그 차이를 또 추적한다. */
+    const goalRes = resolveGoalDetail({ affiliate, briefGoal: bg?.goal as string | null, channel });
+    const goal = goalRes.goal;
+    if (goalRes.briefGoalIgnored) console.log(`[content-gen] piece ${pieceId} — brief goal «${goalRes.briefGoalIgnored}» 는 ${channel} 에 규칙이 없어 채널 기본 «${goal}» 로 썼다`);
     const angle = String(meta.angle || topic.angle || "");
     const pFacts = personaMaterial(persona.profile, pieceId);
     const terms = personaTerms(persona.profile);
@@ -324,7 +328,8 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
        영상의 `meta.frameHash` 와 같은 자리·같은 뜻(그림 지문 ↔ 골격 지문). 추가형이라 옛 글엔 없고, 없는 글은 견주기에서 빠진다. */
     const sPrint = structurePrint(draft.blocks);
     const nextMeta = { ...meta, stage: "done", tags: draft.tags, disclosure: (affiliate || meta.sponsored === true || meta.gift === true) ? disclosureTextFor({ affiliate, sponsored: meta.sponsored === true, gift: meta.gift === true, provider: aff?.provider ?? null }) : null, affiliate: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, imageFailures, model: draft.model, rewritten,
-      structurePrint: sPrint, structureHash: structureHash(sPrint) };
+      structurePrint: sPrint, structureHash: structureHash(sPrint),
+      goal, goalSource: goalRes.source, ...(goalRes.briefGoalIgnored ? { briefGoalIgnored: goalRes.briefGoalIgnored } : {}) };
     await q(sql`UPDATE pieces SET title = ${draft.title}, body = ${bodyHtml}, blocks = ${jsonb(draft.blocks)}, meta = ${jsonb(nextMeta)}, gate_report = ${jsonb(report)}, status = ${"in_review"}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(blocks) AS b, jsonb_typeof(meta) AS m, jsonb_typeof(gate_report) AS g FROM pieces WHERE id = ${pieceId}`);
     if (chk?.b !== "array" || chk?.m !== "object" || chk?.g !== "object") console.error("[content-gen] jsonb_typeof 이상", chk);

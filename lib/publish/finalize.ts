@@ -34,7 +34,7 @@ export async function finalizePublish(pieceId: number, input: FinalizeInput): Pr
 
   let piece: Row | undefined;
   try {
-    [piece] = await q(sql`SELECT id, tenant_id, account_id, slot_id, channel, title, status, external_url, channel_ref
+    [piece] = await q(sql`SELECT id, tenant_id, account_id, slot_id, channel, title, status, external_url, channel_ref, meta   /* [P1R8 §5.1] meta = 대가 여부(쇼핑 태그 안내 판정) */
       FROM pieces WHERE id = ${id} LIMIT 1`);
   } catch (e) { return { ok: false, reason: "db", error: "발행 기록을 저장하지 못했어요.", detail: String((e as Error)?.message ?? e).slice(0, 160) }; }
   if (!piece) return { ok: false, reason: "not_found", error: "글을 찾을 수 없어요." };
@@ -107,6 +107,23 @@ export async function finalizePublish(pieceId: number, input: FinalizeInput): Pr
         VALUES (${tid}, 'post_published', ${"글이 올라갔어요"},
                 ${`«${String(piece.title ?? "").slice(0, 40)}» 이(가) 올라갔어요.`}, ${externalUrl ? externalUrl.slice(0, 200) : "/app/posts.html"})`);
     } catch (e) { console.error("[finalize] notify failed", e); }
+
+    /* ⑥ [P1R8 §5.1] 🔴 **유튜브 쇼핑 태그는 우리가 못 단다** — 공식 문서상 Data API v3 에 상품 태그 필드가 없다
+       (태그는 스튜디오·쇼핑 제휴 프로그램에서 단다 · Merchant Reports API 는 «읽기»만).
+       그렇다고 조용히 넘기면 고객은 «제휴 글인데 왜 상품이 안 붙지»를 영영 모른다(AC-9) — **한 번만** 알려 준다.
+       제휴가 걸린 유튜브 영상일 때만 · kind 로 평생 1회(같은 말을 매번 하지 않는다). */
+    try {
+      const isYoutube = String(piece.channel ?? "") === "youtube_shorts";
+      const meta = (piece.meta && typeof piece.meta === "object" ? piece.meta : {}) as Record<string, unknown>;
+      const paid = !!(meta.affiliate ?? meta.affiliateLink ?? meta.affiliateHint) || meta.adDisclosure === true || meta.sponsored === true || meta.gift === true;
+      if (isYoutube && paid) {
+        await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+          SELECT ${tid}, 'youtube_shopping_manual', ${"쇼핑 태그는 유튜브에서 직접 달아 주세요"},
+                 ${"상품 태그는 유튜브가 API 로 열어 두지 않아서 우리가 대신 달 수 없어요. 유튜브 스튜디오에서 이 영상에 상품을 달면 수익이 붙어요."},
+                 ${externalUrl ? externalUrl.slice(0, 200) : "/app/posts.html"}
+          WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE tenant_id = ${tid} AND kind = 'youtube_shopping_manual')`);
+      }
+    } catch (e) { console.error("[finalize] shopping-tag notice failed", e); }
 
     await writeAudit({
       tenantId: tid, action: "post_published", actorType: "system", target: `piece:${id}`,

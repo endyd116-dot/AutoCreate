@@ -22,6 +22,7 @@ import { jsonb } from "../db-util";
 import { ensureFreshToken } from "./tokens";
 import { r2PublicUrl } from "../r2";
 import { disclosureTextFor } from "../disclosure";
+import { writeAudit } from "../audit";   // [P1R8 §5.1] 파트너십 라벨이 거부되면 조용히 넘기지 않는다
 import type { PublishPiece, PublishAccount, PublishResult } from "./contract";
 
 type Row = Record<string, unknown>;
@@ -53,16 +54,31 @@ export async function videoPublicUrlOf(tid: number, pieceId: number): Promise<st
   return key ? r2PublicUrl(key) : null;
 }
 
-/** 캡션 — 첫 줄 고지 + 본문 + 태그(#광고 포함). */
+/**
+ * 채널별 태그 상한 — 🔴 **플랫폼이 실제로 받는 수**다(R8-A 정책 조사 §122).
+ *   쓰레드는 «해시태그»가 아니라 **토픽 태그**이고 공식 상한이 **게시물당 1개**다
+ *   («You can include up to 1 topic per post» · https://help.instagram.com/1356090605000312).
+ *   🔴 [2026-09-15 C · R8-A §2.6 실측] 계약 문장(`writing-contracts.ts:244`)은 «토픽 태그 0~1개» 로 고쳐졌는데
+ *      **발행 경로는 안 따라왔다** — 쓰레드가 인스타와 같은 캡션 빌더를 쓰는 바람에 태그 10개가 그대로 실렸다
+ *      (실측: threads 캡션에 `#가을이불 #세탁 … #정보` 10개). 계약만 고치면 생성도 발행도 안 따라온다(AC-63).
+ */
+const TAG_MAX: Readonly<Record<string, number>> = { threads: 1 };
+const TAG_MAX_DEFAULT = 20;
+
+/** 캡션 — 첫 줄 고지 + 본문 + 태그(#광고 포함). 태그 수는 **채널 상한**을 따른다. */
 export function buildCaption(piece: PublishPiece, limit = 2_200): string {
   const lines: string[] = [];
   const disc = piece.disclosure ?? (piece.affiliate ? disclosureTextFor(piece.affiliate.provider) : null);
   if (disc) lines.push(disc);
   const body = String(piece.bodyHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (body) lines.push(body.slice(0, 1_500));
-  const tags = (piece.tags ?? []).slice(0, 20).map((t) => `#${String(t).replace(/^#/, "")}`);
+  const max = TAG_MAX[String(piece.channel ?? "")] ?? TAG_MAX_DEFAULT;
+  const tags = (piece.tags ?? []).slice(0, TAG_MAX_DEFAULT).map((t) => `#${String(t).replace(/^#/, "")}`);
+  /* 🔴 `#광고` 는 맨 앞이다 — 상한이 1인 채널에서는 **이것 하나만** 남는다(태그 자리를 법이 먼저 쓴다).
+     쓰레드는 대가 고지 문장이 이미 본문 첫 줄에 있으므로 이 태그는 보조 표시다. */
   if (piece.affiliate && !tags.some((t) => t === "#광고")) tags.unshift("#광고");
-  if (tags.length) lines.push(tags.join(" "));
+  const shown = tags.slice(0, max);
+  if (shown.length) lines.push(shown.join(" "));
   return lines.join("\n\n").slice(0, limit);
 }
 
@@ -90,6 +106,13 @@ function metaError(status: number, json: Record<string, unknown> | null): { reas
   return { reason: "config", retriable: false, error: "인스타그램이 이 영상을 받지 않았어요.", detail: `${status} ${code} ${msg}` };
 }
 
+/** 메타가 «그 파라미터는 못 쓴다»고 답했나 — 라벨만 빼고 한 번 더 만든다(게시물 자체는 나가야 한다). */
+function rejectedPaidLabel(json: Record<string, unknown> | null): boolean {
+  const err = (json?.error ?? {}) as { message?: string; error_user_title?: string; code?: number };
+  const blob = String(err.message ?? "") + " " + String(err.error_user_title ?? "");
+  return blob.includes("is_paid_partnership") || /unknown|invalid parameter|unsupported/i.test(blob);
+}
+
 export async function publishReels(piece: PublishPiece, account: PublishAccount): Promise<PublishResult> {
   const tid = piece.tenantId;
   const META_FIELD = "igCreationId";
@@ -109,8 +132,23 @@ export async function publishReels(piece: PublishPiece, account: PublishAccount)
   if (!creationId) {
     const videoUrl = await videoPublicUrlOf(tid, piece.id);
     if (!videoUrl) return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 영상이 아직 없어요(렌더가 끝나지 않았어요)." };
-    const body = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption: buildCaption(piece), access_token: token });
-    const r = await graph(`${GRAPH}/${encodeURIComponent(igUserId)}/media`, { method: "POST", body }).catch(() => null);
+    /* [P1R8 §5.1] 🔴 **유료 파트너십 라벨** — 대가를 받은 게시물이면 인스타 자체 라벨을 켠다.
+       공식 문서(콘텐츠 게시)에 `is_paid_partnership`(불린 · «Enables the ‘Paid partnership’ label»)이 있다.
+       🔴 **우리 키로 실호출 확인 전이다**(2026-09-15 · 인스타 계정 0 · 채널 planned) — 그래서 **거부당하면 라벨만 빼고 한 번 더** 만든다.
+       캡션 첫 줄의 공정위 고지는 그대로 나가므로, 라벨이 빠져도 «고지 없는 게시물»이 되지는 않는다(AC-9: 빠진 사실은 감사에 남긴다). */
+    const paid = !!piece.disclosure;
+    const mk = (withLabel: boolean) => {
+      const b = new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption: buildCaption(piece), access_token: token });
+      if (withLabel) b.set("is_paid_partnership", "true");
+      return graph(`${GRAPH}/${encodeURIComponent(igUserId)}/media`, { method: "POST", body: b }).catch(() => null);
+    };
+    let r = await mk(paid);
+    if (r && paid && (r.status < 200 || r.status >= 300) && rejectedPaidLabel(r.json)) {
+      await writeAudit({ tenantId: tid, action: "instagram_paid_label_rejected", actorType: "system", target: `piece:${piece.id}`,
+        detail: { status: r.status, note: "is_paid_partnership 를 받지 않았다 — 캡션 첫 줄 고지로만 나간다" } })
+        .catch((err: unknown) => console.warn("[instagram] 감사 기록 실패", String((err as Error)?.message ?? err).slice(0, 80)));
+      r = await mk(false);
+    }
     if (!r) return { ok: false, reason: "network", retriable: true, error: "인스타그램에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
     if (r.status < 200 || r.status >= 300) { const c = metaError(r.status, r.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }
     creationId = String(r.json?.id ?? "").trim();

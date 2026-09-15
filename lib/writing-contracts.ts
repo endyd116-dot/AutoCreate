@@ -489,7 +489,40 @@ export function applyTiers(base: BlockType[], c: WritingContract, seed: number):
     const cand = base.filter((b) => t.optional.includes(b) && !t.suppress.includes(b));
     if (cand.length) { const pick = cand[Math.floor(rnd() * cand.length)]; const at = base.indexOf(pick); out.splice(Math.min(at, out.length), 0, pick); }
   }
-  return out.length ? out : base;
+  return addOptional(out, t, rnd);
+}
+
+/* 🔴 넣기에서 빼는 블록 — 꼬리는 `endWithAction` 이 정한다. 여기서 `tip` 을 꽂으면 끝맺음 교정과 싸우고,
+   `hashtags`·`disclosure` 는 자리가 법·채널로 정해져 있어 흩뿌릴 값이 아니다. */
+const NO_INSERT: readonly BlockType[] = ["tip", "hashtags", "disclosure", "adsense", "affiliate", "hook"];
+
+/**
+ * [2026-09-15 C · R8-A §1.3 실측] **빼기만 해서는 골격이 안 갈린다.**
+ *   `applyTiers` 가 ②에서 «있는 것을 떨어뜨리기»만 하니, 가짓수가 **«그 format 배열에 우연히 들어 있는 optional 수»** 에 묶였다.
+ *   blogger·wordpress 는 배열이 12블록 · optional 등장이 4~5개 · `required` 가 `[para,h2]` 뿐이라
+ *   3개 format 이 억제·탈락을 거치면 **같은 골격으로 수렴**했다 — seed 1·3·4 가 글자 그대로 같은 배열을 냈다:
+ *     `para,h2,para,h2,para,image,h2,para,image,faq,tip`
+ *   실측 20편 가짓수: tistory 20 · naver_blog 13 · **blogger 6(3편째 중복)** · **wordpress 6(3편째 중복)** — 계약 기준은 «11~32 · 4편째 전 중복 없음».
+ *   ⇒ 채널이 **허용한다고 적어 둔 optional 풀**에서 seed 로 **넣기도** 한다. 그러면 가짓수가 배열의 우연이 아니라 **풀 크기에 비례**한다.
+ *   🔴 한 편에 최대 2개만 넣는다(AC-63 — 블록을 늘리면 모델이 총 분량을 나눠 담아 **편당 글자 수가 되레 준다**.
+ *      B-1 실측: 12→17블록에 1,849→1,503자). 분량 손잡이는 B-1 몫이고, 여기서는 **가짓수만** 산다.
+ */
+function addOptional(seq: BlockType[], t: BlockTiers, rnd: () => number): BlockType[] {
+  const pool = t.optional.filter((b) => !t.suppress.includes(b) && !NO_INSERT.includes(b));
+  if (!pool.length) return seq.length ? seq : seq;
+  const out = [...seq];
+  /* 꼬리(해시태그·행동 유도·FAQ)는 건드리지 않는다 — `expandForLength` 와 같은 규칙. */
+  const tail: BlockType[] = ["hashtags", "tip", "faq"];
+  let body = out.length; while (body > 0 && tail.includes(out[body - 1])) body--;
+  const howMany = rnd() < 0.35 ? 2 : rnd() < 0.75 ? 1 : 0;
+  for (let i = 0; i < howMany; i++) {
+    const pick = pool[Math.floor(rnd() * pool.length)];
+    const at = 1 + Math.floor(rnd() * Math.max(1, body - 1));
+    if (out[at] === pick || out[at - 1] === pick) continue;   // 같은 블록이 나란히 붙지 않게
+    out.splice(at, 0, pick);
+    body++;
+  }
+  return out.length ? out : seq;
 }
 
 /** [R8-A §2] 주제군별 분량·사진 수 — 값이 없으면 채널 고정값(무회귀). */
@@ -506,12 +539,37 @@ export function imagesFor(c: WritingContract, group?: TopicGroup | null): { min:
  *   생성(`content-gen`)과 검수 화면(`pieces-get`)이 **같은 함수**를 봐야 «프롬프트에 실린 값»과 «화면이 보여 주는 값»이 안 갈린다
  *   (갈리면 화면이 거짓말을 한다 · AC-57 대용물 금지 · 오늘 우리가 gate_report 에서 겪은 그 모양).
  *   규칙: 제휴가 붙었으면 `affiliate` 가 이긴다 → 아니면 brief 의 목적 → 그것도 없으면 채널 기본(네이버=애드포스트 · 나머지=애드센스).
+ *
+ * 🔴 [2026-09-15 C · R8-A §1.2 실측] **brief 의 목적을 그대로 쓰면 절반 넘게 규칙이 안 닿는다.**
+ *   `director.goalOf()` 는 브리프에 채널이 둘 이상이면 `"mixed"` 를 넣는다 — 라이브 brief 61건 중 **34건(56%)** 이 mixed 이고
+ *   거기 달린 글이 **23편**이다. 그런데 `goalRules` 에 `mixed` 열쇠를 둔 채널은 **0개**다.
+ *   게다가 `"mixed"` 는 truthy 라 «없으면 채널 기본» 폴백도 **그냥 지나간다** ⇒ 그 23편은 수익 목적 규칙을 **한 줄도 못 받았다.**
+ *   ⇒ **brief 는 여러 채널의 묶음이지만 piece 는 채널이 하나다.** 그 채널에 규칙이 있는 목적일 때만 brief 값을 쓰고,
+ *     아니면(mixed·ypp 같은 남의 채널 목적·오타) **그 채널의 기본 목적**으로 읽는다. 저장된 `briefs.goal` 은 건드리지 않는다(소급 0).
  */
-export function resolveGoal(a: { affiliate: boolean; briefGoal?: string | null; channel: string }): RevenueGoal {
-  if (a.affiliate) return "affiliate";
+export interface GoalResolution {
+  goal: RevenueGoal;
+  /** 이 값이 **어디서 왔나** — 🔴 안 남기면 다음 사람이 «brief 는 mixed 인데 글은 adpost 네?» 하고 또 헤맨다(메인 지시). */
+  source: "affiliate" | "brief" | "channel_default";
+  /** brief 에 값은 있었는데 이 채널에 규칙이 없어 떨어뜨린 경우 그 값(예: `"mixed"`). 없으면 null. */
+  briefGoalIgnored: string | null;
+}
+
+/** `resolveGoal` 의 속살 — 값과 **출처**를 같이 준다. 화면·메타·감사가 이걸 읽는다. */
+export function resolveGoalDetail(a: { affiliate: boolean; briefGoal?: string | null; channel: string }): GoalResolution {
+  if (a.affiliate) return { goal: "affiliate", source: "affiliate", briefGoalIgnored: null };
+  const fallback: RevenueGoal = a.channel === "naver_blog" ? "adpost" : "adsense";
   const g = String(a.briefGoal ?? "").trim();
-  if (g) return g as RevenueGoal;
-  return a.channel === "naver_blog" ? "adpost" : "adsense";
+  if (!g) return { goal: fallback, source: "channel_default", briefGoalIgnored: null };
+  /* 🔴 «값이 있나» 가 아니라 **«규칙이 있는 목적인가»** 를 묻는다 — 그래야 `ypp`·`clip_incentive` 처럼
+     규칙 없는 목적이 나중에 또 생겨도 같은 구멍이 안 난다(메인 지시 2026-09-15). */
+  const rules = WRITING_CONTRACTS[a.channel]?.goalRules?.[g as RevenueGoal];
+  if (rules?.length) return { goal: g as RevenueGoal, source: "brief", briefGoalIgnored: null };
+  return { goal: fallback, source: "channel_default", briefGoalIgnored: g };
+}
+
+export function resolveGoal(a: { affiliate: boolean; briefGoal?: string | null; channel: string }): RevenueGoal {
+  return resolveGoalDetail(a).goal;
 }
 
 /** [R8-A §2] 소재·형식에서 주제군을 고른다(순수 · 재료가 없으면 null = 채널 고정값을 쓴다). */

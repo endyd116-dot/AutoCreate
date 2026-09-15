@@ -117,3 +117,11 @@ export function jobKindOf(channel: string): string | null {
 export const API_CHANNEL_KEYS: ReadonlySet<string> = new Set(CHANNELS.filter((c) => c.publishVia === "api").map((c) => c.key));
 /** 러너로 발행하는 채널 집합 — 표에서 파생(예전 `RUNNER_PUBLISH_CHANNELS` 자리). */
 export const RUNNER_CHANNEL_KEYS: ReadonlySet<string> = new Set(CHANNELS.filter((c) => c.publishVia === "runner").map((c) => c.key));
+
+/* ═══ [P1R8 §5.2] 🔴 아직 안 합친 다섯 번째 표 — `lib/writing-contracts.ts WRITING_CONTRACTS` ═══
+   그 파일에도 채널 목록이 있다(채널 × format·structure·length·images). 이번에 **일부러 안 합쳤다**:
+     · R8 §2 에서 B-1·C 가 그 파일을 계속 고치는 중이라, 지금 합치면 세 세션이 한 파일을 만진다(병렬 규칙 위반).
+     · 성격도 다르다 — 여기는 «채널의 성질», 그쪽은 «그 채널에 어떻게 쓰나»(글 계약)다.
+   🔴 그래도 **어긋나면 거짓말이 난다**: `textGen: true` 인데 글 계약이 없으면 «글을 만들어 준다»고 해 놓고 못 만든다
+      (인스타가 요금제 글 채널 목록에 딸려 들어갔던 것과 같은 모양). 그래서 합치는 대신 **검사**를 건다 —
+      `scripts/verify-channel-tables.mjs` 가 두 표를 대조하고, 어긋나면 사람이 고친다. 합치기는 R8 §2 가 끝난 뒤 후보. */
