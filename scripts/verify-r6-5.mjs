@@ -6,7 +6,7 @@ if (existsSync(".env")) for (const line of readFileSync(".env", "utf8").split(/\
 const BASE = (process.env.BASE_URL || "http://localhost:8901").replace(/\/$/, "");
 const STAMP = Date.now().toString(36);
 const EMAIL = process.env.TEST_EMAIL || `c+r65-${STAMP}@autocreate.test`, PASSWORD = "Cp1Verify2026x";
-const SECTIONS = new Set((process.env.SECTIONS || "add,rate,assign,readonly,idor,caption,regress,cleanup").split(","));
+const SECTIONS = new Set((process.env.SECTIONS || "add,readonly,rate,assign,idor,caption,regress,cleanup").split(","));
 const results = []; const t0 = Date.now();
 const rec = (step, ok, note = "", evidence) => { results.push({ step, ok: ok === "WARN" ? "WARN" : ok ? "PASS" : "FAIL", note, evidence }); return !!ok; };
 const warn = (step, note, evidence) => rec(step, "WARN", note, evidence);
@@ -76,7 +76,7 @@ async function main() {
     rec("duplicate — 상태가 picked 여도 · 공백이 달라도 같은 소재", dup2.status === 400 && dup2.json?.step === "duplicate", `${dup2.status} ${dup2.json?.step}`);
     await s`UPDATE topics SET status = 'candidate' WHERE id = ${firstId}`;
 
-    const ch = await add(jar, { title: T("채널 검사"), channelHint: "tiktok" });
+    const ch = await add(jar, { title: T("채널 검사"), channelHint: "foobar" });
     rec("channel — 없는 채널 → 400 step channel", ch.status === 400 && ch.json?.step === "channel", `${ch.status} ${ch.json?.step} «${ch.json?.error}»`);
     const chDefault = await add(jar, { title: T("채널 기본값") });
     rec("channelHint 없으면 연결 계정 첫 채널(naver_blog)", chDefault.json?.topic?.channelHint === "naver_blog", `channelHint ${chDefault.json?.topic?.channelHint}`);
@@ -86,6 +86,17 @@ async function main() {
     const firstNonManual = tl.findIndex((t) => t.source !== "manual"); const lastManual = tl.map((t) => t.source).lastIndexOf("manual");
     rec("topics-list — manual 이 맨 위(정렬 키 · 점수 부풀림 0)", tl.length > 0 && (firstNonManual < 0 || lastManual < firstNonManual) && tl[0]?.source === "manual",
       `상위 ${tl.slice(0, 4).map((t) => `${t.source}:${Math.round(t.score)}`).join(" ")}`);
+  }
+
+  /* ══ readonly — requireWritable 을 안 부른다(넣기만 · 확정은 막힘) ══ */
+  if (SECTIONS.has("readonly")) {
+    await s`UPDATE tenants SET status = 'readonly' WHERE id = ${TID}`;
+    const ro = await add(jar, { title: `읽기전용에서도 넣는다 ${STAMP}` });
+    rec("readonly 테넌트도 소재는 넣는다(넣기는 생성이 아니다 · AC-35)", ro.status === 200 && ro.json?.topic?.id > 0, `${ro.status}/${ro.json?.step ?? "ok"}`);
+    const pr = await call(jar, "/api/director-propose", { body: { topicId: Number(ro.json?.topic?.id || 0) } });
+    const cf = pr.json?.brief ? await call(jar, "/api/director-confirm", { body: { briefId: pr.json.brief.id } }) : { status: pr.status, json: pr.json };
+    rec("…하지만 디렉터 확정은 막힌다(403 writable)", cf.status === 403 && (cf.json?.step === "writable" || cf.json?.reason), `propose ${pr.status}/${pr.json?.step ?? "ok"} · confirm ${cf.status}/${cf.json?.step ?? "-"}`);
+    await s`UPDATE tenants SET status = 'trial' WHERE id = ${TID}`;
   }
 
   /* ══ rate — 하루 20개 · 21번째 429 · 횟수 = 감사 COUNT(KST) ══ */
@@ -111,24 +122,15 @@ async function main() {
       VALUES (${TID}, ${"AI 후보 높은 점수 " + STAMP}, '앵글', ${"aihigh" + STAMP}, 'naver_blog', 'ai', ${s.json({ intent: "info", volume: 50000 })}, 95, 'candidate', NOW() + interval '7 days') RETURNING id, score`;
     const [mn] = await s`INSERT INTO topics (tenant_id, title, angle, norm_key, channel_hint, source, factors, score, status, expires_at)
       VALUES (${TID}, ${"내가 넣은 낮은 점수 " + STAMP}, '앵글', ${"manlow" + STAMP}, 'naver_blog', 'manual', ${s.json({ intent: "info" })}, 12, 'candidate', NOW() + interval '30 days') RETURNING id, score`;
+    // 🔴 assign_topics 는 needsAutoSchedule — 신규 테넌트 기본값 autoSchedule=false(사장님 실측 3번의 원인)라 켜지 않으면 스텝이 아예 안 돈다.
+    const rsS = await call(jar, "/api/rules-settings", { body: { autoSchedule: true, topicLeadDays: 7 } });
     const rs = await call(jar, "/api/rules-save", { body: { rules: [{ channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, active: true }] } });
     await cron("hourly", TID);   // roll → slots
     const c1 = await cron("hourly", TID); const st = stepOf(c1, "slots.assign_topics");
     const slots = await s`SELECT id, topic_id, status FROM slots WHERE tenant_id = ${TID} ORDER BY publish_at NULLS LAST, id LIMIT 3`;
     const firstAssigned = slots.find((x) => x.topic_id);
     rec("assign_topics — 점수 12 인 manual 이 점수 95 인 AI 후보보다 **먼저** 배정된다", Number(firstAssigned?.topic_id) === Number(mn?.id),
-      `규칙 ${rs.status} · 슬롯 ${slots.map((x) => `${x.id}:${x.topic_id ?? "-"}`).join(",")} · manual ${mn?.id}(12) ai ${ai?.id}(95) · step ${JSON.stringify(st || {}).slice(0, 60)}`);
-  }
-
-  /* ══ readonly — requireWritable 을 안 부른다(넣기만 · 확정은 막힘) ══ */
-  if (SECTIONS.has("readonly")) {
-    await s`UPDATE tenants SET status = 'readonly' WHERE id = ${TID}`;
-    const ro = await add(jar, { title: `읽기전용에서도 넣는다 ${STAMP}` });
-    rec("readonly 테넌트도 소재는 넣는다(넣기는 생성이 아니다 · AC-35)", ro.status === 200 && ro.json?.topic?.id > 0, `${ro.status}/${ro.json?.step ?? "ok"}`);
-    const pr = await call(jar, "/api/director-propose", { body: { topicId: Number(ro.json?.topic?.id || 0) } });
-    const cf = pr.json?.brief ? await call(jar, "/api/director-confirm", { body: { briefId: pr.json.brief.id } }) : { status: pr.status, json: pr.json };
-    rec("…하지만 디렉터 확정은 막힌다(403 writable)", cf.status === 403 && (cf.json?.step === "writable" || cf.json?.reason), `propose ${pr.status}/${pr.json?.step ?? "ok"} · confirm ${cf.status}/${cf.json?.step ?? "-"}`);
-    await s`UPDATE tenants SET status = 'trial' WHERE id = ${TID}`;
+      `설정 ${rsS.status} 규칙 ${rs.status} · 슬롯 ${slots.map((x) => `${x.id}:${x.topic_id ?? "-"}`).join(",")} · manual ${mn?.id}(12) ai ${ai?.id}(95) · step ${JSON.stringify(st || {}).slice(0, 60)}`);
   }
 
   /* ══ idor — 타 테넌트(13)로 목록 0 ══ */
