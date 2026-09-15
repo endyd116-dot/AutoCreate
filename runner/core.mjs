@@ -204,7 +204,7 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     const out = await handler.run({ ctx, job, plan, token, shotKey, dryRun, recipe });
 
     // 🔴 shotKey 를 함께 돌려준다 — 카나리가 이 키를 하트비트에 실어야 운영이 «깨진 화면»을 찾아간다(없으면 canary_runs.shot_key 가 늘 비었다).
-    if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [] };
+    if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}) };
     /* 🔴 **`publish.retract` 는 `publish.` 로 시작한다** — 아래 발행 분기보다 **먼저** 가른다.
        안 그러면 «올리기는 했는데 글 주소를 회수하지 못했어요»라는 엉뚱한 실패가 난다(내리는 잡에 외부 주소가 있을 리 없다).
        접두사로 종류를 가르는 코드에 새 잡을 끼울 때 늘 생기는 함정이라 여기 적어 둔다. */
@@ -213,7 +213,9 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     }
     if (job.kind.startsWith("publish.")) {
       if (!out?.externalUrl) return { ok: false, errorKind: "unknown", detail: "올리기는 했는데 글 주소를 회수하지 못했어요." };
-      return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [] };
+      /* [R9-2/5] 🔴 서식은 **사실**이라 구조로 보낸다 — `notes` 에 담으면 서버가 버린다(`lib/runner-jobs.ts` RunnerReportOk 주석).
+         문장은 서버·화면이 만든다. 러너 판(zip)에 화면 문구를 묶지 않는다. */
+      return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}) };
     }
     if (REVENUE_KINDS.has(job.kind)) {
       /* 🔴 행 0개도 성공이다(미가입·미등록 = 정직한 «없음»). 0원 행을 지어내지 않는다(AC-9). */
