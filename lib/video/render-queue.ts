@@ -138,9 +138,19 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
   }
 
   /* 🔴 심사 결과를 `gate_report` 에 남긴다(계약 §5 «아니면 in_review + gate_report»).
-     등급만 남기면 화면이 «왜 걸렸는지»를 못 그린다 — 축 목록이 있어야 사람이 고칠 수 있다. */
-  await q(sql`UPDATE pieces SET gate_report = ${jsonb({ grade: judged.grade, pass: judged.pass, axes: judged.axes ?? [], repaired: !!judged.repaired, at: new Date().toISOString() })},
+     등급만 남기면 화면이 «왜 걸렸는지»를 못 그린다 — 축 목록이 있어야 사람이 고칠 수 있다.
+     🔴 [R7 통합 점검 2026-09-15 · B-1] **모양은 `GateReport` 다 — 심사는 `judge` 아래에 넣는다.**
+        종전엔 `{ grade, pass, axes }` 를 **최상위**에 적었는데, 읽는 쪽 셋(`content-approve.recheckVideoPiece` 의 `prev.judge` ·
+        `judgeBlockers` 의 `gate.judge.axes` · `pieces-get` 의 `judge: g.judge`)은 전부 `judge` 아래를 본다.
+        → 검수 화면에 심사 축이 **0개**로 그려졌고(§1.5 의 보류 3상태가 보일 자리가 없었다), 승인 재검사도 P0 축을 못 봤다.
+        화면 경로로 한 바퀴 돌려 보고서야 잡혔다(하니스 초록 ≠ 화면 · #9). */
+  await q(sql`UPDATE pieces SET gate_report = ${jsonb({
+        ok: judged.pass, checks: [], rewritten: false,
+        judge: { grade: judged.grade, pass: judged.pass, axes: judged.axes ?? [], repaired: !!judged.repaired, at: new Date().toISOString() },
+      })},
       updated_at = NOW() WHERE id = ${pieceId}`);
+  const [gchk] = await q(sql`SELECT jsonb_typeof(gate_report->'judge'->'axes') AS t FROM pieces WHERE id = ${pieceId}`);
+  if (gchk?.t !== "array") console.error("[render-queue] gate_report.judge.axes jsonb_typeof !== array", gchk);   // PITFALLS #1 — 쓴 직후 모양 확인
 
   if (judged.grade === "P0" || !judged.pass) {
     const nextRetry = retry + 1;
@@ -154,8 +164,10 @@ export async function finalizeRender(pieceId: number, report: RenderReport): Pro
     return { ok: false, next: giveUp ? "failed" : "requeued", retry: nextRetry, reason: `judge_${judged.grade}` };
   }
 
+  /* `failReason` 을 **비운다** — 러너를 기다리던 사이 `markAwaitingRunner` 가 «내 PC 프로그램이 아직 연결되지 않았어요»를 적어 두는데,
+     렌더가 끝나고도 그 문장이 남아 있으면 검수 화면이 멀쩡한 영상에 옛 사유를 붙여 보여 준다(2026-09-15 통합 점검에서 실측). */
   await q(sql`UPDATE pieces SET status = 'in_review',
-      meta = meta || ${jsonb({ chainStage: "done", judgeGrade: judged.grade, judgeRepaired: !!judged.repaired })},
+      meta = (meta - 'failReason') || ${jsonb({ chainStage: "done", judgeGrade: judged.grade, judgeRepaired: !!judged.repaired })},
       updated_at = NOW() WHERE id = ${pieceId}`);
   await writeAudit({ tenantId: tid, action: "render_done", actorType: "system", target: `piece:${pieceId}`,
     detail: { key: report.key, durationMs: report.durationMs, grade: judged.grade }, riskLevel: "low" });
