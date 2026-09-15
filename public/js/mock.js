@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 11;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 12;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -52,6 +52,9 @@
   /* [R8 §10.3] 스톡 사진 손잡이 — ?stock=nokey(제공사 열쇠가 안 꽂힘) · ?stock=empty(불렀는데 0건) · 기본은 여섯 장 나온다.
      🔴 «열쇠 없음»과 «0건»은 **다른 말**이라 서버가 `trouble` 로 갈라 준다 — 화면이 갈라 보여 주는지 재려고 둘 다 둔다. */
   const stockKnob = qs.get("stock") || "";
+  /* [R8-B] «언제 만들어지나» 손잡이 — ?pw=auto(자동 편성을 꺼 둔 집) · ?pw=blocked(체험 끝) · 기본은 서버 잣대 그대로.
+     🔴 `missed` 를 화면이 **빨강으로 그리지 않는지** 재려면 missed 가 실제로 나와야 한다. */
+  const pwKnob = qs.get("pw") || "";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
@@ -435,6 +438,30 @@
     S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "planned", publishAt: kst(0, 8, 0), topicTitle: S.topics[4]?.title, origin: "auto" });
     // 오늘 «확인 필요» 한 건(발행함 703·piece 506 과 같은 글) — 없으면 만들어 둔다
     S.slots.push({ id: S.nextId++, date: todayYmd, channel: "naver_blog", kind: "post", accountId: 1, accountHandle: "cook_a", status: "awaiting_manual", publishAt: kst(0, 11, 0), topicTitle: "가을 이불 세탁, 건조기 없이 뽀송하게", pieceId: 506, origin: "auto" });
+  }
+  /* ══ [R8-B · lib/produce-window.ts 그대로] «이 자리는 언제 글이 만들어지나» — 🔴 **잣대는 서버에 한 개**이고 모의는 그 결과를 흉내 낸다.
+       세 값: `pending`(차례가 온다 · 고객 할 일 없음) · `missed`(자동으로는 더 안 만든다 = «지금 만들기»가 유일한 길) · `done`(이미 있다).
+       🔴 버린 자리(건너뜀·반려)는 **키를 안 싣는다** — «해당 없음»이지 «pending 아님»이 아니다(AC-9).
+       🔴 문장은 «못 만든다»로 끝내지 않고 **고객이 지금 할 수 있는 일**로 끝난다(§3 말투 · 서버 BLOCKED_TEXT 와 같은 결). ══ */
+  const PW_DROPPED = ["skipped", "rejected"];
+  const PW_PRODUCED = ["producing", "in_review", "approved", "scheduled", "publishing", "published"];
+  const pwTickText = () => (new Date().getHours() < 6 ? "오늘 오전 6시" : "내일 오전 6시");
+  function produceWindowOf(s) {
+    if (PW_DROPPED.includes(s.status)) return null;
+    if (s.pieceId || PW_PRODUCED.includes(s.status)) return { window: "done", reason: s.status === "published" ? "올라갔어요." : "글이 준비됐어요." };
+    if (pwKnob === "blocked") return { window: "missed", reason: "체험이 끝나서 새 글은 자동으로 안 만들어져요. 요금제를 고르시면 기다리던 자리부터 이어서 만들어요." };
+    if (pwKnob === "auto" || !S.settings.autoSchedule) return { window: "missed", reason: "자동 만들기를 꺼 두셨어요. 이 자리는 «지금 만들기»를 누르시면 바로 만들어요." };
+    if (s.status === "awaiting_manual" || s.status === "failed") return { window: "missed", reason: `${s.note ? s.note + " " : ""}이 자리는 «지금 만들기»로 직접 만들어 주세요.` };
+    const lead = Number(S.settings.produceLeadDays || 3);
+    const opens = (() => { const p = s.date.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2] - lead)).toISOString().slice(0, 10); })();
+    if (opens > todayYmd) return { window: "pending", reason: `발행 ${lead}일 전인 ${opens.slice(5).replace("-", "/")}부터 만들기 시작해요.` };
+    if (s.date < todayYmd) return { window: "missed", reason: `${s.date.slice(5).replace("-", "/")} 자리인데 그날이 지났어요. 지금 만들면 바로 올라가요.` };
+    /* 🔴 다음 만들기 시각이 발행 시각보다 늦으면 기다려도 못 만든다 — 이게 missed 의 본래 뜻이다(서버 ⑦). */
+    if (s.skipReason === "too_soon") return { window: "missed", reason: `다음 자동 만들기 시각(${pwTickText()})이 이 자리보다 늦어요. 지금 만들면 제시간에 올라가요.` };
+    if (s.status === "coin_short") return { window: "pending", reason: `코인이 모자라 미뤘어요. 충전하시면 ${pwTickText()}에 이어서 만들어요.` };
+    if (s.status === "no_topic") return { window: "pending", reason: `쓸 만한 소재를 아직 못 찾았어요. 소재가 정해지면 ${pwTickText()}에 만들어요.` };
+    if (s.status === "planned") return { window: "pending", reason: `소재를 먼저 정하고 ${pwTickText()}에 만들어요.` };
+    return { window: "pending", reason: `${pwTickText()}에 만들어요.` };
   }
   const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : COIN.blog), 0); // [P1R5] shorts = video_60 단가(§1.10)
   const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
@@ -862,6 +889,11 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       /* [R7 §4.3 · B3] note = 서버가 그 자리에 적어 둔 사람말(있을 때만) · revenueKrw = 30일 수익(수집 행이 없으면 키 자체가 없다) */
       for (const s of list) { const seed = S.slotNotes && S.slotNotes[s.id]; if (seed) s.note = seed;
         if (s.status === "published" && s.pieceId) s.revenueKrw = (s.pieceId * 137) % 9000 + 800; }
+      /* [R8-B] 🔴 «언제 만들어지나» + 그 자리의 코인 — 서버 lib/slots.ts 가 싣는 그 자리다(`done` 이면 코인은 안 싣는다).
+         화면은 이 값만 읽고 **스스로 다시 재지 않는다**(AC-47). */
+      for (const s of list) { const pw = produceWindowOf(s); if (!pw) continue;
+        s.produceWindow = pw.window; s.produceReason = pw.reason;
+        if (pw.window !== "done") s.coinCost = s.kind === "shorts" ? VIDEO_COIN.video_60 : s.kind === "cardnews" ? COIN.cardnews : COIN.blog; }
       return { ok: true, slots: list }; },
     "slots-skip": (b) => { const s = S.slots.find((x) => x.id === Number(b.id)); if (s) s.status = "skipped"; return { ok: true }; },
     /* ── [P1R2] §6 슬롯 3동작 ── */
@@ -1250,7 +1282,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
