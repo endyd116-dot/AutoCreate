@@ -312,6 +312,12 @@ const THREE_REST = [
   /* B. 글 품질 축 9행 */
   ["B1 유사도 «계정 간» 중복 0", () => {
     const sameBriefOrAccount = inFile("lib/content-gen.ts", /brief_id = \$\{[^}]*\} OR \(account_id/);
+    /* [2026-09-16 C · R9-8] 🔴 보던 자리가 **옛 자리**였다(AC-75) — B 가 `lib/cross-account.ts crossAccountSimilarity` 로 **다른 계정끼리**를 잰다
+       (`account_id <> 현재` · 테넌트 전체) 그리고 승인(content-approve)·생성(content-gen) 두 경로가 부른다(verify-r8-deadends 확인 · gate 축 cross_account · meta.crossSimilarity{measured}).
+       «있나»가 아니라 «다른 계정을 보나 + 두 경로가 부르나 + 못 쟀으면 measured:false 로 적나(AC-9)»로 잰다. */
+    const cross = inFile("lib/cross-account.ts", /account_id <> \$\{accountId\}/) && inFile("lib/cross-account.ts", /measured:\s*(true|false)/);
+    const called = inFile("lib/content-approve.ts", /crossAccountSimilarity\(/) && inFile("lib/content-gen.ts", /crossAccountSimilarity\(/);
+    if (cross && called) return ["닫힘", "lib/cross-account.ts 가 다른 계정 글과 잰다(account_id <> 현재 · 테넌트 전체) · 승인·생성 두 경로가 부른다 · 못 쟀으면 measured:false"];
     return [sameBriefOrAccount ? "🟠 일부" : "열림",
       "🔴 같은 brief **또는 같은 계정** 30일만 본다 — **다른 brief·다른 계정끼리는 안 본다**. 설계 §4.3 «계정 간 중복 0» 은 아직 반쪽"];
   }],
