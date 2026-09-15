@@ -225,9 +225,11 @@ console.log("\n[R9-11 «깎였다»가 고객에게 닿나 — 티스토리 기�
   /* ⚠️ **문구가 실제로 나오나**(행동)는 여기서 못 잰다 — `node` 는 확장자 없는 TS import 를 못 푼다.
      그쪽은 `scripts/verify-format-notice.mts`(tsx) 가 잰다. 여기서는 **사슬**만 본다(싸고 넓게 · AC-87). */
   const JOBS2 = JOBS;
-  ok(/const say = formatDemotionNotice\(merged, String\(row\.title \?\? ""\)/.test(JOBS2)
+  /* ⚠️ 종전 이 축은 `formatDemotionNotice(merged, String(row.title ?? "")` 까지만 봤다 — **접두사**라
+     셋째 인자를 빼는 변이가 **초록으로 지나갔다**(2026-09-16 · 오늘 다섯 번째). 인자를 **끝까지** 본다. */
+  ok(/const say = formatDemotionNotice\(merged, String\(row\.title \?\? ""\), String\(row\.channel \?\? ""\)\);/.test(JOBS2)
     && /if \(say\) await notify\(tid, "format_demoted", say\.title, say\.body, pieceLink\(pieceId\)\);/.test(JOBS2),
-    "R-12 🔴 그 문구를 **실제로 알림으로 보낸다**(만들어 놓고 안 부르면 AC-69)");
+    "R-12 🔴 그 문구를 **실제로 알림으로 보낸다** · 🔴 **채널까지 넘긴다**(안 넘기면 되돌릴 길 문장이 통째로 빠진다 — 만들어 놓고 안 부르면 AC-69)");
   /* 🔴 **자동 승인 경로에서 닿나** — 이 칸의 전부다.
      `applyFormatMarksToPiece` 는 `reportJob` 의 **발행 성공 경로**에서 불린다. 그 길은 사람이 승인했든
      자동으로 나갔든 **똑같이 지난다**(화면 핸들러가 아니다). 그래서 자동 승인에서도 닿는다. */
