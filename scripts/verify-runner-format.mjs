@@ -45,8 +45,12 @@ const MUTATIONS = {
   /* 🔴 m1 은 **조각 경로의 끊기**를 뺀다 — 바로 앞 문단에서 색을 칠한 다음에 이어 치는 자리라 번짐이 제일 크게 난다.
      ⚠️ 첫판에 나는 여기를 `if (false) await typeParts(op)` 로 끊었는데 **변이가 초록으로 지나갔다** —
         축들이 «boundary 가 있나»를 보고 있었고 그건 그대로였기 때문이다. 변이를 안 돌려 봤으면 그 축을 믿을 뻔했다(AC-87). */
-  m1: { file: "naver", from: "    await boundary();\n    for (const p of parts) {", to: "    /* removed */\n    for (const p of parts) {",
+  m1: { file: "naver", from: "    const broke = await boundary();\n    if (wrote && !broke) await page.keyboard.press(\"Enter\").catch(() => {});\n    for (const p of parts) {",
+    to: "    const broke = false;\n    if (wrote && !broke) await page.keyboard.press(\"Enter\").catch(() => {});\n    for (const p of parts) {",
     expect: "F-01 (칠한 뒤 다음 조각·다음 문단을 안 끊는 판 = 사장님이 보신 그 판)" },
+  /* 🔴 m9 — 태그 줄만 안 끊는 판(끊기 사고를 고치다 같은 뿌리로 하나 더 찾은 자리 · 2026-09-16). */
+  m9: { file: "naver", from: "        const brokeTags = await boundary();", to: "        const brokeTags = false;",
+    expect: "F-01h (해시태그 줄이 앞 문단 서식을 물려받는다 — 마지막 줄이라 뒤에 아무도 없다)" },
   m2: { file: "naver", from: '  markFormatDirty(fmt, `${kind} 적용`);', to: "  /* removed */",
     expect: "F-02a (칠한 뒤 «더럽다»를 안 적는 병 — 빨강 번짐의 출발점)" },
   m3: { file: "naver", from: '          markFormatDirty(fmt, "인용구(색·정렬·기울임)");', to: "          /* removed */",
@@ -77,10 +81,21 @@ if (argMut === "all") {
     try { out = execFileSync(process.execPath, [fileURLToPath(import.meta.url), `--mutate=${k}`], { encoding: "utf8" }); }
     catch (e) { code = e.status ?? 1; out = String(e.stdout ?? ""); }
     const failLines = out.split("\n").filter((l) => l.includes("  ✘ "));
-    rows.push({ k, red: code !== 0, n: failLines.length, axes: failLines.map((l) => l.trim().split(" ")[1]).join(","), expect: MUTATIONS[k].expect });
+    /* 🔴 **«심지 못했다»(종료 2·3)를 «빨강»으로 세지 마라 — 그게 가짜 빨강이다.**
+       2026-09-16 에 실제로 겪었다: 코드를 고쳐 m1 의 앵커가 두 곳이 되자 변이가 **심기지도 못하고 죽었는데**
+       종료코드가 0 이 아니라는 이유로 «빨강»으로 세어져 **«여덟 다 빨개졌다»가 나왔다.** 축은 한 줄도 안 돌았다.
+       ⇒ 앵커가 낡으면 그건 **하니스 고장**이지 «방어가 살아 있다»는 증거가 아니다. 갈라서 센다. */
+    const broken = code === 2 || code === 3;
+    rows.push({ k, red: code === 1 && failLines.length > 0, broken, n: failLines.length, axes: failLines.map((l) => l.trim().split(" ")[1]).join(","), expect: MUTATIONS[k].expect });
   }
   console.log("\n══ 변이 대조(«이 방어를 빼면 빨개지나») ══");
-  for (const r of rows) console.log(`  ${r.red ? "🔴 빨강" : "⚪ 초록"}  ${r.k}  실패축 ${r.n}개 [${r.axes}]  ← ${r.expect}`);
+  for (const r of rows) console.log(`  ${r.broken ? "🟠 못 심음" : r.red ? "🔴 빨강" : "⚪ 초록"}  ${r.k}  실패축 ${r.n}개 [${r.axes}]  ← ${r.expect}`);
+  const broken = rows.filter((r) => r.broken);
+  if (broken.length) {
+    console.log(`\n🟠 변이 ${broken.map((r) => r.k).join("·")} 을(를) **심을 자리를 못 찾았다** — 코드가 바뀌었는데 앵커가 낡았다.`
+      + ` 🔴 이건 «방어가 살아 있다»가 **아니라 하니스 고장**이다(고치기 전까지 이 파일의 초록을 믿지 마라).`);
+    process.exit(1);
+  }
   const silent = rows.filter((r) => !r.red);
   if (silent.length) {
     console.log(`\n🔴 변이 ${silent.map((r) => r.k).join("·")} 이(가) **빨개지지 않았다** — 그 축은 아무것도 못 잡는다(AC-87).`);
@@ -155,8 +170,18 @@ console.log("\n[① 문단 경계에서 서식 끊기]");
   ok(calls >= 4, "F-01b 문단이 서는 자리마다 부른다(평문·조각·소제목·인용 = 4곳 이상)", `${calls}곳`);
   ok(play.indexOf("await boundary();") < play.indexOf("await page.keyboard.insertText(p.t)"),
     "F-01c 끊기는 문단을 쓰기 **전**이다(뒤에 부르면 이미 물든 다음이다)");
-  ok(/await boundary\(\);\s+for \(const p of parts\)/.test(play.replace(/\n/g, "\n")),
-    "F-01d 조각 경로(typeParts)가 끊기를 지나서 시작한다");
+  ok(/const broke = await boundary\(\);\s+if \(wrote && !broke\)[\s\S]{0,80}for \(const p of parts\)/.test(play),
+    "F-01d 조각 경로(typeParts)가 **끊기를 먼저** 지나고, 🔴 새 칸이 생겼으면 **Enter 를 또 안 친다**(둘 다 하면 마크 있는 글마다 빈 줄이 쌓인다)");
+  /* 🔴 F-01h — «태그 줄»은 **글의 마지막 줄**이라 뒤에 아무 문단도 없다 = 아무도 대신 끊어 주지 않는다.
+     끊기 사고를 고치다 **같은 병을 여기서 하나 더** 찾았다(2026-09-16): 종전엔 이 자리만 boundary 를 안 지났고,
+     `moveCaretToEnd` 는 여기서 새 칸을 안 만든다(마지막이 글이라 조건에 안 걸린다) — 같은 뿌리였다. */
+  const tagsCase = play.slice(play.indexOf('case "tags"'), play.indexOf('default: if (op.text)'));
+  ok(/const brokeTags = await boundary\(\);/.test(tagsCase),
+    "F-01h 🔴 **태그 줄도 끊기를 지난다**(앞 문단이 색을 남기면 해시태그가 통째로 물드는데, 태그는 마지막 줄이라 뒤에 아무도 없다)",
+    tagsCase.slice(0, 160));
+  /* 🔴 «문단이 서는 자리»가 전부 끊기를 지나나 — 하나라도 빠지면 그 자리에서만 조용히 번진다. */
+  const boundaryCalls = (play.match(/await boundary\(\)/g) || []).length;
+  ok(boundaryCalls >= 5, "F-01i 끊기를 부르는 자리가 다섯 이상(평문·조각·소제목·인용·태그)", `${boundaryCalls}곳`);
 
   /* ═══ 🔴 F-01e — **이 축이 없어서 끊기가 통째로 무력했다**(2026-09-16 C 가 진짜 Chromium 으로 잡았다) ═══
    *

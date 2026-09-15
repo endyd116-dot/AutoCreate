@@ -608,9 +608,11 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
      깨끗하면 아무 일도 안 한다(왕복 0 · 무회귀). 🔴 **이 한 줄이 «어느 지점부터 끝까지»를 문단 하나에 가둔다.** */
   const boundary = () => breakFormatBeforePara(fmt, fresh);
 
+  /* 🔴 **끊기가 새 칸을 만들었으면 Enter 를 또 치지 않는다** — 새 칸이 곧 새 줄이다.
+     둘 다 하면 마크가 있는 글마다 **빈 줄이 하나씩 쌓인다**(AM 은 이걸 감수했지만 우리는 «생겼나»를 값으로 알고 있으니 안 해도 된다). */
   const type = async (text) => {
-    if (wrote) await page.keyboard.press("Enter").catch(() => {});
-    await boundary();
+    const broke = await boundary();
+    if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
     await page.keyboard.insertText(String(text));
     wrote = true;
   };
@@ -618,8 +620,8 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
   /** 조각들을 **치면서 바로** 칠한다(되돌아가지 않는다 — AM 8차 확정: 「다 쓰고 나중에 칠하기」는 실물이 무너졌다). */
   const typeParts = async (op) => {
     const parts = Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }];
-    if (wrote) await page.keyboard.press("Enter").catch(() => {});
-    await boundary();
+    const broke = await boundary();
+    if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
     for (const p of parts) {
       if (!p.t) continue;
       await page.keyboard.insertText(p.t);
@@ -648,8 +650,8 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
         /* 🔴 소제목 = «굵게 + 글자 크기»다(AM 정본). 스마트에디터 ONE 에는 h2 버튼이 없다 —
            내가 추측으로 쓴 `data-name="header2"` 는 존재하지 않아 **소제목이 본문과 똑같이 나갔다**
            (2026-09-14 실증 스냅샷에서 «결론부터»가 평문이었다). 크기는 **반드시 되돌린다**(sizeLastTyped). */
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
-        await boundary();                    // 🔴 소제목도 문단이다 — 앞 문단의 색을 물려받으면 소제목이 빨개진다
+        const brokeH = await boundary();     // 🔴 소제목도 문단이다 — 앞 문단의 색을 물려받으면 소제목이 빨개진다
+        if (wrote && !brokeH) await page.keyboard.press("Enter").catch(() => {});
         const text = String(op.text);
         await page.keyboard.press("Control+b").catch(() => {});
         await page.keyboard.type(text, { delay: 6 }).catch(async () => { await page.keyboard.insertText(text); });
@@ -662,8 +664,8 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
         break;
       }
       case "quote": {
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
-        await boundary();
+        const brokeQ = await boundary();
+        if (wrote && !brokeQ) await page.keyboard.press("Enter").catch(() => {});
         const opened = await clickToolbarItem(ctx, "quotation");
         if (!opened) {
           missed.quote++;
@@ -738,7 +740,12 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
           if (++stable >= 4) break;
         }
         await moveCaretToEnd(page, ctx, missed);
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        /* 🔴 **태그 줄도 문단이다**(2026-09-16 · 끊기 사고를 고치다 같은 병을 여기서 하나 더 찾았다).
+           종전엔 여기만 `boundary()` 를 안 지났다 — 앞 문단이 색·밑줄을 남겼으면 **해시태그 줄이 통째로 물든다.**
+           🔴 그리고 태그는 **글의 마지막 줄**이라 뒤에 아무 문단도 없다 = **아무도 대신 끊어 주지 않는다.**
+           `moveCaretToEnd` 는 여기서 새 칸을 안 만든다(마지막이 글이라 조건에 안 걸린다) — 그게 이 병의 같은 뿌리다. */
+        const brokeTags = await boundary();
+        if (wrote && !brokeTags) await page.keyboard.press("Enter").catch(() => {});
         await page.keyboard.insertText(String(op.text));
         wrote = true;
         await settle(page, 300);
