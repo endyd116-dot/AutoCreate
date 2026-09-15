@@ -135,9 +135,25 @@ export async function checkLimit(tid: number, resource: LimitResource, requested
  *   ⚠️ P1R6 계약은 «플랜 표의 managedRunner 가격을 plans.ts 에서 읽는다»고 했는데 표에 **가격 칸이 없었다** —
  *      칸을 새로 만들면 DB plans 행·화면까지 번지므로, 등급에서 유도하는 상수 한 곳으로 뒀다(메인에 보고).
  */
-export const MANAGED_RUNNER_PRICE_KRW = 30_000;
+/**
+ * 🔴 **계정당** 월 공급가(부가세 별도) — 사장님 결정 4(2026-09-15): «관리형 = 기본 · **계정당 월요금** · **프록시 요금 포함**».
+ *
+ *   단위가 «대(PC)»에서 «계정»으로 바뀌었다. 고객이 세는 단위가 그쪽이기 때문이다 —
+ *   «PC 두 대»는 우리 사정이고, 고객은 «내 블로그 계정 5개를 맡긴다»고 생각한다.
+ *
+ *   이 값에 **무엇이 들어 있나**(원가 근거 = `docs/active/2026-09-15-proxy-cost.md` §2·§3):
+ *     · 전용 IP(프록시) 월 원가 ≈ ₩5,000  ← **포함이다**(사장님 결정 4). 따로 받지 않는다.
+ *     · 우리 서버 러너 실행 분담 ≈ ₩1,000 · 운영(IP 교체·장애) ≈ ₩500
+ *     · 합계 원가 ≈ ₩6,500~7,000 → 권장 공급가 ₩25,000(약 3.6배)
+ *   ⚠️ AI 생성 원가(글·이미지·영상)는 **여기 없다** — 그건 코인으로 따로 받는다(이중 과금 금지).
+ *
+ *   🔴 **이 숫자는 «권장값»이다. 가격 확정은 사장님 몫**(결정 7)이고 아직 안 났다.
+ *      확정되면 여기 한 줄만 고친다 — 화면·API 에 숫자를 다시 적지 않는다(적는 순간 두 벌이 되어 갈라진다).
+ */
+export const MANAGED_RUNNER_ACCOUNT_KRW = 25_000;
+/** 이 플랜이 **실제로 내는** 계정당 공급가. option(Pro)=유료 · included(Agency)=포함(0원) · no=못 씀. */
 export function managedRunnerUnitKrw(plan: PlanDef): number {
-  return plan.features.managedRunner === "option" ? MANAGED_RUNNER_PRICE_KRW : 0;
+  return plan.features.managedRunner === "option" ? MANAGED_RUNNER_ACCOUNT_KRW : 0;
 }
 
 export type FeatureKey = keyof PlanFeatures;

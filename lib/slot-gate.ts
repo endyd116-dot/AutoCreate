@@ -64,7 +64,7 @@ export function slotGateEnabled(): boolean {
  *   `coin_short`·`no_topic` 은 «보류»지 «끝난 칸»이 아니다 — 코인이 차거나 소재가 생기면 그 자리에서 다시 만든다.
  *   `producing` 이후(in_review·approved·scheduled·publishing·published·skipped·failed·reassigned·awaiting_*)는 받지 않는다.
  */
-const OPEN_SLOT_STATUS: ReadonlySet<string> = new Set(["planned", "topic_assigned", "coin_short", "no_topic"]);
+export const OPEN_SLOT_STATUS: ReadonlySet<string> = new Set(["planned", "topic_assigned", "coin_short", "no_topic"]);
 
 /**
  * guardSlot — 자동 생성 1건이 편성표의 몫인지 판정한다(**piece INSERT 직전에** 부른다).

@@ -17,8 +17,10 @@ const kstToday = sql`(NOW() AT TIME ZONE 'Asia/Seoul')::date`;
 export interface RevenueSummary {
   monthKrw: number; todayConfirmedKrw: number; todayEstimatedKrw: number; prevMonthKrw: number;
   bySource: { source: string; krw: number; freshness: Freshness; lastSyncAt?: string }[];
-  byAccount: { accountId: number; handle: string; channel: string; krw: number }[];
-  topPieces: { pieceId: number; title: string; channel: string; krw: number }[];
+  /** [P1R7 B3] 계정이 지워졌으면 `handle:"지운 계정"` + `deleted:true` · `channel` 은 빈 문자열(마크를 못 그린다). 금액은 그대로 센다 — 합계 = 내역. */
+  byAccount: { accountId: number; handle: string; channel: string; krw: number; deleted?: boolean }[];
+  /** [P1R7 B3] 글이 지워졌으면 `title:"지운 글"` + `deleted:true` · 제목이 비었으면 `"제목 없는 글"` + `untitled:true`. */
+  topPieces: { pieceId: number; title: string; channel: string; krw: number; deleted?: boolean; untitled?: boolean }[];
 }
 export interface HomeRevenue { todayConfirmedKrw: number; todayEstimatedKrw: number; yesterdayKrw: number; monthKrw: number }
 
@@ -52,12 +54,15 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
       (SELECT MAX(s.last_ok_at) FROM revenue_sources s WHERE s.tenant_id = d.tenant_id AND s.source = d.source) AS last_ok
     FROM revenue_daily d WHERE d.tenant_id = ${tid} AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.tenant_id, d.source ORDER BY krw DESC`);
+  /* [P1R7 B3] 🔴 **LEFT JOIN 이어야 한다** — 예전엔 INNER JOIN 이라 계정·글 행이 사라지면 그 돈이 «어느 계정이»·«잘 번 글»에서 **조용히 빠졌다**.
+     합계(monthKrw)에는 남아 있으니 **합계 ≠ 내역**이 되고, 고객은 «없어진 돈»을 보게 된다. 수익 행은 주인이 사라져도 남는 것이 맞다(회계) —
+     그러니 **«주인 없는 금액»을 서버가 이름 붙여 내려보낸다**(화면이 물음표를 그리지 않게 · 이름은 §RevenueSummary 주석). */
   const byAcc = await q(sql`SELECT d.account_id, a.handle, a.channel, COALESCE(SUM(d.amount_krw),0) AS krw
-    FROM revenue_daily d JOIN accounts a ON a.id = d.account_id AND a.tenant_id = d.tenant_id
+    FROM revenue_daily d LEFT JOIN accounts a ON a.id = d.account_id AND a.tenant_id = d.tenant_id
     WHERE d.tenant_id = ${tid} AND d.account_id IS NOT NULL AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.account_id, a.handle, a.channel ORDER BY krw DESC LIMIT 20`);
   const top = await q(sql`SELECT d.piece_id, p.title, p.channel, COALESCE(SUM(d.amount_krw),0) AS krw
-    FROM revenue_daily d JOIN pieces p ON p.id = d.piece_id AND p.tenant_id = d.tenant_id
+    FROM revenue_daily d LEFT JOIN pieces p ON p.id = d.piece_id AND p.tenant_id = d.tenant_id
     WHERE d.tenant_id = ${tid} AND d.piece_id IS NOT NULL AND d.day >= ${start} AND d.day < (${start} + interval '1 month')::date
     GROUP BY d.piece_id, p.title, p.channel ORDER BY krw DESC LIMIT 5`);
   return {
@@ -67,8 +72,21 @@ export async function summary(tid: number, month?: string | null): Promise<Reven
       const at = utcDate(r.last_ok) ?? utcDate(r.last_upd); if (at) o.lastSyncAt = at.toISOString();
       return o;
     }),
-    byAccount: byAcc.map((r) => ({ accountId: n(r.account_id), handle: String(r.handle), channel: String(r.channel), krw: n(r.krw) })),
-    topPieces: top.map((r) => ({ pieceId: n(r.piece_id), title: String(r.title || ""), channel: String(r.channel), krw: n(r.krw) })),
+    /* [P1R7 B3] 주인이 사라졌거나 이름이 비었으면 **서버가 사람말로 이름 붙인다**(화면이 «?»·«제목 없음»을 그리지 않게).
+       `deleted`/`untitled` 는 화면이 «지운 계정»을 흐리게 그릴 재료 — 금액은 그대로 센다(회계). */
+    byAccount: byAcc.map((r) => {
+      const gone = r.handle === null || r.handle === undefined;
+      const o: RevenueSummary["byAccount"][number] = { accountId: n(r.account_id), handle: gone ? "지운 계정" : String(r.handle), channel: String(r.channel ?? ""), krw: n(r.krw) };
+      if (gone) o.deleted = true;
+      return o;
+    }),
+    topPieces: top.map((r) => {
+      const gone = r.channel === null || r.channel === undefined;      // piece 행 자체가 없다(LEFT JOIN 미스)
+      const title = String(r.title ?? "").trim();
+      const o: RevenueSummary["topPieces"][number] = { pieceId: n(r.piece_id), title: gone ? "지운 글" : (title || "제목 없는 글"), channel: String(r.channel ?? ""), krw: n(r.krw) };
+      if (gone) o.deleted = true; else if (!title) o.untitled = true;
+      return o;
+    }),
   };
 }
 

@@ -25,11 +25,12 @@ import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
 import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
-import { guardSlot, type PieceOrigin } from "./slot-gate";
+import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
 import { checkAiCostCap, requireAiBudget } from "./billing/ai-cost-cap";
 import { seasonalFor } from "./kr-calendar";
 import { findBannedCategory } from "./banned-categories";
 import { writeAudit } from "./audit";
+import { backgroundBase } from "./site-url";   // [AC-53/54] 자기 배경 함수 호출 = «이 배포» · 로컬에서 라이브면 던진다
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -47,6 +48,14 @@ export interface PieceSpec {
   kind?: "post" | "video";
   /** [P1R5 §1.1] kind video 일 때만. */
   video?: VideoSpec;
+  /**
+   * [R7 §1.6] «지금 누르면 **오늘 이 자리**에 들어간다» — 제안 응답에만 싣는다(**briefs 에 저장하지 않는다**).
+   *   왜: 확정 화면이 «내일 07:30»이라 해 놓고 누르면 «오늘 08:00»에 들어가면, 고객이 **누르기 전과 후에 다른 시각**을 본다.
+   *   🔴 **확정이 정본**이다. 이건 «지금 기준»이고 제안~확정 사이에 자리가 찰 수 있다 —
+   *      어긋나면 확정 응답의 `usedTodaySlot` 이 이긴다(화면은 확정 값을 그대로 그린다).
+   *   자리를 고르는 판정은 `findTodayOpenSlot` **한 함수**다(제안과 확정이 같은 자리를 고르게).
+   */
+  usesTodaySlot?: { slotId: number; publishAt: string };
 }
 export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
 export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string }; monetize?: { affiliate?: { productQuery: string; slot: string } | null }; schedule?: { at: string }; drop?: true;
@@ -161,6 +170,35 @@ export function assignAccount(accounts: AccountRow[], channel: string): AccountR
  *   🔴 기본값은 `"auto"`(fail-closed · `confirm` 과 같은 규율) — 아무 말 없이 부르면 보수적으로 군다.
  *   `"manual"` = 사람이 만들기 화면에서 누른 것. 이때만 «계정 없이 영상» 이 열린다.
  */
+/* ───────── [R7 §1.6] «오늘 자리» 고르기 — 제안과 확정이 **같은 함수**를 본다 ───────── */
+
+export interface TodaySlotPick { slotId: number; prevStatus: string; slotPublishAt: Date | null }
+
+/**
+ * 사람이 지금 «만들기»를 누르면 들어갈 **오늘(KST) 자리**. 없으면 null(= 새 자리를 만든다).
+ *   고르는 규칙: 오늘 · 같은 채널 · 아직 글이 안 붙은 자리(`OPEN_SLOT_STATUS` — **슬롯 게이트와 같은 어휘**) ·
+ *   같은 계정 자리를 먼저, 그다음 이른 시각 순, 1칸만.
+ *   🔴 두 곳(제안 미리보기 · 확정 실행)이 이 함수를 같이 쓴다 — 두 벌로 적으면 «미리 말한 자리»와 «실제로 쓴 자리»가 갈라진다.
+ */
+export async function findTodayOpenSlot(tid: number, channel: string, accountId: number | null): Promise<TodaySlotPick | null> {
+  const [row] = await q(sql`SELECT id, status, publish_at FROM slots
+    WHERE tenant_id = ${tid} AND channel = ${channel} AND piece_id IS NULL
+      AND slot_date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+      AND status IN (${sql.join([...OPEN_SLOT_STATUS].map((x) => sql`${x}`), sql`, `)})
+    ORDER BY (account_id IS DISTINCT FROM ${accountId}), publish_at NULLS LAST, id
+    LIMIT 1`);
+  if (!row) return null;
+  return { slotId: n(row.id), prevStatus: String(row.status), slotPublishAt: utcDate(row.publish_at) };
+}
+
+/**
+ * 그 자리에 들어갔을 때 **나가는 시각**. 자리의 시각이 아직 안 지났으면 그 시각(자동 편성이 고른 좋은 시간을 버리지 않는다),
+ * 이미 지났으면 이 글이 원래 잡았던 시각(과거로 예약하면 누르자마자 나가 버린다).
+ */
+export function resolveSlotAt(pick: TodaySlotPick, wantAt: Date): Date {
+  return pick.slotPublishAt && pick.slotPublishAt.getTime() > Date.now() ? pick.slotPublishAt : wantAt;
+}
+
 export async function propose(tid: number, topicId: number, opts: { origin?: PieceOrigin } = {}): Promise<{ ok: true; brief: Brief } | { ok: false; step: string; error: string }> {
   const [trow] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${topicId}`);
   if (!trow) return { ok: false, step: "not_found", error: "소재를 찾을 수 없어요." };
@@ -259,12 +297,30 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
   const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE id = ${briefId}`);
   if (chk?.t !== "array") console.error("[director] briefs.pieces jsonb_typeof !== array", chk);
   const bal = await balance(tid);
-  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode: "reviewed", coinCost, coinsLeft: bal.balance, reasons, pieces: specs } };
+  /* [R7 §1.6 · 메인 지시 2026-09-15] 확정 **전에** 미리 알려 준다 — «누르면 오늘 그 자리에 들어가요».
+     이게 없으면 화면은 «내일 07:30»이라 해 놓고, 누르면 «오늘 08:00»에 들어간다(고객이 누르기 전과 후에 다른 시각을 본다).
+     🔴 **응답에만 싣는다** — `briefs.pieces` 에는 저장하지 않는다(위 INSERT 는 이미 끝났다). 저장하면 «그때의 자리»가 굳어
+        나중에 확정할 때 실제로 고른 자리와 어긋난 채로 남는다.
+     🔴 자리는 **한 칸**이라 첫 spec 에만 붙인다(confirm 의 `takeChannel` 규칙과 같다). 확정이 정본이다. */
+  let outPieces = specs;
+  if ((opts.origin === "manual") && specs.length) {
+    const pick = await findTodayOpenSlot(tid, specs[0].channel, specs[0].accountId ?? null);
+    if (pick) {
+      const at = resolveSlotAt(pick, new Date(specs[0].schedule.at)).toISOString();
+      outPieces = specs.map((s, i) => (i === 0 ? { ...s, usesTodaySlot: { slotId: pick.slotId, publishAt: at } } : s));
+    }
+  }
+  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode: "reviewed", coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces } };
 }
 
 /* ───────── confirm ───────── */
 export type ConfirmResult =
-  | { ok: true; briefId: number; pieceIds: number[]; coinsCharged: number; coinsLeft: number }
+  | { ok: true; briefId: number; pieceIds: number[]; coinsCharged: number; coinsLeft: number;
+      /**
+       * [R7 §1.6] 사람이 «만들기»를 눌러 만든 글이 **오늘 이미 잡혀 있던 편성 자리에 들어갔을 때**만 실린다.
+       *   화면은 이걸 보고 «오늘 자리에 넣었어요 — 19:00 에 나가요» 라고 말한다(없으면 종전대로 «새로 잡았어요»).
+       */
+      usedTodaySlot?: { slotId: number; channel: string; publishAt: string; prevStatus: string } }
   | { ok: false; step: "coin_short"; error: string; need: number; have: number }
   | { ok: false; step: string; error: string };
 
@@ -392,6 +448,22 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
     const [rs] = await q(sql`SELECT status, channel FROM slots WHERE tenant_id = ${tid} AND id = ${reuseSlotId}`);
     if (rs) { reuseSlotPrevStatus = String(rs.status); reuseChannel = String(rs.channel); }
   }
+
+  /* ══════════ [R7 §1.6] 수동 «만들기»는 **그날 자동 자리를 쓴다** ══════════
+     종전엔 사람 경로가 늘 **새 자리를 만들었다**. 자동 편성이 잡아 둔 오늘 자리는 그대로 남아,
+     같은 채널에 **하루 두 편**이 나갔다 — 계정 캐던스(daily_cap)를 사람 손으로 우회하는 길이었고,
+     사장님 눈엔 «한 번 눌렀는데 두 개가 올라간» 사고로 보인다.
+     🔴 자동 경로(origin auto)는 손대지 않는다 — 크론은 `opts.slotId` 로 자리를 못 박아 부른다.
+     🔴 코인은 **재차감 0** — 자리를 바꿔 쓰는 것뿐이고 글 1편 값은 아래에서 한 번만 나간다.
+        오히려 그 자리를 나중에 크론이 또 만들 일이 없어져 **한 편 값을 아낀다**.
+     고르는 규칙: 오늘(KST) · 같은 채널 · 아직 글이 안 붙은 자리(`OPEN_SLOT_STATUS` — 슬롯 게이트와 **같은 어휘**) ·
+     같은 계정 자리를 먼저, 그다음 이른 시각 순. */
+  const autoSlot = origin === "manual" && !reuseSlotId ? await findTodayOpenSlot(tid, specs[0].channel, specs[0].accountId ?? null) : null;
+  /* 이 아래부터는 «크론이 못 박아 준 자리»와 «오늘 찾아낸 자리»를 한 벌로 다룬다(뒤 로직을 두 벌로 만들지 않는다). */
+  const takeSlotId = reuseSlotId ?? (autoSlot ? autoSlot.slotId : null);
+  const takeChannel = reuseSlotId ? reuseChannel : specs[0].channel;
+  const takePrevStatus = reuseSlotId ? reuseSlotPrevStatus : (autoSlot ? autoSlot.prevStatus : "topic_assigned");
+  let usedTodaySlot: { slotId: number; channel: string; publishAt: string; prevStatus: string } | undefined;
   const created: { pieceId: number; slotId: number; isVideo?: boolean; reused?: { prevStatus: string } }[] = [];
   let charged = 0;
   const rollback = async (reason: string) => {
@@ -418,13 +490,25 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       /* 편성 자리를 빌려 쓰는가(크론) — 아니면 지금처럼 새 자리를 만든다(사람이 «만들기»로 끼워 넣는 글).
          빌려 쓰는 자리는 **채널이 같은 첫 spec 하나**에만 준다(한 자리에 두 글이 들어갈 수 없다). */
       let slotId: number, reused: { prevStatus: string } | undefined;
-      if (reuseSlotId && !usedReuseSlot && s.channel === reuseChannel) {
+      if (takeSlotId && !usedReuseSlot && s.channel === takeChannel) {
         usedReuseSlot = true;
+        /* [R7 §1.6] 나가는 시각 — 자리의 시각이 **아직 안 지났으면 그 시각**으로 간다(자동 편성이 고른 좋은 시간을 버리지 않는다).
+           이미 지난 자리면(09시 자리인데 22시에 눌렀다) 이 글이 원래 잡았던 시각을 쓴다 — 과거로 예약하면 누르자마자 나가 버린다.
+           두 행(piece.scheduled_for · slot.publish_at)이 **같은 값**을 갖게 아래에서 둘 다 쓴다(값이 갈라지면 편성표와 실제가 어긋난다). */
+        const slotAt = autoSlot ? resolveSlotAt(autoSlot, new Date(s.schedule.at)) : new Date(s.schedule.at);
         const [sl] = await q(sql`UPDATE slots SET piece_id = ${pieceId}, brief_id = ${briefId}, topic_id = ${topicId}, account_id = ${s.accountId},
-            status = ${"producing"}, note = NULL, updated_at = NOW()
-          WHERE tenant_id = ${tid} AND id = ${reuseSlotId} AND piece_id IS NULL RETURNING id`);
+            status = ${"producing"}, note = NULL, publish_at = ${slotAt.toISOString()}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW()
+          WHERE tenant_id = ${tid} AND id = ${takeSlotId} AND piece_id IS NULL RETURNING id`);
         if (!sl) { await rollback("slot_taken"); return { ok: false, step: "slot_gate", error: "편성 자리를 그새 다른 글이 차지했어요." }; }
-        slotId = reuseSlotId; reused = { prevStatus: reuseSlotPrevStatus };
+        slotId = takeSlotId; reused = { prevStatus: takePrevStatus };
+        if (autoSlot) {
+          await q(sql`UPDATE pieces SET scheduled_for = ${slotAt.toISOString()}::timestamptz AT TIME ZONE 'UTC' WHERE id = ${pieceId}`);
+          usedTodaySlot = { slotId, channel: s.channel, publishAt: slotAt.toISOString(), prevStatus: takePrevStatus };
+          /* 감사 1행 — 🔴 **await**(응답을 돌려주면 인보케이션이 끝난다 · `void writeAudit` 금지).
+             «왜 새 자리가 안 생겼나»를 나중에 설명할 수 있어야 한다(편성표에서 자리 수가 안 늘어난 이유). */
+          await writeAudit({ tenantId: tid, action: "manual_used_auto_slot", actorType: "user", actorId, target: `piece:${pieceId}`,
+            detail: { slotId, briefId, channel: s.channel, prevStatus: takePrevStatus, publishAt: slotAt.toISOString(), accountId: s.accountId ?? null }, riskLevel: "low" });
+        }
       } else {
         const slotDate = kstDateStr(new Date(s.schedule.at));
         const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin)
@@ -452,7 +536,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   }
   await Promise.all(created.map((c) => (c.isVideo ? triggerVideo(c.pieceId, tid) : triggerGenerate(c.pieceId, tid))));   // ★C4 fix · [P1R5] 영상은 generate-video-background: 호출 실패를 삼키지 않는다(배경 함수는 202 즉답) · piece 여럿이면 동시에
   const bal = await balance(tid);
-  return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance };
+  return { ok: true, briefId, pieceIds: created.map((c) => c.pieceId), coinsCharged: charged, coinsLeft: bal.balance, ...(usedTodaySlot ? { usedTodaySlot } : {}) };
 }
 
 /**
@@ -483,13 +567,16 @@ async function failTrigger(tid: number, pieceId: number, reason: string): Promis
 /** 배경 생성 함수 호출(POST · x-internal-secret). 실패는 전부 정직하게 piece failed + 환급 + 알림(폴백 0). */
 export async function triggerGenerate(pieceId: number, tid: number): Promise<boolean> {
   const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
-  const site = String(process.env.SITE_URL ?? "").replace(/\/$/, "");
-  if (!secret || !site) {
-    const missing = !secret ? "INTERNAL_SECRET" : "SITE_URL";
-    console.error(`[director] ${missing} 미설정 — 배경 생성 호출 불가`);
-    await failTrigger(tid, pieceId, `서버 설정(${missing})이 없어 생성을 시작하지 못했어요.`);
+  if (!secret) {
+    console.error("[director] INTERNAL_SECRET 미설정 — 배경 생성 호출 불가");
+    await failTrigger(tid, pieceId, "서버 설정(INTERNAL_SECRET)이 없어 생성을 시작하지 못했어요.");
     return false;
   }
+  /* 🔴 [AC-53/54] 자기 배경 함수는 «지금 돌고 있는 이 배포»를 부른다 — `SITE_URL`(정본=라이브)을 먼저 보면 로컬 netlify dev 가
+     라이브를 불러 스텁 없이 진짜 LLM·이미지가 돈다(2026-09-15 B-1 실측 $3.63). `backgroundBase` 는 로컬에서 라이브면 **던진다**. */
+  let site: string;
+  try { site = backgroundBase(); }
+  catch (e) { console.error(`[director] ${String((e as Error)?.message ?? e)}`); await failTrigger(tid, pieceId, String((e as Error)?.message ?? "서버 주소가 없어 생성을 시작하지 못했어요.")); return false; }
   // 응답을 기다리되 6초까지만(호출이 «닿았는지»만 보면 된다). 프로덕션의 background 함수는 202 를 즉시 준다.
   //   ⚠️ `netlify dev` 는 -background 함수를 **동기로** 실행한다(PITFALLS AC-12) — 끝까지 기다리면 이 함수가 먼저 타임아웃한다.
   //   따라서 시간 초과(Abort)는 «호출은 닿았다»로 본다 — 생성 결과의 실패는 배경 함수 자신이 failed+환급+알림으로 남긴다.

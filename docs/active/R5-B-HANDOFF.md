@@ -1,12 +1,13 @@
-# B-1 인수인계 — 영상(R5) · 내보내기·공유 카드(R6) (B-1 → 새 세션)
+# B-1 인수인계 — 영상(R5) · 내보내기·공유 카드(R6) · 영상 축 개통(R7 §1) (B-1 → 새 세션)
 
-> 🔴 **이 문서를 읽는 순서**: **§0(지금 상태) → §8~§12(현재)** 를 먼저 읽어라.
+> 🔴 **이 문서를 읽는 순서**: **§0(지금 상태) → §13(R7 · 가장 최근) → §8~§12** 를 먼저 읽어라.
 > **§1~§7 은 2026-09-15 R5 중간 시점의 스냅숏**이다 — «어떻게 여기까지 왔나»를 남겨 둔 기록이고, 그 안의 «미착수»·«못 정한 것»은
 > **전부 끝났다**(어디서 끝났는지는 각 절 머리에 적어 뒀다). 지금 할 일을 §2 에서 찾으면 안 된다.
 
 > 계약 정본 **R5** `docs/active/2026-09-15-P1R5-contract.md`(v5.6 — §1 이 B-1 몫) · **R6** `docs/active/2026-09-15-P1R6-contract.md`(v6.0 — §2 가 B-1 몫)
 > 조사 정본 `docs/active/2026-09-14-R5-presurvey-video.md`(A~G) · 규칙은 CLAUDE.md, 설계는 DESIGN.md, **키 이름은 계약서가 정본**.
-> 이력: §1~§7 = 2026-09-15 R5 중간(작성 `autocreate-b-8a` · 브랜치 그때 `feature/p1r5-back`) · §8~§12 = R5 완료 + R6 §2 완료(2026-09-15).
+> 계약 정본 **R7** `docs/active/2026-09-15-P1R7-contract.md`(§1 이 B-1 몫)
+> 이력: §1~§7 = 2026-09-15 R5 중간(작성 `autocreate-b-8a` · 브랜치 그때 `feature/p1r5-back`) · §8~§12 = R5 완료 + R6 §2 완료(2026-09-15) · **§13 = R7 §1 완료(2026-09-15 · `autocreate-b-53`)**.
 
 ---
 
@@ -15,8 +16,8 @@
 | | |
 |---|---|
 | 워크트리 | **`../AutoCreate-B1`** — 🔴 이 폴더에서 세션을 띄워라(다른 B 가 `AutoCreate-B` 를 쓴다 · 폴더를 공유하면 커밋이 섞인다) |
-| 브랜치 | `feature/p1r6-back1`(베이스 main · R5 분 `feature/p1r5-back` 은 전부 머지됨) |
-| 상태 | **R5 §1 100% · R6 §2 100%** — 둘 다 main 머지 완료 · 워킹트리 clean |
+| 브랜치 | **`feature/p1r7-back1`**(베이스 main · R5·R6 분은 전부 머지됨) |
+| 상태 | **R5 §1 100% · R6 §2 100% · R7 §1 100%** — §1.1~§1.5 는 main 머지 완료(`64d9b51`) · §1.6(`28588ed`) 머지 대기 |
 | tsc | `npx tsc --noEmit` **0건** |
 | DDL | `drizzle/0008-r5-video.sql` 적용 완료 · ⚠️ **0008 이 둘**(B2 것과) — **다음 번호는 0009** · R6 에서 B-1 이 더한 DDL 은 **없다**(내보내기 상태는 `tenants.settings.export` jsonb) |
 | 보고 머리말 | `■ B-1 (영상·내보내기) · 폴더 AutoCreate-B1 · 브랜치 <브랜치> · 지금: <한 줄>` — 사장님이 창만 보고 구분하신다(메인 지시) |
@@ -220,3 +221,78 @@ VIDEO_PROVIDER_STUB=1 npx --yes tsx --env-file=.env scripts/_smoke/r5-b1-bgm-mix
 ```
 > 🔴 스모크는 **미커밋**이라 워크트리에만 있다. 새 PC 로 옮기거나 지웠다면 이 문서의 목적(무엇을 재는가)만 보고 다시 짜라 —
 > 재는 것은 ①교차 누수 0 ②스텁에서 실호출 0(`ai_usage.model='stub'`) ③덮어쓸 수 있는 키 0 ④그림을 눈으로 확인.
+
+---
+
+## 13. R7 §1 — 영상 축 «개통»(2026-09-15 · 세션 `autocreate-b-53`)
+
+> R5·R6 이 «영상을 만들 수 있게» 했다면 R7 §1 은 **고객 화면에서 실제로 쓸 수 있게** 한 라운드다.
+> 2026-09-15 설계감사(`docs/active/audit/2026-09-15-B1.md`)의 결론 «영상 축은 **미개통**(없는 게 아니라 문이 없다)» 을 푸는 절.
+
+### 13.1 한 일(커밋 순서)
+
+| 절 | 커밋 | 한 줄 |
+|---|---|---|
+| §1.1 | `bae443f` | `GET /api/tenant-settings`(`kinds`·`kindsSet`) + `normalizeKinds`(«글»은 항상 · 영상만 토글) · 소재 재사용 30→90일 |
+| §1.2 | `5bd1e0c` | 계정 없이 영상 만들기 — `propose(..., { origin:"manual" })` 일 때만(자동은 fail-closed 유지) |
+| §1.3 | `34c5ea7` | `GET /api/piece-video` · `POST /api/post-mark-published` · `lib/channel-url.ts`(신규) |
+| §1.4 | `64f323e` | 홈 «해야 할 일» 7줄 |
+| §1.5 | `3e19390` | 프레임 지문 실동작 · `JudgeAxis.pending` |
+| §1.6 | `28588ed` | 수동 «만들기»가 그날 자동 자리를 쓴다 |
+
+### 13.2 새로 생긴 파일·키(다음 세션이 알아야 할 것)
+
+| 자리 | 무엇 |
+|---|---|
+| `netlify/functions/piece-video.ts` | `/api/piece-video`(mp4 내려받기) · `/api/post-mark-published`(직접 올린 주소 적기) — **한 이야기라 한 파일** |
+| `lib/channel-url.ts` | 채널↔도메인 대조 + **`channelRef` 되뽑기**. 순수(임포트 0) |
+| `lib/video/types.ts` | `videoFilename`/`videoSlug`/`kstDateCompact` · `RenderReport.thumbGray?`·`framePhash?` · `JudgeAxis.pending?` |
+| 응답 키(A 와 약속) | `piece-video`: `{ ok, pieceId, channel, status, url, filename, expiresInSec, bytes, durationSec, stage? }`<br>`post-mark-published`: `{ ok, postId, pieceId, channel, already, url, channelRef?, slotId?, message }`<br>`director-confirm`: `usedTodaySlot?: { slotId, channel, publishAt, prevStatus }`<br>`home-summary.todo[]`: `count?`·`pieceId?` + kind `awaiting_manual`·`pending_login`·`runner`·`coin_short`·`slot_gate`·`forcedByPlan` |
+| 감사 action | `post_marked_manual` · `manual_used_auto_slot` |
+| `posts.published_via` | **`manual`** 이 실제로 쓰이기 시작했다(DDL 0001 부터 있던 3번째 값) |
+
+### 13.3 결정(다시 묻지 말 것)
+
+1. **mp4 파일이름은 ASCII 만**. `r2PresignGet` 이 싣는 건 `filename="…"` 한 벌이라 한글은 브라우저마다 깨진다(프리사인은 교차 출처라 `<a download>` 도 무시된다).
+   제목의 한글은 떨어지고 남는 글자가 없으면 KST 날짜(`AC-329-20260915.mp4`). **RFC 5987 `filename*` 은 `lib/r2.ts`(B2) 몫으로 넘겼다** — 붙으면 `videoFilename` 한 함수만 고치면 된다.
+2. **`post-mark-published` 는 `requireWritable` 을 안 부른다** — 이미 밖에 나간 일을 «기록»하는 경로다(돈 드는 경로가 아니고, 막으면 이미 올라간 글의 수익을 영영 못 붙인다).
+3. **300자 넘는 주소는 자르지 않고 거부**한다(`finalizePublish` 가 300자로 자르는데 잘린 주소는 안 열리는 링크가 된다).
+4. **자격 평문 표면을 늘리지 않는다** — 워드프레스 `siteUrl` 대조 대신 «제 도메인 채널은 모르는 도메인 통과 · 단 **다른 채널 도메인이면 거부**».
+5. **`published_via='manual'` 은 DB 에 정본대로 쓰고 타입만 호출 한 줄에서 맞췄다** — `PublishVia` 는 커넥터 반환(`PublishOk.via`)과 겸용이라 넓히면 `publisher.ts:138` 분기 뜻이 흐려진다. `FinalizeInput.via` 분리는 **B2 몫**.
+6. **지문 없음 = 보류**(AC-33). 단 «견줄 상대가 아예 없으면» 그건 보류가 아니라 **진짜 통과**다(겁주지 않는다).
+7. **P1R5 §182 «유사하면 1회 자동 재생성»은 R7 에서 안 켰다** — 사유 원가 · **R8 후보**(메인 결정). 지금은 사람 검수로 간다(조용한 통과 아님).
+
+### 13.4 함정(내가 실제로 밟은 것만 · §5·§11 에 더한다)
+
+- 🔴 **유튜브 수익은 `posts.external_url` 이 아니라 `posts.channel_ref`(영상 id)로 붙는다**(`lib/revenue/youtube.ts:35`).
+  주소만 적어 두면 손으로 올린 쇼츠는 영영 수익이 안 붙는다 — 커넥터와 **같은 모양**으로 주소에서 되뽑아야 한다.
+- 🔴 **지문은 두 군데에서 죽는다**: ①`lib/runner-jobs.ts` 러너 보고 경계(필드를 **골라 담는** 자리 — C 가 ffprobe 실측을 여기서 흘린 전례) ②`finalizeRender` 의 `piece_assets.meta`.
+  러너만 고치면 «보내는데 아무 일도 안 일어나는» 상태가 된다.
+- 🔴 **`account_id IS DISTINCT FROM NULL` 은 NULL 끼리를 «같다»로 본다** — 계정 없이 만든 영상(§1.2)이 통째로 유사도 검사 밖이었다.
+- 🔴 **러너 «꺼짐»을 `runner_devices.status` 로 판정하면 안 된다** — 프로세스가 죽어도 그 칸은 `online` 인 채로 굳는다. 하트비트(5분)로 잰다.
+- 🔴 **경과 시간은 내림이 아니라 반올림** — 40분 전을 «39분째», 3시간 전을 «2시간째»로 말하면 사장님 시계와 어긋난다.
+- 🔴 **파이썬으로 파일을 고칠 때 CRLF 가 LF 로 떨어진다**(universal newlines). 6줄 바뀐 커밋이 466줄 diff 가 됐다 —
+  `lib/video/types.ts`·`render-queue.ts`·`home-summary.ts` 는 **CRLF** 다. 편집 전후로 `count(b"
+")` 를 대조해라.
+- 🔴 **커밋을 버리면(reset --soft 재작성) 메인에 먼저 알려라** — 메인이 이미 머지했을 수 있다(실제로 한 번 충돌시켰다).
+
+### 13.5 스모크(전부 미커밋 · #16 — 무엇을 재는가만 남긴다)
+
+```
+npx tsx scripts/_smoke/r7-b1-noaccount.mts     # §1.1·§1.2 kinds 정규화 · 계정 0 에서 수동만 영상
+npx tsx scripts/_smoke/r7-b1-mp4-out.mts       # §1.3 서명 URL 을 **실제로 눌러** Content-Disposition·바이트 대조 · 멱등 2회
+npx tsx scripts/_smoke/r7-b1-home-todo.mts     # §1.4 7줄 · 러너 5경우 · 레지스트리 실값 대조
+npx tsx scripts/_smoke/r7-b1-fingerprint.mts   # §1.5 **음성 대조**(같은 그림이 실제로 떨어지는가)
+npx tsx scripts/_smoke/r7-b1-todayslot.mts     # §1.6 자리 수 불변 · 코인 1편 값 · 크론 경로 무변경
+```
+> 재는 것: ①**음성 대조**(결함을 일부러 만들면 떨어지는가 · AC-33) ②숫자만 보지 말고 **파일·그림을 열어 볼 것** ③0건이면 행이 없는가 ④스텁에서 실호출 0.
+
+### 13.6 남은 것(B-1 몫이 아닌 것 포함)
+
+| 무엇 | 누구 | 상태 |
+|---|---|---|
+| 러너가 `thumbGray`(32×32 그레이 raw base64) 또는 `framePhash` 를 보고에 싣기 | B2 | 메인이 전달함 · **오면 즉시 가동**(서버는 다 됐다) |
+| `r2PresignGet` 에 RFC 5987 `filename*` | B2 | 메인이 전달함 |
+| `FinalizeInput.via` 를 커넥터 타입에서 분리 | B2 | 메인이 전달함 |
+| `gate_report.axes[].pending` 을 검수 화면이 ✅ 로 안 그리게 | A | 메인이 전달함 |
+| P1R5 §182 유사 시 1회 자동 재생성 | B-1 | **R8 후보**(원가 · 메인 결정) |
