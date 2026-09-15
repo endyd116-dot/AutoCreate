@@ -47,13 +47,13 @@
 ## 3. 설치 배치(권장)
 
 ```
-C:\ac-runner\            ← AC 러너 (이 문서가 다루는 것 · 새로 만든다)
+C:\autocreate-runner\    ← AC 러너 (이 문서가 다루는 것 · zip 을 C:\ 에 풀면 이 이름으로 생긴다)
    ac-runner.mjs · run.bat · profiles\ · _shots\ · .token
 C:\...AM 러너 폴더...     ← 🔴 건드리지 않는다
 ```
 
 - **반드시 다른 폴더.** 같은 폴더에 풀면 `profiles/`·`.token`·`package.json` 이 섞여 **두 서비스가 서로의 세션을 쓰게 된다**(AC-3 이 막으려는 바로 그 사고).
-- 경로에 **한글·공백을 피한다**(`C:\ac-runner\` 권장) — 한글 경로 자체는 동작하지만(2026-09-15 실측) 콘솔 표시가 깨져 문제 추적이 어려워진다.
+- 경로에 **한글·공백을 피한다**(`C:\autocreate-runner\` 권장) — 한글 경로 자체는 동작하지만(2026-09-15 실측) 콘솔 표시가 깨져 문제 추적이 어려워진다.
 
 ---
 
@@ -63,7 +63,7 @@ C:\...AM 러너 폴더...     ← 🔴 건드리지 않는다
 
 | 방법 | 명령 | 되돌리기 |
 |---|---|---|
-| **권장 · 작업 스케줄러** | `schtasks /create /tn "AutoCreate Runner" /tr "C:\ac-runner\run.bat" /sc onlogon /rl highest /f` | `schtasks /delete /tn "AutoCreate Runner" /f` |
+| **권장 · 작업 스케줄러** | `schtasks /create /tn "AutoCreate Runner" /tr "C:\autocreate-runner\run.bat" /sc onlogon /rl highest /f` | `schtasks /delete /tn "AutoCreate Runner" /f` |
 | 간단 · 시작 프로그램 | `shell:startup` 폴더에 `run.bat` 바로가기를 넣고 이름을 **«AutoCreate Runner»** 로 바꾼다 | 그 바로가기를 지운다 |
 
 🔴 **이름에 «AutoCreate» 를 반드시 넣는다.** 나중에 «러너가 두 개 도는데 어느 게 뭐지»를 사장님이 5초에 알 수 있어야 한다.
@@ -103,7 +103,7 @@ AM 계정 하나가 정지될 때 AC 계정까지 같이 물릴 수 있다. 우�
 
 **청소 규칙(권장 · 사장님 노트북에 한 줄로 넣을 수 있다)**
 ```
-forfiles /p C:\ac-runner\_shots /d -14 /c "cmd /c if @isdir==TRUE rd /s /q @path" 2>nul
+forfiles /p C:\autocreate-runner\_shots /d -14 /c "cmd /c if @isdir==TRUE rd /s /q @path" 2>nul
 forfiles /p %TEMP% /m ac-render-* /d -2 /c "cmd /c if @isdir==TRUE rd /s /q @path" 2>nul
 ```
 > ⚠️ `_shots` 는 **문제를 추적하는 증거**다. 2주는 남긴다(문의가 들어오면 그 사진으로 찾는다).
@@ -155,9 +155,9 @@ forfiles /p %TEMP% /m ac-render-* /d -2 /c "cmd /c if @isdir==TRUE rd /s /q @pat
 
 ## 10. 사장님이 확인할 목록(합동 세션)
 
-- [ ] AC 러너는 **`C:\ac-runner\`** 에만 설치됐다(AM 폴더 무접촉)
+- [ ] AC 러너는 **`C:\autocreate-runner\`** 에만 설치됐다(AM 폴더 무접촉)
 - [ ] 자동 시작 이름이 **«AutoCreate Runner»** 로 보인다(AM 것과 구분된다)
 - [ ] 앱에서 이 기기가 **«켜짐»**으로 보인다
 - [ ] **AM 쪽은 아무것도 바뀌지 않았다** — AM 러너 창이 그대로 돌고 있다
 - [ ] (프록시를 샀다면) 이 노트북의 AC 계정이 **프록시 IP 로** 나간다(앱의 기기 상세에서 확인)
-- [ ] 제거하려면: 작업 스케줄러 항목 삭제 → `C:\ac-runner\` 폴더 삭제 → 앱에서 기기 삭제. **AM 에는 흔적이 남지 않는다**
+- [ ] 제거하려면: 작업 스케줄러 항목 삭제 → `C:\autocreate-runner\` 폴더 삭제 → 앱에서 기기 삭제. **AM 에는 흔적이 남지 않는다**
