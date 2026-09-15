@@ -51,8 +51,17 @@ function unescapeHtml(s) {
  *     row       나열 — 요금표 같은 행                     → 러너: 굵게 + 고정색(항목마다 색이 돌면 알록달록해진다)
  *     bold      굵게만(색 0)                              → 러너: 굵게
  *     underline 밑줄                                      → 러너: 도구모음 밑줄을 **선택 범위에** (캐럿 토글 아님)
+ *     italic    기울임                                    → 🔴 **안 낸다**(못 내는 게 아니다 · 아래)
+ *
+ *   🔴 **기울임은 «못 낸다»가 아니라 «안 낸다»** (2026-09-16 B2↔B 합의 · 어휘는 B 가 확정).
+ *      기울임은 우리 자가검사가 **번짐 증상으로 세는 축**이다(사장님이 보신 «빨강+가운데+기울임»).
+ *      일부러 켜면 `measureFormatBleed` 가 **우리 글을 잡는다** — 계약의 두 부분이 서로 싸우는 자리다
+ *      (CLAUDE §9 «계약의 최소치도 게이트다 · 싸우면 매번 재작성이 돌아 돈이 두 배»의 서식판).
+ *      ⇒ 어휘로는 **받고**(서버가 보낼 수 있다) 러너는 `channel_unsupported` 로 내려앉히고 **그 사실을 적는다**.
  */
-export const MARK_KINDS = new Set(["value", "line", "row", "bold", "underline"]);
+export const MARK_KINDS = new Set(["value", "line", "row", "bold", "underline", "italic"]);
+/** 🔴 러너가 «일부러 안 내는» 종류 — 어휘에는 있지만 이 채널에서는 세우지 않는다(조용히 버리지 않고 적는다). */
+export const MARK_NOT_EMITTED = new Set(["italic"]);
 
 /** 강조 위생 상한 — 🔴 **계획 단계에서 확정한다**(실행부 임기응변 금지 · AM 정본값).
  *  서버가 더 적게 보내면 그게 이긴다(여기 값은 «이보다 많이는 안 낸다»는 천장이다). */
@@ -154,13 +163,13 @@ function cleanPart(s, isFirst, isLast) {
  */
 /** 지금 op 들에 걸려 있는 마크 수 — 상한을 먹이기 «전»에 세면 planned, «뒤»에 세면 kept 다. */
 export function countMarks(ops) {
-  const n = { value: 0, line: 0, row: 0, bold: 0, underline: 0 };
+  const n = { value: 0, line: 0, row: 0, bold: 0, underline: 0, italic: 0 };
   for (const op of ops) for (const p of Array.isArray(op?.parts) ? op.parts : []) if (p.mark && n[p.mark] !== undefined) n[p.mark]++;
   return n;
 }
 
-export function applyMarkBudget(opsWithParts, demoted) {
-  const used = { value: 0, line: 0, row: 0, bold: 0, underline: 0 };
+export function applyMarkBudget(opsWithParts, demoted, caps) {
+  const used = { value: 0, line: 0, row: 0, bold: 0, underline: 0, italic: 0 };
   const note = (kind, why, sample) => { if (demoted && demoted.length < 40) demoted.push({ kind, why, sample: String(sample ?? "").slice(0, 24) }); };
   let prevParaHadLine = false;
   for (const op of opsWithParts) {
@@ -177,6 +186,13 @@ export function applyMarkBudget(opsWithParts, demoted) {
     for (const p of parts) {
       if (!p.mark) continue;
       const demote = (why) => { note(p.mark, why, p.t); p.mark = null; };
+      /* 🔴 «일부러 안 내는 것»과 «채널이 못 내는 것»을 **같은 why 로** 적는다 — 둘 다 고객에겐 «이 채널에선 안 나와요»다.
+         다른 점은 우리 쪽 할 일이고, 그건 코드 주석(MARK_NOT_EMITTED)이 말한다. */
+      if (MARK_NOT_EMITTED.has(p.mark)) { demote("channel_unsupported"); continue; }
+      /* 🔴 채널 표가 **명시적으로 false** 일 때만 안 낸다. `null`(모른다)이면 **해 본다** —
+         «아직 모른다»로 막지 않는다(CLAUDE §9) 그리고 «모른다»를 «못 한다»로 바꾸지 않는다(AC-92).
+         해 보고 안 되면 실행부가 `channel_unsupported` 로 적는다(그게 다음 판의 표를 채우는 재료다). */
+      if (caps && caps[p.mark] === false) { demote("channel_unsupported"); continue; }
       if (p.mark === "value") {
         if (p.t.length > MARK_BUDGET.valueMaxChars) { demote("too_long"); continue; }
         if (used.value >= MARK_BUDGET.valueMaxPerPost) { demote("budget"); continue; }
@@ -212,7 +228,12 @@ function opsFromBlocks(blocks, images, demoted) {
      소제목은 이미 «굵게 + 크기»를 선택 범위로 먹이는 중이라(sizeLastTyped) 그 위에 또 선택을 겹치면 자리가 갈린다 —
      🔴 이번 라운드는 **소제목에 마크를 안 낸다**. 조용히 버리지 않고 block_unsupported 로 적는다(AC-9). */
   const marksOf = (b) => partsFromMarks(b?.text, b?.marks, demoted);
-  const note = (kind, sample) => { if (demoted && demoted.length < 40) demoted.push({ kind, why: "block_unsupported", sample: String(sample ?? "").slice(0, 24) }); };
+  /* 🔴 **두 가지 «못 냈어요»를 섞지 않는다**(2026-09-16 B 와 어휘 확정):
+       · `block_unsupported` — 마크는 왔는데 **그 블록이 조각을 실을 수 없다**(목록·표·FAQ 는 op 가 줄 하나씩이다)
+       · `no_editor_op`      — **블록 자체**를 에디터 요소로 못 세운다(표 → 줄글 · 장소 → 링크 한 줄)
+     한 칸으로 뭉치면 「우리가 할 일」이 달라지는데 그게 안 보인다 — 앞은 «조각을 실을 칸을 만들자», 뒤는 «에디터 요소를 배우자». */
+  const note = (kind, sample, why = "block_unsupported") => { if (demoted && demoted.length < 40) demoted.push({ kind, why, sample: String(sample ?? "").slice(0, 20) }); };
+  const noteNoOp = (blockType, sample) => note(blockType, sample, "no_editor_op");
   const dropMarks = (b) => { for (const m of Array.isArray(b?.marks) ? b.marks : []) note(String(m?.kind ?? ""), b?.text); };
   /* 🔴 목록·표·FAQ 는 op 가 줄 하나씩이라 **조각(parts)을 실을 칸이 없다** — 거기 있던 굵게는 진짜로 사라진다.
      사라지는 것을 «없던 일»로 두지 않는다(AC-9). 소제목은 이미 굵게+크기라 잃는 게 없으니 안 센다. */
@@ -257,7 +278,7 @@ function opsFromBlocks(blocks, images, demoted) {
           const line = (row ?? []).map((c) => clean(c)).filter(Boolean).join(" · ");
           if (line) ops.push({ op: "para", text: line });
         }
-        if ((b?.rows ?? []).length) ops.push({ op: "note", text: "표는 줄글로 넣었습니다(에디터 표 미지원)" });
+        if ((b?.rows ?? []).length) { noteNoOp("table", (b.rows[0] ?? []).join(" · ")); ops.push({ op: "note", text: "표는 줄글로 넣었습니다(에디터 표 미지원)" }); }
         break;
       case "faq":
         dropMarks(b);
@@ -293,12 +314,15 @@ function opsFromBlocks(blocks, images, demoted) {
         const line = [name, clean(pl.address), clean(pl.note)].filter(Boolean).join(" · ");
         if (url) ops.push({ op: "link", text: line, url });
         else ops.push({ op: "para", text: line });
+        noteNoOp("place", name);
         ops.push({ op: "note", text: "장소 카드는 아직 못 넣어서 링크로 넣었습니다" });
         break;
       }
       case "adsense":
         /* 애드센스 코드는 스크립트라 네이버·티스토리 에디터 본문에 그대로 넣을 수 없다.
-           서버 게이트가 채널별로 이미 정리했다(네이버는 제거) — 러너는 아무것도 하지 않는다. */
+           서버 게이트가 채널별로 이미 정리했다(네이버는 제거) — 러너는 아무것도 하지 않는다.
+           🔴 그래도 **«안 냈다»고는 적는다** — 조용한 0건 금지(PITFALLS #7). 화면은 «이 채널엔 광고를 못 넣어요»를 말할 수 있어야 한다. */
+        noteNoOp("adsense", "");
         break;
       case "hashtags":
         if (text) ops.push({ op: "tags", text });
@@ -407,8 +431,11 @@ export function planEditorOps(payload) {
 
   /* 🔴 상한은 **여기서 한 번**에 먹인다 — 문단마다 따로 세면 «글당 상한»이 뜻이 없다.
      순서가 중요하다: 고지·태그를 제자리에 놓은 **뒤**에 세야 «연속 문단 줄강조 금지»가 실제 순서로 판정된다. */
+  /* [R9-4] 🔴 채널 표는 **서버가 믿는 표**다(`lib/channel-registry.ts formatCaps` · B). 러너 payload 에 실려 온다.
+     없으면 «모른다»고 보고 해 본다 — 표가 없다고 안 내면 그게 «아직 모른다로 막기»다(CLAUDE §9). */
+  const caps = (payload?.formatCaps && typeof payload.formatCaps === "object") ? payload.formatCaps : null;
   const marksPlanned = countMarks(finalOps);
-  const marksKept = applyMarkBudget(finalOps, demoted);
+  const marksKept = applyMarkBudget(finalOps, demoted, caps);
 
   const stats = {
     total: finalOps.length,

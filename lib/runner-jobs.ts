@@ -798,7 +798,7 @@ export async function claimJobs(
 /* ─────────────────────────── 보고(report) ─────────────────────────── */
 
 /** [R9-2] 인라인 서식 뜻 다섯 — 러너 `runner/lib/plan.mjs MARK_KINDS` 와 **같은 어휘**(두 벌이면 갈린다). */
-export type FormatMarkKind = "value" | "line" | "row" | "bold" | "underline";
+export type FormatMarkKind = "value" | "line" | "row" | "bold" | "underline" | "italic";
 export type FormatMarkCount = Record<FormatMarkKind, number>;
 export interface RunnerFormatMarks {
   planned?: FormatMarkCount | null;
@@ -871,6 +871,8 @@ const FORMAT_WHY_FIELD: Record<string, string> = {
   budget: "highlight", too_long: "highlight", url_para: "link_first",
   block_unsupported: "list_emphasis", channel_unsupported: "highlight",
   caret_drift: "emphasis_place", range_invalid: "emphasis_place",
+  /* 🔴 «블록 자체를 에디터 요소로 못 세웠다» — 마크 이야기가 아니다(표·장소·광고). `kind` 가 **블록 종류**로 온다. */
+  no_editor_op: "editor_element",
 };
 
 /**

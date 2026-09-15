@@ -319,6 +319,37 @@ console.log("\n[⑥ 계획층 — 뜻을 받고 상한을 먹인다]");
   ok(few.stats.demoted.length === 0 && few.stats.marks.kept.value === 1 && few.stats.marks.kept.underline === 1,
     "F-14c 대조군 짝 — 상한 안의 글은 **하나도 안 깎인다**(통과해야 하는 케이스를 같이 잰다 · AC-68)",
     `강등 ${few.stats.demoted.length}`);
+
+  /* ═══ 채널 표(R9-4) — 🔴 `null`(모른다)과 `false`(못 한다)는 **다른 사실**이다 ═══ */
+  const mk = (caps) => PLAN.planEditorOps({
+    formatCaps: caps,
+    blocks: [{ type: "para", text: "밑줄이 있는 문단입니다", marks: [{ s: 0, e: 2, kind: "underline" }] }],
+  });
+  ok(mk({ underline: false }).stats.marks.kept.underline === 0
+    && mk({ underline: false }).stats.demoted.some((d) => d.why === "channel_unsupported"),
+    "F-15 채널 표가 **false** 면 안 낸다(그리고 «못 냈다»고 적는다)");
+  ok(mk({ underline: null }).stats.marks.kept.underline === 1,
+    "F-15b 🔴 표가 **null(모른다)이면 해 본다** — «아직 모른다»로 막지 않는다(CLAUDE §9) · «모른다»를 «못 한다»로 바꾸지 않는다(AC-92)");
+  ok(mk(null).stats.marks.kept.underline === 1, "F-15c 표가 아예 없어도 해 본다(표가 없다고 안 내면 그것도 «모른다로 막기»다)");
+
+  /* ═══ 🔴 기울임은 «못 낸다»가 아니라 «안 낸다» ═══ */
+  const it = PLAN.planEditorOps({ blocks: [{ type: "para", text: "기울임이 있는 문단입니다", marks: [{ s: 0, e: 3, kind: "italic" }] }] });
+  ok(it.stats.marks.planned.italic === 1 && it.stats.marks.kept.italic === 0
+    && it.stats.demoted.some((d) => d.kind === "italic" && d.why === "channel_unsupported"),
+    "F-16 🔴 기울임은 **어휘로는 받고 안 낸다** — 우리 자가검사가 기울임을 번짐 증상으로 세기 때문(켜면 계약의 두 부분이 싸운다)",
+    JSON.stringify(it.stats.demoted));
+  ok(!it.stats.demoted.some((d) => d.why === "range_invalid"),
+    "F-16b 그리고 «모르는 마크»로 오해하지 않는다(어휘에 있으니 range_invalid 가 아니다 — 사유가 틀리면 다음 사람이 엉뚱한 데를 판다)");
+
+  /* ═══ 🔴 «못 낸 서식»과 «못 낸 블록»을 안 섞는다 ═══ */
+  const two = PLAN.planEditorOps({ blocks: [
+    { type: "table", rows: [["구분", "금액"], ["지난달", "3만 원"]] },
+    { type: "list", items: ["**첫째** 항목"] },
+  ] });
+  ok(two.stats.demoted.some((d) => d.kind === "table" && d.why === "no_editor_op")
+    && two.stats.demoted.some((d) => d.kind === "bold" && d.why === "block_unsupported"),
+    "F-17 🔴 «블록을 에디터 요소로 못 세웠다»(no_editor_op)와 «그 블록이 마크를 못 싣는다»(block_unsupported)를 **가른다** — 우리가 할 일이 다르다",
+    JSON.stringify(two.stats.demoted));
 }
 
 rmSync(modPath, { force: true });

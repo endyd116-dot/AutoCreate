@@ -27,6 +27,8 @@ import * as adsSetupBlogger from "./channels/ads-setup-blogger.mjs";
 // P1R5 §2.2 — 영상 렌더 · 네이버 클립 스텁(AC-18: 채널은 **정적 import** 목록에만 둔다).
 import * as renderVideo from "./channels/render-video.mjs";
 import * as naverClip from "./channels/naver-clip.mjs";
+// [R10-1 · 설계 §3.1] 글 레퍼런스 캡처 — 고객이 손으로 넣은 주소를 러너가 열고 **폰 폭으로** 찍는다.
+import * as referenceCapture from "./channels/reference-capture.mjs";
 
 /** 시각은 저장 UTC · 사람에게 보이는 것은 KST(DESIGN §13.5). 콘솔·파일명은 사람이 보는 것이므로 KST. */
 export const kst = (d = new Date()) =>
@@ -53,7 +55,12 @@ const HANDLERS = {
   // P1R5 §2.2·§2.3
   "render.video": renderVideo,
   "publish.naver_clip": naverClip,
+  // R10-1 — 레퍼런스 캡처(계정 프로필·프록시 그대로 · 공개된 글만 · 🔴 캡처는 디스크에 안 쓰고 보고 뒤 사라진다)
+  "reference.capture": referenceCapture,
 };
+
+/** 레퍼런스 캡처 — report 에 `shots`(base64) 를 싣는다. 🔴 서버가 읽고 **바로 버린다**(설계 §3.3 ③). */
+const CAPTURE_KINDS = new Set(["reference.capture"]);
 
 /** 영상 렌더 잡 — report 에 `render`(mp4 키·길이·바이트)를 싣는다. */
 const RENDER_KINDS = new Set(["render.video"]);
@@ -216,6 +223,13 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
       /* [R9-2/5] 🔴 서식은 **사실**이라 구조로 보낸다 — `notes` 에 담으면 서버가 버린다(`lib/runner-jobs.ts` RunnerReportOk 주석).
          문장은 서버·화면이 만든다. 러너 판(zip)에 화면 문구를 묶지 않는다. */
       return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}) };
+    }
+    if (CAPTURE_KINDS.has(job.kind)) {
+      /* 🔴 `shotKey` 를 **안 싣는다** — 이 잡에서 우리 `_shots` 폴더에 남는 것은 **없어야** 한다(남의 글이다).
+         🔴 한 장도 못 찍었으면 «성공»이 아니다(빈 배열을 «읽을 게 없었다»로 흘려보내면 AC-9 그 자리다). */
+      const s = Array.isArray(out?.shots) ? out.shots : [];
+      if (!s.length) return { ok: false, errorKind: "nav", detail: "그 글을 한 장도 찍지 못했어요." };
+      return { ok: true, shots: s, page: out.page ?? null, notes: out.notes ?? [] };
     }
     if (REVENUE_KINDS.has(job.kind)) {
       /* 🔴 행 0개도 성공이다(미가입·미등록 = 정직한 «없음»). 0원 행을 지어내지 않는다(AC-9). */
