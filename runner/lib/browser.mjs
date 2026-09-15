@@ -36,13 +36,22 @@ export async function openContext({ chromium }, { profileKey, proxyUrl, headed, 
     viewport: { width: 1440, height: 960 },
     args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"],
   };
+  /* 🔴 **fail-closed**(계약 P1R7 §2.5-3 · 사장님 지시 «계정 하나 = IP 하나»).
+     종전엔 주소가 깨지면 `catch` 로 삼키고 **프록시 없이 그냥 나갔다** — 주석은 «발행을 막지 않는다» 였지만,
+     그게 정확히 사장님이 걱정하는 **연좌제**를 만든다: 이 계정이 우리 집 IP 로 나가 버리고,
+     그 IP 엔 다른 계정들도 함께 있어서 하나가 정지되면 같이 물린다. 그때는 «왜 묶였는지»조차 알 수 없다.
+     **프록시를 배정받은 계정은 프록시 없이는 절대 안 나간다.** 실패는 던진다(잡이 중단되고 사람이 본다).
+     ⚠️ 프록시가 **없는** 계정은 지금처럼 그대로 직결이다 — 소급 적용 0(쓰던 사람이 갑자기 멈추지 않는다). */
   if (proxyUrl) {
-    try {
-      const u = new URL(proxyUrl);
-      opts.proxy = { server: `${u.protocol}//${u.host}` };
-      if (u.username) opts.proxy.username = decodeURIComponent(u.username);
-      if (u.password) opts.proxy.password = decodeURIComponent(u.password);
-    } catch { /* 프록시 주소가 깨졌으면 프록시 없이(발행을 막지 않는다 · 로그만) */ }
+    let u;
+    try { u = new URL(proxyUrl); }
+    catch { throw new Error(`PROXY_BAD_URL: 이 계정에 배정된 IP 주소를 읽지 못했어요(형식 오류) — 남의 IP 로 나가지 않도록 멈췄어요.`); }
+    if (!/^(https?|socks[45]?):$/i.test(u.protocol) || !u.hostname) {
+      throw new Error(`PROXY_BAD_URL: 이 계정에 배정된 IP 주소가 올바르지 않아요(${u.protocol}//…) — 멈췄어요.`);
+    }
+    opts.proxy = { server: `${u.protocol}//${u.host}` };
+    if (u.username) opts.proxy.username = decodeURIComponent(u.username);
+    if (u.password) opts.proxy.password = decodeURIComponent(u.password);
   }
   const ctx = await chromium.launchPersistentContext(dir, opts);
   ctx.setDefaultTimeout(20_000);
@@ -67,6 +76,28 @@ export async function openContext({ chromium }, { profileKey, proxyUrl, headed, 
   ctx.pages().forEach(watchDialogs);
   ctx.on("page", watchDialogs);
   return ctx;
+}
+
+/**
+ * 지금 이 브라우저가 **실제로 어느 IP 로 나가는가**(계약 P1R7 §2.5-4).
+ *
+ *   🔴 왜 필요한가: 프록시를 «걸었다»와 «그 IP 로 나간다»는 다르다. 프록시가 죽거나 인증이 막히면
+ *      Chromium 이 조용히 실패하거나 우회하는 경우가 있고, 그러면 우리는 **프록시를 쓴다고 믿으면서
+ *      집 IP 로 계정을 굴린다** — 사장님이 걱정하는 연좌제가 «우리도 모르게» 성립한다.
+ *      그래서 **믿지 않고 물어본다.** 이 한 번의 확인이 유일한 증거다.
+ *   🔴 **브라우저 컨텍스트로** 물어야 한다(node fetch 로 물으면 러너 PC 의 IP 가 나온다 — 아무 의미가 없다).
+ *   못 읽으면 `null`(네트워크가 잠깐 나쁠 수 있다) — 호출부가 «모름»과 «다름»을 구분한다(AC-9).
+ */
+export async function exitIp(ctx, timeoutMs = 8000) {
+  const page = await ctx.newPage();
+  try {
+    const r = await page.goto("https://api.ipify.org?format=json", { timeout: timeoutMs, waitUntil: "domcontentloaded" });
+    if (!r || !r.ok()) return null;
+    const txt = await page.evaluate(() => document.body?.innerText ?? "");
+    const ip = String(JSON.parse(txt)?.ip ?? "").trim();
+    return /^[0-9a-f.:]{3,45}$/i.test(ip) ? ip : null;
+  } catch { return null; }
+  finally { await page.close().catch(() => {}); }
 }
 
 /** claim 이 준 쿠키를 컨텍스트에 심는다(로그인 단계 건너뛰기). 모양이 안 맞는 쿠키는 건너뛴다. */

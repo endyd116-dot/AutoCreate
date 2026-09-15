@@ -7,7 +7,7 @@
  *   🔴 실패는 **정직 분류**다(계약 §2 RunnerErrorKind). 못 했으면 못 했다고 보고한다 — «성공»으로 만들지 않는다.
  */
 import { claim, report, release, heartbeat } from "./lib/api.mjs";
-import { openContext, applyCookies, shotKeyFor, SHOTS_ON } from "./lib/browser.mjs";
+import { openContext, applyCookies, exitIp, shotKeyFor, SHOTS_ON } from "./lib/browser.mjs";
 import { planEditorOps, disclosureIsFirst } from "./lib/plan.mjs";
 
 import * as naverBlog from "./channels/naver-blog.mjs";
@@ -95,7 +95,16 @@ const cleanMsg = (e) => String(e?.message ?? e).replace(/\[block:[a-z_]+\]\s*/, 
  * runJob — 잡 1건 실행. 반환 = 서버로 보낼 result(계약 §2 report).
  *   여기서 throw 하지 않는다 — 실패도 «보고할 결과»다(조용히 사라지는 잡이 없게).
  */
-export async function runJob({ chromium, token, job, headed, dryRun }) {
+export async function runJob(args) {
+  /* 🔴 실제로 나간 IP 는 **성공이든 실패든** 보고돼야 한다(계약 §2.5-4) — 서버가 `accounts.last_exit_ip` 에 적고
+     «두 계정이 같은 IP» 를 운영에 경고한다. 반환 지점이 여러 곳이라, 한 군데서 얹도록 감싼다
+     (반환마다 손으로 붙이면 언젠가 하나를 빠뜨리고, 그러면 그 계정만 조용히 기록이 빈다). */
+  const seen = { ip: null };
+  const r = await runJobInner(args, seen);
+  return seen.ip ? { ...r, exitIp: seen.ip } : r;
+}
+
+async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
   const handler = HANDLERS[job.kind];
   if (!handler) return { ok: false, errorKind: "unknown", detail: `모르는 잡 종류: ${job.kind}` };
 
@@ -118,6 +127,28 @@ export async function runJob({ chromium, token, job, headed, dryRun }) {
       proxyUrl: account.proxyUrl,
       headed: wantHeaded,
     });
+    /* 🔴 프록시를 배정받은 계정이면 **나가는 IP 를 잡 시작 때 한 번 확인한다**(계약 P1R7 §2.5-4).
+       «프록시를 걸었다»와 «그 IP 로 나간다»는 다르다 — 프록시가 죽으면 우리는 프록시를 쓴다고 믿으면서
+       집 IP 로 계정을 굴리게 되고, 그게 사장님이 걱정하는 연좌제를 **우리도 모르게** 만든다.
+       🔴 판정은 3값이다(AC-9): 기대와 **다르면 중단** · **모르면**(네트워크 문제) 그냥 진행하고 기록만.
+          «못 읽었다»를 «틀렸다»로 바꾸면 인터넷이 잠깐 나쁜 날 전 계정 발행이 멈춘다. */
+    if (account.proxyUrl) {
+      const ip = await exitIp(ctx);
+      if (!ip) {
+        log("  · 나가는 IP 를 확인하지 못했어요(그대로 진행합니다)");
+      } else if (account.expectExitIp && ip !== account.expectExitIp) {
+        /* 🔴 B 의 전이표(7종)를 **넓히지 않는다** — 그 표는 `lib/account-health.ts` 한 벌뿐이고 B 소유다.
+           대신 이미 있는 선례를 따른다: `"parse"` 처럼 **표 밖 kind**(계정 전이 0 · 우리 문제 · 감사 high).
+           계정 잘못이 아니고(상태를 바꾸면 고객에게 «다시 로그인»을 시키게 된다) 채널이 바뀐 것도 아니다 —
+           **우리 프록시가 죽은 것**이라 고칠 사람은 우리다. */
+        return { ok: false, errorKind: "proxy",
+          detail: `배정된 IP(${account.expectExitIp}) 가 아니라 ${ip} 로 나가고 있어요 — 다른 계정과 묶이지 않도록 멈췄어요.` };
+      } else {
+        seen.ip = ip;
+        log(`  · 나가는 IP ${ip}`);
+      }
+    }
+
     const applied = await applyCookies(ctx, account.cookies);
     if (applied) log(`  · 저장된 로그인 사용(쿠키 ${applied}개)`);
 
