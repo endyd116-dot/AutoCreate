@@ -29,56 +29,17 @@
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
 import { writeAudit } from "../audit";
-import { backgroundBase } from "../site-url";
-import { jsonb, utcDate } from "../db-util";
-import { classifyAndApply } from "../account-health";
 import { requireWritable } from "../guards";
 import { tenantPlan, requireCardBeforePublish } from "../plans";
 import { activeBillingKey } from "../subscription";
-import { kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
-import { publishPiece, publishPortStatus, runnerOffline, type PublishFailReason } from "./publish-port";
+import { notifyOnce, type CronStep, type StepOutcome } from "./base";
+import { publishPortStatus } from "./publish-port";
+/* 🔴 «한 건 내보내기» 몸통은 `lib/publish-one.ts` 한 곳이다(P1R8 §4.2) — 고객의 «지금 올려»(`/api/publish-now`)가 같은 함수를 쓴다.
+   여기 다시 쓰면 두 벌이 되어 규칙이 갈라진다(크론으로는 awaiting_manual, 손으로는 failed 같은 식). */
+import { publishOne } from "../publish-one";
 
 const n = (v: unknown) => Number(v || 0);
 const MAX_ATTEMPTS = 3;
-
-/** [P1R5 B-1] 영상 업로드 배경 함수 호출(202) — 실패는 호출부가 awaiting_manual 로 종결한다(조용한 0건 금지). */
-async function triggerVideoPublish(tid: number, pieceId: number, slotId: number | null): Promise<boolean> {
-  const secret = String(process.env.INTERNAL_SECRET ?? "").trim();
-  if (!secret) { console.error("[cron/publisher] INTERNAL_SECRET 미설정 — 영상 업로드 호출 불가"); return false; }
-  /* 🔴 AC-53 — 자기 호출은 **«지금 돌고 있는 이 배포»**로 가야 한다.
-     종전엔 `SITE_URL`(=라이브)이라, 로컬에서 `VIDEO_PROVIDER_STUB=1` 을 켜고 돌려도
-     **배경 함수는 그 변수가 없는 라이브에서 실행**돼 진짜 돈이 나갔다(B-1 이 실제로 $3.63 을 태웠다).
-     로컬인데 주소가 로컬이 아니면 헬퍼가 **던진다** — 삼키지 않고 false 로 종결한다(호출부가 awaiting_manual 로 남긴다). */
-  let site: string;
-  try { site = backgroundBase(); }
-  catch (e) { console.error(`[cron/publisher] 배경 호출 주소 거부 — ${String((e as Error)?.message ?? e)}`); return false; }
-  try {
-    const r = await fetch(`${site}/api/publish-video-background`, { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ pieceId, tenantId: tid, ...(slotId ? { slotId } : {}) }), signal: AbortSignal.timeout(6_000) });
-    if (r.status !== 202 && !r.ok) { console.error(`[cron/publisher] 영상 업로드 배경 함수 ${r.status}`); return false; }
-    return true;
-  } catch (e) {
-    const err = e as Error;
-    if (err?.name === "TimeoutError" || err?.name === "AbortError") return true;   // netlify dev 는 background 를 동기 실행(AC-12)
-    console.error("[cron/publisher] 영상 업로드 호출 실패", String(err?.message ?? e));
-    return false;
-  }
-}
-
-/** 사람이 손봐야 끝나는 실패 — 재시도해도 같은 답이 온다. */
-const NEEDS_HUMAN: ReadonlySet<PublishFailReason> = new Set(["gate", "no_account", "no_creds", "account_blocked", "auth_failed", "provider_not_configured"]);
-/** 아예 나갈 수 없는 실패 — 재시도 0. */
-const TERMINAL: ReadonlySet<PublishFailReason> = new Set(["unsupported_channel", "not_publishable", "config"]);
-/** 실패 사유 → 계정 전이(자격·차단 계열만). 나머지는 계정 잘못이 아니다. */
-const ACCOUNT_ERROR_OF: Partial<Record<PublishFailReason, "login_fail" | "account_blocked">> = { auth_failed: "login_fail", no_creds: "login_fail" };
-
-const HUMAN: Record<PublishFailReason, string> = {
-  gate: "발행 전 검사에 걸렸어요", no_account: "올릴 계정이 없어요", no_creds: "계정 로그인 정보가 없어요",
-  account_blocked: "계정이 막혀 있어요", auth_failed: "로그인이 풀렸어요", provider_not_configured: "채널 연결 설정이 아직이에요",
-  channel_error: "채널이 응답하지 않았어요", network: "인터넷 연결 문제였어요",
-  // 실패가 아니라 «아직 처리 중» — 다음 틱에 같은 컨테이너로 다시 올린다(중복 게시 0).
-  video_processing: "영상을 채널이 아직 처리하고 있어요",
-  unsupported_channel: "아직 지원하지 않는 채널이에요", not_publishable: "지금 상태로는 올릴 수 없어요", config: "서버 설정 문제예요",
-};
 
 export const publisherStep: CronStep = {
   key: "publisher",
@@ -119,97 +80,17 @@ export const publisherStep: CronStep = {
     let published = 0, queued = 0, waitingRunner = 0, manual = 0, failed = 0, retry = 0, already = 0, deferred = 0;
     for (const p of due) {
       if (Date.now() >= ctx.deadline) { deferred++; continue; }
-      const pieceId = n(p.id), slotId = p.slot_id ? n(p.slot_id) : null;
-      const meta = (p.meta && typeof p.meta === "object" ? p.meta : {}) as Record<string, unknown>;
-      const title = String(p.title || "글");
-
-      /* [P1R5 B-1] 영상 = 배경 업로드로 넘긴다(동기 26초 안에 mp4 를 못 올린다). 호출 실패는 삼키지 않는다(AC-16). */
-      if (String(p.kind) === "video") {
-        const fired = await triggerVideoPublish(ctx.tid, pieceId, slotId);
-        if (fired) {
-          await q(sql`UPDATE pieces SET status = 'publishing', updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId} AND status = 'scheduled'`);
-          if (slotId) await setSlot(ctx.tid, slotId, "publishing", null);
-          queued++;
-        } else {
-          await q(sql`UPDATE pieces SET status = 'awaiting_manual', meta = meta || ${jsonb({ publishFail: { reason: "config", error: "업로드를 시작하지 못했어요(서버 설정)." } })}, updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId} AND status = 'scheduled'`);
-          if (slotId) await setSlot(ctx.tid, slotId, "awaiting_manual", "업로드를 시작하지 못했어요");
-          await notifyOnce(ctx.tid, "publish_manual", "영상 업로드에 손이 필요해요", `«${title}» 업로드를 시작하지 못했어요.`, "/app/posts.html", { withinHours: 6 });
-          manual++;
-        }
-        continue;
+      const out = await publishOne(ctx.tid, p, { now: ctx.now, actor: "cron" });
+      switch (out.kind) {
+        case "published": published++; break;
+        case "queued": queued++; break;
+        case "publishing": out.offline ? waitingRunner++ : queued++; break;      // 러너 잡 적재 = «큐에 넣었다»(종전 집계와 같은 칸 · 발행 완료가 아니다)
+        case "already": already++; break;
+        case "unavailable": deferred++; break;                                   // 포트 미연결 — 상태 무접촉(위에서 걸렀지만 경합 대비)
+        case "retry": retry++; break;
+        case "manual": manual++; break;
+        case "failed": failed++; break;
       }
-
-      const r = await publishPiece(ctx.tid, pieceId, { slotId });
-
-      if (r.ok) {
-        if (r.already) { already++; continue; }                 // 멱등 — 이미 나갔다. 아무 것도 쓰지 않는다.
-        if (r.via === "api") {
-          // B2 가 finalizePublish 까지 끝냈다(계약 §10). 우리가 슬롯을 또 쓰지 않는다.
-          published++;
-          if (!r.finalized) console.warn(`[cron/publisher] piece=${pieceId} via=api 인데 finalized 가 없다 — B2 종결 여부 확인 필요`);
-          continue;
-        }
-        // via = runner — 잡이 큐에 들어갔다. 여기까지가 우리 몫이고, 그 뒤 상태는 B2 가 쓴다.
-        const offline = runnerOffline(r.runner);
-        await q(sql`UPDATE pieces SET status = 'publishing', updated_at = NOW() WHERE tenant_id = ${ctx.tid} AND id = ${pieceId} AND status = 'scheduled'`);
-        if (slotId) await setSlot(ctx.tid, slotId, offline ? "awaiting_runner" : "publishing", offline ? "내 PC 프로그램이 꺼져 있어요 — 켜면 바로 나가요" : null);
-        if (offline) {
-          waitingRunner++;
-          const when = kstTimeText(utcDate(p.scheduled_for), ctx.now);   // 문구 속 시각은 KST(§13.5)
-          await notifyOnce(ctx.tid, "runner_offline", "내 PC 프로그램을 켜 주세요",
-            `«${title}»${when ? ` 은(는) ${when}에 나갈 예정이었어요.` : " 을(를) 올리려면"} 내 PC 프로그램이 켜져 있어야 해요. 켜면 기다리던 글이 바로 나가요.`, "/app/runner.html", { withinHours: 6 });
-        } else queued++;
-        continue;
-      }
-
-      // ── 실패 ──
-      if (r.unavailable) { deferred++; continue; }   // 포트 미연결(위에서 걸렀지만 경합 대비) — 상태 무접촉.
-      const reason = r.reason;
-      const attempts = n(meta.publishAttempts) + 1;
-
-      // 자격·차단 계열은 계정 장부에도 남긴다(같은 계정으로 계속 때리지 않게 · §7.2).
-      const ak = ACCOUNT_ERROR_OF[reason];
-      if (ak && p.account_id) await classifyAndApply(n(p.account_id), ak === "account_blocked" ? "suspended" : "login_fail", { tenantId: ctx.tid, pieceId, detail: r.error });
-
-      /* 🔴 `retriable:false` 는 사유가 무엇이든 **무조건** 존중한다(B2 2026-09-14).
-         가장 무서운 경우: 발행은 성공했는데 finalize 가 실패한 건도 `{ ok:false, reason:"config", retriable:false }` 로 온다 —
-         이걸 재시도하면 **남의 블로그에 같은 글이 두 번 올라간다**(되돌릴 수 없는 사고). B2 가 publish_finalize_failed(risk high) 를 이미 남긴다. */
-      const human = NEEDS_HUMAN.has(reason);
-      /* ★C(P1R2) fix: 사람이 손봐야 하는 실패(gate·no_creds·auth_failed·account_blocked·provider_not_configured)도 publish() 가 retriable:false 로 돌려준다.
-         retriable:false 를 무조건 terminal 로 읽으면 NEEDS_HUMAN 이 죽은 코드가 되어 전부 `failed` 로 떨어졌다(실측 2026-09-14: no_creds → failed).
-         계약 §3 «게이트 실패면 awaiting_manual + 알림(발행 금지)» · DESIGN §5B.6 awaiting_manual = 사람 개입 대기. 재시도 0 은 그대로(둘 다 큐에서 빠진다).
-         finalize 실패(reason "config")는 TERMINAL 에 있어 여전히 failed 다. */
-      const terminal = TERMINAL.has(reason) || (r.retriable === false && !human);
-      const exhausted = !terminal && !human && attempts > MAX_ATTEMPTS;
-
-      if (!terminal && !human && !exhausted) {
-        // 다음 5분 틱이 다시 본다 — 상태는 scheduled 그대로 두고 횟수만 센다.
-        retry++;
-        await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ publishAttempts: attempts, lastPublishError: `${reason}: ${r.error}`.slice(0, 300) })}, updated_at = NOW()
-          WHERE tenant_id = ${ctx.tid} AND id = ${pieceId}`);
-        continue;
-      }
-
-      const next = terminal ? "failed" : "awaiting_manual";
-      /* 🔴 «계정이 없다»가 **두 가지 다른 상황**이 됐다(P1R7 §1.2 이후).
-         ① 글: 계정을 연결하지 않은 것 → «계정을 연결해 주세요» 가 맞다.
-         ② 영상: **일부러 계정 없이 만든 것**(계정 없이 영상 만들기) → 연결하라고 하면 틀린 안내다.
-            그 경우 할 일은 «내려받아 직접 올리기» 이고, 발행함 시트가 그 아래에 내려받기·주소 적기를 붙인다.
-         같은 reason 에 같은 문구를 주면 ②의 고객은 하지 않아도 될 일을 하러 간다. */
-      const why = (reason === "no_account" && String(p.kind) === "video")
-        ? "앱에서 직접 올려 주세요 — 영상을 내려받아 올리면 돼요"
-        : HUMAN[reason] ?? "발행에 실패했어요";
-      await q(sql`UPDATE pieces SET status = ${next}, meta = meta || ${jsonb({ publishAttempts: attempts, failReason: `${why} (${reason})`, lastPublishError: String(r.error).slice(0, 300) })}, updated_at = NOW()
-        WHERE tenant_id = ${ctx.tid} AND id = ${pieceId}`);
-      if (slotId) await setSlot(ctx.tid, slotId, next === "failed" ? "failed" : "awaiting_manual", why);
-      if (next === "failed") failed++; else manual++;
-      await notifyOnce(ctx.tid, next === "failed" ? "publish_failed" : "publish_manual",
-        next === "failed" ? "글을 올리지 못했어요" : "직접 올려 주셔야 해요",
-        // 영상은 «본문을 복사해» 가 말이 안 된다 — 할 일이 내려받아 올리기다.
-        `«${title}» — ${why}. ${String(p.kind) === "video" ? "발행함에서 영상을 내려받아 올리고, 올린 주소를 적어 주세요." : "발행함에서 본문을 복사해 직접 올리거나, 문제를 고치고 다시 시도해 주세요."}`,
-        `/app/posts.html?status=${next === "failed" ? "failed" : "awaiting_manual"}`, { withinHours: 6 });
-      await writeAudit({ tenantId: ctx.tid, action: "publish_failed", actorType: "system", riskLevel: "medium", target: `piece:${pieceId}`,
-        detail: { reason, attempts, retriable: r.retriable, to: next, error: String(r.error).slice(0, 300), slotId } });
     }
 
     const out: StepOutcome = { changed: published + queued + waitingRunner + manual + failed, skipped: already + retry + deferred };
