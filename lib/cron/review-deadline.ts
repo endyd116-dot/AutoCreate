@@ -32,6 +32,7 @@ import { jsonb, utcDate } from "../db-util";
 import { approvePiece } from "../content-approve";
 import { kstHour, kstTimeText, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { planOf, autoApproveAllowed } from "../plans";   // [P1R7 B3] 자동 승인 플랜 게이트(§5B.9)
+import { accountsTrust } from "../account-trust";       // [P1R8 §5.2] 자동 승인은 «신뢰 계정»에서만(DESIGN §4.2)
 
 const n = (v: unknown) => Number(v || 0);
 
@@ -43,7 +44,7 @@ export const reviewDeadlineStep: CronStep = {
   every: "hourly",
   needsAutoSchedule: true,
   async run(ctx): Promise<StepOutcome> {
-    let approved = 0, blocked = 0, pending = 0, notified = 0;
+    let approved = 0, blocked = 0, pending = 0, notified = 0, untrusted = 0;
     const hour = kstHour(ctx.now);
 
     /* [P1R7 B3] 플랜 게이트 — «저장된 값 없음 + 플랜이 자동 승인 불가» 일 때만 require_confirm 처럼 판정한다(위 주석). */
@@ -60,9 +61,27 @@ export const reviewDeadlineStep: CronStep = {
         WHERE s.tenant_id = ${ctx.tid} AND s.status = 'in_review' AND p.status = 'in_review'
           AND s.review_deadline IS NOT NULL AND s.review_deadline <= NOW() AND ${NOT_SILENT}
         ORDER BY s.publish_at NULLS LAST, s.id LIMIT 200`);
+      /* [P1R8 §5.2] 🔴 **자동 승인은 «신뢰 계정»에서만**(DESIGN §4.2). 설계는 처음부터 계정 단위라고 말했는데
+         코드에는 테넌트 스위치 + 요금제 게이트뿐이라 **어제 연결한 계정도 사람 없이 나갔다**.
+         신뢰 = 성공 발행 3건 + 건강도 70 + active + 워밍업 아님(`lib/account-trust.ts` · 근거는 그 파일 머리말).
+         🔴 2026-09-15 라이브에서는 **모든 계정이 «아직»**이다(실발행이 거의 없어서) — 그래서 이 줄은 지금 **자동 승인을 사실상 멈춘다**.
+            그게 맞다: «검증 안 된 계정에 사람 없이 내보내기»가 원래 막으려던 것이고, **처음 3편을 사람이 보면 스스로 풀린다.**
+            대신 **조용히 멈추지 않는다** — 고객에게 사유를 한 번 알리고 감사에 남긴다(AC-9). */
+      const trustMap = await accountsTrust(ctx.tid, due.map((x) => n(x.account_id)).filter(Boolean));
       for (const p of due) {
         if (Date.now() >= ctx.deadline) { pending++; continue; }
         const pieceId = n(p.id), slotId = n(p.sid);
+        const accId = n(p.account_id);
+        const trust = accId ? trustMap.get(accId) : undefined;
+        if (accId && trust && !trust.trusted) {
+          untrusted++;
+          if (await notifyOnce(ctx.tid, `trust_review:${accId}`.slice(0, 32), "처음 몇 편은 직접 봐 주세요",
+            `${trust.reasons[0] ?? "이 계정은 아직 자동으로 내보내지 않아요"} — 검수에서 승인하시면 바로 나가요.`,
+            `/app/piece.html?id=${pieceId}`)) notified++;
+          await writeAudit({ tenantId: ctx.tid, action: "auto_approve_untrusted", actorType: "system", target: `piece:${pieceId}`,
+            detail: { accountId: accId, evidence: trust.evidence, reasons: trust.reasons, slotId } });
+          continue;   // 상태는 그대로 in_review — 사람이 보면 나간다
+        }
         const r = await approvePiece(ctx.tid, p, { now: ctx.now });
         if (r.ok) {
           approved++;
@@ -111,6 +130,7 @@ export const reviewDeadlineStep: CronStep = {
     const detail: Record<string, unknown> = { policy, ...(forcedByPlan ? { forcedByPlan: true, planKey: ctx.planKey, stored: ctx.raw.reviewPolicy ?? null } : {}) };
     if (approved) detail.approved = approved;
     if (blocked) detail.blocked = blocked;
+    if (untrusted) detail.untrusted = untrusted;   // [P1R8 §5.2] 신뢰가 아직 안 선 계정이라 사람에게 남긴 건수(조용한 0건 금지)
     if (notified) detail.notified = notified;
     if (approved || blocked || notified) out.detail = detail;
     return out;
