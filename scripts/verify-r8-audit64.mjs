@@ -39,15 +39,24 @@ const AC_STRIP = process.env.AC_STRIP === "1";
 const acPath = (p) => String(p).split(String.fromCharCode(92)).join("/");
 const acHidden = (p) => AC_HIDE.length > 0 && AC_HIDE.some((h) => acPath(p).endsWith(h));
 const existsSync = (p) => (acHidden(p) ? false : existsSync0(p));
+/** AC_INJECT 덧대기 — 🔴 `AC_HIDE` 와 **같은 파일에** 걸 수 있어야 한다(«근거는 지우고 주석만 남긴다» 를 한 파일에서 재려면 · b-49). */
+const injectOf = (p, t) => { for (const [ip, txt] of AC_INJECT) if (acPath(p).endsWith(ip)) t += "\n" + txt; return t; };
+/** 🔴 **날것**으로 읽는다(주석 포함) — ③C5 처럼 «주석이 곧 산출물»인 칸만 이걸 쓴다. */
 const read = (p) => {
-  if (acHidden(p)) return "";
+  if (acHidden(p)) return injectOf(p, "");
   let t; try { t = readFileSync(p, "utf8"); } catch { return ""; }
   if (AC_STRIP) t = stripComments(t);
-  for (const [ip, txt] of AC_INJECT) if (acPath(p).endsWith(ip)) t += "\n" + txt;
-  return t;
+  return injectOf(p, t);
 };
+/* 🔴 [2026-09-16 메인 · b-49 가 잡았다] **주석을 걷어 낸 본문 — 기본은 이쪽이다.**
+   앞 판은 걷어내기를 `inFile` **안에** 숨겼다. 그래서 `read()` 를 직접 쓰는 자리(다섯 곳)가 **조용히 뚫렸다** —
+   🔴 실제로 **D 접근성**이 그랬다: `revenue.html` 에 «햅틱·당겨서 새로고침·스와이프 는 **다음 라운드에 만든다**»라는
+   HTML 주석 한 줄을 넣으면 그 셋이 «있다»가 되어 **닫힘 6/6** 이 떴다(b-49 실측).
+   **우리는 계획을 주석에 적는다 — 가정이 아니라 우리 관습이다.**
+   ⇒ 보호를 **이름 있는 함수로 꺼낸다.** 새 칸을 쓰는 사람이 `read` 와 `readCode` 중 고르게 되고, 고르지 않으면 안 뚫린다. */
+const readCode = (p) => (AC_STRIP ? read(p) : stripComments(read(p)));
 /** 그 파일 안에 그 패턴이 있나 — **파일을 지목**해서 본다(전역 grep 은 엉뚱한 파일에 걸린다). 🔴 주석은 뺀 본문에서 본다. */
-const inFile = (p, re) => re.test(stripComments(read(p)));
+const inFile = (p, re) => re.test(readCode(p));
 const anyFile = (ps, re) => ps.filter((p) => inFile(p, re));
 
 const results = [];
@@ -232,8 +241,6 @@ for (const r of THREE) { const [state, why, split] = r.check(); rec(`③ ${r.nam
 
 /* ══ ③ 나머지 — 🔴 **손으로 센 스냅샷을 박아 두지 않는다.** 내가 조사할 때 쓴 근거를 그대로 predicate 로 옮겨
       다시 돌릴 때마다 **다시 재지게** 한다. 안 그러면 이 숫자가 조용히 낡는다(그게 우리가 오늘 열 번 잡은 병이다). ══ */
-const SCREEN_TEXT = ["public/js/ui.js", "public/js/mock.js", "public/app/home.html", "public/app/revenue.html", "public/app/settings.html"].map(read).join("\n");
-const SERVER_TEXT = ["lib/referral.ts", "netlify/functions/ops-center.ts", "lib/cs.ts"].map(read).join("\n");
 const yes = (v) => (v ? "닫힘" : "열림");
 const THREE_REST = [
   /* A. 다음 Phase 채널·잡 12칸 — 판정은 «표에 있나»가 아니라 «라우팅표가 그 커넥터를 부르나» */
@@ -352,7 +359,8 @@ const THREE_REST = [
   ["D 접근성 6(대비·당겨새로고침·햅틱·계좌연결·스와이프·기기시간대)", () => {
     /* 🔴 낱말 하나로 뭉쳐 세면 틀린다 — 첫 판에서 `contrast` 가 **훅 이름**(«반전으로 시작»)에 걸려 가짜로 세어졌다.
        여섯 항목을 **각각 그 기능의 실물**로 재고, 내역을 칸 수에 그대로 실어 보낸다(일부로 뭉치면 닫힘·열림이 둘 다 과소평가된다). */
-    const SC = ["public/js/ui.js", "public/app/home.html", "public/app/create.html", "public/app/settings.html", "public/app/revenue.html"].map(read).join("\n");
+    /* 🔴 `readCode` 로 읽는다 — 날것으로 읽으면 «다음 라운드에 만든다» 같은 **계획 주석**이 «있다»가 된다(b-49 실측). */
+    const SC = ["public/js/ui.js", "public/app/home.html", "public/app/create.html", "public/app/settings.html", "public/app/revenue.html"].map(readCode).join("\n");
     const items = [
       ["당겨서 새로고침", /당겨서 새로고침|pullToRefresh/],
       ["햅틱", /햅틱|vibrate\(/],
@@ -378,7 +386,7 @@ const THREE_REST = [
          우리가 붙이는 건 은행 계좌가 아니다. 그 낱말을 화면에서 찾으면 **제대로 만들수록 못 찾는다.**
        ⇒ 이름이 아니라 **패턴의 모양**을 잰다(DESIGN §13.0b 의 «구체 형태» 그대로):
          채널 마크 그리드 · 연결 수 표기 · 눌러서 채널별 연결 · 끝나면 완료를 말해 준다. */
-    const A = read("public/app/accounts.html");
+    const A = readCode("public/app/accounts.html");   // 🔴 날것 금지 — 위와 같은 까닭
     const acc = [/UI\.mark\(/.test(A), /개 연결됨/.test(A), /연결 시트|openConnect|data-k=/.test(A), /connected/.test(A)]
       .filter(Boolean).length >= 3;
     const shape = [["계좌연결 패턴(모양)", acc]];
