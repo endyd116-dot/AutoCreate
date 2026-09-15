@@ -11,6 +11,7 @@
  *     · `not_configured` 는 에러가 아니다 — 세지도 알리지도 않는다(화면이 «키를 넣으면 바로 가져와요»로 그린다 · AC-10).
  *     · «없음»은 «0원»이 아니다(AC-9) — 실패는 행을 만들지 않는다(index.ts syncAndRecord 가 지킨다).
  *   자동 편성과 무관하게 돈다(needsAutoSchedule=false) — 수익은 편성표를 안 써도 들어온다.
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

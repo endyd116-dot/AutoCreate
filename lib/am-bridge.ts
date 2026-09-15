@@ -10,6 +10,7 @@
  *          → 200 { ok:true } | { ok:false, error }
  *   서명: 헤더 `X-AC-Timestamp: {at}` · `X-AC-Signature: hex(HMAC-SHA256(AM_BRIDGE_SECRET, `${at}.${rawBody}`))` · 5분 창. 응답에도 같은 방식의 `X-AM-Signature` 가 있으면 검증(없으면 통과 · 있는데 틀리면 실패).
  *   환경: AM_BRIDGE_URL(끝점 접두 · 뒤 슬래시 없이) · AM_BRIDGE_SECRET(32자 이상 공유 비밀). 🔴 값은 로그·응답·감사에 찍지 않는다(등록 여부 boolean 만).
+ *   🔎 출처: AC 신규(P1R6 §1.4 · 2026-09-15) — AM 쪽 대응 코드는 아직 없다(계약 합의 전)
  */
 import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 

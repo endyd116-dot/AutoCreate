@@ -3,6 +3,7 @@
  *   ① IP 재고가 생기면 `waiting_ip` 슬롯에 배정하고 **그때** 코인을 받는다(없는 걸 팔지 않는다)
  *   ② 만료 D-3 안내 1회 ③ 만료일 갱신 차감(멱등 ref `slot:{id}:{YYYYMM}`) · 잔액 부족이면 **그 슬롯만 «쉼»** ④ 코인이 채워지면 자동 복구
  *   🔴 **global 스텝**(테넌트 루프 밖) — 슬롯은 readonly·체험 만료 테넌트에도 있고, 우산의 활성 목록은 trial|active 뿐이다.
+ *   🔎 출처: AC 신규(계약 §3.6·푸시 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { writeAudit } from "../audit";
 import { runSlotCycle } from "../account-slots";

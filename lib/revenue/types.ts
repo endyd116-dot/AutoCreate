@@ -2,6 +2,7 @@
  * lib/revenue/types.ts — 수익 커넥터 공통 타입(계약 P1R3 §1.1 · 글자 그대로). DESIGN §9.1·§9.2.
  *   소스별 파일(adsense·youtube·coupang·aliexpress·linkprice)은 이 인터페이스만 구현한다.
  *   🔴 이 파일은 아무것도 import 하지 않는다(순환 0 · AC-17). 러너 report(B2)도 이 타입으로 행을 실어 보낸다.
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 
 /** 소스 어휘(계약 §1.4b(4) 최종). 화면·집계·enum 검사가 전부 이 목록을 본다. */

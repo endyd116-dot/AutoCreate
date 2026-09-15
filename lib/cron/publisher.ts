@@ -24,6 +24,7 @@
  *     mp4 업로드는 **서버가 스트리밍**한다(유튜브 resumable) — 동기 26초 안에 못 끝낸다. 그래서 이 스텝은 영상이면
  *     `publish-video-background`(15분)를 202 로 부르고 piece 를 `publishing` 으로만 표시한다(계약 v5.3 §2.3b).
  *     그 뒤 상태(posts·uploaded_private·실패 되돌림)는 배경 함수와 B2 의 finalizePublish 가 쓴다 — 여기서 다시 쓰지 않는다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

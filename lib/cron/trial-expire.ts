@@ -4,6 +4,7 @@
  *   · 종료(trial_ends_at ≤ now · 매시 판정): `tenants.status='readonly'` + readonly_at + 알림 «체험이 끝났어요 · 30일 뒤 데이터 파기 안내»(파기 자체는 R5 · 안내만).
  *     readonly = 열람 O · 생성/발행 X(`requireWritable` 이 막는다). 결제하면 applyChargeResult 가 active 로 풀어 준다.
  *   ⚠️ trial 인데 trial_ends_at 이 없으면 건드리지 않는다(«없음»을 «끝남»으로 읽지 않는다).
+ *   🔎 출처: AC 신규(계약 P1R4-B §1·§2 코인·구독·체험·게이트·남용 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

@@ -8,6 +8,7 @@
  *      멀티파트를 지운다(추정은 늘 틀리고, 틀리면 15분을 버린 뒤 실패한다).
  *   🔴 **시간 예산**: `EXPORT_BUDGET_MS`(11분)를 넘기면 같은 문장으로 멈춘다 — 15분 벽에 잘려 조용히 사라지지 않게.
  *   시각은 전부 KST 표기(§4.5b) · CSV 헤더에 «(KST)».
+ *   🔎 출처: AC 신규(계약 P1R6-B-1 §2.1 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/index";

@@ -2,6 +2,7 @@
  * lib/video/providers/index.ts — 컷 1개 생성의 단일 입구: provider 호출 → 결과 mp4 회수 → R2 저장 → ai_usage(purpose 'video_clip').
  *   AM 관례(video-clips.ts «임시 CDN 은 즉시 R2 로 회수»)를 AC r2.ts 로. 폴백 사다리(registry.fallbackProvider) 1단 · 정책 위반(P0)은 폴백하지 않는다(같은 프롬프트는 어디서도 막힌다).
  *   🔴 환각 0 규칙: i2v 입력에 인물 식별 사진 금지(PIPA — 호출부 게이트) · 프롬프트에 무인물 절(NO_REAL_PERSON) 은 scenes 가 붙인다.
+ *   🔎 AM 원본: ../AutoMarketing/lib/video-clips.ts (관례 이식 2026-09-15)
  */
 import { calcCost } from "../../ai-cost";
 import { recordAiUsage } from "../../ai";

@@ -4,6 +4,7 @@
  *   자격: `cred_enc` = { appKey, appSecret, trackingId? }. 주문 목록(start_time~end_time · status Payment Completed 등)을
  *   일별로 합산 · `tracking_id`/`sub_id`(=piece_{id}) 로 piece 귀속. 커미션은 **USD** → `fxToKrw`(config.fxRate → env FX_USD_KRW).
  *   🔴 환율이 없으면 «대충» 환산하지 않고 not_configured(«환율을 넣어 주세요»)로 정직 반환한다 — 그 숫자가 «오늘 번 돈»이 된다.
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { createHmac } from "node:crypto";
 import { pieceIdFromSubId } from "./upsert";

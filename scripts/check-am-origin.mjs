@@ -32,6 +32,8 @@ const SINCE = argv.includes("--since") ? argv[argv.indexOf("--since") + 1] : nul
  */
 const AM_PATH = /\.\.\/AutoMarketing\//;                                   // 되짚을 수 있는 경로
 const AM_HINT = /(AM 원본|AutoMarketing|AM `|AM 관례|AM 과 동일|AM 방식|계승\)|AM 의 )/;   // 출처를 «말은 하는데» 경로가 없을 수 있다
+/** [2026-09-15] 이 스캐너가 넣은 «되짚을 수 있다» 표식 — 한 번 붙으면 다시 대상이 되지 않는다. */
+const MARKED = /🔎 (출처|AM 원본):/;
 const AC_NEW = /(AC 신규|신규 구현|신규\()/;
 
 function walk(dir, out = []) {
@@ -55,6 +57,11 @@ for (const f of acFiles) {
   const hasAm = AM_HINT.test(src);
   const hasNew = AC_NEW.test(src);
   const hasPath = AM_PATH.test(src);
+  /* [2026-09-15 실행 뒤 보강] 🔴 **이 스캐너가 넣은 표식이 있으면 끝난 파일이다.**
+     헤더에 «AM 원본 없음» 같은 문장이 들어가면 `AM_HINT` 가 그 낱말을 보고 다시 A군으로 집어 든다 —
+     그러면 다음 사람이 재스캔할 때 **이미 고친 75개가 다시 대상으로** 보인다(내가 실제로 그렇게 봤다).
+     표식(`🔎 출처:` / `🔎 AM 원본:`)은 «되짚을 수 있다»의 증거라 경로 유무와 상관없이 통과시킨다. */
+  if (MARKED.test(src)) continue;
   if (hasPath) continue;                                       // AM 경로가 있다 = 되짚을 수 있다(문구는 안 따진다)
   if (hasNew && !hasAm) continue;                              // «AC 신규»만 밝힌 파일 — 출처가 없는 게 아니라 «AM 것이 아니다»
   let added = "", addedAt = "";

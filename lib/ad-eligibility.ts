@@ -10,6 +10,7 @@
  *     클립 = 모집 창 D-7.
  *   알림은 **계정당 1회**(처음 충족한 날) — `eligibilityNotifiedAt` 이 문지기다.
  *   jsonb 쓰기는 `jsonb()` + 직후 `jsonb_typeof` 확인(PITFALLS #1).
+ *   🔎 출처: AC 신규(계약 P1R3-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";

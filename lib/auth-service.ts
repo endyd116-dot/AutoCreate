@@ -2,6 +2,7 @@
  * lib/auth-service.ts — 가입·로그인·세션 발급·잠금·리프레시(고객 + 운영자). DESIGN §11.0.
  *   원칙: 핸들러는 얇게, 규칙은 여기 한 곳(잠금 5회/15분 · 리프레시 회전 · 감사).
  *   jsonb 쓰기 없음. timestamp = UTC(PITFALLS #4).
+ *   🔎 출처: AC 신규(계약 phase0 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import bcrypt from "bcryptjs";
 import { sql } from "drizzle-orm";

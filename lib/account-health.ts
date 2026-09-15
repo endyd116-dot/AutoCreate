@@ -18,6 +18,7 @@
  *      `sweepAccountStates()`(크론 5분 스텝)가 24시간이 지난 cooldown 을 active 로 되돌린다. 스키마 추가 0.
  *
  *   graceful: 이 파일은 throw 하지 않는다 — 계정 장부 갱신 실패가 발행 파이프라인을 죽이면 안 된다.
+ *   🔎 AM 원본: ../AutoMarketing/lib/runner-block.ts (분류 관례 이식 2026-09-14 · 전이표는 AC §7.2)
  */
 import { sql } from "drizzle-orm";
 import { effectiveDailyCap } from "./warmup";   // [P1R7 §2.6] 워밍업 유효 상한의 단일 출처(B2)

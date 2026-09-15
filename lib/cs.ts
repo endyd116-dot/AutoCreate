@@ -8,6 +8,7 @@
  *     · 컨텍스트 자동 첨부(고객이 안 적어도): 플랜·상태·코인·러너 온라인/전체·최근 오류 3건·앱 버전 → `tickets.context`(jsonb).
  *     · SLA 마감 = 생성 + 우선순위별 시간(SLA_HOURS 한 곳). 첫 답변 시각·마지막 메시지 시각을 유지한다(운영 통계 재료).
  *     · 이 파일은 cron·publish 를 import 하지 않는다(AC-17). 이메일은 호출부(ops-cs 답변)가 보낸다.
+ *   🔎 출처: AC 신규(계약 P1R4-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";

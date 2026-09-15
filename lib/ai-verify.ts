@@ -4,6 +4,7 @@
  *   🔴 순수 함수다 — DB·callGemini·프로젝트 의존 0(전역 fetch 만). 그래서 standalone .mjs 에서도 그대로 import 해 쓴다(Node 24 타입 스트립).
  *   세 값(AC-9): true=됨 · false=모델이 거부(미지원) · null=판정 불가(예산/네트워크). 지어내지 않는다.
  *   🔴 모델 이름 문자열은 여기서 만들지 않는다 — 인자로 받은 model 만 부른다(이름의 출처는 ai-models.ts·models.list).
+ *   🔎 출처: AC 신규(계약 P1R4-B2 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 export type Tri = boolean | null;

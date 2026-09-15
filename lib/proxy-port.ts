@@ -7,6 +7,7 @@
  *   🔴 `pending` 은 실패가 아니라 **상태**다(B2 머리말 그대로) — 고객은 계정을 샀고 IP 는 우리가 들여오면 된다.
  *   🔴 접속 주소(url_enc)는 여기로 오지 않는다(B2 가 SELECT 에서부터 뺐다) — 응답·감사에 실을 일이 없다.
  *   `bindProxy` 는 스모크·예외 상황에서 구현을 갈아끼우는 용도(publish-port 관례). 평상시엔 정적 결합이 정본.
+ *   🔎 출처: AC 신규(계약 §3.6·푸시 · 생성 커밋 2026-09-15) — AM 원본 없음.
  */
 import { assignProxy as b2Assign, releaseProxy as b2Release } from "./proxies";
 

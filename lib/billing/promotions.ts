@@ -9,6 +9,7 @@
  *     · coupon       → `validateCoupon` / `redeemCoupon`(subscription-change · 1테넌트 1회) · pct 는 장부 discount_pct/until · krw 는 coupon_code 를 장부에 두고 `quotePlan` 이 1회 차감 · 청구 성공 시 `markCouponConverted`.
  *   🔴 성과(stats.used / converted): used = 적용 횟수(promotions.uses · coupons.used) · converted = 그 뒤 유료 청구 성공(coupon_redemptions.converted_at · 이벤트는 audit `promo_applied` 테넌트 중 active 유료).
  *   이 파일은 cron·publish 를 import 하지 않는다(AC-17).
+ *   🔎 출처: AC 신규(계약 P1R4-B §2.1·§2.3 운영센터 6메뉴 + 원격접속 60분 · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";

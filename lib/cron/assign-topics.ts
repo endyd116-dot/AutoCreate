@@ -16,6 +16,7 @@
  *
  *   ⚠️ 경합: 같은 소재를 두 슬롯이 가져가지 못하게 **CAS**(`UPDATE topics SET status='picked' WHERE status='candidate' RETURNING id`)로 집는다.
  *      0행이면 남이 먼저 가져간 것 — 조용히 다음 후보로 간다.
+ *   🔎 출처: AC 신규(계약 P1R2-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
