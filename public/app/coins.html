@@ -33,7 +33,7 @@ const keyinBody = (sh, body) => { const el = sh.querySelector("#keyin"); if (el 
 if (me.impersonation) UI.$("#packs").innerHTML = `<div class="empty" style="padding:20px 16px"><h3 style="font-size:15px">원격접속 중엔 충전할 수 없어요</h3><p>끝난 뒤 본인이 직접 해 주세요.</p></div>`;
 /* KICC 인증창 콜백 복귀(coin-charge-return): ?charged={주문번호} | ?failed={사유} */
 const charged = UI.qs.get("charged"), failed = UI.qs.get("failed");
-if (failed) UI.toast(`결제가 안 됐어요 · ${failed}`);
+if (failed) setTimeout(() => UI.payFailSheet({ reason: UI.qs.get("reason"), msg: failed, what: "coin" }), 300); // reason 이 없으면(승인 실패 사유가 failed 에 온다) 그 문장만
 const ymKST = (d) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 7);
 const monthOf = () => { const d = new Date(); if (mode === "this") return ymKST(d); if (mode === "prev") { d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return ymKST(d); } return null; };
 async function load() {
