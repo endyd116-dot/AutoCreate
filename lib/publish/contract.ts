@@ -34,7 +34,15 @@ export function publishViaOf(channel: string): PublishVia | null {
 
 /* ─────────────────────────── 입력 ─────────────────────────── */
 
-export interface PublishImage { url: string; caption?: string; sort?: number }
+/**
+ * 발행에 실리는 사진 한 장.
+ *   🔴 `caption` 과 `alt` 는 **다른 것**이다(§5C · B-1 84a2372).
+ *      · caption = 독자가 **보는** 한 줄. 글쓴이 말투 ≤25자이고 **대부분의 사진엔 없다**(다 달면 AI 티가 난다).
+ *      · alt     = 화면에 **안 보이는** 접근성·검색용 설명. 그림 지시문(prompt)에서 짧게 파생한다.
+ *      캡션이 «대부분 없다»로 바뀐 뒤로 alt 를 caption 으로 채우면 **alt 가 통째로 비어 버린다** —
+ *      스크린리더 사용자에게는 사진이 사라지고, 이미지 검색에서도 빠진다. 그래서 칸을 나눠 받는다.
+ */
+export interface PublishImage { url: string; caption?: string; alt?: string; sort?: number }
 
 /**
  * publish() 가 받는 글 한 편. pieces 행 + piece_assets 를 합친 모양.

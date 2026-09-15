@@ -36,9 +36,14 @@ export function safeKey(prefix: string, ext: string): string {
   return `${p}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${e}`;
 }
 
-export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string): Promise<{ key: string; url: string }> {
+/**
+ * 기본 캐시는 **영구·불변**이다 — 우리 키는 대부분 `safeKey()` 로 이름이 매번 달라서 그래도 된다.
+ * 🔴 그러나 **이름이 고정인 파일**(예: `runner/latest.json`)에 그 헤더를 쓰면 새로 올려도 옛 값이 한참 읽힌다 —
+ *    자동 업데이트가 «조용히» 멈춘다. 그런 파일은 호출부가 짧은 캐시를 직접 준다.
+ */
+export async function r2Put(key: string, bytes: Uint8Array | Buffer, contentType: string, cacheControl = "public, max-age=31536000, immutable"): Promise<{ key: string; url: string }> {
   const client = getR2Client();
-  await client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: "public, max-age=31536000, immutable" }));
+  await client.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: key, Body: bytes, ContentType: contentType, CacheControl: cacheControl }));
   return { key, url: r2PublicUrl(key) };
 }
 
@@ -88,4 +93,53 @@ export async function r2Head(key: string): Promise<{ bytes: number; contentType:
     const r = await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
     return { bytes: Number(r.ContentLength || 0), contentType: String(r.ContentType || "application/octet-stream") };
   } catch { return null; }
+}
+
+/* ═══════════ 삭제(2026-09-15 · 메인 발주) — 🔴 되돌릴 수 없다. R2 는 버전 관리가 없다(AC-37). ═══════════
+ *   쓰는 곳: 테스트 잔재 정리 · (앞으로) 테넌트 삭제·탈퇴 · 내보내기 만료 정리. 지금 리포에 테넌트 삭제 흐름은 **없다**(호출처 0 · 2026-09-15 grep).
+ *   🔴 접두 삭제는 **테넌트 접두(`autocreate/{tid}/`)만** 받는다 — `autocreate/` 통째나 공용 `autocreate/bgm/` 은 거부한다(한 줄 실수로 전 테넌트 자산이 날아가는 일 0).
+ *   삭제 전에 몇 개인지 세고(`dryRun`) 지운 키 수를 돌려준다 — «지웠다»는 말은 숫자와 함께만. */
+import { DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+
+export async function r2Delete(key: string): Promise<boolean> {
+  if (!/^autocreate\/[^/]+\/.+/.test(key)) throw new Error(`[R2] 삭제 거부 — 테넌트 자산 키가 아닙니다: ${key}`);
+  const client = getR2Client();
+  try { await client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key })); return true; }
+  catch (e) { console.error("[R2] delete 실패", key, String((e as Error)?.message ?? e).slice(0, 120)); return false; }
+}
+
+/** 접두 아래 키 목록(페이지 전부 · 상한 `max`). 목록만 — 지우지 않는다. */
+export async function r2ListPrefix(prefix: string, max = 5000): Promise<string[]> {
+  const client = getR2Client();
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const r = await client.send(new ListObjectsV2Command({ Bucket: R2_BUCKET, Prefix: prefix, ContinuationToken: token, MaxKeys: 1000 }));
+    for (const o of r.Contents ?? []) if (o.Key) keys.push(o.Key);
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token && keys.length < max);
+  return keys.slice(0, max);
+}
+
+/**
+ * r2DeletePrefix — 테넌트 접두 아래를 전부 지운다. 🔴 `autocreate/{tid}/` 꼴만(숫자 tid) · 공용 접두 거부.
+ *   `dryRun:true` 면 세기만 한다. 반환 = { listed, deleted, failed }.
+ */
+export async function r2DeletePrefix(prefix: string, opts: { dryRun?: boolean; max?: number } = {}): Promise<{ listed: number; deleted: number; failed: number; keys: string[] }> {
+  if (!/^autocreate\/\d+\/$/.test(prefix)) throw new Error(`[R2] 접두 삭제 거부 — 'autocreate/{tid}/' 꼴만 받습니다: ${prefix}`);
+  const keys = await r2ListPrefix(prefix, opts.max ?? 5000);
+  if (opts.dryRun || !keys.length) return { listed: keys.length, deleted: 0, failed: 0, keys };
+  const client = getR2Client();
+  let deleted = 0, failed = 0;
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000);
+    try {
+      const r = await client.send(new DeleteObjectsCommand({ Bucket: R2_BUCKET, Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true } }));
+      const errs = r.Errors?.length ?? 0;
+      failed += errs; deleted += batch.length - errs;
+      for (const e of r.Errors ?? []) console.error("[R2] 접두 삭제 실패", e.Key, e.Message);
+    } catch (e) { failed += batch.length; console.error("[R2] 접두 삭제 배치 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
+  }
+  console.log(`[R2] ${prefix} 아래 ${deleted}/${keys.length} 삭제${failed ? ` · 실패 ${failed}` : ""}`);
+  return { listed: keys.length, deleted, failed, keys };
 }

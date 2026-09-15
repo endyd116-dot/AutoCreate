@@ -27,6 +27,8 @@ import { finalizePublish } from "./publish/finalize";
 // 🔴 수익 행을 쓰는 유일한 함수(계약 P1R3 §5). lib/revenue/** 는 runner-jobs 를 보지 않는다(AC-17 · 방향 한쪽).
 import { upsertRevenueRows } from "./revenue/upsert";
 import { r2Head, r2Configured, r2PresignGet, r2PresignPut, safeKey } from "./r2";
+// 배포판 정보(R2 latest.json)는 한 파일에서만 읽는다 — 하트비트·다운로드가 같은 판을 말해야 한다.
+import { updateOfferFor, type RunnerUpdateOffer } from "./runner-release";
 import type { RenderPayload, RenderReport } from "./video/types";
 import type { RevenueRow } from "./revenue/types";
 import type { Block } from "./blocks";
@@ -95,7 +97,8 @@ export interface RunnerPublishPayload {
   title: string;
   bodyHtml: string;
   blocks: Block[];
-  images: { url: string; caption?: string }[];
+  /** caption = 독자가 보는 한 줄(대부분 없다) · alt = 안 보이는 접근성 설명(§5C · B-1 84a2372). 둘은 다른 칸이다. */
+  images: { url: string; caption?: string; alt?: string }[];
   tags: string[];
   disclosure: string | null;
   scheduledFor?: string;
@@ -178,7 +181,11 @@ function siteBase(): string {
   return String(process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.SITE_URL || "https://autocreate-endyd.netlify.app").replace(/\/$/, "");
 }
 
-export interface RegisteredDevice { device: { id: number; name: string; token: string }; install: { cmd: string; url: string } }
+export interface RegisteredDevice {
+  device: { id: number; name: string; token: string };
+  /** 화면이 그대로 그릴 수 있는 설치 안내. `token` 은 여기서도 1회만 나간다(다시 볼 수 없다). */
+  install: { cmd: string; url: string; token: string; steps: string[] };
+}
 
 /** 기기 등록 — 토큰 평문은 **이때 1회만** 나간다(다시 볼 수 없다). */
 export async function registerDevice(tid: number, name: string, kind = "own"): Promise<RegisteredDevice> {
@@ -191,7 +198,17 @@ export async function registerDevice(tid: number, name: string, kind = "own"): P
   await writeAudit({ tenantId: tid, action: "runner_device_register", actorType: "user", target: `runner_device:${id}`, detail: { name: nm, kind } });
   return {
     device: { id, name: String(row?.name ?? nm), token },
-    install: { cmd: `npx ac-runner --token ${token}`, url: `${siteBase()}/runner/install.md` },
+    /* 🔴 2026-09-15 실측(사장님): 여기 있던 안내가 **둘 다 가짜였다** —
+       `${siteBase()}/runner/install.md` 는 404(`runner/` 는 `public/` 밖이라 Netlify 가 서빙하지 않는다),
+       `npx ac-runner` 는 **존재하지 않는 npm 패키지**. 즉 고객은 러너를 받을 길이 자체가 없었다.
+       이제 zip 을 우리가 만들어 R2 에 올리고(`scripts/build-runner.mts`), 로그인·플랜을 통과한 사람에게만
+       `/api/runner-download` 가 10분짜리 링크로 내준다. 안내 문구도 «받은 걸 실행하는» 실제 순서로 바꾼다. */
+    install: {
+      cmd: `run.bat (Windows) · ./run.sh (Mac·Linux)`,
+      url: `${siteBase()}/api/runner-download`,
+      token,
+      steps: ["내려받은 zip 을 압축 풀기", "run.bat 두 번 클릭(Mac·Linux 는 ./run.sh)", "토큰 붙여넣기"],
+    },
   };
 }
 
@@ -212,6 +229,27 @@ export async function listDevices(tid: number): Promise<RunnerDevice[]> {
     if (r.version) o.version = String(r.version);
     return o;
   });
+}
+
+/**
+ * 토큰 재발급(계약 «묶기» ③) — 기기는 그대로 두고 **열쇠만 바꾼다.**
+ *   쓰는 자리 둘: ①PC 를 바꿨다(지문이 묶여 있어 새 PC 가 거절당한다) ②토큰이 새어 나간 것 같다.
+ *   🔴 옛 토큰은 **이 순간 죽는다**(token_hash 를 덮어쓴다) — 돌아다니던 복사본은 다음 요청에서 401 이다.
+ *   🔴 지문도 함께 지운다. 안 지우면 새 토큰을 받아도 **옛 PC 에 묶인 채**라 새 PC 가 또 거절당한다
+ *      («재발급했는데 그대로예요» 가 여기서 나온다).
+ */
+export async function rotateDeviceToken(tid: number, id: number): Promise<{ id: number; name: string; token: string } | null> {
+  const token = newRunnerToken();
+  const [row] = await q(sql`UPDATE runner_devices
+    SET token_hash = ${hashRunnerToken(token)}, fingerprint = NULL, fingerprint_at = NULL,
+        fp_mismatch_at = NULL, fp_mismatch_count = 0, status = 'offline'
+    WHERE tenant_id = ${tid} AND id = ${id} RETURNING id, name`);
+  if (!row) return null;
+  await writeAudit({
+    tenantId: tid, action: "runner_token_rotate", actorType: "user", target: `runner_device:${id}`,
+    detail: { name: String(row.name ?? "") }, riskLevel: "medium",   // 평문 토큰은 감사에 남기지 않는다
+  });
+  return { id: n(row.id), name: String(row.name ?? ""), token };
 }
 
 export async function removeDevice(tid: number, id: number): Promise<boolean> {
@@ -238,18 +276,74 @@ export async function fleetState(tid: number): Promise<RunnerFleetState> {
 export interface DeviceRow { id: number; tenantId: number; name: string; kind: string }
 
 /** x-runner-token 헤더 → 기기. 토큰은 해시로만 대조한다. */
-export async function authRunner(req: Request): Promise<DeviceRow | null> {
+export type RunnerAuth =
+  | { ok: true; device: DeviceRow }
+  | { ok: false; reason: "no_token" | "bad_token" | "other_device"; message: string };
+
+/**
+ * 🔴 **기기 묶기(계약 «묶기» ②)를 여기서 한다** — 하트비트가 아니라 **인증 자리**다(AC-35).
+ *    하트비트에서만 보면 복사본은 하트비트를 건너뛰고 `claim` 만 때리면 그만이다. 관문은 모든 문에 있어야 관문이다.
+ *    · 지문이 아직 없으면(처음 켠 기기 · 이 기능 이전부터 쓰던 기기) **처음 온 값을 그대로 묶는다** —
+ *      쓰던 사람이 업데이트 하나로 갑자기 못 쓰게 되는 일은 만들지 않는다.
+ *    · 이미 묶인 값과 다르면 거절하고 횟수를 센다(알림 문구는 호출부가 — 여기선 DB 를 한 번만 만진다).
+ *    · `kind='managed'`(우리 팜)은 묶지 않는다 — 우리가 옮기고 다시 띄우는 기계라 지문이 정당하게 바뀐다.
+ *    · 지문을 **안 보내는 옛 러너도 그대로 돈다**(없으면 검사하지 않는다) — 다 올라온 뒤에 조여도 늦지 않다.
+ */
+export async function authRunner(req: Request): Promise<RunnerAuth> {
   const token = String(req.headers.get("x-runner-token") ?? "").trim();
-  if (!token) return null;
+  if (!token) return { ok: false, reason: "no_token", message: "러너 토큰이 올바르지 않아요." };
   let hash: string;
-  try { hash = hashRunnerToken(token); } catch { return null; }
-  const [row] = await q(sql`SELECT id, tenant_id, name, kind FROM runner_devices WHERE token_hash = ${hash} LIMIT 1`);
-  if (!row) return null;
-  return { id: n(row.id), tenantId: n(row.tenant_id), name: String(row.name ?? ""), kind: String(row.kind ?? "own") };
+  try { hash = hashRunnerToken(token); } catch { return { ok: false, reason: "bad_token", message: "러너 토큰이 올바르지 않아요." }; }
+  const [row] = await q(sql`SELECT id, tenant_id, name, kind, fingerprint FROM runner_devices WHERE token_hash = ${hash} LIMIT 1`);
+  if (!row) return { ok: false, reason: "bad_token", message: "러너 토큰이 올바르지 않아요. 앱에서 기기를 다시 등록해 주세요." };
+
+  const device: DeviceRow = { id: n(row.id), tenantId: n(row.tenant_id), name: String(row.name ?? ""), kind: String(row.kind ?? "own") };
+  const fp = String(req.headers.get("x-runner-fp") ?? "").trim().toLowerCase();
+  if (device.kind === "managed" || !/^[0-9a-f]{64}$/.test(fp)) return { ok: true, device };
+
+  const bound = String(row.fingerprint ?? "").trim().toLowerCase();
+  if (!bound) {
+    await q(sql`UPDATE runner_devices SET fingerprint = ${fp}, fingerprint_at = NOW() WHERE id = ${device.id} AND fingerprint IS NULL`);
+    return { ok: true, device };
+  }
+  if (bound !== fp) {
+    await q(sql`UPDATE runner_devices SET fp_mismatch_at = NOW(), fp_mismatch_count = fp_mismatch_count + 1 WHERE id = ${device.id}`);
+    await onOtherDevice(device);
+    return {
+      ok: false, reason: "other_device",
+      message: "이 토큰은 다른 PC에 연결돼 있어요. 이 컴퓨터에서 쓰시려면 앱에서 기기를 지우고 다시 등록해 주세요.",
+    };
+  }
+  return { ok: true, device };
+}
+
+/**
+ * «다른 PC 에서 같은 프로그램이 켜졌어요» — 고객에게 **알린다**(계약 «묶기» ②).
+ *   🔴 조용히 막기만 하면 두 가지가 다 나쁘다: 복사해 쓴 사람은 왜 안 되는지 모르고,
+ *      **토큰을 도둑맞은 사람은 도둑맞은 줄을 모른다.** 알림이 이 기능의 절반이다.
+ *   🔴 시끄럽지 않게: 같은 기기로 1시간에 한 번만 알린다(복사본은 1분마다 두드린다).
+ */
+async function onOtherDevice(device: DeviceRow): Promise<void> {
+  try {
+    const [recent] = await q(sql`SELECT 1 AS hit FROM notifications
+      WHERE tenant_id = ${device.tenantId} AND kind = 'runner_other_device'
+        AND link = ${`/app/settings.html?runner=${device.id}`} AND created_at > NOW() - INTERVAL '1 hour' LIMIT 1`);
+    if (recent) return;
+    await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+      VALUES (${device.tenantId}, ${"runner_other_device"}, ${"다른 PC에서 내 프로그램이 켜졌어요"},
+              ${`«${device.name}» 토큰으로 다른 컴퓨터에서 접속을 시도했어요. 그 컴퓨터에서는 아무 일도 하지 않았습니다. 내가 한 게 아니라면 기기를 지우고 다시 등록해 주세요(옛 토큰은 그 즉시 못 쓰게 돼요).`},
+              ${`/app/settings.html?runner=${device.id}`})`);
+    await writeAudit({
+      tenantId: device.tenantId, action: "runner_other_device", actorType: "system",
+      target: `runner_device:${device.id}`, detail: { name: device.name }, riskLevel: "high",
+    });
+  } catch (e) {
+    console.error("[runner] other_device 알림", (e as Error)?.message ?? e);   // 알림 실패로 거절 자체를 막지는 않는다
+  }
 }
 
 /** 하트비트 — last_seen_at·version 갱신 후 다음 폴링 간격을 알려 준다. */
-export async function heartbeat(device: DeviceRow, body: { version?: unknown; jobs?: unknown; canary?: unknown; caps?: unknown }): Promise<{ sleepSec: number; jobsWaiting: number }> {
+export async function heartbeat(device: DeviceRow, body: { version?: unknown; jobs?: unknown; canary?: unknown; caps?: unknown; updateFailed?: unknown }): Promise<{ sleepSec: number; jobsWaiting: number; update?: RunnerUpdateOffer }> {
   const version = String(body.version ?? "").slice(0, 20) || null;
   /* P1R5 §2.4 — 러너 «능력»(caps). 지금은 ffmpeg 유무. 🔴 ffmpeg 가 없으면 러너는 렌더 잡을 **집지 않고**
      여기로 알린다 — 화면이 «ffmpeg 없음» 칩을 띄운다(조용히 잡이 안 도는 상황을 만들지 않는다 · PITFALLS #7). */
@@ -283,7 +377,25 @@ export async function heartbeat(device: DeviceRow, body: { version?: unknown; jo
         ON CONFLICT (day, channel) DO UPDATE SET ok = EXCLUDED.ok, step = EXCLUDED.step, detail = EXCLUDED.detail, shot_key = EXCLUDED.shot_key, ran_at = NOW()`).catch((e) => console.error("[canary] upsert", e));
     }
   }
-  return { sleepSec: jobsWaiting > 0 ? 5 : 60, jobsWaiting };
+  /* 🔴 러너가 «업데이트 하다 실패했다»고 말하면 **반드시 남긴다**(계약 «러너 배포» ③).
+     러너는 옛 판으로 계속 돌기 때문에 겉으로는 아무 일도 없어 보인다 —
+     기록이 없으면 «다들 최신인 줄 알았는데 절반이 옛 판»인 상태를 아무도 모른 채 몇 주가 간다. */
+  if (body.updateFailed && typeof body.updateFailed === "object") {
+    const u = body.updateFailed as Record<string, unknown>;
+    await writeAudit({
+      tenantId: device.tenantId, action: "runner_update_failed", actorType: "system", target: `runner_device:${device.id}`,
+      detail: { from: version, to: String(u.version ?? "").slice(0, 20), reason: String(u.reason ?? "").slice(0, 200) },
+      riskLevel: "medium",
+    });
+  }
+
+  /* 새 판이 있으면 제안을 실어 보낸다(같거나 낮으면 아무것도 안 싣는다 · lib/runner-release.ts).
+     🔴 여기서 실패해도 하트비트는 성공이어야 한다 — 배포 편의가 발행을 멈추게 두지 않는다. */
+  let update: RunnerUpdateOffer | undefined;
+  try { update = (await updateOfferFor(version)) ?? undefined; }
+  catch (e) { console.error("[runner] update offer", (e as Error)?.message ?? e); }
+
+  return { sleepSec: jobsWaiting > 0 ? 5 : 60, jobsWaiting, ...(update ? { update } : {}) };
 }
 
 /* ─────────────────────────── 적재 ─────────────────────────── */

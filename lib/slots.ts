@@ -11,6 +11,7 @@ import { q } from "./accounts";
 import { defaultImageCount } from "./writing-contracts";
 import { coinCostOf, videoCoinItem } from "./coin-table";
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN } from "./best-time";
+import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -160,8 +161,31 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
 }
 
 /* ───────── Slot 투영 ───────── */
-export interface Slot { id: number; date: string; channel: string; kind: string; accountId?: number; accountHandle?: string; status: string; publishAt?: string; reviewDeadline?: string; topicTitle?: string; pieceId?: number; origin: "auto" | "manual" }
-export async function listSlots(tid: number, from: string, to: string): Promise<Slot[]> {
+export interface Slot { id: number; date: string; channel: string; kind: string; accountId?: number; accountHandle?: string; status: string; publishAt?: string; reviewDeadline?: string; topicTitle?: string; pieceId?: number; origin: "auto" | "manual"; skipReason?: "too_soon" }
+
+const KST_MS_LOCAL = 9 * 3600_000;
+/**
+ * 다음 제작 틱(KST produceHour · 크론 produce 가 도는 시각)을 UTC Date 로. 지금 KST 시 < produceHour 면 오늘, 아니면 내일(같은 시는 «이미 지났다» → 내일).
+ *   «시» 판정은 lib/cron/base.ts kstHour/hourOf 그대로(CLAUDE §4.5b) — 크론과 같은 눈금.
+ */
+export function nextProduceTickUtc(settings: ScheduleSettings, now = new Date()): Date {
+  const h = hourOf(settings.produceHour, 6);
+  const k = new Date(now.getTime() + KST_MS_LOCAL);
+  const dayOffset = kstHour(now) < h ? 0 : 1;
+  return new Date(Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate() + dayOffset, h, 0, 0) - KST_MS_LOCAL);
+}
+/** 아직 글이 없는 «만들어질 차례» 상태들 — 이것들만 «못 만드는 자리» 판정 대상. */
+const SKIP_CANDIDATE_STATUS = new Set(["planned", "no_topic", "topic_assigned", "coin_short"]);
+
+/**
+ * listSlots — 편성표 자리 목록. `skipReason:"too_soon"` = **다음 제작 틱이 그 자리의 발행 시각보다 늦어 이번엔 못 만드는 자리**(서버 판정 · 화면은 «이번엔 건너뛰어요»).
+ *   기준: T = 다음 제작 틱(nextProduceTickUtc) · P = publish_at(없으면 그 slot_date 의 KST 23:59) · `P <= T` 면 too_soon. 글이 있거나 만들어질 차례가 아닌 자리엔 키를 싣지 않는다.
+ *   ⚠️ 화면이 «자리 날짜 − 오늘 < produceLeadDays» 로 그리던 것을 대체한다 — produce 크론의 창은 오늘~오늘+lead 라 lead 안의 자리는 **다음 틱에 만들어진다**(2026-09-15 설계 정정).
+ *   autoSchedule 꺼짐은 여기서 표시하지 않는다(배너가 맡는다).
+ */
+export async function listSlots(tid: number, from: string, to: string, now = new Date()): Promise<Slot[]> {
+  const settings = await readScheduleSettings(tid);
+  const tick = nextProduceTickUtc(settings, now).getTime();
   const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
     WHERE s.tenant_id = ${tid} AND s.slot_date >= ${from}::date AND s.slot_date <= ${to}::date ORDER BY s.slot_date, s.publish_at NULLS LAST, s.id`);
   return rows.map((r) => {
@@ -172,6 +196,11 @@ export async function listSlots(tid: number, from: string, to: string): Promise<
     const rd = utcDate(r.review_deadline); if (rd) o.reviewDeadline = rd.toISOString();
     if (r.topic_title) o.topicTitle = String(r.topic_title);
     if (r.piece_id) o.pieceId = n(r.piece_id);
+    if (!r.piece_id && SKIP_CANDIDATE_STATUS.has(o.status)) {
+      const [y, m, d] = o.date.split("-").map(Number);
+      const publishMs = pa ? pa.getTime() : Date.UTC(y, m - 1, d, 23, 59, 0) - KST_MS_LOCAL;   // publish_at 없으면 그날 KST 23:59
+      if (publishMs <= tick) o.skipReason = "too_soon";
+    }
     return o;
   });
 }

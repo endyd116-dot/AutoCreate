@@ -26,7 +26,7 @@ import { listAccounts, TEXT_CHANNELS, isChannel } from "./accounts";
 import { VIDEO_CHANNELS } from "./video/types";          // 순수 어휘 파일(AC-17 순환 0 — types 는 아무것도 import 하지 않는다)
 import { listTemplates } from "./video/reference";       // [P1R5 §1.11] 레퍼런스 구조 템플릿
 import { AD_LAW_BANNED, normalizeForBanScan } from "./banned-words";
-import { findBannedCategory } from "./banned-categories";
+import { findBannedCategory, BANNED_CATEGORY_LABEL, type BannedHit } from "./banned-categories";
 import { writeAudit } from "./audit";
 
 type Row = Record<string, unknown>;
@@ -275,6 +275,15 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
  *   · 중복: 30일 안 같은 제목(norm_key)이면 만들지 않고 기존 것을 돌려준다(`step:"duplicate"`).
  *   · 이 소재는 목록 **맨 위**(`source:"manual"` 정렬 키) · 자동 편성(assign_topics)도 먼저 집는다(점수는 부풀리지 않는다).
  */
+/** topics-add 전용 도박 단독어(공용 사전 밖 · 여기서만) — 반환 모양은 `findBannedCategory` 와 같다(문장·감사 코드가 같은 길을 탄다). */
+const TOPICS_ADD_EXTRA_GAMBLING: readonly string[] = ["카지노", "바카라", "토토", "배팅", "도박"];
+function topicsAddExtraBanned(text: string): BannedHit | null {
+  const blob = normalizeForBanScan(text);
+  if (!blob) return null;
+  for (const w of TOPICS_ADD_EXTRA_GAMBLING) if (blob.includes(normalizeForBanScan(w))) return { category: "gambling", label: BANNED_CATEGORY_LABEL.gambling, word: w };
+  return null;
+}
+
 export type AddTopicResult =
   | { ok: true; topic: Topic; volumeKnown: boolean }
   | { ok: false; step: "title" | "banned_category" | "duplicate" | "channel"; error: string; topic?: Topic };
@@ -287,7 +296,10 @@ export async function addManualTopic(tid: number, a: { title: unknown; keyword?:
   const angle = String(a.angle ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
 
   // 금칙 카테고리(성인·도박·의료 과장·비방·불법) — R4 사전 · 디렉터와 같은 문장 · 감사
-  const banned = findBannedCategory(`${title} ${keyword} ${angle}`);
+  //   + [메인 결정 2026-09-15] **이 입구의 제목 검사에 한해** 도박 단독어(카지노·바카라·토토·배팅·도박)를 더 본다.
+  //     공용 사전은 «짧은 낱말 오탐 방지»로 조합어만 두는데, 여기는 ≤80자 제목이라 오탐 피해가 작고 사용자가 문구를 보고 고쳐 쓴다.
+  //     🔴 `ai-tell-gate`·`banned-categories` 사전 자체는 건드리지 않는다(다른 호출처 전부에 파급된다).
+  const banned = findBannedCategory(`${title} ${keyword} ${angle}`) ?? topicsAddExtraBanned(`${title} ${keyword}`);
   if (banned) {
     await writeAudit({ tenantId: tid, action: "topic_banned_category", actorType: "user", riskLevel: "medium", detail: { category: banned.category, word: banned.word, title: title.slice(0, 80), source: "manual" } });
     return { ok: false, step: "banned_category", error: `${banned.label} 주제는 만들 수 없어요.` };

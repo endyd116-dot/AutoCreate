@@ -780,3 +780,17 @@ export const opsSettings = pgTable("ops_settings", {
   updatedBy: bigint("updated_by", { mode: "number" }),   // operators.id
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+/* === Phase 1 R7 · 러너 배포·묶기(P1R7-B2 · 2026-09-15 · drizzle/0012-runner-dist.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   러너를 **받을 수 있게** 만들면서 «한 벌 사서 열 명이 복사» 를 막는 칸들.
+ *   잡 자체는 토큰의 테넌트 것만 가므로 복사본이 남의 글을 올릴 수는 없다 — 여기서 막는 건 **한 구독을 여럿이 나눠 쓰는 것**이다.
+ */
+export const runnerDevicesR7 = {
+  /** fingerprint varchar(64) — 호스트명+MAC 의 sha256(러너가 해시해서 보낸다 · **원본은 서버에 오지 않는다**).
+   *  처음 온 값을 그대로 묶고(기존 기기는 NULL 이라 다음 하트비트에 묶인다), 그 뒤 다른 값이 오면 401 + 알림. */
+  fingerprint: "fingerprint",
+  fingerprintAt: "fingerprint_at",
+  /** 다른 지문으로 온 마지막 시각·횟수 — «다른 PC 에서 켜졌어요» 알림과 운영 화면이 읽는다. */
+  fpMismatchAt: "fp_mismatch_at",
+  fpMismatchCount: "fp_mismatch_count",
+} as const;
