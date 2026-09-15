@@ -8,6 +8,10 @@ PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스�
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
 let accountsN = null, busy = false, timer = null, templates = []; // [P1R5] shorts_templates(레퍼런스 구조)
+/* [사장님 실측 2026-09-15 · 테넌트 198] «네이버 소재만 계속 보인다» — 데이터는 맞다(소재 채널은 **연결된 계정의 채널**에서만 정해진다 · lib/topics.ts).
+   틀린 건 **화면이 그 까닭을 말하지 않은 것**이다. 연결된 채널을 한 줄로 말하고, 둘 이상이면 칩으로 거른다.
+   🔴 고른 칩은 **화면 안에서만** 산다(저장·URL 금지) — 새로 들어오면 늘 «전체»(«한 번 누르면 계속 그 상태»가 그 불편의 정체). */
+let chFilter = "";
 function sub(t) { const f = t.factors || {}; const parts = [];
   if (f.volume != null) parts.push(`검색 ${UI.num(f.volume)}`); else parts.push("검색량 모름"); // volume 키가 없으면 «모름»(0 아님) — 직접·AI 구분 없이(B-1 확정) if (f.growthPct != null) parts.push(`${f.growthPct >= 0 ? "↑" : "↓"}${Math.abs(f.growthPct)}%`); if (f.competition) parts.push(COMP[f.competition] || f.competition); if (f.seasonal) parts.push(f.seasonal);
   const tp = t.factors?.structureTemplateId ? templates.find((x) => x.id === t.factors.structureTemplateId) : null; if (tp) parts.push(`구조: ${UI.esc(tp.name)}`); // [P1R5] 레퍼런스 구조 부제
@@ -18,9 +22,17 @@ const busyBox = (since) => `${SK}${SK}<p class="muted" style="margin:2px 16px 12
 const STALE = `<p class="muted" style="margin:2px 16px 12px;font-size:13.5px">소재 뽑기가 너무 오래 걸려요. 다시 뽑아 주세요.</p>`;
 const startPoll = () => { if (!timer) timer = setInterval(() => load(true), 5000); };
 const stopPoll = () => { if (timer) { clearInterval(timer); timer = null; } };
+/* 연결된 채널 목록 — 정지된 계정은 뺀다(거기로는 못 나간다) · 목록·시트가 같은 값을 쓴다 */
+async function loadChans() {
+  if (chans) return chans;
+  const a = await UI.api("/api/accounts-list");
+  chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : [];
+  return chans;
+}
 async function load(poll = false) {
   const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
-  if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0; }
+  if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0;
+    chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : []; }
   templates = r.templates || []; UI.$("#refg").hidden = !accountsN; if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
   const f = r.refresh || {};
   const startedMs = f.startedAt ? UI.utc(f.startedAt).getTime() : null;
@@ -30,15 +42,24 @@ async function load(poll = false) {
   if (was && !busy && !stale) UI.toast(f.error ? f.error : f.added ? `소재 ${f.added}개 찾았어요` : "새로 뽑을 소재가 없었어요");
   const BUSY = busy ? busyBox(startedMs ? UI.ago(f.startedAt) : "") : stale ? STALE : "";
   const g = UI.$("#topics");
-  const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : ""}</div>`
+  /* 🔴 채널 이름을 화면에 박지 않는다 — 연결된 계정에서 읽는다(채널이 늘면 문구가 저절로 따라온다) */
+  const chList = chans || [];
+  const chLine = accountsN && chList.length === 1
+    ? `<p class="muted" style="margin:0 16px 8px;font-size:12.5px">연결된 채널의 소재만 보여드려요 · 지금은 <b style="color:var(--ink)">${UI.esc(UI.chLabel(chList[0]))}</b> <a href="/app/accounts.html" class="inline-tap">다른 채널 연결하기</a></p>` : "";
+  const chChips = accountsN && chList.length > 1
+    ? `<div style="padding:0 12px 8px">${UI.chips("chf", [["", "전체"], ...chList.map((c) => [c, UI.chLabel(c)])], chFilter)}</div>` : "";
+  const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : ""}</div>` + chLine + chChips
     + (accountsN ? `<button type="button" class="row tap" id="addTopic"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">내 소재 넣기</span><span class="d">쓰고 싶은 주제를 직접 적어 디렉터에게 보내요</span></div>${UI.chev}</button>` : ""); // [사장님 실측] 디렉터는 소재만 받으면 된다 — 입구
   const cta = UI.$("#cta"), rb = UI.$("#refresh"); cta.hidden = !accountsN; rb.disabled = busy; rb.textContent = busy ? "뽑는 중이에요" : "새로 뽑기";
   const bindAdd = () => { const b = UI.$("#addTopic"); if (b) b.onclick = addSheet; };
+  const bindChf = () => UI.bindChips(UI.$("#topics"), (n, v) => { if (n !== "chf") return; chFilter = v || ""; load(); });   // 🔴 저장하지 않는다(새로 들어오면 늘 «전체»)
   if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; return; }
-  if (busy && !r.topics.length) { g.innerHTML = head + BUSY; bindAdd(); return; }
-  if (!r.topics.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p></div>`; bindAdd(); return; }
-  g.innerHTML = head + BUSY + r.topics.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}${t.source === "manual" ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">직접</span>' : ""}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
-  bindAdd();
+  if (busy && !r.topics.length) { g.innerHTML = head + BUSY; bindAdd(); bindChf(); return; }
+  if (!r.topics.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>소재를 뽑아 볼까요?</h3><p>지금 검색이 늘고 경쟁이 낮은 소재를 골라 드려요. 하루 3번까지.</p></div>`; bindAdd(); bindChf(); return; }
+  const shown = chFilter ? r.topics.filter((t) => (t.channelHint || "naver_blog") === chFilter) : r.topics;
+  if (!shown.length) { g.innerHTML = head + BUSY + `<div class="empty"><span class="mk soft">?</span><h3>${UI.esc(UI.chLabel(chFilter))} 소재가 아직 없어요</h3><p>«전체»로 보거나 새로 뽑아 보세요.</p></div>`; bindAdd(); bindChf(); return; }
+  g.innerHTML = head + BUSY + shown.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}${t.source === "manual" ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">직접</span>' : ""}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--faint);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
+  bindAdd(); bindChf();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
   UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
   // 좌측 스와이프 = 넘김
@@ -56,7 +77,7 @@ UI.$("#refresh").onclick = refresh;
 /* [사장님 실측] 내 소재 넣기 — 제목 한 칸 + 접힌 «검색 키워드» + 채널 칩(연결된 채널만 · 하나면 숨김) → POST /api/topics-add → 바로 디렉터로(«넣고 → 고르고» 두 번 안 누르게) */
 let chans = null;
 async function addSheet() {
-  if (!chans) { const a = await UI.api("/api/accounts-list"); chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : []; }
+  await loadChans();
   UI.sheet(`<form id="tf"><div class="field"><label>무엇에 대해 쓸까요?</label><input class="input" name="title" maxlength="80" required placeholder="예: 에어프라이어 기름때 3분 청소" autocomplete="off"><div class="help"></div></div>
     <button type="button" class="row tap" id="kwT" style="padding:6px 0;min-height:44px"><div class="l"><span class="t" style="font-size:14px">검색 키워드 <span class="muted" style="font-weight:500">선택</span></span><span class="d">네이버 검색량을 볼 키워드가 제목과 다르면</span></div>${UI.chev}</button>
     <div class="field" id="kwF" hidden><label>검색 키워드</label><input class="input" name="keyword" maxlength="40" placeholder="예: 에어프라이어 청소" autocomplete="off"><div class="help"></div></div>
