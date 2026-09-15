@@ -13,7 +13,7 @@
  */
 import { validateMarks, inlineMarked, renderBlocksHtml, normalizeBlocks, MARK_KINDS, MARK_BUDGET, MARK_LABEL, type Block, type MarkDrop } from "../lib/blocks";
 import { formatCapsOf, inlineMarksAllowed, FORMAT_CAP_KEYS, CHANNELS } from "../lib/channel-registry";
-import { applyMarkBudget, stripUnsupportedMarks, buildFormatMarks, mergeRunnerFormatMarks, formatUnusedOf, dropsToDemotions, WHY_SAY, FIELD_LABEL, marksPromptLine } from "../lib/format-marks";
+import { applyMarkBudget, stripUnsupportedMarks, buildFormatMarks, mergeRunnerFormatMarks, formatUnusedOf, dropsToDemotions, WHY_SAY, FIELD_LABEL, marksPromptLine, formatDemotionNotice } from "../lib/format-marks";
 
 let pass = 0; let fail = 0;
 const ok = (name: string, cond: boolean, extra = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? `\n      ${extra}` : ""}`); } };
@@ -107,6 +107,13 @@ console.log("⑤ 투영·합치기");
   const fu = formatUnusedOf(merged);
   ok("formatUnusedOf — kind×why 묶음 · label 은 서버 정본 · n", fu.length === 4 && fu.every((x) => x.label && x.why && x.n >= 1) && fu.find((x) => x.field === "line")?.label === MARK_LABEL.line, JSON.stringify(fu));
   ok("비어 있으면 []", formatUnusedOf(null).length === 0 && formatUnusedOf({ planned: {}, demoted: [] }).length === 0);
+  /* [R9-11 · §9-③] 발행 뒤 알림 — 되돌릴 길은 채널에 따라 갈라 말한다(내릴 수 있으면 «내렸다가 다시 올리기» · 아니면 «채널에서 직접» · 모르면 안 지어냄). 강등 0 이면 null. */
+  const nT = formatDemotionNotice(merged, "전기요금 아끼는 법", "tistory");
+  const nY = formatDemotionNotice(merged, "전기요금 아끼는 법", "naver_clip");
+  const nN = formatDemotionNotice(merged, null, null);
+  ok("알림 — 강등이 있으면 제목·본문 · 티스토리(내릴 수 있음)는 «내렸다가 고쳐서 다시 올릴 수 있어요»", !!nT && /못 낸 꾸밈/.test(nT.title) && /내렸다가 고쳐서 다시 올릴 수 있어요/.test(nT.body) && /전기요금/.test(nT.body), nT?.body);
+  ok("알림 — 못 내리는 채널은 «채널에서 직접» · 채널 모르면 되돌릴 길을 안 지어낸다", !!nY && /채널에서 직접/.test(nY.body) && !!nN && !/직접|다시 올릴/.test(nN.body), `${nY?.body} | ${nN?.body}`);
+  ok("알림 — 강등 0 이면 null · 겁주는 말 0", formatDemotionNotice({ planned: {}, demoted: [] }, "x", "tistory") === null && ![nT, nY, nN].some((x) => /정지|불이익|알려만|책임|러너|테넌트/.test(x?.body ?? "")));
 }
 
 console.log("⑥ 🔴 음성 대조 — 방어를 빼면 빨개지나");

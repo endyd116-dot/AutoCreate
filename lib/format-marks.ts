@@ -20,7 +20,7 @@
  *   🔴 순수 함수(DB·네트워크 0). `scripts/verify-format-marks.mts` 가 그대로 돌린다.
  */
 import { type Block, type MarkKind, MARK_KINDS, MARK_LABEL, MARK_BUDGET, type MarkDrop } from "./blocks";
-import { formatCapsOf, type FormatCapKey } from "./channel-registry";
+import { formatCapsOf, canRetract, type FormatCapKey } from "./channel-registry";
 
 export interface MarkDemotion { kind: string; why: string; sample?: string; by?: "server" | "runner" }
 /**
@@ -87,14 +87,17 @@ export const WHY_SAY: Record<string, string> = {
  * [R9-11 · §9-②] 🔴 **사람이 안 보는 경로(자동 승인)에서도 닿게** — 발행 뒤 강등이 있으면 알림 한 통의 제목·본문(사람말 · §3 말투).
  *   순수 함수 — 러너 보고를 받는 쪽(`lib/runner-jobs.ts applyFormatMarksToPiece` · B2)이 부르고 notifications 에 넣는다. 강등이 0이면 null(알림을 만들지 않는다).
  */
-export function formatDemotionNotice(fm: unknown, pieceTitle?: string | null): { title: string; body: string } | null {
+export function formatDemotionNotice(fm: unknown, pieceTitle?: string | null, channel?: string | null): { title: string; body: string } | null {
   const rows = formatUnusedOf(fm).filter((r) => r.n > 0);
   if (!rows.length) return null;
   const head = rows.slice(0, 3).map((r) => `${r.label}${r.n > 1 ? ` ${r.n}곳` : ""}`).join(" · ");
   const more = rows.length > 3 ? ` 외 ${rows.length - 3}가지` : "";
+  /* 🔴 §9-③ «되돌릴 길을 함께 준다» — 이 알림은 **이미 올라간 뒤**에 간다(B2 지적 2026-09-16). 우리 화면에서 고치는 게 아니라
+     내릴 수 있는 채널(§5E `canRetract`)이면 «내렸다가 고쳐서 다시 올리기», 아니면 «채널에서 직접 고치기»가 정직한 길이다. 채널을 모르면 둘 다 안 지어내고 «글을 열면 보여 드려요»까지만. */
+  const back = channel ? (canRetract(channel) ? " 고치고 싶으면 글을 내렸다가 고쳐서 다시 올릴 수 있어요." : " 고치고 싶으면 채널에서 직접 바꾸실 수 있어요.") : "";
   return {
     title: "이 글에서 못 낸 꾸밈이 있어요",
-    body: `${pieceTitle ? `«${String(pieceTitle).slice(0, 30)}» — ` : ""}${head}${more}. 글자는 그대로 실렸고, 글을 열면 무엇이 어떻게 들어갔는지 보여 드려요. 고치고 싶으면 글에서 직접 바꾸실 수 있어요.`,
+    body: `${pieceTitle ? `«${String(pieceTitle).slice(0, 30)}» — ` : ""}${head}${more}. 글자는 그대로 실렸고, 글을 열면 무엇이 어떻게 들어갔는지 보여 드려요.${back}`,
   };
 }
 export function whySay(why: string): string { return WHY_SAY[why] ?? "이 채널에서는 내지 못해 글자만 그대로 실었어요."; }
