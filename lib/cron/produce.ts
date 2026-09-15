@@ -29,6 +29,7 @@ import { confirm } from "../director";
 import { requireWritable } from "../guards";
 import { hourOf, kstHour, kstToday, kstWeekStartUtc, notifyOnce, setSlot, type CronStep, type StepOutcome } from "./base";
 import { proposeForSlot, toAutoSlot } from "./director-auto";
+import { PRODUCIBLE_STATUSES } from "../produce-window";   // 🔴 «어떤 자리를 집어 가나»는 한 곳에서만 — 편성표 화면의 produceWindow 도 같은 목록을 읽는다(AC-47)
 
 const n = (v: unknown) => Number(v || 0);
 /**
@@ -66,7 +67,7 @@ export const produceStep: CronStep = {
        LEFT JOIN 이라 규칙이 지워진 옛 자리도 그대로 나온다(자리를 잃지 않는다). */
     const slots = await q(sql`SELECT s.id, s.channel, s.account_id, s.topic_id, s.publish_at, s.slot_date::text AS d, cr.format_hint
       FROM slots s LEFT JOIN cadence_rules cr ON cr.id = s.rule_id AND cr.tenant_id = s.tenant_id
-      WHERE s.tenant_id = ${ctx.tid} AND s.status IN ('topic_assigned','coin_short') AND s.topic_id IS NOT NULL AND s.piece_id IS NULL
+      WHERE s.tenant_id = ${ctx.tid} AND s.status IN (${sql.join(PRODUCIBLE_STATUSES.map((x) => sql`${x}`), sql`, `)}) AND s.topic_id IS NOT NULL AND s.piece_id IS NULL
         AND s.slot_date >= ${kstToday()} AND s.slot_date <= ${kstToday()} + ${lead}::int
       ORDER BY s.slot_date, s.publish_at NULLS LAST, s.id LIMIT 100`);
     if (!slots.length) return { changed: 0, skipped: 0 };
