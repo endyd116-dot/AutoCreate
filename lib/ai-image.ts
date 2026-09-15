@@ -90,7 +90,9 @@ export async function generateImage(a: GenerateImageArgs): Promise<GenerateImage
     const r = await callImageModel(model, prompt, aspect, apiKey, a.timeoutMs ?? 90_000);
     if (!r.ok) { lastReason = r.reason; console.warn(`[ai-image] ${model} 실패: ${r.reason}`); if (/401|403|no_api_key/.test(r.reason)) break; continue; }
     const costUsd = calcCost(model, r.inTok, r.outTok);
-    void recordAiUsage({ tenantId: a.tenantId, purpose: "image", model, inTokens: r.inTok, outTokens: r.outTok, costUsd, ref: a.ref });
+    /* 🔴 AC-36 — 돈 기록은 **await**(이미지는 원가의 85%다 · 메인 실측 2026-09-15: 글 3편 $0.98 중 사진 18장이 $0.83).
+       이미지 생성 자체가 수 초라 쓰기 한 번은 체감이 없고, 새면 «썼는데 원장에 없는 돈»이 된다(`reconcilePieceCost` 는 그물이지 정본이 아니다). */
+    await recordAiUsage({ tenantId: a.tenantId, purpose: "image", model, inTokens: r.inTok, outTokens: r.outTok, costUsd, ref: a.ref });
     const ext = r.mime.includes("jpeg") || r.mime.includes("jpg") ? "jpg" : r.mime.includes("webp") ? "webp" : "png";
     const key = safeKey(a.keyPrefix || `autocreate/${a.tenantId ?? 0}`, ext);
     try {

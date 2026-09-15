@@ -191,7 +191,7 @@ async function main() {
     } else warn("plan_feature·banned_category", "계정 없음");
     // ai_cost_cap — 설정 키 하나 · 판정 한 벌: cap 1원 + ai_usage 오늘 합 심기 → 생성 거부
     await s`UPDATE tenants SET plan_key = 'trial', settings = settings || ${s.json({ aiCostCapKrwPerDay: 1 })} WHERE id = ${TID}`;
-    await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref) VALUES (${TID}, 'topics', 'c-verify', 1000, 1000, 0.5, ${"cap" + STAMP})`;
+    await s`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, synthetic) VALUES (${TID}, 'topics', 'c-verify', 1000, 1000, 0.5, ${"cap" + STAMP}, true)`;
     const capRes = await call(jar, "/api/topics-refresh", { body: {} });
     const [capNotif] = await s`SELECT id FROM notifications WHERE tenant_id = ${TID} AND kind = 'ai_cost_cap' ORDER BY id DESC LIMIT 1`;
     rec("ai_cost_cap 초과 → 400 ai_cost_cap + 알림(settings.aiCostCapKrwPerDay 한 키)", capRes.status === 400 && capRes.json?.step === "ai_cost_cap" && !!capNotif, `${capRes.status} ${capRes.json?.step} «${capRes.json?.error}» 알림 ${capNotif?.id}`);
