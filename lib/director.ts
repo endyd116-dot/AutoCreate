@@ -27,6 +27,7 @@ import { callGeminiJson } from "./ai";
 import { CHAIN_DIRECTOR } from "./ai-models";
 import { toTopic, type Topic } from "./topics";
 import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼런스 구조 템플릿
+import { applyReferenceStyle, applyRefPalette, type RefStyleApplied, type RefUnused } from "./video/reference-apply";   // [R8CLOSE · B2] 배워 온 것 중 **닿는 것만** 고른다
 import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
 import { pickFormatByPrint, type FormatPick } from "./format-pick";        // [R8 §2.2] 골격 지문으로 format 고르기
 import { printFromMeta, type StructurePrint } from "./structure-print";    // 축이 쓰는 지문 그대로
@@ -527,10 +528,16 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   /* [P1R5 §1.11] 레퍼런스 구조 — 소재에 `factors.structureTemplateId` 가 붙어 있으면 그 서사 단계를 영상 meta 에 싣는다.
      `gen.ts` 가 `meta.structure` 를 대본 프롬프트의 «서사 단계 A → B → C» 로 넘긴다(안 실으면 배운 구조가 어디에도 쓰이지 않는다). */
   let refStructure: string[] | null = null; let refTemplateId: number | null = null;
+  /* [R8CLOSE · B2] 🔴 여기가 **«배워 놓고 안 읽던» 자리**다. `templateOf` 는 `style`(그림·색·자막·호흡·카메라·규칙·훅원리)을
+     통째로 들고 오는데 종전엔 `tpl.structure` 하나만 꺼내고 **나머지를 그 자리에서 버렸다.**
+     이제 `applyReferenceStyle` 이 「지금 닿는 것」과 「못 내는 것」으로 갈라, 닿는 것만 piece 에 싣는다.
+     🔴 못 낸 것도 **이름과 이유로 남긴다**(`refUnused`) — 렌더가 좋아지면 그게 할 일 목록이다(AC-9). */
+  let refStyle: RefStyleApplied | null = null; let refUnused: RefUnused[] = [];
   if (hasVideo) {
     const [tr] = await q(sql`SELECT factors FROM topics WHERE tenant_id = ${tid} AND id = ${topicId}`);
     const tplId = n(((tr?.factors ?? {}) as Record<string, unknown>).structureTemplateId);
-    if (tplId) { const tpl = await templateOf(tid, tplId); if (tpl?.structure.length) { refStructure = tpl.structure; refTemplateId = tpl.id; } }
+    if (tplId) { const tpl = await templateOf(tid, tplId); if (tpl?.structure.length) { refStructure = tpl.structure; refTemplateId = tpl.id;
+      const ap = applyReferenceStyle(tpl.style); refStyle = Object.keys(ap.applied).length ? ap.applied : null; refUnused = ap.unused; } }
   }
   // 빌려 쓸 자리의 원래 상태·채널(롤백 복원용 · 채널 대조용). 게이트를 이미 통과했으니 행은 있다.
   let reuseSlotPrevStatus = "topic_assigned", reuseChannel = specs[0].channel, usedReuseSlot = false;
@@ -575,7 +582,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
       const isCard = !isVideo && isCardnewsChannel(s.channel);
       const coinItem = isVideo ? videoCoinItem(s.video!.seconds) : isCard ? "cardnews" : "blog";
       const meta = isVideo
-        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: s.video, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId } : {}) }
+        ? { stage: "script", key: s.key, emotionKey: "script", format: s.format, composition: s.composition, video: applyRefPalette(s.video, refStyle), affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, coinItem, regenCount: 0, chainResume: { count: 0 }, chainLock: null, ...(refStructure ? { structure: refStructure, structureTemplateId: refTemplateId, ...(refStyle ? { refStyle } : {}), ...(refUnused.length ? { refUnused } : {}) } : {}) }
         : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0 , ...(s.formatPick ? { formatPick: s.formatPick } : {}) };
       const [p] = await q(sql`INSERT INTO pieces (tenant_id, brief_id, topic_id, account_id, channel, kind, format, status, meta, scheduled_for)
         VALUES (${tid}, ${briefId}, ${topicId}, ${s.accountId}, ${s.channel}, ${isVideo ? "video" : isCard ? "cardnews" : "post"}, ${s.format}, ${"generating"}, ${jsonb(meta)}, ${s.schedule.at}::timestamptz AT TIME ZONE 'UTC') RETURNING id`);

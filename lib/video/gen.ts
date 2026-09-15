@@ -16,6 +16,7 @@ import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys } 
 import { toTopic } from "../topics";
 import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf } from "./script";
 import { buildCutPlans, planCutWindows, PALETTES } from "./scenes";
+import type { RefStyleApplied } from "./reference-apply";   // [R8CLOSE · B2] 레퍼런스가 배워 온 것 중 **닿는 것만**
 import { generateClip, generateStill } from "./providers";
 import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
 import { synthesizeGemini, isGeminiVoice, scriptGen, type TtsResult, type TtsWord } from "./tts";
@@ -98,6 +99,10 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     const cuts = Math.max(form.cuts.min, Math.min(form.cuts.max, spec.cuts || form.cuts.default));
     const aff = (meta.affiliate ?? null) as { provider: string; productQuery: string } | null;
     const persona = await personaFactsFor(tid, accountId);
+    /* [R8CLOSE · B2] 🔴 레퍼런스가 배워 온 그림·규칙·호흡 — `director.ts` 가 `applyReferenceStyle` 로 걸러 `meta.refStyle` 에 실어 뒀다.
+       종전엔 `meta.structure`(서사 단계) **하나만** 실렸고 나머지는 DB 에만 쌓였다 — 배우기는 하는데 **읽는 쪽이 통째로 없었다.**
+       🔴 없으면 `undefined` 라 프롬프트가 **종전과 한 글자도 안 달라진다**(레퍼런스 안 쓴 영상은 무회귀). */
+    const refStyle = (meta.refStyle ?? null) as RefStyleApplied | null;
     /* 🔴 종전에 여기 `void (await contractFor(channel, "script"));` 가 있었다 — 주석은 «운영자 조정분 **반영**»인데
        `contractFor` 는 **순수 읽기**(DB SELECT + 60초 캐시)라 결과를 버리면 **아무 일도 안 일어난다**.
        운영자가 그 채널 감성 계약을 고쳐도 영상 대본은 한 글자도 안 바뀌었고, 남는 건 **버려지는 질의 한 번**이었다.
@@ -108,7 +113,7 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     let script = (meta.script ?? null) as Awaited<ReturnType<typeof buildVideoScript>> extends { ok: true; script: infer S } ? S | null : null;
     if (!opts.resume || !script) {
       await stamp(pieceId, "script");
-      const r = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
+      const r = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
       if (!r.ok) return await failPiece(tid, pieceId, r.reason, slotId);
       let s = r.script; let drafts = r.drafts;
       const fc = await factcheckRoundTrip(tid, pieceId, s);
@@ -116,7 +121,7 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       s = fc.script;
       const g = checkScriptGates(s);
       if (!g.ok) {
-        const r2 = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null, rewrite: `[다시 쓰기 — 아래에 걸렸다]\n${g.issues.map((x) => `- ${x}`).join("\n")}` });
+        const r2 = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null, rewrite: `[다시 쓰기 — 아래에 걸렸다]\n${g.issues.map((x) => `- ${x}`).join("\n")}` });
         if (r2.ok) { const g2 = checkScriptGates(r2.script); if (g2.ok || g2.issues.length < g.issues.length) { s = r2.script; drafts = r2.drafts; } }
       }
       const gateNote = checkScriptGates(s);
@@ -167,7 +172,7 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     await stamp(pieceId, "clips");
     const windows = planCutWindows(timed.map((l) => ({ idx: l.idx, cutIdx: l.cutIdx, startMs: l.startMs, endMs: l.endMs })));
     const palette = spec.variant?.palette || PALETTES[(accountId ?? 0) % PALETTES.length];
-    const { plans, risks } = buildCutPlans({ windows, lines: timed, drafts, format, seconds, hookType: spec.variant?.hookType ?? "event_pushin", palette });
+    const { plans, risks } = buildCutPlans({ windows, lines: timed, drafts, format, seconds, hookType: spec.variant?.hookType ?? "event_pushin", palette, refStyle });
     if (risks.some((r) => r.risks.some((x) => x.level === "p0"))) return await failPiece(tid, pieceId, `장면 서술이 정책에 걸려요(${risks[0].risks[0].issue}).`, slotId);
     const clipRows = await q(sql`SELECT sort, r2_key FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'clip' ORDER BY sort`);
     const clips = new Map<number, string>(clipRows.map((c) => [n(c.sort), String(c.r2_key)]));
