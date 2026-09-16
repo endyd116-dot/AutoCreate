@@ -355,6 +355,9 @@ const SURFACES = [
      서버는 `lib/slots.ts:397` 에서 `o.crowd = c` 로 이미 실어 보낸다(`crowdOf` 는 순수 · 막는 칸이 없다). */
   ["🔴 «이날 겹쳐요» — 화면이 서버 `crowd` 를 말해 주나(R11-7)", "crowd", "lib/slots.ts",
     "겹침을 재 놓고 **아무 화면도 안 말한다** — 막지 않기로 한 대신 말해 주기로 했는데, 그 말이 어디에도 안 뜬다(§9-①)", true],
+  /* 서버는 두 곳에서 이미 싣는다 — `lib/accounts.ts:204`(`monetizable:false`) · `lib/revenue/aggregate.ts:176`(`noRevenueChannel`). */
+  ["🔴 당근 — 화면이 «수익이 안 붙어요»를 말해 주나(R12-6)", "noRevenueChannel", "lib/revenue/aggregate.ts",
+    "당근 계정의 **0원이 고장으로 보인다** — 설계가 «정직하게 말해야 하는 것 셋»의 첫째로 박아 둔 자리다(AC-10 «설정 안 됨은 오류가 아니다»)", true],
 ];
 /* 🔴 [2026-09-16 메인] **서버 정본을 «파일 이름»으로 찾으면 오늘 세 번 틀렸다.**
    ·E6(감사): «이름만 맞는 파일이 있어서» 가짜 초록 — `ops-center.ts` 는 실제로 `/api/ops-audit` 를 연다
