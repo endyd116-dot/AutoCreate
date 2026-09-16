@@ -1396,8 +1396,22 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
         return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
       const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
         return p.id ? { pieceId: Number(id), title: p.title || "제목 없는 글", channel: p.channel, krw, ...(p.title ? {} : { untitled: true }) } : { pieceId: Number(id), title: "지운 글", channel: "", krw, deleted: true }; });
+      /* [R11 A-4 · B r11-back] «어디서 났나» — 정본은 `lib/revenue/aggregate.ts`(C 확인 · `revenue.ts` 는 스프레드만 한다).
+         🔴 `axes` 는 **연결한 계정** 기준이다(수익 행 기준이 아니다) — 그래서 가진 축은 **0원이어도 줄이 온다**.
+         🔴 `other` 는 **0원이면 줄 자체를 안 보낸다**(화면이 0 판정을 하지 않게).
+         🔴 `label`·`note` 는 **서버 글자**다 — 화면이 다시 적지 않는다(AC-52). */
+      const axisOf = (r) => { const p = S.pieces.find((x) => x.id === Number(r.pieceId)); if (!p) return "other"; return p.kind === "video" ? "video" : "text"; };
+      const axisKrw = { text: 0, video: 0, other: 0 };
+      for (const r of mine) axisKrw[axisOf(r)] += r.amountKrw;
+      const chCat = new Map(CHANNELS.map((c) => [c.key, c.category]));   // 채널 표는 모의 상수 CHANNELS(=accounts-list 가 주는 그 표)
+      const axes = [...new Set((S.accounts || []).filter((a) => a.status !== "suspended").map((a) => (chCat.get(a.channel) === "video" ? "video" : "text")))];
+      const AXL = { text: "글에서", video: "영상에서", other: "그 밖" };
+      const byAxis = [
+        ...axes.map((k) => ({ axis: k, label: AXL[k], krw: axisKrw[k] })),
+        ...(axisKrw.other > 0 ? [{ axis: "other", label: AXL.other, krw: axisKrw.other, note: "계정이나 글에 연결되지 않은 수입이에요 — 협찬·직접 입력처럼요." }] : []),
+      ].sort((a, b) => b.krw - a.krw);
       return { ok: true, monthKrw: sum(mine), todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(),
-        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces }; },
+        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces, axes, byAxis }; },
     "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const days = groupKrw(S.revRows.filter((r) => r.day >= from && r.day <= to), "day").sort((a, b) => a[0].localeCompare(b[0]));
       /* [B2 a8de1d5] 그 날에 «예상 열» 행이 섞였나 — 없으면 키 자체가 없다(옛 데이터엔 안 붙는다) */

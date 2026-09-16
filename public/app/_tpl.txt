@@ -906,7 +906,8 @@ function render() {
   UI.$("#tip").innerHTML = base
     ? `${isThisMonth() ? "지난달 같은 날보다" : "그 전달보다"} <b class="${diff >= 0 ? "up" : ""}">${won(Math.abs(diff))} ${diff >= 0 ? "더" : "덜"}</b> 벌었어요`
     : "지난달에는 기록이 없어요";
-  body.innerHTML = shareLink() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  body.innerHTML = shareLink() + axisGroup() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  bindAxisInfo();
   const sl = UI.$("#shareLink"); if (sl) sl.onclick = (e) => { e.preventDefault(); shareSheet(); };
   bindDaily(); bindManual();
 }
@@ -938,6 +939,30 @@ function bindDaily() {
     const day = b.dataset.d; const r = DAYS.find((x) => x.day === day);
     UI.toast(r ? `${dayLabel(day)} · ${won(r.krw)}${r.freshness ? " · " + (UI.FRESH[r.freshness] || "") : ""}${r.amountEstimated ? " · 예상치가 섞여 있어요" : ""}` : `${dayLabel(day)} · 아직 못 가져왔어요`);
   });
+}
+
+/* ①-b [R11 A-4] 🔴 «어디서 났나» — 글에서 얼마, 영상에서 얼마. 큰 숫자(합계) **바로 아래** 한 그룹.
+   🔴 **`axes.length < 2` 면 그룹을 통째로 안 그린다** — 글만 하는 집에 «영상에서 0원»은 소음이다(그리고 «내가 뭘 안 했나»로 읽힌다).
+      `axes` 는 **연결한 계정** 기준이지 수익 행 기준이 아니다(서버가 그렇게 준다) — 그래서 **가진 축은 0원이어도 줄이 온다**(«영상 0원»은 사실이다).
+   🔴 `other`(그 밖)는 **0원이면 서버가 줄을 아예 안 보낸다** — 화면이 0 판정을 하지 않는다.
+   🔴 **글자는 서버 정본**(`label`·`note`) — 화면에서 다시 적지 않는다(AC-52).
+   🔴 막대는 **단색 + 1등만 잉크**(§13.0 «다색 차트 금지»). **축을 색으로 칠하지 않는다** — 그러면 화면의 «색 3개»가 깨진다.
+   🔴 큰 숫자는 여전히 **하나**다(헌장 «첫 화면 숫자 1개») — 여기 숫자들은 막대 옆 작은 값이다. */
+function axisGroup() {
+  const axes = SUM.axes || [];
+  if (axes.length < 2) return "";
+  const list = SUM.byAxis || []; if (!list.length) return "";
+  const max = Math.max(1, ...list.map((x) => Number(x.krw) || 0));
+  const top = list.reduce((a, b) => ((Number(b.krw) || 0) > (Number(a.krw) || 0) ? b : a), list[0]);
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 났나</div><div class="bars">` + list.map((x) => {
+    const krw = Number(x.krw) || 0;
+    const info = x.note ? ` <button type="button" class="axinfo" data-note="${UI.esc(x.note)}" aria-label="설명 보기">ⓘ</button>` : "";
+    return `<div class="bar ${x === top ? "top" : ""}"><span class="n">${UI.esc(x.label || "")}${info}</span><span class="track"><span class="fill" style="width:${Math.round((krw / max) * 100)}%"></span></span><span class="v">${UI.num(krw)}</span></div>`;
+  }).join("") + "</div></div>";
+}
+/* ⓘ — 바텀시트 한 문장(서버 문장 그대로). 🔴 툴팁이 아니라 시트다(헌장 «툴팁 설명 금지»). */
+function bindAxisInfo() {
+  UI.$$(".axinfo").forEach((b) => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); UI.sheet(`<p class="muted" style="margin:0">${UI.esc(b.dataset.note || "")}</p>`, { title: "그 밖은 뭔가요?" }); });
 }
 
 /* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */

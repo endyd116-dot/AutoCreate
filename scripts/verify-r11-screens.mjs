@@ -159,6 +159,44 @@ const RAW = /\b(ruleKind|shorts|cardnews|post)\b/;
   await page.close();
 }
 
+/* ── A-4 수익 «어디서 났나» ── */
+const axisRead = (page) => page.evaluate(() => {
+  const g = [...document.querySelectorAll(".group")].find((x) => (x.querySelector(".gt")?.textContent || "").trim().startsWith("어디서 났나"));
+  if (!g) return null;
+  const bars = [...g.querySelectorAll(".bar")].map((b) => ({
+    name: (b.querySelector(".n")?.textContent || "").replace("ⓘ", "").trim(),
+    top: b.classList.contains("top"), v: (b.querySelector(".v")?.textContent || "").trim(),
+    fill: (b.querySelector(".fill")?.getAttribute("style") || ""),
+  }));
+  const fills = [...g.querySelectorAll(".fill")].map((f) => getComputedStyle(f).backgroundColor);
+  return { bars, fills: [...new Set(fills)], info: g.querySelectorAll(".axinfo").length, nums: [...document.querySelectorAll(".hl .num")].length };
+});
+{
+  const { page, errors } = await open("/app/revenue.html?mock=1");
+  const v = await axisRead(page);
+  rec("A-4 «어디서 났나» 그룹이 그려진다", !!v && v.bars.length >= 2, v ? `막대=${v.bars.map((b) => b.name + " " + b.v).join(" · ")}` : "🔴 그룹 없음");
+  rec("A-4 이름표가 서버 글자다(«글에서»·«영상에서»)", !!v && v.bars.some((b) => b.name === "글에서") && v.bars.some((b) => b.name === "영상에서"), v ? v.bars.map((b) => b.name).join("·") : "");
+  rec("🔴 A-4 막대가 **단색**이고 1등만 잉크다(다색 차트 0)", !!v && v.fills.length <= 2 && v.bars.filter((b) => b.top).length === 1,
+    v ? `채움색 ${v.fills.length}종=${v.fills.join(" | ")} · top=${v.bars.filter((b) => b.top).map((b) => b.name).join(",")}` : "");
+  rec("🔴 A-4 큰 숫자는 여전히 하나다(헌장)", !!v && v.nums === 1, `.hl .num=${v?.nums}개`);
+  rec("A-4 페이지 오류 0", errors.length === 0, errors.join(" | ") || "0");
+  /* ⓘ — 툴팁이 아니라 시트 · 문장은 서버 것 */
+  if (v && v.info) {
+    await page.click(".axinfo").catch(() => {});
+    await page.waitForTimeout(400);
+    const sheet = await page.evaluate(() => (document.querySelector(".sheet")?.innerText || document.body.innerText).replace(/\s+/g, " "));
+    rec("A-4 ⓘ 를 누르면 바텀시트에 서버 문장이 그대로 나온다", /계정이나 글에 연결되지 않은 수입이에요/.test(sheet), `«${(sheet.match(/계정이나[^»]{0,50}/) || [""])[0]}»`);
+  } else rec("A-4 «그 밖»이 0원이라 ⓘ 가 없다(서버가 줄을 안 보냈다)", true, "이 집엔 그 밖 수입이 없다");
+  await page.close();
+}
+/* 🔴 A-4 거짓 양성 짝 — 축이 하나뿐인 집엔 그룹이 **통째로** 없다 */
+{
+  const { page } = await open("/app/revenue.html?mock=1&oneCh=1");
+  const v = await axisRead(page);
+  rec("🔴 A-4 축이 하나뿐이면 그룹이 **통째로 없다**(«영상에서 0원»은 소음이다)", v === null, v ? `🔴 그려짐: ${v.bars.map((b) => b.name).join("·")}` : "그룹 0개");
+  await page.close();
+}
+
 /* ── 말투 ── */
 {
   const { page } = await open("/app/pieces.html?mock=1");
