@@ -346,5 +346,43 @@ console.log("\n══ ⑬ 고지 축 — 🔴 «pending 이 뜨나»가 아니�
   ok("🔴 pending 은 pass 다(막지 않는다)", disclosureVerdict(OK, true, undefined).pass === true);
 }
 
+console.log("\n══ ⑭ 🔴 «조건의 입력이 둘 이상인 갈래»를 전수로 — 내 규칙을 내 코드에 댄다(B2 되돌려 줌) ══");
+{
+  /* B2 가 내 규칙(«pending 조건에 입력이 둘 이상이면 대조군») 으로 자기 쪽 `pickVerifyLayer` 를 잡았다.
+     그래서 이번 라운드에 내가 만든 «빼는/안 하는» 갈래 중 **입력이 둘 이상인 것**을 전수로 훑었다. 둘이 나왔다(`buildByAxis` · `crowdOf`).
+
+     🔴 **그런데 재 보니 둘 다 이미 잡히고 있었다 — 내 첫 짐작이 틀렸다.**
+        처음 이 블록을 쓸 때 «옛 축들은 전부 초록이었다»고 적었는데, **확인하니 아니었다**:
+          · `&&` → `||` 변이 → 옛 자 **exit 1**(«그 밖 0원이면 줄 없음» 축이 잡았다)
+          · `nearestMin` 0 폴백 변이 → 옛 자 **exit 1**(«다른 채널 1분 뒤는 안 센다» 축이 잡았다)
+        ⇒ 짐작을 지우고 **잰 것만 남긴다**(이번 라운드 내내 고친 그 병이다 · B2 의 «관찰과 해석을 갈라 적어라»).
+
+     🔴 그래도 아래 축은 남긴다. 까닭이 다르다:
+        두 변이를 잡은 것은 **다른 것을 재던 축이 우연히 걸린 것**이다(«그 밖 0원» 축은 `other` 줄을 보러 만든 것이고,
+        «다른 채널» 축은 채널 가르기를 보러 만든 것이다). **우연한 덮개는 그 축이 바뀌는 날 함께 사라진다.**
+        ⇒ 「안 가진 축인데 돈이 있다」와 「이웃이 0명이다」를 **이름 붙여 직접** 잰다. 덮개를 **의도**로 바꾸는 일이다. */
+
+  /* ── ⓐ `buildByAxis`: `if (!ownedAxes.includes(a) && sum[a] === 0) continue` — 입력 **둘**(가졌나 × 0원인가) ──
+     여기가 틀어지면 **안 가진 축의 돈이 통째로 사라진다**(합계 ≠ 내역 → 고객은 «없어진 돈»을 본다). 그 뜻을 이름 붙여 직접 잰다. */
+  const gone = buildByAxis([{ channel: "reels", krw: 700 }], ["text"]);
+  eq("🔴 안 가진 축인데 돈이 있으면 그 줄도 낸다(계정을 지운 뒤)", gone.map((x) => [x.axis, x.krw]), [["text", 0], ["video", 700]]);
+  ok("🔴 합계 보존 — 내역 합이 원장 합과 같다", gone.reduce((a, b) => a + b.krw, 0) === 700, String(gone.reduce((a, b) => a + b.krw, 0)));
+  /* 대조군의 짝 — 안 가졌고 돈도 없으면 **그 줄은 없어야** 한다(둘 다 내면 «영상에서 0원»이 소음이 된다). */
+  eq("🔴 대조군 · 안 가졌고 돈도 없으면 줄 없음", buildByAxis([{ channel: "naver_blog", krw: 100 }], ["text"]).map((x) => x.axis), ["text"]);
+
+  /* ── ⓑ `crowdOf`: `tight = nearestMin !== undefined && nearestMin < gap` — 입력 **둘**(이웃이 있나 × 가까운가) ──
+     `nearestMin` 을 0 으로 메우는 폴백이 생기는 순간 **이웃이 없는 자리에 «0분 안에 붙어요»**가 뜬다(«모른다»를 «값»으로 · AC-92). */
+  const alone = crowdOf({ atMs: Date.UTC(2026, 8, 17, 1, 0), accountId: 7, handle: "cook_a", others: [], channel: "naver_blog", gapMin: 30 });
+  ok("🔴 이웃이 0명이면 nearestMin 키가 아예 없다(0분으로 메우지 않는다)", alone.nearestMin === undefined, JSON.stringify(alone));
+  ok("🔴 이웃이 0명이면 붙는다고 말하지 않는다", !alone.tight && alone.say === "", JSON.stringify(alone));
+  /* 대조군의 짝 — 같은 계정 같은 날은 있는데 **채널 이웃은 없는** 자리: «이날 N편»만 말하고 «붙어요»는 안 말한다. */
+  const sameDayOnly = crowdOf({
+    atMs: Date.UTC(2026, 8, 17, 1, 0), accountId: 7, handle: "cook_a",
+    others: [{ accountId: 7, channel: "tistory", atMs: Date.UTC(2026, 8, 17, 4, 0) }], channel: "naver_blog", gapMin: 30,
+  });
+  ok("🔴 같은 날 있지만 같은 채널 이웃은 없다 → «이날 1편»만, «붙어요»는 없다",
+    sameDayOnly.say.includes("이날") && !sameDayOnly.say.includes("붙어요") && !sameDayOnly.tight, sameDayOnly.say);
+}
+
 console.log(`\n${fail ? "FAIL" : "PASS"} ${pass} · FAIL ${fail}`);
 process.exit(fail ? 1 : 0);
