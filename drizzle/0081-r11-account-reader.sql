@@ -18,9 +18,13 @@
 --   ══ 🔴 **이 파일은 «머지와 같은 호흡»에 걸어야 한다 — 늦으면 제품이 거의 통째로 멈춘다** ══
 --     `lib/accounts.ts ACCOUNT_SELECT` 가 `a.reader` 를 **읽는다.** 컬럼이 없으면 Postgres 가 **42703** 으로 거절하고 **폴백이 없다**.
 --     그 조각을 지나는 자리를 전수로 셌다(2026-09-17 · C 가 러너까지임을 짚어 줘서 다시 셌다):
---       계정(accounts) · 편성 규칙(rules) · 🔴 **러너 API(runner — 잡을 못 집는다)** · 공유 카드 · 글 스타일 배우기 ·
---       🔴 **디렉터(director) · 자동 편성 크론(director-auto)** · 소재(topics)
---     ⇒ «계정 화면이 죽는다»가 아니라 **계정·편성·러너·디렉터·자동 생성이 같이 죽는다.** 순서는 CLAUDE §4.5 그대로 **B → DDL → A**.
+--       [직접 8곳] 계정(accounts) · 편성 규칙(rules) · 🔴 **러너 API(runner — 잡을 못 집는다)** · 공유 카드 · 글 스타일 배우기 ·
+--                  🔴 **디렉터(director) · 자동 편성 크론(director-auto)** · 소재(topics)
+--       [전이 1단] director → director·pieces·slots 엔드포인트 · topics → topics·topics-refresh-background ·
+--                  🔴 director-auto → **lib/cron/produce.ts(제작 크론 · produce.ts:31)**
+--     ⇒ «계정 화면이 죽는다»가 아니라 **글이 아예 안 만들어진다**(공장이 선다). 순서는 CLAUDE §4.5 그대로 **B → DDL → A**.
+--     ⚠️ 🔴 이 목록은 **네 판에 걸쳐 넓어졌다**(B → C → B → C). 네 번 다 짐작이었고 **셀 수 있는 것**이었다 —
+--        다음 사람은 적기 전에 세라(세는 명령은 `docs/active/2026-09-17-R11R12-B-state.md` §0a).
 --     ⚠️ 같은 라운드의 `0082`(당근 행)는 **반대다** — 안 걸어도 아무것도 안 죽는다(화면에 안 뜰 뿐 · 정본은 코드).
 
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS reader varchar(120);
