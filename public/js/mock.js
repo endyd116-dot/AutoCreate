@@ -623,7 +623,11 @@
     return pieces;
   }
   const coinsPerWeek = () => S.rules.filter((r) => r.active).reduce((a, r) => a + (r.every === "day" ? r.count * 7 : r.count) * (r.kind === "shorts" ? VIDEO_COIN.video_60 : r.kind === "cardnews" ? COIN.cardnews : tierFields(r.accountMode === "fixed" ? S.accounts.find((a) => a.id === r.accountId) : null).coinCost), 0); // [P1R5] shorts = video_60 단가(§1.10) · [R9R10-A] 글 = 계정 기본 등급(계정 자동이면 simple)
-  const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
+  /* [R11 A-2 · B r11-back] `ruleKind` — 서버가 **매번 계산해서 싣는다**(정본 `lib/slots.ts ruleKindOfPiece(kind, format)` · 빈칸이 오는 경우 없음).
+     🔴 `kind`(post|video)는 **그대로 남는다** — 지우지 않았다. 배지·종류 칩·빈 상태는 `ruleKind` 만 본다.
+     🔴 종전 화면은 `UI.kindPill(p.kind)` 를 불렀는데 배지표 열쇠가 `shorts|cardnews` 라 **한 번도 안 맞아 배지가 영영 안 그려졌다**(A-2 가 가리키는 자리). */
+  const ruleKindOf = (kind) => (kind === "video" ? "shorts" : kind === "cardnews" ? "cardnews" : "post");
+  const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; row.ruleKind = ruleKindOf(p.kind); if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
   const devRow = (d) => { const o = { id: d.id, name: d.name, kind: d.kind, status: d.online ? "online" : "offline", jobsWaiting: d.jobsWaiting || 0 }; if (d.caps) o.caps = d.caps; // [P1R5] caps.ffmpeg(§2.4)
     if (d.bound) o.bound = true; if (d.otherDeviceAt) { o.otherDeviceAt = d.otherDeviceAt; o.otherDeviceCount = d.otherDeviceCount || 1; } // [러너 배포] 지문 값은 싣지 않는다 — «묶였나 · 다른 PC 가 있었나 · 몇 번» 만

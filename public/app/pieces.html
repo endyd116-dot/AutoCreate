@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>글 · AutoCreate</title>
+<title>만든 것 · AutoCreate</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="/css/ac.css?v=22">
@@ -13,8 +13,9 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/home.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
-<div class="step-h"><h1>만든 글</h1></div>
+<div class="step-h"><h1>만든 것</h1></div>
 <div class="seg" id="seg"><button type="button" data-tab="generating">만드는 중</button><button type="button" data-tab="in_review">봐주세요</button><button type="button" data-tab="scheduled">예약됨</button><button type="button" data-tab="published">발행됨</button></div>
+<div id="kinds"></div>
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
   </main>
 </div>
@@ -27,6 +28,13 @@ await UI.boot("home");
 const TAB = { generating: ["generating", "draft", "failed"], in_review: ["in_review"], scheduled: ["approved", "scheduled", "publishing", "awaiting_manual"], published: ["published"] };
 const STAGES = [["writing", "글 쓰는 중"], ["images", "사진 만드는 중"], ["checking", "검사 중"]];
 let tab = UI.qs.get("tab") || null, all = [], timer = null, runnerOn = null;
+/* [R11 A-1] 종류 칩 — 🔴 **`.seg` 가 아니라 `.chips`** 다. `.seg` 는 이미 **상태**(만드는 중·봐주세요…)가 차지했고,
+   한 화면에서 같은 컨트롤이 두 뜻이면 고객이 무엇을 고르는지 모른다.
+   🔴 고른 값은 **화면 안에서만 산다** — 저장·URL 금지(`create.html` 채널 칩의 선례). 다시 들어오면 늘 «전체».
+   🔴 낱말은 서버 `ruleKind` 열쇠 그대로 받는다(`UI.KIND_PILL` 과 같은 열쇠 · 두 벌 금지 · AC-52). */
+const RK = { post: "글", cardnews: "카드뉴스", shorts: "영상" };
+let kind = "";
+const kindsOf = () => [...new Set(all.map((p) => p.ruleKind).filter((k) => RK[k]))];
 /* 🔴 [2026-09-16] «제자리에 머무는 증상» — 글이 «만드는 중»에 갇혀도 이 화면은 5초마다 **같은 막대를 다시 그리기만** 했다.
    라이브 실물: piece 25·40·42 가 `stage:writing` 인 채 **3,299분(≈55시간)** · `created_at == updated_at`(배경 함수가 한 번도 못 건드렸다).
    영상은 `video-sweep`(20분)이 주워 가는데 **글을 줍는 크론은 0개**다 — 그래서 사용자가 빠져나갈 길은 지금 이 버튼 하나뿐이다(§9-3 «되돌릴 길을 함께 준다»).
@@ -66,13 +74,24 @@ function videoBar(p) { const m = p.meta || {}; const stage = m.stage || "script"
   const extra = (k) => k === "clips" && stage === "clips" && cs.cutsTotal ? ` <small class="muted" style="font-weight:500">${cs.cutsDone ?? 0}/${cs.cutsTotal}</small>` : k === "render" && stage === "render" ? (runnerOn === false ? ` <span class="pill warn" style="margin-left:4px">내 PC 프로그램을 켜 주세요</span>` : ` <small class="muted" style="font-weight:500">내 PC 프로그램이 굽는 중</small>`) : "";
   return `<div class="steps" style="padding:0 16px 12px 66px">${UI.VSTAGE.map(([k, l], n) => `<div class="st ${n < i || stage === "done" ? "done" : n === i ? "on" : ""}"><i>${n < i || stage === "done" ? "✓" : n + 1}</i>${l}${extra(k)}</div>`).join("")}</div>`; }
 function row(p) { const st = UI.PIECE_STATUS[p.status] || ["off", p.status]; const when = p.status === "published" ? UI.dateKST(p.publishedAt) : p.scheduledFor ? `${UI.dateKST(p.scheduledFor)} ${UI.timeKST(p.scheduledFor)}` : ""; const video = p.kind === "video";
-  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${UI.kindPill(p.kind)}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
+  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${UI.kindPill(p.ruleKind)}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
 function render() {
-  const cnt = Object.fromEntries(Object.entries(TAB).map(([k, v]) => [k, all.filter((p) => v.includes(p.status)).length]));
+  /* 🔴 고객이 **가진 종류만** 낸다 — 한 번도 안 만든 종류를 내밀면 눌러 보고 «왜 비었지»가 된다.
+     한 종류뿐이면 **고를 것이 없으니 칩 줄 자체를 안 그린다**(§13.0 «옵션을 늘리지 않는다»). */
+  const kinds = kindsOf();
+  if (kind && !kinds.includes(kind)) kind = "";   // 가진 종류가 바뀌면(마지막 영상을 버렸다면) 조용히 «전체»로
+  const kb = UI.$("#kinds");
+  kb.innerHTML = kinds.length > 1 ? UI.chips("kind", [["", "전체"], ...kinds.map((k) => [k, RK[k]])], kind) : "";
+  if (kinds.length > 1) UI.bindChips(kb, (_n, v) => { kind = v || ""; render(); });
+  const mine = kind ? all.filter((p) => p.ruleKind === kind) : all;   // 상태 탭의 숫자도 고른 종류를 따른다(안 그러면 «3» 이라 적고 0장을 보여 준다)
+  const cnt = Object.fromEntries(Object.entries(TAB).map(([k, v]) => [k, mine.filter((p) => v.includes(p.status)).length]));
   if (!tab) tab = cnt.generating ? "generating" : cnt.in_review ? "in_review" : cnt.scheduled ? "scheduled" : "in_review";
   UI.$$("#seg button").forEach((b) => { b.classList.toggle("on", b.dataset.tab === tab); const n = cnt[b.dataset.tab]; b.textContent = b.textContent.replace(/\s\d+$/, "") + (n ? " " + n : ""); });
-  const list = all.filter((p) => TAB[tab].includes(p.status));
-  const EMPTY = { generating: ["지금 만드는 글이 없어요", "만들기에서 소재를 골라 디렉터에게 보내 보세요", "/app/create.html", "소재 고르기"], in_review: ["봐주실 글이 없어요", "글이 다 되면 여기에 «봐주세요»로 올라와요", null, null], scheduled: ["예약된 글이 없어요", "검수에서 «이대로 발행 예약»을 누르면 여기로 와요", null, null], published: ["아직 발행된 글이 없어요", "예약된 시각에 발행되면 여기에 쌓여요", null, null] };
+  const list = mine.filter((p) => TAB[tab].includes(p.status));
+  /* 🔴 빈 상태가 **종류를 안다** — 영상 칩을 고르고 «봐주실 **글이** 없어요»를 읽으면 그건 틀린 말이다.
+     받침은 `UI.josa` 가 잰다(«글이» · «영상이» · «카드뉴스가») · 종류를 안 골랐으면 «게»(«봐주실 게 없어요»). */
+  const N = kind ? RK[kind] + UI.josa(RK[kind], "이가") : "게";
+  const EMPTY = { generating: [`지금 만드는 ${N} 없어요`, "만들기에서 소재를 골라 디렉터에게 보내 보세요", "/app/create.html", "소재 고르기"], in_review: [`봐주실 ${N} 없어요`, "다 되면 여기에 «봐주세요»로 올라와요", null, null], scheduled: [`예약된 ${N} 없어요`, "검수에서 «이대로 발행 예약»을 누르면 여기로 와요", null, null], published: [`아직 발행된 ${N} 없어요`, "예약된 시각에 발행되면 여기에 쌓여요", null, null] };
   const e = EMPTY[tab];
   UI.$("#list").innerHTML = list.length ? list.map(row).join("") : `<div class="empty"><h3>${e[0]}</h3><p>${e[1]}</p>${e[2] ? `<a class="btn primary sm" href="${e[2]}">${e[3]}</a>` : ""}</div>`;
   // 만드는 중이 남아 있으면 5초 폴링 · 없으면 중단
