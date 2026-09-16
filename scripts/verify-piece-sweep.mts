@@ -76,11 +76,12 @@ try {
   rec("준비: 하니스 테넌트를 만들었다", TID > 0, `tid=${TID}`);
 
   /** 글 한 편 심기 — `updated_at` 을 과거로 밀어 «몇 분째 조용한지»를 만든다(스윕이 보는 그 칸). */
-  const seed = async (o: { kind: string; mins: number; meta: Record<string, unknown>; slot?: boolean }) => {
-    const [p] = await q(sql`INSERT INTO pieces (tenant_id, channel, kind, status, title, meta, created_at, updated_at)
-      VALUES (${TID}, ${"naver_blog"}, ${o.kind}, ${"generating"}, ${"하니스 " + STAMP}, ${jsonb(o.meta)},
+  const seed = async (o: { kind: string; mins: number; meta: Record<string, unknown>; slot?: boolean; body?: string; asset?: boolean }) => {
+    const [p] = await q(sql`INSERT INTO pieces (tenant_id, channel, kind, status, title, body, meta, created_at, updated_at)
+      VALUES (${TID}, ${"naver_blog"}, ${o.kind}, ${"generating"}, ${"하니스 " + STAMP}, ${o.body ?? null}, ${jsonb(o.meta)},
               NOW() - (${o.mins} || ' minutes')::interval, NOW() - (${o.mins} || ' minutes')::interval) RETURNING id`);
     const id = n(p?.id);
+    if (o.asset) await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key) VALUES (${TID}, ${id}, ${"image"}, ${"harness/" + STAMP + "/" + id + ".webp"})`);
     if (o.slot) {
       const [s] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, status) VALUES (${TID}, CURRENT_DATE, ${"naver_blog"}, ${"producing"}) RETURNING id`);
       await q(sql`UPDATE pieces SET slot_id = ${n(s?.id)} WHERE id = ${id}`);
@@ -95,9 +96,14 @@ try {
   const C = await seed({ kind: "post", mins: 60, meta: { stage: "checking", angle: "상한 초과", sweepResume: { count: 3 } }, slot: true });
   const D = await seed({ kind: "video", mins: 60, meta: { stage: "script", angle: "영상" } });                          // 🔴 손대면 빨강
   const E = await seed({ kind: "post", mins: 60, meta: { stage: "writing", angle: "이미 환급됨", sweepResume: { count: 3 } } });
-  await spend(C, 7); await spend(E, 7);
+  /* 🔴 [AM 장부가 알려 준 것] «끝났는데 상태만 안 넘어간 글» — `created_at == updated_at` 과 **같은 모양으로 위장한다**.
+     다시 걸면 AI 를 또 불러 **돈이 두 번** 나가고 중복 산출물이 생긴다. 두 모양을 다 심는다: 본문이 있는 것 · 사진만 있는 것. */
+  const G = await seed({ kind: "post", mins: 60, meta: { stage: "checking", angle: "끝났는데 상태만" }, body: "<p>이미 다 써 놓은 본문이에요.</p>" });
+  const H = await seed({ kind: "post", mins: 60, meta: { stage: "images", angle: "사진까지 만들고 죽음" }, asset: true });
+  await spend(C, 7); await spend(E, 7); await spend(G, 7); await spend(H, 7);
   await q(sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason) VALUES (${TID}, ${"grant"}, ${"included"}, ${7}, ${"refund:piece:" + E + ":c7"}, ${"하니스 · 먼저 환급된 셈"})`);
-  rec("준비: 글 5편을 심었다(갇힘·도는중·상한초과·영상·이미환급)", [A, B, C, D, E].every((x) => x > 0), `A=${A} B=${B} C=${C} D=${D} E=${E}`);
+  rec("준비: 글 7편을 심었다(갇힘·도는중·상한초과·영상·이미환급·본문있음·사진있음)",
+    [A, B, C, D, E, G, H].every((x) => x > 0), `A=${A} B=${B} C=${C} D=${D} E=${E} G=${G} H=${H}`);
 
   const before = await q(sql`SELECT id, updated_at FROM pieces WHERE tenant_id = ${TID}`);
   const upAt = (id: number, rows: Row[]) => String(rows.find((r) => n(r.id) === id)?.updated_at ?? "");
@@ -106,7 +112,7 @@ try {
   const { pieceSweepStep } = await import("../lib/cron/piece-sweep");
   const ctx = { tid: TID, key: "sweepharness", planKey: "trial", settings: {}, raw: {}, now: new Date(), deadline: Date.now() + 120_000, manual: true };
   const r1 = await pieceSweepStep.run(ctx as never);
-  rec("스텝이 돌았다 — 3편을 손댔다(A 재시작 · C·E 종결)", n(r1.changed) === 3 && n(r1.skipped) === 0,
+  rec("스텝이 돌았다 — A 재시작 · C·E 종결 · G·H 는 손 안 댐", n(r1.changed) === 3 && n(r1.skipped) === 2,
     `changed=${r1.changed} skipped=${r1.skipped} detail=${JSON.stringify(r1.detail)}`);
 
   const after = await q(sql`SELECT id, status, slot_id, meta FROM pieces WHERE tenant_id = ${TID}`);
@@ -126,6 +132,16 @@ try {
   rec("🔴 A 의 updated_at 이 지금으로 당겨졌다 — 이 한 줄이 잠금이다",
     fresh?.now_ish === true && upAt(A, before) !== upAt(A, upAfter),
     `SQL «지금이다»=${fresh?.now_ish} · before=${upAt(A, before).slice(0, 19)} after=${upAt(A, upAfter).slice(0, 19)}`);
+
+  /* ── 🔴 이미 만들어진 글은 다시 걸지 않는다(AM 장부가 알려 준 구멍) ── */
+  for (const [key, id, what] of [["G", G, "본문이 있는"], ["H", H, "사진이 있는"]] as [string, number, string][]) {
+    const sk = (meta(id).sweepSkipped ?? null) as { why?: string } | null;
+    rec(`🔴 ${key} ${what} 글은 **다시 걸지 않는다**(AI 두 번 부르지 않는다)`,
+      sk?.why === "already_has_output" && String(row(id).status) === "generating" && !meta(id).sweepResume && !hits.some((h) => h.pieceId === id),
+      `sweepSkipped=${JSON.stringify(sk)} status=${row(id).status} 배경함수 호출=${hits.filter((h) => h.pieceId === id).length}회`);
+    const ref = n((await q(sql`SELECT COALESCE(SUM(delta),0) AS g FROM coin_ledger WHERE tenant_id = ${TID} AND kind = 'grant' AND ref LIKE ${"refund:piece:" + id + "%"}`))[0]?.g);
+    rec(`🔴 ${key} 는 환급 0 이다 — 나간 값에 **물건이 있다**`, ref === 0, `환급=${ref}`);
+  }
 
   /* ── 🔴 대조군: 안 주워야 할 둘 ── */
   rec("🔴 B 도는 글(5분 전 갱신)은 **손대지 않았다**", String(row(B).status) === "generating" && !meta(B).sweepResume && upAt(B, before) === upAt(B, upAfter),
@@ -154,6 +170,8 @@ try {
   rec("🔴 E 알림은 «0개 돌려드렸어요»가 아니라 «빠져나간 코인은 없어요»다(AC-9)",
     notes.some((x) => /빠져나간 코인은 없어요/.test(String(x.body))) && !notes.some((x) => /코인 0개/.test(String(x.body))),
     `알림 ${notes.length}건`);
+  /* 🔴 알림은 **딱 둘**(C·E)이어야 한다 — G·H 에도 «만들지 못했어요»가 가면 **거짓말**이다(만들어졌다). 수로 못 박는다. */
+  rec("🔴 알림은 C·E 둘뿐이다 — 이미 만들어진 G·H 에는 «만들지 못했어요»가 안 간다", notes.length === 2, `알림 ${notes.length}건`);
 
   /* ── 두 번째 회차: 방금 건 글을 5분 뒤 또 집지 않는다(= 한 편을 두 번 만들지 않는다 = 돈이 두 배가 아니다) ──
      🔴 A 가 아직 `generating` **인 채로 남아 있어야** 이 질문이 성립한다 — 그래서 위에서 스텁으로 202 를 줬다. */
@@ -181,13 +199,21 @@ try {
 } finally {
   if (TID && ALLOWED.has(TID)) {
     guard(TID);
-    await q(sql`DELETE FROM notifications WHERE tenant_id = ${TID}`);
-    await q(sql`DELETE FROM coin_ledger WHERE tenant_id = ${TID}`);
-    await q(sql`DELETE FROM pieces WHERE tenant_id = ${TID}`);
-    await q(sql`DELETE FROM slots WHERE tenant_id = ${TID}`);
-    await q(sql`DELETE FROM tenants WHERE id = ${TID}`);
+    /* 🔴 **자식 표를 먼저** 지운다 — `piece_assets.piece_id` 에 FK 가 있어서 pieces 를 먼저 지우면 23503 으로 튕긴다.
+       첫 판이 여기서 죽었고, **죽은 자리가 finally 안이라 나머지 정리가 통째로 안 돌아** 라이브에 하니스 테넌트가 남았다(손으로 치웠다).
+       ⇒ 지우는 순서를 고치고, **한 줄이 실패해도 다음 줄은 돌게** 감싼다 — 정리는 «되도록»이 아니라 «반드시»다. */
+    const del = async (label: string, s: ReturnType<typeof sql>) => { try { await q(s); } catch (e) { console.error(`[정리] ${label} 실패 — ${String((e as Error)?.message ?? e).slice(0, 80)}`); } };
+    await del("piece_assets", sql`DELETE FROM piece_assets WHERE tenant_id = ${TID}`);
+    await del("notifications", sql`DELETE FROM notifications WHERE tenant_id = ${TID}`);
+    await del("coin_ledger", sql`DELETE FROM coin_ledger WHERE tenant_id = ${TID}`);
+    await del("pieces", sql`DELETE FROM pieces WHERE tenant_id = ${TID}`);
+    await del("slots", sql`DELETE FROM slots WHERE tenant_id = ${TID}`);
+    await del("tenants", sql`DELETE FROM tenants WHERE id = ${TID}`);
     const [left] = await q(sql`SELECT COUNT(*) AS c FROM pieces WHERE tenant_id = ${TID}`);
-    rec("정리: 하니스 테넌트를 지웠다(라이브에 흔적 0)", n(left?.c) === 0 && n((await q(sql`SELECT COUNT(*) AS c FROM tenants WHERE id = ${TID}`))[0]?.c) === 0, `tid=${TID}`);
+    const [tleft] = await q(sql`SELECT COUNT(*) AS c FROM tenants WHERE id = ${TID}`);
+    const [aleft] = await q(sql`SELECT COUNT(*) AS c FROM piece_assets WHERE tenant_id = ${TID}`);
+    rec("정리: 하니스 테넌트를 지웠다(라이브에 흔적 0)", n(left?.c) === 0 && n(tleft?.c) === 0 && n(aleft?.c) === 0,
+      `tid=${TID} pieces=${n(left?.c)} assets=${n(aleft?.c)} tenants=${n(tleft?.c)}`);
   }
 }
 

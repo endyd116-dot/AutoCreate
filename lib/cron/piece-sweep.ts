@@ -15,8 +15,9 @@
  *   존재할 수 없다**는 뜻이다(살아 있으면 `setStage` 가 매 단계 `updated_at = NOW()` 를 찍는다 · content-gen:281).
  *   ⇒ 도는 글을 뺏을 위험이 없다. 서버의 `pieces-regenerate` 재점화 기준·화면의 «멈춘 것 같아요»도 **같은 20분**이다.
  *
- *   대상: pieces kind <> 'video' AND status = 'generating' AND updated_at < now() - 20분.
- *   판정: `triggerGenerate` 로 다시 건다(상한 `RESUME_MAX`) · 상한 초과 → failed + 환급 + 알림 + 슬롯 표시.
+ *   대상: pieces kind <> 'video' AND status = 'generating' AND updated_at < now() - 20분 (이미 표시한 행은 제외).
+ *   판정: 🔴 **①산출물이 이미 있으면 손대지 않고 표시만**(아래 «AM 장부» 주석) → ②`triggerGenerate` 로 다시 건다(상한 `RESUME_MAX`)
+ *        → ③상한 초과 → failed + 환급 + 알림 + 슬롯 표시.
  *   🔴 환급은 `refundPieceDetailed` **하나만** 쓴다 — 이미 멱등이다(소비 합 − 기환급 합 = 순액 · `refund:piece:{id}:c{누적}`).
  *      `failTrigger`·`content-gen` 이 먼저 환급했으면 net ≤ 0 이라 **두 번 돌려주지 않는다**.
  *   🔴 막지 않는다(§9) — 상한을 넘겨도 «영원히 만드는 중»으로 두는 대신 `failed` 로 **내려놓고 말해 주는 것**이다.
@@ -51,18 +52,38 @@ export const pieceSweepStep: CronStep = {
   // 사람이 만든 글도 멈추면 주워야 한다 — 자동 편성과 무관(publisher·reap·video.sweep 과 같은 부류).
   needsAutoSchedule: false,
   async run(ctx: TenantCtx): Promise<StepOutcome> {
-    const rows = await q(sql`SELECT id, slot_id, meta, updated_at FROM pieces
-      WHERE tenant_id = ${ctx.tid} AND kind <> 'video' AND status = 'generating'
-        AND updated_at < NOW() - (${STALE_MIN} || ' minutes')::interval
-      ORDER BY updated_at LIMIT ${SWEEP_MAX}`);
+    const rows = await q(sql`SELECT p.id, p.slot_id, p.meta, p.updated_at,
+        (COALESCE(length(btrim(p.body)), 0) > 0) AS has_body,
+        EXISTS (SELECT 1 FROM piece_assets a WHERE a.piece_id = p.id) AS has_assets
+      FROM pieces p
+      WHERE p.tenant_id = ${ctx.tid} AND p.kind <> 'video' AND p.status = 'generating'
+        AND p.updated_at < NOW() - (${STALE_MIN} || ' minutes')::interval
+        AND (p.meta -> 'sweepSkipped') IS NULL
+      ORDER BY p.updated_at LIMIT ${SWEEP_MAX}`);
     if (!rows.length) return NOOP;
     let changed = 0, skipped = 0;
-    const detail: Record<string, unknown> = { restarted: 0, failed: 0 };
+    const detail: Record<string, unknown> = { restarted: 0, failed: 0, hasOutput: 0 };
     for (const r of rows) {
       if (Date.now() > ctx.deadline) { skipped++; continue; }
       const pieceId = n(r.id); const meta = (r.meta ?? {}) as Record<string, unknown>;
       const stage = String(meta.stage ?? "writing");
       const resume = n((meta.sweepResume as { count?: number } | undefined)?.count);
+      /* 🔴 [2026-09-16 · AM 장부가 알려 준 구멍] **다시 걸기 전에 «이미 만들어진 것이 있나»를 본다.**
+         AM 은 배경 실행 장부(`bg_runs`)로 갈랐더니 멈춘 행 중 흔적이 남은 17건이 **전부 `phase='done'`** 이었다 —
+         함수는 **정상 완료**했는데 상태만 안 넘어간 것이다. 그 행은 `created_at == updated_at` 과 **같은 모양으로 위장한다.**
+         ⇒ 우리에겐 장부가 없으니 **산출물 존재**가 그 자를 대신한다. 이걸 안 보고 다시 걸면 **①AI 를 또 불러 돈이 두 번 나가고 ②중복 산출물**이 생긴다.
+         («도는 글을 뺏지 않는다»는 배경 수명 15분 증명은 맞지만, **이미 끝난 글**은 그 증명이 안 덮는 자리다.)
+         🔴 **상태를 대신 넘겨 주지 않는다** — «완료 뒤 누가 넘기는가»를 우리가 아직 모른다. 지금 지어내면 그게 또 다른 사고다(AC-92).
+         🔴 **알림도 안 보낸다** — «만들지 못했어요»는 **틀린 말**이다(만들어졌다). 환급도 없다(나간 값에 물건이 있다).
+         🔴 그럼 고객은 어떻게 아나 — **화면이 말한다.** `pieces.html` 이 «N분째 멈춘 것 같아요 · 다시 시작»을 띄우고,
+            다시 걸지 말지는 **고객이 고른다**(§9 — 우리가 자동으로 돈을 쓰지 않고, 대신 또렷하게 말한다).
+         표시만 남기고 SQL 에서 제외한다 — 안 그러면 이 행이 `ORDER BY updated_at LIMIT 5` 맨 앞을 **영영 차지해** 뒤의 진짜 멈춘 글이 굶는다. */
+      if (r.has_body === true || r.has_assets === true) {
+        await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ sweepSkipped: { why: "already_has_output", at: new Date().toISOString(), body: r.has_body === true, assets: r.has_assets === true, stage } })} WHERE id = ${pieceId}`);
+        detail.hasOutput = n(detail.hasOutput) + 1; skipped++;
+        console.warn(`[piece.sweep] tid=${ctx.tid} piece=${pieceId} stage=${stage} 이미 산출물 있음(body=${r.has_body} assets=${r.has_assets}) — 다시 걸지 않는다`);
+        continue;
+      }
       if (resume >= RESUME_MAX) {
         const rf = await refundPieceDetailed(ctx.tid, pieceId); const refunded = rf.granted;
         const reason = `글을 만들다 멈춰서 멈춤 처리했어요(마지막 단계: ${staySay(stage)}).`;
