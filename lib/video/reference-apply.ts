@@ -192,7 +192,15 @@ export function applyReferenceStyle(style: TemplateStyle | null | undefined): Re
      R10 은 «배워서 저장까지»였다(사유: 속도가 바뀌면 자막 시각·컷 창·전체 길이가 전부 따라 움직인다).
      R12 가 그 셋을 같이 잡았다 ⇒ 여기서는 **배운 배수를 그대로** 실어 보내고,
      🔴 «넘기는 값으로 환산»과 «규격을 넘었나»는 `lib/video/tempo.ts` 와 `gen.ts` 가 한 번씩만 한다. */
-  if (Number.isFinite(Number(s.audioTempo))) applied.audioTempo = Number(s.audioTempo);
+  /* 🔴 **범위 밖은 «못 냈다»로 적는다**(B 가 같은 파일에 먼저 넣었던 몫 · 2026-09-17 흡수).
+     보통 경로에서는 `sanitizeTemplate` 이 이미 0.5~2.0 으로 걸러 여기 안 온다. 그런데 이 함수는
+     **저장된 옛 style 에도** 돌고, 그때 범위 밖 값을 조용히 흘리면 `resolveNarrationTempo` 가 baseline 으로 되돌리면서
+     **«배웠는데 아무 일도 안 남»** 이 된다 — 그게 이 파일이 생긴 까닭 그 자체다. */
+  const tempo = Number(s.audioTempo);
+  if (Number.isFinite(tempo)) {
+    if (tempo >= 0.5 && tempo <= 2.0) applied.audioTempo = tempo;
+    else unused.push({ field: "audioTempo", why: `말 속도 ${s.audioTempo}배는 우리가 낼 수 있는 범위(0.5~2.0) 밖이라 보통 속도로 만들어요` });
+  }
 
   /* 🔴 **색 가짓수**는 못 받는다 — 우리 팔레트는 «색 이름 한 줄»이고 «몇 개»를 강제하는 자리가 없다. */
   if (Number.isFinite(Number(s.design?.colorCount))) {
