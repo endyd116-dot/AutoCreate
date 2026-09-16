@@ -343,6 +343,14 @@ const SURFACES = [
     "함수만 있고 여는 화면이 없어 또 «정의는 있는데 부르는 자리가 없는 것»이 된다", true],
   ["옷장 시트를 화면이 연다", "UI.styleSheet", "public/js/ui.js",
     "함수만 있고 여는 화면이 없어 레퍼런스 학습 입구가 0 이 된다", true],
+  /* ── [R11 · C 2026-09-17] 🔴 **서버가 새로 싣는 두 칸을 화면이 읽나** — 계약 §4-7 «가운데를 먼저 정한다»의 읽는 쪽.
+     B 가 TARGETS 에 «만드는 쪽»(`ruleKindOfPiece`·`buildByAxis`)을 박았고 그건 초록이다. 그런데 **그 값을 읽는 화면이 없으면**
+     설계가 고치려던 바로 그 상태 그대로다 — 🔴 **TARGETS 는 그걸 원리상 못 본다**(만드는 쪽만 세니까).
+     ⚠️ 이 두 줄은 **지금 빨강이다.** 그게 맞다 — §4.8 «완료 = 화면에서 쓸 수 있을 때». A 가 화면을 달면 초록이 된다. ── */
+  ["🔴 종류 배지 — 화면이 서버 `ruleKind` 를 읽나(R11-1)", "ruleKind", "netlify/functions/pieces.ts",
+    "서버는 «shorts·cardnews»를 실어 보내는데 화면이 `p.kind`(post|video)를 배지표에 그대로 넣어 **이름표가 늘 빈칸**이다 — 설계 §1.2 가 «지금 틀린 것»이라 부른 그 상태로 되돌아간다", true],
+  ["🔴 수익 «어디서 났나» — 화면이 `byAxis` 를 읽나(R11-4)", "byAxis", "netlify/functions/revenue.ts",
+    "3단(piece→account→그 밖)으로 갈라 놓은 돈이 화면에 한 줄도 안 나온다 — 사장님이 «수익 내는 방식이 두 개»라고 하신 그 구별이 서버에만 산다", true],
 ];
 /* 🔴 [2026-09-16 메인] **서버 정본을 «파일 이름»으로 찾으면 오늘 세 번 틀렸다.**
    ·E6(감사): «이름만 맞는 파일이 있어서» 가짜 초록 — `ops-center.ts` 는 실제로 `/api/ops-audit` 를 연다
@@ -487,8 +495,14 @@ for (const [label, oldSym, oldOwner, newSym, newOwner] of OLD) {
       const gen = read(`${dir}/${file}`);
       if (!gen) { miss.push(`${dir}/${file} 생성물이 없다(정본에만 있다 — 빌드를 안 돌렸다)`); continue; }
       const [html, js] = rest.join("\n").split(/^--- script ---\s*$/m);
-      if (html && html.trim() && !gen.includes(html.trim())) miss.push(`${dir}/${file} 본문이 정본과 다르다(생성물이 낡았다)`);
-      if (js && js.trim() && !gen.includes(js.trim())) miss.push(`${dir}/${file} 스크립트가 정본과 다르다(생성물이 낡았다)`);
+      /* 🔴 **어느 쪽이 새것인지 같이 찍는다**(2026-09-17 A 되먹임 · 이 자가 실제로 A 를 잡은 뒤에 받은 말).
+         첫 판은 문구가 «⇒ `node scripts/build-pages.mjs`» 로 끝났다. 그런데 이번에 잡힌 실물은 **생성물이 새것**이었고,
+         그 말을 그대로 따랐으면 A 의 라이브 수리(55시간 갇힌 글)가 **날아갔다.**
+         🔴 «둘이 다르다»만 말하고 방향은 **사람이 30초 안에 가리게** 줄 수를 옆에 적는다 — 자가 방향을 모를 땐 **시키지 않는다.** */
+      const onlyIn = (a, b) => { const B = new Set(b.split("\n").map((l) => l.trim()).filter(Boolean)); return a.split("\n").map((l) => l.trim()).filter((l) => l && !B.has(l)).length; };
+      const side = (part) => `정본에만 ${onlyIn(part, gen)}줄 · 생성물에만 ${onlyIn(gen, part)}줄`;
+      if (html && html.trim() && !gen.includes(html.trim())) miss.push(`${dir}/${file} 본문이 정본과 다르다(${side(html.trim())})`);
+      if (js && js.trim() && !gen.includes(js.trim())) miss.push(`${dir}/${file} 스크립트가 정본과 다르다(${side(js.trim())})`);
     }
     /* 🔴 **«정본에 없다»만으로 고아라고 부르면 거짓 양성이 난다**(2026-09-17 C 가 먼저 밟았다):
        `team-accept.html`(초대 수락) · `ops/login.html` 은 셸을 안 쓰는 **홑페이지**라 정본에 없는 게 맞다.
@@ -507,7 +521,8 @@ for (const [label, oldSym, oldOwner, newSym, newOwner] of OLD) {
      이 줄이 빨개지는 것은 **정본과 생성물이 실제로 어긋났을 때뿐**이다. */
   const tail = orphan.length ? ` · 🔸 손수 관리 화면 ${orphan.length}곳(${orphan.join(" · ")}) — 판정은 verify-asset-versions.mjs 가 한다` : "";
   rec("🔴 정본(_tpl.txt)과 생성물이 안 어긋났다 — 이 자는 생성물만 읽는다(«낡아도 초록»)", miss.length === 0,
-    (miss.length ? miss.slice(0, 4).join(" | ") + (miss.length > 4 ? ` 외 ${miss.length - 4}건` : "") + " ⇒ `node scripts/build-pages.mjs`"
+    (miss.length ? miss.slice(0, 4).join(" | ") + (miss.length > 4 ? ` 외 ${miss.length - 4}건` : "")
+      + " ⇒ 🔴 **어느 쪽이 새것인지 먼저 보고** 옮기거나 빌드해라(생성물이 새것이면 그냥 빌드하면 그 수정이 날아간다)"
       : `정본 ${blocks}절 ↔ 생성물 전부 같다`) + tail);
 }
 
