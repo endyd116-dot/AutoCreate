@@ -4,7 +4,7 @@
  *   AC 추가: pack_trial(체험 소액팩 · Q7 가정) — AM 표엔 없다.
  */
 export type CoinItem =
-  | "video_60" | "video_30" | "video_15" | "video_clip" | "cardnews" | "blog" | "sns" | "landing"
+  | "video_90" | "video_60" | "video_30" | "video_15" | "video_clip" | "cardnews" | "blog" | "sns" | "landing"
   | "image" | "persona" | "image_regen" | "video_pro" | "managed_extra" | "hero_ad"
   /* [P1R7 §3.6] «계정 1개 + 전용 IP» 30일권 — 🔴 값이 **여기 없다**(표는 생성 1건 원가 · 이건 월 대여료다).
      가격 정본은 `lib/plans.ts ACCOUNT_SLOT_PRODUCTS`(원가 근거 proxy-cost.md) → `consume(…, { cost })` 로 그때 값을 넘긴다. */
@@ -36,13 +36,16 @@ export const COIN_TIERS: Record<CoinTier, CoinTierDef> = {
 };
 
 export const COIN_TABLE: Record<CoinItem, number> = {
-  image: 1, sns: 1, blog: 1, cardnews: 3, landing: 4, video_clip: 2, video_15: 6, video_30: 12, video_60: 28,
+  /* [R12-7] 🔴 `video_90` = **42**(60초 28 × 1.5). ⚠️ 이 숫자는 B 가 잡은 **임시값**이고 **사장님 결재 대기**다(합동 세션 항목).
+     근거: 원가가 컷 수에 붙고 90초 그래픽은 컷이 9→13(1.4배)·나레이션이 1.5배다. 15/30/60 이 초당 0.40·0.40·0.47 코인이라 90 도 같은 결(0.47)로 뒀다.
+     🔴 **구간제를 깨지 않는다**(AM «초 단위 산식 금지») — `videoCoinItem` 이 90 을 이 칸으로 보낸다. */
+  image: 1, sns: 1, blog: 1, cardnews: 3, landing: 4, video_clip: 2, video_15: 6, video_30: 12, video_60: 28, video_90: 42,
   persona: 15, image_regen: 1, video_pro: 100, managed_extra: 30, hero_ad: 1,
   account_slot: 0, account_slot_managed: 0,   // 0 = «표에 값 없음» — 호출부가 lib/plans.ts 값을 넘긴다(두 벌 금지)
   post_simple: COIN_TIERS.simple.coins, post_standard: COIN_TIERS.standard.coins, post_premium: COIN_TIERS.premium.coins,   // [R10-7] 등급 코인 — 사장님 표(위 등급 표)에서 파생한다(값 두 벌 금지)
 };
 export const COIN_ITEM_LABEL: Record<CoinItem, string> = {
-  video_60: "숏폼 영상 60초", video_30: "숏폼 영상 30초", video_15: "짧은 영상 15초", video_clip: "짧은 클립 2~5초",
+  video_90: "숏폼 영상 90초", video_60: "숏폼 영상 60초", video_30: "숏폼 영상 30초", video_15: "짧은 영상 15초", video_clip: "짧은 클립 2~5초",
   cardnews: "카드뉴스 세트", blog: "블로그 글 1건", sns: "SNS 글 1건", landing: "랜딩 1종", image: "이미지 1장",
   persona: "새 페르소나·전략", image_regen: "이미지 재생성 1장", video_pro: "전문가 영상(외주 제작)",
   managed_extra: "매니징 초과 요청 처리", hero_ad: "랜딩 히어로 광고판",
@@ -116,14 +119,18 @@ export function coinCostOf(item: CoinItem): number { return COIN_TABLE[item] ?? 
 
 /**
  * videoCoinItem — 영상 길이 → 구간(AM 원본 ../AutoMarketing/lib/coin-ledger.ts §1 videoCoinItem · 복사 2026-09-15 · «초 단위 산식 금지·구간제»).
- *   ~5초 = video_clip · ~15초 = video_15 · ~35초 = video_30 · 그보다 길면 video_60(SHORTSBILL — 60초 편이 30초 요금으로 팔리던 손해의 수리).
+ *   ~5초 = video_clip · ~15초 = video_15 · ~35초 = video_30 · ~65초 = video_60 · 그보다 길면 **video_90**(SHORTSBILL — 60초 편이 30초 요금으로 팔리던 손해의 수리 · R12-7 에서 90초 칸을 더했다).
  */
 export function videoCoinItem(seconds: number | null | undefined): CoinItem {
   const s = Number(seconds) || 0;
   if (s <= 5) return "video_clip";
   if (s <= 15) return "video_15";
   if (s <= 35) return "video_30";
-  return "video_60";
+  /* [R12-7] 🔴 65 가 경계다 — 60초 편(±여유)까지는 `video_60`, 그 위(릴스 90)는 `video_90`.
+     🔴 «모르면 모자라게 받는 쪽»(AC-93)이 아니라 여기선 **구간의 위쪽 끝**으로 보낸다: 65~90 초 영상을 60초 값으로 팔면
+        **우리가 손해**를 보고(SHORTSBILL 이 딱 그 사고다) 고객은 말해 주지 않는다. 고객에게서 «더 받는» 자리가 아니다 — 실제로 그만큼 굽는다. */
+  if (s <= 65) return "video_60";
+  return "video_90";
 }
 
 /**

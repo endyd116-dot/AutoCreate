@@ -9,7 +9,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
-import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, type ConnectMethod } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0)
+import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, axisOfChannel, channelMonetizable, maxPhotosOf, type ConnectMethod, type ChannelKindAxis } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0) · [R11-10 · R12-6] 축·수익 유무·사진 수
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 import { toCoinTier, type CoinTier } from "./coin-table";   // [R10-9] 계정 기본 등급(표는 coin-table 한 곳 · 순수 리프)
@@ -69,6 +69,12 @@ export interface AccountRow {
   defaultTier: CoinTier | null;
   /** [R10-4] 계정에 걸어 둔 글 스타일(`text_styles.id`). null = 없음. */
   defaultStyleId: number | null;
+  /**
+   * [R11-8 · 설계 R11 §4.4] 🔴 **이 계정의 독자** — 채널 계약(`contract.reader`)을 덮어쓴다.
+   *   `null` = **안 골랐다** = 계약 값 그대로(지금과 똑같다). 화면은 비워 두고 «비우면 채널 기본 그대로예요»라고 말한다.
+   *   🔴 «계약 값이 무엇인지»는 여기서 안 채운다 — 채우면 화면이 «고객이 고른 값»과 «기본값»을 구별하지 못한다(AC-92).
+   */
+  reader: string | null;
 }
 
 /** SELECT 조각 — accounts a + 자격 존재 여부 서브쿼리. */
@@ -76,6 +82,7 @@ export const ACCOUNT_SELECT = sql`
   a.id, a.channel, a.handle, a.display_name, a.status, a.health_score, a.posts_today, a.daily_cap, a.min_gap_min, a.golden_hours,
   a.last_post_at, a.last_error_kind, a.group_id, a.persona_id, a.proxy_url, a.browser_profile_key, a.monetize, a.avatar_url,
   a.quality_tier, a.text_style_id,   /* [R10-9 · R10-4] 계정 기본 등급 · 계정에 걸어 둔 스타일(drizzle/0035) — 없으면 NULL(«안 고름») */
+  a.reader,                          /* [R11-8] 이 계정의 독자(drizzle/0081) — NULL 이면 채널 계약 값 그대로 */
   (SELECT g.name FROM account_groups g WHERE g.id = a.group_id AND g.tenant_id = a.tenant_id) AS group_name,
   a.created_at, a.opened_at, a.warmup_off,
   /* 워밍업(§2.6)이 보는 «이번 주 몇 건 올렸나» — 주는 **KST 월요일 시작**이다(DESIGN §13.5 · UTC 로 세면 월요일 새벽이 지난주가 된다). */
@@ -95,6 +102,7 @@ export function toAccountRow(r: Row): AccountRow {
     monetize: { coupang: r.has_coupang === true, adpost: !!mon.adpostMediaId, adsense: !!mon.adsensePub },
     defaultTier: toCoinTier(r.quality_tier),            // 모르는 값·NULL → null(«안 고름»)
     defaultStyleId: Number(r.text_style_id) > 0 ? Number(r.text_style_id) : null,
+    reader: String(r.reader ?? "").trim() || null,          // [R11-8] 빈 문자열도 «안 고름»으로 — 화면이 «"" 라는 독자»를 그리지 않게
   };
   /* 🔴 워밍업(§2.6) — **`dailyCap` 을 유효값으로 바꿔서 내보낸다.**
      캐던스를 보는 자리가 셋(director·director-auto·account-health)이라 게이트를 하나 더 만들면 넷이 된다.
@@ -162,8 +170,16 @@ export interface ChannelInfo {
   /** [P1R6 §2.3] 영상 채널이면 규격 — 🔴 **화면이 숫자를 갖지 않는다**(«클립은 30초까지» 를 화면에 적지 않는다).
    *  `maxSeconds` = 채널 상한(naver_clip 30 · 나머지 60 · 릴스 90 은 Phase 5) · `formats[].maxSeconds` = 채널·포맷 상한 중 작은 쪽.
    *  정본은 `lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC`·`VIDEO_FORMAT_MAX_SEC` 한 곳. */
-  video?: { maxSeconds: 15 | 30 | 60; formats: { key: string; label: string; maxSeconds: 15 | 30 | 60 }[] };
+  video?: { maxSeconds: VideoSecondsUi; formats: { key: string; label: string; maxSeconds: VideoSecondsUi }[] };
+  /** [R11-10] 🔴 이 채널이 **글 축이냐 영상 축이냐** — 화면이 «배워 올 곳»·종류 칩을 고를 재료. 표에 없는 채널이면 키를 안 싣는다(모르면 안 말한다 · AC-9). */
+  axis?: ChannelKindAxis;
+  /** [R12-6] 🔴 **수익이 안 붙는 채널**(당근)일 때만 `false` — 수익 화면의 0원이 고장으로 보이지 않게. 붙거나 모르면 키를 안 싣는다. */
+  monetizable?: false;
+  /** [R12-6] 한 글에 올릴 수 있는 사진 수(당근 10). 🔴 **안 재 본 채널엔 키가 없다** — 화면이 수를 지어내지 않는다. */
+  maxPhotos?: number;
 }
+/** 화면이 그리는 영상 길이 칩 값 — 정본은 `lib/video/types.ts VideoSeconds`(R12-7 에서 90 이 들어왔다). */
+type VideoSecondsUi = 15 | 30 | 60 | 90;
 /** channel_registry + 연결 방식 + 앱 키 존재. 레지스트리가 비어 있으면 코드 목록으로. */
 export async function listChannels(): Promise<ChannelInfo[]> {
   let rows: Row[] = [];
@@ -178,8 +194,13 @@ export async function listChannels(): Promise<ChannelInfo[]> {
     const open = status === "active";
     const connectable = open && !missing;
     const reason: ChannelInfo["connectableReason"] = !open ? "not_open" : (missing ?? undefined);
+    /* [R11-10 · R12-6] 🔴 채널의 «성질» 셋을 화면에 실어 준다 — 축 · 수익 유무 · 사진 수.
+       화면이 «네이버면 글»·«당근은 10장»을 **베껴 적으면** 채널이 늘 때마다 두 곳이 갈린다(AC-52). 모르는 것은 **키를 안 싣는다**(AC-9). */
+    const axis = axisOfChannel(key);
+    const maxPhotos = maxPhotosOf(key);
     return { key, label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status,
       connectMethod: connectMethodOf(key), configured: providerConfigured(key), connectable,
-      ...(reason ? { connectableReason: reason } : {}), ...(video ? { video } : {}) };
+      ...(reason ? { connectableReason: reason } : {}), ...(video ? { video } : {}),
+      ...(axis ? { axis } : {}), ...(channelMonetizable(key) ? {} : { monetizable: false as const }), ...(maxPhotos ? { maxPhotos } : {}) };
   });
 }

@@ -10,6 +10,7 @@ import { recordAiUsage } from "../ai";
 import { r2Configured, r2Put } from "../r2";
 import { preprocessForSpeech, wavDurationMs, type SpeakReadingDict, type TtsResult, type TtsWord } from "./tts";
 import { videoStub } from "./types";
+import { NARRATION_TEMPO_BASELINE, clampTempo } from "./tempo";   // [R12-3] 말 속도 상수·클램프 정본(순수 파일)
 import { narrationKey } from "./tts";   // [AC-39] 나레이션 키는 한 함수가 만든다(세 곳에서 조립하다 서로 덮었다)
 
 const TYPECAST_API_URL = process.env.TYPECAST_API_URL || "https://api.typecast.ai/v1/text-to-speech";
@@ -19,12 +20,15 @@ export const TYPECAST_MODEL = "ssfm-v30";
 export const TYPECAST_LANGUAGE = "kor";
 export const TYPECAST_USD_PER_CHAR = Number(process.env.TYPECAST_USD_PER_CHAR || "0.000075");
 export const TYPECAST_DURATION_TOLERANCE_MS = 30;
-/** 기본 배속(AM SHORTS1 1.1x). */
-export const TYPECAST_DEFAULT_TEMPO = 1.1;
+/** 기본 배속(AM SHORTS1 1.1x). 🔴 [R12-3] 상수 본체는 `lib/video/tempo.ts` 한 곳이다 —
+ *  말 속도 판정(무회귀 축·규격 초과 판정)이 그 파일에서 돌아야 하는데, 이 파일은 순수하지 않아(R2·ai) 하니스가 못 돌린다. */
+export const TYPECAST_DEFAULT_TEMPO = NARRATION_TEMPO_BASELINE;
 
 export function typecastAvailable(): boolean { return !!(process.env.TYPECAST_API_KEY || "").trim(); }
 export function typecastEndpoint(timestamps: boolean): string { return timestamps ? `${TYPECAST_API_URL}${TYPECAST_TIMESTAMPS_SUFFIX}` : TYPECAST_API_URL; }
-export function clampTypecastTempo(v: unknown): number { const n = Number(v); if (!(n > 0)) return 1; return Math.min(2, Math.max(0.5, n)); }
+/** 🔴 [R12-3] 종전엔 «값이 이상하면 1» 이었다 — 그런데 우리 «보통»은 1 이 아니라 1.1 이다.
+ *  이상한 값이 오면 **오늘과 같은 속도**로 내려앉아야 무회귀다(1 로 내려앉으면 조용히 느려진다). 판정은 `tempo.ts` 한 곳. */
+export function clampTypecastTempo(v: unknown): number { return clampTempo(v); }
 export function isTtsThrottleStatus(httpStatus: unknown): boolean { const s = Number(httpStatus); return s === 429 || s === 503; }
 
 /** API words/characters(초·소수) → ms 정수(순수·방어). */

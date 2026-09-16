@@ -6,7 +6,8 @@
  *   [P1R7 §3.3] 자격 보관 동의 — 아이디·비밀번호를 맡기는 채널(session·app_password)은 `agreeCredsStorage:true` 를 받아 `consents(creds_storage)` 1행.
  *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
- *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl? }
+ *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl?, defaultTier?, defaultStyleId?, reader? }
+ *     · [R11-8] `reader` = 이 계정의 독자(≤120자 · 채널 계약 `contract.reader` 를 덮어쓴다). 🔴 `null`·`""` = 벗기기 = 계약 값 그대로(지금과 같다).
  *     · [P1R8 §5.3] `avatarUrl` = 계정 사진(https 만 · 빈 문자열이면 지운다) · `groupName` 은 없으면 만들어 붙인다(같은 채널 안에서만).
  *   POST /api/accounts-oauth-start         { channel } → { url } | step provider_not_configured
  *   GET  /api/accounts-oauth-return?state&code → 302 /app/accounts.html?connected=<channel>
@@ -253,6 +254,14 @@ export default async (req: Request): Promise<Response> => {
         const t = raw ? toCoinTier(raw) : null;
         if (raw && !t) return badRequest("등급은 간단히·보통·프리미엄 중 하나예요.", "defaultTier");
         sets.push(sql`quality_tier = ${t}`);
+      }
+      /* [R11-8 · 설계 R11 §4.4] 🔴 **이 계정의 독자** — 채널 계약을 덮어쓴다. `null`·`""` = 벗기기(계약 값 그대로 · 지금과 같다).
+         🔴 **허용 목록에 넣는 것까지가 «값을 만든 것»이다** — 2026-09-16 까지 네 곳에서 «저장은 200 인데 새로고침하면 사라졌다»가 났다.
+            그래서 읽는 쪽(`ACCOUNT_SELECT`·`toAccountRow`·`content-gen` 프롬프트·검수 3축)을 **같은 커밋에** 넣었다.
+         🔴 120자 상한은 DDL(varchar(120))과 같은 수다 — 넘치면 DB 가 거절하는 게 아니라 여기서 잘라 준다(고객이 «왜 안 되지»를 겪지 않게). */
+      if (b.reader !== undefined) {
+        const rd = s(b.reader, 120);
+        sets.push(sql`reader = ${rd || null}`);
       }
       /* [R10-4] 계정에 걸어 둔 스타일 — null = 벗기기. 남의 집 스타일·지운 스타일은 못 건다(교차 누수 · CLAUDE §4.6). */
       if (b.defaultStyleId !== undefined) {

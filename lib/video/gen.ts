@@ -14,11 +14,14 @@ import { videoBadgeText, videoDescriptionFirstLine, videoOpeningCaption } from "
 import { decryptObj } from "../creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys } from "../affiliate-coupang";
 import { toTopic } from "../topics";
-import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf } from "./script";
-import { buildCutPlans, planCutWindows, PALETTES } from "./scenes";
+import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf, maxLinesFor } from "./script";
+/* [R12-3 · B↔B2 합의 2026-09-17] 🔴 말 속도 판정은 `tempo.ts` **한 곳**(B2 소유 파일). B 는 «대본을 그만큼 짧게»만 쓴다. */
+import { syllableRatioOf } from "./tempo";
+import { buildCutPlans, planCutWindows, applyCutFloor, PALETTES } from "./scenes";   // [R12-4] applyCutFloor = 컷 하한(순수)
 import type { RefStyleApplied } from "./reference-apply";   // [R8CLOSE · B2] 레퍼런스가 배워 온 것 중 **닿는 것만**
 import { generateClip, generateStill } from "./providers";
 import { synthesizeTypecast, typecastAvailable } from "./tts-typecast";
+import { resolveNarrationTempo, checkTempoFitsSpec, type TempoPlan } from "./tempo";   // [R12-3] 말 속도 — 판정은 전부 순수 파일에
 import { synthesizeGemini, isGeminiVoice, scriptGen, type TtsResult, type TtsWord } from "./tts";
 import { splitPhrasesForLines, phrasesToRender, phrasesToSrt } from "./captions";
 import { checkVideoBudget, estimateVideoCostUsd, videoBudgetMessage, recordVideoBudget, reconcilePieceCost } from "./cost";
@@ -113,18 +116,24 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     let script = (meta.script ?? null) as Awaited<ReturnType<typeof buildVideoScript>> extends { ok: true; script: infer S } ? S | null : null;
     if (!opts.resume || !script) {
       await stamp(pieceId, "script");
-      const r = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
+      /* [R12-3 · 설계 R12 §4.2] 🔴 **배운 말 속도만큼 대본을 짧게 쓴다.** 안 배웠으면 정확히 1 이라 종전과 한 글자도 안 다르다(무회귀).
+         🔴 규격 초과 판정·«못 냈어요» 문장은 **B2 가 실제 음성을 재서** 적는다(`checkTempoFitsSpec` → `meta.refUnused`) — 여기서 두 벌 쓰지 않는다. */
+      /* 🔴 `audioTempo` 칸의 **주인은 B2**(`lib/video/reference-apply.ts` · 2026-09-17 AC-101 로 정했다 — 그 파일엔 `captionMotion`·`transition`·`minCutMs` 가 같이 산다).
+         내 나무엔 아직 그 칸 선언이 없어서 **«있으면 읽는다»**로 받는다. B2 판이 머지되면 타입에 선다.
+         🔴 안 오면 `syllableRatioOf` 가 **정확히 1** 을 내므로 대본이 종전과 한 글자도 안 달라진다(무회귀 · 계약 §5). */
+      const syllableRatio = syllableRatioOf((refStyle as { audioTempo?: unknown } | null)?.audioTempo);
+      const r = await buildVideoScript({ syllableRatio, tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
       if (!r.ok) return await failPiece(tid, pieceId, r.reason, slotId);
       let s = r.script; let drafts = r.drafts;
       const fc = await factcheckRoundTrip(tid, pieceId, s);
       if (fc.failed) return await failPiece(tid, pieceId, fc.reason ?? "확인 안 되는 사실이 남아 있어요.", slotId);
       s = fc.script;
-      const g = checkScriptGates(s);
+      const g = checkScriptGates(s, maxLinesFor(seconds));
       if (!g.ok) {
-        const r2 = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null, rewrite: `[다시 쓰기 — 아래에 걸렸다]\n${g.issues.map((x) => `- ${x}`).join("\n")}` });
-        if (r2.ok) { const g2 = checkScriptGates(r2.script); if (g2.ok || g2.issues.length < g.issues.length) { s = r2.script; drafts = r2.drafts; } }
+        const r2 = await buildVideoScript({ syllableRatio, tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null, rewrite: `[다시 쓰기 — 아래에 걸렸다]\n${g.issues.map((x) => `- ${x}`).join("\n")}` });
+        if (r2.ok) { const g2 = checkScriptGates(r2.script, maxLinesFor(seconds)); if (g2.ok || g2.issues.length < g.issues.length) { s = r2.script; drafts = r2.drafts; } }
       }
-      const gateNote = checkScriptGates(s);
+      const gateNote = checkScriptGates(s, maxLinesFor(seconds));
       script = s as never;
       await q(sql`UPDATE pieces SET title = ${s.youtube.title.slice(0, 120)}, meta = meta || ${jsonb({ script: s, drafts, hook: s.hook, scriptIssues: gateNote.issues, factcheck: s.factcheck?.status ?? "skipped" })}, updated_at = NOW() WHERE id = ${pieceId}`);
     }
@@ -140,37 +149,94 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
        대본이 바뀌면 새 폴더라 굽고 있던 렌더가 새 음성을 집어 «대본과 음성이 어긋난 영상»이 되지 않는다.
        🔴 R2 는 버전 관리가 없다 — 덮으면 이전 판은 영영 없다. */
     const gen = scriptGen(theScript.lines);
-    const have = await q(sql`SELECT sort, r2_key, meta FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'audio' ORDER BY sort`);
     const audio = new Map<number, { key: string; durationMs: number; words: TtsWord[]; provider: string }>();
-    for (const a of have) { const am = (a.meta ?? {}) as Record<string, unknown>; audio.set(n(a.sort), { key: String(a.r2_key), durationMs: n(am.durationMs), words: (Array.isArray(am.words) ? am.words : []) as TtsWord[], provider: String(am.provider ?? "typecast") }); }
     const useTypecast = typecastAvailable() || videoStub();
     const voiceId = spec.variant?.voiceId || spec.voice?.voiceId || "";
-    for (const [i, line] of theScript.lines.entries()) {
-      if (audio.has(i)) continue;
-      if (overBudget()) return await handOff(tid, pieceId, "tts", m2, slotId);
-      let r: TtsResult = useTypecast && !isGeminiVoice(voiceId)
-        ? await synthesizeTypecast({ tenantId: tid, pieceId, text: line.text, keySuffix: `l${i}`, gen }, { voiceId, previousText: theScript.lines[i - 1]?.text ?? null, nextText: theScript.lines[i + 1]?.text ?? null, dict: persona.dict })
-        : await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: voiceId, keySuffix: `l${i}`, gen, dict: persona.dict });
-      if (!r.ok && useTypecast) r = await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: "Charon", keySuffix: `l${i}`, gen, dict: persona.dict });   // 키 없음·throttle → 정직 폴백(자막 균등 분할)
-      if (!r.ok) return await failPiece(tid, pieceId, `목소리를 만들지 못했어요(${r.reason}).`, slotId);
-      await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"audio"}, ${r.key}, ${line.text.slice(0, 200)}, ${jsonb({ durationMs: r.durationMs, words: r.words, provider: r.provider, notes: r.notes ?? [] })}, ${i})`);
-      audio.set(i, { key: r.key, durationMs: r.durationMs, words: r.words, provider: r.provider });
-      await stamp(pieceId, "tts", { cutsDone: audio.size, cutsTotal: theScript.lines.length });
+
+    /* ═══ [R12-3] 🔴 **말 속도 반영** — R10 이 «저장까지»만 했던 것을 여기서 넘긴다 ═══
+     *
+     *   판정은 전부 `lib/video/tempo.ts`(순수)에 있다. 여기 있는 것은 **부르는 줄뿐**이다 —
+     *   규칙을 이 함수 안에 섞으면 DB 없이 못 돌리고, 못 돌리는 규칙은 «있나»로만 재게 된다(AC-99 ⑩).
+     *
+     *   🔴 **무회귀**: 레퍼런스가 말 속도를 안 배워 오면 `plan.tempo` 가 **정확히 종전 상수(1.1)** 고
+     *      `plan.genSuffix` 가 빈 문자열이라 **R2 키도 종전 그대로**다(옛 piece 의 음성이 그대로 재사용된다 · 재과금 0).
+     *   🔴 배운 값은 «보통(1.0) 대비 배수»고 우리 보통은 1.1 이다 — 단위 환산은 `tempo.ts` 머리말에 한 번만 적었다.
+     *   ⚠️ **Gemini TTS 에는 속도 손잡이가 없다**(타입캐스트 `audio_tempo` 뿐이다). Gemini 로 떨어진 문장은
+     *      속도가 안 걸린 채 구워진다 — 조용히 두지 않고 아래에서 `refUnused` 에 적는다(AC-9).
+     */
+    const tempoPlan = resolveNarrationTempo(refStyle?.audioTempo);
+    const refUnusedAdd: { field: string; why: string }[] = [];
+
+    /**
+     * 한 속도로 전 문장을 굽는다. 🔴 **이미 그 속도로 구워 둔 문장은 다시 안 굽는다**(이어받기 · 돈 두 배 금지).
+     *   속도가 다르면 R2 폴더가 다르므로(`genSuffix`) **다른 속도의 음성을 집는 일이 없다**(AC-39 와 같은 근거).
+     *   돌려주는 값: `null` = 잘 끝났다 · 그 밖 = 바깥 함수가 곧바로 돌려줘야 할 조기 반환(예산 초과·실패).
+     */
+    const bakeNarration = async (plan: TempoPlan): Promise<{ halt: GenResult } | null> => {
+      const genT = gen + plan.genSuffix;
+      const rows = await q(sql`SELECT sort, r2_key, meta FROM piece_assets WHERE piece_id = ${pieceId} AND kind = 'audio' AND r2_key LIKE ${`%/tts/${genT}/%`} ORDER BY sort`);
+      audio.clear();
+      for (const a of rows) { const am = (a.meta ?? {}) as Record<string, unknown>; audio.set(n(a.sort), { key: String(a.r2_key), durationMs: n(am.durationMs), words: (Array.isArray(am.words) ? am.words : []) as TtsWord[], provider: String(am.provider ?? "typecast") }); }
+      for (const [i, line] of theScript.lines.entries()) {
+        if (audio.has(i)) continue;
+        if (overBudget()) return { halt: await handOff(tid, pieceId, "tts", m2, slotId) };
+        let r: TtsResult = useTypecast && !isGeminiVoice(voiceId)
+          ? await synthesizeTypecast({ tenantId: tid, pieceId, text: line.text, keySuffix: `l${i}`, gen: genT }, { voiceId, previousText: theScript.lines[i - 1]?.text ?? null, nextText: theScript.lines[i + 1]?.text ?? null, dict: persona.dict, tempo: plan.tempo })
+          : await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: voiceId, keySuffix: `l${i}`, gen: genT, dict: persona.dict });
+        if (!r.ok && useTypecast) r = await synthesizeGemini({ tenantId: tid, pieceId, text: line.text, voice: "Charon", keySuffix: `l${i}`, gen: genT, dict: persona.dict });   // 키 없음·throttle → 정직 폴백(자막 균등 분할)
+        if (!r.ok) return { halt: await failPiece(tid, pieceId, `목소리를 만들지 못했어요(${r.reason}).`, slotId) };
+        await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort) VALUES (${tid}, ${pieceId}, ${"audio"}, ${r.key}, ${line.text.slice(0, 200)}, ${jsonb({ durationMs: r.durationMs, words: r.words, provider: r.provider, notes: r.notes ?? [], tempo: r.provider === "typecast" ? plan.tempo : null })}, ${i})`);
+        audio.set(i, { key: r.key, durationMs: r.durationMs, words: r.words, provider: r.provider });
+        await stamp(pieceId, "tts", { cutsDone: audio.size, cutsTotal: theScript.lines.length });
+      }
+      return null;
+    };
+
+    { const h = await bakeNarration(tempoPlan); if (h) return h.halt; }
+
+    /* 🔴 **잰 뒤에** 규격을 본다 — «60초를 넘나»는 굽기 전에 모른다. 넘었으면 **속도를 포기하고 보통으로 다시 굽는다.**
+       막는 것이 아니다(CLAUDE §9) — 영상은 나간다. 다만 **왜 느리게 못 했는지**를 적는다(AC-9).
+       🔴 재는 산수는 아래 `timed` 와 **같은 식**이어야 한다(400ms 하한 + 120ms 꼬리) — 두 벌이 되면 판정과 결과가 갈린다. */
+    let tempoApplied = tempoPlan;
+    const rawTotalMs = theScript.lines.reduce((acc, _l, i) => acc + Math.max(400, audio.get(i)?.durationMs ?? 0) + 120, 0);
+    const fit = checkTempoFitsSpec({ plan: tempoPlan, seconds, measuredTotalMs: rawTotalMs });
+    if (!fit.keep) {
+      const back = resolveNarrationTempo(null);            // = 종전 상수. «보통 속도로 굽는다»가 우리 판에서는 이것이다.
+      const h = await bakeNarration(back); if (h) return h.halt;
+      tempoApplied = back;
+      refUnusedAdd.push({ field: "audioTempo", why: fit.why ?? "말 속도를 그대로 쓰면 규격을 넘어서 보통 속도로 만들었어요." });
+    } else if (tempoPlan.changed && [...audio.values()].some((a) => a.provider !== "typecast")) {
+      /* Gemini 로 떨어진 문장엔 속도 손잡이가 없다 — «다 걸었다»고 두면 그게 거짓말이다. */
+      refUnusedAdd.push({ field: "audioTempo", why: `말 속도 ${tempoPlan.learned}배를 넣었지만 일부 문장은 다른 목소리로 만들어져서 속도가 안 걸렸어요.` });
     }
+
     /* [메인 확정] `meta.tts.provider` — A 의 «목소리» 스텝이 piece meta 를 읽는다(`piece_assets.meta.provider` 는 문장별로 그대로 둔다).
        한 문장이라도 Gemini 로 떨어졌으면 **gemini** 로 적는다 — 그 문장은 어절 시각이 없어 자막이 균등 분할이고, 화면이 그 사실을 말해야 한다. */
     const provs = new Set([...audio.values()].map((a) => a.provider));
     const ttsProvider = videoStub() ? "stub" : provs.has("gemini") ? "gemini" : "typecast";
-    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ tts: { provider: ttsProvider, sentences: audio.size } })} WHERE id = ${pieceId}`);
+    const genUsed = gen + tempoApplied.genSuffix;   // [R12-3] 자막(srt)도 **음성과 같은 세대** 아래에 둔다
+    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ tts: { provider: ttsProvider, sentences: audio.size }, audioTempo: tempoApplied.tempo, audioTempoLearned: tempoApplied.learned })} WHERE id = ${pieceId}`);
 
     // 문장 시각(누적 · 컷 경계 = 문장 경계)
     let at = 0;
-    const timed = theScript.lines.map((l, i) => { const a = audio.get(i)!; const startMs = at; const endMs = startMs + Math.max(400, a.durationMs) + 120; at = endMs; return { ...l, startMs, endMs, words: a.words, key: a.key }; });
-    const totalMs = at;
+    const timed0 = theScript.lines.map((l, i) => { const a = audio.get(i)!; const startMs = at; const endMs = startMs + Math.max(400, a.durationMs) + 120; at = endMs; return { ...l, startMs, endMs, words: a.words, key: a.key }; });
+
+    /* ═══ [R12-4] 🔴 **컷당 초 하한** — «이 컷은 최소 N초는 보여 줘» ═══
+     *   판정은 `scenes.ts applyCutFloor`(순수)에 있다. 여기 있는 것은 부르는 줄뿐이다.
+     *   🔴 **나레이션을 이기지 않는다** — 늘리기만 하고 줄이지 않는다(컷이 나레이션보다 짧으면 말이 잘린다).
+     *   🔴 **창을 늘리면 그 창의 문장도 같이 민다** — 안 밀면 다음 컷의 말이 앞 컷 그림 위에서 들린다.
+     *   🔴 **하한 안 받으면 들어온 값 그대로**다(무회귀). 다 더해 규격을 넘으면 **통째로 버리고** 사유를 적는다(AC-9). */
+    const windows0 = planCutWindows(timed0.map((l) => ({ idx: l.idx, cutIdx: l.cutIdx, startMs: l.startMs, endMs: l.endMs })));
+    const floored = applyCutFloor(windows0, timed0.map((l) => ({ idx: l.idx, startMs: l.startMs, endMs: l.endMs })), refStyle?.minCutMs, seconds * 1000);
+    if (floored.why) refUnusedAdd.push({ field: "secPerCut", why: floored.why });
+    const movedTo = new Map(floored.lines.map((l) => [l.idx, l]));
+    const timed = timed0.map((l) => { const f = movedTo.get(l.idx); return f ? { ...l, startMs: f.startMs, endMs: f.endMs } : l; });
+    const windows = floored.windows;
+    /* 🔴 전체 길이는 **창 끝**이다 — 하한으로 늘어난 꼬리까지 포함해야 러너의 `-t` 잠금과 심사 `duration_fit` 이 같은 값을 본다. */
+    const totalMs = windows.length ? windows[windows.length - 1].endMs : at;
 
     /* ── ③ clips(컷마다 즉시 저장 · 이어받기 · 예산 초과 시 이어달리기) ── */
     await stamp(pieceId, "clips");
-    const windows = planCutWindows(timed.map((l) => ({ idx: l.idx, cutIdx: l.cutIdx, startMs: l.startMs, endMs: l.endMs })));
     const palette = spec.variant?.palette || PALETTES[(accountId ?? 0) % PALETTES.length];
     const { plans, risks } = buildCutPlans({ windows, lines: timed, drafts, format, seconds, hookType: spec.variant?.hookType ?? "event_pushin", palette, refStyle });
     if (risks.some((r) => r.risks.some((x) => x.level === "p0"))) return await failPiece(tid, pieceId, `장면 서술이 정책에 걸려요(${risks[0].risks[0].issue}).`, slotId);
@@ -223,7 +289,7 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     await stamp(pieceId, "render");
     const phrases = splitPhrasesForLines(timed.map((l) => ({ i: l.idx, text: l.text, startMs: l.startMs, endMs: l.endMs, sceneIdx: l.cutIdx, words: l.words })));
     const srt = phrasesToSrt(phrases);
-    const srtKey = `autocreate/${tid}/${pieceId}/tts/${gen}/captions.srt`;   // [AC-39] 자막도 같은 세대 아래(대본이 바뀌면 옛 자막을 덮지 않는다)
+    const srtKey = `autocreate/${tid}/${pieceId}/tts/${genUsed}/captions.srt`;   // [AC-39] 자막도 같은 세대 아래(대본이 바뀌면 옛 자막을 덮지 않는다) · [R12-3] 말 속도를 바꾸면 음성과 같은 폴더로 따라간다
     await r2Put(srtKey, Buffer.from(srt, "utf8"), "text/plain; charset=utf-8");
     const renderPhrases = phrasesToRender(phrases);
     const scenes: RenderScene[] = plans.map((c) => {
@@ -242,21 +308,28 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     const firstLine = needDisc ? videoDescriptionFirstLine(comp) : "";
     const yt = youtubeMetaOf(theScript as never, { firstLine, tags: [] });
     const description = affiliateMeta ? `${yt.description}\n\n${affiliateMeta.productName ?? "상품"} 보러가기: ${affiliateMeta.url}` : yt.description;
+    /* [R12-1] 🔴 자막 **모양**과 **등장 방식**은 한 칸(`captions.type`)으로 간다 — 두 칸이면 렌더가 둘을 따로 읽다 갈린다.
+       레퍼런스가 아무것도 안 배워 왔으면 `null` 이라 **키 자체가 없고**, 렌더는 종전 상수로 그린다(무회귀). */
+    const capType = refStyle?.captionType || refStyle?.captionMotion
+      ? { ...(refStyle?.captionType ?? {}), ...(refStyle?.captionMotion ? { motion: refStyle.captionMotion } : {}) }
+      : null;
     const payload: RenderPayload = {
       pieceId, tenantId: tid,
       out: { w: 1080, h: 1920, fps: 30, maxSeconds: seconds, crf: 20 },
       scenes,
       /* [R10-6] 🔴 배워 온 자막 모양을 **렌더까지 보낸다** — 여기가 빠지면 `reference-apply` 가 만든 값을
          **아무도 안 부른다**(AC-69: 정의가 있나가 아니라 부르나). 값이 없으면 키 자체가 없고 렌더는 종전 상수로 그린다. */
-      captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey, ...(refStyle?.captionType ? { type: refStyle.captionType } : {}) },
+      captions: { preset: form.captionPreset, phrases: renderPhrases, srtKey, ...(capType ? { type: capType } : {}) },
       // BGM: `BGM_LICENSE_VERIFIED=1` + 시드 매니페스트가 있을 때만 깔린다. 둘 중 하나라도 없으면 null = **무음**(계약 §1.4c(3) 정직 경로).
       audio: { narration: timed.map((l) => ({ key: l.key, startMs: l.startMs })), bgm: await resolveBgm({ format, seed: pieceId }), sfx: null, loudnorm: { I: -16, TP: -1.5, LRA: 11 } },
       overlay: { badge: needDisc ? { text: videoBadgeText(comp), corner: "tr" } : null, safeZone: safeZoneOf(channel), endcard: { text: theScript.closing.slice(0, 40) } },
+      /* [R12-2] 컷 전환 — 🔴 **안 배워 왔으면 키가 없고**, 키가 없으면 러너가 종전대로 `concat` 만 한다(무회귀). */
+      ...(refStyle?.transition ? { transition: refStyle.transition } : {}),
       ...(isVideoChannel(channel) ? { channel } : {}),
       disclosureCaption: needDisc ? { text: videoOpeningCaption(comp), untilMs: 3000 } : null,
     };
     await q(sql`UPDATE pieces SET body = ${description}, blocks = ${jsonb([{ type: "video" }, { type: "srt" }, { type: "hashtags", items: yt.tags }])},
-      meta = meta || ${jsonb({ render: payload, youtube: { ...yt, description }, affiliateLink: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, totalMs, cutCount: plans.length, disclosure: affiliate ? firstLine : null, adDisclosure: affiliate })}, updated_at = NOW() WHERE id = ${pieceId}`);
+      meta = meta || ${jsonb({ ...(refUnusedAdd.length ? { refUnused: [...((Array.isArray(m2.refUnused) ? m2.refUnused : []) as { field: string; why: string }[]), ...refUnusedAdd] } : {}), render: payload, youtube: { ...yt, description }, affiliateLink: affiliateMeta, affiliateHint: aff && !affiliateMeta ? aff.productQuery : undefined, totalMs, cutCount: plans.length, disclosure: affiliate ? firstLine : null, adDisclosure: affiliate })}, updated_at = NOW() WHERE id = ${pieceId}`);
     const [chk] = await q(sql`SELECT jsonb_typeof(meta) AS m, jsonb_typeof(blocks) AS b FROM pieces WHERE id = ${pieceId}`);
     if (chk?.m !== "object" || chk?.b !== "array") console.error("[video/gen] jsonb_typeof 이상", chk);
     // 🔴 체인 끝 원가 확정(AC-36) — 컷·정지컷의 `void recordAiUsage` 가 샜으면 여기서 한 행으로 채운다(하드 상한이 읽는 값).

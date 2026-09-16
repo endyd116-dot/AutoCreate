@@ -5,7 +5,10 @@
  *   🔎 출처: AC 신규(계약 P1R5-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 export type VideoFormat = "graphic" | "talking" | "clip";
-export type VideoSeconds = 15 | 30 | 60;
+/* [R12-7 · 2026-09-17] 🔴 **릴스 90초**(감사 A12). 여는 것은 이 한 줄이지만 **같이 움직여야 하는 것이 셋** 더 있다 —
+   채널 상한(`lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC.reels`) · 코인 값(`lib/coin-table.ts video_90`) · 심사 축(`lib/video/judge.ts duration_fit`).
+   🔴 따로 가면 «90초인데 값은 60초»가 되고, 그건 **우리가 손해 보는 쪽**이라 고객이 알려 주지 않아 더 늦게 들킨다. */
+export type VideoSeconds = 15 | 30 | 60 | 90;
 export type VideoChannel = "youtube_shorts" | "naver_clip" | "reels" | "threads";
 export type ProviderKey = "omni" | "veo_lite" | "veo_fast" | "veo" | "wan" | "hailuo" | "kling";
 export type ClipTier = "filler" | "standard" | "money";
@@ -40,7 +43,7 @@ export function safeZoneOf(channel: unknown): { top: number; bottom: number; sid
   return SAFE_ZONE_OF[String(channel) as VideoChannel] ?? SAFE_ZONE_FALLBACK;
 }
 export const VIDEO_FORMATS: readonly VideoFormat[] = ["graphic", "talking", "clip"];
-export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60];
+export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60, 90];
 export const VIDEO_STAGES: readonly VideoStage[] = ["script", "tts", "clips", "render", "judging", "done", "failed"];
 export function isVideoChannel(v: unknown): v is VideoChannel { return VIDEO_CHANNELS.has(String(v)); }
 export function isVideoFormat(v: unknown): v is VideoFormat { return VIDEO_FORMATS.includes(String(v) as VideoFormat); }
@@ -121,12 +124,31 @@ export interface RenderPayload {
       strokeWidth?: number; strokeColor?: string;
       position?: "top" | "middle" | "bottom"; side?: number;
       maxCharsPerLine?: number;
+      /**
+       * [R12-1] 🔴 **자막 등장 방식** — `none`(기본 · 지금 그대로) · `fade` · `slide_up` · `pop`.
+       *   구절당 PNG 는 **여전히 한 장**이다 — ffmpeg 이 그 한 장의 **자리·투명도·크기를 시간에 따라** 바꾼다.
+       *   프레임마다 글자를 다시 그리면 **원가가 프레임 수만큼 곱해진다**(그래서 여러 장을 안 찍는다).
+       *   🔴 **길이는 payload 에 없다** — 120~200ms 안에서 러너가 정한다(길면 읽을 시간을 먹는다 · `judge.ts reading_time`).
+       *   🔴 **나가는 모션은 없다** — 다음 자막과 겹치면 두 줄이 동시에 보이고 심사의 «자막 2줄»과 싸운다.
+       *   🔴 **고지 자막·엔드카드에는 안 걸린다**(러너 `motionForLayer`) — 법이 읽는 문장을 우리가 꾸미지 않는다.
+       */
+      motion?: "none" | "fade" | "slide_up" | "pop";
     };
   };
   audio: { narration: { key: string; startMs: number }[]; bgm: { key: string; gainDb: -18 } | null; sfx: [] | null; loudnorm: { I: -16; TP: -1.5; LRA: 11 } };
   /* 🔴 `safeZone` 은 **채널마다 다르다**(`SAFE_ZONE_OF`) — 종전의 리터럴 타입 `{top:220;bottom:300}` 을 열었다.
      리터럴이면 «고치는 것» 자체가 타입 오류라, 틀린 값이 고쳐질 수 없는 상태였다. */
   overlay: { badge: { text: string; corner: "tr" } | null; safeZone: { top: number; bottom: number; side?: number }; endcard: { text: string; url?: string } | null };
+  /**
+   * [R12-2] 🔴 **컷 전환** — `none`(기본 · 딱딱 끊김 = 지금 그대로) · `fade` · `slide`.
+   *   🔴 **전환은 컷 «사이»가 아니라 컷 «안»에서 빌린다**: 각 컷을 전환 길이만큼 늘려서 겹친다 ⇒ **전체 길이 불변**.
+   *      길이가 밀리면 코인이 틀어진다(길이 구간제) — 0.3초 × 12컷 = 3.6초가 사라지는 것을 막는 것이 이 규칙이다.
+   *   🔴 **나레이션·자막 시각은 안 건드린다** — 전환은 **그림에만** 건다.
+   *   🔴 **길이 칸이 없다**(러너 상수 0.3초 · 상한 0.4초) · 컷이 0.8초보다 짧으면 그 경계는 **건너뛴다**.
+   *   ⚠️ `xfade` 는 ffmpeg **4.3 이상**이다 — 러너가 `-filters` 로 **실제로 있는지 재고**, 없으면 `none` 으로 내려앉히고
+   *      «이 컴퓨터의 ffmpeg 가 낮아서 전환 없이 만들었어요»를 `notes` 에 적는다. **막지 않는다** — 영상은 나간다(CLAUDE §9).
+   */
+  transition?: "none" | "fade" | "slide";
   /** 어느 채널로 나가는가 — 안전영역 판정이 이걸로 갈린다(없으면 가장 보수적인 값). */
   channel?: VideoChannel;
   disclosureCaption: { text: string; untilMs: 3000 } | null;
@@ -162,6 +184,33 @@ export interface RenderReport {
   thumbGray?: string;
   /** [R7 §1.5] 러너가 직접 pHash 를 계산했으면 hex 16자. `thumbGray` 가 있으면 서버가 다시 계산하니 **둘 중 하나만** 있으면 된다. */
   framePhash?: string;
+  /**
+   * [R12 마감 · 2026-09-17 · B↔B2] 🔴 **오버레이(자막·배지·고지·엔드카드)가 첫 프레임 말고도 실제로 실렸나** — 러너가 **산출물에서** 확인한 값.
+   *
+   *   왜 생겼나: B2·C 가 ffmpeg 8.1.2 로 실측했다 — 오버레이 필터가 `eof_action=pass` 라 **단일 프레임 PNG 가 t=0 에 EOF** 이고,
+   *   그 뒤로는 본편이 그대로 통과한다. 즉 **자막·제휴 고지·배지·엔드카드가 첫 프레임에만 있었다**(`pass` @1.5s (0,0,0) ↔ `repeat` @1.5s (252,0,0)).
+   *
+   *   🔴 **그런데 심사(`judge.ts disclosure`)는 이걸 원리상 못 잡는다** — 그 축은 `p.overlay.badge.text`·`p.disclosureCaption.text`,
+   *      즉 **계획서**를 본다(AC-33 «산출물이 아니라 계획서를 보고 도장»). 그래서 **고지가 통째로 안 실린 영상에 «고지 ✅»가 찍히고 있었다.**
+   *      = 법으로 정해진 대가 표시가 **없는 채로 초록**이었다. 이 라운드에서 찾은 것 중 제일 큰 거짓 초록이다.
+   *
+   *   🔴 `true` = 러너가 **재서** 확인했다 · `undefined` = **못 쟀다**(«괜찮다»가 아니다 → 심사가 `pending` 으로 내린다 · AC-9).
+   *      `false` 를 보내면 그건 «재 봤고 안 실렸다»라 심사가 **떨어뜨린다**(pending 이 아니다).
+   *
+   *   ══ 러너가 채우는 법 (B2 실측 2026-09-17 · ffmpeg 8.1.2 · 새 의존성 0) ══
+   *     🔴 **그 층을 빼지 말고 «창만» 출력 밖으로 밀어** 같은 그래프를 두 번 지나가, 창 안쪽 시각의 **날 프레임**을 견준다.
+   *        바이트가 같으면 «안 그려졌다»(`false`), 다르면 `true`.
+   *     ⚠️ 🔴 **층을 통째로 빼는 방법은 틀린다.** ← **내가 처음 이 주석에 적어 준 방법이 그것이었고, B2 가 실물로 구워서 잡았다.**
+   *        실측: 빼면 `overlay` 필터가 사라지고 **아무것도 안 그려도 바이트가 달라졌다**
+   *        ⇒ «달라졌으니 그려졌다»가 늘 참이 되어 **옛 `eof_action=pass` 판을 못 잡았다.**
+   *        🔴 여기서 **잰 것과 짐작한 것을 가른다**(B2 요청 — 안 그러면 다음 사람이 짐작을 실측으로 믿는다 · 이번 라운드 내내 고친 그 병이다):
+   *          · **관찰한 사실** = «층을 빼면 아무것도 안 그려도 바이트가 달라졌다» — 이것만 실제로 쟀다.
+   *          · **해석(B2 추정 · 분리해서 재지 않았다)** = 필터가 한 단 줄면서 픽셀 처리(색공간 왕복)가 달라진 것으로 읽는다.
+   *     🔴 **x264 를 태우지 않는다**(`-f rawvideo -pix_fmt rgb24`) — `-t` 가 다른 두 판은 **율 제어부터 갈려** 오버레이와 무관하게 달라진다.
+   *     🔴 창 **한참 안쪽**에서 잰다 — `fade` 는 시작 순간 투명도가 0 이라 그 자리에서 재면 «없다»가 나온다(맞는 말이지만 묻는 것이 아니다).
+   *     확인 순서는 **법이 읽는 것부터**: 고지 → 배지 → 구절. 층이 하나도 없으면 **키를 아예 안 보낸다**(«확인할 게 없다»와 «못 쟀다»는 다르다).
+   */
+  overlayVerified?: boolean;
 }
 
 /* ───────── 심사(계약 §5 judgeVideo) ───────── */

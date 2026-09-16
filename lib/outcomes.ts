@@ -189,3 +189,47 @@ export async function outcomeStats(by: "origin" | "channel" | "topicGroup" | "go
     };
   });
 }
+
+/* ═══ [R11-6 · 설계 R11 §4.2] 성과 저하 알림의 **재료** — `lib/cron/learn.ts` 가 모은 것의 첫 실사용 ═══ */
+
+export interface ViewsWeekCompare {
+  /** 최근 7일에 발행한 글의 **평균 조회**. 🔴 못 잰 글은 빼고 센다(0 으로 세면 «아직 안 재진 글»이 평균을 끌어내린다 · AC-9). */
+  recentAvg: number;
+  /** 직전 7일(8~14일 전)의 같은 값. */
+  prevAvg: number;
+  /** 두 창을 합쳐 **조회를 실제로 잰** 글 수. 이게 모자라면 호출부가 판정하지 않는다. */
+  samples: number;
+  /** 🔴 «잘 먹혔어요» 에 실을 **소재 이름** 최대 3개(최근 30일 · 조회 상위). 없으면 빈 배열 — 문장에서 그 줄이 빠진다. */
+  worked: string[];
+}
+
+/**
+ * viewsWeekCompare — 최근 7일 ↔ 직전 7일 **평균 조회**(KST) + 잘 먹힌 소재 이름.
+ *   🔴 시각 경계는 **KST**(CLAUDE §4.5b) — UTC 로 끊으면 새벽 발행 글이 지난주로 넘어간다.
+ *   🔴 **조회를 못 잰 글은 양쪽 창에서 모두 뺀다** — 한쪽만 빼면 «안 잰 글이 많은 주»가 저절로 낮아 보인다(대용물로 판정 · AC-57).
+ *   🔴 소재 이름은 **그 집 것만** 나간다(교차 테넌트 0 · §5F.3-3). 집계 함수(`outcomeStats`)와 달리 이건 홈 화면용이라 이름을 쓴다.
+ */
+export async function viewsWeekCompare(tid: number): Promise<ViewsWeekCompare> {
+  const kstToday = sql`(NOW() AT TIME ZONE 'Asia/Seoul')::date`;
+  const day = sql`(po.published_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date`;
+  const [r] = await q(sql`SELECT
+      AVG((po.stats->>'views')::numeric) FILTER (WHERE ${day} >  ${kstToday} - 7)  AS recent_avg,
+      AVG((po.stats->>'views')::numeric) FILTER (WHERE ${day} <= ${kstToday} - 7)  AS prev_avg,
+      COUNT(*)::int AS samples
+    FROM posts po
+    WHERE po.tenant_id = ${tid} AND po.published_at IS NOT NULL
+      AND ${day} > ${kstToday} - 14
+      AND (po.stats ? 'views')`).catch(() => [] as Record<string, unknown>[]);
+  /* 잘 먹힌 소재 — 최근 30일 발행 글 중 조회 상위 셋의 **소재 제목**. 🔴 소재가 없는 글(직접 쓴 글)은 빠진다(이름이 없다). */
+  const worked = await q(sql`SELECT t.title, MAX((po.stats->>'views')::numeric) AS v
+    FROM posts po JOIN pieces p ON p.id = po.piece_id AND p.tenant_id = po.tenant_id
+      JOIN topics t ON t.id = p.topic_id AND t.tenant_id = po.tenant_id
+    WHERE po.tenant_id = ${tid} AND po.published_at > NOW() - interval '30 days' AND (po.stats ? 'views')
+    GROUP BY t.id, t.title ORDER BY v DESC NULLS LAST LIMIT 3`).catch(() => [] as Record<string, unknown>[]);
+  return {
+    recentAvg: r?.recent_avg === null || r?.recent_avg === undefined ? 0 : Math.round(Number(r.recent_avg)),
+    prevAvg: r?.prev_avg === null || r?.prev_avg === undefined ? 0 : Math.round(Number(r.prev_avg)),
+    samples: n(r?.samples),
+    worked: worked.map((x) => String(x.title ?? "").trim()).filter(Boolean),
+  };
+}

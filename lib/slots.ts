@@ -13,8 +13,9 @@ import { defaultImageCount, coinFormatOf, estimateVideoSeconds, estimateAiImages
 import { pieceCoinCost, DEFAULT_COIN_TIER, toCoinTier, COIN_TIERS, type CoinTier } from "./coin-table";   // [R10-7] 등급 — 편성표 견적도 계정 등급으로 센다
 import { candidatesFor, kstDateStr, kstToUtc, addDays, ACCOUNT_GAP_MIN, isNightHour, jitterMinutes } from "./best-time";
 import { hourOf, kstHour } from "./cron/base";   // base 는 slots 를 type 으로만 import — 런타임 순환 없음(AC-17)
-import { gapMinFor } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다
+import { gapMinFor, crowdOf, ACCOUNT_GAP_MIN_DEFAULT, type Crowd } from "./publish-gap";   // [R8] 계정 간 간격 정책의 **정본**(B2) — 값을 여기 다시 적지 않는다 · [R11-7] «이날 겹쳐요»(세는 것 · 막지 않는다)
 import { requireWritable } from "./guards";
+import { bestHoursFor } from "./cron/learn";   // [R12-10] 🔴 배운 시각 — 이 줄이 그 함수의 **첫 제품 호출처**다(여태 0곳이었다)
 import { produceWindowOf, type ProduceWindow } from "./produce-window";   // [R8] «언제 만들어지나»의 **정본** — 크론 produce 와 같은 잣대(AC-47/AC-70)
 
 const n = (v: unknown) => Number(v || 0);
@@ -65,6 +66,38 @@ export type RuleKind = "post" | "shorts" | "cardnews";
 export function toRuleKind(v: unknown): RuleKind {
   const x = String(v ?? "");
   return x === "shorts" ? "shorts" : x === "cardnews" ? "cardnews" : "post";
+}
+/**
+ * [R11-1 · B · 2026-09-17 · 🔴 **C 가 실측으로 고쳐 준 판** 2026-09-17] **글 하나의 «종류»를 화면 어휘(`RuleKind`)로 옮긴다** — 설계 R11 §1.2·§3.2.
+ *   왜 필요한가: 화면 배지표(`UI.KIND_PILL`)가 아는 말은 편성표와 같은 **셋**(`post`·`shorts`·`cardnews`)인데
+ *   «만든 것» 목록은 `UI.kindPill(p.kind)` 에 DB 값을 그대로 넣어 **영상도 카드뉴스도 이름표가 한 번도 안 붙었다.**
+ *
+ *   ══ 🔴 `pieces.kind` 는 **셋**이다 — 둘이 아니다 ══
+ *     내 첫 판은 «`kind` 는 `post|video` 둘뿐»이라는 전제로 `format === "cardnews"` 만 봤다. **그 전제가 틀렸다.**
+ *     `lib/director.ts:694` 가 실제로 넣는 값은 **`isVideo ? "video" : isCard ? "cardnews" : "post"`** 이고,
+ *     `isCard` 는 **채널**에서 온다(`isCardnewsChannel(s.channel)` · `director.ts:676`) — **format 이 아니다.**
+ *     그런데 인스타 카드뉴스 계약의 `formats` 는 **다섯**이다(`writing-contracts.ts:343`
+ *     `["cardnews", "steps", "listicle", "compare", "qna"]` — 골격이 늘 같던 것을 R8 이 다섯으로 늘렸다).
+ *     ⇒ 🔴 **인스타 카드뉴스 글의 format 은 5번 중 4번이 `cardnews` 가 아니다.** 내 첫 판은 그때 `post` 로 떨어졌고,
+ *        **배지가 그대로 빈칸**이었다 — 설계 §1.2 가 «지금 틀린 것»이라고 부른 **바로 그 상태를 고치지 못했다.**
+ *
+ *   ══ 🔴 어느 쪽이 정본인가 — **`kind` 다** ══
+ *     `kind` 는 만드는 자리(디렉터)가 **채널을 보고** 박은 값이라 «이 글이 무엇인가»의 답이다.
+ *     `format === "cardnews"` 는 **옛 글 호환**으로 남긴다 — `kind` 에 `cardnews` 가 들어가기 전에 만들어진 글이 있다.
+ *     둘이 어긋나면 `kind` 가 이긴다(그래서 순서가 이렇다).
+ *
+ *   🔴 **DB 값은 안 건드린다.** **보여 줄 말**만 여기 한 곳에서 정한다. **다섯 번째 «kind» 이름을 만들지 않는다**(AC-75).
+ *   🔴 «가운데»는 여기다 — 읽는 쪽은 `netlify/functions/pieces.ts pieceRow` 의 `ruleKind` 칸 하나다.
+ *
+ *   ⚠️ 🔴 **왜 내 자가 못 잡았나**(AC-99 ⑨ · C 지적): `verify-r11-axis.mts` 격자에 **`format === "cardnews"` 경로만** 있었다.
+ *      «잡아야 할 것»이 표본에 없으면 그 검사의 무력화는 **영영 안 보인다.** 이제 실제 다섯 format 을 전부 격자에 넣었다.
+ */
+export function ruleKindOfPiece(kind: unknown, format: unknown): RuleKind {
+  const k = String(kind ?? "");
+  if (k === "video") return "shorts";
+  /* 🔴 `kind` 가 먼저다(정본) · `format` 은 옛 글 호환. 순서를 뒤집으면 둘이 어긋날 때 화면이 틀린 말을 한다. */
+  if (k === "cardnews" || String(format ?? "") === "cardnews") return "cardnews";
+  return "post";
 }
 export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; preferredMinute?: number; formatHint?: string; active: boolean }
 export function toRule(r: Row): Rule {
@@ -206,6 +239,11 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
   for (const e of existing) { if (String(e.status) === "skipped" || String(e.status) === "rejected") continue; const at = utcDate(e.publish_at); if (!at) continue; const k = `${e.channel}:${String(e.d).slice(0, 10)}`; takenBy.set(k, [...(takenBy.get(k) ?? []), at]); }   // [P1R7 B3] 버린(rejected) 자리도 건너뛴(skipped) 자리와 같이 — 그 시각을 점유하지 않는다
   const accounts = await q(sql`SELECT id, golden_hours FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`);
   const golden = new Map(accounts.map((a) => [n(a.id), Array.isArray(a.golden_hours) ? (a.golden_hours as unknown[]).map(Number) : null]));
+  /* [R12-10 · 설계 R12 §8] 🔴 **배운 시각을 편성이 읽는다** — `lib/cron/learn.ts bestHoursFor` 는 주석에 «편성이 읽는다»고 적혀 있었는데
+     2026-09-17 실측에서 **부르는 곳이 0곳**이었다(AC-59 · 주석이 코드보다 앞서 나간 자리). 여기가 그 «읽는 곳»이다.
+     🔴 **골든타임이 있으면 아무 일도 안 한다**(`candidatesFor` 가 그 순서를 지킨다) — 학습이 고객이 고른 시각을 이기지 않는다.
+     🔴 못 읽으면 빈 Map = 기본표 순서 그대로(무회귀 · 편성이 학습 때문에 멈추지 않는다). */
+  const learnedHours = await bestHoursFor(tid).catch(() => new Map<number, number[]>());
   /* [R8] 🔴 간격은 **`publish-gap.ts` 한 곳**에서 온다(계정마다 «우리가 무엇을 아는가»가 다르다).
      루프 안에서 매번 DB 를 치지 않게 **규칙에 고정된 계정만 미리 한 번씩** 읽어 둔다.
      🔴 값을 통째로 담는다 — `gapMin`(자동 기본)과 `floorMin`(고객이 못 박은 시각의 바닥)이 **둘 다** 필요하다. */
@@ -227,7 +265,8 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
       const accountId = r.accountMode === "fixed" && r.accountId ? r.accountId : null;
       const preferred = r.preferredHour ?? null;
       /* [R8 · B] 시:분 — 사장님 «10:00 / 10:05 / 11:00» 이 규칙 3개로 그대로 선다(옛 규칙은 분이 NULL = 00분 · 소급 0). */
-      const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred, r.preferredMinute ?? null);
+      const cands = candidatesFor(r.channel, accountId ? golden.get(accountId) ?? null : null, preferred, r.preferredMinute ?? null,
+        accountId ? learnedHours.get(accountId) ?? null : null);   // [R12-10] 계정이 정해진 규칙만 — auto 규칙은 누구로 나갈지 모르니 배운 시각도 못 고른다
       const tk = `${r.channel}:${date}`; const taken = takenBy.get(tk) ?? [];
       /* 🔴 [R8] 같은 채널 다른 계정과의 간격 = **정책 한 곳**(B2 `lib/publish-gap.ts gapMinFor`) — 여기에 30 을 다시 적지 않는다.
          **고객이 시각을 못 박은 규칙**은 `floorMin`(러너가 «실제로 재서» 출구 IP 가 다를 때만 5분까지) → 10:00 / 10:05 가 그대로 선다.
@@ -276,7 +315,14 @@ export interface Slot { id: number; date: string; channel: string; kind: string;
    *  🔴 이미 만든 자리엔 안 싣는다(그 코인은 이미 나갔다 — «또 든다»로 읽히면 안 된다). */
   coinCost?: number;
   /** [R10-9] 이 자리가 만들 글의 코인 등급 — 계정 기본값(계정 미정이면 그 채널 계정 중 제일 높은 등급 · `ruleTierOf` 와 같은 규칙). `coinCost` 와 같이 실린다. */
-  tier?: CoinTier }
+  tier?: CoinTier;
+  /**
+   * [R11-7 · 설계 R11 §4.3] 🔴 **«이날 겹쳐요»** — 같은 계정·같은 날 몇 편인지 · 같은 채널 이웃과 몇 분인지 · 서버가 만든 한 문장.
+   *   🔴 **막지 않는다**(CLAUDE §9 하드 게이트 0). 이 칸은 **세는 칸**이지 거절하는 칸이 아니다 — 화면은 문장을 보여 주고
+   *      **«그래도 이 시각»** 과 **«시각 바꾸기»**(되돌릴 길)를 같이 준다.
+   *   🔴 겹치는 게 없으면 **키 자체를 안 싣는다**(빈 문장을 내려보내 화면이 빈 줄을 그리지 않게).
+   */
+  crowd?: Crowd }
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -318,7 +364,7 @@ export async function listSlots(tid: number, from: string, to: string, now = new
       (SELECT SUM(rd.amount_krw)::int FROM revenue_daily rd WHERE rd.tenant_id = s.tenant_id AND rd.piece_id = s.piece_id) AS revenue_krw
     FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
     WHERE s.tenant_id = ${tid} AND s.slot_date >= ${from}::date AND s.slot_date <= ${to}::date ORDER BY s.slot_date, s.publish_at NULLS LAST, s.id`);
-  return rows.map((r) => {
+  const out: Slot[] = rows.map((r) => {
     const o: Slot = { id: n(r.id), date: String(r.d).slice(0, 10), channel: String(r.channel), kind: String(r.kind || "post"), status: String(r.status), origin: r.origin === "manual" ? "manual" : "auto" };
     if (r.account_id) o.accountId = n(r.account_id);
     if (r.handle) o.accountHandle = String(r.handle);
@@ -350,5 +396,19 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     }
     return o;
   });
+  /* ══ [R11-7] 🔴 «이날 겹쳐요» — **한 번에** 잰다 ══
+     자리마다 쿼리를 또 던지지 않는다(자리 200개면 쿼리 200번이 된다). 이미 읽어 온 `rows` 가 곧 «다른 예약»이다.
+     🔴 셀 대상에서 빼는 것: 건너뛴·실패·승계된 자리(안 나간다) · 시각이 없는 자리(견줄 좌표가 없다) · **자기 자신**.
+     🔴 간격은 `publish-gap` 의 기본값을 쓴다 — 자리마다 `gapMinFor`(DB 조회)를 부르면 200번이 되고, 여기서 다른 숫자를 지어내면 정본이 둘이 된다.
+        **고객이 실제로 시각을 바꿀 때**는 `slots-reschedule` 이 그 계정의 진짜 값(`gapMinFor`)으로 다시 말해 준다. */
+  const alive = out.filter((x) => x.publishAt && !["skipped", "failed", "reassigned"].includes(x.status));
+  const others = alive.map((x) => ({ accountId: x.accountId ?? null, channel: x.channel, atMs: Date.parse(x.publishAt!) }));
+  alive.forEach((o, i) => {
+    /* 🔴 **자기 자신을 이웃으로 세지 않는다** — 세면 «0분 안에 붙어요»가 전 자리에 뜬다(같은 인덱스를 뺀다). */
+    const rest = others.filter((_, j) => j !== i);
+    const c = crowdOf({ atMs: others[i].atMs, accountId: o.accountId ?? null, handle: o.accountHandle ?? null, others: rest, channel: o.channel, gapMin: ACCOUNT_GAP_MIN_DEFAULT });
+    if (c.say) o.crowd = c;
+  });
+  return out;
 }
 void jsonb;

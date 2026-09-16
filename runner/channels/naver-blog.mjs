@@ -648,20 +648,22 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
    *     그래도 남는 위험은 있다 ⇒ 어긋나면 **안 칠하고 `caret_drift` 로 적는다.** 안 칠한 강조는 아쉬울 뿐이지만
    *     잘못 칠한 강조는 글을 망가뜨린다(AM #736 의 결론 그대로).
    */
-  const typeParts = async (op) => {
+  const typeParts = async (op, prefix = "") => {
     const parts = (Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }])
       .filter((p) => p.t);
     const broke = await boundary();
     if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
 
-    /* ① 전부 평문으로 — 이 순간 문단 안에 **서식 span 이 하나도 없다**(물려받을 것이 없다). */
-    const joined = parts.map((p) => p.t).join("");
+    /* ① 전부 평문으로 — 이 순간 문단 안에 **서식 span 이 하나도 없다**(물려받을 것이 없다).
+       🔴 [R12-5] `prefix`(목록 «• » · 체크 «☑ »)는 **조각이 아니다** — 우리가 붙이는 글머리라 마크가 안 걸린다.
+          그런데 **글자 수는 차지한다** ⇒ 아래 좌표를 그만큼 민다. 안 밀면 강조가 **한 낱말씩 왼쪽으로 어긋난다**. */
+    const joined = String(prefix) + parts.map((p) => p.t).join("");
     await page.keyboard.insertText(joined);
     wrote = true;
     await settle(page, 300, 600);
 
     /* 조각마다 문단 안 위치 [s, e) — 칠하기는 글자 수를 **안 바꾸므로** 이 좌표는 끝까지 유효하다. */
-    let at = 0;
+    let at = String(prefix).length;
     const spans = parts.map((p) => { const s = at; at += p.t.length; return { p, s, e: at }; }).filter((x) => x.p.mark);
     if (!spans.length) return;
 
@@ -747,9 +749,23 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
         await moveCaretToEnd(page, ctx, missed);   // 🔴 구분선도 컴포넌트
         break;
       }
-      case "list": await type(`• ${op.text}`); await settle(page, 200, 500); break;
-      case "check": await type(`☑ ${op.text}`); await settle(page, 200, 500); break;
-      case "faq": await type(op.text); await settle(page, 200, 500); break;
+      /* 🔴 [R12-5] 목록 항목·표 칸 **안**의 꾸밈. R9 는 문단까지였다.
+         🔴 **번짐이 여기서 다시 난다** — 항목 하나에 칠하면 다음 항목까지 따라간다(«어느 지점부터 끝까지 빨강»의 목록판).
+         ⇒ 항목마다 `typeParts` 를 탄다. 그 안에 R9 의 세 겹이 다 있다:
+            ① `boundary()` 로 **항목 경계에서 끊고** ② 칠하기 전 **꼬리를 대조**하고 ③ **오른쪽부터 되짚어** 칠한다.
+         마크가 없는 항목은 **종전 `type()` 그대로**다(무회귀 — 왕복이 안 늘어난다). */
+      case "list":
+        if (Array.isArray(op.parts) && op.parts.some((p) => p.mark)) await typeParts(op, "• ");
+        else await type(`• ${op.text}`);
+        await settle(page, 200, 500); break;
+      case "check":
+        if (Array.isArray(op.parts) && op.parts.some((p) => p.mark)) await typeParts(op, "☑ ");
+        else await type(`☑ ${op.text}`);
+        await settle(page, 200, 500); break;
+      case "faq":
+        if (Array.isArray(op.parts) && op.parts.some((p) => p.mark)) await typeParts(op, "");
+        else await type(op.text);
+        await settle(page, 200, 500); break;
       case "link": await type(`${op.text} ${op.url}`); await settle(page, 300, 700); break;
       case "image": {
         const file = files.get(op.url);

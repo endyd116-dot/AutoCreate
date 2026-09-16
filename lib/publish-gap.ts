@@ -144,3 +144,60 @@ export async function gapMinFor(tid: number, accountId: number): Promise<GapDeci
     others: others.map((o) => ({ accountId: n(o.id), exitIp: o.last_exit_ip ? String(o.last_exit_ip) : null })),
   });
 }
+
+/* ═══ [R11-7 · 설계 R11 §4.3] 🔴 «이날 겹쳐요» — **세는 것이지 거절하는 게 아니다** ═══
+ *   사장님 지시(CLAUDE §9)로 **하드 게이트는 0개**다. 막지 않기로 했으면 **말해 주기가 더 세져야 한다** — 그게 이 칸의 값이다.
+ *   계산은 이미 이 파일(`decideGap`)과 `lib/best-time.ts`(간격)에 있었는데 **화면이 없었다.** 여기서 «문장»까지 만들어 준다(AC-52 · 화면이 또 짓지 않는다).
+ */
+
+export interface CrowdInput {
+  /** 이 자리의 발행 시각(UTC ms). */
+  atMs: number;
+  /** 이 자리의 계정(없으면 «계정 자동» — 그때는 같은 계정 셈이 성립하지 않는다). */
+  accountId: number | null;
+  /** 계정 손잡이(문장에 «@cook_a» 로 들어간다). 없으면 문장이 계정 이름을 빼고 말한다. */
+  handle?: string | null;
+  /** 같은 집의 다른 예약들 — 자기 자신은 **빼고** 넘긴다. */
+  others: readonly { accountId: number | null; channel: string; atMs: number }[];
+  /** 이 자리의 채널(같은 채널 안에서만 «붙는다»를 잰다). */
+  channel: string;
+  /** 채널 안 간격(분) — `gapMinFor().gapMin`. 없으면 기본 30. */
+  gapMin?: number;
+}
+export interface Crowd {
+  /** 🔴 **같은 계정·같은 날(KST)** 에 이미 잡힌 편 수(자기 제외). */
+  sameAccountSameDay: number;
+  /** 같은 채널에서 **가장 가까운 이웃까지의 분**. 이웃이 없으면 키가 없다(«0분»으로 위장하지 않는다). */
+  nearestMin?: number;
+  /** 그 이웃이 간격 안에 들어와 있나(= «붙어요»). */
+  tight: boolean;
+  /** 🔴 서버 정본 한 문장. **겹치는 게 없으면 빈 문자열** — 화면은 빈 문자열이면 줄을 안 그린다. */
+  say: string;
+}
+
+const KST_MS_CROWD = 9 * 3600_000;
+/** UTC ms → KST 날짜 문자열(순수 · `Date` 지역시간 안 쓴다 · CLAUDE §4.5b). */
+const kstDayOf = (ms: number) => new Date(ms + KST_MS_CROWD).toISOString().slice(0, 10);
+
+/**
+ * crowdOf — 이 시각에 잡으면 **무엇과 겹치나**(순수 · DB 0).
+ *   🔴 **막지 않는다.** 이 함수는 `boolean` 을 돌려주지 않는다 — 돌려주는 것은 **수와 한 문장**이다.
+ *      «거절할까»를 여기서 정할 수 없게 일부러 그런 모양으로 뒀다(§9 · 계약 §4-1).
+ *   🔴 **셀 수 없으면 0 이 아니라 «없음»** — 계정이 안 정해진 자리(`accountId: null`)는 «같은 계정 몇 편»을 셀 수 없다.
+ *      그때 0 을 말하면 «이날 그 계정에 아무것도 없다»는 **거짓말**이 된다(AC-92). 문장에서 그 부분이 빠진다.
+ */
+export function crowdOf(inp: CrowdInput): Crowd {
+  const gap = Math.max(1, Math.floor(inp.gapMin ?? ACCOUNT_GAP_MIN_DEFAULT));
+  const day = kstDayOf(inp.atMs);
+  const sameAccountSameDay = inp.accountId
+    ? inp.others.filter((o) => o.accountId === inp.accountId && kstDayOf(o.atMs) === day).length
+    : 0;
+  const sameChannel = inp.others.filter((o) => o.channel === inp.channel);
+  const diffs = sameChannel.map((o) => Math.round(Math.abs(o.atMs - inp.atMs) / 60_000));
+  const nearestMin = diffs.length ? Math.min(...diffs) : undefined;
+  const tight = nearestMin !== undefined && nearestMin < gap;
+  const parts: string[] = [];
+  if (inp.accountId && sameAccountSameDay > 0) parts.push(`이날 ${inp.handle ? `@${inp.handle}` : "이 계정"}에 이미 ${sameAccountSameDay}편 있어요`);
+  if (tight) parts.push(`${gap}분 안에 붙어요`);
+  return { sameAccountSameDay, ...(nearestMin !== undefined ? { nearestMin } : {}), tight, say: parts.join(" · ") };
+}

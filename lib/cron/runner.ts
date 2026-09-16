@@ -34,6 +34,7 @@ import { learnStep } from "./learn";
 import { reapStep } from "./reap";
 import { stockCacheSweepStep } from "./stock-cache-sweep";   // [R8 §10 · B-1] 스톡 캐시 만료분 청소
 import { videoSweepStep } from "./video-sweep";
+import { pieceSweepStep } from "./piece-sweep";
 import { revenueSyncStep } from "./revenue-sync";
 import { managedRunnerWatchStep } from "./managed-runner-watch";
 import { recipeRolloutStep } from "./recipe-rollout";   // [P1R8 §3.3] 셀렉터 표 승격·자동 복귀(global · hourly)
@@ -85,6 +86,7 @@ export const STEPS: AnyStep[] = [
   publisherStep,       // 5m · due 발행
   pushFanoutStep,      // 5m · **global** — 알림함 새 행을 기기 푸시로(문구 한 출처 · VAPID 없으면 표시만 · R7 메인 발주)
   videoSweepStep,      // 5m · 멈춘 영상 체인 재개·종결(P1R5 §1.5)
+  pieceSweepStep,      // 5m · 멈춘 글 재개·종결(video-sweep 의 글 판 · AC-69)
   managedRunnerWatchStep, // 5m · **global** — 관리형(우리 기기) 러너가 30분 조용하면 운영 감사(P1R7 §2.4)
   recipeRolloutStep,      // hourly · **global** — 셀렉터 표: 넓히는 건 평일 10~18시만, 되돌리는 건 언제나(P1R8 §3.3)
   reapStep,            // 5m · 러너 잡 타임아웃 회수

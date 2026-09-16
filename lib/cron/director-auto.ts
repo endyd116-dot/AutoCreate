@@ -25,6 +25,7 @@ import { pausedAccountIds } from "../account-slots";
 import { personaFitsFor } from "../persona-fit";   // [R8CLOSE-B1 §B2] 🔴 사람 경로와 **같은 판정기**로 배정한다(두 경로가 갈리면 그게 곧 «왜 어제랑 달라요»다)
 import { isHealthTopic, HEALTH_FORBIDDEN_FORMATS } from "../banned-categories";   // [R8-A §4] 건강·의료 소재엔 경험담 구성 금지(의료법 §56)
 import { pickFormatByPrint } from "../format-pick";                        // [R8 §2.2] 골격 지문으로 고르기(사람 경로와 같은 함수)
+import { learnedTiltFor, NO_TILT } from "../learn-tilt";                   // [R12-10] 🔴 되먹임 — 자동 경로도 **같은 값**을 읽는다(사람 경로만 배우면 두 길의 글이 갈린다)
 import { printFromMeta, type StructurePrint } from "../structure-print";
 
 const n = (v: unknown) => Number(v || 0);
@@ -115,8 +116,12 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
   const hintBlockedByHealth = hintOk && health && HEALTH_FORBIDDEN_FORMATS.includes(hint);
   /* [R8 §2.2] 자동 편성도 **골격 지문을 보고** 고른다 — 사람 경로(director.propose)와 **같은 함수**를 쓴다.
      둘이 다른 규칙으로 고르면 «자동으로 만든 글»과 «손으로 만든 글»의 생김새가 갈린다. */
+  /* [R12-10] 🔴 되먹임은 **사람 경로와 같은 함수·같은 자리**다 — 자동으로 만든 글만 안 배우면 «공장이 도는 길»이 영영 안 는다.
+     못 읽으면 `NO_TILT` 라 오늘까지와 똑같이 돈다(무회귀). */
+  const tilt = await learnedTiltFor(tid).catch(() => NO_TILT);
   const fpick = pickFormatByPrint(contractForPick, await recentFormats(tid, acc.id, slot.channel), `${topic.id}:${slot.channel}:${acc.id}`, hintOk && !hintBlockedByHealth ? hint : null, await recentPrintsFor(tid, slot.channel),
-    { imageCount: defaultImageCount(slot.channel), affiliate: topic.factors.intent === "commercial" || topic.factors.intent === "mixed", intent: topic.factors.intent, title: topic.title });   // 사람 경로와 **같은 규칙**(director.ts affiliateBase)
+    { imageCount: defaultImageCount(slot.channel), affiliate: topic.factors.intent === "commercial" || topic.factors.intent === "mixed", intent: topic.factors.intent, title: topic.title },   // 사람 경로와 **같은 규칙**(director.ts affiliateBase)
+    tilt.formats);   // [R12-10] 겹침 판정 뒤의 동점 가르기에만(structure_repeat 무회귀)
   const format = fpick.format as FormatKey;
   /* 못 쓴 구성은 «사람말»로 남긴다 — 그 구성의 한국어 이름은 그 채널 계약에만 있어서(못 쓰는 채널엔 없다) **고른 구성**을 말한다.
      원래 힌트 문자열은 감사(detail.formatHint)에 남는다. */
@@ -138,7 +143,10 @@ export async function proposeForSlot(tid: number, slot: AutoSlot): Promise<AutoB
     format, emotionKey: c.emotionKey, composition: c.formatLabel[format] || format, lengthHint: { words: wordsOf(c) },
     /* [R8] 간단히 = **AI 1장 + 나머지 스톡** — 글 한 편 1코인(사장님 승인값). 보통·프리미엄은 계정 기본값을 따라 AI 를 더 굽는다. */
     images: { count: imageCount, style: c.images.style, heroNeeded: slot.channel === "naver_blog" || slot.channel === "tistory", aiCount },
-    tier, styleId: acc.defaultStyleId ?? null,   // [R10-4] 계정에 걸어 둔 스타일이 자동 경로의 옷이다(«공장이 돈다»)
+    /* [R10-4] 계정에 걸어 둔 스타일이 자동 경로의 옷이다(«공장이 돈다»).
+       [R12-10] 🔴 계정이 **안 골랐을 때만** 배운 스타일 — 사람 경로(`director.propose`)와 같은 규칙. 왜 입었는지도 같이 적는다. */
+    tier, styleId: acc.defaultStyleId ?? tilt.styleId ?? null,
+    ...(!acc.defaultStyleId && tilt.styleId ? { styleFrom: "learned" as const, learnedLine: tilt.line } : {}),
     /* [R8-A §4] 자동 경로는 «협찬·무상 제공»을 알 수 없다 — 기본 false. 고객이 검수에서 켠다(켜면 고지가 첫머리에 박힌다). */
     monetize: { affiliate, sponsored: false, gift: false, adDisclosure: !!affiliate },
     schedule: { at, slotReason: "편성표가 정한 시각" }, coinCost: pieceCoin(slot.channel, aiCount, format, tier), angle: topic.angle,
