@@ -50,6 +50,13 @@
 
 `UI.KIND_PILL = { shorts: "영상", cardnews: "카드뉴스" }` 인데 `pieces.html` 은 `UI.kindPill(p.kind)` 에 **`"video"`** 를 넣는다. 맞는 칸이 없어 **빈 문자열**이 나온다.
 
+> 🔴 **[2026-09-17 정정 · C 가 잡았다]** 위 진단은 **영상에 대해서만 맞다.**
+> `pieces.kind` 에는 **`cardnews` 도 들어간다**(메인이 «두 값»이라 적은 것이 틀렸다 · 위 §1.3 표 참고).
+> ⇒ **카드뉴스는 `kind` 가 맞는데도 배지가 안 붙는 경우가 따로 있다** — C 실측: **인스타 5종 중 4종**에서 안 붙는다.
+> 🔴 **까닭이 다르다**: `isCard` 판정이 **채널**에서 오는데(`director.ts`) 인스타 `formats` 는 **다섯**이다
+> (`cardnews`·`steps`·`listicle`·`compare`·`qna`) — 그래서 **골격이 카드뉴스가 아닌 넷**은 `cardnews` 로 안 찍힌다.
+> ⇒ **R11-1 은 «어휘 잇기» 하나가 아니라 «판정 자체»도 봐야 한다.** B 몫으로 넘겼다.
+
 ⇒ **만든 글 목록에서 영상도 카드뉴스도 이름표가 없다.** 채널 마크로 눈치채야 한다. 카드뉴스는 인스타 마크라 **피드 글과 구별이 안 된다.**
 
 🔴 이건 R11 의 «있으면 좋은 것»이 아니라 **지금 틀린 것**이다. 축을 가르기 전에 **종류부터 바로 말해야** 한다.
@@ -58,7 +65,7 @@
 
 | 이름 | 값 | 어디 | 무엇 |
 |---|---|---|---|
-| `pieces.kind` | `post` · `video` | DB·서버 | 만드는 길이 글이냐 영상이냐(3단계냐 6단계냐) |
+| `pieces.kind` | `post` · `video` · **`cardnews`** | DB·서버 | 🔴 **[2026-09-17 정정]** 메인이 «두 값»이라 적었는데 **세 값**이다 — `lib/director.ts` 가 `isVideo ? "video" : isCard ? "cardnews" : "post"` 로 넣고, 그건 **2026-09-15 `8298bee`** 에 이미 들어와 있었다. C 가 잡았다(AC-75 — 옛 이름으로 셌다) |
 | `RuleKind`(슬롯·규칙) | `post` · `shorts` · `cardnews` | `lib/slots.ts` | **주문의 종류**(«글 주 3회»와 «카드뉴스 주 3회»는 다른 주문 · 값도 다르다) |
 | `FormatKey` | `story`…`cardnews`·`steps` | `lib/writing-contracts.ts` | 글의 **골격** |
 | `channel.axis` | `text` · `video` | `lib/channel-registry.ts` | 채널이 **어느 축**인가 |
