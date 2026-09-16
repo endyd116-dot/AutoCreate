@@ -159,3 +159,43 @@ npx --yes tsx --env-file=.env scripts/verify-runner-dist.mts    # 28항목 · �
 🔴 2026-09-16 밤에 재 보니 **47파일 · +7,529/−7,513**(전면 재작성)이고 `feature/r9-front`(A)가 main 보다 앞서 있었다.
 지금 하면 A 의 머지가 **파일 통째 충돌**이 되고, 그러면 **AC-77 ②** 가 그대로 재발한다(700줄 충돌 속에서 게이트 축이 조용히 증발).
 ⇒ **남은 일**: 모든 창이 비었을 때 **메인이 한 번에** `git add --renormalize .`. 그 전에는 하지 마라.
+
+---
+
+## 🔴 R12 (2026-09-17 · B2) — 영상 craft · 당근 · 남은 것
+
+### 무엇이 바뀌었나 (한 줄씩)
+
+| 파일 | 무엇 |
+|---|---|
+| `lib/video/tempo.ts` **신규** | 말 속도 판정 **순수 한 곳**. 🔴 배운 값은 «보통(1.0) 대비 배수»고 **우리 보통은 1.1**(`TYPECAST_DEFAULT_TEMPO`) ⇒ `clamp(1.1×배운값)`. 배운값 1.0 = 오늘과 같은 영상. `resolveNarrationTempo`·`checkTempoFitsSpec`(B2) · `effectiveTempo`·`syllableRatioOf`(B 가 대본 길이에 쓴다 · **식을 두 벌 안 적으려고 한 파일에**) |
+| `lib/video/gen.ts` | ②tts 를 `bakeNarration(plan)` 으로 묶었다 — **잰 뒤에** 규격을 보고 넘치면 **보통으로 다시 굽는다**. R2 세대에 속도 꼬리(`t121`)를 붙여 **다른 속도의 음성을 안 집는다**(AC-39). 컷 하한·모션·전환을 payload 로 |
+| `lib/video/scenes.ts` | `applyCutFloor` — 늘리기만 하고 **안 줄인다**(컷이 나레이션보다 짧으면 말이 잘린다) · 창을 늘리면 **그 창의 문장도 같이 민다** · 규격 넘으면 **통째로 버린다** |
+| `lib/video/reference.ts` | R9 가 «일부러 뺀 둘»(`captionMotion`·`transition`)을 **연다**. 어휘를 `sanitizeTemplate` 이 **닫아** 둔다 |
+| `lib/video/reference-apply.ts` | `audioTempo`·`captionMotion`·`transition`·`minCutMs` 가 `unused` → **`applied`** 로 |
+| `runner/channels/render-video.mjs` | 🔴 `buildRenderArgs` 를 **`run()` 밖 순수 함수로 뽑았다** · 모션 넷 · 전환 셋 · `hasXfade()` · **되돌릴 길**(꾸미다 죽으면 꾸밈만 끄고 재시도) |
+| `runner/lib/plan.mjs` | `itemPartsOf`·`marksForItem`·`marksForCell`·`rowPartsOf` — 목록·표·FAQ 안의 마크 |
+| `runner/channels/naver-blog.mjs` | `typeParts(op, prefix)` — 항목마다 R9 세 겹을 **다시 탄다** |
+| `runner/channels/daangn.mjs` **신규** | 당근 새소식(세션 쿠키만 · 서식 0 · 수익 없음) |
+
+### 🔴 이번에 밟은 것 — 같은 데서 또 넘어지지 말 것
+
+| 함정 | 무엇이 일어났나 |
+|---|---|
+| 🔴 **변이표가 내 축의 구멍을 찾았다** | `deco ? l.motion : "none"` 를 **지워도 초록**이었다 — ① 무회귀 축의 층이 전부 `motion:"none"` 이라 **그 분기를 아무도 안 밟고 있었다.** «망가뜨리면 빨개지나»를 안 돌렸으면 영영 몰랐다. ⇒ **«되돌림» 축**(꾸미다 죽어 다시 구울 때 층엔 이미 모션이 박혀 있다)을 더해서 잡았다 |
+| 🔴 **템플릿 리터럴 안의 백틱** | `ANALYZE_PROMPT` 안에 `` `captionMotion` `` 을 적었더니 **문자열이 그 자리에서 닫혀** tsc 가 셋을 뱉었다. 프롬프트는 백틱 문자열이다 — 안에서 코드 강조를 쓰지 마라 |
+| 🔴 **셸이 정규식의 역슬래시를 먹는다(또)** | 하니스에 `/\[ovs[0-9]+\]/` 를 python heredoc 으로 넣었더니 `[ovs[0-9]+]`(문자 클래스)가 되어 **엉뚱한 것을 셌다**. ⇒ 하니스에 `s_count(hay, needle)` 를 두고 **역슬래시 없는 `split` 으로** 센다 |
+| 🔴 **주석 들여쓰기를 눈대중으로 맞추면 치환이 0건** | `reference.ts` 의 주석 블록이 `   *` (공백 3)인데 ` *`(공백 1)로 찾아 `AssertionError`. ⇒ **줄 번호로 자르고 앵커는 «본문 한 조각»으로** |
+| 🔴 **`downloadImages` 는 Map(주소→파일\|null)** | 배열인 줄 알고 `setInputFiles` 에 넘겼으면 `null` 이 들어가 **사진 첨부 실패가 아니라 잡 전체가 죽는다** |
+| 🔴 **낡아 버린 축을 «고장»으로 읽지 마라** | `verify-runner-format` F-12c·`verify-reference-apply` 의 «모션은 묻지 않는다» 가 빨개졌는데 **코드가 틀린 게 아니라 축이 낡은 것**이었다. AC-101 대로 «어느 쪽이 정본인지»(= 설계)를 먼저 정하고 **축을 뒤집었다** — 그리고 뒤집을 때 **대조군을 같이 넣었다**(«안 버렸다»만 세면 «아예 안 읽었을 때»도 0 이라 거저 초록이다) |
+
+### 열려 있는 것 (다음 세션이 이어받을 것)
+
+| 무엇 | 누구 | 메모 |
+|---|---|---|
+| 🔴 **당근 탐침 1회** | B2 + 사장님 | `OWNER-CHECKLIST §5.3` 에 두 줄 써 뒀다. **쓰기를 안 하니 되돌릴 것이 없다.** 필요한 것 = 비즈프로필 + 로그인 1회(SMS) |
+| 🔴 **러너 새 판 R2 업로드** | 사장님 | `runner/package.json` 을 **일부러 1.3.0 그대로 뒀다**(버전을 올리는 순간이 «배포하겠다»는 뜻이다). R12 러너 변경 = 4파일(`render-video`·`plan`·`naver-blog`·`daangn` 신규) |
+| 🔴 **모션·전환을 «진짜 구워서» 재기** | C | 내 자는 **ffmpeg 인자**까지다. «프레임이 실제로 달라지나»는 C 가 베이스 판과 맞대 굽는다(그쪽 축이 ⊘ 면 아무도 그 칸을 안 읽는 것이다) |
+| 🔴 **`.mjs` 292건** | 메인이 나눈다 | `docs/active/2026-09-17-mjs-typecheck-size.md`. **혼자 다 고치지 마라**(트리거 지시) · `TS2345` 52건부터 |
+| 🔴 **`profile-seal.mjs` 가 갈래마다 다른 모양을 돌려준다** | B2 | `sealed`·`exists` 가 어떤 경로에선 늘 `undefined`(AC-56). 봉인 본체가 아직 없어 같이 볼 자리 |
+| **틱톡 키** | 사장님 | 코드 몫은 **남은 게 없다** — `TIKTOK_CLIENT_KEY`/`SECRET` 만 꽂으면 가동 |
