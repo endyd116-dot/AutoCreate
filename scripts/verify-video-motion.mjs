@@ -290,6 +290,11 @@ console.log("⑧ 🔴 «오버레이가 정말 실렸나» 확인기 — 재는 
   eq("고지가 없으면 배지", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 2000 }, { role: "badge", startMs: 0, endMs: 5000 }]), 1);
   eq("둘 다 없으면 구절", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 2000 }]), 0);
   eq("🔴 층이 없으면 -1 — 키를 아예 안 보낸다(«확인할 게 없다»와 «못 쟀다»는 다르다)", pickVerifyLayer([]), -1);
+  /* 🔴 B 의 규칙(2026-09-17): «**못 잰다**로 내려앉는 조건에 입력이 둘 이상이면 대조군이 있어야 한다».
+     `pickVerifyLayer` 는 «층이 있나» × «창이 충분한가» 둘을 본다 ⇒ **양쪽 다** 재야 한다.
+     이 줄이 없으면 «창 길이를 아예 안 본다»로 바꿔도 초록이다. */
+  eq("층은 있는데 창이 다 너무 짧으면 -1(못 잰다)", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 100 }]), -1);
+  eq("짧은 층과 긴 층이 섞이면 **긴 쪽**을 고른다", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 100 }, { role: "phrase", startMs: 0, endMs: 3000 }]), 1);
 }
 
 console.log(`\n${fail === 0 ? "초록" : "빨강"} — 통과 ${pass} · 실패 ${fail}`);

@@ -63,6 +63,7 @@ const MUTANTS = [
   { name: "오버레이를 `eof_action=pass` 로 되돌린다", from: "eof_action=repeat", to: "eof_action=pass", want: 1, why: "⑦ 오버레이가 정말 얹히나 — 🔴 단일 프레임은 t=0 에 EOF 라 pass 면 자막·고지가 통째로 사라진다" },
   { name: "확인기 날 프레임 갈래를 없앤다(x264 를 태운다)", from: "if (ctx.rawProbe) {", to: "if (false) {", want: 1, why: "⑧ 확인기 — 🔴 인코딩을 태우면 율 제어가 달라 늘 «그려졌다»가 된다" },
   { name: "확인기가 고지 말고 아무 층이나 고른다", from: 'for (const r of ["disclosure", "badge"]) { const i = byRole(r); if (i >= 0) return i; }', to: "", want: 1, why: "⑧ 법이 읽는 것부터" },
+  { name: "확인기가 창 길이를 안 본다", from: "return L.length ? L.findIndex((x) => x && (x.endMs - x.startMs) >= 200) : -1;", to: "return L.length ? 0 : -1;", want: 1, why: "⑧ 🔴 «못 잰다» 조건에 입력이 둘이면 대조군이 있어야 한다(B 규칙)" },
   { name: "영상 조각을 안 늘린다(tpad 제거)", from: "ext > 0 && s.isClip", to: "false", want: 1, why: "② 전체 길이 불변" },
 ];
 
