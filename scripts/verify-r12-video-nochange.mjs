@@ -16,11 +16,11 @@
  *
  *   ══ 자를 먼저 찌른다 (계약 §4-5 · AC-100 ⑦) ══
  *     ⓪ **원판** = 베이스 판 두 번 → **바이트까지 같아야 한다.** 여기가 빨강이면 **표 전체를 버린다**(인코딩이 안 결정적이다).
- *     ⓪b **대조군** = 지금 판이 이미 읽는 칸 하나(`captions.type.color`)를 바꿔 → **반드시 달라져야 한다.**
+ *     ⓪b **대조군** = 자막을 **통째로 뺀 판**과 맞댄다 → **반드시 달라져야 한다.**
  *        🔴 이 줄이 없으면 «전부 같다»가 «아무것도 안 구웠다»와 구별되지 않는다(AC-99 ⑨).
  *     `--mutate=tail`    : `-t` 를 `bodySec` → `maxSec` 으로(AC-31 의 그 꼬리) → ① 이 빨개져야 한다
  *     `--mutate=length`  : 장면 하나를 200ms 늘린다 → ① 이 빨개져야 한다
- *     `--mutate=overlay` : 자막 오버레이를 한 장 빼먹는다 → ① 이 빨개져야 한다
+ *     `--mutate=overlay` : 자막 오버레이를 한 장 빼먹는다 → **⑦** 이 빨개져야 한다
  *   🔴 리포 파일은 안 건드린다 — 베이스도 현재도 **스크래치 사본**에서만 돈다.
  *
  *   ══ 칸 이름은 B2 가 정했다(2026-09-17 · 창끼리 직접 · PARALLEL_GUIDE §2.7) ══
@@ -133,8 +133,11 @@ const MUTATIONS = {
     expect: "① 무회귀가 빨개져야 한다 — AC-31 의 «정지 화면 + 음악» 꼬리" },
   length: { find: "durMs: Math.max(200, Number(s.endMs) - Number(s.startMs))", to: "durMs: Math.max(200, Number(s.endMs) - Number(s.startMs)) + (s.idx === 1 ? 200 : 0) /* 변이 length */",
     expect: "① 무회귀가 빨개져야 한다 — 장면 하나가 200ms 길어진다" },
-  overlay: { find: "layers.push({ file: f, startMs: Math.max(0, Number(ph.startMs) || 0), endMs: Math.max(0, Number(ph.endMs) || 0) });", to: "if (ph.idx !== 1) layers.push({ file: f, startMs: Math.max(0, Number(ph.startMs) || 0), endMs: Math.max(0, Number(ph.endMs) || 0) }); /* 변이 overlay */",
-    expect: "① 무회귀가 빨개져야 한다 — 자막 한 장이 안 얹힌다" },
+  /* 🔴 자막 한 장을 빼먹게 한다 — ⑦(자막이 보이나)이 빨개져야 한다.
+     ⚠️ 앵커는 **호출부 한 줄 전체**가 아니라 그 줄의 **변하지 않는 앞머리**로 잡는다 — B2 가 그 줄을 고치자
+        옛 앵커가 «0곳»이 되어 «🟠 못 심음»으로 떨어졌다(그게 맞는 신호다 · AC-99 ⑦). 다시 낡으면 또 그렇게 말한다. */
+  overlay: { find: "for (const ph of phrases) {", to: "for (const ph of phrases) { if (ph.idx === 1) continue; /* 변이 overlay */",
+    expect: "⑦ 자막이 보이나 — 자막 한 장(idx 1)이 안 얹혀 그 창이 빨개져야 한다" },
 };
 function applyMutation(dir, key) {
   const file = join(dir, "channels", "render-video.mjs");
