@@ -11,6 +11,20 @@
  *     🔴 이 함수의 출력에서 기댓값을 뽑아 오면 그게 **AC-78**(검사가 값을 베끼는 것)이다 — 그러면 내가 무엇을 바꿔도 늘 초록이다.
  *     ⇒ 아래 `BASE_ARGS` 는 **사람이 적은 글자**다. 렌더를 일부러 고치면 이 줄도 같이 고쳐야 하고, 그게 맞다.
  *
+ *   ══ 🔴 이 자가 **못 재는 것** — 그리고 그게 오늘 우리를 물었다 ══
+ *     이 자는 **ffmpeg 인자까지**다. «인자는 맞는데 **나온 파일**의 프레임이 안 달라진다»는 **원리상 못 잡는다.**
+ *     2026-09-17 에 정확히 그 일이 났다: `eof_action=pass` 라 오버레이가 **한 장도 안 얹히는데** 인자는 멀쩡했다(C 가 잡았다).
+ *     ⇒ **굽는 자(C)와 이 자는 다른 층을 본다.** 한 층만 보면 또 난다.
+ *
+ *     🔴 B2 가 이 기계에서 **직접 구워 본 값**(ffmpeg 8.1.2 · 320×240 검은 4초 + 빨간 PNG · 창 1.0~2.0초 · 좌상단 픽셀):
+ *       · `eof_action=pass`  → @1.5s **(0,0,0)**      = 창 안인데 **안 그려진다**
+ *       · `eof_action=repeat`→ @1.5s **(252,0,0)** · @3.0s (0,0,0) = 창 밖엔 안 그려진다(맞다)
+ *       · `fade`             → @1.0s (0,0,0) · @1.1s **(124,0,0)** · @1.5s (252,0,0)   = 투명도가 실제로 오른다
+ *       · `pop`              → @1.0s (0,0,0) · @1.5s (252,0,0)                          = 작을 땐 좌상단이 비어 있다
+ *       · `slide_up`         → @1.0s (0,0,0) · @1.5s (252,0,0)                          = 내려가 있다가 제자리로
+ *       · 전환 `fade`        → **길이 5.000000 ↔ 전환 없음 5.000000(같다)** · @1.85s none (0,0,254) vs fade **(0,68,113)**
+ *         ⇒ 🔴 «길이는 그대로인데 그림만 섞인다»가 **실물로** 확인됐다.
+ *
  *   ══ 🔴 변이(mutation) — 표 맨 윗줄이 «원판»이다(AC-100 ⑦) ══
  *     원판 줄이 초록이 아니면 **표 전체를 버린다**. 그리고 변이를 **심은 자리 수를 센다**(0곳 = 못 심음 · 2곳 이상 = 하니스 고장).
  */
@@ -50,14 +64,21 @@ const fixture = (over = {}) => ({
   ...over,
 });
 
-/* 🔴 **손으로 적은 기댓값** — 베이스 판 `render-video.mjs` 의 ④ 블록을 읽고 그대로 옮겼다. */
+/* 🔴 **손으로 적은 기댓값** — 베이스 판 `render-video.mjs` 의 ④ 블록을 읽고 그대로 옮겼다.
+ *
+ *   🔴🔴 **2026-09-17: 이 기댓값을 한 군데 «일부러» 고쳤다 — `eof_action=pass` → `repeat`.**
+ *      베이스 판이 **틀려 있었다**(C 발견 · B2 가 ffmpeg 8.1.2 로 실측 확인):
+ *      오버레이 입력이 단일 프레임이라 t=0 에 EOF 고, `pass` 는 그때부터 본편을 통과시켜
+ *      **자막·제휴 고지·배지·엔드카드가 첫 프레임 말고는 안 실렸다.**
+ *      ⇒ 여기서 «무회귀»는 **«종전과 같게»가 아니라 «종전에서 이 한 글자만 다르게»**다.
+ *      🔴 이 줄을 조용히 고치면 그게 «조용한 개편»이다. 그래서 **이 주석과 아래 ⑦ 축이 같이 있다.** */
 const NORM = (i, dur) => `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,trim=duration=${dur},setpts=PTS-STARTPTS[v${i}]`;
 const BASE_FC = [
   NORM(0, "2.000"),
   NORM(1, "3.000"),
   "[v0][v1]concat=n=2:v=1:a=0[base]",
-  "[base][2:v]overlay=0:0:enable='between(t,0.000,2.000)':eof_action=pass[ov0]",
-  "[ov0][3:v]overlay=0:0:enable='between(t,2.000,5.000)':eof_action=pass[vout]",
+  "[base][2:v]overlay=0:0:enable='between(t,0.000,2.000)':eof_action=repeat[ov0]",
+  "[ov0][3:v]overlay=0:0:enable='between(t,2.000,5.000)':eof_action=repeat[vout]",
   "[4:a]adelay=0|0[n0]",
   "[n0]amix=inputs=1:duration=longest:dropout_transition=0:normalize=0[amixed]",
   "[amixed]loudnorm=I=-16:TP=-1.5:LRA=11[aout]",
@@ -222,6 +243,24 @@ console.log("⑥ 컷 하한 — 늘리기만 하고, 넘치면 통째로 버리�
     ok("다 더해 규격을 넘으면 통째로 버린다", JSON.stringify(over.windows) === JSON.stringify(W) && over.appliedMs === null, JSON.stringify(over));
     ok("버렸다는 사실을 사람말로 돌려준다", typeof over.why === "string" && over.why.includes("못 했어요"), String(over.why));
   }
+}
+
+console.log("⑦ 🔴 오버레이가 **정말 얹히나** — `eof_action` 은 `pass` 가 아니라 `repeat` 이어야 한다");
+{
+  /* 🔴 **왜 이 축이 영구로 있나**(2026-09-17 · C 발견 · B2 실측):
+       오버레이 PNG 는 **단일 프레임**이라 t=0 에 EOF 다. `pass` 는 그 순간부터 본편을 그대로 통과시켜
+       **`enable` 창이 와도 영영 안 얹힌다** — 자막·**제휴 고지**·배지·엔드카드가 통째로 사라진다.
+       실측(ffmpeg 8.1.2): `pass` → 창 안 프레임 (0,0,0) · `repeat` → (252,0,0).
+     🔴 이 축은 «있나»가 아니라 «**어느 쪽 글자인가**»를 잰다 — 산출물로 재는 것은 C 의 자다(굽는 자).
+       둘이 **다른 층**을 봐야 한다: 나는 인자를, C 는 나온 파일을. 한 층만 보면 오늘 같은 일이 또 난다. */
+  const all = [
+    buildRenderArgs(fixture()),
+    buildRenderArgs(fixture({ deco: true, wantTransition: "fade", layers: [{ file: "a.png", startMs: 0, endMs: 3000, motion: "fade" }], narration: [] })),
+    buildRenderArgs(fixture({ deco: true, layers: [{ file: "a.png", startMs: 0, endMs: 3000, motion: "slide_up" }], narration: [] })),
+    buildRenderArgs(fixture({ deco: true, layers: [{ file: "a.png", startMs: 0, endMs: 3000, motion: "pop" }], narration: [] })),
+  ].map(({ args }) => args[args.indexOf("-filter_complex") + 1]);
+  ok("어느 갈래에도 `eof_action=pass` 가 없다", all.every((fc) => s_count(fc, "eof_action=pass") === 0), all.join(" || "));
+  ok("모든 overlay 가 `eof_action=repeat` 이다", all.every((fc) => s_count(fc, "overlay") === s_count(fc, "eof_action=repeat")), all.join(" || "));
 }
 
 console.log(`\n${fail === 0 ? "초록" : "빨강"} — 통과 ${pass} · 실패 ${fail}`);

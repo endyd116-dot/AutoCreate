@@ -446,13 +446,29 @@ export function buildRenderArgs(ctx) {
     if (runLabels.length === 1) fc.push(`${runLabels[0]}null[base]`);
     else fc.push(`${runLabels.join("")}concat=n=${runLabels.length}:v=1:a=0[base]`);
   }
-  // 오버레이 얹기 — 각자 제 시간에만(eof_action=pass 로 뒤를 막지 않는다)
+  /* 오버레이 얹기 — 각자 제 시간에만.
+   *
+   *   🔴🔴 **`eof_action=pass` 였던 것을 `repeat` 으로 고쳤다**(2026-09-17 · C 발견 · B2 실측 확인).
+   *      종전 코드의 주석은 «`pass` 로 뒤를 막지 않는다»였는데 **그 주석이 뜻하는 일이 일어나지 않았다** —
+   *      오버레이 입력은 `-i ov.png` **단일 프레임**이라 **t=0 에 곧바로 EOF** 고,
+   *      `pass` 는 그 순간부터 **본편을 그대로 통과**시킨다 ⇒ `enable` 창이 와도 **영영 안 얹힌다.**
+   *
+   *      실측(B2 · ffmpeg 8.1.2 · 검은 4초 영상 + 빨간 PNG · `enable='between(t,1.0,2.0)'`):
+   *        · `eof_action=pass`   → 1.5초 프레임 픽셀 **(0,0,0)**   = 안 그려짐
+   *        · `eof_action=repeat` → 1.5초 프레임 픽셀 **(252,0,0)** = 그려짐 · 3.0초는 (0,0,0)(창 밖이라 맞다)
+   *      `repeat` 은 overlay 의 **기본값**이다 — 즉 종전 코드는 기본값을 **일부러 껐고 그게 기능을 껐다.**
+   *
+   *   🔴 **이건 «무회귀»의 예외다.** 종전 산출물과 **달라지는 것이 맞다** — 종전 산출물이 틀렸기 때문이다.
+   *      자막·**제휴 고지**·배지·엔드카드가 첫 프레임 말고는 실리지 않고 있었다(법이 읽는 문장이 영상에 없었다 · CLAUDE §9-④).
+   *      🔴 심사(`judge.ts`)는 이걸 원리상 못 잡는다 — 계획값을 보기 때문이다(AC-33).
+   *   ⚠️ 판 의존일 수 있다: 실측한 판은 **8.1.2 하나**다. 옛 판에서는 돌았을 수 있다(안 그랬으면 진작 드러났다).
+   *      그래도 `repeat` 이 맞다 — **판이 제각각인 고객 PC 에서 «있거나 없거나»가 되면 안 된다.** */
   let vcur = "[base]";
   layers.forEach((l, k) => {
     const nxt = k === layers.length - 1 ? "[vout]" : `[ov${k}]`;
     const m = deco ? l.motion : "none";
     const S = sec(l.startMs), E = sec(l.endMs), D = sec(CAPTION_MOTION_MS);
-    const win = `enable='between(t,${S},${E})':eof_action=pass`;
+    const win = `enable='between(t,${S},${E})':eof_action=repeat`;
     let src = `[${ovBase + k}:v]`;
     if (m === "fade") {
       /* 투명도 0→1. 🔴 `fade` 는 **자기 스트림의 시각**으로 재므로 `st=0` 으로 걸고 **그 뒤에** 제자리로 민다. */
