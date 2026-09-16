@@ -31,9 +31,15 @@
  */
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { readFileSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import postgres from "postgres";
 import { db } from "../db/index";
 import { sql } from "drizzle-orm";
 import { jsonb } from "../lib/db-util";
+
+const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -68,6 +74,40 @@ const STAMP = Date.now().toString(36);
 const ALLOWED = new Set<number>();
 const guard = (tid: number) => { if (!ALLOWED.has(tid)) throw new Error(`🔴 하니스 테넌트가 아니다 tid=${tid} — 쓰기 중단`); };
 let TID = 0;
+
+/* ── S0 🔴 «표시 뒤에 움직였나» 한 줄을 **네 시간대에서** 잰다 ──
+   그 줄은 `at`(timestamptz)과 `updated_at`(**timestamp without time zone**)을 섞는다. 섞으면 Postgres 가 **세션 TZ 로** 맞춘다.
+   ⇒ 세션 TZ 하나로 판정이 뒤집히고, **뒤집히는 방향이 «조용히 제외»**다(구멍이 그대로 다시 열린다).
+   🔴 **소스 파일에서 그 줄을 그대로 떼어다** 잰다 — 여기에 베껴 쓰면 원본을 고쳐도 자는 옛 줄을 계속 초록으로 재운다.
+   🔴 그리고 세 판을 **다 재야** 한다: 움직인 글(뽑혀야) · 안 움직인 글(안 뽑혀야) · `at` 이 없는 글(뽑혀야 — 모르면 보는 쪽). */
+{
+  const src = readFileSync(join(ROOT_DIR, "lib", "cron", "piece-sweep.ts"), "utf8");
+  const line = (src.split("\n").find((l) => l.includes("p.meta -> 'sweepSkipped' IS NULL")) ?? "").trim();
+  const pred = line.replace(/^AND\s*/, "");
+  if (!pred.startsWith("(")) rec("S0 소스에서 «표시 뒤 움직였나» 줄을 떼어 냈다", false, `🔴 못 찾았다 — 자를 고쳐라(줄 모양이 바뀌었다): «${line.slice(0, 60)}»`);
+  else {
+    const CASES = [
+      { name: "표시 뒤 **움직인** 글", meta: `{"sweepSkipped":{"at":"2026-09-16T09:00:00Z"}}`, up: "2026-09-16 10:00:00", want: true },
+      { name: "표시 뒤 **안 움직인** 글", meta: `{"sweepSkipped":{"at":"2026-09-16T11:00:00Z"}}`, up: "2026-09-16 10:00:00", want: false },
+      { name: "표시는 있는데 **`at` 이 없는** 글", meta: `{"sweepSkipped":{}}`, up: "2026-09-16 10:00:00", want: true },
+    ];
+    const TZS = ["GMT", "Asia/Seoul", "America/New_York", "Pacific/Kiritimati"];
+    const bad: string[] = [];
+    for (const tz of TZS) {
+      const c = postgres(process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL || "", { ssl: "require", max: 1 });
+      await c.unsafe(`SET TIME ZONE '${tz}'`);
+      for (const k of CASES) {
+        const [r] = await c.unsafe(`WITH p AS (SELECT '${k.meta}'::jsonb AS meta, '${k.up}'::timestamp AS updated_at) SELECT ${pred} AS picked FROM p`);
+        if (r.picked !== k.want) bad.push(`${tz}/${k.name}=${r.picked}(기대 ${k.want})`);
+      }
+      await c.end();
+    }
+    rec("🔴 S0 «표시 뒤 움직였나» 판정이 **네 시간대에서 다 같다**(세션 TZ 기본값에 안 기댄다)", bad.length === 0,
+      bad.length ? `🔴 ${bad.join(" · ")}` : `${TZS.join("·")} × 세 판 모두 기대대로`);
+    rec("🔴 S0 `at` 이 없으면 **«다시 본다» 쪽으로 넘어진다**(모를 때 막지 않는다 · AC-9)",
+      !bad.some((b) => b.includes("at` 이 없는")), bad.filter((b) => b.includes("at")).join(" · ") || "COALESCE 로 epoch 취급");
+  }
+}
 
 try {
   const [t] = await q(sql`INSERT INTO tenants (key, name, status, plan_key)

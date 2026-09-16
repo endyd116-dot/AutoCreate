@@ -58,8 +58,8 @@ export const pieceSweepStep: CronStep = {
       FROM pieces p
       WHERE p.tenant_id = ${ctx.tid} AND p.kind <> 'video' AND p.status = 'generating'
         AND p.updated_at < NOW() - (${STALE_MIN} || ' minutes')::interval
-        -- 표시는 «영구 제외»가 아니라 «그때 본 것»이다 — 그 뒤에 글이 움직였으면 다시 본다(까닭은 아래 주석).
-        AND (p.meta -> 'sweepSkipped' IS NULL OR (p.meta -> 'sweepSkipped' ->> 'at')::timestamptz < p.updated_at)
+        -- 표시는 «영구 제외»가 아니라 «그때 본 것»이다 — 그 뒤에 글이 움직였으면 다시 본다(까닭·함정은 아래 주석).
+        AND (p.meta -> 'sweepSkipped' IS NULL OR COALESCE((p.meta -> 'sweepSkipped' ->> 'at')::timestamptz, 'epoch'::timestamptz) < p.updated_at AT TIME ZONE 'UTC')
       ORDER BY p.updated_at LIMIT ${SWEEP_MAX}`);
     if (!rows.length) return NOOP;
     let changed = 0, skipped = 0;
@@ -75,6 +75,16 @@ export const pieceSweepStep: CronStep = {
          (그리고 아무 검사도 안 빨개진다). ⇒ 표시 **뒤에 글이 움직였으면** 다시 후보로 돌아온다.
          🔴 그래서 아래 표시 UPDATE 는 `updated_at` 을 **일부러 안 올린다** — 올리면 방금 쓴 표시를 스스로 무효로 만든다(자기 꼬리 물기).
          🔴 이 줄은 `netlify/functions/pieces.ts`(B 파일)를 안 건드리고 내 파일 안에서 끝난다(AC-101).
+
+         🔴 그 한 줄에 **함정이 둘** 있었다(C 가 라이브에서 찾고 내가 네 시간대로 재서 확인 · 2026-09-16):
+         ① **세션 시간대가 비교를 뒤집는다.** `at` 은 timestamptz 인데 `updated_at` 은 **timestamp without time zone** 이라
+            섞으면 Postgres 가 **세션 TZ 로** 맞춘다. 같은 값으로 재면 GMT·New_York 은 true 인데
+            **Asia/Seoul·Pacific/Kiritimati 는 false** — 즉 **우리 시간대에서 구멍이 그대로 다시 열린다.**
+            지금 라이브 세션이 GMT 라 «오늘은 맞는» 것뿐이고, 그건 짠 게 아니라 **기본값에 기댄 것**이다.
+            ⇒ `AT TIME ZONE 'UTC'` 한 절로 **TZ 를 안 타게** 한다(CLAUDE §4.5b — 변환은 SQL 안에서 끝낸다).
+         ② **`at` 이 없으면 `NULL < x` = NULL 이라 행이 안 뽑힌다** — 즉 **«영영 제외»로 되돌아간다.**
+            🔴 깨지는 방향이 우리가 방금 막은 그 구멍과 **똑같은 모양**이다. ⇒ `COALESCE(..., 'epoch')` 로
+            **모르면 «다시 본다» 쪽으로 넘어지게** 한다(§9·AC-9 — 모를 때는 막는 쪽이 아니라 보는 쪽).
       */
       /* 🔴 [2026-09-16 · AM 장부가 알려 준 구멍] **다시 걸기 전에 «이미 만들어진 것이 있나»를 본다.**
          AM 은 배경 실행 장부(`bg_runs`)로 갈랐더니 멈춘 행 중 흔적이 남은 17건이 **전부 `phase='done'`** 이었다 —
