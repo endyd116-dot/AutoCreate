@@ -1391,6 +1391,12 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
           const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
           /* [B2 8a71d69] 애드포스트처럼 «예상 수입» 열만 주는 매체 — 서버가 도장을 찍고 노트를 준다(?est=1) */
           if (estKnob && source === "adpost") { o.amountEstimated = true; o.note = "«예상수입» 열로 읽었어요 — 확정 금액이 아니라 예상치예요"; }   /* [B2 a8de1d5] 이름·문구 모두 서버 것 */
+          /* [R11 A-5 · B r11-back] 채널 추세 — 🔴 **문장(say)은 서버가 만든다** · pct 는 없을 수 있다 · unknown 은 «멈춤»이 아니다.
+             표본이 적으면 «아직 몰라요»로 준다(AC-9 — 못 쟀다고 말한다). ?trend=none 이면 키 자체가 안 온다(옛 배포). */
+          if (qs.get("trend") !== "none") o.trend = source === "adsense"
+            ? { dir: "down", pct: 12, recentKrw: 41000, prevKrw: 46600, samples: 6, basis: "pieces", say: "지난주보다 12% 줄었어요" }
+            : source === "coupang" ? { dir: "up", pct: 31, recentKrw: 22000, prevKrw: 16800, samples: 5, basis: "pieces", say: "지난주보다 31% 늘었어요" }
+            : { dir: "unknown", recentKrw: 0, prevKrw: 0, samples: 1, basis: "pieces", say: "아직 몰라요 — 3편은 모여야 견줄 수 있어요(지금 1편)" };
           return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
         return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다

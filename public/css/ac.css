@@ -104,6 +104,11 @@ input,textarea,select{font:inherit;color:inherit}
 .row .d{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .row .r{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:700;white-space:nowrap;display:flex;align-items:center;gap:8px;font-size:14.5px;flex:none}
 .row .r.mut{color:var(--muted);font-weight:500;font-size:13px}
+/* [R11 A-5] 매체 줄 우측의 «추세» 한 칸 — 새 화면 0 · 금액 아래 작은 글자.
+   🔴 **내림을 빨강으로 칠하지 않는다**(수익 화면은 감소도 잉크 중립 · §13.0b) — 오름만 초록(`.hl .tip b.up` 과 같은 규칙). */
+.row .r.col{flex-direction:column;align-items:flex-end;gap:2px}
+.row .r .trend{font-size:12px;font-weight:500;color:var(--muted);white-space:normal;text-align:right;max-width:132px;line-height:1.35}
+.row .r .trend.up{color:var(--money-ink)}
 .chev{width:16px;height:16px;color:var(--muted);flex:none}
 
 /* 채널 마크 */

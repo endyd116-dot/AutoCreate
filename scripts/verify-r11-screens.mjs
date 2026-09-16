@@ -197,6 +197,40 @@ const axisRead = (page) => page.evaluate(() => {
   await page.close();
 }
 
+/* ── A-5① 채널 추세 ── */
+{
+  const { page, errors } = await open("/app/revenue.html?mock=1");
+  const v = await page.evaluate(() => {
+    /* 🔴 «어디서 났나»(A-4)와 «어디서»(매체별)가 **둘 다 «어디서»로 시작한다** — 앞 글자로 고르면 엉뚱한 그룹을 잡는다(첫 판이 그랬다).
+       그래서 «그 그룹이 무엇을 담고 있나»로 고른다: 매체 줄은 수익 매체 화면으로 가는 링크다. */
+    const g = [...document.querySelectorAll(".group")].find((x) => x.querySelector('a.row[href="/app/ad-media.html"]'));
+    const rows = [...(g?.querySelectorAll("a.row") || [])].map((r) => {
+      const t = r.querySelector(".trend");
+      const box = r.getBoundingClientRect();
+      return { name: (r.querySelector(".t")?.textContent || "").trim(), say: (t?.textContent || "").trim(), color: t ? getComputedStyle(t).color : "", right: Math.round(box.right) };
+    });
+    return { rows, vw: window.innerWidth };
+  });
+  const withSay = v.rows.filter((r) => r.say);
+  rec("A-5① 매체 줄 우측에 추세 글자가 붙는다(새 화면 0)", withSay.length >= 2, `${withSay.length}줄 · ${withSay.map((r) => r.name + ": " + r.say).join(" | ").slice(0, 110)}`);
+  rec("🔴 A-5① `unknown` 엔 화살표를 안 그린다(«멈춤»이 아니다)", withSay.some((r) => /아직 몰라요/.test(r.say) && !/[↑↓→]/.test(r.say)),
+    `«${(withSay.find((r) => /아직 몰라요/.test(r.say)) || {}).say || "없음"}»`);
+  const down = withSay.find((r) => /줄었어요/.test(r.say));
+  rec("🔴 A-5① 내림을 **빨강으로 안 칠한다**(감소도 잉크 중립 · §13.0b)", !!down && !/rgb\(2[0-9]{2},\s*[0-9]+,\s*[0-9]+\)/.test(down.color) && down.color !== "rgb(240, 68, 82)", `«${down?.say}» 색=${down?.color}`);
+  const up = withSay.find((r) => /늘었어요/.test(r.say));
+  rec("A-5① 오름만 초록(§13.0b «증가만 초록»)", !!up && up.color !== down?.color, `오름=${up?.color} 내림=${down?.color}`);
+  rec("🔴 A-5① 폰 폭(400)을 안 넘는다", v.rows.every((r) => r.right <= v.vw), `가장 오른쪽=${Math.max(...v.rows.map((r) => r.right))} / ${v.vw}`);
+  rec("A-5① 페이지 오류 0", errors.length === 0, errors.join(" | ") || "0");
+  await page.close();
+}
+/* 🔴 A-5① 거짓 양성 짝 — 서버가 `trend` 를 안 주면 칸이 아예 없다(지어내지 않는다) */
+{
+  const { page } = await open("/app/revenue.html?mock=1&trend=none");
+  const n = await page.evaluate(() => document.querySelectorAll(".trend").length);
+  rec("🔴 A-5① 서버가 추세를 안 주면 칸이 **없다**(AC-9)", n === 0, `추세 칸=${n}개`);
+  await page.close();
+}
+
 /* ── 말투 ── */
 {
   const { page } = await open("/app/pieces.html?mock=1");
