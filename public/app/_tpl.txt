@@ -2343,8 +2343,40 @@ await UI.boot("home");
 const TAB = { generating: ["generating", "draft", "failed"], in_review: ["in_review"], scheduled: ["approved", "scheduled", "publishing", "awaiting_manual"], published: ["published"] };
 const STAGES = [["writing", "글 쓰는 중"], ["images", "사진 만드는 중"], ["checking", "검사 중"]];
 let tab = UI.qs.get("tab") || null, all = [], timer = null, runnerOn = null;
+/* 🔴 [2026-09-16] «제자리에 머무는 증상» — 글이 «만드는 중»에 갇혀도 이 화면은 5초마다 **같은 막대를 다시 그리기만** 했다.
+   라이브 실물: piece 25·40·42 가 `stage:writing` 인 채 **3,299분(≈55시간)** · `created_at == updated_at`(배경 함수가 한 번도 못 건드렸다).
+   영상은 `video-sweep`(20분)이 주워 가는데 **글을 줍는 크론은 0개**다 — 그래서 사용자가 빠져나갈 길은 지금 이 버튼 하나뿐이다(§9-3 «되돌릴 길을 함께 준다»).
+   20 = 서버 `pieces-regenerate` 가 재점화를 허락하는 바로 그 기준(netlify/functions/pieces.ts · 같은 ref라 **코인 재차감 0**).
+   🔴 여기서 더 짧게 말하면 **눌러도 아무 일이 안 일어난다** — 두 수는 같이 움직여야 한다. */
+const STUCK_MIN = 20;
+const stuckMin = (p) => { const t = Date.parse(p.createdAt || ""); return t ? Math.floor((Date.now() - t) / 60000) : 0; };
+/* 🔴 [하니스 S2 가 여기서 빨갛게 섰다] «다시 시작»을 눌러도 안내가 **그대로 남았다** — `createdAt` 은 재점화해도 **안 움직이기 때문**이다
+   (서버는 `updated_at` 으로 재는데 `pieces-list` 응답엔 그 칸이 없다). 그대로 뒀으면 고친 화면이 «눌렀는데 제자리»라는
+   **같은 증상을 한 겹 더** 만들었다. ⇒ 목록이 못 주는 그 시각을 **우리가 건 시각으로 대신 기억한다**(서버와 같은 20분).
+   20분이 지나도 여전히 «만드는 중»이면 안내는 **정직하게 돌아온다** — 숨기는 게 아니라 기다려 주는 것이다. */
+const RESTART_KEY = "acPieceRestart";
+const restarts = (() => { try { return JSON.parse(localStorage.getItem(RESTART_KEY) || "{}"); } catch { return {}; } })();
+const saveRestarts = () => { try { localStorage.setItem(RESTART_KEY, JSON.stringify(restarts)); } catch { /* empty */ } };
+const markRestart = (id) => { restarts[id] = Date.now(); saveRestarts(); };
+const pruneRestarts = () => { let dirty = false;   // 20분 지난 기억은 버린다(안 버리면 이 칸이 영영 자란다)
+  for (const k of Object.keys(restarts)) if (Date.now() - restarts[k] > STUCK_MIN * 60000) { delete restarts[k]; dirty = true; }
+  if (dirty) saveRestarts(); };
+// 영상은 서버가 스스로 다시 건다(video-sweep · chainResume 표시도 이미 있다) — 버튼은 아무도 안 줍는 «글»에만 단다.
+const isStuck = (p) => p.kind !== "video" && p.status === "generating"
+  && !(restarts[p.id] && Date.now() - restarts[p.id] < STUCK_MIN * 60000)
+  && stuckMin(p) >= STUCK_MIN;
+/* §9-1 또렷하게 · §3 겁주지 않기 — ①무엇이(몇 분째 어느 단계) ②왜(멈춘 것 같다) ③어떻게(다시 시작 · 코인 0).
+   아직 «실패»가 아니므로 «실패»·«오류»로 부르지 않고, «알려만 드려요»로 발을 빼지도 않는다. */
+function stuckNote(p) {
+  const label = (STAGES.find(([k]) => k === p.stage) || ["", "글 쓰는 중"])[1];
+  return `<div data-stuck="${p.id}" style="margin:0 16px 12px 66px;padding:12px 14px;background:var(--warn-soft);border-radius:12px;display:flex;align-items:center;gap:12px">`
+    + `<div style="flex:1;min-width:0"><b style="display:block;font-size:14px;color:var(--warn-ink)">${stuckMin(p)}분째 «${label}»이에요</b>`
+    + `<span style="display:block;margin-top:2px;font-size:12.5px;color:var(--warn-ink)">만들다 멈춘 것 같아요. 다시 시작하면 처음부터 만들어요 · 코인은 더 안 들어요.</span></div>`
+    + `<button class="btn sm secondary" type="button" data-restart="${p.id}">다시 시작</button></div>`;
+}
 function stepBar(p) { const i = p.stage === "failed" ? -1 : Math.max(0, STAGES.findIndex(([k]) => k === p.stage)); const done = p.stage === "done";
-  return `<div class="steps" style="padding:0 16px 12px 66px">${STAGES.map(([k, l], n) => `<div class="st ${done || n < i ? "done" : n === i ? "on" : ""}"><i>${done || n < i ? "✓" : n + 1}</i>${l}</div>`).join("")}</div>`; }
+  return `<div class="steps" style="padding:0 16px 12px 66px">${STAGES.map(([k, l], n) => `<div class="st ${done || n < i ? "done" : n === i ? "on" : ""}"><i>${done || n < i ? "✓" : n + 1}</i>${l}</div>`).join("")}</div>`
+    + (isStuck(p) ? stuckNote(p) : ""); }
 /* [P1R5] 영상 스텝 6(§3 pieces.html · meta.stage → 대본→목소리→장면→합성→검사→완료) · 합성 = 내 PC 프로그램이 굽는다 · 러너 꺼짐이면 «켜 주세요» 칩 */
 function videoBar(p) { const m = p.meta || {}; const stage = m.stage || "script"; const i = UI.VSTAGE.findIndex(([k]) => k === stage); const cs = m.chainStage || {};
   const extra = (k) => k === "clips" && stage === "clips" && cs.cutsTotal ? ` <small class="muted" style="font-weight:500">${cs.cutsDone ?? 0}/${cs.cutsTotal}</small>` : k === "render" && stage === "render" ? (runnerOn === false ? ` <span class="pill warn" style="margin-left:4px">내 PC 프로그램을 켜 주세요</span>` : ` <small class="muted" style="font-weight:500">내 PC 프로그램이 굽는 중</small>`) : "";
@@ -2363,10 +2395,22 @@ function render() {
   const busy = all.some((p) => p.status === "generating" || p.status === "draft");
   if (busy && !timer) timer = setInterval(load, 5000); if (!busy && timer) { clearInterval(timer); timer = null; }
 }
-async function load() { const r = await UI.api("/api/pieces-list?status=all"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } all = r.pieces;
+async function load() { pruneRestarts(); const r = await UI.api("/api/pieces-list?status=all"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } all = r.pieces;
   if (all.some((p) => p.kind === "video" && p.status === "generating")) { const d = await UI.api("/api/runner-list"); if (d.ok) runnerOn = (d.devices || []).some((x) => x.status === "online" && x.caps?.ffmpeg !== false); } // 합성 단계 칩(러너 꺼짐 · ffmpeg 없음)
   render(); }
 UI.$$("#seg button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; render(); });
+/* 멈춘 글 다시 시작 — 목록은 매 폴링마다 다시 그려지므로 **위임으로 한 번만** 건다(행은 `<a>` 이고 이 버튼은 그 밖에 있어 링크를 가로채지 않는다). */
+UI.$("#list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-restart]"); if (!b) return;
+  b.disabled = true;
+  const r = await UI.api("/api/pieces-regenerate", { body: { id: Number(b.dataset.restart) } });
+  if (!r.ok) { b.disabled = false; if (!r.gated) UI.toast(r.error || "다시 시작하지 못했어요"); return; }
+  /* 🔴 서버는 **202 로만** «정말 다시 걸었다»를 말한다 — 20분이 안 됐으면 200 이고 **아무 일도 일어나지 않는다**.
+     둘을 같은 토스트로 덮으면 «다시 시작했어요»라고 해 놓고 화면은 그대로인 «제자리»가 한 겹 더 생긴다(AC-9 — 못 한 것을 했다고 말하지 않는다). */
+  if (r.status === 202) markRestart(Number(b.dataset.restart));   // 우리가 건 시각 — 이 뒤 20분은 안내를 쉬게 한다(위 주석)
+  UI.toast(r.status === 202 ? "다시 시작했어요 · 잠시만 기다려 주세요" : "아직 만드는 중이에요 · 조금만 더 기다려 주세요");
+  await load();
+});
 UI.pullToRefresh(load);   /* [R8 §6.1] «봐주세요»가 올라오는 화면 — 당겨서 확인하는 자리 */
 await load();
 === piece.html | home | 검수 ===
@@ -2456,7 +2500,17 @@ function renderWhy(videoOnly) {
   /* [메인 지적 2026-09-16 · 서버는 내는데 화면이 안 그리던 셋]
      · styleApplied {id,name,lines,from:"piece"|"account"} — **왜 이 스타일인가** · styleUnused {id, why} — 못 입은 까닭(서버 문장 · «지운 스타일이라 스타일 없이 썼어요»는 말해 줘야 하는 것 · §9)
      · crossSimilarity {measured, score, compared, against{pieceId,accountId}} — 게이트 칩 옆 **상세**. measured:false 는 «못 쟀어요»(0점 아님 · AC-9) */
-  if (!videoOnly && m.styleName) h += kv("스타일", String(m.styleName), m.styleApplied && m.styleApplied.from === "piece" ? "이 글만 따로 고른 스타일이에요" : m.styleApplied && m.styleApplied.from === "account" ? "이 계정에 걸어 둔 기본 스타일이에요" : "레퍼런스에서 배운 모양으로 썼어요");
+  /* 🔴 [R12 · B r11-back] `from` 에 **세 번째 값 `"learned"`** 가 생겼고(되먹임이 고른 스타일) `why` 한 문장이 같이 온다.
+     ⇒ **서버 문장이 있으면 그걸 쓴다**(AC-52 · 화면이 같은 말을 두 벌로 짓지 않는다). 없을 때만 우리 문장으로 떨어진다.
+     두 갈래(piece·account)만 알던 종전 코드는 `learned` 를 else 로 흘려 «레퍼런스에서 배운»이라고 뭉뚱그렸다 — 서버가 왜인지 말해 주는데 그걸 버리는 셈이었다. */
+  if (!videoOnly && m.styleName) {
+    const sa = m.styleApplied || {};
+    const say = sa.why ? String(sa.why)
+      : sa.from === "piece" ? "이 글만 따로 고른 스타일이에요"
+      : sa.from === "account" ? "이 계정에 걸어 둔 기본 스타일이에요"
+      : "레퍼런스에서 배운 모양으로 썼어요";
+    h += kv("스타일", String(m.styleName), say);
+  }
   else if (!videoOnly && m.styleUnused && m.styleUnused.why) h += kv("스타일", "안 입고 썼어요", String(m.styleUnused.why));
   if (!videoOnly && m.crossSimilarity && typeof m.crossSimilarity === "object") { const x = m.crossSimilarity;
     h += kv("다른 내 계정 글과", x.measured === false ? "못 쟀어요" : `${Math.round(Number(x.score || 0) * 100)}% 닮음`, x.measured === false ? (x.reason ? String(x.reason) : "견줄 다른 계정 글이 아직 없어요") : `내 다른 계정 글 ${UI.num(x.compared || 0)}편과 견줬어요${x.against && x.against.pieceId ? ` · 가장 닮은 글 #${UI.num(x.against.pieceId)}` : ""}`); }
@@ -2741,6 +2795,22 @@ function render() {
     else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     else cta.hidden = true;
     return; }
+  /* 🔴 [2026-09-16 · «제자리»] 아직 만들어지는 중인 글은 아래 미리보기가 **빈 종이**다(제목도 본문도 없다) —
+     종전엔 그 빈 종이만 남고 **아무 말이 없었다**. 갇힌 글은 그 상태로 55시간을 버텼다(piece 25·40·42 실물 · pieces.html 주석).
+     위 영상 가지와 같은 처치 — 무엇을 기다리는지 말하고, 되돌릴 길(«만드는 중» 목록의 «다시 시작»)로 보낸다(§9-3). */
+  if (P.status === "generating") {
+    const mins = Math.floor((Date.now() - (Date.parse(P.createdAt || "") || Date.now())) / 60000);
+    /* 🔴 목록 화면이 «우리가 다시 건 시각»을 이 칸(`acPieceRestart`)에 적어 둔다 — **같은 칸을 읽어야 두 화면이 같은 말**을 한다.
+       목록에선 안내가 쉬는데 상세에선 «3299분째»라고 하면 그것이 또 한 겹의 «제자리»다. 20 = 서버 `pieces-regenerate` 기준(세 수는 같이 움직인다). */
+    let restartedAgo = null;
+    try { const t = JSON.parse(localStorage.getItem("acPieceRestart") || "{}")[P.id]; if (t) restartedAgo = (Date.now() - t) / 60000; } catch { /* empty */ }
+    const stuck = mins >= 20 && !(restartedAgo !== null && restartedAgo < 20);
+    const vp = UI.$("#vpane"); vp.hidden = false;
+    vp.innerHTML = `<div class="group"><div class="empty"><h3>${stuck ? `${mins}분째 만드는 중이에요` : "만드는 중이에요"}</h3>`
+      + `<p>${stuck ? "만들다 멈춘 것 같아요. 목록에서 다시 시작하면 처음부터 만들어요 · 코인은 더 안 들어요." : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p>`
+      + `<a class="btn ${stuck ? "primary" : "secondary"} sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`;
+    pv.hidden = true; UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return;
+  }
   UI.$("#vpane").hidden = true;
   pv.hidden = false; pv.className = `preview ${P.channel}`;
   const ttl = UI.$("#ttl"); ttl.textContent = P.title || ""; ttl.contentEditable = editable ? "true" : "false";
