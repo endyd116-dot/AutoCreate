@@ -30,9 +30,22 @@ for (const f of files) {
   const s = readFileSync(f, "utf8");
   for (const [asset, v] of Object.entries(want)) {
     if (!v) continue;
-    const re = new RegExp(asset.replace(".", "\.") + "\?v=(\d+)", "g");
-    let m;
-    while ((m = re.exec(s))) if (m[1] !== v) bad.push({ f, asset, got: m[1], want: v });
+    /* 🔴 [2026-09-16 메인 수리] 옛 판은 `new RegExp(asset.replace(".", "\.") + "\?v=(\d+)")` 였는데,
+       **자바스크립트 문자열 리터럴이 역슬래시를 먹어** 실제 정규식이 `ac.css?v=(d+)` 가 됐다.
+       `?` 가 앞 글자를 «있어도 없어도»로 만들고 `(d+)` 는 글자 d 를 찾으니 **어떤 파일과도 안 맞는다.**
+       🔴 **이 검사는 태어난 날부터 늘 초록이었고 아무것도 안 잡았다** — 아침에 난 바로 그 사고를
+       막으려고 만든 자인데 말이다(AC-87 «빨강을 낼 수 있는 검사라는 것까지가 증거» · AC-100).
+       ⇒ **정규식을 아예 안 쓴다.** 글자로 잘라서 숫자만 읽는다 — 역슬래시가 낄 자리가 없다. */
+    const needle = asset + "?v=";
+    let at = 0;
+    for (;;) {
+      const k = s.indexOf(needle, at);
+      if (k < 0) break;
+      at = k + needle.length;
+      let d = "";
+      while (at < s.length && s[at] >= "0" && s[at] <= "9") { d += s[at]; at++; }
+      if (d && d !== v) bad.push({ f, asset, got: d, want: v });
+    }
   }
 }
 console.log(`\n🔎 화면이 부르는 CSS·JS 판 — 파일 ${files.length}개 · 정본 ${Object.entries(want).map(([k, v]) => `${k} v${v}`).join(" · ")}\n`);
