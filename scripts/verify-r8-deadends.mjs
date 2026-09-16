@@ -424,6 +424,17 @@ for (const [label, needle, owner0, harm, needApp] of SURFACES) {
   const locks = [...pieceHtml.matchAll(/grade\s*===\s*"P0"\s*\?\s*"disabled"/g)].length;
   rec("🔴 화면에 남은 하드 게이트 — 심사 P0 로 «이대로 예약»을 잠그지 않는다", locks === 0,
     locks ? `piece.html 이 ${locks}곳에서 단추를 잠근다 ⇒ 서버는 막지 않는데 화면만 막는다(§9 가 내린 바로 그 게이트다)` : "잠그는 자리 0곳 — 판정은 그대로 두고 단추만 열려 있다");
+
+  /* 🔴 [R11-7 · C 2026-09-17 · B 지적] **«읽나»만 재면 «읽되 막는 데 쓰면»이 안 잡힌다.**
+     SURFACES 의 «화면이 `crowd` 를 말해 주나» 는 화면이 그 키를 **읽기만** 하면 초록이다. 그런데 `crowd` 는
+     🔴 **막는 값이 아니다** — 그 키로 «그래도 이 시각» 단추를 잠그면 **§9 를 정면으로 어긴다**(설계 §4.3 «막지 않는다 · 되돌릴 길을 같이»).
+     ⇒ 같은 줄에서 `crowd`·`겹` 와 `disabled` 가 만나는 자리를 센다. **지금은 0곳**(화면이 아직 안 읽는다) — 화면이 생기는 날 이 줄이 지킨다. */
+  const NEAR_LOCK = /(crowd|겹쳐|겹침)[^\n]{0,80}disabled|disabled[^\n]{0,80}(crowd|겹쳐|겹침)/g;
+  const crowdLocks = [...CODE].filter(([p]) => /^public\/(app|ops)\//.test(p))
+    .flatMap(([p, c]) => [...String(c).matchAll(NEAR_LOCK)].map(() => p));
+  rec("🔴 «이날 겹쳐요»로 단추를 잠그지 않는다(§9 — 막지 않기로 한 값이다)", crowdLocks.length === 0,
+    crowdLocks.length ? `🔴 ${[...new Set(crowdLocks)].join(" · ")} 가 겹침으로 단추를 잠근다 ⇒ 서버는 안 막는데 화면만 막는다`
+      : "잠그는 자리 0곳 (화면이 아직 `crowd` 를 안 읽는다 — 읽기 시작하면 이 줄이 지킨다)");
 }
 
 /* ═══ 짝 검사: 옛 상수가 아직 살아 있나 — 새 정본을 만들었는데 옛 값이 그대로면 «하나가 썩는다»(AC-64) ═══ */
