@@ -11,6 +11,15 @@
  *        «아무것도 안 돈다»일 수 있다.
  *     ② **변이를 심은 자리 수를 센다.** 0곳이면 «못 심음»(검사가 아니라 내 치환이 틀린 것) ·
  *        2곳 이상이면 **하니스 고장**(한 변이가 여러 축을 동시에 흔들어 무엇이 잡혔는지 모른다).
+ *     ④ 🔴 **«빨개졌다»로 끝내지 않고 «무엇이 잡았나»를 찍는다**(2026-09-17 · B 가 물어서 세운 것).
+ *        변이가 **이름이 딴판인 축**에만 걸렸다면 그건 «의도»가 아니라 **우연한 덮개**다 —
+ *        그리고 우연한 덮개는 **그 축이 바뀌는 날 같이 사라진다**(그때 이 변이는 조용히 안 잡히게 된다).
+ *        🔴 사람이 읽고 판단할 자리다. 자동으로 못 가른다.
+ *        ⓘ 2026-09-17 읽은 결과: **13개 전부 «이름이 맞는 축»이 잡는다.**
+ *          `eof_action=pass` 변이만 무회귀 축 셋이 **같이** 걸리는데(기댓값에 `repeat` 이 박혀 있으니 당연하다),
+ *          ⑦ 축(«어느 갈래에도 `eof_action=pass` 가 없다»)도 **함께** 잡고 있어 우연한 덮개가 아니다.
+ *        ⓘ 그리고 «확인기가 창 길이를 안 본다» 는 **진짜 구멍이었다** — 축을 더하기 전 판(`29b544af`)으로
+ *          그 변이를 돌려 보니 **종료코드 0**(아무도 안 잡았다). «의도로 바꾸기»가 아니라 «구멍 메우기»가 맞다.
  *     ③ **«주석 걷은 본문»에서 센다.** 같은 글자가 주석에 있으면 치환이 주석을 고치고 본문은 멀쩡하다
  *        (2026-09-17 B2 창에서 같은 병이 네 번 났다).
  */
@@ -42,7 +51,13 @@ function runHarness(src) {
   writeFileSync(HARNESS_MUT, harness.split("../runner/channels/render-video.mjs").join("../runner/channels/.mutant-render-video.mjs"), "utf8");
   try {
     const r = spawnSync(process.execPath, [HARNESS_MUT], { encoding: "utf8", cwd: ROOT, timeout: 120_000 });
-    return r.status;
+    /* 🔴 **«빨개졌다»로 끝내지 않는다 — «무엇이 잡았나»를 돌려준다**(2026-09-17 · B 가 물어서 세운 것).
+       변이가 **이름이 다른 축**에만 걸렸다면 그건 «의도»가 아니라 **우연한 덮개**다.
+       우연한 덮개는 **그 축이 바뀌는 날 같이 사라진다** — 그때 이 변이는 조용히 안 잡히게 된다. */
+    const caught = String(r.stdout || "").split(String.fromCharCode(10))
+      .filter((l) => l.includes("✗"))
+      .map((l) => l.split("✗")[1].split(" — ")[0].trim().slice(0, 60));
+    return { status: r.status, caught };
   } finally {
     try { rmSync(MUT, { force: true }); } catch { /* */ }
     try { rmSync(HARNESS_MUT, { force: true }); } catch { /* */ }
@@ -63,6 +78,7 @@ const MUTANTS = [
   { name: "오버레이를 `eof_action=pass` 로 되돌린다", from: "eof_action=repeat", to: "eof_action=pass", want: 1, why: "⑦ 오버레이가 정말 얹히나 — 🔴 단일 프레임은 t=0 에 EOF 라 pass 면 자막·고지가 통째로 사라진다" },
   { name: "확인기 날 프레임 갈래를 없앤다(x264 를 태운다)", from: "if (ctx.rawProbe) {", to: "if (false) {", want: 1, why: "⑧ 확인기 — 🔴 인코딩을 태우면 율 제어가 달라 늘 «그려졌다»가 된다" },
   { name: "확인기가 고지 말고 아무 층이나 고른다", from: 'for (const r of ["disclosure", "badge"]) { const i = byRole(r); if (i >= 0) return i; }', to: "", want: 1, why: "⑧ 법이 읽는 것부터" },
+  { name: "확인기가 창 길이를 안 본다", from: "return L.length ? L.findIndex((x) => x && (x.endMs - x.startMs) >= 200) : -1;", to: "return L.length ? 0 : -1;", want: 1, why: "⑧ 🔴 «못 잰다» 조건에 입력이 둘이면 대조군이 있어야 한다(B 규칙)" },
   { name: "영상 조각을 안 늘린다(tpad 제거)", from: "ext > 0 && s.isClip", to: "false", want: 1, why: "② 전체 길이 불변" },
 ];
 
@@ -74,7 +90,7 @@ for (const [i, m] of MUTANTS.entries()) {
     planted = codeOnly(original).split(m.from).length - 1;
     src = original.split(m.from).join(m.to);
   }
-  const status = runHarness(src);
+  const { status, caught } = runHarness(src);
   const red = status !== 0;
 
   if (i === 0) {
@@ -88,7 +104,11 @@ for (const [i, m] of MUTANTS.entries()) {
     continue;
   }
   if (!red) { bad++; console.log(`  ✗ ${m.name} — 망가뜨렸는데 **초록이다**(${m.why} 축이 안 돈다)`); }
-  else console.log(`  ✓ ${m.name} → 빨강 (${m.why})`);
+  else {
+    /* 🔴 잡은 축 이름을 **같이 찍는다**. 이름이 이 변이와 딴판이면 «우연한 덮개»를 의심해야 한다 — 사람이 읽고 판단할 자리다. */
+    console.log(`  ✓ ${m.name} → 빨강 (${m.why})`);
+    console.log(`      잡은 축 ${caught.length}개: ${caught.join(" / ") || "(이름을 못 읽음)"}`);
+  }
 }
 
 console.log(`\n${bad === 0 ? "초록" : "빨강"} — 변이 ${MUTANTS.length - 1}개 중 놓친 것 ${bad}`);
