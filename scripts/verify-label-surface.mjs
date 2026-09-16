@@ -316,8 +316,8 @@ rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.s
    왜: 2026-09-15 디렉터가 «1 + 사진 수»로 네이버를 7코인이라 적었다. R10 등급제로 그 셈을 걷어 냈는데(값 = 서버 coinCost · 합계 = director-estimate),
    누가 «미리보기용»으로 되살리면 그날부터 견적과 실제가 갈린다. 생성물(public/app/director.html)의 주석 걷은 본문에서 옛 셈 꼴을 찾는다. */
 {
-  const dir = read("public/app/director.html").replace(//*[sS]*?*//g, " ");
-  const OLD = [["UI.COIN.blog +", /UI.COIN.blogs*+/], ["1 + UI.stepVal(", /1s*+s*UI.stepVal(/], ["+ (aiCount - 1)", /Math.max(0,s*(p.images?.aiCount/]];
+  const dir = read("public/app/director.html").replace(/\/\*[\s\S]*?\*\//g, " ");
+  const OLD = [["UI.COIN.blog +", /UI\.COIN\.blog\s*\+/], ["1 + UI.stepVal(", /\b1\s*\+\s*UI\.stepVal\(/], ["+ (aiCount - 1)", /Math\.max\(0,\s*\(p\.images\?\.aiCount/]];
   const bad = OLD.filter(([, re]) => re.test(dir)).map(([n]) => n);
   rec("🔴 ⑧-e 디렉터 화면이 글 코인을 다시 세지 않는다(서버 coinCost·estimate 만)", bad.length === 0, bad.length ? `옛 셈이 살아 있다: ${bad.join(" · ")}` : "옛 셈 0곳");
 }
