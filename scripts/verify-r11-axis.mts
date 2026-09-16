@@ -29,6 +29,7 @@ import { applyMarkBudget, stripUnsupportedMarks, countMarks } from "../lib/forma
 import type { StatBucket } from "../lib/outcomes";
 import { breadcrumbJsonLd, publisherOf, jsonLdScript, isOurWidget, widgetBlockHtml, ensureLatestPostsWidget, WP_WIDGET_INSTANCE } from "../lib/publish/wp-advanced";
 import type { PublishPiece } from "../lib/publish/contract";
+import { disclosureVerdict } from "../lib/video/judge";
 
 /** 🔴 `renderBlocksHtml` 은 본문에 **광고 자리**를 끼워 넣는다(`insertAdSlots`) — 꾸밈을 견주는 자리에선 그걸 떼고 본다.
  *  ⚠️ 이 줄도 «원판 줄을 먼저 찍어» 알았다: 첫 판은 광고 자리를 안 떼서 **멀쩡한 코드가 빨갛게** 나왔다(AC-100 ⑦). */
@@ -53,6 +54,26 @@ eq("원판 · 카드뉴스 → cardnews", ruleKindOfPiece("post", "cardnews"), "
 /* 🔴 대조군 — «영상인데 format 이 cardnews» 면 **영상이 이긴다**(순서를 뒤집으면 여기가 빨개진다). */
 eq("대조군 · 영상 + cardnews → shorts(영상이 이긴다)", ruleKindOfPiece("video", "cardnews"), "shorts");
 eq("대조군 · 모르는 값 → post", ruleKindOfPiece(null, undefined), "post");
+
+/* ══ 🔴 **C 가 실측으로 잡아 준 구멍**(2026-09-17) — 여기가 이 격자의 값이다 ══
+   내 첫 판은 «`pieces.kind` 는 `post|video` 둘뿐»이라는 전제로 `format === "cardnews"` 만 봤다. **전제가 틀렸다**:
+     · `lib/director.ts:694` 가 넣는 값은 **세 개** — `isVideo ? "video" : isCard ? "cardnews" : "post"`
+     · `isCard` 는 **채널**에서 온다(`isCardnewsChannel`) — format 이 아니다
+     · 인스타 카드뉴스 계약의 `formats` 는 **다섯**(`writing-contracts.ts:343`)
+   ⇒ 인스타 카드뉴스 글의 format 은 **5번 중 4번** `cardnews` 가 아니고, 그때 배지가 **빈칸**이었다.
+
+   ⚠️ 🔴 **왜 내 자가 못 잡았나** — 격자에 `format === "cardnews"` 경로**만** 있었다(AC-99 ⑨).
+      «잡아야 할 것»이 표본에 없으면 그 검사의 무력화는 **영영 안 보인다.** 그래서 **실제 계약의 다섯 format 을 전부** 넣는다.
+      🔴 이 목록을 **계약에서 읽어 오지 않고 손으로 적은** 까닭: 계약이 줄어도 이 격자는 «다섯이던 시절»을 계속 재야 한다
+         (옛 글이 그 format 을 들고 DB 에 남아 있다). 계약을 따라가면 표본이 계약과 함께 사라진다. */
+for (const f of ["cardnews", "steps", "listicle", "compare", "qna"]) {
+  eq(`🔴 인스타 카드뉴스 · kind=cardnews · format=${f} → cardnews`, ruleKindOfPiece("cardnews", f), "cardnews");
+}
+/* 🔴 대조군 짝 — `kind` 가 카드뉴스가 **아닌데** 같은 format 이면 **cardnews 로 안 샌다**(`||` 를 `&&` 로 좁히면 여기가 아니라 위가 빨개지고, 반대로 넓히면 여기가 빨개진다). */
+for (const f of ["steps", "listicle", "compare", "qna"]) {
+  eq(`🔴 대조군 · kind=post · format=${f} → post(카드뉴스로 안 샌다)`, ruleKindOfPiece("post", f), "post");
+}
+eq("🔴 옛 글 호환 · kind=post · format=cardnews → cardnews", ruleKindOfPiece("post", "cardnews"), "cardnews");
 
 /* ─ R11-10 축 ─ */
 eq("원판 · 네이버 블로그 = 글 축", axisOfChannel("naver_blog"), "text");
@@ -311,6 +332,76 @@ console.log("\n══ ⑫ 워드프레스 위젯 — 🔴 «없는 길»과 «�
     return { status: 200, json: [{ id: "sidebar-1", widgets: [] }] };
   });
   ok("🔴 대조군 · 비어 있으면 꽂는다", fresh.ok && !(fresh as { already: boolean }).already && posted2 === 1, `${JSON.stringify(fresh)} posted=${posted2}`);
+}
+
+console.log("\n══ ⑬ 고지 축 — 🔴 «pending 이 뜨나»가 아니라 «**안 떠야 할 때 안 뜨나**»(B2 지적 2026-09-17) ══");
+{
+  const OK = { ok: true };
+  const BAD = { ok: false, detail: "고지 누락(제휴): 우상단 배지" };
+
+  /* 🔴 **여기가 대조군의 심장이다** — 고지가 필요 없는 글에 «못 쟀어요»가 뜨면 그건 소음이다.
+     `needDisclosure` 를 무시하고 `overlayVerified !== true` 만 보면 **전 영상이 pending** 이 되고, 그래도 «pending 이 뜨나» 검사는 초록이다. */
+  for (const ov of [undefined, true, false] as const) {
+    const v = disclosureVerdict(OK, false, ov);
+    ok(`🔴 대조군 · 고지 불필요 + overlayVerified=${String(ov)} → pending 안 뜬다`, !v.pending, JSON.stringify(v));
+  }
+  ok("🔴 대조군 · 고지 불필요면 detail 도 없다(조용하다)", disclosureVerdict(OK, false, undefined).detail === undefined);
+
+  /* 표 그대로 — 고지가 필요한 글. */
+  const seen = disclosureVerdict(OK, true, true);
+  ok("고지 필요 + 쟀고 실렸다 → 통과 · pending 아님", seen.pass && !seen.pending && seen.detail === undefined, JSON.stringify(seen));
+  const unseen = disclosureVerdict(OK, true, undefined);
+  ok("🔴 고지 필요 + 못 쟀다 → pending(막지는 않는다 · pass 그대로)", unseen.pass && unseen.pending, JSON.stringify(unseen));
+  ok("«못 쟀다»를 문장으로 말한다", !!unseen.detail && unseen.detail.includes("못 쟀다"), unseen.detail ?? "");
+  const absent = disclosureVerdict(OK, true, false);
+  ok("🔴 재 봤고 안 실렸다 → **실패**(보류가 아니다)", !absent.pass && !absent.pending, JSON.stringify(absent));
+  ok("«안 실렸다»를 문장으로 말한다", !!absent.detail && absent.detail.includes("안 실렸다"), absent.detail ?? "");
+
+  /* 계획 자체가 모자라면 이미 실패다 — 보류를 덧씌우지 않는다(`pendingIf` 와 같은 규율). */
+  const planBad = disclosureVerdict(BAD, true, undefined);
+  ok("🔴 계획이 모자라면 실패이지 보류가 아니다", !planBad.pass && !planBad.pending, JSON.stringify(planBad));
+  eq("🔴 그때 문장은 **계획 쪽 사유**를 그대로 쓴다(덮지 않는다)", planBad.detail, BAD.detail);
+
+  /* 🔴 그리고 «막지 않는다»(CLAUDE §9) — pending 은 pass 다. 여기가 뒤집히면 고객 영상이 멈춘다. */
+  ok("🔴 pending 은 pass 다(막지 않는다)", disclosureVerdict(OK, true, undefined).pass === true);
+}
+
+console.log("\n══ ⑭ 🔴 «조건의 입력이 둘 이상인 갈래»를 전수로 — 내 규칙을 내 코드에 댄다(B2 되돌려 줌) ══");
+{
+  /* B2 가 내 규칙(«pending 조건에 입력이 둘 이상이면 대조군») 으로 자기 쪽 `pickVerifyLayer` 를 잡았다.
+     그래서 이번 라운드에 내가 만든 «빼는/안 하는» 갈래 중 **입력이 둘 이상인 것**을 전수로 훑었다. 둘이 나왔다(`buildByAxis` · `crowdOf`).
+
+     🔴 **그런데 재 보니 둘 다 이미 잡히고 있었다 — 내 첫 짐작이 틀렸다.**
+        처음 이 블록을 쓸 때 «옛 축들은 전부 초록이었다»고 적었는데, **확인하니 아니었다**:
+          · `&&` → `||` 변이 → 옛 자 **exit 1**(«그 밖 0원이면 줄 없음» 축이 잡았다)
+          · `nearestMin` 0 폴백 변이 → 옛 자 **exit 1**(«다른 채널 1분 뒤는 안 센다» 축이 잡았다)
+        ⇒ 짐작을 지우고 **잰 것만 남긴다**(이번 라운드 내내 고친 그 병이다 · B2 의 «관찰과 해석을 갈라 적어라»).
+
+     🔴 그래도 아래 축은 남긴다. 까닭이 다르다:
+        두 변이를 잡은 것은 **다른 것을 재던 축이 우연히 걸린 것**이다(«그 밖 0원» 축은 `other` 줄을 보러 만든 것이고,
+        «다른 채널» 축은 채널 가르기를 보러 만든 것이다). **우연한 덮개는 그 축이 바뀌는 날 함께 사라진다.**
+        ⇒ 「안 가진 축인데 돈이 있다」와 「이웃이 0명이다」를 **이름 붙여 직접** 잰다. 덮개를 **의도**로 바꾸는 일이다. */
+
+  /* ── ⓐ `buildByAxis`: `if (!ownedAxes.includes(a) && sum[a] === 0) continue` — 입력 **둘**(가졌나 × 0원인가) ──
+     여기가 틀어지면 **안 가진 축의 돈이 통째로 사라진다**(합계 ≠ 내역 → 고객은 «없어진 돈»을 본다). 그 뜻을 이름 붙여 직접 잰다. */
+  const gone = buildByAxis([{ channel: "reels", krw: 700 }], ["text"]);
+  eq("🔴 안 가진 축인데 돈이 있으면 그 줄도 낸다(계정을 지운 뒤)", gone.map((x) => [x.axis, x.krw]), [["text", 0], ["video", 700]]);
+  ok("🔴 합계 보존 — 내역 합이 원장 합과 같다", gone.reduce((a, b) => a + b.krw, 0) === 700, String(gone.reduce((a, b) => a + b.krw, 0)));
+  /* 대조군의 짝 — 안 가졌고 돈도 없으면 **그 줄은 없어야** 한다(둘 다 내면 «영상에서 0원»이 소음이 된다). */
+  eq("🔴 대조군 · 안 가졌고 돈도 없으면 줄 없음", buildByAxis([{ channel: "naver_blog", krw: 100 }], ["text"]).map((x) => x.axis), ["text"]);
+
+  /* ── ⓑ `crowdOf`: `tight = nearestMin !== undefined && nearestMin < gap` — 입력 **둘**(이웃이 있나 × 가까운가) ──
+     `nearestMin` 을 0 으로 메우는 폴백이 생기는 순간 **이웃이 없는 자리에 «0분 안에 붙어요»**가 뜬다(«모른다»를 «값»으로 · AC-92). */
+  const alone = crowdOf({ atMs: Date.UTC(2026, 8, 17, 1, 0), accountId: 7, handle: "cook_a", others: [], channel: "naver_blog", gapMin: 30 });
+  ok("🔴 이웃이 0명이면 nearestMin 키가 아예 없다(0분으로 메우지 않는다)", alone.nearestMin === undefined, JSON.stringify(alone));
+  ok("🔴 이웃이 0명이면 붙는다고 말하지 않는다", !alone.tight && alone.say === "", JSON.stringify(alone));
+  /* 대조군의 짝 — 같은 계정 같은 날은 있는데 **채널 이웃은 없는** 자리: «이날 N편»만 말하고 «붙어요»는 안 말한다. */
+  const sameDayOnly = crowdOf({
+    atMs: Date.UTC(2026, 8, 17, 1, 0), accountId: 7, handle: "cook_a",
+    others: [{ accountId: 7, channel: "tistory", atMs: Date.UTC(2026, 8, 17, 4, 0) }], channel: "naver_blog", gapMin: 30,
+  });
+  ok("🔴 같은 날 있지만 같은 채널 이웃은 없다 → «이날 1편»만, «붙어요»는 없다",
+    sameDayOnly.say.includes("이날") && !sameDayOnly.say.includes("붙어요") && !sameDayOnly.tight, sameDayOnly.say);
 }
 
 console.log(`\n${fail ? "FAIL" : "PASS"} ${pass} · FAIL ${fail}`);

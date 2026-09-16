@@ -68,22 +68,35 @@ export function toRuleKind(v: unknown): RuleKind {
   return x === "shorts" ? "shorts" : x === "cardnews" ? "cardnews" : "post";
 }
 /**
- * [R11-1 · B · 2026-09-17] 🔴 **글 하나의 «종류»를 화면 어휘(`RuleKind`)로 옮긴다** — 설계 R11 §1.2·§3.2.
- *   왜 필요한가: DB 의 `pieces.kind` 는 **`post`·`video` 둘뿐**이고(만드는 길이 3단계냐 6단계냐), 화면 배지표(`UI.KIND_PILL`)가 아는 말은
- *   편성표와 같은 **셋**(`post`·`shorts`·`cardnews`)이다. 그래서 «만든 것» 목록은 `UI.kindPill("video")` 를 불러 **늘 빈 문자열**을 받았다 —
- *   **영상도 카드뉴스도 이름표가 한 번도 안 붙었고**, 카드뉴스는 인스타 마크라 피드 글과 구별이 안 됐다.
+ * [R11-1 · B · 2026-09-17 · 🔴 **C 가 실측으로 고쳐 준 판** 2026-09-17] **글 하나의 «종류»를 화면 어휘(`RuleKind`)로 옮긴다** — 설계 R11 §1.2·§3.2.
+ *   왜 필요한가: 화면 배지표(`UI.KIND_PILL`)가 아는 말은 편성표와 같은 **셋**(`post`·`shorts`·`cardnews`)인데
+ *   «만든 것» 목록은 `UI.kindPill(p.kind)` 에 DB 값을 그대로 넣어 **영상도 카드뉴스도 이름표가 한 번도 안 붙었다.**
  *
- *   🔴 **DB 값은 안 건드린다**(`pieces.kind` 는 그대로 `post|video`). **보여 줄 말**만 여기 한 곳에서 정한다.
- *   🔴 **다섯 번째 «kind» 이름을 만들지 않는다**(AC-75) — `RuleKind` 를 **그대로** 쓴다. 편성표가 이미 그 말을 하고 배지표도 그 말을 안다.
- *   🔴 «가운데»는 여기다 — 읽는 쪽은 `netlify/functions/pieces.ts pieceRow` 의 `ruleKind` 칸 하나이고,
- *      화면(A)은 목록 배지 · 종류 칩 · 빈 상태 문장 셋이 **같은 칸**을 읽는다(A 와 글자 합의 2026-09-17).
- *   판정: `kind === "video"` → `shorts` · `format === "cardnews"` → `cardnews` · 나머지 → `post`.
- *   ⚠️ 영상이 먼저다 — 영상 piece 의 `format` 은 계약 골격(`story`·`qna`·`info`)이라 카드뉴스와 겹치지 않지만,
- *      순서를 뒤집으면 언젠가 «cardnews 라는 이름의 영상 골격»이 생기는 날 조용히 틀린다.
+ *   ══ 🔴 `pieces.kind` 는 **셋**이다 — 둘이 아니다 ══
+ *     내 첫 판은 «`kind` 는 `post|video` 둘뿐»이라는 전제로 `format === "cardnews"` 만 봤다. **그 전제가 틀렸다.**
+ *     `lib/director.ts:694` 가 실제로 넣는 값은 **`isVideo ? "video" : isCard ? "cardnews" : "post"`** 이고,
+ *     `isCard` 는 **채널**에서 온다(`isCardnewsChannel(s.channel)` · `director.ts:676`) — **format 이 아니다.**
+ *     그런데 인스타 카드뉴스 계약의 `formats` 는 **다섯**이다(`writing-contracts.ts:343`
+ *     `["cardnews", "steps", "listicle", "compare", "qna"]` — 골격이 늘 같던 것을 R8 이 다섯으로 늘렸다).
+ *     ⇒ 🔴 **인스타 카드뉴스 글의 format 은 5번 중 4번이 `cardnews` 가 아니다.** 내 첫 판은 그때 `post` 로 떨어졌고,
+ *        **배지가 그대로 빈칸**이었다 — 설계 §1.2 가 «지금 틀린 것»이라고 부른 **바로 그 상태를 고치지 못했다.**
+ *
+ *   ══ 🔴 어느 쪽이 정본인가 — **`kind` 다** ══
+ *     `kind` 는 만드는 자리(디렉터)가 **채널을 보고** 박은 값이라 «이 글이 무엇인가»의 답이다.
+ *     `format === "cardnews"` 는 **옛 글 호환**으로 남긴다 — `kind` 에 `cardnews` 가 들어가기 전에 만들어진 글이 있다.
+ *     둘이 어긋나면 `kind` 가 이긴다(그래서 순서가 이렇다).
+ *
+ *   🔴 **DB 값은 안 건드린다.** **보여 줄 말**만 여기 한 곳에서 정한다. **다섯 번째 «kind» 이름을 만들지 않는다**(AC-75).
+ *   🔴 «가운데»는 여기다 — 읽는 쪽은 `netlify/functions/pieces.ts pieceRow` 의 `ruleKind` 칸 하나다.
+ *
+ *   ⚠️ 🔴 **왜 내 자가 못 잡았나**(AC-99 ⑨ · C 지적): `verify-r11-axis.mts` 격자에 **`format === "cardnews"` 경로만** 있었다.
+ *      «잡아야 할 것»이 표본에 없으면 그 검사의 무력화는 **영영 안 보인다.** 이제 실제 다섯 format 을 전부 격자에 넣었다.
  */
 export function ruleKindOfPiece(kind: unknown, format: unknown): RuleKind {
-  if (String(kind ?? "") === "video") return "shorts";
-  if (String(format ?? "") === "cardnews") return "cardnews";
+  const k = String(kind ?? "");
+  if (k === "video") return "shorts";
+  /* 🔴 `kind` 가 먼저다(정본) · `format` 은 옛 글 호환. 순서를 뒤집으면 둘이 어긋날 때 화면이 틀린 말을 한다. */
+  if (k === "cardnews" || String(format ?? "") === "cardnews") return "cardnews";
   return "post";
 }
 export interface Rule { id: number; channel: string; kind: RuleKind; accountMode: "auto" | "fixed"; accountId?: number; every: "day" | "week" | "month"; count: number; weekdays?: number[]; preferredHour?: number; preferredMinute?: number; formatHint?: string; active: boolean }
