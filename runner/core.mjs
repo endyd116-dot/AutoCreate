@@ -29,6 +29,8 @@ import * as renderVideo from "./channels/render-video.mjs";
 import * as naverClip from "./channels/naver-clip.mjs";
 // [R10-1 · 설계 §3.1] 글 레퍼런스 캡처 — 고객이 손으로 넣은 주소를 러너가 열고 **폰 폭으로** 찍는다.
 import * as referenceCapture from "./channels/reference-capture.mjs";
+// [R12-6 · 설계 §7] 당근 비즈프로필 «새소식» — 🔴 세션 쿠키만(SMS 인증이라 아이디·비번이 없다) · 서식 0 · 수익 없음.
+import * as daangn from "./channels/daangn.mjs";
 
 /** 시각은 저장 UTC · 사람에게 보이는 것은 KST(DESIGN §13.5). 콘솔·파일명은 사람이 보는 것이므로 KST. */
 export const kst = (d = new Date()) =>
@@ -55,6 +57,8 @@ const HANDLERS = {
   // P1R5 §2.2·§2.3
   "render.video": renderVideo,
   "publish.naver_clip": naverClip,
+  // R12-6 — 당근 새소식(B 레지스트리의 `jobKind` 와 **같은 글자**여야 한다 · 2026-09-17 B 확인)
+  "publish.daangn": daangn,
   // R10-1 — 레퍼런스 캡처(계정 프로필·프록시 그대로 · 공개된 글만 · 🔴 캡처는 디스크에 안 쓰고 보고 뒤 사라진다)
   "reference.capture": referenceCapture,
 };
