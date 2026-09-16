@@ -98,7 +98,7 @@ function s33() {
     `위 80px → ${badgeBad?.pass} · 규격대로 → ${badgeOk?.pass}`);
 
   const corner = axisOf(payload({ channel: "reels", ...SAFE_ZONE_OF.reels, badge: true }));
-  const wrongCorner = judgePayloadDeterministic({ ...payload({ channel: "reels", ...SAFE_ZONE_OF.reels, badge: true }), overlay: { ...payload({ channel: "reels", ...SAFE_ZONE_OF.reels, badge: true }).overlay, badge: { text: "광고 포함", corner: "bl" } } } as RenderPayload, {}, null, "보증금 지키는 법").axes.find((a) => a.key === "safe_area");
+  const wrongCorner = judgePayloadDeterministic({ ...payload({ channel: "reels", ...SAFE_ZONE_OF.reels, badge: true }), overlay: { ...payload({ channel: "reels", ...SAFE_ZONE_OF.reels, badge: true }).overlay, badge: { text: "광고 포함", corner: "bl" } } } as unknown as RenderPayload, {}, null, "보증금 지키는 법").axes.find((a) => a.key === "safe_area");
   out("§3.3 배지 코너가 tr 이 아니면 빨강", corner?.pass === true && wrongCorner?.pass === false, `tr ${corner?.pass} · bl ${wrongCorner?.pass}`);
 
   /* 🔴 러너 CSS 에서 배지가 실제로 안전영역 **안쪽**에 놓이는가(종전 `safe.top - 140` 은 바깥이었다). */
