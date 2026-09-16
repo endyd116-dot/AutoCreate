@@ -1138,6 +1138,21 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       /* [R7 §4.3 · B3] note = 서버가 그 자리에 적어 둔 사람말(있을 때만) · revenueKrw = 30일 수익(수집 행이 없으면 키 자체가 없다) */
       for (const s of list) { const seed = S.slotNotes && S.slotNotes[s.id]; if (seed) s.note = seed;
         if (s.status === "published" && s.pieceId) s.revenueKrw = (s.pieceId * 137) % 9000 + 800; }
+      /* [R11 A-5② · B r11-back] `crowd` — 🔴 **겹치는 게 없으면 키가 아예 없다**(있으면 그릴 것이 있다는 뜻).
+         문장(`say`)은 서버 정본. 🔴 **막는 값이 아니다** — 화면이 이걸로 단추를 잠그면 안 된다. ?crowd=0 으로 끌 수 있다. */
+      if (qs.get("crowd") !== "0") {
+        const byDayAcc = new Map();
+        for (const s of list) { if (!s.accountHandle || s.status === "skipped") continue; const k = s.date + "|" + s.accountHandle; byDayAcc.set(k, (byDayAcc.get(k) || 0) + 1); }
+        for (const s of list) {
+          if (!s.accountHandle || s.status === "skipped") continue;
+          const n = byDayAcc.get(s.date + "|" + s.accountHandle) || 0; if (n < 2) continue;
+          const near = list.filter((x) => x !== s && x.accountHandle === s.accountHandle && x.publishAt && s.publishAt)
+            .map((x) => Math.abs(new Date(x.publishAt).getTime() - new Date(s.publishAt).getTime()) / 60000).sort((a, b) => a - b)[0];
+          const tight = near != null && near < 30;
+          s.crowd = { sameAccountSameDay: n, ...(near != null ? { nearestMin: Math.round(near) } : {}), tight,
+            say: `이날 @${s.accountHandle} 에 이미 ${n - 1}편 있어요${tight ? " · 30분 안에 붙어요" : ""}` };
+        }
+      }
       /* [R8-B] 🔴 «언제 만들어지나» + 그 자리의 코인 — 서버 lib/slots.ts 가 싣는 그 자리다(`done` 이면 코인은 안 싣는다).
          화면은 이 값만 읽고 **스스로 다시 재지 않는다**(AC-47). */
       for (const s of list) { const pw = produceWindowOf(s); if (!pw) continue;
@@ -1156,8 +1171,13 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (!b.at) return err("at", "시각을 골라 주세요.");
       if (["published", "publishing", "skipped"].includes(s.status)) return err("stage", "이미 나간 편성은 시각을 바꿀 수 없어요.");
       const at = new Date(b.at).getTime();
-      const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < 30 * 60e3);
-      if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. 30분 이상 떨어뜨려 주세요.`);
+      /* 🔴 [R11 A-5② · B 확인] 서버는 이 자리를 **아직 막는다**(409 `step:"cadence"`) — 그러니 모의도 막는 게 맞다.
+         모의가 통과시키면 화면을 «되는 줄 알고» 만들게 된다(그게 더 나쁜 거짓말이다).
+         ⚠️ 다만 서버 간격은 **30분 고정이 아니다** — `gapMinFor().floorMin` 이라 전용 IP 가 실측된 계정끼리는 **5분**까지 받는다
+         (사장님의 «10:00 / 10:05» 가 그 경우다). 모의는 그 정책 상태를 모르므로 `?gap=5` 로 바꿔 끼울 수 있게 뒀다. */
+      const gapMin = Math.max(1, Number(qs.get("gap")) || 30);
+      const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < gapMin * 60e3);
+      if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. ${gapMin}분 이상 떨어뜨려 주세요.`);
       s.publishAt = b.at; s.date = new Date(at + 9 * 3600e3).toISOString().slice(0, 10); return { ok: true, slot: { ...s } }; },
     "slots-produce-now": (b) => { const nw = notWritable(); if (nw) return nw; tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
       if (!s.topicTitle) return err("no_topic", "먼저 소재를 정해 주세요.");

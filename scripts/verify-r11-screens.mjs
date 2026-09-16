@@ -231,6 +231,68 @@ const axisRead = (page) => page.evaluate(() => {
   await page.close();
 }
 
+/* ── A-5② «이날 겹쳐요» ── */
+const openSlot = async (page) => {
+  await page.waitForSelector("#feed .row[data-id], #day .row[data-id]", { timeout: 8000 }).catch(() => {});
+  const ids = await page.evaluate(() => [...document.querySelectorAll("#feed .row[data-id], #day .row[data-id]")].map((r) => r.dataset.id));
+  for (const id of ids) {
+    await page.click(`[data-id="${id}"]`).catch(() => {});
+    await page.waitForTimeout(350);
+    const has = await page.evaluate(() => !!document.querySelector(".sheet .banner"));
+    const info = await page.evaluate(() => (document.querySelector(".sheet")?.innerText || "").replace(/\s+/g, " "));
+    if (/이날 @/.test(info)) return { id, info };
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(200);
+    void has;
+  }
+  return null;
+};
+{
+  const { page, errors } = await open("/app/schedule.html?mock=1");
+  const hit = await openSlot(page);
+  rec("A-5② 슬롯 시트에 «이날 겹쳐요»가 서버 문장으로 뜬다", !!hit, hit ? `«${(hit.info.match(/이날 @[^·]*(· [^ ]*분 안에 붙어요)?/) || [""])[0]}»` : "🔴 어느 자리에도 안 떴다");
+  if (hit) {
+    const v = await page.evaluate(() => {
+      const b = document.querySelector(".sheet .banner");
+      return { cls: b?.className || "", red: b ? getComputedStyle(b).backgroundColor : "", helps: document.querySelectorAll(".sheet .field .help").length };
+    });
+    rec("🔴 A-5② 오류 칸(.help · 늘 빨강)이 아니라 안내 배너다", v.helps === 0 && /banner/.test(v.cls), `class=«${v.cls}» help=${v.helps}개`);
+  }
+  await page.close();
+  void errors;
+}
+/* «시각 바꾸기» 시트 — 🔴 막지 않는다(단추가 살아 있다) */
+{
+  const { page } = await open("/app/schedule.html?mock=1");
+  const hit = await openSlot(page);
+  let v = null;
+  if (hit) {
+    await page.evaluate(() => { const b = [...document.querySelectorAll(".sheet button, .sheet .row")].find((x) => /시각 바꾸기|시각을 바꾸/.test(x.textContent || "")); if (b) b.click(); });
+    await page.waitForTimeout(400);
+    /* 🔴 배너는 **여럿**이다(슬롯 메모·러너 상태·겹침…) — 첫 것만 읽으면 엉뚱한 줄을 재고 빨개진다(첫 판이 그랬다). 전부 읽고 고른다. */
+    v = await page.evaluate(() => { const ok = document.querySelector("#ok"); const bs = [...document.querySelectorAll(".sheet .banner")].map((b) => (b.textContent || "").trim());
+      return ok ? { label: (ok.textContent || "").trim(), disabled: ok.disabled, banner: bs.find((t) => /이날 @/.test(t)) || bs.join(" | ") } : null; });
+  }
+  rec("A-5② «시각 바꾸기» 시트에도 겹침을 말한다", !!v && /이날 @/.test(v.banner), v ? `«${v.banner}»` : "🔴 시트를 못 열었다");
+  rec("🔴 A-5② 단추를 **비활성화하지 않는다**(§9 — 막지 않는다)", !!v && v.disabled === false, v ? `단추=«${v.label}» disabled=${v.disabled}` : "");
+  /* 🔴 `tight` 면 «그래도 이 시각»이라 **쓰면 안 된다** — 서버가 그 자리를 409 로 거절한다(B 확인).
+     «된다고 해 놓고 안 된다»가 막는 것보다 나쁘다. 그래서 자는 **tight 를 보고 기대를 바꾼다**. */
+  const tight = await page.evaluate(() => { const b = [...document.querySelectorAll(".sheet .banner")].map((x) => x.textContent || ""); return b.some((t) => /안에 붙어요/.test(t)); }).catch(() => false);
+  rec(`A-5② 단추 이름이 ${tight ? "중립(«이 시각으로») — tight 면 «그래도»라 말하지 않는다" : "«그래도 이 시각»이다"}`,
+    !!v && v.label === (tight ? "이 시각으로" : "그래도 이 시각"), `tight=${tight} 단추=«${v?.label}»`);
+  await page.close();
+}
+/* 🔴 A-5② 거짓 양성 짝 — 겹치는 게 없으면 배너도 «그래도»도 없다 */
+{
+  const { page } = await open("/app/schedule.html?mock=1&crowd=0");
+  await page.waitForSelector("#feed .row[data-id], #day .row[data-id]", { timeout: 8000 }).catch(() => {});
+  await page.click("#feed .row[data-id], #day .row[data-id]").catch(() => {});
+  await page.waitForTimeout(400);
+  const t = await page.evaluate(() => (document.querySelector(".sheet")?.innerText || "").replace(/\s+/g, " "));
+  rec("🔴 A-5② 겹치는 게 없으면 «이날 …»이 안 뜬다(키가 없으면 안 그린다)", !/이날 @/.test(t), `«${t.slice(0, 70)}»`);
+  await page.close();
+}
+
 /* ── 말투 ── */
 {
   const { page } = await open("/app/pieces.html?mock=1");
