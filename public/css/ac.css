@@ -115,6 +115,7 @@ input,textarea,select{font:inherit;color:inherit}
 /* [P1R8 §3.4] 다음 Phase 채널 — 색이 없으면 마크가 «칠 안 된 네모»로 뜬다(다른 마크와 나란히 두면 고장으로 보인다). */
 .mk.facebook,.mk.facebook_reels{background:#1877F2} .mk.x{background:#000} .mk.youtube_long{background:var(--y)}
 .mk.brunch{background:#00C6BE;font-size:11px} .mk.naver_clip_post{background:var(--c)}
+.mk.daangn{background:#FF6F0F} /* [R12-6] 당근 — 🔴 이 한 줄이 없으면 `.mk` 의 `color:#fff` 만 남아 **흰 글자가 배경 없이 사라진다**(이름표만 넣으면 하니스는 초록인데 화면은 빈칸) */
 /* 🔴 [R8 · 대비] `.mk.warn` 만 혼자 **채움색**(--warn)을 글자로 쓰고 있었다 — 연노랑 바탕 위 1.8:1 이라 사실상 안 보인다.
    money·danger 는 이미 `-ink` 짝을 쓰고 있었으니 warn 도 같은 줄을 선다(5.17:1). 셋이 같은 규칙을 따라야 다음에 또 갈라지지 않는다. */
 .mk.soft{background:var(--brand-soft);color:var(--ink)} .mk.money{background:var(--money-soft);color:var(--money-ink)} .mk.warn{background:var(--warn-soft);color:var(--warn-ink)} .mk.danger{background:var(--danger-soft);color:var(--danger-ink)}
