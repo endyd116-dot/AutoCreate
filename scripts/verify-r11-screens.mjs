@@ -161,7 +161,9 @@ const RAW = /\b(ruleKind|shorts|cardnews|post)\b/;
 
 /* ── A-4 수익 «어디서 났나» ── */
 const axisRead = (page) => page.evaluate(() => {
-  const g = [...document.querySelectorAll(".group")].find((x) => (x.querySelector(".gt")?.textContent || "").trim().startsWith("어디서 났나"));
+  /* 🔴 **제목 앞 글자로 그룹을 고르지 않는다**(AC-100 ⑩) — 한때 «어디서 났나»와 «어디서»가 나란히 있어 이 자가 엉뚱한 걸 쟀다.
+     이름은 바뀔 수 있고 접두사는 겹칠 수 있다 ⇒ **그 그룹이 무엇을 담고 있나**로 고른다: 축 그룹은 `.bar` 를 담는다. */
+  const g = [...document.querySelectorAll(".group")].find((x) => x.querySelector(".bars .bar") && /어디서 났나/.test(x.querySelector(".gt")?.textContent || ""));
   if (!g) return null;
   const bars = [...g.querySelectorAll(".bar")].map((b) => ({
     name: (b.querySelector(".n")?.textContent || "").replace("ⓘ", "").trim(),

@@ -1007,7 +1007,9 @@ const trendCell = (t) => (t && t.say)
 /* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */
 function sourceGroup() {
   const list = SUM.bySource || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
+  /* 🔴 [R11 · 메인 결정] 제목이 «어디서»였다 — A-4 가 «**어디서 났나**»(축)를 바로 위에 세우면서 **나란한 두 그룹이 둘 다 «어디서»로 시작**했다.
+     자도 앞 글자로 고르다 엉뚱한 그룹을 쟀고(고쳤다), **고객도 똑같이 헷갈린다.** ⇒ «매체별»로 — 축 vs 매체가 한눈에 갈린다. */
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">매체별 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
