@@ -56,14 +56,6 @@ export interface RefStyleApplied {
   };
   /** 영상 전체 길이(초) — 고객이 고른 값이 **있으면 고객 것이 이긴다**(§9 핸들은 고객에게). */
   totalSec?: number;
-  /**
-   * [R12-3 · 2026-09-17] 🔴 **말 속도**(보통 대비 배수 0.5~2.0). R10 은 **저장까지**였고 R12 가 **반영**한다.
-   *   쓰는 곳 둘: ① `lib/video/script.ts budgetFor` — **대본을 그만큼 짧게**(B) ② TTS `audio_tempo`(B2).
-   *   🔴 판정·클램프는 `lib/video/tempo.ts` 한 곳이다 — **실제로 넘기는 값은 `effectiveTempo(이 값)`** 이지 이 값 자체가 아니다
-   *      (우리 보통 속도가 1.0 이 아니라 `TYPECAST_DEFAULT_TEMPO` 1.1 이라서다). 여기엔 **배운 원값**만 담는다.
-   *   🔴 **1.0 이면 오늘과 한 프레임도 다르지 않다**(무회귀 · 계약 §5).
-   */
-  audioTempo?: number;
 }
 /** 못 넘긴 칸 — **이름과 이유**를 같이 남긴다(AC-9). */
 export interface RefUnused { field: string; why: string }
@@ -168,14 +160,12 @@ export function applyReferenceStyle(style: TemplateStyle | null | undefined): Re
     unused.push({ field: "secPerCut", why: `컷 길이는 나레이션 길이가 정해서 «${s.speed?.secPerCut}초마다»를 그대로 못 넣는다 — 빠르기(fast/normal/hold)로만 받았다 · R11` });
   }
 
-  /* 말 속도 — [R12-3 · 2026-09-17] 🔴 **이제 넘긴다.** R10 이 «저장까지»로 두고 여기에 «아직 반영 안 함»을 적어 뒀던 자리다.
-     🔴 R10 이 미뤘던 까닭(«속도를 바꾸면 자막 시각·컷 창·전체 길이가 같이 움직인다»)은 **없어진 게 아니라 풀린 것**이다 —
-        ① 대본을 그 비율만큼 **짧게** 쓰고(`script.ts budgetFor` · B) ② 그래도 규격을 넘으면 **속도를 포기하고 1.0 으로 굽고 «못 냈어요»로 적는다**(B2 `checkTempoFitsSpec`).
-     🔴 **범위 밖이면 안 넘긴다** — `lib/video/reference.ts` 가 이미 0.5~2.0 으로 받지만, 여기서도 한 번 더 본다(두 문을 다 지나야 산다).
-        못 넘긴 것은 조용히 버리지 않고 `unused` 에 남긴다(AC-9). */
-  { const t = Number(s.audioTempo);
-    if (Number.isFinite(t) && t >= 0.5 && t <= 2.0) applied.audioTempo = t;
-    else if (Number.isFinite(t)) unused.push({ field: "audioTempo", why: `말 속도 ${t}배는 우리가 낼 수 있는 폭(0.5~2.0) 밖이라 보통 속도로 만들어요` }); }
+  /* 🟠 말 속도 — 🔴 **이번 라운드는 저장까지만**(트리거 B2-6). 손잡이(`tts-typecast.ts` 0.5~2.0)는 있지만
+     넘기는 것은 **새 규칙**이다: 나레이션 길이가 바뀌면 **자막 시각·컷 창·전체 길이가 전부 따라 움직인다.**
+     ⇒ 배워서 저장하고 여기 «아직 반영 안 함»으로 남긴다. 조용히 버리면 다음 사람이 처음부터 다시 잰다(AC-9). */
+  if (Number.isFinite(Number(s.audioTempo))) {
+    unused.push({ field: "audioTempo", why: `말 속도 ${s.audioTempo}배를 배웠지만 아직 안 넣는다 — 속도를 바꾸면 자막 시각·컷 창·전체 길이가 같이 움직여서 따로 잡아야 한다 · R11` });
+  }
 
   /* 🔴 **색 가짓수**는 못 받는다 — 우리 팔레트는 «색 이름 한 줄»이고 «몇 개»를 강제하는 자리가 없다. */
   if (Number.isFinite(Number(s.design?.colorCount))) {

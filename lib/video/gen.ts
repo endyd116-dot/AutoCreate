@@ -117,7 +117,10 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
       await stamp(pieceId, "script");
       /* [R12-3 · 설계 R12 §4.2] 🔴 **배운 말 속도만큼 대본을 짧게 쓴다.** 안 배웠으면 정확히 1 이라 종전과 한 글자도 안 다르다(무회귀).
          🔴 규격 초과 판정·«못 냈어요» 문장은 **B2 가 실제 음성을 재서** 적는다(`checkTempoFitsSpec` → `meta.refUnused`) — 여기서 두 벌 쓰지 않는다. */
-      const syllableRatio = syllableRatioOf(refStyle?.audioTempo);
+      /* 🔴 `audioTempo` 칸의 **주인은 B2**(`lib/video/reference-apply.ts` · 2026-09-17 AC-101 로 정했다 — 그 파일엔 `captionMotion`·`transition`·`minCutMs` 가 같이 산다).
+         내 나무엔 아직 그 칸 선언이 없어서 **«있으면 읽는다»**로 받는다. B2 판이 머지되면 타입에 선다.
+         🔴 안 오면 `syllableRatioOf` 가 **정확히 1** 을 내므로 대본이 종전과 한 글자도 안 달라진다(무회귀 · 계약 §5). */
+      const syllableRatio = syllableRatioOf((refStyle as { audioTempo?: unknown } | null)?.audioTempo);
       const r = await buildVideoScript({ syllableRatio, tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
       if (!r.ok) return await failPiece(tid, pieceId, r.reason, slotId);
       let s = r.script; let drafts = r.drafts;
