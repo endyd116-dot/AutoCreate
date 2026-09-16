@@ -68,7 +68,10 @@ const SCENES = [
     need: ["올라간 뒤 확인한 꾸밈", "다음 문단까지 이어진 문단이 12%", "끊지 못한 곳이 1곳", "글자 모양(“ ” · ———)으로 대신", "못 쟀어요", "견줄 다른 계정 글이 아직 없어서", "안 입고 썼어요", "스타일 없이 썼어요"], forbid: ["번짐", "bleed", "breakFails", "htmlMode"] },
   { key: "piece-settle", url: q("/app/piece.html?id=501&settle=1"), wait: "#why:not([hidden])", need: ["프리미엄", "1코인", "2코인은 돌려드렸어요", "내 사진으로 채워서"], forbid: ["3코인"] },
   { key: "piece-unknown-caps", url: q("/app/piece.html?id=502"), wait: "#fmtunused:not([hidden])", need: ["올려 봐야 아는 꾸밈", "올려 봐야 알아요", "핵심 강조", "나열 강조"], forbid: ["못 낸 꾸밈"] },
-  { key: "create", url: q("/app/create.html"), wait: "#refPost:not([hidden])", need: ["글 레퍼런스로 스타일 배우기", "코인 0"], forbid: [] },
+  /* [R11 A-3] 🔴 이 자가 **옛 이름표를 기다리고 있었다** — «배워 올 곳»을 제 그룹으로 세우며 줄 이름을 바꿨다(트리거 A-3).
+     자와 화면이 어긋나면 «어느 쪽이 정본인가»부터 정한다(AC-101): **트리거가 정본**이고 이 자는 A 것이라 내가 같이 고친다.
+     그룹 제목과 영상 줄도 need 에 넣는다 — 이름만 바꾸면 «그룹이 생겼나»는 여전히 아무도 안 본다. */
+  { key: "create", url: q("/app/create.html"), wait: "#refPost:not([hidden])", need: ["배워 올 곳", "글 스타일 배우기", "영상 스타일 배우기", "코인 0"], forbid: ["하루 3개"] },
   { key: "create-sheet", url: q("/app/create.html"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rfList .stylerow" }],
     need: ["잘 된 글 주소", "이번 달 2/30개", "숫자와 목록", "남의 문장은 한 줄도 저장하지 않아요", "배운 스타일", "살림 블로그 스타일", "정리형 리뷰", "1.8배", "주소로 못 열면"], forbid: ["summary", "captionRate"], sheet: true,
     actions2: [{ click: "#rfList [data-open]" }, { wait: "#rfList [data-body]:not([hidden])" }], need2: ["문단 2~3줄", "이모지 ✅📌💡 를 문단 첫머리에", "밑줄 5곳", "사진 7장", "뼈대 · 첫 줄 → 소제목 → 문단", "기본에서 풀기", "지우기"] },

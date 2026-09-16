@@ -31,6 +31,8 @@
   /* 🔴 [2026-09-16 · «제자리»] ?stuck=1 — 글 507 이 «글 쓰는 중»에 갇힌 집(배경 함수가 손도 못 댄 상태 · `_t0` 없음 = 시계가 안 간다).
      라이브 실물의 모양 그대로다(piece 25·40·42 · `created_at == updated_at` 인 채 3,299분). 이 손잡이가 없으면 **막힌 화면을 눈으로 볼 방법이 없다**. */
   const stuckKnob = qs.get("stuck") === "1";
+  /* [R11 A-3] ?noQuota=1 — 서버가 «남음»을 못 싣는 집(옛 배포·집계 실패). 🔴 화면이 숫자를 **지어내는지** 보는 자리다(AC-9·AC-92). */
+  const noQuota = qs.get("noQuota") === "1";
   /* [R8-A §2 · B-1 d6c2359] `topicGroup`·`goal`·`contract` 를 서버가 준다(pieces-get).
      값은 서버 어휘 그대로(TopicGroup·RevenueGoal). */
   const clipPiece = qs.get("clip") === "1";    // [R8 §3.2] 509 를 네이버 클립 영상으로(우리가 못 올리는 채널 — 넘겨주는 길이 보이게)
@@ -425,6 +427,9 @@
         learned: { paragraph: { lines: [4, 5], chars: 110 }, emoji: { use: false }, emphasis: { kinds: ["bold"], perPost: 3, on: ["conclusion"] }, photos: { count: 3, where: "top" }, blocks: { list: 1, table: 1, quote: 0, divider: 0 }, tone: { haeyo: 0.1, hamnida: 0.9, question: 0.05 }, title: { hasNumber: false, chars: 18 }, structure: ["summary", "h2", "table", "para", "h2", "para", "faq"] } },
     ],
     styleRefs: {}, styleQuota: { used: refKnob === "quota" ? 30 : 2, limit: 30 },
+    /* [R11 A-3 · B r11-back] 영상 «배워 올 곳» 한도 — 🔴 단위가 «하루 3개»에서 **«이번 달 N개»**로 바뀌었다(글 쪽과 같은 모양).
+       서버 계약: `GET /api/topics-templates` → `{ templates, quota: { used, limit, left, resetAt } }`. */
+    tplQuota: { used: refKnob === "quota" ? 10 : 1, limit: 10 },
     /* [P1R6] 추천인 · 세금계산서 프로필 · 관리형 러너 신청 · 내보내기 작업 */
     referral: { code: "AC7K2M9Q", invited: fresh ? [] : [{ tenantName: "요리하는 집", at: iso(now - 9 * 86400e3), rewarded: true }, { tenantName: "팁스고", at: iso(now - 2 * 86400e3), rewarded: false }], rewardCoins: 20 },
     taxProfile: fresh ? null : { bizNo: "220-88-12345", bizName: "다온커머스", email: "tax@daon.co.kr" },
@@ -1012,7 +1017,10 @@
       /* 되먹임 원장(§5F)의 첫 실사용 — 🔴 표본이 적으면 measured:false + «아직 몰라요»(AC-9 · 지어내지 않는다) */
       const recommend = recNone || !styles.length ? { measured: false, styleId: null, line: "아직 이 계정 글이 몇 편 안 돼서 어느 스타일이 잘 되는지는 몰라요. 30편쯤 쌓이면 말씀드릴게요." }
         : { measured: true, styleId: styles[0].id, line: "«" + styles[0].name + "»로 쓴 글 6편이 다른 글보다 조회가 1.8배 높았어요." };
-      return { ok: true, styles, defaultStyleId: (acc && acc.defaultStyleId) || null, quota: { ...S.styleQuota, resetAt: kst(31 - Number(todayYmd.slice(8)), 0) }, recommend }; },
+      /* 🔴 `left` 는 **서버가 준다**(B 계약) — 화면이 `limit - used` 로 셈하면 두 벌이 된다(AC-52). 모의도 같은 칸을 싣는다. */
+      return { ok: true, styles, defaultStyleId: (acc && acc.defaultStyleId) || null, ...(noQuota ? {} : { quota: { ...S.styleQuota, left: Math.max(0, S.styleQuota.limit - S.styleQuota.used), resetAt: kst(31 - Number(todayYmd.slice(8)), 0) } }), recommend }; },
+    /* [R11 A-3] 영상 «배워 올 곳» — 글 쪽(`account-styles`)과 **같은 모양**의 `quota` 를 낸다. 한도 단위는 «이번 달». */
+    "topics-templates": () => ({ ok: true, templates: S.templates || [], ...(noQuota ? {} : { quota: { ...S.tplQuota, left: Math.max(0, S.tplQuota.limit - S.tplQuota.used), resetAt: kst(31 - Number(todayYmd.slice(8)), 0) } }) }),
     "account-style-default": (b) => { const a = S.accounts.find((x) => x.id === Number(b.accountId)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 }); a.defaultStyleId = b.styleId ? Number(b.styleId) : null; return { ok: true, defaultStyleId: a.defaultStyleId }; },
     "account-style-delete": (b) => { const id = Number(b.id); S.styles = S.styles.filter((s) => s.id !== id); for (const a of S.accounts) if (a.defaultStyleId === id) a.defaultStyleId = null; return { ok: true }; },
     "style-reference": (b, q) => {

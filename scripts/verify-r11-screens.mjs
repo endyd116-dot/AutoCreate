@@ -119,6 +119,46 @@ const RAW = /\b(ruleKind|shorts|cardnews|post)\b/;
   await page.close();
 }
 
+/* ── A-3 «배워 올 곳» ── */
+{
+  const { page, errors } = await open("/app/create.html?mock=1");
+  const v = await page.evaluate(() => {
+    const g = document.querySelector("#refg");
+    const rows = [...(g?.querySelectorAll(".row") || [])].filter((r) => !r.hidden).map((r) => (r.querySelector(".t")?.textContent || "").trim());
+    return { hidden: g?.hidden, title: (g?.querySelector(".gt")?.childNodes[0]?.textContent || "").trim(), quota: (g?.querySelector("#refq")?.textContent || "").trim(), rows, links: (g?.querySelectorAll(".gt a") || []).length, text: (g?.innerText || "").replace(/\s+/g, " ") };
+  });
+  rec("A-3 «배워 올 곳»이 제목을 가진 제 그룹이다(«네 번째 쓰는 길»이 아니다)", v.hidden === false && v.title === "배워 올 곳", `hidden=${v.hidden} 제목=«${v.title}»`);
+  rec("A-3 두 줄이 글 → 영상 차례로 있다", v.rows[0] === "글 스타일 배우기" && v.rows[1] === "영상 스타일 배우기", `줄=${v.rows.join(" · ")}`);
+  rec("A-3 한도가 제목 줄 우측에 **글자로** 있다(링크 아님)", /이번 달 .*남음/.test(v.quota) && v.links === 0, `«${v.quota}» 링크=${v.links}개`);
+  rec("🔴 A-3 단위가 «이번 달»로 통일됐다 — «하루 N개»가 안 남아 있다", !/하루 \d/.test(v.text), `«${v.text.slice(0, 90)}»`);
+  rec("A-3 페이지 오류 0", errors.length === 0, errors.join(" | ") || "0");
+  await page.close();
+}
+
+/* ── 🔴 A-3 거짓 양성 짝 — 축이 없으면 줄이 없고, 서버가 «남음»을 못 주면 숫자를 안 지어낸다 ── */
+{
+  const { page } = await open("/app/create.html?mock=1&oneCh=1");   // 네이버만 있는 집 = 영상 계정 0
+  const v = await page.evaluate(() => {
+    const g = document.querySelector("#refg");
+    const rows = [...(g?.querySelectorAll(".row") || [])].filter((r) => !r.hidden).map((r) => (r.querySelector(".t")?.textContent || "").trim());
+    return { rows, quota: (g?.querySelector("#refq")?.textContent || "").trim() };
+  });
+  rec("🔴 A-3 영상 계정이 없으면 «영상 스타일 배우기» 줄이 **없다**", !v.rows.includes("영상 스타일 배우기") && v.rows.includes("글 스타일 배우기"), `줄=${v.rows.join(" · ") || "없음"}`);
+  rec("A-3 한 축만 있으면 한도도 그 축 것만 말한다", /이번 달 \d+ \/ \d+ 남음/.test(v.quota) && !/영상/.test(v.quota), `«${v.quota}»`);
+  await page.close();
+}
+{
+  /* 🔴 서버가 `quota` 를 못 줄 때 — 숫자를 **지어내면 안 된다**(AC-9·AC-92).
+     🔴 화면 안 함수를 밖에서 부르지 않는다(IIFE 라 닿지도 않았다) — **모의 손잡이로 진짜 경로를 태워** 잰다. */
+  const { page } = await open("/app/create.html?mock=1&noQuota=1");
+  const v = await page.evaluate(() => ({
+    quota: (document.querySelector("#refq")?.textContent || "").trim(),
+    rows: [...document.querySelectorAll("#refg .row")].filter((r) => !r.hidden).length,
+  }));
+  rec("🔴 A-3 서버가 «남음»을 안 주면 **숫자를 빼고 이름만** 남는다(지어내지 않는다)", v.quota === "" && v.rows === 2, `한도=«${v.quota}» 줄=${v.rows}개`);
+  await page.close();
+}
+
 /* ── 말투 ── */
 {
   const { page } = await open("/app/pieces.html?mock=1");
