@@ -5,7 +5,10 @@
  *   🔎 출처: AC 신규(계약 P1R5-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 export type VideoFormat = "graphic" | "talking" | "clip";
-export type VideoSeconds = 15 | 30 | 60;
+/* [R12-7 · 2026-09-17] 🔴 **릴스 90초**(감사 A12). 여는 것은 이 한 줄이지만 **같이 움직여야 하는 것이 셋** 더 있다 —
+   채널 상한(`lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC.reels`) · 코인 값(`lib/coin-table.ts video_90`) · 심사 축(`lib/video/judge.ts duration_fit`).
+   🔴 따로 가면 «90초인데 값은 60초»가 되고, 그건 **우리가 손해 보는 쪽**이라 고객이 알려 주지 않아 더 늦게 들킨다. */
+export type VideoSeconds = 15 | 30 | 60 | 90;
 export type VideoChannel = "youtube_shorts" | "naver_clip" | "reels" | "threads";
 export type ProviderKey = "omni" | "veo_lite" | "veo_fast" | "veo" | "wan" | "hailuo" | "kling";
 export type ClipTier = "filler" | "standard" | "money";
@@ -40,7 +43,7 @@ export function safeZoneOf(channel: unknown): { top: number; bottom: number; sid
   return SAFE_ZONE_OF[String(channel) as VideoChannel] ?? SAFE_ZONE_FALLBACK;
 }
 export const VIDEO_FORMATS: readonly VideoFormat[] = ["graphic", "talking", "clip"];
-export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60];
+export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60, 90];
 export const VIDEO_STAGES: readonly VideoStage[] = ["script", "tts", "clips", "render", "judging", "done", "failed"];
 export function isVideoChannel(v: unknown): v is VideoChannel { return VIDEO_CHANNELS.has(String(v)); }
 export function isVideoFormat(v: unknown): v is VideoFormat { return VIDEO_FORMATS.includes(String(v) as VideoFormat); }

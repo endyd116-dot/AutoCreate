@@ -12,7 +12,7 @@
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireUser, requireWritable } from "../../lib/guards";
-import { gapMinFor } from "../../lib/publish-gap";
+import { gapMinFor, crowdOf } from "../../lib/publish-gap";   // [R11-7] «이날 겹쳐요» — 세는 것이지 거절하는 게 아니다(§9)
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
 import { utcDate } from "../../lib/db-util";
@@ -120,13 +120,25 @@ export default async (req: Request): Promise<Response> => {
         }
       }
 
+      /* ══ [R11-7 · 설계 R11 §4.3] 🔴 «이날 겹쳐요» — **여기가 고객이 시각을 고르는 자리**다 ══
+         막지 않기로 한 대신(CLAUDE §9) **무엇과 겹치는지 또렷하게 말해 준다.** 위 캐던스 문(409)은 «막는 것»이 아니라
+         **고객이 스스로 정한 바닥(floorMin)** 이라 그대로 두고(2026-09-15 게이트 감사 결정 · 유지), 그 바닥 **안쪽**의 겹침은 **세어서 말만 한다.**
+         🔴 성공 응답에도 싣는다 — «바뀌었어요» 다음 줄에 «이날 @cook_a 에 이미 2편 있어요»가 있어야 «되돌릴 길»이 산다.
+         🔴 문장은 `lib/publish-gap.ts crowdOf` 한 곳이 만든다(화면이 또 짓지 않는다 · AC-52). */
+      const crowd = crowdOf({
+        atMs: at.getTime(), accountId, handle: acc?.handle ? String(acc.handle) : null, channel: String(s.channel),
+        others: neighbours.map((x) => ({ accountId: x.account_id ? n(x.account_id) : null, channel: String(s.channel), atMs: utcDate(x.publish_at)?.getTime() ?? 0 }))
+          .filter((x) => x.atMs > 0),
+        gapMin: gapCh,
+      });
+
       const newDate = kstDateStr(at);
       const reviewDeadline = kstToUtc(newDate, 2, 0);   // D-0 02:00 KST — 검수창 마감(§5B.7)
       await q(sql`UPDATE slots SET publish_at = ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', slot_date = ${newDate}::date,
         review_deadline = ${reviewDeadline.toISOString()}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${slotId}`);
       if (s.piece_id) await q(sql`UPDATE pieces SET scheduled_for = ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(s.piece_id)}`);
       await writeAudit({ tenantId: tid, action: "slot_reschedule", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `slot:${slotId}`, detail: { from: utcDate(s.publish_at)?.toISOString() ?? null, to: at.toISOString() } });
-      return json({ ok: true, slot: await oneSlot(tid, slotId, newDate) });
+      return json({ ok: true, slot: await oneSlot(tid, slotId, newDate), ...(crowd.say ? { crowd } : {}) });
     }
 
     /* ───────── 지금 만들기 ───────── */

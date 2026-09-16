@@ -31,6 +31,8 @@ import { templateOf } from "./video/reference";          // [P1R5 §1.11] 레퍼
 import { applyReferenceStyle, applyRefPalette, type RefStyleApplied, type RefUnused } from "./video/reference-apply";   // [R8CLOSE · B2] 배워 온 것 중 **닿는 것만** 고른다
 import { guardSlot, OPEN_SLOT_STATUS, type PieceOrigin } from "./slot-gate";
 import { pickFormatByPrint, type FormatPick } from "./format-pick";
+/* [R12-10] 🔴 모은 성과를 **디렉터가 읽는다** — 시각·골격·스타일 셋. 계약은 안 덮고 **후보 순서만** 기울인다(lib/learn-tilt.ts 머리말). */
+import { learnedTiltFor, NO_TILT } from "./learn-tilt";
 import { targetChannelOrder } from "./director-goal";   // [R8CLOSE-B1 §B8] 목표 매체 → 채널 선택(DESIGN §5.3-1)
 import { personaFitsFor } from "./persona-fit";         // [R8CLOSE-B1 §B2] 페르소나 적합도(DESIGN §5.3-2 · 🔴 LLM 0)        // [R8 §2.2] 골격 지문으로 format 고르기
 import { printFromMeta, type StructurePrint } from "./structure-print";    // 축이 쓰는 지문 그대로
@@ -66,6 +68,14 @@ export interface PieceSpec {
   tier?: CoinTier;
   /** [R10-4] 이 글에만 쓰는 스타일(계정의 옷장 · `text_styles.id`). 없으면 계정 기본 스타일 → 없으면 스타일 없이. */
   styleId?: number | null;
+  /**
+   * [R12-10 · 설계 R12 §8] 🔴 **이 스타일이 어디서 왔나.** `"learned"` = 계정이 안 골라서 **되먹임이 골랐다**.
+   *   🔴 이 칸이 없으면 «조용히 입히는 것»이 된다 — 고객은 자기가 고른 적 없는 글 모양을 보고 **고장으로 읽는다**(§9 «막지 않는 대신 말해 준다»).
+   *   계정이 골랐으면 키가 **없다**(그건 고객의 뜻이라 설명할 것이 없다).
+   */
+  styleFrom?: "learned";
+  /** [R12-10] 되먹임이 무엇을 기울였는지 한 줄(서버 정본 · AC-52). `styleFrom` 과 짝으로만 실린다. */
+  learnedLine?: string;
   /** 추가(계약 외 · A 무시 가능): 채널별로 가른 앵글 — content-gen 재료. */
   angle: string;
   /** [R8CLOSE-B1 §B8] 🔴 **왜 이 채널인가** 한 줄(사람말). 고객이 «왜 티스토리?»를 물으면 답할 자리다. */
@@ -308,6 +318,9 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
   /* [R8CLOSE-B1 §B2] 🔴 **페르소나 적합도** — 소재를 «이 계정 이야기»와 견준다. LLM 은 안 부른다(글자 겹침 · 값 0원).
      계정마다 읽지 않고 **한 번에** 읽는다(계정 30개면 쿼리 30번이 된다). */
   const fit = await personaFitsFor(tid, accounts, { title: topic.title, angle: topic.angle, keyword: (topic.factors as unknown as Record<string, unknown>)?.keyword as string | undefined });
+  /* [R12-10 · 설계 R12 §8] 🔴 **되먹임 한 벌** — 계정 30개여도 한 번만 읽는다. 실패하면 `NO_TILT` 라 **오늘까지와 똑같이** 돈다(무회귀).
+     🔴 표본이 모자라면 `measured:false` 이고 아래 세 자리가 전부 «안 넘김»이 된다 — 지어내면 되먹임이 아니라 미신이다(AC-9). */
+  const tilt = await learnedTiltFor(tid).catch(() => NO_TILT);
   const intent = topic.factors.intent;
   const affiliateBase: Affiliate | null = intent === "commercial" ? { provider: "coupang", productQuery: topic.title, slot: "mid" } : intent === "mixed" ? { provider: "coupang", productQuery: topic.title, slot: "end" } : null;
   const specs: PieceSpec[] = [];
@@ -323,7 +336,8 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
     /* [R8 §2.2] 🔴 **골격 지문을 보고 고른다** — 이름 로테이션만으로는 «생김새가 닮은 글»을 못 피한다.
        축이 «겹친다»고 말해도 고르는 쪽이 안 들으면 다음 글도 또 겹쳤다(재기만 하고 피하지 않던 상태). */
     const fp = pickFormatByPrint(cPick, await recentFormats(tid, acc?.id ?? null, ch), `${topic.id}:${ch}:${acc?.id ?? 0}`, null, await recentPrints(tid, ch),
-      { imageCount: defaultImageCount(ch), affiliate: !!affiliateBase, intent, title: topic.title });   // 넷 다 여기서 이미 정해져 있다(지어낸 값 0)
+      { imageCount: defaultImageCount(ch), affiliate: !!affiliateBase, intent, title: topic.title },   // 넷 다 여기서 이미 정해져 있다(지어낸 값 0)
+      tilt.formats);   // [R12-10] 🔴 겹침 판정 **뒤**의 동점 가르기에만 쓰인다 — 판정 자체는 안 건드린다(structure_repeat 무회귀)
     const format = fp.format;
     if (fp.switched) console.info(`[director] 골격 겹침으로 구성 갈아탐 tid=${tid} ch=${ch} → ${fp.format} (${fp.why})`);
     const chTaken = taken.byChannel.get(ch) ?? [];
@@ -335,6 +349,8 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       channel: ch, goldenHours: acc?.goldenHours ?? null, taken: chTaken,
       takenSameAccount: acc ? (taken.byAccount.get(acc.id) ?? []) : [], minGapMin: acc?.minGapMin,
       ...(gap ? { gapMin: gap.gapMin } : {}),
+      /* [R12-10] 🔴 배운 시각은 **골든타임이 없을 때만** 산다(`candidatesFor` 가 그 순서를 지킨다) — 고객이 고른 시각을 학습이 이기지 않는다. */
+      ...(acc && tilt.hoursByAccount.get(acc.id)?.length ? { learnedHours: tilt.hoursByAccount.get(acc.id)! } : {}),
       /* 🔴 계정마다 **다른** 흔들림 — 전 계정이 같은 폭으로 흔들리면 «같이 흔들리는 것»이 다시 신호가 된다. */
       ...(acc ? { jitterSeed: `acc:${acc.id}` } : {}),
       avoidNight: true,
@@ -369,7 +385,11 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       /* [R8] 🔴 간단히 = **AI 1장 + 나머지는 스톡** — 글 한 편 1코인(사장님 승인값). 보통·프리미엄은 AI 를 더 굽고(2~3 · 4~5) 그만큼(2 · 3) 든다.
          고객 사진이 자리를 먹으면 그만큼 덜 굽고 돌려준다(`settlePieceCoins`). */
       images: { count: imageCount, style: c.images.style, heroNeeded: ch === "naver_blog" || ch === "tistory", aiCount },
-      tier, styleId: acc?.defaultStyleId ?? null,   // [R10-4] 계정에 걸어 둔 스타일이 기본 · 글마다 덮어쓰기는 patch
+      /* [R10-4] 계정에 걸어 둔 스타일이 기본 · 글마다 덮어쓰기는 patch.
+         [R12-10] 🔴 **계정이 안 골랐을 때만** 배운 스타일을 입힌다 — 고객이 건 옷을 우리가 갈아입히지 않는다.
+            그리고 **왜 입었는지 적는다**(`styleFrom`) — 조용히 입히면 고객은 «내가 고른 적 없는 모양»을 보고 고장으로 읽는다(§9 말해 주기). */
+      tier, styleId: acc?.defaultStyleId ?? tilt.styleId ?? null,
+      ...(!acc?.defaultStyleId && tilt.styleId ? { styleFrom: "learned" as const, learnedLine: tilt.line } : {}),
       monetize: { affiliate: affiliateBase ? { ...affiliateBase } : null, sponsored: false, gift: false, adDisclosure: !!affiliateBase },   // [R8-A §4] 협찬·무상 제공은 고객이 켠다(자동 기본 false)
       schedule: { at: sched.at.toISOString(), slotReason: sched.reason }, coinCost: pieceCoin(ch, aiCount, format, tier), angle: topic.angle,
       formatPick: fp,   // [R8 §2.2] 왜 이 구성인지 — 글 piece 만. 영상은 위에서 format 을 **제 규칙으로 덮어쓰므로** 달지 않는다
@@ -664,6 +684,9 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
         : { stage: "writing", key: s.key, emotionKey: s.emotionKey, format: s.format, composition: s.composition, imageCount: s.images.count, aiImageCount: s.images.aiCount, imageStyle: s.images.style, heroNeeded: s.images.heroNeeded, affiliate: s.monetize.affiliate, sponsored: s.monetize.sponsored, gift: s.monetize.gift, adDisclosure: s.monetize.adDisclosure, scheduleAt: s.schedule.at, slotReason: s.schedule.slotReason, angle: s.angle, lengthWords: s.lengthHint.words, coinItem, regenCount: 0,
             /* [R10-7·9] 🔴 등급·계획 코인·스타일을 **글이 들고 있는다** — 정산(`settlePieceCoins`)·재차감·검수 화면이 다시 정하지 않고 이 값을 읽는다(«고르는 자리»가 갈리면 그게 곧 사고 · AC-71·74). */
             ...(isCard ? {} : { tier: postTier, coinPlanned: postCoins }), ...(s.styleId ? { styleId: s.styleId } : {}),
+            /* [R12-10] 🔴 되먹임이 스타일을 골랐으면 **글이 그 사실을 들고 간다** — 검수 화면이 «반응이 좋던 모양으로 입혔어요»를 말할 재료.
+               안 실으면 `content-gen` 이 «계정 기본 스타일»(`styleApplied.from:"account"`)이라고 **틀리게** 적는다(고객은 건 적이 없다 · AC-92). */
+            ...(s.styleFrom ? { styleFrom: s.styleFrom, ...(s.learnedLine ? { learnedLine: s.learnedLine } : {}) } : {}),
             ...(s.formatPick ? { formatPick: s.formatPick } : {}), ...(s.channelReason ? { channelReason: s.channelReason } : {}), ...(s.personaFit ? { personaFit: s.personaFit } : {}) };
       /* 🔴 [R8 §4.5] **누가 만들었나**를 적는다 — 자동(크론)은 `actorId` 가 없어 **NULL** 이다.
          기계가 만든 글에 «누가»를 지어내지 않는다(AC-9). 이 값이 없으면 «팀원이 만든 글»을 가릴 수 없다. */

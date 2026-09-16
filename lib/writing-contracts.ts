@@ -295,6 +295,33 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
     images: { min: 0, max: 1, default: 1, style: "photo", aspect: "1:1", captionRate: 0 },
     emojiPerParagraph: 1, text: true,
   },
+  /* [R12-6 · 2026-09-17 · B] 🔴 **당근 비즈프로필 «새소식»** — `verify-channel-tables` 가 «textGen=true 인데 글 계약이 없다»로 잡아 줘서 채웠다.
+     계약이 없으면 `contractFor` 가 **네이버 블로그 계약을 채널명만 바꿔** 돌려준다 — 1,500자짜리 블로그 글이 **평문 새소식**에 통째로 올라간다.
+     ⚠️ 값의 근거: AM `daangn-runner.mjs`(2026-07 실측) 헤더 + 새소식 에디터가 **평문**이라는 사실. 🔴 **실제로 올려 본 적은 없다**(탐침 대기) —
+        그래서 «본 것»(서식 0 · 사진 10장)만 못 박고, 못 본 것(정확한 글자 수 상한)은 **보수적으로** 잡았다(짧은 쪽이 안전하다).
+     🔴 독자가 «이웃»이 아니라 **동네 사람**이다 — 이게 이 채널을 네이버와 가르는 유일한 축이고, 계정마다 덮어쓸 수 있다(R11-8 `accounts.reader`). */
+  daangn: {
+    channel: "daangn", emotionKey: "hook", label: "당근 새소식 · 동네 말투",
+    reader: "우리 동네 사람 — 가게가 가까운지, 지금 가도 되는지를 먼저 본다",
+    register: "가게 주인이 이웃에게 «~해요 / ~하고 있어요» 나긋한 존댓말",
+    rules: [
+      "첫 줄에 **무슨 소식인지**를 그대로 쓴다(«새로 들어왔어요» «이번 주만» 같은 사실 한 줄).",
+      "동네·거리·시간을 말한다 — 읽는 사람이 «걸어갈 만한가»를 바로 알 수 있게.",
+      /* 🔴 **서식이 0** 이라 굵게·형광펜으로 강조할 수 없다 — 강조는 **줄바꿈과 낱말 순서**로만 한다.
+         이 줄이 없으면 모델이 «**굵게**» 를 본문 글자로 써서 별표가 그대로 올라간다(마크가 아니라 글자로). */
+      "굵게·밑줄·형광펜을 쓸 수 없는 곳이다 — 강조는 줄바꿈과 낱말 순서로만 한다. 별표(**)·마크다운을 본문에 쓰지 않는다.",
+      "«~에 대해 알아보겠습니다» 류 도입 금지. 과장·최상급 금지(동네 장사에서 제일 빨리 신뢰를 깎는다).",
+    ],
+    formats: ["story", "info"],
+    formatLabel: { story: "오늘 있었던 일", info: "알아 두면 좋은 것" },
+    structure: { story: ["hook", "para", "para", "image"], info: ["hook", "list", "para", "image"] },
+    visual: ["사진 1~10장(첫 장이 대표)", "줄바꿈 리듬"],
+    visualMin: { image: 1 },
+    length: { min: 150, max: 700 },
+    titleStyle: "hook", titleExample: "오늘 들어온 딸기, 한 상자 8천원이에요",
+    images: { min: 1, max: 10, default: 3, style: "photo", aspect: "1:1", captionRate: 0 },
+    emojiPerParagraph: 0, text: true,
+  },
   instagram: {
     channel: "instagram", emotionKey: "cardnews", label: "인스타 카드뉴스 · 짧고 단정",
     reader: "썸네일을 넘기며 보는 사람 — 카드 한 장에 한 메시지",
@@ -391,8 +418,11 @@ export const WRITING_CONTRACTS: Record<string, WritingContract> = {
 
 /* ═══ P1R5 §1.3 — 영상 계약 4행(DESIGN §5C.1 «쇼츠·클립·릴스 대본» + §5.4 감성 3행 + §6.2 포맷 3·채널 규격). 포맷×초 표는 `shortsFormOf` 한 함수가 낸다(AM shorts-reference.shortsFormOf 관례 · SHORTS6 «길이·컷·발화 예산 한 표»). ═══ */
 export type ShortsFormat = "graphic" | "talking" | "clip";
+/** [R12-7] 영상 길이 리터럴 — 🔴 정본은 `lib/video/types.ts VideoSeconds` 다. 이 파일은 **순수 표**라 저쪽을 import 하지 않으므로(순환 0) 같은 글자를 여기 한 번 적는다.
+ *  🔴 둘이 갈리면 tsc 가 곧바로 빨개진다(`resolveVideoSeconds` 가 두 타입을 한 자리에서 쓴다) — 그게 이 중복의 안전장치다. */
+export type VideoSecondsLit = 15 | 30 | 60 | 90;
 export interface ShortsForm {
-  format: ShortsFormat; seconds: 15 | 30 | 60;
+  format: ShortsFormat; seconds: VideoSecondsLit;
   /** 컷 수(min·max·기본). */
   cuts: { min: number; max: number; default: number };
   /** 컷 길이(초 · provider 생성 길이 상한 8). */
@@ -407,35 +437,44 @@ export interface ShortsForm {
   stillRatio: number;
   /** 채널 규격(§6.2): 최대 초 · 세이프존. */
   /** 채널 상한 표 — 값은 `VIDEO_CHANNEL_MAX_SEC` 한 곳에서 온다([P1R6 §2.3] · 여기에 숫자를 다시 적지 않는다). */
-  channelMaxSec: Readonly<Record<string, 15 | 30 | 60>>;
+  channelMaxSec: Readonly<Record<string, VideoSecondsLit>>;
 }
 /** shortsFormOf(format, seconds) — 포맷·초 → 계약 한 표(순수). */
-export function shortsFormOf(format: ShortsFormat, seconds: 15 | 30 | 60): ShortsForm {
+export function shortsFormOf(format: ShortsFormat, seconds: VideoSecondsLit): ShortsForm {
   const maxSyl = Math.floor(seconds * 4.6 * 0.85);
   const syllables = { min: Math.floor(maxSyl * 0.55), max: maxSyl };
   const channelMaxSec = VIDEO_CHANNEL_MAX_SEC;   // 🔴 표는 위 한 곳(§2.3) — 여기서 다시 적지 않는다
-  if (format === "clip") return { format, seconds: seconds === 60 ? 30 : seconds, cuts: { min: 3, max: 4, default: 3 }, cutSec: { min: 5, max: 8 }, provider: seconds === 15 ? "veo_lite" : "omni", syllables, captionPreset: "clip_top", stillRatio: 0, channelMaxSec };
+  /* [R12-7] 🔴 클립형은 **어느 채널에서도 30을 넘지 않는다**(§1.3 표) — 60 이 30 으로 내려앉던 그대로 **90 도 30 으로** 내려앉는다.
+     `seconds === 60 ? 30 : seconds` 만 두면 90 이 그대로 통과해 «90초 클립형»이 조용히 생긴다. */
+  if (format === "clip") return { format, seconds: seconds >= 60 ? 30 : seconds, cuts: { min: 3, max: 4, default: 3 }, cutSec: { min: 5, max: 8 }, provider: seconds === 15 ? "veo_lite" : "omni", syllables, captionPreset: "clip_top", stillRatio: 0, channelMaxSec };
   /* 🔴 토킹(계약 §1.3 표): 컷 길이 **5초 고정** · B-roll 3~4 · **나머지 정지 이미지**. 즉 컷 수는 «초 ÷ 5»(60초 = 12컷)이지 3~4 가 아니다.
      예전 값(default 4)은 60초를 컷 4개로 나눠 창이 15초가 됐고, 8초 상한 클립으로는 7초가 비어 러너가 멈춘 화면을 늘려야 했다(설계 축소 · CLAUDE §8). */
   if (format === "talking") { const tc = Math.round((seconds === 15 ? 30 : seconds) / 5); return { format, seconds: seconds === 15 ? 30 : seconds, cuts: { min: Math.max(3, tc - 3), max: tc + 3, default: tc }, cutSec: { min: 5, max: 5 }, provider: "veo_lite", syllables, captionPreset: "talking_big", stillRatio: 0.5, channelMaxSec }; }
+  /* [R12-7] 그래픽 스토리 90초 — 60초 표(6~12 · 기본 9)를 **1.5배**로 넓힌다. 컷당 초(5~8)는 그대로라 컷 수만 늘어난다.
+     🔴 60초 이하의 값은 **한 숫자도 안 바뀐다**(무회귀 · 계약 §5). */
   const s60 = seconds === 60;
-  return { format: "graphic", seconds: seconds === 15 ? 30 : seconds, cuts: s60 ? { min: 6, max: 12, default: 9 } : { min: 4, max: 6, default: 5 }, cutSec: { min: 5, max: 8 }, provider: "omni", syllables, captionPreset: "keyword_center", stillRatio: 0, channelMaxSec };
+  const cuts = seconds === 90 ? { min: 9, max: 18, default: 13 } : s60 ? { min: 6, max: 12, default: 9 } : { min: 4, max: 6, default: 5 };
+  return { format: "graphic", seconds: seconds === 15 ? 30 : seconds, cuts, cutSec: { min: 5, max: 8 }, provider: "omni", syllables, captionPreset: "keyword_center", stillRatio: 0, channelMaxSec };
 }
 /* ═══════════ 영상 채널 규격 — 🔴 **한 곳**(계약 P1R6 §2.3 «화면 상수 금지») ═══════════
  *   여기가 정본이다: `clampSecondsForChannel`·`shortsFormOf`·`accounts-list.channels[].video` 가 전부 이 표를 읽는다.
  *   화면(A)은 이 값을 서버에서 받아 칩을 켜고 끈다 — «클립은 30초까지» 같은 숫자를 화면에 적지 않는다.
  *   릴스 90초는 Phase 5(계약 R5 §7-3 «R5 제외») — 여기 60 을 올리는 것으로 열린다. */
-export const VIDEO_CHANNEL_MAX_SEC: Readonly<Record<string, 15 | 30 | 60>> = { youtube_shorts: 60, naver_clip: 30, reels: 60, threads: 60 };
+export const VIDEO_CHANNEL_MAX_SEC: Readonly<Record<string, VideoSecondsLit>> = { youtube_shorts: 60, naver_clip: 30, reels: 90, threads: 60 };
+/* [R12-7 · 2026-09-17] 🔴 **릴스만 90**으로 올렸다(감사 A12 «VIDEO_SECONDS 에 90 없음»).
+   🔴 `naver_clip`(30)·`threads`(60)·`youtube_shorts`(60)는 **그대로다** — 여기서 셋이 같이 올라가면 «클립에 90초»가 조용히 생긴다(B2 지적 2026-09-17).
+   🔴 그리고 **셋이 같이 움직여야** 한다: 이 표 · 코인 값(`coin-table.ts video_90`) · 심사 축(`lib/video/judge.ts duration_fit`).
+      따로 가면 «90초인데 값은 60초»가 되고 그건 우리가 손해를 보는 쪽이라 더 늦게 들킨다. */
 /** 포맷 자체의 상한(채널과 **별개** 축) — 클립형은 생활밀착 15~30초라 어느 채널에서도 30을 넘지 않는다(§1.3 표). */
-export const VIDEO_FORMAT_MAX_SEC: Readonly<Record<ShortsFormat, 15 | 30 | 60>> = { graphic: 60, talking: 60, clip: 30 };
+export const VIDEO_FORMAT_MAX_SEC: Readonly<Record<ShortsFormat, VideoSecondsLit>> = { graphic: 90, talking: 90, clip: 30 };
 export const VIDEO_FORMAT_LABEL: Readonly<Record<ShortsFormat, string>> = { graphic: "그래픽 스토리", talking: "말하는 영상", clip: "짧은 클립" };
 
 /** 이 채널에서 고를 수 있는 것 — 채널 상한 + 포맷별 상한(둘 중 작은 것이 실제 상한). */
-export function videoChannelSpec(channel: string): { maxSeconds: 15 | 30 | 60; formats: { key: ShortsFormat; label: string; maxSeconds: 15 | 30 | 60 }[] } | null {
+export function videoChannelSpec(channel: string): { maxSeconds: VideoSecondsLit; formats: { key: ShortsFormat; label: string; maxSeconds: VideoSecondsLit }[] } | null {
   const max = VIDEO_CHANNEL_MAX_SEC[channel];
   if (!max) return null;
   const formats = (Object.keys(VIDEO_FORMAT_MAX_SEC) as ShortsFormat[]).map((key) => ({
-    key, label: VIDEO_FORMAT_LABEL[key], maxSeconds: Math.min(max, VIDEO_FORMAT_MAX_SEC[key]) as 15 | 30 | 60,
+    key, label: VIDEO_FORMAT_LABEL[key], maxSeconds: Math.min(max, VIDEO_FORMAT_MAX_SEC[key]) as VideoSecondsLit,
   }));
   return { maxSeconds: max, formats };
 }
@@ -447,8 +486,10 @@ export function videoChannelSpec(channel: string): { maxSeconds: 15 | 30 | 60; f
  * 🔴 «고르지 않았다»의 답은 **60**이다 — 이건 날조가 아니라 **우리 기본값**이고, 안 고른 고객에게 실제로 만들어 주는 길이다.
  *    날조와 기본값의 차이: 기본값은 **그대로 실행된다**(고객이 받는 것과 같다). 날조는 실행과 다른 값을 말한다.
  */
-export function videoSecondsFor(channel: string, want?: unknown): 15 | 30 | 60 {
-  const n0 = Number(want); const base = n0 === 15 || n0 === 30 || n0 === 60 ? n0 : 60;
+export function videoSecondsFor(channel: string, want?: unknown): VideoSecondsLit {
+  /* [R12-7] 90 도 «고른 값»이다. 🔴 **기본값은 여전히 60** — 안 고른 고객에게 만들어 주는 길이를 바꾸면 그건 «칸 열기»가 아니라 조용한 개편이고
+     길이 구간제라 **코인이 통째로 오른다**(계약 §5 무회귀). */
+  const n0 = Number(want); const base: VideoSecondsLit = n0 === 15 || n0 === 30 || n0 === 60 || n0 === 90 ? n0 : 60;
   return clampSecondsForChannel(channel, base);
 }
 
@@ -463,17 +504,17 @@ export function videoSecondsFor(channel: string, want?: unknown): 15 | 30 | 60 {
  *    표의 숫자를 여기 베껴 적지 않는다(베낀 검사·베낀 값은 표가 바뀌면 낡는다 · AC-78).
  *    가장 긴 쪽으로 트는 이유: 견적이 실제보다 **낮으면** 고객이 «적혀 있던 것보다 더 빠졌다»를 겪는다. 그건 돈 이야기라 한쪽으로만 틀려야 한다.
  */
-export function estimateVideoSeconds(channel: string, want?: unknown): 15 | 30 | 60 {
+export function estimateVideoSeconds(channel: string, want?: unknown): VideoSecondsLit {
   const asked = videoSecondsFor(channel, want);
   const all = (Object.keys(VIDEO_FORMAT_MAX_SEC) as ShortsFormat[]).map((f) => shortsFormOf(f, asked).seconds);
-  return Math.max(...all) as 15 | 30 | 60;
+  return Math.max(...all) as VideoSecondsLit;
 }
 
-/** 채널의 최대 초(§6.2 채널 규격) — 15|30|60 중 채널이 허용하는 것. */
-export function clampSecondsForChannel(channel: string, seconds: number): 15 | 30 | 60 {
+/** 채널의 최대 초(§6.2 채널 규격) — 15|30|60|90 중 채널이 허용하는 것. 🔴 **올림이 아니라 내림**이다(채널 상한을 넘지 않는다). */
+export function clampSecondsForChannel(channel: string, seconds: number): VideoSecondsLit {
   const max = VIDEO_CHANNEL_MAX_SEC[channel] ?? 60;
-  const s = seconds <= 15 ? 15 : seconds <= 30 ? 30 : 60;
-  return (Math.min(s, max) as 15 | 30 | 60);
+  const s: VideoSecondsLit = seconds <= 15 ? 15 : seconds <= 30 ? 30 : seconds <= 60 ? 60 : 90;
+  return (Math.min(s, max) as VideoSecondsLit);
 }
 
 function shortsContract(channel: string, label: string, aspect: "9:16"): WritingContract {

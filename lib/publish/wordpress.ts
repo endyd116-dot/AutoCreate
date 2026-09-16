@@ -9,9 +9,13 @@
  *   태그는 워드프레스가 **term id** 를 요구한다 → 이름으로 찾고 없으면 만든다. 태그가 실패해도 **글은 올린다**(태그는 부가 정보).
  *
  *   자격: `account_creds(kind 'app_password')` = { siteUrl, loginId, appPassword }. 🔴 이 파일 밖으로 나가지 않는다.
+ *
+ *   [R12-9 · 2026-09-17 · B] **고급 둘**(`lib/publish/wp-advanced.ts`): ① Article 에 `publisher` + **BreadcrumbList** 한 덩이
+ *     ② 사이드바에 «최근 글» 위젯 **한 번만**(멱등). 🔴 둘 다 **글을 막지 않는다** — 안 돼도 글은 나가고 사실만 감사에 남는다(CLAUDE §9).
  */
 import { loadWpCreds } from "./tokens";
-import { excerptOf, slugOf, articleJsonLdScript, jsonLdSurvived } from "./seo";   // [P1R8 §3.4-②] REST 가 받는데 안 보내던 칸 + 살아 있는 구조화 데이터
+import { excerptOf, slugOf, articleJsonLd, jsonLdSurvived } from "./seo";   // [P1R8 §3.4-②] REST 가 받는데 안 보내던 칸 + 살아 있는 구조화 데이터
+import { breadcrumbJsonLd, publisherOf, jsonLdScript, ensureLatestPostsWidget, type WpSiteInfo } from "./wp-advanced";   // [R12-9] 사이드바 위젯 · 구조화 데이터 한 겹 더
 import { writeAudit } from "../audit";
 import type { PublishPiece, PublishAccount } from "./contract";
 import type { ConnectorResult } from "./blogger";
@@ -136,10 +140,24 @@ export async function publishToWordpress(piece: PublishPiece, account: PublishAc
      구글은 문서 어디에 있든 JSON-LD 를 읽는다. **다만 워드프레스가 `<script>` 를 지울 수 있어**(KSES · `unfiltered_html` 권한),
      아래에서 응답의 `content.rendered` 를 되읽어 **살아남았는지 확인**한다(«넣었다»는 증거가 아니다 · AC-63).
      🔴 FAQPage·HowTo 는 **일부러 안 넣는다** — 둘 다 구글이 지원을 끊었다(`lib/publish/seo.ts` 머리말). */
-  const ld = articleJsonLdScript(piece, {
+  /* [R12-9 · 2026-09-17] 🔴 **사이트 이름을 먼저 읽는다** — `publisher` 와 빵부스러기 첫 마디에 쓴다.
+     🔴 **못 읽으면 그 칸을 통째로 뺀다**(빈 이름을 넣지 않는다 · AC-9). 구글은 빈 `publisher.name` 을 «불일치»로 보고 **통째로 무시**한다.
+     🔴 이 호출이 실패해도 **발행은 그대로 간다** — 인증 없이 열려 있는 공개 엔드포인트라 대개 되지만, 안 돼도 글의 본체가 아니다(§9). */
+  const siteInfo: WpSiteInfo = await (async (): Promise<WpSiteInfo> => {
+    try { const r = await wpFetch(`${site}/wp-json`, { method: "GET", headers: { Authorization: auth } }, 8_000);
+      const nm = String(r.json?.name ?? "").trim();
+      return nm ? { home: site, name: nm } : { home: site };
+    } catch { return { home: site }; }
+  })();
+
+  /* [R12-9] Article 에 `publisher` 한 칸 — 🔴 `logo` 는 **안 넣는다**(고객 사이트 로고 주소를 우리가 모른다 · 추측 주소는 깨진 그림이 된다). */
+  const article = articleJsonLd(piece, {
     authorName: account.displayName || account.handle,
     ...(piece.scheduledFor ? { publishedAt: piece.scheduledFor } : {}),
   });
+  { const pub = publisherOf(siteInfo); if (pub) article.publisher = pub; }
+  /* [R12-9] 빵부스러기(BreadcrumbList) — 🔴 **지금도 지원되는 유형**만 쓴다. FAQPage·HowTo 는 안 만든다(`seo.ts` 머리말의 근거). */
+  const ld = jsonLdScript(article) + jsonLdScript(breadcrumbJsonLd(piece, siteInfo));
 
   const body: Record<string, unknown> = { title: String(piece.title || "").slice(0, 300), content: html + ld, status: "publish" };
   if (tagIds.length) body.tags = tagIds;
@@ -176,5 +194,19 @@ export async function publishToWordpress(piece: PublishPiece, account: PublishAc
       detail: { note: "워드프레스가 <script type=application/ld+json> 를 지웠다 — 앱 비밀번호 사용자에게 unfiltered_html 권한이 없다(KSES)", url: link.slice(0, 200) }, riskLevel: "low" })
       .catch((e: unknown) => console.warn("[wordpress] 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
   }
+  /* [R12-9 · 설계 R12 §8] 🔴 **사이드바 «최근 글» 위젯** — 우리가 올린 글들이 서로 이어지게 하는 내부 링크(DESIGN §518 의 🟢 항목).
+     🔴 **멱등**(우리 도장 `className` 으로 가른다) · 🔴 **실패해도 글은 이미 나갔다** — 여기서 성공을 되돌리지 않는다.
+     🔴 워드프레스 5.8 미만·권한 없음은 **«고장»이 아니라 «없는 길»**이다(CLAUDE §9 «이 규칙 밖») — 감사에만 사실로 남긴다.
+     ⚠️ 발행마다 사이드바를 한 번 읽는다(GET 1~2회). 값을 캐시하지 않는 까닭: 고객이 테마를 바꾸면 사이드바가 통째로 달라지는데
+        «전에 꽂았다»를 우리 DB 에 적어 두면 **없어진 위젯을 있다고 믿게** 된다. 사이트에 물어보는 쪽이 늘 맞다. */
+  try {
+    const w = await ensureLatestPostsWidget(site, auth, (u, init) => wpFetch(u, init, 12_000).then((r) => ({ status: r.status, json: r.json })));
+    if (!w.ok || (w.ok && !w.already)) {
+      await writeAudit({ tenantId: piece.tenantId, action: w.ok ? "wp_widget_added" : "wp_widget_skipped", actorType: "system", target: `piece:${piece.id}`,
+        detail: w.ok ? { widgetId: (w as { widgetId: string }).widgetId } : { why: w.why }, riskLevel: "low" })
+        .catch((e: unknown) => console.warn("[wordpress] 위젯 감사 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
+    }
+  } catch (e) { console.warn("[wordpress] 사이드바 위젯 건너뜀(글은 나갔다)", String((e as Error)?.message ?? e).slice(0, 100)); }
+
   return { ok: true, externalUrl: link, ...(id ? { channelRef: id } : {}) };
 }

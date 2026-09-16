@@ -175,6 +175,22 @@ export default async (req: Request): Promise<Response> => {
           홈에서 본 줄과 감사에 남은 사실을 한 단어로 grep 해 잇기 위해서다. 볼 글이 0건이면 행을 만들지 않는다(규칙만 떠 있으면 잔소리다). */
     if (forcedByPlan && n(review?.c)) todo.push({ kind: "forcedByPlan", title: "지금 요금제에선 검수를 눌러야 글이 나가요",
       desc: "«조용하면 그대로 발행»은 Pro 부터예요. 올려 두면 확인 없이도 나가요", link: "/app/plan.html", tone: "warn" });
+
+    /* ══ [R11-6 · 설계 R11 §4.2] 🔴 **성과 저하 한 줄** — `lib/cron/learn.ts` 가 모은 것의 **첫 실사용**이다 ══
+       판정은 전부 순수 함수(`lib/revenue/trend.ts dropAlertOf`)가 한다 — «몇 %면 뜨나»를 여기서 다시 적지 않는다(하니스가 그 함수를 실제로 돌린다 · AC-99 ⑩).
+       🔴 **겁주지 않는다**(CLAUDE §3): «수익이 떨어지고 있습니다» 가 아니라 ①사실 한 줄 ②어떻게 하면 되는지 ③우리가 대신 해 주는 것.
+       🔴 **막지 않는다**(§9) — 이건 알림 한 줄이고 아무 것도 멈추지 않는다. tone 도 `info` 다(warn 은 «내가 뭘 해야 한다»는 신호라 여기선 과하다).
+       🔴 아이콘은 **있는 것**을 쓴다 — kind `gauge` 는 `public/js/ui.js UI.KIND.gauge` 에 이미 있다(새 아이콘 0 · A 가 손댈 것 없음).
+       🔴 표본이 모자라면 아예 안 뜬다 — `TREND_MIN_SAMPLES` 미만이면 «줄었다»고 말할 근거가 없다(AC-9). */
+    try {
+      const { viewsWeekCompare } = await import("../../lib/outcomes");
+      const { dropAlertOf, TREND_MIN_SAMPLES } = await import("../../lib/revenue/trend");
+      const w = await viewsWeekCompare(tid);
+      if (w.samples >= TREND_MIN_SAMPLES) {
+        const alert = dropAlertOf({ recentKrw: w.recentAvg, avgKrw: w.prevAvg, worked: w.worked });
+        if (alert) todo.push({ kind: "gauge", title: alert.title, desc: alert.desc, link: "/app/create.html", tone: "info" });   // 소재 목록이 있는 화면(«오늘의 소재») — 여기서 다음 소재를 고른다
+      }
+    } catch (e) { console.warn("[home] 성과 저하 판정 실패 — 그 한 줄만 빠진다", String((e as Error)?.message ?? e).slice(0, 100)); }
     /* 🔴 응답의 `runner.online` 은 종전 키라 그대로 둔다(화면 호환). 다만 «꺼졌나» **판정**은 `status` 칸이 아니라 하트비트로 한다 —
        프로세스가 죽으면 status 는 'online' 인 채로 굳는다(lib/video/render-queue.ts offlineReason 과 같은 기준 · 창 5분). */
     const [runner] = await q(sql`SELECT COUNT(*) FILTER (WHERE status='online') AS online, COUNT(*) AS total,

@@ -19,7 +19,7 @@
  *     kind: 마크 여섯(value·line·row·bold·underline·italic) 또는 블록 타입(table·checklist·faq·toc·place…)
  *   🔴 순수 함수(DB·네트워크 0). `scripts/verify-format-marks.mts` 가 그대로 돌린다.
  */
-import { type Block, type MarkKind, MARK_KINDS, MARK_LABEL, MARK_BUDGET, type MarkDrop } from "./blocks";
+import { type Block, type MarkKind, type InlineMark, MARK_KINDS, MARK_LABEL, MARK_BUDGET, type MarkDrop } from "./blocks";   // [R12-5] InlineMark — 문단·목록 항목·표 칸 세 자리를 한 판정기로 훑는다
 import { formatCapsOf, canRetract, channelSpec, type FormatCapKey } from "./channel-registry";
 
 export interface MarkDemotion { kind: string; why: string; sample?: string; by?: "server" | "runner" }
@@ -108,8 +108,32 @@ export function whySay(why: string): string { return WHY_SAY[why] ?? "이 채널
 /** 종류별 수 — planned 에 적는 값. 0 인 종류는 키를 안 만든다(«없음»과 «0»을 가르는 관례 · AC-9). */
 export function countMarks(blocks: Block[]): Partial<Record<MarkKind, number>> {
   const out: Partial<Record<MarkKind, number>> = {};
-  for (const b of blocks) for (const m of b.marks ?? []) out[m.kind] = (out[m.kind] ?? 0) + 1;
+  for (const b of blocks) for (const m of allMarksOf(b)) out[m.kind] = (out[m.kind] ?? 0) + 1;
   return out;
+}
+
+/* ═══ [R12-5] 🔴 마크가 사는 자리가 **셋**이 됐다 — `marks`(문단) · `itemMarks`(목록 항목) · `cellMarks`(표 칸) ═══
+ *   아래 세 함수(`countMarks`·`applyMarkBudget`·`stripUnsupportedMarks`)가 **문단만 훑으면**
+ *   목록 안의 마크가 상한도 안 타고 채널 표(`false`)도 안 타서 «쓰레드에 형광펜»이 목록으로만 새어 나간다.
+ *   🔴 그래서 «마크를 훑는다»를 한 곳으로 모은다 — 네 번째 자리가 생기면 여기만 고친다. */
+/** 블록 하나가 가진 **모든** 마크를 순서대로(문단 → 목록 항목 → 표 칸). 세기·상한이 이 순서를 공유해야 «앞쪽부터 남긴다»가 말이 된다. */
+function allMarksOf(b: Block): InlineMark[] {
+  return [...(b.marks ?? []), ...(b.itemMarks ?? []).flatMap((x) => x.marks), ...(b.cellMarks ?? []).flatMap((x) => x.marks)];
+}
+/** 블록의 세 자리를 **같은 판정기**로 거른다(순수). `keep` 이 false 를 내면 그 마크는 빠진다. 🔴 셋 중 아무것도 없으면 **원래 블록 객체 그대로** 돌려준다(무회귀). */
+function filterBlockMarks(b: Block, keep: (m: InlineMark, text: string) => boolean): Block {
+  if (!b.marks?.length && !b.itemMarks?.length && !b.cellMarks?.length) return b;
+  const nb: Block = { ...b };
+  if (b.marks?.length) { const k = b.marks.filter((m) => keep(m, String(b.text ?? ""))); if (k.length) nb.marks = k; else delete nb.marks; }
+  if (b.itemMarks?.length) {
+    const k = b.itemMarks.map((x) => ({ ...x, marks: x.marks.filter((m) => keep(m, String(b.items?.[x.i] ?? ""))) })).filter((x) => x.marks.length);
+    if (k.length) nb.itemMarks = k; else delete nb.itemMarks;
+  }
+  if (b.cellMarks?.length) {
+    const k = b.cellMarks.map((x) => ({ ...x, marks: x.marks.filter((m) => keep(m, String(b.rows?.[x.r]?.[x.c] ?? ""))) })).filter((x) => x.marks.length);
+    if (k.length) nb.cellMarks = k; else delete nb.cellMarks;
+  }
+  return nb;
 }
 
 /**
@@ -119,17 +143,14 @@ export function countMarks(blocks: Block[]): Partial<Record<MarkKind, number>> {
 export function applyMarkBudget(blocks: Block[]): { blocks: Block[]; dropped: MarkDemotion[] } {
   const seen: Partial<Record<MarkKind, number>> = {};
   const dropped: MarkDemotion[] = [];
-  const out = blocks.map((b) => {
-    if (!b.marks?.length) return b;
-    const keep = b.marks.filter((m) => {
-      const n = (seen[m.kind] ?? 0) + 1; seen[m.kind] = n;
-      if (n <= MARK_BUDGET[m.kind].perPost) return true;
-      dropped.push({ kind: m.kind, why: "budget", sample: String(b.text ?? "").slice(m.s, m.s + 20), by: "server" });
-      return false;
-    });
-    const nb: Block = { ...b }; if (keep.length) nb.marks = keep; else delete nb.marks;
-    return nb;
-  });
+  /* [R12-5] 🔴 상한은 **글 전체 합**이다 — 문단·목록 항목·표 칸을 **한 카운터**로 센다(B2 지적 2026-09-17).
+     항목마다 12개를 허락하면 목록 10줄짜리 글에 120개가 실린다. `seen` 이 블록 바깥에 있는 것이 그 뜻이다. */
+  const out = blocks.map((b) => filterBlockMarks(b, (m, text) => {
+    const n = (seen[m.kind] ?? 0) + 1; seen[m.kind] = n;
+    if (n <= MARK_BUDGET[m.kind].perPost) return true;
+    dropped.push({ kind: m.kind, why: "budget", sample: text.slice(m.s, m.s + 20), by: "server" });
+    return false;
+  }));
   return { blocks: out, dropped };
 }
 
@@ -141,16 +162,12 @@ export function stripUnsupportedMarks(blocks: Block[], channel: string): { block
   const caps = formatCapsOf(channel);
   const dropped: MarkDemotion[] = [];
   if (!caps) return { blocks, dropped };
-  const out = blocks.map((b) => {
-    if (!b.marks?.length) return b;
-    const keep = b.marks.filter((m) => {
-      if (caps[m.kind as FormatCapKey] !== false) return true;
-      dropped.push({ kind: m.kind, why: "channel_unsupported", sample: String(b.text ?? "").slice(m.s, m.s + 20), by: "server" });
-      return false;
-    });
-    const nb: Block = { ...b }; if (keep.length) nb.marks = keep; else delete nb.marks;
-    return nb;
-  });
+  /* [R12-5] 🔴 목록 항목·표 칸도 **같이** 벗긴다 — 문단만 벗기면 «쓰레드에 형광펜»이 목록으로만 새어 나간다(채널 표가 절반만 사는 상태). */
+  const out = blocks.map((b) => filterBlockMarks(b, (m, text) => {
+    if (caps[m.kind as FormatCapKey] !== false) return true;
+    dropped.push({ kind: m.kind, why: "channel_unsupported", sample: text.slice(m.s, m.s + 20), by: "server" });
+    return false;
+  }));
   return { blocks: out, dropped };
 }
 
@@ -251,6 +268,10 @@ export function marksPromptLine(allowed: readonly string[]): string {
   const caps = kinds.map((k) => `${k} ≤${MARK_BUDGET[k].perPost}`).join(" · ");
   return [
     `강조(marks): text 가 있는 블록에 marks:[{s,e,kind}] 로 적는다 — s/e 는 그 text 의 문자 위치(0부터 · e 는 끝 다음) · 겹치지 않게 · 숫자·결론·이름에만.`,
-    `쓸 수 있는 kind: ${kinds.map((k) => say[k]).join(" · ")}. 글당 ${caps}. 강조가 없는 문단이 더 많아야 자연스럽다(전부 칠하면 그것도 티다).`,
+    /* [R12-5] 🔴 목록·표 «안»도 칠할 수 있게 됐다 — 이 두 줄이 없으면 모델은 문단에만 칠하고
+       R12-5 는 «받을 수는 있는데 아무도 안 보내는» 칸이 된다(AC-69 의 프롬프트 판). 좌표 기준을 **한 문장에 못 박는다.** */
+    `목록 항목 안(list·checklist·faq): itemMarks:[{i, marks:[{s,e,kind}]}] — i 는 items 의 인덱스이고 s/e 는 그 항목 문자열 기준(0부터). faq 항목은 "질문(줄바꿈)답" 한 덩이로 세되 질문과 답에 걸친 강조는 쓰지 않는다.`,
+    `표 칸 안(table): cellMarks:[{r, c, marks:[{s,e,kind}]}] — r/c 는 rows[r][c] 이고 머리 행이 r=0. s/e 는 그 칸 문자열 기준.`,
+    `쓸 수 있는 kind: ${kinds.map((k) => say[k]).join(" · ")}. 글당 ${caps}(문단·목록·표를 **다 합쳐서** 센다). 강조가 없는 문단이 더 많아야 자연스럽다(전부 칠하면 그것도 티다).`,
   ].join("\n");
 }

@@ -126,6 +126,9 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
   const d = checkVideoDisclosure({ badge: p.overlay.badge?.text ?? null, disclosureCaption: p.disclosureCaption?.text ?? null, descriptionFirstLine: String(meta.description ?? "").split("\n")[0] ?? "" }, { affiliate: meta.affiliate, adDisclosure: meta.adDisclosure === true });
   axes.push(axis("disclosure", d.ok, d.detail));
   /* duration_fit — 길이 ≤ maxSeconds+1s · ≥ 60% · 🔴 **컨테이너와 영상 트랙이 갈라지지 않았는가**.
+     [R12-7 · 2026-09-17 확인] 🔴 **90초를 여는 데 이 축은 고칠 것이 없다** — 판정이 전부 `p.out.maxSeconds`(= `VideoSeconds`)에서 나오고
+     그 타입이 90 을 받게 넓어졌기 때문이다. 🔴 **«고칠 것이 없다»를 확인 없이 믿지 않았다**: 이 파일에서 15·30·60 리터럴을 전수로 찾았고
+     길이 판정에 박힌 숫자는 0개였다(`CAPTION_SIDE_PX=60` 은 픽셀이지 초가 아니다). 그 사실을 여기 적어 둔다 — 다음 라운드에 또 안 찾게.
      2026-09-14 C 수리: 종전엔 러너가 보낸 `durationMs`(= 인코딩에 넘긴 `-t` 값)와 그걸로 나눈 `frameCount` 를 견줬다.
      두 값이 같은 식에서 나오니 `|frames − dur×fps|` 는 **항상 참인 항등식**이었고, AC-31 의 «정지 화면 + 음악 13초 꼬리»가
      («컨테이너 15s · 영상 12s») 그대로 통과했다 — 심사가 산출물이 아니라 **계획서**를 보고 있었다.

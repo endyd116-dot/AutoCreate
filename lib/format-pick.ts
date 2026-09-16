@@ -125,6 +125,14 @@ export function pickFormatByPrint(
   hint: string | null | undefined,
   recentPrints: StructurePrint[],
   shape?: PickShape | null,
+  /**
+   * [R12-10 · 설계 R12 §8] 🔴 **배운 골격 선호 순서**(`lib/learn-tilt.ts`). 🔴 **겹침 판정은 한 글자도 안 건드린다.**
+   *   쓰이는 자리가 **딱 둘**이다: ⓐ 견줄 최근 글이 아예 없을 때(이름 순서 대신) ⓑ **이미 «겹친다»고 판정해 갈아탈 때** 그 후보들 사이 동점 가르기.
+   *   🔴 왜 이렇게 좁히나 — 학습이 «리스티클이 제일 잘 된다»고 골격을 몰면 R8-A 의 결론(«이상적인 글 한 벌을 베끼지 마라»)을 **통째로 무르고**
+   *      곧바로 `structure_repeat` 축이 빨개져 재작성이 돌아 **돈이 두 배**가 된다(계약 §4-5 · 2026-09-15 `visualMin.faq` 와 같은 모양).
+   *   안 넘기면 종전과 똑같다(무회귀).
+   */
+  prefer?: readonly string[] | null,
 ): FormatPick {
   const fallback = pickFormat(c, recentFormats, seed, hint);
   if (hint && c.formats.includes(hint as FormatKey)) {
@@ -133,6 +141,9 @@ export function pickFormatByPrint(
     return { format: hint as FormatKey, overlap: v, compared: recentPrints.length, why: `소재·사용자가 «${hint}» 를 못 박았어요${recentPrints.length ? `(최근 ${recentPrints.length}편과 ${Math.round(v * 100)}% 겹치지만 그대로 갑니다)` : ""}` };
   }
   if (!recentPrints.length) {
+    /* [R12-10] ⓐ 견줄 글이 없다 — 여기선 학습이 겹침을 만들 수 없다(최근 글이 0편이다). 배운 것이 있으면 이름 순서보다 낫다. */
+    const learned = (prefer ?? []).find((f) => c.formats.includes(f as FormatKey)) as FormatKey | undefined;
+    if (learned) return { format: learned, overlap: 0, compared: 0, why: `견줄 최근 글이 없어 반응이 좋던 «${learned}» 로 골랐어요` };
     return { format: fallback, overlap: 0, compared: 0, why: "견줄 최근 글이 없어 이름 순서로 골랐어요" };
   }
   const scored = c.formats.map((f) => ({ f, v: overlapOf(c, f, recentPrints, shape) }));
@@ -150,8 +161,11 @@ export function pickFormatByPrint(
   /* ② 넘었다 — 가장 안 닮은 것으로 갈아탄다. 동점이면 «가장 오래 안 쓴 것»(종전 로테이션의 잣대)을 쓴다. */
   const min = Math.min(...scored.map((s) => s.v));
   const lru = (f: FormatKey) => { const i = recentFormats.indexOf(f); return i < 0 ? Number.POSITIVE_INFINITY : i; };
+  /* [R12-10] ⓑ 🔴 **여기가 학습이 들어오는 유일한 자리**다 — «가장 안 닮은 것»(`min`)으로 이미 좁혀진 뒤의 **동점 가르기**.
+     후보 집합 자체는 겹침 판정이 정한 것이라 학습이 그 판정을 이길 수 없다(`structure_repeat` 무회귀). */
+  const pref = (f: FormatKey) => { const i = (prefer ?? []).indexOf(f); return i < 0 ? Number.POSITIVE_INFINITY : i; };
   const best = scored.filter((s) => s.v === min).map((s) => s.f)
-    .sort((a, b) => (lru(b) - lru(a)) || (c.formats.indexOf(a) - c.formats.indexOf(b)));
+    .sort((a, b) => (pref(a) - pref(b)) || (lru(b) - lru(a)) || (c.formats.indexOf(a) - c.formats.indexOf(b)));
   const format = best[0];
   /* 🔴 **갈아탈 데가 없을 수도 있다** — 계약에 format 이 1종뿐인 채널(인스타)이나, 후보가 죄다 기준을 넘는 경우다.
      그때 `switched: true` 라고 적으면 «바꿨다»는 거짓말이 된다(고른 것이 종전 답 그대로다). 있는 그대로 말한다(AC-9). */
