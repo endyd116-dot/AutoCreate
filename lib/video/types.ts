@@ -124,12 +124,31 @@ export interface RenderPayload {
       strokeWidth?: number; strokeColor?: string;
       position?: "top" | "middle" | "bottom"; side?: number;
       maxCharsPerLine?: number;
+      /**
+       * [R12-1] 🔴 **자막 등장 방식** — `none`(기본 · 지금 그대로) · `fade` · `slide_up` · `pop`.
+       *   구절당 PNG 는 **여전히 한 장**이다 — ffmpeg 이 그 한 장의 **자리·투명도·크기를 시간에 따라** 바꾼다.
+       *   프레임마다 글자를 다시 그리면 **원가가 프레임 수만큼 곱해진다**(그래서 여러 장을 안 찍는다).
+       *   🔴 **길이는 payload 에 없다** — 120~200ms 안에서 러너가 정한다(길면 읽을 시간을 먹는다 · `judge.ts reading_time`).
+       *   🔴 **나가는 모션은 없다** — 다음 자막과 겹치면 두 줄이 동시에 보이고 심사의 «자막 2줄»과 싸운다.
+       *   🔴 **고지 자막·엔드카드에는 안 걸린다**(러너 `motionForLayer`) — 법이 읽는 문장을 우리가 꾸미지 않는다.
+       */
+      motion?: "none" | "fade" | "slide_up" | "pop";
     };
   };
   audio: { narration: { key: string; startMs: number }[]; bgm: { key: string; gainDb: -18 } | null; sfx: [] | null; loudnorm: { I: -16; TP: -1.5; LRA: 11 } };
   /* 🔴 `safeZone` 은 **채널마다 다르다**(`SAFE_ZONE_OF`) — 종전의 리터럴 타입 `{top:220;bottom:300}` 을 열었다.
      리터럴이면 «고치는 것» 자체가 타입 오류라, 틀린 값이 고쳐질 수 없는 상태였다. */
   overlay: { badge: { text: string; corner: "tr" } | null; safeZone: { top: number; bottom: number; side?: number }; endcard: { text: string; url?: string } | null };
+  /**
+   * [R12-2] 🔴 **컷 전환** — `none`(기본 · 딱딱 끊김 = 지금 그대로) · `fade` · `slide`.
+   *   🔴 **전환은 컷 «사이»가 아니라 컷 «안»에서 빌린다**: 각 컷을 전환 길이만큼 늘려서 겹친다 ⇒ **전체 길이 불변**.
+   *      길이가 밀리면 코인이 틀어진다(길이 구간제) — 0.3초 × 12컷 = 3.6초가 사라지는 것을 막는 것이 이 규칙이다.
+   *   🔴 **나레이션·자막 시각은 안 건드린다** — 전환은 **그림에만** 건다.
+   *   🔴 **길이 칸이 없다**(러너 상수 0.3초 · 상한 0.4초) · 컷이 0.8초보다 짧으면 그 경계는 **건너뛴다**.
+   *   ⚠️ `xfade` 는 ffmpeg **4.3 이상**이다 — 러너가 `-filters` 로 **실제로 있는지 재고**, 없으면 `none` 으로 내려앉히고
+   *      «이 컴퓨터의 ffmpeg 가 낮아서 전환 없이 만들었어요»를 `notes` 에 적는다. **막지 않는다** — 영상은 나간다(CLAUDE §9).
+   */
+  transition?: "none" | "fade" | "slide";
   /** 어느 채널로 나가는가 — 안전영역 판정이 이걸로 갈린다(없으면 가장 보수적인 값). */
   channel?: VideoChannel;
   disclosureCaption: { text: string; untilMs: 3000 } | null;

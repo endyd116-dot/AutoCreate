@@ -41,9 +41,12 @@ export interface TemplateStyle {
    *
    *   원칙(설계 §2.2 · B2 실측 2026-09-16): **우리가 못 내는 축은 배우지 않는다 — 배워도 장식이다.**
    *   ⇒ 아래는 전부 **지금 렌더가 받을 수 있는 축**이다(자막이 HTML/CSS 라 원리상 되고, 상수를 값으로 열었다).
-   *   🔴 **일부러 뺀 둘**: `captionMotion`(글자 등장 방식) · `transition`(컷 전환).
-   *      자막은 구절당 PNG **한 장**이라 «애니메이션 도중» 프레임이 없고, 씬은 `concat` 으로만 이어 하드컷뿐이다.
-   *      만들려면 **렌더 구조를 바꿔야** 하고 그건 따로 잡는 일이다(계약서 §3.2 R11). 배울 칸에서 뺀다.
+   *   🔴 **[R12] 그 «일부러 뺀 둘»이 이제 열렸다** — `captionMotion`(글자 등장 방식) · `transition`(컷 전환).
+   *      R10 까지의 사유는 「자막은 구절당 PNG 한 장이라 «애니메이션 도중» 프레임이 없고, 씬은 `concat` 뿐이라 하드컷」이었다.
+   *      R12 가 **그 구조를 바꿨다**: PNG 는 여전히 **한 장**이고 **ffmpeg 가 그 한 장의 자리·투명도·크기를 시간에 따라 바꾼다**,
+   *      전환은 **컷 «안»에서 빌려** `xfade` 로 겹친다(전체 길이 불변). ⇒ 이제 «낼 수 있는 축»이라 배운다.
+   *      🔴 **열린 만큼만 배운다** — 모션 넷(`none|fade|slide_up|pop`) · 전환 셋(`none|fade|slide`). 그 밖은 `undefined` 로 떨어지고
+   *      `reference-apply.ts` 가 «못 내요»로 적는다(배워 와도 **우리가 못 내면 장식**이다).
    *   🔴 전부 **선택**이다 — 모델이 못 읽으면 `undefined` 고, 그게 «못 읽었다»다. 기본값으로 메우지 않는다(AC-92).
    */
   /** 자막 글자(굵기 100~900 · 외곽선 px · 그림자 세기 0~3). 렌더가 CSS 로 그대로 그린다. */
@@ -61,6 +64,20 @@ export interface TemplateStyle {
    *   ⇒ 배워서 저장하고 `refUnused` 에 «아직 반영 안 함»으로 남긴다. 반영은 다음 라운드(R11).
    */
   audioTempo?: number;
+  /**
+   * [R12-1] 자막 글자 등장 방식 — 🔴 **우리가 낼 수 있는 넷만**. 기본은 `none`(= 지금 그대로 · 무회귀).
+   *   `fade` 서서히 · `slide_up` 아래에서 올라옴 · `pop` 톡 튀어나옴.
+   *   🔴 **다섯째는 없다.** «타자기처럼 한 글자씩»을 배워 와도 우리가 못 내므로 `undefined` 로 떨어뜨리고 «못 내요»로 적는다(AC-9).
+   *   🔴 **나가는 모션(퇴장)은 배우지 않는다** — 다음 자막과 겹치면 두 줄이 동시에 보이고, 그건 심사(`judge.ts`)의 «자막 2줄» 규칙과 싸운다.
+   *   🔴 **모션 «길이»도 배우지 않는다** — 120~200ms 안에서 우리가 정한다. 길면 **읽을 시간을 먹는다**(`judge.ts` `reading_time`).
+   */
+  captionMotion?: "none" | "fade" | "slide_up" | "pop";
+  /**
+   * [R12-2] 컷 전환 — 🔴 **셋만**. 기본은 `none`(딱딱 끊김 = 지금 그대로 · 무회귀).
+   *   🔴 **길이는 배우지 않는다**(러너가 0.3초로 정하고 상한 0.4초). 컷 «사이»가 아니라 컷 «안»에서 빌리므로 **전체 길이가 안 바뀐다**.
+   *   ⚠️ `xfade` 는 ffmpeg **4.3 이상**이다 — 고객 PC 가 못 내면 러너가 `none` 으로 내려앉히고 «못 냈어요»를 적는다(**막지는 않는다** · CLAUDE §9).
+   */
+  transition?: "none" | "fade" | "slide";
 }
 export interface ShortsTemplate {
   id: number;
@@ -145,6 +162,12 @@ export function sanitizeTemplate(raw: unknown): { name: string; structure: strin
   if (design) style.design = design;
   const tempo = num(vg.audioTempo, 0.5, 2.0);
   if (tempo !== undefined) style.audioTempo = tempo;
+  /* [R12-1·2] 🔴 **닫힌 어휘**다 — 목록 밖 값은 `undefined` 로 떨어진다(«타자기»·«와이프»를 배워 와도 **자리가 없다**).
+     그 «못 읽음»은 `reference-apply.ts` 가 «못 내요»로 옮겨 적는다(조용히 버리지 않는다 · AC-9). */
+  const capMotion = pick(vg.captionMotion, ["none", "fade", "slide_up", "pop"] as const);
+  if (capMotion !== undefined) style.captionMotion = capMotion;
+  const trans = pick(vg.transition, ["none", "fade", "slide"] as const);
+  if (trans !== undefined) style.transition = trans;
   return { name: line(r.name ?? r.title ?? st.title, 80) || "구조 템플릿", structure, hookType, style };
 }
 
@@ -179,16 +202,20 @@ JSON 스키마:
     "captionPlace":{"position": "top|middle|bottom", "maxCharsPerLine": "자막 한 줄 글자 수(세어 본 값)", "accentColor": "강조 낱말 색 #RRGGBB"},
     "speed":       {"secPerCut": "컷 하나가 머무는 초(재 본 값)", "totalSec": "영상 전체 길이 초"},
     "design":      {"colorCount": "화면에 쓰는 색 가짓수", "sideMargin": "자막 좌우 여백 px(1080 폭 기준 환산)"},
-    "audioTempo":  "말 속도 배수 0.5~2.0(보통이면 1.0)"
+    "audioTempo":  "말 속도 배수 0.5~2.0(보통이면 1.0)",
+
+    "captionMotion": "자막 글자가 나타나는 방식 — none|fade|slide_up|pop 중 하나만",
+    "transition":    "컷이 바뀌는 방식 — none|fade|slide 중 하나만"
   }
 }
 
 🔴 **모르면 그 키를 빼라. 지어내지 마라.** 「보통」·「평범」으로 메운 값은 **틀린 값보다 나쁘다** —
    우리가 그걸 «재 봤더니 그렇더라»로 믿고 영상에 그대로 넣는다.
 
-🔴 **묻지 않는 것 둘**(일부러 뺐다): **글자 등장 방식(모션)** 과 **컷 전환(디졸브·슬라이드·와이프)**.
-   우리 렌더가 낼 수 없다 — 자막은 구절당 정지 PNG 한 장이고, 씬은 이어 붙이기만 해서 전부 하드컷이다.
-   배워 와도 넣을 데가 없으니 **묻지 않는다**(물으면 토큰만 쓰고 «못 냈어요» 칸만 늘어난다).`;
+🔴 **captionMotion·transition 은 위 목록 밖 값을 쓰지 마라.** 「타자기처럼 한 글자씩」·「와이프」·「줌 전환」처럼
+   목록에 없는 것을 봤으면 **그 키를 빼라** — 억지로 비슷한 것을 고르면 우리는 못 내고 **배운 척만** 남는다.
+🔴 **자막이 «사라지는» 방식은 묻지 않는다** — 우리는 들어오는 것만 낸다(나가는 모션은 다음 자막과 겹친다).
+🔴 **모션·전환의 «길이»는 묻지 않는다** — 그건 우리가 정한다.`;
 
 /** 스텁(계약 §1.4b) — 실호출 없이 고정 구조. 저장 모양·게이트는 실경로와 같게 통과시킨다. */
 function stubRaw(): unknown {

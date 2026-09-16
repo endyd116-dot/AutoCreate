@@ -190,9 +190,22 @@ console.log("\n⑦ 🔴 사슬 — **제품이 정말 부르나**(순수 함수 
   ok("대본 프롬프트가 훅 원리를 쓴다", /inp\.hookPrinciple/.test(scr));
 
   /* [R10-6] 🔴 **자막 모양 사슬** — 배워서 → 걸러서 → payload 로 → 러너가 CSS 로 그린다. 네 칸 중 하나라도 비면 장식이다. */
-  ok("🔴 gen 이 자막 모양을 render payload 에 싣는다",
-    /captions:\s*\{[^}]*refStyle\?\.captionType/.test(gen),
+  /* [R12-1] 🔴 자막 **모양**과 **등장 방식**이 한 칸(`captions.type`)으로 합쳐졌다 — `capType` 가 그 자리다. */
+  ok("🔴 gen 이 자막 모양·모션을 한 칸으로 묶는다",
+    /const capType = refStyle\?\.captionType \|\| refStyle\?\.captionMotion/.test(gen),
+    "capType 를 안 만든다 — 모양과 모션이 두 칸으로 갈리면 렌더가 둘을 따로 읽다 어긋난다");
+  ok("🔴 그리고 그 칸을 render payload 에 싣는다",
+    /captions:\s*\{[^}]*capType \? \{ type: capType \}/.test(gen),
     "captions 에 type 이 안 실린다 — reference-apply 가 만든 값을 아무도 안 부른다(AC-69)");
+  ok("🔴 컷 전환도 payload 에 싣는다",
+    /refStyle\?\.transition \? \{ transition: refStyle\.transition \}/.test(gen),
+    "transition 이 payload 에 안 실린다 — 러너가 읽을 값이 없다(AC-69)");
+  ok("🔴 말 속도를 TTS 에 실제로 넘긴다",
+    /tempo: plan\.tempo/.test(gen) && /resolveNarrationTempo\(refStyle\?\.audioTempo\)/.test(gen),
+    "TTS 호출에 tempo 가 없다 — R10 의 «저장까지»에서 한 발도 안 나간 것이다");
+  ok("🔴 컷 하한을 실제로 먹인다",
+    /applyCutFloor\(windows0,/.test(gen) && /refStyle\?\.minCutMs/.test(gen),
+    "applyCutFloor 를 안 부른다");
   const rv = code("runner/channels/render-video.mjs");
   ok("🔴 러너가 그 값을 실제로 CSS 에 쓴다",
     /const t = captions\?\.type \?\? \{\}/.test(rv) && /font-weight:\$\{weight\}/.test(rv),
@@ -218,12 +231,19 @@ console.log("\n⑦ 🔴 사슬 — **제품이 정말 부르나**(순수 함수 
       html.slice(html.indexOf("#cap{"), html.indexOf("#cap{") + 240));
   }
 
-  /* 🔴 **못 낸 축은 프롬프트에서 묻지도 않는다** — 물으면 토큰만 쓰고 «못 냈어요» 칸만 늘어난다. */
+  /* 🔴 **낼 수 있는 축만 묻는다** — 물어서 못 내면 토큰만 쓰고 «못 냈어요» 칸만 늘어난다.
+     [R12 · 2026-09-17] 🔴 **이 축을 뒤집었다.** R10 까지는 모션·전환을 «묻지 않는다»가 맞았다(렌더가 못 냈다).
+     R12 가 렌더 구조를 바꿨다 ⇒ 이제 **물어야 맞다.** 대신 «목록 밖 값은 빼라»를 같이 말해야 한다
+     (닫힌 어휘 없이 물으면 «타자기»·«와이프»가 들어와 `unused` 만 불린다). */
   const refSrc = readFileSync("lib/video/reference.ts", "utf8");
   const prompt = refSrc.slice(refSrc.indexOf("const ANALYZE_PROMPT"), refSrc.indexOf("function stubRaw"));
-  ok("🔴 자막 모션·컷 전환은 **묻지 않는다**(우리 렌더가 못 내는 축이라 배워도 장식이다)",
-    !/captionMotion|transition|디졸브|슬라이드|와이프|등장 방식/.test(prompt.replace(/묻지 않는 것[\s\S]*$/, "")),
-    "프롬프트가 아직 모션·전환을 묻는다");
+  ok("🔴 자막 모션·컷 전환을 **묻는다**(R12 가 렌더 구조를 바꿔 이제 낼 수 있다)",
+    /captionMotion/.test(prompt) && /transition/.test(prompt),
+    "프롬프트가 아직 모션·전환을 안 묻는다 — 낼 수 있는데 안 배우면 그것도 장식이다");
+  ok("🔴 그리고 **닫힌 어휘**를 같이 말한다(넷·셋 밖은 자리가 없다)",
+    /none\|fade\|slide_up\|pop/.test(prompt) && /none\|fade\|slide/.test(prompt) && /목록 밖 값을 쓰지 마라/.test(prompt));
+  ok("🔴 **나가는 모션·길이는 여전히 안 묻는다**(겹치면 자막 2줄과 싸우고, 길이는 우리가 정한다)",
+    /사라지는» 방식은 묻지 않는다/.test(prompt) && /길이»는 묻지 않는다/.test(prompt));
   ok("🔴 그리고 «모르면 키를 빼라»고 말한다(지어낸 «보통» 이 틀린 값보다 나쁘다)", /지어내지 마라/.test(prompt));
 }
 

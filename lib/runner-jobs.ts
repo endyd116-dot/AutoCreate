@@ -916,7 +916,17 @@ export function mergeRunnerFormatMarks(prev: unknown, fm: RunnerFormatMarks): Re
     ...(Number(fm.htmlMode ?? 0) > 0 ? { htmlMode: Number(fm.htmlMode) } : {}),
     /* 🔴 **못 쟀으면 키를 안 만든다** — `bleed: null` 로 적으면 «쟀는데 깨끗했다»로 읽힌다(AC-92). */
     ...(fm.bleed ? { bleed: fm.bleed } : {}),
-    demoted: [...prevDemoted.filter((d) => d?.by !== "runner"), ...runnerDemoted].slice(0, 80),
+    /* 🔴 [R12-5 · 2026-09-17] **상한이 «앞에서부터 자르기»면 뒤엣것이 통째로 사라진다.**
+       종전엔 `[...서버것, ...러너것].slice(0, 80)` 이었다 — 서버 강등이 80개를 채우면 **러너 강등이 한 건도 안 들어온다.**
+       R12-5 가 목록·표 «안»의 마크를 열어 **마크 수가 늘었다**(B 가 상한을 글 전체 합으로 세지만 자리 수 자체가 늘었다)
+       ⇒ 그 일이 실제로 일어날 수 있는 크기가 됐다. 조용히 사라지면 그게 AC-9 다.
+       🔴 **양쪽에서 40씩** 남기고, **깎인 수를 적는다**(화면이 «그 밖 N곳»을 말할 수 있게). */
+    demoted: [...prevDemoted.filter((d) => d?.by !== "runner").slice(0, 40), ...runnerDemoted.slice(0, 40)],
+    ...(() => {
+      const kept = Math.min(40, prevDemoted.filter((d) => d?.by !== "runner").length) + Math.min(40, runnerDemoted.length);
+      const all = prevDemoted.filter((d) => d?.by !== "runner").length + runnerDemoted.length;
+      return all > kept ? { demotedMore: all - kept } : {};
+    })(),
     runnerReportedAt: new Date().toISOString(),
   };
   return out;
