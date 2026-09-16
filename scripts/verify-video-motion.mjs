@@ -39,6 +39,7 @@ import { dirname, join } from "node:path";
 import {
   buildRenderArgs, planTransitions, motionForLayer,
   CAPTION_MOTION_MS, CAPTION_MOTION_MIN_WINDOW_MS, TRANSITION_MS, TRANSITION_MIN_CUT_MS,
+  pickVerifyLayer,
 } from "../runner/channels/render-video.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -266,6 +267,29 @@ console.log("⑦ 🔴 오버레이가 **정말 얹히나** — `eof_action` 은 
   ].map(({ args }) => args[args.indexOf("-filter_complex") + 1]);
   ok("어느 갈래에도 `eof_action=pass` 가 없다", all.every((fc) => s_count(fc, "eof_action=pass") === 0), all.join(" || "));
   ok("모든 overlay 가 `eof_action=repeat` 이다", all.every((fc) => s_count(fc, "overlay") === s_count(fc, "eof_action=repeat")), all.join(" || "));
+}
+
+console.log("⑧ 🔴 «오버레이가 정말 실렸나» 확인기 — 재는 자리가 맞나");
+{
+  /* 🔴 **이 축이 있는 까닭**(2026-09-17 실측): 처음 만든 확인기는 «층을 통째로 빼고» 견줬는데,
+       그러면 `overlay` 필터가 **사라져** 색공간 왕복이 한 번 줄고 **아무것도 안 그려도 픽셀이 달라진다**
+       ⇒ «달라졌으니 그려졌다»가 늘 참이 되어 **옛 `eof_action=pass` 판을 못 잡았다**(실물로 확인했다).
+       ⇒ 기준판은 **층을 두고 창만 출력 밖으로 민다** — 필터 사슬의 «모양»이 같아야 차이가 하나로 좁혀진다. */
+  const ctxV = fixture({ layers: [{ file: "ov.png", role: "disclosure", startMs: 1000, endMs: 3000, motion: "none" }], narration: [] });
+  const { args: withA } = buildRenderArgs({ ...ctxV, rawProbe: { atSec: 2.0 } });
+  const { args: farA } = buildRenderArgs({ ...ctxV, layers: [{ ...ctxV.layers[0], startMs: 15000, endMs: 17000 }], rawProbe: { atSec: 2.0 } });
+  ok("날 프레임으로 뽑는다(rawvideo · rgb24)", withA.includes("rawvideo") && withA.includes("rgb24"), withA.join(" "));
+  ok("🔴 **x264 를 안 태운다**(태우면 율 제어가 달라 늘 «그려졌다»가 된다)", !withA.includes("libx264"), withA.join(" "));
+  ok("오디오를 안 싣는다(확인에 필요 없다)", !withA.includes("[aout]"), withA.join(" "));
+  const fcW = withA[withA.indexOf("-filter_complex") + 1], fcF = farA[farA.indexOf("-filter_complex") + 1];
+  ok("🔴 기준판은 **필터 수가 같다**(층을 빼지 않는다)", s_count(fcW, "overlay") === 1 && s_count(fcF, "overlay") === 1, fcW + " || " + fcF);
+  ok("🔴 그리고 **창만 다르다**", fcW !== fcF && fcW.includes("between(t,1.000,3.000)") && fcF.includes("between(t,15.000,17.000)"), fcW + " || " + fcF);
+
+  /* 🔴 **법이 읽는 것부터 확인한다** — 고지 → 배지 → 구절. */
+  eq("고지 층이 있으면 그것으로 잰다", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 2000 }, { role: "disclosure", startMs: 0, endMs: 3000 }]), 1);
+  eq("고지가 없으면 배지", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 2000 }, { role: "badge", startMs: 0, endMs: 5000 }]), 1);
+  eq("둘 다 없으면 구절", pickVerifyLayer([{ role: "phrase", startMs: 0, endMs: 2000 }]), 0);
+  eq("🔴 층이 없으면 -1 — 키를 아예 안 보낸다(«확인할 게 없다»와 «못 쟀다»는 다르다)", pickVerifyLayer([]), -1);
 }
 
 console.log(`\n${fail === 0 ? "초록" : "빨강"} — 통과 ${pass} · 실패 ${fail}`);

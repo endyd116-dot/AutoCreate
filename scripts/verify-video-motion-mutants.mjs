@@ -61,6 +61,8 @@ const MUTANTS = [
   { name: "모르는 전환 이름도 그대로 낸다", from: "if (!TRANSITION_XFADE[k] || n < 2) return off;", to: "if (n < 2) return off;", want: 1, why: "③ 못 냈어요" },
   { name: "안 켜도 모션 필터를 붙인다(무회귀 깨기)", from: "const m = deco ? l.motion : \"none\";", to: "const m = l.motion;", want: 2, why: "① 무회귀 — 🔴 본문 2곳(입력 조립·필터 조립)이라 **want=2 가 정상**이다" },
   { name: "오버레이를 `eof_action=pass` 로 되돌린다", from: "eof_action=repeat", to: "eof_action=pass", want: 1, why: "⑦ 오버레이가 정말 얹히나 — 🔴 단일 프레임은 t=0 에 EOF 라 pass 면 자막·고지가 통째로 사라진다" },
+  { name: "확인기 날 프레임 갈래를 없앤다(x264 를 태운다)", from: "if (ctx.rawProbe) {", to: "if (false) {", want: 1, why: "⑧ 확인기 — 🔴 인코딩을 태우면 율 제어가 달라 늘 «그려졌다»가 된다" },
+  { name: "확인기가 고지 말고 아무 층이나 고른다", from: 'for (const r of ["disclosure", "badge"]) { const i = byRole(r); if (i >= 0) return i; }', to: "", want: 1, why: "⑧ 법이 읽는 것부터" },
   { name: "영상 조각을 안 늘린다(tpad 제거)", from: "ext > 0 && s.isClip", to: "false", want: 1, why: "② 전체 길이 불변" },
 ];
 

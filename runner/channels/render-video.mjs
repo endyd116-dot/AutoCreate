@@ -505,11 +505,81 @@ export function buildRenderArgs(ctx) {
   }
 
   args.push("-filter_complex", fc.join(";"), "-map", "[vout]");
+  /* 🔴 [R12 · `overlayVerified`] **날 프레임 한 장만 뽑는 갈래.**
+     x264 를 **안 태운다** — 태우면 `-t` 가 다른 두 판이 **율 제어부터 갈려** 오버레이와 상관없이 프레임이 달라진다
+     (그러면 «달라졌으니 그려졌다»가 **늘 참**이 되어 검사가 거저 초록이 된다 · AC-78 의 인코더판).
+     `-map` 뒤의 `-ss` 는 **출력 쪽 건너뛰기**라 필터 그래프를 그대로 지나온 프레임을 집는다. */
+  if (ctx.rawProbe) {
+    args.push("-ss", Number(ctx.rawProbe.atSec).toFixed(3), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", outPath);
+    return { args, tr };
+  }
   if (alabels.length) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
   else args.push("-an");
   args.push("-c:v", "libx264", ...X264, "-pix_fmt", "yuv420p", "-r", String(out.fps),
     "-t", bodySec.toFixed(3), "-movflags", "+faststart", outPath);
   return { args, tr };
+}
+
+/**
+ * verifyOverlayDrawn — 🔴 **오버레이가 «나온 그림»에 정말 있나.** 계획서를 안 본다(AC-33).
+ *
+ *   ══ 왜 이게 있나 ══
+ *     2026-09-17 에 `eof_action=pass` 탓에 **자막·제휴 고지·배지·엔드카드가 첫 프레임에만** 있었다.
+ *     그런데 심사(`judge.ts disclosure`)가 보는 것은 `payload.disclosureCaption.text` — **계획서**다.
+ *     ⇒ **고지가 통째로 안 실린 영상에 «고지 ✅»가 찍혔다.** 법으로 정해진 대가 표시라 그 도장이 제일 비싸다.
+ *
+ *   ══ 어떻게 재나 — 🔴 **한 층만 빼고 같은 그래프를 두 번 지나가 본다** ══
+ *     ① 그 층이 **있는** 그래프에서 시각 T 의 날 프레임 한 장
+ *     ② 그 층만 **뺀** 그래프에서 같은 T 의 날 프레임 한 장
+ *     두 판의 차이는 **그 층 하나뿐**이다 ⇒ 바이트가 같으면 **안 그려진 것**이다.
+ *   🔴 x264 를 안 태운다 — 태우면 율 제어 때문에 오버레이와 무관하게 달라져 **늘 «그려졌다»**가 된다.
+ *   🔴 T 는 창 **한참 안쪽**으로 잡는다 — 모션(`fade`)은 시작 순간 투명도가 0 이라 그 자리에서 재면
+ *      «안 그려졌다»가 나온다(맞는 말이지만 우리가 묻는 것이 아니다).
+ *   🔴 못 재면 **`undefined`**(«못 쟀다»)다 — `false`(«재 봤고 없다»)로 바꾸지 않는다. 둘은 다른 사실이다(AC-9).
+ */
+async function verifyOverlayDrawn(bin, dir, ctxArgs, layerIdx) {
+  const l = ctxArgs.layers[layerIdx];
+  if (!l) return undefined;
+  const win = Math.max(0, Number(l.endMs) - Number(l.startMs));
+  if (win < 200) return undefined;                       // 너무 짧아 프레임 경계를 못 고른다 — 못 쟀다
+  /* 창 안쪽 · 모션이 끝난 뒤 · 창 끝에서 한 프레임 물러선 자리. */
+  const atMs = Number(l.startMs) + Math.min(Math.max(CAPTION_MOTION_MS * 2, Math.floor(win / 2)), Math.max(1, win - 80));
+  const atSec = atMs / 1000;
+  const withF = join(dir, "ovchk-with.raw");
+  const withoutF = join(dir, "ovchk-without.raw");
+  try {
+    const a = buildRenderArgs({ ...ctxArgs, outPath: withF, rawProbe: { atSec } });
+    /* 🔴 **층을 빼지 않는다 — 창만 옮긴다.**
+       실측(2026-09-17 B2): 층을 통째로 빼면 `overlay` 필터가 **사라지고**, 그러면 색공간 왕복이 한 번 줄어
+       **아무것도 안 그려도 픽셀이 달라진다** ⇒ «달라졌으니 그려졌다»가 늘 참이 되어 검사가 **거저 초록**이 된다.
+       (실제로 그랬다: 옛 `eof_action=pass` 판을 그 방식으로 재 봤더니 **못 잡았다.**)
+       ⇒ 필터 사슬의 **모양은 그대로 두고** 그 층의 창만 출력 밖으로 민다. 그러면 두 판의 차이가
+       «그 시각에 그 층이 합성됐나» **하나뿐**이 된다. */
+    const far = Math.round((Number(ctxArgs.bodySec) || 0) * 1000) + 10_000;
+    const shifted = ctxArgs.layers.map((x, i) => (i === layerIdx ? { ...x, startMs: far, endMs: far + win } : x));
+    const b = buildRenderArgs({ ...ctxArgs, layers: shifted, outPath: withoutF, rawProbe: { atSec } });
+    await runFfmpeg(bin, a.args, 120_000);
+    await runFfmpeg(bin, b.args, 120_000);
+    if (!existsSync(withF) || !existsSync(withoutF)) return undefined;
+    const x = readFileSync(withF), y = readFileSync(withoutF);
+    if (!x.length || x.length !== y.length) return undefined;   // 크기가 다르면 우리가 뭘 잘못 뽑은 것이다 — «없다»가 아니다
+    return !x.equals(y);
+  } catch {
+    return undefined;                                    // 🔴 못 쟀다. «없다»가 아니다
+  } finally {
+    for (const f of [withF, withoutF]) { try { rmSync(f, { force: true }); } catch { /* 무시 */ } }
+  }
+}
+
+/**
+ * 어느 층으로 확인하나 — 🔴 **법이 읽는 것부터**. 고지 자막 → 배지 → 첫 구절 자막.
+ *   🔴 층이 하나도 없으면 `-1` 이고, 그때는 **키를 아예 안 보낸다**(«확인할 것이 없다»와 «못 쟀다»는 다르다).
+ */
+export function pickVerifyLayer(layers) {
+  const L = Array.isArray(layers) ? layers : [];
+  const byRole = (r) => L.findIndex((x) => x && x.role === r);
+  for (const r of ["disclosure", "badge"]) { const i = byRole(r); if (i >= 0) return i; }
+  return L.length ? L.findIndex((x) => x && (x.endMs - x.startMs) >= 200) : -1;
 }
 
 export async function run({ ctx, job, shotKey, dryRun }) {
@@ -551,7 +621,7 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     await page.goto(pathToFileURL(pagePath).href, { waitUntil: "load", timeout: 30_000 });
     await page.evaluate(() => window.__ready);
 
-    const layers = [];   // { file, startMs, endMs, motion }
+    const layers = [];   // { file, role, startMs, endMs, motion } — 🔴 `role` 은 «무엇을 먼저 확인하나»를 고르는 데 쓴다(법이 읽는 것부터)
     const phrases = p.captions?.phrases ?? [];
     const hasBadge = !!p.overlay?.badge?.text;
     /* [R10-6] 한 줄 글자 수 상한 — 🔴 **서버가 줄 때만** 끊는다(안 주면 지금까지와 똑같다 · AC-92). */
@@ -575,7 +645,7 @@ export async function run({ ctx, job, shotKey, dryRun }) {
       writeFileSync(f, await page.screenshot({ type: "png", omitBackground: true }));
       const startMs = Math.max(0, Number(ph.startMs) || 0);
       const endMs = Math.max(0, Number(ph.endMs) || 0);
-      layers.push({ file: f, startMs, endMs, motion: motionForLayer("phrase", endMs - startMs, wantMotion) });
+      layers.push({ file: f, role: "phrase", startMs, endMs, motion: motionForLayer("phrase", endMs - startMs, wantMotion) });
     }
     // 시작 3초 제휴 고지(§16B) — 자막과 같은 자리에 먼저 얹는다.
     if (p.disclosureCaption?.text) {
@@ -583,7 +653,7 @@ export async function run({ ctx, job, shotKey, dryRun }) {
       const f = join(dir, "ov-disc.png");
       writeFileSync(f, await page.screenshot({ type: "png", omitBackground: true }));
       /* 🔴 `motionForLayer` 가 여기엔 언제나 `none` 을 준다 — **대조군이 같은 영상 안에 있다**(AC-68). */
-      layers.unshift({ file: f, startMs: 0, endMs: Math.max(1000, Number(p.disclosureCaption.untilMs) || 3000), motion: motionForLayer("disclosure", 3000, wantMotion) });
+      layers.unshift({ file: f, role: "disclosure", startMs: 0, endMs: Math.max(1000, Number(p.disclosureCaption.untilMs) || 3000), motion: motionForLayer("disclosure", 3000, wantMotion) });
     }
     const totalMs = sceneFiles.reduce((a, s) => a + s.durMs, 0);
     /* 떼어 낸 배지 — 영상 내내 고정(모션 0). 자막보다 **먼저** 얹어 자막이 위로 오게 한다. */
@@ -591,13 +661,13 @@ export async function run({ ctx, job, shotKey, dryRun }) {
       await page.evaluate(([html, opts]) => window.__show(html, opts), ["", { badge: true, endcard: false }]);
       const f = join(dir, "ov-badge.png");
       writeFileSync(f, await page.screenshot({ type: "png", omitBackground: true }));
-      layers.unshift({ file: f, startMs: 0, endMs: totalMs, motion: "none" });
+      layers.unshift({ file: f, role: "badge", startMs: 0, endMs: totalMs, motion: "none" });
     }
     if (p.overlay?.endcard?.text) {
       await page.evaluate(([html, opts]) => window.__show(html, opts), ["", { badge: false, endcard: true }]);
       const f = join(dir, "ov-end.png");
       writeFileSync(f, await page.screenshot({ type: "png", omitBackground: true }));
-      layers.push({ file: f, startMs: Math.max(0, totalMs - 2500), endMs: totalMs, motion: motionForLayer("endcard", 2500, wantMotion) });
+      layers.push({ file: f, role: "endcard", startMs: Math.max(0, totalMs - 2500), endMs: totalMs, motion: motionForLayer("endcard", 2500, wantMotion) });
     }
     await shot(page, shotKey, "01-오버레이");
 
@@ -647,6 +717,14 @@ export async function run({ ctx, job, shotKey, dryRun }) {
       await runFfmpeg(bin, built.args);
     }
     const decoApplied = deco;
+    /* 🔴 [R12] **오버레이가 나온 그림에 정말 있나** — 심사가 계획서만 보던 자리를 러너가 **재서** 메운다(AC-33).
+       못 재면 `undefined` 를 보내고, 서버는 그걸 «아직 못 쟀어요»(pending)로 그린다 — **«괜찮다»가 아니다.**
+       🔴 **막지 않는다**(§9): 여기서 `false` 가 나와도 영상은 그대로 올라가고, 서버가 그 사실을 말할 뿐이다. */
+    const verifyIdx = pickVerifyLayer(layers);
+    const overlayVerified = verifyIdx >= 0
+      ? await verifyOverlayDrawn(bin, dir, { sceneFiles, layers, narration, bgm, out, outPath, bodySec, deco: decoApplied, wantTransition, payload: p }, verifyIdx)
+      : undefined;
+    if (overlayVerified === false) decoNotes.push(`«${layers[verifyIdx]?.role ?? "자막"}»이 영상에 안 실렸어요 — 올리기 전에 확인해 주세요.`);
     if (!existsSync(outPath) || statSync(outPath).size < 1024) throw BLOCK("encode", "영상이 만들어지지 않았어요(빈 파일).");
 
     /* ⑤ 포스터 — 후보 몇 장을 뽑아 **가장 선명한** 1장. */
@@ -689,6 +767,9 @@ export async function run({ ctx, job, shotKey, dryRun }) {
         frameCount: m?.frameCount || Math.round((planMs / 1000) * out.fps),
         ...(m ? { containerMs: m.containerMs, videoMs: m.videoMs, audioMs: m.audioMs, plannedMs: planMs, measured: true } : {}),
         ...(thumbGray ? { thumbGray } : {}),
+        /* 🔴 **못 쟀으면 키를 아예 안 보낸다** — `false` 로 메우면 «재 봤고 없다»가 되어 심사가 **떨어뜨린다**.
+           «못 쟀다»와 «없다»는 다른 사실이다(AC-9 · `thumbGray` 와 같은 규칙). */
+        ...(typeof overlayVerified === "boolean" ? { overlayVerified } : {}),
         ffmpegVersion: _version || undefined,
       },
       notes: [`${sceneFiles.length}장면 · 자막 ${layers.length} · ${(bytes / 1024 / 1024).toFixed(1)}MB`,
@@ -696,6 +777,8 @@ export async function run({ ctx, job, shotKey, dryRun }) {
           : "ffprobe 없음 — 길이는 계획값(심사는 꼬리 판정을 보류한다)",
         /* [R12-1·2] 🔴 **낸 것과 못 낸 것을 둘 다 적는다** — «걸었다»만 적으면 못 걸었을 때가 안 보이고,
            «못 걸었다»만 적으면 걸렸는지 아무도 모른다(AC-9 · 서버가 이 줄을 화면 문장으로 옮긴다). */
+        overlayVerified === true ? `자막·고지가 영상에 실린 것을 확인했어요(«${layers[verifyIdx]?.role ?? "자막"}» 층으로 쟀어요)`
+          : overlayVerified === false ? null : "자막이 영상에 실렸는지는 못 쟀어요",
         decoApplied && motionOn ? `자막 움직임: ${wantMotion}` : null,
         decoApplied && wantTransitionOn && built.tr.ms ? `컷 전환: ${wantTransition}(${built.tr.ms}ms · ${built.tr.at.filter(Boolean).length}군데)` : null,
         ...decoNotes,
