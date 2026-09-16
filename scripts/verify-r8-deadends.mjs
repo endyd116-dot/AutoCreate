@@ -203,6 +203,8 @@ const TARGETS = [
   ["워드프레스 고급 — 사이드바 위젯(R12-9)", "ensureLatestPostsWidget", "lib/publish/wp-advanced.ts", "만들어 놓고 발행이 안 불러 사이드바가 영영 비어 있다(내부 링크 0)"],
   ["워드프레스 고급 — 빵부스러기(R12-9)", "breadcrumbJsonLd", "lib/publish/wp-advanced.ts", "«구조화 데이터를 넣었다»는데 본문엔 Article 한 덩이뿐인 상태로 돌아간다"],
   ["워드프레스 고급 — 발행처 이름(R12-9)", "publisherOf", "lib/publish/wp-advanced.ts", "Article 에 publisher 가 안 붙는다(그리고 빈 이름을 막는 문이 없어진다)"],
+  /* [R12 마감] 🔴 고지 축 판정을 **순수로 뺀 것 자체**가 이 자리의 값이다 — 안에 박혀 있으면 «안 떠야 할 때 안 뜨나»를 못 잰다(B2 지적). */
+  ["🔴 고지 축 판정(순수)", "disclosureVerdict", "lib/video/judge.ts", "판정이 다시 judgeVideo 안으로 들어가 **대조군을 못 재는** 상태가 된다 — 어제 이 축이 거짓 초록이던 까닭이 그것이다"],
 ];
 
 for (const [label, sym, owner, harm, mode] of TARGETS) {

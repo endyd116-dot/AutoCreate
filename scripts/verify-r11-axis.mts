@@ -29,6 +29,7 @@ import { applyMarkBudget, stripUnsupportedMarks, countMarks } from "../lib/forma
 import type { StatBucket } from "../lib/outcomes";
 import { breadcrumbJsonLd, publisherOf, jsonLdScript, isOurWidget, widgetBlockHtml, ensureLatestPostsWidget, WP_WIDGET_INSTANCE } from "../lib/publish/wp-advanced";
 import type { PublishPiece } from "../lib/publish/contract";
+import { disclosureVerdict } from "../lib/video/judge";
 
 /** 🔴 `renderBlocksHtml` 은 본문에 **광고 자리**를 끼워 넣는다(`insertAdSlots`) — 꾸밈을 견주는 자리에선 그걸 떼고 본다.
  *  ⚠️ 이 줄도 «원판 줄을 먼저 찍어» 알았다: 첫 판은 광고 자리를 안 떼서 **멀쩡한 코드가 빨갛게** 나왔다(AC-100 ⑦). */
@@ -311,6 +312,38 @@ console.log("\n══ ⑫ 워드프레스 위젯 — 🔴 «없는 길»과 «�
     return { status: 200, json: [{ id: "sidebar-1", widgets: [] }] };
   });
   ok("🔴 대조군 · 비어 있으면 꽂는다", fresh.ok && !(fresh as { already: boolean }).already && posted2 === 1, `${JSON.stringify(fresh)} posted=${posted2}`);
+}
+
+console.log("\n══ ⑬ 고지 축 — 🔴 «pending 이 뜨나»가 아니라 «**안 떠야 할 때 안 뜨나**»(B2 지적 2026-09-17) ══");
+{
+  const OK = { ok: true };
+  const BAD = { ok: false, detail: "고지 누락(제휴): 우상단 배지" };
+
+  /* 🔴 **여기가 대조군의 심장이다** — 고지가 필요 없는 글에 «못 쟀어요»가 뜨면 그건 소음이다.
+     `needDisclosure` 를 무시하고 `overlayVerified !== true` 만 보면 **전 영상이 pending** 이 되고, 그래도 «pending 이 뜨나» 검사는 초록이다. */
+  for (const ov of [undefined, true, false] as const) {
+    const v = disclosureVerdict(OK, false, ov);
+    ok(`🔴 대조군 · 고지 불필요 + overlayVerified=${String(ov)} → pending 안 뜬다`, !v.pending, JSON.stringify(v));
+  }
+  ok("🔴 대조군 · 고지 불필요면 detail 도 없다(조용하다)", disclosureVerdict(OK, false, undefined).detail === undefined);
+
+  /* 표 그대로 — 고지가 필요한 글. */
+  const seen = disclosureVerdict(OK, true, true);
+  ok("고지 필요 + 쟀고 실렸다 → 통과 · pending 아님", seen.pass && !seen.pending && seen.detail === undefined, JSON.stringify(seen));
+  const unseen = disclosureVerdict(OK, true, undefined);
+  ok("🔴 고지 필요 + 못 쟀다 → pending(막지는 않는다 · pass 그대로)", unseen.pass && unseen.pending, JSON.stringify(unseen));
+  ok("«못 쟀다»를 문장으로 말한다", !!unseen.detail && unseen.detail.includes("못 쟀다"), unseen.detail ?? "");
+  const absent = disclosureVerdict(OK, true, false);
+  ok("🔴 재 봤고 안 실렸다 → **실패**(보류가 아니다)", !absent.pass && !absent.pending, JSON.stringify(absent));
+  ok("«안 실렸다»를 문장으로 말한다", !!absent.detail && absent.detail.includes("안 실렸다"), absent.detail ?? "");
+
+  /* 계획 자체가 모자라면 이미 실패다 — 보류를 덧씌우지 않는다(`pendingIf` 와 같은 규율). */
+  const planBad = disclosureVerdict(BAD, true, undefined);
+  ok("🔴 계획이 모자라면 실패이지 보류가 아니다", !planBad.pass && !planBad.pending, JSON.stringify(planBad));
+  eq("🔴 그때 문장은 **계획 쪽 사유**를 그대로 쓴다(덮지 않는다)", planBad.detail, BAD.detail);
+
+  /* 🔴 그리고 «막지 않는다»(CLAUDE §9) — pending 은 pass 다. 여기가 뒤집히면 고객 영상이 멈춘다. */
+  ok("🔴 pending 은 pass 다(막지 않는다)", disclosureVerdict(OK, true, undefined).pass === true);
 }
 
 console.log(`\n${fail ? "FAIL" : "PASS"} ${pass} · FAIL ${fail}`);
