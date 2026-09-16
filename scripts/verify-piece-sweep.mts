@@ -141,6 +141,11 @@ try {
       `sweepSkipped=${JSON.stringify(sk)} status=${row(id).status} 배경함수 호출=${hits.filter((h) => h.pieceId === id).length}회`);
     const ref = n((await q(sql`SELECT COALESCE(SUM(delta),0) AS g FROM coin_ledger WHERE tenant_id = ${TID} AND kind = 'grant' AND ref LIKE ${"refund:piece:" + id + "%"}`))[0]?.g);
     rec(`🔴 ${key} 는 환급 0 이다 — 나간 값에 **물건이 있다**`, ref === 0, `환급=${ref}`);
+    /* 🔴 표시는 `updated_at` 을 **올리지 않는다.** 올리면 «표시 뒤에 움직였나» 비교가 자기 꼬리를 물어
+       20분마다 다시 찍고 다시 빼는 **왕복**이 된다(메인: «그냥 표시를 지운다»로 가지 마라 — 같은 병).
+       🔴 이 축이 없을 때 변이표에서 그 변이만 **안 잡혔다** — 주석이 주장만 하고 재지 않던 자리였다. */
+    rec(`🔴 ${key} 표시는 updated_at 을 올리지 않는다(왕복 0)`, upAt(id, before) === upAt(id, upAfter),
+      `before=${upAt(id, before).slice(0, 19)} after=${upAt(id, upAfter).slice(0, 19)}`);
   }
 
   /* ── 🔴 대조군: 안 주워야 할 둘 ── */
@@ -181,15 +186,40 @@ try {
     `changed=${r2.changed} skipped=${r2.skipped} 배경함수 호출=${hits.length}회`);
   rec("🔴 두 번 돌려도 환급 합이 안 늘었다", cRef2 === 7 && eRef2 === 7, `C=${cRef2} E=${eRef2}`);
 
+  /* ── 🔴 [C 가 찾은 구멍] 표시는 «영구 제외»가 아니라 «그때 본 것»이다 ──
+     ①산출물 있어 표시됨 → ②고객이 «다시 시작» → ③또 멎음 ⇒ 종전 판이면 이 글은 **크론이 영영 안 줍는다**.
+     = **다시 걸릴 가능성이 제일 큰 글**이 안전망 밖으로 나간다. 표시 뒤 글이 «움직인» 두 경우를 심어 가른다.
+     🔴 앞 장면이 끝난 **뒤에** 심는다 — 앞에 같이 심으면 후보가 7편이라 `LIMIT 5`(SWEEP_MAX)에 걸려
+        «자가 못 본 것»과 «스텝이 안 한 것»이 섞인다(그 표는 읽을 수가 없다). */
+  const skippedAt = new Date(Date.now() - 90 * 60000).toISOString();
+  const I = await seed({ kind: "post", mins: 60, meta: { stage: "checking", angle: "표시 뒤 또 멎음(산출물 남음)", sweepSkipped: { why: "already_has_output", at: skippedAt } }, body: "<p>아직 본문이 있다</p>" });
+  const J = await seed({ kind: "post", mins: 60, meta: { stage: "writing", angle: "표시 뒤 또 멎음(이제 빈 글)", sweepSkipped: { why: "already_has_output", at: skippedAt } } });
+  const hitsBefore = hits.length;
+  const rIJ = await pieceSweepStep.run(ctx as never);
+  const ij = await q(sql`SELECT id, status, meta FROM pieces WHERE tenant_id = ${TID} AND id IN (${I}, ${J})`);
+  const ijMeta = (id: number) => ((ij.find((x) => n(x.id) === id)?.meta ?? {}) as Record<string, unknown>);
+  rec("🔴 J 표시 뒤 움직였고 이제 빈 글 — **안전망으로 돌아온다**(다시 걸린다)",
+    hits.some((h) => h.pieceId === J) && n((ijMeta(J).sweepResume as { count?: number } | undefined)?.count) === 1,
+    `배경함수 호출=${hits.filter((h) => h.pieceId === J).length}회 sweepResume=${JSON.stringify(ijMeta(J).sweepResume ?? null)}`);
+  rec("🔴 I 는 다시 봤지만 **여전히 산출물이 있어** 안 건다(표시 시각만 새로 적는다)",
+    !hits.some((h) => h.pieceId === I) && String((ijMeta(I).sweepSkipped as { at?: string } | undefined)?.at ?? "") > skippedAt,
+    `배경함수 호출=${hits.filter((h) => h.pieceId === I).length}회 at=${(ijMeta(I).sweepSkipped as { at?: string } | undefined)?.at}`);
+  rec("이 장면에서 손댄 것은 I·J 둘뿐이다(앞 장면 글을 다시 집지 않았다)",
+    n(rIJ.changed) === 1 && n(rIJ.skipped) === 1 && hits.length === hitsBefore + 1,
+    `changed=${rIJ.changed} skipped=${rIJ.skipped} detail=${JSON.stringify(rIJ.detail)}`);
+
   /* ── §2 무장해제: 트리거가 못 붙는 날에도 «조용한 0건»이 아니다 ── */
   process.env.INTERNAL_SECRET = "";
   const F = await seed({ kind: "post", mins: 60, meta: { stage: "writing", angle: "트리거 못 붙는 글" } });
+  /* 🔴 **절대값이 아니라 증가분**으로 잰다 — 앞 장면이 늘 때마다 «호출 총합 N» 단언이 낡아서 빨개진다.
+     (실제로 I·J 장면을 넣자 여기가 빨개졌다. 코드가 아니라 자가 틀린 것이었다.) */
+  const hitsBeforeF = hits.length;
   const r3 = await pieceSweepStep.run(ctx as never);
   const [fRow] = await q(sql`SELECT status, meta FROM pieces WHERE id = ${F}`);
   const fMeta = (fRow?.meta ?? {}) as Record<string, unknown>;
   rec("§2 트리거가 못 붙자 failed + 사유를 남겼다(조용히 넘어가지 않는다)",
-    String(fRow?.status) === "failed" && /INTERNAL_SECRET/.test(String(fMeta.failReason ?? "")) && hits.length === 1,
-    `status=${fRow?.status} why=«${String(fMeta.failReason ?? "").slice(0, 36)}» 배경함수 추가호출=${hits.length - 1}회 (r3 changed=${r3.changed})`);
+    String(fRow?.status) === "failed" && /INTERNAL_SECRET/.test(String(fMeta.failReason ?? "")) && hits.length === hitsBeforeF,
+    `status=${fRow?.status} why=«${String(fMeta.failReason ?? "").slice(0, 36)}» 배경함수 추가호출=${hits.length - hitsBeforeF}회 (r3 changed=${r3.changed})`);
 
   /* ── 돈을 안 썼다 ── */
   const [usage] = await q(sql`SELECT COUNT(*) AS c FROM ai_usage WHERE tenant_id = ${TID}`);

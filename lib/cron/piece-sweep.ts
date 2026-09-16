@@ -58,7 +58,8 @@ export const pieceSweepStep: CronStep = {
       FROM pieces p
       WHERE p.tenant_id = ${ctx.tid} AND p.kind <> 'video' AND p.status = 'generating'
         AND p.updated_at < NOW() - (${STALE_MIN} || ' minutes')::interval
-        AND (p.meta -> 'sweepSkipped') IS NULL
+        -- 표시는 «영구 제외»가 아니라 «그때 본 것»이다 — 그 뒤에 글이 움직였으면 다시 본다(까닭은 아래 주석).
+        AND (p.meta -> 'sweepSkipped' IS NULL OR (p.meta -> 'sweepSkipped' ->> 'at')::timestamptz < p.updated_at)
       ORDER BY p.updated_at LIMIT ${SWEEP_MAX}`);
     if (!rows.length) return NOOP;
     let changed = 0, skipped = 0;
@@ -68,6 +69,13 @@ export const pieceSweepStep: CronStep = {
       const pieceId = n(r.id); const meta = (r.meta ?? {}) as Record<string, unknown>;
       const stage = String(meta.stage ?? "writing");
       const resume = n((meta.sweepResume as { count?: number } | undefined)?.count);
+      /* 🔴 [C 가 찾음 · 2026-09-16] 위 WHERE 의 `sweepSkipped` 줄이 왜 «IS NULL» 이 아닌가 —
+         표시를 «영영 제외»로 두면 **안전망에 구멍이 난다**: ①산출물 있는 글이 표시돼 빠짐 → ②고객이 «다시 시작» →
+         ③그 생성이 또 멎음 ⇒ **다시 걸릴 가능성이 제일 큰 글**이 크론 밖으로 나가고 55시간 증상이 거기서만 되살아난다
+         (그리고 아무 검사도 안 빨개진다). ⇒ 표시 **뒤에 글이 움직였으면** 다시 후보로 돌아온다.
+         🔴 그래서 아래 표시 UPDATE 는 `updated_at` 을 **일부러 안 올린다** — 올리면 방금 쓴 표시를 스스로 무효로 만든다(자기 꼬리 물기).
+         🔴 이 줄은 `netlify/functions/pieces.ts`(B 파일)를 안 건드리고 내 파일 안에서 끝난다(AC-101).
+      */
       /* 🔴 [2026-09-16 · AM 장부가 알려 준 구멍] **다시 걸기 전에 «이미 만들어진 것이 있나»를 본다.**
          AM 은 배경 실행 장부(`bg_runs`)로 갈랐더니 멈춘 행 중 흔적이 남은 17건이 **전부 `phase='done'`** 이었다 —
          함수는 **정상 완료**했는데 상태만 안 넘어간 것이다. 그 행은 `created_at == updated_at` 과 **같은 모양으로 위장한다.**
@@ -77,7 +85,9 @@ export const pieceSweepStep: CronStep = {
          🔴 **알림도 안 보낸다** — «만들지 못했어요»는 **틀린 말**이다(만들어졌다). 환급도 없다(나간 값에 물건이 있다).
          🔴 그럼 고객은 어떻게 아나 — **화면이 말한다.** `pieces.html` 이 «N분째 멈춘 것 같아요 · 다시 시작»을 띄우고,
             다시 걸지 말지는 **고객이 고른다**(§9 — 우리가 자동으로 돈을 쓰지 않고, 대신 또렷하게 말한다).
-         표시만 남기고 SQL 에서 제외한다 — 안 그러면 이 행이 `ORDER BY updated_at LIMIT 5` 맨 앞을 **영영 차지해** 뒤의 진짜 멈춘 글이 굶는다. */
+         표시만 남기고 SQL 에서 제외한다 — 안 그러면 이 행이 `ORDER BY updated_at LIMIT 5` 맨 앞을 **영영 차지해** 뒤의 진짜 멈춘 글이 굶는다.
+         🔴 다만 «영구 제외»는 아니다 — 위 WHERE 가 «표시 뒤에 글이 움직였으면 다시 본다»로 되어 있다.
+            그래서 이 UPDATE 는 `updated_at` 을 **올리지 않는다**: 올리면 `at ≈ updated_at` 이 되어 자기가 방금 쓴 표시를 스스로 무효로 만든다. */
       if (r.has_body === true || r.has_assets === true) {
         await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ sweepSkipped: { why: "already_has_output", at: new Date().toISOString(), body: r.has_body === true, assets: r.has_assets === true, stage } })} WHERE id = ${pieceId}`);
         detail.hasOutput = n(detail.hasOutput) + 1; skipped++;
