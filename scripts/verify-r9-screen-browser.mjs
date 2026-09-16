@@ -71,7 +71,13 @@ const SCARY = /정지됩니다|불이익|고객님 책임|알려만/;
   rec(`S1 칩 글자 = 서버(모의) label 그대로(${expectLabels.length}개 · 기울임 제외)`, expectLabels.length > 0 && missing.length === 0, missing.length ? `🔴 화면에 없음: ${missing.join(",")} · 화면=«${(fmt?.text || "").slice(0, 100)}»` : `${expectLabels.join(" · ")}`);
   rec("S1 영어 칸 이름·러너 어휘가 화면에 안 샌다(AC-91)", !!fmt && !RAW_KEYS.test(fmt.text) && !WHY_TOKENS.test(fmt.text), `«${(fmt?.text || "").slice(0, 140)}»`);
   rec("S1 겁주는 말 0(§3) · «글 내용은 그대로»를 말한다", !!fmt && !SCARY.test(fmt.text) && /내용은 그대로|내용은 그대로예요|글 내용/.test(fmt.text), `«${(fmt?.text || "").slice(60, 200)}»`);
-  rec("S1 기울임은 «일부러 안 넣어요»로 말한다(못 낸 게 아니라 안 낸 것)", list.some((x) => x.field === "italic") ? /일부러 안 넣/.test(fmt?.text || "") : true, list.some((x) => x.field === "italic") ? (/일부러 안 넣/.test(fmt?.text || "") ? "있다" : "🔴 문장 없음") : "모의에 기울임 없음");
+  /* 기울임 — 서버가 사람말 `why` 를 실어 주면 화면은 그 문장을 그대로 쓴다(AC-52 · A 8e6bf29) · why 가 비었을 때만 «일부러 안 넣어요» 폴백. 둘 중 하나가 «기울임» 과 함께 보이면 된다. */
+  {
+    const it = list.find((x) => x.field === "italic");
+    const txt = fmt?.text || "";
+    const ok = !it || /일부러 안 넣/.test(txt) || (/기울임/.test(txt) && !!it.why && /[가-힣]/.test(String(it.why)) && txt.includes(String(it.why).slice(0, 12)));
+    rec("S1 기울임은 서버 why 문장(사람말) 또는 «일부러 안 넣어요» 폴백으로 말한다", ok, !it ? "모의에 기울임 없음" : ok ? `«${(txt.match(/기울임[^.]*\./) || [""])[0].slice(0, 60)}»` : "🔴 기울임 문장 없음");
+  }
   await page.close();
 }
 /* ── S2 손잡이 없음 → «못 낸 꾸밈» 을 안 그린다(거짓 양성) ── */

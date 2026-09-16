@@ -113,6 +113,9 @@ console.log("⑤ 투영·합치기");
   const nN = formatDemotionNotice(merged, null, null);
   ok("알림 — 강등이 있으면 제목·본문 · 티스토리(내릴 수 있음)는 «내렸다가 고쳐서 다시 올릴 수 있어요»", !!nT && /못 낸 꾸밈/.test(nT.title) && /내렸다가 고쳐서 다시 올릴 수 있어요/.test(nT.body) && /전기요금/.test(nT.body), nT?.body);
   ok("알림 — 못 내리는 채널은 «채널에서 직접» · 채널 모르면 되돌릴 길을 안 지어낸다", !!nY && /채널에서 직접/.test(nY.body) && !!nN && !/직접|다시 올릴/.test(nN.body), `${nY?.body} | ${nN?.body}`);
+  /* 🔴 [C 발견 · B2 확인] 레지스트리에 **없는** 채널 키 — «있는데 못 내림»과 같은 문장을 주면 «모른다»가 «못 한다»로 읽힌다(AC-92). 채널 안 준 것과 같아야 한다. */
+  const nU = formatDemotionNotice(merged, "x", "zzz_unknown");
+  ok("알림 — 표에 없는 채널 키는 «채널에서 직접»도 «다시 올릴»도 안 말한다(모르면 지어내지 않는다)", !!nU && !/직접|다시 올릴/.test(nU.body), nU?.body);
   ok("알림 — 강등 0 이면 null · 겁주는 말 0", formatDemotionNotice({ planned: {}, demoted: [] }, "x", "tistory") === null && ![nT, nY, nN].some((x) => /정지|불이익|알려만|책임|러너|테넌트/.test(x?.body ?? "")));
 }
 

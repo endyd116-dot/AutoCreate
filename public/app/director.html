@@ -30,7 +30,7 @@ const topicId = Number(UI.qs.get("topicId")); if (!topicId) { UI.go("/app/create
 const STYLE = [["photo", "사진"], ["illust", "일러스트"], ["infographic", "인포그래픽"]];
 const FORMATS = Object.entries(UI.FORMAT);
 const TIMES = [["07:30", "07:30"], ["12:00", "12:00"], ["21:00", "21:00"], ["18:00", "18:00"]];
-let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null, TIERS = [], STYLES = {};   /* [R9R10-A] TIERS = 서버 accounts-list.tiers · STYLES = 계정별 옷장 */
+let brief = null, pieces = [], accounts = [], topicTitle = UI.qs.get("t") || "", clamped = null, TIERS = [], TIER_NOTE = "", STYLES = {};   /* [R9R10-A] TIERS = 서버 accounts-list.tiers · STYLES = 계정별 옷장 */
 const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
 const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
 const isVideo = (p) => p.kind === "video";
@@ -62,7 +62,7 @@ async function load() {
   if (!r.ok) { UI.toast(r.error || "제안을 만들지 못했어요"); setTimeout(() => UI.go("/app/create.html"), 900); return; }
   brief = r.brief; pieces = brief.pieces.map((p) => JSON.parse(JSON.stringify(p))); accounts = a.ok ? a.accounts : [];
   CHV = Object.fromEntries((a.ok ? a.channels || [] : []).filter((c) => c.video).map((c) => [c.key, c.video]));
-  TIERS = a.ok ? (a.tiers || []) : [];   /* [R9R10-A] 등급표 = 서버 값(없으면 등급 줄을 안 그린다) */
+  TIERS = a.ok ? (a.tiers || []) : []; TIER_NOTE = a.ok ? String(a.tierNote || "") : "";   /* [R9R10-A] 등급표·주석 = 서버 값(없으면 등급 줄을 안 그린다) */
   /* [R9R10-A] 글마다 스타일을 덮어쓰려면 그 계정의 옷장을 알아야 한다 — 글 piece 의 계정마다 한 번 읽는다(못 읽으면 칩을 안 그린다 · 지어내지 않는다) */
   const accIds = [...new Set(pieces.filter((p) => !isVideo(p) && p.accountId).map((p) => p.accountId))];
   await Promise.all(accIds.map(async (id) => { const r = await UI.api(`/api/account-styles?accountId=${id}`, { noGate: true }); if (r.ok) STYLES[id] = { styles: r.styles || [], defaultStyleId: r.defaultStyleId ?? null }; }));
@@ -106,7 +106,7 @@ function editSheet() {
     return `<section data-i="${i}" style="padding:4px 0 12px;${i ? "border-top:1px solid var(--line);margin-top:8px" : ""}">${head}<div data-body ${p.drop ? "hidden" : ""}>${acc}
       <div class="sec">감성</div>${UI.chips("emo", emo, p.emotionKey)}
       <div class="sec">구성</div>${UI.chips("fmt", FORMATS, p.format)}
-      <div class="sec">등급</div>${UI.tierRows("tier", TIERS, p.tier || "")}
+      <div class="sec">등급</div>${UI.tierRows("tier", TIERS, p.tier || "", { noteText: TIER_NOTE })}
       ${STYLES[p.accountId] && STYLES[p.accountId].styles.length ? `<div class="sec">스타일 <span class="muted" style="font-weight:500">이번 글만</span></div>${UI.styleChips("wstyle", STYLES[p.accountId].styles, p.styleId ?? "", STYLES[p.accountId].defaultStyleId ? "이 계정 기본" : "그대로")}` : ""}
       <div class="fr"><div class="fl">사진 자리<small>등급의 AI 사진 말고는 내 사진·스톡으로 채워요 · 코인은 안 늘어요</small></div>${UI.stepper("img", p.images?.count ?? 0, 0, 10, "장")}</div>
       ${UI.seg("style", STYLE, p.images?.style || "photo")}

@@ -196,6 +196,10 @@ export default async (req: Request): Promise<Response> => {
         const [st] = await q(sql`SELECT name FROM text_styles WHERE tenant_id = ${tid} AND id = ${meta.styleId as number}`).catch(() => [] as Row[]);
         if (st?.name) meta.styleName = String(st.name);
       }
+      /* [R10-4 · A 지적 2026-09-16] 🔴 **허용 목록에 넣는 것까지가 «값을 만든 것»이다** — content-gen 이 적는 두 칸을 여기서 안 실으면 «만들어 놓고 화면까지 길이 없다»(오늘 세 번 난 그 병 · AC-69).
+         `styleApplied` = { id, name, lines, from: "piece"|"account" }(«계정에 걸어 둔 기본 스타일이에요» / «이 글만 고른 스타일이에요») · `styleUnused` = { id, why }(«그 스타일을 찾지 못해서 스타일 없이 썼어요» · why 는 사람말). */
+      if (m.styleApplied && typeof m.styleApplied === "object") meta.styleApplied = m.styleApplied;
+      if (m.styleUnused && typeof m.styleUnused === "object") meta.styleUnused = m.styleUnused;
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount),

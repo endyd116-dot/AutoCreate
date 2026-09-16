@@ -29,7 +29,7 @@
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
 if (me.impersonation) { UI.$("#page").insertAdjacentHTML("beforeend", `<div class="group"><div class="empty"><h3>원격접속 중엔 결제할 수 없어요</h3><p>운영자가 설정을 도와드리는 동안엔 요금제·카드를 바꿀 수 없어요. 끝난 뒤 본인이 직접 해 주세요.</p></div></div>`); UI.$$("#cards, #cycle, #card, #cancel").forEach((e) => e.hidden = true); return; }
-let S = null, PLANS = [], INV = [], cycle = "month";
+let S = null, PLANS = [], INV = [], cycle = "month", TIERS = [];   /* [R9R10-A · C 지적] TIERS = plans-list.tiers(서버 라벨 · 한 벌) — 없을 때만 UI.TIER_LABEL(하니스 ⑧-c 가 서버와 대조하는 사본) */
 /* [§1.6] 카드 등록 라인 — 법인카드가 인증 창에서 거절될 때 쓰는 «카드번호 직접 입력»(available 일 때만 · 문구는 서버) */
 const keyinRow = (K) => K && K.available ? `<label class="chk" id="keyinRow"><input type="checkbox" id="keyin"> <span>${UI.esc(K.label || "카드번호 직접 입력")}</span></label>${K.notice ? `<p class="muted" style="margin:0 0 8px 34px;font-size:12.5px">${UI.esc(K.notice)}</p>` : ""}` : "";
 const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0, starter: 1, pro: 2, agency: 3 };
@@ -42,7 +42,7 @@ const price = (p) => `<div style="padding:0 16px 6px"><div style="font-size:24px
 const paying = () => S && S.status === "active" && RANK[S.plan.key] > 0;
 async function load() {
   const [s, p, i] = await Promise.all([UI.api("/api/subscription"), UI.api("/api/plans"), UI.api(`/api/invoices?year=${new Date().getFullYear()}`)]);
-  if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; } S = s; PLANS = (p.ok ? p.plans || [] : []).filter((x) => x.public !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0)); INV = i.ok ? i.rows || [] : [];
+  if (!s.ok) { UI.toast(s.error || "불러오지 못했어요"); return; } S = s; PLANS = (p.ok ? p.plans || [] : []).filter((x) => x.public !== false).sort((a, b) => (a.sort || 0) - (b.sort || 0)); TIERS = p.ok ? (p.tiers || []) : []; INV = i.ok ? i.rows || [] : [];
   const st = S.status || "trial"; const trial = st === "trial", ended = st === "readonly", susp = st === "suspended";
   const left = Math.max(0, Math.ceil((UI.utc(S.trialEndsAt) - Date.now()) / 86400e3));
   UI.$("#say").textContent = trial ? "무료 체험" : ended ? "체험이 끝났어요" : susp ? "결제가 밀려 있어요" : "지금은";
@@ -105,7 +105,7 @@ function renderCards() {
       <div class="gt">${UI.esc(p.name)} ${p.recommended ? '<span class="pill ink">추천</span>' : ""}${isCur ? '<span class="pill ok">지금</span>' : ""}</div>${price(p)}
       <div class="kv"><span class="k">계정</span><span class="v">${p.limits.maxAccounts}개</span></div>
       <div class="kv"><span class="k">매달 포함 코인</span><span class="v">${p.limits.coinsIncluded}코인</span></div>
-      ${p.piecesByTier ? `<div class="kv"><span class="k" style="white-space:nowrap;flex:none;padding-right:12px">글로 치면</span><span class="v wrap" style="white-space:normal;text-align:right;font-size:13px">${Object.keys(UI.TIER_LABEL).filter((k) => p.piecesByTier[k] != null).map((k) => `${UI.TIER_LABEL[k]} ${UI.num(p.piecesByTier[k])}편`).join(" · ")}</span></div>` : ""}
+      ${p.piecesByTier ? `<div class="kv"><span class="k" style="white-space:nowrap;flex:none;padding-right:12px">글로 치면</span><span class="v wrap" style="white-space:normal;text-align:right;font-size:13px">${(TIERS.length ? TIERS.map((t) => t.key) : Object.keys(UI.TIER_LABEL)).filter((k) => p.piecesByTier[k] != null).map((k) => `${(TIERS.find((t) => t.key === k) || {}).label || UI.TIER_LABEL[k]} ${UI.num(p.piecesByTier[k])}편`).join(" · ")}</span></div>` : ""}
       <div class="kv"><span class="k">자동 편성 기간</span><span class="v">${p.limits.horizonDays}일치</span></div>
       <div class="kv"><span class="k">편성 규칙</span><span class="v">${p.limits.maxRules == null ? "제한 없음" : p.limits.maxRules + "개"}</span></div>
       <div class="kv"><span class="k">디렉터 손보기</span><span class="v">${p.features.directorEdit ? "가능" : "자동만"}</span></div>
