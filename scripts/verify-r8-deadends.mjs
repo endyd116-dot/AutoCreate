@@ -351,7 +351,7 @@ const SURFACES = [
      ⚠️ 이 두 줄은 **지금 빨강이다.** 그게 맞다 — §4.8 «완료 = 화면에서 쓸 수 있을 때». A 가 화면을 달면 초록이 된다. ── */
   ["🔴 종류 배지 — 화면이 서버 `ruleKind` 를 읽나(R11-1)", "ruleKind", "netlify/functions/pieces.ts",
     "서버는 «shorts·cardnews»를 실어 보내는데 화면이 `p.kind`(post|video)를 배지표에 그대로 넣어 **이름표가 늘 빈칸**이다 — 설계 §1.2 가 «지금 틀린 것»이라 부른 그 상태로 되돌아간다", true],
-  ["🔴 수익 «어디서 났나» — 화면이 `byAxis` 를 읽나(R11-4)", "byAxis", "netlify/functions/revenue.ts",
+  ["🔴 수익 «어디서 났나» — 화면이 `byAxis` 를 읽나(R11-4)", "byAxis", "lib/revenue/aggregate.ts",
     "3단(piece→account→그 밖)으로 갈라 놓은 돈이 화면에 한 줄도 안 나온다 — 사장님이 «수익 내는 방식이 두 개»라고 하신 그 구별이 서버에만 산다", true],
   /* 🔴 §9 의 값이 걸린 자리다 — «막지 않는 대신 말해 준다»로 갔는데 **말하는 화면이 없으면 막지도 않고 말하지도 않는 것**이 된다.
      서버는 `lib/slots.ts:397` 에서 `o.crowd = c` 로 이미 실어 보낸다(`crowdOf` 는 순수 · 막는 칸이 없다). */
@@ -375,6 +375,19 @@ const ownerOf = (owner, needle) => {
 for (const [label, needle, owner0, harm, needApp] of SURFACES) {
   const owner = ownerOf(owner0, needle);
   if (!owner) { rec(`🔴 화면이 부르나 — ${label}`, "WARN", `서버 정본 ${owner0} 를 못 읽었다 — config.path 로도 못 찾았다(검사를 고쳐라)`); continue; }
+  /* 🔴 [2026-09-17 · A 지적] **서버가 그 이름을 아직 싣나** — 이게 없으면 이 줄은 **화면을 잘못 탓한다.**
+     서버가 키를 지우거나 이름을 바꾸면 화면엔 당연히 없고, 그때 이 줄은 «화면이 안 읽는다»로 **빨갛게 남는다**
+     — 사실은 «검사가 낡은 것»인데 A 가 헛일을 한다. TARGETS 는 이미 이 갈래가 있다(«이름이 바뀌었나»).
+     ⚠️ A 가 자기 자에서 «베껴 쓰면 원본을 고쳐도 옛 줄을 계속 초록으로 재운다»고 짚어 준 그 성질의 사촌이다 —
+        여기서는 방향이 반대로 **거짓 빨강**이 된다. 어느 쪽이든 **자가 낡은 것을 자가 말해야** 한다. */
+  /* ⚠️ **점이 든 바늘(`patch.tier`·`coins.line`)은 건너뛴다** — 그건 서버가 싣는 «글자»가 아니라
+     화면이 쓰는 **모양**이다(`director.html` 이 `patch.tier` 를 보내고 `piece.html` 이 `m.coins.line` 을 읽는다).
+     🔴 이 예외를 안 두면 멀쩡한 줄 둘이 «검사가 낡았다»로 뒤집힌다 — 이 갈래를 넣자마자 실제로 그랬다. */
+  if (!needle.includes(".") && !String(SRC.get(owner) ?? read(owner)).includes(needle)) {
+    rec(`🔴 화면이 부르나 — ${label}`, "WARN",
+      `서버 정본 ${owner} 가 \`${needle}\` 를 **더는 안 싣는다** — 화면 탓이 아니라 **검사가 낡았다**(이름이 바뀌었나)`);
+    continue;
+  }
   const hits = screenCalls(needle);
   const apps = APPS(hits);
   /* 🔴 [2026-09-16 C] «화면 파일»만 세면 **공용 시트를 거치는 길**을 죽은 통로로 오판한다 — A 가 레퍼런스 시트를 ui.js 의 `UI.styleSheet` 한 곳에 두고
@@ -424,6 +437,20 @@ for (const [label, needle, owner0, harm, needApp] of SURFACES) {
   const locks = [...pieceHtml.matchAll(/grade\s*===\s*"P0"\s*\?\s*"disabled"/g)].length;
   rec("🔴 화면에 남은 하드 게이트 — 심사 P0 로 «이대로 예약»을 잠그지 않는다", locks === 0,
     locks ? `piece.html 이 ${locks}곳에서 단추를 잠근다 ⇒ 서버는 막지 않는데 화면만 막는다(§9 가 내린 바로 그 게이트다)` : "잠그는 자리 0곳 — 판정은 그대로 두고 단추만 열려 있다");
+
+  /* 🔴 [R11-7 · C 2026-09-17 · B 지적] **«읽나»만 재면 «읽되 막는 데 쓰면»이 안 잡힌다.**
+     SURFACES 의 «화면이 `crowd` 를 말해 주나» 는 화면이 그 키를 **읽기만** 하면 초록이다. 그런데 `crowd` 는
+     🔴 **막는 값이 아니다** — 그 키로 «그래도 이 시각» 단추를 잠그면 **§9 를 정면으로 어긴다**(설계 §4.3 «막지 않는다 · 되돌릴 길을 같이»).
+     ⇒ 같은 줄에서 `crowd`·`겹` 와 `disabled` 가 만나는 자리를 센다. **지금은 0곳**(화면이 아직 안 읽는다) — 화면이 생기는 날 이 줄이 지킨다. */
+  /* 🔴 잠그는 길은 `disabled` 하나가 아니다(2026-09-17 B 지적): `aria-disabled` · `pointer-events:none` 도 같은 일을 한다.
+     ⚠️ **단추를 아예 «안 그리는» 길은 어느 자로도 못 잡는다** — 그때는 눈이 맞다. 이 줄은 **앞의 셋**만 맡는다(못 하는 것을 적어 둔다 · AC-9). */
+  const LOCKWORD = "(disabled|aria-disabled|pointer-events\\s*:\\s*none)";
+  const NEAR_LOCK = new RegExp(`(crowd|겹쳐|겹침)[^\\n]{0,80}${LOCKWORD}|${LOCKWORD}[^\\n]{0,80}(crowd|겹쳐|겹침)`, "g");
+  const crowdLocks = [...CODE].filter(([p]) => /^public\/(app|ops)\//.test(p))
+    .flatMap(([p, c]) => [...String(c).matchAll(NEAR_LOCK)].map(() => p));
+  rec("🔴 «이날 겹쳐요»로 단추를 잠그지 않는다(§9 — 막지 않기로 한 값이다)", crowdLocks.length === 0,
+    crowdLocks.length ? `🔴 ${[...new Set(crowdLocks)].join(" · ")} 가 겹침으로 단추를 잠근다 ⇒ 서버는 안 막는데 화면만 막는다`
+      : "잠그는 자리 0곳 (화면이 아직 `crowd` 를 안 읽는다 — 읽기 시작하면 이 줄이 지킨다)");
 }
 
 /* ═══ 짝 검사: 옛 상수가 아직 살아 있나 — 새 정본을 만들었는데 옛 값이 그대로면 «하나가 썩는다»(AC-64) ═══ */
