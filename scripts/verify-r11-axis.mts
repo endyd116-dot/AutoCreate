@@ -55,6 +55,26 @@ eq("원판 · 카드뉴스 → cardnews", ruleKindOfPiece("post", "cardnews"), "
 eq("대조군 · 영상 + cardnews → shorts(영상이 이긴다)", ruleKindOfPiece("video", "cardnews"), "shorts");
 eq("대조군 · 모르는 값 → post", ruleKindOfPiece(null, undefined), "post");
 
+/* ══ 🔴 **C 가 실측으로 잡아 준 구멍**(2026-09-17) — 여기가 이 격자의 값이다 ══
+   내 첫 판은 «`pieces.kind` 는 `post|video` 둘뿐»이라는 전제로 `format === "cardnews"` 만 봤다. **전제가 틀렸다**:
+     · `lib/director.ts:694` 가 넣는 값은 **세 개** — `isVideo ? "video" : isCard ? "cardnews" : "post"`
+     · `isCard` 는 **채널**에서 온다(`isCardnewsChannel`) — format 이 아니다
+     · 인스타 카드뉴스 계약의 `formats` 는 **다섯**(`writing-contracts.ts:343`)
+   ⇒ 인스타 카드뉴스 글의 format 은 **5번 중 4번** `cardnews` 가 아니고, 그때 배지가 **빈칸**이었다.
+
+   ⚠️ 🔴 **왜 내 자가 못 잡았나** — 격자에 `format === "cardnews"` 경로**만** 있었다(AC-99 ⑨).
+      «잡아야 할 것»이 표본에 없으면 그 검사의 무력화는 **영영 안 보인다.** 그래서 **실제 계약의 다섯 format 을 전부** 넣는다.
+      🔴 이 목록을 **계약에서 읽어 오지 않고 손으로 적은** 까닭: 계약이 줄어도 이 격자는 «다섯이던 시절»을 계속 재야 한다
+         (옛 글이 그 format 을 들고 DB 에 남아 있다). 계약을 따라가면 표본이 계약과 함께 사라진다. */
+for (const f of ["cardnews", "steps", "listicle", "compare", "qna"]) {
+  eq(`🔴 인스타 카드뉴스 · kind=cardnews · format=${f} → cardnews`, ruleKindOfPiece("cardnews", f), "cardnews");
+}
+/* 🔴 대조군 짝 — `kind` 가 카드뉴스가 **아닌데** 같은 format 이면 **cardnews 로 안 샌다**(`||` 를 `&&` 로 좁히면 여기가 아니라 위가 빨개지고, 반대로 넓히면 여기가 빨개진다). */
+for (const f of ["steps", "listicle", "compare", "qna"]) {
+  eq(`🔴 대조군 · kind=post · format=${f} → post(카드뉴스로 안 샌다)`, ruleKindOfPiece("post", f), "post");
+}
+eq("🔴 옛 글 호환 · kind=post · format=cardnews → cardnews", ruleKindOfPiece("post", "cardnews"), "cardnews");
+
 /* ─ R11-10 축 ─ */
 eq("원판 · 네이버 블로그 = 글 축", axisOfChannel("naver_blog"), "text");
 eq("원판 · 쇼츠 = 영상 축", axisOfChannel("youtube_shorts"), "video");
