@@ -25,6 +25,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, cpSync, sym
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { requirePlaywright } from "./lib/find-playwright.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,10 +40,27 @@ const rec = (step, ok, note = "") => { out.push({ step, ok, note }); return ok; 
 /* ═══ 러너 사본(변이는 여기서만) ═══ */
 const SCRATCH = process.env.CLAUDE_SCRATCHPAD || join(tmpdir(), "ac-c-bleed");
 const COPY = join(SCRATCH, `runner-copy-${MUT || "plain"}`);
+/* 🔴 `AC_CURR=<커밋|브랜치>` = 러너를 **남의 창 커밋**으로 물린다 — 머지하지 않고 그 자리에서 잰다(2026-09-17 C).
+   안 주면 내 워킹트리. B2 가 «고쳤습니다» 할 때마다 내 폴더를 안 흔들고 바로 잴 수 있다. */
+function checkoutRunner(ref, dest) {
+  const names = execFileSync("git", ["ls-tree", "-r", "--name-only", ref, "--", "runner"], { cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).split(/\r?\n/).filter(Boolean);
+  for (const rel of names) {
+    const buf = execFileSync("git", ["show", `${ref}:${rel}`], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+    const abs = join(dest, rel.slice("runner/".length));
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, buf);
+  }
+  return names.length;
+}
 function makeCopy() {
   rmSync(COPY, { recursive: true, force: true });
   mkdirSync(COPY, { recursive: true });
-  for (const f of readdirSync(join(ROOT, "runner"))) {
+  if (process.env.AC_CURR) {
+    let sha = "";
+    try { sha = execFileSync("git", ["rev-parse", process.env.AC_CURR], { cwd: ROOT, encoding: "utf8" }).trim(); }
+    catch { console.error(`⊘ 못 쟀음 — AC_CURR=${process.env.AC_CURR} 을 저장소에서 못 찾았다(AC-98)`); process.exit(2); }
+    console.log(`러너 = ${process.env.AC_CURR}(${sha.slice(0, 7)}) · ${checkoutRunner(sha, COPY)}개 파일`);
+  } else for (const f of readdirSync(join(ROOT, "runner"))) {
     if (["node_modules", "profiles", "_shots", "tmp"].includes(f)) continue;
     const src = join(ROOT, "runner", f);
     if (statSync(src).isDirectory()) cpSync(src, join(COPY, f), { recursive: true }); else cpSync(src, join(COPY, f));
@@ -525,6 +543,93 @@ async function main() {
     rec("④ 자가검사가 깨끗한 판을 «멈춤»으로 잡지 않는다(거짓 양성 0 · AC-68)", !!clean && clean.bad === 0 && v2.stop === false, `측정=${JSON.stringify(clean && { total: clean.total, bad: clean.bad })} · 판정=${v2.stop}`);
     await page.close(); await page2.close();
   }
+
+  /* ── ⑤ 🔴 [R12-5 · 트리거 C2] **목록·표 «안»의 꾸밈** — 번짐이 항목 경계에서 다시 난다 ──
+     R9 는 문단까지였다. R12-5 가 항목 «안»으로 들어간다. 🔴 항목 하나에 칠하면 **다음 항목까지 따라갈 수 있다.**
+     칸 이름은 B·B2 확정: 목록 `itemMarks:[{i,marks}]`(좌표는 **항목 문자열** 기준) · 표 `cellMarks:[{r,c,marks}]`.
+     🔴 그리고 **거짓 양성도 같이 본다** — 안 번졌는데 «번졌다»가 뜨면 **멀쩡한 글이 안 나간다**(AC-68·AC-99 ⑧).
+     ⚠️ B2 가 짚어 준 자리: 실행부가 `"• "`·`"☑ "` **접두사만큼 좌표를 밀지 않으면** 강조가 **한 낱말씩 왼쪽으로** 어긋난다.
+        ⇒ 글자 **수**만 세면 그 어긋남이 안 보인다 — **어떤 글자가 밑줄인지**를 본다. */
+  if (hasPlay && planMod) {
+    /* 문단마다 «밑줄이 실제로 덮은 글자»를 그대로 뽑는다(글자 수가 아니라 글자 자체). */
+    const READ_UNDERLINED = () => {
+      const body = document.getElementById("body");
+      const paras = [...body.querySelectorAll(".se-component.se-text .se-text-paragraph")].filter((p) => !p.closest(".se-quotation") && !p.closest(".se-documentTitle"));
+      return paras.map((p) => {
+        const text = (p.textContent || "").replace(/\s+/g, " ").trim();
+        const w = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        let u = "", n;
+        while ((n = w.nextNode())) {
+          const cs = getComputedStyle(n.parentElement);
+          if ((cs.textDecorationLine || cs.textDecoration || "").includes("underline")) u += n.textContent;
+        }
+        return { text, underlined: u.replace(/\s+/g, " ").trim() };
+      }).filter((r) => r.text);
+    };
+    const ITEMS = ["첫 항목은 평문입니다", "둘째 항목에만 밑줄을 칩니다", "셋째 항목도 평문입니다"];
+    const SUB = "밑줄을 칩니다";
+    const ROW0 = ["구분", "지난달 요금", "이번달 요금"];
+    const CELLSUB = "지난달";
+    const blocks = [
+      { type: "para", text: "목록 앞 문단입니다." },
+      { type: "list", items: ITEMS, itemMarks: [{ i: 1, marks: [{ kind: "underline", s: ITEMS[1].indexOf(SUB), e: ITEMS[1].indexOf(SUB) + SUB.length }] }] },
+      { type: "para", text: "목록 뒤 문단입니다. 밑줄이 여기까지 오면 번짐입니다." },
+      { type: "list", items: ["마크가 하나도 없는 항목 하나", "마크가 하나도 없는 항목 둘"] },   // 🔴 거짓 양성 대조군
+      { type: "table", rows: [ROW0, ["전기", "62,000원", "48,000원"]], cellMarks: [{ r: 0, c: 1, marks: [{ kind: "underline", s: 0, e: CELLSUB.length }] }] },
+      { type: "para", text: "표 뒤 문단입니다. 여기에 밑줄이 오면 번짐입니다." },
+    ];
+    const page = await open();
+    await page.click(".se-documentTitle .se-text-paragraph");
+    await page.keyboard.insertText("목록 서식");
+    await clickBody(page);
+    const plan = planMod.planEditorOps({ title: "목록 서식", blocks, tags: [] });
+    const missed = { quote: 0, divider: 0, heading: 0, quoteEscape: 0, caretEnd: 0, image: 0, imageDownload: 0, imageSettle: 0 };
+    const fmt = bleedMod && typeof bleedMod.createFormatState === "function" ? bleedMod.createFormatState() : undefined;
+    let err = null;
+    try { await mod.playOps(page, page, plan, new Map(), "c-bleed-list", missed, fmt); } catch (e) { err = e; }
+    await page.waitForTimeout(200);
+    await page.evaluate(() => window.__fakeSE && window.__fakeSE.wrapBareText()).catch(() => {});
+    const uRows = await page.evaluate(READ_UNDERLINED);
+    const rows = await page.evaluate(READ_PARAS);
+    const find = (frag) => uRows.find((r) => r.text.includes(frag));
+
+    /* 계획이 목록 항목을 **조각**으로 실어 보내나(안 실으면 아래 축이 전부 «못 쟀음»이다) */
+    const listOps = plan.ops.filter((o) => o.op === "list");
+    const marked = listOps.filter((o) => Array.isArray(o.parts) && o.parts.some((p) => p.mark));
+    rec("⑤ [R12-5] 계획이 목록 항목 «안»의 마크를 조각으로 싣는다", listOps.length >= 5 && marked.length === 1,
+      `list op ${listOps.length}개 · 마크 실린 항목 ${marked.length}개(1이어야 한다)${err ? ` · 🔴 연주 오류 ${String(err.message).slice(0, 80)}` : ""}`);
+
+    /* 🔴 ①  둘째 항목만 밑줄 — 1·3번은 평문(항목 경계를 넘어가면 번짐) */
+    const i0 = find(ITEMS[0]), i1 = find(ITEMS[1]), i2 = find(ITEMS[2]);
+    rec("⑤ 🔴 목록 3항목 중 **2번째만** 밑줄 · 1·3번은 평문(항목 경계에서 안 번진다)",
+      !!i1 && i1.underlined.length > 0 && !!i0 && i0.underlined === "" && !!i2 && i2.underlined === "",
+      [i0 ? `1번«${i0.underlined || "평문"}»` : "1번 못 찾음", i1 ? `2번«${i1.underlined}»` : "2번 못 찾음", i2 ? `3번«${i2.underlined || "평문"}»` : "3번 못 찾음"].join(" · "));
+
+    /* 🔴 ②  접두사 오프셋 — **어떤 글자가** 밑줄인지 본다(글자 수만 세면 «한 낱말 왼쪽»이 안 보인다 · B2 지적) */
+    rec("⑤ 🔴 밑줄이 **계획한 낱말**을 덮는다(`• ` 접두사만큼 밀렸나 — 수가 아니라 글자로 본다)",
+      !!i1 && i1.underlined === SUB, i1 ? `계획 «${SUB}» → 실물 «${i1.underlined}»${i1.underlined === SUB ? "" : " 🔴 어긋났다"}` : "2번 항목을 못 찾음");
+
+    /* 🔴 ③  목록·표 뒤 문단이 안 물든다 */
+    const after = find("목록 뒤 문단"), afterT = find("표 뒤 문단");
+    rec("⑤ 🔴 목록 뒤 문단·표 뒤 문단이 안 물든다(블록 경계 번짐)",
+      !!after && after.underlined === "" && !!afterT && afterT.underlined === "",
+      `목록 뒤«${after ? after.underlined || "평문" : "못 찾음"}» · 표 뒤«${afterT ? afterT.underlined || "평문" : "못 찾음"}»`);
+
+    /* 🔴 ④  거짓 양성 — 마크가 하나도 없는 목록엔 아무 서식도 안 붙는다 */
+    const plainItems = uRows.filter((r) => r.text.includes("마크가 하나도 없는 항목"));
+    const plainRows = rows.filter((r) => r.text.includes("마크가 하나도 없는 항목"));
+    const plainClean = plainItems.length === 2 && plainItems.every((r) => r.underlined === "")
+      && plainRows.every((r) => (r.cov?.bold ?? 0) === 0 && (r.cov?.bg ?? 0) === 0 && (r.cov?.color ?? 0) === 0);
+    rec("⑤ 🔴 거짓 양성 — 마크 없는 목록엔 서식이 **안 붙는다**(안 번졌는데 칠하면 더 나쁘다 · AC-68)", plainClean,
+      plainItems.length === 2 ? plainRows.map((r) => `«${r.text.slice(0, 10)}» b${r.cov?.bold ?? 0}/u${r.cov?.underline ?? 0}/bg${r.cov?.bg ?? 0}`).join(" · ") : `항목 ${plainItems.length}개(2여야 한다)`);
+
+    /* 🔴 ⑤  표 칸 «안» — (0,1) 칸만 밑줄, 같은 줄의 다른 칸은 평문 */
+    const tRow = find(ROW0[0]) || uRows.find((r) => r.text.includes(ROW0[1]));
+    rec("⑤ 🔴 표 칸 «안»의 꾸밈 — 한 칸만 밑줄이고 같은 줄의 다른 칸은 평문",
+      !!tRow && tRow.underlined === CELLSUB,
+      tRow ? `줄«${tRow.text.slice(0, 28)}» 밑줄«${tRow.underlined}» (계획 «${CELLSUB}»)` : "표 줄을 못 찾음");
+    if (!KEEP) await page.close();
+  } else rec("⑤ [R12-5] 목록·표 «안»의 꾸밈", false, "playOps/plan 없음 — 열림");
 
   await browser.close();
   if (!KEEP) rmSync(COPY, { recursive: true, force: true });

@@ -416,7 +416,13 @@ console.log("\n[⑥ 계획층 — 뜻을 받고 상한을 먹인다]");
   ok(why("url_para") === 1,
     "F-12 🔴 주소 문단은 강조를 **걷는다**(스마트에디터는 «서식 없는» 평문 URL 만 링크로 바꿔 준다 — AM #799~801 은 3건이 전부 클릭 불가로 나갔다)");
   ok(why("range_invalid") === 1, "F-12b 범위가 어긋난 마크는 **그 마크만** 버리고 적는다(조용히 안 버린다 · AC-9)");
-  ok(why("block_unsupported") === 1, "F-12c 목록은 조각을 실을 칸이 없다 — 잃는 굵게를 **센다**");
+  /* 🔴 [R12-5 · 2026-09-17] **이 축을 뒤집었다.** 종전은 «목록은 조각을 실을 칸이 없어 굵게가 사라진다 — 그걸 센다»였다.
+     R12-5 가 **그 칸을 만들었다**(`itemPartsOf`) ⇒ 이제 사라지지 않는다. «센다»를 그대로 두면 **없어진 병을 계속 재는 축**이 된다.
+     ⚠️ 축을 뒤집을 때는 **어느 쪽이 정본인지** 먼저 본다(AC-101): 여기서는 설계(R12 §6)가 정본이고 이 자가 낡은 쪽이다. */
+  ok(why("block_unsupported") === 0, "F-12c 🔴 목록 항목 **안**의 굵게는 이제 **안 사라진다**(R12-5 가 조각 칸을 만들었다)");
+  ok(r.ops.some((o) => o.op === "list" && Array.isArray(o.parts) && o.parts.some((x) => x.mark === "bold")),
+    "F-12c2 🔴 그리고 «안 버렸다»가 아니라 **마크로 살아 있다** — 버림 수만 세면 «아예 안 읽었을 때»도 0 이다(대조군)",
+    JSON.stringify(r.ops.filter((o) => o.op === "list")));
   ok(r.ops.every((o) => !String(o.text ?? "").includes("**")),
     "F-13 🔴 `**굵게**` 가 **평문으로 새지 않는다**(종전엔 별표가 에디터에 그대로 타자됐다 — 굵게는 한 번도 시도된 적이 없었다)");
   const boldPart = r.ops.flatMap((o) => o.parts ?? []).find((p) => p.mark === "bold");
@@ -463,10 +469,15 @@ console.log("\n[⑥ 계획층 — 뜻을 받고 상한을 먹인다]");
     "F-16b 그리고 «모르는 마크»로 오해하지 않는다(어휘에 있으니 range_invalid 가 아니다 — 사유가 틀리면 다음 사람이 엉뚱한 데를 판다)");
 
   /* ═══ 🔴 «못 낸 서식»과 «못 낸 블록»을 안 섞는다 ═══ */
+  /* 🔴 [R12-5] 재료를 바꿨다 — 표 **칸 안**의 마크는 이제 산다. «마크를 못 싣는» 자리는 **블록 전체에 걸린 `marks`** 뿐이다
+     (목록·표 블록의 `marks` 는 «어느 문자열의 인덱스인가»가 모호해서 여전히 안 받는다 · `itemMarks`/`cellMarks` 로만 받는다). */
   const two = PLAN.planEditorOps({ blocks: [
-    { type: "table", rows: [["구분", "금액"], ["지난달", "3만 원"]] },
-    { type: "list", items: ["**첫째** 항목"] },
+    { type: "table", rows: [["구분", "금액"], ["지난달", "3만 원"]], cellMarks: [{ r: 1, c: 1, marks: [{ s: 0, e: 2, kind: "value" }] }] },
+    { type: "list", items: ["첫째 항목"], marks: [{ s: 0, e: 2, kind: "bold" }] },
   ] });
+  ok(two.ops.some((o) => Array.isArray(o.parts) && o.parts.some((x) => x.mark === "value")),
+    "F-17a 🔴 표 **칸 안**의 강조는 줄글로 내려앉아도 살아남는다(줄로 바꾸는 것과 꾸밈을 버리는 것은 다른 일이다)",
+    JSON.stringify(two.ops));
   ok(two.stats.demoted.some((d) => d.kind === "table" && d.why === "no_editor_op")
     && two.stats.demoted.some((d) => d.kind === "bold" && d.why === "block_unsupported"),
     "F-17 🔴 «블록을 에디터 요소로 못 세웠다»(no_editor_op)와 «그 블록이 마크를 못 싣는다»(block_unsupported)를 **가른다** — 우리가 할 일이 다르다",

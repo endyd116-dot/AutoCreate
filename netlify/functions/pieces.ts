@@ -31,6 +31,7 @@ import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "..
 import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
 import { formatUnusedOf } from "../../lib/format-marks";           // [R9-5] «못 낸 서식» 사람말 투영(정본은 meta.formatMarks)
 import { formatCapsOf } from "../../lib/channel-registry";         // [R9-4] 채널 꾸밈 표
+import { ruleKindOfPiece } from "../../lib/slots";                  // [R11-1] 화면 어휘(RuleKind) 투영 — 정본 한 곳
 import { toCoinTier } from "../../lib/coin-table";                 // [R10-7] 등급 — 글이 들고 있는 값 그대로
 import { sql } from "drizzle-orm";
 
@@ -57,6 +58,10 @@ function pieceRow(r: Row): Record<string, unknown> {
   const g = (r.gate_report && typeof r.gate_report === "object" ? r.gate_report : null) as GateReport | null;
   const o: Record<string, unknown> = {
     id: n(r.id), channel: String(r.channel), accountHandle: r.handle ? String(r.handle) : null, kind: String(r.kind || "post"), format: String(r.format || ""),
+    /* [R11-1] 🔴 **보여 줄 종류** — `post`·`shorts`·`cardnews`(편성표·배지표와 **같은 말** · `lib/slots.ts ruleKindOfPiece` 한 곳이 정한다).
+       `kind` 는 DB 값 그대로 두고(만드는 길의 구분) 화면이 읽을 말만 한 칸 더 싣는다. 화면은 이 칸을 `UI.kindPill()` 에 넣고
+       종류 칩·빈 상태 문장도 **같은 칸**을 본다(A 합의 2026-09-17). `post` 에는 배지를 안 단다 — 그 결정은 화면 쪽 규칙이다. */
+    ruleKind: ruleKindOfPiece(r.kind, r.format),
     /* [R8 §5D] 어떻게 만들어졌나 — `self` 면 화면이 «내가 쓴 글»로 그리고 AI 티 얘기를 꺼내지 않는다(A 요청). 옛 글은 "auto". */
     origin: String(r.origin || "auto"),
     title: String(r.title || ""), status: String(r.status), stage: stageOf(r), gateOk: g ? !!g.ok : false, createdAt: utcDate(r.created_at)?.toISOString() ?? "",
@@ -212,7 +217,12 @@ export default async (req: Request): Promise<Response> => {
          · `goal` — `briefs.goal`. 🔴 생성이 쓰는 `resolveGoal` **같은 함수**를 부른다(프롬프트에 실린 값과 화면 값이 갈리지 않게)
          · `contract.summary` — 그 글에 실제로 적용된 분량·사진 수·목적 규칙 */
       try {
-        const wc = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
+        const wcBase = await contractFor(String(p.channel), m.emotionKey ? String(m.emotionKey) : null);
+        /* [R11-8] 🔴 **검수 화면도 계정 독자를 봐야 한다** — 생성은 계정 독자로 썼는데 «왜 이렇게 생겼나»가 계약 독자를 보여 주면
+           화면이 거짓말을 한다(AC-52). 🔴 캐시된 계약 객체를 **고치지 않고 복사해서** 덮는다(`content-gen` 과 같은 규율 · 안 그러면 다른 계정 글에 번진다). */
+        const [accR] = p.account_id ? await q(sql`SELECT reader FROM accounts WHERE tenant_id = ${tid} AND id = ${n(p.account_id)}`).catch(() => [] as Row[]) : [undefined];
+        const accReader = String(accR?.reader ?? "").trim();
+        const wc = accReader ? { ...wcBase, reader: accReader } : wcBase;
         /* 🔴 **없는 format 을 `formats[0]` 으로 메우지 않는다** — 그러면 «모름»이 «info» 로 위장되고
            주제군·분량이 그 거짓값에서 흘러나온다(AC-57 대용물 금지 · 스모크에서 실제로 걸렸다). 없으면 없는 대로 둔다. */
         const fmt = String(p.format || m.format || "") || null;
@@ -229,6 +239,9 @@ export default async (req: Request): Promise<Response> => {
         detail.contract = {
           channel: String(p.channel), label: wc.label, format: fmt, formatLabel: fmt ? (wc.formatLabel[fmt as keyof typeof wc.formatLabel] ?? fmt) : null,
           register: wc.register,
+          /* [R11-8] 🔴 **이 글이 누구에게 쓰였나** — 계정이 덮어썼으면 그 값이고, 아니면 계약 값이다.
+             `readerFrom` 이 **어느 쪽인지** 말한다(«계정»인지 «채널 기본»인지 화면이 추측하지 않게 · AC-9). */
+          reader: wc.reader, readerFrom: accReader ? "account" as const : "contract" as const,
           length: { min: len.min, max: len.max, fromGroup: !!(grp && wc.lengthByGroup?.[grp]) },
           images: { min: img.min, max: img.max, default: img.default, fromGroup: !!(grp && wc.imagesByGroup?.[grp]) },
           goalRules: wc.goalRules?.[goal] ?? [],       // 실제로 프롬프트에 실린 줄들(없으면 빈 배열)

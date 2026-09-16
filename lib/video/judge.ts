@@ -14,7 +14,7 @@ import { recordAiUsage } from "../ai";
 import { leaseAiKey, reportAiKeyOutcome, isRateLimitReason } from "../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳 — 🔴 `GEMINI_API_KEYS` 만 꽂은 집에서 여기가 env 를 직접 읽으면 «키 없음»으로 죽는다
 import { r2Get } from "../r2";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "../banned-words";
-import { checkVideoDisclosure } from "../disclosure";
+import { checkVideoDisclosure, compensationOfMeta } from "../disclosure";   // [R12 마감] 고지가 «필요한 글인가» 는 여기 한 곳이 정한다
 import { checkHook } from "./script";
 import { hammingHex, phashFromGray32, PHASH_SIMILAR_MAX_DISTANCE } from "./fingerprint";
 import { JUDGE_COST_USD } from "./cost";
@@ -35,6 +35,40 @@ const axis = (key: string, pass: boolean, detail?: string): JudgeAxis => ({ key,
 /** [R7 §1.5] «못 쟀다»를 «괜찮다»로 접지 않는다(AC-33 · AC-9) — 막지는 않지만(`pass:true`) 잰 척도 하지 않는다.
     실패한 축에는 붙이지 않는다: 떨어뜨릴 만큼은 쟀다는 뜻이라 보류가 아니다. */
 const pendingIf = (a: JudgeAxis, pending: boolean): JudgeAxis => (pending && a.pass ? { ...a, pending: true } : a);
+
+/**
+ * [R12 마감 · 2026-09-17] 🔴 **고지 축의 판정 — 순수**(계약 §4-4 «있나»가 아니라 «도나» · AC-99 ⑩).
+ *
+ *   ══ 왜 이 함수가 생겼나 ══
+ *     이 축은 **계획서**(`p.overlay.badge.text`)를 본다. 산출물을 한 번도 안 본다.
+ *     그래서 러너 오버레이가 `eof_action=pass` 라 자막·배지·제휴 고지가 **첫 프레임에만** 실렸는데도 **✅ 가 찍혔다**
+ *     (B2·C ffmpeg 8.1.2 실측 · AC-33 «산출물이 아니라 계획서를 보고 도장»). **대가 표시는 법**이라 이 거짓 도장이 제일 비싸다.
+ *
+ *   ══ 표 — `overlayVerified` 세 값 × 고지 필요 여부 ══
+ *     | 고지 필요 | overlayVerified | 결과 |
+ *     |---|---|---|
+ *     | 아니오 | 무엇이든   | **pending 아님** — 고지가 필요 없는 글에 «못 쟀어요»를 띄우면 그건 소음이다 |
+ *     | 예     | `true`     | 쟀고 실렸다 → 그냥 통과 |
+ *     | 예     | `undefined`| 🔴 **pending** — «못 쟀다»이지 «괜찮다»가 아니다(AC-9) |
+ *     | 예     | `false`    | 🔴 **실패** — 재 봤고 안 실렸다. **보류가 아니다** |
+ *     그리고 계획 자체가 모자라면(`d.ok === false`) 그건 이미 실패라 **보류를 안 붙인다**(`pendingIf` 가 실패 축엔 안 붙는다).
+ *
+ *   🔴 **막지 않는다**(CLAUDE §9) — `pending` 은 `pass:true` 다. «쟀고 괜찮았다»고 **말하지 않을 뿐**이다.
+ */
+export function disclosureVerdict(
+  d: { ok: boolean; detail?: string },
+  needDisclosure: boolean,
+  overlayVerified: boolean | undefined,
+): { pass: boolean; pending: boolean; detail?: string } {
+  const pass = d.ok && overlayVerified !== false;
+  const detail = d.detail
+    ?? (overlayVerified === false ? "러너가 산출물에서 확인했는데 **고지·배지가 화면에 안 실렸다** — 계획엔 있었다"
+      : needDisclosure && overlayVerified !== true ? "계획엔 고지가 있는데 **영상에 실제로 실렸는지 못 쟀다**(러너 overlayVerified 필요) — 통과로 세지 않는다"
+        : undefined);
+  /* 🔴 `pendingIf` 와 **같은 규율**을 여기서도 지킨다: 실패한 축에는 보류를 안 붙인다(떨어뜨릴 만큼은 쟀다는 뜻이라 보류가 아니다). */
+  const pending = pass && needDisclosure && overlayVerified !== true;
+  return { pass, pending, ...(detail ? { detail } : {}) };
+}
 
 /* ═══ 자막·배지가 «그 채널의» 안전영역 안인가 (R8-A §3) ═══
    🔴 종전 축은 «자막·배지가 안전영역 안»이라는 **이름을 달고** 실제로는 `safeZone.top === 220 && bottom === 300`,
@@ -122,10 +156,17 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
   const texts = [...p.captions.phrases.map((x) => x.text), p.overlay.endcard?.text ?? "", String(meta.description ?? "")].join("\n");
   const banned = findBannedWords(texts, BLOG_EXTRA_BANNED); const internal = /cut:\d|\bstub\b|TODO|\{\{|\}\}|undefined|NaN/.test(texts);
   axes.push(axis("forbidden", banned.length === 0 && !internal, banned.length ? `금칙어 ${banned.join(", ")}` : internal ? "내부 문자열 흔적" : undefined));
-  // disclosure(§16B)
-  const d = checkVideoDisclosure({ badge: p.overlay.badge?.text ?? null, disclosureCaption: p.disclosureCaption?.text ?? null, descriptionFirstLine: String(meta.description ?? "").split("\n")[0] ?? "" }, { affiliate: meta.affiliate, adDisclosure: meta.adDisclosure === true });
-  axes.push(axis("disclosure", d.ok, d.detail));
+  /* disclosure(§16B) — 판정은 **순수 함수**(`disclosureVerdict`)가 한다. 여기서는 재료만 모아 넘긴다.
+     🔴 순수로 뺀 까닭: 어제 이 자리를 고치면서 **자에 안 박았다**. B2 가 «pending 이 뜨나»가 아니라
+        «**안 떠야 할 때 안 뜨나**»를 같이 재라고 짚어 줬고, 그건 `judgeVideo` 안에 박혀 있으면 못 잰다(AI 호출이 섞여 있다). */
+  const dIn = { badge: p.overlay.badge?.text ?? null, disclosureCaption: p.disclosureCaption?.text ?? null, descriptionFirstLine: String(meta.description ?? "").split("\n")[0] ?? "" };
+  const dMeta = { affiliate: meta.affiliate, adDisclosure: meta.adDisclosure === true };
+  const dv = disclosureVerdict(checkVideoDisclosure(dIn, dMeta), compensationOfMeta(dMeta).need, report?.overlayVerified);
+  axes.push(pendingIf(axis("disclosure", dv.pass, dv.detail), dv.pending));
   /* duration_fit — 길이 ≤ maxSeconds+1s · ≥ 60% · 🔴 **컨테이너와 영상 트랙이 갈라지지 않았는가**.
+     [R12-7 · 2026-09-17 확인] 🔴 **90초를 여는 데 이 축은 고칠 것이 없다** — 판정이 전부 `p.out.maxSeconds`(= `VideoSeconds`)에서 나오고
+     그 타입이 90 을 받게 넓어졌기 때문이다. 🔴 **«고칠 것이 없다»를 확인 없이 믿지 않았다**: 이 파일에서 15·30·60 리터럴을 전수로 찾았고
+     길이 판정에 박힌 숫자는 0개였다(`CAPTION_SIDE_PX=60` 은 픽셀이지 초가 아니다). 그 사실을 여기 적어 둔다 — 다음 라운드에 또 안 찾게.
      2026-09-14 C 수리: 종전엔 러너가 보낸 `durationMs`(= 인코딩에 넘긴 `-t` 값)와 그걸로 나눈 `frameCount` 를 견줬다.
      두 값이 같은 식에서 나오니 `|frames − dur×fps|` 는 **항상 참인 항등식**이었고, AC-31 의 «정지 화면 + 음악 13초 꼬리»가
      («컨테이너 15s · 영상 12s») 그대로 통과했다 — 심사가 산출물이 아니라 **계획서**를 보고 있었다.

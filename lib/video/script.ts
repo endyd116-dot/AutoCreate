@@ -46,7 +46,10 @@ export function findIncomeClaim(lines: { text: string }[]): string | null {
   return null;
 }
 /** 대본 전체 게이트(순수) — 훅·금칙어·수익 약속·상투. */
-export function checkScriptGates(script: VideoScript): { ok: boolean; issues: string[] } {
+/** [R12-7] 문장 수 상한 — 🔴 기본 **12**(종전 그대로 · 무회귀). 90초만 16 이다(351음절을 12문장에 담으면 한 문장이 29음절이라 계약 «≤28음절»과 싸운다). */
+export function maxLinesFor(seconds: number): number { return Number(seconds) === 90 ? 16 : 12; }
+
+export function checkScriptGates(script: VideoScript, maxLines = 12): { ok: boolean; issues: string[] } {
   const issues: string[] = [];
   const h = checkHook(script.hook || script.lines[0]?.text || ""); if (!h.ok && h.reason) issues.push(`훅: ${h.reason}`);
   const all = script.lines.map((l) => l.text).join("\n");
@@ -54,7 +57,7 @@ export function checkScriptGates(script: VideoScript): { ok: boolean; issues: st
   const inc = findIncomeClaim(script.lines); if (inc) issues.push(`수익 약속 표현: «${inc.slice(0, 40)}»`);
   const cli = CLICHES.filter((c) => c.re.test(all)).map((c) => c.label); if (cli.length) issues.push(`상투 표현: ${cli.slice(0, 3).join(", ")}`);
   const total = script.lines.reduce((a, l) => a + syllablesOf(l.text), 0);
-  if (script.lines.length < 4 || script.lines.length > 12) issues.push(`문장 수 ${script.lines.length}(계약 4~12)`);
+  if (script.lines.length < 4 || script.lines.length > maxLines) issues.push(`문장 수 ${script.lines.length}(계약 4~${maxLines})`);
   if (total < 20) issues.push("대본이 너무 짧다");
   return { ok: issues.length === 0, issues };
 }
@@ -71,14 +74,35 @@ export interface ScriptInput {
   affiliate?: { productQuery: string } | null;
   /** 재작성 지시(게이트 실패·팩트체크 정정). */
   rewrite?: string | null;
+  /**
+   * [R12-3] 🔴 **음절 예산에 곱할 비율** — `lib/video/tempo.ts syllableRatioOf(refStyle?.audioTempo)`.
+   *   안 넘기면 **1**(종전과 한 글자도 안 다르다 · 무회귀). 1보다 작으면 «느리게 말한다 ⇒ 대본을 짧게».
+   *   🔴 규격(15/30/60/90)을 넘는지 **여기서 판정하지 않는다** — 그건 실제 음성 길이를 잰 뒤라야 알 수 있고, B2 의 `checkTempoFitsSpec` 이 재서
+   *      `meta.refUnused` 에 «말 속도를 그대로 쓰면 N초를 넘어서 보통 속도로 만들었어요»를 적는다(문장을 두 벌 쓰지 않는다 · B↔B2 합의).
+   */
+  syllableRatio?: number;
 }
 const FORMAT_RULE: Record<VideoFormat, string> = {
   graphic: "그래픽 스토리 — 무음 시청 전제 · 문장마다 화면이 바뀐다(문장 = 컷) · 사물·공간·수치 중심 · 인물은 실루엣/뒷모습.",
   talking: "토킹 — 나레이션이 본체 · 한 사람이 카메라를 보고 말하듯 · 문장 사이에 B-roll(사물·손·공간) 컷이 들어간다 · 정지 이미지로 대체 가능한 장면을 절반 이상.",
   clip: "클립형(생활밀착 15~30초) — 한 장면 한 메시지 · 짧은 문장 4~6개 · 첫 문장이 곧 결론 · 마지막은 한 줄 팁.",
 };
-function budgetFor(seconds: VideoSeconds): { minSyl: number; maxSyl: number; lines: [number, number] } {
-  const maxSyl = Math.floor(seconds * 4.6 * 0.85); return { minSyl: Math.floor(maxSyl * 0.55), maxSyl, lines: seconds === 15 ? [4, 6] : seconds === 30 ? [5, 8] : [7, 12] };
+/**
+ * budgetFor — 이 길이의 **발화 예산**(음절·문장 수).
+ *
+ *   [R12-3 · 설계 R12 §4.2 · B↔B2 합의 2026-09-17] 🔴 **말 속도를 «대본 길이»로 먼저 맞춘다.**
+ *     레퍼런스에서 배운 `audioTempo` 가 0.9(느리게)면 같은 글자가 **더 오래** 걸린다 ⇒ 컷 창·자막 시각·전체 길이가 다 밀리고,
+ *     길이가 밀리면 **코인이 틀어진다**(길이 구간제). 그래서 음성을 늦추기 전에 **대본을 그만큼 짧게 쓴다.**
+ *   🔴 `ratio` 정본은 `lib/video/tempo.ts syllableRatioOf()` 한 곳이다(= 실제 tempo ÷ 우리 보통 속도 1.1). **여기서 다시 셈하지 않는다.**
+ *   🔴 **안 넘기면 1** — 대본이 종전과 한 글자도 안 달라진다(계약 §5 무회귀 · «안 보내면 어제와 같은 영상»).
+ *   🔴 예산이 0 이 되지 않게 바닥을 둔다 — 0.5배 속도라도 훅 한 문장은 써야 한다.
+ *   [R12-7] 90초: 문장 9~14(상한은 `maxLinesFor`).
+ */
+function budgetFor(seconds: VideoSeconds, ratio = 1): { minSyl: number; maxSyl: number; lines: [number, number] } {
+  const r = Number.isFinite(Number(ratio)) && Number(ratio) > 0 ? Number(ratio) : 1;
+  const maxSyl = Math.max(20, Math.floor(seconds * 4.6 * 0.85 * r));
+  const lines: [number, number] = seconds === 15 ? [4, 6] : seconds === 30 ? [5, 8] : seconds === 90 ? [9, 14] : [7, 12];
+  return { minSyl: Math.floor(maxSyl * 0.55), maxSyl, lines };
 }
 function stubScript(inp: ScriptInput): { script: VideoScript; drafts: CutDraft[] } {
   const n = Math.max(4, Math.min(inp.cuts, 9)); const per = Math.max(1, Math.round(inp.seconds / n));
@@ -89,7 +113,7 @@ function stubScript(inp: ScriptInput): { script: VideoScript; drafts: CutDraft[]
 /** buildVideoScript — 포맷 계약대로 대본 + 컷 서술 JSON 1콜(재작성 지시 포함). */
 export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; script: VideoScript; drafts: CutDraft[]; model: string } | { ok: false; reason: string }> {
   if (videoStub()) { const s = stubScript(inp); return { ok: true, ...s, model: "stub" }; }
-  const b = budgetFor(inp.seconds);
+  const b = budgetFor(inp.seconds, inp.syllableRatio);
   const system = [
     inp.rewrite ?? "",
     `[역할] 한국 숏폼 대본 작가. ${inp.channel} ${inp.seconds}초 · 포맷 ${inp.format}: ${FORMAT_RULE[inp.format]}`,
@@ -109,7 +133,7 @@ export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; sc
   if (!r.ok) return { ok: false, reason: `대본 생성 실패(${r.reason})` };
   const p = r.data ?? {};
   const rawLines = Array.isArray(p.lines) ? p.lines : [];
-  const lines: ScriptLine[] = rawLines.slice(0, 12).map((x, i) => { const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>; const text = String(o.text ?? "").replace(/\s+/g, " ").trim().slice(0, 120); const role = (["hook", "body", "bridge", "landing", "closing"].includes(String(o.role)) ? String(o.role) : i === 0 ? "hook" : "body") as ScriptLine["role"]; const cutIdx = Math.max(0, Math.min(inp.cuts - 1, Math.trunc(Number(o.cutIdx)) || Math.floor(i * inp.cuts / Math.max(1, rawLines.length)))); return { idx: i, text, role, seconds: speechSecondsOf(syllablesOf(text)), cutIdx }; }).filter((l) => l.text);
+  const lines: ScriptLine[] = rawLines.slice(0, maxLinesFor(inp.seconds)).map((x, i) => { const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>; const text = String(o.text ?? "").replace(/\s+/g, " ").trim().slice(0, 120); const role = (["hook", "body", "bridge", "landing", "closing"].includes(String(o.role)) ? String(o.role) : i === 0 ? "hook" : "body") as ScriptLine["role"]; const cutIdx = Math.max(0, Math.min(inp.cuts - 1, Math.trunc(Number(o.cutIdx)) || Math.floor(i * inp.cuts / Math.max(1, rawLines.length)))); return { idx: i, text, role, seconds: speechSecondsOf(syllablesOf(text)), cutIdx }; }).filter((l) => l.text);
   if (!lines.length) return { ok: false, reason: "대본 문장이 비었다" };
   const rawCuts = Array.isArray(p.cuts) ? p.cuts : [];
   const drafts: CutDraft[] = rawCuts.slice(0, 12).map((c, i) => { const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>; return { key: String(o.key ?? "").trim() || `cut:${i}`, subject: String(o.subject ?? "").replace(/\s+/g, " ").trim().slice(0, 400), palette: String(o.palette ?? "").trim().slice(0, 120) || undefined, redMeasureLine: o.redMeasureLine === true, redProp: o.redProp === true, ...(["fast", "normal", "hold"].includes(String(o.pace)) ? { pace: String(o.pace) as CutDraft["pace"] } : {}) }; });

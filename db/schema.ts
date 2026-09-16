@@ -1189,3 +1189,15 @@ export const accountsR9Style = {
  *   정본 목록은 `lib/content-approve.ts REVIEW_PIECE_STATUSES = ['in_review','edited']` — 승인·거절·다시 만들기·마감 자동 승인·홈·팀 승인이 전부 그 목록을 본다.
  *   `meta.editedByUser` 는 다른 것이다(재검사가 HTML 을 보게 하는 표시). */
 export const piecesR9Status = { edited: "edited", review: ["in_review", "edited"] } as const;
+
+
+/* === Phase 1 R11 · B(계정마다 독자 · R11-8 · 2026-09-17 · DDL `drizzle/0081-r11-account-reader.sql`) ===
+ *   설계 R11 §4.4 — 지금 독자는 **채널 계약에 고정**(`lib/writing-contracts.ts contract.reader`)이라
+ *   같은 네이버라도 «살림 검증»과 «작은 돈 재테크»가 **같은 독자**에게 쓰고 있었다. 계정이 계약을 덮어쓰는 칸 하나.
+ *   🔴 NULL = «안 골랐다» = 계약 값 그대로(무회귀 · 기본값을 넣지 않는다).
+ *   🔴 읽는 곳을 **같은 커밋에** 넣었다 — `lib/accounts.ts ACCOUNT_SELECT`/`toAccountRow`(읽기) · `netlify/functions/accounts.ts accounts-update`(쓰기) ·
+ *      `lib/content-gen.ts`(프롬프트 ①칸) · `netlify/functions/pieces.ts`(검수 3축). 「허용 목록이 값을 먹은 자리」가 다섯 번째가 되지 않게. */
+export const accountsR11Reader = {
+  /** 이 계정의 독자(≤120자). NULL = 계약 값 그대로. */
+  reader: "reader",
+} as const;

@@ -155,6 +155,61 @@ function cleanPart(s, isFirst, isLast) {
   return t;
 }
 
+/* ═══════ [R12-5] 목록 항목 · 표 칸 «안»의 꾸밈 — 🔴 **번짐이 여기서 다시 난다** ═══════
+ *
+ *   R9 는 **문단**까지였다(`para`·`quote`). 목록 항목·표 칸 **안**은 조각을 실을 칸이 없어 `block_unsupported` 로 적고 버렸다.
+ *   R12 가 그 칸을 만든다. 🔴 **그런데 번짐은 문단 경계에서만 나는 병이 아니다** —
+ *   항목 하나에 칠하면 **다음 항목까지 따라간다**(사장님이 보신 «어느 지점부터 끝까지 빨강»의 목록판).
+ *   ⇒ 실행부가 **항목마다** R9 의 세 겹(끊기 · 꼬리 대조 · 오른쪽부터)을 **다시 탄다**(`naver-blog.mjs typeParts`).
+ *
+ *   🔴 **인덱스는 «항목 문자열» 기준**이다(블록 전체가 아니다 · 2026-09-17 B↔B2 확정).
+ *      이어 붙인 문자열 기준으로 재면 **항목 경계를 넘는 마크가 «유효»로 통과**하고, 그게 곧바로 번짐이 된다.
+ *   🔴 **`faq` 는 항목 하나가 «Q + A» 한 덩이**다(렌더가 나중에 쪼갠다) — 좌표도 **쪼개기 전 한 덩이** 기준이다(B 확인).
+ */
+
+/** 항목 하나 → 조각들. `marks` 가 없으면 **종전과 똑같이** 조각 하나(또는 `**굵게**` 만 마크로)로 나온다(무회귀). */
+export function itemPartsOf(itemText, marks, demoted) {
+  return partsFromMarks(itemText, marks, demoted);
+}
+
+/** `itemMarks: [{ i, marks }]` 에서 i 번째 항목의 마크를 꺼낸다. 없으면 `null`(«안 왔다»). */
+export function marksForItem(itemMarks, i) {
+  if (!Array.isArray(itemMarks)) return null;
+  const hit = itemMarks.find((x) => x && Number(x.i) === Number(i));
+  return hit && Array.isArray(hit.marks) && hit.marks.length ? hit.marks : null;
+}
+
+/** `cellMarks: [{ r, c, marks }]` 에서 (r,c) 칸의 마크. */
+export function marksForCell(cellMarks, r, c) {
+  if (!Array.isArray(cellMarks)) return null;
+  const hit = cellMarks.find((x) => x && Number(x.r) === Number(r) && Number(x.c) === Number(c));
+  return hit && Array.isArray(hit.marks) && hit.marks.length ? hit.marks : null;
+}
+
+/**
+ * 표 한 행 → 줄글 한 줄의 조각들.
+ *   🔴 **좌표를 다시 계산하지 않는다 — 조각을 «만들어서 이어 붙인다».**
+ *      칸마다 `partsFromMarks` 를 돌려 나온 조각을 순서대로 잇고 사이에 구분자 조각을 끼운다.
+ *      좌표 산수를 두 벌로 하면(«칸 시작 위치 + 마크 위치») `clean()` 이 앞뒤를 턴 만큼 **조용히 어긋난다**.
+ *   🔴 빈 칸은 종전대로 떨어진다 — 그 칸의 마크도 같이 떨어지고, **떨어졌다고 적는다**.
+ */
+export const TABLE_CELL_SEP = " · ";
+export function rowPartsOf(row, r, cellMarks, demoted) {
+  const cells = Array.isArray(row) ? row : [];
+  const out = [];
+  for (const [c, raw] of cells.entries()) {
+    const marks = marksForCell(cellMarks, r, c);
+    const parts = partsFromMarks(raw, marks, demoted);
+    if (!parts.length) {
+      if (marks && demoted && demoted.length < 40) demoted.push({ kind: String(marks[0]?.kind ?? ""), why: "block_unsupported", sample: String(raw ?? "").slice(0, 20) });
+      continue;
+    }
+    if (out.length) out.push({ t: TABLE_CELL_SEP, mark: null });
+    out.push(...parts);
+  }
+  return out;
+}
+
 /**
  * 상한을 먹인다 — 넘치는 마크는 **평문으로 내려앉히고** `demoted` 에 적는다.
  *   🔴 **글 전체에 걸쳐 한 번에** 센다(문단마다 따로 세면 글당 상한이 뜻이 없다).
@@ -235,9 +290,10 @@ function opsFromBlocks(blocks, images, demoted) {
   const note = (kind, sample, why = "block_unsupported") => { if (demoted && demoted.length < 40) demoted.push({ kind, why, sample: String(sample ?? "").slice(0, 20) }); };
   const noteNoOp = (blockType, sample) => note(blockType, sample, "no_editor_op");
   const dropMarks = (b) => { for (const m of Array.isArray(b?.marks) ? b.marks : []) note(String(m?.kind ?? ""), b?.text); };
-  /* 🔴 목록·표·FAQ 는 op 가 줄 하나씩이라 **조각(parts)을 실을 칸이 없다** — 거기 있던 굵게는 진짜로 사라진다.
-     사라지는 것을 «없던 일»로 두지 않는다(AC-9). 소제목은 이미 굵게+크기라 잃는 게 없으니 안 센다. */
-  const noteLostBold = (raw) => { if (String(raw ?? "").includes("**") && stripBoldMarkers(raw) !== String(raw)) note("bold", raw); };
+  /* 🔴 [R12-5] 종전 주석: «목록·표·FAQ 는 op 가 줄 하나씩이라 조각(parts)을 실을 칸이 없다 — 거기 있던 굵게는 진짜로 사라진다».
+     **그 칸을 R12 가 만들었다** ⇒ `noteLostBold` 를 지웠다. 이제 사라지지 않고 `itemPartsOf` 가 마크로 살린다.
+     🔴 «못 냈어요»를 **안 적게 된 것이 아니라 적을 일이 없어진 것**이다 — 상한·채널표에 걸리면 `applyMarkBudget` 이 그대로 적는다.
+     소제목은 이미 굵게+크기라 잃는 게 없어 종전처럼 안 센다. */
   const ops = [];
   const imgs = Array.isArray(images) ? images : [];
   let imgCursor = 0;
@@ -262,31 +318,36 @@ function opsFromBlocks(blocks, images, demoted) {
       case "divider": ops.push({ op: "divider" }); break;
       case "toc":
       case "list":
+        /* 🔴 [R12-5] 블록 전체에 걸린 `marks` 는 여전히 못 쓴다(«어느 문자열의 인덱스인가»가 모호하다) — 그건 적고 버린다.
+           항목 안의 꾸밈은 `itemMarks` 로 온다. 🔴 **`**굵게**` 도 이제 마크로 산다** — 종전 `noteLostBold` 는 «못 낸다»였는데 이제 낸다. */
         dropMarks(b);
-        for (const it of (b?.items ?? [])) { noteLostBold(it); const t = clean(it); if (t) ops.push({ op: "list", text: t }); }
+        for (const [i, it] of (b?.items ?? []).entries()) { const t = clean(it); if (t) ops.push({ op: "list", text: t, parts: itemPartsOf(it, marksForItem(b?.itemMarks, i), demoted) }); }
         break;
       case "checklist":
         dropMarks(b);
-        for (const it of (b?.items ?? [])) { noteLostBold(it); const t = clean(it); if (t) ops.push({ op: "check", text: t }); }
+        for (const [i, it] of (b?.items ?? []).entries()) { const t = clean(it); if (t) ops.push({ op: "check", text: t, parts: itemPartsOf(it, marksForItem(b?.itemMarks, i), demoted) }); }
         break;
       case "table":
         /* 스마트에디터 ONE 에 표를 «데이터로» 넣을 안정적 길이 없다 — 줄로 정직하게 내려앉힌다.
-           조용히 빠뜨리지 않고 note 를 남겨 보고에 실린다(축소를 숨기지 않는다). */
+           조용히 빠뜨리지 않고 note 를 남겨 보고에 실린다(축소를 숨기지 않는다).
+           🔴 [R12-5] **칸 안의 꾸밈은 살린다** — 줄로 내려앉는 것과 꾸밈을 버리는 것은 다른 일이다.
+           좌표는 다시 계산하지 않고 **칸마다 조각을 만들어 이어 붙인다**(`rowPartsOf`). */
         dropMarks(b);
-        for (const row of (b?.rows ?? [])) {
-          for (const c of row ?? []) noteLostBold(c);
-          const line = (row ?? []).map((c) => clean(c)).filter(Boolean).join(" · ");
-          if (line) ops.push({ op: "para", text: line });
+        for (const [r, row] of (b?.rows ?? []).entries()) {
+          const parts = rowPartsOf(row, r, b?.cellMarks, demoted);
+          const line = parts.map((x) => x.t).join("");
+          if (line.trim()) ops.push({ op: "para", text: line, parts });
         }
         if ((b?.rows ?? []).length) { noteNoOp("table", (b.rows[0] ?? []).join(" · ")); ops.push({ op: "note", text: "표는 줄글로 넣었습니다(에디터 표 미지원)" }); }
         break;
       case "faq":
+        /* 🔴 [R12-5] `faq` 는 항목 하나가 «질문 + 답» **한 덩이**다(렌더가 나중에 쪼갠다) —
+           `itemMarks.i` 의 좌표도 **쪼개기 전 한 덩이** 기준이다(2026-09-17 B 확인). 쪼갠 뒤 기준으로 재면 답 쪽이 통째로 어긋난다. */
         dropMarks(b);
-        for (const it of (b?.items ?? [])) {
-          noteLostBold(it);
+        for (const [i, it] of (b?.items ?? []).entries()) {
           const t = clean(it);
           if (!t) continue;
-          ops.push({ op: "faq", text: t });
+          ops.push({ op: "faq", text: t, parts: itemPartsOf(it, marksForItem(b?.itemMarks, i), demoted) });
         }
         break;
       case "image": {

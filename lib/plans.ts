@@ -14,7 +14,14 @@ export interface PlanLimits { maxAccounts: number; coinsIncluded: number; runner
   channels?: string[];
   /** [R10-2 · 사장님 «레퍼런스는 코인 안 받는다 · 요금제별 달에 몇 개 한도만»] 글 레퍼런스(스타일 배우기) **월 한도**. 라이브 plans 행엔 없는 키라 `textStylesPerMonthOf` 가 코드 기본값으로 메운다.
    *  ⚠️ 값(5/10/30/100)은 B 가 잡은 **임시값**이다 — 사장님이 정하신 숫자가 아니다. 운영센터 `plans.limits` 에서 바꿀 수 있다. */
-  textStylesPerMonth?: number }
+  textStylesPerMonth?: number;
+  /** [R11-11 · 설계 R11 §6-② · 메인 결정 2026-09-17] 🔴 **영상 레퍼런스(구조 배우기) 월 한도.**
+   *  종전엔 영상만 «**하루** 3개»였고 글은 «**달에** N개»라 **둘이 다른 말**을 했다 — 같은 그룹(«배워 올 곳»)에 나란히 놓이면 고객이 헷갈린다.
+   *  ⇒ 둘 다 «이번 달 N개»로 통일한다. 까닭: 요금제와 **같은 주기**라 «내 요금제가 주는 것»으로 읽힌다.
+   *  ⚠️ 값(3/6/20/60)은 B 가 잡은 **임시값**이고 **사장님 결재 대기**다(합동 세션 18) — 글 쪽(5/10/30/100)과 같은 처지다.
+   *     근거로 삼은 것: 종전 하루 3개 × 30일 = 90 은 AI 원가가 너무 크고, 실제로 하루 3개를 매일 쓴 집이 없다(라이브 감사 0건).
+   *     그래서 **글 한도의 절반쯤**으로 잡되 🔴 **하루 3개를 쓰던 고객이 첫날 막히지 않게** 체험도 3 으로 둔다. */
+  videoRefsPerMonth?: number }
 export interface PlanFeatures { directorEdit: boolean; autoSchedule: boolean; failover: boolean; managedRunner: "no" | "option" | "included"; runnerRevenue: boolean; teamApproval: boolean;
   /** [P1R7 B3] «조용하면 그대로 발행»(DESIGN §5B.9 · Starter 제외). 라이브 plans 행엔 없는 키라 `autoApproveAllowed` 가 코드 기본값으로 메운다. */
   autoApprove?: boolean;
@@ -32,16 +39,16 @@ export const STARTER_CHANNELS: readonly string[] = [...TEXT_CHANNELS, "youtube_s
 
 export const PLAN_DEFAULTS: PlanDef[] = [
   { key: "trial", name: "체험", priceMonth: 0, priceYear: 0, public: false, recommended: false, sort: 0,
-    limits: { maxAccounts: 5, coinsIncluded: 0, runnerDevices: 1, teamSeats: 1, horizonDays: 14, maxRules: null, textStylesPerMonth: 5 },
+    limits: { maxAccounts: 5, coinsIncluded: 0, runnerDevices: 1, teamSeats: 1, horizonDays: 14, maxRules: null, textStylesPerMonth: 5, videoRefsPerMonth: 3 },
     features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "no", runnerRevenue: true, teamApproval: false, autoApprove: true, exportZip: false } },
   { key: "starter", name: "Starter", priceMonth: 19_000, priceYear: 190_000, public: true, recommended: false, sort: 1,
-    limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3, channels: [...STARTER_CHANNELS], textStylesPerMonth: 10 },   // [P1R7 §3.2] Starter = 글 + 쇼츠
+    limits: { maxAccounts: 3, coinsIncluded: 40, runnerDevices: 1, teamSeats: 1, horizonDays: 7, maxRules: 3, channels: [...STARTER_CHANNELS], textStylesPerMonth: 10, videoRefsPerMonth: 6 },   // [P1R7 §3.2] Starter = 글 + 쇼츠
     features: { directorEdit: false, autoSchedule: true, failover: false, managedRunner: "no", runnerRevenue: false, teamApproval: false, autoApprove: false, exportZip: false } },   // [P1R7 B3] 자동 승인은 Pro 부터(DESIGN §5B.9)
   { key: "pro", name: "Pro", priceMonth: 49_000, priceYear: 490_000, public: true, recommended: true, sort: 2,
-    limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null, textStylesPerMonth: 30 },
+    limits: { maxAccounts: 15, coinsIncluded: 150, runnerDevices: 2, teamSeats: 2, horizonDays: 30, maxRules: null, textStylesPerMonth: 30, videoRefsPerMonth: 20 },
     features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "option", runnerRevenue: true, teamApproval: false, autoApprove: true, exportZip: false } },
   { key: "agency", name: "Agency", priceMonth: 149_000, priceYear: 1_490_000, public: true, recommended: false, sort: 3,
-    limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null, textStylesPerMonth: 100 },
+    limits: { maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, horizonDays: 30, maxRules: null, textStylesPerMonth: 100, videoRefsPerMonth: 60 },
     features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: "included", runnerRevenue: true, teamApproval: true, autoApprove: true, exportZip: true } },   // [P1R7 §3.2] 내보내기는 Agency 열
 ];
 
@@ -192,6 +199,15 @@ export function textStylesPerMonthOf(plan: PlanDef): number {
   const def = PLAN_DEFAULTS.find((p) => p.key === plan.key);
   const dv = def?.limits.textStylesPerMonth;
   return typeof dv === "number" ? dv : 5;
+}
+
+/** [R11-11] 영상 레퍼런스 월 한도 — DB 값 > 코드 기본값 > (둘 다 없으면) 3. 🔴 0 도 값이다(운영자가 잠근 것) — `??` 로만 메운다. `textStylesPerMonthOf` 와 **같은 모양**으로 둔다(둘이 갈리면 화면이 한쪽만 따라간다). */
+export function videoRefsPerMonthOf(plan: PlanDef): number {
+  const v = (plan.limits as unknown as Record<string, unknown>)?.videoRefsPerMonth;
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
+  const def = PLAN_DEFAULTS.find((p) => p.key === plan.key);
+  const dv = def?.limits.videoRefsPerMonth;
+  return typeof dv === "number" ? dv : 3;
 }
 
 export function autoApproveAllowed(planKey: string, plan: PlanDef): boolean {

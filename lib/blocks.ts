@@ -36,6 +36,24 @@ export interface Block {
    *   · AM 은 제어문자를 본문에 섞어 마크를 나르는데 우리는 **구조**로 나른다(AC-77 ③ · 보이지 않는 글자는 git·DB 에서 사고다).
    */
   marks?: InlineMark[];
+  /**
+   * [R12-5 · 설계 R12 §6 · B↔B2 합의 2026-09-17] 🔴 **목록 항목 «안»의 꾸밈.** R9-1 이 «다음 라운드 `itemMarks`» 라고 적어 둔 그 칸이다.
+   *   붙는 블록: `list` · `checklist` · `faq`(항목이 `items[]` 인 것).
+   *   · `i` = `items[]` 인덱스 · `marks` 의 `s`/`e` 는 🔴 **그 항목 문자열** 기준 `[s, e)` 다(블록 전체 기준이 아니다).
+   *     R9-1 때 `items[]` 를 안 받기로 한 까닭이 «어느 문자열의 인덱스인가»가 모호해서였고, **항목마다 따로 재는 것**이 그 답이다.
+   *   · 🔴 `faq` 는 항목 하나가 «Q + 줄바꿈 + A»(또는 «Q | A») **한 덩이**다 — 인덱스도 **쪼개기 전 원문** 기준이다(렌더가 그 뒤에 쪼갠다).
+   *     쪼갠 뒤 기준으로 재면 답변 쪽 좌표가 통째로 어긋난다(B2 와 글자 맞춤 2026-09-17).
+   *   · 🔴 **검증은 항목마다 다시 돈다**(`validateMarks`). 이어 붙인 문자열로 재면 **항목 경계를 넘는 마크가 «유효»로 통과**하고,
+   *     그게 러너에서 곧바로 **번짐**이 된다(R9-3 이 문단 경계에서 겪은 그것 · 이번엔 항목 경계다).
+   */
+  itemMarks?: { i: number; marks: InlineMark[] }[];
+  /**
+   * [R12-5] 🔴 **표 칸 «안»의 꾸밈.** `{ r, c }` 는 `rows[r][c]` 그대로(헤더 행이 `r = 0`).
+   *   `marks` 인덱스는 **그 칸 문자열** 기준 `[s, e)`.
+   *   ⚠️ 네이버는 에디터 표가 없어 러너가 표를 **줄글로 내려앉힌다** — 그때 좌표를 다시 계산해 살리는 것은 러너(B2) 몫이고,
+   *      못 살리면 `block_unsupported` 로 적는다(조용히 0건 금지).
+   */
+  cellMarks?: { r: number; c: number; marks: InlineMark[] }[];
 }
 export interface RenderImage { url: string; caption?: string; alt?: string }
 
@@ -130,6 +148,38 @@ export function markRendererFor(channel: string): (kind: MarkKind) => boolean {
   return (kind) => !(caps && caps[kind] === false);
 }
 
+/* ═══ [R12-5] 목록·표 «안»의 마크를 꺼내 쓰는 소도구 — 🔴 **좌표는 늘 «그 조각의 원문» 기준**이다 ═══ */
+/** faq 항목을 질문/답으로 가르는 자리(종전 렌더와 **같은 잣대**를 이름만 붙여 뺐다 — 두 벌 적으면 갈린다). */
+const FAQ_SPLIT = /[\n]|[ \t]*[|][ \t]*/;
+const FAQ_Q_LEAD = /^Q[.:：]?[ \t]*/i;
+const FAQ_A_LEAD = /^A[.:：]?[ \t]*/i;
+/** 그 항목의 마크(없으면 undefined — 그러면 `inlineMarked` 가 `inline()` 과 같은 결과를 낸다). */
+function marksOfItem(b: Block, i: number): InlineMark[] | undefined {
+  return b.itemMarks?.find((x) => x.i === i)?.marks;
+}
+/** 접두사(«Q. » 같은 것)를 떼면 그만큼 좌표가 앞으로 당겨진다 — 뗀 길이를 잰다. */
+function leadOf(part: string, re: RegExp): number { const m = re.exec(part); return m ? m[0].length : 0; }
+/**
+ * 한 덩이 문자열의 `[from, to)` 조각으로 마크를 **옮겨 담는다**(순수).
+ *   🔴 **조각을 넘나드는 마크는 버린다** — 잘라 쓰면 그게 곧 번짐이다(항목/질문·답 경계를 넘긴 색).
+ *   `lead` = 조각 앞에서 더 떼어 낸 글자 수(«Q. »). 그만큼 더 당긴다.
+ */
+function shiftMarks(ms: InlineMark[] | undefined, from: number, to: number, lead = 0): InlineMark[] | undefined {
+  if (!ms?.length) return undefined;
+  const out = ms.filter((m) => m.s >= from && m.e <= to).map((m) => ({ ...m, s: m.s - from - lead, e: m.e - from - lead })).filter((m) => m.s >= 0 && m.s < m.e);
+  return out.length ? out : undefined;
+}
+/** 목록 항목 하나 — 마크가 있으면 칠하고, 없으면 종전 `inline()` 그대로(무회귀). */
+function itemInline(b: Block, i: number, text: string, mk: (k: MarkKind) => boolean): string {
+  const ms = marksOfItem(b, i);
+  return ms?.length ? inlineMarked(text, ms, mk) : inline(text);
+}
+/** 표 칸 하나 — 같은 규율. */
+function cellInline(b: Block, r: number, c: number, text: string, mk: (k: MarkKind) => boolean): string {
+  const ms = b.cellMarks?.find((x) => x.r === r && x.c === c)?.marks;
+  return ms?.length ? inlineMarked(text, ms, mk) : inline(text);
+}
+
 export function renderBlocksHtml(blocks: Block[], channel: string, images: RenderImage[] = []): string {
   const out: string[] = [];
   const h2s = blocks.filter((b) => b.type === "h2" && b.text).map((b) => String(b.text));
@@ -142,12 +192,14 @@ export function renderBlocksHtml(blocks: Block[], channel: string, images: Rende
       case "h2": out.push(`<h2>${im(b)}</h2>`); break;
       case "h3": out.push(`<h3>${im(b)}</h3>`); break;
       case "quote": out.push(`<blockquote>${im(b)}</blockquote>`); break;
-      case "list": out.push(`<ul>${(b.items ?? []).map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); break;
-      case "checklist": out.push(`<ul class="check">${(b.items ?? []).map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); break;
+      /* [R12-5] 🔴 항목마다 **자기 좌표**로 칠한다 — `itemMarks` 가 없으면 `inline()` 과 한 글자도 다르지 않다(무회귀). */
+      case "list": out.push(`<ul>${(b.items ?? []).map((t, i) => `<li>${itemInline(b, i, t, mk)}</li>`).join("")}</ul>`); break;
+      case "checklist": out.push(`<ul class="check">${(b.items ?? []).map((t, i) => `<li>${itemInline(b, i, t, mk)}</li>`).join("")}</ul>`); break;
       case "table": {
         const rows = b.rows ?? []; if (!rows.length) break;
         const [head, ...body] = rows;
-        out.push(`<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+        /* [R12-5] 🔴 `rows[r][c]` 좌표 그대로 — 헤더가 r=0 이고 본문은 r=1 부터다(`body` 의 인덱스에 +1). */
+        out.push(`<table><thead><tr>${head.map((c, ci) => `<th>${cellInline(b, 0, ci, c, mk)}</th>`).join("")}</tr></thead><tbody>${body.map((r, ri) => `<tr>${r.map((c, ci) => `<td>${cellInline(b, ri + 1, ci, c, mk)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
         break;
       }
       /* [R8CLOSE-B1 §B4] 장소/링크 카드 — 🔴 **링크가 없으면 아무것도 안 그린다**(빈 카드는 카드가 아니다). */
@@ -173,7 +225,21 @@ export function renderBlocksHtml(blocks: Block[], channel: string, images: Rende
       case "tip": out.push(`<p class="tip">${im(b)}${b.items?.length ? "<br>" + b.items.map((i) => inline(i)).join("<br>") : ""}</p>`); break;
       case "faq": {
         const items = b.items ?? [];
-        out.push(`<dl class="faq">${items.map((qa) => { const [qq, ...aa] = String(qa).split(/\n|\s*\|\s*/); return `<dt>${inline(qq.replace(/^Q[.:：]?\s*/i, ""))}</dt><dd>${inline(aa.join(" ").trim().replace(/^A[.:：]?\s*/i, ""))}</dd>`; }).join("")}</dl>`);
+        /* [R12-5] 🔴 faq 항목은 «질문 + 줄바꿈 + 답» **한 덩이**이고 `itemMarks` 좌표도 그 한 덩이 기준이다.
+           ⇒ 여기서 Q/A 로 쪼개면 좌표가 어긋나므로, **원문에서 경계 위치를 먼저 재고** 그 위치로 마크를 조각마다 옮겨 담는다(`shiftMarks`).
+           🔴 조각을 **넘나드는 마크는 버린다** — 잘라 쓰면 그게 곧 번짐이다(질문에 친 형광펜이 답까지 가는 것). */
+        out.push(`<dl class="faq">${items.map((qa, i) => {
+          const raw = String(qa);
+          const cut = FAQ_SPLIT.exec(raw);
+          const qEnd = cut ? cut.index : raw.length;
+          const aStart = cut ? cut.index + cut[0].length : raw.length;
+          const ms = marksOfItem(b, i);
+          const qRaw = raw.slice(0, qEnd), aRaw = raw.slice(aStart);
+          const qLead = leadOf(qRaw, FAQ_Q_LEAD), aLead = leadOf(aRaw, FAQ_A_LEAD);
+          const qHtml = inlineMarked(qRaw.slice(qLead), shiftMarks(ms, 0, qEnd, qLead), mk);
+          const aHtml = inlineMarked(aRaw.slice(aLead).trim(), shiftMarks(ms, aStart, raw.length, aLead), mk);
+          return `<dt>${qHtml}</dt><dd>${aHtml}</dd>`;
+        }).join("")}</dl>`);
         break;
       }
       case "hashtags": out.push(`<p class="tags">${(b.items ?? []).map((t) => `#${esc(String(t).replace(/^#/, "").replace(/\s+/g, ""))}`).join(" ")}</p>`); break;
@@ -268,6 +334,41 @@ export function normalizeBlocks(raw: unknown, opts: { drops?: MarkDrop[] } = {})
     }
     if (Array.isArray(o.items)) { const items = o.items.map((i) => String(i ?? "").trim()).filter(Boolean); if (items.length) b.items = items; }
     if (Array.isArray(o.rows)) { const rows = o.rows.filter(Array.isArray).map((r) => (r as unknown[]).map((c) => String(c ?? "").trim())); if (rows.length) b.rows = rows; }
+    /* [R12-5] 🔴 **목록 항목·표 칸 안의 마크** — 파싱이 없으면 모델이 내도 **조용히 버려진다**(place 블록·`marks` 에서 두 번 겪은 그것).
+       🔴 **항목마다 `validateMarks` 를 다시 돌린다.** 이어 붙인 문자열로 재면 항목 경계를 넘는 마크가 «유효»로 통과하고
+          그게 러너에서 곧바로 **번짐**이 된다(B2 요청 2026-09-17 · R9-3 이 문단 경계에서 겪은 것의 항목 판).
+       🔴 `items` 를 `.trim()` 하고 `filter(Boolean)` 으로 **빈 항목을 뺀 뒤**라 인덱스가 밀릴 수 있다 —
+          그래서 **원본 인덱스가 아니라 «남은 items 의 인덱스»**로 맞춘다(원본 배열에서 그 자리가 어디로 갔는지 되짚는다).
+          안 하면 «2번째 항목에 친 밑줄»이 1번째로 옮겨 붙는다(조용히 틀리는 종류). */
+    if (Array.isArray(o.itemMarks) && b.items?.length) {
+      const kept = (o.items as unknown[]).map((i, oi) => ({ oi, t: String(i ?? "").trim() })).filter((x) => x.t);
+      const newIdxOf = new Map(kept.map((x, ni) => [x.oi, ni]));
+      const im: { i: number; marks: InlineMark[] }[] = [];
+      for (const x of o.itemMarks) {
+        const e = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+        const oi = Number(e.i);
+        if (!Number.isInteger(oi)) { opts.drops?.push({ kind: "?", why: "range_invalid" }); continue; }
+        const ni = newIdxOf.has(oi) ? (newIdxOf.get(oi) as number) : -1;
+        if (ni < 0) { opts.drops?.push({ kind: "?", why: "no_text" }); continue; }   // 빈 항목이라 빠졌다 — 칠할 글자가 없다
+        const v = validateMarks(b.items[ni], e.marks);
+        if (v.marks.length) im.push({ i: ni, marks: v.marks });
+        if (v.dropped.length && opts.drops) opts.drops.push(...v.dropped);
+      }
+      if (im.length) b.itemMarks = im;
+    }
+    if (Array.isArray(o.cellMarks) && b.rows?.length) {
+      const cm: { r: number; c: number; marks: InlineMark[] }[] = [];
+      for (const x of o.cellMarks) {
+        const e = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+        const r = Number(e.r), c = Number(e.c);
+        const cell = Number.isInteger(r) && Number.isInteger(c) ? b.rows[r]?.[c] : undefined;
+        if (cell === undefined) { opts.drops?.push({ kind: "?", why: "range_invalid" }); continue; }
+        const v = validateMarks(cell, e.marks);
+        if (v.marks.length) cm.push({ r, c, marks: v.marks });
+        if (v.dropped.length && opts.drops) opts.drops.push(...v.dropped);
+      }
+      if (cm.length) b.cellMarks = cm;
+    }
     if (typeof o.caption === "string" && o.caption.trim()) b.caption = o.caption.trim();
     if (typeof o.prompt === "string" && o.prompt.trim()) b.prompt = o.prompt.trim().slice(0, 600);
     if (Number.isInteger(Number(o.imageIndex)) && o.imageIndex !== undefined && o.imageIndex !== null) b.imageIndex = Number(o.imageIndex);
