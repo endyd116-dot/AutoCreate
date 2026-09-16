@@ -261,6 +261,9 @@
     naver_blog: { label: "네이버 블로그", mark: "N" }, tistory: { label: "티스토리", mark: "T" }, blogger: { label: "블로거", mark: "B" }, wordpress: { label: "워드프레스", mark: "W" },
     threads: { label: "쓰레드", mark: "@" }, instagram: { label: "인스타그램", mark: "◎" }, youtube_shorts: { label: "유튜브 쇼츠", mark: "▶" }, naver_clip: { label: "네이버 클립", mark: "C" },
     reels: { label: "릴스", mark: "◎" }, tiktok: { label: "틱톡", mark: "♪" },
+    /* [R12-6 · B r11-back] 당근 — 이름표는 서버 시드와 **같은 글자**(«당근» · DDL 0082 · seed-plans.mjs · verify-channel-tables 가 대조).
+       🔴 마크는 새로 그리지 않는다(아이콘 금지) — 글자 마크 + `.mk.daangn` 배경 한 줄(ac.css). 배경이 없으면 흰 글자가 **안 보인다**. */
+    daangn: { label: "당근", mark: "당" },
     /* [P1R8 §3.4 · B2] 다음 Phase 채널 — 이름이 없으면 화면에 «facebook_reels» 같은 **열쇠 글자**가 그대로 뜬다. */
     facebook: { label: "페이스북", mark: "f" }, facebook_reels: { label: "페북 릴스", mark: "f" },
     x: { label: "엑스", mark: "X" }, youtube_long: { label: "유튜브 영상", mark: "▶" },
@@ -426,7 +429,10 @@
   /* [P1R5] 영상 어휘 — 계약 v5.1 §0.2 글자 그대로(VideoFormat · VideoSeconds · VideoStage · JudgeGrade · VideoChannel) · 사람말은 여기 한 곳 */
   UI.VIDEO_CH = ["youtube_shorts", "naver_clip", "reels", "threads"];
   UI.VFORMAT = { graphic: "그래픽 스토리", talking: "말하는 사람", clip: "클립" };
-  UI.VSECONDS = [15, 30, 60];
+  /* 길이 사다리 — 화면은 **고를 수 있는 칸**만 갖고, «어디까지 되나»는 서버가 말한다(`formats[].maxSeconds` · director.html secChips 가 `s <= m` 으로 거른다).
+     🔴 [R12 · B r11-back] **90 을 더했다** — 릴스가 90 을 내기 시작했는데 이 사다리에 칸이 없어서 **서버가 90 이라 해도 칩이 안 떴다**.
+     상한을 화면이 정하지 않는 것과, 상한까지 **오를 칸을 갖고 있는 것**은 다른 이야기다(칸이 없으면 서버 말이 화면에 못 닿는다). */
+  UI.VSECONDS = [15, 30, 60, 90];
   UI.VSTAGE = [["script", "대본"], ["tts", "목소리"], ["clips", "장면"], ["render", "합성"], ["judging", "검사"], ["done", "완료"]];
   UI.VSTAGE_SAY = { script: "대본 쓰는 중", tts: "목소리 입히는 중", clips: "장면 만드는 중", render: "내 PC 프로그램이 굽는 중", judging: "검사하는 중", done: "다 됐어요", failed: "만들지 못했어요" };
   UI.JUDGE = { P0: ["danger", "심사 막힘"], P1: ["warn", "한 번 고쳐 통과"], P2: ["ok", "심사 통과"] };

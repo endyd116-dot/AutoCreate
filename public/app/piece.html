@@ -105,7 +105,17 @@ function renderWhy(videoOnly) {
   /* [메인 지적 2026-09-16 · 서버는 내는데 화면이 안 그리던 셋]
      · styleApplied {id,name,lines,from:"piece"|"account"} — **왜 이 스타일인가** · styleUnused {id, why} — 못 입은 까닭(서버 문장 · «지운 스타일이라 스타일 없이 썼어요»는 말해 줘야 하는 것 · §9)
      · crossSimilarity {measured, score, compared, against{pieceId,accountId}} — 게이트 칩 옆 **상세**. measured:false 는 «못 쟀어요»(0점 아님 · AC-9) */
-  if (!videoOnly && m.styleName) h += kv("스타일", String(m.styleName), m.styleApplied && m.styleApplied.from === "piece" ? "이 글만 따로 고른 스타일이에요" : m.styleApplied && m.styleApplied.from === "account" ? "이 계정에 걸어 둔 기본 스타일이에요" : "레퍼런스에서 배운 모양으로 썼어요");
+  /* 🔴 [R12 · B r11-back] `from` 에 **세 번째 값 `"learned"`** 가 생겼고(되먹임이 고른 스타일) `why` 한 문장이 같이 온다.
+     ⇒ **서버 문장이 있으면 그걸 쓴다**(AC-52 · 화면이 같은 말을 두 벌로 짓지 않는다). 없을 때만 우리 문장으로 떨어진다.
+     두 갈래(piece·account)만 알던 종전 코드는 `learned` 를 else 로 흘려 «레퍼런스에서 배운»이라고 뭉뚱그렸다 — 서버가 왜인지 말해 주는데 그걸 버리는 셈이었다. */
+  if (!videoOnly && m.styleName) {
+    const sa = m.styleApplied || {};
+    const say = sa.why ? String(sa.why)
+      : sa.from === "piece" ? "이 글만 따로 고른 스타일이에요"
+      : sa.from === "account" ? "이 계정에 걸어 둔 기본 스타일이에요"
+      : "레퍼런스에서 배운 모양으로 썼어요";
+    h += kv("스타일", String(m.styleName), say);
+  }
   else if (!videoOnly && m.styleUnused && m.styleUnused.why) h += kv("스타일", "안 입고 썼어요", String(m.styleUnused.why));
   if (!videoOnly && m.crossSimilarity && typeof m.crossSimilarity === "object") { const x = m.crossSimilarity;
     h += kv("다른 내 계정 글과", x.measured === false ? "못 쟀어요" : `${Math.round(Number(x.score || 0) * 100)}% 닮음`, x.measured === false ? (x.reason ? String(x.reason) : "견줄 다른 계정 글이 아직 없어요") : `내 다른 계정 글 ${UI.num(x.compared || 0)}편과 견줬어요${x.against && x.against.pieceId ? ` · 가장 닮은 글 #${UI.num(x.against.pieceId)}` : ""}`); }
@@ -390,6 +400,22 @@ function render() {
     else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     else cta.hidden = true;
     return; }
+  /* 🔴 [2026-09-16 · «제자리»] 아직 만들어지는 중인 글은 아래 미리보기가 **빈 종이**다(제목도 본문도 없다) —
+     종전엔 그 빈 종이만 남고 **아무 말이 없었다**. 갇힌 글은 그 상태로 55시간을 버텼다(piece 25·40·42 실물 · pieces.html 주석).
+     위 영상 가지와 같은 처치 — 무엇을 기다리는지 말하고, 되돌릴 길(«만드는 중» 목록의 «다시 시작»)로 보낸다(§9-3). */
+  if (P.status === "generating") {
+    const mins = Math.floor((Date.now() - (Date.parse(P.createdAt || "") || Date.now())) / 60000);
+    /* 🔴 목록 화면이 «우리가 다시 건 시각»을 이 칸(`acPieceRestart`)에 적어 둔다 — **같은 칸을 읽어야 두 화면이 같은 말**을 한다.
+       목록에선 안내가 쉬는데 상세에선 «3299분째»라고 하면 그것이 또 한 겹의 «제자리»다. 20 = 서버 `pieces-regenerate` 기준(세 수는 같이 움직인다). */
+    let restartedAgo = null;
+    try { const t = JSON.parse(localStorage.getItem("acPieceRestart") || "{}")[P.id]; if (t) restartedAgo = (Date.now() - t) / 60000; } catch { /* empty */ }
+    const stuck = mins >= 20 && !(restartedAgo !== null && restartedAgo < 20);
+    const vp = UI.$("#vpane"); vp.hidden = false;
+    vp.innerHTML = `<div class="group"><div class="empty"><h3>${stuck ? `${mins}분째 만드는 중이에요` : "만드는 중이에요"}</h3>`
+      + `<p>${stuck ? "만들다 멈춘 것 같아요. 목록에서 다시 시작하면 처음부터 만들어요 · 코인은 더 안 들어요." : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p>`
+      + `<a class="btn ${stuck ? "primary" : "secondary"} sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`;
+    pv.hidden = true; UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return;
+  }
   UI.$("#vpane").hidden = true;
   pv.hidden = false; pv.className = `preview ${P.channel}`;
   const ttl = UI.$("#ttl"); ttl.textContent = P.title || ""; ttl.contentEditable = editable ? "true" : "false";
