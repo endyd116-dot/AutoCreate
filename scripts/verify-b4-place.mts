@@ -8,7 +8,7 @@
  *     ② **«있는 척»을 안 하는가** — 러너는 에디터 «장소» 카드를 못 넣는다. 링크로 내려앉히고 그 사실을 적는지 본다.
  */
 import { renderBlocksHtml, normalizeBlocks, type Block } from "../lib/blocks";
-import { WRITING_CONTRACTS, contractSelfConflicts, structureFor } from "../lib/writing-contracts";
+import { WRITING_CONTRACTS, contractSelfConflicts, structureFor, type FormatKey } from "../lib/writing-contracts";
 import { planEditorOps } from "../runner/lib/plan.mjs";
 import fs from "node:fs";
 
@@ -27,7 +27,7 @@ const rec = (step: string, ok: boolean, note = "") => { results.push({ step, ok:
   rec("① 🔴 place 는 visualMin 에 **없다**(필수로 넣지 않았다)", !("place" in (nb.visualMin as Record<string, unknown>)), `visualMin = ${JSON.stringify(nb.visualMin)}`);
   /* 🔴 처음엔 optional 에 넣었다가 ②가 «전 구성에 박힌다»를 잡아서 뺐다 — 골격은 강제하지 않고 프롬프트가 허락한다. */
   rec("① 🔴 place 는 tiers 어느 칸에도 없다(골격이 강제하지 않는다)",
-    !["required", "optional", "suppress"].some((k) => ((nb.tiers as Record<string, string[]>)?.[k] ?? []).includes("place")),
+    !(["required", "optional", "suppress"] as const).some((k) => (nb.tiers?.[k] ?? []).includes("place")),
     JSON.stringify(nb.tiers));
   rec("① 대신 프롬프트가 «있을 때만 넣어도 된다»고 허락한다", /place{place:/.test(fs.readFileSync("lib/content-gen.ts", "utf8")), "lib/content-gen.ts 블록 어휘");
   rec("① 시각 요소 목록에 적혀 있다(설계 §5C.3)", nb.visual.some((v) => v.includes("장소")), nb.visual.join(" · "));
@@ -35,9 +35,15 @@ const rec = (step: string, ok: boolean, note = "") => { results.push({ step, ok:
 
 /* ── ② 골격이 place 를 **강제로** 만들지 않는다(장소 없는 글이 대부분이다) ── */
 {
+  /* 🔴 **인자 순서가 어긋나 있었다**(2026-09-16 · `scripts/**` 를 타입검사에 넣자마자 드러났다).
+     시그니처는 `(c, format, imageCount: number, affiliate: boolean, seed?)` 인데 하니스는 `(c, f, null, 6, 1)` —
+     **imageCount 에 `null`, affiliate 에 `6`(truthy!)** 을 넣고 있었다. 즉 이 축은 여태 «사진 없음 + 제휴 글»이라는
+     **있지도 않은 조합**을 재고 있었다. 초록이긴 했지만 «내가 재려던 것»을 잰 게 아니다.
+     ⚠️ 제품 호출부(`content-gen.ts:315`)와 **같은 모양**으로 맞춘다 — 하니스가 제품과 다른 인자를 쓰면
+        제품이 바뀔 때 하니스만 조용히 옛 모양을 잰다(AC-78). 사진 6장·제휴 없음·seed 1 로 잡는다. */
   const forced = Object.entries(WRITING_CONTRACTS).flatMap(([ch, c]) =>
-    Object.keys(c.structure).map((f) => [ch, f, structureFor(c, f as never, null, 6, 1)] as const))
-    .filter(([, , seq]) => (seq as string[]).includes("place"));
+    Object.keys(c.structure).map((f) => [ch, f, structureFor(c, f as FormatKey, 6, false, 1)] as const))
+    .filter(([, , seq]) => seq.includes("place"));
   rec("② 🔴 어떤 채널·구성도 place 를 골격에 박지 않는다", forced.length === 0, forced.map(([ch, f]) => `${ch}/${f}`).join(",") || "0건");
 }
 

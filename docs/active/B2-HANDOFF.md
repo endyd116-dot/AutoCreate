@@ -141,3 +141,21 @@ npx --yes tsx --env-file=.env scripts/verify-runner-dist.mts    # 28항목 · �
 ```
 - 러너를 고쳤으면 **판 올리고 배포**: `runner/package.json` version +1 → `scripts/build-runner.mts` → 설치된 러너가 자동으로 받는다.
 - 🔴 새 실증 테넌트를 만들면 `verify-runner-dist.mts` 의 `TEST_KEY` 에 **먼저** 넣는다(안 넣으면 teardown 이 안 지운다 — 실제로 t237 이 남았었다).
+
+---
+
+## 🔴 다음 사람이 꼭 알아야 할 것 둘 (2026-09-16 밤 · B2)
+
+### ① 타입검사는 **`.mts` 만** 본다 — `.mjs` 50개는 밖이다
+`tsconfig.include` 에 `scripts/**/*.mts` 를 넣었다(2026-09-16). 그런데 **`scripts/**.mjs` 50개는 여전히 검사 밖**이다
+(`allowJs` 를 안 켰다 — 켜면 또 다른 크기다). `runner/**` 도 `exclude` 라 밖이다.
+🔴 **「전부 검사받는다」고 믿지 마라.** 「`.mts` 는 재고 `.mjs` 는 안 잰다」가 지금의 사실이고, **알고 두는 것**이다.
+⚠️ 켜자마자 잡힌 것이 있었다: `verify-b4-place.mts` 가 `structureFor` 를 **인자 순서가 어긋난 채**(`imageCount=null`,
+`affiliate=6`) 부르며 **있지도 않은 조합**을 재고 있었다 — **초록인 채로**. `.mjs` 쪽에도 같은 것이 있을 수 있다.
+⇒ **남은 일**: `allowJs`(+`checkJs`)를 켜고 `.mjs` 50개를 훑는다. 크기를 먼저 세고 나누는 것이 낫다.
+
+### ② `.gitattributes` **재정규화**는 아직 안 했다 — 조건이 안 됐다
+`.gitattributes` 자신이 적어 뒀다: 「전체 정규화는 **브랜치가 다 비었을 때** 한 번에 — 지금 하면 다섯 창의 브랜치가 통째로 충돌한다」.
+🔴 2026-09-16 밤에 재 보니 **47파일 · +7,529/−7,513**(전면 재작성)이고 `feature/r9-front`(A)가 main 보다 앞서 있었다.
+지금 하면 A 의 머지가 **파일 통째 충돌**이 되고, 그러면 **AC-77 ②** 가 그대로 재발한다(700줄 충돌 속에서 게이트 축이 조용히 증발).
+⇒ **남은 일**: 모든 창이 비었을 때 **메인이 한 번에** `git add --renormalize .`. 그 전에는 하지 마라.

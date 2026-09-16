@@ -9,11 +9,13 @@
  *   🔴 DB·네트워크 접촉 0(계약 표는 코드 기본값으로 읽는다).
  */
 import { fixBlocks } from "../lib/content-gen";
+import type { Block } from "../lib/blocks";
 import { runGate, descriptiveCaptionHit, DESCRIPTIVE_CAPTION } from "../lib/ai-tell-gate";
 import { contractFor } from "../lib/writing-contracts";
 
 const out = (step: string, ok: boolean | "WARN", note: string) => console.log(`RESULT ${JSON.stringify({ step, ok, note })}`);
-type B = Record<string, unknown>;
+/* 🔴 `fixBlocks` 는 **`Block[]` 을 돌려준다** — 종전엔 `Record<string, unknown>` 로 캐스트해 «비슷하겠지»로 밀어 넣었다.
+   제품 타입이 바뀌면 **하니스만 조용히 옛 모양을 재게 된다**(AC-78). 제품이 주는 타입을 그대로 쓴다. */
 
 const c = await contractFor("naver_blog", null);
 out("계약 표 — naver_blog captionRate 0.3 · tistory 0.2 · blogger/WP 0.5 · 영상 0", c.images.captionRate === 0.3 &&
@@ -36,7 +38,7 @@ const raw = [
   { type: "para", text: "결국 두 상자로 정리했어요." },
 ];
 const structure = ["hook", "image", "para", "image", "image", "image", "image", "image", "para"] as never;
-const blocks = fixBlocks(raw, structure, c, false, null, "R6.5 캡션 프로브") as B[];
+const blocks = fixBlocks(raw, structure, c, false, null, "R6.5 캡션 프로브") as Block[];
 const imgs = blocks.filter((b) => b.type === "image");
 const captions = imgs.map((b) => (b.caption as string | undefined) ?? null);
 const prompts = imgs.map((b) => String(b.prompt ?? ""));
@@ -49,9 +51,9 @@ out("① prompt 는 모든 사진에 있다(그림은 prompt 로 만든다)", pr
 /* ② 비율 — 유효 캡션 3장(9자·20자·10자) 중 round(6×0.3)=2 장만 남는다 · 같은 seed 면 같은 자리 */
 const kept = captions.filter(Boolean).length;
 out("② captionRate 0.3 → 6장 중 **2장**만 캡션(유효 3장에서 고른다)", kept === 2, `남은 캡션 ${kept}장 · ${JSON.stringify(captions.filter(Boolean))}`);
-const again = (fixBlocks(raw, structure, c, false, null, "R6.5 캡션 프로브") as B[]).filter((b) => b.type === "image").map((b) => (b.caption as string | undefined) ?? null);
+const again = (fixBlocks(raw, structure, c, false, null, "R6.5 캡션 프로브") as Block[]).filter((b) => b.type === "image").map((b) => (b.caption as string | undefined) ?? null);
 out("② 같은 글이면 같은 사진에 캡션(결정론 · 재생성 때 왔다 갔다 0)", JSON.stringify(again) === JSON.stringify(captions), "");
-const other = (fixBlocks(raw, structure, c, false, null, "다른 글") as B[]).filter((b) => b.type === "image").map((b) => (b.caption as string | undefined) ?? null);
+const other = (fixBlocks(raw, structure, c, false, null, "다른 글") as Block[]).filter((b) => b.type === "image").map((b) => (b.caption as string | undefined) ?? null);
 out("② 다른 글이면 자리가 달라질 수 있다(시드가 살아 있다)", JSON.stringify(other) !== JSON.stringify(captions) || true, `다른 seed: ${JSON.stringify(other.filter(Boolean))}`);
 
 /* ③ 음성 대조 — 묘사문 7패턴을 손으로 넣은 본문은 cliche 에서 떨어진다 */
