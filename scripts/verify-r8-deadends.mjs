@@ -47,6 +47,24 @@ const CODE = new Map([...SRC].map(([p, t]) => [p, t
    🔴 **표본에 없는 고장은 변이로도 안 보인다**(AC-99 ⑨ · b-49 가 자기 §1 을 스스로 되돌리며 찾았다).
    ⚠️ `//` 쪽은 `.` 이 줄바꿈을 원래 안 먹으므로 **역슬래시 없이** 쓴다(AC-100 — 이 셸이 역슬래시를 한 겹 먹는다). */
 
+/* ═══ [R11-13 ③ · C 2026-09-17] 🔴 **문자열 리터럴도 걷은 본문** — b-49 §8-3 ═══
+   b-49 가 셈법을 찔러 보이고 갔다: 이 자는 «부른다»가 아니라 **«그 낱말이 어딘가에 있다»**를 센다.
+   주석만 빼고 전부 센다 — **문자열 · 주소 · 남의 지역 변수 · 같은 이름의 다른 함수 · 객체 속성 · 타입 자리.**
+   그중 **문자열**이 제일 나쁘다: AI 프롬프트의 영어 산문(«when a **place** is implied») · 인라인 CSS(`place-items`) ·
+   타입 union 안의 다른 뜻 문자열이 전부 «호출»로 세어졌다. `place` 는 **진짜 소비처를 다 가려도 바깥 12곳으로 초록**이었다.
+
+   ⇒ 식별자 심볼은 **문자열을 걷은 본문**으로 센다. 템플릿 리터럴은 `${…}` **안이 코드**라 그 부분만 남긴다.
+   🔴 **두 가지는 일부러 안 건드린다(b-49 의 경고 그대로):**
+     ① `SURFACES`(화면이 부르나)는 **일부러 `/api/…` 문자열을 찾는 자리**다 — 거기서 문자열을 걷으면 축이 통째로 죽는다.
+        **두 셈법을 가른 채로 둔다.**
+     ② 🔴 **식별자가 아닌 심볼**(잡 kind `reference.capture` · 타입 조각 `place?: { name`)은 **원래 문자열 안에 산다.**
+        걷으면 진짜 배선을 «산문»으로 오판한다 — 2026-09-17 C 가 자기 meter 에서 **거짓 빨강 1건**으로 먼저 밟았다. */
+const isIdent = (s) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s);
+const CODE_NS = new Map([...CODE].map(([p, t]) => [p, t
+  .replace(/`(?:[^`\\]|\\.)*`/g, (m) => (m.match(/[$][{][^}]*[}]/g) || []).join(" "))
+  .replace(/"(?:[^"\\\n]|\\.)*"/g, " ")
+  .replace(/'(?:[^'\\\n]|\\.)*'/g, " ")]));
+
 /**
  * 이름 하나의 제품 호출처를 센다.
  *   🔴 [2026-09-15 C 수리] 첫 판은 **정의 파일을 통째로 뺐다.** 그래서 «자기 파일 안에서 불리는» 함수가
@@ -54,13 +72,13 @@ const CODE = new Map([...SRC].map(([p, t]) => [p, t
  *      죽은 통로의 뜻은 «아무도 안 부른다» 이지 «남의 파일이 안 부른다» 가 아니다.
  *   ⇒ 정의 파일도 센다. 다만 **정의 줄 자체**(`export function X` · `const X =` · `type X`)는 호출이 아니라서 뺀다.
  */
-function callSites(name, ownerFile) {
+function callSites(name, ownerFile, maps = null) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`\\b${esc}\\b`);
   const defRe = new RegExp(`^\\s*(export\\s+)?(async\\s+)?(function|const|let|var|type|interface|class)\\s+${esc}\\b`);
   const hits = [];
   let importOnly = 0, own = 0;
-  for (const [p, code] of CODE) {
+  for (const [p, code] of (maps || (isIdent(name) ? CODE_NS : CODE))) {
     const lines = code.split("\n").filter((l) => re.test(l));
     if (!lines.length) continue;
     const real = lines.filter((l) => !/^\s*import\b/.test(l) && !/^\s*export\s+\{/.test(l) && !/^\s*}\s*from\s+/.test(l) && !defRe.test(l));
@@ -146,7 +164,10 @@ const TARGETS = [
   /* ── [R8CLOSE-B1 §B9] 대표 이미지 — 🔴 **이게 바로 이 하니스가 잡아야 했던 모양이다.**
      `director` 가 `heroNeeded` 를 적고 `piece.meta` 로 나르는데 **읽는 곳이 0** 이었다(2026-09-16 조사).
      정의도 있고 값도 흐르는데 아무 일도 안 일어나는 것 — 그래서 **적는 쪽이 아니라 «읽는 쪽»을 센다.** ── */
-  ["🔴 대표 이미지 — «필요하다»를 읽는 자리", "heroNeeded", "lib/director.ts", "네이버·티스토리 대표 이미지가 «필요하다»고 적히기만 하고 목록·검색에 빈자리로 나간다"],
+  /* 🔴 [R11-13 ⑨ · C 2026-09-17] `mode:"read"` — b-49 가 짚은 그 줄이다.
+     `director.ts` 는 **적는 쪽**이라 자기 파일 등장 4곳으로 **읽는 쪽이 0이어도 초록**이었다(그게 이 줄이 잡으려던 병 자체다).
+     이제 «읽는 모양»(`meta.heroNeeded` · `heroNeeded &&` · 인자로 넘김)만 센다 — 적는 모양(`heroNeeded:` · `heroNeeded =`)은 안 센다. */
+  ["🔴 대표 이미지 — «필요하다»를 읽는 자리", "heroNeeded", "lib/director.ts", "네이버·티스토리 대표 이미지가 «필요하다»고 적히기만 하고 목록·검색에 빈자리로 나간다", "read"],
   ["대표 이미지 — 자리를 정한다", "heroPlanOf", "lib/stock/plan.ts", "사진 자리가 0개인 글에 대표가 영영 안 생긴다(막지 않고 **대신 넣어 주는** 자리다)"],
   ["대표 이미지 — 어떻게 됐는지 말해 준다", "heroFactOf", "lib/stock/plan.ts", "대표가 섰는지 **고객이 볼 길이 없다** — 막지 않기로 했으면 말해 주기가 값이다(§9)"],
   /* ── [R8CLOSE-B1 §B8] 목표 매체 → 채널 선택. 🔴 **부르는 자리가 `director.propose` 하나뿐**이라 더 죽기 쉽다. ── */
@@ -172,6 +193,33 @@ const TARGETS = [
   ["🔴 장소 카드 — 블록이 실제로 흐른다", "place?: { name", "lib/blocks.ts", "타입만 만들고 파싱·렌더가 없어 모델이 내도 **조용히 버려진다**"],
 ];
 
+/* [R11-13 ⑨ · C 2026-09-17] 🔴 **«적는 곳»과 «읽는 곳»이 갈리는 줄** — b-49 §2.5-9.
+   `heroNeeded` 가 그 모양이었다: `director.ts` 가 **적기만** 하고(`heroNeeded: ch === "naver_blog"`) 읽는 곳이 0이었는데,
+   적는 줄이 **자기 파일 등장**으로 세어져 **읽는 쪽이 통째로 없어도 초록**이었다. 정의도 있고 값도 흐르는데 아무 일도 안 일어난다 —
+   🔴 **이 자가 잡아야 했던 바로 그 모양**인데 못 잡았다.
+   ⇒ `mode: "read"` = «**읽는 모양**의 바깥 등장이 하나라도 있어야 산 값». 적는 모양(`x:` 객체 키 · `x =` 대입)은 안 센다. */
+const READ_SHAPE = (sym) => {
+  const esc = sym.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [new RegExp(`[.]\\s*${esc}\\b`), new RegExp(`\\b${esc}\\s*[)?&|,\\]]`), new RegExp(`\\b${esc}\\s*===`), new RegExp(`${esc}\\s*[(]`)];
+};
+const WRITE_SHAPE = (sym) => {
+  const esc = sym.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [new RegExp(`\\b${esc}\\s*:`), new RegExp(`\\b${esc}\\s*=[^=]`)];
+};
+/** 바깥 파일들에서 «읽는 모양»인 줄이 있는 파일만 센다. */
+function readSites(sym, ownerFile) {
+  const rd = READ_SHAPE(sym), wr = WRITE_SHAPE(sym);
+  const maps = isIdent(sym) ? CODE_NS : CODE;
+  const out = [];
+  for (const [p, code] of maps) {
+    if (p === ownerFile) continue;
+    const lines = code.split("\n").filter((l) => rd.some((r) => r.test(l)) && !wr.some((w) => w.test(l)));
+    if (lines.length) out.push(`${p}(${lines.length})`);
+  }
+  return out;
+}
+/** [R11-13 ②] 🔴 **이 심볼로 잴 수 있나** — 산문·문자열이 떠받치면 자가 «못 잰다»고 말한다. */
+const unmeasurable = [];
 for (const [label, sym, owner, harm, mode] of TARGETS) {
   const ownerSrc = read(owner);
   const defined = ownerSrc.includes(sym);
@@ -180,11 +228,26 @@ for (const [label, sym, owner, harm, mode] of TARGETS) {
   /* 🔴 `external` = **남이 읽으라고 만든 값**(화면·편성이 소비할 값). 자기 파일 안 등장은 타입 선언·자기 참조라 «소비»가 아니다.
      함수는 자기 파일이 써도 «쓰인다»가 맞지만, 내보내려고 만든 **값**은 바깥에서 읽혀야 산 것이다.
      🔴 이 구분이 없으면 `floorMin` 이 «자기 파일 8곳»으로 **초록이 되어 버린다**(그 8곳은 전부 타입·자기 참조다). */
-  const ok = mode === "external" ? hits.length > 0 : hits.length + own > 0;
+  const reads = mode === "read" ? readSites(sym, owner) : null;
+  const ok = mode === "read" ? reads.length > 0 : mode === "external" ? hits.length > 0 : hits.length + own > 0;
   rec(`🔴 죽은 통로 — ${label}(\`${sym}\`) 을 **제품이 부른다**`, ok,
     `바깥 ${hits.length}곳${hits.length ? ` [${hits.join(" · ")}]` : ""} · 자기 파일 ${own}곳${importOnly ? ` · 임포트만 ${importOnly}곳` : ""}`
-    + (mode === "external" ? " (바깥에서 읽혀야 산 값)" : "") + (ok ? "" : ` ⇒ ${harm}`));
+    + (mode === "external" ? " (바깥에서 읽혀야 산 값)" : "")
+    + (mode === "read" ? ` · 🔴 **읽는 곳** ${reads.length}곳${reads.length ? ` [${reads.join(" · ")}]` : ""}(적는 곳은 안 센다)` : "")
+    + (ok ? "" : ` ⇒ ${harm}`));
+
+  /* ② 🔴 문자열을 안 걷었다면 초록이었을 줄 = **그 심볼로는 못 잰다**(`place` 가 그 상태였다).
+     🔴 이 줄이 이 자의 «자기 의심»이다 — 박는 사람에게 «더 구체적인 글자를 쓰라»고 돌려준다. */
+  if (isIdent(sym)) {
+    const loose = callSites(sym, owner, CODE);
+    const okLoose = mode === "external" ? loose.hits.length > 0 : mode === "read" ? true : loose.hits.length + loose.own > 0;
+    const junk = loose.hits.filter((h) => !hits.includes(h));
+    if (!ok && okLoose) unmeasurable.push(`${sym} ⇐ 산문·문자열 ${junk.length}곳 [${junk.join(" · ")}]`);
+    else if (ok && junk.length >= 3) unmeasurable.push(`${sym} 🔸 지금은 산 줄이지만 산문·문자열에도 ${junk.length}곳 나온다 — 배선이 지워지는 날 그것들이 떠받친다`);
+  }
 }
+rec("🔴 [R11-13 ②] 이 심볼들로 «잴 수 있나» — 산문·문자열이 떠받치는 줄이 없다", unmeasurable.filter((u) => !u.includes("🔸")).length === 0,
+  unmeasurable.length ? unmeasurable.join(" | ") + " ⇒ 그 배선에만 있는 글자로 바꿔라(예: `place` → `place?: { name`)" : `식별자 심볼 전부 «쓰는 자리»로 초록이다(문자열을 걷어도 판정이 안 바뀐다)`);
 
 /* ═══ [R8-A2] 🔴 **한 층 위의 죽은 통로 — «서버는 다 됐는데 화면이 부르나»** ═══
    위의 TARGETS 는 «lib 의 이름을 제품이 부르나»를 센다. 그런데 2026-09-15 하루를 여덟 번 관통한 사고는 한 층 위였다:
@@ -366,6 +429,53 @@ for (const [label, oldSym, oldOwner, newSym, newOwner] of OLD) {
     rec(`🔴 운영 화면이 «AI 원가 — ${label}»(\`${key}\`)을 읽나`, where.length > 0,
       where.length ? `화면 ${where.length}곳 [${where.slice(0, 3).join(" ")}]` : `읽는 화면 0곳 — ${harm}`);
   }
+}
+
+/* ═══ [R11-13 ⑥ · C 2026-09-17] 🔴 **빌드 어긋남 — «끊겨도 초록»이 아니라 «낡아도 초록»이다** ═══
+   b-49 §7 이 두 방향을 다 모사해 보고 적었다. 이 자는 `walk("public", [".js",".html"])` 로 **생성물만** 읽는다 —
+   정본은 `public/{app,ops}/_tpl.txt`(`scripts/build-pages.mjs` 의 **입력**)인데 `.txt` 는 훑지도 않는다.
+     · **생성물에만 남았다**(정본에선 지웠는데 안 빌드) → 🔴 **여전히 초록** — 낡은 빌드가 초록을 떠받친다
+     · **정본에만 있다**(아직 안 빌드)             → 빨강 — 멀쩡히 만든 것을 «죽은 통로»라 부른다
+   ⚠️ 메인 짐작(«tpl 만 보면 빌드가 끊겨도 초록»)은 **방향이 반대**였다(b-49 가 바로잡았다).
+   ⇒ 여기서 **한 줄로** 잰다. 🔴 셸(레일·탭·앱바)을 **다시 구현하지 않는다** — 그건 대용물이고 언젠가 갈린다(AC-97).
+      정본 블록의 본문·스크립트가 생성물 **안에 글자 그대로 있나**만 본다(담김 검사). 그리고 **고아 생성물**(정본에 없는 화면)도 센다. */
+{
+  const miss = [], orphan = [];
+  let blocks = 0;
+  for (const dir of ["public/app", "public/ops"]) {
+    const tpl = read(`${dir}/_tpl.txt`);
+    if (!tpl) { miss.push(`${dir}/_tpl.txt 를 못 읽었다`); continue; }
+    const named = new Set();
+    for (const b of tpl.split(/^=== /m).slice(1)) {
+      const [head, ...rest] = b.split("\n");
+      const file = head.replace(/ ===\s*$/, "").split("|")[0].trim();
+      if (!file) continue;
+      named.add(file); blocks++;
+      const gen = read(`${dir}/${file}`);
+      if (!gen) { miss.push(`${dir}/${file} 생성물이 없다(정본에만 있다 — 빌드를 안 돌렸다)`); continue; }
+      const [html, js] = rest.join("\n").split(/^--- script ---\s*$/m);
+      if (html && html.trim() && !gen.includes(html.trim())) miss.push(`${dir}/${file} 본문이 정본과 다르다(생성물이 낡았다)`);
+      if (js && js.trim() && !gen.includes(js.trim())) miss.push(`${dir}/${file} 스크립트가 정본과 다르다(생성물이 낡았다)`);
+    }
+    /* 🔴 **«정본에 없다»만으로 고아라고 부르면 거짓 양성이 난다**(2026-09-17 C 가 먼저 밟았다):
+       `team-accept.html`(초대 수락) · `ops/login.html` 은 셸을 안 쓰는 **홑페이지**라 정본에 없는 게 맞다.
+       ⇒ **빌더가 찍는 셸을 그대로 이고 있는데 정본 블록이 없는 것**만 고아로 센다 — 그게 «손으로 베낀 셸»이고,
+          정본의 셸이 바뀌는 날 이 화면만 조용히 낡는다(그리고 이 자는 낡은 것을 읽고 초록을 준다). */
+    const looksGenerated = (t) => t.includes('<div class="shell">') && t.includes('<nav class="rail"') && t.includes('<nav class="tabs"');
+    for (const p of PRODUCT) {
+      if (!p.startsWith(`${dir}/`) || !p.endsWith(".html")) continue;
+      const f = p.slice(dir.length + 1);
+      if (!f.includes("/") && !named.has(f) && looksGenerated(SRC.get(p) || "")) orphan.push(p);
+    }
+  }
+  /* 🔴 **고아(손수 관리 화면)는 여기서 빨강으로 안 센다** — 이미 주인이 있다: `scripts/verify-asset-versions.mjs` 가
+     `home.html`·`team-accept.html`·`ops/login.html` 을 이름까지 적어 두고 CSS·JS 판을 잰다(2026-09-16 실측으로 태어난 자).
+     🔴 **두 자가 같은 것을 다르게 세면 언젠가 갈린다**(AC-101 · b-49 §2.5-9). 여기선 **적기만** 하고 판정은 그 자에게 맡긴다.
+     이 줄이 빨개지는 것은 **정본과 생성물이 실제로 어긋났을 때뿐**이다. */
+  const tail = orphan.length ? ` · 🔸 손수 관리 화면 ${orphan.length}곳(${orphan.join(" · ")}) — 판정은 verify-asset-versions.mjs 가 한다` : "";
+  rec("🔴 정본(_tpl.txt)과 생성물이 안 어긋났다 — 이 자는 생성물만 읽는다(«낡아도 초록»)", miss.length === 0,
+    (miss.length ? miss.slice(0, 4).join(" | ") + (miss.length > 4 ? ` 외 ${miss.length - 4}건` : "") + " ⇒ `node scripts/build-pages.mjs`"
+      : `정본 ${blocks}절 ↔ 생성물 전부 같다`) + tail);
 }
 
 /* ═══ 주석이 코드보다 앞서 나가지 않았나(AC-59) ═══ */
