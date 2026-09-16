@@ -41,6 +41,11 @@ const channels = [
   ["naver_clip_post", "클립 게시물", "text", "manual", [], ["clip_incentive", "shoppingconnect"], 23],
   ["youtube_long", "유튜브 영상", "video", "api", [], ["ypp", "affiliate"], 24],
   ["facebook_reels", "페북 릴스", "video", "api", [], ["affiliate"], 25],
+  /* [R12-6 · 2026-09-17 · B] 🔴 당근 — **DDL `0082` 와 글자 하나까지 같다.**
+     · `publish_via = 'runner'` 는 **지금 사실**이다(브런치와 달리 AM 러너가 있고 B2 가 `publish.daangn` 으로 포팅했다).
+     · `monetize` 가 **빈 배열**인 것이 이 채널의 핵심이다 — 🔴 «아직 안 붙였다»가 아니라 **«붙지 않는다»**(코드 쪽 `monetizable:false` 와 짝).
+     · best_hours 는 빈 배열 — **잰 적이 없다**(동네 장사 시간대를 짐작해 넣으면 편성이 근거 없는 시각을 «최적»이라 말한다 · AC-9). */
+  ["daangn", "당근", "text", "runner", [], [], 26],
 ];
 // 발행 경로가 실제로 있는 채널만 active(고객 «계정 연결» 그리드는 active 만 그린다 · ui-v4). 영상·SNS 는 Phase 3 에서 켠다(운영센터 «채널» 메뉴).
 const ACTIVE_CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress"]);

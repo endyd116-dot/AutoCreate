@@ -246,11 +246,31 @@ export async function analyzeReference(tenantId: number, url: string): Promise<A
   return { ok: true, template: { id, name: clean.name, structure: clean.structure, hook: clean.hookType, style: clean.style, sourceUrl: u } };
 }
 
-/** 오늘(KST) 분석 횟수 — 감사 행이 곧 횟수(`topics-refresh` 와 같은 패턴). */
-export async function referenceCountToday(tid: number): Promise<number> {
+/**
+ * [R11-11 · 설계 R11 §6-② · 메인 결정] 🔴 **이달(KST) 분석 횟수** — 종전 `referenceCountToday`(하루 3개)를 **월 단위로 옮겼다.**
+ *   까닭: 영상만 «하루 3개»이고 글은 «달에 N개»라 **같은 그룹(«배워 올 곳»)에 나란히 놓이면 둘이 다른 말을 한다.**
+ *   🔴 세는 자리·감사 어휘(`topics_reference`)는 **안 바꿨다** — 창만 «오늘»에서 «이번 달»로 넓혔다. 글 쪽(`textStylesUsedThisMonth`)과 **같은 식**이다.
+ */
+export async function referenceCountThisMonth(tid: number): Promise<number> {
   const [r] = await q(sql`SELECT COUNT(*) AS c FROM audit_logs WHERE tenant_id = ${tid} AND action = 'topics_reference'
-    AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date = (NOW() AT TIME ZONE 'Asia/Seoul')::date`);
+    AND date_trunc('month', created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul') = date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul')`).catch(() => [] as Row[]);
   return Number(r?.c || 0);
+}
+
+export interface VideoRefQuota { used: number; limit: number; left: number; resetAt: string }
+/**
+ * [R11-11] 영상 레퍼런스 한도 — 🔴 **글 쪽 `textStyleQuota` 와 글자 그대로 같은 모양**(`{ used, limit, left, resetAt }`).
+ *   모양이 같아야 화면이 두 줄을 **같은 코드로** 그린다(«이번 달 3 / 10 남음»). 모양이 갈리면 A 가 두 벌을 적게 되고 그게 AC-52 다.
+ *   `resetAt` = 다음 달 1일 00:00 KST(UTC ISO).
+ */
+export async function videoRefQuota(tid: number): Promise<VideoRefQuota> {
+  const { tenantPlan } = await import("../plans");
+  const { videoRefsPerMonthOf } = await import("../plans");
+  const [{ plan }, used] = await Promise.all([tenantPlan(tid), referenceCountThisMonth(tid)]);
+  const limit = videoRefsPerMonthOf(plan);
+  const kstNow = new Date(Date.now() + 9 * 3600_000);
+  const nextMonthKst = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth() + 1, 1, 0, 0, 0) - 9 * 3600_000;
+  return { used, limit, left: Math.max(0, limit - used), resetAt: new Date(nextMonthKst).toISOString() };
 }
 
 /** 템플릿 1건 읽기(디렉터·대본이 `factors.structureTemplateId` 로 부른다 · 테넌트 것 또는 내장(tenant_id NULL)). */

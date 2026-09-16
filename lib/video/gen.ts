@@ -14,7 +14,9 @@ import { videoBadgeText, videoDescriptionFirstLine, videoOpeningCaption } from "
 import { decryptObj } from "../creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys } from "../affiliate-coupang";
 import { toTopic } from "../topics";
-import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf } from "./script";
+import { buildVideoScript, factcheckRoundTrip, checkScriptGates, youtubeMetaOf, maxLinesFor } from "./script";
+/* [R12-3 · B↔B2 합의 2026-09-17] 🔴 말 속도 판정은 `tempo.ts` **한 곳**(B2 소유 파일). B 는 «대본을 그만큼 짧게»만 쓴다. */
+import { syllableRatioOf } from "./tempo";
 import { buildCutPlans, planCutWindows, PALETTES } from "./scenes";
 import type { RefStyleApplied } from "./reference-apply";   // [R8CLOSE · B2] 레퍼런스가 배워 온 것 중 **닿는 것만**
 import { generateClip, generateStill } from "./providers";
@@ -113,18 +115,24 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     let script = (meta.script ?? null) as Awaited<ReturnType<typeof buildVideoScript>> extends { ok: true; script: infer S } ? S | null : null;
     if (!opts.resume || !script) {
       await stamp(pieceId, "script");
-      const r = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
+      /* [R12-3 · 설계 R12 §4.2] 🔴 **배운 말 속도만큼 대본을 짧게 쓴다.** 안 배웠으면 정확히 1 이라 종전과 한 글자도 안 다르다(무회귀).
+         🔴 규격 초과 판정·«못 냈어요» 문장은 **B2 가 실제 음성을 재서** 적는다(`checkTempoFitsSpec` → `meta.refUnused`) — 여기서 두 벌 쓰지 않는다. */
+      /* 🔴 `audioTempo` 칸의 **주인은 B2**(`lib/video/reference-apply.ts` · 2026-09-17 AC-101 로 정했다 — 그 파일엔 `captionMotion`·`transition`·`minCutMs` 가 같이 산다).
+         내 나무엔 아직 그 칸 선언이 없어서 **«있으면 읽는다»**로 받는다. B2 판이 머지되면 타입에 선다.
+         🔴 안 오면 `syllableRatioOf` 가 **정확히 1** 을 내므로 대본이 종전과 한 글자도 안 달라진다(무회귀 · 계약 §5). */
+      const syllableRatio = syllableRatioOf((refStyle as { audioTempo?: unknown } | null)?.audioTempo);
+      const r = await buildVideoScript({ syllableRatio, tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null });
       if (!r.ok) return await failPiece(tid, pieceId, r.reason, slotId);
       let s = r.script; let drafts = r.drafts;
       const fc = await factcheckRoundTrip(tid, pieceId, s);
       if (fc.failed) return await failPiece(tid, pieceId, fc.reason ?? "확인 안 되는 사실이 남아 있어요.", slotId);
       s = fc.script;
-      const g = checkScriptGates(s);
+      const g = checkScriptGates(s, maxLinesFor(seconds));
       if (!g.ok) {
-        const r2 = await buildVideoScript({ tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null, rewrite: `[다시 쓰기 — 아래에 걸렸다]\n${g.issues.map((x) => `- ${x}`).join("\n")}` });
-        if (r2.ok) { const g2 = checkScriptGates(r2.script); if (g2.ok || g2.issues.length < g.issues.length) { s = r2.script; drafts = r2.drafts; } }
+        const r2 = await buildVideoScript({ syllableRatio, tenantId: tid, pieceId, format, seconds, cuts, channel, topic: { title: topic.title, angle: String(meta.angle || topic.angle), intent: topic.factors.intent, seasonal: topic.factors.seasonal }, persona: { facts: persona.facts, tone: persona.tone, signature: persona.signature }, hookType: spec.variant?.hookType ?? "event_pushin", structure: (meta.structure as string[] | undefined) ?? null, hookPrinciple: refStyle?.hookPrinciple ?? null, affiliate: aff ? { productQuery: aff.productQuery } : null, rewrite: `[다시 쓰기 — 아래에 걸렸다]\n${g.issues.map((x) => `- ${x}`).join("\n")}` });
+        if (r2.ok) { const g2 = checkScriptGates(r2.script, maxLinesFor(seconds)); if (g2.ok || g2.issues.length < g.issues.length) { s = r2.script; drafts = r2.drafts; } }
       }
-      const gateNote = checkScriptGates(s);
+      const gateNote = checkScriptGates(s, maxLinesFor(seconds));
       script = s as never;
       await q(sql`UPDATE pieces SET title = ${s.youtube.title.slice(0, 120)}, meta = meta || ${jsonb({ script: s, drafts, hook: s.hook, scriptIssues: gateNote.issues, factcheck: s.factcheck?.status ?? "skipped" })}, updated_at = NOW() WHERE id = ${pieceId}`);
     }

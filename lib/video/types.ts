@@ -5,7 +5,10 @@
  *   🔎 출처: AC 신규(계약 P1R5-B · 생성 커밋 2026-09-14) — AM 원본 없음.
  */
 export type VideoFormat = "graphic" | "talking" | "clip";
-export type VideoSeconds = 15 | 30 | 60;
+/* [R12-7 · 2026-09-17] 🔴 **릴스 90초**(감사 A12). 여는 것은 이 한 줄이지만 **같이 움직여야 하는 것이 셋** 더 있다 —
+   채널 상한(`lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC.reels`) · 코인 값(`lib/coin-table.ts video_90`) · 심사 축(`lib/video/judge.ts duration_fit`).
+   🔴 따로 가면 «90초인데 값은 60초»가 되고, 그건 **우리가 손해 보는 쪽**이라 고객이 알려 주지 않아 더 늦게 들킨다. */
+export type VideoSeconds = 15 | 30 | 60 | 90;
 export type VideoChannel = "youtube_shorts" | "naver_clip" | "reels" | "threads";
 export type ProviderKey = "omni" | "veo_lite" | "veo_fast" | "veo" | "wan" | "hailuo" | "kling";
 export type ClipTier = "filler" | "standard" | "money";
@@ -40,7 +43,7 @@ export function safeZoneOf(channel: unknown): { top: number; bottom: number; sid
   return SAFE_ZONE_OF[String(channel) as VideoChannel] ?? SAFE_ZONE_FALLBACK;
 }
 export const VIDEO_FORMATS: readonly VideoFormat[] = ["graphic", "talking", "clip"];
-export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60];
+export const VIDEO_SECONDS: readonly VideoSeconds[] = [15, 30, 60, 90];
 export const VIDEO_STAGES: readonly VideoStage[] = ["script", "tts", "clips", "render", "judging", "done", "failed"];
 export function isVideoChannel(v: unknown): v is VideoChannel { return VIDEO_CHANNELS.has(String(v)); }
 export function isVideoFormat(v: unknown): v is VideoFormat { return VIDEO_FORMATS.includes(String(v) as VideoFormat); }
@@ -162,6 +165,22 @@ export interface RenderReport {
   thumbGray?: string;
   /** [R7 §1.5] 러너가 직접 pHash 를 계산했으면 hex 16자. `thumbGray` 가 있으면 서버가 다시 계산하니 **둘 중 하나만** 있으면 된다. */
   framePhash?: string;
+  /**
+   * [R12 마감 · 2026-09-17 · B↔B2] 🔴 **오버레이(자막·배지·고지·엔드카드)가 첫 프레임 말고도 실제로 실렸나** — 러너가 **산출물에서** 확인한 값.
+   *
+   *   왜 생겼나: B2·C 가 ffmpeg 8.1.2 로 실측했다 — 오버레이 필터가 `eof_action=pass` 라 **단일 프레임 PNG 가 t=0 에 EOF** 이고,
+   *   그 뒤로는 본편이 그대로 통과한다. 즉 **자막·제휴 고지·배지·엔드카드가 첫 프레임에만 있었다**(`pass` @1.5s (0,0,0) ↔ `repeat` @1.5s (252,0,0)).
+   *
+   *   🔴 **그런데 심사(`judge.ts disclosure`)는 이걸 원리상 못 잡는다** — 그 축은 `p.overlay.badge.text`·`p.disclosureCaption.text`,
+   *      즉 **계획서**를 본다(AC-33 «산출물이 아니라 계획서를 보고 도장»). 그래서 **고지가 통째로 안 실린 영상에 «고지 ✅»가 찍히고 있었다.**
+   *      = 법으로 정해진 대가 표시가 **없는 채로 초록**이었다. 이 라운드에서 찾은 것 중 제일 큰 거짓 초록이다.
+   *
+   *   🔴 `true` = 러너가 **재서** 확인했다 · `undefined` = **못 쟀다**(«괜찮다»가 아니다 → 심사가 `pending` 으로 내린다 · AC-9).
+   *      `false` 를 보내면 그건 «재 봤고 안 실렸다»라 심사가 **떨어뜨린다**(pending 이 아니다).
+   *   러너가 채우는 법(B2 몫): 오버레이가 붙는 시각 **뒤쪽** 프레임 하나를 뽑아 오버레이 자리 픽셀이 본편과 다른지 본다
+   *      (위 실측이 쓴 방법 그대로 — 새 의존성 0).
+   */
+  overlayVerified?: boolean;
 }
 
 /* ───────── 심사(계약 §5 judgeVideo) ───────── */

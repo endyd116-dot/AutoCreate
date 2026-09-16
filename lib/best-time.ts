@@ -96,6 +96,9 @@ export interface PickArgs {
   jitterSpreadMin?: number;
   /** 🔴 새벽(0~6시) 후보를 건너뛴다 — 자동 편성의 기본. 고객이 **직접 고른 시각**에는 적용하지 않는다(막지 않고 말한다). */
   avoidNight?: boolean;
+  /** [R12-10] 🔴 **배운 시각**(KST 시 · `lib/cron/learn.ts bestHoursFor`). 채널 기본표의 **순서만** 기울인다 — 표 밖으로 나가지 않는다.
+   *  고객이 고른 시각(`preferredHour`·`goldenHours`)이 있으면 **아무 일도 안 한다.** 안 넘기면 종전과 똑같다(무회귀). */
+  learnedHours?: readonly number[] | null;
   /** 시작 날짜(KST 'YYYY-MM-DD') — 기본 오늘. */
   fromDate?: string;
   now?: Date;
@@ -104,13 +107,21 @@ export interface PickArgs {
 }
 
 /** 후보 시각 목록(KST h:m). */
-export function candidatesFor(channel: string, goldenHours?: number[] | null, preferredHour?: number | null, preferredMinute?: number | null): { h: number; m: number }[] {
+export function candidatesFor(channel: string, goldenHours?: number[] | null, preferredHour?: number | null, preferredMinute?: number | null, learnedHours?: readonly number[] | null): { h: number; m: number }[] {
   if (typeof preferredHour === "number" && preferredHour >= 0 && preferredHour <= 23) {
     const m = typeof preferredMinute === "number" && preferredMinute >= 0 && preferredMinute <= 59 ? Math.floor(preferredMinute) : 0;
     return [{ h: preferredHour, m }];   // [R8] 못 박은 시각은 **분까지** 그대로(«10:05»)
   }
   if (Array.isArray(goldenHours) && goldenHours.length) return goldenHours.filter((h) => h >= 0 && h <= 23).map((h) => ({ h, m: 0 }));
-  return BEST_HOURS[channel] ?? [{ h: 9, m: 0 }];
+  const table = BEST_HOURS[channel] ?? [{ h: 9, m: 0 }];
+  /* [R12-10 · 설계 R12 §8] 🔴 **되먹임은 «기울이기»다** — 배운 시각을 **앞으로 당기기만** 한다(`lib/learn-tilt.ts` 의 규율).
+     🔴 **없는 시각을 만들지 않는다**: 기본표 밖의 시각은 버린다. 🔴 **후보를 빼지도 않는다**: 안 배운 시각은 뒤에 그대로 남는다.
+     🔴 위 두 `if` 보다 **뒤**에 있는 것이 핵심이다 — 고객이 고른 시각(고정·골든타임)은 학습이 **건드리지 않는다.**
+     🔴 안 넘기면 표 순서 그대로(무회귀 · 옛 호출부는 한 글자도 안 바뀐다). */
+  if (!learnedHours?.length) return table;
+  const head = learnedHours.filter((h) => table.some((c) => c.h === h)).map((h) => table.find((c) => c.h === h)!);
+  const uniq = head.filter((c, i) => head.indexOf(c) === i);
+  return [...uniq, ...table.filter((c) => !uniq.includes(c))];
 }
 
 function conflicts(at: Date, taken: Date[], gapMin: number): boolean {
@@ -125,7 +136,7 @@ export function pickPublishAt(a: PickArgs): { at: Date; reason: string } {
   const now = a.now ?? new Date();
   const lead = 20 * 60_000;   // 지금부터 최소 20분 뒤
   const start = a.fromDate ?? kstDateStr(now);
-  const cands = candidatesFor(a.channel, a.goldenHours, a.preferredHour, a.preferredMinute);
+  const cands = candidatesFor(a.channel, a.goldenHours, a.preferredHour, a.preferredMinute, a.learnedHours);
   /* 🔴 [R8] 같은 채널 다른 계정과의 간격은 **정책이 정한다**(B2 `gapMinFor` → 호출부가 넘긴다 · 여기서 새로 정하지 않는다).
      고객이 시각을 못 박았으면 «바닥»(floor)까지 좁힐 수 있다 — 러너가 **실제로 재서** 출구 IP 가 다른 계정끼리는 5분.
      그래야 사장님 안(«A 10:00 · B 10:05»)이 **정책이 허락하는 만큼** 그대로 선다. */
@@ -152,7 +163,9 @@ export function pickPublishAt(a: PickArgs): { at: Date; reason: string } {
            (계산한 값을 그대로 쓰면 화면이 «10:00»이라는데 실제로는 10:04 에 나가는 어긋남이 생긴다). */
         const kst = new Date(at.getTime() + KST_MS);
         const hh = String(kst.getUTCHours()).padStart(2, "0"), mm = String(kst.getUTCMinutes()).padStart(2, "0");
-        const why = a.preferredHour != null ? "규칙에 고정한 시각" : a.goldenHours?.length ? "이 계정의 골든타임" : "이 채널에서 반응이 좋은 시각";
+        /* [R12-10] 🔴 배운 시각이 **실제로 앞으로 당겨져서 그 시각이 뽑혔을 때만** 그렇게 말한다 — 안 그러면 표 기본값을 «배웠다»고 하는 거짓말이 된다(AC-52). */
+        const why = a.preferredHour != null ? "규칙에 고정한 시각" : a.goldenHours?.length ? "이 계정의 골든타임"
+          : a.learnedHours?.includes(c.h) ? "이 계정에서 반응이 좋았던 시각" : "이 채널에서 반응이 좋은 시각";
         const dayWord = d === 0 ? "오늘" : d === 1 ? "내일" : `${date.slice(5).replace("-", "/")}`;
         return { at, reason: `${dayWord} ${hh}:${mm} — ${why}${shift ? ` · 다른 계정과 ${crossGap}분 간격` : ""}` };
       }

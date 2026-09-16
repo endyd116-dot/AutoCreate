@@ -91,6 +91,18 @@ export interface ChannelSpec {
    *   칸 하나가 `null` = 그 종류는 아직 안 재 봤다. 러너 채널의 값은 **B2 실측**(2026-09-16 · naver_blog)이고, HTML 채널은 우리가 태그를 직접 보내므로 «낼 수 있다».
    */
   formatCaps: FormatCaps | null;
+  /**
+   * [R12-6 · 2026-09-17] 🔴 **이 채널에 광고·제휴 수익이 붙나.** `false` = **확인했고 안 붙는다**(당근 «새소식» — 광고 수익이 없다).
+   *   🔴 **칸이 없으면 «안 붙는다고 확인한 적이 없다»**이고, 그때 동작은 오늘까지와 같다(수익 화면이 그 계정을 그냥 0원으로 그린다).
+   *      이 칸은 «수익이 없는 것을 **알고 있는**» 채널을 적는 자리다 — 그래야 0원이 **고장으로 보이지 않는다**(AC-10 «설정 안 됨은 오류가 아니다»와 같은 결).
+   *   읽는 곳: `lib/accounts.ts listChannels`(연결 화면) · `lib/revenue/aggregate.ts byAccount`(수익 화면 · 0원 옆 한 줄).
+   */
+  monetizable?: boolean;
+  /**
+   * [R12-6] 이 채널이 **한 글에 받는 사진 수 상한**. 🔴 **칸이 없으면 «안 재 봤다»** — 화면은 수를 말하지 않는다(지어내지 않는다 · AC-9).
+   *   🔴 화면이 «10장까지»를 **베껴 적지 않게** 서버가 실어 준다(AC-52). 러너는 제 값으로 한 번 더 자른다(러너는 서버를 다시 안 묻는다 · B2 합의 2026-09-17).
+   */
+  maxPhotos?: number;
   /** 사람이 읽는 메모(왜 null 인지 등) — 화면에 쓰지 않는다. */
   note?: string;
 }
@@ -107,6 +119,10 @@ const CAPS_TISTORY: FormatCaps = caps({ emoji: true }, null);
 const CAPS_HTML: FormatCaps = caps({}, true);
 /** 글자만 받는 API 채널(쓰레드·X·페이스북·인스타 캡션): 꾸밈 태그가 **없다**(플랫폼 사실 · 우리 판단 아님). 이모지·사진만 된다. */
 const CAPS_PLAIN: FormatCaps = caps({ emoji: true, image: true }, false);
+/* [R12-6] 당근 «새소식»(러너): 🔴 **전부 `false`** — «안 재 봤다»인 `null` 이 아니다. AM `daangn-runner.mjs`(43KB · 2026-07 실측) 헤더에
+   «서식 0건»이 적혀 있고 새소식 에디터가 **평문**이다. 사진은 최대 10장(첫 장이 대표)이라 `image` 만 true, 이모지는 타자라 true.
+   🔴 `null` 로 두면 러너가 «해 본다»로 가서 평문 에디터에 헛손질을 한다(B2 요청 2026-09-17) — **확인한 것을 null 로 두는 게 AC-92 의 반대 방향**이다. */
+const CAPS_DAANGN: FormatCaps = caps({ emoji: true, image: true }, false);
 
 /**
  * 채널 성질 표 — **행 하나 = 채널 하나**.
@@ -128,6 +144,13 @@ export const CHANNELS: readonly ChannelSpec[] = [
   /* [R9-9 · B2 2026-09-16] X 영상 — 옛 주석 «영상은 사진과 다른 처리 대기 단계가 붙는다» 는 틀렸다: initialize/append/finalize 는 사진과 **똑같고** 영상만 finalize 응답에 processing_info 가 붙는다 ⇒ «없는 길»이 아니라 «안 만든 길»이라 만들었다(`lib/publish/x.ts`). 우리 키 실호출은 아직(X 계정 0 · AC-50). */
   { key: "x", connect: "oauth", publishVia: "api", retractVia: "api", jobKind: null, axis: "text", textGen: false, formatCaps: CAPS_PLAIN, note: "쓰기가 유료 플랜이다. 삭제는 DELETE /2/tweets/{id} 로 된다. 영상은 2026-09-16 에 열었다 — 사진과 같은 청크 업로드에 «처리 대기» 한 단계를 더한 것이라 «없는 길»이 아니라 «안 만든 길»이었다(우리 키로 실호출 검증은 아직)." },
   /* [P1R8 §3.4] 브런치 — 🔴 **일부러 null** 이다. 아래 «못 채운 칸» 주석 참조. */
+  /* [R12-6 · 사장님 «끝까지 개발하고 하자»] 🔴 **당근 비즈프로필 «새소식»** — AM 러너(`public/runner/daangn-runner.mjs` · 2026-07 실측)를 B2 가 포팅한다.
+     · 붙는 법 **세션 쿠키만** — 당근 로그인은 **휴대폰 SMS 인증**이라 아이디·비번이 아예 없다(AM 러너 헤더).
+     · 올리는 법 **러너** — 공개 API 가 없다(광고 전문가모드·측정 연동만 있다 · AM 2026-07 조사). `jobKind` 글자는 B2 와 맞췄다(2026-09-17).
+     · 🔴 **수익이 없다**(`monetizable:false`) — 새소식에는 광고 수익이 안 붙는다. 수익 화면의 0원이 **고장이 아니라는 걸** 서버가 말해 준다.
+     · 🔴 **비즈프로필이 있어야 한다** — 개인 계정으로는 새소식을 못 쓴다. 연결 화면이 그걸 **먼저** 말한다(A).
+     ⚠️ 선결조건: 셀렉터가 2026-07 기준이고 AM 헤더가 «변경 가능성 高»라 **탐침 먼저**(합동 세션 항목). 그래도 코드·화면은 지금 완성해 둔다(§3.4 «키 꽂으면 즉시»). */
+  { key: "daangn", connect: "session", publishVia: "runner", jobKind: "publish.daangn", retractVia: "runner", axis: "text", textGen: true, formatCaps: CAPS_DAANGN, monetizable: false, maxPhotos: 10, note: "비즈프로필 «새소식». 서식 0(평문 에디터 · 확인함) · 사진 10장 · 광고 수익 없음. 셀렉터는 AM 2026-07 실측이라 탐침 먼저." },
   { key: "brunch", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, formatCaps: null, note: "🔴 러너 채널인데 **셀렉터를 한 번도 못 쟀다**(작가 승인 계정이 없어 화면을 연 적이 없다). 추측으로 채우지 않는다 — 아래 주석." },
   { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
   /* [P1R8 §3.4] 유튜브 롱폼 — 쇼츠와 **같은 `videos.insert`**(lib/publish/youtube.ts publishYoutube · 주소만 다르다).
@@ -173,6 +196,40 @@ export const TEXT_CHANNEL_KEYS: readonly string[] = CHANNELS.filter((c) => c.tex
 export const TEXT_AXIS_KEYS: readonly string[] = CHANNELS.filter((c) => c.axis === "text").map((c) => c.key);
 /** 영상 축 채널. */
 export const VIDEO_CHANNEL_KEYS: readonly string[] = CHANNELS.filter((c) => c.axis === "video").map((c) => c.key);
+
+/* ═══ [R11-10 · B · 2026-09-17] 🔴 **축을 실제로 «부르게» 하는 문**(설계 R11 §1.1 · 계약 §4-3 · AC-69) ═══
+ *   실측 2026-09-16: `axis` 도 위 두 목록도 **부르는 곳이 0곳**이었다. 16채널이 다 갈려 있는데 서버도 화면도 안 읽었다 —
+ *   «정의는 있는데 제품이 안 부른다»의 교과서다. R11 은 축을 **새로 만드는** 라운드가 아니라 **이 두 목록을 읽게 하는** 라운드다.
+ *   ⇒ 축이 필요한 자리는 **전부 이 함수 하나**를 부른다. 새 목록·새 판정식을 만들지 않는다(정본 하나).
+ *
+ *   🔴 **모르는 채널은 `null`** — 이 파일의 사상 그대로다. «표에 없다»를 «글이다»로 접으면 그 순간
+ *      수익 화면이 **못 가른 돈을 «글에서» 로 위장**한다(AC-92 · 돈 이야기에서 그 거짓말이 제일 비싸다).
+ */
+export function axisOfChannel(channel: unknown): ChannelKindAxis | null {
+  const k = String(channel ?? "");
+  if (!k) return null;
+  if (TEXT_AXIS_KEYS.includes(k)) return "text";
+  if (VIDEO_CHANNEL_KEYS.includes(k)) return "video";
+  return null;
+}
+/**
+ * [R12-6] 🔴 이 채널에 **수익이 붙나** — `false` 는 «확인했고 안 붙는다»(당근). 칸이 없으면 `true`(오늘까지와 같은 동작).
+ *   «모른다»를 만들지 않는 이유: 이 값은 **화면이 0원 옆에 한 줄을 쓸지 말지**만 정한다. 모르면 안 쓰는 게 맞고, 그건 `true` 와 같은 동작이다.
+ */
+export function channelMonetizable(channel: unknown): boolean {
+  return channelSpec(String(channel ?? ""))?.monetizable !== false;
+}
+/** [R12-6] 이 채널이 받는 사진 수 상한 — 🔴 **모르면 `null`**(화면이 «몇 장까지»를 안 말한다). */
+export function maxPhotosOf(channel: unknown): number | null {
+  const v = channelSpec(String(channel ?? ""))?.maxPhotos;
+  return typeof v === "number" && v > 0 ? Math.trunc(v) : null;
+}
+/** 이 테넌트가 **가진 축** — 계정들의 채널에서 뽑는다. 축이 하나뿐인 고객에게는 화면이 축 칩·«어디서 났나» 그룹을 **통째로 안 그린다**(설계 §2.3-1). */
+export function axesOfChannels(channels: readonly unknown[]): ChannelKindAxis[] {
+  const out = new Set<ChannelKindAxis>();
+  for (const c of channels) { const a = axisOfChannel(c); if (a) out.add(a); }
+  return [...out];
+}
 
 /**
  * 연결 방식. 🔴 여기만 **모르는 채널에 기본값**(`oauth`)을 준다 — 연결 방식은 «어떤 화면을 띄울까»라서

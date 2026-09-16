@@ -293,9 +293,15 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const topic = toTopic(trow);
     const channel = String(p.channel);
     const accountId = p.account_id ? n(p.account_id) : null;
-    const [acc] = accountId ? await q(sql`SELECT id, handle, persona_id, text_style_id FROM accounts WHERE tenant_id = ${tid} AND id = ${accountId}`) : [undefined];
+    const [acc] = accountId ? await q(sql`SELECT id, handle, persona_id, text_style_id, reader FROM accounts WHERE tenant_id = ${tid} AND id = ${accountId}`) : [undefined];
     const persona = await loadPersona(tid, acc?.persona_id ? n(acc.persona_id) : null);
-    const c = await contractFor(channel, meta.emotionKey ? String(meta.emotionKey) : null);
+    /* [R11-8 · 설계 R11 §4.4] 🔴 **계정이 계약의 독자를 덮어쓴다** — 같은 네이버라도 «살림 검증»과 «작은 돈 재테크»는 읽는 사람이 다르다.
+       🔴 **`contractFor` 가 돌려주는 객체를 고치면 안 된다** — 그 객체는 **60초 캐시에 든 같은 참조**라, 고치면 그 뒤 60초 동안
+          **다른 계정의 글에도 이 독자가 붙는다**(교차 오염 · 계정마다 다르게 하려다 정반대가 된다). 반드시 **복사해서** 덮는다.
+       🔴 비어 있으면 손대지 않는다 = 계약 값 그대로(무회귀). */
+    const base = await contractFor(channel, meta.emotionKey ? String(meta.emotionKey) : null);
+    const accReader = String(acc?.reader ?? "").trim();
+    const c = accReader ? { ...base, reader: accReader } : base;
     const format = (c.formats.includes(String(p.format) as FormatKey) ? String(p.format) : c.formats[0]) as FormatKey;
     const imageCount = Math.max(0, Math.trunc(n(meta.imageCount ?? c.images.default)));
     const aff = (meta.affiliate && typeof meta.affiliate === "object" ? meta.affiliate : null) as { provider: string; productQuery: string; slot: string } | null;
@@ -551,7 +557,11 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
       /* [R9-8] 🔴 **계정 간 유사도** — 숫자·id 만(본문 0). `measured:false` 는 «못 쟀다»지 «0점»이 아니다(AC-9). 게이트 축 `cross_account` 가 같은 값을 말한다. */
       crossSimilarity: cross.meta,
       /* [R10-4] 🔴 이 글이 **실제로 입은 옷** — 계정 기본에서 왔든 글마다 골랐든 id 를 여기 적는다(원장·검수 화면이 이 칸을 읽는다). 못 찾은 스타일은 사람말로 적는다. */
-      ...(styleRow ? { styleId: styleRow.id, styleApplied: { id: styleRow.id, name: styleRow.name, lines: styleLines.length, from: Number(meta.styleId) > 0 ? "piece" : "account" } } : {}),
+      /* [R12-10] 🔴 `from` 이 셋이 됐다 — `piece`(이 글만) · `account`(계정에 걸어 둠) · **`learned`**(되먹임이 골랐다 · 디렉터가 `meta.styleFrom` 에 적어 둔다).
+         🔴 `learned` 를 `account` 로 적으면 **고객이 건 적 없는 옷을 «당신이 걸어 둔 것»이라고** 말하게 된다(AC-92). 세 번째 말을 만든 이유가 그것이다. */
+      ...(styleRow ? { styleId: styleRow.id, styleApplied: { id: styleRow.id, name: styleRow.name, lines: styleLines.length,
+        from: Number(meta.styleId) > 0 ? "piece" : meta.styleFrom === "learned" ? "learned" : "account",
+        ...(meta.styleFrom === "learned" && meta.learnedLine ? { why: String(meta.learnedLine).slice(0, 120) } : {}) } } : {}),
       ...(wantStyleId && !styleRow ? { styleUnused: { id: wantStyleId, why: "그 스타일을 찾지 못해서(지웠거나 없는 스타일) 스타일 없이 썼어요." } } : {}),
       /* [R8 §2.1] 🔴 주제군을 **적어 둔다**. 검수·재검사가 다시 계산하면 재료가 달라 값이 갈린다 —
          여기서는 `intent` 를 알지만(소재에서 온다) 검수 시점엔 없어서 `intent:null` 로 계산되고 있었다.
