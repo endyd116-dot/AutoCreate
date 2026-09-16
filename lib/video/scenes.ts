@@ -51,6 +51,89 @@ export function planCutWindows(lines: (Pick<ScriptLine, "idx" | "cutIdx"> & { st
 }
 export function cutDurationSec(startMs: number, endMs: number): number { return Math.max(2, Math.min(GRAPHIC_CUT_SEC, Math.ceil((endMs - startMs) / 1000))); }
 
+/* ═══════════ [R12-4] 컷당 초 **하한** ═══════════
+ *
+ *   설계(R12 §5): 컷 길이의 **하한**만 받는다(«이 컷은 최소 2초는 보여 줘»). 🔴 **나레이션을 이긴다는 뜻이 아니다** —
+ *   나레이션이 더 길면 나레이션이 이긴다. 까닭: **컷이 나레이션보다 짧으면 말이 잘린다**(되돌릴 수 없는 종류의 나쁨).
+ *   ⇒ 우리는 **늘리기만 하고 줄이지 않는다.**
+ *
+ *   🔴 **무회귀**: `floorMs` 가 없거나 0 이면 **들어온 것을 그대로 돌려준다**(같은 객체 모양·같은 숫자).
+ *      값이 와도 늘릴 창이 하나도 없으면 역시 그대로다 — «칸을 열었더니 영상이 달라졌다»가 없어야 한다.
+ *
+ *   🔴 **무엇이 같이 움직이나**: 창을 늘리면 뒤 창이 밀리고, **그 창의 문장도 같이 밀려야** 한다.
+ *      안 밀면 다음 컷의 나레이션이 **앞 컷 그림 위에서** 들린다(자막·음성·그림이 갈라진다).
+ *      늘어난 몫은 창 **끝**에 붙는다 — 말이 끝난 뒤 그 장면에 더 머무는 것이지, 말을 늦추는 것이 아니다.
+ *
+ *   🔴 **하한을 다 더해 규격을 넘으면 하한을 통째로 버린다**(설계 §5). 반 만 거는 것은 «장면을 더 보여 준다»도
+ *      «규격을 지킨다»도 아니어서, 어느 쪽 약속도 못 지킨 상태가 된다. 버렸다는 사실은 `why` 로 돌려준다(AC-9).
+ */
+
+/** 하한의 천장 — 컷 하나가 머물 수 있는 최대(=`GRAPHIC_CUT_SEC`). 이보다 큰 하한은 여기서 잘린다(상한을 두 벌로 두지 않는다). */
+export const CUT_FLOOR_MAX_MS = GRAPHIC_CUT_SEC * 1000;
+
+export interface CutFloorLine { idx: number; startMs: number; endMs: number }
+export interface CutFloorWindow { idx: number; lineIdx: number[]; startMs: number; endMs: number }
+export interface CutFloorResult {
+  windows: CutFloorWindow[];
+  lines: CutFloorLine[];
+  /** 실제로 걸린 하한(ms). 🔴 안 걸었으면 `null` — 0 으로 메우지 않는다(«안 걸었다»와 «0 을 걸었다»는 다르다 · AC-92). */
+  appliedMs: number | null;
+  /** 🔴 사람말 — 못 건 이유. 걸었거나 애초에 안 받았으면 `null`. */
+  why: string | null;
+}
+
+/**
+ * 컷 하한 적용. 🔴 **순수**(입력을 안 고친다 — 새 배열을 돌려준다).
+ * @param windows `planCutWindows` 산출
+ * @param lines   문장 실측 시각(창과 같은 타임라인)
+ * @param floorMs 컷 하한. 없음·0·NaN = 아무것도 안 한다
+ * @param capMs   규격(15/30/60초 → ms). 늘린 합이 이걸 넘으면 **통째로 버린다**
+ */
+export function applyCutFloor(
+  windows: CutFloorWindow[],
+  lines: CutFloorLine[],
+  floorMs: unknown,
+  capMs: number,
+): CutFloorResult {
+  const keep = (why: string | null, appliedMs: number | null): CutFloorResult => ({
+    windows: windows.map((w) => ({ ...w, lineIdx: [...w.lineIdx] })),
+    lines: lines.map((l) => ({ ...l })),
+    appliedMs, why,
+  });
+
+  const raw = Number(floorMs);
+  if (!Number.isFinite(raw) || raw <= 0) return keep(null, null);        // 🔴 무회귀 자리 — 안 받으면 손도 안 댄다
+  const floor = Math.min(CUT_FLOOR_MAX_MS, Math.round(raw));
+  if (!windows.length) return keep(null, null);
+
+  const ordered = [...windows].sort((a, b) => a.startMs - b.startMs);
+  const needs = ordered.map((w) => Math.max(0, floor - (w.endMs - w.startMs)));
+  if (!needs.some((n) => n > 0)) return keep(null, floor);               // 걸 것이 없다 = 이미 다 하한보다 길다
+
+  const total = ordered[ordered.length - 1].endMs + needs.reduce((a, b) => a + b, 0);
+  const cap = Math.max(1000, Math.round(Number(capMs) || 0));
+  if (total > cap) {
+    return keep(
+      `장면을 ${Math.round(floor / 100) / 10}초씩 보여 달라고 하셨는데, 그러면 ${Math.round(total / 100) / 10}초가 되어 ${Math.round(cap / 1000)}초를 넘어서 못 했어요.`,
+      null,
+    );
+  }
+
+  /* 창마다 «그 창이 시작되기 전까지 밀린 몫»을 적어 둔다 — 문장도 그 몫으로 같이 민다. */
+  const shiftOfLine = new Map<number, number>();
+  const outWindows: CutFloorWindow[] = [];
+  let shift = 0;
+  for (const [i, w] of ordered.entries()) {
+    const dur = w.endMs - w.startMs;
+    for (const li of w.lineIdx) shiftOfLine.set(li, shift);
+    outWindows.push({ idx: i, lineIdx: [...w.lineIdx], startMs: w.startMs + shift, endMs: w.startMs + shift + dur + needs[i] });
+    shift += needs[i];
+  }
+  /* 🔴 창에 안 들어간 문장은 **그대로 둔다**(못 본 것을 옮기면 조용히 어긋난다). 정상 경로에서는 0건이다. */
+  const outLines = lines.map((l) => { const d = shiftOfLine.get(l.idx) ?? 0; return { ...l, startMs: l.startMs + d, endMs: l.endMs + d }; });
+  return { windows: outWindows, lines: outLines, appliedMs: floor, why: null };
+}
+
 /* ═══ 키워드(중앙 대형 자막 재료) ═══ */
 const TAILS = ["으로부터", "에서는", "에게서", "이라는", "라는", "에서", "부터", "까지", "처럼", "보다", "마다", "조차", "밖에", "으로", "에게", "한테", "이나", "라도", "인데", "이며", "이고", "이라", "은데", "는데", "을", "를", "이", "가", "은", "는", "의", "에", "도", "와", "과", "만", "로", "며", "고", "라"];
 export function stripKoreanParticle(word: string): string | null {

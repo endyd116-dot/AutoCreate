@@ -20,9 +20,11 @@
  *     · `pace`·`camera`→ 🟠 **컷 안 비트 수**(`splitCutBeats` 의 fast/normal/hold) — 그 **한 축만** 받는다
  *     · `caption`      → ❌ **없다.** 자막 모양은 렌더에 상수로 박혀 있고 프리셋 3개뿐이다 → 늘 `unused`
  *
- *   🔴 **`audio_tempo`(말 속도)는 여기서 안 다룬다** — 손잡이는 `tts-typecast.ts` 에 있지만
- *      **레퍼런스가 그 칸을 애초에 저장하지 않는다**(`TemplateStyle` 에 없다). 「읽게만 한다」로는 이을 수 없고,
- *      «컷 속도 글 → 말 속도»로 옮기는 건 **새 규칙**이라 R10 이다(나레이션 길이가 바뀌면 자막 시각·컷 창이 전부 따라 움직인다).
+ *   🔴 **[R12] `audioTempo`(말 속도)·`captionMotion`(자막 모션)·`transition`(컷 전환)이 여기 들어왔다.**
+ *      R10 까지는 셋 다 «낼 자리가 없다»였다 — 렌더가 구절당 PNG **한 장**이고 씬은 `concat` 뿐이었다.
+ *      R12 가 그 구조를 고쳤다(ffmpeg 이 그 한 장을 움직이고, 전환은 컷 «안»에서 빌린다) ⇒ 이제 **닿는 자리**다.
+ *      🔴 다만 **못 내는 값은 여전히 `unused`** 다: 모션 넷·전환 셋 밖은 애초에 `sanitizeTemplate` 이 안 받고,
+ *      말 속도는 **규격을 넘으면 `gen.ts` 가 되돌리며** «못 냈어요»를 적는다(여기서는 넘기기만 한다).
  *
  *   🔴 순수 함수다(네트워크·DB 0). `scripts/verify-reference-apply.mts` 가 이걸 그대로 돌린다.
  */
@@ -56,6 +58,25 @@ export interface RefStyleApplied {
   };
   /** 영상 전체 길이(초) — 고객이 고른 값이 **있으면 고객 것이 이긴다**(§9 핸들은 고객에게). */
   totalSec?: number;
+
+  /* ═══ [R12] 🔴 **렌더 구조가 바뀌어 새로 닿게 된 넷** ═══
+   *   전부 **없으면 키가 없고**, 키가 없으면 렌더·TTS 가 **종전 그대로** 간다(무회귀). */
+
+  /** [R12-1] 자막 등장 방식 → 렌더 payload `captions.type.motion`. 길이(120~200ms)는 러너가 정한다. */
+  captionMotion?: "none" | "fade" | "slide_up" | "pop";
+  /** [R12-2] 컷 전환 → 렌더 payload `transition`. 길이(0.3초·상한 0.4초)는 러너가 정한다. */
+  transition?: "none" | "fade" | "slide";
+  /**
+   * [R12-3] 말 속도 «보통(1.0) 대비 배수». 🔴 **넘기는 값으로 환산하는 것은 `lib/video/tempo.ts` 한 곳**이다
+   *   (우리 보통은 1.0 이 아니라 1.1 이다 — 여기서 또 곱하면 두 벌이 된다).
+   */
+  audioTempo?: number;
+  /**
+   * [R12-4] 컷 하나가 **최소** 머무는 ms. 🔴 **나레이션을 이긴다는 뜻이 아니다** —
+   *   나레이션이 더 길면 나레이션이 이긴다(컷이 나레이션보다 짧으면 **말이 잘린다** · 되돌릴 수 없는 나쁨).
+   *   하한을 다 더해 규격을 넘으면 `scenes.ts applyCutFloor` 가 **하한을 통째로 버리고** 사유를 돌려준다.
+   */
+  minCutMs?: number;
 }
 /** 못 넘긴 칸 — **이름과 이유**를 같이 남긴다(AC-9). */
 export interface RefUnused { field: string; why: string }
@@ -142,6 +163,12 @@ export function applyReferenceStyle(style: TemplateStyle | null | undefined): Re
   if (Number.isFinite(Number(s.design?.sideMargin))) ct.side = Number(s.design?.sideMargin);
   if (Object.keys(ct).length) applied.captionType = ct;
 
+  /* ═══ [R12-1·2] 자막 모션 · 컷 전환 — 🔴 **어휘는 `reference.ts` 가 이미 닫아 뒀다** ═══
+     목록 밖 값(«타자기»·«와이프»)은 `sanitizeTemplate` 의 `pick()` 에서 이미 떨어져 여기 안 온다.
+     그래서 여기서는 **온 것만** 그대로 옮긴다 — 두 번째 허용 목록을 만들면 그 둘이 갈라진다(AC-57). */
+  if (s.captionMotion) applied.captionMotion = s.captionMotion;
+  if (s.transition) applied.transition = s.transition;
+
   /* 🔴 **크기는 안 받는다** — 자막 글자 크기는 프리셋(`talking_big`·`clip_top`·그 외)이 정하고 그건 **고객이 고르는 값**이다.
      레퍼런스가 덮으면 화면 칩이 말하는 것과 영상이 달라진다(AC-52 — 그래서 색도 `variant.palette` 로 넣는다). */
 
@@ -154,18 +181,18 @@ export function applyReferenceStyle(style: TemplateStyle | null | undefined): Re
   /* 전체 길이 — 배운 값은 **기본값 후보**다. 고객이 15/30/60 을 골랐으면 고객 것이 이긴다(호출자가 정한다). */
   if (Number.isFinite(Number(s.speed?.totalSec))) applied.totalSec = Number(s.speed?.totalSec);
 
-  /* 컷당 초 — 🔴 **직접 지정하는 칸이 없다.** 컷 길이는 나레이션 길이가 정한다(`gen.ts:163`).
-     «5초마다»는 위 `paceHintOf` 가 fast|normal|hold 로 **거칠게** 받고, 초 단위 그대로는 못 낸다. */
-  if (Number.isFinite(Number(s.speed?.secPerCut))) {
-    unused.push({ field: "secPerCut", why: `컷 길이는 나레이션 길이가 정해서 «${s.speed?.secPerCut}초마다»를 그대로 못 넣는다 — 빠르기(fast/normal/hold)로만 받았다 · R11` });
-  }
+  /* ═══ [R12-4] 컷당 초 — 🔴 **이제 «하한»으로 받는다** ═══
+     R10 까지는 «컷 길이는 나레이션이 정한다»며 통째로 `unused` 였다. 그건 지금도 맞다 —
+     그래서 **덮어쓰기가 아니라 하한**이다(«이 컷은 최소 N초는 보여 줘»). 나레이션이 더 길면 나레이션이 이긴다.
+     🔴 상한은 `scenes.ts` 의 컷 최대 길이다 — 그보다 큰 하한은 거기서 잘린다(여기서 두 벌로 자르지 않는다). */
+  const secPerCut = Number(s.speed?.secPerCut);
+  if (Number.isFinite(secPerCut) && secPerCut > 0) applied.minCutMs = Math.round(secPerCut * 1000);
 
-  /* 🟠 말 속도 — 🔴 **이번 라운드는 저장까지만**(트리거 B2-6). 손잡이(`tts-typecast.ts` 0.5~2.0)는 있지만
-     넘기는 것은 **새 규칙**이다: 나레이션 길이가 바뀌면 **자막 시각·컷 창·전체 길이가 전부 따라 움직인다.**
-     ⇒ 배워서 저장하고 여기 «아직 반영 안 함»으로 남긴다. 조용히 버리면 다음 사람이 처음부터 다시 잰다(AC-9). */
-  if (Number.isFinite(Number(s.audioTempo))) {
-    unused.push({ field: "audioTempo", why: `말 속도 ${s.audioTempo}배를 배웠지만 아직 안 넣는다 — 속도를 바꾸면 자막 시각·컷 창·전체 길이가 같이 움직여서 따로 잡아야 한다 · R11` });
-  }
+  /* ═══ [R12-3] 말 속도 — 🔴 **이제 넘긴다** ═══
+     R10 은 «배워서 저장까지»였다(사유: 속도가 바뀌면 자막 시각·컷 창·전체 길이가 전부 따라 움직인다).
+     R12 가 그 셋을 같이 잡았다 ⇒ 여기서는 **배운 배수를 그대로** 실어 보내고,
+     🔴 «넘기는 값으로 환산»과 «규격을 넘었나»는 `lib/video/tempo.ts` 와 `gen.ts` 가 한 번씩만 한다. */
+  if (Number.isFinite(Number(s.audioTempo))) applied.audioTempo = Number(s.audioTempo);
 
   /* 🔴 **색 가짓수**는 못 받는다 — 우리 팔레트는 «색 이름 한 줄»이고 «몇 개»를 강제하는 자리가 없다. */
   if (Number.isFinite(Number(s.design?.colorCount))) {
