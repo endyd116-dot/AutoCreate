@@ -429,7 +429,10 @@ for (const [label, needle, owner0, harm, needApp] of SURFACES) {
      SURFACES 의 «화면이 `crowd` 를 말해 주나» 는 화면이 그 키를 **읽기만** 하면 초록이다. 그런데 `crowd` 는
      🔴 **막는 값이 아니다** — 그 키로 «그래도 이 시각» 단추를 잠그면 **§9 를 정면으로 어긴다**(설계 §4.3 «막지 않는다 · 되돌릴 길을 같이»).
      ⇒ 같은 줄에서 `crowd`·`겹` 와 `disabled` 가 만나는 자리를 센다. **지금은 0곳**(화면이 아직 안 읽는다) — 화면이 생기는 날 이 줄이 지킨다. */
-  const NEAR_LOCK = /(crowd|겹쳐|겹침)[^\n]{0,80}disabled|disabled[^\n]{0,80}(crowd|겹쳐|겹침)/g;
+  /* 🔴 잠그는 길은 `disabled` 하나가 아니다(2026-09-17 B 지적): `aria-disabled` · `pointer-events:none` 도 같은 일을 한다.
+     ⚠️ **단추를 아예 «안 그리는» 길은 어느 자로도 못 잡는다** — 그때는 눈이 맞다. 이 줄은 **앞의 셋**만 맡는다(못 하는 것을 적어 둔다 · AC-9). */
+  const LOCKWORD = "(disabled|aria-disabled|pointer-events\\s*:\\s*none)";
+  const NEAR_LOCK = new RegExp(`(crowd|겹쳐|겹침)[^\\n]{0,80}${LOCKWORD}|${LOCKWORD}[^\\n]{0,80}(crowd|겹쳐|겹침)`, "g");
   const crowdLocks = [...CODE].filter(([p]) => /^public\/(app|ops)\//.test(p))
     .flatMap(([p, c]) => [...String(c).matchAll(NEAR_LOCK)].map(() => p));
   rec("🔴 «이날 겹쳐요»로 단추를 잠그지 않는다(§9 — 막지 않기로 한 값이다)", crowdLocks.length === 0,
