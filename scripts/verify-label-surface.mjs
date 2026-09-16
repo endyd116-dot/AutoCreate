@@ -312,6 +312,16 @@ rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.s
   }
 }
 
+/* ───────── ⑧-e 🔴 **화면이 글 코인을 다시 세지 않는다**(AC-74 · [R9R10-A]) ─────────
+   왜: 2026-09-15 디렉터가 «1 + 사진 수»로 네이버를 7코인이라 적었다. R10 등급제로 그 셈을 걷어 냈는데(값 = 서버 coinCost · 합계 = director-estimate),
+   누가 «미리보기용»으로 되살리면 그날부터 견적과 실제가 갈린다. 생성물(public/app/director.html)의 주석 걷은 본문에서 옛 셈 꼴을 찾는다. */
+{
+  const dir = read("public/app/director.html").replace(//*[sS]*?*//g, " ");
+  const OLD = [["UI.COIN.blog +", /UI.COIN.blogs*+/], ["1 + UI.stepVal(", /1s*+s*UI.stepVal(/], ["+ (aiCount - 1)", /Math.max(0,s*(p.images?.aiCount/]];
+  const bad = OLD.filter(([, re]) => re.test(dir)).map(([n]) => n);
+  rec("🔴 ⑧-e 디렉터 화면이 글 코인을 다시 세지 않는다(서버 coinCost·estimate 만)", bad.length === 0, bad.length ? `옛 셈이 살아 있다: ${bad.join(" · ")}` : "옛 셈 0곳");
+}
+
 /* ───────── ⑧ 광고 붙이는 «길»(서버 adsWayOf·adsRemovable ↔ 화면 표) ─────────
    왜: 채널마다 길이 다르고(우리가 직접 / 내 PC 가 / 아직 없음), **티스토리는 뗄 수 없다**(러너가 읽기만 한다).
    화면이 이 표를 잘못 들고 있으면 **눌러도 아무 일이 안 나는 단추**가 생긴다 — 없는 되돌리기를 약속하는 것이 가장 나쁘다.
