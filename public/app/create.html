@@ -20,8 +20,9 @@
   <a class="row tap" href="/app/pieces.html?tab=in_review"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/><path d="M12 15l7.5-7.5a1.8 1.8 0 0 0-2.5-2.5L9.5 12.5 9 15z"/></svg></span><div class="l"><span class="t">AI가 쓴 걸 내가 고치기</span><span class="d" id="wayFixD">만들어 둔 글을 열어 고친 뒤 예약해요 · 고쳐도 코인은 더 안 들어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
-<div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
-  <button type="button" class="row tap" id="refPost" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">글 레퍼런스로 스타일 배우기</span><span class="d" id="refPostD">잘 된 글 주소 하나면 문단·이모지·강조·사진 버릇을 배워 그 계정 글에 써요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
+<div class="group" id="refg" hidden><div class="gt">배워 올 곳<span id="refq"></span></div>
+  <button type="button" class="row tap" id="refPost" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">글 스타일 배우기</span><span class="d" id="refPostD">잘 된 글 주소 하나면 문단·이모지·강조·사진 버릇을 배워 그 계정 글에 써요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <button type="button" class="row tap" id="ref" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">영상 스타일 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
   </main>
 </div>
@@ -32,7 +33,21 @@
 (async () => {
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
-let accountsN = null, busy = false, timer = null, templates = [], textAccounts = []; // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다)
+let accountsN = null, busy = false, timer = null, templates = [], textAccounts = [], videoAccounts = []; // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다) · [R11 A-3] videoAccounts = 영상 축
+/* [R11 A-3] 한도는 **그룹 제목 줄 우측**에 글자로 — 링크가 아니다(§13.0b 의 «전체보기 ›» 자리를 글자가 쓴다).
+   🔴 «남음»을 **지어내지 않는다** — 서버가 `quota` 를 안 주거나 칸이 비면 **숫자를 빼고 이름만** 남는다(AC-9·AC-92).
+   🔴 `left` 는 서버 값을 **그대로** 쓴다 — 화면이 `limit - used` 로 셈하면 같은 수를 두 곳에서 만드는 셈이다(AC-52).
+   🔴 단위는 두 축 모두 **«이번 달»**이다(영상이 «하루 3개»였다 · B 가 서버를 맞췄다 · 두 줄이 다른 단위로 말하면 고객이 견준다). */
+async function paintQuota() {
+  const el = UI.$("#refq"); if (!el) return;
+  const num = (q) => (q && Number.isFinite(Number(q.left)) && Number.isFinite(Number(q.limit)) ? `${Number(q.left)} / ${Number(q.limit)}` : null);
+  const [ps, vs] = await Promise.all([
+    textAccounts.length ? UI.api("/api/account-styles") : Promise.resolve({ ok: false }),
+    videoAccounts.length ? UI.api("/api/topics-templates") : Promise.resolve({ ok: false }),
+  ]);
+  const t = ps.ok ? num(ps.quota) : null, v = vs.ok ? num(vs.quota) : null;
+  el.textContent = t && v ? `이번 달 글 ${t} · 영상 ${v} 남음` : t ? `이번 달 ${t} 남음` : v ? `이번 달 ${v} 남음` : "";
+}
 /* [사장님 실측 2026-09-15 · 테넌트 198] «네이버 소재만 계속 보인다» — 데이터는 맞다(소재 채널은 **연결된 계정의 채널**에서만 정해진다 · lib/topics.ts).
    틀린 건 **화면이 그 까닭을 말하지 않은 것**이다. 연결된 채널을 한 줄로 말하고, 둘 이상이면 칩으로 거른다.
    🔴 고른 칩은 **화면 안에서만** 산다(저장·URL 금지) — 새로 들어오면 늘 «전체»(«한 번 누르면 계속 그 상태»가 그 불편의 정체). */
@@ -60,8 +75,19 @@ async function load(poll = false) {
     chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : [];
     /* [R9R10-A] «글 채널»은 서버가 말한다(channels[].category) — 화면에 채널 이름을 박지 않는다 */
     const textCh = new Set((a.ok ? a.channels || [] : []).filter((c) => c.category === "text").map((c) => c.key));
-    textAccounts = a.ok ? (a.accounts || []).filter((x) => textCh.has(x.channel) && x.status !== "suspended") : []; }
-  templates = r.templates || []; UI.$("#refg").hidden = !accountsN; UI.$("#refPost").hidden = !textAccounts.length; if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
+    textAccounts = a.ok ? (a.accounts || []).filter((x) => textCh.has(x.channel) && x.status !== "suspended") : [];
+    /* [R11 A-3] 영상 축도 **서버가 말한 category** 로 가른다(글 쪽과 같은 잣대 · 채널 이름을 화면에 박지 않는다). */
+    const videoCh = new Set((a.ok ? a.channels || [] : []).filter((c) => c.category === "video").map((c) => c.key));
+    videoAccounts = a.ok ? (a.accounts || []).filter((x) => videoCh.has(x.channel) && x.status !== "suspended") : []; }
+  templates = r.templates || [];
+  /* [R11 A-3] «배워 올 곳» — 종전엔 제목 없는 그룹이라 **«네 번째 쓰는 길»처럼** 보였다.
+     레퍼런스는 쓰는 길이 아니라 **쓰기 전에 옷을 갈아입히는 일**이라 제목을 가진 제 그룹으로 세웠다.
+     🔴 **그 축 계정이 없으면 그 줄이 없다** — 영상 계정이 없는 집에 «영상 스타일 배우기»는 못 누르는 줄이다. */
+  UI.$("#refPost").hidden = !textAccounts.length;
+  UI.$("#ref").hidden = !videoAccounts.length;
+  UI.$("#refg").hidden = !textAccounts.length && !videoAccounts.length;
+  if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
+  await paintQuota();
   const f = r.refresh || {};
   const startedMs = f.startedAt ? UI.utc(f.startedAt).getTime() : null;
   const stale = !!(f.running && startedMs && Date.now() - startedMs > 600000); // 고아 방지 — 10분 넘으면 도는 걸로 보지 않는다

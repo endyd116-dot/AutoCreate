@@ -7,13 +7,28 @@ PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스�
   <a class="row tap" href="/app/pieces.html?tab=in_review"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/><path d="M12 15l7.5-7.5a1.8 1.8 0 0 0-2.5-2.5L9.5 12.5 9 15z"/></svg></span><div class="l"><span class="t">AI가 쓴 걸 내가 고치기</span><span class="d" id="wayFixD">만들어 둔 글을 열어 고친 뒤 예약해요 · 고쳐도 코인은 더 안 들어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
 <div class="group" id="topics"><div class="gt">오늘의 소재</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
-<div class="group" id="refg" hidden><button type="button" class="row tap" id="ref"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">레퍼런스로 구조 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 하루 3개</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
-  <button type="button" class="row tap" id="refPost" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">글 레퍼런스로 스타일 배우기</span><span class="d" id="refPostD">잘 된 글 주소 하나면 문단·이모지·강조·사진 버릇을 배워 그 계정 글에 써요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
+<div class="group" id="refg" hidden><div class="gt">배워 올 곳<span id="refq"></span></div>
+  <button type="button" class="row tap" id="refPost" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">글 스타일 배우기</span><span class="d" id="refPostD">잘 된 글 주소 하나면 문단·이모지·강조·사진 버릇을 배워 그 계정 글에 써요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <button type="button" class="row tap" id="ref" hidden><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="l"><span class="t">영상 스타일 배우기</span><span class="d" id="refd">잘 된 쇼츠 링크 하나면 훅·서사·스타일을 배워요 · 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button></div>
 <div class="cta" id="cta" hidden><button class="btn primary" type="button" id="refresh">새로 뽑기</button></div>
 --- script ---
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
-let accountsN = null, busy = false, timer = null, templates = [], textAccounts = []; // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다)
+let accountsN = null, busy = false, timer = null, templates = [], textAccounts = [], videoAccounts = []; // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다) · [R11 A-3] videoAccounts = 영상 축
+/* [R11 A-3] 한도는 **그룹 제목 줄 우측**에 글자로 — 링크가 아니다(§13.0b 의 «전체보기 ›» 자리를 글자가 쓴다).
+   🔴 «남음»을 **지어내지 않는다** — 서버가 `quota` 를 안 주거나 칸이 비면 **숫자를 빼고 이름만** 남는다(AC-9·AC-92).
+   🔴 `left` 는 서버 값을 **그대로** 쓴다 — 화면이 `limit - used` 로 셈하면 같은 수를 두 곳에서 만드는 셈이다(AC-52).
+   🔴 단위는 두 축 모두 **«이번 달»**이다(영상이 «하루 3개»였다 · B 가 서버를 맞췄다 · 두 줄이 다른 단위로 말하면 고객이 견준다). */
+async function paintQuota() {
+  const el = UI.$("#refq"); if (!el) return;
+  const num = (q) => (q && Number.isFinite(Number(q.left)) && Number.isFinite(Number(q.limit)) ? `${Number(q.left)} / ${Number(q.limit)}` : null);
+  const [ps, vs] = await Promise.all([
+    textAccounts.length ? UI.api("/api/account-styles") : Promise.resolve({ ok: false }),
+    videoAccounts.length ? UI.api("/api/topics-templates") : Promise.resolve({ ok: false }),
+  ]);
+  const t = ps.ok ? num(ps.quota) : null, v = vs.ok ? num(vs.quota) : null;
+  el.textContent = t && v ? `이번 달 글 ${t} · 영상 ${v} 남음` : t ? `이번 달 ${t} 남음` : v ? `이번 달 ${v} 남음` : "";
+}
 /* [사장님 실측 2026-09-15 · 테넌트 198] «네이버 소재만 계속 보인다» — 데이터는 맞다(소재 채널은 **연결된 계정의 채널**에서만 정해진다 · lib/topics.ts).
    틀린 건 **화면이 그 까닭을 말하지 않은 것**이다. 연결된 채널을 한 줄로 말하고, 둘 이상이면 칩으로 거른다.
    🔴 고른 칩은 **화면 안에서만** 산다(저장·URL 금지) — 새로 들어오면 늘 «전체»(«한 번 누르면 계속 그 상태»가 그 불편의 정체). */
@@ -41,8 +56,19 @@ async function load(poll = false) {
     chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : [];
     /* [R9R10-A] «글 채널»은 서버가 말한다(channels[].category) — 화면에 채널 이름을 박지 않는다 */
     const textCh = new Set((a.ok ? a.channels || [] : []).filter((c) => c.category === "text").map((c) => c.key));
-    textAccounts = a.ok ? (a.accounts || []).filter((x) => textCh.has(x.channel) && x.status !== "suspended") : []; }
-  templates = r.templates || []; UI.$("#refg").hidden = !accountsN; UI.$("#refPost").hidden = !textAccounts.length; if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
+    textAccounts = a.ok ? (a.accounts || []).filter((x) => textCh.has(x.channel) && x.status !== "suspended") : [];
+    /* [R11 A-3] 영상 축도 **서버가 말한 category** 로 가른다(글 쪽과 같은 잣대 · 채널 이름을 화면에 박지 않는다). */
+    const videoCh = new Set((a.ok ? a.channels || [] : []).filter((c) => c.category === "video").map((c) => c.key));
+    videoAccounts = a.ok ? (a.accounts || []).filter((x) => videoCh.has(x.channel) && x.status !== "suspended") : []; }
+  templates = r.templates || [];
+  /* [R11 A-3] «배워 올 곳» — 종전엔 제목 없는 그룹이라 **«네 번째 쓰는 길»처럼** 보였다.
+     레퍼런스는 쓰는 길이 아니라 **쓰기 전에 옷을 갈아입히는 일**이라 제목을 가진 제 그룹으로 세웠다.
+     🔴 **그 축 계정이 없으면 그 줄이 없다** — 영상 계정이 없는 집에 «영상 스타일 배우기»는 못 누르는 줄이다. */
+  UI.$("#refPost").hidden = !textAccounts.length;
+  UI.$("#ref").hidden = !videoAccounts.length;
+  UI.$("#refg").hidden = !textAccounts.length && !videoAccounts.length;
+  if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
+  await paintQuota();
   const f = r.refresh || {};
   const startedMs = f.startedAt ? UI.utc(f.startedAt).getTime() : null;
   const stale = !!(f.running && startedMs && Date.now() - startedMs > 600000); // 고아 방지 — 10분 넘으면 도는 걸로 보지 않는다
@@ -341,6 +367,22 @@ await load();
 <aside class="aside desk-only" id="side"></aside>
 <div class="group" id="day"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
+/* [R11 A-5②] «이날 겹쳐요» — 🔴 **막지 않는다.** §9 는 «있는 길을 우리 판단으로 막지 말라»이지 «말하지 말라»가 아니다.
+   종전엔 막지도 않고 **말하지도 않아서** §9 의 값이 통째로 사라져 있었다(C 가 «겹쳐» 0곳이라고 셌다).
+   🔴 문장은 서버가 만든다(crowd.say — «이날 @cook_a 에 이미 2편 있어요 · 30분 안에 붙어요»).
+   🔴 **겹치는 게 없으면 키가 아예 없다** — 화면이 «0건»을 판정하지 않는다. 키가 있으면 그릴 것이 있다는 뜻이다.
+   🔴 .field .help 가 아니라 .banner info 다 — help 는 **오류 전용(늘 빨강)**이고 이건 오류가 아니다.
+   🔴 단추를 **비활성화하지 않는다** — 대신 «그래도 이 시각»으로 이름만 바꾸고, 되돌릴 길(시각 바꾸기)을 같이 둔다.
+   🔴 다만 `crowd.tight` 면 «그래도 이 시각»이라 **쓰지 않는다**(B 확인 2026-09-16): 서버는 그 자리를 아직 `409 cadence` 로 거절한다.
+      «그래도 된다»고 말해 놓고 막히면 **막는 것보다 나쁘다**(«된다고 해 놓고 안 된다»). 이름을 중립으로 두고, 눌러 보게는 두고,
+      거절 문장은 시트 안에 남긴다 — 🔴 **비활성화는 여전히 안 한다**(§9).
+      ⚠️ 시각 바꾸기 **성공 응답**의 `crowd` 는 `tight` 가 언제나 false 다(서버가 409 를 `crowdOf` 보다 먼저 return 한다) — 그 자리에선 이 걱정이 안 난다.
+   ⚠️ `listSlots` 의 `crowd` 간격은 서버가 **30분 고정**으로 잰다(자리마다 정책을 물으면 쿼리가 자리 수만큼 는다 · B ⑤).
+      그래서 정책이 5분까지 허락한 짝에도 «30분 안에 붙어요»라고 말한다 — **사실이지만 그 계정의 정책 숫자는 아니다.**
+      🔴 그러니 이 배너가 «규칙 위반»으로 읽히면 안 된다. `.banner info` 인 까닭이 그것이다 —
+      «이 시각은 안 된다»가 아니라 **«이 둘이 가깝게 나간다»**는 사실을 말하는 자리다. */
+const crowdBanner = (c) => (c && c.say) ? `<div class="banner info" style="margin:4px 0 8px"><span>${UI.esc(String(c.say))}</span></div>` : "";
+
 const me = await UI.boot("schedule"); if (!me) return;
 /* [v4] 기본 = 2주 롤링(이번 주 + 다음 주) + 아래 여러 날 피드(시안 v3) · «월» = 6줄 달력 + 고른 하루(한 달치 편성용) */
 let mode = "two";
@@ -486,6 +528,7 @@ function slotSheet(s) {
   const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
   UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
     ${s.note ? `<div class="banner info" style="margin:4px 0 8px"><span>${UI.esc(s.note)}</span></div>` : ""}
+    ${crowdBanner(s.crowd)}
     ${pwSay(s) ? `<div class="banner ${s.produceWindow === "missed" ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(pwSay(s))}</span>${s.produceWindow === "missed" && can.make ? `<button type="button" data-act="make">지금 만들기</button>` : ""}</div>` : ""}
     ${H && H[0] ? `<div class="banner ${warn ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(H[0])}${H[1] ? " · " + UI.esc(H[1]) : ""}</span></div>` : ""}
     ${s.revenueKrw != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">이 글이 번 돈<small class="muted" style="font-weight:500"> · 최근 30일</small></span><span class="v">${UI.won(s.revenueKrw)}</span></div>` : ""}
@@ -568,15 +611,28 @@ function timeSheet(s, closeParent) {
   const times = TIMES.some(([v]) => v === cur) ? TIMES : [[cur, cur], ...TIMES];
   const days = [[0, dayLabel(s.date)], [1, dayLabel(plusDays(s.date, 1))], [2, dayLabel(plusDays(s.date, 2))]];
   UI.sheet(`<div class="sec">어느 날</div>${UI.seg("d", days, 0)}<div class="sec">몇 시에</div>${UI.chips("t", times, cur)}
-    <p class="muted" style="margin:10px 0 0;font-size:13px">같은 채널 글끼리는 30분 이상 떨어뜨려야 해요.</p>
-    <div class="cta"><button class="btn primary" type="button" id="ok">이 시각으로</button></div>`,
+    ${crowdBanner(s.crowd)}
+    <p class="note" style="margin:10px 0 0">같은 채널 글끼리는 30분쯤 떨어뜨리면 서로 덜 가려요.</p>
+    <div id="rwhy"></div>
+    <div class="cta"><button class="btn primary" type="button" id="ok">${s.crowd && !s.crowd.tight ? "그래도 이 시각" : "이 시각으로"}</button></div>`,
     { title: "시각 바꾸기", onOpen: (sh, close) => {
       UI.bindChips(sh);
       sh.querySelector("#ok").onclick = async (e) => {
         e.target.disabled = true;
         const at = atKST(plusDays(s.date, Number(UI.chipVal(sh, "d") || 0)), UI.chipVal(sh, "t") || cur);
         const r = await UI.api("/api/slots-reschedule", { body: { slotId: s.id, at } }); e.target.disabled = false;
-        if (!r.ok) return UI.toast(r.error || "시각을 바꾸지 못했어요");
+        /* 🔴 [R11 A-5②] 서버가 간격으로 **거절**하면(step "cadence" · 409) 토스트로 흘려보내지 않는다 —
+           시트를 **열어 둔 채** 서버 문장을 그 자리에 남긴다. 토스트는 2초 뒤 사라지고, 그러면 고객은
+           «눌렀는데 아무 일도 안 났다»로 읽는다(그게 오늘 아침 «제자리»와 같은 모양이다).
+           🔴 화면이 «그래도 이 시각»이라 말해 놓고 서버가 막으면 **말과 행동이 어긋난다** —
+              그 어긋남은 화면이 숨길 것이 아니라 **보여 줄 것**이다(§9 «또렷하게»). 서버 문장을 그대로 쓰고,
+              바로 그 시트에서 다른 시각을 고를 수 있게 둔다(되돌릴 길).
+           ⚠️ 서버가 이 검사를 소프트로 내리면 이 가지는 그냥 안 타게 된다 — 화면은 안 고쳐도 된다. */
+        if (!r.ok) {
+          const box = sh.querySelector("#rwhy");
+          if (box && r.step === "cadence" && r.error) { box.innerHTML = `<div class="banner" style="margin:10px 0 0"><span>${UI.esc(String(r.error))}</span></div>`; return; }
+          return UI.toast(r.error || "시각을 바꾸지 못했어요");
+        }
         close(); UI.toast("시각을 바꿨어요"); await reload(closeParent);
       };
     } });
@@ -880,7 +936,8 @@ function render() {
   UI.$("#tip").innerHTML = base
     ? `${isThisMonth() ? "지난달 같은 날보다" : "그 전달보다"} <b class="${diff >= 0 ? "up" : ""}">${won(Math.abs(diff))} ${diff >= 0 ? "더" : "덜"}</b> 벌었어요`
     : "지난달에는 기록이 없어요";
-  body.innerHTML = shareLink() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  body.innerHTML = shareLink() + axisGroup() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  bindAxisInfo();
   const sl = UI.$("#shareLink"); if (sl) sl.onclick = (e) => { e.preventDefault(); shareSheet(); };
   bindDaily(); bindManual();
 }
@@ -914,10 +971,45 @@ function bindDaily() {
   });
 }
 
+/* ①-b [R11 A-4] 🔴 «어디서 났나» — 글에서 얼마, 영상에서 얼마. 큰 숫자(합계) **바로 아래** 한 그룹.
+   🔴 **`axes.length < 2` 면 그룹을 통째로 안 그린다** — 글만 하는 집에 «영상에서 0원»은 소음이다(그리고 «내가 뭘 안 했나»로 읽힌다).
+      `axes` 는 **연결한 계정** 기준이지 수익 행 기준이 아니다(서버가 그렇게 준다) — 그래서 **가진 축은 0원이어도 줄이 온다**(«영상 0원»은 사실이다).
+   🔴 `other`(그 밖)는 **0원이면 서버가 줄을 아예 안 보낸다** — 화면이 0 판정을 하지 않는다.
+   🔴 **글자는 서버 정본**(`label`·`note`) — 화면에서 다시 적지 않는다(AC-52).
+   🔴 막대는 **단색 + 1등만 잉크**(§13.0 «다색 차트 금지»). **축을 색으로 칠하지 않는다** — 그러면 화면의 «색 3개»가 깨진다.
+   🔴 큰 숫자는 여전히 **하나**다(헌장 «첫 화면 숫자 1개») — 여기 숫자들은 막대 옆 작은 값이다. */
+function axisGroup() {
+  const axes = SUM.axes || [];
+  if (axes.length < 2) return "";
+  const list = SUM.byAxis || []; if (!list.length) return "";
+  const max = Math.max(1, ...list.map((x) => Number(x.krw) || 0));
+  const top = list.reduce((a, b) => ((Number(b.krw) || 0) > (Number(a.krw) || 0) ? b : a), list[0]);
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 났나</div><div class="bars">` + list.map((x) => {
+    const krw = Number(x.krw) || 0;
+    const info = x.note ? ` <button type="button" class="axinfo" data-note="${UI.esc(x.note)}" aria-label="설명 보기">ⓘ</button>` : "";
+    return `<div class="bar ${x === top ? "top" : ""}"><span class="n">${UI.esc(x.label || "")}${info}</span><span class="track"><span class="fill" style="width:${Math.round((krw / max) * 100)}%"></span></span><span class="v">${UI.num(krw)}</span></div>`;
+  }).join("") + "</div></div>";
+}
+/* ⓘ — 바텀시트 한 문장(서버 문장 그대로). 🔴 툴팁이 아니라 시트다(헌장 «툴팁 설명 금지»). */
+function bindAxisInfo() {
+  UI.$$(".axinfo").forEach((b) => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); UI.sheet(`<p class="muted" style="margin:0">${UI.esc(b.dataset.note || "")}</p>`, { title: "그 밖은 뭔가요?" }); });
+}
+
+/* [R11 A-5] 채널 추세 — 매체 줄 **우측 작은 글자 한 칸**(새 화면 0).
+   🔴 **문장은 서버가 만든다**(`say`) — 화면은 그대로 그린다(«지난주보다 12% 줄었어요» / «아직 몰라요 — 3편은 모여야 견줄 수 있어요(지금 1편)»).
+   🔴 `unknown` 은 «멈춤»이 **아니다** — 화살표를 그리지 않는다(화살표가 없는 것이 그 뜻이다).
+   🔴 `down` 을 **빨강으로 칠하지 않는다** — 수익 화면은 감소도 잉크 중립이다(§13.0b). `dir` 은 화살표용이지 **색용이 아니다**.
+   🔴 `pct` 는 **없을 수 있다**(지난주가 0원이면 서버가 %를 안 만든다) — 화면이 대신 셈하지 않는다. `say` 만 쓴다. */
+const TREND_ARROW = { up: "↑", down: "↓", flat: "→" };
+const trendCell = (t) => (t && t.say)
+  ? `<small class="trend${t.dir === "up" ? " up" : ""}">${TREND_ARROW[t.dir] ? TREND_ARROW[t.dir] + " " : ""}${UI.esc(String(t.say))}</small>` : "";
+
 /* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */
 function sourceGroup() {
   const list = SUM.bySource || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
+  /* 🔴 [R11 · 메인 결정] 제목이 «어디서»였다 — A-4 가 «**어디서 났나**»(축)를 바로 위에 세우면서 **나란한 두 그룹이 둘 다 «어디서»로 시작**했다.
+     자도 앞 글자로 고르다 엉뚱한 그룹을 쟀고(고쳤다), **고객도 똑같이 헷갈린다.** ⇒ «매체별»로 — 축 vs 매체가 한눈에 갈린다. */
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">매체별 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
@@ -927,7 +1019,7 @@ function sourceGroup() {
     /* [B3 6a5ab40 · §13.5] 매체마다 세는 «하루»가 다르다 — 애드센스·유튜브는 미국 시간 기준이라 우리 KST 날짜와 하루가 어긋난다.
        🔴 날짜를 옮기지 않는다(매체 리포트와 숫자를 맞춘다) · 대신 서버가 준 문장(dayBasisNote)을 **그대로** 붙인다. */
     const basis = src && src.dayBasisNote ? String(src.dayBasisNote) : "";
-    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}${basis ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(basis)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}${basis ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(basis)}</span>` : ""}</div><span class="r${s.trend && s.trend.say ? " col" : ""}">${won(s.krw)}${trendCell(s.trend)}</span>${UI.chev}</a>`;
   }).join("") + "</div>";
 }
 

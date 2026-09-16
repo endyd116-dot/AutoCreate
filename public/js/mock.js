@@ -31,6 +31,8 @@
   /* 🔴 [2026-09-16 · «제자리»] ?stuck=1 — 글 507 이 «글 쓰는 중»에 갇힌 집(배경 함수가 손도 못 댄 상태 · `_t0` 없음 = 시계가 안 간다).
      라이브 실물의 모양 그대로다(piece 25·40·42 · `created_at == updated_at` 인 채 3,299분). 이 손잡이가 없으면 **막힌 화면을 눈으로 볼 방법이 없다**. */
   const stuckKnob = qs.get("stuck") === "1";
+  /* [R11 A-3] ?noQuota=1 — 서버가 «남음»을 못 싣는 집(옛 배포·집계 실패). 🔴 화면이 숫자를 **지어내는지** 보는 자리다(AC-9·AC-92). */
+  const noQuota = qs.get("noQuota") === "1";
   /* [R8-A §2 · B-1 d6c2359] `topicGroup`·`goal`·`contract` 를 서버가 준다(pieces-get).
      값은 서버 어휘 그대로(TopicGroup·RevenueGoal). */
   const clipPiece = qs.get("clip") === "1";    // [R8 §3.2] 509 를 네이버 클립 영상으로(우리가 못 올리는 채널 — 넘겨주는 길이 보이게)
@@ -425,6 +427,9 @@
         learned: { paragraph: { lines: [4, 5], chars: 110 }, emoji: { use: false }, emphasis: { kinds: ["bold"], perPost: 3, on: ["conclusion"] }, photos: { count: 3, where: "top" }, blocks: { list: 1, table: 1, quote: 0, divider: 0 }, tone: { haeyo: 0.1, hamnida: 0.9, question: 0.05 }, title: { hasNumber: false, chars: 18 }, structure: ["summary", "h2", "table", "para", "h2", "para", "faq"] } },
     ],
     styleRefs: {}, styleQuota: { used: refKnob === "quota" ? 30 : 2, limit: 30 },
+    /* [R11 A-3 · B r11-back] 영상 «배워 올 곳» 한도 — 🔴 단위가 «하루 3개»에서 **«이번 달 N개»**로 바뀌었다(글 쪽과 같은 모양).
+       서버 계약: `GET /api/topics-templates` → `{ templates, quota: { used, limit, left, resetAt } }`. */
+    tplQuota: { used: refKnob === "quota" ? 10 : 1, limit: 10 },
     /* [P1R6] 추천인 · 세금계산서 프로필 · 관리형 러너 신청 · 내보내기 작업 */
     referral: { code: "AC7K2M9Q", invited: fresh ? [] : [{ tenantName: "요리하는 집", at: iso(now - 9 * 86400e3), rewarded: true }, { tenantName: "팁스고", at: iso(now - 2 * 86400e3), rewarded: false }], rewardCoins: 20 },
     taxProfile: fresh ? null : { bizNo: "220-88-12345", bizName: "다온커머스", email: "tax@daon.co.kr" },
@@ -1012,7 +1017,10 @@
       /* 되먹임 원장(§5F)의 첫 실사용 — 🔴 표본이 적으면 measured:false + «아직 몰라요»(AC-9 · 지어내지 않는다) */
       const recommend = recNone || !styles.length ? { measured: false, styleId: null, line: "아직 이 계정 글이 몇 편 안 돼서 어느 스타일이 잘 되는지는 몰라요. 30편쯤 쌓이면 말씀드릴게요." }
         : { measured: true, styleId: styles[0].id, line: "«" + styles[0].name + "»로 쓴 글 6편이 다른 글보다 조회가 1.8배 높았어요." };
-      return { ok: true, styles, defaultStyleId: (acc && acc.defaultStyleId) || null, quota: { ...S.styleQuota, resetAt: kst(31 - Number(todayYmd.slice(8)), 0) }, recommend }; },
+      /* 🔴 `left` 는 **서버가 준다**(B 계약) — 화면이 `limit - used` 로 셈하면 두 벌이 된다(AC-52). 모의도 같은 칸을 싣는다. */
+      return { ok: true, styles, defaultStyleId: (acc && acc.defaultStyleId) || null, ...(noQuota ? {} : { quota: { ...S.styleQuota, left: Math.max(0, S.styleQuota.limit - S.styleQuota.used), resetAt: kst(31 - Number(todayYmd.slice(8)), 0) } }), recommend }; },
+    /* [R11 A-3] 영상 «배워 올 곳» — 글 쪽(`account-styles`)과 **같은 모양**의 `quota` 를 낸다. 한도 단위는 «이번 달». */
+    "topics-templates": () => ({ ok: true, templates: S.templates || [], ...(noQuota ? {} : { quota: { ...S.tplQuota, left: Math.max(0, S.tplQuota.limit - S.tplQuota.used), resetAt: kst(31 - Number(todayYmd.slice(8)), 0) } }) }),
     "account-style-default": (b) => { const a = S.accounts.find((x) => x.id === Number(b.accountId)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 }); a.defaultStyleId = b.styleId ? Number(b.styleId) : null; return { ok: true, defaultStyleId: a.defaultStyleId }; },
     "account-style-delete": (b) => { const id = Number(b.id); S.styles = S.styles.filter((s) => s.id !== id); for (const a of S.accounts) if (a.defaultStyleId === id) a.defaultStyleId = null; return { ok: true }; },
     "style-reference": (b, q) => {
@@ -1130,6 +1138,21 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       /* [R7 §4.3 · B3] note = 서버가 그 자리에 적어 둔 사람말(있을 때만) · revenueKrw = 30일 수익(수집 행이 없으면 키 자체가 없다) */
       for (const s of list) { const seed = S.slotNotes && S.slotNotes[s.id]; if (seed) s.note = seed;
         if (s.status === "published" && s.pieceId) s.revenueKrw = (s.pieceId * 137) % 9000 + 800; }
+      /* [R11 A-5② · B r11-back] `crowd` — 🔴 **겹치는 게 없으면 키가 아예 없다**(있으면 그릴 것이 있다는 뜻).
+         문장(`say`)은 서버 정본. 🔴 **막는 값이 아니다** — 화면이 이걸로 단추를 잠그면 안 된다. ?crowd=0 으로 끌 수 있다. */
+      if (qs.get("crowd") !== "0") {
+        const byDayAcc = new Map();
+        for (const s of list) { if (!s.accountHandle || s.status === "skipped") continue; const k = s.date + "|" + s.accountHandle; byDayAcc.set(k, (byDayAcc.get(k) || 0) + 1); }
+        for (const s of list) {
+          if (!s.accountHandle || s.status === "skipped") continue;
+          const n = byDayAcc.get(s.date + "|" + s.accountHandle) || 0; if (n < 2) continue;
+          const near = list.filter((x) => x !== s && x.accountHandle === s.accountHandle && x.publishAt && s.publishAt)
+            .map((x) => Math.abs(new Date(x.publishAt).getTime() - new Date(s.publishAt).getTime()) / 60000).sort((a, b) => a - b)[0];
+          const tight = near != null && near < 30;
+          s.crowd = { sameAccountSameDay: n, ...(near != null ? { nearestMin: Math.round(near) } : {}), tight,
+            say: `이날 @${s.accountHandle} 에 이미 ${n - 1}편 있어요${tight ? " · 30분 안에 붙어요" : ""}` };
+        }
+      }
       /* [R8-B] 🔴 «언제 만들어지나» + 그 자리의 코인 — 서버 lib/slots.ts 가 싣는 그 자리다(`done` 이면 코인은 안 싣는다).
          화면은 이 값만 읽고 **스스로 다시 재지 않는다**(AC-47). */
       for (const s of list) { const pw = produceWindowOf(s); if (!pw) continue;
@@ -1148,8 +1171,13 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       if (!b.at) return err("at", "시각을 골라 주세요.");
       if (["published", "publishing", "skipped"].includes(s.status)) return err("stage", "이미 나간 편성은 시각을 바꿀 수 없어요.");
       const at = new Date(b.at).getTime();
-      const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < 30 * 60e3);
-      if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. 30분 이상 떨어뜨려 주세요.`);
+      /* 🔴 [R11 A-5② · B 확인] 서버는 이 자리를 **아직 막는다**(409 `step:"cadence"`) — 그러니 모의도 막는 게 맞다.
+         모의가 통과시키면 화면을 «되는 줄 알고» 만들게 된다(그게 더 나쁜 거짓말이다).
+         ⚠️ 다만 서버 간격은 **30분 고정이 아니다** — `gapMinFor().floorMin` 이라 전용 IP 가 실측된 계정끼리는 **5분**까지 받는다
+         (사장님의 «10:00 / 10:05» 가 그 경우다). 모의는 그 정책 상태를 모르므로 `?gap=5` 로 바꿔 끼울 수 있게 뒀다. */
+      const gapMin = Math.max(1, Number(qs.get("gap")) || 30);
+      const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < gapMin * 60e3);
+      if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. ${gapMin}분 이상 떨어뜨려 주세요.`);
       s.publishAt = b.at; s.date = new Date(at + 9 * 3600e3).toISOString().slice(0, 10); return { ok: true, slot: { ...s } }; },
     "slots-produce-now": (b) => { const nw = notWritable(); if (nw) return nw; tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
       if (!s.topicTitle) return err("no_topic", "먼저 소재를 정해 주세요.");
@@ -1383,13 +1411,33 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
           const o = { source, krw, freshness: srcFreshness(source) }; if (s?.lastSyncAt) o.lastSyncAt = s.lastSyncAt;
           /* [B2 8a71d69] 애드포스트처럼 «예상 수입» 열만 주는 매체 — 서버가 도장을 찍고 노트를 준다(?est=1) */
           if (estKnob && source === "adpost") { o.amountEstimated = true; o.note = "«예상수입» 열로 읽었어요 — 확정 금액이 아니라 예상치예요"; }   /* [B2 a8de1d5] 이름·문구 모두 서버 것 */
+          /* [R11 A-5 · B r11-back] 채널 추세 — 🔴 **문장(say)은 서버가 만든다** · pct 는 없을 수 있다 · unknown 은 «멈춤»이 아니다.
+             표본이 적으면 «아직 몰라요»로 준다(AC-9 — 못 쟀다고 말한다). ?trend=none 이면 키 자체가 안 온다(옛 배포). */
+          if (qs.get("trend") !== "none") o.trend = source === "adsense"
+            ? { dir: "down", pct: 12, recentKrw: 41000, prevKrw: 46600, samples: 6, basis: "pieces", say: "지난주보다 12% 줄었어요" }
+            : source === "coupang" ? { dir: "up", pct: 31, recentKrw: 22000, prevKrw: 16800, samples: 5, basis: "pieces", say: "지난주보다 31% 늘었어요" }
+            : { dir: "unknown", recentKrw: 0, prevKrw: 0, samples: 1, basis: "pieces", say: "아직 몰라요 — 3편은 모여야 견줄 수 있어요(지금 1편)" };
           return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
         return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
       const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
         return p.id ? { pieceId: Number(id), title: p.title || "제목 없는 글", channel: p.channel, krw, ...(p.title ? {} : { untitled: true }) } : { pieceId: Number(id), title: "지운 글", channel: "", krw, deleted: true }; });
+      /* [R11 A-4 · B r11-back] «어디서 났나» — 정본은 `lib/revenue/aggregate.ts`(C 확인 · `revenue.ts` 는 스프레드만 한다).
+         🔴 `axes` 는 **연결한 계정** 기준이다(수익 행 기준이 아니다) — 그래서 가진 축은 **0원이어도 줄이 온다**.
+         🔴 `other` 는 **0원이면 줄 자체를 안 보낸다**(화면이 0 판정을 하지 않게).
+         🔴 `label`·`note` 는 **서버 글자**다 — 화면이 다시 적지 않는다(AC-52). */
+      const axisOf = (r) => { const p = S.pieces.find((x) => x.id === Number(r.pieceId)); if (!p) return "other"; return p.kind === "video" ? "video" : "text"; };
+      const axisKrw = { text: 0, video: 0, other: 0 };
+      for (const r of mine) axisKrw[axisOf(r)] += r.amountKrw;
+      const chCat = new Map(CHANNELS.map((c) => [c.key, c.category]));   // 채널 표는 모의 상수 CHANNELS(=accounts-list 가 주는 그 표)
+      const axes = [...new Set((S.accounts || []).filter((a) => a.status !== "suspended").map((a) => (chCat.get(a.channel) === "video" ? "video" : "text")))];
+      const AXL = { text: "글에서", video: "영상에서", other: "그 밖" };
+      const byAxis = [
+        ...axes.map((k) => ({ axis: k, label: AXL[k], krw: axisKrw[k] })),
+        ...(axisKrw.other > 0 ? [{ axis: "other", label: AXL.other, krw: axisKrw.other, note: "계정이나 글에 연결되지 않은 수입이에요 — 협찬·직접 입력처럼요." }] : []),
+      ].sort((a, b) => b.krw - a.krw);
       return { ok: true, monthKrw: sum(mine), todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(),
-        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces }; },
+        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces, axes, byAxis }; },
     "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const days = groupKrw(S.revRows.filter((r) => r.day >= from && r.day <= to), "day").sort((a, b) => a[0].localeCompare(b[0]));
       /* [B2 a8de1d5] 그 날에 «예상 열» 행이 섞였나 — 없으면 키 자체가 없다(옛 데이터엔 안 붙는다) */

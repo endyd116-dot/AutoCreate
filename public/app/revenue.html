@@ -110,7 +110,8 @@ function render() {
   UI.$("#tip").innerHTML = base
     ? `${isThisMonth() ? "지난달 같은 날보다" : "그 전달보다"} <b class="${diff >= 0 ? "up" : ""}">${won(Math.abs(diff))} ${diff >= 0 ? "더" : "덜"}</b> 벌었어요`
     : "지난달에는 기록이 없어요";
-  body.innerHTML = shareLink() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  body.innerHTML = shareLink() + axisGroup() + dailyGroup() + sourceGroup() + accountGroup() + pieceGroup() + manualGroup();
+  bindAxisInfo();
   const sl = UI.$("#shareLink"); if (sl) sl.onclick = (e) => { e.preventDefault(); shareSheet(); };
   bindDaily(); bindManual();
 }
@@ -144,10 +145,45 @@ function bindDaily() {
   });
 }
 
+/* ①-b [R11 A-4] 🔴 «어디서 났나» — 글에서 얼마, 영상에서 얼마. 큰 숫자(합계) **바로 아래** 한 그룹.
+   🔴 **`axes.length < 2` 면 그룹을 통째로 안 그린다** — 글만 하는 집에 «영상에서 0원»은 소음이다(그리고 «내가 뭘 안 했나»로 읽힌다).
+      `axes` 는 **연결한 계정** 기준이지 수익 행 기준이 아니다(서버가 그렇게 준다) — 그래서 **가진 축은 0원이어도 줄이 온다**(«영상 0원»은 사실이다).
+   🔴 `other`(그 밖)는 **0원이면 서버가 줄을 아예 안 보낸다** — 화면이 0 판정을 하지 않는다.
+   🔴 **글자는 서버 정본**(`label`·`note`) — 화면에서 다시 적지 않는다(AC-52).
+   🔴 막대는 **단색 + 1등만 잉크**(§13.0 «다색 차트 금지»). **축을 색으로 칠하지 않는다** — 그러면 화면의 «색 3개»가 깨진다.
+   🔴 큰 숫자는 여전히 **하나**다(헌장 «첫 화면 숫자 1개») — 여기 숫자들은 막대 옆 작은 값이다. */
+function axisGroup() {
+  const axes = SUM.axes || [];
+  if (axes.length < 2) return "";
+  const list = SUM.byAxis || []; if (!list.length) return "";
+  const max = Math.max(1, ...list.map((x) => Number(x.krw) || 0));
+  const top = list.reduce((a, b) => ((Number(b.krw) || 0) > (Number(a.krw) || 0) ? b : a), list[0]);
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 났나</div><div class="bars">` + list.map((x) => {
+    const krw = Number(x.krw) || 0;
+    const info = x.note ? ` <button type="button" class="axinfo" data-note="${UI.esc(x.note)}" aria-label="설명 보기">ⓘ</button>` : "";
+    return `<div class="bar ${x === top ? "top" : ""}"><span class="n">${UI.esc(x.label || "")}${info}</span><span class="track"><span class="fill" style="width:${Math.round((krw / max) * 100)}%"></span></span><span class="v">${UI.num(krw)}</span></div>`;
+  }).join("") + "</div></div>";
+}
+/* ⓘ — 바텀시트 한 문장(서버 문장 그대로). 🔴 툴팁이 아니라 시트다(헌장 «툴팁 설명 금지»). */
+function bindAxisInfo() {
+  UI.$$(".axinfo").forEach((b) => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); UI.sheet(`<p class="muted" style="margin:0">${UI.esc(b.dataset.note || "")}</p>`, { title: "그 밖은 뭔가요?" }); });
+}
+
+/* [R11 A-5] 채널 추세 — 매체 줄 **우측 작은 글자 한 칸**(새 화면 0).
+   🔴 **문장은 서버가 만든다**(`say`) — 화면은 그대로 그린다(«지난주보다 12% 줄었어요» / «아직 몰라요 — 3편은 모여야 견줄 수 있어요(지금 1편)»).
+   🔴 `unknown` 은 «멈춤»이 **아니다** — 화살표를 그리지 않는다(화살표가 없는 것이 그 뜻이다).
+   🔴 `down` 을 **빨강으로 칠하지 않는다** — 수익 화면은 감소도 잉크 중립이다(§13.0b). `dir` 은 화살표용이지 **색용이 아니다**.
+   🔴 `pct` 는 **없을 수 있다**(지난주가 0원이면 서버가 %를 안 만든다) — 화면이 대신 셈하지 않는다. `say` 만 쓴다. */
+const TREND_ARROW = { up: "↑", down: "↓", flat: "→" };
+const trendCell = (t) => (t && t.say)
+  ? `<small class="trend${t.dir === "up" ? " up" : ""}">${TREND_ARROW[t.dir] ? TREND_ARROW[t.dir] + " " : ""}${UI.esc(String(t.say))}</small>` : "";
+
 /* ② 소스별 — 줄마다 신선도 배지 + 마지막 수집(KST) */
 function sourceGroup() {
   const list = SUM.bySource || []; if (!list.length) return "";
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어디서 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
+  /* 🔴 [R11 · 메인 결정] 제목이 «어디서»였다 — A-4 가 «**어디서 났나**»(축)를 바로 위에 세우면서 **나란한 두 그룹이 둘 다 «어디서»로 시작**했다.
+     자도 앞 글자로 고르다 엉뚱한 그룹을 쟀고(고쳤다), **고객도 똑같이 헷갈린다.** ⇒ «매체별»로 — 축 vs 매체가 한눈에 갈린다. */
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">매체별 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
     const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
@@ -157,7 +193,7 @@ function sourceGroup() {
     /* [B3 6a5ab40 · §13.5] 매체마다 세는 «하루»가 다르다 — 애드센스·유튜브는 미국 시간 기준이라 우리 KST 날짜와 하루가 어긋난다.
        🔴 날짜를 옮기지 않는다(매체 리포트와 숫자를 맞춘다) · 대신 서버가 준 문장(dayBasisNote)을 **그대로** 붙인다. */
     const basis = src && src.dayBasisNote ? String(src.dayBasisNote) : "";
-    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}${basis ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(basis)}</span>` : ""}</div><span class="r">${won(s.krw)}</span>${UI.chev}</a>`;
+    return `<a class="row tap" href="/app/ad-media.html">${UI.srcMark(s.source)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(s.source))}${est ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">예상</span>' : ""}</span><span class="d">${UI.freshPill(s.freshness)}${when ? " " + UI.esc(when) : ""}${bad ? " · " + UI.esc(UI.SRC_ERR[src.lastError] || UI.SRC_STATUS[src.status][1]) : ""}</span>${est && est.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(est.note)}</span>` : ""}${basis ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(basis)}</span>` : ""}</div><span class="r${s.trend && s.trend.say ? " col" : ""}">${won(s.krw)}${trendCell(s.trend)}</span>${UI.chev}</a>`;
   }).join("") + "</div>";
 }
 
