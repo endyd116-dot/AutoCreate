@@ -31,6 +31,12 @@ const files = readdirSync("scripts").filter((f) => /^verify-.*\.(mjs|mts)$/.test
 const WRITES = /\bfetch\s*\(|BASE_URL|autocreate-endyd|\/api\/auth-register|teardownRun|sql`\s*(INSERT|UPDATE|DELETE)|NETLIFY_DATABASE_URL|from "postgres"|db\/index|\.\.\/db\b/i;
 /** 개발 서버·인자·실호출이 필요한 것. */
 const NEEDS = /localhost:\d+|process\.argv\[2\]|사용법:|GEMINI_API_KEY/;
+/** 🔴 [2026-09-19 B2] **키 이름이 있다고 «키가 필요한 자»는 아니다.**
+ *   `verify-ac111-stub-voice.mts` 는 실호출을 막으려고 키를 **일부러 빈 문자열로 덮는다** — 그런데 그 낱말 때문에
+ *   `needs` 로 분류돼 **safe-list 가 영영 안 돌리는 자**가 됐다(자가 있으나 마나가 된다).
+ *   ⇒ 키를 **비우는 코드가 같은 파일에 있으면** 그 낱말은 «필요»의 증거가 아니다. 다른 needs 신호(개발 서버·인자)는 그대로 본다.
+ *   ⚠️ 좁게 본다: `GEMINI_API_KEY: ""` 또는 `GEMINI_API_KEY = ""` 처럼 **빈 값으로 덮는 모양**만 인정한다. */
+const CLEARS_KEY = /GEMINI_API_KEYS?\s*[:=]\s*""/;
 /** 🔴 «읽기만»이라고 **스스로 못 박은** 파일은 그 말을 믿되, 쓰기 낱말이 있으면 그 말보다 코드가 이긴다. */
 const SAYS_READONLY = /읽기만|읽기 전용|SELECT 만/;
 
@@ -38,7 +44,8 @@ const groups = { safe: [], live: [], needs: [] };
 for (const f of files) {
   const src = readFileSync(`scripts/${f}`, "utf8");
   const writes = WRITES.test(src);
-  const needs = NEEDS.test(src);
+  /* 키 이름만 있고 **비우는 코드**가 같이 있으면, 그 낱말은 빼고 다시 본다(위 CLEARS_KEY 주석). */
+  const needs = CLEARS_KEY.test(src) ? /localhost:\d+|process\.argv\[2\]|사용법:/.test(src) : NEEDS.test(src);
   if (writes) groups.live.push([f, SAYS_READONLY.test(src) ? "🟠 «읽기만»이라 적혀 있는데 쓰기 낱말이 있다 — 사람이 확인" : "라이브에 쓰거나 밖으로 나간다"]);
   else if (needs) groups.needs.push([f, "개발 서버·인자·실호출이 필요"]);
   else groups.safe.push([f, "파일만 읽는다"]);

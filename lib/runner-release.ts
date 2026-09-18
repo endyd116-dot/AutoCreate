@@ -85,3 +85,56 @@ export async function updateOfferFor(deviceVersion: string | null | undefined): 
     return null;                                    // 링크를 못 만들면 이번 바퀴는 그냥 넘어간다
   }
 }
+
+/* ═══════════ [수리 라운드 2026-09-19 · B2] 🔴 «고객 PC 가 받아 가는 판»을 **운영 화면까지** ═══════════
+ *   2026-09-15 에 «고객 러너는 v1.3.0» 이라는 말이 **세 번 인용됐는데 라이브는 v1.1.8** 이었다.
+ *   근거가 `runner/package.json`(= **우리 소스**)이었기 때문이다 — 고객이 받아 가는 것은 R2 의 `latest.json` 이다.
+ *   `scripts/read-runner-live.mts` 가 그때 생겼지만 그건 **사람이 손으로 부르는 자**라, 운영자가 `/ops/runners` 를
+ *   보고 있는 동안에는 아무도 그 사실을 모른다. ⇒ **같은 값을 화면에도 세운다.**
+ *   🔴 읽는 법은 위의 `latestRelease()` **그대로 쓴다** — 여기서 R2 를 다시 읽으면 두 벌이 되고, 두 벌은 또 갈린다
+ *      (그게 바로 이 문제의 **재발**이지 수리가 아니다).
+ */
+export interface RunnerReleaseHealth {
+  /** 🔴 `false` = **못 쟀다**(«판이 없다»도 «최신이다»도 아니다 · AC-9). */
+  measured: boolean;
+  reason?: string;
+  version: string | null;
+  releasedAt: string | null;
+  bytes: number | null;
+  sha256: string | null;
+  notes: string | null;
+  /** `latest.json` 이 가리키는 zip 이 **정말 있나**. 가리키기만 하고 없으면 러너가 받다 실패한다. `null` = 못 물어봤다(≠ 없다). */
+  zipOk: boolean | null;
+  /** zip 실측 바이트가 `latest.json` 과 같은가. `null` = 못 쟀다. */
+  bytesMatch: boolean | null;
+}
+
+/** 운영 화면용 — 라이브 판 + «그 판 파일이 진짜 있나»까지. 🔴 던지지 않는다(이것 때문에 운영 화면이 500 나면 안 된다). */
+export async function releaseHealth(): Promise<RunnerReleaseHealth> {
+  if (!r2Configured()) return { measured: false, reason: "R2 설정이 없어서 못 읽었어요", version: null, releasedAt: null, bytes: null, sha256: null, notes: null, zipOk: null, bytesMatch: null };
+  const rel = await latestRelease();
+  if (!rel) return { measured: false, reason: "아직 올린 판이 없거나 판 정보를 읽지 못했어요", version: null, releasedAt: null, bytes: null, sha256: null, notes: null, zipOk: null, bytesMatch: null };
+  let zipOk: boolean | null = null, bytesMatch: boolean | null = null;
+  try {
+    const { r2Head } = await import("./r2");
+    const h = await r2Head(releaseKey(rel.version));
+    zipOk = !!h;
+    if (h) bytesMatch = h.bytes === rel.bytes;
+  } catch { zipOk = null; }                            // 🔴 못 물어봤다 ≠ 없다
+  return { measured: true, version: rel.version, releasedAt: rel.releasedAt ?? null, bytes: rel.bytes, sha256: rel.sha256, notes: rel.notes ?? null, zipOk, bytesMatch };
+}
+
+/**
+ * 이 기기가 **라이브 판을 쓰고 있나**.
+ *   🔴 판정을 **서버에서** 한다 — 화면이 조건을 다시 짜면 서버와 갈린다(AC-74 · `ops/runners.html` 이 이미 적어 둔 규율).
+ *   🔴 `null` = 못 쟀다: 라이브 판을 못 읽었거나(기기 탓이 아니다) 기기가 아직 판을 안 알려 줬다.
+ *   🔴 비교는 `cmpVersion` 한 벌로 — 하트비트의 «권할까»(`updateOfferFor`)와 **같은 잣대**여야 한다.
+ *      다른 잣대를 쓰면 화면은 «낡음»이라는데 하트비트는 안 권하는 일이 생긴다.
+ */
+export function runnerUpToDate(deviceVersion: string | null | undefined, rel: RunnerReleaseHealth): boolean | null {
+  if (!rel.measured || !rel.version) return null;
+  const v = String(deviceVersion ?? "").trim();
+  if (!v) return null;
+  if (!/^\d+\.\d+\.\d+$/.test(v)) return null;         // 형식을 모르면 «낡았다»고 단정하지 않는다
+  return cmpVersion(rel.version, v) <= 0;              // 라이브가 더 높지 않다 = 이 기기는 뒤처지지 않았다
+}

@@ -1,6 +1,7 @@
 /**
  * 운영센터 — 러너 팜(계약 P1R4 §2.2 · DESIGN §8·§19). 관리형 러너(tenant_id NULL) + 고객 러너를 가로질러 본다.
- *   GET  /api/ops-runners            → { ok, requests:[{ id, tenantId, devices, totalKrw, assigned, requestedAt }], runners:[{ id, name, kind, tenantId, tenantKey, online, lastSeenAt, version, active, queued }], farm:{ managed, online, queued, claimed, oldestQueuedMin } }
+ *   GET  /api/ops-runners            → { ok, requests:[…], runners:[{ …, version, upToDate:true|false|null }], release:{ measured, version, releasedAt, bytes, sha256, zipOk, bytesMatch, reason? }, farm:{ … } }
+ *        🔴 `release` = **R2 의 실판**(고객이 받아 가는 것). 종전엔 화면이 기기 `version` 만 보여 줘서 «그게 최신인가»를 운영자가 알 길이 없었다.
  *   POST /api/ops-runner-assign      { action, id, tenantId? }   → 액션별
  *        · action="request-reject" { requestId, note? } — 관리형 러너 «신청» 거절(P1R6 §3.1)
  *        · action="rebind"  { id, tenantId|null } — 관리형 러너를 테넌트에 배정(또는 NULL=팜 복귀)
@@ -25,6 +26,8 @@ import { ONLINE_WINDOW_MIN } from "../../lib/runner-jobs";
 import { RECIPE_CHANNELS, recipeSigningConfigured, type RecipeBody } from "../../lib/recipe";
 import { getRollout, promoteCandidate, putRecipe, rollbackCandidate, candidateHarmSignal } from "../../lib/recipe-store";
 import { sql } from "drizzle-orm";
+// [수리라운드 2026-09-19 · B2] 🔴 «고객 PC 에 실제로 내려가는 판»을 운영 화면까지 데려온다 — 읽는 자리는 lib 한 곳(scripts/read-runner-live.mts 와 같은 값).
+import { releaseHealth, runnerUpToDate } from "../../lib/runner-release";
 
 export const config = { path: ["/api/ops-runners", "/api/ops-runner-assign", "/api/ops-canary", "/api/ops-recipe"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
@@ -52,6 +55,9 @@ export default async (req: Request): Promise<Response> => {
       /* P1R6 §3.1 — 관리형 러너 **신청서** 목록. 기기 목록과 **따로** 싣는다:
          신청은 아직 기기가 아니다(실기기 프로비저닝은 범위 밖 · 운영자가 아래 rebind 로 손수 배정한다).
          한 배열에 섞으면 «신청만 했는데 기기가 있는 것처럼» 보인다. */
+      /* 🔴 R2 의 라이브 판(`latest.json`). 던지지 않으므로 이것 때문에 이 화면이 500 나지 않는다.
+         못 읽으면 `measured:false` 로 내려가고 화면이 «못 쟀어요»라고 말한다(AC-9). */
+      const release = await releaseHealth();
       const requests = await q(sql`SELECT r.id, r.tenant_id, r.devices, r.plan_key, r.amount_krw, r.vat_krw, r.total_krw,
              r.note, r.created_at, t.key AS tenant_key, t.name AS tenant_name,
              (SELECT COUNT(*) FROM runner_devices d WHERE d.tenant_id = r.tenant_id AND d.kind = 'managed') AS assigned
@@ -68,7 +74,9 @@ export default async (req: Request): Promise<Response> => {
         tenantId: r.tenant_id ? n(r.tenant_id) : null, tenantKey: r.tenant_key ? String(r.tenant_key) : null,
         online: r.online === true, lastSeenAt: utcDate(r.last_seen_at)?.toISOString() ?? null,
         version: r.version ? String(r.version) : null, active: n(r.active), queued: n(r.queued),
-      })), farm: { managed: n(f?.managed), online: n(f?.online), queued: n(f?.queued), claimed: n(f?.claimed), oldestQueuedMin: f?.oldest_queued_min == null ? null : Math.round(Number(f.oldest_queued_min)) } });
+        /* 🔴 판정은 **서버가** 한다(화면이 다시 짜면 갈린다 · AC-74). null = 못 쟀다. */
+        upToDate: runnerUpToDate(r.version ? String(r.version) : null, release),
+      })), release, farm: { managed: n(f?.managed), online: n(f?.online), queued: n(f?.queued), claimed: n(f?.claimed), oldestQueuedMin: f?.oldest_queued_min == null ? null : Math.round(Number(f.oldest_queued_min)) } });
     }
 
     if (path.endsWith("/ops-canary") && req.method === "GET") {

@@ -9,7 +9,7 @@ import { MODEL_TTS } from "../ai-models";
 import { recordAiUsage } from "../ai";
 import { leaseAiKey, reportAiKeyOutcome, redactKeys } from "../ai-key";   // [R8 · §3.3] 키를 고르는 자리 한 곳 — 🔴 `GEMINI_API_KEYS` 만 꽂은 집에서 여기가 env 를 직접 읽으면 «키 없음»으로 죽는다
 import { r2Configured, r2Put } from "../r2";
-import { videoStub } from "./types";
+import { videoStub, noteVideoStub } from "./types";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -162,6 +162,7 @@ export async function synthesizeGemini(a: { tenantId: number; pieceId: number; t
   if (!base) return { ok: false, reason: "읽을 대본이 없습니다.", costUsd: 0 };
   if (!r2Configured()) return { ok: false, reason: "R2 미설정", costUsd: 0 };
   if (videoStub()) {
+    noteVideoStub("video_tts(gemini)", "목소리·발음·실측 길이 — 무음 wav 라 «소리 없는 영상» 축(has_audio)도 이 모드에선 못 잰다", "VIDEO_PROVIDER_STUB=1", "VIDEO_PROVIDER_STUB 을 끈다");
     /* 🔴 로컬 하니스(계약 §1.4b) — 여기 분기가 없어서 스텁 모드인데도 실호출이 나갔다(C 스모크 실측: gemini-tts ×4).
        `tts-typecast.ts` 와 같은 모양: 음절 수 ÷ 4.6초 길이의 무음 wav + 어절 시각 균등 분할 + ai_usage model "stub" 원가 0. */
     const durationMs = Math.max(600, Math.round(([...base].filter((ch) => /\S/.test(ch)).length / 4.6) * 1000));

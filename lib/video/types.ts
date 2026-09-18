@@ -233,8 +233,42 @@ export interface ChainResume { count: number; at?: string }
 /** 컷 예산(계약 §1.4-3) — 15분 수명 − 합성·업로드 여유 4분. 상수 1곳.
  *   env `CHAIN_BUDGET_MS` 는 **로컬 전용 손잡이**(C 하니스 이어달리기 재현 · 크론 CRON_BUDGET_MS 관례) — 프로덕션에 설정하지 않는다. */
 export const CHAIN_BUDGET_MS = (() => { const v = Number(process.env.CHAIN_BUDGET_MS); return Number.isFinite(v) && v >= 10_000 ? Math.floor(v) : 11 * 60_000; })();
-/** `VIDEO_PROVIDER_STUB=1` — provider·TTS·심사 비전 호출을 고정 응답으로 대체(로컬 하니스 전용 · ai_usage 는 model «stub» 로 기록 · 원가 0). 실호출은 이 변수가 없을 때만. */
+/** `VIDEO_PROVIDER_STUB=1` — **비싼 매체**(provider 컷·스틸 · TTS · 심사 비전)를 고정 응답으로 대체(로컬 하니스 전용 · ai_usage 는 model «stub» 로 기록 · 원가 0). 실호출은 이 변수가 없을 때만. */
 export function videoStub(): boolean { return String(process.env.VIDEO_PROVIDER_STUB ?? "").trim() === "1"; }
+
+/* ═══════════ [AC-111] 🔴 «비싼 것을 끄는 손잡이»가 «싼 것까지» 끄던 자리 ═══════════
+ *   2026-09-19 C 가 전 구간 리허설에서 잡았다. `VIDEO_PROVIDER_STUB` 은 이름도 문서도 **건당 수 달러짜리 매체**(Veo·TTS·비전)를
+ *   끄는 손잡이인데, `script.ts` 가 그 하나로 **대본까지**(실측 $0.033 — 글 한 번 부르는 값) 통째로 템플릿으로 갈아치웠다.
+ *   ⇒ «Veo 가 비싸니 꺼 두자»로 켠 하니스가 **대본 축이 통째로 가짜인 줄 모른 채 초록**을 냈다.
+ *
+ *   🔴 처방 ㉯ — **축마다 손잡이.** 다만 **기존 하니스의 돈이 새면 안 된다**:
+ *      지금 `VIDEO_PROVIDER_STUB=1` 하나만 켜고 도는 자들(`verify-p1r5` 등)이 여럿인데, 여기서 대본을 덜컥 실호출로 돌리면
+ *      **그 자들이 전부 돈을 쓰기 시작한다.** 그래서 새 손잡이는 «따라가되, 말하면 듣는다»로 만든다:
+ *        · `VIDEO_SCRIPT_STUB` 안 줌  → `VIDEO_PROVIDER_STUB` 을 **그대로 따라간다**(옛 자들 무회귀 · 돈 0)
+ *        · `VIDEO_SCRIPT_STUB=0`      → 🔴 **대본만 진짜로**(Veo 컷은 계속 꺼 둔다) — AC-111 ④ 가 «없다»고 한 바로 그 손잡이
+ *        · `VIDEO_SCRIPT_STUB=1`      → 대본만 스텁(provider 는 진짜로)
+ */
+export function videoScriptStub(): boolean {
+  const raw = String(process.env.VIDEO_SCRIPT_STUB ?? "").trim();
+  if (raw === "1") return true;
+  if (raw === "0") return false;
+  return videoStub();
+}
+/** 지금 그 축을 끈 손잡이의 이름 — 로그가 «어느 손잡이가 받아 버렸는지»를 말해야 한다(AC-111 ③ «한 손잡이만 열면 다른 손잡이가 말없이 받는다»). */
+export function scriptStubHandle(): string {
+  const raw = String(process.env.VIDEO_SCRIPT_STUB ?? "").trim();
+  return raw === "1" ? "VIDEO_SCRIPT_STUB=1" : "VIDEO_PROVIDER_STUB=1(VIDEO_SCRIPT_STUB 미지정 — 따라감)";
+}
+
+/**
+ * noteVideoStub — 🔴 **처방 ㉮ «스텁 경로는 «내가 스텁이다»를 반드시 찍어라».**
+ *   값으로만 말하면(`model:"stub"`) 그 값을 아무도 안 읽을 때 **«스텁이었다»는 사실이 세상 어디에도 안 남는다.**
+ *   🔴 **처방 ㉰ — «무엇을 못 재게 되는지»를 같이 적는다.** 안 적으면 그 축은 영원히 «초록»으로 «안 쟀다»고 말한다(AC-9 자동화판).
+ *   글 쪽 `[ai-stub]`(lib/ai.ts)과 **같은 모양**으로 찍는다 — 로그를 읽는 사람이 두 벌을 외우지 않게.
+ */
+export function noteVideoStub(axis: string, blind: string, handle: string, howToOpen: string): void {
+  console.info(`[video-stub] ${axis} — 고정 응답(실호출 0 · 원가 0) · 손잡이 ${handle}. 🔴 못 재는 것: ${blind}. 진짜로 보려면 ${howToOpen}.`);
+}
 /** 스위퍼 stale 판정(계약 §1.5) · 잠금 만료(§1.4 멱등). */
 export const CHAIN_STALE_MIN = 20;
 export const CHAIN_LOCK_MIN = 20;

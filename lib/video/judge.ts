@@ -18,7 +18,7 @@ import { checkVideoDisclosure, compensationOfMeta } from "../disclosure";   // [
 import { checkHook } from "./script";
 import { hammingHex, phashFromGray32, PHASH_SIMILAR_MAX_DISTANCE } from "./fingerprint";
 import { JUDGE_COST_USD } from "./cost";
-import { videoStub, safeZoneOf, type JudgeAxis, type JudgeGrade, type JudgeResult, type RenderPayload, type RenderReport } from "./types";
+import { videoStub, noteVideoStub, safeZoneOf, type JudgeAxis, type JudgeGrade, type JudgeResult, type RenderPayload, type RenderReport } from "./types";
 
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -221,7 +221,8 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
 
 /* ═══ 비전 축(포스터 + 컷 대표 프레임) ═══ */
 async function visionAxes(tenantId: number, pieceId: number, keys: string[]): Promise<{ axes: JudgeAxis[]; blind: boolean; grayHash?: string }> {
-  if (videoStub()) { void recordAiUsage({ tenantId, purpose: "video_judge", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${pieceId}:judge` }); /* 스텁은 **판정한 게 아니다** — 보류로 표시해 하니스 초록이 «증거»로 둔갑하지 않게 한다(#9 «하니스 green ≠ 증거»). */
+  if (videoStub()) { noteVideoStub("video_judge(비전)", "깨진 글자·검은 여백·빈 프레임 — 비전이 아예 안 돈다(축은 «보류»로 남는다)", "VIDEO_PROVIDER_STUB=1", "VIDEO_PROVIDER_STUB 을 끈다");
+    void recordAiUsage({ tenantId, purpose: "video_judge", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0, ref: `piece:${pieceId}:judge` }); /* 스텁은 **판정한 게 아니다** — 보류로 표시해 하니스 초록이 «증거»로 둔갑하지 않게 한다(#9 «하니스 green ≠ 증거»). */
     return { axes: [pendingIf(axis("text_broken", true, "스텁 — 실제 판정 아님"), true), pendingIf(axis("black_margin", true, "스텁 — 실제 판정 아님"), true), pendingIf(axis("frames_not_blank", true, "스텁 — 실제 판정 아님"), true)], blind: false }; }
   /* [R8 · §3.3] 🔴 키는 `lib/ai-key.ts` 가 고른다 — 글·사진과 **같은 풀**이라 한쪽이 맞은 429 를 여기서도 안다. */
   const lease = leaseAiKey();
@@ -298,6 +299,28 @@ async function similarityAxis(tenantId: number, pieceId: number, accountId: numb
       : `가장 가까운 영상과 거리 ${best!.d}(기준 >${PHASH_SIMILAR_MAX_DISTANCE} · ${withHash.length}편과 견줌)`);
 }
 
+/** 러너가 잰 값 → 심사 입력. 🔴 **한 곳**에서 만든다 — 재통과(아래)가 다른 재료로 재면 그건 다른 판정이다.
+    실측이 실려 있으면 그대로 넘기고, 없으면 넘기지 않는다(계획값을 잰 값인 척 하지 않는다 · AC-9). */
+function reportOf(video: Row | undefined, vmeta: Record<string, unknown>): Partial<RenderReport> | null {
+  if (!video) return null;
+  return { durationMs: n(vmeta.durationMs), bytes: n(vmeta.bytes), frameCount: n(vmeta.frameCount),
+    ...(vmeta.measured === true ? { containerMs: n(vmeta.containerMs), videoMs: n(vmeta.videoMs), audioMs: n(vmeta.audioMs), measured: true } : {}) };
+}
+
+/**
+ * regate — 🔴 **검수 뒤 수정은 검수를 다시 받는다**(AM d507ae885 · 2026-09-19 수리 라운드).
+ *   수리본이 있으면 **그 수리본으로** 결정론 축을 다시 잰다. 없으면 받은 것을 그대로 돌려준다(무회귀).
+ *   🔴 **한 번만** 잰다 — 재수리는 받지 않는다(무한 되먹임 0). 그래서 `repairedPayload` 는 처음 것을 그대로 들고 간다.
+ *   🔴 순수다(AI 0 · DB 0) — 그래서 이 재통과는 **공짜**이고, 하니스가 **실행으로** 잴 수 있다.
+ */
+export function regate(
+  det0: { axes: JudgeAxis[]; repairedPayload: RenderPayload | null },
+  meta: Record<string, unknown>, report: Partial<RenderReport> | null, hookText: string,
+): { axes: JudgeAxis[]; repairedPayload: RenderPayload | null } {
+  if (!det0.repairedPayload) return det0;
+  return { axes: judgePayloadDeterministic(det0.repairedPayload, meta, report, hookText).axes, repairedPayload: det0.repairedPayload };
+}
+
 /** judgeVideo(pieceId) — 계약 §5. piece.meta.render(페이로드)·piece_assets(video/thumb)·meta 로 판정. 수리된 페이로드는 meta.render 에 다시 넣는다. */
 export async function judgeVideo(pieceId: number): Promise<JudgeResult> {
   const [p] = await q(sql`SELECT tenant_id, account_id, meta FROM pieces WHERE id = ${pieceId} AND kind = 'video'`);
@@ -308,11 +331,14 @@ export async function judgeVideo(pieceId: number): Promise<JudgeResult> {
   const assets = await q(sql`SELECT kind, r2_key, meta FROM piece_assets WHERE piece_id = ${pieceId} AND kind IN ('video','thumb','clip') ORDER BY kind, sort`);
   const video = assets.find((a) => a.kind === "video"); const thumb = assets.find((a) => a.kind === "thumb");
   const vmeta = (video?.meta ?? {}) as Record<string, unknown>;
-  const det = judgePayloadDeterministic(payload, meta, video
-    ? { durationMs: n(vmeta.durationMs), bytes: n(vmeta.bytes), frameCount: n(vmeta.frameCount),
-        // 실측이 실려 있으면 그대로 넘긴다 — 없으면 넘기지 않는다(계획값을 잰 값인 척 하지 않는다 · AC-9)
-        ...(vmeta.measured === true ? { containerMs: n(vmeta.containerMs), videoMs: n(vmeta.videoMs), audioMs: n(vmeta.audioMs), measured: true } : {}) }
-    : null, String(meta.hook ?? ""));
+  const det0 = judgePayloadDeterministic(payload, meta, reportOf(video, vmeta), String(meta.hook ?? ""));
+  /* [수리라운드 2026-09-19 · B2 · AM d507ae885 «관문 재통과»] 🔴 **검수 뒤 수정은 검수를 다시 받는 게 원칙이다.**
+     종전엔 결정론 수리(`repairedPayload` — cut_rhythm 씬 밀기 · reading_time)를 만들어 `meta.render` 에 **써 넣고도**
+     등급은 **수리 전 축**으로 냈다. 그래서 저장된 스펙과 그 스펙에 붙은 판정이 **서로 다른 물건**을 가리켰다
+     (그리고 화면은 수리된 스펙 옆에 수리 전 «미달»을 보여 준다).
+     ⇒ 수리본이 있으면 **그 수리본으로 결정론 축을 한 번 더 잰다.** 🔴 **한 번만** — 재수리는 받지 않는다(무한 되먹임 0).
+     🔴 AI 호출 0 · DB 0: `judgePayloadDeterministic` 은 순수라 이 재통과는 **공짜**다. */
+  const det = regate(det0, meta, reportOf(video, vmeta), String(meta.hook ?? ""));
   const vis = await visionAxes(tid, pieceId, [thumb?.r2_key, ...assets.filter((a) => a.kind === "clip").slice(0, 2).map((a) => a.r2_key)].filter(Boolean).map(String));
   const sim = await similarityAxis(tid, pieceId, p.account_id ? n(p.account_id) : null, { gray: String(vmeta.thumbGray ?? "") || null, phash: String(vmeta.framePhash ?? "") || null });
   // 비전이 결정론 축(safe_area·frames_not_blank)과 겹치면 «둘 중 실패»를 채택 — 비전 불능이면 결정론만

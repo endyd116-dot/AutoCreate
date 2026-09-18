@@ -13,7 +13,7 @@ import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { callGeminiJson } from "../ai";
 import { MODEL_VIDEO_READ } from "../ai-models";
-import { videoStub } from "./types";
+import { videoStub, noteVideoStub } from "./types";
 
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -246,7 +246,7 @@ export async function analyzeReference(tenantId: number, url: string): Promise<A
   if (!isYoutubeUrl(u)) return { ok: false, step: "url", error: "유튜브 주소를 넣어 주세요(youtube.com · youtu.be)." };
 
   let parsed: unknown;
-  if (videoStub()) parsed = stubRaw();
+  if (videoStub()) { noteVideoStub("video_reference", "레퍼런스 영상에서 실제로 배워 온 룩·규칙(고정 표본이 들어간다)", "VIDEO_PROVIDER_STUB=1", "VIDEO_PROVIDER_STUB 을 끈다"); parsed = stubRaw(); }
   else {
     const r = await callGeminiJson<Record<string, unknown>>({
       purpose: "video_reference", chain: [MODEL_VIDEO_READ], user: ANALYZE_PROMPT,
