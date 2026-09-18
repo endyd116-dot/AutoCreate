@@ -129,7 +129,32 @@ rec("대조군 — **가르는 자리도 실제로 있다**(이 자가 둘을 �
 {
   /* ⓪a ①축: 화면의 `?? 0` 을 떼면 그 빨강이 사라지나. */
   const idx = readFileSync(path.join(PUB, "ops", "index.html"), "utf8");
-  const fixed = idx.replace("r.trialToPaidPct ?? 0", "r.trialToPaidPct == null ? \"못 쟀어요\" : r.trialToPaidPct");
+  /* 🔴 **변이 방향을 뒤집었다** — 2026-09-19 B 가 이 자리를 «못 쟀어요»로 고치자
+     «`?? 0` 을 «못 쟀어요»로 바꾼다»는 옛 변이가 **닻을 못 찾아** 빨개졌다.
+     자가 무력해서가 아니라 **이미 고쳐졌기 때문에** 못 도는 변이다(AC-112 의 «고칠 대상이 0»).
+     ⇒ 이제 **망가뜨리는 쪽**으로 찌른다 — 서버가 `null` 을 내는 키를 화면이 `?? 0` 으로 받게 만들면 우는가.
+     이 방향은 **고쳐져도 늘 돈다**(망가뜨릴 자리는 언제나 있다). */
+  /* 🔴 **그 화면이 실제로 부르는 경로**의 키를 골라야 한다 — 아무 키나 고르면 «그 화면은 그 경로를 안 부른다»로
+     걸러져 **변이가 아무것도 안 재게** 된다(첫 판이 그랬다 · AC-112 의 «아무것도 안 재는 변이»). */
+  const idxCode = codeOnly(idx);
+  let anyNullKey = null;
+  for (const [route, info] of routeNullKeys) { if (idxCode.includes(route)) { anyNullKey = [...info.keys][0]; break; } }
+  const broken = anyNullKey
+    ? (/<\/body>/i.test(idx) ? idx.replace(/<\/body>/i, `<script>/*변이*/ const r = {}; void (r.${anyNullKey} ?? 0);</script></body>`)
+      : `${idx}\n<script>/*변이*/ const r = {}; void (r.${anyNullKey} ?? 0);</script>`)
+    : idx;
+  const brokenHits = [];
+  {
+    const src = codeOnly(broken);
+    for (const [route, info] of routeNullKeys) {
+      if (!src.includes(route)) continue;
+      for (const k of info.keys) if (new RegExp(`\\.${k}\\s*(?:\\?\\.[\\w$]+\\s*)?(?:\\?\\?|\\|\\|)\\s*0\\b`).test(src)) brokenHits.push(k);
+    }
+  }
+  rec("⓪0 자기 찌르기 — 🔴 **`?? 0` 을 새로 심으면 운다**(고쳐진 뒤에도 도는 변이)",
+    !!anyNullKey && broken !== idx && brokenHits.includes(anyNullKey), `고른 키 «${anyNullKey ?? "없음"}» · 심은 뒤 잡힌 키: ${brokenHits.join(", ") || "없음"}`);
+
+  const fixed = idx.replace(/r\.trialToPaidPct\s*\?\?\s*0/, "r.trialToPaidPct == null ? \"못 쟀어요\" : r.trialToPaidPct");
   const still = [];
   {
     const src = codeOnly(fixed);
@@ -138,9 +163,11 @@ rec("대조군 — **가르는 자리도 실제로 있다**(이 자가 둘을 �
       for (const k of info.keys) if (new RegExp(`\\.${k}\\s*(?:\\?\\.[\\w$]+\\s*)?(?:\\?\\?|\\|\\|)\\s*0\\b`).test(src)) still.push(k);
     }
   }
+  /* 🔴 이 변이는 **이미 고쳐졌으면 돌 자리가 없다** — 그때는 «못 쟀음»이지 «자가 무력함»이 아니다(AC-112).
+     그래서 ⓪0(망가뜨리는 쪽)을 위에 따로 뒀다. 이 줄은 «아직 안 고쳐졌을 때»만 판정한다. */
   rec("⓪a 자기 찌르기 — 화면이 «못 쟀어요»라고 말하게 고치면 ①의 그 빨강이 사라진다",
-    fixed !== idx && !still.includes("trialToPaidPct"),
-    fixed === idx ? "🔴 닻을 못 찾았다 — 이 변이표가 낡았다" : `고친 뒤 남은 키: ${still.join(", ") || "없음"}`);
+    fixed === idx ? true : !still.includes("trialToPaidPct"),
+    fixed === idx ? "⊘ 이미 고쳐져 있어 이 변이는 돌 자리가 없다(⓪0 이 대신 잰다)" : `고친 뒤 남은 키: ${still.join(", ") || "없음"}`);
 
   /* ⓪b ②축: 가드를 지우면 «가르는 자리»가 «안 가르는 자리»로 넘어오나.
      🔴 처음엔 `lib/guards.ts` 를 골랐다가 0→0 으로 실패했다 — 그 파일은 `readonly` 를 **집합**(`NON_WRITABLE`)으로
