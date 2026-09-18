@@ -71,8 +71,12 @@ const MUTATIONS = {
   m8: { file: "bleed", from: "    const bold = !looksHeading && (all(wgt) || (spans.length === 0 && wgt(p)));", to: "    const bold = false;",
     expect: "F-06d (굵게를 안 세어 AM #800·#801 판을 통째로 놓친다)" },
   /* 🔴 m10 — **조각 경계 꼬리**(C 가 잡은 두 번째 판). «먼저 전부 평문»을 «치고 바로 칠하기»로 되돌린다 = 옛 판 그대로. */
-  m10: { file: "naver", from: "    const joined = parts.map((p) => p.t).join(\"\");\n    await page.keyboard.insertText(joined);",
-    to: "    const joined = parts.map((p) => p.t).join(\"\");\n    for (const p0 of parts) { await page.keyboard.insertText(p0.t); if (p0.mark) await applyMark(page, ctx, p0.t.length, p0.t, p0.mark, seq, fmt); }",
+  /* ⚠️ **앵커가 또 낡았다**(2026-09-17 · R12-5 가 `typeParts` 에 `prefix` 를 더하며 그 줄이 바뀌었다).
+     🔴 «못 심음» 가드가 **가짜 빨강 대신 진짜 이유**를 찍어 줘서 1분 만에 알았다 — 그 가드가 두 번째로 값을 했다.
+     ⇒ 이번엔 **한 줄만** 잡는다(줄 둘을 이어 잡으면 그 사이에 뭐가 끼는 순간 또 낡는다).
+        `insertText(joined)` 를 조각별 타자로 되돌리는 것이 «옛 판»이고, 그 한 줄이면 뜻이 선다. */
+  m10: { file: "naver", from: "    await page.keyboard.insertText(joined);",
+    to: "    for (const p0 of parts) { await page.keyboard.insertText(p0.t); if (p0.mark) await applyMark(page, ctx, p0.t.length, p0.t, p0.mark, seq, fmt); }",
     expect: "F-01j (치고 바로 칠해 다음 조각이 서식을 물려받는다 = C 가 찾은 «꼬리» 그대로)" },
   /* 🔴 m11 — 대조 문을 빼면 «어긋나도 칠한다»가 된다(AM 이 무너진 그 자리). */
   m11: { file: "naver", from: "    if (!(await tailMatches(ctx, joined.slice(-60)))) {", to: "    if (false) {",
