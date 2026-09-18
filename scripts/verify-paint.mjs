@@ -245,6 +245,87 @@ async function measurePage(url, { mutateCss = null } = {}) {
   }
 }
 
+/* ═══ ⓶ 🔴 **«절대 화면에 뜨면 안 되는 낱말»** — 누가 봐도 사고인 것만 ═══
+   시나리오 A 가 «화면에 영어 식별자가 새는지»를 물었다. 🔴 **그건 못 잰다** — `piece`·`slot` 같은 낱말은
+   **우리 코드 이름이면서 동시에 손님에게 보여도 되는 말**일 수 있어 기계가 못 가른다. 그건 «못 쟀음»으로 둔다.
+   대신 **누가 봐도 사고인 것**만 좁게 잰다 — `undefined` · `NaN` · `[object Object]` · `null` 같은 것.
+   이건 뜻이 하나뿐이라 거짓 빨강이 안 난다.
+   🔴 **글자로 뜨는 것**과 **속성값에 든 것**을 가른다(메인 지시) — `title="undefined"` 는 눈엔 안 보여도 같은 사고고,
+   **뜨는 쪽이 더 급하다.** 그래서 뜨는 것만 판정하고 속성 쪽은 «△ 살펴볼 것»으로 찍는다. */
+{
+  const ACCIDENT = ["undefined", "NaN", "[object Object]", "[Object]"];
+  const visible = [];
+  const inAttr = [];
+  for (const url of pages.filter((p) => !needsLogin(p))) {
+    const page = await context.newPage();
+    page.on("pageerror", () => { /* 픽셀·글자만 본다 */ });
+    try {
+      await page.goto(BASE + url, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(250);
+      const found = await page.evaluate((words) => {
+        const out = { text: [], attr: [] };
+        /* ① 손님 눈에 **글자로** 뜨는 것 — 보이는 요소의 텍스트만 본다(script·style 제외). */
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const p = n.parentElement;
+          if (!p || ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(p.tagName)) continue;
+          const cs = getComputedStyle(p);
+          if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+          const t = (n.nodeValue || "").trim();
+          if (!t) continue;
+          for (const w of words) if (t.includes(w)) out.text.push({ word: w, snip: t.slice(0, 60), tag: p.tagName });
+        }
+        /* ② 속성값에 든 것 — 눈엔 안 보이지만 같은 사고다. */
+        for (const el of document.querySelectorAll("*")) {
+          for (const a of el.attributes) {
+            for (const w of words) if (String(a.value).includes(w)) out.attr.push({ word: w, attr: a.name, tag: el.tagName, snip: String(a.value).slice(0, 40) });
+          }
+        }
+        return out;
+      }, ACCIDENT);
+      for (const t of found.text) visible.push({ url, ...t });
+      for (const a of found.attr) inAttr.push({ url, ...a });
+    } catch (e) { console.log(`  ⊘ ${url} — 사고 낱말을 못 쟀다: ${String(e.message).slice(0, 60)}`); }
+    await page.close();
+  }
+  /* 🔴 **초록이 나왔으면 «울 수 있나»부터 증명한다** — 안 그러면 «태어나자마자 초록»이다(AC-108).
+     사고 낱말을 **일부러 심어** 이 축이 그걸 보는지, 그리고 **숨긴 것은 안 세는지**(거짓 빨강 방지) 확인한다. */
+  {
+    const probe = await context.newPage();
+    await probe.goto(BASE + "/login.html", { waitUntil: "domcontentloaded" });
+    const scan = async () => probe.evaluate((words) => {
+      const out = [];
+      const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const p = n.parentElement;
+        if (!p || ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(p.tagName)) continue;
+        const cs = getComputedStyle(p);
+        if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+        for (const x of words) if ((n.nodeValue || "").includes(x)) out.push(x);
+      }
+      return out;
+    }, ACCIDENT);
+    await probe.evaluate(() => { document.body.insertAdjacentHTML("afterbegin", `<p id="__acc">값: undefined</p>`); });
+    const seen = await scan();
+    await probe.evaluate(() => { document.querySelector("#__acc").style.display = "none"; });
+    const hidden = await scan();
+    await probe.evaluate(() => { document.querySelector("#__acc")?.remove(); });
+    rec("⓪d 자기 찌르기 — **사고 낱말을 심으면 잡는다**(이 축이 빈 초록이 아니다)", seen.includes("undefined"), `심은 뒤 «${seen.join(",") || "못 봄"}»`);
+    rec("⓪e 자기 찌르기 — **숨긴 것은 안 센다**(손님 눈에 안 보이면 이 축 밖 · 거짓 빨강 방지)", !hidden.includes("undefined"), `숨긴 뒤 «${hidden.join(",") || "안 봄"}»`);
+    await probe.close();
+  }
+
+  rec("⓶ 🔴 손님 눈에 **사고 낱말**(undefined·NaN·[object Object])이 글자로 뜨지 않는다", visible.length === 0,
+    visible.length ? `뜨는 자리 ${visible.length}곳` : `로그인 전 화면 ${pages.filter((p) => !needsLogin(p)).length}개에서 0곳`);
+  for (const v of visible) console.log(`   🔴 ${v.url}  <${v.tag}> 안에 «${v.word}» — «${v.snip}»`);
+  if (inAttr.length) {
+    console.log(`\n△ 살펴볼 것 — **속성값**에 든 사고 낱말(눈엔 안 보이지만 같은 사고 · 판정 밖):`);
+    for (const a of inAttr.slice(0, 12)) console.log(`   · ${a.url}  <${a.tag} ${a.attr}="…${a.snip}…">  «${a.word}»`);
+    if (inAttr.length > 12) console.log(`   · … 그 밖 ${inAttr.length - 12}곳`);
+  }
+  unmeasured("⓶ «영어 식별자가 새나»", "`piece`·`slot` 같은 낱말은 **코드 이름이면서 손님말일 수도** 있어 기계가 못 가른다 — 억지로 올리면 거짓 빨강이 쏟아진다(AC-95)");
+}
+
 /* ═══ ① 본 판정 ═══ */
 let badTotal = 0, okTotal = 0, unmeasuredTotal = 0;
 const badDetail = [];
