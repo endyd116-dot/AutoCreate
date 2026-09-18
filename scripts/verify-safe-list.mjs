@@ -63,6 +63,16 @@ let bad = 0;
    => `2` 는 **못 쟀음**으로 따로 세고 전체 종료코드를 더럽히지 않는다. 대신 **끝줄에 반드시 적는다** —
    조용히 넘기면 그게 «안 재고 통과했다»가 된다(AC-9). */
 let unmeasured = 0;
+/* 🔴 «아직 수리가 안 들어와서 빨간 자»를 «진짜 회귀»와 가른다(2026-09-19 · C 지적).
+   수리 라운드 중엔 새로 세운 자가 전부 빨갛다 — 그건 고장이 아니라 **할 일이 남았다**는 뜻이다.
+   그 빨강 더미에 **그 사이 난 진짜 회귀가 묻힌다**(오늘 `verify-label-surface` 가 하마터면 묻혔다).
+   🔴 그래서 «기다리는 빨강»은 따로 세고 **종료코드도 더럽히지 않는다.** 대신 끝줄에 **몇 개가 누구 몫인지** 반드시 적는다.
+   🔴 목록에 넣어 두고 잊으면 그건 «검사를 끈 것»이다 — 초록이 되면 그 줄을 지운다. */
+const waiting = [];
+const PENDING = new Map();
+try {
+  for (const row of JSON.parse(readFileSync("docs/rules/pending-red.json", "utf8")).대기 || []) PENDING.set(row.자, row);
+} catch { /* 목록이 없으면 전부 «진짜 빨강»으로 본다 — 안전한 쪽 */ }
 console.log("\n안전한 것만 돌린다(종료코드):");
 for (const [f] of groups.safe) {
   if (f === "verify-safe-list.mjs") continue;
@@ -75,12 +85,21 @@ for (const [f] of groups.safe) {
   let code = 0;
   /* 🔴 **파이프로 넘기지 않는다** — `| tail` 을 쓰면 실패해도 0 이 온다(AC-67). 종료코드를 그대로 받는다. */
   try { execFileSync(cmd, { stdio: "ignore", shell: true }); } catch (e) { code = e.status ?? 1; }
+  const wait = PENDING.get(f);
   if (code === 2) unmeasured++;
+  else if (code && wait) waiting.push({ f, wait });
   else if (code) bad++;
-  console.log(`  ${code === 2 ? "⊘" : code ? "✗" : "✓"} ${f}=${code}${code === 2 ? "  (못 쟀음 — 잴 재료가 없다)" : ""}`);
+  const mark = code === 2 ? "⊘" : code ? (wait ? "⏳" : "✗") : "✓";
+  const tail = code === 2 ? "  (못 쟀음 — 잴 재료가 없다)" : (code && wait ? `  (기다리는 빨강 — ${wait.왜} · ${wait.누가} 몫)` : "");
+  console.log(`  ${mark} ${f}=${code}${tail}`);
 }
 console.log(`${"─".repeat(112)}`);
 const ran = groups.safe.length - 1 - unmeasured;
-console.log(bad ? `🔴 실패 ${bad}개` : `✅ 실제로 잰 ${ran}개 전부 통과`);
+console.log(bad ? `🔴 실패 ${bad}개` : `✅ 실제로 잰 ${ran - waiting.length}개 전부 통과`);
 if (unmeasured) console.log(`⊘ 못 쟀음 ${unmeasured}개 — **통과가 아니다.** 재료를 걸고 다시 돌려라(위 안내 참고).`);
+if (waiting.length) {
+  console.log(`⏳ 기다리는 빨강 ${waiting.length}개 — **고장이 아니라 할 일이다**(docs/rules/pending-red.json):`);
+  for (const w of waiting) console.log(`   · ${w.f} — ${w.wait.왜}  ⟵ ${w.wait.누가} 몫`);
+  console.log(`   🔴 초록이 되면 그 줄을 목록에서 지워라. 넣어 두고 잊으면 «검사를 끈 것»이다.`);
+}
 process.exit(bad ? 1 : 0);
