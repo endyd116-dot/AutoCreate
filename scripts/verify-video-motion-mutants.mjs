@@ -22,11 +22,16 @@
  *          그 변이를 돌려 보니 **종료코드 0**(아무도 안 잡았다). «의도로 바꾸기»가 아니라 «구멍 메우기»가 맞다.
  *     ③ **«주석 걷은 본문»에서 센다.** 같은 글자가 주석에 있으면 치환이 주석을 고치고 본문은 멀쩡하다
  *        (2026-09-17 B2 창에서 같은 병이 네 번 났다).
+ *        🔴 **2026-09-19 — 여기 있던 걷기가 새고 있었다**(C 가 실측해서 넘겨 줬다): 「줄 앞이 `*` 면 지운다」는
+ *        블록 주석의 **이어지는 줄**을 못 걷어 **44줄**이 본문인 척 남아 있었다.
+ *        ⚠️ 그때도 **열세 변이 중 어느 것도 안 틀어졌다**(앵커 13개의 수를 두 방식으로 재서 확인 — 전부 같았다).
+ *        ⇒ 이 고침은 «지금 틀렸다»가 아니라 **«다음에 누가 그 44줄에 든 글자를 앵커로 쓰면 조용히 틀어진다»** 쪽이다.
  */
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { codeOnly } from "./_lib/code-only.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "runner/channels/render-video.mjs");
@@ -34,13 +39,7 @@ const MUT = join(ROOT, "runner/channels/.mutant-render-video.mjs");   // 같은 
 const HARNESS = join(ROOT, "scripts/verify-video-motion.mjs");
 const HARNESS_MUT = join(ROOT, "scripts/.mutant-verify-video-motion.mjs");
 
-/** 주석을 걷은 본문 — 치환 자리를 **본문에서만** 센다(규칙 ③). */
-function codeOnly(src) {
-  return String(src)
-    .split("\n")
-    .map((l) => (l.trimStart().startsWith("*") || l.trimStart().startsWith("//") || l.trimStart().startsWith("/*") ? "" : l))
-    .join("\n");
-}
+/* 🔴 주석 걷기는 `scripts/_lib/code-only.mjs` **한 곳**이다 — 두 자가 각자 만들어 각자 틀렸다(2026-09-19 · 그 파일 머리말). */
 
 const original = readFileSync(SRC, "utf8");
 const harness = readFileSync(HARNESS, "utf8");
