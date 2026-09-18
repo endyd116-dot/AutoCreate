@@ -30,6 +30,9 @@
  *     ✅ 됐다 · ❌ 안 됐다 · ⊘ **못 쟀다**(재료가 없어 재지 못함 — 통과 아님).
  *     종료코드: 0 = 전부 ✅ · 1 = ❌ 있음 · 2 = ⊘ 있고 ❌ 없음(«못 쟀음»도 통과가 아니다).
  */
+/* 🔴 **맨 첫 줄이어야 한다** — `db/index` 가 불려 오는 순간 주소를 읽으므로, 그 전에 `.env` 가 들어와 있어야 한다
+   (안 그러면 빈 주소로 풀이 서고 첫 질의에서 `read ECONNRESET` — 자가 스스로 만든 가짜 빨강이다 · 2026-09-19 실측). */
+import "./_lib/load-env.mjs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { sql } from "drizzle-orm";
@@ -95,7 +98,7 @@ const guard = (tid: number) => {
 };
 
 if (!process.env.NETLIFY_DATABASE_URL && !process.env.DATABASE_URL) {
-  console.error("🔴 DB 주소가 없다 — `npx --yes tsx --env-file=.env scripts/verify-e2e-rehearsal.mts` 로 돌려라");
+  console.error("🔴 DB 주소가 없다 — `.env` 에 NETLIFY_DATABASE_URL 이 있어야 한다(⊘ 못 쟀음 · 통과 아님)");
   process.exit(2);
 }
 
