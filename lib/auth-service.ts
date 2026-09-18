@@ -81,7 +81,12 @@ export async function loginUser(email: string, password: string, ip: string | nu
     await writeAudit({ tenantId: null, action: "user_login_failed", actorType: "user", ip, riskLevel: "low", detail: { reason: "no_account", email: maskEmail(email) } });
     return { ok: false, reason: "invalid" };
   }
-  if (user.locked_until && new Date(user.locked_until) > new Date()) {
+  /* 🔴 [2026-09-19 수리 3판 · C `verify-server-time`] **`new Date(칸)` 은 시간대에 매달린다.**
+       `locked_until` 은 `timestamp`(시간대 없음)라 Postgres 가 `"2026-09-19 04:10:00"` 같은 글자로 준다.
+       `new Date()` 는 그 글자를 **프로세스 시간대**로 읽는다 — UTC 면 맞고 KST 면 **9시간 어긋난다.**
+       🔴 잠금은 **15분**이다. 9시간이 어긋나면 잠긴 사람이 **바로 풀리거나** 멀쩡한 사람이 **반나절 갇힌다.**
+       지금 라이브가 맞는 것은 Netlify 가 UTC 라서일 뿐 — **우연이다.** `utcDate()` 로 못 박는다. */
+  if (user.locked_until && (utcDate(user.locked_until)?.getTime() ?? 0) > Date.now()) {
     await writeAudit({ tenantId: user.tenant_id, action: "user_login_failed", actorType: "user", actorId: user.id, ip, riskLevel: "medium", detail: { reason: "locked" } });
     return { ok: false, reason: "locked", lockedUntil: user.locked_until };
   }
@@ -189,7 +194,8 @@ export async function loginOperator(email: string, password: string, ip: string 
     await writeAudit({ tenantId: null, action: "ops_login_failed", actorType: "operator", actorId: op.id, ip, riskLevel: "medium", detail: { reason: "inactive" } });
     return { ok: false, reason: "inactive" };
   }
-  if (op.locked_until && new Date(op.locked_until) > new Date()) {
+  /* 🔴 위와 같은 병 — 운영센터 문이라 더 나쁘다(잠긴 운영자가 바로 풀리면 잠금이 있으나 마나다). */
+  if (op.locked_until && (utcDate(op.locked_until)?.getTime() ?? 0) > Date.now()) {
     await writeAudit({ tenantId: null, action: "ops_login_failed", actorType: "operator", actorId: op.id, ip, riskLevel: "medium", detail: { reason: "locked" } });
     return { ok: false, reason: "locked" };
   }

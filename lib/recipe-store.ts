@@ -8,7 +8,7 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "../db/index";
-import { jsonb } from "./db-util";
+import { jsonb, utcDate } from "./db-util";
 import { writeAudit } from "./audit";
 import {
   RECIPE_CHANNELS, STAGE_ORDER, canPromoteAt, isRecipeVersion, minDwellHours, nextStage,
@@ -43,8 +43,10 @@ export async function getRollout(channel: string): Promise<Rollout | null> {
     channel: String(r.channel), currentVersion: r.current_version ? String(r.current_version) : null,
     candidateVersion: r.candidate_version ? String(r.candidate_version) : null,
     stage: asStage(r.stage),
-    stageSince: r.stage_since ? new Date(r.stage_since as string).toISOString() : null,
-    rolledBackAt: r.rolled_back_at ? new Date(r.rolled_back_at as string).toISOString() : null,
+  /* 🔴 [2026-09-19 수리 3판 · C `verify-server-time`] `timestamp`(시간대 없음) 칸을 `new Date(글자)` 로 읽으면
+     **프로세스 시간대**로 해석된다 — KST 에서 돌면 화면에 **9시간 밀린 시각**이 간다. `utcDate()` 로 못 박는다. */
+    stageSince: utcDate(r.stage_since)?.toISOString() ?? null,
+    rolledBackAt: utcDate(r.rolled_back_at)?.toISOString() ?? null,
     rollbackReason: r.rollback_reason ? String(r.rollback_reason) : null,
   };
 }

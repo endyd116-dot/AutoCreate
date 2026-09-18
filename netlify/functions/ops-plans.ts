@@ -134,7 +134,15 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, plans: rows, priceEvents: events.map(toPriceEventRow) });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
-    const b = await readJson<Record<string, unknown>>(req);
+    /* 🔴 [2026-09-19 수리 3판] **화면은 봉투로 보내는데 서버가 평면만 봤다** — 매크로·FAQ·프로모션과 같은 병이다.
+       `ops/plans.html:61` 이 보내는 것: `{ key, patch:{ maxAccounts, coinsIncluded, runnerDevices, teamSeats, horizonDays, features } }`
+       옛 판은 `parseLimits(b, cur.limits)` 에 **봉투째** 넘겨서 한도 키를 하나도 못 찾았고,
+       `parseLimits` 는 못 찾은 키를 **`base`(지금 값)로 두고 지나간다** ⇒ 🔴 **아무것도 안 바뀌는데 `ok:true`.**
+       운영자 화면엔 «저장했어요» 토스트가 뜬다. 요금제 한도를 고칠 방법이 실은 없었다.
+       봉투를 뜯고 옛 평면 모양도 그대로 받는다(무회귀). */
+    const body = await readJson<Record<string, unknown>>(req);
+    const envP = (body.patch && typeof body.patch === "object" && !Array.isArray(body.patch) ? body.patch : {}) as Record<string, unknown>;
+    const b = { ...body, ...envP } as Record<string, unknown>;
     const key = String(b.key ?? "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 32);
     if (!key) return badRequest("key");
     const plans = await loadPlans();

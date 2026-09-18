@@ -18,7 +18,13 @@ export type ReadResult = { ok: true; raw: unknown; model: string } | { ok: false
 /** 캡처 여러 장 → raw. 장수·순서만 프롬프트에 말한다(주소·제목은 안 보낸다 — 모델에게도 «어디 글인지»는 필요 없다). */
 export async function readTextStyleFromShots(tenantId: number, shots: StyleShot[], opts: { ref?: string } = {}): Promise<ReadResult> {
   if (!shots.length) return { ok: false, error: "읽을 화면이 없어요." };
-  if (aiStubActive()) return { ok: true, raw: TEXT_STYLE_RAW_EXAMPLE, model: "stub" };
+  /* 🔴 [2026-09-19 수리 3판 · C `verify-stub-silence` · AC-111] **가짜를 돌려줬으면 말한다.**
+     옛 판은 `model:"stub"` 이라는 **값으로만** 말했다 — 그 값을 읽는 사람이 없으면 «고정 표본이 들어갔다»는 사실이
+     **어디에도 안 남는다.** 화면엔 진짜로 배워 온 것처럼 보인다. 같은 파일 묶음의 `lib/ai.ts` 관례(`[ai-stub]`)로 찍는다. */
+  if (aiStubActive()) {
+    console.info(`[ai-stub] text_style(캡처 ${shots.length}장) — 고정 응답(실호출 0 · 원가 0 · ai_usage 0). 🔴 못 재는 것: 이 글의 진짜 문단·강조·사진 모양(표본이 대신 들어간다). 진짜로 보려면 AI_STUB 을 끄세요.`);
+    return { ok: true, raw: TEXT_STYLE_RAW_EXAMPLE, model: "stub" };
+  }
   const user = [TEXT_STYLE_PROMPT, "", `캡처 ${shots.length}장(위에서 아래로 · 조각은 10~15% 겹친다 — 겹친 문단은 한 번만 센다). 폰 폭이라 한 줄이 짧다 — 줄 수는 보이는 그대로 센다.`].join("\n");
   const r = await callGeminiJson<Record<string, unknown>>({
     purpose: "text_style", chain: [MODEL_VISION], user, inlineImages: shots.map((s) => ({ mime: s.mime, data: s.data })),
@@ -32,7 +38,11 @@ export async function readTextStyleFromShots(tenantId: number, shots: StyleShot[
 export async function readTextStyleFromText(tenantId: number, text: string, opts: { ref?: string } = {}): Promise<ReadResult> {
   const t = String(text ?? "").trim();
   if (t.length < 200) return { ok: false, error: "글이 너무 짧아요 — 200자는 넘어야 모양을 잴 수 있어요." };
-  if (aiStubActive()) return { ok: true, raw: { ...TEXT_STYLE_RAW_EXAMPLE, shape: { ...TEXT_STYLE_RAW_EXAMPLE.shape, emphasis: { kinds: [], perPost: 0, on: [] }, photos: { count: 0, where: [], captionRate: 0, kinds: [] } } }, model: "stub" };
+  /* 🔴 위와 같다 — 복붙 길은 꾸밈·사진을 애초에 못 보는데다 스텁까지 타면 **두 겹으로 가짜**다. 그러니 더 말해야 한다. */
+  if (aiStubActive()) {
+    console.info(`[ai-stub] text_style(복붙 ${t.length}자) — 고정 응답(실호출 0 · 원가 0 · ai_usage 0). 🔴 못 재는 것: 문단·말투·구성까지 전부 표본이다(강조·사진은 복붙이라 원래도 0). 진짜로 보려면 AI_STUB 을 끄세요.`);
+    return { ok: true, raw: { ...TEXT_STYLE_RAW_EXAMPLE, shape: { ...TEXT_STYLE_RAW_EXAMPLE.shape, emphasis: { kinds: [], perPost: 0, on: [] }, photos: { count: 0, where: [], captionRate: 0, kinds: [] } } }, model: "stub" };
+  }
   const user = [TEXT_STYLE_PROMPT, "", "아래는 복붙한 글(꾸밈·사진은 날아갔다 — 강조·사진 칸은 0 으로 두고 문단·말투·구성만 잰다):", "─────", t.slice(0, 12_000), "─────"].join("\n");
   const r = await callGeminiJson<Record<string, unknown>>({
     purpose: "text_style", chain: [MODEL_VISION], user, tenantId, ref: opts.ref ?? `style:${tenantId}:${Date.now()}`, mode: "flash", temperature: 0.2, maxOutputTokens: 3000, timeoutMs: 60_000,

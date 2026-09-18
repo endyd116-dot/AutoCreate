@@ -11,7 +11,7 @@
  */
 import { sql } from "drizzle-orm";
 import { q } from "./accounts";
-import { jsonb } from "./db-util";
+import { jsonb, utcDate } from "./db-util";
 import { tenantPlan, textStylesPerMonthOf } from "./plans";
 import { outcomeStats, MIN_SAMPLES } from "./outcomes";
 import { sanitizeTextStyleForStorage, textStyleSummary, textStyleOutline, textStyleName, textStyleLeakProbe, type TextStyle, type LearnedFrom } from "./text-style";
@@ -33,7 +33,9 @@ function toRow(r: Row): TextStyleRow {
   const style = (r.style && typeof r.style === "object" ? r.style : {}) as TextStyle;
   return {
     id: n(r.id), name: String(r.name ?? ""), source: (String(r.source ?? "url") as LearnedFrom), sourceUrl: r.source_url ? String(r.source_url) : null,
-    accountId: n(r.account_id) || null, createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : "",
+  /* 🔴 [2026-09-19 수리 3판 · C `verify-server-time`] `timestamp`(시간대 없음) 칸을 `new Date(글자)` 로 읽으면
+     **프로세스 시간대**로 해석된다 — KST 에서 돌면 화면에 **9시간 밀린 시각**이 간다. `utcDate()` 로 못 박는다. */
+    accountId: n(r.account_id) || null, createdAt: utcDate(r.created_at)?.toISOString() ?? "",
     style, summary: textStyleSummary(style), outline: textStyleOutline(style), learned: style.learned,
   };
 }

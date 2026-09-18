@@ -13,6 +13,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { json, jsonError, badRequest } from "../../lib/response";
+import { utcDate } from "../../lib/db-util";
 import { readJson } from "../../lib/validate";
 import { requireAdmin } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
@@ -75,8 +76,10 @@ export default async (req: Request): Promise<Response> => {
           bandwidthGbMonth: r.bandwidth_gb_month === null ? null : Number(r.bandwidth_gb_month),
           stickyGuaranteed: r.sticky_guaranteed === true,
           lastExitIp: r.last_exit_ip ? String(r.last_exit_ip) : null,
-          lastCheckAt: r.last_check_at ? new Date(String(r.last_check_at)).toISOString() : null,
-          expiresAt: r.expires_at ? new Date(String(r.expires_at)).toISOString() : null,
+          /* 🔴 [2026-09-19 수리 3판 · C `verify-server-time`] `timestamp`(시간대 없음) 칸을 `new Date(글자)` 로 읽으면
+             **프로세스 시간대**로 해석된다 — 프록시 «마지막 점검»·«만료»가 KST 프로세스에서 9시간 밀려 보인다. */
+          lastCheckAt: utcDate(r.last_check_at)?.toISOString() ?? null,
+          expiresAt: utcDate(r.expires_at)?.toISOString() ?? null,
           assignedTo: r.account_id ? { accountId: n(r.account_id), handle: String(r.account_handle ?? ""), tenantId: n(r.account_tenant) } : null,
         })),
       });
