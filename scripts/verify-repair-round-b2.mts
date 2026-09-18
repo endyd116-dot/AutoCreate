@@ -21,13 +21,13 @@ const rec = (name: string, ok: boolean, detail = "") => {
   measured++; if (!ok) bad++;
   console.log(`  ${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`);
 };
-/** 🔴 **알려진 결함** — 초록으로도 빨강으로도 세지 않는다.
- *  초록으로 세면 결함이 «괜찮은 것»으로 굳고(AC-9), 늘 빨갛게 두면 아무도 이 자를 안 본다.
- *  ⇒ **따로 세고 끝에 다시 외친다.** 고쳐지면 «이제 고쳐졌다 · 이 항목을 지워라»로 바뀐다. */
+/** 🔴 **남겨 둔 한계** — 초록으로도 빨강으로도 세지 않는다.
+ *  초록으로 세면 «괜찮은 것»으로 굳고(AC-9), 늘 빨갛게 두면 아무도 이 자를 안 본다.
+ *  ⇒ **따로 세고 끝에 다시 외친다.** 사라지면 «이제 고쳐졌다 · 이 항목을 지워라»로 바뀐다. */
 const known: string[] = [];
 const note = (name: string, stillBroken: boolean, detail: string) => {
-  if (stillBroken) { known.push(name); console.log(`  ⊘ [알려진 결함] ${name} — ${detail}`); }
-  else console.log(`  ✓ [고쳐졌다] ${name} — 이 자의 «알려진 결함» 항목을 지워 주세요`);
+  if (stillBroken) { known.push(name); console.log(`  ⊘ [남겨 둔 한계] ${name} — ${detail}`); }
+  else console.log(`  ✓ [고쳐졌다] ${name} — 이 자의 «남겨 둔 한계» 항목을 지워 주세요`);
 };
 
 const DICT = { "쓸GO 닦GO": "쓸고 닦고" };
@@ -78,15 +78,71 @@ async function run(): Promise<void> {
   rec("균등 씬이면 cut_rhythm 이 미달이고 수리본이 나온다", rhythm0?.pass === false && !!first.repairedPayload);
   const again = first.repairedPayload ? judgePayloadDeterministic(first.repairedPayload, {}, null, "훅") : null;
   const rhythm1 = again?.axes.find((a: { key: string }) => a.key === "cut_rhythm");
-  /* 🔴 **재통과를 배선했더니 곧바로 드러난 것**(2026-09-19 B2 · 이 자가 처음 잡았다):
-     `cut_rhythm` 수리는 씬 경계를 **평균의 8%** 미는데 판정 문턱은 **10%** 다.
-     ⇒ 수리본은 **제 검사를 절대 통과하지 못한다.** 실측 [5000×4] → [5400,4600,5400,4600] · maxDev 400 < 문턱 500.
-     🔴 즉 종전 «수리»는 **아무것도 안 고치면서** 씬 경계만 나레이션에서 400ms 밀어 놓는다.
-     🔴 **여기서 안 고친다** — 8%를 12%로 올리면 검사는 통과하지만 **그림이 소리에서 더 멀어진다.**
-        옳은 자리는 사후 밀기가 아니라 `scenes.ts` 의 **계획 단계**이고, 그건 A/V 싱크가 걸린 설계 결정이다.
-        ⇒ 메인에 보고하고 결정을 받는다(조용한 축소 0 · **조용한 확대도 0**). */
-  note("cut_rhythm 수리본이 제 검사를 못 통과한다(8% 밀기 < 10% 문턱)", rhythm1?.pass === false,
-    "재통과 배선이 드러냈다 · 사후 밀기는 A/V 싱크를 건드린다 → 계획 단계(scenes.ts)에서 고칠 일 · 메인 보고함");
+  /* 🔴 **내가 처음에 틀리게 말한 자리다 — 정정을 코드에 박아 둔다**(2026-09-19 · 메인이 잡았다).
+     나는 `[5000×4]` **하나**를 재고 «수리본은 **제 검사를 절대 통과하지 못한다**»고 단정했다.
+     그건 **완전 균등**이라는 한 점에서만 참이다. 메인이 «실제 대본의 씬은 안 고르다 —
+     이미 리듬이 있는 입력에 8%를 더 밀면 문턱을 넘길 수도 있다»고 짚었고, **재 보니 그 말이 맞았다.**
+
+     ══ 산수 ══ 수리는 짝끼리 ±shift(=0.08·mean). 짝수 자리는 `|dev₀+shift|`, 홀수 자리는 `|dev₀−shift|`.
+        문턱 0.1·mean 을 넘으려면 **`dev₀ ≥ 0.02·mean`** 이면 된다 ⇒ **dev₀=0(완전 균등)일 때만 절대 실패.**
+     ══ 실측 ══ 근사균등 무작위 3,920편: **56.4% 통과**. 흔들림별 0.5%→0% · 1%→0% · 2%→9.2% · 3%→49.9% · 5%→74.9%.
+        🔴 **실제 경로**(`planCutWindows` 정본 + 10~28음절 문장) 3,000편: 씬 불균등도 중앙값 **47%** · **최소 4.8%** —
+        `cut_rhythm` 이 «균등»으로 걸린 편은 **0.20%(6편)**이고 **그 6편은 수리본이 100% 통과**했다.
+     ⇒ 🔴 **순손해가 아니다. 지우지 않는다**(메인 판정 기준 «한 번도 안 통과하면 지워라»에 해당하지 않는다).
+        옳은 자리는 여전히 `scenes.ts` **계획 단계**이고 그건 A/V 싱크가 걸린 설계라 메인이 다음 판으로 가져간다. */
+  note("cut_rhythm 수리는 **완전 균등 입력에서만** 제 검사를 못 통과한다(전부는 아니다 — 내 첫 주장이 틀렸다)",
+    rhythm1?.pass === false, "이 한 점만 실패 · 근사균등 56.4% · 실제 경로 6/6 통과 → **지울 것이 아니다**(아래 축들이 잰다)");
+
+  /* 🔴 «이 수리가 통과하는 입력이 존재하나» — 메인 지시로 **실행해서** 센다(씨앗 고정이라 흔들리지 않는다). */
+  const mkLens = (lens: number[]) => {
+    let t = 0;
+    const scenes = lens.map((l, i) => { const s = t; t += l; return { idx: i, startMs: s, endMs: t, clipKey: "k" }; });
+    return { ...(payload as unknown as Record<string, unknown>), scenes } as never;
+  };
+  const tryRepair = (lens: number[]): boolean | null => {
+    const a = judgePayloadDeterministic(mkLens(lens), {}, null, "훅");
+    if (a.axes.find((x: { key: string }) => x.key === "cut_rhythm")?.pass !== false || !a.repairedPayload) return null;
+    return judgePayloadDeterministic(a.repairedPayload, {}, null, "훅").axes.find((x: { key: string }) => x.key === "cut_rhythm")?.pass !== false;
+  };
+  let seed = 42; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  let trig = 0, ok = 0;
+  for (let k = 0; k < 1200; k++) {
+    const n0 = 3 + Math.floor(rnd() * 9), mean = 2000 + Math.floor(rnd() * 6000), spread = rnd() * 0.10;
+    const r0 = tryRepair(Array.from({ length: n0 }, () => Math.round(mean * (1 + (rnd() * 2 - 1) * spread))));
+    if (r0 !== null) { trig++; if (r0) ok++; }
+  }
+  rec("🔴 수리가 **통과하는 입력이 존재한다**(= 순손해가 아니다 · 지울 것이 아니다)", trig > 0 && ok > 0,
+    `근사균등 ${trig}편 중 ${ok}편 통과(${trig ? (ok / trig * 100).toFixed(1) : "—"}%)`);
+  rec("🔴 완전 균등은 **그 한 점만** 실패한다(dev₀=0 이면 8% 를 밀어도 10% 문턱에 못 닿는다)",
+    tryRepair([5000, 5000, 5000, 5000]) === false && tryRepair([5000, 5000, 5000, 5000, 5000]) === false);
+  rec("🔴 dev₀ ≥ 2%·mean 이면 넘긴다 — 문턱이 산수대로다", tryRepair([5100, 4900, 5100, 4900]) === true, "±2% 입력");
+
+  /* 🔴 **실제 경로로 잰다** — 무작위 분포가 아니라 `planCutWindows` **정본**에 현실적인 문장(10~28음절 · 계약 상한)을 태운다.
+     여기서 나오는 씬은 **전혀 고르지 않다** ⇒ «완전 균등»은 실제로는 거의 안 나오는 입력이라는 것을 숫자로 남긴다. */
+  const { planCutWindows } = await import("../lib/video/scenes.js");
+  const { speechSecondsOf } = await import("../lib/video/tts.js");
+  let made = 0, fired = 0, firedOk = 0, minDev = 1;
+  for (let k = 0; k < 800; k++) {
+    const cuts = 4 + Math.floor(rnd() * 6), nLines = cuts + Math.floor(rnd() * cuts);
+    let t = 0;
+    const lines = Array.from({ length: nLines }, (_, i) => {
+      const s = t; t += Math.round(speechSecondsOf(10 + Math.floor(rnd() * 19)) * 1000);
+      return { idx: i, cutIdx: Math.min(cuts - 1, Math.floor(i * cuts / nLines)), startMs: s, endMs: t };
+    });
+    const wins = planCutWindows(lines);
+    if (wins.length < 3) continue;
+    made++;
+    const lens = wins.map((w: { startMs: number; endMs: number }) => w.endMs - w.startMs);
+    const mean = lens.reduce((a: number, b: number) => a + b, 0) / lens.length;
+    minDev = Math.min(minDev, Math.max(...lens.map((l: number) => Math.abs(l - mean))) / mean);
+    const r0 = tryRepair(lens);
+    if (r0 !== null) { fired++; if (r0) firedOk++; }
+  }
+  rec("🔴 실제 컷 창은 **고르지 않다** — «완전 균등»은 이 경로에서 안 나온다",
+    minDev > 0.02, `${made}편 중 가장 고른 편도 불균등도 ${(minDev * 100).toFixed(1)}%(문턱 10% · 절대 실패선 2%)`);
+  rec("🔴 실제 경로에서 수리가 불려도 **통과한다**(불린 편이 없으면 그것도 사실대로 적는다)",
+    fired === 0 || firedOk === fired, fired ? `${fired}편 걸림 · ${firedOk}편 통과` : `${made}편 중 «균등»으로 걸린 편 0 — 이 축은 이번 표본에서 못 쟀다`);
+  console.log(`  · 참고(판정 아님): 실제 경로 ${made}편 중 cut_rhythm 이 «균등»으로 걸린 편 ${fired}편(${(fired / Math.max(1, made) * 100).toFixed(2)}%) — **이 축은 거의 잠들어 있다**`);
   /* 🔴 **재통과를 실행으로 잰다**(소스 정규식이 아니라 · AM 8244b1770 «계단을 정규식이 아니라 실행으로»).
      `reading_time` 은 수리하면 **판정 문구가 바뀐다** — 수리 전엔 «읽을 시간 부족 …(표시 시간 연장으로 수리)»,
      수리본으로 다시 재면 이미 늘어나 있어 **사유가 사라진다.** 그 차이가 «정말 다시 쟀나»의 증거다. */
@@ -152,5 +208,8 @@ console.log("■ 수리 라운드 — «받을 것»에서 골라 고친 셋");
 await run();
 if (MUTATE) await mutate();
 console.log(`\n${bad ? `🔴 실패 ${bad}` : `✅ 잰 ${measured}축 전부 통과`}`);
-if (known.length) { console.log(`⊘ 알려진 결함 ${known.length}개 — **통과가 아니다**(메인 결정 대기):`); known.forEach((k) => console.log(`   · ${k}`)); }
+if (known.length) {
+  console.log(`⊘ 남겨 둔 한계 ${known.length}개 — **통과로 세지 않는다**(메인 결정 2026-09-19: 지우지 말고 남긴다 · 옳은 자리는 \`scenes.ts\` 계획 단계 → 다음 판 설계):`);
+  known.forEach((k) => console.log(`   · ${k}`));
+}
 process.exit(bad ? 1 : 0);
