@@ -123,6 +123,29 @@ const context = await browser.newContext({ viewport: { width: 390, height: 844 }
 
 console.log(`\n«손님 눈에 정말 칠해지나» — 칠해진 픽셀로 잰다 · ${new Date().toISOString()}`);
 console.log(`대상 화면 ${pages.length}개(폴더에서 스스로 찾았다 · 손 목록 0)`);
+
+/* 🔴 **이 자가 무엇을 세어 그 수가 나왔는지 스스로 찍는다**(메인 지시 2026-09-19).
+   같은 것을 **다른 모수**로 세어 서로 다른 수를 말하는 병이 이 리포에서 오늘만 세 번째다.
+   실제로 한 번 갈렸다 — 나는 «16곳 중 14곳», A 는 «10곳». **둘 다 내부적으로 맞았고 모수만 달랐다**:
+     · 내 16 = `public/**` 의 `class="chk"` **전부**(서빙 안 되는 정본 `app/_tpl.txt` 5곳 포함)
+     · A 의 11 = **실제로 서빙되는 화면**만(정본 제외) · 그중 `<i>` 마크업 1곳은 이미 보이고 있었다 → 10
+     · 산수: 14 − 10 = 4 = `_tpl.txt` 의 5 − 그중 `<i>` 1.
+   ⇒ 이제 **자가 제 모수를 적는다.** 수를 말할 거면 «무엇을 세었나»를 같이 말해야 한다(AC-109 ㉮). */
+{
+  const chkFiles = [];
+  for (const f of walk(PUB).concat(readdirSync(path.join(PUB, "app"), { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith(".txt")).map((e) => path.join(PUB, "app", e.name)))) {
+    const src = readFileSync(f, "utf8");
+    const n = (src.match(/class="chk"/g) ?? []).length;
+    if (!n) continue;
+    const withI = (src.match(/class="chk"[^>]*><input[^>]*><i>/g) ?? []).length;
+    chkFiles.push({ file: "/" + path.relative(PUB, f).replace(/\\/g, "/"), n, withI, served: f.endsWith(".html") });
+  }
+  const total = chkFiles.reduce((s, c) => s + c.n, 0);
+  const servedN = chkFiles.filter((c) => c.served).reduce((s, c) => s + c.n, 0);
+  console.log(`\n■ 내가 세는 모수 — \`class="chk"\` **${total}곳** (서빙되는 화면 ${servedN}곳 + 서빙 안 되는 정본 ${total - servedN}곳)`);
+  for (const c of chkFiles) console.log(`   ${c.served ? "화면" : "정본"}  ${c.file.padEnd(24)} ${c.n}곳${c.withI ? ` (그중 <i> 마크업 ${c.withI})` : ""}`);
+  console.log(`   🔴 아래 «본 판정»이 실제로 브라우저로 여는 것은 **서빙되는 화면 중 로그인 전 것**뿐이다 — 나머지는 ⊘ 로 적는다.`);
+}
 console.log("─".repeat(112));
 
 /** 화면 하나를 재고 [{sel, painted, changed}] 를 돌려준다. */

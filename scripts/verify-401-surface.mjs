@@ -61,7 +61,14 @@ for (const f of walk(FN, /\.ts$/)) {
   /* 🔴 **사람말을 실은 401 만** 본다 — `error:` 가 없으면 화면이 띄울 말도 없다. */
   const withWords = hits.filter((h) => /\berror\s*:/.test(h[1]));
   if (!withWords.length) continue;
-  const steps = withWords.map((h) => (h[1].match(/step\s*:\s*["'`]([^"'`]+)/) ?? [])[1] ?? "(step없음)");
+  /* 🔴 `step` 을 **삼항으로** 쓰는 자리가 있다 — `runner.ts:61 step: a.reason === "other_device" ? "other_device" : "runner_auth"`.
+     한 개만 뽑으면 «step없음»으로 잘못 읽는다(첫 판이 그랬다). ⇒ 그 값 안의 **글자 상수를 전부** 거둔다. */
+  const steps = withWords.flatMap((h) => {
+    const sm2 = h[1].match(/step\s*:\s*([^,}]*)/);
+    if (!sm2) return ["(step없음)"];
+    const lits = sm2[1].match(/["'`]([^"'`]+)["'`]/g);
+    return lits && lits.length ? lits.map((s) => s.slice(1, -1)) : ["(step없음)"];
+  });
   const cfg = src.match(/export\s+const\s+config\s*=\s*\{[^}]*?path\s*:\s*(\[[^\]]*\]|["'][^"']*["'])/s);
   const paths = cfg ? (cfg[1].match(/["'`](\/[^"'`]+)["'`]/g) ?? []).map((s) => s.slice(1, -1)) : [];
   for (const p of paths) routes401.set(p, { file: rel(f), steps: [...new Set(steps)] });
@@ -112,18 +119,38 @@ console.log(`\n«서버가 보낸 사람말이 손님에게 닿나» — 401 을
 console.log("─".repeat(120));
 if (LIST) for (const p of pairs) console.log(`  ${p.wantsToShow ? (p.noRedirect ? "✓닿는다" : "🔴못닿는다") : "·안띄움"}  ${p.route.padEnd(26)} ${p.screen.padEnd(30)} step[${p.steps.join(",")}]`);
 
-const broken = pairs.filter((p) => p.wantsToShow && !p.noRedirect);
-const good = pairs.filter((p) => p.wantsToShow && p.noRedirect);
+/* 🔴 **2026-09-19 A 의 수리를 받고 잣대를 바꿨다 — 내 자가 낡았던 것이다.**
+   내 첫 판은 «`noRedirect: true` 가 있나»로 쟀다. 그런데 A 는 **호출마다 붙이는 대신 틀을 고쳤다**:
+     `public/js/ui.js:25` `const SESSION_401 = ["auth","user","operator","expired"];`
+     `:26` `const sessionGone = data.step === undefined || SESSION_401.indexOf(data.step) >= 0;`
+   ⇒ `step:"current"` 같은 **세션 아닌 401 은 이제 안 쫓아낸다.** 그게 더 나은 고침이다(한 곳에서 끝난다).
+   🔴 그러면 내 «noRedirect 가 있나»는 **거짓 빨강**이 된다. 잣대를 새 계약에 맞춘다:
+     **말이 닿는다** = ①`noRedirect: true` 가 있거나 ②그 401 의 `step` 이 세션 목록 밖이라 틀이 안 내보내거나.
+     **말이 안 닿는다** = 🔴 **401 에 `step` 을 아예 안 달았다** — 그러면 틀이 «세션 끊김»으로 보고 내보낸다.
+   🔴 목록은 **`ui.js` 에서 읽어 온다** — 여기 베껴 적으면 A 가 목록을 고친 날 이 자가 낡는다(AC-78). */
+const uiSrc = existsSync(path.join(PUB, "js", "ui.js")) ? codeOnly(readFileSync(path.join(PUB, "js", "ui.js"), "utf8")) : "";
+const sm = uiSrc.match(/SESSION_401\s*=\s*\[([^\]]*)\]/);
+const SESSION_STEPS = sm ? (sm[1].match(/["'`]([^"'`]+)["'`]/g) ?? []).map((s) => s.slice(1, -1)) : null;
+const NO_STEP = "(step없음)";
+/** 이 짝에서 **말이 못 닿는** 401 갈래가 있나. */
+function unreachableSteps(p) {
+  if (p.noRedirect) return [];                       // 화면이 직접 막았다 — 어떤 401 이든 닿는다
+  if (!SESSION_STEPS) return p.steps;                // 🔴 목록을 못 읽었다 — 옛 계약으로 본다(느슨하게)
+  return p.steps.filter((s) => s === NO_STEP || SESSION_STEPS.includes(s));
+}
+for (const p of pairs) p.unreachable = unreachableSteps(p);
+const broken = pairs.filter((p) => p.wantsToShow && p.unreachable.length > 0);
+const good = pairs.filter((p) => p.wantsToShow && p.unreachable.length === 0);
 
 rec("🔴 화면이 **띄우겠다고 적어 둔** 401 사람말은 실제로 닿는다(`noRedirect: true`)", broken.length === 0,
   broken.length ? `못 닿는 자리 ${broken.length}곳 / 띄우려는 자리 ${broken.length + good.length}곳` : `띄우려는 자리 ${good.length}곳 전부 닿는다`);
 for (const b of broken) {
   console.log(`   🔴 ${b.route}`);
   console.log(`      화면 ${b.screen} 이 \`r.error\` 를 띄우게 적어 뒀는데 \`noRedirect: true\` 가 없다`);
-  console.log(`      서버 ${b.server} 가 401 로 보내는 말: step[${b.steps.join(", ")}]`);
+  console.log(`      서버 ${b.server} 가 401 로 보내는 말: step[${b.steps.join(", ")}] · 🔴 못 닿는 갈래: [${b.unreachable.join(", ")}]`);
   console.log(`      ⇒ \`UI.api\`(ui.js:17~25)가 **모든 401 을 세션 끊김으로** 읽고 내보낸다. 그 줄에 닿기 전에 페이지가 떠난다.`);
 }
-const soft = pairs.filter((p) => p.softShow && !p.noRedirect);
+const soft = pairs.filter((p) => p.softShow && p.unreachable.length > 0);
 if (soft.length) {
   console.log(`\n△ 살펴볼 것 — 칸 밑이 아니라 **다른 방법으로** 401 사람말을 띄우려는 자리(판정 밖 · 사람이 본다):`);
   for (const s of soft) console.log(`   · ${s.route.padEnd(26)} ${s.screen}  step[${s.steps.join(",")}]`);
@@ -136,14 +163,21 @@ rec("대조군 — **제대로 된 자리도 있다**(이 자가 둘을 가른�
 
 /* ═══ ⓪ 자기 찌르기 — 🔴 «우는가»를 잰다(AC-108) ═══ */
 {
-  const judge = (calls) => calls.filter((c) => c.wantsToShow && !c.noRedirect).length;
-  rec("⓪a 자기 찌르기 — `noRedirect` 를 **붙이면** 그 빨강이 사라진다",
-    judge(pairs.map((p) => (p.screen === "public/app/settings.html" && p.route === "/api/auth-change-password" ? { ...p, noRedirect: true } : p))) < broken.length,
-    `붙인 뒤 ${judge(pairs.map((p) => (p.screen === "public/app/settings.html" && p.route === "/api/auth-change-password" ? { ...p, noRedirect: true } : p)))}곳`);
-  rec("⓪b 자기 찌르기 — **멀쩡한 자리에서 `noRedirect` 를 떼면 운다**",
-    judge(pairs.map((p) => (p.noRedirect ? { ...p, noRedirect: false } : p))) > broken.length,
-    `전부 떼면 ${judge(pairs.map((p) => ({ ...p, noRedirect: false })))}곳이 운다(지금 ${broken.length}곳)`);
-  rec("⓪c 자기 찌르기 — **띄울 뜻이 없는 호출은 안 센다**(거짓 빨강 방지)",
+  /* 🔴 **변이도 새 계약에 맞춰 다시 짰다.** 옛 변이(«noRedirect 를 붙이면 빨강이 사라지나»)는
+     A 의 수리 뒤 **고칠 대상이 0곳**이라 성립하지 않는다 — 그 변이는 자가 무력해서가 아니라
+     **이미 고쳐졌기 때문에** 못 도는 것이다. 그걸 빨강으로 남겨 두면 «늘 빨간 자»가 된다. */
+  const judge = (calls) => calls.map((c) => ({ ...c, unreachable: unreachableSteps(c) })).filter((c) => c.wantsToShow && c.unreachable.length > 0).length;
+  const shown = pairs.filter((p) => p.wantsToShow);
+  rec("⓪a 자기 찌르기 — 🔴 **401 에서 `step` 을 떼면 운다**(틀이 «세션 끊김»으로 보고 내보낸다)",
+    shown.length > 0 && judge(pairs.map((p) => (p.wantsToShow ? { ...p, steps: [NO_STEP], noRedirect: false } : p))) === shown.length,
+    `step 을 다 떼면 ${judge(pairs.map((p) => (p.wantsToShow ? { ...p, steps: [NO_STEP], noRedirect: false } : p)))}/${shown.length}곳이 운다(지금 ${broken.length}곳)`);
+  rec("⓪b 자기 찌르기 — 🔴 **세션 목록에 든 `step`** 이면 운다(그건 정말 내보내는 자리다)",
+    SESSION_STEPS && SESSION_STEPS.length > 0 && judge(pairs.map((p) => (p.wantsToShow ? { ...p, steps: [SESSION_STEPS[0]], noRedirect: false } : p))) === shown.length,
+    SESSION_STEPS ? `«${SESSION_STEPS[0]}» 로 바꾸면 ${judge(pairs.map((p) => (p.wantsToShow ? { ...p, steps: [SESSION_STEPS[0]], noRedirect: false } : p)))}/${shown.length}곳` : "🔴 ui.js 에서 SESSION_401 을 못 읽었다");
+  rec("⓪c 자기 찌르기 — **세션 목록 밖 `step`** 이면 안 운다(틀이 막아 주니 안 쫓겨난다)",
+    judge(pairs.map((p) => (p.wantsToShow ? { ...p, steps: ["__not_a_session_step__"], noRedirect: false } : p))) === 0,
+    `목록 밖 step 이면 ${judge(pairs.map((p) => (p.wantsToShow ? { ...p, steps: ["__not_a_session_step__"], noRedirect: false } : p)))}곳 — A 의 수리가 여기서 값을 한다`);
+  rec("⓪d 자기 찌르기 — **띄울 뜻이 없는 호출은 안 센다**(거짓 빨강 방지)",
     judge(pairs.map((p) => ({ ...p, wantsToShow: false }))) === 0,
     `띄울 뜻을 지우면 ${judge(pairs.map((p) => ({ ...p, wantsToShow: false })))}곳 — 401 을 내도 «안 띄우는» 호출은 이 축 밖이다`);
 }
