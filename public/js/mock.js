@@ -177,6 +177,19 @@
   const GATE_WEIGHT = { disclosure: "high", banned_words: "high", stock_safe: "high", ad_pointing: "high", similarity: "high",
     affiliate_count: "normal", superlative: "normal", cliche: "normal", para_repeat: "normal", bullet_ratio: "normal",
     sentence_variance: "normal", translationese: "normal", persona: "normal", visual_min: "normal", link_check: "normal", structure_repeat: "normal", cross_account: "high" };   /* cross_account = 계정 하나 = IP 하나를 지키는 축(B-4 · 위험도 1번) */
+  /* 🔴 [2026-09-19 수리 ⑤-2] **걸렸을 때의 말** — 서버 `lib/ai-tell-gate.ts GATE_FAIL_LABEL` 의 화면 사본(글자까지 같게).
+     `label` 은 «통과했을 때의 이름»이라, 홈 위험 목록이 그걸 쓰면 «분량이 알맞음»이 위험처럼 실린다(시나리오 A §9 · 서버는 고쳤다).
+     🔴 두 곳이 갈라지면 `scripts/verify-label-surface.mjs` 가 운다 — 서버를 고치면 여기도 고쳐라. */
+  const GATE_FAIL_SAY = {
+    length: "분량이 짧아요", cliche: "상투 표현이 있어요", para_repeat: "문단 시작이 비슷해요",
+    bullet_ratio: "불릿이 본문을 대신해요", sentence_variance: "문장 길이가 고르게 짧아요",
+    translationese: "번역투가 있어요", superlative: "최상급에 근거가 없어요", persona: "내 사정이 안 들어갔어요",
+    visual_min: "사진·소제목이 적어요", disclosure: "대가 고지가 첫머리에 없어요",
+    banned_words: "근거 없이 쓰면 위험한 표현이 있어요", similarity: "다른 글과 겹쳐요",
+    affiliate_count: "제휴 링크가 많아요", cross_account: "다른 내 계정 글과 겹쳐요",
+    link_check: "안 열리는 링크가 있어요", ad_pointing: "광고를 가리키는 문장이 있어요",
+    stock_safe: "그대로 쓰기 어려운 스톡 사진이 있어요", structure_repeat: "최근 글과 구조가 같아요",
+  };
   const GATE_HOW = {
     disclosure: "검수에서 «대가를 받았나»를 켜면 첫머리 문장이 자동으로 들어가요.",
     banned_words: "단정·효능 표현은 지우고, 최상급은 같은 문장에 근거(기관·기간·수치)를 붙여 주세요.",
@@ -195,7 +208,7 @@
     { key: "persona", label: "내 사정이 들어감", pass: true, detail: "3곳" }, { key: "visual_min", label: "채널 시각 요소 충족", pass: true, detail: "사진 8장" },
     /* [R8-A2] 🔴 이 둘은 서버에 축이 **있는데 화면이 한 번도 안 보여 준 것**이다(하니스가 «서버에만 있는 축»으로 세고 있었다).
        새 축은 «화면에 한 번이라도 보이나»까지가 완료다(CLAUDE §4.8) — 사유 문장 모양은 서버 것 그대로. */
-    { key: "length", label: "분량이 계약 폭 안", pass: true, detail: "1,840자(계약 1,200~2,500자)" },
+    { key: "length", label: "분량이 알맞음", pass: true, detail: "1,840자(권장 1,200~2,500자)" },   // [2026-09-19 수리 ⑤-2] 서버 GATE_LABEL 과 글자까지 같게 · «계약»은 손님 말이 아니다(§3)
     { key: "stock_safe", label: "스톡 사진이 쓸 수 있는 것", pass: true, detail: "스톡 사진이 없어요(우리가 만든 그림·고객 사진)" },
     { key: "disclosure", label: "대가 고지 첫머리", pass: ok }, { key: "banned_words", label: "근거 없이 쓰면 위험한 표현 없음", pass: true, detail: "0건" }, { key: "similarity", label: "다른 글과 겹치지 않음", pass: true, detail: "12%" }, { key: "affiliate_count", label: "제휴 링크 2개 이하", pass: true, detail: "1개" }, { key: "link_check", label: "링크 열림", pass: true },
     /* [R8-A §2 · B-1] 골격 반복 — 🔴 **소프트**(HARD_GATE_KEYS 밖)라 실패해도 예약은 된다. 사유 문장 모양은 서버 checkStructure 그대로 */
@@ -261,7 +274,7 @@
     variantLabels: { hook: HOOK_KO[HOOKS[i % HOOKS.length]], palette: PALETTE_KO[PALETTES[(Number(accountId || 0) + i) % PALETTES.length]], voiceId: VOICES[i % VOICES.length].name }, /* 사람말은 서버가 붙인다(화면 하드코딩 0) */
     cuts: format === "clip" ? 3 : seconds >= 60 ? 9 : 5, disclosure: { badge: true, descriptionFirstLine: true } });
   /* [AC-52 · 2026-09-15 · lib/video/judge.ts AXIS_LABEL 에서 그대로 복사] 🔴 손으로 고치지 마라 — 서버가 정본이고, 다르면 verify-label-surface 가 빨강이다 */
-  const JUDGE_AXES = [["hook_first", "첫 컷이 훅"], ["safe_area", "자막·배지가 안전영역 안"], ["caption_lines", "자막 2줄 이내"], ["reading_time", "자막 읽을 시간 충분"], ["text_broken", "깨진 글자 없음"], ["black_margin", "검은 여백 없음"], ["frames_not_blank", "빈 프레임 없음"], ["cut_rhythm", "컷 리듬 살아 있음"], ["forbidden", "금칙·내부 문자열 없음"], ["disclosure", "제휴 고지(배지·자막·설명란)"], ["duration_fit", "길이 규격 안"], ["similarity", "다른 계정 영상과 겹치지 않음"]];
+  const JUDGE_AXES = [["hook_first", "첫 컷이 훅"], ["safe_area", "자막·배지가 안전영역 안"], ["caption_lines", "자막 2줄 이내"], ["reading_time", "자막 읽을 시간 충분"], ["text_broken", "깨진 글자 없음"], ["black_margin", "검은 여백 없음"], ["frames_not_blank", "빈 프레임 없음"], ["cut_rhythm", "컷 리듬 살아 있음"], ["forbidden", "금칙·내부 문자열 없음"], ["disclosure", "제휴 고지(배지·자막·설명란)"], ["duration_fit", "길이 규격 안"], ["similarity", "다른 계정 영상과 겹치지 않음"], ["has_audio", "소리가 실렸음"]];
   const judgeReport = (grade) => ({ grade, pass: grade !== "P0", repaired: grade === "P1", axes: JUDGE_AXES.map(([key, label]) => { const bad = (grade === "P1" && key === "black_margin") || (grade === "P0" && key === "forbidden");   /* [AC-52] 서버 GRADE_OF 의 P1·P0 축으로 */ const o = { key, label, pass: !bad, grade: bad ? grade : "P2" };
       if (judgePending && !bad && (key === "similarity" || key === "duration_fit")) { o.pending = true; o.detail = key === "similarity" ? "영상 지문이 오지 않아 못 쟀어요 — 내 PC 프로그램이 대표 프레임을 보내면 다음부터 견줘요" : "길이를 잴 도구(ffprobe)가 없어 못 쟀어요"; }   /* [R7 §1.5] pass 지만 «쟀다»가 아니다 */ if (grade === "P1" && key === "black_margin") o.detail = "4번 컷 아래 검은 여백 · 한 번 다시 만들어 통과"; if (grade === "P0" && key === "forbidden") o.detail = "내부 문자열이 남았어요 · 세 번 고쳐도 안 돼 사람이 봐 주세요"; return o; }) });
   const POSTER = "data:image/svg+xml;utf8," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='540' height='960'><rect width='540' height='960' fill='#191F28'/><rect x='60' y='380' width='420' height='120' rx='16' fill='#2A2A32'/><text x='270' y='452' font-family='sans-serif' font-size='40' font-weight='800' fill='#fff' text-anchor='middle'>에어프라이어 기름때</text></svg>");
@@ -285,7 +298,8 @@
   /* [P1R7 §3.1 · B ba99538] 쓰기 막힘 — 🔴 **탈퇴 신청이 먼저다**(그 집엔 «체험»도 «결제»도 할 말이 아니다).
      문장·칸 이름은 lib/guards.ts requireWritable 에서 그대로(느슨하게 베끼면 화면이 또 딴말을 한다 · AC-52). */
   const notWritable = () => {
-    if (S.close) { const daysLeft = Math.max(0, Math.ceil((new Date(S.close.purgeAt).getTime() - Date.now()) / 86400e3));
+    /* [2026-09-19 수리 ⑤-2] 🔴 **날짜로 센다** — 밀리초로 올리면 탈퇴 직후 «31일»과 «30일»이 같이 뜬다(서버 `daysLeftKst` 와 같은 셈). */
+    if (S.close) { const kd = (t) => Math.floor((t + 9 * 3600e3) / 86400e3); const daysLeft = Math.max(0, kd(new Date(S.close.purgeAt).getTime()) - kd(Date.now()));
       return { ok: false, step: "writable", reason: "closed", error: `탈퇴를 신청하셨어요. ${daysLeft}일 뒤에 자료가 지워져요 — 그때까지는 보기만 할 수 있고, 되돌리면 하던 대로 다시 쓸 수 있어요.`, purgeAt: S.close.purgeAt, daysLeft, status: 403 }; }
     return blocked ? { ok: false, step: "writable", reason: blocked, error: blocked === "readonly" ? "체험이 끝났어요. 요금제를 고르면 바로 이어서 돼요." : "결제가 밀려 있어요. 카드를 확인해 주세요.", status: 403 } : null;
   };
@@ -756,7 +770,8 @@
       if (warnPre.length || warnPost.length) {
         const src = warnPre.length ? warnPre : warnPost;
         const cnt = new Map();   // 사유는 **많이 걸린 순 3개**까지 · 라벨은 서버 정본 그대로(화면이 문구를 지어내지 않는다)
-        for (const p of src) for (const c of p.gate.checks) if (!c.pass) cnt.set(c.label, (cnt.get(c.label) || 0) + 1);
+        // [2026-09-19 수리 ⑤-2] 🔴 **걸린 검사는 걸린 말로** — `c.label` 은 통과 이름이라 «분량이 알맞음»이 위험처럼 실렸다(서버와 같이 고친다).
+        for (const p of src) for (const c of p.gate.checks) if (!c.pass) { const say = GATE_FAIL_SAY[c.key] || c.label; cnt.set(say, (cnt.get(say) || 0) + 1); }
         const why = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l]) => l).join(" · ") || "확인이 필요한 표시가 있어요";
         const one = src.length === 1 ? src[0] : null;
         todo.push(warnPre.length
