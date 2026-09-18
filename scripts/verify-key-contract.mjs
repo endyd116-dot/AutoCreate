@@ -158,6 +158,39 @@ for (const f of walk(PUB, /\.(html|js)$/)) {
 }
 
 /* ═══ ③ 서버가 읽는 키 ═══ */
+/** 🔴 **몸통을 받는 함수를 한 겹 따라간다** — 그 함수가 **첫 매개변수에서 읽는 키**를 돌려준다.
+    찾는 곳: 그 핸들러 파일 자신 → `lib/**`(import 를 따라가지 않고 이름으로 찾는다 — 이 리포는 이름이 겹치지 않는다).
+    🔴 못 찾으면 **null** 이다. «찾은 척»하지 않는다(AC-9). */
+const fnDefCache = new Map();
+function paramKeysOfFunction(fnName, sameFile) {
+  if (fnDefCache.has(fnName)) return fnDefCache.get(fnName);
+  const libDir = path.join(ROOT, "lib");
+  const cands = [sameFile, ...(existsSync(libDir) ? walk(libDir, /\.ts$/) : [])];
+  let found = null;
+  for (const f of cands) {
+    const src = codeOnly(readFileSync(f, "utf8"));
+    const m = src.match(new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${fnName}\\s*\\(\\s*([A-Za-z_$][\\w$]*)`));
+    if (!m) continue;
+    const param = m[1];
+    /* 몸통을 중괄호 균형으로 잘라 `param.키` · `param["키"]` · 구조분해를 모은다. */
+    const open = src.indexOf("{", m.index + m[0].length);
+    if (open < 0) continue;
+    let d = 0, end = -1;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === "{") d++;
+      else if (src[i] === "}") { d--; if (!d) { end = i; break; } }
+    }
+    const body = src.slice(open, end < 0 ? src.length : end + 1);
+    const keys = new Set();
+    for (const km of body.matchAll(new RegExp(`\\b${param}\\.([A-Za-z_$][\\w$]*)`, "g"))) keys.add(km[1]);
+    for (const km of body.matchAll(new RegExp(`\\b${param}\\[\\s*["'\`]([^"'\`]+)["'\`]\\s*\\]`, "g"))) keys.add(km[1]);
+    for (const km of body.matchAll(/["'`]([A-Za-z_$][\w$]*)["'`]/g)) keys.add(km[1]);   // 화이트리스트 상수
+    if (keys.size) { found = { from: rel(f), keys }; break; }
+  }
+  fnDefCache.set(fnName, found);
+  return found;
+}
+
 const blockCache = new Map();
 function readKeysFor(route) {
   const file = routeFile.get(route);
@@ -221,14 +254,29 @@ function readKeysFor(route) {
   /* ① 화이트리스트·분기 목록 — 키 이름이 **글자로** 적혀 있으면 읽는 것으로 본다.
      🔴 느슨한 쪽이다(거짓 빨강보다 거짓 초록을 고른다) — 그 대가는 머리말 «아직 못 하는 것»에 적혀 있다. */
   for (const m of block.matchAll(/["'`]([A-Za-z_$][\w$]*)["'`]/g)) keys.add(m[1]);
-  /* ③ 몸통을 통째로 넘기는 자리 — 키 이름이 코드에 안 나온다. «읽었다»고 셀 수 없다. */
+  /* ③ 몸통을 통째로 넘기는 자리 — 키 이름이 **여기에는** 안 나온다.
+     🔴 **2026-09-19 · «못 쟀음»을 한 겹 따라가서 줄였다.** 그날 B 가 내 ⊘ 중 넷을 열어 봤더니
+     **넷이 전부 진짜 고장**이었다(프로모션·쿠폰 저장이 늘 400 · 「끝내기」는 아무 일도 안 났다).
+     🔴 **⊘ 는 «괜찮다»가 아니다**(AC-9) — 넷 중 넷으로 증명됐다. 그래서 비켜 가는 폭을 좁힌다.
+     이 리포의 모양은 늘 같다: `sanitizeSchedulePatch(b)` · `validateTaxInput(b)` · `parseLimits(b, cur.limits)`.
+     ⇒ **몸통을 받는 그 함수를 찾아** 그 함수가 매개변수에서 읽는 키를 여기로 끌어온다(한 겹만).
+     🔴 두 겹 이상 넘어가면 그때는 정말 «못 쟀음»이다 — 지어내지 않는다. */
   const passthrough = /\(\s*b\s*[,)]|\bsanitize[A-Za-z]*\(\s*b\b|\.\.\.\s*b\b/.test(block);
+  let followed = null;
+  if (passthrough) {
+    for (const m of block.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(\s*b\s*[,)]/g)) {
+      const fnName = m[1];
+      if (/^(?:if|for|while|switch|return|json|n|String|Number|Boolean|Object|Array)$/.test(fnName)) continue;
+      const got = paramKeysOfFunction(fnName, file);
+      if (got && got.keys.size) { followed = { fn: fnName, from: got.from, keys: got.keys }; for (const k of got.keys) keys.add(k); break; }
+    }
+  }
   /* 🔴 서버가 **같은 이름의 값을 스스로 만드는** 자리 — `support.ts:119 const contentType = ext === "png" ? …`.
      화면이 보낸 `contentType` 을 **안 믿고 제가 정한다.** 이건 **고장이 아니라 옳은 판단**이다(클라이언트 말을 믿으면 안 된다).
      ⇒ 빨강으로 세지 않는다. 🔴 다만 **조용히 넘기지도 않는다** — 따로 한 줄 찍는다(안 찍으면 다음 사람이 «왜 통과지?» 한다). */
   const derived = new Set();
   for (const m of block.matchAll(/\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=/g)) derived.add(m[1]);
-  const out = { file: rel(file), keys, scoped, passthrough, derived };
+  const out = { file: rel(file), keys, scoped, passthrough, derived, followed };
   blockCache.set(key, out);
   return out;
 }
@@ -243,7 +291,7 @@ for (const c of calls) {
   if (!server) { unmeasured.push({ ...c, why: "이 경로를 가진 핸들러를 못 찾았다(config.path 누락이면 라이브 404 다)" }); continue; }
   const missing = c.keys.filter((k) => !server.keys.has(k));
   pairs++;
-  if (missing.length && server.passthrough) { unmeasured.push({ ...c, why: `몸통을 통째로 넘기는 자리라 키 이름이 코드에 안 나온다(${server.file}) — 안 읽음[${missing.join(",")}] 를 판정 못 한다` }); continue; }
+  if (missing.length && server.passthrough && !server.followed) { unmeasured.push({ ...c, why: `몸통을 통째로 넘기는 자리라 키 이름이 코드에 안 나온다(${server.file}) — 안 읽음[${missing.join(",")}] 를 판정 못 한다` }); continue; }
   const derivedHits = missing.filter((k) => server.derived.has(k));
   const realMissing = missing.filter((k) => !server.derived.has(k));
   if (derivedHits.length) derivedList.push({ ...c, server: server.file, derivedHits });
