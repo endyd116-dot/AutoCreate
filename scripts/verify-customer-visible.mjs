@@ -30,7 +30,10 @@
  *
  *   ══ 🔴 이 자가 **아직 못 하는 것**(못으로 박아 둔다 · AC-109 ㉰) ══
  *   · 라이브 왕복은 안 한다(DB·네트워크 0). «화면에 정말 뜨나»는 시나리오 B 가 브라우저로 잰다.
- *   · `INTERNAL_KEY_RE` 말고 **다른 길**로 내부가 켜지는 것(`is_internal` 손수 켬·메일 도메인)은 안 본다.
+ *   · 🔴 **①축은 «키 규칙»만 본다**(그게 진짜 상호를 삼키는 그 규칙이라). **대조군은 «도메인 + 키»를 같이 본다** —
+ *     제품이 그렇게 가르기 때문이다(`internal.ts:72~74`·`:83`). 이 둘을 섞어 재면 한쪽이 거짓 빨강을 낸다(아래 주석).
+ *   · 셋째 신호 «**사용자가 아예 없는 집**»은 안 본다 — 글자로는 못 재고 DB 를 타야 한다(«못 쟀음»).
+ *   · `is_internal` 을 **손으로 켠 것**(`internal_manual_at`)은 안 본다.
  *
  *   종료코드: 0 = 손님이 안 사라진다 · 1 = 사라진다 · 2 = 못 쟀다.
  */
@@ -81,8 +84,22 @@ const OURS = [
   ["p1r5run@autocreate.test", "P1R5 러너"],
 ];
 
+/* 🔴 **2026-09-19 · B 수리를 받고 대조군을 고쳤다 — 내 자가 과했다.**
+   첫 판의 대조군은 «우리 하니스가 **키 규칙에** 걸리나»만 봤다. 그런데 제품은 키 규칙 **하나로만** 가르지 않는다
+   (`lib/ops/internal.ts:72~74`·`:83`): ①**내부 메일 도메인** ②키 규칙 ③**사용자가 아예 없는 집**.
+   B 가 키 규칙을 좁히자(진짜 상호를 안 삼키게) 내 대조군이 1/4 로 떨어져 **빨개졌는데**,
+   🔴 우리 하니스는 전부 `@autocreate.test` 라 **①로 그대로 걸린다** — B 의 수리는 안전하고 **내 자가 틀린 것**이었다.
+   «새 결함을 찾았다»고 보고하기 직전이었다(AC-112). ⇒ 대조군도 **제품과 같은 세 신호**로 본다. */
+const domMatch = codeOnly(readFileSync(internalSrc, "utf8")).match(/INTERNAL_EMAIL_DOMAINS[^=]*=\s*\[([^\]]*)\]/);
+const INTERNAL_DOMAINS = domMatch ? (domMatch[1].match(/["'`]([^"'`]+)["'`]/g) ?? []).map((s) => s.slice(1, -1)) : [];
+/** 제품의 `looksInternal` 과 같은 뜻(글자로) — 도메인이거나 키 규칙이거나. */
+const looksInternalLike = (email) => INTERNAL_DOMAINS.some((d) => email.toLowerCase().endsWith(`@${d}`)) || KEY_RE.test(keyBaseOf(email));
+
+/** 아무것도 안 맞는 규칙 — 변이에서 «규칙을 비운다»를 뜻한다. */
+const NEVER = /$^/;
 const swallowed = CUSTOMERS.filter(([e]) => KEY_RE.test(keyBaseOf(e)));
-const oursCaught = OURS.filter(([e]) => KEY_RE.test(keyBaseOf(e)));
+const oursCaught = OURS.filter(([e]) => looksInternalLike(e));
+const oursByKeyOnly = OURS.filter(([e]) => KEY_RE.test(keyBaseOf(e)));
 
 console.log(`\n«가입한 손님이 운영 화면에서 보이나» · ${new Date().toISOString()}`);
 console.log(`규칙(소스에서 읽음): ${KEY_RE}`);
@@ -92,8 +109,11 @@ rec("① 🔴 규칙이 **진짜 상호를 삼키지 않는다**", swallowed.len
   swallowed.length ? `손님 표본 ${CUSTOMERS.length}개 중 **${swallowed.length}개가 사라진다**` : `손님 표본 ${CUSTOMERS.length}개 전부 보인다`);
 if (swallowed.length && (LIST || true)) for (const [e, who] of swallowed) console.log(`   🔴 ${who.padEnd(26)} ${e.padEnd(28)} → 키 «${keyBaseOf(e)}» 가 규칙에 걸려 **운영 화면에서 사라진다**`);
 
-rec("대조군 — **우리 하니스**는 그대로 걸린다(규칙이 아예 안 도는 게 아니다)", oursCaught.length === OURS.length,
-  `${oursCaught.length}/${OURS.length} 걸린다`);
+rec("대조군 — **우리 하니스**는 그대로 내부로 걸린다(도메인·키 세 신호 중 하나로)", oursCaught.length === OURS.length,
+  `${oursCaught.length}/${OURS.length} 걸린다 — 그중 **키 규칙으로** 걸리는 것은 ${oursByKeyOnly.length}개(나머지는 내부 메일 도메인이 받는다)`);
+/* 🔴 «어느 신호가 받았나»를 찍어 둔다 — 규칙이 또 좁아질 때 **무엇이 받쳐 주고 있는지**를 다음 사람이 알아야 한다. */
+console.log(`   내부 메일 도메인(소스에서 읽음): ${INTERNAL_DOMAINS.join(" · ") || "(못 읽음)"}`);
+for (const [e, who] of OURS) console.log(`   · ${who.padEnd(14)} ${e.padEnd(30)} 키규칙 ${KEY_RE.test(keyBaseOf(e)) ? "걸림" : "안걸림"} · 도메인 ${INTERNAL_DOMAINS.some((d) => e.toLowerCase().endsWith("@" + d)) ? "걸림" : "안걸림"}`);
 
 /* ═══ ② 서버가 «숨겼다»고 말하면 화면이 그 말을 받나 ═══
    🔴 손 목록이 아니다 — 응답에 «숨김»을 알리는 키를 **서버 소스에서 찾아**, 그 경로를 부르는 화면이 그 키를 읽는지 본다. */
@@ -167,8 +187,15 @@ rec(`③ 🔴 숨은 집을 **꺼낼 손잡이**(\`${knobName}=1\`)를 화면이
   const all = swallowedBy(/^/);
   rec("⓪b 자기 찌르기 — **전부 삼키는 규칙**을 넣으면 ①이 더 크게 운다(축이 규칙을 따라간다)",
     all === CUSTOMERS.length && all > swallowed.length, `삼킨 손님 ${all}/${CUSTOMERS.length}명 (지금 규칙은 ${swallowed.length}명)`);
-  rec("⓪c 자기 찌르기 — 대조군도 규칙을 따라간다(우리 것을 **안** 삼키는 규칙이면 대조군이 운다)",
-    oursBy(/^ $/) === 0 && oursBy(KEY_RE) === OURS.length, `빈 규칙 ${oursBy(/^ $/)}/${OURS.length} · 지금 규칙 ${oursBy(KEY_RE)}/${OURS.length}`);
+  /* 🔴 대조군 변이도 **세 신호**를 따라가게 고쳤다 — 도메인까지 막아야 «안 걸린다»가 성립한다.
+     (키 규칙만 흔들면 도메인이 받아 주므로 그 변이는 **아무것도 안 재는 변이**가 된다 · AC-112) */
+  const oursAll = (re, domains) => OURS.filter(([e]) => domains.some((d) => e.toLowerCase().endsWith("@" + d)) || re.test(keyBaseOf(e))).length;
+  rec("⓪c 자기 찌르기 — **세 신호를 다 막으면** 대조군이 운다(대조군이 신호를 따라간다)",
+    oursAll(NEVER, []) === 0 && oursAll(KEY_RE, INTERNAL_DOMAINS) === OURS.length,
+    `빈 규칙+도메인 없음 ${oursAll(NEVER, [])}/${OURS.length} · 지금 ${oursAll(KEY_RE, INTERNAL_DOMAINS)}/${OURS.length}`);
+  rec("⓪e 자기 찌르기 — 🔴 **키 규칙만 흔들면 도메인이 받아 준다**(그래서 키 규칙만 보면 안 된다)",
+    oursAll(NEVER, INTERNAL_DOMAINS) === OURS.length,
+    `키 규칙을 비워도 도메인이 ${oursAll(NEVER, INTERNAL_DOMAINS)}/${OURS.length} 를 받는다 — 첫 판이 여기서 거짓 빨강을 냈다`);
   /* ②축 — 화면이 그 키를 읽으면 초록이 되나(글자를 바꿔 먹여 본다 · 진짜 파일 무접촉). */
   const fixedScreens = screens.map((s) => (s.file === "public/ops/tenants.html" ? { ...s, src: s.src + "\n/*x*/ r.internal.hidden;" } : s));
   const stillBlind = [];
