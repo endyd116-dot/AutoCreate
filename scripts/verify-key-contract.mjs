@@ -25,9 +25,12 @@
  *      «그때 이래서 고쳤다»는 주석의 키 이름을 «읽는다»로 세면 이 자가 바로 그 병에 걸린다.
  *
  *   ══ 🔴 이 자가 **아직 못 하는 것**(못으로 박아 둔다 · AC-109 ㉰) ══
- *   · **되돌아오는 키**(서버가 보내는 응답 ↔ 화면이 읽는 `r.xxx`)는 **안 잰다.** 응답 모양이 갈래마다 달라
- *     글자만 봐서는 «안 보낸다»와 «이 갈래에선 안 보낸다»를 못 가른다. 그 축은 `verify-r8-deadends.mjs` 의
- *     «화면이 부르나» 줄이 **손 목록으로** 일부만 지키고 있다 — 넓히는 것은 다음 사람 몫이다.
+ *   · 🔴 **되돌아오는 키**(서버 응답 ↔ 화면의 `r.xxx`)는 **찍기만 하고 판정하지 않는다**(«살펴볼 것»).
+ *     세 판을 고쳐 봤다 — ①`json({…})` 최상위 키 파싱 ②느슨한 키 모음 ③응답 변수 묶기.
+ *     진짜 둘(`coinsSplit`·`notes`)은 매번 잡혔지만 **중첩 접근**(`r.slots[i].topicTitle`)과
+ *     **갈래마다 다른 응답 모양** 때문에 거짓 빨강이 끝내 안 걷혔다.
+ *     🔴 빨강으로 게이트하면 **잘 선 요청 축까지 같이 못 믿을 것이 된다**(AC-95) ⇒ 내렸다.
+ *     **이 축은 아직 «못 쟀음»이다**(AC-9) — 판정으로 올리는 것이 다음 사람의 몫이다.
  *   · 키 이름을 **변수로 만들어** 보내면(`{ [k]: v }`) 못 본다. 지금 리포엔 그런 자리가 없다(아래 ⑤ 축이 센다).
  *   · `fetch()` 직접 호출은 안 본다 — 화면은 `UI.api` 를 쓴다(그 축도 아래 ⑤ 가 센다).
  *
@@ -249,6 +252,56 @@ for (const c of calls) {
   if (c.spread) unmeasured.push({ ...c, why: "`...펼치기` 라 보내는 키 이름을 다 모른다" });
 }
 
+/* ═══ ④b 🔴 **되돌아오는 키** — 화면이 읽는 응답 키를 서버가 정말 보내나 ═══
+   ④ 는 «보내는 키»(요청)를 쟀다. 여기서는 **반대 방향**을 잰다 — 시나리오 B 가 찾은 아홉 중 **다섯이 이쪽**이었다:
+     `ops/tenant.html:55` 이 `r.coinsSplit` 을 읽는데 서버(`ops-tenants.ts:111`)는 `coinDetail` 을 보낸다
+     ⇒ 코인 포함/충전 분해가 **영원히 안 뜬다.** 오류도 없고 `ok:true` 다.
+   판정: 화면이 읽는 `r.<키>` 는, **그 화면이 부르는 어느 API 든 하나는** 보내야 한다(합집합으로 본다 —
+   한 화면이 여러 API 를 부르고 변수 이름이 겹치므로, 좁게 매기면 거짓 빨강이 난다).
+   🔴 **못 하는 것**: `r.slots.planned` 처럼 **한 겹 더 들어간 키**는 안 본다(서버가 SQL 별칭으로 만들어
+   글자로는 못 따라간다). 그 자리는 시나리오 B 문서가 손으로 적어 두었다. */
+const RESPONSE_SKIP = new Set(["ok", "status", "error", "step", "detail", "gated", "json", "text", "length", "map", "filter", "forEach", "slice", "find", "some", "every", "push", "join", "then", "catch"]);
+function responseKeysOf(route) {
+  const file = routeFile.get(route);
+  if (!file) return null;
+  const src = codeOnly(readFileSync(file, "utf8"));
+  const keys = new Set();
+  /* 🔴 **손으로 중괄호를 세는 파서를 버렸다.** 첫 판에서 `json({ ok:true, tenant:t, users, … })` 의 최상위 키를
+     제대로 못 뽑아 **거짓 빨강 21화면**을 냈다(`ops/tenant.html` 의 `tenant`·`setup`·`coins` 는 서버가 **보내고 있는데**도).
+     🔴 거짓 빨강이 쏟아지면 곧 아무도 이 자의 빨강을 안 본다(AC-95). ⇒ **느슨한 쪽**으로 간다:
+     핸들러 파일 안에서 **객체 키로 쓰인 이름**(`키:`)과 **짧은 표기**(`{ a, b }`)를 전부 모은다.
+     이 축이 잡으려는 것은 «서버가 **어디에도 그런 이름을 안 쓴다**»이고(`coinsSplit` 처럼), 그건 이걸로 충분히 잡힌다.
+     🔴 대가: 같은 이름이 **다른 뜻**으로 파일 어딘가에 있으면 놓친다. 그건 «못 하는 것»에 적어 둔다. */
+  /* 🔴 판정을 **«서버가 그 이름을 아예 모른다»** 하나로 좁혔다. 시나리오 B 가 찾은 병이 정확히 그 모양이다 —
+     화면이 `r.coinsSplit` 을 읽는데 서버 파일 어디에도 `coinsSplit` 이라는 **글자가 없다**(서버는 `coinDetail` 을 보낸다).
+     «최상위 키인가»를 가리려고 두 판을 썼지만 둘 다 거짓 빨강이 쏟아졌다(`json({…})` 안에 중첩 객체가 있어
+     블록을 못 자른다). **정확히 가리려다 아무도 안 보는 자가 되느니, 덜 가리고 믿을 수 있는 쪽**을 고른다.
+     🔴 대가는 크다 — «보내긴 하는데 **다른 갈래에서만** 보낸다»는 못 잡는다. 머리말에 적어 뒀다. */
+  for (const m of src.matchAll(/\b[A-Za-z_$][\w$]*\b/g)) keys.add(m[0]);
+  return keys;
+}
+const respBad = [];
+const respUnmeasured = [];
+for (const f of walk(PUB, /\.(html|js)$/)) {
+  const screen = rel(f);
+  if (screen === "public/js/ui.js") continue;              // 틀은 여러 화면을 대신 부른다 — 짝을 못 맨다
+  const src = codeOnly(readFileSync(f, "utf8"));
+  const routes = [...new Set([...src.matchAll(/UI\.api\s*\(\s*["'`](\/api\/[A-Za-z0-9_-]+)/g)].map((m) => m[1]))];
+  if (!routes.length) continue;
+  const sends = new Set();
+  let unknown = false;
+  for (const r of routes) { const ks = responseKeysOf(r); if (!ks) { unknown = true; continue; } for (const k of ks) sends.add(k); }
+  if (unknown) { respUnmeasured.push({ screen, why: "핸들러를 못 찾은 경로가 섞여 있다" }); continue; }
+  /* 🔴 응답 변수를 **실제 대입에서** 찾는다 — 이름을 짐작하면(`r`·`res`·`j`) **DOM 요소를 담은 `r`** 까지 섞여
+     `r.innerHTML` 같은 것이 «서버가 안 보내는 키»로 찍힌다(첫 판이 그랬다). `await UI.api(…)` 로 받은 이름만 본다. */
+  const respVars = new Set([...src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+UI\.api\s*\(/g)].map((m) => m[1]));
+  const read = new Set();
+  for (const v of respVars) for (const m of src.matchAll(new RegExp(`\\b${v}\\.([A-Za-z_$][\\w$]*)`, "g"))) read.add(m[1]);
+  const missing = [...read].filter((k) => !sends.has(k) && !RESPONSE_SKIP.has(k));
+  if (missing.length) respBad.push({ screen, routes, missing });
+}
+/* 🔴 이 축은 «합집합»이라 느슨하다 — 그래도 `coinsSplit` 처럼 **어느 API 도 안 보내는** 키는 잡힌다. */
+
 /* ═══ ⑤ 이 자가 안 보는 자리를 **축으로** 둔다 — 넓어지면 여기가 먼저 운다 ═══ */
 const out = [];
 const rec = (step, ok, note) => { out.push({ step, ok, note }); return ok; };
@@ -270,6 +323,19 @@ if (derivedList.length) {
 △ 보내는데 안 읽는다 — 그런데 서버가 **같은 이름을 스스로 만든다**(클라이언트를 안 믿는 것이 맞다 — 고장 아님):`);
   for (const d of derivedList) console.log(`   · ${d.route} — 화면이 [${d.derivedHits.join(",")}] 을 보내지만 ${d.server} 가 직접 정한다`);
 }
+/* 🔴 **되돌아오는 방향은 «살펴볼 것»으로 내린다 — 판정하지 않는다.**
+   세 판을 고쳐 봤지만(최상위 키 파싱 → 느슨한 키 모음 → 응답 변수 묶기) **믿을 만큼 좁혀지지 않았다**:
+   진짜 둘(`coinsSplit`·`notes`)은 매번 잡히는데, 중첩 접근(`r.slots[i].topicTitle`)과
+   갈래마다 다른 응답 모양 때문에 **거짓 빨강이 계속 섞인다.**
+   🔴 이걸 빨강으로 게이트하면 **이 자 전체가 못 믿을 것이 된다**(AC-95) — 잘 선 요청 축까지 같이 죽는다.
+   ⇒ **찍기는 하되 판정에서 뺀다.** 여기 있는 것은 «틀렸다»가 아니라 «**사람이 한 번 봐야 한다**»다.
+   🔴 이 축을 판정으로 올리는 것이 다음 사람의 몫이고, **올리기 전에는 «못 쟀음»이다**(AC-9). */
+if (respBad.length) {
+  console.log(`\n△ 살펴볼 것 — 화면이 읽는데 **서버 파일에 그 이름이 아예 없는** 응답 키(판정 아님 · 사람이 본다):`);
+  for (const b of respBad) console.log(`   · ${b.screen}  [${b.missing.join(", ")}]`);
+  console.log(`   🔴 이 중 확인된 진짜: public/ops/tenant.html 의 \`coinsSplit\`(서버는 \`coinDetail\`) · \`notes\`(서버는 \`note\`)`);
+}
+
 rec("화면은 경로를 글자로 적는다(변수로 만들면 이 자가 못 본다 · 틀 `ui.js` 는 제외)", dynamicRoutes.length === 0,
   dynamicRoutes.length
     ? `화면 변수 경로 ${dynamicRoutes.length}곳 — ${dynamicRoutes.map((d) => `${d.screen}: ${d.snip}`).join(" / ")}`
