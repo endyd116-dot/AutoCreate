@@ -1181,7 +1181,7 @@ async function load() {
      (라이브에서 blogger 는 status=active 인데 우리 앱 키가 없어 못 붙는다 — 조합했으면 이 경우가 «붙을 수 있는 칸»으로 보였다) */
   const soon = (c) => (c.connectable === false || (c.connectable === undefined && c.status && c.status !== "active")) && !cnt[c.key];
   const soonWord = (c) => (c.connectableReason === "not_open" || (!c.connectableReason && c.status !== "active")) ? "곧 열려요" : "준비 중이에요";
-  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? soonWord(c) : c.monetizable === false ? "광고 없음 · 유입" : (SUB[c.key] || "")}</small></button>`).join("");
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? `${soonWord(c)}${c.monetizable === false ? " · 광고 없음" : ""}` : c.monetizable === false ? "광고 없음 · 유입" : (SUB[c.key] || "")}</small></button>`).join("");
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
@@ -1204,7 +1204,11 @@ function soonSheet(c) {
   const why = c.connectableReason === "no_provider_key" || c.connectableReason === "no_site_url"
     ? "채널은 열렸는데 저희 연결 준비가 남았어요. 끝나는 대로 바로 붙일 수 있어요."
     : c.category === "video" ? "영상 채널은 심사와 연결 준비가 끝나는 대로 열려요." : "이 채널은 연결 준비가 끝나는 대로 열려요.";
-  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${c.connectableReason === "not_open" || !c.connectableReason ? "준비 중이에요 · 곧 열려요" : "곧 연결할 수 있어요"}</p>
+  /* [2026-09-19 수리 ③] 🔴 **아직 안 열린 채널에도 «광고가 안 붙어요»를 말해 준다.**
+     종전엔 `connectSheet()` 에만 배너가 있었고 안 열린 채널은 여기로 빠져 **당근에서 한 글자도 안 떴다**
+     (서버는 `monetizable:false` 를 보내고 있었다 · 시나리오 A §6). 「열리면 붙일까」를 **지금** 정하는 자리라 여기가 맞다.
+     🔴 막지 않는다(§9) — 말만 올려둔다. 문장 정본은 `UI.noRevenueBanner` 한 곳(AC-52). */
+  UI.sheet(`${UI.noRevenueBanner(c.monetizable === false ? [c.key] : [], "margin:0 0 10px")}<p style="margin:0 0 6px;font-size:16px;font-weight:700">${c.connectableReason === "not_open" || !c.connectableReason ? "준비 중이에요 · 곧 열려요" : "곧 연결할 수 있어요"}</p>
     <p class="muted" style="margin:0 0 10px">${UI.esc(why)}${c.connectableReason === "no_provider_key" || c.connectableReason === "no_site_url" ? "" : " 열리면 이 자리에서 바로 연결할 수 있어요."}</p>
     <p class="muted" style="margin:0;font-size:12.5px">그동안에도 ${c.category === "video" ? "영상은 만들어 둘 수 있어요 — 만든 영상은 내려받아 앱에서 직접 올리면 돼요." : "다른 채널로는 그대로 나가요."}</p>`, { title: label });
 }
@@ -1640,7 +1644,7 @@ function closeSheet() {
   UI.sheet(`<p class="muted" style="margin:0 0 10px">지금 바로 <b style="color:var(--ink)">보기만</b> 할 수 있게 바뀌고, <b style="color:var(--ink)">${g}일 뒤</b>에 만든 글·영상·연결한 계정·수익 기록이 모두 지워져요. 그 전에는 «되돌리기»로 그대로 돌아올 수 있어요.</p>
     <p class="muted" style="margin:0 0 10px">영수증은 법에 따라 5년 남지만(전자상거래법), 이름·이메일 같은 개인 정보는 지워요. 만든 것들을 남기고 싶다면 위 «내 자료»에서 먼저 받아 주세요.</p>
     <div class="sec">왜 나가시나요 <span class="muted" style="font-weight:500">· 안 골라도 돼요</span></div>${UI.chips("why", WHY, "")}
-    <label class="chk" style="margin:10px 0 0"><input type="checkbox" id="okChk"><i></i>위 내용을 확인했고, 탈퇴에 동의해요</label>
+    <label class="chk" style="margin:10px 0 0"><input type="checkbox" id="okChk"> <span>위 내용을 확인했고, 탈퇴에 동의해요</span></label>
     <div class="cta"><button class="btn danger" type="button" id="closeDo" disabled>탈퇴하기</button></div>`,
     { title: "정말 나가시겠어요?", onOpen: (sh, close) => {
       UI.bindChips(sh);

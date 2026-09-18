@@ -37,7 +37,7 @@ function fail(res: Response): Fail { return { ok: false, user: null, ops: null, 
 import { sql } from "drizzle-orm";
 import { db } from "../db/index";
 import { writeAudit } from "./audit";
-import { utcDate } from "./db-util";
+import { utcDate, daysLeftKst } from "./db-util";
 
 /** 🔴 [P1R7 §3.1] `closed` 추가 — 탈퇴를 신청한 집도 상태는 `readonly` 라 종전엔 «체험이 끝났어요»가 떴다(그 집엔 거짓말이고,
  *  정작 필요한 «되돌리기»를 못 찾게 만든다). 이유를 서버에서 가른다. `readonly`(체험 종료)·`suspended`(결제 밀림)는 그대로다. */
@@ -65,7 +65,7 @@ export async function requireWritable(tid: number): Promise<WritableOk | Writabl
     /* 탈퇴 신청(= 파기 예약)이 먼저다 — 그 집엔 «체험»도 «결제»도 할 말이 아니다. 예약 칸은 `closed_at`·`purge_at`(P1R7 §3.1). */
     const purgeAt = utcDate(row?.purge_at);
     if (row?.closed_at && purgeAt) {
-      const daysLeft = Math.max(0, Math.ceil((purgeAt.getTime() - Date.now()) / 86400_000));
+      const daysLeft = daysLeftKst(purgeAt);   // [2026-09-19 수리 ⑤] 날짜로 센다 — 밀리초 올림 때문에 «31일»과 «30일»이 같이 떴다
       const error = `탈퇴를 신청하셨어요. ${daysLeft}일 뒤에 자료가 지워져요 — 그때까지는 보기만 할 수 있고, 되돌리면 하던 대로 다시 쓸 수 있어요.`;
       return { ok: false, reason: "closed", status, purgeAt: purgeAt.toISOString(), daysLeft,
         res: json({ ok: false, step: "writable", reason: "closed", error, purgeAt: purgeAt.toISOString(), daysLeft }, 403) };

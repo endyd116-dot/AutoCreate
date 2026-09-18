@@ -253,13 +253,12 @@ input,textarea,select{font:inherit;color:inherit}
 .done-full .ck svg{width:44px;height:44px;color:#fff} .done-full p{margin-top:16px;font-size:18px;font-weight:700}
 @keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
 /* 배너(원격접속·체험) */
-/* [R7 §3.1] 위험 동작 한 단계 확인 — 체크 1개(시트 안에서만 · 누르는 영역 44) */
-.chk{display:flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink)}
-.chk input{position:absolute;width:0;height:0;opacity:0}
-.chk i{flex:none;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--line);background:var(--surface);position:relative;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
-.chk input:checked+i{background:var(--ink);border-color:var(--ink)}
-.chk input:checked+i::after{content:"";position:absolute;left:7px;top:3px;width:5px;height:10px;border:solid var(--surface);border-width:0 2px 2px 0;transform:rotate(45deg)}
-.chk input:focus-visible+i{outline:2px solid var(--sel);outline-offset:2px}
+/* 🔴 [2026-09-19 수리 ①] 여기 있던 두 번째 `.chk` 정의(네이티브 input 을 `opacity:0` 으로 숨기고 형제 `<i>` 가
+   네모를 그리는 방식)를 **걷어냈다**. 300줄대의 «input 자신이 네모» 방식과 특이도가 같아 **속성별로 섞였고**,
+   `width·height·background·border` 는 뒤가 이겼는데 `opacity:0` 은 여기 것만 남아
+   **체크박스가 화면에서 투명해졌다**(가입 약관 4개·«30일 로그인 유지»·결제 동의 등 **살아 있는 10곳**).
+   ⇒ 체크박스를 그리는 방식은 **`.chk` 한 곳(아래 «체크박스 — 잉크 계열 커스텀»)뿐**이다. 여기에 다시 만들지 마라.
+   자: `scripts/verify-chk-visible.mjs` (같은 선택자가 두 번 정의되면 운다) */
 .banner{background:var(--warn-soft);color:var(--warn-ink);border-radius:14px;padding:10px 14px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .banner.info{background:var(--brand-soft);color:var(--ink)}
 .banner button{font-weight:700;text-decoration:underline;white-space:nowrap;flex:none}
@@ -297,12 +296,13 @@ input,textarea,select{font:inherit;color:inherit}
   .auth-in{background:var(--surface);border-radius:24px;padding:36px 32px 32px;max-width:420px}
   .auth .foot{margin-top:24px}
 }
-/* 체크박스 — 잉크 계열 커스텀(기본 accent 색 제거) */
-.chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub);padding:10px 2px;min-height:44px;cursor:pointer;user-select:none}
-.chk input{appearance:none;-webkit-appearance:none;width:22px;height:22px;border-radius:7px;background:var(--ground);border:2px solid var(--line);flex:none;display:grid;place-items:center;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+/* 체크박스 — 잉크 계열 커스텀(기본 accent 색 제거) · 🔴 **앱에서 체크박스를 그리는 유일한 곳**(수리 ① · 2026-09-19) */
+.chk{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:var(--sub);padding:10px 2px;min-height:44px;cursor:pointer;user-select:none}
+.chk input{appearance:none;-webkit-appearance:none;position:relative;width:22px;height:22px;border-radius:7px;background:var(--ground);border:2px solid var(--line);flex:none;display:grid;place-items:center;transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease)}
 .chk input:checked{background:var(--brand);border-color:var(--brand)}
 .chk input:checked::after{content:"";width:11px;height:6px;border-left:2.5px solid var(--on-brand);border-bottom:2.5px solid var(--on-brand);transform:rotate(-45deg) translate(1px,-1px)}
-.chk input:focus-visible{outline:2px solid var(--sel);outline-offset:2px} .chk input{position:relative} .chk input::before{content:"";position:absolute;inset:-14px} /* 터치 44 — 보이는 22px 상자 밖까지 눌린다 */
+.chk input:focus-visible{outline:2px solid var(--sel);outline-offset:2px}
+.chk input::before{content:"";position:absolute;inset:-14px} /* 터치 44 — 보이는 22px 상자 밖까지 눌린다(`position:relative` 는 위 한 곳에) */
 .chk a{text-decoration:underline;text-underline-offset:2px;display:inline-block;padding:12px 0;margin:-12px 0;position:relative;z-index:1}
 .divider{height:1px;background:var(--line);margin:12px 0}
 .muted{color:var(--muted)} .tnum{font-variant-numeric:tabular-nums} .center{text-align:center}

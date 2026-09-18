@@ -20,7 +20,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { q } from "./accounts";
 import { writeAudit } from "./audit";
-import { utcDate } from "./db-util";
+import { utcDate, daysLeftKst } from "./db-util";
 import { r2DeletePrefix } from "./r2";
 
 const n = (v: unknown) => Number(v || 0);
@@ -178,5 +178,5 @@ export async function closeStateOf(tid: number): Promise<{ closed: boolean; clos
   const [t] = await q(sql`SELECT closed_at, purge_at FROM tenants WHERE id = ${tid}`);
   const closedAt = utcDate(t?.closed_at), purgeAt = utcDate(t?.purge_at);
   if (!closedAt || !purgeAt) return { closed: false, graceDays: CLOSE_GRACE_DAYS };
-  return { closed: true, closedAt: closedAt.toISOString(), purgeAt: purgeAt.toISOString(), daysLeft: Math.max(0, Math.ceil((purgeAt.getTime() - Date.now()) / 86400_000)), graceDays: CLOSE_GRACE_DAYS };
+  return { closed: true, closedAt: closedAt.toISOString(), purgeAt: purgeAt.toISOString(), daysLeft: daysLeftKst(purgeAt), graceDays: CLOSE_GRACE_DAYS };
 }

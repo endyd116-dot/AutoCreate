@@ -30,7 +30,8 @@ export default async (req: Request): Promise<Response> => {
   // P1R4 §2.4(7) — 약관 동의: 이용약관·개인정보는 필수 · 나머지는 있으면 기록. 기록은 가입 성공 뒤(테넌트 id 가 있어야 한다).
   //   ⚠️ `consents` 키 자체가 없는 옛 화면(머지 순서 B→A 사이 창)은 막지 않고 감사만 남긴다 — 화면이 보내기 시작하면 필수가 된다(조용히 가입이 막히는 사고 방지).
   const agreed = parseSignupConsents(consents ?? {});
-  if (consents !== undefined && agreed.missing.length) return badRequest("이용약관과 개인정보 처리방침에 동의해 주세요.", "consents");
+  // [2026-09-19 수리 ⑤] 화면은 «네 가지 약관에 모두 동의해 주세요»라고 말하는데 여기는 «둘»이라고 했다 — 숫자가 어긋났다(시나리오 A §1).
+  if (consents !== undefined && agreed.missing.length) return badRequest("네 가지 약관에 모두 동의해 주세요.", "consents");
   try {
     if (await findUserByEmail(email)) return badRequest("이 이메일로는 가입할 수 없어요. 로그인하거나 비밀번호를 찾아보세요.", "exists");
     // [P1R6 §1.1] 추천 코드는 테넌트를 만들기 **전에** 본다 — 틀리면 400 만 돌려주고 아무것도 남기지 않는다.

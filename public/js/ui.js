@@ -14,7 +14,17 @@
     try { res = await fetch(path, init); } catch { return { ok: false, error: "네트워크가 불안정해요. 다시 시도해 주세요.", status: 0 }; }
     let data = {};
     try { data = await res.json(); } catch { /* empty */ }
-    if (res.status === 401 && !opts.noRedirect) {
+    /* 🔴 [2026-09-19 수리 ②] **401 이 언제나 «세션이 끊겼다»는 뜻은 아니다.**
+       종전엔 모든 401 을 세션으로 읽어 refresh → 같은 요청 재시도 → `/login.html` 로 **내보냈다**.
+       그래서 설정에서 **현재 비밀번호를 한 번 틀리면 손님이 로그인 화면으로 쫓겨났고**(세션은 멀쩡했다),
+       서버가 보낸 «현재 비밀번호가 맞지 않아요»(`step:"current"`)는 화면에 닿지도 못했다
+       (`settings.html` 의 `UI.fieldError` 가 그 문장을 띄우려던 참이었다 · 시나리오 A §12).
+       ⇒ **세션이 끊겼다고 서버가 말한 401 에서만** 내보낸다. 나머지 401 은 그대로 화면에 돌려준다.
+       🔴 새 401 을 만들면 **`step` 을 여기 목록에 넣을지 정해라** — 안 넣으면 화면이 그 문장을 «보여 주는» 쪽이 된다(덜 나쁜 쪽).
+       자: `scripts/verify-401-meaning.mjs` (401 을 내는 자리의 `step` 이 전부 분류돼 있나) */
+    const SESSION_401 = ["auth", "user", "operator", "expired"];
+    const sessionGone = data.step === undefined || SESSION_401.indexOf(data.step) >= 0;
+    if (res.status === 401 && !opts.noRedirect && sessionGone) {
       // 슬라이딩/리프레시 1회 시도 후 실패면 로그인으로
       if (!opts._retried && !path.includes("auth-refresh") && !path.startsWith("/api/ops")) {
         const r = await fetch("/api/auth-refresh", { method: "POST", credentials: "same-origin" }).catch(() => null);

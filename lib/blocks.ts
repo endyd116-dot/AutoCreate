@@ -306,8 +306,19 @@ export function blocksToPlain(blocks: Block[]): string {
   return ps.join("\n\n");
 }
 
-/** 본문 글자 수(공백 포함 · 고지·태그 제외). */
-export function blocksCharCount(blocks: Block[]): number { return blocksToPlain(blocks).replace(/\s+/g, " ").length; }
+/**
+ * 🔴 **글자를 세는 법은 여기 한 곳뿐이다**(수리 ⑤ · 2026-09-19).
+ *   왜: 검수 화면 한 곳에 «지금 글은 91자»와 «지금 89자예요»가 **같이** 떴다(시나리오 A §9).
+ *   블록으로 세는 쪽(`blocksCharCount`)은 공백을 한 칸으로 줄여 세는데, 블록이 없는 옛 글을 HTML 로 재던 쪽은
+ *   문단 사이 줄바꿈을 그대로 세고 있었다 — 두 문단이면 딱 2가 어긋났다.
+ *   ⇒ 세는 규칙(`\s+` → 한 칸)을 `countPlainChars` 한 곳에 두고 **둘 다 이걸 부른다**. 새로 세지 마라.
+ *   자: `scripts/verify-one-charcount.mjs`
+ */
+export function countPlainChars(text: string): number { return String(text ?? "").replace(/\s+/g, " ").trim().length; }
+/** 본문 글자 수(공백 포함 · 고지·태그 제외) — 블록으로 잰다. */
+export function blocksCharCount(blocks: Block[]): number { return countPlainChars(blocksToPlain(blocks)); }
+/** 같은 자로 HTML 본문을 잰다 — 블록이 없는 옛 글·직접 쓴 글용(`blocksCharCount` 와 **같은 규칙**). */
+export function htmlCharCount(html: string | null | undefined): number { return countPlainChars(htmlToPlain(html)); }
 
 /**
  * 블록 정규화 — 모델 출력의 느슨한 모양을 계약 모양으로. 모르는 type 은 para 로.

@@ -28,7 +28,7 @@ import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
 import { contractFor, topicGroupOf, resolveGoal, lengthFor, imagesFor } from "../../lib/writing-contracts";
-import { htmlToPlain, blocksCharCount } from "../../lib/blocks";   // [2026-09-16] 🔴 글자 세는 자는 **하나**다 — 게이트와 같은 함수
+import { htmlCharCount, blocksCharCount } from "../../lib/blocks";   // [2026-09-19 수리 ⑤] 🔴 둘 다 `countPlainChars` 로 센다 — 세는 법은 `lib/blocks.ts` 한 곳
 import { formatUnusedOf } from "../../lib/format-marks";           // [R9-5] «못 낸 서식» 사람말 투영(정본은 meta.formatMarks)
 import { formatCapsOf } from "../../lib/channel-registry";         // [R9-4] 채널 꾸밈 표
 import { ruleKindOfPiece } from "../../lib/slots";                  // [R11-1] 화면 어휘(RuleKind) 투영 — 정본 한 곳
@@ -246,17 +246,20 @@ export default async (req: Request): Promise<Response> => {
           images: { min: img.min, max: img.max, default: img.default, fromGroup: !!(grp && wc.imagesByGroup?.[grp]) },
           goalRules: wc.goalRules?.[goal] ?? [],       // 실제로 프롬프트에 실린 줄들(없으면 빈 배열)
           /* 🔴 [2026-09-16 · A 가 첫 발행 경로에서 찾음] **자가 둘이었다.**
-             여기서는 `htmlToPlain(body).length`(HTML 을 평문으로 · 줄바꿈 유지)로 재고,
+             여기서는 `htmlToPlain(body).length`(HTML 을 평문으로 · **줄바꿈 유지**)로 재고,
              게이트(`lib/ai-tell-gate.ts`)는 `blocksCharCount(blocks)`(블록 평문 · 공백을 하나로)로 잰다.
              ⇒ 같은 화면에 «472자»와 «1,840자»가 나란히 떴다. 게이트 주석은 «**세는 자는 하나**다»라고 적혀 있었는데
                 이 줄이 그 말을 어기고 있었다(AC-59 · 주석이 코드보다 앞서 나간 자리).
              🔴 자를 게이트 쪽으로 모은다 — 계약 폭(`lengthFor`)이 그 자로 정해진 값이라, 그 자로 재야 «폭 안인가»가 말이 된다.
-             🔴 블록이 없는 옛 글만 HTML 로 잰다(없는 것을 있는 척하지 않는다 · `charsFrom` 으로 어느 자인지 같이 말한다). */
+             🔴 블록이 없는 옛 글만 HTML 로 잰다(없는 것을 있는 척하지 않는다 · `charsFrom` 으로 어느 자인지 같이 말한다).
+             🔴 [2026-09-19 수리 ⑤] **그때 블록 쪽만 옮기고 HTML 쪽은 안 옮겼다.** 그래서 직접 쓴 글(블록 없음)에서
+                «지금 글은 91자»(줄바꿈 셈) ↔ «지금 89자예요»(공백 줄여 셈)가 **같은 화면에** 또 떴다(문단 둘 = 2 차이).
+                이제 둘 다 `lib/blocks.ts countPlainChars` 한 자를 쓴다 — `htmlCharCount` 도 그 자다. 자: `scripts/verify-one-charcount.mjs` */
           ...(() => {
             const blocks = Array.isArray(p.blocks) ? (p.blocks as Parameters<typeof blocksCharCount>[0]) : null;
             return blocks && blocks.length
               ? { actualChars: blocksCharCount(blocks), charsFrom: "blocks" as const }
-              : { actualChars: htmlToPlain(String(p.body || "")).length, charsFrom: "body" as const };
+              : { actualChars: htmlCharCount(String(p.body || "")), charsFrom: "body" as const };   // [수리 ⑤] 게이트와 **같은 자**로 센다(`countPlainChars`)
           })(),
         };
       } catch (e) {

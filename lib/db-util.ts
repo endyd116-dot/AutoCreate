@@ -26,3 +26,18 @@ export function utcDate(v: unknown): Date | null {
   }
   const d = new Date(s); return Number.isNaN(d.getTime()) ? null : d;
 }
+
+/**
+ * 🔴 [2026-09-19 수리 ⑤] «**며칠 남았어요**» — 손님이 말하는 «N일»은 **KST 달력 날짜 수**다(§4.5b).
+ *   종전엔 `Math.ceil((purgeAt - Date.now()) / 86400_000)` 이었다. 탈퇴 직후에는 남은 시간이 30일을 **밀리초만큼** 넘어
+ *   («purge_at − now» = 2,592,000.237초) `ceil` 이 **31**을 줬고, 2초 뒤 다시 읽으면 **30**이었다 —
+ *   설정 화면은 «31일 남았어요», 홈은 «30일 남았어요»가 나란히 떴다(시나리오 A §15 실측).
+ *   ⇒ 시각이 아니라 **날짜로 센다.** 같은 날이면 0, 내일이면 1. 어느 화면에서 읽어도 값이 같다.
+ *   🔴 세는 자는 여기 한 곳이다 — `lib/account-close.ts` 와 `lib/guards.ts` 가 이걸 부른다. 새로 세지 마라.
+ *   자: `scripts/verify-people-words.mjs`
+ */
+const KST_MS_ = 9 * 60 * 60 * 1000;
+export function daysLeftKst(until: Date, now: Date = new Date()): number {
+  const day = (d: Date) => Math.floor((d.getTime() + KST_MS_) / 86400_000);   // KST 기준 «며칠째»
+  return Math.max(0, day(until) - day(now));
+}

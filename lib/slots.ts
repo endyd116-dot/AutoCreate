@@ -357,7 +357,15 @@ export async function listSlots(tid: number, from: string, to: string, now = new
   /* [R10-9] 계정 기본 등급 — 자리마다 «지금 만들기가 몇 코인»을 그 계정 등급으로 센다(한 번에 읽는다 · 계정 30개면 쿼리 30번이 아니라 1번). 못 읽으면 빈 목록 = 전부 simple(낮게 말하는 쪽). */
   const tierRows = await q(sql`SELECT id, channel, quality_tier FROM accounts WHERE tenant_id = ${tid} AND COALESCE(last_error_kind,'') <> 'removed'`).catch(() => [] as Row[]);
   const tierAccounts = tierRows.map((r) => ({ id: n(r.id), channel: String(r.channel), defaultTier: toCoinTier(r.quality_tier) }));
-  const tickText = `${tickAt.getTime() < kstToUtc(addDays(todayKst, 1), 0, 0).getTime() ? "오늘" : "내일"} ${new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "numeric", minute: "2-digit" }).format(tickAt)}`;
+  /* 🔴 [2026-09-19 수리 ⑤] 한국어 문장 한가운데 «**AM 6:00**» 이 떴다(시나리오 A §8).
+     `Intl` 의 `ko-KR` 은 **CLDR 이 바뀐 뒤 약식 오전/오후를 `AM`/`PM` 으로 준다**(Node 24 full-icu 실측 — 키 문제가 아니다).
+     `produce-window.ts:41` 주석은 «사람말로(«오늘 **오전 6시**»)»라고 적어 뒀는데 코드가 그 말을 어기고 있었다(AC-59).
+     ⇒ 로케일에 맡기지 말고 **우리가 적는다.** 시각 판정 자체는 그대로 KST(`hour12:false` 로 뽑아 쓴다 · §4.5b). */
+  const tickHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", hour12: false }).format(tickAt));
+  const tickMin = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", minute: "2-digit" }).format(tickAt).padStart(2, "0");
+  const ampm = tickHour < 12 ? "오전" : "오후";
+  const h12 = tickHour % 12 === 0 ? 12 : tickHour % 12;
+  const tickText = `${tickAt.getTime() < kstToUtc(addDays(todayKst, 1), 0, 0).getTime() ? "오늘" : "내일"} ${ampm} ${h12}시${tickMin === "00" ? "" : ` ${tickMin}분`}`;
   /* [P1R7 B3 · §5B.2 D+1] 수익 되먹임 — 그 자리의 piece 에 귀속된 `revenue_daily` 합을 함께 읽는다(글별 TOP5 와 같은 원천 · lib/revenue/aggregate).
      🔴 수집 행이 하나도 없으면 SUM 이 NULL 이고, 그때는 키를 안 싣는다 — «아직 못 가져옴»을 «0원 벌었다»로 그리지 않게(AC-9). */
   const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title,
