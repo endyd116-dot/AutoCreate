@@ -92,7 +92,7 @@ function render() {
   // 🔴 0원을 큰 숫자로 자랑하지 않는다 — 번 적이 없으면 빈 상태가 기본
   if (!SUM.monthKrw && !DAYS.some((x) => x.krw > 0)) {
     UI.$("#hl").hidden = true;
-    body.innerHTML = `<div class="group"><div class="empty"><span class="mk money">₩</span><h3>${connected ? "이번 달은 아직 들어온 게 없어요" : "아직 연결된 곳이 없어요"}</h3><p>${connected ? "매체에서 정산이 올라오면 여기에 쌓여요." : "애드포스트부터 해볼까요? 조건이 되는지 먼저 확인해 드려요."}</p><a class="btn primary sm" href="/app/ad-media.html">${connected ? "수익 매체 보기" : "수익 매체 연결하기"}</a></div></div>`
+    body.innerHTML = `<div class="group">${UI.noRevenueBanner(SUM.noRevenueChannels || [], "margin:10px 16px 0")}<div class="empty"><span class="mk money">₩</span><h3>${connected ? "이번 달은 아직 들어온 게 없어요" : "아직 연결된 곳이 없어요"}</h3><p>${connected ? "매체에서 정산이 올라오면 여기에 쌓여요." : "애드포스트부터 해볼까요? 조건이 되는지 먼저 확인해 드려요."}</p><a class="btn primary sm" href="/app/ad-media.html">${connected ? "수익 매체 보기" : "수익 매체 연결하기"}</a></div></div>`
       + manualGroup();
     bindManual(); return;
   }
@@ -197,11 +197,29 @@ function sourceGroup() {
   }).join("") + "</div>";
 }
 
-/* ③ 계정별 — 마크 달린 단색 막대(1등만 잉크) */
+/* ③ 계정별 — 마크 달린 단색 막대(1등만 잉크)
+   🔴 [R12-6] 광고가 안 붙는 채널(당근)의 **0원은 고장이 아니다.** 막대만 그리면 «왜 0원인지»를 한 글자도 안 말한다 —
+      설계가 «정직하게 말해야 하는 것 셋»의 첫째로 박아 둔 자리다(AC-10 «설정 안 됨은 오류가 아니다»).
+      ①그런 채널을 **가진 집**이면 줄 위에 `.banner info` 한 칸(사실 + 어떻게 쓰면 되는지 · 문장 정본은 `UI.noRevenueBanner`)
+      ②그런 계정의 0원 줄은 **빈 막대 대신 이유를 적는다**(빈 막대는 «못 벌었다»로 읽힌다)
+   🔴 `noRevenueChannels` 는 **연결한 계정** 기준이라 수익 줄이 하나도 없어도 온다 — 그래서 막대가 없어도 말은 해 준다
+      (`axes` 와 같은 성질이다 · 서버가 그렇게 준다).
+   🔴 그 채널에 **직접 넣은 수익**(협찬 등)이 붙어 있으면 «0원이 맞아요»는 거짓말이다 — 그 채널은 빼고 말한다.
+   🔴 **막지 않는다**(§9) — 줄을 숨기거나 흐리게 하지 않는다. 금액은 그대로 세고 그대로 보여 준다. */
 function accountGroup() {
-  const list = SUM.byAccount || []; if (!list.length) return "";
+  const list = SUM.byAccount || [];
+  const noRev = (SUM.noRevenueChannels || []).filter((ch) => !list.some((a) => a.channel === ch && a.krw > 0));
+  const note = UI.noRevenueBanner(noRev, "margin:4px 16px 10px");
+  if (!list.length) return note ? `<div class="group" style="margin-bottom:12px;padding:8px 4px">${note}</div>` : "";
   const max = Math.max(1, ...list.map((x) => x.krw));
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div>${note}<div class="bars">` + list.map((a, i) => {
+    const flat = a.noRevenueChannel === true && !a.krw;   // 🔴 «0원이 맞는 0원» — 막대 자리에 이유를 적는다
+    const name = `<span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span>`;
+    const mid = flat
+      ? `<span class="track" style="background:none;height:auto;overflow:visible;font-weight:600;color:var(--sub)">광고가 안 붙어요</span>`
+      : `<span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span>`;
+    return `<div class="bar ${i === 0 && !flat ? "top" : ""}">${name}${mid}<span class="v">${UI.num(a.krw)}</span></div>`;
+  }).join("") + "</div></div>";
 }
 
 /* ④ 글·영상별 TOP 5 */

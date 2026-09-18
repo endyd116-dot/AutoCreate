@@ -918,7 +918,7 @@ function render() {
   // 🔴 0원을 큰 숫자로 자랑하지 않는다 — 번 적이 없으면 빈 상태가 기본
   if (!SUM.monthKrw && !DAYS.some((x) => x.krw > 0)) {
     UI.$("#hl").hidden = true;
-    body.innerHTML = `<div class="group"><div class="empty"><span class="mk money">₩</span><h3>${connected ? "이번 달은 아직 들어온 게 없어요" : "아직 연결된 곳이 없어요"}</h3><p>${connected ? "매체에서 정산이 올라오면 여기에 쌓여요." : "애드포스트부터 해볼까요? 조건이 되는지 먼저 확인해 드려요."}</p><a class="btn primary sm" href="/app/ad-media.html">${connected ? "수익 매체 보기" : "수익 매체 연결하기"}</a></div></div>`
+    body.innerHTML = `<div class="group">${UI.noRevenueBanner(SUM.noRevenueChannels || [], "margin:10px 16px 0")}<div class="empty"><span class="mk money">₩</span><h3>${connected ? "이번 달은 아직 들어온 게 없어요" : "아직 연결된 곳이 없어요"}</h3><p>${connected ? "매체에서 정산이 올라오면 여기에 쌓여요." : "애드포스트부터 해볼까요? 조건이 되는지 먼저 확인해 드려요."}</p><a class="btn primary sm" href="/app/ad-media.html">${connected ? "수익 매체 보기" : "수익 매체 연결하기"}</a></div></div>`
       + manualGroup();
     bindManual(); return;
   }
@@ -1023,11 +1023,29 @@ function sourceGroup() {
   }).join("") + "</div>";
 }
 
-/* ③ 계정별 — 마크 달린 단색 막대(1등만 잉크) */
+/* ③ 계정별 — 마크 달린 단색 막대(1등만 잉크)
+   🔴 [R12-6] 광고가 안 붙는 채널(당근)의 **0원은 고장이 아니다.** 막대만 그리면 «왜 0원인지»를 한 글자도 안 말한다 —
+      설계가 «정직하게 말해야 하는 것 셋»의 첫째로 박아 둔 자리다(AC-10 «설정 안 됨은 오류가 아니다»).
+      ①그런 채널을 **가진 집**이면 줄 위에 `.banner info` 한 칸(사실 + 어떻게 쓰면 되는지 · 문장 정본은 `UI.noRevenueBanner`)
+      ②그런 계정의 0원 줄은 **빈 막대 대신 이유를 적는다**(빈 막대는 «못 벌었다»로 읽힌다)
+   🔴 `noRevenueChannels` 는 **연결한 계정** 기준이라 수익 줄이 하나도 없어도 온다 — 그래서 막대가 없어도 말은 해 준다
+      (`axes` 와 같은 성질이다 · 서버가 그렇게 준다).
+   🔴 그 채널에 **직접 넣은 수익**(협찬 등)이 붙어 있으면 «0원이 맞아요»는 거짓말이다 — 그 채널은 빼고 말한다.
+   🔴 **막지 않는다**(§9) — 줄을 숨기거나 흐리게 하지 않는다. 금액은 그대로 세고 그대로 보여 준다. */
 function accountGroup() {
-  const list = SUM.byAccount || []; if (!list.length) return "";
+  const list = SUM.byAccount || [];
+  const noRev = (SUM.noRevenueChannels || []).filter((ch) => !list.some((a) => a.channel === ch && a.krw > 0));
+  const note = UI.noRevenueBanner(noRev, "margin:4px 16px 10px");
+  if (!list.length) return note ? `<div class="group" style="margin-bottom:12px;padding:8px 4px">${note}</div>` : "";
   const max = Math.max(1, ...list.map((x) => x.krw));
-  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div><div class="bars">` + list.map((a, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span><span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span><span class="v">${UI.num(a.krw)}</span></div>`).join("") + "</div></div>";
+  return `<div class="group" style="margin-bottom:12px"><div class="gt">어느 계정이</div>${note}<div class="bars">` + list.map((a, i) => {
+    const flat = a.noRevenueChannel === true && !a.krw;   // 🔴 «0원이 맞는 0원» — 막대 자리에 이유를 적는다
+    const name = `<span class="n"${a.deleted ? ' style="color:var(--muted)"' : ""}>${a.channel ? UI.mark(a.channel, "sm") : ""}${a.deleted ? UI.esc(a.handle || "지운 계정") : "@" + UI.esc(a.handle)}</span>`;
+    const mid = flat
+      ? `<span class="track" style="background:none;height:auto;overflow:visible;font-weight:600;color:var(--sub)">광고가 안 붙어요</span>`
+      : `<span class="track"><span class="fill" style="width:${Math.round((a.krw / max) * 100)}%"></span></span>`;
+    return `<div class="bar ${i === 0 && !flat ? "top" : ""}">${name}${mid}<span class="v">${UI.num(a.krw)}</span></div>`;
+  }).join("") + "</div></div>";
 }
 
 /* ④ 글·영상별 TOP 5 */
@@ -1163,7 +1181,7 @@ async function load() {
      (라이브에서 blogger 는 status=active 인데 우리 앱 키가 없어 못 붙는다 — 조합했으면 이 경우가 «붙을 수 있는 칸»으로 보였다) */
   const soon = (c) => (c.connectable === false || (c.connectable === undefined && c.status && c.status !== "active")) && !cnt[c.key];
   const soonWord = (c) => (c.connectableReason === "not_open" || (!c.connectableReason && c.status !== "active")) ? "곧 열려요" : "준비 중이에요";
-  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? soonWord(c) : (SUB[c.key] || "")}</small></button>`).join("");
+  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? soonWord(c) : c.monetizable === false ? "광고 없음 · 유입" : (SUB[c.key] || "")}</small></button>`).join("");
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
@@ -1192,12 +1210,15 @@ function soonSheet(c) {
 }
 function connectSheet(c) {
   const k = c.key, label = c.label || UI.chLabel(k);
-  if (c.connectMethod === "session") return UI.sheet(`<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 올릴 때만 내 PC 프로그램이 열어요.</p>
+  /* [R12-6] 🔴 광고가 안 붙는 채널이면 **붙이기 전에** 말해 준다(고른 뒤 실망 금지 · 문장 정본은 UI.noRevenueBanner).
+     🔴 막지 않는다(§9) — 말만 올려둔다. 연결 단추도 폼도 그대로다. */
+  const nrb = UI.noRevenueBanner(c.monetizable === false ? [k] : [], "margin:0 0 10px");
+  if (c.connectMethod === "session") return UI.sheet(`${nrb}<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 올릴 때만 내 PC 프로그램이 열어요.</p>
     <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
     <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="off" required><div class="help"></div></div>
     <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off" placeholder="예: 요리하는 A"></div>
     <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => submitAdd({ channel: k, handle: d.loginId, loginId: d.loginId, password: d.password, displayName: d.displayName || undefined }, f, close)) });
-  if (c.connectMethod === "app_password") return UI.sheet(`<form id="cf" autocomplete="off">
+  if (c.connectMethod === "app_password") return UI.sheet(`${nrb}<form id="cf" autocomplete="off">
     <div class="field"><label>사이트 주소</label><input class="input" name="siteUrl" type="url" required placeholder="https://myblog.com"><div class="help"></div></div>
     <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required><div class="help"></div></div>
     <div class="field"><label>앱 비밀번호</label><input class="input" name="appPassword" type="password" autocomplete="off" required><div class="help"></div></div>
@@ -1205,7 +1226,7 @@ function connectSheet(c) {
     <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off"></div>
     <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => { let handle = d.siteUrl; try { handle = new URL(d.siteUrl).hostname; } catch { /* empty */ } submitAdd({ channel: k, handle, siteUrl: d.siteUrl, loginId: d.loginId, appPassword: d.appPassword, displayName: d.displayName || undefined }, f, close); }) });
   // OAuth
-  UI.sheet(`<p class="muted" style="margin:0 0 ${k === "youtube_shorts" ? 8 : 16}px">${UI.esc(label)} 로그인 창으로 이동해요. 허용하면 여기로 돌아와요.</p>${k === "youtube_shorts" ? '<p class="muted" style="margin:0 0 16px;font-size:13px">심사 전엔 비공개로 올라가요 — 유튜브 앱 심사가 끝나면 바로 공개로 올라가요. 그전엔 스튜디오에서 «공개»로 바꾸면 돼요.</p>' : ""}<div class="cta"><button class="btn primary" type="button" id="go">${UI.esc(label)} 계정으로 연결</button></div>`, { title: `${label} 연결`, onOpen: (sh, close) => {
+  UI.sheet(`${nrb}<p class="muted" style="margin:0 0 ${k === "youtube_shorts" ? 8 : 16}px">${UI.esc(label)} 로그인 창으로 이동해요. 허용하면 여기로 돌아와요.</p>${k === "youtube_shorts" ? '<p class="muted" style="margin:0 0 16px;font-size:13px">심사 전엔 비공개로 올라가요 — 유튜브 앱 심사가 끝나면 바로 공개로 올라가요. 그전엔 스튜디오에서 «공개»로 바꾸면 돼요.</p>' : ""}<div class="cta"><button class="btn primary" type="button" id="go">${UI.esc(label)} 계정으로 연결</button></div>`, { title: `${label} 연결`, onOpen: (sh, close) => {
     sh.querySelector("#go").onclick = async () => {
       const r = await UI.api("/api/accounts-oauth-start", { body: { channel: k } });
       if (r.ok && r.url) { location.href = r.url; return; }

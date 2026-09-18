@@ -190,7 +190,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.16";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
+  UI.APP_VERSION = "2026.09.19";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).
@@ -283,6 +283,29 @@
     return `<span class="mk ph ${cls}" aria-hidden="true"><img src="${UI.esc(url)}" alt="" loading="lazy" onerror="this.closest('.mk').className='mk ${ch} ${cls}';this.closest('.mk').textContent='${UI.esc(c.mark)}'"><i class="mk ${ch}">${c.mark}</i></span>`;
   };
   UI.chLabel = (ch) => (UI.CH[ch] || {}).label || ch;
+
+  /* ── [R12-6] 🔴 광고가 안 붙는 채널(당근) — **막지 않는다 · 말해 준다**(§9) ──────────────
+     서버가 이미 두 곳에서 실어 준다. 화면은 **읽어서 그리기만** 한다(새 API 0):
+       · 수익 `/api/revenue-summary` — 계정 줄마다 `noRevenueChannel:true` · 응답 맨 위 `noRevenueChannels[]`
+       · 계정 `/api/accounts-list`   — 채널 목록의 `monetizable:false`
+     🔴 «당근»을 화면이 손으로 적지 않는다 — 채널이 늘면 두 곳이 갈린다(AC-52). 키를 받아 `UI.chLabel` 로 이름을 낸다.
+     🔴 겁주지 않는다(§3): «수익이 발생하지 않습니다»(던지고 끝)도 «다른 채널을 쓰세요»(떠넘기기)도 아니다.
+        ①사실(0원이 맞다 · 고장이 아니다) ②그래서 어떻게 쓰면 되는지 — **두 줄이 붙어야** 한 문장이 된다.
+     🔴 회색 작은 글씨로 흘리지 않는다(§9-①) — `.banner info` 한 칸이다(«이날 겹쳐요»와 같은 급).
+     🔴 `.banner info` 바탕은 `--brand-soft` = 라이트에선 `--ground` 와 같은 색이다 ⇒ **흰 바닥(.group·시트) 안에만 둔다.**
+        페이지 바닥에 그대로 놓으면 글자만 뜨고 칸이 안 보인다.
+     🔴 **막는 데 쓰지 않는다** — 이 값으로 채널을 가리거나 단추를 잠그면 §9 위반이다. 말해 주는 것까지다. */
+  UI.NO_REVENUE_USE = "여기선 손님을 데려오는 용으로 써요 — 번 돈은 광고가 붙는 채널 쪽에 쌓여요.";
+  UI.noRevenueSay = (chs) => {
+    const names = [...new Set((chs || []).filter(Boolean).map((c) => UI.chLabel(c)))];
+    if (!names.length) return "";
+    /* 조사는 **마지막 이름**으로 고른다(«당근 · 브런치는») — 채널 이름은 서버 값이라 문장에 박아 둘 수 없다(UI.josa). */
+    return `${names.join(" · ")}${UI.josa(names[names.length - 1], "은는")} 광고 수익이 안 붙는 채널이에요. 0원이 맞아요 — 고장이 아니에요.`;
+  };
+  UI.noRevenueBanner = (chs, style = "") => {
+    const say = UI.noRevenueSay(chs);
+    return say ? `<div class="banner info"${style ? ` style="${style}"` : ""}><span><b>${UI.esc(say)}</b><br>${UI.esc(UI.NO_REVENUE_USE)}</span></div>` : "";
+  };
 
   /* ── 숫자 카운트업(600ms · reduced-motion 이면 즉시) ── */
   UI.countUp = function (el, to, fmt = UI.won) {

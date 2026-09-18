@@ -14,7 +14,7 @@
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
   const ymd = (dayOffset) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); return d.toISOString().slice(0, 10); };
   const todayYmd = ymd(0);
-  const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡" };
+  const CH_LABEL = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡", daangn: "당근" };   /* [R12-6] 이름이 없으면 화면에 «daangn» 이라는 **열쇠 글자**가 그대로 뜨다 */
   const vdlKnob = qs.get("vdl") || "";            // [R7 §1.3] none = 아직 렌더 전(no_render) · 기본 = 10분 링크
   const estKnob = qs.get("est") === "1";          // [B2] «예상수입» 도장이 찍힌 매체가 섞인 달
   const slotsKnob = qs.get("slots") || "";        // [R7 §3.6] none·waiting·active·paused — 계정 슬롯 상태
@@ -101,10 +101,14 @@
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
     ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
     ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
-  ].map(([key, label, category, publishVia, connectMethod, configured, status]) => { const st = chOpen ? "active" : status;
+    /* [R12-6] 당근 — 라이브 channel_registry 에는 있는데(DDL 0082) 모의 표에만 없었다.
+       🔴 마지막 칸 = 서버 listChannels 가 싣는 `monetizable` 그 칸이다 — **광고가 안 붙는 채널은 false**(수익 화면의 0원이 고장이 아니라고 말해 준다).
+       붙거나 모르면 칸을 비운다 — 서버도 그런다(키를 안 싣는다 · AC-9). */
+    ["daangn", "당근", "text", "runner", "session", true, "active", false],
+  ].map(([key, label, category, publishVia, connectMethod, configured, status, monetizable]) => { const st = chOpen ? "active" : status;
     /* [B3 020fb15] 서버가 주는 한 칸 — 라이브 실측: 블로거는 status=active 인데 우리 앱 키가 없어 못 붙는다 */
     const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
-    const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+    const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}), ...(monetizable === false ? { monetizable: false } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   const BODY_NAVER = `<p>✅ 주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. <mark class="line">세 번 실패하고 네 번째에 깨끗해진 방법</mark>을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -401,6 +405,9 @@
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true }, defaultTier: "premium", defaultStyleId: null },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false }, defaultTier: null, defaultStyleId: null },
       { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: avatarOn ? AVATAR : null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+      /* [R12-6] 당근 — 광고가 안 붙는 채널이라 **수익 화면에 0원으로 서 있는** 집이 모의에도 있어야 그 화면을 눈으로 볼 수 있다.
+         🔴 모의도 막지 않는다(§9) — 상태는 active 다. 문제가 있는 계정이 아니라 **돈이 안 붙는 채널**일 뿐이다. */
+      { id: 6, channel: "daangn", handle: "danggeun_e", displayName: "동네 살림", avatar: null, status: "active", healthScore: 98, postsToday: 0, dailyCap: 1, minGapMin: 360, goldenHours: [10], lastPostAt: iso(now - 3 * 86400e3), browserProfileKey: "acc-6", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null },
       /* [R8 §3.2] ?ads=1 일 때만 — 워드프레스는 «우리가 직접 위젯을 넣는» 유일한 길이라 그 갈래를 화면에서 보려면 계정이 하나 있어야 한다 */
       ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatar: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, minGapMin: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
     ],
@@ -1400,7 +1407,9 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "notifications-list": () => ({ ok: true, notifications: S.notifications.map((n) => ({ ...n })).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")), unread: S.notifications.filter((n) => !n.readAt).length }),
     "notifications-read": (b) => { for (const n of S.notifications) if (!b.id || n.id === Number(b.id)) n.readAt = n.readAt || iso(Date.now()); return { ok: true, unread: S.notifications.filter((n) => !n.readAt).length }; },
     /* ── [P1R3] §1.4 수익 ── */
+    /* [R12-6] 광고가 안 붙는 채널 — 목록은 **CHANNELS 표에서 뽑는다**(모의가 «당근»을 또 적지 않는다 · AC-52). */
     "revenue-summary": (_b, q) => {
+      const NO_REV = new Set(CHANNELS.filter((c) => c.monetizable === false).map((c) => c.key));
       const month = q.get("month") || todayYmd.slice(0, 7);
       const inM = (r, m) => r.day.slice(0, 7) === m;
       const sum = (rs) => rs.reduce((a, r) => a + r.amountKrw, 0);
@@ -1419,7 +1428,9 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
             : { dir: "unknown", recentKrw: 0, prevKrw: 0, samples: 1, basis: "pieces", say: "아직 몰라요 — 3편은 모여야 견줄 수 있어요(지금 1편)" };
           return o; });
       const byAccount = groupKrw(mine.filter((r) => r.accountId), "accountId").map(([id, krw]) => { const a = S.accounts.find((x) => x.id === Number(id)) || {};
-        return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
+        /* [R12-6] 광고가 안 붙는 채널이면 도장 하나 — 화면이 «왜 0원인지»를 말할 재료다.
+           🔴 **지운 계정엔 안 붙인다** — 채널이 빈 문자열이라 알 수 없다(모르면 안 말한다 · AC-9 · 서버도 그런다). */
+        return a.handle ? { accountId: Number(id), handle: a.handle, channel: a.channel || "", krw, ...(NO_REV.has(a.channel) ? { noRevenueChannel: true } : {}) } : { accountId: Number(id), handle: "지운 계정", channel: "", krw, deleted: true }; });   // [B3 24d16d6] 서버가 이름을 붙인다
       const topPieces = groupKrw(mine.filter((r) => r.pieceId), "pieceId").slice(0, 5).map(([id, krw]) => { const p = S.pieces.find((x) => x.id === Number(id)) || {};
         return p.id ? { pieceId: Number(id), title: p.title || "제목 없는 글", channel: p.channel, krw, ...(p.title ? {} : { untitled: true }) } : { pieceId: Number(id), title: "지운 글", channel: "", krw, deleted: true }; });
       /* [R11 A-4 · B r11-back] «어디서 났나» — 정본은 `lib/revenue/aggregate.ts`(C 확인 · `revenue.ts` 는 스프레드만 한다).
@@ -1437,7 +1448,10 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
         ...(axisKrw.other > 0 ? [{ axis: "other", label: AXL.other, krw: axisKrw.other, note: "계정이나 글에 연결되지 않은 수입이에요 — 협찬·직접 입력처럼요." }] : []),
       ].sort((a, b) => b.krw - a.krw);
       return { ok: true, monthKrw: sum(mine), todayConfirmedKrw: todayConfirmed(), todayEstimatedKrw: todayEstimated(),
-        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces, axes, byAxis }; },
+        prevMonthKrw: sum(S.revRows.filter((r) => inM(r, prevMonth(month)))), bySource, byAccount, topPieces, axes, byAxis,
+        /* [R12-6] 🔴 `axes` 와 같은 성질 — **연결한 계정** 기준이라 수익 줄이 하나도 없어도 온다.
+           그래야 당근만 가진 집의 빈 화면에서도 «0원이 맞아요»를 말해 줄 수 있다. */
+        noRevenueChannels: [...new Set((S.accounts || []).map((a) => a.channel).filter((c) => NO_REV.has(c)))] }; },
     "revenue-daily": (_b, q) => { const from = q.get("from") || "0000", to = q.get("to") || "9999";
       const days = groupKrw(S.revRows.filter((r) => r.day >= from && r.day <= to), "day").sort((a, b) => a[0].localeCompare(b[0]));
       /* [B2 a8de1d5] 그 날에 «예상 열» 행이 섞였나 — 없으면 키 자체가 없다(옛 데이터엔 안 붙는다) */
