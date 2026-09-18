@@ -13,7 +13,7 @@ import { omniGenerate, omniEditRetry, type OmniGenerateResult } from "./omni";
 import { veoGenerate } from "./veo";
 import { falGenerate } from "./fal";
 import { generateImage } from "../../ai-image";
-import { videoStub, type ProviderKey, type VideoSeconds } from "../types";
+import { videoStub, noteVideoStub, type ProviderKey, type VideoSeconds } from "../types";
 
 export interface GenerateClipInput {
   tenantId: number; pieceId: number; cutIdx: number;
@@ -58,6 +58,7 @@ export async function generateClip(inp: GenerateClipInput): Promise<GenerateClip
   if (!r2Configured()) return { ok: false, reason: "r2_not_configured", provider: inp.providerKey };
   if (videoStub()) {
     // 로컬 하니스(계약 §1.4b) — provider 호출 없이 고정 응답. R2 에는 «스텁» 표식이 든 자리 채움 바이트를 둔다(키가 없으면 payload 가 거짓말이 된다).
+    noteVideoStub("video_clip", "컷 영상 자체(Veo/fal) · 그림 품질 · 심사 비전이 볼 프레임", "VIDEO_PROVIDER_STUB=1", "VIDEO_PROVIDER_STUB 을 끈다(🔴 건당 수 달러 — 2026-09-15 $3.63)");
     const key = safeKey(`autocreate/${inp.tenantId}/${inp.pieceId}/clips`, "mp4");
     const buf = Buffer.concat([Buffer.from("ACSTUBMP4\n", "utf8"), Buffer.alloc(12_000)]);
     try { await r2Put(key, buf, "video/mp4"); } catch (e) { return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`, provider: inp.providerKey }; }
@@ -106,6 +107,7 @@ export async function generateStill(inp: GenerateStillInput): Promise<GenerateSt
   if (!r2Configured()) return { ok: false, reason: "r2_not_configured" };
   const ref = inp.ref ?? `piece:${inp.pieceId}:still${inp.cutIdx}`;
   if (videoStub()) {
+    noteVideoStub("video_still", "정지 컷 그림(1×1 투명 PNG 가 들어간다)", "VIDEO_PROVIDER_STUB=1", "VIDEO_PROVIDER_STUB 을 끈다");
     const key = safeKey(`autocreate/${inp.tenantId}/${inp.pieceId}/stills`, "png");
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
     try { await r2Put(key, png, "image/png"); } catch (e) { return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}` }; }

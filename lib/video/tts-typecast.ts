@@ -9,7 +9,7 @@
 import { recordAiUsage } from "../ai";
 import { r2Configured, r2Put } from "../r2";
 import { preprocessForSpeech, wavDurationMs, type SpeakReadingDict, type TtsResult, type TtsWord } from "./tts";
-import { videoStub } from "./types";
+import { videoStub, noteVideoStub } from "./types";
 import { NARRATION_TEMPO_BASELINE, clampTempo } from "./tempo";   // [R12-3] 말 속도 상수·클램프 정본(순수 파일)
 import { narrationKey } from "./tts";   // [AC-39] 나레이션 키는 한 함수가 만든다(세 곳에서 조립하다 서로 덮었다)
 
@@ -113,6 +113,7 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
   const costUsd = Math.round(chars * TYPECAST_USD_PER_CHAR * 1e6) / 1e6;
   const key = narrationKey({ tenantId: a.tenantId, pieceId: a.pieceId, gen: a.gen, keySuffix: a.keySuffix, provider: "typecast" });
   if (videoStub()) {
+    noteVideoStub("video_tts(typecast)", "목소리·발음·어절 타임스탬프 — 무음 wav 라 자막 시각이 «실측»이 아니라 균등 분할이다", "VIDEO_PROVIDER_STUB=1", "VIDEO_PROVIDER_STUB 을 끈다");
     // 로컬 하니스 — 고정 응답: 음절 수 × 1/4.6초 길이의 무음 wav + 균등 어절 시각
     const durationMs = Math.max(600, Math.round((chars / 4.6) * 1000));
     const pcm = Buffer.alloc(Math.round(24000 * 2 * durationMs / 1000));

@@ -8,9 +8,9 @@ import { callGemini, callGeminiJson, parseJsonLoose } from "../ai";
 import { CHAIN_DIRECTOR, CHAIN_HIGH } from "../ai-models";
 import { findBannedWords, BLOG_EXTRA_BANNED } from "../banned-words";
 import { CLICHES } from "../ai-tell-gate";
-import { syllablesOf, speechSecondsOf } from "./tts";
+import { syllablesOf, speechSecondsOf, SPEECH_SYLLABLES_PER_SEC } from "./tts";
 import { HOOK_TYPES, type CutDraft } from "./scenes";
-import { videoStub, type ScriptLine, type VideoFormat, type VideoScript, type VideoSeconds } from "./types";
+import { videoScriptStub, scriptStubHandle, noteVideoStub, type ScriptLine, type VideoFormat, type VideoScript, type VideoSeconds } from "./types";
 
 /* ═══ 게이트(순수) ═══ */
 const HOOK_MAX_SYLLABLES = 16;
@@ -66,7 +66,8 @@ export function checkScriptGates(script: VideoScript, maxLines = 12): { ok: bool
 export interface ScriptInput {
   tenantId: number; pieceId: number; format: VideoFormat; seconds: VideoSeconds; cuts: number; channel: string;
   topic: { title: string; angle: string; intent: string; seasonal?: string };
-  persona: { facts: string[]; tone?: string; signature?: string };
+  /** 🔴 `dict` = 테넌트 읽기 사전의 **열쇠**(= 정본 표기). 소리(`tts.applyReadingDict`)와 **같은 표**를 글자 쪽에서도 쓴다. */
+  persona: { facts: string[]; tone?: string; signature?: string; dict?: Record<string, string> | null };
   hookType: string; structure?: string[] | null;
   /** [R8CLOSE · B2] 레퍼런스가 배워 온 «훅이 작동하는 원리»(≤80자 · `TemplateStyle.hookPrinciple`).
       🔴 `hookType` 은 다섯 갈래뿐이라 **왜 그 훅이 먹히는가**를 못 담는다 — 그걸 담으라고 저장해 놓고 **안 읽고 있었다.** */
@@ -100,10 +101,48 @@ const FORMAT_RULE: Record<VideoFormat, string> = {
  */
 function budgetFor(seconds: VideoSeconds, ratio = 1): { minSyl: number; maxSyl: number; lines: [number, number] } {
   const r = Number.isFinite(Number(ratio)) && Number(ratio) > 0 ? Number(ratio) : 1;
-  const maxSyl = Math.max(20, Math.floor(seconds * 4.6 * 0.85 * r));
+  /* [수리라운드 2026-09-19 · B2 · AM 41fb79939 «발화 예산 단위»] 🔴 종전엔 여기와 프롬프트에 `4.6` 이 **손으로 두 번** 적혀 있었다.
+     AM 은 같은 자리에서 «8.7자/초» 와 «음절/초» 가 1.36배 어긋난 채 몇 주를 갔다 — **숫자를 두 곳에 적으면 언젠가 갈린다.**
+     ⇒ 정본은 `tts.ts SPEECH_SYLLABLES_PER_SEC` 한 곳이고, 값은 그대로라 **바이트 무회귀**다. */
+  const maxSyl = Math.max(20, Math.floor(seconds * SPEECH_SYLLABLES_PER_SEC * 0.85 * r));
   const lines: [number, number] = seconds === 15 ? [4, 6] : seconds === 30 ? [5, 8] : seconds === 90 ? [9, 14] : [7, 12];
   return { minSyl: Math.floor(maxSyl * 0.55), maxSyl, lines };
 }
+/* ═══════════ [수리라운드 2026-09-19 · B2 · AM cee28b0d6] 🔴 «쓸쥐오닦쥐오» 의 **글자 쪽** ═══════════
+ *   2026-09-19 에 소리 쪽을 고쳤다(`tts.ts applyReadingDict` — 공백 없는 표기도 물게). 그런데 **반쪽이었다**:
+ *   화면 자막·유튜브 제목·원장에 남는 것은 **우리가 쓴 글자**이고, 사장님이 보시는 것도 그것이다.
+ *   열쇠가 「쓸GO 닦GO」인데 대본기가 「쓸GO닦GO가」로 쓰면 **소리는 고쳐져도 화면은 그대로 깨져 있다.**
+ *
+ *   ⇒ 두 겹: ① 프롬프트가 «적힌 그대로 쓰라»고 말하고 ② **막지 않고 고친다**(결정론 교정).
+ *   🔴 **막는 게 아니라 되돌리는 것**이다(§9) — 사장님 문장을 깎는 게 아니라 **등록한 정본 표기**로 되돌린다.
+ *   🔴 조사·어미는 **그대로 둔다**: 「쓸GO닦GO가」 → 「쓸GO 닦GO가」(뒤를 안 건드린다).
+ *   ⚠️ 공백 없는 열쇠는 붙여 쓸 여지가 없으므로 **대상이 아니다**(옛 테넌트 바이트 무회귀).
+ */
+/** 사전 열쇠 중 «공백이 있는 것»만 — 그 열쇠의 공백 지운 형태를 정본 표기로 되돌린다. */
+export function normalizeReadingKeySpelling(text: string, dict?: Record<string, string> | null): { text: string; fixed: string[] } {
+  const t = String(text ?? "");
+  if (!dict) return { text: t, fixed: [] };
+  const keys = Object.keys(dict)
+    .filter((k) => k && /\s/.test(k) && k.replace(/\s+/g, "").length >= READING_KEY_SQUASHED_MIN && k.length <= 60)
+    .sort((a, b) => b.length - a.length);
+  let out = t; const fixed: string[] = [];
+  for (const k of keys) {
+    const squashed = k.replace(/\s+/g, "");
+    if (squashed === k || !out.includes(squashed)) continue;
+    out = out.split(squashed).join(k);
+    fixed.push(k);
+  }
+  return { text: out, fixed };
+}
+/** 🔴 `tts.ts READING_DICT_SQUASHED_MIN` 과 **같은 뜻의 문턱**이다 — 소리와 글자가 다른 잣대를 쓰면 또 갈린다. */
+export const READING_KEY_SQUASHED_MIN = 4;
+/** 프롬프트에 실을 «표기 그대로» 절. 열쇠가 없으면 **빈 문자열**(옛 테넌트 프롬프트 바이트 무회귀). */
+export function brandSpellingNote(dict?: Record<string, string> | null): string {
+  const keys = Object.keys(dict ?? {}).filter((k) => k && /\s/.test(k) && k.length <= 60).slice(0, 8);
+  if (!keys.length) return "";
+  return `[표기] 다음 이름은 **적힌 그대로**(띄어쓰기·대소문자 포함) 쓴다: ${keys.map((k) => `«${k}»`).join(" · ")}. 붙여 쓰거나 바꿔 쓰지 않는다(예: «${keys[0].replace(/\s+/g, "")}» 금지).`;
+}
+
 function stubScript(inp: ScriptInput): { script: VideoScript; drafts: CutDraft[] } {
   const n = Math.max(4, Math.min(inp.cuts, 9)); const per = Math.max(1, Math.round(inp.seconds / n));
   const lines: ScriptLine[] = Array.from({ length: n }, (_, i) => ({ idx: i, text: i === 0 ? `${inp.topic.title}, 이것 하나면 끝.` : i === n - 1 ? "오늘 바로 해 보세요." : `${inp.topic.angle.slice(0, 20)} 장면 ${i}.`, role: i === 0 ? "hook" : i === n - 1 ? "closing" : "body", seconds: per, cutIdx: i }));
@@ -111,14 +150,21 @@ function stubScript(inp: ScriptInput): { script: VideoScript; drafts: CutDraft[]
 }
 
 /** buildVideoScript — 포맷 계약대로 대본 + 컷 서술 JSON 1콜(재작성 지시 포함). */
-export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; script: VideoScript; drafts: CutDraft[]; model: string } | { ok: false; reason: string }> {
-  if (videoStub()) { const s = stubScript(inp); return { ok: true, ...s, model: "stub" }; }
+export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; script: VideoScript; drafts: CutDraft[]; model: string; spellingFixed?: string[] } | { ok: false; reason: string }> {
+  /* [AC-111] 🔴 종전엔 `if (videoStub())` 하나로 **말없이** 대본을 템플릿으로 갈아치웠다(로그 0줄).
+     이제 ① 대본 전용 손잡이(`videoScriptStub` — 안 주면 종전대로 따라간다)로 묻고 ② **반드시 찍는다.** */
+  if (videoScriptStub()) {
+    noteVideoStub("video_script", "대본 내용·훅·제목·태그·문장 수 — 그리고 계정 간 대본 유사도(스텁은 같은 템플릿이라 늘 1 이다)",
+      scriptStubHandle(), "VIDEO_SCRIPT_STUB=0 (Veo 컷은 계속 꺼 둔 채 대본만 실호출)");
+    const s = stubScript(inp); return { ok: true, ...s, model: "stub" };
+  }
   const b = budgetFor(inp.seconds, inp.syllableRatio);
   const system = [
     inp.rewrite ?? "",
     `[역할] 한국 숏폼 대본 작가. ${inp.channel} ${inp.seconds}초 · 포맷 ${inp.format}: ${FORMAT_RULE[inp.format]}`,
     `[구조] 첫 문장 = 3초 훅(≤16음절 · 도입어·완만한 질문 금지 · 사실·숫자·반전으로 시작 · 훅 유형 «${inp.hookType}»${HOOK_TYPES.includes(inp.hookType as typeof HOOK_TYPES[number]) ? "" : "(자유)"}${inp.hookPrinciple ? ` · 훅이 먹히는 원리: «${inp.hookPrinciple}»` : ""}) → 본문 → 착지(개인 판단 한 줄) → 마무리(행동 한 줄 · 광고성 CTA 금지).${inp.structure?.length ? ` 서사 단계: ${inp.structure.join(" → ")}` : ""}`,
-    `[분량] 문장 ${b.lines[0]}~${b.lines[1]}개 · 총 ${b.minSyl}~${b.maxSyl}음절(초당 4.6음절 · 무음 시청 자막 본체 · 한 문장 ≤ 28음절) · 컷 ${inp.cuts}개(문장마다 cutIdx 0~${inp.cuts - 1} 배정 · 연속 문장이 같은 컷을 공유해도 된다).`,
+    `[분량] 문장 ${b.lines[0]}~${b.lines[1]}개 · 총 ${b.minSyl}~${b.maxSyl}음절(초당 ${SPEECH_SYLLABLES_PER_SEC}음절 · 무음 시청 자막 본체 · 한 문장 ≤ 28음절) · 컷 ${inp.cuts}개(문장마다 cutIdx 0~${inp.cuts - 1} 배정 · 연속 문장이 같은 컷을 공유해도 된다).`,
+    brandSpellingNote(inp.persona.dict),
     "[금지] 근거 없는 수치·연도·통계(모르면 쓰지 않는다) · 최상급(최고·1위·100%) · 수익 약속(«얼마 번다») · 상투 도입(«오늘은 ~를 알아보겠습니다») · 실존 인물·타인 상호 · 이모지.",
     "[컷 서술] cuts[].subject 는 영어 한 문장(무엇이 보이는가 · 사물·공간·동작 · 인물은 silhouette/back view/stylized 로 · 글자·로고·간판 없음 · 실존 인물 없음). palette 는 짧은 색 조합. redMeasureLine 은 치수·비교 컷에만 true.",
     `[출력 JSON] { "hook": string, "lines": [{ "text": string, "role": "hook"|"body"|"bridge"|"landing"|"closing", "cutIdx": number }], "closing": string, "cuts": [{ "key": string, "subject": string, "palette"?: string, "redMeasureLine"?: boolean, "redProp"?: boolean, "pace"?: "fast"|"normal"|"hold" }], "youtube": { "title": string(≤60자 · 검색어 앞), "description": string(2~3문장 · 첫 줄은 비워 둔다 — 시스템이 고지를 넣는다), "tags": [string×5~10] } }`,
@@ -139,17 +185,29 @@ export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; sc
   const drafts: CutDraft[] = rawCuts.slice(0, 12).map((c, i) => { const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>; return { key: String(o.key ?? "").trim() || `cut:${i}`, subject: String(o.subject ?? "").replace(/\s+/g, " ").trim().slice(0, 400), palette: String(o.palette ?? "").trim().slice(0, 120) || undefined, redMeasureLine: o.redMeasureLine === true, redProp: o.redProp === true, ...(["fast", "normal", "hold"].includes(String(o.pace)) ? { pace: String(o.pace) as CutDraft["pace"] } : {}) }; });
   while (drafts.length < inp.cuts) drafts.push({ key: `cut:${drafts.length}`, subject: `stylized 3D scene illustrating: ${lines[Math.min(lines.length - 1, drafts.length)]?.text ?? inp.topic.title}` });
   const yt = (p.youtube && typeof p.youtube === "object" ? p.youtube : {}) as Record<string, unknown>;
+  /* [AM cee28b0d6] 🔴 **막지 않고 고친다** — 정본 표기로 되돌린다(조사·어미는 그대로). 무엇을 고쳤는지 남긴다(조용한 교정 0). */
+  const fixedAll = new Set<string>();
+  const fix = (t: string): string => { const r0 = normalizeReadingKeySpelling(t, inp.persona.dict); r0.fixed.forEach((k) => fixedAll.add(k)); return r0.text; };
+  const fixedLines = lines.map((l) => { const t = fix(l.text); return t === l.text ? l : { ...l, text: t, seconds: speechSecondsOf(syllablesOf(t)) }; });
   const script: VideoScript = {
-    lines, hook: String(p.hook ?? lines[0].text).trim(), closing: String(p.closing ?? lines[lines.length - 1].text).trim(),
-    youtube: { title: String(yt.title ?? inp.topic.title).trim().slice(0, 100), description: String(yt.description ?? "").trim().slice(0, 4000), tags: (Array.isArray(yt.tags) ? yt.tags : []).map((t) => String(t ?? "").replace(/^#/, "").trim()).filter(Boolean).slice(0, 15) },
+    lines: fixedLines, hook: fix(String(p.hook ?? fixedLines[0].text).trim()), closing: fix(String(p.closing ?? fixedLines[fixedLines.length - 1].text).trim()),
+    youtube: { title: fix(String(yt.title ?? inp.topic.title).trim()).slice(0, 100), description: fix(String(yt.description ?? "").trim()).slice(0, 4000), tags: (Array.isArray(yt.tags) ? yt.tags : []).map((t) => String(t ?? "").replace(/^#/, "").trim()).filter(Boolean).slice(0, 15) },
   };
-  return { ok: true, script, drafts, model: r.model };
+  if (fixedAll.size) console.info(`[video-script] 표기 교정 — 등록한 정본 표기로 되돌렸어요: ${[...fixedAll].join(" · ")}`);
+  return { ok: true, script, drafts, model: r.model, ...(fixedAll.size ? { spellingFixed: [...fixedAll] } : {}) };
 }
 
 /* ═══ 팩트체크 왕복(Google 검색 그라운딩) ═══ */
 export async function factcheckRoundTrip(tenantId: number, pieceId: number, script: VideoScript): Promise<{ script: VideoScript; corrected: boolean; failed: boolean; reason?: string }> {
   const world = script.lines.filter((l) => l.role !== "landing" && l.role !== "closing");
-  if (videoStub() || !hasFactualClaims(world)) return { script: { ...script, factcheck: { status: "skipped", claims: [] } }, corrected: false, failed: false };
+  /* [AC-111] 팩트체크도 «싼 축»이라 대본 손잡이를 따라간다 — 그리고 **건너뛴 것을 말한다.**
+     🔴 `status:"skipped"` 는 «주장이 없어서»와 «스텁이라서»를 **한 글자로 뭉갠다** — 로그가 그 둘을 가른다. */
+  if (videoScriptStub()) {
+    noteVideoStub("video_factcheck", "사실 주장 검증·정정(웹 검색 그라운딩) — meta 의 factcheck.status 는 «skipped» 로 남지만 그건 «주장이 없었다»가 아니다",
+      scriptStubHandle(), "VIDEO_SCRIPT_STUB=0");
+    return { script: { ...script, factcheck: { status: "skipped", claims: [] } }, corrected: false, failed: false };
+  }
+  if (!hasFactualClaims(world)) return { script: { ...script, factcheck: { status: "skipped", claims: [] } }, corrected: false, failed: false };
   const listing = world.map((l) => `${l.idx}. ${l.text}`).join("\n");
   const r = await callGemini({ purpose: "video_factcheck", chain: CHAIN_HIGH, role: "high", googleSearch: true, mode: "pro", maxOutputTokens: 6000, timeoutMs: 120_000, tenantId, ref: `piece:${pieceId}:factcheck`,
     user: `다음 쇼츠 대본의 사실 주장(수치·연도·고유명사·사건)을 웹 검색으로 검증하라. 대본에 없는 주장을 만들지 마라.\n출력은 JSON 하나: { "claims": [ { "line": number, "claim": string, "verdict": "ok"|"wrong"|"unknown", "correct"?: string, "note"?: string } ] } — verdict wrong 이면 correct 에 올바른 값.\n\n대본:\n${listing}` });

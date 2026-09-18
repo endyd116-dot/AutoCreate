@@ -480,7 +480,7 @@ if (!can) { UI.$("#addM").hidden = true; UI.$("#addF").hidden = true; }
 load();
 === runners.html | runners | 러너 팜 ===
 <div class="group"><div class="stat4" id="farm"></div></div>
-<div class="group"><div class="gt">러너 <span class="muted" style="font-weight:500">관리형(팜) + 고객 PC</span><span id="lock1"></span></div><div id="list"></div></div>
+<div class="group"><div class="gt">러너 <span class="muted" style="font-weight:500">관리형(팜) + 고객 PC</span><span id="lock1"></span></div><p class="muted" id="release" style="margin:0 16px 10px;font-size:13px"></p><div id="list"></div></div>
 <div class="group"><div class="gt">셀렉터 카나리 <span class="muted" style="font-weight:500">매일 05:00 KST 평가 · 러너가 «임시저장까지» 드라이런</span></div><div id="canary"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">✗ 는 채널 상태를 down 으로 바꿀 «제안»이에요 — 자동 전환은 안 하고 채널 메뉴에서 사람이 눌러요. «—» 는 판정 불가(세션 없음).</p></div>
 <!-- [P1R8 §3.3 · B2] 셀렉터 표 배포 — 🔴 «어느 판이 어디까지 퍼졌나»와 **«왜 아직 대기 중인가»**.
      대기 이유를 안 보여 주면 멈춰 있는 것과 도는 것을 구분할 수 없다(설계 §9). -->
@@ -501,9 +501,20 @@ async function load() {
     { h: "고객", f: (x) => x.tenantId != null ? `<a class="lk" href="/ops/tenant.html?id=${x.tenantId}">${UI.esc(x.tenantKey || "#" + x.tenantId)}</a>` : '<span class="muted">팜(미배정)</span>' },
     { h: "상태", f: (x) => OPS.pill(x.online ? ["ok", "켜짐"] : ["off", "꺼짐"]) },
     { h: "하는 중", r: true, f: (x) => UI.num(x.active || 0) }, { h: "대기", r: true, f: (x) => UI.num(x.queued || 0) },
-    { h: "하트비트", f: (x) => x.lastSeenAt ? UI.ago(x.lastSeenAt) : "—" }, { h: "버전", f: (x) => UI.esc(x.version || "—") },
+    { h: "하트비트", f: (x) => x.lastSeenAt ? UI.ago(x.lastSeenAt) : "—" }, { h: "버전", f: (x) => `${x.version ? `<span class="mono">${UI.esc(x.version)}</span>` : '<span class="muted">—</span>'}${x.upToDate === false ? ' <span class="pill warn">낡음</span>' : x.upToDate === true ? ' <span class="pill ok">최신</span>' : ' <span class="pill" title="라이브 판을 못 읽었거나 기기가 아직 판을 안 알려 줬어요">못 쟀음</span>'}` },
     { h: "", f: (x) => `${managed(x) ? `<button type="button" class="lk" data-rebind="${x.id}">배정</button> · ` : ""}<button type="button" class="lk" data-release="${x.id}" ${x.active ? "" : "disabled"}>잡 되돌리기</button> · <button type="button" class="lk" data-remove="${x.id}">제거</button>` },
   ], r.runners || []);
+  /* [수리라운드 2026-09-19 · B2] 🔴 **«고객 PC 가 실제로 받아 가는 판»을 화면에 세운다.**
+     종전엔 기기가 보고한 `version` 만 있어서 «그게 최신인지»를 운영자가 알 길이 없었다 — 그래서 2026-09-15 에
+     «고객 러너는 v1.3.0» 이라는 **틀린 숫자가 세 번** 인용됐다(실제 라이브 v1.1.8). 숫자·판정은 **전부 서버가 준다**(AC-74).
+     🔴 못 읽었으면 «없다»가 아니라 «못 쟀어요»라고 말한다(AC-9). */
+  const rel = r.release || {};
+  const stale = (r.runners || []).filter((x) => x.upToDate === false).length;
+  UI.$("#release").innerHTML = !rel.measured
+    ? `고객 PC 가 받아 가는 판을 <b>못 쟀어요</b> — ${UI.esc(rel.reason || "R2 를 읽지 못했어요")}`
+    : `고객 PC 가 받아 가는 판 <b class="mono">v${UI.esc(rel.version || "?")}</b>${rel.releasedAt ? ` · 올린 때 ${UI.esc(OPS.dateKST(rel.releasedAt))} ${UI.esc(UI.timeKST(rel.releasedAt))}` : ""}`
+      + `${rel.zipOk === false ? ' · <b style="color:var(--danger-ink)">그 판 파일이 R2 에 없어요 — 러너가 받다 실패해요</b>' : rel.bytesMatch === false ? ' · <b style="color:var(--danger-ink)">파일 크기가 기록과 달라요</b>' : ""}`
+      + `${stale ? ` · <b>${UI.num(stale)}대가 낡은 판</b>이에요` : ""}`;
   OPS.lock(op, "super_admin", UI.$("#list"));
   const byId = (id) => (r.runners || []).find((x) => x.id === Number(id));
   UI.$$("[data-rebind]").forEach((b) => b.onclick = async () => { const x = byId(b.dataset.rebind); const t = await UI.api("/api/ops-tenants?limit=50", { noRedirect: true }); const opts = [["", "팜으로(미배정)"], ...((t.ok ? t.tenants || [] : []).map((z) => [String(z.id), `${z.name} · ${z.key}`]))];
