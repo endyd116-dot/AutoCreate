@@ -13,7 +13,8 @@ import { homeRevenue } from "../../lib/revenue/aggregate";
    · planOf·autoApproveAllowed: «조용하면 발행»을 이 요금제가 쓸 수 있나(B3 가 크론 review-deadline 에 건 게이트와 같은 함수) */
 import { summarizeSlotBlocks } from "../../lib/slot-gate";
 import { planOf, autoApproveAllowed } from "../../lib/plans";
-import { GATE_LABEL, type GateKey } from "../../lib/ai-tell-gate";   // 🔴 라벨 정본은 서버(AC-52) — 화면이 문구를 지어내지 않는다
+import { GATE_FAIL_LABEL, type GateKey } from "../../lib/ai-tell-gate";   // 🔴 라벨 정본은 서버(AC-52) — 화면이 문구를 지어내지 않는다
+//   [2026-09-19 수리 ⑤] 여기는 **걸린** 검사를 적는 자리다 ⇒ 통과 이름(`GATE_LABEL`)이 아니라 `GATE_FAIL_LABEL` 을 쓴다.
 /* [R7 §1.4] 열린 채널 이름은 `channel_registry` 가 정본이다 — 고객 «계정 연결» 그리드가 그리는 기준(`status='active'`)과 같은 곳을 본다.
    문자열로 박아 두면 채널이 열리고 닫힐 때마다 사람이 문구를 고치러 와야 하고, 그러다 못 붙이는 채널을 계속 권하게 된다(A 실측 지적 2026-09-15). */
 import { listChannels } from "../../lib/accounts";
@@ -127,7 +128,7 @@ export default async (req: Request): Promise<Response> => {
       if (warnPre || warnPost) {
         /* 사유는 **많이 걸린 순서 3개까지** · 라벨은 서버 정본 그대로(AC-52 · 화면이 문구를 지어내지 않는다). */
         const key = warnPre ? "pre_n" : "post_n";
-        const why = warnRows.filter((r) => n(r[key])).slice(0, 3).map((r) => GATE_LABEL[String(r.key) as GateKey] ?? String(r.key)).filter(Boolean).join(" · ");
+        const why = warnRows.filter((r) => n(r[key])).slice(0, 3).map((r) => GATE_FAIL_LABEL[String(r.key) as GateKey] ?? String(r.key)).filter(Boolean).join(" · ");
         const one = (warnPre || warnPost) === 1 && warnFirst;
         todo.push(warnPre
           ? { kind: "review_blocked", title: `이 위험을 안고 나갈 글이 ${warnPre}건 있어요`, count: warnPre,

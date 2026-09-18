@@ -41,7 +41,7 @@ export const GATE_LABEL: Record<GateKey, string> = {
         맞는 근거는 둘뿐이다 — ①**실물이 그렇다**(R8-A 표본: 티스토리 8,500~12,500자) ②**얇은 글은 사람이 안 읽는다**.
         여기에 «SEO 때문»이라고 적으면 다음 사람이 그 근거를 무너뜨리고 손잡이를 통째로 뺀다.
      `runGate` 안에서 돈다(순수 · DB·AI 0) — `link_check`·`structure_repeat` 와 달리 밖에서 잴 것이 없다. */
-  length: "분량이 계약 폭 안",
+  length: "분량이 알맞음",   // [2026-09-19 수리 ⑤] «계약 폭»은 우리 내부 말이다(§3 시스템 용어 금지 · 손님은 무슨 계약인지 모른다)
   cliche: "상투 표현 없음", para_repeat: "문단 시작이 다양함", bullet_ratio: "불릿이 본문을 대신하지 않음", sentence_variance: "문장 길이가 살아 있음",
   translationese: "번역투 없음", superlative: "최상급에 근거가 있음", persona: "내 사정이 들어감", visual_min: "채널 시각 요소 충족",
   disclosure: "대가 고지 첫머리", banned_words: "근거 없이 쓰면 위험한 표현 없음", similarity: "다른 글과 겹치지 않음", affiliate_count: "제휴 링크 2개 이하",
@@ -61,6 +61,26 @@ export const GATE_LABEL: Record<GateKey, string> = {
      `GATE_KEYS` 밖(= runGate 가 안 돈다 · `link_check` 와 같은 자리) · **소프트**(HARD_GATE_KEYS 아님). 판정은 `lib/structure-print.ts`. */
   structure_repeat: "최근 글과 구조가 다름",
 };
+
+/**
+ * 🔴 [2026-09-19 수리 ⑤] **걸렸을 때 하는 말** — `GATE_LABEL` 은 «통과했을 때의 이름»이다.
+ *   홈 «해야 할 일»이 **걸린 검사**를 `GATE_LABEL` 로 적는 바람에 위험 목록이 이렇게 떴다(시나리오 A §9):
+ *     «이 위험을 안고 나갈 글이 1건 있어요 / **분량이 알맞음 · 채널 시각 요소 충족** — 막지는 않았어요»
+ *   ⇒ **잘된 것이 위험처럼 읽힌다.** 걸린 것은 걸린 말로 적는다.
+ *   🔴 겁주지 않는다(§3) — 무엇이 그런지 **사실 한 줄**이다. «정지됩니다»·«불이익» 같은 말은 여기 없다.
+ *   🔴 화면은 이 표를 **읽기만** 한다(AC-52 · 문구를 지어내지 않는다).
+ */
+export const GATE_FAIL_LABEL: Record<GateKey, string> = {
+  length: "분량이 짧아요", cliche: "상투 표현이 있어요", para_repeat: "문단 시작이 비슷해요",
+  bullet_ratio: "불릿이 본문을 대신해요", sentence_variance: "문장 길이가 고르게 짧아요",
+  translationese: "번역투가 있어요", superlative: "최상급에 근거가 없어요", persona: "내 사정이 안 들어갔어요",
+  visual_min: "사진·소제목이 적어요", disclosure: "대가 고지가 첫머리에 없어요",
+  banned_words: "근거 없이 쓰면 위험한 표현이 있어요", similarity: "다른 글과 겹쳐요",
+  affiliate_count: "제휴 링크가 많아요", cross_account: "다른 내 계정 글과 겹쳐요",
+  link_check: "안 열리는 링크가 있어요", ad_pointing: "광고를 가리키는 문장이 있어요",
+  stock_safe: "그대로 쓰기 어려운 스톡 사진이 있어요", structure_repeat: "최근 글과 구조가 같아요",
+};
+
 export interface GateCheck {
   key: GateKey; label: string; pass: boolean; detail?: string;
   /**

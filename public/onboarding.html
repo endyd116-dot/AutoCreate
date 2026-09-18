@@ -48,17 +48,38 @@
 </script>
 <script>
   let step = 1; const sel = { kinds: ["text", "video"], channels: [] };
+  /* 🔴 [2026-09-19 수리 ④] **나갔다 오면 고른 게 다 날아갔다.** 마지막 «시작하기» 를 누르기 전까지 아무 데도 안 적혀서,
+     2화면에서 채널을 고르다 전화 한 통 받으면 처음부터였다(시나리오 A §5).
+     ⇒ 고를 때마다 **이 브라우저에** 초안을 적어 두고, 다시 오면 **그 자리에서 잇는다.**
+     🔴 서버에 쓰지 않는다 — 온보딩을 끝내야 `tenants.settings` 에 들어간다(중간 값이 편성에 새면 안 된다).
+     🔴 localStorage 는 사생활 보호 창·차단 설정에서 **던질 수 있다** — 전부 try/catch 로 감싸고, 없으면 그냥 처음부터 한다. */
+  const DRAFT = "ac.onb.draft";
+  const draftSave = () => { try { localStorage.setItem(DRAFT, JSON.stringify({ step, kinds: sel.kinds, channels: sel.channels, at: Date.now() })); } catch { /* 못 적어도 온보딩은 돌아간다 */ } };
+  const draftClear = () => { try { localStorage.removeItem(DRAFT); } catch { /* empty */ } };
+  const draftLoad = () => {
+    try {
+      const d = JSON.parse(localStorage.getItem(DRAFT) || "null");
+      if (!d || !Array.isArray(d.kinds) || !Array.isArray(d.channels)) return null;
+      if (Date.now() - (d.at || 0) > 7 * 24 * 3600 * 1000) { draftClear(); return null; }   // 일주일 지난 초안은 남의 기억이다
+      return d;
+    } catch { return null; }
+  };
   /* 채널은 레지스트리(accounts-list.channels · status active|planned|down)로 그린다 — 하드코딩하면 계정 연결 그리드와 어긋난다.
      planned 는 고를 수 있되 «곧 열려요» 칩(고른 건 저장 → 열리면 계정 연결에 뜬다). 못 읽으면 발행 경로 있는 4채널만. */
   const SUB = { naver_blog: "애드포스트", tistory: "애드센스", blogger: "애드센스", wordpress: "애드센스", threads: "유입", instagram: "제휴", youtube_shorts: "유튜브 수익", naver_clip: "클립 인센티브", reels: "제휴", tiktok: "제휴" };
   const FALLBACK = ["naver_blog", "tistory", "blogger", "wordpress"].map((key) => ({ key, label: UI.chLabel(key), category: "text", status: "active" }));
   let CH = FALLBACK;
-  const soon = (c) => c.status && c.status !== "active";
-  UI.$$("#s1 .choice").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.kinds = UI.$$("#s1 .choice.on").map((x) => x.dataset.k); UI.$("#next").disabled = !sel.kinds.length; });
+  /* 🔴 [2026-09-19 수리 ⑤] «쓸 수 있나»를 **계정 연결 화면과 같은 규칙**으로 본다.
+     종전엔 `status` 만 봐서, 블로거처럼 «채널은 열렸는데 우리 키가 아직»인 경우(`status:"active"` · `connectable:false`)
+     온보딩은 «**애드센스**»(쓸 수 있는 것처럼), 내 계정은 «**준비 중이에요**»라고 **서로 다르게** 말했다(시나리오 A §6).
+     정본은 `_tpl.txt` 의 accounts 화면 `soon`/`soonWord` 다 — 글자 그대로 맞춘다. */
+  const soon = (c) => c.connectable === false || (c.connectable === undefined && c.status && c.status !== "active");
+  const soonWord = (c) => (c.connectableReason === "not_open" || (!c.connectableReason && c.status !== "active")) ? "곧 열려요" : "준비 중이에요";
+  UI.$$("#s1 .choice").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.kinds = UI.$$("#s1 .choice.on").map((x) => x.dataset.k); UI.$("#next").disabled = !sel.kinds.length; draftSave(); });
   function renderChannels() {
     const list = CH.filter((c) => sel.kinds.includes(c.category === "video" ? "video" : "text") && c.status !== "down");
-    UI.$("#cg").innerHTML = list.map((c) => `<button type="button" class="cgi ${sel.channels.includes(c.key) ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${soon(c) ? '<span class="pill off" style="background:var(--press)">곧 열려요</span>' : UI.esc(SUB[c.key] || "")}</small></button>`).join("");
-    UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.channels = UI.$$("#cg .cgi.on").map((x) => x.dataset.k); soonNote(); });
+    UI.$("#cg").innerHTML = list.map((c) => `<button type="button" class="cgi ${sel.channels.includes(c.key) ? "on" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${soon(c) ? `<span class="pill off" style="background:var(--press)">${UI.esc(soonWord(c))}</span>` : UI.esc(SUB[c.key] || "")}</small></button>`).join("");
+    UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { b.classList.toggle("on"); sel.channels = UI.$$("#cg .cgi.on").map((x) => x.dataset.k); soonNote(); draftSave(); });
     soonNote();
   }
   function show() {
@@ -66,14 +87,15 @@
     UI.$("#next").textContent = step === 3 ? "시작하기" : "다음";
     if (step === 2) renderChannels();
   }
-  UI.$("#back").onclick = () => { if (step > 1) { step--; show(); } else history.back(); };
+  UI.$("#back").onclick = () => { if (step > 1) { step--; show(); draftSave(); } else history.back(); };
   /* [여정 점검 6 · B3 확인] 고른 값은 이미 저장되고(tenants.settings.channels) 채널이 열리면 서버가 알림을 준다 — 화면은 그 약속을 한 줄로 말한다 */
   const soonNote = () => { const el = UI.$("#soonNote"); if (!el) return; const picked = CH.filter((c) => sel.channels.includes(c.key) && soon(c)).map((c) => c.label || UI.chLabel(c.key));
     el.hidden = !picked.length; el.textContent = picked.length ? `${picked.join(" · ")} — 아직 연결 준비 중이에요 · 열리면 알려드릴게요.` : ""; };
   UI.$("#next").onclick = async () => {
-    if (step < 3) { step++; show(); return; }
+    if (step < 3) { step++; show(); draftSave(); return; }
     const r = await UI.api("/api/onboarding", { body: { kinds: sel.kinds, channels: sel.channels } });
     if (!r.ok) { UI.toast(r.error || "저장하지 못했어요"); return; }
+    draftClear();   // 서버에 들어갔으니 초안은 버린다(다음에 오면 서버 값으로 선다)
     UI.done("준비됐어요", () => UI.go("/app/home.html")); // UI.go — 앱 화면과 같은 이동(모의 층이 이어 붙는다)
   };
   (async () => { const me = await UI.api("/api/auth-me"); if (me.ok && me.tenant?.trialDaysLeft != null) UI.$("#trial").textContent = me.tenant.trialDaysLeft + "일 남음"; })();
@@ -83,7 +105,30 @@
     UI.$("#videoSoon").hidden = !videoClosed;
     const vn = UI.$("#videoNote"); if (vn) vn.hidden = !videoClosed;
     if (step === 2) renderChannels(); })();
-  show();
+  /* 🔴 [2026-09-19 수리 ④] 다시 왔을 때 **그 자리에서 잇는다.**
+     ① 이 브라우저의 초안이 먼저다(방금 나갔다 온 사람) · ② 없으면 서버에 저장된 값(온보딩을 끝냈던 사람).
+     둘 다 없으면 처음부터. 채널 격자는 `CH` 가 늦게 오므로 그때 다시 그린다. */
+  const applyPicked = (kinds, channels) => {
+    if (Array.isArray(kinds) && kinds.length) {
+      sel.kinds = kinds.slice();
+      UI.$$("#s1 .choice").forEach((b) => b.classList.toggle("on", sel.kinds.includes(b.dataset.k)));
+      UI.$("#next").disabled = !sel.kinds.length;
+    }
+    if (Array.isArray(channels)) sel.channels = channels.slice();
+  };
+  (async () => {
+    const d = draftLoad();
+    if (d) {
+      applyPicked(d.kinds, d.channels);
+      step = d.step === 2 || d.step === 3 ? d.step : 1;
+      show();
+      if (step > 1) UI.toast("고르시던 데서 이어서 해요");
+      return;
+    }
+    const s = await UI.api("/api/tenant-settings", { noGate: true });
+    if (s.ok && s.settings) applyPicked(s.kinds || s.settings.kinds, s.settings.channels);
+    show();
+  })();
 </script>
 </body>
 </html>

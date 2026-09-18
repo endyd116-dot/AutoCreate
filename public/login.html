@@ -12,8 +12,8 @@
 <main class="page auth">
   <div class="auth-in">
     <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 12 6l5 11"/><path d="M9.5 13.5h5"/></svg></i><b>AutoCreate</b></div>
-    <h1>다시 만나서<br>반가워요</h1>
-    <p class="sub">이메일로 로그인해요.</p>
+    <h1 id="hi">다시 만나서<br>반가워요</h1>
+    <p class="sub" id="hiSub">이메일로 로그인해요.</p>
     <form id="f" novalidate>
       <div class="field"><label for="email">이메일</label><input class="input" id="email" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="you@example.com"><div class="help"></div></div>
       <div class="field"><label for="password">비밀번호</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required placeholder="비밀번호"><div class="help"></div></div>
@@ -31,8 +31,19 @@
     UI.fieldError(f, "email", ""); UI.fieldError(f, "password", "");
     const r = await UI.api("/api/auth-login", { body: { email: d.email, password: d.password, remember: !!d.remember }, noRedirect: true });
     if (!r.ok) { UI.fieldError(f, r.step === "invalid" ? "password" : "password", r.error || "로그인에 실패했어요."); return; }
+    try { localStorage.setItem("ac.seen", "1"); } catch { /* 못 적어도 로그인은 된다 */ }
     location.href = UI.qs.get("next") || "/app/home.html";
   });
+  /* 🔴 [2026-09-19 수리 ⑤] **처음 온 사람에게 «다시 만나서 반가워요»라고 하지 않는다.**
+     `/` 는 홈으로 갔다가 401 로 여기에 떨어진다 — 그래서 **가입한 적 없는 사람이 맨 처음 보는 문장**이 이거였다(시나리오 A §2).
+     이 브라우저에서 로그인한 적이 있으면 그대로 두고, 없으면 처음 온 사람에게 맞는 말로 바꾼다.
+     🔴 막지 않는다 — 로그인 폼은 그대로다(계정이 있는 사람도 여기서 바로 들어간다). */
+  try {
+    if (!localStorage.getItem("ac.seen")) {
+      UI.$("#hi").innerHTML = "부수입, 여기서<br>시작해 볼까요";
+      UI.$("#hiSub").textContent = "계정이 있으면 로그인하고, 처음이면 아래 «처음이에요»로 가세요.";
+    }
+  } catch { /* 저장소를 못 읽으면 기본 문구 그대로 */ }
   if (UI.qs.get("out")) UI.toast("로그아웃했어요");
 </script>
 </body>

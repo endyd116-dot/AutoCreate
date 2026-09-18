@@ -255,7 +255,7 @@ function closeSheet() {
   UI.sheet(`<p class="muted" style="margin:0 0 10px">지금 바로 <b style="color:var(--ink)">보기만</b> 할 수 있게 바뀌고, <b style="color:var(--ink)">${g}일 뒤</b>에 만든 글·영상·연결한 계정·수익 기록이 모두 지워져요. 그 전에는 «되돌리기»로 그대로 돌아올 수 있어요.</p>
     <p class="muted" style="margin:0 0 10px">영수증은 법에 따라 5년 남지만(전자상거래법), 이름·이메일 같은 개인 정보는 지워요. 만든 것들을 남기고 싶다면 위 «내 자료»에서 먼저 받아 주세요.</p>
     <div class="sec">왜 나가시나요 <span class="muted" style="font-weight:500">· 안 골라도 돼요</span></div>${UI.chips("why", WHY, "")}
-    <label class="chk" style="margin:10px 0 0"><input type="checkbox" id="okChk"><i></i>위 내용을 확인했고, 탈퇴에 동의해요</label>
+    <label class="chk" style="margin:10px 0 0"><input type="checkbox" id="okChk"> <span>위 내용을 확인했고, 탈퇴에 동의해요</span></label>
     <div class="cta"><button class="btn danger" type="button" id="closeDo" disabled>탈퇴하기</button></div>`,
     { title: "정말 나가시겠어요?", onOpen: (sh, close) => {
       UI.bindChips(sh);
