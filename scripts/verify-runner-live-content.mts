@@ -45,12 +45,17 @@ async function main() {
   if (!r2Configured()) { console.error("⊘ 못 쟀음 — R2 설정이 없다(.env 의 R2_*)"); process.exit(2); }
   console.log(`\n── 라이브 러너 zip «안»을 본다 (버킷 ${R2_BUCKET} · 읽기만) ──\n`);
 
-  const latest = await r2Get(`${PREFIX}latest.json`);
-  if (!latest) { console.error("⊘ 못 쟀음 — latest.json 이 없다(한 번도 안 올렸다)"); process.exit(2); }
-  let version = "";
-  try { version = String(JSON.parse(Buffer.from(latest.bytes).toString("utf8")).version ?? ""); } catch { /* 아래 */ }
-  if (!version) { console.error("⊘ 못 쟀음 — latest.json 에서 version 을 못 읽었다"); process.exit(2); }
-  rec("라이브가 가리키는 판", true, `v${version}`);
+  /* 🔴 `--version=1.1.8` 로 **아무 판이나** 볼 수 있다 — 그래야 이 자가 «진짜 잡는 자»인지 증명된다.
+     안 주면 `latest.json` 이 가리키는 판(= 지금 고객이 받아 가는 것). */
+  const want = (process.argv.find((a) => a.startsWith("--version=")) || "").split("=")[1] || "";
+  let version = want;
+  if (!version) {
+    const latest = await r2Get(`${PREFIX}latest.json`);
+    if (!latest) { console.error("⊘ 못 쟀음 — latest.json 이 없다(한 번도 안 올렸다)"); process.exit(2); }
+    try { version = String(JSON.parse(Buffer.from(latest.bytes).toString("utf8")).version ?? ""); } catch { /* 아래 */ }
+    if (!version) { console.error("⊘ 못 쟀음 — latest.json 에서 version 을 못 읽었다"); process.exit(2); }
+  }
+  rec(want ? "지정한 판(음성 대조용)" : "라이브가 가리키는 판", true, `v${version}${want ? " — `--version=` 으로 물린 판이다" : ""}`);
 
   const zipKey = `${PREFIX}v${version}.zip`;
   const zip = await r2Get(zipKey);
@@ -73,8 +78,35 @@ async function main() {
       e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]);
     const hit = walk(dir).find((p) => p.replace(/\\/g, "/").endsWith("/channels/render-video.mjs"));
     if (!hit) { rec("zip 안에 render-video.mjs 가 있다", false, `🔴 묶음 어디에도 없다 — 이 판은 **영상을 아예 못 굽는다**`); return report(1); }
-    const src = readFileSync(hit, "utf8");
+    const raw = readFileSync(hit, "utf8");
     rec("zip 안에 render-video.mjs 가 있다", true, hit.slice(dir.length + 1));
+
+    /* 🔴 **주석을 걷고 본다 — 안 걷으면 «그 병을 설명한 주석»이 «그 병»으로 세어진다.**
+       2026-09-19 실측: v1.4.0 에서 `eof_action=pass` 가 **다섯 줄** 걸렸는데 **전부 주석**이었고
+       코드는 `:471` 의 `eof_action=repeat` **한 줄**뿐이었다 ⇒ 내 첫 판이 **거짓 빨강**을 냈다.
+       🔴 그리고 그중 한 줄은 `(실제로 그랬다: 옛 ...` 로 **`*` 없이** 시작한다 — 블록 주석의 **이어지는 줄**이다.
+          «줄 앞이 `*` 면 주석» 식으로 걷으면 **그 줄이 살아남는다**(B2 가 자기 자에서 먼저 밟고 알려 줬다).
+       ⇒ **글자 단위**로 걷는다: 블록 주석 · 줄 주석 · 문자열/템플릿 안은 건드리지 않는다. */
+    const stripComments = (s: string): string => {
+      let outStr = "", i = 0;
+      const n = s.length;
+      while (i < n) {
+        const c = s[i], d = s[i + 1];
+        if (c === "/" && d === "*") { const e = s.indexOf("*/", i + 2); i = e < 0 ? n : e + 2; continue; }
+        if (c === "/" && d === "/") { const e = s.indexOf("\n", i); i = e < 0 ? n : e; continue; }
+        if (c === '"' || c === "'" || c === "`") {
+          const q = c; outStr += c; i++;
+          while (i < n && s[i] !== q) { if (s[i] === "\\") { outStr += s[i]; i++; } if (i < n) { outStr += s[i]; i++; } }
+          if (i < n) { outStr += s[i]; i++; }
+          continue;
+        }
+        outStr += c; i++;
+      }
+      return outStr;
+    };
+    const src = stripComments(raw);
+    const commentOnlyPass = /eof_action=pass/.test(raw) && !/eof_action=pass/.test(src);
+    if (commentOnlyPass) rec("🔸 참고 — `pass` 가 주석에만 있다(그 병을 설명한 글)", true, "주석을 걷고 판정했다(안 걷으면 거짓 빨강이다)");
 
     const hasPass = /eof_action=pass/.test(src);
     const hasRepeat = /eof_action=repeat/.test(src);
