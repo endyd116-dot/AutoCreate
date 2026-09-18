@@ -49,9 +49,19 @@ export default async (req: Request): Promise<Response> => {
         return json({ ok: true, promotions: list, total: n(cnt?.c), page, size });
       }
       if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
-      const b = await readJson<Record<string, unknown>>(req);
+      /* 🔴 [2026-09-19 수리 2판] **매크로·FAQ 와 똑같은 봉투 병이 여기에도 있었다.**
+         화면(`ops/promo.html`)이 보내는 것: `{ action:"save", id?, promotion:{…} }` · `{ action:"end", id }`
+         옛 판은 **평면 몸통만** 봐서 ① 저장은 `parsePromotionInput` 이 `kind`·`name` 을 못 찾아 400,
+         ② 「끝내기」는 `active` 를 안 보내니 토글 분기에도 안 걸려 **아무 일도 안 났다.**
+         🔴 `verify-key-contract` 는 이 자리를 «몸통을 통째로 넘긴다»며 **판정 못 함(⊘)** 으로 비켜 갔다 —
+            ⊘ 는 «괜찮다»가 아니다(AC-9). 열어 보니 실제로 고장이었다. 봉투를 뜯고 옛 평면 모양도 그대로 받는다. */
+      const body = await readJson<Record<string, unknown>>(req);
+      const envP = (body.promotion && typeof body.promotion === "object" ? body.promotion : {}) as Record<string, unknown>;
+      const b = { ...body, ...envP } as Record<string, unknown>;
       const id = n(b.id);
-      if (id && Object.keys(b).length <= 2 && typeof b.active === "boolean") {   // 켜기/끄기만
+      /* 「끝내기」 = 끄기. 화면은 `action:"end"` 로 말한다(옛 `{id, active:false}` 도 그대로 받는다). */
+      if (id && b.action === "end") b.active = false;
+      if (id && typeof b.active === "boolean" && b.kind === undefined && b.name === undefined) {   // 켜기/끄기만
         const [r] = await q(sql`UPDATE promotions SET active = ${b.active}, updated_at = NOW() WHERE id = ${id} RETURNING *`);
         if (!r) return json({ ok: false, error: "이벤트가 없어요.", step: "not_found" }, 404);
         await writeAudit({ tenantId: null, action: "ops_promotion_toggle", actorType: "operator", actorId: o.ops.oid, ip, target: `promotion:${id}`, detail: { active: b.active } });
@@ -81,9 +91,13 @@ export default async (req: Request): Promise<Response> => {
         return json({ ok: true, coupons: list, total: n(cnt?.c), page, size });
       }
       if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
-      const b = await readJson<Record<string, unknown>>(req);
+      /* 🔴 [2026-09-19 수리 2판] 프로모션과 같은 병 — 화면은 `{ action:"save", coupon:{…} }` · `{ action:"end", id }` 로 보낸다. */
+      const body = await readJson<Record<string, unknown>>(req);
+      const envC = (body.coupon && typeof body.coupon === "object" ? body.coupon : {}) as Record<string, unknown>;
+      const b = { ...body, ...envC } as Record<string, unknown>;
       const id = n(b.id);
-      if (id && Object.keys(b).length <= 2 && typeof b.active === "boolean") {
+      if (id && b.action === "end") b.active = false;
+      if (id && typeof b.active === "boolean" && b.code === undefined && b.kind === undefined) {
         const [r] = await q(sql`UPDATE coupons SET active = ${b.active}, updated_at = NOW() WHERE id = ${id} RETURNING *`);
         if (!r) return json({ ok: false, error: "쿠폰이 없어요.", step: "not_found" }, 404);
         await writeAudit({ tenantId: null, action: "ops_coupon_toggle", actorType: "operator", actorId: o.ops.oid, ip, target: `coupon:${id}`, detail: { active: b.active } });

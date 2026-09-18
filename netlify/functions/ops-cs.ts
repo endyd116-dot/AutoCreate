@@ -149,8 +149,21 @@ export default async (req: Request): Promise<Response> => {
       if (req.method === "GET") { const rows = await q(sql`SELECT * FROM macros ORDER BY active DESC, sort, id`); return json({ ok: true, macros: rows.map(macroRow), total: rows.length }); }
       if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
       const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
-      const b = await readJson<{ id?: number; title?: string; text?: string; tags?: unknown; active?: boolean; sort?: number }>(req);
+      /* 🔴 [2026-09-19 수리 2판 · C `verify-key-contract`] **화면은 봉투로 보낸다 — 서버가 그걸 안 뜯었다.**
+         `ops/cs-faq.html` 이 보내는 것: `{ action:"save", id?, macro:{title,text} }` · `{ action:"delete", id }`
+         옛 판은 `b.title`·`b.text` 만 봐서 **저장이 늘 400**(«제목과 내용을 적어 주세요»)이었고,
+         🔴 **지우는 길은 아예 없었다**(매크로엔 DELETE 분기 자체가 없다). 봉투를 뜯고, 옛 평면 모양도 그대로 받는다. */
+      const body = await readJson<Record<string, unknown>>(req);
+      const env = (body.macro && typeof body.macro === "object" ? body.macro : {}) as Record<string, unknown>;
+      const b = { ...body, ...env } as { id?: number; title?: string; text?: string; tags?: unknown; active?: boolean; sort?: number; action?: string; delete?: boolean };
       const id = n(b.id);
+      /* 지우기 — FAQ 와 같은 어휘로 맞춘다(`action:"delete"` 또는 옛 `delete:true`). */
+      if (id && (b.action === "delete" || b.delete === true)) {
+        const [gone] = await q(sql`DELETE FROM macros WHERE id = ${id} RETURNING id`);
+        if (!gone) return json({ ok: false, error: "매크로가 없어요.", step: "not_found" }, 404);
+        await writeAudit({ tenantId: null, action: "ops_macro_delete", actorType: "operator", actorId: o.ops.oid, ip, target: `macro:${id}` });
+        return json({ ok: true, deleted: id });
+      }
       if (id && typeof b.active === "boolean" && b.title === undefined && b.text === undefined) {
         const [r] = await q(sql`UPDATE macros SET active = ${b.active}, updated_at = NOW() WHERE id = ${id} RETURNING *`);
         return r ? json({ ok: true, macro: macroRow(r) }) : json({ ok: false, error: "매크로가 없어요.", step: "not_found" }, 404);
@@ -171,9 +184,14 @@ export default async (req: Request): Promise<Response> => {
       if (req.method === "GET") { const rows = await q(sql`SELECT * FROM faqs ORDER BY sort, id`); return json({ ok: true, faqs: rows.map(faqRow), total: rows.length }); }
       if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
       const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
-      const b = await readJson<{ id?: number; q?: string; a?: string; order?: number; public?: boolean; category?: string; delete?: boolean }>(req);
+      /* 🔴 [2026-09-19 수리 2판 · C `verify-key-contract`] 매크로와 같은 병 —
+         화면은 `{ action:"save", id?, faq:{q,a,public} }` · `{ action:"delete", id }` 로 보내는데
+         옛 판은 `b.q`·`b.a` 만 봐서 **저장이 늘 400**, 지우기는 `b.delete` 만 봐서 **안 지워졌다.** */
+      const body = await readJson<Record<string, unknown>>(req);
+      const envF = (body.faq && typeof body.faq === "object" ? body.faq : {}) as Record<string, unknown>;
+      const b = { ...body, ...envF } as { id?: number; q?: string; a?: string; order?: number; public?: boolean; category?: string; delete?: boolean; action?: string };
       const id = n(b.id);
-      if (id && b.delete === true) { await q(sql`DELETE FROM faqs WHERE id = ${id}`); await writeAudit({ tenantId: null, action: "ops_faq_delete", actorType: "operator", actorId: o.ops.oid, ip, target: `faq:${id}` }); return json({ ok: true, deleted: id }); }
+      if (id && (b.action === "delete" || b.delete === true)) { await q(sql`DELETE FROM faqs WHERE id = ${id}`); await writeAudit({ tenantId: null, action: "ops_faq_delete", actorType: "operator", actorId: o.ops.oid, ip, target: `faq:${id}` }); return json({ ok: true, deleted: id }); }
       const qq = String(b.q ?? "").trim().slice(0, 200), a = String(b.a ?? "").trim().slice(0, 8000);
       if (!qq || !a) return badRequest("질문과 답을 적어 주세요.");
       const category = b.category ? String(b.category).slice(0, 40) : null;
@@ -222,9 +240,32 @@ export default async (req: Request): Promise<Response> => {
 
     /* ── 담당 · 해결 · 우선순위 · 상태/태그 ── */
     let status: TicketStatus | null = null, priority: TicketPriority | null = null, tags: string[] | null = null, assigneeId: number | null | undefined;
-    if (path.endsWith("/ops-ticket-assign")) { assigneeId = b.assigneeId === null ? null : n(b.assigneeId) || o.ops.oid; }
-    else if (path.endsWith("/ops-ticket-resolve")) { status = "resolved"; }
-    else if (path.endsWith("/ops-ticket-priority")) { if (!PRIORITIES.includes(b.priority as TicketPriority)) return badRequest("priority"); priority = b.priority as TicketPriority; }
+    /* 🔴 [2026-09-19 수리 2판 · C `verify-key-contract`] **화면이 보내는 이름을 서버가 안 읽고 있었다.**
+       셋 다 «오류 한 글자 없이» 엉뚱하게 동작했다 — 그래서 시나리오에서도 안 걸렸다(200 이 온다). */
+    if (path.endsWith("/ops-ticket-assign")) {
+      /* 화면(`ops/ticket.html`)은 `operatorId` 로 보낸다. 옛 이름 `assigneeId` 도 그대로 받는다(무회귀).
+         🔴 옛 판은 `b.assigneeId` 만 봐서 **늘 undefined** → `n(undefined) || o.ops.oid` 로 떨어졌다 ⇒
+            ① 남을 골라도 **누른 사람에게 배정**되고 ② «담당 없음»(null)도 **자기에게 배정**됐다.
+         값을 아예 안 보냈을 때만 «나에게»다 — `null` 은 «담당 없음»이라는 **뜻**이라 그대로 지킨다. */
+      const raw = b.assigneeId !== undefined ? b.assigneeId : b.operatorId;
+      assigneeId = raw === null ? null : raw === undefined ? o.ops.oid : n(raw) || o.ops.oid;
+    }
+    else if (path.endsWith("/ops-ticket-resolve")) {
+      /* 🔴 옛 판은 `status = "resolved"` 를 **못 박았다** — 화면의 「보류」 단추도 `status:"hold"` 를 보내는데
+            그대로 «해결»로 닫혔다(고객에게 «해결됐어요» 알림까지 갔다). 보내 준 상태를 존중하되 기본은 해결이다. */
+      status = STATUSES.includes(b.status as TicketStatus) ? b.status as TicketStatus : "resolved";
+    }
+    else if (path.endsWith("/ops-ticket-priority")) {
+      if (!PRIORITIES.includes(b.priority as TicketPriority)) return badRequest("priority");
+      priority = b.priority as TicketPriority;
+      /* 🔴 화면은 우선순위와 **태그를 같은 칩 묶음에서 함께** 보낸다(`ops/ticket.html:51`) — 옛 판은 태그를 안 읽어
+            **태그가 저장되지 않았다.** 다중 칩이라 값은 배열이고, **빈 배열은 «전부 껐다»는 뜻**이라 그대로 지운다.
+            🔴 다만 `tags` 를 **아예 안 보냈으면** 건드리지 않는다 — 없는 값으로 있는 것을 지우지 않는다(메모에서 겪은 그 병). */
+      if (b.tags !== undefined) {
+        if (!Array.isArray(b.tags)) return badRequest("tags");
+        tags = [...new Set(b.tags.map((t) => String(t).slice(0, 30)))].slice(0, 10);
+      }
+    }
     else if (path.endsWith("/ops-ticket-update")) {
       if (b.status !== undefined) { if (!STATUSES.includes(b.status as TicketStatus)) return badRequest("status"); status = b.status as TicketStatus; }
       if (b.priority !== undefined) { if (!PRIORITIES.includes(b.priority as TicketPriority)) return badRequest("priority"); priority = b.priority as TicketPriority; }

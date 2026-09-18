@@ -105,12 +105,22 @@ export async function startCoinPurchase(tid: number, packId: unknown, opts: { ac
 export type ApproveResult = { ok: true; tenantId: number; coins: number; bonus: number; balance: number; alreadyPaid: boolean } | { ok: false; tenantId?: number; reason: string };
 /** ㉡ 콜백 — 승인 확정 → 기입. 같은 주문번호 재수신은 alreadyPaid(원장 유니크가 최종 보증). */
 export async function approveCoinPurchase(authorizationId: string, orderNo: string, opts: { verifyMsgAuth?: (raw: unknown, mid?: string | null) => boolean } = {}): Promise<ApproveResult> {
+  /* 🔴 [2026-09-19 수리 2판 · C `verify-audit-gap`] **돈이 걸린 콜백인데 두 갈래가 조용히 돌아섰다.**
+     이 함수는 승인 실패·서명 불일치는 남기면서, «주문번호를 못 읽음»·«없는 묶음»은 **아무 기록 없이** 돌아섰다.
+     그 둘은 «PG 가 뭔가 보냈는데 우리가 못 알아들었다»는 뜻이다 — 고객 돈이 빠져나갔을 수도 있는 자리라
+     **가장 남아야 할 갈래**다. 남길 테넌트를 모르는 첫 갈래는 `tenantId: null` 로 남긴다(안 남기는 것보다 낫다). */
   const parsed = parseCoinOrderNo(orderNo);
-  if (!parsed) return { ok: false, reason: "bad_order_no" };
+  if (!parsed) {
+    await writeAudit({ tenantId: null, action: "coin_purchase_failed", actorType: "system", riskLevel: "high", target: `order:${String(orderNo).slice(0, 80)}`, detail: { reason: "bad_order_no" } });
+    return { ok: false, reason: "bad_order_no" };
+  }
   const tid = parsed.tenantId;
   const [o] = await q(sql`SELECT pack_id, status, pg_mid FROM coin_orders WHERE tenant_id = ${tid} AND order_no = ${orderNo}`);
   const pack = await findPack(o?.pack_id ?? packIdOfCode(parsed.packCode));
-  if (!pack) return { ok: false, tenantId: tid, reason: "unknown_pack" };
+  if (!pack) {
+    await writeAudit({ tenantId: tid, action: "coin_purchase_failed", actorType: "system", riskLevel: "high", target: `order:${orderNo}`, detail: { reason: "unknown_pack", packId: o?.pack_id ?? null, packCode: parsed.packCode ?? null } });
+    return { ok: false, tenantId: tid, reason: "unknown_pack" };
+  }
   if (String(o?.status) === "paid") { const b = await balance(tid); return { ok: true, tenantId: tid, coins: pack.coins, bonus: 0, balance: b.balance, alreadyPaid: true }; }
   const { approveTrade } = await import("../kicc");
   const orderMid = o?.pg_mid ? String(o.pg_mid) : null;   // 거래등록 때 쓴 MID(§1.6) — 없으면 인증 MID 폴백
