@@ -1,7 +1,7 @@
 /**
  * lib/video/judge.ts — 렌더 결과 8축 심사(결정론 + 비전) · 3등급(P0 차단 · P1 1회 편집 재생성 후 통과 표시 · P2 기록) · 결정론 수리. 계약 §1.4-5 · §0.1-7 · §5 judgeVideo.
  *   AM 원본: ../AutoMarketing/lib/creative-judge.ts (복사 2026-09-15 · 원본 342534db8 2026-09-11 · 2,475줄 중 축 8(MASTER §7-1)·3등급(SHORTS5)·결정론 수리 관례 이식 · 광고 소재 축(CTA 씬·브랜드 색·카드뉴스)은 제외)
- *   축(§7-1): ①hook_first ②safe_area ③reading_time ④text_broken ⑤black_margin ⑥frames_not_blank ⑦cut_rhythm ⑧forbidden — + AC 고유 disclosure(§16B)·duration_fit·similarity(§1.9).
+ *   축(§7-1): ①hook_first ②safe_area ③reading_time ④text_broken ⑤black_margin ⑥frames_not_blank ⑦cut_rhythm ⑧forbidden — + AC 고유 disclosure(§16B)·duration_fit·similarity(§1.9)·has_audio(2026-09-19 · AM 5f14ba6f2).
  *   결정론 우선(①③⑦⑧ + duration·disclosure 는 페이로드에서 · 비용 0) · 비전은 포스터 1장 + 컷 대표 프레임을 한 호출에(축별 boolean · 단발 총점 금지) · AC-26: thinking 모델 «본문 0» 을 실패로 세지 않는다(finishReason·parts).
  *   비전 «불능»(429·타임아웃)은 미달이 아니다 — P2 기록 + 사람 말 사유(AM VISION_BLIND_REASON) · 합부에 손대지 않는다.
  *   등급: P0 = forbidden·disclosure·duration_fit·frames_not_blank 실패 → 차단(수리 후 재큐) · P1 = text_broken·black_margin·safe_area·hook_first·similarity → 기록·통과(1회 재생성은 gen 단계에서) · P2 = reading_time·cut_rhythm(수리 가능) → 수리·기록.
@@ -29,8 +29,8 @@ export const VISION_BLIND_REASON = "심사를 돌리지 못했습니다(AI 판�
 export const READ_CHARS_PER_SEC = 6.5;
 /** 컨테이너가 영상 트랙보다 이만큼 넘게 길면 «끝에 정지 화면이 붙었다»로 본다(§AC-31). 키프레임·mux 오차는 이 아래다. */
 export const TAIL_TOLERANCE_MS = Number(process.env.VIDEO_TAIL_TOLERANCE_MS || "500");
-const AXIS_LABEL: Record<string, string> = { hook_first: "첫 컷이 훅", safe_area: "자막·배지가 안전영역 안", caption_lines: "자막 2줄 이내", reading_time: "자막 읽을 시간 충분", text_broken: "깨진 글자 없음", black_margin: "검은 여백 없음", frames_not_blank: "빈 프레임 없음", cut_rhythm: "컷 리듬 살아 있음", forbidden: "금칙·내부 문자열 없음", disclosure: "제휴 고지(배지·자막·설명란)", duration_fit: "길이 규격 안", similarity: "다른 계정 영상과 겹치지 않음" };
-const GRADE_OF: Record<string, JudgeGrade> = { forbidden: "P0", disclosure: "P0", duration_fit: "P0", frames_not_blank: "P0", text_broken: "P1", black_margin: "P1", safe_area: "P1", caption_lines: "P2", hook_first: "P1", similarity: "P1", reading_time: "P2", cut_rhythm: "P2" };
+const AXIS_LABEL: Record<string, string> = { hook_first: "첫 컷이 훅", safe_area: "자막·배지가 안전영역 안", caption_lines: "자막 2줄 이내", reading_time: "자막 읽을 시간 충분", text_broken: "깨진 글자 없음", black_margin: "검은 여백 없음", frames_not_blank: "빈 프레임 없음", cut_rhythm: "컷 리듬 살아 있음", forbidden: "금칙·내부 문자열 없음", disclosure: "제휴 고지(배지·자막·설명란)", duration_fit: "길이 규격 안", similarity: "다른 계정 영상과 겹치지 않음", has_audio: "소리가 실렸음" };
+const GRADE_OF: Record<string, JudgeGrade> = { forbidden: "P0", disclosure: "P0", duration_fit: "P0", frames_not_blank: "P0", text_broken: "P1", black_margin: "P1", safe_area: "P1", caption_lines: "P2", hook_first: "P1", similarity: "P1", has_audio: "P1", reading_time: "P2", cut_rhythm: "P2" };
 const axis = (key: string, pass: boolean, detail?: string): JudgeAxis => ({ key, label: AXIS_LABEL[key] ?? key, pass, grade: GRADE_OF[key] ?? "P2", ...(detail ? { detail } : {}) });
 /** [R7 §1.5] «못 쟀다»를 «괜찮다»로 접지 않는다(AC-33 · AC-9) — 막지는 않지만(`pass:true`) 잰 척도 하지 않는다.
     실패한 축에는 붙이지 않는다: 떨어뜨릴 만큼은 쟀다는 뜻이라 보류가 아니다. */
@@ -196,6 +196,25 @@ export function judgePayloadDeterministic(p: RenderPayload, meta: Record<string,
         : noFrames ? (dur <= 0 ? "길이 0 — 프레임이 없음" : `프레임 ${frameCount}장 — 빈 영상`)
           : framesShort ? `프레임 ${frameCount}장 — ${(videoMs / 1000).toFixed(1)}초 ${p.out.fps}fps 에 한참 못 미쳐요(끊긴 인코딩)`
             : measured ? undefined : "프레임 수가 계획값 — 판정 보류(러너 ffprobe 필요)"), !measured));
+    /* has_audio — 🔴 **«소리 없는 영상»을 아무도 말하지 않던 자리**(2026-09-19 · AM 5f14ba6f2 가려내기에서 «급함»으로 잡힘).
+       러너는 `audioMs` 를 **이미 재서 보내고**(render-video.mjs §102 «0 = 오디오 트랙 없음») 그 값이
+       `render-queue → piece_assets.meta → 여기`까지 **셋 다 배선돼 있었는데 읽는 축이 하나도 없었다.**
+       ⇒ 나레이션 큐가 있는데 오디오가 0 이면 그건 «만들다 만 영상»이다. 재료는 이미 손에 있었다.
+       🔴 **확정 0 만 잡는다.** `measured` 가 아니면 못 잰 것이고(옛 러너·ffprobe 없음) 못 잰 것을 «없다»고 하지 않는다(AC-9).
+          나레이션 큐가 애초에 없는 편(무성 영상)도 대상이 아니다 — 있어야 할 소리가 빠진 것만 본다.
+       🔴 **막지 않는다(P1 · §9)** — 되굽는다고 소리가 생기지 않는다(원인은 합성·업로드 쪽 윗물이다).
+          막는 대신 **또렷하게 말한다**: 무엇이(소리가 없다) · 왜 그런지(나레이션 N줄이 안 실렸다) · 어떻게 하면 되는지(다시 만들기). */
+    const cueCount = (p.audio?.narration ?? []).length;
+    /* 🔴 **확정 0 만 잡는다**(AM 이 같은 자리에서 한 칸 좁힌 근거를 그대로 받았다): 키가 아예 없는 보고는
+       «오디오가 0» 이 아니라 «안 쟀다» 이다. 옛 러너 보고에 대고 «소리 없음» 을 외치면 오경보만 쌓인다. */
+    const audioKnown = measured && report.audioMs !== undefined && report.audioMs !== null;
+    const audioMs = n(report.audioMs);
+    const silent = audioKnown && cueCount > 0 && audioMs === 0;
+    axes.push(pendingIf(axis("has_audio", !silent,
+      silent ? `나레이션 ${cueCount}줄을 만들었는데 영상에 소리가 안 실렸어요 — 이대로 올리면 무음으로 나가요. 다시 만들어 주세요`
+        : cueCount === 0 ? "나레이션이 없는 영상이라 소리는 판정 대상이 아니에요"
+          : !audioKnown ? "소리가 실렸는지는 못 쟀어요(러너 ffprobe 필요)"
+            : `소리 ${(audioMs / 1000).toFixed(1)}초`), !audioKnown && cueCount > 0));
   }
   return { axes, repairedPayload: repaired };
 }
@@ -303,7 +322,7 @@ export async function judgeVideo(pieceId: number): Promise<JudgeResult> {
   byKey.set("similarity", sim);
   // [R7 §1.5] 비전이 못 돌았으면 그 축은 **보류**다 — 종전엔 사유만 달고 초록으로 보였다(AC-33 «없음»을 «괜찮음»으로 접지 않는다).
   if (vis.blind) { for (const k of ["text_broken", "black_margin"]) if (!byKey.has(k)) byKey.set(k, pendingIf(axis(k, true, VISION_BLIND_REASON), true)); }
-  const axes = ["hook_first", "safe_area", "reading_time", "text_broken", "black_margin", "frames_not_blank", "cut_rhythm", "forbidden", "disclosure", "duration_fit", "similarity"].map((k) => byKey.get(k)).filter((a): a is JudgeAxis => !!a);
+  const axes = ["hook_first", "safe_area", "reading_time", "text_broken", "black_margin", "frames_not_blank", "has_audio", "cut_rhythm", "forbidden", "disclosure", "duration_fit", "similarity"].map((k) => byKey.get(k)).filter((a): a is JudgeAxis => !!a);
   const fails = axes.filter((a) => !a.pass);
   const grade: JudgeGrade = fails.some((a) => a.grade === "P0") ? "P0" : fails.some((a) => a.grade === "P1") ? "P1" : fails.length ? "P2" : "P2";
   const pass = !fails.some((a) => a.grade === "P0");   // 3등급: P0 만 차단 · P1/P2 는 기록하고 통과

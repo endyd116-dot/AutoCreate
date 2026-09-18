@@ -49,10 +49,31 @@ const EN_READ_KO: Record<string, string> = {
 export function readEnglishKo(text: unknown): string { return String(text ?? "").replace(/[A-Za-z]{1,12}/g, (w) => EN_READ_KO[w.toUpperCase()] ?? w); }
 /** 테넌트 읽기 사전(페르소나 profile.reading — { 원문: 읽는 법 }) — 전역 사전보다 먼저 이긴다. 없으면 null. */
 export type SpeakReadingDict = Record<string, string>;
+/** 사전 열쇠 공백 지운 형태의 최소 길이 — 이 아래는 안 문다(«A B»→«AB» 같은 두 글자가 아무 데나 걸리는 것을 막는다). */
+export const READING_DICT_SQUASHED_MIN = 4;
+/**
+ * applyReadingDict — 테넌트 읽기 사전으로 치환.
+ *
+ *   🔴 [2026-09-19 · AM 3e425f2d4 가려내기에서 «급함»으로 잡힘] **열쇠에 공백이 있으면 그 열쇠는 영영 못 무는 자리가 있었다.**
+ *      열쇠가 「쓸GO 닦GO」(2어절)인데 대본기가 「쓸GO닦GO가」(1어절)로 쓰면 부분문자열 치환이 안 걸려
+ *      원문 그대로 합성기로 가고, 그 뒤 `readEnglishKo` 도 «GO» 를 모르니 타입캐스트가 «쥐오» 로 읽는다
+ *      (AM 사장님 실사고 «쓸쥐오닦쥐오» · 우리 코드에서도 실행으로 재현했다).
+ *   ⇒ **두 번 문다**: ① 열쇠 그대로(종전과 한 글자도 같다) ② 그다음 열쇠의 **공백을 지운 형태**.
+ *      ②는 열쇠에 공백이 있을 때만 만들고, 지운 형태가 `READING_DICT_SQUASHED_MIN` 자 미만이면 안 만든다.
+ *      ①이 먼저라 정본 표기가 이미 쓰인 문장은 **종전과 결과가 같다**(무회귀).
+ *   ⚠️ 이건 **소리 쪽**만 고친 것이다. 화면 자막·원장에 남는 **글자**는 여전히 「쓸GO닦GO가」다 —
+ *      그 짝(대본 프롬프트 + 결정론 교정)은 AM cee28b0d6 이 한 일이고, 가려내기 문서의 «받을 것» 에 있다.
+ */
 export function applyReadingDict(text: string, dict: SpeakReadingDict | null | undefined): string {
   if (!dict) return text;
+  const pairs = Object.entries(dict).filter(([from, to]) => from && to && from !== to && from.length <= 60);
   let s = text;
-  for (const [from, to] of Object.entries(dict).sort((a, b) => b[0].length - a[0].length)) { if (from && to && from !== to && from.length <= 60) s = s.split(from).join(to); }
+  for (const [from, to] of [...pairs].sort((a, b) => b[0].length - a[0].length)) s = s.split(from).join(to);
+  const squashed = pairs
+    .filter(([from]) => /\s/.test(from))
+    .map(([from, to]) => [from.replace(/\s+/g, ""), to] as const)
+    .filter(([from]) => from.length >= READING_DICT_SQUASHED_MIN);
+  for (const [from, to] of [...squashed].sort((a, b) => b[0].length - a[0].length)) s = s.split(from).join(to);
   return s;
 }
 export function preprocessForSpeech(text: unknown, dict?: SpeakReadingDict | null): string {
