@@ -124,7 +124,17 @@ AC 는 콘텐츠·쇼핑 쇼츠다. 광고 문구·CTA·세그먼트 축·오퍼
 | [`lib/video/judge.ts`](../../lib/video/judge.ts) | 급함② — `has_audio` 축(P1 · 확정 0만) + `AXIS_LABEL`·`GRADE_OF`·축 순서 |
 | `docs/rules/am-video-seen.json` | «여기까지 봤다» 표시 |
 
-**자**: `verify-am-video-sync` 0 · `tsc --noEmit` 0 · `verify-safe-list --run` 0 · `verify-label-surface` 0(△ `has_audio` 모의 미노출 한 줄 — A 몫)
+**자**(한 줄씩 따로 · `| tail` 0 · `&&` 0):
+
+| 자 | 종료코드 |
+|---|---|
+| `node scripts/verify-am-video-sync.mjs` | **0** (마크 쓰기 전엔 1 이었다) |
+| `npx tsc --noEmit` | **0** |
+| `node scripts/verify-safe-list.mjs --run` | **0** — 실제로 잰 68개 전부 통과 |
+| `node scripts/verify-label-surface.mjs` | **0** (△ `has_audio` 모의 미노출 한 줄 — A 몫) |
+
+🔴 **⊘ 못 쟀음 1개를 «다 통과»로 뭉개지 않는다**: `verify-runner-live-inside.mts=2` — 라이브 러너가 붙어 있어야 잰다. **내 변경과 무관**하다(이 커밋은 `lib/video/tts.ts`·`judge.ts`·문서 2개만 건드렸고 그 자는 러너 접속을 잰다). 재료를 걸고 다시 돌려야 한다.
+· 참고: 첫 회차엔 `verify-r12-video-nochange.mjs` 도 ⊘(2) 였는데 재실행에서 0 으로 잰다.
 
 ## 6. 남에게 넘길 한 줄
 
