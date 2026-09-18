@@ -42,8 +42,15 @@ if (englishOut) fails.push("🔴 영어 메시지를 그대로 내보내는 길�
    (`piece.html` · `pieceId` · JS 의 `undefined` 가 전부 걸린다 — 처음 이 자를 냈을 때 16곳이 헛 울었다).
    ⇒ 영어 식별자는 이 자가 **못 잰다.** 그건 화면을 띄워서 보는 수밖에 없다(시나리오 걷기가 하는 일). */
 const BAD_WORDS = ["계약 폭", "테넌트", "러너 잡", "러너 job", "piece 를", "piece 가", "slot 을", "gate_report"];
+/* 🔴 [2026-09-19] **`public/**` 이라 적어 놓고 `.html`·`.txt` 만 셌다** — `public/js/mock.js`·`ui.js` 를 아예 안 봤다.
+   그래서 «계약 폭»을 서버에서 고치고도 **화면 사본이 옛말인 것**을 놓쳤다(기존 자 `verify-label-surface` 가 잡았다).
+   🔴 손님이 보는 글자는 **`.js` 안에 더 많다**(모의·공용 층이 문장을 만든다). 확장자를 늘리고, 아래 note 에 **무엇을 셌는지 그대로 적는다.** */
+const EXT = /\.(html|txt|js)$/;
 const CUSTOMER_FILES = [];
-const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) { if (!/\bops\b/.test(p)) walk(p); } else if (/\.(html|txt)$/.test(f)) CUSTOMER_FILES.push(p); } };
+/* 🔴 운영센터는 뺀다 — **폴더(`public/ops/`)만이 아니라 파일 이름(`ops.js`·`mock-ops.js`)까지** 본다.
+   §13.0b «운영 콘솔 예외» — «테넌트» 같은 말은 **운영자에게는 맞는 말**이다. 폴더만 보다가 `public/js/mock-ops.js` 에서 헛 울었다. */
+const isOps = (p) => /(^|[\\/])ops([\\/]|[-.])/.test(p) || /[\\/]mock-ops\./.test(p);
+const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) { if (!isOps(p + "/")) walk(p); } else if (EXT.test(f) && !isOps(p)) CUSTOMER_FILES.push(p); } };
 walk("public");
 const wordHits = [];
 for (const p of CUSTOMER_FILES) {
@@ -55,8 +62,25 @@ for (const p of ["lib/ai-tell-gate.ts", "lib/produce-window.ts"]) {
   const src = decomment(readFileSync(p, "utf8"));
   for (const w of BAD_WORDS) if (src.includes(`"${w}`) || src.includes(`${w} 안"`)) wordHits.push(`${p} → «${w}»`);
 }
-notes.push(`센 것: 손님 화면(public/** · 운영센터 제외 ${CUSTOMER_FILES.length}개) + 서버 라벨 2개에서 시스템 용어 [${BAD_WORDS.join(", ")}] = ${wordHits.length}곳`);
+notes.push(`센 것: 손님 화면 ${CUSTOMER_FILES.length}개(\`public/**\` 의 .html·.txt·**.js** · 운영센터 제외) + 서버 라벨 2개에서 시스템 용어 [${BAD_WORDS.join(", ")}] = ${wordHits.length}곳`);
 if (wordHits.length) fails.push(`🔴 손님 화면에 시스템 용어가 있다(§3): ${wordHits.join(" · ")}`);
+
+/* ── ③-b 🔴 **서버에서 고친 낱말이 화면 사본에도 갔나** ──
+   이 자가 처음에 놓친 자리다. «계약 폭»을 `lib/ai-tell-gate.ts` 에서만 고치고 `public/js/mock.js` 사본은 옛말이었다 —
+   그런데 **손님 화면에 뜨는 건 모의 쪽**이라 고친 값이 0에 가까웠다(메인 지적 2026-09-19).
+   🔴 라벨 전수 대조는 `scripts/verify-label-surface.mjs` 가 한다. 여기서는 **이 라운드에서 바꾼 낱말**만 못 박는다. */
+const RENAMED = [
+  { 옛말: "분량이 계약 폭 안", 새말: "분량이 알맞음", 어디: "글 검사 라벨" },
+];
+const staleCopies = [];
+for (const r of RENAMED) {
+  for (const p of CUSTOMER_FILES) {
+    const src = decomment(readFileSync(p, "utf8"));
+    if (src.includes(r.옛말)) staleCopies.push(`${p.replace(/\\/g, "/")} → «${r.옛말}»(새말 «${r.새말}»)`);
+  }
+}
+notes.push(`센 것: 이 라운드에서 바꾼 낱말 ${RENAMED.length}개의 **옛말이 화면 사본에 남아 있나** = ${staleCopies.length}곳`);
+if (staleCopies.length) fails.push(`🔴 서버만 고치고 화면 사본이 옛말이다 — 손님이 보는 건 이쪽이다: ${staleCopies.join(" · ")}`);
 
 /* ── ④ 걸린 검사를 «통과 이름»으로 말하지 않나 ── */
 const gate = decomment(readFileSync("lib/ai-tell-gate.ts", "utf8"));
@@ -74,8 +98,29 @@ else {
 }
 const home = decomment(readFileSync("netlify/functions/home-summary.ts", "utf8"));
 const usesFail = /GATE_FAIL_LABEL\[String\(r\.key\)/.test(home);
-notes.push(`센 것: 홈 «해야 할 일»이 걸린 검사에 \`GATE_FAIL_LABEL\` 을 쓰나 = ${usesFail}`);
+notes.push(`센 것: **서버** 홈이 걸린 검사에 \`GATE_FAIL_LABEL\` 을 쓰나 = ${usesFail}`);
 if (!usesFail) fails.push("🔴 홈이 걸린 검사를 통과 이름으로 적고 있다 — «분량이 알맞음 · 채널 시각 요소 충족 — 막지는 않았어요»가 위험처럼 뜬다.");
+
+/* 🔴 **모의도 같이 본다.** 서버만 고치고 모의를 안 고치면 **손님 화면에 뜨는 건 모의 쪽**이다(메인 지적 2026-09-19).
+   변이로 확인했다 — 모의를 되돌렸을 때 이 자가 안 울어서 이 줄을 더했다. */
+const mock = decomment(readFileSync("public/js/mock.js", "utf8"));
+const mockHasMap = /GATE_FAIL_SAY\s*=\s*\{/.test(mock);
+const mockUsesFail = /GATE_FAIL_SAY\[c\.key\]/.test(mock);
+notes.push(`센 것: **모의**(public/js/mock.js)에 \`GATE_FAIL_SAY\` 표가 있나 = ${mockHasMap} · 위험을 셀 때 그걸 쓰나 = ${mockUsesFail}`);
+if (!mockHasMap) fails.push("🔴 모의에 `GATE_FAIL_SAY` 가 없다 — 모의 화면은 걸린 검사를 통과 이름으로 말하게 된다.");
+if (!mockUsesFail) fails.push("🔴 모의가 위험 사유를 `c.label`(통과 이름)로 세고 있다 — 서버만 고치고 화면 사본을 안 고친 모양이다.");
+if (mockHasMap) {
+  /* 두 표가 글자까지 같은가 — 갈라지면 화면과 서버가 딴말을 한다(AC-52). 전수 대조는 `verify-label-surface` 도 하지만, 여기서도 못 박는다. */
+  const srvSeg = (gate.match(/export const GATE_FAIL_LABEL[\s\S]*?\n\};/) || [""])[0];
+  const mockSeg = (mock.match(/GATE_FAIL_SAY\s*=\s*\{[\s\S]*?\n\s*\};/) || [""])[0];
+  const pick = (s) => new Map([...s.matchAll(/([a-z_]+):\s*"([^"]*)"/g)].map((m) => [m[1], m[2]]));
+  const a = pick(srvSeg), b = pick(mockSeg);
+  const diff = [...a].filter(([k, v]) => b.has(k) && b.get(k) !== v).map(([k, v]) => `${k}: 모의 «${b.get(k)}» ≠ 서버 «${v}»`);
+  const gone = [...a.keys()].filter((k) => !b.has(k));
+  notes.push(`센 것: 서버 \`GATE_FAIL_LABEL\` ${a.size}개 ↔ 모의 \`GATE_FAIL_SAY\` ${b.size}개 — 글자가 다른 것 ${diff.length}개 · 모의에 빠진 것 ${gone.length}개`);
+  if (diff.length) fails.push(`🔴 걸렸을 때의 말이 서버와 모의에서 다르다: ${diff.join(" · ")}`);
+  if (gone.length) fails.push(`🔴 모의에 빠진 «걸렸을 때의 말»: ${gone.join(", ")}`);
+}
 
 /* ── ⑤ 겁주는 말(§3) ── */
 const SCARY = ["정지됩니다", "불이익", "알려만 드립니다", "알려만 드렸", "고객님 책임", "책임지지 않습니다"];
