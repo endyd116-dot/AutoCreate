@@ -37,6 +37,16 @@
       "자": "verify-silent-erase.mjs",
       "왜": "고객이 걸어 둔 지시를 읽지도 않고 지우는 자리 3곳(pending_plan_key · pending_cycle · cancel_at_period_end)",
       "누가": "B"
+    },
+    {
+      "자": "verify-audit-gap.mjs",
+      "왜": "인증 실패를 감사에 안 남기는 자리 3곳(loginUser · loginOperator · approveCoinPurchase — 같은 함수가 잠김·성공은 남긴다)",
+      "누가": "B"
+    },
+    {
+      "자": "verify-repair-round.mjs",
+      "왜": "점수판 자체다 — 위 자들이 하나라도 빨간 동안은 이것도 빨간다. 마지막으로 초록이 된다",
+      "누가": "B·B2"
     }
   ]
 }

@@ -17,6 +17,7 @@
  *   🔴 갈래는 **파일을 읽어서** 정한다 — 손으로 든 목록이면 새 하니스가 생길 때마다 낡는다(AC-82).
  */
 import { readdirSync, readFileSync } from "node:fs";
+import { codeOnly } from "./_lib/code-only.mjs";
 import { execFileSync } from "node:child_process";
 
 const files = readdirSync("scripts").filter((f) => /^verify-.*\.(mjs|mts)$/.test(f)).sort();
@@ -42,11 +43,23 @@ const SAYS_READONLY = /읽기만|읽기 전용|SELECT 만/;
 
 const groups = { safe: [], live: [], needs: [] };
 for (const f of files) {
-  const src = readFileSync(`scripts/${f}`, "utf8");
+  const raw = readFileSync(`scripts/${f}`, "utf8");
+  /* 🔴 [2026-09-19 C] **주석을 걷고 가른다**(AC-109 ①) — 이 분류기가 그 병에 걸려 있었다.
+     `verify-key-contract.mjs` 는 파일만 읽는 자인데, **머리말에 적힌 설명 한 줄**
+     («`fetch()` 직접 호출은 안 본다»)이 `WRITES` 에 걸려 **`live` 로 분류돼 전수 실행에서 통째로 빠져 있었다.**
+     🔴 그 자가 지키는 것이 아홉 곳인데 **배치에서는 한 번도 안 돌았다** — 손으로 돌릴 때만 빨갰으니
+     «있는데 안 도는 자»인 줄 아무도 몰랐다(AC-113 «자가 안 보는 자리»의 한 층 위 판).
+     ⇒ 주석을 걷으면 **판정이 더 정확해지기만 한다**: 코드에 진짜 쓰기가 있으면 그대로 걸린다. */
+  const src = codeOnly(raw);
   const writes = WRITES.test(src);
+<<<<<<< HEAD
   /* 키 이름만 있고 **비우는 코드**가 같이 있으면, 그 낱말은 빼고 다시 본다(위 CLEARS_KEY 주석). */
   const needs = CLEARS_KEY.test(src) ? /localhost:\d+|process\.argv\[2\]|사용법:/.test(src) : NEEDS.test(src);
   if (writes) groups.live.push([f, SAYS_READONLY.test(src) ? "🟠 «읽기만»이라 적혀 있는데 쓰기 낱말이 있다 — 사람이 확인" : "라이브에 쓰거나 밖으로 나간다"]);
+=======
+  const needs = NEEDS.test(src);
+  if (writes) groups.live.push([f, SAYS_READONLY.test(raw) ? "🟠 «읽기만»이라 적혀 있는데 쓰기 낱말이 있다 — 사람이 확인" : "라이브에 쓰거나 밖으로 나간다"]);
+>>>>>>> verify/e2e-rehearsal
   else if (needs) groups.needs.push([f, "개발 서버·인자·실호출이 필요"]);
   else groups.safe.push([f, "파일만 읽는다"]);
 }
