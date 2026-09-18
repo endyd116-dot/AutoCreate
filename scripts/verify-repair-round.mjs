@@ -90,10 +90,18 @@ for (const it of ITEMS) {
      🔴 말로 가르는 것이 바로 AC-114 의 씨앗이다(다음 사람은 그 말을 못 듣는다).
      ⇒ 칸에 `mine`(그 칸이 제 것이라고 주장하는 글자)이 있으면 **그 글자가 아직 보이는지**로 칸을 가른다.
      `mine` 이 없는 칸은 종전대로 자 전체의 종료코드를 따른다. */
+  /* 🔴 **«못 쟀음»일 때도 칸의 몫은 가른다**(2026-09-19).
+     `key-contract` 가 exit 2(⊘ 5곳이 남았다)가 되자 B③·B⑥ 두 칸이 **함께 ⊘ 로 내려갔다** —
+     그런데 그 둘의 자국(`slots.planned`·`ops-tenant-note`)은 **이미 사라졌다**(B 가 고쳤다).
+     🔴 **자가 다른 이유로 ⊘ 라고 해서 그 칸까지 «못 쟀다»가 되면, 고쳐진 것이 안 고쳐진 것처럼 보인다.**
+     ⊘ 는 «그 자가 **전부**를 못 쟀다»가 아니라 «**남은 몇 곳**을 못 쟀다»일 수 있다. */
   let split = "";
-  if (state === "빨강" && it.mine) {
+  if ((state === "빨강" || state === "못쟀음") && it.mine) {
     const still = rs.some((r) => new RegExp(it.mine).test(r.stdout ?? ""));
-    if (!still) { state = "초록"; split = `자는 아직 빨갛지만 **이 칸의 몫은 사라졌다**(다른 칸이 그 자를 붙들고 있다)`; }
+    const 자색 = state === "빨강"
+      ? "자는 아직 빨갛지만"
+      : "자는 아직 ⊘(그 자가 **다른 곳**을 못 쟀다)지만";
+    if (!still) { state = "초록"; split = `${자색} **이 칸의 몫은 사라졌다**`; }
     else split = `이 칸의 몫이 그 자 안에 **아직 보인다**`;
   }
   rows.push({ ...it, list, state, note: worst.note, split });

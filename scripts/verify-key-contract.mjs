@@ -185,6 +185,13 @@ function paramKeysOfFunction(fnName, sameFile) {
     for (const km of body.matchAll(new RegExp(`\\b${param}\\.([A-Za-z_$][\\w$]*)`, "g"))) keys.add(km[1]);
     for (const km of body.matchAll(new RegExp(`\\b${param}\\[\\s*["'\`]([^"'\`]+)["'\`]\\s*\\]`, "g"))) keys.add(km[1]);
     for (const km of body.matchAll(/["'`]([A-Za-z_$][\w$]*)["'`]/g)) keys.add(km[1]);   // 화이트리스트 상수
+    /* 🔴 **한 겹 더** — `Object.keys(SCHEDULE_DEFAULTS)` 처럼 **상수 객체의 키**로 훑는 자리가 있다.
+       `lib/slots.ts:45 sanitizeSchedulePatch` 가 그 모양이라 «읽는 키»가 글자로 안 나온다.
+       그 상수를 찾아 키를 끌어온다(같은 파일 안에서만 — 더 멀리 가면 짐작이 된다). */
+    for (const om of body.matchAll(/Object\.keys\(\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
+      const cm = src.match(new RegExp(`(?:export\\s+)?const\\s+${om[1]}\\s*(?::[^=]+)?=\\s*\\{([\\s\\S]*?)\\n\\s*\\}`));
+      if (cm) for (const kk of cm[1].matchAll(/([A-Za-z_$][\w$]*)\s*:/g)) keys.add(kk[1]);
+    }
     if (keys.size) { found = { from: rel(f), keys }; break; }
   }
   fnDefCache.set(fnName, found);
@@ -449,7 +456,16 @@ const fails = out.filter((o) => !o.ok);
 for (const o of out) console.log(`  ${o.ok ? "✓" : "✗"} ${o.step}  — ${o.note}`);
 if (unmeasured.length) {
   console.log(`\n⊘ 못 쟀음 ${unmeasured.length}곳 — **통과가 아니다**(AC-9):`);
-  for (const u of unmeasured) console.log(`   · ${u.route} (${u.screen}) — ${u.why}`);
+  /* 🔴 **사람이 열어 본 기록을 같이 찍는다** — 다음 사람이 같은 자리를 또 열지 않게.
+     🔴 그래도 **⊘ 는 ⊘ 다** — «사람이 봤다»는 «자가 재다»가 아니고 종료코드를 바꾸지 않는다(AC-9). */
+  let reviewed = [];
+  try { reviewed = JSON.parse(readFileSync(path.join(ROOT, "docs", "rules", "key-contract-reviewed.json"), "utf8")).확인 ?? []; } catch { /* 없으면 그냥 ⊘ */ }
+  for (const u of unmeasured) {
+    const r = reviewed.find((x) => x.경로 === u.route && x.화면 === u.screen);
+    console.log(`   · ${u.route} (${u.screen}) — ${u.why}`);
+    if (r) console.log(`     ↳ 사람이 열어 봤다: ${r.본사람} · ${r.언제} — ${r.무엇을봤나}`);
+    else console.log("     ↳ 🔴 **아직 아무도 안 열어 봤다** — 열어 보고 docs/rules/key-contract-reviewed.json 에 적어라");
+  }
 }
 console.log(`\nPASS ${out.length - fails.length} · FAIL ${fails.length} · 대조한 짝 ${pairs}쌍 · ⊘ ${unmeasured.length}`);
 console.log("🔴 이 자는 «보내는 키»만 잰다 — 되돌아오는 응답 키는 안 본다(머리말 «아직 못 하는 것»).\n");

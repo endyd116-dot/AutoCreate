@@ -17,13 +17,15 @@
  *   아무도 그렇게 적어 두지 않았다. CLAUDE §4.5b 가 금지한 자리이고, `lib/db-util.ts utcDate()` 가 이미 있다.
  *
  *   ══ 무엇을 세는가 — 🔴 한 건이 아니라 **축**이다 ══
- *   `lib/**` · `netlify/functions/**` 에서 **DB 시각 칸**(snake_case 이름이 `_at`·`_until`·`_for`·`_date`·`_ends` 로 끝남)을
+ *   `lib/**` · `netlify/functions/**` 에서 **DB 시각 칸**(🔴 이름을 `db/schema.ts` · `drizzle/*.sql` 에서 **읽어 온다** — 짐작하지 않는다)을
  *   `new Date(…)` / `Date.parse(…)` 에 **그대로** 넣는 자리를 폴더째 찾는다. 다음 중 하나면 **안전**으로 센다:
  *     ① `utcDate(…)` 를 거친다(정본 · `lib/db-util.ts`)   ② 뒤에 `Z` 를 붙여 UTC 로 못 박는다   ③ 이미 `Z`·오프셋이 붙은 값이다
  *   셋 다 아니면 **빨강** — 그 자리는 «서버가 어느 시간대로 도는가»에 판정이 매달려 있다.
  *
  *   ══ 🔴 이 자가 **아직 못 하는 것**(못으로 박아 둔다 · AC-109 ㉰) ══
- *   · 칸 이름이 시각처럼 안 생겼으면(`ts`·`when`) 못 본다. 이 리포의 관례는 `_at` 계열이다.
+ *   · 🔴 **첫 판은 접미사를 손으로 들었다**(`_at`·`_until`…) — 그래서 `lib/recipe-store.ts` 의 **`stage_since`** 를 못 봤다.
+ *     바로 옆 줄과 글자까지 같은 모양인데 하나만 짚어 «두 번째를 안 세는 자» 로 보였고, 실제는 **목록에 `_since` 가 없었던 것**이다(AC-108).
+ *     ⇒ 지금은 스키마에서 읽는다. 다만 스키마에 없는 칸(생 SQL 로만 만든 것)은 접미사 규칙으로만 본다.
  *   · `timestamptz` 칸(드라이버가 바르게 읽는다)과 `timestamp` 칸을 **글자로는 못 가른다** —
  *     그래서 `Z` 를 붙인 자리도 «안전»으로 센다(붙이면 어느 쪽이든 UTC 로 고정된다).
  *   · 화면 쪽(`toLocale*`·`datetime-local`)은 `verify-kst-surface.mjs` 몫이다. 여기는 **서버**만 본다.
@@ -53,8 +55,33 @@ function walk(dir, acc = []) {
 }
 const lineOf = (src, i) => src.slice(0, i).split("\n").length;
 
+/* 🔴 **DB 시각 칸 이름을 «짐작»에서 «읽기»로 바꿨다**(2026-09-19 · B 지적).
+   첫 판은 접미사를 손으로 들었다 — `_at`·`_until`·`_for`·`_date`·`_ends`.
+   그래서 `lib/recipe-store.ts` 의 **`stage_since`** 를 **못 봤다**. 바로 옆 줄 `rolled_back_at` 은 같은 모양인데
+   하나만 짚어서 «두 번째를 안 세는 자» 로 보였는데, 실제는 **내 목록에 `_since` 가 없었던 것**이다(AC-108 «손 목록»).
+   ⇒ **`db/schema.ts` 의 `timestamp("…")` 와 `drizzle/*.sql` 의 `ADD COLUMN … timestamp` 에서 이름을 읽어 온다.**
+   🔴 그러면 칸이 새로 생겨도 이 자가 **자동으로** 본다. 못 읽으면 접미사 규칙으로 되돌아가되 **그 사실을 찍는다.** */
+function timestampColumns() {
+  const names = new Set();
+  const schema = path.join(ROOT, "db", "schema.ts");
+  if (existsSync(schema)) for (const m of readFileSync(schema, "utf8").matchAll(/timestamp\(\s*["'`]([a-z_][a-z0-9_]*)["'`]/g)) names.add(m[1]);
+  const dz = path.join(ROOT, "drizzle");
+  if (existsSync(dz)) for (const f of readdirSync(dz).filter((x) => x.endsWith(".sql"))) {
+    for (const m of readFileSync(path.join(dz, f), "utf8").matchAll(/\b([a-z_][a-z0-9_]*)\s+timestamp\b/gi)) names.add(m[1].toLowerCase());
+  }
+  names.delete("timestamp");
+  return names;
+}
+const TS_COLS = timestampColumns();
+/** 손으로 든 접미사 — 🔴 **되돌아갈 자리**일 뿐이다(스키마를 못 읽었을 때). */
+const TIME_SUFFIX = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)*_(?:at|until|for|date|ends|since)\b/;
 /** DB 시각 칸처럼 생긴 이름. 🔴 정본은 `lib/db-util.ts utcDate()` — 이 자는 «그걸 거쳤나»를 본다. */
-const TIME_COL = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)*_(?:at|until|for|date|ends)\b/;
+const TIME_COL = {
+  test: (s) => {
+    for (const m of String(s).matchAll(/\b([a-z_][a-z0-9_]*)\b/g)) if (TS_COLS.has(m[1])) return true;
+    return TIME_SUFFIX.test(s);
+  },
+};
 /** 그 자리가 UTC 로 못 박혔나 — `Z` 를 붙였거나 `utcDate()` 를 거쳤거나. */
 const PINNED = /utcDate\s*\(|["'`]Z["'`]|Z`|\+\s*["'`]Z/;
 
@@ -98,10 +125,13 @@ for (const s of unsafe) {
 rec("대조군 — **못 박힌 자리도 실제로 있다**(이 자가 둘을 가른다)", safe.length > 0,
   safe.length ? `못 박은 자리 ${safe.length}곳 (예: ${safe.slice(0, 3).map((s) => `${s.file}:${s.line}`).join(", ")})` : "🔴 하나도 없다 — 가른 적이 없다");
 
-/* ═══ ⓪ 자기 찌르기 — 🔴 «우는가»를 잰다(AC-108) ═══ */
+/* ═══ ⓪ 자기 찌르기 — 🔴 «우는가»를 잰다(AC-108) ═══
+   🔴 **2026-09-19 · 제품 글자에서 떼어 냈다(AC-112 ⑥).**
+   옛 판은 `lib/auth-service.ts` 의 `new Date(user.locked_until)` 을 닻으로 삼았다.
+   **B 가 그 줄을 고치자 닻이 사라져** «변이표가 낡았다»로 빨개졌다 — 자가 무력한 게 아니라 **고칠 자리가 없어진 것**이다.
+   ⇒ 이제 **내가 지어 넣은 글자**에 찌른다. 제품이 어떻게 바뀌어도 이 변이는 **영원히 돈다.** */
 {
-  /* ⓪a **이 병이 진짜로 무는가** — 같은 글자를 두 시간대에서 읽어 본다.
-     🔴 이게 없으면 이 자는 «규약을 어겼다»만 말하고 «그래서 뭐가 틀어지나»는 못 말한다. */
+  /* ⓪a **이 병이 무는 병인가** — 같은 글자를 두 시간대에서 읽어 본다(제품과 무관한 축이라 그대로 둔다). */
   const probe = 'const s="2026-09-18 18:48:08"; process.stdout.write(String(new Date(s).getTime()));';
   const at = (tz) => Number(execFileSync(process.execPath, ["-e", probe], { env: { ...process.env, TZ: tz }, encoding: "utf8" }));
   let utc = 0, kst = 0, ranTz = true;
@@ -110,30 +140,34 @@ rec("대조군 — **못 박힌 자리도 실제로 있다**(이 자가 둘을 �
   rec("⓪a 자기 찌르기 — 같은 글자를 **두 시간대에서 읽으면 실제로 어긋난다**(이 병이 무는 병이다)",
     ranTz && gapH === 9, ranTz ? `UTC ↔ Asia/Seoul 차이 ${gapH}시간 (잠금 15분보다 훨씬 크다)` : "⊘ TZ 를 바꿔 못 띄웠다");
 
-  /* ⓪b **고치면 빨강이 사라진다** — 위험한 자리에 `utcDate()` 를 씌워 본다. */
-  const authRaw = readFileSync(path.join(ROOT, "lib", "auth-service.ts"), "utf8");
-  const fixed = authRaw.replace("new Date(user.locked_until)", "utcDate(user.locked_until)");
-  const fixedUnsafe = scanSource("lib/auth-service.ts", fixed).filter((s) => !s.safe);
-  const beforeUnsafe = scanSource("lib/auth-service.ts", authRaw).filter((s) => !s.safe);
-  rec("⓪b 자기 찌르기 — **`utcDate()` 를 씌우면 그 빨강이 사라진다**(늘 빨간 자가 아니다)",
-    fixed !== authRaw && fixedUnsafe.length < beforeUnsafe.length,
-    fixed === authRaw ? "🔴 닻을 못 찾았다 — 이 변이표가 낡았다" : `고치기 전 ${beforeUnsafe.length}곳 → 고친 뒤 ${fixedUnsafe.length}곳`);
+  /* 🔴 여기서부터는 **지어 넣은 글자**다 — 어떤 칸 이름을 쓰는지도 **스키마에서 골라** 온다(손으로 안 박는다). */
+  const col = [...TS_COLS].find((c) => /_at$/.test(c)) ?? "locked_until";
+  const mk = (expr) => `export function probeTimeXx(r: Record<string, unknown>) { return ${expr}; }`;
+  const unsafeOf = (src) => scanSource("lib/__probe__.ts", src).filter((s) => !s.safe).length;
+  const seenOf = (src) => scanSource("lib/__probe__.ts", src).length;
 
-  /* ⓪c **못 박힌 자리의 `Z` 를 떼면 운다** — 안전으로 세던 자리가 위험으로 넘어와야 한다. */
-  const teamRaw = readFileSync(path.join(ROOT, "lib", "team.ts"), "utf8");
-  const stripped = teamRaw.replace(/new Date\(`\$\{String\(r\.expires_at\)\}Z`\)/g, "new Date(String(r.expires_at))");
-  const strippedUnsafe = scanSource("lib/team.ts", stripped).filter((s) => !s.safe);
-  rec("⓪c 자기 찌르기 — **못 박은 `Z` 를 떼면 운다**(안전/위험을 글자로 제대로 가른다)",
-    stripped !== teamRaw && strippedUnsafe.length > 0,
-    stripped === teamRaw ? "🔴 닻을 못 찾았다" : `Z 를 떼니 위험 ${strippedUnsafe.length}곳이 됐다`);
+  rec("⓪b 자기 찌르기 — 🔴 **못 박지 않은 자리를 심으면 운다**(고쳐진 뒤에도 도는 변이 · AC-112 ⑥)",
+    unsafeOf(mk(`new Date(r.${col} as string)`)) === 1,
+    `\`new Date(r.${col})\` 를 심으니 위험 ${unsafeOf(mk(`new Date(r.${col} as string)`))}곳`);
 
-  /* ⓪d 🔴 **주석 속 코드를 세지 않는다**(AC-109 ①). */
-  const commented = authRaw.replace("if (user.locked_until && new Date(user.locked_until) > new Date())",
-    "/* 옛 코드: if (user.locked_until && new Date(user.locked_until) > new Date()) */ if (false)");
-  const commentedUnsafe = scanSource("lib/auth-service.ts", commented).filter((s) => !s.safe);
-  rec("⓪d 자기 찌르기 — **주석 속 `new Date(locked_until)` 은 안 센다**(AC-109 ①)",
-    commented !== authRaw && commentedUnsafe.length < beforeUnsafe.length,
-    commented === authRaw ? "🔴 닻을 못 찾았다" : `주석으로 감싸니 ${beforeUnsafe.length} → ${commentedUnsafe.length}곳`);
+  rec("⓪c 자기 찌르기 — **`utcDate()` 를 씌우면 안전으로 넘어간다**",
+    unsafeOf(mk(`utcDate(r.${col})`)) === 0 && seenOf(mk(`utcDate(r.${col})`)) === 0,
+    `\`utcDate(r.${col})\` 는 위험 ${unsafeOf(mk(`utcDate(r.${col})`))}곳 (Date 에 안 넣으니 애초에 볼 것도 없다)`);
+
+  rec("⓪d 자기 찌르기 — **`Z` 를 붙이면 안전 · 떼면 위험**(둘을 글자로 제대로 가른다)",
+    unsafeOf(mk("new Date(String(r." + col + ') + "Z")')) === 0 && unsafeOf(mk(`new Date(String(r.${col}))`)) === 1,
+    `Z 붙임 ${unsafeOf(mk("new Date(String(r." + col + ') + "Z")'))}곳 · Z 뗌 ${unsafeOf(mk(`new Date(String(r.${col}))`))}곳`);
+
+  rec("⓪e 자기 찌르기 — **주석 속 코드는 안 센다**(AC-109 ①)",
+    seenOf(`/* ${mk(`new Date(r.${col} as string)`)} */ export function probeTimeXx2() { return 1; }`) === 0,
+    "주석으로만 남기면 본 자리 0곳");
+
+  /* ⓪f 🔴 **칸 이름을 스키마에서 읽는지** — 접미사 목록에 없는 이름(`stage_since`)도 보는가.
+     🔴 이 축이 바로 오늘 놓쳤던 자리다: 손 목록에 `_since` 가 없어 `lib/recipe-store.ts` 의 그 줄을 못 봤다. */
+  const oddCol = [...TS_COLS].find((c) => !TIME_SUFFIX.test(c));
+  rec("⓪f 자기 찌르기 — 🔴 **접미사 목록에 없는 시각 칸도 본다**(스키마에서 이름을 읽는다 · AC-108)",
+    TS_COLS.size > 10 && (!oddCol || unsafeOf(mk(`new Date(r.${oddCol} as string)`)) === 1),
+    `스키마에서 읽은 시각 칸 ${TS_COLS.size}개 · 접미사 규칙 밖인 이름 «${oddCol ?? "없음"}»${oddCol ? ` → 심으니 위험 ${unsafeOf(mk(`new Date(r.${oddCol} as string)`))}곳` : ""}`);
 }
 
 console.log("─".repeat(120));

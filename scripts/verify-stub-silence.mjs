@@ -19,8 +19,11 @@
  *   ══ 무엇을 재는가 ══
  *   `lib/**` 에서 **스텁 손잡이**(`aiStubActive()`·`aiStubImagesActive()`·`videoStub()`)가 지키는 자리를 **폴더째** 찾아,
  *   그 자리가 **가짜를 만들어 돌려주면**(스텁 공장 호출 또는 `model:"stub"` 반환) —
- *   🔴 **그 사실이 프로세스 밖에서 보여야 한다.** 받아들이는 통로는 둘뿐이다:
- *     ① `console.*` 로 찍는다(`lib/ai.ts` 관례) · ② `recordAiUsage(… model:"stub" …)` 로 **DB 에 자국**을 남긴다.
+ *   🔴 **그 사실이 프로세스 밖에서 보여야 한다.** 받아들이는 통로는 **셋**이다:
+ *     ① `console.*` 로 찍는다(`lib/ai.ts` 관례) · ② `recordAiUsage(… model:"stub" …)` 로 **DB 에 자국**을 남긴다
+ *     · ③ 🔴 **«스털이라고 말해 주는 도우미»를 부른다**(`lib/video/types.ts noteVideoStub` 같은 것).
+ *       첫 판은 ③ 를 몰라 **도우미 한 겹을 못 넘고** «말하고 있는데 조용하다»고 울었다(거짓 빨강).
+ *       🔴 **도움을 묶어 둔 것은 더 좋은 코드인데 자가 그걸 벌주면, 고치는 사람은 코드를 더 나쁘게 쓴다.**
  *   둘 다 없으면 빨강. **값으로만 말하는 것은 «말했다»가 아니다.**
  *
  *   ══ 🔴 손 목록이 없다(AC-108) ══
@@ -93,7 +96,30 @@ const FAKE_FACTORY = /\b(?:stub[A-Z]\w*|aiStub[A-Z]\w*)\s*\(/;       // stubScri
 const FAKE_MODEL = /model\s*:\s*(?:["'`]stub["'`]|AI_STUB_MODEL)/;    // model: "stub"
 const isFake = (c) => FAKE_FACTORY.test(c) || FAKE_MODEL.test(c);
 /** «말해 주는 자리» — 찍거나(console) DB 에 자국을 남기거나(recordAiUsage). 둘 다 없으면 조용한 것이다. */
-const TELLS_LOG = /\bconsole\.\w+\s*\(/;
+/* 🔴 **말해 주는 통로는 셋이다** — 첫 판은 둘(`console.*` · `recordAiUsage`)만 알았다.
+   B2 가 이 자의 처방 ㉮·㉰ 를 받아 **도우미 하나로 묶었다**(`lib/video/types.ts:269 noteVideoStub`) —
+   그 안에서 `console.info` 로 글 쪽 `[ai-stub]` 과 **같은 모양**으로 찍고 «못 재는 것»까지 적는다.
+   🔴 그런데 내 자는 `console.` 을 **그 블록 안에서만** 찾아 **도우미 한 겹을 못 넘었다** —
+   «말하고 있는데 조용하다»고 우는 **거짓 빨강**이다. 🔴 **도움을 묶어 둔 것은 더 좋은 코드인데
+   자가 그걸 벌주면, 고치는 사람은 «자를 초록으로 만들려고 코드를 더 나쁘게» 쓰게 된다.**
+   ⇒ **도우미 이름을 박지 않고** `lib/**` 에서 «몸통에 `console.*` 을 두고 이름에 stub 이 든 함수»를 **찾아서** 쓴다. */
+function stubNoteHelpers() {
+  const names = new Set();
+  for (const f of walk(LIB)) {
+    const src = codeOnly(readFileSync(f, "utf8"));
+    for (const m of src.matchAll(/export\s+function\s+([A-Za-z_$][\w$]*[Ss]tub[\w$]*)\s*\(/g)) {
+      const open = src.indexOf("{", m.index + m[0].length);
+      if (open < 0) continue;
+      let d = 0, end = -1;
+      for (let i = open; i < src.length; i++) { if (src[i] === "{") d++; else if (src[i] === "}") { d--; if (!d) { end = i; break; } } }
+      if (/\bconsole\.\w+\s*\(/.test(src.slice(open, end < 0 ? src.length : end))) names.add(m[1]);
+    }
+  }
+  return names;
+}
+const NOTE_HELPERS = stubNoteHelpers();
+const TELLS_LOG_RE = /\bconsole\.\w+\s*\(/;
+const TELLS_LOG = { test: (c) => TELLS_LOG_RE.test(c) || [...NOTE_HELPERS].some((n) => new RegExp(`\\b${n}\\s*\\(`).test(c)) };
 const TELLS_DB = /\brecordAiUsage\s*\(/;
 
 /** 🔴 **글자만 받아서 재는 함수** — 파일에서 떼어 둔다. 그래야 ⓪ 가 **글자를 망가뜨려** 즉석에서 변이를 넣을 수 있다
@@ -140,39 +166,38 @@ for (const s of silent) {
 }
 
 /* ═══ ⓪ 자기 찌르기 — 🔴 «자를 냈다»가 아니라 «우는가»다(AC-108) ═══
-   진짜 소스는 안 건드린다 — **글자를 받아 재는 `scanSource`** 에 망가뜨린 글자를 먹여 본다. */
+   🔴 **2026-09-19 · 제품 글자에서 떼어 냈다(AC-112 ⑥).**
+   옛 판은 `lib/video/script.ts` 의 그 줄을 닻으로 삼고 「**한 줄 찍어 주면** 빨강이 사라지나」로 찔렀다.
+   B2 가 그 자리를 고치자 **닻이 사라져** «변이표가 낡았다»로 빨개졌다 — 고칠 자리가 없어진 것이다.
+   ⇒ **내가 지어 넣은 글자**에 찌르고, 방향도 «**조용한 스텁을 심으면 보나**»로 뒤집었다. */
 {
-  const scriptSrc = readFileSync(path.join(LIB, "video", "script.ts"), "utf8");
-  const aiSrc = readFileSync(path.join(LIB, "ai.ts"), "utf8");
+  const mk = (inside) => `export function probeStubXx(inp: unknown) { if (videoStub()) { ${inside} return { ok: true, model: "stub" }; } return { ok: false }; }`;
+  const silentOf = (src) => scanSource("lib/__probe__.ts", src).filter((s) => s.fake && !s.log && !s.db).length;
+  const fakeOf = (src) => scanSource("lib/__probe__.ts", src).filter((s) => s.fake).length;
 
-  /* ⓪a **고치면 빨강이 사라진다** — 조용한 자리에 `console.info` 한 줄을 넣어 본다. */
-  const fixed = scriptSrc.replace(
-    "if (videoStub()) { const s = stubScript(inp); return { ok: true, ...s, model: \"stub\" }; }",
-    "if (videoStub()) { console.info(\"[video-stub] script\"); const s = stubScript(inp); return { ok: true, ...s, model: \"stub\" }; }");
-  const fixedSilent = scanSource("lib/video/script.ts", fixed).filter((s) => s.fake && !s.log && !s.db);
-  rec("⓪a 자기 찌르기 — **한 줄 찍어 주면 그 빨강이 사라진다**(늘 빨간 자가 아니다)",
-    fixed !== scriptSrc && fixedSilent.length === 0,
-    fixed === scriptSrc ? "🔴 닻을 못 찾았다 — 이 변이표가 낡았다" : `고친 뒤 조용한 자리 ${fixedSilent.length}곳`);
+  rec("⓪a 자기 찌르기 — 🔴 **조용한 스텁을 심으면 잡는다**(고쳐진 뒤에도 도는 변이 · AC-112 ⑥)",
+    fakeOf(mk("")) === 1 && silentOf(mk("")) === 1,
+    `아무 말 없는 스텁을 심으니 가짜 ${fakeOf(mk(""))}곳 · 그중 조용한 것 ${silentOf(mk(""))}곳`);
 
-  /* ⓪b **말하는 자리의 입을 막으면 운다** — `lib/ai-image.ts` 의 한 줄뿐인 `console.info` 를 지워 본다.
-     🔴 처음엔 `lib/ai.ts` 를 골랐다가 실패했다 — 그 블록엔 `console.info` **와** `console.warn` **둘**이 있어서
-     하나만 지워도 여전히 «말한다»였다. **자가 옳았고 내 변이가 덜 된 것이다.** ⇒ 로그가 하나뿐인 자리로 바꿨다. */
-  const imgSrc = readFileSync(path.join(LIB, "ai-image.ts"), "utf8");
-  const muted = imgSrc.replace(/console\.info\("\[ai-stub\] image[^"]*"\);/, "");
-  const mutedSilent = scanSource("lib/ai-image.ts", muted).filter((s) => s.fake && !s.log && !s.db);
-  rec("⓪b 자기 찌르기 — **말하던 자리의 입을 막으면 운다**(새 조용한 스텁을 본다)",
-    muted !== imgSrc && mutedSilent.length > 0,
-    muted === imgSrc ? "🔴 닻을 못 찾았다 — 이 변이표가 낡았다" : `입을 막으니 조용한 자리 ${mutedSilent.length}곳이 됐다`);
-  void aiSrc;
+  rec("⓪b 자기 찌르기 — **`console.*` 한 줄을 넣으면 조용함이 풀린다**",
+    silentOf(mk('console.info("[video-stub] probe");')) === 0,
+    `찍어 주면 조용한 자리 ${silentOf(mk('console.info("[video-stub] probe");'))}곳`);
 
-  /* ⓪c 🔴 **주석 속 `console.log` 를 «찍는다»로 세지 않는다**(AC-109 ① — 이 자가 그 병에 안 걸렸나). */
-  const commented = scriptSrc.replace(
-    "if (videoStub()) { const s = stubScript(inp); return { ok: true, ...s, model: \"stub\" }; }",
-    "if (videoStub()) { /* 옛날엔 console.info(\"[video-stub] script\") 를 찍었다 */ const s = stubScript(inp); return { ok: true, ...s, model: \"stub\" }; }");
-  const commentedSilent = scanSource("lib/video/script.ts", commented).filter((s) => s.fake && !s.log && !s.db);
-  rec("⓪c 자기 찌르기 — **주석 속 `console.log` 는 «찍는다»로 안 센다**(AC-109 ①)",
-    commented !== scriptSrc && commentedSilent.length > 0,
-    commented === scriptSrc ? "🔴 닻을 못 찾았다" : `주석만 남기니 여전히 조용하다(${commentedSilent.length}곳) — 주석을 코드로 세지 않는다`);
+  /* 🔴 ⓪c — **도우미 한 겹을 넘는지**. 이게 오늘 이 자가 못 넘어 거짓 빨강을 낸 바로 그 자리다.
+     도우미 이름은 **박지 않고** 위에서 찾아 둔 것 중 하나를 쓴다(못 찾았으면 그 사실을 적는다). */
+  const helper = [...NOTE_HELPERS][0];
+  rec("⓪c 자기 찌르기 — 🔴 **«스텁이라고 말해 주는 도우미»를 부르면 «말한다»로 센다**(한 겹을 넘는다)",
+    !!helper && silentOf(mk(`${helper}("probe", "무엇을 못 재나", "HANDLE=1", "손잡이를 끈다");`)) === 0,
+    helper ? `도우미 «${helper}» 를 부르면 조용한 자리 ${silentOf(mk(`${helper}("probe", "x", "y", "z");`))}곳 (lib 에서 찾은 도우미 ${NOTE_HELPERS.size}개)`
+      : "🔴 lib 에서 «말해 주는 도우미»를 하나도 못 찾았다 — 이 축이 지금은 아무것도 안 잰다");
+
+  rec("⓪d 자기 찌르기 — **주석 속 `console.log` 는 «찍는다»로 안 센다**(AC-109 ①)",
+    silentOf(mk('/* 옛날엔 console.info("[video-stub] probe") 를 찍었다 */')) === 1,
+    `주석으로만 남기면 조용한 자리 ${silentOf(mk('/* 옛날엔 console.info("[video-stub] probe") 를 찍었다 */'))}곳`);
+
+  rec("⓪e 자기 찌르기 — **`ai_usage` 에 자국을 남겨도 «말한다»로 센다**(두 번째 통로)",
+    silentOf(mk('void recordAiUsage({ tenantId: null, purpose: "probe", model: "stub", inTokens: 0, outTokens: 0, costUsd: 0 });')) === 0,
+    `DB 자국만 남겨도 조용한 자리 ${silentOf(mk('void recordAiUsage({ model: "stub" });'))}곳`);
 }
 
 /* 🔴 대조군 — «말하는 스텁»이 실제로 있어야 이 자가 «둘을 가른다»는 뜻이다.
