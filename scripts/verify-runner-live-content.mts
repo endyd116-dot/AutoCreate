@@ -19,6 +19,7 @@
  *   ⚠️ 읽기만 한다. `r2Get`·`r2Head` 뿐이고 쓰기·삭제·업로드가 한 줄도 없다(라이브 변경은 사장님 Allow · AC-50).
  */
 import { r2Configured, r2Get, R2_BUCKET } from "../lib/r2";
+import { codeOnly } from "./_lib/code-only.mjs";   // 🔴 주석 걷기는 **한 곳**에서(B2 · 2026-09-19)
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -87,24 +88,13 @@ async function main() {
        🔴 그리고 그중 한 줄은 `(실제로 그랬다: 옛 ...` 로 **`*` 없이** 시작한다 — 블록 주석의 **이어지는 줄**이다.
           «줄 앞이 `*` 면 주석» 식으로 걷으면 **그 줄이 살아남는다**(B2 가 자기 자에서 먼저 밟고 알려 줬다).
        ⇒ **글자 단위**로 걷는다: 블록 주석 · 줄 주석 · 문자열/템플릿 안은 건드리지 않는다. */
-    const stripComments = (s: string): string => {
-      let outStr = "", i = 0;
-      const n = s.length;
-      while (i < n) {
-        const c = s[i], d = s[i + 1];
-        if (c === "/" && d === "*") { const e = s.indexOf("*/", i + 2); i = e < 0 ? n : e + 2; continue; }
-        if (c === "/" && d === "/") { const e = s.indexOf("\n", i); i = e < 0 ? n : e; continue; }
-        if (c === '"' || c === "'" || c === "`") {
-          const q = c; outStr += c; i++;
-          while (i < n && s[i] !== q) { if (s[i] === "\\") { outStr += s[i]; i++; } if (i < n) { outStr += s[i]; i++; } }
-          if (i < n) { outStr += s[i]; i++; }
-          continue;
-        }
-        outStr += c; i++;
-      }
-      return outStr;
-    };
-    const src = stripComments(raw);
+    /* 🔴 **셈은 한 곳에서 나온다**(B2 `scripts/_lib/code-only.mjs`) — 셋이 각자 만들어 셋 다 틀린 자리라
+       내 것을 따로 두지 않는다(두 벌이면 또 갈린다 · AC-101). 들이기 전에 **내가 재 봤다**:
+       줄 수 796→796 보존 · 내 앵커 `eof_action=repeat` 2→**1**(주석만 걷힘) · `pass` 4→**0** · 잘린 코드 **0줄**.
+       ⚠️ 🔴 **다만 그 함수는 문자열 안 `//` 도 주석으로 본다** — 러너 32개 중 16개가 `://` 를 갖고 있고
+          그걸로 **코드 43줄이 잘린다**(실측 · B2 에 넘겼다). 이 자가 보는 `render-video.mjs` 는 `://` 가 **0곳**이라
+          지금은 안 물린다. 🔴 **다른 러너 파일을 보게 넓히려면 그 고침이 먼저다.** */
+    const src = codeOnly(raw);
     const commentOnlyPass = /eof_action=pass/.test(raw) && !/eof_action=pass/.test(src);
     if (commentOnlyPass) rec("🔸 참고 — `pass` 가 주석에만 있다(그 병을 설명한 글)", true, "주석을 걷고 판정했다(안 걷으면 거짓 빨강이다)");
 
