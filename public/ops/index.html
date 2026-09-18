@@ -80,7 +80,13 @@ UI.$("#aiExcluded").textContent = ex.totalUsd > 0 || ex.calls > 0
   ? `여기서 가른 몫 ${usd(ex.totalUsd)}(${UI.num(ex.calls || 0)}회) — 우리 내부 집 ${usd(ex.internalUsd)} · 하니스 ${usd(ex.syntheticUsd)} · 주인 없는 집 ${usd(ex.orphanUsd)} · 고객이 자기 키로 쓴 몫 ${usd(ex.byoUsd)}(${UI.num(ex.byoCalls || 0)}회). 위 숫자는 우리가 실제로 낸 돈만이에요.`
   : "가른 몫은 없어요 — 위 숫자가 이달 AI 원가 전부예요.";
 const st = (k, v) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", `${r.trialToPaidPct ?? 0}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", `${r.churn?.month ?? 0} · ${r.churn?.pct ?? 0}%`);
+/* 🔴 [2026-09-19 수리 · 시나리오 B ⑤ · AC-9] **«못 쟀다»를 «0»이라고 말하지 않는다.**
+   서버는 표본이 없으면 `trialToPaidPct: null` 을 준다(`ops-dashboard.ts` — `cohort > 0 ? … : null`).
+   옛 판은 `?? 0` 으로 뭉개 화면에 **«체험→유료 0%»** 가 떴다 — «아무도 체험을 끝내지 않았다»가
+   «아무도 전환하지 않는다»(장사가 망했다)로 읽혔다. 방향이 제일 나쁜 거짓말이다.
+   이 화면은 다른 칸에서 이미 제대로 하고 있었다(`ai.calls == null ? "못 쟀어요"` · `marginKrw == null ? …`) —
+   규칙이 없어서가 아니라 **이 한 줄이 규칙을 안 따른 것**이다. 이탈률도 같은 병이라 서버까지 고쳤다. */
+UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", r.trialToPaidPct == null ? `<span class="muted" style="font-weight:500">못 쟀어요</span>` : `${r.trialToPaidPct}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", r.churn?.pct == null ? `${r.churn?.month ?? 0} · <span class="muted" style="font-weight:500">못 쟀어요</span>` : `${r.churn?.month ?? 0} · ${r.churn.pct}%`);
 const bc = (r.published && r.published.byChannel) || []; const pm = Math.max(1, ...bc.map((x) => x.n));
 UI.$("#pub").innerHTML = bc.length ? bc.map((x, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(x.channel, "sm")}${UI.esc(UI.chLabel(x.channel))}</span><span class="track"><span class="fill" style="width:${Math.round((x.n / pm) * 100)}%"></span></span><span class="v">${UI.num(x.n)}</span></div>`).join("") : `<p class="muted" style="margin:0 16px 8px;font-size:13px">이달 발행이 아직 없어요</p>`;
 UI.$("#crev").textContent = UI.won(r.revenueCollectedKrw || 0); UI.$("#coins").textContent = `${UI.won(r.coins?.soldKrw || 0)} · ${UI.num(r.coins?.consumed || 0)}코인`;

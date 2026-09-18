@@ -61,7 +61,13 @@ UI.$("#aiExcluded").textContent = ex.totalUsd > 0 || ex.calls > 0
   ? `여기서 가른 몫 ${usd(ex.totalUsd)}(${UI.num(ex.calls || 0)}회) — 우리 내부 집 ${usd(ex.internalUsd)} · 하니스 ${usd(ex.syntheticUsd)} · 주인 없는 집 ${usd(ex.orphanUsd)} · 고객이 자기 키로 쓴 몫 ${usd(ex.byoUsd)}(${UI.num(ex.byoCalls || 0)}회). 위 숫자는 우리가 실제로 낸 돈만이에요.`
   : "가른 몫은 없어요 — 위 숫자가 이달 AI 원가 전부예요.";
 const st = (k, v) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", `${r.trialToPaidPct ?? 0}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", `${r.churn?.month ?? 0} · ${r.churn?.pct ?? 0}%`);
+/* 🔴 [2026-09-19 수리 · 시나리오 B ⑤ · AC-9] **«못 쟀다»를 «0»이라고 말하지 않는다.**
+   서버는 표본이 없으면 `trialToPaidPct: null` 을 준다(`ops-dashboard.ts` — `cohort > 0 ? … : null`).
+   옛 판은 `?? 0` 으로 뭉개 화면에 **«체험→유료 0%»** 가 떴다 — «아무도 체험을 끝내지 않았다»가
+   «아무도 전환하지 않는다»(장사가 망했다)로 읽혔다. 방향이 제일 나쁜 거짓말이다.
+   이 화면은 다른 칸에서 이미 제대로 하고 있었다(`ai.calls == null ? "못 쟀어요"` · `marginKrw == null ? …`) —
+   규칙이 없어서가 아니라 **이 한 줄이 규칙을 안 따른 것**이다. 이탈률도 같은 병이라 서버까지 고쳤다. */
+UI.$("#stat").innerHTML = st("가입(오늘·이달)", `${r.signups?.today ?? 0} · ${r.signups?.month ?? 0}`) + st("체험→유료", r.trialToPaidPct == null ? `<span class="muted" style="font-weight:500">못 쟀어요</span>` : `${r.trialToPaidPct}%`) + st("활성", UI.num(r.activeTenants || 0)) + st("이탈(이달)", r.churn?.pct == null ? `${r.churn?.month ?? 0} · <span class="muted" style="font-weight:500">못 쟀어요</span>` : `${r.churn?.month ?? 0} · ${r.churn.pct}%`);
 const bc = (r.published && r.published.byChannel) || []; const pm = Math.max(1, ...bc.map((x) => x.n));
 UI.$("#pub").innerHTML = bc.length ? bc.map((x, i) => `<div class="bar ${i === 0 ? "top" : ""}"><span class="n">${UI.mark(x.channel, "sm")}${UI.esc(UI.chLabel(x.channel))}</span><span class="track"><span class="fill" style="width:${Math.round((x.n / pm) * 100)}%"></span></span><span class="v">${UI.num(x.n)}</span></div>`).join("") : `<p class="muted" style="margin:0 16px 8px;font-size:13px">이달 발행이 아직 없어요</p>`;
 UI.$("#crev").textContent = UI.won(r.revenueCollectedKrw || 0); UI.$("#coins").textContent = `${UI.won(r.coins?.soldKrw || 0)} · ${UI.num(r.coins?.consumed || 0)}코인`;
@@ -71,12 +77,21 @@ UI.$("#crev").textContent = UI.won(r.revenueCollectedKrw || 0); UI.$("#coins").t
 <div class="group" id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
 --- script ---
 const op = await OPS.boot("tenants"); if (!op) return;
-let status = "", plan = "";
+let status = "", plan = "", withInternal = false;
 async function load() {
   const q = UI.$("#q").value.trim();
-  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1${withInternal ? "&internal=1" : ""}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   const rows = r.tenants || [];
-  UI.$("#list").innerHTML = `<div class="gt">${UI.num(r.total ?? rows.length)}곳</div>` + OPS.table([
+  /* 🔴 [2026-09-19 수리 · 시나리오 B ①] **서버가 «몇 집을 숨겼는지» 말해 주는데 화면이 그 말을 버리고 있었다.**
+     그래서 손님이 전화해서 이름을 대도 화면엔 «0곳»만 떴다 — 운영자는 «가입 기록이 없는데요» 라고 말하게 된다.
+     이제 숨긴 수를 **그대로 적고**, 한 번 눌러 **꺼낼 수 있게** 한다(`?internal=1`). 숨김은 «지움»이 아니라 «접어 둠»이다. */
+  const hidden = (r.internal && r.internal.excluded) ? (r.internal.hidden || 0) : 0;
+  const note = withInternal
+    ? `<div class="kv"><span class="k muted" style="white-space:normal">내부 표시된 집도 함께 보고 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="intOff">다시 접기</button></span></div>`
+    : hidden > 0
+      ? `<div class="kv"><span class="k" style="white-space:normal">내부로 표시된 <b>${UI.num(hidden)}곳</b>은 빠져 있어요.<br><span class="muted" style="font-size:12px;font-weight:500">찾는 분이 안 보이면 여기서 함께 볼 수 있어요.</span></span><span class="v"><button class="btn secondary sm" type="button" id="intOn">함께 보기</button></span></div>`
+      : "";
+  UI.$("#list").innerHTML = `<div class="gt">${UI.num(r.total ?? rows.length)}곳${withInternal ? ' <span class="muted" style="font-weight:500">내부 포함</span>' : ""}</div>` + note + OPS.table([
     { h: "고객", f: (t) => `<span class="mk soft sm">${UI.esc((t.name || "?").slice(0, 1))}</span><b>${UI.esc(t.name)}</b> <span class="muted">${UI.esc(t.key)}</span>` },
     { h: "플랜", f: (t) => UI.esc(t.planKey) }, { h: "상태", f: (t) => OPS.pill(OPS.status(t.status)) },
     { h: "체험", f: (t) => (t.status === "trial" || t.status === "readonly") ? OPS.dleft(t.trialEndsAt) : "—" },
@@ -84,6 +99,8 @@ async function load() {
     { h: "마지막 발행", f: (t) => OPS.dt(t.lastPostAt) }, { h: "건강", r: true, f: (t) => t.health == null ? "—" : `<span class="dot ${t.health >= 80 ? "ok" : t.health >= 50 ? "warn" : "danger"}"></span> ${t.health}` },
   ], rows, (t) => `class="tap" data-id="${t.id}"`);
   UI.$$("#list tr.tap").forEach((tr) => tr.onclick = () => UI.go(`/ops/tenant.html?id=${tr.dataset.id}`));
+  const on = UI.$("#intOn"); if (on) on.onclick = () => { withInternal = true; load(); };
+  const off = UI.$("#intOff"); if (off) off.onclick = () => { withInternal = false; load(); };
 }
 UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(load, 250); });
 UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.s; load(); });
@@ -135,10 +152,32 @@ async function load() {
   ["#grant", "#trial", "#plan"].forEach((s) => { const b = UI.$(s); b.disabled = !can; b.style.opacity = can ? "" : ".45"; });
 }
 UI.$("#imp").onclick = () => UI.sheet(`<p class="muted" style="margin:0 0 4px">고객 화면을 그대로 열어요. 결제·충전·비밀번호는 막히고, 모든 동작이 감사에 남아요.</p><p class="muted" style="margin:0 0 16px;font-size:13px">끝내면 고객에게 «운영자가 설정을 도와드렸어요» 알림이 가요 · 60분 상한</p><div class="cta"><button class="btn primary" type="button" id="go">원격접속 시작</button></div>`, { title: "원격접속", onOpen: (sh, close) => { sh.querySelector("#go").onclick = async () => { const r = await UI.api("/api/ops-impersonate", { body: { id: Number(id) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "시작하지 못했어요"); close(); location.href = r.redirect; }; } });
-UI.$("#grant").onclick = () => UI.sheet(`<form id="gf"><div class="sec">얼마나</div>${UI.chips("n", [[10, "+10"], [30, "+30"], [100, "+100"], [-10, "−10"]], 10)}<div class="field"><label>직접 넣기(음수 = 회수)</label><input class="input" name="coins" type="number" placeholder="예: 50"></div><div class="field"><label>사유</label><input class="input" name="reason" required placeholder="예: 온보딩 지원 · 장애 보상"><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">지급</button></div></form>`, { title: "코인 지급 · 회수", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#gf"), async (d, f) => { const n = Number(d.coins) || Number(UI.chipVal(sh, "n")); const r = await UI.api("/api/ops-coins-grant", { body: { id: Number(id), coins: n, reason: d.reason }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "reason", r.error); close(); UI.toast(`${n > 0 ? "+" : ""}${n}코인 · 잔액 ${UI.num(r.balance)}`); load(); }); } });
+/* 🔴 [2026-09-19 수리 · 시나리오 B ④] **시트 하나에 멱등 키 하나.**
+   옛 판은 서버가 `Date.now()` 로 키를 만들어 더블클릭이 두 번 들어갔다(실측 150→210코인).
+   이제 **시트를 열 때 키를 하나 만들어** 보낸다 — 두 번 누르든 네트워크가 느려 재시도가 나가든 **같은 키**다.
+   서버가 `duplicate:true` 를 주면 «또 들어갔나?» 대신 «한 번만 들어갔어요»를 말해 준다. */
+UI.$("#grant").onclick = () => UI.sheet(`<form id="gf"><div class="sec">얼마나</div>${UI.chips("n", [[10, "+10"], [30, "+30"], [100, "+100"], [-10, "−10"]], 10)}<div class="field"><label>직접 넣기(음수 = 회수)</label><input class="input" name="coins" type="number" placeholder="예: 50"></div><div class="field"><label>사유</label><input class="input" name="reason" required placeholder="예: 온보딩 지원 · 장애 보상"><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">지급</button></div></form>`, { title: "코인 지급 · 회수", onOpen: (sh, close) => { UI.bindChips(sh); const idem = `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`; UI.form(sh.querySelector("#gf"), async (d, f) => { const n = Number(d.coins) || Number(UI.chipVal(sh, "n")); const r = await UI.api("/api/ops-coins-grant", { body: { id: Number(id), coins: n, reason: d.reason, idem }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "reason", r.error); close(); UI.toast(r.duplicate ? (r.message || "아까 넣은 것과 같아서 한 번만 들어갔어요.") : `${n > 0 ? "+" : ""}${n}코인 · 잔액 ${UI.num(r.balance)}`); load(); }); } });
 UI.$("#trial").onclick = () => UI.sheet(`<div class="sec">며칠 늘릴까요</div>${UI.chips("d", [[3, "3일"], [7, "7일"], [14, "14일"], [30, "30일"]], 7)}<p class="muted" style="margin:10px 0 0;font-size:13px">읽기 전용이면 다시 체험으로 돌아가요.</p><div class="cta"><button class="btn primary" type="button" id="ok">연장</button></div>`, { title: "체험 연장", onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const r = await UI.api("/api/ops-trial-extend", { body: { id: Number(id), days: Number(UI.chipVal(sh, "d")) }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "연장하지 못했어요"); close(); UI.toast(`${OPS.dt(r.trialEndsAt)}까지로 늘렸어요`); load(); }; } });
-UI.$("#plan").onclick = () => UI.sheet(`<div class="sec">플랜</div>${UI.chips("p", [["trial", "체험"], ["starter", "Starter"], ["pro", "Pro"], ["agency", "Agency"]], T?.tenant?.plan_key)}<div class="sec">상태</div>${UI.chips("s", [["trial", "체험"], ["active", "이용 중"], ["past_due", "미납"], ["readonly", "읽기 전용"], ["suspended", "정지"], ["closed", "종료"]], T?.tenant?.status)}<div class="cta"><button class="btn primary" type="button" id="ok">바꾸기</button></div>`, { title: "플랜 · 상태", onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const planKey = UI.chipVal(sh, "p"), status = UI.chipVal(sh, "s"); let r = await UI.api("/api/ops-plan-change", { body: { id: Number(id), planKey }, noRedirect: true }); if (r.ok) r = await UI.api("/api/ops-tenant-update", { body: { id: Number(id), status }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요"); load(); }; } });
-UI.$("#noteAdd").onclick = () => UI.sheet(`<form id="nf"><div class="field"><textarea class="input" name="text" rows="4" style="height:auto;padding:14px 16px" required placeholder="다음 담당자가 볼 한 줄"></textarea><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">남기기</button></div></form>`, { title: "메모", onOpen: (sh, close) => UI.form(sh.querySelector("#nf"), async (d, f) => { const r = await UI.api("/api/ops-tenant-note", { body: { id: Number(id), text: d.text }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "text", r.error); close(); load(); }) });
+/* 🔴 [2026-09-19 수리 · 시나리오 B ②] **상태만 바꾸는 길을 따로 냈다.**
+   옛 판은 「바꾸기」 한 번에 `ops-plan-change` 를 **언제나** 먼저 불렀다 — 플랜 칩 기본값이 «지금 플랜»이라
+   상태만 만지려 해도 그 손이 지나갔고, 그 손이 **고객이 걸어 둔 해지 예약을 풀고 결제일을 옮겼다**(실측).
+   이제 **바뀐 것만 부른다**: 플랜 칩이 그대로면 `ops-plan-change` 를 아예 안 부르고 상태만 고친다.
+   그리고 🔴 **무엇이 함께 바뀌는지 누르기 전에 적어 둔다** — 막지 않는 대신 말해 주기다(CLAUDE §9). */
+UI.$("#plan").onclick = () => UI.sheet(`<div class="sec">플랜</div>${UI.chips("p", [["trial", "체험"], ["starter", "Starter"], ["pro", "Pro"], ["agency", "Agency"]], T?.tenant?.plan_key)}<div class="sec">상태</div>${UI.chips("s", [["trial", "체험"], ["active", "이용 중"], ["past_due", "미납"], ["readonly", "읽기 전용"], ["suspended", "정지"], ["closed", "종료"]], T?.tenant?.status)}<p class="muted" id="planWarn" style="margin:12px 0 0;font-size:13px"></p><div class="cta"><button class="btn primary" type="button" id="ok">바꾸기</button></div>`, { title: "플랜 · 상태", onOpen: (sh, close) => { UI.bindChips(sh);
+  const wasPlan = T?.tenant?.plan_key, wasStatus = T?.tenant?.status;
+  /* 요금제를 실제로 바꿀 때만 «함께 바뀌는 것»을 적는다 — 상태만 만지면 구독 장부는 그대로다. */
+  const say = () => { const p = UI.chipVal(sh, "p"), st2 = UI.chipVal(sh, "s"); const w = sh.querySelector("#planWarn");
+    if (p !== wasPlan) w.innerHTML = `요금제를 바꾸면 <b>구독 주기와 다음 결제일이 오늘 기준으로 다시 잡히고</b>, 예약해 둔 해지·다음 달 플랜 변경은 취소돼요. 포함 코인은 이달치가 들어가요. 고객에게 «요금제가 바뀌었어요» 알림이 가요.`;
+    else if (st2 !== wasStatus) w.innerHTML = `상태만 바꿔요. <b>구독·결제일·해지 예약은 그대로</b>예요.`;
+    else w.innerHTML = `바뀐 게 없어요.`; };
+  sh.querySelectorAll(".chip, [data-v]").forEach((c) => c.addEventListener("click", () => setTimeout(say, 0))); say();
+  sh.querySelector("#ok").onclick = async () => { const planKey = UI.chipVal(sh, "p"), status = UI.chipVal(sh, "s");
+    let r = { ok: true };
+    if (planKey !== wasPlan) r = await UI.api("/api/ops-plan-change", { body: { id: Number(id), planKey }, noRedirect: true });   /* 🔴 바뀐 것만 부른다 */
+    if (r.ok && status !== wasStatus) r = await UI.api("/api/ops-tenant-update", { body: { id: Number(id), status }, noRedirect: true });
+    if (!r.ok) return UI.toast(r.error || "바꾸지 못했어요");
+    close(); UI.toast(planKey === wasPlan && status === wasStatus ? "바뀐 게 없어요" : "바꿨어요"); load(); }; } });
+UI.$("#noteAdd").onclick = () => UI.sheet(`<form id="nf"><div class="field"><textarea class="input" name="text" rows="4" style="height:auto;padding:14px 16px" required placeholder="다음 담당자가 볼 한 줄"></textarea><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">남기기</button></div></form>`, { title: "메모", onOpen: (sh, close) => UI.form(sh.querySelector("#nf"), async (d, f) => { /* 🔴 [수리 ③] 서버가 읽는 이름(note)도 같이 싣는다 — 옛 판은 text 만 보내 저장이 조용히 죽었다(ok:true 로). */ const r = await UI.api("/api/ops-tenant-note", { body: { id: Number(id), text: d.text, note: d.text }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "text", r.error); close(); load(); }) });
 load();
 === promo.html | promo | 이벤트 ===
 <div class="group"><div class="gt">이벤트 <button type="button" id="addP" style="color:var(--ink);font-weight:600;font-size:12.5px">새 이벤트</button></div><div id="promos"></div></div>
@@ -642,16 +681,26 @@ async function load() {
   UI.$("#list").innerHTML = OPS.table([
     { h: "이름", f: (o) => `<b>${UI.esc(o.name || "—")}</b><br><span class="muted">${UI.esc(o.email)}</span>` }, { h: "역할", f: (o) => OPS.pill(RL[o.role] || ["off", o.role]) }, { h: "SSO", f: (o) => o.ssoSubject ? `<span class="muted">${UI.esc(o.ssoSubject)}</span>` : "—" },
     { h: "상태", f: (o) => OPS.pill(o.active ? ["ok", "활성"] : ["off", "꺼짐"]) }, { h: "마지막 로그인", f: (o) => OPS.dt(o.lastLoginAt) },
-    { h: "", f: (o) => o.id === op.id ? '<span class="muted">나</span>' : `<button type="button" class="lk" data-role="${o.id}">역할</button> · <button type="button" class="lk" data-edit="${o.id}">고치기</button> · <button type="button" class="lk" data-off="${o.id}">${o.active ? "끄기" : "켜기"}</button>` },
+    { h: "", f: (o) => o.id === op.id ? '<span class="muted">나</span>' : `<button type="button" class="lk" data-role="${o.id}">역할</button> · <button type="button" class="lk" data-pw="${o.id}">비번 주기</button> · <button type="button" class="lk" data-edit="${o.id}">고치기</button> · <button type="button" class="lk" data-off="${o.id}">${o.active ? "끄기" : "켜기"}</button>` },
   ], r.operators || []);
   UI.$("#pager").innerHTML = OPS.pager(r.page, r.total, 30); UI.$$("#pager [data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); load(); });
   const byId = (id) => (r.operators || []).find((x) => x.id === Number(id));
   UI.$$("[data-role]").forEach((b) => b.onclick = () => { const o = byId(b.dataset.role); UI.sheet(`<div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o.role)}<div class="cta"><button class="btn primary" type="button" id="ok">바꾸기</button></div>`, { title: `${o.name || o.email} 역할`, onOpen: (sh, close) => { UI.bindChips(sh); sh.querySelector("#ok").onclick = async () => { const rr = await UI.api("/api/ops-operator-role", { body: { id: o.id, role: UI.chipVal(sh, "role") }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요"); load(); }; } }); });
   UI.$$("[data-off]").forEach((b) => b.onclick = async () => { const o = byId(b.dataset.off); const rr = await UI.api("/api/ops-operator-disable", { body: { id: o.id, active: !o.active }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "바꾸지 못했어요"); UI.toast(rr.operator.active ? "켰어요" : "껐어요"); load(); });
   UI.$$("[data-edit]").forEach((b) => b.onclick = () => form(byId(b.dataset.edit)));
+  /* 🔴 [2026-09-19 수리 · 시나리오 B ⑥] **뽑아 놓고 들여보낼 길이 없었다.**
+     여기서 만든 계정은 비밀번호가 없어 **로그인 자체가 안 됐고**(실측), 남의 비번을 정해 주는 자리가 어디에도 없었다.
+     이제 임시 비번을 쥐여 준다 — 본인이 **첫 로그인에서 바꾸게** 표시를 켠 채로(우리 손에 비번이 남지 않는다).
+     잠긴 사람을 풀어 주는 자리이기도 하다. */
+  UI.$$("[data-pw]").forEach((b) => b.onclick = () => { const o = byId(b.dataset.pw);
+    UI.sheet(`<p class="muted" style="margin:0 0 16px">임시 비밀번호를 정해서 전해 주세요. <b>${UI.esc(o.name || o.email)}</b> 님이 처음 들어오면 바로 새 비밀번호를 정하게 돼요.</p><form id="pf"><div class="field"><label>임시 비밀번호</label><input class="input" name="password" type="text" required autocomplete="off" placeholder="8자 이상"><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">주기</button></div></form>`,
+      { title: "비밀번호 주기", onOpen: (sh, close) => UI.form(sh.querySelector("#pf"), async (d, f) => {
+        const rr = await UI.api("/api/ops-operator-password", { body: { id: o.id, password: d.password }, noRedirect: true });
+        if (!rr.ok) return UI.fieldError(f, "password", rr.error || "정하지 못했어요");
+        close(); UI.toast("전해 주세요 · 첫 로그인에 본인이 바꿔요"); load(); }) }); });
 }
 function form(o) {
-  UI.sheet(`<form id="if"><div class="field"><label>이메일</label><input class="input" name="email" type="email" required value="${UI.esc(o?.email || "")}" placeholder="name@company.com"><div class="help"></div></div><div class="field"><label>이름</label><input class="input" name="name" value="${UI.esc(o?.name || "")}" placeholder="선택"></div><div class="field"><label>SSO 주체 <span class="muted" style="font-weight:500">· 싸이렌MIS · 선택</span></label><input class="input" name="ssoSubject" value="${UI.esc(o?.ssoSubject || "")}" placeholder="mis:123"></div><div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o?.role || "operator")}<div class="cta"><button class="btn primary" type="submit">${o ? "고치기" : "초대"}</button></div></form>`, { title: o ? "운영자 고치기" : "운영자 초대", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#if"), async (d, f) => { const r = await UI.api("/api/ops-operators", { body: { id: o?.id, email: d.email, name: d.name || "", role: UI.chipVal(sh, "role"), ssoSubject: d.ssoSubject || undefined }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "email", r.error || "저장하지 못했어요"); close(); UI.toast(o ? "고쳤어요" : "초대했어요 · 첫 로그인에 비밀번호를 바꿔요"); load(); }); } });
+  UI.sheet(`<form id="if"><div class="field"><label>이메일</label><input class="input" name="email" type="email" required value="${UI.esc(o?.email || "")}" placeholder="name@company.com"><div class="help"></div></div><div class="field"><label>이름</label><input class="input" name="name" value="${UI.esc(o?.name || "")}" placeholder="선택"></div><div class="field"><label>SSO 주체 <span class="muted" style="font-weight:500">· 싸이렌MIS · 선택</span></label><input class="input" name="ssoSubject" value="${UI.esc(o?.ssoSubject || "")}" placeholder="mis:123"></div><div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o?.role || "operator")}<div class="cta"><button class="btn primary" type="submit">${o ? "고치기" : "초대"}</button></div></form>`, { title: o ? "운영자 고치기" : "운영자 초대", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#if"), async (d, f) => { const r = await UI.api("/api/ops-operators", { body: { id: o?.id, email: d.email, name: d.name || "", role: UI.chipVal(sh, "role"), ssoSubject: d.ssoSubject || undefined }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "email", r.error || "저장하지 못했어요"); close(); /* 🔴 [수리 ⑥] 옛 문구(«초대했어요 · 첫 로그인에 비밀번호를 바꿔요»)는 거짓말이었다 — 비번이 없어 로그인 자체가 안 됐다. */ UI.toast(o ? "고쳤어요" : "만들었어요 · «비번 주기»로 임시 비밀번호를 전해 주세요"); load(); }); } });
 }
 UI.$("#invite").onclick = () => form(null);
 load();
