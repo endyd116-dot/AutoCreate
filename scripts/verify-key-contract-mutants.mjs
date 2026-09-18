@@ -63,19 +63,42 @@ console.log("─".repeat(112));
 /* ── 대조군: 손 안 댄 그대로 ── */
 const base = freshRoot();
 const b0 = runRuler(base);
-const baseHasNote = /ops-tenant-note/.test(b0.stdout);
-rec("대조군 — 손 안 댄 리포에서 **실제 버그**(ops-tenant-note 의 `text`)가 빨강이다", baseHasNote && b0.code === 1,
-  `종료코드 ${b0.code} · ops-tenant-note 빨강 ${baseHasNote ? "있다" : "없다"}`);
+/* 🔴 **대조군도 «그 버그가 아직 있다»에 매이면 안 된다**(2026-09-19 · AC-112 ⑥).
+   옛 판은 「손 안 댄 리포에서 `ops-tenant-note` 가 빨갛다」였는데, **B 가 그걸 고치자 대조군이 빨개졌다** —
+   제품이 좋아졌는데 자가 우는 것은 **대조군이 낡은 것**이다.
+   ⇒ 이제 «**자가 살아서 무언가는 재고 있다**»만 본다: 짝을 실제로 세었나(0쌍이면 이 자는 아무것도 안 본 것이다). */
+const basePairs = Number((b0.stdout.match(/대조한 짝 (\d+)쌍/) ?? [])[1] ?? 0);
+rec("대조군 — 손 안 댄 리포에서 **자가 살아서 짝을 센다**(0쌍이면 아무것도 안 보고 있는 것이다)", basePairs > 0,
+  `대조한 짝 ${basePairs}쌍 · 종료코드 ${b0.code}`);
 
-/* ── ① 고치면 그 빨강이 사라지나 ── */
+/* ── ① 🔴 **망가뜨리면 우나** ── (2026-09-19 · AC-112 ⑥ 으로 뒤집었다)
+   옛 판은 「메모의 `text` 를 `note` 로 **고치면** 빨강이 사라지나」였다. **B 가 그 자리를 고치자 닻을 잃고 빨개졌다** —
+   자가 무력해서가 아니라 **이미 고쳐졌기 때문에** 못 도는 변이다.
+   ⇒ **망가뜨리는 쪽**으로 짠다: 서버가 읽는 키를 **딴 이름으로 바꿔** 놓고 그 짝이 빨개지는지 본다.
+   이 방향은 **고쳐진 뒤에도 늘 돈다.** 닻도 «지금 서버가 실제로 읽는 이름»에서 **찾아서** 쓴다(글자를 못 박지 않는다). */
 try {
   const d = freshRoot();
-  patch(d, "public/ops/tenant.html", "text: d.text }", "note: d.text }");
-  const r = runRuler(d);
-  const gone = !/ops-tenant-note/.test(r.stdout);
-  rec("① **고치면 그 빨강이 사라진다**(늘 빨간 자가 아니다)", gone, gone ? "ops-tenant-note 빨강이 사라졌다" : "🔴 고쳤는데도 그대로 빨갛다 — 이 자는 무력하다");
+  const srv = readFileSync(path.join(d, "netlify", "functions", "ops-tenants.ts"), "utf8");
+  const blk = srv.slice(srv.indexOf('endsWith("/ops-tenant-note")'));
+  /* 그 블록이 몸통에서 읽는 키를 한 개 집어 온다(`b.xxx`). */
+  /* 🔴 **읽는 키를 «전부» 바꿔야 한다** — 하나만 바꾸면 안 운다.
+     B 가 이 라우트를 `text` **와** `note` 둘 다 받게 고쳐서, `text` 만 바꾸니 `note` 가 받아 줬다.
+     («하나만 지워서 안 운» AC-112 ② 의 또 한 판 — 오늘만 다섯 번째다.) */
+  const keys = [...new Set((blk.match(/\bb\.([A-Za-z_$][\w$]*)/g) ?? []).map((s) => s.slice(2)))].filter((k) => k !== "id");
+  if (!keys.length) throw new Error("그 라우트가 `b.…` 로 읽는 키를 못 찾았다(이 변이표가 낡았다)");
+  const key = keys.join("·");
+  const before = runRuler(d);
+  const wasClean = !/ops-tenant-note/.test(before.stdout);
+  /* 서버 쪽 그 키들을 전부 딴 이름으로 — 화면은 그대로 보낸다 ⇒ «보내는데 안 읽는다»가 되어야 한다. */
+  let mutated = srv;
+  for (const k of keys) mutated = mutated.replace(new RegExp(`\\bb\\.${k}\\b`, "g"), `b.__${k}__`).replace(new RegExp(`\\b${k}\\?:`, "g"), `__${k}__?:`);
+  writeFileSync(path.join(d, "netlify", "functions", "ops-tenants.ts"), mutated);
+  const after = runRuler(d);
+  const cried = /ops-tenant-note/.test(after.stdout);
+  rec("① 🔴 **서버가 읽는 키를 딴 이름으로 바꾸면 운다**(고쳐진 뒤에도 도는 변이 · AC-112 ⑥)", wasClean && cried,
+    `바꾸기 전 ${wasClean ? "깨끗" : "🔴 이미 빨강"} → 바꾼 뒤 ${cried ? "빨개졌다" : "🔴 조용하다"} (건드린 키 «${key}»)`);
   rmSync(d, { recursive: true, force: true });
-} catch (e) { rec("① 고치면 빨강이 사라진다", false, String(e.message).slice(0, 160)); }
+} catch (e) { rec("① 서버 키를 바꾸면 운다", false, String(e.message).slice(0, 160)); }
 
 /* ── ② 멀쩡한 짝을 망가뜨리면 새 빨강이 나나 ── */
 try {
@@ -88,30 +111,30 @@ try {
   rmSync(d, { recursive: true, force: true });
 } catch (e) { rec("② 멀쩡한 짝을 망가뜨리면 운다", false, String(e.message).slice(0, 160)); }
 
-/* ── ③ 서버가 읽는 줄을 주석으로 숨기면 우나 ── */
+/* ── ③ 주석을 코드로 세나 ──
+   🔴 **제품 글자에 안 매이게 다시 짠다**(2026-09-19 · AC-112 ⑥).
+   옆 판은 `ops-tenants.ts` 의 줄을 통째로 밖아 넣었는데, B 가 그 파일을 고치자 **닻을 잃고 빨개졌다.**
+   ⇒ 이제는 **내가 지어 넣은 가짜 한 쌍**(화면 + 핸들러)에 변이를 넣는다 —
+   제품이 어떻게 바뀜도 **이 변이는 영원히 돈다.** */
 try {
   const d = freshRoot();
-  /* 🔴 변이를 **제대로** 넣는다 — 처음엔 주석을 닫은 뒤 `const note = ""` 를 그대로 남겼더니
-     «서버가 같은 이름을 스스로 만든다» 갈래로 새서 안 울었다. **그건 자의 잘못이 아니라 내 변이의 잘못이었다.**
-     ⇒ 이름을 `memo` 로 바꿔 `note` 가 **주석 안에만** 남게 한다. 그래야 «주석을 코드로 세나»를 진짜로 잰다. */
-  /* 🔴 `note` 가 **주석 말고는 아무 데도 안 남게** 지운다 — 타입 선언까지 바꿔야 한다.
-     (두 번째 판에서 `readJson<{ note?: string }>` 를 안 바꿔서 안 울었다. 그건 자가 **옳게** 센 것이다 —
-      타입에 적혀 있으면 «읽을 뜻이 있다»가 맞다. 변이가 덜 된 것이었다.) */
-  patch(d, "netlify/functions/ops-tenants.ts", `readJson<{ id?: number; note?: string }>(req)`, `readJson<{ id?: number; memo?: string }>(req)`);
-  patch(d, "netlify/functions/ops-tenants.ts", `const note = String(b.note ?? "").slice(0, 2000);`,
-    `/* 옛 코드: const note = String(b.note ?? "").slice(0, 2000); */ const memo = String(b.memo ?? "").slice(0, 2000);`);
-  patch(d, "netlify/functions/ops-tenants.ts", `SET ops_note = ${"${note}"}`, `SET ops_note = ${"${memo}"}`);
-  patch(d, "netlify/functions/ops-tenants.ts", `detail: { length: note.length }`, `detail: { length: memo.length }`);
-  patch(d, "netlify/functions/ops-tenants.ts", `return json({ ok: true, note });`, `return json({ ok: true, memo });`);
+  const fnDir = path.join(d, "netlify", "functions");
+  const pubDir = path.join(d, "public", "app");
+  /* 가짜 핸들러 — `zzprobe` 를 **주석 안에서만** 읽는다. */
+  writeFileSync(path.join(fnDir, "zz-probe.ts"), [
+    'export const config = { path: ["/api/zz-probe"] };',
+    "export default async (req: Request): Promise<Response> => {",
+    "  const b = await readJson<{ id?: number }>(req);",
+    "  /* 예전엔 const v = String(b.zzprobe ?? \"\"); 를 익었다 */",
+    "  return new Response(JSON.stringify({ ok: true, id: b.id }));",
+    "};",
+  ].join(String.fromCharCode(10)));
+  writeFileSync(path.join(pubDir, "zz-probe.html"),
+    '<script>const r = await UI.api("/api/zz-probe", { body: { id: 1, zzprobe: "x" } });</script>');
   const r = runRuler(d);
-  /* 화면은 `text` 를 보내니 원래도 빨갛다 — 여기서 보는 것은 «`note` 가 주석으로 가도 읽는 것으로 세지 않나»다.
-     그래서 화면도 같이 고쳐 `note` 를 보내게 해 놓고, 그래도 빨간지 본다. */
-  patch(d, "public/ops/tenant.html", "text: d.text }", "note: d.text }");
-  const r2 = runRuler(d);
-  const cried = /ops-tenant-note/.test(r2.stdout);
-  rec("③ **주석 안의 키는 «읽는다»로 세지 않는다**(주석을 코드로 세면 이 병을 못 본다 · AC-109 ①)", cried,
-    cried ? "주석으로 숨기니 빨개졌다" : "🔴 주석을 코드로 세고 있다 — 이 자가 AC-109 의 병에 걸렸다");
-  void r;
+  const cried = /zz-probe/.test(r.stdout);
+  rec("③ 🔴 **주석 안의 키는 «읽는다»로 세지 않는다**(주석을 코드로 세면 이 병을 못 본다 · AC-109 ①)", cried,
+    cried ? "지어 넣은 짝에서 «주석으로만 읽는 키»가 빨개졌다" : "🔴 주석을 코드로 세고 있다 — 이 자가 AC-109 의 병에 걸렸다");
   rmSync(d, { recursive: true, force: true });
 } catch (e) { rec("③ 주석 안의 키는 읽는 것으로 안 센다", false, String(e.message).slice(0, 160)); }
 
