@@ -93,7 +93,11 @@ export default async (req: Request): Promise<Response> => {
       const accounts = await q(sql`SELECT id, channel, handle, status, health_score, posts_today, daily_cap, last_post_at, monetize FROM accounts WHERE tenant_id = ${id} ORDER BY channel, id`);
       const runners = await q(sql`SELECT id, name, kind, status, last_seen_at, version FROM runner_devices WHERE tenant_id = ${id}`);
       const coins = await balance(id);
-      const [slots] = await q(sql`SELECT COUNT(*) FILTER (WHERE status IN ('planned','topic_assigned','producing','in_review','approved','scheduled')) AS upcoming,
+      /* 🔴 [2026-09-19 수리 2판] **별칭을 화면이 쓰는 이름으로 바꿨다.**
+         1판에서는 응답에서 `planned` 를 덧붙였고 라이브 왕복으로도 확인했지만, 그건 **SQL 별칭만 읽는 자**(`verify-key-contract`)
+         에게는 안 보였다 — 「자가 못 본다」와 「없다」는 다르지만, **소스에서 이름이 하나로 맞는 편**이 옳다.
+         `upcoming` 을 읽는 곳은 어디에도 없었다(전수 확인) — 그래도 응답에는 남긴다(밖에서 읽을 수 있다 · 무회귀). */
+      const [slots] = await q(sql`SELECT COUNT(*) FILTER (WHERE status IN ('planned','topic_assigned','producing','in_review','approved','scheduled')) AS planned,
                                         COUNT(*) FILTER (WHERE status = 'published') AS published FROM slots WHERE tenant_id = ${id}`);
       const audit = await q(sql`SELECT id, action, actor_type, actor_id, risk_level, created_at FROM audit_logs WHERE tenant_id = ${id} ORDER BY id DESC LIMIT 20`);
       const [rules] = await q(sql`SELECT COUNT(*) AS c FROM cadence_rules WHERE tenant_id = ${id} AND active = true`);
@@ -117,11 +121,11 @@ export default async (req: Request): Promise<Response> => {
       const body: Record<string, unknown> = {
         /* 🔴 [2026-09-19 수리 · 시나리오 B ④(상세)] **화면이 읽는 이름을 같이 싣는다.**
            실측으로 세 자리가 «서버는 보내는데 화면은 다른 이름을 읽어» 영원히 안 뜨고 있었다 —
-             `coinsSplit`(화면) ↔ `coinDetail`(서버) · `slots.planned`(화면) ↔ `slots.upcoming`(서버) · `notes`(화면) ↔ `note`(서버).
+             `coinsSplit`(화면) ↔ `coinDetail`(서버) · `slots.planned`(화면) ↔ `slots.upcoming`(서버 · 2판에서 별칭을 `planned` 로 맞췄다) · `notes`(화면) ↔ `note`(서버).
            옛 이름은 **지우지 않는다**(다른 데서 읽을 수 있다 · 무회귀). 새 이름을 **더한다.** */
         ok: true, tenant: t, users, accounts: accounts.map(({ monetize: _m, ...rest }) => rest), runners,
         coins: coins.balance, coinDetail: coins, coinsSplit: coins,
-        slots: { ...(slots as Record<string, unknown>), planned: n((slots as Record<string, unknown>)?.upcoming) },
+        slots: { ...(slots as Record<string, unknown>), upcoming: n((slots as Record<string, unknown>)?.planned) },
         notes, audit, setup, sources,
         posts: { total: n(posts?.c), lastAt: iso(posts?.last) ?? null },
         invoices: invoices.map((r) => ({ id: n(r.id), kind: String(r.kind), period: String(r.period), amountKrw: n(r.amount), vatKrw: n(r.vat_krw), totalKrw: r.total_krw === null ? n(r.amount) + n(r.vat_krw) : n(r.total_krw),
@@ -257,6 +261,18 @@ export default async (req: Request): Promise<Response> => {
         if (!r.ok) return json({ ok: false, step: r.step, error: r.error, ...(r.totalKrw !== undefined ? { totalKrw: r.totalKrw } : {}) }, r.step === "not_configured" ? 200 : 400);
         return json({ ...r, charged: true });
       }
+      /* 🔴 [2026-09-19 수리 2판 · C `verify-silent-erase`] **지우기 전에 읽는다.**
+         아래 UPSERT 는 고객이 **스스로 걸어 둔 지시**를 비운다 — `pending_plan_key`·`pending_cycle`(다음 달로 예약한 요금제)
+         과 `cancel_at_period_end`(이번 달까지만 쓰고 해지). 옛 판은 **읽지 않고 덮어써서** 무엇을 없앴는지
+         **감사에도 남길 수 없었다** — 운영자는 자기가 무엇을 지웠는지 모른 채 눌렀다.
+         🔴 1판에서는 «같은 플랜이면 아예 안 건드린다»로 **곁다리 삭제**를 막았다(그 자리는 지금도 그대로다).
+            여기는 **요금제를 진짜 바꾸는 자리** — 지우는 것이 뜻에 맞을 수 있지만, **말없이** 지우면 안 된다.
+            화면은 누르기 전에 «예약해 둔 해지·다음 달 플랜 변경은 취소돼요» 라고 미리 적는다(CLAUDE §9). */
+      const [prevSub] = await q(sql`SELECT pending_plan_key, pending_cycle, cancel_at_period_end FROM subscriptions WHERE tenant_id = ${id}`);
+      const erased: Record<string, unknown> = {};
+      if (prevSub?.pending_plan_key) erased.pendingPlanKey = String(prevSub.pending_plan_key);
+      if (prevSub?.pending_cycle) erased.pendingCycle = String(prevSub.pending_cycle);
+      if (prevSub?.cancel_at_period_end === true) erased.cancelAtPeriodEnd = true;
       const now = new Date();
       if (planKey === "trial") {
         const days = await currentTrialDays();
@@ -273,8 +289,11 @@ export default async (req: Request): Promise<Response> => {
         await grantIncluded(id, plan.limits.coinsIncluded, kstMonthOf(now), o.ops.oid);
       }
       await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${id}, ${"plan_changed"}, ${"요금제가 바뀌었어요"}, ${`운영자가 ${plans.find((p) => p.key === planKey)?.name ?? planKey} 로 바꿔 드렸어요.`}, ${"/app/plan.html"})`);
-      await writeAudit({ tenantId: id, action: "ops_plan_change", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { from: String(t.plan_key), fromStatus: String(t.status), to: planKey, cycle, charge: false } });
-      return json({ ok: true, charged: false, planKey, cycle });
+      /* 🔴 무엇을 없앴는지 **감사에 적는다** — 비어 있으면 키를 안 싣는다(없는 일을 적지 않는다). */
+      await writeAudit({ tenantId: id, action: "ops_plan_change", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high",
+        detail: { from: String(t.plan_key), fromStatus: String(t.status), to: planKey, cycle, charge: false, ...(Object.keys(erased).length ? { erased } : {}) } });
+      /* 🔴 화면에도 돌려준다 — 운영자가 «내가 무엇을 없앴나»를 누른 **뒤에도** 볼 수 있어야 한다. */
+      return json({ ok: true, charged: false, planKey, cycle, ...(Object.keys(erased).length ? { erased } : {}) });
     }
 
     /* ── 운영 메모(operator+) ──

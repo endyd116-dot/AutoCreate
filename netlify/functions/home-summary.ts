@@ -59,7 +59,17 @@ export default async (req: Request): Promise<Response> => {
     } catch (e) { console.warn("[home] 자동 승인 요금제 판정 실패 — 행을 만들지 않는다", String((e as Error)?.message ?? e).slice(0, 120)); }
     const todo: { kind: string; title: string; desc: string; link: string; tone: "warn" | "info"; count?: number; pieceId?: number }[] = [];
     // ★C(P1R4) fix: 체험 종료(readonly)·정지(suspended)는 홈 «해야 할 일» 첫 행이어야 한다(계약 §1.3 · 알림함에만 있으면 홈에서 왜 안 만들어지는지 모른다)
-    if (ctx.tenant.status === "readonly") todo.push({ kind: "plan", title: "체험이 끝났어요 — 요금제를 골라 주세요", desc: "만든 글·편성표는 그대로예요. 고르면 바로 이어서 만들고 발행해요", link: "/app/plan.html", tone: "warn" });
+    /* 🔴 [2026-09-19 수리 2판 · C `verify-honest-unknown` ②축] **`readonly` 하나로 뭉치면 탈퇴한 집에 «체험이 끝났어요»가 뜬다.**
+       탈퇴를 신청한 집도 서버 상태는 `readonly` 다. 그 집엔 «체험»도 «요금제»도 할 말이 아니고,
+       정작 필요한 **«되돌리기»를 못 찾게 만든다.** `lib/guards.ts:65` 와 `ui.js:41` 은 이미 `closed_at`·`purge_at` 으로
+       가르고 있었다 — **홈만 못 갈랐다.** 말은 그쪽과 같은 목소리로 맞춘다(한 제품이 두 말을 하지 않게). */
+    if (ctx.tenant.status === "readonly" && ctx.tenant.closedAt && ctx.tenant.purgeAt) {
+      const d = ctx.tenant.purgeDaysLeft;
+      todo.push({ kind: "plan", title: "탈퇴를 신청하셨어요 — 되돌릴 수 있어요",
+        desc: d != null ? `${d}일 뒤에 자료가 지워져요. 그때까지는 보기만 할 수 있고, 되돌리면 하던 대로 다시 써요` : "지금은 보기만 할 수 있어요. 되돌리면 하던 대로 다시 써요",
+        link: "/app/settings.html", tone: "warn" });
+    }
+    else if (ctx.tenant.status === "readonly" && !ctx.tenant.closedAt) todo.push({ kind: "plan", title: "체험이 끝났어요 — 요금제를 골라 주세요", desc: "만든 글·편성표는 그대로예요. 고르면 바로 이어서 만들고 발행해요", link: "/app/plan.html", tone: "warn" });
     else if (ctx.tenant.status === "suspended") todo.push({ kind: "plan", title: "결제가 안 돼서 잠시 멈췄어요", desc: "결제 수단을 확인하면 바로 다시 돌아가요", link: "/app/plan.html", tone: "warn" });
     const relogin = await q(sql`SELECT id, channel, handle FROM accounts WHERE tenant_id = ${tid} AND status IN ('suspended','disconnected') AND COALESCE(last_error_kind,'') <> 'removed' ORDER BY id`);
     for (const a of relogin) todo.push({ kind: "account", title: `@${a.handle} 다시 연결이 필요해요`, desc: String(a.channel), link: "/app/accounts.html", tone: "warn" });

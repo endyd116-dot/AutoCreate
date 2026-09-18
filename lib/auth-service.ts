@@ -62,10 +62,29 @@ export type LoginResult =
   | { ok: true; user: UserRow }
   | { ok: false; reason: "invalid" | "locked"; lockedUntil?: Date | null };
 
+/**
+ * 🔴 [2026-09-19 수리 2판 · C `verify-audit-gap`] **못 들어간 것도 남긴다.**
+ *   옛 판은 로그인 **성공**과 **잠김**만 적었다 — 없는 계정으로 두드리면 잠기지도 않고(잠금은 계정 단위)
+ *   기록도 없었다. 시나리오 B ⑱ 실측: 세 번 시도 → 감사 **0행** · DB 전체에 `*_login_failed` **0건**.
+ *   ⇒ **운영센터 문을 누가 두드렸는지 우리가 몰랐다.**
+ *   🔴 주소는 **가려서** 적는다 — 없는 계정의 메일을 통째로 쌓을 이유가 없다(조사에 필요한 건 «누가·언제·어디서»다).
+ */
+function maskEmail(email: string): string {
+  const [local = "", domain = ""] = String(email).split("@");
+  return `${local.slice(0, 2)}${local.length > 2 ? "***" : ""}${domain ? "@" + domain : ""}`;
+}
+
 export async function loginUser(email: string, password: string, ip: string | null): Promise<LoginResult> {
   const user = await findUserByEmail(email);
-  if (!user) { await bcrypt.compare(password, "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv"); return { ok: false, reason: "invalid" }; }
-  if (user.locked_until && new Date(user.locked_until) > new Date()) return { ok: false, reason: "locked", lockedUntil: user.locked_until };
+  if (!user) {
+    await bcrypt.compare(password, "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv");
+    await writeAudit({ tenantId: null, action: "user_login_failed", actorType: "user", ip, riskLevel: "low", detail: { reason: "no_account", email: maskEmail(email) } });
+    return { ok: false, reason: "invalid" };
+  }
+  if (user.locked_until && new Date(user.locked_until) > new Date()) {
+    await writeAudit({ tenantId: user.tenant_id, action: "user_login_failed", actorType: "user", actorId: user.id, ip, riskLevel: "medium", detail: { reason: "locked" } });
+    return { ok: false, reason: "locked", lockedUntil: user.locked_until };
+  }
   const good = await bcrypt.compare(password, user.password_hash);
   if (!good) {
     const n = (user.failed_logins || 0) + 1;
@@ -75,6 +94,7 @@ export async function loginUser(email: string, password: string, ip: string | nu
       return { ok: false, reason: "locked" };
     }
     await rows(sql`UPDATE users SET failed_logins = ${n} WHERE id = ${user.id}`);
+    await writeAudit({ tenantId: user.tenant_id, action: "user_login_failed", actorType: "user", actorId: user.id, ip, riskLevel: "low", detail: { reason: "bad_password", attempt: n } });
     return { ok: false, reason: "invalid" };
   }
   await rows(sql`UPDATE users SET failed_logins = 0, locked_until = NULL, last_login_at = NOW() WHERE id = ${user.id}`);
@@ -129,14 +149,19 @@ export async function verifyPassword(hash: string, password: string): Promise<bo
 /** /api/auth-me 응답 재료 — 사용자·테넌트·플랜·체험 남은 일·코인 잔액(원장 합산 · AM 규율 «잔액 컬럼 없음»). */
 export async function userContext(uid: number, tid: number) {
   const [u] = await rows(sql`SELECT id, email, name, role, email_verified_at, must_change_password FROM users WHERE id = ${uid} AND tenant_id = ${tid}`);
-  const [t] = await rows(sql`SELECT id, key, name, plan_key, status, trial_ends_at, settings FROM tenants WHERE id = ${tid}`);
+  /* 🔴 [2026-09-19 수리 2판 · C `verify-honest-unknown` ②축] `closed_at`·`purge_at` 을 같이 싣는다 —
+     **탈퇴를 신청한 집도 상태는 `readonly`** 라, 이 둘이 없으면 홈이 그 집에 «체험이 끝났어요»라고 말한다(거짓말이고,
+     정작 필요한 «되돌리기»를 못 찾게 만든다). `lib/guards.ts:65` 는 이미 이 둘로 가르고 있었다 — 홈만 못 갈랐다. */
+  const [t] = await rows(sql`SELECT id, key, name, plan_key, status, trial_ends_at, settings, closed_at, purge_at FROM tenants WHERE id = ${tid}`);
   const [c] = await rows(sql`SELECT COALESCE(SUM(delta),0) AS balance FROM coin_ledger WHERE tenant_id = ${tid} AND (expires_at IS NULL OR expires_at > NOW())`);
   if (!u || !t) return null;
   const trialEnds = utcDate(t.trial_ends_at);
   const trialDaysLeft = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / 86400_000)) : null;
   return {
     user: { id: Number(u.id), email: u.email, name: u.name, role: u.role, emailVerified: !!u.email_verified_at, mustChangePassword: !!u.must_change_password },
-    tenant: { id: Number(t.id), key: t.key, name: t.name, planKey: t.plan_key, status: t.status, trialEndsAt: trialEnds, trialDaysLeft, settings: t.settings },
+    tenant: { id: Number(t.id), key: t.key, name: t.name, planKey: t.plan_key, status: t.status, trialEndsAt: trialEnds, trialDaysLeft, settings: t.settings,
+      closedAt: utcDate(t.closed_at), purgeAt: utcDate(t.purge_at),
+      purgeDaysLeft: utcDate(t.purge_at) ? Math.max(0, Math.ceil((utcDate(t.purge_at)!.getTime() - Date.now()) / 86400_000)) : null },
     coins: Number(c?.balance || 0),
   };
 }
@@ -152,9 +177,22 @@ export async function findOperatorByEmail(email: string): Promise<OperatorRow | 
 
 export async function loginOperator(email: string, password: string, ip: string | null): Promise<{ ok: true; op: OperatorRow } | { ok: false; reason: "invalid" | "locked" | "inactive" }> {
   const op = await findOperatorByEmail(email);
-  if (!op || !op.password_hash) { await bcrypt.compare(password, "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv"); return { ok: false, reason: "invalid" }; }
-  if (!op.active) return { ok: false, reason: "inactive" };
-  if (op.locked_until && new Date(op.locked_until) > new Date()) return { ok: false, reason: "locked" };
+  /* 🔴 운영센터 문이다 — 못 들어간 것도 전부 남긴다(위 `maskEmail` 주석 참고). 위험도는 고객 쪽보다 한 칸 높다. */
+  if (!op || !op.password_hash) {
+    await bcrypt.compare(password, "$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv");
+    /* 계정은 있는데 **비번이 없는** 경우(초대만 하고 «비번 주기»를 안 한 사람)와 아예 없는 경우를 가른다 — 고칠 방법이 다르다. */
+    await writeAudit({ tenantId: null, action: "ops_login_failed", actorType: "operator", actorId: op ? op.id : null, ip, riskLevel: "medium",
+      detail: { reason: op ? "no_password" : "no_account", email: maskEmail(email) } });
+    return { ok: false, reason: "invalid" };
+  }
+  if (!op.active) {
+    await writeAudit({ tenantId: null, action: "ops_login_failed", actorType: "operator", actorId: op.id, ip, riskLevel: "medium", detail: { reason: "inactive" } });
+    return { ok: false, reason: "inactive" };
+  }
+  if (op.locked_until && new Date(op.locked_until) > new Date()) {
+    await writeAudit({ tenantId: null, action: "ops_login_failed", actorType: "operator", actorId: op.id, ip, riskLevel: "medium", detail: { reason: "locked" } });
+    return { ok: false, reason: "locked" };
+  }
   const good = await bcrypt.compare(password, op.password_hash);
   if (!good) {
     const n = (op.failed_logins || 0) + 1;
@@ -164,6 +202,7 @@ export async function loginOperator(email: string, password: string, ip: string 
       return { ok: false, reason: "locked" };
     }
     await rows(sql`UPDATE operators SET failed_logins = ${n} WHERE id = ${op.id}`);
+    await writeAudit({ tenantId: null, action: "ops_login_failed", actorType: "operator", actorId: op.id, ip, riskLevel: "medium", detail: { reason: "bad_password", attempt: n } });
     return { ok: false, reason: "invalid" };
   }
   await rows(sql`UPDATE operators SET failed_logins = 0, locked_until = NULL, last_login_at = NOW() WHERE id = ${op.id}`);
