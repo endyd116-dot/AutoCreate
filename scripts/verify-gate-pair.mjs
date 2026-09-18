@@ -46,6 +46,17 @@ function hit(path, needle) {
   return false;
 }
 
+/** 🔴 경로는 **`export const config` 안에서만** 찾는다 — 파일 전체를 보면 **머리 주석에 적어 둔 경로**에 걸린다.
+ *  B 의 M8: `config.path` 를 `/api/password-reset` 으로 갈아 **URL 이 실제로 404 가 돼도** 초록이었다(표면 7개 전부
+ *  «주석 + config.path» 두 군데에 경로를 갖고 있다 · CLAUDE §4.2 «config.path 누락 = 404»). */
+function hitPath(path, api) {
+  const s = read(path);
+  const i = s.indexOf("export const config");
+  if (i < 0) return false;
+  const end = s.indexOf("}", i);
+  return s.slice(i, end < 0 ? undefined : end).includes(api);
+}
+
 /** 🔴 requireWritable 를 실제로 거는 표면을 **폴더에서 센다** — 손으로 박아 두면 새 담을 못 본다(AC-108). */
 function walledNow() {
   const dir = "netlify/functions";
@@ -64,7 +75,9 @@ function nonWritableStates() {
   if (i < 0) return null;
   const seg = s.slice(i, s.indexOf("]", i));
   const out = [];
-  for (const part of seg.split('"')) if (/^[a-z_]+$/.test(part)) out.push(part);
+  /* 🔴 거르개가 소문자만 받으면 «pastDue»·«past-due» 같은 새 막음이 **조용히 빠진다**(B 의 M6·M7:
+     늘려도 초록이었다). 축 ① 의 값이 상태 이름의 **철자**에 달리면 안 된다. */
+  for (const part of seg.split('"')) if (/^[A-Za-z0-9_-]+$/.test(part)) out.push(part);
   return out.length ? out : null;
 }
 
@@ -143,7 +156,7 @@ if (!states) {
     }
     say(hit(r.hand[0], r.hand[1]), `${st} — 푸는 손이 있다 (${r.hand[0]})  \u27f5 ${r.why}`);
     for (const d of r.doors) {
-      say(hit(d.surface, d.api), `${st} — «${d.what}» 길이 살아 있다 (${d.surface} 가 ${d.api} 를 연다)`);
+      say(hitPath(d.surface, d.api), `${st} — «${d.what}» 길이 살아 있다 (${d.surface} 가 ${d.api} 를 연다)`);
       say(!W.has(d.surface), `${st} — 🔴 **«${d.what}» 문이 자기가 막은 담 뒤에 없다** (${d.surface} 에 requireWritable 가 없다)  \u27f5 AM 사고가 이 모양이었다`);
     }
   }
@@ -153,7 +166,7 @@ console.log("");
 for (const p of ACCOUNT_PAIRS) {
   say(hit(p.block[0], p.block[1]), `${p.name} — 막는 손이 있다 (${p.block[0]})`);
   say(hit(p.free[0], p.free[1]), `${p.name} — 🔴 **푸는 손**이 있다 (${p.free[0]})  \u27f5 ${p.why}`);
-  if (p.api) say(hit(p.api[0], p.api[1]), `${p.name} — 푸는 길이 화면에서 닿는다 (${p.api[0]} 가 ${p.api[1]} 를 연다)`);
+  if (p.api) say(hitPath(p.api[0], p.api[1]), `${p.name} — 푸는 길이 화면에서 닿는다 (${p.api[0]} 가 ${p.api[1]} 를 연다)`);
   if (p.caller) say(hit(p.caller[0], p.caller[1]), `${p.name} — 🔴 **푸는 손을 부르는 데가 살아 있다** (${p.caller[0]})`);
 }
 
