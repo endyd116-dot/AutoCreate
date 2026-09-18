@@ -57,7 +57,10 @@ async function run(): Promise<void> {
   rec("⑧ 서버가 라이브 판을 실어 보낸다(⚠️ 배선)", /releaseHealth\(\)/.test(api) && /release,\s*farm:/.test(api));
   rec("⑨ 서버가 기기마다 판정해 보낸다(화면이 다시 짜지 않는다 · AC-74)(⚠️ 배선)", /upToDate:\s*runnerUpToDate\(/.test(api));
 
-  const html = readFileSync("public/ops/runners.html", "utf8");
+  /* 🔴 **정본을 읽는다**(생성물이 아니라). `public/ops/runners.html` 은 `_tpl.txt` 에서 **빌드되는 것**이라
+     거기만 고치면 다음 빌드에 날아간다 — 2026-09-19 에 내가 실제로 그렇게 고쳤다가 `verify-r8-deadends` 에 잡혔다.
+     ⚠️ «정본과 생성물이 어긋났나»는 이 자가 아니라 `verify-r8-deadends` 가 본다(두 자가 같은 것을 다르게 세면 갈린다 · AC-101). */
+  const html = readFileSync("public/ops/_tpl.txt", "utf8");
   rec("⑩ 화면이 라이브 판을 그린다(⚠️ 배선)", /r\.release/.test(html) && /받아 가는 판/.test(html));
   rec("⑪ 🔴 화면이 «못 쟀어요»라고 말한다(«없다»로 접지 않는다 · AC-9)(⚠️ 배선)", /못 쟀어요/.test(html));
   rec("⑫ 🔴 가리키는 zip 이 없으면 화면이 그 말을 한다(러너가 받다 실패한다)(⚠️ 배선)", /zipOk === false/.test(html));
