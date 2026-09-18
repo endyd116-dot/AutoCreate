@@ -19,8 +19,29 @@ import { q } from "../accounts";
 
 /** owner 메일 도메인이 이것이면 내부. 사장님 테스트 계정(`test@autocreate.kr`)도 여기 든다 — 실카드 실측 결제가 매출로 잡히면 안 된다. */
 export const INTERNAL_EMAIL_DOMAINS: readonly string[] = ["autocreate.kr", "autocreate.test", "autocreate.dev", "test.local", "example.invalid", "example.com"];
-/** 하니스가 만드는 테넌트 키 모양(가입 이메일 앞부분에서 온다 · `lib/validate.ts tenantKeyFrom`). */
-export const INTERNAL_KEY_RE = /^(verify|smoke|test|harness|demo|skip|r[0-9]|ac-?test|p1r[0-9]|live-?c[0-9]|c\+)/i;
+/**
+ * 하니스가 만드는 테넌트 키 모양(가입 이메일 앞부분에서 온다 · `lib/validate.ts tenantKeyFrom`).
+ *
+ * 🔴 [2026-09-19 수리 · 시나리오 B ①] **끝 경계를 막았다 — 옛 판은 «앞글자만 같으면» 삼켰다.**
+ *   옛 판 `/^(verify|smoke|test|…|r[0-9]|…)/i` 은 **진짜 상호**를 내부로 켰다(실측):
+ *     `smokehouse-…`(고깃집) · `demolition-…`(철거) · `skipper-…` · `testkim-…` · `r3design-…` · `r2coffee-…`
+ *   그 집은 운영 목록에서 **사라지고**(기본 집계에서 빠진다), 운영자는 «가입 기록이 없는데요» 라고 말하게 된다.
+ *   🔴 **표시어는 낱말이어야 한다** — 바로 뒤가 **숫자나 구분자**(`[0-9-]`)일 때만 하니스로 본다.
+ *     `tenantKeyFrom` 이 `<메일앞부분 12자>-<무작위 6자>` 로 만들므로 **앞부분이 표시어 그 자체면 뒤에 `-` 가 온다** —
+ *     그래서 `test-56j02y`·`smoke6178942-…`·`verify1789…` 는 그대로 잡히고, `smokehouse-…` 는 놓아준다.
+ *   🔴 `c\+` 갈래는 **지웠다 — 죽은 갈래였다**: 키는 영숫자만 남기므로(`replace(/[^a-z0-9]/g,"")`) `+` 가 키에 올 수 없다.
+ *   🔴 **둘째 갈래 — 표시어 뒤에 글자가 더 붙어도 «시계 도장»이 찍혀 있으면 하니스다.**
+ *     첫 판(경계만 막기)은 `r8ta17894918-29buhy` 같은 **진짜 하니스 키를 놓쳤다**(자가 잡아 줬다 · 2026-09-19).
+ *     우리 하니스는 메일에 `Date.now()` 를 박고, 그 앞부분이 12자로 잘려 **숫자 네 자리 이상이 이어진 채** 남는다.
+ *     그래서 «표시어 + 글자 몇 + 숫자4» 도 하니스로 본다 — `r8ta1789…` ✅ · `r4smokea1789` ✅.
+ *     진짜 상호는 `-`(무작위 꼬리) 가 먼저 와서 숫자4에 못 닿는다 — `smokehouse-…` · `demoday-…` · `r3design-…` 는 놓아준다.
+ *   ⚠️ **남는 위험은 적어 둔다**(AC-9): `test2024@…` 처럼 «표시어 + 숫자»인 진짜 상호는 여전히 삼킨다.
+ *      그 대신 ㉡ 로 **화면이 «N곳 숨겼어요»를 말하고 한 번에 꺼낼 수 있게** 했고, 운영자가 손으로 끄면 크론이 다시 안 켠다.
+ *      «삼킬 수 있다»를 «안 삼킨다»로 적지 않는다 — 대신 **보이게** 만든 것이다.
+ *   🔴 이 정규식의 `source` 는 아래 SQL 이 `~*` 로 **그대로** 쓴다 — 그래서 **POSIX 로도 도는 모양만** 쓴다
+ *      (앞보기 `(?!…)` 금지 · 역참조 금지). 자(`verify-ops-contract.mjs`)가 상호 표·하니스 표로 양쪽을 대조한다.
+ */
+export const INTERNAL_KEY_RE = /^(verify|smoke|test|harness|demo|skip|r[0-9]|ac-?test|p1r[0-9]|live-?c[0-9])([0-9-]|[a-z]*[0-9]{4})/i;
 /**
  * 손으로 지정하는 내부 집(메인 지시 2026-09-15) — **보존 4집**(3 C검증 · 13 C검증 · 109 B2실증 · 116 애드포스트 실증)과
  * 198(사장님 테스트 계정 `test@autocreate.kr` · 실카드 실측 결제가 매출로 잡히면 안 된다 · 도메인 규칙으로도 잡힌다).
@@ -28,15 +49,30 @@ export const INTERNAL_KEY_RE = /^(verify|smoke|test|harness|demo|skip|r[0-9]|ac-
  */
 export const INTERNAL_TENANT_IDS: readonly number[] = [3, 13, 109, 116, 198];
 
+/**
+ * 🔴 [2026-09-19 수리 · 시나리오 B ①] **돈을 낸 집은 자동 규칙이 못 건드린다.**
+ *   추측 규칙(도메인·키 모양·사용자 0명)이 아무리 잘 맞아도 **결제한 집은 우리 시험용 집일 수 없다.**
+ *   그래서 «돈 흔적»이 있으면 자동으로는 안 켠다 — 켜야 하면 운영자가 손으로 켠다(`internal_manual_at`).
+ *   ⚠️ **보존 id 목록에는 이 안전선을 걸지 않는다** — 198(사장님 테스트 계정)은 **실카드로 실제 결제**를 했고
+ *      그 돈이 매출로 잡히면 안 되는 것이 애초에 그 목록의 이유다(메인 지시 2026-09-15).
+ */
+const PAID_TRACE = sql`(
+     EXISTS (SELECT 1 FROM invoices iv WHERE iv.tenant_id = t.id AND iv.paid_at IS NOT NULL)
+  OR EXISTS (SELECT 1 FROM billing_keys bk WHERE bk.tenant_id = t.id AND bk.active = true)
+  OR EXISTS (SELECT 1 FROM subscriptions sb WHERE sb.tenant_id = t.id AND sb.status = 'active')
+)`;
+
 /** 내부 여부를 **자동으로 켠다**(끄지 않는다). 반환 = 이번에 새로 켜진 수. 크론 `tenant.purge` 가 하루 1번 부른다 + 가입 때 1건씩. */
 export async function syncInternalFlags(): Promise<{ marked: number }> {
   const domains = INTERNAL_EMAIL_DOMAINS.map((d) => `@${d}`);
   const rows = await q(sql`UPDATE tenants t SET is_internal = true, updated_at = NOW()
     WHERE t.is_internal = false AND t.internal_manual_at IS NULL AND (
-      EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND (${sql.join(domains.map((d) => sql`LOWER(u.email) LIKE ${"%" + d}`), sql` OR `)}))
-      OR t.key ~* ${INTERNAL_KEY_RE.source}
-      OR NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.tenant_id = t.id)
-      OR t.id IN (${sql.join(INTERNAL_TENANT_IDS.map((i) => sql`${i}`), sql`, `)})
+      t.id IN (${sql.join(INTERNAL_TENANT_IDS.map((i) => sql`${i}`), sql`, `)})
+      OR ((
+           EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND (${sql.join(domains.map((d) => sql`LOWER(u.email) LIKE ${"%" + d}`), sql` OR `)}))
+        OR t.key ~* ${INTERNAL_KEY_RE.source}
+        OR NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.tenant_id = t.id)
+      ) AND NOT ${PAID_TRACE})
     ) RETURNING t.id`);
   return { marked: rows.length };
 }

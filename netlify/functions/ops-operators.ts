@@ -2,6 +2,7 @@
  * 운영센터 — 운영진 계정 + 감사 검색(계약 P1R4 §2.2·§2.4(6) · DESIGN §11.4). 🔴 super_admin 만.
  *   GET  /api/ops-operators?page                     → { ok, operators:[Operator], page, total }
  *   POST /api/ops-operators { id?, email, name, role, ssoSubject? }  → { ok, operator }   // 생성/수정(비밀번호는 여기서 안 만든다 · SSO/기존 흐름)
+ *   POST /api/ops-operator-password { id, password }  → { ok, operator }   🔴 [수리 ⑥] 임시 비번을 쥐여 준다(must_change_password=true · 첫 로그인에서 본인이 바꾼다)
  *   POST /api/ops-operator-role   { id, role }        → { ok, operator }
  *   POST /api/ops-operator-disable { id, active }     → { ok, operator }
  *   GET  /api/ops-audit-search?q&tenant&actor&actorType&action&risk&from&to&page → { ok, rows:[…], page, total }  // R1 ops-audit 확장 · KST 기간
@@ -15,12 +16,14 @@
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireAdmin } from "../../lib/guards";
+import { setOperatorTempPassword } from "../../lib/auth-service";
+import { passwordSchema } from "../../lib/validate";
 import { writeAudit } from "../../lib/audit";
 import { q } from "../../lib/accounts";
 import { sql } from "drizzle-orm";
 import { utcDate } from "../../lib/db-util";
 
-export const config = { path: ["/api/ops-operators", "/api/ops-operator-role", "/api/ops-operator-disable", "/api/ops-audit-search", "/api/ops-backup-status"] };
+export const config = { path: ["/api/ops-operators", "/api/ops-operator-password", "/api/ops-operator-role", "/api/ops-operator-disable", "/api/ops-audit-search", "/api/ops-backup-status"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 const ROLES = new Set(["operator", "admin", "super_admin"]);
@@ -112,6 +115,25 @@ export default async (req: Request): Promise<Response> => {
 
     if (req.method !== "POST") return json({ ok: false, error: "method", step: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
+
+    /* 🔴 [2026-09-19 수리 · 시나리오 B ⑥] **뽑을 수는 있는데 들여보낼 수가 없었다.**
+       `ops-operators` 로 만든 운영자는 `password_hash = NULL` 이라 로그인이 **원천적으로** 안 됐고
+       (실측: 방금 만든 계정으로 로그인 → «아이디 또는 비밀번호가 맞지 않아요»), 남의 비번을 정해 주는
+       화면도 API 도 없었다. 초대 메일도 없다. ⇒ 사람을 늘릴 수 없었다.
+       여기서 **임시 비번**을 쥐여 준다 — 본인이 첫 로그인에서 바꾸게 표시(`must_change_password`)를 켠 채로.
+       잠긴 사람을 풀어 주는 길이기도 하다(`failed_logins`·`locked_until` 을 함께 푼다).
+       🔴 super_admin 전용(파일 머리의 가드) · 감사 **high** · 🔴 기본 비번은 막는다(`ops-change-password` 와 같은 줄). */
+    if (path.endsWith("/ops-operator-password")) {
+      const id = n(b.id); if (!id) return badRequest("id");
+      const parsed = passwordSchema.safeParse(String(b.password ?? ""));
+      if (!parsed.success) return badRequest(parsed.error.issues[0]?.message || "비밀번호를 확인해 주세요.", "password");
+      if (parsed.data === "admin1234") return badRequest("기본 비밀번호는 쓸 수 없어요.", "weak");
+      const [row] = await q(sql`SELECT id, email, name, role, sso_sub, active, last_login_at FROM operators WHERE id = ${id}`);
+      if (!row) return json({ ok: false, error: "운영자를 찾을 수 없어요.", step: "not_found" }, 404);
+      await setOperatorTempPassword(id, parsed.data);
+      await writeAudit({ tenantId: null, action: "ops_operator_password_set", actorType: "operator", actorId: g.ops.oid, target: `operator:${id}`, detail: { email: String(row.email ?? "") }, riskLevel: "high" });
+      return json({ ok: true, operator: toOperator(row), mustChangePassword: true });
+    }
 
     if (path.endsWith("/ops-operator-role")) {
       const id = n(b.id); const role = String(b.role ?? "");
