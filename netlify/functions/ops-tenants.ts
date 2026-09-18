@@ -103,12 +103,26 @@ export default async (req: Request): Promise<Response> => {
       const tickets = await q(sql`SELECT id, subject, status, priority, sla_due_at, created_at FROM tickets WHERE tenant_id = ${id} AND status <> 'resolved' ORDER BY id DESC LIMIT 10`);
       const ledger = await readLedger(id);
       const key = await activeBillingKey(id);
+      /* 🔴 [2026-09-19 수리 · 시나리오 B ③] 화면이 그리는 모양 그대로 — `{text, by, at}`.
+         보조 SELECT 라 실패하면 **빈 배열로 계속**한다(CLAUDE §4.1 · DDL 0083 이 아직 안 걸린 순간에도 상세는 열려야 한다). */
+      let notes: { text: string; by: string; at: string }[] = [];
+      try {
+        const nr = await q(sql`SELECT text, operator, created_at FROM ops_tenant_notes WHERE tenant_id = ${id} ORDER BY id DESC LIMIT 20`);
+        notes = nr.map((r) => ({ text: String(r.text ?? ""), by: String(r.operator ?? "운영자"), at: iso(r.created_at) ?? "" }));
+      } catch { notes = []; }
       // 광고 매체 = 수익 커넥터가 있거나 계정에 광고 식별자(애드포스트 미디어·애드센스 pub)가 붙어 있으면 «연결됨».
       const adMedia = sources.length > 0 || accounts.some((a) => { const m = (a.monetize && typeof a.monetize === "object" ? a.monetize : {}) as Record<string, unknown>; return !!(m.adpostMediaId || m.adsensePub || m.coupangPartnerId); });
       const setup = { accounts: accounts.length > 0, adMedia, rules: n(rules?.c) > 0, firstPublish: n(posts?.c) > 0 };
       const health = accounts.length ? Math.round(accounts.reduce((a, r) => a + n(r.health_score), 0) / accounts.length) : null;
       const body: Record<string, unknown> = {
-        ok: true, tenant: t, users, accounts: accounts.map(({ monetize: _m, ...rest }) => rest), runners, coins: coins.balance, coinDetail: coins, slots, audit, setup, sources,
+        /* 🔴 [2026-09-19 수리 · 시나리오 B ④(상세)] **화면이 읽는 이름을 같이 싣는다.**
+           실측으로 세 자리가 «서버는 보내는데 화면은 다른 이름을 읽어» 영원히 안 뜨고 있었다 —
+             `coinsSplit`(화면) ↔ `coinDetail`(서버) · `slots.planned`(화면) ↔ `slots.upcoming`(서버) · `notes`(화면) ↔ `note`(서버).
+           옛 이름은 **지우지 않는다**(다른 데서 읽을 수 있다 · 무회귀). 새 이름을 **더한다.** */
+        ok: true, tenant: t, users, accounts: accounts.map(({ monetize: _m, ...rest }) => rest), runners,
+        coins: coins.balance, coinDetail: coins, coinsSplit: coins,
+        slots: { ...(slots as Record<string, unknown>), planned: n((slots as Record<string, unknown>)?.upcoming) },
+        notes, audit, setup, sources,
         posts: { total: n(posts?.c), lastAt: iso(posts?.last) ?? null },
         invoices: invoices.map((r) => ({ id: n(r.id), kind: String(r.kind), period: String(r.period), amountKrw: n(r.amount), vatKrw: n(r.vat_krw), totalKrw: r.total_krw === null ? n(r.amount) + n(r.vat_krw) : n(r.total_krw),
           status: String(r.status), attempts: n(r.attempts), refundedKrw: n(r.refunded_krw), ...(iso(r.paid_at) ? { paidAt: iso(r.paid_at) } : {}), ...(iso(r.next_retry_at) ? { nextRetryAt: iso(r.next_retry_at) } : {}), createdAt: iso(r.created_at) ?? "" })),
@@ -162,22 +176,42 @@ export default async (req: Request): Promise<Response> => {
     /* ── 코인 지급/회수(admin) ── */
     if (path.endsWith("/ops-coins-grant")) {
       const g = await requireAdmin(req, [...ADMIN]); if (!g.ok) return g.res;
-      const b = await readJson<{ id?: number; coins?: number; reason?: string }>(req);
+      const b = await readJson<{ id?: number; coins?: number; reason?: string; idem?: string }>(req);
       const id = n(b.id); const coins = Math.trunc(n(b.coins));
       if (!id || !coins || Math.abs(coins) > 10_000) return badRequest("id·coins(±10,000 이내)");
       const reason = (b.reason || "운영자 지급").slice(0, 200);
-      const ref = `ops:${o.ops.oid}:${Date.now()}`;
+      /* 🔴 [2026-09-19 수리 · 시나리오 B ④] **멱등 키가 «뜻»이 아니라 «시계»에서 나왔다.**
+         옛 판은 `ops:<oid>:${Date.now()}` 라 **누를 때마다 다른 키**였다 — 같은 내용을 동시에 두 번 던지니
+         22ms 차이로 **두 줄이 들어갔다**(150 → 210코인 · 실측). 원장 자체는 이미 멱등하다
+         (`coin_ledger` 의 `(tenant_id, kind, ref, bucket)` ON CONFLICT DO NOTHING) — **키만 틀렸던 것**이다.
+         같은 파일의 월 포함분은 처음부터 뜻으로 만든 키였다(`included:<tid>:2026-09`) — 그건 몇 번을 불러도 한 줄이다.
+         고친 것 둘:
+           ① 화면이 **시트를 열 때 만든 `idem`** 을 보내면 그것을 쓴다 — 더블클릭이든 재시도든 **같은 키**다.
+           ② `idem` 이 없으면 **뜻으로 만든다** — 같은 운영자·같은 집·같은 수·같은 사유는 **1분 안에서 한 번**.
+              (안전망이지 정답이 아니다. 뜻이 있어 한 번 더 주려면 1분 뒤이거나 사유를 달리 적으면 된다.) */
+      const idem = String(b.idem ?? "").trim().slice(0, 64).replace(/[^A-Za-z0-9_-]/g, "");
+      const minute = Math.floor(Date.now() / 60_000);
+      const reasonKey = reason.replace(/\s+/g, " ").trim().slice(0, 40);
+      const ref = idem ? `ops:${o.ops.oid}:${idem}` : `ops:${o.ops.oid}:${id}:${coins}:${reasonKey}:${minute}`;
       let applied = 0;
-      if (coins > 0) { const r = await grant(id, coins, reason, o.ops.oid, ref); applied = r.granted; }
+      let duplicate = false;
+      if (coins > 0) { const r = await grant(id, coins, reason, o.ops.oid, ref); applied = r.granted; duplicate = r.ok && r.granted === 0; }
       else {
         // 회수는 포함분 잔량까지만(잔액을 음수로 만들지 않는다 · 충전분 회수는 환불 경로가 따로).
         const bal = await balance(id);
         applied = -Math.min(Math.abs(coins), Math.max(0, bal.included));
-        if (applied) await q(sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason, actor_id) VALUES (${id}, ${"revoke"}, ${"included"}, ${applied}, ${ref}, ${reason}, ${o.ops.oid})`);
+        /* 🔴 회수도 같은 자를 쓴다 — 여기는 `grant()` 를 안 지나므로 **ON CONFLICT 를 손으로** 적는다(없으면 두 번 빠진다). */
+        if (applied) {
+          const r = await q(sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, ref, reason, actor_id)
+            VALUES (${id}, ${"revoke"}, ${"included"}, ${applied}, ${ref}, ${reason}, ${o.ops.oid})
+            ON CONFLICT (tenant_id, kind, ref, bucket) WHERE ref IS NOT NULL DO NOTHING RETURNING id`);
+          if (!r.length) { applied = 0; duplicate = true; }
+        }
       }
-      await writeAudit({ tenantId: id, action: "ops_coins_grant", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { requested: coins, applied, reason } });
+      await writeAudit({ tenantId: id, action: "ops_coins_grant", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "high", detail: { requested: coins, applied, reason, duplicate } });
       const after = await balance(id);
-      return json({ ok: true, applied, balance: after.balance });
+      /* 🔴 «두 번째는 안 들어갔다»를 화면이 **말할 수 있게** 돌려준다 — 조용히 0 을 주면 운영자는 «또 들어갔나?» 싶어 또 누른다. */
+      return json({ ok: true, applied, balance: after.balance, ...(duplicate ? { duplicate: true, message: "아까 넣은 것과 같아서 한 번만 들어갔어요." } : {}) });
     }
 
     /* ── 체험 연장(admin) ── */
@@ -207,6 +241,15 @@ export default async (req: Request): Promise<Response> => {
       if (!plans.find((p) => p.key === planKey)) return badRequest("없는 플랜이에요.", "plan");
       const [t] = await q(sql`SELECT status, plan_key FROM tenants WHERE id = ${id}`);
       if (!t) return json({ ok: false, error: "고객이 없어요.", step: "tenant" }, 404);
+      /* 🔴 [2026-09-19 수리 · 시나리오 B ②] **같은 플랜이면 구독 장부를 건드리지 않는다.**
+         화면의 「플랜 · 상태」 시트는 상태만 바꿀 때도 이 손을 먼저 불렀다(플랜 칩 기본값 = 지금 플랜).
+         그런데 아래 UPSERT 는 같은 플랜이어도 **`cancel_at_period_end=false` · `pending_plan_key=NULL` ·
+         결제일 재설정**까지 한다 ⇒ 고객이 걸어 둔 **해지 예약이 조용히 풀려 다음 달에 또 결제됐다**(실측 증명).
+         돈은 «아무것도 안 바뀌었을 때 아무것도 안 하는 것»이 기본이다. 청구(`charge:true`)는 뜻이 분명하니 지나간다. */
+      if (b.charge !== true && planKey === String(t.plan_key)) {
+        return json({ ok: true, charged: false, planKey, cycle, unchanged: true,
+          error: null, message: "이미 같은 요금제예요 — 구독·결제일은 그대로 두었어요." });
+      }
       if (b.charge === true) {
         if (!await isPaidPlan(planKey)) return badRequest("청구는 유료 플랜만 할 수 있어요.", "plan");
         const r = await changePlan(id, planKey, cycle, { actorId: o.ops.oid, source: "ops" });
@@ -234,14 +277,28 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, charged: false, planKey, cycle });
     }
 
-    /* ── 운영 메모(operator+) ── */
+    /* ── 운영 메모(operator+) ──
+       🔴 [2026-09-19 수리 · 시나리오 B ③] **옛 판은 메모를 잃고 있던 것까지 지웠다.**
+         화면은 `{ id, text }` 를 보내는데 서버는 `b.note` 만 읽어 `note = ""` 가 됐고, 그걸로 `ops_note` 를 덮었다.
+         그런데 응답은 `ok:true` — 시트가 닫히며 «저장됐다»는 모양이 된다. **오류 한 글자 안 떴다**(실측).
+       고친 것 셋:
+         ① **두 이름을 다 받는다**(`text` 가 화면의 말 · `note` 는 옛 계약) — 어느 쪽이 와도 저장된다.
+         ② **빈 말로는 덮지 않는다** — 둘 다 없으면 400. 지우려면 뜻을 갖고 빈 문자열을 보내야 한다.
+         ③ **쌓는다** — `ops_tenant_notes` 에 누가·언제와 함께 넣고(DDL 0083), `ops_note` 는 **최근 한 줄**로 같이 갱신(목록 미리보기 무회귀).
+       🔴 감사에 **내용 앞머리**를 남긴다 — 옛 판은 `{length:0}` 뿐이라 «메모를 남겼다»는 기록만 있고 내용이 어디에도 없었다. */
     if (path.endsWith("/ops-tenant-note")) {
-      const b = await readJson<{ id?: number; note?: string }>(req);
+      const b = await readJson<{ id?: number; note?: string; text?: string }>(req);
       const id = n(b.id); if (!id) return badRequest("id");
-      const note = String(b.note ?? "").slice(0, 2000);
+      const raw = b.text ?? b.note;
+      if (typeof raw !== "string") return badRequest("메모를 적어 주세요.", "text");
+      const note = raw.trim().slice(0, 2000);
+      if (!note) return badRequest("메모를 적어 주세요.", "text");
+      const at = new Date();
+      await q(sql`INSERT INTO ops_tenant_notes (tenant_id, operator_id, operator, text, created_at)
+                  VALUES (${id}, ${o.ops.oid}, ${String(o.ops.name || "운영자").slice(0, 120)}, ${note}, ${ts(at)})`);
       await q(sql`UPDATE tenants SET ops_note = ${note}, updated_at = NOW() WHERE id = ${id}`);
-      await writeAudit({ tenantId: id, action: "ops_tenant_note", actorType: "operator", actorId: o.ops.oid, ip, detail: { length: note.length } });
-      return json({ ok: true, note });
+      await writeAudit({ tenantId: id, action: "ops_tenant_note", actorType: "operator", actorId: o.ops.oid, ip, detail: { length: note.length, head: note.slice(0, 120) } });
+      return json({ ok: true, note, at: at.toISOString() });
     }
 
     /* ── 원격접속(operator+) — 60분 상한 · 시작 감사 + 알림 ── */

@@ -183,6 +183,21 @@ export async function setOperatorPassword(id: number, password: string): Promise
   await rows(sql`UPDATE operators SET password_hash = ${hash}, must_change_password = false, failed_logins = 0, locked_until = NULL WHERE id = ${id}`);
 }
 
+/**
+ * 🔴 [2026-09-19 수리 · 시나리오 B ⑥] **뽑은 사람을 들여보내는 손.**
+ *   `POST /api/ops-operators` 로 만든 운영자는 `password_hash = NULL` 이라 **로그인 자체가 안 됐다**
+ *   (`loginOperator` 가 해시 없으면 `invalid`). 그리고 **남의 비번을 정해 주는 길이 어디에도 없었다** —
+ *   `setOperatorPassword` 를 부르는 곳은 «본인 비번 바꾸기» 한 곳뿐이었다(실측). ⇒ **상담원을 못 뽑았다.**
+ *   여기는 «임시 비번을 쥐여 준다»다 — 위와 딱 하나가 다르다: **`must_change_password = true`.**
+ *   그 표시가 있으면 첫 로그인에서 화면이 `/ops/password.html?first=1` 로 보내고(login.html:35),
+ *   본인이 자기 비번을 정하면 그때 표시가 꺼진다. ⇒ **임시 비번은 우리 손에 남지 않는다.**
+ *   잠김·실패 수도 함께 푼다(잠긴 사람을 풀어 주는 길이기도 하다).
+ */
+export async function setOperatorTempPassword(id: number, password: string): Promise<void> {
+  const hash = await bcrypt.hash(password, BCRYPT_COST);
+  await rows(sql`UPDATE operators SET password_hash = ${hash}, must_change_password = true, failed_logins = 0, locked_until = NULL WHERE id = ${id}`);
+}
+
 /** SSO 진입 — 이메일 기준 upsert. role 은 sso-role 판정 결과(상향만 자동). 비활성은 부활 금지. */
 export async function upsertOperatorFromSso(input: { email: string; name?: string; sub: string; role: OpsRole }): Promise<OperatorRow | null> {
   const existing = await findOperatorByEmail(input.email);

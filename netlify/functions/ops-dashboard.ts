@@ -79,7 +79,10 @@ export default async (req: Request): Promise<Response> => {
       WHERE action IN ('subscription_cancelled', 'subscription_suspended_no_key') AND ${within(created, r)}${notInternal}`);
     const churnMonth = n(ch?.c);
     const churnBase = n(t?.active) + churnMonth;
-    const churn = { month: churnMonth, pct: churnBase > 0 ? Math.round(churnMonth * 1000 / churnBase) / 10 : 0 };
+    /* 🔴 [2026-09-19 수리 · 시나리오 B ⑤ · AC-9] **잴 집이 없으면 «0%»가 아니라 «못 쟀다»(null)다.**
+       바로 위 `trialToPaidPct` 는 이미 그렇게 하고 있었는데(`cohort > 0 ? … : null`) 이탈률만 `: 0` 이었다.
+       집이 하나도 없는 날 «이탈 0%»는 사실처럼 보이지만 **잰 적이 없는 값**이다. 화면이 «못 쟀어요»로 받는다. */
+    const churn = { month: churnMonth, pct: churnBase > 0 ? Math.round(churnMonth * 1000 / churnBase) / 10 : null };
 
     // ④ 코인 — 판매(공급가) · 소비(코인 수)
     const [coins] = await q(sql`SELECT

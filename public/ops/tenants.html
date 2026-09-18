@@ -25,12 +25,21 @@
 <script>
 (async () => {
 const op = await OPS.boot("tenants"); if (!op) return;
-let status = "", plan = "";
+let status = "", plan = "", withInternal = false;
 async function load() {
   const q = UI.$("#q").value.trim();
-  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1${withInternal ? "&internal=1" : ""}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   const rows = r.tenants || [];
-  UI.$("#list").innerHTML = `<div class="gt">${UI.num(r.total ?? rows.length)}곳</div>` + OPS.table([
+  /* 🔴 [2026-09-19 수리 · 시나리오 B ①] **서버가 «몇 집을 숨겼는지» 말해 주는데 화면이 그 말을 버리고 있었다.**
+     그래서 손님이 전화해서 이름을 대도 화면엔 «0곳»만 떴다 — 운영자는 «가입 기록이 없는데요» 라고 말하게 된다.
+     이제 숨긴 수를 **그대로 적고**, 한 번 눌러 **꺼낼 수 있게** 한다(`?internal=1`). 숨김은 «지움»이 아니라 «접어 둠»이다. */
+  const hidden = (r.internal && r.internal.excluded) ? (r.internal.hidden || 0) : 0;
+  const note = withInternal
+    ? `<div class="kv"><span class="k muted" style="white-space:normal">내부 표시된 집도 함께 보고 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="intOff">다시 접기</button></span></div>`
+    : hidden > 0
+      ? `<div class="kv"><span class="k" style="white-space:normal">내부로 표시된 <b>${UI.num(hidden)}곳</b>은 빠져 있어요.<br><span class="muted" style="font-size:12px;font-weight:500">찾는 분이 안 보이면 여기서 함께 볼 수 있어요.</span></span><span class="v"><button class="btn secondary sm" type="button" id="intOn">함께 보기</button></span></div>`
+      : "";
+  UI.$("#list").innerHTML = `<div class="gt">${UI.num(r.total ?? rows.length)}곳${withInternal ? ' <span class="muted" style="font-weight:500">내부 포함</span>' : ""}</div>` + note + OPS.table([
     { h: "고객", f: (t) => `<span class="mk soft sm">${UI.esc((t.name || "?").slice(0, 1))}</span><b>${UI.esc(t.name)}</b> <span class="muted">${UI.esc(t.key)}</span>` },
     { h: "플랜", f: (t) => UI.esc(t.planKey) }, { h: "상태", f: (t) => OPS.pill(OPS.status(t.status)) },
     { h: "체험", f: (t) => (t.status === "trial" || t.status === "readonly") ? OPS.dleft(t.trialEndsAt) : "—" },
@@ -38,6 +47,8 @@ async function load() {
     { h: "마지막 발행", f: (t) => OPS.dt(t.lastPostAt) }, { h: "건강", r: true, f: (t) => t.health == null ? "—" : `<span class="dot ${t.health >= 80 ? "ok" : t.health >= 50 ? "warn" : "danger"}"></span> ${t.health}` },
   ], rows, (t) => `class="tap" data-id="${t.id}"`);
   UI.$$("#list tr.tap").forEach((tr) => tr.onclick = () => UI.go(`/ops/tenant.html?id=${tr.dataset.id}`));
+  const on = UI.$("#intOn"); if (on) on.onclick = () => { withInternal = true; load(); };
+  const off = UI.$("#intOff"); if (off) off.onclick = () => { withInternal = false; load(); };
 }
 UI.$("#q").addEventListener("input", () => { clearTimeout(window._t); window._t = setTimeout(load, 250); });
 UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.s; load(); });

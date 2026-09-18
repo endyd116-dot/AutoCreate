@@ -1201,3 +1201,19 @@ export const accountsR11Reader = {
   /** 이 계정의 독자(≤120자). NULL = 계약 값 그대로. */
   reader: "reader",
 } as const;
+
+
+/* === 수리 라운드 · B(운영 메모 여러 줄 · 시나리오 B ⑩ · 2026-09-19 · DDL `drizzle/0083-ops-tenant-notes.sql`) ===
+ *   실측: 화면은 `{id,text}` 를 보내고 서버는 `b.note` 를 읽어 **`ops_note=''` 로 덮었다**(응답은 `ok:true` — 오류 한 글자 안 떴다).
+ *   읽는 쪽도 어긋나 화면은 `r.notes` 배열을, 서버는 `note` 문자열 하나를 다뤘다 ⇒ **영원히 «메모 없음».**
+ *   화면이 처음부터 `{text, by, at}` 을 그리게 쓰여 있었으니 **화면이 맞고 저장 자리가 없었던 것**이다.
+ *   🔴 `tenants.ops_note` 는 남긴다 — 목록 한 줄 미리보기가 읽는다. 새 메모를 넣을 때 **최근 한 줄로 같이** 갱신한다(무회귀).
+ */
+export const opsTenantNotes = {
+  table: "ops_tenant_notes",
+  /** 남긴 운영자 id(operators.id) · FK 안 건다(운영자가 지워져도 기록은 남는다). */
+  operatorId: "operator_id",
+  /** 남긴 사람 이름을 **그날 그대로** 박아 둔다(나중에 이름이 바뀌어도 기록은 그날의 것). */
+  operator: "operator",
+  text: "text",
+} as const;
