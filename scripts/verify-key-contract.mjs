@@ -323,7 +323,58 @@ if (derivedList.length) {
 △ 보내는데 안 읽는다 — 그런데 서버가 **같은 이름을 스스로 만든다**(클라이언트를 안 믿는 것이 맞다 — 고장 아님):`);
   for (const d of derivedList) console.log(`   · ${d.route} — 화면이 [${d.derivedHits.join(",")}] 을 보내지만 ${d.server} 가 직접 정한다`);
 }
-/* 🔴 **되돌아오는 방향은 «살펴볼 것»으로 내린다 — 판정하지 않는다.**
+/* ═══ ④c 🔴 **한 겹 들어간 응답 키** — 여기는 판정한다 ═══
+   ④b(최상위)는 느슨해서 내렸지만, **한 겹 아래**는 서버 쪽 모양을 글자로 정확히 따라갈 수 있다:
+     화면 `ops/tenant.html:62` 이 `r.slots.planned` 를 읽는다.
+     서버 `ops-tenants.ts:96` 은 `const [slots] = await q(sql`SELECT … AS upcoming, … AS published …`)`.
+   ⇒ `planned` 는 **어디에도 없다.** 「편성 예정」이 **늘 0** 으로 뜬다(시나리오 B §4 표 5번).
+   🔴 이 모양은 `AS <별칭>` 과 객체 리터럴 키를 읽으면 **틀림없이** 갈린다 — 그래서 «살펴볼 것»이 아니라 **판정**이다.
+   못 하는 것: 두 겹 이상(`a.b.c`)·배열 원소(`r.rows[0].x`)는 안 본다. */
+const nestedBad = [];
+function shapeOfServerLocal(routeFile, name) {
+  const src = codeOnly(readFileSync(routeFile, "utf8"));
+  /* `const [name] = await q(sql`…`)` 또는 `const name = await q(sql`…`)` → SELECT 의 별칭·칼럼 이름 */
+  const sqlM = src.match(new RegExp(`const\\s+\\[?\\s*${name}\\s*\\]?\\s*=\\s*await\\s+q\\(\\s*sql\`([\\s\\S]*?)\``));
+  if (sqlM) {
+    const keys = new Set();
+    for (const m of sqlM[1].matchAll(/\bAS\s+([A-Za-z_][\w]*)/gi)) keys.add(m[1]);
+    const selM = sqlM[1].match(/SELECT\s+([\s\S]*?)\s+FROM/i);
+    if (selM) for (const km of selM[1].matchAll(/\b([a-z_][a-z0-9_]*)\s*(?:,|$)/gi)) keys.add(km[1]);
+    return keys.size ? keys : null;
+  }
+  /* `const name = { a: …, b: … }` */
+  const objM = src.match(new RegExp(`const\\s+${name}\\s*=\\s*\\{([^}]*)\\}`));
+  if (objM) return new Set([...objM[1].matchAll(/([A-Za-z_$][\w$]*)\s*:/g)].map((m) => m[1]));
+  return null;
+}
+for (const f of walk(PUB, /\.(html|js)$/)) {
+  const screen = rel(f);
+  if (screen === "public/js/ui.js") continue;
+  const src = codeOnly(readFileSync(f, "utf8"));
+  const respVars = new Set([...src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+UI\.api\s*\(/g)].map((m) => m[1]));
+  const routes = [...new Set([...src.matchAll(/UI\.api\s*\(\s*["'`](\/api\/[A-Za-z0-9_-]+)/g)].map((m) => m[1]))];
+  const files = [...new Set(routes.map((r) => routeFile.get(r)).filter(Boolean))];
+  if (!files.length) continue;
+  for (const v of respVars) {
+    for (const m of src.matchAll(new RegExp(`\\b${v}\\.([A-Za-z_$][\\w$]*)\\.([A-Za-z_$][\\w$]*)\\b`, "g"))) {
+      const [, parent, child] = m;
+      if (RESPONSE_SKIP.has(parent) || RESPONSE_SKIP.has(child)) continue;
+      /* 서버 쪽에서 그 이름의 모양을 **읽어낼 수 있을 때만** 판정한다(못 읽으면 조용히 넘어간다 — 거짓 빨강 금지). */
+      let shape = null, from = "";
+      for (const file of files) { const s = shapeOfServerLocal(file, parent); if (s) { shape = s; from = rel(file); break; } }
+      if (!shape) continue;
+      if (!shape.has(child)) nestedBad.push({ screen, parent, child, from, has: [...shape].slice(0, 6) });
+    }
+  }
+}
+rec("🔴 한 겹 들어간 응답 키도 이름이 맞는다(`r.슬롯.예정` 같은 자리)", nestedBad.length === 0,
+  nestedBad.length ? `어긋난 자리 ${nestedBad.length}곳` : "한 겹 아래까지 이름이 맞는다");
+for (const b of nestedBad) {
+  console.log(`   🔴 ${b.screen} 이 \`${b.parent}.${b.child}\` 를 읽는다`);
+  console.log(`      서버 ${b.from} 의 \`${b.parent}\` 가 가진 이름: [${b.has.join(", ")}] — \`${b.child}\` 는 없다`);
+}
+
+/* 🔴 **되돌아오는 방향(최상위)은 «살펴볼 것»으로 내린다 — 판정하지 않는다.**
    세 판을 고쳐 봤지만(최상위 키 파싱 → 느슨한 키 모음 → 응답 변수 묶기) **믿을 만큼 좁혀지지 않았다**:
    진짜 둘(`coinsSplit`·`notes`)은 매번 잡히는데, 중첩 접근(`r.slots[i].topicTitle`)과
    갈래마다 다른 응답 모양 때문에 **거짓 빨강이 계속 섞인다.**
