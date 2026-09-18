@@ -18,26 +18,12 @@
  */
 import { r2Get, r2Configured, R2_BUCKET } from "../lib/r2";
 import { zipRead } from "../runner/lib/zip.mjs";
+import { codeOnly } from "./_lib/code-only.mjs";
 
 const PREFIX = "autocreate/runner/";
 
 /** 🔴 주석을 걷은 본문 — «있다/없다»를 **실행되는 코드에서만** 센다(위 머리말). */
-function codeOnly(src: string): string {
-  /* 🔴 **진짜로 걷는다** — 「`*` 로 시작하는 줄만 지우기」는 **모자랐다**(2026-09-19 실측):
-     블록 주석의 **이어지는 줄**이 `(실제로 그랬다: 옛 eof_action=pass 판을 …` 처럼 `*` 없이 시작하면 그대로 남아
-     이 자가 **거짓 빨강**을 냈다. ⇒ `/* … *\u002f` 와 `//` 를 **글자 단위로** 훑어 지운다.
-     ⚠️ 문자열 안의 `/*` 까지 가리지는 않는다 — 이 자는 «그 낱말이 실행되는 코드에 있나»만 보므로 그 정도면 넉넉하다. */
-  const t = String(src);
-  let out = "";
-  let k = 0;
-  while (k < t.length) {
-    const two = t.slice(k, k + 2);
-    if (two === "/*") { const e = t.indexOf("*" + "/", k + 2); k = e < 0 ? t.length : e + 2; continue; }
-    if (two === "//") { const e = t.indexOf(String.fromCharCode(10), k); k = e < 0 ? t.length : e; continue; }
-    out += t[k]; k += 1;
-  }
-  return out;
-}
+/* 🔴 주석 걷기는 `scripts/_lib/code-only.mjs` **한 곳**이다(그 파일 머리말에 «왜 한 곳인가»가 있다). */
 
 /** 이 판이 «어느 라운드»인지 zip 안 글자로 가른다. 🔴 없으면 `⊘ 못 쟀다`(«옛 판»이라고 단정하지 않는다). */
 const CHECKS: { file: string; needle: string; good: boolean; say: string }[] = [

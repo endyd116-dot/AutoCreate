@@ -28,7 +28,8 @@ declare module "*/runner/lib/money.mjs";
 declare module "*/runner/lib/recipe.mjs";
 declare module "*/runner/lib/capture-slice.mjs";
 declare module "*/runner/lib/format-bleed.mjs";
-declare module "*/runner/lib/zip.mjs";   // [2026-09-19] 배포한 zip «안»을 읽는 자(verify-runner-live-inside.mts)가 쓴다
+declare module "*/runner/lib/zip.mjs";
+declare module "*/_lib/code-only.mjs";   // [2026-09-19] 주석 걷기 정본(두 자가 같이 쓴다)   // [2026-09-19] 배포한 zip «안»을 읽는 자(verify-runner-live-inside.mts)가 쓴다
 declare module "*/runner/channels/render-video.mjs";
 declare module "*/runner/channels/naver-blog.mjs";
 declare module "*/runner/channels/tistory.mjs";
