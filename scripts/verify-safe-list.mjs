@@ -52,14 +52,10 @@ for (const f of files) {
      ⇒ 주석을 걷으면 **판정이 더 정확해지기만 한다**: 코드에 진짜 쓰기가 있으면 그대로 걸린다. */
   const src = codeOnly(raw);
   const writes = WRITES.test(src);
-<<<<<<< HEAD
+  /* 🔴 [C·2026-09-19] `SAYS_READONLY` 만 `raw` 를 본다 — **주석을 읽는 것이 그 축의 본업**이다(AC-117). */
   /* 키 이름만 있고 **비우는 코드**가 같이 있으면, 그 낱말은 빼고 다시 본다(위 CLEARS_KEY 주석). */
   const needs = CLEARS_KEY.test(src) ? /localhost:\d+|process\.argv\[2\]|사용법:/.test(src) : NEEDS.test(src);
-  if (writes) groups.live.push([f, SAYS_READONLY.test(src) ? "🟠 «읽기만»이라 적혀 있는데 쓰기 낱말이 있다 — 사람이 확인" : "라이브에 쓰거나 밖으로 나간다"]);
-=======
-  const needs = NEEDS.test(src);
   if (writes) groups.live.push([f, SAYS_READONLY.test(raw) ? "🟠 «읽기만»이라 적혀 있는데 쓰기 낱말이 있다 — 사람이 확인" : "라이브에 쓰거나 밖으로 나간다"]);
->>>>>>> verify/e2e-rehearsal
   else if (needs) groups.needs.push([f, "개발 서버·인자·실호출이 필요"]);
   else groups.safe.push([f, "파일만 읽는다"]);
 }
