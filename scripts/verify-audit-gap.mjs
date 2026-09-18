@@ -147,33 +147,46 @@ if (noneAudited.length) {
   if (noneAudited.length > 8) console.log(`   · … 그 밖 ${noneAudited.length - 8}개`);
 }
 
-/* ═══ ⓪ 자기 찌르기 — 🔴 «우는가»를 잰다(AC-108) ═══ */
+/* ═══ ⓪ 자기 찌르기 — 🔴 «우는가»를 잰다(AC-108) ═══
+   🔴 **2026-09-19 · 제품 글자에서 떼어 냈다(AC-112 ⑥).**
+   옛 판은 `lib/auth-service.ts` 의 줄을 닻으로 삼고 「**감사를 넣으면** 갈림이 줄어드나」로 찔렀다.
+   그런데 B 가 그 셋을 다 닫자 **`baseSplit` 이 0** 이 되어 «0보다 작다»가 **구조적으로 불가능**해졌다 —
+   자가 무력해서가 아니라 **줄일 것이 없어서** 못 도는 변이다(«고치는 변이»는 한 번 쓰고 죽는다).
+   ⇒ 이제 **내가 지어 넣은 글자**에 찌른다. 제품이 어떻게 바뀌어도 이 변이는 **영원히 돈다.**
+   방향도 뒤집었다 — «**갈림을 심으면 보나**». */
 {
-  const authPath = path.join(ROOT, "lib", "auth-service.ts");
-  const raw = existsSync(authPath) ? readFileSync(authPath, "utf8") : "";
-  const base = scanSource("lib/auth-service.ts", raw);
-  const baseSplit = base.filter((f) => f.exits.some((e) => e.audited) && f.exits.some((e) => !e.audited)).length;
+  const mk = (a1, a2) => [
+    "export async function probeLoginXx(p: string): Promise<{ ok: true } | { ok: false; reason: string }> {",
+    `  if (!p) { ${a1} return { ok: false, reason: "invalid" }; }`,
+    `  if (p === "x") { ${a2} return { ok: false, reason: "locked" }; }`,
+    '  await writeAudit({ tenantId: null, action: "probe_login" });',
+    "  return { ok: true };",
+    "}",
+  ].join(String.fromCharCode(10));
+  const AUD = (n) => `await writeAudit({ tenantId: null, action: "probe_login_${n}" });`;
+  const splitOf = (src) => scanSource("lib/__probe__.ts", src).filter((f) => f.authish && f.exits.some((e) => e.audited) && f.exits.some((e) => !e.audited)).length;
+  const noneOf = (src) => scanSource("lib/__probe__.ts", src).filter((f) => f.exits.length >= 2 && f.exits.every((e) => !e.audited)).length;
 
-  /* ⓪a **빠진 갈래에 감사를 넣으면** 그 함수가 갈림에서 빠진다. */
-  const fixed = raw.replace(/return \{ ok: false, reason: "invalid" \};/g,
-    'await writeAudit({ tenantId: null, action: "login_failed", actorType: "user", ip }); return { ok: false, reason: "invalid" };');
-  const fixedSplit = scanSource("lib/auth-service.ts", fixed).filter((f) => f.exits.some((e) => e.audited) && f.exits.some((e) => !e.audited)).length;
-  rec("⓪a 자기 찌르기 — **빠진 갈래에 감사를 넣으면 갈림이 줄어든다**(늘 빨간 자가 아니다)",
-    fixed !== raw && fixedSplit < baseSplit, fixed === raw ? "🔴 닻을 못 찾았다 — 이 변이표가 낡았다" : `${baseSplit}개 → ${fixedSplit}개`);
+  /* ⓪a 🔴 **갈림을 심으면 본다** — 한 갈래만 감사를 뺀다. */
+  rec("⓪a 자기 찌르기 — 🔴 **갈림을 심으면 잡는다**(고쳐진 뒤에도 도는 변이 · AC-112 ⑥)",
+    splitOf(mk("", AUD("locked"))) === 1 && splitOf(mk(AUD("failed"), AUD("locked"))) === 0,
+    `한 갈래만 빼면 ${splitOf(mk("", AUD("locked")))}개 · 둘 다 남기면 ${splitOf(mk(AUD("failed"), AUD("locked")))}개`);
 
-  /* ⓪b **남기던 갈래의 감사를 빼면** 그 함수가 «전부 안 남김»(⊘)으로 내려가 갈림에서 빠진다 —
-     🔴 즉 이 자는 «갈렸나»를 보지 «감사가 있나»를 보지 않는다는 뜻이다. 그 성질을 못으로 박아 둔다. */
-  const muted = raw.replace(/await writeAudit\(\{ tenantId: user\.tenant_id, action: "user_login_locked"[\s\S]*?\}\);/, "");
-  const mutedFns = scanSource("lib/auth-service.ts", muted);
-  const mutedSplit = mutedFns.filter((f) => f.exits.some((e) => e.audited) && f.exits.some((e) => !e.audited)).length;
-  rec("⓪b 자기 찌르기 — **남기던 갈래를 지우면 «갈림»이 아니라 «전부 안 남김»(⊘)이 된다**(이 자는 «갈렸나»를 본다)",
-    muted !== raw && mutedSplit < baseSplit, muted === raw ? "🔴 닻을 못 찾았다" : `${baseSplit}개 → ${mutedSplit}개(⊘ 로 내려갔다)`);
+  /* ⓪b 🔴 **전부 빼면 «갈림»이 아니라 «전부 안 남김»(⊘)** — 이 자는 «갈렸나»를 보지 «감사가 있나»를 보지 않는다. */
+  const allGone = mk("", "").replace('await writeAudit({ tenantId: null, action: "probe_login" });', "");
+  rec("⓪b 자기 찌르기 — **전부 빼면 «갈림»이 아니라 «전부 안 남김»(⊘)이 된다**(이 자는 «갈렸나»를 본다)",
+    splitOf(allGone) === 0 && noneOf(mk("", "")) === 1,
+    `전부 빼면 갈림 ${splitOf(allGone)}개 · 실패만 빼면 ⊘ ${noneOf(mk("", ""))}개`);
 
-  /* ⓪c 🔴 **주석 속 `writeAudit` 을 «남겼다»로 세지 않는다**(AC-109 ①). */
-  const commented = raw.replace(/await writeAudit\(\{ tenantId: user\.tenant_id, action: "user_login_locked"/, "/* 옛 코드: await writeAudit({ action: \"user_login_locked\" */ void 0; /*");
-  const commentedSplit = scanSource("lib/auth-service.ts", commented).filter((f) => f.exits.some((e) => e.audited) && f.exits.some((e) => !e.audited)).length;
+  /* ⓪c 🔴 **주석 속 감사는 «남겼다»로 안 센다**(AC-109 ①). */
   rec("⓪c 자기 찌르기 — **주석 속 감사는 «남겼다»로 안 센다**(AC-109 ①)",
-    commented !== raw && commentedSplit <= baseSplit, commented === raw ? "🔴 닻을 못 찾았다" : `주석으로만 남기니 갈림 ${commentedSplit}개`);
+    splitOf(mk(`/* ${AUD("failed")} */`, AUD("locked"))) === 1,
+    `주석으로만 남기니 갈림 ${splitOf(mk(`/* ${AUD("failed")} */`, AUD("locked")))}개(코드로 세면 0이 나온다)`);
+
+  /* ⓪d 🔴 **«인증»이 아닌 감사 이름이면 판정 밖이다**(거짓 빨강 방지 — 발행 함수가 특별한 하나만 남기는 것은 정상). */
+  const notAuth = mk("", 'await writeAudit({ tenantId: null, action: "publish_queued" });').replace('action: "probe_login"', 'action: "publish_done"');
+  rec("⓪d 자기 찌르기 — **감사 이름이 «인증»이 아니면 판정 밖**(거짓 빨강 방지)", splitOf(notAuth) === 0,
+    `인증 아닌 이름으로 바꾸면 판정 대상 ${splitOf(notAuth)}개`);
 }
 
 console.log("─".repeat(120));
