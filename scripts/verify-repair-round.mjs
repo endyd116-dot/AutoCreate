@@ -32,18 +32,18 @@ const ITEMS = [
   { id: "A②", what: "로그인 잠금이 서버 시간대에 매달린다", ruler: "verify-server-time.mjs" },
   { id: "A③", what: "당근 «수익 안 붙어요»가 안 뜬다", ruler: "verify-norevenue-reach.mjs", by: "A" , own: "A" },
   { id: "A④", what: "401 오독 — 손님이 로그인 화면으로 쫓겨난다", ruler: "verify-401-surface.mjs" , own: "A" },
-  { id: "A⑤", what: "탈퇴한 집에 «체험이 끝났어요»", ruler: "verify-honest-unknown.mjs" },
+  { id: "A⑤", what: "탈퇴한 집에 «체험이 끝났어요»", ruler: "verify-honest-unknown.mjs" , mine: "home-summary" },
   { id: "A⑥", what: "온보딩이 나갔다 오면 안 이어진다", ruler: "verify-onboarding-resume.mjs", by: "A" , own: "A" },
   /* 🔴 지도는 이걸 **한 칸**으로 적었다(«글자수/말투»). 첫 판에 둘로 쪼갰더니 점수판이 **19칸**이 나왔다 —
      🔴 **내가 하루 종일 잡은 병(«같은 것을 다른 모수로 센다»)을 내 점수판이 저질렀다.** 바로 맞췄다.
      한 칸에 자가 둘이면 **둘 다 초록일 때만** 그 칸이 초록이다(하나만 초록 = 반쪽 수리). */
   { id: "A⑦", what: "글자수·말투(한 화면에 둘 · 시스템 용어)", rulers: ["verify-one-charcount.mjs", "verify-people-words.mjs"], by: "A" , own: "A" },
   { id: "B①", what: "가입한 손님이 운영 화면에서 사라진다", ruler: "verify-customer-visible.mjs" , own: "B" },
-  { id: "B②", what: "«모름»을 «0»이라고 말한다", ruler: "verify-honest-unknown.mjs" , own: "B" },
-  { id: "B③", what: "회원 상세가 서버 값을 못 읽는다", ruler: "verify-key-contract.mjs" },
+  { id: "B②", what: "«모름»을 «0»이라고 말한다", ruler: "verify-honest-unknown.mjs" , own: "B" , mine: "뭉개는 자리 [1-9]" },
+  { id: "B③", what: "회원 상세가 서버 값을 못 읽는다", ruler: "verify-key-contract.mjs" , mine: "slots\.planned" },
   { id: "B④", what: "코인 지급 멱등이 시계에서 나온다", ruler: "verify-money-idem.mjs" , own: "B" },
   { id: "B⑤", what: "운영 손이 고객 해지 예약을 지운다", ruler: "verify-silent-erase.mjs" , own: "B" },
-  { id: "B⑥", what: "운영 메모가 안 남고 있던 것을 지운다", ruler: "verify-key-contract.mjs" , own: "B" },
+  { id: "B⑥", what: "운영 메모가 안 남고 있던 것을 지운다", ruler: "verify-key-contract.mjs" , own: "B" , mine: "ops-tenant-note" },
   { id: "B⑦", what: "러너 최신 버전을 화면이 안 말해 준다", ruler: null, why: "«화면이 부르나» 목록(verify-r8-deadends)에 한 줄 더할 일 — 새 자를 만들 것이 아니다" , own: "B2" },
   { id: "B⑧", what: "«오늘 AI 에 얼마 썼나» 화면이 없다", ruler: null, why: "같은 이유 — 화면이 안 그리는 것이라 기존 목록의 몫" },
   { id: "B⑨", what: "실패한 로그인이 감사에 안 남는다", ruler: "verify-audit-gap.mjs" },
@@ -62,11 +62,12 @@ function runRuler(file) {
   if (cache.has(file)) return cache.get(file);
   const p = path.join(ROOT, "scripts", file);
   let r;
-  if (!existsSync(p)) r = { code: -1, note: "🔴 그 자가 없다(이름이 바뀌었나?)" };
-  else if (MAP_ONLY) r = { code: null, note: "안 돌렸다(--map)" };
+  if (!existsSync(p)) r = { code: -1, note: "🔴 그 자가 없다(이름이 바뀌었나?)", stdout: "" };
+  else if (MAP_ONLY) r = { code: null, note: "안 돌렸다(--map)", stdout: "" };
   else {
-    try { execFileSync(process.execPath, [p], { stdio: "ignore", timeout: 600_000 }); r = { code: 0, note: "" }; }
-    catch (e) { r = { code: e.status ?? 1, note: e.status === 2 ? "⊘ 못 쟀다" : "" }; }
+    /* 🔴 **찍힌 글자도 받아 둔다** — 한 자가 두 칸을 겸할 때 «그 칸의 줄»만 따로 보려고(아래 `mine`). */
+    try { const stdout = execFileSync(process.execPath, [p], { encoding: "utf8", timeout: 600_000, stdio: ["ignore", "pipe", "pipe"] }); r = { code: 0, note: "", stdout }; }
+    catch (e) { r = { code: e.status ?? 1, note: e.status === 2 ? "⊘ 못 쟀다" : "", stdout: String(e.stdout ?? "") + String(e.stderr ?? "") }; }
   }
   cache.set(file, r);
   return r;
@@ -82,8 +83,20 @@ for (const it of ITEMS) {
   const rs = list.map((f) => runRuler(f));
   /* 🔴 한 칸에 자가 둘이면 **둘 다 초록일 때만** 그 칸이 초록이다 — 하나만 초록이면 **반쪽 수리**다. */
   const worst = rs.find((r) => r.code === -1) ?? rs.find((r) => r.code && r.code !== 2) ?? rs.find((r) => r.code === 2) ?? rs[0];
-  const state = worst.code === -1 ? "자사라짐" : worst.code === null ? "안돌림" : worst.code === 0 ? "초록" : worst.code === 2 ? "못쟀음" : "빨강";
-  rows.push({ ...it, list, state, note: worst.note });
+  let state = worst.code === -1 ? "자사라짐" : worst.code === null ? "안돌림" : worst.code === 0 ? "초록" : worst.code === 2 ? "못쟀음" : "빨강";
+  /* 🔴 **한 자가 두 칸을 겸할 때, 그 칸의 몫만 가른다.**
+     `honest-unknown` 은 A⑤+B② 를, `key-contract` 는 B③+B⑥ 을 같이 잰다 — 자가 빨갛다고
+     **두 칸이 다 안 고쳐진 것은 아니다.** 지금까지는 내가 **말로** 갈라 보고했는데,
+     🔴 말로 가르는 것이 바로 AC-114 의 씨앗이다(다음 사람은 그 말을 못 듣는다).
+     ⇒ 칸에 `mine`(그 칸이 제 것이라고 주장하는 글자)이 있으면 **그 글자가 아직 보이는지**로 칸을 가른다.
+     `mine` 이 없는 칸은 종전대로 자 전체의 종료코드를 따른다. */
+  let split = "";
+  if (state === "빨강" && it.mine) {
+    const still = rs.some((r) => new RegExp(it.mine).test(r.stdout ?? ""));
+    if (!still) { state = "초록"; split = `자는 아직 빨갛지만 **이 칸의 몫은 사라졌다**(다른 칸이 그 자를 붙들고 있다)`; }
+    else split = `이 칸의 몫이 그 자 안에 **아직 보인다**`;
+  }
+  rows.push({ ...it, list, state, note: worst.note, split });
 }
 
 const ICON = { 초록: "✅", 빨강: "🔴", 못쟀음: "⊘", 자없음: "✖", 자사라짐: "❗", 안돌림: "·" };
@@ -92,6 +105,7 @@ for (const r of rows) {
   console.log(`  ${ICON[r.state]} ${r.id.padEnd(7)} ${r.what.padEnd(34)} ${r.list.length ? r.list.join(" + ") + who : "—"}`);
   if (r.state === "자없음") console.log(`      ⊘ 자 없음 — ${r.why}`);
   if (r.state === "자사라짐") console.log(`      🔴 ${r.note}`);
+  if (r.split) console.log(`      ↳ ${r.split}  (그 칸의 자국: «${r.mine}»)`);
 }
 
 const green = rows.filter((r) => r.state === "초록").length;
