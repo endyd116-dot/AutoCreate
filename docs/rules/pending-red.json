@@ -5,43 +5,18 @@
   "대기": [
     {
       "자": "verify-key-contract.mjs",
-      "왜": "운영 화면↔서버 키 이름이 9곳에서 다르다(매크로·FAQ 저장·삭제가 통째로 안 된다)",
-      "누가": "B"
-    },
-    {
-      "자": "verify-customer-visible.mjs",
-      "왜": "그럴듯한 상호 12개 중 9개가 운영 화면에서 사라진다",
+      "왜": "ops-plan-update — 화면은 {key, patch} 로 감싸 보내는데 서버는 평면으로 읽는다(플랜 수정이 아무것도 안 바뀜다)",
       "누가": "B"
     },
     {
       "자": "verify-server-time.mjs",
-      "왜": "DB 시각을 utcDate 없이 읽는 자리 6곳(고객·운영자 로그인 잠금 포함)",
-      "누가": "B"
-    },
-    {
-      "자": "verify-honest-unknown.mjs",
-      "왜": "«못 쟀다»를 «0»이라고 말하는 자리",
-      "누가": "B"
+      "왜": "DB 시각을 utcDate 없이 읽는 자리 6곳(고객·운영자 로그인 잠금 포함) — 라이브가 UTC 로 도는 것에 기대고 있다",
+      "누가": "B2"
     },
     {
       "자": "verify-stub-silence.mjs",
       "왜": "스텁 손잡이가 켜졌는데 로그를 안 남기는 자리 4곳",
       "누가": "B2"
-    },
-    {
-      "자": "verify-money-idem.mjs",
-      "왜": "코인 멱등 키가 시계에서 나오는 자리 1곳(ops-tenants.ts:171 · 나머지 8곳은 «뜻»에서 나온다)",
-      "누가": "B"
-    },
-    {
-      "자": "verify-silent-erase.mjs",
-      "왜": "고객이 걸어 둔 지시를 읽지도 않고 지우는 자리 3곳(pending_plan_key · pending_cycle · cancel_at_period_end)",
-      "누가": "B"
-    },
-    {
-      "자": "verify-audit-gap.mjs",
-      "왜": "인증 실패를 감사에 안 남기는 자리 3곳(loginUser · loginOperator · approveCoinPurchase — 같은 함수가 잠김·성공은 남긴다)",
-      "누가": "B"
     },
     {
       "자": "verify-repair-round.mjs",
