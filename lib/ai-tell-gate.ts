@@ -264,10 +264,14 @@ export function runGate(inp: GateInput): GateReport {
   const selfWritten = String(inp.origin ?? "") === "self";
   push("length", chars >= lenRange.min,
     chars >= lenRange.min
-      ? `${chars.toLocaleString()}자(${selfWritten ? "이 채널에서 잘 읽히는 " : "계약 "}${lenRange.min.toLocaleString()}~${lenRange.max.toLocaleString()}자)${chars > lenRange.max ? " — 폭보다 길다" : ""}`
+      /* 🔴 [2026-09-20] **«계약»이 또 샜다.** 9/19 에 라벨의 «계약 폭»을 고쳤는데 **상세 문구**엔 «계약 »·«계약 하한»이 남아 있었다
+         — 실측으로 손님 화면에 «2자 — **계약 하한** 1,500자에 1,498자 모자란다» 가 떴다(임퍼로 눌러 보다 봤다).
+         «계약»은 우리 내부 말이다(§3 시스템 용어). 손님에게는 **«이 채널에 알맞은»** 이 같은 뜻이다.
+         🔴 말투도 같이 고쳤다 — «모자란다»(서술체)가 아니라 «모자라요». 옆 가지는 이미 «~해요» 인데 여기만 달랐다. */
+      ? `${chars.toLocaleString()}자(${selfWritten ? "이 채널에서 잘 읽히는 " : "이 채널에 알맞은 "}${lenRange.min.toLocaleString()}~${lenRange.max.toLocaleString()}자)${chars > lenRange.max ? " — 알맞은 길이보다 길어요" : ""}`
       : selfWritten
         ? `${lenRange.min.toLocaleString()}자쯤이면 더 잘 읽혀요 — 지금 ${chars.toLocaleString()}자예요(안 고쳐도 올라갑니다)`
-        : `${chars.toLocaleString()}자 — 계약 하한 ${lenRange.min.toLocaleString()}자에 ${(lenRange.min - chars).toLocaleString()}자 모자란다`);
+        : `지금 ${chars.toLocaleString()}자예요 — 이 채널엔 ${lenRange.min.toLocaleString()}자부터가 알맞아요(${(lenRange.min - chars).toLocaleString()}자 모자라요)`);
 
   // cliche — 본문 상투구 + [2026-09-15 §5C] **사진 캡션의 묘사문**(«~놓여 있는 모습» = 그림 지시문이 캡션으로 새어 나온 것 · 사장님 실측 piece 329)
   const hits = CLICHES.filter((c) => c.re.test(plain)).map((c) => c.label);

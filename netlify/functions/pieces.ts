@@ -40,6 +40,38 @@ export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/piec
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
+/**
+ * 🔴 [2026-09-20 · 메인이 손으로 밟았다] **«그만할래»의 문은 손으로 적은 목록이 아니라 «되돌릴 수 없나»로 연다.**
+ *   옛 판은 문마다 «허용 상태 목록»을 손으로 적었고, 그래서 **한 상태가 어떤 문엔 있고 어떤 문엔 없었다**:
+ *     · 발행(`PUBLISHABLE`)엔 `awaiting_manual` 이 **있는데** 버리기·수정·다시 만들기엔 **없었다**
+ *     · 세 목록 다 `draft` 를 허용하는데 라이브에 **0건**이고 **쓰는 코드도 0곳**이다(있는 상태는 빠뜨리고 없는 상태는 허용)
+ *   🔴 실제 아픔: «확인 필요»(`awaiting_manual`) 글이 **못 나가고 못 버려져 편성표 자리를 영원히 먹었다.**
+ *      하루 한도가 있는 손님에게는 그게 곧 «오늘 못 올린다»다(하루 몫은 `rejected` 를 안 세니 버리면 풀린다).
+ *   ⇒ **막는 것은 «되돌릴 수 없는 순간»뿐이다**(CLAUDE §9 — 우리 판단으로 길을 막지 않는다).
+ *      `published`(이미 나갔다) · `publishing`(지금 나가는 중) · `generating`(지금 만드는 중) 셋.
+ *   🔴 막을 때는 **왜 안 되는지 + 그럼 어떻게 하는지**를 같이 준다 — 옛 문구(«지금 상태에서는 …»)는 사실만 있고 다음 수가 없었다(§3).
+ */
+const BUSY_SAY: Record<string, { published: string; publishing: string; generating: string }> = {
+  버리기: {
+    published: "이미 올라간 글이에요 — 버리는 대신 «발행함»에서 «내리기»로 거둘 수 있어요.",
+    publishing: "지금 올리는 중이에요 — 잠깐만요. 올라간 뒤에는 «발행함»에서 «내리기»로 거둘 수 있어요.",
+    generating: "지금 만드는 중이에요 — 다 되면 검수 화면에서 버릴 수 있어요.",
+  },
+  수정: {
+    published: "이미 올라간 글이에요 — 채널에서 직접 고치시거나, «내리기»로 거둔 뒤 다시 만들 수 있어요.",
+    publishing: "지금 올리는 중이에요 — 잠깐만요. 올라간 뒤에는 채널에서 직접 고칠 수 있어요.",
+    generating: "지금 만드는 중이에요 — 다 되면 검수 화면에서 고칠 수 있어요.",
+  },
+  "다시 만들기": {
+    published: "이미 올라간 글이에요 — 새로 쓰려면 편성표에서 새 자리를 잡아 주세요.",
+    publishing: "지금 올리는 중이에요 — 잠깐만요.",
+    generating: "지금 만드는 중이에요 — 다 될 때까지 기다려 주세요.",
+  },
+};
+/** 되돌릴 수 없는 순간이면 «사실 + 다음 수» 한 문장을 준다. 아니면 null(= 열려 있다). */
+const busyReason = (door: keyof typeof BUSY_SAY, st: string): string | null =>
+  (BUSY_SAY[door] as Record<string, string>)[st] ?? null;
+
 const STATUSES = new Set(["generating", "draft", "in_review", "edited", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);   // [R9-9 C4] edited = 사람이 고친 «봐주세요»
 
 /** 글 스텝 3(writing·images·checking) · [P1R5] 영상 스텝 6(`VideoStage` = script·tts·clips·render·judging·done — A 가 «대본→목소리→장면→합성→검사→완료» 로 그린다). */
@@ -351,7 +383,7 @@ export default async (req: Request): Promise<Response> => {
     }
     if (path.endsWith("/pieces-reject")) {
       if (st === "rejected") return json({ ok: true, status: "rejected" });
-      if (!["in_review", "edited", "draft", "failed", "scheduled", "approved"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 버릴 수 없어요." }, 400);
+      { const say = busyReason("버리기", st); if (say) return json({ ok: false, step: "state", error: say }, 400); }   /* 문 규칙은 `BUSY_SAY` 한 곳 */
       const reason = String(b.reason ?? "").trim().slice(0, 300);
       await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: reason || null })}, updated_at = NOW() WHERE id = ${id}`);
       /* [P1R7 B3] 자리는 'rejected' — 'skipped' 는 «이날은 쉰다»(사용자가 편성표에서 건너뛴 날)라 둘을 한 어휘로 두면
@@ -374,7 +406,7 @@ export default async (req: Request): Promise<Response> => {
         }
         return json({ ok: true, status: "generating" });
       }
-      if (!["in_review", "edited", "draft", "failed", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 다시 만들 수 없어요." }, 400);
+      { const say = busyReason("다시 만들기", st); if (say) return json({ ok: false, step: "state", error: say }, 400); }   /* 🔴 `awaiting_manual` 이 빠져 있었다 — 못 나간 글을 다시 만들지도 못했다 */
       const regen = n(m.regenCount);
       if (regen >= 1) return json({ ok: false, step: "regen_limit", error: "다시 만들기는 한 번만 할 수 있어요. 직접 수정하거나 새 소재로 만들어 주세요." }, 400);
       const note = String(b.note ?? "").trim().slice(0, 300);
@@ -452,7 +484,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, status: "generating" }, 202);
     }
     if (path.endsWith("/pieces-update")) {
-      if (!["in_review", "edited", "draft", "scheduled", "approved", "rejected"].includes(st)) return json({ ok: false, step: "state", error: "지금 상태에서는 수정할 수 없어요." }, 400);
+      { const say = busyReason("수정", st); if (say) return json({ ok: false, step: "state", error: say }, 400); }   /* 🔴 `awaiting_manual`·`failed` 가 빠져 있었다 — 직접 올려야 하는 글을 고칠 수도 없었다 */
       if (String(p.kind || "post") === "video") {
         /* [P1R5 §3 · A 실물] 영상 설명란 수정 — `{ id, title, body, tags[] }`.
            🔴 첫 줄 고지는 **서버가 되붙인다**(사용자가 지워도 · 글의 «고지 첫 요소» 관례와 같은 급 · §16B.4).
