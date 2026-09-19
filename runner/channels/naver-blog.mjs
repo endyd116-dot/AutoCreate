@@ -272,6 +272,48 @@ async function tailMatches(ctx, expect) {
 }
 
 /**
+ * 🔴 **빈 종이에서 시작한다**(AM `writeAndPublish` · 이식 2026-09-20).
+ *
+ *   사장님 실물 지적(AM): 「**#태그 아래 또 본문 내용이 써짐, 심지어 이 글과 관련 없는 회의실 내용**」.
+ *   그 «회의실 내용»은 **앞서 쓰던 글의 임시저장 잔재**다. 네이버는 작성 중이던 글을 저장해 두고 다음 진입 때 되살린다.
+ *   🔴 **복구 팝업을 «취소»해도 본문이 남는 경우가 있고, 팝업이 아예 안 뜨고 조용히 복원되기도 한다** —
+ *      AM 은 `.se-popup-button-cancel` 을 **누르고도 당했다.** «팝업을 눌렀으니 됐겠지»가 그 사고의 모양이다.
+ *   ⇒ 쓰기 **전에** 본문을 비운다. 새 글이니 비어 있는 게 정상이고, **뭔가 있으면 그건 잔재다.**
+ *
+ *   🔴 **AM 과 한 곳 다르게 잰다 — 제목을 빼고 센다.**
+ *      AM 은 `.se-main-container` 의 글자를 세는데 **거기엔 제목도 들어 있다**(제목은 이 직전에 우리가 넣었다).
+ *      그대로 쓰면 제목이 긴 글마다 «잔재 N자»가 뜨고, 지운 뒤에도 남아 **거짓 경고**가 난다.
+ *      ⇒ `.se-documentTitle` 밖의 컴포넌트만 센다.
+ *   ⚠️ **제목 칸은 비우지 않는다** — 제목에도 잔재가 있을 수 있지만 AM 에 실측 근거가 없고,
+ *      확인 안 된 지우기는 멀쩡한 제목을 지운다. **재서 적기만** 한다(`titleLen`). ⊘ 로 남긴다.
+ *   ⚠️ 지운 양을 반드시 적는다 — **조용히 지우면 «왜 짧아졌지»를 아무도 모른다.**
+ */
+async function clearResidue(page, ctx) {
+  const measure = async () => await ctx.evaluate(() => {
+    const body = [...document.querySelectorAll(".se-component")]
+      .filter((c) => !c.closest(".se-documentTitle") && !/se-documentTitle/.test((c.className || "").toString()))
+      .map((c) => c.textContent || "").join("");
+    const title = document.querySelector(".se-documentTitle")?.textContent || "";
+    return { body: body.replace(/\s+/g, "").length, title: title.replace(/\s+/g, "").length };
+  }).catch(() => null);
+
+  const m0 = await measure();
+  if (!m0) return { measured: false };                 // 🔴 못 쟀으면 «0자»라고 하지 않는다(AC-9)
+  if (m0.body <= 40) return { measured: true, before: m0.body, after: m0.body, cleared: false, titleLen: m0.title };
+
+  await page.keyboard.press("Control+a").catch(() => {});
+  await settle(page, 200);
+  await page.keyboard.press("Delete").catch(() => {});
+  await settle(page, 400);
+  const m1 = await measure();
+  const after = m1 ? m1.body : null;
+  console.log(`  · 앞 글 잔재 ${m0.body}자를 지우고 시작합니다(남은 ${after === null ? "?" : after}자).`);
+  /* 지웠는데도 많이 남았다 = **우리가 못 지우는 잔재**다. 그대로 쓰면 남의 글이 섞이므로 크게 알린다. */
+  if (after !== null && after > 40) console.log(`  · ⚠️ 잔재 ${after}자가 남았어요 — 이 글에 다른 글 내용이 섞일 수 있어요.`);
+  return { measured: true, before: m0.body, after, cleared: true, titleLen: m0.title };
+}
+
+/**
  * 🔴 «이미 문서 어딘가에 들어가 있나» — **다시 치기 전에 묻는 질문**(AM `writeHeading` #742).
  *   `tailMatches` 는 **마지막 문단**만 본다. 인용·구분선·사진 직후엔 방금 친 글이 마지막 문단이 아닐 수 있고,
  *   그러면 «안 들어갔다»는 **거짓 판정**이 난다. 그 상태로 다시 치면 같은 소제목이 **두 번** 찍힌다
@@ -1069,6 +1111,8 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
 
     // ④ 본문
     if (!(await clickEditable(ed, S.body))) throw BLOCK("selector_changed", "본문 칸을 찾지 못했어요(에디터 화면이 바뀐 것 같아요).");
+    /* 🔴 **빈 종이에서 시작한다** — 본문 칸을 잡은 **직후**(포커스가 본문에 있어야 Ctrl+A 가 본문 범위다). */
+    const residue = await clearResidue(page, ed);
     files = await downloadImages(plan.ops.filter((o) => o.op === "image").map((o) => o.url));
     const fmt = createFormatState();
     const played = await playOps(page, ed, plan, files, shotKey, missed, fmt);
@@ -1080,6 +1124,18 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
 
     // ⑤ 발행 또는 임시저장
     const notes = [];
+    /* 🔴 잔재는 **세 갈래**로 적는다 — «못 쟀다»를 «깨끗했다»로 바꾸지 않는다(AC-9). */
+    if (!residue.measured) notes.push("앞 글 잔재를 못 쟀어요(에디터를 읽지 못했어요)");
+    else if (residue.cleared) {
+      notes.push(`앞 글 잔재 ${residue.before}자를 지우고 시작했어요(남은 ${residue.after === null ? "?" : residue.after}자)`);
+      if (residue.after !== null && residue.after > 40) notes.push(`🔴 잔재 ${residue.after}자가 남았어요 — 이 글에 다른 글 내용이 섞였을 수 있어요`);
+    }
+    /* ⊘ 제목 칸은 **비우지 않고 재기만 한다**(AM 에 실측 근거가 없다 — 확인 안 된 지우기는 멀쩡한 제목을 지운다).
+       🔴 «글자가 있다»로 적으면 **매번** 뜬다(제목은 늘 있다) — **우리가 넣은 제목보다 긴 경우**만 잔재다. */
+    const wantTitleLen = String(job.payload?.title ?? "").replace(/\s+/g, "").length;
+    if (residue.measured && residue.titleLen > wantTitleLen) {
+      notes.push(`🔴 제목 칸이 넣은 것보다 ${residue.titleLen - wantTitleLen}자 길어요 — 앞 글 제목이 남았을 수 있어요(⊘ 제목은 지우지 않았어요)`);
+    }
     if (missed.quote) notes.push(`인용구 ${missed.quote}건 폴백`);
     if (missed.divider) notes.push(`구분선 ${missed.divider}건 폴백`);
     if (missed.heading) notes.push(`소제목 ${missed.heading}건 크기 미적용(굵게만)`);
