@@ -179,7 +179,8 @@ const WIN = 600;
    (`/app/revenue.html` 의 날짜 칸 17개가 통째로 그렇게 빨갰다.)
    ⇒ 이제 **먼저 화면이 조용해질 때까지 기다린다.** 조용해진 뒤엔 **한 번이라도 움직이면** 일이 난 것이다.
    🔴 끝내 안 조용해지는 화면은 **판정하지 않고 «못 쟀음»으로 적는다** — 그게 정직하다. */
-async function press(mark) {
+/* `retry` = 칸을 채운 뒤 **한 번만** 다시 누르는 길(아래 `blockedByForm` 블록). 되풀이를 막는 표다. */
+async function press(mark, retry) {
   await pg.evaluate(ARM).catch(() => {});
   let quiet = false, lastNoise = -1;
   for (let i = 0; i < 6 && !quiet; i++) {
@@ -235,11 +236,39 @@ async function press(mark) {
   const opened = popped > pop0 || downloaded > dl0 || chose > ch0;   // 새 창·내려받기·파일 고르기 창도 «일어난 일»이다
   /* 🔴 **폼이 스스로 막은 것**을 «죽은 단추»로 세면 안 된다 — 빈 필수 칸이 있으면 브라우저가 전송을
      막고 말풍선만 띄운다(DOM 0 · 호출 0). 그건 단추가 죽은 게 아니라 **내가 칸을 안 채운 것**이다. */
-  const blockedByForm = gone ? false : await pg.evaluate((m) => {
+  let blockedByForm = gone ? false : await pg.evaluate((m) => {
     const e = document.querySelector(`[data-ac-probe="${m}"]`);
     const f = e && e.form;
     return !!(f && typeof f.checkValidity === "function" && !f.checkValidity());
   }, mark).catch(() => false);
+
+  /* 🔴 [2026-09-21 · A] **칸을 채우고 한 번 더 눌러 본다.**
+     여태 이 자는 «내가 칸을 안 채운 것»이라 적고 **⊘ 로 남겼다** — 로그인·가입·비번찾기 등 **10곳**이 그렇게 영영 안 쟀다.
+     그런데 «칸을 안 채운 것»이면 **채우면 잴 수 있다.** 안 재고 ⊘ 로 두면 그 단추는 아무도 안 보는 것이다(AC-95).
+     🔴 채우는 값은 **모양만 맞춘 가짜**다(모의 층이라 아무 데도 안 나간다 · `?mock=1`).
+     🔴 그래도 못 채우면(고르는 칸·파일 칸 등) **그대로 ⊘ 다** — 억지로 통과시키지 않는다(AC-9). */
+  if (blockedByForm && !retry) {
+    const filled = await pg.evaluate((m) => {
+      const e = document.querySelector(`[data-ac-probe="${m}"]`); const f = e && e.form;
+      if (!f) return false;
+      const V = { email: "walk@example.com", password: "WalkTest2026!", url: "https://example.com/post", tel: "01012345678",
+        number: "1", date: "2020-01-01", search: "시험", text: "시험 입력" };
+      for (const el of f.querySelectorAll("input,textarea,select")) {
+        if (!el.required || el.disabled || el.type === "hidden") continue;
+        if (el.type === "checkbox" || el.type === "radio") { if (!el.checked) { el.checked = true; el.dispatchEvent(new Event("change", { bubbles: true })); } continue; }
+        if (el.tagName === "SELECT") { const o = [...el.options].find((x) => x.value); if (!o) return false; el.value = o.value; }
+        else if (el.type === "file") return false;                      // 파일은 못 채운다 — 정직하게 ⊘
+        else if (!el.value) el.value = V[el.type] || V[el.name] || V.text;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return f.checkValidity();
+    }, mark).catch(() => false);
+    if (filled) {
+      const again = await press(mark, true);                            // 🔴 한 번만 다시 — 무한 되풀이 금지
+      return { ...again, refilled: true };
+    }
+  }
   return { ...r, idle, moved, gone, opened, scrolled, blockedByForm,
     nothing: !moved && !gone && !opened && !scrolled && !blockedByForm && r.api === 0 && r.mut === 0 };
 }
@@ -249,6 +278,23 @@ async function press(mark) {
 const readsId = (p) => /UI\.qs\.get\(\s*["']id["']\s*\)/.test(readFileSync(path.join(PUB, p.slice(1)), "utf8"));
 /** 화면 이름 → 모의 상태의 배열 이름(piece→pieces · account→accounts). */
 const collNames = (p) => { const b = path.basename(p, ".html"); return [b + "s", b.replace(/y$/, "ies"), b]; };
+
+/**
+ * 🔴 [2026-09-21 · A] **«열쇠 표»** — 이 화면을 열려면 주소에 무엇이 더 있어야 하나.
+ *   이 자가 «늘 exit 2» 이던 까닭의 절반이 이것이었다(AC-95 «늘 ⊘ 인 자는 곧 아무도 안 본다»).
+ *   🔴 **모의는 이미 닿고 있었다** — 자가 **열쇠를 안 넣어서** 빈 껍데기를 보고 «못 쟀다»고 적었다:
+ *     · `team-accept.html` — `mock.js` 의 `team-invite-info` 는 **token 만 있으면** 답한다(빈 token 이면 410)
+ *     · `receipt.html` — `invoice` 모의는 답하는데, 이 자가 찾던 목록 이름이 `receipts` 라 **`billing.invoices` 를 못 찾았다**
+ *   점(`.`)으로 파고든다. 값이 배열이면 각 `id` 로 상태를 하나씩 연다.
+ */
+const KEYS = {
+  "/app/team-accept.html": { param: "token", fixed: "mock-invite-token" },
+  "/receipt.html": { param: "id", from: "billing.invoices" },
+  /* 디렉터는 «소재»를 들고서만 여는 화면이다(`director.html:29` — 없으면 만들기로 보낸다 · 설계다).
+     모의의 소재 하나를 들려 보낸다. 🔴 모의 층이라 `director-propose` 도 가짜다 — **진짜 AI 는 안 부른다.** */
+  "/app/director.html": { param: "topicId", from: "topics" },
+};
+const dig = (o, dotted) => dotted.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
 
 let mockState = {};
 async function loadMockState() {
@@ -260,6 +306,7 @@ const roster = [];       // 🔴 **본 단추 전부** — 정적으로 «붙은
 const found = [];        // 눌러 봐도 아무 일 없던 것 = 확정
 const covered = [];      // 가운데가 다른 것에 가려져 **누를 수조차 없던** 것 — 살펴볼 것
 const emptyPages = [];   // 아무것도 안 그린 화면 — «단추 0개, 통과»로 적으면 거짓말이다
+const noButtonPages = [];   // [2026-09-21] **그릴 단추가 애초에 없는 화면**(법 문서·숫자 대시보드) — 사실이지 구멍이 아니다
 const deadEnds = [];     // 🔴 막다른 골목 — 이 상태에서 손님이 갈 수 있는 길이 0
 const seen = { pages: 0, states: 0, buttons: 0, sheets: 0, pressed: 0 };
 
@@ -270,10 +317,23 @@ await loadMockState();
 for (const p of pages) {
   const mocked = p.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(p);
   const states = [""];
-  if (mocked && readsId(p)) {
+  /* [2026-09-21] 열쇠 표(위 KEYS 주석) — 넣을 열쇠가 있으면 **그 상태로만** 잰다(빈 껍데기를 세지 않는다). */
+  const key = KEYS[p];
+  if (key) {
+    if (key.fixed) states.length = 0, states.push(`&${key.param}=${encodeURIComponent(key.fixed)}`);
+    else {
+      const arr = dig(mockState, key.from);
+      if (Array.isArray(arr) && arr.length) { states.length = 0; for (const it of arr) if (it && it.id != null) states.push(`&${key.param}=${it.id}`); }
+      else unmeasured.push(`${p} — 열쇠 \`${key.param}\` 를 \`${key.from}\` 에서 못 찾았다 — **모의 상태에 그 목록을 채워라**`);
+    }
+  }
+  /* 🔴 [2026-09-21] `?id=` 를 읽는 화면은 **맨 주소로 열면 스스로 다른 화면으로 보낸다**(설계다 — `piece.html:29` 류).
+     그 상태를 «못 쟀음»으로 세면 **영영 안 지워지는 ⊘** 가 된다 — 정작 `?id=` 상태는 바로 아래에서 제대로 잰다.
+     ⇒ 열 수 있는 id 를 찾으면 **맨 상태는 빼고** 그 상태들만 잰다. 못 찾으면 그때는 정직하게 ⊘ 다. */
+  if (!key && mocked && readsId(p)) {
     const names = collNames(p);
     const arr = names.map((n) => mockState[n]).find((a) => Array.isArray(a) && a.length);
-    if (arr) { for (const it of arr) if (it && it.id != null) states.push(`&id=${it.id}`); }
+    if (arr) { const ids = arr.filter((it) => it && it.id != null); if (ids.length) states.length = 0; for (const it of ids) states.push(`&id=${it.id}`); }
     else unmeasured.push(`${p} — \`?id=\` 를 읽는데 모의 상태에서 그 목록(${names.join("·")})을 못 찾았다 — **한 상태만 쟀다**`);
   }
   seen.pages++;
@@ -287,8 +347,18 @@ for (const p of pages) {
     seen.states++;
     const list = await pg.evaluate(MEASURE, null);
     seen.buttons += list.length;
-    /* 🔴 아무것도 안 그린 화면을 «단추 0개, 통과»로 적으면 그게 바로 조용한 거짓 초록이다. */
-    if (!list.length) emptyPages.push(url);
+    /* 🔴 아무것도 안 그린 화면을 «단추 0개, 통과»로 적으면 그게 바로 조용한 거짓 초록이다.
+       🔴 [2026-09-21 · A] 다만 **«그릴 단추가 애초에 없는 화면»과 «모의가 못 닿아 빈 껍데기인 화면»은 다르다.**
+          한 칸에 섞어 두어 이 자가 «늘 exit 2» 였다(AC-95). 둘을 **재서** 가른다 —
+          그 화면 파일 안에 단추를 만들 글자(`<button` · `class="btn` · `.tap`)가 **하나도 없으면** 그릴 수가 없다.
+          실측(2026-09-21): terms·privacy·paid-terms·automation-notice 는 소스에 0개(법 문서다) ·
+          ops/index 도 0개(숫자만 그리는 대시보드다) ⇒ 이 다섯은 **사실이지 구멍이 아니다.**
+          반대로 team-accept 는 `<button` 1 · `.btn` 3 이라 **그릴 수 있는데 안 그린 것** = 진짜 구멍(열쇠로 열었다). */
+    if (!list.length) {
+      const src = readFileSync(path.join(PUB, p.slice(1)), "utf8");
+      if (/<button|class="btn|class="row tap/.test(src)) emptyPages.push(url);
+      else noButtonPages.push(url);
+    }
     for (const b of list) roster.push({ page: p, url, scope: "화면", opener: null, ...b });
 
     /* ═══ ㉱ 🔴 **막다른 골목** — 이 상태에서 손님이 갈 수 있는 길이 0인가 ═══
@@ -326,7 +396,14 @@ for (const p of pages) {
       await pg.evaluate(MEASURE, null);   // 표식을 다시 매긴다(시트가 지워졌으니)
     }
   }
-  if (outside) unmeasured.push(`${p} — 모의가 이 화면을 안 흉내 낸다(${outside.replace(BASE, "")} 가 진짜로 나갔다) — **⊘ 못 쟀음**`);
+  /* 🔴 [2026-09-21 · A] 모의 밖으로 나간 화면이라도, **그릴 단추가 애초에 없으면** 잴 것도 없다.
+     `/index.html` 이 그렇다 — `location.replace("/app/home.html")` 한 줄짜리 문지기다(소스에 단추 0개).
+     그걸 «못 쟀음»으로 세면 영영 안 지워지는 ⊘ 가 된다(AC-95). **재서** 가른다 — 나중에 단추가 생기면 저절로 ⊘ 로 돌아온다. */
+  if (outside) {
+    const src = readFileSync(path.join(PUB, p.slice(1)), "utf8");
+    if (/<button|class="btn|class="row tap/.test(src)) unmeasured.push(`${p} — 모의가 이 화면을 안 흉내 낸다(${outside.replace(BASE, "")} 가 진짜로 나갔다) — **⊘ 못 쟀음**`);
+    else noButtonPages.push(`${p} (모의 밖이지만 **그릴 단추가 0개**다)`);
+  }
 }
 
 /* ═══ ㉰ 🔴 **전부 눌러 본다** ═══
@@ -409,7 +486,13 @@ say(`■ 잰 모수 — 화면 ${seen.pages}개 · 상태 ${seen.states}가지 �
 if (skipped) {
   say(`   🔴 «제자리»(그 단추에 직접 손이 붙은 것) ${skipped}개는 **안 눌러 봤다** — \`--press-all\` 로 전부 눌러 본다.`);
   say("      그 손이 **빈 함수**면 이 자는 못 잡는다 — 그건 이 자가 **못 재는 것**이다(AC-9).");
-  unmeasured.push(`«제자리» 단추 ${skipped}개 — 손이 붙어 있는 것만 봤고 **그 손이 무엇을 하는지는 안 눌러 봤다**(\`--press-all\` 로 잰다)`);
+  /* 🔴 [2026-09-21 · A] **이 줄이 이 자를 «늘 exit 2» 로 만들던 구조적 원인이다**(AC-95).
+     기본 모드는 «제자리» 단추를 **일부러** 안 누른다(404개를 다 누르면 몇십 분이다) — 그건 **모드 선택**이지 구멍이 아니다.
+     매번 구멍으로 세면 종료코드가 **영원히 2** 라, 진짜 구멍이 생겨도 아무도 못 알아챈다.
+     ⇒ 위 두 줄로 **크게 말하되**, 구멍으로는 `--press-all` 을 켠 판에서만 센다.
+     🔴 «말은 하되 세지 않는다»가 아니다 — `--press-all` 을 켜면 그때 남는 것은 **진짜 구멍**으로 센다. */
+  if (PRESS_ALL) unmeasured.push(`«제자리» 단추 ${skipped}개 — \`--press-all\` 인데도 못 눌렀다`);
+  else say("      (기본 모드가 일부러 안 누르는 것이라 **구멍으로 세지 않는다** — 세면 종료코드가 늘 2 가 되어 아무도 안 본다 · AC-95)");
 }
 say("");
 if (found.length) {
@@ -454,6 +537,14 @@ if (emptyPages.length) {
   say(`⊘ 단추를 하나도 안 그린 화면 ${emptyPages.length}개 — **«통과»가 아니라 «못 쟀음»이다**`);
   for (const u of emptyPages) say(`   · ${u}`);
   say("   🔴 로그인 뒤 화면은 모의 밖이면 빈 껍데기로 뜬다. 거기 있는 단추는 **아무도 안 쟀다.**");
+}
+/* 🔴 [2026-09-21 · A] **사실은 사실대로 적는다** — 숨기면 그게 «검사를 끈 것»이다(AC-95).
+   소스에 단추를 만들 글자가 하나도 없는 화면이다. 나중에 누가 단추를 넣으면 **자동으로 위 ⊘ 칸으로 옮겨 간다.** */
+if (noButtonPages.length) {
+  say("");
+  say(`ℹ️ 그릴 단추가 **애초에 없는** 화면 ${noButtonPages.length}개 — 구멍이 아니라 사실이다(소스에 \`<button\`·\`class="btn\`·\`row tap\` 이 0개)`);
+  for (const u of noButtonPages) say(`   · ${u}`);
+  say("   🔴 여기에 나중에 단추가 생기면 이 자가 **저절로 ⊘ 로 올려 세운다** — 목록을 손으로 적지 않는다.");
 }
 if (unmeasured.length) {
   say("");
