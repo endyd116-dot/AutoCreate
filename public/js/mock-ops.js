@@ -249,7 +249,11 @@
       return { ok: true, role: r.role, chain: r.chain, candidate: r.candidate, canaryPct: r.canaryPct }; },
     "ops-ai-rollback": (b) => { if (need("admin")) return forbid(); const r = S.ai.roles.find((x) => x.role === b.role); if (!r) return err("role", "role"); if (!r.prevChain && !r.candidate) return err("not_found", "이 역할엔 되돌릴 오버레이가 없어요(코드 기본 사용 중).", { status: 404 }); if (r.prevChain) r.chain = r.prevChain; r.candidate = null; r.candidateAt = null; r.canaryPct = 100; r.prevChain = null; r.appliedAt = iso(Date.now()); return { ok: true, role: r.role, chain: r.chain }; },
     "ops-ai-mode": (b) => { if (need("admin")) return forbid(); if (b.mode !== "manual" && b.mode !== "auto") return err("mode", "mode 는 manual|auto"); S.ai.settings.updateMode = b.mode; return { ok: true, updateMode: b.mode }; },
-    "ops-ai-video-kill": (b) => { if (need("admin")) return forbid(); if (typeof b.enabled !== "boolean") return err("enabled", "enabled 는 true/false"); S.ai.video = { ...S.ai.video, enabled: b.enabled, note: b.note || null, updatedAt: iso(Date.now()) }; return { ok: true, enabled: b.enabled, tenantId: b.tenantId ?? null, note: b.note || null }; },
+    "ops-ai-video-kill": (b) => { if (need("admin")) return forbid(); if (typeof b.enabled !== "boolean") return err("enabled", "enabled 는 true/false");
+      const tid = b.tenantId == null || b.tenantId === "" ? null : Math.floor(Number(b.tenantId)) || 0;
+      if (tid === null) S.ai.video = { ...S.ai.video, enabled: b.enabled, note: b.note || null, updatedAt: iso(Date.now()) };
+      else { const cur = new Set(S.ai.video.stoppedTenants || []); if (b.enabled) cur.delete(tid); else cur.add(tid); S.ai.video = { ...S.ai.video, stoppedTenants: [...cur].sort((x, y) => x - y), updatedAt: iso(Date.now()) }; }
+      return { ok: true, enabled: b.enabled, tenantId: tid, note: b.note || null }; },
     "ops-ai-cost-cap": (b) => { if (need("admin")) return forbid(); const v = b.costCapKrw == null || b.costCapKrw === "" ? null : Math.max(0, Math.trunc(Number(b.costCapKrw))); S.ai.settings.costCapKrw = v; return { ok: true, costCapKrw: v }; },
     /* ── [B2] 채널 — ops-channels.ts ── */
     "ops-channels": (b) => { if (!b || !b.key) return { ok: true, channels: S.channels.map((c) => ({ ...c })) }; if (need("admin")) return forbid(); const c = S.channels.find((x) => x.key === b.key); if (!c) return err("not_found", "그 채널이 레지스트리에 없어요.", { status: 404 });
