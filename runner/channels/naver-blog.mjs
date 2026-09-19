@@ -648,6 +648,19 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
    *     그래도 남는 위험은 있다 ⇒ 어긋나면 **안 칠하고 `caret_drift` 로 적는다.** 안 칠한 강조는 아쉬울 뿐이지만
    *     잘못 칠한 강조는 글을 망가뜨린다(AM #736 의 결론 그대로).
    */
+  /** 🔴 링크카드가 «더 이상 안 생긴다»를 확인한다(최대 6초 · 안 생겨도 진행). 태그 줄과 주소 문단이 **같은 것**을 쓴다. */
+  const waitLinkCards = async () => {
+    const cardCount = async () => await ctx.locator(".se-component.se-oglink, .se-oglink").count().catch(() => 0);
+    const deadline = Date.now() + 6000;
+    let last = await cardCount(), stable = 0;
+    while (Date.now() < deadline) {
+      await settle(page, 400);
+      const now = await cardCount();
+      if (now !== last) { last = now; stable = 0; continue; }
+      if (++stable >= 4) break;
+    }
+  };
+
   const typeParts = async (op, prefix = "") => {
     const parts = (Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }])
       .filter((p) => p.t);
@@ -694,6 +707,13 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
         if (Array.isArray(op.parts) && op.parts.some((p) => p.mark)) await typeParts(op);
         else await type(op.text);
         await settle(page, 250, 600);
+        /* 🔴 [2026-09-20 · AM `insertPara` 에서 배웠다] **주소를 친 뒤에는 링크카드가 자리 잡을 때까지 기다린다.**
+           네이버는 주소를 알아보면 **비동기로** `se-oglink` 카드를 만들어 끼워 넣는다. 그동안 계속 치면
+           **카드 삽입이 캐럿을 옮겨 주소가 두 동강 난다**(AM 실물 #723: 「ht」+[카드]+「tps://…」).
+           🔴 종전엔 이 대기가 **태그 줄에서만** 있었다 — 주소가 글 **끝**에만 오던 시절의 코드다.
+              오늘 «문장 안 링크를 독립 줄로 미루기»를 넣으면서 **주소가 글 중간에 서기 시작했다** ⇒ 여기에도 필요하다.
+           🔴 시간을 세지 않는다(고정 대기는 AM 이 «추측이었다»고 적은 그 자리다) — **카드 수가 멎을 때까지** 본다. */
+        if (/https?:\/\//.test(String(op.text ?? ""))) { await waitLinkCards(); await moveCaretToEnd(page, ctx, missed); }
         break;
       case "note": break;   // 사람이 읽는 메모 — 본문에 넣지 않는다(보고에만 실린다)
       case "heading": {
@@ -800,15 +820,7 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
       case "tags": {
         /* 태그 줄은 **글의 맨 끝**에. 링크카드(se-oglink)가 비동기로 생기면 캐럿이 중간에 남는다(AM #723) —
            카드가 «더 이상 안 생긴다»를 확인한 뒤 끝을 다시 잡는다(최대 6초 · 안 생겨도 진행). */
-        const cardCount = async () => await ctx.locator(".se-component.se-oglink, .se-oglink").count().catch(() => 0);
-        const deadline = Date.now() + 6000;
-        let last = await cardCount(), stable = 0;
-        while (Date.now() < deadline) {
-          await settle(page, 400);
-          const now = await cardCount();
-          if (now !== last) { last = now; stable = 0; continue; }
-          if (++stable >= 4) break;
-        }
+        await waitLinkCards();
         await moveCaretToEnd(page, ctx, missed);
         /* 🔴 **태그 줄도 문단이다**(2026-09-16 · 끊기 사고를 고치다 같은 병을 여기서 하나 더 찾았다).
            종전엔 여기만 `boundary()` 를 안 지났다 — 앞 문단이 색·밑줄을 남겼으면 **해시태그 줄이 통째로 물든다.**
