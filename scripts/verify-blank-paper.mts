@@ -76,6 +76,15 @@ const AXES: Axis[] = [
       const b = bodyOf(c, "clearResidue");
       return /closest\("\.se-documentTitle"\)/.test(b);
     } },
+  /* 🔴 실물 #1986 이 가르쳐 준 축 둘 — «16자» 거짓 경고의 정체(`probe-editor` 실측). */
+  { id: "b5", what: "🔴 **자리글씨(placeholder)를 걷고** 센다 — 빈 칸의 «제목» 2자가 글자로 읽힌다", hit: (c) => {
+      const b = bodyOf(c, "clearResidue");
+      return /querySelectorAll\("\.se-placeholder, \.__se_placeholder"\)[\s\S]{0,40}remove\(\)/.test(b);
+    } },
+  { id: "b6", what: "🔴 **글자 칸(.se-text-paragraph) 안만** 센다 — 제목 칸엔 **배경사진 버튼 UI 글자**가 섞인다(그게 «16자»였다)", hit: (c) => {
+      const b = bodyOf(c, "clearResidue");
+      return /querySelectorAll\("\.se-text-paragraph"\)/.test(b) && !/titleEl\.textContent/.test(b);
+    } },
 
   /* ═══ ③ 적는다 ═══ */
   { id: "c1", what: "지운 양을 **지운 뒤 다시 재서** 적는다(«지웠으니 깨끗하겠지» 금지)", hit: (c) => {
@@ -112,6 +121,10 @@ const MUTANTS: { id: string; why: string; by: string; apply: (s: string) => stri
     apply: (s) => s.replace("residue.titleLen > wantTitleLen", "residue.titleLen > 0") },
   { id: "m7", why: "센 것을 보고에 안 싣는다(AC-69)", by: "c3",
     apply: (s) => s.replace('    if (!residue.measured) notes.push("앞 글 잔재를 못 쟀어요(에디터를 읽지 못했어요)");', "") },
+  { id: "m8", why: "🔴 자리글씨를 안 걷는다 — 빈 칸의 «제목» 2자가 글자로 읽힌다", by: "b5",
+    apply: (s) => s.replace('      c.querySelectorAll(".se-placeholder, .__se_placeholder").forEach((x) => x.remove());\n', "") },
+  { id: "m9", why: "🔴 제목을 통째 textContent 로 되돌린다 — **배경사진 버튼 UI 글자 16자**가 매번 섞인다(실물 #1986 의 거짓 경고)", by: "b6",
+    apply: (s) => s.replace("const title = titleEl ? paraText(titleEl) : \"\";", "const title = titleEl ? (titleEl.textContent || \"\") : \"\";") },
 ];
 
 function run(raw: string): string[] {

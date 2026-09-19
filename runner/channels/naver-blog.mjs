@@ -290,10 +290,22 @@ async function tailMatches(ctx, expect) {
  */
 async function clearResidue(page, ctx) {
   const measure = async () => await ctx.evaluate(() => {
+    /* 🔴 **글자 칸의 글자만 센다 — 자리글씨와 UI 글자를 걷는다**(2026-09-20 · `probe-editor` 실측으로 확정).
+       빈 제목 칸의 `textContent` 는 «제목위치이동제목 배경 사진 삭제취소확인» = **18자**다:
+         · `제목` = 자리글씨(`.se-placeholder`)
+         · 나머지 = **배경사진 버튼 UI 글자**(`.se-cover-button-wrap` — 위치 이동·삭제·취소·확인)
+       제목을 치면 자리글씨만 빠져 **18−2 = 16자**가 남는다 — 🔴 실물 #1986 에서 러너가 적은 «16자»가 **정확히 이것**이다.
+       그 경고는 **거짓이었고, 이대로 두면 글마다 뜬다**(늑대 소년). ⇒ `.se-text-paragraph` 안의 글자만 센다. */
+    const paraText = (root) => [...root.querySelectorAll(".se-text-paragraph")].map((p) => {
+      const c = p.cloneNode(true);
+      c.querySelectorAll(".se-placeholder, .__se_placeholder").forEach((x) => x.remove());
+      return c.textContent || "";
+    }).join("");
     const body = [...document.querySelectorAll(".se-component")]
       .filter((c) => !c.closest(".se-documentTitle") && !/se-documentTitle/.test((c.className || "").toString()))
-      .map((c) => c.textContent || "").join("");
-    const title = document.querySelector(".se-documentTitle")?.textContent || "";
+      .map(paraText).join("");
+    const titleEl = document.querySelector(".se-documentTitle");
+    const title = titleEl ? paraText(titleEl) : "";
     return { body: body.replace(/\s+/g, "").length, title: title.replace(/\s+/g, "").length };
   }).catch(() => null);
 
