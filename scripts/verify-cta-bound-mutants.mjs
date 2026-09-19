@@ -23,9 +23,19 @@ import os from "node:os";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const RULER = path.join(ROOT, "scripts", "verify-cta-bound.mjs");
-const FILES = ["public/app/_tpl.txt", "public/app/piece.html", "lib/content-approve.ts"];
-
 if (!existsSync(RULER)) { console.error("⊘ 못 쟀어요 — `scripts/verify-cta-bound.mjs` 가 없다(A 의 자)."); process.exit(2); }
+/* 🔴 **A 의 자가 읽는 파일 목록을 손으로 적지 않는다** — 2026-09-20 실제로 갈렸다.
+   A 가 축을 더하면서 `netlify/functions/pieces.ts`·`public/css/ac.css` 를 읽기 시작했는데 내 사본엔 그 둘이 없어
+   **대조군이 빨개졌다.** (거짓 판정은 안 났다 — «대조군이 빨가면 여기서 멈춘다»가 값을 했다.)
+   ⇒ 이제 **그 자의 소스에서 읽는 파일을 뽑아 온다.** A 가 축을 더해도 따라온다(AC-113 «손 목록은 낡는다»). */
+const FILES = (() => {
+  const src = readFileSync(RULER, "utf8");
+  const set = new Set();
+  for (const m of src.matchAll(/readFileSync\(\s*["']([^"']+)["']/g)) set.add(m[1]);
+  for (const m of src.matchAll(/(?:const|let)\s+\w+\s*=\s*["']((?:public|lib|netlify|db|runner|drizzle)\/[^"']+)["']/g)) set.add(m[1]);
+  return [...set];
+})();
+
 for (const f of FILES) if (!existsSync(path.join(ROOT, f))) { console.error(`⊘ 못 쟀어요 — ${f} 가 없다.`); process.exit(2); }
 
 /** 사본을 하나 만들고 transform 을 먹인 뒤 A 의 자를 그 폴더에서 돌린다. */

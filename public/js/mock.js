@@ -154,6 +154,17 @@
   /* [R8CLOSE-B2 §5] 🔴 **못 따라 한 축**(`meta.refUnused = [{field, why}]` · lib/video/reference-apply.ts).
      🔴 `why` 는 **우리끼리 쓰는 말**이다(«렌더»·«프리셋»·«R10 3번») — 화면에 그대로 내면 §13.0 금지어가 실린다.
         그래서 모의도 서버 글자 그대로 담아 두되, **화면은 축 이름만 그린다**(아래 `renderRefUnused` 주석 참고). */
+  /* 🔴 [2026-09-20] **대본 검사 결과**(`meta.scriptIssues` · `lib/video/script.ts checkScriptGates` → `lib/video/gen.ts`).
+     서버는 전부터 적고 있었는데 **읽는 데가 0곳**이라 이 화면을 **눈으로 볼 수가 없었다**(당근 때와 같은 자리 · §4.8).
+     문장은 **서버 것 그대로 베낀다**(AC-52) — 서버 `lib/video/script.ts checkScriptGates` 가 정본이다.
+     🔴 [2026-09-20] 서버 문장을 사람말로 고쳤다(«문장 수 3(**계약** 4~8)» 의 «계약»은 §3 시스템 용어였다).
+        여기 사본도 **같은 커밋에서** 따라간다 — 서버만 고치고 사본을 두면 **손님이 보는 건 이쪽**이다(9/19 에 겪은 그 자리). */
+  const SCRIPT_ISSUES = [
+    "훅이 «요즘 다들…»로 시작해요 — 첫마디를 사실이나 숫자로 열면 더 붙잡아요",
+    "광고법에서 못 쓰는 말이 들어 있어요 — 최고, 100%. 다른 말로 바꾸면 돼요",
+    "수익을 약속하는 말이 있어요 — «한 달이면 월 300은 나와요». 겪은 일로 바꿔 적으면 돼요",
+    "문장이 3개예요 — 4~8개가 알맞아요",
+  ];
   const REF_UNUSED = [
     { field: "caption", why: "자막 모양이 렌더에 상수로 박혀 있다(프리셋 3개뿐) — 넣을 칸이 없다 · R10 3번" },
     { field: "camera", why: "컷 안 비트 수만 받았다 — 이동 규칙(푸시인·궤도·팬)은 렌더가 켄번즈 하나뿐이라 못 낸다 · R10 4·5번" },
@@ -1057,7 +1068,7 @@
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
-      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}), /* [R8CLOSE] 영상에도 «왜 이 채널·이 계정» — 🔴 `hero` 는 안 실는다(사진 계약은 글의 것이다). */ channelReason: WHY3(whyMode).channelReason, personaFit: WHY3(whyMode).personaFit }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
+      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}), ...(p.id === 508 ? { scriptIssues: SCRIPT_ISSUES } : {}), /* [R8CLOSE] 영상에도 «왜 이 채널·이 계정» — 🔴 `hero` 는 안 실는다(사진 계약은 글의 것이다). */ channelReason: WHY3(whyMode).channelReason, personaFit: WHY3(whyMode).personaFit }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
       /* [R8-A §2 · B-1 d6c2359] «왜 이렇게 생겼나» 3축 — 이름·모양은 서버 pieces-get 그대로.
          값은 lib/writing-contracts.ts 의 그 채널 칸에서 복사(label·register·분량·사진).
          🔴 ?why=none = **형식이 없어 주제군을 못 정한 글** — topicGroup 이 null 로 오고 분량이 채널 기본값에서 온다(fromGroup:false). */

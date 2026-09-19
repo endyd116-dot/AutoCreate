@@ -20,6 +20,10 @@ const fails = [];
 const notes = [];
 const decomment = (s) => s
   .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+  /* 🔴 [2026-09-20 · B] **HTML 주석도 걷는다.** 안 걷으면 `register.html` 의 `<!-- … 계약 §3.2 -->` 가
+     «손님 화면의 시스템 용어»로 잡힌다 — 거짓 빨강이다. 이 자는 `.html` 을 세면서 정작 HTML 주석을 못 걷고 있었다
+     (옆 자 `verify-script-issues-shown` 은 처음부터 걷는다 — **같은 일을 하는 자끼리 갈라져 있었다**). */
+  .replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "))
   .replace(/(^|[^:])\/\/[^\n]*/g, (m, a) => a + " ".repeat(m.length - a.length));
 
 /* ── ① · ② 손님에게 나가는 오류 문구를 만드는 자리 ── */
@@ -41,7 +45,10 @@ if (englishOut) fails.push("🔴 영어 메시지를 그대로 내보내는 길�
 /* 🔴 **한국어 시스템 용어만** 센다. `piece`·`payload`·`undefined` 같은 영어는 **코드 이름과 구별할 수 없다**
    (`piece.html` · `pieceId` · JS 의 `undefined` 가 전부 걸린다 — 처음 이 자를 냈을 때 16곳이 헛 울었다).
    ⇒ 영어 식별자는 이 자가 **못 잰다.** 그건 화면을 띄워서 보는 수밖에 없다(시나리오 걷기가 하는 일). */
-const BAD_WORDS = ["계약 폭", "테넌트", "러너 잡", "러너 job", "piece 를", "piece 가", "slot 을", "gate_report"];
+/* 🔴 [2026-09-20 · B] **«계약 폭» 만 막았더니 «계약 하한»이 샜다** — 손님 화면에 «2자 — 계약 하한 1,500자에…» 가 떴다.
+   낱말이 아니라 **«계약» 자체가 내부 말**이다(§3). 뒤에 무엇이 붙든 같다 ⇒ «계약 » 으로 넓힌다.
+   🔴 넓혀도 안전하다: 이 자는 **주석을 걷고** 센다. `public/**` 의 «계약»은 전부 주석이고(실측), 남는 것은 손님이 읽는 문자열뿐이다. */
+const BAD_WORDS = ["계약 ", "테넌트", "러너 잡", "러너 job", "piece 를", "piece 가", "slot 을", "gate_report"];
 /* 🔴 [2026-09-19] **`public/**` 이라 적어 놓고 `.html`·`.txt` 만 셌다** — `public/js/mock.js`·`ui.js` 를 아예 안 봤다.
    그래서 «계약 폭»을 서버에서 고치고도 **화면 사본이 옛말인 것**을 놓쳤다(기존 자 `verify-label-surface` 가 잡았다).
    🔴 손님이 보는 글자는 **`.js` 안에 더 많다**(모의·공용 층이 문장을 만든다). 확장자를 늘리고, 아래 note 에 **무엇을 셌는지 그대로 적는다.** */
@@ -57,12 +64,33 @@ for (const p of CUSTOMER_FILES) {
   const src = decomment(readFileSync(p, "utf8"));
   for (const w of BAD_WORDS) if (src.includes(w)) wordHits.push(`${p.replace(/\\/g, "/")} → «${w}»`);
 }
-/* 서버가 만드는 라벨도 손님 화면에 그대로 간다(AC-52) */
-for (const p of ["lib/ai-tell-gate.ts", "lib/produce-window.ts"]) {
+/* 서버가 만드는 라벨도 손님 화면에 그대로 간다(AC-52)
+   🔴 [2026-09-20 · B 가 더했다] `lib/video/script.ts` 를 넣는다 — **대본 검사 문장이 검수 화면 칩이 됐다.**
+      실제로 «문장 수 3(**계약** 4~8)» 이 손님 화면에 떴다. 9/19 에 `ai-tell-gate` 의 «계약 폭»을 고친 그 낱말이
+      🔴 **다른 문에서 또 샜다** — 그때 이 목록에 «서버 라벨 두 개»만 적어 둔 것이 좁았던 것이다.
+      ⇒ 말을 먼저 고치고(같은 커밋) **그 다음 이 줄을 넣었다.** 그래서 `pending-red` 에 올릴 것이 없다(들어오자마자 초록).
+   🔴 이 목록은 «손님이 그대로 읽는 서버 문장»을 담는다 — 새 자리가 생기면 **여기 한 줄**이다. */
+for (const p of ["lib/ai-tell-gate.ts", "lib/produce-window.ts", "lib/video/script.ts"]) {
   const src = decomment(readFileSync(p, "utf8"));
-  for (const w of BAD_WORDS) if (src.includes(`"${w}`) || src.includes(`${w} 안"`)) wordHits.push(`${p} → «${w}»`);
+  /* 🔴 [2026-09-20] 문자열 **첫머리**만 보던 것을 **아무 데나**로 바꿨다 — «— 계약 하한 …» 처럼 문장 가운데 있으면 못 봤다.
+     주석은 이미 걷었으니 여기 남은 한글은 사실상 손님이 읽는 문자열이다. */
+  for (const w of BAD_WORDS) if (src.includes(w)) wordHits.push(`${p} → «${w.trim()}»`);
 }
-notes.push(`센 것: 손님 화면 ${CUSTOMER_FILES.length}개(\`public/**\` 의 .html·.txt·**.js** · 운영센터 제외) + 서버 라벨 2개에서 시스템 용어 [${BAD_WORDS.join(", ")}] = ${wordHits.length}곳`);
+/* 🔴 [2026-09-20] **대본 검사 문구도 손님 화면에 그대로 간다** — 2026-09-20 에 A 가 `meta.scriptIssues` 를 칩 줄로 그리기 시작하면서
+   `lib/video/script.ts` 의 문장이 **처음으로 손님 눈에 닿았다.** 거기 «(계약 4~8)» 이 있다 — «계약»은 우리 내부 말이다(§3).
+   9/19 에 `GATE_LABEL` 의 «분량이 계약 폭 안»을 고친 것과 **같은 낱말**이다.
+   🔴 화면이 고쳐 쓰지 않는다(AC-52 — 두 곳이 갈라진다). 서버 문자열이 바뀌어야 하고 그건 B 몫이다.
+   ⇒ **지금 넣고 빨간 채로 둔다**(메인 지시 2026-09-20). «B 가 고친 뒤에 넣자»가 잊히는 길이다.
+      «기다리는 빨강»은 `docs/rules/pending-red.json` 에 등록했다 — B 가 고치면 그 줄을 지운다. */
+{
+  const p = "lib/video/script.ts";
+  const src = decomment(readFileSync(p, "utf8"));
+  /* 손님에게 나가는 문장(`issues.push(…)`)만 본다 — 변수명·타입에 든 «계약»까지 세면 헛 운다. */
+  for (const m of src.matchAll(/issues\.push\(([^\n]*)\)/g)) {
+    if (/계약/.test(m[1])) wordHits.push(`${p} → «계약»(손님 칩으로 나간다: ${m[1].trim().slice(0, 60)})`);
+  }
+}
+notes.push(`센 것: 손님 화면 ${CUSTOMER_FILES.length}개(\`public/**\` 의 .html·.txt·**.js** · 운영센터 제외) + 서버 라벨 2개 + **대본 검사 문구**(lib/video/script.ts 의 \`issues.push\`) 에서 시스템 용어 [${BAD_WORDS.join(", ")}, 계약] = ${wordHits.length}곳`);
 if (wordHits.length) fails.push(`🔴 손님 화면에 시스템 용어가 있다(§3): ${wordHits.join(" · ")}`);
 
 /* ── ③-b 🔴 **서버에서 고친 낱말이 화면 사본에도 갔나** ──

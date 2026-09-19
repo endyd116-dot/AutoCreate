@@ -125,8 +125,16 @@ export function effectiveDailyCap(storedCap: number, inp: WarmupInput, now: Date
  * 워밍업 중 **최소 발행 간격**(분). 간격도 함께 늘린다 — 하루 1건이어도 «매일 같은 시각 정각»은 기계 티가 난다.
  *   고객이 정한 값보다 **짧아지지 않는다**(늘리기만 한다).
  */
-export function effectiveMinGapMin(storedGap: number, inp: WarmupInput, now: Date = new Date()): number {
+export function effectiveMinGapMin(storedGap: number, inp: WarmupInput, now: Date = new Date(), opts?: CapOpts): number {
   const gap = Math.max(0, Math.floor(Number(storedGap) || 0));
+  /* 🔴 [2026-09-20 B2 · 메인 승인] **넘길 문은 여기에도 있어야 한다.**
+   *   `effectiveDailyCap` 에는 `override` 가 있는데 여기엔 없었다. 그런데 **둘 다 «우리 추정»이
+   *   고객이 정한 값을 덮은 것**이다(실측: 고객 180분 → 우리가 360분). 문이 한쪽에만 있으면
+   *   🔴 **고객이 «그래도 올릴래요»를 눌러도 우리가 만든 다른 한도에 그대로 막힌다**
+   *   (2026-09-20 실측: 캡 문을 열었더니 «360분 띄워요 · 07:22부터»가 나왔다 — 같은 병의 네 번째 얼굴).
+   *   ⇒ 넘기면 **고객이 정한 값으로 돌아간다.** 🔴 **고객 값 아래로는 절대 안 내려간다** —
+   *      우리 추정을 넘기는 것과 고객이 스스로 정한 값을 우리가 넘기는 것은 다르다(캡 때와 같은 선). */
+  if (opts?.override) return gap;
   return warmupState(inp, now).active ? Math.max(gap, 360) : gap;   // 6시간
 }
 

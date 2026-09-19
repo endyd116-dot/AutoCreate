@@ -18,10 +18,13 @@ const HOOK_WEAK_OPENERS = /^(오늘부터|요즘|혹시|여러분|우리|만약|
 const HOOK_WEAK_TAIL = /(하지 않나요|않으신가요|일까요|겠죠|시죠)\s*\??$/;
 export function checkHook(text: string): { ok: boolean; reason: string | null; syllables: number } {
   const t = String(text ?? "").trim(); const syl = (t.match(/[가-힣]/g) ?? []).length;
-  if (!t) return { ok: false, reason: "훅이 비었다", syllables: 0 };
-  if (syl > HOOK_MAX_SYLLABLES) return { ok: false, reason: `훅이 ${syl}음절(3초 상한 ${HOOK_MAX_SYLLABLES}음절 초과 — 배경 설명은 두 번째 문장으로, 첫 문장은 사실 한 방으로)`, syllables: syl };
-  if (HOOK_WEAK_OPENERS.test(t)) return { ok: false, reason: `훅이 도입어로 시작한다("${t.slice(0, 8)}…") — 첫 글자부터 사실·숫자·반전이어야 한다`, syllables: syl };
-  if (HOOK_WEAK_TAIL.test(t)) return { ok: false, reason: "훅이 완만한 공감 질문으로 끝난다 — 단언 또는 상식을 깨는 질문으로", syllables: syl };
+  /* 🔴 [2026-09-20] **이 사유도 손님이 읽는다** — `checkScriptGates` 가 그대로 칩에 싣는다(위 주석 참고).
+     그래서 «~한다» 체 개발 메모를 **사람말**로 바꿨다. «훅»은 그대로 둔다 — 이미 손님 화면의 낱말이다
+     (`create.html`·`director.html`·`piece.html` 이 «훅 «반전»으로 시작» 처럼 쓴다). 뜻은 한 글자도 안 바꿨다. */
+  if (!t) return { ok: false, reason: "훅(첫 문장)이 비어 있어요", syllables: 0 };
+  if (syl > HOOK_MAX_SYLLABLES) return { ok: false, reason: `훅이 ${syl}음절이라 3초에 안 담겨요 — ${HOOK_MAX_SYLLABLES}음절까지가 알맞아요(배경 설명은 둘째 문장으로 미루면 돼요)`, syllables: syl };
+  if (HOOK_WEAK_OPENERS.test(t)) return { ok: false, reason: `훅이 «${t.slice(0, 8)}…»로 시작해요 — 첫마디를 사실이나 숫자로 열면 더 붙잡아요`, syllables: syl };
+  if (HOOK_WEAK_TAIL.test(t)) return { ok: false, reason: "훅이 부드러운 질문으로 끝나요 — 단언하거나 의외의 질문으로 바꾸면 더 붙잡아요", syllables: syl };
   return { ok: true, reason: null, syllables: syl };
 }
 export function hasFactualClaims(lines: { text: string }[]): boolean { return lines.some((l) => /\d/.test(l.text) || /[A-Z][a-z]{2,}/.test(l.text)); }
@@ -49,16 +52,34 @@ export function findIncomeClaim(lines: { text: string }[]): string | null {
 /** [R12-7] 문장 수 상한 — 🔴 기본 **12**(종전 그대로 · 무회귀). 90초만 16 이다(351음절을 12문장에 담으면 한 문장이 29음절이라 계약 «≤28음절»과 싸운다). */
 export function maxLinesFor(seconds: number): number { return Number(seconds) === 90 ? 16 : 12; }
 
+/**
+ * 🔴 [2026-09-20 · A 가 화면에 그리자 드러났다] **이 문장들은 이제 손님이 그대로 읽는다.**
+ *   여태 개발자·모델용 메모였다가 `meta.scriptIssues` 로 검수 화면 칩이 됐다 — 그래서 **§3 말투 규칙이 여기에 걸린다.**
+ *   실제로 손님 화면에 이렇게 떴다: 🔴 «문장 수 3(**계약** 4~8)» — «계약»은 시스템 용어다
+ *   (9/19 에 `GATE_LABEL` 의 «계약 폭»을 «분량이 알맞음»으로 고친 그 낱말이 **다른 문에서 또 샜다**).
+ *   ⇒ 한 문장씩 **사람말**로 고쳤다. 규율(§3·§9):
+ *     ① **문장형**으로 — «수익 약속 표현:» 같은 이름표가 아니라 «수익을 약속하는 말이 있어요».
+ *     ② **어떻게 하면 되는지**를 붙인다 — 위험만 던지고 끝내지 않는다(§9 «또렷하게 ≠ 겁주기»).
+ *     ③ **막지 않는다** — 이건 세는 칸이지 거절하는 칸이 아니다(`gen.ts` 는 `ok` 와 **개수**만 쓴다 · 문장은 안 쓴다).
+ *   🔴 **문장을 고쳐도 생성은 안 흔들린다** — 전수로 확인했다: 이 문자열을 프롬프트에 넣는 자리가 없다.
+ *      `gen.ts:131~136` 은 `g.ok` 와 `g.issues.length` 만 본다. `judge.ts:128` 은 `checkHook` 의 사유를 쓰는데 거기서도 사람말이 낫다.
+ *   🔴 자(`verify-script-issues-shown`)는 이제 **말이 아니라 «검사 호출»** 에 고정한다 — 말은 말투 규칙 때문에 바뀌지만
+ *      «검사를 지우지 마라»(§9)는 검사 호출이 있나로 재야 한다(말에 고정하면 말투를 고칠 때마다 빨개진다).
+ */
 export function checkScriptGates(script: VideoScript, maxLines = 12): { ok: boolean; issues: string[] } {
   const issues: string[] = [];
-  const h = checkHook(script.hook || script.lines[0]?.text || ""); if (!h.ok && h.reason) issues.push(`훅: ${h.reason}`);
+  const h = checkHook(script.hook || script.lines[0]?.text || ""); if (!h.ok && h.reason) issues.push(h.reason);
   const all = script.lines.map((l) => l.text).join("\n");
-  const banned = findBannedWords(`${script.youtube.title}\n${all}`, BLOG_EXTRA_BANNED); if (banned.length) issues.push(`광고법 금칙어: ${banned.join(", ")}`);
-  const inc = findIncomeClaim(script.lines); if (inc) issues.push(`수익 약속 표현: «${inc.slice(0, 40)}»`);
-  const cli = CLICHES.filter((c) => c.re.test(all)).map((c) => c.label); if (cli.length) issues.push(`상투 표현: ${cli.slice(0, 3).join(", ")}`);
+  const banned = findBannedWords(`${script.youtube.title}\n${all}`, BLOG_EXTRA_BANNED);
+  if (banned.length) issues.push(`광고법에서 못 쓰는 말이 들어 있어요 — ${banned.join(", ")}. 다른 말로 바꾸면 돼요`);
+  const inc = findIncomeClaim(script.lines);
+  if (inc) issues.push(`수익을 약속하는 말이 있어요 — «${inc.slice(0, 40)}». 겪은 일로 바꿔 적으면 돼요`);
+  const cli = CLICHES.filter((c) => c.re.test(all)).map((c) => c.label);
+  if (cli.length) issues.push(`흔한 표현이 있어요 — ${cli.slice(0, 3).join(", ")}. 내 말로 바꾸면 더 잘 읽혀요`);
   const total = script.lines.reduce((a, l) => a + syllablesOf(l.text), 0);
-  if (script.lines.length < 4 || script.lines.length > maxLines) issues.push(`문장 수 ${script.lines.length}(계약 4~${maxLines})`);
-  if (total < 20) issues.push("대본이 너무 짧다");
+  if (script.lines.length < 4 || script.lines.length > maxLines)
+    issues.push(`문장이 ${script.lines.length}개예요 — 4~${maxLines}개가 알맞아요`);
+  if (total < 20) issues.push("대본이 너무 짧아요 — 몇 문장 더 있으면 좋아요");
   return { ok: issues.length === 0, issues };
 }
 
