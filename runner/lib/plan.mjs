@@ -403,7 +403,86 @@ function opsFromBlocks(blocks, images, demoted) {
 
 /* ─────────────── bodyHtml → ops(폴백 경로 · §4B class 계약 되읽기) ─────────────── */
 
-function opsFromHtml(html) {
+/**
+ * inlineMarksFromHtml — 🔴 **인라인 태그를 «뜻»(마크)으로 되읽는다.**
+ *
+ *   ══ 왜 생겼나 (2026-09-20 B2 · 실발행 직전에 오프라인으로 잡았다) ══
+ *     이 폴백 경로는 `{op:"para", text}` 만 만들고 **`parts` 를 한 번도 안 만들었다.**
+ *     `unescapeHtml` 이 `<strong>`→`**` 로 남겨 두는데 바로 뒤 `clean()` 의 `stripBoldMarkers` 가 지우고,
+ *     `<u>`·`<mark>` 는 `.replace(/<[^>]+>/g,"")` 로 통째로 날아갔다.
+ *     ⇒ **굵게·밑줄·형광펜·핵심값이 글자만 남고 서식이 전부 사라졌다. 그리고 `demoted` 에도 안 적혔다** —
+ *       막지도 않고 말하지도 않고 **그냥 지웠다**(§9 위반 · «조용한 0건 금지»).
+ *     🔴 이 경로로 오는 글이 둘이다: ①«직접 쓴 글» ②**검수창에서 본문을 고친 글**.
+ *       즉 **손님이 글을 다듬으면 꾸밈이 날아가고 있었다.**
+ *
+ *   ══ 어떻게 ══
+ *     좌표를 **평문 기준**으로 모아 `partsFromMarks`(블록 경로의 **그 함수**)에 그대로 넘긴다.
+ *     🔴 새 어휘 0 · 새 조각 모양 0 — 두 경로가 **같은 자**를 쓰게 한다(두 벌로 만들면 언젠가 갈린다).
+ *     겹친 마크·어긋난 마크 처리도 `partsFromMarks` 가 하던 대로 하고 `demoted` 에 적는다.
+ */
+const INLINE_MARK_TAG = { strong: "bold", b: "bold", u: "underline", ins: "underline", em: "italic", i: "italic" };
+/** 🔴 **꾸밈인 건 아는데 우리 어휘로 못 내는** 인라인 태그 — 조용히 버리지 않고 `demoted` 에 적는다(§9 · 메인 지시 2026-09-20).
+ *  `span` 은 **style·color 가 붙었을 때만** 센다(맨 `<span>` 은 뜻이 없어서 적으면 소음이 된다). */
+const INLINE_LOST_TAG = /^(font|s|strike|del|sub|sup|code|kbd|small|big)$/;
+export function inlineMarksFromHtml(inner, demoted) {
+  const src = String(inner ?? "");
+  let text = "";
+  const marks = [];
+  const open = [];                                     // { kind, at } — 여는 태그를 만난 자리(평문 기준)
+  const re = /<\/?([a-z0-9]+)\b([^>]*)>/gi;
+  let last = 0, m;
+  const put = (raw) => { text += unescapeHtml(raw); };
+  while ((m = re.exec(src)) !== null) {
+    put(src.slice(last, m.index));
+    last = re.lastIndex;
+    const tag = m[1].toLowerCase();
+    const closing = m[0][1] === "/";
+    let kind = INLINE_MARK_TAG[tag];
+    if (tag === "mark") {
+      const cls = (/class="([^"]*)"/i.exec(m[2] ?? "")?.[1] ?? "").split(/\s+/);
+      /* class 가 없으면 «면 강조»로 본다 — `lib/blocks.ts MARK_HTML` 이 내는 모양이 `<mark class="line">` 이고,
+         사람이 손으로 `<mark>` 만 쓴 경우도 뜻은 형광펜이다. */
+      kind = cls.find((c) => MARK_KINDS.has(c)) ?? "line";
+    }
+    if (!kind) {
+      /* 🔴 **못 내는 꾸밈을 «그냥 지우지» 않는다.** 글자는 그대로 가고, 빠진 꾸밈만 원장에 적는다.
+         같은 종류는 한 번만 적는다(같은 말을 마흔 번 적으면 그것도 안 읽힌다). */
+      const lost = !closing && (INLINE_LOST_TAG.test(tag) || (tag === "span" && /\b(style|color)\s*=/i.test(m[2] ?? "")));
+      if (lost && demoted && demoted.length < 40 && !demoted.some((d) => d.kind === tag && d.why === "unknown_kind")) {
+        /* 🔴 본보기에 **태그가 새면 안 된다** — 이 값은 고객이 보는 «못 냈어요» 칸까지 간다.
+           여는 `<` 부터 뒤는 통째로 버린다(반쪽 태그가 남는 것이 첫판에 실제로 났다). */
+        const sample = String(src.slice(re.lastIndex, re.lastIndex + 40)).split("<")[0].replace(/\s+/g, " ").trim().slice(0, 24);
+        demoted.push({ kind: tag, why: "unknown_kind", ...(sample ? { sample } : {}) });
+      }
+      continue;                                        // 우리가 뜻을 아는 태그만 마크로 센다(나머지는 글자만 남는다 — 종전과 같다)
+    }
+    if (!closing) open.push({ tag, kind, at: text.length });
+    else {
+      /* 🔴 짝은 **태그 이름**으로 맞춘다 — 닫는 태그에는 class 가 없다.
+         (첫판에 «뜻»으로 맞췄더니 `</mark>` 의 뜻이 기본값 line 으로 계산돼 `<mark class="value">` 와 짝이 안 맞아
+          **핵심 강조가 통째로 버려졌다**. 실행으로 잡았다.) */
+      for (let i = open.length - 1; i >= 0; i--) {
+        if (open[i].tag !== tag) continue;
+        const o = open.splice(i, 1)[0];
+        if (text.length > o.at) marks.push({ s: o.at, e: text.length, kind: o.kind });
+        break;
+      }
+    }
+  }
+  put(src.slice(last));
+  return { text, marks };
+}
+/** 인라인 마크가 붙은 op 하나 — 마크가 없으면 **종전과 한 글자도 같은** `{op, text}` 를 낸다(무회귀). */
+function inlineOp(op, inner, demoted, extra = {}) {
+  const { text: raw, marks } = inlineMarksFromHtml(inner, demoted);
+  const text = clean(raw);
+  if (!text) return null;
+  if (!marks.length) return { op, text, ...extra };
+  const parts = partsFromMarks(raw, marks, demoted);
+  return parts.length ? { op, text, parts, ...extra } : { op, text, ...extra };
+}
+
+function opsFromHtml(html, demoted) {
   const ops = [];
   const src = String(html ?? "");
   // 최상위 요소를 순서대로 훑는다(중첩은 얕다 — §4B 계약이 단순한 모양을 보장한다).
@@ -425,12 +504,12 @@ function opsFromHtml(html) {
     if (tag === "div" && cls.includes("adsense")) { ops.push({ op: "note", text: "광고 코드는 에디터 본문에 못 넣어서 뺐습니다" }); continue; }
     if (tag === "h2") { if (text) ops.push({ op: "heading", text, level: 2 }); continue; }
     if (tag === "h3") { if (text) ops.push({ op: "heading", text, level: 3 }); continue; }
-    if (tag === "blockquote") { if (text) ops.push({ op: "quote", text }); continue; }
+    if (tag === "blockquote") { const o = inlineOp("quote", inner, demoted); if (o) ops.push(o); continue; }
     if (tag === "ul" || tag === "ol" || tag === "nav") {
       const isCheck = cls.includes("check");
       for (const li of inner.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
-        const t = clean(unescapeHtml(li[1]));
-        if (t) ops.push({ op: isCheck ? "check" : "list", text: t });
+        const o = inlineOp(isCheck ? "check" : "list", li[1], demoted);
+        if (o) ops.push(o);
       }
       continue;
     }
@@ -471,10 +550,11 @@ function opsFromHtml(html) {
     }
     if (tag === "p") {
       if (cls.includes("tags")) { if (text) ops.push({ op: "tags", text }); continue; }
-      if (text) ops.push({ op: "para", text });
+      const o = inlineOp("para", inner, demoted);
+      if (o) ops.push(o);
       continue;
     }
-    if (tag === "div" && text) ops.push({ op: "para", text });
+    if (tag === "div" && text) { const o = inlineOp("para", inner, demoted); if (o) ops.push(o); }
   }
   return ops;
 }
@@ -490,8 +570,8 @@ export function planEditorOps(payload) {
   /* 🔴 «못 낸 서식»을 담는 그릇 — 조용히 버리지 않는다(AC-9 · AM 은 이 자리를 `marksDemoted` 라 부른다).
      발행 보고에 실려 서버 meta 로 간다(R9-5 는 B 몫 · 우리는 재료를 정확히 준다). */
   const demoted = [];
-  let ops = blocks.length ? opsFromBlocks(blocks, images, demoted) : opsFromHtml(payload?.bodyHtml);
-  if (!ops.length && payload?.bodyHtml) ops = opsFromHtml(payload.bodyHtml);
+  let ops = blocks.length ? opsFromBlocks(blocks, images, demoted) : opsFromHtml(payload?.bodyHtml, demoted);
+  if (!ops.length && payload?.bodyHtml) ops = opsFromHtml(payload.bodyHtml, demoted);
 
   const disclosure = ops.filter((o) => o.role === "disclosure");
   const tagOps = ops.filter((o) => o.op === "tags");
