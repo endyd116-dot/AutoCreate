@@ -81,6 +81,19 @@ async function run(): Promise<void> {
   rec("🔴 `&` 가 든 사진 주소가 **그대로** 러너에 간다(엔티티를 풀어 준다 · AM #722 에서 배웠다)",
     ampGot === ampUrl, ampGot === ampUrl ? "" : `받을 주소 ${String(ampGot).slice(0, 60)}`);
 
+  /* 🔴 [2026-09-20 · AM `deferAnchorUrls` 에서 배웠다] **문장 안 링크는 주소가 통째로 사라지고 있었다.**
+     AM 실측(#550·#579): 문장 안 `…(https://…)을 통해…` 는 앵커가 아니라 글자였고 조사가 붙어 깨졌다 —
+     🔴 «랜딩으로 갈 길이 없었다». 네이버는 **줄 끝에 홀로 선 URL** 만 자동 링크한다.
+     ⇒ 라벨은 문장에, 주소는 **독립 줄**로. 🔴 제휴 링크가 이 길로 간다(고지는 들어가고 링크는 없는 글 = 제일 나쁜 모양). */
+  const linkOps = (planEditorOps({ title: "t", bodyHtml: `<p>자세한 것은 <a href="https://ex.com/g?a=1&amp;b=2">이 안내</a> 를 보세요.</p>` }) as { ops: { op: string; text?: string }[] }).ops;
+  rec("🔴 문장 안 링크의 **주소가 살아남는다**(독립 줄로 미룬다 · AM 에서 배웠다)",
+    linkOps.some((o) => o.text === "https://ex.com/g?a=1&b=2"), linkOps.map((o) => o.text).join(" | ").slice(0, 70));
+  rec("🔴 문장에는 **라벨만** 남는다(괄호 주소가 조사에 붙어 깨지던 자리)",
+    linkOps.some((o) => o.text === "자세한 것은 이 안내 를 보세요."));
+  rec("🔴 같은 주소를 두 번 안 붙인다(멱등)",
+    (planEditorOps({ title: "t", bodyHtml: `<p><a href="https://ex.com/x">가</a></p><p><a href="https://ex.com/x">나</a></p>` }) as { ops: { text?: string }[] })
+      .ops.filter((o) => o.text === "https://ex.com/x").length === 1);
+
   rec("🔴 **사진이 안 사라진다**(하나의 조용한 손실을 다른 손실로 바꾸지 않았다)",
     JSON.stringify(urlsOf(viaHtml)) === JSON.stringify(urlsOf(viaBlocks)), JSON.stringify(urlsOf(viaHtml)));
   const count = (r: { ops: { op: string }[] }, op: string) => r.ops.filter((o) => o.op === op).length;
@@ -133,12 +146,14 @@ const MUTANTS = [
   { what: "안 고친 글의 블록까지 버린다(무회귀 깨짐 — 대부분의 글이 이쪽이다)",
     file: "lib/publish/index.ts", from: "  return meta?.editedByUser === true ? [] : blocks;", to: "  return [];", expect: "안 고친 글은 블록을 그대로 싣는다" },
   { what: "폴백이 다시 `parts` 를 안 만든다(굵게·형광펜이 통째로 사라지던 그 판)",
-    file: "runner/lib/plan.mjs", from: "  if (!marks.length) return { op, text, ...extra };", to: "  return { op, text, ...extra };", expect: "«bold» 가 산다" },
+    file: "runner/lib/plan.mjs", from: "  const base = marks.length", to: "  const base = false && marks.length", expect: "«bold» 가 산다" },
   { what: "못 살린 꾸밈을 조용히 버린다(§9 위반 — 막지도 않고 말하지도 않는다)",
     file: "runner/lib/plan.mjs", from: "      const lost = !closing && (INLINE_LOST_TAG.test(tag)", to: "      const lost = false && (INLINE_LOST_TAG.test(tag)", expect: "취소선을 적는다" },
   { what: "사진 주소의 `&amp;` 를 안 푼다(주소가 달라져 사진이 조용히 사라진다 · AM #722)",
     file: "runner/lib/plan.mjs", from: "      const url = decodeAttrUrl(/<img[^>]*src=\"([^\"]+)\"/i.exec(inner)?.[1] ?? \"\");",
     to: "      const url = /<img[^>]*src=\"([^\"]+)\"/i.exec(inner)?.[1] ?? \"\";", expect: "든 사진 주소가 **그대로** 러너에 간다" },
+  { what: "문장 안 링크의 주소를 안 미룬다(주소가 통째로 사라지던 자리 · AM 실측 «랜딩으로 갈 길이 없었다»)",
+    file: "runner/lib/plan.mjs", from: "    urls.push(u);", to: "    void u;", expect: "주소가 살아남는다" },
   { what: "닫는 태그를 «뜻»으로 짝지어 `<mark class=\"value\">` 가 버려진다(첫판에 실제로 났다)",
     file: "runner/lib/plan.mjs", from: "        if (open[i].tag !== tag) continue;", to: "        if (open[i].kind !== kind) continue;", expect: "«value» 가 산다" },
 ];

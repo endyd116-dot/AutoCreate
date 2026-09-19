@@ -472,14 +472,48 @@ export function inlineMarksFromHtml(inner, demoted) {
   put(src.slice(last));
   return { text, marks };
 }
+/**
+ * deferInlineLinks — 🔴 **문장 안에 박힌 링크는 «클릭되지 않는다». 라벨만 남기고 주소는 줄 끝으로 미룬다.**
+ *
+ *   ══ 어디서 배웠나 (2026-09-20 · AM `deferAnchorUrls` · 실측 #550·#579) ══
+ *     AM 라이브 실측: 본문 속 `…내 사무실?(https://…)을 통해…` 는 **앵커가 아니라 그냥 글자**였고,
+ *     닫는 괄호에 조사가 붙어(`)을`) **복사도 자동 링크화도 둘 다 깨졌다.**
+ *     🔴 **글을 읽은 사람이 우리 랜딩으로 갈 길이 없었다** — 유입 0 은 «트래픽이 없어서»가 아니라 «문이 없어서».
+ *     네이버가 자동 링크화하는 것은 **줄 끝에 홀로 선 URL** 뿐이다.
+ *
+ *   ══ 🔴 우리는 더 나빴다(실행으로 확인) ══
+ *     `<a href="…">이 안내</a>` → `para "…이 안내 를 보세요."` · **url 없음 · `demoted` 도 []**
+ *     ⇒ 주소가 **통째로 사라지는데 아무 데도 안 적혔다.** §9 위반이고, 🔴 **제휴 링크가 이 길로 간다** —
+ *       고지는 들어가고 링크는 없는 글이 나가는 것이 제일 나쁜 모양이다.
+ *
+ *   ⇒ 문장에는 **라벨만**, 주소는 **블록 뒤 독립 줄**로. 라벨이 곧 주소면 미루지 않는다(이미 홀로 선다).
+ *   ⚠️ AM 은 `👉` 를 붙이는데 우리는 **안 붙인다**(CLAUDE §3 이모지 금지) — 맨 주소 한 줄이면 자동 링크는 똑같이 된다.
+ */
+export function deferInlineLinks(inner) {
+  const urls = [];
+  const html = String(inner ?? "").replace(/<a\b[^>]*\shref=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href, text) => {
+    const label = String(text).replace(/<[^>]+>/g, "").trim();
+    const u = decodeAttrUrl(href);
+    if (!u || /^(#|javascript:)/i.test(u)) return label;
+    if (!label || label.includes(u)) return label || u;   // 라벨이 곧 주소면 그대로 둔다(이미 홀로 선다)
+    urls.push(u);
+    return label;                                          // 🔴 괄호 주소를 안 남긴다 — 조사가 붙어 깨지던 그 자리
+  });
+  return { html, urls };
+}
+
 /** 인라인 마크가 붙은 op 하나 — 마크가 없으면 **종전과 한 글자도 같은** `{op, text}` 를 낸다(무회귀). */
-function inlineOp(op, inner, demoted, extra = {}) {
+function inlineOp(op, inner0, demoted, extra = {}) {
+  /* 🔴 링크를 **마크를 읽기 전에** 걷어 낸다 — `<a>` 가 남아 있으면 마크 스캐너가 그 태그를 «모르는 꾸밈»으로 세고,
+     좌표도 라벨이 아니라 태그까지 껴서 어긋난다. 걷어 낸 주소는 호출부가 **독립 줄**로 뒤에 붙인다. */
+  const { html: inner, urls: deferredUrls } = deferInlineLinks(inner0);
   const { text: raw, marks } = inlineMarksFromHtml(inner, demoted);
   const text = clean(raw);
   if (!text) return null;
-  if (!marks.length) return { op, text, ...extra };
-  const parts = partsFromMarks(raw, marks, demoted);
-  return parts.length ? { op, text, parts, ...extra } : { op, text, ...extra };
+  const base = marks.length
+    ? (() => { const parts = partsFromMarks(raw, marks, demoted); return parts.length ? { op, text, parts, ...extra } : { op, text, ...extra }; })()
+    : { op, text, ...extra };
+  return deferredUrls.length ? { ...base, deferredUrls } : base;
 }
 
 /**
@@ -506,6 +540,16 @@ function decodeAttrUrl(u) {
 
 function opsFromHtml(html, demoted) {
   const ops = [];
+  /* 🔴 미뤄 둔 링크 주소를 **그 블록 바로 뒤 독립 줄**로 붙인다(네이버는 줄 끝에 홀로 선 URL 만 자동 링크한다).
+     이미 나온 주소는 다시 안 붙인다(멱등) — 같은 링크가 여러 번 나오면 줄만 늘어난다. */
+  const seenUrls = new Set();
+  const pushOp = (o) => {
+    if (!o) return;
+    const urls = o.deferredUrls;
+    if (urls) delete o.deferredUrls;
+    ops.push(o);
+    for (const u of urls ?? []) { if (seenUrls.has(u)) continue; seenUrls.add(u); ops.push({ op: "para", text: u, role: "link_url" }); }
+  };
   const src = String(html ?? "");
   // 최상위 요소를 순서대로 훑는다(중첩은 얕다 — §4B 계약이 단순한 모양을 보장한다).
   /* 🔴 `aside` 가 빠져 있었다 — `lib/blocks.ts` 는 장소 카드를 `<aside class="place">` 로 낸다.
@@ -526,12 +570,11 @@ function opsFromHtml(html, demoted) {
     if (tag === "div" && cls.includes("adsense")) { ops.push({ op: "note", text: "광고 코드는 에디터 본문에 못 넣어서 뺐습니다" }); continue; }
     if (tag === "h2") { if (text) ops.push({ op: "heading", text, level: 2 }); continue; }
     if (tag === "h3") { if (text) ops.push({ op: "heading", text, level: 3 }); continue; }
-    if (tag === "blockquote") { const o = inlineOp("quote", inner, demoted); if (o) ops.push(o); continue; }
+    if (tag === "blockquote") { pushOp(inlineOp("quote", inner, demoted)); continue; }
     if (tag === "ul" || tag === "ol" || tag === "nav") {
       const isCheck = cls.includes("check");
       for (const li of inner.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
-        const o = inlineOp(isCheck ? "check" : "list", li[1], demoted);
-        if (o) ops.push(o);
+        pushOp(inlineOp(isCheck ? "check" : "list", li[1], demoted));
       }
       continue;
     }
@@ -572,11 +615,10 @@ function opsFromHtml(html, demoted) {
     }
     if (tag === "p") {
       if (cls.includes("tags")) { if (text) ops.push({ op: "tags", text }); continue; }
-      const o = inlineOp("para", inner, demoted);
-      if (o) ops.push(o);
+      pushOp(inlineOp("para", inner, demoted));
       continue;
     }
-    if (tag === "div" && text) { const o = inlineOp("para", inner, demoted); if (o) ops.push(o); }
+    if (tag === "div" && text) pushOp(inlineOp("para", inner, demoted));
   }
   return ops;
 }

@@ -16,7 +16,7 @@
  *
  *   🔴 DB 0 · 네트워크 0 · 순수 함수와 소스만 본다.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 /** 리포의 주석 걷기 소도구 — 🔴 두 벌로 만들지 않는다(`verify-safe-list` 도 이걸 쓴다). */
 import { codeOnly } from "./_lib/code-only.mjs";
@@ -86,8 +86,25 @@ async function run(): Promise<void> {
   for (let i = 0; i < 3; i++) html = ensurePhotoCreditHtml(html, imgs as never);
   rec("🔴 사진 출처를 세 번 붙여도 **한 덩이**다(쌓이면 남의 블로그에 같은 줄이 늘어난다)",
     (html.match(/class="photo-credit"/g) || []).length === 1, `${(html.match(/class="photo-credit"/g) || []).length}덩이`);
-  rec("🔴 소스에 보이지 않는 글자(0x08)가 없다 — `grep` 은 이걸 정상으로 그린다",
-    !readFileSync("lib/publish/gate.ts").includes(0x08));
+  /* 🔴 [2026-09-20 넓혔다] 종전엔 `lib/publish/gate.ts` **한 파일**만 봤다. 그런데 같은 날 **두 번째**가 났다 —
+     내가 파이썬 heredoc 으로 `\b` 를 쓰다 `runner/lib/plan.mjs` 에 **진짜 백스페이스**를 박았고,
+     정규식이 `<a\b` 대신 `<a` 가 되어 **링크 걷기가 통째로 안 먹었다**(그런데 문법 오류는 안 난다).
+     🔴 `grep`·편집기는 백스페이스를 «앞 글자 지우기»로 그려서 **눈으로는 정상으로 보인다.**
+     ⇒ **나무 전체를 훑는다.** 한 파일만 보는 축은 다음 파일에서 그대로 뚫린다. */
+  const roots = ["lib", "runner/lib", "runner/channels", "netlify/functions", "scripts", "db"];
+  const bad08: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const f = `${dir}/${e.name}`;
+      if (e.isDirectory()) { walk(f); continue; }
+      if (!/\.(ts|mts|mjs|js|json)$/.test(e.name)) continue;
+      if (readFileSync(f).includes(0x08)) bad08.push(f);
+    }
+  };
+  for (const r of roots) { try { walk(r); } catch { /* 없는 폴더는 건너뛴다 */ } }
+  rec("🔴 소스 **전체**에 보이지 않는 글자(0x08)가 없다 — `grep` 은 이걸 정상으로 그린다",
+    bad08.length === 0, bad08.length ? bad08.join(" · ") : `${roots.length}개 뿌리를 훑었다`);
 }
 
 const MUTANTS = [
