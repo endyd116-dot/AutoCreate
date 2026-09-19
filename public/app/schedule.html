@@ -63,7 +63,15 @@ const atKST = (dateYmd, hhmm) => { const [h, m] = hhmm.split(":").map(Number); c
 const plusDays = (dateYmd, n) => { const d = new Date(dateYmd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayLabel = (k) => { const t = ymd(today); if (k === t) return "오늘"; if (k === ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return "내일"; const d = new Date(k + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate() - today.getDay()); return ws; };
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}${pwRowSay(s) ? `<span class="d wrap" style="color:var(--${s.produceWindow === "missed" ? "warn-ink" : "muted"})">${UI.esc(pwRowSay(s))}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
+/* 🔴 [2026-09-20 · A 가 «고치는 길»에서 찾고 B 가 서버를 열었다] **이 자리에 뭐라고 쓸 것인가.**
+   종전엔 언제나 `topicTitle`(디렉터가 배정한 **소재** 제목)이라, 손님이 검수에서 제목을 고쳐 예약해 놓고
+   편성표를 보면 **딴 글이 걸린 것처럼** 보였다(홈 «오늘 편성»은 글 제목을 보여 줘서 두 화면이 다른 이름을 말했다).
+   계약(B): **글이 걸려 있으면 `title`(실제로 나갈 글) · 아직 없으면 `topicTitle`(무엇을 쓰기로 했나) · 둘 다 온다.**
+   🔴 **`topicTitle` 을 지우지 않는다** — 그건 이름표가 아니라 **판정**에도 쓰인다(`can.make = !pieceId && !!topicTitle` ·
+      «먼저 소재를 정해 주세요» · «다른 소재로 바꿔요»). 덮으면 그 판정이 거짓말이 된다.
+   ⇒ **이름표로 쓸 때만** 이 함수를 통과시킨다. 자: `scripts/verify-slot-name.mjs` */
+const slotName = (s) => s.title || s.topicTitle || "소재 정하는 중";
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(slotName(s))}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}${pwRowSay(s) ? `<span class="d wrap" style="color:var(--${s.produceWindow === "missed" ? "warn-ink" : "muted"})">${UI.esc(pwRowSay(s))}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -187,7 +195,7 @@ function slotSheet(s) {
   const dSkip = can.skip ? "이날은 쉬고 다음 편성은 그대로 나가요" : "이미 지나간 편성이에요";
   const act = (id, t, d, ok) => `<button type="button" class="row tap" data-act="${id}" ${ok ? "" : 'disabled style="opacity:.4"'}><div class="l"><span class="t">${t}</span><span class="d wrap">${UI.esc(d)}</span></div>${ok ? UI.chev : ""}</button>`;
   const cta = H && H[3] ? (H[3] === "topic" ? `<button class="btn primary" type="button" data-act="topic">${H[2]}</button>` : `<a class="btn primary" href="${H[3]}">${H[2]}</a>`) : "";
-  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
+  UI.sheet(`<div class="row" style="padding-left:0;padding-right:0">${UI.mark(s.channel)}<div class="l"><span class="t wrap">${UI.esc(slotName(s))}</span><span class="d">${UI.esc(UI.chLabel(s.channel))}</span></div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>
     ${s.note ? `<div class="banner info" style="margin:4px 0 8px"><span>${UI.esc(s.note)}</span></div>` : ""}
     ${crowdBanner(s.crowd)}
     ${pwSay(s) ? `<div class="banner ${s.produceWindow === "missed" ? "" : "info"}" style="margin:4px 0 8px"><span>${UI.esc(pwSay(s))}</span>${s.produceWindow === "missed" && can.make ? `<button type="button" data-act="make">지금 만들기</button>` : ""}</div>` : ""}
@@ -450,7 +458,7 @@ function renderSide() {
   const k = ymd(today); const ls = daySlots(k).filter((s) => s.status !== "skipped");
   const active = (D.rules || []).filter((r) => r.active);
   const done = ls.filter((s) => s.status === "published").length;
-  const rows = ls.length ? ls.map((s) => `<div class="row" style="min-height:44px">${UI.mark(s.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(s.topicTitle || "소재 정하는 중")}</span><span class="d">${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${tooSoon(s) ? '<span class="pill off">건너뜀</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>`).join("")
+  const rows = ls.length ? ls.map((s) => `<div class="row" style="min-height:44px">${UI.mark(s.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(slotName(s))}</span><span class="d">${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}</span></div>${tooSoon(s) ? '<span class="pill off">건너뜀</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</div>`).join("")
     : '<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘은 나갈 글이 없어요</span></div></div>';
   const ruleRows = active.map((r) => `<div class="row" style="min-height:40px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:13.5px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회</span><span class="d">${(r.weekdays || []).length ? r.weekdays.map((w) => WD[w]).join("·") : "요일 자동"}${r.preferredHour != null ? " · " + String(r.preferredHour).padStart(2, "0") + "시" : ""}</span></div></div>`).join("");
   side.innerHTML = `<div class="group"><div class="gt">오늘</div>${rows}</div>
