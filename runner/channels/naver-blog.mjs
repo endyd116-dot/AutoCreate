@@ -695,9 +695,56 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
 
   /* 🔴 **끊기가 새 칸을 만들었으면 Enter 를 또 치지 않는다** — 새 칸이 곧 새 줄이다.
      둘 다 하면 마크가 있는 글마다 **빈 줄이 하나씩 쌓인다**(AM 은 이걸 감수했지만 우리는 «생겼나»를 값으로 알고 있으니 안 해도 된다). */
+  /** 본문 글자 칸의 문단 수 — 🔴 «줄이 갈렸나»를 재는 **유일하게 믿을 수 있는 눈**이다(선택은 못 읽는다). */
+  const paraCount = async () => await ctx.evaluate(
+    () => document.querySelectorAll(".se-component.se-text .se-text-paragraph").length,
+  ).catch(() => -1);
+
+  /**
+   * 🔴 **Enter 를 누르고 «갈렸는지» 확인한다**(2026-09-21 · AC-152 · 실측 잡 #325·#327).
+   *
+   *   네이버가 평문 URL 을 **앵커로 바꾸는 그 순간** 우리가 친 `Enter` 가 **먹힌다** —
+   *   다음 문단이 주소와 **한 줄에 붙고**, 발행하면 네이버가 그 줄을 **통째로 버린다**(그래서 «사라졌다»로 보였다).
+   *     A(`https://` 있음): 문단 **3**(계획 4) · B(`https://` 뺌): 문단 **4**(계획 4) — **한 조각 차이였다.**
+   *
+   *   🔴 **«먼저 기다리기»로는 못 고친다.** 변환을 **일으키는 것이 그 Enter 자체**다 —
+   *      누르기 전에 기다려 봐야 아직 아무 일도 안 일어났다. ⇒ **누르고 나서 갈렸는지 본다.**
+   *   ⚠️ **한 번만 더 누른다.** 갈렸는데 또 누르면 **빈 줄이 쌓인다** — 그래서 **다시 재고 나서만** 누른다.
+   *   ⚠️ DOM 이 늦게 붙을 수 있어 **잠깐 지켜본다**(고정 대기가 아니라 «늘었나»를 본다) —
+   *      성급히 «안 갈렸다»로 보면 우리가 **멀쩡한 줄에 빈 줄을 넣는다**(고치려다 새 고장 · 오늘 여섯 번 본 모양).
+   *   🔴 못 재면(`-1`) **아무것도 더 하지 않는다** — «모른다»를 «안 갈렸다»로 바꾸지 않는다(AC-9).
+   */
+  const pressEnterSplit = async () => {
+    const before = await paraCount();
+    await page.keyboard.press("Enter").catch(() => {});
+    if (before < 0) return null;                       // 못 쟀다 — 종전대로 한 번만 누르고 간다
+    const grew = async () => {
+      const deadline = Date.now() + 1500;
+      while (Date.now() < deadline) {
+        await settle(page, 250);
+        const n = await paraCount();
+        if (n < 0) return null;
+        if (n > before) return true;
+      }
+      return false;
+    };
+    const ok1 = await grew();
+    if (ok1 !== false) return ok1;                     // 갈렸거나 못 쟀다
+    missed.enterEaten = (missed.enterEaten ?? 0) + 1;
+    console.log("  · 줄바꿈이 먹혔어요(주소를 링크로 바꾸는 중일 수 있어요) — 한 번 더 나눕니다.");
+    await page.keyboard.press("Enter").catch(() => {});
+    const ok2 = await grew();
+    if (ok2 === false) {
+      missed.enterEatenTwice = (missed.enterEatenTwice ?? 0) + 1;
+      console.log("  · ⚠️ 두 번 눌러도 줄이 안 갈렸어요 — 앞뒤 줄이 붙어서 나갈 수 있어요.");
+    }
+    return ok2;
+  };
+
   const type = async (text) => {
     const broke = await boundary();
-    if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
+    /* 🔴 끊기가 **새 칸**을 만들었으면 그 자체가 새 줄이다 — Enter 를 또 치면 빈 줄이 쌓인다. */
+    if (wrote && !broke) await pressEnterSplit();
     await page.keyboard.insertText(String(text));
     wrote = true;
   };
@@ -747,8 +794,12 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
   const typeParts = async (op, prefix = "") => {
     const parts = (Array.isArray(op.parts) && op.parts.length ? op.parts : [{ t: String(op.text ?? ""), mark: null }])
       .filter((p) => p.t);
+    /* 🔴 **여기도 문단 경계다**(2026-09-21 · 내 자 `verify-enter-split` b1 이 잡았다).
+       `type()` 만 고치고 여기를 빼먹으면 **강조가 든 문단만** 조용히 붙는다 —
+       그리고 강조가 든 문단은 **주소를 안 담으므로**(`url_para` 가 걷는다) 잘 안 걸려서 **더 오래 숨는다**.
+       ⚠️ 이 주석을 아래 두 줄 **사이**에 넣지 마라 — 하니스 `F-01d` 가 둘이 **붙어 있는지**를 본다. */
     const broke = await boundary();
-    if (wrote && !broke) await page.keyboard.press("Enter").catch(() => {});
+    if (wrote && !broke) await pressEnterSplit();
 
     /* ① 전부 평문으로 — 이 순간 문단 안에 **서식 span 이 하나도 없다**(물려받을 것이 없다).
        🔴 [R12-5] `prefix`(목록 «• » · 체크 «☑ »)는 **조각이 아니다** — 우리가 붙이는 글머리라 마크가 안 걸린다.
@@ -804,7 +855,7 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
            내가 추측으로 쓴 `data-name="header2"` 는 존재하지 않아 **소제목이 본문과 똑같이 나갔다**
            (2026-09-14 실증 스냅샷에서 «결론부터»가 평문이었다). 크기는 **반드시 되돌린다**(sizeLastTyped). */
         const brokeH = await boundary();     // 🔴 소제목도 문단이다 — 앞 문단의 색을 물려받으면 소제목이 빨개진다
-        if (wrote && !brokeH) await page.keyboard.press("Enter").catch(() => {});
+        if (wrote && !brokeH) await pressEnterSplit();
         const text = String(op.text);
         await page.keyboard.press("Control+b").catch(() => {});
         await page.keyboard.type(text, { delay: 6 }).catch(async () => { await page.keyboard.insertText(text); });
@@ -847,7 +898,7 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
       }
       case "quote": {
         const brokeQ = await boundary();
-        if (wrote && !brokeQ) await page.keyboard.press("Enter").catch(() => {});
+        if (wrote && !brokeQ) await pressEnterSplit();
         const opened = await clickToolbarItem(ctx, "quotation");
         if (!opened) {
           missed.quote++;
@@ -867,7 +918,7 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
         break;
       }
       case "divider": {
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        if (wrote) await pressEnterSplit();
         if (await clickToolbarItem(ctx, "horizontalLine")) {
           // AM 관례 — 구분선 뒤는 End+Enter 로 새 줄을 연다(컴포넌트 뒤에 캐럿이 붙어 있지 않게).
           await page.keyboard.press("End").catch(() => {});
@@ -902,7 +953,7 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
       case "image": {
         const file = files.get(op.url);
         if (!file) { missed.imageDownload++; break; }   // 내려받기 실패분 — 글은 계속
-        if (wrote) await page.keyboard.press("Enter").catch(() => {});
+        if (wrote) await pressEnterSplit();
         const countImgs = async () => await ctx.locator(".se-component.se-image").count().catch(() => 0);
         const before = await countImgs();
         await attachImage(page, ctx, file, missed);
@@ -933,7 +984,7 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
            🔴 그리고 태그는 **글의 마지막 줄**이라 뒤에 아무 문단도 없다 = **아무도 대신 끊어 주지 않는다.**
            `moveCaretToEnd` 는 여기서 새 칸을 안 만든다(마지막이 글이라 조건에 안 걸린다) — 그게 이 병의 같은 뿌리다. */
         const brokeTags = await boundary();
-        if (wrote && !brokeTags) await page.keyboard.press("Enter").catch(() => {});
+        if (wrote && !brokeTags) await pressEnterSplit();
         await page.keyboard.insertText(String(op.text));
         wrote = true;
         await settle(page, 300);
