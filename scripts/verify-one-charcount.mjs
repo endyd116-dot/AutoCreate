@@ -58,6 +58,27 @@ for (const p of files) {
 notes.push(`센 것: 제품 코드(lib/**·netlify/functions/** · .ts ${files.length}개)에서 평문을 \`.length\` 로 **직접** 세는 자리 = ${raw.length}곳`);
 if (raw.length) fails.push(`🔴 아직 직접 세는 자리가 있다 — \`countPlainChars\`(또는 \`htmlCharCount\`)를 써라: ${raw.join(" · ")}`);
 
+/* ── ②-b 🔴 **저장한 직후에도 한 값인가** (2026-09-20 · «고치는 길» 걷기에서 나왔다) ──
+   세는 자는 하나로 모았는데, **화면이 새 값을 안 받아** 또 두 숫자가 떴다:
+   고치고 저장하면 검사 줄은 새 값(102자)인데 «이 글이 왜 이렇게 생겼나»의 분량은 **불러올 때 받은 옛 값**(50자) 그대로였다.
+   ⇒ `pieces-update` 가 `actualChars` 를 **같은 자로 세어** 실어 보내고, 화면이 그걸 받아 다시 그린다.
+   🔴 화면이 제 나름대로 세게 하면 안 된다 — 그러면 자가 다시 둘이 된다. */
+const upd = readFileSync("netlify/functions/pieces.ts", "utf8");
+/* 🔴 `[^)]*` 는 **중첩 괄호를 못 넘는다** — 이 라운드에서만 네 번째다. 괄호를 세지 말고 **그 줄 안에** 둘 다 있나로 본다. */
+const sendsChars = upd.split(/\r?\n/).some((l) => /return json\(\{\s*ok:\s*true,\s*gate,\s*bodyHtml/.test(l) && /actualChars/.test(l));
+const tplPiece = readFileSync("public/app/_tpl.txt", "utf8");
+const takesChars = /r\.actualChars === "number"[\s\S]{0,120}?renderWhy\(/.test(tplPiece);
+const genPiece = readFileSync("public/app/piece.html", "utf8");
+const genTakes = /r\.actualChars === "number"/.test(genPiece);
+notes.push(`센 것: 저장 응답이 \`actualChars\` 를 실어 보내나 = ${sendsChars} · 화면이 그걸 받아 다시 그리나 = ${takesChars} · 생성물에도 들어갔나 = ${genTakes}`);
+if (!sendsChars) fails.push("🔴 `pieces-update` 가 `actualChars` 를 안 보낸다 — 저장 직후 화면에 **옛 글자 수와 새 글자 수가 같이** 뜬다.");
+if (!takesChars) fails.push("🔴 화면이 저장 응답의 `actualChars` 를 안 받는다 — 새로고침해야 맞아진다(손님은 두 숫자를 본다).");
+if (takesChars && !genTakes) fails.push("🔴 `_tpl.txt` 만 고치고 `build-pages` 를 안 돌렸다(AC-105).");
+/* 화면이 제 나름대로 세고 있지 않나 */
+const ownCount = /replace\(\/\\s\+\/g, ?" "\)\.(trim\(\)\.)?length/.test(tplPiece);
+notes.push(`센 것: 화면(\`_tpl.txt\`)이 **제 나름대로** 글자를 세는 자리가 있나 = ${ownCount}`);
+if (ownCount) fails.push("🔴 화면이 직접 글자를 센다 — 세는 자가 둘이 되면 2026-09-19 에 고친 병이 그대로 다시 난다.");
+
 /* ── ③ 두 자가 같은 글에 **같은 값**을 주나 — 규칙만 보지 않고 진짜로 돌려서 잰다 ──
    `lib/blocks.ts` 는 확장자 없는 임포트를 쓰므로 맨 node 로는 못 끌어온다 ⇒ 리포의 `tsx` 로 돌린다. */
 {
