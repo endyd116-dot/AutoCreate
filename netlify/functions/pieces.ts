@@ -549,7 +549,13 @@ export default async (req: Request): Promise<Response> => {
         detail: { title: typeof b.title === "string", body: typeof b.bodyHtml === "string", gateOk: gate.ok,
           // 무엇을 «켰는지» 남긴다 — 대가는 되돌릴 수 없는 종류의 표시라 누가 언제 켰는지가 증거가 된다.
           ...(turnOn.sponsored || turnOn.gift ? { monetize: { ...(turnOn.sponsored ? { sponsored: true } : {}), ...(turnOn.gift ? { gift: true } : {}) } } : {}) } });
-      return json({ ok: true, gate, bodyHtml: String(p2.body || "") });
+      /* 🔴 [2026-09-20] `actualChars` 를 **같이 보낸다.** 고치고 저장한 직후 화면에 **글자 수가 두 개** 떴다(실측 «지금 글은 57자» ↔ «지금 76자예요»):
+         검사 줄은 이 응답의 `gate` 로 새로 그려지는데, «이 글이 왜 이렇게 생겼나»의 분량 값은 **불러올 때 받은 옛 값** 그대로였다.
+         🔴 화면이 제 나름대로 세게 하지 않는다 — 그러면 세는 자가 둘이 된다(2026-09-19 수리 ⑤ 가 한 곳으로 모은 그 규율).
+         `htmlCharCount` = `lib/blocks.ts countPlainChars` 한 자. 목록(`pieces-get`)이 쓰는 것과 **같은 셈**이다. */
+      const blocks2 = Array.isArray(p2.blocks) ? (p2.blocks as Parameters<typeof blocksCharCount>[0]) : null;
+      const actualChars = blocks2 && blocks2.length ? blocksCharCount(blocks2) : htmlCharCount(String(p2.body || ""));
+      return json({ ok: true, gate, bodyHtml: String(p2.body || ""), actualChars });
     }
     return json({ ok: false, error: "not_found" }, 404);
   } catch (err) { return jsonError("pieces", err); }

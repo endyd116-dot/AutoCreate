@@ -3069,6 +3069,10 @@ async function save() {
   if (!r.ok) return UI.toast(r.error || "저장하지 못했어요");
   P.title = body.title; if (video) { if (typeof r.body === "string") P.body = r.body; if (r.tags) P.meta.tags = r.tags; } else if (r.bodyHtml) { P.bodyHtml = r.bodyHtml; UI.$("#body").innerHTML = r.bodyHtml; lockDisc(UI.$("#body")); }
   if (r.gate) { P.gate = r.gate; P.gateOk = !!r.gate?.ok; UI.$("#gate").innerHTML = video ? judgeList(r.gate) : gateList(r.gate); }
+  /* 🔴 [2026-09-20 · 고치는 길 걷기에서 나온 셋째] **저장 직후 글자 수가 두 개로 갈렸다** — 검사 줄은 새 값(76자)인데
+     «이 글이 왜 이렇게 생겼나»의 분량은 **불러올 때 받은 옛 값**(57자) 그대로였다. 새로고침해야 맞아졌다.
+     🔴 화면이 제 나름대로 세지 않는다(세는 자가 둘이 되면 2026-09-19 에 고친 그 병이 다시 난다) — **서버가 같은 자로 세어 보낸 값**을 받는다. */
+  if (typeof r.actualChars === "number" && P.contract) { P.contract.actualChars = r.actualChars; renderWhy(video); }
   dirty = false; btn.hidden = true; const bad = (r.gate?.checks || []).filter((c) => !c.pass).length;
   UI.toast(bad ? `저장했어요 · 검사 ${bad}개는 확인이 필요해요` : "저장했어요 · 검사 통과");
 }
