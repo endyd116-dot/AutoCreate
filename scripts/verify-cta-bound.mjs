@@ -47,7 +47,9 @@ const lines = seg.split(/\r?\n/);
    그러면 `bindNow()` 를 떼어도 이 자가 안 운다 — **내가 잡으려는 바로 그 고장**을 못 보는 것이다(AC-113).
    ⇒ `xxxBtn()` 류 호출을 그 함수 본문으로 바꿔 놓고 센다. */
 const helpers = new Map();
-for (const m of seg.matchAll(/const (\w*[Bb]tn)\s*=\s*\(\)\s*=>\s*(`[^`]*`|[^;\n]+);/g)) helpers.set(m[1], m[2]);
+/* 🔴 한 줄짜리만 잡으면 **여러 줄 도우미를 놓친다** — `rejectedBtn` 이 조건에 따라 두 줄이라 그대로 샜고,
+   자가 «까닭 모름»으로 울어서 알았다(자가 스스로 잡은 것이다). `;` + 줄바꿈까지 비탐욕으로 삼킨다. */
+for (const m of seg.matchAll(/const (\w*[Bb]tn)\s*=\s*\(\)\s*=>([\s\S]*?);\r?\n/g)) helpers.set(m[1], m[2]);
 notes.push(`센 것: 단추를 만드는 도우미 함수 = ${JSON.stringify([...helpers.keys()])} (이 안의 단추도 펼쳐서 센다)`);
 const expand = (l) => { let s = l; for (const [fn, body] of helpers) s = s.split(fn + "()").join(body); return s; };
 
@@ -77,6 +79,7 @@ const HAVE_TO_SAY = [
   { st: "awaiting_manual", 왜: "올리다 멈춘 글 — 첫 발행이 실패하면 여기 갇힌다(2026-09-20 실제로 갇혔다)" },
   { st: "failed", 왜: "만들거나 올리지 못한 글" },
   { st: "publishing", 왜: "올리는 중 — 누를 건 없어도 말은 해 줘야 한다" },
+  { st: "rejected", 왜: "버린 글 — 되돌릴 길이 없다는 **사실도 말해야** 한다(메인 지시 2026-09-20)" },
 ];
 for (const h of HAVE_TO_SAY) {
   const inChain = new RegExp(`(STUCK_ST|NOW_OK)[\\s\\S]{0,120}includes\\(P\\.status\\)|P\\.status === "${h.st}"`).test(seg);
@@ -98,6 +101,34 @@ const hasWay = /posts\.html\?status=awaiting_manual/.test(seg);
 notes.push(`센 것: **\`stuckSay()\` 안에서** 까닭(서버 \`failReason\`)을 쓰나 = ${saysWhy} · **다음 수**(직접 올리는 길)로 보내나 = ${hasWay}`);
 if (!saysWhy) fails.push("🔴 서버가 보낸 `failReason` 을 화면이 안 쓴다 — «확인 필요»만 뜨고 **무엇을 확인해야 하는지** 말하지 않는다.");
 if (!hasWay) fails.push("🔴 막힌 글에서 «직접 올리는 길»(`posts.html?status=awaiting_manual`)로 보내지 않는다 — 막다른 골목이다(§9-③).");
+
+/* ── ③-c 🔴 **버린 글에 «되돌릴 수 없다»를 정직하게 말하나** ──
+   되돌리는 코드가 **0곳**이라는 게 사실이다(`rejected` → `in_review` 로 되돌리는 UPDATE 없음).
+   그러면 화면도 «되돌릴 수 있어요»라고 말하면 안 되고, **없다고 말해야** 한다(AC-9 «못 하는 건 못 한다고»).
+   🔴 그리고 서버가 정말 못 되돌리는지 **여기서 같이 잰다** — 나중에 서버가 되돌릴 수 있게 되면 이 자가 먼저 운다. */
+const piecesTs = decomment(readFileSync("netlify/functions/pieces.ts", "utf8"));
+const srvUnreject = /rejected[\s\S]{0,200}?status\s*=\s*['"`{]?\s*(sql`)?['"]?in_review/.test(piecesTs);
+const rejFn = (seg.match(/function showRejected\(\)[\s\S]*?\n\}/) || [""])[0];
+const saysNoUndo = /되돌릴 수는 없어요/.test(rejFn);
+const claimsUndo = /되돌릴 수 있어요/.test(rejFn);
+notes.push(`센 것: 서버에 «버린 글을 되돌리는» 길이 있나 = ${srvUnreject} · 화면이 «되돌릴 수는 없어요»라고 말하나 = ${saysNoUndo}`);
+if (!rejFn) fails.push("🔴 `showRejected()` 가 없다 — 버린 글에 할 말을 만드는 자리가 없다(양성 대조 실패).");
+else if (!srvUnreject && !saysNoUndo) fails.push("🔴 되돌릴 길이 없는데 화면이 그 사실을 말하지 않는다 — 손님은 «왜 아무것도 없지»로 끝난다(AC-9).");
+else if (srvUnreject && claimsUndo === false) notes.push("   ⚠️ 서버가 되돌릴 수 있게 됐다 — 화면 문구(«되돌릴 수는 없어요»)를 다시 봐야 한다.");
+/* 🔴 **페이지 바닥에 `.banner info` 를 놓지 않았나** — `--brand-soft` 와 `--ground` 가 **같은 색**이라 칸이 안 보이고 글자만 뜬다.
+   2026-09-18 당근 작업이 «흰 바닥 안에만 둔다»고 적어 뒀는데 2026-09-20 에 내가 그대로 밟았다(스크린샷으로 잡았다).
+   여기서 만드는 두 배너(`stuckSay`·`showRejected`)는 **페이지 바닥에 직접** 붙으므로 `info` 를 쓰면 안 된다. */
+const css = readFileSync("public/css/ac.css", "utf8");
+const tok = (n) => (css.match(new RegExp("--" + n + ":\\s*(#[0-9A-Fa-f]{3,8})")) || [, ""])[1].toUpperCase();
+const sameColor = tok("brand-soft") && tok("brand-soft") === tok("ground");
+const pageBanners = [...seg.matchAll(/class="banner([^"]*)stuck-say/g)].map((m) => m[1].trim());
+notes.push(`센 것: \`--brand-soft\`(${tok("brand-soft")}) 와 \`--ground\`(${tok("ground")}) 가 같은 색인가 = ${sameColor} · 페이지 바닥에 붙는 배너 ${pageBanners.length}개의 덧클래스 = ${JSON.stringify(pageBanners)}`);
+if (sameColor) for (const c of pageBanners) if (/\binfo\b/.test(c)) fails.push("🔴 페이지 바닥에 붙는 배너에 `.banner info` 를 썼다 — 바탕이 바닥색과 같아 **칸이 안 보이고 글자만 뜬다**. `info` 를 빼라.");
+
+/* 직접 쓴 글에 «AI 가 다시 쓰기»를 권하지 않는가 — 손님 글을 덮는 것이라 «다시 만들기»가 아니다 */
+const guardsSelf = /P\.origin !== "self"/.test(seg);
+notes.push(`센 것: «다시 만들기»를 **직접 쓴 글엔 안 권하나**(\`P.origin !== "self"\`) = ${guardsSelf}`);
+if (!guardsSelf) fails.push('🔴 직접 쓴 글에도 «다시 만들기»를 권한다 — AI 가 손님이 쓴 글을 덮는다.');
 
 /* ── ③-b 🔴 **화면이 «고칠 수 있다»고 보는 상태가 서버 «승인해 준다»와 같은가** ──
    상태 전수 훑기에서 나온 둘째 고장: 손님이 고치면 서버가 `edited` 로 바꾸는데 화면은 `in_review` 만 봐서

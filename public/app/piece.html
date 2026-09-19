@@ -404,6 +404,8 @@ function render() {
     /* [2026-09-20 고장 ①] 영상도 같은 막다른 골목이었다 — 글 갈래와 **같은 처치**(까닭 + 직접 올리는 길). */
     else if (STUCK_ST.includes(P.status)) { showStuck(); cta.innerHTML = stuckBtn(); }
     else if (P.status === "publishing") { cta.innerHTML = `<button class="btn secondary" type="button" disabled>지금 올리는 중이에요</button>`; }
+  /* [2026-09-20] 버린 글 — 사실 + 되돌리기 없음 + 다음 수(showRejected 주석). */
+  else if (P.status === "rejected") { showRejected(); cta.innerHTML = rejectedBtn(); bindCta(); }
     else cta.hidden = true;
     return; }
   /* 🔴 [2026-09-16 · «제자리»] 아직 만들어지는 중인 글은 아래 미리보기가 **빈 종이**다(제목도 본문도 없다) —
@@ -437,6 +439,8 @@ function render() {
   else if (STUCK_ST.includes(P.status)) { showStuck(); cta.innerHTML = stuckBtn(); }
   /* 올리는 중 — 누를 것은 없지만 **아무 말도 없는 것보다 낫다**(조용한 빈 화면이 이 고장의 뿌리였다). */
   else if (P.status === "publishing") { cta.innerHTML = `<button class="btn secondary" type="button" disabled>지금 올리는 중이에요</button>`; }
+  /* [2026-09-20] 버린 글 — 사실 + 되돌리기 없음 + 다음 수(showRejected 주석). */
+  else if (P.status === "rejected") { showRejected(); cta.innerHTML = rejectedBtn(); bindCta(); }
   else cta.hidden = true;
   if (editable && !dirty) { const mark = () => { restoreDisc(body); if (!dirty) { dirty = true; UI.$("#save").hidden = false; } }; ttl.addEventListener("input", mark); body.addEventListener("input", mark); }
 }
@@ -476,6 +480,32 @@ const stuckBtn = () => `<a class="btn primary" href="/app/posts.html?status=awai
    («그 점에 실제로 보이는 것: nav.tabs» · elementFromPoint 실측) 미리보기와 «왜 이렇게 생겼나»를 다 지나야 나왔다.
    §9-① «위험한 것은 지나가는 회색 글씨가 되면 안 된다» — 멈춘 까닭은 **열자마자** 보여야 한다.
    두 번 그리지 않는다(다시 render 하면 배너가 쌓인다). */
+/* 🔴 [2026-09-20 · 메인 지시] **버린 글도 «왜 아무것도 없는지»는 말한다.** 조용한 막다른 길이 오늘 하루 종일 잡은 그것이다.
+   확인한 것(추측 아님):
+     · **원래 글 그대로 되돌리는 길은 없다** — `rejected` 를 `in_review` 로 되돌리는 코드가 **0곳**이다.
+       버릴 때 화면도 이미 «이 글을 버릴까요? **되돌릴 수 없어요.**» 라고 말한다(같은 말을 여기서도 한다 · AC-52).
+     · **«다시 만들기»는 남아 있다** — `pieces-regenerate` 가 `rejected` 를 받는다(`pieces.ts:366`). AI 가 **새로 쓰는** 것이지 되돌리는 게 아니다.
+       코인은 0이다(그 핸들러의 `consume` 셋은 전부 «환급분 재차감» 블록 안 · §4.7 «재생성 무료»).
+       한 번만 된다(`regenCount >= 1` 이면 서버가 거절) · 🔴 **직접 쓴 글엔 권하지 않는다** — 손님이 쓴 글을 AI 글로 덮는 것이라 «다시 만들기»가 아니다.
+   ⇒ 사실 한 줄 + **없으면 없다고** + 다음 수 한 줄. 겁주지 않는다(§3). */
+const canRegen = () => Number(P.regenCount || 0) < 1 && P.origin !== "self";
+function showRejected() {
+  const host = UI.$("#page") || document.body;
+  host.querySelectorAll(".stuck-say").forEach((x) => x.remove());
+  const next = canRegen()
+    ? "같은 소재로 새로 만들 수는 있어요 — AI 가 처음부터 다시 써요(코인은 안 들어요)."
+    : "새로 쓰시려면 «만들기»에서 시작하시면 돼요.";
+  /* 🔴 `.banner info` 를 **페이지 바닥에 놓으면 칸이 안 보인다** — `--brand-soft(#F2F4F6)` 가 `--ground(#F2F4F6)` 와 **같은 색**이라
+     글자만 떠 있게 된다(2026-09-18 당근 작업이 적어 둔 함정 · 내가 그대로 밟았고 스크린샷으로 잡았다).
+     ⇒ `info` 를 떼고 위 «올리지 못했어요»와 **같은 칸**으로 둔다. 둘 다 «이 글은 안 나가요»를 말하는 자리다. */
+  const html = `<div class="banner stuck-say" style="margin:0 0 10px"><span><b>버리신 글이에요</b><br>되돌릴 수는 없어요.<br>${next}</span></div>`;
+  const anchor = UI.$("#vpane")?.hidden === false ? UI.$("#vpane") : UI.$("#pv");
+  if (anchor) anchor.insertAdjacentHTML("beforebegin", html); else host.insertAdjacentHTML("afterbegin", html);
+}
+const rejectedBtn = () => canRegen()
+  ? `<button class="btn primary" type="button" id="regen">같은 소재로 다시 만들기</button>`
+  : `<a class="btn primary" href="/app/create.html">새로 만들러 가기</a>`;
+
 function showStuck() {
   const host = UI.$("#page") || document.body;
   host.querySelectorAll(".stuck-say").forEach((x) => x.remove());
