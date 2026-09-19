@@ -378,3 +378,66 @@ AM 실물(2026-08-19): 「하마터면 **QJ 글이 ON 블로그에 올라갈 뻔
 자: `scripts/verify-blank-paper.mts` — **16축 / 변이 7**(전부 이름이 맞는 축이 잡았다).
 🔴 변이 절반이 «안 잡는 것»이 아니라 **«너무 많이 지우는 것»**을 잡는다(m2 가드 제거 · m3 AC-9 · m6 매번 경고).
 ⊘ 진짜 에디터에 잔재가 되살아나는지는 **못 쟀다** — 실물이 답한다.
+
+---
+
+## 17. 🔴 이 문서 전체의 전제를 한 번 확인했다 — «내가 읽은 게 AM 정본인가»
+
+이 문서는 `AutoMarketing/scripts/naver-blog-runner.mjs` **한 파일**을 읽고 «AM 은 이렇게 한다»를 계속 말한다.
+🔴 그런데 AM 레포에 같은 이름의 러너가 **여럿**이다. 하나를 읽고 딴 게 정본이면 **이 문서가 통째로 헛말**이다.
+
+```
+AutoMarketing/scripts/naver-blog-runner.mjs                       2,715줄   ← 내가 읽은 것
+AutoMarketing/public/runner/naver-blog-runner.mjs                 2,715줄   ← 배포되는 것
+AutoMarketing/scripts/.tmpbrief/runner-cwd/naver-blog-runner.mjs            (작업 임시)
+AutoMarketing/_archive-2026-08/root-runner-copies-0821/…                    (보관)
+cmp scripts/… public/runner/…  →  **exit 0 (바이트가 같다)**
+```
+⇒ 내가 읽은 것 = 배포되는 것. **이 문서의 «AM 은…»은 유효하다.**
+
+🔴 **이걸 안 재고 지나갈 뻔했다.** 오늘 §14 에서 분모를 안 세고 적은 것과 **같은 종류**다 —
+«당연히 그거겠지»로 넘긴 전제는 틀렸을 때 **그 위에 쌓은 것이 전부 무너진다.**
+(AC-116 의 또 다른 얼굴: 표본이 하나면 그게 **파일**이어도 단정하면 안 된다.)
+
+---
+
+## 18. 8차 읽기 — `writeAndPublish` 나머지 절반 + 발행 증명 경로. 🔴 **㉯ 가 둘 더.**
+> ⚠️ 07:24 발행 전이라 **문서에만 적는다.** 코드는 안 건드린다(메인과 약속).
+
+### 🔴 ㉯-③ **«이미 올라가 있나»를 쓰기 전에 안 묻는다** (중복 게시)
+AM 실사고: 「**#815(QJ)·#812(AM)가 DB 에선 `failed`(«게시 여부 불명»)인데 블로그엔 실제로 올라가 있었다**」.
+러너가 **게시한 뒤 보고 전에 죽으면** 원장이 거짓말로 남고, **재예약하면 중복 게시**가 된다.
+
+AM: `precheckAlreadyPublished(blogId, piece)` — **쓰기 전에** 블로그 **RSS** 를 읽어 최근 3일 안에 같은 제목이 있나 본다.
+있으면 **다시 쓰지 않고 그 URL 을 보고한다**(`publishWithProof` 가 본체와 한 벌).
+
+우리:
+- ✅ **우리 원장 기준 멱등은 있다** — `lib/publish/index.ts:6` 「`external_url`/`channel_ref` 가 있으면 아무것도 하지 않는다」(§4.7).
+- ✅ **발행 뒤 확인도 있다** — `lib/runner-jobs.ts:1011 verifyPublishedUrl`(쿠키 없는 서버가 같은 주소를 한 번 더 연다). 🔴 이건 AM 보다 **깨끗한 자리**다(러너가 자기 발행을 자기가 확인하지 않는다).
+- ❌ 🔴 **«우리 원장에 없는데 채널엔 있는» 경우를 묻지 않는다.** `grep -rn "rss|precheck" runner/ lib/publish/` → **0줄**.
+  ⇒ 러너가 **게시 → 보고 전 사망** 이면 `external_url` 이 안 남고, 재시도가 **같은 글을 또 올린다.**
+  🔴 **멱등의 열쇠가 «우리 기록»이면 «우리 기록이 없는 사고»는 못 막는다.** 채널에 직접 물어야 닫힌다.
+⇒ **다음 판**. 재료는 AM 에 다 있다(`fetchNaverRssItems`·`parseNaverRssItems`·`matchNaverRssItem`·`normalizePostTitle`).
+
+### 🔴 ㉯-④ **자동화 표식(stealth) 이 우리에겐 하나도 없다**
+AM 실사고(2026-07-28): 로그인·글·사진·게시판까지 다 되는데 **«발행 확정» 직후 네이버가 오류 페이지**를 돌려줬다 —
+**수동은 성공하고 러너만 실패.** ⇒ 자동화 표식 탐지.
+AM 이 한 것: ① `STEALTH_INIT`(`navigator.webdriver`·`window.chrome`·`plugins`·`languages` 위장 · 페이지 로드 **전** 주입)
+② `humanClick`(mouse.move + hover 로 누른다) ③ 게시판 고른 뒤 **확정 전 랜덤 체류**(900+rand(1400)ms).
+
+우리: `grep -rn "webdriver|addInitScript|navigator.plugins" runner/` → **0줄.** `humanClick` 도 없다.
+(`runner/lib/browser.mjs:222` 의 `settle(min,max)` 랜덤 지연은 **op 사이**의 것이지 «확정 전 체류»가 아니다.)
+
+⚠️ **그런데 우리는 아직 안 당했다** — 어제 첫 글이 그냥 올라갔다.
+🔴 **그래서 «필요 없다»가 아니라 «아직 안 걸렸다»로 적는다**(AC-116: 한 번 됐다고 «된다»가 아니다).
+AM 이 이걸 붙인 계기가 **«5번 다 오류 페이지»**였다는 것, 그리고 우리 코드가 그 오류 페이지를
+**`BLOCK("network", "해외 IP 차단이 의심돼요")`** 로 적는다는 것을 같이 적어 둔다 —
+🔴 **만약 이게 터지면 우리는 «IP 문제»라고 잘못 진단하게 된다.** 사유가 틀리면 다음 사람이 엉뚱한 데를 판다.
+⇒ **다음 판 지도에.** (⚠️ 이건 «탐지 회피»가 아니라 **자기 계정 정상 발행을 사람 브라우저처럼 보이게** 하는 것이다 — AM 주석의 선도 그것이다.)
+
+### ㉰ 이 구간에서 «이미 있다»
+발행 후 **탭 전수**에서 «발행 전엔 없던» logNo 만 인정(새 탭 케이스) — `publishNow` 에 있다.
+게시판 항목 클릭 3겹 폴백(`scrollIntoView` → `click` → `force` → 내부 요소) — 있다.
+
+### 읽기 — **29/49 (59%)**
+새로 다 읽은 5: `writeAndPublish`(끝까지) · `precheckAlreadyPublished` · `publishWithProof` · `detectBlogIdOnPage` · `fetchNaverRssItems`.
