@@ -470,7 +470,15 @@ async function moveCaretToEnd(page, ctx, missed) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const para = ctx.locator(".se-component.se-text").last().locator(".se-text-paragraph").last();
       if (!(await para.isVisible({ timeout: 1500 }).catch(() => false))) break;
-      await para.click({ timeout: 4000 }).catch(() => {});
+      /* 🔴 **오른쪽 아래 모서리를 짚는다**(AM `moveCaretToEnd` 2026-08-21 · 우리가 안 가져온 한 줄).
+         Playwright 의 기본 클릭은 **요소 한가운데**다. 문단이 두 줄 이상으로 접히면 한가운데는 **가운뎃줄**이고,
+         이어지는 `End` 는 «문단 끝»이 아니라 **그 줄 끝**으로 간다 ⇒ 다음 글자가 **문단 한복판**에 끼어든다.
+         AM 실물이 그 모양이었다: 「월 44,80 | 서울 강서구…」 — 한 문장이 두 동강.
+         🔴 그리고 우리 표식 검사는 **컴포넌트 번호만** 봐서 이걸 못 잡았다 — 한복판이어도 «마지막 컴포넌트»는 맞다.
+            아래에서 «마지막 문단의 **끝**에 붙었나»까지 본다(AC-113 «안 보는 축»). */
+      const box = await para.boundingBox({ timeout: 2500 }).catch(() => null);
+      if (box) await para.click({ position: { x: Math.max(1, box.width - 2), y: Math.max(1, box.height - 2) }, timeout: 4000 }).catch(() => {});
+      else await para.click({ timeout: 4000 }).catch(() => {});
       await page.keyboard.press("End").catch(() => {});
 
       /* 표식은 **보이는 글자**로 쓴다. 제로폭 문자는 키보드 이벤트로 아예 안 들어가는 경우가 있어
@@ -480,11 +488,16 @@ async function moveCaretToEnd(page, ctx, missed) {
       await page.keyboard.type(MARK).catch(() => {});
       const at = await ctx.evaluate((mark) => {
         const comps = [...document.querySelectorAll(".se-component")];
-        return { idx: comps.findIndex((c) => (c.textContent || "").includes(mark)), total: comps.length };
-      }, MARK).catch(() => ({ idx: -1, total: 0 }));
+        const idx = comps.findIndex((c) => (c.textContent || "").includes(mark));
+        /* 🔴 **문단 안 어디인가**도 본다 — 번호만 보면 «마지막 문단 한복판»이 «문서 끝»으로 읽힌다. */
+        const paras = [...document.querySelectorAll(".se-component.se-text .se-text-paragraph")];
+        const lastPara = paras[paras.length - 1];
+        const t = String((lastPara && lastPara.textContent) || "");
+        return { idx, total: comps.length, atParaEnd: t.endsWith(mark) };
+      }, MARK).catch(() => ({ idx: -1, total: 0, atParaEnd: false }));
       for (let i = 0; i < MARK.length; i++) await page.keyboard.press("Backspace").catch(() => {});
 
-      if (at.idx === at.total - 1 && at.idx >= 0) return true;    // 진짜로 문서 끝이다
+      if (at.idx === at.total - 1 && at.idx >= 0 && at.atParaEnd) return true;   // 진짜로 문서 끝이다(컴포넌트 + 문단 끝)
       if (at.idx < 0) return true;                                /* 표식을 못 넣었다 = **판정 불가**.
         실패로 세지 않는다 — «모르겠다»를 «틀렸다»로 적으면 보고서가 거짓말을 한다(AC-9 의 반대편 얼굴).
         캐럿 위치는 앞의 클릭+End 로 최선을 다한 상태다. */
