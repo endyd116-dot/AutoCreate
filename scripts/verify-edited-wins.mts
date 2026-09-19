@@ -70,6 +70,17 @@ async function run(): Promise<void> {
   const viaBlocks = planEditorOps({ title: "t", blocks: BLOCKS, images: IMAGES });
   const viaHtml = planEditorOps({ title: "t", bodyHtml: html });
   const urlsOf = (r: { ops: { op: string; url?: string }[] }) => r.ops.filter((o) => o.op === "image").map((o) => o.url);
+  /* 🔴 [2026-09-20 · AM 러너를 읽다가 배웠다] **주소에 `&` 가 둘 이상이면 사진이 조용히 사라지던 자리.**
+     `renderBlocksHtml` 이 `&` → `&amp;` 로 적는데 폴백 파서가 글자 그대로 꺼내 `fetch` 에 넘겼다.
+     AM 은 실물에서 **5장 중 2장**을 잃었고, 하필 **자른 사진에만** 파라미터가 붙어 **그 종류는 전부** 빠졌다.
+     우리 프리사인드 주소는 파라미터가 여럿이라 **항상** 걸린다. */
+  const ampUrl = "https://r2.example.com/p.jpg?fm=webp&w=800&fit=cover";
+  const ampHtml = renderBlocksHtml([{ type: "image", imageIndex: 0 }] as never, "naver_blog", [{ url: ampUrl }] as never);
+  const ampGot = (planEditorOps({ title: "t", bodyHtml: ampHtml }) as { ops: { op: string; url?: string }[] })
+    .ops.find((o) => o.op === "image")?.url;
+  rec("🔴 `&` 가 든 사진 주소가 **그대로** 러너에 간다(엔티티를 풀어 준다 · AM #722 에서 배웠다)",
+    ampGot === ampUrl, ampGot === ampUrl ? "" : `받을 주소 ${String(ampGot).slice(0, 60)}`);
+
   rec("🔴 **사진이 안 사라진다**(하나의 조용한 손실을 다른 손실로 바꾸지 않았다)",
     JSON.stringify(urlsOf(viaHtml)) === JSON.stringify(urlsOf(viaBlocks)), JSON.stringify(urlsOf(viaHtml)));
   const count = (r: { ops: { op: string }[] }, op: string) => r.ops.filter((o) => o.op === op).length;
@@ -125,6 +136,9 @@ const MUTANTS = [
     file: "runner/lib/plan.mjs", from: "  if (!marks.length) return { op, text, ...extra };", to: "  return { op, text, ...extra };", expect: "«bold» 가 산다" },
   { what: "못 살린 꾸밈을 조용히 버린다(§9 위반 — 막지도 않고 말하지도 않는다)",
     file: "runner/lib/plan.mjs", from: "      const lost = !closing && (INLINE_LOST_TAG.test(tag)", to: "      const lost = false && (INLINE_LOST_TAG.test(tag)", expect: "취소선을 적는다" },
+  { what: "사진 주소의 `&amp;` 를 안 푼다(주소가 달라져 사진이 조용히 사라진다 · AM #722)",
+    file: "runner/lib/plan.mjs", from: "      const url = decodeAttrUrl(/<img[^>]*src=\"([^\"]+)\"/i.exec(inner)?.[1] ?? \"\");",
+    to: "      const url = /<img[^>]*src=\"([^\"]+)\"/i.exec(inner)?.[1] ?? \"\";", expect: "든 사진 주소가 **그대로** 러너에 간다" },
   { what: "닫는 태그를 «뜻»으로 짝지어 `<mark class=\"value\">` 가 버려진다(첫판에 실제로 났다)",
     file: "runner/lib/plan.mjs", from: "        if (open[i].tag !== tag) continue;", to: "        if (open[i].kind !== kind) continue;", expect: "«value» 가 산다" },
 ];

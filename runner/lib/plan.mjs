@@ -482,6 +482,28 @@ function inlineOp(op, inner, demoted, extra = {}) {
   return parts.length ? { op, text, parts, ...extra } : { op, text, ...extra };
 }
 
+/**
+ * decodeAttrUrl — 🔴 **HTML 속성에 든 주소는 «엔티티»가 섞여 있다. 풀지 않으면 그 주소로는 못 받는다.**
+ *
+ *   ══ 어디서 배웠나 (2026-09-20 · AM 러너를 읽다가) ══
+ *     AM 이 실물 #722 에서 **사진 5장 중 2장을 통째로 잃었다.** 진범이 `&` 하나였다:
+ *     본문 HTML 에는 `&amp;` 로 적혀 있는데 받는 쪽은 생 `&` 를 기대해 **짝이 안 맞았고, 짝이 없으면 그냥 지나갔다.**
+ *     🔴 하필 **«자른 사진»에만** 파라미터가 붙어(`?fm=webp&w=…&fit=cover`) **자르기를 쓴 사진은 구조적으로 전부** 빠졌다.
+ *
+ *   ══ 🔴 우리도 똑같았다(실행으로 확인) ══
+ *     `renderBlocksHtml` 이 `esc()` 로 `&` → `&amp;` 로 적는데, 이 폴백 파서는 `src="…"` 를 **글자 그대로** 꺼내
+ *     `downloadImages` 의 `fetch` 로 넘겼다 ⇒ 주소가 달라 **못 받고**, 그 실패는 `null` 로 **조용히 삼켜진다.**
+ *     🔴 우리 R2 프리사인드 주소는 파라미터가 여럿이라 **항상** 걸린다 —
+ *        그리고 이 경로는 2026-09-20 부터 **«손님이 고친 글»의 정본 경로**다(그래서 더 급하다).
+ */
+function decodeAttrUrl(u) {
+  return String(u ?? "")
+    .replace(/&amp;/gi, "&").replace(/&#38;/g, "&")
+    .replace(/&quot;/gi, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .trim();
+}
+
 function opsFromHtml(html, demoted) {
   const ops = [];
   const src = String(html ?? "");
@@ -514,7 +536,7 @@ function opsFromHtml(html, demoted) {
       continue;
     }
     if (tag === "figure") {
-      const url = /<img[^>]*src="([^"]+)"/i.exec(inner)?.[1] ?? "";
+      const url = decodeAttrUrl(/<img[^>]*src="([^"]+)"/i.exec(inner)?.[1] ?? "");
       const cap = clean(unescapeHtml(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/i.exec(inner)?.[1] ?? ""));
       if (url) ops.push({ op: "image", url, caption: cap });
       continue;
@@ -528,14 +550,14 @@ function opsFromHtml(html, demoted) {
     }
     if (tag === "aside" && cls.includes("place")) {
       /* 블록 정본 경로와 **같은 모양으로** 내려앉힌다(링크 한 줄 + «못 냈어요») — 두 경로가 다른 글을 내면 그게 더 나쁘다. */
-      const url = /<a[^>]*href="([^"]+)"/i.exec(inner)?.[1] ?? "";
+      const url = decodeAttrUrl(/<a[^>]*href="([^"]+)"/i.exec(inner)?.[1] ?? "");
       if (text) ops.push(url ? { op: "link", text, url } : { op: "para", text });
       if (text) ops.push({ op: "note", text: "장소 카드는 아직 못 넣어서 링크로 넣었습니다" });
       continue;
     }
     if (tag === "aside") { if (text) ops.push({ op: "para", text }); continue; }
     if (tag === "a" && cls.includes("affiliate")) {
-      const url = /href="([^"]+)"/i.exec(attrs)?.[1] ?? "";
+      const url = decodeAttrUrl(/href="([^"]+)"/i.exec(attrs)?.[1] ?? "");
       const name = clean(unescapeHtml(/<b[^>]*class="name"[^>]*>([\s\S]*?)<\/b>/i.exec(inner)?.[1] ?? "")) || "상품 보러가기";
       if (url) ops.push({ op: "link", text: name, url });
       continue;
