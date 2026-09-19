@@ -378,3 +378,23 @@ AM 실물(2026-08-19): 「하마터면 **QJ 글이 ON 블로그에 올라갈 뻔
 자: `scripts/verify-blank-paper.mts` — **16축 / 변이 7**(전부 이름이 맞는 축이 잡았다).
 🔴 변이 절반이 «안 잡는 것»이 아니라 **«너무 많이 지우는 것»**을 잡는다(m2 가드 제거 · m3 AC-9 · m6 매번 경고).
 ⊘ 진짜 에디터에 잔재가 되살아나는지는 **못 쟀다** — 실물이 답한다.
+
+---
+
+## 17. 🔴 이 문서 전체의 전제를 한 번 확인했다 — «내가 읽은 게 AM 정본인가»
+
+이 문서는 `AutoMarketing/scripts/naver-blog-runner.mjs` **한 파일**을 읽고 «AM 은 이렇게 한다»를 계속 말한다.
+🔴 그런데 AM 레포에 같은 이름의 러너가 **여럿**이다. 하나를 읽고 딴 게 정본이면 **이 문서가 통째로 헛말**이다.
+
+```
+AutoMarketing/scripts/naver-blog-runner.mjs                       2,715줄   ← 내가 읽은 것
+AutoMarketing/public/runner/naver-blog-runner.mjs                 2,715줄   ← 배포되는 것
+AutoMarketing/scripts/.tmpbrief/runner-cwd/naver-blog-runner.mjs            (작업 임시)
+AutoMarketing/_archive-2026-08/root-runner-copies-0821/…                    (보관)
+cmp scripts/… public/runner/…  →  **exit 0 (바이트가 같다)**
+```
+⇒ 내가 읽은 것 = 배포되는 것. **이 문서의 «AM 은…»은 유효하다.**
+
+🔴 **이걸 안 재고 지나갈 뻔했다.** 오늘 §14 에서 분모를 안 세고 적은 것과 **같은 종류**다 —
+«당연히 그거겠지»로 넘긴 전제는 틀렸을 때 **그 위에 쌓은 것이 전부 무너진다.**
+(AC-116 의 또 다른 얼굴: 표본이 하나면 그게 **파일**이어도 단정하면 안 된다.)
