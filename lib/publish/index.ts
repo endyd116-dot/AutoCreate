@@ -73,6 +73,32 @@ const BLOCKED_ACCOUNT: ReadonlySet<string> = new Set(["suspended", "disconnected
 
 /* ─────────────────────────── 로더 ─────────────────────────── */
 
+/* 🔴 [2026-09-20 B2 · 실발행 직전에 잡았다] **손님이 고친 글이 이긴다.**
+ *
+ *   ══ 무슨 일이 있었나 ══
+ *     `pieces-update`(검수창 본문 수정)는 `body` 와 `meta.editedByUser` 만 쓰고 **`blocks` 는 그대로 둔다**
+ *     (지우는 곳은 «다시 만들기» 하나뿐). 그런데 발행 payload 는 `bodyHtml`(고친 글)과 `blocks`(옛 AI 블록)를
+ *     **둘 다** 실었고, `runner/lib/plan.mjs` 는 `blocks.length ? …blocks : …bodyHtml` 로 **blocks 를 먼저** 본다.
+ *     ⇒ 🔴 **손님이 검수창에서 다듬은 글이 통째로 버려지고 AI 원문이 발행됐다.** 그리고 **조용했다.**
+ *     실행으로 재현했다: blocks=«AI 가 처음 쓴 문장» + bodyHtml=«손님이 고쳐 쓴 문장» → 나간 글은 AI 원문.
+ *     네이버·티스토리(러너 경로)만 그렇다 — 블로거·워드프레스는 `bodyHtml` 을 그대로 올려 영향이 없다.
+ *
+ *   ══ 왜 아무도 몰랐나 ══
+ *     두 칸을 **따로** 본 검사는 있었는데 **«둘 다 있을 때 누가 이기나»**를 아무도 안 쟀다(PITFALLS AC-118).
+ *     어젯밤 첫 실발행이 «직접 쓴 글»이라 `blocks` 가 처음부터 비어 있었고, 그래서 **멀쩡히 나갔다.**
+ *
+ *   ══ 고친 방법 — 🔴 **새 어휘 0** ══
+ *     `meta.editedByUser` 는 이미 «HTML 이 정본이다»라는 뜻으로 `lib/content-approve.ts` 가 읽는 값이다.
+ *     같은 뜻을 여기서도 지킨다: **정본이 HTML 이면 낡은 블록을 아예 안 싣는다.** 그러면 러너는
+ *     손댈 것 없이 `bodyHtml` 경로로 간다(플래그 추가 0 · 러너 계약 변경 0).
+ *   🔴 **`bodyHtml` 이 블록이 들고 있던 것을 다 들고 있나**를 먼저 쟀다(메인이 건 조건):
+ *     19종 블록을 렌더해 두 경로를 대 보니 op 종류·개수가 같고 **사진 URL 도 그대로 살아 있다**
+ *     (`scripts/verify-edited-wins.mts` 가 그 대조를 매번 다시 한다). 하나의 조용한 손실을 다른 손실로 바꾸지 않았다.
+ *   ⚠️ 안 고친 글(대부분)은 `editedByUser` 가 없으니 **블록 경로 그대로**다 — 바이트 무회귀. */
+export function blocksForRunner(meta: Record<string, unknown>, blocks: Block[]): Block[] {
+  return meta?.editedByUser === true ? [] : blocks;
+}
+
 /** pieces + piece_assets → PublishPiece. B 가 행을 다시 짜지 않도록 B2 가 한 벌만 만든다. */
 export async function loadPublishPiece(tid: number, pieceId: number): Promise<PublishPiece | null> {
   const [p] = await q(sql`SELECT id, tenant_id, channel, kind, account_id, slot_id, title, body, blocks, meta, status, scheduled_for, external_url, channel_ref
@@ -83,7 +109,7 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
   const out: PublishPiece = {
     id: n(p.id), tenantId: n(p.tenant_id), channel: String(p.channel ?? ""), kind: String(p.kind ?? "post"), accountId: n(p.account_id) || null,
     title: String(p.title ?? ""), bodyHtml: String(p.body ?? ""),
-    blocks: normalizeBlocks(p.blocks) as Block[],
+    blocks: blocksForRunner(meta, normalizeBlocks(p.blocks) as Block[]),
     images: assets.map((a) => {
       const m = (a.meta && typeof a.meta === "object" ? a.meta : {}) as Record<string, unknown>;
       const img: PublishImage = { url: String(m.url ?? ""), sort: n(a.sort) };
