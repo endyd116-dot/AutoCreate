@@ -50,6 +50,19 @@ try {
     out.paragraphStyle = [...document.querySelectorAll("button[class*='font-size'], button[class*='text-style'], [class*='se-document-toolbar'] button")].slice(0, 20).map(desc);
     // ④ 현재 컴포넌트 구성
     out.components = [...document.querySelectorAll(".se-component")].map((c) => (c.className || "").toString().split(/\s+/).find((x) => /^se-(text|quotation|image|horizontalLine|horizontal-line|oglink)$/.test(x)) || "?");
+    /* ⑤ 🔴 **제목 칸에 «원래» 무엇이 들어 있나**(2026-09-20 · 실물 #1986 이 남긴 물음).
+       러너가 「제목 칸이 넣은 것보다 **16자** 길어요」라고 적었는데 **올라간 제목은 멀쩡했다** —
+       즉 «잔재»가 아니라 **내가 제목 글자를 센 방식이 틀린 것**이다(`.se-documentTitle` 의 `textContent`).
+       아무도 아무것도 안 친 **빈 화면**에서 그 칸을 통째로 찍으면 16자의 정체가 나온다.
+       🔴 자리글씨(placeholder)·UI 글자가 섞이는지 **눈으로 본다** — 추측으로 셀렉터를 좁히지 않는다. */
+    const t = document.querySelector(".se-documentTitle");
+    out.title = t ? {
+      textContent: (t.textContent || ""),
+      textLen: (t.textContent || "").replace(/\s+/g, "").length,
+      paragraphs: [...t.querySelectorAll(".se-text-paragraph")].map((p) => (p.textContent || "")),
+      placeholders: [...t.querySelectorAll("[class*='placeholder']")].map((p) => ({ cls: (p.className || "").toString(), text: (p.textContent || ""), vis: !!(p.offsetParent || p.getClientRects().length) })),
+      html: (t.outerHTML || "").slice(0, 1200),
+    } : null;
     return out;
   });
 
@@ -60,6 +73,17 @@ try {
   console.log("\n■ 도구모음 버튼(앞 60개)");
   for (const b of dump.toolbar) if (b.name || b.aria) console.log(`  ${b.vis ? "보임" : "숨김"} · ${b.cls} · data-name=${b.name} · aria=${b.aria}`);
   console.log("\n■ 현재 컴포넌트:", dump.components.join(" > ") || "(없음)");
+
+  /* 🔴 제목 칸 — «16자»의 정체. 빈 화면에서 재는 것이 핵심이다(아무도 아무것도 안 쳤다). */
+  console.log("\n■ 🔴 제목 칸(아무것도 안 친 상태)");
+  if (!dump.title) console.log("  (.se-documentTitle 을 못 찾았다 — 이름이 바뀌었다)");
+  else {
+    console.log(`  textContent 공백뺀 길이 = ${dump.title.textLen}자   ← 러너가 «16자»라고 한 그 셈`);
+    console.log(`  textContent 그대로      = «${dump.title.textContent.replace(/\s+/g, " ").trim()}»`);
+    console.log(`  문단(.se-text-paragraph) = ${JSON.stringify(dump.title.paragraphs)}`);
+    console.log(`  자리글씨(placeholder)    = ${JSON.stringify(dump.title.placeholders, null, 1)}`);
+    console.log(`  outerHTML 앞 1200자:\n${dump.title.html}`);
+  }
 } finally {
   await ctx.close();
 }
