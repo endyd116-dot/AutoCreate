@@ -271,6 +271,22 @@ async function tailMatches(ctx, expect) {
   return norm(tail).endsWith(norm(expect));
 }
 
+/**
+ * 🔴 «이미 문서 어딘가에 들어가 있나» — **다시 치기 전에 묻는 질문**(AM `writeHeading` #742).
+ *   `tailMatches` 는 **마지막 문단**만 본다. 인용·구분선·사진 직후엔 방금 친 글이 마지막 문단이 아닐 수 있고,
+ *   그러면 «안 들어갔다»는 **거짓 판정**이 난다. 그 상태로 다시 치면 같은 소제목이 **두 번** 찍힌다
+ *   (AM 실물: 「💬 18석 규모…기록💬 18석 규모…」). 🔴 **증발보다 중복이 나쁘다** — 사장님 눈에 바로 보인다.
+ *   ⚠️ 못 읽으면 `true` 를 돌려 **다시 치지 않는다** — «모른다»일 때 더 안전한 쪽으로 기운다(AC-92).
+ */
+async function alreadyInDoc(ctx, text) {
+  const t = String(text ?? "").replace(/\s+/g, "");
+  if (!t) return true;
+  return await ctx.evaluate((want) => {
+    const root = document.querySelector(".se-content") || document.body;
+    return String(root?.innerText ?? "").replace(/\s+/g, "").includes(want);
+  }, t).catch(() => true);
+}
+
 /** 팔레트에서 **실제 칠해진 색**이 가장 가까운 칸을 고른다. 너무 멀면 -1(엉뚱한 색을 칠하지 않는다). */
 async function pickPaletteIndex(ctx, hex) {
   const want = { r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16) };
@@ -745,6 +761,29 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
            🔴 **다시 토글하지 않는다**(AM 의 판단 그대로) — 켜졌는지 **읽을 수 없으니** 재시도가 «반대로 켜기»가 된다.
               대신 «더럽다»고 적어 **다음 문단을 새 칸에서** 시작하게 한다. */
         await page.keyboard.press("Control+b").catch(() => { markFormatDirty(fmt, "소제목 굵게 해제 실패"); });
+        /* 🔴 [2026-09-20 · AM `writeHeading` 에서 배웠다] **소제목이 통째로 증발한다.**
+           AM 실물 #739: FAQ 첫 질문이 사라지고 **빈 문단 3개**만 남았다. 나머지 7개는 멀쩡했으니 «어쩌다 한 번»이고,
+           그래서 더 위험하다 — **아무도 안 보면 다음에도 모른다.** 우리는 이 자리에서 **한 번도 확인한 적이 없었다**
+           (`tailMatches` 는 이미 우리 파일에 있었는데 `applyMark`·`typeParts` 에서만 썼다 — 있는 도구를 여기서 안 쓴 것이다).
+           🔴 **다시 치기 전에 «문서 어딘가에 이미 있나»를 본다**(AM #742: 소제목이 **두 번** 찍혔다).
+              꼬리 검사는 **마지막 문단**만 보는데 인용·구분선 직후엔 소제목이 마지막이 아닐 수 있다 ⇒ 거짓 «없다»가 난다.
+              **증발보다 중복이 나쁘다**(사장님 눈에 바로 보인다) — 확신이 없으면 **다시 치지 않고 ⊘ 로 적는다.** */
+        if (!(await tailMatches(ctx, text.slice(-60)))) {
+          if (await alreadyInDoc(ctx, text)) {
+            missed.headingTailBlind++;
+          } else {
+            missed.headingRetry++;
+            console.log(`  · 소제목이 안 들어갔습니다 — 다시 시도 «${text.slice(0, 20)}»`);
+            await moveCaretToEnd(page, ctx, missed);
+            await page.keyboard.press("Control+b").catch(() => {});
+            await page.keyboard.type(text, { delay: 6 }).catch(async () => { await page.keyboard.insertText(text); });
+            await page.keyboard.press("Control+b").catch(() => { markFormatDirty(fmt, "소제목 굵게 해제 실패"); });
+            if (!(await tailMatches(ctx, text.slice(-60)))) {
+              missed.headingMissing++;
+              console.log(`  · ⚠️ 소제목 «${text.slice(0, 24)}»을 끝내 넣지 못했어요 — 그 자리가 빕니다.`);
+            }
+          }
+        }
         const sized = await sizeLastTyped(page, ctx, text.length);
         if (!sized) missed.heading++;     // 굵게로는 남는다 — 조용히 넘기지 않고 센다
         await page.keyboard.press("Enter").catch(() => {});
@@ -1003,7 +1042,14 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
   if (!blogId) throw BLOCK("login_fail", "블로그 아이디(핸들)가 없어요. 계정을 다시 연결해 주세요.");
 
   const page = ctx.pages()[0] ?? await ctx.newPage();
-  const missed = { quote: 0, divider: 0, heading: 0, quoteEscape: 0, caretEnd: 0, image: 0, imageDownload: 0, imageSettle: 0 };
+  const missed = {
+    quote: 0, divider: 0, heading: 0, quoteEscape: 0, caretEnd: 0, image: 0, imageDownload: 0, imageSettle: 0,
+    /* 🔴 소제목이 «통째로 증발»하는 자리(AM #739) — 세 갈래를 **갈라서** 센다. 한 숫자로 뭉치면
+       «다시 쳐서 살렸다»와 «끝내 비었다»가 같아 보이고, 다음 사람이 어디를 팔지 모른다. */
+    headingRetry: 0,      // 꼬리에 없어서 **다시 쳤다**
+    headingMissing: 0,    // 🔴 다시 치고도 **끝내 안 들어갔다**(그 자리가 빈다)
+    headingTailBlind: 0,  // ⊘ 꼬리로는 못 봤는데 **문서 어딘가엔 있었다** — 다시 치지 않았다(중복이 증발보다 나쁘다)
+  };
   /* 🔴 실패 스냅샷은 **모든 단계**를 덮는다. 종전에는 본문 단계부터만 감쌌는데, 실제로 가장 흔한 실패는
      그 앞(로그인·에디터 진입)에서 난다 — 2026-09-14 로컬 왕복에서 FAIL.png 가 안 남아 그 사실이 드러났다.
      «무엇에 막혔나»는 화면을 봐야 안다(AM 눈검사 규율). */
@@ -1037,6 +1083,10 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
     if (missed.quote) notes.push(`인용구 ${missed.quote}건 폴백`);
     if (missed.divider) notes.push(`구분선 ${missed.divider}건 폴백`);
     if (missed.heading) notes.push(`소제목 ${missed.heading}건 크기 미적용(굵게만)`);
+    /* 🔴 세 갈래를 **갈라서** 적는다 — 한 줄로 뭉치면 «살렸다»와 «비었다»가 같아 보인다(AM #739·#742). */
+    if (missed.headingRetry) notes.push(`소제목 ${missed.headingRetry}건은 안 들어가서 다시 넣었어요`);
+    if (missed.headingMissing) notes.push(`🔴 소제목 ${missed.headingMissing}건이 끝내 안 들어갔어요 — 그 자리가 비어 있어요`);
+    if (missed.headingTailBlind) notes.push(`소제목 ${missed.headingTailBlind}건은 자리를 못 봤어요(글 안엔 있어서 다시 넣지 않았어요)`);
     if (missed.quoteEscape) notes.push(`🔴 인용 탈출 실패 ${missed.quoteEscape}건 — 뒤 본문이 인용에 갇혔을 수 있어요`);
     if (missed.caretEnd) notes.push(`🔴 «본문 추가» 실패 ${missed.caretEnd}건 — 컴포넌트 뒤 글 순서가 어긋났을 수 있어요`);
     if (missed.bodyTooBig) notes.push(`🔴 본문 ${missed.bodyTooBig}줄이 소제목 크기로 번졌어요`);
