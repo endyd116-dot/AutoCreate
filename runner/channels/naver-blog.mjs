@@ -705,7 +705,13 @@ export async function playOps(page, ctx, plan, files, shotKey, missed, fmt = cre
         const text = String(op.text);
         await page.keyboard.press("Control+b").catch(() => {});
         await page.keyboard.type(text, { delay: 6 }).catch(async () => { await page.keyboard.insertText(text); });
-        await page.keyboard.press("Control+b").catch(() => {});
+        /* 🔴 [2026-09-20 · AM `writeParts` 에서 배웠다] **굵게 «해제» 실패를 삼키지 않는다.**
+           여긴 선택이 아니라 **캐럿 토글**이라 해제가 안 되면 **다음 문단이 통째로 굵어진다.**
+           그런데 `breakFormatBeforePara` 는 🔴 **`dirty` 가 아니면 아무것도 안 한다** — 즉 조용히 넘기면
+           끊기도 안 걸려 번짐이 그대로 나간다(우리 `applyMark` 의 마크들은 선택 기반이라 이 자리만 그렇다).
+           🔴 **다시 토글하지 않는다**(AM 의 판단 그대로) — 켜졌는지 **읽을 수 없으니** 재시도가 «반대로 켜기»가 된다.
+              대신 «더럽다»고 적어 **다음 문단을 새 칸에서** 시작하게 한다. */
+        await page.keyboard.press("Control+b").catch(() => { markFormatDirty(fmt, "소제목 굵게 해제 실패"); });
         const sized = await sizeLastTyped(page, ctx, text.length);
         if (!sized) missed.heading++;     // 굵게로는 남는다 — 조용히 넘기지 않고 센다
         await page.keyboard.press("Enter").catch(() => {});
