@@ -80,7 +80,8 @@ export async function checkCadenceAt(a: {
   const cap = a.warmupOverride === true ? customerCap : warmCap;
   /** 넘길 문이 **실제로 도움이 되나** — 워밍업이 깎고 있고, 넘기면 자리가 생기는 경우에만 «그래도 올릴래요»를 권한다. */
   const canOverride = !a.warmupOverride && warmCap < customerCap;
-  const gapMin = effectiveMinGapMin(n(acc.min_gap_min) || 180, warm, at);
+  /* 🔴 캡과 **같은 문**이다 — 넘기면 고객이 정한 간격으로 돌아간다(고객 값 아래로는 안 내려간다). */
+  const gapMin = effectiveMinGapMin(n(acc.min_gap_min) || 180, warm, at, { override: a.warmupOverride === true });
   const day = kstDateStr(at);
 
   /* ③ 하루 몫 — **나간 글 + 잡아 둔 글**을 같은 날(KST)로 함께 센다.

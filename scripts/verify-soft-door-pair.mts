@@ -46,7 +46,11 @@ async function run(): Promise<void> {
   const pub = readFileSync("netlify/functions/publish-now.ts", "utf8");
   const self = readFileSync("netlify/functions/pieces-self.ts", "utf8");
   const pself = codeOnly(readFileSync("lib/piece-self.ts", "utf8")) as string;
-  rec("🔴 **쓰기** 입구에 문이 있다(`checkCadenceAt` 이 override 를 받는다)", /warmupOverride\?:\s*boolean/.test(cad) && /override:\s*a\.warmupOverride === true/.test(cad));
+  /* 🔴 **캡 호출에 못 박는다.** 종전엔 «`override: a.warmupOverride` 라는 글자가 어딘가 있나»만 봤는데,
+     간격 쪽에 같은 글자가 생기자 **캡 문을 도로 막아도 이 축이 통과했다**(변이가 잡아 줬다).
+     축이 «어느 함수의» 문인지 말하지 않으면, 옆에 같은 글자가 생기는 순간 **우연한 덮개**가 된다. */
+  rec("🔴 **쓰기** 입구에 문이 있다(`checkCadenceAt` 이 override 를 받는다)",
+    /warmupOverride\?:\s*boolean/.test(cad) && /effectiveDailyCap\([\s\S]{0,90}override: a\.warmupOverride === true/.test(cad));
   rec("🔴 **발행** 입구에 문이 있다(`publish-now`)", /override:\s*warmupOverride/.test(pub));
   rec("🔴 두 입구가 **같은 낱말**을 쓴다(화면이 두 말을 안 하게 · AC-52)",
     /warmupOverride/.test(pub) && /warmupOverride/.test(self) && /warmupOverride/.test(pself));
@@ -57,6 +61,15 @@ async function run(): Promise<void> {
     effectiveDailyCap(1, { ...warm, postsThisWeek: 1 }, new Date(), { override: true }) === 1, "daily_cap=1 이면 1");
   rec("두 입구가 **같은 선**을 긋는다(`customerCap` 을 천장으로)",
     /const cap = a\.warmupOverride === true \? customerCap : warmCap/.test(cad) && /const cap = warmupOverride \? customerCap : warmCap/.test(pub));
+
+  console.log("\n②-b 🔴 **캡에만 문을 내면 안 된다** — 같은 «우리 추정»인 간격에도 있어야 한다");
+  const { effectiveMinGapMin } = await import("../lib/warmup.js");
+  const CUSTOMER_GAP = 180;
+  rec("문을 안 열면 워밍업이 간격을 올린다(360)", effectiveMinGapMin(CUSTOMER_GAP, warm, new Date()) === 360);
+  rec("🔴 문을 열면 **고객이 정한 간격**으로 돌아간다(180)", effectiveMinGapMin(CUSTOMER_GAP, warm, new Date(), { override: true }) === CUSTOMER_GAP);
+  rec("🔴 열어도 **고객 값 아래로는 안 내려간다**(우리가 더 풀어 주지 않는다)",
+    effectiveMinGapMin(600, warm, new Date(), { override: true }) === 600, "고객이 600분이면 600분");
+  rec("🔴 캐던스가 그 문을 간격에도 넘긴다(⚠️ 배선)", /effectiveMinGapMin\([\s\S]{0,90}override: a\.warmupOverride === true/.test(cad));
 
   console.log("\n③ 🔴 안내가 **할 수 있는 일**을 가리키나(§3 ①사실 ②어떻게 ③우리가 해 주는 것)");
   rec("🔴 «다른 날로 잡아 주세요»를 cap 0 자리에 **안 쓴다**(모든 날짜가 막히는데 그렇게 말했다)",
@@ -87,6 +100,11 @@ const MUTANTS = [
   { what: "«다른 날로 잡아 주세요»를 도로 쓴다(할 수 없는 일을 하라고 안내)",
     file: "lib/cadence-check.ts", from: `: "이 계정은 이번 주 몫을 다 썼어요(새로 연결한 계정은 천천히 늘려요). 다음 주가 되면 다시 올릴 수 있어요.")`,
     to: `: "이 계정은 이번 주 몫을 다 썼어요. 다른 날로 잡아 주세요.")`, expect: "«다른 날로 잡아 주세요»를 cap 0 자리에 **안 쓴다**" },
+  { what: "간격에는 문을 안 낸다(캡 문으로 들어가도 «360분 띄워요»에 막힌다 · 2026-09-20 실물)",
+    file: "lib/cadence-check.ts", from: "const gapMin = effectiveMinGapMin(n(acc.min_gap_min) || 180, warm, at, { override: a.warmupOverride === true });",
+    to: "const gapMin = effectiveMinGapMin(n(acc.min_gap_min) || 180, warm, at);", expect: "캐던스가 그 문을 간격에도 넘긴다" },
+  { what: "문을 열면 고객이 정한 간격보다 **더** 풀어 준다(고객 설정이 무의미해진다)",
+    file: "lib/warmup.ts", from: "  if (opts?.override) return gap;", to: "  if (opts?.override) return 0;", expect: "고객 값 아래로는 안 내려간다" },
   { what: "`canOverride` 를 화면까지 안 흘린다(우리가 낸 문이 없는 문이 된다)",
     file: "lib/piece-self.ts", from: "postsToday?: number; capped?: boolean; canOverride?: boolean };",
     to: "postsToday?: number; capped?: boolean };", expect: "`canOverride` 가 화면까지 흘러간다" },
