@@ -130,6 +130,50 @@ console.log("─".repeat(120));
       : "쓰는 칸은 전부 어딘가에서 읽힌다");
 }
 
+/* ═══ ③ 🔴 글을 **이름으로 부르는 자리**가 글 제목을 쓰나 ═══
+   2026-09-20 A 실측: 편성표가 손님이 고친 제목 대신 **디렉터가 배정했던 소재 제목**을 말했다.
+   홈은 처음부터 `pieces.title` 을 썼으니 **두 화면이 다른 이름을 말하고 있었다.**
+   🔴 규칙: 글이 걸린 자리를 **이름으로 부를 때는 `pieces.title`**. `topics.title` 은 «무엇을 쓰기로 했나»라는 다른 뜻이라
+      **같이 실을 수는 있어도 대신 쓸 수는 없다.** */
+{
+  /* 🔴 **일부러 소재 이름을 쓰는 자리**는 이름으로 적어 둔다 — 안 적으면 이 자가 늑대 소년이 된다.
+     `lib/outcomes.ts` = «잘 먹힌 **소재**»(어떤 주제가 통했나)를 묻는 자리다. 글 이름이 답이 아니다. */
+  const BY_TOPIC_ON_PURPOSE = new Map([["lib/outcomes.ts", "«잘 먹힌 소재» — 주제별 성과라 글 이름이 답이 아니다"]]);
+  const bad = [];
+  for (const [f, src] of CODE) {
+    for (const m of src.matchAll(/sql`([^`]{40,1600})`/g)) {
+      const qy = m[1];
+      if (!/\bJOIN\s+pieces\b|\bFROM\s+pieces\b/i.test(qy)) continue;
+      const usesTopicTitle = /\bt\.title\b/.test(qy);
+      /* 🔴 [거짓양성 → 과잉교정 → 좁히기 · 변이가 두 번 고치게 했다]
+         ① 첫 판: `p.*` 가 제목을 포함하는 걸 몰라 **멀쩡한 자리를 빨갛게** 했다(`pieces.ts` 의 `PIECE_SELECT`).
+         ② 고친 판: `${…}` 가 있으면 봐 주게 했더니 — 🔴 **거의 모든 질의에 `${tid}` 파라미터가 있어 이 축이 통째로 죽었다**
+            (변이 M4·M6 이 «안 운다»로 그걸 잡았다. 자를 넓게 봐 주면 «늘 초록»이 된다).
+         ③ 지금: **SELECT 절만** 본다 — 이름을 고르는 곳은 거기다. WHERE 의 파라미터는 판정과 상관없다. */
+      const sel = (qy.match(/SELECT([\s\S]*?)\bFROM\b/i) || [, ""])[1];
+      const usesPieceTitle = /\b(p|pc)\.title\b/.test(sel) || /\b(p|pc)\.\*/.test(sel) || sel.includes("${");
+      if (usesTopicTitle && !usesPieceTitle && !BY_TOPIC_ON_PURPOSE.has(f.split(path.sep).join("/"))) {
+        bad.push(`${f}: ${qy.slice(0, 60).replace(/\s+/g, " ")}`);
+      }
+    }
+  }
+  rec("③ 🔴 글을 이름으로 부르는 자리가 **글 제목**을 쓴다(소재 제목으로 대신하지 않는다)", bad.length === 0,
+    bad.length ? `🔴 소재 제목으로 대신 부르는 자리 ${bad.length}곳: ${bad.join(" · ")} — 손님이 고친 제목이 화면에 안 뜬다`
+      : `일부러 소재로 부르는 자리(${[...BY_TOPIC_ON_PURPOSE.keys()].join(",")})만 빼고 전부 글 제목을 쓴다`);
+}
+
+/* ═══ ④ 🔴 홈과 편성표가 **같은 이름**을 말하나 ═══ */
+{
+  const slots = read("lib/slots.ts");
+  const home = read("netlify/functions/home-summary.ts");
+  const slotsHas = /pc\.title AS piece_title/.test(slots) && /o\.title = String\(r\.piece_title\)/.test(slots);
+  const homeHas = /p\.title/.test(home);
+  rec("④ 🔴 홈과 편성표가 그 자리를 **같은 이름**으로 부른다", slotsHas && homeHas,
+    slotsHas && homeHas ? "둘 다 글 제목을 싣는다(편성표는 `topicTitle` 도 같이 — 판정이 그 값을 쓴다)"
+      : !slotsHas ? "🔴 편성표가 글 제목을 안 싣는다 — 손님 눈엔 딴 글이 걸린 것처럼 보인다"
+        : "🔴 홈이 글 제목을 안 쓴다");
+}
+
 /* 대조군 — 제대로 지나가는 자리가 실제로 있다 */
 {
   /* 🔴 [변이가 고치게 한 것] 첫 판은 «셋 중 둘»이면 통과였다 — 그래서 `refUnused` 를 통째로 치워도 **안 울었다.**

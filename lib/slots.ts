@@ -302,6 +302,16 @@ export async function rollSlots(tid: number, horizonDays?: number, now: Date = n
 
 /* ───────── Slot 투영 ───────── */
 export interface Slot { id: number; date: string; channel: string; kind: string; accountId?: number; accountHandle?: string; status: string; publishAt?: string; reviewDeadline?: string; topicTitle?: string; pieceId?: number; origin: "auto" | "manual"; skipReason?: "too_soon";
+  /**
+   * [2026-09-20] 🔴 **그 자리에 실제로 걸린 글의 제목**(손님이 검수에서 고쳤으면 고친 그 이름).
+   *   ══ 어느 이름을 말하나 — 규칙 ══
+   *     · 글이 걸려 있으면(`pieceId` 가 있으면) 화면이 말하는 이름은 **`title`**(실제로 나갈 글이다).
+   *     · 글이 아직 없으면 **`topicTitle`**(무엇을 쓰기로 했나).
+   *   🔴 **둘을 하나로 뭉치지 않는다** — `topicTitle` 은 이름표만이 아니라 **판정**에도 쓰인다
+   *      (화면 `can.make = !pieceId && !!topicTitle` · «먼저 소재를 정해 주세요»). 덮으면 그 판정이 거짓말이 된다.
+   *   🔴 홈(`home-summary.ts`)은 처음부터 글 제목을 썼다 — 이 칸이 없어서 **두 화면이 다른 이름을 말하고 있었다.**
+   */
+  title?: string;
   /** [P1R7 B3] 그 자리에 서버가 남긴 사람말 한 줄(예: 규칙이 정한 구성을 못 썼을 때 · 실패 사유). 없으면 키를 안 싣는다. */
   note?: string;
   /** [P1R7 B3 · DESIGN §5B.2 D+1] 이 자리의 글이 **지금까지 번 돈**(원 · revenue_daily 의 piece 귀속 합). 0원이어도 값이 있으면 싣는다 — «아직 못 가져옴»과 «0원»은 다르다(AC-9). */
@@ -368,9 +378,18 @@ export async function listSlots(tid: number, from: string, to: string, now = new
   const tickText = `${tickAt.getTime() < kstToUtc(addDays(todayKst, 1), 0, 0).getTime() ? "오늘" : "내일"} ${ampm} ${h12}시${tickMin === "00" ? "" : ` ${tickMin}분`}`;
   /* [P1R7 B3 · §5B.2 D+1] 수익 되먹임 — 그 자리의 piece 에 귀속된 `revenue_daily` 합을 함께 읽는다(글별 TOP5 와 같은 원천 · lib/revenue/aggregate).
      🔴 수집 행이 하나도 없으면 SUM 이 NULL 이고, 그때는 키를 안 싣는다 — «아직 못 가져옴»을 «0원 벌었다»로 그리지 않게(AC-9). */
-  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title,
+  /* 🔴 [2026-09-20 «윗물이 만든 것을 아랫물이 버린다» · A 실측] **편성표가 «고친 제목»을 몰랐다.**
+     손님이 검수에서 제목을 고쳐도 이 목록은 **소재 제목**(`topics.title`)만 실어 보냈다 —
+     화면엔 디렉터가 배정했던 옛 소재 이름이 뜨고, **손님 눈엔 딴 글이 걸린 것처럼** 보였다.
+     🔴 «화면이 고칠 수 있는 자리»가 아니었다 — **서버가 글 제목을 아예 안 보냈다.**
+     그리고 **홈은 이미 글 제목을 쓰고 있었다**(`home-summary.ts:46` 이 `pieces p` 를 조인한다) ⇒ **두 화면이 다른 이름을 말했다.**
+     ⇒ `pieces` 를 조인해 **글 제목을 같이 싣는다.** 🔴 `topicTitle` 은 **안 덮는다** —
+        그건 «무엇을 쓰기로 했나»라는 **다른 뜻**이고, 화면의 판정(`can.make`·«먼저 소재를 정해 주세요»)이 그 값을 쓴다.
+        둘 다 뜻이 있으니 둘 다 보낸다(하나로 뭉치는 것이 답이 아니다). 고르는 규칙은 `Slot.title` 주석에 못 박았다. */
+  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title, pc.title AS piece_title,
       (SELECT SUM(rd.amount_krw)::int FROM revenue_daily rd WHERE rd.tenant_id = s.tenant_id AND rd.piece_id = s.piece_id) AS revenue_krw
     FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
+      LEFT JOIN pieces pc ON pc.id = s.piece_id AND pc.tenant_id = s.tenant_id
     WHERE s.tenant_id = ${tid} AND s.slot_date >= ${from}::date AND s.slot_date <= ${to}::date ORDER BY s.slot_date, s.publish_at NULLS LAST, s.id`);
   const out: Slot[] = rows.map((r) => {
     const o: Slot = { id: n(r.id), date: String(r.d).slice(0, 10), channel: String(r.channel), kind: String(r.kind || "post"), status: String(r.status), origin: r.origin === "manual" ? "manual" : "auto" };
@@ -379,6 +398,8 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     const pa = utcDate(r.publish_at); if (pa) o.publishAt = pa.toISOString();
     const rd = utcDate(r.review_deadline); if (rd) o.reviewDeadline = rd.toISOString();
     if (r.topic_title) o.topicTitle = String(r.topic_title);
+    /* 🔴 글이 걸려 있으면 **그 글의 제목**을 싣는다(손님이 고친 그 이름). 없으면 키를 안 싣는다. */
+    if (r.piece_title) o.title = String(r.piece_title);
     if (r.piece_id) o.pieceId = n(r.piece_id);
     if (r.note) o.note = String(r.note).slice(0, 300);
     if (r.revenue_krw !== null && r.revenue_krw !== undefined) o.revenueKrw = n(r.revenue_krw);
