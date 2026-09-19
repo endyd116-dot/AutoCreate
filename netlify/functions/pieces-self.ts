@@ -43,6 +43,8 @@ export default async (req: Request): Promise<Response> => {
       styleId: n(b.styleId) || null,   // [R10-4] «구성만 그 틀로» 빌려 쓴 스타일(A 합의 body.styleId)
       scheduleAt: b.scheduleAt ? String(b.scheduleAt) : null,
       monetize: { sponsored: mon.sponsored === true, gift: mon.gift === true, affiliate: mon.affiliate },
+      /* 🔴 [2026-09-20 B2] «그래도 올릴래요» — `publish-now` 와 **같은 키**. 워밍업이 깎은 몫만 그 회차만 넘긴다(저장 0). */
+      warmupOverride: b.warmupOverride === true,
     });
     if (!r.ok) return json(r, STATUS[r.step] ?? 400);
 

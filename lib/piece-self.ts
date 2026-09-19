@@ -50,11 +50,16 @@ export interface SelfPieceInput {
   monetize?: { sponsored?: boolean; gift?: boolean; affiliate?: unknown } | null;
   /** [R10-4 · §5D] «내가 쓰되 구성만 그 틀로» — 빌려 쓴 스타일(`text_styles.id`). 되먹임 원장이 «이 스타일로 쓴 글»로 묶는다. */
   styleId?: number | null;
+  /** 🔴 [2026-09-20 B2] 고객이 «그래도 올릴래요»를 **직접 눌렀나** — 워밍업이 깎은 몫만 그 회차만 넘긴다.
+   *  `publish-now` 와 **같은 키 이름**이다(화면이 두 곳에 다른 낱말을 쓰면 그게 갈림이다 · AC-52). 기본은 false(무회귀). */
+  warmupOverride?: boolean;
 }
 export type SelfPieceResult =
   | { ok: true; pieceId: number; status: "in_review"; origin: "self"; coins: { charged: number; ref: string };
       gate: GateReport; slot: { id: number; publishAt: string } | null; notice?: string }
-  | { ok: false; step: string; error: string; retryAt?: string; gapMin?: number; dailyCap?: number; postsToday?: number; capped?: boolean };
+  /** 🔴 `canOverride` 를 **그대로 흘려 보낸다** — 이 값이 여기서 끊기면 화면은 «그래도 올릴래요» 단추를 못 띄우고,
+   *  그러면 우리가 방금 낸 문이 **고객에게는 없는 문**이 된다(만들어 놓고 부르는 자리가 없는 것 · AC-69). */
+  | { ok: false; step: string; error: string; retryAt?: string; gapMin?: number; dailyCap?: number; postsToday?: number; capped?: boolean; canOverride?: boolean };
 
 const bad = (step: string, error: string): SelfPieceResult => ({ ok: false, step, error });
 
@@ -121,7 +126,7 @@ export async function createSelfPiece(a: SelfPieceInput): Promise<SelfPieceResul
 
   /* ── ④ 🔴 캐던스 — ①에도 그대로 건다(§5D.5 · §7.3b). 계정이 없으면 걸 대상이 없다. ── */
   if (accountId) {
-    const cad: CadenceVerdict = await checkCadenceAt({ tenantId: tid, accountId, channel, at });
+    const cad: CadenceVerdict = await checkCadenceAt({ tenantId: tid, accountId, channel, at, warmupOverride: a.warmupOverride === true });
     if (!cad.ok) return cad;
   }
 
