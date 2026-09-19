@@ -22,14 +22,66 @@ const decomment = (s) => s
 
 /* ── ① 재는 자리 ── */
 const scriptTs = decomment(readFileSync("lib/video/script.ts", "utf8"));
+/* 🔴 [2026-09-20 · B 가 고쳤다] **축을 «문장»이 아니라 «검사 호출»에 고정한다.**
+   첫 판은 `issues.push(\`광고법 금칙어` 처럼 **손님이 읽는 문장의 앞머리**로 축을 잡았다.
+   그런데 그 문장들은 **§3 말투 규칙을 지켜야 하는 말**이다(«문장 수 3(**계약** 4~8)» 의 «계약»이 그래서 걸렸다).
+   ⇒ 말에 고정하면 **말투를 고칠 때마다 이 자가 빨개진다** — «검사를 지웠다»가 아닌데 그렇게 운다.
+   🔴 §9 가 지키라는 것은 «검사를 지우지 마라»이지 «문구를 고치지 마라»가 아니다.
+      그래서 **검사를 부르는 모양**으로 잰다 — 이러면 말투는 자유롭고 검사를 빼면 바로 운다.
+   (같은 교훈: 2026-09-20 `verify-upstream-discarded` 도 이름이 아니라 **쓰는 모양**으로 옮겼다.) */
 const axes = [
-  { key: "훅", re: /issues\.push\(`훅/ },
-  { key: "광고법 금칙어", re: /issues\.push\(`광고법 금칙어/ },
-  { key: "수익 약속 표현", re: /issues\.push\(`수익 약속 표현/ },
-  { key: "상투 표현", re: /issues\.push\(`상투 표현/ },
-  { key: "문장 수", re: /issues\.push\(`문장 수/ },
+  { key: "훅", re: /checkHook\s*\(/ },
+  { key: "광고법 금칙어", re: /findBannedWords\s*\(/ },
+  { key: "수익 약속 표현", re: /findIncomeClaim\s*\(/ },
+  { key: "상투 표현", re: /CLICHES\s*\.\s*filter/ },
+  { key: "문장 수", re: /script\.lines\.length\s*[<>]/ },
 ];
-const found = axes.filter((a) => a.re.test(scriptTs)).map((a) => a.key);
+/* 🔴 [변이가 고치게 했다 · AC-108] **«정의가 있나»가 아니라 «그 함수 안에서 부르나»** 로 잰다.
+   첫 재고정은 파일 전체에서 `checkHook(` 를 찾았다 — 그런데 **그 파일에 `checkHook` 의 정의가 있다.**
+   그래서 `checkScriptGates` 안의 호출을 통째로 들어내도 **안 울었다**(변이 M1 이 잡았다).
+   `verify-r8-deadends` 가 머리말에 적어 둔 그 교훈(«정의가 있나가 아니라 호출이 있나»)을 내가 그대로 밟은 것이다.
+   ⇒ `checkScriptGates` 의 **몸통만 잘라** 그 안에서 찾는다. */
+/* 🔴 [AC-113 을 내가 그대로 밟았다] 첫 판은 «이름 뒤 첫 `)` 다음의 첫 `{`» 를 몸통으로 봤다.
+   타입스크립트에서 그 `{` 는 **반환 타입**의 것일 수 있다 — 여기가 정확히 그렇다:
+     `checkScriptGates(script: VideoScript, maxLines = 12): { ok: boolean; issues: string[] } { …진짜 몸통… }`
+   그러면 «몸통»이 `{ ok: boolean; issues: string[] }` 가 되어 **축이 전부 사라진다**(변이 M5 가 그 꼴로 잡혔다).
+   ⇒ 인자 목록을 **괄호 깊이**로 닫고, 그 뒤 **꺾쇠(`<>`)·중괄호 깊이가 0일 때** 나오는 첫 `{` 가 몸통이다.
+   C 가 `verify-audit-gap` 머리말(AC-113)에 적어 둔 그 처방이다 — 적어 둔 걸 읽고도 밟았다. */
+function bodyOf(src, name) {
+  const i = src.indexOf(`export function ${name}(`);
+  if (i < 0) return "";
+  /* 인자 목록을 **괄호 깊이**로 닫는다(기본값 안에 `(` 가 있어도 안 속는다). */
+  let k = src.indexOf("(", i), par = 0;
+  for (; k < src.length; k++) { if (src[k] === "(") par++; else if (src[k] === ")") { par--; if (!par) { k++; break; } } }
+  /* 그 뒤로 **짝이 맞는 `{ … }` 덩어리**를 차례로 모은다 — 반환 타입의 것과 몸통의 것이 섞여 있다.
+     🔴 고르는 법은 단순하다: **제일 멀리 닫히는 덩어리가 몸통**이다(반환 타입은 한 줄 안에서 닫힌다). */
+  /* 🔴 **이웃한 덩어리만** 줍는다 — 첫 판은 함수 끝에서 안 멈춰 **다음 함수의 몸통까지** 주웠고,
+     «제일 큰 것»을 고르다 보니 엉뚱한 함수를 몸통이라 했다(자가 통째로 빨개졌다).
+     사이에 낀 글자가 **타입에 나올 법한 것**(`: | & 이름 [] <> , . ( ) ' "` 과 공백)일 때만 이어 붙인다. */
+  const groups = [];
+  let cur = k;
+  /* 🔴 **최대 둘**이다 — 반환 타입 덩어리 + 몸통. 셋째부터는 **다음 선언**이다.
+     첫 판은 넷까지 줍고 «제일 큰 것»을 골랐는데, 사이 글자가 `export interface ScriptInput` 이어도
+     `\w` 가 허용해서 **그 인터페이스 몸통**을 «함수 몸통»이라 했다(길이 1167 · 자가 통째로 빨개졌다).
+     ⇒ 개수를 둘로 막고, 사이에 **선언 키워드**가 끼면 거기서 끊는다. */
+  while (groups.length < 2) {
+    const nxt = src.indexOf("{", cur);
+    if (nxt < 0) break;
+    const gap = src.slice(cur, nxt);
+    if (/\b(export|function|interface|type|const|let|class|enum)\b/.test(gap)) break;
+    if (!/^[\s:|&\w[\]<>,.()'"?=-]*$/.test(gap)) break;                  // 진짜 코드가 끼면 함수 signature 가 끝난 것
+    let d = 0, end = -1;
+    for (let m = nxt; m < src.length; m++) { if (src[m] === "{") d++; else if (src[m] === "}") { d--; if (!d) { end = m; break; } } }
+    if (end < 0) break;
+    groups.push([nxt, end]); cur = end + 1;
+  }
+  if (!groups.length) return "";
+  const [open, close] = groups.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a));
+  return src.slice(open, close + 1);
+}
+const gateBody = bodyOf(scriptTs, "checkScriptGates");
+if (!gateBody) fails.push("🔴 `checkScriptGates` 의 몸통을 못 찾았다 — 이 자를 고쳐라(조용히 통과시키지 않는다).");
+const found = axes.filter((a) => a.re.test(gateBody)).map((a) => a.key);
 notes.push(`센 것: \`checkScriptGates\` 가 재는 축 = ${found.length}/${axes.length} [${found.join(", ")}]`);
 if (found.length < axes.length) fails.push(`🔴 재던 축이 사라졌다: ${axes.filter((a) => !found.includes(a.key)).map((a) => a.key).join(", ")} — 검사를 지우지 마라(§9 «소프트로 내리는 것이지 없애는 게 아니다»).`);
 
