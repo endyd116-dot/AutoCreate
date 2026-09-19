@@ -146,6 +146,12 @@ export type PublishFailReason =
   | "no_account"
   | "no_creds"
   | "account_blocked"
+  /* 🔴 [2026-09-20 첫 발행 라운드] **«아직 안 한 것»과 «막힌 것»을 가른다.**
+     계정을 막 연결하면 `pending_login`(첫 로그인 전)인데, 옛 판은 이것도 `account_blocked` 로 뭉쳤다.
+     그러면 짧은 말이 «계정이 막혀 있어요» 가 되어 **사실도 틀리고 겁까지 준다**(CLAUDE §3) —
+     계정 화면은 같은 상태를 «아직 로그인 전이에요 · 한 번만 하면 돼요» 라고 말하고 있었다(한 제품이 두 말을 했다).
+     실측(2026-09-20 첫 실발행 · 슬롯 1019): 계정은 `pending_login` · health 100 · 막힌 적 없는데 슬롯에 «계정이 막혀 있어요». */
+  | "account_login_needed"
   | "auth_failed"
   | "provider_not_configured"
   | "channel_error"
