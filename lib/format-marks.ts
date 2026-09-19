@@ -43,6 +43,17 @@ export interface FormatMarks {
    *  🔴 `bold` 는 2026-09-16 부터 세기 시작한 축 — 옛 글엔 키가 없고 그건 «0건»이 아니라 «그때는 안 쟀다»다(`?? 0` 로 읽지 않는다 · AC-92).
    *  🔴 러너의 `samples`(번진 문단의 실물 조각)는 **여기 싣지 않는다** — 실물 예시는 **러너 로그에만 있다**(B2 합의 · meta 를 무겁게 하지 않는다 · «왜 예시 문단이 안 보이지»의 답이 이 줄이다). */
   bleed?: { pct: number; total?: number; bad?: number; red?: number; center?: number; italic?: number; underline?: number; bold?: number };
+  /**
+   * 🔴 **문단 수 대조**(2026-09-21 B2) — 계획이 만들 문단 수 ↔ 러너가 발행 직전에 **실제로 센** 문단 수.
+   *   2026-09-20 실측(잡 #325·#327): 네이버가 평문 URL 을 **앵커로 바꾸는 동안** 우리가 친 `Enter` 가 먹혀
+   *   다음 문단이 **같은 줄에 붙었고**(계획 4 ↔ 실물 3), 발행본에서는 그 줄이 **통째로 사라졌다**.
+   *   🔴 러너는 그 «실물 문단 수»를 **이미 세고 있었다**(`bleed.total`) — 대조하는 사람이 없었을 뿐이다.
+   *   `kind` — `ok` · `lost`(🔴 실물이 적다 = 붙었거나 사라졌다) · `extra`(네이버가 쪼갰다) · `unknown`(못 쟀다).
+   *   ⚠️ `uncertain` 은 **인용 수**다. 인용 컴포넌트가 서면 안 세지고 폴백(평문)이면 세진다 —
+   *      계획 시점엔 모르므로 **폭으로** 들고 다닌다(«모른다»를 기대값에 섞지 않는다 · AC-9).
+   *   🔴 키가 없으면 «못 쟀다»이지 «맞았다»가 아니다.
+   */
+  paragraphs?: { expected: number; actual: number | null; diff: number | null; uncertain: number; skipped: number; kind: "ok" | "lost" | "extra" | "unknown" };
   /** [R9-11] 티스토리가 HTML 모드를 못 열어 기본 모드로 내려앉은 횟수 — 🔴 0 이면 키를 안 만든다(B2 · 강등 자체는 `demoted[{kind:블록, why:"no_editor_op"}]` 로 같이 온다). */
   htmlMode?: number;
   /** 러너 보고를 받은 시각(UTC ISO) — 있으면 «발행 뒤 본 것»이다. */
@@ -203,13 +214,32 @@ const clampDemotion = (d: MarkDemotion): MarkDemotion => ({
  * 러너 보고(`formatMarks`)를 **믿지 않고** 받아 정본에 합친다 — 숫자는 정수·음수 금지 · 강등은 kind/why 24자 · sample 20자 · 최대 60건.
  *   서버 강등은 그대로 두고 러너 강등을 **append** 한다(by:"runner"). 같은 kind·why 가 이미 러너 것으로 있으면 중복 append 하지 않는다(재보고 멱등).
  */
+/**
+ * 문단 대조 보고를 **믿지 않고** 받는다 — 정수·음수 금지 · `kind` 는 네 낱말만 · `actual`/`diff` 는 **null 허용**.
+ *   🔴 `expected` 가 숫자가 아니면 **통째로 버린다**(모양이 틀린 보고를 반쯤 받아 적으면 화면이 거짓말을 한다).
+ */
+function paragraphsOf(v: unknown): FormatMarks["paragraphs"] | null {
+  const o = (v && typeof v === "object" ? v : null) as Record<string, unknown> | null;
+  if (!o) return null;
+  const nn = (x: unknown): number | null => { const n = Math.floor(Number(x)); return Number.isFinite(n) ? n : null; };
+  const expected = nn(o.expected);
+  if (expected === null || expected < 0) return null;
+  const kinds = ["ok", "lost", "extra", "unknown"] as const;
+  const kind = (kinds as readonly string[]).includes(String(o.kind)) ? (String(o.kind) as "ok" | "lost" | "extra" | "unknown") : "unknown";
+  const actual = o.actual === null || o.actual === undefined ? null : nn(o.actual);
+  const diff = o.diff === null || o.diff === undefined ? null : nn(o.diff);
+  return { expected, actual: actual !== null && actual >= 0 ? actual : null, diff,
+    uncertain: Math.max(0, nn(o.uncertain) ?? 0), skipped: Math.max(0, nn(o.skipped) ?? 0), kind };
+}
+
 export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new Date()): FormatMarks {
   const p = (prev && typeof prev === "object" ? prev : null) as FormatMarks | null;
   const base: FormatMarks = p
     ? { planned: { ...(p.planned ?? {}) }, ...(p.kept ? { kept: { ...p.kept } } : {}), ...(p.applied ? { applied: { ...p.applied } } : {}),
         demoted: [...(p.demoted ?? [])].map(clampDemotion),
         ...(typeof p.breaks === "number" ? { breaks: p.breaks } : {}), ...(typeof p.breakFails === "number" ? { breakFails: p.breakFails } : {}),
-        ...(bleedOf(p.bleed) ? { bleed: bleedOf(p.bleed)! } : {}), ...(typeof p.htmlMode === "number" && p.htmlMode > 0 ? { htmlMode: p.htmlMode } : {}) }
+        ...(bleedOf(p.bleed) ? { bleed: bleedOf(p.bleed)! } : {}), ...(paragraphsOf(p.paragraphs) ? { paragraphs: paragraphsOf(p.paragraphs)! } : {}),
+        ...(typeof p.htmlMode === "number" && p.htmlMode > 0 ? { htmlMode: p.htmlMode } : {}) }
     : { planned: {}, demoted: [] };
   const r = (report && typeof report === "object" ? report : {}) as Record<string, unknown>;
   const counts = (v: unknown): Record<string, number> => {
@@ -227,6 +257,11 @@ export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new
   if (breaks !== undefined) base.breaks = Math.floor(breaks);
   if (breakFails !== undefined) base.breakFails = Math.floor(breakFails);
   if (bleed) base.bleed = bleed;   // 🔴 없으면 안 만든다 — «못 쟀다»는 «0%»가 아니다
+  /* 🔴 **문단 수 대조도 받는다.** 안 받으면 러너가 보내도 여기서 **조용히 버려진다** —
+     그게 2026-09-20 에 `notes` 로 겪은 바로 그 자리다(세어 놓고 아무도 못 본다 · AC-69).
+     ⚠️ `actual`·`diff` 는 **null 이 뜻 있는 값**이다(«못 쟀다») — 0 으로 채우지 않는다(AC-9). */
+  const paras = paragraphsOf(r.paragraphs);
+  if (paras) base.paragraphs = paras;
   if (htmlMode !== undefined && htmlMode > 0) base.htmlMode = Math.floor(htmlMode);   // [R9-11] 0 이면 키 없음
   const dem = Array.isArray(r.demoted) ? r.demoted.slice(0, 60) : [];
   for (const x of dem) {

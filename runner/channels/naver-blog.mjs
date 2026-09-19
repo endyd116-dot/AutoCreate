@@ -16,7 +16,7 @@
  */
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
 import { BLOCK, ensureNaverLogin } from "../lib/auth-naver.mjs";   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
-import { createFormatState, markFormatDirty, breakFormatBeforePara, measureFormatBleed, bleedVerdict } from "../lib/format-bleed.mjs";
+import { createFormatState, markFormatDirty, breakFormatBeforePara, measureFormatBleed, bleedVerdict, paragraphVerdict } from "../lib/format-bleed.mjs";
 
 const B_TITLE = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
 const B_EDITOR = ".se-content, .se-container, .se-components-wrap";
@@ -1187,6 +1187,22 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
     const verdict = bleedVerdict(bleed);
     notes.push(verdict.line);
     if (bleed) formatMarks.bleed = bleed;
+
+    /* ═══ 🔴 **문단이 사라졌나** — 같은 숫자에 빼기 한 번(2026-09-21) ═══
+       `bleed.total` 이 곧 **실물 문단 수**다. 계획이 만들 문단 수와 맞춰 보면
+       «주소 줄 뒤가 한 줄로 붙는» 병(잡 #325 실측 · 계획 4 ↔ 실물 3)이 **그 자리에서** 걸린다.
+       🔴 **막지 않는다**(§9) — 재서 말해 줄 뿐이다. 그리고 🔴 **`formatMarks`(meta)로 보낸다** —
+          `notes` 는 서버가 버리고 콘솔은 죽여야 보인다(2026-09-20 실측). 세어 놓고 못 보면 AC-69 다. */
+    const paraCheck = paragraphVerdict(plan, bleed);
+    notes.push(paraCheck.line);
+    formatMarks.paragraphs = {
+      expected: paraCheck.expected, actual: paraCheck.actual, diff: paraCheck.diff,
+      uncertain: paraCheck.uncertain, skipped: paraCheck.skipped, kind: paraCheck.kind, measured: paraCheck.measured,
+    };
+    if (paraCheck.kind === "lost") {
+      console.log(`  · ${paraCheck.line}`);
+      await shot(page, shotKey, "06-문단어긋남", true).catch(() => {});
+    }
     if (verdict.stop) {
       await shot(page, shotKey, "05-서식번짐-발행중단", true).catch(() => {});
       console.error(`  · 🔴 ${verdict.reason}`);
