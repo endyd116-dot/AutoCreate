@@ -62,7 +62,21 @@ for (const p of ["lib/ai-tell-gate.ts", "lib/produce-window.ts"]) {
   const src = decomment(readFileSync(p, "utf8"));
   for (const w of BAD_WORDS) if (src.includes(`"${w}`) || src.includes(`${w} 안"`)) wordHits.push(`${p} → «${w}»`);
 }
-notes.push(`센 것: 손님 화면 ${CUSTOMER_FILES.length}개(\`public/**\` 의 .html·.txt·**.js** · 운영센터 제외) + 서버 라벨 2개에서 시스템 용어 [${BAD_WORDS.join(", ")}] = ${wordHits.length}곳`);
+/* 🔴 [2026-09-20] **대본 검사 문구도 손님 화면에 그대로 간다** — 2026-09-20 에 A 가 `meta.scriptIssues` 를 칩 줄로 그리기 시작하면서
+   `lib/video/script.ts` 의 문장이 **처음으로 손님 눈에 닿았다.** 거기 «(계약 4~8)» 이 있다 — «계약»은 우리 내부 말이다(§3).
+   9/19 에 `GATE_LABEL` 의 «분량이 계약 폭 안»을 고친 것과 **같은 낱말**이다.
+   🔴 화면이 고쳐 쓰지 않는다(AC-52 — 두 곳이 갈라진다). 서버 문자열이 바뀌어야 하고 그건 B 몫이다.
+   ⇒ **지금 넣고 빨간 채로 둔다**(메인 지시 2026-09-20). «B 가 고친 뒤에 넣자»가 잊히는 길이다.
+      «기다리는 빨강»은 `docs/rules/pending-red.json` 에 등록했다 — B 가 고치면 그 줄을 지운다. */
+{
+  const p = "lib/video/script.ts";
+  const src = decomment(readFileSync(p, "utf8"));
+  /* 손님에게 나가는 문장(`issues.push(…)`)만 본다 — 변수명·타입에 든 «계약»까지 세면 헛 운다. */
+  for (const m of src.matchAll(/issues\.push\(([^\n]*)\)/g)) {
+    if (/계약/.test(m[1])) wordHits.push(`${p} → «계약»(손님 칩으로 나간다: ${m[1].trim().slice(0, 60)})`);
+  }
+}
+notes.push(`센 것: 손님 화면 ${CUSTOMER_FILES.length}개(\`public/**\` 의 .html·.txt·**.js** · 운영센터 제외) + 서버 라벨 2개 + **대본 검사 문구**(lib/video/script.ts 의 \`issues.push\`) 에서 시스템 용어 [${BAD_WORDS.join(", ")}, 계약] = ${wordHits.length}곳`);
 if (wordHits.length) fails.push(`🔴 손님 화면에 시스템 용어가 있다(§3): ${wordHits.join(" · ")}`);
 
 /* ── ③-b 🔴 **서버에서 고친 낱말이 화면 사본에도 갔나** ──
