@@ -170,9 +170,17 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
     return { ok: false, reason: "no_account", retriable: false, error: "글과 계정의 채널이 달라요.", detail: `${piece.channel}≠${account.channel}` };
   }
   if (BLOCKED_ACCOUNT.has(account.status)) {
+    /* 🔴 [2026-09-20 첫 발행 라운드] **«아직 안 한 것»은 «막힌 것»이 아니다.**
+       옛 판은 넷을 다 `account_blocked` 로 냈고, 그러면 `publish-one.ts HUMAN` 이 **«계정이 막혀 있어요»** 로 뭉갠다 —
+       고객은 «내 계정이 정지됐나» 하고 놀란다. 사실도 틀렸다(막힌 적이 없다).
+       🔴 **«다시»도 지웠다** — `pending_login` 은 **한 번도 안 한 것**이라 «다시 로그인»이 거짓말이었다.
+          계정 화면이 쓰는 말(«아직 로그인 전이에요 · 한 번만 하면 돼요»)에 맞춘다. */
+    const firstLogin = account.status === "pending_login";
     return {
-      ok: false, reason: "account_blocked", retriable: false,
-      error: account.status === "pending_login" ? `@${account.handle} 계정에 다시 로그인해 주세요.` : `@${account.handle} 계정을 지금은 쓸 수 없어요.`,
+      ok: false, reason: firstLogin ? "account_login_needed" : "account_blocked", retriable: false,
+      error: firstLogin
+        ? `@${account.handle} 계정은 아직 로그인 전이에요 — 한 번만 해 두면 그다음부터는 저절로 올라가요.`
+        : `@${account.handle} 계정을 지금은 쓸 수 없어요.`,
       detail: `account_status=${account.status}`,
     };
   }

@@ -34,6 +34,8 @@ const n = (v: unknown) => Number(v || 0);
 /** 사람말 시각(KST · «오후 3시 20분»). 문구 속 시각은 전부 KST(§13.5). */
 const kstAt = (d: Date) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "numeric", minute: "2-digit" }).format(d);
 
+const dot = (t: string) => (/[.!?。]$/.test(t) ? t : `${t}.`);
+
 export default async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
   const auth = requireUser(req); if (!auth.ok) return auth.res;
@@ -177,13 +179,20 @@ export default async (req: Request): Promise<Response> => {
       case "unavailable":
         return json({ ok: false, step: "connector", error: "발행 준비가 아직 끝나지 않았어요. 준비되면 예약한 시간에 자동으로 나가요." }, 503);
       case "retry":
+        /* 🔴 [2026-09-20 첫 발행 라운드] 옛 판은 `${out.error ? "" : ""}` 였다 — **어느 쪽이든 빈 문자열**이라
+           넣으려다 만 죽은 자리다. `out.error` 는 계약상 «사람말 한 문장»(`PublishFail.error`)이고
+           여기 «채널 응답»보다 훨씬 구체적이다(예: «X 에 연결하지 못했어요»). 있으면 그걸 앞에 세운다.
+           🔴 바닥은 남긴다 — 한글이 없으면(뒷날 채널 원문이 새면) 옛 뭉갠 말로 내려앉는다. */
+        const retrySay = String(out.error ?? "").trim();
+        const retryHead = retrySay && /[가-힣]/.test(retrySay) ? `${retrySay} ` : `잠깐 문제가 있었어요(${out.reason === "network" ? "인터넷 연결" : "채널 응답"}). `;
         return json({ ok: false, step: "publish", reason: out.reason, retry: true,
-          error: `${out.error ? "" : ""}잠깐 문제가 있었어요(${out.reason === "network" ? "인터넷 연결" : "채널 응답"}). 예약한 시간에 자동으로 다시 시도해요.` }, 400);
+          error: `${retryHead}예약한 시간에 자동으로 다시 시도해요.` }, 400);
+      /* 🔴 [2026-09-20] `out.why` 가 이제 **문장**이라 마침표를 달고 온다 — `.` 을 또 붙이면 «…올라가요.. 발행함에서» 가 된다(실측). */
       case "manual":
         return json({ ok: false, step: out.reason === "gate" ? "gate" : "publish", reason: out.reason,
-          error: out.reason === "gate" ? "발행 전 검사에 걸렸어요. 검수 화면에서 고치고 다시 승인해 주세요." : `${out.why}. 발행함에서 확인해 주세요.` }, 400);
+          error: out.reason === "gate" ? "발행 전 검사에 걸렸어요. 검수 화면에서 고치고 다시 승인해 주세요." : `${dot(out.why)} 발행함에서 확인해 주세요.` }, 400);
       case "failed":
-        return json({ ok: false, step: "publish", reason: out.reason, error: `${out.why}. 발행함에서 확인해 주세요.` }, 400);
+        return json({ ok: false, step: "publish", reason: out.reason, error: `${dot(out.why)} 발행함에서 확인해 주세요.` }, 400);
     }
   } catch (err) { return jsonError("publish_now", err); }
 };

@@ -46,15 +46,27 @@ export async function triggerVideoPublish(tid: number, pieceId: number, slotId: 
 }
 
 /** 사람이 손봐야 끝나는 실패 — 재시도해도 같은 답이 온다. */
-export const NEEDS_HUMAN: ReadonlySet<PublishFailReason> = new Set(["gate", "no_account", "no_creds", "account_blocked", "auth_failed", "provider_not_configured"]);
+export const NEEDS_HUMAN: ReadonlySet<PublishFailReason> = new Set(["gate", "no_account", "no_creds", "account_blocked", "account_login_needed", "auth_failed", "provider_not_configured"]);
 /** 아예 나갈 수 없는 실패 — 재시도 0. */
 export const TERMINAL: ReadonlySet<PublishFailReason> = new Set(["unsupported_channel", "not_publishable", "config"]);
-/** 실패 사유 → 계정 전이(자격·차단 계열만). 나머지는 계정 잘못이 아니다. */
-const ACCOUNT_ERROR_OF: Partial<Record<PublishFailReason, "login_fail" | "account_blocked">> = { auth_failed: "login_fail", no_creds: "login_fail" };
+/**
+ * 실패 사유 → 계정 전이(자격·차단 계열만). 나머지는 계정 잘못이 아니다.
+ * 🔴 [2026-09-20 메인 물음] «`account_blocked` 가 계정을 `suspended` 로 적나?» — **오늘은 못 적는다.**
+ *   이 표에 `account_blocked` **키가 없어서** 아래 `ACCOUNT_ERROR_OF[reason]` 이 늘 `undefined` 고,
+ *   그래서 `ak === "account_blocked" ? "suspended" : …` 갈래는 **닿을 수 없는 죽은 길**이었다(값으로 쓰는 데가 0곳).
+ *   🔴 그런데 **닿을 수 있게 만들기가 너무 쉬웠다** — 누가 이 표에 한 줄 더하면 그날로
+ *      «막 연결한 계정이 발행 한 번 시켰다고 정지»가 된다. 그래서 형에서 아예 **`account_blocked` 를 뺐다**:
+ *      이제 그런 줄을 쓰면 **타입 검사가 막는다**(주석이 아니라 컴파일러가 지킨다).
+ *   🔴 `account_login_needed`(첫 로그인 전)도 **당연히 여기 없다** — 아직 안 한 것은 계정 잘못이 아니다.
+ */
+const ACCOUNT_ERROR_OF: Partial<Record<PublishFailReason, "login_fail">> = { auth_failed: "login_fail", no_creds: "login_fail" };
 
 export const HUMAN: Record<PublishFailReason, string> = {
   gate: "발행 전 검사에 걸렸어요", no_account: "올릴 계정이 없어요", no_creds: "계정 로그인 정보가 없어요",
-  account_blocked: "계정이 막혀 있어요", auth_failed: "로그인이 풀렸어요", provider_not_configured: "채널 연결 설정이 아직이에요",
+  account_blocked: "계정이 막혀 있어요",
+  /* 🔴 [2026-09-20] «막혔다»와 다른 말이어야 한다 — 계정 화면과 **같은 말**을 쓴다(한 제품이 두 말을 하지 않게). */
+  account_login_needed: "아직 로그인 전이에요 — 한 번만 해 두면 돼요",
+  auth_failed: "로그인이 풀렸어요", provider_not_configured: "채널 연결 설정이 아직이에요",
   channel_error: "채널이 응답하지 않았어요", network: "인터넷 연결 문제였어요",
   // 실패가 아니라 «아직 처리 중» — 다음 틱에 같은 컨테이너로 다시 올린다(중복 게시 0).
   video_processing: "영상을 채널이 아직 처리하고 있어요",
@@ -142,7 +154,7 @@ export async function publishOne(tid: number, p: PublishOneRow, opts: { now?: Da
 
   // 자격·차단 계열은 계정 장부에도 남긴다(같은 계정으로 계속 때리지 않게 · §7.2).
   const ak = ACCOUNT_ERROR_OF[reason];
-  if (ak && p.account_id) await classifyAndApply(n(p.account_id), ak === "account_blocked" ? "suspended" : "login_fail", { tenantId: tid, pieceId, detail: r.error });
+  if (ak && p.account_id) await classifyAndApply(n(p.account_id), ak, { tenantId: tid, pieceId, detail: r.error });
 
   /* 🔴 `retriable:false` 는 사유가 무엇이든 **무조건** 존중한다(B2 2026-09-14).
      가장 무서운 경우: 발행은 성공했는데 finalize 가 실패한 건도 `{ ok:false, reason:"config", retriable:false }` 로 온다 —
@@ -161,16 +173,29 @@ export async function publishOne(tid: number, p: PublishOneRow, opts: { now?: Da
   const next = terminal ? "failed" : "awaiting_manual";
   /* 🔴 «계정이 없다»가 **두 가지 다른 상황**이다(P1R7 §1.2 이후): 글 = 계정을 연결하지 않은 것 · 영상 = 일부러 계정 없이 만든 것.
      같은 reason 에 같은 문구를 주면 영상 고객은 하지 않아도 될 일을 하러 간다. */
+  /* 🔴 [2026-09-20 첫 발행 라운드] **또렷한 말이 중간에서 버려지고 있었다.**
+     `PublishFail.error` 의 계약은 «사람말 한 문장(알림·«해야 할 일» 문구로 **그대로 쓴다**)»인데
+     옛 판은 그걸 버리고 `HUMAN[reason]`(사유당 한 마디)만 썼다. 그 한 마디가 **세 곳**으로 나간다 —
+     편성표 슬롯 note · 고객 알림 본문 · `pieces.meta.failReason`. ⇒ 서버가 «@handle 계정은 아직 로그인 전이에요»
+     라고 만들어 놨는데 고객은 «계정이 막혀 있어요»만 봤다. §9 는 «막지 않는 대신 **또렷하게 말한다**»인데
+     그 또렷한 말이 고객 표면에 **한 번도 닿지 않았다.**
+     🔴 전수로 셌다 — `lib/publish/**` 의 `ok:false` 문장 **143개가 143개 다 우리가 쓴 한국어**다. 써도 된다.
+     🔴 그래도 **바닥은 남긴다**: 뒷날 누가 채널 원문(영어·JSON)을 `error` 에 흘리면 그건 사람말이 아니다 —
+        한글이 없거나 비었으면 `HUMAN[reason]` 으로 내려앉는다. **고객 화면에 기계 말이 나가느니 뭉갠 말이 낫다.** */
+  const say = String(r.error ?? "").trim();
+  const sayOk = say.length > 0 && say.length <= 300 && /[가-힣]/.test(say);
   const why = (reason === "no_account" && String(p.kind) === "video")
     ? "앱에서 직접 올려 주세요 — 영상을 내려받아 올리면 돼요"
-    : HUMAN[reason] ?? "발행에 실패했어요";
+    : sayOk ? say : HUMAN[reason] ?? "발행에 실패했어요";
   await q(sql`UPDATE pieces SET status = ${next}, meta = meta || ${jsonb({ publishAttempts: attempts, failReason: `${why} (${reason})`, lastPublishError: String(r.error).slice(0, 300) })}, updated_at = NOW()
     WHERE tenant_id = ${tid} AND id = ${pieceId}`);
   if (slotId) await setSlot(tid, slotId, next === "failed" ? "failed" : "awaiting_manual", why);
   await notifyOnce(tid, next === "failed" ? "publish_failed" : "publish_manual",
     next === "failed" ? "글을 올리지 못했어요" : "직접 올려 주셔야 해요",
     // 영상은 «본문을 복사해» 가 말이 안 된다 — 할 일이 내려받아 올리기다.
-    `«${title}» — ${why}. ${String(p.kind) === "video" ? "발행함에서 영상을 내려받아 올리고, 올린 주소를 적어 주세요." : "발행함에서 본문을 복사해 직접 올리거나, 문제를 고치고 다시 시도해 주세요."}`,
+    /* 🔴 [2026-09-20] `why` 가 이제 **문장**이라 마침표를 이미 달고 온다 — 옛 템플릿이 `.` 을 또 붙여
+       «…올라가요.. 발행함에서» 가 됐다(실측). 문장으로 끝나면 안 붙인다. */
+    `«${title}» — ${/[.!?。]$/.test(why) ? why : `${why}.`} ${String(p.kind) === "video" ? "발행함에서 영상을 내려받아 올리고, 올린 주소를 적어 주세요." : "발행함에서 본문을 복사해 직접 올리거나, 문제를 고치고 다시 시도해 주세요."}`,
     `/app/posts.html?status=${next === "failed" ? "failed" : "awaiting_manual"}`, { withinHours: 6 });
   await writeAudit({ tenantId: tid, action: "publish_failed", actorType: actor === "user" ? "user" : "system", riskLevel: "medium", target: `piece:${pieceId}`,
     detail: { reason, attempts, retriable: r.retriable, to: next, error: String(r.error).slice(0, 300), slotId, actor } });

@@ -19,6 +19,11 @@ import { publishViaOf as registryPublishViaOf } from "../channel-registry";   //
 export type PublishVia = "api" | "runner";
 export type PublishFailReason =
   | "gate" | "no_account" | "no_creds" | "account_blocked" | "auth_failed" | "provider_not_configured"
+  /* 🔴 [2026-09-20 첫 발행 라운드] «아직 로그인 전»(`pending_login`)은 «막혔다»가 아니다 —
+     한 사유로 뭉치니 슬롯 note 에 «계정이 막혀 있어요» 가 떴다(사실도 틀리고 겁까지 준다 · CLAUDE §3).
+     🔴 이 줄을 더할 때 **위 주석이 말한 그 일이 실제로 났다** — `contract.ts` 만 고쳤더니 타입 검사가 포트에서 울었다.
+        짝이 갈라지는 걸 컴파일러가 잡아 준 것이다. `verify-publish-words.mjs` 가 이제 둘을 글자로도 대조한다. */
+  | "account_login_needed"
   | "channel_error" | "network" | "unsupported_channel" | "not_publishable" | "config"
   /* P1R5 §2.3 — 릴스·스레드가 영상을 **아직 처리 중**(IN_PROGRESS). 실패가 아니라 «조금 뒤에»(retriable).
      🔴 `lib/publish/contract.ts` 의 같은 이름 union 과 **짝**이다 — 한쪽만 고치면 포트가 갈라진다. */
