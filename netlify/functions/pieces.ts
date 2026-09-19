@@ -178,6 +178,17 @@ export default async (req: Request): Promise<Response> => {
          정본은 `meta.formatMarks`(내부 · 생성 + 발행 뒤 러너 append) 이고 여기서 **매번 투영**한다(저장 두 벌 금지). `label` 은 서버 정본(AC-52) · `why` 는 화면이 안 그린다(AC-91).
          비어 있으면 키를 안 싣는다(«없음»을 «[]»로 보내면 화면이 빈 칸을 그린다). */
       { const fu = formatUnusedOf(m.formatMarks); if (fu.length) meta.formatUnused = fu; }
+      /* 🔴 [2026-09-20 «윗물이 만든 것을 아랫물이 버린다» 훑기 · 넷째] **대본 검사 결과가 화면까지 오는 길이 아예 없었다.**
+         `lib/video/script.ts checkScriptGates` 가 찾는 것: 훅 문제 · 🔴 **광고법 금칙어** · 🔴 **수익 약속 표현** · 상투 표현 · 문장 수 · 너무 짧음.
+         `lib/video/gen.ts:138` 이 그걸 `meta.scriptIssues` 에 적는다 — **그리고 읽는 데가 0곳이었다**(전수로 셌다).
+         ⇒ 검사는 도는데 **결과가 아무에게도 안 간다.** CLAUDE §9 는 «막지 않는 대신 **또렷하게 말한다**» 인데
+            여기는 막지도 않고 말하지도 않았다 — §9 가 «게이트보다 나쁘다»고 한 바로 그 자리다.
+         🔴 이 화이트리스트가 값을 먹은 것이 **네 번째**다(2026-09-16 에 셋 · `loadPublishPiece` 주석이 «네 번째가 되지 않게» 라고 적어 뒀다).
+         모양은 `string[]`(사람말 한 줄씩) — A 가 `refUnused`·`formatUnused` 에 쓰는 칩 줄을 그대로 쓸 수 있다.
+         비어 있으면 키를 안 싣는다(«없음»을 «[]»로 보내면 화면이 빈 칸을 그린다 — 위 `formatUnused` 와 같은 규율). */
+      if (Array.isArray(m.scriptIssues) && m.scriptIssues.length) {
+        meta.scriptIssues = (m.scriptIssues as unknown[]).map((x) => String(x).slice(0, 200)).slice(0, 12);
+      }
       if (m.formatMarks && typeof m.formatMarks === "object") {
         const fm = m.formatMarks as Record<string, unknown>;
         /* 러너 자가검사 값도 같이 — `bleed` 가 **없으면 «못 쟀다»**(키를 만들지 않는다 · AC-92). `breakFails > 0` 은 «뒤 문단이 앞 서식을 물려받았을 수 있다»는 뜻이라 값이 있다. */
