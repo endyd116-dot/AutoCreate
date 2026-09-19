@@ -126,7 +126,35 @@ function bodyKeys(argSrc) {
   return { keys, spread: /\.\.\./.test(inner) };
 }
 
+/** 🔴 **변수로 만든 몸통을 한 겹 따라간다** — `const <name> = { … }` 의 키 + 뒤따르는 `<name>.<키> = …` 의 키. */
+function varObjectKeys(src, name, callAt) {
+  const keys = new Set();
+  /* 🔴 **그 이름이 진짜 «보낼 몸통»인지 먼저 본다.** `piece.html` 에는 `const body = UI.$("#body")`(**DOM 마디**)가 있는데,
+     그걸 몸통으로 알고 `body.innerHTML = …` 를 «보내는 키»로 세면 `innerHTML`·`contentEditable` 이 «서버가 안 읽는 키»로 찍힌다.
+     🔴 게다가 한 파일에 같은 이름의 몸통이 **여럿** 있다(`accounts.html` 의 add 와 update) — 파일 전체를 훑으면 **남의 키를 섞는다.**
+     내 첫 판이 둘 다 저질러 **거짓 빨강 여섯**을 만들 뻔했다(AC-112 ⑤ — 돌려 보고 잡았다).
+     ⇒ ①**부르는 자리 바로 앞**의 가장 가까운 `const <이름> = {` 만 본다 ②그 선언과 호출 **사이**의 `<이름>.<키> = …` 만 센다
+        ③객체 리터럴을 못 찾으면 **빈 손으로 돌아간다**(= ⊘). 찾은 척하지 않는다. */
+  const head = src.slice(0, callAt);
+  const re = new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*\\{`, "g");
+  let declAt = -1, mm;
+  while ((mm = re.exec(head))) declAt = mm.index;
+  if (declAt < 0) return [];
+  const open = src.indexOf("{", declAt);
+  let d = 0, end = -1;
+  for (let i = open; i < src.length; i++) { if (src[i] === "{") d++; else if (src[i] === "}") { d--; if (!d) { end = i; break; } } }
+  if (end < 0 || end > callAt) return [];
+  const lit = bodyKeys(`body: ${src.slice(open, end + 1)}`);
+  if (lit) for (const k of lit.keys) keys.add(k);
+  /* 나중에 붙이는 칸 — 🔴 **선언과 호출 사이**에서만(`body.openedAt = …`) */
+  const between = src.slice(end, callAt);
+  for (const m of between.matchAll(new RegExp(`\\b${name}\\.([A-Za-z_$][\\w$]*)\\s*=[^=]`, "g"))) keys.add(m[1]);
+  for (const m of between.matchAll(new RegExp(`\\b${name}\\[\\s*["']([A-Za-z_$][\\w$]*)["']\\s*\\]\\s*=[^=]`, "g"))) keys.add(m[1]);
+  return [...keys];
+}
+
 const calls = [];        // { screen, route, keys[], spread }
+const unreadableBody = [];  // 🔴 몸통을 못 읽은 짝 — **조용히 넘기지 않는다**(⊘ 로 센다)
 const dynamicRoutes = [];   // 화면에서 경로가 변수라 못 읽은 것
 const frameworkDynamic = []; // 틀(ui.js) 안의 변수 경로 — `UI.api(path, …)` 재시도라 정당하다
 const rawFetch = [];       // UI.api 를 안 거친 화면
@@ -144,9 +172,25 @@ for (const f of walk(PUB, /\.(html|js)$/)) {
        🔴 «못 본다»고 말하지도 않고 초록이 되는, 이 자가 제일 하면 안 되는 모양이다(AC-9 «조용한 초록»).
        ⇒ 이제 **글자로 된 경로가 아니면 무조건** 변수 경로로 센다. 안 보면 안 본다고 말한다. */
     if (!pm) { (rel(f) === "public/js/ui.js" ? frameworkDynamic : dynamicRoutes).push({ screen: rel(f), snip: args.slice(0, 70).replace(/\s+/g, " ") }); continue; }
-    const bk = bodyKeys(args);
-    if (!bk || !bk.keys.length) continue;
-    calls.push({ screen: rel(f), route: pm[1], keys: bk.keys, spread: bk.spread });
+    /* 🔴 [2026-09-21 · A 의 새 화면이 드러냈다] **바로 윗 주석의 교훈을 몸통에는 안 걸고 있었다.**
+       경로가 변수면 «못 본다»고 적으면서, **몸통이 변수면 `continue` 로 조용히 넘겼다** — 같은 병을 한 줄 아래서 저질렀다.
+       실제로 새 났다: A 가 `accounts.html` 에 «언제부터 쓰셨어요» 칸을 달고
+           `const body = { id, displayName, … };  if (…) body.openedAt = …;  UI.api("/api/accounts-update", { body })`
+       로 보냈는데, 이 자는 `body: {` 라는 글자가 없어 **그 짝을 통째로 안 셌다.**
+       `accounts-update` 는 `openedAt` 을 **안 읽는다** ⇒ 손님이 적은 날짜가 조용히 버려지는데 **내가 «어긋남 0»이라 적었다.**
+       ⇒ ①**변수 몸통을 한 겹 따라간다**(`const body = {…}` + 뒤따르는 `body.키 = …`) ②그래도 못 읽으면 **⊘ 로 적는다.** */
+    let bk = bodyKeys(args);
+    if (!bk) {
+      const vm = args.match(/\bbody\s*:\s*([A-Za-z_$][\w$]*)/) || args.match(/\{[^{}]*\bbody\b\s*[,}]/) ? (args.match(/\bbody\s*:\s*([A-Za-z_$][\w$]*)/) || [, "body"]) : null;
+      if (vm) {
+        const keys = varObjectKeys(src, vm[1], m.index);
+        if (keys.length) bk = { keys, spread: false, viaVar: vm[1] };
+        else { unreadableBody.push({ screen: rel(f), route: pm[1], varName: vm[1] }); continue; }
+      }
+    }
+    if (!bk) continue;                       // 몸통이 아예 없는 호출(GET) — 잴 것이 없다
+    if (!bk.keys.length) { unreadableBody.push({ screen: rel(f), route: pm[1], varName: "(키를 못 뽑았다)" }); continue; }
+    calls.push({ screen: rel(f), route: pm[1], keys: bk.keys, spread: bk.spread, viaVar: bk.viaVar });
   }
   /* 🔴 `public/js/ui.js` 는 **틀 자신**이다 — `UI.api` 가 거기 산다.
      그 안의 생 `fetch` 넷은 **정당하다**: 셋은 `auth-refresh`(=`UI.api` 가 401 을 만나 부르는 그 장치 자신이라
