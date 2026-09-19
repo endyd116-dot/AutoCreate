@@ -473,10 +473,10 @@ export default async (req: Request): Promise<Response> => {
            산출물만 지운다(원장·감사·piece 행은 그대로). 코인은 위 규칙대로(실패 환급분만 재차감 · 검수 단계 재생성은 0). */
         await q(sql`DELETE FROM piece_assets WHERE piece_id = ${id} AND tenant_id = ${tid} AND kind IN ('clip','audio','image','srt','video','thumb')`);
         await q(sql`UPDATE pieces SET status = 'generating', gate_report = NULL, body = NULL, blocks = '[]'::jsonb,
-          meta = (meta - 'script' - 'drafts' - 'render' - 'youtube' - 'chainStage') || ${jsonb({ stage: "script", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null, chainLock: null, chainResume: { count: 0 }, angle: note ? `${String(m.angle || "")} — 사용자 요청: ${note}` : m.angle })},
+          meta = (meta - 'script' - 'drafts' - 'render' - 'youtube' - 'chainStage') || ${jsonb({ stage: "script", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null, chainLock: null, chainResume: { count: 0 } })},
           updated_at = NOW() WHERE id = ${id}`);
       } else {
-        await q(sql`UPDATE pieces SET status = 'generating', gate_report = NULL, meta = meta || ${jsonb({ stage: "writing", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null, angle: note ? `${String(m.angle || "")} — 사용자 요청: ${note}` : m.angle })}, updated_at = NOW() WHERE id = ${id}`);
+        await q(sql`UPDATE pieces SET status = 'generating', gate_report = NULL, meta = meta || ${jsonb({ stage: "writing", regenCount: regen + 1, regenNote: note || null, failReason: null, refunded: null })}, updated_at = NOW() WHERE id = ${id}`);
       }
       if (p.slot_id) await q(sql`UPDATE slots SET status = 'producing', updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
       const fired = isVideo ? await triggerVideo(id, tid) : await triggerGenerate(id, tid);

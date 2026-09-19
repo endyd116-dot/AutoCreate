@@ -20,6 +20,7 @@ import { isVideoChannel } from "../../lib/video/types";
 import { listRules, coinsPerWeek, ruleTierOf, rollSlots, readScheduleSettings, readSettingsRaw, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
 import { listAccounts } from "../../lib/accounts";   // [R10-9] 규칙 견적을 계정 등급으로 세려면 계정 목록이 필요하다
 import { isCardnewsChannel } from "../../lib/writing-contracts";   // [R8 §2.5] «카드뉴스 채널인가» 정본 한 곳
+import { DAY_FREED_STATUSES, statusListSql } from "../../lib/cadence-check";      // [2026-09-21 B] «그날 자리를 놓아 준 상태» 정본 한 곳 — 세는 쪽과 놓아 주는 쪽이 갈라지면 «취소가 취소가 아니»게 된다
 import { mergeSettings } from "./tenant-settings";
 import { kstDateStr, addDays } from "../../lib/best-time";
 import { sql } from "drizzle-orm";
@@ -202,7 +203,16 @@ export default async (req: Request): Promise<Response> => {
       if (!s) return json({ ok: false, error: "그 자리를 찾을 수 없어요.", step: "not_found" }, 404);
       if (["published", "publishing"].includes(String(s.status))) return json({ ok: false, step: "state", error: "이미 나간 글은 건너뛸 수 없어요." }, 400);
       await q(sql`UPDATE slots SET status = 'skipped', updated_at = NOW() WHERE id = ${id}`);
-      if (s.piece_id) await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: "편성표에서 건너뜀" })}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(s.piece_id)} AND status IN ('generating','draft','in_review','approved','scheduled')`);
+      /* 🔴 [2026-09-21 · B] **손으로 적은 목록을 버렸다 — «취소가 취소가 아니었다».**
+         종전엔 `status IN ('generating','draft','in_review','approved','scheduled')` 일 때만 글을 버렸다.
+         그런데 하루 몫을 **세는 쪽**(`cadence-check`)은 «`failed`·`rejected`·`published` 빼고 다 센다» 였다 —
+         두 목록이 **서로의 여집합이 아니라서** 라이브에서 자리를 먹던 `awaiting_manual`(11건)·`edited`(2건) 은
+         «이날은 건너뛰기»를 눌러도 **그날 몫이 안 풀렸다.** 손님 눈엔 «취소했는데 오늘 더 못 올린다» 다.
+         ⇒ 이제 두 곳이 `DAY_FREED_STATUSES` **한 벌**을 본다. 여기서는 그 여집합을 버린다.
+         ⚠️ `publishing` 만 빼 둔다 — **지금 나가는 중**이라 되돌릴 수 없다(위 슬롯 검사도 같은 이유로 막는다). */
+      if (s.piece_id) await q(sql`UPDATE pieces SET status = 'rejected', meta = meta || ${jsonb({ rejectReason: "편성표에서 건너뜀" })}, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = ${n(s.piece_id)}
+          AND status NOT IN (${statusListSql([...DAY_FREED_STATUSES, "publishing"])})`);
       await writeAudit({ tenantId: tid, action: "slot_skip", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `slot:${id}` });
       return json({ ok: true });
     }
