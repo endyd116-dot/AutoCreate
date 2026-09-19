@@ -97,7 +97,7 @@ export function countAffiliateLinks(html: string): number {
 /** 애드센스를 붙일 수 있는 채널(네이버 블로그는 애드포스트라 제외). */
 export const ADSENSE_CHANNELS: ReadonlySet<string> = new Set(["tistory", "blogger", "wordpress"]);
 
-const CREDIT_RE = /<div[^>]*class="[^"]*photo-credit[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi;
+const CREDIT_RE = /<div[^>]*class="[^"]*\bphoto-credit\b[^"]*"[^>]*>[\s\S]*?<\/div>\s*/gi;
 
 /**
  * 🔴 스톡 사진 크레딧을 **본문 끝에 넣어 준다**(2026-09-16 메인 · A 가 «부르는 곳 0» 을 잡았다).

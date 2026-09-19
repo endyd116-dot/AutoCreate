@@ -33,7 +33,9 @@ function kstAt(d: Date): string {
 
 export type CadenceVerdict =
   | { ok: true; dailyCap: number; gapMin: number; plannedToday: number }
-  | { ok: false; step: "cadence"; error: string; retryAt?: string; gapMin?: number; dailyCap?: number; postsToday?: number; capped?: boolean };
+  /** 🔴 `canOverride` = «그래도 올릴래요» 단추를 **띄워도 되나**(워밍업이 깎고 있고, 넘기면 자리가 생긴다).
+   *   `publish-now` 가 이미 같은 이름으로 화면에 주고 있다 — **두 곳이 같은 낱말**이어야 화면이 두 말을 안 한다(AC-52). */
+  | { ok: false; step: "cadence"; error: string; retryAt?: string; gapMin?: number; dailyCap?: number; postsToday?: number; capped?: boolean; canOverride?: boolean };
 
 /**
  * `at` 시각에 `accountId` 로 한 편을 더 낼 수 있나.
@@ -41,6 +43,18 @@ export type CadenceVerdict =
  */
 export async function checkCadenceAt(a: {
   tenantId: number; accountId: number; channel: string; at: Date; excludePieceId?: number | null;
+  /**
+   * 🔴 [2026-09-20 B2] **워밍업이 깎은 몫만** «이번 회차만» 넘긴다 — 고객이 «그래도 올릴래요»를 **직접 눌렀을 때**.
+   *
+   *   ══ 왜 생겼나 ══
+   *     `publish-now`(발행)에는 이 문이 **처음부터 있었는데**(`{ override: warmupOverride }`) **쓰기(`pieces-self`)에는 없었다.**
+   *     같은 소프트 규칙인데 **문이 한쪽에만** 있었던 것이다. 그래서 워밍업 주간 몫을 쓴 고객은
+     *     🔴 **글을 아예 못 썼다 — 나중에 올릴 예약조차 못 만들었다.**
+   *     (실측 2026-09-20: 어제 연결한 계정이 1주차 몫 1건을 쓰자 `cap=0` 이 되어 **모든 날짜**가 막혔다.)
+   *   🔴 **넘기는 것은 «우리 추정»(워밍업)뿐이다** — `daily_cap`(고객이 정한 값)은 그대로 지킨다.
+   *      `publish-now` 가 이미 그 선을 그어 뒀고(:95) 여기도 **같은 선**이다(두 곳이 다른 선을 그으면 그게 또 갈림이다).
+   */
+  warmupOverride?: boolean;
 }): Promise<CadenceVerdict> {
   const tid = a.tenantId, accountId = a.accountId, at = a.at;
   const skip = a.excludePieceId ? n(a.excludePieceId) : 0;
@@ -59,7 +73,13 @@ export async function checkCadenceAt(a: {
   }
 
   const warm = { openedAt: (acc.opened_at as string | null) ?? null, createdAt: (acc.created_at as string | null) ?? null, off: acc.warmup_off === true, postsThisWeek: n(acc.posts_this_week) };
-  const cap = effectiveDailyCap(n(acc.daily_cap) || 2, warm, at);
+  /* 🔴 `publish-now:94-95` 와 **같은 두 줄**이다 — 고객이 정한 값은 하드, 워밍업이 깎은 값은 소프트.
+     넘기더라도 `customerCap` 은 못 넘는다(그건 고객의 뜻이다). */
+  const customerCap = n(acc.daily_cap) || 2;
+  const warmCap = effectiveDailyCap(customerCap, warm, at, { override: a.warmupOverride === true });
+  const cap = a.warmupOverride === true ? customerCap : warmCap;
+  /** 넘길 문이 **실제로 도움이 되나** — 워밍업이 깎고 있고, 넘기면 자리가 생기는 경우에만 «그래도 올릴래요»를 권한다. */
+  const canOverride = !a.warmupOverride && warmCap < customerCap;
   const gapMin = effectiveMinGapMin(n(acc.min_gap_min) || 180, warm, at);
   const day = kstDateStr(at);
 
@@ -78,10 +98,18 @@ export async function checkCadenceAt(a: {
     ) AS c`);
   const planned = n(cnt?.c);
   if (planned >= cap) {
-    return { ok: false, step: "cadence", capped: true, dailyCap: cap, postsToday: planned,
+    /* 🔴 [2026-09-20 B2] **할 수 없는 일을 하라고 안내하지 않는다.**
+       종전 문구는 `cap === 0` 일 때 «**다른 날로 잡아 주세요**» 였다. 그런데 `cap 0` 은 **모든 날짜를 막는다** —
+       고객이 그 말대로 백 번 날짜를 바꿔도 **영영 안 된다.** 막는 것보다 **틀린 길을 가리키는 것**이 나쁘다.
+       ⇒ §3 대로 ①사실 ②어떻게 하면 되는지(= 넘길 문) ③우리가 대신 해 주는 것. 겁주지 않고 발뺌하지 않는다. */
+    return { ok: false, step: "cadence", capped: true, dailyCap: cap, postsToday: planned, ...(canOverride ? { canOverride: true } : {}),
       error: cap === 0
-        ? "이 계정은 이번 주 몫을 다 썼어요(새 계정은 천천히 늘려요). 다른 날로 잡아 주세요."
-        : `그날 이 계정으로 ${cap}건까지 올릴 수 있어요(이미 ${planned}건). 다른 날이나 다른 계정을 골라 주세요.` };
+        ? (canOverride
+          ? "새로 연결한 계정이라 이번 주는 1건까지만 자동으로 올리고 있어요. 지금 꼭 올리셔야 하면 «그래도 올릴래요»를 눌러 주세요 — 이번 한 번만 올려 드려요."
+          : "이 계정은 이번 주 몫을 다 썼어요(새로 연결한 계정은 천천히 늘려요). 다음 주가 되면 다시 올릴 수 있어요.")
+        : canOverride
+          ? `그날 이 계정으로 ${cap}건까지 올리고 있어요(이미 ${planned}건). 다른 날·다른 계정을 고르시거나, «그래도 올릴래요»로 이번 한 번만 더 올리실 수 있어요.`
+          : `그날 이 계정으로 ${cap}건까지 올릴 수 있어요(이미 ${planned}건). 다른 날이나 다른 계정을 골라 주세요.` };
   }
 
   /* ④ 같은 계정 — 앞뒤로 `gapMin` 안에 다른 글이 있으면 안 된다(뒤에 있는 글도 본다: 앞에 끼워 넣으면 그 글이 밀린다).
