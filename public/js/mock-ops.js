@@ -79,6 +79,23 @@
       703: [{ id: 5, from: "system", text: "계정 @life_c 가 24시간 안에 3회 정지 판정을 받았어요. 승계는 @cook_a 로 됐어요.", at: iso(now - 40 * 60e3) }], 704: [{ id: 6, from: "customer", text: "지난주 충전한 코인을 환불하고 싶어요.", at: iso(now - 4 * 86400e3) }, { id: 7, from: "operator", text: "미사용 90코인 기준 45,000원(부가세 포함 49,500원)이 환불돼요. 진행할까요?", at: iso(now - 3.5 * 86400e3) }, { id: 8, from: "customer", text: "네 진행해 주세요.", at: iso(now - 3.2 * 86400e3) }, { id: 9, from: "operator", text: "환불 처리했어요. 카드사 사정에 따라 3~5일 걸려요.", at: iso(now - 3 * 86400e3) }], 705: [] },
     macros: [{ id: 1, title: "다시 로그인 안내", text: "앱 «내 계정 → 다시 로그인»을 눌러 주세요. PC 프로그램이 로그인 창을 열어요.", tags: ["러너"] }, { id: 2, title: "결제 실패 안내", text: "카드사에서 승인이 거절됐어요. 다른 카드로 «요금제 → 카드 등록»을 다시 해 주세요.", tags: ["결제"] }, { id: 3, title: "환불 안내", text: "미사용 코인만 충전 후 7일 안에 환불돼요. 단가는 그 주문의 결제액 ÷ 받은 코인이에요.", tags: ["환불"] }, { id: 4, title: "정지 승계 안내", text: "정지된 계정의 예약 글은 같은 채널의 다른 계정으로 옮겨 두었어요. 코인은 더 들지 않아요.", tags: ["계정정지"] }],
     faqs: [{ id: 1, q: "코인은 언제까지 쓸 수 있나요?", a: "충전한 코인은 1년, 플랜에 포함된 코인은 그달 말까지예요.", order: 1, public: true }, { id: 2, q: "네이버·티스토리는 왜 내 PC 프로그램이 필요한가요?", a: "두 곳은 바깥에서 글을 넣는 길이 없어서 PC 프로그램이 대신 올려요.", order: 2, public: true }, { id: 3, q: "환불은 어떻게 되나요?", a: "미사용 코인은 충전 후 7일 안에 환불돼요. 구독은 기간 말에 해지돼요.", order: 3, public: true }],
+    /* ── [AC-180 · A] 내리기(takedown_notices) — 🔴 «볼 만한 상태»로 둔다:
+         기한 지난 것 1건(대기열에 줄이 생긴다) · 단계가 진행된 것 1건 · 주소 없는 것 1건 · 끝난 것 1건. ── */
+    takedowns: fresh ? [] : [
+      { id: 601, tenantId: 3, tenantName: "팁스고", status: "open", kind: "copyright", kindLabel: "저작권", reason: "사진 3장이 저작권자 허락 없이 실렸어요. 그 사진을 빼거나 글을 내려 주세요.", claimant: "스톡사진 코리아", evidence: "메일 2026-09-10 · 사건번호 KR-2231", channel: "tistory", externalUrl: "https://tipsgo.tistory.com/122", pieceId: 9012, postId: 4410, accountId: 2, receivedAt: iso(now - 9 * 86400e3), dueAt: iso(now - 2 * 86400e3), overdue: true, resolution: null },
+      { id: 602, tenantId: 1, tenantName: "모의", status: "disconnected", kind: "defamation", kindLabel: "명예훼손·비방", reason: "실명이 들어간 후기가 사실과 다르다는 신고예요. 그 문단을 고치거나 글을 내려 주세요.", claimant: "본인", evidence: null, channel: "naver_blog", externalUrl: "https://blog.naver.com/mock/223", pieceId: 9101, postId: 4502, accountId: 1, receivedAt: iso(now - 14 * 86400e3), dueAt: iso(now - 7 * 86400e3), overdue: false, resolution: null },
+      { id: 603, tenantId: 2, tenantName: "요리하는 집", status: "open", kind: "policy", kindLabel: "채널 정책 위반", reason: "제휴 링크 고지 문장이 빠졌다는 신고예요. 고지 문장을 켜면 첫머리에 자동으로 실려요.", claimant: null, evidence: null, channel: null, externalUrl: null, pieceId: null, postId: null, accountId: null, receivedAt: iso(now - 2 * 86400e3), dueAt: iso(now + 5 * 86400e3), overdue: false, resolution: null },
+      { id: 604, tenantId: 4, tenantName: "에이전시 K", status: "resolved", kind: "privacy", kindLabel: "개인정보", reason: "사진에 다른 사람 얼굴이 나왔다는 신고였어요.", claimant: "신고자", evidence: null, channel: "wordpress", externalUrl: "https://agencyk.com/p/88", pieceId: 9200, postId: 4600, accountId: null, receivedAt: iso(now - 30 * 86400e3), dueAt: iso(now - 23 * 86400e3), overdue: false, resolution: "고객이 사진을 바꿔 다시 올렸어요." },
+    ],
+    /* ── [AC-181 · A] 전용 IP(proxies) — 🔴 접속 주소(url_enc)는 **응답에 없다**. 모의에도 두지 않는다(있으면 화면이 기대하게 된다).
+         남은 것 2 · 쓰는 중 2 · 멈춘 채 붙어 있는 것 1(= «IP 가 멈춘 계정 1곳») · 곧 만료 1. ── */
+    proxies: fresh ? [] : [
+      { id: 301, label: "주거-KR-1", provider: "brightdata", product: "Static Residential KR", kind: "residential", region: "KR", status: "active", billingUnit: "ip", unitPriceKrw: 5200, costKrwMonth: 5200, bandwidthGbMonth: null, stickyGuaranteed: true, lastExitIp: "121.163.44.10", lastCheckAt: iso(now - 40 * 60e3), expiresAt: iso(now + 200 * 86400e3), assignedTo: { accountId: 1, handle: "cook_a", tenantId: 1 } },
+      { id: 302, label: "주거-KR-2", provider: "brightdata", product: "Static Residential KR", kind: "residential", region: "KR", status: "active", billingUnit: "ip", unitPriceKrw: 5200, costKrwMonth: 5200, bandwidthGbMonth: null, stickyGuaranteed: true, lastExitIp: null, lastCheckAt: null, expiresAt: iso(now + 200 * 86400e3), assignedTo: null },
+      { id: 303, label: "모바일-KR-1", provider: "자체 회선", product: "LTE 라우터 A", kind: "mobile", region: "KR", status: "active", billingUnit: "ip", unitPriceKrw: 2400, costKrwMonth: 2400, bandwidthGbMonth: null, stickyGuaranteed: true, lastExitIp: "39.7.51.8", lastCheckAt: iso(now - 3 * 3600e3), expiresAt: iso(now + 12 * 86400e3), assignedTo: { accountId: 2, handle: "tips_b", tenantId: 3 } },
+      { id: 304, label: "주거-KR-3", provider: "oxylabs", product: "ISP KR", kind: "residential", region: "KR", status: "down", billingUnit: "gb", unitPriceKrw: 3400, costKrwMonth: 0, bandwidthGbMonth: 2.5, stickyGuaranteed: false, lastExitIp: "175.223.9.44", lastCheckAt: iso(now - 26 * 3600e3), expiresAt: null, assignedTo: { accountId: 4, handle: "shorts_d", tenantId: 1 } },
+      { id: 305, label: "주거-KR-4", provider: "oxylabs", product: "ISP KR", kind: "residential", region: "KR", status: "active", billingUnit: "ip", unitPriceKrw: 6100, costKrwMonth: 6100, bandwidthGbMonth: null, stickyGuaranteed: true, lastExitIp: null, lastCheckAt: iso(now - 5 * 86400e3), expiresAt: iso(now + 9 * 86400e3), assignedTo: null },
+    ],
     /* ── [B2] 러너 팜(ops-runners.ts) — runner_devices + farm 집계 ── */
     runners: fresh ? [] : [
       { id: 1, name: "farm-01", kind: "managed", tenantId: null, tenantKey: null, online: true, lastSeenAt: iso(now - 20e3), version: "1.0.3", active: 2, queued: 3 },
@@ -120,7 +137,7 @@
   });
 
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || !S.ai || !S.ai.settings || !S.disclosure || !S.disclosure.text || qs.get("reset") === "1" || !S.tickets || !S.payment) { S = seed(); save(); }
+  if (!S || fresh || !S.ai || !S.ai.settings || !S.disclosure || !S.disclosure.text || qs.get("reset") === "1" || !S.tickets || !S.payment || !S.takedowns || !S.proxies) { S = seed(); save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const forbid = () => ({ ok: false, step: "forbidden", error: "이 역할로는 할 수 없어요.", status: 403 });
@@ -257,6 +274,63 @@
       if (b.action === "release") { const n = x.active || 0; x.active = 0; x.queued = (x.queued || 0) + n; return { ok: true, id: x.id, released: n }; }
       if (b.action === "remove") { S.runners = S.runners.filter((r) => r.id !== x.id); return { ok: true, id: x.id, removed: true }; }
       return err("action", "action 은 rebind|release|remove"); },
+    /* ── [AC-180 · A] 내리기 — ops-takedown.ts(조회·동작 admin+). 🔴 `due` = status open + 기한 지난 것(서버 dueNotices 와 같은 잣대). ── */
+    "ops-takedowns": (_b, q) => { if (need("admin")) return forbid();
+      const st = q.get("status") || ""; const tid = Number(q.get("tenantId")) || 0;
+      const size = Math.min(200, Math.max(1, Number(q.get("size")) || 50)); const page = Math.max(1, Number(q.get("page")) || 1);
+      const all = S.takedowns.filter((x) => (!st || x.status === st) && (!tid || x.tenantId === tid)).slice().sort((a, b) => b.id - a.id);
+      const KINDS = [["copyright", "저작권"], ["defamation", "명예훼손·비방"], ["privacy", "개인정보"], ["policy", "채널 정책 위반"], ["other", "기타"]];
+      const due = S.takedowns.filter((x) => x.status === "open" && UI.utc(x.dueAt).getTime() <= Date.now())
+        .map((x) => ({ id: x.id, tenantId: x.tenantId, dueAt: x.dueAt, reason: x.reason }));
+      return { ok: true, total: all.length, page, size, kinds: KINDS.map(([key, label]) => ({ key, label })), due,
+        notices: all.slice((page - 1) * size, page * size).map((x) => ({ ...x, overdue: x.status === "open" && UI.utc(x.dueAt).getTime() < Date.now() })) }; },
+    "ops-takedown": (b) => { if (need("admin")) return forbid();
+      const t = tn(b.tenantId); if (!t) return err("tenant", "그 고객을 찾을 수 없어요.");
+      if (String(b.reason || "").trim().length < 5) return err("reason", "고객에게 보일 사유를 사람말로 적어 주세요(무엇이 왜 문제인지).");
+      if (!b.pieceId && !b.postId && !String(b.externalUrl || "").trim()) return err("target", "어느 글인지(주소 또는 글 번호) 적어 주세요.");
+      const KL = { copyright: "저작권", defamation: "명예훼손·비방", privacy: "개인정보", policy: "채널 정책 위반", other: "기타" };
+      const kind = KL[b.kind] ? b.kind : "other"; const days = Math.max(1, Math.min(30, Number(b.dueDays) || 7));
+      const n = { id: S.nextId++, tenantId: t.id, tenantName: t.name, status: "open", kind, kindLabel: KL[kind], reason: String(b.reason).trim(),
+        claimant: b.claimant || null, evidence: b.evidence || null, channel: null, externalUrl: b.externalUrl || null,
+        pieceId: b.pieceId ? Number(b.pieceId) : null, postId: null, accountId: null,
+        receivedAt: iso(Date.now()), dueAt: iso(Date.now() + days * 86400e3), overdue: false, resolution: null };
+      S.takedowns.unshift(n); return { ok: true, notice: n, stoppedSlots: 2, status: 201 }; },
+    "ops-takedown-action": (b) => { if (need("admin")) return forbid();
+      const x = S.takedowns.find((z) => z.id === Number(b.id)); if (!x) return err("not_found", "그 신고를 찾을 수 없어요.", { status: 404 });
+      const a = String(b.action || "");
+      if (a === "disconnect") { x.status = "disconnected"; return { ok: true, status: x.status, affected: x.accountId ? 1 : 0 }; }
+      if (a === "suspend") { x.status = "suspended"; const t = tn(x.tenantId); if (t) t.status = "suspended"; return { ok: true, status: x.status }; }
+      if (a === "resolve" || a === "dismiss") { x.status = a === "dismiss" ? "dismissed" : "resolved"; x.resolution = b.note || null; return { ok: true, status: x.status }; }
+      return err("action", "action 은 disconnect · suspend · resolve · dismiss 중 하나예요."); },
+    /* ── [AC-181 · A] 전용 IP — ops-proxies.ts(조회·배정·상태 admin+ · 🔴 등록만 super_admin). 접속 주소는 **응답에 없다**. ── */
+    "ops-proxies": (b) => { if (need("admin")) return forbid();
+      const stock = () => ({ free: S.proxies.filter((p) => p.status === "active" && !p.assignedTo).length,
+        assigned: S.proxies.filter((p) => p.assignedTo).length, down: S.proxies.filter((p) => p.status !== "active").length });
+      if (!b || !b.action) return { ok: true, stock: stock(), proxies: S.proxies.map((p) => ({ ...p })) };
+      if (b.action === "status") { const p = S.proxies.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "그 IP 를 찾을 수 없어요.", { status: 404 });
+        if (!["active", "down", "expired"].includes(String(b.status))) return err("status", "status 는 active/down/expired");
+        p.status = b.status; return { ok: true, proxy: { id: p.id, label: p.label, status: p.status } }; }
+      if (b.action !== "add") return err("action", "action 은 add/status");
+      if (need("super_admin")) return forbid();
+      const label = String(b.label || "").trim(); if (!label) return err("label", "이름을 입력해 주세요.");
+      if (!/^(https?|socks[45]?):\/\/[^\s]+$/i.test(String(b.url || ""))) return err("url", "접속 주소가 올바르지 않아요(http://user:pass@host:port).");
+      const p = { id: S.nextId++, label, provider: b.provider || null, product: b.product || null, kind: b.kind || "residential", region: b.region || null,
+        status: "active", billingUnit: b.billingUnit || "ip", unitPriceKrw: Number(b.unitPriceKrw) || 0, costKrwMonth: Number(b.costKrwMonth) || 0,
+        bandwidthGbMonth: b.bandwidthGbMonth == null ? null : Number(b.bandwidthGbMonth), stickyGuaranteed: b.stickyGuaranteed === true,
+        lastExitIp: null, lastCheckAt: null, expiresAt: b.expiresAt ? iso(new Date(b.expiresAt).getTime()) : null, assignedTo: null };
+      S.proxies.unshift(p); return { ok: true, proxy: { id: p.id, label: p.label } }; },
+    "ops-proxy-assign": (b) => { if (need("admin")) return forbid();
+      const accountId = Number(b.accountId) || 0; if (!accountId) return err("accountId", "accountId");
+      if (String(b.action || "") === "release") { const p = S.proxies.find((x) => x.assignedTo && x.assignedTo.accountId === accountId);
+        if (!p) return err("not_assigned", "이 계정에는 붙어 있는 IP 가 없어요.", { status: 404 });
+        const id = p.id; p.assignedTo = null; return { ok: true, released: true, proxyId: id }; }
+      if (S.proxies.some((x) => x.assignedTo && x.assignedTo.accountId === accountId)) return err("already", "이 계정에는 이미 전용 IP 가 붙어 있어요.", { status: 409 });
+      const want = Number(b.proxyId) || 0;
+      const p = S.proxies.find((x) => x.status === "active" && !x.assignedTo && (!want || x.id === want));
+      /* 🔴 재고가 없으면 **실패가 아니라 «준비 중»**이다(lib/proxies.ts) — 화면이 그렇게 읽는지 여기서 보인다. */
+      if (!p) return { ok: true, pending: true, reason: "no_stock", message: "전용 IP 를 준비하고 있어요. 준비되면 바로 붙여 드릴게요." };
+      p.assignedTo = { accountId, handle: "acc" + accountId, tenantId: Number(b.tenantId) || 1 };
+      return { ok: true, proxyId: p.id, label: p.label }; },
     "ops-canary": (_b, q) => ({ ok: true, days: Number(q.get("days")) || 14, channels: S.canary.map((c) => ({ ...c })) }),
     /* ── [B2] AI — ops-ai.ts(조회 operator+ · 변경 admin+ · 화면은 super_admin 잠금) ── */
     "ops-ai-models": () => ({ ok: true, roles: S.ai.roles.map((r) => ({ ...r })), settings: { ...S.ai.settings }, video: { ...S.ai.video } }),

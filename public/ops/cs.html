@@ -13,7 +13,7 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">CS</span><span class="sp"></span></div>
-<div class="group"><div class="stat4" id="stat"></div></div>
+<div class="group"><div class="gt">티켓 현황 <a href="/ops/takedowns.html">내리기</a></div><div class="stat4" id="stat"></div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="st" style="margin:0"><button class="on" data-v="">전체</button><button data-v="open">열림</button><button data-v="progress">진행</button><button data-v="hold">보류</button><button data-v="resolved">해결</button></div><div class="seg" id="pr" style="margin:0"><button class="on" data-v="">우선순위</button><button data-v="urgent">긴급</button><button data-v="high">높음</button></div><div class="seg" id="mine" style="margin:0"><button data-v="">내 것만</button></div></div>
 <div class="group"><div class="gt">티켓함 <a href="/ops/cs-faq.html">FAQ · 매크로</a></div><div id="list"></div></div>
   </main>
@@ -21,7 +21,7 @@
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=29"></script>
 <script src="/js/ops.js?v=3"></script>
-<script src="/js/mock-ops.js?v=1"></script>
+<script src="/js/mock-ops.js?v=2"></script>
 <script>
 (async () => {
 const op = await OPS.boot("cs"); if (!op) return;

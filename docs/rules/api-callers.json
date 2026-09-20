@@ -9,24 +9,16 @@
     "이제 부르는 데가 생기면 그 줄을 지운다 — 자가 «낡은 등록»으로 운다."
   ],
   "_언제": "2026-09-20 · C (첫 등록 22종)",
-
   "바깥이 부른다(코드로는 증명할 수 없다)": {
     "/api/cs-inbound": "머리말: «메일 공급사의 인바운드 훅(Resend/SendGrid/Mailgun 계열)과 카카오 채널 훅이 여기로 밀어 넣는다» — 우리 코드가 부를 일이 없다",
     "/api/sso/enter": "머리말: «싸이렌MIS 허브 SSO 진입점» — 허브가 사용자를 이리로 보낸다",
     "/api/health": "바깥 감시가 찌르는 문. 우리 화면이 부를 이유가 없다"
   },
-
   "유물(옛 경로 · 호환으로 살려 둔다)": {
     "/api/support-ticket-create": "머리말이 스스로 적어 뒀다: «옛 경로 /api/support-ticket-create … 는 그대로 받는다(R1 화면 호환)». 지금 화면은 `/api/support-ticket` 을 쓴다",
     "/api/ops-audit": "`ops-center.ts` 가 «옛 경로는 그대로 살린다»로 남긴 묶음 경로. 지금 운영 화면(audit.html)은 `/api/ops-audit-search` 를 쓴다"
   },
-
   "화면이 없다(아직 못 만든 기능)": {
-    "/api/ops-takedown": "🔴 **내리기 콘솔이 통째로 없다** — `public/ops/**` 전수에 `ops-takedown*` 호출 0곳",
-    "/api/ops-takedowns": "🔴 같은 콘솔의 목록 문. 운영자가 신고 대기열을 볼 화면이 없다",
-    "/api/ops-takedown-action": "🔴 같은 콘솔의 동작 문. `lib/cron/takedown-watch.ts` 주석이 «사람이 여기서 누른다»고 적어 뒀는데 **누를 화면이 없다**",
-    "/api/ops-proxies": "🔴 **프록시 콘솔이 통째로 없다** — `public/ops/**` 에 호출 0곳",
-    "/api/ops-proxy-assign": "🔴 같은 콘솔의 배정 문",
     "/api/ops-ai-sync": "ai.html 은 apply·rollback·models·mode·cost-cap·video-kill 을 부르는데 **sync 만 없다**(정본 동기화 PR 열기)",
     "/api/ops-backup-status": "operators.html 이 부르지 않는다 — 백업 상태를 볼 화면이 없다",
     "/api/ops-features": "기능 스위치(byoAiKey). 운영 화면 어디에도 없다",
@@ -35,9 +27,8 @@
     "/api/ops-ticket-create": "운영이 손으로 티켓을 만드는 문. 화면 0곳",
     "/api/ops-ticket-update": "같은 묶음의 수정 문. 화면 0곳",
     "/api/photo-usage": "«이 사진이 어느 글에 쓰였나»(침해 통지·내리기의 첫 걸음 · DESIGN §5E). 부르는 화면이 없다",
-    "/api/revenue-oauth-start": "🔴 **고객이 애드센스·유튜브 수익 연결을 시작할 자리가 없다** — 302 로 구글에 보내는 문인데 `public/**` 에 호출 0곳. 짝인 `revenue-oauth-return` 은 `lib/revenue/google-oauth.ts` 가 쓴다(돌아오는 길만 있고 **나가는 길이 없다**)"
+    "/api/revenue-oauth-start": "🔴 **두 번째 문이다 — 화면은 이 길로 안 간다.** 수익 연결은 2026-09-21 에 났다(ad-media.html «수익 연결» → POST /api/revenue-sources {action:\"connect\"} → url 로 이동). 이 GET 은 302 라 **열쇠가 없을 때 503 JSON 이 브라우저에 날것으로 뜬다** — 그래서 화면이 안 쓴다. 메일·딥링크 입구로 남길지, 지울지는 메인·B 가 정한다(A 가 2026-09-21 에 올림)."
   },
-
   "조사필요(유물인지 아직인지 내가 못 가른다)": {
     "/api/coins-balance": "🔴 coins.html·home.html 전수에 `/api/coins*` 호출이 **0곳**이다. 화면이 잔액을 다른 문에서 받는 것 같은데 어디인지 못 찾았다 — 유물인지 «아직»인지 모른다. **모르는 채로 «유물»이라 적지 않는다**",
     "/api/topics-pick": "create.html 은 list·add·skip·refresh·reference·templates 를 부른다. `topics-pick`(candidate→picked)만 안 부른다 — 다른 문이 대신하는지, 빠진 건지 못 가렸다",

@@ -3632,6 +3632,34 @@ async function adsDo(kind, accountId, b) {
   UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><button class="btn secondary" type="button" data-ok>알겠어요</button></div>`,
     { title: r.ok ? "" : "그대로 두었어요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
 }
+/* [AC-182 · A · 2026-09-21] 🔴 **나가는 길**(토스 «계좌 연결» · §13.0b) — 여태 «구글로 연결»은 **계정 줄에만** 있었다.
+   그 줄은 ①계정을 아직 안 붙였거나 ②애드센스 승인 전이거나 ③유튜브 조건이 덜 차면 **아예 안 그려진다** —
+   그래서 손님이 애드센스·유튜브를 연결할 자리가 **한 곳도 없는 상태**가 될 수 있었다(돌아오는 길만 있고 나가는 길이 없다).
+   🔴 §9 — 연결을 우리 판단으로 막지 않는다. 언제든 나갈 수 있게 열어 두고, 아직 못 받는 것은 **말해 준다**. */
+const OAUTH = [["adsense", "티스토리·블로거·워드프레스 글의 광고 수익을 매일 가져와요"], ["youtube", "유튜브 쇼츠 수익을 매일 가져와요"]];
+const OAUTH_CH = { adsense: ["tistory", "blogger", "wordpress"], youtube: ["youtube_shorts"] };
+/** 집 전체로 붙인 소스(계정이 안 딸린 행) — 계정별 연결과 섞으면 «어느 것이 붙었나»가 흐려진다. */
+const srcTenant = (key) => SRC.find((s) => s.source === key && !s.accountId);
+function connectCard() {
+  return card("수익 연결", "구글 계정으로 한 번 연결하면 그다음부터는 저희가 매일 가져와요.",
+    OAUTH.map(([key, say]) => { const s = srcTenant(key); const on = !!(s && s.status === "connected");
+      return `<button type="button" class="row tap" data-oauth="${key}">${UI.srcMark(key)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(key))}</span><span class="d wrap">${UI.esc(on ? srcSub(s) : say)}</span></div>${on ? srcPill(s) : UI.chev}</button>`;
+    }).join(""));
+}
+/* 고르는 칸은 «내 계정 전체 / 계정 하나» 둘뿐 — 애드센스는 집 전체로도 사이트별로도 붙는다(서버 accountId 가 선택이다). */
+function oauthSheet(key) {
+  const mine = accounts.filter((a) => OAUTH_CH[key].includes(a.channel));
+  const s = srcTenant(key); const on = !!(s && s.status === "connected");
+  UI.sheet(`<p class="muted" style="margin:0 0 12px;line-height:1.6">새 창에서 구글에 로그인하고 «허용»을 누르면 끝이에요. ${UI.esc(key === "adsense" ? "애드센스 심사가 끝나기 전에 연결해 둬도 괜찮아요 — 수익이 생기는 날부터 들어와요." : "수익 창출 승인 전에 연결해 둬도 괜찮아요 — 승인되는 날부터 들어와요.")}</p>
+    ${mine.length ? `<div class="sec">어느 것에</div>${UI.chips("oa", [["", "내 계정 전체"], ...mine.map((a) => [String(a.id), "@" + a.handle])], "")}` : ""}
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="oaGo">${on ? "다시 연결" : "구글로 연결"}</button>${on ? `<button class="btn ghost" type="button" id="oaOff" style="color:var(--danger-ink)">끊기</button>` : ""}</div>`,
+    { title: UI.srcLabel(key), onOpen: (sh, close) => {
+      UI.bindChips(sh);
+      sh.querySelector("#oaGo").onclick = (e) => { const v = UI.chipVal(sh, "oa"); const b = e.currentTarget; close(); setTimeout(() => googleConnect(key, v ? Number(v) : null, b), 250); };
+      const off = sh.querySelector("#oaOff");
+      if (off) off.onclick = () => { close(); setTimeout(() => disconnect(key, null), 250); };
+    } });
+}
 /* 계정 행 + 아래 버튼 줄 — 카드마다 같은 자리에 같은 것(통일성) */
 const accRow = (a, sub, pill) => `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(sub)}</span></div>${pill}</div>`;
 const gaugeRow = (a, gauges, pill) => `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><div style="padding:6px 0 0">${gauges}</div></div>${pill}</div>`;
@@ -3639,7 +3667,7 @@ const notYet = `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기
 
 function render() {
   const th = EL.thresholds || {};
-  let h = "";
+  let h = connectCard();
 
   /* ① 애드포스트 — 네이버 블로그 계정마다(조건 게이지 + 자기 신고) */
   const np = EL.accounts.filter((a) => a.adpost);
@@ -3691,6 +3719,7 @@ function render() {
   UI.$$("#body [data-connect]").forEach((b) => b.onclick = () => googleConnect(b.dataset.connect, acc(b), b));
   UI.$$("#body [data-off]").forEach((b) => b.onclick = () => disconnect(b.dataset.off, acc(b)));
   UI.$$("#body [data-ads]").forEach((b) => b.onclick = () => adsDo(b.dataset.ads, acc(b), b));
+  UI.$$("#body [data-oauth]").forEach((b) => b.onclick = () => oauthSheet(b.dataset.oauth));
 }
 
 /* 한 화면 한 단계 — 신청 방법 3단계 + 외부 새 창 */
@@ -3725,7 +3754,9 @@ async function googleConnect(source, accountId, b) {
   b.disabled = true; const body = { action: "connect", source }; if (accountId) body.accountId = accountId;
   const r = await UI.api("/api/revenue-sources", { body }); b.disabled = false;
   if (r.ok && r.url) { location.href = r.url; return; }
-  if (r.step === "provider_not_configured") return UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">준비가 아직이에요</p><p class="muted" style="margin:0 0 16px">${UI.esc(UI.srcLabel(source))} 구글 연결이 열리면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } });
+  /* 🔴 여기는 **고장이 아니다**(AC-10) — 빨간 오류로 말하지 않는다. 그리고 «곧 열려요»로 끝내지도 않는다:
+     남은 것이 무엇인지, 고객이 할 일이 있는지 없는지를 **한 줄씩** 적는다. 화면은 이대로 완성이고 열쇠만 꽂으면 가동된다(§8). */
+  if (r.step === "provider_not_configured") return UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">저희 쪽 준비가 하나 남았어요</p><p class="muted" style="margin:0 0 6px;line-height:1.6">구글 로그인 창을 띄우려면 저희가 구글에서 받은 열쇠를 꽂아야 해요. 그게 아직이라 지금은 창이 안 열려요.</p><p class="muted" style="margin:0 0 16px;line-height:1.6">고객님이 하실 일은 없어요. 저희가 꽂으면 이 단추가 바로 열리고, 그때 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } });
   UI.toast(r.error || "연결을 시작하지 못했어요");
 }
 /* 키 입력 = 바텀시트 · 소스별 여러 칸 · creds 객체로 보낸다(v3.5) */
