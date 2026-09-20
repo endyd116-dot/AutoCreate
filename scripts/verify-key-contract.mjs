@@ -272,13 +272,19 @@ function readKeysFor(route) {
     return [m.index, src.length];
   };
   const spans = marks.map((m) => ({ tail: m[1], span: blockOf(m) }));
-  const mine = spans.find((s) => s.tail === tail);
-  const scoped = !!mine;
-  /* 공통 코드 = 전체에서 형제 블록을 도려낸 것(내 블록은 남긴다). */
+  /* 🔴 [2026-09-21] **한 경로가 한 파일에 블록 **여럿**일 수 있다 — 첫 것만 보면 나머지를 통째로 잃는다.**
+     `pieces.ts` 는 `if (path.endsWith("/pieces-regenerate"))` 가 **두 번** 나온다(351 앞단속 · 395 본일).
+     `const note = String(b.note ?? "")` 는 **둘째** 블록(412)에 있는데, 내 자는 첫째만 «내 블록»으로 잡고
+     둘째는 **형제 블록으로 오려내** 버렸다 ⇒ `note` 를 «서버가 안 읽는다»로 찍었다.
+     🔴 그 빨강을 내가 **진짜라고 메인·A 에 보고했다.** 서버는 처음부터 읽고 있었다 — **내 자가 틀렸다**(AC-112 ⑤).
+     ⇒ 같은 꼬리를 가진 블록을 **전부** 내 것으로 삼고, 그 어느 것도 오려내지 않는다. */
+  const mines = spans.filter((s) => s.tail === tail);
+  const scoped = mines.length > 0;
+  /* 공통 코드 = 전체에서 **형제** 블록만 도려낸 것(내 블록들은 전부 남긴다). */
   let shared = "";
   let cur = 0;
   for (const s of spans.slice().sort((a, b) => a.span[0] - b.span[0])) {
-    if (mine && s.span[0] === mine.span[0]) continue;      // 내 블록은 안 도려낸다
+    if (s.tail === tail) continue;                         // 내 꼬리의 블록은 하나도 안 도려낸다
     shared += src.slice(cur, s.span[0]);
     cur = s.span[1];
   }
