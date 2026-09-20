@@ -15,6 +15,10 @@
  *     ④ 두 갈래를 다 본다 — 키인 MID **있음** / **없음**(= `?keyinMid=0` · **지금 라이브가 이쪽**)
  *     ⑤ 🔴 안내만 있고 체크박스가 없는 판에서 «카드 등록하러 가기»가 **죽지 않나**
  *        (안내를 실으려고 시트를 열게 만들었으니, 없는 #keyin 을 읽으면 그 단추가 죽는다 — 내가 만든 새 위험을 내가 잰다)
+ *     ⑥ 🔴 카드 등록 쪽이 `payRoute` 를 **안 보내나** — 서버(billing-key.ts:43)가 **안 읽는다**.
+ *        보내는 코드가 남아 있으면 KICC_MALL_ID_KEYIN 을 꽂는 날 체크박스가 되살아나고
+ *        **«물어 놓고 조용히 버리는»** 고장이 그대로 돌아온다(2026-09-21 에 끝낸 그것).
+ *        소스 검사라 브라우저보다 먼저 돈다 — 번호는 뒤지만 순서는 앞이다.
  *
  *   종료코드: 0 = 닿는다 · 1 = 안 닿는다 · 2 = 못 쟀다(playwright 없음 · 서버 모양이 바뀜 등)
  */
@@ -72,6 +76,52 @@ else if (missing.length) {
 if (mockCode.includes("o.keyin = keyinOption()")) {
   fail++;
   say("🔴 ② 모의 `subscription` 이 **코인용** keyinOption() 을 준다 — 빌키는 available:false 고정이라 모양이 다르다");
+}
+say("");
+
+/* ═══ ⑥ 카드 등록 쪽이 payRoute 를 안 보내나 (소스 검사 — 브라우저보다 먼저) ═══ */
+const planPath = path.join(PUB, "app", "plan.html");
+if (!existsSync(planPath)) unmeasured.push("public/app/plan.html 이 없어 ⑥ 을 못 봤다");
+else {
+  const plan = readFileSync(planPath, "utf8");
+  const a0 = plan.indexOf("async function addCard()");
+  if (a0 < 0) unmeasured.push("plan.html 에 addCard() 가 없어 ⑥ 을 못 봤다(모양이 바뀌었나)");
+  else {
+    /* 함수 머리부터 **줄 맨 앞의 `}`** 까지 — 괄호를 세지 않는다 */
+    const a1 = plan.indexOf("\n}", a0);
+    const addCard = decomment(plan.slice(a0, a1 < 0 ? plan.length : a1));
+    const sends = addCard.includes("payRoute");
+    const reads = addCard.includes('querySelector("#keyin")') || addCard.includes("querySelector('#keyin')");
+    if (sends || reads) {
+      fail++;
+      say("🔴 ⑥ 카드 등록 쪽이 **고객 선택을 보내려 한다** — 서버는 안 읽는다(billing-key.ts:43 이 MID 로만 정한다)");
+      if (sends) say("   · addCard() 안에 `payRoute` 가 남아 있다");
+      if (reads) say("   · addCard() 안에서 `#keyin` 을 읽는다 — 그 체크박스는 여기 없어야 한다");
+      say("   🔴 남겨 두면 키인 MID 를 꽂는 날 «물어 놓고 조용히 버리는» 고장이 그대로 돌아온다.");
+      say("      되살릴 거면 lib/pay-route.ts·billing-key.ts 가 **실제로 듣게** 만든 다음 같이 되살려라.");
+    } else say("✓ ⑥ 카드 등록 쪽이 payRoute 를 **안 보낸다** — 화면과 서버가 같은 말을 한다");
+    /* 🔴 «보낼 것이 없다»를 **글자로** 적었나 — 변수 몸통으로 두면 사람도 자도 못 본다.
+       실제로 verify-key-contract 가 변수 몸통을 한 겹 따라가다 **다른 시트의 `const body = { planKey, cycle }`** 를 집어
+       엉뚱한 키로 빨개졌다(2026-09-21). 빈 몸통은 `body: {}` 라고 적는다. */
+    const s0 = plan.indexOf("async function startCard");
+    if (s0 < 0) unmeasured.push("plan.html 에 startCard() 가 없어 ⑥-b 를 못 봤다");
+    else {
+      const s1 = plan.indexOf("\n}", s0);
+      const startCard = decomment(plan.slice(s0, s1 < 0 ? plan.length : s1));
+      if (!/UI\.api\(\s*"\/api\/billing-key-start"\s*,\s*\{\s*body\s*:\s*\{\s*\}\s*\}/.test(startCard)) {
+        fail++;
+        say("🔴 ⑥-b 카드 등록이 **빈 몸통을 글자로 안 적었다** — `{ body: {} }` 여야 한다");
+        say("   변수 몸통(`{ body }`)으로 두면 ①언젠가 누가 거기 payRoute 를 다시 담고 ②자가 남의 `const body` 를 집어 거짓 빨강을 낸다");
+      } else say("✓ ⑥-b 카드 등록이 빈 몸통을 **글자로** 적었다(`body: {}`) — 사람도 자도 같은 것을 본다");
+    };
+    /* 🔴 코인(단건)은 반대다 — 거긴 보내야 맞다. 여기서 같이 지워 버리지 않았는지 본다(대조군). */
+    const coinsPath = path.join(PUB, "app", "coins.html");
+    if (existsSync(coinsPath)) {
+      const coins = decomment(readFileSync(coinsPath, "utf8"));
+      if (!coins.includes("payRoute")) { fail++; say("🔴 ⑥ 대조군 — **coins.html 이 payRoute 를 안 보낸다**. 거긴 진짜 고를 수 있는 자리다(resolvePayRoute 가 읽는다) — 같이 지운 것 아닌가"); }
+      else say("✓ ⑥ 대조군 — coins.html 은 payRoute 를 **그대로 보낸다**(거긴 고를 수 있다)");
+    } else unmeasured.push("public/app/coins.html 이 없어 ⑥ 대조군을 못 봤다");
+  }
 }
 say("");
 
@@ -180,7 +230,7 @@ await browser.close(); server.close();
 say("");
 if (unmeasured.length) { say("⊘ 못 쟀음 — 통과로 세지 않는다(AC-9)"); unmeasured.forEach((u) => say("   · " + u)); }
 say("─".repeat(104));
-say("🔴 이 자가 **무엇을 셌나** — 서버 문장 2개(lib/pay-route.ts 가 정본) · 모의 사본 2개 · 화면 2갈래(눌러서 시트를 열고 #keyinNote 를 **보이는지**까지) · 그 판의 으뜸 단추 2개(눌러서 무언가 나는지)");
+say("🔴 이 자가 **무엇을 셌나** — 서버 문장 2개(lib/pay-route.ts 가 정본) · 모의 사본 2개 · 화면 2갈래(눌러서 시트를 열고 #keyinNote 를 **보이는지**까지) · 그 판의 으뜸 단추 2개(눌러서 무언가 나는지) · addCard() 소스에 payRoute·#keyin 이 남았나 + 대조군으로 coins.html 은 **그대로인가**");
 say("🔴 이 자가 **못 재는 것** — 진짜 KICC 창이 실제로 어느 쪽으로 열리는지(그건 서버·결제사 몫이다) · 문장이 **맞는 말인지**(문장의 옳고 그름은 사람이 본다)");
 if (fail) { say(`\n🔴 ${fail}건 — 말해 주기가 손님에게 안 닿는다`); process.exit(1); }
 say("\n✅ 카드 등록 안내가 두 갈래 다 손님 눈에 닿는다");

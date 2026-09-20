@@ -22,16 +22,25 @@ const MUTANTS = [
   { name: "원판(아무것도 안 바꿈)", expect: "초록" },
 
   { name: "시트에서 안내 줄을 뺀다 → ③ 이 «안 그려졌다»로 울어야 한다",
-    file: TPL, from: "${keyinRow(K)}${keyinNote(K)}<div class=\"cta\">", to: "${keyinRow(K)}<div class=\"cta\">", expect: "빨강" },
+    file: TPL, from: "${keyinNote(K)}<div class=\"cta\">", to: "<div class=\"cta\">", expect: "빨강" },
 
   { name: "가드를 고치기 전으로 되돌린다 → 시트 자체가 안 열려 ③ 이 울어야 한다",
-    file: TPL, from: "if (!K || (!K.available && !K.notice)) return startCard({});", to: "if (!K || !K.available) return startCard({});", expect: "빨강" },
+    file: TPL, from: "if (!K || (!K.available && !K.notice)) return startCard();", to: "if (!K || !K.available) return startCard();", expect: "빨강" },
 
   { name: "안내를 «고를 수 있을 때만» 그리게 한다 → available:false 라 사라져 ③ 이 울어야 한다",
     file: TPL, from: "const keyinNote = (K) => K && K.notice ?", to: "const keyinNote = (K) => K && K.notice && K.available ?", expect: "빨강" },
 
-  { name: "🔴 #keyin 널 가드를 뗀다 → 체크박스 없는 판에서 으뜸 단추가 죽어 ⑤ 가 울어야 한다",
-    file: TPL, from: "const kc = sh.querySelector(\"#keyin\"); if (kc && kc.checked)", to: "if (sh.querySelector(\"#keyin\").checked)", expect: "빨강" },
+  /* 🔴 [2026-09-21] «#keyin 널 가드를 뗀다»(옛 ㉤)는 **더 이상 심을 자리가 없다** — 메인 지시로 카드 등록 쪽의
+     체크박스·payRoute 보내기를 통째로 지웠다(읽는 자리 자체가 없으니 가드할 것도 없다).
+     그 자리를 **덫이 돌아오는 변이**로 갈아 끼운다 — 지운 것이 되살아나는 것이 이제 진짜 위험이다. */
+  { name: "🔴 카드 등록 쪽에 payRoute 보내기를 되살린다 → ⑥ 이 «물어 놓고 버린다»로 울어야 한다",
+    file: TPL, from: "sh.querySelector(\"#go\").onclick = () => { close(); startCard(); };", to: "sh.querySelector(\"#go\").onclick = () => { const body = {}; const kc = sh.querySelector(\"#keyin\"); if (kc && kc.checked) body.payRoute = \"keyin\"; close(); startCard(body); };", expect: "빨강" },
+
+  { name: "🔴 빈 몸통을 다시 변수로 감춘다 → ⑥-b 가 «글자로 안 적었다»로 울어야 한다",
+    file: TPL, from: "async function startCard() { const r = await UI.api(\"/api/billing-key-start\", { body: {} });", to: "async function startCard(body) { const r = await UI.api(\"/api/billing-key-start\", { body });", expect: "빨강" },
+
+  { name: "🔴 대조군 — 코인 쪽 payRoute 까지 같이 지운다 → ⑥ 대조군이 «거긴 고를 수 있다»로 울어야 한다",
+    file: TPL, from: "const keyinBody = (sh, body) => { const el = sh.querySelector(\"#keyin\"); if (el && el.checked) body.payRoute = \"keyin\"; return body; };", to: "const keyinBody = (sh, body) => body;", expect: "빨강" },
 
   { name: "모의 문장을 한 글자 바꾼다 → ② 가 «서버와 다르다»로 울어야 한다",
     file: MOCK, from: "카드 등록은 카드사 인증 창으로 열려요.", to: "카드 등록은 카드사 인증 창으로 열립니다.", expect: "빨강" },
