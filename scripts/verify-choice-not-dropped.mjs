@@ -56,33 +56,78 @@ console.log(`\n«손님이 고른 것을 서버가 조용히 버리지 않나» 
 console.log(`■ 내가 세는 모수 — 화면이 여는 /api 경로 ${byRoute.size}개 중 **payRoute 를 보내는 자리**`);
 console.log("─".repeat(120));
 
-/* ① 화면이 payRoute 를 보내는 엔드포인트가 그 값을 실제로 쓰나 */
+/**
+ * ① 🔴 화면이 `payRoute` 를 **붙이는 모든 자리**를 세고, 그 몸통이 **어느 엔드포인트로 흘러가나**를 따라간다.
+ *
+ *   🔴 [2026-09-21 메인이 세서 갈랐다] 첫 판은 **모양 둘만** 알았다(①`UI.api(…)` 한 문장 안 ②`const 이름 = (…) => {…}` 도우미).
+ *      그런데 결제 쪽은 **셋째 모양**이었다 — `onclick` 에 **붙이는** 화살표(=`const` 가 아니다)에서 붙이고,
+ *      보내는 것도 `UI.api` 가 아니라 **`startCard(body)` 라는 한 겹 건너간 함수**였다.
+ *      ⇒ 그 자리가 **모수에 아예 안 들어와** 내 자는 초록, C 의 `verify-key-contract` 는 빨강 — **둘이 다른 말을 했다.**
+ *      **AC-119 그 모양**: 축이 «어느 문법의» 문인지 못 말하면 옆에 다른 모양이 생기는 순간 무력해진다.
+ *
+ *   ⇒ 이제 **문법이 아니라 값의 흐름**으로 센다: `x.payRoute =` 를 **전부** 찾고, 그 `x` 가 닿는 `UI.api` 를 **한 겹 이상** 따라간다.
+ *   🔴 못 따라가는 모양은 **«못 쟀음»으로 찍는다**(AC-9) — 조용히 빼면 이번 같은 일이 또 난다.
+ *   🔴 **«보내는 자리 0» 을 통과로 쓰지 않는다** — 그건 «정직한 0» 일 수도, **눈이 먼 것**일 수도 있다. 0 이면 «못 쟀음».
+ */
+let unmeasured = 0;
 {
-  /* 화면에서 `payRoute` 를 실어 보내는 호출을 찾는다(직접 `body.payRoute = …` 로 붙이는 모양 포함). */
-  const senders = new Set();
-  for (const m of TPL.matchAll(/UI\.api\("(\/api\/[a-z0-9-]+)"[^;]{0,400}?payRoute/g)) senders.add(m[1]);
-  /* 🔴 `keyinBody(sh, { … })` 처럼 **함수가 붙여 주는** 모양도 본다.
-     그 경우 몸통을 **앞 줄에서** 만들고 다음 줄에서 `UI.api(…, { body })` 로 보낸다 — 호출 **뒤쪽**을 봐야 한다.
-     (첫 판은 «UI.api 안에서 helper 를 부른다»만 봐서 코인 쪽을 통째로 놓쳤다 — «보내는 자리가 없다»고 말하며 초록이 될 뻔했다.) */
-  const helpers = [...TPL.matchAll(/const (\w+) = \([^)]*\)\s*=>\s*\{[^}]*payRoute\s*=/g)].map((m) => m[1]);
-  for (const h of helpers) {
-    for (const m of TPL.matchAll(new RegExp(`\\b${h}\\(`, "g"))) {
-      const after = TPL.slice(m.index, m.index + 600);
-      const call = after.match(/UI\.api\("(\/api\/[a-z0-9-]+)"/);
-      if (call) senders.add(call[1]);
+  /** 이름이 붙은 함수 몸통(대략) — `function f(…) {` · `const f = (…) => {` 둘 다. */
+  const bodyOfFn = (name) => {
+    const i = TPL.search(new RegExp(`(?:function\\s+${name}\\s*\\(|const\\s+${name}\\s*=\\s*(?:async\\s*)?\\()`));
+    return i < 0 ? "" : TPL.slice(i, i + 700);
+  };
+  /** 그 창 안에서 처음 나오는 `/api/…` 하나. */
+  const apiIn = (s) => (s.match(/UI\.api\("(\/api\/[a-z0-9-]+)"/) || [])[1] ?? null;
+
+  const attach = [...TPL.matchAll(/(\w+)\.payRoute\s*=/g)];
+  const resolved = [], blind = [];
+  for (const m of attach) {
+    const v = m[1];
+    /* 🔴 창을 **그 줄 끝까지**로 묶는다. 처음엔 900자를 봤는데 **다음 함수까지 넘어가** 엉뚱한 `/api/plans` 를 물었다
+       (넓게 보면 못 보던 것을 보는 게 아니라 **틀린 것을 본다**). 이 리포는 한 줄에 흐름이 다 있는 문체라 줄이 곧 그 흐름이다. */
+    const eol = TPL.indexOf("\n", m.index);
+    const ahead = TPL.slice(m.index, eol < 0 ? m.index + 400 : eol);
+    /* ㉮ 같은 흐름 안에서 바로 보낸다 */
+    let route = apiIn(ahead);
+    /* ㉯ 한 겹 건너간다 — `startCard(body)` 처럼 그 몸통을 넘겨받는 함수 */
+    if (!route) {
+      for (const c of ahead.matchAll(new RegExp(`\\b(\\w+)\\(\\s*${v}\\s*\\)`, "g"))) {
+        const r = apiIn(bodyOfFn(c[1]));
+        if (r) { route = r; break; }
+      }
     }
+    /* ㉰ 몸통을 **돌려주는** 도우미 — 부르는 자리에서 다음 줄에 보낸다(`keyinBody`) */
+    if (!route) {
+      /* 🔴 감싸는 **함수** 이름을 집는다. 첫 판은 `lastIndexOf("const ")` 로 집었는데 — 바로 앞의 `const el = …` 을 물어
+         도우미 이름을 영영 못 찾았다(그래서 코인 쪽이 «못 따라갔다»로 빠졌다). **함수 꼴인 `const` 만** 본다. */
+      const before = TPL.slice(0, m.index);
+      const fns = [...before.matchAll(/(?:function\s+(\w+)\s*\(|const\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>)/g)];
+      const name = fns.length ? (fns[fns.length - 1][1] ?? fns[fns.length - 1][2]) : null;
+      if (name && new RegExp(`return\\s+${v}`).test(ahead)) {
+        for (const c of TPL.matchAll(new RegExp(`\\b${name}\\(`, "g"))) {
+          const r = apiIn(TPL.slice(c.index, c.index + 600));
+          if (r) { route = r; break; }
+        }
+      }
+    }
+    const near = TPL.slice(Math.max(0, m.index - 60), m.index + 40).replace(/\s+/g, " ").trim();
+    if (route) resolved.push({ route, near }); else blind.push(near);
   }
 
   const dropped = [];
-  for (const r of senders) {
-    const file = byRoute.get(r);
+  for (const { route, near } of resolved) {
+    const file = byRoute.get(route);
     const src = file ? codeOnly(read(file)) : "";
-    if (!/resolvePayRoute\(|wantsKeyin\(/.test(src)) dropped.push(`${r}${file ? `(${path.basename(file)})` : "(서버 경로를 못 찾았다)"}`);
+    if (!/resolvePayRoute\(|wantsKeyin\(/.test(src)) dropped.push(`${route}${file ? `(${path.basename(file)})` : "(서버 파일을 못 찾았다)"} ← «${near.slice(-46)}»`);
   }
-  rec("① 🔴 화면이 보내는 `payRoute` 를 그 엔드포인트가 **실제로 쓴다**", senders.size > 0 && dropped.length === 0,
-    !senders.size ? "화면이 `payRoute` 를 보내는 자리가 없다 — 묻지 않으니 버릴 것도 없다"
+  const routes = [...new Set(resolved.map((r) => r.route))];
+  const ok = attach.length > 0 && blind.length === 0 && dropped.length === 0;
+  rec("① 🔴 화면이 보내는 `payRoute` 를 그 엔드포인트가 **실제로 쓴다**", ok,
+    !attach.length ? "🔴 `payRoute` 를 붙이는 자리를 하나도 못 찾았다 — **통과가 아니라 못 쟀음**이다(정직한 0 인지 눈이 먼 것인지 가릴 수 없다)"
       : dropped.length ? `🔴 물어 놓고 버리는 자리 ${dropped.length}곳: ${dropped.join(" · ")} — 고객은 고른 줄 안다`
-        : `보내는 ${senders.size}곳이 전부 \`resolvePayRoute\`(정본)를 지난다`);
+        : blind.length ? `⊘ 붙이는 자리 ${attach.length}곳 중 ${blind.length}곳은 **어디로 가는지 못 따라갔다**: ${blind.join(" · ")}`
+          : `붙이는 ${attach.length}곳 → 엔드포인트 ${routes.length}개(${routes.join(", ")})가 전부 \`resolvePayRoute\`(정본)를 지난다`);
+  if (!attach.length || blind.length) unmeasured++;
 }
 
 /* ② 못 고르는 자리에는 선택지를 안 띄우나 */
@@ -122,4 +167,6 @@ console.log("─".repeat(120));
 const bad = out.filter((x) => !x.ok).length;
 console.log(bad ? `🔴 FAIL ${bad} / ${out.length}` : `PASS ${out.length} · FAIL 0`);
 console.log("🔴 이 자는 **우리 배선**까지 잰다 — KICC 창이 실제로 어떻게 뜨는지는 라이브 실거래가 필요해 못 잰다(머리말).");
-process.exit(bad ? 1 : 0);
+/* 🔴 «못 쟀음»은 **통과가 아니다**(AC-9) — 빨강이 없어도 종료코드 2 로 내보내 배치가 초록으로 세지 않게 한다. */
+if (!bad && unmeasured) console.log("⊘ 못 쟀음 — 재료가 없거나 흐름을 못 따라갔다. **통과가 아니다.**");
+process.exit(bad ? 1 : (unmeasured ? 2 : 0));
