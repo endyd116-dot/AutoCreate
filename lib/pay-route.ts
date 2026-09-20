@@ -38,8 +38,34 @@ export async function resolvePayRoute(body: unknown): Promise<PayRoute> {
   return "keyin";
 }
 
-/** 결제 화면에 «카드번호 직접 입력» 선택지를 노출할지 + 문구. 클라이언트는 MID·정책 원본을 모른다. */
+/** 결제 화면에 «카드번호 직접 입력» 선택지를 노출할지 + 문구. 클라이언트는 MID·정책 원본을 모른다.
+ *  ⚠️ **단건 결제(코인)용이다.** 카드 등록(빌키)은 아래 `keyinOptionForBillingKey()` 를 써라 — 거기선 고객이 고를 것이 없다. */
 export async function keyinOption(): Promise<{ available: boolean; label: string; notice: string }> {
   const pol = await paymentPolicy().catch(() => ({ keyinEnabled: false, keyinLabel: "카드번호 직접 입력", keyinNotice: "" }));
   return { available: pol.keyinEnabled && isKeyinMidConfigured(), label: pol.keyinLabel, notice: pol.keyinNotice };
+}
+
+/**
+ * 🔴 **카드 등록(빌키) 화면용** — 여기서는 «카드번호 직접 입력»을 **고를 수 없다**(2026-09-21 · B 실측).
+ *
+ *   ══ 왜 «못 고른다»가 정답인가(재 보고 정했다) ══
+ *     `lib/billing/billing-key.ts:43` 이 빌키 라인을 **이렇게 정한다**:
+ *       `isKeyinMidConfigured() ? "keyin" : (opts.route === "keyin" ? "keyin" : "auth")`
+ *     ⇒ ①키인 MID 가 **있으면** — 고객이 무엇을 고르든 **언제나 keyin** 이다(고를 것이 없다. 이미 그쪽으로 간다).
+ *       ②키인 MID 가 **없으면** — keyin 을 골라도 `getKiccConfig("keyin")` 이 auth MID 로 떨어진다(고를 수가 없다).
+ *     **어느 쪽이든 고객의 선택이 결과를 못 바꾼다.** 그런데 화면은 체크박스를 그려 `payRoute` 를 보내고 있었고,
+ *     서버는 그걸 **읽지도 않았다** ⇒ 🔴 «물어 놓고 버리는» 상태였다.
+ *
+ *   ⇒ 고쳐야 할 것은 «서버가 받기»가 **아니다**(받아도 결과가 같다 — 그건 연극이다). **묻지 않는 것**이다.
+ *      대신 §9 대로 **무엇이 일어나는지 말해 준다** — `notice` 를 비워 두지 않는다(화면이 그대로 실으면 된다).
+ */
+export async function keyinOptionForBillingKey(): Promise<{ available: false; label: string; notice: string }> {
+  const pol = await paymentPolicy().catch(() => ({ keyinEnabled: false, keyinLabel: "카드번호 직접 입력", keyinNotice: "" }));
+  return {
+    available: false,
+    label: pol.keyinLabel,
+    notice: isKeyinMidConfigured()
+      ? "카드 등록은 카드번호를 직접 입력하는 창으로 열려요."
+      : "카드 등록은 카드사 인증 창으로 열려요. 카드번호 직접 입력은 코인을 살 때 고를 수 있어요.",
+  };
 }

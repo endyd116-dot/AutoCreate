@@ -21,7 +21,7 @@ import { utcDate } from "../../lib/db-util";
 import { subscriptionView, quotePlan, changePlan, cancelAtPeriodEnd, isPaidPlan, prorateQuote, type Cycle } from "../../lib/subscription";
 import { startBillingKey, approveBillingKey, removeBillingKeyOf } from "../../lib/billing/billing-key";
 import { requirePaidTerms } from "../../lib/billing/consents";
-import { keyinOption } from "../../lib/pay-route";
+import { keyinOptionForBillingKey } from "../../lib/pay-route";
 import { readKiccCallback, callbackAudit } from "../../lib/billing/callback";
 import { parseBkOrder } from "../../lib/billing/billing-key";
 import { taxInvoiceOf } from "../../lib/billing/tax";
@@ -58,7 +58,7 @@ export default async (req: Request): Promise<Response> => {
     const auth = requireUser(req); if (!auth.ok) return auth.res;
     const tid = auth.tid;
 
-    if (path.endsWith("/subscription") && req.method === "GET") return json({ ok: true, ...(await subscriptionView(tid)), keyin: await keyinOption() });
+    if (path.endsWith("/subscription") && req.method === "GET") return json({ ok: true, ...(await subscriptionView(tid)), keyin: await keyinOptionForBillingKey() });   /* 🔴 [2026-09-21 B] 카드 등록은 고객이 라인을 «고를 수 없다»(빌키는 keyin MID 가 있으면 고정 · 없으면 auth 폴백) — 묻지 않고 **무엇이 일어나는지 말해 준다**(§9) */
     if (path.endsWith("/subscription-quote")) {
       const planKey = String(url.searchParams.get("planKey") || ""); if (!await isPaidPlan(planKey)) return badRequest("planKey");
       const couponCode = (url.searchParams.get("couponCode") || "").trim() || null;
