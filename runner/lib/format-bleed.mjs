@@ -171,3 +171,86 @@ export function bleedVerdict(bleed) {
     : "";
   return { measured: true, stop, line, reason };
 }
+
+/* ═══════════════ ⑤ 🔴 «문단이 사라졌나» — 계획과 실물의 **빼기 한 번** ═══════════════
+ *
+ *   2026-09-20 실측(잡 #325·#327 · 공개 발행 0): 네이버가 평문 URL 을 **앵커로 바꾸는 동안**
+ *   우리가 친 `Enter` 가 **먹혀서** 다음 문단이 **같은 줄에 붙었다**. 그리고 발행본에서는 그 줄이 **통째로 사라졌다**.
+ *     A(`https://` 있음): 실물 문단 **3** · 계획 **4**      ← 붙었다
+ *     B(`https://` 뺌)  : 실물 문단 **4** · 계획 **4**      ← 멀쩡
+ *   🔴 **우리는 그 «실물 문단 수»를 이미 세고 있었다**(`measureFormatBleedIn` 의 `out.total`).
+ *      대조하는 사람이 없었을 뿐이다. #1986 은 `total 25` 였다 — **그때 맞춰 봤으면 그날 알았다.**
+ *   ⇒ 자를 새로 만들 것 없이 **빼기 한 번**이면 이 계열(«문단이 사라진다»)이 통째로 걸린다.
+ *
+ *   🔴 **막지 않는다**(CLAUDE §9). 이건 «고객 글에 대한 판단»도 아니고 «우리가 망쳤다»는 확정도 아니다 —
+ *      **셈이 어긋났다는 사실**이다. 재서 `formatMarks` 에 싣고 **말해 준다.**
+ *   🔴 **닿는 길은 `meta`(`formatMarks`)다** — `notes` 는 서버가 버리고(`runner-jobs.ts:854`),
+ *      콘솔은 프로세스를 죽여야 보인다(2026-09-20 실측). 세어 놓고 아무도 못 보면 그게 AC-69 다.
+ */
+
+/**
+ * 🔴 **세는 규칙이 저쪽과 같아야 한다.** `measureFormatBleedIn` 은 문단을 이렇게 거른다:
+ *     `.se-component.se-text .se-text-paragraph` 중 **인용·제목 밖**이고 **글자가 4자 이상**.
+ * ⚠️ 그 함수는 `page.evaluate` 로 **문자열이 되어** 브라우저에 실려 가므로 **바깥 변수를 못 쓴다**(닫힘 금지).
+ *    그래서 저기엔 숫자 `4` 가 **리터럴로 박혀 있고**, 여기 이 상수와 **손으로 맞춰 둔 것**이다.
+ *    🔴 둘이 갈라지면 이 대조가 통째로 거짓말을 한다 ⇒ **자가 «두 숫자가 같나»를 축으로 본다**(`verify-paragraph-count`).
+ */
+export const PARA_MIN_CHARS = 4;
+
+/**
+ * 계획(ops)이 만들 **«세어지는» 문단 수**. 🔴 러너가 실제로 치는 글자 그대로 센다(머리표까지).
+ *
+ * @returns `{ expected, uncertain, skipped }`
+ *   · `expected`  — 반드시 세어질 문단 수
+ *   · `uncertain` — 🔴 **셀 수도 안 셀 수도 있는 것**(인용). 인용 컴포넌트가 서면 `.se-quotation` 이라 **안 세지고**,
+ *                   도구를 못 찾아 폴백(«…» 평문)으로 들어가면 **세진다**. 계획 시점엔 어느 쪽인지 **모른다**.
+ *                   ⇒ «모르는 것»을 `expected` 에 섞지 않는다(AC-9). 폭으로 들고 다닌다.
+ *   · `skipped`   — 문단을 안 만드는 op(구분선·사진·메모…) 수. 보고용 — 🔴 **«왜 계획 30인데 기대 12냐»의 답이다.**
+ */
+export function expectedParagraphCount(ops) {
+  const long = (s) => String(s ?? "").trim().length >= PARA_MIN_CHARS;
+  let expected = 0, uncertain = 0, skipped = 0;
+  for (const op of Array.isArray(ops) ? ops : []) {
+    const t = String(op?.text ?? "");
+    switch (op?.op) {
+      case "para": case "heading": case "faq": case "tags":
+        if (long(t)) expected++; else skipped++;
+        break;
+      /* 머리표를 **러너가 붙인다** — 글자 수가 그만큼 늘어난다(`naver-blog.mjs` list/check 갈래). */
+      case "list":  if (long(`• ${t}`)) expected++; else skipped++; break;
+      case "check": if (long(`☑ ${t}`)) expected++; else skipped++; break;
+      case "link":  if (long(`${t} ${op?.url ?? ""}`)) expected++; else skipped++; break;
+      /* 사진은 컴포넌트라 안 세지만 **설명은 본문 문단으로** 들어간다(`naver-blog.mjs` image 갈래). */
+      case "image": if (long(op?.caption)) expected++; else skipped++; break;
+      case "quote": if (long(`“${t}”`)) uncertain++; else skipped++; break;
+      /* 🔴 구분선·메모·제목은 문단을 **안 만든다**. `note` 는 본문에 아예 안 쓴다. */
+      default: skipped++; break;
+    }
+  }
+  return { expected, uncertain, skipped };
+}
+
+/**
+ * 판정 — 🔴 **한 곳에서만** 답한다. 막지 않는다(`stop` 을 안 낸다).
+ *   · `lost`  — 실물이 기대보다 **적다** ⇒ 🔴 **문단이 사라졌거나 붙었다**(오늘 잡은 그 병)
+ *   · `extra` — 실물이 기대+폭보다 **많다** ⇒ 네이버가 문단을 **쪼갰다**(정보 · 덜 아프다)
+ *   ⚠️ 인용 폭(`uncertain`)은 **위쪽으로만** 열어 둔다 — 인용이 폴백이면 문단이 **늘기만** 한다.
+ *   🔴 `bleed` 가 `null`(못 쟀다)이면 **아무 판정도 안 한다** — «못 쟀다»를 «맞았다»로도 «틀렸다»로도 안 바꾼다(AC-9).
+ */
+export function paragraphVerdict(plan, bleed) {
+  const { expected, uncertain, skipped } = expectedParagraphCount(plan?.ops);
+  if (!bleed || typeof bleed.total !== "number") {
+    return { measured: false, expected, uncertain, skipped, actual: null, diff: null, kind: "unknown",
+      line: `문단 수 대조: 실물을 못 재서 못 했어요(계획 ${expected}문단)` };
+  }
+  const actual = bleed.total;
+  const kind = actual < expected ? "lost" : actual > expected + uncertain ? "extra" : "ok";
+  const base = `문단 수 대조: 계획 ${expected} · 실물 ${actual}`
+    + (uncertain ? ` (인용 ${uncertain}건은 셀지 몰라 폭으로 뒀어요)` : "")
+    + (skipped ? ` · 문단을 안 만드는 것 ${skipped}건` : "");
+  const line = kind === "lost"
+    ? `🔴 ${base} — **${expected - actual}문단이 비었어요.** 앞뒤 줄이 한 줄로 붙었을 수 있어요(주소 줄 뒤에서 잘 납니다).`
+    : kind === "extra" ? `${base} — 실물이 ${actual - expected}문단 많아요(네이버가 줄을 쪼갰을 수 있어요).`
+    : `${base} — 맞아요.`;
+  return { measured: true, expected, uncertain, skipped, actual, diff: actual - expected, kind, line };
+}

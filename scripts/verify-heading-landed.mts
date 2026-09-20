@@ -119,8 +119,11 @@ function run(raw: string): string[] {
   return AXES.filter((a) => !a.hit(code, raw)).map((a) => a.id);
 }
 
+/* 🔴 **줄끝을 고른다**(2026-09-21 · AC-151). 이 작업트리는 체크아웃마다 **CRLF 가 되기도 한다** —
+   그러면 여러 줄짜리 변이 대상이 **글자 그대로 안 맞아** «변이가 안 먹었다»로 떨어진다(실제로 5건이 그랬다).
+   🔴 자가 **파일이 아니라 줄끝에 걸려 빨개지면** 다음 사람이 «고장났다»로 읽고 축을 지운다. */
 let raw: string;
-try { raw = readFileSync(FILE, "utf8"); }
+try { raw = readFileSync(FILE, "utf8").replace(/\r\n/g, "\n"); }   // 🔴 줄끝 고르기 — 아래 주석 참조
 catch { console.log(`⊘ 못 쟀음 — ${FILE} 이 없다.`); process.exit(2); }
 
 const baseFail = run(raw);

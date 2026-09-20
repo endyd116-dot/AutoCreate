@@ -824,6 +824,13 @@ export interface RunnerFormatMarks {
    *      위 `demoted` 에 **같은 어휘**로 실린다(`kind` = 블록 종류 · `why: "no_editor_op"`). 새 칸을 안 만든 이유가 그것이다(AC-75).
    */
   htmlMode?: number;
+  /**
+   * 🔴 **문단 수 대조**(2026-09-21 B2) — 계획이 만들 문단 수 ↔ 러너가 발행 직전 **실제로 센** 수(`bleed.total`).
+   *   실측(잡 #325·#327): 주소를 앵커로 바꾸는 동안 우리 `Enter` 가 먹혀 다음 문단이 **한 줄로 붙었다**(계획 4 ↔ 실물 3).
+   *   🔴 **막는 신호가 아니다**(§9) — 재서 말해 주는 **사실**이다. `kind:"lost"` 가 «문단이 비었다»다.
+   *   ⚠️ `actual`·`diff` 의 `null` 은 **«못 쟀다»**이지 0 이 아니다(AC-9).
+   */
+  paragraphs?: { expected: number; actual: number | null; diff: number | null; uncertain: number; skipped: number; kind: string; measured?: boolean };
 }
 
 export interface RunnerReportOk {
