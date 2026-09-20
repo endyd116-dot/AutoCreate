@@ -114,6 +114,7 @@ export async function proxyStopped(limit = 50): Promise<{
   count: number; jobs: number;
   accounts: { accountId: number; handle: string; channel: string; tenantId: number; tenantName: string; reason: string; waiting: number; since: string | null }[];
   waitingSlots: number;
+  waiting: { slotId: number; tenantId: number; tenantName: string; accountId: number | null; handle: string; channel: string; managed: boolean; since: string | null }[];
 }> {
   const lim = Math.max(1, Math.min(200, Math.floor(limit) || 50));
   const rows = await q(sql`
@@ -126,7 +127,13 @@ export async function proxyStopped(limit = 50): Promise<{
        AND j.error_kind IN ('no_proxy', 'proxy_down', 'proxy_expired', 'proxy_decrypt_failed')
      GROUP BY a.id, a.handle, a.channel, a.tenant_id, t.name
      ORDER BY MIN(j.updated_at) LIMIT ${lim}`);
-  const [w] = await q(sql`SELECT COUNT(*)::int AS c FROM account_slots WHERE status = 'waiting_ip'`);
+  /* 🔴 **아직 한 번도 안 돌아 본 쪽** — 계정 슬롯은 샀는데 IP 재고가 없어 `waiting_ip` 로 선 것.
+     수를 세는 데서 그치지 않고 **누구인지**까지 준다: 재고가 들어왔을 때 운영자가 **붙일 상대를 고를 목록**이
+     이것뿐이다(수만 주면 «3계정이 기다립니다» 를 띄워 놓고 누구에게 붙일지 알 길이 없다 · CLAUDE §4.8). */
+  const waiting = await q(sql`SELECT s.id, s.tenant_id, s.account_id, s.kind, s.created_at,
+             t.name AS tenant_name, a.handle, a.channel
+      FROM account_slots s LEFT JOIN tenants t ON t.id = s.tenant_id LEFT JOIN accounts a ON a.id = s.account_id
+     WHERE s.status = 'waiting_ip' ORDER BY s.id LIMIT ${lim}`);
   return {
     count: rows.length,
     jobs: rows.reduce((a, r) => a + n(r.waiting), 0),
@@ -136,7 +143,13 @@ export async function proxyStopped(limit = 50): Promise<{
       reason: String(r.reason ?? "no_proxy"), waiting: n(r.waiting),
       since: r.since instanceof Date ? r.since.toISOString() : (r.since ? new Date(String(r.since) + "Z").toISOString() : null),
     })),
-    waitingSlots: n(w?.c),
+    waitingSlots: waiting.length,
+    waiting: waiting.map((r) => ({
+      slotId: n(r.id), tenantId: n(r.tenant_id), tenantName: String(r.tenant_name ?? ""),
+      accountId: n(r.account_id) || null, handle: String(r.handle ?? ""), channel: String(r.channel ?? ""),
+      managed: String(r.kind ?? "") === "account_slot_managed",
+      since: r.created_at instanceof Date ? r.created_at.toISOString() : (r.created_at ? new Date(String(r.created_at) + "Z").toISOString() : null),
+    })),
   };
 }
 

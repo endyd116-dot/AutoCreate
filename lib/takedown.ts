@@ -226,7 +226,25 @@ export async function resolveNotice(noticeId: number, operatorId: number, opts: 
 }
 
 /** 기한이 지난 통지 — 크론이 **운영 대기열에 올린다**(자동 정지 없음). */
-export async function dueNotices(limit = 50): Promise<{ id: number; tenantId: number; dueAt: string; reason: string }[]> {
-  const rows = await q(sql`SELECT id, tenant_id, due_at, reason FROM takedown_notices WHERE status = 'open' AND due_at <= NOW() ORDER BY due_at LIMIT ${Math.max(1, Math.min(200, limit))}`);
-  return rows.map((r) => ({ id: n(r.id), tenantId: n(r.tenant_id), dueAt: utcDate(r.due_at)?.toISOString() ?? "", reason: String(r.reason ?? "") }));
+export async function dueNotices(limit = 50): Promise<{ id: number; tenantId: number; tenantName: string; title: string; kindLabel: string; dueAt: string; overdueDays: number; reason: string }[]> {
+  /* 🔴 **이름까지 준다**(2026-09-21 B · CLAUDE §3 시스템 용어 금지).
+     전에는 `{id, tenantId, dueAt, reason}` 만 줘서, 이 대기열을 그리는 화면은 «테넌트 778» 이라고 쓸 수밖에 없었다.
+     운영자가 «되돌릴 수 없는 일»(계정 해제·서비스 정지)을 누르는 자리인데 **누구 것인지 모르고 누르게** 두면 안 된다. */
+  const rows = await q(sql`SELECT t.id, t.tenant_id, t.due_at, t.reason, t.kind, e.name AS tenant_name, p.title AS piece_title, t.external_url
+    FROM takedown_notices t LEFT JOIN tenants e ON e.id = t.tenant_id LEFT JOIN pieces p ON p.id = t.piece_id
+    WHERE t.status = 'open' AND t.due_at <= NOW() ORDER BY t.due_at LIMIT ${Math.max(1, Math.min(200, limit))}`);
+  const today = Math.floor((Date.now() + 9 * 3600_000) / 86400_000);
+  return rows.map((r) => {
+    const due = utcDate(r.due_at);
+    const kind = (TAKEDOWN_KINDS as readonly string[]).includes(String(r.kind)) ? String(r.kind) as TakedownKind : "other";
+    return {
+      id: n(r.id), tenantId: n(r.tenant_id), tenantName: String(r.tenant_name ?? ""),
+      /* 제목이 없는 통지(외부 URL 만 온 신고)는 **꾸며 내지 않는다** — 주소를 그대로 보여 준다(AC-9). */
+      title: String(r.piece_title ?? "") || String(r.external_url ?? ""),
+      kindLabel: TAKEDOWN_KIND_LABEL[kind],
+      dueAt: due?.toISOString() ?? "",
+      overdueDays: due ? Math.max(0, today - Math.floor((due.getTime() + 9 * 3600_000) / 86400_000)) : 0,
+      reason: String(r.reason ?? ""),
+    };
+  });
 }
