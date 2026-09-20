@@ -62,6 +62,8 @@ accounts.ts:253       sets.push(sql`proxy_url = ${px || null}`) → 그 값을 �
 다음 러너 잡은 인증 없는 프록시로 붙어 실패한다(`proxy_down` — 이름까지 이미 있다).
 🔴 **AC-160 ① 이 또 맞았다** — A 가 **바로 두 줄 위** `openedAt` 에서 «건드렸을 때만 보낸다»로 고친 그 병이다. 23줄 차이.
 🔴 **덤**: `|| undefined` 라 고객이 프록시를 **지울 수도 없다**(빈 칸 → 안 보냄 → 서버는 옛 값 유지).
+🔴 **고칠 곳은 두 군데다**(AC-114 모수) — 서빙되는 `public/app/accounts.html` 1곳 + 정본 `public/app/_tpl.txt` 1곳.
+한 쪽만 고치면 다음 `build-pages` 가 **옛 코드를 다시 덮는다** — 이번 판에 실제로 밟은 자리다(AC-213).
 
 ### ㉯ `ops-proxies` 를 부르는 화면이 **0곳**
 `/api/ops-proxies` · `/api/ops-proxy-assign` 가 있는데 `public/**` 어디도 안 부른다.
