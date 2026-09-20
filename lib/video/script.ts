@@ -97,6 +97,12 @@ export interface ScriptInput {
   /** 재작성 지시(게이트 실패·팩트체크 정정). */
   rewrite?: string | null;
   /**
+   * 🔴 [2026-09-21 · B] «다시 만들기»에 손님이 적은 한 마디(`pieces-regenerate { note }` → `meta.regenNote`).
+   *   종전엔 `topic.angle` 뒤에 몰래 붙여 보냈다 — 앵글은 «이 영상의 관점»이라는 다른 뜻이고, **다시 만들 때마다 쌓였다.**
+   *   제 이름으로 받는다. 비면 줄이 아예 안 실린다(무회귀).
+   */
+  regenNote?: string | null;
+  /**
    * [R12-3] 🔴 **음절 예산에 곱할 비율** — `lib/video/tempo.ts syllableRatioOf(refStyle?.audioTempo)`.
    *   안 넘기면 **1**(종전과 한 글자도 안 다르다 · 무회귀). 1보다 작으면 «느리게 말한다 ⇒ 대본을 짧게».
    *   🔴 규격(15/30/60/90)을 넘는지 **여기서 판정하지 않는다** — 그건 실제 음성 길이를 잰 뒤라야 알 수 있고, B2 의 `checkTempoFitsSpec` 이 재서
@@ -191,7 +197,8 @@ export async function buildVideoScript(inp: ScriptInput): Promise<{ ok: true; sc
     `[출력 JSON] { "hook": string, "lines": [{ "text": string, "role": "hook"|"body"|"bridge"|"landing"|"closing", "cutIdx": number }], "closing": string, "cuts": [{ "key": string, "subject": string, "palette"?: string, "redMeasureLine"?: boolean, "redProp"?: boolean, "pace"?: "fast"|"normal"|"hold" }], "youtube": { "title": string(≤60자 · 검색어 앞), "description": string(2~3문장 · 첫 줄은 비워 둔다 — 시스템이 고지를 넣는다), "tags": [string×5~10] } }`,
   ].filter(Boolean).join("\n");
   const user = [
-    `[소재] ${inp.topic.title}`, `[앵글] ${inp.topic.angle}`, `[검색 의도] ${inp.topic.intent}${inp.topic.seasonal ? ` · 시즌 ${inp.topic.seasonal}` : ""}`,
+    `[소재] ${inp.topic.title}`, `[앵글] ${inp.topic.angle}`,
+    inp.regenNote ? `[🔴 다시 만드는 이유 — 손님 요청 · 이번 영상에서 꼭 반영] ${inp.regenNote}` : "", `[검색 의도] ${inp.topic.intent}${inp.topic.seasonal ? ` · 시즌 ${inp.topic.seasonal}` : ""}`,
     inp.persona.facts.length ? `[내 사정(1~2개를 장면으로)] ${inp.persona.facts.join(" / ")}` : "",
     inp.persona.tone ? `[말투] ${inp.persona.tone}` : "",
     inp.affiliate ? `[제휴] «${inp.affiliate.productQuery}» 를 쓴 장면 1곳 — 링크·가격은 시스템이 설명란에 넣는다. 본문에서 팔지 않는다.` : "",

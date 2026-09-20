@@ -25,6 +25,27 @@ import { pausedAccountIds } from "./account-slots";
 
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 
+/**
+ * 🔴 **그날 자리를 «놓아 준» 상태 — 정본 한 벌**(2026-09-21 · B).
+ *
+ *   하루 몫은 «나간 글 + 잡아 둔 글»을 센다. 잡아 둔 글 중 **이 셋만** 자리를 놓아 준다.
+ *   ⇒ 뒤집으면 **그 밖의 모든 상태는 그날을 먹고 있다**(`awaiting_manual`·`edited`·`in_review`·`approved` …).
+ *
+ *   🔴 **왜 상수로 빼나**: 이 목록이 두 곳에 손으로 적혀 있었고 **서로 어긋났다**(2026-09-21 실측).
+ *     · 여기(세는 쪽)는 «셋 빼고 다 센다»
+ *     · `slots-skip`(놓아 주는 쪽)은 «`generating`·`draft`·`in_review`·`approved`·`scheduled` 일 때만 버린다»
+ *     두 목록은 **서로의 여집합이어야 하는데** 그렇지 않아서, 라이브에서 자리를 먹고 있는
+ *     `awaiting_manual`(11건)·`edited`(2건)은 **«이날은 건너뛰기»를 눌러도 그날 몫이 안 풀렸다.**
+ *     «취소가 취소가 아니다» — 손님 눈엔 그냥 고장이다. ⇒ 두 곳이 **이 한 벌**을 본다.
+ *
+ *   ⚠️ `publishing` 은 여기 없다 — **지금 나가는 중**이라 놓아 줄 수 없다(놓아 주면 두 번 나간다).
+ */
+export const DAY_FREED_STATUSES = ["failed", "rejected", "published"] as const;
+/** 그 글이 **아직 그날을 먹고 있나**. 놓아 준 셋이 아니면 먹고 있다. */
+export const occupiesDay = (status: unknown): boolean => !DAY_FREED_STATUSES.includes(String(status ?? "") as typeof DAY_FREED_STATUSES[number]);
+/** 질의에 그대로 끼우는 목록 조각. 🔴 값은 **코드 상수**뿐이라 바깥 입력이 섞이지 않는다(배열 파라미터는 드라이버가 record 로 보낸다). */
+export const statusListSql = (list: readonly string[]) => sql.raw(list.map((s) => `'${s}'`).join(", "));
+
 /** 화면에 그대로 나가는 KST 시각 한 마디(«9/16 08:00»). */
 function kstAt(d: Date): string {
   const s = new Date(d.getTime() + 9 * 3600_000).toISOString();
@@ -94,7 +115,7 @@ export async function checkCadenceAt(a: {
          AND p.published_at IS NOT NULL AND to_char((p.published_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = ${day})
       +
       (SELECT COUNT(*)::int FROM pieces x WHERE x.tenant_id = ${tid} AND x.account_id = ${accountId}
-         AND x.id <> ${skip} AND x.status NOT IN ('failed','rejected','published')
+         AND x.id <> ${skip} AND x.status NOT IN (${statusListSql(DAY_FREED_STATUSES)})
          AND x.scheduled_for IS NOT NULL AND to_char((x.scheduled_for AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = ${day})
     ) AS c`);
   const planned = n(cnt?.c);

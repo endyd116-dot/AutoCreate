@@ -40,11 +40,24 @@ export interface AccountRow {
   avatar: string | null;
   status: string;
   healthScore: number; postsToday: number;
-  /** 🔴 **유효** 하루 상한 — 워밍업 중이면 낮아진 값이다(게이트는 이걸 본다). */
+  /**
+   * 🔴 **보여 줄 값** — 지금 실제로 걸리는 하루 상한(워밍업 중이면 낮아진 값 · 게이트는 이걸 본다).
+   * ⚠️ **이 값을 편집 칸에 미리 채우지 마라.** 아래 `dailyCapBase` 가 «고칠 값»이다.
+   */
   dailyCap: number;
-  /** 고객이 정한 원래 상한(워밍업 중일 때만 실린다) — 화면이 «원래 2건인데 지금은 1건»을 말할 수 있게. */
-  dailyCapBase?: number;
+  /**
+   * 🔴 **고칠 값** — 고객이 정한 원래 상한(`accounts.daily_cap` 그대로).
+   *
+   *   [2026-09-21 · B] 종전엔 **워밍업 중일 때만** 실렸다. 그래서 화면은 «있으면 쓰고 없으면 `dailyCap`» 으로 짤 수밖에 없었고,
+   *   워밍업이 도는 동안 설정 시트를 **열었다 저장만 해도 고객 값이 워밍업 값으로 덮어써졌다.**
+   *   🔴 실제로 메인이 그걸로 `min_gap` 180 → 360 을 부쉈다(계정 466 · 되돌렸다).
+   *   ⇒ **언제나 싣는다.** 한 칸이 «보여 줄 값»과 «고칠 값»을 겸하면 언젠가 반드시 덮어쓴다.
+   */
+  dailyCapBase: number;
+  /** 🔴 **보여 줄 값** — 지금 걸리는 글 간격(워밍업 중이면 늘어난 값). 편집 칸에 미리 채우지 마라. */
   minGapMin: number;
+  /** 🔴 **고칠 값** — 고객이 정한 원래 간격(`accounts.min_gap_min` 그대로). 이 칸이 없어서 180 이 360 으로 덮어써졌다. */
+  minGapBase: number;
   /** 워밍업 중일 때만(§2.6). 화면은 `label` 을 그대로 쓰면 된다. */
   /** [P1R7 §2.6 · R8 §9] 워밍업 중일 때만. 🔴 `blockedThisWeek`·`canOverride`·`risk` 는
       «막지 않고 말한다»를 화면이 그릴 재료다 — 워밍업은 **우리 추정**이지 규칙이 아니다(CLAUDE §9). */
@@ -75,6 +88,13 @@ export interface AccountRow {
    *   🔴 «계약 값이 무엇인지»는 여기서 안 채운다 — 채우면 화면이 «고객이 고른 값»과 «기본값»을 구별하지 못한다(AC-92).
    */
   reader: string | null;
+  /**
+   * 🔴 [2026-09-21 · B] **이 계정을 만든 날**(`YYYY-MM-DD` · 모르면 `null`) — 고객이 알면 적는 값이다.
+   *   워밍업이 «우리와 연결한 날»(`created_at`)보다 **먼저** 본다(`lib/warmup.ts:57`) — 3년 된 블로그를 어제 연결해도 1주차로 묶이지 않게.
+   *   🔴 읽는 곳이 여섯인데 **쓰는 길이 0곳**이라 라이브 92계정이 전부 NULL 이었다(`verify-write-path-missing` 가 잡았다).
+   *   «모른다»를 아무 날짜로 **바꾸지 않는다**(AC-92) — 비면 `null` 이고 워밍업은 다시 `created_at` 을 본다.
+   */
+  openedAt: string | null;
 }
 
 /** SELECT 조각 — accounts a + 자격 존재 여부 서브쿼리. */
@@ -96,13 +116,19 @@ export function toAccountRow(r: Row): AccountRow {
   const mon = (r.monetize && typeof r.monetize === "object" ? r.monetize : {}) as Record<string, unknown>;
   const o: AccountRow = {
     id: Number(r.id), channel: String(r.channel), handle: String(r.handle), displayName: (r.display_name as string) ?? null,
-    status: String(r.status), healthScore: Number(r.health_score ?? 100), postsToday: Number(r.posts_today ?? 0), dailyCap: Number(r.daily_cap ?? 2), minGapMin: Number(r.min_gap_min ?? 180),
+    status: String(r.status), healthScore: Number(r.health_score ?? 100), postsToday: Number(r.posts_today ?? 0),
+    /* 🔴 **네 칸을 한 번에 채운다** — 「보여 줄 값」 둘과 「고칠 값」 둘. 아래에서 워밍업이 앞의 둘만 바꾼다. */
+    dailyCap: Number(r.daily_cap ?? 2), dailyCapBase: Number(r.daily_cap ?? 2),
+    minGapMin: Number(r.min_gap_min ?? 180), minGapBase: Number(r.min_gap_min ?? 180),
     avatar: r.avatar_url ? String(r.avatar_url) : null,
     browserProfileKey: String(r.browser_profile_key || `t0-a${r.id}`), hasCreds: r.has_creds === true,
     monetize: { coupang: r.has_coupang === true, adpost: !!mon.adpostMediaId, adsense: !!mon.adsensePub },
     defaultTier: toCoinTier(r.quality_tier),            // 모르는 값·NULL → null(«안 고름»)
     defaultStyleId: Number(r.text_style_id) > 0 ? Number(r.text_style_id) : null,
     reader: String(r.reader ?? "").trim() || null,          // [R11-8] 빈 문자열도 «안 고름»으로 — 화면이 «"" 라는 독자»를 그리지 않게
+    /* 🔴 [2026-09-21 · B] 계정을 만든 날 — **쓰는 길을 냈으면 읽는 길도 같은 커밋에**(이 파일이 `reader` 에서 겪은 그것:
+       «저장은 200 인데 새로고침하면 사라졌다»). 칸이 `date` 라 `YYYY-MM-DD` 열 자만 내보낸다(시각이 붙으면 날이 갈린다 · §4.5b). */
+    openedAt: r.opened_at ? String(r.opened_at).slice(0, 10) : null,
   };
   /* 🔴 워밍업(§2.6) — **`dailyCap` 을 유효값으로 바꿔서 내보낸다.**
      캐던스를 보는 자리가 셋(director·director-auto·account-health)이라 게이트를 하나 더 만들면 넷이 된다.
@@ -112,9 +138,10 @@ export function toAccountRow(r: Row): AccountRow {
     off: r.warmup_off === true, postsThisWeek: Number(r.posts_this_week ?? 0) };
   const w = warmupState(wIn);
   if (w.active) {
-    o.dailyCapBase = o.dailyCap;
-    o.dailyCap = effectiveDailyCap(o.dailyCap, wIn);
-    o.minGapMin = effectiveMinGapMin(o.minGapMin, wIn);
+    /* 🔴 **「보여 줄 값」만 바꾼다.** `dailyCapBase`·`minGapBase` 는 고객이 정한 값 그대로 둔다 —
+       그 둘이 편집 시트가 미리 채우는 칸이다(2026-09-21 · 여기를 겸하게 두어 고객 값이 덮어써졌다). */
+    o.dailyCap = effectiveDailyCap(o.dailyCapBase, wIn);
+    o.minGapMin = effectiveMinGapMin(o.minGapBase, wIn);
     /* 🔴 화면이 «왜 지금 못 만드나»를 말할 수 있어야 한다(CLAUDE §9 — 막을 거면 이유를 보여 준다).
        `blockedThisWeek` = 이번 주 권장량을 다 썼다(자동 편성은 멈춘다) ·
        `canOverride` = 🔴 **고객이 «이번만 넘길래»를 누를 수 있다**(끄는 게 아니라 그 회차만) ·

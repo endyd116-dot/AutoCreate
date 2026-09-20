@@ -128,7 +128,17 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
   /** [R10-8] 코인 등급 — 분량 하한(`lengthFor`)과 «어떻게 채우나» 줄(`tierPromptLines`)이 여기 달렸다. 없으면 간단히(= 오늘까지의 글). */
   tier?: CoinTier | null;
   /** [R10-4] 계정의 옷장 — 배운 «생김새» 줄(`textStylePromptLines`)과 이름. 없으면 줄이 안 실린다(무회귀). */
-  style?: { name: string; lines: string[] } | null }): { system: string; user: string } {
+  style?: { name: string; lines: string[] } | null;
+  /**
+   * 🔴 [2026-09-21 · B] **«다시 만들기»에 손님이 적은 한 마디**(`pieces-regenerate { note }` → `meta.regenNote`).
+   *
+   *   ══ 왜 제 이름으로 받나 ══
+   *     종전엔 그 말을 **`angle` 뒤에 몰래 붙여** 보냈다(`«원래 앵글» — 사용자 요청: …`). 두 가지가 나빴다:
+   *       ① `angle` 은 «이 글의 관점»이라는 **다른 뜻**이다 — 요청을 관점으로 섞으면 모델이 관점을 바꾼다.
+   *       ② 🔴 **다시 만들 때마다 쌓였다** — 세 번째 재생성이면 앞의 두 요청까지 앵글에 매달려 간다.
+   *     ⇒ 제 이름으로 받고, `angle` 은 건드리지 않는다. 비면 줄이 아예 안 실린다(무회귀).
+   */
+  regenNote?: string | null }): { system: string; user: string } {
   const c = a.c;
   const len = lengthFor(c, a.group, a.tier);
   /* 문단 하나가 져야 할 몫 — 계약 하한 ÷ (이 구성의 예상 분량) × (문단 하나의 예상 분량).
@@ -177,6 +187,8 @@ export function buildPrompt(a: { c: WritingContract; structure: Block["type"][];
     "[③ 재료]",
     `소재: ${a.topic.title}`,
     `앵글(이 글의 관점): ${a.angle}`,
+    /* 🔴 손님이 «다시 만들기»에 적은 한 마디 — **앵글보다 세다**(그러라고 다시 만드는 것이다). 없으면 줄이 안 실린다. */
+    a.regenNote ? `🔴 다시 만드는 이유(손님 요청 · 이번 글에서 꼭 반영): ${a.regenNote}` : "",
     /* 🔴 [R8-라 · DESIGN §5C.6-2] **잰 낱말을 그대로 준다.** 옛 줄은 «검색어: {소재 제목} (월 검색 N)» 이었는데
        N 은 제목이 아니라 `bestVolume()` 이 고른 **다른 낱말**의 값이었다 — 모델이 틀린 문구를 노리고 썼다(AC-57 대용물).
        🔴 그리고 **못 찾았으면 검색량 줄 자체를 뺀다.** 제목으로 대신 채우면 같은 거짓말이 이름만 바꿔 돌아온다(AC-9 «모르면 모른다»). */
@@ -328,6 +340,9 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
     const goal = goalRes.goal;
     if (goalRes.briefGoalIgnored) console.log(`[content-gen] piece ${pieceId} — brief goal «${goalRes.briefGoalIgnored}» 는 ${channel} 에 규칙이 없어 채널 기본 «${goal}» 로 썼다`);
     const angle = String(meta.angle || topic.angle || "");
+    /* 🔴 [2026-09-21 · B] «다시 만들기»에 손님이 적은 한 마디 — 계약(`pieces-regenerate { id, note? }`)에 적힌 그 칸이다.
+       여태 **저장만 하고 아무도 안 읽었다**(`verify-upstream-discarded` ②축이 잡고 있던 그 칸). 여기서 프롬프트로 넘긴다. */
+    const regenNote = String(meta.regenNote ?? "").trim().slice(0, 300) || null;
     const pFacts = personaMaterial(persona.profile, pieceId);
     const terms = personaTerms(persona.profile);
 
@@ -347,7 +362,7 @@ export async function generatePiece(tid: number, pieceId: number): Promise<{ ok:
 
     await setStage(pieceId, "writing");
     const write = async (rewrite?: string, angleOverride?: string) => {
-      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, rewrite, goal, group, marksAllowed, tier, style: stylePrompt });
+      const pr = buildPrompt({ c, structure, topic, angle: angleOverride ?? angle, persona: persona.profile, personaFacts: pFacts, affiliateCands: affCands, affiliateQuery: aff && !affCands ? aff.productQuery : null, rewrite, goal, group, marksAllowed, tier, style: stylePrompt, regenNote });
       const r = await callGeminiJson<{ title?: string; blocks?: unknown; tags?: unknown; affiliateChoice?: unknown }>({ purpose: "content", chain: CHAIN_HIGH, role: "high", system: pr.system, user: pr.user, tenantId: tid, ref: `piece:${pieceId}`, mode: "pro", maxOutputTokens: 12_000, timeoutMs: 180_000 });
       if (!r.ok) throw new Error(`글 생성 실패(${r.reason})`);
       const markDrops: MarkDrop[] = [];
