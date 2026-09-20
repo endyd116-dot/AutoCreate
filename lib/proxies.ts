@@ -101,6 +101,45 @@ export async function releaseProxy(accountId: number): Promise<{ ok: boolean; pr
   return { ok: true, proxyId };
 }
 
+/**
+ * 🔴 **fail-closed 로 멈춰 선 계정** — «막았다»가 아니라 **«길이 없어 못 갔다»**를 센다(DESIGN §7.3b).
+ *
+ *   막지 않는 대신 **말해 주기로** 간 이상(CLAUDE §9), 멈춘 것이 **아무에게도 안 보이면 그게 제일 나쁘다**.
+ *   `claimJobs` 가 잡을 큐에 되돌리면서 `runner_jobs.error_kind` 에 까닭을 적어 두는데, 이 함수가 그걸 걷는다.
+ *   🔴 **계정 이름·테넌트 이름까지 같이 준다** — 운영 화면이 «계정 231» 이라고 쓰게 두지 않는다(CLAUDE §3 시스템 용어 금지).
+ *   🔴 `waitingSlots` 는 **아직 잡도 못 만든 쪽**이다 — 계정 슬롯은 샀는데 IP 재고가 없어 `waiting_ip` 로 선 것.
+ *      잡 기준만 세면 «한 번도 안 돌아 본 계정»이 통째로 안 보인다(AC-9 «못 쟀음»과 «0»은 다르다).
+ */
+export async function proxyStopped(limit = 50): Promise<{
+  count: number; jobs: number;
+  accounts: { accountId: number; handle: string; channel: string; tenantId: number; tenantName: string; reason: string; waiting: number; since: string | null }[];
+  waitingSlots: number;
+}> {
+  const lim = Math.max(1, Math.min(200, Math.floor(limit) || 50));
+  const rows = await q(sql`
+    SELECT a.id, a.handle, a.channel, a.tenant_id, t.name AS tenant_name,
+           MIN(j.error_kind) AS reason, COUNT(*)::int AS waiting, MIN(j.updated_at) AS since
+      FROM runner_jobs j
+      JOIN accounts a ON a.id = j.account_id
+      LEFT JOIN tenants t ON t.id = a.tenant_id
+     WHERE j.status = 'queued'
+       AND j.error_kind IN ('no_proxy', 'proxy_down', 'proxy_expired', 'proxy_decrypt_failed')
+     GROUP BY a.id, a.handle, a.channel, a.tenant_id, t.name
+     ORDER BY MIN(j.updated_at) LIMIT ${lim}`);
+  const [w] = await q(sql`SELECT COUNT(*)::int AS c FROM account_slots WHERE status = 'waiting_ip'`);
+  return {
+    count: rows.length,
+    jobs: rows.reduce((a, r) => a + n(r.waiting), 0),
+    accounts: rows.map((r) => ({
+      accountId: n(r.id), handle: String(r.handle ?? ""), channel: String(r.channel ?? ""),
+      tenantId: n(r.tenant_id), tenantName: String(r.tenant_name ?? ""),
+      reason: String(r.reason ?? "no_proxy"), waiting: n(r.waiting),
+      since: r.since instanceof Date ? r.since.toISOString() : (r.since ? new Date(String(r.since) + "Z").toISOString() : null),
+    })),
+    waitingSlots: n(w?.c),
+  };
+}
+
 /** 지금 재고 — 운영 화면·«준비 중» 판정용. 🔴 접속 주소는 세지도 내보내지도 않는다. */
 export async function proxyStock(tenantId?: number): Promise<{ free: number; assigned: number; down: number }> {
   const tid = n(tenantId);

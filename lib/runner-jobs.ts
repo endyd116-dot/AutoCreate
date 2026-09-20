@@ -208,6 +208,82 @@ export interface RunnerDevice {
   caps?: { ffmpeg?: boolean; ffmpegVersion?: string; profileSeal?: ProfileSealCap };
 }
 
+/* ───────────────── 프록시 fail-closed(DESIGN §7.3b) ───────────────── */
+
+/**
+ * 🔴 **왜 막는가** — DESIGN §7.3b: «배정된 프록시가 없거나 죽으면 **잡을 멈춘다**. 우리 IP 로 절대 폴백하지 않는다.»
+ *    관리형 러너는 **우리 기기**다. 거기서 프록시 없이 내보내면 **모든 고객 계정이 우리 IP 하나로 묶인다** —
+ *    사장님이 걱정한 연좌제의 최악형(한 계정이 정지되면 같은 IP 의 전부가 죽는다)을 우리가 만드는 셈이다.
+ *
+ * ⚠️ **이건 CLAUDE §9 의 «게이트»가 아니다.** 고객 글에 대한 우리 판단이 아니라 **«없는 길»**이다 —
+ *    전용 IP 가 없으면 그 길로 나갈 방법이 물리적으로 없다. §9 는 «있는 길을 우리 판단으로 막지 말라»이고,
+ *    이건 길 자체가 없는 경우다. 그래서 `HARD_GATE_KEYS` 에 넣지 않는다.
+ *    🔴 대신 §9 가 요구하는 **«말해 주기»는 여기서도 그대로다** — 멈춘 것은 반드시 보여야 한다
+ *    (`claimJobs` 가 감사 + 알림 + `error_kind` 를 남기고, `ops-proxies` 가 «몇 계정이 멈췄나»를 센다).
+ *
+ * 🔴 **내 PC 러너(`own`)는 막지 않는다** — 그건 고객 자기 집 IP 다. 거기엔 «우리 IP 로 샌다»가 없고,
+ *    여기서 막으면 프록시를 안 산 고객의 발행이 **통째로** 죽는다(연좌제를 막으려다 공장을 세운다).
+ *    관리형만 판정한다 — `runner_devices.kind`.
+ */
+export type ProxyStopReason = "no_proxy" | "proxy_down" | "proxy_expired" | "proxy_decrypt_failed";
+
+/** 고객에게 보일 사람말 — §3 말투: 위협·책임전가 없이 ①사실 ②우리가 하는 것. */
+export const PROXY_STOP_MESSAGE: Record<ProxyStopReason, string> = {
+  no_proxy: "이 계정 전용 IP 를 준비하는 동안 잠시 쉬어요. 다른 계정과 같은 IP 로 나가지 않도록 저희가 일부러 멈춰 둔 거예요 — IP 가 붙는 대로 밀린 글부터 올라가요.",
+  proxy_down: "이 계정 전용 IP 가 응답하지 않아 잠시 멈췄어요. 다른 계정과 묶이지 않도록 한 조치예요 — 저희가 바로 손보고 있어요.",
+  proxy_expired: "이 계정 전용 IP 의 기간이 끝나 잠시 멈췄어요. 새 IP 를 붙이는 대로 밀린 글부터 올라가요.",
+  proxy_decrypt_failed: "이 계정 전용 IP 의 접속 정보를 읽지 못해 잠시 멈췄어요. 저희가 바로 손보고 있어요.",
+};
+
+/** `ops-proxies`·`claimJobs` 가 함께 보는 «멈춤» 표식 — `runner_jobs.error_kind` 에 이 값들이 적힌다. */
+export const PROXY_STOP_KINDS: readonly ProxyStopReason[] = ["no_proxy", "proxy_down", "proxy_expired", "proxy_decrypt_failed"];
+
+export interface ProxyFailClosedInput {
+  /** `runner_devices.kind` — "managed" 만 판정한다. */
+  deviceKind: string;
+  /** `accounts.proxy_id`(새 방식 배정). */
+  proxyId: number | null;
+  /** `proxies.status` — active 가 아니면 죽은 것으로 본다. */
+  proxyStatus: string | null;
+  /** `proxies.expires_at`. */
+  proxyExpiresAt: Date | null;
+  /** `accounts.proxy_url`(옛 평문 칸) 가 있나 — 이것도 **엄연히 전용 IP 다**(소급 0 · 쓰던 계정 그대로). */
+  legacyProxyUrl: boolean;
+  /** 암호문을 실제로 풀었나. `proxyId` 가 있을 때만 뜻이 있다. */
+  decrypted: boolean;
+  now?: Date;
+}
+
+/**
+ * 🔴 **이 잡을 내보내도 되나** — 순수 함수다(DB·시각·환경 안 본다). 그래서 자가 변이를 직접 먹일 수 있다
+ *    (`scripts/verify-proxy-failclosed.mjs`). 판정을 `claimJobs` 안에 녹여 두면 **과녁이 제품 안에 없어**
+ *    부정형 단언이 공짜로 참이 된다(어제 값을 치른 것 · 트리거 §3).
+ */
+export function proxyFailClosed(inp: ProxyFailClosedInput): { stop: false } | { stop: true; reason: ProxyStopReason } {
+  // 내 PC 러너 = 고객 자기 IP. 판정 대상이 아니다.
+  if (String(inp.deviceKind ?? "") !== "managed") return { stop: false };
+
+  if (inp.proxyId) {
+    // 🔴 복호화 실패를 «프록시 없음»으로 뭉개지 않는다 — 고칠 사람(우리)이 다르다.
+    if (!inp.decrypted) return { stop: true, reason: "proxy_decrypt_failed" };
+    const st = String(inp.proxyStatus ?? "");
+    if (st === "expired") return { stop: true, reason: "proxy_expired" };
+    /* 🔴 `status` 를 **보기만 하고 안 쓰던 자리**가 여기였다(2026-09-21 B 측정):
+       러너가 `errorKind:"proxy"` 를 보고하면 서버가 그 프록시를 `down` 으로 내리는데(`reportJob`),
+       **다음 claim 이 그 down 을 무시하고 같은 죽은 IP 를 또 줬다.** 자기가 내려 놓고 자기가 안 봤다. */
+    if (st !== "active") return { stop: true, reason: "proxy_down" };
+    const exp = inp.proxyExpiresAt;
+    if (exp instanceof Date && !Number.isNaN(exp.getTime()) && exp.getTime() <= (inp.now ?? new Date()).getTime()) {
+      return { stop: true, reason: "proxy_expired" };
+    }
+    return { stop: false };
+  }
+
+  // 배정은 없지만 옛 평문 칸에 주소가 있으면 그것도 전용 IP 다 — 막지 않는다.
+  if (inp.legacyProxyUrl) return { stop: false };
+  return { stop: true, reason: "no_proxy" };
+}
+
 /* ─────────────────────────── 기기·토큰 ─────────────────────────── */
 
 /** 최근 이 시간 안에 하트비트가 있으면 online(계약 §2). */
@@ -595,28 +671,49 @@ export async function enqueueJob(inp: EnqueueInput): Promise<{ id: number; creat
 /* ─────────────────────────── 선점(claim) ─────────────────────────── */
 
 /** 계정 자격 복호화 — 🔴 claim 전용. 반환값은 응답 본문 외 어디에도 쓰지 않는다(로그 금지). */
-async function loadAccountForRunner(tid: number, accountId: number, sealCaps?: unknown): Promise<RunnerJobAccount | null> {
+async function loadAccountForRunner(
+  tid: number, accountId: number, sealCaps?: unknown,
+  /** 🔴 **누가 물어 가나** — 관리형 기기면 전용 IP 가 없을 때 잡을 내주지 않는다(§7.3b · `proxyFailClosed`). */
+  deviceKind = "own",
+): Promise<{ ok: true; account: RunnerJobAccount } | { ok: false; gone: true } | { ok: false; stop: ProxyStopReason }> {
   /* 프록시는 두 자리에서 온다(계약 §2.5): 새 방식 `accounts.proxy_id → proxies`(암호문) · 옛 방식 `accounts.proxy_url`(평문 칸).
      🔴 옛 칸을 지우지 않는다 — 쓰던 계정이 그대로 돌아야 한다(소급 0). 새 배정이 있으면 그것을 **우선**한다. */
   const [a] = await q(sql`SELECT a.id, a.channel, a.handle, a.browser_profile_key, a.proxy_url, a.proxy_id,
-      p.url_enc AS p_enc, p.last_exit_ip AS p_ip, p.status AS p_status
+      p.url_enc AS p_enc, p.last_exit_ip AS p_ip, p.status AS p_status, p.expires_at AS p_exp
     FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
     WHERE a.tenant_id = ${tid} AND a.id = ${accountId} LIMIT 1`);
-  if (!a) return null;
+  if (!a) return { ok: false, gone: true };
   const out: RunnerJobAccount = {
     id: n(a.id), handle: String(a.handle ?? ""), channel: String(a.channel ?? ""),
     profileKey: String(a.browser_profile_key || `t${tid}-a${n(a.id)}`),
   };
+  let decrypted = false;
   if (a.p_enc) {
     const dec = decryptObj<{ url?: string }>(String(a.p_enc));
     // 🔴 복호화가 안 되면 **직결로 내려앉히지 않는다** — 프록시를 배정받은 계정이 집 IP 로 나가는 게 이 기능이 막으려는 바로 그것이다.
-    if (dec?.url) out.proxyUrl = String(dec.url);
-    else throw Object.assign(new Error("proxy_decrypt_failed"), { code: "PROXY_DECRYPT" });
+    if (dec?.url) { out.proxyUrl = String(dec.url); decrypted = true; }
     // 기대 출구 IP — 러너가 실제 IP 와 대조해 다르면 멈춘다(프록시가 죽고 조용히 우회한 상태를 여기서 잡는다).
     if (a.p_ip) out.expectExitIp = String(a.p_ip);
   } else if (a.proxy_url) {
     out.proxyUrl = String(a.proxy_url);   // 러너용 원문(마스킹 안 함 — 이 응답 밖으로 나가면 안 된다)
   }
+
+  /* 🔴 **fail-closed 가 무는 자리 ①**(DESIGN §7.3b · 2026-09-21 B 신설).
+     여기 오기 전까지 이 함수는 «프록시가 없으면 `proxyUrl` 을 안 실어 보낸다»였고,
+     러너는 `if (account.proxyUrl)` 로 **검사 자체를 건너뛰어** 우리 IP 로 그냥 나갔다(fail-open).
+     이제는 관리형이면 **잡을 내주지 않는다** — 자격 복호화(아래)까지 가지도 않는다. */
+  const fc = proxyFailClosed({
+    deviceKind,
+    proxyId: n(a.proxy_id) || null,
+    proxyStatus: a.p_status ? String(a.p_status) : null,
+    proxyExpiresAt: utcDate(a.p_exp) ?? null,
+    legacyProxyUrl: !!a.proxy_url,
+    decrypted,
+  });
+  if (fc.stop) return { ok: false, stop: fc.reason };
+  /* 🔴 관리형이 아니어도 복호화 실패는 그냥 넘길 수 없다 — 배정을 받아 놓고 집 IP 로 나가는 건
+     내 PC 러너에서도 «배정된 그 IP 가 아닌 곳»이다. `proxyUrl` 없이 보내지 않는다. */
+  if (n(a.proxy_id) && !decrypted) return { ok: false, stop: "proxy_decrypt_failed" };
   const creds = await q(sql`SELECT kind, enc, expires_at FROM account_creds
     WHERE account_id = ${accountId} AND purged_at IS NULL AND kind IN ('cookies','password') ORDER BY id DESC`);
 
@@ -649,7 +746,7 @@ async function loadAccountForRunner(tid: number, accountId: number, sealCaps?: u
       }
     }
   }
-  return out;
+  return { ok: true, account: out };
 }
 
 /**
@@ -767,7 +864,31 @@ export async function claimJobs(
       job.payload = signed as RunnerPayload;
     }
     if (accountId) {
-      job.account = await loadAccountForRunner(device.tenantId, accountId, deviceCaps);
+      const loaded = await loadAccountForRunner(device.tenantId, accountId, deviceCaps, device.kind);
+      /* 🔴 **fail-closed 가 무는 자리 ②**(DESIGN §7.3b) — 전용 IP 가 없거나 죽었으면 **이 잡을 내주지 않는다.**
+         멈추는 것으로 끝내면 §9 가 금지하는 «조용한 0건»이라, 멈춤은 **세 곳에 동시에** 남긴다:
+           ① `runner_jobs.error_kind` = 멈춘 까닭(큐에 그대로 두되 표식을 붙인다 · `ops-proxies` 가 이걸 센다)
+           ② 감사 high(운영이 뒤늦게도 되짚을 수 있게)
+           ③ 알림 1건(고객에게 · 하루 1건으로 눌러 둔다 — claim 은 몇십 초마다 오므로 그대로 두면 알림함이 터진다)
+         🔴 `due_at` 을 10분 뒤로 밀어 **되풀이 폭주를 큐 자체로** 막는다(claim 은 `due_at <= NOW()` 만 집는다).
+            `attempts` 는 되돌린다 — 집었다 놓은 것으로 고객의 재시도 예산을 깎지 않는다(렌더 R2 선례와 같다). */
+      if (!loaded.ok && "stop" in loaded) {
+        await q(sql`UPDATE runner_jobs SET status = 'queued', claimed_by = NULL, claimed_at = NULL,
+          attempts = GREATEST(0, attempts - 1), error_kind = ${loaded.stop},
+          due_at = NOW() + INTERVAL '10 minutes', updated_at = NOW() WHERE id = ${job.id}`);
+        await writeAudit({
+          tenantId: device.tenantId, action: "proxy_fail_closed", actorType: "system", riskLevel: "high",
+          target: `account:${accountId}`,
+          detail: { jobId: job.id, kind: job.kind, reason: loaded.stop, deviceId: device.id, deviceKind: device.kind },
+        });
+        /* 알림 중복 억제 — 같은 테넌트·같은 까닭이 24시간 안에 이미 있으면 다시 넣지 않는다. */
+        await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+          SELECT ${device.tenantId}, ${loaded.stop}, ${"전용 IP 를 기다리는 중이에요"}, ${PROXY_STOP_MESSAGE[loaded.stop]}, ${"/app/accounts.html"}
+           WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE tenant_id = ${device.tenantId}
+             AND kind = ${loaded.stop} AND created_at > NOW() - INTERVAL '24 hours')`).catch(() => {});
+        continue;
+      }
+      job.account = loaded.ok ? loaded.account : null;
       /* 🔴 자격 평문이 실제로 실린 건에 대해서만 **계정 1건당 1행** 감사(메인 조건 (가) 2026-09-14).
             무엇이 나갔는지는 남기지 않는다 — 나갔다는 «사실»과 종류(cookies/login)만. */
       if (job.account && (job.account.cookies || job.account.login)) {
