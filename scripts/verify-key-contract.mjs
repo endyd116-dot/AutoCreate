@@ -140,6 +140,20 @@ function varObjectKeys(src, name, callAt) {
   let declAt = -1, mm;
   while ((mm = re.exec(head))) declAt = mm.index;
   if (declAt < 0) return [];
+  /* 🔴 [2026-09-21 · A 가 밟았다] **매개변수를 선언으로 착각하면 «남의 시트 키»를 집는다.**
+     `async function startCard(body) { … UI.api("/api/billing-key-start", { body }) }` 처럼 `body` 가 **함수 매개변수**면
+     이 파일 어디에도 그 시트의 `const body = {` 가 없다. 그런데 뒤로 훑다 보면 **같은 파일 다른 시트의** `const body = {…}` 가 잡힌다.
+     실제로 A 가 `payRoute` 를 지우자 이 자가 **요금제 변경 키**(`planKey`·`cycle`·`agreePaidTerms`)로 다시 빨개졌다 — 엉뚱한 시트 것이다.
+     ⇒ **선언한 블록이 호출 전에 닫혔으면 같은 이름이라도 남의 것**이다. 선언에서 호출까지 중괄호를 세어,
+        깊이가 한 번이라도 **음수**가 되면(= 그 블록이 닫혔다) **못 따라간 것으로 본다**(⊘). 조용히 엉뚱한 걸 집지 않는다. */
+  {
+    let depth = 0;
+    for (let i = declAt; i < callAt; i++) {
+      const c = src[i];
+      if (c === "{") depth++;
+      else if (c === "}") { depth--; if (depth < 0) return []; }
+    }
+  }
   const open = src.indexOf("{", declAt);
   let d = 0, end = -1;
   for (let i = open; i < src.length; i++) { if (src[i] === "{") d++; else if (src[i] === "}") { d--; if (!d) { end = i; break; } } }
@@ -189,7 +203,10 @@ for (const f of walk(PUB, /\.(html|js)$/)) {
       }
     }
     if (!bk) continue;                       // 몸통이 아예 없는 호출(GET) — 잴 것이 없다
-    if (!bk.keys.length) { unreadableBody.push({ screen: rel(f), route: pm[1], varName: "(키를 못 뽑았다)" }); continue; }
+    /* 🔴 **빈 몸통(`{ body: {} }`)은 «못 읽은 것»이 아니라 «보낼 것이 없는 것»이다.**
+       처음에 이걸 ⊘ 로 셌더니 거짓 ⊘ 가 일곱 났다(`billing-key-start`·`account-restore`·`notifications-read` …).
+       ⊘ 를 부풀리면 «늘 2» 가 되고, 그러면 **진짜 못 잰 자리가 그 속에 묻힌다** — 내가 고치려던 바로 그 병이다(AC-95). */
+    if (!bk.keys.length && !bk.spread) continue;
     calls.push({ screen: rel(f), route: pm[1], keys: bk.keys, spread: bk.spread, viaVar: bk.viaVar });
   }
   /* 🔴 `public/js/ui.js` 는 **틀 자신**이다 — `UI.api` 가 거기 산다.
@@ -342,6 +359,13 @@ function readKeysFor(route) {
 const bad = [];
 const unmeasured = [];
 const derivedList = [];
+/* 🔴 **몸통을 못 읽은 짝도 ⊘ 다** — 조용히 넘기면 «어긋남 0»이 거짓말이 된다.
+   🔴 이 줄이 한 번 **안 들어간 채로 있었다**(2026-09-21): 위에서 `unreadableBody` 에 담기까지는 했는데
+   여기서 꺼내 쓰는 줄이 빠져서 **담아 놓고 아무도 안 봤다.** 내가 심은 변이(⑤)가 «조용하다»로 떨어져서 알았다 —
+   **변이를 안 넣었으면 «담았으니 됐다»고 믿고 넘어갔을 자리**다(AC-108). */
+for (const u of unreadableBody) {
+  unmeasured.push({ screen: u.screen, route: u.route, why: `몸통이 변수(\`${u.varName}\`)라 보내는 키를 못 읽었다` });
+}
 let pairs = 0;
 for (const c of calls) {
   const server = readKeysFor(c.route);
@@ -504,19 +528,39 @@ rec("화면은 `UI.api` 로만 부른다(생 `fetch` 는 401·게이트 처리�
 console.log("─".repeat(120));
 const fails = out.filter((o) => !o.ok);
 for (const o of out) console.log(`  ${o.ok ? "✓" : "✗"} ${o.step}  — ${o.note}`);
+/* 🔴 [2026-09-21] **이 자가 «늘 종료코드 2» 였다**(A 가 짚었다).
+   `exit(fails ? 1 : unmeasured ? 2 : 0)` 인데 ⊘ 가 상시로 있어서, **어긋난 자리가 0 이어도 언제나 2** 였다.
+   ⇒ 늘 2 인 자는 곧 아무도 안 읽는다(AC-95 — 오늘 `verify-api-surface` 에서 고친 그 모양).
+   🔴 **⊘ 를 없애서 고치는 게 아니다.** ⊘ 는 그대로 ⊘ 라고 찍는다(AC-9). 바꾼 것은 **종료코드가 무엇을 가리키나**다:
+     · «아직 **아무도 안 본** 자리»가 있으면 → **2**(할 일이 있다 · 줄어들 수 있는 수다)
+     · 남은 ⊘ 가 전부 «사람이 열어 보고 적어 둔 것»이면 → **0**(자는 여전히 못 쟀다고 찍는다)
+   🔴 «적어 두면 조용해진다»가 아니다 — 기록에는 **무엇을 봤나**가 있어야 하고,
+      `key-contract-reviewed.json` 의 규율대로 **보내는 키가 달라지면 그 확인은 만료된다.**
+      아래 ⓐ 가 그 만료를 실제로 재서, 지문이 바뀌면 **다시 «아무도 안 봤다»로 되돌린다.** */
+let reviewed = [];
+try { reviewed = JSON.parse(readFileSync(path.join(ROOT, "docs", "rules", "key-contract-reviewed.json"), "utf8")).확인 ?? []; } catch { /* 없으면 전부 ⊘ */ }
+/** ⓐ 그 기록이 **지금도 유효한가** — 적어 둔 지문(보낸 키 목록)이 지금 보내는 키와 같아야 한다. */
+const reviewOf = (u) => {
+  const r = reviewed.find((x) => x.경로 === u.route && x.화면 === u.screen);
+  if (!r) return null;
+  const want = Array.isArray(r.보낸키) ? r.보낸키.join(",") : String(r.보낸키 ?? "");
+  const now = Array.isArray(u.keys) ? u.keys.join(",") : (u.why.includes("펼치기") ? "...펼치기" : `변수:${u.why}`);
+  if (want && want !== "...펼치기" && want !== now) return { ...r, 만료: `적어 둘 땐 [${want}] · 지금은 [${now}]` };
+  return r;
+};
+const unseen = [];
 if (unmeasured.length) {
-  console.log(`\n⊘ 못 쟀음 ${unmeasured.length}곳 — **통과가 아니다**(AC-9):`);
-  /* 🔴 **사람이 열어 본 기록을 같이 찍는다** — 다음 사람이 같은 자리를 또 열지 않게.
-     🔴 그래도 **⊘ 는 ⊘ 다** — «사람이 봤다»는 «자가 재다»가 아니고 종료코드를 바꾸지 않는다(AC-9). */
-  let reviewed = [];
-  try { reviewed = JSON.parse(readFileSync(path.join(ROOT, "docs", "rules", "key-contract-reviewed.json"), "utf8")).확인 ?? []; } catch { /* 없으면 그냥 ⊘ */ }
+  console.log(`\n⊘ 못 쟀음 ${unmeasured.length}곳 — **자가 잰 것이 아니다**(AC-9):`);
   for (const u of unmeasured) {
-    const r = reviewed.find((x) => x.경로 === u.route && x.화면 === u.screen);
+    const r = reviewOf(u);
     console.log(`   · ${u.route} (${u.screen}) — ${u.why}`);
-    if (r) console.log(`     ↳ 사람이 열어 봤다: ${r.본사람} · ${r.언제} — ${r.무엇을봤나}`);
-    else console.log("     ↳ 🔴 **아직 아무도 안 열어 봤다** — 열어 보고 docs/rules/key-contract-reviewed.json 에 적어라");
+    if (r && !r.만료) console.log(`     ↳ ● 사람이 열어 봤다: ${r.본사람} · ${r.언제} — ${r.무엇을봤나}`);
+    else if (r && r.만료) { unseen.push(u); console.log(`     ↳ 🔴 **그 확인은 만료됐다** — ${r.만료}. 다시 열어 보고 적어라`); }
+    else { unseen.push(u); console.log("     ↳ 🔴 **아직 아무도 안 열어 봤다** — 열어 보고 docs/rules/key-contract-reviewed.json 에 적어라"); }
   }
+  console.log(`\n   ■ 그중 **아직 아무도 안 본 것 ${unseen.length}곳** · 사람이 보고 적어 둔 것 ${unmeasured.length - unseen.length}곳`);
+  console.log("   🔴 종료코드는 **앞의 수**만 가리킨다 — 뒤의 것도 «자가 쟀다»는 아니다(그래서 ⊘ 칸에 그대로 둔다).");
 }
-console.log(`\nPASS ${out.length - fails.length} · FAIL ${fails.length} · 대조한 짝 ${pairs}쌍 · ⊘ ${unmeasured.length}`);
+console.log(`\nPASS ${out.length - fails.length} · FAIL ${fails.length} · 대조한 짝 ${pairs}쌍 · ⊘ ${unmeasured.length}(안 본 것 ${unseen.length})`);
 console.log("🔴 이 자는 «보내는 키»만 잰다 — 되돌아오는 응답 키는 안 본다(머리말 «아직 못 하는 것»).\n");
-process.exit(fails.length ? 1 : unmeasured.length ? 2 : 0);
+process.exit(fails.length ? 1 : unseen.length ? 2 : 0);

@@ -150,6 +150,33 @@ try {
   rmSync(d, { recursive: true, force: true });
 } catch (e) { rec("④ 자가 안 보는 자리를 자가 말한다", false, String(e.message).slice(0, 160)); }
 
+/* ── ⑤ 🔴 **매개변수를 선언으로 착각하지 않는다**(2026-09-21 · A 가 밟은 자리) ──
+   `f(body)` 처럼 몸통이 **함수 매개변수**로 들어오면 그 시트엔 `const body = {` 가 없다.
+   그런데 뒤로 훑다 보면 **같은 파일 다른 시트의** `const body = {…}` 가 잡힌다 —
+   실제로 A 가 `payRoute` 를 지우자 이 자가 **요금제 변경 키**(`planKey`·`cycle`·`agreePaidTerms`)로 다시 빨개졌다.
+   🔴 그 짝은 «어긋났다»가 아니라 **«내가 못 읽었다»**여야 한다. 지어낸 시트 하나로 그 모양을 다시 만든다. */
+try {
+  const d = freshRoot();
+  const zz = [
+    "<script>",
+    'async function zzSend(body) { const r = await UI.api("/api/zz-param-probe", { body }); return r; }',
+    'function zzOpen() { const body = { zzAlpha: 1, zzBeta: 2 }; return zzSend({}); }',
+    "</script>",
+  ].join("\n");
+  writeFileSync(path.join(d, "public", "app", "zz-param.html"), zz);
+  writeFileSync(path.join(d, "netlify", "functions", "zz-param-probe.ts"),
+    'export const config = { path: "/api/zz-param-probe" };\nexport default async () => new Response("{}");\n');
+  const r = runRuler(d);
+  /* 🔴 **거짓 빨강이 안 나야 한다** — 남의 시트 키(`zzAlpha`·`zzBeta`)를 이 짝의 «보내는 키»로 집으면 안 된다. */
+  const grabbedWrong = /zzAlpha|zzBeta/.test(r.stdout);
+  /* 그리고 **조용히 넘기지도 않아야 한다** — «몸통을 못 읽었다»로 ⊘ 에 적혀야 한다. */
+  const saidUnread = /zz-param-probe/.test(r.stdout);
+  rec("⑤ 🔴 몸통이 **함수 매개변수**면 남의 시트 `const body` 를 집지 않고 **«못 읽었다»로 적는다**",
+    !grabbedWrong && saidUnread,
+    `남의 키를 집었나=${grabbedWrong ? "🔴 집었다" : "아니다"} · 못 읽었다고 적었나=${saidUnread ? "적었다" : "🔴 조용하다"}`);
+  rmSync(d, { recursive: true, force: true });
+} catch (e) { rec("⑤ 매개변수를 선언으로 착각하지 않는다", false, String(e.message).slice(0, 160)); }
+
 rmSync(base, { recursive: true, force: true });
 
 console.log("─".repeat(112));
