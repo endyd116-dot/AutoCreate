@@ -1980,13 +1980,18 @@ UI.pullToRefresh(load);
 const me = await UI.boot("account"); if (!me) return;
 if (me.impersonation) { UI.$("#page").insertAdjacentHTML("beforeend", `<div class="group"><div class="empty"><h3>원격접속 중엔 결제할 수 없어요</h3><p>운영자가 설정을 도와드리는 동안엔 요금제·카드를 바꿀 수 없어요. 끝난 뒤 본인이 직접 해 주세요.</p></div></div>`); UI.$$("#cards, #cycle, #card, #cancel").forEach((e) => e.hidden = true); return; }
 let S = null, PLANS = [], INV = [], cycle = "month", TIERS = [];   /* [R9R10-A · C 지적] TIERS = plans-list.tiers(서버 라벨 · 한 벌) — 없을 때만 UI.TIER_LABEL(하니스 ⑧-c 가 서버와 대조하는 사본) */
-/* [§1.6] 카드 등록 라인 — 법인카드가 인증 창에서 거절될 때 쓰는 «카드번호 직접 입력»(available 일 때만 · 문구는 서버) */
-const keyinRow = (K) => K && K.available ? `<label class="chk" id="keyinRow"><input type="checkbox" id="keyin"> <span>${UI.esc(K.label || "카드번호 직접 입력")}</span></label>` : "";
-/* 🔴 [2026-09-21 A · B 실측 받아서] 서버 안내는 «고를 수 있을 때»가 아니라 **있으면 언제나** 싣는다.
-   카드 등록(빌키)은 고객이 결제 라인을 **못 고른다**(lib/pay-route.ts keyinOptionForBillingKey 가 available:false 고정).
-   안내를 keyinRow 안에 두면 available:false 와 함께 통째로 사라져 «무엇이 열리는지»를 아무도 못 듣는다 — §9(막지 않는 대신 말해 준다).
-   🔴 문장은 서버가 만든다 · 화면은 그대로 싣기만 한다(AC-52). 체크박스가 없으면 들여쓰기(34px)도 없다. */
-const keyinNote = (K) => K && K.notice ? `<p class="muted" id="keyinNote" style="margin:0 0 8px ${K.available ? "34px" : "0"};font-size:12.5px">${UI.esc(K.notice)}</p>` : "";
+/* 🔴 [2026-09-21 A] **카드 등록에는 «카드번호 직접 입력» 체크박스가 없다 — 지웠다.**
+   왜 주석이 아니라 삭제인가: `billing-key.ts:43` 은 빌키 라인을 **고객 선택과 무관하게** 정한다
+   (키인 MID 있으면 언제나 keyin · 없으면 auth 폴백) ⇒ 물어도 **결과가 안 바뀐다**.
+   🔴 그린 채로 두면 KICC_MALL_ID_KEYIN 을 꽂아 available 이 true 가 되는 날 체크박스가 **되살아나고**
+      서버는 여전히 안 읽는다 ⇒ «물어 놓고 조용히 버리는» 고장이 그대로 돌아온다(2026-09-21 에 끝낸 그것).
+      주석은 그날 아무도 안 읽는다. 지우면 그날 **«없는 길»**이 된다 — §9 «없는 길은 게이트가 아니라 사실».
+      서버가 선택을 **실제로 듣게 되는 날 그때 같이** 되살린다(lib/pay-route.ts keyinOptionForBillingKey 를 함께 고쳐야 한다).
+   🔴 코인(단건)은 다르다 — 거긴 진짜 고를 수 있고 resolvePayRoute 가 읽는다. **coins.html 의 keyinRow·keyinBody 는 그대로 둔다.**
+
+   대신 §9 대로 **무엇이 열리는지 말해 준다** — 그 한 줄이 아래 keyinNote 다.
+   문장은 서버가 만든다 · 화면은 그대로 싣기만 한다(AC-52). 체크박스가 없으니 들여쓰기도 없다. */
+const keyinNote = (K) => K && K.notice ? `<p class="muted" id="keyinNote" style="margin:0 0 8px;font-size:12.5px">${UI.esc(K.notice)}</p>` : "";
 const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0, starter: 1, pro: 2, agency: 3 };
 /* KICC 카드 등록 콜백 복귀(billing-key-return): ?key=ok|fail · &trial=reused = 같은 카드로 체험을 이미 씀(§12.3) */
 const key = UI.qs.get("key");
@@ -2104,13 +2109,18 @@ async function choose(p) {
 /* 카드 등록 = KICC 인증창(url·form 은 서버가 준다) → 콜백 billing-key-return → ?key=ok|fail */
 async function addCard() {
   const K = S && S.keyin;
-  if (!K || (!K.available && !K.notice)) return startCard({});                      // 고를 것도 **알려 줄 것도** 없을 때만 바로 기존(인증) 라인
-  UI.sheet(`<p class="muted" style="margin:0 0 12px">카드 등록 창으로 이동해요. 등록하면 다음 결제부터 자동으로 청구돼요.</p>${keyinRow(K)}${keyinNote(K)}<div class="cta"><button class="btn primary" type="button" id="go">카드 등록하러 가기</button></div>`, { title: "카드 등록", onOpen: (sh, close) => {
-    /* 🔴 #keyin 은 available 일 때만 그려진다 — 안내만 있는 판이 생겼으므로 **있는지 보고 읽는다**(없이 읽으면 여기서 던져 이 단추가 죽는다) */
-    sh.querySelector("#go").onclick = () => { const body = {}; const kc = sh.querySelector("#keyin"); if (kc && kc.checked) body.payRoute = "keyin"; close(); startCard(body); };
+  if (!K || (!K.available && !K.notice)) return startCard();                        // 고를 것도 **알려 줄 것도** 없을 때만 바로 기존(인증) 라인
+  UI.sheet(`<p class="muted" style="margin:0 0 12px">카드 등록 창으로 이동해요. 등록하면 다음 결제부터 자동으로 청구돼요.</p>${keyinNote(K)}<div class="cta"><button class="btn primary" type="button" id="go">카드 등록하러 가기</button></div>`, { title: "카드 등록", onOpen: (sh, close) => {
+    /* 🔴 여기서 payRoute 를 보내지 않는다 — 서버(billing-key.ts:43)가 **안 읽는다**. 보내면 «물어 놓고 버리는» 모양으로 돌아간다.
+       보내는 코드가 없으니 읽을 #keyin 도 없다 — 널 가드가 필요 없는 게 아니라 **읽는 자리 자체를 없앴다**(verify-key-contract 가 이 약속을 지킨다). */
+    sh.querySelector("#go").onclick = () => { close(); startCard(); };
   } });
 }
-async function startCard(body) { const r = await UI.api("/api/billing-key-start", { body }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }
+/* 🔴 몸통을 **안 받는다**(2026-09-21) — 카드 등록에 고객이 고를 것이 없으니 보낼 것도 없다.
+   매개변수로 두면 ①언젠가 누가 거기 payRoute 를 다시 담고 ②`verify-key-contract` 가 변수 몸통을 한 겹 따라가다
+   **다른 시트의 `const body = { planKey, cycle }`** 를 집어 엉뚱한 키로 빨개진다(실제로 그랬다).
+   **보내는 것이 없으면 `body: {}` 라고 글자로 적는다** — 화면·서버·자가 같은 것을 본다. */
+async function startCard() { const r = await UI.api("/api/billing-key-start", { body: {} }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }
 function soon() { UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">결제 준비 중이에요</p><p class="muted" style="margin:0 0 16px">곧 열려요. 열리면 홈 «해야 할 일»에 알려드릴게요. 지금 체험 기간은 그대로예요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } }); }
 function cancel() { UI.sheet(`<p class="muted" style="margin:0 0 8px">해지하면 ${S.periodEnd ? UI.dateKST(S.periodEnd) : "이번 기간 끝"}까지 그대로 쓰고, 그 뒤엔 보기만 돼요. 만든 글과 편성표는 남아요.</p><div id="cc"></div>`, { title: "구독 해지", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#cc"), "정말 해지할까요? 기간 안엔 언제든 되돌릴 수 있어요.", async () => { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: true } }); if (!r.ok) return UI.toast(r.error || "해지하지 못했어요"); close(); UI.toast(r.periodEnd ? `${UI.dateKST(r.periodEnd)}까지 쓰고 끝나요` : "해지를 예약했어요"); load(); }) }); }
 async function revert() { const r = await UI.api("/api/subscription-cancel", { body: { atPeriodEnd: false } }); if (!r.ok) return UI.toast(r.error || "되돌리지 못했어요"); UI.toast("해지를 취소했어요 · 그대로 이어져요"); load(); }
