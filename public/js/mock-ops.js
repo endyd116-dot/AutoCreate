@@ -234,6 +234,24 @@
     "ops-cs-stats": () => ({ ok: true, open: S.tickets.filter((t) => t.status !== "resolved").length, avgFirstReplyMin: 42, slaMissPct: 8.3, satisfactionPct: 91 }),
     /* ── [B2] 러너 팜 — ops-runners.ts(조회 operator+ · 변경 admin+ · 화면은 super_admin 잠금) ── */
     "ops-runners": () => { const R = S.runners; const farm = { managed: R.filter((x) => x.tenantId == null).length, online: R.filter((x) => x.online).length, queued: R.reduce((a, x) => a + (x.queued || 0), 0), claimed: R.reduce((a, x) => a + (x.active || 0), 0), oldestQueuedMin: R.some((x) => x.queued) ? 42 : null }; return { ok: true, runners: R.map((x) => ({ ...x })), farm }; },
+    /* 🔴 [2026-09-21 · A] **셀렉터 표(`ops-recipe`) 를 모의가 안 흉내 냈다** — 그래서 `/ops/runners.html` 이
+       모의로 열려도 진짜 API 를 부르고 표가 안 그려져, 그 화면의 «한 단계 넓히기»·«되돌리기» 단추를
+       `verify-hand-on-button` 이 **한 번도 못 쟀다**(⊘). 모양은 그 화면이 읽는 칸 그대로다(runners.html:80~95).
+       🔴 값은 «볼 만한 상태»로 둔다 — 후보가 있는 채널 하나(단추가 그려진다) · 없는 채널 하나(«없음»이 그려진다). */
+    "ops-recipe": (b) => {
+      if (need("admin")) return forbid();
+      if (b && b.action) {
+        const ch = String(b.channel || "");
+        if (!ch) return err("channel", "채널을 고르세요.");
+        return { ok: true, channel: ch, stage: b.action === "promote" ? "own" : "canary", message: b.action === "promote" ? "한 단계 넓혔어요" : "되돌렸어요" };
+      }
+      return { ok: true, channels: [
+        { channel: "naver_blog", current: "2026.09.12", candidate: "2026.09.20", stage: "canary",
+          canary: { good: 7, bad: 0, unknown: 2 }, why: "", harm: { fails: 0, tenants: 0 } },
+        { channel: "tistory", current: "2026.08.30", candidate: "", stage: "",
+          canary: { good: 0, bad: 0, unknown: 0 }, why: "", harm: { fails: 0, tenants: 0 } },
+      ] };
+    },
     "ops-runner-assign": (b) => { if (need("admin")) return forbid(); const x = S.runners.find((r) => r.id === Number(b.id)); if (!x) return err("not_found", "러너를 찾을 수 없어요.", { status: 404 });
       if (b.action === "rebind") { const tid = b.tenantId == null || b.tenantId === "" ? null : Number(b.tenantId); const tn = tid == null ? null : S.tenants.find((z) => z.id === tid); if (tid != null && !tn) return err("tenant", "그 테넌트가 없어요.", { status: 404 }); x.tenantId = tid; x.tenantKey = tn ? tn.key : null; return { ok: true, id: x.id, tenantId: tid }; }
       if (b.action === "release") { const n = x.active || 0; x.active = 0; x.queued = (x.queued || 0) + n; return { ok: true, id: x.id, released: n }; }
