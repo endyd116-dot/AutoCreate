@@ -171,3 +171,119 @@ export async function ensureNaverLogin(page, account) {
   await naverLogin(page, account.login.id, account.login.pw);
   return "password";
 }
+
+/* ═══════════════════════ 🔴 «지금 내가 어느 블로그에 쓰고 있나» (AC-201 · B2 2026-09-21) ═══════════════════════
+ *
+ *   ══ 왜 ══
+ *     `runner/channels/naver-blog.mjs` 는 `account.handle` 을 **그대로 믿고** `blog.naver.com/{handle}/postwrite` 로 간다.
+ *     🔴 그 아이디가 틀리면 네이버는 **404 를 주지 않고 로그인한 사람의 블로그로 조용히 데려간다.**
+ *        AM 실사고(2026-09 NAVERPUB): 원장 `qj_academy`(없는 아이디) → 네이버가 자사 `with_walk_on_office` 로 리다이렉트
+ *        → **남의 블로그에 남의 글이 올라갔다.** 그리고 우리는 끝까지 «맞게 올렸다»고 알고 있었다.
+ *     이 자리만은 **되돌릴 수 없다** — 남의 블로그에 한 번 나가면 우리가 못 내린다(§5E ③을 안 만들기로 했다).
+ *
+ *   ══ 사다리는 **하나**다 — 둘째를 만들었다가 **재 보고 뺐다**(2026-09-21) ══
+ *     `myblog` — `blog.naver.com/MyBlog.naver` 는 **로그인이 필요한 주소**라 네이버가 «그 세션의 블로그»로 보낸다.
+ *     서버측 리다이렉트라 렌더 타이밍과 무관하고, 남의 블로그가 섞일 길이 없다.
+ *     (`isNaverLoggedIn` 이 이미 같은 주소로 로그인 여부를 판정한다 — 그때 **버리던 아이디**를 여기서 줍는 것이다.)
+ *
+ *   🔴 ══ 뺀 사다리와 왜 뺐는지 — AM `detectBlogIdOnPage` (2026-09-21 실측으로 죽였다) ══
+ *     AM 은 `section.blog.naver.com/BlogHome.naver` 의 링크에서 아이디를 모아 **최빈값**(빈도 ≥2)을
+ *     «내 블로그»로 삼는다. 그럴듯해서 폴백으로 넣었다가 **실제로 두 번 열어 봤다**(로그아웃):
+ *       1회차 링크 96개 · 아이디 84개 · 최빈 5회 = aronmovie · liferecord689 · winsighting …
+ *       2회차 같은 화면                 최빈 5회 = nuk1905 · lbmoon68 · minahan …
+ *     ⇒ **전부 생판 남의 블로그였고, 두 번이 서로 달랐다.** 이 화면의 최빈값은 «내 블로그»가 아니라
+ *        **«오늘 네이버가 미는 블로그»**다 — 틀릴 뿐 아니라 **재현되지도 않는다.**
+ *     🔴 그리고 그게 왜 위험한가(발행이 아니라 **장부**가 문제다):
+ *        판정기는 약한 증거로 «다르다»를 선언하지 않으니 발행은 안 틀린다. 그런데 서버가 그 값을
+ *        `accounts.identity.observed` 에 적고, 화면이 «이 주소가 맞나요?»로 **남의 블로그를 내밀고**,
+ *        고객이 «맞아요»를 누르면 `confirmed` → `expectBlogId` 가 된다.
+ *        ⇒ **가드가 자기 폴백에 무장해제된다.** 폴백이 본체를 죽이는 모양이라 없는 편이 낫다.
+ *     ⚠️ 로그인 상태에서는 내 블로그가 더 자주 나올 **수도** 있다 — 그건 **안 재 봤다**(로컬에 로그인 프로필이 없다).
+ *        재 보지 않은 것을 폴백으로 두지 않는다(AC-9). 이 파일 위쪽에서 `a[href*="MyBlog"]` 를 뺀 것과 **같은 판단**이다.
+ *     `pickBlogIdFromLinks` 는 **남겨 뒀다**(`scripts/verify-blog-identity.mts` 가 지킨다) —
+ *     다시 쓰려면 **로그인 상태로 재 보고** 쓰라는 뜻이다.
+ *
+ *   🔴 이 비대칭은 **비용이 비대칭이기 때문**이다: 헛된 «다르다» = 한 번 물어보면 끝 ·
+ *      놓친 «다르다» = **남의 블로그에 발행**(되돌릴 수 없다). 그래도 약한 증거로 막지는 않는다 —
+ *      멀쩡한 계정에 엉뚱한 주소를 들이미는 것도 값이 있다. 그래서 **못 쟀으면 못 쟀다고 한다**(AC-9).
+ */
+
+/** 블로그 아이디가 아닌 것들 — 네이버 화면 이름이 주소 첫 칸에 온다(AM NON_IDS + `*.naver` 규칙). */
+export const NAVER_NON_IDS = new Set([
+  "BlogHome", "FrontMain", "PostList", "MyBlog", "PostView", "PostThumbnailList", "GoBlogHome",
+  "gnb", "section", "recommendation", "prologue", "guestbook", "api", "rss", "m",
+]);
+
+/**
+ * 주소 한 개에서 블로그 아이디를 뽑는다(순수). 아이디가 아니면 **null**.
+ *   🔴 `classifyNaverSession` 이 피 흘려 배운 규칙을 그대로 쓴다 — **«이름.naver» 는 아이디가 아니다.**
+ *      그 줄이 없으면 `PostList.naver` 같은 화면 이름을 사람 아이디로 읽는다(2026-09-15 실측 ①번 실패).
+ */
+export function blogIdFromUrl(url) {
+  const m = /^https?:\/\/(?:m\.)?blog\.naver\.com\/([A-Za-z0-9_-]{2,30})(?:[/?#]|$)/i.exec(String(url ?? "").trim());
+  if (!m) return null;
+  const id = m[1];
+  if (/\.naver$/i.test(id) || NAVER_NON_IDS.has(id)) return null;
+  return id;
+}
+
+/**
+ * 링크 무더기에서 «내 블로그»를 고른다(순수 · AM `detectBlogIdOnPage` 의 최빈값 규칙).
+ *   🔴 빈도 `minCount` 미만이면 **null** — 한 번 스친 링크를 «내 블로그»로 집으면 이웃 블로그를 집는다.
+ */
+export function pickBlogIdFromLinks(hrefs, minCount = 2) {
+  const count = new Map();
+  for (const h of hrefs ?? []) { const id = blogIdFromUrl(h); if (id) count.set(id, (count.get(id) ?? 0) + 1); }
+  /* 🔴 동점이면 **아이디 사전순**으로 못 박는다 — Map 순서(=문서 등장 순서)에 맡기면 같은 화면에서
+     실행마다 다른 답이 나오고, 그러면 «다르다»가 떴다 말았다 한다(재현 안 되는 판정이 제일 나쁘다). */
+  const ranked = [...count.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const top = ranked[0];
+  return top && top[1] >= minCount ? top[0] : null;
+}
+
+/**
+ * 🔴 지금 로그인된 세션이 **실제로 가진 블로그 주소**를 읽는다.
+ *   @returns `{ blogId, via, why }` — 못 읽으면 `blogId:null` 과 사유(**「못 쟀음」이지 「같다」가 아니다**).
+ *   ⚠️ 던지지 않는다 — 신원을 못 읽었다고 발행을 멈추면 그게 «모른다로 막기»다(§9 · AC-9).
+ */
+export async function readMyBlogId(page) {
+  /* 로그인이 필요한 주소로 가서 **어디로 보내는지** 본다(서버측 판정 · 렌더 타이밍 무관).
+     🔴 못 읽으면 **거기서 끝난다 — 폴백을 두지 않는다.** 둘째 사다리를 만들었다가 재 보니
+        남의 블로그를 집어 왔다(위 머리말 실측). 「모른다」를 그럴듯한 값으로 메우지 않는다(AC-9). */
+  try {
+    await page.goto("https://blog.naver.com/MyBlog.naver", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await settle(page, 1000);
+    const id = blogIdFromUrl(page.url());
+    if (id) return { blogId: id, via: "myblog", why: null };
+    if (/nidlogin/i.test(page.url())) return { blogId: null, via: null, why: "logged_out" };
+    return { blogId: null, via: null, why: `unexpected_url:${page.url().slice(0, 40)}` };
+  } catch (e) {
+    return { blogId: null, via: null, why: `read_failed:${String(e?.message ?? e).slice(0, 40)}` };
+  }
+}
+
+/**
+ * 🔴 판정(순수) — 장부의 handle 과 실제로 본 블로그를 댄다.
+ *   @param handle    장부에 적힌 블로그 아이디(`accounts.handle`)
+ *   @param observed  러너가 실제로 본 아이디(못 봤으면 null)
+ *   @param via       어느 사다리로 봤나(`myblog` 만 «다르다»를 선언할 수 있다)
+ *   @param confirmed 고객이 «이 주소가 맞다»고 이미 확인해 준 아이디(`accounts.identity.confirmed`)
+ *   @returns kind —
+ *     `match`      장부와 같다 → 그대로 간다
+ *     `confirmed`  장부와는 다른데 **고객이 이미 확인한 주소**다 → 그대로 간다(🔴 네이버는 아이디와 블로그 주소가 다를 수 있다)
+ *     `mismatch`   🔴 다른 블로그다 → **아무것도 쓰기 전에 멈추고 한 번 묻는다**(되돌릴 수 없는 동작의 확인 · §9 밖)
+ *     `unmeasured` 못 쟀거나 약한 증거뿐 → 그대로 가되 **「못 쟀음」으로 남긴다**(AC-9)
+ */
+export function judgeBlogIdentity({ handle, observed, via, confirmed }) {
+  const want = String(handle ?? "").replace(/^@/, "").trim().toLowerCase();
+  const got = String(observed ?? "").trim().toLowerCase();
+  const okd = String(confirmed ?? "").trim().toLowerCase();
+  if (!got) return { kind: "unmeasured", want, got: null, via: via ?? null, why: "not_read" };
+  if (want && got === want) return { kind: "match", want, got, via: via ?? null };
+  if (okd && got === okd) return { kind: "confirmed", want, got, via: via ?? null };
+  /* 🔴 약한 증거(`links`)로는 «다르다»를 선언하지 않는다 — 그 화면엔 이웃·추천 블로그 링크가 섞여 있다. */
+  if (via !== "myblog") return { kind: "unmeasured", want, got, via: via ?? null, why: "weak_evidence" };
+  /* 장부가 **비어 있으면** 댈 것이 없다 — 막지 말고 본 것을 적어 준다(신규 연결 직후 · AM 도 이때는 폴백한다). */
+  if (!want) return { kind: "unmeasured", want, got, via, why: "no_handle" };
+  return { kind: "mismatch", want, got, via };
+}

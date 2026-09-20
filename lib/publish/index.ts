@@ -5,6 +5,7 @@
  *   흐름
  *     ① 멱등 — piece 에 external_url/channel_ref 가 있으면 **아무것도 하지 않는다**(CLAUDE §4.7 절대 게이트).
  *     ② 발행 가능 상태인가 · 계정이 살아 있나
+ *     ②-b 🔴 **채널에 «이미 있나»를 묻는다**(AC-200) — ①의 열쇠는 «우리 기록»이라 기록을 잃은 사고를 구조적으로 못 막는다.
  *     ③ 발행 직전 최종 검사(§16B) — 고지 복원·금칙어·제휴 링크 ≤2.
  *        🔴 **실패해도 막지 않는다**(`CLAUDE.md §9` · 사장님 2026-09-15 «말해 주기로 내려. 고객 계정이야»).
  *        감사 `publish_gate_risks` 에 남기고 `gate_report` 를 **늘 저장**해 «나갈 때 어떤 위험이 있었나»가 발행함에 보이게 한 뒤 **그대로 내보낸다.**
@@ -23,6 +24,7 @@ import { formatCapsOf } from "../channel-registry";   // [R9-4] 채널 꾸밈 �
 import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishImage, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
 import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
+import { reconcileLostPublish, lastClaimAtFor } from "./reconcile";   // [AC-200] 🔴 «우리 기록»이 아니라 **채널**에 이미 있나를 묻는다
 import { finalizePublish } from "./finalize";
 import { publishToBlogger } from "./blogger";
 import { publishToWordpress } from "./wordpress";
@@ -209,6 +211,23 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
         : `@${account.handle} 계정을 지금은 쓸 수 없어요.`,
       detail: `account_status=${account.status}`,
     };
+  }
+
+  /* ②-b 🔴 **채널에 물어본다**(AC-200 · `lib/publish/reconcile.ts` · 2026-09-21).
+     ①의 멱등 열쇠는 `pieces.external_url` — **우리 기록**이다. 러너가 올리고 보고 전에 죽으면 그 칸이 비고,
+     우리는 «안 올라갔다»로 알고 **같은 글을 또 올린다.** 그 사고는 우리 장부 안에서는 보이지 않는다.
+     ⇒ 올리기 전에 **채널에** 묻는다. 찾으면(잡을 집어 간 뒤에 생긴 글) 재발행 대신 **기록을 고친다.**
+     🔴 못 물어봐도(`unknown`) 그냥 간다 — 「아직 모른다」로 막지 않는다(§9). 판정은 `meta.alreadyCheck` 에 늘 남는다. */
+  if (!opts.dryRun) {
+    const rec = await reconcileLostPublish({
+      tenantId: piece.tenantId, pieceId: piece.id,
+      since: await lastClaimAtFor(piece.tenantId, piece.id),
+    }).catch((e) => { console.error("[publish] already-check failed(비치명)", (e as Error)?.message ?? e); return null; });
+    if (rec?.recovered) {
+      const out: PublishOk = { ok: true, via, already: true };
+      if (rec.externalUrl) out.externalUrl = rec.externalUrl;
+      return out;
+    }
   }
 
   // ③ 🔴 발행 직전 최종 게이트(§16B)

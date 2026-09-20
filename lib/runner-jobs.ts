@@ -32,6 +32,8 @@ import { publicBase } from "./site-url";
 import { classifyRunnerBlock, type RunnerBlock } from "./runner-block";
 import { classifyAndApply } from "./account-health";
 import { finalizePublish } from "./publish/finalize";
+/* [AC-200 · B2 2026-09-21] 🔴 되돌리기 **직전**에 채널에 «이미 올라갔나»를 묻는다 — 중복 게시가 태어나는 자리가 바로 여기다. */
+import { reconcileLostPublish } from "./publish/reconcile";
 // 🔴 수익 행을 쓰는 유일한 함수(계약 P1R3 §5). lib/revenue/** 는 runner-jobs 를 보지 않는다(AC-17 · 방향 한쪽).
 import { upsertRevenueRows } from "./revenue/upsert";
 import { r2Head, r2Configured, r2PresignGet, r2PresignPut, safeKey } from "./r2";
@@ -154,6 +156,14 @@ export interface RunnerJobAccount {
   proxyUrl?: string;
   /** 이 프록시의 기대 출구 IP — 러너가 실측 IP 와 다르면 발행을 멈춘다(계약 §2.5-4). */
   expectExitIp?: string;
+  /**
+   * [AC-201 · B2 2026-09-21] 🔴 **고객이 «이 주소가 맞다»고 확인해 준 블로그 주소**(`accounts.identity.confirmed`).
+   *   `expectExitIp` 와 **같은 모양**이다: 서버가 기대값을 내려보내고 러너가 실물과 댄다.
+   *   🔴 다른 점 하나 — IP 는 다르면 **멈춘다**(우리 프록시가 죽은 것). 블로그 주소는 다르면 **한 번 묻는다**
+   *      (네이버는 로그인 아이디와 블로그 주소가 다를 수 있어, 막으면 멀쩡한 계정이 영영 못 올린다).
+   *   없으면 러너는 `accounts.handle` 하고만 댄다(지금까지와 같다).
+   */
+  expectBlogId?: string;
   /** 저장된 세션 쿠키(있으면 로그인 단계를 건너뛴다). */
   cookies?: unknown[];
   /**
@@ -598,7 +608,12 @@ export async function enqueueJob(inp: EnqueueInput): Promise<{ id: number; creat
 async function loadAccountForRunner(tid: number, accountId: number, sealCaps?: unknown): Promise<RunnerJobAccount | null> {
   /* 프록시는 두 자리에서 온다(계약 §2.5): 새 방식 `accounts.proxy_id → proxies`(암호문) · 옛 방식 `accounts.proxy_url`(평문 칸).
      🔴 옛 칸을 지우지 않는다 — 쓰던 계정이 그대로 돌아야 한다(소급 0). 새 배정이 있으면 그것을 **우선**한다. */
+  /* [AC-201] `a.identity` 는 **선택 컬럼**이다 — DDL 0091 을 아직 안 걸었으면 42703 으로 죽는다.
+     🔴 그래서 `to_jsonb(a)->'identity'` 로 **행 전체를 jsonb 로 바꿔** 꺼낸다: 컬럼이 없으면 그냥 `null` 이 나오고
+        (선택 컬럼을 «있으면 읽고 없으면 건너뛴다»로 만드는 유일한 한 줄짜리 방법), 있으면 그대로 온다.
+        claim 은 **발행 전체의 목**이라 여기서 죽으면 공장이 통째로 선다(0081 이 가르친 자리). */
   const [a] = await q(sql`SELECT a.id, a.channel, a.handle, a.browser_profile_key, a.proxy_url, a.proxy_id,
+      to_jsonb(a) -> 'identity' AS a_identity,
       p.url_enc AS p_enc, p.last_exit_ip AS p_ip, p.status AS p_status
     FROM accounts a LEFT JOIN proxies p ON p.id = a.proxy_id
     WHERE a.tenant_id = ${tid} AND a.id = ${accountId} LIMIT 1`);
@@ -616,6 +631,14 @@ async function loadAccountForRunner(tid: number, accountId: number, sealCaps?: u
     if (a.p_ip) out.expectExitIp = String(a.p_ip);
   } else if (a.proxy_url) {
     out.proxyUrl = String(a.proxy_url);   // 러너용 원문(마스킹 안 함 — 이 응답 밖으로 나가면 안 된다)
+  }
+  /* [AC-201] 🔴 고객이 «맞다»고 확인해 준 블로그 주소가 있으면 내려보낸다 — 이게 있어야 «한 번 묻기»가
+     «영원히 묻기»가 되지 않는다(네이버는 로그인 아이디와 블로그 주소가 다를 수 있다).
+     ⚠️ 모양이 이상하면 **안 싣는다** — 이상한 값을 기대값으로 내려보내면 멀쩡한 계정이 매번 mismatch 가 된다. */
+  {
+    const idn = (a.a_identity && typeof a.a_identity === "object" ? a.a_identity : {}) as Record<string, unknown>;
+    const okId = String(idn.confirmed ?? "").trim();
+    if (okId && /^[A-Za-z0-9_-]{2,30}$/.test(okId)) out.expectBlogId = okId;
   }
   const creds = await q(sql`SELECT kind, enc, expires_at FROM account_creds
     WHERE account_id = ${accountId} AND purged_at IS NULL AND kind IN ('cookies','password') ORDER BY id DESC`);
@@ -849,6 +872,14 @@ export interface RunnerReportOk {
   render?: RunnerRenderResult;
   /** 이 잡이 실제로 나간 IP(계약 §2.5-4 · 프록시 배정 계정만). 서버가 `accounts.last_exit_ip` 에 적는다. */
   exitIp?: string;
+  /**
+   * [AC-201 · B2 2026-09-21] 🔴 **«이 잡이 실제로 어느 블로그에 썼나»** — `exitIp` 와 같은 부류의 **사실**이다.
+   *   🔴 `formatMarks` 에 싣지 않았다: 그건 «글의 꾸밈» 기록이고 이건 **계정의 신원**이라,
+   *      뒤에 이걸 찾는 사람이 `pieces.meta.formatMarks` 를 열어 볼 리가 없다. 사는 곳은 `accounts.identity` 다.
+   *   `kind` — `match`(장부와 같다) · `confirmed`(고객이 확인해 준 주소) · `unmeasured`(못 쟀다 · 🔴 «같다»가 아니다).
+   *   `posted` — 발행된 글 주소에서 회수한 blogId. **가장 센 증거**(그 글이 실제로 거기 갔다는 뜻).
+   */
+  identity?: { kind?: string; want?: string | null; got?: string | null; via?: string | null; posted?: string | null; why?: string; readWhy?: string };
   shotKey?: string;
   /**
    * [R9-2/5] 🔴 **서식을 «실제로 냈나»** — 러너가 보내는 **사실**이다(문장이 아니다 · 아래 `notes` 주석의 규율 그대로).
@@ -1106,6 +1137,36 @@ async function recordExitIp(tid: number, accountId: number | null, ip: unknown):
   }
 }
 
+/**
+ * [AC-201 · B2 2026-09-21] 🔴 러너가 **실제로 본** 블로그 주소를 계정 장부에 적는다(`accounts.identity`).
+ *   `recordExitIp` 와 **같은 부류**다: «걸었다»가 아니라 «그리로 갔다»의 유일한 증거이고, 성공·실패 모두 적는다.
+ *   🔴 `confirmed` 는 **절대 여기서 안 쓴다** — 그건 **고객이** «맞다»고 한 값이고, 러너가 본 것으로 자기 승인을
+ *      만들면 확인 절차가 통째로 사라진다(고양이에게 생선). 러너는 `observed`·`posted` 까지다.
+ *   ⚠️ 던지지 않는다 — 장부 갱신 실패로 보고를 잃으면 안 된다.
+ */
+async function recordAccountIdentity(tid: number, accountId: number | null, idn: unknown): Promise<void> {
+  const o = (idn && typeof idn === "object" ? idn : null) as Record<string, unknown> | null;
+  if (!accountId || !o) return;
+  const clean = (v: unknown): string | null => {
+    const x = String(v ?? "").trim();
+    return x && /^[A-Za-z0-9_-]{2,30}$/.test(x) ? x : null;
+  };
+  const observed = clean(o.got);
+  const posted = clean(o.posted);
+  /* 🔴 본 것이 하나도 없으면 **아무것도 안 적는다** — «못 쟀다»를 빈 값으로 적으면 다음 사람이
+     «쟀는데 없었다»로 읽는다(AC-9). 판정 자체는 아래 감사에 남는다. */
+  if (!observed && !posted) return;
+  const patch: Record<string, unknown> = { observedAt: new Date().toISOString() };
+  if (observed) { patch.observed = observed; if (o.via) patch.observedVia = String(o.via).slice(0, 16); }
+  if (posted) { patch.posted = posted; patch.observedVia = "posted"; }
+  try {
+    await q(sql`UPDATE accounts SET identity = COALESCE(identity, '{}'::jsonb) || ${jsonb(patch)}, updated_at = NOW()
+      WHERE tenant_id = ${tid} AND id = ${accountId}`);
+  } catch (e) {
+    console.error("[runner-jobs] identity 기록", (e as Error)?.message ?? e);
+  }
+}
+
 export async function reportJob(device: DeviceRow, jobId: number, result: RunnerReportBody): Promise<ReportOutcome> {
   const [j] = await q(sql`SELECT id, tenant_id, kind, account_id, piece_id, payload, status, attempts FROM runner_jobs
     WHERE id = ${jobId} AND tenant_id = ${device.tenantId} LIMIT 1`);
@@ -1120,6 +1181,8 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
 
   // 🔴 성공·실패를 가르기 **전에** 적는다 — 실패한 잡의 출구 IP 야말로 알아야 하는 값이다(§2.5-4).
   await recordExitIp(tid, accountId || null, (result as { exitIp?: unknown }).exitIp);
+  /* [AC-201] 🔴 신원도 **가르기 전에** 적는다 — 같은 이유다(실패한 잡이 본 것이야말로 알아야 하는 값이다). */
+  await recordAccountIdentity(tid, accountId || null, (result as { identity?: unknown }).identity);
 
   /* [P1R8 §3.3] 🔴 **어느 표로 돌았나를 성공·실패 가르기 전에 적는다** — 출구 IP 와 같은 이유다.
      실패한 잡이야말로 «어느 표 때문인가»를 알아야 하는 건인데, 아래 분기들은 각자 다른 자리에서 반환한다.
@@ -1143,6 +1206,62 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   if (kind === "reference.capture") {
     const { handleReferenceCaptureReport } = await import("./text-style-capture");
     return handleReferenceCaptureReport({ id: jobId, tenantId: tid, accountId: accountId || null, payload, attempts: n(j.attempts) }, result as unknown as Record<string, unknown>);
+  }
+
+  /* ── 🔴 `"identity_mismatch"` — **남의 블로그에 올릴 뻔했다**(AC-201 · B2 2026-09-21) ──
+     `proxy`·`parse`·`format_bleed` 와 같은 부류: 전이표 7종 **밖** · **계정 전이 0** · 재시도 0.
+     🔴 계정을 `pending_login` 으로 밀면 안 된다 — 계정은 멀쩡하다. 로그인은 됐고, **장부의 주소가 다를 뿐**이다.
+        «다시 로그인하세요»로 밀면 거짓 안내이고(AC-10), 고객은 시키는 대로 재로그인을 반복하다 캡차를 부른다.
+
+     ══ 🔴 이건 CLAUDE §9 의 게이트가 **아니다** ══
+       §9 가 스스로 밖에 둔 셋 중 하나다 — **«되돌릴 수 없는 동작의 확인 대화»**.
+       남의 블로그에 한 번 나가면 우리가 못 내린다(§5E ③을 안 만들기로 했다). 그래서 «말해 주고 내보낸다»가
+       여기서는 성립하지 않는다 — 말해 줄 때는 이미 남의 블로그에 글이 있다.
+     ══ 🔴 그래서 **한 번만** 묻는다 ══
+       네이버는 로그인 아이디와 블로그 주소가 다를 수 있다. 다르다고 영영 막으면 **멀쩡한 계정이 못 올린다**
+       (AM 의 가드가 그렇게 생겼다). 고객이 «맞다»고 하면 `accounts.identity.confirmed` 에 적히고,
+       그다음 claim 부터 `expectBlogId` 로 내려가 **다시는 안 묻는다**. */
+  if (result.ok !== true && String((result as RunnerReportFail).errorKind) === "identity_mismatch") {
+    const fail = result as RunnerReportFail;
+    const detail = String(fail.detail ?? "").slice(0, 300);
+    /* 🔴 실패 보고에도 `identity` 가 실려 온다(러너가 오류에 붙여 보낸다) — 없으면 고객에게 내밀 주소가 없다. */
+    const seen = (result as { identity?: { got?: string | null; want?: string | null } }).identity ?? null;
+    await q(sql`UPDATE runner_jobs SET status = 'failed', claimed_by = NULL, claimed_at = NULL, error_kind = 'identity_mismatch',
+        result = ${jsonb({ ok: false, errorKind: "identity_mismatch", detail, shotKey: fail.shotKey ?? null, identity: seen, attempts: n(j.attempts) })},
+        due_at = NULL, updated_at = NOW() WHERE id = ${jobId}`);
+    /* 🔴 «마지막으로 물어본 때»를 적는다 — 같은 계정에 잡이 열 건 쌓여 있으면 알림도 열 통이 간다.
+       아래 `askedAt` 하루 안이면 알림을 한 번만 보낸다(또렷하게 말하되 **시끄럽게** 말하지 않는다 · §3). */
+    let askedRecently = false;
+    if (accountId) {
+      try {
+        const [row] = await q(sql`SELECT to_jsonb(a) -> 'identity' AS idn FROM accounts a WHERE tenant_id = ${tid} AND id = ${accountId} LIMIT 1`);
+        const prev = (row?.idn && typeof row.idn === "object" ? row.idn : {}) as Record<string, unknown>;
+        const at = utcDate(prev.askedAt);
+        askedRecently = !!at && Date.now() - at.getTime() < 24 * 3600_000;
+        await q(sql`UPDATE accounts SET identity = COALESCE(identity, '{}'::jsonb) || ${jsonb({ askedAt: new Date().toISOString() })}, updated_at = NOW()
+          WHERE tenant_id = ${tid} AND id = ${accountId}`);
+      } catch (e) { console.error("[runner-jobs] identity askedAt", (e as Error)?.message ?? e); }
+    }
+    if (pieceId) {
+      /* 🔴 조용히 0건으로 끝내지 않는다 — 글은 `awaiting_manual` 로 남아 고객이 직접 올릴 수도 있다. */
+      await failPublishPiece(tid, pieceId, classifyRunnerBlock("unknown",
+        "올리기 전에 계정을 확인했는데, 지금 로그인된 블로그가 장부에 적힌 주소와 달라요. 다른 블로그에 올라가지 않도록 잠깐 멈췄어요 — 계정 화면에서 주소만 확인해 주시면 바로 이어서 올릴게요."), fail.shotKey);
+    }
+    if (accountId && !askedRecently) {
+      /* §3 말투 — ①사실 ②어떻게 하면 되는지 ③우리가 대신 한 것. 위협·책임 전가 0. */
+      const got = String(seen?.got ?? "").trim();
+      const want = String(seen?.want ?? "").trim();
+      await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link)
+        VALUES (${tid}, ${"account_address_check"}, ${"이 계정 주소가 맞나요?"},
+          ${`${want ? `저장된 주소는 «${want}» 인데 ` : ""}${got ? `지금 로그인된 블로그는 «${got}» 예요. ` : "지금 로그인된 블로그가 저장된 주소와 달라요. "}네이버는 아이디와 블로그 주소가 다를 수 있어서, 맞는지 한 번만 확인해 주세요. 확인해 주시면 다음부터는 묻지 않고 그대로 올릴게요. 그동안 글은 올리지 않고 보관해 두었어요.`},
+          ${"/app/accounts.html"})`).catch(() => {});
+    }
+    await writeAudit({
+      tenantId: tid, action: "publish_identity_mismatch", actorType: "system", riskLevel: "high", target: `runner_job:${jobId}`,
+      detail: { kind, errorKind: "identity_mismatch", accountId, pieceId: pieceId || null, want: seen?.want ?? null, got: seen?.got ?? null, notifiedNow: !askedRecently, detail: detail.slice(0, 200),
+        note: "쓰기 전에 멈췄다 — 되돌릴 수 없는 동작의 확인(CLAUDE §9 밖)" },
+    });
+    return { ok: true, status: "failed", reason: "identity_mismatch" };
   }
 
   /* ── 실패(parse) — 계약 P1R3 §2.1 · 우리 버그 · 계정 전이 0 · 0 으로 채우지 않는다(AC-9) ── */
@@ -1560,12 +1679,32 @@ export async function releaseJob(device: DeviceRow, jobId: number, reason?: stri
  * reapStaleJobs — claim 후 무보고 잡 회수(계약 §1 `runner.reap` 5분 스텝에서 B 가 호출).
  *   전 테넌트 대상(크론) · 시도 상한을 넘긴 건은 failed 로 종결하고 발행 잡이면 awaiting_manual 로 남긴다.
  */
-export async function reapStaleJobs(staleMin = STALE_CLAIM_MIN): Promise<{ released: number; failed: number }> {
-  const stale = await q(sql`SELECT id, tenant_id, kind, piece_id, attempts FROM runner_jobs
+export async function reapStaleJobs(staleMin = STALE_CLAIM_MIN): Promise<{ released: number; failed: number; recovered: number }> {
+  const stale = await q(sql`SELECT id, tenant_id, kind, piece_id, attempts, claimed_at FROM runner_jobs
     WHERE status = 'claimed' AND claimed_at IS NOT NULL AND claimed_at < NOW() - (${Math.max(1, Math.floor(staleMin))} * INTERVAL '1 minute')`);
   let released = 0, failed = 0;
+  let recovered = 0;
   for (const j of stale) {
     const id = n(j.id), tid = n(j.tenant_id), attempts = n(j.attempts);
+    /* 🔴 [AC-200 · 2026-09-21 B2] **여기가 중복 게시가 태어나는 자리다.**
+       러너가 claim → **글을 올린다** → 보고 전에 죽는다 → 15분 뒤 이 줄이 `queued` 로 되돌린다 →
+       다른 러너가 집어 **같은 글을 또 올린다.** 이 길은 `publish()` 를 안 거치므로 §4.7 멱등 검사 ①을 아예 안 탄다.
+       그리고 ①의 열쇠(`external_url`)는 **우리 기록**이라, 보고가 없으면 비어 있는 것이 정상이다 —
+       즉 **우리 장부만 보고는 이 사고를 원리적으로 못 본다.**
+       ⇒ 되돌리기 **전에** 채널에 묻는다. 이미 있으면(집어 간 시각 뒤에 생긴 글) 되돌리지 않고 그 주소로 확정한다.
+       ⚠️ 못 물어보면(`unknown`) 종전 그대로 되돌린다 — 「모른다」로 잡을 죽이지 않는다(AC-9 · §9). */
+    if (String(j.kind).startsWith("publish.") && n(j.piece_id)) {
+      const since = utcDate(j.claimed_at)?.toISOString() ?? null;
+      const rec = await reconcileLostPublish({ tenantId: tid, pieceId: n(j.piece_id), since, jobId: id })
+        .catch((e) => { console.error("[runner-jobs] reap already-check 실패(비치명)", (e as Error)?.message ?? e); return null; });
+      if (rec?.recovered) {
+        await q(sql`UPDATE runner_jobs SET status='done', claimed_by=NULL, claimed_at=NULL,
+          result = ${jsonb({ ok: true, via: "channel_reconcile", externalUrl: rec.externalUrl ?? null, note: "보고는 못 받았지만 채널에 올라가 있었다(AC-200)" })},
+          updated_at=NOW() WHERE id = ${id} AND status='claimed'`);
+        recovered++;
+        continue;                                  // 🔴 되돌리지 않는다 — 되돌리면 그게 중복 게시다
+      }
+    }
     if (attempts < MAX_ATTEMPTS) {
       await q(sql`UPDATE runner_jobs SET status='queued', claimed_by=NULL, claimed_at=NULL, updated_at=NOW() WHERE id = ${id} AND status='claimed'`);
       released++;
@@ -1578,8 +1717,10 @@ export async function reapStaleJobs(staleMin = STALE_CLAIM_MIN): Promise<{ relea
       }
     }
   }
-  if (released || failed) await writeAudit({ tenantId: null, action: "runner_reap", actorType: "system", detail: { released, failed, staleMin }, riskLevel: "low" });
-  return { released, failed };
+  if (released || failed || recovered) {
+    await writeAudit({ tenantId: null, action: "runner_reap", actorType: "system", detail: { released, failed, recovered, staleMin }, riskLevel: "low" });
+  }
+  return { released, failed, recovered };
 }
 
 /* ─────────────────────────── 세션 업로드 ─────────────────────────── */
