@@ -27,7 +27,8 @@
  *   ══ 판정 ══
  *     ✗  두 팔 **둘 다 종료코드 0** — 제품이 비었는데도 «전부 통과»다. 이 자의 초록은 제품과 무관하다.
  *     ✓  빈 팔에서 갈라진다(1·2·그 밖) — 판정이 제품에 달려 있다.
- *     ⊘  **대조군에서부터 0 이 아니다**(지금 빨갛거나 못 재는 자) 또는 시간 초과 — **잴 자격이 없다**(AC-9).
+ *     ⊘  셋 중 하나 — ㈜출력이 **글자 하나 안 달라졌다**(안 읽었거나 · 읽고도 모수를 안 찍는다 — 🔴 이 둘은 **못 가른다**)
+ *        ㈝**대조군에서부터 0 이 아니다**(지금 빨갛거나 못 재는 자) 또는 시간 초과 — **잴 자격이 없다**(AC-9).
  *        🔴 ⊘ 를 통과로 세지 않는다. 세면 이 자가 바로 그 병에 걸린다.
  *
  *   ══ 🔴 이 자가 재지 **않는** 것 (거짓 빨강을 미리 깎는다 · AC-112 ⑤) ══
@@ -47,7 +48,10 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const ARENA = path.join(ROOT, "_verify", "experiment-holds");   /* `_verify/` 는 .gitignore 에 있다 — 잔재가 커밋에 안 딸려간다 */
+/* 🔴 한 폴더를 두 판이 같이 쓰면 뒤에 도는 판이 앞 판의 팔을 지운다 — 실제로 밟았다(2026-09-21 C).
+   배경에서 전수를 돌리면서 앞에서 `--only=` 로 한 번 더 돌렸는데, 뒤에 끝난 판의 `rmSync` 가
+   **돌고 있는 판의 나무를** 지워 그 판이 죽었다. 자가 제 아레나를 난누어 쓰면 안 된다. */
+const ARENA = path.join(ROOT, "_verify", `experiment-holds-${process.pid}`);   /* `_verify/` 는 .gitignore 에 있다 — 잔재가 커밋에 안 딸려간다 */
 const TIMEOUT_MS = 60_000;
 
 const argOnly = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7);
@@ -98,17 +102,27 @@ function runIn(armDir, rel) {
    ㉯ «성립하는 실험» 검체   — 제품을 읽고 없으면 우는 자
    이 자가 ㉮ 를 ✗, ㉯ 를 ✓ 로 갈라야 한다. 한쪽이라도 못 가르면 이 자는 무디다. */
 const SPECIMENS = {
+  /* ㈞ 🔴 **AC-172 그 모양** — 읽긴 읽는다. 그런데 판정이 그 읽은 것에 **안 달려 있다**.
+     메인의 탐침이 정확히 이것이었다 — 값을 읽어 제공사에 넣었고, 그 값이 무엇이든 401 이었다.
+     🔴 첫 판 검체는 **아무것도 안 읽는** 것이었는데, 그건 «눈몄 자»가 아니라 «모수 밖»이다. 본뜨기를 고쳐 적는다. */
   "scripts/_specimen-vacuous.mjs":
-    `/* 검체㉮ — 🔴 **제품을 읽지 않는다**(AC-172 모양: 결과가 재려는 것과 무관) */\n` +
+    `import { readFileSync, existsSync } from \"node:fs\";\n` +
+    `const p = \"lib/creds-crypto.ts\";\n` +
+    `const s = existsSync(p) ? readFileSync(p, \"utf8\") : \"\";\n` +
+    'console.log("  읽은 글자 " + s.length + "자");\n' +
     `console.log("  ✓ ① 계약이 지켜졌다");\nprocess.exit(0);\n`,
+  /* ㈟ «성립하는 실험» — 읽고, 없으면 운다 */
   "scripts/_specimen-sound.mjs":
-    `/* 검체㉯ — 제품을 읽고, 없으면 운다 */\n` +
-    `import { readFileSync, existsSync } from "node:fs";\n` +
-    `const p = "lib/creds-crypto.ts";\n` +
-    `const s = existsSync(p) ? readFileSync(p, "utf8") : "";\n` +
+    `import { readFileSync, existsSync } from \"node:fs\";\n` +
+    `const p = \"lib/creds-crypto.ts\";\n` +
+    `const s = existsSync(p) ? readFileSync(p, \"utf8\") : \"\";\n` +
     `const ok = s.includes("maskProxyUrl");\n` +
     `console.log(ok ? "  ✓ ① maskProxyUrl 이 있다" : "  ✗ ① maskProxyUrl 이 없다");\n` +
     `process.exit(ok ? 0 : 1);\n`,
+  /* ㈠ 🔴 **모수 밖** — 내가 비운 곳을 아예 안 읽는다. 이건 «눈몄 자»가 아니다 — 내 팔이 못 미치는 자리다.
+     첫 전수에서 이런 자 셋을 ✗ 로 찍었다(AC-210 ②). 그 가름을 검체로 박아 둔다. */
+  "scripts/_specimen-outofscope.mjs":
+    `console.log("  ✓ ① 이 자는 제품을 안 읽는다");\nprocess.exit(0);\n`,
 };
 
 /* ══════════════ 돌린다 ══════════════ */
@@ -122,6 +136,7 @@ if (!files.length) { console.error("⊘ 못 쟀어요 — 추적되는 파일이
 
 /* 🔴 모수를 **먼저 찍는다**(AC-114 ② — 다음 사람이 수를 맞댈 수 있어야 한다) */
 const allRulers = files.filter((f) => /^scripts\/verify-.*\.mjs$/.test(f));
+const MTS = files.filter((f) => /^scripts\/verify-.*\.mts$/.test(f)).length;
 const skipped = [];
 let rulers = allRulers.filter((f) => {
   const src = readFileSync(path.join(ROOT, f), "utf8");
@@ -136,6 +151,8 @@ console.log(`■ 내가 세는 모수`);
 console.log(`   추적 파일 ${files.length}개 · 그중 \`scripts/verify-*.mjs\` **${allRulers.length}개**`);
 console.log(`   └ 모수 밖 ${skipped.length}개(${[...new Set(skipped.map((s) => s[1]))].join(" · ")})`);
 console.log(`   └ 🔴 **이번에 재는 자 ${rulers.length}개**${argOnly ? ` (--only=${argOnly} 로 좁혔다)` : ""}`);
+console.log(`   ⊘ 🔴 **이 자가 아예 안 보는 것: scripts/verify-*.mts ${MTS}개**(B2 쪽이 대부분) — tsx 가 있어야 돌고,`);
+console.log(`     그중 여럿은 R2·DB 자격을 쓴다. **모수의 절반을 못 본다**는 뜻이다 — «못 재음»으로 적는다(AC-9).`);
 console.log(`   비우는 곳: 추적 파일 중 \`scripts/**\` 와 ${[...KEEP_EXACT].join("·")} 를 뺀 전부 — **파일은 남기고 내용만** ""`);
 console.log("");
 
@@ -157,23 +174,28 @@ console.log(`   팔 둘을 지었다(${((Date.now() - t0) / 1000).toFixed(1)}초
 }
 console.log("");
 
-/** 🔴 **«내가 비운 곳을 이 자가 보기는 하나»** — 안 보면 ✗ 가 아니라 ⊘(모수 밖)다.
- *  첫 판이 `verify-scripts-parse`·`verify-ruler-legible`·`verify-audit-selftest` 셋을 ✗ 로 찍었는데
- *  셋 다 **`scripts/` 만 읽는 자**였다 — 나는 그곳을 일부러 안 비웠다. 내 팔이 못 미치는 자리다.
- *  거짓 빨강 셋을 그대로 뒀으면 사람이 이 자를 곧 무시했을 것이다(AC-112 ⑤). */
-const BLANKED_TREES = ["public", "lib", "netlify", "db", "docs", "runner", "drizzle", "assets"];
-const seesBlanked = (rel) => { const src = readFileSync(path.join(ROOT, rel), "utf8"); return BLANKED_TREES.some((t) => new RegExp(`["'\`]${t}[/"'\`]`).test(src)); };
+/** 🔴 시각처럼 **매 번 달라지는 글자**를 걷는다 — 안 걷으면 모든 자의 출력이 달라 보인다.
+ *  지금은 ISO 시각과 시계 둘뿐이다 — **숫자를 통째로 걷지 않는다**(«화면 0개»↔«화면 38개» 가 이 자의 핵심이다). */
+const noClock = (s) => String(s)
+  .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\d]*Z?/g, "<시각>")
+  .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, "<시계>");
 
 const targets = SELFTEST ? Object.keys(SPECIMENS) : rulers;
 const rows = [];
 for (const rel of targets) {
-  if (!SELFTEST && !seesBlanked(rel)) { rows.push({ rel, mark: "⊘", say: `**모수 밖** — 이 자는 \`scripts/\` 만 읽는다(내가 비운 ${BLANKED_TREES.length}그루를 안 본다)` }); continue; }
   const a = runIn(armA, rel);
   if (a.why) { rows.push({ rel, mark: "⊘", say: `대조군에서 ${a.why}` }); continue; }
   if (a.code !== 0) { rows.push({ rel, mark: "⊘", say: `대조군이 초록이 아니다(종료코드 ${a.code}) — **이 자로는 못 잰다**` }); continue; }
   const b = runIn(armB, rel);
   if (b.why) { rows.push({ rel, mark: "⊘", say: `빈 팔에서 ${b.why}` }); continue; }
-  if (b.code === 0) rows.push({ rel, mark: "✗", say: `🔴 **제품을 통째로 비웠는데도 종료코드 0** — 이 자의 초록은 제품을 보고 한 말이 아니다`, a, b });
+  if (b.code === 0) {
+    /* 🔴 둘 다 0 이면 두 갈래다 — **이 자가 무언가 달라진 것을 보긴 했나**로 가른다.
+       본 것이 없으면(출력이 글자 하나 안 달라졌으면) 내가 비운 곳을 **안 읽는 자**다 — ✗ 가 아니라 ⊘(모수 밖).
+       첫 판은 이걸 소스에서 낱말로 짐작했다가 **양쪽으로** 틀렸다(못 보는 자를 ✗, 보는 자를 ⊘). 짐작하지 말고 재라. */
+    const same = noClock(a.out) === noClock(b.out);
+    if (same) rows.push({ rel, mark: "⊘", say: `제품을 비웠는데 출력이 **글자 하나 안 달라졌다** — 🔴 안 읽었거나, 읽고도 **무엇을 읽었는지 안 찍는다**(AC-114). 이 자로는 못 가른다 — 먼저 그 자가 제 모수를 찍게 하라` });
+    else rows.push({ rel, mark: "✗", say: `🔴 **제품을 통째로 비웠고 출력도 달라졌는데 종료코드는 0** — 보고도 «통과»라 했다(모수 0 을 통과로 쓴 것 · AC-141 ②)`, a, b });
+  }
   else rows.push({ rel, mark: "✓", say: `빈 팔에서 갈라진다(A=0 → B=${b.code})` });
 }
 
@@ -201,7 +223,7 @@ console.log(`   ⊘ 는 **통과가 아니다** — 대조군이 초록이 아�
 if (SELFTEST) {
   /* 🔴 판정표를 **먼저** 적고 맞대는 것 — ㉮ 는 ✗ 여야 하고 ㉯ 는 ✓ 여야 한다 */
   const got = (rel) => (rows.find((r) => r.rel === rel) || {}).mark;
-  const want = { "scripts/_specimen-vacuous.mjs": "✗", "scripts/_specimen-sound.mjs": "✓" };
+  const want = { "scripts/_specimen-vacuous.mjs": "✗", "scripts/_specimen-sound.mjs": "✓", "scripts/_specimen-outofscope.mjs": "⊘" };
   let miss = 0;
   console.log("");
   console.log("── 🔴 자기 찌르기 판정표(먼저 적고 맞댄다) ──");
@@ -210,7 +232,7 @@ if (SELFTEST) {
     if (!ok) miss++;
     console.log(`  ${ok ? "✓" : "✗"} ${rel} — 기대 ${expect} · 나온 것 ${g ?? "(못 돌았다)"}`);
   }
-  console.log(miss ? "  🔴 **이 자는 두 갈래를 못 가른다 — 무디다.**" : "  이 자는 두 갈래를 가른다(아는 검체 둘로 확인).");
+  console.log(miss ? "  🔴 **이 자는 두 갈래를 못 가른다 — 무디다.**" : "  이 자는 세 갈래를 다 가른다(아는 검체 셋으로 확인 — ✗ 눈먼 자 · ✓ 성한 자 · ⊘ 모수 밖).");
   rmSync(ARENA, { recursive: true, force: true });
   process.exit(miss ? 1 : 0);
 }
