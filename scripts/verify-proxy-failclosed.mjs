@@ -114,15 +114,36 @@ notes.push("■ ③ 보임 — 멈춘 것이 운영 화면으로 나오나(§9 �
 const prox = read(PROX), ops = read(OPS);
 if (!prox || !ops) unk("③", `${!prox ? PROX : OPS} 가 없다`);
 else {
+  /* 🔴 **덩이별로 잘라서 본다.** 파일 어딘가에 `tenantName` 이 한 번 있다고 그 목록이 그려지는 게 아니다 —
+     한 덩이에서 지워도 **다른 덩이를 보고** 초록이 나온다(변이가 그걸 잡았다: 이름을 한 곳에서 빼도 안 울었다).
+     그래서 시작 글자에서 정해진 길이만큼만 잘라 그 안에서 찾는다. */
+  /* 🔴 길이로 자르면 **옆 덩이까지 샌다** — 700자를 줬더니 «멈춘 계정» 창이 «기다리는 계정» 블록을 먹어서,
+     앞 덩이에서 이름을 빼도 뒤 덩이의 이름을 보고 초록이 났다(변이가 두 번째로 잡았다).
+     ⇒ **끝 글자로 자른다.** 덩이의 경계를 말로 적으면 줄이 늘어도 창이 안 샌다. */
+  const inBlock = (text, start, end, re) => {
+    const i = text.indexOf(start); if (i < 0) return false;
+    const j = text.indexOf(end, i + start.length);
+    return re.test(text.slice(i, j > 0 ? j : i + 900));
+  };
   const seen = [
     ["집계가 있다",               prox, /export async function proxyStopped/],
     ["멈춤 표식으로 센다",        prox, /error_kind IN \('no_proxy', 'proxy_down', 'proxy_expired', 'proxy_decrypt_failed'\)/],
-    ["🔴 계정 이름까지 준다",     prox, /handle: String\(r\.handle/],
-    ["🔴 테넌트 이름까지 준다",   prox, /tenantName: String\(r\.tenant_name/],
-    ["아직 안 돌아 본 쪽도 센다", prox, /account_slots WHERE status = 'waiting_ip'/],
+    /* «아직 한 번도 안 돌아 본 계정» — 수뿐 아니라 **누구인지**까지 봐야 재고가 왔을 때 붙일 상대를 고른다.
+       🔴 처음엔 `account_slots WHERE status` 로 적었다가, ⑵ 에서 그 질의에 JOIN 이 붙자 과녁이 빗나갔다
+          (자가 제 일을 해서 빨개졌다). 과녁을 **결과 모양**(`waiting:` 을 싣나)으로 옮긴다 — 질의는 또 바뀐다. */
+    ["아직 안 돌아 본 쪽도 센다", prox, /'waiting_ip'/],
+    ["그게 누구인지까지 준다",    prox, /waiting: waiting\.map\(/],
     ["운영 응답이 그걸 싣는다",   ops,  /stopped: await proxyStopped\(\)/],
   ];
   for (const [name, text, re] of seen) (re.test(text) ? ok : bad)("③", name);
+  // 이름은 **두 덩이 각각에서** 본다(멈춘 계정 / 기다리는 계정 — 어느 쪽이 비어도 그 목록은 숫자가 된다).
+  const NAMED = [
+    ["멈춘 계정: 테넌트 이름",    "accounts: rows.map",   "waitingSlots:", /tenantName: String\(r\.tenant_name/],
+    ["멈춘 계정: 계정 이름",      "accounts: rows.map",   "waitingSlots:", /handle: String\(r\.handle/],
+    ["기다리는 계정: 테넌트 이름", "waiting: waiting.map", "  };",       /tenantName: String\(r\.tenant_name/],
+    ["기다리는 계정: 계정 이름",   "waiting: waiting.map", "  };",       /handle: String\(r\.handle/],
+  ];
+  for (const [name, start, end, re] of NAMED) (inBlock(prox, start, end, re) ? ok : bad)("③", name);
 }
 
 /* ───────────────── ④ 러너 쪽 — 배정된 IP 는 실측으로 대조하나 ─────────────────
@@ -177,7 +198,8 @@ const MUT = [
   ["claim 이 기기 종류를 안 넘긴다", (b) => { b[JOBS] = b[JOBS].replace(", deviceCaps, device.kind)", ", deviceCaps)"); }, "②"],
   ["멈춰도 잡을 그냥 내준다",        (b) => { b[JOBS] = b[JOBS].replace("if (fc.stop) return { ok: false, stop: fc.reason };", ""); }, "②"],
   ["멈춘 것을 화면에 안 싣는다",     (b) => { b[OPS] = b[OPS].replace("stopped: await proxyStopped(),", ""); }, "③"],
-  ["이름 없이 id 만 준다",           (b) => { b[PROX] = b[PROX].replace(/tenantName: String\(r\.tenant_name \?\? ""\),/, ""); }, "③"],
+  ["멈춘 계정에서 이름을 뺀다",      (b) => { b[PROX] = b[PROX].replace(/(accounts: rows\.map[\s\S]{0,700}?)tenantName: String\(r\.tenant_name \?\? ""\),/, "$1"); }, "③"],
+  ["기다리는 계정에서 이름을 뺀다",  (b) => { b[PROX] = b[PROX].replace(/(waiting: waiting\.map[\s\S]{0,700}?)tenantName: String\(r\.tenant_name \?\? ""\),/, "$1"); }, "③"],
 ];
 let silent = 0;
 for (const [name, tf, axis] of MUT) {

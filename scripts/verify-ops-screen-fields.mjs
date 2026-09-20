@@ -51,6 +51,14 @@ function inRange(text, startNeedle, span, needle) {
   const i = text.indexOf(startNeedle);
   return i >= 0 && text.slice(i, i + span).includes(needle);
 }
+/* 🔴 길이 창은 **옆 덩이까지 샌다** — 같은 날 `verify-proxy-failclosed` 에서 실제로 그랬다(700자 창이
+   «멈춘 계정»에서 «기다리는 계정» 블록을 먹어, 앞에서 이름을 빼도 뒤를 보고 초록이 났다).
+   나란한 덩이가 둘 이상이면 길이가 아니라 **끝 글자**로 자른다. */
+function inBlock(text, start, end, needle) {
+  const i = text.indexOf(start); if (i < 0) return false;
+  const j = text.indexOf(end, i + start.length);
+  return text.slice(i, j > 0 ? j : i + 900).includes(needle);
+}
 notes.push("■ ① 짝 — id 를 주는 자리에 그 id 의 «이름»이 같이 오나(«테넌트 778» 금지 · CLAUDE §3)");
 /* 🔴 과녁은 **값을 싣는 자리**다 — 처음엔 `"tenantName:"` 로 찾다가 `dueNotices` 의 **반환 타입 선언**
    (`Promise<{ …; tenantName: string; … }>`)을 짚어, 값을 통째로 빼도 초록이 나왔다(변이가 잡았다).
@@ -67,13 +75,15 @@ const PAIRS = [
   ["운영 대기열: 테넌트 이름",   LTD, "export async function dueNotices", 1600, "tenantName: String(r.tenant_name"],
   ["운영 대기열: 글 제목",       LTD, "export async function dueNotices", 1600, "title: String(r.piece_title"],
   ["운영 대기열: 며칠 지났나",   LTD, "export async function dueNotices", 1600, "overdueDays: due ?"],
-  ["멈춘 계정: 테넌트 이름",     LPX, "accounts: rows.map", 700, "tenantName: String(r.tenant_name"],
-  ["멈춘 계정: 계정 이름",       LPX, "accounts: rows.map", 700, "handle: String(r.handle"],
-  ["기다리는 계정: 이름",        LPX, "waiting: waiting.map", 700, "tenantName: String(r.tenant_name"],
-  ["기다리는 계정: 계정 이름",   LPX, "waiting: waiting.map", 700, "handle: String(r.handle"],
+  // 🔴 이 넷은 **나란한 두 덩이**라 길이가 아니라 경계로 자른다(위 `inBlock` 주석).
+  ["멈춘 계정: 테넌트 이름",     LPX, "accounts: rows.map", "waitingSlots:", "tenantName: String(r.tenant_name"],
+  ["멈춘 계정: 계정 이름",       LPX, "accounts: rows.map", "waitingSlots:", "handle: String(r.handle"],
+  ["기다리는 계정: 이름",        LPX, "waiting: waiting.map", "  };", "tenantName: String(r.tenant_name"],
+  ["기다리는 계정: 계정 이름",   LPX, "waiting: waiting.map", "  };", "handle: String(r.handle"],
   ["프록시 목록: 쓰는 계정 이름", PX, "assignedTo:", 200, "handle: String(r.account_handle"],
 ];
-for (const [name, f, start, span, needle] of PAIRS) (inRange(T[f], start, span, needle) ? ok : bad)("①", name);
+for (const [name, f, start, span, needle] of PAIRS)
+  ((typeof span === "number" ? inRange(T[f], start, span, needle) : inBlock(T[f], start, span, needle)) ? ok : bad)("①", name);
 
 /* ───────────── ② 문 — A 가 부를 문이 실제로 열려 있나 ───────────── */
 notes.push("■ ② 문 — A 가 부를 여섯 문이 열려 있나(경로 등록 + 그 메서드까지)");
@@ -163,6 +173,7 @@ console.log("  ✓ 대조군(맨 판) 초록");
 const MUT = [
   ["목록에서 글 제목을 뺀다",       (b) => { b[TD] = b[TD].replace(/\n\s*pieceTitle: String\(r\.piece_title[^\n]*\n/, "\n"); }, "①"],
   ["대기열에서 테넌트 이름을 뺀다", (b) => { b[LTD] = b[LTD].replace(/tenantName: String\(r\.tenant_name \?\? ""\),/, ""); }, "①"],
+  ["멈춘 계정에서만 이름을 뺀다",   (b) => { b[LPX] = b[LPX].replace(/(accounts: rows\.map[\s\S]*?)tenantName: String\(r\.tenant_name \?\? ""\),/, "$1"); }, "①"],
   ["단건 GET 을 닫는다",            (b) => { b[TD] = b[TD].replace('path.endsWith("/ops-takedown") && req.method === "GET"', "false"); }, "②"],
   ["정지 감사를 low 로 내린다",     (b) => { b[LTD] = b[LTD].replace('action: "takedown_suspend", actorType: "operator", actorId: operatorId, ip: ip ?? null, riskLevel: "critical"', 'action: "takedown_suspend", actorType: "operator", actorId: operatorId, ip: ip ?? null, riskLevel: "low"'); }, "④"],
   ["IP 등록을 admin 에게 연다",     (b) => { b[PX] = b[PX].replace('requireAdmin(req, ["super_admin"])', 'requireAdmin(req, ["admin"])'); }, "③"],
