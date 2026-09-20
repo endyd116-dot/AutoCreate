@@ -88,6 +88,13 @@ export interface AccountRow {
    *   🔴 «계약 값이 무엇인지»는 여기서 안 채운다 — 채우면 화면이 «고객이 고른 값»과 «기본값»을 구별하지 못한다(AC-92).
    */
   reader: string | null;
+  /**
+   * 🔴 [2026-09-21 · B] **이 계정을 만든 날**(`YYYY-MM-DD` · 모르면 `null`) — 고객이 알면 적는 값이다.
+   *   워밍업이 «우리와 연결한 날»(`created_at`)보다 **먼저** 본다(`lib/warmup.ts:57`) — 3년 된 블로그를 어제 연결해도 1주차로 묶이지 않게.
+   *   🔴 읽는 곳이 여섯인데 **쓰는 길이 0곳**이라 라이브 92계정이 전부 NULL 이었다(`verify-write-path-missing` 가 잡았다).
+   *   «모른다»를 아무 날짜로 **바꾸지 않는다**(AC-92) — 비면 `null` 이고 워밍업은 다시 `created_at` 을 본다.
+   */
+  openedAt: string | null;
 }
 
 /** SELECT 조각 — accounts a + 자격 존재 여부 서브쿼리. */
@@ -119,6 +126,9 @@ export function toAccountRow(r: Row): AccountRow {
     defaultTier: toCoinTier(r.quality_tier),            // 모르는 값·NULL → null(«안 고름»)
     defaultStyleId: Number(r.text_style_id) > 0 ? Number(r.text_style_id) : null,
     reader: String(r.reader ?? "").trim() || null,          // [R11-8] 빈 문자열도 «안 고름»으로 — 화면이 «"" 라는 독자»를 그리지 않게
+    /* 🔴 [2026-09-21 · B] 계정을 만든 날 — **쓰는 길을 냈으면 읽는 길도 같은 커밋에**(이 파일이 `reader` 에서 겪은 그것:
+       «저장은 200 인데 새로고침하면 사라졌다»). 칸이 `date` 라 `YYYY-MM-DD` 열 자만 내보낸다(시각이 붙으면 날이 갈린다 · §4.5b). */
+    openedAt: r.opened_at ? String(r.opened_at).slice(0, 10) : null,
   };
   /* 🔴 워밍업(§2.6) — **`dailyCap` 을 유효값으로 바꿔서 내보낸다.**
      캐던스를 보는 자리가 셋(director·director-auto·account-health)이라 게이트를 하나 더 만들면 넷이 된다.

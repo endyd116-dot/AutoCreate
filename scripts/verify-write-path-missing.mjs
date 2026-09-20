@@ -30,6 +30,12 @@
  *   🔴 **이 자가 못 하는 것**(AC-9):
  *     ① 화면에 입력칸이 **보이나**는 안 본다 — 서버에 길이 있나까지다(그 다음은 A 의 자).
  *     ② `jsonb` 안의 칸(`settings->>'x'`)은 안 본다 — 그건 `verify-upstream-discarded` 의 `meta` 축 몫이다.
+ *        🔴 **그런데 그 짝도 `pieces.meta` 하나만 본다**(C 실측 2026-09-21): `db/schema.ts` 에 jsonb 칸이 **43개**인데
+ *        **나머지 42개의 «안»은 두 자 중 누구도 안 본다.** 그 안에 이름 붙은 계약이 실제로 있다 —
+ *        `ops_settings.features`(영상 킬 스위치가 살던 동네와 **같은 갈래인데 jsonb 키**) · `posts.stats`(`stats->>'views'`·`'alive'`) ·
+ *        `tenants.settings` · `personas.profile` 등. (`runner_jobs.payload`·`result` 처럼 **불투명한 짐**은 «키 계약»이 아니라 대상이 아니다.)
+ *        ⇒ 🔴 **«이 쌍이 전부를 덮는다»고 읽지 마라.** 아직 안 만든 이유: jsonb 안은 키가 코드마다 다르게 닿아서
+ *        (`r.meta.x` · `settings.features.x` · `->>'x'`) **읽기 판정이 또 표를 못 가릴** 공산이 크다 — DB 칸에서 겪은 그 문제 그대로다.
  *     ③ 🔴 **반대 방향(«쓰는데 아무도 안 읽는 칸»)은 여기 안 둔다.** 돌려 보고 정했다:
  *        DB 칸에서는 이름이 짧은 것(`ref`·`key`·`ip`·`day`)이 많아 읽기 판정이 **표를 못 가린다** — 17칸이 나왔는데 전수 거짓양성이었다.
  *        그쪽은 `pieces.meta` 처럼 **이름이 긴 칸**에서만 잴 수 있고, 그 자가 이미 있다(`verify-upstream-discarded` ②축).

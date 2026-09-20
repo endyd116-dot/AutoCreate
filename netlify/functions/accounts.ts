@@ -6,7 +6,11 @@
  *   [P1R7 §3.3] 자격 보관 동의 — 아이디·비밀번호를 맡기는 채널(session·app_password)은 `agreeCredsStorage:true` 를 받아 `consents(creds_storage)` 1행.
  *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
- *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl?, defaultTier?, defaultStyleId?, reader? }
+ *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl?, defaultTier?, defaultStyleId?, reader?, openedAt? }
+ *     · 🔴 [2026-09-21 · B] `openedAt` = **이 계정을 만든 날**(YYYY-MM-DD · `null`·`""` = 모름으로 되돌리기).
+ *       워밍업이 «우리와 연결한 날» 대신 **이 날**을 먼저 본다(`lib/warmup.ts:57`) — 3년 된 블로그를 어제 연결해도 1주차로 묶이지 않게.
+ *       🔴 읽는 곳이 **6곳**인데 **쓰는 길이 0곳**이었다(`scripts/verify-write-path-missing.mjs` 가 잡았다 · 라이브 92계정 전부 NULL).
+ *       응답에도 `openedAt` 으로 함께 싣는다 — **안 실으면 «저장은 됐는데 다시 열면 비어 있다»** 가 된다(이 파일이 `reader` 에서 이미 겪은 그것).
  *     · [R11-8] `reader` = 이 계정의 독자(≤120자 · 채널 계약 `contract.reader` 를 덮어쓴다). 🔴 `null`·`""` = 벗기기 = 계약 값 그대로(지금과 같다).
  *     · [P1R8 §5.3] `avatarUrl` = 계정 사진(https 만 · 빈 문자열이면 지운다) · `groupName` 은 없으면 만들어 붙인다(같은 채널 안에서만).
  *   POST /api/accounts-oauth-start         { channel } → { url } | step provider_not_configured
@@ -262,6 +266,23 @@ export default async (req: Request): Promise<Response> => {
       if (b.reader !== undefined) {
         const rd = s(b.reader, 120);
         sets.push(sql`reader = ${rd || null}`);
+      }
+      /* 🔴 [2026-09-21 · B] **계정을 만든 날** — 워밍업이 «우리와 연결한 날»보다 **먼저** 보는 값(`lib/warmup.ts:57`).
+         읽는 곳이 여섯인데 **쓰는 길이 없어서** 라이브 92계정이 전부 NULL 이었다 — 오래 쓰던 블로그도 «1주차»로 묶였다.
+         🔴 «모른다»를 **아무 날짜로 바꾸지 않는다**(AC-92): 빈 값이면 NULL 로 되돌리고, 워밍업은 다시 `created_at` 을 본다.
+         받는 모양은 `YYYY-MM-DD` 하나뿐이다 — 칸이 `date` 라서 시각·시간대가 끼면 그때부터 «어느 날인가»가 갈린다(§4.5b). */
+      if (b.openedAt !== undefined) {
+        const raw = b.openedAt === null ? "" : String(b.openedAt).trim();
+        if (raw) {
+          if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(raw)) return badRequest("날짜는 2024-03-15 처럼 적어 주세요.", "openedAt");
+          const t = Date.parse(`${raw}T00:00:00Z`);
+          if (!Number.isFinite(t)) return badRequest("그런 날짜는 없어요. 다시 골라 주세요.", "openedAt");
+          /* 오늘(KST)보다 뒤면 계정을 만든 날일 수 없다. 겁주지 않고 어떻게 하면 되는지만 말한다(§3). */
+          const todayKst = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+          if (raw > todayKst) return badRequest("아직 오지 않은 날이에요. 계정을 만든 날을 골라 주세요.", "openedAt");
+          if (raw < "2000-01-01") return badRequest("2000년 이후로 골라 주세요.", "openedAt");
+        }
+        sets.push(sql`opened_at = ${raw || null}`);
       }
       /* [R10-4] 계정에 걸어 둔 스타일 — null = 벗기기. 남의 집 스타일·지운 스타일은 못 건다(교차 누수 · CLAUDE §4.6). */
       if (b.defaultStyleId !== undefined) {
