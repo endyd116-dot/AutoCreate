@@ -110,6 +110,29 @@ add("㉰ 열쇠 표에서 한 줄을 빼면 **⊘ 로 돌아온다**", "team-acc
   return true;
 }, "⊘ 못 쟀음|단추를 하나도 안 그린", true);
 
+/* ㉱ 🔴 **«원래 있던 약속»이 안 깨졌나** — 열쇠 표·폼 자동채우기를 얹은 뒤에도 ⓪d 축(«위임이 안 잡는 단추»)이 그대로 무는가.
+   위 넷은 **A 가 새로 단 약속**만 찌른다. 새 기능이 옛 축을 조용히 무디게 만드는 일은 흔하다.
+   🔴 A 가 이 변이를 손으로 먼저 심어 보고 **두 가지를 알려 줬다**(그대로 옮긴다):
+     · 심는 자리가 **정적 마크업이면 안 된다** — `#list` 는 `innerHTML` 로 통째로 덮여서 심자마자 지워진다. **그린 뒤**에 넣어야 산다.
+     · **`accounts.html` 은 이 변이에 안 맞는다** — 거기 `#list` 는 위임이 아니라 자식마다 `b.onclick` 을 직접 붙인다.
+       위임 축을 재려면 **부모에 `addEventListener("click")` 이 있는** 자리여야 한다 ⇒ `pieces.html`(`closest("[data-restart]")`).
+   ⇒ `data-restart` **없는** 단추를 `#list` 안에 넣는다. 부모엔 손이 있으니 정적으로는 «위임=붙음»으로 보이고,
+      눌러 보면 `if (!b) return;` 에 걸려 **아무 일도 안 난다** — 그게 ⓪d 가 잡아야 하는 바로 그 모양이다. */
+add("㉱ 열쇠·자동채우기를 얹은 뒤에도 **위임이 안 잡는 단추**를 그대로 문다(⓪d 축 무회귀)", "pieces.html", (d) => {
+  const f = path.join(d, "public", "app", "pieces.html");
+  const s = readFileSync(f, "utf8");
+  const mark = "  // 만드는 중이 남아 있으면 5초 폴링 · 없으면 중단";
+  if (!s.includes(mark)) throw new Error("pieces.html 의 그리는 자리 뒤를 못 찾았다 — 변이 자리가 옮겨졌다");
+  /* 🔴 첫 판에 **안 울었다. 자가 아니라 내 변이가 틀렸다**(AC-112 ①):
+       도우미 함수를 `</script>` 앞에 넣었는데, 파일의 **첫 `</script>` 는 `<script src="/js/ui.js">` 의 닫는 태그**였다.
+       `src=` 스크립트 안의 글자는 브라우저가 통째로 무시하므로 도우미가 없는 셈이 되고, 심은 줄이 던져서
+       **render 가 통째로 죽었다** — 단추가 안 생기니 자가 울 리가 없다.
+     ⇒ 도우미를 없애고 **그 자리에서 마디를 만든다**(문자열 끼워 넣기 0 · 따옴표 겹침 0). */
+  const plant = '  UI.$("#list").appendChild(Object.assign(document.createElement("button"), { type: "button", id: "zzRealDead", textContent: "심어 둔 죽은 위임 단추" }));\n';
+  writeFileSync(f, s.replace(mark, plant + mark));
+  return true;
+}, "손이 안 붙은 단추 [1-9]", true);
+
 /* ═══ 돌린다 ═══ */
 console.log("🔴 A 가 고친 `verify-hand-on-button` 에 변이를 넣어 본다 · " + new Date().toISOString());
 console.log("─".repeat(116));
