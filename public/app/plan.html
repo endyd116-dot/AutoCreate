@@ -31,7 +31,12 @@ const me = await UI.boot("account"); if (!me) return;
 if (me.impersonation) { UI.$("#page").insertAdjacentHTML("beforeend", `<div class="group"><div class="empty"><h3>원격접속 중엔 결제할 수 없어요</h3><p>운영자가 설정을 도와드리는 동안엔 요금제·카드를 바꿀 수 없어요. 끝난 뒤 본인이 직접 해 주세요.</p></div></div>`); UI.$$("#cards, #cycle, #card, #cancel").forEach((e) => e.hidden = true); return; }
 let S = null, PLANS = [], INV = [], cycle = "month", TIERS = [];   /* [R9R10-A · C 지적] TIERS = plans-list.tiers(서버 라벨 · 한 벌) — 없을 때만 UI.TIER_LABEL(하니스 ⑧-c 가 서버와 대조하는 사본) */
 /* [§1.6] 카드 등록 라인 — 법인카드가 인증 창에서 거절될 때 쓰는 «카드번호 직접 입력»(available 일 때만 · 문구는 서버) */
-const keyinRow = (K) => K && K.available ? `<label class="chk" id="keyinRow"><input type="checkbox" id="keyin"> <span>${UI.esc(K.label || "카드번호 직접 입력")}</span></label>${K.notice ? `<p class="muted" style="margin:0 0 8px 34px;font-size:12.5px">${UI.esc(K.notice)}</p>` : ""}` : "";
+const keyinRow = (K) => K && K.available ? `<label class="chk" id="keyinRow"><input type="checkbox" id="keyin"> <span>${UI.esc(K.label || "카드번호 직접 입력")}</span></label>` : "";
+/* 🔴 [2026-09-21 A · B 실측 받아서] 서버 안내는 «고를 수 있을 때»가 아니라 **있으면 언제나** 싣는다.
+   카드 등록(빌키)은 고객이 결제 라인을 **못 고른다**(lib/pay-route.ts keyinOptionForBillingKey 가 available:false 고정).
+   안내를 keyinRow 안에 두면 available:false 와 함께 통째로 사라져 «무엇이 열리는지»를 아무도 못 듣는다 — §9(막지 않는 대신 말해 준다).
+   🔴 문장은 서버가 만든다 · 화면은 그대로 싣기만 한다(AC-52). 체크박스가 없으면 들여쓰기(34px)도 없다. */
+const keyinNote = (K) => K && K.notice ? `<p class="muted" id="keyinNote" style="margin:0 0 8px ${K.available ? "34px" : "0"};font-size:12.5px">${UI.esc(K.notice)}</p>` : "";
 const won = UI.won; const VATNOTE = "부가세 별도"; const RANK = { trial: 0, starter: 1, pro: 2, agency: 3 };
 /* KICC 카드 등록 콜백 복귀(billing-key-return): ?key=ok|fail · &trial=reused = 같은 카드로 체험을 이미 씀(§12.3) */
 const key = UI.qs.get("key");
@@ -149,9 +154,10 @@ async function choose(p) {
 /* 카드 등록 = KICC 인증창(url·form 은 서버가 준다) → 콜백 billing-key-return → ?key=ok|fail */
 async function addCard() {
   const K = S && S.keyin;
-  if (!K || !K.available) return startCard({});                                     // 선택지가 없으면 바로 기존(인증) 라인
-  UI.sheet(`<p class="muted" style="margin:0 0 12px">카드 등록 창으로 이동해요. 등록하면 다음 결제부터 자동으로 청구돼요.</p>${keyinRow(K)}<div class="cta"><button class="btn primary" type="button" id="go">카드 등록하러 가기</button></div>`, { title: "카드 등록", onOpen: (sh, close) => {
-    sh.querySelector("#go").onclick = () => { const body = {}; if (sh.querySelector("#keyin").checked) body.payRoute = "keyin"; close(); startCard(body); };
+  if (!K || (!K.available && !K.notice)) return startCard({});                      // 고를 것도 **알려 줄 것도** 없을 때만 바로 기존(인증) 라인
+  UI.sheet(`<p class="muted" style="margin:0 0 12px">카드 등록 창으로 이동해요. 등록하면 다음 결제부터 자동으로 청구돼요.</p>${keyinRow(K)}${keyinNote(K)}<div class="cta"><button class="btn primary" type="button" id="go">카드 등록하러 가기</button></div>`, { title: "카드 등록", onOpen: (sh, close) => {
+    /* 🔴 #keyin 은 available 일 때만 그려진다 — 안내만 있는 판이 생겼으므로 **있는지 보고 읽는다**(없이 읽으면 여기서 던져 이 단추가 죽는다) */
+    sh.querySelector("#go").onclick = () => { const body = {}; const kc = sh.querySelector("#keyin"); if (kc && kc.checked) body.payRoute = "keyin"; close(); startCard(body); };
   } });
 }
 async function startCard(body) { const r = await UI.api("/api/billing-key-start", { body }); if (r.ok && r.url) return UI.postForm(r.url, r.form); if (r.step === "not_configured") return soon(); UI.toast(r.error || "카드 등록을 시작하지 못했어요"); }

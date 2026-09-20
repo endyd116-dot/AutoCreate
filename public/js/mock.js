@@ -269,6 +269,10 @@
     lines.push(`<text x='540' y='1180' font-family='sans-serif' font-size='36' fill='#B0B8C1' text-anchor='middle'>AutoCreate</text>`);
     return "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='1080' height='1350'><rect width='1080' height='1350' fill='#F2F4F6'/><rect x='60' y='60' width='960' height='1230' rx='48' fill='#fff'/>${lines.join("")}</svg>`); };
   const keyinOption = () => ({ available: keyinOn && keyinMid, label: "카드번호 직접 입력", notice: "법인카드가 앱카드 창에서 거절될 때 쓰세요. 카드번호를 결제사 창에 직접 넣어요." });
+  /* 🔴 [2026-09-21] 카드 등록(빌키)은 **단건 결제와 모양이 다르다** — lib/pay-route.ts `keyinOptionForBillingKey()` 를 그대로 흉내 낸다.
+     고객이 라인을 못 고르므로 available 은 **언제나 false**(정책 토글 ?keyin 과 무관) · 대신 무엇이 열리는지 notice 로 말해 준다.
+     두 갈래는 키인 MID 등록 여부로 갈린다 → ?keyinMid=0 이 **지금 라이브**(MID 미등록)다. 문구는 서버가 정본(AC-52). */
+  const keyinForBillingKey = () => ({ available: false, label: "카드번호 직접 입력", notice: keyinMid ? "카드 등록은 카드번호를 직접 입력하는 창으로 열려요." : "카드 등록은 카드사 인증 창으로 열려요. 카드번호 직접 입력은 코인을 살 때 고를 수 있어요." });
   const aiCap = qs.get("aiCap") === "1", bannedTopic = qs.get("banned") === "1";
   /* [P1R5] 영상 손잡이 — ?stage=script|tts|clips|render|judging|done|failed(만드는 중 영상의 단계 고정) · ?judge=P0|P1|P2(검수 영상 심사 등급) · ?noFfmpeg=1(내 PC 프로그램 caps.ffmpeg=false) · ?uploaded=private(발행함 비공개 업로드 행) · ?videoBudget=0(달러 캡 초과 step budget) */
   const vStage = qs.get("stage") || "", vJudge = qs.get("judge") || "", noFfmpeg = qs.get("noFfmpeg") === "1", uploadedKnob = qs.get("uploaded") || "", videoBudget = qs.get("videoBudget") || "";
@@ -828,7 +832,7 @@
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
       const o = { ok: true, plan: p ? { key: p.key, name: p.name, priceKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), cycle: B.cycle } : { key: "trial", name: "체험", priceKrw: 0, vatKrw: 0, totalKrw: 0, cycle: B.cycle }, status: blocked || (paid ? "active" : "trial"), cancelAtPeriodEnd: B.cancelAtPeriodEnd, billingKey: B.billingKey ? { has: true, last4: B.billingKey.last4, brand: B.billingKey.brand } : { has: false }, vatNote: "부가세 별도" };
-      o.keyin = keyinOption(); o.trialEndsAt = iso(now + (blocked ? -2 : 9) * 86400e3); if (B.periodEnd) o.periodEnd = B.periodEnd; if (B.nextBillingAt) o.nextBillingAt = B.nextBillingAt; if (B.pendingPlanKey) o.pendingPlanKey = B.pendingPlanKey; if (B.pendingCycle) o.pendingCycle = B.pendingCycle; return o; },
+      o.keyin = keyinForBillingKey(); o.trialEndsAt = iso(now + (blocked ? -2 : 9) * 86400e3);   /* 🔴 여긴 빌키다 — 코인용 keyinOption() 이 아니다(서버 subscription.ts:61 과 같은 모양) */ if (B.periodEnd) o.periodEnd = B.periodEnd; if (B.nextBillingAt) o.nextBillingAt = B.nextBillingAt; if (B.pendingPlanKey) o.pendingPlanKey = B.pendingPlanKey; if (B.pendingCycle) o.pendingCycle = B.pendingCycle; return o; },
     "subscription-quote": (_b, q) => { const p = PLANS.find((x) => x.key === q.get("planKey")); if (!p) return err("planKey", "planKey"); const cycle = q.get("cycle") === "year" ? "year" : "month"; const base = cycle === "year" ? p.priceYear : p.priceMonth;
       return { ok: true, quote: { supplyKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), discountPct: 0, source: "plan", baseKrw: base }, vatNote: "부가세 별도" }; },
     "subscription-change": (b) => { const B = S.billing; const p = PLANS.find((x) => x.key === b.planKey); if (!p) return err("plan", "고를 수 있는 요금제가 아니에요.");
