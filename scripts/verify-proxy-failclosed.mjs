@@ -34,9 +34,20 @@ import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
+import { codeOnly } from "./_lib/code-only.mjs";
 
 const ROOT = process.cwd();
 const read = (f) => { const p = path.join(ROOT, f); return existsSync(p) ? readFileSync(p, "utf8") : null; };
+/* 🔴 [2026-09-22 · AC-193] **주석이 코드의 알리바이가 된다**(B2 가 오늘 넷째 꼴로 짚었다).
+   덩이를 정확히 잡아도 **그 안 주석에 과녁 낱말이 있으면** 코드를 지워도 그대로 통과한다 — AC-59 의 사촌인데
+   이번엔 **주석이 검사를 통과시켜 주는** 쪽이다. 이 자는 여태 **원문을 그대로** 읽고 있었다.
+   ⇒ ①②③(«그 코드가 있나»)은 **주석을 걷고** 본다.
+   ⚠️ ④(러너)만 **원문으로 남긴다** — 두 가지 까닭이고 둘 다 `code-only.mjs` 머리말이 경고한 자리다:
+      ① `runner/core.mjs` 엔 `https?:\/\/` 꼴 정규식이 있어 걷으면 **그 줄이 통째로 사라진다**
+      ② ④의 셋째 축은 `if (!ip) { … 그대로 진행` 으로 **주석을 일부러 읽는다**(«못 읽었다»를 «틀렸다»로 안 바꾼다는 뜻이
+         그 자리엔 주석으로 적혀 있다). 걷으면 **맞는 제품이 빨개진다.**
+      🔴 «일부러 원문»과 «안 걷어서 원문»은 다르다 — 앞엣것만 남긴다. */
+const readCode = (f) => { const t = read(f); return t === null ? null : codeOnly(t); };
 const JOBS = "lib/runner-jobs.ts", PROX = "lib/proxies.ts", OPS = "netlify/functions/ops-proxies.ts", CORE = "runner/core.mjs";
 
 const fails = [], notes = [];
@@ -44,7 +55,7 @@ const ok  = (ax, m) => notes.push(`  ✓ ${ax} ${m}`);
 const bad = (ax, m) => { notes.push(`  ✗ ${ax} ${m}`); fails.push(`${ax} ${m}`); };
 const unk = (ax, m) => { notes.push(`  ⊘ ${ax} 못 쟀음 — ${m}`); fails.push(`${ax} 못 쟀음`); };
 
-const src = read(JOBS);
+const src = readCode(JOBS);
 if (!src) { console.error("⊘ 못 쟀어요 — lib/runner-jobs.ts 가 없다."); process.exit(2); }
 
 /* ───────────────── ① 판정표 — 제품 함수를 **실제로 돌린다** ─────────────────
@@ -111,7 +122,7 @@ for (const [name, re] of chain) (re.test(src) ? ok : bad)("②", name);
 
 /* ───────────────── ③ 보임 — 멈춘 것이 화면으로 나오나 ───────────────── */
 notes.push("■ ③ 보임 — 멈춘 것이 운영 화면으로 나오나(§9 «말해 주기»)");
-const prox = read(PROX), ops = read(OPS);
+const prox = readCode(PROX), ops = readCode(OPS);
 if (!prox || !ops) unk("③", `${!prox ? PROX : OPS} 가 없다`);
 else {
   /* 🔴 **덩이별로 잘라서 본다.** 파일 어딘가에 `tenantName` 이 한 번 있다고 그 목록이 그려지는 게 아니다 —
@@ -120,10 +131,17 @@ else {
   /* 🔴 길이로 자르면 **옆 덩이까지 샌다** — 700자를 줬더니 «멈춘 계정» 창이 «기다리는 계정» 블록을 먹어서,
      앞 덩이에서 이름을 빼도 뒤 덩이의 이름을 보고 초록이 났다(변이가 두 번째로 잡았다).
      ⇒ **끝 글자로 자른다.** 덩이의 경계를 말로 적으면 줄이 늘어도 창이 안 샌다. */
+  /* 🔴 [2026-09-22 · AC-193] **끝 글자를 못 찾으면 «못 쟀다»다 — 900자로 넓히지 않는다.**
+     여기 `i + 900` 폴백이 남아 있었다. 바로 위 주석이 「700자를 줬더니 옆 덩이까지 샜다」고 적어 두고도
+     **못 찾았을 때의 길**에 그 700자가 900자로 이름만 바꿔 남아 있었던 것이다.
+     B2 가 오늘 같은 결의 함정을 넘겨 줬다(C 의 `guardNear` 가 화살표 함수에서 몸통을 **파일 전체**로 잡아 영원히 초록).
+     🔴 넓어진 창은 **조용히 통과시킨다.** 못 찾았으면 **못 찾았다고 말한다**(AC-141 ② · 통과로 쓰지 않는다).
+     ⇒ `null` 을 내고 부르는 쪽이 `unk`(못 쟀음)로 적는다 — «없다»(false·빨강)와도 구별한다. */
   const inBlock = (text, start, end, re) => {
-    const i = text.indexOf(start); if (i < 0) return false;
+    const i = text.indexOf(start); if (i < 0) return null;
     const j = text.indexOf(end, i + start.length);
-    return re.test(text.slice(i, j > 0 ? j : i + 900));
+    if (j <= 0) return null;                 // 끝을 못 찾았다 = 우리가 덩이를 잘못 잡은 것이다
+    return re.test(text.slice(i, j));
   };
   const seen = [
     ["집계가 있다",               prox, /export async function proxyStopped/],
@@ -154,7 +172,13 @@ else {
     ["기다리는 계정: 테넌트 이름", "waiting: waiting.map", "  };",       /tenantName: String\(r\.tenant_name/],
     ["기다리는 계정: 계정 이름",   "waiting: waiting.map", "  };",       /handle: String\(r\.handle/],
   ];
-  for (const [name, start, end, re] of NAMED) (inBlock(prox, start, end, re) ? ok : bad)("③", name);
+  /* 🔴 **셋을 가른다** — 있다(✓) · 없다(✗) · **덩이를 못 잡았다(⊘)**. 셋째를 둘째에 섞으면 «자가 깨진 것»이
+     «제품이 틀린 것»으로 보이고, 첫째에 섞으면 **조용한 초록**이 된다. 둘 다 오늘 값을 치른 병이다. */
+  for (const [name, start, end, re] of NAMED) {
+    const r = inBlock(prox, start, end, re);
+    if (r === null) unk("③", `${name} — 덩이의 시작·끝(«${start}» … «${end}»)을 못 잡았다. 넓혀서 답하지 않는다`);
+    else (r ? ok : bad)("③", name);
+  }
 }
 
 /* ───────────────── ④ 러너 쪽 — 배정된 IP 는 실측으로 대조하나 ─────────────────
@@ -216,6 +240,18 @@ const MUT = [
   ["🔴 IP 죽은 계정 셈을 뗀다",      (b) => { b[PROX] = b[PROX].replace("AS stalled", "AS zz_gone2"); }, "③"],
   ["🔴 «없다»를 슬롯 안 보고 말한다", (b) => { b[PROX] = b[PROX].replace("FROM account_slots s WHERE s.account_id = a.id AND s.status = 'active'", "FROM account_slots s WHERE s.account_id = a.id"); }, "③"],
   ["🔴 옛 평문 칸을 IP 로 안 친다",   (b) => { b[PROX] = b[PROX].replace("a.proxy_url IS NULL OR a.proxy_url = ''", "TRUE"); }, "③"],
+  /* 🔴 **넷째 꼴 — 주석이 코드의 알리바이가 된다**(B2 2026-09-22 · AC-193).
+     덩이를 정확히 잡아도 **그 안 주석에 과녁 낱말이 있으면** 코드를 지워도 통과한다.
+     ⇒ **코드는 지우고 낱말만 주석에 남기는** 변이를 넣는다. 주석을 안 걷는 자는 여기서 **조용히 초록**이다. */
+  ["🔴 코드는 지우고 낱말만 주석에 남긴다", (b) => {
+    b[PROX] = b[PROX].replace("AS no_proxy", "AS zz_alibi /* AS no_proxy */");
+  }, "③"],
+];
+/* 🔴 **덩이를 못 잡았을 때 — «넓혀서 답하지 않고 «못 쟀다»로 적나»**(2026-09-22 · AC-193).
+   여기엔 `i + 900` 폴백이 있었다(끝 글자를 못 찾으면 900자를 덩이로 쳤다). 넓어진 창은 **조용히 통과시킨다.**
+   ⇒ 덩이의 **끝 표식을 지워** 그때 `⊘ 못 쟀음` 이 나오는지 본다. 이건 축이 «✗»로 우는 게 아니라 «⊘»로 적혀야 맞다. */
+const CANT_MEASURE = [
+  ["덩이의 끝 표식이 사라진다", (b) => { b[PROX] = b[PROX].replace("waitingSlots: waiting.length,", "wsCount: waiting.length,"); }],
 ];
 let silent = 0;
 for (const [name, tf, axis] of MUT) {
@@ -225,6 +261,15 @@ for (const [name, tf, axis] of MUT) {
   if (cried) console.log(`  ✓ ${name} → ${axis}축이 운다`);
   else { console.log(`  ✗ ${name} → 🔴 **안 운다**(종료 ${r.code}) — 이 자가 그 자리를 못 보고 있다`); silent++; }
 }
+console.log("\n■ 🔴 덩이를 못 잡았을 때 — **넓히지 않고 «못 쟀다»로 적나**(⊘ 가 나와야 한다 · ✓ 면 조용한 초록이다)");
+let widened = 0;
+for (const [name, tf] of CANT_MEASURE) {
+  const r = runIn(tf);
+  if (!r.changed) { console.log(`  ⊘ ${name} — 🔴 **변이가 안 먹었다**. 통과로 세지 않는다.`); widened++; continue; }
+  if (/⊘ ③ 못 쟀음/.test(r.out)) console.log(`  ✓ ${name} → «못 쟀음»으로 적는다`);
+  else { console.log(`  ✗ ${name} → 🔴 **종료 ${r.code} 인데 «못 쟀음»이 없다** — 창을 넓혀 답한 것이다`); widened++; }
+}
 console.log("─".repeat(100));
 console.log(silent ? `🔴 변이 ${silent}종이 안 울었다 — 자를 고쳐야 한다` : `✓ 변이 ${MUT.length}종이 모두 제 축을 울렸다`);
-process.exit(fails.length || silent ? 1 : 0);
+console.log(widened ? `🔴 «못 잡았을 때» ${widened}종이 넓혀서 답했다 — 자를 고쳐야 한다` : `✓ «못 잡았을 때» ${CANT_MEASURE.length}종 모두 «못 쟀음»으로 적는다`);
+process.exit(fails.length || silent || widened ? 1 : 0);

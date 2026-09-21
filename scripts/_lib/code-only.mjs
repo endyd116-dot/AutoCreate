@@ -61,6 +61,51 @@ export function codeOnly(src) {
   return out;
 }
 
+/**
+ * 🔴 **자리 표까지 보존하는 판**(2026-09-22 · AC-193 · B2 가 필요로 해서 **여기 한 곳에** 만든다).
+ *
+ *   ══ 왜 또 하나인가 ══
+ *     위 `codeOnly` 는 **줄 수**는 지키지만 **글자 자리(index)**는 안 지킨다(주석 글자를 통째로 뺀다).
+ *     그래서 「어느 쪽이 **먼저** 나오나」(순서 판정)를 `indexOf` 로 재는 자는 걷은 본문으로는 **답이 달라진다.**
+ *     ⇒ 주석 글자를 **공백으로 바꿔** 길이·자리를 그대로 둔다. 줄바꿈은 줄바꿈으로 남긴다.
+ *        「원문에서 잰 자리」와 「걷은 본문에서 잰 자리」가 **같은 곳**을 가리킨다.
+ *
+ *   ══ 🔴 왜 «두 벌»을 안 만드는가 ══
+ *     2026-09-22 에 B2 가 자기 자에 `stripComments` 를 따로 만들었다. 좋은 함수였지만 **두 벌째**다 —
+ *     이 파일 머리말이 적어 둔 그대로 «두 벌·세 벌로 두면 또 갈린다»의 세 번째 판이 될 뻔했다.
+ *     ⇒ 필요한 것은 **새 모듈이 아니라 이 파일의 변이형**이었다. 갈래가 늘면 **여기에** 는다.
+ *
+ *   ⚠️ 한계는 `codeOnly` 와 **똑같다**(문자열 안 `//`·정규식 안 `\/\/` 는 못 가린다) — 위 머리말 그대로다.
+ *      한쪽만 고치면 또 갈리므로 **둘은 같은 눈을 쓴다**(아래 구현이 `codeOnly` 와 한 몸인 이유).
+ */
+export function codeOnlyKeepIndex(src) {
+  const t = String(src ?? "");
+  const out = [];
+  let i = 0;
+  const blank = (from, to) => { for (let k = from; k < to; k++) out.push(t[k] === NL ? NL : " "); };
+  while (i < t.length) {
+    const two = t.slice(i, i + 2);
+    if (two === "/*") {
+      const end = t.indexOf("*" + "/", i + 2);
+      const stop = end < 0 ? t.length : end + 2;
+      blank(i, stop);
+      i = stop;
+      continue;
+    }
+    if (two === "//") {
+      if (t[i - 1] === ":") { out.push(t[i]); i += 1; continue; }   // `https://…` — 주석이 아니다
+      const end = t.indexOf(NL, i);
+      const stop = end < 0 ? t.length : end;
+      blank(i, stop);
+      i = stop;
+      continue;
+    }
+    out.push(t[i]);
+    i += 1;
+  }
+  return out.join("");
+}
+
 /** 본문에서만 센다 — 「변이를 몇 곳에 심었나」·「그 낱말이 코드에 있나」의 정본. */
 export function countInCode(src, needle) {
   if (!needle) return 0;
