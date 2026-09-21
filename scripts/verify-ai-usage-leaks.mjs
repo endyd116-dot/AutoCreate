@@ -67,6 +67,7 @@ for (const [name, f, re] of SITES) (re.test(T[f]) ? ok : bad)("①", name);
 /* ───────── ② 「모름」을 0으로 적지 않나 ─────────
    🔴 과녁을 «없음»에 두지 않으려고, **그 호출 덩이를 먼저 찾고**(있어야 한다) 그 안에서만 금액 유무를 본다. */
 notes.push("■ ② 「모름」 — 🔴 청구 여부·금액을 모르면 **0 이 아니라 NULL**(AC-9)");
+const ZEROLESS = (x) => /costUsd:/.test(x) && !/costUsd: 0[,s}]/.test(x);   // 🔴 «0 이 아닌 값을 넣나» — 부정선행은 파이썬/셸을 거치며 자주 깨져서 단순한 두 검사로 쪼갰다
 function callBlock(text, needle) {
   const i = text.indexOf(needle);
   if (i < 0) return null;
@@ -75,6 +76,10 @@ function callBlock(text, needle) {
   const e = text.indexOf("});", i);
   return e < 0 ? null : text.slice(s, e);
 }
+/* 🔴 **계약이 2026-09-21 사장님 결재로 바뀌었다** — 이 축도 같이 바뀐다.
+   · 전(메인 «세기만»)  : 아는 금액 → `costUsdMaybe` · `costUsd` 는 늘 0
+   · ✅ 후(사장님 «실패도 글처럼») : **아는 금액 → `costUsd`**(상한을 먹는다) · **모르는 것은 그대로 안 넣는다**
+   🔴 자가 옛 계약을 재고 있으면 **맞는 제품이 빨갛게** 나온다 — 실제로 이 판에서 그랬다(축 셋). 계약이 바뀌면 자를 같이 옮긴다. */
 const MONEY = [
   ["영상 provider_failed — 금액 모름",  VID, 'failKind: "provider_failed"', false],
   ["영상 download_failed — 금액 안다",  VID, 'failKind: "download_failed"', true],
@@ -82,26 +87,33 @@ const MONEY = [
   ["TTS download_failed — 금액 안다",   TTS, 'failKind: "download_failed"', true],
   ["TTS http — 금액 모름",              TTS, 'failKind: "http"',            false],
 ];
-for (const [name, f, needle, wantAmount] of MONEY) {
+for (const [name, f, needle, knowsAmount] of MONEY) {
   const blk = callBlock(T[f], needle);
   if (!blk) { bad("②", `${name} — 그 기록 자체를 못 찾았다(①축이 먼저 운다)`); continue; }
-  const has = /costUsdMaybe:/.test(blk);
-  if (has === wantAmount) ok("②", `${name} — ${wantAmount ? "숫자를 적는다" : "금액을 안 적는다(NULL)"}`);
-  else bad("②", `${name} — ${wantAmount ? "숫자를 적어야 하는데 안 적는다" : "🔴 모르는데 금액을 적는다(0/숫자로 뭉갠다)"}`);
+  const paysIntoCap = ZEROLESS(blk);          // `costUsd: billed` 처럼 0 이 아닌 값을 넣나
+  const zeroed = /costUsd: 0[,s}]/.test(blk);
+  if (knowsAmount && paysIntoCap) ok("②", `${name} — \`cost_usd\` 에 넣어 **상한을 먹인다**(글과 같은 취급)`);
+  else if (!knowsAmount && zeroed && !/costUsdMaybe:/.test(blk)) ok("②", `${name} — 상한에 안 넣고 금액도 NULL(못 쟀음)`);
+  else if (knowsAmount) bad("②", `${name} — 아는 금액인데 \`cost_usd\` 에 안 넣는다(상한이 못 먹는다)`);
+  else bad("②", `${name} — 🔴 **모르는데 금액이 새어 들어간다**(0/지어낸 수) — 오늘 막은 것이 도로아미타불이다`);
 }
 (/costUsdMaybe === undefined \|\| row\.costUsdMaybe === null/.test(T[AI]) ? ok : bad)("②", "🔴 기록 함수가 `?? 0` 으로 접지 않는다(모름 → NULL)");
 
 /* ───────── ③ 관문 — 합을 안 건드리나 ───────── */
-notes.push("■ ③ 관문 — 🔴 **합을 지금은 안 건드린다**(메인 지시 «새 자리는 세기만»)");
-(/COALESCE\(SUM\(cost_usd\), 0\)/.test(T[CAP]) ? ok : bad)("③", "관문은 `cost_usd` 만 합한다(= 새 칸을 안 읽는다)");
+notes.push("■ ③ 관문 — 🔴 **아는 것만 먹인다 · 모르는 금액이 새어 들어가지 않나**(사장님 결재 2026-09-21)");
+(/COALESCE\(SUM\(cost_usd\), 0\)/.test(T[CAP]) ? ok : bad)("③", "관문은 `cost_usd` 만 합한다(= `cost_usd_maybe` 를 안 읽는다)");
+(/fail_kind IS NOT NULL/.test(T[CAP]) ? ok : bad)("③", "🔴 막힐 때 **실패분이 얼마인지 말해 준다**(있을 때만 · 없으면 문장 무회귀)");
 {
-  /* 새 기록들이 전부 `costUsd: 0` 인가 — 하나라도 실비용을 넣으면 그 순간 관문이 움직인다. */
+  /* 🔴 **이번 결재가 연 문** — 이제 `costUsd` 에 값이 들어갈 수 있다. 그래서 «**모르는 금액이 그 문으로 새어 들어가지 않나**»를
+     따로 잰다(메인이 이번에 콕 집어 물은 축). 아는 둘(`download_failed`·`store_failed`)만 값을 넣어야 한다. */
+  const KNOWN = /download_failed|store_failed/;
   const blocks = [VID, IMG, TTS].flatMap((f) => [...T[f].matchAll(/recordAiUsage\(\{[\s\S]*?\}\)/g)].map((m) => m[0]));
   const failBlocks = blocks.filter((b) => /failKind:/.test(b));
-  const moved = failBlocks.filter((b) => !/costUsd: 0/.test(b));
+  const leaked = failBlocks.filter((b) => !KNOWN.test(b) && ZEROLESS(b));
+  const pays = failBlocks.filter((b) => KNOWN.test(b) && ZEROLESS(b));
   if (!failBlocks.length) bad("③", "실패 기록을 하나도 못 찾았다");
-  else if (moved.length) bad("③", `실패 기록 ${moved.length}건이 \`costUsd\` 에 값을 넣는다 — 관문이 조용히 움직인다`);
-  else ok("③", `실패 기록 ${failBlocks.length}건 모두 \`costUsd: 0\`(관문 합 무영향)`);
+  else if (leaked.length) bad("③", `🔴 **모르는 금액 ${leaked.length}건이 \`cost_usd\` 로 샌다** — 상한이 지어낸 수를 먹는다`);
+  else ok("③", `실패 기록 ${failBlocks.length}건 중 **아는 ${pays.length}건만** 상한을 먹는다(모르는 것은 0 · 새는 것 0)`);
 }
 
 /* ───────── ④ 칸 — DDL 과 schema.ts 가 같은 말을 하나 ───────── */
@@ -191,9 +203,13 @@ const MUT = [
   ["🔴 다운로드 실패 기록을 뗀다",   (b) => { b[VID] = b[VID].replace(/void recordAiUsage\(\{[^}]*failKind: "download_failed"[\s\S]*?\}\);/, ""); }, "①"],
   ["이미지 기록을 뗀다",             (b) => { b[IMG] = b[IMG].replace(/void recordAiUsage\(\{[^}]*purpose: "image:fail"[\s\S]*?\}\);/, ""); }, "①"],
   ["🔴 모르는데 금액을 적는다",      (b) => { b[VID] = b[VID].replace('costUsd: 0, failKind: "provider_failed"', 'costUsd: 0, costUsdMaybe: 0, failKind: "provider_failed"'); }, "②"],
-  ["아는 금액을 안 적는다",          (b) => { b[TTS] = b[TTS].replace(/, costUsdMaybe: chars \* TYPECAST_USD_PER_CHAR/, ""); }, "②"],
+  /* 🔴 옛 변이 «아는 금액을 안 적는다»(TTS `costUsdMaybe` 를 뗀다)는 **과녁이 제품에서 사라져** 걷었다 —
+     결재로 그 값이 `costUsd` 로 옮겨 갔다. 같은 뜻은 아래 «아는 금액을 상한에서 뺀다»가 덮는다.
+     🔴 안 걷으면 «변이가 안 먹었다»가 매번 뜨고, 그 소리에 익숙해지면 **진짜 안 우는 날을 놓친다**(AC-95). */
   ["🔴 기록 함수가 모름을 0으로 접는다", (b) => { b[AI] = b[AI].replace("row.costUsdMaybe === undefined || row.costUsdMaybe === null", "false"); }, "②"],
-  ["🔴 실패 기록이 관문 합을 움직인다", (b) => { b[VID] = b[VID].replace('costUsd: 0, failKind: "download_failed", costUsdMaybe: billed', 'costUsd: billed, failKind: "download_failed", costUsdMaybe: billed'); }, "③"],
+  ["🔴 모르는 금액을 상한에 먹인다",  (b) => { b[VID] = b[VID].replace('costUsd: 0, failKind: "provider_failed"', 'costUsd: 0.5, failKind: "provider_failed"'); }, "③"],
+  ["아는 금액을 상한에서 뺀다",       (b) => { b[VID] = b[VID].replace('costUsd: billed, failKind: "download_failed"', 'costUsd: 0, failKind: "download_failed"'); }, "②"],
+  ["막힐 때 실패분을 안 말한다",      (b) => { b[CAP] = b[CAP].replace("fail_kind IS NOT NULL", "1=0"); }, "③"],
   ["schema.ts 에서 칸을 뺀다",       (b) => { b[SCH] = b[SCH].replace('numeric("cost_usd_maybe", { precision: 10, scale: 6 })', "numeric(\"zz_gone\", { precision: 10, scale: 6 })"); }, "④"],
 ];
 let silent = 0;

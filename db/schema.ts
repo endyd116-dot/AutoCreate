@@ -1227,9 +1227,12 @@ export const aiUsageR13 = {
   /** 실패 사유 — `provider_failed|download_failed|store_failed|empty|http|timeout`. 🔴 NULL = **성공한 호출**이다. */
   failKind: varchar("fail_kind", { length: 32 }),
   /**
-   * 나갔을 수 있는 돈. 🔴 `cost_usd` 에는 **안 넣는다** — 메인 지시로 `checkAiCostCap` 의 합을 지금은 안 건드린다
-   * («세기만» 한다 · 관문에 넣을지는 숫자를 보고 사장님이 정한다).
-   * 🔴 **NULL 과 0 은 다른 말이다**: NULL = 못 쟀음(제공사가 청구하는지 모른다) · 0 = 안 나갔다(스텁).
+   * **아직 `cost_usd` 로 못 옮긴 돈.** 🔴 **지금은 비어 있는 것이 정상**이다.
+   * ✅ 2026-09-21 사장님 결재(«실패했을 때도 글처럼 맞춰줘») 뒤로 **아는 금액은 `cost_usd` 가 먹는다** —
+   *    그래서 이 칸에 남는 것은 «금액을 알지만 아직 안 옮긴 것»뿐이고, 현재 그런 경우가 없다.
+   * 🔴 그래도 **지우지 않는다**(메인 지시) — 「아는 것/모르는 것」을 가른 **이 수리의 기록**이고,
+   *    제공사 응답에 원가가 붙거나 청구서를 대조하게 되면 **그때 채울 자리**다.
+   * 🔴 **NULL 과 0 은 다른 말이다**: NULL = 못 쟀음 · 0 = 안 나갔다(스텁).
    */
   costUsdMaybe: numeric("cost_usd_maybe", { precision: 10, scale: 6 }),
 };
