@@ -61,7 +61,16 @@ export default async (req: Request): Promise<Response> => {
       if (source !== "adsense" && source !== "youtube") return badRequest("source 는 adsense 또는 youtube 예요.");
       const accountId = n(url.searchParams.get("accountId")) || null;
       const to = revenueAuthorizeUrl(source, signRevenueState({ tid, uid: auth.user.uid, kind: source, accountId }));
-      if (!to) return json({ ok: false, step: "provider_not_configured", error: "구글 연결 준비가 아직이에요. 준비되면 바로 연결할 수 있어요." }, 503);
+      if (!to) {
+        /* 🔴 **정직하게 «아직»이라고 말한다** — 스텁도, 조용한 성공도 없다(키가 없으면 연결된 척하지 않는다).
+           다만 이 문은 **브라우저가 직접 이동해 오는 자리**라, 그때 JSON 본문을 뱉으면 고객은
+           날 JSON 을 마주한 채 **막다른 길**에 선다(정직하지만 쓸 수 없다 · CLAUDE §4.8).
+           ⇒ 이동이면 화면으로 되돌려 보내고(§3 말투대로 «곧 연결할 수 있어요»는 화면이 말한다),
+              fetch 면 지금까지대로 `provider_not_configured` 를 그대로 준다(기계가 읽는 쪽은 안 바꾼다). */
+        const wantsHtml = (req.headers.get("accept") ?? "").includes("text/html");
+        if (wantsHtml) return redirect(`/app/ad-media.html?notready=${encodeURIComponent(source)}`);
+        return json({ ok: false, step: "provider_not_configured", error: "구글 연결 준비가 아직이에요. 준비되면 바로 연결할 수 있어요." }, 503);
+      }
       return redirect(to);
     }
     if (path.endsWith("/revenue-oauth-return")) {
@@ -93,7 +102,12 @@ export default async (req: Request): Promise<Response> => {
       /* [P1R8 §3.4 · B2] 🔴 «직접 넣기»에서 고를 수 있는 매체와 **그 이름을 서버가 준다**.
          화면이 목록을 갖고 있으면 매체를 늘릴 때마다 두 곳을 맞춰야 하고, 하나를 빠뜨리면
          «화면엔 있는데 서버가 400»(또는 그 반대로 **새 매체가 영영 안 보임**)이 된다(AC-52). */
-      manualSources: MANUAL_SOURCE_CHOICES });
+      manualSources: MANUAL_SOURCE_CHOICES,
+      /* 🔴 **«지금 이 고객이 실제로 붙일 수 있나»**(DESIGN §7.5 `connectable` 과 같은 뜻).
+         전에는 화면이 이걸 알 길이 없어 단추를 늘 «연결»로 그려 놓고, 눌러야 비로소 503 을 만났다
+         (라이브 `blogger` 에서 실제로 그랬다 — 눌러도 아무 일이 안 나는 단추). 그래서 **미리** 말해 준다.
+         🔴 키가 있나 없나만 본다 — «연결됐나»가 아니다(그건 `sources[].status` 다). */
+      oauthReady: googleAppConfigured() });
     }
 
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);

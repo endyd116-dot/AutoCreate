@@ -28,7 +28,8 @@ import { recordConsents, hasConsent } from "../../lib/billing/consents";
 import { attachAccountToSlot } from "../../lib/account-slots";
 import { encryptObj, credsEncConfigured } from "../../lib/creds-crypto";
 import { q, listAccounts, getAccount, listChannels, connectMethodOf, isChannel, type ChannelKey } from "../../lib/accounts";
-import { COIN_TIER_LIST, COIN_TIER_NOTE, toCoinTier } from "../../lib/coin-table";   // [R10-9] 등급 표(글자 정본) · 계정 기본 등급 검증
+import { COIN_TIER_LIST, COIN_TIER_NOTE, COIN_ITEM_LABEL, toCoinTier } from "../../lib/coin-table";
+import { loadPacksAndTable } from "../../lib/billing/packs";   // 🔴 단가는 운영센터 오버레이 적용값 한 곳에서(사장님 지시 2026-09-21)   // [R10-9] 등급 표(글자 정본) · 계정 기본 등급 검증
 import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUrl, exchangeCode } from "../../lib/oauth-providers";
 import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
@@ -155,9 +156,17 @@ export default async (req: Request): Promise<Response> => {
   const tid = auth.tid;
   try {
     if (path.endsWith("/accounts-list")) {
-      const [accounts, channels] = await Promise.all([listAccounts(tid), listChannels()]);
+      /* 🔴 [2026-09-21 B · 사장님 지시] **코인 단가를 같이 싣는다** —
+         «모든 화면의 코인값은 변수로 지정해서, 운영센터에서 가격 바꾸면 다 같이 바뀌어서 보일 수 있게».
+         이 문을 고른 까닭: 디렉터(`director.html:61`)·편성표(`schedule.html:78`)·만들기(`create.html:68`)가
+         **이미 이 문을 부르고**, 디렉터는 **영상 상한도 여기서 받는다**(`channels[].video.maxSeconds` ·
+         그 줄 주석이 «화면 상수 금지»라고 못 박아 뒀다). 왕복을 안 늘리고 같은 규율 자리에 얹는다.
+         🔴 값은 `loadPacksAndTable()`(운영센터 오버레이 적용 · 60초 캐시) — `plans-list` 와 **같은 한 곳**이다.
+            여기서 `COIN_TABLE` 을 직접 쓰면 그 순간 다시 두 벌이 된다. */
+      const [accounts, channels, coins] = await Promise.all([listAccounts(tid), listChannels(), loadPacksAndTable()]);
       /* [R10-9] 등급 표를 같이 싣는다 — 계정 화면·디렉터·직접 쓰기가 다 accounts-list 를 이미 부른다(A 합의). 글자(label·say)는 서버 정본. */
-      return json({ ok: true, accounts, channels, tiers: COIN_TIER_LIST, tierNote: COIN_TIER_NOTE });
+      return json({ ok: true, accounts, channels, tiers: COIN_TIER_LIST, tierNote: COIN_TIER_NOTE,
+        coins: { table: coins.table, labels: COIN_ITEM_LABEL } });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
 

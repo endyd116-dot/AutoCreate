@@ -77,15 +77,34 @@ export async function generateClip(inp: GenerateClipInput): Promise<GenerateClip
     if (spec.gateway !== "fal") reportAiKeyOutcome(keyLease, r.ok ? "ok" : isRateLimitReason(r.reason) ? "rate_limited" : "error");
     if (!r.ok) {
       console.warn(`[video/providers] ${spec.key} 컷 ${inp.cutIdx} 실패: ${redactKeys(r.reason)}`);
+      /* 🔴 [2026-09-21 B · drizzle/0084] **여기가 첫 번째 새던 자리다.** 여태 실패하면 그냥 폴백으로 넘어가서
+         `ai_usage` 에 **한 줄도 안 남았다** — 폴백이 일어나면 provider 를 **둘 불렀는데 원장엔 한 줄**이었다.
+         🔴 제공사가 에러를 낸 호출을 **청구하는지 우리는 모른다** ⇒ `costUsdMaybe` 를 **안 넘긴다(= NULL · 못 쟀음)**.
+            여기서 0 을 적으면 «안 나갔다»가 되어 거짓이 된다(AC-9). */
+      void recordAiUsage({ tenantId: inp.tenantId, purpose: "video_clip:fail", model: spec.model, inTokens: 0, outTokens: 0,
+        costUsd: 0, failKind: "provider_failed", ref: inp.ref ?? `piece:${inp.pieceId}:cut${inp.cutIdx}` });
       if (r.policyBlocked) return { ok: false, reason: r.reason, policyBlocked: true, provider: spec.key };
       spec = inp.edit ? null : fallbackProvider(spec.key);   // 편집 재생성은 폴백 없음(같은 interaction 이 없다)
       continue;
     }
+    /* 🔴 여기서부터 제공사는 **영상을 다 만들어 줬다** — 아래 두 실패는 «제공사 실패»가 아니라 **우리 쪽 사고**이고,
+       그래서 **확실히 청구된다**. 금액을 아는 자리라 `costUsdMaybe` 에 **숫자를 적는다**(NULL 이 아니다). */
+    const billed = spec.gateway === "omni" ? Math.round(inp.durationSec * 0.10 * 1000) / 1000 : estimateClipCostUsd(spec, inp.durationSec);
     const bytes = await fetchBytes(r.videoUrl);
-    if (!bytes || bytes.length < 10_000) return { ok: false, reason: "clip_download_failed", provider: spec.key };
+    if (!bytes || bytes.length < 10_000) {
+      // 🔴 두 번째 새던 자리 — 만들어진 영상을 **우리가 못 받아 왔다**. 돈은 이미 나갔다.
+      void recordAiUsage({ tenantId: inp.tenantId, purpose: "video_clip:fail", model: spec.model, inTokens: 0, outTokens: 0,
+        costUsd: 0, failKind: "download_failed", costUsdMaybe: billed, ref: inp.ref ?? `piece:${inp.pieceId}:cut${inp.cutIdx}` });
+      return { ok: false, reason: "clip_download_failed", provider: spec.key };
+    }
     const key = safeKey(`autocreate/${inp.tenantId}/${inp.pieceId}/clips`, "mp4");
-    try { await r2Put(key, bytes, "video/mp4"); } catch (e) { return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`, provider: spec.key }; }
-    const costUsd = spec.gateway === "omni" ? Math.round(inp.durationSec * 0.10 * 1000) / 1000 : estimateClipCostUsd(spec, inp.durationSec);
+    try { await r2Put(key, bytes, "video/mp4"); } catch (e) {
+      // 🔴 세 번째 새던 자리 — 다 받아 놓고 **우리 저장소에 못 넣었다**. 돈은 이미 나갔다.
+      void recordAiUsage({ tenantId: inp.tenantId, purpose: "video_clip:fail", model: spec.model, inTokens: 0, outTokens: 0,
+        costUsd: 0, failKind: "store_failed", costUsdMaybe: billed, ref: inp.ref ?? `piece:${inp.pieceId}:cut${inp.cutIdx}` });
+      return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`, provider: spec.key };
+    }
+    const costUsd = billed;
     void recordAiUsage({ tenantId: inp.tenantId, purpose: "video_clip", model: spec.model, inTokens: 0, outTokens: Math.round(costUsd * 1_000_000 / 30), costUsd: costUsd || calcCost(spec.model, 0, 0), ref: inp.ref ?? `piece:${inp.pieceId}:cut${inp.cutIdx}` });
     return { ok: true, key, url: key, provider: spec.key, model: spec.model, interactionId: r.interactionId, costUsd, durationSec: inp.durationSec };
   }

@@ -53,3 +53,7 @@ assets/fonts/*.ttf
 *.pem
 *.key
 !*.pem.example
+
+# 하니스가 잠깐 쓰는 프로브(자가 지우지만 세게 죽으면 남는다 · 2026-09-21 B)
+.probe*.mts
+.tmp-*.mts

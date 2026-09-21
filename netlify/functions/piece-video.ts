@@ -67,7 +67,7 @@ async function getVideo(tid: number, req: Request): Promise<Response> {
   /* 🔴 piece 는 **테넌트로 좁혀서** 읽는다(남의 영상 id 를 넣어도 «없다»가 된다 — 있고 없고를 알려 주지 않는다).
      mp4 는 `piece_assets(kind='video')` 한 행이다(`lib/video/render-queue.ts` 가 재렌더마다 지우고 다시 넣는다 — 항상 최신 1행). */
   const [row] = await q(sql`
-    SELECT p.id, p.title, p.channel, p.kind, p.status, p.meta->>'chainStage' AS stage,
+    SELECT p.id, p.title, p.channel, p.kind, p.status, p.account_id, p.meta->>'chainStage' AS stage,
            a.r2_key, a.meta AS asset_meta
       FROM pieces p
       LEFT JOIN piece_assets a ON a.piece_id = p.id AND a.tenant_id = p.tenant_id AND a.kind = 'video'
@@ -98,7 +98,11 @@ async function getVideo(tid: number, req: Request): Promise<Response> {
   /* 🔴 «우리가 못 올리는 채널»이면 **넘겨주는 길을 같이 내려보낸다**(R8 §3.2 · DESIGN §1031 «앱에서 올리기» 폴백).
      종전엔 파일 받는 주소만 줬다 — 고객은 «클립은 앱에서 올려 주세요»를 듣고도 **어떻게 폰으로 가져가는지**를 몰랐다.
      ⚠️ `handoff.appOpenVerified` 가 false 면 화면이 «앱으로 바로 열려요»라고 쓰면 안 된다(우리가 폰에서 재 보지 않았다). */
-  const handoff = manualHandoffFor(String(row.channel ?? ""));
+  /* 🔴 [2026-09-21 B] **계정 유무를 같이 넘긴다.** 종전엔 채널만 보고 정해서 `naver_clip` 만 안내가 나갔고,
+     «계정 없이 영상 만들기»(R7 §1.2)가 기본으로 떨어지는 `youtube_shorts` 는 **안내 없이** 내려받기 주소만 갔다 —
+     그 길로 만든 영상은 `account_id` 가 아예 없어 발행이 `no_account` → `awaiting_manual` 로 가는데도.
+     반대로 계정이 붙어 있으면 안 띄운다(우리가 올릴 텐데 «직접 올리세요»는 거짓 안내다). */
+  const handoff = manualHandoffFor(String(row.channel ?? ""), { noAccount: !n(row.account_id) });
 
   return json({
     ok: true, pieceId: id, channel: String(row.channel ?? ""), status: String(row.status),

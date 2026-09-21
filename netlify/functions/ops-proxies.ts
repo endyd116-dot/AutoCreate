@@ -1,7 +1,8 @@
 /**
  * 프록시(계정별 전용 IP) 운영 API — 계약 P1R7 §2.5-② · B 의 §3.6(계정 슬롯 구매)이 이 배정에 기댄다.
  *
- *   GET  /api/ops-proxies                                   → { ok, stock:{free,assigned,down}, proxies:[…] }
+ *   GET  /api/ops-proxies                                   → { ok, stock:{free,assigned,down}, stopped:{…}, proxies:[…] }
+ *        🔴 `stopped` = fail-closed 로 **멈춰 선 계정**(전용 IP 가 없거나 죽어서). 계정·테넌트 **이름까지** 준다.
  *   POST /api/ops-proxies        { action:"add"|"status", … } → 등록 · 상태 변경
  *   POST /api/ops-proxy-assign   { accountId, proxyId? }      → 배정(자동/지정) · { action:"release" } 면 해제
  *
@@ -18,7 +19,7 @@ import { readJson } from "../../lib/validate";
 import { requireAdmin } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { encryptObj } from "../../lib/creds-crypto";
-import { assignProxy, releaseProxy, proxyStock } from "../../lib/proxies";
+import { assignProxy, releaseProxy, proxyStock, proxyStopped } from "../../lib/proxies";
 
 export const config = { path: ["/api/ops-proxies", "/api/ops-proxy-assign"] };
 
@@ -67,6 +68,11 @@ export default async (req: Request): Promise<Response> => {
       return json({
         ok: true,
         stock: await proxyStock(),
+        /* 🔴 **«몇 계정이 IP 가 없어 멈췄나»**(DESIGN §7.3b fail-closed · 2026-09-21 B).
+           재고(`stock`)는 «우리가 가진 것»이고 이건 «그 때문에 못 나가고 있는 것»이다 — **둘은 다르다.**
+           재고만 보면 «free 0» 은 그냥 숫자지만, 여기 계정 이름이 뜨면 «지금 이 사람 글이 안 올라가고 있다»가 된다.
+           멈추는 것은 우리 판단이 아니라 **길이 없는 사실**이지만(§9 «없는 길»), 말해 주는 것은 우리 몫이다. */
+        stopped: await proxyStopped(),
         // 🔴 `url_enc` 는 SELECT 에도 넣지 않았다 — 실수로 내보낼 여지를 아예 없앤다.
         proxies: rows.map((r) => ({
           id: n(r.id), label: String(r.label ?? ""), provider: r.provider ? String(r.provider) : null,

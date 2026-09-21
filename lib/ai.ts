@@ -218,13 +218,28 @@ export function __clearInternalCache(): void { internalCache.clear(); }
  *   (종전엔 대시보드가 `NOT EXISTS(tenants…)` 로 판정해서, 부모를 지우면 그 돈이 **고객 비용으로 넘어갔다** — 고아 103행 $9.98.)
  *   `synthetic` = 실제 호출이 아닌 행(하니스가 상한 시험용으로 적어 넣는 것). 지우지 않고 표시해서 기본 집계에서 뺀다.
  */
-export async function recordAiUsage(row: { tenantId?: number | null; purpose: string; model: string; inTokens: number; outTokens: number; costUsd: number; ref?: string | null; synthetic?: boolean; byo?: boolean }): Promise<void> {
+export async function recordAiUsage(row: { tenantId?: number | null; purpose: string; model: string; inTokens: number; outTokens: number; costUsd: number; ref?: string | null; synthetic?: boolean; byo?: boolean;
+  /**
+   * [2026-09-21 B · drizzle/0084] 🔴 **실패한 호출도 남긴다.** 여태 이 함수는 성공 경로에만 불려서,
+   * 실패·폴백이 **한 줄도 안 남았다** — «몇 번 헛돌았나»를 셀 수 없었고 `checkAiCostCap` 도 그만큼을 못 봤다.
+   *   `provider_failed` — 제공사가 에러를 냈다(청구 여부 **모름**)
+   *   `download_failed` · `store_failed` — 🔴 제공사는 **다 만들어 줬는데** 우리가 못 받아 왔다 ⇒ **확실히 청구된다**
+   */
+  failKind?: string | null;
+  /**
+   * 나갔을 수 있는 돈. 🔴 `costUsd` 와 **다른 칸**이다 — 메인 지시로 관문 합(`SUM(cost_usd)`)을 지금은 안 건드린다.
+   * 🔴 **`undefined`/`null` 은 «못 쟀음»이고 `0` 은 «안 나갔다»**다. 모르면 **0 을 적지 마라**(AC-9).
+   */
+  costUsdMaybe?: number | null }): Promise<void> {
   try {
     const internal = await isInternalTenant(row.tenantId);
     /* 🔴 [R8 §4.4] `byo` 는 «켰나»가 아니라 **실제로 어느 키로 나갔나**다. 고객 키가 죽어 우리 키로 돌았으면 그건 **우리 원가**다 —
        의도로 적으면 AC-71(부모를 지우면 분류가 넘어가던 고아 103행 $9.98)이 이 칸에서 되살아난다. */
-    await db.execute(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, is_internal, synthetic, byo)
-      VALUES (${row.tenantId ?? null}, ${row.purpose.slice(0, 40)}, ${row.model.slice(0, 60)}, ${Math.trunc(row.inTokens)}, ${Math.trunc(row.outTokens)}, ${row.costUsd.toFixed(6)}, ${row.ref ? String(row.ref).slice(0, 120) : null}, ${internal}, ${row.synthetic === true}, ${row.byo === true})`);
+    /* 🔴 `cost_usd_maybe` 는 **모르면 NULL** 이다 — `?? 0` 으로 접으면 «못 쟀다»가 «안 나갔다»가 된다(AC-9). */
+    const maybe = row.costUsdMaybe === undefined || row.costUsdMaybe === null || !Number.isFinite(Number(row.costUsdMaybe))
+      ? null : Number(row.costUsdMaybe).toFixed(6);
+    await db.execute(sql`INSERT INTO ai_usage (tenant_id, purpose, model, in_tokens, out_tokens, cost_usd, ref, is_internal, synthetic, byo, fail_kind, cost_usd_maybe)
+      VALUES (${row.tenantId ?? null}, ${row.purpose.slice(0, 40)}, ${row.model.slice(0, 60)}, ${Math.trunc(row.inTokens)}, ${Math.trunc(row.outTokens)}, ${row.costUsd.toFixed(6)}, ${row.ref ? String(row.ref).slice(0, 120) : null}, ${internal}, ${row.synthetic === true}, ${row.byo === true}, ${row.failKind ? String(row.failKind).slice(0, 32) : null}, ${maybe})`);
   } catch (e) { console.warn("[ai_usage] 기록 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
 }
 

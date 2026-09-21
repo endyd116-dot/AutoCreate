@@ -22,21 +22,11 @@ const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceL
   "goal"]);
 const CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress", "threads", "instagram", "youtube_shorts", "naver_clip", "reels", "tiktok"]);
 
-/**
- * [R7 §1.1] `kinds` 정규화 — 🔴 «글»은 밑바탕이라 **항상 남는다**(영상만 켜고 글을 끄는 길은 없다 · 끄면 만들 게 없어진다).
- *   저장된 값이 없거나 이상하면 `["text"]`(= 영상 꺼짐)로 본다 — **온보딩을 안 거친 테넌트도 토글이 보이고 꺼짐으로 표시된다**(§1.1).
- *   덮어쓰기 금지: 화면이 `{ kinds:["text","video"] }` 를 보내든 `{ kinds:["video"] }` 를 보내든 결과는 병합된 정규형이다.
- */
-export function normalizeKinds(raw: unknown): ("text" | "video")[] {
-  const list = Array.isArray(raw) ? raw.map(String) : [];
-  const video = list.includes("video");
-  return video ? ["text", "video"] : ["text"];
-}
-/** 저장값 → 화면이 쓰는 모양(A §5.1). `kindsSet:false` = 온보딩을 안 거쳤다(기본값을 보여 준 것). */
-export function kindsView(settings: Record<string, unknown>): { kinds: ("text" | "video")[]; kindsSet: boolean } {
-  const has = Array.isArray(settings.kinds) && (settings.kinds as unknown[]).length > 0;
-  return { kinds: normalizeKinds(settings.kinds), kindsSet: has };
-}
+/* [R7 §1.1] `kinds` 정규화·보기는 **`lib/tenant-kinds.ts` 정본**이다(2026-09-21 B 가 옮김 —
+   `lib/director.ts` 가 같은 규칙을 쓰는데 lib → netlify/functions 임포트는 층이 거꾸로였다).
+   🔴 여기서 재수출한다 — 이 이름으로 부르던 자리(rules.ts·onboarding 등)가 그대로 돌아야 한다(소급 0). */
+import { normalizeKinds, kindsView } from "../../lib/tenant-kinds";
+export { normalizeKinds, kindsView };
 
 /** [v1.1 P1-2] tenants.settings 병합의 단일 경로 — rules-settings(netlify/functions/rules.ts)도 이 함수를 쓴다(같은 jsonb 두 경로 금지). */
 export async function mergeSettings(tid: number, patch: Record<string, unknown>): Promise<Record<string, unknown>> {

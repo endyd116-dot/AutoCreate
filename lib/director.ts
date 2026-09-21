@@ -14,6 +14,8 @@ import { sql } from "drizzle-orm";
 import { jsonb, utcDate } from "./db-util";
 import { q, listAccounts, TEXT_CHANNELS, type AccountRow } from "./accounts";
 import { VIDEO_CHANNELS, isVideoChannel, type VideoFormat, type VideoSeconds, type VideoSpec } from "./video/types";
+import { manualHandoffFor } from "./manual-upload";
+import { kindsView } from "./tenant-kinds";
 import { HOOK_TYPES, PALETTES } from "./video/scenes";
 import { GEMINI_VOICES } from "./video/tts";
 import { TYPECAST_VOICE_PILJAE, typecastAvailable } from "./video/tts-typecast";
@@ -83,6 +85,14 @@ export interface PieceSpec {
   /** [R8CLOSE-B1 §B2] 🔴 **왜 이 계정인가** — 페르소나 적합도. `measured:false` = 못 쟀다(0 과 다르다 · AC-9). */
   personaFit?: { score: number; matched: string[]; measured: boolean; line: string };
   /**
+   * [R7 §1.2 · 2026-09-21 B] 🔴 **«이건 직접 올리셔야 해요»** — 영상을 켰는데 그 채널 계정이 없어
+   *   «계정 없이 영상 만들기» 로 낸 조각이다(`accountId` 가 null 인 까닭).
+   *   🔴 **응답에만 싣는다**(`briefs.pieces` 에 저장하지 않는다 · 아래 `usedTodaySlot` 과 같은 규율) —
+   *      확정 전에 계정을 연결하면 그 순간 거짓말이 되는 값이라, 굳히면 안 된다.
+   *   화면이 없으면 A 는 `accountId: null` 만 보고 **고장으로 읽는다**(§4.8 «고르는 UI 까지가 그 기능»).
+   */
+  selfUpload?: { channel: string; label: string; why: string; steps: string[]; openUrl: string; openLabel: string; appOpenVerified: boolean };
+  /**
    * [R8 §2.2] **이 구성을 왜 골랐나** — 골격 지문으로 잰 값과 사람말 사유.
    *   🔴 이게 없으면 §2.2 는 «돌긴 도는데 아무도 못 보는» 기능이다(AC-29). `pieces.meta.formatPick` 으로 내려가
    *      검수 화면·감사에서 그대로 읽힌다. 자동 경로도 같은 자리에 싣는다(둘이 다른 곳에 적으면 화면이 갈린다).
@@ -101,7 +111,11 @@ export interface PieceSpec {
    */
   usesTodaySlot?: { slotId: number; publishAt: string };
 }
-export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[] }
+export interface Brief { id: number; topicId: number; goal: Goal; mode: "auto" | "reviewed"; coinCost: number; coinsLeft: number; reasons: string[]; pieces: PieceSpec[];
+  /** [R7 §1.1 · 2026-09-21 B] 이 집이 무엇을 만드나(정규형 · «글»은 항상 들어 있다). 화면이 설정을 **또 묻지 않게** 같이 준다. */
+  kinds: ("text" | "video")[];
+  /** 🔴 «한 번도 안 물었다»(false)와 «껐다»(true + video 없음)는 **다른 말**이다 — A 가 온보딩에서 물을지 여기서 갈린다. */
+  kindsSet: boolean }
 export interface PieceSpecPatch { key: string; accountId?: number; format?: string; emotionKey?: string; images?: { count?: number; style?: string; aiCount?: number }; monetize?: { affiliate?: { productQuery: string; slot: string } | null; sponsored?: boolean; gift?: boolean }; schedule?: { at: string }; drop?: true;
   /** [P1R5 §1.1] 영상 손보기 — 포맷·길이·보이스·팔레트·훅·컷 수. */
   video?: { format?: string; seconds?: number; voiceId?: string; palette?: string; hookType?: string; cuts?: number };
@@ -446,7 +460,17 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
       outPieces = specs.map((s, i) => (i === 0 ? { ...s, usesTodaySlot: { slotId: pick.slotId, publishAt: at } } : s));
     }
   }
-  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode: "reviewed", coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces } };
+  /* [R7 §1.2 · 2026-09-21 B] 🔴 **계정 없이 낸 영상에 «직접 올리셔야 해요»를 붙인다.**
+     여기까지 오면 조각은 이미 `accountId: null` 인데, 그 사실만으로는 화면이 **왜 그런지** 말할 수 없었다.
+     넘겨주는 길(`lib/manual-upload.ts`)은 이미 있는데 **아무도 확정 전에 보여 주지 않았다** —
+     고객은 28코인을 쓰고 나서야 «직접 올려 주세요»를 처음 들었다. 누르기 전에 말해 준다(§9 «또렷하게»). */
+  outPieces = outPieces.map((s2) => {
+    if (s2.kind !== "video" || s2.accountId) return s2;
+    const h = manualHandoffFor(s2.channel, { noAccount: true });
+    return h ? { ...s2, selfUpload: { channel: h.channel, label: h.label, why: h.why, steps: h.steps, openUrl: h.openUrl, openLabel: h.openLabel, appOpenVerified: h.appOpenVerified } } : s2;
+  });
+  const kv = kindsView(tset);
+  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode: "reviewed", coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces, kinds: kv.kinds, kindsSet: kv.kindsSet } };
 }
 
 /* ───────── confirm ───────── */
