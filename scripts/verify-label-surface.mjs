@@ -286,8 +286,21 @@ rec("코인 항목이 서버에만 있고 화면엔 없다(있으면 WARN)", coi
    ⇒ 폴백이 **«자가 지키는 사본»**이 된다(몰래 어긋나는 사본이 아니라). */
 const vsec = [...(uiJs.match(/UI\.VSECONDS\s*=\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/\d+/g)].map((m) => Number(m[0]));
 const vcoinKeys = [...(uiJs.match(/UI\.VIDEO_COIN\s*=\s*\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\d+)\s*:/g)].map((m) => Number(m[1]));
-/* 화면이 **서버가 준 표로 채우는가** — 그러면 폴백에 칸이 없어도 값의 출처가 있다(ⓐ). */
-const fedFromServer = /UI\.VIDEO_COIN\s*=[\s\S]{0,400}coins\.table|coins\.table[\s\S]{0,400}UI\.VIDEO_COIN|UI\.setCoinTable/.test(uiJs);
+/* 화면이 **서버가 준 표로 채우는가** — 그러면 폴백에 칸이 없어도 값의 출처가 있다(ⓐ).
+   🔴 [AC-186 · A · 2026-09-22] **`uiJs`(원문)로 재면 주석만 써도 초록이 된다.** 실제로 그랬다 —
+      내가 이 축을 초록으로 만든 뒤 변이(`setCoinTable` → `setZZZ`)를 심었는데 **안 울었다**.
+      남아 있던 건 «(UI.setCoinTable · 정의부 주석에 까닭)» 이라는 **내 주석 한 줄**이었다.
+      ⇒ 이 축만은 **주석을 걷어 낸 본문**에서 본다(`readCode` — 위 15행이 서버 소스에 쓰던 그 도구).
+      다른 축들이 `uiJs` 원문을 쓰는 건 옳다(거긴 **손님이 읽는 낱말**을 세는 자리다) — 여기만 «배선»을 묻는다.
+   🔴 그리고 **이름만 보면 안 된다.** 종전 식에는 `|UI\.setCoinTable` 한 가지가 있어서 **그 이름이 있기만 하면** 초록이었다.
+      변이로 확인했다: `UI.VIDEO_COIN[s] = v`(실제로 채우는 **그 한 줄**)를 **지웠는데도 초록**이었다 —
+      함수 이름이 남아 있었기 때문이다. 이름은 배선이 아니다.
+   ⇒ **«서버 표를 읽는 자리»와 «UI.VIDEO_COIN 에 쓰는 자리»가 서로 가까이 있을 때**만 초록이다.
+      쓰는 자리 = `UI.VIDEO_COIN[…] =`(칸마다 채우기) 또는 `UI.VIDEO_COIN = <식>`(통째로 갈기) —
+      폴백 `UI.VIDEO_COIN = { … }`(중괄호 리터럴)은 **쓰는 자리로 안 센다**(그게 폴백이니까). */
+const uiJsCode = readCode("public/js/ui.js");
+const VCOIN_WRITE = "UI\\.VIDEO_COIN\\s*(\\[|=\\s*[A-Za-z(])";
+const fedFromServer = new RegExp(`coins\\.table[\\s\\S]{0,600}${VCOIN_WRITE}|${VCOIN_WRITE}[\\s\\S]{0,600}coins\\.table`).test(uiJsCode);
 const priceless = vsec.filter((s2) => !vcoinKeys.includes(s2));
 rec("🔴 고를 수 있는 모든 영상 길이에 코인 값의 출처가 있다", vsec.length > 0 && (fedFromServer || priceless.length === 0),
   vsec.length === 0 ? "UI.VSECONDS 를 못 읽었다"

@@ -33,6 +33,10 @@
       const login = path.startsWith("/api/ops") ? "/ops/login.html" : "/login.html";
       if (location.pathname !== login) location.href = login + "?next=" + encodeURIComponent(location.pathname + location.search);
     }
+    /* [AC-186] 🔴 **코인 단가는 서버가 말한다** — `coins.table` 을 실어 주는 문(`/api/accounts-list` · `/api/plans`)이
+       오면 여기서 화면 표에 앉힌다(UI.setCoinTable · 정의부 주석에 까닭). `table` 이 있는 응답만 본다 —
+       `pieces-self` 의 `coins:{charged,ref}` 나 `ops-dashboard` 의 `coins:{soldKrw,…}` 는 **단가표가 아니다.** */
+    if (data && data.coins && data.coins.table) UI.setCoinTable(data.coins);
     const out = { ...data, status: res.status, ok: !!data.ok && res.ok };
     if (!opts.noGate && UI.gate(out)) out.gated = true; // [P1R4] 쓰기 막힘·플랜 한도·상한은 화면마다 말고 여기서 한 번(계약 §1.3·§1.4·§1.5) · 화면은 gated 면 제 토스트를 겹치지 않는다
     return out;
@@ -228,7 +232,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.21";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
+  UI.APP_VERSION = "2026.09.22";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).
@@ -510,6 +514,31 @@
         운영센터가 단가를 바꿀 수 있게 됐으니(B ea980a3), 서버 값이 오는 자리에서는 **이 표를 쓰지 않는다**. */
   UI.COIN = { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28 };
   UI.VIDEO_COIN = { 15: UI.COIN.video_15, 30: UI.COIN.video_30, 60: UI.COIN.video_60 }; // 손보기 코인 재계산 미리보기(정본은 director-confirm 응답 coinCost · videoCoinItem 구간제)
+  /* [AC-186 · 사장님 지시 2026-09-21 «모든 화면의 코인값은 변수로 — 운영센터에서 가격 바꾸면 다 같이 바뀌게»]
+     🔴 위 두 줄은 이제 **폴백**이다(서버가 아직 안 왔을 때 잠깐 쓰는 값). 정본은 서버가 준 표다:
+       `GET /api/accounts-list` → `coins:{ table, labels }` · `GET /api/plans` → `coins:{ krw, packs, table, labels }`
+       (둘 다 `lib/billing/packs.ts loadPacksAndTable()` — 운영센터 오버레이가 적용된 **한 곳**이다)
+     🔴 왜 화면마다 안 부르고 `UI.api` 한 자리에서 받나: 이 문들을 부르는 화면이 이미 여덟이고(디렉터·편성표·만들기·계정·직접
+        쓰기·수익·광고소재·요금제), 새 화면이 붙을 때마다 «여기도 앉혀라»를 기억해야 하면 **그날로 한 화면만 옛 값을 그린다**.
+        받는 자리를 하나로 두면 그 문을 부르기만 하면 표가 최신이다.
+     🔴 **화면이 값을 지어내지 않는다** — 서버에 없는 칸은 폴백 값 그대로 두고(덮어쓰지 않는다), 폴백에도 없으면 없는 채로 둔다.
+        `video_90`(42코인 · 사장님 결재 2026-09-21)을 여기 손으로 적지 않는 까닭이 이것이다 — 서버 표가 준다. */
+  UI.COIN_LABEL = {};   // 코인 항목 사람말(«숏폼 영상 90초» …) — 🔴 서버 `coins.labels` 만 채운다. 화면에 이름을 두 벌 적지 않는다(lib/coin-table.ts COIN_ITEM_LABEL 이 정본).
+  UI.setCoinTable = function (coins) {
+    if (!coins || typeof coins !== "object") return false;
+    const t = coins.table, L = coins.labels; let got = false;
+    if (t && typeof t === "object") {
+      for (const k in t) { const v = Number(t[k]); if (Number.isFinite(v)) { UI.COIN[k] = v; got = true; } }
+      /* 고를 수 있는 길이(UI.VSECONDS)마다 서버 표의 `video_<초>` 를 앉힌다 — 90 처럼 폴백에 칸이 없던 길이도 여기서 생긴다. */
+      for (let i = 0; i < UI.VSECONDS.length; i++) { const s = UI.VSECONDS[i], v = Number(t["video_" + s]); if (Number.isFinite(v)) UI.VIDEO_COIN[s] = v; }
+    }
+    if (L && typeof L === "object") for (const k in L) if (typeof L[k] === "string" && L[k]) { UI.COIN_LABEL[k] = L[k]; got = true; }
+    return got;
+  };
+  /** 코인 항목 사람말. 서버가 안 줬으면 **빈 문자열**(«video_90» 같은 기계말을 손님에게 보이지 않는다 · §3). */
+  UI.coinLabel = (item) => UI.COIN_LABEL[item] || "";
+  /** 영상 길이 → 사람말(«숏폼 영상 90초»). 서버 labels 가 없으면 «90초»로만 말한다. */
+  UI.vcoinLabel = (sec) => UI.COIN_LABEL["video_" + sec] || (sec ? sec + "초" : "");
   UI.vlabel = (v) => v ? `${UI.VFORMAT[v.format] || v.format} ${v.seconds}초` : "";
   UI.studioUrl = (ref) => ref ? `https://studio.youtube.com/video/${encodeURIComponent(ref)}/edit` : "https://studio.youtube.com/";
   /* [P1R2] RunnerErrorKind → 사람말(계약 §2) · 계정·발행함이 같이 쓰는 한 벌 */
@@ -577,7 +606,10 @@
      [R8 §4.5 · B] `team_review` — 팀원이 만든 글이 주인을 기다린다(`lib/team.ts notifyOwnersWaiting`). 🔴 `review`(soft) 로 잇지 마라 —
         마감 자동 승인이 이 글을 **아예 안 집기 때문에**(lib/cron/review-deadline.ts) 주인이 안 보면 그대로 멈춰 있다. 그래서 주의(`review_wait`)다.
         링크는 서버가 실어 준다(`/app/pieces.html?status=in_review`) — KIND_LINK 에 또 적지 않는다(두 출처 금지). */
-  UI.KIND_ALIAS = { gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+  /* [AC-187 · B2 AC-201] `account_address_check` — 러너가 «장부와 다른 블로그»를 보고 멈췄다(lib/runner-jobs.ts).
+     🔴 «계정» 얼굴로 잇는다 — 가는 곳이 계정 화면(`/app/accounts.html` · 링크는 서버가 실어 준다)이고, 할 일이 «계정 주소 확인»이다.
+     🔴 겁주는 얼굴(danger)을 고정하지 않는다 — 색은 서버가 준 `tone` 이 정한다(§3 · 이건 «틀렸다»가 아니라 «한 번만 봐 달라»다). */
+  UI.KIND_ALIAS = { account_address_check: "account", gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "setup", /* [R9R10-A · B c922b28 · 메인이 main 에서 setup 으로 이음] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ format_demoted: "publish", /* [R9R10 · B2] «이 글에서 못 낸 꾸밈이 있어요»(발행 뒤 · 링크 /app/piece.html?id=) — 검수·발행 얼굴 */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",

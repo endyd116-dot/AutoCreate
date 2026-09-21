@@ -1222,14 +1222,22 @@ async function load() {
   const list = UI.$("#list");
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
     ? D.accounts.map((a) => { const relogin = a.status === "pending_login"; const ls = UI.loginState(a);
-        const sub = relogin ? ls.why : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요" : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
+        const sub = relogin ? ls.why : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요"
+          /* [AC-187] 🔴 «주소 확인»이라는 단추만 있으면 왜 눌러야 하는지 모른다 — 사실 한 줄을 같이 준다(§9-①). 겁주지 않는다(§3). */
+          : addrAsk(a) ? "주소가 달라 보여요 · 글은 보관해 두었어요"
+          : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
         const head = `${UI.accMark(a)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
+        /* [AC-187] 🔴 주소 확인은 **목록에서 보여야 한다** — 알림이 데려오는 곳이 여기다(서버 link `/app/accounts.html`).
+           시트 안에만 두면 «말해 주기»가 아무에게도 안 닿는다(§9-②). 로그인 풀림이 먼저다(그건 아예 못 올린다). */
         return relogin
           ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">${ls.cta}</button></div>`
+          : addrAsk(a)
+          ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-addr="${a.id}">주소 확인</button></div>`
           : `<div class="row">${head}${UI.pill(UI.ACC_STATUS, a.status)}${UI.chev}</div>`; }).join("")
     : `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">아직 연결한 계정이 없어요</h3><p>위에서 채널 마크를 누르면 바로 연결할 수 있어요.</p></div>`);
   UI.$$("#list [data-id]").forEach((b) => b.onclick = () => detailSheet(D.accounts.find((a) => a.id === Number(b.dataset.id))));
   UI.$$("#list [data-relogin]").forEach((b) => b.onclick = () => reloginSheet(D.accounts.find((a) => a.id === Number(b.dataset.relogin))));
+  UI.$$("#list [data-addr]").forEach((b) => b.onclick = () => addrSheet(D.accounts.find((a) => a.id === Number(b.dataset.addr))));   // [AC-187] 주소 확인
 }
 
 /* ── 연결 시트(채널 방식별 · 계약 §1) ── */
@@ -1346,6 +1354,43 @@ async function reloginSheet(a) {
 }
 
 /* ── 계정 상세 시트(DESIGN §7.1 필드 전부) ── */
+/* ── [AC-187 · B2 AC-201] «이 계정 주소가 맞나요» ─────────────────────────────────────────────
+   B2 가 교차 발행을 막았다: 러너가 올리기 직전에 **지금 로그인된 블로그 주소**를 읽어 장부의 핸들과 댄다.
+   다르면 **막지 않고**(§9) 글을 보관해 둔 채 **한 번 묻는다** — 그런데 **묻는 화면이 없었다**.
+   그러면 «한 번 묻기»가 **영원히 묻기**가 된다(러너가 24시간마다 다시 알림을 보낸다 · lib/runner-jobs.ts askedAt).
+   🔴 서버가 주는 것: `account.identity = { seen?, confirmed?, matchesHandle }` (lib/accounts.ts:146~)
+      · `identity` 자체가 **없으면 «아직 모른다»**이지 «틀렸다»가 아니다 — **빨간 경고를 띄우지 않는다**(AC-9).
+      · `matchesHandle === true` 면 물을 것이 없다 — 조용히 주소만 적는다(§13.0 «설명 한 문장»).
+   🔴 보내는 곳: `POST /api/accounts-update { id, confirmBlogId }` — 값은 **우리가 본 주소 그대로**만 받는다
+      (서버가 `observed`/`posted` 와 대조한다 · 임의 문자열을 보내면 400). `null` = 확인 취소(되돌릴 길 · §9-③).
+   🔴 말투(§3): 겁주지 않는다. «남의 블로그에 나갈 뻔했어요»가 아니라 **①본 사실 ②한 번만 확인 ③그동안 우리가 보관해 뒀다**. */
+const addrIdn = (a) => (a && a.identity && typeof a.identity === "object" ? a.identity : null);
+const addrSeen = (a) => String(addrIdn(a)?.seen || "").trim();
+const addrConfirmed = (a) => String(addrIdn(a)?.confirmed || "").trim();
+/** 물어야 하나 — ①우리가 본 주소가 있고 ②아직 확인 안 됐고 ③핸들과 다르거나(처음) 확인해 둔 주소와 또 달라졌을 때. */
+function addrAsk(a) {
+  const seen = addrSeen(a); if (!seen || addrConfirmed(a) === seen) return false;
+  return addrIdn(a).matchesHandle === false || !!addrConfirmed(a);
+}
+/** 한 화면 한 질문(토스 온보딩 패턴) — 목록의 «주소 확인»과 계정 설정 안의 배너가 **같은 이 시트**를 연다(두 벌 금지). */
+function addrSheet(a, after) {
+  const seen = addrSeen(a), was = addrConfirmed(a);
+  UI.sheet(`<p style="margin:0 0 12px;font-size:15px;line-height:1.6">지금 이 계정으로 로그인된 블로그는<br><b style="color:var(--ink)">${UI.esc(seen)}</b> 예요.</p>
+  <div class="kv" style="padding-left:0;padding-right:0"><span class="k">저장된 주소</span><span class="v">@${UI.esc(a.handle)}</span></div>
+  ${was ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">전에 확인해 주신 주소</span><span class="v">${UI.esc(was)}</span></div>` : ""}
+  <p class="muted" style="margin:12px 0 0;font-size:13px;line-height:1.6">네이버는 아이디와 블로그 주소가 다를 수 있어서, 맞는지 한 번만 확인해 주세요. 확인해 주시면 다음부터는 묻지 않고 그대로 올려요.<br>그동안 글은 올리지 않고 <b style="color:var(--ink)">보관해 두었어요</b>.</p>
+  <div class="cta" style="margin-top:16px"><button class="btn primary" type="button" id="addrOk">네, 이 주소가 맞아요</button></div>
+  <div style="padding:8px 0 0"><button class="btn ghost" type="button" id="addrNo" style="width:100%">아닌 것 같아요</button></div>`,
+  { title: "이 주소가 맞나요?", onOpen: (sh, close) => {
+    sh.querySelector("#addrOk").onclick = async (e) => { e.currentTarget.disabled = true;
+      const r = await UI.api("/api/accounts-update", { body: { id: a.id, confirmBlogId: seen } });
+      if (!r.ok) { e.currentTarget.disabled = false; return UI.toast(r.error || "확인하지 못했어요"); }
+      close(); UI.toast("확인했어요 · 다음부터는 묻지 않을게요"); (after || load)(); };
+    /* «아니에요» — 막다른 골목을 만들지 않는다(§4.8). 다른 블로그에 로그인돼 있다는 뜻이니 **다시 로그인**이 갈 길이다. */
+    sh.querySelector("#addrNo").onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
+  } });
+}
+
 async function detailSheet(a) {
   if (!personas.length) { const p = await UI.api("/api/personas-list"); if (p.ok) personas = p.personas; }
   // [P1R3] 이 계정의 수익 — 매체 상태 한 줄 + 이달 수익
@@ -1372,6 +1417,13 @@ async function detailSheet(a) {
   ${a.status === "pending_login" ? `<div class="banner" style="margin:4px 0 8px"><span>${UI.esc(UI.loginState(a).why)}</span><button type="button" id="relogin">${UI.loginState(a).cta}</button></div>`
     : a.status === "suspended" ? `<div class="banner" style="margin:4px 0 8px"><span>채널에서 정지됐어요 · 예약된 글은 같은 채널의 다른 계정으로 넘겼어요</span></div>`
     : a.lastErrorKind ? `<div class="banner" style="margin:4px 0 8px"><span>최근 오류 · ${UI.esc(UI.errk(a.lastErrorKind))}</span></div>` : ""}
+  ${addrAsk(a) ? `<div class="banner" style="margin:4px 0 8px"><span>지금 로그인된 블로그 주소가 저장된 주소와 달라 보여요 · 한 번만 확인해 주세요</span><button type="button" id="addrGo">주소 확인</button></div>`
+    : addrSeen(a) && addrConfirmed(a) === addrSeen(a)
+    /* 확인해 둔 주소 — 🔴 되돌릴 길을 같이 둔다(§9-③). 취소하면 다음 잡에서 다시 묻는다(서버 `confirmBlogId: null`). */
+    ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px">${UI.esc(addrSeen(a))} <span class="pill ok">확인했어요</span></span></div>
+       <div style="padding:0 0 8px;text-align:right"><button type="button" class="btn ghost sm" id="addrUndo">확인 취소</button></div>`
+    /* 우리가 본 주소가 저장된 주소와 같다 — 물을 것이 없다. 조용히 적기만 한다(§13.0 «설명 한 문장»). `identity` 가 없으면 한 줄도 없다(AC-9 «아직 모른다»). */
+    : addrSeen(a) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px">${UI.esc(addrSeen(a))}</span></div>` : ""}
   ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
@@ -1410,6 +1462,11 @@ async function detailSheet(a) {
     /* [R9R10-A] 옷장 시트는 ui.js 한 곳(UI.styleSheet) — 돌아오면 칩만 다시 그린다 */
     const wzMore = sh.querySelector("#wzMore"); if (wzMore) wzMore.onclick = () => UI.styleSheet({ accounts: D.accounts.filter((x) => x.channel === a.channel && x.status !== "suspended"), accountId: a.id,
       onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
+    /* [AC-187] 주소 확인 · 확인 취소 — 시트는 목록과 **같은 것**을 연다(두 벌 금지) */
+    const ag = sh.querySelector("#addrGo"); if (ag) ag.onclick = () => { close(); setTimeout(() => addrSheet(a), 300); };
+    const au = sh.querySelector("#addrUndo"); if (au) au.onclick = () => UI.confirmRow(au.parentElement, "확인을 취소하면 다음에 올릴 때 주소를 한 번 더 여쭤볼게요.", async () => {
+      const r = await UI.api("/api/accounts-update", { body: { id: a.id, confirmBlogId: null } });
+      if (!r.ok) return UI.toast(r.error || "취소하지 못했어요"); close(); UI.toast("확인을 취소했어요"); load(); });
     sh.querySelector("#save").onclick = async () => {
       const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
       /* [R9R10-A · 계약 §13] 등급·스타일 기본값은 **계정마다** — 고른 것만 보낸다(안 고른 등급을 화면이 채워 보내지 않는다 · AC-92) */

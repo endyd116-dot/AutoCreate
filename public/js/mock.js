@@ -274,11 +274,16 @@
      두 갈래는 키인 MID 등록 여부로 갈린다 → ?keyinMid=0 이 **지금 라이브**(MID 미등록)다. 문구는 서버가 정본(AC-52). */
   const keyinForBillingKey = () => ({ available: false, label: "카드번호 직접 입력", notice: keyinMid ? "카드 등록은 카드번호를 직접 입력하는 창으로 열려요." : "카드 등록은 카드사 인증 창으로 열려요. 카드번호 직접 입력은 코인을 살 때 고를 수 있어요." });
   const aiCap = qs.get("aiCap") === "1", bannedTopic = qs.get("banned") === "1";
+  /* [AC-187 · AC-201] `?addr=ask|ok|again` — «이 계정 주소가 맞나요»의 세 상태(계정 1번에 붙인다).
+     🔴 손잡이가 없으면 `identity` 자체가 **없다** — 그게 대부분의 계정이고, «아직 모른다»를 «틀렸다»로 그리지 않는지 보는 기본값이다(AC-9). */
+  const addrKnob = qs.get("addr") || "";
   /* [P1R5] 영상 손잡이 — ?stage=script|tts|clips|render|judging|done|failed(만드는 중 영상의 단계 고정) · ?judge=P0|P1|P2(검수 영상 심사 등급) · ?noFfmpeg=1(내 PC 프로그램 caps.ffmpeg=false) · ?uploaded=private(발행함 비공개 업로드 행) · ?videoBudget=0(달러 캡 초과 step budget) */
   const vStage = qs.get("stage") || "", vJudge = qs.get("judge") || "", noFfmpeg = qs.get("noFfmpeg") === "1", uploadedKnob = qs.get("uploaded") || "", videoBudget = qs.get("videoBudget") || "";
   const VIDEO_CH = ["youtube_shorts", "naver_clip", "reels", "threads"];                       // §0.2 VideoChannel
-  const VIDEO_COIN = { video_15: 6, video_30: 12, video_60: 28 };                               // §6.3 코인 · lib/coin-table.ts 값
-  const videoCoinItem = (sec) => (sec <= 15 ? "video_15" : sec <= 35 ? "video_30" : "video_60"); // §0.1-4 구간제(초 산식 금지)
+  /* [AC-186] 🔴 **90초 칸을 더했다** — 릴스가 90초를 내는데 모의 표엔 칸이 없어서, 모의로 보는 화면은 90초를 골라도
+     60초 값(28)을 그렸다. 값·구간 경계는 `lib/coin-table.ts`(COIN_TABLE · videoCoinItem) 그대로 베낀 것이다 — 여기서 정하지 않는다. */
+  const VIDEO_COIN = { video_15: 6, video_30: 12, video_60: 28, video_90: 42 };                 // §6.3 코인 · lib/coin-table.ts 값
+  const videoCoinItem = (sec) => (sec <= 15 ? "video_15" : sec <= 35 ? "video_30" : sec <= 65 ? "video_60" : "video_90"); // §0.1-4 구간제(초 산식 금지) · 65 가 경계(R12-7)
   const VOICES = [{ voiceId: "tc_minseo", name: "민서", desc: "차분한 여성", provider: "typecast" }, { voiceId: "tc_jun", name: "준", desc: "또렷한 남성", provider: "typecast" }, { voiceId: "tc_haru", name: "하루", desc: "밝은 여성", provider: "typecast" }];
   const HOOKS = ["contrast", "question", "number_typo", "event_pushin", "extreme_closeup"], PALETTES = ["terracotta", "teal", "navy", "sage", "charcoal"]; // B-1 types.ts 훅 5 · scenes.ts 팔레트 5
   const HOOK_KO = { event_pushin: "사건으로 시작", number_typo: "숫자로 시작", extreme_closeup: "확대로 시작", question: "질문으로 시작", contrast: "반전으로 시작" };
@@ -340,6 +345,14 @@
   const AVATAR = "/icon.svg";
   /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
   const COIN = { blog: 1, image: 1, cardnews: 3 };
+  /* [AC-186 · 사장님 지시 2026-09-21 «운영센터에서 가격 바꾸면 화면도 같이 바뀌게»] 🔴 실서버는 단가표·이름표를
+     `accounts-list` 와 `plans` **둘 다**에 싣는다(`coins:{table,labels}` · lib/billing/packs.ts loadPacksAndTable).
+     모의가 `plans` 에만 싣고 있어서, **계정·디렉터·편성표만 여는 길**(모의로 화면을 보는 흔한 길)에서는 표가 한 번도 안 왔다.
+     ⇒ 한 벌로 묶어 두 문에 같이 싣는다. 🔴 값·글자는 `lib/coin-table.ts`(COIN_TABLE · COIN_ITEM_LABEL) 그대로다 — 여기서 짓지 않는다. */
+  const COIN_PAYLOAD = {
+    table: { blog: 1, image: 1, cardnews: 3, sns: 1, landing: 4, video_clip: 2, video_15: 6, video_30: 12, video_60: 28, video_90: 42, persona: 15, image_regen: 1, post_simple: 1, post_standard: 2, post_premium: 3 },
+    labels: { blog: "블로그 글 1건", image: "이미지 1장", cardnews: "카드뉴스 세트", sns: "SNS 글 1건", landing: "랜딩 1종", video_clip: "짧은 클립 2~5초", video_15: "짧은 영상 15초", video_30: "숏폼 영상 30초", video_60: "숏폼 영상 60초", video_90: "숏폼 영상 90초", persona: "새 페르소나·전략", image_regen: "이미지 재생성 1장", post_simple: "글 1편(간단히)", post_standard: "글 1편(보통)", post_premium: "글 1편(프리미엄)" },
+  };
   /* [R9R10-A · 사장님 확정 2026-09-16] 코인 등급 — 🔴 정본은 서버 lib/coin-table.ts COIN_TIERS(B 채택) · 글자까지 같아야 한다(verify-label-surface ⑧-c).
      accounts-list.tiers 로 실어 준다 · 화면은 이 값을 셈 없이 그린다(AC-74). «최소»라는 말을 쓰지 않는다. */
   /* ⚠️ 필드 순서 «key · coins · label» — 라벨 하니스 ②가 `{ key:…, label:… }` 꼴을 **글 검사축**으로 읽는다(정규식). 뜻은 같다. */
@@ -430,7 +443,11 @@
       { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
       { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatar: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
     ] : [
-      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701 },
+      /* [AC-187] `identity` — 서버 lib/accounts.ts:146 이 만드는 그 모양 그대로({ seen?, confirmed?, matchesHandle }) · 🔴 본 적이 없으면 **키 자체가 없다**. */
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701,
+        ...(addrKnob === "ask" ? { identity: { seen: "blog.naver.com/cook-a-2024", matchesHandle: false } }
+          : addrKnob === "ok" ? { identity: { seen: "blog.naver.com/cook-a-2024", confirmed: "blog.naver.com/cook-a-2024", matchesHandle: false } }
+          : addrKnob === "again" ? { identity: { seen: "blog.naver.com/cook-a-new", confirmed: "blog.naver.com/cook-a-2024", matchesHandle: false } } : {}) },
       { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, dailyCapBase: 2, minGapMin: 360, minGapBase: 180, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true }, defaultTier: "premium", defaultStyleId: null },
       { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false }, defaultTier: null, defaultStyleId: null },
       { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: avatarOn ? AVATAR : null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
@@ -831,7 +848,7 @@
       if (typeof b.goal === "string") { if (["adsense", "adpost", "ypp", "clip_incentive"].includes(b.goal)) S.settings.goal = b.goal; else delete S.settings.goal; }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
       return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer }; },
-    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p, piecesByTier: Object.fromEntries(TIERS.map((t) => [t.key, Math.floor(p.limits.coinsIncluded / t.coins)])) })), tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE,   /* [R9R10-A] «이 요금제로 몇 편» — 서버가 셈 · tiers 라벨도 같이(요금제 화면은 accounts-list 를 안 부른다 · C 지적) */ trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 }, labels: { blog: "글 1편", image: "사진 1장", cardnews: "카드뉴스", video_15: "15초 영상", video_30: "30초 영상", video_60: "60초 영상", persona: "페르소나" } } }),
+    "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p, piecesByTier: Object.fromEntries(TIERS.map((t) => [t.key, Math.floor(p.limits.coinsIncluded / t.coins)])) })), tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE,   /* [R9R10-A] «이 요금제로 몇 편» — 서버가 셈 · tiers 라벨도 같이(요금제 화면은 accounts-list 를 안 부른다 · C 지적) */ trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), ...COIN_PAYLOAD } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;
       const o = { ok: true, plan: p ? { key: p.key, name: p.name, priceKrw: base, vatKrw: VAT(base), totalKrw: base + VAT(base), cycle: B.cycle } : { key: "trial", name: "체험", priceKrw: 0, vatKrw: 0, totalKrw: 0, cycle: B.cycle }, status: blocked || (paid ? "active" : "trial"), cancelAtPeriodEnd: B.cancelAtPeriodEnd, billingKey: B.billingKey ? { has: true, last4: B.billingKey.last4, brand: B.billingKey.brand } : { has: false }, vatNote: "부가세 별도" };
@@ -963,7 +980,7 @@
     "upload": (b) => { if (!b.dataBase64 || !b.contentType) return err("file", "사진을 골라 주세요."); if (String(b.dataBase64).length > 4e6) return err("size", "3MB 이하 사진만 붙일 수 있어요."); return { ok: true, key: "autocreate/1/support/" + Date.now() + "-" + String(b.filename || "img").replace(/[^\w.-]/g, "_"), url: "" }; },
     "notices": () => ({ ok: true, notices: qs.get("incident") === "0" ? [] : [{ id: 801, kind: "incident", title: "네이버 발행이 늦어요 · 네이버 쪽 점검", body: "14:00 부터 네이버 블로그 발행이 30분쯤 밀리고 있어요. 예약은 그대로 나가요.", startsAt: iso(now - 2 * 3600e3), endsAt: iso(now + 4 * 3600e3), channels: ["naver_blog"] }, { id: 802, kind: "notice", title: "9월 25일 새벽 2시 점검(10분)", startsAt: iso(now - 3600e3), endsAt: iso(now + 11 * 86400e3) }] }),
     /* §1 계정 */
-    "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS, tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE }),   /* [R9R10-A] tiers = 서버 COIN_TIERS 그대로 */
+    "accounts-list": () => ({ ok: true, accounts: S.accounts.map((a) => ({ ...a })), channels: CHANNELS, tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE, coins: { ...COIN_PAYLOAD } }),   /* [R9R10-A] tiers = 서버 COIN_TIERS 그대로 · [AC-186] coins = 단가표·이름표(실서버 accounts.ts:170 과 같은 모양) */
     "accounts-add": (b) => {
       if (/쿠팡|coupang/i.test(b.handle || "")) return err("handle_policy", "채널 이름에 «쿠팡»을 쓸 수 없어요(파트너스 정책).");
       if (planLimit === "accounts") return { ok: false, reason: "plan_limit", step: "plan_limit", resource: "accounts", used: S.accounts.length, limit: 3, planKey: "starter", error: "계정은(는) 3개까지예요. Pro 로 바꾸면 더 늘어나요.", status: 402 };
@@ -982,6 +999,15 @@
       for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours", "defaultTier", "defaultStyleId"]) if (b[k] !== undefined) a[k] = b[k];   /* [R9R10-A] 등급·스타일 기본값은 계정마다 */
       if (b.proxyUrl !== undefined) a.proxyUrl = b.proxyUrl ? b.proxyUrl.replace(/\/\/([^@]+)@/, "//****@") : undefined;
       if (b.monetize) { const m = b.monetize; if (m.coupangAccessKey && m.coupangSecretKey) a.monetize.coupang = true; if (m.adpostMediaId) a.monetize.adpost = true; if (m.adsensePub) a.monetize.adsense = true; }
+      /* [AC-187 · AC-201] «이 주소가 맞아요» — 🔴 실서버와 **같은 규율**로 흉내 낸다(accounts.ts:347):
+         우리가 실제로 본 주소(`identity.seen`)만 승인할 수 있고, 그 밖의 값은 400 이다. `null`/"" 는 승인 취소. */
+      if (b.confirmBlogId !== undefined) {
+        const want = b.confirmBlogId === null ? "" : String(b.confirmBlogId).trim();
+        const idn = a.identity && typeof a.identity === "object" ? a.identity : null;
+        if (!want) { if (idn) { const { confirmed, ...rest } = idn; a.identity = rest; } }
+        else if (!idn || String(idn.seen || "").trim() !== want) return err("confirmBlogId", "확인할 수 있는 주소는 저희가 실제로 본 주소예요. 계정 화면에 보이는 주소로 다시 눌러 주세요.");
+        else a.identity = { ...idn, confirmed: want };
+      }
       return { ok: true, account: { ...a } }; },
     "accounts-oauth-start": (b) => { const c = CHANNELS.find((x) => x.key === b.channel); if (!c || !c.configured) return err("provider_not_configured", "준비 중이에요"); return { ok: true, url: `/app/accounts.html?connected=${b.channel}&mock=1` }; },
     "personas-list": () => ({ ok: true, personas: S.personas }),
