@@ -19,8 +19,11 @@ import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireAdmin } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
+/* [AC-214 · B2 2026-09-22] 🔴 **운영자가 잡을 되돌리기 전에** 채널에 «이미 올라갔나»를 묻는다.
+   ⚠️ 이 파일은 B 영역이다 — B(`autocreate-b-f8`) 에게 물어 «안 겹친다 · 그냥 넣어라»를 받고 넣었다(보고에 적었다). */
+import { reconcileLostPublish } from "../../lib/publish/reconcile";
 import { q } from "../../lib/accounts";
-import { utcDate } from "../../lib/db-util";
+import { utcDate, jsonb } from "../../lib/db-util";
 import { ONLINE_WINDOW_MIN } from "../../lib/runner-jobs";
 // [P1R8 §3.3] 셀렉터 표 — 등록·배포 상태·되돌리기. 🔴 «만들어 놓고 부르는 자리가 없는 것»이 제일 안 보인다(AC-69).
 import { RECIPE_CHANNELS, recipeSigningConfigured, type RecipeBody } from "../../lib/recipe";
@@ -207,17 +210,59 @@ export default async (req: Request): Promise<Response> => {
       }
 
 
+      /* ═══ [AC-214] 🔴 **되돌리기 전에 채널에 묻는다** — 운영자 문이 크론보다 위험하다 ═══
+       *
+       *   사람이 이 단추를 누르는 때는 「잡이 멈춰 보일 때」다. 그런데 **«올렸는데 보고를 못 했다»가
+       *   정확히 그 «멈춰 보이는» 모양**이다. `reapStaleJobs` 는 15분을 기다리지만 **운영자는 즉시 누른다.**
+       *   되돌리면 다른 러너가 집어 **같은 글을 또 올린다**(AC-200 그 사고) — 그리고 그 두 번째 시도는
+       *   잡이 payload 째 큐에 있어 **`publish()` 를 다시 안 타므로** 멱등 검사도 안 걸린다.
+       *
+       *   🔴 **막는 게 아니다**(CLAUDE §9). 되돌리기를 거부하는 것이 아니라, **이미 올라간 잡만** 골라
+       *      «되돌릴 것이 아니라 끝난 것»으로 닫고 **운영자에게 그 사실과 주소를 돌려준다.**
+       *   🔴 **운영자 문이니 운영자에게 보인다** — 응답과 감사 `detail` 에 `recovered` 를 싣는다.
+       *      (새 감사 액션을 파지 않는다 — 파면 운영 화면이 또 갈린다 · B 제안 2026-09-22.)
+       */
+      const reconcileClaimed = async () => {
+        const jobs = await q(sql`SELECT id, tenant_id, kind, piece_id, claimed_at FROM runner_jobs
+          WHERE claimed_by = ${id} AND status = 'claimed'`);
+        const recovered: { jobId: number; pieceId: number; externalUrl: string | null }[] = [];
+        for (const j of jobs) {
+          if (!String(j.kind ?? "").startsWith("publish.") || !n(j.piece_id)) continue;
+          /* `claimed_at` 이 «언제부터 이 러너가 들고 있었나»다 — 그 뒤에 생긴 글만 «우리 것»으로 본다.
+             🔴 `utcDate` 를 쓴다(손으로 «Z» 를 붙이지 않는다) — `+00` 두 자리 오프셋에서 Invalid Date 가 나고,
+                그게 조용히 새어 나가면 `since` 가 없는 것과 같아져 **`found_after` 가 영영 안 난다**(PITFALLS #4). */
+          const since = utcDate(j.claimed_at);
+          const rec = await reconcileLostPublish({
+            tenantId: n(j.tenant_id), pieceId: n(j.piece_id), jobId: n(j.id),
+            since: since ? since.toISOString() : null,
+          }).catch((e) => { console.error("[ops-runners] already-check 실패(비치명)", (e as Error)?.message ?? e); return null; });
+          if (!rec?.recovered) continue;
+          /* 🔴 되돌리지 않는다 — 되돌리면 그게 중복 게시다. «끝난 것»으로 닫는다. */
+          await q(sql`UPDATE runner_jobs SET status = 'done', claimed_by = NULL, claimed_at = NULL,
+              result = ${jsonb({ ok: true, via: "channel_reconcile", externalUrl: rec.externalUrl ?? null, note: "운영자가 되돌리려 했지만 채널에는 올라가 있었다(AC-214)" })},
+              updated_at = NOW() WHERE id = ${n(j.id)} AND status = 'claimed'`);
+          recovered.push({ jobId: n(j.id), pieceId: n(j.piece_id), externalUrl: rec.externalUrl ?? null });
+        }
+        return recovered;
+      };
+
       if (action === "release") {
+        const recovered = await reconcileClaimed();
         const released = await q(sql`UPDATE runner_jobs SET status = 'queued', claimed_by = NULL, claimed_at = NULL, updated_at = NOW()
           WHERE claimed_by = ${id} AND status = 'claimed' RETURNING id`);
-        await writeAudit({ tenantId: dev.tenant_id ? n(dev.tenant_id) : null, action: "ops_runner_release", actorType: "operator", actorId: g.ops.oid, target: `runner_device:${id}`, detail: { released: released.length }, riskLevel: "high" });
-        return json({ ok: true, id, released: released.length });
+        await writeAudit({ tenantId: dev.tenant_id ? n(dev.tenant_id) : null, action: "ops_runner_release", actorType: "operator", actorId: g.ops.oid, target: `runner_device:${id}`, detail: { released: released.length, recovered }, riskLevel: "high" });
+        return json({ ok: true, id, released: released.length, recovered });
       }
       if (action === "remove") {
-        await q(sql`UPDATE runner_jobs SET status = 'queued', claimed_by = NULL, claimed_at = NULL, updated_at = NOW() WHERE claimed_by = ${id} AND status = 'claimed'`);
+        /* 🔴 **`DELETE` 보다 먼저** 묻는다(B 지적 2026-09-22): `remove` 는 되돌린 **직후 기기를 지운다** —
+           채널엔 올라갔는데 되돌아간 잡이 있으면 **누가 물고 있었는지조차 사라진다.** `release` 보다 센 문이다. */
+        const recovered = await reconcileClaimed();
+        /* 🔴 `RETURNING` 을 붙였다(B 지적) — 종전엔 **되돌린 수조차 감사에 안 남았다.** */
+        const requeued = await q(sql`UPDATE runner_jobs SET status = 'queued', claimed_by = NULL, claimed_at = NULL, updated_at = NOW()
+          WHERE claimed_by = ${id} AND status = 'claimed' RETURNING id`);
         await q(sql`DELETE FROM runner_devices WHERE id = ${id}`);
-        await writeAudit({ tenantId: dev.tenant_id ? n(dev.tenant_id) : null, action: "ops_runner_remove", actorType: "operator", actorId: g.ops.oid, target: `runner_device:${id}`, detail: { name: String(dev.name ?? "") }, riskLevel: "high" });
-        return json({ ok: true, id, removed: true });
+        await writeAudit({ tenantId: dev.tenant_id ? n(dev.tenant_id) : null, action: "ops_runner_remove", actorType: "operator", actorId: g.ops.oid, target: `runner_device:${id}`, detail: { name: String(dev.name ?? ""), requeued: requeued.map((r) => n(r.id)), recovered }, riskLevel: "high" });
+        return json({ ok: true, id, removed: true, requeued: requeued.length, recovered });
       }
       return badRequest("action 은 rebind|release|remove|request-reject", "action");
     }

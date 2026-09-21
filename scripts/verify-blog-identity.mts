@@ -17,6 +17,7 @@
  */
 /* 러너 모듈(.mjs)은 타입 선언이 없다 — `verify-runner-auth.mts` 가 쓰는 **같은 방법**으로 읽는다(두 벌이 되지 않게). */
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const load = async (f: string) => await import(pathToFileURL(path.join(ROOT, "runner", "lib", f)).href);
@@ -31,6 +32,8 @@ const { blogIdFromUrl, pickBlogIdFromLinks, judgeBlogIdentity, NAVER_NON_IDS, re
 /* 🔴 «뺀 사다리가 되살아났나»를 **소스로** 본다 — 브라우저 없이 잴 수 있는 유일한 방법이다.
    (함수를 부르면 실제로 네이버에 나간다 — 이 자는 네트워크 0 이 규율이다.) */
 const readMyBlogIdSource = String(readMyBlogId);
+/* [AC-215] 머리말(주석)은 함수 소스에 안 들어온다 — 파일을 직접 읽어야 «주석이 실측과 같은 수를 말하나»를 잴 수 있다. */
+const readMyBlogIdModuleSrc = readFileSync(path.join(ROOT, "runner", "lib", "auth-naver.mjs"), "utf8");
 
 let pass = 0; let fail = 0;
 const ok = (name: string, cond: boolean, extra = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? `\n      ${extra}` : ""}`); } };
@@ -113,18 +116,27 @@ for (const m of MUT) {
 /* ═══ 🔴 회귀 방지 — «링크 최빈값»을 다시 사다리로 쓰지 못하게 못 박는다 ═══ */
 console.log("\n④-b 🔴 BlogHome 링크 최빈값은 **신원의 증거가 아니다**(2026-09-21 실측)");
 {
-  /* 실측(로그아웃 · `section.blog.naver.com/BlogHome.naver` 를 두 번 열었다):
+  /* 실측(로그아웃 · `section.blog.naver.com/BlogHome.naver` 를 **세 번** 열었다):
        1회차 링크 96개 · 아이디로 읽힌 것 84개 · 최빈값 5회 = aronmovie · liferecord689 · winsighting …
        2회차 같은 화면                              최빈값 5회 = nuk1905 · lbmoon68 · minahan …
-     🔴 **전부 생판 남의 블로그였고, 두 번이 서로 달랐다.** 값이 틀릴 뿐 아니라 **재현되지도 않는다.**
-     ⇒ `readMyBlogId` 에서 이 사다리를 뺐다. 아래 줄들은 «다시 넣지 마라»를 코드로 적어 둔 것이다. */
+       3회차 같은 화면                              최빈값 5회 = vicoy · uijae0622 · jae_ilsang …
+     🔴 **전부 생판 남의 블로그였고, 세 번이 서로 다 달랐다.** 값이 틀릴 뿐 아니라 **재현되지도 않는다.**
+     ⇒ `readMyBlogId` 에서 이 사다리를 뺐다. 아래 줄들은 «다시 넣지 마라»를 코드로 적어 둔 것이다.
+     ⚠️ [AC-215] 한동안 **제품 주석은 «두 번»이고 탐침은 «세 번»**이라 증거 수가 갈려 있었다 —
+        사람이 읽는 쪽이 약해 보이면 누가 «두 번으로 뭘 판단하나»며 **되살릴 수 있다.** 셋 다 3회로 맞췄다. */
   const round1 = ["aronmovie", "liferecord689", "winsighting", "just_do_it2023", "awe0254"];
   const round2 = ["nuk1905", "lbmoon68", "minahan", "ektha0108", "okmijnuhb489"];
+  const round3 = ["vicoy", "uijae0622", "jae_ilsang", "minahan2", "ddihw"];
   const soup = (ids: string[]) => ids.flatMap((x) => [u(x), u(x), u(x), u(x), u(x)]);
   const r1 = pickBlogIdFromLinks(soup(round1));
   const r2 = pickBlogIdFromLinks(soup(round2));
+  const r3 = pickBlogIdFromLinks(soup(round3));
   ok("실측 그대로 — 남의 블로그를 «내 블로그»로 집는다(그래서 뺐다)", !!r1 && round1.includes(r1), String(r1));
-  ok("🔴 두 번이 서로 다르다 — 재현 안 되는 판정", r1 !== r2, `${r1} vs ${r2}`);
+  ok("🔴 세 번이 서로 다 다르다 — 재현 안 되는 판정", r1 !== r2 && r2 !== r3 && r1 !== r3, `${r1} / ${r2} / ${r3}`);
+  /* 🔴 [AC-215] **주석과 코드가 같은 수를 말하나** — 제품 주석이 실측보다 약해 보이면 되살아난다. */
+  ok("🔴 제품 주석도 «세 번»이라고 말한다(증거 수가 갈리지 않는다)",
+    readMyBlogIdModuleSrc.includes("세 번 열어 봤다") && readMyBlogIdModuleSrc.includes("세 번이 서로 다 달랐다"),
+    "🔴 auth-naver.mjs 머리말이 실측보다 적은 횟수를 말한다");
   /* 🔴 못 ①: 그런 값이 들어와도 판정기는 «다르다»를 선언하지 않는다(약한 증거 규칙).
      이 줄이 빨강이면 누군가 `judgeBlogIdentity` 의 비대칭을 없앤 것이다. */
   ok("🔴 그래도 판정기는 «다르다»를 선언하지 않는다(via=links → unmeasured)",

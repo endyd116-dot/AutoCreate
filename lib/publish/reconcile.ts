@@ -11,8 +11,17 @@
  *   ══ 왜 여기가 맞는 자리인가 ══
  *     중복은 **`publish()` 밖에서** 태어난다: 러너가 올리고 → 보고 전에 죽고 → `reapStaleJobs` 가
  *     15분 뒤 `queued` 로 되돌리고 → 다른 러너가 **같은 글을 또 올린다.** 그 길에는 멱등 검사 ①이 없다.
- *     그래서 이 화해기를 **두 자리**에서 부른다 — `publish()` 앞머리, 그리고 `reapStaleJobs` 의 되돌리기 **직전**.
+ *     그래서 이 화해기를 **되돌리는 문마다** 부른다.
  *     (AM 도 같은 자리를 골랐다: `cron-content-publisher.ts` 가 스테일을 못박기 **전에** 화해기를 먼저 부른다.)
+ *
+ *   🔴 ══ [AC-214] **문이 하나가 아니었다**(2026-09-22 · C 가 세고 메인이 확인했다) ══
+ *     처음엔 `reapStaleJobs` 하나만 막았다. 그런데 잡을 큐로 되돌리는 자리를 세니 **7개**였고,
+ *     그중 «러너가 이미 가졌던 잡»을 되돌리는 문이 **4개**였다. 하나만 막은 것은 **셋을 열어 둔 것**이다.
+ *     🔴 그리고 **운영자 문이 reap 보다 위험하다**: reap 은 15분을 기다리지만 운영자는 **즉시 누르고**,
+ *        사람이 그 단추를 누르는 때가 바로 「잡이 멈춰 보일 때」인데 **«올렸는데 보고를 못 했다»가 정확히 그 모양**이다.
+ *     🔴 `publish()` 가 받쳐 주지도 않는다 — 러너 채널의 두 번째 시도는 잡이 payload 째 큐에 있어
+ *        **`publish()` 를 다시 안 탄다.** 그래서 **문마다 따로** 막아야 한다.
+ *     지키는 자: `scripts/verify-requeue-guarded.mjs`(C) — 문 7개를 세고 하나라도 비면 빨강이다.
  *
  *   🔴 **게이트가 아니다**(§9). 이 파일이 발행을 세우는 경우는 단 하나 — **이미 올라가 있을 때**이고,
  *      그건 막는 게 아니라 §4.7 «발행 멱등» 그 자체다(열쇠를 우리 장부 대신 채널에서 주워 왔을 뿐).
@@ -61,7 +70,7 @@ export async function reconcileLostPublish(input: {
   if (!tid || !pid) return { recovered: false, ask: SKIPPED };
   let piece: Row | undefined;
   try {
-    [piece] = await q(sql`SELECT id, tenant_id, channel, title, status, account_id, external_url, channel_ref
+    [piece] = await q(sql`SELECT id, tenant_id, channel, title, status, account_id, external_url, channel_ref, meta
       FROM pieces WHERE tenant_id = ${tid} AND id = ${pid} LIMIT 1`);
   } catch (e) { console.error("[reconcile] piece load", (e as Error)?.message ?? e); return { recovered: false, ask: SKIPPED }; }
   if (!piece) return { recovered: false, ask: SKIPPED };
@@ -79,6 +88,21 @@ export async function reconcileLostPublish(input: {
   } catch { /* 못 읽으면 아래에서 no_handle 로 떨어진다 */ }
 
   const ask = await askChannelForExisting({ channel, handle, title, since: input.since ?? null });
+
+  /* 🔴 [AC-214] **같은 말을 네 번 하지 않는다.** 이 화해기를 부르는 문이 넷이 됐다
+     (`publish()` · `reapStaleJobs` · `releaseJob` · 운영자 release/remove).
+     `found_before`(전부터 있던 동명 글)는 **사실이 안 변하는데** 문마다 알림이 한 통씩 가면
+     고객에게는 그냥 소음이고, 소음이 되면 §9-① «또렷하게 말한다»가 죽는다.
+     ⇒ **판정과 주소가 지난번과 같으면 알림만 건너뛴다.** 기록(meta·감사)은 문마다 그대로 남긴다 —
+        «몇 번째 문에서 걸렸나»는 나중에 되짚을 재료이고, 그건 조용해지면 안 된다. */
+  const prevCheck = (() => {
+    const m = (piece.meta && typeof piece.meta === "object" ? piece.meta : {}) as Record<string, unknown>;
+    const a = (m.alreadyCheck && typeof m.alreadyCheck === "object" ? m.alreadyCheck : null) as Record<string, unknown> | null;
+    return a;
+  })();
+  const sameAsLast = !!prevCheck
+    && String(prevCheck.verdict ?? "") === ask.verdict
+    && String((prevCheck.hit as { url?: string } | null)?.url ?? "") === String(ask.hit?.url ?? "");
 
   /* 🔴 **판정은 늘 남긴다**(§9-② «사람이 안 보는 경로에서도 닿게»). 자동 승인으로 나간 글도
      나중에 «그때 채널에 뭐가 있었나»를 볼 수 있어야 한다. `unknown` 도 남긴다 — «못 물어봤다»가 사실이다. */
@@ -116,7 +140,8 @@ export async function reconcileLostPublish(input: {
       tenantId: tid, action: "publish_same_title_exists", actorType: "system", target: `piece:${pid}`,
       detail: { channel, handle, url: ask.hit.url, at: ask.hit.at, note: "막지 않고 내보냄(CLAUDE §9)" }, riskLevel: "low",
     });
-    if (say) await notify(tid, "publish_same_title", "같은 제목의 글이 이미 있어요", say, ask.hit.url);
+    /* 🔴 위 `sameAsLast` — 지난번과 **똑같은 사실**이면 알림은 한 번으로 끝낸다(기록은 위에서 이미 남겼다). */
+    if (say && !sameAsLast) await notify(tid, "publish_same_title", "같은 제목의 글이 이미 있어요", say, ask.hit.url);
     return { recovered: false, ask };
   }
 
