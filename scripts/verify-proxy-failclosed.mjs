@@ -126,8 +126,15 @@ for (const [name, re] of chain) (re.test(src) ? ok : bad)("②", name);
    536번 줄(딴 알림)을 떠다 «고객에게 알린다»가 빨개졌다 — 제품은 멀쩡한데.
    ⇒ **진짜 범위(fail-closed 갈래)를 먼저 잡고** 그 안에서만 닻을 찾는다. 갈래 안에서는 넷 다 하나뿐이다.
    ⇒ 그리고 **닻이 그 안에 정말 하나인지 세어** 둘 이상이면 ⊘ 로 적는다(다음에 또 늘어날 수 있다). */
-const branch = blockOf(src, 'if (!loaded.ok && "stop" in loaded) {', ["continue;"]);
-if (!branch) unk("②", "fail-closed 갈래를 못 잡았다(닻 `if (!loaded.ok && \"stop\" in loaded) {`)");
+/* 🔴 **바깥 닻도 센다** — 안쪽만 세고 바깥을 안 세면 «범위를 잘못 잡고 그 안에서 정확히 재는» 꼴이 된다.
+   그 답은 빨강이든 초록이든 거짓이다(오늘 `INSERT INTO notifications` 5곳으로 실제로 그랬다).
+   ⚠️ B2 가 `blockOf` 에 `unique`(기본 켬)를 넣고 있다(`bd4d761` · 아직 main 밖) — 들어오면 **이 셈은 그쪽에 맡긴다.**
+      그때까지는 여기서 센다. 내 닻들은 셈으로 확인했다(갈래 1 · 안쪽 넷 각 1). */
+const BRANCH_ANCHOR = 'if (!loaded.ok && "stop" in loaded) {';
+const branchN = src.split(BRANCH_ANCHOR).length - 1;
+const branch = branchN === 1 ? blockOf(src, BRANCH_ANCHOR, ["continue;"]) : null;
+if (branchN > 1) unk("②", `fail-closed 갈래 닻이 ${branchN}곳이다 — 어느 갈래를 잰 건지 말할 수 없다`);
+else if (!branch) unk("②", `fail-closed 갈래를 못 잡았다(닻 \`${BRANCH_ANCHOR}\` ${branchN}곳 · 끝 \`continue;\`)`);
 else {
   const B = branch.body;
   const inStmt = (name, anchor, enders, re) => {
@@ -286,6 +293,16 @@ const MUT = [
    ⇒ 덩이의 **끝 표식을 지워** 그때 `⊘ 못 쟀음` 이 나오는지 본다. 이건 축이 «✗»로 우는 게 아니라 «⊘»로 적혀야 맞다. */
 const CANT_MEASURE = [
   ["덩이의 끝 표식이 사라진다", (b) => { b[PROX] = b[PROX].replace("waitingSlots: waiting.length,", "wsCount: waiting.length,"); }],
+  /* 🔴 **닻이 둘이 된다** — 오늘 «엉뚱한 덩이를 봤다»로 실제로 겪은 그 판(가로지르는 여섯째 꼴).
+     범위를 잘못 잡고 그 안에서 정확히 재면, 그 답은 **빨강이든 초록이든 거짓**이다. ⇒ ⊘ 로 적어야 맞다. */
+  ["fail-closed 갈래 닻이 둘이 된다", (b) => {
+    b[JOBS] = b[JOBS].replace("      if (!loaded.ok && \"stop\" in loaded) {",
+      "      if (zzNever) { if (!loaded.ok && \"stop\" in loaded) { } }\n      if (!loaded.ok && \"stop\" in loaded) {");
+  }],
+  ["감사 닻이 갈래 안에서 둘이 된다", (b) => {
+    b[JOBS] = b[JOBS].replace("        await writeAudit({\n          tenantId: device.tenantId, action: \"proxy_fail_closed\"",
+      "        if (zzNever) await writeAudit({ zz: 1 });\n        await writeAudit({\n          tenantId: device.tenantId, action: \"proxy_fail_closed\"");
+  }],
 ];
 let silent = 0;
 for (const [name, tf, axis] of MUT) {
@@ -300,7 +317,9 @@ let widened = 0;
 for (const [name, tf] of CANT_MEASURE) {
   const r = runIn(tf);
   if (!r.changed) { console.log(`  ⊘ ${name} — 🔴 **변이가 안 먹었다**. 통과로 세지 않는다.`); widened++; continue; }
-  if (/⊘ ③ 못 쟀음/.test(r.out)) console.log(`  ✓ ${name} → «못 쟀음»으로 적는다`);
+  /* 🔴 여기 과녁이 `⊘ ③` 로 **축까지 박혀** 있었다 — ②축에서 ⊘ 가 나자 «넓혀서 답했다»로 **거짓 빨강**이 났다.
+     자를 재는 자도 같은 병에 걸린다. 축을 안 박고 «어느 축에서든 ⊘ 가 났나»로 본다. */
+  if (/⊘ .+못 쟀음/.test(r.out)) console.log(`  ✓ ${name} → «못 쟀음»으로 적는다`);
   else { console.log(`  ✗ ${name} → 🔴 **종료 ${r.code} 인데 «못 쟀음»이 없다** — 창을 넓혀 답한 것이다`); widened++; }
 }
 console.log("─".repeat(100));
