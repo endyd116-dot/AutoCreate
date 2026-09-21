@@ -117,11 +117,18 @@
    🔴 밀린 글이 있으면 «다시 시작» 대신 **고르는 자리**로 데려간다 — 저절로 깬 손님은 resume 을 안 부르기 때문이다(§(1-d) ②). */
 function drawPauseBanner(pz) {
   const bn = UI.$("#pauseBn"); if (!bn) return;
-  bn.hidden = !(pz && pz.paused);
+  const n = pz && pz.backlog ? Number(pz.backlog.count) || 0 : 0;
+  /* 🔴 [AC-189 · B AC-221 · 메인이 열어서 잡았다 2026-09-22] **`paused` 만 보면 깬 손님에게 아무것도 안 보인다.**
+     저절로 깬 집은 `paused=false` 다 — 그런데 밀린 글은 그대로 있다. 바로 위 주석이 그렇게 적혀 있었는데
+     **코드가 그 주석을 안 따라갔다**(AC-59 의 뒤집힌 얼굴 — 주석이 앞선 게 아니라 코드가 뒤처졌다).
+     🔴 서버는 `backlog:{count}` 를 **쉬든 안 쉬든 늘** 싣는다(B 가 조건을 일부러 안 붙였다) — 그래서 «안 왔다»를 따로 다룰 필요가 없다. */
+  bn.hidden = !(pz && (pz.paused || n > 0));
   if (bn.hidden) return;
-  const n = pz.backlog && Number(pz.backlog.count);
   const left = pz.daysLeft != null ? ` · ${UI.num(pz.daysLeft)}일 뒤에 저절로 다시 시작해요` : "";
-  UI.$("#pauseBnT").textContent = `지금은 쉬고 있어요${pz.days != null ? ` · ${UI.num(pz.days)}일째` : ""}${left}${n ? ` · 밀린 글 ${UI.num(n)}건` : ""}`;
+  /* 🔴 **말을 가른다** — 이미 깬 손님에게 «지금은 쉬고 있어요»는 거짓말이다. */
+  UI.$("#pauseBnT").textContent = pz.paused
+    ? `지금은 쉬고 있어요${pz.days != null ? ` · ${UI.num(pz.days)}일째` : ""}${left}${n ? ` · 밀린 글 ${UI.num(n)}건` : ""}`
+    : `쉬는 동안 밀린 글이 ${UI.num(n)}건 있어요`;
   const b = UI.$("#pauseResume");
   b.textContent = n ? "밀린 글 고르기" : "다시 시작";
   /* 🔴 홈에서 직접 집행하지 않는다 — 고르는 화면은 설정에 한 벌만 둔다(두 벌이면 말이 갈린다). */

@@ -277,7 +277,10 @@
   /* [AC-187 · AC-201] `?addr=ask|ok|again` — «이 계정 주소가 맞나요»의 세 상태(계정 1번에 붙인다).
      🔴 손잡이가 없으면 `identity` 자체가 **없다** — 그게 대부분의 계정이고, «아직 모른다»를 «틀렸다»로 그리지 않는지 보는 기본값이다(AC-9). */
   const addrKnob = qs.get("addr") || "";
-  /* [AC-188] `?pause=on` 쉬는 중(2주) · `?pause=auto` 자동으로 깰 날이 가까움 · `?pause=backlog` 쉬는 중 + 밀린 글 3건(저절로 깬 손님이 고르는 길).
+  /* [AC-188] `?pause=on` 쉬는 중(2주) · `?pause=auto` 자동으로 깰 날이 가까움 · `?pause=backlog` 쉬는 중 + 밀린 글 3건
+     · 🔴 `?pause=woke` **저절로 깬 손님**(`paused=false` 인데 밀린 글 3건) — **이 판이 이 기능의 구멍이었다**(AC-189).
+       크론이 `pause_until` 지난 집을 깨우면 손님은 `tenant-resume` 를 **안 부른다**. 그런데 밀린 글은 그대로 있다.
+       🔴 모의에 이 판이 없어서 **화면이 그 줄을 안 그리는 걸 아무도 못 봤다** — 판이 없으면 자도 못 만든다.
      🔴 손잡이가 없으면 **안 쉬는 집**이다 — 그게 기본이다. */
   const pauseKnob = qs.get("pause") || "";
   /* [P1R5] 영상 손잡이 — ?stage=script|tts|clips|render|judging|done|failed(만드는 중 영상의 단계 고정) · ?judge=P0|P1|P2(검수 영상 심사 등급) · ?noFfmpeg=1(내 PC 프로그램 caps.ffmpeg=false) · ?uploaded=private(발행함 비공개 업로드 행) · ?videoBudget=0(달러 캡 초과 step budget) */
@@ -358,12 +361,14 @@
   const PAUSE_REASONS = [{ key: "vacation", label: "여행·휴가" }, { key: "editing", label: "글을 손보는 중" }, { key: "channel_penalty", label: "채널에서 제재를 받았어요" }, { key: "cost", label: "비용을 아끼려고" }, { key: "other", label: "그 밖" }];
   const pausePayload = () => {
     const P = S.pause;
-    if (!P) return { paused: false, pausedAt: null, pauseUntil: null, reason: null, days: null, daysLeft: null, reasons: PAUSE_REASONS };
+    /* 🔴 [AC-189 · B AC-221] **쉬든 안 쉬든 `backlog` 를 늘 싣는다.** «쉬는 집에서만 센다»로 두면
+       깬 손님은 `paused=false` 라 **다시는 못 본다** — 그게 이 기능의 구멍이었다. */
+    if (!P) return { paused: false, pausedAt: null, pauseUntil: null, reason: null, days: null, daysLeft: null, reasons: PAUSE_REASONS, backlog: { count: Number(S.backlog) || 0 } };
     const st = UI.utc(P.pausedAt).getTime();
     const until = P.until === "2w" ? st + 14 * 86400e3 : P.until === "1m" ? st + 30 * 86400e3 : null;
     const o = { paused: true, pausedAt: P.pausedAt, pauseUntil: until ? iso(until) : null, reason: P.reason,
       days: kdayOf(Date.now()) - kdayOf(st) + 1, daysLeft: until ? Math.max(0, kdayOf(until) - kdayOf(Date.now())) : null, reasons: PAUSE_REASONS };
-    if (P.backlog) o.backlog = { count: P.backlog };   // 🔴 §(1-d) ② 저절로 깬 손님도 고를 수 있게
+    o.backlog = { count: Number(P.backlog) || 0 };   // 🔴 §(1-d) ② · 늘 싣는다(0 이어도) — 서버와 같은 모양
     return o;
   };
   const COIN_PAYLOAD = {
@@ -539,7 +544,9 @@
     pause: pauseKnob === "on" ? { pausedAt: iso(now - 11 * 86400e3), until: "2w", reason: "vacation", backlog: 0 }
       : pauseKnob === "auto" ? { pausedAt: iso(now - 13 * 86400e3), until: "2w", reason: "editing", backlog: 0 }
       : pauseKnob === "backlog" ? { pausedAt: iso(now - 16 * 86400e3), until: "manual", reason: "vacation", backlog: 3 } : null,
-    backlog: 0,
+    /* 🔴 [AC-189] 깬 뒤에도 남아 있는 밀린 글 — `pause` 는 `null`(안 쉰다)인데 이 수는 살아 있다.
+       서버(B AC-221)는 `backlog:{count}` 를 **쉬든 안 쉬든 늘** 싣는다. 모의도 그래야 «깬 손님» 판이 선다. */
+    backlog: pauseKnob === "woke" ? 3 : 0,
     devices: fresh ? [] : [{ id: 901, name: "집 PC", kind: "own", online: runnerOn, bound: true, lastSeenAt: iso(now - 2 * 3600e3), version: "1.1.3", jobsWaiting: 2, caps: { ffmpeg: !noFfmpeg, ffmpegVersion: noFfmpeg ? undefined : "7.1" } },
       ...(otherPc ? [{ id: 902, name: "사무실 PC", kind: "own", online: false, bound: true, lastSeenAt: iso(now - 3 * 86400e3), version: "1.1.2", jobsWaiting: 0, otherDeviceAt: iso(now - 40 * 60e3), otherDeviceCount: 3 }] : [])], // [러너 배포] bound = 처음 켠 PC 에 묶임 · otherDeviceAt 은 «있을 때만» // [P1R5] heartbeat caps(§2.4)
     posts: fresh ? [] : [

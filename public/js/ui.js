@@ -656,7 +656,10 @@
   /* [AC-187 · B2 AC-201] `account_address_check` — 러너가 «장부와 다른 블로그»를 보고 멈췄다(lib/runner-jobs.ts).
      🔴 «계정» 얼굴로 잇는다 — 가는 곳이 계정 화면(`/app/accounts.html` · 링크는 서버가 실어 준다)이고, 할 일이 «계정 주소 확인»이다.
      🔴 겁주는 얼굴(danger)을 고정하지 않는다 — 색은 서버가 준 `tone` 이 정한다(§3 · 이건 «틀렸다»가 아니라 «한 번만 봐 달라»다). */
-  UI.KIND_ALIAS = { account_address_check: "account", gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+  /* 🔴 [AC-189 · B `lib/cron/pause-watch.ts` · 2026-09-22] 잠깐 멈춤이 보내는 알림 셋 — 없으면 아이콘 자리가 빈다.
+     `pause_still`(«아직 쉬는 중이에요» · 7일마다) · `pause_wake_soon`(«내일 다시 시작해요») → **시계**. 둘 다 «때»에 대한 말이다.
+     `pause_resumed`(«다시 시작했어요» · 링크가 발행함) → **발행** 얼굴. 🔴 셋 다 사고가 아니라 **알려 주는 것**이다(§3 · 겁주는 얼굴 금지). */
+  UI.KIND_ALIAS = { pause_still: "clock", pause_wake_soon: "clock", pause_resumed: "publish", account_address_check: "account", gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "setup", /* [R9R10-A · B c922b28 · 메인이 main 에서 setup 으로 이음] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ format_demoted: "publish", /* [R9R10 · B2] «이 글에서 못 낸 꾸밈이 있어요»(발행 뒤 · 링크 /app/piece.html?id=) — 검수·발행 얼굴 */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",

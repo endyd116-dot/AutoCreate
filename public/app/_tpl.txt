@@ -1665,7 +1665,13 @@ function drawPause() {
     bindBacklog();
     return;
   }
-  box.innerHTML = `<div class="fr"><div class="fl">자동으로 만들고 올려요<small>쉬고 싶을 땐 꺼 두세요 · 언제든 다시 켤 수 있어요</small></div><button class="toggle" type="button" id="pTg" aria-checked="true"></button></div>`;
+  /* 🔴 [AC-189 · 메인이 열어서 잡았다 2026-09-22] **깬 손님에게도 그려야 한다.** 여긴 «안 쉬는 집» 갈래인데
+     저절로 깬 집이 바로 여기로 온다(`paused=false`) — 밀린 글은 그대로 있는데 **이 줄을 `paused` 갈래 안에만 뒀다.**
+     내 주석은 «resume 을 안 불러도 보여야 한다»고 맞게 적혀 있었다 — **코드가 안 따라갔다.**
+     🔴 서버가 `backlog:{count}` 를 **늘** 싣는다(B AC-221) — 쉬든 안 쉬든. */
+  box.innerHTML = `<div class="fr"><div class="fl">자동으로 만들고 올려요<small>쉬고 싶을 땐 꺼 두세요 · 언제든 다시 켤 수 있어요</small></div><button class="toggle" type="button" id="pTg" aria-checked="true"></button></div>`
+    + backlogRow();
+  bindBacklog();
   /* 🔴 토글을 **끄는 순간 바로 멈추지 않는다** — «언제까지»를 반드시 고르게 한다(§(3)). 그래서 토글은 시트를 열고, 돌아온 값으로 그린다. */
   UI.toggle(UI.$("#pTg"), async (next) => { if (next) return undefined; pauseSheet(); return false; });
 }
@@ -1673,7 +1679,12 @@ function drawPause() {
 function backlogRow() {
   const n = PAUSE && PAUSE.backlog && Number(PAUSE.backlog.count);
   if (!n) return "";
-  return pauseRow(`<div class="l"><span class="t">쉬는 동안 밀린 글이 ${UI.num(n)}건 있어요</span><span class="d wrap">지금부터 차례로 올릴지, 그냥 둘지 고르실 수 있어요.</span></div><button type="button" class="btn sm secondary" id="pBacklog">고르기</button>`);
+  /* 🔴 말을 가른다 — 쉬는 중이면 «쉬는 동안 밀렸어요», **이미 깼으면** «다시 시작했는데 밀린 글이 남아 있어요».
+     깬 손님에게 «쉬는 동안»만 말하면 «그래서 지금 쉬는 건가?» 가 된다. */
+  const woke = !(PAUSE && PAUSE.paused);
+  /* 🔴 제목 줄은 **한 줄에서 잘린다**(`.t`) — 길게 쓰면 «…남아 있» 에서 끊긴다(폰 390 에서 실제로 그랬다).
+     ⇒ 가르는 말(«다시 시작했어요»)은 **아랫줄**로 내린다. 아랫줄은 접힌다(`.d wrap`). */
+  return pauseRow(`<div class="l"><span class="t">${woke ? `밀린 글이 ${UI.num(n)}건 남아 있어요` : `쉬는 동안 밀린 글이 ${UI.num(n)}건 있어요`}</span><span class="d wrap">${woke ? "다시 시작했어요 · " : ""}지금부터 차례로 올릴지, 그냥 둘지 고르실 수 있어요.</span></div><button type="button" class="btn sm secondary" id="pBacklog">고르기</button>`);
 }
 function bindBacklog() { const b = UI.$("#pBacklog"); if (b) b.onclick = () => backlogSheet(Number(PAUSE.backlog.count)); }
 function pauseSheet() {
