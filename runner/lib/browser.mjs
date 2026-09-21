@@ -218,5 +218,13 @@ export function cleanupFiles(fileMap) {
  *      ⇒ 준비 여부는 **조건으로** 본다: `scrape.mjs` 의 `waitFor(page, cond, maxMs)` (되면 즉시 나오고, 안 되면 false).
  *      ⚠️ 아직 `settle` 로 기다리는 자리가 많이 남아 있다(R8 에서 이어 간다) — 새로 쓰는 코드는 `waitFor` 를 써라.
  */
+/* 🔴 [AC-204 · 2026-09-23] **주석은 «등간격을 피한다»인데 코드는 등간격이었다.**
+   실측(`scripts/_tmp/count-rhythm.mjs` · 러너 전수): `settle(page, min)` **고정 90곳** · `settle(page, min, max)` 12곳.
+   즉 **88%가 난수를 안 탔다** — `max > min` 이 거짓이라 `waitForTimeout(min)` 으로 곧장 갔다.
+   ⇒ 인자 하나로 불러도 **흔들리게** 한다. 호출 90곳을 안 고치고 여기 한 줄로 고친다.
+   🔴 **절대 짧아지지 않는다**(`min` 이 바닥이다) — 이 함수를 «준비될 때까지»로 잘못 쓰는 자리가 아직 남아 있어서,
+      짧아지면 안 그려진 화면을 재고 «내용 없음»으로 오보고한다(위 주석의 그 사고).
+   ⚠️ 흔들림은 **35% 또는 400ms 중 작은 쪽**으로 묶는다 — 안 묶으면 3000ms 자리들이 잡마다 몇 초씩 더 먹는다. */
+const jitterOf = (min) => Math.min(Math.round(min * 0.35), 400);
 export const settle = (page, min = 400, max = 0) =>
-  page.waitForTimeout(max > min ? min + Math.floor(Math.random() * (max - min)) : min).catch(() => {});
+  page.waitForTimeout(min + Math.floor(Math.random() * (max > min ? max - min : jitterOf(min)))).catch(() => {});
