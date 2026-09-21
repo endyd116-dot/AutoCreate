@@ -9,7 +9,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../db-util";
 import { refundPieceDetailed, refundLine } from "../coin-ledger";
-import { shortsFormOf, type ShortsFormat } from "../writing-contracts";
+import { shortsFormOf, cutCountFor, type ShortsFormat } from "../writing-contracts";
 import { videoBadgeText, videoDescriptionFirstLine, videoOpeningCaption } from "../disclosure";
 import { decryptObj } from "../creds-crypto";
 import { searchProducts, deeplink, envCoupangKeys, subIdFor, type CoupangKeys } from "../affiliate-coupang";
@@ -99,7 +99,9 @@ export async function generateVideo(tid: number, pieceId: number, opts: { resume
     const format = (spec.format ?? "graphic") as VideoFormat;
     const seconds = (spec.seconds ?? 60) as VideoSeconds;
     const form = shortsFormOf(format as ShortsFormat, seconds);
-    const cuts = Math.max(form.cuts.min, Math.min(form.cuts.max, spec.cuts || form.cuts.default));
+    /* 🔴 [2026-09-21 B] 이 식이 **원가 추정과 갈라져 있었다** — 여기는 맞았고 `video/cost.ts` 가 손으로 베낀 쪽이 틀렸다.
+       이제 둘 다 `cutCountFor` **한 함수**를 부른다(계약 `writing-contracts.ts`). 셈을 여기 다시 적지 마라. */
+    const cuts = cutCountFor(format as ShortsFormat, seconds, spec.cuts);
     const aff = (meta.affiliate ?? null) as { provider: string; productQuery: string } | null;
     const persona = await personaFactsFor(tid, accountId);
     /* [R8CLOSE · B2] 🔴 레퍼런스가 배워 온 그림·규칙·호흡 — `director.ts` 가 `applyReferenceStyle` 로 걸러 `meta.refStyle` 에 실어 뒀다.

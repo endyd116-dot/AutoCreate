@@ -456,6 +456,26 @@ export function shortsFormOf(format: ShortsFormat, seconds: VideoSecondsLit): Sh
   const cuts = seconds === 90 ? { min: 9, max: 18, default: 13 } : s60 ? { min: 6, max: 12, default: 9 } : { min: 4, max: 6, default: 5 };
   return { format: "graphic", seconds: seconds === 15 ? 30 : seconds, cuts, cutSec: { min: 5, max: 8 }, provider: "omni", syllables, captionPreset: "keyword_center", stillRatio: 0, channelMaxSec };
 }
+/**
+ * 🔴 **이 편이 몇 컷인가 — 한 곳**(2026-09-21 B).
+ *
+ *   여태 이 셈이 **두 벌**이었다:
+ *     · 만들 때  `lib/video/gen.ts:102` → `clamp(spec.cuts || form.cuts.default, min, max)`  ← 맞는 쪽
+ *     · 값 잴 때 `lib/video/cost.ts:39`  → `seconds === 60 ? 9 : seconds === 30 ? 5 : 3`     ← **손으로 베낀 쪽**
+ *   베낀 쪽에 **90 이 없어서 3컷으로 떨어졌다.** 90초 추정 원가가 60초보다 **싸게** 나왔고,
+ *   그 값으로 `checkAiCostCap`·하드캡이 판정하니 **90초가 실제보다 싸 보이는 채로 관문을 통과**했다.
+ *   🔴 표시가 틀린 게 아니라 **돈 관문이 틀렸다** — 그래서 고객이 알려 줄 수 없고 더 늦게 들킨다.
+ *   🔎 AM 에는 이 삼항이 없다(메인 확인) — AC 에서 생긴 줄이라 우리가 고친다.
+ *
+ *   ⇒ 이제 **둘 다 이 함수를 부른다.** 컷 수를 다시 적는 자리를 만들지 마라.
+ *   `asked` = 고객이 손보기에서 고른 컷 수(`spec.cuts`). `0`·`undefined` 는 «안 골랐다»로 본다
+ *   (🔴 `??` 로 받으면 `0` 이 그대로 통과해 **0으로 나누게 된다** — `||` 여야 한다).
+ */
+export function cutCountFor(format: ShortsFormat, seconds: VideoSecondsLit, asked?: number): number {
+  const c = shortsFormOf(format, seconds).cuts;
+  return Math.max(c.min, Math.min(c.max, Number(asked) || c.default));
+}
+
 /* ═══════════ 영상 채널 규격 — 🔴 **한 곳**(계약 P1R6 §2.3 «화면 상수 금지») ═══════════
  *   여기가 정본이다: `clampSecondsForChannel`·`shortsFormOf`·`accounts-list.channels[].video` 가 전부 이 표를 읽는다.
  *   화면(A)은 이 값을 서버에서 받아 칩을 켜고 끈다 — «클립은 30초까지» 같은 숫자를 화면에 적지 않는다.

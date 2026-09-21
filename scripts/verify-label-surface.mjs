@@ -272,6 +272,30 @@ rec("코인 항목이 서버에만 있고 화면엔 없다(있으면 WARN)", coi
   coinOnlyServer.length ? `${coinOnlyServer.map((k) => `${k}(서버 ${coinSrvNum.get(k)})`).join(" · ")} — 화면 미리보기 표에 없다. 값이 결재 대기면 그대로 두고, 확정되면 UI.COIN 에 옮긴다` : "없음",
   coinOnlyServer);
 
+/* ───────── ⑧-b2 🔴 **고를 수 있는데 값이 없는 길이가 있나**(사장님 지시 2026-09-21 · 메인 «양방향으로») ─────────
+   위 ⑧-b 는 **화면 표를 돌며** 서버와 견준다 — 그래서 «서버에만 있는 항목»이 과녁에 안 들어왔고,
+   `video_90`(42코인)이 **화면 표에 없는 채로 초록**이었다. 그 결과가 이것이다:
+     · `UI.VSECONDS = [15,30,60,90]` — 화면이 **90초를 고르게 해 준다**
+     · `UI.VIDEO_COIN = {15,30,60}`  — 그런데 **90 칸이 없다**
+     · `director.html` «vsec» 가지가 `UI.VIDEO_COIN[Number(v)] ?? 0` 이라 **«0코인»이라 적는다**
+       (합계는 `director-estimate` 가 42로 맞춘다 ⇒ **한 화면이 두 말을 한다**)
+   🔴 **여기서 값을 정하지 않는다** — «42가 맞나»는 사장님 결재 대기다. 이 축이 묻는 것은 오직
+      **«고를 수 있는 모든 길이에 값의 출처가 있나»** 하나다. 그래서 둘 중 아무 쪽으로나 풀 수 있다:
+        ⓐ 화면이 서버 표(`accounts-list.coins.table` · `plans.coins.table`)에서 채운다  ← 권장(사장님 지시의 모양)
+        ⓑ 폴백 표에 그 칸을 적는다(값이 확정된 뒤)
+   ⇒ 폴백이 **«자가 지키는 사본»**이 된다(몰래 어긋나는 사본이 아니라). */
+const vsec = [...(uiJs.match(/UI\.VSECONDS\s*=\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/\d+/g)].map((m) => Number(m[0]));
+const vcoinKeys = [...(uiJs.match(/UI\.VIDEO_COIN\s*=\s*\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\d+)\s*:/g)].map((m) => Number(m[1]));
+/* 화면이 **서버가 준 표로 채우는가** — 그러면 폴백에 칸이 없어도 값의 출처가 있다(ⓐ). */
+const fedFromServer = /UI\.VIDEO_COIN\s*=[\s\S]{0,400}coins\.table|coins\.table[\s\S]{0,400}UI\.VIDEO_COIN|UI\.setCoinTable/.test(uiJs);
+const priceless = vsec.filter((s2) => !vcoinKeys.includes(s2));
+rec("🔴 고를 수 있는 모든 영상 길이에 코인 값의 출처가 있다", vsec.length > 0 && (fedFromServer || priceless.length === 0),
+  vsec.length === 0 ? "UI.VSECONDS 를 못 읽었다"
+    : fedFromServer ? `서버 표(coins.table)에서 채운다 — 폴백에 없는 칸(${priceless.join(",") || "없음"})도 서버가 메운다`
+    : priceless.length ? `${priceless.join("·")}초는 고를 수 있는데 UI.VIDEO_COIN 에 칸이 없다 → 화면이 «0코인»이라 쓴다(값은 정하지 마라 — 서버 표에서 채우거나 결재 뒤 적는다)`
+    : `${vsec.join("·")}초 모두 값이 있다`,
+  priceless);
+
 /* ───────── ⑧-c 🔴 **코인 등급 표**(서버 COIN_TIERS ↔ 모의 TIERS ↔ 화면 UI.TIER_LABEL) — [R9R10-A · 2026-09-16] ─────────
    왜: 사장님이 «간단히 1 · 보통 2 · 프리미엄 3»을 정하셨고 «최소»라는 말은 쓰지 말라 하셨다. 라벨·코인·설명 문장(say)이 세 곳에 있다 —
    정본은 서버 `lib/coin-table.ts COIN_TIERS`(B 채택 · docs/active/2026-09-16-R9R10-AB-keys.md §11). 모의는 accounts-list.tiers 로 실어 주고 화면은 셈 없이 그린다(AC-74).

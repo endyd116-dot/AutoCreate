@@ -20,6 +20,7 @@ import { fxToKrw } from "../revenue/common";
 import { PROVIDERS, estimateClipCostUsd } from "./providers/registry";
 import { TYPECAST_USD_PER_CHAR } from "./tts-typecast";
 import type { ProviderKey, VideoFormat, VideoSeconds } from "./types";
+import { cutCountFor, shortsFormOf } from "../writing-contracts";   // 🔴 컷 수·컷 길이의 정본(값 두 벌 금지)
 
 type Row = Record<string, unknown>;
 const q = async (s: SQL): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -36,8 +37,15 @@ export const STILL_IMAGE_USD = 0.04;
 /** estimateVideoCostUsd — 편 1개 추정 원가(컷 수 × provider 5초가 + 정지 이미지 + TTS + 심사 상수). 계약 §1.2 선검사 재료. */
 export function estimateVideoCostUsd(format: VideoFormat, seconds: VideoSeconds, providerKey: ProviderKey, cuts?: number): number {
   const p = PROVIDERS[providerKey] ?? PROVIDERS.veo_lite;
-  const n = cuts ?? (seconds === 60 ? 9 : seconds === 30 ? 5 : 3);
-  const clipSec = Math.min(8, Math.max(4, Math.round(seconds / n)));
+  /* 🔴 **컷 수·컷 길이를 여기서 다시 적지 않는다** — 계약(`cutCountFor`·`shortsFormOf`)에 묻는다(2026-09-21 B).
+     여태 이 줄은 `seconds === 60 ? 9 : seconds === 30 ? 5 : 3` 이었고 **90 이 없어서 3컷**으로 떨어졌다.
+     그래서 90초 추정 원가가 60초보다 **싸게** 나왔고(₩1,863 < ₩4,579), 그 값을 `checkAiCostCap`·하드캡이
+     그대로 믿었다 — **표시가 아니라 돈 관문이 틀린 것**이라 고객이 알려 줄 수 없다.
+     🔴 60·30초는 **한 숫자도 안 바뀐다**(계약 값이 옛 상수와 같다 · `scripts/verify-video-cost-cuts.mjs` 가 잰다).
+        바뀌는 것은 90(3→13) · 15(3→5) · 토킹(초÷5)이고, 전부 **실제로 만들 컷 수 쪽**이다. */
+  const form = shortsFormOf(format, seconds);
+  const n = cutCountFor(format, seconds, cuts);
+  const clipSec = Math.min(form.cutSec.max, Math.max(form.cutSec.min, Math.round(seconds / n)));
   // 토킹은 **B-roll 3~4 + 나머지 정지 이미지**(계약 §1.3 표 · `scenes.ts buildCutPlans` 의 brollAt 과 같은 규칙).
   const clipCount = format === "talking" ? Math.max(1, Math.min(4, Math.min(n, n <= 4 ? Math.ceil(n / 2) : n >= 10 ? 4 : 3))) : n;
   const stillCount = n - clipCount;                                        // 나머지는 CHAIN_IMAGE 한 장씩(§1.4c(2))
