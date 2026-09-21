@@ -50,28 +50,31 @@ function run(transform) {
 
 const cases = [];
 /** want = "appear"(변이 판에만 나와야) · "vanish"(대조군엔 있고 변이 판엔 없어야) */
-const add = (name, transform, mark, want) => cases.push({ name, transform, mark, want });
+const add = (name, transform, mark, want = "appear") => cases.push({ name, transform, mark, want });
 
-/* ① 굳은 빨강이 아닌가 — 가드를 넣어 주면 초록이 되나 */
-add("① `releaseJob` 에 가드를 **넣어 주면** 그 빨강이 사라진다(굳어 있지 않다)",
-  (b) => { b[RJ] = b[RJ].replace("export async function releaseJob(", "export async function releaseJob(/* reconcileLostPublish */"); },
-  "✗ lib/runner-jobs.ts:1793", "vanish");
-
-/* ② 진짜 초록인가 — 막힌 문의 가드를 빼면 우나 */
-add("② `reapStaleJobs` 의 가드를 **빼면** 그 문이 운다",
-  (b) => { b[RJ] = b[RJ].replace(/const rec = await reconcileLostPublish\(/, "const rec = await zzGone("); },
-  "✗ lib/runner-jobs.ts:1830", "appear");
-
-/* ③ 🔴 봐주기가 무르지 않은가 — «내주기 전»이 아니게 만들면 셋이 운다 */
-add("③ 🔴 `claimJobs` 를 다른 이름으로 바꾸면 봐주던 셋이 **전부** 운다(봐주기가 너무 넓지 않다)",
+/* ═══ 🔴 B2 가 찾아 준 사각 — 이 넷이 이 하니스의 값이다(AC-216) ═══
+   옛 판은 몸통을 「위로 `function` · 아래로 다음 `function`」으로 잡아, 화살표 핸들러에서 **몸통 = 파일 전체**가 됐다.
+   그래서 **맨 위 `import` 한 줄**이 그 파일의 모든 문을 영원히 초록으로 만들었다. 아래 ①이 그걸 잡는다. */
+add("① 🔴 **ops 의 «호출»만 지운다**(import 는 남긴다) — 두 문이 운다 · B2 가 찾은 그 변이",
+  (b) => { b[OPS] = b[OPS].replace("const rec = await reconcileLostPublish(", "const rec = await zzGone("); },
+  "✗ netlify/functions/ops-runners.ts");
+add("② 🔴 가드를 **주석으로만** 남긴다 — 그래도 운다(좋은 주석이 자를 눈멀게 하지 않는다 · AC-191)",
+  (b) => { b[OPS] = b[OPS].replace("const rec = await reconcileLostPublish(", "/* reconcileLostPublish */ const rec = await zzGone("); },
+  "✗ netlify/functions/ops-runners.ts");
+add("③ `reapStaleJobs` 의 가드를 지우면 그 문이 운다",
+  (b) => { b[RJ] = b[RJ].replace(/const rec = await reconcileLostPublish\(\{\s*tenantId: tid/, "const rec = await zzGone({ tenantId: tid"); },
+  "✗ lib/runner-jobs.ts:1861");
+add("④ 🔴 `claimJobs` 이름을 바꾸면 봐주던 셋이 **전부** 운다(봐주기가 너무 넓지 않다)",
   (b) => { b[RJ] = b[RJ].split("function claimJobs(").join("function zzClaim("); },
-  "✗ lib/runner-jobs.ts:858", "appear");
-
-/* ④ 문을 새로 내면 잡나 */
-add("④ 가드 없는 되돌리기를 **한 줄 새로 심으면** 잡는다(다음에 문이 생겨도 운다)",
+  "✗ lib/runner-jobs.ts:858");
+add("⑤ 가드 없는 되돌리기를 **한 줄 새로 심으면** 잡는다(다음에 문이 생겨도 운다)",
   (b) => { b[OPS] = b[OPS].replace('if (action === "remove") {',
-    'if (action === "zznew") { await q(sql`UPDATE runner_jobs SET status = \'queued\' WHERE id = 1`); }\n      if (action === "remove") {'); },
-  'action="zznew"', "appear");
+    "if (action === \"zznew\") { await q(sql`UPDATE runner_jobs SET status = 'queued' WHERE id = 1`); }\n      if (action === \"remove\") {"); },
+  "✗ netlify/functions/ops-runners.ts");
+/* 🔴 ⑥ **이 자가 이제 «못 쟀음»으로 멈추나** — 넓게 잡지 말고 멈추라는 것이 AC-216 의 결론이다 */
+add("⑥ 🔴 중괄호를 깨면 **⊘(못 쟀음)** 으로 멈춘다 — 넓게 잡아 초록을 내지 않는다",
+  (b) => { b[RJ] = b[RJ].replace("export async function reapStaleJobs", "export async function reapStaleJobs{"); },
+  "       **못 쟀음**");   /* 🔴 이 줄에만 있는 글자를 골라야 한다 — «⊘ » 만 써다가 **꼬리말 줄**에 걸려 거짓 실패를 냈다(AC-121) */
 
 /* ═══ 돌린다 ═══ */
 console.log(`🔴 내 \`verify-requeue-guarded\` 에 변이를 넣어 본다 · ${new Date().toISOString()}`);

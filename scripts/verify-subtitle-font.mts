@@ -10,6 +10,14 @@
  *     ⑤ 🔴 **보고 경로** — 러너가 재도 중간에서 버려지지 않나. 소스에 못을 박는다(코드를 읽어 확인한다)
  *     ⑥ 🔴 **동봉 경로** — `.woff2` 가 zip 에 들어가나. 안 들어가면 **개발 PC 에서만** 고쳐진 것이다
  *     ⑦ 사람말 — 겁주는 말 0(CLAUDE §3)
+ *     ⑧ 🔴 **덩이 잡기 자체** — 닻·끝 표식을 지워 보고 `⊘` 가 나오는가(자가 «멈추는» 쪽 · 칸을 나눠 뒀다)
+ *
+ *   🔴 ══ [AC-216] 이 자가 **자기 병으로 조용한 초록이었다**(2026-09-22) ══
+ *     ⑤의 소스 검사가 `indexOf(닻) + 700` 같은 **고정 창**이었다. 변이로 재 보니 러너·서버 두 가드를
+ *     **빼도 초록**이었다 — 넓어진 창이 옆 덩이의 `formatMarks` 를 주워 왔다.
+ *     ⇒ `scripts/lib/block.mjs blockOf` 로 바꿨다(끝 표식까지만 · 못 잡으면 `null`).
+ *     🔴 그리고 **판정을 셋으로** 갈랐다: `✓` · `✗`(제품이 틀렸다) · **`⊘`(자가 못 쟀다 · 종료 2)**.
+ *        B(`autocreate-b-f8`)의 잣대다 — 「창을 넓히는 자리는 전부 이 병을 품는다」.
  *
  *   ══ 실측값(이 자가 지키는 «그때 그 숫자») ══
  *     2026-09-22 · 같은 문장 "전기요금 3만원 아끼는 법 ABC 123" · 같은 PC
@@ -20,6 +28,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { mergeRunnerFormatMarks } from "../lib/format-marks";
+/* 🔴 [AC-216] 고정 창(`+700`·`+900`·`+400`)을 버리고 **끝 표식까지**만 잡는다 — 못 잡으면 `⊘`(못 쟀음).
+   변이로 재 보니 그 고정 창 둘이 **조용한 초록**이었다(가드를 빼도 통과 · 2026-09-22). 까닭은 파일 머리말에. */
+import { blockOf, stripComments } from "./lib/block.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const load = async (rel: string) => await import(pathToFileURL(path.join(ROOT, rel)).href);
@@ -31,9 +42,21 @@ const { judgeFont, fontSay } = await load("runner/lib/font.mjs") as {
   fontSay: (v: unknown) => string;
 };
 const src = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
+/* 🔴 [AC-216] **주석을 걷고 본다.** 「찾긴 찾았는데 **주석에서** 찾았다」도 같은 병이다 —
+   실측: 러너·서버 렌더 분기의 가드를 빼도 **바로 위 내 주석**에 `formatMarks`·`applyFormatMarksToPiece` 가
+   적혀 있어서 **조용한 초록**이었다. 🔴 주석이 코드의 알리바이가 됐다(AC-59 의 사촌).
+   ⚠️ 주석을 **공백으로 치환**하므로 길이·인덱스가 그대로다 — 순서 판정이 살아 있다. */
+const code = (rel: string) => stripComments(readFileSync(path.join(ROOT, rel), "utf8"));
 
 let pass = 0; let fail = 0;
 const ok = (name: string, cond: boolean, extra = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? `\n      ${extra}` : ""}`); } };
+/* 🔴 [AC-216] **«못 쟀다»는 «틀렸다»가 아니다.** `✗` 에 섞으면 자가 깨진 것이 제품이 틀린 것으로 보이고,
+   `✓` 에 섞으면 **조용한 초록**이 된다. 오늘 둘 다 값을 치렀다(B 의 잣대 · `scripts/lib/block.mjs`). */
+let unmeasured = 0;
+const gone = (name: string, why = "닻이나 끝 표식이 바뀌었나") => { unmeasured++; console.log(`  ⊘ ${name} — 못 쟀음(${why})`); };
+/** 덩이가 없으면 `⊘`, 있으면 판정. */
+const okIn = (name: string, body: string | null, judge: (b: string) => boolean, extra = "") =>
+  (body == null ? gone(name) : ok(name, judge(body), extra));
 
 console.log("① fontFaceCss — 동봉본이 이기고, 없으면 안 적는다");
 {
@@ -143,19 +166,31 @@ console.log("\n④ 흰 목록 — mergeRunnerFormatMarks 가 subtitleFont 를 **
 
 console.log("\n⑤ 🔴 보고 경로 — 재 놓고 중간에서 버려지지 않나(코드를 읽어 못 박는다)");
 {
-  const core = src("runner/core.mjs");
-  const renderBranch = core.slice(core.indexOf("RENDER_KINDS.has(job.kind)"), core.indexOf("RENDER_KINDS.has(job.kind)") + 700);
-  ok("🔴 러너 core 의 렌더 분기가 formatMarks 를 싣는다(종전엔 발행 분기에만 있었다)",
-    renderBranch.includes("formatMarks"), "🔴 여기서 빠지면 러너가 재도 서버에 닿지 않는다");
-  const jobs = src("lib/runner-jobs.ts");
-  const serverBranch = jobs.slice(jobs.indexOf('if (kind === "render.video")'), jobs.indexOf('if (kind === "render.video")') + 900);
-  ok("🔴 서버의 렌더 분기가 applyFormatMarksToPiece 를 부른다(종전엔 publish.* 안에만 있었다)",
-    serverBranch.includes("applyFormatMarksToPiece"), "🔴 여기서 빠지면 서버에 닿고도 글에 안 적힌다");
-  const rv = src("runner/channels/render-video.mjs");
+  /* 🔴 [AC-216] 종전엔 `indexOf(닻) + 700` 같은 **고정 창**이었다. 변이로 재 보니 **조용한 초록**이었다 —
+     창이 옆 덩이를 먹어서 가드를 빼도 통과했다. 이제 **다음 분기가 시작되는 자리**까지만 본다.
+     🔴 닻이나 끝 표식을 못 찾으면 `⊘`(못 쟀음) 다 — 그걸 `✓` 로도 `✗` 로도 접지 않는다. */
+  const core = code("runner/core.mjs");
+  const renderBranch = blockOf(core, "RENDER_KINDS.has(job.kind)", ["if (ADS_WRITE_KINDS", "if (job.kind ===", "return { ok: true, notes:"]);
+  okIn("🔴 러너 core 의 렌더 분기가 formatMarks 를 싣는다(종전엔 발행 분기에만 있었다)",
+    renderBranch?.body ?? null, (b) => b.includes("formatMarks"), "🔴 여기서 빠지면 러너가 재도 서버에 닿지 않는다");
+  const jobs = code("lib/runner-jobs.ts");
+  const serverBranch = blockOf(jobs, 'if (kind === "render.video")', ['if ((kind === "verify.post_alive"', "// 통계·생존 확인 잡"]);
+  okIn("🔴 서버의 렌더 분기가 applyFormatMarksToPiece 를 부른다(종전엔 publish.* 안에만 있었다)",
+    serverBranch?.body ?? null, (b) => b.includes("applyFormatMarksToPiece"), "🔴 여기서 빠지면 서버에 닿고도 글에 안 적힌다");
+  const rv = code("runner/channels/render-video.mjs");
   ok("렌더러가 찍기 **전에** 폰트를 받아 놓는다(document.fonts.load)", rv.includes("document.fonts.load"));
   ok("렌더러가 성공 반환에 subtitleFont 를 싣는다", /formatMarks:\s*\{\s*subtitleFont\s*\}/.test(rv));
-  ok("드라이런에도 싣는다(카나리가 폰트를 볼 수 있어야 한다)",
-    rv.slice(rv.indexOf("if (dryRun)"), rv.indexOf("if (dryRun)") + 400).includes("subtitleFont"));
+  /* 🔴 처음엔 끝 표식을 **다른 파일 것**(naver-blog.mjs 의 `publishNow`)으로 붙여 놨다 —
+     그래서 이 자가 `⊘ 못 쟀음`을 냈다. **그게 이 판에서 고친 바로 그 값이다**: 종전 같으면
+     `indexOf(-1) + 400` 이 되어 엉뚱한 조각을 보고 **조용히 초록**이었을 자리다. */
+  const dry = blockOf(rv, "if (dryRun) {", ["const maxSec =", "const outPath ="]);
+  okIn("드라이런에도 싣는다(카나리가 폰트를 볼 수 있어야 한다)",
+    dry?.body ?? null, (b) => b.includes("subtitleFont"));
+  /* 🔴 **순서**로도 못을 박는다 — 「재고 나서 찍는다」가 이 기능의 전부다(창이 조금 넓어도 순서는 안 속는다). */
+  const iMeasure = rv.indexOf("measureOverlayFont(page)");
+  const iShot = rv.indexOf("await page.screenshot(");
+  ok("🔴 폰트를 **찍기 전에** 잰다(뒤에 재면 이미 폴백으로 박힌 뒤다)",
+    iMeasure >= 0 && iShot >= 0 && iMeasure < iShot, `measure=${iMeasure} shot=${iShot}`);
 }
 
 console.log("\n⑥ 🔴 동봉 경로 — zip 에 실제로 들어가나(안 들어가면 개발 PC 에서만 고쳐진 것이다)");
@@ -190,5 +225,46 @@ console.log("\n⑦ 사람말 — CLAUDE §3(겁주지 않는다 · 시스템 용
   ok("시스템 용어 0(테넌트·piece·러너 잡)", !/테넌트|piece|러너 잡|font-face/i.test(all), all);
 }
 
-console.log(`\n${fail === 0 ? "🟢" : "🔴"} pass ${pass} · fail ${fail}`);
-process.exit(fail === 0 ? 0 : 1);
+/* ═══ ⑧ 🔴 **덩이 잡기 자체를 잰다** — 「못 잡게 만들어 보고 ⊘ 가 나오는지」 ═══
+ *   B(`autocreate-b-f8`) 조언: 「그걸 잰 변이가 없으면 고쳤다고 할 수 없다」.
+ *   🔴 이건 축이 **우는** 게 아니라 자가 **멈추는** 쪽이라 위 변이 목록과 **칸을 나눠** 둔다.
+ *   ⚠️ 파일을 건드리지 않는다 — **메모리 안의 글자**로 «닻을 지운다 / 끝 표식을 지운다»를 흉내 낸다.
+ */
+console.log("\n⑧ 🔴 덩이를 **못 잡게 만들면** ⊘ 가 나오는가(자가 멈추는 쪽)");
+{
+  const SAMPLE = [
+    "if (A_KIND.has(k)) {",
+    "  return { ok: true, formatMarks: x };",
+    "}",
+    "if (B_KIND.has(k)) {",
+    "  return { ok: true, formatMarks: y };",
+    "}",
+  ].join("\n");
+  const got = blockOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"]);
+  ok("정상 — 닻과 끝 표식이 있으면 **그 덩이만** 잡는다", !!got && got.body.includes("formatMarks: x") && !got.body.includes("formatMarks: y"), String(got?.body));
+  ok("🔴 닻을 지우면 null(«가드 없음»이 아니라 **못 쟀음**)", blockOf(SAMPLE, "Z_KIND.has(k)", ["if (B_KIND"]) === null);
+  ok("🔴 끝 표식을 지우면 null — **파일 끝까지 넓히지 않는다**(이게 이 판의 병이었다)",
+    blockOf(SAMPLE, "A_KIND.has(k)", ["if (NOTHING_LIKE_THIS"]) === null);
+  ok("🔴 상한 밖의 끝 표식은 못 찾은 것으로 본다(고정 창의 반대 — 넓히지 않고 멈춘다)",
+    blockOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"], { maxChars: 5 }) === null);
+  /* 🔴 **주석이 코드의 알리바이가 되는 것**도 여기서 막는다(실측으로 겪은 그 자리). */
+  const WITH_COMMENT = [
+    "if (A_KIND.has(k)) {",
+    "  /* formatMarks 를 여기서도 싣는다 */",
+    "  return { ok: true };",
+    "}",
+    "if (B_KIND.has(k)) { return 1; }",
+  ].join("\n");
+  const raw = blockOf(WITH_COMMENT, "A_KIND.has(k)", ["if (B_KIND"]);
+  const clean = blockOf(stripComments(WITH_COMMENT), "A_KIND.has(k)", ["if (B_KIND"]);
+  ok("🔴 주석을 안 걷으면 **코드를 지워도 낱말이 남는다**(이게 조용한 초록이었다)", !!raw?.body.includes("formatMarks"));
+  ok("🔴 주석을 걷으면 사라진다 — 코드만 본다", !clean?.body.includes("formatMarks"), String(clean?.body));
+  ok("주석을 걷어도 **길이가 보존된다**(순서 판정이 살아 있어야 한다)",
+    stripComments(WITH_COMMENT).length === WITH_COMMENT.length);
+  ok("문자열 리터럴 속 `//` 는 주석이 아니다", stripComments('const s = "http://x"; // real').includes("http://x"));
+}
+
+/* 🔴 [AC-216] **못 쟀는데 통과로 넘기지 않는다.** 종료 0 = 전부 ✓ · 1 = 제품이 틀렸다 · 2 = **자가 못 쟀다**. */
+console.log(`\n${fail > 0 ? "🔴" : unmeasured > 0 ? "⊘" : "🟢"} pass ${pass} · fail ${fail} · 못 쟀음 ${unmeasured}`);
+if (unmeasured > 0 && fail === 0) console.log("🔴 자가 덩이를 못 잡았다 — 그건 «맞다»가 아니다(종료 2). 닻·끝 표식을 코드에 맞춰라.");
+process.exit(fail > 0 ? 1 : unmeasured > 0 ? 2 : 0);
