@@ -73,7 +73,7 @@ let notices = [];
 const noticeOf = (p) => notices.find((n) => UI.TAKEDOWN_ACTIVE.includes(n.status) && ((p.pieceId && n.pieceId === p.pieceId) || (p.externalUrl && n.externalUrl === p.externalUrl)));
 async function load() {
   const [r, t] = await Promise.all([UI.api(`/api/posts-list?status=${tab === "published" ? "all" : tab}`), UI.api("/api/takedowns", { noGate: true })]);
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }   /* [AC-188] 뼈대를 치우고 다시 누를 단추를 준다 */
   notices = t.ok ? (t.notices || []) : [];   /* 못 읽으면 빈 채로 둔다 — 없는 신고를 지어내지 않는다(AC-9) */
   posts = (r.posts || []).filter((p) => tab !== "published" || p.status === "published" || privateOf(p)); render();
 }

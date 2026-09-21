@@ -32,7 +32,7 @@ const canEdit = OPS.can(op, "super_admin"); // 변경은 최고 관리자만(메
 const STEP = { login_fail: "로그인 실패", selector_changed: "화면이 바뀜", draft_saved: "임시저장까지 OK", timeout: "시간 초과", no_session: "세션 없음" };
 async function load() {
   const [r, c] = await Promise.all([UI.api("/api/ops-runners", { noRedirect: true }), UI.api("/api/ops-canary?days=14", { noRedirect: true })]);
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   const f = r.farm || {};
   UI.$("#farm").innerHTML = [["관리형 러너", UI.num(f.managed || 0)], ["지금 켜짐", UI.num(f.online || 0)], ["대기 잡", UI.num(f.queued || 0)], ["가장 오래 기다림", f.oldestQueuedMin == null ? "—" : `${UI.num(f.oldestQueuedMin)}분`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");

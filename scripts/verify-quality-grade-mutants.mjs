@@ -75,6 +75,13 @@ add("③ 빈 상태를 지우면 ③ 이 운다", (b) => { b[POSTS] = b[POSTS].s
 add("③-b 빈 상태에서 **갈 데만** 떼면 ③ 이 운다(문도 «누르면»도 없앤다)", (b) => {
   b[ACC] = b[ACC].replace(/위에서 채널 마크를 누르면 바로 연결할 수 있어요\./, "계정이 없습니다.");
 }, "✗ ③ 빈 상태", "프록시");
+/* 🔴 [AC-188 · A 2026-09-22] **② 가 초록이 되면서 재는 법이 달라진다.**
+   C 가 이 자를 만들 때 ② 는 두 화면에서 빨갰다 — 변이로는 못 재니(더 빨개질 수 없다) 아래 «되짚기»가
+   **수리를 넣어** 초록이 되나를 봤다. 이제 제품이 고쳐졌으니(`UI.retryPanel` — 뼈대를 치우고 다시 부를 단추를 준다)
+   그 되짚기는 닻을 잃는다. ⇒ **옛 갈래(토스트만 띄우고 돌아가기)로 되돌리는 것**이 이제 올바른 변이다. */
+add("② 수리를 옛 갈래(토스트만)로 되돌리면 ② 가 운다", (b) => {
+  for (const f of [POSTS, ACC]) b[f] = b[f].replace(/if \(!r\.ok\) \{[^\n]*retryPanel[^\n]*\}/, 'if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }');
+}, "✗ ② 못 불러왔을 때");
 add("④ 겁주는 문장을 심으면 ④ 가 운다", (b) => { b[ACC] = b[ACC].replace("아직 연결한 계정이 없어요", "계정이 없으면 서비스가 정지됩니다"); }, "✗ ④ 겁주는 문장", "프록시");
 add("⑤ 가려서 준 값을 되보내게 만들면 ⑤ 가 운다(내리기 쪽 · 지금은 초록)", (b) => {
   b[POSTS] = b[POSTS].replace("<div class=\"cta\" style=\"flex-direction:column\">",
@@ -122,8 +129,12 @@ for (const c of cases) {
 {
   const r = run(REPAIR.transform);
   const inBase = base.out.includes(REPAIR.mustVanish), inFix = r.out.includes(REPAIR.mustVanish);
-  if (!r.changed) { console.log(`  ✗ ${REPAIR.name}\n       🔴 **수리를 못 넣었다**(파일이 안 바뀜)`); bad++; }
-  else if (!inBase) { console.log(`  ⊘ ${REPAIR.name}\n       대조군에 그 빨강이 없다 — 되짚을 것이 없다(누가 이미 고쳤나?)`); }
+  /* 🔴 [AC-188 · A 2026-09-22] **순서를 바꿨다.** 고쳐진 뒤에는 «수리를 못 넣었다»가 아니라 «되짚을 것이 없다»가 맞는 말이다 —
+     옛 갈래가 파일에 없으니 `changed:false` 가 되고, 그러면 이 자가 **제품이 고쳐졌다는 이유로 자기를 빨갛게 찍는다**.
+     (C 가 그 ⊘ 문장을 이미 써 뒀는데 `!r.changed` 를 먼저 보는 바람에 거기까지 못 갔다.)
+     ②를 계속 재는 일은 위 «② 수리를 옛 갈래로 되돌리면» 변이가 맡는다 — 초록이 된 축은 **되짚기가 아니라 변이로** 잰다. */
+  if (!inBase) { console.log(`  ⊘ ${REPAIR.name}\n       대조군에 그 빨강이 없다 — 되짚을 것이 없다(누가 이미 고쳤나?)`); }
+  else if (!r.changed) { console.log(`  ✗ ${REPAIR.name}\n       🔴 **수리를 못 넣었다**(파일이 안 바뀜)`); bad++; }
   else if (inFix) { console.log(`  ✗ ${REPAIR.name}\n       🔴 **고쳤는데도 빨갛다 — 이 축은 굳어 있다**(판정이 코드에 안 달렸다)`); bad++; }
   else console.log(`  ✓ ${REPAIR.name}\n       고치니 «${REPAIR.mustVanish}…» 가 사라졌다 — 굳어 있지 않다`);
 }

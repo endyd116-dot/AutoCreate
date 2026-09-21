@@ -26,7 +26,7 @@ const op = await OPS.boot("notices"); if (!op) return;
 const canEdit = OPS.can(op, "admin"); // 공지는 admin+ (B2 ops-notices)
 let page = 1, R;
 async function load() {
-  const r = await UI.api(`/api/ops-notices?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } R = r;
+  const r = await UI.api(`/api/ops-notices?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; } R = r;
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "종류", f: (n) => OPS.pill(n.kind === "incident" ? ["warn", "장애 배너"] : ["off", "공지"]) }, { h: "제목", f: (n) => `<b>${UI.esc(n.title)}</b>${n.body ? `<br><span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(n.body)}</span>` : ""}` },

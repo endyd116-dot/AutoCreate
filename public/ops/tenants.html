@@ -28,7 +28,7 @@ const op = await OPS.boot("tenants"); if (!op) return;
 let status = "", plan = "", withInternal = false;
 async function load() {
   const q = UI.$("#q").value.trim();
-  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1${withInternal ? "&internal=1" : ""}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1${withInternal ? "&internal=1" : ""}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   const rows = r.tenants || [];
   /* 🔴 [2026-09-19 수리 · 시나리오 B ①] **서버가 «몇 집을 숨겼는지» 말해 주는데 화면이 그 말을 버리고 있었다.**
      그래서 손님이 전화해서 이름을 대도 화면엔 «0곳»만 떴다 — 운영자는 «가입 기록이 없는데요» 라고 말하게 된다.

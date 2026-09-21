@@ -98,7 +98,9 @@ function render() {
   const busy = all.some((p) => p.status === "generating" || p.status === "draft");
   if (busy && !timer) timer = setInterval(load, 5000); if (!busy && timer) { clearInterval(timer); timer = null; }
 }
-async function load() { pruneRestarts(); const r = await UI.api("/api/pieces-list?status=all"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } all = r.pieces;
+async function load() { pruneRestarts(); const r = await UI.api("/api/pieces-list?status=all");
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }   /* [AC-188] 뼈대를 치우고 다시 누를 단추를 준다 */
+  all = r.pieces;
   if (all.some((p) => p.kind === "video" && p.status === "generating")) { const d = await UI.api("/api/runner-list"); if (d.ok) runnerOn = (d.devices || []).some((x) => x.status === "online" && x.caps?.ffmpeg !== false); } // 합성 단계 칩(러너 꺼짐 · ffmpeg 없음)
   render(); }
 UI.$$("#seg button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; render(); });

@@ -79,7 +79,9 @@ async function load(poll = false) {
   /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
      편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
   const [r, ts] = await Promise.all([UI.api("/api/topics-list?status=candidate"), UI.api("/api/tenant-settings", { noGate: true })]);
-  if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
+  /* [AC-188] 🔴 토스트만 띄우고 돌아가면 뼈대가 영원히 돈다 — 치우고·까닭 적고·다시 누를 단추를 준다(UI.retryPanel).
+     🔴 되풀이 호출(poll)에서는 갈아엎지 않는다 — 보고 있던 목록이 깜빡 사라진다. */
+  if (!r.ok) { if (!poll) UI.retryPanel("#topics", () => load(false), r.error); return; }
   /* 🔴 영상을 켰나 — **서버가 정본**(`tenant-settings.kinds`). 못 읽으면 «꺼짐»으로 둔다(없는 기능을 켜 보이지 않는다 · AC-9). */
   wantVideo = !!(ts.ok && (ts.kinds || []).includes("video"));
   if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0;
