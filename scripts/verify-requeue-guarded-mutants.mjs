@@ -50,7 +50,13 @@ function run(transform) {
 
 const cases = [];
 /** want = "appear"(변이 판에만 나와야) · "vanish"(대조군엔 있고 변이 판엔 없어야) */
-const add = (name, transform, mark, want = "appear") => cases.push({ name, transform, mark, want });
+/** 🔴 **기댓말을 줄 번호로 적지 않는다**(AC-114 그 규율). 첫 판은 «✗ lib/runner-jobs.ts:1861» 로 적었는데,
+ *  B2 가 그 파일을 고치자 줄이 **1861 → 1871** 로 밀려 변이 ③이 «안 울었다»로 죽었다
+ *  — 🔴 **남의 수리가 내 닻을 옮긴다**(AC-112 ⑥ 의 얼굴). 그렇다고 함수 이름만 쓰면 **초록 줄에도 그 이름이 있다.**
+ *  ⇒ `mark`(빨강 표식)와 `also`(그 줄에 같이 있어야 하는 이름)를 **한 줄에서** 찾는다. */
+const add = (name, transform, mark, want = "appear", also = null) => cases.push({ name, transform, mark, want, also });
+/** 그 출력에 «mark 와 also 가 **같은 줄**에」 있나 */
+const onSameLine = (out, mark, also) => String(out).split(/\r?\n/).some((l) => l.includes(mark) && (!also || l.includes(also)));
 
 /* ═══ 🔴 B2 가 찾아 준 사각 — 이 넷이 이 하니스의 값이다(AC-216) ═══
    옛 판은 몸통을 「위로 `function` · 아래로 다음 `function`」으로 잡아, 화살표 핸들러에서 **몸통 = 파일 전체**가 됐다.
@@ -63,10 +69,10 @@ add("② 🔴 가드를 **주석으로만** 남긴다 — 그래도 운다(좋�
   "✗ netlify/functions/ops-runners.ts");
 add("③ `reapStaleJobs` 의 가드를 지우면 그 문이 운다",
   (b) => { b[RJ] = b[RJ].replace(/const rec = await reconcileLostPublish\(\{\s*tenantId: tid/, "const rec = await zzGone({ tenantId: tid"); },
-  "✗ lib/runner-jobs.ts:1861");
+  "✗ lib/runner-jobs.ts:", "appear", "reapStaleJobs");
 add("④ 🔴 `claimJobs` 이름을 바꾸면 봐주던 셋이 **전부** 운다(봐주기가 너무 넓지 않다)",
   (b) => { b[RJ] = b[RJ].split("function claimJobs(").join("function zzClaim("); },
-  "✗ lib/runner-jobs.ts:858");
+  "✗ lib/runner-jobs.ts:", "appear", "zzClaim");   /* 🔴 변이가 이름을 바꾸므로 **바뀜 이름**으로 물어야 한다 — 옆 줄과 안 섮인다 */
 add("⑤ 가드 없는 되돌리기를 **한 줄 새로 심으면** 잡는다(다음에 문이 생겨도 운다)",
   (b) => { b[OPS] = b[OPS].replace('if (action === "remove") {',
     "if (action === \"zznew\") { await q(sql`UPDATE runner_jobs SET status = 'queued' WHERE id = 1`); }\n      if (action === \"remove\") {"); },
@@ -89,7 +95,7 @@ let bad = 0;
 for (const c of cases) {
   const r = run(c.transform);
   if (!r.changed) { console.log(`  ✗ ${c.name}\n       🔴 **변이를 못 넣었다**(파일이 안 바뀜) — 자를 잰 게 아니다(AC-112 ①)`); bad++; continue; }
-  const inBase = base.out.includes(c.mark), inMut = r.out.includes(c.mark);
+  const inBase = onSameLine(base.out, c.mark, c.also), inMut = onSameLine(r.out, c.mark, c.also);
   let okd, why;
   if (c.want === "appear") {
     if (inBase) { okd = false; why = `🔴 **대조군에도 «${c.mark}» 가 있다** — 변이 탓이라 말할 수 없다(AC-161 ②)`; }
