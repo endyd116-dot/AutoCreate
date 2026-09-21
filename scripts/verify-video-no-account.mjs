@@ -92,11 +92,16 @@ out.kinds = {
 };
 console.log("@@" + JSON.stringify(out) + "@@");
 `);
+  /* 🔴 **치우고 나간다.** 안 치웠더니 `.probe.mts` 가 리포 뿌리에 남았고, 메인이 «커밋 안 된 파일»로 보고 지웠다
+     (2026-09-21). 자가 제 뒷정리를 안 하면 **다음 사람이 그걸 제품으로 오해**하거나 그대로 커밋한다.
+     ⚠️ 프로브는 리포 안에 있어야 한다(`./lib/...` 를 tsx 가 풀려면) — 그래서 임시 폴더로 못 옮긴다. 대신 반드시 지운다.
+        세게 죽으면(SIGKILL) 남을 수 있어 `.gitignore` 에도 적어 뒀다(두 겹). */
   try {
     const o = execFileSync("npx", ["tsx", probe], { cwd: dir, encoding: "utf8", shell: process.platform === "win32", timeout: 180000 });
     const m = /@@(.*)@@/s.exec(o);
     return m ? JSON.parse(m[1]) : null;
   } catch { return null; }
+  finally { try { rmSync(probe, { force: true }); } catch { /* 이미 없으면 그만 */ } }
 }
 
 notes.push("■ ② 넘겨주기 — «어떻게 올리나»가 영상 채널 **넷 다** 있나(실제로 함수를 돌린다)");
