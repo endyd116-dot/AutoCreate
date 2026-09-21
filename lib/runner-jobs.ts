@@ -1794,8 +1794,33 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
   return { ok: true, status: "done" };
 }
 
-/** 되돌림 — 러너가 «못 하겠다»고 놓을 때(attempts 는 claim 에서 이미 올랐다). */
-export async function releaseJob(device: DeviceRow, jobId: number, reason?: string): Promise<{ ok: boolean }> {
+/**
+ * 되돌림 — 러너가 «못 하겠다»고 놓을 때(attempts 는 claim 에서 이미 올랐다).
+ *
+ *   🔴 [AC-214 · 2026-09-22] **되돌리기 전에 채널에 묻는다.** 이 문은 `status='claimed'` 인 잡만 건드린다 —
+ *      즉 **러너가 이미 가졌던 잡**이고, 그렇다면 **올려 놓고 보고를 못 했을 수도** 있다(AC-200 그 사고).
+ *      `reapStaleJobs` 하나만 막았던 것이 실수였다: 되돌리는 문은 넷이고, 이 문은 **기다림이 0**이다.
+ *   ⚠️ 우리 러너가 이 문을 쓰는 곳은 **드라이런·카나리 둘뿐**이고 거기선 아무것도 안 올린다(임시저장까지).
+ *      그래서 평소엔 `absent`/`unknown` 이 나오고 **종전과 똑같이** 되돌아간다 — 무회귀다.
+ *      그래도 막는 까닭: 이건 기기 토큰으로 열리는 **공개 엔드포인트**이고, 발행 도중 죽었다 살아난 러너나
+ *      옛 판 러너가 이 문을 두드릴 수 있다. **러너 주장을 믿지 않는다**(계약 §2)가 여기에도 걸린다.
+ */
+export async function releaseJob(device: DeviceRow, jobId: number, reason?: string): Promise<{ ok: boolean; recovered?: boolean; externalUrl?: string }> {
+  /* 발행 잡이면 되돌리기 **전에** 채널을 본다. `claimed_at` 이 곧 «언제부터 이 러너가 들고 있었나»다. */
+  const [j] = await q(sql`SELECT id, tenant_id, kind, piece_id, claimed_at FROM runner_jobs
+    WHERE id = ${jobId} AND tenant_id = ${device.tenantId} AND status = 'claimed' LIMIT 1`);
+  if (j && String(j.kind ?? "").startsWith("publish.") && n(j.piece_id)) {
+    const since = utcDate(j.claimed_at)?.toISOString() ?? null;
+    const rec = await reconcileLostPublish({ tenantId: n(j.tenant_id), pieceId: n(j.piece_id), since, jobId })
+      .catch((e) => { console.error("[runner-jobs] release already-check 실패(비치명)", (e as Error)?.message ?? e); return null; });
+    if (rec?.recovered) {
+      /* 🔴 되돌리지 않는다 — 되돌리면 그게 중복 게시다. 잡은 «끝난 것»으로 닫는다. */
+      await q(sql`UPDATE runner_jobs SET status = 'done', claimed_by = NULL, claimed_at = NULL,
+          result = ${jsonb({ ok: true, via: "channel_reconcile", externalUrl: rec.externalUrl ?? null, released: String(reason ?? "").slice(0, 200), note: "러너가 놓았지만 채널에는 올라가 있었다(AC-214)" })},
+          updated_at = NOW() WHERE id = ${jobId} AND status = 'claimed'`);
+      return { ok: true, recovered: true, ...(rec.externalUrl ? { externalUrl: rec.externalUrl } : {}) };
+    }
+  }
   const rows = await q(sql`UPDATE runner_jobs SET status = 'queued', claimed_by = NULL, claimed_at = NULL,
       result = ${jsonb({ released: String(reason ?? "").slice(0, 200) })}, updated_at = NOW()
     WHERE id = ${jobId} AND tenant_id = ${device.tenantId} AND status = 'claimed' RETURNING id`);
