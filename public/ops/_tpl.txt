@@ -80,7 +80,7 @@ const op = await OPS.boot("tenants"); if (!op) return;
 let status = "", plan = "", withInternal = false;
 async function load() {
   const q = UI.$("#q").value.trim();
-  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1${withInternal ? "&internal=1" : ""}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q)}&status=${status}&plan=${plan}&page=1${withInternal ? "&internal=1" : ""}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   const rows = r.tenants || [];
   /* 🔴 [2026-09-19 수리 · 시나리오 B ①] **서버가 «몇 집을 숨겼는지» 말해 주는데 화면이 그 말을 버리고 있었다.**
      그래서 손님이 전화해서 이름을 대도 화면엔 «0곳»만 떴다 — 운영자는 «가입 기록이 없는데요» 라고 말하게 된다.
@@ -409,7 +409,7 @@ const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; c
 async function load() {
   const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}`, { noRedirect: true })]);
   if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", s.avgFirstReplyMin == null ? "—" : `${s.avgFirstReplyMin}분`], ["SLA 놓침", s.slaMissPct == null ? "—" : `${s.slaMissPct}%`], ["만족", s.satisfactionPct == null ? "—" : `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#list").innerHTML = OPS.table([
     { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) }, { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },
     { h: "상태", f: (t) => OPS.pill(TST[t.status] || ["off", t.status]) }, { h: "담당", f: (t) => t.assignee ? UI.esc(t.assignee.name) : '<span class="muted">없음</span>' },
@@ -677,7 +677,7 @@ const canEdit = OPS.can(op, "super_admin"); // 변경은 최고 관리자만(메
 const STEP = { login_fail: "로그인 실패", selector_changed: "화면이 바뀜", draft_saved: "임시저장까지 OK", timeout: "시간 초과", no_session: "세션 없음" };
 async function load() {
   const [r, c] = await Promise.all([UI.api("/api/ops-runners", { noRedirect: true }), UI.api("/api/ops-canary?days=14", { noRedirect: true })]);
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   const f = r.farm || {};
   UI.$("#farm").innerHTML = [["관리형 러너", UI.num(f.managed || 0)], ["지금 켜짐", UI.num(f.online || 0)], ["대기 잡", UI.num(f.queued || 0)], ["가장 오래 기다림", f.oldestQueuedMin == null ? "—" : `${UI.num(f.oldestQueuedMin)}분`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
@@ -1071,7 +1071,7 @@ const MON = Object.keys(UI.SRC).map((k) => [k, UI.srcLabel(k)]);
 let D;
 async function load() {
   const [r, d] = await Promise.all([UI.api("/api/ops-channels", { noRedirect: true }), UI.api("/api/ops-disclosure", { noRedirect: true })]);
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin"); UI.$("#lock2").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "채널", f: (c) => `${UI.mark(c.key, "sm")}<b>${UI.esc(c.label || UI.chLabel(c.key))}</b>` }, { h: "상태", f: (c) => OPS.pill(CST[c.status] || ["off", c.status]) },
@@ -1105,7 +1105,7 @@ const op = await OPS.boot("notices"); if (!op) return;
 const canEdit = OPS.can(op, "admin"); // 공지는 admin+ (B2 ops-notices)
 let page = 1, R;
 async function load() {
-  const r = await UI.api(`/api/ops-notices?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } R = r;
+  const r = await UI.api(`/api/ops-notices?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; } R = r;
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "종류", f: (n) => OPS.pill(n.kind === "incident" ? ["warn", "장애 배너"] : ["off", "공지"]) }, { h: "제목", f: (n) => `<b>${UI.esc(n.title)}</b>${n.body ? `<br><span class="muted" style="white-space:normal;display:inline-block;max-width:360px">${UI.esc(n.body)}</span>` : ""}` },
@@ -1145,7 +1145,7 @@ const op = await OPS.boot("operators"); if (!op) return;
 const RL = { super_admin: ["ink", "super_admin"], admin: ["ok", "admin"], operator: ["off", "operator"] };
 let page = 1;
 async function load() {
-  const r = await UI.api(`/api/ops-operators?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-operators?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#list").innerHTML = OPS.table([
     { h: "이름", f: (o) => `<b>${UI.esc(o.name || "—")}</b><br><span class="muted">${UI.esc(o.email)}</span>` }, { h: "역할", f: (o) => OPS.pill(RL[o.role] || ["off", o.role]) }, { h: "SSO", f: (o) => o.ssoSubject ? `<span class="muted">${UI.esc(o.ssoSubject)}</span>` : "—" },
     { h: "상태", f: (o) => OPS.pill(o.active ? ["ok", "활성"] : ["off", "꺼짐"]) }, { h: "마지막 로그인", f: (o) => OPS.dt(o.lastLoginAt) },
@@ -1182,7 +1182,7 @@ let risk = "", actorType = "", page = 1; const tenant = UI.qs.get("tenant") || "
 if (tenant) UI.$("#tenantChip").innerHTML = `<span class="pill ink">고객 #${UI.esc(tenant)}</span> <a class="lk" href="/ops/audit.html" style="font-size:12.5px">전체 보기</a>`;
 async function load() {
   const p = new URLSearchParams({ q: UI.$("#q").value.trim(), risk, actorType, from: UI.$("#from").value, to: UI.$("#to").value, page: String(page) }); if (tenant) p.set("tenant", tenant); // actorType 어휘 = operator|customer|system(API·응답 같은 말)
-  const r = await UI.api(`/api/ops-audit-search?${p}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-audit-search?${p}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   const who = (a) => `${{ operator: "운영자", customer: "고객", user: "고객", system: "시스템" }[a.actorType] || UI.esc(a.actorType || "—")}${a.actorId != null ? " #" + a.actorId : ""}`;
   const TGT = { tenant: "고객", invoice: "청구서", account: "계정", operator: "운영자", runner_device: "러너", plan: "요금제", notice: "공지", order: "주문", ai: "AI", disclosure: "고지 문구", channel: "채널", ticket: "티켓", piece: "글", slot: "자리" };
   const tgt = (s) => { const m = String(s).match(/^([a-z_]+):(.+)$/); return m ? `${TGT[m[1]] || m[1]} ${/^\d+$/.test(m[2]) ? "#" + m[2] : m[2]}` : (TGT[String(s)] || String(s)); }; // target 은 «종류:id» — 사람말로

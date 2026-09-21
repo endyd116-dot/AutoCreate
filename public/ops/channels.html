@@ -30,7 +30,7 @@ const MON = Object.keys(UI.SRC).map((k) => [k, UI.srcLabel(k)]);
 let D;
 async function load() {
   const [r, d] = await Promise.all([UI.api("/api/ops-channels", { noRedirect: true }), UI.api("/api/ops-disclosure", { noRedirect: true })]);
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin"); UI.$("#lock2").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "채널", f: (c) => `${UI.mark(c.key, "sm")}<b>${UI.esc(c.label || UI.chLabel(c.key))}</b>` }, { h: "상태", f: (c) => OPS.pill(CST[c.status] || ["off", c.status]) },

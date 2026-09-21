@@ -29,7 +29,7 @@ let risk = "", actorType = "", page = 1; const tenant = UI.qs.get("tenant") || "
 if (tenant) UI.$("#tenantChip").innerHTML = `<span class="pill ink">고객 #${UI.esc(tenant)}</span> <a class="lk" href="/ops/audit.html" style="font-size:12.5px">전체 보기</a>`;
 async function load() {
   const p = new URLSearchParams({ q: UI.$("#q").value.trim(), risk, actorType, from: UI.$("#from").value, to: UI.$("#to").value, page: String(page) }); if (tenant) p.set("tenant", tenant); // actorType 어휘 = operator|customer|system(API·응답 같은 말)
-  const r = await UI.api(`/api/ops-audit-search?${p}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-audit-search?${p}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   const who = (a) => `${{ operator: "운영자", customer: "고객", user: "고객", system: "시스템" }[a.actorType] || UI.esc(a.actorType || "—")}${a.actorId != null ? " #" + a.actorId : ""}`;
   const TGT = { tenant: "고객", invoice: "청구서", account: "계정", operator: "운영자", runner_device: "러너", plan: "요금제", notice: "공지", order: "주문", ai: "AI", disclosure: "고지 문구", channel: "채널", ticket: "티켓", piece: "글", slot: "자리" };
   const tgt = (s) => { const m = String(s).match(/^([a-z_]+):(.+)$/); return m ? `${TGT[m[1]] || m[1]} ${/^\d+$/.test(m[2]) ? "#" + m[2] : m[2]}` : (TGT[String(s)] || String(s)); }; // target 은 «종류:id» — 사람말로

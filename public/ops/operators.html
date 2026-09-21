@@ -26,7 +26,7 @@ const op = await OPS.boot("operators"); if (!op) return;
 const RL = { super_admin: ["ink", "super_admin"], admin: ["ok", "admin"], operator: ["off", "operator"] };
 let page = 1;
 async function load() {
-  const r = await UI.api(`/api/ops-operators?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api(`/api/ops-operators?page=${page}`, { noRedirect: true }); if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#list").innerHTML = OPS.table([
     { h: "이름", f: (o) => `<b>${UI.esc(o.name || "—")}</b><br><span class="muted">${UI.esc(o.email)}</span>` }, { h: "역할", f: (o) => OPS.pill(RL[o.role] || ["off", o.role]) }, { h: "SSO", f: (o) => o.ssoSubject ? `<span class="muted">${UI.esc(o.ssoSubject)}</span>` : "—" },
     { h: "상태", f: (o) => OPS.pill(o.active ? ["ok", "활성"] : ["off", "꺼짐"]) }, { h: "마지막 로그인", f: (o) => OPS.dt(o.lastLoginAt) },
