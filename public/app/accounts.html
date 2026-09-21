@@ -30,9 +30,19 @@ const HEALTH = (n) => (n >= 80 ? "좋아요" : n >= 50 ? "조금 지쳤어요" :
 const HOURS = [[6,"06시"],[7,"07시"],[9,"09시"],[12,"12시"],[15,"15시"],[18,"18시"],[20,"20시"],[21,"21시"],[23,"23시"]];
 let D = { accounts: [], channels: [] }, personas = [];
 const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
+/** [AC-186] 채널 한 칸 — 서버가 준 `channels[]` 에서 찾는다(화면이 채널 성질을 베껴 적지 않는다 · AC-52). */
+const chOf = (key) => (D.channels || []).find((c) => c.key === key) || null;
 
+/* 🔴 [AC-186 · 사장님 라이브 2026-09-22] **«확인 중»이 왜 확인 중인지 화면이 말을 안 했다.**
+   계정 셋이 다 «확인 중»인데 까닭은 저 아래 **«내 PC 프로그램 · 꺼짐»** 한 줄이었다 — 두 정보가 따로 놀았다.
+   session 채널(네이버·티스토리·당근)의 로그인 창은 **내 PC 프로그램이 연다**(runner). 그게 꺼져 있으면
+   고객은 «로그인하기»를 눌러 봐야 시트에서야 까닭을 듣는다(`reloginSheet` 가 이미 그 말을 한다 — **목록만 조용했다**).
+   🔴 **모르면 말하지 않는다**(AC-9): `RUNNER_ON` 은 `true`·`false`·`null`(못 물어봤다) 셋이다. `null` 이면 옛 문장 그대로 둔다. */
+let RUNNER_ON = null;
 async function load() {
-  const r = await UI.api("/api/accounts-list");
+  /* 러너 상태는 **곁다리**다 — 실패해도 계정 목록은 그려야 한다(그래서 noGate·실패 시 null). */
+  const [r, rl] = await Promise.all([UI.api("/api/accounts-list"), UI.api("/api/runner-list", { noGate: true }).catch(() => ({ ok: false }))]);
+  RUNNER_ON = rl && rl.ok ? (rl.devices || []).some((d) => d.status === "online") : null;
   /* [AC-188] 뼈대가 둘이라 둘 다 치운다 — 하나만 치우면 채널 칸이 계속 돈다. */
   if (!r.ok) { const cg = UI.$("#cg"); if (cg) cg.innerHTML = ""; return UI.retryPanel("#list", load, r.error); }
   D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
@@ -45,16 +55,26 @@ async function load() {
   UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? `${soonWord(c)}${c.monetizable === false ? " · 광고 없음" : ""}` : c.monetizable === false ? "광고 없음 · 유입" : (SUB[c.key] || "")}</small></button>`).join("");
   UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
   const list = UI.$("#list");
-  list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + (D.accounts.length
+  /* 🔴 [AC-186 · 사장님 라이브 2026-09-22 «삭제하거나 수정하는 UI가 없네»] **있는데 알 길이 없었다** —
+     고치기도 «연결 해제»도 줄을 눌러야 나오는 시트 안에 있다. 줄이 눌린다는 것을 **한 문장으로 말해 준다**(§13.0 «설명 한 문장»).
+     🔴 단추를 새로 달지 않는다 — 줄마다 «수정»·«삭제»를 붙이면 목록이 시끄러워지고 §13.0(Primary 1개·색 3개)이 깨진다. */
+  const howto = D.accounts.length ? `<div class="row" style="padding-top:2px;padding-bottom:8px"><span class="d muted" style="font-size:12.5px">줄을 누르면 이름·올리는 횟수를 고치거나 연결을 해제할 수 있어요.</span></div>` : "";
+  list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + howto + (D.accounts.length
     ? D.accounts.map((a) => { const relogin = a.status === "pending_login"; const ls = UI.loginState(a);
-        const sub = relogin ? ls.why : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요"
+        /* [AC-186] 🔴 내 PC 가 꺼져 있어서 못 하는 것이면 **그 까닭을 여기서** 말한다(시트까지 들어가야 아는 것이 아니라). */
+        const needPc = relogin && UI.needsPc(chOf(a.channel)) && RUNNER_ON === false;
+        const sub = needPc ? "내 PC 프로그램이 꺼져 있어서 로그인 창을 못 열어요"
+          : relogin ? ls.why : a.status === "suspended" ? "채널에서 정지됐어요 · 예약된 글은 다른 계정으로 넘겼어요"
           /* [AC-187] 🔴 «주소 확인»이라는 단추만 있으면 왜 눌러야 하는지 모른다 — 사실 한 줄을 같이 준다(§9-①). 겁주지 않는다(§3). */
           : addrAsk(a) ? "주소가 달라 보여요 · 글은 보관해 두었어요"
           : `오늘 ${a.postsToday}/${a.dailyCap} · 건강 ${a.healthScore}`;
         const head = `${UI.accMark(a)}<button type="button" class="l" data-id="${a.id}" style="text-align:left"><span class="t">@${UI.esc(a.handle)}${a.displayName ? ` <span class="muted" style="font-weight:500">${UI.esc(a.displayName)}</span>` : ""}</span><span class="d wrap">${UI.esc(sub)}</span></button>`;
         /* [AC-187] 🔴 주소 확인은 **목록에서 보여야 한다** — 알림이 데려오는 곳이 여기다(서버 link `/app/accounts.html`).
            시트 안에만 두면 «말해 주기»가 아무에게도 안 닿는다(§9-②). 로그인 풀림이 먼저다(그건 아예 못 올린다). */
-        return relogin
+        /* [AC-186] 내 PC 가 꺼졌으면 **갈 데가 로그인 창이 아니라 내 PC 화면**이다 — 막다른 골목을 만들지 않는다(§4.8). */
+        return needPc
+          ? `<div class="row">${head}<a class="btn sm secondary" href="/app/runner.html">내 PC 켜기</a></div>`
+          : relogin
           ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-relogin="${a.id}">${ls.cta}</button></div>`
           : addrAsk(a)
           ? `<div class="row">${head}<button type="button" class="btn sm secondary" data-addr="${a.id}">주소 확인</button></div>`
@@ -86,8 +106,11 @@ function connectSheet(c) {
   /* [R12-6] 🔴 광고가 안 붙는 채널이면 **붙이기 전에** 말해 준다(고른 뒤 실망 금지 · 문장 정본은 UI.noRevenueBanner).
      🔴 막지 않는다(§9) — 말만 올려둔다. 연결 단추도 폼도 그대로다. */
   const nrb = UI.noRevenueBanner(c.monetizable === false ? [k] : [], "margin:0 0 10px");
-  if (c.connectMethod === "session") return UI.sheet(`${nrb}<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px">로그인 정보는 암호화해 두고, 올릴 때만 내 PC 프로그램이 열어요.</p>
-    <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
+  /* [AC-186] 🔴 «무엇으로 로그인하나»를 **맨 위에서** 말한다 — 사장님이 «티스토리는 카카오 로그인이라서 어떻게 계정을 추가하냐»고 물으신 자리다.
+     칸 이름도 «아이디»가 아니라 그 채널의 말(«카카오 계정»)로 적는다. 글자 정본은 `UI.LOGIN_WITH` 한 곳(거기 B 에게 보낼 주문도 적어 뒀다). */
+  const lw = UI.loginWith(c);
+  if (c.connectMethod === "session") return UI.sheet(`${nrb}${lw ? `<p style="margin:0 0 8px;font-size:15px;line-height:1.6">${UI.esc(lw.hint)}</p>` : ""}<form id="cf" autocomplete="off"><p class="muted" style="margin:0 0 8px;font-size:13px">로그인 정보는 암호화해 두고, 올릴 때만 내 PC 프로그램이 열어요.</p>
+    <div class="field"><label>${UI.esc((lw && lw.label) || "아이디")}</label><input class="input" name="loginId" autocomplete="off" required placeholder="${k === "tistory" ? "카카오 계정 이메일" : "네이버 아이디"}"><div class="help"></div></div>
     <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="off" required><div class="help"></div></div>
     <div class="field"><label>표시명 <span class="muted" style="font-weight:500">선택</span></label><input class="input" name="displayName" autocomplete="off" placeholder="예: 요리하는 A"></div>
     <div class="cta"><button class="btn primary" type="submit">연결하기</button></div></form>`, { title: `${label} 연결`, onOpen: (sh, close) => UI.form(sh.querySelector("#cf"), (d, f) => submitAdd({ channel: k, handle: d.loginId, loginId: d.loginId, password: d.password, displayName: d.displayName || undefined }, f, close)) });

@@ -499,9 +499,13 @@
 
   /* ── 상태 어휘(계약 §1·§4·§5 → 사람말 알약) ── */
   UI.ACC_STATUS = { active: ["ok", "정상"], pending_login: ["warn", "확인 중"], suspended: ["danger", "정지"], disconnected: ["danger", "끊김"], cooldown: ["off", "쉬는 중"], limited: ["warn", "제한"] };
-  UI.PIECE_STATUS = { generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], edited: ["warn", "고쳤어요"], /* [R9-9 · B] 사람이 검수에서 고친 글 — «봐주세요»의 한 갈래 */ approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], awaiting_runner: ["warn", "PC 대기"], failed: ["danger", "실패"], rejected: ["off", "버림"] };   // [AC-52] awaiting_runner = 영상 렌더가 내 PC 프로그램을 기다린다(편성표 낱말과 같게)
+  /* 🔴 [AC-187 · DESIGN §5B.11 (1-b)(1-e) · 2026-09-22] **`pending_resume` — 쉬는 동안 발행 시각이 지나 버린 글.**
+     🔴 낱말을 안 넣으면 `UI.pill` 이 **키 글자 그대로**(«pending_resume») 손님 화면에 찍는다(§3 시스템 용어 금지 · B 실측).
+     🔴 색은 `warn` 이 아니라 **`off`** — 이건 **사고가 아니라 기다리는 것**이다. 손님이 «다시 시작»을 누를 때 고르면 된다(§3 겁주지 않기).
+     🔴 «건너뜀(skipped)»·«버림(rejected)»과 **다른 말**을 쓴다 — 그 둘로 읽히면 «내 글이 사라졌다»가 된다(설계가 가장 경계한 자리). */
+  UI.PIECE_STATUS = { pending_resume: ["off", "쉬는 동안 밀렸어요"], generating: ["off", "만드는 중"], draft: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], edited: ["warn", "고쳤어요"], /* [R9-9 · B] 사람이 검수에서 고친 글 — «봐주세요»의 한 갈래 */ approved: ["off", "예약"], scheduled: ["off", "예약"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], awaiting_runner: ["warn", "PC 대기"], failed: ["danger", "실패"], rejected: ["off", "버림"] };   // [AC-52] awaiting_runner = 영상 렌더가 내 PC 프로그램을 기다린다(편성표 낱말과 같게)
   /* [P1R2] 슬롯 상태기계 전 상태(DESIGN §5B.6 · 계약 §-1) — 어휘 한 벌 */
-  UI.SLOT_STATUS = { planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], rejected: ["off", "버림"], failed: ["danger", "실패"] };
+  UI.SLOT_STATUS = { pending_resume: ["off", "쉬는 동안 밀렸어요"], planned: ["off", "예정"], assigned: ["off", "소재 정함"], topic_assigned: ["off", "소재 정함"], no_topic: ["off", "소재 없음"], producing: ["off", "만드는 중"], in_review: ["warn", "봐주세요"], approved: ["off", "예약"], scheduled: ["off", "예약"], coin_short: ["warn", "코인 부족"], awaiting_runner: ["warn", "PC 대기"], publishing: ["off", "발행 중"], published: ["ok", "발행됨"], awaiting_manual: ["danger", "확인 필요"], reassigned: ["off", "계정 옮김"], skipped: ["off", "건너뜀"], rejected: ["off", "버림"], failed: ["danger", "실패"] };
   /* [P1R2] 발행함 행 상태(계약 v2.1 PostRow.status) */
   UI.POST_STATUS = { published: ["ok", "발행됨"], awaiting_manual: ["warn", "직접 올려야 해요"], failed: ["danger", "올리지 못했어요"], uploaded_private: ["warn", "비공개 업로드됨"], publishing: ["off", "올리는 중"] }; // [P1R5] uploaded_private(§7-1) · 릴스 처리 중은 publishing + errorKind video_processing
   /* [R8-A2 · DESIGN §5E.2] 내 글에 들어온 신고(`takedown_notices.status`) — 서버엔 값만 있고 **한국말은 여기가 정본**이다(주제군·수익 목적과 같은 자리).
@@ -567,6 +571,31 @@
      🔴 그런데 화면이 `lastErrorKind || "login_fail"` 로 **기본값을 지어냈다**(AC-74 의 축소판) — 그래서 한 번도 로그인한 적 없는 계정한테
         «로그인이 풀렸어요»라고 했다. **사장님이 첫 계정을 붙이고 그 자리에서 읽으실 바로 그 문장이다**(«내가 뭘 잘못했나»가 된다).
      ⇒ 가르는 자리는 **여기 한 곳**이다(계정 목록·자세히·시트·끝맺음이 다 이걸 쓴다 — 네 군데가 따로 말하면 또 갈린다). */
+  /* 🔴 [AC-186 · 사장님 라이브 2026-09-22 «티스토리는 카카오 로그인이라서 어떻게 계정을 추가하냐»] ─────────────
+     **채널마다 «무엇으로» 로그인하는지가 다른데 화면이 한 번도 말하지 않았다.** 러너는 이미 카카오로 붙는다
+     (`runner/lib/auth-kakao.mjs` — 티스토리·카카오 애드핏이 같은 카카오 세션) — **화면만 조용했다.**
+     🔴 서버가 주는 `connectMethod`(session·app_password·oauth)는 «어떤 방식»이지 «누구 계정»이 아니다.
+        그래서 «네이버 아이디»와 «카카오 계정»을 가르지 못한다.
+     ── 🔴 B 에게(A · **2026-09-22** · 메인 경유) ────────────────────────────────────────────────
+        `accounts-list.channels[]` 에 **`loginWith: { label, hint }`** 를 실어 주면 이 표를 지운다.
+        정본은 `lib/channel-registry.ts`(거기 `connect` 옆이 그 자리다) — 러너가 쓰는 사실과 한 곳에서 갈린다.
+        그때까지 아래 표가 **화면 사본**이다. (주문에 날짜를 적는다 — 낡은 주문이 코드보다 앞서 나가면 다음 사람이 고쳐진 것을 또 고친다 · AC-59)
+     ────────────────────────────────────────────────────────────────────────────────────────── */
+  UI.LOGIN_WITH = {
+    tistory: { label: "카카오 계정", hint: "티스토리는 카카오 계정으로 로그인해요. 카카오 아이디와 비밀번호를 적어 주세요." },
+    naver_blog: { label: "네이버 아이디", hint: "네이버 아이디와 비밀번호를 적어 주세요." },
+    daangn: { label: "당근 계정", hint: "당근 앱에 쓰는 번호로 로그인해요." },
+  };
+  /** 채널이 «무엇으로» 로그인하나 — 표에 없으면 방식으로만 말한다(모르는 것을 지어내지 않는다 · AC-9). */
+  UI.loginWith = (c) => {
+    const k = c && (c.key || c); const w = UI.LOGIN_WITH[k]; if (w) return w;
+    const m = c && c.connectMethod;
+    if (m === "oauth") return { label: "채널 로그인 창", hint: "채널 로그인 창으로 옮겨 가서 허용만 누르면 돼요." };
+    if (m === "app_password") return { label: "앱 비밀번호", hint: "채널에서 만든 «앱 비밀번호»를 적어 주세요. 평소 비밀번호가 아니에요." };
+    return null;
+  };
+  /** 이 채널의 로그인 창을 **내 PC 프로그램이 여나** — session 방식이 그렇다(러너가 브라우저를 띄운다). */
+  UI.needsPc = (c) => !!c && c.connectMethod === "session";
   UI.loginState = (a) => (a && a.lastErrorKind)
     ? { first: false, why: UI.errk(a.lastErrorKind), cta: "다시 로그인", lead: "의 로그인이 풀렸어요", done: "다시 로그인했어요" }
     : { first: true, why: "아직 로그인 전이에요 · 한 번만 하면 돼요", cta: "로그인하기", lead: "로 로그인할 차례예요", done: "로그인했어요" };

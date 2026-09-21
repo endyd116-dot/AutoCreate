@@ -16,6 +16,9 @@
 <div class="step-h"><h1>설정</h1></div>
 <div id="closeBn"></div>
 <div class="group" id="takedown" hidden></div>
+<!-- [AC-188 · DESIGN §5B.11 · §13.0b «그룹 리스트 + 토글»] 🔴 잠깐 멈춤 — 쉬는 중이면 이 자리가 «쉬는 중 · N일째 + 다시 시작» 한 줄이 된다.
+     🔴 «만드는 것»보다 **위**에 둔다: 쉬는 중에 설정을 열면 제일 먼저 보여야 «크론 멈춘 걸 까먹는» 일이 없다(사장님 물음). -->
+<div class="group" id="pauseg"><div class="gt">자동으로 만들고 올리기</div><div id="pauseBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
@@ -67,6 +70,96 @@ const me = await UI.boot("account"); if (!me) return;
 /* [R7 §1.1] 영상 만들기 — GET/POST /api/tenant-settings { kinds, kindsSet }.
    🔴 «글»은 밑바탕이라 서버가 항상 남긴다(영상만 켜는 길은 없다) · kindsSet=false(온보딩 안 거친 테넌트)도 토글은 보이고 «꺼짐» 이다.
    영상 채널이 하나도 연결 안 돼 있어도 켤 수 있다 — 만든 뒤 «앱에서 직접 올리기» 로 간다(§1.2). */
+/* ── [AC-188 · DESIGN §5B.11 · 사장님 2026-09-22 «근본적인 잠깐 멈춤»] ────────────────────────────
+   사장님 물음이 둘이었다: ①«잠시 멈추고 싶은데 그 기능이 없어?» ②🔴**«근데 크론 멈췄다는 걸 내가 까먹으면 어떡해?»**
+   ②가 이 화면의 뼈대다 — 그래서 **쉬는 중에는 이 자리가 «N일째»를 늘 말하고**, 홈 첫 화면에도 같은 한 줄이 뜬다.
+   🔴 **N 을 화면이 셈하지 않는다**(§(1-c) · AC-52) — `pause.days`·`pause.daysLeft` 는 서버가 KST 로 센 값이다.
+   🔴 **겁주지 않는다**(§3): «멈추면 수익이 줄어요» 금지. 사실 한 줄 + 되돌릴 길.
+   🔴 **서버가 아직 `pause` 를 안 실어 주면 토글을 «준비 중»으로 잠근다** — 눌러도 아무 일이 안 나는 토글이 제일 나쁘다(AC-9).
+   ── 🔴 B 에게(A · **2026-09-22** · 메인 경유) ────────────────────────────────────────────────
+     §(1-d) ②«저절로 깬 손님»이 고르려면 **resume 을 안 부르고도** 밀린 글이 있다는 걸 알아야 한다.
+     ⇒ `pause` 객체에 **`backlog: { count }`** 를 같이 실어 달라(resume 응답과 **같은 모양**). 그거 하나면 홈·설정 둘 다 그린다.
+     안 오면 이 화면은 그 줄을 **안 그린다**(없는 것을 지어내지 않는다) — 그러면 저절로 깬 손님은 못 고른다(그게 이 기능의 구멍이다).
+   ────────────────────────────────────────────────────────────────────────────────────── */
+let PAUSE = null;
+const pauseRow = (html) => `<div class="row">${html}</div>`;
+async function loadPause() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  PAUSE = r.ok && r.pause && typeof r.pause === "object" ? r.pause : null;
+  drawPause();
+}
+function drawPause() {
+  const box = UI.$("#pauseBody"); if (!box) return;
+  if (!PAUSE) {
+    /* 서버가 아직 이 칸을 안 준다 — **거짓으로 켜지지 않게** 잠근 채 사실만 적는다(§3 · AC-9). */
+    box.innerHTML = pauseRow(`<div class="l"><span class="t">잠깐 쉬기</span><span class="d wrap">준비 중이에요 — 곧 여기서 한 번에 쉬고, 언제든 다시 시작할 수 있어요.</span></div><span class="pill off">곧</span>`);
+    return;
+  }
+  if (PAUSE.paused) {
+    const when = PAUSE.pausedAt ? `${UI.dateKST(PAUSE.pausedAt)}부터 · ` : "";
+    const left = PAUSE.daysLeft != null ? ` · ${UI.num(PAUSE.daysLeft)}일 뒤에 저절로 다시 시작해요` : "";
+    box.innerHTML = pauseRow(`<div class="l"><span class="t">지금은 쉬고 있어요</span><span class="d wrap">${UI.esc(when)}${PAUSE.days != null ? `${UI.num(PAUSE.days)}일째` : "쉬는 중"}${UI.esc(left)}</span></div><button type="button" class="btn sm secondary" id="pResume">다시 시작</button>`)
+      + backlogRow();
+    const br = UI.$("#pResume"); if (br) br.onclick = doResume;
+    bindBacklog();
+    return;
+  }
+  box.innerHTML = `<div class="fr"><div class="fl">자동으로 만들고 올려요<small>쉬고 싶을 땐 꺼 두세요 · 언제든 다시 켤 수 있어요</small></div><button class="toggle" type="button" id="pTg" aria-checked="true"></button></div>`;
+  /* 🔴 토글을 **끄는 순간 바로 멈추지 않는다** — «언제까지»를 반드시 고르게 한다(§(3)). 그래서 토글은 시트를 열고, 돌아온 값으로 그린다. */
+  UI.toggle(UI.$("#pTg"), async (next) => { if (next) return undefined; pauseSheet(); return false; });
+}
+/** 🔴 §(1-d) ② — **저절로 깬 손님**도 여기서 고른다(resume 을 안 불렀어도). 서버가 수를 안 주면 안 그린다. */
+function backlogRow() {
+  const n = PAUSE && PAUSE.backlog && Number(PAUSE.backlog.count);
+  if (!n) return "";
+  return pauseRow(`<div class="l"><span class="t">쉬는 동안 밀린 글이 ${UI.num(n)}건 있어요</span><span class="d wrap">지금부터 차례로 올릴지, 그냥 둘지 고르실 수 있어요.</span></div><button type="button" class="btn sm secondary" id="pBacklog">고르기</button>`);
+}
+function bindBacklog() { const b = UI.$("#pBacklog"); if (b) b.onclick = () => backlogSheet(Number(PAUSE.backlog.count)); }
+function pauseSheet() {
+  const reasons = (PAUSE && PAUSE.reasons) || [];
+  /* 🔴 «무엇이 멈추나»를 **끄기 전에 세 줄**로(§9-① 또렷하게 · §5B.11 (1) 표의 왼쪽). 겁주는 문장이 아니라 사실이다. */
+  UI.sheet(`<div class="group" style="background:var(--ground);margin:0 0 14px"><div class="gt">쉬는 동안</div>
+    <div class="kv"><span class="k">새 자리</span><span class="v">안 만들어요</span></div>
+    <div class="kv"><span class="k">만들기 · 코인</span><span class="v">안 나가요</span></div>
+    <div class="kv"><span class="k">예약된 글</span><span class="v">그대로 두고 기다려요</span></div></div>
+    <p class="muted" style="margin:0 0 14px;font-size:13px;line-height:1.6">만든 글은 그대로 보고 고칠 수 있고, <b style="color:var(--ink)">«지금 올리기»는 그대로 돼요</b>. 언제든 다시 시작할 수 있어요.</p>
+    <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">언제까지 쉴까요</div>${UI.chips("until", [["2w", "2주"], ["1m", "한 달"], ["manual", "내가 켤 때까지"]], "2w")}</div>
+    ${reasons.length ? `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">왜 쉬시나요<small>안 고르셔도 돼요</small></div>${UI.chips("preason", reasons.map((x) => [x.key, x.label]), "")}</div>` : ""}
+    <div class="cta"><button class="btn primary" type="button" id="pGo">쉬기</button></div>`,
+  { title: "언제까지 쉴까요", onOpen: (sh, close) => {
+    UI.bindChips(sh);
+    sh.querySelector("#pGo").onclick = async (e) => { e.currentTarget.disabled = true;
+      const body = { until: UI.chipVal(sh, "until") || "2w" };
+      const why = reasons.length ? UI.chipVal(sh, "preason") : ""; if (why) body.reason = why;
+      const r = await UI.api("/api/tenant-pause", { body });
+      if (!r.ok) { e.currentTarget.disabled = false; return UI.toast(r.error || "쉬지 못했어요"); }
+      PAUSE = r.pause || PAUSE; close(); UI.toast("쉬고 있을게요 · 언제든 다시 시작할 수 있어요"); drawPause(); };
+  } });
+}
+async function doResume() {
+  const r = await UI.api("/api/tenant-resume", { body: {} });
+  if (!r.ok) return UI.toast(r.error || "다시 시작하지 못했어요");
+  PAUSE = r.pause || PAUSE; drawPause();
+  const n = r.backlog && Number(r.backlog.count);
+  UI.toast("다시 시작했어요");
+  if (n) backlogSheet(n);   /* 🔴 밀린 글이 있으면 **그 자리에서** 고르게 한다(§(1-b)) — 우리가 대신 정하지 않는다(§9) */
+}
+/** 🔴 §(1-b) — 우리가 판단하지 않는다. 말해 주고 **고르는 것은 고객**이다. 어느 쪽도 글을 버리지 않는다. */
+function backlogSheet(n) {
+  UI.sheet(`<p style="margin:0 0 6px;font-size:15px;line-height:1.6">쉬는 동안 올릴 때가 지난 글이 <b style="color:var(--ink)">${UI.num(n)}건</b> 있어요.</p>
+    <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6">한 번에 쏟지 않고 <b style="color:var(--ink)">계정마다 정해 둔 간격을 지켜</b> 앞으로의 시각에 차례로 올려요. 그냥 두셔도 글은 그대로 있어요 — 나중에 올리셔도 돼요.</p>
+    <div class="cta"><button class="btn primary" type="button" data-act="publish">지금부터 차례로 올릴게요</button></div>
+    <div style="padding:8px 0 0"><button class="btn ghost" type="button" data-act="leave" style="width:100%">이건 그냥 둘게요</button></div>`,
+  { title: "밀린 글이 있어요", onOpen: (sh, close) => {
+    sh.querySelectorAll("[data-act]").forEach((b) => b.onclick = async (e) => {
+      const act = e.currentTarget.dataset.act; e.currentTarget.disabled = true;
+      const r = await UI.api("/api/tenant-backlog", { body: { action: act } });
+      if (!r.ok) { e.currentTarget.disabled = false; return UI.toast(r.error || "바꾸지 못했어요"); }
+      close(); UI.toast(act === "publish" ? "차례로 올릴게요" : "그대로 둘게요"); loadPause(); });
+  } });
+}
+loadPause();
+
 async function loadKinds() {
   const r = await UI.api("/api/tenant-settings", { noGate: true });
   const on = r.ok && (r.kinds || []).includes("video");
