@@ -185,6 +185,33 @@ notes.push("■ ⑦ 두 문 — `tenant-settings` 와 `home-summary` 가 **같�
   }
 }
 
+/* ───────── ⑧ 🔴 **저절로 깬 손님에게 닿나** — 이 기능의 마지막 구멍(설계 §5B.11(1-d)②) ─────────
+   🔴 **이 축이 없어서 33축이 전부 초록인 채로 구멍이 열려 있었다**(2026-09-23 메인이 열어 보고 찾았다).
+      `backlog` 가 `POST /api/tenant-resume` **응답에만** 있었고, `pause_until` 이 지나 크론이 **저절로 깨운 집**은
+      그 문을 **아예 안 부른다** ⇒ 그 손님은 «밀린 글 N건»을 **영영 못 보고 영영 못 고른다.**
+   ⇒ «구조가 맞나»를 아무리 꼼꼼히 재도 **«화면 값까지 닿나»를 안 재면 초록인 채로 고장 난다.** 오늘 종일 잡은 그 모양이다. */
+notes.push("■ ⑧ 🔴 저절로 깬 손님 — 화면 값에 `backlog` 가 닿나(33축이 초록인 채 열려 있던 구멍)");
+{
+  (/backlog: \{ count: number \}/.test(T[PAUSE]) ? ok : bad)("⑧", "🔴 `PauseView` 가 `backlog` 를 **계약에 적는다**(타입만 보는 사람도 안다)");
+  const lp = blockOf(T[PAUSE], "export async function loadPause", ["\n}"]);
+  if (!lp) unk("⑧", "`loadPause` 를 못 찾았다");
+  else {
+    (/countBacklog\(tid\)/.test(lp.body) ? ok : bad)("⑧", "🔴 `loadPause` 가 **밀린 글을 같이 센다**(두 문이 그걸 그대로 싣는다)");
+    /* 🔴 **«쉬는 집에서만» 세면 안 된다** — 저절로 깬 손님은 `paused=false` 다. 조건이 붙으면 그 손님이 다시 못 본다. */
+    (/if \(.*paused/.test(lp.body) ? bad : ok)("⑧", "🔴 그 셈에 **`paused` 조건이 안 붙었다**(깬 손님이 `paused=false` 라 조건이 붙으면 못 본다)");
+  }
+  const pv = blockOf(T[PAUSE], "export function pauseViewOf", ["\n}"]);
+  if (!pv) unk("⑧", "`pauseViewOf` 를 못 찾았다");
+  else {
+    /* 🔴 **이른 반환에도 실리나** — 안 쉬는 집의 갈래가 바로 그 «저절로 깬 손님»이다. 거기서 빠지면 기능이 통째로 안 닿는다. */
+    const early = pv.body.slice(0, pv.body.indexOf("const days"));
+    (/backlog: \{ count: backlog \}/.test(early) ? ok : bad)("⑧", "🔴 **안 쉬는 갈래(이른 반환)에도** `backlog` 가 실린다 — 여기가 그 손님의 유일한 통로다");
+    (/backlog: \{ count: backlog \}/.test(pv.body.slice(early.length)) ? ok : bad)("⑧", "쉬는 갈래에도 실린다(두 갈래가 같은 모양)");
+  }
+  /* 🔴 **모양이 `resume` 응답과 같나** — 두 벌이면 화면이 갈린다(설계 (1-c)). */
+  (/backlog: \{ count: r\.backlog \}/.test(T[API]) ? ok : bad)("⑧", "`tenant-resume` 응답도 `{ count }` 로 같은 모양이다");
+}
+
 /* ───────── 찍기 ───────── */
 console.log("─".repeat(100));
 console.log(`잠깐 멈춤 — 축 ${notes.filter((l) => /^  [✓✗⊘]/.test(l)).length}개 · 어긋난 곳 ${fails.length}`);
@@ -245,6 +272,14 @@ const MUT = [
   ["🔴 깨우기가 밀린 글을 올려 버린다", (b) => { b[API] = b[API].replace("const r = await resumeTenant(tid);", "const r = await resumeTenant(tid); await releaseBacklog(tid);"); }, "⑤"],
   ["🔴 «N일째»를 0일째부터 센다",       (b) => { b[PAUSE] = b[PAUSE].replace("kstDayNo(now) - kstDayNo(pausedAt) + 1", "kstDayNo(now) - kstDayNo(pausedAt)"); }, "⑥"],
   ["🔴 «N일째»를 UTC 로 센다",          (b) => { b[PAUSE] = b[PAUSE].replace("const kstDayNo = (d: Date): number => Math.floor((d.getTime() + KST_MS) / 86400_000);", "const kstDayNo = (d: Date): number => Math.floor(d.getTime() / 86400_000);"); }, "⑥"],
+  /* 🔴 **어제까지 열려 있던 그 구멍 셋** — 33축이 전부 초록인 채로 손님에게 안 닿던 자리다. */
+  ["🔴 `loadPause` 가 밀린 글을 안 센다", (b) => { b[PAUSE] = b[PAUSE].replace("    countBacklog(tid),\n", "    Promise.resolve(0),\n"); }, "⑧"],
+  ["🔴 쉬는 집에서만 센다(깬 손님이 못 본다)", (b) => {
+    b[PAUSE] = b[PAUSE].replace("    countBacklog(tid),", "    (async () => { const v = await q(sql`SELECT paused_at FROM tenants WHERE id = ${tid}`); if (!v[0]?.paused_at) return 0; return countBacklog(tid); })(),");
+  }, "⑧"],
+  ["🔴 안 쉬는 갈래에서 `backlog` 를 뺀다", (b) => {
+    b[PAUSE] = b[PAUSE].replace("reasons: PAUSE_REASONS, backlog: { count: backlog } };", "reasons: PAUSE_REASONS };");
+  }, "⑧"],
 ];
 let silent = 0;
 for (const [name, tf, axis] of MUT) {

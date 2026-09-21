@@ -76,6 +76,15 @@ export interface PauseView {
   /** 🔴 저절로 깰 때까지 남은 날. `manual`(= `pause_until` 없음)이면 **null**. 안 쉬면 null. */
   daysLeft: number | null;
   reasons: readonly { key: string; label: string }[];
+  /**
+   * 🔴 [AC-221] **쉬는 동안 밀린 글 수** — 설계 §5B.11(1-d)②.
+   *   🔴 **`paused` 와 무관하게 늘 싣는다.** 여기가 이 기능의 마지막 구멍이었다:
+   *      `pause_until` 이 지나 크론이 **저절로 깨운 집**은 `POST /api/tenant-resume` 을 **아예 안 부른다** —
+   *      그 응답에만 실어 두면 그 손님은 «밀린 글 N건»을 **영영 못 보고 영영 못 고른다.**
+   *   🔴 «안 온다»와 «0이다»는 화면에서 다른 말이라, **없을 때도 `{ count: 0 }`** 으로 준다(칸이 사라지지 않는다 · AC-9).
+   *   모양은 `POST /api/tenant-resume` 응답의 `backlog` 와 **같다** — 화면이 한 벌로 그린다.
+   */
+  backlog: { count: number };
 }
 
 export interface PauseRow { paused_at?: unknown; pause_until?: unknown; pause_reason?: unknown; pause_notified_at?: unknown }
@@ -84,11 +93,13 @@ export interface PauseRow { paused_at?: unknown; pause_until?: unknown; pause_re
  * 행 → 화면 모양. 🔴 **순수 함수**(DB·환경 0) — 그래서 자가 경계 시각을 직접 먹여 KST 셈을 잴 수 있다.
  *   `days` 는 «첫날 = 1일째»: 같은 KST 날짜면 1, 하루 지나면 2 …
  */
-export function pauseViewOf(row: PauseRow | null | undefined, now: Date = new Date()): PauseView {
+export function pauseViewOf(row: PauseRow | null | undefined, now: Date = new Date(), backlog = 0): PauseView {
   const pausedAt = utcDate(row?.paused_at);
   const until = utcDate(row?.pause_until);
+  /* 🔴 [AC-221] **`backlog` 는 이 이른 반환에도 실린다.** 안 쉬는 집이야말로 «저절로 깬 손님»이고,
+     그 손님이 밀린 글을 고를 마지막(그리고 유일한) 통로가 이 칸이다. 여기서 빠뜨리면 기능이 통째로 안 닿는다. */
   if (!pausedAt) {
-    return { paused: false, pausedAt: null, pauseUntil: null, reason: null, days: null, daysLeft: null, reasons: PAUSE_REASONS };
+    return { paused: false, pausedAt: null, pauseUntil: null, reason: null, days: null, daysLeft: null, reasons: PAUSE_REASONS, backlog: { count: backlog } };
   }
   const days = kstDayNo(now) - kstDayNo(pausedAt) + 1;            // 🔴 +1 = «첫날이 1일째»
   const daysLeft = until ? Math.max(0, kstDayNo(until) - kstDayNo(now)) : null;
@@ -100,16 +111,24 @@ export function pauseViewOf(row: PauseRow | null | undefined, now: Date = new Da
     days: Math.max(1, days),
     daysLeft,
     reasons: PAUSE_REASONS,
+    backlog: { count: backlog },
   };
 }
 
 /** 쉬는 중인가 — 🔴 **`paused_at` 하나가 정본**이다(`status` 를 안 본다). */
 export const isPausedRow = (row: PauseRow | null | undefined): boolean => !!utcDate(row?.paused_at);
 
-/** 이 집의 쉼 상태를 읽는다(두 문이 같은 이것을 쓴다 — 두 벌로 만들지 않는다). */
+/**
+ * 이 집의 쉼 상태를 읽는다(두 문이 같은 이것을 쓴다 — 두 벌로 만들지 않는다).
+ *   🔴 [AC-221] **밀린 글 수를 «쉬든 안 쉬든» 같이 센다.** 쉬는 집에서만 세면 **저절로 깬 손님**이 못 고른다(§5B.11(1-d)②).
+ *   셈은 `pieces_tenant_status_idx`(tenant_id, status) 를 그대로 타는 COUNT 한 번이다 — 자주 불리는 문 둘에 들어가도 싸다.
+ */
 export async function loadPause(tid: number): Promise<PauseView> {
-  const rows = await q(sql`SELECT paused_at, pause_until, pause_reason, pause_notified_at FROM tenants WHERE id = ${tid}`);
-  return pauseViewOf(rows[0] as PauseRow | undefined);
+  const [rows, backlog] = await Promise.all([
+    q(sql`SELECT paused_at, pause_until, pause_reason, pause_notified_at FROM tenants WHERE id = ${tid}`),
+    countBacklog(tid),
+  ]);
+  return pauseViewOf(rows[0] as PauseRow | undefined, new Date(), backlog);
 }
 
 /* ───────── 밀린 글 ─────────
