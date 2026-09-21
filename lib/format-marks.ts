@@ -252,6 +252,12 @@ export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new
   if (Object.keys(applied).length) base.applied = applied;
   /* 러너의 `kept` 는 서버 `kept` 와 같아야 정상이다 — 다르면 러너 값을 **덮지 않고** 서버 값을 둔다(서버가 내려보낸 수가 사실이다). 서버 값이 없을 때만 받는다. */
   if (!base.kept) { const k = counts(r.kept); if (Object.keys(k).length) base.kept = k as Partial<Record<MarkKind, number>>; }
+  /* 🔴 [2026-09-22 · AC-193] **`planned` 에는 이 줄이 없었다** — 러너가 보내도 **한 번도 안 읽었다.**
+     `kept` 는 바로 위처럼 «서버 값이 없을 때만 받는다»고 적혀 있는데 `planned` 만 빠져 있었다.
+     대개는 서버가 생성 때 이미 적어 두므로 티가 안 났지만, **없을 때 채울 길이 없어** 그 글은 영영 «계획을 모르는 글»로 남았다.
+     ⇒ 옆줄과 **같은 눈**으로 맞춘다: 서버 값이 비었을 때만 러너 값을 받는다(덮지 않는다).
+     🔴 이 칸을 찾아낸 것은 `scripts/verify-formatmarks-contract.mjs` 다 — 흰 목록에서 값을 잃은 **다섯 번째**였다. */
+  if (!Object.keys(base.planned ?? {}).length) { const pl = counts(r.planned); if (Object.keys(pl).length) base.planned = pl as Partial<Record<MarkKind, number>>; }
   const num = (v: unknown): number | undefined => { const n = Number(v); return v !== undefined && v !== null && Number.isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : undefined; };
   const breaks = num(r.breaks), breakFails = num(r.breakFails), bleed = bleedOf(r.bleed), htmlMode = num(r.htmlMode);
   if (breaks !== undefined) base.breaks = Math.floor(breaks);
