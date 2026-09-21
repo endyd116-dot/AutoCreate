@@ -17,7 +17,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { codeOnly, countInCode } from "./_lib/code-only.mjs";
+import { codeOnly, codeOnlyKeepIndex, countInCode } from "./_lib/code-only.mjs";
 
 const NL = String.fromCharCode(10);
 const S2 = "/" + "/";
@@ -88,6 +88,26 @@ console.log("④ 🔴 실물로 — 러너 소스를 통째로 먹여 본다");
   ok("render-video 의 `eof_action=repeat` 이 코드에 **정확히 1곳**", countInCode(rv, "eof_action=repeat") === 1, String(countInCode(rv, "eof_action=repeat")));
   ok("🔴 `eof_action=pass` 는 코드에 **0곳**(주석에는 여럿 있다)", countInCode(rv, "eof_action=pass") === 0, String(countInCode(rv, "eof_action=pass")));
   ok("그 낱말이 **원본에는** 있다(= 위 0곳이 «파일을 못 읽어서»가 아니다)", rv.includes("eof_action=pass"));
+}
+
+console.log("④b 🔴 자리 표 보존판(`codeOnlyKeepIndex`) — 순서 판정이 살아 있나(2026-09-22 · AC-193)");
+{
+  /* 🔴 이 갈래를 만든 까닭이 **순서**다 — 「어느 쪽이 먼저 나오나」를 `indexOf` 로 재는 자는
+     주석을 통째로 빼면 자리가 밀려 **답이 달라진다**. 그래서 «걷혔나»와 «자리가 그대로인가»를 **둘 다** 못으로 박는다. */
+  const src = [`const A = 1; ${S2} 비밀글자 여기`, `${BOPEN} 비밀글자 ${BCLOSE}`, "const B = 2;"].join(NL);
+  const kept = codeOnlyKeepIndex(src);
+  ok("걷힌다 — 주석 낱말은 사라진다", !kept.includes("비밀글자"));
+  ok("🔴 길이가 그대로다(= 자리 표가 안 밀린다)", kept.length === src.length, `${kept.length} ≠ ${src.length}`);
+  ok("🔴 줄 수가 그대로다", kept.split(NL).length === src.split(NL).length);
+  ok("🔴 코드의 자리가 원문과 **같은 곳**이다", kept.indexOf("const B") === src.indexOf("const B"));
+  ok("🔴 순서가 뒤집히지 않는다", kept.indexOf("const A") < kept.indexOf("const B"));
+  ok("`https://` 는 주석이 아니다(같은 눈)", codeOnlyKeepIndex(`const u = "https${S2}x"; ${S2} 비밀글자`).includes("https"));
+  /* 🔴 **대조군**(AC-99 ⑫) — 「전부 공백으로 바꾸는 함수」도 위 넷은 통과한다. 코드가 남았나를 같이 본다. */
+  ok("대조군 — 코드는 안 걷힌다", kept.includes("const A = 1;") && kept.includes("const B = 2;"));
+  /* 🔴 **두 갈래가 같은 눈인가** — 한쪽만 고치면 또 갈린다(이 파일이 태어난 까닭). */
+  const strip = (s) => codeOnlyKeepIndex(s).replace(/ +/g, " ").trim();
+  ok("🔴 두 갈래가 같은 것을 걷는다(걷는 눈이 하나다)",
+    strip(`const a = 1; ${S2} 비밀글자`).includes("const a = 1;") && !codeOnly(`const a = 1; ${S2} 비밀글자`).includes("비밀글자"));
 }
 
 console.log("⑤ ⚠️ **아직 못 하는 것** — 못으로 박는다(누가 고치면 여기가 빨개지고, 그때 머리말도 같이 고친다)");
