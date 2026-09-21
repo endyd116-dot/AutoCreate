@@ -462,12 +462,34 @@ GET /api/tenant-settings · GET /api/home-summary  →  pause: {
   daysLeft,   // 🔴 자동으로 깰 때까지 남은 날 · manual 이면 null
   reasons: [{ key, label }]   // vacation · editing · channel_penalty · cost · other
 }
-POST /api/tenant-pause  { until: "2w"|"1m"|"manual", reason? }   // until 없으면 400((3) «반드시 고르게»)
-POST /api/tenant-resume { }
+POST /api/tenant-pause   { until: "2w"|"1m"|"manual", reason? }   // until 없으면 400((3) «반드시 고르게»)
+POST /api/tenant-resume  { }                     → { ok, pause, backlog: { count } }   // 깨우고 «세기만»
+POST /api/tenant-backlog { action: "publish" | "leave" }                               // 고른 것을 «집행»
 ```
 
 🔴 `days`·`daysLeft`·`label` 을 **서버가 주는 것이 핵심**이다 — 안 주면 화면이 **날짜를 셈하고 말을 지어낸다**(AC-52·AC-74).
 🔴 **두 문이 같은 `pause` 객체**를 싣는다(두 벌로 만들지 않는다).
+
+#### (1-d) 🔴 깨우기와 고르기를 **가른다**(B 가 짚었다 · 2026-09-22)
+
+> 처음 계약은 `tenant-resume { }` 하나였다. **그것만으로는 (1-b) 의 단추 둘을 못 그린다.**
+> 🔴 그리고 결정적으로 — **저절로 깬 집**(`pause_until` 이 지나 `pauseWatchStep` 이 깨운 집)은 `tenant-resume` 를 **아예 안 부른다.**
+> 손님은 **알림을 보고 화면에 들어온다.** ⇒ **그 길에도 고를 문이 있어야 한다.**
+
+| 문 | 하는 일 |
+|---|---|
+| `tenant-resume` | 깬다 · 밀린 글을 **센다**(`backlog.count`) — 화면은 **숫자만** 받는다 |
+| `tenant-backlog` | 고른 것을 **집행한다** — `publish` = 🔴 **캐던스(§7.4 `daily_cap`·`min_gap`)를 지켜 앞으로의 시각에 다시 예약** · `leave` = `pending_resume` **그대로 둔다**(🔴 버리지 않는다 · 나중에 마음이 바뀔 수 있다) |
+
+🔴 **화면이 둘이다**: ①손님이 «다시 시작»을 누른 순간 ②**저절로 깬 뒤 들어왔을 때**(홈·알림).
+**②를 빠뜨리면 저절로 깬 손님은 영영 못 고른다** — 이 기능에서 제일 빠지기 쉬운 자리다.
+
+#### (1-e) 🔴 «모르는 상태»는 화면에 **키 글자 그대로** 나온다(B 실측 · 2026-09-22)
+
+`public/js/ui.js` 의 `UI.pill = (map, s) => { const p = map[s] || ["off", s]; … }`
+⇒ `UI.PIECE_STATUS`·`UI.SLOT_STATUS` **두 표에 낱말을 안 넣으면 손님 화면에 «pending_resume»** 이 뜬다(§3 시스템 용어 금지).
+· 🔴 **새 상태를 만드는 사람은 «두 표에 낱말을 넣는 것»까지가 그 일이다**(§4.8 «완료»의 정의).
+· 색은 **`off`**(기다리는 것) — `warn`(사고) 아니다. §3 «겁주지 않는다».
 
 #### (2) 데이터
 
