@@ -88,10 +88,16 @@ rec("서버에만 있고 모의가 한 번도 안 보여 주는 심사 축", axU
 /* ───────── ② 글 발행 전 검사(서버 GATE_LABEL ↔ 모의 checks) ───────── */
 const gtSrv = objectMap(gateTs, "GATE_LABEL") || new Map();
 const gtMock = new Map();
-for (const m of mockJs.matchAll(/\{\s*key:\s*"([a-z_0-9]+)",\s*label:\s*"([^"]*)"/g)) gtMock.set(m[1], m[2]);
+/* 🔴 [AC-188 · A 2026-09-22] **과녁을 좁혔다.** 이 줄은 모의 파일 **전체**에서 `{ key, label }` 꼴을 긁고 있었다 —
+   그래서 «검사 축»과 아무 상관 없는 새 목록이 생기면 그날로 이 축이 빨개진다. 실제로 그랬다:
+   잠깐 멈춤의 «왜 쉬시나요» 보기(`PAUSE_REASONS` — vacation·editing…)가 **글 검사 축으로 읽혔다.**
+   🔴 검사 축은 **결과가 있는 것**이다 — 바로 뒤에 `pass:` 가 온다. 그것만 센다(무르게 하는 게 아니라 **과녁을 맞히는 것**).
+   🔴 이 줄을 고치다 한 번 **거짓 초록**을 냈다: 스크립트로 `\b` 를 써 넣었더니 **백스페이스 문자(0x08)** 가 박혀
+      정규식이 아무것도 못 잡고 «모의 0칸 · 통과»가 됐다. 0칸은 통과가 아니다 — 아래 `gtMock.size` 를 **같이 본다**. */
+for (const m of mockJs.matchAll(/\{\s*key:\s*"([a-z_0-9]+)",\s*label:\s*"([^"]*)"[^}]{0,120}?pass\s*:/g)) gtMock.set(m[1], m[2]);
 const gtMissing = minus(new Set(gtMock.keys()), new Set(gtSrv.keys()));
 const gtLabelDiff = [...gtMock].filter(([k, v]) => gtSrv.has(k) && gtSrv.get(k) !== v).map(([k, v]) => `${k}: 모의 «${v}» ≠ 서버 «${gtSrv.get(k)}»`);
-rec("🔴 글 검사 — 모의 키 − 서버 키 = 0", gtMissing.length === 0, gtMissing.join(" ") || `서버 ${gtSrv.size}칸 · 모의 ${gtMock.size}칸`, gtMissing);
+rec("🔴 글 검사 — 모의 키 − 서버 키 = 0", gtMissing.length === 0 && gtMock.size > 0, gtMock.size === 0 ? "모의에서 검사 축을 **하나도 못 읽었다** — 자가 눈이 먼 것이다(0칸을 통과로 세지 않는다)" : gtMissing.join(" ") || `서버 ${gtSrv.size}칸 · 모의 ${gtMock.size}칸`, gtMissing);
 rec("🔴 글 검사 — 라벨 글자가 서버와 같다(통과형 문장)", gtLabelDiff.length === 0, gtLabelDiff.slice(0, 4).join(" | ") || "같음", gtLabelDiff);
 /* 🔴 위 두 줄은 «모의 ⊂ 서버»만 본다 — **서버에 축이 생겨도 화면이 안 그리면 조용하다**(2026-09-15: structure_repeat·ad_pointing 이 그렇게 지나갔다).
    영상 축엔 이미 같은 검사가 있었는데 글 축엔 없었다. 🔴 새 축은 «화면에 한 번이라도 보이나»까지가 완료다(CLAUDE §4.8). */

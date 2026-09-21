@@ -277,6 +277,9 @@
   /* [AC-187 · AC-201] `?addr=ask|ok|again` — «이 계정 주소가 맞나요»의 세 상태(계정 1번에 붙인다).
      🔴 손잡이가 없으면 `identity` 자체가 **없다** — 그게 대부분의 계정이고, «아직 모른다»를 «틀렸다»로 그리지 않는지 보는 기본값이다(AC-9). */
   const addrKnob = qs.get("addr") || "";
+  /* [AC-188] `?pause=on` 쉬는 중(2주) · `?pause=auto` 자동으로 깰 날이 가까움 · `?pause=backlog` 쉬는 중 + 밀린 글 3건(저절로 깬 손님이 고르는 길).
+     🔴 손잡이가 없으면 **안 쉬는 집**이다 — 그게 기본이다. */
+  const pauseKnob = qs.get("pause") || "";
   /* [P1R5] 영상 손잡이 — ?stage=script|tts|clips|render|judging|done|failed(만드는 중 영상의 단계 고정) · ?judge=P0|P1|P2(검수 영상 심사 등급) · ?noFfmpeg=1(내 PC 프로그램 caps.ffmpeg=false) · ?uploaded=private(발행함 비공개 업로드 행) · ?videoBudget=0(달러 캡 초과 step budget) */
   const vStage = qs.get("stage") || "", vJudge = qs.get("judge") || "", noFfmpeg = qs.get("noFfmpeg") === "1", uploadedKnob = qs.get("uploaded") || "", videoBudget = qs.get("videoBudget") || "";
   const VIDEO_CH = ["youtube_shorts", "naver_clip", "reels", "threads"];                       // §0.2 VideoChannel
@@ -349,6 +352,20 @@
      `accounts-list` 와 `plans` **둘 다**에 싣는다(`coins:{table,labels}` · lib/billing/packs.ts loadPacksAndTable).
      모의가 `plans` 에만 싣고 있어서, **계정·디렉터·편성표만 여는 길**(모의로 화면을 보는 흔한 길)에서는 표가 한 번도 안 왔다.
      ⇒ 한 벌로 묶어 두 문에 같이 싣는다. 🔴 값·글자는 `lib/coin-table.ts`(COIN_TABLE · COIN_ITEM_LABEL) 그대로다 — 여기서 짓지 않는다. */
+  /* ── [AC-188 · §5B.11 (1-c)] 잠깐 멈춤 — 🔴 **서버가 세는 값**(days·daysLeft)을 여기서 센다. 화면은 받아 그리기만 한다.
+       KST 달력 날짜로 센다(§4.5b) · 🔴 **첫날 = 1일째**(«오늘 멈췄는데 0일»이 되면 안 된다). */
+  const kdayOf = (ms) => Math.floor((ms + 9 * 3600e3) / 86400e3);
+  const PAUSE_REASONS = [{ key: "vacation", label: "여행·휴가" }, { key: "editing", label: "글을 손보는 중" }, { key: "channel_penalty", label: "채널에서 제재를 받았어요" }, { key: "cost", label: "비용을 아끼려고" }, { key: "other", label: "그 밖" }];
+  const pausePayload = () => {
+    const P = S.pause;
+    if (!P) return { paused: false, pausedAt: null, pauseUntil: null, reason: null, days: null, daysLeft: null, reasons: PAUSE_REASONS };
+    const st = UI.utc(P.pausedAt).getTime();
+    const until = P.until === "2w" ? st + 14 * 86400e3 : P.until === "1m" ? st + 30 * 86400e3 : null;
+    const o = { paused: true, pausedAt: P.pausedAt, pauseUntil: until ? iso(until) : null, reason: P.reason,
+      days: kdayOf(Date.now()) - kdayOf(st) + 1, daysLeft: until ? Math.max(0, kdayOf(until) - kdayOf(Date.now())) : null, reasons: PAUSE_REASONS };
+    if (P.backlog) o.backlog = { count: P.backlog };   // 🔴 §(1-d) ② 저절로 깬 손님도 고를 수 있게
+    return o;
+  };
   const COIN_PAYLOAD = {
     table: { blog: 1, image: 1, cardnews: 3, sns: 1, landing: 4, video_clip: 2, video_15: 6, video_30: 12, video_60: 28, video_90: 42, persona: 15, image_regen: 1, post_simple: 1, post_standard: 2, post_premium: 3 },
     labels: { blog: "블로그 글 1건", image: "이미지 1장", cardnews: "카드뉴스 세트", sns: "SNS 글 1건", landing: "랜딩 1종", video_clip: "짧은 클립 2~5초", video_15: "짧은 영상 15초", video_30: "숏폼 영상 30초", video_60: "숏폼 영상 60초", video_90: "숏폼 영상 90초", persona: "새 페르소나·전략", image_regen: "이미지 재생성 1장", post_simple: "글 1편(간단히)", post_standard: "글 1편(보통)", post_premium: "글 1편(프리미엄)" },
@@ -518,6 +535,11 @@
     settings: { kinds: kindsKnob === "text" || kindsKnob === "none" ? ["text"] : ["text", "video"], autoSchedule: !fresh, horizonDays: 14, topicLeadDays: 7, produceLeadDays: 3, produceHour: "06:00", reviewPolicy: planKnob === "starter" && !keptAuto ? "require_confirm" : "silence_approves", bestTimeMode: "auto", weeklyCoinCap: null, quietDays: [] },
     slots: [],
     /* ── [P1R2] 러너 기기(계약 §2) · 발행함(§6) · 재로그인 잡(§7.2) · 알림함 ── */
+    /* [AC-188] 잠깐 멈춤 — 손잡이 `?pause=on|auto|backlog`. 🔴 없으면 **안 쉬는 집**(기본). */
+    pause: pauseKnob === "on" ? { pausedAt: iso(now - 11 * 86400e3), until: "2w", reason: "vacation", backlog: 0 }
+      : pauseKnob === "auto" ? { pausedAt: iso(now - 13 * 86400e3), until: "2w", reason: "editing", backlog: 0 }
+      : pauseKnob === "backlog" ? { pausedAt: iso(now - 16 * 86400e3), until: "manual", reason: "vacation", backlog: 3 } : null,
+    backlog: 0,
     devices: fresh ? [] : [{ id: 901, name: "집 PC", kind: "own", online: runnerOn, bound: true, lastSeenAt: iso(now - 2 * 3600e3), version: "1.1.3", jobsWaiting: 2, caps: { ffmpeg: !noFfmpeg, ffmpegVersion: noFfmpeg ? undefined : "7.1" } },
       ...(otherPc ? [{ id: 902, name: "사무실 PC", kind: "own", online: false, bound: true, lastSeenAt: iso(now - 3 * 86400e3), version: "1.1.2", jobsWaiting: 0, otherDeviceAt: iso(now - 40 * 60e3), otherDeviceCount: 3 }] : [])], // [러너 배포] bound = 처음 켠 PC 에 묶임 · otherDeviceAt 은 «있을 때만» // [P1R5] heartbeat caps(§2.4)
     posts: fresh ? [] : [
@@ -836,7 +858,7 @@
       if (!S.accounts.length) todo.push({ kind: "setup", title: "첫 계정을 연결해 보세요", desc: `${CHANNELS.filter((c) => c.status === "active").slice(0, 3).map((c) => c.label).join(" · ") || "지금 열린 채널"} 중 하나면 돼요`, link: "/app/accounts.html", tone: "info" });
       else if (!S.rules.length) todo.push({ kind: "setup", title: "자동 편성을 켜 보세요", desc: "규칙 하나면 한 달치가 알아서 나가요", link: "/app/schedule.html", tone: "info" });
       const todaySlots = S.slots.filter((s) => s.date === todayYmd).map((s) => { const o = { id: s.id, channel: s.channel, status: s.status, publishAt: s.publishAt, handle: s.accountHandle, title: s.topicTitle }; if (s.pieceId) o.pieceId = s.pieceId; return o; });
-      return { ok: true, revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length, produceLeadDays: S.settings.produceLeadDays }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
+      return { ok: true, pause: pausePayload(), revenue: revSummaryForHome(), todaySlots, todo, notices: [], unread: S.notifications.filter((n) => !n.readAt).length, auto: { enabled: S.settings.autoSchedule, rules: S.rules.filter((r) => r.active).length, produceLeadDays: S.settings.produceLeadDays }, runner: { online, total: S.devices.length }, trial: trialOf(), coins: S.coins, impersonation: null }; },
     /* [R7 §1.1] GET = 지금 값 · POST = 병합. kinds 는 서버가 정규화한다(«글»은 항상 남는다 · 영상만 토글) */
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule;
       /* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **최상위 키**다(settings 안이 아니다) · 기본 꺼짐 */
@@ -847,7 +869,22 @@
          🔴 빈 문자열은 **열쇠를 지우는 것**이다(«모름»과 «빈 값을 고름»은 다르다 · AC-57). */
       if (typeof b.goal === "string") { if (["adsense", "adpost", "ypp", "clip_incentive"].includes(b.goal)) S.settings.goal = b.goal; else delete S.settings.goal; }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
-      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer }; },
+      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer, pause: pausePayload() }; },
+    /* ── [AC-188 · DESIGN §5B.11 (1-c)(1-d)] 잠깐 멈춤 — 🔴 **서버 계약 그대로** 흉내 낸다.
+       `days`·`daysLeft`·`reasons[].label` 은 **서버가 주는 값**이다(화면이 날짜를 셈하거나 말을 지어내면 AC-52·AC-74 위반).
+       🔴 `backlog` 는 `pause` 안에도 싣는다 — **저절로 깬 손님**은 `tenant-resume` 를 안 부르기 때문이다(§(1-d) ②). */
+    "tenant-pause": (b) => { const u = String(b.until || "");
+      if (!["2w", "1m", "manual"].includes(u)) return err("until", "언제까지 쉴지 골라 주세요.");   // 🔴 «반드시 고르게»(§(3))
+      S.pause = { pausedAt: iso(Date.now()), until: u, reason: String(b.reason || "") || null, backlog: 0 };
+      return { ok: true, pause: pausePayload() }; },
+    "tenant-resume": () => { if (!S.pause) return err("not_paused", "지금은 쉬고 있지 않아요.");
+      const n = Number(S.pause.backlog) || 0; S.backlog = n; S.pause = null;
+      return { ok: true, pause: pausePayload(), backlog: { count: n } }; },   // 🔴 깨고 **세기만** 한다(집행은 tenant-backlog)
+    "tenant-backlog": (b) => { const a = String(b.action || "");
+      if (!["publish", "leave"].includes(a)) return err("action", "action 은 publish/leave");
+      /* 🔴 `leave` 는 **버리는 게 아니다** — `pending_resume` 그대로 둔다(나중에 마음이 바뀔 수 있다 · §(1-d)). */
+      const n = S.backlog || 0; if (a === "publish") S.backlog = 0;
+      return { ok: true, action: a, count: n }; },
     "plans": () => ({ ok: true, plans: PLANS.map((p) => ({ ...p, piecesByTier: Object.fromEntries(TIERS.map((t) => [t.key, Math.floor(p.limits.coinsIncluded / t.coins)])) })), tiers: TIERS.map((t) => ({ ...t })), tierNote: TIER_NOTE,   /* [R9R10-A] «이 요금제로 몇 편» — 서버가 셈 · tiers 라벨도 같이(요금제 화면은 accounts-list 를 안 부른다 · C 지적) */ trialDays: 14, coins: { krw: 500, packs: PACKS.map((k) => ({ ...k })), ...COIN_PAYLOAD } }),
     /* ── [P1R4] §1.2 구독 — B subscription.ts 모양(코드가 정본) ── */
     "subscription": () => { const B = S.billing; const paid = B.planKey !== "trial"; const p = PLANS.find((x) => x.key === B.planKey); const base = p ? (B.cycle === "year" ? p.priceYear : p.priceMonth) : 0;

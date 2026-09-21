@@ -14,6 +14,9 @@
   <main class="page" id="page">
     <div class="appbar"><span class="sp"></span><a class="ic" href="/app/notifications.html" aria-label="알림"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></a></div>
     <div id="notice" hidden></div>
+    <!-- [AC-188 · DESIGN §5B.11 (3)] 🔴 «크론 멈춘 걸 까먹으면?» 의 답 — 쉬는 중이면 **첫 화면에 늘** 이 줄이 있다.
+         설계: «첫 화면 숫자 1개 자리와 겹치면 그것이 이긴다» ⇒ 수익 숫자 **위**에 둔다. -->
+    <div class="banner" id="pauseBn" hidden><span id="pauseBnT"></span><button type="button" id="pauseResume">다시 시작</button></div>
     <a class="hl" href="/app/revenue.html" style="display:block">
       <div class="say">오늘</div>
       <div class="num" id="hlnum"><span class="sk" style="display:inline-block;width:60%"></span></div>
@@ -60,7 +63,13 @@
   /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
      편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
   const [r, ks] = await Promise.all([UI.api("/api/home-summary"), UI.api("/api/tenant-settings", { noGate: true })]);
-  if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  if (!r.ok) { UI.retryPanel("#todo", load, r.error); return; }   /* [AC-188] 뼈대를 치우고 다시 누를 단추를 준다(홈은 손수 파일이라 그때 빠졌다) */
+  /* [AC-188 · §5B.11] 🔴 쉬는 중이면 **첫 화면이 그 말을 한다.** `pause` 는 `home-summary` 나 `tenant-settings` 중
+     오는 쪽을 쓴다(설계 (1-c): **두 문이 같은 pause 객체**를 싣는다).
+     🔴 `days`·`daysLeft` 는 **서버가 센 값**이다 — 화면이 날짜를 빼지 않는다(AC-52).
+     🔴 §(1-d) ② **저절로 깬 손님** — resume 을 안 불러도 `pause.backlog.count` 가 오면 여기서 고를 수 있어야 한다. */
+  const pz = (r.pause && typeof r.pause === "object") ? r.pause : ((ks.ok && ks.pause && typeof ks.pause === "object") ? ks.pause : null);
+  drawPauseBanner(pz);
   // [P1R3] 오늘 번 돈 — 확정은 진하게, 예상은 회색 작게. 🔴 둘을 합쳐서 한 숫자로 그리지 않는다(§9.3)
   const rev = r.revenue || {};
   const conf = rev.todayConfirmedKrw != null ? rev.todayConfirmedKrw : (rev.today || 0);
@@ -104,6 +113,21 @@
   slots.innerHTML = `<div class="gt">오늘 편성 <a href="/app/schedule.html">전체</a></div>` + (r.todaySlots.length
     ? r.todaySlots.map((s) => { const p = PILL[s.status] || ["off", s.status]; return `<a class="row tap" href="${s.status === "in_review" && s.pieceId ? `/app/piece.html?id=${s.pieceId}` : "/app/schedule.html"}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(s.title || "소재 정하는 중")}</span><span class="d">${s.handle ? "@" + UI.esc(s.handle) : "계정 자동"} · ${UI.timeKST(s.publishAt) || "시간 자동"}</span></div><span class="pill ${p[0]}">${p[1]}</span></a>`; }).join("")
     : `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">오늘 나갈 글이 없어요</span><span class="d">자동 편성을 켜면 다음 자리부터 채워져요</span></div></div>`);
+/* [AC-188 · §5B.11 (3)(1-d)] 쉬는 중 한 줄 — 🔴 **늘 보인다**. 겁주지 않는다(§3): 사실 + 되돌릴 길만.
+   🔴 밀린 글이 있으면 «다시 시작» 대신 **고르는 자리**로 데려간다 — 저절로 깬 손님은 resume 을 안 부르기 때문이다(§(1-d) ②). */
+function drawPauseBanner(pz) {
+  const bn = UI.$("#pauseBn"); if (!bn) return;
+  bn.hidden = !(pz && pz.paused);
+  if (bn.hidden) return;
+  const n = pz.backlog && Number(pz.backlog.count);
+  const left = pz.daysLeft != null ? ` · ${UI.num(pz.daysLeft)}일 뒤에 저절로 다시 시작해요` : "";
+  UI.$("#pauseBnT").textContent = `지금은 쉬고 있어요${pz.days != null ? ` · ${UI.num(pz.days)}일째` : ""}${left}${n ? ` · 밀린 글 ${UI.num(n)}건` : ""}`;
+  const b = UI.$("#pauseResume");
+  b.textContent = n ? "밀린 글 고르기" : "다시 시작";
+  /* 🔴 홈에서 직접 집행하지 않는다 — 고르는 화면은 설정에 한 벌만 둔다(두 벌이면 말이 갈린다). */
+  b.onclick = () => location.assign("/app/settings.html");
+}
+
   // [사장님 실측] 규칙이 있는데 자동 편성이 꺼져 있으면 맨 위 한 줄(홈 토글과 같은 API)
   const bn = UI.$("#autoBn"); bn.hidden = !(r.auto.rules && !r.auto.enabled);
   if (!bn.hidden) { UI.$("#autoBnT").textContent = `자동 편성이 꺼져 있어요 — 켜면 ${(r.auto.produceLeadDays) || 3}일 전에 글을 만들어 드려요`;
@@ -122,8 +146,13 @@
     const day = ymd(new Date(next.publishAt)) === ymd(d0) ? "오늘" : ymd(new Date(next.publishAt)) === ymd(new Date(Date.now() + 86400e3)) ? "내일" : UI.dateKST(next.publishAt);
     return `${head} · 다음 글은 ${day} ${UI.timeKST(next.publishAt)}`;
   };
-  UI.$("#autoDesc").textContent = r.auto.rules ? (r.auto.enabled ? `규칙 ${r.auto.rules}개로 돌아가요` : `규칙 ${r.auto.rules}개 · 지금은 꺼져 있어요`) : "규칙을 만들면 켤 수 있어요";
-  autoDesc().then((t) => { UI.$("#autoDesc").textContent = t; });
+  /* 🔴 [AC-188] **쉬는 중엔 «다음 글은 오늘 08:00»이 거짓말이다** — 안 나간다.
+     계정의 «확인 중»과 «내 PC 꺼짐»이 따로 놀던 것과 **같은 병**이다(AC-186): 두 정보가 한 화면에 있는데 서로를 모른다.
+     🔴 토글을 끄지는 않는다 — 쉼과 자동 편성은 **다른 스위치**다(§5B.11 (2)). 말만 사실대로 한다. */
+  const resting = !!(pz && pz.paused);
+  UI.$("#autoDesc").textContent = resting ? `지금은 쉬고 있어요 · 다시 시작하면 규칙 ${r.auto.rules}개로 돌아가요`
+    : r.auto.rules ? (r.auto.enabled ? `규칙 ${r.auto.rules}개로 돌아가요` : `규칙 ${r.auto.rules}개 · 지금은 꺼져 있어요`) : "규칙을 만들면 켤 수 있어요";
+  if (!resting) autoDesc().then((t) => { UI.$("#autoDesc").textContent = t; });
   UI.toggle(tg, async (on) => {
     if (on && !r.auto.rules) { UI.toast("먼저 편성 규칙을 만들어 주세요"); setTimeout(() => UI.go("/app/schedule.html"), 600); return false; }
     const s = await UI.api("/api/tenant-settings", { body: { autoSchedule: on } });
