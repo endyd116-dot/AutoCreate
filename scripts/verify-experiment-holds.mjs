@@ -101,10 +101,13 @@ function buildArm(name, files, blank) {
 
 /** 한 자를 한 팔에서 돌린다. 🔴 **그 팔의 사본 스크립트**를 돌린다 — `import.meta.dirname` 를 쓰는 자가 절반이라 그래야 그 팔을 본다. */
 function runIn(armDir, rel) {
-  const script = path.join(armDir, rel);
+  const script = path.resolve(armDir, rel);   /* 🔴 **절대 경로**다 — 상대로 넘기면 cwd 에 두 번 이어 붙어 `ERR_MODULE_NOT_FOUND` 가 난다(2026-09-23 실측) */
   if (!existsSync(script)) return { code: -2, out: "", why: "그 팔에 자가 없다" };
+  /* 🔴 `.mts` 는 `tsx` 가 있어야 돈다. `tsx` 는 이 팔(`_verify/…`) 에서 위로 걸어 **리포의 node_modules** 를 찾는다
+     — 그래서 팔을 리포 **안**에 둔 것이다(밖에 두면 패키지를 못 찾아 «사격장이 없는» 판정이 된다 · AC-190). */
+  const argv = rel.endsWith(".mts") ? ["--import", "tsx", script] : [script];
   try {
-    const out = execFileSync(process.execPath, [script], { cwd: armDir, encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: 32 << 20, stdio: ["ignore", "pipe", "pipe"] });
+    const out = execFileSync(process.execPath, argv, { cwd: armDir, encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: 32 << 20, stdio: ["ignore", "pipe", "pipe"] });
     return { code: 0, out };
   } catch (e) {
     if (e.killed || e.signal) return { code: -3, out: String(e.stdout ?? ""), why: `시간 초과(${TIMEOUT_MS / 1000}초)` };
@@ -153,6 +156,27 @@ const SPECIMENS = {
     `process.exit(0);\n`,
 };
 
+/** 🔴 `--grow --selftest` 전용 검체 셋 — **«안 움직였다»가 두 뜻인 것을 돌려서 보인다.**
+ *  메인이 «가를 수 있나»를 물었다. 정적 신호로는 안 된다 — 폴더를 훑는 자 52개 중 18개가 **손 목록도** 쓴다.
+ *  ⇒ 아는 검체 셋을 넣어 **㈟와 ㈠가 같은 답을 낸다**는 것을 보인다. 그게 «못 가른다»의 증명이다. */
+const GROW_SPECIMENS = {
+  /* ㈞ 성한 세는 자 — 폴더를 세어 수를 찍는다. 새 화면이 늘면 수가 움직인다 → ✓
+     실패하면 이 모드가 아예 무디다는 뜻이다. */
+  "scripts/_grow-counter.mjs":
+    "import { readdirSync } from \"node:fs\";\n" +
+    "const n = readdirSync(\"public/app\").filter((f) => f.endsWith(\".html\")).length;\n" +
+    "console.log(\"  본 화면 \" + n + \"개\");\nprocess.exit(0);\n",
+  /* ㈟ 🔴 **진짜 병** — «모든 화면을 봤다»고 **말하면서** 손 목록을 쓴다. 새 화면을 **안 센다.** */
+  "scripts/_grow-blind.mjs":
+    "const SCREENS = [\"home.html\", \"posts.html\"];   // 손 목록\n" +
+    "console.log(\"  ✓ 모든 화면을 봤다 — \" + SCREENS.length + \"개\");\nprocess.exit(0);\n",
+  /* ㈠ 세는 자가 **아니다** — 이름 붙은 검사 하나만 한다. 새 화면이 늘어도 움직일 **까닭이 없다**(멀줦하다). */
+  "scripts/_grow-named.mjs":
+    "import { readFileSync } from \"node:fs\";\n" +
+    "const ok = readFileSync(\"public/app/posts.html\", \"utf8\").includes(\"이 글 내리기\");\n" +
+    "console.log(ok ? \"  ✓ ① 내리기 단추가 있다\" : \"  ✗ ① 없다\");\nprocess.exit(0);\n",
+};
+
 /* ══════════════ 돌린다 ══════════════ */
 console.log(GROW
   ? `🔴 «모수가 **늘어야 할 때** 느나» — 새 화면 한 장을 심고 출력이 움직이는지 본다 · ${new Date().toISOString()}`
@@ -164,25 +188,33 @@ try { files = tracked(); }
 catch (e) { console.error(`⊘ 못 쟀어요 — git ls-files 가 안 된다: ${e.message}`); process.exit(2); }
 if (!files.length) { console.error("⊘ 못 쟀어요 — 추적되는 파일이 0개다."); process.exit(2); }
 
-/* 🔴 모수를 **먼저 찍는다**(AC-114 ② — 다음 사람이 수를 맞댈 수 있어야 한다) */
-const allRulers = files.filter((f) => /^scripts\/verify-.*\.mjs$/.test(f));
-const MTS = files.filter((f) => /^scripts\/verify-.*\.mts$/.test(f)).length;
+/* 🔴 모수를 **먼저 찍는다**(AC-114 ② — 다음 사람이 수를 맞댈 수 있어야 한다)
+   🔴 **[2026-09-23 · AC-230] `.mts` 를 모수에 넣었다 — 여태 «모수의 절반»을 못 보고 있었다.**
+   내가 «못 쟀음»으로 적어 둔 것이고, 메인이 «오늘 종일 잡은 그 병이 네 자에 그대로 있다»고 짚었다. 맞다.
+   ⇒ `tsx` 로 돈다(`node --import tsx <절대경로>` · `cwd` 는 그 팔). **팔 안에서 실제로 도는 것을 먼저 확인했다**(AC-190 «사격장이 없으면 못 잰다»).
+   ⚠️ 한 번 밟았다: 팔 경로를 **상대**로 넘겼더니 cwd 에 두 번 이어 붙어 `ERR_MODULE_NOT_FOUND` 가 났다 — **절대 경로로 넘긴다.** */
+const allRulers = files.filter((f) => /^scripts\/verify-.*\.(mjs|mts)$/.test(f));
+const MJS_N = files.filter((f) => /^scripts\/verify-.*\.mjs$/.test(f)).length;
+const MTS_N = files.filter((f) => /^scripts\/verify-.*\.mts$/.test(f)).length;
 const skipped = [];
 let rulers = allRulers.filter((f) => {
   const src = readFileSync(path.join(ROOT, f), "utf8");
   if (LIVE_RE.test(src)) { skipped.push([f, "브라우저·DB·네트워크를 쓴다"]); return false; }
-  if (/-mutants\.mjs$/.test(f)) { skipped.push([f, "변이 하니스 — 제 손으로 사본을 짓는다(이 자의 팔과 겹친다)"]); return false; }
+  if (/-mutants\.(mjs|mts)$/.test(f)) { skipped.push([f, "변이 하니스 — 제 손으로 사본을 짓는다(이 자의 팔과 겹친다)"]); return false; }
   if (f.endsWith("verify-experiment-holds.mjs")) { skipped.push([f, "이 자 자신"]); return false; }
   return true;
 });
 if (argOnly) rulers = rulers.filter((f) => f.includes(argOnly));
 
+const mtsIn = rulers.filter((f) => f.endsWith(".mts")).length;
 console.log(`■ 내가 세는 모수`);
-console.log(`   추적 파일 ${files.length}개 · 그중 \`scripts/verify-*.mjs\` **${allRulers.length}개**`);
+console.log(`   추적 파일 ${files.length}개 · 그중 \`scripts/verify-*\` **${allRulers.length}개**(\`.mjs\` ${MJS_N} + \`.mts\` ${MTS_N})`);
 console.log(`   └ 모수 밖 ${skipped.length}개(${[...new Set(skipped.map((s) => s[1]))].join(" · ")})`);
-console.log(`   └ 🔴 **이번에 재는 자 ${rulers.length}개**${argOnly ? ` (--only=${argOnly} 로 좁혔다)` : ""}`);
-console.log(`   ⊘ 🔴 **이 자가 아예 안 보는 것: scripts/verify-*.mts ${MTS}개**(B2 쪽이 대부분) — tsx 가 있어야 돌고,`);
-console.log(`     그중 여럿은 R2·DB 자격을 쓴다. **모수의 절반을 못 본다**는 뜻이다 — «못 재음»으로 적는다(AC-9).`);
+console.log(`   └ 🔴 **이번에 재는 자 ${rulers.length}개**${argOnly ? ` (--only=${argOnly} 로 좁혔다)` : ""} — 그중 \`.mts\` **${mtsIn}개**`);
+/* 🔴 «몇에서 몇으로 늘었나»를 자가 스스로 말한다(메인 부탁 2026-09-23) */
+console.log(`   🔴 **모수를 채웠다(AC-230)** — 어제까지 이 자는 \`.mjs\` 만 봤다: **${MJS_N}개 중 고른 ${rulers.length - mtsIn}개**.`);
+console.log(`      오늘 \`.mts\` ${MTS_N}개를 넣어 **${rulers.length}개**가 됐다(늘어난 ${mtsIn}개 · \`node --import tsx\` 로 돈다).`);
+console.log(`      어제 내가 «모수의 절반을 못 본다»고 «못 쟀음»에 적어 둔 그 자리다.`);
 console.log(`   비우는 곳: 추적 파일 중 \`scripts/**\` 와 ${[...KEEP_EXACT].join("·")} 를 뺀 전부 — **파일은 남기고 내용만** ""`);
 console.log("");
 
@@ -198,7 +230,7 @@ if (GROW) {
   mkdirSync(path.join(armC, path.dirname(GROW_FILE)), { recursive: true });
   writeFileSync(path.join(armC, GROW_FILE), GROW_BODY);
 }
-if (SELFTEST) for (const [rel, body] of Object.entries(SPECIMENS)) { for (const d of [armA, armB]) { mkdirSync(path.join(d, path.dirname(rel)), { recursive: true }); writeFileSync(path.join(d, rel), body); } }
+if (SELFTEST) for (const [rel, body] of Object.entries(GROW ? GROW_SPECIMENS : SPECIMENS)) { for (const d of [armA, armB, armC].filter(Boolean)) { mkdirSync(path.join(d, path.dirname(rel)), { recursive: true }); writeFileSync(path.join(d, rel), body); } }
 console.log(`   팔 둘을 지었다(${((Date.now() - t0) / 1000).toFixed(1)}초) — A=대조군 · B=제품을 비운 판`);
 {
   /* 🔴 **팔이 정말 달라졌는지 본다** — 안 달라졌으면 이 자는 아무것도 안 잰 것이다(AC-112 ①) */
@@ -216,7 +248,7 @@ const noClock = (s) => String(s)
   .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\d]*Z?/g, "<시각>")
   .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, "<시계>");
 
-const targets = SELFTEST ? Object.keys(SPECIMENS) : rulers;
+const targets = SELFTEST ? Object.keys(GROW ? GROW_SPECIMENS : SPECIMENS) : rulers;
 const rows = [];
 for (const rel of targets) {
   const a = runIn(armA, rel);
@@ -275,7 +307,12 @@ console.log(`   ⊘ 는 **통과가 아니다** — 대조군이 초록이 아�
 if (SELFTEST) {
   /* 🔴 판정표를 **먼저** 적고 맞대는 것 — ㉮ 는 ✗ 여야 하고 ㉯ 는 ✓ 여야 한다 */
   const got = (rel) => (rows.find((r) => r.rel === rel) || {}).mark;
-  const want = { "scripts/_specimen-vacuous.mjs": "✗", "scripts/_specimen-sound.mjs": "✓", "scripts/_specimen-outofscope.mjs": "⊘",
+  /* 🔴 `--grow` 의 판정표는 **따로다** — 이 표가 이 판의 답이다(메인 물음 «가를 수 있나»).
+     ㉯`_grow-blind`(진짜 병 — «모든 화면을 봤다»고 **말하면서** 손 목록을 쓴다)와
+     ㉰`_grow-named`(멀쩡 — 애초에 세는 자가 아니다)가 **같은 ⊘ 로 나오는 것**을 기대값으로 못 박는다.
+     🔴 **둘이 갈라지는 날 이 판정표가 맨 먼저 빨개지면서 «드디어 가른다»고 알려 준다.** */
+  const wantGrow = { "scripts/_grow-counter.mjs": "✓", "scripts/_grow-blind.mjs": "⊘", "scripts/_grow-named.mjs": "⊘" };
+  const want = GROW ? wantGrow : { "scripts/_specimen-vacuous.mjs": "✗", "scripts/_specimen-sound.mjs": "✓", "scripts/_specimen-outofscope.mjs": "⊘",
     /* 🔴 AC-172 모양은 **못 잡는다** — 기대값을 ⊘ 로 적어 둔다(잡게 되면 이 줄이 맨먼저 울면서 «드디어 된다»고 알려 준다) */
     "scripts/_specimen-external.mjs": "⊘" };
   let miss = 0;
