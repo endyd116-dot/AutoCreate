@@ -25,16 +25,25 @@ import { readFileSync } from "node:fs";
 const FILE = "netlify/functions/ops-runners.ts";
 const src = readFileSync(FILE, "utf8");
 
-let pass = 0; let fail = 0;
+let pass = 0; let fail = 0; let unmeasured = 0;
 const ok = (name, cond, extra = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? `\n      ${extra}` : ""}`); } };
+/* 🔴 [AC-216] «못 쟀다»를 «틀렸다»에 섞지 않는다 — 자가 깨진 것이 제품이 틀린 것으로 보이면 엉뚱한 데를 판다. */
+const gone = (name, why = "갈래를 못 잡았다 — 닻이나 끝 표식이 바뀌었나") => { unmeasured++; console.log(`  ⊘ ${name} — 못 쟀음(${why})`); };
 
-/** `action === "x"` 갈래의 몸통 — 그 줄부터 다음 `if (action ===` 또는 `return json({ ok: false` 까지. */
+/**
+ * `action === "x"` 갈래의 몸통.
+ *   🔴 [AC-216] 종전엔 「다음 갈래를 못 찾으면 **`rest`(파일 끝까지)**」였다 — B 가 세운 잣대의 ①꼴이다.
+ *      `remove` 는 **마지막 갈래**라 창이 늘 EOF 까지였다. 지금 이 자는 «순서»를 재서 안 속았지만
+ *      («호출이 되돌리기보다 앞인가»), **그건 운이지 규율이 아니다.** 끝 표식을 못 찾으면 **`null`**(⊘) 이다.
+ */
 function branch(text, action) {
   const i = text.indexOf(`action === "${action}"`);
-  if (i < 0) return null;
+  if (i < 0) return null;                                  // 닻이 없다 = ⊘(«가드 없음»이 아니다)
   const rest = text.slice(i);
-  const nx = rest.slice(1).search(/if \(action === "/);
-  return nx > 0 ? rest.slice(0, nx + 1) : rest;
+  const ends = [/if \(action === "/, /return badRequest\("action 은/, /return json\(\{ ok: false, error: "not_found"/];
+  let end = -1;
+  for (const re of ends) { const k = rest.slice(1).search(re); if (k > 0 && (end < 0 || k < end)) end = k; }
+  return end > 0 ? rest.slice(0, end + 1) : null;          // 🔴 끝을 못 찾으면 **넓히지 않고 못 쟀다고 한다**
 }
 
 /** 그 몸통 안에서 «채널에 묻기»가 «되돌리기»보다 앞인가. 🔴 순서가 이 기능의 전부다. */
@@ -50,7 +59,9 @@ function asksBeforeRequeue(body) {
 console.log("① 두 운영자 갈래가 되돌리기 **전에** 채널에 묻나");
 {
   for (const a of ["release", "remove"]) {
-    const r = asksBeforeRequeue(branch(src, a));
+    const b = branch(src, a);
+    if (b == null) { gone(`action="${a}" — 묻고 나서 되돌린다`); continue; }
+    const r = asksBeforeRequeue(b);
     ok(`action="${a}" — 묻고 나서 되돌린다`, r.ok, r.why);
   }
 }
@@ -107,6 +118,7 @@ console.log("\n④ 🔴 자기 변이 — 위 못을 빼면 이 자가 우는가
   }
 }
 
-console.log(`\n${fail === 0 ? "🟢" : "🔴"} pass ${pass} · fail ${fail}`);
-console.log("⊘ 이 자가 **못 재는 것**: 실제로 안 올라가는지는 라이브 발행이 답한다 — 여기는 «순서가 맞나»까지다.");
-process.exit(fail === 0 ? 0 : 1);
+console.log(`\n${fail > 0 ? "🔴" : unmeasured > 0 ? "⊘" : "🟢"} pass ${pass} · fail ${fail} · 못 쟀음 ${unmeasured}`);
+if (unmeasured > 0 && fail === 0) console.log("🔴 자가 갈래를 못 잡았다 — 그건 «맞다»가 아니다(종료 2).");
+console.log("⊘ 이 자가 **원리적으로 못 재는 것**: 실제로 안 올라가는지는 라이브 발행이 답한다 — 여기는 «순서가 맞나»까지다.");
+process.exit(fail > 0 ? 1 : unmeasured > 0 ? 2 : 0);
