@@ -262,6 +262,19 @@ console.log("\n⑧ 🔴 덩이를 **못 잡게 만들면** ⊘ 가 나오는가(
   ok("주석을 걷어도 **길이가 보존된다**(순서 판정이 살아 있어야 한다)",
     stripComments(WITH_COMMENT).length === WITH_COMMENT.length);
   ok("문자열 리터럴 속 `//` 는 주석이 아니다", stripComments('const s = "http://x"; // real').includes("http://x"));
+  /* 🔴 (가로지르는 병) **닻이 여럿이면 «엉뚱한 덩이»를 본다** — B 가 짚었고 `blockOf` 기본을 `unique:true` 로 바꿨다.
+     그 답은 빨강이든 초록이든 거짓이다. 여기서 못을 박는다. */
+  const TWICE = [
+    'if (A_KIND.has(k)) { return { ok: true, formatMarks: x }; }',
+    'if (B_KIND.has(k)) { return 1; }',
+    'if (A_KIND.has(k)) { return { ok: true }; }',            // 🔴 같은 닻이 또 나온다
+    'if (C_KIND.has(k)) { return 2; }',
+  ].join("\n");
+  ok("🔴 닻이 둘이면 null — **첫 것을 집어 답하지 않는다**(엉뚱한 덩이를 보느니 못 쟀다고 한다)",
+    blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]) === null);
+  ok("일부러 첫 것을 쓰려면 `unique:false` 로 **적어서** 쓴다(그때는 count 를 보고 판단한다)",
+    blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"], { unique: false })?.count === 2);
+  ok("닻이 하나면 count 가 1 이다", blockOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"])?.count === 1);
 }
 
 /* 🔴 [AC-216] **못 쟀는데 통과로 넘기지 않는다.** 종료 0 = 전부 ✓ · 1 = 제품이 틀렸다 · 2 = **자가 못 쟀다**. */

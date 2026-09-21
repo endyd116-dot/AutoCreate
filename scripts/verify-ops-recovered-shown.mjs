@@ -102,6 +102,18 @@ console.log("\n④ 🔴 덩이 잡기 자체 — **못 잡게 만들면** ⊘ �
   t.ok("정상 — 갈래 하나만 잡는다", (blockOf(SAMPLE, 'action === "aa"', ['if (action === "'])?.body ?? "").includes("recovered"));
   t.ok("🔴 닻을 지우면 null(«못 쟀음»이지 «가드 없음»이 아니다)", blockOf(SAMPLE, 'action === "zz"', ['if (action === "']) === null);
   t.ok("🔴 끝 표식을 지우면 null — 파일 끝까지 넓히지 않는다", blockOf(SAMPLE, 'action === "aa"', ["NOTHING_LIKE_THIS"]) === null);
+  /* 🔴 (가로지르는 병) 닻이 여럿이면 **엉뚱한 덩이**를 본다 — 이 자의 `writeAudit(` 이 딱 그 모양이 될 뻔했다
+     (파일 전체엔 5곳이다 · 갈래 몸통 안에선 1곳이라 지금은 맞다). 좁히는 순서가 틀어지면 여기서 운다. */
+  const TWICE = [
+    'if (action === "aa") { return 1; }',
+    'if (action === "bb") { return 2; }',
+    'if (action === "aa") { return 3; }',        // 🔴 같은 닻이 또 나온다
+    'if (action === "cc") {',
+  ].join("\n");
+  t.ok("🔴 닻이 둘이면 null — 첫 것을 집어 답하지 않는다",
+    blockOf(TWICE, 'action === "aa"', ['if (action === "bb"', 'if (action === "cc"']) === null);
+  t.ok("갈래를 좁힌 뒤엔 감사 닻이 **하나**다(그래서 지금은 맞다)",
+    ["release", "remove"].every((a) => { const b = branch(a); return b != null && blockOf(b, "writeAudit(", ["});"])?.count === 1; }));
   t.ok("🔴 주석에 적힌 이름은 안 센다(넷째 꼴)",
     !(blockOf(stripComments('if (action === "aa") { /* recovered 를 싣는다 */ return 1; }\nif (action === "bb") {'), 'action === "aa"', ['if (action === "'])?.body ?? "").includes("recovered"));
 }

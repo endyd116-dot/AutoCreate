@@ -19,8 +19,15 @@
  *       (가드를 빼도 통과 · 2026-09-22 `_tmp/mutate-windows.mjs`).
  *     · B2 의 **변이 하니스 자신** — 종료코드만 보고 「자가 아니라고 했다」와 「**자를 못 돌렸다**」를 한 값으로 뭉갰다.
  *     · ④ **주석이 알리바이** — 덩이를 정확히 잡고도 **주석에 이름이 남아** 코드를 지운 변이가 통과했다(B2·B 둘 다).
- *       🔴 ①②③ 은 «못 잡았는데 답을 냈다» · ④ 는 «잡긴 잡았는데 **엉뚱한 글자**를 봤다» — 고침도 둘이다
- *          (앞 셋은 `null` 내고 `⊘` · 넷째는 **주석 걷기**). 둘 다 **변이 한 종**이 있어야 고쳤다고 할 수 있다.
+ *     · ⑤ **창이 넓어 옆 코드를 줍는다** — 주석을 걷어도 남는다. B2 가 `writeAudit\([\s\S]{0,400}` 로 바로 뒤
+ *       `return json({…recovered})` 를 주워 왔고, B 는 감사 축에 **코드 미끼**를 심어 뚫어 보였다.
+ *       🔴 **④를 고쳤다고 ⑤가 닫히지 않는다** — 따로 막아야 한다.
+ *     · (가로지름) 🔴 **닻이 여럿인데 첫 것만 본다** — «엉뚱한 **덩이**»를 본다. B 가 `INSERT INTO notifications`
+ *       5곳에서 겪었다(제품은 멀쩡한데 빨강 · 반대 방향이면 **조용한 초록**). ⇒ `blockOf` 기본 `unique:true`.
+ *
+ *   🔴 한 줄로: ①②③ = «못 잡았는데 답했다» · ④⑤ = «잡았는데 **엉뚱한 글자**» · 가로지름 = «**엉뚱한 덩이**».
+ *      고침도 그 결대로 셋이다 — **`null` 내고 ⊘** · **주석 걷기 + 창 좁히기** · **닻의 유일성**.
+ *      그리고 **셋 다 변이 한 종**이 있어야 고쳤다고 할 수 있다.
  *
  *   ══ 고침은 한 가지다 ══
  *     🔴 **`null` 을 내고 «못 쟀다»로 적는다.** `✗`(제품이 틀렸다) 가 아니라 **`⊘`(자가 못 쟀다)** 로.
@@ -44,19 +51,39 @@
  */
 export { codeOnlyKeepIndex as stripComments } from "../_lib/code-only.mjs";
 
+/** 닻이 몇 번 나오나(겹치지 않게 센다). */
+function countOf(src, anchor) {
+  let n = 0; let i = src.indexOf(anchor);
+  while (i >= 0) { n++; i = src.indexOf(anchor, i + anchor.length); }
+  return n;
+}
+
 /**
  * 닻(`anchor`)으로 시작해 **끝 표식 중 가장 먼저 오는 것**까지를 덩이로 잡는다.
- *   @param {string} text  소스 전문
+ *   @param {string} text  소스(보통 **이미 좁혀 놓은** 덩이)
  *   @param {string} anchor  덩이의 시작 표식(문자열 그대로)
  *   @param {string[]} enders  끝 표식 후보들(문자열 그대로) — **하나도 못 찾으면 `null`**
- *   @param {{maxChars?: number}} [opts]  안전 상한(그 안에서 끝 표식을 못 찾아도 `null`)
- *   @returns {{ body: string, start: number, end: number } | null}
+ *   @param {{maxChars?: number, unique?: boolean}} [opts]
+ *     `maxChars` 안전 상한(그 안에서 끝 표식을 못 찾아도 `null`) ·
+ *     `unique` **기본 켬** — 닻이 둘 이상이면 `null`(아래 까닭)
+ *   @returns {{ body: string, start: number, end: number, count: number } | null}
  *     🔴 **`null` 은 «덩이를 못 잡았다»다 — «가드가 없다»가 아니다.** 부르는 쪽이 `⊘` 로 적어야 한다.
+ *
+ *   🔴 ══ **닻이 여럿이면 답이 거짓이다**(B 가 짚었다 · 2026-09-22) ══
+ *     종전엔 `indexOf` 로 **첫 번째**를 집었다. 그런데 닻이 여럿이면 **엉뚱한 덩이**를 떠 오고,
+ *     그 답은 **빨강이든 초록이든 거짓**이다. B 가 실제로 겪었다: `INSERT INTO notifications` 가
+ *     `runner-jobs.ts` 에 **5곳**이라 딴 알림 자리를 떠 왔고 **제품은 멀쩡한데 빨개졌다.**
+ *     🔴 이번엔 빨강이라 알아챘지만 **반대 방향이면 조용한 초록**이다.
+ *     ⇒ 기본을 **`unique: true`** 로 둔다 — 애매하면 답하지 않는다(그게 이 파일의 전부다).
+ *     ⇒ 일부러 첫 것을 쓰려면 `unique:false` 로 **적어서** 쓴다(그러면 `count` 를 보고 판단하라).
+ *     ⚠️ 부르는 쪽이 **먼저 범위를 좁히는 것**이 정답이다 — 갈래 몸통을 잡고 그 안에서 닻을 찾아라.
  */
 export function blockOf(text, anchor, enders, opts = {}) {
   const src = String(text ?? "");
+  const count = countOf(src, anchor);
+  if (count === 0) return null;                     // 🔴 닻이 없다 — 코드가 바뀌었다. «가드 없음»이 아니다.
+  if (count > 1 && opts.unique !== false) return null;   // 🔴 애매하다 — 첫 것을 집어 답하지 않는다
   const start = src.indexOf(anchor);
-  if (start < 0) return null;                       // 🔴 닻이 없다 — 코드가 바뀌었다. «가드 없음»이 아니다.
   const limit = Math.min(src.length, start + (opts.maxChars ?? 20_000));
   let end = -1;
   for (const e of enders) {
@@ -64,7 +91,7 @@ export function blockOf(text, anchor, enders, opts = {}) {
     if (i >= 0 && i < limit && (end < 0 || i < end)) end = i;
   }
   if (end < 0) return null;                          // 🔴 끝을 못 찾았다 — **파일 끝까지 넓히지 않는다**
-  return { body: src.slice(start, end), start, end };
+  return { body: src.slice(start, end), start, end, count };
 }
 
 /**

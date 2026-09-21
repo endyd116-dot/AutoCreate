@@ -20,8 +20,9 @@ export function blockOf(
   text: string,
   anchor: string,
   enders: readonly string[],
-  opts?: { maxChars?: number },
-): { body: string; start: number; end: number } | null;
+  /** `unique` 는 **기본 켬** — 닻이 둘 이상이면 `null`(엉뚱한 덩이를 집지 않는다). 일부러 첫 것을 쓰려면 `false` 로 **적어서**. */
+  opts?: { maxChars?: number; unique?: boolean },
+): { body: string; start: number; end: number; count: number } | null;
 
 /** 덩이 안에서 A 가 B 보다 앞인가. `null` = 둘 중 하나를 못 찾았다(⊘). */
 export function orderIn(
