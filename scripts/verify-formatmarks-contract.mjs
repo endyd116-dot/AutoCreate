@@ -61,33 +61,49 @@ const DROPPED = [
 
 /* ───────── 뜯기 ─────────
    `const formatMarks = { … }` 의 최상위 칸 · `formatMarks.<칸> =` 대입 · `formatMarks.paragraphs = { … }` 의 안쪽 칸. */
-function literalKeys(text, start) {
-  const i = text.indexOf(start);
-  if (i < 0) return [];
-  let depth = 0, j = text.indexOf("{", i), end = -1;
-  if (j < 0) return [];
-  for (let k = j; k < text.length; k++) {
-    if (text[k] === "{") depth++;
-    else if (text[k] === "}") { depth--; if (depth === 0) { end = k; break; } }
-  }
-  if (end < 0) return [];
-  const body = text.slice(j + 1, end);
+/** 최상위 쉼표로 쪼갠 뒤 각 조각의 머리를 읽는다 — `이름:` 도 **줄임 표기(`{ subtitleFont }`)** 도 키다. */
+function keysOfBody(body) {
   const out = [];
-  let d = 0;
-  for (let k = 0; k < body.length; k++) {
-    const c = body[k];
-    if (c === "{" || c === "[" || c === "(") d++;
-    else if (c === "}" || c === "]" || c === ")") d--;
-    else if (d === 0) {
-      const m = /^([A-Za-z_$][\w$]*)\s*:/.exec(body.slice(k));
-      if (m && (k === 0 || /[\s,]/.test(body[k - 1]))) { out.push(m[1]); k += m[0].length - 1; }
+  let d = 0, cur = "";
+  const take = (seg) => {
+    const s = seg.trim();
+    if (!s || s.startsWith("...")) return;                       // 펼침은 키가 아니다
+    const m = /^([A-Za-z_$][\w$]*)\s*:/.exec(s) || /^([A-Za-z_$][\w$]*)$/.exec(s);
+    if (m) out.push(m[1]);
+  };
+  for (const c of body) {
+    if ("{[(".includes(c)) d++;
+    else if ("}])".includes(c)) d--;
+    if (c === "," && d === 0) { take(cur); cur = ""; continue; }
+    cur += c;
+  }
+  take(cur);
+  return out;
+}
+/** 🔴 **그 글자가 나오는 자리를 전부** 본다 — `indexOf` 로 첫 자리만 보면 나머지가 말없이 모수에서 빠진다(오늘 그 병이다). */
+function literalKeys(text, start) {
+  const out = [];
+  for (let i = text.indexOf(start); i >= 0; i = text.indexOf(start, i + start.length)) {
+    const j = text.indexOf("{", i + start.length - 1);
+    if (j < 0) continue;
+    let depth = 0, end = -1;
+    for (let k = j; k < text.length; k++) {
+      if (text[k] === "{") depth++;
+      else if (text[k] === "}") { depth--; if (depth === 0) { end = k; break; } }
     }
+    if (end < 0) continue;
+    out.push(...keysOfBody(text.slice(j + 1, end)));
   }
   return out;
 }
 const runnerTop = new Set(), runnerPara = new Set();
 for (const f of CHANNELS) {
+  /* 🔴 **싣는 꼴이 셋이다**(2026-09-22 — `subtitleFont` 가 모수에서 빠져 있어 알았다):
+     ① `const formatMarks = { … }` ② `formatMarks.<칸> = …` ③ `return { …, formatMarks: { … } }`(인라인).
+     ③ 을 안 보면 **영상 러너가 싣는 칸이 통째로 안 보인다** — `render-video.mjs` 가 딱 그 꼴이었다.
+     그리고 ③ 은 **줄임 표기**(`{ subtitleFont }`)라 «이름:» 만 찾던 눈으로는 또 안 보였다. 두 구멍이 겹쳐 있었다. */
   for (const k of literalKeys(T[f], "const formatMarks = {")) runnerTop.add(k);
+  for (const k of literalKeys(T[f], "formatMarks: {")) runnerTop.add(k);
   for (const m of T[f].matchAll(/formatMarks\.([A-Za-z_$][\w$]*)\s*=/g)) runnerTop.add(m[1]);
   for (const k of literalKeys(T[f], "formatMarks.paragraphs = {")) runnerPara.add(k);
 }
@@ -96,19 +112,35 @@ const bleedDecl = /bleed\?: \{([^}]*)\}/.exec(rawRead(RJ) ?? "");
 const runnerBleed = new Set((bleedDecl?.[1] ?? "").split(";").map((s) => (/([A-Za-z_$][\w$]*)\??:/.exec(s.trim())?.[1] ?? "")).filter(Boolean));
 
 /* 서버가 읽는 칸 — 함수 몸통 안의 `r.<칸>`·`o.<칸>`·`pick("<칸>")`·목록 리터럴. */
+/* 🔴 **못 잡으면 `null` 을 낸다 — 파일 전체로 넓히지 않는다**(2026-09-22 · B2 가 넘겨준 함정).
+   C 의 `verify-requeue-guarded` 가 몸통을 「위로 `function 이름`, 아래로 다음 `function`」으로 잡는데
+   화살표 함수 핸들러엔 경계가 없어 **몸통이 파일 전체가 됐고**, `import` 한 줄만 있으면 그 파일의 모든 문이 **영원히 초록**이었다.
+   내 `bodyOf` 도 「중괄호가 안 맞으면 `text.slice(i)`」라 **같은 병**이었다 — 넓어진 창은 조용히 통과시킨다.
+   ⇒ 넓히느니 **«못 쟀다»라고 말한다**(AC-141 ② · 통과로 쓰지 않는다). */
 function bodyOf(text, sig) {
   const i = text.indexOf(sig);
-  if (i < 0) return "";
-  let depth = 0, j = text.indexOf("{", i), end = -1;
+  if (i < 0) return null;
+  const j = text.indexOf("{", i);
+  if (j < 0) return null;
+  let depth = 0;
   for (let k = j; k < text.length; k++) {
     if (text[k] === "{") depth++;
-    else if (text[k] === "}") { depth--; if (depth === 0) { end = k; break; } }
+    else if (text[k] === "}") { depth--; if (depth === 0) return text.slice(i, k); }
   }
-  return end < 0 ? text.slice(i) : text.slice(i, end);
+  return null;                      // 🔴 안 닫혔다 = 우리가 잘못 잡은 것이다. 파일 전체를 몸통이라 하지 않는다
 }
-const mergeBody = bodyOf(T[FM], "export function mergeRunnerFormatMarks");
-const paraBody = bodyOf(T[FM], "function paragraphsOf");
-const bleedBody = bodyOf(T[FM], "export function bleedOf");
+const BODIES = [
+  ["mergeRunnerFormatMarks", bodyOf(T[FM], "export function mergeRunnerFormatMarks")],
+  ["paragraphsOf",           bodyOf(T[FM], "function paragraphsOf")],
+  ["bleedOf",                bodyOf(T[FM], "export function bleedOf")],
+];
+const noBody = BODIES.filter(([, b]) => b === null).map(([nm]) => nm);
+if (noBody.length) {
+  console.log(`⊘ 못 쟀어요 — 몸통을 못 잡은 함수 ${noBody.length}개: ${noBody.join(", ")}.`);
+  console.log("   🔴 넓혀서 통과시키느니 여기서 멈춘다 — 넓어진 창은 **조용히 초록**을 낸다(B2 2026-09-22).");
+  process.exit(2);
+}
+const [, mergeBody] = BODIES[0], [, paraBody] = BODIES[1], [, bleedBody] = BODIES[2];
 const serverTop = new Set([...mergeBody.matchAll(/\br\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
 const serverPara = new Set([...paraBody.matchAll(/\bo\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
 const serverBleed = new Set([...bleedBody.matchAll(/pick\("([A-Za-z_$][\w$]*)"\)/g)].map((m) => m[1]));
@@ -193,6 +225,20 @@ const MUT = [
   ["🔴 서버가 `breaks` 읽기를 뗀다",     (b) => { b[FM] = b[FM].replace("const breaks = num(r.breaks),", "const breaks = undefined, zz = num(r.zzz),"); }, "①"],
   ["🔴 `bleed` 안쪽 한 칸을 안 읽는다",  (b) => { b[FM] = b[FM].replace('for (const k of ["total", "bad", "red", "center", "italic", "underline", "bold"] as const)', 'for (const k of ["total", "bad", "red", "center", "italic", "underline"] as const)'); }, "②"],
   ["🔴 계약서에서 칸 하나를 뺀다",       (b) => { b[RJ] = b[RJ].replace("  breaks?: number;", ""); }, "③"],
+  /* 🔴 **뜯는 눈이 놓쳤던 꼴 둘**(2026-09-22) — `subtitleFont` 가 이 둘에 걸려 모수에서 통째로 빠져 있었다.
+     ① `return { …, formatMarks: { … } }` 인라인 · ② **줄임 표기**(`{ subtitleFont }` — 콜론이 없다).
+     고쳤으니 **그 꼴로 새 칸을 넣어도 무는지**까지 잰다. 안 그러면 다음에 또 조용히 빠진다. */
+  ["🔴 인라인 `formatMarks: {` 에 새 칸(줄임 표기)", (b) => {
+    const vid = CHANNELS.find((f) => f.includes("render-video")) ?? NAVER;
+    b[vid] = b[vid].replace("formatMarks: { subtitleFont }", "formatMarks: { subtitleFont, zzInline }");
+  }, "①"],
+];
+/* 🔴 **넓어진 창은 조용히 초록을 낸다**(B2 2026-09-22) — 그래서 «몸통을 못 잡았을 때»를 따로 시험한다.
+   이건 축이 우는 게 아니라 **자가 «못 쟀다»(종료 2)로 멈춰야** 맞다. 통과(0)로 나오면 그게 병이다. */
+const CANT_MEASURE = [
+  /* 🔴 **B2 가 겪은 바로 그 모양** — 선언 함수를 화살표 함수로 바꾼다. C 의 자는 이때 몸통이 파일 전체가 돼 영원히 초록이었다. */
+  ["`bleedOf` 가 화살표 함수가 된다", (b) => { b[FM] = b[FM].replace("export function bleedOf(v: unknown)", "export const bleedOf = (v: unknown)"); }],
+  ["`paragraphsOf` 가 화살표 함수가 된다", (b) => { b[FM] = b[FM].replace("function paragraphsOf(v: unknown)", "const paragraphsOf = (v: unknown)"); }],
 ];
 let silent = 0;
 for (const [name, tf, axisName] of MUT) {
@@ -202,6 +248,15 @@ for (const [name, tf, axisName] of MUT) {
   if (cried) console.log(`  ✓ ${name} → ${axisName}축이 운다`);
   else { console.log(`  ✗ ${name} → 🔴 **안 운다**(종료 ${r.code}) — 이 자가 그 자리를 못 본다`); silent++; }
 }
+console.log("\n■ 🔴 못 잡았을 때 — **넓히지 않고 «못 쟀다»로 멈추나**(종료 2여야 한다 · 0 이면 조용한 초록이다)");
+let widened = 0;
+for (const [name, tf] of CANT_MEASURE) {
+  const r = runIn(tf);
+  if (!r.changed) { console.log(`  ⊘ ${name} — 🔴 **변이가 안 먹었다**. 통과로 세지 않는다.`); widened++; continue; }
+  if (r.code === 2) console.log(`  ✓ ${name} → «못 쟀다»로 멈춘다(종료 2)`);
+  else { console.log(`  ✗ ${name} → 🔴 **종료 ${r.code}** — 몸통을 못 잡고도 답을 냈다. 창이 넓어진 것이다`); widened++; }
+}
 console.log("─".repeat(100));
 console.log(silent ? `🔴 변이 ${silent}종이 안 울었다 — 자를 고쳐야 한다` : `✓ 변이 ${MUT.length}종이 모두 제 축을 울렸다`);
-process.exit(fails.length || silent ? 1 : 0);
+console.log(widened ? `🔴 «못 잡았을 때» ${widened}종이 넓혀서 답을 냈다 — 자를 고쳐야 한다` : `✓ «못 잡았을 때» ${CANT_MEASURE.length}종 모두 «못 쟀다»로 멈춘다`);
+process.exit(fails.length || silent || widened ? 1 : 0);

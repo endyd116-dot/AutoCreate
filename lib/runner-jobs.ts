@@ -975,6 +975,16 @@ export interface RunnerFormatMarks {
    *   ⚠️ `actual`·`diff` 의 `null` 은 **«못 쟀다»**이지 0 이 아니다(AC-9).
    */
   paragraphs?: { expected: number; actual: number | null; diff: number | null; uncertain: number; skipped: number; kind: string; measured?: boolean };
+  /**
+   * 🔴 **자막을 어느 폰트로 그렸나**(AC-202 · B2 2026-09-22 · `render-video.mjs` 가 `formatMarks: { subtitleFont }` 로 싣는다).
+   *   `kind` — `bundled`(뜻대로) · `fallback`(다른 글꼴로 그렸다) · `unknown`(**못 쟀다** · «맞았다»가 아니다 · AC-9).
+   *   `ambiguous` — 이름은 짚었는데 브라우저 기본과 **폭이 같아** 둘을 못 가른 경우(한국어 윈도가 그렇다).
+   *
+   *   🔴 [2026-09-22 · AC-193] **이 줄이 없었다.** 구현(`mergeRunnerFormatMarks`)은 읽고 러너는 보내는데
+   *      **계약서만 몰랐다** — 타입만 보는 사람에게는 «그런 칸은 없다»가 된다(`paragraphs` 가 그 앞에 똑같이 겪었다).
+   *      `scripts/verify-formatmarks-contract.mjs` ③축이 잡았다. 이 축은 **그러라고 만든 축**이다.
+   */
+  subtitleFont?: { kind: string; family?: string; why?: string; ambiguous?: boolean };
 }
 
 export interface RunnerReportOk {
