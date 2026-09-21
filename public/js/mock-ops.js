@@ -96,6 +96,14 @@
       { id: 304, label: "주거-KR-3", provider: "oxylabs", product: "ISP KR", kind: "residential", region: "KR", status: "down", billingUnit: "gb", unitPriceKrw: 3400, costKrwMonth: 0, bandwidthGbMonth: 2.5, stickyGuaranteed: false, lastExitIp: "175.223.9.44", lastCheckAt: iso(now - 26 * 3600e3), expiresAt: null, assignedTo: { accountId: 4, handle: "shorts_d", tenantId: 1 } },
       { id: 305, label: "주거-KR-4", provider: "oxylabs", product: "ISP KR", kind: "residential", region: "KR", status: "active", billingUnit: "ip", unitPriceKrw: 6100, costKrwMonth: 6100, bandwidthGbMonth: null, stickyGuaranteed: true, lastExitIp: null, lastCheckAt: iso(now - 5 * 86400e3), expiresAt: iso(now + 9 * 86400e3), assignedTo: null },
     ],
+    /* ── [AC-191] 전용 IP **슬롯**(계정이 «전용 IP 30일권»을 산 것) — `stock.noProxy` 가 세는 모수다.
+         🔴 플랜 계정은 여기 안 들어온다 — 그 계정들은 **원래 IP 가 없다**. 그냥 세면 겁주는 숫자가 된다(서버도 active 슬롯만 센다).
+         씨앗: 산 것 3 · 그중 IP 가 아직 안 붙은 것 1 ⇒ 화면의 «IP 가 아직 안 붙은 계정 1곳». ── */
+    proxySlots: fresh ? [] : [
+      { id: 401, tenantId: 2, accountId: 11, status: "active", proxyId: 301 },
+      { id: 402, tenantId: 3, accountId: 12, status: "active", proxyId: 302 },
+      { id: 403, tenantId: 2, accountId: 13, status: "active", proxyId: null },
+    ],
     /* ── [B2] 러너 팜(ops-runners.ts) — runner_devices + farm 집계 ── */
     runners: fresh ? [] : [
       { id: 1, name: "farm-01", kind: "managed", tenantId: null, tenantKey: null, online: true, lastSeenAt: iso(now - 20e3), version: "1.0.3", active: 2, queued: 3 },
@@ -137,7 +145,7 @@
   });
 
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
-  if (!S || fresh || !S.ai || !S.ai.settings || !S.disclosure || !S.disclosure.text || qs.get("reset") === "1" || !S.tickets || !S.payment || !S.takedowns || !S.proxies) { S = seed(); save(); }
+  if (!S || fresh || !S.ai || !S.ai.settings || !S.disclosure || !S.disclosure.text || qs.get("reset") === "1" || !S.tickets || !S.payment || !S.takedowns || !S.proxies || !S.proxySlots) { S = seed(); save(); }
   function save() { try { sessionStorage.setItem(KEY, JSON.stringify(S)); } catch { /* empty */ } }
   const err = (step, error, extra = {}) => ({ ok: false, step, error, status: 400, ...extra });
   const forbid = () => ({ ok: false, step: "forbidden", error: "이 역할로는 할 수 없어요.", status: 403 });
@@ -280,11 +288,21 @@
       const size = Math.min(200, Math.max(1, Number(q.get("size")) || 50)); const page = Math.max(1, Number(q.get("page")) || 1);
       const all = S.takedowns.filter((x) => (!st || x.status === st) && (!tid || x.tenantId === tid)).slice().sort((a, b) => b.id - a.id);
       const KINDS = [["copyright", "저작권"], ["defamation", "명예훼손·비방"], ["privacy", "개인정보"], ["policy", "채널 정책 위반"], ["other", "기타"]];
+      /* [AC-190] 🔴 **실서버 `dueNotices` 와 같은 모양**(lib/takedown.ts) — 이름·제목·종류·며칠 지났나까지 준다.
+         모의가 옛 모양(id·tenantId·dueAt·reason)만 주고 있어서, 화면이 «이름이 없다»고 믿고 목록을 한 번 더 뜨던
+         그 낡은 계약이 **모의로는 영영 안 드러났다**(AC-190). */
+      const kday = (ms) => Math.floor((ms + 9 * 3600e3) / 86400e3);
       const due = S.takedowns.filter((x) => x.status === "open" && UI.utc(x.dueAt).getTime() <= Date.now())
-        .map((x) => ({ id: x.id, tenantId: x.tenantId, dueAt: x.dueAt, reason: x.reason }));
+        .sort((a, b) => UI.utc(a.dueAt) - UI.utc(b.dueAt))
+        .map((x) => ({ id: x.id, tenantId: x.tenantId, tenantName: x.tenantName || "", title: x.pieceTitle || x.externalUrl || "",
+          kindLabel: x.kindLabel, dueAt: x.dueAt, overdueDays: Math.max(0, kday(Date.now()) - kday(UI.utc(x.dueAt).getTime())), reason: x.reason }));
       return { ok: true, total: all.length, page, size, kinds: KINDS.map(([key, label]) => ({ key, label })), due,
         notices: all.slice((page - 1) * size, page * size).map((x) => ({ ...x, overdue: x.status === "open" && UI.utc(x.dueAt).getTime() < Date.now() })) }; },
-    "ops-takedown": (b) => { if (need("admin")) return forbid();
+    /* 🔴 [AC-190] 실서버는 **한 주소에 두 일**이 걸려 있다 — `POST /api/ops-takedown`(접수) · `GET /api/ops-takedown?id=`(단건).
+       모의 배선은 **길만 보고 가르므로**(mock-ops UI.api — method 를 모른다) `?id=` 가 있으면 단건으로 읽는다(접수는 `?id=` 를 안 붙인다). */
+    "ops-takedown": (b, q) => { if (need("admin")) return forbid();
+      if (q && q.get("id")) { const x = S.takedowns.find((z) => z.id === Number(q.get("id"))); if (!x) return err("not_found", "그 신고를 찾을 수 없어요.", { status: 404 });
+        return { ok: true, notice: { ...x, overdue: x.status === "open" && UI.utc(x.dueAt).getTime() < Date.now() }, trail: [] }; }
       const t = tn(b.tenantId); if (!t) return err("tenant", "그 고객을 찾을 수 없어요.");
       if (String(b.reason || "").trim().length < 5) return err("reason", "고객에게 보일 사유를 사람말로 적어 주세요(무엇이 왜 문제인지).");
       if (!b.pieceId && !b.postId && !String(b.externalUrl || "").trim()) return err("target", "어느 글인지(주소 또는 글 번호) 적어 주세요.");
@@ -304,8 +322,13 @@
       return err("action", "action 은 disconnect · suspend · resolve · dismiss 중 하나예요."); },
     /* ── [AC-181 · A] 전용 IP — ops-proxies.ts(조회·배정·상태 admin+ · 🔴 등록만 super_admin). 접속 주소는 **응답에 없다**. ── */
     "ops-proxies": (b) => { if (need("admin")) return forbid();
+      /* [AC-191] 🔴 `stalled`·`noProxy` 는 **서버가 센다**(화면이 proxies[] 를 훑으면 LIMIT 200 에서 조용히 덜 센다).
+         모의도 같은 칸을 줘야 화면의 새 길(«못 쟀어요»가 아닌 진짜 수)을 눈으로 볼 수 있다.
+         🔴 `noProxy` 는 **전용 IP 슬롯을 산 계정**만 센다 — 플랜 계정은 원래 IP 가 없어서, 그냥 세면 겁주는 숫자가 된다. */
       const stock = () => ({ free: S.proxies.filter((p) => p.status === "active" && !p.assignedTo).length,
-        assigned: S.proxies.filter((p) => p.assignedTo).length, down: S.proxies.filter((p) => p.status !== "active").length });
+        assigned: S.proxies.filter((p) => p.assignedTo).length, down: S.proxies.filter((p) => p.status !== "active").length,
+        stalled: S.proxies.filter((p) => p.status !== "active" && p.assignedTo).length,
+        noProxy: (S.proxySlots || []).filter((x) => x.status === "active" && !x.proxyId).length });
       if (!b || !b.action) return { ok: true, stock: stock(), proxies: S.proxies.map((p) => ({ ...p })) };
       if (b.action === "status") { const p = S.proxies.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "그 IP 를 찾을 수 없어요.", { status: 404 });
         if (!["active", "down", "expired"].includes(String(b.status))) return err("status", "status 는 active/down/expired");

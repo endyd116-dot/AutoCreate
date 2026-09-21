@@ -68,20 +68,21 @@ const kday = (ms) => Math.floor((ms + 9 * 3600e3) / 86400e3);
 const past = (iso) => { const d = kday(Date.now()) - kday(UI.utc(iso).getTime()); return d <= 0 ? "오늘" : `${d}일`; };
 
 async function load() {
-  /* 🔴 대기열(`due`)에는 **고객 이름이 없다**(id·tenantId·dueAt·reason 뿐). 그래서 열린 신고를 한 번에 떠서 이어 붙인다 —
-     `due` 는 `status='open'` 만·최대 50건이라 size=200 이면 다 덮는다(못 덮으면 그 줄에 «못 불러왔어요»라고 적는다 · AC-9). */
-  const [qd, ls] = await Promise.all([
-    UI.api("/api/ops-takedowns?status=open&size=200&page=1", { noRedirect: true }),
-    UI.api(`/api/ops-takedowns?status=${encodeURIComponent(status)}&page=${page}`, { noRedirect: true }),
-  ]);
-  if (!qd.ok && !ls.ok) {
-    UI.toast(qd.error || ls.error || "불러오지 못했어요");
-    UI.$("#dueN").textContent = "—"; UI.$("#dueTip").textContent = "못 불러왔어요. 새로고침해 주세요.";
-    UI.$("#due").innerHTML = row1("못 불러왔어요"); UI.$("#list").innerHTML = row1("못 불러왔어요"); return;
+  /* 🔴 [AC-190 · A 2026-09-22 · B 가 짚어 줬다] **여기 적혀 있던 «due 에는 고객 이름이 없다»는 낡은 말이었다.**
+     서버는 이미 `due[]` 에 `tenantName`·`title`·`kindLabel`·`overdueDays` 를 실어 준다(lib/takedown.ts dueNotices).
+     그런데 화면은 그 말을 못 믿고 **열린 신고를 size=200 으로 한 번 더 떠서** 이어 붙이고 있었다. 그 값이:
+       ① **왕복이 두 번**이고 ② **200 을 넘으면 조용히 못 덮어서** «고객 #778» 이라고 쓴다 —
+       운영자가 «되돌릴 수 없는 일»(계정 해제·서비스 정지)을 **누구 것인지 모르고** 누르는 자리다(§3 시스템 용어 금지).
+     ⇒ 한 번만 뜨고, 대기열은 **서버가 준 값을 그대로** 그린다. 줄을 눌렀을 때 이번 쪽에 없는 신고면 **그때 한 건만** 떠 온다.
+     🔴 이 주석에 날짜를 적어 둔다 — 낡은 주석이 코드보다 앞서 나가는 것이 이 사고의 뿌리였다(AC-59). */
+  const ls = await UI.api(`/api/ops-takedowns?status=${encodeURIComponent(status)}&page=${page}`, { noRedirect: true });
+  if (!ls.ok) {
+    UI.$("#dueN").textContent = "—"; UI.$("#dueTip").textContent = ls.error || "못 불러왔어요.";
+    UI.retryPanel("#due", load, ls.error); UI.retryPanel("#list", load, ls.error); return;
   }
-  KINDS = (ls.kinds && ls.kinds.length ? ls.kinds : qd.kinds) || [];
-  BY_ID = new Map([...(qd.notices || []), ...(ls.notices || [])].map((t) => [t.id, t]));
-  renderQueue(qd.ok ? (qd.due || []) : null);
+  KINDS = ls.kinds || [];
+  BY_ID = new Map((ls.notices || []).map((t) => [t.id, t]));
+  renderQueue(ls.due || []);
   renderList(ls);
 }
 
@@ -91,10 +92,20 @@ function renderQueue(due) {
   UI.$("#dueTip").textContent = due.length
     ? "기한 안에 안 내려간 신고예요. 줄을 누르면 지금 어디까지 왔는지와 다음 단계가 보여요."
     : "기한이 지난 신고가 없어요. 새 신고가 들어오면 여기에 먼저 떠요.";
-  UI.$("#due").innerHTML = due.length ? due.map((d) => { const t = BY_ID.get(d.id);
-    return `<button type="button" class="row tap" data-open="${d.id}"><span class="mk soft">!</span><div class="l"><span class="t wrap">${UI.esc(t ? t.kindLabel : "신고")} · ${UI.esc(String(d.reason || (t && t.reason) || "").slice(0, 60))}</span><span class="d">${UI.esc(t ? t.tenantName || `#${d.tenantId}` : `고객 #${d.tenantId}`)} · 기한 ${UI.esc(OPS.dateKST(d.dueAt))} · ${UI.esc(past(d.dueAt))} 지났어요</span></div>${UI.chev}</button>`;
+  /* [AC-190] 🔴 **서버가 준 값을 그대로** — `kindLabel`·`tenantName`·`title`·`overdueDays` 다 온다. 화면이 다시 셈하지 않는다(AC-74).
+     🔴 이름이 빈 집은 «고객 #778» 이 아니라 **«이름이 없는 집»**이라고 적는다 — 운영자에게도 시스템 용어를 보이지 않는다(§3). */
+  UI.$("#due").innerHTML = due.length ? due.map((d) => {
+    const who = String(d.tenantName || "").trim() || "이름이 없는 집";
+    const what = String(d.title || d.reason || "").trim();
+    return `<button type="button" class="row tap" data-open="${d.id}"><span class="mk soft">!</span><div class="l"><span class="t wrap">${UI.esc(d.kindLabel || "신고")}${what ? ` · ${UI.esc(what.slice(0, 60))}` : ""}</span><span class="d">${UI.esc(who)} · 기한 ${UI.esc(OPS.dateKST(d.dueAt))} · ${d.overdueDays > 0 ? `${UI.num(d.overdueDays)}일 지났어요` : "오늘까지예요"}</span></div>${UI.chev}</button>`;
   }).join("") : row1("기한이 지난 신고가 없어요");
-  UI.$$("#due [data-open]").forEach((b) => b.onclick = () => { const t = BY_ID.get(Number(b.dataset.open)); if (!t) return UI.toast("그 신고를 못 불러왔어요"); detail(t); });
+  /* 이번 쪽에 없는 신고면 **그때 한 건만** 떠 온다(GET /api/ops-takedown?id= · B 가 연 문). 200건 한도에 기대지 않는다. */
+  UI.$$("#due [data-open]").forEach((b) => b.onclick = async () => {
+    const id = Number(b.dataset.open); const t = BY_ID.get(id); if (t) return detail(t);
+    b.disabled = true; const r = await UI.api(`/api/ops-takedown?id=${id}`, { noRedirect: true }); b.disabled = false;
+    if (!r.ok || !r.notice) return UI.toast(r.error || "그 신고를 못 불러왔어요");
+    BY_ID.set(id, r.notice); detail(r.notice);
+  });
 }
 
 function renderList(r) {
