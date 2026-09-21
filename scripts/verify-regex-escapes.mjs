@@ -54,6 +54,10 @@ const RE_STRINGY = /new RegExp\(\s*(["'])((?:\\.|(?!\1)[\s\S])*?)\1/g;
  *  ⇒ 글자를 하나씩 걸으며 **백슬래시 다음 글자는 건너뛴다.** */
 export function classesOf(body) {
   const out = [];
+  /* 🔴 [2026-09-22 · B2 가 짚었다] 여기서 **조용히 버리고** 있었다 — 안 닫힌 클래스를 만나면 그 뒤를 통째로 포기했다.
+     «모수 5인데 4개만 봤다»가 되는 자리이고, 그게 오늘 아침 `subtitleFont` 를 놓친 그 모양이다. ⇒ **표시해서 내보낸다.**
+     ⚠️ 다만 **그걸 곧바로 «못 쟀다»로 쓰면 거짓 빨강이 난다** — 아래 부르는 쪽 주석을 봐라. */
+  out.unclosed = 0;
   for (let i = 0; i < body.length; i++) {
     if (body[i] === "\\") { i++; continue; }
     if (body[i] !== "[") continue;
@@ -62,7 +66,7 @@ export function classesOf(body) {
       if (body[j] === "\\") { j++; continue; }
       if (body[j] === "]") break;
     }
-    if (j >= body.length) break;                 // 안 닫혔다 — 우리가 잘못 뜯은 것이다. 버린다
+    if (j >= body.length) { out.unclosed++; break; }
     out.push(body.slice(i, j + 1));
     i = j;
   }
@@ -119,6 +123,14 @@ const TEAR = [
   ["costUsd: 0(?![.\\d])", 1, "`[.\\d]` 하나"],
   ["^[=(,:]$", 1, "클래스 하나"],
 ];
+/* 🔴 **«안 닫힌 것»을 세는지도 시험한다** — 안 세면 조용히 버려지고, 세기만 하고 «못 쟀음»으로 쓰면 거짓 빨강이 난다. */
+{
+  const a = classesOf("a[bc");
+  if (a.unclosed !== 1) selfFails.push(`뜯기 — 안 닫힌 클래스를 1개로 안 센다(${a.unclosed})`);
+  if (a.length !== 0) selfFails.push(`뜯기 — 안 닫힌 것을 클래스로 세었다(${a.length})`);
+  const b = classesOf("[ab][cd]");
+  if (b.unclosed !== 0 || b.length !== 2) selfFails.push(`뜯기 — 성한 둘을 ${b.length}개(안 닫힘 ${b.unclosed})로 봤다`);
+}
 for (const [body, want, why] of TEAR) {
   const got = classesOf(body).length;
   if (got !== want) selfFails.push(`뜯기 — /${body}/ 에서 클래스 ${want}개를 봐야 하는데 ${got}개를 봤다(${why})`);
@@ -135,7 +147,8 @@ if (selfFails.length) {
 const files = DIRS.flatMap((d) => walk(d));
 if (!files.length) { console.log("⊘ 못 쟀어요 — 훑을 파일이 하나도 없다(폴더가 맞나)."); process.exit(2); }
 
-let nLiterals = 0, nStringy = 0, nCommentLines = 0;
+let nLiterals = 0, nStringy = 0, nCommentLines = 0, nNotRegex = 0;
+const notRegex = [];
 const hits = [];
 for (const f of files) {
   const raw = readFileSync(path.join(ROOT, f), "utf8");
@@ -148,8 +161,16 @@ for (const f of files) {
   lines.forEach((ln, i) => {
     if (ln.trim() && !(stripped[i] ?? "").trim()) { nCommentLines++; return; }   // 통째로 주석인 줄
     for (const m of ln.matchAll(RE_LITERAL)) {
+      const classes = classesOf(m[2]);
+      /* 🔴 **«못 뜯었다»와 «애초에 정규식이 아니었다»를 가른다**(2026-09-22 · 세자마자 1건이 나왔다).
+         B2 의 `unresolved` 를 그대로 «못 쟀음»으로 쓰려다 **거짓 빨강**을 낼 뻔했다 — 실측으로 나온 그 1건은
+         `lib/publish/seo.ts:72` 의 `Math.floor(i / 588)] + JUNG[Math.floor((i % 588) / 28)]` 이었다.
+         **나눗셈 두 개**를 이 자가 정규식 리터럴로 오인한 것이고(머리말의 알려진 한계), 그 안의 `]`·`[` 가 안 맞을 뿐이다.
+         🔴 클래스가 안 닫혔다는 것은 대개 «**그 후보가 정규식이 아니었다**»는 신호다 ⇒ 모수에서 빼고 **따로 센다.**
+            이걸 «못 쟀음»으로 세면 멀쩡한 제품에 빨강이 뜨고, 그러면 아무도 이 자를 안 본다(AC-95). */
+      if (classes.unclosed) { nNotRegex++; if (notRegex.length < 3) notRegex.push(`${f}:${i + 1}`); continue; }
       nLiterals++;
-      for (const cls of classesOf(m[2])) {
+      for (const cls of classes) {
         const b = brokenClass(cls);
         if (b) hits.push({ f, line: i + 1, kind: "①", what: cls, why: `맨 «${b.bare}» 가 구두점 «${b.punct}» 과 섞여 있다 — \\${b.bare[0]} 가 흘린 자국`, ctx: ln.trim().slice(0, 110) });
       }
@@ -164,6 +185,9 @@ for (const f of files) {
 
 console.log("─".repeat(100));
 console.log(`정규식의 먹힌 백슬래시 — 훑은 파일 ${files.length}개 · 집은 정규식 리터럴 ${nLiterals}개 · new RegExp("…") ${nStringy}개 · 건너뛴 주석 줄 ${nCommentLines}개 · 깨진 곳 ${hits.length}`);
+/* 🔴 **모수에서 뺀 것을 말한다** — 말 안 하면 «다 봤다»가 되고, 그게 오늘 하루 종일 쫓은 병이다(AC-141 ②). */
+console.log(`  · 모수에서 뺀 것 — 정규식이 **아니었던 듯한 후보 ${nNotRegex}개**(클래스가 안 닫힌다 = 대개 나눗셈이다${notRegex.length ? ` · 예: ${notRegex.join(", ")}` : ""})`);
+console.log("    🔴 이건 «못 쟀음»이 아니라 **이 자의 알려진 한계**다 — 「나눗셈과 정규식을 완벽히 못 가른다」(머리말). 빨강으로 세지 않는다.");
 console.log(`  ✓ ③ 자기시험 — 잡는 눈 ${SELFTEST.length}종 · 뜯는 눈 ${TEAR.length}종이 모두 제 답을 냈다(이 자를 믿을 근거)`);
 if (!hits.length) console.log("  ✓ ①② 깨진 곳 없다");
 for (const h of hits) {

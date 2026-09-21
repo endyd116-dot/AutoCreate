@@ -80,32 +80,41 @@ function keysOfBody(body) {
   take(cur);
   return out;
 }
-/** 🔴 **그 글자가 나오는 자리를 전부** 본다 — `indexOf` 로 첫 자리만 보면 나머지가 말없이 모수에서 빠진다(오늘 그 병이다). */
+/** 🔴 **그 글자가 나오는 자리를 전부** 본다 — `indexOf` 로 첫 자리만 보면 나머지가 말없이 모수에서 빠진다(오늘 그 병이다).
+ *
+ *  🔴 [2026-09-22 · AC-193 · B2 가 짚었다] **«닻은 찾았는데 덩이를 못 잡은 것»을 조용히 버리면 안 된다.**
+ *     여기 `continue` 가 **두 곳** 있었다 — 여는 중괄호를 못 찾거나 안 닫혔을 때 그냥 넘어갔다.
+ *     그러면 «모수 5인데 4개만 봤다»가 되고, 그건 오늘 아침 `subtitleFont` 를 통째로 놓친 그 모양이다(모수가 조용히 준다).
+ *     ⇒ **센다.** 부르는 쪽이 0 이 아니면 **⊘**로 적는다. «못 잡았다»는 «없다»가 아니다.
+ *     ⚠️ B2 의 `allBlocksOf({ count, blocks, unresolved })` 가 main 에 들어오면 **이 함수는 그쪽에 맡긴다**(`d77bde9` · 아직 밖). */
 function literalKeys(text, start) {
   const out = [];
+  let unresolved = 0;
   for (let i = text.indexOf(start); i >= 0; i = text.indexOf(start, i + start.length)) {
     const j = text.indexOf("{", i + start.length - 1);
-    if (j < 0) continue;
+    if (j < 0) { unresolved++; continue; }
     let depth = 0, end = -1;
     for (let k = j; k < text.length; k++) {
       if (text[k] === "{") depth++;
       else if (text[k] === "}") { depth--; if (depth === 0) { end = k; break; } }
     }
-    if (end < 0) continue;
+    if (end < 0) { unresolved++; continue; }
     out.push(...keysOfBody(text.slice(j + 1, end)));
   }
-  return out;
+  return { keys: out, unresolved };
 }
 const runnerTop = new Set(), runnerPara = new Set();
+let unresolvedBlocks = 0;
+const addKeys = (set, text, start) => { const r = literalKeys(text, start); for (const k of r.keys) set.add(k); unresolvedBlocks += r.unresolved; };
 for (const f of CHANNELS) {
   /* 🔴 **싣는 꼴이 셋이다**(2026-09-22 — `subtitleFont` 가 모수에서 빠져 있어 알았다):
      ① `const formatMarks = { … }` ② `formatMarks.<칸> = …` ③ `return { …, formatMarks: { … } }`(인라인).
      ③ 을 안 보면 **영상 러너가 싣는 칸이 통째로 안 보인다** — `render-video.mjs` 가 딱 그 꼴이었다.
      그리고 ③ 은 **줄임 표기**(`{ subtitleFont }`)라 «이름:» 만 찾던 눈으로는 또 안 보였다. 두 구멍이 겹쳐 있었다. */
-  for (const k of literalKeys(T[f], "const formatMarks = {")) runnerTop.add(k);
-  for (const k of literalKeys(T[f], "formatMarks: {")) runnerTop.add(k);
+  addKeys(runnerTop, T[f], "const formatMarks = {");
+  addKeys(runnerTop, T[f], "formatMarks: {");
   for (const m of T[f].matchAll(/formatMarks\.([A-Za-z_$][\w$]*)\s*=/g)) runnerTop.add(m[1]);
-  for (const k of literalKeys(T[f], "formatMarks.paragraphs = {")) runnerPara.add(k);
+  addKeys(runnerPara, T[f], "formatMarks.paragraphs = {");
 }
 /* `bleed` 는 러너가 `measureFormatBleed` 의 결과를 통째로 싣는다 — 그 반환 모양을 계약서(`RunnerFormatMarks.bleed`)에서 읽는다. */
 const bleedDecl = /bleed\?: \{([^}]*)\}/.exec(rawRead(RJ) ?? "");
@@ -149,6 +158,13 @@ for (const m of bleedBody.matchAll(/"([A-Za-z_$][\w$]*)"/g)) if (/for \(const k 
 const droppedSet = new Set(DROPPED.map(([k]) => k));
 const M = runnerTop.size + runnerPara.size + runnerBleed.size;
 if (!M) { console.error("⊘ 못 쟀어요 — 러너 칸을 하나도 못 뜯었다(뜯는 눈이 깨졌다)."); process.exit(2); }
+/* 🔴 **모수가 «조용히» 줄지 않았나** — 닻은 찾았는데 덩이를 못 잡은 것이 있으면 이 자의 답은 «다 봤다»가 아니다.
+   0 이 아니면 «몇 개를 못 봤는지 모른 채 초록»이 되므로 여기서 멈춘다(AC-141 ② · B2 2026-09-22). */
+if (unresolvedBlocks) {
+  console.error(`⊘ 못 쟀어요 — 닻은 찾았는데 **덩이를 못 잡은 자리 ${unresolvedBlocks}곳**. 모수가 조용히 줄었다.`);
+  console.error("   🔴 「모수 5인데 4개만 봤다」가 오늘 아침 `subtitleFont` 를 통째로 놓친 그 모양이다. 넘어가지 않는다.");
+  process.exit(2);
+}
 
 /* ───────── ①② 러너 칸이 서버에 닿나 ───────── */
 function axis(ax, label, runnerKeys, serverKeys, prefix) {
@@ -239,6 +255,14 @@ const CANT_MEASURE = [
   /* 🔴 **B2 가 겪은 바로 그 모양** — 선언 함수를 화살표 함수로 바꾼다. C 의 자는 이때 몸통이 파일 전체가 돼 영원히 초록이었다. */
   ["`bleedOf` 가 화살표 함수가 된다", (b) => { b[FM] = b[FM].replace("export function bleedOf(v: unknown)", "export const bleedOf = (v: unknown)"); }],
   ["`paragraphsOf` 가 화살표 함수가 된다", (b) => { b[FM] = b[FM].replace("function paragraphsOf(v: unknown)", "const paragraphsOf = (v: unknown)"); }],
+  /* 🔴 **모수가 조용히 주는 쪽**(B2 2026-09-22) — 닻은 있는데 **덩이를 못 잡는** 자리를 심는다.
+     여태 `continue` 로 그냥 넘어갔다 ⇒ 「모수 5인데 4개만 봤다」. 이제 ⊘ 로 멈춘다.
+     ⚠️ B2 가 방금 이 변이의 **표본**으로 데었다(끝 표식이 뒤에 있으면 `unresolved` 가 0 이다) —
+        그래서 **뒤에 아무것도 안 닫히도록** 파일 맨 끝에 심는다. */
+  ["닻은 있는데 덩이가 안 닫힌다", (b) => {
+    const vid = CHANNELS.find((f) => f.includes("render-video")) ?? NAVER;
+    b[vid] = b[vid] + "\nconst zzNeverClosed = { formatMarks: { zzOpen: 1 ";
+  }],
 ];
 let silent = 0;
 for (const [name, tf, axisName] of MUT) {
