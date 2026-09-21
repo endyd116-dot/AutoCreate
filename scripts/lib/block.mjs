@@ -19,8 +19,25 @@
  *       (가드를 빼도 통과 · 2026-09-22 `_tmp/mutate-windows.mjs`).
  *     · B2 의 **변이 하니스 자신** — 종료코드만 보고 「자가 아니라고 했다」와 「**자를 못 돌렸다**」를 한 값으로 뭉갰다.
  *     · ④ **주석이 알리바이** — 덩이를 정확히 잡고도 **주석에 이름이 남아** 코드를 지운 변이가 통과했다(B2·B 둘 다).
- *       🔴 ①②③ 은 «못 잡았는데 답을 냈다» · ④ 는 «잡긴 잡았는데 **엉뚱한 글자**를 봤다» — 고침도 둘이다
- *          (앞 셋은 `null` 내고 `⊘` · 넷째는 **주석 걷기**). 둘 다 **변이 한 종**이 있어야 고쳤다고 할 수 있다.
+ *     · ⑤ **창이 넓어 옆 코드를 줍는다** — 주석을 걷어도 남는다. B2 가 `writeAudit\([\s\S]{0,400}` 로 바로 뒤
+ *       `return json({…recovered})` 를 주워 왔고, B 는 감사 축에 **코드 미끼**를 심어 뚫어 보였다.
+ *       🔴 **④를 고쳤다고 ⑤가 닫히지 않는다** — 따로 막아야 한다.
+ *     · (가로지름) 🔴 **닻이 여럿인데 첫 것만 본다** — «엉뚱한 **덩이**»를 본다. B 가 `INSERT INTO notifications`
+ *       5곳에서 겪었다(제품은 멀쩡한데 빨강 · 반대 방향이면 **조용한 초록**). ⇒ `blockOf` 기본 `unique:true`.
+ *
+ *   🔴 한 줄로: ①②③ = «못 잡았는데 답했다» · ④⑤ = «잡았는데 **엉뚱한 글자**» · 가로지름 = «**엉뚱한 덩이**».
+ *      고침도 그 결대로 셋이다 — **`null` 내고 ⊘** · **주석 걷기 + 창 좁히기** · **닻의 유일성**.
+ *      그리고 **셋 다 변이 한 종**이 있어야 고쳤다고 할 수 있다.
+ *
+ *   🔴 ══ **`unique` 를 만능으로 읽지 마라**(B 지적 2026-09-22) ══
+ *     **판정은 유일하게 · 열거는 전부.**
+ *       · 「**이 덩이가 맞나**」를 물을 때 → `blockOf`(`unique` 기본 켬). 닻이 여럿이면 답하지 않는 게 맞다.
+ *       · 「**몇 개나 있나**」를 물을 때 → 🔴 **`allBlocksOf`**. 여기에 `unique` 를 대면 **모수가 1로 줄어**
+ *         그 자체가 **조용한 초록**이 된다. B 가 실제로 겪었다: `literalKeys` 가 `formatMarks: {` 의
+ *         **첫 자리만** 보다 `subtitleFont` 를 **통째로 놓쳤다**(모수 24 인데 25 였다).
+ *     ⚠️ 그래서 「쓰지 마라」를 **주석으로만** 두지 않고 **열거할 함수를 같이 뒀다** —
+ *        오늘 하루가 「주석은 안 지켜진다」를 두 번 보여 줬다(AC-59 · 그리고 주석이 알리바이가 된 ④꼴).
+ *        고를 것이 하나뿐이면 사람은 그것을 잘못 쓴다.
  *
  *   ══ 고침은 한 가지다 ══
  *     🔴 **`null` 을 내고 «못 쟀다»로 적는다.** `✗`(제품이 틀렸다) 가 아니라 **`⊘`(자가 못 쟀다)** 로.
@@ -44,19 +61,39 @@
  */
 export { codeOnlyKeepIndex as stripComments } from "../_lib/code-only.mjs";
 
+/** 닻이 몇 번 나오나(겹치지 않게 센다). */
+function countOf(src, anchor) {
+  let n = 0; let i = src.indexOf(anchor);
+  while (i >= 0) { n++; i = src.indexOf(anchor, i + anchor.length); }
+  return n;
+}
+
 /**
  * 닻(`anchor`)으로 시작해 **끝 표식 중 가장 먼저 오는 것**까지를 덩이로 잡는다.
- *   @param {string} text  소스 전문
+ *   @param {string} text  소스(보통 **이미 좁혀 놓은** 덩이)
  *   @param {string} anchor  덩이의 시작 표식(문자열 그대로)
  *   @param {string[]} enders  끝 표식 후보들(문자열 그대로) — **하나도 못 찾으면 `null`**
- *   @param {{maxChars?: number}} [opts]  안전 상한(그 안에서 끝 표식을 못 찾아도 `null`)
- *   @returns {{ body: string, start: number, end: number } | null}
+ *   @param {{maxChars?: number, unique?: boolean}} [opts]
+ *     `maxChars` 안전 상한(그 안에서 끝 표식을 못 찾아도 `null`) ·
+ *     `unique` **기본 켬** — 닻이 둘 이상이면 `null`(아래 까닭)
+ *   @returns {{ body: string, start: number, end: number, count: number } | null}
  *     🔴 **`null` 은 «덩이를 못 잡았다»다 — «가드가 없다»가 아니다.** 부르는 쪽이 `⊘` 로 적어야 한다.
+ *
+ *   🔴 ══ **닻이 여럿이면 답이 거짓이다**(B 가 짚었다 · 2026-09-22) ══
+ *     종전엔 `indexOf` 로 **첫 번째**를 집었다. 그런데 닻이 여럿이면 **엉뚱한 덩이**를 떠 오고,
+ *     그 답은 **빨강이든 초록이든 거짓**이다. B 가 실제로 겪었다: `INSERT INTO notifications` 가
+ *     `runner-jobs.ts` 에 **5곳**이라 딴 알림 자리를 떠 왔고 **제품은 멀쩡한데 빨개졌다.**
+ *     🔴 이번엔 빨강이라 알아챘지만 **반대 방향이면 조용한 초록**이다.
+ *     ⇒ 기본을 **`unique: true`** 로 둔다 — 애매하면 답하지 않는다(그게 이 파일의 전부다).
+ *     ⇒ 일부러 첫 것을 쓰려면 `unique:false` 로 **적어서** 쓴다(그러면 `count` 를 보고 판단하라).
+ *     ⚠️ 부르는 쪽이 **먼저 범위를 좁히는 것**이 정답이다 — 갈래 몸통을 잡고 그 안에서 닻을 찾아라.
  */
 export function blockOf(text, anchor, enders, opts = {}) {
   const src = String(text ?? "");
+  const count = countOf(src, anchor);
+  if (count === 0) return null;                     // 🔴 닻이 없다 — 코드가 바뀌었다. «가드 없음»이 아니다.
+  if (count > 1 && opts.unique !== false) return null;   // 🔴 애매하다 — 첫 것을 집어 답하지 않는다
   const start = src.indexOf(anchor);
-  if (start < 0) return null;                       // 🔴 닻이 없다 — 코드가 바뀌었다. «가드 없음»이 아니다.
   const limit = Math.min(src.length, start + (opts.maxChars ?? 20_000));
   let end = -1;
   for (const e of enders) {
@@ -64,7 +101,62 @@ export function blockOf(text, anchor, enders, opts = {}) {
     if (i >= 0 && i < limit && (end < 0 || i < end)) end = i;
   }
   if (end < 0) return null;                          // 🔴 끝을 못 찾았다 — **파일 끝까지 넓히지 않는다**
-  return { body: src.slice(start, end), start, end };
+  return { body: src.slice(start, end), start, end, count };
+}
+
+/**
+ * 🔴 **열거** — 닻이 나오는 자리를 **전부** 잡는다(`blockOf` 의 반대 쪽 짝).
+ *   「몇 개나 있나」를 물을 때는 이것을 쓴다. `blockOf` 는 «이 덩이가 맞나»를 묻는 자다.
+ *
+ *   🔴 ══ **«끝을 못 찾았다»의 뜻은 닻의 성질이 정한다**(B 지적 2026-09-22 · 실측으로 나왔다) ══
+ *     같은 `unresolved` 인데 뜻이 **정반대**일 수 있다:
+ *       · `anchorKind:"literal"`   닻이 **글자 그대로의 코드**다(`formatMarks: {` · `writeAudit(`).
+ *         못 찾았으면 «**내가 실패했다**» ⇒ **⊘ 로 적고 모수에는 그대로 둔다**(안 그러면 모수가 줄어 조용한 초록).
+ *       · `anchorKind:"heuristic"` 닻이 **어림짐작**이다(정규식 후보 탐지 같은 것).
+ *         못 찾았으면 «**애초에 그게 아니었다**» ⇒ **모수에서 뺀다**(⊘ 로 적으면 **멀쩡한 제품에 거짓 빨강**).
+ *     🔴 B 가 실제로 겪었다: `verify-regex-escapes` 가 `Math.floor(i / 588)] + JUNG[…]` 의 **나눗셈 둘**을
+ *        정규식 리터럴로 오인했고, `unresolved` 를 곧바로 ⊘ 로 썼다면 **멀쩡한 제품이 빨개졌다.**
+ *        그러면 아무도 그 자를 안 본다(AC-95) — 거짓 빨강은 조용한 초록만큼 나쁘다.
+ *     ⚠️ **한 값을 한 뜻으로만 읽으면 한쪽은 반드시 거짓이다.**
+ *     🔴 그래서 주석으로만 두지 않고 **`denominator` 를 계산해 돌려준다** — 부르는 쪽이 매번 갈래를 안 써도 되게.
+ *        (오늘 하루가 「주석은 안 지켜진다」를 세 번 보여 줬다.)
+ *
+ *   @param {{maxChars?: number, anchorKind?: "literal"|"heuristic"}} [opts] 기본 `"literal"`(안전한 쪽)
+ *   @returns {{ count, blocks, unresolved, denominator, unresolvedMeans }}
+ *     · `count`           닻이 나온 수(**날것**)
+ *     · `blocks`          끝 표식까지 제대로 잘라 낸 덩이들
+ *     · `unresolved`      닻은 있는데 끝을 못 찾은 수
+ *     · 🔴 `denominator`  **셈에 쓸 모수** — `literal` 이면 `count`, `heuristic` 이면 `blocks.length`
+ *     · 🔴 `unresolvedMeans` `"unmeasured"`(⊘ 로 적어라) | `"not_applicable"`(그건 그게 아니었다)
+ *   ⚠️ 겹치지 않게 센다(닻 길이만큼 건너뛴다).
+ */
+export function allBlocksOf(text, anchor, enders, opts = {}) {
+  const src = String(text ?? "");
+  const heuristic = opts.anchorKind === "heuristic";
+  const blocks = [];
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const start = src.indexOf(anchor, from);
+    if (start < 0) break;
+    count++;
+    from = start + anchor.length;
+    const limit = Math.min(src.length, start + (opts.maxChars ?? 20_000));
+    let end = -1;
+    for (const e of enders) {
+      const i = src.indexOf(e, start + anchor.length);
+      if (i >= 0 && i < limit && (end < 0 || i < end)) end = i;
+    }
+    if (end >= 0) blocks.push({ body: src.slice(start, end), start, end });
+  }
+  const unresolved = count - blocks.length;
+  return {
+    count, blocks, unresolved,
+    /* 🔴 `literal` 은 모수를 **안 줄인다**(못 잰 것도 세야 «못 쟀다»가 보인다) ·
+       `heuristic` 은 **줄인다**(그건 애초에 대상이 아니었다). 이 한 줄이 위 갈래의 전부다. */
+    denominator: heuristic ? blocks.length : count,
+    unresolvedMeans: heuristic ? "not_applicable" : "unmeasured",
+  };
 }
 
 /**

@@ -20,8 +20,35 @@ export function blockOf(
   text: string,
   anchor: string,
   enders: readonly string[],
-  opts?: { maxChars?: number },
-): { body: string; start: number; end: number } | null;
+  /** `unique` 는 **기본 켬** — 닻이 둘 이상이면 `null`(엉뚱한 덩이를 집지 않는다). 일부러 첫 것을 쓰려면 `false` 로 **적어서**. */
+  opts?: { maxChars?: number; unique?: boolean },
+): { body: string; start: number; end: number; count: number } | null;
+
+/**
+ * 🔴 **열거** — 닻이 나오는 자리를 **전부**. 「몇 개나 있나」는 이것으로 묻는다.
+ *   `blockOf`(유일성)를 여기에 쓰면 **모수가 1로 줄어 조용한 초록**이 된다 — **판정은 유일하게 · 열거는 전부.**
+ *   `unresolved > 0` 이면 닻은 있는데 끝을 못 찾은 것이라 부르는 쪽이 **`⊘`** 로 적어야 한다.
+ */
+export function allBlocksOf(
+  text: string,
+  anchor: string,
+  enders: readonly string[],
+  /**
+   * 🔴 `anchorKind` — **«끝을 못 찾았다»의 뜻**을 정한다(기본 `"literal"`).
+   *   · `"literal"`   닻이 글자 그대로의 코드 → 못 찾음 = «**내가 실패했다**» ⇒ `⊘` · 모수는 **안 줄인다**
+   *   · `"heuristic"` 닻이 어림짐작 → 못 찾음 = «**그건 애초에 그게 아니었다**» ⇒ 모수에서 **뺀다**
+   *   ⚠️ 한 값을 한 뜻으로만 읽으면 한쪽은 반드시 거짓이다(⊘ 로 쓰면 거짓 빨강 · 빼면 조용한 초록).
+   */
+  opts?: { maxChars?: number; anchorKind?: "literal" | "heuristic" },
+): {
+  count: number;
+  blocks: { body: string; start: number; end: number }[];
+  unresolved: number;
+  /** 🔴 **셈에 쓸 모수** — `literal`=`count` · `heuristic`=`blocks.length`. 부르는 쪽이 갈래를 다시 쓰지 않게. */
+  denominator: number;
+  /** 🔴 `"unmeasured"`(⊘ 로 적어라) | `"not_applicable"`(그건 그게 아니었다). */
+  unresolvedMeans: "unmeasured" | "not_applicable";
+};
 
 /** 덩이 안에서 A 가 B 보다 앞인가. `null` = 둘 중 하나를 못 찾았다(⊘). */
 export function orderIn(

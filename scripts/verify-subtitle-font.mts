@@ -30,7 +30,7 @@ import { pathToFileURL } from "node:url";
 import { mergeRunnerFormatMarks } from "../lib/format-marks";
 /* 🔴 [AC-216] 고정 창(`+700`·`+900`·`+400`)을 버리고 **끝 표식까지**만 잡는다 — 못 잡으면 `⊘`(못 쟀음).
    변이로 재 보니 그 고정 창 둘이 **조용한 초록**이었다(가드를 빼도 통과 · 2026-09-22). 까닭은 파일 머리말에. */
-import { blockOf, stripComments } from "./lib/block.mjs";
+import { blockOf, allBlocksOf, stripComments } from "./lib/block.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const load = async (rel: string) => await import(pathToFileURL(path.join(ROOT, rel)).href);
@@ -262,6 +262,55 @@ console.log("\n⑧ 🔴 덩이를 **못 잡게 만들면** ⊘ 가 나오는가(
   ok("주석을 걷어도 **길이가 보존된다**(순서 판정이 살아 있어야 한다)",
     stripComments(WITH_COMMENT).length === WITH_COMMENT.length);
   ok("문자열 리터럴 속 `//` 는 주석이 아니다", stripComments('const s = "http://x"; // real').includes("http://x"));
+  /* 🔴 (가로지르는 병) **닻이 여럿이면 «엉뚱한 덩이»를 본다** — B 가 짚었고 `blockOf` 기본을 `unique:true` 로 바꿨다.
+     그 답은 빨강이든 초록이든 거짓이다. 여기서 못을 박는다. */
+  const TWICE = [
+    'if (A_KIND.has(k)) { return { ok: true, formatMarks: x }; }',
+    'if (B_KIND.has(k)) { return 1; }',
+    'if (A_KIND.has(k)) { return { ok: true }; }',            // 🔴 같은 닻이 또 나온다
+    'if (C_KIND.has(k)) { return 2; }',
+  ].join("\n");
+  ok("🔴 닻이 둘이면 null — **첫 것을 집어 답하지 않는다**(엉뚱한 덩이를 보느니 못 쟀다고 한다)",
+    blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]) === null);
+  ok("일부러 첫 것을 쓰려면 `unique:false` 로 **적어서** 쓴다(그때는 count 를 보고 판단한다)",
+    blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"], { unique: false })?.count === 2);
+  ok("닻이 하나면 count 가 1 이다", blockOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"])?.count === 1);
+  /* 🔴 **판정은 유일하게 · 열거는 전부**(B 지적 2026-09-22). `unique` 를 「몇 개나 있나」에 대면
+     **모수가 1로 줄어 그 자체가 조용한 초록**이 된다 — B 가 `literalKeys` 에서 겪었다(모수 24 인데 25 였고,
+     첫 자리만 보다 `subtitleFont` 를 통째로 놓쳤다). 「쓰지 마라」를 주석으로만 두지 않고
+     **열거할 함수를 같이 뒀다** — 고를 것이 하나뿐이면 사람은 그것을 잘못 쓴다. */
+  const all = allBlocksOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]);
+  ok("🔴 열거는 **전부** 센다(모수 2)", all.count === 2 && all.blocks.length === 2, JSON.stringify({ c: all.count, b: all.blocks.length }));
+  ok("🔴 그 자리에 `blockOf`(유일성)를 대면 **null** — 모수가 1로 줄지 않고 **아예 답을 안 한다**",
+    blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]) === null);
+  ok("닻이 하나면 열거도 1개", allBlocksOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"]).count === 1);
+  /* 🔴 **닻은 있는데 끝을 못 찾은 것**을 조용히 버리지 않는다 — 버리면 «모수 2인데 1개만 봤다»가 된다.
+     ⚠️ 처음엔 위 `TWICE` 를 그대로 썼는데 **거기선 두 닻 다 끝을 찾는다**(뒤에 `if (C_KIND` 가 있다).
+        자가 `u:0` 으로 빨강을 냈고 — **코드가 맞고 내 표본이 틀렸다**(이 판 세 번째다).
+        ⇒ **마지막 닻 뒤에 끝 표식이 없는** 표본을 따로 만든다. */
+  const TAIL = [
+    'if (A_KIND.has(k)) { return 1; }',
+    'if (C_KIND.has(k)) { return 2; }',
+    'if (A_KIND.has(k)) { return 3; }',        // 🔴 이 뒤에는 끝 표식이 없다
+  ].join("\n");
+  const half = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"]);
+  ok("🔴 끝을 못 찾은 닻은 `unresolved` 로 드러난다(조용히 안 버린다)",
+    half.count === 2 && half.unresolved === 1, JSON.stringify({ c: half.count, b: half.blocks.length, u: half.unresolved }));
+  /* 🔴 **«끝을 못 찾았다»의 뜻은 닻의 성질이 정한다**(B 지적 · 실측에서 나왔다).
+     같은 `unresolved:1` 인데 뜻이 정반대라, 한 뜻으로만 읽으면 **한쪽은 반드시 거짓**이다:
+       · 글자 그대로의 닻 → «내가 실패했다» ⇒ ⊘ · 모수를 **줄이면 안 된다**(줄이면 조용한 초록)
+       · 어림짐작 닻     → «그건 애초에 그게 아니었다» ⇒ 모수에서 **빼야** 한다(⊘ 로 적으면 **거짓 빨강**)
+     B 가 겪은 것: `Math.floor(i / 588)] + JUNG[…]` 의 나눗셈 둘을 정규식으로 오인 — ⊘ 로 썼으면 멀쩡한 제품이 빨개졌다. */
+  const lit = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"]);                            // 기본 = literal
+  const heu = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"], { anchorKind: "heuristic" });
+  ok("🔴 글자 그대로의 닻 — 모수를 **안 줄인다**(못 잰 것도 세야 «못 쟀다»가 보인다)",
+    lit.denominator === 2 && lit.unresolvedMeans === "unmeasured", JSON.stringify(lit.denominator + "/" + lit.unresolvedMeans));
+  ok("🔴 어림짐작 닻 — 모수에서 **뺀다**(그건 애초에 그게 아니었다 · ⊘ 로 적으면 거짓 빨강)",
+    heu.denominator === 1 && heu.unresolvedMeans === "not_applicable", JSON.stringify(heu.denominator + "/" + heu.unresolvedMeans));
+  ok("🔴 두 갈래가 **서로 다른 모수**를 낸다(같으면 이 갈래가 아무 일도 안 하는 것이다)", lit.denominator !== heu.denominator);
+  ok("못 찾은 게 없으면 두 갈래가 같다(평소엔 차이가 없어야 한다)",
+    allBlocksOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]).denominator
+    === allBlocksOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"], { anchorKind: "heuristic" }).denominator);
 }
 
 /* 🔴 [AC-216] **못 쟀는데 통과로 넘기지 않는다.** 종료 0 = 전부 ✓ · 1 = 제품이 틀렸다 · 2 = **자가 못 쟀다**. */
