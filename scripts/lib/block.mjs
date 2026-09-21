@@ -29,6 +29,16 @@
  *      고침도 그 결대로 셋이다 — **`null` 내고 ⊘** · **주석 걷기 + 창 좁히기** · **닻의 유일성**.
  *      그리고 **셋 다 변이 한 종**이 있어야 고쳤다고 할 수 있다.
  *
+ *   🔴 ══ **`unique` 를 만능으로 읽지 마라**(B 지적 2026-09-22) ══
+ *     **판정은 유일하게 · 열거는 전부.**
+ *       · 「**이 덩이가 맞나**」를 물을 때 → `blockOf`(`unique` 기본 켬). 닻이 여럿이면 답하지 않는 게 맞다.
+ *       · 「**몇 개나 있나**」를 물을 때 → 🔴 **`allBlocksOf`**. 여기에 `unique` 를 대면 **모수가 1로 줄어**
+ *         그 자체가 **조용한 초록**이 된다. B 가 실제로 겪었다: `literalKeys` 가 `formatMarks: {` 의
+ *         **첫 자리만** 보다 `subtitleFont` 를 **통째로 놓쳤다**(모수 24 인데 25 였다).
+ *     ⚠️ 그래서 「쓰지 마라」를 **주석으로만** 두지 않고 **열거할 함수를 같이 뒀다** —
+ *        오늘 하루가 「주석은 안 지켜진다」를 두 번 보여 줬다(AC-59 · 그리고 주석이 알리바이가 된 ④꼴).
+ *        고를 것이 하나뿐이면 사람은 그것을 잘못 쓴다.
+ *
  *   ══ 고침은 한 가지다 ══
  *     🔴 **`null` 을 내고 «못 쟀다»로 적는다.** `✗`(제품이 틀렸다) 가 아니라 **`⊘`(자가 못 쟀다)** 로.
  *        · `⊘` 를 `✓` 에 섞으면 → **조용한 초록**(오늘 둘)
@@ -92,6 +102,38 @@ export function blockOf(text, anchor, enders, opts = {}) {
   }
   if (end < 0) return null;                          // 🔴 끝을 못 찾았다 — **파일 끝까지 넓히지 않는다**
   return { body: src.slice(start, end), start, end, count };
+}
+
+/**
+ * 🔴 **열거** — 닻이 나오는 자리를 **전부** 잡는다(`blockOf` 의 반대 쪽 짝).
+ *   「몇 개나 있나」를 물을 때는 이것을 쓴다. `blockOf` 는 «이 덩이가 맞나»를 묻는 자다.
+ *
+ *   @returns {{ count: number, blocks: {body:string,start:number,end:number}[], unresolved: number }}
+ *     · `count`      닻이 나온 수(**모수**)
+ *     · `blocks`     끝 표식까지 제대로 잘라 낸 덩이들
+ *     · `unresolved` 🔴 **닻은 있는데 끝을 못 찾은 수** — 0 이 아니면 부르는 쪽이 **`⊘` 로 적어야 한다.**
+ *       (여기서 조용히 버리면 «모수는 5인데 4개만 봤다»가 되고, 그게 바로 이 파일이 막는 병이다.)
+ *   ⚠️ 겹치지 않게 센다(닻 길이만큼 건너뛴다).
+ */
+export function allBlocksOf(text, anchor, enders, opts = {}) {
+  const src = String(text ?? "");
+  const blocks = [];
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const start = src.indexOf(anchor, from);
+    if (start < 0) break;
+    count++;
+    from = start + anchor.length;
+    const limit = Math.min(src.length, start + (opts.maxChars ?? 20_000));
+    let end = -1;
+    for (const e of enders) {
+      const i = src.indexOf(e, start + anchor.length);
+      if (i >= 0 && i < limit && (end < 0 || i < end)) end = i;
+    }
+    if (end >= 0) blocks.push({ body: src.slice(start, end), start, end });
+  }
+  return { count, blocks, unresolved: count - blocks.length };
 }
 
 /**

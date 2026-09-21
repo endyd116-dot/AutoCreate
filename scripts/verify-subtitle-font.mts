@@ -30,7 +30,7 @@ import { pathToFileURL } from "node:url";
 import { mergeRunnerFormatMarks } from "../lib/format-marks";
 /* 🔴 [AC-216] 고정 창(`+700`·`+900`·`+400`)을 버리고 **끝 표식까지**만 잡는다 — 못 잡으면 `⊘`(못 쟀음).
    변이로 재 보니 그 고정 창 둘이 **조용한 초록**이었다(가드를 빼도 통과 · 2026-09-22). 까닭은 파일 머리말에. */
-import { blockOf, stripComments } from "./lib/block.mjs";
+import { blockOf, allBlocksOf, stripComments } from "./lib/block.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const load = async (rel: string) => await import(pathToFileURL(path.join(ROOT, rel)).href);
@@ -275,6 +275,27 @@ console.log("\n⑧ 🔴 덩이를 **못 잡게 만들면** ⊘ 가 나오는가(
   ok("일부러 첫 것을 쓰려면 `unique:false` 로 **적어서** 쓴다(그때는 count 를 보고 판단한다)",
     blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"], { unique: false })?.count === 2);
   ok("닻이 하나면 count 가 1 이다", blockOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"])?.count === 1);
+  /* 🔴 **판정은 유일하게 · 열거는 전부**(B 지적 2026-09-22). `unique` 를 「몇 개나 있나」에 대면
+     **모수가 1로 줄어 그 자체가 조용한 초록**이 된다 — B 가 `literalKeys` 에서 겪었다(모수 24 인데 25 였고,
+     첫 자리만 보다 `subtitleFont` 를 통째로 놓쳤다). 「쓰지 마라」를 주석으로만 두지 않고
+     **열거할 함수를 같이 뒀다** — 고를 것이 하나뿐이면 사람은 그것을 잘못 쓴다. */
+  const all = allBlocksOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]);
+  ok("🔴 열거는 **전부** 센다(모수 2)", all.count === 2 && all.blocks.length === 2, JSON.stringify({ c: all.count, b: all.blocks.length }));
+  ok("🔴 그 자리에 `blockOf`(유일성)를 대면 **null** — 모수가 1로 줄지 않고 **아예 답을 안 한다**",
+    blockOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]) === null);
+  ok("닻이 하나면 열거도 1개", allBlocksOf(SAMPLE, "A_KIND.has(k)", ["if (B_KIND"]).count === 1);
+  /* 🔴 **닻은 있는데 끝을 못 찾은 것**을 조용히 버리지 않는다 — 버리면 «모수 2인데 1개만 봤다»가 된다.
+     ⚠️ 처음엔 위 `TWICE` 를 그대로 썼는데 **거기선 두 닻 다 끝을 찾는다**(뒤에 `if (C_KIND` 가 있다).
+        자가 `u:0` 으로 빨강을 냈고 — **코드가 맞고 내 표본이 틀렸다**(이 판 세 번째다).
+        ⇒ **마지막 닻 뒤에 끝 표식이 없는** 표본을 따로 만든다. */
+  const TAIL = [
+    'if (A_KIND.has(k)) { return 1; }',
+    'if (C_KIND.has(k)) { return 2; }',
+    'if (A_KIND.has(k)) { return 3; }',        // 🔴 이 뒤에는 끝 표식이 없다
+  ].join("\n");
+  const half = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"]);
+  ok("🔴 끝을 못 찾은 닻은 `unresolved` 로 드러난다(조용히 안 버린다)",
+    half.count === 2 && half.unresolved === 1, JSON.stringify({ c: half.count, b: half.blocks.length, u: half.unresolved }));
 }
 
 /* 🔴 [AC-216] **못 쟀는데 통과로 넘기지 않는다.** 종료 0 = 전부 ✓ · 1 = 제품이 틀렸다 · 2 = **자가 못 쟀다**. */
