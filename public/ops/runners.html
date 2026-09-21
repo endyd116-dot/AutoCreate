@@ -13,7 +13,7 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">러너 팜</span><span class="sp"></span></div>
-<div class="group"><div class="stat4" id="farm"></div></div>
+<div class="group"><div class="gt">러너 팜 <a href="/ops/proxies.html">전용 IP</a></div><div class="stat4" id="farm"></div></div>
 <div class="group"><div class="gt">러너 <span class="muted" style="font-weight:500">관리형(팜) + 고객 PC</span><span id="lock1"></span></div><p class="muted" id="release" style="margin:0 16px 10px;font-size:13px"></p><div id="list"></div></div>
 <div class="group"><div class="gt">셀렉터 카나리 <span class="muted" style="font-weight:500">매일 05:00 KST 평가 · 러너가 «임시저장까지» 드라이런</span></div><div id="canary"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">✗ 는 채널 상태를 down 으로 바꿀 «제안»이에요 — 자동 전환은 안 하고 채널 메뉴에서 사람이 눌러요. «—» 는 판정 불가(세션 없음).</p></div>
 <!-- [P1R8 §3.3 · B2] 셀렉터 표 배포 — 🔴 «어느 판이 어디까지 퍼졌나»와 **«왜 아직 대기 중인가»**.
@@ -22,9 +22,9 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=29"></script>
+<script src="/js/ui.js?v=30"></script>
 <script src="/js/ops.js?v=3"></script>
-<script src="/js/mock-ops.js?v=1"></script>
+<script src="/js/mock-ops.js?v=2"></script>
 <script>
 (async () => {
 const op = await OPS.boot("runners"); if (!op) return;

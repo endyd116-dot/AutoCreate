@@ -159,6 +159,34 @@
       }) });
   };
 
+  /* [AC-183 · A · 2026-09-21] 🔴 **«영상도 만들래요?»를 묻는 한 자리** — 온보딩(§13.0b «한 화면 한 질문»)은 **이미 묻는다**(글·영상 둘 다 켜진 채로).
+     못 묻는 건 **그 화면을 지나온 집**이다: `kindsSet:false` 는 «한 번도 저장된 적이 없다»는 뜻이고,
+     그 집의 `kinds` 는 서버 기본값 `["text"]` 라 **영상이 어디에도 안 나타난다**(사장님 집 778 이 그 상태였다).
+     🔴 **두 답 모두 저장한다** — «글만»도 답이다. 안 그러면 이 질문이 영영 다시 뜬다(묻기만 하고 끝낼 수 없는 질문이 제일 나쁘다).
+     🔴 켠다고 채널이 필요한 건 아니다 — 계정이 없어도 만들어서 **직접 올릴 수 있다**(`lib/director.ts` §1.2 · 검수 화면의 «영상 내려받기»).
+        그래서 «채널부터 연결하세요»로 겁주지 않는다(§3). */
+  UI.askKindsSheet = function (onDone) {
+    UI.sheet(`<p style="margin:0 0 6px;font-size:19px;font-weight:800;letter-spacing:-.02em">영상도 만들어 드릴까요?</p>
+      <p class="muted" style="margin:0 0 14px;line-height:1.6">글은 지금처럼 그대로 만들어요. 영상을 켜면 만들기와 디렉터에 영상이 함께 나와요.</p>
+      ${UI.chips("kindPick", [["text", "글만 만들어요"], ["video", "글도 영상도 만들어요"]], "text")}
+      <p class="muted" style="margin:12px 0 0;font-size:12.5px;line-height:1.6">올릴 채널이 아직 없어도 괜찮아요 — 만들어 드리고, 올리는 건 직접 하시면 돼요.</p>
+      <p class="muted" style="margin:4px 0 0;font-size:12.5px;line-height:1.6">나중에 «내 계정 → 설정»에서 언제든 바꿀 수 있어요.</p>
+      <div class="cta"><button class="btn primary" type="button" id="kpGo">이걸로 할게요</button></div>`,
+      { title: "", onOpen: (sh, close) => {
+        UI.bindChips(sh);
+        sh.querySelector("#kpGo").onclick = async (e) => {
+          const pick = UI.chipVal(sh, "kindPick") || "text";
+          e.target.disabled = true;
+          /* 서버가 정규화한다(«글»은 항상 남는다 · `tenant-settings.ts normalizeKinds`) — 화면은 켤지 말지만 보낸다. */
+          const r = await UI.api("/api/tenant-settings", { body: { kinds: pick === "video" ? ["text", "video"] : ["text"] } });
+          e.target.disabled = false;
+          if (!r.ok) { if (r.gated) return close(); return UI.toast(r.error || "저장하지 못했어요"); }
+          close();
+          UI.done((r.kinds || []).includes("video") ? "영상도 만들어 드릴게요" : "글만 만들어 드릴게요", () => { if (onDone) onDone(r); });
+        };
+      } });
+  };
+
   /* [R7 §4.4] 알림 — 서비스워커는 «알림»만 맡는다(오프라인 캐시 안 한다 · public/sw.js).
      🔴 기기 알림은 «권한»과 «구독» 두 단계다: 권한만 받고 서버에 구독을 못 보내면 알림은 **안 온다** — 화면이 «켰어요»라고 말하면 거짓말이 된다.
      그래서 서버 키(/api/push-key)가 없으면 그 상태를 그대로 말한다(준비 중). */
@@ -200,7 +228,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.20";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
+  UI.APP_VERSION = "2026.09.21";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).

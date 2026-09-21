@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>전용 IP · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=23">
+</head>
+<body class="ops">
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/runners.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">전용 IP</span><span class="sp"></span></div>
+<!-- [AC-181 · A · 2026-09-21] 🔴 **프록시(IP) 콘솔** — 서버 둘(`ops-proxies`·`ops-proxy-assign`)이 **화면 0개**였다(킬스위치 문서 §5).
+     🔴 첫 숫자 = **남은 IP**. 0이면 새 계정은 IP 를 기다린다 — `lib/proxies.ts` 는 «없다»를 실패가 아니라 `pending` 으로 돌려주고,
+        B 의 계정 슬롯 구매가 그걸 보고 «배정될 때 차감»으로 미룬다. 그러니 이 숫자가 **재고 운영의 손잡이**다.
+     🔴 DESIGN §7.3b «계정 하나 = IP 하나» · fail-closed — 그래서 «지금 몇 계정이 멈춰 있나»가 이 콘솔의 값이다.
+     🔴 접속 주소는 어떤 응답에도 없다(`url_enc` 는 SELECT 에도 안 넣는다) — 화면이 보여 줄 수 있는 건 «어디 것 · 살았나 · 누가 쓰나 · 얼마»뿐이다. -->
+<div class="hl"><div class="say">지금 남은 IP</div><div class="num" id="freeN">…</div><div class="tip" id="freeTip"></div></div>
+<div class="group"><div class="gt">재고</div><div class="stat4" id="stock"></div><p class="muted" id="stall" style="margin:0 16px 6px;font-size:12.5px;line-height:1.6"></p><p class="muted" id="unmeasured" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6"></p></div>
+<div class="group"><div class="gt">IP 목록<span id="lock"></span> <button type="button" class="lk" id="add">IP 등록</button></div><div id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=30"></script>
+<script src="/js/ops.js?v=3"></script>
+<script src="/js/mock-ops.js?v=2"></script>
+<script>
+(async () => {
+const op = await OPS.boot("runners"); if (!op) return;
+const canSee = OPS.can(op, "admin");        // 조회·배정·상태 = admin+ (`ops-proxies.ts requireAdmin(["admin","super_admin"])`)
+const canAdd = OPS.can(op, "super_admin");  // 🔴 등록만 super_admin — IP 를 바꾸는 건 그 계정의 신원을 바꾸는 일이다
+const row1 = (t) => `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">${UI.esc(t)}</span></div></div>`;
+/* 표에 없는 값은 **코드값 그대로** 낸다 — «기타»로 뭉치면 새 종류가 생겨도 아무도 모른다(AC-9 · OPS.aiPurpose 와 같은 규칙). */
+const PST = { active: ["ok", "살아 있음"], down: ["danger", "멈춤"], expired: ["off", "기간 끝"] };
+const KIND = { residential: "가정용", mobile: "모바일", datacenter: "데이터센터" };
+const UNIT = { ip: "IP 당 월", gb: "1GB 당" };
+let P = [], TENANTS = null;
+
+if (!canSee) {
+  UI.$("#freeN").textContent = "—";
+  UI.$("#freeTip").textContent = "전용 IP 는 관리자부터 볼 수 있어요. 최고 관리자에게 권한을 올려 달라고 하시면 바로 열려요.";
+  UI.$("#stock").innerHTML = ""; UI.$("#list").innerHTML = row1("여기서는 안 보여요");
+  UI.$("#lock").innerHTML = OPS.lockPill("admin");
+  UI.$("#add").disabled = true; UI.$("#add").classList.add("locked");
+  return;
+}
+
+const won = (n) => (n ? UI.won(n) : "—");
+const dleftDays = (iso) => Math.ceil((UI.utc(iso).getTime() - Date.now()) / 86400e3);
+
+async function load() {
+  const r = await UI.api("/api/ops-proxies", { noRedirect: true });
+  if (!r.ok) {
+    UI.toast(r.error || "불러오지 못했어요");
+    UI.$("#freeN").textContent = "—"; UI.$("#freeTip").textContent = "못 불러왔어요. 새로고침해 주세요.";
+    UI.$("#list").innerHTML = row1("못 불러왔어요"); return;
+  }
+  P = r.proxies || [];
+  const s = r.stock || { free: 0, assigned: 0, down: 0 };
+
+  UI.$("#freeN").textContent = `${UI.num(s.free)}개`;
+  /* 🔴 0 일 때도 **겁주지 않는다**: ①사실 ②어떻게 하면 되는지 ③우리가 대신 해 주는 것(§3). «못 받습니다»로 끝내지 않는다. */
+  UI.$("#freeTip").textContent = s.free
+    ? `계정 ${UI.num(s.free)}개를 바로 받을 수 있어요.`
+    : "남은 IP 가 없어요. 새 계정은 IP 가 준비될 때까지 기다리고, 여기서 IP 를 등록하면 바로 붙어요.";
+
+  /* 🔴 **«IP 가 멈춘 채 계정에 붙어 있는 것»**이 이 콘솔의 두 번째 값이다 — 재고 표(free/assigned/down)만으로는 안 보인다.
+     러너가 프록시 오류를 보고하면 서버가 그 IP 를 `down` 으로 내리고 고객에게 «IP 연결이 끊겨 잠시 멈췄어요»를 보낸다
+     (`lib/runner-jobs.ts`) — 그러니 이 줄은 **이미 한 번은 실패한 계정**이다. */
+  const stalled = P.filter((p) => p.status !== "active" && p.assignedTo);
+  const soon = P.filter((p) => p.expiresAt && dleftDays(p.expiresAt) <= 30 && dleftDays(p.expiresAt) >= 0);
+  UI.$("#stock").innerHTML = [["쓰는 중", UI.num(s.assigned)], ["멈춘 IP", UI.num(s.down)], ["IP 가 멈춘 계정", UI.num(stalled.length)], ["30일 안에 만료", UI.num(soon.length)]]
+    .map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  UI.$("#stall").innerHTML = stalled.length
+    ? `IP 가 멈춘 채로 계정 <b>${UI.num(stalled.length)}곳</b>에 붙어 있어요(${stalled.slice(0, 3).map((p) => UI.esc(`@${p.assignedTo.handle}`)).join(" · ")}${stalled.length > 3 ? " 외" : ""}). 새 IP 를 등록해 배정하면 바로 이어져요.`
+    : "IP 가 멈춘 채로 붙어 있는 계정은 없어요.";
+  /* 🔴 못 재는 축은 **통과시키고 «못 쟀어요»라고 적는다**(§9 · AC-9). 지어내지 않는다.
+     ── 🔴 B 에게(A · 2026-09-21 · 메인 경유) — 이 줄을 지우려면 서버가 두 칸을 더 내려 줘야 한다 ──
+       ① `GET /api/ops-proxies` 의 `stock` 에 **`stock.noProxy`**(number) — `accounts.proxy_id IS NULL` 인 계정 수.
+          지금 응답으로는 «IP 가 붙은 것»만 보여서 «IP 없이 도는 계정»을 셀 수가 없다.
+       ② 같은 자리에 **`stock.stalled`**(number) — 붙어 있는 IP 가 `status <> 'active'` 인 계정 수.
+          지금은 화면이 `proxies[]` 를 훑어 세지만 서버가 `LIMIT 200` 을 걸어 두어 **200개를 넘으면 조용히 덜 센다.**
+       ③ 🔴 그리고 이건 화면 일이 아니라 **서버 고장**이다 — `lib/runner-jobs.ts:602` 가 `p.status AS p_status` 를
+          **SELECT 만 하고 한 번도 안 읽는다**(그 파일에서 `p_status` 등장 1회 = 그 SELECT 줄). 그래서 DESIGN §7.3b 의
+          fail-closed 중 «죽은 IP 면 잡을 멈춘다» 쪽이 **안 돈다**(출구 IP 불일치 쪽은 `runner/core.mjs:188` 이 제대로 막는다).
+          이 화면이 «IP 가 멈춘 계정»이라고 부르는 것도 그래서 «멈췄다»가 아니라 «실패하고 있다»가 정확한 말이다. */
+  UI.$("#unmeasured").textContent = "IP 가 아예 안 붙은 계정이 몇 곳인지는 여기서 못 세요 — 이 화면에는 IP 쪽만 내려와요.";
+
+  UI.$("#lock").innerHTML = canAdd ? "" : OPS.lockPill("super_admin");
+  UI.$("#list").innerHTML = OPS.table([
+    { h: "이름", f: (p) => `<b>${UI.esc(p.label)}</b>${p.stickyGuaranteed ? ` <span class="pill ok">고정 보장</span>` : ` <span class="pill warn" title="같은 출구 IP 유지가 보장되지 않아요">고정 미보장</span>`}` },
+    { h: "어디 것", f: (p) => p.provider ? `${UI.esc(p.provider)}${p.product ? `<br><span class="muted">${UI.esc(p.product)}</span>` : ""}` : `<span class="muted">안 적혀 있어요</span>` },
+    { h: "종류 · 지역", f: (p) => `${UI.esc(KIND[p.kind] || p.kind || "")}${p.region ? ` · ${UI.esc(p.region)}` : ""}` },
+    { h: "상태", f: (p) => OPS.pill(PST[p.status] || ["off", p.status]) },
+    { h: "쓰는 계정", f: (p) => p.assignedTo
+      ? `<a class="lk" href="/ops/tenant.html?id=${p.assignedTo.tenantId}">@${UI.esc(p.assignedTo.handle)}</a>`
+      : `<span class="muted">비어 있음</span>` },
+    { h: "값", r: true, f: (p) => `${won(p.unitPriceKrw)}<br><span class="muted">${UI.esc(UNIT[p.billingUnit] || p.billingUnit || "")}</span>` },
+    { h: "나가는 IP", f: (p) => p.lastExitIp ? `<span class="mono">${UI.esc(p.lastExitIp)}</span>` : `<span class="muted">못 쟀음</span>` },
+    { h: "마지막 점검", f: (p) => p.lastCheckAt ? UI.ago(p.lastCheckAt) : `<span class="muted">못 쟀음</span>` },
+    { h: "만료", f: (p) => p.expiresAt ? `${OPS.dateKST(p.expiresAt)} <span class="muted">${UI.esc(OPS.dleft(p.expiresAt))}</span>` : `<span class="muted">없음</span>` },
+    { h: "", f: (p) => `${p.assignedTo ? `<button type="button" class="lk" data-rel="${p.id}">해제</button>` : `<button type="button" class="lk" data-asg="${p.id}">배정</button>`} · <button type="button" class="lk" data-st="${p.id}">${p.status === "active" ? "멈춤으로" : "살리기"}</button>` },
+  ], P);
+  if (!P.length) UI.$("#list").innerHTML = row1("아직 등록한 IP 가 없어요 — «IP 등록»으로 하나 넣으면 계정에 붙일 수 있어요");
+
+  const byId = (id) => P.find((x) => x.id === Number(id));
+  UI.$$("#list [data-asg]").forEach((b) => b.onclick = () => assignSheet(byId(b.dataset.asg)));
+  UI.$$("#list [data-rel]").forEach((b) => b.onclick = () => releaseSheet(byId(b.dataset.rel)));
+  UI.$$("#list [data-st]").forEach((b) => b.onclick = () => statusSheet(byId(b.dataset.st)));
+  if (!canAdd) { UI.$("#add").disabled = true; UI.$("#add").classList.add("locked"); UI.$("#add").onclick = () => UI.toast("최고 관리자만 등록할 수 있어요"); }
+}
+
+async function tenantList() {
+  if (TENANTS) return TENANTS;
+  const t = await UI.api("/api/ops-tenants?limit=50&internal=1", { noRedirect: true });
+  TENANTS = t.ok ? t.tenants || [] : [];
+  return TENANTS;
+}
+
+/* 배정 = 고객 → 그 집 계정. 🔴 «자동(비면 아무거나)»과 «이 IP 로 지정» 둘 다 서버가 받는다(`proxyId` 를 넣나 마나) —
+   이 화면은 줄에서 들어오니 기본이 **지정**이고, 체크를 끄면 서버가 재고 우선순위로 고른다. */
+async function assignSheet(p) {
+  if (!p) return;
+  const list = await tenantList();
+  if (!list.length) return UI.toast("고객 목록을 못 불러왔어요");
+  UI.sheet(`<p class="muted" style="margin:0 0 12px;font-size:13px;line-height:1.6">이 IP 를 쓸 계정을 골라요. 계정 하나에 IP 하나만 붙고, 붙은 IP 는 다른 계정이 못 써요.</p>
+    <div class="sec">고객</div><div id="pxT">${UI.chips("pxT", list.map((z) => [String(z.id), `${z.isInternal ? "[내부] " : ""}${z.name}`]), "")}</div>
+    <div class="sec">계정</div><div id="pxA"><p class="muted" style="margin:0 0 4px;font-size:13px">고객을 먼저 골라 주세요.</p></div>
+    <div class="sec">어느 IP 로</div>${UI.chips("pxP", [["1", `이 IP 로(${p.label})`], ["0", "비어 있는 것 아무거나"]], "1")}
+    <div class="cta"><button class="btn primary" type="button" id="pxGo">배정</button></div>`,
+    { title: "전용 IP 배정", onOpen: (sh, close) => {
+      let accounts = [];
+      UI.bindChips(sh, async (name, v) => {
+        if (name !== "pxT" || !v) return;
+        UI.$("#pxA", sh).innerHTML = `<p class="muted" style="margin:0 0 4px;font-size:13px">계정을 불러오는 중이에요…</p>`;
+        const t = await UI.api(`/api/ops-tenant?id=${Number(v)}`, { noRedirect: true });
+        accounts = t.ok ? t.accounts || [] : [];
+        UI.$("#pxA", sh).innerHTML = accounts.length
+          ? UI.chips("pxA2", accounts.map((a) => [String(a.id), `${UI.chLabel(a.channel)} @${a.handle}`]), "")
+          : `<p class="muted" style="margin:0 0 4px;font-size:13px">${t.ok ? "그 집에는 아직 계정이 없어요." : UI.esc(t.error || "계정을 못 불러왔어요.")}</p>`;
+        UI.bindChips(UI.$("#pxA", sh));
+      });
+      sh.querySelector("#pxGo").onclick = async (e) => {
+        const accountId = Number(UI.chipVal(sh, "pxA2") || 0);
+        if (!accountId) return UI.toast("어느 계정에 붙일지 골라 주세요");
+        const body = { accountId };
+        if (UI.chipVal(sh, "pxP") === "1") body.proxyId = p.id;
+        e.target.disabled = true;
+        const r = await UI.api("/api/ops-proxy-assign", { body, noRedirect: true });
+        e.target.disabled = false;
+        if (!r.ok) return UI.toast(r.error || "배정하지 못했어요");
+        close();
+        /* 🔴 `pending` 은 **실패가 아니라 상태**다(`lib/proxies.ts` 머리말) — «못 했어요»로 말하지 않는다. */
+        UI.done(r.pending ? r.message || "IP 가 준비되면 바로 붙여 드릴게요" : `붙였어요 · ${r.label || p.label}`, load);
+      };
+    } });
+}
+
+function releaseSheet(p) {
+  if (!p || !p.assignedTo) return;
+  UI.sheet(`<div id="pxRel"></div>`, { title: "전용 IP 해제", onOpen: (sh, close) => {
+    /* 문장은 `lib/proxies.ts releaseProxy` 의 규율 그대로 — 뗀 IP 를 바로 다른 계정에 주면 «같은 IP 에서 계정이 바뀌었다»가 신호가 된다. */
+    UI.confirmRow(sh.querySelector("#pxRel"), `@${p.assignedTo.handle} 에서 ${p.label} 을(를) 뗄까요? 뗀 IP 는 바로 다른 계정에 주지 말고 며칠 식힌 뒤에 쓰세요.`, async () => {
+      const r = await UI.api("/api/ops-proxy-assign", { body: { accountId: p.assignedTo.accountId, action: "release" }, noRedirect: true });
+      if (!r.ok) return UI.toast(r.error || "떼지 못했어요");
+      close(); UI.toast("뗐어요"); load();
+    }, "해제");
+  } });
+}
+
+function statusSheet(p) {
+  if (!p) return;
+  const to = p.status === "active" ? "down" : "active";
+  const say = to === "down"
+    ? `${p.label} 을(를) «멈춤»으로 둘까요? 이 IP 는 새 계정에 안 붙어요. 붙어 있는 계정이 있으면 새 IP 로 옮겨 주세요.`
+    : `${p.label} 을(를) 다시 «살아 있음»으로 둘까요? 비어 있으면 다음 배정부터 후보가 돼요.`;
+  UI.sheet(`<div id="pxSt"></div>`, { title: "IP 상태", onOpen: (sh, close) => {
+    UI.confirmRow(sh.querySelector("#pxSt"), say, async () => {
+      const r = await UI.api("/api/ops-proxies", { body: { action: "status", id: p.id, status: to }, noRedirect: true });
+      if (!r.ok) return UI.toast(r.error || "바꾸지 못했어요");
+      close(); UI.toast(to === "down" ? "멈춤으로 뒀어요" : "살렸어요"); load();
+    }, to === "down" ? "멈춤으로" : "살리기");
+  } });
+}
+
+/* 등록 = super_admin. 🔴 접속 주소는 보내는 즉시 서버가 암호로 잠근다(`encryptObj`) — 응답·감사 어디에도 다시 안 나온다.
+   그래서 화면도 **보낸 뒤 칸을 비운다**(키 넣기와 같은 규율). */
+UI.$("#add").onclick = () => {
+  if (!canAdd) return UI.toast("최고 관리자만 등록할 수 있어요");
+  UI.sheet(`<p class="muted" style="margin:0 0 12px;font-size:13px;line-height:1.6">접속 주소는 암호로 잠가서 보관하고, 러너가 잡을 받아 갈 때만 풀어요. 등록한 뒤에는 화면 어디에도 다시 안 보여요.</p>
+    <div class="field"><label>이름</label><input class="input" id="pxLabel" autocomplete="off" placeholder="주거-KR-1"><div class="help"></div></div>
+    <div class="field"><label>접속 주소</label><input class="input" id="pxUrl" type="password" autocomplete="off" placeholder="http://아이디:비밀번호@주소:포트"><div class="help"></div></div>
+    <div class="sec">종류</div>${UI.chips("pxKind", [["residential", "가정용"], ["mobile", "모바일"], ["datacenter", "데이터센터"]], "residential")}
+    <div class="sec">같은 IP 유지 보장</div>${UI.chips("pxSticky", [["1", "보장돼요"], ["0", "아니요"]], "1")}
+    <div class="sec">값 매기는 법</div>${UI.chips("pxUnit", [["ip", "IP 당 월정액"], ["gb", "쓴 만큼(GB)"]], "ip")}
+    <div class="field"><label>공급사 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="pxProv" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>상품 이름 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="pxProd" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>지역 <span class="muted" style="font-weight:500">선택 · KR</span></label><input class="input" id="pxRegion" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>단가(원)</label><input class="input" id="pxUnitPrice" inputmode="numeric" autocomplete="off" value="0"><div class="help"></div></div>
+    <div class="field"><label>월 원가(원) <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="pxCost" inputmode="numeric" autocomplete="off" value="0"><div class="help"></div></div>
+    <div class="field"><label>월 트래픽(GB) <span class="muted" style="font-weight:500">선택 · GB 과금일 때</span></label><input class="input" id="pxGb" inputmode="decimal" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>세션 키 <span class="muted" style="font-weight:500">선택 · 공급사 규격</span></label><input class="input" id="pxSticky2" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>만료일 <span class="muted" style="font-weight:500">선택 · 한국 시간</span></label><input class="input" id="pxExp" type="date"><div class="help"></div></div>
+    <div class="field"><label>메모 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="pxNote" autocomplete="off"><div class="help"></div></div>
+    <div class="cta"><button class="btn primary" type="button" id="pxAdd">등록</button></div>`,
+    { title: "IP 등록", onOpen: (sh, close) => {
+      UI.bindChips(sh);
+      const help = (id, msg) => { const el = sh.querySelector(id); el.classList.toggle("err", !!msg); el.closest(".field").querySelector(".help").textContent = msg || ""; };
+      const val = (id) => sh.querySelector(id).value.trim();
+      sh.querySelector("#pxAdd").onclick = async (e) => {
+        ["#pxLabel", "#pxUrl", "#pxUnitPrice"].forEach((i) => help(i, ""));
+        if (!val("#pxLabel")) return help("#pxLabel", "이름을 입력해 주세요.");
+        if (!val("#pxUrl")) return help("#pxUrl", "접속 주소를 입력해 주세요.");
+        const exp = val("#pxExp");
+        const body = {
+          action: "add", label: val("#pxLabel"), url: val("#pxUrl"),
+          kind: UI.chipVal(sh, "pxKind"), billingUnit: UI.chipVal(sh, "pxUnit"), stickyGuaranteed: UI.chipVal(sh, "pxSticky") === "1",
+          unitPriceKrw: Number(val("#pxUnitPrice") || 0), costKrwMonth: Number(val("#pxCost") || 0),
+        };
+        if (val("#pxProv")) body.provider = val("#pxProv");
+        if (val("#pxProd")) body.product = val("#pxProd");
+        if (val("#pxRegion")) body.region = val("#pxRegion");
+        if (val("#pxGb")) body.bandwidthGbMonth = Number(val("#pxGb"));
+        if (val("#pxSticky2")) body.stickyKey = val("#pxSticky2");
+        /* 🔴 날짜 한 줄을 그냥 보내면 서버 `new Date()` 가 **UTC 자정**으로 읽어 하루가 밀린다 — 한국 시간 자정으로 못 박아 보낸다(§4.5b). */
+        if (exp) body.expiresAt = `${exp}T00:00:00+09:00`;
+        if (val("#pxNote")) body.note = val("#pxNote");
+        e.target.disabled = true;
+        const r = await UI.api("/api/ops-proxies", { body, noRedirect: true });
+        sh.querySelector("#pxUrl").value = "";   // 🔴 주소는 보낸 즉시 비운다
+        e.target.disabled = false;
+        if (!r.ok) {
+          if (r.step === "url") return help("#pxUrl", r.error || "접속 주소가 올바르지 않아요.");
+          if (r.step === "label") return help("#pxLabel", r.error || "이름을 입력해 주세요.");
+          return UI.toast(r.error || "등록하지 못했어요");
+        }
+        close(); UI.done(`등록했어요 · ${r.proxy && r.proxy.label ? r.proxy.label : ""}`.trim(), load);
+      };
+    } });
+};
+await load();
+})();
+</script>
+</body>
+</html>

@@ -34,8 +34,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=29"></script>
-<script src="/js/mock.js?v=31"></script>
+<script src="/js/ui.js?v=30"></script>
+<script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -405,10 +405,13 @@ function renderTeamWait() {
     + `<p class="muted" style="margin:0 16px 10px;font-size:13px">${UI.esc(teamWait)}</p>`
     + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">이 글은 «봐주세요»에 그대로 있어요. 고치실 것이 있으면 지금 고쳐 두시면 돼요.</p>';
 }
+/* 🔴 [AC-185] 머리줄이 **없는 길을 말하지 않게** 한다(스샷을 눈으로 보고 잡았다 · 자는 못 잡는다):
+   · 올릴 계정이 없는 영상에 «계정 자동»은 거짓이다 — 배정될 계정이 없다. «직접 올려요»가 사실이다.
+   · 같은 글의 «… 예약»도 거짓이다 — 그 시각에 발행은 `no_account` 로 멈춘다(그래서 시각을 아예 안 적는다). */
 function render() {
   const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = EDITABLE_ST.includes(P.status); const video = P.kind === "video";
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
-  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
+  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : selfUpload() ? "직접 올려요" : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when && !selfUpload() ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
   renderTeamWait(); renderRefUnused(); renderScriptIssues(); renderFmtUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; renderWhy(true); UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
@@ -421,7 +424,9 @@ function render() {
        서버는 이미 `HARD_GATE_KEYS = []` 라 막는 축이 0개이고, 영상도 **«물건이 깨진 것» 둘**(UI.JUDGE_BLOCK)만 거부한다.
        화면만 잠가 두면 «서버는 되는데 화면이 안 되는» 자리가 되고, 그건 §9 가 내린 바로 그 게이트다.
        🔴 판정은 **그대로 둔다** — 지운 게 아니라 소프트로 내린 것이다(§9 «검사를 지우지 마라»). 무엇이·왜·어떻게는 judgeList 가 세 줄로 말한다. */
-    if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
+    /* [AC-185] 🔴 **올릴 계정이 없는 영상**은 «이대로 예약»이 아니라 «내려받아 직접 올리기»가 유일한 실제 경로다(윗주석). */
+    if (selfUpload()) { showSelfUpload(); cta.innerHTML = selfUploadBtn(); if (editable) bindCta(); bindSelfUpload(); }
+    else if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
     else if (P.status === "published" && P.externalUrl) cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">올라간 영상 보기</a>`;
     else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     /* [2026-09-20 고장 ①] 영상도 같은 막다른 골목이었다 — 글 갈래와 **같은 처치**(까닭 + 직접 올리는 길). */
@@ -529,6 +534,39 @@ const rejectedBtn = () => canRegen()
   ? `<button class="btn primary" type="button" id="regen">같은 소재로 다시 만들기</button>`
   : `<a class="btn primary" href="/app/create.html">새로 만들러 가기</a>`;
 
+/* 🔴 [AC-183 · A · 2026-09-21] **계정 없이 만든 영상의 출구.**
+   `lib/director.ts` §1.2 가 «계정 없이 영상 만들기»를 열어 뒀는데, 그 영상이 **밖으로 나가는 문이 화면에 없었다** —
+   예약해 두면 발행 때 `no_account` 로 멈춰 `awaiting_manual` 이 된 **뒤에야** 내려받기가 보였다(그때까지 이 글은 갇혀 있다).
+   서버 문 둘은 처음부터 있었다: `/api/piece-video`(내려받기) · `/api/post-mark-published`(주소 적기) —
+   **둘 다 pieceId 만 받는다**(posts 행이 없어도 되고, 상태도 generating·failed·rejected 말고는 다 받는다).
+   🔴 «이대로 예약»을 여기 두지 않는다 — 올릴 계정이 없으니 그건 **없는 길**이다(§9 «없는 길을 단추로 만들지 마라» · 티스토리 «떼기»에서 배운 것).
+   🔴 겁주지 않는다(§3): «연결 안 되면 못 해요»가 아니라 ①사실 ②어떻게 하면 되는지 ③우리가 대신 해 주는 것.
+   🔴 `.banner` 를 안 쓴다 — 기본이 주황(경고)이라 «고장»으로 읽히고, `.banner.info` 는 `--brand-soft` 가 `--ground` 와 **같은 색**이라
+      이 페이지 바탕에서 칸이 안 보인다(이 파일이 아래에서 이미 한 번 밟은 자리다). 그룹 섹션으로 낸다. */
+const SELF_SKIP = ["published", "rejected", "generating", "failed"];
+const selfUpload = () => P.kind === "video" && !P.accountHandle && !SELF_SKIP.includes(P.status);
+function showSelfUpload() {
+  const host = UI.$("#page") || document.body;
+  host.querySelectorAll(".self-say").forEach((x) => x.remove());
+  const anchor = UI.$("#vpane")?.hidden === false ? UI.$("#vpane") : UI.$("#pv");
+  const html = `<div class="group self-say" style="margin:0 0 12px"><div class="gt">올릴 채널이 아직 없어요</div>
+    <p class="muted" style="margin:0 16px 8px;font-size:13px;line-height:1.7">지금은 저희가 <b style="color:var(--ink)">만들어 드리고, 올리는 건 직접</b> 하시면 돼요. 영상을 받아 앱에서 올린 뒤 그 주소를 적어 주시면 발행함과 수익까지 저희가 이어서 해요.</p>
+    <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">나중에 ${UI.esc(UI.chLabel(P.channel))} 계정을 연결하시면 그다음부터는 저희가 올려 드려요.</p>
+    <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">영상을 받아 앱에서 올린 뒤 «올린 주소 적기»에 그 주소를 붙여 주시면, 발행함과 수익까지 저희가 이어서 해요.</p></div>`;
+  if (anchor) anchor.insertAdjacentHTML("beforebegin", html); else host.insertAdjacentHTML("afterbegin", html);
+  /* 🔴 내려받기를 **두 곳에 두지 않는다** — 이 경우엔 아래 으뜸 단추가 그 일을 한다(곁판의 작은 단추는 이미 `bindVideoOut` 이 손을 붙인 뒤라 걷어도 안전하다). */
+  const side = UI.$("#vdl"); if (side) { const kv = side.closest(".kv"); if (kv) kv.remove(); else side.remove(); }
+}
+/* 으뜸은 **첫걸음 하나**(내려받기)다 — «올린 주소 적기»는 위 «직접 올렸다면» 묶음에 이미 있고, 같은 일을 두 곳에 두지 않는다(§13.0 «Primary 1개»).
+   🔴 이름이 `…Btn` 으로 끝나고 **인자를 안 받는다** — `scripts/verify-cta-bound.mjs` 가 `const xxxBtn = () =>` 꼴의 도우미만 펼쳐서 그 안의 id 를 센다.
+      `…Btns(editable)` 로 뒀더니 그 자가 이 갈래를 «까닭 모름»으로 울렸다(**자가 나를 잡았다** · 고치기 전에 두 번 울었다).
+   🔴 `editable` 을 인자로 받지 않는 편이 낫기도 하다 — 그 값은 `EDITABLE_ST` 한 곳에서만 나온다. */
+const selfUploadBtn = () => `${EDITABLE_ST.includes(P.status) ? `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button>` : ""}<button class="btn primary" type="button" id="vdlCta">영상 내려받기</button>`;
+function bindSelfUpload() {
+  /* 곁판·«직접 올렸다면» 묶음은 `bindVideoOut` 이 이미 손을 붙였다 — 여기선 으뜸 단추 하나만(넘겨주는 길도 같은 함수로 · AC-52). */
+  const dl = UI.$("#vdlCta");
+  if (dl) dl.onclick = async () => { dl.disabled = true; await UI.videoDownload(P.id, UI.$("#vdlNote"), { onHandoff: handoffSheet }); dl.disabled = false; };
+}
 function showStuck() {
   const host = UI.$("#page") || document.body;
   host.querySelectorAll(".stuck-say").forEach((x) => x.remove());

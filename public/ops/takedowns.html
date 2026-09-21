@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>내리기 · AutoCreate 운영센터</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/css/ac.css?v=23">
+</head>
+<body class="ops">
+<div class="shell">
+  <nav class="rail" aria-label="메뉴"></nav>
+  <main class="page" id="page">
+    <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/ops/cs.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="ttl">내리기</span><span class="sp"></span></div>
+<!-- [AC-180 · A · 2026-09-21] 🔴 **내리기 콘솔** — 서버 셋(`ops-takedowns`·`ops-takedown`·`ops-takedown-action`)은 R8 부터 있었는데
+     **부르는 화면이 0개**였다(2026-09-20 킬스위치 문서 §5 «내리기 콘솔이 통째로 화면 0»). §4.8 로는 **없는 기능**이다.
+     🔴 맨 위 = `due`(기한이 지난 것 = 운영 대기열). 목록에 묻히면 이 콘솔이 값을 잃는다 — 그래서 첫 숫자를 이것으로 잡았다.
+     🔴 DESIGN §5E.0 의 **두 갈래**를 상세에서 가른다 — (가)우리 안에서 되는 일 ↔ (나)남의 플랫폼(고객 계정)에 올라간 글.
+     🔴 **자동 정지는 없다**(`lib/takedown.ts` 머리말: 크론은 대기열에 올리기만 한다) — 네 동작은 **사람이 누르는 단계**다.
+        그래서 «지금 어디»와 «다음에 누를 수 있는 것»만 낸다(순서를 건너뛰는 단추를 만들지 않는다). -->
+<div class="hl"><div class="say">기한이 지난 신고</div><div class="num" id="dueN">…</div><div class="tip" id="dueTip"></div></div>
+<div class="group"><div class="gt">운영 대기열 <span class="muted" style="font-weight:500">기한이 지났는데 아직 열려 있어요</span></div><div id="due"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<!-- 🔴 세그먼트가 아니라 칩이다 — 폰 390 에서 .seg 다섯 칸은 **낱말이 «확인 필 요»로 쪼개진다**(눈으로 보고 잡았다).
+     칩은 줄바꿈이 되고, 낱말은 상태 알약(UI.TAKEDOWN_STATUS)과 **같은 말**로 둔다. -->
+<div id="st" style="margin:0 4px 12px"></div>
+<div class="group"><div class="gt">신고함<span id="lock"></span> <button type="button" class="lk" id="new">신고 접수</button></div><div id="list"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div><div class="muted" id="pg" style="padding:0 16px 10px;font-size:12.5px"></div></div>
+  </main>
+</div>
+<nav class="tabs" aria-label="탭"></nav>
+<script src="/js/ui.js?v=30"></script>
+<script src="/js/ops.js?v=3"></script>
+<script src="/js/mock-ops.js?v=2"></script>
+<script>
+(async () => {
+const op = await OPS.boot("cs"); if (!op) return;
+/* 🔴 서버는 admin+ 만 연다(`ops-takedown.ts` `requireAdmin(["admin","super_admin"])`). 그런데 메뉴 «CS» 는 operator 도 본다 —
+   그대로 두면 operator 에게 **빈 화면 + 403 토스트**가 뜬다. 숨기지 않고 **무엇이 필요한지 한 줄**로 말한다(§3 · 겁주기 아님). */
+const canOpen = OPS.can(op, "admin");
+const row1 = (t) => `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">${UI.esc(t)}</span></div></div>`;
+/* 🔴 상태 낱말은 `public/js/ui.js UI.TAKEDOWN_STATUS` 한 곳이 정본이다 — 고객 화면과 **같은 말**을 쓴다(둘이 갈리면 그게 AC-52). */
+const STEPS = [["알렸어요", "기한과 함께 고객에게 알렸어요"], ["계정 연결 해제", "그 계정 하나만 끊어요"], ["서비스 멈춤", "그 집 전체가 멈춰요"], ["끝냈어요", "막아 둔 것이 풀려요"]];
+const stepOf = (s) => s === "disconnected" ? 1 : s === "suspended" ? 2 : (s === "resolved" || s === "dismissed") ? 3 : 0;
+/* 상태마다 **다음에 누를 수 있는 것**만. 서버가 받는 네 낱말 그대로(disconnect·suspend·resolve·dismiss). */
+const NEXT = { open: ["disconnect", "resolve", "dismiss"], customer_removed: ["resolve", "dismiss"], retracted: ["resolve", "dismiss"],
+  disconnected: ["suspend", "resolve", "dismiss"], suspended: ["resolve", "dismiss"], resolved: [], dismissed: [] };
+/* 🔴 확인 문장은 ①무엇이 일어나나 ②어떻게 되돌리나 순서다(§3). «정지됩니다» 같은 위협·«알려만 드렸습니다» 같은 면피는 쓰지 않는다. */
+const ACT = {
+  disconnect: { label: "계정 연결 해제", say: "그 계정 하나만 끊어요. 다른 계정은 그대로 돌아요. 글을 내린 뒤에 고객이 계정 화면에서 다시 연결할 수 있어요.", done: "계정 연결을 해제했어요" },
+  suspend: { label: "서비스 멈추기", say: "그 집 전체가 멈춰요. 글을 내리고 문의함으로 알려 주시면 바로 풀 수 있어요.", done: "서비스를 멈췄어요" },
+  resolve: { label: "끝내기", say: "막아 둔 것이 풀려서 같은 글을 다시 올릴 수 있게 돼요.", done: "끝냈어요" },
+  dismiss: { label: "문제없음으로 닫기", say: "신고가 맞지 않았다고 보고 닫아요. 막아 둔 것이 풀려요.", done: "문제없음으로 닫았어요" },
+};
+let status = "", page = 1, KINDS = [], BY_ID = new Map(), TENANTS = null;
+
+if (!canOpen) {
+  UI.$("#dueN").textContent = "—";
+  UI.$("#dueTip").textContent = "신고함은 관리자부터 볼 수 있어요. 최고 관리자에게 권한을 올려 달라고 하시면 바로 열려요.";
+  UI.$("#due").innerHTML = row1("여기서는 안 보여요");
+  UI.$("#list").innerHTML = row1("여기서는 안 보여요");
+  UI.$("#lock").innerHTML = OPS.lockPill("admin");
+  UI.$("#new").disabled = true; UI.$("#new").classList.add("locked");
+  return;
+}
+
+/* 기한이 며칠 지났나 — KST 달력 날짜 차이로 센다(밀리초로 세면 «어제»가 0일로 보인다 · lib/takedown.ts daysLeftKst 와 같은 셈). */
+const kday = (ms) => Math.floor((ms + 9 * 3600e3) / 86400e3);
+const past = (iso) => { const d = kday(Date.now()) - kday(UI.utc(iso).getTime()); return d <= 0 ? "오늘" : `${d}일`; };
+
+async function load() {
+  /* 🔴 대기열(`due`)에는 **고객 이름이 없다**(id·tenantId·dueAt·reason 뿐). 그래서 열린 신고를 한 번에 떠서 이어 붙인다 —
+     `due` 는 `status='open'` 만·최대 50건이라 size=200 이면 다 덮는다(못 덮으면 그 줄에 «못 불러왔어요»라고 적는다 · AC-9). */
+  const [qd, ls] = await Promise.all([
+    UI.api("/api/ops-takedowns?status=open&size=200&page=1", { noRedirect: true }),
+    UI.api(`/api/ops-takedowns?status=${encodeURIComponent(status)}&page=${page}`, { noRedirect: true }),
+  ]);
+  if (!qd.ok && !ls.ok) {
+    UI.toast(qd.error || ls.error || "불러오지 못했어요");
+    UI.$("#dueN").textContent = "—"; UI.$("#dueTip").textContent = "못 불러왔어요. 새로고침해 주세요.";
+    UI.$("#due").innerHTML = row1("못 불러왔어요"); UI.$("#list").innerHTML = row1("못 불러왔어요"); return;
+  }
+  KINDS = (ls.kinds && ls.kinds.length ? ls.kinds : qd.kinds) || [];
+  BY_ID = new Map([...(qd.notices || []), ...(ls.notices || [])].map((t) => [t.id, t]));
+  renderQueue(qd.ok ? (qd.due || []) : null);
+  renderList(ls);
+}
+
+function renderQueue(due) {
+  if (!due) { UI.$("#dueN").textContent = "—"; UI.$("#dueTip").textContent = "대기열을 못 불러왔어요."; UI.$("#due").innerHTML = row1("못 불러왔어요"); return; }
+  UI.$("#dueN").textContent = `${UI.num(due.length)}건`;
+  UI.$("#dueTip").textContent = due.length
+    ? "기한 안에 안 내려간 신고예요. 줄을 누르면 지금 어디까지 왔는지와 다음 단계가 보여요."
+    : "기한이 지난 신고가 없어요. 새 신고가 들어오면 여기에 먼저 떠요.";
+  UI.$("#due").innerHTML = due.length ? due.map((d) => { const t = BY_ID.get(d.id);
+    return `<button type="button" class="row tap" data-open="${d.id}"><span class="mk soft">!</span><div class="l"><span class="t wrap">${UI.esc(t ? t.kindLabel : "신고")} · ${UI.esc(String(d.reason || (t && t.reason) || "").slice(0, 60))}</span><span class="d">${UI.esc(t ? t.tenantName || `#${d.tenantId}` : `고객 #${d.tenantId}`)} · 기한 ${UI.esc(OPS.dateKST(d.dueAt))} · ${UI.esc(past(d.dueAt))} 지났어요</span></div>${UI.chev}</button>`;
+  }).join("") : row1("기한이 지난 신고가 없어요");
+  UI.$$("#due [data-open]").forEach((b) => b.onclick = () => { const t = BY_ID.get(Number(b.dataset.open)); if (!t) return UI.toast("그 신고를 못 불러왔어요"); detail(t); });
+}
+
+function renderList(r) {
+  if (!r.ok) { UI.$("#list").innerHTML = row1(r.error || "못 불러왔어요"); UI.$("#pg").textContent = ""; return; }
+  /* 🔴 «올라간 글» 칸이 두 갈래의 (나)다 — 주소가 없으면 없다고 적는다(«—» 하나로 뭉개면 «주소를 안 받았다»가 사라진다). */
+  UI.$("#list").innerHTML = OPS.table([
+    { h: "고객", f: (t) => `<a class="lk" href="/ops/tenant.html?id=${t.tenantId}">${UI.esc(t.tenantName || `#${t.tenantId}`)}</a>` },
+    { h: "무엇", f: (t) => `<b>${UI.esc(t.kindLabel)}</b><br><span class="muted">${UI.esc(String(t.reason || "").slice(0, 56))}</span>` },
+    { h: "올라간 글", f: (t) => t.externalUrl ? `<a class="lk" href="${UI.esc(t.externalUrl)}" target="_blank" rel="noopener">글 열기</a>` : `<span class="muted">${UI.esc(t.channel ? `${UI.chLabel(t.channel)} · 주소 없음` : "주소 없음")}</span>` },
+    { h: "지금", f: (t) => UI.pill(UI.TAKEDOWN_STATUS, t.status) + (t.overdue ? ` <span class="pill warn">기한 지남</span>` : "") },
+    { h: "기한", f: (t) => OPS.dateKST(t.dueAt) },
+    { h: "받은 때", f: (t) => OPS.dt(t.receivedAt) },
+  ], r.notices || [], (t) => `class="tap" data-id="${t.id}"`);
+  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = (e) => { if (e.target.closest("a")) return; const t = BY_ID.get(Number(tr.dataset.id)); if (t) detail(t); });
+  UI.$("#pg").innerHTML = OPS.pager(r.page || 1, r.total || 0, r.size || 50);
+  UI.$$("#pg [data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); load(); });
+}
+
+/* 상세 = **두 갈래를 가른 한 장**(DESIGN §5E.0). 위가 (가) 우리 손 안, 아래가 (나) 고객 계정에 올라간 글. */
+function detail(t) {
+  const at = stepOf(t.status);
+  const bar = `<div class="steps">${STEPS.map(([lbl, say], i) => `<div class="st ${i === at ? "on" : i < at ? "done" : ""}"><i>${i + 1}</i>${UI.esc(lbl)}${i === at ? ` · <span class="muted" style="font-weight:500">지금 여기</span>` : ` · <span class="muted" style="font-weight:500">${UI.esc(say)}</span>`}</div>`).join("")}</div>`;
+  const acts = NEXT[t.status] || [];
+  UI.sheet(`<div class="kv"><span class="k">고객</span><span class="v">${UI.esc(t.tenantName || `#${t.tenantId}`)}</span></div>
+    <div class="kv"><span class="k">종류 · 지금</span><span class="v">${UI.esc(t.kindLabel)} ${UI.pill(UI.TAKEDOWN_STATUS, t.status)}</span></div>
+    <div class="kv"><span class="k">받은 때 · 기한</span><span class="v">${UI.esc(OPS.dt(t.receivedAt))} · ${UI.esc(OPS.dateKST(t.dueAt))}</span></div>
+    ${t.claimant ? `<div class="kv"><span class="k">신고한 사람</span><span class="v">${UI.esc(t.claimant)}</span></div>` : ""}
+    <p style="margin:10px 0 0;font-size:14px;line-height:1.6">${UI.esc(t.reason || "")}</p>
+    ${t.evidence ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px;line-height:1.6">증거 · ${UI.esc(String(t.evidence).slice(0, 400))}</p>` : ""}
+    ${t.resolution ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px;line-height:1.6">마무리 메모 · ${UI.esc(t.resolution)}</p>` : ""}
+    <div class="group" style="background:var(--ground);margin:12px 0 0"><div class="gt">우리 안에서 <span class="muted" style="font-weight:500">전부 우리 손 안에서 돼요</span></div>
+      ${bar}
+      <p class="muted" style="margin:0 16px 8px;font-size:12.5px;line-height:1.6">접수할 때 같은 글의 재발행·재생성을 막고, 그 계정과 그 소재의 예약을 세워 뒀어요.</p>
+      <div id="tdAct" style="padding:0 16px 12px"></div>
+    </div>
+    <div class="group" style="background:var(--ground);margin:8px 0 0"><div class="gt">올라간 글 <span class="muted" style="font-weight:500">고객 계정에 있어요</span></div>
+      <div class="kv"><span class="k">주소</span><span class="v">${t.externalUrl ? `<a class="lk" href="${UI.esc(t.externalUrl)}" target="_blank" rel="noopener">글 열기</a>` : `<span class="muted">받은 주소가 없어요</span>`}</span></div>
+      ${t.channel ? `<div class="kv"><span class="k">채널</span><span class="v">${UI.esc(UI.chLabel(t.channel))}</span></div>` : ""}
+      <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">고객이 직접 내리거나, 앱에서 «대신 내려 주세요»를 누르면 저희가 내려 드려요. 고객 동의 없이 저희가 직접 내리지는 않아요.</p>
+    </div>`,
+    { title: `신고 #${t.id}`, onOpen: (sh, close) => {
+      const host = sh.querySelector("#tdAct");
+      if (!acts.length) { host.innerHTML = `<p class="muted" style="margin:0;font-size:13px">끝난 신고예요. 더 누를 것이 없어요.</p>`; return; }
+      host.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap">${acts.map((a) => `<button type="button" class="btn sm secondary" data-act="${a}">${UI.esc(ACT[a].label)}</button>`).join("")}</div><div id="tdc"></div>`;
+      host.querySelectorAll("[data-act]").forEach((b) => b.onclick = () => {
+        const a = b.dataset.act;
+        /* 되돌리기 어려운 동작이라 **한 번 묻는다** — «네, 할게요»가 아니라 **그 동작의 이름**을 단추에 쓴다(§9 «확인 대화는 게이트가 아니다»). */
+        UI.confirmRow(host.querySelector("#tdc"), ACT[a].say, async () => {
+          b.disabled = true;
+          const r = await UI.api("/api/ops-takedown-action", { body: { id: t.id, action: a }, noRedirect: true });
+          b.disabled = false;
+          if (!r.ok) return UI.toast(r.error || "그대로 두었어요");
+          close(); UI.done(ACT[a].done + (r.affected ? ` · 계정 ${UI.num(r.affected)}개` : ""), load);
+        }, ACT[a].label);
+      });
+    } });
+}
+
+/* 🔴 접수 = **운영자가 손으로 신고를 받아 적는 문**(메인 지시). 이 입구가 없으면 위 목록은 영영 0건이다. */
+async function tenantList() {
+  if (TENANTS) return TENANTS;
+  /* `internal=1` — 시험 집이 기본 목록에서 빠져 «고를 집이 하나도 없다»가 되는 자리다(runners.html 에서 한 번 겪었다). */
+  const t = await UI.api("/api/ops-tenants?limit=50&internal=1", { noRedirect: true });
+  TENANTS = t.ok ? t.tenants || [] : [];
+  return TENANTS;
+}
+UI.$("#new").onclick = async () => {
+  const list = await tenantList();
+  if (!list.length) return UI.toast("고객 목록을 못 불러왔어요");
+  const kinds = KINDS.length ? KINDS : [{ key: "other", label: "기타" }];   // 종류 이름표는 서버가 정본 — 못 받았을 때만 «기타» 하나
+  UI.sheet(`<p class="muted" style="margin:0 0 12px;font-size:13px;line-height:1.6">밖에서 받은 신고를 여기에 옮겨 적어요. 접수하면 같은 글의 재발행을 막고, 예약을 세우고, 고객에게 기한과 함께 알려요.</p>
+    <div class="sec">고객</div>${UI.chips("tdT", list.map((z) => [String(z.id), `${z.isInternal ? "[내부] " : ""}${z.name}`]), "")}
+    <div class="sec">어떤 신고</div>${UI.chips("tdK", kinds.map((k) => [k.key, k.label]), kinds[0].key)}
+    <div class="field"><label>올라간 글 주소</label><input class="input" id="tdUrl" inputmode="url" autocomplete="off" placeholder="https://"><div class="help"></div></div>
+    <div class="field"><label>글 번호 <span class="muted" style="font-weight:500">주소를 모를 때만</span></label><input class="input" id="tdPiece" inputmode="numeric" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>고객에게 보일 사유</label><textarea class="input" id="tdReason" rows="3" style="height:auto;padding:14px 16px" placeholder="무엇이 왜 문제인지 사람말로"></textarea><div class="help"></div></div>
+    <div class="field"><label>신고한 사람 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="tdWho" autocomplete="off"><div class="help"></div></div>
+    <div class="field"><label>증거 <span class="muted" style="font-weight:500">선택 · 메일 내용·사건번호</span></label><input class="input" id="tdEv" autocomplete="off"><div class="help"></div></div>
+    <div class="kv"><span class="k">기한</span><span class="v">${UI.stepper("tdDue", 7, 1, 30, "일")}</span></div>
+    <div class="cta"><button class="btn primary" type="button" id="tdGo">접수하기</button></div>`,
+    { title: "신고 접수", onOpen: (sh, close) => {
+      UI.bindChips(sh); UI.bindSteppers(sh);
+      const help = (id, msg) => { const el = sh.querySelector(id); el.classList.toggle("err", !!msg); el.closest(".field").querySelector(".help").textContent = msg || ""; };
+      sh.querySelector("#tdGo").onclick = async (e) => {
+        ["#tdUrl", "#tdPiece", "#tdReason", "#tdWho", "#tdEv"].forEach((i) => help(i, ""));
+        const tid = Number(UI.chipVal(sh, "tdT") || 0);
+        if (!tid) return UI.toast("어느 고객인지 골라 주세요");
+        const body = { tenantId: tid, kind: UI.chipVal(sh, "tdK"), reason: sh.querySelector("#tdReason").value.trim(), dueDays: UI.stepVal(sh, "tdDue") };
+        const url = sh.querySelector("#tdUrl").value.trim(); if (url) body.externalUrl = url;
+        const pid = Number(sh.querySelector("#tdPiece").value.trim() || 0); if (pid) body.pieceId = pid;
+        const who = sh.querySelector("#tdWho").value.trim(); if (who) body.claimant = who;
+        const ev = sh.querySelector("#tdEv").value.trim(); if (ev) body.evidence = ev;
+        e.target.disabled = true;
+        const r = await UI.api("/api/ops-takedown", { body, noRedirect: true });
+        e.target.disabled = false;
+        /* 서버가 어느 칸이 모자란지 `step` 으로 말해 준다 — 토스트로 뭉개지 않고 **그 칸에** 붙인다. */
+        if (!r.ok) {
+          if (r.step === "reason") return help("#tdReason", r.error || "사유를 적어 주세요.");
+          if (r.step === "target") return help("#tdUrl", r.error || "주소나 글 번호를 적어 주세요.");
+          return UI.toast(r.error || "접수하지 못했어요");
+        }
+        close(); UI.done(r.stoppedSlots ? `접수했어요 · 예약 ${UI.num(r.stoppedSlots)}건을 멈췄어요` : "접수했어요 · 고객에게 알렸어요", load);
+      };
+    } });
+};
+/* 거르개는 서버가 받는 **정확한 status 값**만 낸다. `dismissed`(문제없음)는 칸을 하나 더 만드는 대신 «전체»에서 보인다 —
+   서버 필터가 «한 값 정확히»라 여기서 두 값을 합칠 길이 없다(합치려면 B 가 status 를 배열로 받아야 한다). */
+UI.$("#st").innerHTML = UI.chips("tdSt", [["", "전체"], ["open", "확인 필요"], ["disconnected", "계정 끊김"], ["suspended", "서비스 멈춤"], ["resolved", "끝났어요"]], "");
+UI.bindChips(UI.$("#st"), (_n, v) => { status = v || ""; page = 1; load(); });
+await load();
+})();
+</script>
+</body>
+</html>

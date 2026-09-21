@@ -2,7 +2,7 @@ PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스�
 === create.html | create | 만들기 ===
 <div class="step-h"><h1>오늘은 어떻게 써 볼까요?</h1><p>셋 중 아무거나 고르면 돼요 · 오늘은 직접 쓰고 내일은 맡겨도 돼요.</p></div>
 <div class="group" id="ways"><div class="gt">쓰는 길</div>
-  <button type="button" class="row tap" id="wayAi"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg></span><div class="l"><span class="t">AI에게 맡기기</span><span class="d">소재만 고르면 채널·계정·구성·시각까지 정해 드려요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
+  <button type="button" class="row tap" id="wayAi"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z"/></svg></span><div class="l"><span class="t">AI에게 맡기기</span><span class="d wrap" id="wayAiD">소재만 고르면 채널·계정·구성·시각까지 정해 드려요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></button>
   <a class="row tap" href="/app/write.html"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14 6l4 4"/></svg></span><div class="l"><span class="t">내가 직접 쓰기</span><span class="d">제목과 본문을 직접 쓰고 편성표에 걸어요 · AI를 안 써서 코인 0</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
   <a class="row tap" href="/app/pieces.html?tab=in_review"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/><path d="M12 15l7.5-7.5a1.8 1.8 0 0 0-2.5-2.5L9.5 12.5 9 15z"/></svg></span><div class="l"><span class="t">AI가 쓴 걸 내가 고치기</span><span class="d" id="wayFixD">만들어 둔 글을 열어 고친 뒤 예약해요 · 고쳐도 코인은 더 안 들어요</span></div><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3l5 5-5 5"/></svg></a>
 </div>
@@ -14,7 +14,13 @@ PAGES (Phase 0 골격 · 빈 상태 정직 표기) — 이 파일은 빌드 스�
 --- script ---
 await UI.boot("create");
 const COMP = { low: "경쟁 낮음", mid: "경쟁 보통", high: "경쟁 높음" };
-let accountsN = null, busy = false, timer = null, templates = [], textAccounts = [], videoAccounts = []; // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다) · [R11 A-3] videoAccounts = 영상 축
+let accountsN = null, busy = false, timer = null, templates = [], textAccounts = [], videoAccounts = [];
+let wantVideo = false;
+/* 🔴 [AC-184 · A · 2026-09-21] **여기가 사장님이 «만들기에 영상이 없다»고 하신 자리다.**
+   종전엔 영상 줄을 `videoAccounts.length`(영상 채널 계정이 있나)로만 갈랐다 — 그런데 설정의 토글은 `kinds` 를 켠다.
+   영상 채널 계정이 0개인 집은 **토글을 켜도 이 화면이 아무 말도 안 했다**(서버는 이미 만들 수 있는데도).
+   🔴 `lib/director.ts` §1.2 가 «계정 없이 영상 만들기»를 **수동 «만들기» 경로에 한해** 열어 뒀다 — 그러니 계정은 조건이 아니다.
+   ⇒ `kinds` 를 읽고, 계정이 없으면 **그 사실과 다음 수**를 한 줄로 말한다(§9 «막지 않는 대신 말해 준다»). // [P1R5] shorts_templates(레퍼런스 구조) · [R9R10-A] textAccounts = 글 채널 계정(글 레퍼런스는 계정의 옷장에 붙는다) · [R11 A-3] videoAccounts = 영상 축
 /* [R11 A-3] 한도는 **그룹 제목 줄 우측**에 글자로 — 링크가 아니다(§13.0b 의 «전체보기 ›» 자리를 글자가 쓴다).
    🔴 «남음»을 **지어내지 않는다** — 서버가 `quota` 를 안 주거나 칸이 비면 **숫자를 빼고 이름만** 남는다(AC-9·AC-92).
    🔴 `left` 는 서버 값을 **그대로** 쓴다 — 화면이 `limit - used` 로 셈하면 같은 수를 두 곳에서 만드는 셈이다(AC-52).
@@ -24,7 +30,7 @@ async function paintQuota() {
   const num = (q) => (q && Number.isFinite(Number(q.left)) && Number.isFinite(Number(q.limit)) ? `${Number(q.left)} / ${Number(q.limit)}` : null);
   const [ps, vs] = await Promise.all([
     textAccounts.length ? UI.api("/api/account-styles") : Promise.resolve({ ok: false }),
-    videoAccounts.length ? UI.api("/api/topics-templates") : Promise.resolve({ ok: false }),
+    wantVideo ? UI.api("/api/topics-templates") : Promise.resolve({ ok: false }),   // [AC-184] 계정이 아니라 kinds — 이 한도는 테넌트 것이다(topics-reference.ts 는 계정을 안 본다)
   ]);
   const t = ps.ok ? num(ps.quota) : null, v = vs.ok ? num(vs.quota) : null;
   el.textContent = t && v ? `이번 달 글 ${t} · 영상 ${v} 남음` : t ? `이번 달 ${t} 남음` : v ? `이번 달 ${v} 남음` : "";
@@ -51,7 +57,12 @@ async function loadChans() {
   return chans;
 }
 async function load(poll = false) {
-  const r = await UI.api("/api/topics-list?status=candidate"); if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
+  /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
+     편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
+  const [r, ts] = await Promise.all([UI.api("/api/topics-list?status=candidate"), UI.api("/api/tenant-settings", { noGate: true })]);
+  if (!r.ok) { if (!poll) UI.toast(r.error || "불러오지 못했어요"); return; }
+  /* 🔴 영상을 켰나 — **서버가 정본**(`tenant-settings.kinds`). 못 읽으면 «꺼짐»으로 둔다(없는 기능을 켜 보이지 않는다 · AC-9). */
+  wantVideo = !!(ts.ok && (ts.kinds || []).includes("video"));
   if (accountsN == null) { const a = await UI.api("/api/accounts-list"); accountsN = a.ok ? a.accounts.length : 0;
     chans = a.ok ? [...new Set((a.accounts || []).filter((x) => x.status !== "suspended").map((x) => x.channel))] : [];
     /* [R9R10-A] «글 채널»은 서버가 말한다(channels[].category) — 화면에 채널 이름을 박지 않는다 */
@@ -60,13 +71,17 @@ async function load(poll = false) {
     /* [R11 A-3] 영상 축도 **서버가 말한 category** 로 가른다(글 쪽과 같은 잣대 · 채널 이름을 화면에 박지 않는다). */
     const videoCh = new Set((a.ok ? a.channels || [] : []).filter((c) => c.category === "video").map((c) => c.key));
     videoAccounts = a.ok ? (a.accounts || []).filter((x) => videoCh.has(x.channel) && x.status !== "suspended") : []; }
+  const wa = UI.$("#wayAiD");
+  if (wa) wa.textContent = wantVideo
+    ? (videoAccounts.length ? "소재만 고르면 채널·계정·구성·시각까지 정해 드려요 · 글과 영상을 함께 만들어요" : "소재만 고르면 글과 영상을 함께 만들어요 · 올릴 영상 채널이 없어도 만들어 두고 직접 올리시면 돼요")
+    : "소재만 고르면 채널·계정·구성·시각까지 정해 드려요";
   templates = r.templates || [];
   /* [R11 A-3] «배워 올 곳» — 종전엔 제목 없는 그룹이라 **«네 번째 쓰는 길»처럼** 보였다.
      레퍼런스는 쓰는 길이 아니라 **쓰기 전에 옷을 갈아입히는 일**이라 제목을 가진 제 그룹으로 세웠다.
      🔴 **그 축 계정이 없으면 그 줄이 없다** — 영상 계정이 없는 집에 «영상 스타일 배우기»는 못 누르는 줄이다. */
   UI.$("#refPost").hidden = !textAccounts.length;
-  UI.$("#ref").hidden = !videoAccounts.length;
-  UI.$("#refg").hidden = !textAccounts.length && !videoAccounts.length;
+  UI.$("#ref").hidden = !wantVideo;   // [AC-184] 영상을 켠 집이면 계정 0개여도 배울 수 있다(옷장은 테넌트에 붙는다)
+  UI.$("#refg").hidden = !textAccounts.length && !wantVideo;
   if (templates.length) UI.$("#refd").textContent = `배운 구조 ${templates.length}개 · ${templates.map((x) => x.name).slice(-2).join(" · ")}`;
   await paintQuota();
   const f = r.refresh || {};
@@ -395,6 +410,14 @@ const WD = ["일", "월", "화", "수", "목", "금", "토"];
 const isVideoCh = (c) => UI.VIDEO_CH.includes(c); const perPiece = (c) => (isVideoCh(c) ? UI.VIDEO_COIN[60] : UI.COIN.blog); // [P1R5] shorts 규칙 = 편당 video_60(§1.10)
 const today = KST(); let view = new Date(today.getFullYear(), today.getMonth(), 1); let sel = ymd(today);
 let D = { rules: [], settings: {}, coinsPerWeek: 0, maxRules: null }, accounts = [], slots = [];
+/* [AC-184] 🔴 자동 편성은 **계정이 있어야 한다**(`lib/director.ts` §1.2 가 못 박았다: «아무도 안 보는 사이에 올릴 곳 없는 영상을 코인 써 가며 쌓지 않는다»).
+   그래서 규칙에 영상 축을 **지어내지 않는다** — 대신 영상을 켠 집에는 «왜 여기 없는지»와 «그럼 어떻게 하는지»를 한 줄로 말한다(§9 · 조용한 축소 금지). */
+let wantVideo = false;
+/* [AC-184] 🔴 «영상 축이 왜 여기 없나» — **한 문장을 한 곳에서만** 만든다(마법사·한 줄 고치기 두 시트가 같이 쓴다 · AC-52).
+   빈 문자열이면 아무것도 안 붙는다 — 영상을 안 켰거나 이미 영상 계정이 있으면 할 말이 없다. */
+const videoRuleNote = (chans) => (wantVideo && !chans.some(isVideoCh))
+  ? `<p class="muted" style="margin:0 2px 10px;font-size:12.5px;line-height:1.7">영상은 올릴 채널을 연결해야 편성에 들어가요. 그 전에도 <a href="/app/create.html" style="text-decoration:underline">만들기</a>에서 만들어 두고 직접 올리실 수 있어요.</p>`
+  : "";
 const gear = document.createElement("button"); gear.type = "button"; gear.className = "ic"; gear.setAttribute("aria-label", "편성 설정"); gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>'; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(gear);
 const dotCls = (s) => UI.slotDot(s); // [P1R2] 상태 점 = 알약과 같은 자(§5B.6 전 상태)
 const TIMES = [["07:30", "07:30"], ["09:00", "09:00"], ["12:00", "12:00"], ["15:00", "15:00"], ["18:00", "18:00"], ["21:00", "21:00"]];
@@ -414,8 +437,11 @@ const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
-  const [r, a] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list")]);
+  /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
+     편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
+  const [r, a, ts] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list"), UI.api("/api/tenant-settings", { noGate: true })]);
   if (r.ok) D = r; accounts = a.ok ? a.accounts : [];
+  wantVideo = !!(ts.ok && (ts.kinds || []).includes("video"));   // [AC-184] rules-list 는 kinds 를 안 준다(scheduleSettingsOf 에 그 칸이 없다)
   await loadSlots(); render();
 }
 async function loadSlots() {
@@ -678,7 +704,7 @@ function ruleOneSheet(rule) {
     hour: rule?.preferredHour ?? null, min: rule?.preferredMinute ?? 0, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const accs = accounts.filter((a) => a.channel === s.channel);
-    body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}
+    body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}${videoRuleNote(chans)}
       <div class="sec">얼마나 자주</div><div class="fr" style="padding-left:0;padding-right:0"><div class="fl">${UI.esc(everySay(s))}<small>0으로 두면 이 규칙은 지워져요</small></div>${UI.stepper("cnt", s.count, 0, s.every === "day" ? 3 : s.every === "month" ? 31 : 7, "회")}</div>
       <div style="padding:0 0 10px">${UI.seg("ev", [["day", "매일"], ["week", "주"], ["month", "달"]], s.every)}</div>
       ${s.every === "week" ? `<div class="sec">어느 요일</div>${UI.chips("wd", WD.map((w, i) => [i, w]), s.wd, true)}<p class="muted" style="margin:6px 0 0;font-size:12.5px">${s.wd.length ? `${s.wd.length}일 골랐어요` : "안 고르면 저희가 골라요"}</p>` : ""}
@@ -775,6 +801,8 @@ function ruleSheet() {
         <div id="estNote">${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}</div>${""/* 🔴 서버가 답하면 이 칸을 통째로 갈아 끼운다(estServer) — 화면 셈은 답이 올 때까지의 미리보기다 */}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
+    /* [AC-184] 🔴 영상을 켰는데 영상 채널 계정이 0개면 이 목록엔 영상 줄이 **없다** — 조용히 없는 것과 «왜 없는지»는 다르다. */
+    if (step === 1) body.insertAdjacentHTML("beforeend", videoRuleNote(chans));
     UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") { st.reviewPolicy = v; const sy = body.querySelector("#rpSay2"); if (sy) sy.textContent = rpSay(v); }   /* [R8 §9-2] 🔴 켜는 **그 순간에** 무엇을 켜는 것인지 말한다 — «사람이 안 보는 경로»가 생기는 자리가 여기다 */
       else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };
@@ -2994,10 +3022,13 @@ function renderTeamWait() {
     + `<p class="muted" style="margin:0 16px 10px;font-size:13px">${UI.esc(teamWait)}</p>`
     + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">이 글은 «봐주세요»에 그대로 있어요. 고치실 것이 있으면 지금 고쳐 두시면 돼요.</p>';
 }
+/* 🔴 [AC-185] 머리줄이 **없는 길을 말하지 않게** 한다(스샷을 눈으로 보고 잡았다 · 자는 못 잡는다):
+   · 올릴 계정이 없는 영상에 «계정 자동»은 거짓이다 — 배정될 계정이 없다. «직접 올려요»가 사실이다.
+   · 같은 글의 «… 예약»도 거짓이다 — 그 시각에 발행은 `no_account` 로 멈춘다(그래서 시각을 아예 안 적는다). */
 function render() {
   const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = EDITABLE_ST.includes(P.status); const video = P.kind === "video";
   const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
-  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
+  UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : selfUpload() ? "직접 올려요" : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when && !selfUpload() ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
   renderTeamWait(); renderRefUnused(); renderScriptIssues(); renderFmtUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; renderWhy(true); UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
@@ -3010,7 +3041,9 @@ function render() {
        서버는 이미 `HARD_GATE_KEYS = []` 라 막는 축이 0개이고, 영상도 **«물건이 깨진 것» 둘**(UI.JUDGE_BLOCK)만 거부한다.
        화면만 잠가 두면 «서버는 되는데 화면이 안 되는» 자리가 되고, 그건 §9 가 내린 바로 그 게이트다.
        🔴 판정은 **그대로 둔다** — 지운 게 아니라 소프트로 내린 것이다(§9 «검사를 지우지 마라»). 무엇이·왜·어떻게는 judgeList 가 세 줄로 말한다. */
-    if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
+    /* [AC-185] 🔴 **올릴 계정이 없는 영상**은 «이대로 예약»이 아니라 «내려받아 직접 올리기»가 유일한 실제 경로다(윗주석). */
+    if (selfUpload()) { showSelfUpload(); cta.innerHTML = selfUploadBtn(); if (editable) bindCta(); bindSelfUpload(); }
+    else if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
     else if (P.status === "published" && P.externalUrl) cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">올라간 영상 보기</a>`;
     else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     /* [2026-09-20 고장 ①] 영상도 같은 막다른 골목이었다 — 글 갈래와 **같은 처치**(까닭 + 직접 올리는 길). */
@@ -3118,6 +3151,39 @@ const rejectedBtn = () => canRegen()
   ? `<button class="btn primary" type="button" id="regen">같은 소재로 다시 만들기</button>`
   : `<a class="btn primary" href="/app/create.html">새로 만들러 가기</a>`;
 
+/* 🔴 [AC-183 · A · 2026-09-21] **계정 없이 만든 영상의 출구.**
+   `lib/director.ts` §1.2 가 «계정 없이 영상 만들기»를 열어 뒀는데, 그 영상이 **밖으로 나가는 문이 화면에 없었다** —
+   예약해 두면 발행 때 `no_account` 로 멈춰 `awaiting_manual` 이 된 **뒤에야** 내려받기가 보였다(그때까지 이 글은 갇혀 있다).
+   서버 문 둘은 처음부터 있었다: `/api/piece-video`(내려받기) · `/api/post-mark-published`(주소 적기) —
+   **둘 다 pieceId 만 받는다**(posts 행이 없어도 되고, 상태도 generating·failed·rejected 말고는 다 받는다).
+   🔴 «이대로 예약»을 여기 두지 않는다 — 올릴 계정이 없으니 그건 **없는 길**이다(§9 «없는 길을 단추로 만들지 마라» · 티스토리 «떼기»에서 배운 것).
+   🔴 겁주지 않는다(§3): «연결 안 되면 못 해요»가 아니라 ①사실 ②어떻게 하면 되는지 ③우리가 대신 해 주는 것.
+   🔴 `.banner` 를 안 쓴다 — 기본이 주황(경고)이라 «고장»으로 읽히고, `.banner.info` 는 `--brand-soft` 가 `--ground` 와 **같은 색**이라
+      이 페이지 바탕에서 칸이 안 보인다(이 파일이 아래에서 이미 한 번 밟은 자리다). 그룹 섹션으로 낸다. */
+const SELF_SKIP = ["published", "rejected", "generating", "failed"];
+const selfUpload = () => P.kind === "video" && !P.accountHandle && !SELF_SKIP.includes(P.status);
+function showSelfUpload() {
+  const host = UI.$("#page") || document.body;
+  host.querySelectorAll(".self-say").forEach((x) => x.remove());
+  const anchor = UI.$("#vpane")?.hidden === false ? UI.$("#vpane") : UI.$("#pv");
+  const html = `<div class="group self-say" style="margin:0 0 12px"><div class="gt">올릴 채널이 아직 없어요</div>
+    <p class="muted" style="margin:0 16px 8px;font-size:13px;line-height:1.7">지금은 저희가 <b style="color:var(--ink)">만들어 드리고, 올리는 건 직접</b> 하시면 돼요. 영상을 받아 앱에서 올린 뒤 그 주소를 적어 주시면 발행함과 수익까지 저희가 이어서 해요.</p>
+    <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">나중에 ${UI.esc(UI.chLabel(P.channel))} 계정을 연결하시면 그다음부터는 저희가 올려 드려요.</p>
+    <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">영상을 받아 앱에서 올린 뒤 «올린 주소 적기»에 그 주소를 붙여 주시면, 발행함과 수익까지 저희가 이어서 해요.</p></div>`;
+  if (anchor) anchor.insertAdjacentHTML("beforebegin", html); else host.insertAdjacentHTML("afterbegin", html);
+  /* 🔴 내려받기를 **두 곳에 두지 않는다** — 이 경우엔 아래 으뜸 단추가 그 일을 한다(곁판의 작은 단추는 이미 `bindVideoOut` 이 손을 붙인 뒤라 걷어도 안전하다). */
+  const side = UI.$("#vdl"); if (side) { const kv = side.closest(".kv"); if (kv) kv.remove(); else side.remove(); }
+}
+/* 으뜸은 **첫걸음 하나**(내려받기)다 — «올린 주소 적기»는 위 «직접 올렸다면» 묶음에 이미 있고, 같은 일을 두 곳에 두지 않는다(§13.0 «Primary 1개»).
+   🔴 이름이 `…Btn` 으로 끝나고 **인자를 안 받는다** — `scripts/verify-cta-bound.mjs` 가 `const xxxBtn = () =>` 꼴의 도우미만 펼쳐서 그 안의 id 를 센다.
+      `…Btns(editable)` 로 뒀더니 그 자가 이 갈래를 «까닭 모름»으로 울렸다(**자가 나를 잡았다** · 고치기 전에 두 번 울었다).
+   🔴 `editable` 을 인자로 받지 않는 편이 낫기도 하다 — 그 값은 `EDITABLE_ST` 한 곳에서만 나온다. */
+const selfUploadBtn = () => `${EDITABLE_ST.includes(P.status) ? `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button>` : ""}<button class="btn primary" type="button" id="vdlCta">영상 내려받기</button>`;
+function bindSelfUpload() {
+  /* 곁판·«직접 올렸다면» 묶음은 `bindVideoOut` 이 이미 손을 붙였다 — 여기선 으뜸 단추 하나만(넘겨주는 길도 같은 함수로 · AC-52). */
+  const dl = UI.$("#vdlCta");
+  if (dl) dl.onclick = async () => { dl.disabled = true; await UI.videoDownload(P.id, UI.$("#vdlNote"), { onHandoff: handoffSheet }); dl.disabled = false; };
+}
 function showStuck() {
   const host = UI.$("#page") || document.body;
   host.querySelectorAll(".stuck-say").forEach((x) => x.remove());
@@ -3632,6 +3698,34 @@ async function adsDo(kind, accountId, b) {
   UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta"><button class="btn secondary" type="button" data-ok>알겠어요</button></div>`,
     { title: r.ok ? "" : "그대로 두었어요", onOpen: (sh, close) => { sh.querySelector("[data-ok]").onclick = close; } });
 }
+/* [AC-182 · A · 2026-09-21] 🔴 **나가는 길**(토스 «계좌 연결» · §13.0b) — 여태 «구글로 연결»은 **계정 줄에만** 있었다.
+   그 줄은 ①계정을 아직 안 붙였거나 ②애드센스 승인 전이거나 ③유튜브 조건이 덜 차면 **아예 안 그려진다** —
+   그래서 손님이 애드센스·유튜브를 연결할 자리가 **한 곳도 없는 상태**가 될 수 있었다(돌아오는 길만 있고 나가는 길이 없다).
+   🔴 §9 — 연결을 우리 판단으로 막지 않는다. 언제든 나갈 수 있게 열어 두고, 아직 못 받는 것은 **말해 준다**. */
+const OAUTH = [["adsense", "티스토리·블로거·워드프레스 글의 광고 수익을 매일 가져와요"], ["youtube", "유튜브 쇼츠 수익을 매일 가져와요"]];
+const OAUTH_CH = { adsense: ["tistory", "blogger", "wordpress"], youtube: ["youtube_shorts"] };
+/** 집 전체로 붙인 소스(계정이 안 딸린 행) — 계정별 연결과 섞으면 «어느 것이 붙었나»가 흐려진다. */
+const srcTenant = (key) => SRC.find((s) => s.source === key && !s.accountId);
+function connectCard() {
+  return card("수익 연결", "구글 계정으로 한 번 연결하면 그다음부터는 저희가 매일 가져와요.",
+    OAUTH.map(([key, say]) => { const s = srcTenant(key); const on = !!(s && s.status === "connected");
+      return `<button type="button" class="row tap" data-oauth="${key}">${UI.srcMark(key)}<div class="l"><span class="t">${UI.esc(UI.srcLabel(key))}</span><span class="d wrap">${UI.esc(on ? srcSub(s) : say)}</span></div>${on ? srcPill(s) : UI.chev}</button>`;
+    }).join(""));
+}
+/* 고르는 칸은 «내 계정 전체 / 계정 하나» 둘뿐 — 애드센스는 집 전체로도 사이트별로도 붙는다(서버 accountId 가 선택이다). */
+function oauthSheet(key) {
+  const mine = accounts.filter((a) => OAUTH_CH[key].includes(a.channel));
+  const s = srcTenant(key); const on = !!(s && s.status === "connected");
+  UI.sheet(`<p class="muted" style="margin:0 0 12px;line-height:1.6">새 창에서 구글에 로그인하고 «허용»을 누르면 끝이에요. ${UI.esc(key === "adsense" ? "애드센스 심사가 끝나기 전에 연결해 둬도 괜찮아요 — 수익이 생기는 날부터 들어와요." : "수익 창출 승인 전에 연결해 둬도 괜찮아요 — 승인되는 날부터 들어와요.")}</p>
+    ${mine.length ? `<div class="sec">어느 것에</div>${UI.chips("oa", [["", "내 계정 전체"], ...mine.map((a) => [String(a.id), "@" + a.handle])], "")}` : ""}
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="oaGo">${on ? "다시 연결" : "구글로 연결"}</button>${on ? `<button class="btn ghost" type="button" id="oaOff" style="color:var(--danger-ink)">끊기</button>` : ""}</div>`,
+    { title: UI.srcLabel(key), onOpen: (sh, close) => {
+      UI.bindChips(sh);
+      sh.querySelector("#oaGo").onclick = (e) => { const v = UI.chipVal(sh, "oa"); const b = e.currentTarget; close(); setTimeout(() => googleConnect(key, v ? Number(v) : null, b), 250); };
+      const off = sh.querySelector("#oaOff");
+      if (off) off.onclick = () => { close(); setTimeout(() => disconnect(key, null), 250); };
+    } });
+}
 /* 계정 행 + 아래 버튼 줄 — 카드마다 같은 자리에 같은 것(통일성) */
 const accRow = (a, sub, pill) => `<div class="row">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><span class="d">${UI.esc(sub)}</span></div>${pill}</div>`;
 const gaugeRow = (a, gauges, pill) => `<div class="row" style="align-items:flex-start;padding-top:10px">${UI.mark(a.channel)}<div class="l"><span class="t">@${UI.esc(a.handle)}</span><div style="padding:6px 0 0">${gauges}</div></div>${pill}</div>`;
@@ -3639,7 +3733,7 @@ const notYet = `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">기
 
 function render() {
   const th = EL.thresholds || {};
-  let h = "";
+  let h = connectCard();
 
   /* ① 애드포스트 — 네이버 블로그 계정마다(조건 게이지 + 자기 신고) */
   const np = EL.accounts.filter((a) => a.adpost);
@@ -3691,6 +3785,7 @@ function render() {
   UI.$$("#body [data-connect]").forEach((b) => b.onclick = () => googleConnect(b.dataset.connect, acc(b), b));
   UI.$$("#body [data-off]").forEach((b) => b.onclick = () => disconnect(b.dataset.off, acc(b)));
   UI.$$("#body [data-ads]").forEach((b) => b.onclick = () => adsDo(b.dataset.ads, acc(b), b));
+  UI.$$("#body [data-oauth]").forEach((b) => b.onclick = () => oauthSheet(b.dataset.oauth));
 }
 
 /* 한 화면 한 단계 — 신청 방법 3단계 + 외부 새 창 */
@@ -3725,7 +3820,9 @@ async function googleConnect(source, accountId, b) {
   b.disabled = true; const body = { action: "connect", source }; if (accountId) body.accountId = accountId;
   const r = await UI.api("/api/revenue-sources", { body }); b.disabled = false;
   if (r.ok && r.url) { location.href = r.url; return; }
-  if (r.step === "provider_not_configured") return UI.sheet(`<p style="margin:0 0 4px;font-size:16px;font-weight:700">준비가 아직이에요</p><p class="muted" style="margin:0 0 16px">${UI.esc(UI.srcLabel(source))} 구글 연결이 열리면 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } });
+  /* 🔴 여기는 **고장이 아니다**(AC-10) — 빨간 오류로 말하지 않는다. 그리고 «곧 열려요»로 끝내지도 않는다:
+     남은 것이 무엇인지, 고객이 할 일이 있는지 없는지를 **한 줄씩** 적는다. 화면은 이대로 완성이고 열쇠만 꽂으면 가동된다(§8). */
+  if (r.step === "provider_not_configured") return UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">저희 쪽 준비가 하나 남았어요</p><p class="muted" style="margin:0 0 6px;line-height:1.6">구글 로그인 창을 띄우려면 저희가 구글에서 받은 열쇠를 꽂아야 해요. 그게 아직이라 지금은 창이 안 열려요.</p><p class="muted" style="margin:0 0 16px;line-height:1.6">고객님이 하실 일은 없어요. 저희가 꽂으면 이 단추가 바로 열리고, 그때 홈 «해야 할 일»에 알려드릴게요.</p><div class="cta"><button class="btn secondary" type="button" id="ok">알겠어요</button></div>`, { title: "", onOpen: (sh, close) => { sh.querySelector("#ok").onclick = close; } });
   UI.toast(r.error || "연결을 시작하지 못했어요");
 }
 /* 키 입력 = 바텀시트 · 소스별 여러 칸 · creds 객체로 보낸다(v3.5) */

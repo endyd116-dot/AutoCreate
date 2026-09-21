@@ -360,6 +360,21 @@ const SURFACES = [
   /* 서버는 두 곳에서 이미 싣는다 — `lib/accounts.ts:204`(`monetizable:false`) · `lib/revenue/aggregate.ts:176`(`noRevenueChannel`). */
   ["🔴 당근 — 화면이 «수익이 안 붙어요»를 말해 주나(R12-6)", "noRevenueChannel", "lib/revenue/aggregate.ts",
     "당근 계정의 **0원이 고장으로 보인다** — 설계가 «정직하게 말해야 하는 것 셋»의 첫째로 박아 둔 자리다(AC-10 «설정 안 됨은 오류가 아니다»)", true],
+  /* ── [AC-180/181 · A · 2026-09-21] 운영 콘솔 두 장. 🔴 이 다섯 라우트는 **R8 부터 서버에 있었는데 부르는 화면이 0개**였다
+       (2026-09-20 킬스위치 문서 §5 가 «통째로 화면 0» 둘을 세어 두고 갔다). 화면을 만들었으니 **여기 줄로 못을 박는다** —
+       안 박으면 다음 라운드에 화면이 지워져도 아무도 모른다. ── */
+  ["내리기 콘솔 — 신고함·운영 대기열(§5E.2)", "/api/ops-takedowns", "netlify/functions/ops-takedown.ts",
+    "기한이 지난 신고가 **아무 화면에도 안 뜬다** — 크론은 대기열에 올리기만 하는데(자동 정지 없음) 그 대기열을 볼 자리가 없다", true],
+  ["내리기 콘솔 — 단계 실행(해제·정지·종결·기각)", "/api/ops-takedown-action", "netlify/functions/ops-takedown.ts",
+    "①~④ 다섯 걸음 중 **④를 누를 자리가 없다** — ③(안 만들기로 한 것)을 안 만든 대가로 확실히 갖기로 한 바로 그 단계다", true],
+  /* 🔴 접수 경로(`/api/ops-takedown`)는 위 두 줄의 **접두사**라 substring 으로 거저 통과한다 —
+     그래서 **접수 응답에만 실리는 키**로 잰다(화면이 «예약 N건을 멈췄어요»를 말하나). */
+  ["내리기 콘솔 — 손으로 신고 접수(그 입구가 없으면 신고함은 영영 0건)", "stoppedSlots", "netlify/functions/ops-takedown.ts",
+    "밖에서 받은 신고를 **적어 넣을 문이 없어** 다섯 걸음이 시작조차 안 된다", true],
+  ["전용 IP 콘솔 — 재고·목록(§7.3b)", "/api/ops-proxies", "netlify/functions/ops-proxies.ts",
+    "«남은 IP» 를 볼 자리가 없어 재고가 0이 된 것을 **계정이 안 붙고 나서야** 안다(계정 슬롯 구매가 이 재고에 기댄다)", true],
+  ["전용 IP 콘솔 — 배정·해제", "/api/ops-proxy-assign", "netlify/functions/ops-proxies.ts",
+    "IP 를 사 놓고도 계정에 붙일 길이 없다 — «계정 하나 = IP 하나»가 코드에만 있고 아무도 못 쓴다", true],
 ];
 /* 🔴 [2026-09-16 메인] **서버 정본을 «파일 이름»으로 찾으면 오늘 세 번 틀렸다.**
    ·E6(감사): «이름만 맞는 파일이 있어서» 가짜 초록 — `ops-center.ts` 는 실제로 `/api/ops-audit` 를 연다

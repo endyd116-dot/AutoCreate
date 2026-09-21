@@ -39,7 +39,9 @@ else if (staticBtns.length) fails.push(`🔴 정적 \`#cta\` 에 단추가 미�
 
 /* ── ② 🔴 그리는 자리마다 **손 붙이는 자리가 짝인가** ──
    `cta.innerHTML = …#아이디…` 를 쓴 갈래는 같은 갈래 안에서 그 아이디에 onclick 을 붙이는 함수를 불러야 한다. */
-const BINDERS = { approve: "bindCta", save: "bindCta", regen: "bindCta", pubNow: "bindNow" };
+/* [AC-185 · A · 2026-09-21] `vdlCta` = 올릴 계정이 없는 영상의 으뜸 단추(내려받기) — 손은 `bindSelfUpload()` 가 붙인다.
+   🔴 이 표에 안 적으면 그 갈래를 **아예 못 잰다**(«까닭 모름»으로 울고 끝난다) — 새 CTA id 를 만들면 여기 한 줄이 그 기능의 일부다. */
+const BINDERS = { approve: "bindCta", save: "bindCta", regen: "bindCta", pubNow: "bindNow", vdlCta: "bindSelfUpload" };
 const lines = seg.split(/\r?\n/);
 
 /* 🔴 **도우미 함수 안에 든 단추까지 펼쳐서 본다.** 처음엔 그 줄의 `id="…"` 만 셌는데, `nowBtn()` 은 단추를
