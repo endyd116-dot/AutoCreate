@@ -35,6 +35,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { codeOnly } from "./_lib/code-only.mjs";
+import { blockOf } from "./lib/block.mjs";   // 🔴 자르개는 한 곳(B2 · AC-216) — 세 번째를 만들지 않는다
 
 const ROOT = process.cwd();
 const read = (f) => { const p = path.join(ROOT, f); return existsSync(p) ? readFileSync(p, "utf8") : null; };
@@ -112,13 +113,37 @@ const chain = [
   ["판정을 부른다",               /proxyFailClosed\(\{/],
   ["멈추면 잡을 내주지 않는다",   /if \(fc\.stop\) return \{ ok: false, stop: fc\.reason \}/],
   ["claim 이 멈춤을 받아 낸다",   /if \(!loaded\.ok && "stop" in loaded\)/],
-  ["잡을 큐로 되돌린다",          /UPDATE runner_jobs SET status = 'queued'[\s\S]{0,240}error_kind = \$\{loaded\.stop\}/],
   ["되풀이를 큐로 누른다",        /due_at = NOW\(\) \+ INTERVAL '10 minutes'/],
-  ["감사에 남긴다(high)",         /action: "proxy_fail_closed"[\s\S]{0,140}riskLevel: "high"|riskLevel: "high"[\s\S]{0,140}action: "proxy_fail_closed"/],
-  ["고객에게 알린다",             /INSERT INTO notifications[\s\S]{0,240}PROXY_STOP_MESSAGE\[loaded\.stop\]/],
-  ["알림을 하루 1건으로 누른다",  /NOT EXISTS \(SELECT 1 FROM notifications[\s\S]{0,200}24 hours/],
 ];
 for (const [name, re] of chain) (re.test(src) ? ok : bad)("②", name);
+
+/* 🔴 [2026-09-22 · AC-193] **창(`A[\s\S]{0,N}B`)을 덩이로 바꾼다** — 여기 셋이 그 모양이었다.
+   먹여 보니 **감사 줄은 실제로 뚫렸고**(아래 변이가 그 판이다) 나머지 둘은 **지금 배치에서만** 안 뚫렸다.
+   🔴 «지금 배치에선 안 뚫린다»는 **운이지 규율이 아니다**(오늘 세 번 그렇게 데었다) — 모양 자체를 없앤다.
+   ⇒ SQL 문 하나를 `sql\`` 부터 `\`);` 까지 덩이로 잡고 **그 안에서만** 본다. 못 잡으면 ⊘. */
+/* 🔴 **닻이 파일에 여럿이면 `blockOf` 는 «첫 번째»를 잡는다** — 그러면 **엉뚱한 문**을 재고,
+   그 답은 빨강이든 초록이든 **거짓**이다. 실제로 그랬다: `INSERT INTO notifications` 는 이 파일에 **5곳**이라
+   536번 줄(딴 알림)을 떠다 «고객에게 알린다»가 빨개졌다 — 제품은 멀쩡한데.
+   ⇒ **진짜 범위(fail-closed 갈래)를 먼저 잡고** 그 안에서만 닻을 찾는다. 갈래 안에서는 넷 다 하나뿐이다.
+   ⇒ 그리고 **닻이 그 안에 정말 하나인지 세어** 둘 이상이면 ⊘ 로 적는다(다음에 또 늘어날 수 있다). */
+const branch = blockOf(src, 'if (!loaded.ok && "stop" in loaded) {', ["continue;"]);
+if (!branch) unk("②", "fail-closed 갈래를 못 잡았다(닻 `if (!loaded.ok && \"stop\" in loaded) {`)");
+else {
+  const B = branch.body;
+  const inStmt = (name, anchor, enders, re) => {
+    const n = B.split(anchor).length - 1;
+    if (n === 0) { unk("②", `${name} — 갈래 안에 닻 «${anchor.slice(0, 44)}» 가 없다`); return; }
+    if (n > 1) { unk("②", `${name} — 갈래 안에 닻이 ${n}곳이다. 어느 것을 잰 건지 말할 수 없다`); return; }
+    const blk = blockOf(B, anchor, enders);
+    if (!blk) { unk("②", `${name} — 문의 끝(«${enders.join("» «")}»)을 못 찾았다. 넓히지 않는다`); return; }
+    (re.test(blk.body) ? ok : bad)("②", `${name} — **그 문 안에서** 본다`);
+  };
+  inStmt("잡을 큐로 되돌린다", "UPDATE runner_jobs SET status = 'queued'", ["`)"], /error_kind = \$\{loaded\.stop\}/);
+  inStmt("감사에 남긴다(high)", "await writeAudit({", ["});"], /action: "proxy_fail_closed"[\s\S]*riskLevel: "high"|riskLevel: "high"[\s\S]*action: "proxy_fail_closed"/);
+  inStmt("고객에게 알린다", "INSERT INTO notifications", ["`)"], /PROXY_STOP_MESSAGE\[loaded\.stop\]/);
+  inStmt("알림을 하루 1건으로 누른다", "NOT EXISTS (SELECT 1 FROM notifications", ["`)"], /24 hours/);
+}
+
 
 /* ───────────────── ③ 보임 — 멈춘 것이 화면으로 나오나 ───────────────── */
 notes.push("■ ③ 보임 — 멈춘 것이 운영 화면으로 나오나(§9 «말해 주기»)");
@@ -246,6 +271,15 @@ const MUT = [
   ["🔴 코드는 지우고 낱말만 주석에 남긴다", (b) => {
     b[PROX] = b[PROX].replace("AS no_proxy", "AS zz_alibi /* AS no_proxy */");
   }, "③"],
+  /* 🔴 **②꼴 — 창이 넓어 «옆 코드»를 줍는다**(B2 2026-09-22 · 내 것도 뚫렸다).
+     감사 호출에서 `riskLevel: "high"` 를 빼고 **호출 밖 140자 안에 미끼**를 둔다.
+     옛 창(`action: …[\s\S]{0,140}riskLevel: "high"`)은 여기서 **조용히 초록**이었다.
+     🔴 미끼가 **코드**라 주석 걷기로는 안 막힌다 — ②와 ④는 따로 막아야 한다는 증거가 이 줄이다. */
+  ["🔴 감사의 high 를 빼고 옆에 미끼를 둔다", (b) => {
+    b[JOBS] = b[JOBS]
+      .replace('action: "proxy_fail_closed", actorType: "system", riskLevel: "high",', 'action: "proxy_fail_closed", actorType: "system",')
+      .replace("        });\n        /* 알림 중복 억제", '        });\n        const zzDecoy = { riskLevel: "high" };\n        /* 알림 중복 억제');
+  }, "②"],
 ];
 /* 🔴 **덩이를 못 잡았을 때 — «넓혀서 답하지 않고 «못 쟀다»로 적나»**(2026-09-22 · AC-193).
    여기엔 `i + 900` 폴백이 있었다(끝 글자를 못 찾으면 900자를 덩이로 쳤다). 넓어진 창은 **조용히 통과시킨다.**
