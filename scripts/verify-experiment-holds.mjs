@@ -123,6 +123,18 @@ const SPECIMENS = {
      첫 전수에서 이런 자 셋을 ✗ 로 찍었다(AC-210 ②). 그 가름을 검체로 박아 둔다. */
   "scripts/_specimen-outofscope.mjs":
     `console.log("  ✓ ① 이 자는 제품을 안 읽는다");\nprocess.exit(0);\n`,
+  /* ㅡ 🔴 **AC-172 그 모양 그대로** — 재려는 것이 **우리 나무 밖**에 있다(남의 API 가 준 값).
+     메인은 넷리파이 env API 로 읽은 **마스킹된** 20자를 제공사에 넣고 401 을 받아 «가짜 키»라 결론했다.
+     어떤 값을 넣어도 401 이라 **대조군이 없는 실험**이었다.
+     🔴 **이 검체의 답은 ⊘ 이고, 그게 이 자의 한계다** — 내 대조군은 «우리 제품을 비운다»인데,
+     그 실험의 주어는 제품이 아니라 **밖에서 받은 값**이라 팔을 비워도 아무것도 안 변한다.
+     ⇒ «못 잡는다»를 **문장이 아니라 돌아가는 검체로** 남긴다. 다음 사람은 이걸 ✓ 로 뒤집는 것을 목표로 삼으면 된다. */
+  "scripts/_specimen-external.mjs":
+    `/* 남의 API 가 준 값을 재는 척 한다 — 우리 나무 밖이라 팔을 비워도 같다 */\n` +
+    `const masked = \"****************abcd\";   // 별표16+뒤4자 = 20자\n` +
+    `const ok = masked.length === 20 && !/^\\*/.test(masked);   // 이 판정은 제품과 무관하다\n` +
+    `console.log(ok ? \"  ✓ ① 키가 살아 있다\" : \"  ✗ ① 가짜 키다\");\n` +
+    `process.exit(0);\n`,
 };
 
 /* ══════════════ 돌린다 ══════════════ */
@@ -223,7 +235,9 @@ console.log(`   ⊘ 는 **통과가 아니다** — 대조군이 초록이 아�
 if (SELFTEST) {
   /* 🔴 판정표를 **먼저** 적고 맞대는 것 — ㉮ 는 ✗ 여야 하고 ㉯ 는 ✓ 여야 한다 */
   const got = (rel) => (rows.find((r) => r.rel === rel) || {}).mark;
-  const want = { "scripts/_specimen-vacuous.mjs": "✗", "scripts/_specimen-sound.mjs": "✓", "scripts/_specimen-outofscope.mjs": "⊘" };
+  const want = { "scripts/_specimen-vacuous.mjs": "✗", "scripts/_specimen-sound.mjs": "✓", "scripts/_specimen-outofscope.mjs": "⊘",
+    /* 🔴 AC-172 모양은 **못 잡는다** — 기대값을 ⊘ 로 적어 둔다(잡게 되면 이 줄이 맨먼저 울면서 «드디어 된다»고 알려 준다) */
+    "scripts/_specimen-external.mjs": "⊘" };
   let miss = 0;
   console.log("");
   console.log("── 🔴 자기 찌르기 판정표(먼저 적고 맞댄다) ──");
