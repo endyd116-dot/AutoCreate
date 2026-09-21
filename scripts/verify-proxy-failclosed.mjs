@@ -34,9 +34,20 @@ import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
+import { codeOnly } from "./_lib/code-only.mjs";
 
 const ROOT = process.cwd();
 const read = (f) => { const p = path.join(ROOT, f); return existsSync(p) ? readFileSync(p, "utf8") : null; };
+/* 🔴 [2026-09-22 · AC-193] **주석이 코드의 알리바이가 된다**(B2 가 오늘 넷째 꼴로 짚었다).
+   덩이를 정확히 잡아도 **그 안 주석에 과녁 낱말이 있으면** 코드를 지워도 그대로 통과한다 — AC-59 의 사촌인데
+   이번엔 **주석이 검사를 통과시켜 주는** 쪽이다. 이 자는 여태 **원문을 그대로** 읽고 있었다.
+   ⇒ ①②③(«그 코드가 있나»)은 **주석을 걷고** 본다.
+   ⚠️ ④(러너)만 **원문으로 남긴다** — 두 가지 까닭이고 둘 다 `code-only.mjs` 머리말이 경고한 자리다:
+      ① `runner/core.mjs` 엔 `https?:\/\/` 꼴 정규식이 있어 걷으면 **그 줄이 통째로 사라진다**
+      ② ④의 셋째 축은 `if (!ip) { … 그대로 진행` 으로 **주석을 일부러 읽는다**(«못 읽었다»를 «틀렸다»로 안 바꾼다는 뜻이
+         그 자리엔 주석으로 적혀 있다). 걷으면 **맞는 제품이 빨개진다.**
+      🔴 «일부러 원문»과 «안 걷어서 원문»은 다르다 — 앞엣것만 남긴다. */
+const readCode = (f) => { const t = read(f); return t === null ? null : codeOnly(t); };
 const JOBS = "lib/runner-jobs.ts", PROX = "lib/proxies.ts", OPS = "netlify/functions/ops-proxies.ts", CORE = "runner/core.mjs";
 
 const fails = [], notes = [];
@@ -44,7 +55,7 @@ const ok  = (ax, m) => notes.push(`  ✓ ${ax} ${m}`);
 const bad = (ax, m) => { notes.push(`  ✗ ${ax} ${m}`); fails.push(`${ax} ${m}`); };
 const unk = (ax, m) => { notes.push(`  ⊘ ${ax} 못 쟀음 — ${m}`); fails.push(`${ax} 못 쟀음`); };
 
-const src = read(JOBS);
+const src = readCode(JOBS);
 if (!src) { console.error("⊘ 못 쟀어요 — lib/runner-jobs.ts 가 없다."); process.exit(2); }
 
 /* ───────────────── ① 판정표 — 제품 함수를 **실제로 돌린다** ─────────────────
@@ -111,7 +122,7 @@ for (const [name, re] of chain) (re.test(src) ? ok : bad)("②", name);
 
 /* ───────────────── ③ 보임 — 멈춘 것이 화면으로 나오나 ───────────────── */
 notes.push("■ ③ 보임 — 멈춘 것이 운영 화면으로 나오나(§9 «말해 주기»)");
-const prox = read(PROX), ops = read(OPS);
+const prox = readCode(PROX), ops = readCode(OPS);
 if (!prox || !ops) unk("③", `${!prox ? PROX : OPS} 가 없다`);
 else {
   /* 🔴 **덩이별로 잘라서 본다.** 파일 어딘가에 `tenantName` 이 한 번 있다고 그 목록이 그려지는 게 아니다 —
@@ -229,6 +240,12 @@ const MUT = [
   ["🔴 IP 죽은 계정 셈을 뗀다",      (b) => { b[PROX] = b[PROX].replace("AS stalled", "AS zz_gone2"); }, "③"],
   ["🔴 «없다»를 슬롯 안 보고 말한다", (b) => { b[PROX] = b[PROX].replace("FROM account_slots s WHERE s.account_id = a.id AND s.status = 'active'", "FROM account_slots s WHERE s.account_id = a.id"); }, "③"],
   ["🔴 옛 평문 칸을 IP 로 안 친다",   (b) => { b[PROX] = b[PROX].replace("a.proxy_url IS NULL OR a.proxy_url = ''", "TRUE"); }, "③"],
+  /* 🔴 **넷째 꼴 — 주석이 코드의 알리바이가 된다**(B2 2026-09-22 · AC-193).
+     덩이를 정확히 잡아도 **그 안 주석에 과녁 낱말이 있으면** 코드를 지워도 통과한다.
+     ⇒ **코드는 지우고 낱말만 주석에 남기는** 변이를 넣는다. 주석을 안 걷는 자는 여기서 **조용히 초록**이다. */
+  ["🔴 코드는 지우고 낱말만 주석에 남긴다", (b) => {
+    b[PROX] = b[PROX].replace("AS no_proxy", "AS zz_alibi /* AS no_proxy */");
+  }, "③"],
 ];
 /* 🔴 **덩이를 못 잡았을 때 — «넓혀서 답하지 않고 «못 쟀다»로 적나»**(2026-09-22 · AC-193).
    여기엔 `i + 900` 폴백이 있었다(끝 글자를 못 찾으면 900자를 덩이로 쳤다). 넓어진 창은 **조용히 통과시킨다.**
