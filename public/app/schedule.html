@@ -24,8 +24,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=29"></script>
-<script src="/js/mock.js?v=31"></script>
+<script src="/js/ui.js?v=30"></script>
+<script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
 /* [R11 A-5②] «이날 겹쳐요» — 🔴 **막지 않는다.** §9 는 «있는 길을 우리 판단으로 막지 말라»이지 «말하지 말라»가 아니다.
@@ -56,6 +56,14 @@ const WD = ["일", "월", "화", "수", "목", "금", "토"];
 const isVideoCh = (c) => UI.VIDEO_CH.includes(c); const perPiece = (c) => (isVideoCh(c) ? UI.VIDEO_COIN[60] : UI.COIN.blog); // [P1R5] shorts 규칙 = 편당 video_60(§1.10)
 const today = KST(); let view = new Date(today.getFullYear(), today.getMonth(), 1); let sel = ymd(today);
 let D = { rules: [], settings: {}, coinsPerWeek: 0, maxRules: null }, accounts = [], slots = [];
+/* [AC-184] 🔴 자동 편성은 **계정이 있어야 한다**(`lib/director.ts` §1.2 가 못 박았다: «아무도 안 보는 사이에 올릴 곳 없는 영상을 코인 써 가며 쌓지 않는다»).
+   그래서 규칙에 영상 축을 **지어내지 않는다** — 대신 영상을 켠 집에는 «왜 여기 없는지»와 «그럼 어떻게 하는지»를 한 줄로 말한다(§9 · 조용한 축소 금지). */
+let wantVideo = false;
+/* [AC-184] 🔴 «영상 축이 왜 여기 없나» — **한 문장을 한 곳에서만** 만든다(마법사·한 줄 고치기 두 시트가 같이 쓴다 · AC-52).
+   빈 문자열이면 아무것도 안 붙는다 — 영상을 안 켰거나 이미 영상 계정이 있으면 할 말이 없다. */
+const videoRuleNote = (chans) => (wantVideo && !chans.some(isVideoCh))
+  ? `<p class="muted" style="margin:0 2px 10px;font-size:12.5px;line-height:1.7">영상은 올릴 채널을 연결해야 편성에 들어가요. 그 전에도 <a href="/app/create.html" style="text-decoration:underline">만들기</a>에서 만들어 두고 직접 올리실 수 있어요.</p>`
+  : "";
 const gear = document.createElement("button"); gear.type = "button"; gear.className = "ic"; gear.setAttribute("aria-label", "편성 설정"); gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>'; const sp = UI.$(".appbar .sp"); if (sp) sp.replaceWith(gear);
 const dotCls = (s) => UI.slotDot(s); // [P1R2] 상태 점 = 알약과 같은 자(§5B.6 전 상태)
 const TIMES = [["07:30", "07:30"], ["09:00", "09:00"], ["12:00", "12:00"], ["15:00", "15:00"], ["18:00", "18:00"], ["21:00", "21:00"]];
@@ -75,8 +83,11 @@ const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
-  const [r, a] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list")]);
+  /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
+     편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
+  const [r, a, ts] = await Promise.all([UI.api("/api/rules-list"), UI.api("/api/accounts-list"), UI.api("/api/tenant-settings", { noGate: true })]);
   if (r.ok) D = r; accounts = a.ok ? a.accounts : [];
+  wantVideo = !!(ts.ok && (ts.kinds || []).includes("video"));   // [AC-184] rules-list 는 kinds 를 안 준다(scheduleSettingsOf 에 그 칸이 없다)
   await loadSlots(); render();
 }
 async function loadSlots() {
@@ -339,7 +350,7 @@ function ruleOneSheet(rule) {
     hour: rule?.preferredHour ?? null, min: rule?.preferredMinute ?? 0, mode: rule?.accountMode || "auto", acc: rule?.accountId || null };
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const accs = accounts.filter((a) => a.channel === s.channel);
-    body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}
+    body.innerHTML = `<div class="sec">채널</div>${UI.chips("ch", chans.map((c) => [c, UI.chLabel(c)]), s.channel)}${videoRuleNote(chans)}
       <div class="sec">얼마나 자주</div><div class="fr" style="padding-left:0;padding-right:0"><div class="fl">${UI.esc(everySay(s))}<small>0으로 두면 이 규칙은 지워져요</small></div>${UI.stepper("cnt", s.count, 0, s.every === "day" ? 3 : s.every === "month" ? 31 : 7, "회")}</div>
       <div style="padding:0 0 10px">${UI.seg("ev", [["day", "매일"], ["week", "주"], ["month", "달"]], s.every)}</div>
       ${s.every === "week" ? `<div class="sec">어느 요일</div>${UI.chips("wd", WD.map((w, i) => [i, w]), s.wd, true)}<p class="muted" style="margin:6px 0 0;font-size:12.5px">${s.wd.length ? `${s.wd.length}일 골랐어요` : "안 고르면 저희가 골라요"}</p>` : ""}
@@ -436,6 +447,8 @@ function ruleSheet() {
         <div id="estNote">${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}</div>${""/* 🔴 서버가 답하면 이 칸을 통째로 갈아 끼운다(estServer) — 화면 셈은 답이 올 때까지의 미리보기다 */}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
+    /* [AC-184] 🔴 영상을 켰는데 영상 채널 계정이 0개면 이 목록엔 영상 줄이 **없다** — 조용히 없는 것과 «왜 없는지»는 다르다. */
+    if (step === 1) body.insertAdjacentHTML("beforeend", videoRuleNote(chans));
     UI.bindSteppers(body, (n, v) => { st.count[n.slice(2)] = v; }); UI.bindChips(body, (n, v) => { if (n.startsWith("e:")) { st.every[n.slice(2)] = v; view(sh, close); } else if (n.startsWith("wd:")) { st.wd[n.slice(3)] = (Array.isArray(v) ? v : [v]).filter((x) => x !== "").map(Number); view(sh, close); } else if (n.startsWith("h:")) st.hour[n.slice(2)] = v === "" ? null : Number(v); else if (n.startsWith("m:")) { st.mode[n.slice(2)] = v; body.querySelector(`[data-pick="${n.slice(2)}"]`).hidden = v !== "fixed"; } else if (n.startsWith("a:")) st.acc[n.slice(2)] = Number(v); else if (n === "rp") { st.reviewPolicy = v; const sy = body.querySelector("#rpSay2"); if (sy) sy.textContent = rpSay(v); }   /* [R8 §9-2] 🔴 켜는 **그 순간에** 무엇을 켜는 것인지 말한다 — «사람이 안 보는 경로»가 생기는 자리가 여기다 */
       else if (n === "pl") { st.produceLeadDays = Number(v); view(sh, close); } });
     const nx = body.querySelector("#nx"); if (nx) nx.onclick = () => { if (step === 1 && !chans.some((c) => st.count[c] > 0)) return UI.toast("한 채널은 1회 이상으로 해 주세요"); step++; view(sh, close); };

@@ -30,8 +30,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=29"></script>
-<script src="/js/mock.js?v=31"></script>
+<script src="/js/ui.js?v=30"></script>
+<script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
   const me = await UI.boot("home"); if (!me) return;
@@ -57,7 +57,9 @@
       if (!rr.ok) { e.target.disabled = false; return UI.toast(rr.error || "되돌리지 못했어요"); }
       bn.hidden = true; UI.toast("탈퇴를 되돌렸어요 · 하던 대로 쓰시면 돼요"); };
   });
-  const r = await UI.api("/api/home-summary");
+  /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
+     편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
+  const [r, ks] = await Promise.all([UI.api("/api/home-summary"), UI.api("/api/tenant-settings", { noGate: true })]);
   if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
   // [P1R3] 오늘 번 돈 — 확정은 진하게, 예상은 회색 작게. 🔴 둘을 합쳐서 한 숫자로 그리지 않는다(§9.3)
   const rev = r.revenue || {};
@@ -81,12 +83,19 @@
   if (trial.status === "trial" && trial.daysLeft != null && trial.daysLeft <= 3) r.todo.unshift({ kind: "coin", title: `무료 체험이 ${trial.daysLeft}일 남았어요`, desc: "이어서 쓰려면 요금제를 골라 주세요", link: "/app/plan.html", tone: "warn" });
   /* [여정 점검 13] «체험이 끝났어요»는 **서버 todo(kind:"plan")가 정본**이다 — 화면이 같은 줄을 또 얹어 두 줄로 보였다.
      체험 D-3 남음은 서버가 안 보내므로 그 줄만 화면이 얹는다. */
+  /* [AC-183 · A] 🔴 «영상도 만들래요?» — `kindsSet:false` 는 **한 번도 안 물어본 집**이다(온보딩 화면은 이미 묻지만 그 화면을 지나왔다).
+     서버 todo 에는 이 줄이 없어서 화면이 얹는다(바로 위 체험 D-3 줄과 **같은 자리·같은 방식**).
+     🔴 답하면 둘 중 무엇이든 `kindsSet` 이 true 가 되어 이 줄이 사라진다 — 끝낼 수 있는 질문이어야 한다.
+     🔴 못 읽으면 줄을 안 얹는다(없는 할 일을 지어내지 않는다 · AC-9). */
+  if (ks.ok && ks.kindsSet === false) r.todo.unshift({ kind: "review", title: "영상도 만들어 드릴까요?", desc: "글만 할지 영상도 할지 한 번만 정하면 돼요", link: "#ask-kinds", tone: "soft" });
   // 해야 할 일
   const todo = UI.$("#todo");
   if (!r.todo.length) todo.innerHTML = `<div class="row"><span class="mk money" aria-hidden="true">✓</span><div class="l"><span class="t">오늘 할 일이 없어요</span><span class="d">편성표대로 알아서 돌아가고 있어요</span></div></div>`;
   /* [R7 §1.4] 서버가 주는 count(몇 건인지)·pieceId(1건이면 그 글로 바로) 를 그대로 쓴다 — 화면이 세거나 고르지 않는다 */
   else todo.innerHTML = r.todo.map((t) => { const href = t.pieceId ? `/app/piece.html?id=${t.pieceId}` : t.link;
     return `<a class="row tap" href="${href}">${UI.kindMark(t.kind, t.tone)}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.desc)}</span></div>${t.count > 1 ? `<span class="pill ${t.tone === "warn" || t.tone === "danger" ? "warn" : "off"}">${UI.num(t.count)}건</span>` : ""}${UI.chev}</a>`; }).join("");
+  /* 이 줄만 이동이 아니라 **시트**다 — 목록 만드는 자리를 건드리지 않으려고 `link` 로 표시해 두고 여기서 가로챈다. */
+  UI.$$('#todo a[href="#ask-kinds"]').forEach((a) => a.onclick = (e) => { e.preventDefault(); UI.askKindsSheet(() => location.reload()); });
   // 알림 안 읽음 표시(종)
   if (r.unread) { const bell = UI.$(".appbar .ic"); if (bell) { bell.style.position = "relative"; bell.insertAdjacentHTML("beforeend", '<span class="dot danger" style="position:absolute;top:7px;right:7px"></span>'); bell.setAttribute("aria-label", `알림 ${r.unread}개`); } }
   // 오늘 편성
