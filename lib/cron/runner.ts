@@ -41,6 +41,7 @@ import { recipeRolloutStep } from "./recipe-rollout";   // [P1R8 §3.3] 셀렉�
 import { postAliveStep } from "./post-alive";
 import { billingChargeStep } from "./billing-charge";
 import { trialExpireStep } from "./trial-expire";
+import { pauseWatchStep } from "./pause-watch";   // 🔴 [AC-220] 잠깐 멈춤 깨우기
 import { csAutoTicketStep } from "./cs-auto-ticket";
 import { runnerCanaryStep } from "./runner-canary";
 import { aiModelWatchStep } from "./ai-model-watch";
@@ -72,6 +73,8 @@ export const STEPS: AnyStep[] = [
   revenueSyncStep,     // hourly(06:00 KST · 쿠팡 13:00) · 수익 회수(P1R3)
   billingChargeStep,   // hourly(09:00 KST) · 정기 청구·재시도·해지·연납 포함분(P1R4)
   trialExpireStep,     // hourly · 체험 D-3/D-1/D-0 알림(09:00) · 종료 → readonly(P1R4)
+  pauseWatchStep,      // 🔴 hourly · [AC-220] 잠깐 멈춤을 **깨워 준다** — 기한이 지나면 깨우고(밀린 글을 모아서 «N건» 을 알린다),
+                       //   «내가 켤 때까지»인 집엔 7일마다 «아직 쉬는 중». 사장님 «까먹으면 어떡해?» 의 자리(DESIGN §5B.11(3))
   csAutoTicketStep,    // hourly · 러너 실패·결제 실패·계정 정지 3회 → 시스템 티켓(P1R4 §2.1)
   runnerCanaryStep,    // hourly(05:00 KST 게이트) · 셀렉터 카나리 평가(P1R4 · 하루 1회 잠금)
   aiModelWatchStep,    // hourly(auto 승격 점검 매시간 · 발굴은 월 06:00 KST 주 1회) · AI 모델 감시(P1R4)
@@ -124,12 +127,16 @@ function secretOk(req: Request): boolean {
 }
 
 /* ───────── 테넌트 ───────── */
-interface TenantRow { tid: number; key: string; planKey: string; raw: Record<string, unknown> }
+interface TenantRow { tid: number; key: string; planKey: string; paused: boolean; raw: Record<string, unknown> }
 /** 활성 테넌트 = status trial|active. 정지·해지 테넌트는 크론이 건드리지 않는다. */
 async function activeTenants(): Promise<TenantRow[]> {
-  const rows = await q(sql`SELECT id, key, plan_key, settings FROM tenants WHERE status IN ('trial','active') ORDER BY id`);
+  /* 🔴 [AC-220] `paused_at` 을 같이 읽는다 — 쉬는 집을 **스텝 관문 한 줄**에서 가르려고(스텝마다 흩뿌리지 않는다).
+     🔴 **`status` 조건은 그대로다** — 쉼은 `status` 를 안 건드리므로 쉬는 집도 여전히 `trial|active` 이고,
+        그래서 «안 멈추는 것»(수익·결제·알림·러너)이 **그대로 돈다**(설계 §5B.11(1) 오른쪽 칸). */
+  const rows = await q(sql`SELECT id, key, plan_key, settings, paused_at FROM tenants WHERE status IN ('trial','active') ORDER BY id`);
   return rows.map((r) => ({
     tid: Number(r.id), key: String(r.key ?? ""), planKey: String(r.plan_key ?? "trial"),
+    paused: !!r.paused_at,
     raw: (r.settings && typeof r.settings === "object" && !Array.isArray(r.settings) ? r.settings : {}) as Record<string, unknown>,
   }));
 }
@@ -193,6 +200,7 @@ export async function runTick(every: Every, req: Request, opts: RunTickOpts = {}
     const rep: StepReport = { step: step.key, tenants: 0, changed: 0, skipped: 0, errors: 0 };
     const budgetSkipped: number[] = [];
     const autoOff: number[] = [];
+    const pausedSkipped: number[] = [];   // 🔴 [AC-220] «잠깐 멈춤»으로 건너뛴 집 — `autoOff` 와 뜻이 다르다
     const details: Record<string, unknown>[] = [];
 
     /* global 스텝 — 테넌트 루프 밖에서 한 번(탈퇴 파기처럼 «활성 테넌트 목록에 없는 집»을 도는 일).
@@ -220,6 +228,12 @@ export async function runTick(every: Every, req: Request, opts: RunTickOpts = {}
       if (Date.now() >= stepDeadline) { budgetSkipped.push(t.tid); continue; }
       const settings = scheduleSettingsOf(t.raw);
       if (step.needsAutoSchedule && !settings.autoSchedule) { autoOff.push(t.tid); continue; }
+      /* 🔴 [AC-220 · DESIGN §5B.11] **잠깐 멈춤** — 손님이 스스로 켠 쉼. 여기 **한 줄**이 그 관문이다.
+         🔴 `stopsWhenPaused` 를 켠 넷(roll·assign·produce·publisher)만 쉰다 — 나머지는 **그대로 돈다**.
+            수익·정산·결제·알림·러너·검수창 마감이 같이 멈추면 «쉼»이 «잠김»이 되고, 그게 이 기능이 막으려던 것이다.
+         ⚠️ `autoOff` 와 **따로 센다** — «자동 편성을 꺼 뒀다»와 «잠깐 쉬는 중»은 다른 말이고,
+            한 칸에 뭉치면 운영 화면이 «왜 안 도는지»를 못 가른다(조용한 0건 금지). */
+      if (step.stopsWhenPaused && t.paused) { pausedSkipped.push(t.tid); continue; }
       const ctx: TenantCtx = { tid: t.tid, key: t.key, planKey: t.planKey, settings, raw: t.raw, now, deadline: stepDeadline, manual };
       rep.tenants++;
       try {
@@ -238,6 +252,7 @@ export async function runTick(every: Every, req: Request, opts: RunTickOpts = {}
     const detail: Record<string, unknown> = {};
     if (budgetSkipped.length) detail.budgetSkipped = budgetSkipped.length;
     if (autoOff.length) detail.autoScheduleOff = autoOff.length;
+    if (pausedSkipped.length) detail.paused = pausedSkipped.length;   // 🔴 [AC-220] 조용한 0건 금지 — «쉬어서 안 돌았다»를 적는다
     if (details.length) detail.tenants = details.slice(0, 20);
     if (Object.keys(detail).length) rep.detail = detail;
     ran.push(rep);

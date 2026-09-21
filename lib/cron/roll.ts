@@ -12,6 +12,7 @@ export const rollStep: CronStep = {
   key: "slots.roll",
   every: "hourly",
   needsAutoSchedule: true,
+  stopsWhenPaused: true,    // 🔴 [AC-220] 설계 §5B.11(1) «새 자리를 안 만든다»
   async run(ctx): Promise<StepOutcome> {
     const r = await rollSlots(ctx.tid, ctx.settings.horizonDays, ctx.now);
     // checked = 규칙이 이 기간에 «내야 했던» 자리 수 · created = 그중 비어 있어 새로 만든 수.

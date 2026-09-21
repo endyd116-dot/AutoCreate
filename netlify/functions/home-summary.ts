@@ -18,6 +18,7 @@ import { GATE_FAIL_LABEL, type GateKey } from "../../lib/ai-tell-gate";   // �
 /* [R7 §1.4] 열린 채널 이름은 `channel_registry` 가 정본이다 — 고객 «계정 연결» 그리드가 그리는 기준(`status='active'`)과 같은 곳을 본다.
    문자열로 박아 두면 채널이 열리고 닫힐 때마다 사람이 문구를 고치러 와야 하고, 그러다 못 붙이는 채널을 계속 권하게 된다(A 실측 지적 2026-09-15). */
 import { listChannels } from "../../lib/accounts";
+import { loadPause } from "../../lib/tenant-pause";   // 🔴 [AC-220] 쉼의 한 곳 — `tenant-settings` 와 같은 객체
 import { sql } from "drizzle-orm";
 export const config = { path: "/api/home-summary" };
 type Row = Record<string, unknown>;
@@ -262,6 +263,9 @@ export default async (req: Request): Promise<Response> => {
       runner: { online: n(runner?.online), total: n(runner?.total) },
       trial: { status: ctx.tenant.status, daysLeft: ctx.tenant.trialDaysLeft, planKey: ctx.tenant.planKey },
       coins: ctx.coins,
+      /* 🔴 [AC-220 · DESIGN §5B.11(3)] **홈 첫 화면에 «쉬는 중 · N일째»가 늘 보여야 한다** — 사장님 «까먹으면 어떡해?» 의 답이다.
+         `tenant-settings` 와 **같은 `pause` 객체**를 그대로 싣는다(두 벌로 만들지 않는다 · 설계 (1-c)). */
+      pause: await loadPause(tid),
       impersonation: auth.user.imp || null,
     });
   } catch (err) { return jsonError("home", err); }
