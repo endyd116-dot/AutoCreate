@@ -51,6 +51,17 @@ export interface CronStep {
    *   false = 사람이 만든 글도 먹여 살려야 하는 것(publisher·learn·reap) — 자동 편성과 무관하게 돈다.
    */
   needsAutoSchedule: boolean;
+  /**
+   * 🔴 [AC-220 · DESIGN §5B.11] **손님이 «잠깐 멈춤»을 켜면 이 스텝이 쉬나.**
+   *   true  = 설계 (1) 표의 **왼쪽**(멈춘다) — `slots.roll`·`topics.assign`·`produce`·`publisher` 넷뿐이다.
+   *   false = **오른쪽**(안 멈춘다) — 수익·정산·결제·알림·러너·검수창 마감. 🔴 **여기가 더 중요하다**:
+   *           하나라도 잘못 true 로 두면 «쉼»이 «잠김»이 되고, 그건 이 기능이 막으려던 바로 그것이다.
+   *   ⚠️ `needsAutoSchedule` 과 **다른 축**이다 — `publisher` 는 `needsAutoSchedule:false`(사람이 승인한 글도 나가야 한다)
+   *      이면서 `stopsWhenPaused:true`(쉬는 동안엔 **아무 글도** 저절로 안 나간다)다. 한 칸으로 못 쓴다.
+   *   🔴 안 적으면 **false**(안 멈춘다)다 — 새 스텝이 조용히 멈추는 쪽으로 기우는 것보다,
+   *      «왜 안 멈추지»를 사람이 알아채는 쪽이 낫다(조용한 정지가 더 비싸다).
+   */
+  stopsWhenPaused?: boolean;
   run(ctx: TenantCtx): Promise<StepOutcome>;
 }
 

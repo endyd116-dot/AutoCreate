@@ -45,6 +45,11 @@ export const publisherStep: CronStep = {
   key: "publisher",
   every: "5m",
   needsAutoSchedule: false,   // 사람이 손으로 승인한 글도 나가야 한다 — 자동 편성과 무관.
+  /* 🔴 [AC-220 · DESIGN §5B.11(1)] **«잠깐 멈춤»에는 이 스텝도 쉰다** — 예약된 것이 «취소»가 아니라 **대기**한다.
+     ⚠️ 위 `needsAutoSchedule:false` 와 **모순이 아니다**: 두 축이 다르다.
+        «자동 편성을 꺼 뒀다» = 새 자리를 안 만들 뿐 **이미 승인된 글은 나간다** ↔ «쉬는 중» = **아무 글도 저절로 안 나간다**.
+     🔴 그래도 **손으로 «지금 올리기»는 그대로 된다** — 그 길은 이 크론이 아니라 `publish-now` API 다(설계 (1) 오른쪽 칸). */
+  stopsWhenPaused: true,
   async run(ctx): Promise<StepOutcome> {
     // readonly·suspended 는 발행도 멈춘다(P1R4 §1.3) — due 글은 scheduled 그대로 두고(결제하면 이어서 나간다) 센다.
     const w = await requireWritable(ctx.tid);

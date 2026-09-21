@@ -26,6 +26,7 @@ const CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress", "thre
    `lib/director.ts` 가 같은 규칙을 쓰는데 lib → netlify/functions 임포트는 층이 거꾸로였다).
    🔴 여기서 재수출한다 — 이 이름으로 부르던 자리(rules.ts·onboarding 등)가 그대로 돌아야 한다(소급 0). */
 import { normalizeKinds, kindsView } from "../../lib/tenant-kinds";
+import { loadPause } from "../../lib/tenant-pause";   // 🔴 [AC-220] 쉼의 한 곳
 export { normalizeKinds, kindsView };
 
 /** [v1.1 P1-2] tenants.settings 병합의 단일 경로 — rules-settings(netlify/functions/rules.ts)도 이 함수를 쓴다(같은 jsonb 두 경로 금지). */
@@ -49,7 +50,9 @@ export default async (req: Request): Promise<Response> => {
     if (req.method === "GET" && path.endsWith("/tenant-settings")) {
       const rows = (await db.execute(sql`SELECT settings, recipe_volunteer FROM tenants WHERE id = ${auth.tid}`)) as unknown as { settings: Record<string, unknown>; recipe_volunteer: boolean }[];
       const settings = (rows[0]?.settings && typeof rows[0].settings === "object") ? rows[0].settings : {};
-      return json({ ok: true, settings, ...kindsView(settings), recipeVolunteer: rows[0]?.recipe_volunteer === true });
+      /* 🔴 [AC-220 · DESIGN §5B.11(1-c)] «잠깐 멈춤» — `home-summary` 와 **같은 객체**를 싣는다(두 벌로 만들지 않는다).
+         `days`·`daysLeft`·`reasons[].label` 을 **서버가** 주는 것이 핵심이다 — 안 주면 화면이 날짜를 셈하고 말을 지어낸다(AC-52·AC-74). */
+      return json({ ok: true, settings, ...kindsView(settings), recipeVolunteer: rows[0]?.recipe_volunteer === true, pause: await loadPause(auth.tid) });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
     if (path.endsWith("/onboarding")) {

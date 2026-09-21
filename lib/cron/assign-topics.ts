@@ -79,6 +79,7 @@ export const assignTopicsStep: CronStep = {
   key: "slots.assign_topics",
   every: "hourly",
   needsAutoSchedule: true,
+  stopsWhenPaused: true,    // 🔴 [AC-220] 설계 §5B.11(1) «새 자리를 안 만든다»
   async run(ctx): Promise<StepOutcome> {
     const lead = ctx.settings.topicLeadDays;
     // 창 = 오늘(KST) ~ 오늘+topicLeadDays. 경계는 SQL 안에서 만든다(PITFALLS #4).

@@ -1247,3 +1247,27 @@ export const accountsAc201 = {
    *  🔴 `{}` = «아직 모른다»이지 «맞다»가 아니다. `confirmed` 가 있으면 claim 때 `expectBlogId` 로 러너에 내려간다. */
   identity: "identity",
 } as const;
+
+/* === AC-220 · 잠깐 멈춤(B · 2026-09-23 · drizzle/0087-tenant-pause.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   DESIGN §5B.11(사장님 승인 2026-09-22). 위 `tenants` 정의(Phase 0)는 **그대로 두고** 이번 라운드가 더한 칸만 적는다.
+ *
+ *   🔴 **`tenants.status` 를 안 건드린 것이 이 라운드의 핵심이다.**
+ *      `NON_WRITABLE`(`readonly`·`suspended`·`cancelled`)에 «쉼»을 끼우면 **«쉼»이 «잠김»이 된다** —
+ *      `requireWritable`(lib/guards.ts · 한 곳)의 뜻은 «**계약상 못 쓴다**»이고, 쉼은 **고객의 선택**이다.
+ *      쉬는 중에도 보기·고치기·손으로 «지금 올리기»·수익·결제·알림은 **그대로 된다**(§5B.11(1) 오른쪽 칸).
+ *      ⇒ `scripts/verify-pause-scope.mjs` 가 «`paused` 가 `NON_WRITABLE` 에 들어가면 운다»를 지킨다.
+ *
+ *   🔴 **«멈춤»에는 «깨워 주기»가 같이 있어야 한다**(사장님 «까먹으면 어떡해?»):
+ *      `pause_until` 이 있으면 그때 저절로 깨고, NULL(«내가 켤 때까지»)이면 **7일마다** 알린다.
+ *      `pause_notified_at` 이 그 **멱등 키**다 — 없으면 크론이 돌 때마다 알림이 나간다.
+ */
+export const tenantsAc220 = {
+  /** 언제부터 쉬나. 🔴 **NULL = 안 쉰다** — 이 칸 하나가 «쉬는 중인가»의 정본이다(`status` 와 무관). */
+  pausedAt:        timestamp("paused_at", { withTimezone: true }),
+  /** 언제 저절로 깨나. 🔴 **NULL = «내가 켤 때까지»** — 그 경우에만 7일 알림 대상이다. */
+  pauseUntil:      timestamp("pause_until", { withTimezone: true }),
+  /** 고객이 고른 까닭 key — `vacation|editing|channel_penalty|cost|other`. 🔴 사람말(label)은 **서버가** 준다(AC-52). 선택이라 NULL 가능. */
+  pauseReason:     varchar("pause_reason", { length: 40 }),
+  /** 마지막으로 «아직 쉬는 중이에요»를 알린 때. 🔴 7일 알림의 **멱등 키**. NULL = 아직 안 알렸다. */
+  pauseNotifiedAt: timestamp("pause_notified_at", { withTimezone: true }),
+};

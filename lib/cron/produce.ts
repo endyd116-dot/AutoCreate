@@ -53,6 +53,7 @@ export const produceStep: CronStep = {
   key: "slots.produce",
   every: "hourly",
   needsAutoSchedule: true,
+  stopsWhenPaused: true,    // 🔴 [AC-220] 설계 §5B.11(1) «코인이 안 나간다»
   async run(ctx): Promise<StepOutcome> {
     // 시각 게이트 — 하루 1회. 수동 강제 실행(`?secret=`)도 같은 규칙을 탄다(테스트는 produceHour 를 지금 시각으로 바꿔서 한다).
     const want = hourOf(ctx.settings.produceHour);
