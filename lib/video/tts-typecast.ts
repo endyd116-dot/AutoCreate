@@ -139,7 +139,8 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
     });
     if (!resp.ok) {
       const t = await resp.text().catch(() => "");
-      /* 🔴 합성 요청 자체가 거절됐다 — 청구하는지 **모른다** ⇒ 금액 NULL(0 을 적으면 «안 나갔다»가 된다 · AC-9). */
+      /* 🔴 합성 요청 자체가 거절됐다 — 청구하는지 **모른다** ⇒ `costUsd` 에 안 넣고(상한 무영향) 금액도 NULL.
+         0 을 적으면 «안 나갔다»가 된다(AC-9). «글처럼 맞춘다»는 **아는 것에만** 적용된다. */
       void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
         costUsd: 0, failKind: "http", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
       return { ok: false, reason: `타입캐스트 합성 실패(HTTP ${resp.status}) ${t.slice(0, 140)}`, costUsd: 0, httpStatus: resp.status };
@@ -155,9 +156,10 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
         const dl = await fetch(dlUrl, { signal: AbortSignal.timeout(20_000) });
         if (!dl.ok) {
           /* 🔴 [2026-09-21 B · drizzle/0084] **합성은 끝났는데 우리가 못 받아 왔다** — 영상 `download_failed` 와 같은 자리다.
-             타입캐스트는 이미 만들었으니 **확실히 청구된다**. 금액을 아는 자리라 숫자를 적는다. */
+             타입캐스트는 이미 만들었으니 **확실히 청구된다**. 글자 수로 금액을 **계산할 수 있다.**
+             ✅ 2026-09-21 사장님 결재 «실패도 글처럼» ⇒ 아는 금액이라 `costUsd` 에 넣어 **상한을 먹인다**. */
           void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
-            costUsd: 0, failKind: "download_failed", costUsdMaybe: chars * TYPECAST_USD_PER_CHAR, ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+            costUsd: chars * TYPECAST_USD_PER_CHAR, failKind: "download_failed", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
           return { ok: false, reason: `타입캐스트 오디오 다운로드 실패(HTTP ${dl.status})`, costUsd: 0, httpStatus: dl.status };
         }
         buf = Buffer.from(await dl.arrayBuffer());
