@@ -59,6 +59,18 @@ const readCode = (p) => (AC_STRIP ? read(p) : stripComments(read(p)));
 const inFile = (p, re) => re.test(readCode(p));
 const anyFile = (ps, re) => ps.filter((p) => inFile(p, re));
 
+/* ═══ 🔴 **«없다»를 말하려면 «봤다»부터 말해야 한다**(2026-09-22 C · AC-217) ═══
+   `verify-experiment-holds` 로 이 자를 재니, **제품을 통째로 비운 나무에서도** 두 줄이 «닫힘»이었다:
+     · `lib/channel-registry.ts 정본 통합` — `!inFile(…, /connectMethodOf/)` 가 **부정형**이라
+       그 파일이 **비어도 참**이 된다(AC-121 «없어야 한다»는 대상을 못 찾아도 통과한다).
+     · `E3 티켓 한 화면` — `existsSync(…)` 만 봐서 **빈 파일도 «있다»**가 된다.
+   🔴 둘 다 «찾았다»가 아니라 **«못 찾았다»를 통과로 쓴 것**이다(AC-141 ②).
+   ⇒ 아래 둘을 쓴다. 파일을 **실제로 읽었을 때만** 판정하고, 못 읽었으면 **false**(= 안전한 쪽으로 틀린다). */
+/** 그 파일을 실제로 읽었나 — 없거나 비었으면 false. */
+const alive = (p) => readCode(p).trim().length > 0;
+/** 🔴 «그 파일에 그 패턴이 **없다**» — **읽은 파일에 대해서만** 참이다. */
+const notInFile = (p, re) => alive(p) && !inFile(p, re);
+
 const results = [];
 /** 한 줄이 몇 «칸»인가 — 묶음 행(접근성 6·팀 4·트레이 2·레지스트리 2·고지 4)은 한 줄이 여러 칸이다.
  *  🔴 칸 수를 안 달면 줄을 세는 것과 칸을 세는 것이 갈려 분모가 또 흔들린다(오늘 «64·66·67» 로 세 번 흔들렸다). */
@@ -250,7 +262,7 @@ const THREE = [
   { name: "`lib/channel-registry.ts` 정본 통합", rows: 2,
     check: () => {
       const has = existsSync("lib/channel-registry.ts");
-      const guessGone = !inFile("lib/publish/contract.ts", /connectMethodOf/);
+      const guessGone = notInFile("lib/publish/contract.ts", /connectMethodOf/);
       return has && guessGone ? ["닫힘", "표 한 곳 + 추측 폴백 제거(모르면 null)"] : ["🟠 일부", `표 ${has} 추측제거 ${guessGone}`];
     } },
   { name: "고지 축(유튜브 유료 프로모션·파트너십 라벨·분기 재확인·쇼핑 태그)", rows: 4,
@@ -292,7 +304,7 @@ const THREE_REST = [
   ["A6 틱톡", () => [yes(inFile("lib/publish/index.ts", /tiktok:\s*publishToTiktok/)), "tiktok.ts"]],
   ["A7 페북릴스/롱폼/X영상(한 칸에 셋)", () => {
     const fb = inFile("lib/publish/index.ts", /facebook_reels:/), yl = inFile("lib/publish/index.ts", /youtube_long:/);
-    const xv = !inFile("lib/publish/x.ts", /x_video_not_supported/);
+    const xv = notInFile("lib/publish/x.ts", /x_video_not_supported/);
     const n = [fb, yl, xv].filter(Boolean).length;
     return [n === 3 ? "닫힘" : n ? "🟠 일부" : "열림", `페북릴스 ${fb} · 롱폼 ${yl} · X영상 ${xv}(x.ts 가 정직하게 막는다) = ${n}/3` /* 🔴 split 안 준다 — 이건 **한 칸 안의 셋**이지 세 칸이 아니다(칸 수와 내역은 다른 것) */];
   }],
@@ -347,7 +359,7 @@ const THREE_REST = [
   ["B4 장소 카드", () => {
     const block = inFile("lib/blocks.ts", /place.: . name: string/);
     const runner = inFile("runner/lib/plan.mjs", /장소 카드는 아직 못 넣어서/);
-    const notForced = !inFile("lib/writing-contracts.ts", /visualMin: .[^}]*place/);
+    const notForced = notInFile("lib/writing-contracts.ts", /visualMin: .[^}]*place/);
     return [yes(block && runner && notForced), block ? `블록 ${block} · 러너 링크대체 ${runner} · visualMin 에 안 넣음 ${notForced}` : "0건"];
   }],
   /* [R8CLOSE §B5 · B2 2026-09-16] 🔴 **낱말로 세면 주석만 있어도 «닫힘»이 된다**(AC-59).
@@ -491,7 +503,7 @@ const THREE_REST = [
       reads && used ? "referral.ts:109 activePromotions(\"referral\") 로 이벤트 표를 읽고 referralRewardCoins() 를 쓴다(없으면 0)"
         : `이벤트 표를 읽나 ${reads} · 그 값을 쓰나 ${used}`];
   }],
-  ["E3 티켓 한 화면", () => [yes(existsSync("public/ops/cs.html")), "public/ops/cs.html"]],
+  ["E3 티켓 한 화면", () => [yes(alive("public/ops/cs.html")), "public/ops/cs.html"]],   /* 🔴 존재만 보면 **빈 파일도 «있다»** 가 된다(AC-217) */
   ["E4 AM↔AC 코인 이전", () => [yes(inFile("netlify/functions/coin-transfer.ts", /amDebit/)), "coin-transfer → am-bridge amDebit (칸12 에서 이리로 옮김)"]],
   /* 🔴 [2026-09-16 · B] 보는 자리를 고쳤다 — 원래 `lib/am-bridge.ts`(AM↔AC 코인 다리)를 보고 있었는데 **거기가 아니다.**
      정본 동기화는 «DB 오버레이를 `lib/ai-models.ts` 로 되돌리는 PR»이라 그 코드는 `lib/ai-models-sync.ts` 에 산다.
@@ -622,5 +634,19 @@ const _blind = results.filter((r) => ["고객", "운영"].includes(axisOf(r.row)
 console.log(`   닫힘 가운데 ${_blind.length}칸은 «서버에 있다»까지만 보고 셌어요 — 화면에 실제로 보이는지는 이 숫자가 말해 주지 않아요.`);
 console.log(`   (어느 칸인지·왜 그런지는 docs/active/2026-09-16-audit-measure-review.md §8·§12)`);
 
+}
+
+/* ═══ 🔴 **이 자는 «점수판»이라 늘 0 으로 끝난다 — 그래서 «내가 읽기는 했나»를 스스로 말한다**(2026-09-22 C · AC-217) ═══
+   `verify-experiment-holds` 로 재 보니, **제품을 통째로 비운 나무에서도** 이 자는 종료코드 0 이었다.
+   칸을 고쳐 «닫힘»이 안 나오게 해도, **점수판이 늘 0 이면 «이 자가 돌았다»와 «이 자가 아무것도 못 봤다»가 같은 글자**다.
+   ⇒ 실제로 **읽은 제품 파일 수**를 세고, 너무 적으면 **종료코드 2(못 쟀음)** 로 멈춘다. 초록으로 뭉개지 않는다(AC-9·AC-141 ②). */
+{
+  const PROBE = ["lib/channel-registry.ts", "lib/publish/contract.ts", "public/js/ui.js", "db/schema.ts", "netlify/functions/pieces.ts"];
+  const aliveN = PROBE.filter((p2) => { try { return readCode(p2).trim().length > 0; } catch { return false; } }).length;
+  console.log(`   ■ 내가 읽은 제품 파일: 표본 ${PROBE.length}개 중 **${aliveN}개**가 살아 있다`);
+  if (aliveN < 2) {
+    console.error(`⊘ 못 쟀어요 — 표본 ${PROBE.length}개 중 ${aliveN}개만 읽혔다. 제품을 못 보고 낸 점수판은 점수가 아니다.`);
+    process.exit(2);
+  }
 }
 process.exit(0);

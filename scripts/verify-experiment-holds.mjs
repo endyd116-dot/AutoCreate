@@ -56,6 +56,22 @@ const TIMEOUT_MS = 60_000;
 
 const argOnly = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7);
 const SELFTEST = process.argv.includes("--selftest");
+/** 🔴 `--grow` — «모수가 **늘어야 할 때** 안 느나»(메인 물음 2026-09-22 · B 가 `subtitleFont` 로 밟은 병).
+ *  AC-141 은 «모수 0 을 통과로 쓰지 마라»인데, **모수가 안 변한 것**은 그 축이 못 잡는다.
+ *  ⇒ 팔 하나를 더 짓는다: **제품에 새 화면 한 장을 심은 판**. 자의 출력이 **글자 하나도 안 변하면**
+ *     그 자는 «새로 생긴 것»을 안 센다 — 그게 이 모드가 찍는 것이다. */
+const GROW = process.argv.includes("--grow");
+const GROW_FILE = "public/app/zz-grown.html";
+const GROW_BODY = [
+  "<!doctype html>", "<html lang=\"ko\"><head><meta charset=\"utf-8\"><title>새 화면 · AutoCreate</title>",
+  "<link rel=\"stylesheet\" href=\"/css/ac.css?v=23\"></head><body>",
+  "<div class=\"shell\"><main class=\"page\" id=\"page\">",
+  "<div id=\"list\"><div class=\"group\"><span class=\"sk\" style=\"height:40px\"></span></div></div>",
+  "</main></div><script src=\"/js/ui.js?v=29\"></script>",
+  "<script>(async () => { await UI.boot(\"schedule\");",
+  "  const r = await UI.api(\"/api/zz-grown\"); if (!r.ok) { UI.toast(\"불러오지 못했어요\"); return; }",
+  "})();</script></body></html>",
+].join("\n");
 
 /* ── 그대로 두는 것(비우지 않는다) ─────────────────────────────────────────── */
 const KEEP_EXACT = new Set(["package.json", "package-lock.json", "tsconfig.json"]);
@@ -138,7 +154,9 @@ const SPECIMENS = {
 };
 
 /* ══════════════ 돌린다 ══════════════ */
-console.log(`🔴 «이 실험이 성립하나» — 제품을 비운 팔에서도 초록인 자를 찾는다 · ${new Date().toISOString()}`);
+console.log(GROW
+  ? `🔴 «모수가 **늘어야 할 때** 느나» — 새 화면 한 장을 심고 출력이 움직이는지 본다 · ${new Date().toISOString()}`
+  : `🔴 «이 실험이 성립하나» — 제품을 비운 팔에서도 초록인 자를 찾는다 · ${new Date().toISOString()}`);
 console.log("═".repeat(118));
 
 let files;
@@ -174,6 +192,12 @@ if (!rulers.length && !SELFTEST) { console.error("⊘ 못 쟀어요 — 잴 자�
 const t0 = Date.now();
 const armA = buildArm("A-control", files, false);
 const armB = buildArm("B-blank", files, true);
+let armC = null;
+if (GROW) {
+  armC = buildArm("C-grown", files, false);
+  mkdirSync(path.join(armC, path.dirname(GROW_FILE)), { recursive: true });
+  writeFileSync(path.join(armC, GROW_FILE), GROW_BODY);
+}
 if (SELFTEST) for (const [rel, body] of Object.entries(SPECIMENS)) { for (const d of [armA, armB]) { mkdirSync(path.join(d, path.dirname(rel)), { recursive: true }); writeFileSync(path.join(d, rel), body); } }
 console.log(`   팔 둘을 지었다(${((Date.now() - t0) / 1000).toFixed(1)}초) — A=대조군 · B=제품을 비운 판`);
 {
@@ -198,6 +222,22 @@ for (const rel of targets) {
   const a = runIn(armA, rel);
   if (a.why) { rows.push({ rel, mark: "⊘", say: `대조군에서 ${a.why}` }); continue; }
   if (a.code !== 0) { rows.push({ rel, mark: "⊘", say: `대조군이 초록이 아니다(종료코드 ${a.code}) — **이 자로는 못 잰다**` }); continue; }
+  if (GROW) {
+    /* 🔴 «늘어야 할 때 느나» — 새 화면을 심은 팔과 대조군의 출력을 맞댄다.
+       글자 하나도 안 변하면 그 자는 **새로 생긴 것을 안 센다**(B 가 `subtitleFont` 로 밟은 병 · 메인 물음 2026-09-22). */
+    const c = runIn(armC, rel);
+    if (c.why) { rows.push({ rel, mark: "⊘", say: `늘린 팔에서 ${c.why}` }); continue; }
+    const moved = noClock(a.out) !== noClock(c.out);
+    /* 🔴 **이것은 판정이 아니다 — 세어서 나란히 놓는 것이다**(AC-163 ③).
+       첫 판은 «안 움직이면 ✗» 로 찍었다가 바로 거짓 빨강을 냈다: `verify-r8-deadends` 는 `public/**` 을 읽지만
+       **화면을 세는 자가 아니라 «이름 붙은 검사 140개»를 도는 자**라, 빈 화면 한 장이 늘어도 움직일 까닭이 없다.
+       ⇒ «안 움직였다»는 **① 새것을 안 센다** 또는 **② 애초에 세는 자가 아니다** 둘 중 하나이고,
+          🔴 **이 모드로는 그 둘을 못 가른다.** 그래서 **사람이 보라고 찍기만** 하고 등급에 안 넣는다(⊘). */
+    rows.push({ rel, mark: moved ? "✓" : "⊘",
+      say: moved ? `새 화면 한 장을 심으니 **출력이 움직였다** — 이 자는 새것을 센다`
+        : `움직임 0 — **새것을 안 세거나**, 애초에 «세는 자»가 아니다. 🔴 **이 모드로는 못 가른다**(사람이 보라)` });
+    continue;
+  }
   const b = runIn(armB, rel);
   if (b.why) { rows.push({ rel, mark: "⊘", say: `빈 팔에서 ${b.why}` }); continue; }
   if (b.code === 0) {
@@ -252,4 +292,4 @@ if (SELFTEST) {
 }
 
 rmSync(ARENA, { recursive: true, force: true });
-process.exit(bad.length ? 1 : 0);
+process.exit(GROW ? 0 : bad.length ? 1 : 0);   /* 🔴 `--grow` 는 **보고서**다 — 판정하지 않는다(거짓 빨강을 바로 냈다) */
