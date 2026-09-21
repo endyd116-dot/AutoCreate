@@ -36,6 +36,10 @@ export const TEXT_CHANNELS: ReadonlySet<string> = new Set(TEXT_CHANNEL_KEYS);
 
 export interface AccountRow {
   id: number; channel: string; handle: string; displayName: string | null;
+  /** [AC-201] 러너가 **실제로 본** 블로그 주소(`seen`)와 고객이 «맞다»고 한 주소(`confirmed`).
+   *  🔴 **본 적이 없으면 키 자체가 없다**(«{}» 를 내보내면 화면이 빈 칸을 그린다 · AC-9).
+   *  `matchesHandle` — `seen` 이 `handle` 과 같은가. `null` = 못 쟀다. */
+  identity?: { seen?: string; confirmed?: string; matchesHandle: boolean | null };
   /** [P1R8 §5.3] 프로필 사진(https) — **없으면 null**. 예전엔 타입부터 `null` 로 굳어 있어 값이 들어갈 자리가 없었다(전수조사 ④7). */
   avatar: string | null;
   status: string;
@@ -103,6 +107,11 @@ export const ACCOUNT_SELECT = sql`
   a.last_post_at, a.last_error_kind, a.group_id, a.persona_id, a.proxy_url, a.browser_profile_key, a.monetize, a.avatar_url,
   a.quality_tier, a.text_style_id,   /* [R10-9 · R10-4] 계정 기본 등급 · 계정에 걸어 둔 스타일(drizzle/0035) — 없으면 NULL(«안 고름») */
   a.reader,                          /* [R11-8] 이 계정의 독자(drizzle/0081) — NULL 이면 채널 계약 값 그대로 */
+  /* [AC-201] 계정 신원(drizzle/0091) — 러너가 본 블로그 주소와 고객이 확인해 준 주소.
+     🔴 to_jsonb 로 꺼낸다: 이 SELECT 는 **여덟 자리가 지나가는 목**이라(0081 이 셌다) 컬럼이 없으면 42703 으로
+        공장이 통째로 선다. 이렇게 쓰면 컬럼이 없는 순간에도 그냥 NULL 이고 화면만 한 칸 비운다.
+     ⚠️ 이 주석 안에 백틱을 쓰지 마라 — 여기는 sql 템플릿 **안**이라 백틱 하나가 템플릿을 끊는다(방금 겪었다). */
+  to_jsonb(a) -> 'identity' AS identity,
   (SELECT g.name FROM account_groups g WHERE g.id = a.group_id AND g.tenant_id = a.tenant_id) AS group_name,
   a.created_at, a.opened_at, a.warmup_off,
   /* 워밍업(§2.6)이 보는 «이번 주 몇 건 올렸나» — 주는 **KST 월요일 시작**이다(DESIGN §13.5 · UTC 로 세면 월요일 새벽이 지난주가 된다). */
@@ -130,6 +139,21 @@ export function toAccountRow(r: Row): AccountRow {
        «저장은 200 인데 새로고침하면 사라졌다»). 칸이 `date` 라 `YYYY-MM-DD` 열 자만 내보낸다(시각이 붙으면 날이 갈린다 · §4.5b). */
     openedAt: r.opened_at ? String(r.opened_at).slice(0, 10) : null,
   };
+  /* [AC-201] 🔴 «우리가 실제로 본 블로그 주소»와 «고객이 확인해 준 주소» — 화면이 «이 주소가 맞나요»를 물으려면
+     본 것을 보여 줘야 한다. 🔴 **본 것이 없으면 키 자체를 안 싣는다**(«{}» 를 내보내면 화면이 빈 칸을 그린다 · AC-9).
+     `confirmed` 는 있는데 `observed` 와 같으면 «확인됨»이고, 다르면 화면이 «다시 확인해 주세요»를 띄울 수 있다. */
+  {
+    const idn = (r.identity && typeof r.identity === "object" ? r.identity : {}) as Record<string, unknown>;
+    const seen = String(idn.posted ?? idn.observed ?? "").trim();
+    const conf = String(idn.confirmed ?? "").trim();
+    if (seen || conf) {
+      o.identity = {
+        ...(seen ? { seen } : {}),
+        ...(conf ? { confirmed: conf } : {}),
+        matchesHandle: seen ? seen.toLowerCase() === String(r.handle ?? "").replace(/^@/, "").trim().toLowerCase() : null,
+      };
+    }
+  }
   /* 🔴 워밍업(§2.6) — **`dailyCap` 을 유효값으로 바꿔서 내보낸다.**
      캐던스를 보는 자리가 셋(director·director-auto·account-health)이라 게이트를 하나 더 만들면 넷이 된다.
      대신 **게이트가 읽는 값 자체**를 유효값으로 만들면 그 셋이 코드를 안 고쳐도 워밍업을 따른다.

@@ -15,7 +15,7 @@
  *   🔴 dryRun(카나리·검증)은 **임시저장까지만** 한다. 발행 버튼을 누르지 않는다.
  */
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
-import { BLOCK, ensureNaverLogin } from "../lib/auth-naver.mjs";   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
+import { BLOCK, ensureNaverLogin, readMyBlogId, judgeBlogIdentity } from "../lib/auth-naver.mjs";   // [AC-201] 🔴 handle 을 믿지 않고 «실제로 어느 블로그인가»를 읽어 댄다   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
 import { createFormatState, markFormatDirty, breakFormatBeforePara, measureFormatBleed, bleedVerdict, paragraphVerdict } from "../lib/format-bleed.mjs";
 
 const B_TITLE = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
@@ -1159,10 +1159,41 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
      그 앞(로그인·에디터 진입)에서 난다 — 2026-09-14 로컬 왕복에서 FAIL.png 가 안 남아 그 사실이 드러났다.
      «무엇에 막혔나»는 화면을 봐야 안다(AM 눈검사 규율). */
   let files = null;
+  /* [AC-201] 계정 신원 판정 — 성공·실패 어느 길로 나가도 보고에 실어야 서버가 `accounts.identity` 를 갱신한다. */
+  let identity = null;
+  const notesEarly = [];
   try {
     // ① 로그인 — 쿠키가 살아 있으면 건너뛴다(공용 lib/auth-naver.mjs).
     await ensureNaverLogin(page, account);
     await shot(page, shotKey, "00-로그인확인");
+
+    /* ①-b 🔴 **«지금 내가 어느 블로그에 쓰고 있나»를 읽어 댄다**(AC-201 · 2026-09-21 B2).
+       이 아래 `openEditor` 는 `blog.naver.com/{handle}/postwrite` 로 간다 — **handle 을 그대로 믿는다.**
+       그 아이디가 틀리면 네이버는 404 를 주지 않고 **로그인한 사람의 블로그로 조용히 데려간다**
+       (AM 실사고: 원장 `qj_academy`(없음) → 자사 `with_walk_on_office` 로 리다이렉트 → 남의 블로그에 발행).
+       🔴 **한 글자도 쓰기 전**에 여기서 댄다 — 쓰고 나서 알면 이미 늦다(이 자리는 되돌릴 수 없다).
+       🔴 **못 쟀으면 그냥 간다**(§9 · AC-9). 막는 것은 «myblog 리다이렉트로 다른 블로그를 봤을 때» 하나뿐이고,
+          그건 게이트가 아니라 **되돌릴 수 없는 동작의 확인**이다(CLAUDE §9 «이 규칙 밖인 것»). */
+    const seenBlog = await readMyBlogId(page);
+    identity = judgeBlogIdentity({ handle: blogId, observed: seenBlog.blogId, via: seenBlog.via, confirmed: account.expectBlogId ?? null });
+    if (seenBlog.why) identity.readWhy = seenBlog.why;
+    await shot(page, shotKey, "00b-계정확인");
+    if (identity.kind === "mismatch") {
+      /* 🔴 `errorKind` 를 계약 7종 **밖**으로 낸다(`proxy`·`parse`·`format_bleed` 와 같은 부류) —
+         계정 잘못이 아니므로 «다시 로그인하세요»로 밀면 **거짓 안내**가 된다(AC-10). 서버가 고객에게 한 번 묻는다. */
+      /* 🔴 **던지는 오류에 판정을 붙여 보낸다.** 안 붙이면 서버는 «달랐다»만 알고 **무엇과 달랐는지**를 모른다 —
+         그러면 고객에게 내밀 주소가 없어서 «이 주소가 맞나요»를 물을 수가 없고, 확인 단추도 누를 값이 없다.
+         🔴 불일치일 때가 관찰값이 **가장 필요한** 순간이다(성공했을 때가 아니라). */
+      throw Object.assign(
+        BLOCK("identity_mismatch",
+          `장부에는 «${identity.want}» 인데 지금 로그인된 블로그는 «${identity.got}» 예요 — 다른 블로그에 올릴 뻔해서 멈췄어요.`),
+        { identity });
+    }
+    if (identity.kind === "unmeasured") {
+      notesEarly.push(identity.got
+        ? `이 계정의 블로그 주소를 확실히는 못 쟀어요(본 것: ${identity.got})`
+        : "이 계정의 블로그 주소를 못 쟀어요 — 장부에 적힌 주소로 올렸어요");
+    }
 
     // ② 에디터
     const ed = await openEditor(page, blogId, shotKey);
@@ -1186,7 +1217,8 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
     await shot(page, shotKey, "04-스윕후", true);
 
     // ⑤ 발행 또는 임시저장
-    const notes = [];
+    /* 🔴 `notesEarly`(로그인 직후 계정 신원 판정)를 **여기서 합친다** — 따로 두면 그대로 버려진다(AC-69). */
+    const notes = [...notesEarly];
     /* 🔴 잔재는 **세 갈래**로 적는다 — «못 쟀다»를 «깨끗했다»로 바꾸지 않는다(AC-9). */
     if (!residue.measured) notes.push("앞 글 잔재를 못 쟀어요(에디터를 읽지 못했어요)");
     else if (residue.cleared) {
@@ -1260,9 +1292,15 @@ export async function run({ ctx, job, plan, shotKey, dryRun, recipe }) {
       throw BLOCK("format_bleed", verdict.reason);
     }
 
-    if (dryRun) { await saveDraft(page, ed, shotKey); return { dryRun: true, notes, formatMarks }; }
+    /* 🔴 `identity` 를 **성공에도 싣는다**(AC-201) — 「맞았다」도 사실이고, 서버가 그걸 `accounts.identity.observed`
+       로 적어 둬야 «고객이 확인해 준 주소»가 쌓인다. 실패 때만 보내면 장부는 영영 안 배운다. */
+    if (dryRun) { await saveDraft(page, ed, shotKey); return { dryRun: true, notes, formatMarks, ...(identity ? { identity } : {}) }; }
     const out = await publishNow(page, ed, plan.tags, blogId, shotKey, job.payload?.title, job.payload?.options?.category);
-    return { ...out, notes, formatMarks };
+    /* 🔴 발행 뒤 주소에서 회수한 **실제 blogId** 가 가장 센 증거다 — 그 글이 실제로 그리로 갔다는 뜻이라
+       리다이렉트 판정보다 확실하다. 있으면 그것으로 `identity.got` 을 덮어쓴다(AM `realBlogId` 되보고와 같은 뜻). */
+    const postedId = (String(out?.externalUrl ?? "").match(/blog\.naver\.com\/([^/?#]+)\//) || [])[1] || null;
+    const idOut = identity ? { ...identity, ...(postedId ? { posted: postedId } : {}) } : (postedId ? { kind: "unmeasured", want: blogId, got: null, via: null, posted: postedId } : null);
+    return { ...out, notes, formatMarks, ...(idOut ? { identity: idOut } : {}) };
   } catch (e) {
     await failShot(page, shotKey);
     throw e;

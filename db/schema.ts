@@ -1233,3 +1233,14 @@ export const aiUsageR13 = {
    */
   costUsdMaybe: numeric("cost_usd_maybe", { precision: 10, scale: 6 }),
 };
+/* === AC-201 · B2 2026-09-21 · 계정 신원(교차 발행 방지) ===
+ *   ⚠️ 🔴 **`db/schema.ts` 는 B 소유다**(CLAUDE §4.4) — B2 가 손댔으니 머지 때 겹치는지 봐 주세요(보고에 적었습니다).
+ *   테이블 정의를 고치지 않고 **컬럼 이름 맵**만 더한다(`accountsR8` 선례) — `accounts` 정의를 B2 가 다시 쓰면
+ *   다른 라운드 정의를 덮어쓸 위험이 있고 §4.4 가 금한 것이 정확히 그것이다.
+ *   DDL: drizzle/0091-ac201-account-identity.sql (적용 완료 2026-09-21).
+ */
+export const accountsAc201 = {
+  /** jsonb — `{ observed, observedAt, observedVia, posted, confirmed, confirmedAt, confirmedBy, askedAt }`.
+   *  🔴 `{}` = «아직 모른다»이지 «맞다»가 아니다. `confirmed` 가 있으면 claim 때 `expectBlogId` 로 러너에 내려간다. */
+  identity: "identity",
+} as const;

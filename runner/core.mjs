@@ -215,7 +215,7 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     const out = await handler.run({ ctx, job, plan, token, shotKey, dryRun, recipe });
 
     // 🔴 shotKey 를 함께 돌려준다 — 카나리가 이 키를 하트비트에 실어야 운영이 «깨진 화면»을 찾아간다(없으면 canary_runs.shot_key 가 늘 비었다).
-    if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}) };
+    if (out?.dryRun) return { ok: true, dryRun: true, shotKey, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}), ...(out.identity ? { identity: out.identity } : {}) };
     /* 🔴 **`publish.retract` 는 `publish.` 로 시작한다** — 아래 발행 분기보다 **먼저** 가른다.
        안 그러면 «올리기는 했는데 글 주소를 회수하지 못했어요»라는 엉뚱한 실패가 난다(내리는 잡에 외부 주소가 있을 리 없다).
        접두사로 종류를 가르는 코드에 새 잡을 끼울 때 늘 생기는 함정이라 여기 적어 둔다. */
@@ -226,7 +226,9 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
       if (!out?.externalUrl) return { ok: false, errorKind: "unknown", detail: "올리기는 했는데 글 주소를 회수하지 못했어요." };
       /* [R9-2/5] 🔴 서식은 **사실**이라 구조로 보낸다 — `notes` 에 담으면 서버가 버린다(`lib/runner-jobs.ts` RunnerReportOk 주석).
          문장은 서버·화면이 만든다. 러너 판(zip)에 화면 문구를 묶지 않는다. */
-      return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}) };
+      /* [AC-201] 🔴 `identity` 도 **구조로** 올린다 — `notes` 에 담으면 서버가 버린다(위 주석과 같은 이유).
+         서버는 이걸 `accounts.identity.observed` 에 적어 «이 계정의 진짜 블로그 주소»를 배운다. */
+      return { ok: true, externalUrl: out.externalUrl, channelRef: out.channelRef, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}), ...(out.identity ? { identity: out.identity } : {}) };
     }
     if (CAPTURE_KINDS.has(job.kind)) {
       /* 🔴 `shotKey` 를 **안 싣는다** — 이 잡에서 우리 `_shots` 폴더에 남는 것은 **없어야** 한다(남의 글이다).
@@ -262,6 +264,10 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     const result = { ok: false, errorKind, detail: cleanMsg(e) };
     // 실패 스냅샷은 채널 모듈이 이미 찍었다 — 그 키를 보고에 실어 사람이 화면을 볼 수 있게 한다.
     result.shotKey = shotKey;
+    /* [AC-201] 🔴 채널이 오류에 **붙여 보낸 구조값**은 그대로 올린다(`detail` 문장으로 뭉개지 않는다).
+       지금은 `identity` 하나다 — «다른 블로그였다»는 서버가 고객에게 **무엇과 달랐는지**를 보여 줘야
+       확인 단추가 누를 값을 갖는다. 문장에서 주소를 다시 파싱하는 짓을 하지 않으려고 이 줄이 있다. */
+    if (e?.identity) result.identity = e.identity;
     return result;
   } finally {
     /* 🔴 컨텍스트를 닫기 **전에** 계측값을 걷는다(닫으면 CDP 세션이 사라진다).

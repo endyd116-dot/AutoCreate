@@ -7,6 +7,7 @@
  *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
  *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl?, defaultTier?, defaultStyleId?, reader?, openedAt? }
+ *                                          🔴 [AC-201] `confirmBlogId?` — «이 블로그 주소가 맞아요»(러너가 실제로 본 주소만 · null = 승인 취소)
  *     · 🔴 [2026-09-21 · B] `openedAt` = **이 계정을 만든 날**(YYYY-MM-DD · `null`·`""` = 모름으로 되돌리기).
  *       워밍업이 «우리와 연결한 날» 대신 **이 날**을 먼저 본다(`lib/warmup.ts:57`) — 3년 된 블로그를 어제 연결해도 1주차로 묶이지 않게.
  *       🔴 읽는 곳이 **6곳**인데 **쓰는 길이 0곳**이었다(`scripts/verify-write-path-missing.mjs` 가 잡았다 · 라이브 92계정 전부 NULL).
@@ -338,9 +339,31 @@ export default async (req: Request): Promise<Response> => {
         }
         sets.push(sql`monetize = ${jsonb(m)}`);
       }
+      /* [AC-201 · B2 2026-09-21] 🔴 **«이 계정 주소가 맞아요»** — 러너가 «장부와 다른 블로그»를 보고 멈췄을 때
+         고객이 한 번 눌러 주는 자리. 이걸 안 만들면 «한 번 묻기»가 **영원히 묻기**가 된다(§4.8 «고르는 UI 까지가 기능»).
+         🔴 러너가 본 것(`identity.observed`/`posted`)을 **그대로** 승인하는 것만 받는다 — 임의 문자열을 받으면
+            확인이라는 절차 자체가 무의미해지고, 오타 하나가 남의 블로그를 «승인»해 버린다.
+         🔴 `confirmBlogId: null`(또는 "") = **승인 취소** — 되돌릴 길을 같이 둔다(§9-③). 그러면 다음 잡에서 다시 묻는다. */
+      if (b.confirmBlogId !== undefined) {
+        const [row] = await q(sql`SELECT to_jsonb(a) -> 'identity' AS idn FROM accounts a WHERE tenant_id = ${tid} AND id = ${id} LIMIT 1`);
+        const prev = (row?.idn && typeof row.idn === "object" ? row.idn : {}) as Record<string, unknown>;
+        const want = b.confirmBlogId === null ? "" : String(b.confirmBlogId).trim();
+        if (!want) {
+          const cleared = { ...prev }; delete cleared.confirmed; delete cleared.confirmedAt; delete cleared.confirmedBy;
+          sets.push(sql`identity = ${jsonb(cleared)}`);
+        } else {
+          const seen = [String(prev.observed ?? "").trim(), String(prev.posted ?? "").trim()].filter(Boolean);
+          if (!seen.includes(want)) {
+            return badRequest("확인할 수 있는 주소는 저희가 실제로 본 주소예요. 계정 화면에 보이는 주소로 다시 눌러 주세요.", "confirmBlogId");
+          }
+          sets.push(sql`identity = COALESCE(identity, '{}'::jsonb) || ${jsonb({ confirmed: want, confirmedAt: new Date().toISOString(), confirmedBy: `user:${auth.user.uid}` })}`);
+        }
+      }
       if (!sets.length) return badRequest("바꿀 값이 없어요.");
       await q(sql`UPDATE accounts SET ${sql.join(sets, sql`, `)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${id}`);
       if (mon) { const [chk] = await q(sql`SELECT jsonb_typeof(monetize) AS t FROM accounts WHERE id = ${id}`); if (chk?.t !== "object") console.error("[accounts-update] monetize jsonb_typeof !== object", chk); }
+      /* 🔴 PITFALLS #1 — 「쓴 직후 `jsonb_typeof()` 확인까지가 쓰기다」. identity 도 같은 규율을 탄다. */
+      if (b.confirmBlogId !== undefined) { const [chk] = await q(sql`SELECT jsonb_typeof(identity) AS t FROM accounts WHERE id = ${id}`); if (chk?.t !== "object") console.error("[accounts-update] identity jsonb_typeof !== object", chk); }
       await writeAudit({ tenantId: tid, action: "account_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `account:${id}`, detail: { keys: Object.keys(b).filter((k) => k !== "id" && k !== "monetize"), monetizeKeys: mon ? Object.keys(mon) : [] } });
       return json({ ok: true, account: await getAccount(tid, id) });
     }
