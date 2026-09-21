@@ -444,7 +444,7 @@
       { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatar: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
     ] : [
       /* [AC-187] `identity` — 서버 lib/accounts.ts:146 이 만드는 그 모양 그대로({ seen?, confirmed?, matchesHandle }) · 🔴 본 적이 없으면 **키 자체가 없다**. */
-      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701,
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701, proxyUrl: "http://proxy-kr-01.example.com:8080",   /* [AC-189] 가려서 준 값(아이디·비밀번호는 서버만 안다) — 화면이 이걸 되보내면 안 된다 */
         ...(addrKnob === "ask" ? { identity: { seen: "blog.naver.com/cook-a-2024", matchesHandle: false } }
           : addrKnob === "ok" ? { identity: { seen: "blog.naver.com/cook-a-2024", confirmed: "blog.naver.com/cook-a-2024", matchesHandle: false } }
           : addrKnob === "again" ? { identity: { seen: "blog.naver.com/cook-a-new", confirmed: "blog.naver.com/cook-a-2024", matchesHandle: false } } : {}) },
@@ -997,7 +997,11 @@
     "accounts-remove": (b) => { S.accounts = S.accounts.filter((a) => a.id !== Number(b.id)); return { ok: true }; },
     "accounts-update": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
       for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours", "defaultTier", "defaultStyleId"]) if (b[k] !== undefined) a[k] = b[k];   /* [R9R10-A] 등급·스타일 기본값은 계정마다 */
-      if (b.proxyUrl !== undefined) a.proxyUrl = b.proxyUrl ? b.proxyUrl.replace(/\/\/([^@]+)@/, "//****@") : undefined;
+      /* [AC-189] 🔴 **서버와 같은 법으로 가린다**(lib/creds-crypto.ts maskProxyUrl — 아이디·비밀번호를 «****» 로 바꾸는 게 아니라
+         **통째로 떼고** `프로토콜//호스트:포트` 만 남긴다). 모의가 «****@» 로 가리면 화면이 그걸 되보내도 티가 안 나서,
+         **저장 한 번에 인증이 날아가던 사고**(AC-189)를 모의로는 영영 못 본다. */
+      if (b.proxyUrl !== undefined) { const v = String(b.proxyUrl || "").trim();
+        a.proxyUrl = v ? (() => { try { const u = new URL(v); return `${u.protocol}//${u.hostname}${u.port ? ":" + u.port : ""}`; } catch { return v; } })() : undefined; }
       if (b.monetize) { const m = b.monetize; if (m.coupangAccessKey && m.coupangSecretKey) a.monetize.coupang = true; if (m.adpostMediaId) a.monetize.adpost = true; if (m.adsensePub) a.monetize.adsense = true; }
       /* [AC-187 · AC-201] «이 주소가 맞아요» — 🔴 실서버와 **같은 규율**로 흉내 낸다(accounts.ts:347):
          우리가 실제로 본 주소(`identity.seen`)만 승인할 수 있고, 그 밖의 값은 400 이다. `null`/"" 는 승인 취소. */

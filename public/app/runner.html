@@ -58,7 +58,11 @@ function render() {
   const wait = devices.some((d) => d.status !== "online");
   if (wait && !timer) timer = setInterval(load, 5000); if (!wait && timer) { clearInterval(timer); timer = null; }
 }
-async function load() { const r = await UI.api("/api/runner-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } devices = r.devices || []; render(); loadManaged(); }
+async function load() { const r = await UI.api("/api/runner-list");
+  /* [AC-188] 🔴 큰 글자 자리(#num)도 뼈대다 — 안 치우면 «내 PC 프로그램이 …» 가 영원히 말줄임으로 남는다.
+     🔴 «꺼져 있어요»라고 지어내지 않는다 — 못 물어봤으면 «모르겠어요»가 정직하다(AC-9). */
+  if (!r.ok) { const n = UI.$("#num"); if (n) n.textContent = "지금은 모르겠어요"; UI.retryPanel("#list", load, r.error); return; }
+  devices = r.devices || []; render(); loadManaged(); }
 /* [P1R6] 관리형 러너 — 요금·가능 여부는 서버가 준다(화면 상수 0) · Starter 는 402 plan_feature 시트(UI.gate) */
 async function loadManaged() {
   const r = await UI.api("/api/managed-runner", { noGate: true }); const g = UI.$("#managed"); if (!r.ok) { g.hidden = true; return; }

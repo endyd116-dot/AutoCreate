@@ -32,7 +32,9 @@ let D = { accounts: [], channels: [] }, personas = [];
 const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
 
 async function load() {
-  const r = await UI.api("/api/accounts-list"); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; }
+  const r = await UI.api("/api/accounts-list");
+  /* [AC-188] 뼈대가 둘이라 둘 다 치운다 — 하나만 치우면 채널 칸이 계속 돈다. */
+  if (!r.ok) { const cg = UI.$("#cg"); if (cg) cg.innerHTML = ""; return UI.retryPanel("#list", load, r.error); }
   D = r; const cnt = {}; for (const a of D.accounts) cnt[a.channel] = (cnt[a.channel] || 0) + 1;
   const chs = (D.channels.length ? D.channels : Object.keys(UI.CH).map((key) => ({ key, label: UI.chLabel(key), connectMethod: "oauth", configured: false })))
     .filter((c) => c.status !== "down" || cnt[c.key]); // [R7 §4.1] 아직 안 열린 채널도 흐리게 보여 준다(숨기면 «영상이 통째로 없는» 화면이 된다 · 내려간 채널만 뺀다)
@@ -243,10 +245,10 @@ async function detailSheet(a) {
   ${addrAsk(a) ? `<div class="banner" style="margin:4px 0 8px"><span>지금 로그인된 블로그 주소가 저장된 주소와 달라 보여요 · 한 번만 확인해 주세요</span><button type="button" id="addrGo">주소 확인</button></div>`
     : addrSeen(a) && addrConfirmed(a) === addrSeen(a)
     /* 확인해 둔 주소 — 🔴 되돌릴 길을 같이 둔다(§9-③). 취소하면 다음 잡에서 다시 묻는다(서버 `confirmBlogId: null`). */
-    ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px">${UI.esc(addrSeen(a))} <span class="pill ok">확인했어요</span></span></div>
+    ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(addrSeen(a))} <span class="pill ok">확인했어요</span></span></div>
        <div style="padding:0 0 8px;text-align:right"><button type="button" class="btn ghost sm" id="addrUndo">확인 취소</button></div>`
     /* 우리가 본 주소가 저장된 주소와 같다 — 물을 것이 없다. 조용히 적기만 한다(§13.0 «설명 한 문장»). `identity` 가 없으면 한 줄도 없다(AC-9 «아직 모른다»). */
-    : addrSeen(a) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px">${UI.esc(addrSeen(a))}</span></div>` : ""}
+    : addrSeen(a) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(addrSeen(a))}</span></div>` : ""}
   ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
@@ -263,7 +265,19 @@ async function detailSheet(a) {
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">페르소나<small>이 계정이 «누구»로 쓰는지</small></div><div id="pz">${personaChips(a.personaId)}</div><button type="button" class="btn ghost sm" id="pedit" style="margin-top:8px;align-self:flex-start" hidden>고른 페르소나 고치기</button></div>
   ${isText ? `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 등급<small>이 계정 글의 기본 등급 · 글마다 바꿀 수 있어요</small></div>${UI.tierRows("tier", D.tiers, a.defaultTier || "", { noteText: D.tierNote || "" })}${a.defaultTier ? "" : '<p class="muted" style="margin:6px 0 0;font-size:12.5px">아직 안 골랐어요 · 고르기 전엔 «간단히»로 만들어요.</p>'}</div>
   <div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl">글 스타일<small>레퍼런스로 배운 모양 · 이 계정 글에 자동으로 써요</small></div><div id="wz">${wzChips()}</div>${W.recommend && W.recommend.line ? `<p class="muted" id="wzRec" style="margin:8px 0 0;font-size:12.5px;line-height:1.5">${UI.esc(W.recommend.line)}</p>` : ""}<button type="button" class="btn ghost sm" id="wzMore" style="margin-top:8px;align-self:flex-start">${W.styles.length ? "스타일 배우기 · 관리" : "글 레퍼런스로 스타일 배우기 · 코인 0"}</button></div>` : ""}
-  <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label><input class="input" id="px" value="${UI.esc(a.proxyUrl || "")}" placeholder="http://user:pass@host:port" autocomplete="off"></div>
+  ${/* 🔴 [AC-189 · C 품질자 ⑤] **저장 한 번에 프록시 아이디·비밀번호가 날아가던 자리.**
+       서버는 이 칸을 **가려서** 준다(`lib/creds-crypto.ts maskProxyUrl` — `user:pass@` 를 통째로 떼고 `http://host:port` 만).
+       화면이 그 가려진 값을 칸에 채워 두고 저장할 때 **그대로 되보내고** 있었다 ⇒ 저장을 누를 때마다
+       `proxy_url` 이 **인증 없는 주소**로 덮여, 그다음 발행부터 프록시가 401 을 맞는다(AC-172 의 제품 판).
+       🔴 고친 법: **채우지 않는다.** 지금 값은 **읽기 전용 한 줄**로 보여 주고, 칸은 «바꿀 때만» 적는 빈 칸이다.
+          비어 있으면 아예 안 보낸다(서버는 `undefined` 면 건드리지 않는다 · accounts.ts:263).
+       🔴 지우는 길은 따로 준다 — «안 보내기»만 있으면 **뗄 방법이 없어진다**(빈 칸이 «지우기»가 아니게 됐으니). */ ""}
+  <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label>
+    ${a.proxyUrl ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">지금 쓰는 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(a.proxyUrl)}</span></div>` : ""}
+    <input class="input" id="px" placeholder="${a.proxyUrl ? "바꿀 때만 새 주소를 적어 주세요" : "http://user:pass@host:port"}" autocomplete="off">
+    <div class="note">${a.proxyUrl ? "아이디·비밀번호는 저희만 보관해서 화면에는 안 보여요. 비워 두시면 지금 주소를 그대로 써요." : "안 적으셔도 돼요. 적으시면 이 계정만 그 주소로 나가요."}</div>
+    ${a.proxyUrl ? `<div style="padding:6px 0 0;text-align:right"><button type="button" class="btn ghost sm" id="pxOff">프록시 안 쓰기</button></div><div id="pxc"></div>` : ""}
+    <div class="help"></div></div>
   <div class="sec">수익 매체</div>
   <div class="fr"><div class="fl">쿠팡 파트너스<small>제휴 링크를 자동으로 넣어요</small></div>${a.monetize?.coupang ? '<span class="pill ok">연결됨</span>' : '<span class="pill off">없음</span>'}</div>
   <div style="padding:0 0 8px"><input class="input" id="cpA" placeholder="Access Key" autocomplete="off" style="margin-bottom:6px"><input class="input" id="cpS" placeholder="Secret Key" type="password" autocomplete="off"></div>
@@ -287,11 +301,17 @@ async function detailSheet(a) {
       onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
     /* [AC-187] 주소 확인 · 확인 취소 — 시트는 목록과 **같은 것**을 연다(두 벌 금지) */
     const ag = sh.querySelector("#addrGo"); if (ag) ag.onclick = () => { close(); setTimeout(() => addrSheet(a), 300); };
+    /* [AC-189] 프록시 떼기 — 빈 칸이 «지우기»가 아니게 됐으니 **뗄 길을 따로** 준다(막다른 골목 금지 · §4.8). */
+    const po = sh.querySelector("#pxOff"); if (po) po.onclick = () => UI.confirmRow(sh.querySelector("#pxc"), "이 계정은 프록시 없이 내 PC 에서 바로 나가요.", async () => {
+      const r = await UI.api("/api/accounts-update", { body: { id: a.id, proxyUrl: "" } });
+      if (!r.ok) return UI.toast(r.error || "바꾸지 못했어요"); close(); UI.toast("프록시를 뗐어요"); load(); }, "네, 뗄게요");
     const au = sh.querySelector("#addrUndo"); if (au) au.onclick = () => UI.confirmRow(au.parentElement, "확인을 취소하면 다음에 올릴 때 주소를 한 번 더 여쭤볼게요.", async () => {
       const r = await UI.api("/api/accounts-update", { body: { id: a.id, confirmBlogId: null } });
       if (!r.ok) return UI.toast(r.error || "취소하지 못했어요"); close(); UI.toast("확인을 취소했어요"); load(); });
     sh.querySelector("#save").onclick = async () => {
-      const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined, proxyUrl: sh.querySelector("#px").value.trim() || undefined };
+      const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined };
+      /* [AC-189] 🔴 **적었을 때만 보낸다.** 빈 칸은 «지우기»가 아니라 «그대로 두기»다(위 칸 주석 참고) — 지우기는 «프록시 안 쓰기». */
+      const pxNow = sh.querySelector("#px").value.trim(); if (pxNow) body.proxyUrl = pxNow;
       /* [R9R10-A · 계약 §13] 등급·스타일 기본값은 **계정마다** — 고른 것만 보낸다(안 고른 등급을 화면이 채워 보내지 않는다 · AC-92) */
       if (isText) { const tv = UI.chipVal(sh, "tier"); if (tv) body.defaultTier = tv; if (sh.querySelector('[data-chips="wstyle"]')) { const wv = UI.chipVal(sh, "wstyle"); body.defaultStyleId = wv ? Number(wv) : null; } }
       /* 🔴 [2026-09-21] **«언제부터 쓰셨어요»를 보낸다** — 여태 쓰는 길이 0곳이라 라이브 92계정이 전부 NULL 이었다.

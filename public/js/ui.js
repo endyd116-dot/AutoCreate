@@ -366,6 +366,24 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove("show"), ms);
   };
 
+  /* ── [AC-188] 🔴 «못 불러왔어요»는 **토스트 하나로 끝낼 수 없다** ────────────────────────────
+     C 의 품질 자(`scripts/verify-quality-grade.mjs` ②)가 잡아 준 것: 첫 불러오기가 실패하면 화면들이
+       `if (!r.ok) { UI.toast(...); return; }`
+     로 돌아갔다. 토스트는 2.2초 뒤에 사라지고 **기다림 뼈대(.sk)는 그대로 남는다** — 손님은 **영원히 도는 화면**을
+     보고, 다시 누를 곳도 없다. 새로고침을 아는 사람만 빠져나온다(막다른 골목 · §4.8).
+     🔴 그래서 **치우고 · 까닭을 적고 · 다시 누를 단추를 준다.** 세 가지가 다 있어야 «정직한 빈 화면»이다.
+     🔴 겁주지 않는다(§3): «오류가 발생했습니다»가 아니라 «지금은 못 불러왔어요 · 잠깐 뒤에 다시 눌러 보세요».
+        무엇이 그런지(사실)는 서버 문장을 그대로 싣고, 고객이 할 일(다시)과 우리가 할 일(계속 그러면 살펴본다)을 같이 적는다.
+     쓰는 법: `if (!r.ok) return UI.retryPanel("#list", load, r.error);`  (셋째 칸은 서버 문장 · 없으면 기본 문장) */
+  UI.retryPanel = function (target, again, why) {
+    const el = typeof target === "string" ? UI.$(target) : target; if (!el) return;
+    el.innerHTML = `<div class="empty" style="padding:24px 16px"><h3 style="font-size:15px">지금은 못 불러왔어요</h3>
+      <p>${UI.esc(why || "잠깐 뒤에 다시 눌러 보세요.")}${why ? " 잠깐 뒤에 다시 눌러 보세요." : ""} 계속 이러면 저희가 살펴볼게요.</p>
+      <div class="cta nobar" style="position:static;padding:12px 0 0"><button class="btn secondary" type="button" data-retry>다시 불러오기</button></div></div>`;
+    const b = el.querySelector("[data-retry]");
+    if (b) b.onclick = () => { b.disabled = true; b.textContent = "불러오는 중"; Promise.resolve(typeof again === "function" ? again() : null).catch(() => { b.disabled = false; b.textContent = "다시 불러오기"; }); };
+  };
+
   /* ── 바텀시트 ── */
   UI.sheet = function (html, { title = "", onOpen } = {}) {
     const bg = document.createElement("div"); bg.className = "sheet-bg";
