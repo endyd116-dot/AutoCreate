@@ -17,6 +17,7 @@
 import { shot, failShot, settle, downloadImages, cleanupFiles } from "../lib/browser.mjs";
 import { BLOCK, ensureNaverLogin, readMyBlogId, judgeBlogIdentity } from "../lib/auth-naver.mjs";   // [AC-201] 🔴 handle 을 믿지 않고 «실제로 어느 블로그인가»를 읽어 댄다   // 로그인은 공용(애드포스트·클립과 같은 nid 세션)
 import { createFormatState, markFormatDirty, breakFormatBeforePara, measureFormatBleed, bleedVerdict, paragraphVerdict } from "../lib/format-bleed.mjs";
+import { judgeBlockReason } from "../lib/block-reason.mjs";   // [AC-203] 🔴 막힌 까닭을 가른다 — 못 가르면 «못 쟀어요»
 
 const B_TITLE = ".se-section-documentTitle .se-text-paragraph, .se-documentTitle .se-text-paragraph, .se-placeholder.__se_placeholder, .se-section-documentTitle";
 const B_EDITOR = ".se-content, .se-container, .se-components-wrap";
@@ -1118,16 +1119,41 @@ async function publishNow(page, ctx, tags, blogId, shotKey, title, categoryHint)
       if (pm?.logNo && !preLogNos.has(pm.logNo)) { found = pm; break; }
     }
     if (found) break;
-    if ((await page.locator("text=페이지를 찾을 수 없습니다").count().catch(() => 0)) > 0) {
-      throw BLOCK("network", "네이버가 발행 처리 중 오류 페이지를 돌려줬어요(해외 IP 차단이 의심돼요).");
-    }
-    if ((await page.locator("text=이용이 제한, text=제재").count().catch(() => 0)) > 0) {
-      throw BLOCK("suspended", "이 계정은 네이버에서 이용이 제한된 상태예요.");
+    /* ═══ [AC-203] 🔴 **막혔으면 까닭을 가른다 — 못 가르면 «못 쟀어요»** ═══
+     *
+     *   ══ 종전에 여기 있던 두 줄이 **둘 다 틀렸다**(2026-09-23 실측) ══
+     *     ① `locator("text=이용이 제한, text=제재")` — 🔴 **한 번도 안 걸리는 죽은 가지였다.**
+     *        콤마는 CSS 목록 문법이라 `text=` 엔진과 섞이면 **한 문자열**로 읽힌다. 브라우저로 쟀다:
+     *        「이 블로그는 이용이 제한된 상태입니다」 → 0 · 「운영원칙 위반으로 제재되었습니다」 → 0.
+     *        ⇒ 계정이 제재당해도 45초를 기다린 뒤 `unknown` 으로 끝났고, `unknown` 은 계정 전이가 **0**이라
+     *           **그 계정은 계속 잡을 받았다.** «제재당했다»고 말해 줄 유일한 가지가 죽어 있었다.
+     *     ② `"페이지를 찾을 수 없습니다"` → «해외 IP 차단이 의심돼요» — 🔴 **근거 없는 지목이었다.**
+     *        그 한 문자열은 우리 코드 **다른 세 곳**(`post-alive`·`retract`·`scrape`)에서 «그 글이 없다»로 읽힌다.
+     *        손님에게 «IP 문제예요»라고 하면 **프록시를 사러 간다** — 틀린 사유는 돈을 쓰게 만든다.
+     *
+     *   ⇒ **보이는 글자**를 읽어 `judgeBlockReason` 이 가른다(원본 HTML 로 재면 스크립트 속 낱말에 걸린다).
+     *   🔴 `sure:false` 면 **까닭을 말하지 않고 본 것만** 적는다. 여기서는 «오류 화면이 떴다»까지가 우리가 아는 전부다.
+     *   ⚠️ 45초를 **매번** innerText 로 읽지 않는다 — 1.8초에 한 번(세 바퀴)만 본다. 오래 도는 자리라 값이 싸야 한다. */
+    if (waited % 1800 === 0) {
+      const seen = ((await page.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+      const v = judgeBlockReason({ seen, url: page.url() });
+      /* 🔴 **아무 신호도 못 본 것**은 «막혔다»가 아니다 — 아직 처리 중일 수 있으니 계속 기다린다.
+         못 본 것을 실패로 바꾸면 멀쩡한 발행을 45초마다 죽인다(AC-9 의 반대 얼굴). */
+      if (v.matched) { await shot(page, shotKey, "91-막힘", true).catch(() => {}); throw BLOCK(v.kind, v.message); }
     }
     await settle(page, 600);
   }
   await shot(page, shotKey, "92-발행후");
-  if (!found) throw BLOCK("unknown", `발행 후 글 주소를 회수하지 못했어요(탭 ${page.context().pages().length}개 · 현재 ${page.url().slice(0, 70)}).`);
+  if (!found) {
+    /* 🔴 45초를 다 기다렸는데 주소가 없다 — **마지막으로 한 번 더 까닭을 본다.**
+       종전엔 곧바로 `unknown` «주소를 회수하지 못했어요»였다. 그 문장은 **무엇에 막혔는지 하나도 안 말한다** —
+       화면에 «이용이 제한» 이 떠 있어도 그렇게 끝났다(위 ①이 죽어 있었으므로). */
+    const seen = ((await page.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+    const v = judgeBlockReason({ seen, url: page.url() });
+    throw BLOCK(v.kind, v.matched
+      ? v.message
+      : `${v.message} (탭 ${page.context().pages().length}개 · 현재 ${page.url().slice(0, 70)})`);
+  }
   const realBlogId = found.blogId || blogId;
   return { externalUrl: `https://blog.naver.com/${realBlogId}/${found.logNo}`, channelRef: `naverblog:${found.logNo}` };
 }
