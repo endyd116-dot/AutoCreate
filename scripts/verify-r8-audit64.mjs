@@ -13,6 +13,13 @@
 //      CS 가 `referral.ts` 에 걸렸다). 그래서 이 판은 행마다 **틀릴 수 없는 근거**(파일 경로 + 그 파일 안의 특정 문자열)로 좁혔다.
 import { readFileSync, existsSync as existsSync0 } from "node:fs";
 
+/* 🔴 ══ **이 자의 stdout 을 누가 먹나** — 새 줄을 찍기 전에 반드시 읽어라 ══
+ *   `scripts/verify-audit-selftest.mjs:29` 가 `--json` 으로 이 자를 돌려 **stdout 을 통째로 `JSON.parse`** 한다.
+ *   ⇒ 🔴 **`--json` 일 때 stdout 에 나가는 것은 `:593` 의 JSON 한 덩이뿐이어야 한다.**
+ *      사람에게 할 말은 **`console.error`(stderr)** 로 보내라 — 먹는 쪽은 stdout 만 읽는다.
+ *   실제로 밟았다(2026-09-22 C · 배포 직전 전수 검사가 잡았다): 내가 맨 끝에 «내가 읽은 제품 파일 …» 한 줄을
+ *   `console.log` 로 찍었더니 **JSON 뒤에 붙어** `Unexpected non-whitespace character after JSON at position 9187` 로 죽었다.
+ *   🔴 **«내 자리»라고 생각한 곳이 남의 입구였다** — 자를 고칠 때는 **그 자를 부르는 자까지** 돌려 봐야 한다(AC-219). */
 const JSON_OUT = process.argv.includes("--json");
 /* [2026-09-16 메인 · b-49 실측] 주석을 걷어 낸 본문 — «주석에만 적혀 있는 것»을 만든 것으로 세지 않는다(AC-59).
    b-49 가 찔러 보니 11칸 중 **9칸**이 주석 한 줄로 닫혔다(A10·B7·B8·H1·E4·C1·A12·C2·H3).
@@ -643,7 +650,13 @@ console.log(`   (어느 칸인지·왜 그런지는 docs/active/2026-09-16-audit
 {
   const PROBE = ["lib/channel-registry.ts", "lib/publish/contract.ts", "public/js/ui.js", "db/schema.ts", "netlify/functions/pieces.ts"];
   const aliveN = PROBE.filter((p2) => { try { return readCode(p2).trim().length > 0; } catch { return false; } }).length;
-  console.log(`   ■ 내가 읽은 제품 파일: 표본 ${PROBE.length}개 중 **${aliveN}개**가 살아 있다`);
+  /* 🔴 **stdout 은 이 자의 것이 아니다 — 남이 먹는다.**
+     `--json` 이면 `:593` 이 stdout 에 **JSON 한 덩이**를 뱉고, `scripts/verify-audit-selftest.mjs:29` 가
+     그걸 그대로 `JSON.parse` 한다. 내가 여기 사람말을 `console.log` 로 찍었더니 **JSON 뒤에 붙어 파싱이 죽었다**
+     (2026-09-22 · 배포 직전 전수 검사가 잡았다 · position 9187).
+     🔴 오늘 종일 잡던 그 병의 다른 얼굴이다 — **«내 자리»라고 생각한 곳이 남의 입구였다.**
+     ⇒ 사람말은 **stderr** 로 보낸다(기계가 먹는 것은 stdout 뿐이다). 판정은 `--json` 에서도 그대로 산다. */
+  console.error(`   ■ 내가 읽은 제품 파일: 표본 ${PROBE.length}개 중 **${aliveN}개**가 살아 있다`);
   if (aliveN < 2) {
     console.error(`⊘ 못 쟀어요 — 표본 ${PROBE.length}개 중 ${aliveN}개만 읽혔다. 제품을 못 보고 낸 점수판은 점수가 아니다.`);
     process.exit(2);
