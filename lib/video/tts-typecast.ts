@@ -137,7 +137,13 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
       method: "POST", headers: { "Content-Type": "application/json", "X-API-KEY": apiKey }, signal: ctrl.signal,
       body: JSON.stringify({ voice_id: String(opts.voiceId ?? "").trim() || TYPECAST_VOICE_PILJAE, text: base, model: TYPECAST_MODEL, language: TYPECAST_LANGUAGE, prompt, output: { audio_format: "wav", ...(tempo !== 1 ? { audio_tempo: tempo } : {}) } }),
     });
-    if (!resp.ok) { const t = await resp.text().catch(() => ""); return { ok: false, reason: `타입캐스트 합성 실패(HTTP ${resp.status}) ${t.slice(0, 140)}`, costUsd: 0, httpStatus: resp.status }; }
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      /* 🔴 합성 요청 자체가 거절됐다 — 청구하는지 **모른다** ⇒ 금액 NULL(0 을 적으면 «안 나갔다»가 된다 · AC-9). */
+      void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
+        costUsd: 0, failKind: "http", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+      return { ok: false, reason: `타입캐스트 합성 실패(HTTP ${resp.status}) ${t.slice(0, 140)}`, costUsd: 0, httpStatus: resp.status };
+    }
     let buf: Buffer; let words: TtsWord[] = []; let charTimes: TtsWord[] = []; let apiDurationMs = 0; const notes: string[] = [];
     const ctype = String(resp.headers.get("content-type") ?? "");
     if (/json/i.test(ctype)) {
@@ -147,7 +153,13 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
         const dlUrl = ["audio_download_url", "audio_url", "url"].map((k) => (typeof j[k] === "string" ? (j[k] as string) : "")).find((v) => /^https?:\/\//.test(v)) || "";
         if (!dlUrl) return { ok: false, reason: `타입캐스트 응답에 오디오가 없습니다(키: ${Object.keys(j).join(",")})`, costUsd: 0 };
         const dl = await fetch(dlUrl, { signal: AbortSignal.timeout(20_000) });
-        if (!dl.ok) return { ok: false, reason: `타입캐스트 오디오 다운로드 실패(HTTP ${dl.status})`, costUsd: 0, httpStatus: dl.status };
+        if (!dl.ok) {
+          /* 🔴 [2026-09-21 B · drizzle/0084] **합성은 끝났는데 우리가 못 받아 왔다** — 영상 `download_failed` 와 같은 자리다.
+             타입캐스트는 이미 만들었으니 **확실히 청구된다**. 금액을 아는 자리라 숫자를 적는다. */
+          void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
+            costUsd: 0, failKind: "download_failed", costUsdMaybe: chars * TYPECAST_USD_PER_CHAR, ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+          return { ok: false, reason: `타입캐스트 오디오 다운로드 실패(HTTP ${dl.status})`, costUsd: 0, httpStatus: dl.status };
+        }
         buf = Buffer.from(await dl.arrayBuffer());
       }
       words = parseTypecastWords(j.words); charTimes = parseTypecastWords(j.characters);

@@ -93,7 +93,18 @@ export async function generateImage(a: GenerateImageArgs): Promise<GenerateImage
     const lease = leaseAiKey();
     const r = await callImageModel(model, prompt, aspect, lease?.key ?? "", a.timeoutMs ?? 90_000);
     reportAiKeyOutcome(lease, r.ok ? "ok" : isRateLimitReason(r.reason) ? "rate_limited" : "error");
-    if (!r.ok) { lastReason = r.reason; console.warn(`[ai-image] ${model} 실패: ${r.reason}`); if (/401|403|no_api_key/.test(r.reason)) break; continue; }
+    if (!r.ok) {
+      lastReason = r.reason; console.warn(`[ai-image] ${model} 실패: ${r.reason}`);
+      /* 🔴 [2026-09-21 B · drizzle/0084] **여기도 새고 있었다**(영상과 같은 병 — 메인이 «영상만의 문제가 아닐 수 있다»고 짚었다).
+         체인을 도는 동안 모델마다 실패해도 `ai_usage` 에 **한 줄도 안 남아서**, 모델 셋을 다 때리고 실패한 날이
+         원장에는 **아무 일도 없던 날**로 보였다.
+         🔴 `empty_image` 는 특히 나쁘다 — HTTP 는 200 이고 토큰도 썼는데 그림만 없다. **청구된 것은 거의 확실하다.**
+            다만 그 응답엔 `usageMetadata` 가 없어 **얼마인지는 모른다** ⇒ 금액은 **NULL(못 쟀음)**로 두고 사유만 `empty` 로 가른다.
+            «청구됐나»와 «얼마냐»는 다른 물음이고, 여기서 아는 것은 앞엣것뿐이다 — 뒤엣것에 숫자를 지어내지 않는다. */
+      const kind = /empty_image/.test(r.reason) ? "empty" : /timeout_/.test(r.reason) ? "timeout" : "http";
+      void recordAiUsage({ tenantId: a.tenantId, purpose: "image:fail", model, inTokens: 0, outTokens: 0, costUsd: 0, failKind: kind, ref: a.ref });
+      if (/401|403|no_api_key/.test(r.reason)) break; continue;
+    }
     const costUsd = calcCost(model, r.inTok, r.outTok);
     /* 🔴 AC-36 — 돈 기록은 **await**(이미지는 원가의 85%다 · 메인 실측 2026-09-15: 글 3편 $0.98 중 사진 18장이 $0.83).
        이미지 생성 자체가 수 초라 쓰기 한 번은 체감이 없고, 새면 «썼는데 원장에 없는 돈»이 된다(`reconcilePieceCost` 는 그물이지 정본이 아니다). */

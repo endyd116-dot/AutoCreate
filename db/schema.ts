@@ -1217,3 +1217,19 @@ export const opsTenantNotes = {
   operator: "operator",
   text: "text",
 } as const;
+
+/* === Phase 1 R13 · 원장이 못 세던 돈(B · 2026-09-21 · drizzle/0084-ai-usage-fail.sql 과 동시 · CLAUDE §4.4 append-only) ===
+ *   `recordAiUsage` 가 **성공 경로에만** 있어서, 실패·폴백 호출이 `ai_usage` 에 **한 줄도 안 남았다.**
+ *   🔴 특히 «제공사는 다 만들어 줬는데 우리가 못 받아 온» 두 자리(다운로드·R2 저장)는 **확실히 청구되는데** 통째로 안 보였다.
+ *   위 `aiUsage` 정의(Phase 0)는 **그대로 두고** 이번 라운드가 더한 칸만 여기 적는다(다른 라운드 정의 덮어쓰기 금지).
+ */
+export const aiUsageR13 = {
+  /** 실패 사유 — `provider_failed|download_failed|store_failed|empty|http|timeout`. 🔴 NULL = **성공한 호출**이다. */
+  failKind: varchar("fail_kind", { length: 32 }),
+  /**
+   * 나갔을 수 있는 돈. 🔴 `cost_usd` 에는 **안 넣는다** — 메인 지시로 `checkAiCostCap` 의 합을 지금은 안 건드린다
+   * («세기만» 한다 · 관문에 넣을지는 숫자를 보고 사장님이 정한다).
+   * 🔴 **NULL 과 0 은 다른 말이다**: NULL = 못 쟀음(제공사가 청구하는지 모른다) · 0 = 안 나갔다(스텁).
+   */
+  costUsdMaybe: numeric("cost_usd_maybe", { precision: 10, scale: 6 }),
+};
