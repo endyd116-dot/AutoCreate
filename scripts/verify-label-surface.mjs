@@ -260,6 +260,18 @@ const coinDiff = [...coinUi].filter(([k, v]) => coinSrvNum.get(k) !== v).map(([k
 rec("🔴 코인 값이 서버 표와 같다(화면 미리보기)", coinSrvNum.size > 0 && coinUi.size > 0 && coinDiff.length === 0,
   coinDiff.join(" | ") || `${coinUi.size}종 · 글 ${coinSrvNum.get("blog")}코인`, coinDiff);
 
+/* 🔴 [2026-09-21 B] **이 축은 한쪽만 보고 있었다.** 위 `coinDiff` 는 `coinUi`(화면 표)를 돌며 서버와 견준다 —
+   그래서 **서버에만 있고 화면엔 없는 항목**은 아예 과녁에 들어오지 않는다. 실제로 그랬다:
+   `video_90`(42코인 · R12-7 릴스 90초)이 서버에만 있고 `UI.COIN` 에는 없는데 이 자는 **초록이었다.**
+   그 결과 화면 손보기에서 90초를 고르면 `UI.VIDEO_COIN[90]` 이 없어 «0코인»이라 적힌다(director.html «vsec» 가지 `?? 0`).
+   🔴 값을 여기서 정하지 않는다 — `video_90 = 42` 는 **사장님 결재 대기**다(`lib/coin-table.ts` 39행).
+      그래서 FAIL 이 아니라 **WARN** 이다: 빠진 것을 **보이게만** 하고, 채우는 것은 결재 뒤에 한다.
+      (FAIL 로 두면 이 자를 초록으로 만들려고 누군가 결재 전 값을 화면에 박게 된다 — 그게 더 나쁘다.) */
+const coinOnlyServer = [...coinSrvNum.keys()].filter((k) => !coinUi.has(k));
+rec("코인 항목이 서버에만 있고 화면엔 없다(있으면 WARN)", coinOnlyServer.length === 0 ? true : "WARN",
+  coinOnlyServer.length ? `${coinOnlyServer.map((k) => `${k}(서버 ${coinSrvNum.get(k)})`).join(" · ")} — 화면 미리보기 표에 없다. 값이 결재 대기면 그대로 두고, 확정되면 UI.COIN 에 옮긴다` : "없음",
+  coinOnlyServer);
+
 /* ───────── ⑧-c 🔴 **코인 등급 표**(서버 COIN_TIERS ↔ 모의 TIERS ↔ 화면 UI.TIER_LABEL) — [R9R10-A · 2026-09-16] ─────────
    왜: 사장님이 «간단히 1 · 보통 2 · 프리미엄 3»을 정하셨고 «최소»라는 말은 쓰지 말라 하셨다. 라벨·코인·설명 문장(say)이 세 곳에 있다 —
    정본은 서버 `lib/coin-table.ts COIN_TIERS`(B 채택 · docs/active/2026-09-16-R9R10-AB-keys.md §11). 모의는 accounts-list.tiers 로 실어 주고 화면은 셈 없이 그린다(AC-74).
