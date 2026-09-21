@@ -114,7 +114,14 @@ export async function generateImage(a: GenerateImageArgs): Promise<GenerateImage
     try {
       const put = await r2Put(key, Buffer.from(r.b64, "base64"), r.mime);
       return { ok: true, url: put.url, key, model, mime: r.mime, costUsd };
-    } catch (e) { return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}` }; }
+    } catch (e) {
+      /* 🔴 [2026-09-22 B · AC-192] **돈은 이미 위에서 적혔다**(바로 앞 `purpose: "image"` · 실제 금액).
+         그래서 여기는 «안 새는 자리»였지만, 원장에는 **성공 한 줄**만 남아 «다 만들어 놓고 저장에서 엎어진 날»이
+         보이지 않았다 — 영상·TTS 는 `store_failed` 로 가르는데 이미지만 안 갈랐다(같은 규약이어야 한다).
+         🔴 금액은 **0 으로 적는다** — 값이 아니라 **사유**를 남기는 줄이다. 여기에 금액을 또 적으면 **상한이 두 번 먹는다.** */
+      void recordAiUsage({ tenantId: a.tenantId, purpose: "image:fail", model, inTokens: 0, outTokens: 0, costUsd: 0, failKind: "store_failed", ref: a.ref });
+      return { ok: false, reason: `r2_put_failed: ${String((e as Error)?.message ?? e).slice(0, 120)}` };
+    }
   }
   return { ok: false, reason: lastReason };
 }

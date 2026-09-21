@@ -154,12 +154,27 @@ export async function proxyStopped(limit = 50): Promise<{
 }
 
 /** 지금 재고 — 운영 화면·«준비 중» 판정용. 🔴 접속 주소는 세지도 내보내지도 않는다. */
-export async function proxyStock(tenantId?: number): Promise<{ free: number; assigned: number; down: number }> {
+export async function proxyStock(tenantId?: number): Promise<{ free: number; assigned: number; down: number; noProxy: number; stalled: number }> {
   const tid = n(tenantId);
   const [r] = await q(sql`SELECT
       COUNT(*) FILTER (WHERE p.status = 'active' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.proxy_id = p.id))::int AS free,
       COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM accounts a WHERE a.proxy_id = p.id))::int AS assigned,
       COUNT(*) FILTER (WHERE p.status <> 'active')::int AS down
     FROM proxies p WHERE ${tid ? sql`(p.tenant_id IS NULL OR p.tenant_id = ${tid})` : sql`TRUE`}`);
-  return { free: n(r?.free), assigned: n(r?.assigned), down: n(r?.down) };
+  /* 🔴 **계정 쪽에서도 센다**(2026-09-22 · A 가 화면에 주문을 적어 뒀다 · AC-192).
+     위 셋은 «우리가 가진 IP»만 센다 — 그래서 화면은 **«IP 가 없어서 못 도는 계정»을 셀 수가 없었고**,
+     붙은 IP 가 죽은 계정은 `proxies[]`(서버가 `LIMIT 200`)를 훑어 세느라 **200을 넘으면 조용히 덜 셌다.**
+     🔴 조용히 덜 세는 것이 오늘 종일 걷어 낸 그 병이다 ⇒ **세는 자리를 서버로 옮긴다**(한도 없음).
+
+     ⚠️ `noProxy` 를 «`proxy_id IS NULL` 인 계정»으로 그냥 세지 않는다 — **그러면 겁주는 숫자가 된다.**
+        플랜에 딸려 온 계정은 원래 전용 IP 가 없다(내 PC 러너로 돈다). **전용 IP 를 사기로 한 슬롯**
+        (`account_slots.status = 'active'`)인데 IP 가 안 붙은 계정만 «없다»고 말한다. 옛 평문 칸(`proxy_url`)도
+        엄연한 전용 IP 라 빼고 센다(`proxyFailClosed` 의 `legacyProxyUrl` 과 같은 눈으로 본다 — 자리마다 다르면 숫자가 갈린다). */
+  const [c] = await q(sql`SELECT
+      COUNT(*) FILTER (WHERE a.proxy_id IS NULL AND (a.proxy_url IS NULL OR a.proxy_url = '')
+                         AND EXISTS (SELECT 1 FROM account_slots s WHERE s.account_id = a.id AND s.status = 'active'))::int AS no_proxy,
+      COUNT(*) FILTER (WHERE a.proxy_id IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM proxies p WHERE p.id = a.proxy_id AND p.status <> 'active'))::int AS stalled
+    FROM accounts a WHERE ${tid ? sql`a.tenant_id = ${tid}` : sql`TRUE`}`);
+  return { free: n(r?.free), assigned: n(r?.assigned), down: n(r?.down), noProxy: n(c?.no_proxy), stalled: n(c?.stalled) };
 }

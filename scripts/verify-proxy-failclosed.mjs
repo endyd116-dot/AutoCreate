@@ -134,6 +134,17 @@ else {
     ["아직 안 돌아 본 쪽도 센다", prox, /'waiting_ip'/],
     ["그게 누구인지까지 준다",    prox, /waiting: waiting\.map\(/],
     ["운영 응답이 그걸 싣는다",   ops,  /stopped: await proxyStopped\(\)/],
+    /* 🔴 **세는 자리가 서버인가**(2026-09-22 · AC-192 · A 의 주문 ①②).
+       전에는 화면이 `proxies[]` 를 훑어 «IP 가 멈춘 계정»을 셌는데, 그 목록엔 서버가 `LIMIT 200` 이 걸려 있어
+       **200을 넘으면 조용히 덜 셌다.** 그리고 «IP 가 아예 없는 계정»은 아예 셀 길이 없었다(응답에 IP 쪽만 있었다).
+       ⇒ 한도 없는 집계를 서버가 준다. 과녁은 **칸 이름**(화면이 읽는 것)과 **한도가 없다**는 두 가지다. */
+    ["🔴 IP 없는 계정을 서버가 센다",   prox, /AS no_proxy/],
+    ["🔴 IP 가 죽은 계정을 서버가 센다", prox, /AS stalled/],
+    ["🔴 그 셈에 `LIMIT` 이 안 걸려 있다", prox, /FROM accounts a WHERE \$\{tid \? sql`a\.tenant_id = \$\{tid\}` : sql`TRUE`\}/],
+    /* 🔴 «플랜에 딸린 계정»까지 세면 **겁주는 숫자**가 된다 — 그 계정은 원래 전용 IP 가 없다.
+       전용 IP 슬롯(`status='active'`)만 본다 · 옛 평문 칸도 IP 로 친다(`proxyFailClosed` 와 같은 눈). */
+    ["🔴 «없다»를 슬롯 기준으로만 말한다", prox, /FROM account_slots s WHERE s\.account_id = a\.id AND s\.status = 'active'/],
+    ["🔴 옛 평문 칸도 IP 로 친다",        prox, /a\.proxy_url IS NULL OR a\.proxy_url = ''/],
   ];
   for (const [name, text, re] of seen) (re.test(text) ? ok : bad)("③", name);
   // 이름은 **두 덩이 각각에서** 본다(멈춘 계정 / 기다리는 계정 — 어느 쪽이 비어도 그 목록은 숫자가 된다).
@@ -200,6 +211,11 @@ const MUT = [
   ["멈춘 것을 화면에 안 싣는다",     (b) => { b[OPS] = b[OPS].replace("stopped: await proxyStopped(),", ""); }, "③"],
   ["멈춘 계정에서 이름을 뺀다",      (b) => { b[PROX] = b[PROX].replace(/(accounts: rows\.map[\s\S]{0,700}?)tenantName: String\(r\.tenant_name \?\? ""\),/, "$1"); }, "③"],
   ["기다리는 계정에서 이름을 뺀다",  (b) => { b[PROX] = b[PROX].replace(/(waiting: waiting\.map[\s\S]{0,700}?)tenantName: String\(r\.tenant_name \?\? ""\),/, "$1"); }, "③"],
+  /* 🔴 2026-09-22 — A 의 주문 ①② 로 새로 붙인 집계. 떼 보고 우는지까지가 만든 것이다. */
+  ["🔴 IP 없는 계정 셈을 뗀다",      (b) => { b[PROX] = b[PROX].replace("AS no_proxy", "AS zz_gone"); }, "③"],
+  ["🔴 IP 죽은 계정 셈을 뗀다",      (b) => { b[PROX] = b[PROX].replace("AS stalled", "AS zz_gone2"); }, "③"],
+  ["🔴 «없다»를 슬롯 안 보고 말한다", (b) => { b[PROX] = b[PROX].replace("FROM account_slots s WHERE s.account_id = a.id AND s.status = 'active'", "FROM account_slots s WHERE s.account_id = a.id"); }, "③"],
+  ["🔴 옛 평문 칸을 IP 로 안 친다",   (b) => { b[PROX] = b[PROX].replace("a.proxy_url IS NULL OR a.proxy_url = ''", "TRUE"); }, "③"],
 ];
 let silent = 0;
 for (const [name, tf, axis] of MUT) {

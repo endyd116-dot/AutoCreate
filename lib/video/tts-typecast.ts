@@ -152,14 +152,21 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
       if (typeof j.audio === "string" && j.audio.length > 64) buf = Buffer.from(j.audio, "base64");
       else {
         const dlUrl = ["audio_download_url", "audio_url", "url"].map((k) => (typeof j[k] === "string" ? (j[k] as string) : "")).find((v) => /^https?:\/\//.test(v)) || "";
-        if (!dlUrl) return { ok: false, reason: `타입캐스트 응답에 오디오가 없습니다(키: ${Object.keys(j).join(",")})`, costUsd: 0 };
+        if (!dlUrl) {
+          /* 🔴 [2026-09-22 B · AC-192] **여기도 새던 자리였다.** 합성 요청은 **200 으로 끝났다** — 타입캐스트는 이미 만들었고
+             **확실히 청구된다.** 그런데 응답에 오디오가 어디 있는지가 없어 그냥 빠져나갔다(원장에 한 줄도 안 남았다).
+             `download_failed` 와 **같은 자리**다 — 글자 수로 금액을 **계산할 수 있다** ⇒ `costUsd` 에 넣어 상한을 먹인다. */
+          void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
+            costUsd, failKind: "no_audio", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+          return { ok: false, reason: `타입캐스트 응답에 오디오가 없습니다(키: ${Object.keys(j).join(",")})`, costUsd: 0 };
+        }
         const dl = await fetch(dlUrl, { signal: AbortSignal.timeout(20_000) });
         if (!dl.ok) {
           /* 🔴 [2026-09-21 B · drizzle/0084] **합성은 끝났는데 우리가 못 받아 왔다** — 영상 `download_failed` 와 같은 자리다.
              타입캐스트는 이미 만들었으니 **확실히 청구된다**. 글자 수로 금액을 **계산할 수 있다.**
              ✅ 2026-09-21 사장님 결재 «실패도 글처럼» ⇒ 아는 금액이라 `costUsd` 에 넣어 **상한을 먹인다**. */
           void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
-            costUsd: chars * TYPECAST_USD_PER_CHAR, failKind: "download_failed", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+            costUsd, failKind: "download_failed", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
           return { ok: false, reason: `타입캐스트 오디오 다운로드 실패(HTTP ${dl.status})`, costUsd: 0, httpStatus: dl.status };
         }
         buf = Buffer.from(await dl.arrayBuffer());
@@ -168,7 +175,13 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
       if (Number(j.audio_duration) > 0) apiDurationMs = Math.round(Number(j.audio_duration) * 1000);
       if (wantTs && !words.length) notes.push("타임스탬프를 요청했는데 words 가 비어 있습니다(구절 자막은 균등 분할로 폴백).");
     } else buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.length < 256) return { ok: false, reason: "타입캐스트 오디오가 비어 있습니다.", costUsd: 0 };
+    if (buf.length < 256) {
+      /* 🔴 [2026-09-22 B · AC-192] 여기도 **합성이 끝난 뒤**다(200 으로 받았다) — 받아 온 오디오가 비어 있을 뿐이다.
+         **확실히 청구된다** ⇒ 아는 금액을 `costUsd` 에 넣는다. */
+      void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
+        costUsd, failKind: "empty_audio", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+      return { ok: false, reason: "타입캐스트 오디오가 비어 있습니다.", costUsd: 0 };
+    }
     // 선두 무음(타임스탬프) — 자른 만큼 words 도 당긴다
     const firstSpeechMs = [...words, ...charTimes].reduce((acc, w) => (acc < 0 ? w.startMs : Math.min(acc, w.startMs)), -1);
     if (firstSpeechMs > 0) {
@@ -184,9 +197,24 @@ export async function synthesizeTypecast(a: { tenantId: number; pieceId: number;
       else if (want >= TAIL_SILENCE_MIN_TRIM_MS) notes.push(`꼬리 무음 ${quiet}ms 가 조각(${whole}ms)에 비해 커서 자르지 않음`); }
     const durationMs = wavDurationMs(buf) || apiDurationMs;
     if (apiDurationMs && durationMs && Math.abs(apiDurationMs - durationMs) > TYPECAST_DURATION_TOLERANCE_MS) notes.push(`API audio_duration ${apiDurationMs}ms ≠ wav 실측 ${durationMs}ms(실측 채택)`);
-    await r2Put(key, buf, "audio/wav");
+    /* 🔴 [2026-09-22 B · AC-192] **저장 실패를 바깥 `catch` 에 맡기지 않는다.** 영상에는 `store_failed` 가 있는데
+       TTS 에는 없어서, 다 만들어 놓고 우리 저장소에 못 넣은 경우가 «예외» 한 덩이에 섞여 **금액을 아는데도 모름으로** 갔다.
+       여기까지 왔으면 오디오는 손에 있다 = **확실히 청구된다** ⇒ 아는 금액을 넣는다. */
+    try { await r2Put(key, buf, "audio/wav"); } catch (e) {
+      void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
+        costUsd, failKind: "store_failed", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+      return { ok: false, reason: `타입캐스트 오디오 저장 실패: ${String((e as Error)?.message || e).slice(0, 120)}`, costUsd: 0 };
+    }
     void recordAiUsage({ tenantId: a.tenantId, purpose: "tts", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0, costUsd, ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
     return { ok: true, key, mime: "audio/wav", bytes: buf.length, durationMs, words, provider: "typecast", costUsd, ...(notes.length ? { notes } : {}) };
-  } catch (e) { return { ok: false, reason: `타입캐스트 예외: ${String((e as Error)?.message || e).slice(0, 140)}`, costUsd: 0 }; }
+  } catch (e) {
+    /* 🔴 [2026-09-22 B · AC-192] 마지막까지 **한 줄도 안 남던 자리.** 다만 여기는 **어디서 터졌는지 모른다** —
+       fetch 가 나가기 전일 수도(돈 0), 다 만들어진 뒤일 수도 있다. ⇒ **금액을 지어내지 않는다**:
+       `costUsd: 0`(상한 무영향) · `costUsdMaybe` 도 안 넘긴다(= NULL · 못 쟀음 · AC-9).
+       그래도 **행은 남는다** — «몇 번 헛돌았나»는 이제 셀 수 있다. 그게 이 줄의 값이다. */
+    void recordAiUsage({ tenantId: a.tenantId, purpose: "tts:fail", model: `typecast:${TYPECAST_MODEL}`, inTokens: chars, outTokens: 0,
+      costUsd: 0, failKind: "exception", ref: `piece:${a.pieceId}:tts:${a.keySuffix}` });
+    return { ok: false, reason: `타입캐스트 예외: ${String((e as Error)?.message || e).slice(0, 140)}`, costUsd: 0 };
+  }
   finally { clearTimeout(timer); }
 }
