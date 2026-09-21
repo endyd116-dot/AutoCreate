@@ -108,15 +108,31 @@ export function blockOf(text, anchor, enders, opts = {}) {
  * 🔴 **열거** — 닻이 나오는 자리를 **전부** 잡는다(`blockOf` 의 반대 쪽 짝).
  *   「몇 개나 있나」를 물을 때는 이것을 쓴다. `blockOf` 는 «이 덩이가 맞나»를 묻는 자다.
  *
- *   @returns {{ count: number, blocks: {body:string,start:number,end:number}[], unresolved: number }}
- *     · `count`      닻이 나온 수(**모수**)
- *     · `blocks`     끝 표식까지 제대로 잘라 낸 덩이들
- *     · `unresolved` 🔴 **닻은 있는데 끝을 못 찾은 수** — 0 이 아니면 부르는 쪽이 **`⊘` 로 적어야 한다.**
- *       (여기서 조용히 버리면 «모수는 5인데 4개만 봤다»가 되고, 그게 바로 이 파일이 막는 병이다.)
+ *   🔴 ══ **«끝을 못 찾았다»의 뜻은 닻의 성질이 정한다**(B 지적 2026-09-22 · 실측으로 나왔다) ══
+ *     같은 `unresolved` 인데 뜻이 **정반대**일 수 있다:
+ *       · `anchorKind:"literal"`   닻이 **글자 그대로의 코드**다(`formatMarks: {` · `writeAudit(`).
+ *         못 찾았으면 «**내가 실패했다**» ⇒ **⊘ 로 적고 모수에는 그대로 둔다**(안 그러면 모수가 줄어 조용한 초록).
+ *       · `anchorKind:"heuristic"` 닻이 **어림짐작**이다(정규식 후보 탐지 같은 것).
+ *         못 찾았으면 «**애초에 그게 아니었다**» ⇒ **모수에서 뺀다**(⊘ 로 적으면 **멀쩡한 제품에 거짓 빨강**).
+ *     🔴 B 가 실제로 겪었다: `verify-regex-escapes` 가 `Math.floor(i / 588)] + JUNG[…]` 의 **나눗셈 둘**을
+ *        정규식 리터럴로 오인했고, `unresolved` 를 곧바로 ⊘ 로 썼다면 **멀쩡한 제품이 빨개졌다.**
+ *        그러면 아무도 그 자를 안 본다(AC-95) — 거짓 빨강은 조용한 초록만큼 나쁘다.
+ *     ⚠️ **한 값을 한 뜻으로만 읽으면 한쪽은 반드시 거짓이다.**
+ *     🔴 그래서 주석으로만 두지 않고 **`denominator` 를 계산해 돌려준다** — 부르는 쪽이 매번 갈래를 안 써도 되게.
+ *        (오늘 하루가 「주석은 안 지켜진다」를 세 번 보여 줬다.)
+ *
+ *   @param {{maxChars?: number, anchorKind?: "literal"|"heuristic"}} [opts] 기본 `"literal"`(안전한 쪽)
+ *   @returns {{ count, blocks, unresolved, denominator, unresolvedMeans }}
+ *     · `count`           닻이 나온 수(**날것**)
+ *     · `blocks`          끝 표식까지 제대로 잘라 낸 덩이들
+ *     · `unresolved`      닻은 있는데 끝을 못 찾은 수
+ *     · 🔴 `denominator`  **셈에 쓸 모수** — `literal` 이면 `count`, `heuristic` 이면 `blocks.length`
+ *     · 🔴 `unresolvedMeans` `"unmeasured"`(⊘ 로 적어라) | `"not_applicable"`(그건 그게 아니었다)
  *   ⚠️ 겹치지 않게 센다(닻 길이만큼 건너뛴다).
  */
 export function allBlocksOf(text, anchor, enders, opts = {}) {
   const src = String(text ?? "");
+  const heuristic = opts.anchorKind === "heuristic";
   const blocks = [];
   let count = 0;
   let from = 0;
@@ -133,7 +149,14 @@ export function allBlocksOf(text, anchor, enders, opts = {}) {
     }
     if (end >= 0) blocks.push({ body: src.slice(start, end), start, end });
   }
-  return { count, blocks, unresolved: count - blocks.length };
+  const unresolved = count - blocks.length;
+  return {
+    count, blocks, unresolved,
+    /* 🔴 `literal` 은 모수를 **안 줄인다**(못 잰 것도 세야 «못 쟀다»가 보인다) ·
+       `heuristic` 은 **줄인다**(그건 애초에 대상이 아니었다). 이 한 줄이 위 갈래의 전부다. */
+    denominator: heuristic ? blocks.length : count,
+    unresolvedMeans: heuristic ? "not_applicable" : "unmeasured",
+  };
 }
 
 /**

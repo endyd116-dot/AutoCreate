@@ -296,6 +296,21 @@ console.log("\n⑧ 🔴 덩이를 **못 잡게 만들면** ⊘ 가 나오는가(
   const half = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"]);
   ok("🔴 끝을 못 찾은 닻은 `unresolved` 로 드러난다(조용히 안 버린다)",
     half.count === 2 && half.unresolved === 1, JSON.stringify({ c: half.count, b: half.blocks.length, u: half.unresolved }));
+  /* 🔴 **«끝을 못 찾았다»의 뜻은 닻의 성질이 정한다**(B 지적 · 실측에서 나왔다).
+     같은 `unresolved:1` 인데 뜻이 정반대라, 한 뜻으로만 읽으면 **한쪽은 반드시 거짓**이다:
+       · 글자 그대로의 닻 → «내가 실패했다» ⇒ ⊘ · 모수를 **줄이면 안 된다**(줄이면 조용한 초록)
+       · 어림짐작 닻     → «그건 애초에 그게 아니었다» ⇒ 모수에서 **빼야** 한다(⊘ 로 적으면 **거짓 빨강**)
+     B 가 겪은 것: `Math.floor(i / 588)] + JUNG[…]` 의 나눗셈 둘을 정규식으로 오인 — ⊘ 로 썼으면 멀쩡한 제품이 빨개졌다. */
+  const lit = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"]);                            // 기본 = literal
+  const heu = allBlocksOf(TAIL, "A_KIND.has(k)", ["if (C_KIND"], { anchorKind: "heuristic" });
+  ok("🔴 글자 그대로의 닻 — 모수를 **안 줄인다**(못 잰 것도 세야 «못 쟀다»가 보인다)",
+    lit.denominator === 2 && lit.unresolvedMeans === "unmeasured", JSON.stringify(lit.denominator + "/" + lit.unresolvedMeans));
+  ok("🔴 어림짐작 닻 — 모수에서 **뺀다**(그건 애초에 그게 아니었다 · ⊘ 로 적으면 거짓 빨강)",
+    heu.denominator === 1 && heu.unresolvedMeans === "not_applicable", JSON.stringify(heu.denominator + "/" + heu.unresolvedMeans));
+  ok("🔴 두 갈래가 **서로 다른 모수**를 낸다(같으면 이 갈래가 아무 일도 안 하는 것이다)", lit.denominator !== heu.denominator);
+  ok("못 찾은 게 없으면 두 갈래가 같다(평소엔 차이가 없어야 한다)",
+    allBlocksOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"]).denominator
+    === allBlocksOf(TWICE, "A_KIND.has(k)", ["if (B_KIND", "if (C_KIND"], { anchorKind: "heuristic" }).denominator);
 }
 
 /* 🔴 [AC-216] **못 쟀는데 통과로 넘기지 않는다.** 종료 0 = 전부 ✓ · 1 = 제품이 틀렸다 · 2 = **자가 못 쟀다**. */
