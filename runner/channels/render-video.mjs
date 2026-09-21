@@ -16,9 +16,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, dirname } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";   // [AC-202] 동봉 폰트의 절대 주소를 만든다
 import { shot, failShot, settle } from "../lib/browser.mjs";
+import { measureOverlayFont, fontSay } from "../lib/font.mjs";   // [AC-202] 🔴 «자막을 어느 폰트로 그렸나»를 잰다
 
 const BLOCK = (kind, msg) => Object.assign(new Error(`[block:${kind}] ${msg}`), { errorKind: kind });
 
@@ -152,8 +153,50 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 /**
  * 오버레이 페이지(AM `buildRenderPage` 이식) — 자막·키워드 강조·배지·엔드카드 레이어.
  *   투명 배경으로 찍어 ffmpeg 가 영상 위에 얹는다. 안전여백(safeZone)은 payload 가 준다.
- *   폰트는 러너 동봉 Pretendard 를 쓰되, 없으면 시스템 산세리프로 내려간다(글자가 사라지지 않게).
+ *
+ *   ══ 🔴 폰트 — 이 주석이 **2026-09-22 까지 거짓말이었다**(AC-59 · 주석이 코드보다 앞서 나갔다) ══
+ *     여기엔 「폰트는 러너 동봉 Pretendard 를 쓴다」고 적혀 있었는데, 코드는
+ *     `src: local("Pretendard")` **하나뿐**이었고 러너에 한글 폰트 파일은 **0개**였다.
+ *     `local()` 은 「그 PC 에 깔려 있으면」이라는 뜻이라, 없으면 **조용히** 맑은 고딕으로 떨어진다.
+ *     🔴 실측(2026-09-22 · `probe-subtitle-font.mjs`): `@font-face` status = **`"error"`** ·
+ *        `fonts.check("Pretendard")` = **false** · Pretendard 로 지정한 폭과 «없는 이름»의 폭이 **똑같이 1605.57**.
+ *        ⇒ **그때까지 구운 자막은 전부 Pretendard 가 아니었다.** 글자가 안 깨지니 아무도 못 봤다.
+ *     ⇒ 이제 `runner/assets/fonts/PretendardVariable.woff2` 를 **실제로 동봉**하고 `url()` 로 문다.
+ *       · 가변 폰트를 고른 까닭: `lib/video/reference.ts:155` 가 굵기를 **100~900 범위로** 내보낸다.
+ *         정적 한 굵기를 넣으면 그 범위가 통째로 거짓말이 된다(열어 둔 값이 안 먹는 바로 그 병).
+ *       · 크기: 2,057,688 bytes. 러너 `node_modules` 19MB + 크로미움(수백 MB) 옆에서 **1% 안쪽**이라 서브셋 안 했다
+ *         (가변 폰트 서브셋은 글리프 누락 위험이 붙고, 이 분모에선 값이 안 맞는다).
+ *     🔴 **없어도 영상은 나온다** — 파일이 없으면 `url()` 을 안 적고 종전대로 `local()`+시스템 폰트로 간다.
+ *        다만 **조용하지 않다**: `measureOverlayFont` 가 재서 `formatMarks.subtitleFont` 로 남긴다.
+ *     ⚖️ 라이선스: SIL Open Font License 1.1 (Copyright (c) 2021 Kil Hyung-jin · Reserved Font Name "Pretendard").
+ *        원문을 **받아서** 확인했고 `runner/assets/fonts/LICENSE-Pretendard.txt` 로 같이 동봉한다.
+ *        OFL 은 번들 재배포를 허용한다(폰트를 팔지 않고, 라이선스를 같이 싣고, 이름을 바꾸지 않는 한).
  */
+/** 동봉 폰트의 절대 경로. 🔴 **없으면 null** — 없는 파일을 가리키는 `url()` 을 적지 않는다(그건 또 «이름만 있는 폰트»다). */
+export function bundledFontFile() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));                // runner/channels
+    const f = join(here, "..", "assets", "fonts", "PretendardVariable.woff2");
+    return existsSync(f) ? f : null;
+  } catch { return null; }
+}
+
+/**
+ * `@font-face` 한 줄(순수 · 자가 브라우저 없이 잰다).
+ *   🔴 `url()` 을 **맨 앞**에 둔다 — `src` 는 우선순위 목록이라 앞엣것부터 시도한다.
+ *      동봉본이 이기고, 못 받으면 그다음 `local()`(그 PC 에 깔려 있으면), 그것도 없으면 body 스택이 받는다.
+ *   🔴 `font-weight:100 900` — 가변 폰트라 한 면이 전 굵기를 낸다. 이 줄이 없으면 브라우저가 400 으로만 쓰고,
+ *      `reference.ts` 가 보내는 굵기(100~900)가 **또** 안 먹는다.
+ *   🔴 `font-display:block` — 폰트를 받기 전에 그리면 **그 프레임이 폴백으로 찍힌다.** 우리는 화면이 아니라
+ *      **PNG 를 찍는** 자리라 «잠깐 안 보이는 것»보다 «잘못된 글꼴로 찍히는 것»이 훨씬 나쁘다.
+ */
+export function fontFaceCss(fontFileOrNull) {
+  const srcs = [];
+  if (fontFileOrNull) srcs.push(`url("${pathToFileURL(fontFileOrNull).href}") format("woff2")`);
+  srcs.push('local("Pretendard")', 'local("Pretendard Variable")');
+  return `@font-face{font-family:Pretendard;font-weight:100 900;font-display:block;src:${srcs.join(",")};}`;
+}
+
 export function buildOverlayHtml(payload) {
   const { out, overlay, captions } = payload;
   /* 🔴 폴백을 **가장 보수적인 값**으로 바꿨다(R8-A §3 · 2026-09-15). 종전 폴백 220/300 은
@@ -193,7 +236,7 @@ export function buildOverlayHtml(payload) {
       : `bottom:${safe.bottom}px;`;
   return `<!doctype html><meta charset="utf-8">
 <style>
-  @font-face{font-family:Pretendard;src:local("Pretendard"),local("Pretendard Variable");}
+  ${fontFaceCss(bundledFontFile())}
   html,body{margin:0;padding:0;background:transparent;width:${out.w}px;height:${out.h}px;overflow:hidden;}
   body{font-family:Pretendard,"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
   #cap{position:absolute;left:${side}px;right:${side}px;${pos}text-align:center;font-weight:${weight};font-size:${size}px;line-height:${lineHeight};
@@ -621,6 +664,22 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     await page.goto(pathToFileURL(pagePath).href, { waitUntil: "load", timeout: 30_000 });
     await page.evaluate(() => window.__ready);
 
+    /* ═══ [AC-202] 🔴 **자막을 찍기 전에 폰트를 받아 놓고, 무엇으로 그리는지 잰다** ═══
+       🔴 **찍기 전**이어야 한다: 아래 루프가 PNG 를 찍는데, 폰트가 아직 안 왔으면 그 프레임이 **폴백으로 박힌다.**
+          화면이면 «잠깐 안 보이는 것»이지만 여기서는 **영상에 그대로 남는다.**
+       🔴 `document.fonts.ready` 만으로는 모자랐다(2026-09-22 실측): 그 글꼴로 그려진 글자가 아직 없으면
+          브라우저는 **받기 시작하지도 않는다.** `load()` 로 **콕 집어** 시켜야 한다 —
+          이걸 몰라서 동봉하고도 status 가 `"loading"` 인 채로 재고 «폴백»이라 읽었다.
+       ⚠️ 실패해도 **멈추지 않는다**(CLAUDE §9) — 폰트를 못 받았다고 영상을 안 내보내지 않는다. 대신 **적는다.** */
+    try {
+      await page.evaluate(async (sample) => {
+        try { await document.fonts.load('800 100px "Pretendard"', sample); } catch { /* 아래 측정이 드러낸다 */ }
+        try { await document.fonts.ready; } catch { /* 무시 */ }
+      }, "가나다 ABC 123");
+    } catch { /* 무시 — 측정이 사실을 말한다 */ }
+    const subtitleFont = await measureOverlayFont(page);
+    if (subtitleFont.kind !== "bundled") console.log(`  · ${fontSay(subtitleFont)}`);
+
     const layers = [];   // { file, role, startMs, endMs, motion } — 🔴 `role` 은 «무엇을 먼저 확인하나»를 고르는 데 쓴다(법이 읽는 것부터)
     const phrases = p.captions?.phrases ?? [];
     const hasBadge = !!p.overlay?.badge?.text;
@@ -672,7 +731,11 @@ export async function run({ ctx, job, shotKey, dryRun }) {
     await shot(page, shotKey, "01-오버레이");
 
     /* ③ 드라이런이면 여기까지 — 굽지도 올리지도 않는다(계약: 발행 위험 0). */
-    if (dryRun) return { dryRun: true, notes: [`재료 ${sceneFiles.length}장면 · 자막 ${layers.length}장 준비(굽지 않음)`] };
+    /* 🔴 드라이런에도 싣는다 — 폰트는 **굽기 전에** 이미 정해진 사실이고, 시험이 그걸 못 보면
+       «카나리는 멀쩡한데 본 렌더에서 글꼴이 다르다»를 영영 못 잡는다. */
+    if (dryRun) {
+      return { dryRun: true, formatMarks: { subtitleFont }, notes: [`재료 ${sceneFiles.length}장면 · 자막 ${layers.length}장 준비(굽지 않음)`, fontSay(subtitleFont)] };
+    }
 
     /* ④ ffmpeg — 입력 순서: 장면들 → 오버레이 PNG 들 → 나레이션 → BGM.
      *
@@ -772,7 +835,12 @@ export async function run({ ctx, job, shotKey, dryRun }) {
         ...(typeof overlayVerified === "boolean" ? { overlayVerified } : {}),
         ffmpegVersion: _version || undefined,
       },
+      /* [AC-202] 🔴 **구조로** 올린다 — `notes` 는 사람이 읽는 문장이고 서버가 화면에 그대로 안 쓴다.
+         「무슨 글꼴로 그렸나」는 **사실**이라 `formatMarks` 로 가야 `pieces.meta` 에 남는다. */
+      formatMarks: { subtitleFont },
       notes: [`${sceneFiles.length}장면 · 자막 ${layers.length} · ${(bytes / 1024 / 1024).toFixed(1)}MB`,
+        /* 🔴 뜻대로 그렸을 때도 적는다 — «못 냈을 때만» 적으면 **적힌 적이 없는 것**과 구별이 안 된다. */
+        fontSay(subtitleFont),
         m ? `실측 컨테이너 ${(m.containerMs / 1000).toFixed(2)}s · 영상 ${(m.videoMs / 1000).toFixed(2)}s · 오디오 ${m.audioMs ? `${(m.audioMs / 1000).toFixed(2)}s` : "없음"} · ${m.frameCount}프레임`
           : "ffprobe 없음 — 길이는 계획값(심사는 꼬리 판정을 보류한다)",
         /* [R12-1·2] 🔴 **낸 것과 못 낸 것을 둘 다 적는다** — «걸었다»만 적으면 못 걸었을 때가 안 보이고,

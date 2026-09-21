@@ -989,7 +989,8 @@ export interface RunnerReportOk {
   adsense?: { linked: boolean; state?: string; detail?: string };
   /** `ads.setup_blogger`/`ads.revert_blogger` — 블로거 템플릿 광고 삽입/복원 결과(계약 P1R4 §2.2 · 백업 원문 포함). */
   monetize?: { bloggerTemplateBackup?: string; adsenseInserted?: boolean; reverted?: boolean; detail?: string };
-  /** `render.video`(P1R5 §2.1) — 러너가 구운 mp4. 🔴 서버가 R2 HEAD 로 확인하기 전엔 «성공»이 아니다. */
+  /** `render.video`(P1R5 §2.1) — 러너가 구운 mp4. 🔴 서버가 R2 HEAD 로 확인하기 전엔 «성공»이 아니다.
+   *  ⚠️ [AC-202] 이 잡도 `formatMarks` 를 싣는다(자막 폰트) — 흰 목록은 `lib/format-marks.ts` 다. */
   render?: RunnerRenderResult;
   /** 이 잡이 실제로 나간 IP(계약 §2.5-4 · 프록시 배정 계정만). 서버가 `accounts.last_exit_ip` 에 적는다. */
   exitIp?: string;
@@ -1700,6 +1701,11 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
         R2 HEAD 로 **실존과 크기**를 확인한 뒤에만 다음 단계로 보낸다. bytes 도 러너 값이 아니라 **HEAD 실측**을 쓴다.
      🔴 AC-17 순환 0 — `render-queue` 는 이 파일을 import 한다. 그래서 여기서는 **함수 안에서** 동적으로 부른다. */
   if (kind === "render.video") {
+    /* [AC-202] 🔴 **자막 폰트 같은 «영상의 사실»도 그 글에 적는다.** 종전엔 `applyFormatMarksToPiece` 가
+       `publish.*` 안에서만 불려서, 렌더가 재서 보낸 값이 **서버에 닿고도 버려졌다.**
+       발행 쪽 주석과 같은 이유로 **아래 실패 가지들보다 먼저** 적는다 — 파일이 없어 실패해도
+       «그때 자막은 무슨 글꼴이었나»는 남아야 한다(그건 이미 일어난 사실이다). */
+    await applyFormatMarksToPiece(tid, pieceId ?? 0, okBody.formatMarks);
     const r = okBody.render;
     const failRender = async (reason: string, detail: string) => {
       await q(sql`UPDATE runner_jobs SET status='failed', claimed_by=NULL, claimed_at=NULL, error_kind='encode',

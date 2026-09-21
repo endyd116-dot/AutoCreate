@@ -35,7 +35,10 @@ const { zipWrite, zipRead } = await import(pathToFileURL(path.join(RUNNER, "lib/
 const SKIP_DIRS = new Set(["node_modules", "profiles", "_shots", "tmp", ".git"]);
 const SKIP_FILES = new Set([".token", ".env", ".DS_Store", "Thumbs.db"]);
 const SKIP_PATTERNS = [/^probe-.*\.mjs$/];      // 개발용 탐침 — 고객 PC 에 갈 물건이 아니다(셀렉터 노출도 덜한다)
-const ALLOW_EXT = new Set([".mjs", ".js", ".json", ".md", ".bat", ".sh", ".txt"]);
+/* 🔴 [AC-202] `.woff2` 를 넣지 않으면 **동봉한 폰트가 고객에게 안 간다.**
+   이 목록에 없으면 `collect` 가 «확장자 밖»으로 건너뛰고, 그러면 러너 안에는 폰트가 있는데 zip 에는 없어서
+   **개발 PC 에서만 자막이 Pretendard** 가 된다 — 이번 판이 고치려던 바로 그 병(«주석은 동봉인데 실물은 없다»)의 재판이다. */
+const ALLOW_EXT = new Set([".mjs", ".js", ".json", ".md", ".bat", ".sh", ".txt", ".woff2"]);
 
 interface Entry { name: string; data: Buffer; mode: number }
 
@@ -91,7 +94,11 @@ async function main() {
   console.log(`\n── 러너 묶기 v${version} ──`);
   const entries = collect(RUNNER);
   if (!entries.length) throw new Error("넣을 파일이 하나도 없어요(경로가 맞나요?)");
-  for (const must of ["ac-runner.mjs", "core.mjs", "package.json", "run.bat", "run.sh", "install.md", "lib/api.mjs", "lib/zip.mjs", "lib/update.mjs"]) {
+  /* 🔴 [AC-202] 폰트와 그 라이선스를 **필수 목록**에 넣는다 — 「넣었다」를 빌드가 **매번 확인**해야
+     다음 사람이 파일을 옮기거나 지웠을 때 조용히 맑은 고딕으로 돌아가지 않는다.
+     ⚖️ 라이선스 파일도 필수다: OFL 은 **라이선스를 같이 싣는 조건**으로 재배포를 허락한다. */
+  for (const must of ["ac-runner.mjs", "core.mjs", "package.json", "run.bat", "run.sh", "install.md", "lib/api.mjs", "lib/zip.mjs", "lib/update.mjs",
+    "assets/fonts/PretendardVariable.woff2", "assets/fonts/LICENSE-Pretendard.txt"]) {
     if (!entries.some((e) => e.name === must)) throw new Error(`꼭 있어야 할 «${must}» 가 빠졌어요 — 이 zip 으로는 러너가 못 돕니다.`);
   }
 

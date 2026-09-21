@@ -249,7 +249,9 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
       /* 🔴 «구웠다»는 말만으로는 성공이 아니다 — key 가 없으면 실패로 돌려보낸다.
          서버는 여기 더해 **R2 HEAD 로 실존까지** 확인한다(계약 §2.1 · 러너 주장 불신). */
       if (!out?.render?.key) return { ok: false, errorKind: "encode", detail: "영상을 구웠다는데 파일 키가 없어요.", shotKey };
-      return { ok: true, render: out.render, shotKey, notes: out.notes ?? [] };
+      /* [AC-202] 🔴 `formatMarks` 를 **여기서도 싣는다.** 종전엔 발행 분기에만 있어서, 렌더가 «자막을 어느 폰트로
+         그렸나»를 재도 **이 줄에서 통째로 사라졌다**(AC-69 그 자리). 자막은 영상의 사실이라 남아야 한다. */
+      return { ok: true, render: out.render, shotKey, notes: out.notes ?? [], ...(out.formatMarks ? { formatMarks: out.formatMarks } : {}) };
     }
     if (ADS_WRITE_KINDS.has(job.kind)) {
       // 🔴 monetize.bloggerTemplateBackup(원문)을 그대로 실어 보낸다 — 서버가 accounts.monetize 에 저장(복원 재료 · §5 경계).

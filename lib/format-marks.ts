@@ -54,6 +54,18 @@ export interface FormatMarks {
    *   🔴 키가 없으면 «못 쟀다»이지 «맞았다»가 아니다.
    */
   paragraphs?: { expected: number; actual: number | null; diff: number | null; uncertain: number; skipped: number; kind: "ok" | "lost" | "extra" | "unknown" };
+  /**
+   * 🔴 **자막을 어느 폰트로 그렸나**(AC-202 · B2 2026-09-22 · 영상 축).
+   *   `render-video.mjs` 의 `@font-face` 가 `src:local("Pretendard")` **하나뿐**이었고 러너에 한글 폰트가 **0개**였다.
+   *   `local()` 은 「그 PC 에 깔려 있으면」이라 없으면 **조용히** 맑은 고딕으로 떨어진다 —
+   *   **글자가 안 깨지니 아무도 못 봤다.** 실측(2026-09-22): `@font-face` status=`error` · `fonts.check`=false ·
+   *   Pretendard 로 지정한 폭과 «없는 이름»의 폭이 **똑같이 1605.57**. 동봉 뒤 **1427.44** 로 갈렸다.
+   *   `kind` — `bundled`(뜻대로) · `fallback`(다른 글꼴로 그렸다 · `family` 에 무엇인지) · `unknown`(**못 쟀다**).
+   *   🔴 `ambiguous` — 이름은 짚었는데 **브라우저 기본과 폭이 같아** 둘을 못 가른 경우(한국어 윈도가 그렇다).
+   *      결론(«Pretendard 가 아니다»)은 그대로지만 **이름까지 단정하지는 않았다**는 표시다(AC-9).
+   *   🔴 키가 없으면 «못 쟀다»이지 «맞았다»가 아니다.
+   */
+  subtitleFont?: { kind: "bundled" | "fallback" | "unknown"; family?: string; why?: string; ambiguous?: boolean };
   /** [R9-11] 티스토리가 HTML 모드를 못 열어 기본 모드로 내려앉은 횟수 — 🔴 0 이면 키를 안 만든다(B2 · 강등 자체는 `demoted[{kind:블록, why:"no_editor_op"}]` 로 같이 온다). */
   htmlMode?: number;
   /** 러너 보고를 받은 시각(UTC ISO) — 있으면 «발행 뒤 본 것»이다. */
@@ -232,6 +244,26 @@ function paragraphsOf(v: unknown): FormatMarks["paragraphs"] | null {
     uncertain: Math.max(0, nn(o.uncertain) ?? 0), skipped: Math.max(0, nn(o.skipped) ?? 0), kind };
 }
 
+/**
+ * 자막 폰트 보고를 **믿지 않고** 받는다 — `kind` 는 세 낱말만 · `family` 40자 · 나머지는 버린다.
+ *   🔴 `kind` 가 모르는 값이면 **통째로 버린다**(`unknown` 으로 바꿔 적지 않는다 — 러너가 안 보낸 것과
+ *      «모르는 값을 보낸 것»은 다른 사실이고, 뒤엣것은 계약이 어긋났다는 뜻이라 조용히 삼키면 안 된다).
+ */
+function subtitleFontOf(v: unknown): FormatMarks["subtitleFont"] | null {
+  const o = (v && typeof v === "object" ? v : null) as Record<string, unknown> | null;
+  if (!o) return null;
+  const kinds = ["bundled", "fallback", "unknown"] as const;
+  const kind = String(o.kind ?? "");
+  if (!(kinds as readonly string[]).includes(kind)) return null;
+  const out: NonNullable<FormatMarks["subtitleFont"]> = { kind: kind as "bundled" | "fallback" | "unknown" };
+  const fam = String(o.family ?? "").trim();
+  if (fam) out.family = fam.slice(0, 40);
+  const why = String(o.why ?? "").trim();
+  if (why) out.why = why.slice(0, 40);
+  if (o.ambiguous === true) out.ambiguous = true;
+  return out;
+}
+
 export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new Date()): FormatMarks {
   const p = (prev && typeof prev === "object" ? prev : null) as FormatMarks | null;
   const base: FormatMarks = p
@@ -239,6 +271,7 @@ export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new
         demoted: [...(p.demoted ?? [])].map(clampDemotion),
         ...(typeof p.breaks === "number" ? { breaks: p.breaks } : {}), ...(typeof p.breakFails === "number" ? { breakFails: p.breakFails } : {}),
         ...(bleedOf(p.bleed) ? { bleed: bleedOf(p.bleed)! } : {}), ...(paragraphsOf(p.paragraphs) ? { paragraphs: paragraphsOf(p.paragraphs)! } : {}),
+        ...(subtitleFontOf(p.subtitleFont) ? { subtitleFont: subtitleFontOf(p.subtitleFont)! } : {}),
         ...(typeof p.htmlMode === "number" && p.htmlMode > 0 ? { htmlMode: p.htmlMode } : {}) }
     : { planned: {}, demoted: [] };
   const r = (report && typeof report === "object" ? report : {}) as Record<string, unknown>;
@@ -262,6 +295,10 @@ export function mergeRunnerFormatMarks(prev: unknown, report: unknown, now = new
      ⚠️ `actual`·`diff` 는 **null 이 뜻 있는 값**이다(«못 쟀다») — 0 으로 채우지 않는다(AC-9). */
   const paras = paragraphsOf(r.paragraphs);
   if (paras) base.paragraphs = paras;
+  /* 🔴 **자막 폰트도 받는다.** 안 받으면 러너가 재서 보내도 **여기서 조용히 버려진다** —
+     이 흰 목록에서 값을 잃은 게 이번이 세 번째다(notes → paragraphs → subtitleFont). */
+  const sf = subtitleFontOf(r.subtitleFont);
+  if (sf) base.subtitleFont = sf;
   if (htmlMode !== undefined && htmlMode > 0) base.htmlMode = Math.floor(htmlMode);   // [R9-11] 0 이면 키 없음
   const dem = Array.isArray(r.demoted) ? r.demoted.slice(0, 60) : [];
   for (const x of dem) {
