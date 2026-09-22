@@ -78,7 +78,7 @@ const rec = (step, ok, note = "") => { out.push({ step, ok, note }); return ok; 
 /** 🔴 **반드시 절대 경로로 돌려준다.** 맨 이름(`ffmpeg`)을 그대로 쓰면 아래 shim 이 자기를 부른다 —
  *  Windows 의 `CreateProcess` 는 맨 이름을 **부르는 실행 파일이 있는 폴더부터** 찾기 때문이다.
  *  2026-09-17 C 가 실제로 밟았다: shim 안에 `"ffmpeg"` 을 박았더니 shim 이 자기를 불러 **프로세스가 무한 증식**했다(200개 넘게 떴다).
- *  🔴 «내 계측이 제품보다 먼저 고장 난다»의 또 한 얼굴이다(AC-95·AC-100 ③). */
+ *  🔴 «내 계측이 제품보다 먼저 고장 난다»의 또 한 얼굴이다(AC-176 · 옛 AC-95 · AC-100 ③). */
 function ladder(bin, envKey) {
   const la = process.env.LOCALAPPDATA;
   const cands = [process.env[envKey], bin,
@@ -332,7 +332,7 @@ function sameRange(a, b, fromMs, toMs, pad = 2) {
 }
 
 /* ═══ 낮은 ffmpeg 흉내 — 🔴 **진짜 .exe** 로 만든다 ═══
-   `.cmd` 는 못 쓴다: Node 는 `shell:false` 로 `.bat/.cmd` 실행을 막는다(AC-95 의 뿌리 · npx.cmd 가 그래서 죽었다).
+   `.cmd` 는 못 쓴다: Node 는 `shell:false` 로 `.bat/.cmd` 실행을 막는다(AC-176 의 뿌리 · 옛 AC-95 · npx.cmd 가 그래서 죽었다).
    러너의 사다리도 `shell:false` 라 `.cmd` shim 은 **조용히 건너뛰어지고 진짜 ffmpeg 이 뽑힌다** — 그러면 이 축은 «잰 척»이 된다.
    ⇒ Windows 에 늘 있는 `csc.exe`(.NET Framework)로 **콘솔 exe** 를 굽는다.
    흉내 내는 것은 둘: ①`-version` 이 4.2 라고 말한다 ②🔴 **`-filters` 목록에서 `xfade` 줄을 뺀다**
