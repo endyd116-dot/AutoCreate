@@ -13,9 +13,15 @@
   <nav class="rail" aria-label="메뉴"></nav>
   <main class="page white" id="page">
     <div class="appbar"><a class="ic" href="javascript:history.length>1?history.back():location.assign('/app/account.html')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a><span class="sp"></span></div>
-<div class="step-h"><h1>어디에 올릴까요?</h1><p>계정은 여러 개 붙일 수 있어요. 마크를 누르면 바로 연결해요.</p></div>
-<div class="cg" id="cg"><span class="sk" style="height:96px;grid-column:1/-1"></span></div>
+<!-- 🔴 [AC-191 · 사장님 라이브 2026-09-23] **순서를 뒤집었다.** 사장님: «내 계정 뭐가 연결됐는지, 잘 연결됐는지
+     정지됐는지, 수정·추가하는 CRUD 가 없어서 너무 불편해 · 아니면 내가 모르는 다른 화면에 있나?»
+     🔴 **다 이 화면에 있었다 — 순서가 거꾸로였다.** 채널 17칸(그중 14칸이 «곧 열려요»)이 화면을 꽉 채우고
+     «연결한 계정»은 한참 아래였다(실측: 폰 844px 화면에서 목록이 y=675 에서 시작 — 첫 화면 끝자락).
+     ⇒ **계정이 있으면 내 계정 먼저**, 채널 붙이기는 그 아래. 계정이 0개일 때만 예전처럼 «어디에 올릴까요?» 가 먼저다
+     (그때는 붙이는 게 할 일이니까). 자리 바꾸기는 `load()` 에서 한다(데이터를 봐야 정해지므로). -->
+<div class="step-h"><h1 id="h1">어디에 올릴까요?</h1><p id="h1sub">계정은 여러 개 붙일 수 있어요. 마크를 누르면 바로 연결해요.</p></div>
 <div class="group" id="list"><div class="gt">연결한 계정</div><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div>
+<div id="addwrap"><div class="gt" id="addT">계정 추가</div><div class="cg" id="cg"><span class="sk" style="height:96px;grid-column:1/-1"></span></div><div id="soonWrap"></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -52,13 +58,36 @@ async function load() {
      (라이브에서 blogger 는 status=active 인데 우리 앱 키가 없어 못 붙는다 — 조합했으면 이 경우가 «붙을 수 있는 칸»으로 보였다) */
   const soon = (c) => (c.connectable === false || (c.connectable === undefined && c.status && c.status !== "active")) && !cnt[c.key];
   const soonWord = (c) => (c.connectableReason === "not_open" || (!c.connectableReason && c.status !== "active")) ? "곧 열려요" : "준비 중이에요";
-  UI.$("#cg").innerHTML = chs.map((c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? `${soonWord(c)}${c.monetizable === false ? " · 광고 없음" : ""}` : c.monetizable === false ? "광고 없음 · 유입" : (SUB[c.key] || "")}</small></button>`).join("");
-  UI.$$("#cg .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
+  /* 🔴 [AC-191] **«곧 열려요»를 첫 화면에서 뺀다.** 라이브 17칸 중 **14칸이 못 쓰는 것**이라, 손님은
+     쓸 수 있는 3개를 보려고 못 쓰는 14개를 먼저 지나갔다. 🔴 **숨기는 게 아니라 접는 것**이다 —
+     «곧 열려요 N개» 를 누르면 그대로 펼쳐진다(§9: 우리 판단으로 길을 막지 않는다 · 누르면 사유 시트도 그대로). */
+  const tile = (c) => `<button type="button" class="cgi ${cnt[c.key] ? "on" : ""}${soon(c) ? " soon" : ""}" data-k="${c.key}">${UI.mark(c.key)}${UI.esc(c.label || UI.chLabel(c.key))}<small>${cnt[c.key] ? `${cnt[c.key]}개 연결됨` : soon(c) ? `${soonWord(c)}${c.monetizable === false ? " · 광고 없음" : ""}` : c.monetizable === false ? "광고 없음 · 유입" : (SUB[c.key] || "")}</small></button>`;
+  const now = chs.filter((c) => !soon(c)), later = chs.filter((c) => soon(c));
+  const bindTiles = () => UI.$$("#cg .cgi, #soonWrap .cgi").forEach((b) => b.onclick = () => { const c = chs.find((x) => x.key === b.dataset.k); if (soon(c)) return soonSheet(c); connectSheet(c); });
+  UI.$("#cg").innerHTML = now.map(tile).join("");
+  const sw = UI.$("#soonWrap");
+  sw.innerHTML = later.length ? `<button type="button" class="row tap" id="soonMore" style="margin-top:2px"><div class="l"><span class="t" style="font-size:14px">곧 열리는 채널 ${later.length}개</span><span class="d">준비가 끝나면 여기서 바로 붙일 수 있어요</span></div>${UI.chev}</button>` : "";
+  const more = UI.$("#soonMore");
+  if (more) more.onclick = () => { sw.innerHTML = `<div class="cg" style="margin-top:6px">${later.map(tile).join("")}</div>`; bindTiles(); };
+  bindTiles();
+  /* 🔴 [AC-191] 계정이 **있으면 내 계정이 먼저**, 없으면 붙이는 것이 먼저다(처음 온 사람에겐 그게 할 일이다).
+     제목도 같이 바뀐다 — «어디에 올릴까요?»는 처음 온 사람 말이다(§13.0b «내 자산 목록»). */
+  {
+    const has = D.accounts.length > 0, listEl = UI.$("#list"), addEl = UI.$("#addwrap"), h1 = UI.$("#h1"), sub = UI.$("#h1sub");
+    if (h1) h1.textContent = has ? "내 계정" : "어디에 올릴까요?";
+    if (sub) sub.textContent = has ? "줄을 누르면 고치거나 연결을 해제할 수 있어요." : "계정은 여러 개 붙일 수 있어요. 마크를 누르면 바로 연결해요.";
+    UI.$("#addT").textContent = has ? "계정 추가" : "";
+    if (listEl && addEl && listEl.parentNode) {
+      const first = has ? listEl : addEl, second = has ? addEl : listEl;
+      if (first.nextElementSibling !== second) first.parentNode.insertBefore(first, second);
+    }
+  }
   const list = UI.$("#list");
   /* 🔴 [AC-186 · 사장님 라이브 2026-09-22 «삭제하거나 수정하는 UI가 없네»] **있는데 알 길이 없었다** —
      고치기도 «연결 해제»도 줄을 눌러야 나오는 시트 안에 있다. 줄이 눌린다는 것을 **한 문장으로 말해 준다**(§13.0 «설명 한 문장»).
      🔴 단추를 새로 달지 않는다 — 줄마다 «수정»·«삭제»를 붙이면 목록이 시끄러워지고 §13.0(Primary 1개·색 3개)이 깨진다. */
-  const howto = D.accounts.length ? `<div class="row" style="padding-top:2px;padding-bottom:8px"><span class="d muted" style="font-size:12.5px">줄을 누르면 이름·올리는 횟수를 고치거나 연결을 해제할 수 있어요.</span></div>` : "";
+  /* [AC-191] 안내 한 줄은 **제목 밑으로 올라갔다**(`#h1sub`) — 목록 안에서 또 말하면 두 번이다. */
+  const howto = "";
   list.innerHTML = `<div class="gt">연결한 계정 ${D.accounts.length ? D.accounts.length + "개" : ""}</div>` + howto + (D.accounts.length
     ? D.accounts.map((a) => { const relogin = a.status === "pending_login"; const ls = UI.loginState(a);
         /* [AC-186] 🔴 내 PC 가 꺼져 있어서 못 하는 것이면 **그 까닭을 여기서** 말한다(시트까지 들어가야 아는 것이 아니라). */
