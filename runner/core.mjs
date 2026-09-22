@@ -209,6 +209,14 @@ async function runJobInner({ chromium, token, job, headed, dryRun }, seen) {
     /* 🔴 «표를 받았는데 안 썼다»일 때만 이유를 싣는다 — 애초에 표가 안 온 경우(기능이 아직 안 켜짐)까지 실으면
        운영 화면의 «되돌아간 러너» 숫자가 **전 대수**가 되어 신호가 죽는다. */
     if (job.recipe && !recipe.version) seen.recipeFellBack = recipe.fellBackWhy;
+    /* 🔴 [AC-205] **서버 표의 칸 중 «죽은 모양»이라 안 쓴 것**을 보고에 싣는다.
+       안 실으면 서버 표가 깨진 채로 묶여 온 표로 조용히 돌고 **아무도 모른다** —
+       어제 그 셀렉터가 «한 번도 안 걸리는데 아무도 몰랐던» 것과 같은 모양이 된다.
+       ⚠️ 거부해도 **잡은 그대로 돈다**(§9 — 막지 않는다). 이건 «멈췄다»가 아니라 «되돌렸다»는 기록이다. */
+    if (recipe.rejected?.length) {
+      seen.recipeRejected = recipe.rejected;
+      log(`  ⚠ 서버 셀렉터 표에서 ${recipe.rejected.length}칸을 못 썼어요(묶여 온 값으로 돌렸습니다) — ${recipe.rejected.map((r) => `${r.name}:${r.why}`).join(" · ")}`);
+    }
     if (recipe.version) log(`  · 셀렉터 표 ${recipe.version}(서버)`);
     else if (job.recipe) log(`  · 셀렉터 표: 묶여 온 것으로 갑니다 — ${recipe.fellBackWhy}`);
 
