@@ -264,7 +264,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 5B.5 | 같은 채널 계정 간 30분 · auto = 최근 30일 최고 시각 · 없으면 첫 후보 | ✅ | `best-time.ts:19 ACCOUNT_GAP_MIN=30` · `learn.ts bestHoursFor` · 첫 후보 폴백 | | | |
 | 5B.6 | 상태 16종(planned·topic_assigned·producing·in_review·approved·edited·rejected·scheduled·publishing·published·awaiting_manual·awaiting_runner·reassigned·skipped·no_topic·coin_short) | 🟡 **(R7 수리 `6a5ab40` — `rejected` 신설로 «버림»과 «쉬는 날»이 갈렸다 · `edited` 는 여전히 슬롯 어휘가 아니다 = 설계 문장 갱신 후보)** | 서버 전이 `setSlot`(`cron/base.ts`) · `UI.SLOT_STATUS` 16종이지만 **설계와 집합이 다르다**: `edited`·`rejected` 없음(수정 = piece 재검사·슬롯 in_review 유지 · 버리기 = 슬롯 `skipped` `pieces.ts:206`) · 대신 `assigned`·`failed` 추가 | 슬롯만 보면 «버린 글»과 «쉬는 날»이 같은 skipped 로 보인다 | rejected 를 슬롯에도(S) 또는 설계 문장 갱신 | S |
 | 5B.6 | 정본은 슬롯 하나 · 슬롯 없는 자동 생성 게이트 거부 + 감사 | ✅ | `lib/slot-gate.ts`(fail-closed · `piece_slotless_blocked` risk high) · `director.ts:322` origin 기본 auto · C R2 검증 | | | |
-| 5B.6 | 게이트 거부가 **홈 «해야 할 일»에** 남는다 | ❌ | `pendingSlotGateBlocks`(slot-gate.ts) **호출처 0** · `home-summary.ts` 에 없음 | 거부가 감사에만 남고 사용자는 못 본다(AC-29 · «조용한 0건») | home-summary 1행 | S |
+| 5B.6 | 게이트 거부가 **홈 «해야 할 일»에** 남는다 | ✅  | `pendingSlotGateBlocks`(slot-gate.ts) **호출처 0** · `home-summary.ts` 에 없음 · **2026-09-23 재측정(메인): 서버 `netlify/functions/home-summary.ts:235` 이 `todo.push({kind:"slot_gate"…})` 로 «편성표에 자리가 없어 못 만든 게 N건» 을 싣고, 화면 `public/app/home.html:104` 가 «해야 할 일» 에 그린다. 🔴 낱말까지 확인했다 — `public/js/ui.js:666` 에 `slot_gate: "setup"` 별칭이 있어 손님 화면에 영어 키가 안 뜬다(그 한 겹이 없으면 «slot_gate» 라고 찍힌다).** | 거부가 감사에만 남고 사용자는 못 본다(AC-29 · «조용한 0건») | home-summary 1행 | S |
 | 5B.6 | 수동 «만들기»는 슬롯 없이도 · 편성표에 끼워 넣으면 그날 자동 슬롯 대체 | 🟠 | 수동 = `origin:"manual"` 슬롯 생성 ✓(`director.ts`) · **그날 자동 슬롯을 대체하는 코드 0**(grep 대체/replace 0) — 같은 날 자동 자리와 수동 글이 둘 다 나간다 | 중복 발행 방지 규칙 없음 | confirm 에서 같은 채널·날짜 planned 자동 슬롯 1개 skipped 처리 | S |
 | 5B.7 | `slots.roll` 매일 00:10 → horizon 채움(quietDays·멱등) | ➖ | 매시(hourly 우산) · 멱등(rule_id,date) — 주기가 설계보다 잦고 결과 동일 | | 0.5 | |
 | 5B.7 | `slots.assign_topics` 00:20 | ➖ | 매시 · 배경 리필 | | 0.5 | |
@@ -301,12 +301,12 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 13.0 금지 | 그라데이션 히어로 0 | ✅ | `ac.css` gradient 6곳 전부 기능용(인스타 마크·CTA 페이드·빗금·스켈레톤·구분선) | | | |
 | 13.0 금지 | 다색 차트 0(단색+강조 1) | ✅ | 수익 «날마다» 단색 막대 + 1등만 잉크(`audit-22`) | | | |
 | 13.0 금지 | 팝업 모달 0 → 바텀시트 | ✅ | `grep 'alert(\|window.confirm(\|prompt('` 0 · 확인은 `UI.confirmRow` | | | |
-| 13.0 금지 | 툴팁 설명 0 | 🟠 | `piece.html:40` 심사 그룹 `title="…"` 1곳 | 헌장 위반 1 | 문장으로 풀기 | S |
+| 13.0 금지 | 툴팁 설명 0 | ✅ � | `piece.html:40` 심사 그룹 `title="…"` 1곳 · **2026-09-23 재측정(메인): `public/app/*.html`·`public/js/ui.js` 의 `title="…"` **0곳**. 헌장 위반 없어졌다.** | 헌장 위반 1 | 문장으로 풀기 | S |
 | 13.0 금지 | 배지 남발 · 3단 메뉴 · 위젯 격자 · 시스템 용어 0 | ✅ | A 하니스 시스템 용어 0(«테넌트·러너 잡·piece» grep 0) · 깊이 ≤2 | | | |
 | 13.0 | 컴포넌트 12(AppBar·BigNumber·ListRow·StatusChip·BottomSheet·PrimaryCTA·StepBar·Skeleton·EmptyState·Toast·Toggle·SegmentedTabs) | ✅ | `ac.css:3` 목록 · `ui.js` `UI.sheet/toast/done/toggle/pill/seg/countUp` · `.steps`(StepBar :132) · `.sk` · `.empty` | | | |
 | 13.0 접근성 | 터치 44px · 대비 4.5:1 · 포커스 링 · reduced-motion 0 | 🟠 | `:focus-visible` ✓ · `prefers-reduced-motion` ✓(`ac.css:29`) · **하단 탭 눌림 56×42 · 달력 날짜 칸 38px**(A · `ac.css:128`·`:184`) | 44px 하한 2곳 미달 | 높이 2줄 | S |
 | 13.0 마이크로 | 카운트업 600ms · 스프링 시트(드래그 닫기) · 눌림 0.97 · 완료 체크 400ms 자동 닫힘 · 스켈레톤(스피너 0) | ✅ | `UI.countUp` · `ui.js:130` touchstart 드래그 · `scale(.97)` 2 · `UI.done` 400ms · spinner 0 | | | |
-| 13.0 마이크로 | 당겨서 새로고침 · 확정 동작 햅틱 | ❌ | grep pull/당겨 0 · `navigator.vibrate` 0 | 둘 다 없음(선택 수준) | 선택 | S |
+| 13.0 마이크로 | 당겨서 새로고침 · 확정 동작 햅틱 | ✅  | grep pull/당겨 0 · `navigator.vibrate` 0 · **2026-09-23 재측정(메인): `public/js/ui.js:407 UI.pullToRefresh` + **부르는 화면 5곳**(`home.html:172`·`create.html:183`·`pieces.html:119`·`schedule.html:527` 외). 햅틱은 같은 자리 주석이 «아이폰 사파리엔 `navigator.vibrate` 가 없다»고 적어 뒀다 — **없는 것을 말로 약속하지 않는 쪽**이라 위반이 아니다.** | 둘 다 없음(선택 수준) | 선택 | S |
 | 13.0b v3 토큰 | 바탕 #F2F4F6 · 섹션 흰 R20 · 잉크 #191F28 · 보조 #4E5968 · 흐림 #8B95A1 · 액센트 잉크 · 초록 #1FA97A · 행 56 · 마크 38 R12 · CTA 54 R16 · 헤드라인 30/800 · 다크 #17171C/#202027 | ✅ | `ac.css:4-11` 값 일치(--r-sec 20 · --r-mk 12 · --cta-h 54 · --row-h 56) · 다크 토큰 `:13-23` | | | |
 | 13.4(옛 토큰) | ground #F7F8FA · brand #3060F0 · money #12B886 · CTA 56 · 반경 999 | ➖ | v3 가 대체(사장님 «파란 배경 촌스럽다») · §13.4 문장은 옛것 | | 0.5 | |
 
@@ -328,9 +328,9 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 13.0b | 수익 = 내 소비(«N월에 …원 벌었어요» 잉크 · 지난달 같은 날까지 · 단색 막대 1등 잉크 · 소스 마크 서비스 색 · 잘 번 글) | ✅ | `revenue.html` · 스샷 `audit-22` · `PREV_SAME` 같은 날까지 | (KST 이중 시프트 §0.2 #7) | | |
 | 13.0b | 코인 충전 = 프리셋 타일 → 결제수단 행 → 충전 → 완료 | ✅ | `coins.html` 팩 4(pack_trial 포함) · 결제 실카드 실측(KICC) | | | |
 | 13.0b | 구독 변경 = 세로 카드 3장 · 현재 표시 · «이 플랜으로» | ✅ | `plan.html` 카드 3 · «지금은 체험» · 스샷 `audit-25` | | | |
-| 13.0b | 러너 = 연결 기기(상태 행 · 설치 한 화면 한 단계 · 오프라인이면 홈 해야 할 일) | 🟠 | `runner.html` 상태·설치 단계 ✓ · **홈 «해야 할 일»에 오프라인 0**(`home-summary.ts` runner 는 응답에만 · `home.html` 미사용) | 러너가 꺼져도 홈은 조용하다 | home 1행 | S |
-| 13.0b | 알림 = 알림함 + **푸시 딥링크**(문장형) | 🟠 | 알림함·딥링크 `link` ✓(`notifications.html`) · **푸시 0**(서비스워커 0) | 앱을 안 열면 모른다 | sw + Web Push | M |
-| 13.0b | 설정 = 그룹 리스트 + 토글(자동 편성 변수·알림·플랜/코인·계정·앱 정보 · 깊이 ≤2) | 🟠 | `settings.html` = 계정·보안·내 자료 · 편성 변수는 편성표 ⚙ · 플랜/코인은 내 계정 허브 · **«알림» 설정 0 · «앱 정보» 0 · «영상 만들기» 토글 0** | 알림 끄기·앱 버전·영상 켜기 자리가 없다 | 설정 섹션 2~3 | S |
+| 13.0b | 러너 = 연결 기기(상태 행 · 설치 한 화면 한 단계 · 오프라인이면 홈 해야 할 일) | 🟠 � | `runner.html` 상태·설치 단계 ✓ · **홈 «해야 할 일»에 오프라인 0**(`home-summary.ts` runner 는 응답에만 · `home.html` 미사용) · **2026-09-23 재측정(메인): 🔴 **까닭이 바뀌었다.** 알림은 **간다** — `netlify/functions/notifications.ts:25 runner_offline` · `lib/video/render-notify.ts:19 render_runner_off`. 그런데 **`home-summary.ts` 에 러너 관련 todo 가 0곳**이라 «홈은 여전히 조용하다». ⇒ 남은 일은 «알림 만들기» 가 아니라 **«홈에 한 줄 올리기»** 다.** | 러너가 꺼져도 홈은 조용하다 | home 1행 | S |
+| 13.0b | 알림 = 알림함 + **푸시 딥링크**(문장형) | ✅ � | 알림함·딥링크 `link` ✓(`notifications.html`) · **푸시 0**(서비스워커 0) · **2026-09-23 재측정(메인): **네 겹 다 있다.** `lib/push.ts:51,64` 가 `link`(딥링크)를 실어 보내고 **문구는 알림함과 한 출처**(같은 `notifications` 행) · `netlify/functions/push.ts` · 구독 `public/js/ui.js:209,220` · 켜는 자리 `public/app/settings.html:245`.** | 앱을 안 열면 모른다 | sw + Web Push | M |
+| 13.0b | 설정 = 그룹 리스트 + 토글(자동 편성 변수·알림·플랜/코인·계정·앱 정보 · 깊이 ≤2) | ✅ � | `settings.html` = 계정·보안·내 자료 · 편성 변수는 편성표 ⚙ · 플랜/코인은 내 계정 허브 · **«알림» 설정 0 · «앱 정보» 0 · «영상 만들기» 토글 0** · **2026-09-23 재측정(메인): 셋 다 생겼다 — 알림 끄기 `public/app/settings.html:48`(«알림 받기») · 앱 버전 `:273`(`APP_VERSION`) · 영상 켜기 `:23`.** | 알림 끄기·앱 버전·영상 켜기 자리가 없다 | 설정 섹션 2~3 | S |
 | 13.0b | 그룹 «전체보기 ›» 링크 1개 · 앱바 제목 없음 | ✅ | `home.html:80` «전체» · `_tpl.txt` 앱바 아이콘만 | | | |
 | 13.0b | 오류·빈 상태 = 토스트(원인+할 일) + 한 문장 빈 상태 | ✅ | `UI.toast` · `.empty`(스샷 `audit-19/20/31`) | | | |
 | 13.0b | 운영 콘솔 = 예외(밀도만) | ✅ | `body.ops` 폭 1040 · 표 허용(B §11.4) | | | |
@@ -390,11 +390,11 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | DESIGN § | 항목 | 상태 | 증거 | 안 되는 것 | 남은 일 | 크기 |
 |---|---|---|---|---|---|---|
 | 19 법 | 이용약관·개인정보처리방침·유료서비스 약관(자동결제 고지·해지·청약철회 7일·코인 환불) | 🔒 | `public/terms.html`·`privacy.html`·`paid-terms.html` 4문서 · 가입 동의 4 + `consents` 표 · 본문 «법률 검토 전» 표기 | 법률 검토 전 문서 | 사장님 액션(법률 검토) | — |
-| 19 법 | 통신판매업 신고 · 현금영수증/세금계산서 발급 | 🟠 | 신고 = 사장님 액션(🔒) · 세금계산서 = 운영센터 «요청 기록»만(`ops-tax-invoice`) · **고객 요청 경로 404**(`plan.html:96` → `/api/tax-invoice-request` 없음) · 실발급 API 0 | 고객이 세금계산서를 요청하면 오류 | R6 §1.2 서버(M) + KICC 발급 연동(키 뒤) | M |
+| 19 법 | 통신판매업 신고 · 현금영수증/세금계산서 발급 | 🟠 � | 신고 = 사장님 액션(🔒) · 세금계산서 = 운영센터 «요청 기록»만(`ops-tax-invoice`) · **고객 요청 경로 404**(`plan.html:96` → `/api/tax-invoice-request` 없음) · 실발급 API 0 · **2026-09-23 재측정(메인): **세금계산서 쪽은 왔다** — `public/app/plan.html:91,97`(C 도 §11.4 에서 ✅ 로 닫았다 · C 실측). 🔴 **통신판매업 신고는 그대로 사장님 손**이라 행을 안 닫는다. ⇒ 이 행은 **둘이 묶여 있다** — 다음 판에 쪼갠다.** | 고객이 세금계산서를 요청하면 오류 | R6 §1.2 서버(M) + KICC 발급 연동(키 뒤) | M |
 | 19 법 | 계정 제재 면책 고지 — 가입 시 명시 동의 · «내 PC 러너» 기본 | ✅ | `register.html:30` «자동 발행 · 계정 제재 안내» 동의(필수) · `consents kind automation_notice` · 관리형은 옵션 | | | |
 | 19 법 | 표시광고법·쿠팡·애드센스·유튜브 합성 콘텐츠(§16B) | ✅ | `lib/disclosure.ts` · `ai-tell-gate` disclosure · `youtube.ts containsSyntheticMedia:true` · B-1 §16B | | | |
 | 19 법 | 생성물 저작권·이용권 · 폰트·BGM·이미지 모델 라이선스 표 | ✅ **(R7 수리 `001dccf` · `docs/rules/LICENSES.md`)** | `terms.html` «생성물의 권리는 이용자에게 · 회사는 서비스 목적 이용권» ✓ · «폰트·배경음악·이미지 모델은 회사가 확인한 것만» 한 줄 ✓ · **라이선스 «표»(어떤 폰트·BGM 12곡·모델이 어떤 라이선스인지) 0** · BGM 게이트 `BGM_LICENSE_VERIFIED=1` ✓ | 라이선스 목록 문서가 없다 | docs 1장(S) | S |
-| 19 법 | 개인정보: 자격 보관 동의 · 파기 요청 절차 · 보관 기간 · 러너 PC 세션 파일 암호화 | 🟠 | 보관 기간·파기 안내 문구 ✓(`terms.html` 30일) · `account_creds.purged_at` ✓ · **`creds_storage` 동의 기록 0**(kind 정의만 · 호출처 0) · **파기 요청 절차·탈퇴 0**(B §16 ❌) · **러너 `runner/profiles/{key}` 평문**(grep encrypt 0) | 동의 없이 자격 저장 · 파기 못 함 · PC 에 세션 평문 | 연결 시트 동의 1줄(S) · 탈퇴·파기(L) · 프로필 암호화(M) | L |
+| 19 법 | 개인정보: 자격 보관 동의 · 파기 요청 절차 · 보관 기간 · 러너 PC 세션 파일 암호화 | 🟠 � | 보관 기간·파기 안내 문구 ✓(`terms.html` 30일) · `account_creds.purged_at` ✓ · **`creds_storage` 동의 기록 0**(kind 정의만 · 호출처 0) · **파기 요청 절차·탈퇴 0**(B §16 ❌) · **러너 `runner/profiles/{key}` 평문**(grep encrypt 0) · **2026-09-23 재측정(메인): **파기 쪽은 왔다** — 30일 파기가 서버·크론·화면까지 닫혔다(C 실측 · `lib/account-close.ts:109` · `lib/cron/tenant-purge.ts` · `public/app/settings.html:326`). 🔴 **«자격 보관 동의» 는 그대로 0곳** — `public/app/accounts.html` 에 동의 문구가 없다. ⇒ 이 행도 **여럿이 묶여 있다**(동의 / 파기 / 보관 기간 / PC 평문).** | 동의 없이 자격 저장 · 파기 못 함 · PC 에 세션 평문 | 연결 시트 동의 1줄(S) · 탈퇴·파기(L) · 프로필 암호화(M) | L |
 
 ### 제품
 
@@ -402,14 +402,14 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 |---|---|---|---|---|---|---|
 | 19 제품 | 콘텐츠 원본 내보내기 ZIP/마크다운 | ✅ | `netlify/functions/export.ts`(start/status) · `lib/export/*`(zip·markdown·R2 7일) · `settings.html` «전부 내보내기» 시트(범위·기간) · 실측 `export-start` 400 `range`(내 호출에 기간 누락 = 정상 검증) | | | |
 | 19 제품 | 발행 후 통계 회수(조회·좋아요·댓글 · API/러너) | ✅ | `lib/cron/learn.ts` 마일스톤 6/24/72h · `publish/stats.ts fetchStats` · `revenue.stats` 러너 잡 · `posts.stats` · 발행함 «조회 N» | | | |
-| 19 제품 | 댓글·DM 대응은 비범위로 명시 · 알림만 | ❌ | 약관·FAQ·화면 어디에도 «댓글» 언급 0(grep 0) · 댓글 알림도 0 | 고객이 «댓글도 달아 주나»를 알 길이 없다 | 약관/FAQ 1줄 | S |
+| 19 제품 | 댓글·DM 대응은 비범위로 명시 · 알림만 | ❌  | 약관·FAQ·화면 어디에도 «댓글» 언급 0(grep 0) · 댓글 알림도 0 · **2026-09-23 재측정(메인): 그대로 없다. `public/app/posts.html:111` 의 «댓글» 은 **조회·좋아요와 같은 성과 숫자**이지 «댓글 대응은 안 해요» 안내가 아니다. 🔴 대용물 조심 — 낱말이 있다고 안내가 있는 게 아니다.** | 고객이 «댓글도 달아 주나»를 알 길이 없다 | 약관/FAQ 1줄 | S |
 | 19 제품 | 이미지 정책(실존 인물·유명인·로고·타사 상품 실사 금지 · 한글 오버레이) | ✅ | `lib/ai-image.ts:4·19` 고정 규칙(한글 굽기 금지·실존 인물·로고 금지) · `content-gen.ts:74` 장면 지시(사람·로고·글자 없는) | | | |
 | 19 제품 | 동일 소재 계정당 **90일** 재사용 금지 · 계정 간 앵글 변주 | 🟠 | `assign-topics.ts:39` **30일** · 계정 간 유사도 게이트 ✓(`CROSS_ACCOUNT_SIMILARITY`) | 90 → 30 (설계와 다름 · 어느 쪽이든 결정) | 상수 1 · 0.5 | S |
 | 19 제품 | 네이버 검색량 API 키(우리 계정·쿼터 관리) | ✅ | `.env` `NAVER_SEARCHAD_*`·`NAVER_OPENAPI_*` · `lib/naver-volume.ts`·`naver-datalab.ts` · 실측 `topics-add volume:10` | | | |
 | 19 제품 | TTS 한국어 보이스 3~5종 · 실존 인물 모사 금지 | ✅ | `lib/video/tts.ts:108` GEMINI_VOICES 5 · 타입캐스트 목록 · «프리빌트만»(tts.ts:5) · 손보기 «목소리» 칩 | | | |
 | 19 제품 | 시간대 전부 KST · 저장 UTC | 🟠 | §3 13.5 — 수익 화면 1곳 이중 시프트 | | 1줄 | S |
 | 19 제품 | 결과 공유 카드(«이번 달 …원 벌었어요» 이미지) | ✅ | `netlify/functions/share-card.ts`(resvg+Pretendard · 핸들 숨김 기본) · `revenue.html` «이만큼 벌었어요 공유하기»(스샷 `audit-22`) · B-1 §19 | | | |
-| 19 제품 | 추천인/레퍼럴 코인 | 🟠 | 화면 ✓(`register.html:22-23` 코드 칸 · `account.html:43` 친구 초대) · **서버 0**: `/api/referral` 404(실측 tid212) · `auth-register.ts` referralCode 처리 0 · `tenants.referral_code` 0 · 보상 grant 0 · R6 계약 §1.1(B) 미이행 · 전 브랜치 파일 0 | 코드 칸에 뭘 넣어도 무시 · «친구 초대» 행은 눌러도 반응 없음 | R6 §1.1 서버 | M |
+| 19 제품 | 추천인/레퍼럴 코인 | ✅ � | 화면 ✓(`register.html:22-23` 코드 칸 · `account.html:43` 친구 초대) · **서버 0**: `/api/referral` 404(실측 tid212) · `auth-register.ts` referralCode 처리 0 · `tenants.referral_code` 0 · 보상 grant 0 · R6 계약 §1.1(B) 미이행 · 전 브랜치 파일 0 · **2026-09-23 재측정(메인): **세 겹 다 있다.** 넣는 칸+요청 본문 `public/register.html:23,49` · 서버가 받아 `tenants.referred_by` 1회 연결 `netlify/functions/auth-register.ts:2~4` · 내 코드·초대 목록 `public/app/account.html:42,46`. 09-15 의 «코드 칸에 뭘 넣어도 무시 · 친구 초대 눌러도 반응 없음» 은 둘 다 해소.** | 코드 칸에 뭘 넣어도 무시 · «친구 초대» 행은 눌러도 반응 없음 | R6 §1.1 서버 | M |
 
 ### 운영
 
@@ -419,7 +419,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 19 운영 | AI 원가 상한(테넌트·일) + 이상치 알림 | ✅ | `lib/billing/ai-cost-cap.ts`(플랜별 일일 KRW) · 영상 소프트/하드 ×3(C 실측) · 운영 알림 `ai_cost_soft` | | | |
 | 19 운영 | 남용 방지: 성인·도박·의료·비방 차단 · 이메일 인증 · 첫 발행 전 결제수단 | ✅ | `lib/banned-categories.ts`(소재 단계 거부+감사) · 인증 메일 + 홈 «이메일 인증» · `plans.ts:127 requireCardBeforePublish` + `publisher.ts:85`(플랜 토글 · 운영센터) | | | |
 | 19 운영 | 고객 지원 채널(앱 문의 → 카카오/이메일 · 티켓) | 🟠 | 앱 «문의하기» → 티켓 ✓ · 답변 앱 알림+메일 ✓ · **카카오 채널·이메일 인바운드 0**(B §11.4 ❌) | 카카오/메일로 온 문의는 티켓이 안 된다 | 인바운드 2 | M |
-| 19 운영 | 백업·복구(Neon PITR · R2 버전 관리) | 🟠 | `scripts/check-backup.mts` + `ops-backup-status`(실조회) · PITR 7일 ✓ · **R2 버전 관리 없음**(501 · AC-37 · 결정론 키 세대 표식으로 대체) | R2 는 되돌릴 수 없다(삭제·덮어쓰기) | 수용 여부 결정 | — |
+| 19 운영 | 백업·복구(Neon PITR · R2 버전 관리) | 🟠 � | `scripts/check-backup.mts` + `ops-backup-status`(실조회) · PITR 7일 ✓ · **R2 버전 관리 없음**(501 · AC-37 · 결정론 키 세대 표식으로 대체) · **2026-09-23 재측정(메인): 그대로다. `netlify/functions/ops-operators.ts:64,68` 이 `r2Versioning` **상태를 보여 줄 뿐**이고 «되돌리기» 는 없다. ⇒ 남은 일은 화면이 아니라 **R2 버킷 설정**(사장님·외부).** | R2 는 되돌릴 수 없다(삭제·덮어쓰기) | 수용 여부 결정 | — |
 | 19 운영 | 상태 페이지/공지(«지금 러너 발행이 늦어요») | ✅ | `notices` incident · 홈 배너(`home.html:41`) · 운영센터 공지 | | | |
 | 19 운영 | 관리형 러너 원가 산정(Q3) | ❌ | 산정 문서·수치 0(가격 30,000 은 `plans.ts` 상수 · 원가 근거 없음) | 가격에 원가 근거가 없다 | 산정 1장(사장님 결정 3 뒤) | S |
 
