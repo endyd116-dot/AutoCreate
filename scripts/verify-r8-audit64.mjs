@@ -19,7 +19,7 @@ import { readFileSync, existsSync as existsSync0 } from "node:fs";
  *      사람에게 할 말은 **`console.error`(stderr)** 로 보내라 — 먹는 쪽은 stdout 만 읽는다.
  *   실제로 밟았다(2026-09-22 C · 배포 직전 전수 검사가 잡았다): 내가 맨 끝에 «내가 읽은 제품 파일 …» 한 줄을
  *   `console.log` 로 찍었더니 **JSON 뒤에 붙어** `Unexpected non-whitespace character after JSON at position 9187` 로 죽었다.
- *   🔴 **«내 자리»라고 생각한 곳이 남의 입구였다** — 자를 고칠 때는 **그 자를 부르는 자까지** 돌려 봐야 한다(AC-219). */
+ *   🔴 **«내 자리»라고 생각한 곳이 남의 입구였다** — 자를 고칠 때는 **그 자를 부르는 자까지** 돌려 봐야 한다(AC-240 · 옛 번호 AC-219 는 B 가 먼저 쓴 자리라 내가 비켰다). */
 const JSON_OUT = process.argv.includes("--json");
 /* [2026-09-16 메인 · b-49 실측] 주석을 걷어 낸 본문 — «주석에만 적혀 있는 것»을 만든 것으로 세지 않는다(AC-59).
    b-49 가 찔러 보니 11칸 중 **9칸**이 주석 한 줄로 닫혔다(A10·B7·B8·H1·E4·C1·A12·C2·H3).
