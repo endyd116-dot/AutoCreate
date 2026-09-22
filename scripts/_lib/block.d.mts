@@ -1,5 +1,5 @@
 /**
- * scripts/lib/block.d.mts — `block.mjs` 의 타입 선언(AC-216 · B2 · 2026-09-22).
+ * scripts/_lib/block.d.mts — `block.mjs` 의 타입 선언(AC-216 · B2 · 2026-09-22).
  *   🔴 구현은 `.mjs` 다(자들이 `node` 로도 `tsx` 로도 부른다). 선언만 여기 둔다 —
  *      없으면 `.mts` 자에서 `tsc` 가 TS7016 으로 운다.
  *   ⚠️ **구현과 이 선언이 갈라지면 아무도 안 잡는다.** 칸을 더하면 둘 다 고쳐라.

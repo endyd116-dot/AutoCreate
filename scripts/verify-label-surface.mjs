@@ -157,9 +157,26 @@ const ddlEnum = (table, col) => {
   const cm = line.split("--")[1] || "";
   return new Set(cm.split("|").map((x) => x.trim()).filter((x) => /^[a-z_]{3,}$/.test(x)));
 };
+/* 🔴 [AC-222 · B 2026-09-23] **매개변수로 쓰는 상태도 본다** — 여기가 눈먼 자리였다.
+   이 축은 `UPDATE pieces SET … status = '글자'` 만 봤다. 그런데 서버는 상수를 자주 쓴다:
+     `const BACKLOG_STATUS = "pending_resume";  …  UPDATE pieces SET status = ${BACKLOG_STATUS}`
+   ⇒ 🔴 **새 상태 `pending_resume` 이 이 축에 아예 안 들어왔다.** 화면 낱말을 빼 봐도 **초록이었다**(2026-09-23 실측).
+      지금 초록인 건 A 가 손으로 낱말을 넣어 줬기 때문이지 **자가 잡아서가 아니다** — 운이지 규율이 아니다.
+   ⇒ `status = ${IDENT}` 를 만나면 **그 이름의 상수를 서버 본문에서 찾아** 값을 읽는다(상수도 제품에서 떼어 온다).
+   ⚠️ 못 찾으면 **아무것도 안 더한다** — 지어내지 않는다. 그런 자리는 아래 «못 읽은 상수»로 찍어 사람이 본다. */
+const paramConsts = [];
+const constWrites = (table) => {
+  const out = new Set();
+  for (const m of serverText.matchAll(new RegExp(`UPDATE ${table} SET[^;]{0,400}?status = \\$\\{([A-Za-z_$][\\w$]*)\\}`, "g"))) {
+    const name = m[1];
+    const dec = new RegExp(`const ${name}\\s*=\\s*"([a-z_]+)"`).exec(serverText);
+    if (dec) out.add(dec[1]); else paramConsts.push(`${table}.status = \${${name}}`);
+  }
+  return out;
+};
 const writes = (table) => setOf(new RegExp(`UPDATE ${table} SET[^;]{0,400}?status = '([a-z_]+)'`, "g"), serverText);
-const slotSrv = new Set([...ddlEnum("slots", "status"), ...writes("slots")]);
-const pieceSrv = new Set([...ddlEnum("pieces", "status"), ...writes("pieces")]);
+const slotSrv = new Set([...ddlEnum("slots", "status"), ...writes("slots"), ...constWrites("slots")]);
+const pieceSrv = new Set([...ddlEnum("pieces", "status"), ...writes("pieces"), ...constWrites("pieces")]);
 const uiSlot = objectMap(uiJs, "UI.SLOT_STATUS", { pair: true }) || new Map();
 const uiPiece = objectMap(uiJs, "UI.PIECE_STATUS", { pair: true }) || new Map();
 const uiPost = objectMap(uiJs, "UI.POST_STATUS", { pair: true }) || new Map();
@@ -167,6 +184,10 @@ const slotNoWord = minus(slotSrv, new Set(uiSlot.keys()));
 const pieceNoWord = minus(pieceSrv, new Set(uiPiece.keys()));
 rec("🔴 슬롯 상태 — 서버가 쓰는 값에 화면 낱말이 다 있다", slotNoWord.length === 0, slotNoWord.join(" ") || `서버 ${slotSrv.size}종 · 화면 ${uiSlot.size}종`, slotNoWord);
 rec("🔴 글 상태 — 서버가 쓰는 값에 화면 낱말이 다 있다", pieceNoWord.length === 0, pieceNoWord.join(" ") || `서버 ${pieceSrv.size}종 · 화면 ${uiPiece.size}종`, pieceNoWord);
+/* 🔴 [AC-222] **못 읽은 상수는 «없는 것»이 아니다** — 조용히 빼면 그 상태가 다시 모수 밖으로 사라진다(AC-9).
+   `status = ${X}` 인데 `const X = "…"` 를 못 찾은 자리를 **세어서 적는다**. 0 이 아니면 사람이 본다. */
+rec("🔴 매개변수로 쓰는 상태의 상수를 다 읽었다", paramConsts.length === 0 ? true : "WARN",
+  paramConsts.join(" · ") || "못 읽은 상수 0", paramConsts);
 
 /* 모의가 지어낸 상태(서버에 없는 값)도 잡는다 — 모의만의 세계가 생기지 않게 */
 const mockSlotStatus = setOf(/status:\s*"([a-z_]+)"/g, mockJs);

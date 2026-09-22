@@ -1,5 +1,5 @@
 /**
- * scripts/lib/find-playwright.mjs — **playwright 를 어디서 빌려 오나**(메인 · 2026-09-16).
+ * scripts/_lib/find-playwright.mjs — **playwright 를 어디서 빌려 오나**(메인 · 2026-09-16).
  *
  *   ══ 왜 ══
  *   `verify-runner-scrape.mts`·`verify-runner-wait.mts` 는 `createRequire(runner/package.json)` 로
@@ -12,7 +12,7 @@
  *      exit 1(제품이 틀렸다) 과 exit 2(잴 재료가 없다) 는 다른 말이다 — `verify-safe-list.mjs` 가 갈라서 센다.
  *
  *   쓰는 법:
- *     import { requirePlaywright } from "./lib/find-playwright.mjs";
+ *     import { requirePlaywright } from "./_lib/find-playwright.mjs";
  *     const { chromium } = await requirePlaywright();   // 없으면 안내 찍고 exit 2
  */
 import { existsSync } from "node:fs";

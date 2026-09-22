@@ -24,7 +24,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { codeOnly } from "./_lib/code-only.mjs";
-import { blockOf } from "./lib/block.mjs";   // 🔴 자르개는 한 곳(B2 · AC-216)
+import { blockOf } from "./_lib/block.mjs";   // 🔴 자르개는 한 곳(B2 · AC-216)
 
 const ROOT = process.cwd();
 const GUARDS = "lib/guards.ts", PAUSE = "lib/tenant-pause.ts", RUNNER = "lib/cron/runner.ts", BASE = "lib/cron/base.ts";

@@ -89,6 +89,9 @@ export function brokenClass(cls) {
   return { bare: bare.join(""), punct: punct.join("") };
 }
 
+/** 🔴 [AC-222] «내용이 없다» — 그 팔이 파일을 남기고 내용만 `""` 로 만든다. 공백·줄바꿈만 있는 것도 «없다»로 친다. */
+export function isBlank(text) { return !String(text ?? "").trim(); }
+
 /** 보통 문자열 안에서 «JS 가 먹어 없어질 홑 백슬래시» 를 찾는다. */
 export function brokenStringRegex(src) {
   const hits = [];
@@ -135,6 +138,12 @@ for (const [body, want, why] of TEAR) {
   const got = classesOf(body).length;
   if (got !== want) selfFails.push(`뜯기 — /${body}/ 에서 클래스 ${want}개를 봐야 하는데 ${got}개를 봤다(${why})`);
 }
+/* 🔴 [AC-222] **«빈 파일»을 가르는 눈도 시험한다** — 이 판정이 틀리면 «제품을 비워도 초록»이 그대로 돌아온다.
+   대조군을 짝으로 둔다(AC-99 ⑫): 빈 것을 물고 **성한 것을 안 무는지**까지 봐야 «전부 빈 것으로 치는 함수»가 안 숨는다. */
+for (const [t, want, why] of [["", true, "아예 빈 것"], ["   \n\t\n", true, "공백·줄바꿈만(그 팔이 만드는 모양)"],
+                              ["const a = 1;", false, "성한 코드"], ["// 주석만", false, "🔴 주석만 있어도 «있다» — 걷는 것은 다른 축의 일이다"]]) {
+  if (isBlank(t) !== want) selfFails.push(`빈 판정 — ${why}: 기대 ${want} · 나온 것 ${isBlank(t)}`);
+}
 if (brokenStringRegex('"\\\\d+"').length !== 0) selfFails.push('new RegExp("\\\\d") — 성한 본을 물었다');
 if (brokenStringRegex('"\\d+"').length !== 1) selfFails.push('new RegExp("\\d") — 깨진 본을 안 물었다');
 if (selfFails.length) {
@@ -147,8 +156,35 @@ if (selfFails.length) {
 const files = DIRS.flatMap((d) => walk(d));
 if (!files.length) { console.log("⊘ 못 쟀어요 — 훑을 파일이 하나도 없다(폴더가 맞나)."); process.exit(2); }
 
+/* ───────── 🔴 **내가 제품을 정말 읽었나** — «파일은 있는데 내용이 없다» (AC-222 · 2026-09-23) ─────────
+ *   C 의 `verify-experiment-holds` 가 이 자를 찍었다: **제품을 통째로 비운 나무에서도 종료 0**.
+ *   정규식 3036 → 2230(**806개 사라졌는데**) «깨진 곳 0» 이라 초록이었다 — 볼 게 없으니 흠도 없던 것이다.
+ *   🔴 **«0을 통과로 쓰지 마라»(AC-141 ②)의 정확한 얼굴**이고, 어제 내 ⑧축이 없어 33축이 초록이던 것과 같은 자리다.
+ *
+ *   ══ 🔴 임계값을 **지어내지 않았다 — 재서 나온 수다** ══
+ *     오늘 이 저장소를 세어 보니 훑는 다섯 나무에 **파일 583개 · 그중 내용이 빈 것 0개**였다
+ *     (scripts 276 · lib 218 · netlify/functions 83 · db 2 · public/js 4 — 전부 100% 비지 않음).
+ *     그리고 그 팔은 **파일을 남기고 내용만 `""` 로** 만든다(`verify-experiment-holds.mjs:96`).
+ *     ⇒ 🔴 **«빈 소스 파일이 하나라도 있으면 ⊘»** 가 답이다. «몇 % 줄면» 같은 **비율을 만들 까닭이 없었다** —
+ *        0 은 내가 정한 수가 아니라 **오늘 잰 수**이고, 비율과 달리 **일부만 비운 경우도 그대로 걸린다.**
+ *   ⚠️ 빈 파일이 **정말 필요해질 때**(자리 채움 등)는 이 줄이 운다. 그때 «왜 비었나»를 여기 적고 예외를 만들어라 —
+ *      그게 «조용히 넘기는 것»보다 낫다. */
+{
+  const empty = files.filter((f) => isBlank(readFileSync(path.join(ROOT, f), "utf8")));
+  if (empty.length) {
+    console.log("─".repeat(100));
+    console.log(`⊘ 못 쟀어요 — 🔴 **내용이 빈 소스 파일 ${empty.length}개**(훑은 ${files.length}개 중). 볼 것이 없으면 «깨진 곳 0» 은 참말이 아니다.`);
+    for (const f of empty.slice(0, 8)) console.log(`   · ${f}`);
+    if (empty.length > 8) console.log(`   · … 외 ${empty.length - 8}개`);
+    console.log("   🔴 이 저장소엔 빈 소스 파일이 **0개**여야 한다(2026-09-23 실측 583/583). 하나라도 있으면 «내가 제품을 읽고 있나»부터 의심한다.");
+    process.exit(2);
+  }
+}
+
 let nLiterals = 0, nStringy = 0, nCommentLines = 0, nNotRegex = 0;
 const notRegex = [];
+const perDir = new Map();   // 🔴 [AC-222] 나무별 모수 — 합만 보면 «어느 나무가 사라졌나»를 못 본다
+const dirOf = (f) => DIRS.find((d) => f === d || f.startsWith(`${d}/`)) ?? "(그 밖)";
 const hits = [];
 for (const f of files) {
   const raw = readFileSync(path.join(ROOT, f), "utf8");
@@ -170,6 +206,7 @@ for (const f of files) {
             이걸 «못 쟀음»으로 세면 멀쩡한 제품에 빨강이 뜨고, 그러면 아무도 이 자를 안 본다(AC-95). */
       if (classes.unclosed) { nNotRegex++; if (notRegex.length < 3) notRegex.push(`${f}:${i + 1}`); continue; }
       nLiterals++;
+      perDir.set(dirOf(f), (perDir.get(dirOf(f)) ?? 0) + 1);
       for (const cls of classes) {
         const b = brokenClass(cls);
         if (b) hits.push({ f, line: i + 1, kind: "①", what: cls, why: `맨 «${b.bare}» 가 구두점 «${b.punct}» 과 섞여 있다 — \\${b.bare[0]} 가 흘린 자국`, ctx: ln.trim().slice(0, 110) });
@@ -186,6 +223,15 @@ for (const f of files) {
 console.log("─".repeat(100));
 console.log(`정규식의 먹힌 백슬래시 — 훑은 파일 ${files.length}개 · 집은 정규식 리터럴 ${nLiterals}개 · new RegExp("…") ${nStringy}개 · 건너뛴 주석 줄 ${nCommentLines}개 · 깨진 곳 ${hits.length}`);
 /* 🔴 **모수에서 뺀 것을 말한다** — 말 안 하면 «다 봤다»가 되고, 그게 오늘 하루 종일 쫓은 병이다(AC-141 ②). */
+/* 🔴 **나무별로 찍는다**(AC-222) — 합만 보면 «어느 나무가 통째로 사라졌는지»를 사람도 못 본다.
+   위 «빈 파일» 축이 기계로 막고, 이 줄은 **사람이 눈으로** 보는 자리다(둘 다 있어야 한다). */
+{
+  const byDir = DIRS.map((d) => {
+    const fs2 = files.filter((f) => f === d || f.startsWith(`${d}/`));
+    return `${d} ${fs2.length}파일/${perDir.get(d) ?? 0}식`;
+  }).join(" · ");
+  console.log(`  · 나무별 모수 — ${byDir}`);
+}
 console.log(`  · 모수에서 뺀 것 — 정규식이 **아니었던 듯한 후보 ${nNotRegex}개**(클래스가 안 닫힌다 = 대개 나눗셈이다${notRegex.length ? ` · 예: ${notRegex.join(", ")}` : ""})`);
 console.log("    🔴 이건 «못 쟀음»이 아니라 **이 자의 알려진 한계**다 — 「나눗셈과 정규식을 완벽히 못 가른다」(머리말). 빨강으로 세지 않는다.");
 console.log(`  ✓ ③ 자기시험 — 잡는 눈 ${SELFTEST.length}종 · 뜯는 눈 ${TEAR.length}종이 모두 제 답을 냈다(이 자를 믿을 근거)`);

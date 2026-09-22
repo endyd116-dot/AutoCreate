@@ -1,5 +1,5 @@
 /**
- * scripts/lib/block.mjs — 🔴 **소스에서 «덩이»를 잡되, 못 잡으면 못 잡았다고 말한다**(AC-216 · B2 · 2026-09-22).
+ * scripts/_lib/block.mjs — 🔴 **소스에서 «덩이»를 잡되, 못 잡으면 못 잡았다고 말한다**(AC-216 · B2 · 2026-09-22).
  *
  *   ══ 왜 이 파일이 생겼나 — 하루에 **다섯 자리**에서 같은 병이 나왔다 ══
  *     B(`autocreate-b-f8`)가 잣대를 세웠다: **「창을 넓히는 자리는 전부 이 병을 품는다」.**
@@ -58,12 +58,14 @@
  *      ⇒ B 가 **새 모듈이 아니라 그 파일의 갈래**로 `codeOnlyKeepIndex` 를 냈다(공백으로 치환 · 길이·자리 보존).
  *   🔴 한계는 `codeOnly` 와 **똑같다**(문자열 속 `//`·정규식 속 `\/\/` 는 못 가린다) — 그래서 **같은 눈**을 쓴다.
  *      한쪽만 고치면 또 갈린다. 고칠 일이 있으면 `scripts/_lib/code-only.mjs` 를 고쳐라.
- *   ⚠️ **왜 디렉터리를 건너 부르나**: `scripts/lib/`(2026-09-16 메인)와 `scripts/_lib/` 가 **둘 다 있다**.
- *      내가 만든 갈림이 아니라 **원래 갈려 있던 것**이고, 합치는 것은 여러 브랜치가 도는 중이라 내 몫이 아니다 —
- *      메인에 넘겨 뒀다. 🔴 다음 사람은 **둘 다 열어 보고** 나서 새 파일을 만들어라(오늘 나는 안 열어 보고
- *      `stripComments` 를 새로 팠다 · B 가 잡았다).
+ *   ✅ **[AC-222 · B 2026-09-23] 그 갈림은 합쳐졌다 — 이 파일이 `scripts/_lib/` 로 왔다.**
+ *      전에 여기 «`scripts/lib/` 와 `scripts/_lib/` 가 둘 다 있다 · 합치는 것은 내 몫이 아니다»라고 적혀 있었다.
+ *      메인이 «내가 만든 갈림»(2026-09-16 `find-playwright.mjs`)이라며 B 에게 넘겼고, 셋(`block.mjs`·`block.d.mts`·
+ *      `find-playwright.mjs`)을 옮기고 **부르는 쪽 15곳**을 고쳤다. `scripts/lib/` 는 **없다**.
+ *      🔴 그래서 이제 **건너 부르지 않는다** — 아래 수출도 같은 폴더(`./code-only.mjs`)를 본다.
+ *      🔴 다음 사람에게: **하니스 공용 도구는 `scripts/_lib/` 한 곳**이다. 새 폴더를 만들지 말고 여기 갈래를 더해라.
  */
-export { codeOnlyKeepIndex as stripComments } from "../_lib/code-only.mjs";
+export { codeOnlyKeepIndex as stripComments } from "./code-only.mjs";
 
 /** 닻이 몇 번 나오나(겹치지 않게 센다). */
 function countOf(src, anchor) {
