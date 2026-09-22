@@ -13,16 +13,21 @@
  *
  * 무엇을 재나 — 규칙 문서의 **번호 붙은 항목 하나하나**를 견준다.
  *   · 옛 판에 있던 항목이 **사라졌나**
- *   · 같은 항목이 **짧아졌나**(오늘 일이 정확히 이 모양이다 — 고친 긴 판이 옛 짧은 판으로 덮일 뻔했다)
+ *   · 🔴 같은 항목에서 **옛 글이 없어졌나**(길이가 아니다 — 아래 `compare()` 머리말을 읽어라)
  *   · 같은 번호가 **두 번** 나오나(양쪽을 다 붙여 놓고 못 본 것)
+ *
+ * 🔴 **처음엔 «짧아졌나»로 쟀고, B 가 그 자리를 짚었다**(2026-09-23, 태어난 지 한 시간 만에).
+ *   «이 자가 태어난 사건이 하필 «짧아짐»이었을 뿐이다» — 길이는 **대용물**이었다.
+ *   고치자마자 **길이 판이 조용하던 자리를 물었다**: AC-94 가 553자 → **706자로 늘었는데** 옛 글이 사라졌다
+ *   (메인이 겹친 번호를 가르며 바꾼 것이라 까닭이 있었지만, **길이 판은 그걸 못 봤다**).
  *
  * 견줄 상대(자동으로 고른다):
  *   · 머지 도중이면(`MERGE_HEAD` 가 있으면) **HEAD 와 들어오는 가지 전부** ⇒ 충돌을 풀고 **커밋하기 전에** 운다
  *   · 아니면 **origin/main** ⇒ 올리기 전에 운다
  *   · `REFS="a b"` 로 손수 줄 수도 있다.
  *
- * ⚠️ **짧아진 것이 늘 잘못은 아니다** — 일부러 줄인 것일 수 있다. 이 자는 **막지 않는다**(§9).
- *   사람에게 «여기를 보라»고 할 뿐이고, 일부러 줄였으면 그대로 커밋하면 된다.
+ * ⚠️ **바뀐 것이 늘 잘못은 아니다** — 일부러 고쳤을 수 있다. 이 자는 **막지 않는다**(§9).
+ *   사람에게 «여기를 보라»고 할 뿐이고, 일부러 고쳤으면 그대로 커밋하면 된다.
  *
  * 실행: `node scripts/verify-doc-not-reverted.mjs`     (0 = 되돌아간 것 없다 · 1 = 볼 곳 있다 · 2 = 자가 못 쟀다)
  */
@@ -96,23 +101,43 @@ function selfTest() {
   if (compare(entriesOf(B_short, head), ea, "옛").length !== 1) fails.push("짧아진 항목을 못 물었다");
   if (compare(entriesOf(B_gone, head), ea, "옛").length !== 1) fails.push("사라진 항목을 못 물었다");
   if (entriesOf(B_dup, head).dup.length !== 1) fails.push("같은 번호가 두 번 나온 것을 못 물었다");
+  //  🔴 B 가 짚은 것 — **길어졌는데도 남의 문단이 사라진** 판. 길이로 재면 안 울던 자리다.
+  const B_grewButLost = mk("- **AC-1** 옛 판 · 딴 창이 그 사이 더해 둔 아주 긴 다른 문단이 여기 통째로 들어와 있다 · 그리고 더 붙였다", "- **AC-2** 둘째");
+  if (compare(entriesOf(B_grewButLost, head), ea, "옛").length !== 1) fails.push("🔴 길어졌지만 옛 글이 사라진 것을 못 물었다(길이는 대용물이다)");
+
   //  🔴 무해 변이 둘 — 물면 안 된다
   if (compare(entriesOf(B_same, head), ea, "옛").length !== 0) fails.push("안 바뀐 항목을 물었다");
-  if (compare(entriesOf(B_grew, head), ea, "옛").length !== 0) fails.push("길어진 항목을 물었다(그건 수리다)");
+  if (compare(entriesOf(B_grew, head), ea, "옛").length !== 0) fails.push("덧붙인 항목을 물었다(그건 수리다 — 옛 글이 그대로 남아 있다)");
   //  모수 지킴이 — 옛 판이 비면 «볼 것 0» 이 아니라 «못 쟀다»여야 한다
   if (entriesOf("", head).entries.size !== 0) fails.push("빈 문서에서 항목을 만들어 냈다");
 
   return fails;
 }
 
-/** 지금 판 vs 옛 판. 반환: 사람이 볼 곳들. */
+/**
+ * 지금 판 vs 옛 판. 반환: 사람이 볼 곳들.
+ *
+ * 🔴 **«짧아졌나»로 재지 않는다 — 길이는 대용물이다**(B 가 짚었다 · 2026-09-23).
+ *   이 자가 태어난 사건이 하필 «짧아짐»이었을 뿐이다(C 가지에 B 의 문단이 **빠져** 있었다).
+ *   그런데 충돌을 «저쪽 것»으로 통째로 받는 흔한 모양은 **길이가 같거나 늘 수도 있다** —
+ *   그 사이 딴 창이 다른 문단을 더해 뒀으면 그렇다. 그때 길이로 재면 **안 운다.**
+ *   🔴 **대용물로 재면 그 대용물이 안 움직이는 날 조용해진다** — 오늘 종일 잡은 그 병이다.
+ *   ⇒ 재는 것은 **«옛 판에 있던 글이 지금 판에 그대로 들어 있나»**(줄 단위 포함 여부).
+ *     항목이 한 줄짜리라 «줄»이 곧 «항목»인 경우가 많은데, 그때도 **덧붙이기는 안 울고**
+ *     (옛 글이 앞머리로 그대로 남는다) **빼거나 갈아엎으면 운다.** 그게 우리가 원하는 것이다.
+ *   ⚠️ 오타를 고쳐도 운다. **막지 않으니(§9) 그러라고 둔다** — «보라»고 할 뿐이고, 고친 것이면 그대로 커밋한다.
+ */
 function compare(now, oldEntries, refName) {
   const hits = [];
   for (const [key, oldText] of oldEntries) {
     const cur = now.entries.get(key);
     if (cur === undefined) { hits.push({ key, refName, why: "사라졌다", was: oldText.length, is: 0 }); continue; }
     if (cur === oldText) continue;
-    if (cur.length < oldText.length) hits.push({ key, refName, why: "짧아졌다", was: oldText.length, is: cur.length });
+    const lost = oldText.split("\n").map(s => s.trim()).filter(s => s.length > 8 && !cur.includes(s));
+    if (lost.length) {
+      hits.push({ key, refName, why: "옛 글 " + lost.length + "줄이 지금 판에 없다", was: oldText.length, is: cur.length,
+                  sample: lost[0].slice(0, 60) });
+    }
   }
   return hits;
 }
@@ -162,7 +187,7 @@ if (!compared) {
 }
 
 for (const d of dupNew) console.log("🔴 " + d.path + " — " + d.key + " 가 **두 번** 나온다(이번 판에서 생겼다 · 양쪽을 다 붙여 놓고 못 본 것)");
-for (const h of hits) console.log("🔴 " + h.key + " 가 " + h.refName + " 보다 " + h.why + " (" + h.was + "자 → " + h.is + "자)");
+for (const h of hits) { console.log("🔴 " + h.key + " — " + h.refName + " 의 " + h.why + " (" + h.was + "자 → " + h.is + "자)"); if (h.sample) console.log("      없어진 글 맛보기: " + h.sample + "…"); }
 
 if (dupOld.length) {
   console.log("");
@@ -176,7 +201,7 @@ const bad = hits.length + dupNew.length;
 console.log("■ 볼 곳 " + bad + "곳");
 if (bad) {
   console.log("");
-  console.log("🔴 막지 않는다 — **보라는 것**이다. 일부러 줄였으면 그대로 커밋하면 된다.");
+  console.log("🔴 막지 않는다 — **보라는 것**이다. 일부러 고친 것이면 그대로 커밋하면 된다.");
   console.log("   견주려면: git show <판>:docs/rules/PITFALLS.md | grep '^- \\*\\*AC-<번호>'");
 }
 process.exit(bad ? 1 : 0);
