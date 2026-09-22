@@ -28,10 +28,10 @@
  *     🔴 운영자는 **자기가 누른 것이 먹혔다고 믿는다.** 막지 않는 대신 말해 주기로 했으면(§9)
  *        **그 말이 실제로 그 화면에 닿아야** 한다. 응답과 감사 `detail` 둘 다 본다(둘 중 하나만이면 한쪽 눈이 먼다).
  *
- *   🔴 판정은 셋이다: `✓` · `✗`(제품이 틀렸다) · **`⊘`(자가 못 쟀다 · 종료 2)** — `scripts/lib/block.mjs` 규율.
+ *   🔴 판정은 셋이다: `✓` · `✗`(제품이 틀렸다) · **`⊘`(자가 못 쟀다 · 종료 2)** — `scripts/_lib/block.mjs` 규율.
  */
 import { readFileSync } from "node:fs";
-import { blockOf, stripComments, tally } from "./lib/block.mjs";
+import { blockOf, stripComments, tally } from "./_lib/block.mjs";
 
 const FILE = "netlify/functions/ops-runners.ts";
 /* 🔴 **주석을 걷고 본다** — 「찾긴 찾았는데 **주석에서** 찾았다」가 넷째 꼴이다(2026-09-22 · B2·B 둘 다 겪었다).

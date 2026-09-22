@@ -12,7 +12,7 @@
  */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 // playwright 는 **러너에만** 설치돼 있다(루트 node_modules 에 없다) — 러너 기준으로 해석한다.

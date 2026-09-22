@@ -15,7 +15,7 @@
  *   🔴 ══ [AC-216] 이 자가 **자기 병으로 조용한 초록이었다**(2026-09-22) ══
  *     ⑤의 소스 검사가 `indexOf(닻) + 700` 같은 **고정 창**이었다. 변이로 재 보니 러너·서버 두 가드를
  *     **빼도 초록**이었다 — 넓어진 창이 옆 덩이의 `formatMarks` 를 주워 왔다.
- *     ⇒ `scripts/lib/block.mjs blockOf` 로 바꿨다(끝 표식까지만 · 못 잡으면 `null`).
+ *     ⇒ `scripts/_lib/block.mjs blockOf` 로 바꿨다(끝 표식까지만 · 못 잡으면 `null`).
  *     🔴 그리고 **판정을 셋으로** 갈랐다: `✓` · `✗`(제품이 틀렸다) · **`⊘`(자가 못 쟀다 · 종료 2)**.
  *        B(`autocreate-b-f8`)의 잣대다 — 「창을 넓히는 자리는 전부 이 병을 품는다」.
  *
@@ -30,7 +30,7 @@ import { pathToFileURL } from "node:url";
 import { mergeRunnerFormatMarks } from "../lib/format-marks";
 /* 🔴 [AC-216] 고정 창(`+700`·`+900`·`+400`)을 버리고 **끝 표식까지**만 잡는다 — 못 잡으면 `⊘`(못 쟀음).
    변이로 재 보니 그 고정 창 둘이 **조용한 초록**이었다(가드를 빼도 통과 · 2026-09-22). 까닭은 파일 머리말에. */
-import { blockOf, allBlocksOf, stripComments } from "./lib/block.mjs";
+import { blockOf, allBlocksOf, stripComments } from "./_lib/block.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const load = async (rel: string) => await import(pathToFileURL(path.join(ROOT, rel)).href);
@@ -51,7 +51,7 @@ const code = (rel: string) => stripComments(readFileSync(path.join(ROOT, rel), "
 let pass = 0; let fail = 0;
 const ok = (name: string, cond: boolean, extra = "") => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra ? `\n      ${extra}` : ""}`); } };
 /* 🔴 [AC-216] **«못 쟀다»는 «틀렸다»가 아니다.** `✗` 에 섞으면 자가 깨진 것이 제품이 틀린 것으로 보이고,
-   `✓` 에 섞으면 **조용한 초록**이 된다. 오늘 둘 다 값을 치렀다(B 의 잣대 · `scripts/lib/block.mjs`). */
+   `✓` 에 섞으면 **조용한 초록**이 된다. 오늘 둘 다 값을 치렀다(B 의 잣대 · `scripts/_lib/block.mjs`). */
 let unmeasured = 0;
 const gone = (name: string, why = "닻이나 끝 표식이 바뀌었나") => { unmeasured++; console.log(`  ⊘ ${name} — 못 쟀음(${why})`); };
 /** 덩이가 없으면 `⊘`, 있으면 판정. */

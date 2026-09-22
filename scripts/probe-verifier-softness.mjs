@@ -2,7 +2,7 @@
  * scripts/probe-verifier-softness.mjs — 🔴 **내 자들이 무른가**를 변이로 잰다(AC-216 · B2 · 2026-09-22).
  *   실행: `node scripts/probe-verifier-softness.mjs`   (🔴 커밋 안 된 변경이 있으면 안 돈다 — 아래 안전장치)
  *
- *   🔴 **이 파일은 `scripts/lib/block.mjs` 머리말이 대는 증거다.** 거기 적힌 「조용한 초록 둘」이
+ *   🔴 **이 파일은 `scripts/_lib/block.mjs` 머리말이 대는 증거다.** 거기 적힌 「조용한 초록 둘」이
  *      이 하니스로 나온 값이라, 커밋해 두지 않으면 그 인용이 **허공을 가리킨다**
  *      — 오늘 하루가 「가리키는 곳이 없는 말」로 데인 날이라 같은 실수를 안 하려고 옮겨 왔다.
  *

@@ -23,7 +23,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { codeOnly } from "./_lib/code-only.mjs";
-import { blockOf } from "./lib/block.mjs";
+import { blockOf } from "./_lib/block.mjs";
 
 const ROOT = process.cwd();
 const WATCH = "lib/cron/pause-watch.ts", RUNNER = "lib/cron/runner.ts", PAUSE = "lib/tenant-pause.ts";
