@@ -14,6 +14,7 @@
  *     ⇒ **공개키만** zip 에 넣고 개인키는 서버에만 둔다. 공개키가 새어도 표를 **만들** 수는 없다.
  */
 import crypto from "node:crypto";
+import { selectorLooksDead } from "./selector-guard.mjs";   // [AC-205] 🔴 서버가 민 셀렉터가 «죽은 모양»이면 안 쓴다
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +100,8 @@ export function makeRecipe(serverRecipe, bundled, runnerVersion) {
   const pem = publicKeyPem();
   const d = decideRecipe({ recipe: serverRecipe, runnerVersion, publicPem: pem });
   const sel = d.use ? (serverRecipe.selectors ?? {}) : {};
+  /* [AC-205] 서버 값 중 **죽은 모양**이라 안 쓴 칸들 — `sel()` 이 여기 쌓는다. */
+  const rejected = [];
   const waits = d.use ? (serverRecipe.waits ?? {}) : {};
   return {
     /** 실제로 쓴 표의 이름. **묶여 온 표면 null** — 보고가 이 값으로 실패를 되짚는다. */
@@ -107,11 +110,30 @@ export function makeRecipe(serverRecipe, bundled, runnerVersion) {
     fellBackWhy: d.use ? "" : d.why,
     assertions: d.use ? (serverRecipe.assertions ?? {}) : {},
     blockText: d.use && Array.isArray(serverRecipe.blockText) ? serverRecipe.blockText : [],
-    /** 셀렉터 한 칸 — 서버 값이 있으면 그것, 없으면 묶여 온 값. */
+    /**
+     * 셀렉터 한 칸 — 서버 값이 있으면 그것, 없으면 묶여 온 값.
+     *
+     *   🔴 [AC-205 · 2026-09-23] **서버 값이 «죽은 모양»이면 안 쓴다.** 종전엔 «비어 있지 않으면» 그대로 썼다.
+     *      어제 소스에서 잡은 그 병(`text=A, text=B` 가 조용히 한 문자열이 된다)이 **여기로도 들어올 수 있다** —
+     *      레시피는 「러너를 다시 배포하지 않고 셀렉터를 고치는 길」이라 **오타 한 번이면 그대로 나간다.**
+     *      그리고 호출부가 거의 다 `.catch(() => 0)` 이라 **터져도 «없네»로 읽힌다.**
+     *   🔴 거부는 **묶여 온 값으로 되돌리는 것**이지 잡을 멈추는 게 아니다(§9 — 막지 않는다). 글은 그대로 나간다.
+     *   🔴 다만 **조용하지 않다** — `rejected` 에 쌓아 보고에 싣는다. 안 적으면 서버 표가 깨진 채로 돌고 아무도 모른다.
+     *   ⚠️ 거부 규칙은 **브라우저로 재서 죽은 것만**이다(`scripts/probe-selector-guard.mjs` 13/0).
+     *      「의심스럽다」로 거부하면 **서버가 고쳐 보낸 수리가 묻힌다** — 거짓 빨강은 조용한 초록만큼 나쁘다.
+     */
     sel(name) {
       const v = sel[name];
-      return typeof v === "string" && v.trim() ? v : (bundled?.[name] ?? "");
+      if (typeof v === "string" && v.trim()) {
+        const bad = selectorLooksDead(v);
+        if (!bad.dead) return v;
+        /* 같은 칸을 여러 번 물어도 한 번만 적는다(보고가 같은 말로 도배되지 않게). */
+        if (!rejected.some((r) => r.name === name)) rejected.push({ name, why: bad.why, sample: v.slice(0, 60) });
+      }
+      return bundled?.[name] ?? "";
     },
+    /** 🔴 거부한 서버 칸들 — `[{ name, why, sample }]`. 비어 있으면 거부 0(«안 쟀다»가 아니다 · 늘 잰다). */
+    rejected,
     /** 대기값 한 칸(밀리초). */
     wait(name, fallback) {
       const v = Number(waits[name]);
