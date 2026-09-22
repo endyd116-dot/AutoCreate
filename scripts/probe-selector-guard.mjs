@@ -8,7 +8,7 @@
  *
  *   ⚠️ 새 거부 규칙을 넣으려면 **여기에 줄을 먼저 더해** 죽은 것을 보이고 나서 넣어라.
  */
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 

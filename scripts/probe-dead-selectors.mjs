@@ -1,6 +1,6 @@
 /**
  * scripts/probe-dead-selectors.mjs — 🔴 **한 번도 안 걸리는 셀렉터가 또 있나**(AC-205 · B2 · 2026-09-23).
- *   실행: `node scripts/probe-dead-selectors.mjs`  (playwright 는 `lib/find-playwright.mjs` 가 찾아 준다)
+ *   실행: `node scripts/probe-dead-selectors.mjs`  (playwright 는 `_lib/find-playwright.mjs` 가 찾아 준다)
  *   네트워크 0 · 발행 0 · 빈 페이지에 대고 **파싱되나**만 본다.
  *
  *   ══ 🔴 왜 이걸 골랐나 ══
@@ -23,7 +23,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 /* 🔴 playwright 는 `runner/node_modules` 에만 있다 — **이미 있는 관례**를 쓴다(새 길을 내지 않는다).
    없으면 **exit 2(«못 쟀다»)** 다. 「통과」라고 말하지 않는다(AC-9 · 그 파일 머리말 그대로). */
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 import { codeOnlyKeepIndex } from "./_lib/code-only.mjs";
 
 const { chromium } = await requirePlaywright();
