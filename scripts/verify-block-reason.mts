@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { stripComments } from "./lib/block.mjs";
+import { stripComments } from "./_lib/block.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const { judgeBlockReason, NAVER_PUBLISH_SIGNALS } = await import(

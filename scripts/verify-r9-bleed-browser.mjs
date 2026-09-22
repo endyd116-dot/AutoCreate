@@ -26,7 +26,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ARGS = process.argv.slice(2);
@@ -302,7 +302,7 @@ async function main() {
   /* 🔴 [2026-09-16 메인] playwright 를 **러너 폴더에서만** 찾고 있었다 — `runner/node_modules` 는 **B2·C 폴더에만** 있어서
      메인·A·B 폴더에서는 이 자가 **종료코드 4**(«하니스 자체 오류»)로 떨어졌다. 🔴 그건 «틀렸다»가 아니라 «**못 쟀다**»다.
      `verify-safe-list` 는 **2** 를 «⊘ 못 쟀음»으로 세므로, 없을 때는 **exit 2** 로 끝나야 «실패 1개»로 안 찍힌다(AC-96).
-     ⇒ 같은 폴더 문제를 이미 푼 `scripts/lib/find-playwright.mjs` 를 쓴다(우리 러너 것 → PW_DIR → 옆 리포 → 루트). */
+     ⇒ 같은 폴더 문제를 이미 푼 `scripts/_lib/find-playwright.mjs` 를 쓴다(우리 러너 것 → PW_DIR → 옆 리포 → 루트). */
   const pw = await requirePlaywright();
   const browser = await pw.chromium.launch({ headless: !HEADED });
   /* 폭 480 — 긴 문단이 **여러 줄로 접히게**(줄 경계를 넘는 ArrowLeft 가 글자 단위로 정확한지 재려면 접혀야 한다). */

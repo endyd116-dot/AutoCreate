@@ -31,7 +31,7 @@
 import { createServer } from "node:http";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PUB = path.join(ROOT, "public");

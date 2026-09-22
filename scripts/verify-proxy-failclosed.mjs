@@ -35,7 +35,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { codeOnly } from "./_lib/code-only.mjs";
-import { blockOf } from "./lib/block.mjs";   // 🔴 자르개는 한 곳(B2 · AC-216) — 세 번째를 만들지 않는다
+import { blockOf } from "./_lib/block.mjs";   // 🔴 자르개는 한 곳(B2 · AC-216) — 세 번째를 만들지 않는다
 
 const ROOT = process.cwd();
 const read = (f) => { const p = path.join(ROOT, f); return existsSync(p) ? readFileSync(p, "utf8") : null; };

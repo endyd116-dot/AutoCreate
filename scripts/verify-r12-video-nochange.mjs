@@ -58,7 +58,7 @@ import { tmpdir } from "node:os";
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import http from "node:http";
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ARGS = process.argv.slice(2);

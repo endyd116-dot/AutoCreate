@@ -16,7 +16,7 @@
 import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { requirePlaywright } from "./lib/find-playwright.mjs";
+import { requirePlaywright } from "./_lib/find-playwright.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 /* 🔴 [2026-09-16 메인] 예전엔 `createRequire(runner/package.json)` 였다 — 그런데 `runner/node_modules` 는
