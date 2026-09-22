@@ -52,7 +52,10 @@ const ROOT = path.resolve(import.meta.dirname, "..");
    배경에서 전수를 돌리면서 앞에서 `--only=` 로 한 번 더 돌렸는데, 뒤에 끝난 판의 `rmSync` 가
    **돌고 있는 판의 나무를** 지워 그 판이 죽었다. 자가 제 아레나를 난누어 쓰면 안 된다. */
 const ARENA = path.join(ROOT, "_verify", `experiment-holds-${process.pid}`);   /* `_verify/` 는 .gitignore 에 있다 — 잔재가 커밋에 안 딸려간다 */
-const TIMEOUT_MS = 60_000;
+/* 🔴 60초로는 **무거운 자가 통째로 ⊘ 로 떨어진다** — `verify-deadends-meter` 는 실측 **190초**다(2026-09-23).
+   ⊘ 는 «통과가 아니다»라 그대로 두면 「못 쟀음」이 쌓이기만 한다 ⇒ 넉넉히 준다.
+   🔴 다만 **무한정은 아니다** — 안 끝나는 자는 «못 쟀음»이 맞다(그때는 까닭이 «시간 초과»로 남는다). */
+const TIMEOUT_MS = Number(process.env.HOLDS_TIMEOUT_MS || 240_000);
 
 const argOnly = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7);
 const SELFTEST = process.argv.includes("--selftest");
