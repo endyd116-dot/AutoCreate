@@ -219,7 +219,7 @@ export function cleanupFiles(fileMap) {
  *      ⚠️ 아직 `settle` 로 기다리는 자리가 많이 남아 있다(R8 에서 이어 간다) — 새로 쓰는 코드는 `waitFor` 를 써라.
  */
 /* 🔴 [AC-204 · 2026-09-23] **주석은 «등간격을 피한다»인데 코드는 등간격이었다.**
-   실측(`scripts/_tmp/count-rhythm.mjs` · 러너 전수): `settle(page, min)` **고정 90곳** · `settle(page, min, max)` 12곳.
+   실측(`scripts/probe-human-rhythm.mjs` · 러너 전수): `settle(page, min)` **고정 90곳** · `settle(page, min, max)` 12곳.
    즉 **88%가 난수를 안 탔다** — `max > min` 이 거짓이라 `waitForTimeout(min)` 으로 곧장 갔다.
    ⇒ 인자 하나로 불러도 **흔들리게** 한다. 호출 90곳을 안 고치고 여기 한 줄로 고친다.
    🔴 **절대 짧아지지 않는다**(`min` 이 바닥이다) — 이 함수를 «준비될 때까지»로 잘못 쓰는 자리가 아직 남아 있어서,
