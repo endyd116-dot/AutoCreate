@@ -171,7 +171,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | DESIGN § | 항목 | 상태 | 증거 | 안 되는 것 | 남은 일 | 크기 |
 |---|---|---|---|---|---|---|
 | 1.1 | 주 사용자 개인 · 계정 2~30 · 하루 5~15분 | ✅ | plans 계정 3/15/50 · 자동 편성 크론 14 스텝(사람 개입 = 검수뿐) | | | |
-| 1.1 | 부 사용자 대행(Agency 플랜·팀 시트) | 🟠 | `plans.ts` agency teamSeats 5 · **팀 초대 경로 0**(B §11.0 ❌) | 팀 시트가 숫자만 — 대행이 팀원을 못 넣는다 | B 참조 | M |
+| 1.1 | 부 사용자 대행(Agency 플랜·팀 시트) | ✅ � | `plans.ts` agency teamSeats 5 · **팀 초대 경로 0**(B §11.0 ❌) · **2026-09-23 재측정(메인): 세 겹 다 있다 — 서버 `netlify/functions/team.ts:2,3`(소유자가 팀원을 부른다 · `GET /api/team` → members·invites) · 화면 `public/app/team.html` + 받는 쪽 `public/app/team-accept.html` · 들어가는 자리 `public/app/settings.html`. 09-15 의 «팀 시트가 숫자만» 은 해소. C 도 §11.0·§15 에서 팀 초대/수락을 ✅ 로 닫았다(C 실측).** | 팀 시트가 숫자만 — 대행이 팀원을 못 넣는다 | B 참조 | M |
 | 1.1 | 운영자 MIS SSO · super_admin/admin/operator | ✅ | `netlify/functions/sso-enter.ts` · `operators.role` · B §11 | | | |
 | 1.2 | 글 축 6단계(소재→디렉터→제작→검수→발행→수익) | ✅ | `topics.ts`→`director.ts`→`content-gen.ts`→`content-approve.ts`→`publish/*`→`revenue/*` · 여정 실측 §7 | (실발행 0건은 §4 로드맵) | | |
 | 1.2 | 영상 축 6단계 | 🟠 | 코드 R5 전부(B-1 §6 ✅ 다수) · 화면 8장(A) · **고객 경로 입구 0**(§6) | 라이브 영상 0건 | §0.4 묶음 1 | L |
@@ -241,13 +241,13 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 5B.2 D-3 | 자동 제작(produceLeadDays 3 · 1~7) → 코인 차감 → in_review | ✅ | `lib/cron/produce.ts`(창 `slot_date BETWEEN 오늘 AND 오늘+lead` · `produceHour` KST 게이트) · `director-auto.ts` | (⚠️ produceHour 시각 1틱만 — 그 틱이 예산에 끊기면 내일 · 주석에 정직) | | |
 | 5B.2 D-3~D-0 | 검수창: 수정·교체·건너뛰기·컨펌 · 조용하면 자동 승인 | ✅ | `pieces-update`(수정 → 재검사 · 코인 0) · 슬롯 시트 «소재 바꾸기/시각 바꾸기/건너뛰기» · `review-deadline.ts`(silence_approves · 게이트 하드 실패면 awaiting_manual) | | | |
 | 5B.2 D-0 | 채널별 최적 시간(기본표 + 실측 학습 + 사용자 고정) → 발행 | ✅ | `lib/best-time.ts`(표 · golden_hours · preferredHour) · `learn.ts:18 bestHoursFor` | | | |
-| 5B.2 D+1 | 수익 매칭 → 슬롯에 «이 글 ₩N» → 편성자 성과 팩터 | 🟡 **(R7 서버 `001dccf` `revenueKrw` · 화면은 A)** | `learn.ts:106` 30일 piece 수익 → `topics.factors.performance` + 점수 재계산 ✓ · **편성표 슬롯 행에 «이 글 ₩N» 표시 0**(`slotRow` 에 수익 없음 · 수익은 revenue.html «잘 번 글»에만) | 편성표에서 글별 수익을 못 본다 | slotRow 에 revenue 1칸 | S |
+| 5B.2 D+1 | 수익 매칭 → 슬롯에 «이 글 ₩N» → 편성자 성과 팩터 | ✅ � **(R7 서버 `001dccf` `revenueKrw` · 화면은 A)** | `learn.ts:106` 30일 piece 수익 → `topics.factors.performance` + 점수 재계산 ✓ · **편성표 슬롯 행에 «이 글 ₩N» 표시 0**(`slotRow` 에 수익 없음 · 수익은 revenue.html «잘 번 글»에만) · **2026-09-23 재측정(메인): 서버가 **글별로** 센다 — `lib/slots.ts:390` 이 `revenue_daily` 를 `piece` 단위로 합쳐 `revenue_krw` 를 내고 `:405` 가 `revenueKrw` 로 싣는다(`:318` 타입). 화면은 `public/app/schedule.html:214` 가 슬롯을 열면 그 줄을 그린다. ⚠️ 다만 **라이브 `revenue_daily` 가 14행에서 한 행도 안 늘었다**(B2 실측) — 길은 났는데 **지나간 적이 없다.**** | 편성표에서 글별 수익을 못 본다 | slotRow 에 revenue 1칸 | S |
 | 5B.3 | `channel` | ✅ | cadence_rules.channel · 시트 채널 행 | | | |
-| 5B.3 | `kind` 글·쇼츠·**카드뉴스** | 🟠 | `RuleKind = post|shorts`(`lib/slots.ts`) · 카드뉴스 없음 | 카드뉴스 규칙 불가(인스타 카드뉴스 자체가 미구현 · §1 #10) | 카드뉴스 뒤에 | — |
+| 5B.3 | `kind` 글·쇼츠·**카드뉴스** | ✅ � | `RuleKind = post · **2026-09-23 재측정(메인): 세 겹 다 있다 — 어휘 `lib/slots.ts:64 RuleKind = "post"|"shorts"|"cardnews"` · 발행 경로 `lib/publish/instagram.ts:162,165,175`(캐러셀 child 만들고 묶는다) · 화면 `public/app/pieces.html:35 RK`·`public/app/coins.html:60`. 09-15 의 «카드뉴스 없음» 은 그 파일 주석이 스스로 «R8 §2.5 에서 통째로 없던 하나를 추가했다»고 적어 뒀다.** |shorts`(`lib/slots.ts`) · 카드뉴스 없음 | 카드뉴스 규칙 불가(인스타 카드뉴스 자체가 미구현 · §1 #10) | 카드뉴스 뒤에 | — |
 | 5B.3 | `account_mode` 고정/자동 로테이션(건강도 순) | ✅ | rules.accountMode auto/fixed · 시트 2단계 «자동/고르기» · `director-auto.ts` assignAccount(health 순) | | | |
 | 5B.3 | `every` 주 N회 / 월 N회 / 매일 | 🟡 | `rules-save` every day/week/month + `rollSlots` 분산 로직 ✓ · **규칙 시트는 «주 N회» 스테퍼만**(`schedule.html ruleSheet` `every:"week"` 고정) | 월 N회·매일을 화면에서 못 고른다 | 시트에 세그먼트 1 | S |
-| 5B.3 | `weekdays[]` 요일(비우면 자동 분산) | 🟡 | API·rollSlots ✓(`slots.ts` weekdays) · 시트 0 | 요일 지정 불가 | 시트 칩 7 | S |
-| 5B.3 | `preferred_hour` 고정 시각(KST) | 🟡 | API·best-time ✓ · 시트 0(설정의 bestTimeMode «정한 시간만»은 있는데 시각을 넣을 칸이 없다) | fixed 모드가 사실상 쓸 수 없다 | 시트 시간 칩 | S |
+| 5B.3 | `weekdays[]` 요일(비우면 자동 분산) | ✅ � | API·rollSlots ✓(`slots.ts` weekdays) · 시트 0 · **2026-09-23 재측정(메인): 화면에서 고른다 — `public/app/schedule.html:335`(요일을 말로 풀어 보여 준다) · `:349`(시트 기본값에 `weekdays`).** | 요일 지정 불가 | 시트 칩 7 | S |
+| 5B.3 | `preferred_hour` 고정 시각(KST) | ✅ � | API·best-time ✓ · 시트 0(설정의 bestTimeMode «정한 시간만»은 있는데 시각을 넣을 칸이 없다) · **2026-09-23 재측정(메인): 화면에서 고른다 — `public/app/schedule.html:350`(`preferredHour`·`preferredMinute` 기본값) · `:379`(고른 값을 규칙에 싣는다). **분까지** 고를 수 있다.** | fixed 모드가 사실상 쓸 수 없다 | 시트 시간 칩 | S |
 | 5B.3 | `format_hint` 경험담·정보·비교(비우면 로테이션) | ✅ **(R7 수리 `001dccf`)** | 칸·API 저장 ✓ · **읽는 코드 0**(`grep formatHint lib/cron lib/director` 0) · 시트 0 | 저장돼도 아무 효과 없음 | director-auto 에 1줄 + 시트 칩 | S |
 | 5B.3 | `active` 켜짐/꺼짐 | ✅ | rules.active · 시트 count 0 = 비활성 · 설정 시트 규칙 요약 | | | |
 | 5B.3 예 | 채널 여러 규칙 동시(네이버 주3 + 쇼츠 매일 + 티스토리 토·일) | 🟠 | 규칙 여러 개 ✓ · 채널당 1규칙만 시트가 만든다(`cur[c]` 채널 키) · 쇼츠 «매일»·«토·일»은 위 🟡 2개 때문에 화면에서 못 만든다 | 설계 예시 3개 중 화면으로 되는 건 «주 N회» 하나 | 위 3건 | S |
@@ -262,7 +262,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 5B.5 | 기본표 7채널(네이버 07:30·12·21 / 티스토리 08·13 / 블로거·WP 09 / 쇼츠 18·21 / 클립 19·22 / 릴스 12·19 / 쓰레드 08·22) | ✅ | `lib/best-time.ts:8-15` 값 일치 · 실측 슬롯 publishAt 03:00Z=12:00 KST · 22:30Z=07:30 KST | | | |
 | 5B.5 | 학습: 네이버 24h 조회(러너) · 티스토리 애드센스 PV · 쇼츠 애널리틱스 · 클립 러너 · 릴스 인사이트 | 🟠 | `learn.ts` 마일스톤 6/24/72h · API 채널 `fetchStats` · 러너 채널 `revenue.stats` 잡 ✓ · **애드센스 PV·애널리틱스·인사이트 는 수익 커넥터와 별개 조회 0**(조회수만 · 매체 지표 아님) | 티스토리·쇼츠·릴스의 «학습 신호»가 설계와 다름(조회수 통일) | 매체 지표 붙이기(키 뒤) | M |
 | 5B.5 | 같은 채널 계정 간 30분 · auto = 최근 30일 최고 시각 · 없으면 첫 후보 | ✅ | `best-time.ts:19 ACCOUNT_GAP_MIN=30` · `learn.ts bestHoursFor` · 첫 후보 폴백 | | | |
-| 5B.6 | 상태 16종(planned·topic_assigned·producing·in_review·approved·edited·rejected·scheduled·publishing·published·awaiting_manual·awaiting_runner·reassigned·skipped·no_topic·coin_short) | 🟡 **(R7 수리 `6a5ab40` — `rejected` 신설로 «버림»과 «쉬는 날»이 갈렸다 · `edited` 는 여전히 슬롯 어휘가 아니다 = 설계 문장 갱신 후보)** | 서버 전이 `setSlot`(`cron/base.ts`) · `UI.SLOT_STATUS` 16종이지만 **설계와 집합이 다르다**: `edited`·`rejected` 없음(수정 = piece 재검사·슬롯 in_review 유지 · 버리기 = 슬롯 `skipped` `pieces.ts:206`) · 대신 `assigned`·`failed` 추가 | 슬롯만 보면 «버린 글»과 «쉬는 날»이 같은 skipped 로 보인다 | rejected 를 슬롯에도(S) 또는 설계 문장 갱신 | S |
+| 5B.6 | 상태 16종(planned·topic_assigned·producing·in_review·approved·edited·rejected·scheduled·publishing·published·awaiting_manual·awaiting_runner·reassigned·skipped·no_topic·coin_short) | ✅ � **(R7 수리 `6a5ab40` — `rejected` 신설로 «버림»과 «쉬는 날»이 갈렸다 · `edited` 는 여전히 슬롯 어휘가 아니다 = 설계 문장 갱신 후보)** | 서버 전이 `setSlot`(`cron/base.ts`) · `UI.SLOT_STATUS` 16종이지만 **설계와 집합이 다르다**: `edited`·`rejected` 없음(수정 = piece 재검사·슬롯 in_review 유지 · 버리기 = 슬롯 `skipped` `pieces.ts:206`) · 대신 `assigned`·`failed` 추가 · **2026-09-23 재측정(메인): 🔴 **«버림»과 «쉬는 날»이 갈렸다** — `public/js/ui.js SLOT_STATUS` 에 `skipped: ["off", "건너뜀"]` 과 `rejected: ["off", "버림"]` 이 따로 있다. 이 판에 만든 `pending_resume: ["off", "쉬는 동안 밀렸어요"]` 도 같은 표에 있다.** | 슬롯만 보면 «버린 글»과 «쉬는 날»이 같은 skipped 로 보인다 | rejected 를 슬롯에도(S) 또는 설계 문장 갱신 | S |
 | 5B.6 | 정본은 슬롯 하나 · 슬롯 없는 자동 생성 게이트 거부 + 감사 | ✅ | `lib/slot-gate.ts`(fail-closed · `piece_slotless_blocked` risk high) · `director.ts:322` origin 기본 auto · C R2 검증 | | | |
 | 5B.6 | 게이트 거부가 **홈 «해야 할 일»에** 남는다 | ✅  | `pendingSlotGateBlocks`(slot-gate.ts) **호출처 0** · `home-summary.ts` 에 없음 · **2026-09-23 재측정(메인): 서버 `netlify/functions/home-summary.ts:235` 이 `todo.push({kind:"slot_gate"…})` 로 «편성표에 자리가 없어 못 만든 게 N건» 을 싣고, 화면 `public/app/home.html:104` 가 «해야 할 일» 에 그린다. 🔴 낱말까지 확인했다 — `public/js/ui.js:666` 에 `slot_gate: "setup"` 별칭이 있어 손님 화면에 영어 키가 안 뜬다(그 한 겹이 없으면 «slot_gate» 라고 찍힌다).** | 거부가 감사에만 남고 사용자는 못 본다(AC-29 · «조용한 0건») | home-summary 1행 | S |
 | 5B.6 | 수동 «만들기»는 슬롯 없이도 · 편성표에 끼워 넣으면 그날 자동 슬롯 대체 | 🟠 | 수동 = `origin:"manual"` 슬롯 생성 ✓(`director.ts`) · **그날 자동 슬롯을 대체하는 코드 0**(grep 대체/replace 0) — 같은 날 자동 자리와 수동 글이 둘 다 나간다 | 중복 발행 방지 규칙 없음 | confirm 에서 같은 채널·날짜 planned 자동 슬롯 1개 skipped 처리 | S |
@@ -274,12 +274,12 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 5B.7 | `slots.learn` 매일 성과 → best-time·편성자 팩터 | ✅ | `learn.ts`(매시 · 마일스톤) | | | |
 | 5B.8 | 첫 진입 빈 상태 한 문장 + CTA «자동 편성 켜기» | ✅ | `schedule.html` «규칙 하나면 한 달치가 알아서 나가요» · 스샷 `audit-16-schedule-empty.png` | | | |
 | 5B.8 | 3스텝 시트 ①채널 행마다 주 N회 ②계정(자동 기본) ③검수 방식(3일 전·조용하면 발행) | ✅ | `ruleSheet` step 1~3 · prog 3칸 | | | |
-| 5B.8 | 시트 끝 코인 미리보기 «주 84코인 · 포함분 150 안» | 🟡 **(R7 서버 `001dccf` `includedCoins` · 화면은 A)** | «이 편성이면 주 약 N코인 · 지금 잔여 N코인» — **«포함분 N 안»(플랜 포함 코인 대비) 없음** | 플랜 포함분과 견줘 볼 수 없다 | `me.plan.limits.coinsIncluded` 한 줄 | S |
+| 5B.8 | 시트 끝 코인 미리보기 «주 84코인 · 포함분 150 안» | ✅ � **(R7 서버 `001dccf` `includedCoins` · 화면은 A)** | «이 편성이면 주 약 N코인 · 지금 잔여 N코인» — **«포함분 N 안»(플랜 포함 코인 대비) 없음** · **2026-09-23 재측정(메인): 서버 `netlify/functions/rules.ts:62` 가 `includedCoins`(플랜 포함분)·`planKey` 를 함께 주고, 화면 `public/app/schedule.html:329 inclSay()` 가 주간 코인과 **나란히** 보여 준다. 그 서버 주석(`:59`)이 «화면(A)은 `coinsPerWeek` 와 `includedCoins` 를 나란히 쓴다»고 계약을 적어 뒀다.** | 플랜 포함분과 견줘 볼 수 없다 | `me.plan.limits.coinsIncluded` 한 줄 | S |
 | 5B.8 | 평소: 세그먼트 주/월 · 주 = 날짜별 리스트 · 월 = 달력 점(상태 색만) | ✅ | v3 정정(2주 롤링 + 피드 · 월 6줄) · 점 ≤3 상태색 · 스샷 `audit-17`·`audit-18` | | | |
 | 5B.8 | 슬롯 탭 → 시트: 미리보기 · 소재 바꾸기 · 시각 바꾸기 · 지금 만들기 · 건너뛰기 | ✅ | `slotSheet` 4동작 + «글 보기» 링크(미리보기) · `slots-assign-topic`·`slots-reschedule`·`slots-produce-now`·`slots-skip` | | | |
 | 5B.8 | 검수창 슬롯 «수정하기 / 이대로 발행» | ✅ | 시트 → `piece.html`(수정 저장 / 이대로 발행 예약) | | | |
 | 5B.8 | 홈 «해야 할 일»에 «검수 기다리는 글 N건(내일 발행)» | ✅ | `home-summary.ts:39` «봐주실 글 N건이 있어요 · 내일 나가기 전에» | (다른 해야 할 일 누락은 §0.2 #6) | | |
-| 5B.8 | 데스크톱: 좌 640 주간 리스트 + 우 300 패널(선택 슬롯 미리보기·수정) | 🟠 | 640 컬럼 ✓(스샷 `audit-33-schedule-desktop.png`) · **우 패널 상시 0**(`.page.two` 미사용 · 시트 열 때만 우측) | 선택 슬롯 미리보기·수정 패널이 없다 | `.page.two` + aside 에 slotSheet 내용 | M |
+| 5B.8 | 데스크톱: 좌 640 주간 리스트 + 우 300 패널(선택 슬롯 미리보기·수정) | ✅ � | 640 컬럼 ✓(스샷 `audit-33-schedule-desktop.png`) · **우 패널 상시 0**(`.page.two` 미사용 · 시트 열 때만 우측) · **2026-09-23 재측정(메인): 상시 패널이 생겼다 — `public/app/schedule.html:14 <main class="page two">` + `:22 <aside class="aside desk-only">` · `public/css/ac.css:57`(≥1100px 에서 640 + 300 그리드) · `:61`(≤1099px 에선 감춘다). 시트 대체가 아니라 **가로로 벌어진다.**** | 선택 슬롯 미리보기·수정 패널이 없다 | `.page.two` + aside 에 slotSheet 내용 | M |
 | 5B.9 | 코인 = 제작 시점 piece 1회 · 수정·재생성·승계 무료 | ✅ | `director.ts:424 consume(piece:{id})` · 재생성 ref regen(순액 1회) · `reassignSlots` 코인 0 | | | |
 | 5B.9 | weeklyCoinCap 초과 → «코인 부족» + D-3 알림 → 충전하면 다음 produce | ✅ | `produce.ts:65` coin_short 재시도 대상 · 알림 · 슬롯 시트 «충전하기» | | | |
 | 5B.9 | 플랜: Starter 규칙 3·horizon 7 · Pro 무제한·30·**자동 승인** · Agency 팀 컨펌 | ✅ **(R7 수리 `001dccf`+`66c1050` · 저장·크론 둘 다 · 소급 0)** | maxRules 3/null · horizonDays 7/30 ✓(`plans.ts` · `rules.ts` step limit) · **자동 승인은 플랜 게이트 0**(Starter 도 silence_approves) · 팀 컨펌 = teamApproval 플래그만(B) | Starter 가 자동 승인까지 다 쓴다(설계 Pro) | reviewPolicy 게이트 1줄(사장님이 설계 유지할 때) | S |
@@ -318,7 +318,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 13.0b | 홈 = 문장형 헤드라인 + 그룹 섹션(해야 할 일·오늘 편성·자동 편성 토글) | ✅ | `audit-23-home-after.png` «오늘 12,400원 벌었어요» | (해야 할 일 항목 누락 §0.2 #6) | | |
 | 13.0b | 계정 연결 = 계좌 연결(마크 그리드 → 채널별 로그인 → 풀스크린 완료 체크) | 🟠 | 그리드·시트·`UI.done` ✓ · **영상 채널 4 + 쓰레드·인스타 타일이 안 보인다**(§0.2 #1) | 절반의 채널이 «없는 것처럼» 보인다 | 레지스트리 개통 + 준비 중 타일 | S |
 | 13.0b | 내 계정 = 내 자산 목록(채널 그룹 · 행 = 마크+핸들+상태+알약 · 상세 건강도·오늘 발행·페르소나) | ✅ | `accounts.html` 행·상세 시트(건강·오늘 N/N·페르소나) · `account.html` 허브 | | | |
-| 13.0b | 소재 고르기 = 추천 카드 스와이프(오른쪽 디렉터·왼쪽 넘김·위 나중에) | 🟠 | `create.html` 카드 + touch 2곳(좌우) · «위 = 나중에» 0 · 버튼 폴백 있음 | 3방향 중 «나중에» 없음(넘김과 합쳐짐) | 선택 | S |
+| 13.0b | 소재 고르기 = 추천 카드 스와이프(오른쪽 디렉터·왼쪽 넘김·위 나중에) | 🟠 � | `create.html` 카드 + touch 2곳(좌우) · «위 = 나중에» 0 · 버튼 폴백 있음 · **2026-09-23 재측정(메인): 🔴 **까닭이 또렷해졌다 — 화면 탓이 아니다.** `public/app/create.html:136~137` 이 스스로 적어 뒀다: «서버에 «나중에»를 적어 둘 자리가 없다(`topics-pick`·`topics-skip` 뿐)». ⇒ 남은 일은 «스와이프 한 방향 더»가 아니라 **«서버에 «나중에» 상태 만들기»**다. 화면에서만 숨기면 새로고침에 사라진다.** | 3방향 중 «나중에» 없음(넘김과 합쳐짐) | 선택 | S |
 | 13.0b | 디렉터 확인 = 송금 확인(질문 한 줄 · 대상 행 · 키-값 표 · 손보기/만들기) | ✅ | `director.html` «N곳에 만들까요?» · `#targets` 행 · 코인 표 · CTA 2 | | | |
 | 13.0b | 손보기 = 바텀시트 편집(칩·세그먼트·토글 · 입력 최소) | ✅ | `director.html:72-115`(계정 seg · 감성 칩 · 구성 칩 · 이미지 스테퍼 · 제휴 토글 · 시각 칩) | | | |
 | 13.0b | 만드는 중 = 스켈레톤 + 스텝 텍스트 + 예상 시간 + 완료 체크 | ✅ | `pieces.html` 스텝 바(글 4 · 영상 6 `meta.stage`) · `UI.done` | | | |
@@ -349,7 +349,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 13.3 디렉터 | 소재 헤드(검색·상승·경쟁) · 대상 3행 · 시각 · 총 코인(잔여) · 손보기/이대로 | ✅ | `director.html` `#targets` · 코인 표 | (실측은 LLM 호출이라 안 함 · A 모의 확인) | | |
 | 13.3 내 계정 | 채널 그룹(N) · 행 상태(정상/재로그인/정지→승계) · + 계정 연결 | ✅ | `accounts.html:43-48` | | | |
 | 13.3 수익 | 9월 총합 · 소스 막대 · ⟳어제 신선도 · 글별 TOP5 | ✅ | `revenue.html` sourceGroup(신선도 «N분 전 가져옴») · pieceGroup | | | |
-| 13.3b | 3구간(≤640 탭 / 641~1099 레일+720 / ≥1100 레일 220 + 640 + **우 300 패널 상시**) | 🟠 | ≤640·641~1099 ✓(`ac.css:35-43` · 스샷 `audit-35`) · ≥1100 640 컬럼 ✓ · **우 300 패널 상시 노출 0**(`.page.two` 미사용) | 데스크톱에서 미리보기·손보기 패널이 상시가 아니라 시트 대체 | 편성표·디렉터·검수 3화면에 aside | M |
+| 13.3b | 3구간(≤640 탭 / 641~1099 레일+720 / ≥1100 레일 220 + 640 + **우 300 패널 상시**) | ✅ � | ≤640·641~1099 ✓(`ac.css:35-43` · 스샷 `audit-35`) · ≥1100 640 컬럼 ✓ · **우 300 패널 상시 노출 0**(`.page.two` 미사용) · **2026-09-23 재측정(메인): 세 구간이 다 있다 — `public/css/ac.css:57`(≥1100 레일+패널) · `:235`(641~1099 에서 시트를 가운데 440px 로) · 기본(≤640 탭). 위 §13.0b 데스크톱 패널과 같은 근거다.** | 데스크톱에서 미리보기·손보기 패널이 상시가 아니라 시트 대체 | 편성표·디렉터·검수 3화면에 aside | M |
 | 13.3b | 텍스트 폭 720 초과 금지 · 짧은 목록 2열 허용 · BottomSheet→SidePanel | ✅ | `.page` max 720 · `.sheet` ≥1100 우측 300(`ac.css:197`) | | | |
 | 13.5 저장 UTC | timestamp = UTC | ✅ | `db/schema.ts:3` · `db-util.ts utcDate` · AC-5 | | | |
 | 13.5 응답 | ISO UTC `…Z` · 날짜 값은 KST `YYYY-MM-DD` | ✅ | 실측 `slots-list` publishAt `2026-09-15T03:00:00.000Z` · date `2026-09-15` | | | |
@@ -404,7 +404,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 19 제품 | 발행 후 통계 회수(조회·좋아요·댓글 · API/러너) | ✅ | `lib/cron/learn.ts` 마일스톤 6/24/72h · `publish/stats.ts fetchStats` · `revenue.stats` 러너 잡 · `posts.stats` · 발행함 «조회 N» | | | |
 | 19 제품 | 댓글·DM 대응은 비범위로 명시 · 알림만 | ❌  | 약관·FAQ·화면 어디에도 «댓글» 언급 0(grep 0) · 댓글 알림도 0 · **2026-09-23 재측정(메인): 그대로 없다. `public/app/posts.html:111` 의 «댓글» 은 **조회·좋아요와 같은 성과 숫자**이지 «댓글 대응은 안 해요» 안내가 아니다. 🔴 대용물 조심 — 낱말이 있다고 안내가 있는 게 아니다.** | 고객이 «댓글도 달아 주나»를 알 길이 없다 | 약관/FAQ 1줄 | S |
 | 19 제품 | 이미지 정책(실존 인물·유명인·로고·타사 상품 실사 금지 · 한글 오버레이) | ✅ | `lib/ai-image.ts:4·19` 고정 규칙(한글 굽기 금지·실존 인물·로고 금지) · `content-gen.ts:74` 장면 지시(사람·로고·글자 없는) | | | |
-| 19 제품 | 동일 소재 계정당 **90일** 재사용 금지 · 계정 간 앵글 변주 | 🟠 | `assign-topics.ts:39` **30일** · 계정 간 유사도 게이트 ✓(`CROSS_ACCOUNT_SIMILARITY`) | 90 → 30 (설계와 다름 · 어느 쪽이든 결정) | 상수 1 · 0.5 | S |
+| 19 제품 | 동일 소재 계정당 **90일** 재사용 금지 · 계정 간 앵글 변주 | 🟠 � | `assign-topics.ts:39` **30일** · 계정 간 유사도 게이트 ✓(`CROSS_ACCOUNT_SIMILARITY`) · **2026-09-23 재측정(메인): 🔴 **고칠 일이 아니라 정할 일이다.** 코드는 `lib/similarity.ts` 가 **30일**로 돌고 설계는 **90일**이다. 둘 중 어느 쪽이 맞는지 **아무도 정한 적이 없어서** 9일째 그대로다. ⇒ 사장님/메인이 한 줄 정하면 닫힌다(개발 목록이 아니라 결정 목록).** | 90 → 30 (설계와 다름 · 어느 쪽이든 결정) | 상수 1 · 0.5 | S |
 | 19 제품 | 네이버 검색량 API 키(우리 계정·쿼터 관리) | ✅ | `.env` `NAVER_SEARCHAD_*`·`NAVER_OPENAPI_*` · `lib/naver-volume.ts`·`naver-datalab.ts` · 실측 `topics-add volume:10` | | | |
 | 19 제품 | TTS 한국어 보이스 3~5종 · 실존 인물 모사 금지 | ✅ | `lib/video/tts.ts:108` GEMINI_VOICES 5 · 타입캐스트 목록 · «프리빌트만»(tts.ts:5) · 손보기 «목소리» 칩 | | | |
 | 19 제품 | 시간대 전부 KST · 저장 UTC | 🟠 | §3 13.5 — 수익 화면 1곳 이중 시프트 | | 1줄 | S |
