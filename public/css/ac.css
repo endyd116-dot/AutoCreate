@@ -315,6 +315,13 @@ input,textarea,select{font:inherit;color:inherit}
 .stepper button{width:36px;height:32px;border-radius:9px;font-size:20px;font-weight:600;display:grid;place-items:center;color:var(--ink);line-height:1} .stepper button:active{background:var(--press)} .stepper button[disabled]{opacity:.3}
 .stepper .val{min-width:40px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
 .fr{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;min-height:52px} .fr+.fr{border-top:1px solid var(--line)}
+/* 🔴 [AC-190 · 사장님 라이브 2026-09-23 «설정 1섹션·2섹션이 UI가 깨져서 왼쪽으로 붙어 있었어»]
+   `.fr` 은 원래 **바텀시트용**이다 — 시트가 자기 여백을 주니 좌우 0 이 맞다. 그게 페이지 `.group` 안으로 들어오면서
+   **들여쓰기를 잃었다**: 같은 묶음 안에서 `.gt`(제목)·`.row` 는 4+16=20px 인데 `.fr` 만 4+0=4px 였다.
+   ⇒ **`.group` 안에서만** 16px 을 준다. 🔴 `.sheet` 바로 밑의 `.fr` 은 그대로 0 이다(시트가 이미 준다).
+   🔴 선(`.fr+.fr`)은 `.kv` 와 **같은 결**로 둔다 — 내용은 들여쓰고 선은 상자 끝까지(집 안에 이미 있는 규칙 · ac.css:192).
+   자: `scripts/verify-left-edge.mjs`(브라우저로 실제 x 를 잰다 — 정적으로는 안 보인다). */
+.group .fr{padding-left:16px;padding-right:16px}
 .fr .fl{font-size:14.5px;font-weight:600;min-width:0} .fr .fl small{display:block;color:var(--muted);font-weight:500;font-size:12.5px;margin-top:1px}
 .sheet .seg,.fr .seg{align-self:flex-start}
 .sheet .sec{font-size:13px;color:var(--muted);font-weight:600;padding:14px 0 4px} .sheet .sec:first-child{padding-top:0}
