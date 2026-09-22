@@ -77,7 +77,20 @@ function run(transform) {
    길: 크론이 안 돈다 → 서버가 «쉬는 중 · 밀린 글 N» 을 **실어 준다** → 화면이 그 줄을 **그린다**.
    겹 하나를 끊으면 **둘 중 하나는 울어야** 짝이다. */
 const layers = [];
-const add = (name, transform, why) => layers.push({ name, transform, why });
+const add = (name, transform, why, target = null) => layers.push({ name, transform, why, target });
+
+/** 🔴 **과녁이 살아 있나** — 변이를 넣기 전에 «그 글자가 제품에 몇 곳인가»를 찍는다(AC-236).
+ *  첫 판이 «빈 겹 4」를 냈는데 **전부 내 변이가 허공을 친 것**이었다: `paused` 를 바꿨는데 그 파일에 그 글자가 **0곳**이었다.
+ *  🔴 «0」이면 아무도 안 믿지만 **«4」는 발견처럼 보인다** — 그대로 보고했으면 없는 구멍을 메우러 세 창이 갔을 것이다.
+ *  ⇒ **0 이면 그건 변이가 아니라 오타다.** 여기서 멈춘다. */
+function targetAlive(t) {
+  if (!t) return null;
+  const [rel, word] = t;
+  let n = 0;
+  /* 🔴 과념은 다 평문이라 `split` 으로 센다 — 정규식을 짓지 않는다(이스케이프가 깨지는 자리다 · AC-100). */
+  try { n = readFileSync(path.join(ROOT, rel), "utf8").split(word).length - 1; } catch { n = -1; }
+  return { rel, word, n };
+}
 
 /* 🔴 **첫 판은 변이가 허공을 쳤다 — 먼저 밟은 것을 적어 둔다.**
    `paused` 라는 글자를 바꿨는데 `netlify/functions/tenant-settings.ts` 에 그 글자는 **0곳**이었다.
@@ -87,27 +100,27 @@ const add = (name, transform, why) => layers.push({ name, transform, why });
 
 add("① 설정 응답에서 `loadPause` 를 들어낸다",
   (get, set) => { set("netlify/functions/tenant-settings.ts", get("netlify/functions/tenant-settings.ts").split("loadPause").join("zzLoadPause")); },
-  "손님 화면이 «쉬는 중»인지 알 길이 통째로 사라진다");
+  "손님 화면이 «쉬는 중»인지 알 길이 통째로 사라진다", ["netlify/functions/tenant-settings.ts", "loadPause"]);
 
 add("② 홈 응답에서 `loadPause` 를 들어낸다",
   (get, set) => { set("netlify/functions/home-summary.ts", get("netlify/functions/home-summary.ts").split("loadPause").join("zzLoadPause")); },
-  "홈 첫 화면의 «쉬는 중 · N일째»가 못 뜬다(§5B.11(3) «까먹을 수가 없어야 한다»)");
+  "홈 첫 화면의 «쉬는 중 · N일째»가 못 뜬다(§5B.11(3) «까먹을 수가 없어야 한다»)", ["netlify/functions/home-summary.ts", "loadPause"]);
 
 add("③ 🔴 **계약(`PauseView`)에서 `backlog` 를 지운다**",
   (get, set) => { set("lib/tenant-pause.ts", get("lib/tenant-pause.ts").split("backlog").join("zzBacklog")); },
-  "저절로 깬 손님이 «그동안 밀린 글»을 못 본다 — **실제로 열려 있던 그 구멍이다**");
+  "저절로 깬 손님이 «그동안 밀린 글»을 못 본다 — **실제로 열려 있던 그 구멍이다**", ["lib/tenant-pause.ts", "backlog"]);
 
 add("④ 설정 화면이 «쉬는 중» 줄을 안 그린다",
   (get, set) => { set("public/app/settings.html", get("public/app/settings.html").split("pause").join("zzPause")); },
-  "서버가 실어 줘도 손님 눈에는 아무것도 없다");
+  "서버가 실어 줘도 손님 눈에는 아무것도 없다", ["public/app/settings.html", "pause"]);
 
 add("⑤ 홈 화면이 그 배너를 안 그린다",
   (get, set) => { set("public/app/home.html", get("public/app/home.html").split("pause").join("zzPause")); },
-  "홈에서 «쉬는 중»이 사라진다");
+  "홈에서 «쉬는 중»이 사라진다", ["public/app/home.html", "pause"]);
 
 add("⑥ 크론이 `stopsWhenPaused` 를 안 본다",
   (get, set) => { set("lib/cron/base.ts", get("lib/cron/base.ts").split("stopsWhenPaused").join("zzStops")); },
-  "쉬는 집에서도 크론이 그대로 돈다 — «멈춤»이 아무것도 안 멈춘다");
+  "쉬는 집에서도 크론이 그대로 돈다 — «멈춤»이 아무것도 안 멈춘다", ["lib/cron/base.ts", "stopsWhenPaused"]);
 
 /* ── 돌린다 ───────────────────────────────────────────────────────────── */
 console.log(`🔴 «둘이 짝이다»가 진짜인가 — 겹을 하나씩 끊고 **두 자를 같이** 돌린다 · ${new Date().toISOString()}`);
@@ -116,6 +129,25 @@ console.log(`■ 내가 세는 모수 — 손님에게 닿는 길의 겹 **${lay
 console.log(`   자 둘: \`${path.basename(SCOPE)}\`(B · 서버) ↔ \`${path.basename(SURF)}\`(A · 화면)`);
 console.log(`   🔴 판정: 겹을 끊었을 때 **둘 다 초록이면 그 겹은 아무도 안 본다**(= 짝이 아니라 따로 도는 자 둘)`);
 console.log("");
+
+/* 🔴 **변이를 넣기 전에 과녁부터 찍는다**(AC-236) — 0 이면 그건 변이가 아니라 오타다. */
+{
+  const dead = [];
+  console.log("■ 🔴 과녁이 살아 있나(변이를 넣기 전에 먼저 센다 · AC-236)");
+  for (const L of layers) {
+    const t = targetAlive(L.target);
+    if (!t) { console.log(`   ⊘ ${L.name} — 과녁을 안 적었다`); continue; }
+    console.log(`   ${t.n > 0 ? "✓" : "✗"} ${t.rel} 에 «${t.word}» ${t.n}곳`);
+    if (t.n <= 0) dead.push(`${t.rel} «${t.word}»`);
+  }
+  if (dead.length) {
+    console.error(`⊘ 못 쟀어요 — 🔴 **과녁이 죽은 변이 ${dead.length}개**(${dead.join(" · ")}). 이건 변이가 아니라 **오타**다.`);
+    console.error(`   첫 판이 그렇게 «빈 겹 4»를 냈고, 그건 제품이 아니라 **내 변이의 상태**였다(AC-236).`);
+    rmSync(ARENA, { recursive: true, force: true });
+    process.exit(2);
+  }
+  console.log("");
+}
 
 const base = run(null);
 if (base.scope !== 0 || base.surf !== 0) {
