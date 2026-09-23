@@ -1,7 +1,11 @@
 /**
  * lib/director.ts — 디렉터(DESIGN §5.3 결정 규칙 6 을 결정론 함수로 · LLM 은 «앵글 가르기» 1콜). 계약 §3 v1.1.
  *   AM 관례(content-director «앞뒤만 한다»): 재료 모으기·배정·게이트만. 글은 content-gen 하나가 쓴다.
- *   propose: 채널 = topic.channelHint ∩ 계정 있는 글 채널(힌트 먼저 · 최대 3채널 · 채널당 1piece) · 계정 = active|pending_login · posts_today<daily_cap · health 높은 순
+ *   propose: 채널 = topic.channelHint ∩ 계정 있는 글 채널(최대 3채널 · 채널당 1piece)
+ *            🔴 [2026-09-23 정정] 여기 «힌트 먼저»라고 적혀 있었는데 **순서 규칙은 그게 아니다**(`lib/director-goal.ts` 가 정본):
+ *            **①고객이 고른 목표 매체 → ②실제로 붙은 광고 → ③소재 힌트** 순이다. 힌트는 셋째다.
+ *            ⚠️ 오늘까지 이 줄이 «맞아 보인» 까닭은 **목표를 고른 집이 0곳**이라서다(라이브 124집 전부 «없음» · 실측 2026-09-23) —
+ *            AC-255 와 같은 모양이다(**맞는 까닭이 우연**). 목표를 처음 고르는 손님이 생기는 날 이 줄을 믿은 사람이 틀린다. · 계정 = active|pending_login · posts_today<daily_cap · health 높은 순
  *            · 구성 = 그 계정 직전 글과 다른 format(writing-contracts 로테이션) · 일정 = best-time(계정 간 30분·min_gap·지난 시각이면 내일)
  *            · 제휴 = intent commercial|mixed → coupang(productQuery=소재 검색어 · slot mid/end) · 이미지 = 채널 기본 · coinCost = blog 1 + image×count.
  *   confirm: 패치 적용 → 잔액 선검사 → piece(generating·meta.stage writing)+slot(manual·producing) → consume(piece:{id} · piece:{id}:img{i}) → 경합 실패 시 refund+삭제 롤백 → 배경 생성 함수 호출.
@@ -441,8 +445,15 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
 
   const goal = goalOf(specs, intent);
   const coinCost = specs.reduce((a, s) => a + s.coinCost, 0);
+  /* [AC-255 · DESIGN §5.2 `mode`] 🔴 **«사람이 볼 것인가»는 `origin` 에서 나온다 — 여기서 글자로 박지 않는다.**
+     여태 `"reviewed"` 가 두 자리(이 INSERT 와 아래 반환)에 **손으로** 박혀 있었다. 오늘은 부르는 곳이 하나(`origin:"manual"`)라
+     값이 맞았지만, **맞는 까닭이 우연**이다 — `propose(tid, id)` 를 opts 없이 부르는 날 `origin` 은 `auto` 로 떨어지는데
+     `mode` 는 계속 `"reviewed"` 라고 말한다. 🔴 **그러면 brief 행이 «사람이 본 것»이라고 거짓말을 하고, 그 거짓은 조용하다.**
+     ⚠️ 자동 경로(`lib/cron/director-auto.ts:174`)는 **처음부터 `'auto'` 를 제대로 넣고 있었다**(라이브에 행 4개) —
+        고칠 곳은 저쪽이 아니라 **이쪽 한 곳**이다. */
+  const mode: Brief["mode"] = opts.origin === "manual" ? "reviewed" : "auto";
   const [b] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost)
-    VALUES (${tid}, ${topic.id}, ${goal}, ${jsonb(specs)}, ${jsonb(reasons)}, ${"reviewed"}, ${"proposed"}, ${coinCost}) RETURNING id`);
+    VALUES (${tid}, ${topic.id}, ${goal}, ${jsonb(specs)}, ${jsonb(reasons)}, ${mode}, ${"proposed"}, ${coinCost}) RETURNING id`);
   const briefId = n(b?.id);
   const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE id = ${briefId}`);
   if (chk?.t !== "array") console.error("[director] briefs.pieces jsonb_typeof !== array", chk);
@@ -470,7 +481,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
     return h ? { ...s2, selfUpload: { channel: h.channel, label: h.label, why: h.why, steps: h.steps, openUrl: h.openUrl, openLabel: h.openLabel, appOpenVerified: h.appOpenVerified } } : s2;
   });
   const kv = kindsView(tset);
-  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode: "reviewed", coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces, kinds: kv.kinds, kindsSet: kv.kindsSet } };
+  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode, coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces, kinds: kv.kinds, kindsSet: kv.kindsSet } };   // [AC-255] 저장한 값 그대로 — 두 자리가 갈릴 수 없다
 }
 
 /* ───────── confirm ───────── */

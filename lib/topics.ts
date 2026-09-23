@@ -12,7 +12,7 @@
  *       seasonal = kr-calendar 시즌 가중(1.0~1.35)
  *       performance = 1.0(Phase 2 전엔 고정 — factors.performance 는 0 으로 기록)
  *   🔴 환각 0: volume·growthPct·competition 은 네이버 응답값만 · 없으면 키 생략. «최고·1위·100%» 앵글은 코드 필터로 버린다.
- *   norm_key = 공백제거·NFC·lower(title). 30일 내 used/picked 와 같으면 버림. expires_at = +7일.
+ *   norm_key = 공백제거·NFC·lower(title). 🔴 **`TOPIC_REUSE_DAYS`(90일 · DESIGN §4.3) 내** used/picked 와 같으면 버림(2026-09-23 · 30→90). expires_at = +7일.
  */
 import { db } from "../db/index";
 import { sql, type SQL } from "drizzle-orm";
@@ -48,7 +48,13 @@ export interface TopicFactors {
 }
 export interface Topic { id: number; title: string; angle: string; channelHint: string; score: number; status: string; factors: TopicFactors; expiresAt: string;
   /** "ai"(추천) | "manual"(내가 넣은 것 · 화면이 «직접» 필을 단다 · 목록·자동 편성에서 먼저) */
-  source: string }
+  source: string;
+  /**
+   * [AC-254] **`expiresAt` 이 지났나** — 🔴 **판단은 서버가 한다**(AC-52 · 화면이 `new Date()` 로 재면 시간대가 갈린다).
+   *   `expiresAt` 이 없으면 **붙이지 않는다**(AC-9 — «안 지났다»가 아니라 «시계가 없다»).
+   *   `later` 목록에만 실제로 뜬다(다른 상태는 만료된 행이 애초에 안 나온다).
+   */
+  stale?: boolean }
 
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 export function demandScore(volume: number | undefined): number {
@@ -115,7 +121,7 @@ async function tenantContext(tid: number) {
   const templates = videoChannels.length ? await listTemplates(tid, 8) : [];
   const personaIds = [...new Set(accounts.map((a) => a.personaId).filter(Boolean))] as number[];
   const personas = personaIds.length ? await q(sql`SELECT name, profile FROM personas WHERE tenant_id = ${tid} AND id IN (${sql.join(personaIds.map((i) => sql`${i}`), sql`, `)})`) : await q(sql`SELECT name, profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 2`);
-  const recent = await q(sql`SELECT title FROM topics WHERE tenant_id = ${tid} AND created_at > NOW() - interval '30 days' ORDER BY id DESC LIMIT 60`);
+  const recent = await q(sql`SELECT title FROM topics WHERE tenant_id = ${tid} AND created_at > NOW() - (${TOPIC_REUSE_DAYS} || ' days')::interval ORDER BY id DESC LIMIT 60`);
   return { settings, channels, videoChannels, templates, personas: personas.map((p) => ({ name: String(p.name), profile: (p.profile || {}) as Record<string, unknown> })), recentTitles: recent.map((r) => String(r.title)) };
 }
 
@@ -199,6 +205,53 @@ function bestVolume(seeds: string[], vols: Map<string, KeywordVolume>): { volume
 /* ───────── ④ upsert ───────── */
 export const normKey = (title: string) => normKw(title).slice(0, 160);
 
+/**
+ * 🔴 **동일 소재를 얼마 만에 다시 써도 되나**(DESIGN §4.3 「같은 소재는 계정당 **90일** 재사용 금지」 · AC-251 · 2026-09-23).
+ *
+ *   ══ 왜 상수로 뺐나 ══
+ *     코드가 **30일**, 설계가 **90일**이었고 **아무도 정한 적이 없었다**(9일째 그대로).
+ *     🔴 CLAUDE §8: **설계가 정본**이고, 설계를 바꾸려면 사장님 승인이 먼저다 — 승인 없이 코드가 혼자 30으로 가 있던 것이
+ *     그 자체로 «왜곡»이었다(메인 판정 2026-09-23). ⇒ 설계대로 **90**으로 맞춘다.
+ *     🔴 **한 곳에만 둔다** — 사장님이 «30이 낫다»고 하시면 **이 줄 하나로** 되돌아온다(세 자리를 다시 찾아다니지 않는다).
+ *
+ *   ══ ⚠️ 이건 **막는 것이 아니다**(CLAUDE §9) ══
+ *     이 창이 하는 일은 셋 다 «말해 주기»이거나 «조용히 안 버리기»다:
+ *       · 프롬프트에 «최근 이만큼 쓴 소재 — 겹치지 말 것»으로 **알려 주고**(모델이 피한다)
+ *       · 후보를 거를 때는 **`skipped` 로 세어 남기고**(조용한 0건 금지)
+ *       · 직접 넣기는 **막지 않고 기존 것을 돌려준다**(`step:"duplicate"` — 고객이 그 소재로 갈 수 있다)
+ *     🔴 90으로 늘리면서 **하드 게이트가 되면 안 된다.** 늘어나는 것은 «겹친다고 말해 주는 범위»이지 «못 하게 하는 범위»가 아니다.
+ *
+ *   ⚠️ **수동 소재의 만료(+30일)는 이 값이 아니다** — 그건 «직접 넣은 소재가 언제 시드나»라 뜻이 다르다(아래 `addManualTopic`).
+ */
+export const TOPIC_REUSE_DAYS = 90;
+
+/**
+ * [AC-254 · DESIGN §5.1] **추천 소재의 «신선도 시계»** — `expires_at = NOW() + 이 날짜`.
+ *   여태 `interval '7 days'` 가 **두 군데에 글자로** 박혀 있었다(`refreshTopics` 의 갱신·삽입). `TOPIC_REUSE_DAYS` 가 30→90 으로
+ *   세 군데에서 갈렸던 것과 **똑같은 병**이라 같은 처방으로 묶는다(AC-251).
+ *
+ *   🔴 **이 시계가 뜻하는 것은 «없어진다»가 아니라 «추천한 지 오래됐다»이다.**
+ *     트렌드 후보의 검색량·경쟁도는 우리가 잰 그날의 값이다. 일주일이 지나면 **그 숫자를 더는 못 믿는다**는 뜻이지,
+ *     고객이 그 소재를 못 쓴다는 뜻이 아니다. 그래서 `stale` 로 **말해 주고 막지는 않는다**(§9).
+ *
+ *   ⚠️ **수동 소재의 +30일은 이 값이 아니다**(`addManualTopic`) — «내가 넣은 소재가 언제 시드나»라 뜻이 다르다.
+ *     `TOPIC_REUSE_DAYS` 때와 같은 판단이다: **숫자가 같아 보인다고 한 상수로 묶으면 한쪽을 고칠 때 다른 쪽이 따라 움직인다.**
+ */
+export const TOPIC_FRESH_DAYS = 7;
+
+/** 소재 화면의 말 — 🔴 **화면이 글자를 지어내지 않는다**(AC-52). A 가 `create.html` 에 박아 둔 것을 그대로 옮겼다(§3 말투가 갈리면 안 된다). */
+export const TOPIC_LABELS = {
+  later: {
+    title: "나중에 볼 소재",
+    empty: "나중에 볼 소재가 아직 없어요",
+    undo: "오늘 소재로",
+    /** 🔴 A 가 «N일 뒤 사라져요»를 적으려 했는데 — **이제 안 사라진다.** 그 자리에 들어갈 말이다. */
+    keep: "여기 둔 소재는 사라지지 않아요",
+    /** 만료가 지난 소재 줄. §3 — «못 쓴다»가 아니라 «오래됐다 + 지금도 된다» */
+    stale: "추천한 지 오래됐어요 · 지금도 쓸 수 있어요",
+  },
+} as const;
+
 export function toTopic(r: Row): Topic {
   const f = (r.factors && typeof r.factors === "object" ? r.factors : {}) as Record<string, unknown>;
   const factors: TopicFactors = { intent: (["info", "commercial", "mixed"].includes(String(f.intent)) ? String(f.intent) : "info") as TopicIntent };
@@ -211,13 +264,34 @@ export function toTopic(r: Row): Topic {
   if (f.seasonal) factors.seasonal = String(f.seasonal);
   factors.performance = Number(f.performance) || 0;
   if (Number.isFinite(Number(f.structureTemplateId)) && Number(f.structureTemplateId) > 0) factors.structureTemplateId = Number(f.structureTemplateId);
-  return { id: Number(r.id), title: String(r.title), angle: String(r.angle ?? ""), channelHint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), status: String(r.status), factors, expiresAt: utcDate(r.expires_at)?.toISOString() ?? "", source: String(r.source ?? "ai") };
+  const exp = utcDate(r.expires_at);
+  const t: Topic = { id: Number(r.id), title: String(r.title), angle: String(r.angle ?? ""), channelHint: String(r.channel_hint ?? ""), score: Number(r.score ?? 0), status: String(r.status), factors, expiresAt: exp?.toISOString() ?? "", source: String(r.source ?? "ai") };
+  if (exp) t.stale = exp.getTime() <= Date.now();   // [AC-254] 시계가 없으면 안 붙인다 — «안 지났다»와 «못 쟀다»는 다르다(AC-9)
+  return t;
 }
 
+/**
+ * 소재 목록. 🔴 **`later` 는 만료로 숨기지 않는다**(AC-254 · A 가 짚었다 · 2026-09-23).
+ *
+ *   ══ 내가 적어 놓은 계약이 거짓이었다 ══
+ *     `topics.ts:92` 에 내 손으로 **«목록에서 사라지는 게 아니라 `?status=later` 로 언제든 다시 본다»**고 적어 놓고,
+ *     바로 이 줄에서 `expires_at > NOW()` 를 **모든 상태에 똑같이** 걸고 있었다. 추천 소재의 시계는 **7일**이라
+ *     «나중에»로 옮긴 소재는 **일주일이면 말없이 없어진다.** 고객이 겪는 것은 «옮겨 뒀는데 없어졌다»다.
+ *     ⚠️ 나는 이걸 **안 쟀다** — A 가 화면을 붙이면서 «그러면 만료되면 어떻게 되나»를 물어서 드러났다.
+ *
+ *   🔴 **왜 `later` 만 빼나** — 만료는 **우리 추천의 신선도**이지 고객의 뜻이 아니다.
+ *     `candidate` 에서 낡은 후보를 감추는 것은 우리 추천 품질 관리다(고객이 고른 적 없다).
+ *     `later` 는 **고객이 «이건 남겨 둬»라고 말한 칸**이다. 거기서 우리 시계로 지우는 것은 **고객 대신 버리는 것**이다(§9).
+ *     ⇒ 낡았으면 **`stale` 로 말해 주고 둔다.** 되돌리기(§`topics-later` undo)가 살아 있어야 «되돌릴 길»이 참이 된다.
+ *
+ *   ⚠️ **`all` 은 원래부터 안 걸렸다** — 그래서 이 판의 변화는 `later` 한 칸뿐이다(`candidate`·`picked`·`used`·`expired` 무변).
+ */
 export async function listTopics(tid: number, status = "candidate"): Promise<Topic[]> {
-  const rows = status === "all"
-    ? await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} ORDER BY (source = 'manual') DESC, score DESC, id DESC LIMIT 100`)
-    : await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND status = ${status} AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY (source = 'manual') DESC, score DESC, id DESC LIMIT 100`);   // 🔴 [topics-add] 내가 넣은 소재가 맨 위 — 점수를 부풀리지 않고 정렬 키로
+  const keepExpired = status === "all" || status === "later";
+  const rows = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid}
+    ${status === "all" ? sql`` : sql`AND status = ${status}`}
+    ${keepExpired ? sql`` : sql`AND (expires_at IS NULL OR expires_at > NOW())`}
+    ORDER BY (source = 'manual') DESC, score DESC, id DESC LIMIT 100`);   // 🔴 [topics-add] 내가 넣은 소재가 맨 위 — 점수를 부풀리지 않고 정렬 키로
   return rows.map(toTopic);
 }
 
@@ -247,7 +321,7 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
   const growth = await lookupGrowth(bestKw);
   lap.growth = Date.now() - t0 - lap.ctx - lap.llm - lap.volumes;
   const growthKnown = growth.size > 0;
-  const used = await q(sql`SELECT norm_key FROM topics WHERE tenant_id = ${tid} AND status IN ('used','picked') AND created_at > NOW() - interval '30 days'`);
+  const used = await q(sql`SELECT norm_key FROM topics WHERE tenant_id = ${tid} AND status IN ('used','picked') AND created_at > NOW() - (${TOPIC_REUSE_DAYS} || ' days')::interval`);
   const usedKeys = new Set(used.map((r) => String(r.norm_key)));
   let added = 0, skipped = 0;
   for (const { c, bv } of enriched) {
@@ -265,11 +339,11 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
     const score = computeScore({ demand: demandScore(bv.volume), intent: intentScore(c.intent), pain: c.pain, compGap: compGapScore(bv.compIdx), difficulty: channelDifficulty(c.channelHint), seasonal: seasonal.weight, performance: 1 });
     const [ex] = await q(sql`SELECT id, score, status FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} ORDER BY id DESC LIMIT 1`);
     if (ex && String(ex.status) === "candidate") {
-      await q(sql`UPDATE topics SET angle = ${c.angle}, channel_hint = ${c.channelHint}, factors = ${jsonb(factors)}, score = ${score}, expires_at = NOW() + interval '7 days' WHERE id = ${Number(ex.id)}`);
+      await q(sql`UPDATE topics SET angle = ${c.angle}, channel_hint = ${c.channelHint}, factors = ${jsonb(factors)}, score = ${score}, expires_at = NOW() + (${TOPIC_FRESH_DAYS} || ' days')::interval WHERE id = ${Number(ex.id)}`);   // [AC-254] 7 은 `TOPIC_FRESH_DAYS` 한 곳
       skipped++; continue;
     }
     await q(sql`INSERT INTO topics (tenant_id, title, angle, norm_key, channel_hint, source, factors, score, status, expires_at)
-      VALUES (${tid}, ${c.title}, ${c.angle}, ${nk}, ${c.channelHint}, ${"ai"}, ${jsonb(factors)}, ${score}, ${"candidate"}, NOW() + interval '7 days')`);
+      VALUES (${tid}, ${c.title}, ${c.angle}, ${nk}, ${c.channelHint}, ${"ai"}, ${jsonb(factors)}, ${score}, ${"candidate"}, NOW() + (${TOPIC_FRESH_DAYS} || ' days')::interval)`);   // [AC-254]
     added++;
   }
   const [chk] = await q(sql`SELECT jsonb_typeof(factors) AS t FROM topics WHERE tenant_id = ${tid} ORDER BY id DESC LIMIT 1`);
@@ -327,7 +401,7 @@ export async function addManualTopic(tid: number, a: { title: unknown; keyword?:
 
   // 중복 — 30일 안 같은 제목이면 만들지 않는다(기존 것을 돌려준다 · 상태 무관)
   const nk = normKey(title);
-  const [dup] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} AND created_at > NOW() - interval '30 days' ORDER BY id DESC LIMIT 1`);
+  const [dup] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} AND created_at > NOW() - (${TOPIC_REUSE_DAYS} || ' days')::interval ORDER BY id DESC LIMIT 1`);
   if (dup) return { ok: false, step: "duplicate", error: "같은 소재가 이미 있어요. 아래에서 그걸 쓰면 돼요.", topic: toTopic(dup) };
 
   // 검색량 1회 — 실패해도 만든다 · 못 재면 적지 않는다(AC-9)

@@ -565,34 +565,71 @@ function shortsContract(channel: string, label: string, aspect: "9:16"): Writing
 
 /* ───────── DB 오버레이(emotion_profiles.contract) ───────── */
 const cache = new Map<string, { c: WritingContract; at: number }>();
-const OVERLAY_KEYS: (keyof WritingContract)[] = ["label", "reader", "register", "rules", "formats", "formatLabel", "structure", "visual", "visualMin", "length", "titleStyle", "titleExample", "images", "emojiPerParagraph"];
+export const OVERLAY_KEYS: (keyof WritingContract)[] = ["label", "reader", "register", "rules", "formats", "formatLabel", "structure", "visual", "visualMin", "length", "titleStyle", "titleExample", "images", "emojiPerParagraph"];
+
+/** 오버레이 캐시가 도는 시간 — 화면이 «바로는 아니고 최대 N초»를 **서버 값으로** 말한다(AC-52 · 지어내지 않는다). */
+export const OVERLAY_CACHE_SECONDS = 60;
+
+const shapeOf = (x: unknown) => Array.isArray(x) ? "array" : x === null ? "null" : typeof x;
+
+export interface OverlayReport {
+  merged: WritingContract;
+  /** 실제로 덮어쓴 열쇠. */
+  applied: string[];
+  /** 🔴 **무시된 열쇠와 까닭** — 안 알리면 운영자는 «저장했는데 안 바뀐다»를 겪는다(조용한 0건). */
+  ignored: { key: string; why: string; expected?: string; got?: string }[];
+}
+
+/**
+ * [AC-258] 오버레이 한 벌을 기본 계약에 얹는다 — 🔴 **판정기는 이 함수 하나**다.
+ *   `contractFor`(생성 경로)와 `ops-emotion`(운영 화면)이 **같은 함수**를 쓴다.
+ *   두 벌이면 «화면은 먹었다는데 글은 안 바뀐» 자리가 생기고, 그건 재현이 제일 어려운 종류다(PITFALLS #11-b).
+ *
+ *   🔴 **무시한 것을 «말해 준다»** — 종전엔 모양이 다르면 `continue` 로 **소리 없이** 넘어갔다.
+ *      운영자가 `length: "1200"`(문자열)을 저장하면 저장은 성공하고 글은 그대로다. 그게 제일 나쁜 모양이다.
+ *   ⚠️ **막지는 않는다**(§9) — 무시된 채로도 저장은 된다. 다만 **무엇이 안 먹었는지 그 자리에서 보인다.**
+ */
+export function applyOverlay(base: WritingContract, o: Record<string, unknown> | null | undefined): OverlayReport {
+  const merged: WritingContract = { ...base };
+  const applied: string[] = [], ignored: OverlayReport["ignored"] = [];
+  if (!o || typeof o !== "object") return { merged, applied, ignored };
+  /* 운영센터 시드(Phase 0 seed-plans)의 짧은 모양도 받는다: length [min,max] · images [min,max] · tone → register.
+     🔴 모양이 다르면 덮어쓰지 않는다 — 스모크 실사고: length 배열이 객체를 덮어 **NaN 코인**이 나갔다. */
+  const o2: Record<string, unknown> = { ...o };
+  if (Array.isArray(o2.length) && o2.length.length >= 2) o2.length = { min: Number(o2.length[0]), max: Number(o2.length[1]) };
+  if (Array.isArray(o2.images) && o2.images.length >= 2) o2.images = { min: Number(o2.images[0]), max: Number(o2.images[1]), default: Number(o2.images[0]) };
+  if (typeof o2.tone === "string" && !o2.register) o2.register = o2.tone;
+  const known = new Set<string>(OVERLAY_KEYS as string[]);
+  for (const k of Object.keys(o2)) {
+    if (k === "tone") continue;                                   // 위에서 register 로 옮겨 붙였다
+    if (!known.has(k)) { ignored.push({ key: k, why: "계약에 없는 칸이에요" }); continue; }
+  }
+  for (const k of OVERLAY_KEYS) {
+    const v = o2[k as string];
+    if (v === undefined || v === null) continue;
+    const cur = base[k];
+    if (shapeOf(cur) !== shapeOf(v)) { ignored.push({ key: k as string, why: "모양이 달라요", expected: shapeOf(cur), got: shapeOf(v) }); continue; }
+    if (shapeOf(cur) === "object") (merged as unknown as Record<string, unknown>)[k] = { ...(cur as object), ...(v as object) };
+    else (merged as unknown as Record<string, unknown>)[k] = v;
+    applied.push(k as string);
+  }
+  return { merged, applied, ignored };
+}
 
 /** contractFor(channel, emotionKey?) — 코드 기본값 + DB 오버레이(있으면 필드 단위 덮어씀 · 60초 캐시 · graceful). 미등록 채널은 naver_blog 계약을 채널명만 바꿔 돌려준다. */
 export async function contractFor(channel: string, emotionKey?: string | null): Promise<WritingContract> {
   const base = WRITING_CONTRACTS[channel] ?? { ...WRITING_CONTRACTS.naver_blog, channel };
   const key = `${channel}.${emotionKey || base.emotionKey}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < 60_000) return hit.c;
+  if (hit && Date.now() - hit.at < OVERLAY_CACHE_SECONDS * 1000) return hit.c;   // [AC-258] 초는 상수 하나 — 화면이 «최대 N초» 를 서버 값으로 말한다
   let merged: WritingContract = { ...base };
   try {
     const rows = (await db.execute(sql`SELECT contract FROM emotion_profiles WHERE key = ${key} LIMIT 1`)) as unknown as { contract: Record<string, unknown> }[];
     const o = rows[0]?.contract;
     if (o && typeof o === "object") {
-      /* 운영센터 시드(Phase 0 seed-plans)의 짧은 모양도 받는다: length [min,max] · images [min,max] · tone → register.
-         그 밖의 필드는 **기본값과 같은 모양(배열/객체/문자열)일 때만** 덮어쓴다 — 모양이 다르면 무시(스모크 실사고: length 배열이 객체를 덮어 NaN 코인). */
-      const o2: Record<string, unknown> = { ...o };
-      if (Array.isArray(o2.length) && o2.length.length >= 2) o2.length = { min: Number(o2.length[0]), max: Number(o2.length[1]) };
-      if (Array.isArray(o2.images) && o2.images.length >= 2) o2.images = { min: Number(o2.images[0]), max: Number(o2.images[1]), default: Number(o2.images[0]) };
-      if (typeof o2.tone === "string" && !o2.register) o2.register = o2.tone;
-      for (const k of OVERLAY_KEYS) {
-        const v = o2[k as string];
-        if (v === undefined || v === null) continue;
-        const cur = base[k];
-        const shape = (x: unknown) => Array.isArray(x) ? "array" : typeof x === "object" ? "object" : typeof x;
-        if (shape(cur) !== shape(v)) continue;
-        if (shape(cur) === "object") (merged as unknown as Record<string, unknown>)[k] = { ...(cur as object), ...(v as object) };
-        else (merged as unknown as Record<string, unknown>)[k] = v;
-      }
+      /* [AC-258] 🔴 얹는 규칙은 `applyOverlay` **한 함수**다 — 운영 화면(`ops-emotion`)이 같은 것을 부른다.
+         두 벌이면 «화면은 먹었다는데 글은 안 바뀐» 자리가 생긴다(PITFALLS #11-b). */
+      merged = applyOverlay(base, o).merged;
       if (emotionKey) merged.emotionKey = emotionKey;
     }
   } catch { /* 오버레이 없음 — 코드 기본값 */ }

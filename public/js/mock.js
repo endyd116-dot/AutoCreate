@@ -97,14 +97,40 @@
     reels: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("talking", "말하는 사람", 60), VF("clip", "클립", 30)] },
     threads: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("clip", "클립", 30)] },
   }; // 🔴 상한은 서버가 말한다(화면 상수 금지 · 릴스 90 은 Phase 5)
+  /* 🔴 [R17 · A · B 계약 2026-09-23] 소재 낱말은 **서버가 준다**(AC-52). 글자는 `lib/topics.ts` 의 `labels` 와 **한 글자도 다르지 않아야** 한다 —
+     모의가 다른 말을 하면 화면 말투가 갈리고(§3) 그걸 아무 자도 안 잡는다. */
+  const TOPIC_LABELS = { later: {
+    title: "나중에 볼 소재",
+    empty: "나중에 볼 소재가 아직 없어요",
+    undo: "오늘 소재로",
+    keep: "여기 둔 소재는 사라지지 않아요",
+    stale: "추천한 지 오래됐어요 · 지금도 쓸 수 있어요",
+  } };
   const CHANNELS = [
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
-    ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"], ["instagram", "인스타그램", "video", "api", "oauth", false, "planned"],
+    ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"],
+    /* 🔴 [AC-270 · A · 2026-09-23] 인스타그램은 라이브에서 **`text`** 다(`category`). 모의만 `video` 로 적혀 있었다 —
+       온보딩이 `category === "video" ? "video" : "text"` 로 가르므로, 모의에서는 인스타가 **영상 묶음**에 들어가 있었다. */
+    ["instagram", "인스타그램", "text", "api", "oauth", false, "planned"],
     ["youtube_shorts", "유튜브 쇼츠", "video", "api", "oauth", false, "planned"], ["naver_clip", "네이버 클립", "video", "runner", "session", true, "planned"], ["reels", "릴스", "video", "api", "oauth", false, "planned"], ["tiktok", "틱톡", "video", "api", "oauth", false, "planned"],
+    /* ═══ 🔴 [AC-270 · A · 2026-09-23] **라이브에만 있던 6칸을 데려왔다** — 모의 11 ↔ 라이브 17 이었다. ═══
+       R16 에서 `SELECT * FROM channel_registry` 로 실측한 값 **그대로**다(라벨·category·publish_via·status·sort 전부).
+       🔴 이 여섯이 없어서 무슨 일이 났나: `UI.CH`(ui.js:309–312)도 `.mk.*`(ac.css:121–122)도 **이미 여섯을 다 알고 있었다.**
+          화면은 17칸을 그릴 줄 아는데 **모의만 11칸을 먹였다.** 그래서 모의로 재면 계정 연결 첫 화면이 5타일,
+          라이브 값을 먹이면 3타일이었다 — **우리 자가 그만큼만 참이었다**(C 의 등급 19축 중 5축이 모의를 본다).
+       ⇒ 열쇠 없이 되는 일이라 R17 에서 메꿨다. 값을 바꿀 땐 **라이브를 먼저 읽고** 바꾼다(추측 금지).
+       칸 = [key, label, category, publishVia, connectMethod, configured, status, monetizable] */
+    ["facebook", "페이스북", "text", "api", "oauth", false, "planned"], ["x", "엑스", "text", "api", "oauth", false, "planned"],
+    /* 🔴 브런치·클립 게시물은 `publishVia: "manual"` 이다 — «우리가 못 올린다»가 아니라 **«손으로 올리는 길»**이다.
+       `channel-registry.ts:154·161` 이 «셀렉터를 한 번도 못 쟀다»고 적어 둔 그 둘(㉰). 모의도 그 사실대로 적는다. */
+    ["brunch", "브런치", "text", "manual", "session", false, "planned"], ["naver_clip_post", "클립 게시물", "text", "manual", "session", false, "planned"],
+    ["youtube_long", "유튜브 영상", "video", "api", "oauth", false, "planned"], ["facebook_reels", "페북 릴스", "video", "api", "oauth", false, "planned"],
     /* [R12-6] 당근 — 라이브 channel_registry 에는 있는데(DDL 0082) 모의 표에만 없었다.
        🔴 마지막 칸 = 서버 listChannels 가 싣는 `monetizable` 그 칸이다 — **광고가 안 붙는 채널은 false**(수익 화면의 0원이 고장이 아니라고 말해 준다).
-       붙거나 모르면 칸을 비운다 — 서버도 그런다(키를 안 싣는다 · AC-9). */
-    ["daangn", "당근", "text", "runner", "session", true, "active", false],
+       붙거나 모르면 칸을 비운다 — 서버도 그런다(키를 안 싣는다 · AC-9).
+       🔴 [AC-270 · 2026-09-23] status 를 `active` → **`planned`** 로 고쳤다. 라이브가 planned 다(sort 26).
+          모의에는 당근 계정이 하나 붙어 있어서(accounts #6) 타일은 그대로 앞줄에 남는다 — `soon()` 이 `!cnt[key]` 를 보기 때문이다. */
+    ["daangn", "당근", "text", "runner", "session", true, "planned", false],
   ].map(([key, label, category, publishVia, connectMethod, configured, status, monetizable]) => { const st = chOpen ? "active" : status;
     /* [B3 020fb15] 서버가 주는 한 칸 — 라이브 실측: 블로거는 status=active 인데 우리 앱 키가 없어 못 붙는다 */
     const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
@@ -348,6 +374,8 @@
   }
   /* 모의 계정 사진 — 바깥 주소를 쓰면 «열어야 보이는 그림»이 되니 데이터 URI 로(서버는 https 만 받는다는 규칙은 화면 쪽 검사로 따로 지킨다) */
   /* 모의 계정 사진 — 우리 서버가 주는 그림 자리(같은 출처 파일). 🔴 실서버는 https 만 받는다(accounts.ts) · 화면도 https 와 같은 출처만 그린다 */
+  /* 🔴 [R17 · C] 모의가 `avatar` 라 써서 **서버 `avatarUrl` 과 이름이 어긋나 있었다** — 화면이 써 본 적이 없어 아무도 몰랐다.
+     모의가 서버와 다른 이름을 쓰면 **화면을 만들자마자 빈 칸이 된다**(A 가 채널 11↔17 로 밟은 그 병의 이름 판). */
   const AVATAR = "/icon.svg";
   /* [R8 · 사장님 승인 2026-09-15 · lib/coin-table.ts 그대로] 🔴 글 1편 = 1코인(AI 사진 1장 포함) · 카드뉴스 3 · 내 사진·스톡 0 */
   const COIN = { blog: 1, image: 1, cardnews: 3 };
@@ -462,25 +490,28 @@
     close: closedKnob ? { closedAt: iso(now - 2 * 86400e3), purgeAt: iso(now + 28 * 86400e3), reason: null } : null, // v = 모의 상태 판(올리면 옛 상태를 버리고 다시 뿌린다 · fresh 로 비운 상태를 되살리지 않는다) // [P1R5] C 시나리오 «코인 60»(글 2 + 쇼츠 1 = 41 이 한 번에 나가게)
     /* [사장님 실측] ?oneCh=1 = 네이버 계정만 있는 집(테넌트 198) — 소재가 전부 한 채널로 나온다 */
     accounts: fresh ? [] : oneChannel ? [
-      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
-      { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatar: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatarUrl: null, groupName: "요리 계정들", status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], credsAt: iso(now - 9 * 86400e3) },
+      { id: 2, channel: "naver_blog", handle: "cook_b", displayName: "요리하는 B", avatarUrl: null, status: "active", healthScore: 92, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [9], credsAt: iso(now - 4 * 86400e3) },
     ] : [
       /* [AC-187] `identity` — 서버 lib/accounts.ts:146 이 만드는 그 모양 그대로({ seen?, confirmed?, matchesHandle }) · 🔴 본 적이 없으면 **키 자체가 없다**. */
-      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatar: null, status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701, proxyUrl: "http://proxy-kr-01.example.com:8080",   /* [AC-189] 가려서 준 값(아이디·비밀번호는 서버만 안다) — 화면이 이걸 되보내면 안 된다 */
+      { id: 1, channel: "naver_blog", handle: "cook_a", displayName: "요리하는 A", avatarUrl: null, groupName: "요리 계정들", status: "active", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [7, 21], lastPostAt: iso(now - 26 * 3600e3), personaId: 1, browserProfileKey: "acc-1", hasCreds: true, monetize: { coupang: true, adpost: true, adsense: false }, defaultTier: "standard", defaultStyleId: noStyles ? null : 701, proxyUrl: "http://proxy-kr-01.example.com:8080",   /* [AC-189] 가려서 준 값(아이디·비밀번호는 서버만 안다) — 화면이 이걸 되보내면 안 된다 */
         ...(addrKnob === "ask" ? { identity: { seen: "blog.naver.com/cook-a-2024", matchesHandle: false } }
           : addrKnob === "ok" ? { identity: { seen: "blog.naver.com/cook-a-2024", confirmed: "blog.naver.com/cook-a-2024", matchesHandle: false } }
           : addrKnob === "again" ? { identity: { seen: "blog.naver.com/cook-a-new", confirmed: "blog.naver.com/cook-a-2024", matchesHandle: false } } : {}) },
-      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatar: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, dailyCapBase: 2, minGapMin: 360, minGapBase: 180, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true }, defaultTier: "premium", defaultStyleId: null },
-      { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatar: null, status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false }, defaultTier: null, defaultStyleId: null },
-      { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatar: avatarOn ? AVATAR : null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+      { id: 2, channel: "tistory", handle: "tips_b", displayName: "", avatarUrl: null, status: "pending_login", healthScore: 84, postsToday: 0, dailyCap: 1, dailyCapBase: 2, minGapMin: 360, minGapBase: 180, goldenHours: [12], lastErrorKind: "login_fail", browserProfileKey: "acc-2", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true }, defaultTier: "premium", defaultStyleId: null },
+      { id: 3, channel: "naver_blog", handle: "life_c", displayName: "살림하는 C", avatarUrl: null, groupName: "요리 계정들", status: "suspended", healthScore: 31, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [21], lastErrorKind: "suspended", lastPostAt: iso(now - 5 * 86400e3), browserProfileKey: "acc-3", hasCreds: true, monetize: { coupang: false, adpost: true, adsense: false }, defaultTier: null, defaultStyleId: null },
+      { id: 4, channel: "youtube_shorts", handle: "shorts_d", displayName: "1분 살림", avatarUrl: avatarOn ? AVATAR : null, status: "active", healthScore: 96, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [18], lastPostAt: iso(now - 2 * 86400e3), browserProfileKey: "acc-4", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
       /* [R12-6] 당근 — 광고가 안 붙는 채널이라 **수익 화면에 0원으로 서 있는** 집이 모의에도 있어야 그 화면을 눈으로 볼 수 있다.
          🔴 모의도 막지 않는다(§9) — 상태는 active 다. 문제가 있는 계정이 아니라 **돈이 안 붙는 채널**일 뿐이다. */
-      { id: 6, channel: "daangn", handle: "danggeun_e", displayName: "동네 살림", avatar: null, status: "active", healthScore: 98, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [10], lastPostAt: iso(now - 3 * 86400e3), browserProfileKey: "acc-6", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null },
+      { id: 6, channel: "daangn", handle: "danggeun_e", displayName: "동네 살림", avatarUrl: null, status: "active", healthScore: 98, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [10], lastPostAt: iso(now - 3 * 86400e3), browserProfileKey: "acc-6", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null },
       /* [R8 §3.2] ?ads=1 일 때만 — 워드프레스는 «우리가 직접 위젯을 넣는» 유일한 길이라 그 갈래를 화면에서 보려면 계정이 하나 있어야 한다 */
-      ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatar: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
+      ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatarUrl: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
+      /* 🔴 [R17 · A] `?later=stale` — **나중에 둔 사이에 만료가 지난 소재.** 없으면 `stale` 줄을 한 번도 못 그려 본다(§4.8).
+         B 가 서버를 고쳐서 이건 이제 **사라지지 않고 남는다**(예전엔 `WHERE expires_at > NOW()` 에 걸려 조용히 증발했다). */
+      ...(qs.get("later") === "stale" ? [{ id: 10, title: "장마철 빨래 냄새 없애는 법", angle: "실내 건조 순서", channelHint: "naver_blog", score: 74, status: "later", factors: { volume: 18000, growthPct: -4, competition: "low", intent: "mixed", pain: 0.6 }, expiresAt: iso(now - 2 * 86400e3) }] : []),
       { id: 11, title: "에어프라이어 청소법, 눌어붙은 기름 3분 컷", angle: "실패담 → 성공 순서", channelHint: "naver_blog", score: 91, status: "candidate", factors: { volume: 32000, growthPct: 18, competition: "low", intent: "mixed", pain: 0.8, seasonal: "가을 대청소" }, expiresAt: iso(now + 6 * 86400e3) },
       { id: 12, title: "가을 이불 세탁, 건조기 없이 뽀송하게", angle: "베란다 건조 요령", channelHint: "naver_blog", score: 84, status: "candidate", factors: { volume: 18400, growthPct: 42, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) },
       { id: 13, title: "전기요금 아끼는 멀티탭, 대기전력 진짜 차이", angle: "한 달 실측", channelHint: "tistory", score: 79, status: "candidate", factors: { volume: 9800, competition: "low", intent: "commercial" }, expiresAt: iso(now + 5 * 86400e3) },
@@ -600,7 +631,14 @@
     takedowns: tdKnob === "open" ? [{ id: 9101, status: "open", kind: "copyright", kindLabel: "저작권", reason: "본문에 쓰인 사진 두 장이 저작권자의 것이라는 통지가 들어왔어요.", channel: "naver_blog", externalUrl: "https://blog.naver.com/cook_a/223456789", pieceId: 505, accountId: 1, receivedAt: iso(now - 2 * 86400e3), dueAt: iso(now + 5 * 86400e3), daysLeft: 5, claimant: "OO스튜디오", canRetract: true, retractAvailable: true }]
       : tdKnob === "noway" ? [{ id: 9102, status: "open", kind: "policy", kindLabel: "채널 정책 위반", reason: "영상 배경 음악이 채널 정책에 맞지 않는다는 통지가 들어왔어요.", channel: "youtube_shorts", externalUrl: "https://youtube.com/shorts/mock509", pieceId: 509, accountId: 4, receivedAt: iso(now - 86400e3), dueAt: iso(now + 6 * 86400e3), daysLeft: 6, claimant: "유튜브", canRetract: false, retractAvailable: false }]
       : tdKnob === "done" ? [{ id: 9103, status: "resolved", kind: "defamation", kindLabel: "명예훼손·비방", reason: "확인 결과 문제가 없어 종결했어요.", channel: "tistory", pieceId: 504, receivedAt: iso(now - 20 * 86400e3), dueAt: iso(now - 13 * 86400e3), daysLeft: 0, canRetract: true, retractAvailable: true }] : [],
-    photos: {},      /* [R8-A2 §5D.4] pieceId → 내 사진 목록(piece_assets kind=image) */
+    /* [R8-A2 §5D.4] pieceId → 내 사진 목록(piece_assets kind=image)
+       🔴 [R17 · A] **같은 스톡 사진 한 장을 두 글에 깔아 둔다.** «이 사진이 어느 글에 쓰였나»(§5E 내리기의 첫 걸음)는
+          **한 열쇠가 여러 글로 퍼지는 경우**가 본론이다 — 빈 `{}` 이면 그 단추를 한 번도 못 눌러 본다(§4.8).
+          504 는 **발행된 글**이라 `externalUrl` 이 있다 = 실제로 내려야 할 자리가 바깥에 있는 판. */
+    photos: {
+      501: [{ id: 9101, pieceId: 501, r2Key: "t1/p501/a.jpg", url: "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#E8F3FF"/><text x="40" y="46" font-size="13" text-anchor="middle" fill="#3182F6">사진</text></svg>'), caption: "에어프라이어 바스켓", sort: 0, source: { kind: "stock", key: "stock:pexels:10422341", addedAt: iso(now - 3 * 86400e3) }, stock: { provider: "pexels", id: "10422341", author: "Ivan Samkov", sourceUrl: "https://www.pexels.com/photo/10422341/" }, createdAt: iso(now - 3 * 86400e3) }],
+      504: [{ id: 9102, pieceId: 504, r2Key: "t1/p504/a.jpg", url: "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#E8F3FF"/><text x="40" y="46" font-size="13" text-anchor="middle" fill="#3182F6">사진</text></svg>'), caption: "같은 사진", sort: 0, source: { kind: "stock", key: "stock:pexels:10422341", addedAt: iso(now - 9 * 86400e3) }, stock: { provider: "pexels", id: "10422341", author: "Ivan Samkov", sourceUrl: "https://www.pexels.com/photo/10422341/" }, createdAt: iso(now - 9 * 86400e3) }],
+    },
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== MOCK_V) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -870,6 +908,12 @@
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule;
       /* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **최상위 키**다(settings 안이 아니다) · 기본 꺼짐 */
       if (typeof b.recipeVolunteer === "boolean") S.recipeVolunteer = b.recipeVolunteer;
+      /* [R17 · C] «디렉터에게 맡기기» — 🔴 켜는 것만 요금제(Pro 부터)로 가른다. **끄는 것은 언제나 된다**(§9).
+         모의도 그 갈래를 흉내 내야 «Pro 가 아니면 어떻게 보이나»를 손으로 볼 수 있다(안 그러면 늘 켜져서 그 화면을 못 본다). */
+      if (typeof b.directorAuto === "boolean") {
+        if (b.directorAuto && S.plan && S.plan.key === "starter") return err("plan_limit", "맡기기는 Pro 요금제부터 쓸 수 있어요.", { status: 402 });
+        S.settings.directorAuto = b.directorAuto;
+      }
       if (Array.isArray(b.kinds)) { S.settings.kinds = b.kinds.includes("video") ? ["text", "video"] : ["text"]; S.kindsSet = true; }
       /* [R8CLOSE §B8] 수익 목표 — 🔴 서버 `ALLOWED_SETTINGS`(tenant-settings.ts:19) 에 `goal` 이 들어가야 살아난다.
          모의는 **약속대로** 받아 둔다(A·B 동시 발사 관례) — 값은 `lib/director-goal.ts MediaGoal` 네 갈래뿐이고,
@@ -1036,11 +1080,19 @@
       if (b.channel === "wordpress" && b.appPassword === "wrong") return err("wp_auth", "워드프레스 로그인 정보를 확인해 주세요.");
       if (["naver_blog", "tistory", "naver_clip"].includes(b.channel) && (!b.loginId || !b.password)) return err("creds", "아이디와 비밀번호를 입력해 주세요.");
       if (b.channel === "wordpress" && (!b.siteUrl || !b.loginId || !b.appPassword)) return err("creds", "사이트 주소·아이디·앱 비밀번호를 입력해 주세요.");
-      const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", avatar: null, status: b.channel === "wordpress" ? "active" : "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [], browserProfileKey: "acc-" + S.nextId, hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null };
+      const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", avatarUrl: null, status: b.channel === "wordpress" ? "active" : "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [], browserProfileKey: "acc-" + S.nextId, hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null };
       S.accounts.push(a); return { ok: true, account: { ...a } }; },
     "accounts-remove": (b) => { S.accounts = S.accounts.filter((a) => a.id !== Number(b.id)); return { ok: true }; },
+    /* [R17 · C] `accounts-health` — 🔴 **재는 것뿐이다**(상태 안 바꾼다). 모의는 «다시 재면 값이 움직인다»를
+       보여 줘야 «눌러도 아무 일이 없다»와 구별된다(AC-122 «그려졌나 ≠ 손이 붙었나»). */
+    "accounts-health": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
+      /* 🔴 100 은 상한이라 «+2» 로는 **안 움직인다** — 그러면 «눌러도 아무 일 없음»과 구별이 안 된다(내가 한 번 밟았다).
+         모의는 **늘 움직이게** 한다: 100 이면 내리고 아니면 올린다. 진짜 서버는 `recomputeHealth` 가 센다. */
+      const cur = a.healthScore ?? 100;
+      a.healthScore = a.status === "suspended" ? Math.max(0, cur - 3) : cur >= 100 ? 98 : Math.min(100, cur + 2);
+      return { ok: true, id: a.id, healthScore: a.healthScore }; },
     "accounts-update": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
-      for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours", "defaultTier", "defaultStyleId"]) if (b[k] !== undefined) a[k] = b[k];   /* [R9R10-A] 등급·스타일 기본값은 계정마다 */
+      for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours", "defaultTier", "defaultStyleId", "avatarUrl", "groupName"]) if (b[k] !== undefined) a[k] = b[k] || undefined;   /* [R17 · C] `avatarUrl`·`groupName` — 🔴 모의가 안 받으면 화면에서 저장해도 **다시 열면 사라진다** — 그러면 손으로 볼 때 «안 된다»로 보인다. 빈 값은 **지우기**라 undefined 로 둠다(서버도 NULL 로 쓴다). */   /* [R9R10-A] 등급·스타일 기본값은 계정마다 */
       /* [AC-189] 🔴 **서버와 같은 법으로 가린다**(lib/creds-crypto.ts maskProxyUrl — 아이디·비밀번호를 «****» 로 바꾸는 게 아니라
          **통째로 떼고** `프로토콜//호스트:포트` 만 남긴다). 모의가 «****@» 로 가리면 화면이 그걸 되보내도 티가 안 나서,
          **저장 한 번에 인증이 날아가던 사고**(AC-189)를 모의로는 영영 못 본다. */
@@ -1070,12 +1122,22 @@
     "topics-reference": (b) => { const url = String(b.url || "").trim(); if (!/^https?:\/\/\S+$/.test(url)) return err("url", "쇼츠·릴스 링크를 붙여 주세요."); if (S.templates.filter((x) => x.createdAt.slice(0, 10) === todayYmd).length >= 3) return err("limit", "오늘은 3개까지 배울 수 있어요. 내일 다시 해 주세요.");
       const tpl = { id: S.nextId++, name: /youtube|youtu\.be/.test(url) ? "비포·애프터 반전 (60초)" : "생활밀착 3단계 (30초)", sourceUrl: url, structure: ["3초 훅: 결과 먼저 보여 주기", "문제 한 줄", "해결 3단계", "엔드카드 · 설명란 링크"], hook: "twist", style: { palette: "ink", captions: "keyword_center", pace: "fast" }, createdAt: iso(Date.now()) };
       S.templates.push(tpl); const tp = S.topics.find((x) => x.status === "candidate" && VIDEO_CH.includes(x.channelHint)) || S.topics.find((x) => x.status === "candidate"); if (tp) tp.factors.structureTemplateId = tpl.id; return { ok: true, template: tpl }; }, // [P1R5] §1.11 · 코인 0 · 하루 3회
-    "topics-list": () => { refreshTick(); const t = S.topicsRefresh;
+    /* 🔴 [R17 · A] `?status=` 를 **읽는다.** 여태 무시하고 늘 `candidate` 만 냈는데, B 가 «나중에»를 열면서
+       `?status=later` 가 실제로 쓰이게 됐다(`topics-list?status=later`). 모의가 그걸 무시하면
+       «나중에 볼 소재»에 **오늘 소재가 통째로 뜨는** 거짓 화면이 된다. */
+    "topics-list": (_b, q) => { refreshTick(); const t = S.topicsRefresh; const want = (q && q.get("status")) || "candidate";
       const refresh = { running: isRefreshing() };
       if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
       /* [사장님 실측] 서버는 **연결된 계정의 채널**에서만 소재 채널을 고른다(lib/topics.ts) — 모의도 그래야 «네이버만 보이는» 그 화면이 재현된다 */
       const only = oneChannel ? "naver_blog" : null;
-      return { ok: true, topics: S.topics.filter((x) => x.status === "candidate").map((x) => (only ? { ...x, channelHint: only } : x)), templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; }, // [P1R5] templates(레퍼런스 구조) 동봉
+      /* 🔴 [R17 · A · B 가 서버를 고쳤다 2026-09-23] 만료 처리가 **상태마다 다르다** — 모의가 이걸 안 닮으면 거짓 초록이다.
+         · `later` **만** 만료된 것도 낸다(안 그러면 «옮겨 뒀는데 없어졌다»가 된다) · 나머지 상태는 예전대로 만료를 거른다.
+         · 🔴 만료 여부는 **서버가 재서** `stale` 로 준다(시간대가 갈리지 않게). 없으면 «안 지났다»가 아니라 «시계가 없다»(AC-9).
+         🔴 라이브 실측(B): AI 소재 512행 **전부 7일** 만료다(30일 아니다). 모의 씨앗도 그 안쪽 값이라 그대로 둔다. */
+      const gone = (x) => !!x.expiresAt && new Date(x.expiresAt).getTime() <= Date.now();
+      const rows = S.topics.filter((x) => x.status === want && (want === "later" || !gone(x)))
+        .map((x) => ({ ...(only ? { ...x, channelHint: only } : x), ...(want === "later" ? { stale: gone(x) } : {}) }));
+      return { ok: true, topics: rows, templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh, labels: TOPIC_LABELS }; }, // [P1R5] templates(레퍼런스 구조) 동봉 · [R17] labels 는 status 무관 항상 실린다
     "topics-refresh": () => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; refreshTick();
       if (isRefreshing()) return { ok: true, started: false, running: true };
       if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
@@ -1083,6 +1145,19 @@
       return { ok: true, started: true, status: 202 }; },
     "topics-pick": (b) => { const t = S.topics.find((x) => x.id === Number(b.id)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 }); t.status = "picked"; return { ok: true, topic: t }; },
     "topics-skip": (b) => { const t = S.topics.find((x) => x.id === Number(b.id)); if (t) t.status = "expired"; return { ok: true }; },
+    /* 🔴 [R17 · A · B 계약 2026-09-23] «나중에» — `{ id }` 는 candidate → later, `{ id, undo: true }` 는 되돌리기.
+       🔴 **멱등**이다(스와이프로 두 번 스칠 수 있다) · 🔴 `skip` 과 달리 **만료 시각을 안 건드린다** — 되돌리면 그대로 돌아온다. */
+    "topics-later": (b) => { const t = S.topics.find((x) => x.id === Number(b.id));
+      if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
+      const to = b.undo ? "candidate" : "later";
+      if (t.status !== to && (b.undo ? t.status === "later" : t.status === "candidate")) {
+        t.status = to;
+        /* 🔴 [B 2026-09-23] 되돌릴 때 **이미 지난 것만** 시계를 다시 감는다(+7일).
+           안 감으면 «오늘 소재로»를 눌러도 후보 목록이 만료를 걸러서 **누르자마자 또 사라진다** —
+           되돌릴 길이 «있는 척»만 하는 꼴이다. 🔴 안 지난 소재는 **한 글자도 안 건드린다**(«그대로 돌아가요»가 참이어야 한다). */
+        if (b.undo && t.expiresAt && new Date(t.expiresAt).getTime() <= Date.now()) t.expiresAt = iso(Date.now() + 7 * 86400e3);
+      }
+      return { ok: true, topic: t }; },
     /* §3 디렉터 */
     "director-propose": (b) => { const t = S.topics.find((x) => x.id === Number(b.topicId)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
       const pieces = []; const nv = S.accounts.find((a) => a.channel === "naver_blog"); const ts = S.accounts.find((a) => a.channel === "tistory");
@@ -1432,6 +1507,33 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     },
     /* ══ [R8-A2 · DESIGN §5D.4] 내 사진 — 모양·사유 문장은 netlify/functions/piece-photos.ts · lib/photo-source.ts 그대로. 🔴 내 사진은 코인 0. ══ */
     "piece-photos": (_b, q) => ({ ok: true, pieceId: Number(q.get("pieceId")), photos: (S.photos || {})[Number(q.get("pieceId"))] || [] }),
+    /* 🔴 [R17 · A] «이 사진이 어느 글에 쓰였나» — 서버(`piece-photos.ts:42` → `piecesUsingSource`)와 같은 뜻으로,
+       **열쇠가 같은 사진이 들어간 글을 전부** 찾는다(파일 이름이 아니라 열쇠로 묶는 게 요점이다). */
+    "photo-usage": (_b, q) => { const key = String(q.get("key") || "");
+      if (!/^(customer:sha256:[0-9a-f]{16,64}|stock:[a-z0-9_]+:[A-Za-z0-9_-]{1,64}|ai:[A-Za-z0-9._-]{1,60}:.{1,80})$/.test(key)) return { ok: false, error: "사진 출처 값이 올바르지 않아요.", step: "key" };
+      const uses = [];
+      /* `?photouse=many` — 같은 사진이 **상한을 넘는 글**에 쓰인 판(250곳). 🔴 표본이 둘이면 상한에 안 닿아 늘 초록이다. */
+      if (qs.get("photouse") === "many" && key === "stock:pexels:10422341") {
+        for (let i = 0; i < 250; i++) uses.push({ assetId: 9200 + i, tenantId: 1, pieceId: 9000 + i, title: `같은 사진을 쓴 글 ${i + 1}`, status: i % 3 === 0 ? "published" : "in_review", channel: "naver_blog", externalUrl: i % 3 === 0 ? `https://blog.naver.com/cook_a/22${300000 + i}` : null });
+      }
+      for (const [pid, list] of Object.entries(S.photos || {})) {
+        for (const a of list) {
+          if (!a.source || a.source.key !== key) continue;
+          const pc = S.pieces.find((x) => x.id === Number(pid)); if (!pc) continue;
+          const post = (S.posts || []).find((x) => x.pieceId === Number(pid));
+          uses.push({ assetId: a.id, tenantId: 1, pieceId: Number(pid), title: pc.title || "", status: pc.status, channel: pc.channel, externalUrl: (post && post.externalUrl) || null });
+        }
+      }
+      /* 🔴 [AC-273 · 2026-09-23] **서버의 조용한 상한을 모의도 그대로 갖는다** — `piecesUsingSource` 가
+         `min(500, opts.limit ?? 200)` 으로 자른다(`lib/piece-photos.ts:150`). 모의에 상한이 없으면
+         **상한에 닿는 판을 한 번도 못 그려 본다**(내 첫 실측이 «글 2곳»이라 초록이었던 이유다 · AC-270).
+         `?photouse=many` 로 상한을 넘겨 본다.
+         🔴 [같은 날 · B 가 고쳤다] 이제 **`total`(LIMIT 안 건 COUNT) · `shown` · `hasMore`** 를 같이 싣는다 —
+         자르는 건 그대로 두고 «다 보여 준 척»만 없앴다(§9). 모의도 **네 칸 다** 낸다. */
+      const SERVER_LIMIT = 200;
+      const all = uses.sort((a, b) => b.pieceId - a.pieceId);
+      const shown = all.slice(0, SERVER_LIMIT);
+      return { ok: true, key, uses: shown, total: all.length, shown: shown.length, hasMore: all.length > shown.length }; },
     "piece-photo-add": (b) => {
       const nw = notWritable(); if (nw) return nw;
       const pid = Number(b.pieceId); if (!pid) return err("pieceId", "어느 글에 붙일 사진인지 알려 주세요.");

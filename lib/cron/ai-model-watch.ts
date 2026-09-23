@@ -81,6 +81,9 @@ async function promoteRipeCanaries(deadline: number): Promise<{ promoted: string
   return { promoted, rolledBack };
 }
 
+/** [AC-256 · DESIGN §10.2 «분기마다»] 정본 갈림을 **다시 말하기까지** 쉬는 날. 🔴 상수 하나 — 두 곳에 90을 적지 않는다. */
+export const SYNC_REMIND_DAYS = 90;
+
 export const aiModelWatchStep: CronStep = {
   key: "ai.model_watch",
   every: "hourly",
@@ -148,6 +151,30 @@ export const aiModelWatchStep: CronStep = {
         if (started.length) await writeAudit({ tenantId: null, action: "ai_candidate_canary", actorType: "system", target: "ai:high", detail: { model: good.model, canaryPct: 10, mode: "auto" }, riskLevel: "medium" });
       }
     }
+    /* ═══ [AC-256 · DESIGN §10.2] 🔴 **분기 알림 — «파일과 DB 가 갈라진 채 굳었다»고 말해 준다** ═══
+       설계는 «분기마다 오버레이를 파일에 굽는 정본 동기화»라고 적어 뒀는데, 여태 **누가 언제 그걸 해야 하는지 아무도 안 알렸다.**
+       운영센터 화면을 **열어 본 사람만** 갈림을 본다 ⇒ 안 열면 영영 모른다(조용한 0건).
+       🔴 막지 않는다(§9) — «하세요»가 아니라 **«이만큼 갈려 있어요»**다. 굽는 것은 사람이 누를 때다.
+       🔴 멱등: 같은 감사 행이 90일 안에 있으면 안 적는다. «분기»를 날짜로 세지 않고 **마지막으로 말한 때**로 센다
+          (크론 주기가 바뀌어도, 한 달을 쉬어도 같은 뜻으로 돈다).
+       ⚠️ 동적 import — 이 파일은 무거운 것을 최상단에 안 올린다(AC-17). */
+    try {
+      const [said] = await q(sql`SELECT created_at FROM audit_logs WHERE action = 'ai_sync_due' ORDER BY id DESC LIMIT 1`);
+      const quietDays = said?.created_at ? (Date.now() - new Date(`${String(said.created_at).replace(" ", "T")}Z`).getTime()) / 86400_000 : Infinity;
+      if (quietDays >= SYNC_REMIND_DAYS) {
+        const { driftReport } = await import("../ai-models-sync");
+        const d = await driftReport();
+        if (d.drifted) {
+          await writeAudit({ tenantId: null, action: "ai_sync_due", actorType: "system", target: "ai",
+            /* 🔴 «몇 중 몇»을 적는다 — 수 없이 «갈렸어요»만 적으면 읽는 사람이 크기를 못 잰다(AC-141②). */
+            detail: { roleCount: d.roleCount, drifted: d.rows.filter((r) => !r.same).map((r) => r.role),
+              envMasked: d.envMasked, canary: d.canaryRoles, unbakeable: d.unbakeable, quietDays: Number.isFinite(quietDays) ? Math.round(quietDays) : null },
+            /* 🔴 구울 자리를 모르는 역할이 있으면 더 세게 — 그건 **화면에서 눌러도 안 고쳐지는** 종류다. */
+            riskLevel: d.unbakeable.length ? "high" : "medium" });
+        }
+      }
+    } catch (e) { console.warn("[ai.model_watch] 정본 갈림 확인 실패", String((e as Error)?.message ?? e).slice(0, 120)); }
+
     return { changed: candidates.length, skipped: promo.promoted.length + promo.rolledBack.length, detail: { newCandidates: news.length, tested: testedCount, promote: promo } };
   },
 };

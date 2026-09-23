@@ -5,6 +5,7 @@
  *   [P1R7 §3.2] 채널 게이트 — **새로 연결할 때만** 요금제를 본다(402 `step:"plan_channel"`). 🔴 이미 연결한 계정은 소급해서 막지 않는다.
  *   [P1R7 §3.3] 자격 보관 동의 — 아이디·비밀번호를 맡기는 채널(session·app_password)은 `agreeCredsStorage:true` 를 받아 `consents(creds_storage)` 1행.
  *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
+ *   POST /api/accounts-health              { id }            — [R17 · §15] 건강 점수를 **지금 다시 잰다**(읽기만 · 상태는 안 바꾼다)
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
  *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl?, defaultTier?, defaultStyleId?, reader?, openedAt? }
  *                                          🔴 [AC-201] `confirmBlogId?` — «이 블로그 주소가 맞아요»(러너가 실제로 본 주소만 · null = 승인 취소)
@@ -35,7 +36,7 @@ import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUr
 import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/accounts-list", "/api/accounts-add", "/api/accounts-remove", "/api/accounts-update", "/api/accounts-oauth-start", "/api/accounts-oauth-return"] };
+export const config = { path: ["/api/accounts-list", "/api/accounts-add", "/api/accounts-remove", "/api/accounts-update", "/api/accounts-oauth-start", "/api/accounts-oauth-return", "/api/accounts-health"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
@@ -258,6 +259,22 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, account: await getAccount(tid, id) }, 201);
     }
 
+    /* ── [R17 · §15 `accounts-health` · DESIGN:1304] 건강 점수를 **지금 다시 재 본다** ──────────
+       🔴 여태 점수는 **신호가 올 때만** 다시 셌다(`applyAccountSignal` 안 · account-health.ts:104).
+          그래서 화면은 «건강 85점»을 **보여 주기만** 하고 고객은 **다시 재 볼 길이 없었다** —
+          계정을 손본 뒤에도 옛 점수가 그대로 있어 «고쳤는데 그대로네»가 된다.
+       🔴 **상태는 안 바꾼다.** 이건 «재기»지 «판정»이 아니다 — 점수만 다시 세고 그 값을 돌려준다(§9 막지 않는다).
+       🔴 **테넌트 스코프**를 반드시 지난다(§4.6) — 남의 계정 점수를 재 주면 안 된다. */
+    if (path.endsWith("/accounts-health")) {
+      const b = await readJson<{ id?: unknown }>(req);
+      const id = Math.floor(Number(b.id ?? 0)) || 0;
+      if (!id) return badRequest("어떤 계정인지 알 수 없어요.", "id");
+      const acc = await getAccount(auth.tid, id);
+      if (!acc) return json({ ok: false, error: "계정을 찾을 수 없어요.", step: "not_found" }, 404);
+      const { recomputeHealth } = await import("../../lib/account-health");
+      const healthScore = await recomputeHealth(auth.tid, id);
+      return json({ ok: true, id, healthScore });
+    }
     if (path.endsWith("/accounts-remove")) {
       const b = await readJson<{ id?: number }>(req);
       const id = n(b.id); if (!id) return badRequest("id");

@@ -154,13 +154,13 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 0 | 한 줄 정의 — 여러 계정 · 글 **과 영상** · 자동 발행 · 수익 한 곳 | 🟠 | 글 축 코드·화면 ✓ · 라이브 posts 성공 naver_blog 2(임시저장 · B2 SELECT) · 영상 piece 0 · API 수익 0행 | 영상은 입구가 잠겼고 글도 실발행 0 — «한 곳에서 보는 수익»은 수동 입력·애드포스트뿐 | §0.4 묶음 1·2 | L |
 | 0 원칙1 | 디렉터가 앞에 선다 — 지시서 «이대로/손보기» | ✅ | `lib/director.ts` propose/confirm(:159·:320) · `public/app/director.html` CTA 2(손보기/이대로 만들기) | | | |
 | 0 원칙2 | 채널 감성 자동 적응(채널별 톤·구성 계약) | ✅ | `lib/writing-contracts.ts` 7채널 + `emotion_profiles` 오버레이(AC-6 shape 가드) · B-1 §5C | | | |
-| 0 원칙3 | «API 있으면 API 없으면 러너» — 레지스트리 **한 곳**이 결정 | 🟠 | 경로 결정 = `lib/accounts.ts:22 connectMethodOf` + `lib/runner-jobs.ts:83 publishJobKindOf` + `lib/publish/index.ts:180` 분기 3곳 · DB `channel_registry.publish_via` 는 표시용 · 설계의 `lib/channel-registry.ts` 파일 없음(grep 0) | 정본이 3곳이라 채널 하나 켤 때 세 군데를 맞춰야 한다 | 정본 1파일(B2 ➖ 와 짝) | S |
+| 0 원칙3 | «API 있으면 API 없으면 러너» — 레지스트리 **한 곳**이 결정 | ✅ � | 경로 결정 = `lib/accounts.ts:22 connectMethodOf` + `lib/runner-jobs.ts:83 publishJobKindOf` + `lib/publish/index.ts:180` 분기 3곳 · DB `channel_registry.publish_via` 는 표시용 · 설계의 `lib/channel-registry.ts` 파일 없음(grep 0) · **2026-09-23 재측정(메인): 🔴 **정본이 한 곳으로 모였다.** 러너가 제 입으로 적어 뒀다 — `runner/lib/plan.mjs:658` «채널 표는 **서버가 믿는 표**다(`lib/channel-registry.ts formatCaps`)». 화면도 같다 — `public/js/ui.js:581` «정본은 `lib/channel-registry.ts`(거기 `connect` 옆이 그 자리다)». ⇒ 09-15 의 «세 군데를 맞춰야 한다» 는 해소. **셋이 한 곳을 가리킨다.**** | 정본이 3곳이라 채널 하나 켤 때 세 군데를 맞춰야 한다 | 정본 1파일(B2 ➖ 와 짝) | S |
 | 0 원칙4 | 계정은 소모품 — 정지 → 같은 채널 다음 계정 승계 · 계정 간 중복 0 | ✅ | `lib/account-health.ts:164 reassignSlots`(날짜별 예산 · AC-24) · `lib/similarity.ts` 계정 간 게이트 · B §7.2 | | | |
 | 0 원칙5 | 한 화면 한 목적(큰 숫자 1 · CTA 1 · 옵션은 시트) | ✅ | 홈 `_shots/audit-23-home-after.png`(숫자 1 · 토글 1) · 수익 `audit-22`(숫자 1) · A 하니스 21화면 Primary 1 | | | |
 | 0 원칙6 | AI 이름은 한 파일 · 자동 검증→승격→롤백 | ✅ | `lib/ai-models.ts` · `lib/cron/ai-model-watch.ts` · `ops-ai.ts`(apply/rollback/mode) · B-1 §10 | | | |
 | 0 Q1 | S스토리 = 티스토리 | ✅ | `runner/channels/tistory.mjs` · `writing-contracts.ts:77` | | | |
 | 0 Q2 | Starter 19,000 · Pro 49,000 · Agency 149,000 | ✅ | `lib/plans.ts:18-24` · 라이브 plans(B) · 실측 `/api/plans` tid212 | | | |
-| 0 Q3 | 관리형 러너 = Pro 옵션 · Agency 포함 · 원가 별도 산정 | 🟡 | `plans.ts` managedRunner option/included · `netlify/functions/managed-runner.ts`(신청·가격 30,000+VAT · 실측 tid212 `eligible:false · price 33,000`) · `runner.html` «PC 없이 쓰기» | 신청·가격뿐 — 우리 서버가 대신 발행하는 러너 팜 0 · 원가 산정 문서 0 | R7 러너 팜(사장님 결정 3) | L |
+| 0 Q3 | 관리형 러너 = Pro 옵션 · Agency 포함 · 원가 별도 산정 | 🟡 � | `plans.ts` managedRunner option/included · `netlify/functions/managed-runner.ts`(신청·가격 30,000+VAT · 실측 tid212 `eligible:false · price 33,000`) · `runner.html` «PC 없이 쓰기» · **2026-09-23 재측정(메인): 🔴 **🟡 다 — 서버는 있고 기계가 0대다.** `netlify/functions/managed-runner.ts` 가 있고 신청·가격도 있다. 라이브 `managed_runner_requests` **0행** · 관리형 러너 **0대**(B2 실측). ⇒ 남은 건 코드가 아니라 **기계와 원가 산정**(Q3).** | 신청·가격뿐 — 우리 서버가 대신 발행하는 러너 팜 0 · 원가 산정 문서 0 | R7 러너 팜(사장님 결정 3) | L |
 | 0 Q4 | 유튜브·틱톡 앱 하나로 고객 OAuth | 🔒 | `lib/oauth-providers.ts`(google·meta·threads·tiktok 인가·교환·장기 토큰) · 키 없으면 `provider_not_configured`(실측 tid212 «준비 중이에요») · **키 꽂으면 즉시 가동** | 앱·키·심사 0 | 사장님 액션 | — |
 | 0 Q5 | 프록시 기본 미제공 · «내 프록시 등록» 필드 | ✅ | `accounts.proxy_url` · `accounts.html:165` «프록시 주소(선택)» · `runner/lib/browser.mjs:30` 컨텍스트 적용 | | | |
 | 0 Q6 | 잉크 블랙 액센트 · `--brand` 하나로 교체 | ✅ | `public/css/ac.css:5-6` `--brand:#191F28` | | | |
@@ -183,11 +183,11 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 
 | DESIGN § | 항목 | 상태 | 증거 | 안 되는 것 | 남은 일 | 크기 |
 |---|---|---|---|---|---|---|
-| 3.1 | Frontend Vanilla **PWA** + `ac.css` + 12 컴포넌트 | 🟠 | `ac.css` · `ui.js`(컴포넌트 12 주석·구현) · `manifest.webmanifest` ✓ · **서비스워커 0**(`grep serviceWorker public` 0) | 설치·오프라인·푸시가 없어 «PWA»가 manifest 뿐 | sw.js + 푸시 | M |
+| 3.1 | Frontend Vanilla **PWA** + `ac.css` + 12 컴포넌트 | 🟠 � | `ac.css` · `ui.js`(컴포넌트 12 주석·구현) · `manifest.webmanifest` ✓ · **서비스워커 0**(`grep serviceWorker public` 0) · **2026-09-23 재측정(메인): 🔴 **까닭이 좁아졌다 — «manifest 뿐»이 아니다.** `public/manifest.webmanifest` + **`public/sw.js` 가 있고**(오프라인), iOS 설치 안내도 있다(`public/app/settings.html:232,238,239` — «공유 → 홈 화면에 추가» · `iosStandalone` 을 보고 알림 토글을 잠근다). **빠진 것은 안드로이드·데스크톱의 설치 띄우기 하나** — `beforeinstallprompt` 를 듣는 곳이 **0곳**이다.** | 설치·오프라인·푸시가 없어 «PWA»가 manifest 뿐 | sw.js + 푸시 | M |
 | 3.1 | Backend Netlify Functions v2 · Node 20 · TS | ✅ | `netlify.toml` NODE_VERSION 20 · 함수 60개 `config.path` 전수 | | | |
 | 3.1 | DB Neon + Drizzle 신규 인스턴스 · `neon-migrate.mjs` | ✅ | `db/schema.ts` 48표 · `drizzle/0001~0012` · `scripts/neon-migrate.mjs` | | | |
 | 3.1 | AI Gemini 단일 출처 · `CHAIN_IMAGE` · TTS · video-providers | ✅ | `lib/ai-models.ts` · `lib/ai-image.ts` · `lib/video/tts*.ts` · `lib/video/providers/*` | | | |
-| 3.1 | 러너 Node+Playwright+ffmpeg · Windows 런처 → **트레이 앱** | 🟠 | `runner/run.bat`·`run.sh` · `render-video.mjs`(ffmpeg 사다리) · zip 배포·자동 업데이트(B2 0012) | 트레이 앱 없음(콘솔 창) | 설계 문장 결정(0.5) 또는 트레이(M) | M |
+| 3.1 | 러너 Node+Playwright+ffmpeg · Windows 런처 → **트레이 앱** | 🟠 � | `runner/run.bat`·`run.sh` · `render-video.mjs`(ffmpeg 사다리) · zip 배포·자동 업데이트(B2 0012) · **2026-09-23 재측정(메인): 그대로다 — `runner/` 에 트레이 앱·실행 파일 **0개**. 콘솔 창으로 돈다. ⇒ 키와 무관한 우리 손 일이지만 **덩치가 크다**(패키징).** | 트레이 앱 없음(콘솔 창) | 설계 문장 결정(0.5) 또는 트레이(M) | M |
 | 3.1 | 스토리지 R2 presigned PUT | ✅ | `lib/r2.ts` r2Put/r2PresignPut/r2PresignGet/r2Delete | | | |
 | 3.1 | 결제 KICC(kicc·billing·coin-purchase) | ✅ | `lib/kicc.ts` · `lib/billing/*` · 실카드 실측(KICC-GO-LIVE §0.1) | | | |
 | 3.1 | Cron Netlify Scheduled + **GitHub Actions 보조** | ✅ **(R7 수리 `001dccf`)** | `netlify.toml` 우산 2 ✓ · `.github/workflows` 없음(ls 0) | Netlify 스케줄이 멈추면 대신 깨울 것이 없다 | Actions 1개(`/api/cron-run` 호출) | S |
@@ -224,7 +224,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 3.3 | 품질 게이트(ad-law-banned·ad-copy-similarity·**content-link-verify**) | ✅ **(R7 수리 `6a5ab40` · 소프트 게이트 `link_check`)** | `banned-words.ts`·`similarity.ts` ✓ · **content-link-verify 0**(발행 전 본문 링크 확인 없음 · 발행 후 `post_alive` 만) | §4.2 «코드 게이트(…링크)»의 링크 검사가 없다 | ai-tell-gate 에 link HEAD 1검사 | S |
 | 3.3 | 알림·감사 그대로 | ✅ | `lib/audit.ts`(await · AC-36) · `notifications.ts` | | | |
 | 3.3 | 안 가져오는 것(ad-*·리드·랜딩·제안서·brain·챗) | ✅ | grep 0 | | | |
-| 3.3 · CLAUDE §2 | AC-1 «AM 원본 경로·복사일» 헤더 | 🟠 | 헤더 있는 파일 58 · 없는 파일 20(`grep -L` · `lib/auth-service.ts`·`accounts.ts`·`plans.ts`·`r2.ts`·`email.ts`·`cs.ts`·`billing/*`…) | 출처 없는 이식 파일은 AM 버그 추적이 안 된다 | 헤더 보강 | S |
+| 3.3 · CLAUDE §2 | AC-1 «AM 원본 경로·복사일» 헤더 | 🟠 � | 헤더 있는 파일 58 · 없는 파일 20(`grep -L` · `lib/auth-service.ts`·`accounts.ts`·`plans.ts`·`r2.ts`·`email.ts`·`cs.ts`·`billing/*`…) · **2026-09-23 재측정(메인): **85 / 102.** `lib/*.ts` 102개 중 «AM 원본» 헤더가 적힌 것이 85개다(09-15 엔 훨씬 적었다). 🔴 남은 17개가 어느 것인지 **세어서 적어야** 닫을 수 있다 — «거의 다 됐다» 로는 못 닫는다(AC-114).** | 출처 없는 이식 파일은 AM 버그 추적이 안 된다 | 헤더 보강 | S |
 
 ---
 
@@ -304,7 +304,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 13.0 금지 | 툴팁 설명 0 | ✅ � | `piece.html:40` 심사 그룹 `title="…"` 1곳 · **2026-09-23 재측정(메인): `public/app/*.html`·`public/js/ui.js` 의 `title="…"` **0곳**. 헌장 위반 없어졌다.** | 헌장 위반 1 | 문장으로 풀기 | S |
 | 13.0 금지 | 배지 남발 · 3단 메뉴 · 위젯 격자 · 시스템 용어 0 | ✅ | A 하니스 시스템 용어 0(«테넌트·러너 잡·piece» grep 0) · 깊이 ≤2 | | | |
 | 13.0 | 컴포넌트 12(AppBar·BigNumber·ListRow·StatusChip·BottomSheet·PrimaryCTA·StepBar·Skeleton·EmptyState·Toast·Toggle·SegmentedTabs) | ✅ | `ac.css:3` 목록 · `ui.js` `UI.sheet/toast/done/toggle/pill/seg/countUp` · `.steps`(StepBar :132) · `.sk` · `.empty` | | | |
-| 13.0 접근성 | 터치 44px · 대비 4.5:1 · 포커스 링 · reduced-motion 0 | 🟠 | `:focus-visible` ✓ · `prefers-reduced-motion` ✓(`ac.css:29`) · **하단 탭 눌림 56×42 · 달력 날짜 칸 38px**(A · `ac.css:128`·`:184`) | 44px 하한 2곳 미달 | 높이 2줄 | S |
+| 13.0 접근성 | 터치 44px · 대비 4.5:1 · 포커스 링 · reduced-motion 0 | ✅ � | `:focus-visible` ✓ · `prefers-reduced-motion` ✓(`ac.css:29`) · **하단 탭 눌림 56×42 · 달력 날짜 칸 38px**(A · `ac.css:128`·`:184`) · **2026-09-23 재측정(A 실측 · 내가 잰 게 아니다): `public/css/ac.css:161`(`min-height:44px`) · `:224`(38px → 44px). A 가 **그려서** 쟀다 — `.tab` 56×44(5개 전부) · `.cal .dd` 45.1×44(8개 전부). 🔴 A 가 이번 하니스에서 `.tabs`·`.cal` 을 **안 뺐다**(전에 그 제외가 거짓 초록을 냈다).** | 44px 하한 2곳 미달 | 높이 2줄 | S |
 | 13.0 마이크로 | 카운트업 600ms · 스프링 시트(드래그 닫기) · 눌림 0.97 · 완료 체크 400ms 자동 닫힘 · 스켈레톤(스피너 0) | ✅ | `UI.countUp` · `ui.js:130` touchstart 드래그 · `scale(.97)` 2 · `UI.done` 400ms · spinner 0 | | | |
 | 13.0 마이크로 | 당겨서 새로고침 · 확정 동작 햅틱 | ✅  | grep pull/당겨 0 · `navigator.vibrate` 0 · **2026-09-23 재측정(메인): `public/js/ui.js:407 UI.pullToRefresh` + **부르는 화면 5곳**(`home.html:172`·`create.html:183`·`pieces.html:119`·`schedule.html:527` 외). 햅틱은 같은 자리 주석이 «아이폰 사파리엔 `navigator.vibrate` 가 없다»고 적어 뒀다 — **없는 것을 말로 약속하지 않는 쪽**이라 위반이 아니다.** | 둘 다 없음(선택 수준) | 선택 | S |
 | 13.0b v3 토큰 | 바탕 #F2F4F6 · 섹션 흰 R20 · 잉크 #191F28 · 보조 #4E5968 · 흐림 #8B95A1 · 액센트 잉크 · 초록 #1FA97A · 행 56 · 마크 38 R12 · CTA 54 R16 · 헤드라인 30/800 · 다크 #17171C/#202027 | ✅ | `ac.css:4-11` 값 일치(--r-sec 20 · --r-mk 12 · --cta-h 54 · --row-h 56) · 다크 토큰 `:13-23` | | | |
@@ -353,7 +353,7 @@ B-1 이 말한 «운영센터 채널 화면에서 naver_clip 을 active 로 바�
 | 13.3b | 텍스트 폭 720 초과 금지 · 짧은 목록 2열 허용 · BottomSheet→SidePanel | ✅ | `.page` max 720 · `.sheet` ≥1100 우측 300(`ac.css:197`) | | | |
 | 13.5 저장 UTC | timestamp = UTC | ✅ | `db/schema.ts:3` · `db-util.ts utcDate` · AC-5 | | | |
 | 13.5 응답 | ISO UTC `…Z` · 날짜 값은 KST `YYYY-MM-DD` | ✅ | 실측 `slots-list` publishAt `2026-09-15T03:00:00.000Z` · date `2026-09-15` | | | |
-| 13.5 화면 | `UI.timeKST/dateKST/ago` 만 · timeZone 없는 `toLocale*` 0 · `datetime-local` 0 | 🟠 | `datetime-local` 0 · timeZone 없는 toLocale = `UI.won/num`(숫자 · 무해) 뿐 · **`revenue.html:32` 이중 시프트**(실측 Seoul «15일» vs New_York «16일») | 수익 «날마다» 축·지난달 비교가 기기 시간대를 탄다 | `todayYmd = new Date().toLocaleDateString("en-CA",{timeZone})` 로 1줄 | S |
+| 13.5 화면 | `UI.timeKST/dateKST/ago` 만 · timeZone 없는 `toLocale*` 0 · `datetime-local` 0 | ✅ � | `datetime-local` 0 · timeZone 없는 toLocale = `UI.won/num`(숫자 · 무해) 뿐 · **`revenue.html:32` 이중 시프트**(실측 Seoul «15일» vs New_York «16일») · **2026-09-23 재측정(메인): `public/app/*.html`·`public/js/ui.js` 에서 **timeZone 없는 날짜 호출 0곳**. ⚠️ 🔴 **내 첫 뽑기는 2곳을 물었는데 거짓 빨강이었다** — `ui.js:282,283` 의 `toLocaleString("ko-KR")` 는 **숫자·금액 서식**이라 시간대와 무관하다. 날짜만 겨눠 다시 재서 0을 얻었다(AC-178).** | 수익 «날마다» 축·지난달 비교가 기기 시간대를 탄다 | `todayYmd = new Date().toLocaleDateString("en-CA",{timeZone})` 로 1줄 | S |
 | 13.5 입력 | 사용자가 고른 시각·요일·쉬는 날 = KST 해석 · 계약에 글자로 | ✅ | `schedule.html atKST`(KST 벽시계 → UTC ISO) · `slots-reschedule` · quietDays KST 날짜 | | | |
 | 13.5 서버 | 오늘·주·월·마감·produceHour = KST(SQL AT TIME ZONE · `cron/base.ts` 소도구) | ✅ | `cron/base.ts kstHour/kstTodayUtc/kstWeekStartUtc` · `revenue/aggregate.ts` | | | |
 | 13.5 크론 | 표현식 UTC · 업무 시각은 스텝 안 KST | ✅ | `netlify.toml` `*/5`·`0 *` · `produce.ts` kstHour | | | |

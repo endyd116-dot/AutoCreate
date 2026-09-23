@@ -14,6 +14,9 @@
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">운영진</span><span class="sp"></span></div>
 <div class="group"><div class="gt">운영자 <button type="button" id="invite" style="color:var(--ink);font-weight:600;font-size:12.5px">초대</button></div><div id="list"></div><div id="pager" class="muted" style="padding:0 16px 4px;font-size:12.5px"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">super_admin 전부 · admin 고객/이벤트/결제/CS/공지 · operator 고객 열람+원격접속+CS 답변(러너·AI·채널은 조회만). 싸이렌MIS SSO 는 sso_subject 로 묶여요.</p></div>
+<!-- 🔴 [R17 · A] 백업 — 서버(`ops-operators.ts:52`)도 `scripts/check-backup.mts` 도 R8 부터 다 있었는데 **한 줄을 안 그렸다.**
+     놓을 자리는 계약에 «운영진·감사 아래»로 적혀 있었다. -->
+<div class="group"><div class="gt">백업</div><div id="bk"></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -52,7 +55,34 @@ function form(o) {
   UI.sheet(`<form id="if"><div class="field"><label>이메일</label><input class="input" name="email" type="email" required value="${UI.esc(o?.email || "")}" placeholder="name@company.com"><div class="help"></div></div><div class="field"><label>이름</label><input class="input" name="name" value="${UI.esc(o?.name || "")}" placeholder="선택"></div><div class="field"><label>SSO 주체 <span class="muted" style="font-weight:500">· 싸이렌MIS · 선택</span></label><input class="input" name="ssoSubject" value="${UI.esc(o?.ssoSubject || "")}" placeholder="mis:123"></div><div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o?.role || "operator")}<div class="cta"><button class="btn primary" type="submit">${o ? "고치기" : "초대"}</button></div></form>`, { title: o ? "운영자 고치기" : "운영자 초대", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#if"), async (d, f) => { const r = await UI.api("/api/ops-operators", { body: { id: o?.id, email: d.email, name: d.name || "", role: UI.chipVal(sh, "role"), ssoSubject: d.ssoSubject || undefined }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "email", r.error || "저장하지 못했어요"); close(); /* 🔴 [수리 ⑥] 옛 문구(«초대했어요 · 첫 로그인에 비밀번호를 바꿔요»)는 거짓말이었다 — 비번이 없어 로그인 자체가 안 됐다. */ UI.toast(o ? "고쳤어요" : "만들었어요 · «비번 주기»로 임시 비밀번호를 전해 주세요"); load(); }); } });
 }
 UI.$("#invite").onclick = () => form(null);
-load();
+
+/* 🔴 [R17 · A] **백업 한 줄** — 서버가 R8 부터 주고 있던 `/api/ops-backup-status` 를 처음으로 그린다.
+   서버 머리말이 못 박은 두 가지를 화면이 그대로 지킨다:
+   ① 🔴 «아마 켜져 있을 것»을 상태로 적지 않는다 — 확인한 적이 없으면 **«아직 확인한 적이 없어요»** 라고 쓴다(AC-9).
+   ② 🔴 `versioning` 의 **`unsupported`(R2 가 기능 자체를 안 준다)** 와 **`null`(못 물어봤다)** 은 다른 말이다.
+      «기능 없음»을 «확인 필요»로 그리면 **아무도 끝낼 수 없는 숙제**가 된다.
+   말투는 §3 — 겁주지 않는다. «위험합니다»가 아니라 «무엇이 · 어떻게 하면 되는지»를 적는다. */
+const VER = {
+  Enabled: ["ok", "켜짐", "덮어써도 이전 판이 남아요."],
+  Disabled: ["warn", "꺼짐", "버킷 설정에서 버전 관리를 켜면 덮어쓴 파일도 되살릴 수 있어요."],
+  unsupported: ["off", "기능 없음", "이 R2 가 버전 관리를 제공하지 않아요 — 우리가 할 수 있는 일은 없어요."],
+};
+const kv = (k, v, d) => `<div class="kv" style="white-space:normal"><span class="k">${k}</span><span class="v" style="white-space:normal;text-align:right">${v}${d ? `<br><span class="muted" style="font-weight:500;font-size:12.5px">${UI.esc(d)}</span>` : ""}</span></div>`;
+async function loadBackup() {
+  const r = await UI.api("/api/ops-backup-status", { noRedirect: true });
+  if (!r.ok) { UI.$("#bk").innerHTML = kv("상태", OPS.pill(["off", "못 물어봤어요"]), r.error || "잠시 뒤 다시 열어 보세요."); return; }
+  if (!r.checked) {
+    UI.$("#bk").innerHTML = kv("상태", OPS.pill(["warn", "아직 확인 전"]), r.hint || "아직 확인한 적이 없어요.")
+      + `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">확인한 적이 없어서 <b>켜져 있는지 꺼져 있는지 아직 몰라요.</b> 한 번 돌리면 이 줄이 채워져요.</p>`;
+    return;
+  }
+  const v = r.r2Versioning == null ? ["off", "못 물어봤어요", "R2 설정이 없어 확인하지 못했어요."] : (VER[r.r2Versioning] || ["off", String(r.r2Versioning), ""]);
+  UI.$("#bk").innerHTML =
+    kv("마지막 확인(KST)", OPS.dt(r.checkedAt) + (r.stale ? ` ${OPS.pill(["warn", `${r.ageDays}일 전`])}` : ""), r.stale ? "30일 넘게 안 봤어요. 한 번 더 돌려 두면 지금 상태를 알 수 있어요." : "")
+    + kv("Neon 시점 복구", OPS.pill(r.neon && r.neon.ok ? ["ok", r.neon.retentionDays != null ? `${r.neon.retentionDays}일` : "켜짐"] : ["warn", "확인 필요"]), (r.neon && r.neon.detail) || "")
+    + kv("R2 버전 관리", OPS.pill([v[0], v[1]]), v[2]);
+}
+load(); loadBackup();
 })();
 </script>
 </body>

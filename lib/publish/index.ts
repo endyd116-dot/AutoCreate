@@ -21,6 +21,7 @@ import { jsonb, utcDate } from "../db-util";
 import { writeAudit } from "../audit";
 import { normalizeBlocks, type Block } from "../blocks";
 import { formatCapsOf } from "../channel-registry";   // [R9-4] 채널 꾸밈 표 — 러너 payload 에 같이 싣는다
+import { compensationOfMeta } from "../disclosure";   // 🔴 [AC-253] 대가 «종류» 판정 정본(채널마다 켜는 칸이 다르다)
 import { publishViaOf as strictPublishViaOf, type PublishPiece, type PublishImage, type PublishAccount, type PublishOpts, type PublishResult, type PublishOk, type PublishFailReason } from "./contract";
 import { connectMethodOf } from "../accounts";
 import { runPublishGate } from "./gate";
@@ -125,6 +126,9 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
     }).filter((i) => !!i.url),
     tags: Array.isArray(meta.tags) ? (meta.tags as unknown[]).map(String).slice(0, 20) : [],
     disclosure: meta.disclosure ? String(meta.disclosure) : null,
+    /* 🔴 [AC-253] **대가의 종류**를 판정 정본에서 그대로 싣는다 — 채널마다 켜야 하는 칸이 다르다
+       (유튜브 `paidPromotion` 은 «원고료·PPL» 일 때만 · 제휴만인 글에 켜면 거짓 신고다). */
+    compensationKinds: compensationOfMeta(meta).kinds,
     status: String(p.status ?? ""),
   };
   if (n(p.slot_id)) out.slotId = n(p.slot_id);
@@ -267,7 +271,7 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
     const payload: RunnerPublishPayload = {
       title: prepared.title, bodyHtml: prepared.bodyHtml, blocks: prepared.blocks,
       images: prepared.images.map((i) => ({ url: i.url, ...(i.caption ? { caption: i.caption } : {}), ...(i.alt ? { alt: i.alt } : {}) })),
-      tags: prepared.tags, disclosure: prepared.disclosure,
+      tags: prepared.tags, disclosure: prepared.disclosure, ...(prepared.compensationKinds?.length ? { compensationKinds: prepared.compensationKinds } : {}),
       /* [R9-4] 서버가 믿는 꾸밈 표를 러너도 본다 — `blocks[].marks` 를 어디까지 누를지 러너가 같은 표로 정한다(표가 없으면 null). */
       formatCaps: formatCapsOf(piece.channel),
       ...(prepared.scheduledFor ? { scheduledFor: prepared.scheduledFor } : {}),

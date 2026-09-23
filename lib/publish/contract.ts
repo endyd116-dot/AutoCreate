@@ -84,6 +84,16 @@ export interface PublishPiece {
   tags: string[];
   /** 고지 문구(없으면 null). bodyHtml 첫 요소 `<div class="disclosure">` 와 같은 문장. */
   disclosure: string | null;
+  /**
+   * 🔴 [AC-253 · 2026-09-23] **대가의 «종류»** — `lib/disclosure.compensationOfMeta` 가 판정한 것 그대로.
+   *   여태 발행 계약에는 `disclosure`(문장 있음/없음)만 왔다. 그런데 채널이 요구하는 것은 **종류별로 다르다**:
+   *     · 유튜브 `status.paidPromotion` = **«원고료·PPL»**(sponsored)일 때 켜는 칸이다
+   *     · 인스타 «유료 파트너십 라벨» 도 같은 축 · 제휴 수수료(affiliate)만 있는 글에 켜면 **거짓 신고**가 된다
+   *   🔴 그래서 `disclosure !== null` 로 켜면 안 된다 — **제휴만인 글까지 «유료 광고»로 신고**하게 된다.
+   *      공정위 고지는 셋 다 켜지지만(`affiliate|sponsored|gift`), **플랫폼 신고 칸은 그중 일부**다.
+   *   ⚠️ 비어 있으면 «대가 없음»이 아니라 **«안 실렸다»**일 수 있다 — 읽는 쪽이 `?? []` 로 두고 **켜지 않는 쪽**으로 기운다(안전).
+   */
+  compensationKinds?: ("affiliate" | "sponsored" | "gift")[];
   affiliate?: { provider: string; url: string; subId?: string };
   /**
    * [R9-9 · §5.1 고지 축 4행 중 마지막] **인스타 쇼핑 태그** — 사진 위에 상품을 붙이는 값.

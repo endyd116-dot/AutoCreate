@@ -1,6 +1,9 @@
 /**
  * 소재 API(계약 P1R1 §2):
- *   GET  /api/topics-list?status=candidate|picked|used|expired|all → { topics:[Topic], refreshedAt?, refresh:{running,startedAt?,finishedAt?,added?,error?} }
+ *   GET  /api/topics-list?status=candidate|picked|used|expired|later|all → { topics:[Topic], refreshedAt?, refresh:{running,startedAt?,finishedAt?,added?,error?}, labels }
+ *        · `labels.later = { title, empty, undo, keep, stale }` — 🔴 [AC-254 · AC-52] **화면이 글자를 안 지어낸다.** A 가 박아 둔 셋을 글자 그대로 옮겼다
+ *        · `Topic.stale` — `expiresAt` 이 지났나(**서버가 잰다**). 시계가 없으면 **칸 자체가 없다**(AC-9)
+ *        · 🔴 `status=later` 는 **만료된 것도 낸다**(AC-254) — 나머지 상태는 예전 그대로 만료를 거른다
  *   POST /api/topics-refresh {}  → **202** { ok:true, started:true } · 이미 도는 중이면 { ok:true, started:false, running:true }
  *        코인 0 · 하루 3회(step rate_limit · audit topics_refresh COUNT)
  *        🔴 v2.9(CLAUDE §4.5b): «동기 한도(≈26초) 넘을 것 같으면 재지 말고 처음부터 배경으로» — LLM 1콜 + 검색량 조회라 동기로는 못 끝낸다.
@@ -10,20 +13,21 @@
  *        400 step: title(빈값·80자) | banned_category(R4 사전 · 문장 그대로) | duplicate(30일 안 같은 제목 → 기존 topic 동봉)
  *   POST /api/topics-pick { id } → { topic }          // candidate→picked
  *   POST /api/topics-skip { id } → { ok }             // →expired
+ *   POST /api/topics-later { id } → { ok, topic }    // 🔴 [AC-251] candidate→later(«나중에») · 되돌리기 = 같은 문에 { id, undo:true }
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
 import { requireUser } from "../../lib/guards";
 import { writeAudit } from "../../lib/audit";
 import { clientIp } from "../../lib/auth";
-import { listTopics, refreshCountToday, toTopic, addManualTopic, addCountToday } from "../../lib/topics";
+import { listTopics, refreshCountToday, toTopic, addManualTopic, addCountToday, TOPIC_FRESH_DAYS, TOPIC_LABELS } from "../../lib/topics";
 import { readRefreshState } from "../../lib/topics-refresh-state";
 import { startTopicsRefresh } from "./topics-refresh-background";
 import { utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/topics-list", "/api/topics-refresh", "/api/topics-pick", "/api/topics-skip", "/api/topics-add"] };
+export const config = { path: ["/api/topics-list", "/api/topics-refresh", "/api/topics-pick", "/api/topics-skip", "/api/topics-add", "/api/topics-later"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const REFRESH_PER_DAY = 3;
@@ -41,7 +45,8 @@ export default async (req: Request): Promise<Response> => {
       const [topics, refresh] = await Promise.all([listTopics(tid, status), readRefreshState(tid)]);
       const [last] = await q(sql`SELECT created_at FROM audit_logs WHERE tenant_id = ${tid} AND action = 'topics_refresh' ORDER BY id DESC LIMIT 1`);
       // refresh 는 항상 싣는다(화면이 폴링한다 · 없으면 화면은 running=false 로 보지만 «added» 를 못 받아 완료 문구가 틀린다).
-      const body: Record<string, unknown> = { ok: true, topics, refresh };
+      // [AC-254 · AC-52] 화면이 글자를 지어내지 않게 말을 같이 보낸다 — A 가 `create.html` 에 박아 둔 셋 + 만료 두 줄
+      const body: Record<string, unknown> = { ok: true, topics, refresh, labels: TOPIC_LABELS };
       const at = utcDate(last?.created_at); if (at) body.refreshedAt = at.toISOString();
       return json(body);
     }
@@ -78,6 +83,38 @@ export default async (req: Request): Promise<Response> => {
         const [cur] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${id}`);
         if (!cur) return json({ ok: false, error: "소재를 찾을 수 없어요.", step: "not_found" }, 404);
         return json({ ok: true, topic: toTopic(cur) });   // 이미 picked/used — 멱등
+      }
+      return json({ ok: true, topic: toTopic(row) });
+    }
+    /* ───────── 🔴 «나중에»(AC-251 · 2026-09-23) ─────────
+       `public/app/create.html:136` 이 스스로 적어 뒀다: «서버에 «나중에»를 적어 둘 자리가 없다(pick·skip 뿐) —
+       화면에서만 숨기면 새로고침하면 돌아와 «했는데 안 됐다»가 된다».
+       🔴 **화면 탓이 아니라 서버 칸이 없던 것**이라 여기서 연다(설계 §13.0b 소재 카드의 세 번째 방향).
+
+       ⚠️ `skip`(→expired)과 **뜻이 다르다**: 넘김은 «안 쓴다», 나중에는 «지금은 아니다».
+          그래서 **만료 시각을 안 건드린다** — 되돌리면 원래 후보로 그대로 돌아온다.
+       🔴 막지 않는다(§9) — 목록에서 사라지는 게 아니라 `?status=later` 로 **언제든 다시 본다.**
+
+       ══ 🔴 [AC-254 · 2026-09-23] 위 마지막 줄이 **거짓이었다.** A 가 화면을 붙이다 물어서 드러났다 ══
+         `listTopics` 가 **모든 상태**에 `expires_at > NOW()` 를 걸고 있었고 추천 소재의 시계는 **7일**이라,
+         «나중에»로 옮긴 소재는 **일주일이면 말없이 없어졌다.** 고친 것은 둘이다:
+           ① `listTopics` 가 `later` 에는 만료 필터를 안 건다(`lib/topics.ts` · `stale` 로 말해 준다)
+           ② 🔴 **되돌리기에서 시계가 이미 지났으면 다시 감는다**(바로 아래). 안 감으면
+              «오늘 소재로»를 눌렀는데 `candidate` 목록은 만료를 거르므로 **누르자마자 또 사라진다** —
+              되돌릴 길이 있는 척만 하는 꼴이고, 그게 §9 가 제일 싫어하는 모양이다.
+         ⚠️ **안 지난 소재는 그대로 둔다** — A 가 화면에 «원래 자리로 **그대로** 돌아가요»라고 썼고
+            보통의 경우에 그 문장은 **참이어야** 한다. 시계를 감는 것은 **이미 죽은 시계일 때뿐**이다. */
+    if (path.endsWith("/topics-later")) {
+      const undo = (b as { undo?: unknown }).undo === true;
+      const [row] = undo
+        ? await q(sql`UPDATE topics SET status = 'candidate',
+              expires_at = CASE WHEN expires_at IS NOT NULL AND expires_at <= NOW() THEN NOW() + (${TOPIC_FRESH_DAYS} || ' days')::interval ELSE expires_at END
+            WHERE tenant_id = ${tid} AND id = ${id} AND status = 'later' RETURNING *`)
+        : await q(sql`UPDATE topics SET status = 'later' WHERE tenant_id = ${tid} AND id = ${id} AND status = 'candidate' RETURNING *`);
+      if (!row) {
+        const [cur] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${id}`);
+        if (!cur) return json({ ok: false, error: "소재를 찾을 수 없어요.", step: "not_found" }, 404);
+        return json({ ok: true, topic: toTopic(cur) });   // 이미 그 상태 — 멱등(두 번 눌러도 같은 답)
       }
       return json({ ok: true, topic: toTopic(row) });
     }

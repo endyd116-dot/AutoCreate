@@ -309,7 +309,7 @@ async function detailSheet(a) {
        종전엔 그 수가 서버 파일 밖 0곳이라 **여섯 건째가 될 때까지 아무도 몰랐다**(§9: 막지 않는 대신 말해 준다).
        🔴 숫자는 **서버가 준 것만** 쓴다(`dailyPublishCap`) — 화면이 5 를 베껴 적지 않는다(§13 · AC-52). 안 주면 줄을 안 그린다. */""}
   ${chOf(a.channel) && chOf(a.channel).dailyPublishCap ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">하루에</span><span class="v" style="font-size:13px">${chOf(a.channel).dailyPublishCap}개까지 올라가요 · 더 예약하면 다음 날 이어서 올려요</span></div>` : ""}
-  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
+  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span> <button type="button" class="btn ghost sm" id="hre" style="margin-left:8px">다시 재기</button></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
   ${/* [R17-B2 · DESIGN §8.2] 🔴 **«로그인이 아직 살아 있나»를 조용히 확인한다** — 재로그인(창을 띄우고 사람이 로그인)과 **다른 일**이다.
@@ -335,6 +335,14 @@ async function detailSheet(a) {
        🔴 고친 법: **채우지 않는다.** 지금 값은 **읽기 전용 한 줄**로 보여 주고, 칸은 «바꿀 때만» 적는 빈 칸이다.
           비어 있으면 아예 안 보낸다(서버는 `undefined` 면 건드리지 않는다 · accounts.ts:263).
        🔴 지우는 길은 따로 준다 — «안 보내기»만 있으면 **뗄 방법이 없어진다**(빈 칸이 «지우기»가 아니게 됐으니). */ ""}
+  <div class="field"><label>계정 사진 <span class="muted" style="font-weight:500">선택</span></label>
+    <input class="input" id="av" value="${UI.esc(a.avatarUrl || "")}" placeholder="https://… 사진 주소" autocomplete="off">
+    <div class="note">안 넣으셔도 돼요 — 그때는 채널 마크로 보여 드려요. 지우시려면 비워 두고 저장하시면 돼요.</div>
+    <div class="help"></div></div>
+  <div class="field"><label>묶음 <span class="muted" style="font-weight:500">선택</span></label>
+    <input class="input" id="gn" value="${UI.esc(a.groupName || "")}" placeholder="예: 요리 계정들" autocomplete="off">
+    <div class="note">같은 채널 계정을 한 묶음으로 두면, 한 계정이 쉬게 될 때 <b>그 묶음 안에서</b> 이어서 올려 드려요. 안 묶으시면 같은 채널 전체에서 골라요.</div>
+    <div class="help"></div></div>
   <div class="field"><label>프록시 주소 <span class="muted" style="font-weight:500">선택</span></label>
     ${a.proxyUrl ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">지금 쓰는 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(a.proxyUrl)}</span></div>` : ""}
     <input class="input" id="px" placeholder="${a.proxyUrl ? "바꿀 때만 새 주소를 적어 주세요" : "http://user:pass@host:port"}" autocomplete="off">
@@ -359,6 +367,22 @@ async function detailSheet(a) {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
     const rb = sh.querySelector("#relogin");
+    /* 🔴 [R17 · §15 `accounts-health`] 점수는 여태 **신호가 올 때만** 다시 셌다(`applyAccountSignal` 안) —
+       계정을 손본 뒤에도 옛 점수가 그대로라 «고쳤는데 그대로네»가 됐다. **누를 자리**를 준다(§4.8).
+       🔴 재는 것뿐이라 상태를 안 바꾼다. 못 재도 막지 않는다 — 그냥 그렇게 말한다(§9·§3).
+       ⚠️ **자리를 두 번 틀렸다**: ㉮저장 핸들러 안쪽 ㉯`po.onclick` 콜백 안. 둘 다 «단추는 보이는데 손이 안 붙은» 판이 됐고,
+          브라우저로 `b.onclick === false` 를 보고서야 알았다(AC-122 «그려졌나 ≠ 손이 붙었나»).
+          🔴 **한 줄짜리 `if (x) x.onclick = …` 이 여러 줄로 이어지는 파일이라, 눈으로 고른 앵커가 남의 콜백 안일 수 있다.** */
+    const hre = sh.querySelector("#hre");
+    if (hre) hre.onclick = async () => {
+      hre.disabled = true;
+      const rr = await UI.api("/api/accounts-health", { body: { id: a.id }, noRedirect: true });
+      hre.disabled = false;
+      if (!rr.ok) return UI.toast(rr.error || "지금은 다시 재지 못했어요 · 잠시 뒤 해 주세요");
+      a.healthScore = rr.healthScore;
+      UI.toast(`지금 ${rr.healthScore}점이에요`);
+      close(); load();
+    };
     /* [R9R10-A] 옷장 시트는 ui.js 한 곳(UI.styleSheet) — 돌아오면 칩만 다시 그린다 */
     const wzMore = sh.querySelector("#wzMore"); if (wzMore) wzMore.onclick = () => UI.styleSheet({ accounts: D.accounts.filter((x) => x.channel === a.channel && x.status !== "suspended"), accountId: a.id,
       onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
@@ -403,6 +427,12 @@ async function detailSheet(a) {
       if (!r.ok) return UI.toast(r.error || "취소하지 못했어요"); close(); UI.toast("확인을 취소했어요"); load(); });
     sh.querySelector("#save").onclick = async () => {
       const body = { id: a.id, displayName: sh.querySelector("#dn").value.trim(), goldenHours: UI.chipVal(sh, "hours").map(Number), personaId: Number(UI.chipVal(sh, "persona")) || undefined };
+      /* [R17 · §7.1] 계정 사진·묶음 — 🔴 **연 순간과 다를 때만 보낸다**(A 가 `openedAt`·프록시에서 세운 규율).
+         늘 보내면 «안 건드린 것을 되돌려 보내» 고객 값이 부서진다. 빈 값은 **지우기**라서 그때는 보낸다. */
+      const avWas = String(a.avatarUrl || ""), avNow = (sh.querySelector("#av").value || "").trim();
+      if (avNow !== avWas) body.avatarUrl = avNow;
+      const gnWas = String(a.groupName || ""), gnNow = (sh.querySelector("#gn").value || "").trim();
+      if (gnNow !== gnWas) body.groupName = gnNow;
       /* [AC-189] 🔴 **적었을 때만 보낸다.** 빈 칸은 «지우기»가 아니라 «그대로 두기»다(위 칸 주석 참고) — 지우기는 «프록시 안 쓰기». */
       const pxNow = sh.querySelector("#px").value.trim(); if (pxNow) body.proxyUrl = pxNow;
       /* [R9R10-A · 계약 §13] 등급·스타일 기본값은 **계정마다** — 고른 것만 보낸다(안 고른 등급을 화면이 채워 보내지 않는다 · AC-92) */

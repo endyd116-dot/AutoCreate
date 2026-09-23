@@ -1271,3 +1271,23 @@ export const tenantsAc220 = {
   /** 마지막으로 «아직 쉬는 중이에요»를 알린 때. 🔴 7일 알림의 **멱등 키**. NULL = 아직 안 알렸다. */
   pauseNotifiedAt: timestamp("pause_notified_at", { withTimezone: true }),
 };
+
+/* === R17 · 클립 모집창(B2 → B 넘김 · 2026-09-23 · drizzle/0092-r17-channel-monetize-meta.sql) ===
+ *   🔴 **B2 가 DDL 을 라이브에 이미 적용했다**(`applied 2/2` · `jsonb_typeof(monetize_meta)=object` 실측).
+ *      §4.4 가 «schema.ts 정의는 **DDL 적용과 동시에**»라고 해서 B2 가 문서로 넘겼고(`docs/active/2026-09-23-B2-schema-block-for-B.md`)
+ *      **schema.ts 는 B 전용**이라 내가 붙인다.
+ *
+ *   ══ 왜 새 칸인가(B2 실측) ══
+ *     `lib/ad-eligibility.ts` 가 `monetize->'clipOpen'` 을 **객체**로 읽는데 그 칸은 `0001-init.sql:208` 부터 **배열**이었고,
+ *     `ops-channels.ts` 가 «수익 매체» 칩을 저장할 때마다 그 칸을 배열로 **통째 덮어썼다.**
+ *     ⇒ D-7 «클립 모집이 시작해요» 알림이 **구조적으로 한 번도 못 떴다.** 🔴 **오류는 0이라 아무도 몰랐다**(조용한 0건).
+ *
+ *   🔴 위 `channelRegistry`(Phase 0) 정의는 **그대로 둔다** — 다른 라운드 정의를 덮지 않는다(§4.4 append-only).
+ *      `monetize`(배열 = 수익 매체 **목록**)와 **다른 칸**이다. 한 칸에 섞으면 목록을 저장할 때마다 모집창이 사라진다.
+ *   ⚠️ 이 표는 지금 **드리즐 객체로 질의하는 곳이 0**이고(`grep channelRegistry` = schema.ts 뿐) 전부 raw `sql` 이다 —
+ *      그래서 여기 적는 것은 «칸이 있다»는 **기록**이 주된 값이다. 드리즐로 질의하게 되면 그때 이 칸을 본 정의로 합친다.
+ */
+export const channelRegistryR17 = {
+  /** 운영자가 손으로 넣는 «수익 관련 사실» — 지금은 `clipOpen:{from,to}`(클립 모집창 · KST 날짜). 읽는 곳 `lib/ad-eligibility.ts clipWindow()`. */
+  monetizeMeta: jsonb("monetize_meta").notNull().default({}),
+};
