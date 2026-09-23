@@ -20,7 +20,7 @@
   <div class="group"><div class="gt">답변 <span class="muted" style="font-weight:500">앱 알림 + 메일</span></div><div style="padding:0 12px 6px"><div class="chips" id="macros"></div><textarea class="input" id="reply" rows="4" style="height:auto;padding:14px 16px" placeholder="매크로를 고르거나 직접 적어요"></textarea></div><div class="cta" style="position:static;padding:8px 12px 10px;justify-content:flex-end"><button class="btn primary" type="button" id="send">보내기</button></div></div>
 </div>
 <div>
-  <div class="group"><div class="gt">고객 컨텍스트 <a id="toTenant" href="#">고객</a></div><div id="ctx"></div></div>
+  <div class="group"><div class="gt">고객 컨텍스트 <a id="toTenant" href="#">고객</a></div><div id="ctx"></div><div class="cta" style="position:static;padding:6px 12px 10px;flex-direction:column"><button class="btn secondary" type="button" id="imp">원격접속</button><button class="btn secondary" type="button" id="grant">코인 보상</button><p class="muted" id="grantNo" style="display:none;margin:2px 2px 0;font-size:12.5px;line-height:1.6"></p></div></div>
   <div class="group"><div class="gt">처리</div><div style="padding:0 12px 10px"><div class="sec">우선순위</div><div id="pri"></div><div class="sec">담당</div><div id="asg"></div><div class="sec">태그</div><div id="tags"></div></div><div class="cta" style="position:static;padding:4px 12px 10px;flex-direction:column"><button class="btn secondary" type="button" id="hold">보류</button><button class="btn secondary" type="button" id="resolve">해결로</button></div></div>
 </div>
 </div>
@@ -49,6 +49,33 @@ async function load() {
   UI.$("#pri").innerHTML = UI.chips("pri", PRI, t.priority); UI.$("#tags").innerHTML = UI.chips("tags", TAGS.map((x) => [x, x]), t.tags || [], true);
   UI.$("#asg").innerHTML = UI.chips("asg", [["", "없음"], [String(op.id), "나"], ...(t.assignee && t.assignee.id !== op.id ? [[String(t.assignee.id), t.assignee.name]] : [])], t.assignee ? String(t.assignee.id) : "");
   UI.bindChips(document, async (n, v) => { if (n === "pri" || n === "tags") { const rr = await UI.api("/api/ops-ticket-priority", { body: { id, priority: UI.chipVal(document, "pri"), tags: UI.chipVal(document, "tags") }, noRedirect: true }); if (!rr.ok) UI.toast(rr.error); } if (n === "asg") { const rr = await UI.api("/api/ops-ticket-assign", { body: { id, operatorId: v ? Number(v) : null }, noRedirect: true }); if (!rr.ok) UI.toast(rr.error); } });
+}
+/* 🔴 [R17] §11.4 는 «티켓 → 고객 상세 · 원격접속 · 코인 보상 **한 화면에서**» 라고 적혀 있다.
+   여태 고객 상세로 **건너가야** 했다 — 건너가면 티켓 번호도, 방금 읽은 대화도 손에서 놓친다.
+   🔴 **새 문을 안 판다**: `tenant.html` 이 쓰는 그 API 를 그대로 부른다(멱등 키 규율까지 그대로 옮겼다).
+   권한은 설계 그대로 — 원격접속은 `operator+`, 코인은 `admin+`(§11.4 «operator 는 결제·요금제 불가»).
+   🔴 **안 되는 사람에게는 숨기지 않고 «누가 할 수 있는지»를 말한다**(§3 — 사실 한 줄 + 어떻게 하면 되는지). */
+const tid = () => (T && T.ticket ? T.ticket.tenantId : 0);
+UI.$("#imp").onclick = () => { if (!tid()) return UI.toast("티켓을 불러오는 중이에요");
+  UI.sheet(`<p class="muted" style="margin:0 0 4px">고객 화면을 그대로 열어요. 결제·충전·비밀번호는 막히고, 모든 동작이 감사에 남아요.</p><p class="muted" style="margin:0 0 16px;font-size:13px">끝내면 고객에게 «운영자가 설정을 도와드렸어요» 알림이 가요 · 60분 상한</p><div class="cta"><button class="btn primary" type="button" id="go">원격접속 시작</button></div>`,
+    { title: "원격접속", onOpen: (sh, close) => { sh.querySelector("#go").onclick = async () => {
+      const r = await UI.api("/api/ops-impersonate", { body: { id: tid() }, noRedirect: true });
+      if (!r.ok) return UI.toast(r.error || "시작하지 못했어요"); close(); location.href = r.redirect; }; } }); };
+if (OPS.can(op, "admin")) {
+  /* 🔴 시트 하나에 멱등 키 하나 — 더블클릭·재시도가 **같은 키**로 나간다(tenant.html 에서 실측으로 얻은 규율). */
+  UI.$("#grant").onclick = () => { if (!tid()) return UI.toast("티켓을 불러오는 중이에요");
+    UI.sheet(`<form id="gf"><div class="sec">얼마나</div>${UI.chips("n", [[10, "+10"], [30, "+30"], [100, "+100"]], 10)}<div class="field"><label>직접 넣기</label><input class="input" name="coins" type="number" placeholder="예: 50"></div><div class="field"><label>사유</label><input class="input" name="reason" required value="티켓 #${id} 보상"><div class="help"></div></div><div class="cta"><button class="btn primary" type="submit">지급</button></div></form>`,
+      { title: "코인 보상", onOpen: (sh, close) => { UI.bindChips(sh);
+        const idem = `t${id}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        UI.form(sh.querySelector("#gf"), async (d, f) => {
+          const nn = Number(d.coins) || Number(UI.chipVal(sh, "n"));
+          const r = await UI.api("/api/ops-coins-grant", { body: { id: tid(), coins: nn, reason: d.reason, idem }, noRedirect: true });
+          if (!r.ok) return UI.fieldError(f, "reason", r.error);
+          close(); UI.toast(r.duplicate ? (r.message || "아까 넣은 것과 같아서 한 번만 들어갔어요.") : `+${nn}코인 · 잔액 ${UI.num(r.balance)}`); load(); }); } }); };
+} else {
+  UI.$("#grant").style.display = "none";
+  UI.$("#grantNo").style.display = "";
+  UI.$("#grantNo").textContent = "코인 보상은 admin 이 넣어요. 이 티켓 번호(#" + id + ")를 알려 주시면 바로 됩니다.";
 }
 UI.$("#send").onclick = async () => { const text = UI.$("#reply").value.trim(); if (!text) return UI.toast("답변을 적어 주세요"); UI.$("#send").disabled = true; const r = await UI.api("/api/ops-ticket-reply", { body: { id, text }, noRedirect: true }); UI.$("#send").disabled = false; if (!r.ok) return UI.toast(r.error || "보내지 못했어요"); UI.$("#reply").value = ""; UI.toast("보냈어요 · 앱 알림 + 메일"); load(); };
 UI.$("#hold").onclick = async () => { const r = await UI.api("/api/ops-ticket-resolve", { body: { id, status: "hold" }, noRedirect: true }); if (!r.ok) return UI.toast(r.error); UI.toast("보류했어요"); load(); };
