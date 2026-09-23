@@ -9,8 +9,12 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
-import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, axisOfChannel, channelMonetizable, maxPhotosOf, canVerifySession, type ConnectMethod, type ChannelKindAxis } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0) · [R11-10 · R12-6] 축·수익 유무·사진 수
+import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, axisOfChannel, channelMonetizable, maxPhotosOf, canVerifySession, publishViaOf, type ConnectMethod, type ChannelKindAxis } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0) · [R11-10 · R12-6] 축·수익 유무·사진 수
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
+/* [R17-B2] 유튜브 하루 상한의 정본(구글 쿼터가 정하는 **사실** · §2.2).
+   🔴 고리 없음을 확인하고 최상단에 뒀다: youtube.ts → tokens·r2·disclosure·audit 넷 중 **accounts 를 부르는 것이 0**이다
+      (AC-17 은 `runner-jobs` 처럼 되돌아오는 길이 있을 때의 이야기다 — 여기는 없다). */
+import { youtubeDailyCap } from "./publish/youtube";
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 import { toCoinTier, type CoinTier } from "./coin-table";   // [R10-9] 계정 기본 등급(표는 coin-table 한 곳 · 순수 리프)
 
@@ -249,6 +253,13 @@ export interface ChannelInfo {
    *   `scripts/verify-channel-tables.mjs` ⑩). 못 하는 채널엔 **키를 안 싣는다**(AC-9 «모르면 안 말한다»).
    */
   canVerifySession?: true;
+  /**
+   * [R17-B2 · DESIGN §2.2] 🔴 **이 채널에 하루 몇 건까지 올라가나** — 유튜브만 있다(구글 쿼터가 정하는 **사실**이다).
+   *   우리 게이트가 아니라 **좁은 길**이라, §9 대로 **막지 말고 미리 말해 준다**:
+   *   종전엔 이 수가 `lib/publish/youtube.ts` 밖 **0곳**이어서 **여섯 건째가 될 때까지 아무도 몰랐다**.
+   *   🔴 다른 채널엔 **키를 안 싣는다** — 없는 상한을 화면이 지어내지 않는다(AC-9).
+   */
+  dailyPublishCap?: number;
 }
 /** 화면이 그리는 영상 길이 칩 값 — 정본은 `lib/video/types.ts VideoSeconds`(R12-7 에서 90 이 들어왔다). */
 type VideoSecondsUi = 15 | 30 | 60 | 90;
@@ -270,11 +281,23 @@ export async function listChannels(): Promise<ChannelInfo[]> {
        화면이 «네이버면 글»·«당근은 10장»을 **베껴 적으면** 채널이 늘 때마다 두 곳이 갈린다(AC-52). 모르는 것은 **키를 안 싣는다**(AC-9). */
     const axis = axisOfChannel(key);
     const maxPhotos = maxPhotosOf(key);
-    return { key, label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status,
+    /* 🔴 [R17-B2 · 2026-09-23 · B 의 «제품이 읽는데 제품은 안 쓰는 칸» 축이 가리켜서 쟀다]
+       **발행 경로는 DB 칸이 아니라 코드 표에서 읽는다.** 종전엔 `String(r.publish_via)` 였다.
+       · 설계 원칙 3(`docs/DESIGN.md:20`)은 «발행 경로는 채널 레지스트리 **한 곳**이 결정한다»인데 **둘이었다** —
+         `lib/channel-registry.ts publishVia`(발행이 실제로 보는 것)와 DB `channel_registry.publish_via`(화면에 실려 나가던 것).
+       · 🔴 **이미 갈려 있었다**(2026-09-23 라이브 대조 17채널): `brunch`·`naver_clip_post` 두 채널이
+         DB `manual` ↔ 코드 `null`. 오늘은 **아무도 이 값을 판단에 안 써서** 안 터졌을 뿐이다(AC-69 죽은 통로) —
+         누가 쓰기 시작하는 날 «화면은 된다는데 발행은 막히는» 그 사고가 된다.
+       · 어휘는 고객 쪽을 지킨다: 코드의 `null`(= 우리가 올릴 코드가 없다)은 고객에겐 **«직접 올리신다»**라
+         DDL 어휘(`api|runner|manual`)의 `manual` 로 편다. 뜻이 같은 자리라 낱말을 새로 만들지 않는다.
+       ⇒ 이제 DB `publish_via` 는 **아무도 안 읽는다**(정렬은 `sort` 가 한다). 지우는 건 파괴적 DDL 이라 §4.5 상 사장님 승인 사안 — 그대로 둔다. */
+    return { key, label: String(r.label), category: String(r.category), publishVia: publishViaOf(key) ?? "manual", status,
       connectMethod: connectMethodOf(key), configured: providerConfigured(key), connectable,
       ...(reason ? { connectableReason: reason } : {}), ...(video ? { video } : {}),
       ...(axis ? { axis } : {}), ...(channelMonetizable(key) ? {} : { monetizable: false as const }), ...(maxPhotos ? { maxPhotos } : {}),
       /* [R17-B2] 🔴 순수 리프(`channel-registry`)에서 읽는다 — `runner-jobs` 에서 읽으면 이 파일이 고리에 걸린다(AC-17). */
-      ...(canVerifySession(key) ? { canVerifySession: true as const } : {}) };
+      ...(canVerifySession(key) ? { canVerifySession: true as const } : {}),
+      /* [R17-B2] 유튜브 하루 상한 — 🔴 **서버가 정본**(`lib/publish/youtube.ts youtubeDailyCap`). 화면이 5 를 베껴 적지 않는다. */
+      ...(key === "youtube_shorts" || key === "youtube_long" ? { dailyPublishCap: youtubeDailyCap() } : {}) };
   });
 }

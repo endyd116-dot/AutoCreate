@@ -49,7 +49,19 @@ function rejectedPaidField(json: Record<string, unknown> | null): boolean {
   return blob.includes(PAID_PART) || /unexpected|invalid.*part|not writable|badRequest/i.test(blob);
 }
 /** videos.insert 1,600u — 일 10,000u 면 6건이 한계. 기본 5건으로 여유를 둔다. */
+/**
+ * 하루에 올릴 수 있는 수 — 🔴 **우리 게이트가 아니라 구글 쿼터가 정하는 사실**이다(설계 §2.2).
+ *   일 10,000 유닛 중 `videos.insert` 가 1,600 유닛이라 하루 **여섯 건쯤**이 천장이고,
+ *   쿼터는 **채널이 아니라 구글 프로젝트** 단위라 우리 고객 전부가 같은 통을 나눠 쓴다(그래서 기본값을 6이 아니라 5로 둔다).
+ *
+ * 🔴 [R17-B2 · B 가 물어서 잰 자리] 종전엔 이 수가 **이 파일 밖 0곳**이었다 —
+ *   즉 **여섯 건째가 될 때까지 아무도 말해 주지 않았다.** «있는데 좁은 길»을 안 알리면
+ *   고객은 하루 10건을 편성해 놓고 다섯 건째부터 «내일 이어서»만 본다(§9: 막지 않는 대신 **말해 준다**).
+ *   ⇒ `youtubeDailyCap()` 으로 열어 `accounts-list` 가 화면에 실어 준다. **화면은 숫자를 베껴 적지 않는다**(§13 · AC-52).
+ */
 const DAILY_CAP = Math.max(1, Number(process.env.YOUTUBE_DAILY_INSERT_CAP) || 5);
+/** [R17-B2] 화면·다른 서버 코드가 이 수를 물어보는 **하나뿐인 문**. 여기 말고 다른 데 5 를 적지 마라. */
+export function youtubeDailyCap(): number { return DAILY_CAP; }
 const META_TIMEOUT_MS = 20_000;
 /* ═══ [R8-A §4] 해시태그·검색 태그는 **다른 것**이다(공식 문서 실조사 2026-09-15) ═══
    · 설명란 `#해시태그` — 제목 옆엔 **최대 3개**만 노출 · 60개 초과면 전부 무시 · 과도하면 삭제될 수 있다.
