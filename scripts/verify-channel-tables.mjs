@@ -123,6 +123,17 @@ for (const r of rows) {
   const [a, b] = [seedLabel.get(r.key), uiLabel.get(r.key)];
   if (a && b && a !== b) problems.push(`🟡 ${r.key}: 이름이 다르다 — 시드 «${a}» ↔ 화면 «${b}»(같은 채널을 서로 다른 말로 부른다)`);
 }
+/* ⑪ 🔴 [R17-B2] **발행 경로를 DB 칸에서 읽지 않는다** — 설계 원칙 3(`docs/DESIGN.md:20`):
+   «발행 경로는 채널 레지스트리 **한 곳**이 결정한다».
+   그런데 `lib/accounts.ts` 가 화면에 실어 보내는 `publishVia` 를 **DB `channel_registry.publish_via`** 에서 읽고 있었고,
+   🔴 라이브 대조에서 **이미 갈려 있었다**(2026-09-23 · 17채널 중 2 — `brunch`·`naver_clip_post` 가 DB `manual` ↔ 코드 `null`).
+   아무도 그 값을 판단에 안 써서 안 터졌을 뿐이다(AC-69 죽은 통로) — 쓰기 시작하는 날
+   «화면은 된다는데 발행은 막히는» 사고가 된다. ⇒ 코드 표에서 파생하는지 **글자로** 센다. */
+const accountsSrc = readFileSync("lib/accounts.ts", "utf8");
+if (/publishVia:\s*String\(r\.publish_via\)/.test(accountsSrc)) {
+  problems.push("🔴 lib/accounts.ts: 화면에 보낼 publishVia 를 **DB 칸**(r.publish_via)에서 읽는다 — 정본이 둘이 되고 라이브에서 이미 갈렸다(설계 원칙 3 위반). `publishViaOf(key) ?? \"manual\"` 로 코드 표에서 파생해라");
+}
+
 /* 거꾸로도 본다 — 배선은 있는데 표가 «api» 가 아니면 그 커넥터는 **아무도 안 부른다**(AC-69 죽은 통로). */
 for (const k of wiredApi) if (!rows.some((r) => r.key === k && r.publishVia === "api")) problems.push(`🟡 ${k}: 커넥터는 배선돼 있는데 표의 publishVia 가 api 가 아니다 — 부르는 자리가 없다(죽은 통로)`);
 for (const k of contractKeys) if (!rows.some((r) => r.key === k)) problems.push(`🟡 ${k}: 글 계약에는 있는데 채널 표에 없다(유령 채널·오타?)`);
