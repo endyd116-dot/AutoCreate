@@ -83,10 +83,15 @@ ${(js || "").trim()}
       if (cur === null) drift.push({ file: out, missing: true, gone: [], add: [] });
       else if (norm(cur) !== norm(page)) {
         const a = norm(cur).split(LF), b = norm(page).split(LF);
-        const setA = new Set(a), setB = new Set(b);
-        drift.push({ file: out, missing: false,
-          gone: a.filter((l) => l.trim() && !setB.has(l)),   // 생성물에만 = **빌드가 지울 줄**
-          add: b.filter((l) => l.trim() && !setA.has(l)) }); // 정본에만  = **빌드가 넣을 줄**
+        /* 🔴 **집합이 아니라 개수로 센다**(2026-09-23 · B 가 밟은 모양을 재서 고쳤다).
+           B 가 정본에 `load()` 닫는 `}` 를 **하나 더** 넣었는데, 집합 비교는 그 `}` 가 **딴 데도 있다**는 이유로
+           «새 줄 0개»로 읽었다 — 파일 이름은 뜨는데 **밑에 한 줄도 안 찍혔다.** «갈렸다»고만 하고 **무엇이**를 못 말하면
+           사람은 그냥 넘긴다. 개수로 세면 «5번 나오던 줄이 6번» 이 **+1** 로 보인다. */
+        const count = (arr) => { const m = new Map(); for (const l of arr) if (l.trim()) m.set(l, (m.get(l) || 0) + 1); return m; };
+        const ca = count(a), cb = count(b), gone = [], add = [];
+        for (const [l, k] of ca) for (let x = (cb.get(l) || 0); x < k; x++) gone.push(l);
+        for (const [l, k] of cb) for (let x = (ca.get(l) || 0); x < k; x++) add.push(l);
+        drift.push({ file: out, missing: false, gone, add });
       }
     } else writeFileSync(out, page, "utf8");
     n++;
@@ -102,6 +107,8 @@ if (CHECK) {
     console.log("");
     if (d.missing) { console.log(`   ✗ ${d.file}  —  생성물이 없다`); continue; }
     console.log(`   ✗ ${d.file}`);
+    /* 순서만 바뀐 경우엔 개수로도 안 보인다 — 그때는 «못 보여준다»고 **말한다**(조용히 이름만 띄우지 않는다). */
+    if (!d.gone.length && !d.add.length) console.log("      ⊘ 갈렸는데 줄로는 안 보인다 — **줄 순서만 바뀌었다.** `git diff` 로 봐라.");
     if (d.gone.length) {
       /* 지울 줄은 많을 수 있다(실측 66줄) — 앞 8줄만 보이고 나머지는 수로 말한다. 여기서는 «무엇이»보다 «얼마나»가 먼저다. */
       console.log(`      ✖ 생성물에만 ${d.gone.length}줄 — **빌드가 지울 줄**`);
