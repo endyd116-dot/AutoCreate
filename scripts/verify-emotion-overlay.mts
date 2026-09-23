@@ -13,6 +13,7 @@
  *     여기서 재는 것은 **판정기 한 벌이 두 곳에서 같은 답을 내는가**까지다.
  */
 import "./_lib/load-env.mjs";
+import fs from "node:fs";
 const { WRITING_CONTRACTS, applyOverlay, contractFor, OVERLAY_KEYS } = await import("../lib/writing-contracts");
 const { q } = await import("../lib/accounts");
 const { sql } = await import("drizzle-orm");
@@ -30,6 +31,22 @@ console.log(orphans.length ? `⚠️ 아무도 안 읽는 행 ${orphans.length}�
 /* jsonb 가 아닌 행은 **빨강이다** — `contractFor` 가 조용히 코드 기본값으로 돌아 «바꿨는데 그대로»가 된다(PITFALLS #1). */
 const notObj = live.filter((r) => r.t !== "object").map((r) => String(r.key));
 if (notObj.length) { bad++; console.log(`  ❌ jsonb_typeof 가 object 가 아닌 행: ${notObj.join(" · ")}`); }
+
+/* 🔴 **뿌리까지 본다 — 씨앗 대본의 열쇠**(AC-258 · B2 실측 `40923be`).
+   라이브 유령을 세는 것만으로는 **또 생긴다** — `scripts/seed-plans.mjs` 가 그 열쇠를 다시 넣기 때문이다.
+   실제로 `youtube_shorts.graphic` 이 그 모양이었다: `graphic` 은 감성 키가 아니라 **`VideoFormat` 낱말**(graphic·talking·clip)이고,
+   코드 셋(`writing-contracts.ts:543` · `director.ts:382` · `shortsContract`)은 전부 `script` 다 — **어휘 둘이 한 열쇠에서 부딪혔다.**
+   ⚠️ **빨강으로 안 낸다** — 열쇠를 고치면 그 오버레이가 **다음 시드에서 새로 살아나** 쇼츠 말투가 바뀐다(`tone`→`register`).
+      그건 우리가 조용히 정할 일이 아니다. **이름을 대고 무슨 일이 날지까지 적는다.** */
+{
+  const seedSrc = fs.readFileSync("scripts/seed-plans.mjs", "utf8");
+  const block = /const profiles = \[([\s\S]*?)\n\];/.exec(seedSrc)?.[1] ?? "";
+  const seedKeys = [...block.matchAll(/\["([a-z_]+\.[a-z_]+)"/g)].map((m) => m[1]);
+  const deadSeed = seedKeys.filter((k) => !keys.includes(k));
+  console.log(`씨앗 열쇠 ${seedKeys.length}개 · 코드 표에 없는 것 ${deadSeed.length}개${deadSeed.length ? `: ${deadSeed.join(" · ")}` : ""}`);
+  if (deadSeed.length) console.log("     ⚠️ 이 줄들은 **깔아도 아무도 안 읽는다**(scripts/seed-plans.mjs). 🔴 고치면 그 오버레이가 **새로 살아난다** — 사람이 정할 일이다.");
+  ok("⑨ 씨앗 열쇠를 코드 표와 견줬다(모수를 적었다)", seedKeys.length > 0, { seedKeys: seedKeys.length });
+}
 
 const base = WRITING_CONTRACTS.naver_blog;
 /* ① 정상 오버레이가 먹나 */
