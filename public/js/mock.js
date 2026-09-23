@@ -1512,6 +1512,10 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     "photo-usage": (_b, q) => { const key = String(q.get("key") || "");
       if (!/^(customer:sha256:[0-9a-f]{16,64}|stock:[a-z0-9_]+:[A-Za-z0-9_-]{1,64}|ai:[A-Za-z0-9._-]{1,60}:.{1,80})$/.test(key)) return { ok: false, error: "사진 출처 값이 올바르지 않아요.", step: "key" };
       const uses = [];
+      /* `?photouse=many` — 같은 사진이 **상한을 넘는 글**에 쓰인 판(250곳). 🔴 표본이 둘이면 상한에 안 닿아 늘 초록이다. */
+      if (qs.get("photouse") === "many" && key === "stock:pexels:10422341") {
+        for (let i = 0; i < 250; i++) uses.push({ assetId: 9200 + i, tenantId: 1, pieceId: 9000 + i, title: `같은 사진을 쓴 글 ${i + 1}`, status: i % 3 === 0 ? "published" : "in_review", channel: "naver_blog", externalUrl: i % 3 === 0 ? `https://blog.naver.com/cook_a/22${300000 + i}` : null });
+      }
       for (const [pid, list] of Object.entries(S.photos || {})) {
         for (const a of list) {
           if (!a.source || a.source.key !== key) continue;
@@ -1520,7 +1524,16 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
           uses.push({ assetId: a.id, tenantId: 1, pieceId: Number(pid), title: pc.title || "", status: pc.status, channel: pc.channel, externalUrl: (post && post.externalUrl) || null });
         }
       }
-      return { ok: true, key, uses: uses.sort((a, b) => b.pieceId - a.pieceId) }; },
+      /* 🔴 [AC-273 · 2026-09-23] **서버의 조용한 상한을 모의도 그대로 갖는다** — `piecesUsingSource` 가
+         `min(500, opts.limit ?? 200)` 으로 자른다(`lib/piece-photos.ts:150`). 모의에 상한이 없으면
+         **상한에 닿는 판을 한 번도 못 그려 본다**(내 첫 실측이 «글 2곳»이라 초록이었던 이유다 · AC-270).
+         `?photouse=many` 로 상한을 넘겨 본다.
+         🔴 [같은 날 · B 가 고쳤다] 이제 **`total`(LIMIT 안 건 COUNT) · `shown` · `hasMore`** 를 같이 싣는다 —
+         자르는 건 그대로 두고 «다 보여 준 척»만 없앴다(§9). 모의도 **네 칸 다** 낸다. */
+      const SERVER_LIMIT = 200;
+      const all = uses.sort((a, b) => b.pieceId - a.pieceId);
+      const shown = all.slice(0, SERVER_LIMIT);
+      return { ok: true, key, uses: shown, total: all.length, shown: shown.length, hasMore: all.length > shown.length }; },
     "piece-photo-add": (b) => {
       const nw = notWritable(); if (nw) return nw;
       const pid = Number(b.pieceId); if (!pid) return err("pieceId", "어느 글에 붙일 사진인지 알려 주세요.");

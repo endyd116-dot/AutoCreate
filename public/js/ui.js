@@ -886,7 +886,25 @@
         if (!r.ok) { box.innerHTML = `<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "지금은 확인할 수 없어요. 잠시 뒤 다시 열어 보세요.")}</p>`; return; }
         const uses = r.uses || [];
         if (!uses.length) { box.innerHTML = '<p class="muted" style="margin:0;font-size:13px">아직 이 사진을 쓴 글이 없어요.</p>'; return; }
-        box.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:13px">글 ${uses.length}곳에 들어가 있어요. 내려야 하면 여기서 하나씩 열어요.</p>`
+        /* 🔴 [AC-273 · 2026-09-23] **«N곳»이라고 단정하지 않는다.** 서버가 `piecesUsingSource` 에서 `limit = min(500, opts.limit ?? 200)` 으로
+           **말없이 자른다**(`lib/piece-photos.ts:150`). 여기가 §5E 침해 통지·내리기라, 201곳에 쓰인 사진을 «200곳»이라 적으면
+           고객은 **200개를 내린 뒤 다 내렸다고 믿는다.** «말없이 사라짐»만큼 나쁜 게 «말없이 **안** 사라짐»이다.
+           🔴 **상한 숫자를 여기 박지 않는다** — 서버가 정하는 값이라 박으면 서버가 500으로 올리는 날 또 거짓이 된다(AC-232).
+              그리고 `/api/photo-usage` 는 **`limit` 을 안 받는다**(`netlify/functions/piece-photos.ts:46` — 쿼리를 안 읽는다).
+              그래서 «받은 개수 === 요청한 개수»로도 못 잰다. ⇒ **잴 수 없는 것을 단정하지 않는 쪽**으로 갔다:
+              «여기 보이는»이라고 적고, **다시 열어 확인하는 길**을 함께 준다. 이 문장은 상한이 몇이든 늘 참이다.
+           🔴 §3 — 우리 사정(«200개까지만 보여 드려요»)을 고객 문제로 넘기지 않는다. **무엇이 · 어떻게 하면 되는지**만 적는다.
+
+           🔴 **[같은 날 · B 가 ⓐ 를 했다] 서버가 `total`(LIMIT 안 건 COUNT)·`shown`·`hasMore` 를 싣는다.**
+              그래서 **진짜 수를 적을 수 있다** — 201곳이면 «201곳». 🔴 자르는 것은 **그대로 둔다**(§9 — 막지 말고 말해 준다).
+              없앤 것은 «다 보여 준 척»이지 상한이 아니다.
+           🔴 **두 길을 다 둔다** — 서버가 아직 옛 판이면(`total` 이 없으면) 아래 «여기 보이는»으로 떨어진다.
+              배포가 반쯤 섞인 동안에도 **거짓말은 안 한다.** `hasMore` 는 `=== true` 로만 본다(칸이 없으면 «없다»가 아니라 «모른다» · AC-9). */
+        const total = typeof r.total === "number" ? r.total : null;
+        const more = r.hasMore === true;
+        box.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:13px">${total == null
+          ? `여기 보이는 글 ${uses.length}곳에 들어가 있어요. 내려야 하면 하나씩 열어요.<br>다 내린 뒤 이 화면을 다시 열면 남은 곳이 있는지 확인할 수 있어요.`
+          : `글 <b>${UI.num(total)}곳</b>에 들어가 있어요. 내려야 하면 하나씩 열어요.${more ? `<br>여기엔 ${UI.num(uses.length)}곳만 보여요 — 내린 뒤 다시 열면 나머지가 이어서 보여요.` : ""}`}</p>`
           + uses.map((u) => {
             const st = UI.PIECE_STATUS[u.status] || ["off", u.status];
             return `<a class="row tap" href="/app/piece.html?id=${u.pieceId}">${UI.mark(u.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(u.title || "제목 없는 글")}</span><span class="d">${UI.esc(UI.chLabel(u.channel))} · <span class="pill ${st[0]}" style="font-size:11px;padding:1px 6px">${UI.esc(st[1])}</span></span></div>${UI.chev}</a>`
