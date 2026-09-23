@@ -38,28 +38,6 @@ let EL = { accounts: [], thresholds: null, links: {} }, SRC = [], accounts = [];
 const linkOf = (k) => (EL.links && EL.links[k]) || FALLBACK_LINKS[k] || "";
 const srcOf = (source, accountId) => SRC.find((s) => s.source === source && (accountId == null || s.accountId === accountId));
 const connected = UI.qs.get("connected"); if (connected) UI.toast(`${UI.srcLabel(connected)} 을(를) 구글로 연결했어요`); // [v3.5] 동의 후 돌아온 자리
-/* 🔴 [R17 · A] **돌아오는 자리가 셋인데 화면은 하나만 받고 있었다.** `netlify/functions/revenue.ts` 는
-   `?connected=` 말고도 `?notready=<source>`(71행) · `?error=state|denied|exchange`(78·80·82행) 로 되돌려 보낸다.
-   여태 그 둘은 **아무 말 없는 빈 화면**이었다 — 고객은 구글에 다녀왔는데 무슨 일이 났는지 한 글자도 못 봤다.
-   🔴 §3 겁주지 않는다: «실패했습니다»가 아니라 ①무슨 일인지 ②다음에 뭘 하면 되는지 ③우리가 할 일이면 우리가 한다고 적는다.
-   🔴 ㉯ 규율(트리거 §3-1): «열쇠가 없어요»(notready)와 «불렀는데 안 됐어요»(error)를 **갈라서** 말한다. */
-const notready = UI.qs.get("notready");
-if (notready) UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">저희 쪽 준비가 하나 남았어요</p>
-  <p class="muted" style="margin:0 0 10px;line-height:1.7">${UI.esc(UI.srcLabel(notready))} 을(를) 가져오려면 저희가 구글에서 받은 열쇠를 꽂아야 해요. <b>고객님이 하실 일은 없어요.</b></p>
-  <p class="muted" style="margin:0 0 4px;line-height:1.7">준비되는 대로 여기서 바로 연결할 수 있게 해 둘게요. 그동안 ${UI.esc(notready === "youtube" ? "유튜브 수익 창출 신청" : "애드센스 가입과 사이트 추가")}은 미리 해 두시면 연결하는 날 바로 수익이 들어와요.</p>`,
-  { title: UI.srcLabel(notready) });
-const oaErr = UI.qs.get("error");
-if (oaErr) {
-  /* 🔴 셋을 다르게 말한다 — «알 수 없는 오류» 하나로 뭉치면 고객이 다음에 뭘 할지 모른다(AC-170 ②). */
-  const E = {
-    state: ["연결이 도중에 끊겼어요", "안전을 위해 잠깐 사이에만 쓰는 표가 있는데 그게 지났어요. <b>한 번 더 눌러 주시면</b> 대개 바로 돼요."],
-    denied: ["구글에서 «허용»을 안 누르셨어요", "수익을 가져오려면 구글 화면에서 <b>«허용»</b>까지 눌러 주셔야 해요. 다시 눌러서 해 볼 수 있어요."],
-    exchange: ["구글과 이야기하다 막혔어요", "저희 쪽에서 확인하고 있어요. <b>고객님이 하실 일은 없어요</b> — 잠시 뒤 한 번 더 눌러 보시고, 그래도 안 되면 문의 주세요."],
-  };
-  const e = E[oaErr] || ["연결을 끝내지 못했어요", "잠시 뒤 한 번 더 눌러 보세요. 그래도 안 되면 문의 주시면 저희가 봐 드릴게요."];
-  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${UI.esc(e[0])}</p><p class="muted" style="margin:0 0 10px;line-height:1.7">${e[1]}</p>
-    <div class="cta"><a class="btn secondary" href="/app/support.html">문의하기</a></div>`, { title: "구글 연결" });
-}
 
 async function load() {
   const [e, v, a] = await Promise.all([UI.api("/api/ad-eligibility"), UI.api("/api/revenue-sources"), UI.api("/api/accounts-list")]);
