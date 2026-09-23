@@ -178,7 +178,17 @@ export async function publishYoutube(piece: PublishPiece, account: PublishAccoun
       tags: youtubeTags(piece.tags ?? []),
       categoryId: "22",
     },
-    status: { privacyStatus, selfDeclaredMadeForKids: false, containsSyntheticMedia: true },
+    /* 🔴 [AC-253 · 2026-09-23] **유료 프로모션 신고** — 유튜브 `status.paidPromotion` 은
+       «원고료·PPL 을 받았다»(sponsored)일 때 켜는 칸이다.
+       🔴 **`disclosure` 유무로 켜지 않는다** — 제휴 수수료(affiliate)만 있는 글까지 «유료 광고»로 신고하게 된다(거짓 신고).
+          공정위 고지는 대가 3종에 다 켜지지만 **플랫폼 신고 칸은 그중 일부**다(`lib/publish/contract.ts compensationKinds`).
+       ⚠️ 칸이 안 실려 왔으면(`?? []`) **켜지 않는다** — «대가 없음»이 아니라 «안 실렸다»일 수 있어 안전한 쪽으로 기운다(AC-9).
+       ⚠️ 이 칸은 **끄는 값을 보내지 않는다**: false 를 굳이 실어 보내면 «아니라고 우리가 말한 것»이 된다 —
+          모르면 **아무 말도 안 하는 것**이 정직하다. */
+    status: {
+      privacyStatus, selfDeclaredMadeForKids: false, containsSyntheticMedia: true,
+      ...((piece.compensationKinds ?? []).includes("sponsored") ? { paidPromotion: true } : {}),
+    },
   };
   let meta = paid ? { ...metaBase, [PAID_PART]: { hasPaidProductPlacement: true } } : metaBase;
   let paidFlagDropped = false;
