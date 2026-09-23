@@ -87,7 +87,9 @@ async function load() {
       sh.querySelector("#kone").onclick = () => { const tid = Number(sh.querySelector("#ktid").value || 0); if (!tid) return UI.toast("고객 번호를 적어 주세요"); send(tid, false); };
     } });
   };
-  OPS.lock(op, "super_admin", UI.$("#roles")); OPS.lock(op, "super_admin", UI.$("#cost"), ["#sync"]);
+  /* [AC-256] 🔴 `#sync` 를 잠금 **예외에서 뺐다** — 여태는 화면 안에서 글자만 만들던 단추라 아무나 눌러도 됐지만,
+     이제 `/api/ops-ai-sync`(super_admin 전용)를 부른다. 예외로 두면 눌러 놓고 403 을 받는다 — **누르기 전에 말해 주는 쪽**이다(§3). */
+  OPS.lock(op, "super_admin", UI.$("#roles")); OPS.lock(op, "super_admin", UI.$("#cost"));
   UI.$$("#mode button").forEach((b) => b.onclick = async () => { if (!canEdit) return; const mode = b.dataset.v; if (mode === s.updateMode) return; const rr = await UI.api("/api/ops-ai-mode", { body: { mode }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "바꾸지 못했어요"); UI.toast(rr.updateMode === "auto" ? "자동 업데이트를 켰어요" : "수동으로 바꿨어요"); load(); });
   UI.$$("[data-apply]").forEach((b) => b.onclick = () => { const x = r.roles.find((y) => y.role === b.dataset.apply); const pick = (s.candidates || []).filter((c) => c.tested && c.tested.text === true).map((c) => c.model);
     UI.sheet(`<form id="af"><div class="field"><label>체인 <span class="muted" style="font-weight:500">· 쉼표로 여러 개 · 앞이 1순위</span></label><input class="input" name="chain" value="${UI.esc((x.candidate || x.chain || []).join(", "))}" style="font-family:ui-monospace,monospace" required><div class="help"></div></div>
@@ -97,7 +99,53 @@ async function load() {
       <div class="cta"><button class="btn primary" type="submit">적용</button></div></form>`, { title: `${ROLE[x.role] || x.role} 모델`, onOpen: (sh, close) => { UI.bindChips(sh, (n, v) => { if (n === "pick") sh.querySelector('[name="chain"]').value = v; }); UI.form(sh.querySelector("#af"), async (d, f) => { const chain = String(d.chain).split(",").map((v) => v.trim()).filter(Boolean); const rr = await UI.api("/api/ops-ai-apply", { body: { role: x.role, chain, canaryPct: Number(UI.chipVal(sh, "pct")) }, noRedirect: true }); if (!rr.ok) return UI.fieldError(f, "chain", rr.error || "적용하지 못했어요"); close(); UI.toast(rr.canaryPct >= 100 ? "체인을 바꿨어요" : `카나리 ${rr.canaryPct}%로 올렸어요`); load(); }); } }); });
   UI.$$("[data-rb]").forEach((b) => b.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "롤백", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "직전 체인으로 되돌리고 후보를 내릴까요?", async () => { const rr = await UI.api("/api/ops-ai-rollback", { body: { role: b.dataset.rb }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "되돌리지 못했어요"); close(); UI.toast("롤백했어요"); load(); }) }));
   UI.$("#cap").onclick = () => UI.sheet(`<div class="fr"><div class="fl">원가 상한<small>고객 · 일 · 넘으면 생성 거부 + 알림 1건/일 · 환율 없으면 «미환산»으로 통과</small></div>${UI.stepper("cap", s.costCapKrw ?? 0, 0, 300000, "원", 5000)}</div><p class="muted" style="margin:8px 0 0;font-size:13px">0원 = 무제한(상한 없음)</p><div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "원가 상한", onOpen: (sh, close) => { UI.bindSteppers(sh); sh.querySelector("#ok").onclick = async () => { const v = UI.stepVal(sh, "cap"); const rr = await UI.api("/api/ops-ai-cost-cap", { body: { costCapKrw: v > 0 ? v : null }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "저장하지 못했어요"); close(); UI.toast(rr.costCapKrw == null ? "상한을 없앴어요" : `상한 ${UI.won(rr.costCapKrw)}`); load(); }; } });
-  UI.$("#sync").onclick = () => { const txt = `// lib/ai-models.ts 형태 · DB 오버레이 내려받기(${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST) · PR 은 사람이\nexport const AI_CHAINS = ${JSON.stringify(Object.fromEntries((A.roles || []).map((x) => [x.role, x.chain])), null, 2)};\n`; UI.sheet(`<code class="code" style="white-space:pre-wrap;font-size:12px">${UI.esc(txt)}</code><div class="cta"><button class="btn primary" type="button" id="cp">복사</button></div>`, { title: "정본 동기화", onOpen: (sh) => { sh.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(txt)) ? "복사했어요 · PR 로 올려요" : "복사하지 못했어요"); } }); };
+  UI.$("#sync").onclick = syncSheet;
+}
+
+/* ═══ 정본 동기화 — [AC-256] 🔴 여태 화면이 **서버를 한 번도 안 불렀다.**
+   `lib/ai-models-sync.ts`(214줄)와 `/api/ops-ai-sync` 는 2026-09-16 부터 다 있었는데
+   이 화면은 제 손으로 텍스트를 만들어 복사시키고 있었다 — §4.8 «완료 = 화면에서 쓸 수 있을 때» 그대로다.
+   🔴 겁주지 않는다(§3): 열쇠가 없으면 «정지됩니다»가 아니라 **«아직 준비 중이에요 · 그동안은 복사로»**다.
+   🔴 막지 않는다(§9): PR 을 못 열어도 **복사 길은 늘 열려 있다.** */
+async function syncSheet() {
+  const s = await UI.api("/api/ops-ai-sync", { noRedirect: true });
+  /* 복사본은 서버가 못 와도 만든다 — 손으로 올리는 길을 끊지 않는다. */
+  /* ⚠️ `UI.utc` 는 **문자열만** 받는다(`String(Date.now())` 는 `new Date("1758…")` 가 돼 Invalid Date). ISO 로 준다. */
+  const nowIso = new Date().toISOString();
+  const txt = `// lib/ai-models.ts 형태 · DB 오버레이 내려받기(${UI.dateKST(nowIso)} ${UI.timeKST(nowIso)} KST) · PR 은 사람이\nexport const AI_CHAINS = ${JSON.stringify(Object.fromEntries((A.roles || []).map((x) => [x.role, x.chain])), null, 2)};\n`;
+  const rows = (s && s.rows) || [];
+  const diff = rows.filter((r) => !r.same);
+  const warn = (r) => [
+    r.envSet ? `⚠️ <code>${UI.esc(r.envName)}</code> 가 켜져 있어 머지해도 안 바뀌어요` : "",
+    r.bakeable === false ? "🔴 구울 자리를 몰라요 — PR 로 못 담아요" : "",
+    r.candidate && r.canaryPct < 100 ? `카나리 ${r.canaryPct}% 중이라 아직 안 구워요` : "",
+    r.probeNone ? "텍스트로 못 재는 역할이라 바꾸기 전에 1컷 실증이 필요해요" : "",
+  ].filter(Boolean).join(" · ");
+  const list = diff.length
+    ? diff.map((r) => `<div class="row"><div class="l"><span class="t">${UI.esc(r.label || r.role)}</span><span class="d wrap">${UI.esc((r.code || []).join(", "))} → <b>${UI.esc((r.db || []).join(", "))}</b>${warn(r) ? `<br>${warn(r)}` : ""}</span></div></div>`).join("")
+    : `<p class="muted" style="margin:0">지금은 파일과 같아요. 만들 PR 이 없어요.</p>`;
+  /* 🔴 모수를 적는다 — «몇 중 몇»이 없으면 «다 봤다»고 읽힌다(AC-141②). */
+  const head = s && s.ok
+    ? `<p class="muted" style="margin:0 0 10px;font-size:13px">운영센터에서 바꿔 둔 모델을 파일로 되돌려요. 역할 ${s.roleCount || rows.length}개 중 <b>${diff.length}개</b>가 파일과 달라요.</p>`
+    : `<p class="muted" style="margin:0 0 10px;font-size:13px">지금 상태를 불러오지 못했어요. 아래 코드를 복사해서 올리면 돼요.</p>`;
+  const ready = !!(s && s.ok && s.configured && diff.length);
+  const note = s && s.ok && !s.configured
+    ? `<p class="muted" style="margin:10px 0 0;font-size:12.5px">PR 을 여기서 바로 여는 건 아직 준비 중이에요. 그동안은 아래 코드를 복사해서 올리면 돼요.</p>` : "";
+  UI.sheet(`${head}<div id="sylist">${list}</div>${note}
+    <details style="margin-top:10px"><summary class="muted" style="font-size:12.5px">코드로 보기</summary><code class="code" style="white-space:pre-wrap;font-size:12px">${UI.esc(txt)}</code></details>
+    <div class="cta" style="flex-direction:column">${ready ? `<button class="btn primary" type="button" id="pr">PR 만들기</button>` : ""}<button class="btn secondary" type="button" id="cp">코드 복사</button></div>`,
+    { title: "정본 동기화", onOpen: (sh, close) => {
+      sh.querySelector("#cp").onclick = async () => UI.toast((await UI.copy(txt)) ? "복사했어요 · PR 로 올려요" : "복사하지 못했어요");
+      const pr = sh.querySelector("#pr"); if (!pr) return;
+      pr.onclick = async () => {
+        pr.disabled = true;
+        const rr = await UI.api("/api/ops-ai-sync", { method: "POST", body: {}, noRedirect: true });
+        pr.disabled = false;
+        if (!rr.ok) return UI.toast(rr.error || "PR 을 만들지 못했어요");
+        close(); UI.toast(`PR 을 만들었어요 · ${(rr.changed || []).join(", ")} · 머지는 사람이 해요`);
+        if (rr.url) window.open(rr.url, "_blank", "noopener");
+      };
+    } });
 }
 load();
 })();

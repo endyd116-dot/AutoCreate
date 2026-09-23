@@ -441,8 +441,15 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
 
   const goal = goalOf(specs, intent);
   const coinCost = specs.reduce((a, s) => a + s.coinCost, 0);
+  /* [AC-255 · DESIGN §5.2 `mode`] 🔴 **«사람이 볼 것인가»는 `origin` 에서 나온다 — 여기서 글자로 박지 않는다.**
+     여태 `"reviewed"` 가 두 자리(이 INSERT 와 아래 반환)에 **손으로** 박혀 있었다. 오늘은 부르는 곳이 하나(`origin:"manual"`)라
+     값이 맞았지만, **맞는 까닭이 우연**이다 — `propose(tid, id)` 를 opts 없이 부르는 날 `origin` 은 `auto` 로 떨어지는데
+     `mode` 는 계속 `"reviewed"` 라고 말한다. 🔴 **그러면 brief 행이 «사람이 본 것»이라고 거짓말을 하고, 그 거짓은 조용하다.**
+     ⚠️ 자동 경로(`lib/cron/director-auto.ts:174`)는 **처음부터 `'auto'` 를 제대로 넣고 있었다**(라이브에 행 4개) —
+        고칠 곳은 저쪽이 아니라 **이쪽 한 곳**이다. */
+  const mode: Brief["mode"] = opts.origin === "manual" ? "reviewed" : "auto";
   const [b] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost)
-    VALUES (${tid}, ${topic.id}, ${goal}, ${jsonb(specs)}, ${jsonb(reasons)}, ${"reviewed"}, ${"proposed"}, ${coinCost}) RETURNING id`);
+    VALUES (${tid}, ${topic.id}, ${goal}, ${jsonb(specs)}, ${jsonb(reasons)}, ${mode}, ${"proposed"}, ${coinCost}) RETURNING id`);
   const briefId = n(b?.id);
   const [chk] = await q(sql`SELECT jsonb_typeof(pieces) AS t FROM briefs WHERE id = ${briefId}`);
   if (chk?.t !== "array") console.error("[director] briefs.pieces jsonb_typeof !== array", chk);
@@ -470,7 +477,7 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
     return h ? { ...s2, selfUpload: { channel: h.channel, label: h.label, why: h.why, steps: h.steps, openUrl: h.openUrl, openLabel: h.openLabel, appOpenVerified: h.appOpenVerified } } : s2;
   });
   const kv = kindsView(tset);
-  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode: "reviewed", coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces, kinds: kv.kinds, kindsSet: kv.kindsSet } };
+  return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode, coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces, kinds: kv.kinds, kindsSet: kv.kindsSet } };   // [AC-255] 저장한 값 그대로 — 두 자리가 갈릴 수 없다
 }
 
 /* ───────── confirm ───────── */
