@@ -145,19 +145,41 @@ export interface SourceUsage { pieceId: number; tenantId: number; title: string;
  *   침해 통지·내리기 절차의 첫 걸음이다(DESIGN §5E). 발행된 글이면 `externalUrl` 까지 준다 — 거기가 실제로 내려야 할 자리다.
  *   `tenantId` 를 주면 그 집 안에서만 찾는다(고객 화면). 안 주면 전체 — **운영자 경로에서만** 그렇게 부른다(§4.6).
  */
-export async function piecesUsingSource(sourceKey: string, opts: { tenantId?: number | null; limit?: number } = {}): Promise<SourceUsage[]> {
-  if (!isSourceKey(sourceKey)) return [];
+export interface SourceUsageResult {
+  uses: SourceUsage[];
+  /** 🔴 **실제로 몇 곳인가** — 목록 길이가 아니다(목록은 `limit` 에서 잘린다). */
+  total: number;
+  /** 잘렸나. 화면은 이걸 보고 «다 보여 준 척»을 그만둔다. */
+  hasMore: boolean;
+  limit: number;
+}
+
+/**
+ * [AC-257 · A 가 짚었다 · 2026-09-23] 🔴 **«기본값이 자르는» 게이트** — `if` 도 `WHERE` 도 아닌 세 번째 얼굴이다(AC-254 형제).
+ *   여기 `LIMIT 200` 은 배치 경계로 놓은 것인데, 화면(`public/js/ui.js`)이 **목록 길이를 그대로 «글 N곳»으로 적었다.**
+ *   ⇒ 201곳에 쓰인 사진이면 화면은 «200곳»이라 말하고 🔴 **고객은 다 내렸다고 믿는다.** 하필 침해 통지·내리기(§5E)다.
+ *   🔴 **빨강이 안 뜨는 게 아니라 초록이 뜬다** — A 의 실측 하니스도 «글 2곳»을 보고 초록이었다(표본이 상한에 안 닿았다).
+ *   ⇒ 세는 것과 보여 주는 것을 가른다: `total` 은 **LIMIT 없이 COUNT** 로 재고, `uses` 는 잘린 채로 준다.
+ *     막지 않는다(§9) — 자르는 것은 그대로 두고 **잘렸다고 말한다.**
+ */
+export async function piecesUsingSource(sourceKey: string, opts: { tenantId?: number | null; limit?: number } = {}): Promise<SourceUsageResult> {
   const limit = Math.min(500, Math.max(1, opts.limit ?? 200));
+  if (!isSourceKey(sourceKey)) return { uses: [], total: 0, hasMore: false, limit };
   const scope = opts.tenantId ? sql`AND a.tenant_id = ${opts.tenantId}` : sql``;
+  /* 🔴 모수를 **따로** 센다 — LIMIT 안 건 COUNT 라야 «201곳»이 나온다. */
+  const [cnt] = await q(sql`SELECT COUNT(*)::int AS c FROM piece_assets a JOIN pieces p ON p.id = a.piece_id
+     WHERE a.meta->'source'->>'key' = ${sourceKey} ${scope}`);
+  const total = n(cnt?.c);
   const rows = await q(sql`
     SELECT a.id AS asset_id, a.tenant_id, p.id AS piece_id, COALESCE(p.title, '') AS title, p.status, p.channel,
            (SELECT po.external_url FROM posts po WHERE po.piece_id = p.id AND po.external_url IS NOT NULL ORDER BY po.id DESC LIMIT 1) AS external_url
       FROM piece_assets a JOIN pieces p ON p.id = a.piece_id
      WHERE a.meta->'source'->>'key' = ${sourceKey} ${scope}
      ORDER BY p.id DESC LIMIT ${limit}`);
-  return rows.map((r) => ({
+  const uses = rows.map((r) => ({
     assetId: n(r.asset_id), tenantId: n(r.tenant_id), pieceId: n(r.piece_id),
     title: String(r.title ?? ""), status: String(r.status ?? ""), channel: String(r.channel ?? ""),
     externalUrl: r.external_url ? String(r.external_url) : null,
   }));
+  return { uses, total, hasMore: total > uses.length, limit };
 }
