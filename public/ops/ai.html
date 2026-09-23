@@ -19,6 +19,7 @@
 <div class="group"><div class="gt">새 모델 후보 <span class="muted" style="font-weight:500">주 1회 models.list 와 diff · 실측 4종</span></div><div id="cands"></div></div>
 <div class="group"><div class="gt">원가 · 업데이트</div><div id="cost"></div></div>
 </div>
+<div class="group"><div class="gt">집필 계약 · 감성 <span class="muted" style="font-weight:500">채널마다 독자·말투·분량 · 배포 없이 바꾼다</span><span id="lock2"></span></div><div id="emo"></div></div>
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
@@ -105,6 +106,63 @@ async function load() {
   UI.$$("[data-rb]").forEach((b) => b.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "롤백", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "직전 체인으로 되돌리고 후보를 내릴까요?", async () => { const rr = await UI.api("/api/ops-ai-rollback", { body: { role: b.dataset.rb }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "되돌리지 못했어요"); close(); UI.toast("롤백했어요"); load(); }) }));
   UI.$("#cap").onclick = () => UI.sheet(`<div class="fr"><div class="fl">원가 상한<small>고객 · 일 · 넘으면 생성 거부 + 알림 1건/일 · 환율 없으면 «미환산»으로 통과</small></div>${UI.stepper("cap", s.costCapKrw ?? 0, 0, 300000, "원", 5000)}</div><p class="muted" style="margin:8px 0 0;font-size:13px">0원 = 무제한(상한 없음)</p><div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "원가 상한", onOpen: (sh, close) => { UI.bindSteppers(sh); sh.querySelector("#ok").onclick = async () => { const v = UI.stepVal(sh, "cap"); const rr = await UI.api("/api/ops-ai-cost-cap", { body: { costCapKrw: v > 0 ? v : null }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "저장하지 못했어요"); close(); UI.toast(rr.costCapKrw == null ? "상한을 없앴어요" : `상한 ${UI.won(rr.costCapKrw)}`); load(); }; } });
   UI.$("#sync").onclick = syncSheet;
+  loadEmo();
+}
+
+/* ═══ 집필 계약 · 감성 — [AC-258 · DESIGN §5.4 «운영자가 화면에서 조정 · 재배포 0»]
+   🔴 `emotion_profiles.contract` 는 **읽는 코드만 있었다** — 쓰는 API 0 · 화면 0 이라 운영자가 **손으로 SQL** 을 쳐야 했다.
+   설계가 «재배포 0»이라 적어 둔 자리인데 실제로는 «배포는 안 해도 되지만 DBA 가 필요한» 자리였다.
+   🔴 겁주지 않는다(§3) · 막지 않는다(§9): 무시된 칸은 **막는 대신 이름을 대고**, 되돌리기가 늘 옆에 있다. */
+let EMO = null;
+async function loadEmo() {
+  const r = await UI.api("/api/ops-emotion", { noRedirect: true });
+  const host = UI.$("#emo"); if (!host) return;
+  if (!r.ok) { host.innerHTML = `<div class="row"><div class="l"><span class="t muted" style="font-weight:500">불러오지 못했어요</span></div></div>`; return; }
+  EMO = r;
+  UI.$("#lock2").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
+  host.innerHTML = OPS.table([
+    { h: "채널 · 감성", f: (p) => `<b>${UI.esc(p.label)}</b>` },
+    { h: "지금", f: (p) => p.hasOverlay ? '<span class="pill ink">바꿈</span>' : '<span class="pill off">코드 기본</span>' },
+    /* 🔴 «안 먹은 칸»을 목록에서부터 보여 준다 — 시트를 열어야 보이면 아무도 안 본다(조용한 0건). */
+    { h: "안 먹은 칸", f: (p) => (p.ignored || []).length ? `<span class="pill warn">${p.ignored.length}</span>` : '<span class="muted">—</span>' },
+    { h: "바꾼 때", f: (p) => p.updatedAt ? OPS.dt(p.updatedAt) : '<span class="muted">—</span>' },
+    { h: "", f: (p) => `<button type="button" class="lk" data-emo="${UI.esc(p.key)}">열기</button>` },
+  ], r.profiles || []);
+  if ((r.orphans || []).length) host.innerHTML += `<p class="muted" style="margin:8px 16px 0;font-size:12.5px">표에 없는 행이 ${r.orphans.length}개 있어요(${UI.esc(r.orphans.join(", "))}) — 아무도 안 읽어요.</p>`;
+  OPS.lock(op, "super_admin", host);
+  UI.$$("[data-emo]").forEach((b) => b.onclick = () => emoSheet(b.dataset.emo));
+}
+function emoSheet(key) {
+  const p = (EMO.profiles || []).find((x) => x.key === key); if (!p) return;
+  const kv = (rows) => rows.map((x) => `<div class="kv"><span class="k">${UI.esc(x.k)}</span><span class="v" style="max-width:66%;text-align:right">${UI.esc(x.v)}</span></div>`).join("");
+  const ign = (p.ignored || []).length
+    ? `<div class="sec">안 먹은 칸</div>` + (p.ignored || []).map((x) => `<div class="kv"><span class="k">${UI.esc(x.key)}</span><span class="v">${UI.esc(x.why)}${x.expected ? ` · ${UI.esc(x.expected)} 여야 해요(지금 ${UI.esc(x.got)})` : ""}</span></div>`).join("")
+    : "";
+  UI.sheet(`<div class="sec">지금 도는 값</div>${kv(p.effective)}
+    ${p.hasOverlay ? `<div class="sec">코드 기본</div>${kv(p.base)}` : ""}${ign}
+    <div class="field" style="margin-top:12px"><label>바꿀 칸만 적어요 <span class="muted" style="font-weight:500">· ${UI.esc((EMO.keys || []).join(" · "))}</span></label>
+      <textarea class="input" id="emoJson" rows="8" style="font-family:ui-monospace,monospace;font-size:12.5px">${UI.esc(JSON.stringify(p.overlay || {}, null, 2))}</textarea></div>
+    <p class="muted" style="margin:8px 0 0;font-size:12.5px">바뀐 글은 최대 ${EMO.cacheSeconds}초 뒤부터 나와요. 이미 만든 글은 그대로예요.</p>
+    <div class="cta" style="flex-direction:column"><button class="btn primary" type="button" id="emoSave">저장</button>${p.hasOverlay ? `<button class="btn secondary" type="button" id="emoReset">코드 기본으로 되돌리기</button>` : ""}</div>`,
+    { title: p.label, onOpen: (sh, close) => {
+      const ta = sh.querySelector("#emoJson");
+      sh.querySelector("#emoSave").onclick = async () => {
+        let overlay;
+        /* 🔴 여기서 막는 것은 «고객»이 아니라 **깨진 JSON** 이다 — 그대로 보내면 서버가 400 을 내고 운영자는 까닭을 못 본다. */
+        try { overlay = JSON.parse(ta.value || "{}"); } catch (e) { return UI.toast("JSON 모양이 깨졌어요 — 따옴표·쉼표를 봐 주세요"); }
+        const rr = await UI.api("/api/ops-emotion-save", { body: { key, overlay }, noRedirect: true });
+        if (!rr.ok) { UI.toast(rr.error || "저장하지 못했어요"); if ((rr.ignored || []).length) { close(); await loadEmo(); emoSheet(key); } return; }
+        close(); await loadEmo();
+        UI.toast((rr.ignored || []).length ? `${rr.applied.length}칸 바꿨어요 · ${rr.ignored.length}칸은 안 먹었어요` : `${rr.applied.length}칸 바꿨어요 · 최대 ${rr.cacheSeconds}초 뒤부터`);
+        if ((rr.ignored || []).length) emoSheet(key);
+      };
+      const rs = sh.querySelector("#emoReset");
+      if (rs) rs.onclick = () => UI.sheet(`<div id="erc"></div>`, { title: "되돌리기", onOpen: (s2, c2) => UI.confirmRow(s2.querySelector("#erc"), "코드 기본값으로 되돌릴까요?", async () => {
+        const rr = await UI.api("/api/ops-emotion-reset", { body: { key }, noRedirect: true });
+        if (!rr.ok) return UI.toast(rr.error || "되돌리지 못했어요");
+        c2(); close(); await loadEmo(); UI.toast(`코드 기본으로 돌렸어요 · 최대 ${rr.cacheSeconds}초 뒤부터`);
+      }) });
+    } });
 }
 
 /* ═══ 정본 동기화 — [AC-256] 🔴 여태 화면이 **서버를 한 번도 안 불렀다.**
