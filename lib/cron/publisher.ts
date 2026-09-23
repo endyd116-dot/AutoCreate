@@ -77,9 +77,20 @@ export const publisherStep: CronStep = {
       console.error(`[cron/publisher] tid=${ctx.tid} 발행 커넥터 미연결 — due ${due.length}건을 손대지 않고 미룬다`);
       await writeAudit({ tenantId: ctx.tid, action: "publish_connector_missing", actorType: "system", riskLevel: "high",
         target: `tenant:${ctx.tid}`, detail: { due: due.length, step: "publisher" } });
+      /* 🔴 [R17-B2 · B 의 AC-273 «기본값이 자른다» 를 내 쪽에 돌려 잡았다]
+         `due` 는 위에서 **`LIMIT 50`** 으로 집은 배열이다. 그 길이를 고객에게 «N건 기다려요»로 말하면,
+         60건이 밀려 있을 때 **«50건»이라고 말한다** — 고객은 그게 전부인 줄 안다.
+         🔴 빨강이 안 뜨고 **초록이 뜬다**(수가 멀쩡해 보여 아무도 못 알아챈다).
+         ⇒ 고객에게 말하는 수는 **따로 센다.** 이 갈래는 «커넥터가 없다»라 드물게만 도니 질의 한 번이 싸다.
+         세다 실패하면 **수를 빼고 말한다** — 지어내지 않는다(AC-9). */
+      const [tot] = await q(sql`SELECT COUNT(*)::int AS c FROM pieces
+        WHERE tenant_id = ${ctx.tid} AND status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for <= NOW()`)
+        .catch(() => []);
+      const waiting = Number((tot as { c?: unknown } | undefined)?.c ?? 0) || 0;
       await notifyOnce(ctx.tid, "publish_blocked", "발행 준비가 아직 끝나지 않았어요",
-        `내보낼 글 ${due.length}건이 기다리고 있어요. 준비가 끝나면 자동으로 나가요.`, "/app/posts.html", { withinHours: 24 });
-      return { changed: 0, skipped: due.length, detail: { connector: "missing", due: due.length } };
+        waiting ? `내보낼 글 ${waiting}건이 기다리고 있어요. 준비가 끝나면 자동으로 나가요.`
+                : "내보낼 글이 기다리고 있어요. 준비가 끝나면 자동으로 나가요.", "/app/posts.html", { withinHours: 24 });
+      return { changed: 0, skipped: due.length, detail: { connector: "missing", due: due.length, waiting } };
     }
 
     let published = 0, queued = 0, waitingRunner = 0, manual = 0, failed = 0, retry = 0, already = 0, deferred = 0;

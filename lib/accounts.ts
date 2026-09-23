@@ -11,6 +11,10 @@ import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
 import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, axisOfChannel, channelMonetizable, maxPhotosOf, canVerifySession, type ConnectMethod, type ChannelKindAxis } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0) · [R11-10 · R12-6] 축·수익 유무·사진 수
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
+/* [R17-B2] 유튜브 하루 상한의 정본(구글 쿼터가 정하는 **사실** · §2.2).
+   🔴 고리 없음을 확인하고 최상단에 뒀다: youtube.ts → tokens·r2·disclosure·audit 넷 중 **accounts 를 부르는 것이 0**이다
+      (AC-17 은 `runner-jobs` 처럼 되돌아오는 길이 있을 때의 이야기다 — 여기는 없다). */
+import { youtubeDailyCap } from "./publish/youtube";
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 import { toCoinTier, type CoinTier } from "./coin-table";   // [R10-9] 계정 기본 등급(표는 coin-table 한 곳 · 순수 리프)
 
@@ -245,6 +249,13 @@ export interface ChannelInfo {
    *   `scripts/verify-channel-tables.mjs` ⑩). 못 하는 채널엔 **키를 안 싣는다**(AC-9 «모르면 안 말한다»).
    */
   canVerifySession?: true;
+  /**
+   * [R17-B2 · DESIGN §2.2] 🔴 **이 채널에 하루 몇 건까지 올라가나** — 유튜브만 있다(구글 쿼터가 정하는 **사실**이다).
+   *   우리 게이트가 아니라 **좁은 길**이라, §9 대로 **막지 말고 미리 말해 준다**:
+   *   종전엔 이 수가 `lib/publish/youtube.ts` 밖 **0곳**이어서 **여섯 건째가 될 때까지 아무도 몰랐다**.
+   *   🔴 다른 채널엔 **키를 안 싣는다** — 없는 상한을 화면이 지어내지 않는다(AC-9).
+   */
+  dailyPublishCap?: number;
 }
 /** 화면이 그리는 영상 길이 칩 값 — 정본은 `lib/video/types.ts VideoSeconds`(R12-7 에서 90 이 들어왔다). */
 type VideoSecondsUi = 15 | 30 | 60 | 90;
@@ -271,6 +282,8 @@ export async function listChannels(): Promise<ChannelInfo[]> {
       ...(reason ? { connectableReason: reason } : {}), ...(video ? { video } : {}),
       ...(axis ? { axis } : {}), ...(channelMonetizable(key) ? {} : { monetizable: false as const }), ...(maxPhotos ? { maxPhotos } : {}),
       /* [R17-B2] 🔴 순수 리프(`channel-registry`)에서 읽는다 — `runner-jobs` 에서 읽으면 이 파일이 고리에 걸린다(AC-17). */
-      ...(canVerifySession(key) ? { canVerifySession: true as const } : {}) };
+      ...(canVerifySession(key) ? { canVerifySession: true as const } : {}),
+      /* [R17-B2] 유튜브 하루 상한 — 🔴 **서버가 정본**(`lib/publish/youtube.ts youtubeDailyCap`). 화면이 5 를 베껴 적지 않는다. */
+      ...(key === "youtube_shorts" || key === "youtube_long" ? { dailyPublishCap: youtubeDailyCap() } : {}) };
   });
 }

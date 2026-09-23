@@ -55,7 +55,16 @@ const envOf = new Map([...(/const m: Record<ProviderKey, \[string, string\]> = \
 
 /* ②④ — 경로 하나라 한 번만 본다. */
 const screenKnows = /connectableReason/.test(accountsTs) && /connectableReason/.test(appTpl);
-const opsToggles = /UI\.seg\("status",\s*\[\["active"/.test(opsTpl) && /api\/ops-channels/.test(opsTpl);
+/* 🔴 [R17-B2 · B 가 «네 자가 그걸 실제로 재나»라고 물어서 올렸다] 종전엔 **운영 화면에 칩이 있나**만 봤다 —
+   그건 «켤 수 있다»의 **대용물**이다(AC-178): 칩이 있어도 서버가 그 칸을 안 쓰거나, 쓰는 칸과 **읽는 칸이 다르면** 안 켜진다.
+   ⇒ 이제 길 **셋**을 다 본다: ①화면이 그 문을 부르나 ②서버가 `status` 를 **쓰나**(화이트리스트를 지나) ③고객 쪽이 **같은 칸을 읽나**.
+   ⚠️ 그래도 **라이브 왕복은 아니다** — 채널을 실제로 `active` 로 뒤집으면 그 순간 고객 연결 그리드가 바뀐다(공개 토글 · CLAUDE §4.5 사장님 승인 사안).
+      그래서 «코드의 길이 이어져 있나»까지만 잰다. 이 한계를 여기 적어 둔다(안 적으면 다음 사람이 «실증했다»로 읽는다). */
+const opsSrv = readFileSync("netlify/functions/ops-channels.ts", "utf8");
+const opsToggles = /UI\.seg\("status",\s*\[\["active"/.test(opsTpl)            // ① 화면에 칩
+  && /api\/ops-channels/.test(opsTpl)                                          //   + 그 문을 부른다
+  && /STATUS\.has\(s\)/.test(opsSrv) && /sets\.push\(sql`status = \$\{s\}`\)/.test(opsSrv)   // ② 서버가 쓴다(화이트리스트 통과)
+  && /SELECT key, label, category, publish_via, status FROM channel_registry/.test(accountsTs); // ③ 고객 쪽이 같은 칸을 읽는다
 
 const problems = [];
 console.log(`«키 꽂으면 즉시 가동» — API 채널 ${apiChannels.length}개\n`);

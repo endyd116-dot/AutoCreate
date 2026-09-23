@@ -1485,6 +1485,10 @@ async function detailSheet(a) {
     /* 우리가 본 주소가 저장된 주소와 같다 — 물을 것이 없다. 조용히 적기만 한다(§13.0 «설명 한 문장»). `identity` 가 없으면 한 줄도 없다(AC-9 «아직 모른다»). */
     : addrSeen(a) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(addrSeen(a))}</span></div>` : ""}
   ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
+  ${/* [R17-B2 · DESIGN §2.2] 🔴 **좁은 길은 미리 말해 준다.** 유튜브 하루 상한은 우리 게이트가 아니라 구글 쿼터가 정하는 **사실**이고,
+       종전엔 그 수가 서버 파일 밖 0곳이라 **여섯 건째가 될 때까지 아무도 몰랐다**(§9: 막지 않는 대신 말해 준다).
+       🔴 숫자는 **서버가 준 것만** 쓴다(`dailyPublishCap`) — 화면이 5 를 베껴 적지 않는다(§13 · AC-52). 안 주면 줄을 안 그린다. */""}
+  ${chOf(a.channel) && chOf(a.channel).dailyPublishCap ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">하루에</span><span class="v" style="font-size:13px">${chOf(a.channel).dailyPublishCap}개까지 올라가요 · 더 예약하면 다음 날 이어서 올려요</span></div>` : ""}
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
