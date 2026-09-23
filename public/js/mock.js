@@ -97,6 +97,15 @@
     reels: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("talking", "말하는 사람", 60), VF("clip", "클립", 30)] },
     threads: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("clip", "클립", 30)] },
   }; // 🔴 상한은 서버가 말한다(화면 상수 금지 · 릴스 90 은 Phase 5)
+  /* 🔴 [R17 · A · B 계약 2026-09-23] 소재 낱말은 **서버가 준다**(AC-52). 글자는 `lib/topics.ts` 의 `labels` 와 **한 글자도 다르지 않아야** 한다 —
+     모의가 다른 말을 하면 화면 말투가 갈리고(§3) 그걸 아무 자도 안 잡는다. */
+  const TOPIC_LABELS = { later: {
+    title: "나중에 볼 소재",
+    empty: "나중에 볼 소재가 아직 없어요",
+    undo: "오늘 소재로",
+    keep: "여기 둔 소재는 사라지지 않아요",
+    stale: "추천한 지 오래됐어요 · 지금도 쓸 수 있어요",
+  } };
   const CHANNELS = [
     ["naver_blog", "네이버 블로그", "text", "runner", "session", true, "active"], ["tistory", "티스토리", "text", "runner", "session", true, "active"], ["blogger", "블로거", "text", "api", "oauth", false, "active"],
     ["wordpress", "워드프레스", "text", "api", "app_password", true, "active"], ["threads", "쓰레드", "text", "api", "oauth", true, "planned"],
@@ -498,6 +507,9 @@
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
+      /* 🔴 [R17 · A] `?later=stale` — **나중에 둔 사이에 만료가 지난 소재.** 없으면 `stale` 줄을 한 번도 못 그려 본다(§4.8).
+         B 가 서버를 고쳐서 이건 이제 **사라지지 않고 남는다**(예전엔 `WHERE expires_at > NOW()` 에 걸려 조용히 증발했다). */
+      ...(qs.get("later") === "stale" ? [{ id: 10, title: "장마철 빨래 냄새 없애는 법", angle: "실내 건조 순서", channelHint: "naver_blog", score: 74, status: "later", factors: { volume: 18000, growthPct: -4, competition: "low", intent: "mixed", pain: 0.6 }, expiresAt: iso(now - 2 * 86400e3) }] : []),
       { id: 11, title: "에어프라이어 청소법, 눌어붙은 기름 3분 컷", angle: "실패담 → 성공 순서", channelHint: "naver_blog", score: 91, status: "candidate", factors: { volume: 32000, growthPct: 18, competition: "low", intent: "mixed", pain: 0.8, seasonal: "가을 대청소" }, expiresAt: iso(now + 6 * 86400e3) },
       { id: 12, title: "가을 이불 세탁, 건조기 없이 뽀송하게", angle: "베란다 건조 요령", channelHint: "naver_blog", score: 84, status: "candidate", factors: { volume: 18400, growthPct: 42, competition: "mid", intent: "info", seasonal: "환절기" }, expiresAt: iso(now + 6 * 86400e3) },
       { id: 13, title: "전기요금 아끼는 멀티탭, 대기전력 진짜 차이", angle: "한 달 실측", channelHint: "tistory", score: 79, status: "candidate", factors: { volume: 9800, competition: "low", intent: "commercial" }, expiresAt: iso(now + 5 * 86400e3) },
@@ -1102,7 +1114,14 @@
       if (t) { if (t.startedAt) refresh.startedAt = t.startedAt; if (t.finishedAt) refresh.finishedAt = t.finishedAt; if (t.added != null) refresh.added = t.added; if (t.error) refresh.error = t.error; }
       /* [사장님 실측] 서버는 **연결된 계정의 채널**에서만 소재 채널을 고른다(lib/topics.ts) — 모의도 그래야 «네이버만 보이는» 그 화면이 재현된다 */
       const only = oneChannel ? "naver_blog" : null;
-      return { ok: true, topics: S.topics.filter((x) => x.status === want).map((x) => (only ? { ...x, channelHint: only } : x)), templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh }; }, // [P1R5] templates(레퍼런스 구조) 동봉
+      /* 🔴 [R17 · A · B 가 서버를 고쳤다 2026-09-23] 만료 처리가 **상태마다 다르다** — 모의가 이걸 안 닮으면 거짓 초록이다.
+         · `later` **만** 만료된 것도 낸다(안 그러면 «옮겨 뒀는데 없어졌다»가 된다) · 나머지 상태는 예전대로 만료를 거른다.
+         · 🔴 만료 여부는 **서버가 재서** `stale` 로 준다(시간대가 갈리지 않게). 없으면 «안 지났다»가 아니라 «시계가 없다»(AC-9).
+         🔴 라이브 실측(B): AI 소재 512행 **전부 7일** 만료다(30일 아니다). 모의 씨앗도 그 안쪽 값이라 그대로 둔다. */
+      const gone = (x) => !!x.expiresAt && new Date(x.expiresAt).getTime() <= Date.now();
+      const rows = S.topics.filter((x) => x.status === want && (want === "later" || !gone(x)))
+        .map((x) => ({ ...(only ? { ...x, channelHint: only } : x), ...(want === "later" ? { stale: gone(x) } : {}) }));
+      return { ok: true, topics: rows, templates: S.templates.map((x) => ({ ...x })), refreshedAt: t?.finishedAt || iso(now - 7200e3), refresh, labels: TOPIC_LABELS }; }, // [P1R5] templates(레퍼런스 구조) 동봉 · [R17] labels 는 status 무관 항상 실린다
     "topics-refresh": () => { const nw = notWritable(); if (nw) return nw; if (aiCap) return { ok: false, step: "ai_cost_cap", error: "오늘 AI 사용 상한(3,000원)에 닿았어요. 내일 다시 이어서 만들 수 있어요." }; refreshTick();
       if (isRefreshing()) return { ok: true, started: false, running: true };
       if (S.refreshCount >= 3) return err("rate_limit", "오늘은 세 번 다 뽑았어요. 내일 다시 뽑을 수 있어요.");
@@ -1115,7 +1134,13 @@
     "topics-later": (b) => { const t = S.topics.find((x) => x.id === Number(b.id));
       if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
       const to = b.undo ? "candidate" : "later";
-      if (t.status !== to && (b.undo ? t.status === "later" : t.status === "candidate")) t.status = to;
+      if (t.status !== to && (b.undo ? t.status === "later" : t.status === "candidate")) {
+        t.status = to;
+        /* 🔴 [B 2026-09-23] 되돌릴 때 **이미 지난 것만** 시계를 다시 감는다(+7일).
+           안 감으면 «오늘 소재로»를 눌러도 후보 목록이 만료를 걸러서 **누르자마자 또 사라진다** —
+           되돌릴 길이 «있는 척»만 하는 꼴이다. 🔴 안 지난 소재는 **한 글자도 안 건드린다**(«그대로 돌아가요»가 참이어야 한다). */
+        if (b.undo && t.expiresAt && new Date(t.expiresAt).getTime() <= Date.now()) t.expiresAt = iso(Date.now() + 7 * 86400e3);
+      }
       return { ok: true, topic: t }; },
     /* §3 디렉터 */
     "director-propose": (b) => { const t = S.topics.find((x) => x.id === Number(b.topicId)); if (!t) return err("not_found", "소재를 찾을 수 없어요.", { status: 404 });
