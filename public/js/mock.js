@@ -1083,6 +1083,14 @@
       const a = { id: S.nextId++, channel: b.channel, handle: b.handle, displayName: b.displayName || "", avatarUrl: null, status: b.channel === "wordpress" ? "active" : "pending_login", healthScore: 100, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [], browserProfileKey: "acc-" + S.nextId, hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null };
       S.accounts.push(a); return { ok: true, account: { ...a } }; },
     "accounts-remove": (b) => { S.accounts = S.accounts.filter((a) => a.id !== Number(b.id)); return { ok: true }; },
+    /* [R17 · C] `accounts-health` — 🔴 **재는 것뿐이다**(상태 안 바꾼다). 모의는 «다시 재면 값이 움직인다»를
+       보여 줘야 «눌러도 아무 일이 없다»와 구별된다(AC-122 «그려졌나 ≠ 손이 붙었나»). */
+    "accounts-health": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
+      /* 🔴 100 은 상한이라 «+2» 로는 **안 움직인다** — 그러면 «눌러도 아무 일 없음»과 구별이 안 된다(내가 한 번 밟았다).
+         모의는 **늘 움직이게** 한다: 100 이면 내리고 아니면 올린다. 진짜 서버는 `recomputeHealth` 가 센다. */
+      const cur = a.healthScore ?? 100;
+      a.healthScore = a.status === "suspended" ? Math.max(0, cur - 3) : cur >= 100 ? 98 : Math.min(100, cur + 2);
+      return { ok: true, id: a.id, healthScore: a.healthScore }; },
     "accounts-update": (b) => { const a = S.accounts.find((x) => x.id === Number(b.id)); if (!a) return err("not_found", "계정을 찾을 수 없어요.", { status: 404 });
       for (const k of ["displayName", "dailyCap", "minGapMin", "personaId", "goldenHours", "defaultTier", "defaultStyleId", "avatarUrl", "groupName"]) if (b[k] !== undefined) a[k] = b[k] || undefined;   /* [R17 · C] `avatarUrl`·`groupName` — 🔴 모의가 안 받으면 화면에서 저장해도 **다시 열면 사라진다** — 그러면 손으로 볼 때 «안 된다»로 보인다. 빈 값은 **지우기**라 undefined 로 둠다(서버도 NULL 로 쓴다). */   /* [R9R10-A] 등급·스타일 기본값은 계정마다 */
       /* [AC-189] 🔴 **서버와 같은 법으로 가린다**(lib/creds-crypto.ts maskProxyUrl — 아이디·비밀번호를 «****» 로 바꾸는 게 아니라
