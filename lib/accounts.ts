@@ -79,6 +79,9 @@ export interface AccountRow {
   neverLoggedIn?: true;
   /** [P1R8 §5.3] 묶음 **이름** — 화면이 id 만 받고 이름을 또 물으러 가지 않게 같이 싣는다(승계 단위 · §7.2). */
   groupName?: string;
+  /** [R17 · §7.1] 계정 사진 — 🔴 `ACCOUNT_SELECT` 는 `avatar_url` 을 **읽고 있었는데** 응답에만 안 실렸다.
+   *  그래서 화면을 만들어도 칸이 **늘 비어 보였을 것**이다(저장은 되는데 다시 열면 사라진다 · A 가 `openedAt` 에서 밟은 그 병). */
+  avatarUrl?: string;
   personaId?: number;
   proxyUrl?: string; browserProfileKey: string; hasCreds: boolean;
   monetize: { coupang: boolean; adpost: boolean; adsense: boolean };
@@ -191,6 +194,7 @@ export function toAccountRow(r: Row): AccountRow {
   if (String(r.status) === "pending_login" && !r.last_error_kind) o.neverLoggedIn = true;
   if (r.group_id) o.groupId = Number(r.group_id);
   if (r.group_name) o.groupName = String(r.group_name);
+  if (r.avatar_url) o.avatarUrl = String(r.avatar_url);   /* [R17] 응답에 실어야 화면 칸이 채워진다 */
   if (r.persona_id) o.personaId = Number(r.persona_id);
   const px = maskProxyUrl(r.proxy_url as string); if (px) o.proxyUrl = px;
   return o;
