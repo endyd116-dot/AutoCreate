@@ -6,6 +6,7 @@
  *      API 채널(blogger·wordpress)은 자격이 없는 상태의 «정직한 실패» 경로만 확인한다.
  *   증거로 남기는 것: 테넌트 id · 잡 id · piece id · posts 행 수 · audit action 목록.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";

@@ -8,6 +8,7 @@
  *
  *   🔴 내 catch 가 내 눈을 가리지 않게(AC-58): 여기엔 삼키는 catch 가 없다. 예외는 그 절을 **빨강으로** 만든다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import {

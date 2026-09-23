@@ -6,6 +6,7 @@
  *   그리고 **두 번 불러도 두 번 더하지 않는가**(멱등 — 안 그러면 달러 캡이 헛돈을 세서 멀쩡한 고객을 막는다).
  *   🔴 테스트 테넌트에서만 · 만든 행은 끝에서 지운다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";

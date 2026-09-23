@@ -1050,7 +1050,8 @@ function sourceGroup() {
   return `<div class="group" style="margin-bottom:12px"><div class="gt">매체별 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
-    const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
+    /* [R17-B2 · DESIGN §2.3] 🔴 절대 시각으로 말한다 — «3시간 전»만으로는 **하루 지난 값인지 오늘 아침 값인지 모른다**(설계가 든 예시가 «어제 12:30 기준»이다). */
+    const when = s.lastSyncAt ? `${UI.whenKST(s.lastSyncAt)} 기준` : "";
     /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
        🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
     const est = estOf(s);
@@ -1354,7 +1355,10 @@ async function submitAdd(body, f, close) {
     if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
     if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
-    if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
+    /* [R17-B2] 🔴 **서버가 말한 칸에 칠한다.** 종전엔 뭐가 틀렸든 늘 «앱 비밀번호» 칸이 빨개져서,
+       주소가 안 열리는 경우에도 고객이 비밀번호를 다시 만들러 갔다 — 거짓 안내다(AC-10).
+       서버가 칸을 안 주면 종전대로(모르면 지어내지 않는다). */
+    if (r.step === "wp_auth") return UI.fieldError(f, r.field || "appPassword", r.error);
     return UI.toast(r.error || "연결하지 못했어요");
   }
   close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
@@ -1484,6 +1488,10 @@ async function detailSheet(a) {
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span> <button type="button" class="btn ghost sm" id="hre" style="margin-left:8px">다시 재기</button></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
+  ${/* [R17-B2 · DESIGN §8.2] 🔴 **«로그인이 아직 살아 있나»를 조용히 확인한다** — 재로그인(창을 띄우고 사람이 로그인)과 **다른 일**이다.
+       서버가 canVerifySession 을 줄 때만 그린다 — **못 하는 일을 단추로 내놓지 않는다**(AC-9).
+       🔴 겁주는 말 금지(§3): «끊기면 정지됩니다»가 아니라 «미리 알면 글이 안 밀려요» 쪽이다. */""}
+  ${chOf(a.channel) && chOf(a.channel).canVerifySession ? `<button type="button" class="row tap" id="vsess" style="padding-left:0;padding-right:0"><div class="l"><span class="t" style="font-size:14px">로그인 확인</span><span class="d wrap" id="vsessD">${a.sessionCheckedAt ? `${UI.esc(UI.ago(a.sessionCheckedAt))} 확인했어요 · ${a.sessionState === "alive" ? "잘 살아 있어요" : a.sessionState === "expired" ? "다시 로그인이 필요해요" : "그때는 확인하지 못했어요"}` : "지금 로그인이 살아 있는지 조용히 확인해요 · 창은 안 떠요"}</span></div>${UI.chev}</button>` : ""}
   <a class="row tap" href="/app/ad-media.html" style="padding-left:0;padding-right:0"><div class="l"><span class="t" style="font-size:14px">수익 매체</span><span class="d wrap">${UI.esc(srcLine)}</span></div>${badSrc.length ? '<span class="pill warn">연결 끊김</span>' : okSrc.length ? '<span class="pill ok">' + okSrc.length + '곳</span>' : ""}${UI.chev}</a>
   <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
   <div class="field"><label for="oa">이 블로그, 언제부터 쓰셨어요</label>
@@ -1554,6 +1562,36 @@ async function detailSheet(a) {
     /* [R9R10-A] 옷장 시트는 ui.js 한 곳(UI.styleSheet) — 돌아오면 칩만 다시 그린다 */
     const wzMore = sh.querySelector("#wzMore"); if (wzMore) wzMore.onclick = () => UI.styleSheet({ accounts: D.accounts.filter((x) => x.channel === a.channel && x.status !== "suspended"), accountId: a.id,
       onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
+    /* [R17-B2] 🔴 **로그인 확인** — 조용히 본다(창 0 · 사람 손 0). 재로그인과 달리 **시트를 안 닫는다**: 몇 초면 끝나고,
+       닫았다 다시 열게 하면 «확인»이 «로그인»처럼 무거워 보인다. 결과는 같은 줄에 그대로 쓴다. */
+    const vs = sh.querySelector("#vsess"); if (vs) vs.onclick = async () => {
+      const d = sh.querySelector("#vsessD"); vs.disabled = true;
+      const say = (t) => { if (d) d.textContent = t; };
+      say("확인하고 있어요…");
+      const r = await UI.api("/api/accounts-verify", { body: { id: a.id } });
+      /* 🔴 겁주지 않는다(§3): «못 합니다»가 아니라 «켜 두시면 해 드려요» + 갈 길. */
+      if (!r.ok) { say(r.error || "지금은 확인하지 못했어요."); vs.disabled = false; return; }
+      const t0 = Date.now();
+      const tick = async () => {
+        if (!document.body.contains(sh)) return;                       // 시트 닫히면 폴링도 끝
+        const g = await UI.api(`/api/accounts-relogin?id=${a.id}`);
+        const st = g.ok && g.job ? g.job.status : null;
+        if (st === "done" || st === "failed") {
+          const acc = g.ok ? g.account : null;
+          const s = acc && acc.sessionState;
+          say(s === "alive" ? "잘 살아 있어요 · 그대로 올라가요"
+            : s === "expired" ? "다시 로그인이 필요해요 · 위 «로그인하기»를 눌러 주세요"
+            : "지금은 확인하지 못했어요 · 조금 뒤에 다시 눌러 주세요");
+          vs.disabled = false;
+          /* 🔴 상태가 바뀌었으면 목록도 같이 고쳐야 한다 — 시트만 맞고 뒤가 틀리면 그게 더 헷갈린다. */
+          if (s === "alive" || s === "expired") load();
+          return;
+        }
+        if (Date.now() - t0 > 90_000) { say("아직 확인 중이에요 · 조금 뒤에 다시 눌러 주세요"); vs.disabled = false; return; }
+        setTimeout(tick, 2500);
+      };
+      setTimeout(tick, 1500);
+    };
     /* [AC-187] 주소 확인 · 확인 취소 — 시트는 목록과 **같은 것**을 연다(두 벌 금지) */
     const ag = sh.querySelector("#addrGo"); if (ag) ag.onclick = () => { close(); setTimeout(() => addrSheet(a), 300); };
     /* [AC-189] 프록시 떼기 — 빈 칸이 «지우기»가 아니게 됐으니 **뗄 길을 따로** 준다(막다른 골목 금지 · §4.8). */
@@ -3907,7 +3945,7 @@ function postSheet(p) {
     ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
     ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : p.publishedVia === "manual" ? "직접 올림" : "채널 연동"}</span></div>` : ""}
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
-    ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
+    ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.whenKST(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
     ${p.riskCount ? `<div class="banner ${p.riskHigh ? "" : "info"}" style="margin:8px 0 0"><span>이 글엔 못 지킨 게 ${p.riskCount}가지 있어요 · 지금이라도 고치거나 내릴 수 있어요</span>${p.pieceId ? `<a href="/app/piece.html?id=${p.pieceId}" style="font-weight:700;text-decoration:underline;white-space:nowrap">무엇인지 보기</a>` : ""}</div>` : ""}
     <div class="cta" style="flex-direction:column">
@@ -3973,7 +4011,8 @@ function gauge(label, now, need, unit) {
 }
 const STATE_PILL = { none: ["off", "아직 신청 전"], pending: ["warn", "심사 중"], approved: ["ok", "승인됨"] };
 const srcPill = (s) => { const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured; return `<span class="pill ${st[0]}">${st[1]}</span>`; };
-const srcSub = (s) => (s && s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
+/* [R17-B2] 🔴 절대 시각(KST) — «어제 값인지 오늘 값인지»가 여기서 갈라진다(§2.3). */
+const srcSub = (s) => (s && s.lastSyncAt ? `${UI.whenKST(s.lastSyncAt)} 기준` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
 const btn = (attr, label, danger = false) => `<button type="button" class="btn sm ${danger ? "ghost" : "secondary"}" ${attr}${danger ? ' style="color:var(--danger-ink)"' : ""}>${label}</button>`;
 const bar = (...bs) => `<div style="display:flex;gap:8px;padding:2px 16px 10px;flex-wrap:wrap">${bs.filter(Boolean).join("")}</div>`;
 function card(title, desc, inner) {

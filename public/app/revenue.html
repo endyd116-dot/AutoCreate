@@ -23,7 +23,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=30"></script>
+<script src="/js/ui.js?v=31"></script>
 <script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
@@ -186,7 +186,8 @@ function sourceGroup() {
   return `<div class="group" style="margin-bottom:12px"><div class="gt">매체별 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
-    const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
+    /* [R17-B2 · DESIGN §2.3] 🔴 절대 시각으로 말한다 — «3시간 전»만으로는 **하루 지난 값인지 오늘 아침 값인지 모른다**(설계가 든 예시가 «어제 12:30 기준»이다). */
+    const when = s.lastSyncAt ? `${UI.whenKST(s.lastSyncAt)} 기준` : "";
     /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
        🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
     const est = estOf(s);

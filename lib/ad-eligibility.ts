@@ -51,10 +51,18 @@ export interface AccountEligibility {
 
 const stateOf = (v: unknown): MediaState => (v === "pending" || v === "approved" ? v : "none");
 
-/** 클립 모집 창(운영자 입력 · channel_registry.monetize.clipOpen). 없으면 null. */
+/**
+ * 클립 모집 창(운영자 입력 · `channel_registry.monetize_meta.clipOpen`). 없으면 null.
+ *
+ * 🔴 [R17-B2 · 2026-09-23] **읽는 칸을 `monetize` → `monetize_meta` 로 옮겼다 — 종전엔 영원히 null 이었다.**
+ *   `monetize` 는 `0001-init.sql:208` 부터 **배열**(수익 매체 목록)이고 `ops-channels.ts` 가 칩 저장 때마다
+ *   그 칸을 **배열로 통째 덮어쓴다.** 배열에 `->'clipOpen'` 을 하면 **언제나 NULL** 이다(라이브 `jsonb_typeof=array` 로 실측).
+ *   ⇒ 아래 `judgeAndNotify` 의 D-7 «모집이 시작해요» 알림이 **구조적으로 한 번도 못 떴다.** 그런데 **오류는 0이라 조용했다.**
+ *   이제 `drizzle/0092` 의 전용 칸(object)에서 읽고, 운영센터 채널 화면에서 날짜를 **넣을 수 있다**(`public/ops/channels.html`).
+ */
 export async function clipWindow(): Promise<{ from: string; to: string } | null> {
   try {
-    const [r] = await q(sql`SELECT monetize->'clipOpen' AS w FROM channel_registry WHERE key = 'naver_clip'`);
+    const [r] = await q(sql`SELECT monetize_meta->'clipOpen' AS w FROM channel_registry WHERE key = 'naver_clip'`);
     const w = (r?.w && typeof r.w === "object" ? r.w : null) as { from?: unknown; to?: unknown } | null;
     if (!w) return null;
     const from = String(w.from ?? ""), to = String(w.to ?? "");

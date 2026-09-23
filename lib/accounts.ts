@@ -9,7 +9,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { utcDate } from "./db-util";
 import { maskProxyUrl } from "./creds-crypto";
 import { providerConfigured, providerMissing } from "./oauth-providers";
-import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, axisOfChannel, channelMonetizable, maxPhotosOf, type ConnectMethod, type ChannelKindAxis } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0) · [R11-10 · R12-6] 축·수익 유무·사진 수
+import { connectMethodOf as registryConnectMethodOf, isKnownChannel, TEXT_CHANNEL_KEYS, CHANNEL_KEYS, axisOfChannel, channelMonetizable, maxPhotosOf, canVerifySession, type ConnectMethod, type ChannelKindAxis } from "./channel-registry";   // [P1R8 §5.2] 채널 «성질» 정본(순수 리프 · 순환 0) · [R11-10 · R12-6] 축·수익 유무·사진 수
 import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상 채널 규격 정본(순수 표 · 순환 0)
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 import { toCoinTier, type CoinTier } from "./coin-table";   // [R10-9] 계정 기본 등급(표는 coin-table 한 곳 · 순수 리프)
@@ -102,6 +102,13 @@ export interface AccountRow {
    *   «모른다»를 아무 날짜로 **바꾸지 않는다**(AC-92) — 비면 `null` 이고 워밍업은 다시 `created_at` 을 본다.
    */
   openedAt: string | null;
+  /**
+   * [R17-B2 · DESIGN §8.2] 마지막으로 **로그인이 살아 있나 확인한** 시각(UTC ISO · 표시는 화면이 KST 로).
+   *   🔴 **확인한 적이 없으면 키 자체가 없다** — 빈 값을 내보내면 화면이 «확인함»처럼 그린다(AC-9).
+   */
+  sessionCheckedAt?: string;
+  /** [R17-B2] 그때의 답 — `alive`·`expired`·`unknown`. 🔴 `unknown` 은 «끊겼다»가 아니라 **«그때 못 봤다»**다. */
+  sessionState?: "alive" | "expired" | "unknown";
 }
 
 /** SELECT 조각 — accounts a + 자격 존재 여부 서브쿼리. */
@@ -135,6 +142,9 @@ export function toAccountRow(r: Row): AccountRow {
     avatar: r.avatar_url ? String(r.avatar_url) : null,
     browserProfileKey: String(r.browser_profile_key || `t0-a${r.id}`), hasCreds: r.has_creds === true,
     monetize: { coupang: r.has_coupang === true, adpost: !!mon.adpostMediaId, adsense: !!mon.adsensePub },
+    /* [R17-B2] 로그인 확인 결과 — 🔴 **본 적 있을 때만** 싣는다(키가 없으면 화면이 «아직 확인 전»이라고 말한다). */
+    ...(typeof mon.sessionCheckedAt === "string" ? { sessionCheckedAt: mon.sessionCheckedAt } : {}),
+    ...(mon.sessionState === "alive" || mon.sessionState === "expired" || mon.sessionState === "unknown" ? { sessionState: mon.sessionState } : {}),
     defaultTier: toCoinTier(r.quality_tier),            // 모르는 값·NULL → null(«안 고름»)
     defaultStyleId: Number(r.text_style_id) > 0 ? Number(r.text_style_id) : null,
     reader: String(r.reader ?? "").trim() || null,          // [R11-8] 빈 문자열도 «안 고름»으로 — 화면이 «"" 라는 독자»를 그리지 않게
@@ -232,6 +242,13 @@ export interface ChannelInfo {
   monetizable?: false;
   /** [R12-6] 한 글에 올릴 수 있는 사진 수(당근 10). 🔴 **안 재 본 채널엔 키가 없다** — 화면이 수를 지어내지 않는다. */
   maxPhotos?: number;
+  /**
+   * [R17-B2 · DESIGN §8.2] 🔴 **저장된 로그인이 살아 있나를 «확인»해 줄 수 있는 채널인가.**
+   *   화면은 이 칸이 `true` 일 때만 «로그인 확인» 단추를 그린다 — **못 하는 일을 단추로 내놓지 않는다.**
+   *   정본은 `lib/runner-jobs.ts SESSION_VERIFY_CHANNELS`(러너 `session-verify.mjs CHECK` 와 자로 묶여 있다 ·
+   *   `scripts/verify-channel-tables.mjs` ⑩). 못 하는 채널엔 **키를 안 싣는다**(AC-9 «모르면 안 말한다»).
+   */
+  canVerifySession?: true;
 }
 /** 화면이 그리는 영상 길이 칩 값 — 정본은 `lib/video/types.ts VideoSeconds`(R12-7 에서 90 이 들어왔다). */
 type VideoSecondsUi = 15 | 30 | 60 | 90;
@@ -256,6 +273,8 @@ export async function listChannels(): Promise<ChannelInfo[]> {
     return { key, label: String(r.label), category: String(r.category), publishVia: String(r.publish_via), status,
       connectMethod: connectMethodOf(key), configured: providerConfigured(key), connectable,
       ...(reason ? { connectableReason: reason } : {}), ...(video ? { video } : {}),
-      ...(axis ? { axis } : {}), ...(channelMonetizable(key) ? {} : { monetizable: false as const }), ...(maxPhotos ? { maxPhotos } : {}) };
+      ...(axis ? { axis } : {}), ...(channelMonetizable(key) ? {} : { monetizable: false as const }), ...(maxPhotos ? { maxPhotos } : {}),
+      /* [R17-B2] 🔴 순수 리프(`channel-registry`)에서 읽는다 — `runner-jobs` 에서 읽으면 이 파일이 고리에 걸린다(AC-17). */
+      ...(canVerifySession(key) ? { canVerifySession: true as const } : {}) };
   });
 }

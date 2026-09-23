@@ -1094,14 +1094,24 @@ const op = await OPS.boot("channels"); if (!op) return;
 const canEdit = OPS.can(op, "super_admin");
 const CST = { active: ["ok", "가동"], planned: ["off", "준비 중"], down: ["danger", "장애"] };
 const MON = Object.keys(UI.SRC).map((k) => [k, UI.srcLabel(k)]);
+/* [R17-B2] 🔴 **모집창을 «쓰는» 채널만 칸을 준다.** 수익 매체 칩에 clip_incentive 가 붙었다고 주면 안 된다 —
+   서버(lib/ad-eligibility.ts clipWindow)가 읽는 행은 naver_clip **하나**라, 다른 채널에 넣으면 운영자는 넣었는데 **아무 일도 안 일어난다**(되는 척).
+   서버가 읽는 행이 늘면 여기 한 줄 늘린다. */
+const CLIP_KEYS = ["naver_clip"];
+/* 🔴 «며칠 전에 알리나»는 **서버가 정본**(CLIP_NOTICE_DAYS) — 화면이 숫자를 베껴 적으면 정책이 바뀔 때 두 곳이 갈린다(§13 · AC-52).
+   못 받으면 숫자 없이 말한다(지어내지 않는다 · AC-9). */
+let CLIP_D = null;
 let D;
 async function load() {
   const [r, d] = await Promise.all([UI.api("/api/ops-channels", { noRedirect: true }), UI.api("/api/ops-disclosure", { noRedirect: true })]);
   if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
+  if (typeof r.clipNoticeDays === "number") CLIP_D = r.clipNoticeDays;   // [R17-B2] 서버가 정본
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin"); UI.$("#lock2").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "채널", f: (c) => `${UI.mark(c.key, "sm")}<b>${UI.esc(c.label || UI.chLabel(c.key))}</b>` }, { h: "상태", f: (c) => OPS.pill(CST[c.status] || ["off", c.status]) },
     { h: "최적 시간(KST)", f: (c) => (c.bestHours || []).map((h) => String(h).padStart(2, "0") + "시").join(" · ") || "—" }, { h: "수익", f: (c) => (c.monetize || []).map((m) => UI.srcLabel(m)).join(" · ") || "—" },
+    /* [R17-B2] 🔴 모집창은 **목록에 보여야** 운영자가 «넣었나»를 안다 — 종전엔 넣을 칸도 볼 칸도 없어서 D-7 알림이 구조적으로 안 떴다. */
+    { h: "모집창(KST)", f: (c) => (c.clipOpen ? `${UI.esc(c.clipOpen.from)} ~ ${UI.esc(c.clipOpen.to)}` : "—") },
     { h: "", f: (c) => `<button type="button" class="lk" data-k="${c.key}">바꾸기</button>` },
   ], r.channels || []);
   OPS.lock(op, "super_admin", UI.$("#list"));
@@ -1116,10 +1126,27 @@ function sheet(c) {
     <p class="muted" id="hint" style="margin:8px 0 0;font-size:13px"></p>
     <div class="sec">최적 시간(KST)</div>${UI.chips("hours", H, c.bestHours || [], true)}
     <div class="sec">수익 매체</div>${UI.chips("mon", MON, c.monetize || [], true)}
+    ${CLIP_KEYS.includes(c.key) ? `<div class="sec">모집창(KST)</div>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">넣어 두면 ${CLIP_D ? `시작 ${CLIP_D}일 전부터` : "시작 전에 미리"} 이 채널 계정을 쓰는 고객에게 «모집이 시작해요»를 한 번 알려드려요. 비우면 안 알려요.</p>
+    <div class="fr"><div class="field" style="flex:1"><label>시작</label><input class="input" type="date" id="cFrom" value="${UI.esc((c.clipOpen && c.clipOpen.from) || "")}"></div><div class="field" style="flex:1"><label>끝</label><input class="input" type="date" id="cTo" value="${UI.esc((c.clipOpen && c.clipOpen.to) || "")}"></div></div>
+    <p class="muted" id="cErr" style="margin:0;font-size:13px;color:var(--danger)"></p>` : ""}
     <div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "채널 설정", onOpen: (sh, close) => {
       const hint = sh.querySelector("#hint"); const say = (v) => { hint.textContent = v === "down" ? "장애로 두면 고객 편성표의 이 채널 발행이 «PC 대기/확인 필요»로 멈춰요. 카나리 ✗ 뒤에 사람이 눌러요." : v === "planned" ? "준비 중이면 고객 그리드에서 숨고 온보딩엔 «곧 열려요» 칩이 붙어요." : "가동이면 고객이 바로 연결할 수 있어요."; }; say(c.status);
       UI.bindChips(sh, (n, v) => { if (n === "status") say(v); });
-      sh.querySelector("#ok").onclick = async () => { const r = await UI.api("/api/ops-channels", { body: { key: c.key, status: UI.chipVal(sh, "status"), bestHours: UI.chipVal(sh, "hours").map(Number), monetize: UI.chipVal(sh, "mon") }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요 · 고객 화면에 바로 반영"); load(); };
+      sh.querySelector("#ok").onclick = async () => {
+        const body = { key: c.key, status: UI.chipVal(sh, "status"), bestHours: UI.chipVal(sh, "hours").map(Number), monetize: UI.chipVal(sh, "mon") };
+        /* [R17-B2] 모집창 — 둘 다 비면 null(지운다) · 둘 다 차면 넣는다.
+           🔴 **한쪽만 찬 것은 서버로 안 보낸다** — 서버가 되물어 주긴 하지만, 여기서 한 줄 말해 주는 게 왕복 한 번보다 빠르다(막는 게 아니라 되묻는다 · §9). */
+        const err = sh.querySelector("#cErr"), cf = sh.querySelector("#cFrom"), ct = sh.querySelector("#cTo");
+        if (cf && ct) {
+          const a = cf.value.trim(), z = ct.value.trim();
+          if (err) err.textContent = "";
+          if (!a && !z) body.clipOpen = null;
+          else if (!a || !z) { if (err) err.textContent = "시작일과 종료일을 둘 다 적어 주세요(둘 다 비우면 안 알려요)."; return; }
+          else if (a > z) { if (err) err.textContent = "종료일이 시작일보다 빨라요. 다시 골라 주세요."; return; }
+          else body.clipOpen = { from: a, to: z };
+        }
+        const r = await UI.api("/api/ops-channels", { body, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요 · 고객 화면에 바로 반영"); load(); };
     } });
 }
 UI.$("#editD").onclick = () => { const t = (D && D.text) || {}; UI.sheet(`<form id="df"><div class="field"><label>쿠팡 파트너스 <span class="muted" style="font-weight:500">· 쿠팡 필수 문구 · 첫 블록 고정</span></label><textarea class="input" name="coupang" rows="3" style="height:auto;padding:14px 16px" required>${UI.esc(t.coupang || "")}</textarea><div class="help"></div></div><div class="field"><label>일반 제휴 <span class="muted" style="font-weight:500">· 공정위 «추천·보증 심사지침»</span></label><textarea class="input" name="generic" rows="3" style="height:auto;padding:14px 16px" required>${UI.esc(t.generic || "")}</textarea><div class="help"></div></div><div id="dc"></div><div class="cta"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "고지 문구", onOpen: (sh, close) => UI.form(sh.querySelector("#df"), (d, f) => UI.confirmRow(sh.querySelector("#dc"), "다음 발행부터 모든 고객의 제휴 글 첫 줄이 이 문구로 바뀌어요. 바꿀까요?", async () => { const r = await UI.api("/api/ops-disclosure", { body: { coupang: d.coupang, generic: d.generic }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "coupang", r.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요 · 감사 기록"); load(); })) }); };

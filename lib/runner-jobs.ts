@@ -66,6 +66,13 @@ export type RunnerJobKind =
   | "ads.setup_blogger" | "ads.revert_blogger"
   // P1R5 §0.2 — 영상: 렌더(러너가 굽는다) · 유튜브 쇼츠 · 네이버 클립(스텁).
   | "render.video" | "publish.youtube_shorts" | "publish.naver_clip"
+  /* [R17-B2 · 2026-09-23] 🔴 **당근 새소식** — R16 재측정에서 «서버가 만들 수 없는 잡»으로 잡혔다.
+     `lib/channel-registry.ts:153` 이 `jobKind:"publish.daangn"` 이라 말하고 `runner/core.mjs:61` 에 처리기까지 있는데
+     이 union·`RUNNER_JOB_KINDS`·`JOB_PRIORITY`·`PUBLISH_JOB_KINDS` **네 곳 전부**에 없어서
+     `publishJobKindOf("daangn")` 이 **언제나 null** 이었다 ⇒ 발행이 «아직 이 채널로는 발행할 수 없어요»로 막혔다.
+     🔴 우리가 자랑해 온 «키 꽂으면 즉시 가동»(CLAUDE §8)의 **반례**였다 — 채널 표는 다 썼는데 잡 이름 네 칸을 안 썼다.
+     한 사고에 문이 넷이었다(AC-214 와 같은 모양) · 이제 `scripts/verify-channel-tables.mjs` ⑧이 이 넷을 센다. */
+  | "publish.daangn"
   // [R10-1·2 · B2↔B 2026-09-16] 글 레퍼런스 캡처 — 러너가 폰 폭으로 찍어 넘기고(`runner/channels/reference-capture.mjs`) 서버가 읽고 즉시 버린다(`lib/text-style-capture.ts`).
   | "reference.capture";
 export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
@@ -74,6 +81,7 @@ export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
   "ads.setup_blogger", "ads.revert_blogger",
   "render.video", "publish.youtube_shorts", "publish.naver_clip",
   "reference.capture",
+  "publish.daangn",   // [R17-B2] 위 union 주석 참조 — 네 칸 중 둘째
 ];
 export function isRunnerJobKind(v: unknown): v is RunnerJobKind { return RUNNER_JOB_KINDS.includes(String(v) as RunnerJobKind); }
 /** 수익 스크랩 잡(report 에 `revenueRows` 가 실린다). `revenue.stats` 는 글 통계라 여기 안 든다. */
@@ -94,6 +102,7 @@ export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.free
   "reference.capture": 45,   // [R10-1] 고객이 지금 기다리는 일이라 통계·수익 스크랩보다 앞 · 발행·세션보다는 뒤
   "revenue.stats": 50,
   "revenue.adpost": 60, "revenue.adfit": 60, "revenue.clip": 60,
+  "publish.daangn": 10,   // [R17-B2] 발행이므로 네이버·티스토리와 같은 10(네 칸 중 셋째)
 });
 export function priorityOf(kind: RunnerJobKind): number { return JOB_PRIORITY[kind] ?? 50; }
 
@@ -107,7 +116,12 @@ export function publishJobKindOf(channel: string): RunnerJobKind | null {
   return kind && (PUBLISH_JOB_KINDS as readonly string[]).includes(kind) ? (kind as RunnerJobKind) : null;
 }
 /** 발행 잡 이름 화이트리스트 — 표의 글자가 이 중 하나일 때만 잡을 만든다(오타·새 채널의 임시값 차단). */
-const PUBLISH_JOB_KINDS = ["publish.naver_blog", "publish.tistory", "publish.naver_clip"] as const;
+const PUBLISH_JOB_KINDS = ["publish.naver_blog", "publish.tistory", "publish.naver_clip", "publish.daangn"] as const;
+
+/* [R17-B2] 로그인 «확인»을 할 줄 아는 채널 — 정본은 **순수 리프** `lib/channel-registry.ts` 다.
+   🔴 여기 두면 `accounts.ts` 가 못 읽는다: `accounts → runner-jobs → account-health → accounts` 고리가 이미 있다(AC-17).
+   호출부 호환을 위해 이름만 다시 내보낸다. */
+export { SESSION_VERIFY_CHANNELS, canVerifySession } from "./channel-registry";
 
 /** 잡 상태(스키마 varchar(12)). */
 export type RunnerJobStatus = "queued" | "claimed" | "done" | "failed" | "released";
@@ -997,6 +1011,15 @@ export interface RunnerReportOk {
   adpostState?: "none" | "pending" | "approved";
   /** `ads.setup_tistory` — 애드센스 연결 상태 읽기 결과(계약 §2.2 · 변경은 안 한다). */
   adsense?: { linked: boolean; state?: string; detail?: string };
+  /**
+   * [R17-B2 · DESIGN §8.2 `session.verify`] **저장된 로그인이 아직 살아 있나** — `runner/channels/session-verify.mjs` 가 보낸다.
+   *   🔴 **세 값이다**(`verify.post_alive` 와 같은 규율): `alive` · `expired` · `unknown`(**못 봤다**).
+   *   🔴 `unknown` 은 «만료»가 아니다 — 타임아웃 하나로 멀쩡한 계정을 «다시 로그인» 줄에 세우면 거짓 안내다(AC-10).
+   *      그래서 서버는 `expired` 일 때만 계정을 옮기고 `unknown` 에는 **손대지 않는다**(아래 reportJob).
+   */
+  session?: "alive" | "expired" | "unknown";
+  /** [R17-B2] 확인한 시각(러너 시계 · 표시는 서버가 KST 로). */
+  checkedAt?: string;
   /** `ads.setup_blogger`/`ads.revert_blogger` — 블로거 템플릿 광고 삽입/복원 결과(계약 P1R4 §2.2 · 백업 원문 포함). */
   monetize?: { bloggerTemplateBackup?: string; adsenseInserted?: boolean; reverted?: boolean; detail?: string };
   /** `render.video`(P1R5 §2.1) — 러너가 구운 mp4. 🔴 서버가 R2 HEAD 로 확인하기 전엔 «성공»이 아니다.
@@ -1673,6 +1696,35 @@ export async function reportJob(device: DeviceRow, jobId: number, result: Runner
     await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
       result = ${jsonb({ ok: true, alreadyGone: okBody.stats?.alreadyGone === true })}, updated_at = NOW() WHERE id = ${jobId}`);
     return { ok: true, status: "done" };
+  }
+
+  /* ── [R17-B2 · DESIGN §8.2] **로그인 확인**(`session.verify`) — 🔴 답이 세 값이고, **하나에만** 계정을 옮긴다 ──
+   *   · `expired` → `pending_login`. 고객 화면이 이미 그 상태를 «다시 로그인» 줄로 그린다(`accounts.html` · 새 어휘 0).
+   *   · `alive`   → 🔴 **`pending_login` 을 풀어 준다.** 확인이 «살아 있다»고 했는데 줄이 그대로 서 있으면
+   *                  고객은 멀쩡한 계정에 대고 로그인 창을 계속 연다. 🔴 다만 **`suspended`·`cooldown` 은 안 건드린다** —
+   *                  그건 로그인 문제가 아니라 채널·정책 문제고, 확인이 그걸 덮으면 정지된 계정이 되살아난 것처럼 보인다.
+   *   · `unknown` → 🔴 **아무것도 안 한다.** 우리가 못 읽은 것을 «끊겼다»로도 «살았다»로도 세지 않는다(AC-9).
+   *   확인한 사실은 세 값 **모두** 계정에 적어 둔다 — «언제 봤고 뭐였나»가 없으면 다음에 또 확인부터 해야 한다. */
+  if (kind === "session.verify") {
+    const s = okBody.session === "alive" || okBody.session === "expired" ? okBody.session : "unknown";
+    if (accountId) {
+      const at = typeof okBody.checkedAt === "string" ? okBody.checkedAt : new Date().toISOString();
+      await q(sql`UPDATE accounts SET monetize = monetize || ${jsonb({ sessionCheckedAt: at, sessionState: s })},
+          status = CASE
+            WHEN ${s} = 'expired' THEN 'pending_login'
+            WHEN ${s} = 'alive' AND status = 'pending_login' THEN 'active'
+            ELSE status END,
+          last_error_kind = CASE
+            WHEN ${s} = 'expired' THEN 'login_fail'
+            WHEN ${s} = 'alive' AND status = 'pending_login' THEN NULL
+            ELSE last_error_kind END,
+          updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = ${accountId}`)
+        .catch((e) => console.warn("[runner-jobs] 로그인 확인 갱신 실패(비치명)", String((e as Error)?.message ?? e).slice(0, 120)));
+    }
+    await q(sql`UPDATE runner_jobs SET status='done', error_kind = NULL,
+      result = ${jsonb({ ok: true, session: s, checkedAt: okBody.checkedAt ?? null })}, updated_at = NOW() WHERE id = ${jobId}`);
+    return { ok: true, status: "done", reason: s };
   }
 
   if (kind === "ads.setup_tistory" || kind === "ads.status_blogger") {

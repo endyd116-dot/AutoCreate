@@ -14,6 +14,7 @@
  *
  *   스냅샷: 전/후 슬롯 표를 `runner/_shots/failover-<stamp>.txt` 에 남긴다(row id 동반 — CLAUDE §6 «증거 없는 실증 금지»).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

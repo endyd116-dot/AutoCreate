@@ -11,6 +11,7 @@
  *   🔴 **추측 금지**: 권한이 없거나 못 물어보면 «확인 필요»로 남긴다. «아마 켜져 있을 것»은 상태가 아니다.
  *   키: Neon 은 `NEON_API_KEY` env 또는 `~/.neon-am-key` 파일(neon-migrate 와 같은 자리) · R2 는 `.env` R2_*.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { GetBucketVersioningCommand } from "@aws-sdk/client-s3";

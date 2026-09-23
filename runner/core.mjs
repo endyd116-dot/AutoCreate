@@ -15,6 +15,7 @@ import { planEditorOps, disclosureIsFirst } from "./lib/plan.mjs";
 import * as naverBlog from "./channels/naver-blog.mjs";
 import * as tistory from "./channels/tistory.mjs";
 import * as sessionLogin from "./channels/session-login.mjs";
+import * as sessionVerify from "./channels/session-verify.mjs";   // [R17-B2] 확인은 로그인과 다른 일이다(헤드리스 · 사람 손 0)
 import * as postAlive from "./channels/post-alive.mjs";
 // [R8 §3 · DESIGN §5E] 올린 글 내리기 — 고객이 «내려 줘»를 눌렀을 때만 온다.
 import * as retract from "./channels/retract.mjs";
@@ -41,7 +42,9 @@ const HANDLERS = {
   "publish.naver_blog": naverBlog,
   "publish.tistory": tistory,
   "session.login": sessionLogin,
-  "session.verify": sessionLogin,
+  /* [R17-B2 · 2026-09-23] 🔴 여기가 `sessionLogin` 이었다 — 그러면 «확인»이 **창을 띄우고 사람을 5분 기다린다.**
+     배경 점검이 고객 PC 를 멋대로 점유하는 꼴이라, 적재하는 곳이 0곳이었던 게 차라리 다행이었다. */
+  "session.verify": sessionVerify,
   "verify.post_alive": postAlive,
   "publish.retract": retract,
   "revenue.stats": postAlive,
@@ -97,7 +100,9 @@ const ADS_KINDS = new Set(["ads.setup_tistory", "ads.status_blogger"]);
 const ADS_WRITE_KINDS = new Set(["ads.setup_blogger", "ads.revert_blogger"]);
 
 /** 사람이 봐야 하는 잡(창이 떠야 한다). */
-const NEEDS_HEADED = new Set(["session.login", "session.verify"]);
+/* [R17-B2] 🔴 `session.verify` 를 **뺐다** — 확인은 헤드리스다(사람 손 0 · 아무것도 안 바꾼다).
+   헤드풀은 **사람이 직접 로그인해야 하는 일**에만 쓴다(`session.login` 하나). */
+const NEEDS_HEADED = new Set(["session.login"]);
 
 export const ALL_KINDS = Object.keys(HANDLERS);
 
