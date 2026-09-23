@@ -72,7 +72,23 @@ const BUSY_SAY: Record<string, { published: string; publishing: string; generati
 const busyReason = (door: keyof typeof BUSY_SAY, st: string): string | null =>
   (BUSY_SAY[door] as Record<string, string>)[st] ?? null;
 
-const STATUSES = new Set(["generating", "draft", "in_review", "edited", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);   // [R9-9 C4] edited = 사람이 고친 «봐주세요»
+/**
+ * `?status=` 로 받아 주는 낱말들(거름망 · 이 목록 밖은 무시한다). [R9-9 C4] `edited` = 사람이 고친 «봐주세요».
+ *
+ *   🔴 **[2026-09-23 R17 실측] `draft` 와 `approved` 는 «받아는 주는데 아무도 안 만드는» 낱말이다.**
+ *     `pieces SET status=` 를 전수로 세면 실제로 쓰이는 것은
+ *     generating · in_review · edited · scheduled · publishing · published · awaiting_manual · awaiting_runner · failed · rejected 이고,
+ *     제품 경로는 **generating → in_review → scheduled** 로 **`draft`·`approved` 를 건너뛴다**(설계 §4.1·§4.2).
+ *     ⚠️ 라이브에 `draft 4 · approved 2` 행이 있어 «닫혔나» 싶지만, **누가 만들었나**를 보면
+ *        draft 4는 시험 테넌트 778 의 하니스 산물이고 approved 2는 09-15 것뿐이다 —
+ *        🔴 **«라이브에 행이 있다» ≠ «제품이 만든다»**(AC-178).
+ *
+ *   🔴 **그래서 이 두 낱말로 «상태를 만들지» 마라.** `status = 'draft'` 를 쓰는 코드를 새로 넣으면
+ *      화면 스텝 바(실제 전이만 그린다)와 갈라지고, 그 글은 **어느 칸에도 안 보이는 채로** 남는다.
+ *   ⚠️ 목록에서 **빼지도 않았다** — 빼면 옛 라이브 6행이 `?status=` 로 조회조차 안 된다.
+ *      **지울지 뜻을 줄지는 설계 문구를 고치는 일**이라 §8 상 **사장님 승인 먼저**다(메인에 «정할 일»로 올렸다 · 2026-09-23).
+ */
+const STATUSES = new Set(["generating", "draft", "in_review", "edited", "approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "rejected"]);
 
 /** 글 스텝 3(writing·images·checking) · [P1R5] 영상 스텝 6(`VideoStage` = script·tts·clips·render·judging·done — A 가 «대본→목소리→장면→합성→검사→완료» 로 그린다). */
 const VIDEO_STAGES = ["script", "tts", "clips", "render", "judging", "done", "failed"];
