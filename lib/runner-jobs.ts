@@ -66,6 +66,13 @@ export type RunnerJobKind =
   | "ads.setup_blogger" | "ads.revert_blogger"
   // P1R5 §0.2 — 영상: 렌더(러너가 굽는다) · 유튜브 쇼츠 · 네이버 클립(스텁).
   | "render.video" | "publish.youtube_shorts" | "publish.naver_clip"
+  /* [R17-B2 · 2026-09-23] 🔴 **당근 새소식** — R16 재측정에서 «서버가 만들 수 없는 잡»으로 잡혔다.
+     `lib/channel-registry.ts:153` 이 `jobKind:"publish.daangn"` 이라 말하고 `runner/core.mjs:61` 에 처리기까지 있는데
+     이 union·`RUNNER_JOB_KINDS`·`JOB_PRIORITY`·`PUBLISH_JOB_KINDS` **네 곳 전부**에 없어서
+     `publishJobKindOf("daangn")` 이 **언제나 null** 이었다 ⇒ 발행이 «아직 이 채널로는 발행할 수 없어요»로 막혔다.
+     🔴 우리가 자랑해 온 «키 꽂으면 즉시 가동»(CLAUDE §8)의 **반례**였다 — 채널 표는 다 썼는데 잡 이름 네 칸을 안 썼다.
+     한 사고에 문이 넷이었다(AC-214 와 같은 모양) · 이제 `scripts/verify-channel-tables.mjs` ⑧이 이 넷을 센다. */
+  | "publish.daangn"
   // [R10-1·2 · B2↔B 2026-09-16] 글 레퍼런스 캡처 — 러너가 폰 폭으로 찍어 넘기고(`runner/channels/reference-capture.mjs`) 서버가 읽고 즉시 버린다(`lib/text-style-capture.ts`).
   | "reference.capture";
 export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
@@ -74,6 +81,7 @@ export const RUNNER_JOB_KINDS: readonly RunnerJobKind[] = [
   "ads.setup_blogger", "ads.revert_blogger",
   "render.video", "publish.youtube_shorts", "publish.naver_clip",
   "reference.capture",
+  "publish.daangn",   // [R17-B2] 위 union 주석 참조 — 네 칸 중 둘째
 ];
 export function isRunnerJobKind(v: unknown): v is RunnerJobKind { return RUNNER_JOB_KINDS.includes(String(v) as RunnerJobKind); }
 /** 수익 스크랩 잡(report 에 `revenueRows` 가 실린다). `revenue.stats` 는 글 통계라 여기 안 든다. */
@@ -94,6 +102,7 @@ export const JOB_PRIORITY: Readonly<Record<RunnerJobKind, number>> = Object.free
   "reference.capture": 45,   // [R10-1] 고객이 지금 기다리는 일이라 통계·수익 스크랩보다 앞 · 발행·세션보다는 뒤
   "revenue.stats": 50,
   "revenue.adpost": 60, "revenue.adfit": 60, "revenue.clip": 60,
+  "publish.daangn": 10,   // [R17-B2] 발행이므로 네이버·티스토리와 같은 10(네 칸 중 셋째)
 });
 export function priorityOf(kind: RunnerJobKind): number { return JOB_PRIORITY[kind] ?? 50; }
 
@@ -107,7 +116,7 @@ export function publishJobKindOf(channel: string): RunnerJobKind | null {
   return kind && (PUBLISH_JOB_KINDS as readonly string[]).includes(kind) ? (kind as RunnerJobKind) : null;
 }
 /** 발행 잡 이름 화이트리스트 — 표의 글자가 이 중 하나일 때만 잡을 만든다(오타·새 채널의 임시값 차단). */
-const PUBLISH_JOB_KINDS = ["publish.naver_blog", "publish.tistory", "publish.naver_clip"] as const;
+const PUBLISH_JOB_KINDS = ["publish.naver_blog", "publish.tistory", "publish.naver_clip", "publish.daangn"] as const;
 
 /** 잡 상태(스키마 varchar(12)). */
 export type RunnerJobStatus = "queued" | "claimed" | "done" | "failed" | "released";

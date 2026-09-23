@@ -150,7 +150,13 @@ export const CHANNELS: readonly ChannelSpec[] = [
      · 🔴 **수익이 없다**(`monetizable:false`) — 새소식에는 광고 수익이 안 붙는다. 수익 화면의 0원이 **고장이 아니라는 걸** 서버가 말해 준다.
      · 🔴 **비즈프로필이 있어야 한다** — 개인 계정으로는 새소식을 못 쓴다. 연결 화면이 그걸 **먼저** 말한다(A).
      ⚠️ 선결조건: 셀렉터가 2026-07 기준이고 AM 헤더가 «변경 가능성 高»라 **탐침 먼저**(합동 세션 항목). 그래도 코드·화면은 지금 완성해 둔다(§3.4 «키 꽂으면 즉시»). */
-  { key: "daangn", connect: "session", publishVia: "runner", jobKind: "publish.daangn", retractVia: "runner", axis: "text", textGen: true, formatCaps: CAPS_DAANGN, monetizable: false, maxPhotos: 10, note: "비즈프로필 «새소식». 서식 0(평문 에디터 · 확인함) · 사진 10장 · 광고 수익 없음. 셀렉터는 AM 2026-07 실측이라 탐침 먼저." },
+  /* [R17-B2 · 2026-09-23] 🔴 `retractVia` 를 `"runner"` 에서 **`null` 로 내렸다 — 약속 뒤에 코드가 없었다.**
+     `runner/channels/daangn.mjs` 에 삭제 경로가 **0줄**이고(AM 원본에도 없어 안 가져왔다),
+     `runner/channels/retract.mjs` 의 셀렉터는 **네이버·티스토리를 보고 고른 것**이다.
+     그대로 두면 화면에 «내려 주기» 단추가 켜지고 눌러도 헛손질만 한다 — 이 파일의 «모르면 null» 규율 그대로 내린다.
+     🔴 §9 의 «없는 길»이지 게이트가 아니다 — `lib/publish/retract.ts` 가 «직접 내려 주세요» + 글 링크로 정직하게 말한다.
+     여는 법: 당근 새소식 삭제 화면을 **한 번 보고** `retract.mjs RETRACTABLE_CHANNELS` 에 한 줄 늘린다. */
+  { key: "daangn", connect: "session", publishVia: "runner", jobKind: "publish.daangn", retractVia: null, axis: "text", textGen: true, formatCaps: CAPS_DAANGN, monetizable: false, maxPhotos: 10, note: "비즈프로필 «새소식». 서식 0(평문 에디터 · 확인함) · 사진 10장 · 광고 수익 없음 · 🔴 내리기는 아직 없다(삭제 화면을 못 봤다 — 직접 내려 주셔야 해요). 셀렉터는 AM 2026-07 실측이라 탐침 먼저." },
   { key: "brunch", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, formatCaps: null, note: "🔴 러너 채널인데 **셀렉터를 한 번도 못 쟀다**(작가 승인 계정이 없어 화면을 연 적이 없다). 추측으로 채우지 않는다 — 아래 주석." },
   { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
   /* [P1R8 §3.4] 유튜브 롱폼 — 쇼츠와 **같은 `videos.insert`**(lib/publish/youtube.ts publishYoutube · 주소만 다르다).
