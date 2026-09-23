@@ -872,6 +872,12 @@
     "tenant-settings": (b) => { if (typeof b.autoSchedule === "boolean") S.settings.autoSchedule = b.autoSchedule;
       /* [R8 B2 §3.3] «새 방식을 먼저 써 볼래요» — 🔴 **최상위 키**다(settings 안이 아니다) · 기본 꺼짐 */
       if (typeof b.recipeVolunteer === "boolean") S.recipeVolunteer = b.recipeVolunteer;
+      /* [R17 · C] «디렉터에게 맡기기» — 🔴 켜는 것만 요금제(Pro 부터)로 가른다. **끄는 것은 언제나 된다**(§9).
+         모의도 그 갈래를 흉내 내야 «Pro 가 아니면 어떻게 보이나»를 손으로 볼 수 있다(안 그러면 늘 켜져서 그 화면을 못 본다). */
+      if (typeof b.directorAuto === "boolean") {
+        if (b.directorAuto && S.plan && S.plan.key === "starter") return err("plan_limit", "맡기기는 Pro 요금제부터 쓸 수 있어요.", { status: 402 });
+        S.settings.directorAuto = b.directorAuto;
+      }
       if (Array.isArray(b.kinds)) { S.settings.kinds = b.kinds.includes("video") ? ["text", "video"] : ["text"]; S.kindsSet = true; }
       /* [R8CLOSE §B8] 수익 목표 — 🔴 서버 `ALLOWED_SETTINGS`(tenant-settings.ts:19) 에 `goal` 이 들어가야 살아난다.
          모의는 **약속대로** 받아 둔다(A·B 동시 발사 관례) — 값은 `lib/director-goal.ts MediaGoal` 네 갈래뿐이고,
