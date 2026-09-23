@@ -52,7 +52,8 @@ let S = { ...BUNDLED_SELECTORS };
 /** 후보 목록이 필요한 자리(«보이는 것»을 고르려면 낱개로 봐야 한다 · AC-43). */
 const htmlItems = () => String(S.htmlItems || "").split(",").map((x) => x.trim()).filter(Boolean);
 
-function blogHost(handle) {
+/** [R17-B2] `session.verify` 도 같은 규칙으로 호스트를 만든다(커스텀 도메인 포함) — 두 벌로 적지 않는다. */
+export function blogHost(handle) {
   const h = String(handle ?? "").replace(/^@/, "").trim();
   if (!h) return null;
   if (/^https?:\/\//i.test(h)) { try { return new URL(h).host; } catch { return null; } }
@@ -60,7 +61,13 @@ function blogHost(handle) {
   return `${h}.tistory.com`;
 }
 
-async function isLoggedIn(page, host) {
+/**
+ * [R17-B2 · 2026-09-23] 🔴 **`export` 를 붙였다 — `session.verify` 가 이 판정을 그대로 쓴다.**
+ *   옮기지 않고 **잰 자리에 둔다**: 이 셀렉터는 티스토리 발행을 실제로 통과시키면서 얻은 것이고,
+ *   복사해 두 벌이 되면 한쪽만 늙는다(채널 표가 네 곳이었던 것과 같은 병 · `lib/channel-registry.ts` 머리말).
+ *   🔴 추측한 판정을 `session-verify.mjs` 에 새로 적지 않는다 — 그게 이 프로젝트에서 제일 비싼 실수였다.
+ */
+export async function isLoggedIn(page, host) {
   try {
     await page.goto(`https://${host}/manage`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     const url = page.url();

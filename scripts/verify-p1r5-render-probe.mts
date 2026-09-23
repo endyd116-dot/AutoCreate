@@ -14,6 +14,7 @@
  *   🔴 테스트 테넌트에서만 돈다(`--tid` 가 `tenants.plan_key='trial'`·이메일 `*@autocreate.test` 가 아니면 거부).
  *   🔴 만든 piece·job·device 행은 끝에서 지운다(정리까지가 검증).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";

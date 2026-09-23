@@ -122,3 +122,17 @@ export async function run({ ctx, job, shotKey, dryRun }) {
 }
 
 export const channel = "retract";
+
+/**
+ * [R17-B2 · 2026-09-23] 🔴 **이 파일이 «내릴 줄 아는» 채널을 글자로 적는다.**
+ *
+ *   왜 적나: 머리말이 «대상: 네이버 블로그 · 티스토리»라고 말하는데 그건 **주석**이라 아무도 안 센다.
+ *   그래서 `lib/channel-registry.ts` 가 `daangn` 에 `retractVia:"runner"` 를 적어 둔 것을 **9일 동안 아무도 못 봤다** —
+ *   이 파일엔 당근 삭제 경로가 **0줄**이고(`runner/channels/daangn.mjs` 도 AM 원본에 삭제가 없어 안 가져왔다),
+ *   그러면 고객 화면엔 «내려 주기» 단추가 켜지는데 눌러도 **네이버·티스토리용 셀렉터로 헛손질**만 한다.
+ *   🔴 되돌릴 수 없는 일에 추측을 섞지 않는다는 이 파일 ②의 규율과 정면으로 어긋나는 자리였다.
+ *
+ *   ⇒ 채널을 늘리면 **여기 한 줄**을 같이 늘린다. 안 늘리면 `scripts/verify-channel-tables.mjs` ⑨가 빨개진다.
+ *   🔴 위 `DELETE_SEL`·`CONFIRM_SEL` 은 **이 목록의 채널을 보고 고른 것**이다 — 목록 밖 채널에 그대로 쓰면 안 된다.
+ */
+export const RETRACTABLE_CHANNELS = ["naver_blog", "tistory"];

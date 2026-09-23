@@ -59,7 +59,14 @@ async function loadChans() {
 async function load(poll = false) {
   /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
      편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
-  const [r, ts] = await Promise.all([UI.api("/api/topics-list?status=candidate"), UI.api("/api/tenant-settings", { noGate: true })]);
+  /* 🔴 [R17 · A] «나중에 볼 소재»는 **세 번째 부름**으로 센다 — 옮긴 것이 어디로 갔는지 안 보이면 옮기지 않는다(§9-3).
+     실패해도 화면은 그대로 간다(`catch` → 0) — 곁다리 하나 때문에 소재 목록이 안 뜨면 안 된다. */
+  const [r, ts, lt] = await Promise.all([UI.api("/api/topics-list?status=candidate"), UI.api("/api/tenant-settings", { noGate: true }),
+    UI.api("/api/topics-list?status=later", { noGate: true }).catch(() => ({ ok: false }))]);
+  const laterN = lt && lt.ok ? (lt.topics || []).length : 0;
+  /* 🔴 [R17 · A · B 계약 2026-09-23] 소재 낱말은 **서버가 준다**(AC-52) — `labels` 는 status 무관 항상 실린다.
+     아래 기본값은 서버가 아직 안 줄 때만 쓴다(옛 배포와 섞여도 화면이 안 비게). */
+  if (r.ok && r.labels) LBL = r.labels; else if (lt && lt.ok && lt.labels) LBL = lt.labels;
   /* [AC-188] 🔴 토스트만 띄우고 돌아가면 뼈대가 영원히 돈다 — 치우고·까닭 적고·다시 누를 단추를 준다(UI.retryPanel).
      🔴 되풀이 호출(poll)에서는 갈아엎지 않는다 — 보고 있던 목록이 깜빡 사라진다. */
   if (!r.ok) { if (!poll) UI.retryPanel("#topics", () => load(false), r.error); return; }
@@ -101,9 +108,14 @@ async function load(poll = false) {
   const chChips = accountsN && chList.length > 1
     ? `<div style="padding:0 12px 8px">${UI.chips("chf", [["", "전체"], ...chList.map((c) => [c, UI.chLabel(c)])], chFilter)}</div>` : "";
   const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : ""}</div>` + chLine + chChips
-    + (accountsN ? `<button type="button" class="row tap" id="addTopic"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">내 소재 넣기</span><span class="d">쓰고 싶은 주제를 직접 적어 디렉터에게 보내요</span></div>${UI.chev}</button>` : ""); // [사장님 실측] 디렉터는 소재만 받으면 된다 — 입구
+    + (accountsN ? `<button type="button" class="row tap" id="addTopic"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">내 소재 넣기</span><span class="d">쓰고 싶은 주제를 직접 적어 디렉터에게 보내요</span></div>${UI.chev}</button>` : "") // [사장님 실측] 디렉터는 소재만 받으면 된다 — 입구
+    /* 🔴 [R17 · A] «나중에 볼 소재» 입구 — **옮긴 것은 돌아올 길이 보여야 옮긴 게 된다**(§9-3).
+       🔴 0개면 줄을 안 그린다 — 빈 줄은 «할 일»처럼 보인다(§13.0 «첫 화면 숫자 하나»). */
+    + (laterN ? `<button type="button" class="row tap" id="laterBtn"><span class="mk soft">↺</span><div class="l"><span class="t">${UI.esc(lz("title"))} ${laterN}개</span><span class="d">지금은 아니라고 옮겨 둔 것 · 언제든 다시 꺼내요</span></div>${UI.chev}</button>` : "");
   const cta = UI.$("#cta"), rb = UI.$("#refresh"); cta.hidden = !accountsN; rb.disabled = busy; rb.textContent = busy ? "뽑는 중이에요" : "새로 뽑기";
-  const bindAdd = () => { const b = UI.$("#addTopic"); if (b) b.onclick = addSheet; };
+  /* 🔴 [R17 · A] `#laterBtn` 은 `head` 에 들어가므로 **빈 목록 판에서도 같이 묶여야** 한다 —
+     소재가 0개일 때야말로 «나중에 둔 것»을 꺼낼 때다. 그래서 `bindAdd` 와 한 몸으로 둔다(부르는 자리 네 곳 전부). */
+  const bindAdd = () => { const b = UI.$("#addTopic"); if (b) b.onclick = addSheet; const l = UI.$("#laterBtn"); if (l) l.onclick = laterSheet; };
   const bindChf = () => UI.bindChips(UI.$("#topics"), (n, v) => { if (n !== "chf") return; chFilter = v || ""; load(); });   // 🔴 저장하지 않는다(새로 들어오면 늘 «전체»)
   if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; return; }
   if (busy && !r.topics.length) { g.innerHTML = head + BUSY; bindAdd(); bindChf(); return; }
@@ -113,15 +125,20 @@ async function load(poll = false) {
   g.innerHTML = head + BUSY + shown.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}${t.source === "manual" ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">직접</span>' : ""}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
   bindAdd(); bindChf();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
-  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
-  /* [DESIGN §13.0b 소재 카드] 스와이프 — **왼쪽 = 넘김 · 오른쪽 = 디렉터에게**(설계의 세 번째 «위 = 나중에»는 아직 안 만든다:
-     서버에 «나중에»를 적어 둘 자리가 없다(`topics-pick`·`topics-skip` 뿐) — 화면에서만 숨기면 새로고침하면 돌아와
-     «했는데 안 됐다»가 된다. 서버가 열리면 그때 붙인다 · 메인에 보고).
-     🔴 두 방향 다 **이미 단추로 되는 일**이라 스와이프는 지름길일 뿐이다 — 스와이프로만 되는 기능을 만들지 않는다(못 찾는 사람이 생긴다). */
-  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0;
-    row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true });
-    row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; row.style.transform = `translateX(${Math.max(Math.min(dx, 120), -120)}px)`; }, { passive: true });
-    row.addEventListener("touchend", async () => { row.style.transform = ""; const d = dx; x0 = null;
+  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-later>나중에</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; sh.querySelector("[data-s-later]").onclick = async () => { close(); await later(t.id); }; } }); });
+  /* [DESIGN §13.0b 소재 카드] 스와이프 — **왼쪽 = 넘김 · 오른쪽 = 디렉터에게 · 위 = 나중에.**
+     🔴 [R17 · A] 세 번째 방향이 드디어 붙었다 — 여기 «서버에 «나중에»를 적어 둘 자리가 없다»고 적어 뒀던 그것이다.
+        B 가 `POST /api/topics-later` 를 열어 줘서(2026-09-23) 이제 **새로고침해도 그대로**다.
+     🔴 세 방향 다 **이미 단추로 되는 일**이라 스와이프는 지름길일 뿐이다 — 스와이프로만 되는 기능을 만들지 않는다(못 찾는 사람이 생긴다).
+        «나중에»도 ⋯ 더보기 시트에 단추로 있다. */
+  UI.$$(".row.swipe").forEach((row) => { let x0 = null, y0 = null, dx = 0, dy = 0;
+    row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; dy = 0; }, { passive: true });
+    row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; dy = e.touches[0].clientY - y0;
+      /* 세로가 더 크면 세로로 잡는다 — 가로와 섞이면 둘 다 엉뚱하게 먹는다 */
+      if (Math.abs(dy) > Math.abs(dx)) row.style.transform = `translateY(${Math.max(Math.min(dy, 80), -80)}px)`;
+      else row.style.transform = `translateX(${Math.max(Math.min(dx, 120), -120)}px)`; }, { passive: true });
+    row.addEventListener("touchend", async () => { row.style.transform = ""; const d = dx, dv = dy; x0 = null; y0 = null;
+      if (Math.abs(dv) > Math.abs(d) && dv < -60) return later(Number(row.dataset.id));
       if (d < -80) return skip(Number(row.dataset.id));
       if (d > 80) { const t = (r.topics || []).find((x) => x.id === Number(row.dataset.id)); if (t) UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title || "")}`); }
     }); });
@@ -134,6 +151,45 @@ async function refresh() {
   busy = true; UI.toast(r.started === false ? "이미 뽑고 있어요" : "소재를 뽑기 시작했어요"); startPoll(); load(true);
 }
 async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
+/* 🔴 [R17 · A · B 가 서버를 열었다] **«나중에»** — `POST /api/topics-later { id }` · 되돌리기는 `{ id, undo: true }`.
+   🔴 `skip`(넘김 = «안 쓴다» → expired)과 **뜻이 다르다** — 나중에 = «지금은 아니다».
+      만료 시각을 안 건드려서 되돌리면 **원래 후보로 점수·순서 그대로** 돌아온다(B 계약).
+   🔴 §9 — **숨기는 게 아니라 옮기는 것**이다. 그래서 돌아올 길(«나중에 볼 소재»)이 목록 머리에 늘 떠 있다. */
+/* 🔴 [R17 · A · B 계약] 소재 낱말은 서버가 준다(AC-52). 기본값은 **서버가 아직 안 줄 때만** 쓴다 —
+   글자는 `lib/topics.ts` 의 `labels.later` 와 한 글자도 다르지 않아야 한다(다르면 화면 말투가 갈리고 아무 자도 안 잡는다).
+   🔴 `stale` 은 **`=== true` 로만** 본다 — 칸이 없는 건 «안 지났다»가 아니라 «시계가 없다»다(AC-9). */
+let LBL = {};
+const LZ_FALLBACK = { title: "나중에 볼 소재", empty: "나중에 볼 소재가 아직 없어요", undo: "오늘 소재로", keep: "여기 둔 소재는 사라지지 않아요", stale: "추천한 지 오래됐어요 · 지금도 쓸 수 있어요" };
+const lz = (k) => ((LBL.later && LBL.later[k]) || LZ_FALLBACK[k]);
+async function later(id) {
+  const r = await UI.api("/api/topics-later", { body: { id } });
+  if (!r.ok) { UI.toast(r.error || "옮기지 못했어요"); return; }
+  /* 되돌릴 길을 **사라지는 토스트에 걸지 않는다** — 놓치면 끝이다. 목록 머리의 줄이 늘 남는다. */
+  UI.toast("나중에 볼 소재로 옮겼어요 · 위에서 다시 꺼낼 수 있어요", 3200);
+  load();
+}
+async function laterSheet() {
+  UI.sheet(`<div id="ltList"><span class="sk" style="width:100%;height:56px"></span></div>`, { title: lz("title"), onOpen: async (sh, close) => {
+    const box = sh.querySelector("#ltList");
+    const r = await UI.api("/api/topics-list?status=later");
+    if (!r.ok) { box.innerHTML = `<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "지금은 불러올 수 없어요. 잠시 뒤 다시 열어 보세요.")}</p>`; return; }
+    if (r.labels) LBL = r.labels;
+    const list = r.topics || [];
+    if (!list.length) { box.innerHTML = `<p class="muted" style="margin:0;font-size:13px">${UI.esc(lz("empty"))}. 소재를 위로 밀거나 ⋯ 에서 «나중에»를 누르면 여기로 와요.</p>`; return; }
+    /* 🔴 [B 2026-09-23] 여기 둔 소재는 **이제 만료로 사라지지 않는다** — 서버가 `later` 만 만료를 안 거른다.
+       그래서 «N일 뒤 사라져요»가 아니라 **«사라지지 않아요»**를 적는다(내가 물었던 그 구멍이 서버에서 막혔다).
+       🔴 자동 편성에서 빠지는 것은 **따로 말한다** — «지금은 아니다»의 뜻이지만, 안 적으면 «왜 안 올라갔지»가 된다(§9-1). */
+    box.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:13px">${list.length}개 있어요. <b>${UI.esc(lz("keep"))}</b> · «${UI.esc(lz("undo"))}»를 누르면 원래 자리로 그대로 돌아가요.<br>여기 있는 동안은 자동 편성에 안 올라가요.</p>`
+      + list.map((t) => `<div class="row">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.angle || "")}</span>${t.stale === true ? `<span class="d wrap" style="color:var(--warn-ink)">${UI.esc(lz("stale"))}</span>` : ""}</div><button type="button" class="lk" data-back="${t.id}" style="min-height:44px;padding:0 8px;flex:none">${UI.esc(lz("undo"))}</button></div>`).join("");
+    box.querySelectorAll("[data-back]").forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      const rr = await UI.api("/api/topics-later", { body: { id: Number(b.dataset.back), undo: true } });
+      b.disabled = false;
+      if (!rr.ok) return UI.toast(rr.error || "되돌리지 못했어요");
+      close(); UI.toast("오늘 소재로 되돌렸어요"); load();
+    });
+  } });
+}
 UI.$("#refresh").onclick = refresh;
 /* [사장님 실측] 내 소재 넣기 — 제목 한 칸 + 접힌 «검색 키워드» + 채널 칩(연결된 채널만 · 하나면 숨김) → POST /api/topics-add → 바로 디렉터로(«넣고 → 고르고» 두 번 안 누르게) */
 let chans = null;
@@ -1050,7 +1106,8 @@ function sourceGroup() {
   return `<div class="group" style="margin-bottom:12px"><div class="gt">매체별 <a href="/app/ad-media.html">관리</a></div>` + list.map((s) => {
     const src = SRC.find((x) => x.source === s.source);
     const bad = src && (src.status === "error" || src.status === "not_configured");
-    const when = s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : "";
+    /* [R17-B2 · DESIGN §2.3] 🔴 절대 시각으로 말한다 — «3시간 전»만으로는 **하루 지난 값인지 오늘 아침 값인지 모른다**(설계가 든 예시가 «어제 12:30 기준»이다). */
+    const when = s.lastSyncAt ? `${UI.whenKST(s.lastSyncAt)} 기준` : "";
     /* [B2 8a71d69] 어떤 매체는 «예상 수입» 열만 준다 — 그 행은 확정이 아니라는 도장을 찍는다(숫자가 멀쩡해 보여 아무도 못 알아챈다).
        🔴 서버가 준 note 는 **그대로** 보여 준다(가공 금지 · 어느 열로 읽었는지가 그 안에 있다). */
     const est = estOf(s);
@@ -1354,7 +1411,10 @@ async function submitAdd(body, f, close) {
     if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
     if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
-    if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
+    /* [R17-B2] 🔴 **서버가 말한 칸에 칠한다.** 종전엔 뭐가 틀렸든 늘 «앱 비밀번호» 칸이 빨개져서,
+       주소가 안 열리는 경우에도 고객이 비밀번호를 다시 만들러 갔다 — 거짓 안내다(AC-10).
+       서버가 칸을 안 주면 종전대로(모르면 지어내지 않는다). */
+    if (r.step === "wp_auth") return UI.fieldError(f, r.field || "appPassword", r.error);
     return UI.toast(r.error || "연결하지 못했어요");
   }
   close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
@@ -1481,9 +1541,13 @@ async function detailSheet(a) {
     /* 우리가 본 주소가 저장된 주소와 같다 — 물을 것이 없다. 조용히 적기만 한다(§13.0 «설명 한 문장»). `identity` 가 없으면 한 줄도 없다(AC-9 «아직 모른다»). */
     : addrSeen(a) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(addrSeen(a))}</span></div>` : ""}
   ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
-  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span></div>
+  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span> <button type="button" class="btn ghost sm" id="hre" style="margin-left:8px">다시 재기</button></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
+  ${/* [R17-B2 · DESIGN §8.2] 🔴 **«로그인이 아직 살아 있나»를 조용히 확인한다** — 재로그인(창을 띄우고 사람이 로그인)과 **다른 일**이다.
+       서버가 canVerifySession 을 줄 때만 그린다 — **못 하는 일을 단추로 내놓지 않는다**(AC-9).
+       🔴 겁주는 말 금지(§3): «끊기면 정지됩니다»가 아니라 «미리 알면 글이 안 밀려요» 쪽이다. */""}
+  ${chOf(a.channel) && chOf(a.channel).canVerifySession ? `<button type="button" class="row tap" id="vsess" style="padding-left:0;padding-right:0"><div class="l"><span class="t" style="font-size:14px">로그인 확인</span><span class="d wrap" id="vsessD">${a.sessionCheckedAt ? `${UI.esc(UI.ago(a.sessionCheckedAt))} 확인했어요 · ${a.sessionState === "alive" ? "잘 살아 있어요" : a.sessionState === "expired" ? "다시 로그인이 필요해요" : "그때는 확인하지 못했어요"}` : "지금 로그인이 살아 있는지 조용히 확인해요 · 창은 안 떠요"}</span></div>${UI.chev}</button>` : ""}
   <a class="row tap" href="/app/ad-media.html" style="padding-left:0;padding-right:0"><div class="l"><span class="t" style="font-size:14px">수익 매체</span><span class="d wrap">${UI.esc(srcLine)}</span></div>${badSrc.length ? '<span class="pill warn">연결 끊김</span>' : okSrc.length ? '<span class="pill ok">' + okSrc.length + '곳</span>' : ""}${UI.chev}</a>
   <div class="field"><label>표시명</label><input class="input" id="dn" value="${UI.esc(a.displayName || "")}" placeholder="예: 요리하는 A"></div>
   <div class="field"><label for="oa">이 블로그, 언제부터 쓰셨어요</label>
@@ -1535,9 +1599,55 @@ async function detailSheet(a) {
     UI.bindSteppers(sh); UI.bindChips(sh);
     bindPersona(sh, a);
     const rb = sh.querySelector("#relogin");
+    /* 🔴 [R17 · §15 `accounts-health`] 점수는 여태 **신호가 올 때만** 다시 셌다(`applyAccountSignal` 안) —
+       계정을 손본 뒤에도 옛 점수가 그대로라 «고쳤는데 그대로네»가 됐다. **누를 자리**를 준다(§4.8).
+       🔴 재는 것뿐이라 상태를 안 바꾼다. 못 재도 막지 않는다 — 그냥 그렇게 말한다(§9·§3).
+       ⚠️ **자리를 두 번 틀렸다**: ㉮저장 핸들러 안쪽 ㉯`po.onclick` 콜백 안. 둘 다 «단추는 보이는데 손이 안 붙은» 판이 됐고,
+          브라우저로 `b.onclick === false` 를 보고서야 알았다(AC-122 «그려졌나 ≠ 손이 붙었나»).
+          🔴 **한 줄짜리 `if (x) x.onclick = …` 이 여러 줄로 이어지는 파일이라, 눈으로 고른 앵커가 남의 콜백 안일 수 있다.** */
+    const hre = sh.querySelector("#hre");
+    if (hre) hre.onclick = async () => {
+      hre.disabled = true;
+      const rr = await UI.api("/api/accounts-health", { body: { id: a.id }, noRedirect: true });
+      hre.disabled = false;
+      if (!rr.ok) return UI.toast(rr.error || "지금은 다시 재지 못했어요 · 잠시 뒤 해 주세요");
+      a.healthScore = rr.healthScore;
+      UI.toast(`지금 ${rr.healthScore}점이에요`);
+      close(); load();
+    };
     /* [R9R10-A] 옷장 시트는 ui.js 한 곳(UI.styleSheet) — 돌아오면 칩만 다시 그린다 */
     const wzMore = sh.querySelector("#wzMore"); if (wzMore) wzMore.onclick = () => UI.styleSheet({ accounts: D.accounts.filter((x) => x.channel === a.channel && x.status !== "suspended"), accountId: a.id,
       onChange: ({ accountId, styles, defaultStyleId }) => { if (accountId !== a.id) return; W.styles = styles; W.defaultStyleId = defaultStyleId; const wz = sh.querySelector("#wz"); if (wz) { wz.innerHTML = wzChips(); UI.bindChips(wz); } } }); if (rb) rb.onclick = () => { close(); setTimeout(() => reloginSheet(a), 300); };
+    /* [R17-B2] 🔴 **로그인 확인** — 조용히 본다(창 0 · 사람 손 0). 재로그인과 달리 **시트를 안 닫는다**: 몇 초면 끝나고,
+       닫았다 다시 열게 하면 «확인»이 «로그인»처럼 무거워 보인다. 결과는 같은 줄에 그대로 쓴다. */
+    const vs = sh.querySelector("#vsess"); if (vs) vs.onclick = async () => {
+      const d = sh.querySelector("#vsessD"); vs.disabled = true;
+      const say = (t) => { if (d) d.textContent = t; };
+      say("확인하고 있어요…");
+      const r = await UI.api("/api/accounts-verify", { body: { id: a.id } });
+      /* 🔴 겁주지 않는다(§3): «못 합니다»가 아니라 «켜 두시면 해 드려요» + 갈 길. */
+      if (!r.ok) { say(r.error || "지금은 확인하지 못했어요."); vs.disabled = false; return; }
+      const t0 = Date.now();
+      const tick = async () => {
+        if (!document.body.contains(sh)) return;                       // 시트 닫히면 폴링도 끝
+        const g = await UI.api(`/api/accounts-relogin?id=${a.id}`);
+        const st = g.ok && g.job ? g.job.status : null;
+        if (st === "done" || st === "failed") {
+          const acc = g.ok ? g.account : null;
+          const s = acc && acc.sessionState;
+          say(s === "alive" ? "잘 살아 있어요 · 그대로 올라가요"
+            : s === "expired" ? "다시 로그인이 필요해요 · 위 «로그인하기»를 눌러 주세요"
+            : "지금은 확인하지 못했어요 · 조금 뒤에 다시 눌러 주세요");
+          vs.disabled = false;
+          /* 🔴 상태가 바뀌었으면 목록도 같이 고쳐야 한다 — 시트만 맞고 뒤가 틀리면 그게 더 헷갈린다. */
+          if (s === "alive" || s === "expired") load();
+          return;
+        }
+        if (Date.now() - t0 > 90_000) { say("아직 확인 중이에요 · 조금 뒤에 다시 눌러 주세요"); vs.disabled = false; return; }
+        setTimeout(tick, 2500);
+      };
+      setTimeout(tick, 1500);
+    };
     /* [AC-187] 주소 확인 · 확인 취소 — 시트는 목록과 **같은 것**을 연다(두 벌 금지) */
     const ag = sh.querySelector("#addrGo"); if (ag) ag.onclick = () => { close(); setTimeout(() => addrSheet(a), 300); };
     /* [AC-189] 프록시 떼기 — 빈 칸이 «지우기»가 아니게 됐으니 **뗄 길을 따로** 준다(막다른 골목 금지 · §4.8). */
@@ -1629,6 +1739,7 @@ await load();
 <!-- [AC-188 · DESIGN §5B.11 · §13.0b «그룹 리스트 + 토글»] 🔴 잠깐 멈춤 — 쉬는 중이면 이 자리가 «쉬는 중 · N일째 + 다시 시작» 한 줄이 된다.
      🔴 «만드는 것»보다 **위**에 둔다: 쉬는 중에 설정을 열면 제일 먼저 보여야 «크론 멈춘 걸 까먹는» 일이 없다(사장님 물음). -->
 <div class="group" id="pauseg"><div class="gt">자동으로 만들고 올리기</div><div id="pauseBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="dag" hidden><div class="gt">디렉터</div><div id="daBody"></div></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
@@ -1692,6 +1803,36 @@ async function loadPause() {
   PAUSE = r.ok && r.pause && typeof r.pause === "object" ? r.pause : null;
   drawPause();
 }
+
+/* ── [R17 · §15 `director-settings` · DESIGN:286·1100] «디렉터에게 맡기기» ──────────────────
+   🔴 설계의 이름은 `director-settings` 지만 **새 문을 파지 않았다** — 우리 설정 정본은 `tenants.settings` 한 곳이고
+      문을 따로 두면 «설정이 두 군데»가 된다(§14). 서버는 `tenant-settings` 에 `directorAuto` 한 칸을 더했다.
+   🔴 켜는 것만 요금제로 가른다(Pro 부터 · `directorEdit`). **끄는 것은 언제나 된다**(되돌릴 길은 막지 않는다 · §9).
+   🔴 겁주지 않는다(§3) — «안 켜면 손해예요» 같은 말 0. 무엇이 달라지는지 **사실 한 줄**만. */
+async function drawDirectorAuto() {
+  const g = UI.$("#dag"), box = UI.$("#daBody"); if (!g || !box) return;
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  if (!r.ok) return;                                  /* 못 읽으면 조용히 둔다 — 없는 상태를 지어내지 않는다 */
+  const on = !!(r.settings || {}).directorAuto;
+  g.hidden = false;
+  box.innerHTML = `<div class="fr"><div class="fl">디렉터에게 맡기기<small id="daDesc">${on ? "지시서를 저희가 바로 확정하고 만들어요." : "지시서를 보여 드리고 «이대로 만들기»를 누르시면 만들어요."}</small></div>
+    <button class="toggle" type="button" id="daTg" aria-checked="${on ? "true" : "false"}"></button></div>
+    <p class="muted" id="daWhy" hidden style="margin:0 16px 10px;font-size:12.5px"></p>`;
+  const tg = UI.$("#daTg"), desc = UI.$("#daDesc"), why = UI.$("#daWhy");
+  UI.toggle(tg, async (next) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { directorAuto: next }, noRedirect: true });
+    if (!rr.ok) {
+      /* 🔴 요금제가 없어서 못 켜는 것이면 **무엇을 하면 되는지**까지 말한다(§3 ①사실 ②어떻게 ③우리가 하는 것) */
+      why.hidden = false;
+      why.textContent = rr.reason === "plan_limit" ? "맡기기는 Pro 요금제부터 쓸 수 있어요 — 지금은 지시서를 보여 드리고 누르시면 만들어요." : (rr.error || "바꾸지 못했어요 · 잠시 뒤 다시 해 주세요");
+      return false;
+    }
+    why.hidden = true;
+    desc.textContent = next ? "지시서를 저희가 바로 확정하고 만들어요." : "지시서를 보여 드리고 «이대로 만들기»를 누르시면 만들어요.";
+    UI.toast(next ? "이제 저희가 알아서 만들어요" : "지시서를 보여 드릴게요");
+  });
+}
+drawDirectorAuto();
 function drawPause() {
   const box = UI.$("#pauseBody"); if (!box) return;
   if (!PAUSE) {
@@ -3860,7 +4001,7 @@ function postSheet(p) {
     ${p.publishedAt ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올라간 시각</span><span class="v">${UI.dateKST(p.publishedAt)} ${UI.timeKST(p.publishedAt)}</span></div>` : ""}
     ${p.publishedVia ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">올린 방법</span><span class="v">${p.publishedVia === "runner" ? "내 PC 프로그램" : p.publishedVia === "manual" ? "직접 올림" : "채널 연동"}</span></div>` : ""}
     ${stat ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">성과</span><span class="v">${UI.esc(stat)}</span></div>` : ""}
-    ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.ago(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
+    ${s.lastSyncAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.whenKST(s.lastSyncAt))} 기준이에요 · 하루에 몇 번씩 다시 세어요</p>` : ""}
     ${p.publishedAt && p.alive === false ? `<div class="banner" style="margin:8px 0 0"><span>채널에서 글이 보이지 않아요 · 지워졌을 수 있어요</span></div>` : ""}
     ${p.riskCount ? `<div class="banner ${p.riskHigh ? "" : "info"}" style="margin:8px 0 0"><span>이 글엔 못 지킨 게 ${p.riskCount}가지 있어요 · 지금이라도 고치거나 내릴 수 있어요</span>${p.pieceId ? `<a href="/app/piece.html?id=${p.pieceId}" style="font-weight:700;text-decoration:underline;white-space:nowrap">무엇인지 보기</a>` : ""}</div>` : ""}
     <div class="cta" style="flex-direction:column">
@@ -3910,6 +4051,28 @@ let EL = { accounts: [], thresholds: null, links: {} }, SRC = [], accounts = [];
 const linkOf = (k) => (EL.links && EL.links[k]) || FALLBACK_LINKS[k] || "";
 const srcOf = (source, accountId) => SRC.find((s) => s.source === source && (accountId == null || s.accountId === accountId));
 const connected = UI.qs.get("connected"); if (connected) UI.toast(`${UI.srcLabel(connected)} 을(를) 구글로 연결했어요`); // [v3.5] 동의 후 돌아온 자리
+/* 🔴 [R17 · A] **돌아오는 자리가 셋인데 화면은 하나만 받고 있었다.** `netlify/functions/revenue.ts` 는
+   `?connected=` 말고도 `?notready=<source>`(71행) · `?error=state|denied|exchange`(78·80·82행) 로 되돌려 보낸다.
+   여태 그 둘은 **아무 말 없는 빈 화면**이었다 — 고객은 구글에 다녀왔는데 무슨 일이 났는지 한 글자도 못 봤다.
+   🔴 §3 겁주지 않는다: «실패했습니다»가 아니라 ①무슨 일인지 ②다음에 뭘 하면 되는지 ③우리가 할 일이면 우리가 한다고 적는다.
+   🔴 ㉯ 규율(트리거 §3-1): «열쇠가 없어요»(notready)와 «불렀는데 안 됐어요»(error)를 **갈라서** 말한다. */
+const notready = UI.qs.get("notready");
+if (notready) UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">저희 쪽 준비가 하나 남았어요</p>
+  <p class="muted" style="margin:0 0 10px;line-height:1.7">${UI.esc(UI.srcLabel(notready))} 을(를) 가져오려면 저희가 구글에서 받은 열쇠를 꽂아야 해요. <b>고객님이 하실 일은 없어요.</b></p>
+  <p class="muted" style="margin:0 0 4px;line-height:1.7">준비되는 대로 여기서 바로 연결할 수 있게 해 둘게요. 그동안 ${UI.esc(notready === "youtube" ? "유튜브 수익 창출 신청" : "애드센스 가입과 사이트 추가")}은 미리 해 두시면 연결하는 날 바로 수익이 들어와요.</p>`,
+  { title: UI.srcLabel(notready) });
+const oaErr = UI.qs.get("error");
+if (oaErr) {
+  /* 🔴 셋을 다르게 말한다 — «알 수 없는 오류» 하나로 뭉치면 고객이 다음에 뭘 할지 모른다(AC-170 ②). */
+  const E = {
+    state: ["연결이 도중에 끊겼어요", "안전을 위해 잠깐 사이에만 쓰는 표가 있는데 그게 지났어요. <b>한 번 더 눌러 주시면</b> 대개 바로 돼요."],
+    denied: ["구글에서 «허용»을 안 누르셨어요", "수익을 가져오려면 구글 화면에서 <b>«허용»</b>까지 눌러 주셔야 해요. 다시 눌러서 해 볼 수 있어요."],
+    exchange: ["구글과 이야기하다 막혔어요", "저희 쪽에서 확인하고 있어요. <b>고객님이 하실 일은 없어요</b> — 잠시 뒤 한 번 더 눌러 보시고, 그래도 안 되면 문의 주세요."],
+  };
+  const e = E[oaErr] || ["연결을 끝내지 못했어요", "잠시 뒤 한 번 더 눌러 보세요. 그래도 안 되면 문의 주시면 저희가 봐 드릴게요."];
+  UI.sheet(`<p style="margin:0 0 6px;font-size:16px;font-weight:700">${UI.esc(e[0])}</p><p class="muted" style="margin:0 0 10px;line-height:1.7">${e[1]}</p>
+    <div class="cta"><a class="btn secondary" href="/app/support.html">문의하기</a></div>`, { title: "구글 연결" });
+}
 
 async function load() {
   const [e, v, a] = await Promise.all([UI.api("/api/ad-eligibility"), UI.api("/api/revenue-sources"), UI.api("/api/accounts-list")]);
@@ -3926,7 +4089,8 @@ function gauge(label, now, need, unit) {
 }
 const STATE_PILL = { none: ["off", "아직 신청 전"], pending: ["warn", "심사 중"], approved: ["ok", "승인됨"] };
 const srcPill = (s) => { const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured; return `<span class="pill ${st[0]}">${st[1]}</span>`; };
-const srcSub = (s) => (s && s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
+/* [R17-B2] 🔴 절대 시각(KST) — «어제 값인지 오늘 값인지»가 여기서 갈라진다(§2.3). */
+const srcSub = (s) => (s && s.lastSyncAt ? `${UI.whenKST(s.lastSyncAt)} 기준` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
 const btn = (attr, label, danger = false) => `<button type="button" class="btn sm ${danger ? "ghost" : "secondary"}" ${attr}${danger ? ' style="color:var(--danger-ink)"' : ""}>${label}</button>`;
 const bar = (...bs) => `<div style="display:flex;gap:8px;padding:2px 16px 10px;flex-wrap:wrap">${bs.filter(Boolean).join("")}</div>`;
 function card(title, desc, inner) {

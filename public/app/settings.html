@@ -19,6 +19,7 @@
 <!-- [AC-188 · DESIGN §5B.11 · §13.0b «그룹 리스트 + 토글»] 🔴 잠깐 멈춤 — 쉬는 중이면 이 자리가 «쉬는 중 · N일째 + 다시 시작» 한 줄이 된다.
      🔴 «만드는 것»보다 **위**에 둔다: 쉬는 중에 설정을 열면 제일 먼저 보여야 «크론 멈춘 걸 까먹는» 일이 없다(사장님 물음). -->
 <div class="group" id="pauseg"><div class="gt">자동으로 만들고 올리기</div><div id="pauseBody"><div class="row"><span class="sk" style="width:100%;height:40px"></span></div></div></div>
+<div class="group" id="dag" hidden><div class="gt">디렉터</div><div id="daBody"></div></div>
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
@@ -62,7 +63,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=30"></script>
+<script src="/js/ui.js?v=31"></script>
 <script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
@@ -88,6 +89,36 @@ async function loadPause() {
   PAUSE = r.ok && r.pause && typeof r.pause === "object" ? r.pause : null;
   drawPause();
 }
+
+/* ── [R17 · §15 `director-settings` · DESIGN:286·1100] «디렉터에게 맡기기» ──────────────────
+   🔴 설계의 이름은 `director-settings` 지만 **새 문을 파지 않았다** — 우리 설정 정본은 `tenants.settings` 한 곳이고
+      문을 따로 두면 «설정이 두 군데»가 된다(§14). 서버는 `tenant-settings` 에 `directorAuto` 한 칸을 더했다.
+   🔴 켜는 것만 요금제로 가른다(Pro 부터 · `directorEdit`). **끄는 것은 언제나 된다**(되돌릴 길은 막지 않는다 · §9).
+   🔴 겁주지 않는다(§3) — «안 켜면 손해예요» 같은 말 0. 무엇이 달라지는지 **사실 한 줄**만. */
+async function drawDirectorAuto() {
+  const g = UI.$("#dag"), box = UI.$("#daBody"); if (!g || !box) return;
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  if (!r.ok) return;                                  /* 못 읽으면 조용히 둔다 — 없는 상태를 지어내지 않는다 */
+  const on = !!(r.settings || {}).directorAuto;
+  g.hidden = false;
+  box.innerHTML = `<div class="fr"><div class="fl">디렉터에게 맡기기<small id="daDesc">${on ? "지시서를 저희가 바로 확정하고 만들어요." : "지시서를 보여 드리고 «이대로 만들기»를 누르시면 만들어요."}</small></div>
+    <button class="toggle" type="button" id="daTg" aria-checked="${on ? "true" : "false"}"></button></div>
+    <p class="muted" id="daWhy" hidden style="margin:0 16px 10px;font-size:12.5px"></p>`;
+  const tg = UI.$("#daTg"), desc = UI.$("#daDesc"), why = UI.$("#daWhy");
+  UI.toggle(tg, async (next) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { directorAuto: next }, noRedirect: true });
+    if (!rr.ok) {
+      /* 🔴 요금제가 없어서 못 켜는 것이면 **무엇을 하면 되는지**까지 말한다(§3 ①사실 ②어떻게 ③우리가 하는 것) */
+      why.hidden = false;
+      why.textContent = rr.reason === "plan_limit" ? "맡기기는 Pro 요금제부터 쓸 수 있어요 — 지금은 지시서를 보여 드리고 누르시면 만들어요." : (rr.error || "바꾸지 못했어요 · 잠시 뒤 다시 해 주세요");
+      return false;
+    }
+    why.hidden = true;
+    desc.textContent = next ? "지시서를 저희가 바로 확정하고 만들어요." : "지시서를 보여 드리고 «이대로 만들기»를 누르시면 만들어요.";
+    UI.toast(next ? "이제 저희가 알아서 만들어요" : "지시서를 보여 드릴게요");
+  });
+}
+drawDirectorAuto();
 function drawPause() {
   const box = UI.$("#pauseBody"); if (!box) return;
   if (!PAUSE) {

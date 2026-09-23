@@ -604,6 +604,26 @@
   UI.slotDot = (s) => (UI.SLOT_STATUS[s] || ["off"])[0].replace("off", "");
   /* «방금 전 · 2시간 전» — 러너 마지막 응답 */
   UI.ago = (iso) => { if (!iso) return ""; const ms = Date.now() - UI.utc(iso).getTime(); if (ms < 90e3) return "방금 전"; const m = Math.round(ms / 60e3); if (m < 60) return `${m}분 전`; const h = Math.round(m / 60); if (h < 24) return `${h}시간 전`; return `${Math.round(h / 24)}일 전`; };
+  /**
+   * [R17-B2 · DESIGN §2.3] 🔴 **«언제 것인가»를 절대 시각으로** — «어제 12:30» · «오늘 09:05» · «9월 20일 12:30»(전부 KST).
+   *
+   *   왜 `UI.ago` 로는 모자란가: 수익 신선도가 «3시간 전 가져옴»이었는데, 그러면
+   *   **하루 지난 값인지 오늘 아침 값인지 구분이 안 된다**(전수조사 §2.3 이 든 예시가 «어제 12:30 기준»이다).
+   *   «3시간 전»은 **볼 때마다 달라지는 값**이라, 스크린샷을 찍어 두거나 남에게 말할 수도 없다.
+   *   🔴 오늘·어제는 **KST 날짜로** 가른다(`toLocaleDateString` timeZone 고정 · §13.5) —
+   *      `Date` 의 로컬 날짜로 가르면 해외에 있는 고객 화면에서 «어제»가 하루 밀린다.
+   */
+  UI.whenKST = (iso) => {
+    if (!iso) return "";
+    const d = UI.utc(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const day = (x) => x.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });   // YYYY-MM-DD(KST)
+    const now = new Date();
+    const y = new Date(now.getTime() - 86400e3);
+    const t = day(d);
+    const word = t === day(now) ? "오늘" : t === day(y) ? "어제" : UI.dateKST(iso);
+    return `${word} ${UI.timeKST(iso)}`;
+  };
   /* 복사(토큰·본문) — clipboard 막힌 환경 폴백까지 */
   UI.copy = async function (text) {
     try { await navigator.clipboard.writeText(text); return true; } catch { /* 폴백 */ }
@@ -847,11 +867,57 @@
         if (String(q0 || "").trim()) search();   // 소재 제목으로 한 번 미리 찾아 둔다(빈 격자로 맞지 않게)
       } });
   };
+  /**
+   * 🔴 [R17 · A] **«이 사진이 어느 글에 쓰였나»** — `GET /api/photo-usage?key=` 는 R8 에 다 만들어져 있었는데
+   * 부르는 화면이 **한 곳도 없었다**(`grep photo-usage public/` = 0).
+   *
+   *   왜 필요한가(DESIGN §5E · 내리기의 첫 걸음): 스톡 사진 한 장에 침해 통지가 오면 **그 한 장이 들어간 글을 전부**
+   *   찾아 내려야 한다. 열쇠는 «바이트 해시»(내 사진)·«제공사+id»(스톡)라서 **같은 사진을 여러 글에 썼어도 한 번에 묶인다**
+   *   (`lib/photo-source.ts:35~40`). 파일 이름으로 찾으면 못 찾는다.
+   *
+   *   🔴 §9 — **막지 않는다.** 여기서 «못 내립니다»라고 하지 않는다. 발행된 글이면 **그 글로 가는 길**을 주고,
+   *      우리가 내려 줄 수 없는 채널이면 «직접 내려 주세요»와 **바깥 링크**를 준다(없는 길을 단추로 만들지 않는다).
+   */
+  UI.photoUsesSheet = function (key) {
+    UI.sheet(`<div id="puList"><span class="sk" style="width:100%;height:56px"></span></div>`, {
+      title: "이 사진이 쓰인 글", onOpen: async (sh) => {
+        const box = sh.querySelector("#puList");
+        const r = await UI.api(`/api/photo-usage?key=${encodeURIComponent(key)}`);
+        if (!r.ok) { box.innerHTML = `<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "지금은 확인할 수 없어요. 잠시 뒤 다시 열어 보세요.")}</p>`; return; }
+        const uses = r.uses || [];
+        if (!uses.length) { box.innerHTML = '<p class="muted" style="margin:0;font-size:13px">아직 이 사진을 쓴 글이 없어요.</p>'; return; }
+        /* 🔴 [AC-273 · 2026-09-23] **«N곳»이라고 단정하지 않는다.** 서버가 `piecesUsingSource` 에서 `limit = min(500, opts.limit ?? 200)` 으로
+           **말없이 자른다**(`lib/piece-photos.ts:150`). 여기가 §5E 침해 통지·내리기라, 201곳에 쓰인 사진을 «200곳»이라 적으면
+           고객은 **200개를 내린 뒤 다 내렸다고 믿는다.** «말없이 사라짐»만큼 나쁜 게 «말없이 **안** 사라짐»이다.
+           🔴 **상한 숫자를 여기 박지 않는다** — 서버가 정하는 값이라 박으면 서버가 500으로 올리는 날 또 거짓이 된다(AC-232).
+              그리고 `/api/photo-usage` 는 **`limit` 을 안 받는다**(`netlify/functions/piece-photos.ts:46` — 쿼리를 안 읽는다).
+              그래서 «받은 개수 === 요청한 개수»로도 못 잰다. ⇒ **잴 수 없는 것을 단정하지 않는 쪽**으로 갔다:
+              «여기 보이는»이라고 적고, **다시 열어 확인하는 길**을 함께 준다. 이 문장은 상한이 몇이든 늘 참이다.
+           🔴 §3 — 우리 사정(«200개까지만 보여 드려요»)을 고객 문제로 넘기지 않는다. **무엇이 · 어떻게 하면 되는지**만 적는다.
+
+           🔴 **[같은 날 · B 가 ⓐ 를 했다] 서버가 `total`(LIMIT 안 건 COUNT)·`shown`·`hasMore` 를 싣는다.**
+              그래서 **진짜 수를 적을 수 있다** — 201곳이면 «201곳». 🔴 자르는 것은 **그대로 둔다**(§9 — 막지 말고 말해 준다).
+              없앤 것은 «다 보여 준 척»이지 상한이 아니다.
+           🔴 **두 길을 다 둔다** — 서버가 아직 옛 판이면(`total` 이 없으면) 아래 «여기 보이는»으로 떨어진다.
+              배포가 반쯤 섞인 동안에도 **거짓말은 안 한다.** `hasMore` 는 `=== true` 로만 본다(칸이 없으면 «없다»가 아니라 «모른다» · AC-9). */
+        const total = typeof r.total === "number" ? r.total : null;
+        const more = r.hasMore === true;
+        box.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:13px">${total == null
+          ? `여기 보이는 글 ${uses.length}곳에 들어가 있어요. 내려야 하면 하나씩 열어요.<br>다 내린 뒤 이 화면을 다시 열면 남은 곳이 있는지 확인할 수 있어요.`
+          : `글 <b>${UI.num(total)}곳</b>에 들어가 있어요. 내려야 하면 하나씩 열어요.${more ? `<br>여기엔 ${UI.num(uses.length)}곳만 보여요 — 내린 뒤 다시 열면 나머지가 이어서 보여요.` : ""}`}</p>`
+          + uses.map((u) => {
+            const st = UI.PIECE_STATUS[u.status] || ["off", u.status];
+            return `<a class="row tap" href="/app/piece.html?id=${u.pieceId}">${UI.mark(u.channel, "sm")}<div class="l"><span class="t wrap">${UI.esc(u.title || "제목 없는 글")}</span><span class="d">${UI.esc(UI.chLabel(u.channel))} · <span class="pill ${st[0]}" style="font-size:11px;padding:1px 6px">${UI.esc(st[1])}</span></span></div>${UI.chev}</a>`
+              + (u.externalUrl ? `<a class="row tap" href="${UI.esc(u.externalUrl)}" target="_blank" rel="noopener"><span class="mk soft">↗</span><div class="l"><span class="t">올라간 자리에서 열기</span><span class="d wrap">${UI.esc(u.externalUrl)}</span></div></a>` : "");
+          }).join("");
+      },
+    });
+  };
   UI.photoSheet = function (pieceId, onDone, q0) {
     let photos = [];
     /* 행(ListRow) 한 벌 — 🔴 격자 위 작은 ✕ 를 쓰지 않는다(터치 44px 하한 · §13.0 접근성). 마크 38px + 이름 + 44px 단추. */
     const SRC = { customer: "내 사진", stock: "스톡 사진", ai: "AI 사진" };
-    const thumb = (p, i) => `<div class="row" style="padding-left:0;padding-right:0"><span class="mk ph"><img src="${UI.esc(p.url)}" alt="" loading="lazy"></span><div class="l"><span class="t">${UI.esc(p.caption || `사진 ${i + 1}`)}</span><span class="d wrap">${UI.esc(SRC[p.source && p.source.kind] || "내 사진")}${p.stock ? ` · ${UI.creditLine(p.stock)}` : ""}</span></div><button type="button" data-drop="${p.id}" aria-label="이 사진 빼기" style="min-height:44px;min-width:44px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
+    const thumb = (p, i) => `<div class="row" style="padding-left:0;padding-right:0"><span class="mk ph"><img src="${UI.esc(p.url)}" alt="" loading="lazy"></span><div class="l"><span class="t">${UI.esc(p.caption || `사진 ${i + 1}`)}</span><span class="d wrap">${UI.esc(SRC[p.source && p.source.kind] || "내 사진")}${p.stock ? ` · ${UI.creditLine(p.stock)}` : ""}</span></div>${p.source && p.source.key ? `<button type="button" class="lk" data-uses="${UI.esc(p.source.key)}" style="min-height:44px;padding:0 8px;flex:none">쓰인 곳</button>` : ""}<button type="button" data-drop="${p.id}" aria-label="이 사진 빼기" style="min-height:44px;min-width:44px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
     const draw = (sh) => {
       sh.querySelector("#phList").innerHTML = photos.length ? photos.map(thumb).join("") : '<p class="muted" style="margin:0;font-size:13px">아직 넣은 사진이 없어요.</p>';
       $$("[data-drop]", sh).forEach((b) => b.onclick = async () => {
@@ -861,6 +927,7 @@
         if (!r.ok) return r.gated ? undefined : UI.toast(r.error || "빼지 못했어요");
         photos = photos.filter((x) => x.id !== Number(b.dataset.drop)); draw(sh); if (onDone) onDone(photos);
       });
+      $$("[data-uses]", sh).forEach((b) => b.onclick = () => UI.photoUsesSheet(b.dataset.uses));
     };
     UI.sheet(`<p class="muted" style="margin:0 0 10px;font-size:13px">내 사진(JPG·PNG·WEBP)을 올리거나 스톡에서 찾아 넣을 수 있어요. 둘 다 코인이 들지 않아요.</p>
       <div id="phList"><span class="sk" style="width:100%;height:60px"></span></div>

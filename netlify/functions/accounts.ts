@@ -5,6 +5,7 @@
  *   [P1R7 §3.2] 채널 게이트 — **새로 연결할 때만** 요금제를 본다(402 `step:"plan_channel"`). 🔴 이미 연결한 계정은 소급해서 막지 않는다.
  *   [P1R7 §3.3] 자격 보관 동의 — 아이디·비밀번호를 맡기는 채널(session·app_password)은 `agreeCredsStorage:true` 를 받아 `consents(creds_storage)` 1행.
  *     🔴 키 자체가 없는 옛 화면은 막지 않는다(가입 동의와 같은 관례) — 대신 감사 `account_add_no_consent` 를 남긴다. 화면이 보내기 시작하면 필수가 된다.
+ *   POST /api/accounts-health              { id }            — [R17 · §15] 건강 점수를 **지금 다시 잰다**(읽기만 · 상태는 안 바꾼다)
  *   POST /api/accounts-remove              { id }            — 소프트 삭제(creds purged_at · status disconnected · last_error_kind removed)
  *   POST /api/accounts-update              { id, displayName?, dailyCap?, minGapMin?, personaId?, proxyUrl?, goldenHours?, monetize?, groupName?|groupId?, avatarUrl?, defaultTier?, defaultStyleId?, reader?, openedAt? }
  *                                          🔴 [AC-201] `confirmBlogId?` — «이 블로그 주소가 맞아요»(러너가 실제로 본 주소만 · null = 승인 취소)
@@ -35,7 +36,7 @@ import { isOAuthChannel, providerConfigured, signState, verifyState, authorizeUr
 import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/accounts-list", "/api/accounts-add", "/api/accounts-remove", "/api/accounts-update", "/api/accounts-oauth-start", "/api/accounts-oauth-return"] };
+export const config = { path: ["/api/accounts-list", "/api/accounts-add", "/api/accounts-remove", "/api/accounts-update", "/api/accounts-oauth-start", "/api/accounts-oauth-return", "/api/accounts-health"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
@@ -82,7 +83,31 @@ async function checkLimit(tid: number): Promise<Response | null> {
 void planOf;
 
 /** 워드프레스 App Password 인증 확인 — GET {siteUrl}/wp-json/wp/v2/users/me (Basic). */
-async function verifyWordpress(siteUrl: string, loginId: string, appPassword: string): Promise<{ ok: boolean; name?: string; reason?: string }> {
+/**
+ * [R17-B2 · 2026-09-23] 🔴 **워드프레스 연결이 왜 안 됐나를 갈라서 말한다.**
+ *
+ *   ══ 왜 ══
+ *   `verifyWordpress` 는 실패를 **다섯 갈래**로 가르는데(`http_401`·`http_403`·`http_404`·`no_user`·연결 실패)
+ *   고객에게는 전부 **«워드프레스 로그인 정보를 확인해 주세요»** 한 문장으로 나갔다.
+ *   🔴 그 말은 404·연결 실패에서는 **거짓**이다 — 주소가 안 열리거나 REST 가 꺼진 건데 비밀번호를 다시 만들러 간다.
+ *      «키 꽂으면 즉시 가동»의 ①(정직하게 말한다)이 서버 안에서만 지켜지고 **화면 앞에서 뭉개지던 자리**다.
+ *
+ *   ══ 어떻게 ══ §3 그대로 — ①**사실 한 줄**(무엇이 그런가) ②**어떻게 하면 되는지** ③(있으면) 우리가 대신 해 주는 것.
+ *   🔴 겁주지 않는다: «안 됩니다»·«차단됐습니다»로 끝내지 않고 **다음 손**을 같이 준다.
+ *   🔴 `field` 는 화면이 **어느 칸에 빨간 줄을 칠지**다 — 주소 문제를 비밀번호 칸에 칠하면 그것도 거짓 안내다.
+ */
+export function wpAuthSay(reason?: string): { error: string; field: "siteUrl" | "loginId" | "appPassword"; detail?: string } {
+  const r = String(reason ?? "");
+  if (r === "http_401") return { field: "appPassword", error: "아이디나 앱 비밀번호가 맞지 않아요. 워드프레스 관리자 → 사용자 → 프로필 → «응용 프로그램 비밀번호»에서 새로 만들어 붙여넣어 주세요(띄어쓰기는 그대로 두셔도 돼요)." };
+  if (r === "http_403") return { field: "appPassword", error: "워드프레스가 요청을 막았어요. 보안 플러그인이 REST API 를 막고 있거나 앱 비밀번호 기능이 꺼져 있을 때 그래요. 플러그인에서 «REST API» 를 허용하거나 잠시 꺼 보고 다시 눌러 주세요." };
+  if (r === "http_404") return { field: "siteUrl", error: "그 주소에서 워드프레스를 못 찾았어요. 주소가 맞는지(끝에 /wp 같은 게 붙는지) 보시고, 관리자 → 설정 → 고유주소를 «기본»이 아닌 것으로 한 번 저장해 주시면 대개 열려요." };
+  if (r === "no_user") return { field: "loginId", error: "로그인은 됐는데 사용자 정보를 못 읽었어요. 그 아이디에 글쓰기 권한(편집자 이상)이 있는지 확인해 주세요." };
+  if (/abort|timeout|ETIMEDOUT/i.test(r)) return { field: "siteUrl", error: "사이트가 제때 응답하지 않았어요. 주소가 맞는지 보시고 잠시 뒤에 다시 눌러 주세요.", detail: r.slice(0, 60) };
+  /* 나머지(DNS·인증서·연결 거부 등) — 🔴 **모르는 것을 «비밀번호가 틀렸다»로 바꾸지 않는다**(AC-9). */
+  return { field: "siteUrl", error: "사이트에 연결하지 못했어요. 주소를 https:// 부터 정확히 적었는지 확인해 주세요.", detail: r.slice(0, 60) };
+}
+
+export async function verifyWordpress(siteUrl: string, loginId: string, appPassword: string): Promise<{ ok: boolean; name?: string; reason?: string }> {
   const base = siteUrl.replace(/\/+$/, "");
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12_000);
   try {
@@ -220,7 +245,13 @@ export default async (req: Request): Promise<Response> => {
       const appPassword = String(b.appPassword ?? "").trim();
       if (!/^https?:\/\//i.test(siteUrl) || !loginId || !appPassword) return badRequest("사이트 주소·아이디·앱 비밀번호를 적어 주세요.", "creds");
       const v = await verifyWordpress(siteUrl, loginId, appPassword);
-      if (!v.ok) { await writeAudit({ tenantId: tid, action: "account_add_fail", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { channel, handle, reason: v.reason } }); return json({ ok: false, step: "wp_auth", error: "워드프레스 로그인 정보를 확인해 주세요." }, 400); }
+      if (!v.ok) {
+        await writeAudit({ tenantId: tid, action: "account_add_fail", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { channel, handle, reason: v.reason } });
+        /* 🔴 [R17-B2] **다섯 갈래로 갈라서 말한다.** 종전엔 전부 «로그인 정보를 확인해 주세요» 한 문장이었는데,
+           404(REST 가 꺼져 있다)·연결 실패(주소가 안 열린다)는 **로그인 문제가 아니다** — 그 말은 고객을
+           아무 소용 없는 곳(비밀번호 다시 만들기)으로 보낸다. §3 그대로 «사실 한 줄 + 어떻게 하면 되는지»로 준다. */
+        return json({ ok: false, step: "wp_auth", ...wpAuthSay(v.reason) }, 400);
+      }
       const id = await upsertAccount(tid, channel as ChannelKey, handle, displayName || v.name || null, "app_password", "active");
       if (id === null) return json({ ok: false, step: "duplicate", error: "이미 연결한 계정이에요." }, 409);
       await saveCreds(tid, id, "app_password", { siteUrl, loginId, appPassword });
@@ -228,6 +259,22 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, account: await getAccount(tid, id) }, 201);
     }
 
+    /* ── [R17 · §15 `accounts-health` · DESIGN:1304] 건강 점수를 **지금 다시 재 본다** ──────────
+       🔴 여태 점수는 **신호가 올 때만** 다시 셌다(`applyAccountSignal` 안 · account-health.ts:104).
+          그래서 화면은 «건강 85점»을 **보여 주기만** 하고 고객은 **다시 재 볼 길이 없었다** —
+          계정을 손본 뒤에도 옛 점수가 그대로 있어 «고쳤는데 그대로네»가 된다.
+       🔴 **상태는 안 바꾼다.** 이건 «재기»지 «판정»이 아니다 — 점수만 다시 세고 그 값을 돌려준다(§9 막지 않는다).
+       🔴 **테넌트 스코프**를 반드시 지난다(§4.6) — 남의 계정 점수를 재 주면 안 된다. */
+    if (path.endsWith("/accounts-health")) {
+      const b = await readJson<{ id?: unknown }>(req);
+      const id = Math.floor(Number(b.id ?? 0)) || 0;
+      if (!id) return badRequest("어떤 계정인지 알 수 없어요.", "id");
+      const acc = await getAccount(auth.tid, id);
+      if (!acc) return json({ ok: false, error: "계정을 찾을 수 없어요.", step: "not_found" }, 404);
+      const { recomputeHealth } = await import("../../lib/account-health");
+      const healthScore = await recomputeHealth(auth.tid, id);
+      return json({ ok: true, id, healthScore });
+    }
     if (path.endsWith("/accounts-remove")) {
       const b = await readJson<{ id?: number }>(req);
       const id = n(b.id); if (!id) return badRequest("id");

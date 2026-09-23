@@ -252,8 +252,35 @@ async function load() {
   UI.$$("[data-edit]").forEach((b) => b.onclick = () => planSheet(p.plans.find((x) => x.key === b.dataset.edit)));
   if (CP) { UI.$("#packs").innerHTML = OPS.table([{ h: "팩", f: (k) => `<b>${UI.esc(k.id)}</b>${k.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}` }, { h: "가격", r: true, f: (k) => UI.won(k.krw) }, { h: "코인", r: true, f: (k) => UI.num(k.coins) }, { h: "보너스", r: true, f: (k) => k.bonusPct ? `+${k.bonusPct}%` : "—" }, { h: "청구", r: true, f: (k) => `${UI.won(k.krw + Math.round(k.krw * 0.1))}<span class="muted"> (VAT 포함)</span>` }], CP.packs || []);
     UI.$("#table").innerHTML = `<div class="kv" style="white-space:normal"><span class="k">단가표</span><span class="v" style="white-space:normal;justify-content:flex-end;gap:6px;flex-wrap:wrap">${Object.entries(CP.table || {}).map(([k, v]) => `<span class="pill off">${UI.esc(k)} ${v}</span>`).join("")}</span></div>`; }
-  const EST = { scheduled: ["off", "예약"], noticed: ["warn", "고지 보냄"], applied: ["ok", "적용됨"] };
-  UI.$("#events").innerHTML = OPS.table([{ h: "플랜", f: (e) => UI.esc(e.planKey) }, { h: "가격", f: (e) => `${UI.won(e.oldPriceKrw)} → <b>${UI.won(e.newPriceKrw)}</b>` }, { h: "적용일(KST)", f: (e) => OPS.dateKST(e.effectiveAt) }, { h: "고지", f: (e) => e.noticedAt ? OPS.dt(e.noticedAt) : "—" }, { h: "대상", r: true, f: (e) => UI.num(e.affected) }, { h: "상태", f: (e) => OPS.pill(EST[e.status] || ["off", e.status]) }, { h: "문구", f: (e) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:320px">${UI.esc(e.noticeText)}</span>` }], p.priceEvents || []);
+  /* 🔴 [AC-271 · A · 2026-09-23 · R17] `cancelled` 가 이 표에 없어서 **«cancelled» 가 영어로 그대로 찍혔다.**
+     `OPS.pill(EST[e.status] || ["off", e.status])` 의 `||` 뒤가 «못 찾으면 열쇠 글자» 라서 조용히 영어가 샌다 —
+     서버는 R8 부터 `cancelled` 를 쓰고 있었다(`lib/billing/price-events.ts:100`). 낱말 표가 서버보다 낡았던 것이다. */
+  const EST = { scheduled: ["off", "예약"], noticed: ["warn", "고지 보냄"], applied: ["ok", "적용됨"], cancelled: ["off", "취소됨"] };
+  const CANCELABLE = ["scheduled", "noticed"];   // 서버와 같은 목록(`ops-plans.ts` → `cancelPriceEvent`)
+  UI.$("#events").innerHTML = OPS.table([{ h: "플랜", f: (e) => UI.esc(e.planKey) }, { h: "가격", f: (e) => `${UI.won(e.oldPriceKrw)} → <b>${UI.won(e.newPriceKrw)}</b>` }, { h: "적용일(KST)", f: (e) => OPS.dateKST(e.effectiveAt) }, { h: "고지", f: (e) => e.noticedAt ? OPS.dt(e.noticedAt) : "—" }, { h: "대상", r: true, f: (e) => UI.num(e.affected) }, { h: "상태", f: (e) => OPS.pill(EST[e.status] || ["off", e.status]) }, { h: "문구", f: (e) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:320px">${UI.esc(e.noticeText)}</span>` },
+    /* 🔴 [R17] **보낼 문이 없었다** — 서버 `POST /api/ops-price-event-cancel` 은 R8 에 다 돼 있었고
+       고객 앱도 `price_change_cancelled` 알림을 받을 준비가 끝나 있었는데(`public/js/ui.js:663`) **부르는 화면이 0곳**이었다. */
+    { h: "", f: (e) => CANCELABLE.includes(e.status) ? `<button type="button" class="lk" data-cancel="${e.id}">개정 취소</button>` : "" }], p.priceEvents || []);
+  UI.$$("[data-cancel]").forEach((b) => b.onclick = () => cancelSheet((p.priceEvents || []).find((e) => String(e.id) === b.dataset.cancel)));
+}
+/* 되돌릴 수 없는 동작이라 한 번 묻는다(§9 «확인 대화는 게이트가 아니다» — 우리 판단이 아니라 운영자를 위한 확인).
+   🔴 **고지를 이미 보낸 개정이면 취소도 고객에게 간다** — 서버가 그렇게 돼 있다(`price-events.ts:99~101` · notified_count > 0).
+      그 사실을 시트에서 먼저 말한다. 모르고 누르면 «내가 안 보낸 알림»이 고객에게 간다. */
+function cancelSheet(e) {
+  if (!e) return;
+  const sent = Number(e.affected) > 0 && !!e.noticedAt;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px;line-height:1.7">${UI.esc(e.planKey)} 요금을 <b>${UI.won(e.oldPriceKrw)} → ${UI.won(e.newPriceKrw)}</b> 로 바꾸기로 한 예약이에요. 취소하면 <b>지금 요금 그대로</b> 갑니다.</p>
+    ${sent ? `<div class="banner" style="margin:0 0 12px;display:block;line-height:1.6">이미 고지를 보낸 개정이라, 취소하면 <b>대상 ${UI.num(e.affected)}곳에 «요금 변경이 취소됐어요» 알림이 갑니다.</b><br><span style="font-weight:500">고객 앱 알림함과 요금제 화면에 남아요.</span></div>` : `<p class="muted" style="margin:0 0 12px;font-size:13px">아직 고지 전이라 고객에게 가는 알림은 없어요.</p>`}
+    <div class="cta"><button class="btn primary" type="button" id="cgo">개정 취소하기</button></div>`,
+    { title: "가격 개정을 취소할까요?", onOpen: (sh, close) => {
+      sh.querySelector("#cgo").onclick = async (ev) => {
+        const b = ev.currentTarget; b.disabled = true;
+        const r = await UI.api("/api/ops-price-event-cancel", { body: { id: e.id }, noRedirect: true });
+        b.disabled = false;
+        if (!r.ok) return UI.toast(r.error || "취소하지 못했어요");
+        close(); UI.toast(sent ? "취소했어요 · 고객에게 알렸어요" : "취소했어요"); load();
+      };
+    } });
 }
 function planSheet(x) {
   UI.sheet(`<form id="pf"><p class="muted" style="margin:0 0 8px;font-size:13px">가격은 여기서 못 바꿔요 — «가격 개정 예약»으로만(기존 고객 고지 → 다음 주기).</p>
@@ -397,29 +424,75 @@ UI.$$("#seg button").forEach((b) => b.onclick = () => { UI.$$("#seg button").for
 load();
 === cs.html | cs | CS ===
 <div class="group"><div class="gt">티켓 현황 <a href="/ops/takedowns.html">내리기</a></div><div class="stat4" id="stat"></div></div>
-<div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="st" style="margin:0"><button class="on" data-v="">전체</button><button data-v="open">열림</button><button data-v="progress">진행</button><button data-v="hold">보류</button><button data-v="resolved">해결</button></div><div class="seg" id="pr" style="margin:0"><button class="on" data-v="">우선순위</button><button data-v="urgent">긴급</button><button data-v="high">높음</button></div><div class="seg" id="mine" style="margin:0"><button data-v="">내 것만</button></div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="st" style="margin:0"><button class="on" data-v="">전체</button><button data-v="open">열림</button><button data-v="progress">진행</button><button data-v="hold">보류</button><button data-v="resolved">해결</button></div><div class="seg" id="pr" style="margin:0"><button class="on" data-v="">우선순위</button><button data-v="urgent">긴급</button><button data-v="high">높음</button></div><div class="seg" id="mine" style="margin:0"><button data-v="">내 것만</button></div><!-- 🔴 [R17 · A] 서버는 R8 부터 `unclaimed=1` 을 받고 있었는데(`ops-cs.ts:78·83`) **화면이 한 번도 안 걸었다.** 주인 없는 문의는 «있는데 안 보이는» 상태였다 --><div class="seg" id="unc" style="margin:0"><button data-v="">주인 없는 것</button></div></div>
 <div class="group"><div class="gt">티켓함 <a href="/ops/cs-faq.html">FAQ · 매크로</a></div><div id="list"></div></div>
 --- script ---
 const op = await OPS.boot("cs"); if (!op) return;
-let status = "", priority = "", mine = false;
+let status = "", priority = "", mine = false, unclaimed = false;
 const TST = { open: ["warn", "열림"], progress: ["ink", "진행"], hold: ["off", "보류"], resolved: ["ok", "해결"] };
 const PRI = { urgent: ["danger", "긴급"], high: ["warn", "높음"], normal: ["off", "보통"], low: ["off", "낮음"] };
 const SRC = { app: "앱", email: "메일", kakao: "카카오", system: "자동" };
 const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; const m = Math.round((UI.utc(t.slaDueAt).getTime() - Date.now()) / 60e3); return m < 0 ? `<span style="color:var(--danger-ink);font-weight:700">${-m}분 지남</span>` : m < 60 ? `<span style="color:var(--warn-ink);font-weight:700">${m}분</span>` : `${Math.round(m / 60)}시간`; };
 async function load() {
-  const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}`, { noRedirect: true })]);
+  const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}${unclaimed ? "&unclaimed=1" : ""}`, { noRedirect: true })]);
   if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", s.avgFirstReplyMin == null ? "—" : `${s.avgFirstReplyMin}분`], ["SLA 놓침", s.slaMissPct == null ? "—" : `${s.slaMissPct}%`], ["만족", s.satisfactionPct == null ? "—" : `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#list").innerHTML = OPS.table([
-    { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) }, { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },
+    { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) },
+    /* 🔴 [R17 · A] 주인 없는 문의는 여태 **이름 칸이 빈 줄**로 보였다(`tenantName` 이 "") — 서버는 R8 부터
+       `unclaimed: true` 와 `fromEmail` 을 실어 보내고 있었는데(`lib/cs.ts:108~110`) 화면이 안 읽었다.
+       ⇒ 보낸 사람을 그 자리에 적는다. **누가 기다리는지가 보여야 답을 한다.** */
+    { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${t.unclaimed ? `<span class="pill warn" style="font-size:11px;padding:1px 6px">주인 없음</span> ${UI.esc(t.fromName || t.fromEmail || "보낸 사람 모름")}` : UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },
     { h: "상태", f: (t) => OPS.pill(TST[t.status] || ["off", t.status]) }, { h: "담당", f: (t) => t.assignee ? UI.esc(t.assignee.name) : '<span class="muted">없음</span>' },
     { h: "SLA", f: sla }, { h: "갱신", f: (t) => OPS.dt(t.updatedAt) },
+    /* 🔴 [R17 · A] **고객을 붙이는 손잡이** — `POST /api/ops-ticket-claim` 은 R8 에 다 돼 있었는데 부르는 화면이 0곳이었다. */
+    { h: "", f: (t) => t.unclaimed ? `<button type="button" class="lk" data-claim="${t.id}">고객 붙이기</button>` : "" },
   ], r.tickets || [], (t) => `class="tap" data-id="${t.id}"`);
-  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = () => UI.go(`/ops/ticket.html?id=${tr.dataset.id}`));
+  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = (e) => { if (e.target.closest("[data-claim]")) return; UI.go(`/ops/ticket.html?id=${tr.dataset.id}`); });
+  UI.$$("[data-claim]").forEach((b) => b.onclick = () => claimSheet((r.tickets || []).find((t) => String(t.id) === b.dataset.claim)));
+}
+/* [R8 §4.3 · 화면은 R17] 🔴 **주인 없는 문의에 집을 붙인다.**
+   서버 규칙 그대로 말한다: ① 이미 주인이 있으면 안 바꾼다(남의 집 문의를 옮기는 길은 없다)
+   ② 붙이는 순간 플랜·러너·최근 오류 맥락을 **그때 새로 받아 적는다**(그래야 답을 할 수 있다). */
+function claimSheet(t) {
+  if (!t) return;
+  let picked = null;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px;line-height:1.7"><b>${UI.esc(t.fromName || t.fromEmail || "보낸 사람 모름")}</b> 님이 보낸 문의예요.<br>어느 집 사람인지 골라 주면 <b>플랜·러너·최근 오류</b>를 그때 받아 적어 둘게요.</p>
+    <div class="field"><label>고객 찾기</label><input class="input" id="cq" placeholder="집 이름 · 키 · 가입 메일" autocomplete="off"></div>
+    <div id="cres" style="max-height:240px;overflow:auto"></div>
+    <div class="cta"><button class="btn primary" type="button" id="cgo" disabled>이 집에 붙이기</button></div>`,
+    { title: "고객 붙이기", onOpen: (sh, close) => {
+      const res = sh.querySelector("#cres"), go = sh.querySelector("#cgo"), q = sh.querySelector("#cq");
+      const draw = (rows) => {
+        res.innerHTML = rows.length ? rows.map((x) => `<button type="button" class="row tap" data-t="${x.id}"><div class="l"><span class="t">${UI.esc(x.name)}</span><span class="d">${UI.esc(x.ownerEmail || x.key || "")} · ${UI.esc(x.planKey || "")}</span></div></button>`).join("")
+          : `<p class="muted" style="margin:8px 0;font-size:13px">찾는 집이 없어요. 이름이나 가입 메일로 다시 찾아 보세요.</p>`;
+        res.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => {
+          picked = rows.find((x) => String(x.id) === b.dataset.t);
+          res.querySelectorAll("[data-t]").forEach((x) => x.style.background = "");
+          b.style.background = "var(--press)";
+          go.disabled = false; go.textContent = `«${picked.name}» 에 붙이기`;
+        });
+      };
+      /* 처음부터 한 번 불러 둔다 — 빈 상자를 보여 주고 «찾아라»고 하면 대개 아무도 안 찾는다 */
+      const search = async () => { const rr = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q.value.trim())}&size=20`, { noRedirect: true }); draw(rr.ok ? (rr.tenants || []) : []); };
+      let tm; q.oninput = () => { clearTimeout(tm); tm = setTimeout(search, 250); };
+      search();
+      go.onclick = async () => {
+        if (!picked) return;
+        go.disabled = true;
+        const rr = await UI.api("/api/ops-ticket-claim", { body: { id: t.id, tenantId: picked.id }, noRedirect: true });
+        go.disabled = false;
+        if (!rr.ok) return UI.toast(rr.error || "붙이지 못했어요");
+        close(); UI.toast(`«${rr.tenantName || picked.name}» 에 붙였어요`); load();
+      };
+    } });
 }
 UI.$$("#st button").forEach((b) => b.onclick = () => { UI.$$("#st button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.v; load(); });
 UI.$$("#pr button").forEach((b) => b.onclick = () => { UI.$$("#pr button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); priority = b.dataset.v; load(); });
 UI.$("#mine button").onclick = (e) => { mine = !mine; e.target.classList.toggle("on", mine); load(); };
+UI.$("#unc button").onclick = (e) => { unclaimed = !unclaimed; e.target.classList.toggle("on", unclaimed); load(); };
+/* 🔴 [R17 · A] 주소로도 연다 — 알림·운영 메모에서 «주인 없는 문의 N건»을 바로 열 수 있어야 한다(`/ops/cs.html?unclaimed=1`). */
+if (UI.qs.get("unclaimed") === "1") { unclaimed = true; UI.$("#unc button").classList.add("on"); }
 load();
 === ticket.html | cs | 티켓 ===
 <div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
@@ -1010,7 +1083,11 @@ await load();
 --- script ---
 const op = await OPS.boot("ai"); if (!op) return;
 const canEdit = OPS.can(op, "super_admin");
-const ROLE = { high: "글(고급)", low: "글(가벼움)", director: "디렉터", landing: "랜딩", image: "사진" };
+/* 🔴 [R17 · C] **역할 이름 손 표를 지웠다** — 서버가 `label`·`note` 를 준다(B · 정본 `lib/ai-models.ts AI_ROLE_SPECS`).
+   여태는 다섯을 손으로 적어 뒀고 폴백이 `x.role`(영문 키)이라, 역할이 늘면 **`tts`·`veo` 로 영문이 찍혔다**(§3 «말은 사람말» · AC-52).
+   🔴 이제 B 가 역할을 몇 개로 넓히든 화면이 따라간다 — **손 표가 응답보다 먼저 낡는 일을 없앴다.**
+   ⚠️ 폴백은 남긴다: 서버가 `label` 을 빼먹으면 영문 키라도 보여 주는 편이 빈칸보다 낫다(지어내진 않는다 · AC-9). */
+const roleName = (x) => x.label || x.role;
 const mono = (a) => `<span style="font-family:ui-monospace,monospace;font-size:12.5px">${UI.esc((a || []).join(" → ") || "—")}</span>`;
 const tri = (v) => v === true ? '<span style="color:var(--money-ink);font-weight:800">✓</span>' : v === false ? '<span style="color:var(--danger-ink);font-weight:800">✗</span>' : '<span class="muted" title="판정 불가">—</span>';
 let A;
@@ -1018,7 +1095,7 @@ async function load() {
   const r = await UI.api("/api/ops-ai-models", { noRedirect: true }); if (!r.ok) { UI.toast(r.error || "불러오지 못했어요"); return; } A = r; const s = r.settings || {};
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
   UI.$("#roles").innerHTML = OPS.table([
-    { h: "역할", f: (x) => `<b>${ROLE[x.role] || x.role}</b>` }, { h: "지금 체인", f: (x) => `${mono(x.chain)}${JSON.stringify(x.chain) !== JSON.stringify(x.codeChain) ? ' <span class="pill ink">오버레이</span>' : ' <span class="pill off">코드 기본</span>'}` },
+    { h: "역할", f: (x) => `<b>${UI.esc(roleName(x))}</b>${x.probe === "none" ? ' <span class="pill warn">대신 못 재요</span>' : ""}${x.note ? `<div class="muted" style="font-size:12.5px;margin-top:2px">${UI.esc(x.note)}</div>` : ""}` }, { h: "지금 체인", f: (x) => `${mono(x.chain)}${JSON.stringify(x.chain) !== JSON.stringify(x.codeChain) ? ' <span class="pill ink">오버레이</span>' : ' <span class="pill off">코드 기본</span>'}` },
     { h: "후보 · 카나리", f: (x) => x.candidate ? `${mono(x.candidate)} <span class="pill warn">${x.canaryPct}%</span>` : '<span class="muted">없음</span>' },
     { h: "적용", f: (x) => OPS.dt(x.appliedAt) },
     { h: "", f: (x) => `<button type="button" class="lk" data-apply="${x.role}">적용 · 카나리</button>${x.prevChain || x.candidate ? ` · <button type="button" class="lk" data-rb="${x.role}">롤백</button>` : ""}` },
@@ -1074,10 +1151,11 @@ async function load() {
   UI.$$("#mode button").forEach((b) => b.onclick = async () => { if (!canEdit) return; const mode = b.dataset.v; if (mode === s.updateMode) return; const rr = await UI.api("/api/ops-ai-mode", { body: { mode }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "바꾸지 못했어요"); UI.toast(rr.updateMode === "auto" ? "자동 업데이트를 켰어요" : "수동으로 바꿨어요"); load(); });
   UI.$$("[data-apply]").forEach((b) => b.onclick = () => { const x = r.roles.find((y) => y.role === b.dataset.apply); const pick = (s.candidates || []).filter((c) => c.tested && c.tested.text === true).map((c) => c.model);
     UI.sheet(`<form id="af"><div class="field"><label>체인 <span class="muted" style="font-weight:500">· 쉼표로 여러 개 · 앞이 1순위</span></label><input class="input" name="chain" value="${UI.esc((x.candidate || x.chain || []).join(", "))}" style="font-family:ui-monospace,monospace" required><div class="help"></div></div>
+      ${x.probe === "none" ? `<div class="banner info" style="margin:0 0 12px"><span>이건 저희가 대신 재 볼 수가 없어요 — 글은 한 줄 물어보면 되는데 영상은 만들어 봐야 알고 돈이 들거든요. 바꾸신 뒤에 <b>1컷만 만들어 보시면</b> 바로 확인돼요.</span></div>` : ""}
       ${pick.length ? `<div class="sec">실측 통과 후보</div>${UI.chips("pick", pick.map((m) => [m, m]), "")}` : ""}
       <div class="sec">카나리 비율</div>${UI.chips("pct", [[10, "10%"], [50, "50%"], [100, "100% (전량)"]], x.canaryPct && x.canaryPct < 100 ? x.canaryPct : 10)}
       <p class="muted" style="margin:10px 0 0;font-size:13px">100%는 지금 체인을 통째로 바꿔요(직전 체인은 롤백용으로 남아요). 코드에 없던 모델은 서버가 우리 키로 먼저 불러 보고, 안 되면 적용을 취소해요(§4.9).</p>
-      <div class="cta"><button class="btn primary" type="submit">적용</button></div></form>`, { title: `${ROLE[x.role] || x.role} 모델`, onOpen: (sh, close) => { UI.bindChips(sh, (n, v) => { if (n === "pick") sh.querySelector('[name="chain"]').value = v; }); UI.form(sh.querySelector("#af"), async (d, f) => { const chain = String(d.chain).split(",").map((v) => v.trim()).filter(Boolean); const rr = await UI.api("/api/ops-ai-apply", { body: { role: x.role, chain, canaryPct: Number(UI.chipVal(sh, "pct")) }, noRedirect: true }); if (!rr.ok) return UI.fieldError(f, "chain", rr.error || "적용하지 못했어요"); close(); UI.toast(rr.canaryPct >= 100 ? "체인을 바꿨어요" : `카나리 ${rr.canaryPct}%로 올렸어요`); load(); }); } }); });
+      <div class="cta"><button class="btn primary" type="submit">적용</button></div></form>`, { title: `${roleName(x)} 모델`, onOpen: (sh, close) => { UI.bindChips(sh, (n, v) => { if (n === "pick") sh.querySelector('[name="chain"]').value = v; }); UI.form(sh.querySelector("#af"), async (d, f) => { const chain = String(d.chain).split(",").map((v) => v.trim()).filter(Boolean); const rr = await UI.api("/api/ops-ai-apply", { body: { role: x.role, chain, canaryPct: Number(UI.chipVal(sh, "pct")) }, noRedirect: true }); if (!rr.ok) return UI.fieldError(f, "chain", rr.error || "적용하지 못했어요"); close(); UI.toast(rr.verified === false ? "바꿨어요 — 1컷 만들어서 확인해 주세요" : rr.canaryPct >= 100 ? "체인을 바꿨어요" : `카나리 ${rr.canaryPct}%로 올렸어요`); load(); }); } }); });
   UI.$$("[data-rb]").forEach((b) => b.onclick = () => UI.sheet(`<div id="rc"></div>`, { title: "롤백", onOpen: (sh, close) => UI.confirmRow(sh.querySelector("#rc"), "직전 체인으로 되돌리고 후보를 내릴까요?", async () => { const rr = await UI.api("/api/ops-ai-rollback", { body: { role: b.dataset.rb }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "되돌리지 못했어요"); close(); UI.toast("롤백했어요"); load(); }) }));
   UI.$("#cap").onclick = () => UI.sheet(`<div class="fr"><div class="fl">원가 상한<small>고객 · 일 · 넘으면 생성 거부 + 알림 1건/일 · 환율 없으면 «미환산»으로 통과</small></div>${UI.stepper("cap", s.costCapKrw ?? 0, 0, 300000, "원", 5000)}</div><p class="muted" style="margin:8px 0 0;font-size:13px">0원 = 무제한(상한 없음)</p><div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "원가 상한", onOpen: (sh, close) => { UI.bindSteppers(sh); sh.querySelector("#ok").onclick = async () => { const v = UI.stepVal(sh, "cap"); const rr = await UI.api("/api/ops-ai-cost-cap", { body: { costCapKrw: v > 0 ? v : null }, noRedirect: true }); if (!rr.ok) return UI.toast(rr.error || "저장하지 못했어요"); close(); UI.toast(rr.costCapKrw == null ? "상한을 없앴어요" : `상한 ${UI.won(rr.costCapKrw)}`); load(); }; } });
   UI.$("#sync").onclick = syncSheet;
@@ -1137,14 +1215,24 @@ const op = await OPS.boot("channels"); if (!op) return;
 const canEdit = OPS.can(op, "super_admin");
 const CST = { active: ["ok", "가동"], planned: ["off", "준비 중"], down: ["danger", "장애"] };
 const MON = Object.keys(UI.SRC).map((k) => [k, UI.srcLabel(k)]);
+/* [R17-B2] 🔴 **모집창을 «쓰는» 채널만 칸을 준다.** 수익 매체 칩에 clip_incentive 가 붙었다고 주면 안 된다 —
+   서버(lib/ad-eligibility.ts clipWindow)가 읽는 행은 naver_clip **하나**라, 다른 채널에 넣으면 운영자는 넣었는데 **아무 일도 안 일어난다**(되는 척).
+   서버가 읽는 행이 늘면 여기 한 줄 늘린다. */
+const CLIP_KEYS = ["naver_clip"];
+/* 🔴 «며칠 전에 알리나»는 **서버가 정본**(CLIP_NOTICE_DAYS) — 화면이 숫자를 베껴 적으면 정책이 바뀔 때 두 곳이 갈린다(§13 · AC-52).
+   못 받으면 숫자 없이 말한다(지어내지 않는다 · AC-9). */
+let CLIP_D = null;
 let D;
 async function load() {
   const [r, d] = await Promise.all([UI.api("/api/ops-channels", { noRedirect: true }), UI.api("/api/ops-disclosure", { noRedirect: true })]);
   if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
+  if (typeof r.clipNoticeDays === "number") CLIP_D = r.clipNoticeDays;   // [R17-B2] 서버가 정본
   UI.$("#lock1").innerHTML = canEdit ? "" : OPS.lockPill("super_admin"); UI.$("#lock2").innerHTML = canEdit ? "" : OPS.lockPill("super_admin");
   UI.$("#list").innerHTML = OPS.table([
     { h: "채널", f: (c) => `${UI.mark(c.key, "sm")}<b>${UI.esc(c.label || UI.chLabel(c.key))}</b>` }, { h: "상태", f: (c) => OPS.pill(CST[c.status] || ["off", c.status]) },
     { h: "최적 시간(KST)", f: (c) => (c.bestHours || []).map((h) => String(h).padStart(2, "0") + "시").join(" · ") || "—" }, { h: "수익", f: (c) => (c.monetize || []).map((m) => UI.srcLabel(m)).join(" · ") || "—" },
+    /* [R17-B2] 🔴 모집창은 **목록에 보여야** 운영자가 «넣었나»를 안다 — 종전엔 넣을 칸도 볼 칸도 없어서 D-7 알림이 구조적으로 안 떴다. */
+    { h: "모집창(KST)", f: (c) => (c.clipOpen ? `${UI.esc(c.clipOpen.from)} ~ ${UI.esc(c.clipOpen.to)}` : "—") },
     { h: "", f: (c) => `<button type="button" class="lk" data-k="${c.key}">바꾸기</button>` },
   ], r.channels || []);
   OPS.lock(op, "super_admin", UI.$("#list"));
@@ -1159,10 +1247,27 @@ function sheet(c) {
     <p class="muted" id="hint" style="margin:8px 0 0;font-size:13px"></p>
     <div class="sec">최적 시간(KST)</div>${UI.chips("hours", H, c.bestHours || [], true)}
     <div class="sec">수익 매체</div>${UI.chips("mon", MON, c.monetize || [], true)}
+    ${CLIP_KEYS.includes(c.key) ? `<div class="sec">모집창(KST)</div>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">넣어 두면 ${CLIP_D ? `시작 ${CLIP_D}일 전부터` : "시작 전에 미리"} 이 채널 계정을 쓰는 고객에게 «모집이 시작해요»를 한 번 알려드려요. 비우면 안 알려요.</p>
+    <div class="fr"><div class="field" style="flex:1"><label>시작</label><input class="input" type="date" id="cFrom" value="${UI.esc((c.clipOpen && c.clipOpen.from) || "")}"></div><div class="field" style="flex:1"><label>끝</label><input class="input" type="date" id="cTo" value="${UI.esc((c.clipOpen && c.clipOpen.to) || "")}"></div></div>
+    <p class="muted" id="cErr" style="margin:0;font-size:13px;color:var(--danger)"></p>` : ""}
     <div class="cta"><button class="btn primary" type="button" id="ok">저장</button></div>`, { title: "채널 설정", onOpen: (sh, close) => {
       const hint = sh.querySelector("#hint"); const say = (v) => { hint.textContent = v === "down" ? "장애로 두면 고객 편성표의 이 채널 발행이 «PC 대기/확인 필요»로 멈춰요. 카나리 ✗ 뒤에 사람이 눌러요." : v === "planned" ? "준비 중이면 고객 그리드에서 숨고 온보딩엔 «곧 열려요» 칩이 붙어요." : "가동이면 고객이 바로 연결할 수 있어요."; }; say(c.status);
       UI.bindChips(sh, (n, v) => { if (n === "status") say(v); });
-      sh.querySelector("#ok").onclick = async () => { const r = await UI.api("/api/ops-channels", { body: { key: c.key, status: UI.chipVal(sh, "status"), bestHours: UI.chipVal(sh, "hours").map(Number), monetize: UI.chipVal(sh, "mon") }, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요 · 고객 화면에 바로 반영"); load(); };
+      sh.querySelector("#ok").onclick = async () => {
+        const body = { key: c.key, status: UI.chipVal(sh, "status"), bestHours: UI.chipVal(sh, "hours").map(Number), monetize: UI.chipVal(sh, "mon") };
+        /* [R17-B2] 모집창 — 둘 다 비면 null(지운다) · 둘 다 차면 넣는다.
+           🔴 **한쪽만 찬 것은 서버로 안 보낸다** — 서버가 되물어 주긴 하지만, 여기서 한 줄 말해 주는 게 왕복 한 번보다 빠르다(막는 게 아니라 되묻는다 · §9). */
+        const err = sh.querySelector("#cErr"), cf = sh.querySelector("#cFrom"), ct = sh.querySelector("#cTo");
+        if (cf && ct) {
+          const a = cf.value.trim(), z = ct.value.trim();
+          if (err) err.textContent = "";
+          if (!a && !z) body.clipOpen = null;
+          else if (!a || !z) { if (err) err.textContent = "시작일과 종료일을 둘 다 적어 주세요(둘 다 비우면 안 알려요)."; return; }
+          else if (a > z) { if (err) err.textContent = "종료일이 시작일보다 빨라요. 다시 골라 주세요."; return; }
+          else body.clipOpen = { from: a, to: z };
+        }
+        const r = await UI.api("/api/ops-channels", { body, noRedirect: true }); if (!r.ok) return UI.toast(r.error || "저장하지 못했어요"); close(); UI.toast("저장했어요 · 고객 화면에 바로 반영"); load(); };
     } });
 }
 UI.$("#editD").onclick = () => { const t = (D && D.text) || {}; UI.sheet(`<form id="df"><div class="field"><label>쿠팡 파트너스 <span class="muted" style="font-weight:500">· 쿠팡 필수 문구 · 첫 블록 고정</span></label><textarea class="input" name="coupang" rows="3" style="height:auto;padding:14px 16px" required>${UI.esc(t.coupang || "")}</textarea><div class="help"></div></div><div class="field"><label>일반 제휴 <span class="muted" style="font-weight:500">· 공정위 «추천·보증 심사지침»</span></label><textarea class="input" name="generic" rows="3" style="height:auto;padding:14px 16px" required>${UI.esc(t.generic || "")}</textarea><div class="help"></div></div><div id="dc"></div><div class="cta"><button class="btn primary" type="submit">바꾸기</button></div></form>`, { title: "고지 문구", onOpen: (sh, close) => UI.form(sh.querySelector("#df"), (d, f) => UI.confirmRow(sh.querySelector("#dc"), "다음 발행부터 모든 고객의 제휴 글 첫 줄이 이 문구로 바뀌어요. 바꿀까요?", async () => { const r = await UI.api("/api/ops-disclosure", { body: { coupang: d.coupang, generic: d.generic }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "coupang", r.error || "바꾸지 못했어요"); close(); UI.toast("바꿨어요 · 감사 기록"); load(); })) }); };
@@ -1209,6 +1314,9 @@ UI.$("#add").onclick = () => { if (!canEdit) return UI.toast("관리자만 쓸 �
 load();
 === operators.html | operators | 운영진 ===
 <div class="group"><div class="gt">운영자 <button type="button" id="invite" style="color:var(--ink);font-weight:600;font-size:12.5px">초대</button></div><div id="list"></div><div id="pager" class="muted" style="padding:0 16px 4px;font-size:12.5px"></div><p class="muted" style="margin:0 16px 10px;font-size:12.5px">super_admin 전부 · admin 고객/이벤트/결제/CS/공지 · operator 고객 열람+원격접속+CS 답변(러너·AI·채널은 조회만). 싸이렌MIS SSO 는 sso_subject 로 묶여요.</p></div>
+<!-- 🔴 [R17 · A] 백업 — 서버(`ops-operators.ts:52`)도 `scripts/check-backup.mts` 도 R8 부터 다 있었는데 **한 줄을 안 그렸다.**
+     놓을 자리는 계약에 «운영진·감사 아래»로 적혀 있었다. -->
+<div class="group"><div class="gt">백업</div><div id="bk"></div></div>
 --- script ---
 const op = await OPS.boot("operators"); if (!op) return;
 const RL = { super_admin: ["ink", "super_admin"], admin: ["ok", "admin"], operator: ["off", "operator"] };
@@ -1240,7 +1348,34 @@ function form(o) {
   UI.sheet(`<form id="if"><div class="field"><label>이메일</label><input class="input" name="email" type="email" required value="${UI.esc(o?.email || "")}" placeholder="name@company.com"><div class="help"></div></div><div class="field"><label>이름</label><input class="input" name="name" value="${UI.esc(o?.name || "")}" placeholder="선택"></div><div class="field"><label>SSO 주체 <span class="muted" style="font-weight:500">· 싸이렌MIS · 선택</span></label><input class="input" name="ssoSubject" value="${UI.esc(o?.ssoSubject || "")}" placeholder="mis:123"></div><div class="sec">역할</div>${UI.chips("role", Object.keys(RL).map((k) => [k, k]), o?.role || "operator")}<div class="cta"><button class="btn primary" type="submit">${o ? "고치기" : "초대"}</button></div></form>`, { title: o ? "운영자 고치기" : "운영자 초대", onOpen: (sh, close) => { UI.bindChips(sh); UI.form(sh.querySelector("#if"), async (d, f) => { const r = await UI.api("/api/ops-operators", { body: { id: o?.id, email: d.email, name: d.name || "", role: UI.chipVal(sh, "role"), ssoSubject: d.ssoSubject || undefined }, noRedirect: true }); if (!r.ok) return UI.fieldError(f, "email", r.error || "저장하지 못했어요"); close(); /* 🔴 [수리 ⑥] 옛 문구(«초대했어요 · 첫 로그인에 비밀번호를 바꿔요»)는 거짓말이었다 — 비번이 없어 로그인 자체가 안 됐다. */ UI.toast(o ? "고쳤어요" : "만들었어요 · «비번 주기»로 임시 비밀번호를 전해 주세요"); load(); }); } });
 }
 UI.$("#invite").onclick = () => form(null);
-load();
+
+/* 🔴 [R17 · A] **백업 한 줄** — 서버가 R8 부터 주고 있던 `/api/ops-backup-status` 를 처음으로 그린다.
+   서버 머리말이 못 박은 두 가지를 화면이 그대로 지킨다:
+   ① 🔴 «아마 켜져 있을 것»을 상태로 적지 않는다 — 확인한 적이 없으면 **«아직 확인한 적이 없어요»** 라고 쓴다(AC-9).
+   ② 🔴 `versioning` 의 **`unsupported`(R2 가 기능 자체를 안 준다)** 와 **`null`(못 물어봤다)** 은 다른 말이다.
+      «기능 없음»을 «확인 필요»로 그리면 **아무도 끝낼 수 없는 숙제**가 된다.
+   말투는 §3 — 겁주지 않는다. «위험합니다»가 아니라 «무엇이 · 어떻게 하면 되는지»를 적는다. */
+const VER = {
+  Enabled: ["ok", "켜짐", "덮어써도 이전 판이 남아요."],
+  Disabled: ["warn", "꺼짐", "버킷 설정에서 버전 관리를 켜면 덮어쓴 파일도 되살릴 수 있어요."],
+  unsupported: ["off", "기능 없음", "이 R2 가 버전 관리를 제공하지 않아요 — 우리가 할 수 있는 일은 없어요."],
+};
+const kv = (k, v, d) => `<div class="kv" style="white-space:normal"><span class="k">${k}</span><span class="v" style="white-space:normal;text-align:right">${v}${d ? `<br><span class="muted" style="font-weight:500;font-size:12.5px">${UI.esc(d)}</span>` : ""}</span></div>`;
+async function loadBackup() {
+  const r = await UI.api("/api/ops-backup-status", { noRedirect: true });
+  if (!r.ok) { UI.$("#bk").innerHTML = kv("상태", OPS.pill(["off", "못 물어봤어요"]), r.error || "잠시 뒤 다시 열어 보세요."); return; }
+  if (!r.checked) {
+    UI.$("#bk").innerHTML = kv("상태", OPS.pill(["warn", "아직 확인 전"]), r.hint || "아직 확인한 적이 없어요.")
+      + `<p class="muted" style="margin:0 16px 10px;font-size:12.5px">확인한 적이 없어서 <b>켜져 있는지 꺼져 있는지 아직 몰라요.</b> 한 번 돌리면 이 줄이 채워져요.</p>`;
+    return;
+  }
+  const v = r.r2Versioning == null ? ["off", "못 물어봤어요", "R2 설정이 없어 확인하지 못했어요."] : (VER[r.r2Versioning] || ["off", String(r.r2Versioning), ""]);
+  UI.$("#bk").innerHTML =
+    kv("마지막 확인(KST)", OPS.dt(r.checkedAt) + (r.stale ? ` ${OPS.pill(["warn", `${r.ageDays}일 전`])}` : ""), r.stale ? "30일 넘게 안 봤어요. 한 번 더 돌려 두면 지금 상태를 알 수 있어요." : "")
+    + kv("Neon 시점 복구", OPS.pill(r.neon && r.neon.ok ? ["ok", r.neon.retentionDays != null ? `${r.neon.retentionDays}일` : "켜짐"] : ["warn", "확인 필요"]), (r.neon && r.neon.detail) || "")
+    + kv("R2 버전 관리", OPS.pill([v[0], v[1]]), v[2]);
+}
+load(); loadBackup();
 === audit.html | audit | 감사 ===
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="flex:1;min-width:200px;padding:0"><input class="input" id="q" type="search" placeholder="동작·대상으로 찾기" autocomplete="off" style="height:44px"></div><div class="seg" id="risk" style="margin:0"><button class="on" data-v="">전부</button><button data-v="high">높음</button><button data-v="medium">중간</button><button data-v="low">낮음</button></div><div class="seg" id="who" style="margin:0"><button class="on" data-v="">전체</button><button data-v="operator">운영자</button><button data-v="customer">고객</button><button data-v="system">시스템</button></div></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><div class="field" style="padding:0;width:150px"><input class="input" id="from" type="date" style="height:44px" aria-label="시작일(KST)"></div><span class="muted">~</span><div class="field" style="padding:0;width:150px"><input class="input" id="to" type="date" style="height:44px" aria-label="종료일(KST)"></div><span id="tenantChip"></span></div>

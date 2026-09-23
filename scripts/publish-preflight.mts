@@ -13,6 +13,7 @@
  *      «실수로 엔터를 한 번 더 쳤다»로 실발행이 되면 안 된다.
  *   🔴 게이트가 하나라도 걸리면 `--go` 를 줘도 **멈춘다**(§16B 는 발행 직전 재검사가 정본이다).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { loadPublishPiece, loadPublishAccount, publish, runPublishGate } from "../lib/publish";

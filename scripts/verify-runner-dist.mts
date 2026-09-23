@@ -13,6 +13,7 @@
  *   🔴 실패를 «종료코드 0» 으로 덮지 않는다 — 한 항목이라도 어긋나면 1 로 나간다(PITFALLS #9 거짓 초록).
  *   ⚠️ 로컬 전용. 발행은 일어나지 않는다(러너는 --peek 로만 돌린다).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import http from "node:http";

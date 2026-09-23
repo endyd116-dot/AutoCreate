@@ -20,7 +20,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=30"></script>
+<script src="/js/ui.js?v=31"></script>
 <script src="/js/ops.js?v=3"></script>
 <script src="/js/mock-ops.js?v=2"></script>
 <script>
@@ -41,8 +41,35 @@ async function load() {
   UI.$$("[data-edit]").forEach((b) => b.onclick = () => planSheet(p.plans.find((x) => x.key === b.dataset.edit)));
   if (CP) { UI.$("#packs").innerHTML = OPS.table([{ h: "팩", f: (k) => `<b>${UI.esc(k.id)}</b>${k.oncePerTenant ? ' <span class="pill off">1회</span>' : ""}` }, { h: "가격", r: true, f: (k) => UI.won(k.krw) }, { h: "코인", r: true, f: (k) => UI.num(k.coins) }, { h: "보너스", r: true, f: (k) => k.bonusPct ? `+${k.bonusPct}%` : "—" }, { h: "청구", r: true, f: (k) => `${UI.won(k.krw + Math.round(k.krw * 0.1))}<span class="muted"> (VAT 포함)</span>` }], CP.packs || []);
     UI.$("#table").innerHTML = `<div class="kv" style="white-space:normal"><span class="k">단가표</span><span class="v" style="white-space:normal;justify-content:flex-end;gap:6px;flex-wrap:wrap">${Object.entries(CP.table || {}).map(([k, v]) => `<span class="pill off">${UI.esc(k)} ${v}</span>`).join("")}</span></div>`; }
-  const EST = { scheduled: ["off", "예약"], noticed: ["warn", "고지 보냄"], applied: ["ok", "적용됨"] };
-  UI.$("#events").innerHTML = OPS.table([{ h: "플랜", f: (e) => UI.esc(e.planKey) }, { h: "가격", f: (e) => `${UI.won(e.oldPriceKrw)} → <b>${UI.won(e.newPriceKrw)}</b>` }, { h: "적용일(KST)", f: (e) => OPS.dateKST(e.effectiveAt) }, { h: "고지", f: (e) => e.noticedAt ? OPS.dt(e.noticedAt) : "—" }, { h: "대상", r: true, f: (e) => UI.num(e.affected) }, { h: "상태", f: (e) => OPS.pill(EST[e.status] || ["off", e.status]) }, { h: "문구", f: (e) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:320px">${UI.esc(e.noticeText)}</span>` }], p.priceEvents || []);
+  /* 🔴 [AC-271 · A · 2026-09-23 · R17] `cancelled` 가 이 표에 없어서 **«cancelled» 가 영어로 그대로 찍혔다.**
+     `OPS.pill(EST[e.status] || ["off", e.status])` 의 `||` 뒤가 «못 찾으면 열쇠 글자» 라서 조용히 영어가 샌다 —
+     서버는 R8 부터 `cancelled` 를 쓰고 있었다(`lib/billing/price-events.ts:100`). 낱말 표가 서버보다 낡았던 것이다. */
+  const EST = { scheduled: ["off", "예약"], noticed: ["warn", "고지 보냄"], applied: ["ok", "적용됨"], cancelled: ["off", "취소됨"] };
+  const CANCELABLE = ["scheduled", "noticed"];   // 서버와 같은 목록(`ops-plans.ts` → `cancelPriceEvent`)
+  UI.$("#events").innerHTML = OPS.table([{ h: "플랜", f: (e) => UI.esc(e.planKey) }, { h: "가격", f: (e) => `${UI.won(e.oldPriceKrw)} → <b>${UI.won(e.newPriceKrw)}</b>` }, { h: "적용일(KST)", f: (e) => OPS.dateKST(e.effectiveAt) }, { h: "고지", f: (e) => e.noticedAt ? OPS.dt(e.noticedAt) : "—" }, { h: "대상", r: true, f: (e) => UI.num(e.affected) }, { h: "상태", f: (e) => OPS.pill(EST[e.status] || ["off", e.status]) }, { h: "문구", f: (e) => `<span class="muted" style="white-space:normal;display:inline-block;max-width:320px">${UI.esc(e.noticeText)}</span>` },
+    /* 🔴 [R17] **보낼 문이 없었다** — 서버 `POST /api/ops-price-event-cancel` 은 R8 에 다 돼 있었고
+       고객 앱도 `price_change_cancelled` 알림을 받을 준비가 끝나 있었는데(`public/js/ui.js:663`) **부르는 화면이 0곳**이었다. */
+    { h: "", f: (e) => CANCELABLE.includes(e.status) ? `<button type="button" class="lk" data-cancel="${e.id}">개정 취소</button>` : "" }], p.priceEvents || []);
+  UI.$$("[data-cancel]").forEach((b) => b.onclick = () => cancelSheet((p.priceEvents || []).find((e) => String(e.id) === b.dataset.cancel)));
+}
+/* 되돌릴 수 없는 동작이라 한 번 묻는다(§9 «확인 대화는 게이트가 아니다» — 우리 판단이 아니라 운영자를 위한 확인).
+   🔴 **고지를 이미 보낸 개정이면 취소도 고객에게 간다** — 서버가 그렇게 돼 있다(`price-events.ts:99~101` · notified_count > 0).
+      그 사실을 시트에서 먼저 말한다. 모르고 누르면 «내가 안 보낸 알림»이 고객에게 간다. */
+function cancelSheet(e) {
+  if (!e) return;
+  const sent = Number(e.affected) > 0 && !!e.noticedAt;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px;line-height:1.7">${UI.esc(e.planKey)} 요금을 <b>${UI.won(e.oldPriceKrw)} → ${UI.won(e.newPriceKrw)}</b> 로 바꾸기로 한 예약이에요. 취소하면 <b>지금 요금 그대로</b> 갑니다.</p>
+    ${sent ? `<div class="banner" style="margin:0 0 12px;display:block;line-height:1.6">이미 고지를 보낸 개정이라, 취소하면 <b>대상 ${UI.num(e.affected)}곳에 «요금 변경이 취소됐어요» 알림이 갑니다.</b><br><span style="font-weight:500">고객 앱 알림함과 요금제 화면에 남아요.</span></div>` : `<p class="muted" style="margin:0 0 12px;font-size:13px">아직 고지 전이라 고객에게 가는 알림은 없어요.</p>`}
+    <div class="cta"><button class="btn primary" type="button" id="cgo">개정 취소하기</button></div>`,
+    { title: "가격 개정을 취소할까요?", onOpen: (sh, close) => {
+      sh.querySelector("#cgo").onclick = async (ev) => {
+        const b = ev.currentTarget; b.disabled = true;
+        const r = await UI.api("/api/ops-price-event-cancel", { body: { id: e.id }, noRedirect: true });
+        b.disabled = false;
+        if (!r.ok) return UI.toast(r.error || "취소하지 못했어요");
+        close(); UI.toast(sent ? "취소했어요 · 고객에게 알렸어요" : "취소했어요"); load();
+      };
+    } });
 }
 function planSheet(x) {
   UI.sheet(`<form id="pf"><p class="muted" style="margin:0 0 8px;font-size:13px">가격은 여기서 못 바꿔요 — «가격 개정 예약»으로만(기존 고객 고지 → 다음 주기).</p>

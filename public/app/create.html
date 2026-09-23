@@ -27,7 +27,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=30"></script>
+<script src="/js/ui.js?v=31"></script>
 <script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
@@ -78,7 +78,14 @@ async function loadChans() {
 async function load(poll = false) {
   /* 🔴 [AC-184] **나란히** 부른다 — 줄줄이 붙이면 첫 그림이 왕복 하나만큼 밀린다.
      편성표에서 실제로 그랬다: `verify-hand-on-button` 이 그 화면을 «막다른 골목»(단추 3개)으로 잡았다. 오류는 0이었다. */
-  const [r, ts] = await Promise.all([UI.api("/api/topics-list?status=candidate"), UI.api("/api/tenant-settings", { noGate: true })]);
+  /* 🔴 [R17 · A] «나중에 볼 소재»는 **세 번째 부름**으로 센다 — 옮긴 것이 어디로 갔는지 안 보이면 옮기지 않는다(§9-3).
+     실패해도 화면은 그대로 간다(`catch` → 0) — 곁다리 하나 때문에 소재 목록이 안 뜨면 안 된다. */
+  const [r, ts, lt] = await Promise.all([UI.api("/api/topics-list?status=candidate"), UI.api("/api/tenant-settings", { noGate: true }),
+    UI.api("/api/topics-list?status=later", { noGate: true }).catch(() => ({ ok: false }))]);
+  const laterN = lt && lt.ok ? (lt.topics || []).length : 0;
+  /* 🔴 [R17 · A · B 계약 2026-09-23] 소재 낱말은 **서버가 준다**(AC-52) — `labels` 는 status 무관 항상 실린다.
+     아래 기본값은 서버가 아직 안 줄 때만 쓴다(옛 배포와 섞여도 화면이 안 비게). */
+  if (r.ok && r.labels) LBL = r.labels; else if (lt && lt.ok && lt.labels) LBL = lt.labels;
   /* [AC-188] 🔴 토스트만 띄우고 돌아가면 뼈대가 영원히 돈다 — 치우고·까닭 적고·다시 누를 단추를 준다(UI.retryPanel).
      🔴 되풀이 호출(poll)에서는 갈아엎지 않는다 — 보고 있던 목록이 깜빡 사라진다. */
   if (!r.ok) { if (!poll) UI.retryPanel("#topics", () => load(false), r.error); return; }
@@ -120,9 +127,14 @@ async function load(poll = false) {
   const chChips = accountsN && chList.length > 1
     ? `<div style="padding:0 12px 8px">${UI.chips("chf", [["", "전체"], ...chList.map((c) => [c, UI.chLabel(c)])], chFilter)}</div>` : "";
   const head = `<div class="gt">오늘의 소재 ${r.topics.length || ""} ${busy ? '<span class="muted" style="font-weight:600;font-size:12.5px">뽑는 중</span>' : ""}</div>` + chLine + chChips
-    + (accountsN ? `<button type="button" class="row tap" id="addTopic"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">내 소재 넣기</span><span class="d">쓰고 싶은 주제를 직접 적어 디렉터에게 보내요</span></div>${UI.chev}</button>` : ""); // [사장님 실측] 디렉터는 소재만 받으면 된다 — 입구
+    + (accountsN ? `<button type="button" class="row tap" id="addTopic"><span class="mk soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></span><div class="l"><span class="t">내 소재 넣기</span><span class="d">쓰고 싶은 주제를 직접 적어 디렉터에게 보내요</span></div>${UI.chev}</button>` : "") // [사장님 실측] 디렉터는 소재만 받으면 된다 — 입구
+    /* 🔴 [R17 · A] «나중에 볼 소재» 입구 — **옮긴 것은 돌아올 길이 보여야 옮긴 게 된다**(§9-3).
+       🔴 0개면 줄을 안 그린다 — 빈 줄은 «할 일»처럼 보인다(§13.0 «첫 화면 숫자 하나»). */
+    + (laterN ? `<button type="button" class="row tap" id="laterBtn"><span class="mk soft">↺</span><div class="l"><span class="t">${UI.esc(lz("title"))} ${laterN}개</span><span class="d">지금은 아니라고 옮겨 둔 것 · 언제든 다시 꺼내요</span></div>${UI.chev}</button>` : "");
   const cta = UI.$("#cta"), rb = UI.$("#refresh"); cta.hidden = !accountsN; rb.disabled = busy; rb.textContent = busy ? "뽑는 중이에요" : "새로 뽑기";
-  const bindAdd = () => { const b = UI.$("#addTopic"); if (b) b.onclick = addSheet; };
+  /* 🔴 [R17 · A] `#laterBtn` 은 `head` 에 들어가므로 **빈 목록 판에서도 같이 묶여야** 한다 —
+     소재가 0개일 때야말로 «나중에 둔 것»을 꺼낼 때다. 그래서 `bindAdd` 와 한 몸으로 둔다(부르는 자리 네 곳 전부). */
+  const bindAdd = () => { const b = UI.$("#addTopic"); if (b) b.onclick = addSheet; const l = UI.$("#laterBtn"); if (l) l.onclick = laterSheet; };
   const bindChf = () => UI.bindChips(UI.$("#topics"), (n, v) => { if (n !== "chf") return; chFilter = v || ""; load(); });   // 🔴 저장하지 않는다(새로 들어오면 늘 «전체»)
   if (!accountsN) { g.innerHTML = head + `<div class="empty"><span class="mk soft">+</span><h3>먼저 계정을 연결해 주세요</h3><p>연결된 채널에 맞는 소재부터 보여드려요.</p><a class="btn primary sm" href="/app/accounts.html">계정 연결</a></div>`; return; }
   if (busy && !r.topics.length) { g.innerHTML = head + BUSY; bindAdd(); bindChf(); return; }
@@ -132,15 +144,20 @@ async function load(poll = false) {
   g.innerHTML = head + BUSY + shown.map((t) => `<div class="row swipe" data-id="${t.id}">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}${t.source === "manual" ? ' <span class="pill off" style="font-size:11px;padding:1px 6px">직접</span>' : ""}</span><span class="d wrap">${sub(t)}</span></div><button type="button" class="btn sm secondary" data-go="${t.id}">디렉터에게</button><button type="button" class="ic" data-more="${t.id}" aria-label="더보기" style="width:32px;height:32px;display:grid;place-items:center;color:var(--muted);flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button></div>`).join("");
   bindAdd(); bindChf();
   UI.$$("[data-go]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.go)); UI.go(`/app/director.html?topicId=${b.dataset.go}&t=${encodeURIComponent(t?.title || "")}`); });
-  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; } }); });
-  /* [DESIGN §13.0b 소재 카드] 스와이프 — **왼쪽 = 넘김 · 오른쪽 = 디렉터에게**(설계의 세 번째 «위 = 나중에»는 아직 안 만든다:
-     서버에 «나중에»를 적어 둘 자리가 없다(`topics-pick`·`topics-skip` 뿐) — 화면에서만 숨기면 새로고침하면 돌아와
-     «했는데 안 됐다»가 된다. 서버가 열리면 그때 붙인다 · 메인에 보고).
-     🔴 두 방향 다 **이미 단추로 되는 일**이라 스와이프는 지름길일 뿐이다 — 스와이프로만 되는 기능을 만들지 않는다(못 찾는 사람이 생긴다). */
-  UI.$$(".row.swipe").forEach((row) => { let x0 = null, dx = 0;
-    row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; dx = 0; }, { passive: true });
-    row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; row.style.transform = `translateX(${Math.max(Math.min(dx, 120), -120)}px)`; }, { passive: true });
-    row.addEventListener("touchend", async () => { row.style.transform = ""; const d = dx; x0 = null;
+  UI.$$("[data-more]").forEach((b) => b.onclick = () => { const t = r.topics.find((x) => x.id === Number(b.dataset.more)); UI.sheet(`<p class="muted" style="margin:0 0 4px">${UI.esc(t.title)}</p><p class="muted" style="margin:0 0 16px;font-size:13px">${UI.esc(t.angle || "")}${t.expiresAt ? ` · ${UI.dateKST(t.expiresAt)}까지` : ""}</p><div class="cta" style="flex-direction:column"><button class="btn primary" type="button" data-s-go>디렉터에게</button><button class="btn secondary" type="button" data-s-later>나중에</button><button class="btn secondary" type="button" data-s-skip>넘김</button></div>`, { title: "이 소재를", onOpen: (sh, close) => { sh.querySelector("[data-s-go]").onclick = () => UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title)}`); sh.querySelector("[data-s-skip]").onclick = async () => { close(); await skip(t.id); }; sh.querySelector("[data-s-later]").onclick = async () => { close(); await later(t.id); }; } }); });
+  /* [DESIGN §13.0b 소재 카드] 스와이프 — **왼쪽 = 넘김 · 오른쪽 = 디렉터에게 · 위 = 나중에.**
+     🔴 [R17 · A] 세 번째 방향이 드디어 붙었다 — 여기 «서버에 «나중에»를 적어 둘 자리가 없다»고 적어 뒀던 그것이다.
+        B 가 `POST /api/topics-later` 를 열어 줘서(2026-09-23) 이제 **새로고침해도 그대로**다.
+     🔴 세 방향 다 **이미 단추로 되는 일**이라 스와이프는 지름길일 뿐이다 — 스와이프로만 되는 기능을 만들지 않는다(못 찾는 사람이 생긴다).
+        «나중에»도 ⋯ 더보기 시트에 단추로 있다. */
+  UI.$$(".row.swipe").forEach((row) => { let x0 = null, y0 = null, dx = 0, dy = 0;
+    row.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; dy = 0; }, { passive: true });
+    row.addEventListener("touchmove", (e) => { if (x0 == null) return; dx = e.touches[0].clientX - x0; dy = e.touches[0].clientY - y0;
+      /* 세로가 더 크면 세로로 잡는다 — 가로와 섞이면 둘 다 엉뚱하게 먹는다 */
+      if (Math.abs(dy) > Math.abs(dx)) row.style.transform = `translateY(${Math.max(Math.min(dy, 80), -80)}px)`;
+      else row.style.transform = `translateX(${Math.max(Math.min(dx, 120), -120)}px)`; }, { passive: true });
+    row.addEventListener("touchend", async () => { row.style.transform = ""; const d = dx, dv = dy; x0 = null; y0 = null;
+      if (Math.abs(dv) > Math.abs(d) && dv < -60) return later(Number(row.dataset.id));
       if (d < -80) return skip(Number(row.dataset.id));
       if (d > 80) { const t = (r.topics || []).find((x) => x.id === Number(row.dataset.id)); if (t) UI.go(`/app/director.html?topicId=${t.id}&t=${encodeURIComponent(t.title || "")}`); }
     }); });
@@ -153,6 +170,45 @@ async function refresh() {
   busy = true; UI.toast(r.started === false ? "이미 뽑고 있어요" : "소재를 뽑기 시작했어요"); startPoll(); load(true);
 }
 async function skip(id) { const r = await UI.api("/api/topics-skip", { body: { id } }); if (!r.ok) { UI.toast(r.error || "넘기지 못했어요"); return; } UI.toast("넘겼어요"); load(); }
+/* 🔴 [R17 · A · B 가 서버를 열었다] **«나중에»** — `POST /api/topics-later { id }` · 되돌리기는 `{ id, undo: true }`.
+   🔴 `skip`(넘김 = «안 쓴다» → expired)과 **뜻이 다르다** — 나중에 = «지금은 아니다».
+      만료 시각을 안 건드려서 되돌리면 **원래 후보로 점수·순서 그대로** 돌아온다(B 계약).
+   🔴 §9 — **숨기는 게 아니라 옮기는 것**이다. 그래서 돌아올 길(«나중에 볼 소재»)이 목록 머리에 늘 떠 있다. */
+/* 🔴 [R17 · A · B 계약] 소재 낱말은 서버가 준다(AC-52). 기본값은 **서버가 아직 안 줄 때만** 쓴다 —
+   글자는 `lib/topics.ts` 의 `labels.later` 와 한 글자도 다르지 않아야 한다(다르면 화면 말투가 갈리고 아무 자도 안 잡는다).
+   🔴 `stale` 은 **`=== true` 로만** 본다 — 칸이 없는 건 «안 지났다»가 아니라 «시계가 없다»다(AC-9). */
+let LBL = {};
+const LZ_FALLBACK = { title: "나중에 볼 소재", empty: "나중에 볼 소재가 아직 없어요", undo: "오늘 소재로", keep: "여기 둔 소재는 사라지지 않아요", stale: "추천한 지 오래됐어요 · 지금도 쓸 수 있어요" };
+const lz = (k) => ((LBL.later && LBL.later[k]) || LZ_FALLBACK[k]);
+async function later(id) {
+  const r = await UI.api("/api/topics-later", { body: { id } });
+  if (!r.ok) { UI.toast(r.error || "옮기지 못했어요"); return; }
+  /* 되돌릴 길을 **사라지는 토스트에 걸지 않는다** — 놓치면 끝이다. 목록 머리의 줄이 늘 남는다. */
+  UI.toast("나중에 볼 소재로 옮겼어요 · 위에서 다시 꺼낼 수 있어요", 3200);
+  load();
+}
+async function laterSheet() {
+  UI.sheet(`<div id="ltList"><span class="sk" style="width:100%;height:56px"></span></div>`, { title: lz("title"), onOpen: async (sh, close) => {
+    const box = sh.querySelector("#ltList");
+    const r = await UI.api("/api/topics-list?status=later");
+    if (!r.ok) { box.innerHTML = `<p class="muted" style="margin:0;font-size:13px">${UI.esc(r.error || "지금은 불러올 수 없어요. 잠시 뒤 다시 열어 보세요.")}</p>`; return; }
+    if (r.labels) LBL = r.labels;
+    const list = r.topics || [];
+    if (!list.length) { box.innerHTML = `<p class="muted" style="margin:0;font-size:13px">${UI.esc(lz("empty"))}. 소재를 위로 밀거나 ⋯ 에서 «나중에»를 누르면 여기로 와요.</p>`; return; }
+    /* 🔴 [B 2026-09-23] 여기 둔 소재는 **이제 만료로 사라지지 않는다** — 서버가 `later` 만 만료를 안 거른다.
+       그래서 «N일 뒤 사라져요»가 아니라 **«사라지지 않아요»**를 적는다(내가 물었던 그 구멍이 서버에서 막혔다).
+       🔴 자동 편성에서 빠지는 것은 **따로 말한다** — «지금은 아니다»의 뜻이지만, 안 적으면 «왜 안 올라갔지»가 된다(§9-1). */
+    box.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:13px">${list.length}개 있어요. <b>${UI.esc(lz("keep"))}</b> · «${UI.esc(lz("undo"))}»를 누르면 원래 자리로 그대로 돌아가요.<br>여기 있는 동안은 자동 편성에 안 올라가요.</p>`
+      + list.map((t) => `<div class="row">${UI.mark(t.channelHint || "naver_blog", "sm")}<div class="l"><span class="t wrap">${UI.esc(t.title)}</span><span class="d wrap">${UI.esc(t.angle || "")}</span>${t.stale === true ? `<span class="d wrap" style="color:var(--warn-ink)">${UI.esc(lz("stale"))}</span>` : ""}</div><button type="button" class="lk" data-back="${t.id}" style="min-height:44px;padding:0 8px;flex:none">${UI.esc(lz("undo"))}</button></div>`).join("");
+    box.querySelectorAll("[data-back]").forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      const rr = await UI.api("/api/topics-later", { body: { id: Number(b.dataset.back), undo: true } });
+      b.disabled = false;
+      if (!rr.ok) return UI.toast(rr.error || "되돌리지 못했어요");
+      close(); UI.toast("오늘 소재로 되돌렸어요"); load();
+    });
+  } });
+}
 UI.$("#refresh").onclick = refresh;
 /* [사장님 실측] 내 소재 넣기 — 제목 한 칸 + 접힌 «검색 키워드» + 채널 칩(연결된 채널만 · 하나면 숨김) → POST /api/topics-add → 바로 디렉터로(«넣고 → 고르고» 두 번 안 누르게) */
 let chans = null;

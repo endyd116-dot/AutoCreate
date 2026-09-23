@@ -8,6 +8,9 @@
  *   POST /api/runner-remove          { id, lostDevice? }                   → { ok:true, purgedKeys? }   // 🔴 lostDevice=true 면 봉인 열쇠 폐기(되돌릴 수 없다)
  *   POST /api/accounts-relogin       { id }                               → { job:{ id, status, updatedAt? } }      // §6B
  *   GET  /api/accounts-relogin?id=                                        → { job:{...}|null, account:AccountRow }
+ *   POST /api/accounts-verify        { id }                               → { job:{ id, status } }   // [R17-B2] 저장된 로그인이 **아직 살아 있나**
+ *        🔴 `session.login`(창을 띄우고 사람을 5분 기다린다)과 **다른 일**이다 — 헤드리스·사람 손 0·아무것도 안 바꾼다.
+ *        결과 폴링은 위 GET 이 같이 돌려준다(`latestSessionJob` 이 두 잡을 같이 집는다).
  *   [러너 토큰 x-runner-token · 지문 x-runner-fp]
  *   POST /api/runner-heartbeat       { version, jobs, canary?, caps?, updateFailed? } → { sleepSec, jobsWaiting, update? }
  *   POST /api/runner-queue           { action:"claim"|"report"|"release" }→ claim { jobs:[RunnerJob] } · report/release { ok:true }
@@ -30,7 +33,7 @@ import { purgeProfileKeys } from "../../lib/profile-seal";   // [P1R8 §3.1] 기
 import {
   registerDevice, listDevices, removeDevice, rotateDeviceToken, authRunner, heartbeat,
   claimJobs, reportJob, releaseJob, saveRunnerSession, enqueueJob, fleetState, latestSessionJob,
-  isRunnerJobKind, type RunnerJobKind, type DeviceRow, type RunnerReportBody,
+  isRunnerJobKind, canVerifySession, type RunnerJobKind, type DeviceRow, type RunnerReportBody,
 } from "../../lib/runner-jobs";
 
 export const config = {
@@ -39,6 +42,7 @@ export const config = {
     "/api/runner-heartbeat", "/api/runner-queue", "/api/runner-session-upload",
     "/api/runner-download",
     "/api/accounts-relogin",
+    "/api/accounts-verify",
   ],
 };
 
@@ -210,6 +214,34 @@ export default async (req: Request): Promise<Response> => {
           target: `runner_device:${id}`, detail: { purgedKeys: purged }, riskLevel: "high" });
       }
       return json({ ok: true, ...(b.lostDevice === true ? { purgedKeys: purged } : {}) });
+    }
+
+    /* ── [R17-B2 · DESIGN §8.2] 로그인 «확인» — 🔴 재로그인과 **다른 일**이다 ──
+     *   재로그인은 고객 PC 에 창을 띄우고 사람을 5분 기다린다. 확인은 헤드리스로 조용히 보고 끝난다.
+     *   🔴 **못 하는 채널엔 잡을 안 만든다** — 만들면 러너가 «지원 안 해요»로 실패하고 고객은 빨간 줄만 본다.
+     *      화면도 같은 이유로 단추를 안 그린다(`accounts-list channels[].canVerifySession`). */
+    if (path.endsWith("/accounts-verify")) {
+      const b = await readJson<{ id?: unknown }>(req);
+      const id = n(b.id);
+      if (!id) return badRequest("id");
+      const account = await getAccount(tid, id);
+      if (!account) return json({ ok: false, error: "계정을 찾을 수 없어요.", step: "not_found" }, 404);
+      if (!canVerifySession(account.channel)) {
+        return json({ ok: false, step: "not_verifiable", error: `아직 ${account.channel} 은 로그인 확인을 할 수 없어요. 글이 안 올라가면 «다시 로그인»을 눌러 주세요.` }, 409);
+      }
+      /* 이미 대기 중인 세션 잡이 있으면 그대로 돌려준다(재로그인과 같은 규칙 · 중복 적재 0). */
+      const cur = await latestSessionJob(tid, id);
+      if (cur && (cur.status === "queued" || cur.status === "running")) return json({ ok: true, job: cur });
+      const fleet = await fleetState(tid);
+      /* 🔴 겁주지 않는다(§3) — «못 합니다»가 아니라 «켜 두시면 해 드려요». */
+      if (!fleet.online) return json({ ok: false, step: "runner_offline", error: "내 PC 프로그램이 꺼져 있어요. 켜 두시면 바로 확인해 드려요.", runner: fleet }, 409);
+      const { id: jobId } = await enqueueJob({
+        tenantId: tid, kind: "session.verify", accountId: id,
+        payload: { channel: account.channel, handle: account.handle },
+      });
+      await writeAudit({ tenantId: tid, action: "account_session_verify", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `account:${id}`, detail: { jobId, channel: account.channel } });
+      const job = await latestSessionJob(tid, id);
+      return json({ ok: true, job: job ?? { id: jobId, status: "queued" } });
     }
 
     if (path.endsWith("/accounts-relogin")) {

@@ -4,6 +4,7 @@
  *   `npx tsx --env-file=.env scripts/verify-coin-reconcile.mts [--tid 123] [--json]`
  *   🔴 읽기 전용(INSERT·UPDATE·DELETE 0) · «없음»을 «괜찮음»으로 적지 않는다(AC-9 — 0집이면 그렇게 말한다).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { reconcileCoins, balancesOf, type ReconcileFinding } from "../lib/coin-reconcile";

@@ -15,6 +15,11 @@
  *      🔴 발행은 일어나지 않는다 — 자격이 없으므로 네트워크 호출 전에 멈춘다(남의 계정에 글 0건).
  *   끝나면 만든 테넌트를 지운다.
  */
+/* 🔴 [R17-B2 · 2026-09-23] **맨 위 첫 줄이어야 한다.** 없으면 `db/index` 가 **본문이 한 줄도 돌기 전에**
+   빈 `NETLIFY_DATABASE_URL` 로 풀을 만들고 첫 질의에서 `read ECONNRESET` 이 난다 —
+   🔴 «못 쟀다»도 «틀렸다»도 아닌 **자가 스스로 만든 가짜 빨강**이다(`scripts/_lib/load-env.mjs` 머리말).
+   R16 재측정 때 이 자가 그렇게 빨개져서 «못 쟀다»로 접을 뻔했다(셸에 env 를 넣고 돌리면 통과했다). */
+import "./_lib/load-env.mjs";
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";
