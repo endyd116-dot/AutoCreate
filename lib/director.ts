@@ -1,7 +1,11 @@
 /**
  * lib/director.ts — 디렉터(DESIGN §5.3 결정 규칙 6 을 결정론 함수로 · LLM 은 «앵글 가르기» 1콜). 계약 §3 v1.1.
  *   AM 관례(content-director «앞뒤만 한다»): 재료 모으기·배정·게이트만. 글은 content-gen 하나가 쓴다.
- *   propose: 채널 = topic.channelHint ∩ 계정 있는 글 채널(힌트 먼저 · 최대 3채널 · 채널당 1piece) · 계정 = active|pending_login · posts_today<daily_cap · health 높은 순
+ *   propose: 채널 = topic.channelHint ∩ 계정 있는 글 채널(최대 3채널 · 채널당 1piece)
+ *            🔴 [2026-09-23 정정] 여기 «힌트 먼저»라고 적혀 있었는데 **순서 규칙은 그게 아니다**(`lib/director-goal.ts` 가 정본):
+ *            **①고객이 고른 목표 매체 → ②실제로 붙은 광고 → ③소재 힌트** 순이다. 힌트는 셋째다.
+ *            ⚠️ 오늘까지 이 줄이 «맞아 보인» 까닭은 **목표를 고른 집이 0곳**이라서다(라이브 124집 전부 «없음» · 실측 2026-09-23) —
+ *            AC-255 와 같은 모양이다(**맞는 까닭이 우연**). 목표를 처음 고르는 손님이 생기는 날 이 줄을 믿은 사람이 틀린다. · 계정 = active|pending_login · posts_today<daily_cap · health 높은 순
  *            · 구성 = 그 계정 직전 글과 다른 format(writing-contracts 로테이션) · 일정 = best-time(계정 간 30분·min_gap·지난 시각이면 내일)
  *            · 제휴 = intent commercial|mixed → coupang(productQuery=소재 검색어 · slot mid/end) · 이미지 = 채널 기본 · coinCost = blog 1 + image×count.
  *   confirm: 패치 적용 → 잔액 선검사 → piece(generating·meta.stage writing)+slot(manual·producing) → consume(piece:{id} · piece:{id}:img{i}) → 경합 실패 시 refund+삭제 롤백 → 배경 생성 함수 호출.

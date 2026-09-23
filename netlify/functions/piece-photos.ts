@@ -7,7 +7,7 @@
  *   GET  /api/piece-photos?pieceId=   → { ok, pieceId, photos[] }
  *   POST /api/piece-photo-remove { assetId } → { ok, removedObject }
  *   GET  /api/photo-usage?key=   → { ok, key, uses[], total, shown, hasMore }  🔴 «이 사진이 어느 글에 쓰였나»(침해 통지·내리기의 첫 걸음 · DESIGN §5E)
- *        🔴 [AC-257] **`total` 로 적어라 — `uses.length` 가 아니다.** 목록은 200곳에서 잘리는데 그걸 «글 N곳»으로 적으면
+ *        🔴 [AC-273] **`total` 로 적어라 — `uses.length` 가 아니다.** 목록은 200곳에서 잘리는데 그걸 «글 N곳»으로 적으면
  *        201곳 쓰인 사진에서 고객이 **다 내렸다고 믿는다.** `hasMore` 면 «여기엔 M곳만 보여요»를 같이 말한다(§9 — 자르되 말해 준다).
  *
  *   ══ 지키는 것 ══
@@ -45,7 +45,7 @@ export default async (req: Request): Promise<Response> => {
       if (req.method !== "GET") return json({ ok: false, error: "method", step: "method" }, 405);
       const key = String(new URL(req.url).searchParams.get("key") || "");
       if (!isSourceKey(key)) return badRequest("사진 출처 값이 올바르지 않아요.", "key");
-      /* [AC-257] 🔴 `total` 은 **LIMIT 없이 센 진짜 수**다 — 화면이 `uses.length` 로 «글 N곳»을 적으면 잘린 수를 말하게 된다.
+      /* [AC-273] 🔴 `total` 은 **LIMIT 없이 센 진짜 수**다 — 화면이 `uses.length` 로 «글 N곳»을 적으면 잘린 수를 말하게 된다.
          `hasMore` 가 참이면 화면은 «N곳(여기엔 M곳만 보여요)» 쪽으로 적는다(막지 않는다 · 말해 준다 · §9). */
       const u = await piecesUsingSource(key, { tenantId: auth.tid });
       return json({ ok: true, key, uses: u.uses, total: u.total, hasMore: u.hasMore, shown: u.uses.length });
