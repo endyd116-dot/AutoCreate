@@ -122,3 +122,60 @@ export const ALL_DECLARED_MODELS: string[] = [...new Set([
   ...CHAIN_HIGH, ...CHAIN_LOW, ...CHAIN_DIRECTOR, ...CHAIN_LANDING_GEN, ...CHAIN_IMAGE,
   MODEL_DEFAULT, MODEL_VISION, MODEL_VIDEO_READ, MODEL_TTS,
 ])];
+
+/* ═══════════════════ ⑤ 🔴 운영이 **무배포로 바꿀 수 있는 역할** — 이름·말·사슬이 여기 한 곳 (AC-252 · 2026-09-23) ═══════════════════ */
+
+/**
+ * 🔴 **CLAUDE §2 의 약속이 절반만 참이었다.**
+ *   «모델명은 `lib/ai-models.ts` 한 파일에만 · DB 오버레이 `ai_model_overrides` 로 **무배포 갱신**» 이라고 적어 뒀는데,
+ *   운영센터가 실제로 바꿀 수 있는 것은 **글·사진 다섯**(high·low·director·landing·image)뿐이었다(메인 실측 2026-09-23).
+ *   🔴 **영상·음성 전부가 밖**이었다 — `MODEL_TTS`·`MODEL_OMNI`·`MODEL_VEO/_FAST/_LITE`·`MODEL_VISION`·`MODEL_VIDEO_READ`·FAL 3종.
+ *   ⇒ 그 모델이 죽거나 값이 바뀌면 **배포를 해야 한다.** 제공사가 미리보기 모델을 내리는 일이 잦은데 그때마다 배포다.
+ *
+ *   ══ 그래서 무엇이 바뀌나 ══
+ *     역할 목록을 **여기 한 곳**에 두고 `ops-ai` 가 그걸 그대로 읽는다. 역할을 더하면 **운영 화면이 저절로 따라간다.**
+ *     🔴 **`label`(사람말)도 여기서 준다** — C 가 짚었다: 화면(`public/ops/ai.html:32`)이 `ROLE` 손 표를 들고 있어
+ *        서버가 역할을 넓히면 **영문 키가 그대로 찍힌다**(AC-52 · CLAUDE §3 «말은 사람말»).
+ *        ⇒ 화면은 손 표를 지우고 `label` 을 그대로 그린다. **그 표가 서버보다 먼저 낡는 일이 없어진다.**
+ *
+ *   ══ ⚠️ 잴 수 있는 것과 없는 것을 갈라 둔다 ══
+ *     `probe: "text"` — `verify-ai-models` 가 **우리 키로 불러 보고** 살아 있음을 잰다(CLAUDE §4.9).
+ *     `probe: "none"` — 텍스트 프로브로 **못 잰다**(영상 출력·과금·별도 게이트웨이). 🔴 «안 잰다»가 아니라 **«못 잰다»**이고,
+ *        바꾸기 전에 **사람이 1컷 실증**해야 한다. 화면이 그 말을 그대로 보여 준다(겁주지 않고 사실만 · §3).
+ */
+export interface AiRoleSpec {
+  /** `ai_model_overrides.role` 키. 🔴 바꾸면 저장된 오버레이와 끊긴다 — 늘리기만 한다. */
+  role: string;
+  /** 🔴 사람말(운영 화면이 그대로 그린다 · 화면이 지어내지 않는다 · AC-52). */
+  label: string;
+  /** 코드가 들고 있는 기본 사슬(오버레이가 없을 때 쓰는 것). */
+  codeChain: string[];
+  /** 무엇에 쓰는 모델인가 — 한 문장(운영자가 고를 때 읽는다). */
+  note: string;
+  /** `text` = 우리 키로 불러 살아 있음을 잰다 · `none` = 텍스트 프로브로 **못 잰다**(사람이 1컷 실증). */
+  probe: "text" | "none";
+}
+
+/**
+ * 🔴 **운영이 바꿀 수 있는 역할 표 — 정본.** `netlify/functions/ops-ai.ts` 가 이걸 그대로 읽는다.
+ *   ⚠️ 여기 없는 모델은 **여전히 배포해야 바뀐다.** 새 모델을 `lib/ai-models.ts` 에 더하면 **이 표에도 넣어라** —
+ *      안 넣으면 «무배포 갱신» 약속이 또 절반만 참이 된다(그게 이 표를 만든 까닭이다).
+ */
+export const AI_ROLE_SPECS: readonly AiRoleSpec[] = [
+  { role: "high",     label: "글(공들여)",     codeChain: CHAIN_HIGH,        note: "본문을 공들여 쓸 때", probe: "text" },
+  { role: "low",      label: "글(가볍게)",     codeChain: CHAIN_LOW,         note: "짧은 글·요약처럼 가벼운 일", probe: "text" },
+  { role: "director", label: "디렉터",         codeChain: CHAIN_DIRECTOR,    note: "소재를 고르고 지시서를 짤 때", probe: "text" },
+  { role: "landing",  label: "소개 페이지",     codeChain: CHAIN_LANDING_GEN, note: "소개 페이지 문안", probe: "text" },
+  { role: "image",    label: "사진",           codeChain: CHAIN_IMAGE,       note: "그림을 만들 때", probe: "text" },
+  /* 🔴 여기부터가 이번에 들어온 것 — 여태 배포해야만 바뀌던 자리다. */
+  { role: "tts",       label: "목소리",          codeChain: [MODEL_TTS],        note: "영상 내레이션을 읽는 목소리", probe: "text" },
+  { role: "vision",    label: "그림 읽기",       codeChain: [MODEL_VISION],     note: "만든 그림·화면을 살펴볼 때", probe: "text" },
+  { role: "videoRead", label: "영상 살펴보기",   codeChain: [MODEL_VIDEO_READ], note: "만든 영상을 검수할 때", probe: "text" },
+  /* 🔴 아래 넷은 **텍스트로 못 잰다** — 영상이 나오고 돈이 든다. 바꾸기 전에 사람이 1컷을 만들어 봐야 한다. */
+  { role: "videoOmni", label: "영상(옴니)",      codeChain: [MODEL_OMNI],       note: "그래픽 쇼츠를 만드는 기본", probe: "none" },
+  { role: "videoVeo",  label: "영상(베오)",      codeChain: [MODEL_VEO, MODEL_VEO_FAST, MODEL_VEO_LITE], note: "실사 느낌 쇼츠(세 등급)", probe: "none" },
+  { role: "videoFal",  label: "영상(팔 게이트웨이)", codeChain: [FAL_MODEL_WAN, FAL_MODEL_HAILUO, FAL_MODEL_KLING], note: "FAL_KEY 가 있을 때 쓰는 바깥 게이트웨이", probe: "none" },
+];
+
+/** 역할 키 → 사양(한 곳에서 찾는다). 모르는 역할이면 `undefined` — **지어내지 않는다**(AC-9). */
+export const aiRoleSpec = (role: string): AiRoleSpec | undefined => AI_ROLE_SPECS.find((r) => r.role === role);
