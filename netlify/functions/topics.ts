@@ -1,6 +1,6 @@
 /**
  * 소재 API(계약 P1R1 §2):
- *   GET  /api/topics-list?status=candidate|picked|used|expired|all → { topics:[Topic], refreshedAt?, refresh:{running,startedAt?,finishedAt?,added?,error?} }
+ *   GET  /api/topics-list?status=candidate|picked|used|expired|later|all → { topics:[Topic], refreshedAt?, refresh:{running,startedAt?,finishedAt?,added?,error?} }
  *   POST /api/topics-refresh {}  → **202** { ok:true, started:true } · 이미 도는 중이면 { ok:true, started:false, running:true }
  *        코인 0 · 하루 3회(step rate_limit · audit topics_refresh COUNT)
  *        🔴 v2.9(CLAUDE §4.5b): «동기 한도(≈26초) 넘을 것 같으면 재지 말고 처음부터 배경으로» — LLM 1콜 + 검색량 조회라 동기로는 못 끝낸다.
@@ -10,6 +10,7 @@
  *        400 step: title(빈값·80자) | banned_category(R4 사전 · 문장 그대로) | duplicate(30일 안 같은 제목 → 기존 topic 동봉)
  *   POST /api/topics-pick { id } → { topic }          // candidate→picked
  *   POST /api/topics-skip { id } → { ok }             // →expired
+ *   POST /api/topics-later { id } → { ok, topic }    // 🔴 [AC-251] candidate→later(«나중에») · 되돌리기 = 같은 문에 { id, undo:true }
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
@@ -23,7 +24,7 @@ import { utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/topics-list", "/api/topics-refresh", "/api/topics-pick", "/api/topics-skip", "/api/topics-add"] };
+export const config = { path: ["/api/topics-list", "/api/topics-refresh", "/api/topics-pick", "/api/topics-skip", "/api/topics-add", "/api/topics-later"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const REFRESH_PER_DAY = 3;
@@ -78,6 +79,26 @@ export default async (req: Request): Promise<Response> => {
         const [cur] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${id}`);
         if (!cur) return json({ ok: false, error: "소재를 찾을 수 없어요.", step: "not_found" }, 404);
         return json({ ok: true, topic: toTopic(cur) });   // 이미 picked/used — 멱등
+      }
+      return json({ ok: true, topic: toTopic(row) });
+    }
+    /* ───────── 🔴 «나중에»(AC-251 · 2026-09-23) ─────────
+       `public/app/create.html:136` 이 스스로 적어 뒀다: «서버에 «나중에»를 적어 둘 자리가 없다(pick·skip 뿐) —
+       화면에서만 숨기면 새로고침하면 돌아와 «했는데 안 됐다»가 된다».
+       🔴 **화면 탓이 아니라 서버 칸이 없던 것**이라 여기서 연다(설계 §13.0b 소재 카드의 세 번째 방향).
+
+       ⚠️ `skip`(→expired)과 **뜻이 다르다**: 넘김은 «안 쓴다», 나중에는 «지금은 아니다».
+          그래서 **만료 시각을 안 건드린다** — 되돌리면 원래 후보로 그대로 돌아온다.
+       🔴 막지 않는다(§9) — 목록에서 사라지는 게 아니라 `?status=later` 로 **언제든 다시 본다.** */
+    if (path.endsWith("/topics-later")) {
+      const undo = (b as { undo?: unknown }).undo === true;
+      const [row] = undo
+        ? await q(sql`UPDATE topics SET status = 'candidate' WHERE tenant_id = ${tid} AND id = ${id} AND status = 'later' RETURNING *`)
+        : await q(sql`UPDATE topics SET status = 'later' WHERE tenant_id = ${tid} AND id = ${id} AND status = 'candidate' RETURNING *`);
+      if (!row) {
+        const [cur] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND id = ${id}`);
+        if (!cur) return json({ ok: false, error: "소재를 찾을 수 없어요.", step: "not_found" }, 404);
+        return json({ ok: true, topic: toTopic(cur) });   // 이미 그 상태 — 멱등(두 번 눌러도 같은 답)
       }
       return json({ ok: true, topic: toTopic(row) });
     }
