@@ -18,7 +18,7 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=30"></script>
+<script src="/js/ui.js?v=31"></script>
 <script src="/js/mock.js?v=32"></script>
 <script>
 (async () => {
@@ -54,7 +54,8 @@ function gauge(label, now, need, unit) {
 }
 const STATE_PILL = { none: ["off", "아직 신청 전"], pending: ["warn", "심사 중"], approved: ["ok", "승인됨"] };
 const srcPill = (s) => { const st = s ? UI.SRC_STATUS[s.status] : UI.SRC_STATUS.not_configured; return `<span class="pill ${st[0]}">${st[1]}</span>`; };
-const srcSub = (s) => (s && s.lastSyncAt ? `${UI.ago(s.lastSyncAt)} 가져옴` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
+/* [R17-B2] 🔴 절대 시각(KST) — «어제 값인지 오늘 값인지»가 여기서 갈라진다(§2.3). */
+const srcSub = (s) => (s && s.lastSyncAt ? `${UI.whenKST(s.lastSyncAt)} 기준` : UI.SRC_ERR[(s && s.lastError) || "not_configured"]);
 const btn = (attr, label, danger = false) => `<button type="button" class="btn sm ${danger ? "ghost" : "secondary"}" ${attr}${danger ? ' style="color:var(--danger-ink)"' : ""}>${label}</button>`;
 const bar = (...bs) => `<div style="display:flex;gap:8px;padding:2px 16px 10px;flex-wrap:wrap">${bs.filter(Boolean).join("")}</div>`;
 function card(title, desc, inner) {

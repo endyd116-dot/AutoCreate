@@ -604,6 +604,26 @@
   UI.slotDot = (s) => (UI.SLOT_STATUS[s] || ["off"])[0].replace("off", "");
   /* «방금 전 · 2시간 전» — 러너 마지막 응답 */
   UI.ago = (iso) => { if (!iso) return ""; const ms = Date.now() - UI.utc(iso).getTime(); if (ms < 90e3) return "방금 전"; const m = Math.round(ms / 60e3); if (m < 60) return `${m}분 전`; const h = Math.round(m / 60); if (h < 24) return `${h}시간 전`; return `${Math.round(h / 24)}일 전`; };
+  /**
+   * [R17-B2 · DESIGN §2.3] 🔴 **«언제 것인가»를 절대 시각으로** — «어제 12:30» · «오늘 09:05» · «9월 20일 12:30»(전부 KST).
+   *
+   *   왜 `UI.ago` 로는 모자란가: 수익 신선도가 «3시간 전 가져옴»이었는데, 그러면
+   *   **하루 지난 값인지 오늘 아침 값인지 구분이 안 된다**(전수조사 §2.3 이 든 예시가 «어제 12:30 기준»이다).
+   *   «3시간 전»은 **볼 때마다 달라지는 값**이라, 스크린샷을 찍어 두거나 남에게 말할 수도 없다.
+   *   🔴 오늘·어제는 **KST 날짜로** 가른다(`toLocaleDateString` timeZone 고정 · §13.5) —
+   *      `Date` 의 로컬 날짜로 가르면 해외에 있는 고객 화면에서 «어제»가 하루 밀린다.
+   */
+  UI.whenKST = (iso) => {
+    if (!iso) return "";
+    const d = UI.utc(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const day = (x) => x.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });   // YYYY-MM-DD(KST)
+    const now = new Date();
+    const y = new Date(now.getTime() - 86400e3);
+    const t = day(d);
+    const word = t === day(now) ? "오늘" : t === day(y) ? "어제" : UI.dateKST(iso);
+    return `${word} ${UI.timeKST(iso)}`;
+  };
   /* 복사(토큰·본문) — clipboard 막힌 환경 폴백까지 */
   UI.copy = async function (text) {
     try { await navigator.clipboard.writeText(text); return true; } catch { /* 폴백 */ }
