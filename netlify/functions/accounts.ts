@@ -82,7 +82,31 @@ async function checkLimit(tid: number): Promise<Response | null> {
 void planOf;
 
 /** 워드프레스 App Password 인증 확인 — GET {siteUrl}/wp-json/wp/v2/users/me (Basic). */
-async function verifyWordpress(siteUrl: string, loginId: string, appPassword: string): Promise<{ ok: boolean; name?: string; reason?: string }> {
+/**
+ * [R17-B2 · 2026-09-23] 🔴 **워드프레스 연결이 왜 안 됐나를 갈라서 말한다.**
+ *
+ *   ══ 왜 ══
+ *   `verifyWordpress` 는 실패를 **다섯 갈래**로 가르는데(`http_401`·`http_403`·`http_404`·`no_user`·연결 실패)
+ *   고객에게는 전부 **«워드프레스 로그인 정보를 확인해 주세요»** 한 문장으로 나갔다.
+ *   🔴 그 말은 404·연결 실패에서는 **거짓**이다 — 주소가 안 열리거나 REST 가 꺼진 건데 비밀번호를 다시 만들러 간다.
+ *      «키 꽂으면 즉시 가동»의 ①(정직하게 말한다)이 서버 안에서만 지켜지고 **화면 앞에서 뭉개지던 자리**다.
+ *
+ *   ══ 어떻게 ══ §3 그대로 — ①**사실 한 줄**(무엇이 그런가) ②**어떻게 하면 되는지** ③(있으면) 우리가 대신 해 주는 것.
+ *   🔴 겁주지 않는다: «안 됩니다»·«차단됐습니다»로 끝내지 않고 **다음 손**을 같이 준다.
+ *   🔴 `field` 는 화면이 **어느 칸에 빨간 줄을 칠지**다 — 주소 문제를 비밀번호 칸에 칠하면 그것도 거짓 안내다.
+ */
+export function wpAuthSay(reason?: string): { error: string; field: "siteUrl" | "loginId" | "appPassword"; detail?: string } {
+  const r = String(reason ?? "");
+  if (r === "http_401") return { field: "appPassword", error: "아이디나 앱 비밀번호가 맞지 않아요. 워드프레스 관리자 → 사용자 → 프로필 → «응용 프로그램 비밀번호»에서 새로 만들어 붙여넣어 주세요(띄어쓰기는 그대로 두셔도 돼요)." };
+  if (r === "http_403") return { field: "appPassword", error: "워드프레스가 요청을 막았어요. 보안 플러그인이 REST API 를 막고 있거나 앱 비밀번호 기능이 꺼져 있을 때 그래요. 플러그인에서 «REST API» 를 허용하거나 잠시 꺼 보고 다시 눌러 주세요." };
+  if (r === "http_404") return { field: "siteUrl", error: "그 주소에서 워드프레스를 못 찾았어요. 주소가 맞는지(끝에 /wp 같은 게 붙는지) 보시고, 관리자 → 설정 → 고유주소를 «기본»이 아닌 것으로 한 번 저장해 주시면 대개 열려요." };
+  if (r === "no_user") return { field: "loginId", error: "로그인은 됐는데 사용자 정보를 못 읽었어요. 그 아이디에 글쓰기 권한(편집자 이상)이 있는지 확인해 주세요." };
+  if (/abort|timeout|ETIMEDOUT/i.test(r)) return { field: "siteUrl", error: "사이트가 제때 응답하지 않았어요. 주소가 맞는지 보시고 잠시 뒤에 다시 눌러 주세요.", detail: r.slice(0, 60) };
+  /* 나머지(DNS·인증서·연결 거부 등) — 🔴 **모르는 것을 «비밀번호가 틀렸다»로 바꾸지 않는다**(AC-9). */
+  return { field: "siteUrl", error: "사이트에 연결하지 못했어요. 주소를 https:// 부터 정확히 적었는지 확인해 주세요.", detail: r.slice(0, 60) };
+}
+
+export async function verifyWordpress(siteUrl: string, loginId: string, appPassword: string): Promise<{ ok: boolean; name?: string; reason?: string }> {
   const base = siteUrl.replace(/\/+$/, "");
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12_000);
   try {
@@ -220,7 +244,13 @@ export default async (req: Request): Promise<Response> => {
       const appPassword = String(b.appPassword ?? "").trim();
       if (!/^https?:\/\//i.test(siteUrl) || !loginId || !appPassword) return badRequest("사이트 주소·아이디·앱 비밀번호를 적어 주세요.", "creds");
       const v = await verifyWordpress(siteUrl, loginId, appPassword);
-      if (!v.ok) { await writeAudit({ tenantId: tid, action: "account_add_fail", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { channel, handle, reason: v.reason } }); return json({ ok: false, step: "wp_auth", error: "워드프레스 로그인 정보를 확인해 주세요." }, 400); }
+      if (!v.ok) {
+        await writeAudit({ tenantId: tid, action: "account_add_fail", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { channel, handle, reason: v.reason } });
+        /* 🔴 [R17-B2] **다섯 갈래로 갈라서 말한다.** 종전엔 전부 «로그인 정보를 확인해 주세요» 한 문장이었는데,
+           404(REST 가 꺼져 있다)·연결 실패(주소가 안 열린다)는 **로그인 문제가 아니다** — 그 말은 고객을
+           아무 소용 없는 곳(비밀번호 다시 만들기)으로 보낸다. §3 그대로 «사실 한 줄 + 어떻게 하면 되는지»로 준다. */
+        return json({ ok: false, step: "wp_auth", ...wpAuthSay(v.reason) }, 400);
+      }
       const id = await upsertAccount(tid, channel as ChannelKey, handle, displayName || v.name || null, "app_password", "active");
       if (id === null) return json({ ok: false, step: "duplicate", error: "이미 연결한 계정이에요." }, 409);
       await saveCreds(tid, id, "app_password", { siteUrl, loginId, appPassword });

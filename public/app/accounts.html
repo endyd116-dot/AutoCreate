@@ -175,7 +175,10 @@ async function submitAdd(body, f, close) {
     if (r.gated) return close(); // 402 plan_limit 은 UI.gate 가 업셀 시트를 열었다
     if (r.step === "limit") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">${UI.esc(r.error)}</p><div class="cta"><a class="btn primary" href="/app/plan.html">요금제 보기</a></div>`, { title: "이 요금제에서는 여기까지예요" }); }
     if (r.step === "duplicate" || r.step === "creds" || r.step === "handle_policy") return UI.fieldError(f, "loginId", r.error);
-    if (r.step === "wp_auth") return UI.fieldError(f, "appPassword", r.error);
+    /* [R17-B2] 🔴 **서버가 말한 칸에 칠한다.** 종전엔 뭐가 틀렸든 늘 «앱 비밀번호» 칸이 빨개져서,
+       주소가 안 열리는 경우에도 고객이 비밀번호를 다시 만들러 갔다 — 거짓 안내다(AC-10).
+       서버가 칸을 안 주면 종전대로(모르면 지어내지 않는다). */
+    if (r.step === "wp_auth") return UI.fieldError(f, r.field || "appPassword", r.error);
     return UI.toast(r.error || "연결하지 못했어요");
   }
   close(); UI.done(r.account?.status === "active" ? "연결했어요" : "연결했어요 · 첫 발행 전에 로그인을 확인해요", load);
