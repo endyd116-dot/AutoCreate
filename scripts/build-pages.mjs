@@ -9,7 +9,11 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
    이 자를 만든 까닭: 2026-09-23 에 내가 이 스크립트를 그냥 돌렸다가 **A 의 R17 작업 201줄을 다섯 화면에서 지웠다.**
    `*.html` 을 직접 고치고 `_tpl.txt` 에 안 옮긴 사람이 있으면, 다음 사람이 빌드를 돌리는 순간 **말없이 사라진다**
    — 그리고 빌드는 초록으로 끝난다. 그게 제일 나쁘다(§4.8 의 반대 방향: «있던 화면이 없어진다»).
-   ⇒ 고치기 **전에** `node scripts/build-pages.mjs --check` 를 돌린다. 갈린 게 있으면 종료코드 1 + 파일 목록. */
+   ⇒ 고치기 **전에** `node scripts/build-pages.mjs --check` 를 돌린다. 갈린 게 있으면 종료코드 1 + 파일 목록.
+   🔴 **이 자는 «자기 나무의» build-pages.mjs 로만 재라.** 이 스크립트 자체가 내용이다(`ui.js?v=` 같은 판 번호가 여기 박힌다).
+      남의 가지를 재겠다고 **내 자를 남의 나무에 얹으면** 37장이 전부 «`ui.js?v=30` ↔ `v=31` 한 줄»로 빨개진다 —
+      제품이 아니라 **내 자의 상태를 찍은 것**이다(AC-236 · AC-240). 내가 2026-09-23 에 바로 그렇게 한 번 틀렸다.
+      남의 가지를 재려면 **그 가지의 스크립트를 쓰고**, 그냥 돌린 뒤 `git diff -- public/` 가 비는지 보면 된다. */
 const CHECK = process.argv.includes("--check");
 const drift = [];
 
@@ -73,14 +77,16 @@ ${(js || "").trim()}
     const out = `${t.dir}/${file}`;
     if (CHECK) {
       const cur = existsSync(out) ? readFileSync(out, "utf8") : null;
-      /* 줄끝(CRLF)만 다른 건 갈린 게 아니다 — 그걸 세면 스물넷이 매번 빨개져서 아무도 안 본다. */
+      /* 줄끝(CRLF)만 다른 건 갈린 게 아니다 — 그걸 세면 서른일곱이 매번 빨개져서 아무도 안 본다. */
       const CR = String.fromCharCode(13), LF = String.fromCharCode(10);
       const norm = (x) => x.split(CR).join("");
-      if (cur === null) drift.push([out, "생성물이 없다"]);
+      if (cur === null) drift.push({ file: out, missing: true, gone: [], add: [] });
       else if (norm(cur) !== norm(page)) {
         const a = norm(cur).split(LF), b = norm(page).split(LF);
         const setA = new Set(a), setB = new Set(b);
-        drift.push([out, `생성물에만 ${a.filter((l) => l.trim() && !setB.has(l)).length}줄 · 정본에만 ${b.filter((l) => l.trim() && !setA.has(l)).length}줄`]);
+        drift.push({ file: out, missing: false,
+          gone: a.filter((l) => l.trim() && !setB.has(l)),   // 생성물에만 = **빌드가 지울 줄**
+          add: b.filter((l) => l.trim() && !setA.has(l)) }); // 정본에만  = **빌드가 넣을 줄**
       }
     } else writeFileSync(out, page, "utf8");
     n++;
@@ -89,9 +95,33 @@ ${(js || "").trim()}
 }
 if (CHECK) {
   if (!drift.length) { console.log("✓ 정본(_tpl.txt)과 생성물이 같다 — 지금 빌드를 돌려도 지워지는 것이 없다."); process.exit(0); }
+  const cut = (l) => (l.trim().length > 150 ? l.trim().slice(0, 150) + " …" : l.trim());
+  console.log("");
   console.log(`🔴 정본과 갈린 생성물 ${drift.length}개 — **지금 빌드를 돌리면 «생성물에만» 있는 줄이 사라진다.**`);
-  for (const [f, why] of drift) console.log(`   ✗ ${f}  —  ${why}`);
+  for (const d of drift) {
+    console.log("");
+    if (d.missing) { console.log(`   ✗ ${d.file}  —  생성물이 없다`); continue; }
+    console.log(`   ✗ ${d.file}`);
+    if (d.gone.length) {
+      /* 지울 줄은 많을 수 있다(실측 66줄) — 앞 8줄만 보이고 나머지는 수로 말한다. 여기서는 «무엇이»보다 «얼마나»가 먼저다. */
+      console.log(`      ✖ 생성물에만 ${d.gone.length}줄 — **빌드가 지울 줄**`);
+      for (const l of d.gone.slice(0, 8)) console.log(`         - ${cut(l)}`);
+      if (d.gone.length > 8) console.log(`         … ${d.gone.length - 8}줄 더 (git diff 로 본다)`);
+    }
+    if (d.add.length) {
+      /* 🔴 넣을 줄은 **전부 찍는다**(A 의 제안 · 2026-09-23). 세는 것보다 **보는 것**이 이 건을 가른다 — 아래 경고와 한 몸이다. */
+      console.log(`      ＋ 정본에만 ${d.add.length}줄 — **빌드가 넣을 줄**(전부 찍는다)`);
+      for (const l of d.add) console.log(`         + ${cut(l)}`);
+    }
+  }
+  console.log("");
   console.log("   할 일: 「생성물에만」 있는 줄을 **`_tpl.txt` 로 옮긴 뒤** 빌드한다(AC-213 · 정본이 먼저다).");
   console.log("   🔴 그 줄을 쓴 사람이 누군지 모르면 **지우지 말고 물어본다** — 말없이 사라지면 아무도 못 찾는다.");
+  console.log("");
+  console.log("   🔴 **「정본에만」 있는 줄은 반드시 눈으로 읽어라.** 자는 그게 «새 내용»인지");
+  console.log("      «생성물 쪽에서 고치기 전의 옛 판»인지 **못 가른다** — 글자로는 똑같이 «갈림»이다.");
+  console.log("      A 실측(2026-09-23): 20줄 중 **새 내용 0줄 · 전부 옛 판**이었다. 안 가르고 줄 단위로 합치면");
+  console.log("      옛 판과 새 판이 **둘 다 남는다**(프랑켄슈타인). 그때는 **블록 통째 교체**가 맞다.");
+  console.log("      🔴 «갈렸다»는 잰 것이고 «둘 다 필요하다»는 **뜻한 것**이다 — 자는 앞엣것만 한다(AC-178).");
   process.exit(1);
 }
