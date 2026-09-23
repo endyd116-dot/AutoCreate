@@ -16,7 +16,7 @@ import { db } from "../../db/index";
 import { sql } from "drizzle-orm";
 
 export const config = { path: ["/api/onboarding", "/api/tenant-settings"] };
-const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt", "teamApproval",
+const ALLOWED_SETTINGS = new Set(["autoSchedule", "kinds", "channels", "produceLeadDays", "reviewPolicy", "bestTimeMode", "weeklyCoinCap", "quietDays", "horizonDays", "topicLeadDays", "produceHour", "coinAutoUsePurchased", "onboardedAt", "teamApproval", "directorAuto",
   /* 🔴 [2026-09-16 · A2 가 화면 만들기 전에 찾음] `goal` 이 여기 없어서 **POST 해도 조용히 버려졌다** —
      고객이 «목표 매체»를 고르고 저장한 뒤 새로고침하면 사라지는 상태였다. 화이트리스트가 값을 먹는 자리다. */
   "goal"]);
@@ -100,6 +100,17 @@ export default async (req: Request): Promise<Response> => {
       if (!f.ok) return f.res!;
     }
     if ("teamApproval" in patch) patch.teamApproval = patch.teamApproval === true;
+    /* 🔴 [R17 · §15 `director-settings` · DESIGN:286] «디렉터에게 맡기기» — ON 이면 지시서 확인 화면을 건너뛴다.
+       🔴 **새 문(`/api/director-settings`)을 파지 않았다** — 설계의 이름은 그 뜻이고, 우리 정본은 `tenants.settings` 한 곳이다.
+          문을 따로 파면 «설정이 두 군데»가 되고 그게 더 비싸다(§14 «같은 사실을 두 벌로 두지 않는다»).
+       🔴 켜는 것만 요금제로 가른다(`directorEdit` = Pro 부터 · DESIGN:1100 «자동만 / 자동+손보기+자동모드»).
+          **끄는 것은 언제나 되게 둔다** — 되돌릴 길은 막지 않는다(§9). */
+    if (patch.directorAuto === true) {
+      const { requireFeature } = await import("../../lib/plans");
+      const f = await requireFeature(auth.tid, "directorEdit");
+      if (!f.ok) return f.res!;
+    }
+    if ("directorAuto" in patch) patch.directorAuto = patch.directorAuto === true;
     const settings = await mergeSettings(auth.tid, patch);
     await writeAudit({ tenantId: auth.tid, action: "tenant_settings_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: patch });
     return json({ ok: true, settings, ...kindsView(settings), ...(volunteerChanged !== null ? { recipeVolunteer: volunteerChanged } : {}) });
