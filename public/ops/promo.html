@@ -14,6 +14,7 @@
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">이벤트</span><span class="sp"></span></div>
 <div class="group"><div class="gt">이벤트 <button type="button" id="addP" style="color:var(--ink);font-weight:600;font-size:12.5px">새 이벤트</button></div><div id="promos"></div></div>
+<div class="group"><div class="gt">추천인</div><div id="rsum" class="muted" style="padding:0 16px 10px;font-size:12.5px"></div><div id="refs"></div></div>
 <div class="group"><div class="gt">쿠폰 <button type="button" id="addC" style="color:var(--ink);font-weight:600;font-size:12.5px">새 쿠폰</button></div><div id="coupons"></div></div>
 <div class="group"><div class="gt">쿠폰 사용 기록</div><div id="red"></div></div>
   </main>
@@ -29,7 +30,7 @@ const KIND = { trial_days: "체험 기간", bonus_coin: "보너스 코인", refe
 const PST = { scheduled: ["off", "예약"], active: ["ok", "진행 중"], ended: ["off", "끝남"] };
 const unit = (p) => p.unit === "days" ? `${p.value}일` : p.unit === "pct" ? `+${p.value}%` : `${p.value}코인`;
 async function load() {
-  const [p, c, r] = await Promise.all([UI.api("/api/ops-promotions", { noRedirect: true }), UI.api("/api/ops-coupons", { noRedirect: true }), UI.api("/api/ops-coupon-redemptions", { noRedirect: true })]);
+  const [p, c, r, rf] = await Promise.all([UI.api("/api/ops-promotions", { noRedirect: true }), UI.api("/api/ops-coupons", { noRedirect: true }), UI.api("/api/ops-coupon-redemptions", { noRedirect: true }), UI.api("/api/ops-referrals", { noRedirect: true })]);
   if (!p.ok) { UI.toast(p.error || "불러오지 못했어요"); return; }
   UI.$("#promos").innerHTML = OPS.table([
     { h: "이름", f: (x) => `<b>${UI.esc(x.name)}</b>` }, { h: "종류", f: (x) => KIND[x.kind] || x.kind }, { h: "값", f: (x) => unit(x) },
@@ -37,6 +38,22 @@ async function load() {
     { h: "상태", f: (x) => OPS.pill(PST[x.status] || ["off", x.status]) }, { h: "사용 · 전환", r: true, f: (x) => `${UI.num(x.stats?.used || 0)} · ${UI.num(x.stats?.converted || 0)}` },
     { h: "", f: (x) => x.status !== "ended" ? `<button type="button" class="lk" data-edit="${x.id}">고치기</button> · <button type="button" class="lk" data-end="${x.id}">끝내기</button>` : "" },
   ], p.promotions || []);
+  /* 🔴 [R17] 추천인 — 원장·감사에는 다 남는데 **운영이 볼 자리가 0곳**이었다(§4.8).
+     막지 않는다 · 되돌리지 않는다 — **보여만 준다**(§9). 「같은 카드」는 위협이 아니라 **왜 코인이 안 갔는지**의 사실 한 줄이다(§3). */
+  const RST = { rewarded: ["ok", "코인 갔어요"], blocked: ["warn", "코인 안 갔어요"], waiting: ["off", "첫 결제 전"] };
+  const RWHY = { card_fp: "같은 카드를 써요", email_alias: "같은 메일이에요", email_domain: "같은 회사 메일이에요" };
+  const rs = rf.ok ? (rf.summary || {}) : null;
+  UI.$("#rsum").textContent = rf.ok
+    ? `추천으로 온 분 ${UI.num(rs.attached || 0)}명 · 코인 간 곳 ${UI.num(rs.rewarded || 0)} · 첫 결제 전 ${UI.num(rs.waiting || 0)} · 코인 안 간 곳 ${UI.num(rs.blocked || 0)} · 나간 코인 ${UI.num(rs.coins || 0)}코인 · 지금 보상 ${UI.num(rf.rewardCoins || 0)}코인${rf.rewardCoins ? "" : "(이벤트가 꺼져 있어요)"}`
+    : "추천 현황을 못 불러왔어요. 잠시 뒤 다시 열어 주세요.";
+  UI.$("#refs").innerHTML = OPS.table([
+    { h: "가입", f: (x) => OPS.dt(x.joinedAt) },
+    { h: "데려온 분", f: (x) => `<b>${UI.esc(x.inviterName)}</b> <span class="muted">#${x.inviterTid}</span>` },
+    { h: "온 분", f: (x) => `${UI.esc(x.inviteeName)} <span class="muted">#${x.inviteeTid} · ${UI.esc(x.inviteePlan)}</span>` },
+    { h: "상태", f: (x) => `${OPS.pill(RST[x.state] || ["off", x.state])}${x.blockReason ? ` <span class="muted">${UI.esc(RWHY[x.blockReason] || x.blockReason)}</span>` : ""}` },
+    { h: "코인", r: true, f: (x) => x.coins ? `${UI.num(x.coins)}코인` : "-" },
+    { h: "", f: (x) => `<a class="lk" href="/ops/tenant.html?id=${x.inviteeTid}">고객 보기</a>` },
+  ], rf.ok ? rf.referrals || [] : []);
   UI.$("#coupons").innerHTML = OPS.table([
     { h: "코드", f: (x) => `<b style="font-family:ui-monospace,monospace">${UI.esc(x.code)}</b>` }, { h: "할인", f: (x) => x.kind === "pct" ? `${x.value}%` : UI.won(x.value) },
     { h: "사용", r: true, f: (x) => `${UI.num(x.used)} / ${UI.num(x.maxUses)}` }, { h: "기간", f: (x) => `${OPS.dateKST(x.startsAt)} ~ ${OPS.dateKST(x.endsAt)}` },

@@ -19,8 +19,9 @@ import { jsonb, utcDate } from "../../lib/db-util";
 import { loadPlans } from "../../lib/plans";
 import { pageOf } from "../../lib/ops/period";
 import { toPromotionRow, toCouponRow, parsePromotionInput, parseCouponInput } from "../../lib/billing/promotions";
+import { referralRewardCoins } from "../../lib/referral";
 
-export const config = { path: ["/api/ops-promotions", "/api/ops-coupons", "/api/ops-coupon-redemptions"] };
+export const config = { path: ["/api/ops-promotions", "/api/ops-coupons", "/api/ops-coupon-redemptions", "/api/ops-referrals"] };
 const n = (v: unknown) => Number(v || 0);
 const iso = (v: unknown) => utcDate(v)?.toISOString();
 const tsOrNull = (v: string | null): SQL => (v ? sql`${v}::timestamptz AT TIME ZONE 'UTC'` : sql`NULL`);
@@ -44,6 +45,16 @@ export default async (req: Request): Promise<Response> => {
             AND a.target IN (${sql.join(rows.map((r) => sql`${`promotion:${n(r.id)}`}`), sql`, `)}) GROUP BY a.target`) : [];
         const convOf = new Map(conv.map((c) => [String(c.target), n(c.c)]));
         const status = (url.searchParams.get("status") || "").trim();
+        /* 🔴 [R17] 추천은 `promo_applied` 를 **안 남긴다** — 보상 경로가 다르다(`lib/referral.ts` 는 `referral_reward` 를 쓴다).
+           그대로 두면 추천인 이벤트의 «전환» 칸이 **영원히 0** 이고, 화면은 그걸 «아무도 안 왔다»로 읽는다.
+           «0 이 사실이 아닌데 0 으로 보이는 것»이 제일 나쁘다 — 실제로 보상이 나간 수(이벤트 기간 안)로 센다. */
+        for (const r of rows.filter((x) => String(x.kind) === "referral")) {
+          try {
+            const [rc] = await q(sql`SELECT COUNT(*) AS c FROM tenants t, promotions p WHERE p.id = ${n(r.id)} AND t.referral_rewarded_at IS NOT NULL
+              AND (p.starts_at IS NULL OR t.referral_rewarded_at >= p.starts_at) AND (p.ends_at IS NULL OR t.referral_rewarded_at <= p.ends_at)`);
+            convOf.set(`promotion:${n(r.id)}`, n(rc?.c));
+          } catch { /* 보조 집계 실패는 목록을 막지 않는다(CLAUDE §4.1) */ }
+        }
         let list = rows.map((r) => toPromotionRow(r, convOf.get(`promotion:${n(r.id)}`) ?? 0));
         if (status) list = list.filter((p) => p.status === status);
         return json({ ok: true, promotions: list, total: n(cnt?.c), page, size });
@@ -77,6 +88,48 @@ export default async (req: Request): Promise<Response> => {
       if (chk && (chk.c !== "object" || chk.d !== "object")) console.error("[ops-promotions] jsonb_typeof 이상", chk);   // PITFALLS #1
       await writeAudit({ tenantId: null, action: id ? "ops_promotion_update" : "ops_promotion_create", actorType: "operator", actorId: o.ops.oid, ip, riskLevel: "medium", target: `promotion:${n(r.id)}`, detail: { kind: p.kind, name: p.name, config: p.config, conditions: p.conditions, startsAt: p.startsAt, endsAt: p.endsAt, active: p.active } });
       return json({ ok: true, promotion: toPromotionRow(r) }, id ? 200 : 201);
+    }
+
+    /* ── 🔴 [R17] 추천인 — 운영이 «누가 누굴 데려와 얼마 받았나»를 보는 자리(읽기 전용) ──
+       여태 추천은 `promo.html` 의 **종류 이름표**로만 있었다: 원장(`coin_ledger` ref `referral:{inviter}:{invitee}`)과
+       감사(`referral_attached`·`referral_reward`·`referral_blocked`)에 다 남는데 **운영이 볼 문이 0곳**이었다(§4.8 «API 만 있으면 없는 기능»).
+       새 파일을 안 판다 — 이벤트 함수의 분기로 붙인다(`director-settings` 선례). 쓰기 없음: 막지도 풀지도 않고 **보여만 준다**(§9). */
+    if (path.endsWith("/ops-referrals")) {
+      if (req.method !== "GET") return json({ ok: false, error: "method" }, 405);
+      const { page, size, offset } = pageOf(url);
+      const only = (url.searchParams.get("status") || "").trim();   // rewarded | blocked | waiting | ""
+      const [cnt] = await q(sql`SELECT COUNT(*) AS c FROM tenants WHERE referred_by IS NOT NULL`);
+      const rows = await q(sql`SELECT t.id AS invitee_tid, t.name AS invitee_name, t.plan_key AS invitee_plan, t.status AS invitee_status,
+          t.created_at AS joined_at, t.referral_rewarded_at, t.referral_blocked_at, t.referral_block_reason,
+          inv.id AS inviter_tid, inv.name AS inviter_name,
+          (SELECT COALESCE(SUM(l.delta), 0) FROM coin_ledger l WHERE l.ref = 'referral:' || inv.id || ':' || t.id AND l.delta > 0) AS coins
+        FROM tenants t JOIN tenants inv ON inv.id = t.referred_by
+        WHERE t.referred_by IS NOT NULL
+        ORDER BY COALESCE(t.referral_rewarded_at, t.referral_blocked_at, t.created_at) DESC, t.id DESC LIMIT ${size} OFFSET ${offset}`);
+      /* 🔴 `joinedAt` 은 «연결한 시각»이 아니라 **가입 시각**이다 — 연결은 가입 때 1회뿐이라 같은 값이지만, 이름은 있는 그대로 적는다(AC-114). */
+      let list = rows.map((r) => {
+        const o: Record<string, unknown> = {
+          inviteeTid: n(r.invitee_tid), inviteeName: String(r.invitee_name ?? ""), inviteePlan: String(r.invitee_plan ?? ""), inviteeStatus: String(r.invitee_status ?? ""),
+          inviterTid: n(r.inviter_tid), inviterName: String(r.inviter_name ?? ""), joinedAt: iso(r.joined_at) ?? "",
+          coins: n(r.coins), state: r.referral_rewarded_at ? "rewarded" : r.referral_blocked_at ? "blocked" : "waiting",
+        };
+        if (iso(r.referral_rewarded_at)) o.rewardedAt = iso(r.referral_rewarded_at);
+        if (iso(r.referral_blocked_at)) o.blockedAt = iso(r.referral_blocked_at);
+        if (r.referral_block_reason) o.blockReason = String(r.referral_block_reason);
+        return o;
+      });
+      if (only) list = list.filter((x) => x.state === only);
+      /* 요약은 **전체**를 센다(한 쪽만 보고 판단하지 않도록 · 페이지와 겹쳐 세지 않는다). */
+      let summary = { attached: n(cnt?.c), rewarded: 0, blocked: 0, waiting: 0, coins: 0 };
+      try {
+        const [sm] = await q(sql`SELECT COUNT(*) FILTER (WHERE referral_rewarded_at IS NOT NULL) AS rewarded,
+            COUNT(*) FILTER (WHERE referral_blocked_at IS NOT NULL) AS blocked FROM tenants WHERE referred_by IS NOT NULL`);
+        const [cs] = await q(sql`SELECT COALESCE(SUM(delta), 0) AS c FROM coin_ledger WHERE ref LIKE 'referral:%' AND delta > 0`);
+        summary = { attached: n(cnt?.c), rewarded: n(sm?.rewarded), blocked: n(sm?.blocked),
+          waiting: Math.max(0, n(cnt?.c) - n(sm?.rewarded) - n(sm?.blocked)), coins: n(cs?.c) };
+      } catch { /* 보조 집계 실패는 목록을 막지 않는다 */ }
+      const { coins: rewardCoins } = await referralRewardCoins();
+      return json({ ok: true, referrals: list, summary, rewardCoins, total: n(cnt?.c), page, size });
     }
 
     /* ── 쿠폰 ── */

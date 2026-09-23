@@ -45,6 +45,13 @@
       { id: 102, kind: "bonus_coin", name: "첫 충전 +20%", value: 20, unit: "pct", startsAt: iso(now - 10 * 86400e3), endsAt: iso(now + 5 * 86400e3), target: { plans: ["trial", "starter"] }, status: "active", stats: { used: 9, converted: 9 } },
       { id: 103, kind: "referral", name: "친구 추천 20코인", value: 20, unit: "coins", startsAt: iso(now + 7 * 86400e3), endsAt: iso(now + 60 * 86400e3), target: {}, status: "scheduled", stats: { used: 0, converted: 0 } },
     ],
+    /* 🔴 [R17] 추천인 표본은 **세 갈래를 다 넣는다** — 보상 간 것·막힌 것·첫 결제 전.
+       한 갈래만 넣으면 화면이 나머지 둘을 한 번도 안 그리고, 그래도 자는 초록이다(AC-243 «모의가 라이브보다 작다»). */
+    referrals: fresh ? [] : [
+      { inviteeTid: 21, inviteeName: "팁스고", inviteePlan: "pro", inviteeStatus: "active", inviterTid: 7, inviterName: "요리하는 집", joinedAt: iso(now - 9 * 86400e3), rewardedAt: iso(now - 6 * 86400e3), coins: 40, state: "rewarded" },
+      { inviteeTid: 34, inviteeName: "주말목공", inviteePlan: "trial", inviteeStatus: "trial", inviterTid: 7, inviterName: "요리하는 집", joinedAt: iso(now - 2 * 86400e3), coins: 0, state: "waiting" },
+      { inviteeTid: 41, inviteeName: "내일의집", inviteePlan: "starter", inviteeStatus: "active", inviterTid: 12, inviterName: "하루한장", joinedAt: iso(now - 21 * 86400e3), blockedAt: iso(now - 18 * 86400e3), blockReason: "card_fp", coins: 0, state: "blocked" },
+    ],
     coupons: fresh ? [] : [
       { id: 201, code: "FALL30", kind: "pct", value: 30, maxUses: 100, used: 27, startsAt: iso(now - 10 * 86400e3), endsAt: iso(now + 20 * 86400e3), plans: ["pro"], status: "active" },
       { id: 202, code: "WELCOME10K", kind: "krw", value: 10000, maxUses: 500, used: 500, startsAt: iso(now - 90 * 86400e3), endsAt: iso(now - 1 * 86400e3), plans: ["starter", "pro"], status: "ended" },
@@ -222,9 +229,20 @@
     "ops-impersonate-end": () => ({ ok: true }),
     /* ── 이벤트 ── */
     "ops-promotions": (b) => { if (need("admin")) return forbid(); if (b && b.action) { if (b.action === "save") { const p = S.promotions.find((x) => x.id === Number(b.id)); if (p) Object.assign(p, b.promotion); else S.promotions.unshift({ id: S.nextId++, stats: { used: 0, converted: 0 }, ...b.promotion, status: new Date(b.promotion.startsAt) > new Date() ? "scheduled" : "active" }); } if (b.action === "end") { const p = S.promotions.find((x) => x.id === Number(b.id)); if (p) { p.status = "ended"; p.endsAt = iso(Date.now()); } } return { ok: true }; }
+      /* 🔴 [R17] 추천 이벤트의 «전환»은 서버가 **실제 보상이 나간 수**로 센다(promo_applied 를 안 남기므로).
+         모의가 0 으로 굳어 있으면 화면이 고쳐진 걸 한 번도 못 본다 — 여기서도 같이 센다. */
+      const rw = (S.referrals || []).filter((x) => x.state === "rewarded").length;
+      for (const p of S.promotions) if (p.kind === "referral") p.stats = { used: (p.stats && p.stats.used) || rw, converted: rw };
       return { ok: true, promotions: S.promotions }; },
     "ops-coupons": (b) => { if (need("admin")) return forbid(); if (b && b.action) { if (b.action === "save") { if (!/^[A-Z0-9]{4,16}$/.test(b.coupon?.code || "")) return err("code", "코드는 영문 대문자·숫자 4~16자예요."); if (S.coupons.some((c) => c.code === b.coupon.code && c.id !== Number(b.id))) return err("code", "이미 있는 코드예요."); const c = S.coupons.find((x) => x.id === Number(b.id)); if (c) Object.assign(c, b.coupon); else S.coupons.unshift({ id: S.nextId++, used: 0, status: "active", ...b.coupon }); } if (b.action === "end") { const c = S.coupons.find((x) => x.id === Number(b.id)); if (c) c.status = "ended"; } return { ok: true }; }
       return { ok: true, coupons: S.coupons }; },
+    "ops-referrals": (_b, q) => { if (need("admin")) return forbid();
+      const only = (q && q.get("status")) || "";
+      const all = S.referrals, rewarded = all.filter((x) => x.state === "rewarded").length, blocked = all.filter((x) => x.state === "blocked").length;
+      /* 🔴 요약은 **거르기와 무관하게 전체**를 센다(서버와 같은 규율) — 거른 수를 전체처럼 보이면 그게 거짓말이다. */
+      return { ok: true, referrals: only ? all.filter((x) => x.state === only) : all,
+        summary: { attached: all.length, rewarded, blocked, waiting: all.length - rewarded - blocked, coins: all.reduce((a, x) => a + (x.coins || 0), 0) },
+        rewardCoins: (S.promotions.find((p) => p.kind === "referral" && p.status === "active") || {}).value || 0, total: all.length, page: 1, size: 50 }; },
     "ops-coupon-redemptions": (_b, q) => ({ ok: true, redemptions: S.redemptions.filter((r) => !q.get("couponId") || r.couponId === Number(q.get("couponId"))) }),
     /* ── 요금제 ── */
     "ops-plans": () => { if (need("super_admin")) return forbid(); return { ok: true, plans: S.plans, priceEvents: S.priceEvents }; },
