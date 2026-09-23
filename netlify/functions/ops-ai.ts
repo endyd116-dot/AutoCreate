@@ -1,8 +1,10 @@
 /**
  * 운영센터 — AI 엔진(계약 P1R4 §2.2 · DESIGN §10 전문). 🔴 모델 무배포 갱신·카나리·자동/수동·원가 상한.
- *   GET  /api/ops-ai-models    → { ok, roles:[{ role, codeChain, chain, candidate, canaryPct, prevChain, candidateAt, appliedAt }], settings:{ updateMode, candidates },
+ *   GET  /api/ops-ai-models    → { ok, roles:[{ role, label, note, probe, codeChain, chain, candidate, canaryPct, prevChain, candidateAt, appliedAt }], settings:{ updateMode, candidates },
+ *        🔴 `label`·`note` = 사람말(화면이 지어내지 않는다 · AC-52) · `probe:"none"` = 텍스트로 **못 잰다**(영상 · 사람이 1컷 실증)
  *                                  keys:{ count, perInstance:true, items:[{ label:"key#1", resting, restsUntilSec, rested, used }] } }   // [R8 §3.3] 키 로테이션 — 🔴 키 값은 안 싣는다
- *   POST /api/ops-ai-apply     { role, chain:[model], canaryPct }  → { ok, role, chain, candidate, canaryPct }   // canaryPct<100=카나리·=100=전량 적용
+ *   POST /api/ops-ai-apply     { role, chain:[model], canaryPct }  → { ok, role, chain, candidate, canaryPct, verified }   // canaryPct<100=카나리·=100=전량 적용
+ *        🔴 `verified:false` = **우리가 대신 못 재는 역할**(영상 · `probe:"none"`)이라 불러 보지 않았다는 뜻 — «됐다»가 아니다(AC-9)
  *   POST /api/ops-ai-rollback  { role }                            → { ok, role, chain }                          // prev_chain 복원 + 후보 폐기
  *   POST /api/ops-ai-mode      { mode: "manual"|"auto" }           → { ok, updateMode }
  *   POST /api/ops-ai-cost-cap  { tenantId, costCapKrw:number|null } → { ok, tenantId, costCapKrw }
@@ -25,15 +27,18 @@ import { q } from "../../lib/accounts";
 import { jsonb, utcDate } from "../../lib/db-util";
 import { sql } from "drizzle-orm";
 import { callGemini } from "../../lib/ai";
-import { CHAIN_HIGH, CHAIN_LOW, CHAIN_DIRECTOR, CHAIN_LANDING_GEN, CHAIN_IMAGE, ALL_DECLARED_MODELS } from "../../lib/ai-models";
+import { ALL_DECLARED_MODELS, AI_ROLE_SPECS, aiRoleSpec } from "../../lib/ai-models";   // 🔴 [AC-252] 역할 표 정본은 ai-models.ts(여기서 안 짓는다)
 import { aiKeyCount, aiKeyStats } from "../../lib/ai-key";   // [R8 · §3.3] 키 로테이션 — 어느 키가 몇 번 쉬었나(키 값은 안 싣는다)
 
 export const config = { path: ["/api/ops-ai-models", "/api/ops-ai-apply", "/api/ops-ai-rollback", "/api/ops-ai-mode", "/api/ops-ai-cost-cap", "/api/ops-ai-video-kill"] };
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 
-/** 역할 → 코드 기본 체인. 🔴 모델명은 ai-models.ts 에서만 온다(여기서 짓지 않는다). */
-const CODE_CHAIN: Record<string, string[]> = { high: CHAIN_HIGH, low: CHAIN_LOW, director: CHAIN_DIRECTOR, landing: CHAIN_LANDING_GEN, image: CHAIN_IMAGE };
-const AI_ROLES = Object.keys(CODE_CHAIN);
+/* 🔴 [AC-252 · 2026-09-23] **역할 표를 여기서 짓지 않는다** — `lib/ai-models.ts AI_ROLE_SPECS` 가 정본이다.
+   여태 이 파일이 손으로 다섯(high·low·director·landing·image)을 적고 있었고, 그래서 **영상·음성 전부가 무배포 갱신 밖**이었다
+   (CLAUDE §2 의 «DB 오버레이로 무배포 갱신» 약속이 글·사진에만 참이었다 · 메인 실측).
+   ⇒ 이제 역할을 정본에 더하면 **이 문도 화면도 저절로 따라간다**(손 표 0). */
+const CODE_CHAIN: Record<string, string[]> = Object.fromEntries(AI_ROLE_SPECS.map((r) => [r.role, r.codeChain]));
+const AI_ROLES = AI_ROLE_SPECS.map((r) => r.role);
 
 type Row = Record<string, unknown>;
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
@@ -41,15 +46,24 @@ const cleanChain = (v: unknown): string[] =>
   (Array.isArray(v) ? v : []).map((x) => String(x ?? "").trim()).filter(Boolean).map((s) => s.slice(0, 60)).slice(0, 6);
 const arr = (v: unknown): string[] => (Array.isArray(v) ? (v as unknown[]).map(String) : []);
 
-/** §4.9 — 코드에 없던 모델은 넣기 전에 우리 키로 불러 본다. 하나라도 안 되면 거부(적용 안 함). */
-async function verifyChain(chain: string[]): Promise<{ ok: boolean; badModel?: string; reason?: string }> {
+/**
+ * §4.9 — 코드에 없던 모델은 넣기 전에 우리 키로 불러 본다. 하나라도 안 되면 거부(적용 안 함).
+ *
+ *   🔴 [AC-252 · 2026-09-23] **역할이 `probe:"none"` 이면 이 텍스트 프로브를 돌리지 않는다.**
+ *      영상 모델(`veo`·`omni`·FAL)은 텍스트로 부르면 **멀쩡한 모델도 실패로 나온다** — 출력이 영상이고 과금이 붙는다.
+ *      그대로 뒀으면 «무배포로 바꿀 수 있게» 열어 놓고 **바꾸려 할 때마다 거부**하는 문이 된다(열린 척하는 문이 제일 나쁘다).
+ *   🔴 **그래서 «못 쟀다»를 «통과»로 쓰지 않는다** — 돌려주는 `checked:false` 를 화면이 그대로 말한다:
+ *      «이건 우리가 대신 못 재요 · 바꾸기 전에 1컷을 만들어 보세요»(§3 사실만 · 겁주지 않는다 · AC-9).
+ */
+async function verifyChain(chain: string[], role?: string): Promise<{ ok: boolean; checked: boolean; badModel?: string; reason?: string }> {
+  if (role && aiRoleSpec(role)?.probe === "none") return { ok: true, checked: false };
   const declared = new Set(ALL_DECLARED_MODELS.map((m) => m.toLowerCase()));
   for (const m of chain) {
     if (declared.has(m.toLowerCase())) continue;   // 이미 코드에서 검증된 모델 — 재확인 생략
     const r = await callGemini({ purpose: "ops_verify", chain: [m], user: "한 단어로만 답: ok", timeoutMs: 15_000, budgetMs: 15_000 }).catch(() => null);
-    if (!r || !r.ok) return { ok: false, badModel: m, reason: r?.reason ?? "no_response" };
+    if (!r || !r.ok) return { ok: false, checked: true, badModel: m, reason: r?.reason ?? "no_response" };
   }
-  return { ok: true };
+  return { ok: true, checked: true };
 }
 
 export default async (req: Request): Promise<Response> => {
@@ -62,7 +76,15 @@ export default async (req: Request): Promise<Response> => {
       const roles = AI_ROLES.map((role) => {
         const r = byRole.get(role);
         return {
-          role, codeChain: CODE_CHAIN[role],
+          role,
+          /* 🔴 사람말·설명·«잴 수 있나»를 **서버가 준다**(AC-52) — 화면이 `ROLE` 손 표를 들면 서버가 역할을 넓힐 때
+             영문 키가 그대로 찍힌다(C 가 `ops/ai.html:32` 에서 짚었다). 화면은 이 값을 그대로 그린다. */
+          label: aiRoleSpec(role)?.label ?? role,
+          note: aiRoleSpec(role)?.note ?? "",
+          /* 🔴 `none` = 텍스트 프로브로 **못 잰다**(영상은 출력·과금이 있다). «안 잰다»가 아니라 «못 잰다»이고,
+             바꾸기 전에 사람이 1컷을 실증해야 한다 — 화면이 그 사실을 말해 준다(겁주지 않고 사실만 · §3). */
+          probe: aiRoleSpec(role)?.probe ?? "text",
+          codeChain: CODE_CHAIN[role],
           chain: r ? arr(r.chain) : CODE_CHAIN[role],
           candidate: r?.candidate ? arr(r.candidate) : null,
           canaryPct: r ? Number(r.canary_pct ?? 100) : 100,
@@ -104,7 +126,7 @@ export default async (req: Request): Promise<Response> => {
       if (!chain.length) return badRequest("chain 이 비었어요", "chain");
       const pct = Math.max(1, Math.min(100, Math.trunc(Number(b.canaryPct ?? 100)) || 100));
       // §4.9 — 코드에 없던 모델은 우리 키로 불러 본다.
-      const v = await verifyChain(chain);
+      const v = await verifyChain(chain, role);
       if (!v.ok) return json({ ok: false, error: `모델 «${v.badModel}» 을(를) 우리 키로 부를 수 없어요(${v.reason}). 적용을 취소했어요.`, step: "verify", detail: { badModel: v.badModel, reason: v.reason } }, 400);
 
       let row;
@@ -124,7 +146,9 @@ export default async (req: Request): Promise<Response> => {
           RETURNING role, chain, candidate, canary_pct`);
       }
       await writeAudit({ tenantId: null, action: "ops_ai_apply", actorType: "operator", actorId: oid, target: `ai:${role}`, detail: { chain, canaryPct: pct }, riskLevel: "high" });
-      return json({ ok: true, role, chain: arr(row.chain), candidate: row.candidate ? arr(row.candidate) : null, canaryPct: Number(row.canary_pct ?? 100) });
+      /* 🔴 [AC-252] **«못 쟀다»를 응답에 싣는다** — 안 실으면 «불러 봤고 됐다»와 «아예 못 불러 봤다»가 화면에서 같은 말이 된다(AC-9).
+         화면은 `verified:false` 면 «이건 우리가 대신 못 재요 · 바꾸기 전에 1컷을 만들어 보세요»를 그대로 말한다(§3 사실만). */
+      return json({ ok: true, role, chain: arr(row.chain), candidate: row.candidate ? arr(row.candidate) : null, canaryPct: Number(row.canary_pct ?? 100), verified: v.checked });
     }
 
     if (path.endsWith("/ops-ai-rollback")) {

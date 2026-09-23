@@ -12,7 +12,7 @@
  *       seasonal = kr-calendar 시즌 가중(1.0~1.35)
  *       performance = 1.0(Phase 2 전엔 고정 — factors.performance 는 0 으로 기록)
  *   🔴 환각 0: volume·growthPct·competition 은 네이버 응답값만 · 없으면 키 생략. «최고·1위·100%» 앵글은 코드 필터로 버린다.
- *   norm_key = 공백제거·NFC·lower(title). 30일 내 used/picked 와 같으면 버림. expires_at = +7일.
+ *   norm_key = 공백제거·NFC·lower(title). 🔴 **`TOPIC_REUSE_DAYS`(90일 · DESIGN §4.3) 내** used/picked 와 같으면 버림(2026-09-23 · 30→90). expires_at = +7일.
  */
 import { db } from "../db/index";
 import { sql, type SQL } from "drizzle-orm";
@@ -115,7 +115,7 @@ async function tenantContext(tid: number) {
   const templates = videoChannels.length ? await listTemplates(tid, 8) : [];
   const personaIds = [...new Set(accounts.map((a) => a.personaId).filter(Boolean))] as number[];
   const personas = personaIds.length ? await q(sql`SELECT name, profile FROM personas WHERE tenant_id = ${tid} AND id IN (${sql.join(personaIds.map((i) => sql`${i}`), sql`, `)})`) : await q(sql`SELECT name, profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 2`);
-  const recent = await q(sql`SELECT title FROM topics WHERE tenant_id = ${tid} AND created_at > NOW() - interval '30 days' ORDER BY id DESC LIMIT 60`);
+  const recent = await q(sql`SELECT title FROM topics WHERE tenant_id = ${tid} AND created_at > NOW() - (${TOPIC_REUSE_DAYS} || ' days')::interval ORDER BY id DESC LIMIT 60`);
   return { settings, channels, videoChannels, templates, personas: personas.map((p) => ({ name: String(p.name), profile: (p.profile || {}) as Record<string, unknown> })), recentTitles: recent.map((r) => String(r.title)) };
 }
 
@@ -199,6 +199,26 @@ function bestVolume(seeds: string[], vols: Map<string, KeywordVolume>): { volume
 /* ───────── ④ upsert ───────── */
 export const normKey = (title: string) => normKw(title).slice(0, 160);
 
+/**
+ * 🔴 **동일 소재를 얼마 만에 다시 써도 되나**(DESIGN §4.3 「같은 소재는 계정당 **90일** 재사용 금지」 · AC-251 · 2026-09-23).
+ *
+ *   ══ 왜 상수로 뺐나 ══
+ *     코드가 **30일**, 설계가 **90일**이었고 **아무도 정한 적이 없었다**(9일째 그대로).
+ *     🔴 CLAUDE §8: **설계가 정본**이고, 설계를 바꾸려면 사장님 승인이 먼저다 — 승인 없이 코드가 혼자 30으로 가 있던 것이
+ *     그 자체로 «왜곡»이었다(메인 판정 2026-09-23). ⇒ 설계대로 **90**으로 맞춘다.
+ *     🔴 **한 곳에만 둔다** — 사장님이 «30이 낫다»고 하시면 **이 줄 하나로** 되돌아온다(세 자리를 다시 찾아다니지 않는다).
+ *
+ *   ══ ⚠️ 이건 **막는 것이 아니다**(CLAUDE §9) ══
+ *     이 창이 하는 일은 셋 다 «말해 주기»이거나 «조용히 안 버리기»다:
+ *       · 프롬프트에 «최근 이만큼 쓴 소재 — 겹치지 말 것»으로 **알려 주고**(모델이 피한다)
+ *       · 후보를 거를 때는 **`skipped` 로 세어 남기고**(조용한 0건 금지)
+ *       · 직접 넣기는 **막지 않고 기존 것을 돌려준다**(`step:"duplicate"` — 고객이 그 소재로 갈 수 있다)
+ *     🔴 90으로 늘리면서 **하드 게이트가 되면 안 된다.** 늘어나는 것은 «겹친다고 말해 주는 범위»이지 «못 하게 하는 범위»가 아니다.
+ *
+ *   ⚠️ **수동 소재의 만료(+30일)는 이 값이 아니다** — 그건 «직접 넣은 소재가 언제 시드나»라 뜻이 다르다(아래 `addManualTopic`).
+ */
+export const TOPIC_REUSE_DAYS = 90;
+
 export function toTopic(r: Row): Topic {
   const f = (r.factors && typeof r.factors === "object" ? r.factors : {}) as Record<string, unknown>;
   const factors: TopicFactors = { intent: (["info", "commercial", "mixed"].includes(String(f.intent)) ? String(f.intent) : "info") as TopicIntent };
@@ -247,7 +267,7 @@ export async function refreshTopics(tid: number): Promise<{ added: number; skipp
   const growth = await lookupGrowth(bestKw);
   lap.growth = Date.now() - t0 - lap.ctx - lap.llm - lap.volumes;
   const growthKnown = growth.size > 0;
-  const used = await q(sql`SELECT norm_key FROM topics WHERE tenant_id = ${tid} AND status IN ('used','picked') AND created_at > NOW() - interval '30 days'`);
+  const used = await q(sql`SELECT norm_key FROM topics WHERE tenant_id = ${tid} AND status IN ('used','picked') AND created_at > NOW() - (${TOPIC_REUSE_DAYS} || ' days')::interval`);
   const usedKeys = new Set(used.map((r) => String(r.norm_key)));
   let added = 0, skipped = 0;
   for (const { c, bv } of enriched) {
@@ -327,7 +347,7 @@ export async function addManualTopic(tid: number, a: { title: unknown; keyword?:
 
   // 중복 — 30일 안 같은 제목이면 만들지 않는다(기존 것을 돌려준다 · 상태 무관)
   const nk = normKey(title);
-  const [dup] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} AND created_at > NOW() - interval '30 days' ORDER BY id DESC LIMIT 1`);
+  const [dup] = await q(sql`SELECT * FROM topics WHERE tenant_id = ${tid} AND norm_key = ${nk} AND created_at > NOW() - (${TOPIC_REUSE_DAYS} || ' days')::interval ORDER BY id DESC LIMIT 1`);
   if (dup) return { ok: false, step: "duplicate", error: "같은 소재가 이미 있어요. 아래에서 그걸 쓰면 돼요.", topic: toTopic(dup) };
 
   // 검색량 1회 — 실패해도 만든다 · 못 재면 적지 않는다(AC-9)
