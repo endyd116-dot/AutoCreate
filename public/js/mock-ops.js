@@ -116,12 +116,21 @@
     canary: fresh ? [] : ["naver_blog", "tistory"].map((ch) => ({ channel: ch, today: { ok: true, step: "draft_saved", shotKey: `canary/${ymd(0)}/${ch}.png`, ranAt: iso(now - 4 * 3600e3) },
       history: [0, 1, 2, 3, 4, 5, 6].map((d) => ({ day: ymd(-d), ok: ch === "naver_blog" ? d !== 2 : d === 5 ? null : true, step: ch === "naver_blog" && d === 2 ? "selector_changed" : ch === "tistory" && d === 5 ? "no_session" : "draft_saved" })) })),
     /* [B2] ai_model_overrides + ai_settings — 모델 이름은 모의 표식(실명은 lib/ai-models.ts·API 가 준다) */
+    /* 🔴 [R17 · C] 서버 정본 `lib/ai-models.ts AI_ROLE_SPECS` 에서 **뽑아 맞췄다** — 모의 5행 ↔ 라이브 11행이라
+       «역할이 늘면 화면이 저절로 따라가나»를 **모의로 잴 수가 없었다**(A 가 채널 11↔17 로 밟은 그 병).
+       🔴 `label`·`note`·`probe` 는 서버가 주는 칸이다 — 모의가 안 주면 화면이 폴백(영문 키)으로만 보인다. */
     ai: { roles: [
-        { role: "high", codeChain: ["model-h1", "model-h2"], chain: ["model-h1", "model-h2"], candidate: ["model-h3"], canaryPct: 10, prevChain: null, candidateAt: iso(now - 2 * 86400e3), appliedAt: iso(now - 2 * 86400e3) },
-        { role: "low", codeChain: ["model-l1"], chain: ["model-l2", "model-l1"], candidate: null, canaryPct: 100, prevChain: ["model-l1"], candidateAt: null, appliedAt: iso(now - 20 * 86400e3) },
-        { role: "director", codeChain: ["model-h1"], chain: ["model-h1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
-        { role: "landing", codeChain: ["model-h1"], chain: ["model-h1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
-        { role: "image", codeChain: ["model-i1"], chain: ["model-i1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "high", label: "글(공들여)", note: "본문을 공들여 쓸 때", probe: "text", codeChain: ["model-hi1"], chain: ["model-hi1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "low", label: "글(가볍게)", note: "짧은 글·요약처럼 가벼운 일", probe: "text", codeChain: ["model-lo1"], chain: ["model-lo1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "director", label: "디렉터", note: "소재를 고르고 지시서를 짤 때", probe: "text", codeChain: ["model-di1"], chain: ["model-di1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "landing", label: "소개 페이지", note: "소개 페이지 문안", probe: "text", codeChain: ["model-la1"], chain: ["model-la1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "image", label: "사진", note: "그림을 만들 때", probe: "text", codeChain: ["model-im1"], chain: ["model-im1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "tts", label: "목소리", note: "영상 내레이션을 읽는 목소리", probe: "text", codeChain: ["model-tt1"], chain: ["model-tt1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "vision", label: "그림 읽기", note: "만든 그림·화면을 살펴볼 때", probe: "text", codeChain: ["model-vi1"], chain: ["model-vi1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "videoRead", label: "영상 살펴보기", note: "만든 영상을 검수할 때", probe: "text", codeChain: ["model-vi1"], chain: ["model-vi1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "videoOmni", label: "영상(옴니)", note: "그래픽 쇼츠를 만드는 기본", probe: "none", codeChain: ["model-vi1"], chain: ["model-vi1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "videoVeo", label: "영상(베오)", note: "실사 느낌 쇼츠(세 등급)", probe: "none", codeChain: ["model-vi1"], chain: ["model-vi1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
+        { role: "videoFal", label: "영상(팔 게이트웨이)", note: "FAL_KEY 가 있을 때 쓰는 바깥 게이트웨이", probe: "none", codeChain: ["model-vi1"], chain: ["model-vi1"], candidate: null, canaryPct: 100, prevChain: null, candidateAt: null, appliedAt: null },
       ], video: { enabled: true, note: null, updatedAt: null, stoppedTenants: [] }, settings: { updateMode: "manual", costCapKrw: 30000, candidates: [{ model: "model-h3", tested: { text: true, json: true, googleSearch: true, image: false }, at: iso(now - 3 * 86400e3) }, { model: "model-i2", tested: { text: false, json: false, googleSearch: null, image: true }, at: iso(now - 3 * 86400e3) }, { model: "model-x", tested: null, at: iso(now - 3 * 86400e3) }] } },
     /* [B2] channel_registry(ops-channels.ts) */
     channels: [["naver_blog", "네이버 블로그", "active", [7, 12, 21], ["adpost", "coupang"]], ["tistory", "티스토리", "active", [12, 13, 19], ["adsense"]], ["blogger", "블로거", "active", [9, 21], ["adsense"]], ["wordpress", "워드프레스", "active", [9, 21], ["adsense"]], ["threads", "쓰레드", "planned", [8, 20], []], ["instagram", "인스타그램", "planned", [18], ["coupang"]], ["youtube_shorts", "유튜브 쇼츠", "planned", [18], ["youtube"]], ["naver_clip", "네이버 클립", "planned", [19], ["clip"]], ["reels", "릴스", "planned", [18], []], ["tiktok", "틱톡", "planned", [20], []]].map(([key, label, status, bestHours, monetize]) => ({ key, label, status, bestHours, monetize })),
