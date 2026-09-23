@@ -14,7 +14,7 @@
   <main class="page" id="page">
     <div class="appbar"><span class="ph"></span><span class="ttl">CS</span><span class="sp"></span></div>
 <div class="group"><div class="gt">티켓 현황 <a href="/ops/takedowns.html">내리기</a></div><div class="stat4" id="stat"></div></div>
-<div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="st" style="margin:0"><button class="on" data-v="">전체</button><button data-v="open">열림</button><button data-v="progress">진행</button><button data-v="hold">보류</button><button data-v="resolved">해결</button></div><div class="seg" id="pr" style="margin:0"><button class="on" data-v="">우선순위</button><button data-v="urgent">긴급</button><button data-v="high">높음</button></div><div class="seg" id="mine" style="margin:0"><button data-v="">내 것만</button></div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="st" style="margin:0"><button class="on" data-v="">전체</button><button data-v="open">열림</button><button data-v="progress">진행</button><button data-v="hold">보류</button><button data-v="resolved">해결</button></div><div class="seg" id="pr" style="margin:0"><button class="on" data-v="">우선순위</button><button data-v="urgent">긴급</button><button data-v="high">높음</button></div><div class="seg" id="mine" style="margin:0"><button data-v="">내 것만</button></div><!-- 🔴 [R17 · A] 서버는 R8 부터 `unclaimed=1` 을 받고 있었는데(`ops-cs.ts:78·83`) **화면이 한 번도 안 걸었다.** 주인 없는 문의는 «있는데 안 보이는» 상태였다 --><div class="seg" id="unc" style="margin:0"><button data-v="">주인 없는 것</button></div></div>
 <div class="group"><div class="gt">티켓함 <a href="/ops/cs-faq.html">FAQ · 매크로</a></div><div id="list"></div></div>
   </main>
 </div>
@@ -25,25 +25,71 @@
 <script>
 (async () => {
 const op = await OPS.boot("cs"); if (!op) return;
-let status = "", priority = "", mine = false;
+let status = "", priority = "", mine = false, unclaimed = false;
 const TST = { open: ["warn", "열림"], progress: ["ink", "진행"], hold: ["off", "보류"], resolved: ["ok", "해결"] };
 const PRI = { urgent: ["danger", "긴급"], high: ["warn", "높음"], normal: ["off", "보통"], low: ["off", "낮음"] };
 const SRC = { app: "앱", email: "메일", kakao: "카카오", system: "자동" };
 const sla = (t) => { if (!t.slaDueAt || t.status === "resolved") return "—"; const m = Math.round((UI.utc(t.slaDueAt).getTime() - Date.now()) / 60e3); return m < 0 ? `<span style="color:var(--danger-ink);font-weight:700">${-m}분 지남</span>` : m < 60 ? `<span style="color:var(--warn-ink);font-weight:700">${m}분</span>` : `${Math.round(m / 60)}시간`; };
 async function load() {
-  const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}`, { noRedirect: true })]);
+  const [s, r] = await Promise.all([UI.api("/api/ops-cs-stats", { noRedirect: true }), UI.api(`/api/ops-tickets?status=${status}&priority=${priority}&assignee=${mine ? op.id : ""}${unclaimed ? "&unclaimed=1" : ""}`, { noRedirect: true })]);
   if (s.ok) UI.$("#stat").innerHTML = [["열린 티켓", UI.num(s.open)], ["첫 답변까지", s.avgFirstReplyMin == null ? "—" : `${s.avgFirstReplyMin}분`], ["SLA 놓침", s.slaMissPct == null ? "—" : `${s.slaMissPct}%`], ["만족", s.satisfactionPct == null ? "—" : `${s.satisfactionPct}%`]].map(([k, v]) => `<div class="st"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   if (!r.ok) { UI.retryPanel("#list", load, r.error); return; }
   UI.$("#list").innerHTML = OPS.table([
-    { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) }, { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },
+    { h: "우선", f: (t) => OPS.pill(PRI[t.priority] || ["off", t.priority]) },
+    /* 🔴 [R17 · A] 주인 없는 문의는 여태 **이름 칸이 빈 줄**로 보였다(`tenantName` 이 "") — 서버는 R8 부터
+       `unclaimed: true` 와 `fromEmail` 을 실어 보내고 있었는데(`lib/cs.ts:108~110`) 화면이 안 읽었다.
+       ⇒ 보낸 사람을 그 자리에 적는다. **누가 기다리는지가 보여야 답을 한다.** */
+    { h: "제목", f: (t) => `<b>${UI.esc(t.subject)}</b><br><span class="muted">${t.unclaimed ? `<span class="pill warn" style="font-size:11px;padding:1px 6px">주인 없음</span> ${UI.esc(t.fromName || t.fromEmail || "보낸 사람 모름")}` : UI.esc(t.tenantName)} · ${SRC[t.source] || t.source}${t.tags?.length ? " · " + t.tags.map(UI.esc).join(", ") : ""}</span>` },
     { h: "상태", f: (t) => OPS.pill(TST[t.status] || ["off", t.status]) }, { h: "담당", f: (t) => t.assignee ? UI.esc(t.assignee.name) : '<span class="muted">없음</span>' },
     { h: "SLA", f: sla }, { h: "갱신", f: (t) => OPS.dt(t.updatedAt) },
+    /* 🔴 [R17 · A] **고객을 붙이는 손잡이** — `POST /api/ops-ticket-claim` 은 R8 에 다 돼 있었는데 부르는 화면이 0곳이었다. */
+    { h: "", f: (t) => t.unclaimed ? `<button type="button" class="lk" data-claim="${t.id}">고객 붙이기</button>` : "" },
   ], r.tickets || [], (t) => `class="tap" data-id="${t.id}"`);
-  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = () => UI.go(`/ops/ticket.html?id=${tr.dataset.id}`));
+  UI.$$("#list tr.tap").forEach((tr) => tr.onclick = (e) => { if (e.target.closest("[data-claim]")) return; UI.go(`/ops/ticket.html?id=${tr.dataset.id}`); });
+  UI.$$("[data-claim]").forEach((b) => b.onclick = () => claimSheet((r.tickets || []).find((t) => String(t.id) === b.dataset.claim)));
+}
+/* [R8 §4.3 · 화면은 R17] 🔴 **주인 없는 문의에 집을 붙인다.**
+   서버 규칙 그대로 말한다: ① 이미 주인이 있으면 안 바꾼다(남의 집 문의를 옮기는 길은 없다)
+   ② 붙이는 순간 플랜·러너·최근 오류 맥락을 **그때 새로 받아 적는다**(그래야 답을 할 수 있다). */
+function claimSheet(t) {
+  if (!t) return;
+  let picked = null;
+  UI.sheet(`<p class="muted" style="margin:0 0 10px;line-height:1.7"><b>${UI.esc(t.fromName || t.fromEmail || "보낸 사람 모름")}</b> 님이 보낸 문의예요.<br>어느 집 사람인지 골라 주면 <b>플랜·러너·최근 오류</b>를 그때 받아 적어 둘게요.</p>
+    <div class="field"><label>고객 찾기</label><input class="input" id="cq" placeholder="집 이름 · 키 · 가입 메일" autocomplete="off"></div>
+    <div id="cres" style="max-height:240px;overflow:auto"></div>
+    <div class="cta"><button class="btn primary" type="button" id="cgo" disabled>이 집에 붙이기</button></div>`,
+    { title: "고객 붙이기", onOpen: (sh, close) => {
+      const res = sh.querySelector("#cres"), go = sh.querySelector("#cgo"), q = sh.querySelector("#cq");
+      const draw = (rows) => {
+        res.innerHTML = rows.length ? rows.map((x) => `<button type="button" class="row tap" data-t="${x.id}"><div class="l"><span class="t">${UI.esc(x.name)}</span><span class="d">${UI.esc(x.ownerEmail || x.key || "")} · ${UI.esc(x.planKey || "")}</span></div></button>`).join("")
+          : `<p class="muted" style="margin:8px 0;font-size:13px">찾는 집이 없어요. 이름이나 가입 메일로 다시 찾아 보세요.</p>`;
+        res.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => {
+          picked = rows.find((x) => String(x.id) === b.dataset.t);
+          res.querySelectorAll("[data-t]").forEach((x) => x.style.background = "");
+          b.style.background = "var(--press)";
+          go.disabled = false; go.textContent = `«${picked.name}» 에 붙이기`;
+        });
+      };
+      /* 처음부터 한 번 불러 둔다 — 빈 상자를 보여 주고 «찾아라»고 하면 대개 아무도 안 찾는다 */
+      const search = async () => { const rr = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q.value.trim())}&size=20`, { noRedirect: true }); draw(rr.ok ? (rr.tenants || []) : []); };
+      let tm; q.oninput = () => { clearTimeout(tm); tm = setTimeout(search, 250); };
+      search();
+      go.onclick = async () => {
+        if (!picked) return;
+        go.disabled = true;
+        const rr = await UI.api("/api/ops-ticket-claim", { body: { id: t.id, tenantId: picked.id }, noRedirect: true });
+        go.disabled = false;
+        if (!rr.ok) return UI.toast(rr.error || "붙이지 못했어요");
+        close(); UI.toast(`«${rr.tenantName || picked.name}» 에 붙였어요`); load();
+      };
+    } });
 }
 UI.$$("#st button").forEach((b) => b.onclick = () => { UI.$$("#st button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); status = b.dataset.v; load(); });
 UI.$$("#pr button").forEach((b) => b.onclick = () => { UI.$$("#pr button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); priority = b.dataset.v; load(); });
 UI.$("#mine button").onclick = (e) => { mine = !mine; e.target.classList.toggle("on", mine); load(); };
+UI.$("#unc button").onclick = (e) => { unclaimed = !unclaimed; e.target.classList.toggle("on", unclaimed); load(); };
+/* 🔴 [R17 · A] 주소로도 연다 — 알림·운영 메모에서 «주인 없는 문의 N건»을 바로 열 수 있어야 한다(`/ops/cs.html?unclaimed=1`). */
+if (UI.qs.get("unclaimed") === "1") { unclaimed = true; UI.$("#unc button").classList.add("on"); }
 load();
 })();
 </script>

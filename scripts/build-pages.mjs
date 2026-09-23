@@ -3,7 +3,15 @@
 //   블록 형식: === 파일명 | 탭키 | 제목 [| white two] ===  본문HTML  --- script ---  JS(async 함수 안에서 실행)
 //   4번째 칸: white = 흰 페이지(.page.white) · two = 데스크톱 우측 300 패널(.page.two · ≥1100px · DESIGN §13.3b) · 둘 다면 "white two"
 //   [v4] 고객 화면 앱바에는 제목 텍스트를 넣지 않는다(시안 v3·v4 — 제목은 문장형 헤드라인이 맡는다 · <title> 은 유지) · 4번째 칸 white = 흰 페이지(.page.white)
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+
+/* 🔴 [R17 · C · AC-244] `--check` — **덮어쓰지 않고 «정본과 생성물이 갈렸나»만 말한다.**
+   이 자를 만든 까닭: 2026-09-23 에 내가 이 스크립트를 그냥 돌렸다가 **A 의 R17 작업 201줄을 다섯 화면에서 지웠다.**
+   `*.html` 을 직접 고치고 `_tpl.txt` 에 안 옮긴 사람이 있으면, 다음 사람이 빌드를 돌리는 순간 **말없이 사라진다**
+   — 그리고 빌드는 초록으로 끝난다. 그게 제일 나쁘다(§4.8 의 반대 방향: «있던 화면이 없어진다»).
+   ⇒ 고치기 **전에** `node scripts/build-pages.mjs --check` 를 돌린다. 갈린 게 있으면 종료코드 1 + 파일 목록. */
+const CHECK = process.argv.includes("--check");
+const drift = [];
 
 const FONT = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">`;
 const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?history.back():location.assign('${fallback}')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>`;
@@ -62,7 +70,28 @@ ${(js || "").trim()}
 </body>
 </html>
 `;
-    writeFileSync(`${t.dir}/${file}`, page, "utf8"); n++;
+    const out = `${t.dir}/${file}`;
+    if (CHECK) {
+      const cur = existsSync(out) ? readFileSync(out, "utf8") : null;
+      /* 줄끝(CRLF)만 다른 건 갈린 게 아니다 — 그걸 세면 스물넷이 매번 빨개져서 아무도 안 본다. */
+      const CR = String.fromCharCode(13), LF = String.fromCharCode(10);
+      const norm = (x) => x.split(CR).join("");
+      if (cur === null) drift.push([out, "생성물이 없다"]);
+      else if (norm(cur) !== norm(page)) {
+        const a = norm(cur).split(LF), b = norm(page).split(LF);
+        const setA = new Set(a), setB = new Set(b);
+        drift.push([out, `생성물에만 ${a.filter((l) => l.trim() && !setB.has(l)).length}줄 · 정본에만 ${b.filter((l) => l.trim() && !setA.has(l)).length}줄`]);
+      }
+    } else writeFileSync(out, page, "utf8");
+    n++;
   }
-  console.log(`${t.dir}: ${n} pages`);
+  console.log(`${t.dir}: ${n} pages${CHECK ? " (check)" : ""}`);
+}
+if (CHECK) {
+  if (!drift.length) { console.log("✓ 정본(_tpl.txt)과 생성물이 같다 — 지금 빌드를 돌려도 지워지는 것이 없다."); process.exit(0); }
+  console.log(`🔴 정본과 갈린 생성물 ${drift.length}개 — **지금 빌드를 돌리면 «생성물에만» 있는 줄이 사라진다.**`);
+  for (const [f, why] of drift) console.log(`   ✗ ${f}  —  ${why}`);
+  console.log("   할 일: 「생성물에만」 있는 줄을 **`_tpl.txt` 로 옮긴 뒤** 빌드한다(AC-213 · 정본이 먼저다).");
+  console.log("   🔴 그 줄을 쓴 사람이 누군지 모르면 **지우지 말고 물어본다** — 말없이 사라지면 아무도 못 찾는다.");
+  process.exit(1);
 }
