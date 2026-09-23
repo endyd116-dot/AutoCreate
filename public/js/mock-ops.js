@@ -56,7 +56,12 @@
       { key: "agency", name: "Agency", priceMonthKrw: 149000, priceYearKrw: 1490000, maxAccounts: 50, coinsIncluded: 500, runnerDevices: 5, teamSeats: 5, maxRules: 99, horizonDays: 30, features: { directorEdit: true, autoSchedule: true, failover: true, managedRunner: true, runnerRevenue: true, teamApproval: true }, public: true, recommended: false, requireCardBeforePublish: false, subscribers: 3, mrrKrw: 447000 },
     ],
     coinPrices: { packs: [{ id: "pack_100", krw: 50000, coins: 100, bonusPct: 0 }, { id: "pack_220", krw: 100000, coins: 220, bonusPct: 10 }, { id: "pack_720", krw: 300000, coins: 720, bonusPct: 20 }, { id: "pack_trial", krw: 5000, coins: 10, bonusPct: 0, oncePerTenant: true }], table: { blog: 1, image: 1, cardnews: 3, video_15: 6, video_30: 12, video_60: 28, persona: 15 } },
-    priceEvents: fresh ? [] : [{ id: 401, planKey: "pro", oldPriceKrw: 45000, newPriceKrw: 49000, effectiveAt: iso(now - 30 * 86400e3), noticeText: "Pro 요금이 10월 1일 청구분부터 월 49,000원(부가세 별도)으로 바뀌어요.", noticedAt: iso(now - 61 * 86400e3), status: "applied", affected: 22 }],
+    /* 🔴 [R17 · A] 취소할 수 있는 개정을 **둘 다** 깔아 둔다 — 없으면 «개정 취소» 단추가 모의에서 한 번도 안 그려져
+       «만들었다»를 확인할 길이 없다(§4.8). `noticed` 는 고객 알림이 가는 판, `scheduled` 는 안 가는 판이다. */
+    priceEvents: fresh ? [] : [
+      { id: 403, planKey: "basic", oldPriceKrw: 19000, newPriceKrw: 22000, effectiveAt: iso(now + 45 * 86400e3), noticeText: "베이직 요금이 11월 청구분부터 월 22,000원(부가세 별도)으로 바뀌어요.", noticedAt: iso(now - 2 * 86400e3), status: "noticed", affected: 31 },
+      { id: 402, planKey: "pro", oldPriceKrw: 49000, newPriceKrw: 52000, effectiveAt: iso(now + 60 * 86400e3), noticeText: "Pro 요금이 12월 청구분부터 월 52,000원(부가세 별도)으로 바뀌어요.", status: "scheduled", affected: 22 },
+      { id: 401, planKey: "pro", oldPriceKrw: 45000, newPriceKrw: 49000, effectiveAt: iso(now - 30 * 86400e3), noticeText: "Pro 요금이 10월 1일 청구분부터 월 49,000원(부가세 별도)으로 바뀌어요.", noticedAt: iso(now - 61 * 86400e3), status: "applied", affected: 22 }],
     invoices: fresh ? [] : [
       { ...inv(9001, 2, "요리하는 집", "subscription", thisMonth, 49000, "paid", 30), taxRequestedAt: iso(now - 20 * 3600e3), taxInvoice: { status: "requested", requestedAt: iso(now - 20 * 3600e3) }, taxBiz: { bizNo: "220-88-12345", bizName: "요리하는 집", email: "cook@example.com" } }, // [P1R6 §1.2] 고객이 증빙을 요청한 행
       inv(9002, 4, "에이전시 K", "subscription", thisMonth, 149000, "paid", 28),
@@ -68,6 +73,10 @@
     billingKeys: fresh ? [] : [{ tenantId: 2, tenantName: "요리하는 집", brand: "신한", last4: "4421", active: true, updatedAt: iso(now - 30 * 86400e3) }, { tenantId: 3, tenantName: "팁스고", brand: "국민", last4: "0192", active: false, updatedAt: iso(now - 3 * 86400e3) }, { payRoute: "keyin", tenantId: 4, tenantName: "에이전시 K", brand: "현대", last4: "7730", active: true, updatedAt: iso(now - 100 * 86400e3) }],
     receivables: fresh ? [] : [{ tenantId: 3, tenantName: "팁스고", overdueKrw: 20900, overdueDays: 6, attempts: 2, lastFailReason: "카드 한도 초과" }],
     tickets: fresh ? [] : [
+      /* 🔴 [R17 · A] **주인 없는 문의** — 라이브에 실제로 이런 줄이 떠 있다(50번 «카카오 채널 문의»).
+         서버는 `tenantId: null` + `fromEmail` 이면 `unclaimed: true` 를 실어 준다(`lib/cs.ts:110`).
+         모의에 이 줄이 없으면 «고객 붙이기» 단추가 한 번도 안 그려져 만든 걸 확인할 길이 없다(§4.8). */
+      { id: 704, tenantId: null, tenantName: "", unclaimed: true, fromEmail: "hj.park@gmail.com", fromName: "박현진", subject: "카카오 채널 문의 · 블로그 글이 두 번 올라갔어요", status: "open", priority: "normal", tags: [], source: "kakao", createdAt: iso(now - 5 * 3600e3), updatedAt: iso(now - 5 * 3600e3), slaDueAt: iso(now + 3 * 3600e3) },
       { id: 701, tenantId: 3, tenantName: "팁스고", subject: "결제가 안 돼요", status: "open", priority: "high", tags: ["결제"], source: "app", createdAt: iso(now - 3 * 3600e3), updatedAt: iso(now - 3 * 3600e3), slaDueAt: iso(now + 1 * 3600e3) },
       { id: 702, tenantId: 1, tenantName: "모의", subject: "네이버 글이 안 올라가요", status: "progress", priority: "normal", assignee: { id: 3, name: "CS 담당" }, tags: ["러너", "발행실패"], source: "app", createdAt: iso(now - 26 * 3600e3), updatedAt: iso(now - 2 * 3600e3), slaDueAt: iso(now + 6 * 3600e3) },
       { id: 703, tenantId: 5, tenantName: "잠든 집", subject: "[자동] 계정 정지 3회 반복 · @life_c", status: "open", priority: "urgent", tags: ["계정정지"], source: "system", createdAt: iso(now - 40 * 60e3), updatedAt: iso(now - 40 * 60e3), slaDueAt: iso(now + 20 * 60e3) },
@@ -214,6 +223,14 @@
     "ops-coin-prices": (b) => { if (need("super_admin")) return forbid(); if (b && b.packs) { S.coinPrices.packs = b.packs; } if (b && b.table) S.coinPrices.table = b.table; return { ok: true, ...S.coinPrices }; },
     "ops-price-event": (b) => { if (need("super_admin")) return forbid(); const p = S.plans.find((x) => x.key === b.planKey); if (!p) return err("planKey", "플랜을 골라 주세요."); const price = Number(b.newPriceKrw); if (!price) return err("newPriceKrw", "새 가격을 넣어 주세요."); if (!b.effectiveAt || new Date(b.effectiveAt) < new Date(Date.now() + 30 * 86400e3)) return err("effectiveAt", "적용일은 고지 뒤 30일 이후여야 해요."); if (!String(b.noticeText || "").trim()) return err("noticeText", "고지 문구를 적어 주세요.");
       const ev = { id: S.nextId++, planKey: b.planKey, oldPriceKrw: p.priceMonthKrw, newPriceKrw: price, effectiveAt: b.effectiveAt, noticeText: b.noticeText, status: "scheduled", affected: p.subscribers }; S.priceEvents.unshift(ev); return { ok: true, event: ev }; },
+    /* 🔴 [R17 · A] 개정 취소 — 서버(`ops-plans.ts:115` → `cancelPriceEvent`)와 **같은 규칙**으로 흉내 낸다.
+       ① scheduled·noticed 만 취소된다 ② 이미 고지를 보냈으면(notified_count>0) 고객에게 알림이 간다. */
+    "ops-price-event-cancel": (b) => { if (need("super_admin")) return forbid();
+      const ev = S.priceEvents.find((x) => x.id === Number(b.id)); if (!ev) return err("state", "개정이 없어요.", { status: 400 });
+      if (!["scheduled", "noticed"].includes(ev.status)) return err("state", "이미 적용됐거나 취소된 개정이에요.");
+      ev.status = "cancelled";
+      if (Number(ev.affected) > 0 && ev.noticedAt) S.opsNotified = (S.opsNotified || 0) + Number(ev.affected);
+      return { ok: true }; },
     /* ── 결제 ── */
     "ops-invoices": (_b, q) => { if (need("admin")) return forbid(); const st = q.get("status") || ""; const rows = S.invoices.filter((i) => !st || i.status === st); return { ok: true, rows, page: 1, total: rows.length }; },
     "ops-invoice-retry": (b) => { if (need("admin")) return forbid(); const i = S.invoices.find((x) => x.id === Number(b.id)); if (!i) return err("id", "인보이스가 없어요.", { status: 404 }); if (i.status !== "failed") return err("status", "실패한 인보이스만 다시 시도할 수 있어요."); i.attempts++; if (i.attempts >= 3) { i.status = "paid"; i.paidAt = iso(Date.now()); delete i.nextRetryAt; S.receivables = S.receivables.filter((r) => r.tenantId !== i.tenantId); const t = tn(i.tenantId); if (t) t.status = "active"; } else i.nextRetryAt = iso(Date.now() + 86400e3); return { ok: true, invoice: i }; },
@@ -247,7 +264,24 @@
         return { ok: true, invoiceId: i.id, taxInvoice: i.taxInvoice, issued: true }; }
       i.taxRequestedAt = iso(Date.now()); i.taxInvoice = { status: "requested", requestedAt: i.taxRequestedAt }; return { ok: true, status: "requested", note: "KICC 키가 꽂히면 실발급돼요 · 지금은 요청만 기록" }; },
     /* ── CS ── */
-    "ops-tickets": (_b, q) => { const f = (k) => q.get(k) || ""; const rows = S.tickets.filter((t) => (!f("status") || t.status === f("status")) && (!f("priority") || t.priority === f("priority")) && (!f("assignee") || String(t.assignee?.id) === f("assignee")) && (!f("tag") || t.tags.includes(f("tag")))).sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")); return { ok: true, tickets: rows, page: 1, total: rows.length }; },
+    /* [R17 · A] `unclaimed=1` 은 서버와 같은 뜻 — **주인이 없고 보낸 사람이 있는 것**(`ops-cs.ts:83`). */
+    /* 🔴 [R17 · A] 백업 — `?backup=none` 이면 «아직 확인 전», `?backup=stale` 이면 «30일 넘음», `?backup=unsupported` 면
+       **R2 가 기능 자체를 안 주는 판**을 그린다. 세 판이 화면에서 **다르게 보여야** 하므로 모의도 셋을 다 낸다(AC-9). */
+    "ops-backup-status": () => { const m = qs.get("backup") || "";
+      if (m === "none") return { ok: true, checked: false, checkedAt: null, neon: { ok: false, retentionDays: null, detail: "아직 확인한 적이 없어요." }, r2: { ok: false, versioning: null, detail: "아직 확인한 적이 없어요." }, hint: "scripts/check-backup.mts 를 돌리면 이 줄이 채워져요." };
+      const days = m === "stale" ? 47 : 2;
+      return { ok: true, checked: true, checkedAt: iso(now - days * 86400e3), ageDays: days, stale: days > 30,
+        neon: { ok: true, retentionDays: 7, detail: "시점 복구 7일 보존" },
+        r2: { ok: m !== "unsupported", versioning: m === "unsupported" ? "unsupported" : "Enabled", detail: m === "unsupported" ? "이 R2 가 버전 관리를 제공하지 않아요." : "버전 관리 켜짐(덮어써도 이전 판이 남아요)" },
+        r2Versioning: m === "unsupported" ? "unsupported" : "Enabled" }; },
+    "ops-tickets": (_b, q) => { const f = (k) => q.get(k) || ""; const unc = ["1", "true", "yes"].includes(f("unclaimed").toLowerCase());
+      const rows = S.tickets.filter((t) => (!f("status") || t.status === f("status")) && (!f("priority") || t.priority === f("priority")) && (!f("assignee") || String(t.assignee?.id) === f("assignee")) && (!f("tag") || t.tags.includes(f("tag"))) && (!unc || (!t.tenantId && !!t.fromEmail))).sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")); return { ok: true, tickets: rows, page: 1, total: rows.length }; },
+    /* [R17 · A] 고객 붙이기 — 서버 규칙 그대로: 🔴 **이미 주인이 있으면 안 바꾼다**(`ops-cs.ts:103`). */
+    "ops-ticket-claim": (b) => { const t = S.tickets.find((x) => x.id === Number(b.id)); if (!t) return err("not_found", "티켓을 찾을 수 없어요.", { status: 404 });
+      if (t.tenantId) return err("already", "이미 고객이 연결된 문의예요.");
+      const ten = S.tenants.find((x) => x.id === Number(b.tenantId)); if (!ten) return err("tenant", "그 고객을 찾을 수 없어요.", { status: 404 });
+      t.tenantId = ten.id; t.tenantName = ten.name; delete t.unclaimed; t.updatedAt = iso(Date.now());
+      return { ok: true, ticketId: t.id, tenantId: ten.id, tenantName: ten.name }; },
     "ops-ticket": (_b, q) => { const t = S.tickets.find((x) => x.id === Number(q.get("id"))); if (!t) return err("id", "티켓이 없어요.", { status: 404 }); const ten = tn(t.tenantId) || {};
       return { ok: true, ticket: t, messages: S.messages[t.id] || [], context: { planKey: ten.planKey, status: ten.status, coins: ten.coins, runner: { online: S.runners.filter((r) => r.tenantName === ten.name && r.status === "online").length, total: S.runners.filter((r) => r.tenantName === ten.name).length }, recentErrors: t.id === 702 ? [{ at: iso(now - 25 * 3600e3), kind: "login_fail", text: "네이버 로그인 풀림 · @tips_b" }] : t.id === 701 ? [{ at: iso(now - 20 * 3600e3), kind: "billing", text: "카드 한도 초과 ×2" }] : [], appVersion: "1.4.0" }, macros: S.macros }; },
     "ops-ticket-reply": (b) => { const t = S.tickets.find((x) => x.id === Number(b.id)); if (!t) return err("id", "티켓이 없어요.", { status: 404 }); if (!String(b.text || "").trim()) return err("text", "답변을 적어 주세요."); (S.messages[t.id] = S.messages[t.id] || []).push({ id: S.nextId++, from: "operator", text: b.text.trim(), at: iso(Date.now()) }); t.updatedAt = iso(Date.now()); if (t.status === "open") t.status = "progress"; if (!t.assignee) t.assignee = { id: me().id, name: me().name }; return { ok: true, sent: { app: true, email: true } }; },
