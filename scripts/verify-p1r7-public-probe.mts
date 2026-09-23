@@ -13,6 +13,7 @@
  *     ④ 404 → 도장 없음(«못 읽었다»를 «비공개»로 바꾸지 않는다)
  *   🔴 테스트 테넌트에서만 · 만든 행은 끝에서 지운다 · 발행은 일어나지 않는다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import http from "node:http";
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";

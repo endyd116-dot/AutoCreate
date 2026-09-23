@@ -7,6 +7,7 @@
  *   ⚠️ 자격은 **가짜**다(`b2-dryrun-no-such-account`). 남의 계정·실서비스에 글을 남기지 않는다 —
  *      이 시드로 도는 왕복은 «로그인 실패까지»가 정상이고, 그것이 곧 파이프라인 실증이다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";

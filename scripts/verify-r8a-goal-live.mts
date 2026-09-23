@@ -14,6 +14,7 @@
  *     · 🔴 `ai_usage` 는 **지우지 않는다**(쓴 돈은 남아야 한다 · AC-54-③). 실제 금액을 원장에서 읽어 보고한다(추정 금지).
  *     · 예산 가드 — 시작 전 잔액·건수를 읽고, 편당 상한을 넘으면 즉시 멈춘다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";

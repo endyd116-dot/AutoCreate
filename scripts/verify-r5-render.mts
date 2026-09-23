@@ -25,6 +25,7 @@
  *        🔴 알려진 것: `frames_not_blank` 는 이 하니스에서 **항상 ✗**(합성 재료를 비전이 «빈 프레임»으로 본다).
  *           **하니스 한계이지 제품 결함이 아니다** — 그래서 piece 는 failed 로 끝난다. «렌더 실패»로 적으면 기록이 틀린다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";

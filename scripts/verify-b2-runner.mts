@@ -25,6 +25,7 @@
  *      창에서 직접 승인할 시간을 준다(운영 헤드리스에서는 이 값이 0이라 기다리지 않는다).
  *   ⚠️ 임의 포트를 쓴다 — 8899 에 다른 프로그램이 떠 있어 엉뚱한 응답을 받은 적이 있다(2026-09-14).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import http from "node:http";
 import { spawn } from "node:child_process";
 import path from "node:path";

@@ -29,6 +29,7 @@
  *   ⚠️ 라이브 DB 에 **하니스 전용 테넌트**를 하나 만들고 끝에 지운다(집안 관례 · `verify-p1r5.mjs`).
  *      🔴 자기가 만든 tid 밖은 **한 행도** 건드리지 않는다(ALLOWED 가드 · 끝에 finally 로 정리).
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFileSync } from "node:fs";

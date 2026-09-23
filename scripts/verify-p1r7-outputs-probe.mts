@@ -9,6 +9,7 @@
  *   🔴 [A] 가 0건일 때 그것을 «통과» 로 접지 않는다(AC-9). 0건은 «못 쟀다» 이고, 그 사유를 note 에 적는다.
  *      0건의 사유가 **teardown**(테스트 집을 지웠다)인지 **미실행**(그 길을 아직 아무도 안 지나갔다)인지를 갈라 적는다 — 둘은 전혀 다른 얘기다.
  */
+import "./_lib/load-env.mjs";   // [R17-B2] 🔴 맨 위 — 없으면 db/index 가 빈 URL 로 풀을 만들어 `read ECONNRESET` 이라는 **가짜 빨강**을 낸다
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { runPublishGate, countAffiliateLinks } from "../lib/publish/gate";
