@@ -287,6 +287,19 @@ export function inlineMarksAllowed(channel: string): FormatCapKey[] {
 }
 
 /** 서버(API)로 발행하는 채널 집합 — 표에서 파생(예전 `API_PUBLISH_CHANNELS` 자리). */
+/**
+ * [R17-B2 · DESIGN §8.2] 🔴 **저장된 로그인이 살아 있나를 «확인»해 줄 수 있는 채널.**
+ *   `runner/channels/session-verify.mjs` 의 `CHECK` 표와 **같은 글자**여야 한다 — 러너는 별도 번들이라
+ *   import 로 못 묶는다. ⇒ 두 벌이 될 수밖에 없고, 그래서 **자가 센다**(`scripts/verify-channel-tables.mjs` ⑩).
+ *   🔴 여기 없는 채널로 잡을 만들면 러너가 «아직 이 채널은 확인을 지원하지 않아요»로 실패한다 —
+ *      고객은 «확인»을 눌렀는데 빨간 줄만 본다. **못 하는 일을 단추로 내놓지 않는다.**
+ *   🔴 이 파일에 둔 까닭: `lib/accounts.ts` 가 화면에 실어 보내야 하는데, `runner-jobs` 에 두면
+ *      `accounts → runner-jobs → account-health → accounts` 고리에 걸린다(AC-17). 여기는 **순수 리프**라 안전하다.
+ *   늘리는 법: 러너 `CHECK` 에 실측 판정을 한 갈래 붙이고 **여기 한 줄**. 둘 중 하나만 하면 자가 빨개진다.
+ */
+export const SESSION_VERIFY_CHANNELS: ReadonlySet<string> = new Set(["naver_blog", "tistory", "blogger"]);
+export function canVerifySession(channel: unknown): boolean { return SESSION_VERIFY_CHANNELS.has(String(channel ?? "")); }
+
 export const API_CHANNEL_KEYS: ReadonlySet<string> = new Set(CHANNELS.filter((c) => c.publishVia === "api").map((c) => c.key));
 /** 러너로 발행하는 채널 집합 — 표에서 파생(예전 `RUNNER_PUBLISH_CHANNELS` 자리). */
 export const RUNNER_CHANNEL_KEYS: ReadonlySet<string> = new Set(CHANNELS.filter((c) => c.publishVia === "runner").map((c) => c.key));

@@ -92,6 +92,14 @@ const handlerKinds = new Set([...(/const HANDLERS\s*=\s*\{([\s\S]*?)\n\};/.exec(
    🔴 되돌릴 수 없는 일이라 ⑤보다 위험하다 — 헛손질이 **엉뚱한 글을 지울** 수 있는 자리다. */
 const retractRunnerSrc = readFileSync("runner/channels/retract.mjs", "utf8");
 const runnerRetractable = new Set([...(/export const RETRACTABLE_CHANNELS\s*=\s*\[([\s\S]*?)\];/.exec(retractRunnerSrc)?.[1] ?? "").matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
+/* ⑩ 🔴 [R17-B2] **«로그인 확인» 목록을 서버와 러너가 둘 다 가진다** — 러너는 별도 번들이라 import 로 못 묶는다.
+   갈리면 고객이 «확인»을 눌렀는데 러너가 «아직 이 채널은 확인을 지원하지 않아요»로 실패한다 —
+   **못 하는 일을 화면에 단추로 내놓는** 꼴이다. 🔴 당근이 네 칸에서 갈렸던 그 병과 같은 모양이라, 생기기 전에 센다. */
+const sessVerifySrc = readFileSync("runner/channels/session-verify.mjs", "utf8");
+const runnerVerifiable = new Set([...(/const CHECK = \{([\s\S]*?)\n\};/.exec(sessVerifySrc)?.[1] ?? "").matchAll(/^  async ([a-z_]+)\(/gm)].map((m) => m[1]));
+/* 🔴 서버쪽 정본은 **순수 리프** `lib/channel-registry.ts` 다(`runner-jobs` 에 두면 `accounts` 가 고리에 걸린다 · AC-17).
+   `runner-jobs.ts` 는 그 이름을 다시 내보내기만 한다 — 그래서 여기서도 **정본 파일**을 읽는다(재수출을 읽으면 정본이 옮겨가도 모른다). */
+const serverVerifiable = new Set([...(/export const SESSION_VERIFY_CHANNELS[^=]*=\s*new Set\(\[([\s\S]*?)\]\);/.exec(reg)?.[1] ?? "").matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
 
 const problems = [];
 for (const r of rows) {
@@ -131,6 +139,10 @@ console.log(`  이름표: 시드 ${seedLabel.size}개 · 화면 ${uiLabel.size}�
 /* 🔴 [R17-B2] 센 것을 찍는다 — 0 이면 «어긋난 게 없다»가 아니라 **정규식이 빗나간 것**이다(위 ④⑤와 같은 규율). */
 console.log(`  잡 이름: 전체 ${allKinds.size} · 발행 화이트리스트 ${pubKinds.size} · 우선순위 ${priKinds.size} · 러너 처리기 ${handlerKinds.size}`);
 console.log(`  러너가 내릴 줄 아는 채널: ${[...runnerRetractable].join(" ") || "(없음)"}`);
+console.log(`  로그인 확인: 러너 ${[...runnerVerifiable].join(" ") || "(없음)"} ↔ 서버 ${[...serverVerifiable].join(" ") || "(없음)"}`);
+if (!runnerVerifiable.size || !serverVerifiable.size) { console.log("🔴 로그인 확인 목록을 못 읽었다 — session-verify.mjs 의 CHECK 또는 runner-jobs.ts 의 SESSION_VERIFY_CHANNELS 모양이 바뀌었다"); process.exit(1); }
+for (const k of runnerVerifiable) if (!serverVerifiable.has(k)) problems.push(`🟡 ${k}: 러너는 로그인 확인을 할 줄 아는데 서버 SESSION_VERIFY_CHANNELS 에 없다 — 만들어 둔 길을 아무도 안 부른다(AC-29)`);
+for (const k of serverVerifiable) if (!runnerVerifiable.has(k)) problems.push(`🔴 ${k}: 서버는 로그인 확인을 약속하는데 러너 session-verify.mjs 가 모른다 — 고객이 «확인»을 누르면 실패한다`);
 if (!runnerRetractable.size) { console.log("🔴 러너 내리기 목록을 못 읽었다 — runner/channels/retract.mjs 의 RETRACTABLE_CHANNELS 모양이 바뀌었다"); process.exit(1); }
 if (!allKinds.size || !pubKinds.size || !priKinds.size || !handlerKinds.size) { console.log("🔴 잡 이름 표를 못 읽었다 — lib/runner-jobs.ts·runner/core.mjs 의 모양이 바뀌었다(정규식이 빗나갔다)"); process.exit(1); }
 if (!wiredApi.size || !wiredRetract.size) { console.log("🔴 커넥터 배선을 못 읽었다 — index.ts·retract-api.ts 의 모양이 바뀌었다(정규식이 빗나갔다)"); process.exit(1); }
