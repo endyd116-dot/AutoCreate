@@ -28,6 +28,7 @@ import { publishOne } from "../../lib/publish-one";
 import { publishPortStatus } from "../../lib/cron/publish-port";
 import { pausedAccountIds } from "../../lib/account-slots";
 import { takedownBlock } from "../../lib/takedown";
+import { YOUTUBE_FULL_SAY } from "../../lib/publish/youtube";
 
 export const config = { path: "/api/publish-now" };
 const n = (v: unknown) => Number(v || 0);
@@ -184,6 +185,9 @@ export default async (req: Request): Promise<Response> => {
            여기 «채널 응답»보다 훨씬 구체적이다(예: «X 에 연결하지 못했어요»). 있으면 그걸 앞에 세운다.
            🔴 바닥은 남긴다 — 한글이 없으면(뒷날 채널 원문이 새면) 옛 뭉갠 말로 내려앉는다. */
         const retrySay = String(out.error ?? "").trim();
+        /* 🔴 [R19 · B2] 유튜브 통이 찬 날의 말은 **언제 이어지는지까지** 이미 말한다(«내일 순서대로 이어서 올릴게요») —
+           뒤에 «예약한 시간에 자동으로 다시 시도해요»를 또 붙이면 두 말이 서로 다른 때를 가리킨다. */
+        if (retrySay === YOUTUBE_FULL_SAY) return json({ ok: false, step: "publish", reason: out.reason, retry: true, error: retrySay }, 400);
         const retryHead = retrySay && /[가-힣]/.test(retrySay) ? `${retrySay} ` : `잠깐 문제가 있었어요(${out.reason === "network" ? "인터넷 연결" : "채널 응답"}). `;
         return json({ ok: false, step: "publish", reason: out.reason, retry: true,
           error: `${retryHead}예약한 시간에 자동으로 다시 시도해요.` }, 400);

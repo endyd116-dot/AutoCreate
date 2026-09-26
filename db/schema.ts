@@ -1306,3 +1306,11 @@ export const piecesR18 = {
   /** 원본 piece id. 🔴 **NULL = 원본(또는 무관)** · 값이 있으면 파생 — 원본과 같은 `r2_key` 를 가리키고 코인 원장에 **0행**(§4.7 승계 무료). */
   originPieceId: bigint("origin_piece_id", { mode: "number" }),
 };
+
+/* === R19 · 유튜브 업로드 호출 세기(B2 · 2026-09-27 · drizzle/0093-r19-youtube-insert-calls.sql · CLAUDE §4.4 append-only) ===
+ *   🔴 **새 표·새 칸 없음 — 인덱스 하나뿐**이라 여기엔 코드 정의를 두지 않고 «있다»만 적는다(위 `auditLogs`(Phase 0) 정의는 그대로 둔다).
+ *   인덱스: `audit_logs_yt_insert_idx ON audit_logs (created_at) WHERE action = 'youtube.insert_call'`
+ *     — `lib/publish/youtube.ts insertCallsLast24h()` 가 **집 조건 없이**(프로젝트 전체 · §4.6 예외 «수만 합친다») 최근 24시간 호출을 센다.
+ *       기존 `audit_logs_tenant_idx (tenant_id, created_at)` 로는 집 조건 없는 질의가 표 전체를 훑는다.
+ *   쓰는 곳: `noteInsertCall()` → `writeAudit({ action: "youtube.insert_call", target: "piece:<id>", detail: { channel } })`.
+ */
