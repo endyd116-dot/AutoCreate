@@ -64,9 +64,9 @@ async function main() {
   const tA = await seedTenant(stamp, "a"), tB = await seedTenant(stamp, "b");
   console.log(`\n── R18 한 영상 여러 곳 — 라이브 실증 (시드 집 ${tA} · ${tB}) ──`);
   try {
-    /* ── 집 A: 계정 — 쇼츠(원본) · 릴스 · 틱톡 · 클립 · 페북 릴스 · + youtube_long(🔴 연결돼 있어도 안 가야 한다) ── */
+    /* ── 집 A: 계정 — 쇼츠(원본) · 릴스 · 틱톡 · 클립 · 페북 릴스 · 스레드([R19] 대상 여섯째) · + youtube_long(🔴 연결돼 있어도 안 가야 한다) ── */
     const acc = await seedAccount(tA, "youtube_shorts", "yt_a");
-    for (const [c, h] of [["reels", "ig_a"], ["tiktok", "tt_a"], ["naver_clip", "clip_a"], ["facebook_reels", "fb_a"], ["youtube_long", "ytl_a"]]) await seedAccount(tA, c, h);
+    for (const [c, h] of [["reels", "ig_a"], ["tiktok", "tt_a"], ["naver_clip", "clip_a"], ["facebook_reels", "fb_a"], ["threads", "th_a"], ["youtube_long", "ytl_a"]]) await seedAccount(tA, c, h);
     /* 원본의 지시서 — «30초 판 새로 만들기»가 이 spec 을 복제한다(실제 director 가 쓰는 모양 그대로 · 필요한 칸만). */
     const spec = { key: `youtube_shorts:${acc}`, channel: "youtube_shorts", accountId: acc, accountHandle: "yt_a", kind: "video", emotionKey: "script", format: "story", composition: "60초 그래픽 스토리",
       images: { count: 0, aiCount: 0, style: "photo", heroNeeded: false }, monetize: { affiliate: null, sponsored: false, gift: false, adDisclosure: false },
@@ -80,7 +80,8 @@ async function main() {
     console.log("\n① 설정 · 처음 한 번");
     const view0 = await videoReuseView(tA);
     ok("안 물은 집 — 꺼짐 · asked false", view0.on === false && view0.asked === false);
-    ok("후보 다섯 · youtube_long 없음 · 연결 여부는 서버가 준다", view0.targets.map((t) => t.channel).join() === "youtube_shorts,reels,tiktok,naver_clip,facebook_reels" && view0.targets.every((t) => t.connected), JSON.stringify(view0.targets.map((t) => [t.channel, t.maxSeconds, t.connected])));
+    ok("후보 여섯(스레드 맨 끝 · R19) · youtube_long 없음 · 연결 여부는 서버가 준다", view0.targets.map((t) => t.channel).join() === "youtube_shorts,reels,tiktok,naver_clip,facebook_reels,threads" && view0.targets.every((t) => t.connected), JSON.stringify(view0.targets.map((t) => [t.channel, t.maxSeconds, t.connected])));
+    ok("[R19] targets[].connectable 은 늘 boolean(레지스트리 값 그대로)", view0.targets.every((t) => typeof t.connectable === "boolean"), JSON.stringify(view0.targets.map((t) => [t.channel, t.connectable])));
     const pv0 = await pieceReuseView(tA, (await q(sql`SELECT * FROM pieces WHERE id = ${origin}`))[0]);
     ok("검수 중 원본 — ask true · basis all", pv0?.role === "origin" && pv0.ask === true && pv0.basis === "all", JSON.stringify(pv0 && pv0.role === "origin" ? { ask: pv0.ask, basis: pv0.basis, places: pv0.fit.places } : pv0));
 
@@ -241,6 +242,13 @@ async function main() {
     ok("🔴 답이 없으니 파생 0(꺼진 채로 둔다)", dB === 0);
     const vB = await videoReuseView(tB);
     ok("알림은 «물었다»가 아니다 — asked 는 여전히 false(시트가 여전히 뜬다)", vB.asked === false && vB.on === false);
+    /* [R19 · §0-C] 집 B 는 쇼츠·릴스 계정만 있다 → 틱톡·클립·페북·스레드는 계정 없음. 까닭은 **그 채널 창구에 따라** 갈린다
+       (레지스트리가 planned 면 not_connectable · 열렸고 키가 있으면 no_account) — 🔴 레지스트리 값과 무관하게 «창구 닫힌 줄에 연결하시면 0»을 잰다. */
+    const pvB = await pieceReuseView(tB, (await q(sql`SELECT * FROM pieces WHERE id = ${oB1}`))[0]);
+    const skB = pvB?.role === "origin" ? pvB.fit.skip : [];
+    ok("[R19] 계정 없는 넷(틱톡·클립·페북·스레드)이 조용히 빠지지 않고 skip 에 있다", ["tiktok", "naver_clip", "facebook_reels", "threads"].every((c) => skB.some((x) => x.channel === c)), skB.map((x) => `${x.channel}:${x.why}:${x.connectable}`).join(" "));
+    ok("[R19] 까닭이 창구와 맞다 — connectable false ⇒ not_connectable · true ⇒ no_account", skB.every((x) => x.why === (x.connectable === false ? "not_connectable" : "no_account")), skB.map((x) => `${x.channel}:${x.why}:${x.connectable}`).join(" "));
+    ok("[R19] 🔴 창구 닫힌 줄에 «연결하시면» 0", !skB.some((x) => x.connectable === false && /연결하시면|연결되면/.test(`${x.line} ${x.how}`)));
     const sB = await saveVideoReuse(tB, { on: true, channels: ["reels"] });
     ok("설정 저장 한 번이면 asked", !!sB.askedAt && sB.on);
     const tyB = await q(sql`SELECT jsonb_typeof(settings) AS s, jsonb_typeof(settings->'videoReuse'->'channels') AS c FROM tenants WHERE id = ${tB}`);
