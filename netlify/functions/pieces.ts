@@ -11,6 +11,7 @@
  *   GET  /api/pieces-get 응답에 [R8-A] `topicGroup`(없으면 null) · `goal` · `contract`(그 글에 **적용된** 분량·사진·goalRules) 3축.
  *   [R18] 영상 piece 에 `reuse`(원본: ask·fit·derived·skipped / 파생: origin·coin 0·line) · 목록 행에 `originPieceId`(number|null)
  *   POST /api/pieces-reuse { id, channels: string[], remember: boolean } → { videoReuse, reuse, created, skip }   // «처음 한 번 묻기»의 답 · 정본 lib/video/reuse.ts
+ *   POST /api/pieces-remake { id, channel } → 202 { pieceIds, coinsCharged, coinsLeft, seconds, alsoTo, already? } | 402 coin_short   // [R18 §6-6] 빠진 채널용 N초 판을 새로(코인 새로 · 정본 lib/director.ts remakeVideoFor)
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
@@ -25,7 +26,7 @@ import { disclosureTextFor, videoDescriptionFirstLine, isDisclosureText, compens
 /* 🔴 발행 직전 재검사·승인 전이는 `lib/content-approve.ts` 한 벌이 정본이다 — 크론(`slots.review_deadline` 자동 승인)이
    같은 판정기·같은 전이를 부른다(사람 승인과 자동 승인의 기준이 갈라지지 않게 · PITFALLS #11-b). */
 import { recheckPiece, approvePiece, REVIEW_PIECE_STATUSES, EDITED_PIECE_STATUS } from "../../lib/content-approve";   // [R9-9 C4] «봐주세요» 상태 정본(in_review·edited)
-import { triggerGenerate } from "../../lib/director";
+import { triggerGenerate, remakeVideoFor } from "../../lib/director";
 import { triggerVideo } from "../../lib/video/gen";
 import { paletteLabelKo, hookLabelKo } from "../../lib/video/types";
 import { r2PublicUrl, r2PresignGet, r2Configured } from "../../lib/r2";
@@ -38,7 +39,7 @@ import { toCoinTier } from "../../lib/coin-table";                 // [R10-7] �
 import { pieceReuseView, answerReuse, videoReuseView, holdDerivedFor } from "../../lib/video/reuse";   // [R18] 한 영상 여러 곳 — 정본 한 벌
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update", "/api/pieces-reuse"] };
+export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update", "/api/pieces-reuse", "/api/pieces-remake"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
@@ -385,6 +386,16 @@ export default async (req: Request): Promise<Response> => {
         created: r.derive?.ok ? r.derive.created : [], skip,
         /* 원본이 아직 못 올라가는 상태(실패·버림)면 파생을 못 만든다 — 그 사실 한 줄(설정은 이미 저장됐다). */
         ...(r.derive && !r.derive.ok ? { note: r.derive.error } : {}) });
+    }
+    /* ── [R18 · 트리거 §6-6] «30초로 다시 만들 길» — 길이가 안 맞아 빠진 채널용으로 **같은 소재** 영상을 새로 만든다.
+       🔴 새 영상이라 **코인이 새로 든다**(값은 누르기 전에 `reuse.fit.skip[].remake.coins` 로 보여 준다). 코인·자리·생성은 `confirm` 한 길.
+       새 글이라 계약(`requireWritable`)을 탄다. 응답 모양은 `/api/director-confirm` 과 같다(202). ── */
+    if (path.endsWith("/pieces-remake")) {
+      const w = await requireWritable(tid); if (!w.ok) return w.res;
+      const r = await remakeVideoFor(tid, id, String(b.channel ?? ""), n(auth.user.uid) || null);
+      if (!r.ok) return json(r, r.step === "coin_short" ? 402 : r.step === "not_found" ? 404 : 400);
+      if (!r.already) await writeAudit({ tenantId: tid, action: "piece_remake", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { channel: String(b.channel ?? ""), pieceIds: r.pieceIds, coinsCharged: r.coinsCharged } });
+      return json(r, r.already ? 200 : 202);
     }
     // P1R4 §1.3 — readonly·suspended 는 재생성 금지. 글을 찾기 전에 재서 403 이 404 보다 먼저.
     if (path.endsWith("/pieces-regenerate")) {
