@@ -232,7 +232,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.26";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
+  UI.APP_VERSION = "2026.09.27";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).
@@ -523,7 +523,8 @@
   /* ═══ [R18 · A] 한 번 만들어 여러 곳에 — 🔴 화면은 **세지도 짓지도 않는다** ═══
      «몇 곳»(`places`)·들어가는 곳(`go`)·빠지는 곳과 그 까닭 문장(`skip[].line`·`.how`)은 **서버가 준다**(B 계약 R18 v1 · lib/video/reuse.ts).
      🔴 화면에 채널·초 표가 없다 — 표를 베끼면 틱톡 180 이 들어오는 날 화면만 옛 말을 한다(트리거 §2 에서 셋이 비어 있던 그 모양 · AC-52).
-     🔴 `youtube_long`·`threads` 는 서버가 후보에서 뺀다(트리거 §3). 화면이 한 번 더 거르지 않는다 — 거르는 곳이 둘이면 언젠가 갈린다.
+     🔴 `youtube_long` 은 서버가 후보에서 뺀다(트리거 §3). [R19] `threads` 는 이제 **후보다** — 서버 기준이 «영상 길이가 있는 채널»로 바뀌었다(설계 §6.4).
+        화면이 한 번 더 거르지 않는다 — 거르는 곳이 둘이면 언젠가 갈린다.
      여기서 하는 일은 **말로 옮기기** 둘뿐이다: 수 → 고유어(«세 곳»), 길이마다의 수 → 한 줄로 묶기. */
   UI.places = (n) => `${["한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열"][n - 1] || UI.num(n)} 곳`;
   /** 길이별 «몇 곳» 한 줄 — fits = 서버 `ReuseFit[]`({ seconds, places }) 중 **지금 고를 수 있는 길이만**(오름차순).

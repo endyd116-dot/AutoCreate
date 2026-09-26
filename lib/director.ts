@@ -810,7 +810,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
  */
 export async function remakeVideoFor(tid: number, originPieceId: number, channel: string, actorId: number | null):
   Promise<(ConfirmResult & { ok: true; seconds?: number; alsoTo?: string[]; already?: boolean }) | { ok: false; step: string; error: string; need?: number; have?: number }> {
-  const { pieceSecondsOf, reuseTargetsFor, reuseFit, VIDEO_REUSE_TARGETS, loadVideoReuse } = await import("./video/reuse");
+  const { pieceSecondsOf, reuseTargetsFor, reuseFit, VIDEO_REUSE_TARGETS, loadVideoReuse, reuseConnectableOf } = await import("./video/reuse");
   const [o] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${originPieceId} AND kind = 'video'`);
   if (!o) return { ok: false, step: "not_found", error: "그 영상을 찾지 못했어요." };
   if (o.origin_piece_id != null && n(o.origin_piece_id)) return { ok: false, step: "is_derived", error: "이 영상은 다른 영상에서 왔어요 — 원본에서 골라 주세요." };
@@ -845,7 +845,11 @@ export async function remakeVideoFor(tid: number, originPieceId: number, channel
   const [oa] = o.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(o.account_id)}`) : [];
   const personaId = oa?.persona_id == null ? null : n(oa.persona_id);
   const acc = (personaId != null ? accs.find((a) => a.personaId === personaId) : undefined) ?? accs[0];   // 같은 페르소나 먼저(reuse.ts pickAccount 와 같은 규칙)
-  if (!acc) return { ok: false, step: "no_account", error: `${mine.label} 계정이 아직 연결되지 않았어요 — 연결하시면 새로 만들 수 있어요.` };
+  /* [R19 · §0-C] 계정이 없을 때 «연결하시면»은 그 채널이 연결을 **받을 때만** 참이다 — 창구가 닫혀 있으면(라이브 대상 여섯 전부 `planned`)
+     없는 길을 가리키게 된다. 판정은 `reuseConnectableOf`(= `listChannels().connectable`) 한 곳. 계정이 있으면 창구와 무관하게 만든다. */
+  if (!acc) return (await reuseConnectableOf())[target] === false
+    ? { ok: false, step: "not_connectable", error: `${mine.label} 연결은 아직 준비 중이에요 — 연결이 열리면 여기서 새로 만들 수 있어요.` }
+    : { ok: false, step: "no_account", error: `${mine.label} 계정이 아직 연결되지 않았어요 — 연결하시면 새로 만들 수 있어요.` };
 
   const [b] = o.brief_id ? await q(sql`SELECT * FROM briefs WHERE tenant_id = ${tid} AND id = ${n(o.brief_id)}`) : [];
   const specs = (Array.isArray(b?.pieces) ? b!.pieces : []) as PieceSpec[];

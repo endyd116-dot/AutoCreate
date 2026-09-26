@@ -160,7 +160,7 @@ export const CHANNELS: readonly ChannelSpec[] = [
   { key: "brunch", connect: "session", publishVia: null, retractVia: null, jobKind: null, axis: "text", textGen: false, formatCaps: null, note: "🔴 러너 채널인데 **셀렉터를 한 번도 못 쟀다**(작가 승인 계정이 없어 화면을 연 적이 없다). 추측으로 채우지 않는다 — 아래 주석." },
   { key: "youtube_shorts", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "🔴 retract 는 스코프가 없어 못 한다 — 지금 스코프는 youtube.upload·readonly 뿐이고 videos.delete 는 auth/youtube 가 필요하다. 늘리면 연결된 계정이 전부 재동의해야 해서 사장님 판단 사안." },
   /* [P1R8 §3.4] 유튜브 롱폼 — 쇼츠와 **같은 `videos.insert`**(lib/publish/youtube.ts publishYoutube · 주소만 다르다).
-     🔴 쿼터는 채널이 아니라 **구글 프로젝트** 단위라 쇼츠와 합산해 센다(todayUploads). */
+     🔴 쿼터는 채널이 아니라 **구글 프로젝트** 단위라 쇼츠와 합산해 센다([R19] `insertCallsLast24h` — 프로젝트 전체 · 최근 24시간). */
   { key: "youtube_long", connect: "oauth", publishVia: "api", retractVia: null, jobKind: null, axis: "video", textGen: false, formatCaps: null, note: "쇼츠와 같은 API·같은 동의·같은 쿼터. retract 는 쇼츠와 같은 이유로 null." },
   { key: "naver_clip", connect: "session", publishVia: "runner", retractVia: null, jobKind: "publish.naver_clip", axis: "video", textGen: false, formatCaps: null, note: "러너 스텁 — 잡은 쌓이되 사람이 올린다(§2.3)" },
   /* [P1R8 §3.4] 클립 «게시물형»(텍스트+이미지 · 설계 §2.1 P3) — 🔴 **일부러 null**. 아래 «못 채운 칸» 주석 참조. */

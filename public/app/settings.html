@@ -67,7 +67,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=32"></script>
-<script src="/js/mock.js?v=33"></script>
+<script src="/js/mock.js?v=34"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -224,11 +224,14 @@ function sayKinds(on) {
 }
 loadKinds();
 /* ═══ [R18 · A] «영상을 여러 곳에 올리기» — GET/POST /api/tenant-settings `videoReuse` (B 계약 R18 v1) ═══
-   모양: { on, channels, asked, askedAt, targets: [{ channel, label, maxSeconds, connected }] } · POST { videoReuse: { on, channels } } → 같은 모양.
-   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long·threads 는 서버가 이미 뺐다 · 트리거 §3).
+   모양: { on, channels, asked, askedAt, targets: [{ channel, label, maxSeconds, connected, connectable }] } · POST { videoReuse: { on, channels } } → 같은 모양.
+   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long 은 서버가 뺀다 · [R19] 스레드는 이제 후보다 — 영상 길이가 있는 채널은 전부 대상).
    🔴 **서버가 돌려준 값으로 다시 그린다** — 내가 누른 값을 기억해서 그리면 저장이 안 됐는데 된 것처럼 보인다(서버가 후보 밖 채널을 걸러 낸다).
    🔴 기본은 꺼짐(트리거 §1 ①) — 아직 안 물은 집에는 «첫 영상이 다 되면 한 번 여쭤볼게요»를 적는다. 지금 켜도 된다(막지 않는다 · §9).
-   🔴 계정이 아직 없는 채널도 **고를 수 있다** — 연결되는 날부터 같이 올라간다. 그 사실을 한 줄로 적는다(겁주지 않는다 · §3). */
+   🔴 계정이 아직 없는 채널도 **고를 수 있다** — 연결되는 날부터 같이 올라간다. 그 사실을 한 줄로 적는다(겁주지 않는다 · §3).
+   🔴 [R19 · B 합의 · 트리거 §0-C ㉱] 그 채널이 **아직 연결을 못 받으면**(`connectable:false` · 계정도 없음) «계정이 연결되면»은 막다른 말이다 —
+      연결할 길이 없다. 그 줄은 «연결은 아직 준비 중이에요»로 적는다(고를 수는 그대로 있다 — 열리는 날부터 쓰인다).
+      계정이 이미 붙어 있으면(`connected:true`) `connectable` 과 무관하게 아무 말도 안 붙인다 — 그 채널엔 실제로 올라간다(B ③). */
 let VR = null;
 async function loadReuse() {
   const r = await UI.api("/api/tenant-settings", { noGate: true });
@@ -244,7 +247,7 @@ function drawReuse() {
   const sub = on ? (picked.size ? "같은 영상이라 코인은 한 번만 들어요 · 시간 차를 두고 올려요" : "올릴 곳을 아래에서 골라 주세요")
     : VR.asked ? "지금은 만든 곳에만 올려요 · 켜면 고른 곳에도 같이 올라가요" : "첫 영상이 다 되면 한 번 여쭤볼게요 · 지금 켜셔도 돼요";
   box.innerHTML = `<div class="fr"><div class="fl">한 번 만든 영상을 다른 곳에도 올려요<small>${UI.esc(sub)}</small></div><button class="toggle" type="button" id="vrTg" aria-checked="${on ? "true" : "false"}" aria-label="영상을 여러 곳에 올리기"></button></div>`
-    + (on ? targets.map((t) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(t.channel, "sm")}<span>${UI.esc(t.label || UI.chLabel(t.channel))}<small>${Number(t.maxSeconds) ? `${Number(t.maxSeconds)}초까지 올라가요` : ""}${t.connected === false ? `${Number(t.maxSeconds) ? " · " : ""}계정이 연결되면 같이 올라가요` : ""}</small></span></div><button class="toggle" type="button" data-vrch="${UI.esc(t.channel)}" aria-checked="${picked.has(t.channel) ? "true" : "false"}" aria-label="${UI.esc(t.label || UI.chLabel(t.channel))}에도 올리기"></button></div>`).join("")
+    + (on ? targets.map((t) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(t.channel, "sm")}<span>${UI.esc(t.label || UI.chLabel(t.channel))}<small>${[Number(t.maxSeconds) ? `${Number(t.maxSeconds)}초까지 올라가요` : "", t.connected !== false ? "" : t.connectable === false ? "연결은 아직 준비 중이에요" : "계정이 연결되면 같이 올라가요"].filter(Boolean).join(" · ")}</small></span></div><button class="toggle" type="button" data-vrch="${UI.esc(t.channel)}" aria-checked="${picked.has(t.channel) ? "true" : "false"}" aria-label="${UI.esc(t.label || UI.chLabel(t.channel))}에도 올리기"></button></div>`).join("")
       + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">영상 길이가 그 채널보다 길면 그 채널만 빼고 올려요 · 만들 때 길이 옆에 몇 곳에 올라가는지 보여 드려요</p>` : "");
   const save = async (body) => {
     const rr = await UI.api("/api/tenant-settings", { body: { videoReuse: body } });
