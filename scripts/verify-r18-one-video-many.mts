@@ -274,6 +274,10 @@ if (!REHEARSE) {
     const cands: string[] = [...(reuse.VIDEO_REUSE_TARGETS as string[])];
     const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 
+    /* ── 앞 판이 끊겨 남긴 시드 집 — 있으면 먼저 말한다(죽은 판은 teardown 을 못 한다 · 2026-09-26 856 을 손으로 치웠다) ── */
+    const stale = await sql`SELECT id, key FROM tenants WHERE key LIKE 'r18-%' AND is_internal = true`;
+    rec("리허설 ⓪ 앞 판이 남긴 시드 집", stale.length ? "unmeasured" : "pass", stale.length ? `🔴 ${stale.length}곳(${stale.map((t) => `${t.id}:${t.key}`).join(" · ")}) — 도는 다른 판의 것일 수도, 끊긴 판의 것일 수도 있다 · 끊긴 것이면 teardownRun 으로 치운다` : "0곳");
+
     /* ── 시드 ── */
     const STAMP = Date.now().toString(36);
     const [t] = await sql`INSERT INTO tenants (key, name, plan_key, status, settings, is_internal)

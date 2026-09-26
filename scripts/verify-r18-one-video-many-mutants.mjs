@@ -105,7 +105,7 @@ add("② 🔴 멈췄다 깰 때 파생을 옛 길(채널·계정만 보는 pickP
 add("⑤ 원본을 다시 만들 때 파생의 시각을 안 풀면(옛 영상이 먼저 나간다)", REUSE,
   "  const rows = await q(sql`UPDATE pieces SET scheduled_for = NULL,", "  const rows = await q(sql`UPDATE pieces SET status = status /*r18mut*/,", "[⑤ timed_while_regen]", "db");
 add("⑤ 재승인 때 파생을 새 영상으로 안 갈아 끼우면", REUSE,
-  "      await refreshHeldDerived(tid, prev.pieceId, originPieceId, meta, { originPieceId, originChannel, seconds, at }, scheduleAt);", "      /*r18mut*/", "[⑤ stale_video]", "db");
+  "    await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${n(r.id)} AND kind IN ('video','thumb')`);", "    continue; /*r18mut*/", "[⑤ stale_video]", "db");   // B 리뷰(86aa8c2): refreshHeldDerived → reviveHeldFamily — 되살린 파생의 파일 교체를 건너뛴다
 add("⑤ 파생에서 «다시 만들기»를 열어 두면(다시 굽는다 · 퓨즈가 굽기를 끊는다)", PIECES,
   "      if (p.origin_piece_id != null && n(p.origin_piece_id)) {", "      if (false /*r18mut*/) {", "[⑤ derived_regen_open]", "db");
 add("⑥ 원본을 버릴 때 파생을 같이 안 내리면(문의 배선을 끊는다)", PIECES,
@@ -158,6 +158,9 @@ try {
         const hit = r.code === 1 && r.out.includes(c.expect);
         if (hit) { caught++; console.log(`✅ ${c.name}  — 과녁 ${hits}곳 · 종료 1 · ${c.expect} 로 울었다`); }
         else if (r.code === 2 && !got.length) { unmeasured++; console.log(`⊘ ${c.name}  — 종료 2(자가 «못 쟀다») · 울었다로 안 센다(AC-161)`); }
+        /* 🔴 0·1·2 밖(143 = 시간 초과로 죽음 · null = 신호)은 «안 울었다»가 아니라 «끝까지 못 갔다»다(2026-09-26 `timeout 500` 이 리허설 두 판을 끊었다).
+           그리고 죽은 판은 시드 집을 **못 치운다** — 자가 다음 판 시작 때 «남은 시드 집»을 말한다. 리허설 한 판이 4~5분이니 짧은 시간 제한을 걸지 마라. */
+        else if (![0, 1, 2].includes(r.code)) { unmeasured++; console.log(`⊘ ${c.name}  — 종료 ${r.code}(자가 끝까지 못 갔다 · 시간 초과/신호) · 울었다·안 울었다로 안 센다 · 🔴 시드 집이 남았을 수 있다`); }
         else {
           missed++;
           const why = r.code !== 1 ? `종료 ${r.code} — 안 울었다` : `🔴 엉뚱한 축이 울었다(기대 ${c.expect}): ${got.slice(0, 3).join(" | ")}`;
