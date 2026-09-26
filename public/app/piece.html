@@ -685,15 +685,30 @@ const rejectedBtn = () => isDerived() ? `<a class="btn primary" href="/app/piece
       이 페이지 바탕에서 칸이 안 보인다(이 파일이 아래에서 이미 한 번 밟은 자리다). 그룹 섹션으로 낸다. */
 const SELF_SKIP = ["published", "rejected", "generating", "failed"];
 const selfUpload = () => P.kind === "video" && !P.accountHandle && !SELF_SKIP.includes(P.status);
+/* 🔴 [R19 · A · 메인 발주 · C 발견 — ㉱ 와 같은 모양] «나중에 … 계정을 연결하시면»은 그 채널이 연결을 **받을 때만** 참이다.
+   라이브 영상 채널은 전부 `planned` 라 계정 화면에 붙일 카드가 없다 — 없는 길을 가리키면 막다른 골목이다(§9 «또렷하게»).
+   판정은 서버 `accounts-list` 의 `channels[].connectable`(listChannels 한 곳) 그대로 — 화면이 새로 짓지 않는다.
+   🔴 모르면(값 없음 · 못 불러옴 · 표에 없는 채널) 옛 문장 그대로 — «준비 중»을 지어내지 않는다(AC-9).
+   이 화면은 평소 accounts-list 를 안 부른다 → «직접 올려요» 영상일 때만 **한 번** 부른다(곁다리라 noGate · 실패는 «모름»).
+   🔴 답이 오기 전엔 그 줄을 **비워 둔다** — 옛 문장을 먼저 그렸다가 바꾸면 라이브에선 거의 늘 거짓 문장이 먼저 보인다. */
+let selfChs = null;
+async function selfConnectSay() {
+  const label = UI.chLabel(P.channel);
+  selfChs = selfChs || UI.api("/api/accounts-list", { noGate: true }).then((r) => (r && r.ok && Array.isArray(r.channels) ? r.channels : [])).catch(() => []);
+  const c = (await selfChs).find((x) => x && x.key === P.channel);
+  return c && c.connectable === false ? `${label} 연결은 아직 준비 중이에요. 열리면 그다음부터는 저희가 올려 드려요.`
+    : `나중에 ${label} 계정을 연결하시면 그다음부터는 저희가 올려 드려요.`;
+}
 function showSelfUpload() {
   const host = UI.$("#page") || document.body;
   host.querySelectorAll(".self-say").forEach((x) => x.remove());
   const anchor = UI.$("#vpane")?.hidden === false ? UI.$("#vpane") : UI.$("#pv");
   const html = `<div class="group self-say" style="margin:0 0 12px"><div class="gt">올릴 채널이 아직 없어요</div>
     <p class="muted" style="margin:0 16px 8px;font-size:13px;line-height:1.7">지금은 저희가 <b style="color:var(--ink)">만들어 드리고, 올리는 건 직접</b> 하시면 돼요. 영상을 받아 앱에서 올린 뒤 그 주소를 적어 주시면 발행함과 수익까지 저희가 이어서 해요.</p>
-    <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">나중에 ${UI.esc(UI.chLabel(P.channel))} 계정을 연결하시면 그다음부터는 저희가 올려 드려요.</p>
+    <p class="muted" data-self-connect style="margin:0 16px 12px;font-size:12.5px;line-height:1.6" hidden></p>
     <p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">영상을 받아 앱에서 올린 뒤 «올린 주소 적기»에 그 주소를 붙여 주시면, 발행함과 수익까지 저희가 이어서 해요.</p></div>`;
   if (anchor) anchor.insertAdjacentHTML("beforebegin", html); else host.insertAdjacentHTML("afterbegin", html);
+  selfConnectSay().then((t) => { const el = host.querySelector(".self-say [data-self-connect]"); if (el && t) { el.textContent = t; el.hidden = false; } });
   /* 🔴 내려받기를 **두 곳에 두지 않는다** — 이 경우엔 아래 으뜸 단추가 그 일을 한다(곁판의 작은 단추는 이미 `bindVideoOut` 이 손을 붙인 뒤라 걷어도 안전하다). */
   const side = UI.$("#vdl"); if (side) { const kv = side.closest(".kv"); if (kv) kv.remove(); else side.remove(); }
 }
