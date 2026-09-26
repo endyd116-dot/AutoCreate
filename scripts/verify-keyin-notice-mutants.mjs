@@ -7,16 +7,40 @@
  *   🔴 **안 울면 자보다 변이를 먼저 의심한다**(AC-112) — 그래서 바뀐 줄 수를 찍고, 0줄이면 «못 바꿈»으로 적는다.
  *   🔴 `_tpl.txt` 가 정본이라 여기도 정본을 바꾸고 `build-pages` 로 생성물까지 만든다(AC-105).
  *      중간에 죽어도 원판으로 돌아가도록 finally 에서 되돌린다.
+ *
+ *   🔴 [R18 · C · 2026-09-26 · A 의 AC-276 을 재서 고침] **«거절하는 빌드»(AC-244)와 이 자가 서로를 막았다.**
+ *      이 자는 **일부러** 정본과 생성물을 가른다(정본에서 줄을 빼고 빌드) — 새 빌드는 그걸 «생성물에만 있는 줄 · 지우면 안 된다»로 거절하고
+ *      `execSync` 가 던져 **하니스가 첫 변이에서 죽었다**(C 실측: «1장은 안 썼다» → exit 1). 그리고 죽으면서 `ui.js` 판 번호를
+ *      오늘로 **올려 놓은 채** 끝났다 — 진짜 빌드가 판 번호를 박기 때문이다(검사 도구가 나무를 더럽히는 병 · `verify-check-writes-nothing`).
+ *   ⇒ 🔴 **거절은 풀지 않는다.** 대신 이 자가 «나는 일부러 가른다»를 **증명하고** 지나간다:
+ *      ① 손대기 **전에** `build-pages --check`(이제 아무것도 안 쓴다) — 정본과 생성물이 **이미** 갈려 있으면 ⊘ 로 멈춘다.
+ *         그 갈림은 남의 줄(생성물에만 있는 R17·R18 화면)일 수 있고, 아래 `--force` 가 그걸 **말없이 지운다**(AC-244 가 다시 온다).
+ *      ② ①이 깨끗할 때만 `--force` — 그때 덮이는 줄은 **이 자가 방금 넣은 변이뿐**이다.
+ *      ③ 되돌릴 때 **다시 빌드하지 않고 바이트 그대로** 되쓴다(정본·모의·ui.js·생성물 전부). 빌드로 되돌리면 판 번호·줄끝이 바뀐다.
+ *      ④ 끝에 **나무가 처음과 한 바이트도 안 다른지** 스스로 확인한다 — 다르면 빨강(검사가 흔적을 남기면 그게 고장이다).
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const TPL = path.join(ROOT, "public", "app", "_tpl.txt");
 const MOCK = path.join(ROOT, "public", "js", "mock.js");
+const UIJS = path.join(ROOT, "public", "js", "ui.js");
 const TPL0 = readFileSync(TPL, "utf8");
 const MOCK0 = readFileSync(MOCK, "utf8");
+
+/* ① 손대기 전에 — 정본과 생성물이 이미 같은가(아니면 --force 가 남의 줄을 지운다) */
+try { execSync("node scripts/build-pages.mjs --check", { cwd: ROOT, stdio: "pipe" }); }
+catch (e) {
+  console.log("⊘ 못 쟀다 — 정본(_tpl.txt)과 생성물이 **이미** 갈려 있다. 변이를 넣지 않는다(아무 파일도 안 건드렸다).");
+  console.log("   이 자는 빌드를 --force 로 돌리는데, 지금 갈린 줄은 **남의 작업**일 수 있어서 말없이 지워진다(AC-244).");
+  console.log("   `node scripts/build-pages.mjs --check` 로 무엇이 갈렸나 먼저 보고, 정본에 옮긴 뒤 다시 돌려라.");
+  process.exit(2);
+}
+/* ③ 되돌릴 것 — 이 자가 건드릴 수 있는 파일 전부의 **바이트** */
+const SNAP = new Map([TPL, MOCK, UIJS, ...readdirSync(path.join(ROOT, "public", "app")).filter((f) => f.endsWith(".html")).map((f) => path.join(ROOT, "public", "app", f))]
+  .map((p) => [p, readFileSync(p)]));
 
 const MUTANTS = [
   { name: "원판(아무것도 안 바꿈)", expect: "초록" },
@@ -50,8 +74,10 @@ const MUTANTS = [
 ];
 
 const orig = (f) => (f === TPL ? TPL0 : MOCK0);
-const restore = () => { writeFileSync(TPL, TPL0); writeFileSync(MOCK, MOCK0); build(); };
-const build = () => execSync("node scripts/build-pages.mjs", { cwd: ROOT, stdio: "pipe" });
+/* ③ 바이트 그대로 되쓴다 — 빌드로 되돌리지 않는다(판 번호·줄끝이 바뀐다) */
+const restore = () => { for (const [p, b] of SNAP) writeFileSync(p, b); };
+/* ② «나는 일부러 가른다» — ①이 깨끗했으니 --force 가 덮는 것은 이 자가 방금 넣은 변이뿐이다 */
+const build = () => execSync("node scripts/build-pages.mjs --force", { cwd: ROOT, stdio: "pipe" });
 
 /** 바뀐 줄 수 — 0이면 변이가 안 닿은 것이다(AC-112) */
 const changedLines = (a, b) => {
@@ -84,6 +110,10 @@ try {
     rows.push({ ...m, got, changed, ok: got === m.expect });
   }
 } finally { restore(); }
+
+/* ④ 나무가 처음과 한 바이트도 안 다른가 — 검사가 흔적을 남기면 그게 고장이다 */
+const dirty = [...SNAP].filter(([p, b]) => !readFileSync(p).equals(b)).map(([p]) => path.relative(ROOT, p));
+if (dirty.length) { console.log(`🔴 되돌렸는데 처음과 다른 파일 ${dirty.length}개: ${dirty.join(", ")} — 이 자가 나무를 더럽혔다`); process.exit(1); }
 
 console.log("🔴 verify-keyin-notice-shown 변이 시험 — «자가 진짜 무는가»");
 console.log("─".repeat(104));
