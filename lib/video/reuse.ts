@@ -60,7 +60,10 @@ export interface ReuseGo { channel: string; label: string; maxSeconds: ChannelMa
 export type ReuseSkipWhy = "too_long" | "no_account";
 export interface ReuseSkip { channel: string; label: string; maxSeconds: ChannelMaxSecLit; why: ReuseSkipWhy; line: string; how: string;
   /** 🔴 [§6-6] too_long 일 때만 — «이 채널용으로 N초 영상을 새로 만들면 C코인»(`POST /api/pieces-remake`). **새 영상**이라 코인이 새로 든다 — 누르기 전에 값을 보여 준다. */
-  remake?: { seconds: VideoSecondsLit; coins: number } }
+  remake?: { seconds: VideoSecondsLit; coins: number };
+  /** [v1.6 · A 요청] 계정을 잴 때만(`connected` 를 줬을 때) — 그 채널에 쓸 수 있는 계정이 있나. too_long 이면서 계정도 없으면
+   *  «새로 만들기» 단추 대신 «계정을 연결하시면 만들 수 있어요»를 그릴 재료(길이가 먼저라 `why` 엔 계정 사실이 안 실린다). */
+  connected?: boolean }
 /** `places` = 1(원본) + `go.length` — 🔴 «몇 곳»은 이 수 그대로다(화면이 세지 않는다). */
 export interface ReuseFit { seconds: VideoSecondsLit; places: number; go: ReuseGo[]; skip: ReuseSkip[] }
 
@@ -90,11 +93,11 @@ export function reuseFit(input: { originChannel: string; seconds: VideoSecondsLi
       skip.push({ channel, label, maxSeconds, why: "too_long",
         line: `이 영상은 ${input.seconds}초라 ${label}(최대 ${maxSeconds}초)엔 안 올라가요.`,
         how: `${label}에도 올리시려면 만들 때 ${pick}초를 골라 주세요.`,
-        remake: { seconds: pick, coins: coinCostOf(videoCoinItem(pick)) } });
+        remake: { seconds: pick, coins: coinCostOf(videoCoinItem(pick)) }, ...(input.connected ? { connected: !!input.connected[channel] } : {}) });
     } else if (input.connected && !input.connected[channel]) {
       skip.push({ channel, label, maxSeconds, why: "no_account",
         line: `${label} 계정이 아직 연결되지 않았어요.`,
-        how: "계정을 연결하시면 같이 올라가요." });
+        how: "계정을 연결하시면 같이 올라가요.", connected: false });
     } else go.push({ channel, label, maxSeconds });
   }
   return { seconds: input.seconds, places: 1 + go.length, go, skip };

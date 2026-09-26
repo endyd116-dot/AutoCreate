@@ -65,6 +65,8 @@ console.log("\n② reuseFit — 트리거 §1 의 두 모양");
   // 길이·계정 둘 다 → 길이 먼저
   const both = reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: ["naver_clip"], connected: { naver_clip: false } });
   eq("길이도 안 맞고 계정도 없으면 길이 먼저(이 영상에 대한 사실)", both.skip[0]?.why, "too_long");
+  eq("🔴 그때 connected:false 가 같이 실린다 — 화면이 «새로 만들기» 대신 «계정을 연결하시면»을 그린다(A v1.6)", both.skip[0]?.connected, false);
+  eq("🔴 대조군 · connected 를 안 주면 칸이 없다(모르면 안 싣는다)", "connected" in (reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: ["naver_clip"] }).skip[0] ?? {}), false);
   // 고르지 않은 채널은 어디에도 없다
   eq("🔴 대조군 · 고르지 않은 채널은 go·skip 어디에도 없다", reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: ["reels"], connected: ALL_ON }).skip.length, 0);
   // 중복·후보 밖
