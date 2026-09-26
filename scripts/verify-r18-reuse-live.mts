@@ -96,7 +96,10 @@ async function main() {
     const [p0] = await q(sql`SELECT * FROM pieces WHERE id = ${origin}`);
     const ap = await approvePiece(tA, p0, { by: { uid: 1, role: "owner" } });
     ok("원본 승인 → scheduled", ap.ok === true, JSON.stringify(ap.ok ? { at: ap.scheduledFor } : ap));
-    const der = await q(sql`SELECT p.id, p.channel, p.status, p.scheduled_for, p.slot_id, p.external_url, p.channel_ref, p.meta, a.channel AS acc_channel
+    /* `ahead_s` — 🔴 [2026-09-27 C] 시각 차는 **SQL 에서** 잰다: `scheduled_for` 는 시간대 없는 칸(UTC 로 적힌다)이라
+       JS `new Date(…)` 가 이 PC 의 KST 로 읽어 9시간 어긋난다(첫 판이 «-390분 뒤»를 냈다 · CLAUDE §4.5b). */
+    const der = await q(sql`SELECT p.id, p.channel, p.status, p.scheduled_for, p.slot_id, p.external_url, p.channel_ref, p.meta, a.channel AS acc_channel,
+      EXTRACT(EPOCH FROM (p.scheduled_for - (NOW() AT TIME ZONE 'UTC')))::float AS ahead_s
       FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tA} AND p.origin_piece_id = ${origin} ORDER BY p.id`);
     ok("60초 → 릴스·틱톡·페북 릴스 세 곳(클립은 30초라 빠진다)", der.map((d) => d.channel).join() === "reels,tiktok,facebook_reels", der.map((d) => d.channel).join());
     ok("🔴 youtube_long 계정이 연결돼 있어도 안 간다", !der.some((d) => String(d.channel).startsWith("youtube_")));
@@ -108,9 +111,9 @@ async function main() {
     ok("파생 = scheduled · 발행 흔적 NULL · 시각과 자리는 한 몸(B2 편성이 둘 다 잡거나 둘 다 비운다)",
       der.length > 0 && der.every((d) => d.status === "scheduled" && d.external_url == null && d.channel_ref == null) && placed.length + waiting.length === der.length,
       `편성됨 ${placed.length} · 자리 대기 ${waiting.length} · 반쪽 ${der.length - placed.length - waiting.length}`);
-    const soonest = placed.map((d) => new Date(String(d.scheduled_for)).getTime()).sort((a, b) => a - b)[0];
+    const soonestS = placed.map((d) => Number(d.ahead_s)).sort((a, b) => a - b)[0];
     ok("🔴 편성된 파생의 시각은 30분 넘게 뒤 — 이 판이 치우기 전에 발행 크론이 주울 수 없다",
-      placed.length === 0 || soonest > Date.now() + 30 * 60_000, placed.length ? `가장 이른 파생 ${Math.round((soonest - Date.now()) / 60_000)}분 뒤` : "편성된 파생 0");
+      placed.length === 0 || soonestS > 30 * 60, placed.length ? `가장 이른 파생 ${Math.round(soonestS / 60)}분 뒤(SQL 에서 잰 UTC 차)` : "편성된 파생 0");
     ok("계정은 그 채널 계정", der.every((d) => d.acc_channel === d.channel));
     const after = await consumeRows(tA);
     ok("🔴 코인 — 파생 전후 consume 행 수가 같다", before === after, `${before} → ${after}`);
