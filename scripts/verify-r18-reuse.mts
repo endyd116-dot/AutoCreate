@@ -21,6 +21,7 @@ import {
   readVideoReuse, reuseBasisOf, basisChannels,
 } from "../lib/video/reuse";
 import { VIDEO_CHANNELS, VIDEO_SECONDS } from "../lib/video/types";
+import { coinCostOf, videoCoinItem } from "../lib/coin-table";
 
 let fail = 0, pass = 0;
 const ok = (name: string, cond: boolean, detail = "") => { if (cond) { pass++; console.log(`  ✅ ${name}`); } else { fail++; console.log(`  🔴 ${name}${detail ? ` — ${detail}` : ""}`); } };
@@ -48,6 +49,7 @@ console.log("\n② reuseFit — 트리거 §1 의 두 모양");
   eq("원판 · places = 1(원본) + go", f60.places, 4);
   eq("문장 · 사실 한 줄", f60.skip[0]?.line, "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요.");
   eq("문장 · 어떻게 하면 되는지", f60.skip[0]?.how, "네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요.");
+  eq("🔴 §6-6 «30초로 다시 만들 길» — 누르기 전에 값(30초 · 그 길이 코인)", f60.skip[0]?.remake, { seconds: 30, coins: coinCostOf(videoCoinItem(30)) });
   const f30 = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON });
   eq("30초면 다섯 곳(쇼츠+릴스+틱톡+클립+페북) · 빠지는 곳 0", [f30.places, f30.skip.length], [5, 0]);
   const f90 = reuseFit({ originChannel: "reels", seconds: 90, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON });
@@ -57,6 +59,7 @@ console.log("\n② reuseFit — 트리거 §1 의 두 모양");
   const na = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok", "reels"], connected: { ...ALL_ON, tiktok: false } });
   eq("계정 없는 채널 → skip no_account", na.skip.map((s) => `${s.channel}:${s.why}`), ["tiktok:no_account"]);
   eq("no_account 문장", [na.skip[0]?.line, na.skip[0]?.how], ["틱톡 계정이 아직 연결되지 않았어요.", "계정을 연결하시면 같이 올라가요."]);
+  eq("🔴 대조군 · no_account 엔 «새로 만들기» 값이 없다(길이는 맞다 — 계정만 이으면 된다)", na.skip[0]?.remake, undefined);
   // 🔴 대조군: connected 를 안 주면 계정은 안 본다
   eq("🔴 대조군 · connected 없음 → 길이만 잰다(no_account 0)", reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"] }).skip.length, 0);
   // 길이·계정 둘 다 → 길이 먼저

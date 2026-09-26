@@ -313,7 +313,12 @@ export async function holdDerivedFor(tid: number, originPieceId: number, why: "r
   }
   const rows = await q(sql`UPDATE pieces SET scheduled_for = NULL,
       meta = meta || jsonb_build_object('reuse', COALESCE(meta->'reuse', '{}'::jsonb) || ${jsonb({ waitOrigin: true })}), updated_at = NOW()
-    WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id`);
+    WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id, slot_id`);
+  /* 🔴 [B2 요청] 그 파생의 편성 자리도 시각을 비운다(상태는 그대로) — 안 비우면 기다리는 동안 편성표에 **옛 시각**이 남아
+     «그때 나간다»로 읽힌다. 다시 승인되면 B2 `scheduleDerived` 가 publish_at·slot_date·note 를 새로 쓴다. */
+  const heldSlots = rows.map((r) => n(r.slot_id)).filter(Boolean);
+  if (heldSlots.length) await q(sql`UPDATE slots SET publish_at = NULL, note = ${"원본 영상을 다시 만드는 중이에요"}, updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id IN (${sql.join(heldSlots.map((x) => sql`${x}`), sql`, `)})`);
   if (rows.length) await writeAudit({ tenantId: tid, action: "video_reuse_held_for_regen", actorType: "user", target: `piece:${originPieceId}`, detail: { derived: rows.map((r) => n(r.id)) }, riskLevel: "low" });
   return rows.map((r) => n(r.id));
 }

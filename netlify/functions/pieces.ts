@@ -260,6 +260,21 @@ export default async (req: Request): Promise<Response> => {
          `tier` 는 글이 들고 있는 값 그대로(옛 글엔 없다 → 키 없음 · «간단히»로 위장하지 않는다). `coins` 는 정산이 돈 뒤에만 있다. */
       { const t = toCoinTier(m.tier); if (t) meta.tier = t; }
       if (m.coins && typeof m.coins === "object") meta.coins = m.coins;
+      /* [R18 · B] 🔴 한 영상 여러 곳 — 서버가 적은 세 칸을 **화면까지** 싣는다(이 화이트리스트가 값을 먹는 다섯 번째가 되지 않게 · B2 가 자로 잡았다).
+         · `reuseResult` = 파생을 만들 때 **어디로 갔고 어디서 빠졌나**({ at, seconds, go:[{channel,pieceId}], skip:ReuseSkip[] }) — `reuse.skipped` 의 정본 기록
+         · `reuseChannels` = 이 영상에 고객이 **고른** 채널(빈 배열 = «이번엔 여기만» — 없는 것과 다르다 · 그래서 빈 배열도 싣는다)
+         · `remakeOf` = «빠진 채널용으로 새로 만든 판»이면 원본 id — 화면이 «#N 영상의 30초 판이에요»를 말할 재료 */
+      if (m.reuseResult && typeof m.reuseResult === "object") meta.reuseResult = m.reuseResult;
+      if (Array.isArray(m.reuseChannels)) meta.reuseChannels = (m.reuseChannels as unknown[]).map(String);
+      if (m.remakeOf != null && n(m.remakeOf)) meta.remakeOf = n(m.remakeOf);
+      /* [R18 · B] 🔴 `verify-upstream-discarded` 의 틈(첫 `}` 뒤 칸을 못 셈)을 메우자 **종전 자가 못 보던 «쓰기만 하는 칸» 셋**이 드러났다 — 싣는다.
+         · `takedownNoticeId` — 신고로 막힌 글의 통지 번호(`lib/publish-one.ts`). 화면이 «어느 신고 때문인가»를 그 통지로 이을 재료(문장은 `failReason`).
+         · `audioTempo`·`audioTempoLearned` — 실제로 건 말 속도 · 레퍼런스가 배운 말 속도(`lib/video/gen.ts` · 칸 주인 B2).
+           안 걸렸을 때는 `refUnused` 가 말해 주는데, **걸렸을 때는 아무도 말하지 않았다**(«배운 것이 닿았다»가 화면까지 올 길이 0).
+         숫자만 싣는다 — 모르면 키를 안 싣는다(AC-9). 🔴 화면이 그리는지는 이 자 밖이다(머리말) — A 에게 따로 알린다. */
+      if (m.takedownNoticeId != null && n(m.takedownNoticeId)) meta.takedownNoticeId = n(m.takedownNoticeId);
+      if (typeof m.audioTempo === "number" && Number.isFinite(m.audioTempo)) meta.audioTempo = m.audioTempo;
+      if (typeof m.audioTempoLearned === "number" && Number.isFinite(m.audioTempoLearned)) meta.audioTempoLearned = m.audioTempoLearned;
       /* [R10-4] 이 글에 쓴 스타일 — id + 사람이 읽는 이름(화면이 id 만 받고 이름을 또 물으러 가지 않게). 지워진 스타일이면 이름 없이 id 만. */
       if (Number(m.styleId) > 0) {
         meta.styleId = Math.floor(Number(m.styleId));

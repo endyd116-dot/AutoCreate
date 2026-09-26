@@ -143,8 +143,15 @@ async function main() {
     ok("🔴 대조군 · 후보 밖(youtube_long)은 없는 길", !ytl.ok && ytl.step === "channel");
 
     console.log("\n⑤ 원본 다시 만들기 → 파생 멈춤 → 다시 승인하면 새 영상으로 갈아 끼움");
+    /* B2 가 자리를 박은 뒤라고 친다 — 파생 하나에 자리(시각 있음)를 붙여 두고, 멈출 때 그 시각이 비는지 본다(B2 요청). */
+    const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, piece_id, publish_at, status, origin)
+      VALUES (${tA}, (NOW() AT TIME ZONE 'Asia/Seoul')::date, 'tiktok', 'shorts', NULL, ${dIds[1]}, NOW() + interval '3 hours', 'scheduled', 'derived') RETURNING id`);
+    await q(sql`UPDATE pieces SET slot_id = ${n(sl?.id)}, scheduled_for = NOW() + interval '3 hours' WHERE id = ${dIds[1]}`);
     const held = await holdDerivedFor(tA, origin, "regenerate");
     ok("안 나간 파생 3개 멈춤(시각 NULL · waitOrigin)", held.length === 3);
+    const [sl2] = await q(sql`SELECT publish_at, status, note FROM slots WHERE id = ${n(sl?.id)}`);
+    const [pd2] = await q(sql`SELECT scheduled_for FROM pieces WHERE id = ${dIds[1]}`);
+    ok("🔴 그 파생의 자리도 시각이 빈다(상태는 그대로) — 편성표에 옛 시각이 안 남는다", sl2?.publish_at == null && sl2?.status === "scheduled" && pd2?.scheduled_for == null, `${String(sl2?.status)} · ${String(sl2?.note)}`);
     // 원본이 새로 구워졌다고 친다(finalizeRender 가 하는 일: 옛 video 행을 지우고 새 key)
     await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tA} AND piece_id = ${origin} AND kind IN ('video','thumb')`);
     await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tA}, ${origin}, 'video', ${`autocreate/${tA}/r18/origin-v2.mp4`}, ${jsonb({ durationMs: 60000 })}, 0)`);
