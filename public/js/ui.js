@@ -703,6 +703,8 @@
      `pause_resumed`(«다시 시작했어요» · 링크가 발행함) → **발행** 얼굴. 🔴 셋 다 사고가 아니라 **알려 주는 것**이다(§3 · 겁주는 얼굴 금지). */
   UI.KIND_ALIAS = { pause_still: "clock", pause_wake_soon: "clock", pause_resumed: "publish", account_address_check: "account", gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
     video_reuse_ask: "review", /* [R18 · B 계약] «영상을 다른 곳에도 올릴 수 있어요»(자동 승인 경로의 처음 한 번 묻기 · 링크 /app/piece.html?id=&reuse=ask) — 검수 얼굴(soft · 겁줄 일이 아니다 · §3) */
+    reuse_waiting: "clock", /* [R18 · B2 계약] «영상을 올릴 자리를 기다리고 있어요»(링크 /app/schedule.html) — «때»에 대한 말이라 시계 */
+    publish_failed: "publish", /* [R18 · B2 계약] «이 채널엔 안 맞는 길이예요»(링크 /app/piece.html?id=) — 발행에서 멈춘 것 · 까닭은 그 글 failReason(서버 문장) */
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "setup", /* [R9R10-A · B c922b28 · 메인이 main 에서 setup 으로 이음] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ format_demoted: "publish", /* [R9R10 · B2] «이 글에서 못 낸 꾸밈이 있어요»(발행 뒤 · 링크 /app/piece.html?id=) — 검수·발행 얼굴 */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",
