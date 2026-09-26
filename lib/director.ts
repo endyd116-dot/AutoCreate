@@ -788,6 +788,80 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
 }
 
 /**
+ * [R18 · 트리거 §6-6 · B 2026-09-26] 🔴 **«30초로 다시 만들 길»** — 길이가 안 맞아 빠진 채널을 위해 **같은 소재·같은 지시서**로
+ *   그 채널에 맞는 길이의 영상을 **새로** 만든다(`POST /api/pieces-remake { id, channel }`).
+ *
+ *   ══ 왜 이 함수가 필요했나 ══
+ *     «클립에도 올리시려면 만들 때 30초를 골라 주세요»라고 말하는데 **그 길이 없었다** — `propose` 는 쓴 소재를
+ *     «이미 쓴 소재예요»로 거절한다(위 `topic_state`). 60초로 만든 뒤에는 같은 소재로 30초를 만들 방법이 0개였다.
+ *     ⇒ 말은 «어떻게 하면 되는지»를 주는데 **그 «어떻게»가 막다른 길**이었다(§9 ③ «되돌릴 길을 함께 준다»의 반대).
+ *
+ *   ══ 어떻게 ══
+ *     원본 지시서(`briefs.pieces`)의 그 영상 spec 을 **대상 채널·그 채널 계정**으로 복제해 새 지시서(`proposed`)를 만들고,
+ *     `confirm` 에 **길이 패치**만 넘긴다 — 길이·컷·코인 재계산(`applyPatches`)·편성 자리·코인 차감·생성 호출이 **전부 기존 한 길**을 탄다.
+ *     🔴 새로 짠 길이 없다: 코인 셈·자리·생성은 `confirm` 이 정본이다(두 벌이면 견적과 차감이 갈린다 · AC-74).
+ *
+ *   ══ 🔴 지키는 것 ══
+ *     · **새 영상이라 코인이 새로 든다**(그 길이의 값) — 파생이 아니다(`origin_piece_id` NULL). 누르기 전 값은 `ReuseSkip.remake.coins`.
+ *     · `meta.remakeOf` = 원본 id(추적) · `meta.reuseChannels` = 이 새 영상이 **같이 덮을** 다른 «빠진» 채널(없으면 []) —
+ *       🔴 빈 배열이어도 적는다: 안 적으면 승인 때 설정(켜짐)대로 릴스·틱톡에 **같은 소재 영상이 두 번** 간다(원본 60초 파생이 이미 갔다).
+ *     · 한 채널에 이 원본의 30초 판은 **하나** — 이미 있으면 새로 안 만들고 그 id 를 돌려준다(두 번 눌러 코인 두 번 0).
+ */
+export async function remakeVideoFor(tid: number, originPieceId: number, channel: string, actorId: number | null):
+  Promise<(ConfirmResult & { ok: true; seconds?: number; alsoTo?: string[]; already?: boolean }) | { ok: false; step: string; error: string; need?: number; have?: number }> {
+  const { pieceSecondsOf, reuseTargetsFor, reuseFit, VIDEO_REUSE_TARGETS } = await import("./video/reuse");
+  const [o] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${originPieceId} AND kind = 'video'`);
+  if (!o) return { ok: false, step: "not_found", error: "그 영상을 찾지 못했어요." };
+  if (o.origin_piece_id != null && n(o.origin_piece_id)) return { ok: false, step: "is_derived", error: "이 영상은 다른 영상에서 왔어요 — 원본에서 골라 주세요." };
+  const target = String(channel ?? "");
+  if (!reuseTargetsFor(String(o.channel)).includes(target) || !isVideoChannel(target)) return { ok: false, step: "channel", error: "그 채널로는 새로 만들 수 없어요." };
+  const om = (o.meta && typeof o.meta === "object" ? o.meta : {}) as Record<string, unknown>;
+  const seconds = pieceSecondsOf(om);
+  /* 이 원본에서 «빠진» 채널 전부(계정은 안 본다 — 아래에서 그 채널 계정을 따로 고른다) */
+  const skipped = reuseFit({ originChannel: String(o.channel), seconds, channels: VIDEO_REUSE_TARGETS }).skip;
+  const mine = skipped.find((x) => x.channel === target && x.why === "too_long");
+  if (!mine?.remake) return { ok: false, step: "fits", error: "그 채널엔 지금 영상 그대로 올라가요 — 새로 만들 필요가 없어요." };
+  /* 멱등 — 이 원본의 이 채널 판이 이미 있으면(버린 것 빼고) 그대로 돌려준다 */
+  const [dup] = await q(sql`SELECT id FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND channel = ${target} AND status NOT IN ('rejected','failed') ORDER BY id DESC LIMIT 1`);
+  if (dup) { const bal = await balance(tid); return { ok: true, briefId: 0, pieceIds: [n(dup.id)], coinsCharged: 0, coinsLeft: bal.balance, already: true }; }
+
+  /* 쓸 수 있는 계정 — 🔴 `lib/video/reuse.ts usableAccounts` 와 같은 규칙(removed · suspended · disconnected 제외) */
+  const accs = (await listAccounts(tid)).filter((a) => a.channel === target && a.status !== "suspended" && a.status !== "disconnected" && a.lastErrorKind !== "removed");
+  const [oa] = o.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(o.account_id)}`) : [];
+  const personaId = oa?.persona_id == null ? null : n(oa.persona_id);
+  const acc = (personaId != null ? accs.find((a) => a.personaId === personaId) : undefined) ?? accs[0];   // 같은 페르소나 먼저(reuse.ts pickAccount 와 같은 규칙)
+  if (!acc) return { ok: false, step: "no_account", error: `${mine.label} 계정이 아직 연결되지 않았어요 — 연결하시면 새로 만들 수 있어요.` };
+
+  const [b] = o.brief_id ? await q(sql`SELECT * FROM briefs WHERE tenant_id = ${tid} AND id = ${n(o.brief_id)}`) : [];
+  const specs = (Array.isArray(b?.pieces) ? b!.pieces : []) as PieceSpec[];
+  const base = specs.find((s) => s.key === String(om.key ?? "")) ?? specs.find((s) => s.kind === "video" && s.channel === String(o.channel));
+  if (!b || !base || base.kind !== "video" || !base.video) return { ok: false, step: "no_brief", error: "이 영상은 처음 만든 지시서가 남아 있지 않아 같은 내용으로 다시 만들 수 없어요 — 새 소재로 만들어 주세요." };
+
+  /* 나가는 시각 — 원본 뒤 30분(같은 소재가 같은 분에 두 곳 나가지 않게) · 지금보다 2시간 뒤보다 이르면 2시간 뒤(만들 시간) */
+  const oAt = utcDate(o.scheduled_for)?.getTime() ?? 0;
+  const at = new Date(Math.max(Date.now() + 2 * 3600_000, oAt + 30 * 60_000)).toISOString();
+  const key = `${target}:${acc.id}`;
+  const spec: PieceSpec = { ...base, channel: target, accountId: acc.id, accountHandle: acc.handle, key,
+    schedule: { at, slotReason: `«${mine.label}»용 ${mine.remake.seconds}초 — 원본과 같은 소재` } };
+  const [nb] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost)
+    VALUES (${tid}, ${b.topic_id}, ${b.goal}, ${jsonb([spec])}, ${jsonb([`원본 영상 #${originPieceId} 이 ${seconds}초라 ${mine.label}(최대 ${mine.maxSeconds}초)용으로 새로 만들어요`])}, ${b.mode ?? "reviewed"}, ${"proposed"}, ${0}) RETURNING id`);
+  const briefId = n(nb?.id);
+  const r = await confirm(tid, briefId, [{ key, video: { seconds: mine.remake.seconds } }], actorId, { origin: "manual" });
+  if (!r.ok) {
+    /* 확정이 안 됐으면 새 지시서는 `proposed` 로 남는다(코인 0) — 지우지 않는다(원장·감사처럼 «시도했다»의 자국). */
+    return r as { ok: false; step: string; error: string; need?: number; have?: number };
+  }
+  /* 이 새 영상이 **같이 덮을** 다른 «빠진» 채널 — 새 길이로 들어가고, 아직 그 채널 판이 없는 것(없으면 []). */
+  const covered = new Set((await q(sql`SELECT channel FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND status NOT IN ('rejected','failed')`)).map((x) => String(x.channel)));
+  const alsoTo = skipped.filter((x) => x.why === "too_long" && x.channel !== target && x.maxSeconds >= mine.remake!.seconds && !covered.has(x.channel)).map((x) => x.channel);
+  await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ remakeOf: originPieceId, reuseChannels: alsoTo })}, updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id IN (${sql.join(r.pieceIds.map((x) => sql`${x}`), sql`, `)})`);
+  await writeAudit({ tenantId: tid, action: "video_reuse_remake", actorType: "user", ...(actorId ? { actorId } : {}), target: `piece:${originPieceId}`,
+    detail: { channel: target, seconds: mine.remake.seconds, pieceIds: r.pieceIds, coinsCharged: r.coinsCharged, alsoTo }, riskLevel: "low" });
+  return { ...r, seconds: mine.remake.seconds, alsoTo };
+}
+
+/**
  * 배경 생성 호출 실패 처리 — piece 를 failed 로 내리고 코인 환급·알림·슬롯 표시(content-gen 실패 경로와 같은 처치).
  *   ★C4 fix(2026-09-14 · PITFALLS AC-16): 호출이 실패해도 piece 가 generating 에 남으면 «코인은 빠졌는데 화면은 영원히 만드는 중»이 된다 —
  *   홈 «해야 할 일»은 in_review 만 세므로 사용자에게 아무 신호도 가지 않는다(조용한 0건 금지).

@@ -35,6 +35,7 @@ import { VIDEO_CHANNEL_MAX_SEC, shortsFormOf, type ChannelMaxSecLit, type Shorts
 import { channelLabelKo } from "../channel-url";
 import { VIDEO_SECONDS, isVideoFormat } from "./types";
 import { scheduleDerived } from "../derived-schedule";   // [R18 · B2] 파생에 시각·자리를 준다(아래 «B2 SEAM»)
+import { coinCostOf, videoCoinItem } from "../coin-table";   // 🔴 값표(순수)만 — 원장(coin-ledger)은 이 파일이 **부르지 않는다**(파생 코인 0)
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -58,7 +59,9 @@ export function reuseTargetsFor(originChannel: string): string[] {
 
 export interface ReuseGo { channel: string; label: string; maxSeconds: ChannelMaxSecLit }
 export type ReuseSkipWhy = "too_long" | "no_account";
-export interface ReuseSkip { channel: string; label: string; maxSeconds: ChannelMaxSecLit; why: ReuseSkipWhy; line: string; how: string }
+export interface ReuseSkip { channel: string; label: string; maxSeconds: ChannelMaxSecLit; why: ReuseSkipWhy; line: string; how: string;
+  /** 🔴 [§6-6] too_long 일 때만 — «이 채널용으로 N초 영상을 새로 만들면 C코인»(`POST /api/pieces-remake`). **새 영상**이라 코인이 새로 든다 — 누르기 전에 값을 보여 준다. */
+  remake?: { seconds: VideoSecondsLit; coins: number } }
 /** `places` = 1(원본) + `go.length` — 🔴 «몇 곳»은 이 수 그대로다(화면이 세지 않는다). */
 export interface ReuseFit { seconds: VideoSecondsLit; places: number; go: ReuseGo[]; skip: ReuseSkip[] }
 
@@ -84,9 +87,11 @@ export function reuseFit(input: { originChannel: string; seconds: VideoSecondsLi
     if (!maxSeconds) continue;   // 표에 없는 채널은 잴 수 없다 — 지어내지 않는다(AC-9). 지금 후보 다섯은 전부 표에 있다(하니스가 잰다).
     const label = channelLabelKo(channel);
     if (input.seconds > maxSeconds) {
+      const pick = longestPickableUnder(maxSeconds);
       skip.push({ channel, label, maxSeconds, why: "too_long",
         line: `이 영상은 ${input.seconds}초라 ${label}(최대 ${maxSeconds}초)엔 안 올라가요.`,
-        how: `${label}에도 올리시려면 만들 때 ${longestPickableUnder(maxSeconds)}초를 골라 주세요.` });
+        how: `${label}에도 올리시려면 만들 때 ${pick}초를 골라 주세요.`,
+        remake: { seconds: pick, coins: coinCostOf(videoCoinItem(pick)) } });
     } else if (input.connected && !input.connected[channel]) {
       skip.push({ channel, label, maxSeconds, why: "no_account",
         line: `${label} 계정이 아직 연결되지 않았어요.`,
@@ -309,7 +314,12 @@ export async function holdDerivedFor(tid: number, originPieceId: number, why: "r
   }
   const rows = await q(sql`UPDATE pieces SET scheduled_for = NULL,
       meta = meta || jsonb_build_object('reuse', COALESCE(meta->'reuse', '{}'::jsonb) || ${jsonb({ waitOrigin: true })}), updated_at = NOW()
-    WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id`);
+    WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id, slot_id`);
+  /* 🔴 [B2 요청] 그 파생의 편성 자리도 시각을 비운다(상태는 그대로) — 안 비우면 기다리는 동안 편성표에 **옛 시각**이 남아
+     «그때 나간다»로 읽힌다. 다시 승인되면 B2 `scheduleDerived` 가 publish_at·slot_date·note 를 새로 쓴다. */
+  const heldSlots = rows.map((r) => n(r.slot_id)).filter(Boolean);
+  if (heldSlots.length) await q(sql`UPDATE slots SET publish_at = NULL, note = ${"원본 영상을 다시 만드는 중이에요"}, updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id IN (${sql.join(heldSlots.map((x) => sql`${x}`), sql`, `)})`);
   if (rows.length) await writeAudit({ tenantId: tid, action: "video_reuse_held_for_regen", actorType: "user", target: `piece:${originPieceId}`, detail: { derived: rows.map((r) => n(r.id)) }, riskLevel: "low" });
   return rows.map((r) => n(r.id));
 }

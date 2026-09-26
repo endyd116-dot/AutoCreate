@@ -5,13 +5,20 @@
  *   → 파생 · 두 번 불러도 새로 0 · 원장 0행 · 같은 r2_key · 원본 다시 만들기(멈춤 → 새 영상으로 갈아 끼움) · 원본 버리기(같이 버림)
  *   · 안 물은 집의 알림 한 번(두 번째 승인엔 안 나간다).
  *   🔴 발행은 하지 않는다 — 파생은 `scheduled_for NULL` 이라 발행 크론이 안 줍고, 이 스크립트도 publish 를 안 부른다.
+ *   🔴 **영상 생성도 하지 않는다** — «30초 판 새로 만들기»는 `confirm` → `triggerVideo` 를 부르는데, `.env` 에 라이브 주소와
+ *      `INTERNAL_SECRET` 이 있으면 **라이브 배경 함수를 불러 진짜 Veo·TTS 가 돈다**(AC-53 · $3.63 실측). 그래서 맨 위에서
+ *      `INTERNAL_SECRET` 을 비운다 → `triggerVideo` 가 네트워크 전에 멈추고 failed + 환급 + 알림으로 남긴다(돈 경로만 잰다).
  */
 import "./_lib/load-env.mjs";
+process.env.INTERNAL_SECRET = "";   // 🔴 위 머리말 — 라이브 배경 함수를 절대 부르지 않게(모듈이 값을 읽는 건 호출 때라 여기서 비우면 된다)
+delete process.env.SITE_URL; delete process.env.URL; delete process.env.DEPLOY_PRIME_URL;   // 🔴 이중으로 — 비밀이 남아도 부를 주소가 없다(`backgroundBase` 가 던진다)
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";
 import { approvePiece } from "../lib/content-approve";
 import { answerReuse, deriveVideoPieces, holdDerivedFor, pieceReuseView, saveVideoReuse, videoReuseView } from "../lib/video/reuse";
+import { remakeVideoFor } from "../lib/director";
+import { coinCostOf, videoCoinItem } from "../lib/coin-table";
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -27,12 +34,12 @@ async function seedAccount(tid: number, channel: string, handle: string, persona
   const [a] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, persona_id) VALUES (${tid}, ${channel}, ${handle}, 'oauth', 'active', ${personaId}) RETURNING id`);
   return n(a?.id);
 }
-async function seedOrigin(tid: number, accountId: number, seconds: number, key: string): Promise<number> {
+async function seedOrigin(tid: number, accountId: number, seconds: number, key: string, briefId: number | null = null): Promise<number> {
   const meta = { stage: "done", video: { format: "graphic", seconds }, render: { scenes: [] }, youtube: { title: "실증", tags: [] }, coinItem: `video_${seconds}`, regenCount: 0,
     chainLock: null, chainStage: "done", renderJobId: 1 };
-  const [p] = await q(sql`INSERT INTO pieces (tenant_id, account_id, channel, kind, format, title, body, blocks, meta, status, gate_report, scheduled_for)
-    VALUES (${tid}, ${accountId}, 'youtube_shorts', 'video', 'story', ${"[R18 실증] 원본 영상"}, ${"설명란"}, ${jsonb([])}, ${jsonb(meta)}, 'in_review',
-            ${jsonb({ ok: true, checks: [], rewritten: false, judge: { grade: "OK", pass: true, axes: [] } })}, NOW() + interval '2 hours') RETURNING id`);
+  const [p] = await q(sql`INSERT INTO pieces (tenant_id, account_id, channel, kind, format, title, body, blocks, meta, status, gate_report, scheduled_for, brief_id)
+    VALUES (${tid}, ${accountId}, 'youtube_shorts', 'video', 'story', ${"[R18 실증] 원본 영상"}, ${"설명란"}, ${jsonb([])}, ${jsonb({ ...meta, key: "youtube_shorts:" + accountId })}, 'in_review',
+            ${jsonb({ ok: true, checks: [], rewritten: false, judge: { grade: "OK", pass: true, axes: [] } })}, NOW() + interval '2 hours', ${briefId}) RETURNING id`);
   const id = n(p?.id);
   await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tid}, ${id}, 'video', ${key}, ${jsonb({ durationMs: seconds * 1000, bytes: 999999 })}, 0)`);
   await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tid}, ${id}, 'thumb', ${`${key}.jpg`}, ${jsonb({ from: "render" })}, 1)`);
@@ -50,7 +57,15 @@ async function main() {
     /* ── 집 A: 계정 — 쇼츠(원본) · 릴스 · 틱톡 · 클립 · 페북 릴스 · + youtube_long(🔴 연결돼 있어도 안 가야 한다) ── */
     const acc = await seedAccount(tA, "youtube_shorts", "yt_a");
     for (const [c, h] of [["reels", "ig_a"], ["tiktok", "tt_a"], ["naver_clip", "clip_a"], ["facebook_reels", "fb_a"], ["youtube_long", "ytl_a"]]) await seedAccount(tA, c, h);
-    const origin = await seedOrigin(tA, acc, 60, `autocreate/${tA}/r18/origin-v1.mp4`);
+    /* 원본의 지시서 — «30초 판 새로 만들기»가 이 spec 을 복제한다(실제 director 가 쓰는 모양 그대로 · 필요한 칸만). */
+    const spec = { key: `youtube_shorts:${acc}`, channel: "youtube_shorts", accountId: acc, accountHandle: "yt_a", kind: "video", emotionKey: "script", format: "story", composition: "60초 그래픽 스토리",
+      images: { count: 0, aiCount: 0, style: "photo", heroNeeded: false }, monetize: { affiliate: null, sponsored: false, gift: false, adDisclosure: false },
+      schedule: { at: new Date(Date.now() + 3 * 3600_000).toISOString(), slotReason: "실증" }, lengthHint: { words: 0 }, coinCost: 28, angle: "R18 실증",
+      video: { format: "graphic", seconds: 60, cuts: 9, provider: { tier: "standard", key: "omni" }, voice: { provider: "gemini", voiceId: "Kore" }, variant: { palette: "warm", hookType: "question", voiceId: "Kore" }, disclosure: { badge: false, descriptionFirstLine: false } } };
+    const [tp] = await q(sql`INSERT INTO topics (tenant_id, title, norm_key, status) VALUES (${tA}, ${"R18 실증 소재"}, ${`r18smoke${stamp}`}, 'used') RETURNING id`);
+    const [br] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost) VALUES (${tA}, ${n(tp?.id)}, 'adsense', ${jsonb([spec])}, ${jsonb([])}, 'reviewed', 'confirmed', 28) RETURNING id`);
+    const origin = await seedOrigin(tA, acc, 60, `autocreate/${tA}/r18/origin-v1.mp4`, n(br?.id));
+    await q(sql`UPDATE pieces SET topic_id = ${n(tp?.id)} WHERE id = ${origin}`);
 
     console.log("\n① 설정 · 처음 한 번");
     const view0 = await videoReuseView(tA);
@@ -104,9 +119,39 @@ async function main() {
     const pvD = await pieceReuseView(tA, (await q(sql`SELECT * FROM pieces WHERE id = ${dIds[0]}`))[0]);
     ok("파생 — role derived · coin 0 · 사람말 한 줄", pvD?.role === "derived" && pvD.coin === 0 && pvD.origin.pieceId === origin, pvD?.role === "derived" ? pvD.line : "");
 
+    console.log("\n④-b 🔴 «30초로 다시 만들 길»(트리거 §6-6) — 빠진 클립용 30초 판을 새로");
+    const clipSkip = pvO?.role === "origin" ? pvO.fit.skip.find((x) => x.channel === "naver_clip") : undefined;
+    ok("빠진 줄에 값이 먼저 실린다 — remake {30초 · 코인}", clipSkip?.remake?.seconds === 30 && clipSkip.remake.coins === coinCostOf(videoCoinItem(30)), JSON.stringify(clipSkip?.remake));
+    const short = await remakeVideoFor(tA, origin, "naver_clip", null);
+    ok("코인이 모자라면 402 사유 — 조용히 0건 아님(시드 집 잔액 0)", !short.ok && short.step === "coin_short", JSON.stringify(short).slice(0, 160));
+    await q(sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, reason, ref) VALUES (${tA}, 'grant', 'included', 200, ${"R18 실증 지급"}, ${`r18smoke:${stamp}`})`);
+    const c0 = await consumeRows(tA);
+    const rm = await remakeVideoFor(tA, origin, "naver_clip", null);
+    const [np] = rm.ok ? await q(sql`SELECT id, channel, status, origin_piece_id, meta, account_id FROM pieces WHERE id = ${rm.pieceIds[0]}`) : [];
+    const nm = (np?.meta ?? {}) as Row;
+    ok("새 영상 — 네이버 클립 · 30초 · 파생 아님(origin_piece_id NULL) · remakeOf 원본", rm.ok && np?.channel === "naver_clip" && ((nm.video as Row)?.seconds === 30) && np?.origin_piece_id == null && n(nm.remakeOf) === origin,
+      JSON.stringify(rm.ok ? { id: rm.pieceIds, coins: rm.coinsCharged, st: np?.status, sec: (nm.video as Row)?.seconds, alsoTo: rm.alsoTo } : rm).slice(0, 200));
+    ok("🔴 새 영상이라 코인은 그 길이 값 한 번(원장 consume +1행)", rm.ok && rm.coinsCharged === coinCostOf(videoCoinItem(30)) && (await consumeRows(tA)) === c0 + 1, `charged ${rm.ok ? rm.coinsCharged : "-"}`);
+    ok("같이 덮을 다른 빠진 채널 없음 → reuseChannels [] 로 적힌다(승인 때 릴스·틱톡에 두 번 안 간다)", Array.isArray(nm.reuseChannels) && (nm.reuseChannels as unknown[]).length === 0);
+    ok("생성은 안 불렀다(INTERNAL_SECRET 비움) → failed + 환급으로 정직하게 남는다", np?.status === "failed", String(np?.status));
+    await q(sql`UPDATE pieces SET status = 'in_review' WHERE id = ${n(np?.id)}`);   // 만들어졌다고 친다(멱등을 재려고)
+    const rm2 = await remakeVideoFor(tA, origin, "naver_clip", null);
+    ok("🔴 두 번 눌러도 새로 0 · 코인 0 — 같은 id", rm2.ok && rm2.already === true && rm2.coinsCharged === 0 && rm2.pieceIds[0] === n(np?.id));
+    const fitsNo = await remakeVideoFor(tA, origin, "reels", null);
+    ok("🔴 대조군 · 이미 들어가는 채널(릴스)은 새로 안 만든다", !fitsNo.ok && fitsNo.step === "fits");
+    const ytl = await remakeVideoFor(tA, origin, "youtube_long", null);
+    ok("🔴 대조군 · 후보 밖(youtube_long)은 없는 길", !ytl.ok && ytl.step === "channel");
+
     console.log("\n⑤ 원본 다시 만들기 → 파생 멈춤 → 다시 승인하면 새 영상으로 갈아 끼움");
+    /* B2 가 자리를 박은 뒤라고 친다 — 파생 하나에 자리(시각 있음)를 붙여 두고, 멈출 때 그 시각이 비는지 본다(B2 요청). */
+    const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, piece_id, publish_at, status, origin)
+      VALUES (${tA}, (NOW() AT TIME ZONE 'Asia/Seoul')::date, 'tiktok', 'shorts', NULL, ${dIds[1]}, NOW() + interval '3 hours', 'scheduled', 'derived') RETURNING id`);
+    await q(sql`UPDATE pieces SET slot_id = ${n(sl?.id)}, scheduled_for = NOW() + interval '3 hours' WHERE id = ${dIds[1]}`);
     const held = await holdDerivedFor(tA, origin, "regenerate");
     ok("안 나간 파생 3개 멈춤(시각 NULL · waitOrigin)", held.length === 3);
+    const [sl2] = await q(sql`SELECT publish_at, status, note FROM slots WHERE id = ${n(sl?.id)}`);
+    const [pd2] = await q(sql`SELECT scheduled_for FROM pieces WHERE id = ${dIds[1]}`);
+    ok("🔴 그 파생의 자리도 시각이 빈다(상태는 그대로) — 편성표에 옛 시각이 안 남는다", sl2?.publish_at == null && sl2?.status === "scheduled" && pd2?.scheduled_for == null, `${String(sl2?.status)} · ${String(sl2?.note)}`);
     // 원본이 새로 구워졌다고 친다(finalizeRender 가 하는 일: 옛 video 행을 지우고 새 key)
     await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tA} AND piece_id = ${origin} AND kind IN ('video','thumb')`);
     await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tA}, ${origin}, 'video', ${`autocreate/${tA}/r18/origin-v2.mp4`}, ${jsonb({ durationMs: 60000 })}, 0)`);
@@ -140,9 +185,15 @@ async function main() {
     ok("설정 저장 한 번이면 asked", !!sB.askedAt && sB.on);
     const tyB = await q(sql`SELECT jsonb_typeof(settings) AS s, jsonb_typeof(settings->'videoReuse'->'channels') AS c FROM tenants WHERE id = ${tB}`);
     ok("settings 모양(PITFALLS #1) — object · channels array", tyB[0]?.s === "object" && tyB[0]?.c === "array");
+
+    console.log("\n⑧ 🔴 제공사 돈 — 코인 원장 0 ≠ 제공사 돈 0(메인 지적) · `ai_usage` 도 센다");
+    const ai = n((await q(sql`SELECT COUNT(*)::int AS c FROM ai_usage WHERE tenant_id IN (${tA}, ${tB})`))[0]?.c);
+    ok("시드 집 두 곳의 ai_usage = 0행(생성 호출 전에 멈췄다)", ai === 0, `${ai}행`);
+    const gen = n((await q(sql`SELECT COUNT(*)::int AS c FROM runner_jobs WHERE tenant_id IN (${tA}, ${tB})`))[0]?.c);
+    ok("렌더 잡 0건(러너가 구울 것도 없다)", gen === 0, `${gen}건`);
   } finally {
     for (const tid of [tA, tB]) {
-      for (const table of ["posts", "runner_jobs", "slots", "piece_assets", "pieces", "accounts", "notifications", "audit_logs", "coin_ledger"]) {
+      for (const table of ["posts", "runner_jobs", "slots", "piece_assets", "pieces", "briefs", "topics", "accounts", "notifications", "audit_logs", "coin_ledger", "ai_usage"]) {
         await q(sql`DELETE FROM ${sql.raw(table)} WHERE tenant_id = ${tid}`).catch(() => {});
       }
       await q(sql`DELETE FROM tenants WHERE id = ${tid}`).catch(() => {});
