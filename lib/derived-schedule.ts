@@ -351,8 +351,11 @@ export async function scheduleDerived(tid: number, originPieceId: number, opts: 
         (SELECT COUNT(*)::int FROM posts p WHERE p.account_id = a.id AND p.published_at > NOW() - interval '7 days') AS posts_this_week
       FROM accounts a WHERE a.tenant_id = ${tid} AND a.id = ${accountId}`) : [];
     if (!acc || String(acc.channel) !== channel || ["suspended", "disconnected"].includes(String(acc.status)) || paused.has(accountId)) {
-      res.waiting.push({ pieceId, channel,
-        say: `«${title}» 영상을 ${label}에 올릴 계정을 지금 쓸 수 없어 기다리고 있어요. 계정 화면에서 ${label} 계정을 확인해 주시면 자리가 나는 대로 올려 드려요.` });
+      const say = `«${title}» 영상을 ${label}에 올릴 계정을 지금 쓸 수 없어 기다리고 있어요. 계정 화면에서 ${label} 계정을 확인해 주시면 자리가 나는 대로 올려 드려요.`;
+      res.waiting.push({ pieceId, channel, say });
+      /* 새로 얹으려다 기다리는 것은 **까닭이 무엇이든 같은 칸**에 남긴다(`pieces-get meta.reuseWaiting` — 파생 화면이 한 자리에서 읽는다). */
+      if (!reseat) await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ reuseWaiting: { at: now.toISOString(), say } })}, updated_at = NOW()
+        WHERE tenant_id = ${tid} AND id = ${pieceId}`).catch(() => []);
       continue;
     }
     const warm = { openedAt: (acc.opened_at as string | null) ?? null, createdAt: (acc.created_at as string | null) ?? null, off: acc.warmup_off === true, postsThisWeek: n(acc.posts_this_week) };
