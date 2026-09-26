@@ -208,13 +208,25 @@ export function triageFresh(originChannel: string, siblingChannels: readonly str
 /* ═══════════════════════════ DB — 자리를 박는다 ═══════════════════════════ */
 
 /** 원본이 이 상태면 «시각이 있다» — 파생을 얹을 수 있다. 🔴 검수 전(generating·draft·in_review)·버린 원본(rejected)에는 안 얹는다. */
-const ORIGIN_READY: ReadonlySet<string> = new Set(["approved", "scheduled", "publishing", "published", "awaiting_manual", "failed", "pending_resume"]);
+/*   🔴 B 계약(dea5b50): «approved·scheduled·publishing·published 일 때만» — 원본을 **다시 만드는 사이**(generating·in_review) 옛 영상이 나가지 않게.
+ *   여기에 둘을 더 둔다(B 에게 알림): `awaiting_manual` — **클립 원본은 늘 여기로 간다**(러너 스텁 → «앱에서 올려 주세요»)라 빼면 클립 원본의 파생이 영영 안 얹힌다.
+ *   `pending_resume` — 쉬다 깬 원본(`releaseBacklog` 가 원본을 먼저 옮긴다). 🔴 `failed` 는 **뺐다** — 신고로 막힌 원본일 수 있다(`publishOne` takedown).
+ *   다시 만드는 중인 파생은 상태가 아니라 `meta.reuse.waitOrigin` 으로 가른다(`isUnplaced`). */
+const ORIGIN_READY: ReadonlySet<string> = new Set(["approved", "scheduled", "publishing", "published", "awaiting_manual", "pending_resume"]);
 /** 가족 시각으로 치지 않는 상태(안 나간다). */
 const NOT_GOING = ["failed", "rejected"] as const;
 /** 🔴 B 계약 v1.2 — 파생은 **이 상태 + 시각 없음**으로 태어난다. 크론이 줍는 조건도 이 둘이다. */
 export const UNPLACED_STATUS = "scheduled";
-/** 시각이 **아직 없는** 파생인가(= 우리가 얹어야 할 것). */
-export const isUnplaced = (f: Record<string, unknown>): boolean => String(f.status) === UNPLACED_STATUS && !f.scheduled_for;
+/** 원본을 **다시 만드는 중**이라 멈춰 둔 파생인가(B `holdDerivedFor("regenerate")` 가 찍는다 · 다시 승인되면 B 가 지우고 SEAM 으로 온다). */
+export const waitsOrigin = (f: Record<string, unknown>): boolean =>
+  ((((f.meta && typeof f.meta === "object" ? f.meta : {}) as Record<string, unknown>).reuse ?? {}) as Record<string, unknown>).waitOrigin === true;
+/**
+ * 시각이 **아직 없는** 파생인가(= 우리가 얹어야 할 것).
+ *   🔴 `waitOrigin` 인 파생은 **아니다** — 같은 «scheduled ∧ 시각 없음»이지만 원본을 다시 만드는 중이라, 지금 얹으면 **옛 영상**이 나간다(B dea5b50).
+ */
+export const isUnplaced = (f: Record<string, unknown>): boolean => String(f.status) === UNPLACED_STATUS && !f.scheduled_for && !waitsOrigin(f);
+/** SQL 판 — 크론이 줍는 조건. 🔴 `isUnplaced` 와 **같은 셋**이어야 한다(자 `verify-r18-stagger ⑤` 가 잰다). */
+export const UNPLACED_SQL = sql`status = ${UNPLACED_STATUS} AND scheduled_for IS NULL AND COALESCE(meta->'reuse'->>'waitOrigin', '') <> 'true'`;
 /** 시각을 다시 맞출 수 있는 상태 — 아직 안 나갔고(`publishing` 아님) 시각이 있는 것. */
 const RESEATABLE: readonly string[] = ["scheduled", "pending_resume"];
 
@@ -276,7 +288,7 @@ async function videoMsOf(tid: number, pieceId: number, originId: number): Promis
 /** 새서 닿은 파생을 `failed` 로 — 사유 한 줄 + 감사 high(조용히 넘기지 않는다). */
 async function dropDerived(tid: number, pieceId: number, originId: number, action: string, say: string, detail: Record<string, unknown>): Promise<void> {
   await q(sql`UPDATE pieces SET status = 'failed', meta = meta || ${jsonb({ failReason: say })}, updated_at = NOW()
-    WHERE tenant_id = ${tid} AND id = ${pieceId} AND status = ${UNPLACED_STATUS} AND scheduled_for IS NULL`);
+    WHERE tenant_id = ${tid} AND id = ${pieceId} AND ${UNPLACED_SQL}`);
   await writeAudit({ tenantId: tid, action, actorType: "system", riskLevel: "high", target: `piece:${pieceId}`,
     detail: { originPieceId: originId, note: "B reuseFit 이 걸렀어야 하는 파생이 편성까지 왔다(둘째 줄에서 잡음)", ...detail } }).catch(() => {});
 }
@@ -300,7 +312,7 @@ export async function scheduleDerived(tid: number, originPieceId: number, opts: 
   if (!originAt) return { ...res, ok: false, reason: "origin_not_ready" };
   const title = String(o.title ?? "영상").slice(0, 40);
 
-  const fam = await q(sql`SELECT id, channel, account_id, status, scheduled_for, published_at FROM pieces
+  const fam = await q(sql`SELECT id, channel, account_id, status, scheduled_for, published_at, meta FROM pieces
     WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} ORDER BY id`);
   const reseatIds = new Set((opts.reseat ?? []).map(n).filter((v) => v > 0));
   const todo = fam.filter((f) => isUnplaced(f) || (reseatIds.has(n(f.id)) && RESEATABLE.includes(String(f.status)) && !!f.scheduled_for));
@@ -384,8 +396,11 @@ export async function scheduleDerived(tid: number, originPieceId: number, opts: 
       const say = `«${title}» 영상을 ${label}에 올릴 자리를 아직 못 잡았어요 — 그 계정의 하루 몫이 앞으로 ${DERIVED_HORIZON_DAYS}일 동안 차 있어요. `
         + `하루 몫을 늘리시면 바로 잡아 드리고, 그대로 두셔도 자리가 나면 저절로 잡아 드려요.`;
       res.waiting.push({ pieceId: t.pieceId, channel: t.channel, say });
-      await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ reuseWaiting: { at: now.toISOString(), say, cadence: lastSay || null } })}, updated_at = NOW()
+      /* 파생 화면이 «왜 아직 시각이 없나»를 보여 줄 한 줄(`pieces-get meta.reuseWaiting`). 판정자의 원문은 감사에만 둔다(화면은 서버 문장 하나만). */
+      await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ reuseWaiting: { at: now.toISOString(), say } })}, updated_at = NOW()
         WHERE tenant_id = ${tid} AND id = ${t.pieceId}`).catch(() => []);
+      await writeAudit({ tenantId: tid, action: "reuse_waiting", actorType: "system", riskLevel: "low", target: `piece:${t.pieceId}`,
+        detail: { originPieceId, channel: t.channel, cadence: lastSay || null } }).catch(() => {});
       continue;
     }
     /* 박는다 — 🔴 **조건부 한 줄이 곧 멱등**이다(새것은 «`scheduled` ∧ 시각 없음» · 맞추는 것은 «`scheduled|pending_resume` ∧ 시각 있음» 일 때만).
@@ -394,7 +409,7 @@ export async function scheduleDerived(tid: number, originPieceId: number, opts: 
     const claimed = await q(sql`UPDATE pieces SET status = 'scheduled', scheduled_for = ${iso}::timestamptz AT TIME ZONE 'UTC',
         meta = (meta - 'reuseWaiting'), updated_at = NOW()
       WHERE tenant_id = ${tid} AND id = ${t.pieceId}
-        AND ${t.reseat ? sql`status IN (${statusListSql(RESEATABLE)}) AND scheduled_for IS NOT NULL` : sql`status = ${UNPLACED_STATUS} AND scheduled_for IS NULL`}
+        AND ${t.reseat ? sql`status IN (${statusListSql(RESEATABLE)}) AND scheduled_for IS NOT NULL` : UNPLACED_SQL}
       RETURNING id, slot_id, topic_id, brief_id`);
     if (!claimed.length) continue;   // 다른 손이 먼저 잡았다
     const c = claimed[0];
@@ -403,8 +418,9 @@ export async function scheduleDerived(tid: number, originPieceId: number, opts: 
     let slotId: number | null = n(c.slot_id) || null;
     try {
       if (slotId) {
-        /* 이미 자리가 있다(다시 맞추는 경우) — 새로 만들지 않고 그 자리를 옮긴다(편성표가 글과 같은 말을 하게). */
-        await q(sql`UPDATE slots SET status = 'scheduled', publish_at = ${iso}::timestamptz AT TIME ZONE 'UTC', slot_date = ${date}::date, updated_at = NOW()
+        /* 이미 자리가 있다(다시 맞추는 경우 · 원본을 다시 만든 뒤 다시 얹는 경우) — 새로 만들지 않고 그 자리를 옮긴다(편성표가 글과 같은 말을 하게).
+           🔴 문구도 새로 적는다 — 원본을 다시 만드는 동안 B 가 «다시 만드는 중»을 적어 둘 수 있고, 제목도 바뀌었을 수 있다. */
+        await q(sql`UPDATE slots SET status = 'scheduled', publish_at = ${iso}::timestamptz AT TIME ZONE 'UTC', slot_date = ${date}::date, note = ${note}, updated_at = NOW()
           WHERE tenant_id = ${tid} AND id = ${slotId}`);
       } else {
         const [s] = await q(sql`INSERT INTO slots (tenant_id, rule_id, slot_date, channel, kind, account_id, topic_id, brief_id, piece_id, publish_at, status, origin, note)

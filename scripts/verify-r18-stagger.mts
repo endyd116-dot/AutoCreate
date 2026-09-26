@@ -18,7 +18,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import {
-  staggerDerived, staggerClashes, morningOf, DERIVED_STAGGER_MIN, DERIVED_LEAD_MIN,
+  staggerDerived, staggerClashes, morningOf, isUnplaced, DERIVED_STAGGER_MIN, DERIVED_LEAD_MIN,
   type StaggerTarget, type StaggerPick,
 } from "../lib/derived-schedule";
 import { pickPublishAt, kstToUtc, kstDateStr, addDays, isNightHour, ACCOUNT_GAP_MIN, BEST_HOURS } from "../lib/best-time";
@@ -185,6 +185,10 @@ say("■ ③ `staggerClashes` — 깨진 쌍을 세는가");
   T.ok("③ 29분도 깨진 쌍이다(같은 분뿐 아니라 시차 안이면)", c2.length === 1);
   const c3 = staggerClashes([{ pieceId: 1, at: a }, { pieceId: 2, at: new Date(a.getTime() + 30 * 60_000) }]);
   T.ok("③ 딱 30분은 괜찮다(경계)", c3.length === 0);
+  /* 무엇을 «얹을 것»으로 보나 — B 계약 v1.2(scheduled ∧ 시각 없음) − waitOrigin(B dea5b50). */
+  T.ok("③ `isUnplaced` — «scheduled ∧ 시각 없음»은 얹을 것", isUnplaced({ status: "scheduled", scheduled_for: null, meta: {} }));
+  T.ok("③ `isUnplaced` — 🔴 원본을 다시 만드는 중(`waitOrigin`)이면 **아니다**(옛 영상이 나간다)", !isUnplaced({ status: "scheduled", scheduled_for: null, meta: { reuse: { waitOrigin: true } } }));
+  T.ok("③ `isUnplaced` — 시각이 있거나 다른 상태면 아니다", !isUnplaced({ status: "scheduled", scheduled_for: "2026-09-28T09:00:00Z", meta: {} }) && !isUnplaced({ status: "approved", scheduled_for: null, meta: {} }));
 }
 
 /* ═══ ④ 변이 — 검사기가 틀린 배치를 무는가 ═══ */
@@ -211,7 +215,7 @@ let mutantsCaught = 0; const MUTANTS = 3;
 
 /* ═══ ⑤ 경로 — 파생이 시각을 받는 모든 길이 가족을 보나 ═══ */
 say("■ ⑤ 경로 — 파생이 시각을 받는 **모든 길**이 가족을 본다");
-type Src = Record<"DS" | "PAUSE" | "SLOTS" | "REUSE" | "CRON" | "RUNNER", string>;
+type Src = Record<"DS" | "PAUSE" | "SLOTS" | "REUSE" | "CRON" | "RUNNER" | "PUB" | "ONE", string>;
 /** 🔴 판정식을 이름 붙여 뺐다 — ⑥ 변이가 **같은 식**을 변이된 소스에 다시 돌린다(식이 두 벌이면 변이가 다른 것을 잰다). */
 const PATH_RULES: { key: string; name: string; judge: (s: Src) => boolean | null }[] = [
   { key: "sd-order", name: "`scheduleDerived` 가 후보를 `staggerDerived` 에서 받고 **판정자 `checkCadenceAt`** 에게 묻는다",
@@ -219,7 +223,7 @@ const PATH_RULES: { key: string; name: string; judge: (s: Src) => boolean | null
   { key: "sd-family", name: "`scheduleDerived` 가 가족(원본 + 이미 잡힌 형제 + 이번에 잡은 것)을 넘긴다",
     judge: (s) => { const b = blockOf(s.DS, "export async function scheduleDerived(", ["\nexport async function restaggerFamily("])?.body; return b == null ? null : /family:\s*\[\.\.\.family,\s*\.\.\.placedTimes\]/.test(b); } },
   { key: "sd-claim", name: "박는 줄이 조건부(새것 «scheduled ∧ 시각 없음»)라 두 손이 와도 한 번만",
-    judge: (s) => { const b = blockOf(s.DS, "export async function scheduleDerived(", ["\nexport async function restaggerFamily("])?.body; return b == null ? null : /status = \$\{UNPLACED_STATUS\} AND scheduled_for IS NULL/.test(b); } },
+    judge: (s) => { const b = blockOf(s.DS, "export async function scheduleDerived(", ["\nexport async function restaggerFamily("])?.body; return b == null ? null : /: UNPLACED_SQL\}/.test(b) && /export const UNPLACED_SQL = sql`status = \$\{UNPLACED_STATUS\} AND scheduled_for IS NULL/.test(s.DS); } },
   { key: "pause", name: "깰 때(`releaseBacklog`) 파생을 `pickPublishAt` 루프에서 **빼고**, 원본을 다 옮긴 **뒤** `scheduleDerived(… reseat)` 로 얹는다",
     judge: (s) => { const b = blockOf(s.PAUSE, "export async function releaseBacklog(", ["\nexport "])?.body; return b == null ? null : /origin_piece_id/.test(b) && /for \(const p of plain\) await placeOne/.test(b) && /scheduleDerived\(tid, originId, \{ now, reseat:/.test(b) && (orderIn(b, /for \(const p of plain\)/, /scheduleDerived\(/)?.ok ?? false); } },
   { key: "reschedule", name: "옮길 때(`slots-reschedule`) `restaggerFamily` 로 깨진 파생만 다시 맞춘다(고객이 고른 글은 `keepPieceId`)",
@@ -227,13 +231,18 @@ const PATH_RULES: { key: string; name: string; judge: (s: Src) => boolean | null
   { key: "seam", name: "새로 만들 때(B `deriveVideoPieces` 끝 «B2 SEAM») `scheduleDerived` 를 부른다",
     judge: (s) => { const b = blockOf(s.REUSE, "export async function deriveVideoPieces(", ["\nexport async function "])?.body; return b == null ? null : /scheduleDerived\(tid, originPieceId\)/.test(b); } },
   { key: "cron-pick", name: "크론 `reuse.schedule` 이 B 계약 v1.2 줍는 조건 그대로 줍는다",
-    judge: (s) => /origin_piece_id IS NOT NULL AND status = \$\{UNPLACED_STATUS\} AND scheduled_for IS NULL/.test(s.CRON) },
+    judge: (s) => /origin_piece_id IS NOT NULL AND \$\{UNPLACED_SQL\}/.test(s.CRON) },
+  { key: "wait-origin", name: "원본을 **다시 만드는 중**인 파생(`meta.reuse.waitOrigin`)은 줍지도 박지도 않는다 — SQL 판·JS 판 둘 다(B dea5b50 · 옛 영상이 나가는 틈)",
+    judge: (s) => /UNPLACED_SQL = sql`[^`]*waitOrigin[^`]*<> 'true'`/.test(s.DS) && /export const isUnplaced = [^\n]*!waitsOrigin\(f\)/.test(s.DS) },
+  { key: "takedown-body", name: "발행 크론이 `p.body` 를 싣는다 → 신고 차단의 «같은 본문 해시»가 산다(파생은 원본 본문을 그대로 들고 태어난다)",
+    judge: (s) => { const due = blockOf(s.PUB, "const due = await q(sql`SELECT", ["FROM pieces p"])?.body; const one = blockOf(s.ONE, "export async function publishOne(", ["\n}\n"])?.body;
+      return due == null || one == null ? null : /\bp\.body\b/.test(due) && (orderIn(one, /takedownBlock\(tid, p\)/, /triggerVideoPublish\(/)?.ok ?? false); } },
   { key: "cron-reg", name: "그 크론이 `STEPS` 에 등록돼 있다(등록 안 된 스텝은 안 돈다 · PITFALLS #7)",
     judge: (s) => /\n\s*reuseScheduleStep,/.test(s.RUNNER) },
   { key: "const", name: "파생 시차 상수는 새 숫자가 아니라 `ACCOUNT_GAP_MIN` 에서 온다",
     judge: (s) => /export const DERIVED_STAGGER_MIN = ACCOUNT_GAP_MIN;/.test(s.DS) },
 ];
-const FILES_OF: Record<keyof Src, string> = { DS: "lib/derived-schedule.ts", PAUSE: "lib/tenant-pause.ts", SLOTS: "netlify/functions/slots.ts", REUSE: "lib/video/reuse.ts", CRON: "lib/cron/reuse-schedule.ts", RUNNER: "lib/cron/runner.ts" };
+const FILES_OF: Record<keyof Src, string> = { DS: "lib/derived-schedule.ts", PAUSE: "lib/tenant-pause.ts", SLOTS: "netlify/functions/slots.ts", REUSE: "lib/video/reuse.ts", CRON: "lib/cron/reuse-schedule.ts", RUNNER: "lib/cron/runner.ts", PUB: "lib/cron/publisher.ts", ONE: "lib/publish-one.ts" };
 const missing = Object.values(FILES_OF).filter((f) => !existsSync(f));
 const SRC: Src | null = missing.length ? null : Object.fromEntries(Object.entries(FILES_OF).map(([k, f]) => [k, stripComments(readFileSync(f, "utf8"))])) as Src;
 if (!SRC) T.unmeasured("⑤ 파일", `없다: ${missing.join(", ")}`);
@@ -246,6 +255,8 @@ let pathCaught = 0; const PATH_MUTANTS: { name: string; file: keyof Src; from: R
   { name: "옮길 때 형제를 안 본다(restaggerFamily 호출 삭제)", file: "SLOTS", from: /await restaggerFamily\([^)]*\)[^)]*\)/, to: "await Promise.resolve()", rule: "reschedule" },
   { name: "편성이 가족을 안 넘긴다(`family: []`)", file: "DS", from: /family: \[\.\.\.family, \.\.\.placedTimes\]/, to: "family: []", rule: "sd-family" },
   { name: "B2 SEAM 을 비운다(파생 만들고 안 얹음)", file: "REUSE", from: /await scheduleDerived\(tid, originPieceId\)/, to: "await Promise.resolve(null)", rule: "seam" },
+  { name: "줍는 SQL 에서 waitOrigin 조건을 뺀다", file: "DS", from: / AND COALESCE\(meta->'reuse'->>'waitOrigin', ''\) <> 'true'/, to: "", rule: "wait-origin" },
+  { name: "발행 크론이 본문을 다시 안 싣는다(`p.body` 삭제)", file: "PUB", from: /p\.scheduled_for, p\.body, /, to: "p.scheduled_for, ", rule: "takedown-body" },
 ];
 if (SRC) for (const m of PATH_MUTANTS) {
   /* 🔴 과녁이 살아 있나 먼저(AC-236) — 변이할 글자가 소스에 없으면 «울었다/안 울었다»가 아니라 **못 쟀다**다. */
@@ -262,5 +273,5 @@ counts["표본(①)"] = "11 표본 · 채널 5";
 const code = T.done("verify-r18-stagger");
 console.log("\n  ── 검산 수(무엇을 · 어디서 · 몇) ──");
 for (const [k, v] of Object.entries(counts)) console.log(`   · ${k}: ${v}`);
-console.log("   · 범위: 순수 함수(`lib/derived-schedule.ts staggerDerived`) + 경로 소스 6파일 — **DB 의 실제 가족 시각은 C 의 `verify-r18-one-video-many` 가 본다**");
+console.log(`   · 범위: 순수 함수(\`lib/derived-schedule.ts\` staggerDerived·isUnplaced) + 경로 소스 ${Object.keys(FILES_OF).length}파일 — **DB 의 실제 가족 시각은 C 의 \`verify-r18-one-video-many\` 가 본다**`);
 process.exit(code);

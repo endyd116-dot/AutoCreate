@@ -17,7 +17,7 @@
  */
 import { sql } from "drizzle-orm";
 import { q } from "../accounts";
-import { scheduleDerived, UNPLACED_STATUS } from "../derived-schedule";
+import { scheduleDerived, UNPLACED_SQL } from "../derived-schedule";
 import { NOOP, type CronStep, type StepOutcome, type TenantCtx } from "./base";
 
 const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
@@ -30,9 +30,10 @@ export const reuseScheduleStep: CronStep = {
   needsAutoSchedule: false,
   stopsWhenPaused: false,
   async run(ctx: TenantCtx): Promise<StepOutcome> {
-    /* 🔴 줍는 조건은 B 계약 v1.2 글자 그대로 — `origin_piece_id IS NOT NULL AND status = 'scheduled' AND scheduled_for IS NULL`. */
+    /* 🔴 줍는 조건은 B 계약 v1.2 그대로(`origin_piece_id IS NOT NULL AND status = 'scheduled' AND scheduled_for IS NULL`) + **`waitOrigin` 이 아닌 것**(B dea5b50 —
+       원본을 다시 만드는 중인 파생을 주우면 옛 영상이 나간다). 조건은 `UNPLACED_SQL` 한 벌이다(`isUnplaced` 와 같은 셋). */
     const rows = await q(sql`SELECT origin_piece_id AS o, MIN(id) AS first FROM pieces
-      WHERE tenant_id = ${ctx.tid} AND origin_piece_id IS NOT NULL AND status = ${UNPLACED_STATUS} AND scheduled_for IS NULL
+      WHERE tenant_id = ${ctx.tid} AND origin_piece_id IS NOT NULL AND ${UNPLACED_SQL}
       GROUP BY origin_piece_id ORDER BY MIN(id) LIMIT ${REUSE_SWEEP_MAX}`);
     if (!rows.length) return NOOP;
     let placed = 0, waiting = 0, dropped = 0, notReady = 0, deferred = 0, errors = 0;
