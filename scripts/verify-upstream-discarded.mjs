@@ -83,11 +83,62 @@ const rec = (step, ok, note) => { out.push({ ok }); console.log(`  ${ok ? "✓" 
 
 console.log(`\n«윗물이 만든 것을 아랫물이 버리나» · ${new Date().toISOString()}`);
 
+/**
+ * 🔴 [R18 · B · 2026-09-26] **깊이 0 의 키만 «meta 키»로 센다** — 이 자의 대용물 틈을 메웠다(AC-178 «이름을 붙이고 어느 쪽으로 틀리는지 적는다»).
+ *   재는 것: `jsonb({ … })` 안의 `이름:` / 뜻하는 것: **pieces.meta 의 최상위 칸**.
+ *   종전엔 여는 괄호부터 **첫 닫는 괄호까지** 잘라 그 안의 `이름:` 을 전부 셌다 ⇒ 두 쪽으로 틀렸다:
+ *     · 🔴 **중첩 객체의 칸을 최상위 칸처럼 셌다** — `reuseResult: { go: [...].map((c) => ({ channel, pieceId })) }` 의
+ *       go·channel·pieceId 가 «아무 데서도 안 읽는 칸»으로 빨갛게 나왔다. 부모 `reuseResult` 는 `pieces-get` 으로 화면까지 가는데도(B2 가 R18 에서 잡았다).
+ *       위 INTERNAL 의 `at`·`count`·`field`·`why`·`say` 도 사실은 이 틈을 막으려고 넣은 **중첩 칸 이름**이다.
+ *     · **첫 닫는 괄호 뒤의 최상위 칸은 아예 못 셌다**(놓치는 쪽).
+ *   ⇒ 여는 괄호부터 **짝이 맞는** 닫는 괄호까지 훑고, 깊이 2 이상과 따옴표 안의 `:` 는 공백으로 바꾼다.
+ *     🔴 **값 글자는 지우지 않는다** — ①의 «위험 낱말»(FINDING) 판정이 그 글자를 본다(중첩 안의 `issues` 도 그대로 보인다).
+ *   🔴 [C 반례 · 같은 날] 첫 판은 **펼침 안의 조건부 객체** `...(조건 ? { sponsored: true } : {})` 를 깊이 2 로 봐 `sponsored`·`refUnused` 를 **놓쳤다**
+ *      — 한쪽 틈을 메우며 반대쪽 틈을 새로 냈다. 최상위의 `...(` 와 그 갈래의 `{` 는 **깊이를 안 올린다**(투명)로 고쳤다.
+ *   ⚠️ 글자 훑기다(파서 아님) — 틀리는 방향을 적어 둔다:
+ *      · 놓치는 쪽: **템플릿 안의 템플릿** · **정규식 리터럴 안 괄호** · 펼침이 변수(`...extra`)면 그 안의 키는 못 본다(값이 이 자리에 없다)
+ *      · 오탐 쪽: 최상위(투명 밖)의 삼항 `a ? b : c` 는 b 를 키로 셀 수 있다(지금 meta 쓰기엔 0곳)
+ */
+function keysSource(s, m) {
+  const open = m.index + m[0].indexOf("jsonb({") + "jsonb(".length;
+  const BS = String.fromCharCode(92);
+  const WS = new Set([" ", String.fromCharCode(9), String.fromCharCode(10), String.fromCharCode(13)]);
+  const prevNonSpace = (i) => { let j = i - 1; while (j >= 0 && WS.has(s[j])) j--; return j; };
+  const stack = [];   // { c, t } — t = «투명»(깊이를 안 올린다): 최상위의 `...(` 와 그 갈래의 `{`
+  let depth = 0, q = "", out = "";
+  for (let i = open; i < s.length; i++) {
+    const c = s[i];
+    if (q) { out += c === ":" ? " " : c; if (c === q && s[i - 1] !== BS) q = ""; continue; }
+    if (c === "'" || c === '"' || c === "`") { q = c; out += c; continue; }
+    const top = stack[stack.length - 1];
+    if (c === "{" || c === "(" || c === "[") {
+      const j = prevNonSpace(i);
+      /* [C 반례 · 2026-09-26] `...(조건 ? { sponsored: true } : {})` — 펼침 안의 조건부 객체는 **meta 최상위**로 들어간다.
+         그 `(` 와 갈래의 `{` 를 깊이로 치면 `sponsored`·`refUnused` 같은 진짜 최상위 칸을 놓친다(놓치는 쪽). */
+      const spreadParen = c === "(" && depth === 1 && s.slice(j - 2, j + 1) === "...";
+      const armBrace = c === "{" && !!top && top.t && top.c === "(" && (s[j] === "?" || s[j] === ":");
+      const t = spreadParen || armBrace;
+      stack.push({ c, t });
+      if (t) { out += ","; continue; }
+      depth++; if (depth > 1) out += c; continue;
+    }
+    if (c === "}" || c === ")" || c === "]") {
+      const e = stack.pop();
+      if (e && e.t) { out += ","; continue; }
+      depth--; if (depth === 0) break; out += c; continue;
+    }
+    /* 투명 `(` 바로 안의 삼항 기호는 칸 구분으로 — 안 그러면 `: {}` 앞 낱말(`true`)을 키로 센다 */
+    if (top && top.t && top.c === "(" && (c === "?" || c === ":")) { out += ","; continue; }
+    out += (c === ":" && depth > 1) ? " " : c;
+  }
+  return out;
+}
+
 /* 쓰는 키 모으기 */
 const written = new Map();
 for (const [f, s] of CODE) {
   for (const m of s.matchAll(/meta\s*=\s*(?:\([^)]*\)\s*\|\|\s*)?meta?\s*\|\|\s*\$\{jsonb\(\{([^}]*)\}/g)) {
-    for (const km of m[1].matchAll(/(\w+)\s*:\s*([^,]*)/g)) {
+    for (const km of keysSource(s, m).matchAll(/(\w+)\s*:\s*([^,]*)/g)) {
       const k = km[1];
       const v = (km[2] || "").slice(0, 120);
       const prev = written.get(k) ?? { files: new Set(), vals: [] };

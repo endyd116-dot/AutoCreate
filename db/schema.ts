@@ -1291,3 +1291,18 @@ export const channelRegistryR17 = {
   /** 운영자가 손으로 넣는 «수익 관련 사실» — 지금은 `clipOpen:{from,to}`(클립 모집창 · KST 날짜). 읽는 곳 `lib/ad-eligibility.ts clipWindow()`. */
   monetizeMeta: jsonb("monetize_meta").notNull().default({}),
 };
+
+/* === R18 · 한 번 만들어 여러 곳에(영상 재사용 · B · 2026-09-26 · drizzle/0088-r18-piece-origin.sql) ===
+ *   사장님(2026-09-24): «쇼츠로 만든 영상을 릴스·클립에도 똑같이 올려서 한 영상으로 최대 효율을 뽑자»
+ *   `pieces` 는 `account_id`·`channel` 이 각 하나(1:1)라 N곳 = piece N개다. 그 N개가 «같은 영상에서 왔다»를 적을 칸이 없었다.
+ *
+ *   🔴 위 `pieces`(Phase 0) 정의는 **그대로 둔다** — 다른 라운드 정의를 덮지 않는다(§4.4 append-only).
+ *      `tenantsAc220` 과 같은 관례로 «칸이 있다»를 여기 적는다. 질의는 전부 raw `sql`(`lib/video/reuse.ts`).
+ *   🔴 `origin`(auto|manual|self · 만들어진 길)과 **다른 칸**이다 — 이름이 닮아 섞기 쉽다.
+ *   인덱스: `pieces_origin_piece_idx (tenant_id, origin_piece_id)` · 🔴 `pieces_origin_channel_uq (origin_piece_id, channel)`
+ *          — 둘 다 `WHERE origin_piece_id IS NOT NULL`. 유니크가 «한 원본 → 한 채널 파생 하나»(멱등)의 정본이다.
+ */
+export const piecesR18 = {
+  /** 원본 piece id. 🔴 **NULL = 원본(또는 무관)** · 값이 있으면 파생 — 원본과 같은 `r2_key` 를 가리키고 코인 원장에 **0행**(§4.7 승계 무료). */
+  originPieceId: bigint("origin_piece_id", { mode: "number" }),
+};

@@ -49,8 +49,11 @@ export const CUSTOM_DOMAIN_CHANNELS: ReadonlySet<string> = new Set(["wordpress",
 /** 화면 문구용 채널 이름(사람말 · CLAUDE §3 «시스템 용어 금지»). */
 export const CHANNEL_LABEL_KO: Readonly<Record<string, string>> = {
   naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거",
-  wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "릴스",
+  wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "인스타 릴스",
   youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡",
+  /* [R18 · B] 🔴 `facebook_reels` 가 한 영상 여러 곳의 대상이 되면서 «릴스»가 **둘**이 됐다 — 그래서 `reels` 를 «인스타 릴스»로 갈랐다.
+     «릴스» 한 낱말로 두면 «릴스 ✅ · 페이스북 릴스 —» 가 같은 곳처럼 읽힌다(트리거 §1 의 모양도 «인스타 릴스»다). */
+  facebook_reels: "페이스북 릴스",
 };
 export function channelLabelKo(channel: unknown): string { return CHANNEL_LABEL_KO[String(channel ?? "")] ?? String(channel ?? "채널"); }
 
