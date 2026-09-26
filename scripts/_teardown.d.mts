@@ -6,9 +6,9 @@
  */
 
 /** 보존 테넌트 — 집은 절대 지우지 않는다(이번 실행 산출물만). */
-export const PROTECT: Set<number>;
-export const ARTIFACT_TABLES: string[];
-export const KEEP_TABLES: Set<string>;
+export declare const PROTECT: Set<number>;
+export declare const ARTIFACT_TABLES: string[];
+export declare const KEEP_TABLES: Set<string>;
 
 /** 하니스 끝(성공·실패·예외 모두)에서 부른다. 🔴 절대 던지지 않는다. `sql` 은 postgres-js 태그(모양을 여기서 좁히지 않는다). */
 export function teardownRun(
