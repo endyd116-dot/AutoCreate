@@ -332,7 +332,9 @@ export interface Slot { id: number; date: string; channel: string; kind: string;
    *      **«그래도 이 시각»** 과 **«시각 바꾸기»**(되돌릴 길)를 같이 준다.
    *   🔴 겹치는 게 없으면 **키 자체를 안 싣는다**(빈 문장을 내려보내 화면이 빈 줄을 그리지 않게).
    */
-  crowd?: Crowd }
+  crowd?: Crowd;
+  /** [R18 · B2] 이 자리의 글이 한 영상의 **파생**이면 원본 piece id(`pieces.origin_piece_id`). 🔴 `origin` 은 그대로 auto|manual 이다 — 파생 자리의 `slots.origin` 은 `derived` 지만 화면 어휘를 늘리지 않고 이 칸으로 가른다. */
+  reuseOf?: number }
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -386,7 +388,7 @@ export async function listSlots(tid: number, from: string, to: string, now = new
      ⇒ `pieces` 를 조인해 **글 제목을 같이 싣는다.** 🔴 `topicTitle` 은 **안 덮는다** —
         그건 «무엇을 쓰기로 했나»라는 **다른 뜻**이고, 화면의 판정(`can.make`·«먼저 소재를 정해 주세요»)이 그 값을 쓴다.
         둘 다 뜻이 있으니 둘 다 보낸다(하나로 뭉치는 것이 답이 아니다). 고르는 규칙은 `Slot.title` 주석에 못 박았다. */
-  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title, pc.title AS piece_title,
+  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title, pc.title AS piece_title, pc.origin_piece_id AS reuse_of,
       (SELECT SUM(rd.amount_krw)::int FROM revenue_daily rd WHERE rd.tenant_id = s.tenant_id AND rd.piece_id = s.piece_id) AS revenue_krw
     FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
       LEFT JOIN pieces pc ON pc.id = s.piece_id AND pc.tenant_id = s.tenant_id
@@ -401,6 +403,8 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     /* 🔴 글이 걸려 있으면 **그 글의 제목**을 싣는다(손님이 고친 그 이름). 없으면 키를 안 싣는다. */
     if (r.piece_title) o.title = String(r.piece_title);
     if (r.piece_id) o.pieceId = n(r.piece_id);
+    /* [R18 · B2] 이 자리의 글이 **다른 영상에서 온 파생**이면 그 원본 id(화면이 «쇼츠 영상을 여기에도» 로 묶어 보인다). 원본·보통 글엔 키를 안 싣는다. */
+    if (r.reuse_of) o.reuseOf = n(r.reuse_of);
     if (r.note) o.note = String(r.note).slice(0, 300);
     if (r.revenue_krw !== null && r.revenue_krw !== undefined) o.revenueKrw = n(r.revenue_krw);
     const [y, m, d] = o.date.split("-").map(Number);

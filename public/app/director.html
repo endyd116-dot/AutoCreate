@@ -21,8 +21,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=31"></script>
-<script src="/js/mock.js?v=32"></script>
+<script src="/js/ui.js?v=32"></script>
+<script src="/js/mock.js?v=33"></script>
 <script>
 (async () => {
 const me = await UI.boot("create"); if (!me) return;
@@ -35,8 +35,37 @@ const kstAt = (dayOffset, hhmm) => { const [h, m] = hhmm.split(":").map(Number);
 const dayWord = (iso) => { const d = UI.utc(iso); const t = new Date(); const k = (x) => new Date(x.toLocaleString("en-US", { timeZone: "Asia/Seoul" })).toDateString(); const diff = Math.round((new Date(k(d)) - new Date(k(t))) / 86400e3); return diff === 0 ? "오늘" : diff === 1 ? "내일" : diff === 2 ? "모레" : UI.dateKST(iso); };
 const isVideo = (p) => p.kind === "video";
 /* 길이 칩 = 그 채널 × 그 포맷의 상한까지만(서버가 준 숫자 · 화면 상수 0) · 상한이 60 미만이면 왜 그런지 한 줄 */
-const secChips = (p) => { const m = fmtMax(p.channel, p.video.format); const list = UI.VSECONDS.filter((s) => s <= m);
-  return UI.chips("vsec", list.map((s) => [s, s + "초"]), Math.min(p.video.seconds, m)) + (m < 60 ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))} · ${UI.esc(UI.VFORMAT[p.video.format] || p.video.format)}은 ${m}초까지 올라가요 · 60초는 유튜브 쇼츠 그래픽에서요</p>` : ""); };
+const secChips = (p) => { const m = fmtMax(p.channel, p.video.format); const list = UI.VSECONDS.filter((s) => s <= m); const cur = Math.min(p.video.seconds, m);
+  return UI.chips("vsec", list.map((s) => [s, s + "초"]), cur) + (m < 60 ? `<p class="muted" style="margin:6px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))} · ${UI.esc(UI.VFORMAT[p.video.format] || p.video.format)}은 ${m}초까지 올라가요 · 60초는 유튜브 쇼츠 그래픽에서요</p>` : "")
+    + `<div data-reuse>${reuseSay(p, cur)}</div>`; };
+/* ═══ [R18 · A] 한 번 만들어 여러 곳에 — 🔴 **길이를 고르는 그 자리에서 «몇 곳»을 먼저 말한다**(트리거 §1 ②) ═══
+   빠진 걸 영상이 다 된 뒤에 알면 늦다 — 그땐 코인이 이미 나갔고, 30초로 다시 만들면 **또 낸다**(§9 ① «또렷하게»).
+   🔴 «몇 곳»·빠지는 곳·그 문장은 **서버가 준다**(director-propose 영상 piece 의 `reuseFit: ReuseFit[]`·`reuseBasis` · B 계약 R18 v1).
+      화면은 세지 않는다 — 길이마다 온 `places` 를 한 줄로 **묶기만** 한다(UI.reusePlaces). 채널·초 표 0(AC-52).
+   🔴 `reuseBasis`: chosen = 켜 뒀다(고른 곳으로 셈) · all = 아직 안 물었다(연결된 후보로 셈) · off = 물었고 껐다 → **안 그린다**.
+      모르는 값·칸 없음도 안 그린다(«한 곳»이라고 지어내지 않는다 · AC-9).
+   🔴 막지 않는다(§9) — 60초를 골라도 된다. 무엇이 빠지는지만 말한다(서버 `skip[].line` 글자 그대로 · §3 말투는 서버 문장이 맡는다). */
+const fitsOf = (p) => (Array.isArray(p.reuseFit) ? p.reuseFit : []);
+const fitAt = (p, sec) => fitsOf(p).find((f) => Number(f.seconds) === Number(sec)) || null;
+const reuseOn = (p) => p.reuseBasis === "chosen" || p.reuseBasis === "all";
+function reuseSay(p, sec) {
+  if (!reuseOn(p)) return "";
+  const secs = UI.VSECONDS.filter((s) => s <= fmtMax(p.channel, p.video.format));
+  const line = UI.reusePlaces(fitsOf(p).filter((f) => secs.includes(Number(f.seconds))).sort((a, b) => a.seconds - b.seconds), sec); if (!line) return "";
+  /* 🔴 여기선 **길이 때문에 빠지는 것(too_long)만** 말한다 — 길이 칩 옆이라 길이로 바뀌는 것만 이 자리의 말이다.
+     계정 연결 전(no_account)은 길이를 바꿔도 안 바뀐다 → 설정·검수 화면의 몫이다(한 자리에 두 가지를 섞으면 «30초로 바꾸면 틱톡도 된다»로 읽힌다). */
+  const long = ((fitAt(p, sec) || {}).skip || []).filter((s) => s.why === "too_long" && s.line);
+  /* 켜 둔 집은 «올라가요»(사실) · 아직 안 물은 집은 «올리면»(가정 — 첫 영상이 다 되면 한 번 여쭌다 · 트리거 §1 ①) */
+  return `<p class="muted" style="margin:6px 0 0;font-size:12.5px;line-height:1.6">${p.reuseBasis === "chosen" ? "여러 곳에 올라가요" : "다른 곳에도 올리면"} · ${line}${long.map((s) => `<br>${UI.esc(s.line)}`).join("")}</p>`;
+}
+/** 켜 둔 집의 디렉터 한 줄 — «세 곳에 올려요» + 지금 길이에서 빠지는 곳. 켠 집(chosen)만 — 아직 안 물은 집에 «N곳에 올려요»라고 단정하지 않는다.
+    🔴 **맨글자**를 돌려준다 — 받는 쪽(`desc` → drawTargets)이 `UI.esc` 로 한 번 싼다. 여기서도 싸면 두 번 싸인다. */
+function reuseRow(p) {
+  if (p.reuseBasis !== "chosen") return "";
+  const sec = Number(p.video?.seconds); const f = fitAt(p, sec); if (!f || !(Number(f.places) > 1)) return "";
+  const long = (f.skip || []).filter((s) => s.why === "too_long");
+  return `${UI.places(Number(f.places))}에 올려요${long.map((s) => ` · ${s.label}${UI.josa(s.label)} ${sec}초라 빠져요`).join("")}`;
+}
 /* [P1R6] 채널별 영상 상한은 서버가 말한다(accounts-list.channels[].video.maxSeconds · 화면 상수 금지) */
 let CHV = {};
 const vfmts = (ch) => (CHV[ch] && CHV[ch].formats) || [];                               // [{key,label,maxSeconds}] — 이 채널에서 되는 포맷
@@ -52,7 +81,7 @@ const cost = (p) => isVideo(p) ? (UI.VIDEO_COIN[p.video?.seconds] ?? p.coinCost 
   : (typeof p.coinCost === "number" ? p.coinCost : null);
 const coinSay = (n) => (typeof n === "number" ? `${UI.num(n)}코인` : "코인 확인 중");
 const total = () => pieces.filter((p) => !p.drop).reduce((a, p) => a + (cost(p) || 0), 0);
-const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null].filter(Boolean).join(" · ")
+const desc = (p) => isVideo(p) ? [UI.vlabel(p.video), `훅 «${UI.vword(p.video, "hook")}»`, `${cost(p)}코인`, p.monetize?.affiliate ? "제휴 링크 · 배지" : null, reuseRow(p) || null].filter(Boolean).join(" · ")   /* [R18] 코인은 한 번 — «N곳»이 늘어도 코인 칸은 그대로다 */
   /* [R8 · 사장님 승인] 🔴 **사진 장수와 «AI 로 굽는 장수»는 다른 질문**이다 — 장수는 공짜(내 사진·스톡이 채운다), AI 로 구운 장만 돈이다.
      «사진 6장»만 적으면 고객은 «6코인이겠지»로 읽는다(그게 옛 값이었다). 그래서 AI 장수를 따로 적는다. */
   : [p.tier && UI.TIER_LABEL[p.tier] ? `${UI.TIER_LABEL[p.tier]} · ${coinSay(cost(p))}` : coinSay(cost(p)), UI.FORMAT[p.format] || p.format, p.images?.count ? `사진 ${p.images.count}장${p.images.aiCount != null ? `(AI ${p.images.aiCount}장)` : ""}` : "사진 없음", p.monetize?.affiliate ? "제휴 링크" : (p.channel === "tistory" || p.channel === "blogger" || p.channel === "wordpress") ? "애드센스 자리" : null].filter(Boolean).join(" · ");
@@ -116,8 +145,10 @@ function editSheet() {
   UI.sheet((clamped ? `<div class="banner" style="margin:0 0 8px"><span>${clamped.now}초로 맞췄어요 — 이 채널은 ${clamped.now}초까지 올라가요</span></div>` : "") + html + `<div class="cta"><button class="btn primary" type="button" id="apply">적용 · <span id="sum">${total()}</span>코인</button></div>`, { title: "손보기", onOpen: (sh, close) => {
     UI.bindSteppers(sh, () => sum(sh)); UI.bindChips(sh, (n, v, g) => {
       if (n === "tier" || n === "wstyle" || n === "fmt") sum(sh);   /* [R9R10-A] 등급·구성이 바뀌면 서버 견적을 다시 받는다 */
-      if (n === "vfmt") { const sec = g.closest("section"); const p = pieces[Number(sec.dataset.i)]; p.video.format = v; const w = sec.querySelector("[data-secwrap]"); if (w) { w.innerHTML = secChips(p); UI.bindChips(w, (n2, v2) => { if (n2 === "vsec") { const c = UI.VIDEO_COIN[Number(v2)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; sum(sh); } }); const cur = Number(UI.chipVal(w, "vsec")); sec.querySelector("[data-vcoin]").textContent = UI.VIDEO_COIN[cur] ?? 0; sum(sh); } }
-      if (n === "vsec") { const sec = g.closest("section"); const c = UI.VIDEO_COIN[Number(v)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; const cur = pieces[Number(sec.dataset.i)]; const hint = sec.querySelector("[data-vhint]"); hint.textContent = Number(v) !== cur.video.seconds ? `${cur.video.seconds}초 ${cost(cur)}코인 → ${v}초 ${c}코인` : ""; sum(sh); } });
+      /* [R18] 길이·포맷을 바꾸면 «몇 곳» 줄도 **그 자리에서** 다시 말한다(굵은 묶음 · 빠지는 곳). 포맷은 고를 수 있는 길이를 바꾼다(클립형 30초). */
+      const reSay = (sec, secV) => { const p = pieces[Number(sec.dataset.i)]; const box = sec.querySelector("[data-reuse]"); if (box) box.innerHTML = reuseSay({ ...p, video: { ...p.video, format: UI.chipVal(sec, "vfmt") || p.video.format } }, Number(secV)); };
+      if (n === "vfmt") { const sec = g.closest("section"); const p = pieces[Number(sec.dataset.i)]; p.video.format = v; const w = sec.querySelector("[data-secwrap]"); if (w) { w.innerHTML = secChips(p); UI.bindChips(w, (n2, v2) => { if (n2 === "vsec") { const c = UI.VIDEO_COIN[Number(v2)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; reSay(sec, v2); sum(sh); } }); const cur = Number(UI.chipVal(w, "vsec")); sec.querySelector("[data-vcoin]").textContent = UI.VIDEO_COIN[cur] ?? 0; reSay(sec, cur); sum(sh); } }
+      if (n === "vsec") { const sec = g.closest("section"); const c = UI.VIDEO_COIN[Number(v)] ?? 0; sec.querySelector("[data-vcoin]").textContent = c; const cur = pieces[Number(sec.dataset.i)]; const hint = sec.querySelector("[data-vhint]"); hint.textContent = Number(v) !== cur.video.seconds ? `${cur.video.seconds}초 ${cost(cur)}코인 → ${v}초 ${c}코인` : ""; reSay(sec, v); sum(sh); } });
     sh.querySelectorAll("section").forEach((sec) => {
       const body = sec.querySelector("[data-body]"); const tg = sec.querySelector("[data-drop]");
       UI.toggle(tg, (on) => { body.hidden = !on; sum(sh); });

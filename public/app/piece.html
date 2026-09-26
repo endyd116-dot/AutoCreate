@@ -16,6 +16,8 @@
 <div class="row" id="head" style="padding-left:4px;padding-right:4px"><span class="sk" style="width:100%;height:40px"></span></div>
 <article class="preview" id="pv" hidden><h1 id="ttl"></h1><div class="by" id="by"></div><div id="body"></div></article>
 <div id="vpane" hidden></div>
+<!-- [R18 · A] 한 번 만들어 여러 곳에 — 원본: «60초로 만든 영상 · 쇼츠 ✓ 릴스 ✓ … 클립 — 한 줄»(트리거 §1 ②) · 파생: «이 영상은 … 에서 왔어요» -->
+<div class="group" id="reuse" hidden></div>
 <div class="group" id="why" hidden></div>
 <div class="group" id="comp" hidden></div>
 <div class="group" id="photos" hidden></div>
@@ -34,8 +36,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=31"></script>
-<script src="/js/mock.js?v=32"></script>
+<script src="/js/ui.js?v=32"></script>
+<script src="/js/mock.js?v=33"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -405,18 +407,146 @@ function renderTeamWait() {
     + `<p class="muted" style="margin:0 16px 10px;font-size:13px">${UI.esc(teamWait)}</p>`
     + '<p class="muted" style="margin:0 16px 12px;font-size:12.5px">이 글은 «봐주세요»에 그대로 있어요. 고치실 것이 있으면 지금 고쳐 두시면 돼요.</p>';
 }
+/* ═══ [R18 · A] 한 번 만들어 여러 곳에 — 검수 화면 ═════════════════════════════════════════════
+   🔴 사장님 결정(2026-09-26): ① 처음 한 번 묻고 그 뒤론 자동 ② 길이가 안 맞는 채널만 빼고 왜 뺐는지 말해 준다(코인은 한 번).
+   모양은 트리거 §1 그대로 — 원본은 «N초로 만든 영상» 아래 채널마다 한 줄(올라가요 / — 한 줄), 파생은 «어디서 왔나» 한 줄.
+   🔴 말·수는 **전부 서버 것**(`P.reuse` · B 계약 R18 v1): fit.go·fit.skip[].line/how·derived[]·skipped[]·origin·line.
+      화면은 세지도 짓지도 않는다(AC-52) — 빠진 채널 문장(«이 영상은 60초라 …») 도 서버 글자 그대로다(알림도 같은 문장을 쓴다).
+   🔴 처음 한 번 묻기(`reuse.ask`) — «이대로 예약»을 누르는 그 자리에서 **바텀시트**로 묻는다(팝업 모달 금지 · §13.0).
+      채널 칸은 **기본 꺼짐**(트리거 §1 ① «고객이 내가 켰다를 알아야 한다») · «앞으로도 이렇게 할게요»만 기본 켬.
+      이번 영상에 안 맞는 채널(too_long · no_account)도 **고를 수 있다** — 앞으로의 영상에 쓰이고, 이번엔 왜 빠지는지 그 줄에 적혀 있다(② 모양이 바로 그것).
+      답은 `pieces-reuse` 먼저 → `pieces-approve`(B 계약 순서). 🔴 묻기가 안 되면 **예약은 그대로 간다**(§9 — 묻는 것이 예약을 막으면 안 된다).
+   🔴 자동 승인 경로(사람이 이 화면을 안 본다)는 서버 알림(`video_reuse_ask`)이 `?reuse=ask` 로 이 시트를 연다(§9 ② «사람이 안 보는 경로에서도 닿게»). */
+const isDerived = () => !!(P && P.reuse && P.reuse.role === "derived");
+/** 시트에 그릴 후보 — 들어가는 곳(go) 먼저, 그다음 이번엔 빠지는 곳(skip). 둘 다 서버가 준 목록이다(원본 채널·유튜브 가족은 서버가 이미 뺐다). */
+function reuseCands() { const f = (P.reuse && P.reuse.fit) || {}; return [...(f.go || []).map((g) => ({ ...g, why: null })), ...(f.skip || [])]; }
+const skipSub = (s) => `${UI.esc(s.line || "")}${s.how ? `<br>${UI.esc(s.how)}` : ""}`;
+function reuseRowHtml(ch, label, sub, right, href, wrapTitle, extra) {   /* wrapTitle = 제목 자리에 서버 문장이 오는 줄(파생 «… 에서 왔어요 · 코인은 더 안 들어요») — 말줄임으로 자르지 않고 두 줄까지 · extra = 줄 안에 붙는 단추(링크 줄엔 안 쓴다) */
+  const inner = `${UI.mark(ch)}<div class="l"><span class="t${wrapTitle ? " wrap" : ""}">${UI.esc(label)}</span>${sub ? `<span class="d wrap">${sub}</span>` : ""}${extra || ""}</div>${right}`;
+  return href ? `<a class="row tap" href="${href}">${inner}</a>` : `<div class="row">${inner}</div>`;
+}
+const stPill = (s) => { const st = UI.PIECE_STATUS[s] || ["off", s]; return `<span class="pill ${st[0]}">${UI.esc(st[1])}</span>`; };
+function renderReuse() {
+  const host = UI.$("#reuse"); const R = P.reuse;
+  if (P.kind !== "video" || !R || typeof R !== "object") { host.hidden = true; return; }
+  if (R.role === "derived") {   /* ④ 파생 — 어디서 왔나 한 줄(서버 문장) + 원본으로 가는 길 */
+    const o = R.origin || {}; host.hidden = !R.line;
+    /* [R18 · B2 계약] «예약됨 · 시각 잡는 중»이 **왜 오래 가나** — `meta.reuseWaiting.say`(서버 문장 ①사실 ②어떻게 ③우리가 대신). 자리가 잡히면 서버가 키를 지운다.
+       🔴 없으면 아무것도 안 그린다(«곧 잡혀요» 같은 말을 지어내지 않는다 · AC-9). */
+    const w = P.meta && P.meta.reuseWaiting && typeof P.meta.reuseWaiting.say === "string" ? P.meta.reuseWaiting.say : "";
+    host.innerHTML = reuseRowHtml(o.channel || P.channel, R.line || "", o.pieceId ? "원본 영상 보기" : "", o.pieceId ? UI.chev : "", o.pieceId ? `/app/piece.html?id=${Number(o.pieceId)}` : "", true)
+      + (w && !P.scheduledFor ? `<p class="muted" style="margin:0 16px 12px;font-size:12.5px;line-height:1.6">${UI.esc(w)}</p>` : "");
+    return;
+  }
+  if (R.role !== "origin") { host.hidden = true; return; }
+  const derived = Array.isArray(R.derived) ? R.derived : [], skipped = Array.isArray(R.skipped) ? R.skipped : [], f = R.fit || {};
+  const editable = EDITABLE_ST.includes(P.status);
+  const me = reuseRowHtml(P.channel, UI.chLabel(P.channel), P.accountHandle ? "@" + UI.esc(P.accountHandle) : "", stPill(P.status));
+  /* [R18 · B v1.4 · 트리거 §6-6] 길이 때문에 빠진 곳(too_long)엔 서버가 `remake{seconds,coins}` 를 싣는다 — «그 채널용으로 짧게 하나 더 만드는 길».
+     🔴 **새 영상이라 코인이 든다** — 값을 단추에 **먼저** 적는다(누른 뒤에 알면 늦다). 누르면 한 번 더 묻는다(되돌릴 수 없는 돈 · 확인은 게이트가 아니다). */
+  /* [B v1.6] `connected:false` 면(그 채널 계정이 없다) 단추 대신 한 줄 — 눌러도 서버가 400 no_account 로 돌려보낼 단추는 그리지 않는다(없는 길) */
+  const remakeBtn = (s) => s.why === "too_long" && s.remake && s.connected === false ? `<span class="d wrap" style="margin-top:6px;color:var(--muted)">계정을 연결하시면 ${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds) || ""}초 영상도 만들 수 있어요</span>`
+    : s.why === "too_long" && s.remake && Number(s.remake.seconds) && Number.isFinite(Number(s.remake.coins))
+    ? `<button type="button" class="btn secondary sm" data-remake="${UI.esc(s.channel)}" data-rsec="${Number(s.remake.seconds)}" data-rcoin="${Number(s.remake.coins)}" data-rlabel="${UI.esc(s.label || UI.chLabel(s.channel))}" style="margin-top:8px;align-self:flex-start">${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds)}초로 하나 더 만들기 · ${UI.num(Number(s.remake.coins))}코인</button>` : "";
+  const skipRows = (list) => list.map((s) => reuseRowHtml(s.channel, s.label || UI.chLabel(s.channel), skipSub(s), '<span class="r mut">—</span>', "", false, remakeBtn(s))).join("");
+  let rows = "";
+  if (derived.length || skipped.length) {   /* 이미 나눴다 — 파생마다 제 상태·시각, 빠진 곳은 그 까닭 */
+    rows = me + derived.map((d) => reuseRowHtml(d.channel, d.label || UI.chLabel(d.channel), [d.handle ? "@" + UI.esc(d.handle) : "", UI.whenSay(d)].filter(Boolean).join(" · "), stPill(d.status), d.pieceId ? `/app/piece.html?id=${Number(d.pieceId)}` : "")).join("") + skipRows(skipped);   /* 시각이 아직 없으면 «시각 잡는 중»(B v1.2) */
+  } else if (editable && R.basis === "chosen" && ((f.go || []).length || (f.skip || []).length)) {   /* 켜 둔 집의 두 번째 영상부터 — 안 묻고, 예약하면 어디로 가는지만 먼저 보여 준다 */
+    rows = me + (f.go || []).map((g) => reuseRowHtml(g.channel, g.label || UI.chLabel(g.channel), "예약하면 같이 올라가요", '<span class="pill ok">같이 올라가요</span>')).join("") + skipRows(f.skip || []);
+  } else if (R.ask === true && !editable && reuseCands().length) {   /* 이미 예약·발행된 원본인데 아직 안 물었다(자동 승인 경로) — 여기서도 물을 수 있게 */
+    rows = `<button type="button" class="row tap" id="reuseAsk"><div class="l"><span class="t">다른 곳에도 올릴까요?</span><span class="d wrap">같은 영상이라 코인은 더 안 들어요</span></div>${UI.chev}</button>`;
+  }
+  /* [R18 · B v1.4] «짧게 하나 더»로 만든 새 영상이면(`meta.remakeOf` = 원래 영상 id) 어디서 왔는지 한 줄 — 🔴 파생이 아니다(코인을 따로 냈다) · 그래서 «코인은 안 들어요»라고 쓰지 않는다 */
+  const rmOf = Number(P.meta && P.meta.remakeOf) || 0;
+  const rmRow = rmOf ? reuseRowHtml(P.channel, `원래 영상을 ${Number(R.seconds) ? `${Number(R.seconds)}초로 ` : "짧게 "}다시 만든 영상이에요`, "원래 영상 보기", UI.chev, `/app/piece.html?id=${rmOf}`, true) : "";
+  if (!rows && !rmRow) { host.hidden = true; return; }
+  host.hidden = false;
+  host.innerHTML = `<div class="gt">${Number(R.seconds) ? `${Number(R.seconds)}초로 만든 영상` : "여러 곳에 올리기"}${rows ? ' <span class="muted" style="font-weight:500">같은 영상은 코인이 한 번만 들어요</span>' : ""}</div>${rmRow}${rows}`;
+  const b = UI.$("#reuseAsk"); if (b) b.onclick = () => reuseSheet(false);
+  host.querySelectorAll("[data-remake]").forEach((x) => { x.onclick = () => remakeSheet(x.dataset.remake, Number(x.dataset.rsec), Number(x.dataset.rcoin), x.dataset.rlabel); });
+}
+/* ═══ [R18 · B v1.4 · 트리거 §6-6] «그 채널용으로 짧게 하나 더 만들기» — POST /api/pieces-remake { id: 원본, channel } ═══
+   🔴 **새 영상이다**(파생 아님 · 코인이 든다) — 시트 제목·본문·단추 셋 다에 값을 적는다. 누르기 전에 안다.
+   응답: 202 새로 시작 · 200 `already` 이미 만든 적 있음(코인 0 · 같은 영상으로 데려간다) · 402 coin_short(얼마 모자란지 + 충전 길) · 400 그 밖(서버 문장 그대로). */
+let remaking = false;
+function remakeSheet(channel, sec, coins, label) {
+  UI.sheet(`<p class="muted" style="margin:0 0 8px">${UI.esc(label)}에 올릴 ${sec}초 영상을 새로 만들어요. 새 영상이라 ${UI.num(coins)}코인이 들어요.</p>
+    <p class="muted" style="margin:0 0 16px;font-size:12.5px">지금 영상은 그대로 올라가요.</p>
+    <div class="cta"><button class="btn primary" type="button" id="rmGo">${UI.num(coins)}코인으로 만들기</button></div>`,
+  { title: `${label}용 ${sec}초로 하나 더 만들까요?`, onOpen: (sh, close) => {
+    sh.querySelector("#rmGo").onclick = async (e) => {
+      const btn = e.currentTarget; if (remaking) return; remaking = true; btn.disabled = true;
+      const r = await UI.api("/api/pieces-remake", { body: { id, channel } }); remaking = false; btn.disabled = false;
+      if (r.gated) return close();
+      if (!r.ok) {
+        if (r.step === "coin_short") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${UI.num(r.have ?? 0)}코인이 있고 ${UI.num(r.need ?? coins)}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: `코인이 ${UI.num(Math.max(0, (r.need ?? coins) - (r.have ?? 0)))}개 부족해요` }); }
+        return UI.toast(r.error || "지금은 만들지 못했어요 · 잠시 뒤 다시 눌러 주세요");
+      }
+      close();
+      const nid = Array.isArray(r.pieceIds) && r.pieceIds.length ? Number(r.pieceIds[0]) : 0;
+      if (r.already) { UI.toast(`이미 만들어 둔 ${sec}초 영상이 있어요 · 코인은 안 들었어요`); if (nid) setTimeout(() => UI.go(`/app/piece.html?id=${nid}`), 900); return; }
+      /* `alsoTo` = 원본에서 길이 때문에 빠졌던 다른 채널 중 **새 길이에 들어가는 곳**(target 자신은 빠진다 · B 2026-09-26). 라벨은 원본 `reuse` 안의 서버 라벨로 잇는다(화면 표 아님). */
+      const R0 = P.reuse || {}, f0 = R0.fit || {}; const lab = {};
+      for (const x of [...(R0.skipped || []), ...(f0.skip || []), ...(f0.go || []), ...(R0.derived || [])]) if (x && x.channel && x.label) lab[x.channel] = x.label;
+      const places = [label, ...(Array.isArray(r.alsoTo) ? r.alsoTo : []).map((c) => lab[c] || UI.chLabel(c))];
+      UI.done(`${sec}초 영상을 만들기 시작했어요 · ${places.join("·")}에 올라가요`, () => UI.go(nid ? `/app/piece.html?id=${nid}` : "/app/pieces.html?tab=generating"));
+    };
+  } });
+}
+let reusing = false;
+/** ① «처음 한 번 묻기» 시트. approveAfter = 이 답 뒤에 이 영상을 예약한다(검수 중인 원본) · false = 이미 예약·발행된 원본(파생만 만든다). */
+function reuseSheet(approveAfter) {
+  const cands = reuseCands();
+  if (!cands.length) return approveAfter ? approve({ asked: true }) : undefined;   // 물을 곳이 없으면 묻지 않는다(빈 시트 금지)
+  const goSet = new Set(((P.reuse.fit || {}).go || []).map((g) => g.channel));
+  const NOTE_ON = "다음 영상부터는 묻지 않고 고른 곳에 올려요 · 설정에서 언제든 바꿀 수 있어요";
+  const NOTE_OFF = "이번 영상만 이렇게 해요 · 다음부터 여러 곳에 올리시려면 설정에서 켜 주세요";
+  UI.sheet(`<p class="muted" style="margin:0 0 12px">다른 곳에도 올릴까요? 같은 영상이라 코인은 더 안 들어요.</p>
+    <div class="group" style="margin:0 0 8px">${cands.map((c) => `<label class="row" style="cursor:pointer">${UI.mark(c.channel)}<div class="l"><span class="t">${UI.esc(c.label || UI.chLabel(c.channel))}</span>${c.why ? `<span class="d wrap">${skipSub(c)}</span>` : ""}</div><span class="chk" style="padding:0"><input type="checkbox" data-rch="${UI.esc(c.channel)}" aria-label="${UI.esc(c.label || UI.chLabel(c.channel))}에도 올리기"></span></label>`).join("")}</div>
+    <label class="chk"><input type="checkbox" id="rRemember" checked> <span>앞으로도 이렇게 할게요</span></label>
+    <p class="muted" id="rNote" style="margin:0 0 14px;font-size:12.5px">${NOTE_ON}</p>
+    <div class="cta"><button class="btn primary" type="button" id="rGo">${approveAfter ? "이대로 예약" : "이대로 올리기"}</button></div>`,
+  { title: `${UI.chLabel(P.channel)}에 올릴 준비가 됐어요`, onOpen: (sh, close) => {
+    const rem = sh.querySelector("#rRemember"), note = sh.querySelector("#rNote");
+    rem.onchange = () => { note.textContent = rem.checked ? NOTE_ON : NOTE_OFF; };
+    sh.querySelector("#rGo").onclick = async (e) => {
+      const btn = e.currentTarget; if (reusing) return; reusing = true; btn.disabled = true;
+      const channels = [...sh.querySelectorAll("[data-rch]:checked")].map((x) => x.dataset.rch);
+      const r = await UI.api("/api/pieces-reuse", { body: { id, channels, remember: rem.checked } });
+      reusing = false; btn.disabled = false;
+      if (r.gated) return close();
+      if (r.ok && r.reuse) P.reuse = r.reuse;
+      close();
+      const n = channels.filter((c) => goSet.has(c)).length;   /* 들어가는 곳 수 = 고른 것 ∩ 서버가 «들어간다»고 한 곳(go) — 새로 판정하지 않는다 */
+      if (approveAfter) return approve({ asked: true, say: !r.ok ? "발행을 예약했어요 · 다른 곳은 설정에서 골라 주세요" : n ? `발행을 예약했어요 · ${UI.places(1 + n)}에 올라가요` : "" });
+      if (!r.ok) return UI.toast(r.error || "다른 곳에 올리지 못했어요 · 잠시 뒤 다시 눌러 주세요");
+      render();
+      const made = Array.isArray(r.created) ? r.created.length : 0;
+      UI.toast(made ? `${UI.places(made)}에 더 올려요` : rem.checked && channels.length ? "다음 영상부터 고른 곳에 올려요" : "이번엔 이 영상만 올려요");
+    };
+  } });
+}
 /* 🔴 [AC-185] 머리줄이 **없는 길을 말하지 않게** 한다(스샷을 눈으로 보고 잡았다 · 자는 못 잡는다):
    · 올릴 계정이 없는 영상에 «계정 자동»은 거짓이다 — 배정될 계정이 없다. «직접 올려요»가 사실이다.
    · 같은 글의 «… 예약»도 거짓이다 — 그 시각에 발행은 `no_account` 로 멈춘다(그래서 시각을 아예 안 적는다). */
 function render() {
-  const st = UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = EDITABLE_ST.includes(P.status); const video = P.kind === "video";
-  const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : "";
+  /* [R18 · B2] 길이 등으로 그 채널에 안 올라간 파생은 «실패»가 아니다(§3 · 트리거 §1 ② «실패·오류·불가 금지») — 영상은 멀쩡하고 그 채널만 빠졌다 */
+  const st = P.status === "failed" && isDerived() ? ["off", "안 올라갔어요"] : UI.PIECE_STATUS[P.status] || ["off", P.status]; const editable = EDITABLE_ST.includes(P.status); const video = P.kind === "video";
+  const when = P.status === "published" ? `${UI.dateKST(P.publishedAt)} 발행` : P.scheduledFor ? `${UI.dateKST(P.scheduledFor)} ${UI.timeKST(P.scheduledFor)} 예약` : UI.whenSay(P);   /* [R18 · B v1.2] 시각 없는 예약(파생) = «시각 잡는 중» */
   UI.$("#head").innerHTML = `${UI.mark(P.channel)}<div class="l"><span class="t">${P.accountHandle ? "@" + UI.esc(P.accountHandle) : selfUpload() ? "직접 올려요" : "계정 자동"}${video ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${UI.esc(UI.chLabel(P.channel))}${when && !selfUpload() ? " · " + when : ""}${P.topicTitle ? " · " + UI.esc(P.topicTitle) : ""}</span></div><span class="pill ${st[0]}">${st[1]}</span>`;
   const pv = UI.$("#pv"); const gate = UI.$("#gate"); const cta = UI.$("#cta");
   renderTeamWait(); renderRefUnused(); renderScriptIssues(); renderFmtUnused(); renderThreadChain();   // 글·영상 둘 다 — 아래 영상 가지가 먼저 return 한다
+  UI.$("#reuse").hidden = true;   /* [R18] 다 된 영상에서만 그린다(아래 renderReuse) — 만드는 중·글에는 없다 */
   if (video) { pv.hidden = true; UI.$("#vpane").hidden = false; renderWhy(true); UI.$("#claims").hidden = true; UI.$("#photos").hidden = true;   /* 수치 주장·내 사진은 글의 자리다(영상은 컷·자막이 그 몫) */
+    /* [R18 · B2 계약] 🔴 **파생이 발행 직전에 멈췄다**(길이가 그 채널에 안 맞는 등 · 상태 failed). 영상은 **이미 만들어졌다** —
+       아래 가지의 «만들지 못했어요»·«만드는 중 보기»는 이 경우 거짓이다. 사실(«이 채널엔 올라가지 않았어요») + 서버 까닭(failReason 글자 그대로) + 원본으로 가는 길. */
+    if (P.status === "failed" && isDerived()) { const oid = Number((P.reuse.origin || {}).pieceId) || 0;
+      UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>이 채널엔 올라가지 않았어요</h3>${P.failReason ? `<p>${UI.esc(P.failReason)}</p>` : ""}${oid ? `<a class="btn secondary sm" href="/app/piece.html?id=${oid}">원본 영상 보기</a>` : ""}</div></div>`;
+      UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     if (P.status === "generating" || P.status === "failed") { UI.$("#vpane").innerHTML = `<div class="group"><div class="empty"><h3>${P.status === "failed" ? "만들지 못했어요" : UI.esc(UI.VSTAGE_SAY[P.meta?.stage] || "만드는 중이에요")}</h3><p>${P.status === "failed" ? UI.esc(P.failReason || "코인은 돌려드렸어요") : "다 되면 «봐주세요»로 올라와요 · 여기서 기다리지 않아도 돼요"}</p><a class="btn secondary sm" href="/app/pieces.html?tab=generating">만드는 중 보기</a></div></div>`; UI.$("#comp").hidden = true; UI.$("#why").hidden = true; gate.hidden = true; cta.hidden = true; return; }
     renderVideo(editable);
+    renderReuse();   // [R18] «N초로 만든 영상» — 어디에 같이 올라가나 · 파생이면 어디서 왔나
     renderComp();   // [R8 §5.1] 영상에도 «대가를 받았나요» — 협찬 영상에 고지를 켤 자리가 아무 데도 없었다
     if (P.gate) { gate.hidden = false; gate.innerHTML = judgeList(P.gate); } else gate.hidden = true;
     cta.hidden = false;
@@ -426,7 +556,8 @@ function render() {
        🔴 판정은 **그대로 둔다** — 지운 게 아니라 소프트로 내린 것이다(§9 «검사를 지우지 마라»). 무엇이·왜·어떻게는 judgeList 가 세 줄로 말한다. */
     /* [AC-185] 🔴 **올릴 계정이 없는 영상**은 «이대로 예약»이 아니라 «내려받아 직접 올리기»가 유일한 실제 경로다(윗주석). */
     if (selfUpload()) { showSelfUpload(); cta.innerHTML = selfUploadBtn(); if (editable) bindCta(); bindSelfUpload(); }
-    else if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button><button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button><button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
+    /* [R18] 🔴 파생 영상에는 «다시 만들기»를 안 그린다 — 원본과 **같은 파일**이라 여기서 다시 구우면 원본과 갈린다. 서버도 거절한다(«원본에서 다시 만들어 주세요»). */
+    else if (editable) { cta.innerHTML = `<button class="btn secondary" type="button" id="save" hidden>수정 저장</button>${isDerived() ? "" : `<button class="btn secondary" type="button" id="regen" ${P.regenCount >= 1 ? "disabled" : ""} style="flex:0 0 40%">다시 만들기</button>`}<button class="btn primary" type="button" id="approve">이대로 예약</button>`; bindCta(); }
     else if (P.status === "published" && P.externalUrl) cta.innerHTML = `<a class="btn secondary" href="${UI.esc(P.externalUrl)}" target="_blank" rel="noopener">올라간 영상 보기</a>`;
     else if (NOW_OK.includes(P.status)) { cta.innerHTML = nowBtn(); bindNow(); }
     /* [2026-09-20 고장 ①] 영상도 같은 막다른 골목이었다 — 글 갈래와 **같은 처치**(까닭 + 직접 올리는 길). */
@@ -516,7 +647,7 @@ const stuckBtn = () => `<a class="btn primary" href="/app/posts.html?status=awai
        코인은 0이다(그 핸들러의 `consume` 셋은 전부 «환급분 재차감» 블록 안 · §4.7 «재생성 무료»).
        한 번만 된다(`regenCount >= 1` 이면 서버가 거절) · 🔴 **직접 쓴 글엔 권하지 않는다** — 손님이 쓴 글을 AI 글로 덮는 것이라 «다시 만들기»가 아니다.
    ⇒ 사실 한 줄 + **없으면 없다고** + 다음 수 한 줄. 겁주지 않는다(§3). */
-const canRegen = () => Number(P.regenCount || 0) < 1 && P.origin !== "self";
+const canRegen = () => Number(P.regenCount || 0) < 1 && P.origin !== "self" && !isDerived();   /* [R18 · B v1.3] 파생은 서버가 다시 만들기를 거절한다(step "derived") — 원본에서 다시 만든다 */
 function showRejected() {
   const host = UI.$("#page") || document.body;
   host.querySelectorAll(".stuck-say").forEach((x) => x.remove());
@@ -526,11 +657,14 @@ function showRejected() {
   /* 🔴 `.banner info` 를 **페이지 바닥에 놓으면 칸이 안 보인다** — `--brand-soft(#F2F4F6)` 가 `--ground(#F2F4F6)` 와 **같은 색**이라
      글자만 떠 있게 된다(2026-09-18 당근 작업이 적어 둔 함정 · 내가 그대로 밟았고 스크린샷으로 잡았다).
      ⇒ `info` 를 떼고 위 «올리지 못했어요»와 **같은 칸**으로 둔다. 둘 다 «이 글은 안 나가요»를 말하는 자리다. */
-  const html = `<div class="banner stuck-say" style="margin:0 0 10px"><span><b>버리신 글이에요</b><br>되돌릴 수는 없어요.<br>${next}</span></div>`;
+  /* [R18 · B v1.3] 원본을 버려서 **같이 내려진 파생**은 고객이 버린 게 아니다 — «버리신 글이에요»는 거짓이다. 서버 까닭(`meta.rejectReason`)을 그대로 쓰고, 다음 수는 원본으로 가는 길이다. */
+  const why = P.meta && typeof P.meta.rejectReason === "string" && P.meta.rejectReason ? P.meta.rejectReason : "";
+  const html = `<div class="banner stuck-say" style="margin:0 0 10px"><span><b>${why ? UI.esc(why) : "버리신 글이에요"}</b><br>되돌릴 수는 없어요.${isDerived() ? "" : `<br>${next}`}</span></div>`;
   const anchor = UI.$("#vpane")?.hidden === false ? UI.$("#vpane") : UI.$("#pv");
   if (anchor) anchor.insertAdjacentHTML("beforebegin", html); else host.insertAdjacentHTML("afterbegin", html);
 }
-const rejectedBtn = () => canRegen()
+const rejectedBtn = () => isDerived() ? `<a class="btn primary" href="/app/piece.html?id=${Number((P.reuse.origin || {}).pieceId) || ""}">원본 영상 보기</a>`   /* [R18 · B v1.3] 파생의 다음 수 = 원본 */
+  : canRegen()
   ? `<button class="btn primary" type="button" id="regen">같은 소재로 다시 만들기</button>`
   : `<a class="btn primary" href="/app/create.html">새로 만들러 가기</a>`;
 
@@ -606,9 +740,12 @@ async function save() {
   dirty = false; btn.hidden = true; const bad = (r.gate?.checks || []).filter((c) => !c.pass).length;
   UI.toast(bad ? `저장했어요 · 검사 ${bad}개는 확인이 필요해요` : "저장했어요 · 검사 통과");
 }
-async function approve() {
+/* o.asked = «처음 한 번 묻기» 시트를 거쳐 왔다 · o.say = 다 됐을 때의 말(시트가 «세 곳에 올라가요»를 붙여 준다) */
+async function approve(o = {}) {
   if (dirty) return UI.toast("먼저 «수정 저장»을 눌러 주세요");
-  const btn = UI.$("#approve"); btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); btn.disabled = false;
+  /* [R18] 이 집이 아직 한 번도 답하지 않았고 이 영상이 원본이면 — **예약하기 전에** 시트로 묻는다(트리거 §1 ① «첫 영상이 완성됐을 때 딱 한 번»). */
+  if (!o.asked && P.kind === "video" && P.reuse && P.reuse.role === "origin" && P.reuse.ask === true && reuseCands().length) return reuseSheet(true);
+  const btn = UI.$("#approve"); if (btn) btn.disabled = true; const r = await UI.api("/api/pieces-approve", { body: { id } }); if (btn) btn.disabled = false;
   if (!r.ok) { if (r.gated) return;
     /* 🔴 [R8 §4.5] **팀 승인 403** — «지금 못 하는 일»(상태)이 아니라 «내가 못 하는 일»(권한)이라 다른 얼굴로 그린다.
        🔴 우리가 건 게이트가 **아니다** — 그 집 주인이 자기 팀에 건 규칙이라 §9 밖이다. 그래서 «막았어요»가 아니라 «기다려요»로 쓴다.
@@ -636,7 +773,7 @@ async function approve() {
     }
     return UI.toast(r.error || "예약하지 못했어요");
   }
-  UI.done("발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
+  UI.done(o.say || "발행을 예약했어요", () => UI.go("/app/pieces.html?tab=scheduled"));
 }
 /* [R7 §1.3] 영상 파일 내려받기 · 직접 올린 주소 적기 — 유튜브 자동 업로드가 열리기 전의 정식 출구(계정 없이 만든 영상도 이 길로 나간다) */
 function bindVideoOut() {
@@ -683,14 +820,28 @@ function askRegen(close) {
 /* [2026-09-21] `note` 를 **같이 보낸다** — 비면 안 보낸다(서버가 빈 값을 null 로 적는 길과 같다 · AC-92 «안 고른 값을 화면이 채워 보내지 않는다»). */
 async function regen(close, note) { const body = { id }; if (String(note || "").trim()) body.note = String(note).trim().slice(0, 300);
   const r = await UI.api("/api/pieces-regenerate", { body }); if (!r.ok) return r.gated ? (close && close()) : UI.toast(r.error || "다시 만들지 못했어요"); if (close) close(); UI.toast(P.kind === "video" ? "지금 영상을 지우고 처음부터 만들어요 · 코인은 더 안 들어요" : "다시 만들기 시작했어요"); setTimeout(() => UI.go("/app/pieces.html?tab=generating"), 600); }
-function bindCta() { const s = UI.$("#save"); if (s) s.onclick = save; const a = UI.$("#approve"); if (a) a.onclick = approve; const g = UI.$("#regen"); if (g) g.onclick = () => askRegen(); }
+function bindCta() { const s = UI.$("#save"); if (s) s.onclick = save; const a = UI.$("#approve"); if (a) a.onclick = () => approve(); const g = UI.$("#regen"); if (g) g.onclick = () => askRegen(); }   /* [R18] approve 는 이제 인자를 받는다 — 클릭 이벤트가 그 자리에 들어가지 않게 감싼다 */
+/* [R18] 파생 영상의 «다시 만들기»는 **원본으로 가는 길**로 바꿔 둔다(여기서 다시 구우면 원본과 파일이 갈린다 · 서버도 거절한다) */
 more.onclick = () => UI.sheet(`<div class="group" style="padding:0">
-  <button type="button" class="row tap" id="regen2" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : P.kind === "video" ? "지금 영상은 사라지고 처음부터 · 코인 0 · 1회" : "코인은 더 안 들어요 · 1회"}</span></div></button>
+  ${isDerived() ? `<a class="row tap" href="/app/piece.html?id=${Number((P.reuse.origin || {}).pieceId) || ""}"><div class="l"><span class="t">다시 만들기</span><span class="d">같은 영상이라 원본에서 다시 만들어요</span></div>${UI.chev}</a>`
+  : `<button type="button" class="row tap" id="regen2" ${P.regenCount >= 1 ? "disabled" : ""}><div class="l"><span class="t">다시 만들기</span><span class="d">${P.regenCount >= 1 ? "이미 한 번 다시 만들었어요" : P.kind === "video" ? "지금 영상은 사라지고 처음부터 · 코인 0 · 1회" : "코인은 더 안 들어요 · 1회"}</span></div></button>`}
   <button type="button" class="row tap" id="reject"><div class="l"><span class="t" style="color:var(--danger-ink)">버리기</span><span class="d">${P.kind === "video" ? "이 영상은 올리지 않아요" : "이 글은 발행하지 않아요"}</span></div></button></div><div id="rc"></div>`, { title: P.kind === "video" ? "이 영상을" : "이 글을", onOpen: (sh, close) => {
-    sh.querySelector("#regen2").onclick = () => askRegen(close);
-    sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), P.kind === "video" ? "이 영상을 버릴까요? 되돌릴 수 없어요." : "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close(); UI.toast("버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), 600); });
+    const rg2 = sh.querySelector("#regen2"); if (rg2) rg2.onclick = () => askRegen(close);
+    /* [R18 · B v1.3] 🔴 원본 영상을 버리면 **아직 안 나간 파생도 같이 버린다** — 되돌릴 수 없는 일이니 **누르기 전에** 말한다(§9 ① · 확인 대화는 게이트가 아니다).
+       수는 서버가 답한다(`derivedRejected`) — 누르기 전엔 «있으면»으로만 말하고 화면이 세지 않는다(어느 상태까지 «안 나간 것»인지는 서버 판정 · AC-52). */
+    const livePairs = P.kind === "video" && P.reuse && P.reuse.role === "origin" && (P.reuse.derived || []).some((d) => d.status !== "published" && d.status !== "rejected");
+    sh.querySelector("#reject").onclick = () => UI.confirmRow(sh.querySelector("#rc"), P.kind === "video" ? `이 영상을 버릴까요? 되돌릴 수 없어요.${livePairs ? " 같은 영상으로 예약된 곳도 같이 내려요." : ""}` : "이 글을 버릴까요? 되돌릴 수 없어요.", async () => { const r = await UI.api("/api/pieces-reject", { body: { id } }); if (!r.ok) return UI.toast(r.error || "버리지 못했어요"); close();
+      const n = Array.isArray(r.derivedRejected) ? r.derivedRejected.length : 0;
+      UI.toast(n ? `버렸어요 · 같은 영상으로 예약된 ${UI.places(n)}도 같이 내렸어요` : "버렸어요"); setTimeout(() => UI.go("/app/pieces.html"), n ? 1400 : 600); });
   } });
 await load();
+/* [R18] 자동 승인 경로의 알림(`video_reuse_ask`)이 `?reuse=ask` 로 데려온다(§9 ② 사람이 안 보는 경로에서도 닿게).
+   🔴 **여기서 한 번만** 연다 — `load()` 는 다른 자리에서도 다시 불리니(올린 주소 적기 뒤 등) 거기에 두면 시트가 되풀이해 뜬다.
+   이미 답한 집(ask=false)이면 시트 대신 «어디에 올라가나» 줄로 데려다 놓는다(다른 기기에서 먼저 답했을 수 있다). */
+if (UI.qs.get("reuse") === "ask" && P && P.kind === "video" && P.reuse && P.reuse.role === "origin") {
+  if (P.reuse.ask === true) reuseSheet(EDITABLE_ST.includes(P.status));
+  else { const g = UI.$("#reuse"); if (g && !g.hidden) g.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }
+}
 })();
 </script>
 </body>

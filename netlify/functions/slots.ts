@@ -18,6 +18,7 @@ import { clientIp } from "../../lib/auth";
 import { utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
 import { listSlots, type Slot } from "../../lib/slots";
+import { restaggerFamily } from "../../lib/derived-schedule";   // [R18 · B2] 한 영상의 가족 시차 — 원본을 옮기면 깨진 파생만 다시 맞춘다
 import { kstDateStr, kstToUtc, ACCOUNT_GAP_MIN } from "../../lib/best-time";
 import { confirm } from "../../lib/director";
 import { proposeForSlot, toAutoSlot } from "../../lib/cron/director-auto";
@@ -137,8 +138,14 @@ export default async (req: Request): Promise<Response> => {
       await q(sql`UPDATE slots SET publish_at = ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', slot_date = ${newDate}::date,
         review_deadline = ${reviewDeadline.toISOString()}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${slotId}`);
       if (s.piece_id) await q(sql`UPDATE pieces SET scheduled_for = ${at.toISOString()}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(s.piece_id)}`);
-      await writeAudit({ tenantId: tid, action: "slot_reschedule", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `slot:${slotId}`, detail: { from: utcDate(s.publish_at)?.toISOString() ?? null, to: at.toISOString() } });
-      return json({ ok: true, slot: await oneSlot(tid, slotId, newDate), ...(crowd.say ? { crowd } : {}) });
+      /* 🔴 [R18 · B2] **한 영상의 가족 시차** — 고객이 원본(또는 파생)을 옮기면 형제와 같은 분에 붙을 수 있다.
+         고객이 **방금 고른 시각은 안 건드리고**, 시차가 깨진 **다른 파생만** 다시 맞춘다(`restaggerFamily`).
+         자리가 없으면 그대로 두고 그 한 줄을 응답에 싣는다(`reuseNote` · 막지 않는다 §9). 실패해도 시각 바꾸기는 이미 됐다(보조 쓰기). */
+      const restag = s.piece_id
+        ? await restaggerFamily(tid, n(s.piece_id), { keepPieceId: n(s.piece_id) }).catch(() => ({ moved: 0, say: [] as string[] }))
+        : { moved: 0, say: [] as string[] };
+      await writeAudit({ tenantId: tid, action: "slot_reschedule", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `slot:${slotId}`, detail: { from: utcDate(s.publish_at)?.toISOString() ?? null, to: at.toISOString(), ...(restag.moved ? { reuseMoved: restag.moved } : {}) } });
+      return json({ ok: true, slot: await oneSlot(tid, slotId, newDate), ...(crowd.say ? { crowd } : {}), ...(restag.say.length ? { reuseNote: restag.say } : {}) });
     }
 
     /* ───────── 지금 만들기 ───────── */

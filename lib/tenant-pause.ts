@@ -169,11 +169,18 @@ export async function holdBacklog(tid: number, now: Date = new Date()): Promise<
  *   반환 = 다시 예약한 수.
  */
 export async function releaseBacklog(tid: number, now: Date = new Date()): Promise<number> {
-  const held = await q(sql`SELECT id, channel, account_id, slot_id FROM pieces
+  const held = await q(sql`SELECT id, channel, account_id, slot_id, origin_piece_id FROM pieces
      WHERE tenant_id = ${tid} AND status = ${BACKLOG_STATUS} ORDER BY scheduled_for, id`);
   if (!held.length) return 0;
   const { pickPublishAt } = await import("./best-time");
   const { gapMinFor } = await import("./publish-gap");
+  /* 🔴 [R18 · B2 · C 가 실측으로 짚었다] **한 영상의 파생은 여기서 따로 얹는다.**
+     `pickPublishAt` 은 «같은 채널»·«같은 계정»만 본다 — **채널이 다른 형제**(한 영상의 틱톡·클립)는 모른다.
+     그래서 둘 다 기본표 첫 후보 **19:00 에 같은 분으로** 모였다(now=13:00 KST 실측 · C). `scheduleDerived` 가 아무리 벌려 놔도
+     멈췄다 깨는 이 길에서 다시 모인다. ⇒ 파생은 이 루프에서 빼고, **원본을 다 옮긴 뒤** 가족 시차를 맞춰 다시 얹는다(아래).
+     14일 안에 자리가 없는 파생만 이 루프의 길(`pickPublishAt`)로 내려앉는다 — `pending_resume` 에 영영 갇히지 않게. */
+  const derived = held.filter((p) => Number(p.origin_piece_id) > 0);
+  const plain = held.filter((p) => !(Number(p.origin_piece_id) > 0));
   /* 앞으로 이미 잡혀 있는 것들 — 밀린 글이 **그 사이를 비집고 들어가지 않게** 먼저 읽는다. */
   const future = await q(sql`SELECT channel, account_id, scheduled_for FROM pieces
      WHERE tenant_id = ${tid} AND status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for > ${now.toISOString()}::timestamptz`);
@@ -187,7 +194,7 @@ export async function releaseBacklog(tid: number, now: Date = new Date()): Promi
     if (r.account_id) push(takenByAccount as Map<string | number, Date[]>, Number(r.account_id), at);
   }
   let moved = 0;
-  for (const p of held) {
+  const placeOne = async (p: Record<string, unknown>) => {
     const channel = String(p.channel ?? "");
     const aid = p.account_id ? Number(p.account_id) : 0;
     /* 🔴 간격은 **`publish-gap.gapMinFor` 가 정본**이다(계정의 전용 IP 여부로 갈린다) — 여기서 새로 정하지 않는다.
@@ -209,6 +216,27 @@ export async function releaseBacklog(tid: number, now: Date = new Date()): Promi
     push(takenByChannel as Map<string | number, Date[]>, channel, picked.at);
     if (aid) push(takenByAccount as Map<string | number, Date[]>, aid, picked.at);
     moved++;
+  };
+  for (const p of plain) await placeOne(p);
+
+  /* [R18 · B2] 파생 — 원본별로 묶어 **가족 시차**를 맞춰 다시 얹는다(원본이 방금 위에서 새 시각을 받았으면 그 시각 뒤로). */
+  if (derived.length) {
+    const { scheduleDerived } = await import("./derived-schedule");
+    const byOrigin = new Map<number, Record<string, unknown>[]>();
+    for (const p of derived) { const o = Number(p.origin_piece_id); byOrigin.set(o, [...(byOrigin.get(o) ?? []), p]); }
+    for (const [originId, kids] of byOrigin) {
+      const r = await scheduleDerived(tid, originId, { now, reseat: kids.map((k) => Number(k.id)) })
+        .catch((e: unknown) => { console.error(`[tenant-pause] 파생 다시 얹기 실패 origin=${originId}`, String((e as Error)?.message ?? e).slice(0, 120)); return null; });
+      const placedIds = new Set((r?.placed ?? []).map((x) => x.pieceId));
+      for (const x of r?.placed ?? []) {
+        const k = kids.find((kk) => Number(kk.id) === x.pieceId);
+        push(takenByChannel as Map<string | number, Date[]>, x.channel, new Date(x.at));
+        if (k?.account_id) push(takenByAccount as Map<string | number, Date[]>, Number(k.account_id), new Date(x.at));
+        moved++;
+      }
+      /* 자리가 없었던 것(또는 다시 얹기가 통째로 실패한 것)만 옛 길로 — 🔴 갇히는 것보다 **시차가 덜 맞는 편**이 낫다(캐던스는 그 길도 지킨다). */
+      for (const k of kids) if (!placedIds.has(Number(k.id))) await placeOne(k);
+    }
   }
   return moved;
 }

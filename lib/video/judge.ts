@@ -281,8 +281,10 @@ async function similarityAxis(tenantId: number, pieceId: number, accountId: numb
      🔴 계정이 없는 영상(§1.2 수동 «만들기»)은 뺄 계정 자체가 없다 — 그때는 테넌트의 다른 영상 전부와 견준다.
         `account_id IS DISTINCT FROM NULL` 은 NULL 끼리를 «같다»로 보아 **다른 무계정 영상을 통째로 건너뛴다**(= 손으로 올리는 사람은 검사를 못 받는다). */
   const scope = accountId ? sql`AND account_id IS DISTINCT FROM ${accountId}` : sql``;
+  /* [R18 · B · 리뷰 ⑧] 파생(`origin_piece_id` 있음)은 원본의 **복사본**이라 다른 계정에 있어도 «다른 영상»이 아니다 —
+     빼지 않으면 다시 만든 원본이 **제 옛 판**(다른 계정에 얹힌 파생)과 견줘져 «다른 계정 영상과 겹쳐요»가 뜬다. 원본끼리는 그대로 견준다. */
   const others = await q(sql`SELECT id, meta->>'frameHash' AS h FROM pieces
-    WHERE tenant_id = ${tenantId} AND kind = 'video' AND id <> ${pieceId} ${scope}
+    WHERE tenant_id = ${tenantId} AND kind = 'video' AND id <> ${pieceId} AND origin_piece_id IS NULL ${scope}
       AND created_at > NOW() - interval '14 days' ORDER BY id DESC LIMIT 50`);
 
   if (!hash) {

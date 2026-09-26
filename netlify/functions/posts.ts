@@ -1,7 +1,8 @@
 /**
  * 발행함 API(계약 P1R2 §6 v2.1 · DESIGN §2.3):
  *   GET  /api/posts-list?from=&to=&status=published|awaiting_manual|failed|all(기본 all) → { ok:true, posts:[PostRow] }
- *   POST /api/post-retract { postId, reason? } → { ok, state, message, openUrl? }   // [R8 §3 · DESIGN §5E] 고객이 «내려 줘»를 누른다
+ *   POST /api/post-retract { postId, reason? } → { ok, state, message, openUrl?, sameVideo? }   // [R8 §3 · DESIGN §5E] 고객이 «내려 줘»를 누른다
+ *     [R18] `sameVideo` = { originPieceId, unsent[], live[], line } — 같은 영상이 다른 곳에 예약/게시돼 있으면(없으면 키 없음 · 정본 lib/video/reuse.ts sameVideoOf)
  *
  *   🔴 **posts 가 아니라 pieces 를 기준으로 만든다**(계약 v2.1): 발행에 실패한 글은 `posts` 행이 아예 없다.
  *      posts 에서 출발하면 «직접 올려 주셔야 해요» 가 목록에서 통째로 사라진다 — 사용자가 가장 알아야 할 행이 안 보이는 사고.
@@ -17,6 +18,7 @@ import { json, jsonError } from "../../lib/response";
 import { requireUser } from "../../lib/guards";
 import { readJson } from "../../lib/validate";
 import { retractPost } from "../../lib/publish/retract";
+import { sameVideoOf } from "../../lib/video/reuse";   // [R18] 같은 영상 가족 — 내려도 다른 곳엔 남는다는 사실을 같이 말한다
 import { canRetract } from "../../lib/channel-registry";
 import { utcDate } from "../../lib/db-util";
 import { q } from "../../lib/accounts";
@@ -68,7 +70,11 @@ export default async (req: Request): Promise<Response> => {
       if (!postId) return json({ ok: false, step: "id", error: "어떤 글인지 알 수 없어요." }, 400);
       const reason = String(b.reason ?? "").trim().slice(0, 200) || "고객 요청";
       const r = await retractPost(tid, postId, { reason, by: `user:${auth.user.uid}` });
-      return json(r, r.ok ? 200 : r.state === "not_found" ? 404 : 409);
+      /* [R18 · B] 🔴 한 영상 여러 곳 — 이 영상을 내려도 **다른 채널의 같은 영상**은 남는다(예약된 것은 나중에 나간다).
+         번지게 하지 않는다(채널마다 까닭이 다를 수 있다 — 고르는 것은 고객) · 대신 **말해 준다**(§9). 못 재면 조용히 뺀다(내리기 자체를 망치지 않게). */
+      const [pp] = r.ok || r.state === "unsupported" ? await q(sql`SELECT piece_id FROM posts WHERE tenant_id = ${tid} AND id = ${postId}`).catch(() => [] as Record<string, unknown>[]) : [];
+      const same = pp?.piece_id ? await sameVideoOf(tid, n(pp.piece_id)).catch(() => null) : null;
+      return json({ ...r, ...(same ? { sameVideo: same } : {}) }, r.ok ? 200 : r.state === "not_found" ? 404 : 409);
     }
 
     const today = kstDateStr(new Date());

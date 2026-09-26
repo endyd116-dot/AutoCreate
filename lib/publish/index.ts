@@ -37,6 +37,10 @@ import { publishFacebookPost, publishFacebookReels } from "./facebook";
 import { publishToX } from "./x";
 import { publishToTiktok } from "./tiktok";
 import { enqueueJob as enqueueRunnerJob, fleetState, publishJobKindOf, type RunnerJobKind, type RunnerPublishPayload } from "../runner-jobs";
+import { videoFitsChannel } from "./video-fit";   // [R18 · B2] 영상 길이 ↔ 채널 상한(러너·커넥터 전에 잰다)
+
+/** [R18 · B2] 길이가 채널에 안 들어가서 돌려보낼 때 `detail` 첫 낱말 — 배경 함수가 이걸 보고 «직접 올리기»가 아니라 `failed` 로 둔다(직접 올려도 안 올라간다). */
+export const LENGTH_OVER_DETAIL = "length_over_channel";
 
 export * from "./contract";
 export { finalizePublish } from "./finalize";
@@ -150,6 +154,12 @@ export async function loadPublishPiece(tid: number, pieceId: number): Promise<Pu
     const af = meta.affiliate as Record<string, unknown>;
     out.affiliate = { provider: String(af.provider ?? "coupang"), url: String(af.url ?? ""), ...(af.subId ? { subId: String(af.subId) } : {}) };
   }
+  /* [R18 · B2] 영상 길이 — 렌더 실측(`finalizeRender` 가 넣는다 · 파생은 B 가 원본 행을 meta 째 복사한다). 모르면 안 싣는다(«못 쟀다»를 0 으로 채우지 않는다). */
+  if (out.kind === "video") {
+    const [v] = await q(sql`SELECT (meta->>'durationMs') AS ms FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${pieceId} AND kind = 'video' ORDER BY id DESC LIMIT 1`);
+    const ms = Number(v?.ms);
+    if (Number.isFinite(ms) && ms > 0) out.videoDurationMs = ms;
+  }
   const sf = utcDate(p.scheduled_for); if (sf) out.scheduledFor = sf.toISOString();
   if (p.external_url) out.externalUrl = String(p.external_url);
   if (p.channel_ref) out.channelRef = String(p.channel_ref);
@@ -196,6 +206,22 @@ export async function publish(piece: PublishPiece, account: PublishAccount | nul
   }
   if (!piece.bodyHtml.trim() || !piece.title.trim()) {
     return { ok: false, reason: "not_publishable", retriable: false, error: "제목이나 본문이 비어 있어요.", detail: "empty_body" };
+  }
+  /* ②-a 🔴 [R18 · B2] **영상 길이가 이 채널에 들어가나** — 러너·커넥터에 넘기기 **전**에 잰다(`lib/publish/video-fit.ts` 한 곳).
+     ══ 왜 여기인가 ══ 60초 영상이 네이버 클립(30초)으로 오면 ④-A 가 잡을 쌓고, 러너 스텁은 «앱에서 올려 주세요»로 돌려보내고,
+       고객은 폰에서 올리다 **네이버에게 거절당한다** — 우리 화면엔 길이가 까닭이라는 말이 **어디에도 없다**(조용한 실패).
+     ══ 🔴 게이트가 아니다(§9 «이 규칙 밖») ══ 채널이 **받지 않는 길이**다. 그래서 말은 ①사실 ②어떻게 하면 되는지다.
+     ══ 순서 ══ 계정 검사보다 **앞**이다 — 계정이 없어서 «직접 올려 주세요»로 보내도, 그 영상은 직접 올려도 안 올라간다.
+     길이를 모르면(`videoDurationMs` 없음) 들어간다고 본다 — «아직 모른다»로 막지 않는다(§9). 여기 닿는 파생은 B `reuseFit`·B2 편성이 먼저 거른다. */
+  if (piece.kind === "video") {
+    const fit = videoFitsChannel(piece.channel, piece.videoDurationMs);
+    if (!fit.fits) {
+      if (!opts.dryRun) {
+        await writeAudit({ tenantId: piece.tenantId, action: "publish_length_mismatch", actorType: "system", target: `piece:${piece.id}`,
+          detail: { channel: piece.channel, sec: fit.sec, maxSec: fit.maxSec }, riskLevel: "medium" });
+      }
+      return { ok: false, reason: "not_publishable", retriable: false, error: fit.say, detail: `${LENGTH_OVER_DETAIL} ${fit.sec}s>${fit.maxSec}s` };
+    }
   }
   if (!account) return { ok: false, reason: "no_account", retriable: false, error: "올릴 계정이 없어요. 계정을 연결해 주세요." };
   if (account.channel !== piece.channel) {
