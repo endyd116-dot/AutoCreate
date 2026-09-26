@@ -11,7 +11,7 @@
  *   GET  /api/pieces-get 응답에 [R8-A] `topicGroup`(없으면 null) · `goal` · `contract`(그 글에 **적용된** 분량·사진·goalRules) 3축.
  *   [R18] 영상 piece 에 `reuse`(원본: ask·fit·derived·skipped / 파생: origin·coin 0·line) · 목록 행에 `originPieceId`(number|null)
  *   POST /api/pieces-reuse { id, channels: string[], remember: boolean } → { videoReuse, reuse, created, skip }   // «처음 한 번 묻기»의 답 · 정본 lib/video/reuse.ts
- *   POST /api/pieces-remake { id, channel } → 202 { pieceIds, coinsCharged, coinsLeft, seconds, alsoTo, already? } | 402 coin_short   // [R18 §6-6] 빠진 채널용 N초 판을 새로(코인 새로 · 정본 lib/director.ts remakeVideoFor)
+ *   POST /api/pieces-remake { id, channel } → 202 { pieceIds, coinsCharged, coinsLeft, seconds, alsoTo, already? } | 402 coin_short   // [R18 §6-6][R19 · 400 not_connectable = 계정 없고 그 채널이 연결을 못 받는다 · no_account = 계정 없고 연결은 된다] 빠진 채널용 N초 판을 새로(코인 새로 · 정본 lib/director.ts remakeVideoFor)
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";

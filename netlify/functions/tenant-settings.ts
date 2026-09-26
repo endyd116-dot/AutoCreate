@@ -3,7 +3,7 @@
  *   POST /api/onboarding { kinds: ["text","video"], channels: [...] } — settings 병합(read→merge→full write · AM jsonb 규율)
  *   GET  /api/tenant-settings                                        → { settings, kinds:["text"|"video"…], kindsSet } — [R7 §1.1] 화면이 토글 상태를 읽는다
  *   POST /api/tenant-settings { autoSchedule?: boolean, kinds?, ... } — 화이트리스트 키만 병합 · kinds 는 정규화(«글»은 항상 · 영상만 토글)
- *   [R18] GET 응답 최상위 `videoReuse` = { on, channels, asked, askedAt, targets:[{channel,label,maxSeconds,connected}] }
+ *   [R18] GET 응답 최상위 `videoReuse` = { on, channels, asked, askedAt, targets:[{channel,label,maxSeconds,connected,connectable}] }   // [R19] connectable = 그 채널이 지금 연결을 받나(listChannels 그대로)
  *         POST { videoReuse: { on, channels } } → 같은 `videoReuse` · 저장은 `lib/video/reuse.ts saveVideoReuse` 한 곳
  *   🔴 `recipeVolunteer` 는 settings(jsonb) 가 아니라 **`tenants` 의 칸**이다(B2 §3.3 · drizzle/0051) — 배포 판정이 SQL 로 그 칸을 세기 때문.
  *      그래서 위 화이트리스트를 타지 않고 따로 받는다.
