@@ -273,13 +273,60 @@ export async function pieceReuseView(tid: number, p: Row): Promise<PieceReuseVie
  *      파생이 **조용히 영영 안 나간다**(B2 ③). 그래서 접두(fb·tt·th·ig·yt·publish·chain·render)로 통째로 뺀다 — 새 커넥터가 키를 늘려도 새지 않게.
  *   🔴 코인 흔적(`coinItem`·`coinPlanned`·`regenCount`·`refunded`)도 뺀다 — 파생은 코인과 무관하다(§4.7 승계 무료).
  */
-const STRIP_EXACT = new Set(["stage", "failReason", "refunded", "coinItem", "coinPlanned", "regenCount", "rejectReason", "reuseChannels", "reuseResult", "reuse", "scheduleAt"]);
+/* 🔴 `renderedAt` 은 접두 규칙(`render[A-Z]`)을 빠져나간다(소문자 e) — 자(`verify-r18-reuse` ⑥)가 잡아서 여기 적었다. */
+const STRIP_EXACT = new Set(["stage", "renderedAt", "failReason", "refunded", "coinItem", "coinPlanned", "regenCount", "rejectReason", "reuseChannels", "reuseResult", "reuse", "scheduleAt"]);
 const STRIP_PREFIX = /^(chain|render|publish|fb|tt|th|ig|yt)[A-Z]/;
 export function derivedMetaOf(originMeta: unknown, reuse: { originPieceId: number; originChannel: string; seconds: VideoSecondsLit; at: string }, scheduleAt: string | null): Row {
   const src = (originMeta && typeof originMeta === "object" ? originMeta : {}) as Row;
   const out: Row = {};
   for (const [k, v] of Object.entries(src)) if (!STRIP_EXACT.has(k) && !STRIP_PREFIX.test(k)) out[k] = v;
   return { ...out, stage: "done", reuse: { ...reuse, coin: 0 }, ...(scheduleAt ? { scheduleAt } : {}) };
+}
+
+/** 아직 안 나간 파생 — 이 상태에서만 멈추고·갈아 끼우고·같이 버린다. 🔴 나가는 중·나간 것은 **건드리지 않는다**(되돌릴 수 없는 순간 · pieces.ts BUSY_SAY 와 같은 잣대). */
+const UNSENT_DERIVED: readonly string[] = ["scheduled", "awaiting_manual"];
+
+/**
+ * 원본이 **다시 만들어지거나 버려질 때** 아직 안 나간 파생을 멈춘다(pieces-regenerate · pieces-reject 가 부른다).
+ *   · `reject`     → 파생도 `rejected`(자리도 `rejected`). 🔴 고객이 버린 영상이 **다른 세 곳엔 그대로 나가는** 일이 없게.
+ *   · `regenerate` → 시각만 푼다(`scheduled_for NULL` · 상태는 `scheduled` 그대로) + `meta.reuse.waitOrigin`.
+ *                    원본이 다시 승인되면 `deriveVideoPieces` 가 **새 영상으로 갈아 끼우고** B2 가 자리를 다시 잡는다.
+ *                    🔴 시각이 없으면 발행 크론이 안 줍는다(`publisher.ts:71`) — 옛 영상이 먼저 나가는 틈이 없다.
+ *   반환: 멈춘 파생 id. 파생이 없거나 원본이 아니면 [].
+ */
+export async function holdDerivedFor(tid: number, originPieceId: number, why: "regenerate" | "reject"): Promise<number[]> {
+  const inList = sql.join(UNSENT_DERIVED.map((x) => sql`${x}`), sql`, `);
+  if (why === "reject") {
+    const rows = await q(sql`UPDATE pieces SET status = 'rejected', scheduled_for = NULL,
+        meta = meta || ${jsonb({ rejectReason: "원본 영상을 버려서 같이 내렸어요" })}, updated_at = NOW()
+      WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id, slot_id`);
+    const slotIds = rows.map((r) => n(r.slot_id)).filter(Boolean);
+    if (slotIds.length) await q(sql`UPDATE slots SET status = 'rejected', note = ${"원본 영상을 버려서 같이 내렸어요"}, updated_at = NOW()
+      WHERE tenant_id = ${tid} AND id IN (${sql.join(slotIds.map((x) => sql`${x}`), sql`, `)})`);
+    if (rows.length) await writeAudit({ tenantId: tid, action: "video_reuse_rejected_with_origin", actorType: "user", target: `piece:${originPieceId}`, detail: { derived: rows.map((r) => n(r.id)) }, riskLevel: "low" });
+    return rows.map((r) => n(r.id));
+  }
+  const rows = await q(sql`UPDATE pieces SET scheduled_for = NULL,
+      meta = meta || jsonb_build_object('reuse', COALESCE(meta->'reuse', '{}'::jsonb) || ${jsonb({ waitOrigin: true })}), updated_at = NOW()
+    WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id`);
+  if (rows.length) await writeAudit({ tenantId: tid, action: "video_reuse_held_for_regen", actorType: "user", target: `piece:${originPieceId}`, detail: { derived: rows.map((r) => n(r.id)) }, riskLevel: "low" });
+  return rows.map((r) => n(r.id));
+}
+
+/** `waitOrigin` 인 파생을 원본의 **지금 영상**으로 갈아 끼운다. 갈아 끼웠으면 true(아니면 손대지 않고 false). */
+async function refreshHeldDerived(tid: number, derivedId: number, originPieceId: number, originMeta: Row, reuse: { originPieceId: number; originChannel: string; seconds: VideoSecondsLit; at: string }, scheduleAt: string | null): Promise<boolean> {
+  const [d] = await q(sql`SELECT status, meta FROM pieces WHERE tenant_id = ${tid} AND id = ${derivedId}`);
+  const dr = ((d?.meta as Row | null)?.reuse ?? {}) as Row;
+  if (!d || dr.waitOrigin !== true || !UNSENT_DERIVED.includes(String(d.status))) return false;
+  const dmeta = derivedMetaOf(originMeta, reuse, scheduleAt);
+  await q(sql`UPDATE pieces d SET title = o.title, body = o.body, blocks = o.blocks, gate_report = o.gate_report, format = o.format,
+      meta = ${jsonb(dmeta)}, status = 'scheduled', scheduled_for = NULL, updated_at = NOW()
+    FROM pieces o WHERE d.tenant_id = ${tid} AND d.id = ${derivedId} AND o.tenant_id = ${tid} AND o.id = ${originPieceId}`);
+  await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${derivedId} AND kind IN ('video','thumb')`);
+  await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort)
+    SELECT tenant_id, ${derivedId}, kind, r2_key, caption, COALESCE(meta, '{}'::jsonb) || ${jsonb({ reusedFrom: originPieceId })}, sort
+      FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${originPieceId} AND kind IN ('video','thumb') ORDER BY sort, id`);
+  return true;
 }
 
 export interface DeriveCreated { pieceId: number; channel: string; accountId: number }
@@ -323,7 +370,13 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
   const created: DeriveCreated[] = []; const existing: DeriveCreated[] = [];
   for (const g of fit.go) {
     const prev = have.get(g.channel);
-    if (prev) { existing.push(prev); continue; }
+    if (prev) {
+      /* 🔴 원본을 **다시 만든** 뒤라면(`holdDerivedFor("regenerate")` 가 `waitOrigin` 을 찍어 둔 파생) 새 영상으로 **갈아 끼운다** —
+         안 그러면 원본은 새 영상, 파생 세 곳은 **옛 영상**이 나간다(고객이 싫다고 다시 만든 그 영상이다). */
+      await refreshHeldDerived(tid, prev.pieceId, originPieceId, meta, { originPieceId, originChannel, seconds, at }, scheduleAt);
+      existing.push(prev);
+      continue;
+    }
     const acc = pickAccount(accs.get(g.channel), personaId);
     if (!acc) continue;   // fit 이 connected 로 이미 걸렀다 — 여기 올 일은 없다(방어)
     const dmeta = derivedMetaOf(meta, { originPieceId, originChannel, seconds, at }, scheduleAt);

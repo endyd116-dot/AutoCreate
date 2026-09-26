@@ -480,6 +480,16 @@ export async function propose(tid: number, topicId: number, opts: { origin?: Pie
     const h = manualHandoffFor(s2.channel, { noAccount: true });
     return h ? { ...s2, selfUpload: { channel: h.channel, label: h.label, why: h.why, steps: h.steps, openUrl: h.openUrl, openLabel: h.openLabel, appOpenVerified: h.appOpenVerified } } : s2;
   });
+  /* [R18 · B] 🔴 **길이를 고르는 그 자리에서 «30초면 네 곳 · 60초면 세 곳»을 먼저 말한다**(트리거 §1 ② — 나중에 빠진 걸 알면 늦다).
+     초마다 `ReuseFit` 하나(15·30·60·90 중 그 채널 상한 이하 · 🔴 포맷 무관 — 손보기에서 포맷을 바꿔도 칸이 비지 않게 · A 요청).
+     «몇 곳»(`places`)·빠진 까닭 문장은 **서버가** 센다(`lib/video/reuse.ts reuseFit` 한 곳) — 화면이 표를 베끼지 않는다(AC-52).
+     🔴 응답에만 싣는다(위 `usesTodaySlot` 과 같은 까닭) — 계정 연결·설정이 바뀌면 값이 바뀐다. */
+  if (outPieces.some((s2) => s2.kind === "video")) {
+    const { reuseFitsForDirector } = await import("./video/reuse");
+    const fits = new Map<string, Awaited<ReturnType<typeof reuseFitsForDirector>>>();
+    for (const s2 of outPieces) if (s2.kind === "video" && !fits.has(s2.channel)) fits.set(s2.channel, await reuseFitsForDirector(tid, s2.channel));
+    outPieces = outPieces.map((s2) => (s2.kind === "video" && fits.has(s2.channel) ? { ...s2, ...fits.get(s2.channel)! } : s2));
+  }
   const kv = kindsView(tset);
   return { ok: true, brief: { id: briefId, topicId: topic.id, goal, mode, coinCost, coinsLeft: bal.balance, reasons, pieces: outPieces, kinds: kv.kinds, kindsSet: kv.kindsSet } };   // [AC-255] 저장한 값 그대로 — 두 자리가 갈릴 수 없다
 }
