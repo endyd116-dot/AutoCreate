@@ -183,8 +183,10 @@ if (alive.reuseFit && alive.VIDEO_REUSE_TARGETS && alive.VIDEO_CHANNEL_MAX_SEC) 
 /** 파생 가족을 DB 에서 읽어 ①②③ + §4.6 을 잰다 — 🔴 라이브(`--db`)와 리허설 집(`--rehearse`)이 **같은 몸통**을 쓴다.
  *   리허설에서 한 번 돌려야 이 접합부(SQL·묶기·to_char)가 **실제 행으로** 산다 — 라이브는 파생이 0개라 여기가 늘 ⊘ 였다(AC-236). */
 async function liveArm(sql: any, scopeTid: number | null, tag: string): Promise<void> {
-  const derived = await sql`SELECT id, tenant_id, origin_piece_id, channel, status, to_char(COALESCE(published_at, scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at FROM pieces WHERE origin_piece_id IS NOT NULL AND (${scopeTid}::bigint IS NULL OR tenant_id = ${scopeTid}) ORDER BY id`;
-  rec(`⓪ ${tag} 모수 — 파생 piece`, derived.length ? "pass" : "unmeasured", derived.length ? `${derived.length}개 · 집 ${new Set(derived.map((d) => d.tenant_id)).size}곳` : "🔴 0개 — 아래 ①②③ 은 ⊘(트리거 §0-b · 영상 채널이 아직 전부 planned)");
+  const derived = await sql`SELECT p.id, p.tenant_id, p.origin_piece_id, p.channel, p.status, to_char(COALESCE(p.published_at, p.scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
+      t.is_internal, (t.key LIKE 'r18%') AS seed FROM pieces p JOIN tenants t ON t.id = p.tenant_id
+    WHERE p.origin_piece_id IS NOT NULL AND (${scopeTid}::bigint IS NULL OR p.tenant_id = ${scopeTid}) ORDER BY p.id`;
+  rec(`⓪ ${tag} 모수 — 파생 piece`, derived.length ? "pass" : "unmeasured", derived.length ? (() => { const all = new Set(derived.map((d) => d.tenant_id)); const seeds = new Set(derived.filter((d) => d.seed || d.is_internal).map((d) => d.tenant_id)); /* 🔴 무엇을 세었나(AC-114) — 도는 중인 리허설의 시드 집도 여기 잡힌다. 고객 집과 갈라 적는다. */ return `${derived.length}개 · 집 ${all.size}곳(그중 시드·내부 집 ${seeds.size}곳 · 고객 집 ${all.size - seeds.size}곳)`; })() : "🔴 0개 — 아래 ①②③ 은 ⊘(트리거 §0-b · 영상 채널이 아직 전부 planned)");
   if (!derived.length) {
     rec(`① 코인 — 파생의 원장 0행(${tag})`, "unmeasured", "표본 0");
     rec(`② 같은 분에 N곳 없음(${tag})`, "unmeasured", "표본 0");

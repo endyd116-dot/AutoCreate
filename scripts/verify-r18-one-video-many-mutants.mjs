@@ -75,9 +75,9 @@ add("④ «안 올라가요»를 «업로드 불가»로 바꾸면", REUSE,
 add("④ «사실» 칸에서 상한을 빼면(«어떻게» 칸의 30초가 대신 채워 주던 모양)", REUSE,
   "${label}(최대 ${maxSeconds}초)엔 안 올라가요.`", "${label}엔 안 올라가요.`/*r18mut*/", "[④ no_fact]");
 add("④ «어떻게» 칸에서 길이를 빼면(«더 짧게»만 권한다)", REUSE,
-  "만들 때 ${longestPickableUnder(maxSeconds)}초를 골라 주세요.`", "더 짧게 만들어 주세요.`/*r18mut*/", "[④ no_way]");
+  "만들 때 ${pick}초를 골라 주세요.`", "더 짧게 만들어 주세요.`/*r18mut*/", "[④ no_way]");   // B v1.4 에서 `longestPickableUnder(maxSeconds)` → `pick` (과녁을 새 글자로)
 add("④ «계정 없음»의 «어떻게»를 비우면", REUSE,
-  'how: "계정을 연결하시면 같이 올라가요." });', 'how: "" /*r18mut*/ });', "[④ no_way]");
+  'how: "계정을 연결하시면 같이 올라가요.",', 'how: "" /*r18mut*/,', "[④ no_way]");   // B v1.4 에서 `connected` 칸이 뒤에 붙었다
 add("④ 채널 이름 대신 채널 키가 새면", REUSE,
   "const label = channelLabelKo(channel);", "const label = channel /*r18mut*/;", "[④ machine_word]");
 add("④ 겁주는 꼬리를 달면", REUSE,
