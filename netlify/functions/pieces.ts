@@ -9,6 +9,8 @@
  *     [R8-A] `monetize:{sponsored?,gift?}` = **대가 켜기**(글·영상 **둘 다**). 켜기만 한다(false 는 안 내린다) · **monetize 만 보내도 된다** ·
  *     🔴 `meta.editedByUser` 는 **본문이 실제로 온 경우에만** 찍는다(그 값이 서면 재검사가 블록→HTML 로 바뀐다 · 읽는 곳 `lib/content-approve.ts:155` 한 곳).
  *   GET  /api/pieces-get 응답에 [R8-A] `topicGroup`(없으면 null) · `goal` · `contract`(그 글에 **적용된** 분량·사진·goalRules) 3축.
+ *   [R18] 영상 piece 에 `reuse`(원본: ask·fit·derived·skipped / 파생: origin·coin 0·line) · 목록 행에 `originPieceId`(number|null)
+ *   POST /api/pieces-reuse { id, channels: string[], remember: boolean } → { videoReuse, reuse, created, skip }   // «처음 한 번 묻기»의 답 · 정본 lib/video/reuse.ts
  */
 import { json, jsonError, badRequest } from "../../lib/response";
 import { readJson } from "../../lib/validate";
@@ -33,9 +35,10 @@ import { formatUnusedOf } from "../../lib/format-marks";           // [R9-5] «�
 import { formatCapsOf } from "../../lib/channel-registry";         // [R9-4] 채널 꾸밈 표
 import { ruleKindOfPiece } from "../../lib/slots";                  // [R11-1] 화면 어휘(RuleKind) 투영 — 정본 한 곳
 import { toCoinTier } from "../../lib/coin-table";                 // [R10-7] 등급 — 글이 들고 있는 값 그대로
+import { pieceReuseView, answerReuse, videoReuseView, holdDerivedFor } from "../../lib/video/reuse";   // [R18] 한 영상 여러 곳 — 정본 한 벌
 import { sql } from "drizzle-orm";
 
-export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update"] };
+export const config = { path: ["/api/pieces-list", "/api/pieces-get", "/api/pieces-approve", "/api/pieces-reject", "/api/pieces-regenerate", "/api/pieces-update", "/api/pieces-reuse"] };
 /** netlify dev 는 함수가 404 를 내면 같은 경로에 `.html`·`.htm`·`/index.html` 을 붙여 다시 부른다(마지막 시도의 응답이 클라이언트에 간다)(정적 폴백) — 그 재시도가 경로 매칭에서 빠지면 엉뚱한 405 가 보인다. 꼬리를 떼고 맞춘다. */
 const routeOf = (req: Request) => new URL(req.url).pathname.replace(/\/index\.html?$/, "").replace(/\.html?$/, "");
 const n = (v: unknown) => Number(v || 0);
@@ -113,6 +116,8 @@ function pieceRow(r: Row): Record<string, unknown> {
     /* [R8 §5D] 어떻게 만들어졌나 — `self` 면 화면이 «내가 쓴 글»로 그리고 AI 티 얘기를 꺼내지 않는다(A 요청). 옛 글은 "auto". */
     origin: String(r.origin || "auto"),
     title: String(r.title || ""), status: String(r.status), stage: stageOf(r), gateOk: g ? !!g.ok : false, createdAt: utcDate(r.created_at)?.toISOString() ?? "",
+    /* [R18] 🔴 파생이면 원본 id — 목록에서 «같은 영상에서 왔다»를 가를 재료. 원본·일반 글은 null(없는 키가 아니라 null — 화면이 «모름»과 «원본»을 섞지 않게). */
+    originPieceId: r.origin_piece_id == null ? null : n(r.origin_piece_id),
   };
   const sf = utcDate(r.scheduled_for); if (sf) o.scheduledFor = sf.toISOString();
   const pa = utcDate(r.published_at); if (pa) o.publishedAt = pa.toISOString();
@@ -357,12 +362,30 @@ export default async (req: Request): Promise<Response> => {
           /** 자동 하향 사실(§2.3) — 있으면 화면이 «N초로 맞췄어요». */
           clampedFrom: ((m.video ?? {}) as { clampedFrom?: unknown }).clampedFrom ?? null,
         };
+        /* [R18] 🔴 한 영상 여러 곳 — 원본이면 «어디 가고 어디 빠지나»와 «처음 한 번 묻기», 파생이면 «어디서 왔나 · 코인 0».
+           못 실으면 null(말을 지어내지 않는다) — 이 칸 하나 때문에 검수 화면 전체가 500 이 되지 않게 따로 잡는다. */
+        detail.reuse = await pieceReuseView(tid, p).catch((e) => { console.warn("[pieces] reuse 보기 실패", String((e as Error)?.message ?? e).slice(0, 120)); return null; });
       }
       return json({ ok: true, piece: detail });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
     const b = await readJson<Record<string, unknown>>(req);
     const id = n(b.id); if (!id) return badRequest("id");
+    /* ── [R18] «처음 한 번 묻기»의 답 — 고른 채널 · «앞으로도 이렇게». 🔴 판정·저장·파생은 `lib/video/reuse.ts answerReuse` 한 곳.
+       파생은 새 글이라 계약(`requireWritable` · 체험 종료 readonly)을 탄다 — 우리 판단이 아니라 계약이다(§9 밖). ── */
+    if (path.endsWith("/pieces-reuse")) {
+      const w = await requireWritable(tid); if (!w.ok) return w.res;
+      const r = await answerReuse(tid, id, { channels: b.channels, remember: b.remember }, n(auth.user.uid) || null);
+      if (!r.ok) return json({ ok: false, step: r.step, error: r.error }, r.status);
+      const [p2] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${id}`);
+      const view = p2 ? await pieceReuseView(tid, p2) : null;
+      /* `skip` — 지금 만들었으면 만들 때 빠진 것, 아직 검수 중이라 적어만 뒀으면 **승인 때 빠질 것**(같은 `reuseFit` 이 잰 값). */
+      const skip = r.derive?.ok ? r.derive.skip : view?.role === "origin" ? view.fit.skip : [];
+      return json({ ok: true, videoReuse: await videoReuseView(tid, r.setting), reuse: view,
+        created: r.derive?.ok ? r.derive.created : [], skip,
+        /* 원본이 아직 못 올라가는 상태(실패·버림)면 파생을 못 만든다 — 그 사실 한 줄(설정은 이미 저장됐다). */
+        ...(r.derive && !r.derive.ok ? { note: r.derive.error } : {}) });
+    }
     // P1R4 §1.3 — readonly·suspended 는 재생성 금지. 글을 찾기 전에 재서 403 이 404 보다 먼저.
     if (path.endsWith("/pieces-regenerate")) {
       const w = await requireWritable(tid); if (!w.ok) return w.res;
@@ -405,11 +428,20 @@ export default async (req: Request): Promise<Response> => {
       /* [P1R7 B3] 자리는 'rejected' — 'skipped' 는 «이날은 쉰다»(사용자가 편성표에서 건너뛴 날)라 둘을 한 어휘로 두면
          편성표에서 «내가 버린 글»과 «쉬는 날»이 같은 칩으로 보인다(전수조사 §5B.6). 자리를 다시 만들지 않는 것은 둘 다 같다. */
       if (p.slot_id) await q(sql`UPDATE slots SET status = 'rejected', note = ${reason || "버림"}, updated_at = NOW() WHERE id = ${n(p.slot_id)}`);
-      await writeAudit({ tenantId: tid, action: "piece_reject", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { reason } });
-      return json({ ok: true, status: "rejected" });
+      /* [R18] 🔴 원본 영상을 버리면 **아직 안 나간 파생도 같이** 버린다 — 안 그러면 고객이 버린 영상이 다른 곳엔 그대로 나간다.
+         이미 나갔거나 나가는 중인 파생은 건드리지 않는다(«내리기»의 몫). 화면은 `derivedRejected` 로 «같은 영상 N곳도 같이 내렸어요»를 말한다. */
+      const derivedRejected = String(p.kind) === "video" && p.origin_piece_id == null ? await holdDerivedFor(tid, id, "reject") : [];
+      await writeAudit({ tenantId: tid, action: "piece_reject", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), target: `piece:${id}`, detail: { reason, ...(derivedRejected.length ? { derivedRejected } : {}) } });
+      return json({ ok: true, status: "rejected", ...(derivedRejected.length ? { derivedRejected } : {}) });
     }
     if (path.endsWith("/pieces-regenerate")) {
       const isVideo = String(p.kind || "post") === "video";
+      /* [R18] 🔴 **파생은 다시 굽지 않는다** — 원본과 같은 파일(`r2_key`)을 가리키는 글이라 여기서 다시 만들면
+         ①원본과 다른 영상이 되고 ②코인 0 인 글에 생성비가 든다(§4.7 «승계 무료»를 거꾸로 뚫는다).
+         다시 만들 길은 **원본**에 있다 — «사실 + 다음 수»(§3). */
+      if (p.origin_piece_id != null && n(p.origin_piece_id)) {
+        return json({ ok: false, step: "derived", error: "이 영상은 원본 영상을 그대로 올리는 거예요 — 다시 만들려면 원본에서 다시 만들어 주세요.", originPieceId: n(p.origin_piece_id) }, 400);
+      }
       if (st === "generating") {
         // ★C4 fix: 배경 함수가 죽어 «만드는 중»에 갇힌 글은 다시 만들기가 거부되어 사용자가 빠져나갈 길이 없었다 —
         //   20분 넘게 그대로면 코인 재차감 0(같은 ref)으로 한 번 더 건다. 다시 실패하면 triggerGenerate 가 failed+환급+알림으로 내린다.
@@ -484,6 +516,9 @@ export default async (req: Request): Promise<Response> => {
         }
       }
       if (isVideo) {
+        /* [R18] 🔴 원본을 다시 만들면 **아직 안 나간 파생의 시각을 푼다** — 파생은 옛 파일(`r2_key`)을 들고 있어서
+           그대로 두면 원본은 새 영상, 다른 곳엔 **고객이 싫다고 다시 만든 옛 영상**이 나간다. 다시 승인되면 새 영상으로 갈아 끼운다. */
+        await holdDerivedFor(tid, id, "regenerate");
         /* 🔴 영상 «다시 만들기»는 **정말 다시 만든다** — 대본·문장 음성·컷을 지우지 않으면 `generateVideo` 의 이어받기가
            전부 «이미 있음»으로 건너뛰어 **같은 영상**이 다시 나온다(사용자 요청 note 가 반영되지 않는다).
            산출물만 지운다(원장·감사·piece 행은 그대로). 코인은 위 규칙대로(실패 환급분만 재차감 · 검수 단계 재생성은 0). */

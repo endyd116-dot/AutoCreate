@@ -3,6 +3,8 @@
  *   POST /api/onboarding { kinds: ["text","video"], channels: [...] } — settings 병합(read→merge→full write · AM jsonb 규율)
  *   GET  /api/tenant-settings                                        → { settings, kinds:["text"|"video"…], kindsSet } — [R7 §1.1] 화면이 토글 상태를 읽는다
  *   POST /api/tenant-settings { autoSchedule?: boolean, kinds?, ... } — 화이트리스트 키만 병합 · kinds 는 정규화(«글»은 항상 · 영상만 토글)
+ *   [R18] GET 응답 최상위 `videoReuse` = { on, channels, asked, askedAt, targets:[{channel,label,maxSeconds,connected}] }
+ *         POST { videoReuse: { on, channels } } → 같은 `videoReuse` · 저장은 `lib/video/reuse.ts saveVideoReuse` 한 곳
  *   🔴 `recipeVolunteer` 는 settings(jsonb) 가 아니라 **`tenants` 의 칸**이다(B2 §3.3 · drizzle/0051) — 배포 판정이 SQL 로 그 칸을 세기 때문.
  *      그래서 위 화이트리스트를 타지 않고 따로 받는다.
  */
@@ -27,6 +29,10 @@ const CHANNELS = new Set(["naver_blog", "tistory", "blogger", "wordpress", "thre
    🔴 여기서 재수출한다 — 이 이름으로 부르던 자리(rules.ts·onboarding 등)가 그대로 돌아야 한다(소급 0). */
 import { normalizeKinds, kindsView } from "../../lib/tenant-kinds";
 import { loadPause } from "../../lib/tenant-pause";   // 🔴 [AC-220] 쉼의 한 곳
+/* [R18] «영상을 여러 곳에 올리기» — 🔴 `settings.videoReuse` 를 쓰는 손은 `lib/video/reuse.ts` **하나**다.
+   화이트리스트(`ALLOWED_SETTINGS`)에 넣지 않은 까닭: 받은 값을 그대로 병합하면 후보 밖 채널(`youtube_long`)이 저장되고
+   «처음 한 번 물었나»(`askedAt`)가 찍히지 않는다. 정규화·askedAt 은 `saveVideoReuse` 한 곳에서. */
+import { saveVideoReuse, videoReuseView, readVideoReuse } from "../../lib/video/reuse";
 export { normalizeKinds, kindsView };
 
 /** [v1.1 P1-2] tenants.settings 병합의 단일 경로 — rules-settings(netlify/functions/rules.ts)도 이 함수를 쓴다(같은 jsonb 두 경로 금지). */
@@ -52,7 +58,9 @@ export default async (req: Request): Promise<Response> => {
       const settings = (rows[0]?.settings && typeof rows[0].settings === "object") ? rows[0].settings : {};
       /* 🔴 [AC-220 · DESIGN §5B.11(1-c)] «잠깐 멈춤» — `home-summary` 와 **같은 객체**를 싣는다(두 벌로 만들지 않는다).
          `days`·`daysLeft`·`reasons[].label` 을 **서버가** 주는 것이 핵심이다 — 안 주면 화면이 날짜를 셈하고 말을 지어낸다(AC-52·AC-74). */
-      return json({ ok: true, settings, ...kindsView(settings), recipeVolunteer: rows[0]?.recipe_volunteer === true, pause: await loadPause(auth.tid) });
+      /* [R18] `videoReuse` — 후보 목록·채널 상한·연결 여부를 **서버가** 준다(화면이 표를 베끼지 않는다 · AC-52). `settings.videoReuse`(저장 모양)와 다른 **보기**다. */
+      return json({ ok: true, settings, ...kindsView(settings), recipeVolunteer: rows[0]?.recipe_volunteer === true, pause: await loadPause(auth.tid),
+        videoReuse: await videoReuseView(auth.tid, readVideoReuse(settings)) });
     }
     if (req.method !== "POST") return json({ ok: false, error: "method" }, 405);
     if (path.endsWith("/onboarding")) {
@@ -80,13 +88,21 @@ export default async (req: Request): Promise<Response> => {
         await writeAudit({ tenantId: auth.tid, action: b.recipeVolunteer ? "recipe_volunteer_on" : "recipe_volunteer_off", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { recipeVolunteer: b.recipeVolunteer } });
       } else volunteerChanged = b.recipeVolunteer;   // 같은 값 = 멱등(감사 도배 0)
     }
+    /* ── [R18] «영상을 여러 곳에 올리기» { on, channels } — 켜고 끄고 채널 고르기. 🔴 한 번 저장하면 «처음 한 번 묻기»가 끝난다(askedAt). ── */
+    let reuseView: Awaited<ReturnType<typeof videoReuseView>> | null = null;
+    if (b.videoReuse && typeof b.videoReuse === "object" && !Array.isArray(b.videoReuse)) {
+      const vr = b.videoReuse as { on?: unknown; channels?: unknown };
+      const saved = await saveVideoReuse(auth.tid, { on: vr.on, channels: vr.channels });
+      reuseView = await videoReuseView(auth.tid, saved);
+      await writeAudit({ tenantId: auth.tid, action: "video_reuse_setting", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: { on: saved.on, channels: saved.channels } });
+    }
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(b)) if (ALLOWED_SETTINGS.has(k)) patch[k] = v;
     if (!Object.keys(patch).length) {
-      if (volunteerChanged !== null) {
+      if (volunteerChanged !== null || reuseView) {
         const rows = (await db.execute(sql`SELECT settings FROM tenants WHERE id = ${auth.tid}`)) as unknown as { settings: Record<string, unknown> }[];
         const settings = (rows[0]?.settings && typeof rows[0].settings === "object") ? rows[0].settings : {};
-        return json({ ok: true, settings, ...kindsView(settings), recipeVolunteer: volunteerChanged });
+        return json({ ok: true, settings, ...kindsView(settings), ...(volunteerChanged !== null ? { recipeVolunteer: volunteerChanged } : {}), ...(reuseView ? { videoReuse: reuseView } : {}) });
       }
       return badRequest("바꿀 값이 없어요.");
     }
@@ -113,6 +129,6 @@ export default async (req: Request): Promise<Response> => {
     if ("directorAuto" in patch) patch.directorAuto = patch.directorAuto === true;
     const settings = await mergeSettings(auth.tid, patch);
     await writeAudit({ tenantId: auth.tid, action: "tenant_settings_update", actorType: "user", actorId: auth.user.uid, ip: clientIp(req), detail: patch });
-    return json({ ok: true, settings, ...kindsView(settings), ...(volunteerChanged !== null ? { recipeVolunteer: volunteerChanged } : {}) });
+    return json({ ok: true, settings, ...kindsView(settings), ...(volunteerChanged !== null ? { recipeVolunteer: volunteerChanged } : {}), ...(reuseView ? { videoReuse: reuseView } : {}) });
   } catch (err) { return jsonError("tenant_settings", err); }
 };
