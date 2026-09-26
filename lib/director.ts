@@ -843,14 +843,45 @@ export async function remakeVideoFor(tid: number, originPieceId: number, channel
   const key = `${target}:${acc.id}`;
   const spec: PieceSpec = { ...base, channel: target, accountId: acc.id, accountHandle: acc.handle, key,
     schedule: { at, slotReason: `«${mine.label}»용 ${mine.remake.seconds}초 — 원본과 같은 소재` } };
+
+  /* 🔴 [C 실측 반례 · 2026-09-26] **동시에 두 번 누르면 두 번 받았다**(시드 집 812: 차감 1→3 · 새 영상 2개).
+     위 멱등 검사(`remakeOf` 로 찾기)는 차감 **앞**에 있고 `remakeOf` 는 차감 **뒤**에 붙어서, 그 사이(차감+INSERT+생성 호출 · 최대 6초)에
+     들어온 둘째 요청은 «아직 없음»을 봤다. 두 탭·재시도·더블탭이 이 창을 연다.
+     ⇒ **원본 행 한 줄의 조건부 UPDATE 로 «이 채널 판은 내가 만든다»를 먼저 잡는다**(`meta.remakeClaim[채널]`).
+        같은 행을 동시에 고치면 둘째는 행 잠금에서 기다렸다가 **바뀐 행으로 WHERE 를 다시 재서** 빠진다(READ COMMITTED) — 한 문장이라 사이가 없다.
+     다시 잡을 수 있는 때: 잡은 적 없음 · 잡았던 판이 `failed`·`rejected`(다시 만들고 싶다) · 잡기만 하고 10분 넘게 판이 안 붙음(도중에 죽었다).
+     확정이 실패하면(코인 부족 등) **놓는다** — 안 놓으면 충전하고 다시 눌러도 «만드는 중»에 갇힌다. */
+  const claimAt = new Date().toISOString();
+  const claimed = await q(sql`UPDATE pieces SET meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{remakeClaim}',
+        COALESCE(meta->'remakeClaim', '{}'::jsonb) || jsonb_build_object(${target}::text, ${jsonb({ at: claimAt })})), updated_at = NOW()
+      WHERE tenant_id = ${tid} AND id = ${originPieceId} AND (
+        (meta->'remakeClaim'->${target}::text) IS NULL
+        OR ((meta->'remakeClaim'->${target}::text->>'pieceId') IS NULL AND (meta->'remakeClaim'->${target}::text->>'at')::timestamptz < NOW() - interval '10 minutes')
+        OR EXISTS (SELECT 1 FROM pieces x WHERE x.tenant_id = ${tid} AND x.id::text = (pieces.meta->'remakeClaim'->${target}::text->>'pieceId') AND x.status IN ('failed','rejected'))
+      ) RETURNING id`);
+  if (!claimed.length) {
+    const [c] = await q(sql`SELECT meta->'remakeClaim'->${target}::text->>'pieceId' AS pid FROM pieces WHERE tenant_id = ${tid} AND id = ${originPieceId}`);
+    const bal = await balance(tid);
+    if (c?.pid) return { ok: true, briefId: 0, pieceIds: [n(c.pid)], coinsCharged: 0, coinsLeft: bal.balance, already: true };
+    return { ok: false, step: "in_progress", error: "방금 만들기 시작했어요 — 잠시 뒤 목록에 보여요. 코인은 한 번만 빠져요." };
+  }
+  const releaseClaim = () => q(sql`UPDATE pieces SET meta = jsonb_set(meta, '{remakeClaim}', COALESCE(meta->'remakeClaim', '{}'::jsonb) - ${target}::text), updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id = ${originPieceId}`);
+
   const [nb] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost)
     VALUES (${tid}, ${b.topic_id}, ${b.goal}, ${jsonb([spec])}, ${jsonb([`원본 영상 #${originPieceId} 이 ${seconds}초라 ${mine.label}(최대 ${mine.maxSeconds}초)용으로 새로 만들어요`])}, ${b.mode ?? "reviewed"}, ${"proposed"}, ${0}) RETURNING id`);
   const briefId = n(nb?.id);
-  const r = await confirm(tid, briefId, [{ key, video: { seconds: mine.remake.seconds } }], actorId, { origin: "manual" });
+  let r: ConfirmResult | { ok: false; step: string; error: string; need?: number; have?: number };
+  try { r = await confirm(tid, briefId, [{ key, video: { seconds: mine.remake.seconds } }], actorId, { origin: "manual" }); }
+  catch (e) { await releaseClaim().catch(() => {}); throw e; }
   if (!r.ok) {
-    /* 확정이 안 됐으면 새 지시서는 `proposed` 로 남는다(코인 0) — 지우지 않는다(원장·감사처럼 «시도했다»의 자국). */
+    /* 확정이 안 됐으면 새 지시서는 `proposed` 로 남는다(코인 0) — 지우지 않는다(원장·감사처럼 «시도했다»의 자국). 잡은 자리는 놓는다. */
+    await releaseClaim();
     return r as { ok: false; step: string; error: string; need?: number; have?: number };
   }
+  /* 잡은 자리에 판 id 를 붙인다 — 이제부터 이 채널 판의 멱등 정본은 이 칸이다(위 `remakeOf` 검사는 차례로 누른 경우의 빠른 길). */
+  await q(sql`UPDATE pieces SET meta = jsonb_set(meta, '{remakeClaim}', COALESCE(meta->'remakeClaim', '{}'::jsonb) || jsonb_build_object(${target}::text, ${jsonb({ at: claimAt, pieceId: r.pieceIds[0] ?? null })})), updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id = ${originPieceId}`);
   /* 이 새 영상이 **같이 덮을** 다른 «빠진» 채널 — 새 길이로 들어가고, 아직 그 채널 판이 없는 것(없으면 []). */
   const covered = new Set((await q(sql`SELECT channel FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND status NOT IN ('rejected','failed')`)).map((x) => String(x.channel)));
   const alsoTo = skipped.filter((x) => x.why === "too_long" && x.channel !== target && x.maxSeconds >= mine.remake!.seconds && !covered.has(x.channel)).map((x) => x.channel);

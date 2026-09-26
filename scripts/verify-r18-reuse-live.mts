@@ -126,7 +126,15 @@ async function main() {
     ok("코인이 모자라면 402 사유 — 조용히 0건 아님(시드 집 잔액 0)", !short.ok && short.step === "coin_short", JSON.stringify(short).slice(0, 160));
     await q(sql`INSERT INTO coin_ledger (tenant_id, kind, bucket, delta, reason, ref) VALUES (${tA}, 'grant', 'included', 200, ${"R18 실증 지급"}, ${`r18smoke:${stamp}`})`);
     const c0 = await consumeRows(tA);
-    const rm = await remakeVideoFor(tA, origin, "naver_clip", null);
+    /* 🔴 [C 반례] **동시에 두 번**(두 탭·재시도·더블탭) — 종전엔 둘 다 받았다(차감 +2 · 새 영상 2개). 이제 한 번만. */
+    const [rmA, rmB] = await Promise.all([remakeVideoFor(tA, origin, "naver_clip", null), remakeVideoFor(tA, origin, "naver_clip", null)]);
+    const charged = [rmA, rmB].filter((x) => x.ok && x.coinsCharged > 0);
+    const loser = [rmA, rmB].find((x) => !(x.ok && x.coinsCharged > 0));
+    const nRemake = n((await q(sql`SELECT COUNT(*)::int AS c FROM pieces WHERE tenant_id = ${tA} AND (meta->>'remakeOf') = ${String(origin)}`))[0]?.c);
+    ok("🔴 동시에 두 번 눌러도 받는 건 한 번 · 새 영상 1개", charged.length === 1 && nRemake === 1 && (await consumeRows(tA)) === c0 + 1,
+      `받은 요청 ${charged.length} · 새 영상 ${nRemake} · 진 쪽 ${JSON.stringify(loser && (loser.ok ? { already: loser.already, coins: loser.coinsCharged } : { step: loser.step }))}`);
+    ok("진 쪽은 조용한 0건이 아니라 사유를 준다(already 또는 in_progress)", !!loser && (loser.ok ? loser.already === true : loser.step === "in_progress"));
+    const rm = charged[0] ?? rmA;
     const [np] = rm.ok ? await q(sql`SELECT id, channel, status, origin_piece_id, meta, account_id FROM pieces WHERE id = ${rm.pieceIds[0]}`) : [];
     const nm = (np?.meta ?? {}) as Row;
     ok("새 영상 — 네이버 클립 · 30초 · 파생 아님(origin_piece_id NULL) · remakeOf 원본", rm.ok && np?.channel === "naver_clip" && ((nm.video as Row)?.seconds === 30) && np?.origin_piece_id == null && n(nm.remakeOf) === origin,
