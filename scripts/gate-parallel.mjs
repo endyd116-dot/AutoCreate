@@ -259,7 +259,8 @@ function addLane(L, hash) {
 }
 
 /* ───────────────────────── 자 하나 돌리기 ───────────────────────── */
-const RUN_ID = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+/* 판 이름은 KST(CLAUDE §4.5b — 표시는 KST) · 끝에 «KST» 를 붙여 헷갈리지 않게 */
+const RUN_ID = `${new Date(Date.now() + 9 * 3600_000).toISOString().replace(/[:.]/g, "-").slice(0, 19)}KST`;
 const LOGDIR = `${ROOT}/ac-gate-logs/${RUN_ID}`;
 const PENDING = pendingRed(SRC);
 const results = [];
