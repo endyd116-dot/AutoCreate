@@ -7,11 +7,21 @@
  *   🔴 발행은 하지 않는다 — 파생은 `scheduled_for NULL` 이라 발행 크론이 안 줍고, 이 스크립트도 publish 를 안 부른다.
  *   🔴 **영상 생성도 하지 않는다** — «30초 판 새로 만들기»는 `confirm` → `triggerVideo` 를 부르는데, `.env` 에 라이브 주소와
  *      `INTERNAL_SECRET` 이 있으면 **라이브 배경 함수를 불러 진짜 Veo·TTS 가 돈다**(AC-53 · $3.63 실측). 그래서 맨 위에서
- *      `INTERNAL_SECRET` 을 비운다 → `triggerVideo` 가 네트워크 전에 멈추고 failed + 환급 + 알림으로 남긴다(돈 경로만 잰다).
+ *      **127.0.0.1 스텁(202)** 을 띄우고 `URL` 을 거기로 · 비밀값은 가짜로 둔다 → 생성 호출은 스텁에만 닿고 판은 `generating` 에 머문다.
+ *      🔴 [C 지적 · 2026-09-26] 처음엔 비밀값을 **비웠다** — 그러면 판이 곧바로 `failed` 가 되어 «잡았던 판이 failed 면 다시 잡는다»에 걸려
+ *         «동시에 두 번» 재기가 **운 좋게 초록**일 수 있었다(퓨즈가 잰 것을 흐린다). 스텁은 판을 살려 둔다. `backgroundBase` 안전핀도 로컬 주소만 통과시킨다.
  */
 import "./_lib/load-env.mjs";
-process.env.INTERNAL_SECRET = "";   // 🔴 위 머리말 — 라이브 배경 함수를 절대 부르지 않게(모듈이 값을 읽는 건 호출 때라 여기서 비우면 된다)
-delete process.env.SITE_URL; delete process.env.URL; delete process.env.DEPLOY_PRIME_URL;   // 🔴 이중으로 — 비밀이 남아도 부를 주소가 없다(`backgroundBase` 가 던진다)
+/* 🔴 생성 호출은 **로컬 스텁에만** — 라이브 주소를 절대 안 쥔다(아래에서 URL 호스트를 다시 재고 아니면 멈춘다). */
+import { createServer } from "node:http";
+let stubHits = 0;
+const stub = createServer((req, res) => { stubHits++; req.resume(); res.writeHead(202, { "Content-Type": "application/json" }); res.end("{}"); });
+await new Promise<void>((r) => stub.listen(0, "127.0.0.1", () => r()));
+const stubPort = (stub.address() as { port: number }).port;
+delete process.env.SITE_URL; delete process.env.DEPLOY_PRIME_URL;
+process.env.URL = `http://127.0.0.1:${stubPort}`;
+process.env.INTERNAL_SECRET = "r18-live-stub-secret";   // 가짜 — 스텁은 안 본다
+if (new URL(String(process.env.URL)).hostname !== "127.0.0.1") { console.error("🔴 URL 이 로컬이 아니다 — 멈춘다"); process.exit(3); }
 import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";
@@ -141,7 +151,7 @@ async function main() {
       JSON.stringify(rm.ok ? { id: rm.pieceIds, coins: rm.coinsCharged, st: np?.status, sec: (nm.video as Row)?.seconds, alsoTo: rm.alsoTo } : rm).slice(0, 200));
     ok("🔴 새 영상이라 코인은 그 길이 값 한 번(원장 consume +1행)", rm.ok && rm.coinsCharged === coinCostOf(videoCoinItem(30)) && (await consumeRows(tA)) === c0 + 1, `charged ${rm.ok ? rm.coinsCharged : "-"}`);
     ok("같이 덮을 다른 빠진 채널 없음 → reuseChannels [] 로 적힌다(승인 때 릴스·틱톡에 두 번 안 간다)", Array.isArray(nm.reuseChannels) && (nm.reuseChannels as unknown[]).length === 0);
-    ok("생성은 안 불렀다(INTERNAL_SECRET 비움) → failed + 환급으로 정직하게 남는다", np?.status === "failed", String(np?.status));
+    ok("생성 호출은 로컬 스텁에만 닿았다(라이브 0) · 판은 generating 에 머문다", np?.status === "generating" && stubHits >= 1, `${String(np?.status)} · 스텁 ${stubHits}번`);
     await q(sql`UPDATE pieces SET status = 'in_review' WHERE id = ${n(np?.id)}`);   // 만들어졌다고 친다(멱등을 재려고)
     const rm2 = await remakeVideoFor(tA, origin, "naver_clip", null);
     ok("🔴 두 번 눌러도 새로 0 · 코인 0 — 같은 id", rm2.ok && rm2.already === true && rm2.coinsCharged === 0 && rm2.pieceIds[0] === n(np?.id));
@@ -166,7 +176,7 @@ async function main() {
     const o90b = await mk90(["naver_clip", "youtube_shorts"]);   // 둘 다 골랐다
     const rb = await remakeVideoFor(tA, o90b, "naver_clip", null);
     ok("둘 다 골랐으면 클립용 30초 판이 쇼츠도 덮는다 — alsoTo [youtube_shorts]", rb.ok && JSON.stringify(rb.alsoTo) === JSON.stringify(["youtube_shorts"]), JSON.stringify(rb.ok ? rb.alsoTo : rb).slice(0, 120));
-    if (rb.ok) await q(sql`UPDATE pieces SET status = 'in_review' WHERE id = ${rb.pieceIds[0]}`);   // 만들어졌다고 친다(생성은 막아 뒀다 — 실패한 판은 덮지 않는 게 맞다)
+    // 스텁 덕에 판이 generating 에 머문다 — 「만들어졌다고 친다」 손질이 필요 없다(실패한 판은 덮지 않는 게 맞다 · 그건 위 멱등 쪽이 잰다)
     const cB = await consumeRows(tA);
     const rc = await remakeVideoFor(tA, o90b, "youtube_shorts", null);
     ok("🔴 그 뒤 «쇼츠용» 을 눌러도 안 만든다(step covered · 코인 0 · 유튜브 두 번 0)", !rc.ok && rc.step === "covered" && (await consumeRows(tA)) === cB, rc.ok ? "만들었다" : rc.error);
@@ -238,7 +248,7 @@ async function main() {
 
     console.log("\n⑧ 🔴 제공사 돈 — 코인 원장 0 ≠ 제공사 돈 0(메인 지적) · `ai_usage` 도 센다");
     const ai = n((await q(sql`SELECT COUNT(*)::int AS c FROM ai_usage WHERE tenant_id IN (${tA}, ${tB})`))[0]?.c);
-    ok("시드 집 두 곳의 ai_usage = 0행(생성 호출 전에 멈췄다)", ai === 0, `${ai}행`);
+    ok("시드 집 두 곳의 ai_usage = 0행(생성 호출은 로컬 스텁에만 닿았다)", ai === 0, `${ai}행`);
     const gen = n((await q(sql`SELECT COUNT(*)::int AS c FROM runner_jobs WHERE tenant_id IN (${tA}, ${tB})`))[0]?.c);
     ok("렌더 잡 0건(러너가 구울 것도 없다)", gen === 0, `${gen}건`);
   } finally {
@@ -251,6 +261,7 @@ async function main() {
     const left = n((await q(sql`SELECT COUNT(*)::int AS c FROM pieces WHERE tenant_id IN (${tA}, ${tB})`))[0]?.c);
     console.log(`\n   (시드 집 ${tA}·${tB} 정리 완료 · 남은 piece ${left})`);
     await pgClient.end({ timeout: 5 });
+    stub.close();
   }
   console.log(`\n${fail ? "🔴" : "✅"} R18 라이브 실증 — 통과 ${pass} · 실패 ${fail}`);
   process.exit(fail ? 1 : 0);
