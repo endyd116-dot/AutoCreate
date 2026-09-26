@@ -43,9 +43,12 @@ function run(transform, only) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "ac-hand-"));
   try {
     copyDir(path.join(ROOT, "public"), path.join(dir, "public"));
-    mkdirSync(path.join(dir, "scripts", "lib"), { recursive: true });
+    /* 🔴 [2026-09-27 C · R19 C0 — 배포 체인 첫 판이 잡았다] 도우미 폴더가 `scripts/lib` → `scripts/_lib` 로 옮겨졌는데(851edf3 · 09-23)
+       이 하니스는 옛 자리를 복사하다 ENOENT 로 **변이 5개를 전부 «못 넣었다»** — 09-23 부터 main 에서 늘 빨강이었고 아무도 안 돌렸다.
+       ⇒ 파일 하나를 이름으로 집지 않고 **`_lib` 통째로** 옮긴다(자가 도우미를 하나 더 부르게 돼도 안 깨진다). */
+    mkdirSync(path.join(dir, "scripts"), { recursive: true });
     copyFileSync(RULER, path.join(dir, "scripts", "verify-hand-on-button.mjs"));
-    copyFileSync(path.join(ROOT, "scripts", "lib", "find-playwright.mjs"), path.join(dir, "scripts", "lib", "find-playwright.mjs"));
+    copyDir(path.join(ROOT, "scripts", "_lib"), path.join(dir, "scripts", "_lib"));
     /* 🔴 playwright 는 **원래 리포**에서 빌려 온다 — 사본에 node_modules 를 복사하지 않는다. */
     const changed = transform ? transform(dir) : true;
     let code = 0, out = "";

@@ -45,11 +45,11 @@ export interface ReuseRow {
 /** ② 가족의 한 사람 — `at` 은 ISO 문자열·Date·없음. */
 export interface FamilyMember { pieceId: number; channel: string; at: string | Date | null }
 
-export const FORBIDDEN_REUSE: readonly string[];
-export const HARD_WORDS: readonly string[];
-export const SCARY: readonly (readonly [RegExp, string])[];
-export const GOOD_WORDS: readonly WordItem[];
-export const BAD_WORDS: readonly (readonly [WordItem, string])[];
+export declare const FORBIDDEN_REUSE: readonly string[];
+export declare const HARD_WORDS: readonly string[];
+export declare const SCARY: readonly (readonly [RegExp, string])[];
+export declare const GOOD_WORDS: readonly WordItem[];
+export declare const BAD_WORDS: readonly (readonly [WordItem, string])[];
 
 export function secondsForms(sec: unknown): string[];
 export function lengthsIn(text: unknown): number[];

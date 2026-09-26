@@ -75,8 +75,11 @@ const SCENES = [
   { key: "create-sheet", url: q("/app/create.html"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rfList .stylerow" }],
     need: ["잘 된 글 주소", "이번 달 2/30개", "숫자와 목록", "남의 문장은 한 줄도 저장하지 않아요", "배운 스타일", "살림 블로그 스타일", "정리형 리뷰", "1.8배", "주소로 못 열면"], forbid: ["summary", "captionRate"], sheet: true,
     actions2: [{ click: "#rfList [data-open]" }, { wait: "#rfList [data-body]:not([hidden])" }], need2: ["문단 2~3줄", "이모지 ✅📌💡 를 문단 첫머리에", "밑줄 5곳", "사진 7장", "뼈대 · 첫 줄 → 소제목 → 문단", "기본에서 풀기", "지우기"] },
-  { key: "ref-ok", url: q("/app/create.html"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rf input[name=url]" }, { fill: ["#rf input[name=url]", "https://blog.naver.com/someone/223000000"] }, { click: "#rfGo" }, { wait: "#rfState:not([hidden])" }, { sleep: 1500 }],
-    need: ["차례를 기다리고 있어요"], forbid: [], sheet: true,
+  { key: "ref-ok", url: q("/app/create.html"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rf input[name=url]" }, { fill: ["#rf input[name=url]", "https://blog.naver.com/someone/223000000"] }, { click: "#rfGo" }, { wait: "#rfState:not([hidden])" }, { waitText: "차례를 기다리고 있어요" }],
+    /* 🔴 [2026-09-27 C · R19 C0 — 배포 체인이 잡은 흔들림] «차례를 기다리고 있어요»는 **지나가는** 단계(첫 물음 ~1.2초 뒤 다음 단계로 간다)다.
+       `sleep 1500` 뒤에 읽으면 브라우저 셋이 같이 도는 체인에서 **이미 지나가** 4판 중 1판이 빨갰다(혼자 돌리면 565/565 초록).
+       ⇒ 그 글자는 `waitText` 로 **나타나는 순간** 잰다(12초 안에 안 나오면 «장면이 끝까지 가지 못했다»로 빨강). 뒤에 다시 읽는 `need` 에서는 뺀다. */
+    need: [], forbid: [], sheet: true,
     actions2: [{ waitText: "아래 «배운 스타일»에서" }], need2: ["배웠어요 · 새로 배운 스타일", "이번 달 3/30개"] },
   { key: "ref-fail", url: q("/app/create.html?ref=fail"), wait: "#refPost:not([hidden])", actions: [{ click: "#refPost" }, { wait: "#rf input[name=url]" }, { fill: ["#rf input[name=url]", "https://blog.naver.com/someone/223000001"] }, { click: "#rfGo" }, { waitText: "로그인해야 보이는 글이라" }],
     need: ["로그인해야 보이는 글이라 저희가 못 열었어요", "2~6장 찍어서 올려 주세요", "찍은 화면 올리기", "글을 붙여 넣기"], forbid: ["login_wall", "책임", "불이익"], sheet: true,
