@@ -1390,7 +1390,7 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
       if (!REUSE_CANDS.includes(ch) || !max) return err("channel", "그 채널엔 올릴 수 없어요.");
       if (sec0 <= max) return err("fits", `이 영상은 이미 ${chLabelOf(ch)}에 들어가요.`);
       if (!vrConnected(ch) && !vrConnectable(ch)) return err("not_connectable", `${chLabelOf(ch)} 연결은 아직 준비 중이에요 — 연결이 열리면 여기서 새로 만들 수 있어요.`);   // [R19 · B ⑧] 계정 없고 연결도 못 받는 채널
-      if (!vrConnected(ch)) return err("no_account", `${chLabelOf(ch)} 계정이 아직 연결되지 않았어요.`);
+      if (!vrConnected(ch)) return err("no_account", `${chLabelOf(ch)} 계정이 아직 연결되지 않았어요 — 연결하시면 새로 만들 수 있어요.`);   // [R19 · A] 서버 lib/director.ts 글자로 맞춤(R18 부터 모의만 «…않았어요.»에서 끊겨 있었다)
       const sec = Math.max(...[15, 30, 60, 90].filter((s) => s <= max));
       const had = S.pieces.find((x) => x.meta && x.meta.remakeOf === p.id && x.channel === ch);
       if (had) return { ok: true, briefId: null, pieceIds: [had.id], coinsCharged: 0, coinsLeft: S.coins, seconds: sec, alsoTo: (had.meta.reuseChannels || []).slice(), already: true };
