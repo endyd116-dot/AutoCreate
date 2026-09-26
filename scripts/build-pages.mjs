@@ -32,7 +32,11 @@ const TARGETS = [
 ];
 
 /* [R7 §4.4] 앱 판 번호 — 사람이 올리는 걸 잊는다. **빌드가 오늘(KST)을 박는다**(설정 «앱 정보»에 보이는 그 값).
-   ui.js 의 상수는 폴백이다(빌드를 안 돌린 사본에서도 칸이 비지 않게) · 날짜가 같으면 파일을 건드리지 않는다(쓸데없는 diff 금지). */
+   ui.js 의 상수는 폴백이다(빌드를 안 돌린 사본에서도 칸이 비지 않게) · 날짜가 같으면 파일을 건드리지 않는다(쓸데없는 diff 금지).
+   🔴 [R18 · C · 2026-09-26] **`--check` 에서는 쓰지 않는다.** 이 블록이 모드와 상관없이 맨 먼저 돌아서
+   «✓ 정본과 생성물이 같다 · 종료 0»을 찍는 **검사**가 `ui.js` 를 오늘 날짜로 고쳐 놓았다(메인·A 가 밟았다 · 메인 실측).
+   그 한 줄이 `git add -A` 에 딸려 들어가고, 되돌리려던 `git checkout ui.js` 가 **A 의 R18 줄까지** 날렸다.
+   🔴 «잰다»는 도구가 «쓴다»면 그 도구를 돌린 모든 창이 몰래 더러워진다 — 검사는 **말만** 한다. 자: `scripts/verify-check-writes-nothing.mjs`. */
 {
   const ver = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }).split("-").join(".");
   const p = "public/js/ui.js"; const src = readFileSync(p, "utf8");
@@ -41,7 +45,8 @@ const TARGETS = [
   else {
     const s = i + "UI.APP_VERSION = \"".length; const e = src.indexOf("\"", s);
     const cur = src.slice(s, e);
-    if (cur !== ver) { writeFileSync(p, src.slice(0, s) + ver + src.slice(e), "utf8"); console.log(`public/js/ui.js: 판 번호 ${cur} → ${ver}`); }
+    if (cur !== ver && CHECK) console.log(`public/js/ui.js: 판 번호 ${cur} — 빌드하면 ${ver} 로 바뀐다(--check 라 안 썼다)`);
+    else if (cur !== ver) { writeFileSync(p, src.slice(0, s) + ver + src.slice(e), "utf8"); console.log(`public/js/ui.js: 판 번호 ${cur} → ${ver}`); }
   }
 }
 
