@@ -152,6 +152,54 @@ if (alive.reuseFit && alive.VIDEO_REUSE_TARGETS && alive.VIDEO_CHANNEL_MAX_SEC) 
   rec("④ 빠진 채널 문구", "unmeasured", `과녁 없음 — ${TARGETS.reuse.file} reuseFit().skip[].line/how (B)`);
 }
 
+/** 파생 가족을 DB 에서 읽어 ①②③ + §4.6 을 잰다 — 🔴 라이브(`--db`)와 리허설 집(`--rehearse`)이 **같은 몸통**을 쓴다.
+ *   리허설에서 한 번 돌려야 이 접합부(SQL·묶기·to_char)가 **실제 행으로** 산다 — 라이브는 파생이 0개라 여기가 늘 ⊘ 였다(AC-236). */
+async function liveArm(sql: any, scopeTid: number | null, tag: string): Promise<void> {
+  const derived = await sql`SELECT id, tenant_id, origin_piece_id, channel, status, to_char(COALESCE(published_at, scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at FROM pieces WHERE origin_piece_id IS NOT NULL AND (${scopeTid}::bigint IS NULL OR tenant_id = ${scopeTid}) ORDER BY id`;
+  rec(`⓪ ${tag} 모수 — 파생 piece`, derived.length ? "pass" : "unmeasured", derived.length ? `${derived.length}개 · 집 ${new Set(derived.map((d) => d.tenant_id)).size}곳` : "🔴 0개 — 아래 ①②③ 은 ⊘(트리거 §0-b · 영상 채널이 아직 전부 planned)");
+  if (!derived.length) {
+    rec(`① 코인 — 파생의 원장 0행(${tag})`, "unmeasured", "표본 0");
+    rec(`② 같은 분에 N곳 없음(${tag})`, "unmeasured", "표본 0");
+    rec(`③ 나간 채널에 youtube_long 없음(${tag})`, "unmeasured", "표본 0");
+    return;
+  }
+  const originIds = [...new Set(derived.map((d) => Number(d.origin_piece_id)))];
+  const origins = await sql`SELECT id, tenant_id, channel, to_char(COALESCE(published_at, scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, (meta->'video'->>'seconds') AS secs FROM pieces WHERE id = ANY(${originIds})`;
+  const oById = new Map(origins.map((o) => [Number(o.id), o]));
+  const tids = [...new Set(derived.map((d) => Number(d.tenant_id)))];
+  const ledger = await sql`SELECT tenant_id, kind, ref, delta FROM coin_ledger WHERE kind = 'consume' AND tenant_id = ANY(${tids}) AND ref LIKE 'piece:%'`;
+
+  /* ① 집마다 */
+  const coin = { verdict: "pass" as V, measured: 0, findings: [] as Record<string, unknown>[], note: "" };
+  for (const tid of tids) {
+    const r = judgeCoin({ derivedIds: derived.filter((d) => Number(d.tenant_id) === tid).map((d) => Number(d.id)), ledger: ledger.filter((l) => Number(l.tenant_id) === tid) });
+    coin.measured += r.measured; coin.findings.push(...r.findings); coin.note = r.note ?? "";
+  }
+  coin.verdict = coin.findings.length ? "fail" : "pass";
+  report(`① 코인 — 파생 piece 가 원장에 0행(${tag})`, coin, "파생");
+
+  /* ② 가족 — 원본 + 파생 · 나갔으면 나간 시각, 아니면 예약 시각 */
+  const at = (r: Record<string, unknown>) => (r.at ?? null) as string | null;   // SQL 이 UTC 문자열로 준다(to_char)
+  const fams = originIds.map((oid) => {
+    const o = oById.get(oid);
+    const kids = derived.filter((d) => Number(d.origin_piece_id) === oid);
+    return { originId: oid, members: [...(o ? [{ pieceId: oid, channel: String(o.channel), at: at(o) }] : []), ...kids.map((d) => ({ pieceId: Number(d.id), channel: String(d.channel), at: at(d) }))] };
+  });
+  report(`② 같은 분에 N곳 없음(${tag} · 원본+파생 가족)`, judgeMinutes(fams), "가족");
+
+  /* ③ 나간/잡힌 채널 */
+  const rows = originIds.map((oid) => {
+    const o = oById.get(oid);
+    return { source: String(o?.channel ?? ""), seconds: Number(o?.secs) || 0, targets: derived.filter((d) => Number(d.origin_piece_id) === oid).map((d) => String(d.channel)), skipped: [] };
+  });
+  const MAXDB = Object.keys(MAX).length ? MAX : null;
+  report(`③ 파생 채널에 youtube_long 없음 · 원본 채널 다시 없음(${tag})`, judgeReuse(rows, { maxOf: MAXDB ? maxOf : () => 1e9 }), `가족${MAXDB ? "" : " (상한 표를 못 읽어 길이 판정은 빼고)"}`);
+
+  /* 덤 — §4.6 파생이 원본과 **같은 집**인가(교차 누수는 코인·편성 어느 축보다 크다) */
+  const cross = derived.filter((d) => { const o = oById.get(Number(d.origin_piece_id)); return !o || Number(o.tenant_id) !== Number(d.tenant_id); });
+  rec(`덤 — 파생이 원본과 같은 집이다(§4.6 · ${tag})`, cross.length ? "fail" : "pass", cross.length ? `[덤 cross_tenant] 🔴 ${cross.length}개: ${cross.slice(0, 5).map((d) => `piece ${d.id}(집 ${d.tenant_id}) ← 원본 ${d.origin_piece_id}`).join(" · ")}` : `파생 ${derived.length}개 전부`);
+}
+
 /* ═══ DB 팔 — 라이브 **읽기 전용** ①②③ ═══ */
 if (!DB) {
   rec("①② DB 팔", "unmeasured", "`--db` 없이 돌렸다 — 코인 원장·가족의 분은 데이터가 있어야 잰다");
@@ -161,49 +209,7 @@ if (!DB) {
     await pgClient.begin("read only", async (sql: typeof pgClient) => {
       const [col] = await sql`SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'pieces' AND column_name = 'origin_piece_id'`;
       if (!col?.n) { rec("①②③ DB 팔 — 과녁 칸 `pieces.origin_piece_id`", "unmeasured", "과녁 없음 — 라이브에 칸이 아직 없다(DDL 0088 · B)"); return; }
-      const derived = await sql`SELECT id, tenant_id, origin_piece_id, channel, status, to_char(COALESCE(published_at, scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at FROM pieces WHERE origin_piece_id IS NOT NULL ORDER BY id`;
-      rec("⓪ DB 모수 — 라이브의 파생 piece", derived.length ? "pass" : "unmeasured", derived.length ? `${derived.length}개 · 집 ${new Set(derived.map((d) => d.tenant_id)).size}곳` : "🔴 0개 — 아래 ①②③ 은 ⊘(트리거 §0-b · 영상 채널이 아직 전부 planned)");
-      if (!derived.length) {
-        rec("① 코인 — 파생의 원장 0행(DB)", "unmeasured", "표본 0");
-        rec("② 같은 분에 N곳 없음(DB)", "unmeasured", "표본 0");
-        rec("③ 나간 채널에 youtube_long 없음(DB)", "unmeasured", "표본 0");
-        return;
-      }
-      const originIds = [...new Set(derived.map((d) => Number(d.origin_piece_id)))];
-      const origins = await sql`SELECT id, tenant_id, channel, to_char(COALESCE(published_at, scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, (meta->'video'->>'seconds') AS secs FROM pieces WHERE id = ANY(${originIds})`;
-      const oById = new Map(origins.map((o) => [Number(o.id), o]));
-      const tids = [...new Set(derived.map((d) => Number(d.tenant_id)))];
-      const ledger = await sql`SELECT tenant_id, kind, ref, delta FROM coin_ledger WHERE kind = 'consume' AND tenant_id = ANY(${tids}) AND ref LIKE 'piece:%'`;
-
-      /* ① 집마다 */
-      const coin = { verdict: "pass" as V, measured: 0, findings: [] as Record<string, unknown>[], note: "" };
-      for (const tid of tids) {
-        const r = judgeCoin({ derivedIds: derived.filter((d) => Number(d.tenant_id) === tid).map((d) => Number(d.id)), ledger: ledger.filter((l) => Number(l.tenant_id) === tid) });
-        coin.measured += r.measured; coin.findings.push(...r.findings); coin.note = r.note ?? "";
-      }
-      coin.verdict = coin.findings.length ? "fail" : "pass";
-      report("① 코인 — 파생 piece 가 원장에 0행(DB)", coin, "파생");
-
-      /* ② 가족 — 원본 + 파생 · 나갔으면 나간 시각, 아니면 예약 시각 */
-      const at = (r: Record<string, unknown>) => (r.at ?? null) as string | null;   // SQL 이 UTC 문자열로 준다(to_char)
-      const fams = originIds.map((oid) => {
-        const o = oById.get(oid);
-        const kids = derived.filter((d) => Number(d.origin_piece_id) === oid);
-        return { originId: oid, members: [...(o ? [{ pieceId: oid, channel: String(o.channel), at: at(o) }] : []), ...kids.map((d) => ({ pieceId: Number(d.id), channel: String(d.channel), at: at(d) }))] };
-      });
-      report("② 같은 분에 N곳 없음(DB · 원본+파생 가족)", judgeMinutes(fams), "가족");
-
-      /* ③ 나간/잡힌 채널 */
-      const rows = originIds.map((oid) => {
-        const o = oById.get(oid);
-        return { source: String(o?.channel ?? ""), seconds: Number(o?.secs) || 0, targets: derived.filter((d) => Number(d.origin_piece_id) === oid).map((d) => String(d.channel)), skipped: [] };
-      });
-      const MAXDB = Object.keys(MAX).length ? MAX : null;
-      report("③ 파생 채널에 youtube_long 없음 · 원본 채널 다시 없음(DB)", judgeReuse(rows, { maxOf: MAXDB ? maxOf : () => 1e9 }), `가족${MAXDB ? "" : " (상한 표를 못 읽어 길이 판정은 빼고)"}`);
-
-      /* 덤 — §4.6 파생이 원본과 **같은 집**인가(교차 누수는 코인·편성 어느 축보다 크다) */
-      const cross = derived.filter((d) => { const o = oById.get(Number(d.origin_piece_id)); return !o || Number(o.tenant_id) !== Number(d.tenant_id); });
-      rec("덤 — 파생이 원본과 같은 집이다(§4.6)", cross.length ? "fail" : "pass", cross.length ? `[덤 cross_tenant] 🔴 ${cross.length}개: ${cross.slice(0, 5).map((d) => `piece ${d.id}(집 ${d.tenant_id}) ← 원본 ${d.origin_piece_id}`).join(" · ")}` : `파생 ${derived.length}개 전부`);
+      await liveArm(sql, null, "DB");
     });
   } catch (e) {
     rec("①②③ DB 팔", "unmeasured", `DB 를 못 읽었다 — ${String((e as Error)?.message ?? e).slice(0, 160)}`);
@@ -344,6 +350,8 @@ if (!REHEARSE) {
       const r = judgeMinutes(await readFamilies());
       report(`② 멈췄다 깨도 같은 분에 안 모인다(리허설 · 깨는 시각 KST ${wakeKst} 13:00 · 모은 ${held} · 다시 잡은 ${moved})`, held ? r : { ...r, verdict: "unmeasured", note: "모인 글 0 — 깨기 경로가 안 돌았다" }, "가족");
     }
+    /* DB 팔의 접합부를 리허설 집의 **실제 행**으로 한 번 돌린다(라이브엔 파생이 0개라 거기선 늘 ⊘) */
+    await liveArm(sql, TID, "리허설 집 · DB 팔 몸통");
   } catch (e) {
     const un = (e as { unmeasured?: boolean })?.unmeasured;
     rec("리허설 팔", un ? "unmeasured" : "fail", `${un ? "" : "[리허설 threw] "}${String((e as Error)?.message ?? e).slice(0, 240)}`);
