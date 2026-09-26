@@ -16,7 +16,7 @@
  *        (예: 멱등을 깨는 변이는 **없다** — `have` 검사를 지워도 DB 유니크 `(origin_piece_id, channel)` 이 받아 낸다. 그건 제품이 두 겹이라는 뜻이지 자의 구멍이 아니다.)
  *
  *   ══ 사본은 어디에 ══
- *   `--tree <경로>`(기본: 작업 폴더)의 `lib/`·`db/` 를 **내 나무 안** `.r18-mut-<pid>/` 에 복사한다(내 `node_modules` 가 풀리게).
+ *   `--tree <경로>`(기본: 작업 폴더)의 `lib/`·`db/`·`netlify/` 를 **내 나무 안** `.r18-mut-<pid>/` 에 복사한다(내 `node_modules` 가 풀리게).
  *   🔴 **남의 나무에는 한 글자도 안 쓴다**(읽기만) · 끝나면(성공·실패·예외) 사본을 지운다.
  *   🔴 변이표의 키는 `put` 이다(`to:` 아님) — `verify-mutant-residue` 는 `to: "…"` 글자를 제품에서 찾는데, 이 하니스는 **사본만** 고치므로
  *      제품에 잔재가 남을 길이 없고, 치환 글자가 제품에 원래 있는 줄(`out[k] = v;` 같은)이면 그 자에 **거짓 빨강**을 준다. 모든 치환엔 `r18mut` 표식을 단다.
@@ -40,6 +40,7 @@ const RULER = "scripts/verify-r18-one-video-many.mts";
 const MINE = [RULER, "scripts/_lib/r18-judge.mjs", "scripts/_lib/code-only.mjs", "scripts/_lib/load-env.mjs", "scripts/_teardown.mjs"];
 const TSX = path.join(MY, "node_modules", "tsx", "dist", "cli.mjs");
 const REUSE = "lib/video/reuse.ts", WC = "lib/writing-contracts.ts";
+const SCHED = "lib/derived-schedule.ts", PAUSE = "lib/tenant-pause.ts", PIECES = "netlify/functions/pieces.ts";
 
 for (const f of MINE) if (!existsSync(path.join(MY, f))) { console.error(`⊘ 못 쟀어요 — 내 자 ${f} 가 없다`); process.exit(2); }
 if (!existsSync(TSX)) { console.error("⊘ 못 쟀어요 — tsx 가 없다(npm i)"); process.exit(2); }
@@ -94,6 +95,22 @@ add("덤 파생이 영상 파일을 새로 가리키면(다시 굽는 모양 · 
 add("덤 원본의 발행·코인 흔적을 통째로 물려받으면(§6-2)", REUSE,
   "if (!STRIP_EXACT.has(k) && !STRIP_PREFIX.test(k)) out[k] = v;", "if (true /*r18mut*/) out[k] = v;", "[덤 inherited_marks]", "db");
 
+/* ═══ ② ⑤ ⑥ — 편성(B2)·원본의 결정(B) · 🔴 기대는 **그 줄의 빨강**으로 적는다(② 는 두 줄이 같은 코드를 내서 코드만으론 어느 길이 울었는지 못 가른다 · AC-121) ═══ */
+add("② 가족 시차를 빼면(파생이 전부 «원본+30분» 한 분에)", SCHED,
+  "      clash(family, stagger);", "      /*r18mut*/", "❌ ② 같은 분에 N곳 없음 — 파생에 시각을 박은 뒤", "db");
+add("② 🔴 멈췄다 깰 때 파생을 옛 길(채널·계정만 보는 pickPublishAt)로 되돌리면(C 반례: 틱톡·클립 19:00)", PAUSE,
+  "  if (derived.length) {", "  for (const p of derived) await placeOne(p); /*r18mut*/\n  if (false) {", "❌ ② 멈췄다 깨도 같은 분에 안 모인다", "db");
+add("⑤ 원본을 다시 만들 때 파생의 시각을 안 풀면(옛 영상이 먼저 나간다)", REUSE,
+  "  const rows = await q(sql`UPDATE pieces SET scheduled_for = NULL,", "  const rows = await q(sql`UPDATE pieces SET status = status /*r18mut*/,", "[⑤ timed_while_regen]", "db");
+add("⑤ 재승인 때 파생을 새 영상으로 안 갈아 끼우면", REUSE,
+  "      await refreshHeldDerived(tid, prev.pieceId, originPieceId, meta, { originPieceId, originChannel, seconds, at }, scheduleAt);", "      /*r18mut*/", "[⑤ stale_video]", "db");
+add("⑤ 파생에서 «다시 만들기»를 열어 두면(다시 굽는다 · 퓨즈가 굽기를 끊는다)", PIECES,
+  "      if (p.origin_piece_id != null && n(p.origin_piece_id)) {", "      if (false /*r18mut*/) {", "[⑤ derived_regen_open]", "db");
+add("⑥ 원본을 버릴 때 파생을 같이 안 내리면(문의 배선을 끊는다)", PIECES,
+  '? await holdDerivedFor(tid, id, "reject") : [];', "? [] /*r18mut*/ : [];", "[⑥ derived_left_scheduled]", "db");
+add("⑥ 이미 나간 파생까지 «안 나간 것»으로 치면", REUSE,
+  'const UNSENT_DERIVED: readonly string[] = ["scheduled", "awaiting_manual"];', 'const UNSENT_DERIVED: readonly string[] = ["scheduled", "awaiting_manual", "published" /*r18mut*/];', "[⑥ published_touched]", "db");
+
 /* ═══ 돌리기 ═══ */
 const run = (withDb) => {
   const args = [TSX, path.join(BOX, RULER), ...(withDb ? ["--rehearse"] : [])];
@@ -107,7 +124,7 @@ console.log(`\n── 내 자에 변이를 넣는다 · 나무 ${TREE} · ${new 
 let exit = 0;
 try {
   mkdirSync(BOX, { recursive: true });
-  for (const d of ["lib", "db"]) cpSync(path.join(TREE, d), path.join(BOX, d), { recursive: true });
+  for (const d of ["lib", "db", "netlify"]) if (existsSync(path.join(TREE, d))) cpSync(path.join(TREE, d), path.join(BOX, d), { recursive: true });
   for (const f of MINE) { mkdirSync(path.dirname(path.join(BOX, f)), { recursive: true }); cpSync(path.join(MY, f), path.join(BOX, f)); }
 
   /* ② 대조군 */

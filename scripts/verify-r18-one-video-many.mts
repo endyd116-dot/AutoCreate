@@ -1,11 +1,14 @@
 /**
  * scripts/verify-r18-one-video-many.mts — 🔴 **R18 «한 번 만들어 여러 곳에»의 자**(C · 2026-09-26 · 트리거 R18 §7 C).
  *
- *   ══ 무엇을 재나 — 넷(메인이 준 몫) ══
+ *   ══ 무엇을 재나 — 여섯(메인이 준 넷 + B 가 찾은 구멍 둘 · 2026-09-26) ══
  *     ① 코인은 한 번   — 파생 piece 가 코인 원장에 **0행**인가 · 파생을 만드는 사이 그 집의 차감 행이 **안 늘었나**
- *     ② 같은 분에 N곳 없음 — 한 영상 가족(원본 + 파생)의 예약 시각이 **같은 분**에 둘 이상 없나
+ *     ② 같은 분에 N곳 없음 — 한 영상 가족(원본 + 파생)의 예약 시각이 **같은 분**에 둘 이상 없나(+ 멈췄다 깨도)
  *     ③ `youtube_long` 이 재사용 목록에 없나 — 대상에도 **«빠진 채널»에도** 안 뜬다(트리거 §3 «화면에도 안 띄운다»)
  *     ④ 빠진 채널 문구가 §3 말투인가 — «실패»·«불가»·«오류» 0 · 사실 한 줄 · 어떻게 하면 되는지
+ *     ⑤ 원본을 다시 만들면 — 그 사이 안 나간 파생은 시각이 없고 · 다시 승인되면 **새 영상**으로 갈아 끼운다 · 파생에서 다시 만들기는 원본으로
+ *     ⑥ 원본을 버리면 — 안 나간 파생도 같이 내리고 · 이미 나간 파생은 안 건드린다
+ *     🔴 ⑤⑥ 은 «고객이 원본에 한 결정이 파생에 안 닿는» 모양이다 — 트리거에 없던 구멍을 B 가 찾아 막았다(메인이 여섯으로 늘렸다).
  *   판정 자체는 `scripts/_lib/r18-judge.mjs`(순수)에 있다 — 재는 법과 틀리는 방향은 **거기 머리말**에 적었다.
  *
  *   ══ 🔴 제품보다 먼저 섰다 — 그래서 셋을 먼저 찍는다 ══
@@ -47,6 +50,13 @@ const ROOT = process.cwd();
 const ARGS = new Set(process.argv.slice(2));
 const DB = ARGS.has("--db");
 const REHEARSE = ARGS.has("--rehearse");
+/* 🔴 **돈 퓨즈** — 제품 모듈을 부르기 **전에** 건다(제품은 전부 아래에서 동적 import 한다 · 정적 import 는 load-env 뿐).
+   리허설 팔은 실제 문(`pieces-regenerate`)을 두드린다. 그 문 끝의 `triggerVideo` 는 `INTERNAL_SECRET` 과 `backgroundBase()` 로 배경 함수를 부르는데,
+   2026-09-26 전 판의 `backgroundBase` 는 스크립트에서 `.env` 의 `SITE_URL`(라이브)을 그대로 돌려줬다(C 가 찾고 a1d0c77 로 막음).
+   🔴 **재는 나무가 그 수리 전 판일 수 있다**(남의 가지 · 옛 커밋) — 그래서 자가 스스로 끊는다: 비밀값 0 · 주소는 127.0.0.1 · 메일 0 · AI 0.
+   `triggerVideo` 는 비밀값이 없으면 부르지 않고 `failPiece`(환급·알림 — 시드 집 안)로 끝난다. */
+for (const k of ["URL", "DEPLOY_PRIME_URL"]) delete process.env[k];
+Object.assign(process.env, { INTERNAL_SECRET: "", SITE_URL: "http://127.0.0.1:1", RESEND_API_KEY: "", GEMINI_API_KEY: "" });
 
 type V = "pass" | "fail" | "unmeasured";
 const lines: { v: V; step: string }[] = [];
@@ -60,7 +70,7 @@ function report(step: string, r: { verdict: V; measured: number; findings: Recor
   for (const f of r.findings) {
     const key = `${f.code}|${f.channel ?? ""}|${f.text ?? f.why ?? ""}`;
     if (seen.has(key)) continue; seen.add(key);
-    console.log(`     [${f.axis} ${f.code}] ${[f.source ? `원본 ${f.source}` : "", f.seconds ? `${f.seconds}초` : "", f.channel ? `→ ${f.channel}` : "", f.reason && f.reason !== "too_long" ? `(${f.reason})` : ""].filter(Boolean).join(" ")} — ${f.why}${f.text ? `  «${f.text}»` : ""}`);
+    console.log(`     [${f.axis} ${f.code}] ${[f.source ? `원본 ${f.source}` : "", f.seconds ? `${f.seconds}초` : "", f.channel ? `→ ${f.channel}` : "", f.reason && f.reason !== "too_long" ? `(${f.reason})` : "", f.at ? `@${f.at}` : ""].filter(Boolean).join(" ")} — ${f.why}${f.text ? `  «${f.text}»` : ""}`);
   }
 }
 
@@ -81,6 +91,7 @@ const TARGETS = {
   table: { file: "lib/writing-contracts.ts", names: ["VIDEO_CHANNEL_MAX_SEC"], who: "B" },
   registry: { file: "lib/channel-registry.ts", names: ["VIDEO_CHANNEL_KEYS"], who: "—" },
   schedule: { file: "lib/derived-schedule.ts", names: ["scheduleDerived", "staggerDerived", "DERIVED_STAGGER_MIN"], who: "B2" },
+  remake: { file: "lib/director.ts", names: ["remakeVideoFor"], who: "B" },
 } as const;
 const alive: Record<string, number> = {};
 {
@@ -247,7 +258,7 @@ if (!REHEARSE) {
     /* ── 시드 ── */
     const STAMP = Date.now().toString(36);
     const [t] = await sql`INSERT INTO tenants (key, name, plan_key, status, settings, is_internal)
-      VALUES (${`r18-${STAMP}`.slice(0, 40)}, ${`R18 재사용 리허설 ${STAMP}`}, 'starter', 'active', ${JSON.stringify({ kinds: ["video"], channels: ["youtube_shorts"] })}::jsonb, true) RETURNING id`;
+      VALUES (${`r18-${STAMP}`.slice(0, 40)}, ${`R18 재사용 리허설 ${STAMP}`}, 'pro', 'active', ${JSON.stringify({ kinds: ["video"], channels: ["youtube_shorts"] })}::jsonb, true) RETURNING id`;
     TID = n(t?.id);
     if (!TID || PROTECT.has(TID)) throw new Error(`🔴 시드 집 id 가 이상하다(${TID}) — 멈춘다`);
     const acc: Record<string, number> = {};
@@ -345,11 +356,145 @@ if (!REHEARSE) {
       const last = Math.max(...timed.map((m) => new Date(m.at as string).getTime()));
       const wakeKst = new Date(last + 86400_000 + 9 * 3600_000).toISOString().slice(0, 10);
       const wake = new Date(`${wakeKst}T04:00:00Z`);   // 🔴 KST 13:00 — 릴스 12시 후보가 지나 있고 틱톡·클립이 둘 다 19시를 첫 후보로 갖는 시각
+      /* 🔴 과녁을 살린다(AC-236): 두 가족이 **함께** 멈춰 있으면 60초 가족의 틱톡이 19:00 을 먼저 차지해서 30초 가족이 **우연히** 안 부딪힐 수 있다
+         (가족을 모르는 길이어도 초록이 나는 시드). ⇒ 60초 가족은 깨는 시각 한참 뒤로 비켜 두고, 틱톡·클립이 **둘 다** 있는 30초 가족만 멈춤에 걸린다. */
+      const o60 = origins.find((o) => o.seconds === 60);
+      /* 🔴 **각자 +30일**로 민다 — 한 값으로 옮기면 가족 셋이 **내 손으로** 같은 분에 앉는다(2026-09-26 첫 판이 그렇게 대조군을 빨갛게 했다 · AC-236 을 내 시드에서). */
+      if (o60) await sql`UPDATE pieces SET scheduled_for = scheduled_for + interval '30 days'
+        WHERE tenant_id = ${TID} AND origin_piece_id = ${o60.id} AND status = 'scheduled' AND scheduled_for IS NOT NULL`;
       const held = await pause.holdBacklog(TID, wake);
       const moved = await pause.releaseBacklog(TID, wake);
       const r = judgeMinutes(await readFamilies());
       report(`② 멈췄다 깨도 같은 분에 안 모인다(리허설 · 깨는 시각 KST ${wakeKst} 13:00 · 모은 ${held} · 다시 잡은 ${moved})`, held ? r : { ...r, verdict: "unmeasured", note: "모인 글 0 — 깨기 경로가 안 돌았다" }, "가족");
+      /* 빨가면 **무엇이·언제**를 찍는다 — «같은 분»만으로는 제품 탓인지 내 시드 탓인지 못 가른다 */
+      if (r.verdict === "fail") for (const row of await sql`SELECT id, origin_piece_id, channel, status, to_char(scheduled_for, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at FROM pieces WHERE tenant_id = ${TID} AND origin_piece_id IS NOT NULL ORDER BY origin_piece_id, id`) console.log(`       · piece ${row.id} ← ${row.origin_piece_id} ${row.channel} ${row.status} @${row.at}`);
     }
+    /* ═══ ⑤⑥ 고객이 **원본에** 한 결정이 파생에 닿나 — B 가 찾은 구멍 둘(메인 2026-09-26 «자 넷 → 여섯») ═══
+     *   ⑤ 원본 다시 만들기: 안 나간 파생은 그 사이 **시각이 없고**(옛 영상이 먼저 나가는 틈 0) · 다시 승인되면 **새 영상**으로 갈아 끼운다
+     *   ⑥ 원본 버리기: 안 나간 파생도 **같이 내린다** · 이미 나간 파생은 **안 건드린다**(내리기의 몫)
+     *   🔴 함수가 아니라 **실제 문**(`/api/pieces-reuse`·`pieces-regenerate`·`pieces-reject` 핸들러)을 두드린다 — 함수만 부르면 «손이 붙어 있나»를 못 잰다(AC-242).
+     *   🔴 재승인은 `approvePiece` 의 **마지막 두 줄**(UPDATE scheduled → `onOriginApproved`)을 그대로 부른다 — 그 앞의 `recheckPiece` 는
+     *      가짜 영상 파일이라 못 돈다(알고 둔다 · 여기서 재는 것은 «승인 뒤 파생이 따라오나»다). */
+    const o30 = origins.find((o) => o.seconds === 30);
+    const piecesFn = await imp("netlify/functions/pieces.ts").catch(() => null);
+    const authLib = await imp("lib/auth.ts").catch(() => null);
+    if (!o30 || !piecesFn?.default || !authLib?.signUserToken || typeof reuse.onOriginApproved !== "function") {
+      rec("⑤ 원본 다시 만들기 — 파생이 따라오나", "unmeasured", "과녁 없음 — pieces 핸들러·signUserToken·onOriginApproved 중 없는 것이 있다");
+      rec("⑥ 원본 버리기 — 파생이 따라오나", "unmeasured", "과녁 없음");
+    } else {
+      const [u] = await sql`INSERT INTO users (tenant_id, email, password_hash, name, role) VALUES (${TID}, ${`c+r18-${STAMP}@autocreate.test`}, 'x', 'R18 리허설', 'owner') RETURNING id`;
+      const token = authLib.signUserToken({ uid: n(u?.id), tid: TID, role: "owner" });
+      const door = async (p: string, body: Record<string, unknown>) => {
+        const res = await piecesFn.default(new Request(`http://127.0.0.1/api/${p}`, { method: "POST", headers: { "content-type": "application/json", cookie: `${authLib.USER_COOKIE}=${token}` }, body: JSON.stringify(body) }));
+        let j: Record<string, unknown> = {};
+        try { j = await res.json(); } catch { /* 몸통 없음 */ }
+        return { status: res.status, j };
+      };
+      const kids = async () => (await sql`SELECT id, status, to_char(scheduled_for, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, meta->'reuse'->>'waitOrigin' AS wait
+        FROM pieces WHERE tenant_id = ${TID} AND origin_piece_id = ${o30.id} ORDER BY id`) as { id: number; status: string; at: string | null; wait: string | null }[];
+      const videoKey = async (id: number) => ((await sql`SELECT r2_key FROM piece_assets WHERE tenant_id = ${TID} AND piece_id = ${id} AND kind = 'video' ORDER BY id DESC LIMIT 1`)[0]?.r2_key ?? null) as string | null;
+
+      /* 준비 — 고객의 답(첫 한 번)을 **실제 문**으로. 이 글에 채널이 적혀야 재승인 때 파생이 다시 만들어진다(`onOriginApproved`). */
+      const ans = await door("pieces-reuse", { id: o30.id, channels: cands, remember: false });
+      rec("⑤ 준비 — 고객의 답(`/api/pieces-reuse`)이 문으로 들어간다", ans.status < 300 && ans.j.ok ? "pass" : "unmeasured", `HTTP ${ans.status}${ans.j.ok ? "" : ` · ${String(ans.j.step ?? "")} ${String(ans.j.error ?? "")}`}`);
+
+      /* ⑤-0 파생에서 «다시 만들기»는 원본으로 돌려보낸다 — 다시 구우면 코인 0 인 글에 생성비가 든다(§4.7 을 거꾸로 뚫는다) */
+      const k0 = await kids();
+      const c0 = await consumeCount();
+      if (k0.length) {
+        const r = await door("pieces-regenerate", { id: n(k0[0].id) });
+        const c1 = await consumeCount();
+        const ok = r.status === 400 && r.j.step === "derived" && c1 === c0;
+        rec("⑤ 파생에서 «다시 만들기»는 원본으로 돌려보낸다(다시 안 굽는다 · 코인 0)", ok ? "pass" : "fail",
+          ok ? `HTTP 400 · «${String(r.j.error ?? "").slice(0, 60)}»` : `[⑤ derived_regen_open] HTTP ${r.status} · step ${String(r.j.step)} · 차감 행 ${c0} → ${c1}`);
+      }
+
+      /* ⑤-1 원본 다시 만들기 — 실제 문(퓨즈가 굽기를 끊는다 · 원본은 «시작 못 함»으로 failed + 환급, 시드 집 안) */
+      const K1 = await videoKey(o30.id);
+      const rg = await door("pieces-regenerate", { id: o30.id });
+      const k1 = await kids();
+      const unsent = k1.filter((k) => ["scheduled", "awaiting_manual"].includes(String(k.status)));
+      const timedNow = unsent.filter((k) => k.at);
+      const noWait = unsent.filter((k) => k.wait !== "true");
+      rec("⑤ 원본을 다시 만드는 사이 안 나간 파생은 **시각이 없다**(옛 영상이 먼저 나가는 틈 0)",
+        rg.status >= 300 ? "fail" : !unsent.length ? "unmeasured" : timedNow.length || noWait.length ? "fail" : "pass",
+        rg.status >= 300 ? `[⑤ regen_door] HTTP ${rg.status} · ${String(rg.j.step)} ${String(rg.j.error ?? "")}`
+          : timedNow.length || noWait.length ? `[⑤ timed_while_regen] 안 나간 ${unsent.length} 중 시각 남음 ${timedNow.length} · waitOrigin 없음 ${noWait.length}`
+            : `안 나간 파생 ${unsent.length}개 전부 시각 없음 · waitOrigin`);
+
+      /* ⑤-2 새 영상이 나왔다 치고(굽기는 퓨즈로 안 돈다) 재승인 — approvePiece 의 마지막 두 줄 그대로 */
+      const K2 = `r18/${TID}/${o30.id}-regen.mp4`;
+      await sql`DELETE FROM piece_assets WHERE tenant_id = ${TID} AND piece_id = ${o30.id} AND kind IN ('video','thumb')`;
+      await sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES
+        (${TID}, ${o30.id}, 'video', ${K2}, ${JSON.stringify({ durationMs: 30000 })}::jsonb, 0), (${TID}, ${o30.id}, 'thumb', ${`r18/${TID}/${o30.id}-regen.jpg`}, '{}'::jsonb, 1)`;
+      await sql`UPDATE pieces SET status = 'scheduled', scheduled_for = ${at10}::timestamptz AT TIME ZONE 'UTC',
+        meta = meta || ${JSON.stringify({ stage: "done", video: { seconds: 30, format: "graphic" } })}::jsonb, updated_at = NOW() WHERE tenant_id = ${TID} AND id = ${o30.id}`;
+      const [orow] = await sql`SELECT * FROM pieces WHERE tenant_id = ${TID} AND id = ${o30.id}`;
+      await reuse.onOriginApproved(TID, orow);
+      const c3 = await consumeCount();
+      const keys = await Promise.all(unsent.map(async (k) => ({ id: n(k.id), key: await videoKey(n(k.id)) })));
+      const stale = keys.filter((k) => k.key !== K2);
+      rec("⑤ 다시 승인되면 안 나간 파생이 **새 영상**으로 갈아 끼워진다", !keys.length ? "unmeasured" : stale.length ? "fail" : "pass",
+        stale.length ? `[⑤ stale_video] ${stale.map((k) => `piece ${k.id} → ${k.key}`).join(" · ")} (새 ${K2} · 옛 ${K1})` : `${keys.length}개 전부 ${K2}(옛 ${K1})`);
+      report("⑤ 원본 다시 만들기 ~ 재승인 동안 파생 몫 코인 0(파생 id 행 + 전후 차감 행)", judgeCoin({ derivedIds: k1.map((k) => n(k.id)), ledger: await ledgerRows(), consumeBefore: c0, consumeAfter: c3 }), "파생");
+
+      /* ⑥ 원본 버리기 — 파생 하나는 **이미 나간 것**으로 둔다(건드리면 안 되는 쪽의 과녁) */
+      const k2 = await kids();
+      const pubId = n(k2.find((k) => k.status === "scheduled")?.id);
+      if (pubId) await sql`UPDATE pieces SET status = 'published', published_at = NOW() AT TIME ZONE 'UTC', external_url = 'https://r18.invalid/x', channel_ref = 'r18x' WHERE tenant_id = ${TID} AND id = ${pubId}`;
+      const rj = await door("pieces-reject", { id: o30.id });
+      const k3 = await kids();
+      const left = k3.filter((k) => n(k.id) !== pubId && k.status !== "rejected");
+      const pubNow = k3.find((k) => n(k.id) === pubId);
+      rec("⑥ 원본을 버리면(`/api/pieces-reject`) 안 나간 파생도 같이 내린다", rj.status >= 300 ? "fail" : k3.length < 2 ? "unmeasured" : left.length ? "fail" : "pass",
+        rj.status >= 300 ? `[⑥ reject_door] HTTP ${rj.status} · ${String(rj.j.step)} ${String(rj.j.error ?? "")}` : left.length ? `[⑥ derived_left_scheduled] ${left.map((k) => `piece ${k.id}(${k.status})`).join(" · ")}` : `안 나간 ${k3.length - 1}개 전부 rejected`);
+      rec("⑥ 이미 나간 파생은 안 건드린다(«내리기»의 몫)", !pubId ? "unmeasured" : pubNow?.status === "published" ? "pass" : "fail",
+        pubNow?.status === "published" ? `piece ${pubId} published 그대로` : `[⑥ published_touched] piece ${pubId} → ${pubNow?.status}`);
+    }
+
+    /* ═══ ①-b «30초로 다시 만들 길»(트리거 §6-6) — 새 영상이라 **한 번** 받는다 · 🔴 차례로든 **동시에**든 두 번 눌러도 한 번 ═══
+     *   C 반례(2026-09-26 · B 1be9d16): 멱등 검사(`meta.remakeOf`)가 차감(confirm) **앞**, 표시는 **뒤**라 동시에 두 번이면 새 영상 2 · 차감 2 였다.
+     *   B 의 라이브 자는 «차례로»만 쟀다 — 그건 맞다. 두 탭·재시도·더블탭이 여는 창은 **동시에**다. */
+    if (!alive.remakeVideoFor) rec("①-b 30초로 다시 만들기 — 두 번 눌러도 한 번", "unmeasured", `과녁 없음 — ${TARGETS.remake.file} remakeVideoFor (B)`);
+    else {
+      const dir = await imp(TARGETS.remake.file);
+      const yt = acc.youtube_shorts;
+      /* 원본의 지시서 — «새로 만들기»가 이 spec 을 복제한다(B 의 라이브 자와 같은 모양 · 필요한 칸만) */
+      const spec = { key: `youtube_shorts:${yt}`, channel: "youtube_shorts", accountId: yt, accountHandle: "yt", kind: "video", emotionKey: "script", format: "story", composition: "60초 그래픽 스토리",
+        images: { count: 0, aiCount: 0, style: "photo", heroNeeded: false }, monetize: { affiliate: null, sponsored: false, gift: false, adDisclosure: false },
+        schedule: { at: at10, slotReason: "R18 리허설" }, lengthHint: { words: 0 }, coinCost: 28, angle: "R18 리허설",
+        video: { format: "graphic", seconds: 60, cuts: 9, provider: { tier: "standard", key: "omni" }, voice: { provider: "gemini", voiceId: "Kore" }, variant: { palette: "warm", hookType: "question", voiceId: "Kore" }, disclosure: { badge: false, descriptionFirstLine: false } } };
+      const [tp] = await sql`INSERT INTO topics (tenant_id, title, norm_key, status) VALUES (${TID}, ${"R18 리허설 소재"}, ${`r18reh${STAMP}`}, 'used') RETURNING id`;
+      const [br] = await sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost) VALUES (${TID}, ${n(tp?.id)}, 'adsense', ${JSON.stringify([spec])}::jsonb, '[]'::jsonb, 'reviewed', 'confirmed', 28) RETURNING id`;
+      const [p3] = await sql`INSERT INTO pieces (tenant_id, origin, account_id, channel, kind, format, title, body, blocks, meta, status, scheduled_for, brief_id, topic_id)
+        VALUES (${TID}, 'manual', ${yt}, 'youtube_shorts', 'video', 'story', ${"R18 리허설 원본(다시 만들기)"}, ${"설명"}, '[]'::jsonb,
+                ${JSON.stringify({ stage: "done", video: { format: "graphic", seconds: 60 }, coinItem: "video_60", key: `youtube_shorts:${yt}` })}::jsonb,
+                'scheduled', ${at10}::timestamptz AT TIME ZONE 'UTC', ${n(br?.id)}, ${n(tp?.id)}) RETURNING id`;
+      const o3 = n(p3?.id);
+      await sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${TID}, ${o3}, 'video', ${`r18/${TID}/${o3}.mp4`}, ${JSON.stringify({ durationMs: 60000 })}::jsonb, 0)`;
+      await coin.consume(TID, "video_60", `piece:${o3}`, { reason: "R18 리허설 원본(다시 만들기)" });
+      const made = async () => (await sql`SELECT id FROM pieces WHERE tenant_id = ${TID} AND meta->>'remakeOf' = ${String(o3)} AND channel = 'naver_clip'`).length;
+
+      const cA = await consumeCount();
+      const [ra, rb] = await Promise.all([dir.remakeVideoFor(TID, o3, "naver_clip", null), dir.remakeVideoFor(TID, o3, "naver_clip", null)]);
+      const cB = await consumeCount(); const mB = await made();
+      const anyOk = ra?.ok || rb?.ok;
+      rec("①-b 🔴 «30초로 다시 만들기»를 **동시에** 두 번 눌러도 새 영상 1개 · 차감 1번", !anyOk ? "unmeasured" : mB === 1 && cB - cA === 1 ? "pass" : "fail",
+        !anyOk ? `둘 다 안 됐다 — ${String(ra?.step)}/${String(rb?.step)} ${String(ra?.error ?? "")}`.slice(0, 200)
+          : mB === 1 && cB - cA === 1 ? `새 영상 1 · 차감 행 +1 · 둘째 ${rb?.already || ra?.already ? "already" : String(rb?.step ?? ra?.step ?? "")}`
+            : `[①b remake_twice] 새 영상 ${mB}개 · 차감 행 +${cB - cA} (r1 ${JSON.stringify(ra?.pieceIds)}·${ra?.coinsCharged} / r2 ${JSON.stringify(rb?.pieceIds)}·${rb?.coinsCharged})`);
+      /* 차례로 — 첫 것은 퓨즈로 failed 가 됐으니 «다 만들어졌다»로 친다(in_review · B 의 라이브 자와 같은 방식) */
+      await sql`UPDATE pieces SET status = 'in_review' WHERE tenant_id = ${TID} AND meta->>'remakeOf' = ${String(o3)} AND channel = 'naver_clip'`;
+      const cC = await consumeCount();
+      const rc = await dir.remakeVideoFor(TID, o3, "naver_clip", null);
+      const cD = await consumeCount(); const mD = await made();
+      rec("①-b 한 번 만든 뒤 또 누르면 새로 0 · 차감 0(already)", rc?.ok && rc.already && cD === cC && mD === mB ? "pass" : "fail",
+        rc?.ok && rc.already && cD === cC && mD === mB ? "already · 차감 행 그대로" : `[①b remake_again] ok ${rc?.ok} already ${rc?.already} · 차감 행 ${cC}→${cD} · 새 영상 ${mB}→${mD}`);
+      const rf = await dir.remakeVideoFor(TID, o3, "reels", null);
+      const ry = await dir.remakeVideoFor(TID, o3, "youtube_long", null);
+      rec("①-b 대조군 — 이미 들어가는 채널(릴스)은 새로 안 만든다 · youtube_long 은 없는 길", !rf?.ok && rf.step === "fits" && !ry?.ok && ry.step === "channel" ? "pass" : "fail", `릴스 ${String(rf?.step)} · youtube_long ${String(ry?.step)}`);
+    }
+
     /* DB 팔의 접합부를 리허설 집의 **실제 행**으로 한 번 돌린다(라이브엔 파생이 0개라 거기선 늘 ⊘) */
     await liveArm(sql, TID, "리허설 집 · DB 팔 몸통");
   } catch (e) {
