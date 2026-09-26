@@ -36,11 +36,13 @@ const MY = path.resolve(import.meta.dirname, "..");
 const argv = process.argv.slice(2);
 const TREE = path.resolve(argv.includes("--tree") ? argv[argv.indexOf("--tree") + 1] : process.cwd());
 const REHEARSE = argv.includes("--rehearse");
+/** `--only <글자>` — 이름에 그 글자가 든 변이만(대조군은 늘 돈다). 한 수리의 반대팔만 빨리 잴 때. */
+const ONLY = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : "";
 const RULER = "scripts/verify-r18-one-video-many.mts";
 const MINE = [RULER, "scripts/_lib/r18-judge.mjs", "scripts/_lib/code-only.mjs", "scripts/_lib/load-env.mjs", "scripts/_teardown.mjs"];
 const TSX = path.join(MY, "node_modules", "tsx", "dist", "cli.mjs");
 const REUSE = "lib/video/reuse.ts", WC = "lib/writing-contracts.ts";
-const SCHED = "lib/derived-schedule.ts", PAUSE = "lib/tenant-pause.ts", PIECES = "netlify/functions/pieces.ts";
+const SCHED = "lib/derived-schedule.ts", PAUSE = "lib/tenant-pause.ts", PIECES = "netlify/functions/pieces.ts", DIRECTOR = "lib/director.ts";
 
 for (const f of MINE) if (!existsSync(path.join(MY, f))) { console.error(`⊘ 못 쟀어요 — 내 자 ${f} 가 없다`); process.exit(2); }
 if (!existsSync(TSX)) { console.error("⊘ 못 쟀어요 — tsx 가 없다(npm i)"); process.exit(2); }
@@ -111,6 +113,10 @@ add("⑥ 원본을 버릴 때 파생을 같이 안 내리면(문의 배선을 �
 add("⑥ 이미 나간 파생까지 «안 나간 것»으로 치면", REUSE,
   'const UNSENT_DERIVED: readonly string[] = ["scheduled", "awaiting_manual"];', 'const UNSENT_DERIVED: readonly string[] = ["scheduled", "awaiting_manual", "published" /*r18mut*/];', "[⑥ published_touched]", "db");
 
+/* ①-b B 의 수리(5f99451 «먼저 잡기»)를 끈다 — 🔴 경쟁이라 자는 5판 × 동시 3번으로 잰다(한 번 초록은 우연일 수 있다) */
+add("①-b «30초 판 새로 만들기»의 먼저 잡기(조건부 UPDATE)를 늘 통과시키면", DIRECTOR,
+  "      WHERE tenant_id = ${tid} AND id = ${originPieceId} AND (", "      WHERE tenant_id = ${tid} AND id = ${originPieceId} AND (true /*r18mut*/ OR ", "[①b remake_twice]", "db");
+
 /* ═══ 돌리기 ═══ */
 const run = (withDb) => {
   const args = [TSX, path.join(BOX, RULER), ...(withDb ? ["--rehearse"] : [])];
@@ -137,6 +143,7 @@ try {
     const missedLines = [];
     for (const c of cases) {
       if (c.arm === "db" && !REHEARSE) continue;
+      if (ONLY && !c.name.includes(ONLY)) continue;
       const p = path.join(BOX, c.file);
       const orig = existsSync(p) ? readFileSync(p, "utf8") : "";
       const hits = count(orig, c.find);

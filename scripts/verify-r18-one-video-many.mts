@@ -54,9 +54,26 @@ const REHEARSE = ARGS.has("--rehearse");
    리허설 팔은 실제 문(`pieces-regenerate`)을 두드린다. 그 문 끝의 `triggerVideo` 는 `INTERNAL_SECRET` 과 `backgroundBase()` 로 배경 함수를 부르는데,
    2026-09-26 전 판의 `backgroundBase` 는 스크립트에서 `.env` 의 `SITE_URL`(라이브)을 그대로 돌려줬다(C 가 찾고 a1d0c77 로 막음).
    🔴 **재는 나무가 그 수리 전 판일 수 있다**(남의 가지 · 옛 커밋) — 그래서 자가 스스로 끊는다: 비밀값 0 · 주소는 127.0.0.1 · 메일 0 · AI 0.
-   `triggerVideo` 는 비밀값이 없으면 부르지 않고 `failPiece`(환급·알림 — 시드 집 안)로 끝난다. */
+   `triggerVideo` 는 비밀값이 없으면 부르지 않고 `failPiece`(환급·알림 — 시드 집 안)로 끝난다.
+   🔴 [2026-09-26 · 둘째 판] **리허설에서는 «로컬 스텁 + 가짜 비밀값»으로 바꾼다.** 비밀값을 비우면 판이 **즉시 failed** 가 되는데,
+   B 의 «30초 판 새로 만들기» 수리는 «잡았던 판이 failed 면 다시 잡는다»(생성이 실패했으면 다시 만들 수 있어야 한다)라서
+   **퓨즈가 만든 failed** 때문에 둘째 요청이 합법적으로 다시 잡혀 «새 영상 2»가 나올 수 있다 — 제품이 아니라 **내 퓨즈의 상태**다(AC-236).
+   ⇒ 127.0.0.1 에 202 만 돌려주는 스텁을 세우고 `URL` 을 그리로(옛·새 `backgroundBase` 둘 다 `URL` 을 먼저 본다 · 로컬 주소라 둘 다 통과),
+      비밀값은 **가짜**(`r18-local-stub` — 혹시 라이브에 닿아도 401). 판은 라이브처럼 `generating` 에 머문다. 스텁이 받은 호출 수를 찍는다. */
 for (const k of ["URL", "DEPLOY_PRIME_URL"]) delete process.env[k];
 Object.assign(process.env, { INTERNAL_SECRET: "", SITE_URL: "http://127.0.0.1:1", RESEND_API_KEY: "", GEMINI_API_KEY: "" });
+const STUB = { calls: 0, paths: new Map<string, number>(), close: async () => {} };
+if (REHEARSE) {
+  const { createServer } = await import("node:http");
+  const srv = createServer((req, res) => {
+    STUB.calls++; const p = String(req.url ?? "").split("?")[0]; STUB.paths.set(p, (STUB.paths.get(p) ?? 0) + 1);
+    req.resume(); res.statusCode = /-background$/.test(p) ? 202 : 404; res.end();
+  });
+  await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", () => ok()));
+  const port = (srv.address() as { port: number }).port;
+  Object.assign(process.env, { URL: `http://127.0.0.1:${port}`, SITE_URL: `http://127.0.0.1:${port}`, INTERNAL_SECRET: "r18-local-stub" });
+  STUB.close = () => new Promise<void>((ok) => srv.close(() => ok()));
+}
 
 type V = "pass" | "fail" | "unmeasured";
 const lines: { v: V; step: string }[] = [];
@@ -466,24 +483,38 @@ if (!REHEARSE) {
         video: { format: "graphic", seconds: 60, cuts: 9, provider: { tier: "standard", key: "omni" }, voice: { provider: "gemini", voiceId: "Kore" }, variant: { palette: "warm", hookType: "question", voiceId: "Kore" }, disclosure: { badge: false, descriptionFirstLine: false } } };
       const [tp] = await sql`INSERT INTO topics (tenant_id, title, norm_key, status) VALUES (${TID}, ${"R18 리허설 소재"}, ${`r18reh${STAMP}`}, 'used') RETURNING id`;
       const [br] = await sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost) VALUES (${TID}, ${n(tp?.id)}, 'adsense', ${JSON.stringify([spec])}::jsonb, '[]'::jsonb, 'reviewed', 'confirmed', 28) RETURNING id`;
-      const [p3] = await sql`INSERT INTO pieces (tenant_id, origin, account_id, channel, kind, format, title, body, blocks, meta, status, scheduled_for, brief_id, topic_id)
-        VALUES (${TID}, 'manual', ${yt}, 'youtube_shorts', 'video', 'story', ${"R18 리허설 원본(다시 만들기)"}, ${"설명"}, '[]'::jsonb,
-                ${JSON.stringify({ stage: "done", video: { format: "graphic", seconds: 60 }, coinItem: "video_60", key: `youtube_shorts:${yt}` })}::jsonb,
-                'scheduled', ${at10}::timestamptz AT TIME ZONE 'UTC', ${n(br?.id)}, ${n(tp?.id)}) RETURNING id`;
-      const o3 = n(p3?.id);
-      await sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${TID}, ${o3}, 'video', ${`r18/${TID}/${o3}.mp4`}, ${JSON.stringify({ durationMs: 60000 })}::jsonb, 0)`;
-      await coin.consume(TID, "video_60", `piece:${o3}`, { reason: "R18 리허설 원본(다시 만들기)" });
-      const made = async () => (await sql`SELECT id FROM pieces WHERE tenant_id = ${TID} AND meta->>'remakeOf' = ${String(o3)} AND channel = 'naver_clip'`).length;
-
-      const cA = await consumeCount();
-      const [ra, rb] = await Promise.all([dir.remakeVideoFor(TID, o3, "naver_clip", null), dir.remakeVideoFor(TID, o3, "naver_clip", null)]);
-      const cB = await consumeCount(); const mB = await made();
-      const anyOk = ra?.ok || rb?.ok;
-      rec("①-b 🔴 «30초로 다시 만들기»를 **동시에** 두 번 눌러도 새 영상 1개 · 차감 1번", !anyOk ? "unmeasured" : mB === 1 && cB - cA === 1 ? "pass" : "fail",
-        !anyOk ? `둘 다 안 됐다 — ${String(ra?.step)}/${String(rb?.step)} ${String(ra?.error ?? "")}`.slice(0, 200)
-          : mB === 1 && cB - cA === 1 ? `새 영상 1 · 차감 행 +1 · 둘째 ${rb?.already || ra?.already ? "already" : String(rb?.step ?? ra?.step ?? "")}`
-            : `[①b remake_twice] 새 영상 ${mB}개 · 차감 행 +${cB - cA} (r1 ${JSON.stringify(ra?.pieceIds)}·${ra?.coinsCharged} / r2 ${JSON.stringify(rb?.pieceIds)}·${rb?.coinsCharged})`);
-      /* 차례로 — 첫 것은 퓨즈로 failed 가 됐으니 «다 만들어졌다»로 친다(in_review · B 의 라이브 자와 같은 방식) */
+      /* 🔴 경쟁은 타이밍이다 — **한 번 초록은 증거가 약하다**(메인). 판마다 원본을 새로 심고 **동시에 세 번**을 ROUNDS 판 넣는다. */
+      const ROUNDS = 5, AT_ONCE = 3;
+      const seedOrigin = async (i: number) => {
+        const [p] = await sql`INSERT INTO pieces (tenant_id, origin, account_id, channel, kind, format, title, body, blocks, meta, status, scheduled_for, brief_id, topic_id)
+          VALUES (${TID}, 'manual', ${yt}, 'youtube_shorts', 'video', 'story', ${`R18 리허설 원본(다시 만들기 ${i})`}, ${"설명"}, '[]'::jsonb,
+                  ${JSON.stringify({ stage: "done", video: { format: "graphic", seconds: 60 }, coinItem: "video_60", key: `youtube_shorts:${yt}` })}::jsonb,
+                  'scheduled', ${at10}::timestamptz AT TIME ZONE 'UTC', ${n(br?.id)}, ${n(tp?.id)}) RETURNING id`;
+        const id = n(p?.id);
+        await sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${TID}, ${id}, 'video', ${`r18/${TID}/${id}.mp4`}, ${JSON.stringify({ durationMs: 60000 })}::jsonb, 0)`;
+        await coin.consume(TID, "video_60", `piece:${id}`, { reason: "R18 리허설 원본(다시 만들기)" });
+        return id;
+      };
+      const madeOf = async (oid: number) => (await sql`SELECT id FROM pieces WHERE tenant_id = ${TID} AND meta->>'remakeOf' = ${String(oid)} AND channel = 'naver_clip'`).length;
+      let o3 = 0, bad = 0, okRounds = 0, noneOk = 0;
+      const badNotes: string[] = [];
+      const seconds: string[] = [];
+      for (let i = 0; i < ROUNDS; i++) {
+        o3 = await seedOrigin(i);
+        const cA = await consumeCount();
+        const rs = await Promise.all(Array.from({ length: AT_ONCE }, () => dir.remakeVideoFor(TID, o3, "naver_clip", null)));
+        const cB = await consumeCount(); const mB = await madeOf(o3);
+        if (!rs.some((r) => r?.ok)) { noneOk++; badNotes.push(`판${i + 1}: 다 안 됐다 ${rs.map((r) => String(r?.step)).join("/")}`); continue; }
+        if (mB === 1 && cB - cA === 1) { okRounds++; seconds.push(rs.filter((r) => !r?.ok || r?.already).map((r) => (r?.already ? "already" : String(r?.step))).join("·")); }
+        else { bad++; badNotes.push(`판${i + 1}: 새 영상 ${mB} · 차감 행 +${cB - cA}`); }
+      }
+      rec(`①-b 🔴 «30초로 다시 만들기»를 **동시에 ${AT_ONCE}번** × ${ROUNDS}판 — 판마다 새 영상 1개 · 차감 1번`, bad ? "fail" : okRounds ? "pass" : "unmeasured",
+        bad ? `[①b remake_twice] ${bad}/${ROUNDS}판에서 두 번 이상 · ${badNotes.join(" | ")}`
+          : okRounds ? `${okRounds}/${ROUNDS}판 전부 1·1 · 나머지 요청은 ${[...new Set(seconds)].join(" / ")}${noneOk ? ` · ⊘ ${noneOk}판` : ""}`
+            : `판 ${ROUNDS} 전부 안 됐다 — ${badNotes.join(" | ")}`.slice(0, 240));
+      const made = () => madeOf(o3);
+      const mB = await made();
+      /* 차례로 — 마지막 판의 원본에 한 번 더. 스텁 덕에 판은 `generating` 이지만, 스텁이 못 받았을 때도 같은 답이 나오게 «다 만들어졌다»(in_review)로 둔다(B 의 라이브 자와 같은 방식) */
       await sql`UPDATE pieces SET status = 'in_review' WHERE tenant_id = ${TID} AND meta->>'remakeOf' = ${String(o3)} AND channel = 'naver_clip'`;
       const cC = await consumeCount();
       const rc = await dir.remakeVideoFor(TID, o3, "naver_clip", null);
@@ -507,6 +538,8 @@ if (!REHEARSE) {
       rec("리허설 — 치우기(teardown)", note.failed ? "fail" : "pass", note.text);
     }
     await sql.end({ timeout: 5 }).catch(() => {});
+    rec("리허설 — 돈 퓨즈: 배경 호출은 로컬 스텁만 받았다(라이브 0)", "pass", `스텁이 받은 호출 ${STUB.calls}(${[...STUB.paths].map(([p, c]) => `${p} ${c}`).join(" · ") || "없음"}) · 비밀값은 가짜 · URL=127.0.0.1`);
+    await STUB.close();
   }
 }
 
