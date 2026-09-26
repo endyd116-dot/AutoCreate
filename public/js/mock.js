@@ -826,7 +826,7 @@
     /* [R18 · B v1.2] 파생 영상은 시각 없이 태어나고 **B2 가 시차를 맞춰 박는다** — 모의는 10초 뒤 원본 시각 + 30분 간격으로 박는다(«시각 잡는 중» → 시각, 두 판을 다 보게) */
     for (const p of S.pieces) { if (!p.originPieceId || p.scheduledFor || p.status !== "scheduled" || Date.now() - (Date.parse(p.createdAt) || 0) < 10000) continue;
       const o = S.pieces.find((x) => x.id === p.originPieceId); const sibs = S.pieces.filter((x) => x.originPieceId === p.originPieceId);
-      if (o && o.scheduledFor) p.scheduledFor = iso(Date.parse(o.scheduledFor) + (sibs.indexOf(p) + 1) * 30 * 60e3); }
+      if (o && o.scheduledFor && ["scheduled", "approved", "publishing", "published"].includes(o.status)) p.scheduledFor = iso(Date.parse(o.scheduledFor) + (sibs.indexOf(p) + 1) * 30 * 60e3); }   /* 원본이 다시 만드는 중이면 안 박는다(B v1.3 · 다시 승인되면 박힌다) */
     for (const p of S.pieces) { if (!p._t0) continue; const age = Date.now() - p._t0; // [v1.1] stage: writing → images → checking → done
       if (age > 18000) { p.status = "in_review"; p.stage = "done"; p.gateOk = true; delete p._t0; } else if (age > 12000) { p.stage = "checking"; p.status = "draft"; } else if (age > 6000) p.stage = "images"; else p.stage = "writing"; }
     for (const p of S.pieces) { if (p.kind !== "video" || p.status !== "generating") continue; const v = p.meta; const online = S.devices.some((d) => d.online && d.caps?.ffmpeg !== false); const sl = S.slots.find((s) => s.pieceId === p.id);
@@ -1347,8 +1347,15 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
       if (["in_review", "edited"].includes(p.status)) p._reusePending = chosen;
       else { created = vrMake(p, fit.go.map((g) => g.channel)); p._reuseSkipped = fit.skip; }
       return { ok: true, videoReuse: vrPayload(), reuse: vrOf(p), created, skip: fit.skip }; },
-    "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
+    /* [R18 · B v1.3] 원본 영상을 버리면 **아직 안 나간 파생도 같이 버린다** — 응답 `derivedRejected: number[]`(없으면 키 없음) · 파생마다 meta.rejectReason(서버 글자 그대로) */
+    "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected";
+      const gone = p && p.kind === "video" && !p.originPieceId ? S.pieces.filter((x) => x.originPieceId === p.id && !["published", "publishing", "rejected"].includes(x.status)) : [];
+      for (const d of gone) { d.status = "rejected"; d.meta = { ...(d.meta || {}), rejectReason: "원본 영상을 버려서 같이 내렸어요" }; }
+      return { ok: true, status: "rejected", ...(gone.length ? { derivedRejected: gone.map((d) => d.id) } : {}) }; },
     "pieces-regenerate": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 });
+      /* [R18 · B v1.3] 파생은 거절(서버 글자 그대로) · 원본을 다시 만들면 안 나간 파생은 «예약됨 · 시각 잡는 중»으로 돌아간다(시각을 뗀다) */
+      if (p.originPieceId) return err("derived", "이 영상은 원본 영상을 그대로 올리는 거예요 — 다시 만들려면 원본에서 다시 만들어 주세요.", { originPieceId: p.originPieceId });
+      if (p.kind === "video") for (const d of S.pieces) if (d.originPieceId === p.id && d.status === "scheduled") delete d.scheduledFor;
       /* 🔴 [2026-09-16 · «제자리»] 서버 계약을 그대로 옮긴다(netlify/functions/pieces.ts `pieces-regenerate`) — 종전 모의엔 **이 가지가 통째로 없었다**.
          그래서 «만드는 중»에 갇힌 글을 누르면 `regenCount` 를 태우고 1회 한도를 먹었다(서버는 태우지 않는다 · 코인도 0).
          20분 넘었으면 **202**(정말 다시 걸었다) · 아니면 200 그대로 — 화면이 이 둘을 갈라 말하므로 모의도 갈라야 한다(안 가르면 하니스가 초록인 채 거짓말한다). */
