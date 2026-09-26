@@ -37,7 +37,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=32"></script>
-<script src="/js/mock.js?v=33"></script>
+<script src="/js/mock.js?v=34"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -414,7 +414,8 @@ function renderTeamWait() {
       화면은 세지도 짓지도 않는다(AC-52) — 빠진 채널 문장(«이 영상은 60초라 …») 도 서버 글자 그대로다(알림도 같은 문장을 쓴다).
    🔴 처음 한 번 묻기(`reuse.ask`) — «이대로 예약»을 누르는 그 자리에서 **바텀시트**로 묻는다(팝업 모달 금지 · §13.0).
       채널 칸은 **기본 꺼짐**(트리거 §1 ① «고객이 내가 켰다를 알아야 한다») · «앞으로도 이렇게 할게요»만 기본 켬.
-      이번 영상에 안 맞는 채널(too_long · no_account)도 **고를 수 있다** — 앞으로의 영상에 쓰이고, 이번엔 왜 빠지는지 그 줄에 적혀 있다(② 모양이 바로 그것).
+      이번 영상에 안 맞는 채널(too_long · not_connectable · no_account)도 **고를 수 있다** — 앞으로의 영상에 쓰이고, 이번엔 왜 빠지는지 그 줄에 적혀 있다(② 모양이 바로 그것).
+      🔴 [R19] not_connectable = 그 채널이 **아직 연결을 못 받는다**(서버 문장 «… 연결은 아직 준비 중이에요.» · «연결이 열리면 여기서 같이 올릴 수 있어요.»). 골라 두면 열리는 날부터 쓰인다.
       답은 `pieces-reuse` 먼저 → `pieces-approve`(B 계약 순서). 🔴 묻기가 안 되면 **예약은 그대로 간다**(§9 — 묻는 것이 예약을 막으면 안 된다).
    🔴 자동 승인 경로(사람이 이 화면을 안 본다)는 서버 알림(`video_reuse_ask`)이 `?reuse=ask` 로 이 시트를 연다(§9 ② «사람이 안 보는 경로에서도 닿게»). */
 const isDerived = () => !!(P && P.reuse && P.reuse.role === "derived");
@@ -444,8 +445,13 @@ function renderReuse() {
   const me = reuseRowHtml(P.channel, UI.chLabel(P.channel), P.accountHandle ? "@" + UI.esc(P.accountHandle) : "", stPill(P.status));
   /* [R18 · B v1.4 · 트리거 §6-6] 길이 때문에 빠진 곳(too_long)엔 서버가 `remake{seconds,coins}` 를 싣는다 — «그 채널용으로 짧게 하나 더 만드는 길».
      🔴 **새 영상이라 코인이 든다** — 값을 단추에 **먼저** 적는다(누른 뒤에 알면 늦다). 누르면 한 번 더 묻는다(되돌릴 수 없는 돈 · 확인은 게이트가 아니다). */
-  /* [B v1.6] `connected:false` 면(그 채널 계정이 없다) 단추 대신 한 줄 — 눌러도 서버가 400 no_account 로 돌려보낼 단추는 그리지 않는다(없는 길) */
-  const remakeBtn = (s) => s.why === "too_long" && s.remake && s.connected === false ? `<span class="d wrap" style="margin-top:6px;color:var(--muted)">계정을 연결하시면 ${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds) || ""}초 영상도 만들 수 있어요</span>`
+  /* [B v1.6] `connected:false` 면(그 채널 계정이 없다) 단추 대신 한 줄 — 눌러도 서버가 400 no_account 로 돌려보낼 단추는 그리지 않는다(없는 길)
+     🔴 [R19 · B 합의 · 트리거 §0-C ㉱] 그 채널이 **아직 연결을 못 받으면**(계정 없음 + `connectable:false`) «계정을 연결하시면»도 거짓이다 —
+        연결할 길이 없는데 연결하라고 하는 막다른 골목이다(§9 «또렷하게»). 그때는 **단추도 그 한 줄도 그리지 않는다**:
+        서버가 그 줄의 `how` 를 «… 연결은 아직 준비 중이에요 — 연결이 열리면 N초로 만들어 같이 올릴 수 있어요.»로 바꿔 싣는다(B ④ · skipSub 가 그린다).
+        계정이 이미 붙어 있으면 `connectable` 과 **무관하게** 단추를 그린다 — 그 길은 실제로 된다(B ③·⑧: 400 not_connectable 은 «계정 없음 + 연결 못 받음»일 때만). */
+  const remakeBtn = (s) => s.why === "too_long" && s.remake && s.connected === false && s.connectable === false ? ""
+    : s.why === "too_long" && s.remake && s.connected === false ? `<span class="d wrap" style="margin-top:6px;color:var(--muted)">계정을 연결하시면 ${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds) || ""}초 영상도 만들 수 있어요</span>`
     : s.why === "too_long" && s.remake && Number(s.remake.seconds) && Number.isFinite(Number(s.remake.coins))
     ? `<button type="button" class="btn secondary sm" data-remake="${UI.esc(s.channel)}" data-rsec="${Number(s.remake.seconds)}" data-rcoin="${Number(s.remake.coins)}" data-rlabel="${UI.esc(s.label || UI.chLabel(s.channel))}" style="margin-top:8px;align-self:flex-start">${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds)}초로 하나 더 만들기 · ${UI.num(Number(s.remake.coins))}코인</button>` : "";
   const skipRows = (list) => list.map((s) => reuseRowHtml(s.channel, s.label || UI.chLabel(s.channel), skipSub(s), '<span class="r mut">—</span>', "", false, remakeBtn(s))).join("");

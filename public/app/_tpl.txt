@@ -1282,6 +1282,10 @@ let D = { accounts: [], channels: [] }, personas = [];
 const conn = UI.qs.get("connected"); if (conn) UI.toast(`${UI.chLabel(conn)} 계정을 연결했어요`);
 /** [AC-186] 채널 한 칸 — 서버가 준 `channels[]` 에서 찾는다(화면이 채널 성질을 베껴 적지 않는다 · AC-52). */
 const chOf = (key) => (D.channels || []).find((c) => c.key === key) || null;
+/** [R19 · A · 트리거 §0-D ㉲] 이 채널에 **우리가 만들어 올리는** 가장 긴 영상(초) — 서버 `channels[].video.formats[].maxSeconds` 중 큰 값.
+    🔴 `video.maxSeconds` 가 아니다 — 그건 **채널이 받는** 길이(릴스 90 · 틱톡 180 = 플랫폼 사실)이고, 우리가 만드는 상한은 포맷 쪽이다(서버 `VIDEO_FORMAT_MAX_SEC` 한 곳).
+    종전엔 계정 상세에 «60초까지»가 **박혀 있어서** 릴스가 90 을 내는데도 60 이라 적혀 있었다(AC-52). 상한이 바뀌면 이 줄은 서버를 따라간다. 모르면 0 → 줄을 안 그린다(AC-9). */
+const vMaxOf = (key) => { const f = ((chOf(key) || {}).video || {}).formats; const xs = Array.isArray(f) ? f.map((x) => Number(x && x.maxSeconds)).filter((s) => Number.isFinite(s) && s > 0) : []; return xs.length ? Math.max(...xs) : 0; };
 
 /* 🔴 [AC-186 · 사장님 라이브 2026-09-22] **«확인 중»이 왜 확인 중인지 화면이 말을 안 했다.**
    계정 셋이 다 «확인 중»인데 까닭은 저 아래 **«내 PC 프로그램 · 꺼짐»** 한 줄이었다 — 두 정보가 따로 놀았다.
@@ -1530,6 +1534,10 @@ async function detailSheet(a) {
   const srcLine = !mySrc.length ? "아직 연결한 곳이 없어요"
     : badSrc.length ? `${okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") || "연결됨 없음"} · ${UI.srcLabel(badSrc[0].source)} 끊김`
     : okSrc.length ? okSrc.map((s) => UI.srcLabel(s.source)).join(" · ") : "키를 넣으면 바로 가져와요";
+  /* [R19 · A] «영상» 한 줄 — 유튜브·클립은 그 채널 사정(심사·앱)을, 그 밖은 **서버가 준 길이**를 말한다(vMaxOf · 화면에 박힌 숫자 0). 길이를 모르면 줄을 안 그린다. */
+  const vSay = a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : vMaxOf(a.channel) ? `${vMaxOf(a.channel)}초까지 올라가요` : "";
+  /* [R19 · B2 계약] 하루에 올릴 수 있는 수가 정해진 채널(유튜브)만 서버가 싣는 문장 — 글자 그대로 한 줄. 없으면 "" → 줄 없음. */
+  const limitNote = chOf(a.channel) && typeof chOf(a.channel).publishLimitNote === "string" ? chOf(a.channel).publishLimitNote.trim() : "";
   /* 🔴 [2026-09-21] **«이 블로그 언제부터 쓰셨어요?» — 여태 물어보는 자리가 없었다**(아래 `#oa` 칸).
     `lib/warmup.ts:17` 이 «opened_at(계정을 만든 날 · **고객이 알면 입력**) > created_at» 이라고 적어 뒀는데
     읽는 곳 6 · **쓰는 곳 0** · 라이브 92계정 **전부 NULL** 이었다(실측 · 2026-09-21).
@@ -1548,11 +1556,13 @@ async function detailSheet(a) {
        <div style="padding:0 0 8px;text-align:right"><button type="button" class="btn ghost sm" id="addrUndo">확인 취소</button></div>`
     /* 우리가 본 주소가 저장된 주소와 같다 — 물을 것이 없다. 조용히 적기만 한다(§13.0 «설명 한 문장»). `identity` 가 없으면 한 줄도 없다(AC-9 «아직 모른다»). */
     : addrSeen(a) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">블로그 주소</span><span class="v" style="font-size:13px;word-break:break-all">${UI.esc(addrSeen(a))}</span></div>` : ""}
-  ${UI.VIDEO_CH.includes(a.channel) ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${a.channel === "youtube_shorts" ? "심사 전엔 비공개로 올라가요" : a.channel === "naver_clip" ? "클립은 앱에서 올려 주세요 · 준비 중" : "60초까지 올라가요"}</span></div>` : ""}
+  ${UI.VIDEO_CH.includes(a.channel) && vSay ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">영상</span><span class="v" style="font-size:13px">${UI.esc(vSay)}</span></div>` : ""}
   ${/* [R17-B2 · DESIGN §2.2] 🔴 **좁은 길은 미리 말해 준다.** 유튜브 하루 상한은 우리 게이트가 아니라 구글 쿼터가 정하는 **사실**이고,
        종전엔 그 수가 서버 파일 밖 0곳이라 **여섯 건째가 될 때까지 아무도 몰랐다**(§9: 막지 않는 대신 말해 준다).
-       🔴 숫자는 **서버가 준 것만** 쓴다(`dailyPublishCap`) — 화면이 5 를 베껴 적지 않는다(§13 · AC-52). 안 주면 줄을 안 그린다. */""}
-  ${chOf(a.channel) && chOf(a.channel).dailyPublishCap ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">하루에</span><span class="v" style="font-size:13px">${chOf(a.channel).dailyPublishCap}개까지 올라가요 · 더 예약하면 다음 날 이어서 올려요</span></div>` : ""}
+       🔴 [R19 · B2 · 트리거 §0-B ㉯] **숫자를 뺐다**(R17 의 «하루 N개» 숫자 칸 → `publishLimitNote` 문장). 새 규정의 100 은 구글 **프로젝트 하나**의 수라
+       우리 고객 전부가 나눠 쓴다 — 한 사람에게 «하루에 100개까지»는 거짓이다. 서버 문장(`lib/publish/youtube.ts YOUTUBE_LIMIT_NOTE`)을
+       **글자 그대로** 한 줄 싣고, 안 주면 줄을 안 그린다(AC-9). 화면은 숫자도 문장도 짓지 않는다(AC-52). */""}
+  ${limitNote ? `<p class="muted" style="margin:4px 0 8px;font-size:12.5px;line-height:1.6">${UI.esc(limitNote)}</p>` : ""}
   ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span> <button type="button" class="btn ghost sm" id="hre" style="margin-left:8px">다시 재기</button></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
@@ -1950,11 +1960,14 @@ function sayKinds(on) {
 }
 loadKinds();
 /* ═══ [R18 · A] «영상을 여러 곳에 올리기» — GET/POST /api/tenant-settings `videoReuse` (B 계약 R18 v1) ═══
-   모양: { on, channels, asked, askedAt, targets: [{ channel, label, maxSeconds, connected }] } · POST { videoReuse: { on, channels } } → 같은 모양.
-   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long·threads 는 서버가 이미 뺐다 · 트리거 §3).
+   모양: { on, channels, asked, askedAt, targets: [{ channel, label, maxSeconds, connected, connectable }] } · POST { videoReuse: { on, channels } } → 같은 모양.
+   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long 은 서버가 뺀다 · [R19] 스레드는 이제 후보다 — 영상 길이가 있는 채널은 전부 대상).
    🔴 **서버가 돌려준 값으로 다시 그린다** — 내가 누른 값을 기억해서 그리면 저장이 안 됐는데 된 것처럼 보인다(서버가 후보 밖 채널을 걸러 낸다).
    🔴 기본은 꺼짐(트리거 §1 ①) — 아직 안 물은 집에는 «첫 영상이 다 되면 한 번 여쭤볼게요»를 적는다. 지금 켜도 된다(막지 않는다 · §9).
-   🔴 계정이 아직 없는 채널도 **고를 수 있다** — 연결되는 날부터 같이 올라간다. 그 사실을 한 줄로 적는다(겁주지 않는다 · §3). */
+   🔴 계정이 아직 없는 채널도 **고를 수 있다** — 연결되는 날부터 같이 올라간다. 그 사실을 한 줄로 적는다(겁주지 않는다 · §3).
+   🔴 [R19 · B 합의 · 트리거 §0-C ㉱] 그 채널이 **아직 연결을 못 받으면**(`connectable:false` · 계정도 없음) «계정이 연결되면»은 막다른 말이다 —
+      연결할 길이 없다. 그 줄은 «연결은 아직 준비 중이에요»로 적는다(고를 수는 그대로 있다 — 열리는 날부터 쓰인다).
+      계정이 이미 붙어 있으면(`connected:true`) `connectable` 과 무관하게 아무 말도 안 붙인다 — 그 채널엔 실제로 올라간다(B ③). */
 let VR = null;
 async function loadReuse() {
   const r = await UI.api("/api/tenant-settings", { noGate: true });
@@ -1970,7 +1983,7 @@ function drawReuse() {
   const sub = on ? (picked.size ? "같은 영상이라 코인은 한 번만 들어요 · 시간 차를 두고 올려요" : "올릴 곳을 아래에서 골라 주세요")
     : VR.asked ? "지금은 만든 곳에만 올려요 · 켜면 고른 곳에도 같이 올라가요" : "첫 영상이 다 되면 한 번 여쭤볼게요 · 지금 켜셔도 돼요";
   box.innerHTML = `<div class="fr"><div class="fl">한 번 만든 영상을 다른 곳에도 올려요<small>${UI.esc(sub)}</small></div><button class="toggle" type="button" id="vrTg" aria-checked="${on ? "true" : "false"}" aria-label="영상을 여러 곳에 올리기"></button></div>`
-    + (on ? targets.map((t) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(t.channel, "sm")}<span>${UI.esc(t.label || UI.chLabel(t.channel))}<small>${Number(t.maxSeconds) ? `${Number(t.maxSeconds)}초까지 올라가요` : ""}${t.connected === false ? `${Number(t.maxSeconds) ? " · " : ""}계정이 연결되면 같이 올라가요` : ""}</small></span></div><button class="toggle" type="button" data-vrch="${UI.esc(t.channel)}" aria-checked="${picked.has(t.channel) ? "true" : "false"}" aria-label="${UI.esc(t.label || UI.chLabel(t.channel))}에도 올리기"></button></div>`).join("")
+    + (on ? targets.map((t) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(t.channel, "sm")}<span>${UI.esc(t.label || UI.chLabel(t.channel))}<small>${[Number(t.maxSeconds) ? `${Number(t.maxSeconds)}초까지 올라가요` : "", t.connected !== false ? "" : t.connectable === false ? "연결은 아직 준비 중이에요" : "계정이 연결되면 같이 올라가요"].filter(Boolean).join(" · ")}</small></span></div><button class="toggle" type="button" data-vrch="${UI.esc(t.channel)}" aria-checked="${picked.has(t.channel) ? "true" : "false"}" aria-label="${UI.esc(t.label || UI.chLabel(t.channel))}에도 올리기"></button></div>`).join("")
       + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">영상 길이가 그 채널보다 길면 그 채널만 빼고 올려요 · 만들 때 길이 옆에 몇 곳에 올라가는지 보여 드려요</p>` : "");
   const save = async (body) => {
     const rr = await UI.api("/api/tenant-settings", { body: { videoReuse: body } });
@@ -3507,7 +3520,8 @@ function renderTeamWait() {
       화면은 세지도 짓지도 않는다(AC-52) — 빠진 채널 문장(«이 영상은 60초라 …») 도 서버 글자 그대로다(알림도 같은 문장을 쓴다).
    🔴 처음 한 번 묻기(`reuse.ask`) — «이대로 예약»을 누르는 그 자리에서 **바텀시트**로 묻는다(팝업 모달 금지 · §13.0).
       채널 칸은 **기본 꺼짐**(트리거 §1 ① «고객이 내가 켰다를 알아야 한다») · «앞으로도 이렇게 할게요»만 기본 켬.
-      이번 영상에 안 맞는 채널(too_long · no_account)도 **고를 수 있다** — 앞으로의 영상에 쓰이고, 이번엔 왜 빠지는지 그 줄에 적혀 있다(② 모양이 바로 그것).
+      이번 영상에 안 맞는 채널(too_long · not_connectable · no_account)도 **고를 수 있다** — 앞으로의 영상에 쓰이고, 이번엔 왜 빠지는지 그 줄에 적혀 있다(② 모양이 바로 그것).
+      🔴 [R19] not_connectable = 그 채널이 **아직 연결을 못 받는다**(서버 문장 «… 연결은 아직 준비 중이에요.» · «연결이 열리면 여기서 같이 올릴 수 있어요.»). 골라 두면 열리는 날부터 쓰인다.
       답은 `pieces-reuse` 먼저 → `pieces-approve`(B 계약 순서). 🔴 묻기가 안 되면 **예약은 그대로 간다**(§9 — 묻는 것이 예약을 막으면 안 된다).
    🔴 자동 승인 경로(사람이 이 화면을 안 본다)는 서버 알림(`video_reuse_ask`)이 `?reuse=ask` 로 이 시트를 연다(§9 ② «사람이 안 보는 경로에서도 닿게»). */
 const isDerived = () => !!(P && P.reuse && P.reuse.role === "derived");
@@ -3537,8 +3551,13 @@ function renderReuse() {
   const me = reuseRowHtml(P.channel, UI.chLabel(P.channel), P.accountHandle ? "@" + UI.esc(P.accountHandle) : "", stPill(P.status));
   /* [R18 · B v1.4 · 트리거 §6-6] 길이 때문에 빠진 곳(too_long)엔 서버가 `remake{seconds,coins}` 를 싣는다 — «그 채널용으로 짧게 하나 더 만드는 길».
      🔴 **새 영상이라 코인이 든다** — 값을 단추에 **먼저** 적는다(누른 뒤에 알면 늦다). 누르면 한 번 더 묻는다(되돌릴 수 없는 돈 · 확인은 게이트가 아니다). */
-  /* [B v1.6] `connected:false` 면(그 채널 계정이 없다) 단추 대신 한 줄 — 눌러도 서버가 400 no_account 로 돌려보낼 단추는 그리지 않는다(없는 길) */
-  const remakeBtn = (s) => s.why === "too_long" && s.remake && s.connected === false ? `<span class="d wrap" style="margin-top:6px;color:var(--muted)">계정을 연결하시면 ${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds) || ""}초 영상도 만들 수 있어요</span>`
+  /* [B v1.6] `connected:false` 면(그 채널 계정이 없다) 단추 대신 한 줄 — 눌러도 서버가 400 no_account 로 돌려보낼 단추는 그리지 않는다(없는 길)
+     🔴 [R19 · B 합의 · 트리거 §0-C ㉱] 그 채널이 **아직 연결을 못 받으면**(계정 없음 + `connectable:false`) «계정을 연결하시면»도 거짓이다 —
+        연결할 길이 없는데 연결하라고 하는 막다른 골목이다(§9 «또렷하게»). 그때는 **단추도 그 한 줄도 그리지 않는다**:
+        서버가 그 줄의 `how` 를 «… 연결은 아직 준비 중이에요 — 연결이 열리면 N초로 만들어 같이 올릴 수 있어요.»로 바꿔 싣는다(B ④ · skipSub 가 그린다).
+        계정이 이미 붙어 있으면 `connectable` 과 **무관하게** 단추를 그린다 — 그 길은 실제로 된다(B ③·⑧: 400 not_connectable 은 «계정 없음 + 연결 못 받음»일 때만). */
+  const remakeBtn = (s) => s.why === "too_long" && s.remake && s.connected === false && s.connectable === false ? ""
+    : s.why === "too_long" && s.remake && s.connected === false ? `<span class="d wrap" style="margin-top:6px;color:var(--muted)">계정을 연결하시면 ${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds) || ""}초 영상도 만들 수 있어요</span>`
     : s.why === "too_long" && s.remake && Number(s.remake.seconds) && Number.isFinite(Number(s.remake.coins))
     ? `<button type="button" class="btn secondary sm" data-remake="${UI.esc(s.channel)}" data-rsec="${Number(s.remake.seconds)}" data-rcoin="${Number(s.remake.coins)}" data-rlabel="${UI.esc(s.label || UI.chLabel(s.channel))}" style="margin-top:8px;align-self:flex-start">${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds)}초로 하나 더 만들기 · ${UI.num(Number(s.remake.coins))}코인</button>` : "";
   const skipRows = (list) => list.map((s) => reuseRowHtml(s.channel, s.label || UI.chLabel(s.channel), skipSub(s), '<span class="r mut">—</span>', "", false, remakeBtn(s))).join("");
