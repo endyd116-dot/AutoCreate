@@ -91,10 +91,9 @@ const LIVE_IN_CHAIN = [
     why: "C · R19 여섯 축 + 배경 전 문 — 시드 집 둘 → 치운다 · `fetch` 스텁(대본 밖 주소는 던진다) · 돈 0" },
   { file: "verify-r19.mts", args: ["--screen"],
     why: "C · R19 reuse.honest 화면 겹 — 로컬 정적 서버 + 브라우저(모의 · 라이브 0) · 창구 닫힌 판에 «연결하시면» 0 · 대조군(chOpen)엔 나온다" },
-  /* 🔴 변이 하니스는 아직 `--screen` 을 안 준다 — 화면 대조군이 A 의 piece.html 수리 전엔 빨가서(510 «올릴 채널이 아직 없어요») 변이 판 전체를 ⊘ 로 만든다.
-     A 수리가 main 에 들어오면 `["--db", "--screen"]` 으로 넓힌다(C 몫). */
-  { file: "verify-r19-mutants.mjs", args: ["--db"], db: true, timeoutMin: 30,
-    why: "C · R19 자 변이 14(DB 셋은 변이마다 시드 집 둘 → 치운다) — 순수 변이도 이 판 안에 있다" },
+  /* A 의 piece.html 수리(dee2506)가 들어와 화면 대조군이 초록이 됐다 → `--screen` 까지 넓혔다(화면 변이 1 · 대조군이 빨가면 판 전체 ⊘ 라 수리 전엔 못 넣었다). */
+  { file: "verify-r19-mutants.mjs", args: ["--db", "--screen"], db: true, timeoutMin: 30,
+    why: "C · R19 자 변이 15(DB 셋은 변이마다 시드 집 둘 → 치운다 · 화면 하나는 브라우저) — 순수 변이도 이 판 안에 있다" },
   { file: "verify-r19-threads-derived-live.mts", db: true,
     why: "B2 · 쓰레드 파생 시차·같은 r2_key·멱등 + 유튜브 찬 날 — 시드 집 둘 → 치운다 · `fetch` 전부 스텁 · 영상 생성 0 · 한도 1 은 이 프로세스만" },
 ];
