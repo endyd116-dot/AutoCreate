@@ -13,9 +13,15 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
    🔴 **이 자는 «자기 나무의» build-pages.mjs 로만 재라.** 이 스크립트 자체가 내용이다(`ui.js?v=` 같은 판 번호가 여기 박힌다).
       남의 가지를 재겠다고 **내 자를 남의 나무에 얹으면** 37장이 전부 «`ui.js?v=30` ↔ `v=31` 한 줄»로 빨개진다 —
       제품이 아니라 **내 자의 상태를 찍은 것**이다(AC-236 · AC-240). 내가 2026-09-23 에 바로 그렇게 한 번 틀렸다.
-      남의 가지를 재려면 **그 가지의 스크립트를 쓰고**, 그냥 돌린 뒤 `git diff -- public/` 가 비는지 보면 된다. */
+      남의 가지를 재려면 **그 가지의 스크립트를 쓰고**, 그냥 돌린 뒤 `git diff -- public/` 가 비는지 보면 된다.
+   🔴 **그리고 `--check` 를 «따로 돌리는 것»으로 두면 아무도 안 돌린다 — 내가 같은 판에서 두 번 밟았다.**
+      함정을 쓴 바로 뒤에 또 밟았다. **아는 것으로는 안 막힌다. 막는 것으로만 막힌다.**
+      ⇒ 그래서 **그냥 돌려도 먼저 재고, 지울 줄이 있으면 거절한다.** 정말 덮을 때만 `--force`.
+      이건 고객을 막는 게 아니라 **되돌릴 수 없는 삭제 앞의 확인**이다(CLAUDE §9 «이 규칙 밖인 것» 셋째). */
 const CHECK = process.argv.includes("--check");
+const FORCE = process.argv.includes("--force");
 const drift = [];
+const pending = [];   // 쓸 것들 — 다 재고 나서 한꺼번에 쓴다
 
 const FONT = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">`;
 const BACK = (fallback) => `<a class="ic" href="javascript:history.length>1?history.back():location.assign('${fallback}')" aria-label="뒤로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></a>`;
@@ -75,7 +81,7 @@ ${(js || "").trim()}
 </html>
 `;
     const out = `${t.dir}/${file}`;
-    if (CHECK) {
+    {
       const cur = existsSync(out) ? readFileSync(out, "utf8") : null;
       /* 줄끝(CRLF)만 다른 건 갈린 게 아니다 — 그걸 세면 서른일곱이 매번 빨개져서 아무도 안 본다. */
       const CR = String.fromCharCode(13), LF = String.fromCharCode(10);
@@ -93,16 +99,37 @@ ${(js || "").trim()}
         for (const [l, k] of cb) for (let x = (ca.get(l) || 0); x < k; x++) add.push(l);
         drift.push({ file: out, missing: false, gone, add });
       }
-    } else writeFileSync(out, page, "utf8");
+    }
+    pending.push([out, page]);   // 🔴 먼저 다 재고 나서 쓴다 — 한 장이라도 위험하면 **아무 장도 안 쓴다**
     n++;
   }
   console.log(`${t.dir}: ${n} pages${CHECK ? " (check)" : ""}`);
 }
+/* ── 재고 나서: 보고(--check)하거나, 거절하거나, 쓴다 ── */
+const risky = drift.filter((d) => d.gone.length);   // **지울 줄이 있는 것만** 위험이다(넣기만 하는 건 그냥 빌드다)
 if (CHECK) {
   if (!drift.length) { console.log("✓ 정본(_tpl.txt)과 생성물이 같다 — 지금 빌드를 돌려도 지워지는 것이 없다."); process.exit(0); }
+} else {
+  /* 🔴 **위험한 장만 건너뛰고 나머지는 쓴다.**
+     처음엔 «한 장이라도 위험하면 아무 장도 안 쓴다»로 만들었는데, 그러면 **내 안전한 장도 못 써서**
+     사람이 곧바로 `--force` 를 집는다 — 막는 자가 **우회를 부르면** 안 막은 것만 못하다.
+     위험한 장은 **손도 안 대고 그대로 둔다**(지울 줄이 살아 있다). 나머지는 평소대로 간다. */
+  const skip = new Set(FORCE ? [] : risky.map((d) => d.file));
+  let wrote = 0;
+  for (const [out, page] of pending) if (!skip.has(out)) { writeFileSync(out, page, "utf8"); wrote++; }
+  console.log("");
+  if (!skip.size) {
+    console.log(`✓ ${wrote} pages 썼다${FORCE && risky.length ? ` · 🔴 --force 로 ${risky.reduce((a, d) => a + d.gone.length, 0)}줄을 덮었다` : ""}`);
+    process.exit(0);
+  }
+  console.log(`✓ ${wrote}장 썼다 · 🔴 **${skip.size}장은 안 썼다** — 이대로 쓰면 ${risky.reduce((a, d) => a + d.gone.length, 0)}줄이 사라진다.`);
+  console.log("   안 쓴 장은 **손도 안 댔다**(지울 줄이 그대로 살아 있다). 아래를 보고 정하라.");
+}
+
+{
   const cut = (l) => (l.trim().length > 150 ? l.trim().slice(0, 150) + " …" : l.trim());
   console.log("");
-  console.log(`🔴 정본과 갈린 생성물 ${drift.length}개 — **지금 빌드를 돌리면 «생성물에만» 있는 줄이 사라진다.**`);
+  console.log(`🔴 정본과 갈린 생성물 ${drift.length}개 — **빌드는 «생성물에만» 있는 줄을 지운다.**`);
   for (const d of drift) {
     console.log("");
     if (d.missing) { console.log(`   ✗ ${d.file}  —  생성물이 없다`); continue; }
@@ -110,13 +137,12 @@ if (CHECK) {
     /* 순서만 바뀐 경우엔 개수로도 안 보인다 — 그때는 «못 보여준다»고 **말한다**(조용히 이름만 띄우지 않는다). */
     if (!d.gone.length && !d.add.length) console.log("      ⊘ 갈렸는데 줄로는 안 보인다 — **줄 순서만 바뀌었다.** `git diff` 로 봐라.");
     if (d.gone.length) {
-      /* 지울 줄은 많을 수 있다(실측 66줄) — 앞 8줄만 보이고 나머지는 수로 말한다. 여기서는 «무엇이»보다 «얼마나»가 먼저다. */
       console.log(`      ✖ 생성물에만 ${d.gone.length}줄 — **빌드가 지울 줄**`);
       for (const l of d.gone.slice(0, 8)) console.log(`         - ${cut(l)}`);
       if (d.gone.length > 8) console.log(`         … ${d.gone.length - 8}줄 더 (git diff 로 본다)`);
     }
     if (d.add.length) {
-      /* 🔴 넣을 줄은 **전부 찍는다**(A 의 제안 · 2026-09-23). 세는 것보다 **보는 것**이 이 건을 가른다 — 아래 경고와 한 몸이다. */
+      /* 🔴 넣을 줄은 **전부 찍는다**(A 의 제안 · 2026-09-23). 세는 것보다 **보는 것**이 이 건을 가른다. */
       console.log(`      ＋ 정본에만 ${d.add.length}줄 — **빌드가 넣을 줄**(전부 찍는다)`);
       for (const l of d.add) console.log(`         + ${cut(l)}`);
     }
@@ -124,10 +150,11 @@ if (CHECK) {
   console.log("");
   console.log("   할 일: 「생성물에만」 있는 줄을 **`_tpl.txt` 로 옮긴 뒤** 빌드한다(AC-213 · 정본이 먼저다).");
   console.log("   🔴 그 줄을 쓴 사람이 누군지 모르면 **지우지 말고 물어본다** — 말없이 사라지면 아무도 못 찾는다.");
+  console.log("   정말 덮어야 한다면: node scripts/build-pages.mjs --force");
   console.log("");
   console.log("   🔴 **「정본에만」 있는 줄은 반드시 눈으로 읽어라.** 자는 그게 «새 내용»인지");
   console.log("      «생성물 쪽에서 고치기 전의 옛 판»인지 **못 가른다** — 글자로는 똑같이 «갈림»이다.");
-  console.log("      A 실측(2026-09-23): 20줄 중 **새 내용 0줄 · 전부 옛 판**이었다. 안 가르고 줄 단위로 합치면");
+  console.log("      A 실측(2026-09-23): 22종 전부 **옛 판**이었다. 안 가르고 줄 단위로 합치면");
   console.log("      옛 판과 새 판이 **둘 다 남는다**(프랑켄슈타인). 그때는 **블록 통째 교체**가 맞다.");
   console.log("      🔴 «갈렸다»는 잰 것이고 «둘 다 필요하다»는 **뜻한 것**이다 — 자는 앞엣것만 한다(AC-178).");
   process.exit(1);
