@@ -181,7 +181,7 @@ if (!files.length) { console.log("⊘ 못 쟀어요 — 훑을 파일이 하나�
   }
 }
 
-let nLiterals = 0, nStringy = 0, nCommentLines = 0, nNotRegex = 0;
+let nLiterals = 0, nStringy = 0, nCommentLines = 0, nNotRegex = 0, nGenLines = 0;
 const notRegex = [];
 const perDir = new Map();   // 🔴 [AC-222] 나무별 모수 — 합만 보면 «어느 나무가 사라졌나»를 못 본다
 const dirOf = (f) => DIRS.find((d) => f === d || f.startsWith(`${d}/`)) ?? "(그 밖)";
@@ -194,7 +194,17 @@ for (const f of files) {
      하필 이 자가 보는 것이 정규식이라 그걸 본문으로 쓰면 **보던 줄이 사라진다.**
      ⇒ 「그 줄이 통째로 주석인가」만 그 도구에 묻고(줄 수를 보존하니 줄 번호가 맞는다), **읽기는 원문으로** 한다. */
   const stripped = codeOnly(raw).split("\n");
+  /* 🔴 [2026-09-27 C · R19 C0 — 배포 체인 첫 판이 잡았다] **생성 칸(`▼ GEN:` … `▲ GEN:`)은 건너뛴다.**
+     `public/js/mock-ops.js` 의 감정 표(R18 · 2e58ce5)는 `scripts/gen-mock-ops-emotion.mts` 가 `lib/writing-contracts.ts` 를 **JSON 으로 찍은 한 줄**이다.
+     그 안의 «~했어요 / ~더라고요» 같은 빗금을 이 자가 정규식 리터럴로 오인해 **거짓 빨강 22** 를 냈다(머리말의 알려진 한계 — 나눗셈·글 속 빗금).
+     생성 칸에는 손으로 쓴 정규식이 없다 — 원본(`lib/`)은 이 자가 **따로** 훑는다. 뺀 줄 수는 끝줄에 찍는다(말 안 하면 «다 봤다»가 된다 · AC-141 ②). */
+  let inGen = false;
   lines.forEach((ln, i) => {
+    /* 표식은 **줄 머리의 주석**만 — 글자 속(생성기의 상수 · 이 자의 정규식)에 든 같은 글자로 켜지면 진짜 코드를 건너뛴다(첫 판이 그랬다).
+       백슬래시 없는 검사로 쓴다(AC-100 — 셸을 거치면 먹힌다 · 이 수리를 하다 실제로 먹혔다). */
+    if (ln.trimStart().startsWith("/* ▼ GEN:")) { inGen = true; return; }
+    if (ln.trimStart().startsWith("/* ▲ GEN:")) { inGen = false; return; }
+    if (inGen) { nGenLines++; return; }
     if (ln.trim() && !(stripped[i] ?? "").trim()) { nCommentLines++; return; }   // 통째로 주석인 줄
     for (const m of ln.matchAll(RE_LITERAL)) {
       const classes = classesOf(m[2]);
@@ -221,7 +231,7 @@ for (const f of files) {
 }
 
 console.log("─".repeat(100));
-console.log(`정규식의 먹힌 백슬래시 — 훑은 파일 ${files.length}개 · 집은 정규식 리터럴 ${nLiterals}개 · new RegExp("…") ${nStringy}개 · 건너뛴 주석 줄 ${nCommentLines}개 · 깨진 곳 ${hits.length}`);
+console.log(`정규식의 먹힌 백슬래시 — 훑은 파일 ${files.length}개 · 집은 정규식 리터럴 ${nLiterals}개 · new RegExp("…") ${nStringy}개 · 건너뛴 주석 줄 ${nCommentLines}개 · 건너뛴 생성 칸 ${nGenLines}줄(원본 lib 에서 잰다) · 깨진 곳 ${hits.length}`);
 /* 🔴 **모수에서 뺀 것을 말한다** — 말 안 하면 «다 봤다»가 되고, 그게 오늘 하루 종일 쫓은 병이다(AC-141 ②). */
 /* 🔴 **나무별로 찍는다**(AC-222) — 합만 보면 «어느 나무가 통째로 사라졌는지»를 사람도 못 본다.
    위 «빈 파일» 축이 기계로 막고, 이 줄은 **사람이 눈으로** 보는 자리다(둘 다 있어야 한다). */

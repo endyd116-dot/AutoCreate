@@ -477,6 +477,7 @@ function claimSheet(t) {
   UI.sheet(`<p class="muted" style="margin:0 0 10px;line-height:1.7"><b>${UI.esc(t.fromName || t.fromEmail || "보낸 사람 모름")}</b> 님이 보낸 문의예요.<br>어느 집 사람인지 골라 주면 <b>플랜·러너·최근 오류</b>를 그때 받아 적어 둘게요.</p>
     <div class="field"><label>고객 찾기</label><input class="input" id="cq" placeholder="집 이름 · 키 · 가입 메일" autocomplete="off"></div>
     <div id="cres" style="max-height:240px;overflow:auto"></div>
+    <div class="kv" id="chid" hidden></div>
     <div class="cta"><button class="btn primary" type="button" id="cgo" disabled>이 집에 붙이기</button></div>`,
     { title: "고객 붙이기", onOpen: (sh, close) => {
       const res = sh.querySelector("#cres"), go = sh.querySelector("#cgo"), q = sh.querySelector("#cq");
@@ -491,7 +492,22 @@ function claimSheet(t) {
         });
       };
       /* 처음부터 한 번 불러 둔다 — 빈 상자를 보여 주고 «찾아라»고 하면 대개 아무도 안 찾는다 */
-      const search = async () => { const rr = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q.value.trim())}&size=20`, { noRedirect: true }); draw(rr.ok ? (rr.tenants || []) : []); };
+      /* 🔴 [2026-09-27 C · R19 C0 — 배포 체인 첫 판이 잡았다 · verify-customer-visible ②] 이 찾기도 서버가 «내부로 표시된 N곳은 뺐다»고
+         말해 주는데(`internal:{excluded,hidden}`) 그 말을 버리고 있었다 — 찾는 분이 내부로 표시돼 있으면 운영자는 «없는 집»이라고 읽는다.
+         고객 목록 화면(`tenants.html`)과 **같은 말 · 같은 손잡이**(`internal=1`)로 적는다. 숨김은 «지움»이 아니라 «접어 둠»이다. */
+      let withInternal = false;
+      const hid = sh.querySelector("#chid");
+      const search = async () => {
+        const rr = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q.value.trim())}&size=20${withInternal ? "&internal=1" : ""}`, { noRedirect: true });
+        draw(rr.ok ? (rr.tenants || []) : []);
+        const hidden = rr.ok && rr.internal && rr.internal.excluded ? (rr.internal.hidden || 0) : 0;
+        hid.hidden = !withInternal && !(hidden > 0);
+        hid.innerHTML = withInternal
+          ? `<span class="k muted" style="white-space:normal">내부 표시된 집도 함께 찾고 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="chidt">다시 접기</button></span>`
+          : hidden > 0 ? `<span class="k" style="white-space:normal">내부로 표시된 <b>${UI.num(hidden)}곳</b>은 빠져 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="chidt">함께 찾기</button></span>` : "";
+        const tg = hid.querySelector("#chidt");
+        if (tg) tg.onclick = () => { withInternal = !withInternal; search(); };
+      };
       let tm; q.oninput = () => { clearTimeout(tm); tm = setTimeout(search, 250); };
       search();
       go.onclick = async () => {

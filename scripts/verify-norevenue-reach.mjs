@@ -48,8 +48,11 @@ for (const s of SCREENS) {
 notes.push(`센 것: 말이 닿는 화면 ${reached}/${SCREENS.length} — 🔴 이 목록에 없는 화면은 **안 세고 있는 것**이다(어제 자가 여기서 거짓말했다)`);
 
 /* ── ③ 🔴 이번 사고의 뿌리 — «아직 안 열린 채널»에도 닿나 ── */
-const gridLine = (tpl.match(/^.*#cg.*innerHTML.*cgi.*$/m) || [""])[0];
-notes.push(`센 것: 계정 연결 격자 한 줄(\`#cg\` innerHTML) 안에서 \`soon(\` 과 \`monetizable\` 의 자리`);
+/* 🔴 [2026-09-27 C · R19 C0 — 배포 체인 첫 판이 잡았다] 격자가 «한 줄»에서 `tile` 도우미 + `#cg.innerHTML = now.map(tile)` 로 갈라졌다.
+   옛 닻(`#cg … innerHTML … cgi` 가 한 줄)은 과녁을 잃어 **제품이 맞는데 빨강**이었다(§2.9 ② 자가 늦었다).
+   ⇒ 닻을 «칸 하나(`class="cgi`)를 짓는 줄»로 — 옛 모양이면 옛 닻이 먼저 잡는다. 둘 다 없으면 여전히 과녁 잃음(빨강). */
+const gridLine = (tpl.match(/^.*#cg.*innerHTML.*cgi.*$/m) || tpl.split("\n").filter((l) => l.includes('class="cgi') && l.includes("soon(c)")) || [""])[0] ?? "";
+notes.push(`센 것: 계정 연결 격자의 칸 하나를 짓는 줄(\`class="cgi"\`) 안에서 \`soon(\` 과 \`monetizable\` 의 자리`);
 if (!gridLine) fails.push("🔴 계정 연결 격자를 그리는 줄을 못 찾았다 — 이 자가 과녁을 잃었다(양성 대조 실패).");
 else {
   const iSoon = gridLine.indexOf("soon(c) ?");
