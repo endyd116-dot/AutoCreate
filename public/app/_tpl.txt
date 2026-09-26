@@ -3514,8 +3514,8 @@ const isDerived = () => !!(P && P.reuse && P.reuse.role === "derived");
 /** 시트에 그릴 후보 — 들어가는 곳(go) 먼저, 그다음 이번엔 빠지는 곳(skip). 둘 다 서버가 준 목록이다(원본 채널·유튜브 가족은 서버가 이미 뺐다). */
 function reuseCands() { const f = (P.reuse && P.reuse.fit) || {}; return [...(f.go || []).map((g) => ({ ...g, why: null })), ...(f.skip || [])]; }
 const skipSub = (s) => `${UI.esc(s.line || "")}${s.how ? `<br>${UI.esc(s.how)}` : ""}`;
-function reuseRowHtml(ch, label, sub, right, href, wrapTitle) {   /* wrapTitle = 제목 자리에 서버 문장이 오는 줄(파생 «… 에서 왔어요 · 코인은 더 안 들어요») — 말줄임으로 자르지 않고 두 줄까지 */
-  const inner = `${UI.mark(ch)}<div class="l"><span class="t${wrapTitle ? " wrap" : ""}">${UI.esc(label)}</span>${sub ? `<span class="d wrap">${sub}</span>` : ""}</div>${right}`;
+function reuseRowHtml(ch, label, sub, right, href, wrapTitle, extra) {   /* wrapTitle = 제목 자리에 서버 문장이 오는 줄(파생 «… 에서 왔어요 · 코인은 더 안 들어요») — 말줄임으로 자르지 않고 두 줄까지 · extra = 줄 안에 붙는 단추(링크 줄엔 안 쓴다) */
+  const inner = `${UI.mark(ch)}<div class="l"><span class="t${wrapTitle ? " wrap" : ""}">${UI.esc(label)}</span>${sub ? `<span class="d wrap">${sub}</span>` : ""}${extra || ""}</div>${right}`;
   return href ? `<a class="row tap" href="${href}">${inner}</a>` : `<div class="row">${inner}</div>`;
 }
 const stPill = (s) => { const st = UI.PIECE_STATUS[s] || ["off", s]; return `<span class="pill ${st[0]}">${UI.esc(st[1])}</span>`; };
@@ -3535,7 +3535,13 @@ function renderReuse() {
   const derived = Array.isArray(R.derived) ? R.derived : [], skipped = Array.isArray(R.skipped) ? R.skipped : [], f = R.fit || {};
   const editable = EDITABLE_ST.includes(P.status);
   const me = reuseRowHtml(P.channel, UI.chLabel(P.channel), P.accountHandle ? "@" + UI.esc(P.accountHandle) : "", stPill(P.status));
-  const skipRows = (list) => list.map((s) => reuseRowHtml(s.channel, s.label || UI.chLabel(s.channel), skipSub(s), '<span class="r mut">—</span>')).join("");
+  /* [R18 · B v1.4 · 트리거 §6-6] 길이 때문에 빠진 곳(too_long)엔 서버가 `remake{seconds,coins}` 를 싣는다 — «그 채널용으로 짧게 하나 더 만드는 길».
+     🔴 **새 영상이라 코인이 든다** — 값을 단추에 **먼저** 적는다(누른 뒤에 알면 늦다). 누르면 한 번 더 묻는다(되돌릴 수 없는 돈 · 확인은 게이트가 아니다). */
+  /* [B v1.6] `connected:false` 면(그 채널 계정이 없다) 단추 대신 한 줄 — 눌러도 서버가 400 no_account 로 돌려보낼 단추는 그리지 않는다(없는 길) */
+  const remakeBtn = (s) => s.why === "too_long" && s.remake && s.connected === false ? `<span class="d wrap" style="margin-top:6px;color:var(--muted)">계정을 연결하시면 ${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds) || ""}초 영상도 만들 수 있어요</span>`
+    : s.why === "too_long" && s.remake && Number(s.remake.seconds) && Number.isFinite(Number(s.remake.coins))
+    ? `<button type="button" class="btn secondary sm" data-remake="${UI.esc(s.channel)}" data-rsec="${Number(s.remake.seconds)}" data-rcoin="${Number(s.remake.coins)}" data-rlabel="${UI.esc(s.label || UI.chLabel(s.channel))}" style="margin-top:8px;align-self:flex-start">${UI.esc(s.label || UI.chLabel(s.channel))}용 ${Number(s.remake.seconds)}초로 하나 더 만들기 · ${UI.num(Number(s.remake.coins))}코인</button>` : "";
+  const skipRows = (list) => list.map((s) => reuseRowHtml(s.channel, s.label || UI.chLabel(s.channel), skipSub(s), '<span class="r mut">—</span>', "", false, remakeBtn(s))).join("");
   let rows = "";
   if (derived.length || skipped.length) {   /* 이미 나눴다 — 파생마다 제 상태·시각, 빠진 곳은 그 까닭 */
     rows = me + derived.map((d) => reuseRowHtml(d.channel, d.label || UI.chLabel(d.channel), [d.handle ? "@" + UI.esc(d.handle) : "", UI.whenSay(d)].filter(Boolean).join(" · "), stPill(d.status), d.pieceId ? `/app/piece.html?id=${Number(d.pieceId)}` : "")).join("") + skipRows(skipped);   /* 시각이 아직 없으면 «시각 잡는 중»(B v1.2) */
@@ -3544,10 +3550,42 @@ function renderReuse() {
   } else if (R.ask === true && !editable && reuseCands().length) {   /* 이미 예약·발행된 원본인데 아직 안 물었다(자동 승인 경로) — 여기서도 물을 수 있게 */
     rows = `<button type="button" class="row tap" id="reuseAsk"><div class="l"><span class="t">다른 곳에도 올릴까요?</span><span class="d wrap">같은 영상이라 코인은 더 안 들어요</span></div>${UI.chev}</button>`;
   }
-  if (!rows) { host.hidden = true; return; }
+  /* [R18 · B v1.4] «짧게 하나 더»로 만든 새 영상이면(`meta.remakeOf` = 원래 영상 id) 어디서 왔는지 한 줄 — 🔴 파생이 아니다(코인을 따로 냈다) · 그래서 «코인은 안 들어요»라고 쓰지 않는다 */
+  const rmOf = Number(P.meta && P.meta.remakeOf) || 0;
+  const rmRow = rmOf ? reuseRowHtml(P.channel, `원래 영상을 ${Number(R.seconds) ? `${Number(R.seconds)}초로 ` : "짧게 "}다시 만든 영상이에요`, "원래 영상 보기", UI.chev, `/app/piece.html?id=${rmOf}`, true) : "";
+  if (!rows && !rmRow) { host.hidden = true; return; }
   host.hidden = false;
-  host.innerHTML = `<div class="gt">${Number(R.seconds) ? `${Number(R.seconds)}초로 만든 영상` : "여러 곳에 올리기"} <span class="muted" style="font-weight:500">코인은 한 번만 들어요</span></div>${rows}`;
+  host.innerHTML = `<div class="gt">${Number(R.seconds) ? `${Number(R.seconds)}초로 만든 영상` : "여러 곳에 올리기"}${rows ? ' <span class="muted" style="font-weight:500">같은 영상은 코인이 한 번만 들어요</span>' : ""}</div>${rmRow}${rows}`;
   const b = UI.$("#reuseAsk"); if (b) b.onclick = () => reuseSheet(false);
+  host.querySelectorAll("[data-remake]").forEach((x) => { x.onclick = () => remakeSheet(x.dataset.remake, Number(x.dataset.rsec), Number(x.dataset.rcoin), x.dataset.rlabel); });
+}
+/* ═══ [R18 · B v1.4 · 트리거 §6-6] «그 채널용으로 짧게 하나 더 만들기» — POST /api/pieces-remake { id: 원본, channel } ═══
+   🔴 **새 영상이다**(파생 아님 · 코인이 든다) — 시트 제목·본문·단추 셋 다에 값을 적는다. 누르기 전에 안다.
+   응답: 202 새로 시작 · 200 `already` 이미 만든 적 있음(코인 0 · 같은 영상으로 데려간다) · 402 coin_short(얼마 모자란지 + 충전 길) · 400 그 밖(서버 문장 그대로). */
+let remaking = false;
+function remakeSheet(channel, sec, coins, label) {
+  UI.sheet(`<p class="muted" style="margin:0 0 8px">${UI.esc(label)}에 올릴 ${sec}초 영상을 새로 만들어요. 새 영상이라 ${UI.num(coins)}코인이 들어요.</p>
+    <p class="muted" style="margin:0 0 16px;font-size:12.5px">지금 영상은 그대로 올라가요.</p>
+    <div class="cta"><button class="btn primary" type="button" id="rmGo">${UI.num(coins)}코인으로 만들기</button></div>`,
+  { title: `${label}용 ${sec}초로 하나 더 만들까요?`, onOpen: (sh, close) => {
+    sh.querySelector("#rmGo").onclick = async (e) => {
+      const btn = e.currentTarget; if (remaking) return; remaking = true; btn.disabled = true;
+      const r = await UI.api("/api/pieces-remake", { body: { id, channel } }); remaking = false; btn.disabled = false;
+      if (r.gated) return close();
+      if (!r.ok) {
+        if (r.step === "coin_short") { close(); return UI.sheet(`<p class="muted" style="margin:0 0 16px">지금 ${UI.num(r.have ?? 0)}코인이 있고 ${UI.num(r.need ?? coins)}코인이 필요해요.</p><div class="cta"><a class="btn primary" href="/app/coins.html">충전하기</a></div>`, { title: `코인이 ${UI.num(Math.max(0, (r.need ?? coins) - (r.have ?? 0)))}개 부족해요` }); }
+        return UI.toast(r.error || "지금은 만들지 못했어요 · 잠시 뒤 다시 눌러 주세요");
+      }
+      close();
+      const nid = Array.isArray(r.pieceIds) && r.pieceIds.length ? Number(r.pieceIds[0]) : 0;
+      if (r.already) { UI.toast(`이미 만들어 둔 ${sec}초 영상이 있어요 · 코인은 안 들었어요`); if (nid) setTimeout(() => UI.go(`/app/piece.html?id=${nid}`), 900); return; }
+      /* `alsoTo` = 원본에서 길이 때문에 빠졌던 다른 채널 중 **새 길이에 들어가는 곳**(target 자신은 빠진다 · B 2026-09-26). 라벨은 원본 `reuse` 안의 서버 라벨로 잇는다(화면 표 아님). */
+      const R0 = P.reuse || {}, f0 = R0.fit || {}; const lab = {};
+      for (const x of [...(R0.skipped || []), ...(f0.skip || []), ...(f0.go || []), ...(R0.derived || [])]) if (x && x.channel && x.label) lab[x.channel] = x.label;
+      const places = [label, ...(Array.isArray(r.alsoTo) ? r.alsoTo : []).map((c) => lab[c] || UI.chLabel(c))];
+      UI.done(`${sec}초 영상을 만들기 시작했어요 · ${places.join("·")}에 올라가요`, () => UI.go(nid ? `/app/piece.html?id=${nid}` : "/app/pieces.html?tab=generating"));
+    };
+  } });
 }
 let reusing = false;
 /** ① «처음 한 번 묻기» 시트. approveAfter = 이 답 뒤에 이 영상을 예약한다(검수 중인 원본) · false = 이미 예약·발행된 원본(파생만 만든다). */
@@ -4166,24 +4204,59 @@ async function load() {
    🔴 코인은 안 든다(retract 경로에 consume 호출 0 · 우리 잘못이든 마음이 바뀌었든 내리는 데 돈을 받지 않는다). */
 const retractable = (p) => p.status === "published" && !p.retractedAt;
 /* 🔴 신고가 붙은 글은 **«신고에 답하기» 한 문**으로 모은다 — 같은 «내리기»가 두 문이면 어느 쪽이 신고를 끝내는지 알 수 없다. */
+/* [R18 · B v1.5] 🔴 우리가 대신 못 내리는 글엔 «내리는 법»(«내리기»가 아니다 — 우리가 내리는 게 아니다). 누르면 post-retract 가 **아무것도 안 건드리고**
+   409 unsupported(«직접 내려 주세요» + openUrl)를 주고, 같은 영상이 다른 채널에 있으면 `sameVideo` 를 같이 준다 — 영상 원본을 내리려는 사람에게
+   «다른 곳엔 남아 있다»를 알릴 **유일한 입구**다(영상 채널은 전부 canRetract false). 글 행엔 영상인지 칸이 없어 채널로 가르지 않는다(표를 베끼지 않는다 · AC-52) — 서버가 답을 가른다. */
 const retractBtn = (p) => (noticeOf(p) ? '<button class="btn ghost" type="button" id="tdAns" style="color:var(--danger-ink)">신고에 답하기</button>'
-  : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
+  : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>`
+  : retractable(p) ? `<button class="btn ghost" type="button" id="rtHow">내리는 법</button>` : "");
 const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
   : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}${UI.josa(UI.chLabel(p.channel))} 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
 function bindRetract(p, sh, close) {
   const ans = sh.querySelector("#tdAns");
   if (ans) { ans.onclick = () => { const n = noticeOf(p); close(); setTimeout(() => UI.takedownSheet(n, load), 300); }; return; }
+  /* [R18 · B v1.5] «내리는 법» — 서버는 아무것도 안 건드린다(표식·감사 0). 그래서 «되돌릴 수 없어요» 확인을 거치지 않는다(지우는 게 아니다). */
+  const how = sh.querySelector("#rtHow");
+  if (how) how.onclick = async () => { how.disabled = true; const r = await UI.api("/api/post-retract", { body: { postId: p.id } }); how.disabled = false; if (r.gated) return; close(); setTimeout(() => retractResult(r, true), 300); };
   const b = sh.querySelector("#rt"); if (!b) return;
   b.onclick = () => UI.confirmRow(sh.querySelector("#rtc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
     b.disabled = true;
     const r = await UI.api("/api/post-retract", { body: { postId: p.id } });
     b.disabled = false;
-    const say = UI.esc(r.message || r.error || "");
     close();
-    setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta">${r.openUrl ? `<a class="btn primary" href="${UI.esc(r.openUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
-      { title: r.ok ? "" : "내리지 못했어요", onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; const bg = s2.previousSibling; if (bg) bg.addEventListener("click", load); } }), 300);
+    setTimeout(() => retractResult(r, false), 300);
     await load();
   }, "내릴게요");
+}
+/** 내리기 결과 시트 — 서버 문장 그대로 + (못 내리는 채널이면) 그 글 열기 + [R18 · B v1.5] 같은 영상이 남은 곳.
+    howTo = «내리는 법»으로 왔다 — 409 unsupported 가 **정상 답**이라 제목을 «내리지 못했어요»로 쓰지 않는다(우리가 하려던 일이 아니다). */
+function retractResult(r, howTo) {
+  const say = UI.esc(r.message || r.error || "");
+  const sv = r.sameVideo && typeof r.sameVideo === "object" ? r.sameVideo : null;
+  UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p>${sv ? sameVideoHtml(sv) : ""}<div class="cta">${r.openUrl ? `<a class="btn primary" href="${UI.esc(r.openUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
+    { title: r.ok ? "" : howTo ? "내리는 법" : "내리지 못했어요", onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; const bg = s2.previousSibling; if (bg) bg.addEventListener("click", load); if (sv) bindSameVideo(s2); } });
+}
+/* ═══ [R18 · B v1.5] 원본을 내려도 **다른 채널의 같은 영상은 번지지 않고 남는다** — 채널마다 까닭이 다를 수 있어 우리가 안 고른다(§9 · 고르는 것은 고객).
+   그래서 **남아 있다는 사실(서버 line)** + 줄마다 **그것만 거두는 단추**를 준다: 예약(unsent) → pieces-reject · 올라간 것(live) → post-retract.
+   🔴 한 번에 다 거두는 단추는 두지 않는다 — 그게 곧 «우리가 고른 것»이 된다. 줄마다 한 번 더 묻는다(되돌릴 수 없다).
+   🔴 우리가 대신 못 내리는 채널은 post-retract 가 «직접 내려 주세요»(+ 주소)로 답한다 — 그 문장과 «그 글 열기»를 그 줄 밑에 그대로 둔다. */
+function sameVideoHtml(sv) {
+  const unsent = Array.isArray(sv.unsent) ? sv.unsent : [], live = Array.isArray(sv.live) ? sv.live : [];
+  if (!unsent.length && !live.length && !sv.line) return "";
+  const rowOf = (x, kind) => `<div class="row" style="flex-wrap:wrap">${UI.mark(x.channel)}<div class="l"><span class="t">${UI.esc(x.label || UI.chLabel(x.channel))}</span><span class="d">${kind === "live" ? (x.retracted ? "내렸어요" : "올라가 있어요") : ["예약", UI.whenSay(x)].filter(Boolean).join(" · ")}</span></div>`
+    + (kind === "live" ? (x.retracted ? "" : `<button type="button" class="btn secondary sm" data-sv-live="${Number(x.postId) || ""}">이것도 내리기</button>`) : `<button type="button" class="btn secondary sm" data-sv-unsent="${Number(x.pieceId) || ""}">이 예약도 거두기</button>`)
+    + `<div data-svc style="flex-basis:100%"></div></div>`;
+  return `<div class="group" style="margin:0 0 12px">${sv.line ? `<p class="muted" style="margin:12px 16px 4px;font-size:13px;line-height:1.6">${UI.esc(sv.line)}</p>` : ""}${live.map((x) => rowOf(x, "live")).join("")}${unsent.map((x) => rowOf(x, "unsent")).join("")}</div>`;
+}
+function bindSameVideo(sh) {
+  sh.querySelectorAll("[data-sv-unsent],[data-sv-live]").forEach((b) => { const row = b.closest(".row"), host = row.querySelector("[data-svc]"); const live = b.hasAttribute("data-sv-live");
+    b.onclick = () => UI.confirmRow(host, live ? "그 채널에서도 이 영상을 내려요. 되돌릴 수 없어요." : "이 예약을 거둬요. 이 채널엔 안 올라가요.", async () => {
+      b.disabled = true;
+      const r2 = live ? await UI.api("/api/post-retract", { body: { postId: Number(b.dataset.svLive) } }) : await UI.api("/api/pieces-reject", { body: { id: Number(b.dataset.svUnsent) } });
+      b.disabled = false; if (r2.gated) return;
+      if (r2.ok) { b.remove(); host.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:12.5px">${live ? UI.esc(r2.message || "내렸어요") : "거뒀어요"}</p>`; load(); return; }
+      host.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:12.5px">${UI.esc(r2.message || r2.error || "지금은 못 했어요 · 잠시 뒤 다시 눌러 주세요")}${r2.openUrl ? ` · <a href="${UI.esc(r2.openUrl)}" target="_blank" rel="noopener" style="text-decoration:underline">그 글 열기</a>` : ""}</p>`;
+    }, live ? "내릴게요" : "거둘게요"); });
 }
 /* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유 · [P1R5] 비공개 업로드 → 스튜디오) */
 function postSheet(p) {

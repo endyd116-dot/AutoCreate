@@ -85,24 +85,59 @@ async function load() {
    🔴 코인은 안 든다(retract 경로에 consume 호출 0 · 우리 잘못이든 마음이 바뀌었든 내리는 데 돈을 받지 않는다). */
 const retractable = (p) => p.status === "published" && !p.retractedAt;
 /* 🔴 신고가 붙은 글은 **«신고에 답하기» 한 문**으로 모은다 — 같은 «내리기»가 두 문이면 어느 쪽이 신고를 끝내는지 알 수 없다. */
+/* [R18 · B v1.5] 🔴 우리가 대신 못 내리는 글엔 «내리는 법»(«내리기»가 아니다 — 우리가 내리는 게 아니다). 누르면 post-retract 가 **아무것도 안 건드리고**
+   409 unsupported(«직접 내려 주세요» + openUrl)를 주고, 같은 영상이 다른 채널에 있으면 `sameVideo` 를 같이 준다 — 영상 원본을 내리려는 사람에게
+   «다른 곳엔 남아 있다»를 알릴 **유일한 입구**다(영상 채널은 전부 canRetract false). 글 행엔 영상인지 칸이 없어 채널로 가르지 않는다(표를 베끼지 않는다 · AC-52) — 서버가 답을 가른다. */
 const retractBtn = (p) => (noticeOf(p) ? '<button class="btn ghost" type="button" id="tdAns" style="color:var(--danger-ink)">신고에 답하기</button>'
-  : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>` : "");
+  : retractable(p) && p.canRetract ? `<button class="btn ghost" type="button" id="rt" style="color:var(--danger-ink)">이 글 내리기</button>`
+  : retractable(p) ? `<button class="btn ghost" type="button" id="rtHow">내리는 법</button>` : "");
 const retractSay = (p) => (p.retractedAt ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.dateKST(p.retractedAt))} ${UI.esc(UI.timeKST(p.retractedAt))}에 내렸어요.</p>`
   : retractable(p) && !p.canRetract ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${UI.esc(UI.chLabel(p.channel))}${UI.josa(UI.chLabel(p.channel))} 우리가 대신 내려 드릴 수 없어요 — 위 «올라간 글 열기»로 가서 직접 내려 주세요.</p>` : "");
 function bindRetract(p, sh, close) {
   const ans = sh.querySelector("#tdAns");
   if (ans) { ans.onclick = () => { const n = noticeOf(p); close(); setTimeout(() => UI.takedownSheet(n, load), 300); }; return; }
+  /* [R18 · B v1.5] «내리는 법» — 서버는 아무것도 안 건드린다(표식·감사 0). 그래서 «되돌릴 수 없어요» 확인을 거치지 않는다(지우는 게 아니다). */
+  const how = sh.querySelector("#rtHow");
+  if (how) how.onclick = async () => { how.disabled = true; const r = await UI.api("/api/post-retract", { body: { postId: p.id } }); how.disabled = false; if (r.gated) return; close(); setTimeout(() => retractResult(r, true), 300); };
   const b = sh.querySelector("#rt"); if (!b) return;
   b.onclick = () => UI.confirmRow(sh.querySelector("#rtc"), "채널에서 이 글이 지워져요. 되돌릴 수 없고, 코인은 들지 않아요.", async () => {
     b.disabled = true;
     const r = await UI.api("/api/post-retract", { body: { postId: p.id } });
     b.disabled = false;
-    const say = UI.esc(r.message || r.error || "");
     close();
-    setTimeout(() => UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p><div class="cta">${r.openUrl ? `<a class="btn primary" href="${UI.esc(r.openUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
-      { title: r.ok ? "" : "내리지 못했어요", onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; const bg = s2.previousSibling; if (bg) bg.addEventListener("click", load); } }), 300);
+    setTimeout(() => retractResult(r, false), 300);
     await load();
   }, "내릴게요");
+}
+/** 내리기 결과 시트 — 서버 문장 그대로 + (못 내리는 채널이면) 그 글 열기 + [R18 · B v1.5] 같은 영상이 남은 곳.
+    howTo = «내리는 법»으로 왔다 — 409 unsupported 가 **정상 답**이라 제목을 «내리지 못했어요»로 쓰지 않는다(우리가 하려던 일이 아니다). */
+function retractResult(r, howTo) {
+  const say = UI.esc(r.message || r.error || "");
+  const sv = r.sameVideo && typeof r.sameVideo === "object" ? r.sameVideo : null;
+  UI.sheet(`<p class="muted" style="margin:0 0 16px">${say}</p>${sv ? sameVideoHtml(sv) : ""}<div class="cta">${r.openUrl ? `<a class="btn primary" href="${UI.esc(r.openUrl)}" target="_blank" rel="noopener">그 글 열기</a>` : '<button class="btn secondary" type="button" data-ok>알겠어요</button>'}</div>`,
+    { title: r.ok ? "" : howTo ? "내리는 법" : "내리지 못했어요", onOpen: (s2, c2) => { const ok = s2.querySelector("[data-ok]"); if (ok) ok.onclick = c2; const bg = s2.previousSibling; if (bg) bg.addEventListener("click", load); if (sv) bindSameVideo(s2); } });
+}
+/* ═══ [R18 · B v1.5] 원본을 내려도 **다른 채널의 같은 영상은 번지지 않고 남는다** — 채널마다 까닭이 다를 수 있어 우리가 안 고른다(§9 · 고르는 것은 고객).
+   그래서 **남아 있다는 사실(서버 line)** + 줄마다 **그것만 거두는 단추**를 준다: 예약(unsent) → pieces-reject · 올라간 것(live) → post-retract.
+   🔴 한 번에 다 거두는 단추는 두지 않는다 — 그게 곧 «우리가 고른 것»이 된다. 줄마다 한 번 더 묻는다(되돌릴 수 없다).
+   🔴 우리가 대신 못 내리는 채널은 post-retract 가 «직접 내려 주세요»(+ 주소)로 답한다 — 그 문장과 «그 글 열기»를 그 줄 밑에 그대로 둔다. */
+function sameVideoHtml(sv) {
+  const unsent = Array.isArray(sv.unsent) ? sv.unsent : [], live = Array.isArray(sv.live) ? sv.live : [];
+  if (!unsent.length && !live.length && !sv.line) return "";
+  const rowOf = (x, kind) => `<div class="row" style="flex-wrap:wrap">${UI.mark(x.channel)}<div class="l"><span class="t">${UI.esc(x.label || UI.chLabel(x.channel))}</span><span class="d">${kind === "live" ? (x.retracted ? "내렸어요" : "올라가 있어요") : ["예약", UI.whenSay(x)].filter(Boolean).join(" · ")}</span></div>`
+    + (kind === "live" ? (x.retracted ? "" : `<button type="button" class="btn secondary sm" data-sv-live="${Number(x.postId) || ""}">이것도 내리기</button>`) : `<button type="button" class="btn secondary sm" data-sv-unsent="${Number(x.pieceId) || ""}">이 예약도 거두기</button>`)
+    + `<div data-svc style="flex-basis:100%"></div></div>`;
+  return `<div class="group" style="margin:0 0 12px">${sv.line ? `<p class="muted" style="margin:12px 16px 4px;font-size:13px;line-height:1.6">${UI.esc(sv.line)}</p>` : ""}${live.map((x) => rowOf(x, "live")).join("")}${unsent.map((x) => rowOf(x, "unsent")).join("")}</div>`;
+}
+function bindSameVideo(sh) {
+  sh.querySelectorAll("[data-sv-unsent],[data-sv-live]").forEach((b) => { const row = b.closest(".row"), host = row.querySelector("[data-svc]"); const live = b.hasAttribute("data-sv-live");
+    b.onclick = () => UI.confirmRow(host, live ? "그 채널에서도 이 영상을 내려요. 되돌릴 수 없어요." : "이 예약을 거둬요. 이 채널엔 안 올라가요.", async () => {
+      b.disabled = true;
+      const r2 = live ? await UI.api("/api/post-retract", { body: { postId: Number(b.dataset.svLive) } }) : await UI.api("/api/pieces-reject", { body: { id: Number(b.dataset.svUnsent) } });
+      b.disabled = false; if (r2.gated) return;
+      if (r2.ok) { b.remove(); host.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:12.5px">${live ? UI.esc(r2.message || "내렸어요") : "거뒀어요"}</p>`; load(); return; }
+      host.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:12.5px">${UI.esc(r2.message || r2.error || "지금은 못 했어요 · 잠시 뒤 다시 눌러 주세요")}${r2.openUrl ? ` · <a href="${UI.esc(r2.openUrl)}" target="_blank" rel="noopener" style="text-decoration:underline">그 글 열기</a>` : ""}</p>`;
+    }, live ? "내릴게요" : "거둘게요"); });
 }
 /* 글 시트(열기 · 성과 · 본문 복사 · 실패 사유 · [P1R5] 비공개 업로드 → 스튜디오) */
 function postSheet(p) {
