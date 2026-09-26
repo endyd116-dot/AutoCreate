@@ -23,6 +23,9 @@
 <div class="group" id="kindsg"><div class="gt">만드는 것</div>
   <div class="fr"><div class="fl" id="kindT">글만 만들어요<small id="kindD">영상도 켜면 만들기·디렉터에 영상이 함께 나와요</small></div><button class="toggle" type="button" id="kinds" aria-checked="false" aria-label="영상도 만들기"></button></div>
 </div>
+<!-- [R18 · A] 🔴 «영상을 여러 곳에 올리기» — 켜고 끄고 채널 고르기. **여기까지가 이 기능이다**(§4.8 · 트리거 §6-5).
+     서버가 `videoReuse` 를 안 실어 주면 이 그룹은 **안 뜬다**(눌러도 값이 안 남는 토글이 제일 나쁘다 · AC-9). -->
+<div class="group" id="video-reuse" hidden><div class="gt">영상을 여러 곳에 올리기</div><div id="vrBody"></div></div>
 <!-- [R8CLOSE §B8] 🔴 **지금은 붙어 있는 광고로 추정한다** — 고객이 고를 자리가 없어서(`tenants.settings.goal` 라이브 0건) 그 기계가 추정값으로만 돌았다.
      🔴 **고르게 만들지 않는다** — «모르겠어요»가 기본이고, 그대로 두셔도 지금처럼 잘 돌아간다(§9).
      🔴 고르셔도 **켜 둔 채널은 하나도 안 빠진다** — 순서만 바뀜다(서버 `targetChannelOrder` 와 같은 약속). -->
@@ -63,8 +66,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=31"></script>
-<script src="/js/mock.js?v=32"></script>
+<script src="/js/ui.js?v=32"></script>
+<script src="/js/mock.js?v=33"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -220,6 +223,42 @@ function sayKinds(on) {
   UI.$("#kindD").textContent = on ? "만들기·디렉터에 영상이 함께 나와요 · 영상은 내 PC 프로그램이 구워요" : "영상도 켜면 만들기·디렉터에 영상이 함께 나와요";
 }
 loadKinds();
+/* ═══ [R18 · A] «영상을 여러 곳에 올리기» — GET/POST /api/tenant-settings `videoReuse` (B 계약 R18 v1) ═══
+   모양: { on, channels, asked, askedAt, targets: [{ channel, label, maxSeconds, connected }] } · POST { videoReuse: { on, channels } } → 같은 모양.
+   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long·threads 는 서버가 이미 뺐다 · 트리거 §3).
+   🔴 **서버가 돌려준 값으로 다시 그린다** — 내가 누른 값을 기억해서 그리면 저장이 안 됐는데 된 것처럼 보인다(서버가 후보 밖 채널을 걸러 낸다).
+   🔴 기본은 꺼짐(트리거 §1 ①) — 아직 안 물은 집에는 «첫 영상이 다 되면 한 번 여쭤볼게요»를 적는다. 지금 켜도 된다(막지 않는다 · §9).
+   🔴 계정이 아직 없는 채널도 **고를 수 있다** — 연결되는 날부터 같이 올라간다. 그 사실을 한 줄로 적는다(겁주지 않는다 · §3). */
+let VR = null;
+async function loadReuse() {
+  const r = await UI.api("/api/tenant-settings", { noGate: true });
+  VR = r.ok && r.videoReuse && typeof r.videoReuse === "object" ? r.videoReuse : null;
+  drawReuse();
+  if (location.hash === "#video-reuse" && VR) UI.$("#video-reuse").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+function drawReuse() {
+  const g = UI.$("#video-reuse"), box = UI.$("#vrBody");
+  if (!VR) { g.hidden = true; return; }
+  g.hidden = false;
+  const on = !!VR.on, picked = new Set(Array.isArray(VR.channels) ? VR.channels : []), targets = Array.isArray(VR.targets) ? VR.targets : [];
+  const sub = on ? (picked.size ? "같은 영상이라 코인은 한 번만 들어요 · 시간 차를 두고 올려요" : "올릴 곳을 아래에서 골라 주세요")
+    : VR.asked ? "지금은 만든 곳에만 올려요 · 켜면 고른 곳에도 같이 올라가요" : "첫 영상이 다 되면 한 번 여쭤볼게요 · 지금 켜셔도 돼요";
+  box.innerHTML = `<div class="fr"><div class="fl">한 번 만든 영상을 다른 곳에도 올려요<small>${UI.esc(sub)}</small></div><button class="toggle" type="button" id="vrTg" aria-checked="${on ? "true" : "false"}" aria-label="영상을 여러 곳에 올리기"></button></div>`
+    + (on ? targets.map((t) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(t.channel, "sm")}<span>${UI.esc(t.label || UI.chLabel(t.channel))}<small>${Number(t.maxSeconds) ? `${Number(t.maxSeconds)}초까지 올라가요` : ""}${t.connected === false ? `${Number(t.maxSeconds) ? " · " : ""}계정이 연결되면 같이 올라가요` : ""}</small></span></div><button class="toggle" type="button" data-vrch="${UI.esc(t.channel)}" aria-checked="${picked.has(t.channel) ? "true" : "false"}" aria-label="${UI.esc(t.label || UI.chLabel(t.channel))}에도 올리기"></button></div>`).join("")
+      + `<p class="muted" style="margin:0 16px 12px;font-size:12.5px">영상 길이가 그 채널보다 길면 그 채널만 빼고 올려요 · 만들 때 길이 옆에 몇 곳에 올라가는지 보여 드려요</p>` : "");
+  const save = async (body) => {
+    const rr = await UI.api("/api/tenant-settings", { body: { videoReuse: body } });
+    if (!rr.ok) { if (!rr.gated) UI.toast(rr.error || "바꾸지 못했어요"); drawReuse(); return false; }
+    if (rr.videoReuse && typeof rr.videoReuse === "object") VR = rr.videoReuse;
+    drawReuse(); return true;
+  };
+  UI.toggle(UI.$("#vrTg"), async (next) => { const ok = await save({ on: next, channels: [...picked] }); if (ok) UI.toast(VR.on ? "여러 곳에 올려요" : "만든 곳에만 올려요"); return ok ? undefined : false; });
+  box.querySelectorAll("[data-vrch]").forEach((b) => UI.toggle(b, async (next) => {
+    const ch = b.dataset.vrch; const nextSet = new Set(picked); if (next) nextSet.add(ch); else nextSet.delete(ch);
+    const ok = await save({ on: true, channels: [...nextSet] }); return ok ? undefined : false;
+  }));
+}
+loadReuse();
 /* [R8CLOSE-B1 §B8] «어디서 벌고 싶으세요» — GET/POST /api/tenant-settings { goal }.
    🔴 **«모르겠어요»(값 없음)가 기본**이다. 그때 서버는 지금처럼 **붙어 있는 광고를 보고 추정**한다(`lib/director-goal.ts`) —
       그게 이미 잘 돌고 있으니 억지로 고르게 하지 않는다(§9). 별표도 «필수»도 «설정을 완료하세요»도 없다.

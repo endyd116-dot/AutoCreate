@@ -20,8 +20,8 @@
   </main>
 </div>
 <nav class="tabs" aria-label="탭"></nav>
-<script src="/js/ui.js?v=31"></script>
-<script src="/js/mock.js?v=32"></script>
+<script src="/js/ui.js?v=32"></script>
+<script src="/js/mock.js?v=33"></script>
 <script>
 (async () => {
 await UI.boot("home");
@@ -73,8 +73,10 @@ function stepBar(p) { const i = p.stage === "failed" ? -1 : Math.max(0, STAGES.f
 function videoBar(p) { const m = p.meta || {}; const stage = m.stage || "script"; const i = UI.VSTAGE.findIndex(([k]) => k === stage); const cs = m.chainStage || {};
   const extra = (k) => k === "clips" && stage === "clips" && cs.cutsTotal ? ` <small class="muted" style="font-weight:500">${cs.cutsDone ?? 0}/${cs.cutsTotal}</small>` : k === "render" && stage === "render" ? (runnerOn === false ? ` <span class="pill warn" style="margin-left:4px">내 PC 프로그램을 켜 주세요</span>` : ` <small class="muted" style="font-weight:500">내 PC 프로그램이 굽는 중</small>`) : "";
   return `<div class="steps" style="padding:0 16px 12px 66px">${UI.VSTAGE.map(([k, l], n) => `<div class="st ${n < i || stage === "done" ? "done" : n === i ? "on" : ""}"><i>${n < i || stage === "done" ? "✓" : n + 1}</i>${l}${extra(k)}</div>`).join("")}</div>`; }
-function row(p) { const st = UI.PIECE_STATUS[p.status] || ["off", p.status]; const when = p.status === "published" ? UI.dateKST(p.publishedAt) : p.scheduledFor ? `${UI.dateKST(p.scheduledFor)} ${UI.timeKST(p.scheduledFor)}` : ""; const video = p.kind === "video";
-  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${UI.kindPill(p.ruleKind)}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
+/* [R18 · B v1.2] 파생 영상은 `scheduled` 인데 **시각 없이** 태어난다(B2 가 시차를 맞춰 박기 전 잠깐) — 빈칸 대신 «시각 잡는 중»(UI.whenSay).
+   `originPieceId` 가 있으면 «같은 영상 그대로» — 코인이 또 나간 새 영상이 아니라는 것을 목록에서도 읽히게. */
+function row(p) { const st = UI.PIECE_STATUS[p.status] || ["off", p.status]; const when = p.status === "published" ? UI.dateKST(p.publishedAt) : UI.whenSay(p); const video = p.kind === "video";
+  return `<a class="row tap" href="/app/piece.html?id=${p.id}">${UI.mark(p.channel)}<div class="l"><span class="t">${UI.esc(p.title || "제목 정하는 중")}</span><span class="d" style="${video ? "display:flex;align-items:center;gap:6px;overflow:visible" : ""}">${UI.kindPill(p.ruleKind)}<span style="${video ? "overflow:hidden;text-overflow:ellipsis;white-space:nowrap" : ""}">${p.accountHandle ? "@" + UI.esc(p.accountHandle) : "계정 자동"}${video && p.meta?.video ? " · " + UI.esc(UI.vlabel(p.meta.video)) : ""}${video && p.originPieceId ? " · 같은 영상 그대로" : ""}${when ? " · " + when : ""}${p.status === "failed" && p.failReason ? " · " + UI.esc(p.failReason) : ""}</span></span></div><span class="pill ${st[0]}">${st[1]}</span>${UI.chev}</a>` + (TAB.generating.includes(p.status) && p.status !== "failed" ? (video ? videoBar(p) : stepBar(p)) : ""); }
 function render() {
   /* 🔴 고객이 **가진 종류만** 낸다 — 한 번도 안 만든 종류를 내밀면 눌러 보고 «왜 비었지»가 된다.
      한 종류뿐이면 **고를 것이 없으니 칩 줄 자체를 안 그린다**(§13.0 «옵션을 늘리지 않는다»). */
