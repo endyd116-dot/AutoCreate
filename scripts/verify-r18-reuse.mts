@@ -10,6 +10,9 @@
  *     ⑤ derivedMetaOf 를 잰다 / 파생이 «이미 나갔다»로 읽힐 발행 흔적 없이 태어나는지를 뜻한다(B2 ③)
  *     ⑥ reuse.ts 소스를 잰다  / 파생 경로에 **코인 차감이 없음**을 뜻한다 — ⚠️ 이건 대용물이다: 소스에 `consume` 이 없다 ≠ 원장 0행.
  *                              원장 0행은 C 의 자(라이브 원장 대조)가 잰다. 여기선 «부를 수단이 없다»까지만 말한다(놓치는 쪽으로 틀린다).
+ *     ⑨ [R19] 후보 집합을 잰다 / «영상 길이가 있는 채널 = 재사용 대상»(설계 §6.4)이 **이름이 아니라 표로** 지켜지는지를 뜻한다 — 쓰레드 포함
+ *     ⑩ [R19] 연결 창구를 잰다 / 연결을 못 받는 채널에 «계정을 연결하시면»(없는 길)을 **한 줄도** 말하지 않는지를 뜻한다(§9 «또렷하게»)
+ *                              + 계정이 이미 붙은 집엔 «준비 중»을 말하지 않는지(대조군) · go 가 창구 때문에 줄지 않는지(무회귀)
  *
  *   ══ 스스로 지키는 셋(verify-r11-axis 관례) ══
  *     원판 줄 먼저(안 건드린 입력이 기대대로) · 대조군 짝(빠져야 할 것과 **안 빠져야 할 것** 둘 다) · 무회귀 축.
@@ -38,22 +41,22 @@ ok("🔴 youtube_long 은 표에 **없다**(값을 넣는 문제가 아니다 ·
 eq("틱톡 규격 — 채널 상한은 180, 만드는 상한은 포맷 상한(≤90)", videoChannelSpec("tiktok")?.formats.map((f) => f.maxSeconds), [90, 90, 30]);
 eq("무회귀 · clampSecondsForChannel 은 여전히 15|30|60|90 만(틱톡 90 → 90)", clampSecondsForChannel("tiktok", 90), 90);
 eq("무회귀 · 클립 채널 60 → 30", clampSecondsForChannel("naver_clip", 60), 30);
-ok("후보 다섯 전부 표에 있다(표에 없으면 reuseFit 이 조용히 건너뛴다)", VIDEO_REUSE_TARGETS.every((c) => !!VIDEO_CHANNEL_MAX_SEC[c]));
+ok(`후보 ${VIDEO_REUSE_TARGETS.length}개 전부 표에 있다(표에 없으면 reuseFit 이 조용히 건너뛴다)`, VIDEO_REUSE_TARGETS.every((c) => !!VIDEO_CHANNEL_MAX_SEC[c]));
 
 console.log("\n② reuseFit — 트리거 §1 의 두 모양");
 {
-  // 원판 줄: 60초 쇼츠 → 릴스·틱톡·페북 ✅ · 클립 —
+  // 원판 줄: 60초 쇼츠 → 릴스·틱톡·페북·스레드 ✅ · 클립 — ([R19] 스레드 60 이 들어왔다 — 60초는 딱 맞는다)
   const f60 = reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON });
-  eq("원판 · 60초 쇼츠 → go", f60.go.map((g) => g.channel), ["reels", "tiktok", "facebook_reels"]);
+  eq("원판 · 60초 쇼츠 → go", f60.go.map((g) => g.channel), ["reels", "tiktok", "facebook_reels", "threads"]);
   eq("원판 · 60초 쇼츠 → 클립만 빠진다(too_long)", f60.skip.map((s) => `${s.channel}:${s.why}`), ["naver_clip:too_long"]);
-  eq("원판 · places = 1(원본) + go", f60.places, 4);
+  eq("원판 · places = 1(원본) + go", f60.places, 5);
   eq("문장 · 사실 한 줄", f60.skip[0]?.line, "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요.");
   eq("문장 · 어떻게 하면 되는지", f60.skip[0]?.how, "네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요.");
   eq("🔴 §6-6 «30초로 다시 만들 길» — 누르기 전에 값(30초 · 그 길이 코인)", f60.skip[0]?.remake, { seconds: 30, coins: coinCostOf(videoCoinItem(30)) });
   const f30 = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON });
-  eq("30초면 다섯 곳(쇼츠+릴스+틱톡+클립+페북) · 빠지는 곳 0", [f30.places, f30.skip.length], [5, 0]);
+  eq("30초면 여섯 곳(쇼츠+릴스+틱톡+클립+페북+스레드) · 빠지는 곳 0", [f30.places, f30.skip.length], [6, 0]);
   const f90 = reuseFit({ originChannel: "reels", seconds: 90, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON });
-  eq("90초 릴스 → 쇼츠(60)·클립(30) 빠지고 틱톡·페북 간다", [f90.go.map((g) => g.channel), f90.skip.map((s) => s.channel)], [["tiktok", "facebook_reels"], ["youtube_shorts", "naver_clip"]]);
+  eq("90초 릴스 → 쇼츠(60)·클립(30)·스레드(60) 빠지고 틱톡·페북 간다", [f90.go.map((g) => g.channel), f90.skip.map((s) => s.channel)], [["tiktok", "facebook_reels"], ["youtube_shorts", "naver_clip", "threads"]]);
   eq("90초 릴스 → 쇼츠 how 는 60초", f90.skip.find((s) => s.channel === "youtube_shorts")?.how, "유튜브 쇼츠에도 올리시려면 만들 때 60초를 골라 주세요.");
   // no_account
   const na = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok", "reels"], connected: { ...ALL_ON, tiktok: false } });
@@ -71,7 +74,7 @@ console.log("\n② reuseFit — 트리거 §1 의 두 모양");
   eq("🔴 대조군 · 고르지 않은 채널은 go·skip 어디에도 없다", reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: ["reels"], connected: ALL_ON }).skip.length, 0);
   // 중복·후보 밖
   const junk = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["reels", "reels", "youtube_long", "naver_blog", "threads"], connected: ALL_ON });
-  eq("후보 밖(youtube_long·naver_blog·threads)·중복은 조용히 무시 — 없는 길", [junk.go.map((g) => g.channel), junk.skip.length], [["reels"], 0]);
+  eq("후보 밖(youtube_long·naver_blog)·중복은 조용히 무시 — 없는 길 · [R19] 스레드는 이제 후보다", [junk.go.map((g) => g.channel), junk.skip.length], [["reels", "threads"], 0]);
 }
 
 console.log("\n③ 🔴 유튜브는 한 가족에 최대 1건 — 모든 원본 × 15/30/60/90");
@@ -146,6 +149,77 @@ console.log("\n⑧ 🔴 파생 경로에 코인 차감 수단이 없다(⚠️ �
   ok("파생은 scheduled 로 태어난다(approved 아님 · AC-178)", /'scheduled', gate_report/.test(code) && !/'approved', gate_report/.test(code));
   const pieces = readFileSync(new URL("../netlify/functions/pieces.ts", import.meta.url), "utf8");
   ok("pieces-regenerate 가 파생을 거절한다", /origin_piece_id[\s\S]{0,120}step: "derived"/.test(pieces));
+}
+
+console.log("\n⑨ [R19] 후보 = «영상 길이가 있는 채널»(설계 §6.4) — 이름이 아니라 표로");
+{
+  const keys = Object.keys(VIDEO_CHANNEL_MAX_SEC).sort();
+  eq("🔴 불변식 · set(VIDEO_REUSE_TARGETS) = set(keys(VIDEO_CHANNEL_MAX_SEC))", [...VIDEO_REUSE_TARGETS].sort(), keys);
+  eq("중복 0", new Set(VIDEO_REUSE_TARGETS).size, VIDEO_REUSE_TARGETS.length);
+  eq("스레드는 맨 끝(화면 순서)", VIDEO_REUSE_TARGETS[VIDEO_REUSE_TARGETS.length - 1], "threads");
+  eq("🔴 대조군 · 원판 다섯의 순서는 그대로", VIDEO_REUSE_TARGETS.slice(0, 5), ["youtube_shorts", "reels", "tiktok", "naver_clip", "facebook_reels"]);
+  eq("원본이 스레드면 스레드는 후보에서 빠진다(같은 가족)", reuseTargetsFor("threads").includes("threads"), false);
+  eq("🔴 대조군 · 원본이 쇼츠면 스레드는 후보다", reuseTargetsFor("youtube_shorts").includes("threads"), true);
+  const th = readVideoReuse({ videoReuse: { on: true, channels: ["threads", "reels"], askedAt: "2026-09-27T00:00:00Z" } });
+  eq("설정에 스레드를 저장·읽을 수 있다(걸러지지 않는다)", th.channels, ["threads", "reels"]);
+}
+
+console.log("\n⑩ [R19] 연결 창구 — «연결하시면»은 연결을 받는 채널에만");
+{
+  const OPEN = Object.fromEntries(VIDEO_REUSE_TARGETS.map((c) => [c, true]));
+  const SHUT = Object.fromEntries(VIDEO_REUSE_TARGETS.map((c) => [c, false]));
+  const NONE = Object.fromEntries(VIDEO_REUSE_TARGETS.map((c) => [c, false]));
+  // 원판: 계정 없음 + 창구 닫힘 + 길이 맞음 → not_connectable
+  const nc = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"], connected: NONE, connectable: SHUT });
+  eq("원판 · 계정 없고 창구 닫힘 → skip not_connectable", nc.skip.map((x) => `${x.channel}:${x.why}`), ["tiktok:not_connectable"]);
+  eq("not_connectable 문장(글자표 §0-C 그대로)", [nc.skip[0]?.line, nc.skip[0]?.how], ["틱톡 연결은 아직 준비 중이에요.", "연결이 열리면 여기서 같이 올릴 수 있어요."]);
+  eq("not_connectable 칸 — connected:false · connectable:false · remake 없음", [nc.skip[0]?.connected, nc.skip[0]?.connectable, nc.skip[0]?.remake], [false, false, undefined]);
+  // 대조군: 계정 없음 + 창구 열림 → no_account(종전 그대로 + connectable:true)
+  const na = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"], connected: NONE, connectable: OPEN });
+  eq("🔴 대조군 · 창구 열림 → no_account 그대로 · connectable:true", [na.skip[0]?.why, na.skip[0]?.how, na.skip[0]?.connectable], ["no_account", "계정을 연결하시면 같이 올라가요.", true]);
+  // 대조군: 계정 있음 + 창구 닫힘 → go (계정이 이미 붙어 있으면 길이 있다)
+  const gone = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"], connected: { tiktok: true }, connectable: SHUT });
+  eq("🔴 대조군 · 계정이 붙어 있으면 창구가 닫혀도 go(«준비 중»은 그 집에 거짓)", [gone.go.map((g) => g.channel), gone.skip.length], [["tiktok"], 0]);
+  // 무회귀: 창구가 go 를 줄이지 않는다 — 모든 원본 × 길이 × 계정 전부 붙음에서 go 가 창구와 무관
+  let diff = 0;
+  for (const o of VIDEO_CHANNELS) for (const sec of VIDEO_SECONDS) {
+    const a = reuseFit({ originChannel: o, seconds: sec, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON, connectable: SHUT }).go.map((g) => g.channel).join();
+    const b = reuseFit({ originChannel: o, seconds: sec, channels: VIDEO_REUSE_TARGETS, connected: ALL_ON }).go.map((g) => g.channel).join();
+    if (a !== b) diff++;
+  }
+  eq("무회귀 · 계정이 다 붙은 집에서 창구가 닫혀도 go 는 같다(원본 × 길이 전수)", diff, 0);
+  // too_long + 계정 없음 + 창구 닫힘 → too_long(길이 먼저) · how 가 «준비 중» · remake 는 값 정보로 남는다
+  const tl = reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: ["naver_clip"], connected: NONE, connectable: SHUT });
+  eq("too_long + 창구 닫힘 → 길이 먼저(why too_long)", tl.skip[0]?.why, "too_long");
+  eq("그때 how 가 «준비 중»(연결하시면 0)", tl.skip[0]?.how, "네이버 클립 연결은 아직 준비 중이에요 — 연결이 열리면 30초로 만들어 같이 올릴 수 있어요.");
+  eq("그때 칸 — connected:false · connectable:false · remake 는 값 정보로 남는다", [tl.skip[0]?.connected, tl.skip[0]?.connectable, !!tl.skip[0]?.remake], [false, false, true]);
+  // 대조군: too_long + 계정 있음 + 창구 닫힘 → how 평소 문장(새로 만들기가 실제로 된다 · A 합의)
+  const tla = reuseFit({ originChannel: "youtube_shorts", seconds: 60, channels: ["naver_clip"], connected: { naver_clip: true }, connectable: SHUT });
+  eq("🔴 대조군 · too_long + 계정 있음 → how 평소 문장 · connectable:false 는 싣는다", [tla.skip[0]?.how, tla.skip[0]?.connected, tla.skip[0]?.connectable], ["네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요.", true, false]);
+  // 모르면 안 말한다
+  eq("🔴 대조군 · connected 없이 connectable 만 → 길이만 잰다(칸도 없다)", (() => { const f = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"], connectable: SHUT }); return [f.go.length, f.skip.length]; })(), [1, 0]);
+  eq("🔴 대조군 · connectable 을 안 주면 not_connectable 을 지어내지 않는다(no_account · 칸 없음)", (() => { const x = reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"], connected: NONE }).skip[0]; return [x?.why, "connectable" in (x ?? {})]; })(), ["no_account", false]);
+  eq("🔴 대조군 · connectable 표에 그 채널 키가 없으면 닫혔다고 지어내지 않는다", reuseFit({ originChannel: "youtube_shorts", seconds: 30, channels: ["tiktok"], connected: NONE, connectable: {} }).skip[0]?.why, "no_account");
+  // 🔴 정직 축(r19.reuse.honest): 모든 원본 × 길이 × 계정/창구 네 짝에서 connectable===false 인 skip 에 «연결하시면» 0
+  const lies: string[] = []; let seen = 0;
+  for (const o of VIDEO_CHANNELS) for (const sec of VIDEO_SECONDS) for (const [cn, cb] of [[NONE, SHUT], [NONE, OPEN], [ALL_ON, SHUT], [ALL_ON, OPEN]] as const) {
+    for (const x of reuseFit({ originChannel: o, seconds: sec, channels: VIDEO_REUSE_TARGETS, connected: cn, connectable: cb }).skip) {
+      if (x.connectable !== false) continue;
+      seen++;
+      if (/연결하시면|연결되면|연결해 주세요/.test(`${x.line} ${x.how}`)) lies.push(`${o}@${sec}s→${x.channel}:${x.why}`);
+    }
+  }
+  ok(`🔴 창구 닫힌 채널의 문장 ${seen}건 — «연결하시면·연결되면» 0`, !lies.length, lies.slice(0, 5).join(", "));
+  ok("원판 · 창구 닫힌 문장이 실제로 만들어졌다(빈 표가 초록이 되지 않게)", seen > 0);
+  const lines = [nc.skip[0]?.line, nc.skip[0]?.how, tl.skip[0]?.how].map(String);
+  ok("§3 말투 — «실패·오류·불가» 0", !lines.some((l) => /실패|오류|불가|정지|불이익|에러/.test(l)));
+  // 판정의 출처: listChannels().connectable 을 **그대로** 읽는다(새로 짓지 않는다) · pieces-remake 도 같은 값
+  const src = readFileSync(new URL("../lib/video/reuse.ts", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("export async function reuseConnectableOf"), src.indexOf("export async function reuseConnectableOf") + 400);
+  ok("reuseConnectableOf 가 listChannels() 의 connectable 을 읽는다", /listChannels\(\)/.test(body) && /\.connectable === true/.test(body));
+  ok("🔴 reuseConnectableOf 가 레지스트리·앱 키를 따로 재지 않는다(판정 두 벌 0)", !/channel_registry|providerMissing|providerConfigured/.test(body));
+  const dir = readFileSync(new URL("../lib/director.ts", import.meta.url), "utf8");
+  ok("pieces-remake(remakeVideoFor)도 창구가 닫히면 not_connectable — «연결하시면»을 안 쓴다", /reuseConnectableOf\(\)\)\[target\] === false\s*\?\s*\{ ok: false, step: "not_connectable", error: `\$\{mine\.label\} 연결은 아직 준비 중이에요/.test(dir));
 }
 
 console.log(`\n${fail ? "🔴" : "✅"} R18 재사용 — 통과 ${pass} · 실패 ${fail}`);
