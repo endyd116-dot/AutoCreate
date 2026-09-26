@@ -111,6 +111,12 @@ export interface PublishPiece {
   externalUrl?: string;
   channelRef?: string;
   status: string;
+  /**
+   * [R18 · B2] 영상 길이(ms) — 렌더 실측 `piece_assets(kind='video').meta.durationMs`. 영상이 아니거나 모르면 없다.
+   *   🔴 `publish()` 가 러너·커넥터에 넘기기 **전에** «이 채널에 들어가나»를 잰다(`lib/publish/video-fit.ts`) —
+   *      60초 영상이 클립(30초)으로 가서 러너 스텁의 «앱에서 올려 주세요»에 가려지는 조용한 실패를 끊는다.
+   */
+  videoDurationMs?: number;
 }
 
 /**

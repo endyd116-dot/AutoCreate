@@ -34,6 +34,7 @@ import { writeAudit } from "../audit";
 import { VIDEO_CHANNEL_MAX_SEC, shortsFormOf, type ChannelMaxSecLit, type ShortsFormat, type VideoSecondsLit } from "../writing-contracts";
 import { channelLabelKo } from "../channel-url";
 import { VIDEO_SECONDS, isVideoFormat } from "./types";
+import { scheduleDerived } from "../derived-schedule";   // [R18 · B2] 파생에 시각·자리를 준다(아래 «B2 SEAM»)
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -355,10 +356,15 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
   await writeAudit({ tenantId: tid, action: "video_reuse_derived", actorType: opts.actorId ? "user" : "system", ...(opts.actorId ? { actorId: opts.actorId } : {}),
     target: `piece:${originPieceId}`, detail: { seconds, created, existing: existing.map((e) => e.pieceId), skip: fit.skip.map((x) => ({ channel: x.channel, why: x.why })), coin: 0 }, riskLevel: "low" });
 
-  /* ─── B2 SEAM ───  🔴 [계약 v1] 파생의 **시각·자리·`scheduled` 전이**는 B2 `scheduleDerived(tid, originPieceId)`(lib/derived-schedule.ts)가 한다.
-     B 가 먼저 머지된다 — 없는 파일을 여기서 import 하면 tsc 가 빨갛다. **B2 가 이 줄에 호출을 넣는다.**
+  /* ─── B2 SEAM ───  🔴 [계약 v1] 파생의 **시각·자리**는 B2 `scheduleDerived(tid, originPieceId)`(lib/derived-schedule.ts)가 한다.
      그 전까지 파생은 `scheduled` · `scheduled_for NULL` 이라 발행 크론(`scheduled_for IS NOT NULL` 만 줍는다)이 **안 줍는다**(같은 분에 N곳 0).
-     크론으로 줍는 조건: `origin_piece_id IS NOT NULL AND status = 'scheduled' AND scheduled_for IS NULL`. */
+     크론으로 줍는 조건: `origin_piece_id IS NOT NULL AND status = 'scheduled' AND scheduled_for IS NULL`.
+     [R18 · B2] 🔴 **여기서 못 얹어도 파생 만들기는 성공이다** — 파생은 이미 있고, 크론 `reuse.schedule`(매시)이 다시 줍는다.
+        그래서 삼키되 **조용히 삼키지 않는다**(감사 medium). 원본이 아직 시각이 없으면(`origin_not_ready`) 얹을 것이 없어 그냥 돌아온다. */
+  await scheduleDerived(tid, originPieceId).catch(async (e: unknown) => {
+    await writeAudit({ tenantId: tid, action: "reuse_schedule_deferred", actorType: "system", target: `piece:${originPieceId}`,
+      detail: { error: String((e as Error)?.message ?? e).slice(0, 200), note: "크론 reuse.schedule 이 다시 줍는다" }, riskLevel: "medium" }).catch(() => {});
+  });
 
   return { ok: true, originPieceId, created, existing, skip: fit.skip };
 }

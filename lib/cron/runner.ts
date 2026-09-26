@@ -53,6 +53,7 @@ import { coinReconcileStep } from "./coin-reconcile";
 import { channelOpenedStep } from "./channel-opened";
 import { policyReviewStep } from "./policy-review";
 import { briefSweepStep } from "./brief-sweep";   // [P1R8 §5.2] brief 상태 producing·done 을 자기 글에서 파생   // [P1R8 §5.1] 분기 1회 정책 재확인(DESIGN §16B.4)
+import { reuseScheduleStep } from "./reuse-schedule";   // [R18 · B2] 시각 없는 파생(한 영상 여러 곳)을 시차 두고 편성표에 얹는다
 
 /**
  * 틱 전체 예산(ms) — Netlify 동기 함수 26초 벽에서 6초 여유.
@@ -81,6 +82,7 @@ export const STEPS: AnyStep[] = [
   channelOpenedStep,   // hourly · 관심 채널(온보딩에서 고른 planned)이 열리면 1회 알림(P1R7 B3 · 영구 멱등)
   policyReviewStep,    // hourly · 분기 1회(1·4·7·10월 · KST 09시) — 정책 출처 10곳을 «사람이 읽어라»로 감사에 남긴다
   briefSweepStep,      // hourly · brief 상태를 자기 글들의 상태에서 읽어 낸다(설계 4단계 중 producing·done 이 한 번도 안 쓰였다)
+  reuseScheduleStep,   // hourly · [R18 · B2] 시각 없는 파생을 줍는다 — 원본 승인 때 못 얹은 것(하루 몫이 찼다·계정이 잠깐 못 씀)이 «예약됨 · 시각 없음»에 영영 머물지 않게
   coinReconcileStep,   // hourly(월 06:00 KST 주 1회 · 전역 1잠금) · 코인 원장 대조 — 어긋난 행 있을 때만 감사(P1R7 B3)
   tenantPurgeStep,     // hourly(04:00 KST 게이트 = 하루 1회) · **global** — 탈퇴 30일 지난 집 파기 + 내부 표시 동기화(P1R7 §3.1·§3.4)
   postAliveStep,       // hourly · 발행 7일 뒤 «아직 살아 있나» 1회(P1R7 §2 · 영구 멱등)
