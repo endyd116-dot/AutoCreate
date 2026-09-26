@@ -10,6 +10,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../../lib/db-util";
 import { publishPieceById, LENGTH_OVER_DETAIL } from "../../lib/publish";
+import { YOUTUBE_FULL_SAY } from "../../lib/publish/youtube";
 import { recheckVideoPiece, hardFailures, judgeBlockers } from "../../lib/content-approve";
 import { writeAudit } from "../../lib/audit";
 import { setSlot } from "../../lib/cron/base";   // 슬롯 상태 쓰기 한 곳(base.ts) — 편성표가 «올리는 중»에 영영 멈춰 있지 않게
@@ -66,7 +67,10 @@ export default async (req: Request): Promise<Response> => {
     await q(sql`UPDATE pieces SET status = ${next}, meta = meta || ${jsonb({ publishFail: { reason: r.reason, error: r.error ?? null, at: new Date().toISOString() }, ...(lengthOver ? { failReason: String(r.error ?? "") } : {}) })}, updated_at = NOW()
       WHERE tenant_id = ${tid} AND id = ${pieceId} AND status IN ('publishing','scheduled')`);
     // 편성 자리도 piece 와 같은 상태로(위 게이트 차단과 같은 이유) — 다시 시도면 `scheduled` 로 되돌려 다음 틱이 잡게, 아니면 «직접 올리기».
-    if (slotId) await setSlot(tid, slotId, next, retriable ? null : String(r.error ?? "업로드하지 못했어요"));
+    /* 🔴 [R19 · B2] 다시 시도여도 **유튜브 통이 찬 날**이면 그 말을 슬롯에 싣는다(§9 «또렷하게») — 몇 분짜리 흔들림과 달리 몇 시간 간다.
+       (보통은 `publishOne` 이 부르기 전에 걸러 여기 안 온다 — 여기 오는 것은 사이에 찬 경우와 구글이 `quotaExceeded` 로 답한 경우다.) */
+    const slotNote = retriable ? (r.error === YOUTUBE_FULL_SAY ? YOUTUBE_FULL_SAY : null) : String(r.error ?? "업로드하지 못했어요");
+    if (slotId) await setSlot(tid, slotId, next, slotNote);
     if (!retriable) await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${lengthOver ? "publish_failed" : "publish_manual"}, ${lengthOver ? "이 채널엔 안 맞는 길이예요" : "영상 업로드에 손이 필요해요"}, ${String(r.error ?? "업로드하지 못했어요.").slice(0, 200)}, ${lengthOver ? `/app/piece.html?id=${pieceId}` : "/app/posts.html"})`);
     console.error(`[publish-video-background] piece=${pieceId} 실패 reason=${r.reason} retriable=${retriable}`);
     return new Response(JSON.stringify({ ok: false, reason: r.reason, retriable }), { status: 200, headers: { "Content-Type": "application/json" } });

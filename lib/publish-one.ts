@@ -21,6 +21,7 @@ import { classifyAndApply } from "./account-health";
 import { kstTimeText, notifyOnce, setSlot } from "./cron/base";
 import { publishPiece, runnerOffline, type PublishFailReason } from "./cron/publish-port";
 import { takedownBlock } from "./takedown";
+import { isYoutubeChannel, youtubeFullNow, YOUTUBE_FULL_SAY } from "./publish/youtube";
 
 const n = (v: unknown) => Number(v || 0);
 export const MAX_ATTEMPTS = 3;
@@ -113,6 +114,21 @@ export async function publishOne(tid: number, p: PublishOneRow, opts: { now?: Da
 
   /* [P1R5 B-1] 영상 = 배경 업로드로 넘긴다(동기 26초 안에 mp4 를 못 올린다). 호출 실패는 삼키지 않는다(AC-16). */
   if (String(p.kind) === "video") {
+    /* 🔴 [R19 · B2] **유튜브 통(프로젝트 전체 · 최근 24시간)이 찼으면 배경 함수를 부르지 않는다.**
+       종전엔 불러 놓고 배경 함수 안(`publishYoutube`)에서 세어 `retriable` → `scheduled` 로 되돌렸다 — 찬 동안 **5분마다 · 글마다**
+       배경 함수가 떴다(24시간 굴림이라 «찬 동안»이 몇 시간일 수 있다). 세는 함수는 발행 직전 문과 **같은 것**(`youtubeFullNow`)이다.
+       · 시도 횟수는 **안 센다** — 우리 쪽 사정이라 3회 넘겨 «직접 올려 주세요»로 새면 안 된다(배경 길도 안 쌓았다).
+       · 🔴 **말해 준다**(§9) — 편성표 슬롯의 `note` 에 찬 날의 말을 싣는다(화면이 이미 그 칸을 그린다). 배경 함수를 부르는 순간
+         `setSlot(…, "publishing", null)` 이 그 줄을 지운다. 슬롯 **상태**는 안 바꾼다(`setSlot` 한 곳 규칙 — 여기서 쓰는 것은 말 한 줄).
+       · 계정이 없는 글은 유튜브를 안 부르고 «직접 올려 주세요»로 가야 하니 세지 않는다. */
+    if (isYoutubeChannel(p.channel) && p.account_id) {
+      const room = await youtubeFullNow();
+      if (room.full) {
+        if (slotId) await q(sql`UPDATE slots SET note = ${YOUTUBE_FULL_SAY}, updated_at = NOW()
+          WHERE tenant_id = ${tid} AND id = ${slotId} AND status <> 'published' AND note IS DISTINCT FROM ${YOUTUBE_FULL_SAY}`).catch(() => []);
+        return { kind: "retry", reason: "channel_error", error: YOUTUBE_FULL_SAY, attempts: n(meta.publishAttempts) };
+      }
+    }
     const fired = await triggerVideoPublish(tid, pieceId, slotId);
     if (fired) {
       await q(sql`UPDATE pieces SET status = 'publishing', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${pieceId} AND status IN ('scheduled', 'approved')`);

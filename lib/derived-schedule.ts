@@ -16,7 +16,9 @@
  *     ② **캐던스**(§4.7) — 파생 계정의 하루 몫(워밍업 반영)·글 사이 간격·같은 채널 다른 계정 30분.
  *        🔴 최종 판정은 `checkCadenceAt` **한 곳**이다 — 여기 순수 함수는 «후보를 내는 자»이고, 판정자가 아니다(두 자가 다른 말을 하지 않게).
  *     ③ **유튜브 쿼터**(§2.2) — 가족당 유튜브 업로드 **최대 1건**. 그리고 파생이 유튜브로 가면 그날 테넌트 유튜브 수를
- *        `youtubeDailyCap()`(하나뿐인 문)으로 센다 — 5건 찬 날에 얹어 «내일 이어서»를 세 번 돌게 하지 않는다.
+ *        `youtubeDailyCap()`(하나뿐인 문)으로 센다 — 찬 날에 얹어 «내일 이어서»를 세 번 돌게 하지 않는다.
+ *        🔴 [R19] 여기는 **내 편성**이 한도를 안 넘게 하는 몫(집 · KST 하루)이다. 통은 프로젝트 전체라 **다른 집 몫까지** 세는 것은
+ *           발행 직전 문(`lib/publish/youtube.ts youtubeFullNow`) 한 곳이다 — 편성에서 남의 수로 내 자리를 밀면 남의 수가 내 편성표에 드러난다(§4.6).
  *     ④ **길이**(트리거 §1②) — 채널에 안 들어가는 영상은 얹지 않는다(`lib/publish/video-fit.ts` 한 곳).
  *
  *   ══ 🔴 ③④ 는 B 의 `reuseFit` 이 이미 거른다 — 여기는 **새면 잡는 둘째 줄**이다 ══
@@ -37,7 +39,7 @@ import { checkCadenceAt, DAY_FREED_STATUSES, statusListSql } from "./cadence-che
 import { effectiveDailyCap, effectiveMinGapMin } from "./warmup";
 import { gapMinFor } from "./publish-gap";
 import { pausedAccountIds } from "./account-slots";
-import { youtubeDailyCap } from "./publish/youtube";
+import { youtubeDailyCap, YOUTUBE_CHANNELS, isYoutubeChannel } from "./publish/youtube";
 import { videoFitsChannel } from "./publish/video-fit";
 import { channelLabelKo } from "./channel-url";
 import { notifyOnce } from "./cron/base";
@@ -55,9 +57,8 @@ export const DERIVED_STAGGER_MIN = ACCOUNT_GAP_MIN;
 export const DERIVED_LEAD_MIN = 20;
 /** 몇 날 앞까지 찾나 — `pickPublishAt maxDaysAhead` 와 같은 14일. */
 export const DERIVED_HORIZON_DAYS = 14;
-/** 🔴 유튜브 채널 — 쿼터가 **채널이 아니라 구글 프로젝트** 단위라 한 통으로 센다(`lib/publish/youtube.ts todayUploads` 와 같은 목록). */
-export const YOUTUBE_CHANNELS: readonly string[] = ["youtube_shorts", "youtube_long"];
-export const isYoutubeChannel = (ch: unknown): boolean => YOUTUBE_CHANNELS.includes(String(ch ?? ""));
+/** 🔴 유튜브 채널 — 쿼터가 **채널이 아니라 구글 프로젝트** 단위라 한 통으로 센다. [R19] 🔴 정본은 `lib/publish/youtube.ts` 한 곳 — 여기선 **다시 적지 않고** 내보내기만 한다(목록이 두 벌이면 갈린다). */
+export { YOUTUBE_CHANNELS, isYoutubeChannel } from "./publish/youtube";
 
 /* ═══════════════════════════ 순수 — 후보를 낸다 ═══════════════════════════ */
 
@@ -335,7 +336,7 @@ export async function scheduleDerived(tid: number, originPieceId: number, opts: 
   const paused = new Set(await pausedAccountIds(tid).catch(() => [] as number[]));
   const fromIso = new Date(now.getTime() - 86400_000).toISOString();
   const toIso = new Date(Math.max(now.getTime(), originAt.getTime()) + (DERIVED_HORIZON_DAYS + 1) * 86400_000).toISOString();
-  /* 🔴 유튜브 하루 수는 `youtubeDailyCap()` **하나뿐인 문**으로 센다 — 여기 5 를 다시 적지 않는다. 맞추는 자기 옛 자리는 빼고 센다. */
+  /* 🔴 유튜브 하루 수는 `youtubeDailyCap()` **하나뿐인 문**으로 센다 — 여기 수를 다시 적지 않는다. 맞추는 자기 옛 자리는 빼고 센다. */
   const ytSelf = todo.filter((f) => isYoutubeChannel(f.channel)).map((f) => n(f.id));
   const youtubePool: DayBudget | undefined = ytSelf.length
     ? { cap: () => youtubeDailyCap(), used: await dayCounts(tid, fromIso, toIso, { channels: YOUTUBE_CHANNELS }, ytSelf[0]) }
