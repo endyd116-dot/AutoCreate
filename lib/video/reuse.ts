@@ -5,7 +5,8 @@
  *   사장님 결정(2026-09-26): ① 처음 한 번 묻고, 그 뒤론 자동(기본 꺼짐) ② 길이가 안 맞는 채널만 빼고 왜 뺐는지 말해 준다(코인은 한 번)
  *
  *   ══ 이 파일이 정하는 것(계약 v1 · A·B2·C 에 글자 그대로 보냄) ══
- *     · `VIDEO_REUSE_TARGETS` — 재사용 대상 후보. 🔴 `youtube_long` 없음(트리거 §3 · 없는 길) · `threads` 없음(글 축 채널).
+ *     · `VIDEO_REUSE_TARGETS` — 재사용 대상 후보. 🔴 `youtube_long` 없음(트리거 §3 · 없는 길).
+ *       [R19 · 2026-09-27] `threads` 를 **넣었다**(설계 §6.4) — 고르는 기준이 «축 이름»에서 **«영상 길이가 있나»**로 바뀌었다(아래 상수 주석).
  *     · `reuseFit()` — «이 길이면 어디 가고 어디 빠지나» + 빠진 까닭 **문장**(순수 · DB 0). 화면·알림·디렉터가 전부 이 문장을 쓴다.
  *     · `deriveVideoPieces()` — 원본 영상 → 파생 piece N개. 🔴 **같은 `r2_key`** · 🔴 **코인 0**(consume 을 안 부른다).
  *     · `settings.videoReuse` 읽기·쓰기 — 🔴 `tenants.settings` 한 곳(directorAuto 옆 · 새 문 없음). 쓰는 손은 이 파일 하나.
@@ -16,7 +17,7 @@
  *     2. 발행 멱등(§4.7) — 파생은 `external_url`·`channel_ref`·발행 흔적(meta 의 fb*·tt*·th*·ig*·publish*) **없이** 태어난다.
  *        원본을 통째로 베끼면 커넥터가 «이미 나갔다»로 읽고 **조용히 영영 안 나간다**(B2 가 짚었다).
  *     3. 🔴 유튜브는 한 가족에 **최대 1건** — 원본이 `youtube_*` 면 `youtube_*` 전부가 대상에서 빠진다(B2 지적 · 트리거 §3·§6-4).
- *        유튜브는 세로 3분 이하를 전부 쇼츠로 분류해서 **같은 채널에 같은 영상이 두 번** 생기고 하루 쿼터(5)를 두 배로 먹는다.
+ *        유튜브는 세로 3분 이하를 전부 쇼츠로 분류해서 **같은 채널에 같은 영상이 두 번** 생기고 하루 쿼터(§2.2 — 프로젝트 전체가 나눠 쓰는 수)를 두 배로 먹는다.
  *     4. 캐던스·시차(§4.7 · 같은 분에 N곳 금지)는 **B2 몫**이다 — 파생은 `scheduled` · 🔴 `scheduled_for NULL` · `slot_id NULL` 로 태어나고
  *        B2 `scheduleDerived` 가 시각·자리를 박는다(아래 «B2 SEAM»). 발행 크론은 `scheduled_for IS NOT NULL` 만 줍는다(`lib/cron/publisher.ts:71`)
  *        → 시각이 박히기 전엔 **안 나간다.**
@@ -36,6 +37,9 @@ import { channelLabelKo } from "../channel-url";
 import { VIDEO_SECONDS, isVideoFormat } from "./types";
 import { scheduleDerived } from "../derived-schedule";   // [R18 · B2] 파생에 시각·자리를 준다(아래 «B2 SEAM»)
 import { coinCostOf, videoCoinItem } from "../coin-table";   // 🔴 값표(순수)만 — 원장(coin-ledger)은 이 파일이 **부르지 않는다**(파생 코인 0)
+/* [R19 · §0-C] «이 채널이 지금 연결을 받나»의 정본(계정 화면 «연결» 카드와 같은 값). 🔴 고리 없음 확인 — accounts.ts 가 부르는
+   db-util·creds-crypto·oauth-providers·channel-registry·writing-contracts·publish/youtube·warmup·coin-table 중 이 파일에 닿는 것 0. */
+import { listChannels } from "../accounts";
 
 type Row = Record<string, unknown>;
 const q = async (s: ReturnType<typeof sql>): Promise<Row[]> => (await db.execute(s)) as unknown as Row[];
@@ -44,7 +48,11 @@ const n = (v: unknown) => Math.floor(Number(v ?? 0)) || 0;
 /* ═══════════ 대상 후보 ═══════════ */
 
 /** 재사용 대상 후보 — 순서가 화면 순서다. 🔴 `youtube_long` 은 **넣지 않는다**(세로 짧은 영상은 긴 영상이 되지 않고 쇼츠가 하나 더 생긴다 · 트리거 §3). */
-export const VIDEO_REUSE_TARGETS: readonly string[] = ["youtube_shorts", "reels", "tiktok", "naver_clip", "facebook_reels"];
+/* [R19 · 설계 §6.4 · 사장님 2026-09-27] 🔴 **고르는 기준 = «그 채널에 영상 길이가 있나»** — 불변식 `set(이 목록) = set(keys(VIDEO_CHANNEL_MAX_SEC))`.
+   종전엔 레지스트리 **축 이름**(`axis: "text"`)을 보고 `threads` 를 뺐다. 그런데 쓰레드는 영상을 **올린다**(`lib/publish/index.ts` threads →
+   `publishThreadsVideo` · `media_type: "VIDEO"`) — 축은 «처음 무엇을 만드나»이지 «무엇을 받나»가 아니다. 이름으로 고르면 받는 채널이 조용히 빠진다.
+   ⇒ 길이 표에 칸이 생긴 채널은 대상이다(자가 잰다 — `scripts/verify-r18-reuse.mts` ⑨). `threads` 는 **맨 끝**(화면 순서). */
+export const VIDEO_REUSE_TARGETS: readonly string[] = ["youtube_shorts", "reels", "tiktok", "naver_clip", "facebook_reels", "threads"];
 
 /** 같은 플랫폼 가족 — 🔴 유튜브는 쇼츠·긴 영상이 **같은 API·같은 동의·같은 쿼터**라 한 가족이다(`channel-registry.ts youtube_long` note). */
 function familyOf(channel: string): string { return channel.startsWith("youtube_") ? "youtube" : channel; }
@@ -58,13 +66,19 @@ export function reuseTargetsFor(originChannel: string): string[] {
 /* ═══════════ 들어가나 · 빠지나 ═══════════ */
 
 export interface ReuseGo { channel: string; label: string; maxSeconds: ChannelMaxSecLit }
-export type ReuseSkipWhy = "too_long" | "no_account";
+/** 🔴 판정 순서가 곧 이 순서다 — 길이(이 영상에 대한 사실) → 연결 창구(그 채널이 지금 받나) → 계정(이 집에 있나). */
+export type ReuseSkipWhy = "too_long" | "not_connectable" | "no_account";
 export interface ReuseSkip { channel: string; label: string; maxSeconds: ChannelMaxSecLit; why: ReuseSkipWhy; line: string; how: string;
   /** 🔴 [§6-6] too_long 일 때만 — «이 채널용으로 N초 영상을 새로 만들면 C코인»(`POST /api/pieces-remake`). **새 영상**이라 코인이 새로 든다 — 누르기 전에 값을 보여 준다. */
   remake?: { seconds: VideoSecondsLit; coins: number };
   /** [v1.6 · A 요청] 계정을 잴 때만(`connected` 를 줬을 때) — 그 채널에 쓸 수 있는 계정이 있나. too_long 이면서 계정도 없으면
    *  «새로 만들기» 단추 대신 «계정을 연결하시면 만들 수 있어요»를 그릴 재료(길이가 먼저라 `why` 엔 계정 사실이 안 실린다). */
-  connected?: boolean }
+  connected?: boolean;
+  /** [R19 · §0-C] `connected` 와 **같이** 실린다 — 그 채널이 지금 연결을 받을 수 있나(`lib/accounts.ts listChannels().connectable` 그대로).
+   *  🔴 `false` 면 «계정을 연결하시면 …»은 **거짓 길**이다(연결 카드가 없다 · 라이브 재사용 대상 여섯이 전부 `planned` — 메인 실측 2026-09-27).
+   *  too_long 이면서 계정도 없고 연결도 못 받으면 `how` 가 «연결은 아직 준비 중»으로 바뀐다(`remake` 는 값 정보라 그대로 싣는다 — 화면은 단추를 안 그린다).
+   *  계정이 이미 붙어 있으면(`connected: true`) 창구가 닫혀도 `how` 는 평소 문장이고 «새로 만들기»가 **실제로 된다**(A 합의 2026-09-27). */
+  connectable?: boolean }
 /** `places` = 1(원본) + `go.length` — 🔴 «몇 곳»은 이 수 그대로다(화면이 세지 않는다). */
 export interface ReuseFit { seconds: VideoSecondsLit; places: number; go: ReuseGo[]; skip: ReuseSkip[] }
 
@@ -78,27 +92,40 @@ function longestPickableUnder(max: number): VideoSecondsLit {
  * reuseFit — 이 길이의 영상이 고른 채널 중 **어디 가고 어디 빠지나**(순수 · DB 0).
  *   · `channels` 중 후보 밖(`youtube_long` 등)·원본과 같은 가족은 **go 에도 skip 에도 안 든다** — 없는 길이라 말할 것도 없다.
  *   · `connected` 를 주면 계정이 없는 채널은 `skip`(no_account). 안 주면 길이만 잰다.
+ *   · [R19] `connectable` 도 주면(`connected` 와 **같이** 준다) 계정이 없고 그 채널이 연결도 못 받을 때 `skip`(not_connectable) —
+ *     «계정을 연결하시면»이라고 **없는 길을 가리키지 않는다**(§9 «또렷하게» · 막다른 골목 금지). 🔴 계정이 **이미 붙어 있으면** 연결 창구가
+ *     닫혀 있어도 go 다(올릴 길이 있다 — «준비 중»은 그 집에 거짓이다). `connectable` 이 없으면 «준비 중»을 지어내지 않는다(AC-9).
  *   · 한 채널이 길이도 안 맞고 계정도 없으면 **길이**를 먼저 말한다 — 이 영상에 대한 사실이라서(계정은 다음 영상에도 같은 말이다).
  *   🔴 문장은 여기 한 곳 — 화면(시트·디렉터)과 알림이 같은 글자를 쓴다(두 곳이 따로 지으면 말이 갈린다 · A 요청).
  */
-export function reuseFit(input: { originChannel: string; seconds: VideoSecondsLit; channels: readonly string[]; connected?: Readonly<Record<string, boolean>> }): ReuseFit {
+export function reuseFit(input: { originChannel: string; seconds: VideoSecondsLit; channels: readonly string[]; connected?: Readonly<Record<string, boolean>>; connectable?: Readonly<Record<string, boolean>> }): ReuseFit {
   const want = new Set((input.channels ?? []).map(String));
   const go: ReuseGo[] = []; const skip: ReuseSkip[] = [];
+  const measured = !!input.connected;
   for (const channel of reuseTargetsFor(input.originChannel)) {
     if (!want.has(channel)) continue;
     const maxSeconds = VIDEO_CHANNEL_MAX_SEC[channel];
-    if (!maxSeconds) continue;   // 표에 없는 채널은 잴 수 없다 — 지어내지 않는다(AC-9). 지금 후보 다섯은 전부 표에 있다(하니스가 잰다).
+    if (!maxSeconds) continue;   // 표에 없는 채널은 잴 수 없다 — 지어내지 않는다(AC-9). 지금 후보 여섯은 전부 표에 있다(하니스가 잰다).
     const label = channelLabelKo(channel);
+    const hasAccount = measured ? !!input.connected![channel] : true;
+    const canConnect = input.connectable ? input.connectable[channel] !== false : true;
+    /* 계정을 잰 fit 에만 싣는다 — `connectable` 은 `connected` 와 한 짝(A 합의 2026-09-27) */
+    const facts: Pick<ReuseSkip, "connected" | "connectable"> = measured ? { connected: hasAccount, ...(input.connectable ? { connectable: canConnect } : {}) } : {};
+    const notReady = measured && !hasAccount && !canConnect;
     if (input.seconds > maxSeconds) {
       const pick = longestPickableUnder(maxSeconds);
       skip.push({ channel, label, maxSeconds, why: "too_long",
         line: `이 영상은 ${input.seconds}초라 ${label}(최대 ${maxSeconds}초)엔 안 올라가요.`,
-        how: `${label}에도 올리시려면 만들 때 ${pick}초를 골라 주세요.`,
-        remake: { seconds: pick, coins: coinCostOf(videoCoinItem(pick)) }, ...(input.connected ? { connected: !!input.connected[channel] } : {}) });
-    } else if (input.connected && !input.connected[channel]) {
+        how: notReady ? `${label} 연결은 아직 준비 중이에요 — 연결이 열리면 ${pick}초로 만들어 같이 올릴 수 있어요.` : `${label}에도 올리시려면 만들 때 ${pick}초를 골라 주세요.`,
+        remake: { seconds: pick, coins: coinCostOf(videoCoinItem(pick)) }, ...facts });
+    } else if (notReady) {
+      skip.push({ channel, label, maxSeconds, why: "not_connectable",
+        line: `${label} 연결은 아직 준비 중이에요.`,
+        how: "연결이 열리면 여기서 같이 올릴 수 있어요.", ...facts });
+    } else if (measured && !hasAccount) {
       skip.push({ channel, label, maxSeconds, why: "no_account",
         line: `${label} 계정이 아직 연결되지 않았어요.`,
-        how: "계정을 연결하시면 같이 올라가요.", connected: false });
+        how: "계정을 연결하시면 같이 올라가요.", ...facts });
     } else go.push({ channel, label, maxSeconds });
   }
   return { seconds: input.seconds, places: 1 + go.length, go, skip };
@@ -195,6 +222,16 @@ async function usableAccounts(tid: number): Promise<Map<string, Acc[]>> {
 function connectedOf(m: Map<string, Acc[]>): Record<string, boolean> {
   return Object.fromEntries(VIDEO_REUSE_TARGETS.map((c) => [c, (m.get(c)?.length ?? 0) > 0]));
 }
+/**
+ * [R19 · §0-C] 후보 채널마다 **지금 연결을 받을 수 있나** — 🔴 판정을 새로 짓지 않는다: `listChannels()` 의 `connectable`
+ *   (레지스트리 `active` ∧ 우리 앱 키 ∧ SITE_URL · 사유 `not_open`·`no_provider_key`·`no_site_url`)을 **그대로** 읽는다.
+ *   계정 화면이 «연결» 카드를 그리는 바로 그 값이라, 여기서 «준비 중»이면 계정 화면에도 붙일 카드가 없다.
+ *   목록에 없는 채널은 붙일 카드가 없으니 false. `pieces-remake`(lib/director.ts)도 이 값을 쓴다.
+ */
+export async function reuseConnectableOf(): Promise<Record<string, boolean>> {
+  const open = new Map((await listChannels()).map((c) => [c.key, c.connectable === true]));
+  return Object.fromEntries(VIDEO_REUSE_TARGETS.map((c) => [c, open.get(c) === true]));
+}
 /** 대상 채널에서 어느 계정으로 갈까 — 원본 계정과 **같은 페르소나** 먼저(같은 사람이 여러 곳에 올리는 모양), 없으면 먼저 연결한 계정. */
 function pickAccount(list: Acc[] | undefined, personaId: number | null): Acc | null {
   if (!list?.length) return null;
@@ -205,15 +242,16 @@ function pickAccount(list: Acc[] | undefined, personaId: number | null): Acc | n
 
 export interface VideoReuseView {
   on: boolean; channels: string[]; asked: boolean; askedAt: string | null;
-  targets: { channel: string; label: string; maxSeconds: ChannelMaxSecLit; connected: boolean }[];
+  /** [R19] `connectable` — 늘 boolean(계정과 무관한 채널의 사실). `false` 면 화면은 «준비 중»(고를 수는 있다 — 앞으로의 영상에 쓰인다). */
+  targets: { channel: string; label: string; maxSeconds: ChannelMaxSecLit; connected: boolean; connectable: boolean }[];
 }
 /** `/api/tenant-settings` GET·POST 의 `videoReuse` — 후보 목록·상한·연결 여부를 **서버가** 준다(화면이 표를 베끼지 않는다 · AC-52). */
 export async function videoReuseView(tid: number, s?: VideoReuseSetting): Promise<VideoReuseView> {
   const cur = s ?? await loadVideoReuse(tid);
-  const conn = connectedOf(await usableAccounts(tid));
+  const [conn, open] = await Promise.all([usableAccounts(tid).then(connectedOf), reuseConnectableOf()]);
   return {
     on: cur.on, channels: cur.channels, asked: !!cur.askedAt, askedAt: cur.askedAt,
-    targets: VIDEO_REUSE_TARGETS.map((channel) => ({ channel, label: channelLabelKo(channel), maxSeconds: VIDEO_CHANNEL_MAX_SEC[channel], connected: conn[channel] })),
+    targets: VIDEO_REUSE_TARGETS.map((channel) => ({ channel, label: channelLabelKo(channel), maxSeconds: VIDEO_CHANNEL_MAX_SEC[channel], connected: conn[channel], connectable: open[channel] })),
   };
 }
 
@@ -225,9 +263,9 @@ export async function videoReuseView(tid: number, s?: VideoReuseSetting): Promis
 export async function reuseFitsForDirector(tid: number, originChannel: string): Promise<{ reuseBasis: ReuseBasis; reuseFit: ReuseFit[] }> {
   const s = await loadVideoReuse(tid);
   const basis = reuseBasisOf(s);
-  const connected = connectedOf(await usableAccounts(tid));
+  const [connected, connectable] = await Promise.all([usableAccounts(tid).then(connectedOf), reuseConnectableOf()]);
   const channels = basisChannels(s, basis);
-  return { reuseBasis: basis, reuseFit: pickableSecondsFor(originChannel).map((seconds) => reuseFit({ originChannel, seconds, channels, connected })) };
+  return { reuseBasis: basis, reuseFit: pickableSecondsFor(originChannel).map((seconds) => reuseFit({ originChannel, seconds, channels, connected, connectable })) };
 }
 
 export interface ReuseDerivedRow { pieceId: number; channel: string; label: string; status: string; scheduledFor: string | null; accountId: number | null; handle: string | null }
@@ -258,12 +296,12 @@ export async function pieceReuseView(tid: number, p: Row): Promise<PieceReuseVie
   }
   const meta = (p.meta && typeof p.meta === "object" ? p.meta : {}) as Row;
   const s = await loadVideoReuse(tid);
-  const accs = await usableAccounts(tid);
+  const [accs, connectable] = await Promise.all([usableAccounts(tid), reuseConnectableOf()]);
   const picked = Array.isArray(meta.reuseChannels) ? (meta.reuseChannels as unknown[]).map(String) : null;
   const basis: ReuseBasis = picked ? "chosen" : reuseBasisOf(s);
   const channels = picked ?? basisChannels(s, basis);
   const seconds = pieceSecondsOf(meta);
-  const fit = reuseFit({ originChannel: String(p.channel), seconds, channels, connected: connectedOf(accs) });
+  const fit = reuseFit({ originChannel: String(p.channel), seconds, channels, connected: connectedOf(accs), connectable });
   const rows = await q(sql`SELECT p.id, p.channel, p.status, p.scheduled_for, p.account_id, a.handle
     FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id AND a.tenant_id = p.tenant_id
     WHERE p.tenant_id = ${tid} AND p.origin_piece_id = ${n(p.id)} ORDER BY p.id`);
@@ -398,8 +436,10 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
   const originChannel = String(o.channel);
   const seconds = pieceSecondsOf(meta);
   const revived = held ? await reviveHeldFamily(tid, originPieceId, meta, { originPieceId, originChannel, seconds, at: new Date().toISOString() }, isoOrNull(o.scheduled_for)) : [];
-  const accs = await usableAccounts(tid);
-  const fit = reuseFit({ originChannel, seconds, channels, connected: connectedOf(accs) });
+  const [accs, connectable] = await Promise.all([usableAccounts(tid), reuseConnectableOf()]);
+  /* 🔴 [R19] `connectable` 은 **go 를 바꾸지 않는다** — 계정 없는 채널은 전에도 skip(no_account)이었고, 이제 그중 연결 창구가 닫힌 것만
+     까닭(not_connectable)이 바뀐다. 계정이 붙어 있으면 창구가 닫혀도 go 그대로(무회귀). */
+  const fit = reuseFit({ originChannel, seconds, channels, connected: connectedOf(accs), connectable });
   const [oa] = o.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(o.account_id)}`) : [];
   const personaId = oa?.persona_id == null ? null : n(oa.persona_id);
   const at = new Date().toISOString();
@@ -467,7 +507,7 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
  * `/api/pieces-reuse { id, channels, remember }` — 원본 화면의 시트에서 «이대로 예약».
  *   · remember=true  → 설정 켜고(고른 게 있으면) 채널 저장 · askedAt.  remember=false → 이번 영상만 · askedAt 은 찍는다(처음 한 번은 끝났다).
  *   · 원본이 아직 검수 중이면 고른 채널을 `meta.reuseChannels` 에 적어 두고 **승인 때** 만든다(`approvePiece`). 이미 승인됐으면 지금 만든다.
- *   · 🔴 이번 영상에 안 맞는 채널(too_long·no_account)을 보내도 거절하지 않는다 — 설정엔 저장되고 이번엔 `skip` 으로 돌려준다(A 계약 ④).
+ *   · 🔴 이번 영상에 안 맞는 채널(too_long·not_connectable·no_account)을 보내도 거절하지 않는다 — 설정엔 저장되고 이번엔 `skip` 으로 돌려준다(A 계약 ④).
  */
 export async function answerReuse(tid: number, originPieceId: number, body: { channels?: unknown; remember?: unknown }, actorId: number | null): Promise<
   { ok: true; setting: VideoReuseSetting; derive: DeriveResult | null; note?: string } | { ok: false; status: number; step: string; error: string }> {
