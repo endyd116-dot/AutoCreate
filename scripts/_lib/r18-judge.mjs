@@ -101,8 +101,12 @@ export function judgeWords(items) {
     if ((it.why ?? "too_long") !== "too_long") continue;
     const max = Number(it.max);
     if (!(max > 0)) { bad(it, "no_max", "이 채널의 상한을 몰라 «사실 한 줄»을 잴 수 없다 — 상한 표에 채널이 없다(트리거 §2)"); continue; }
-    if (!secondsForms(max).some((f) => text.includes(f))) bad(it, "no_fact", `채널 상한(${secondsForms(max).join(" 또는 ")})이 문장에 없다 — «무엇이·왜»가 흐리다`);
-    const way = sentences(text).some((s) => lengthsIn(s).some((n) => n > 0 && n <= max) && /(면|주세요|보세요|하세요|세요)/.test(s));
+    /* 🔴 두 칸으로 오면 **칸마다** 잰다 — 사실은 `line` 에서, 어떻게는 `how` 에서. 합쳐 보면 `how` 의 «30초를 골라 주세요»가
+       `line` 에서 빠진 «최대 30초»를 **대신 채워 준다**(클립 상한 30 = 권하는 길이 30 이라 늘 겹친다 · 2026-09-26 B 코드를 읽다 잡음). */
+    const factText = it.line != null ? String(it.line) : text;
+    const wayText = it.how != null ? String(it.how) : text;
+    if (!secondsForms(max).some((f) => factText.includes(f))) bad(it, "no_fact", `채널 상한(${secondsForms(max).join(" 또는 ")})이 ${it.line != null ? "«사실» 칸(`line`)에" : "문장에"} 없다 — «무엇이·왜»가 흐리다`);
+    const way = sentences(wayText).some((s) => lengthsIn(s).some((n) => n > 0 && n <= max) && /(면|주세요|보세요|하세요|세요)/.test(s));
     if (!way) bad(it, "no_way", `«어떻게 하면 되는지»가 없다 — 한 문장 안에 «${max}초 이하의 길이 + 권하는 끝말»이 같이 없다`);
   }
   return { axis: "④", verdict: list.length === 0 ? "unmeasured" : findings.length ? "fail" : "pass", measured: list.length, findings };
@@ -226,6 +230,10 @@ export const BAD_WORDS = Object.freeze([
   [{ channel: "naver_clip", seconds: 60, max: 30, text: "" }, "empty"],
   [{ channel: "tiktok", seconds: 240, max: null, text: "틱톡엔 안 올라가요. 짧게 골라 주세요." }, "no_max"],
   [{ channel: "naver_clip", seconds: 60, max: 30, why: "too_long", line: "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요.", how: "" }, "no_way"],
+  /* 🔴 상한이 `how` 에만 있고 `line` 에는 없다 — 합쳐 보면 초록으로 새던 모양(칸마다 재야 운다) */
+  [{ channel: "naver_clip", seconds: 60, max: 30, why: "too_long", line: "이 영상은 60초라 네이버 클립엔 안 올라가요.", how: "네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요." }, "no_fact"],
+  /* 권하는 길이가 `line` 에만 있고 `how` 는 길이 없이 권한다 — 같은 병의 반대쪽 */
+  [{ channel: "naver_clip", seconds: 60, max: 30, why: "too_long", line: "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요.", how: "네이버 클립에도 올리시려면 더 짧게 만들어 주세요." }, "no_way"],
   [{ channel: "tiktok", seconds: 60, max: 180, why: "no_account", line: "틱톡 계정 연결 실패", how: "계정을 연결하시면 같이 올라가요." }, "hard_word"],
   [{ channel: "tiktok", seconds: 60, max: 180, why: "no_account", line: "틱톡 계정이 아직 연결되지 않았어요.", how: "" }, "no_way"],
 ]);
