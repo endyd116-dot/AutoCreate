@@ -76,6 +76,10 @@ if (REHEARSE) {
 }
 
 type V = "pass" | "fail" | "unmeasured";
+/** 🔴 [2026-09-27 · R19 · tsc 34건 수리] DB 는 `db/index.ts` 를 **동적으로** 불러 `any` 가 모든 행으로 번졌다(implicit any 32).
+ *   행의 모양은 SQL 이 정한다 — 여기서 칸을 지어내지 않고 «칸 이름 → 모름»으로 **한 곳에** 적는다. 쓰는 것은 태그 질의와 `end` 뿐이다. */
+type Row = Record<string, any>;
+type SqlTag = ((strings: TemplateStringsArray, ...values: unknown[]) => Promise<Row[]>) & { end(o?: { timeout?: number }): Promise<void> };
 const lines: { v: V; step: string }[] = [];
 const icon = (v: V) => (v === "pass" ? "✅" : v === "fail" ? "❌" : "⊘");
 const rec = (step: string, v: V, note = "") => { lines.push({ v, step }); console.log(`${icon(v)} ${step}${note ? `  — ${note}` : ""}`); return v; };
@@ -182,7 +186,7 @@ if (alive.reuseFit && alive.VIDEO_REUSE_TARGETS && alive.VIDEO_CHANNEL_MAX_SEC) 
 
 /** 파생 가족을 DB 에서 읽어 ①②③ + §4.6 을 잰다 — 🔴 라이브(`--db`)와 리허설 집(`--rehearse`)이 **같은 몸통**을 쓴다.
  *   리허설에서 한 번 돌려야 이 접합부(SQL·묶기·to_char)가 **실제 행으로** 산다 — 라이브는 파생이 0개라 여기가 늘 ⊘ 였다(AC-236). */
-async function liveArm(sql: any, scopeTid: number | null, tag: string): Promise<void> {
+async function liveArm(sql: SqlTag, scopeTid: number | null, tag: string): Promise<void> {
   const derived = await sql`SELECT p.id, p.tenant_id, p.origin_piece_id, p.channel, p.status, to_char(COALESCE(p.published_at, p.scheduled_for), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
       t.is_internal, (t.key LIKE 'r18%') AS seed FROM pieces p JOIN tenants t ON t.id = p.tenant_id
     WHERE p.origin_piece_id IS NOT NULL AND (${scopeTid}::bigint IS NULL OR p.tenant_id = ${scopeTid}) ORDER BY p.id`;
@@ -259,7 +263,7 @@ if (!REHEARSE) {
   rec("①②③ 리허설 팔", "unmeasured", "`--rehearse` 없이 돌렸다 — «파생 전후 원장 차이»·«가족의 분»·«멈췄다 깨기»는 실제로 만들어 봐야 안다");
 } else {
   const imp = (f: string) => import(pathToFileURL(path.join(ROOT, f)).href);
-  const { pgClient: sql } = await imp("db/index.ts");
+  const sql: SqlTag = (await imp("db/index.ts")).pgClient;
   const PROTECT = new Set([3, 13, 109, 116, 198, 451]);
   let TID = 0;
   try {
