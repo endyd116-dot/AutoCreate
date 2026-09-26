@@ -237,6 +237,8 @@ const PATH_RULES: { key: string; name: string; judge: (s: Src) => boolean | null
   { key: "takedown-body", name: "발행 크론이 `p.body` 를 싣는다 → 신고 차단의 «같은 본문 해시»가 산다(파생은 원본 본문을 그대로 들고 태어난다)",
     judge: (s) => { const due = blockOf(s.PUB, "const due = await q(sql`SELECT", ["FROM pieces p"])?.body; const one = blockOf(s.ONE, "export async function publishOne(", ["\n}\n"])?.body;
       return due == null || one == null ? null : /\bp\.body\b/.test(due) && (orderIn(one, /takedownBlock\(tid, p\)/, /triggerVideoPublish\(/)?.ok ?? false); } },
+  { key: "tell-keep", name: "고객이 **직접** 형제 옆에 붙인 시각은 안 옮기고 **말한다**(`restaggerFamily` → `reuseNote` · §9 막지 않는다)",
+    judge: (s) => { const b = blockOf(s.DS, "export async function restaggerFamily(", ["\n}\n"])?.body; return b == null ? null : /if \(keep\)/.test(b) && /staggerClashes\(t2\)\.filter\(\(c\) => c\.a === keep \|\| c\.b === keep\)/.test(b) && /say\.push\(/.test(b); } },
   { key: "cron-reg", name: "그 크론이 `STEPS` 에 등록돼 있다(등록 안 된 스텝은 안 돈다 · PITFALLS #7)",
     judge: (s) => /\n\s*reuseScheduleStep,/.test(s.RUNNER) },
   { key: "const", name: "파생 시차 상수는 새 숫자가 아니라 `ACCOUNT_GAP_MIN` 에서 온다",
@@ -255,6 +257,7 @@ let pathCaught = 0; const PATH_MUTANTS: { name: string; file: keyof Src; from: R
   { name: "옮길 때 형제를 안 본다(restaggerFamily 호출 삭제)", file: "SLOTS", from: /await restaggerFamily\([^)]*\)[^)]*\)/, to: "await Promise.resolve()", rule: "reschedule" },
   { name: "편성이 가족을 안 넘긴다(`family: []`)", file: "DS", from: /family: \[\.\.\.family, \.\.\.placedTimes\]/, to: "family: []", rule: "sd-family" },
   { name: "B2 SEAM 을 비운다(파생 만들고 안 얹음)", file: "REUSE", from: /await scheduleDerived\(tid, originPieceId\)/, to: "await Promise.resolve(null)", rule: "seam" },
+  { name: "고객이 붙인 시각에 말을 안 한다(say.push 삭제)", file: "DS", from: /say\.push\(`같은 영상을 올리는 다른 곳과/, to: "void (`같은 영상을 올리는 다른 곳과", rule: "tell-keep" },
   { name: "줍는 SQL 에서 waitOrigin 조건을 뺀다", file: "DS", from: / AND COALESCE\(meta->'reuse'->>'waitOrigin', ''\) <> 'true'/, to: "", rule: "wait-origin" },
   { name: "발행 크론이 본문을 다시 안 싣는다(`p.body` 삭제)", file: "PUB", from: /p\.scheduled_for, p\.body, /, to: "p.scheduled_for, ", rule: "takedown-body" },
 ];

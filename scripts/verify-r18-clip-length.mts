@@ -15,6 +15,7 @@
  *        ㉰ `publish()` 가 `enqueueRunnerJob`·커넥터·계정 검사보다 **앞**에서 잰다 · 발행 잡을 쌓는 곳은 `publish()` 한 곳뿐
  *        ㉱ 배경 함수가 그 경우를 «직접 올리기»가 아니라 `failed` 로 둔다(직접 올려도 안 올라간다)
  *     ⑤ 🔴 소스 변이 4종 — `video-fit.ts` **사본**(임시 폴더)을 틀어 ①표가 우는가 · 경로 변이 3종 — ④가 우는가
+ *     ⑥ 발행 멱등(트리거 §6-2) — `publish()` ① 이 여전히 맨 앞 · 배경 함수가 그 길로만 간다 · 파생이 기록·컨테이너 흔적 없이 태어난다(B `derivedMetaOf` 실행)
  *   종료코드: 0 = 지켜진다 · 1 = 어긋난다 · 2 = 못 쟀다.
  */
 import { readFileSync, existsSync, readdirSync, statSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -207,6 +208,41 @@ const SRC_MUTANTS: { name: string; from: RegExp; to: string }[] = [
     if (v === false) pathCaught++;
   }
   counts["변이"] = `소스 ${srcCaught}/${SRC_MUTANTS.length} · 경로 ${pathCaught}/3 물었다`;
+}
+
+/* ═══ ⑥ 발행 멱등 — 파생도 **제 기록**으로 멱등이다(트리거 §6-2 · CLAUDE §4.7) ═══
+   🔴 멱등 **장치**는 원래 있었다(`publish()` ① — `external_url`/`channel_ref` 가 있으면 아무것도 안 한다). R18 에서 새로 생긴 위험은 둘이다:
+     ㉠ 파생이 원본의 기록을 **베껴** 태어나면 ①이 «이미 나갔다»로 읽고 **조용히 영영 안 나간다**
+     ㉡ 파생이 원본의 **컨테이너 흔적**(`fb*`·`ig*`·`tt*` · 처리 대기 재개용)을 베끼면 커넥터가 **원본의 컨테이너를 다시 게시**하려 든다
+   그래서 «장치가 그대로 앞에 있나» + «파생이 깨끗하게 태어나나»를 같이 잰다. */
+say("■ ⑥ 발행 멱등 — 장치는 그대로 맨 앞 · 파생은 기록·흔적 없이 태어난다");
+let idemCaught = 0;
+{
+  const IDEM_RULES: { key: string; name: string; judge: (s: Src) => boolean | null }[] = [
+    { key: "idem-first", name: "`publish()` 의 멱등 검사(`externalUrl || channelRef`)가 길이 검사·러너 잡·커넥터보다 **앞**",
+      judge: (s) => { const b = pub(s); if (b == null) return null; const idem = /if \(piece\.externalUrl \|\| piece\.channelRef\)/;
+        return (orderIn(b, idem, /videoFitsChannel\(/)?.ok ?? false) && (orderIn(b, idem, /enqueueRunnerJob\(/)?.ok ?? false) && (orderIn(b, idem, /API_CONNECTORS\[/)?.ok ?? false); } },
+    { key: "idem-bg", name: "영상 배경 함수는 커넥터를 **직접** 안 부르고 `publishPieceById`(→ `publish()` ①)로만 간다",
+      judge: (s) => /publishPieceById\(/.test(s.BG) && !/publish(Youtube|Reels|ToTiktok|FacebookReels|ThreadsVideo)\w*\(/.test(s.BG) },
+    { key: "idem-born", name: "B 파생 INSERT 가 `external_url`·`channel_ref`·`published_at` 을 **안 베낀다**",
+      judge: (s) => { const b = blockOf(s.REUSE, "INSERT INTO pieces (tenant_id, origin, brief_id", [")\n", ") "], { maxChars: 600 })?.body; return b == null ? null : !/external_url|channel_ref|published_at/.test(b); } },
+  ];
+  if (SRC) for (const r of IDEM_RULES) { const v = r.judge(SRC); if (v === null) T.unmeasured(`⑥ ${r.name}`, "덩이를 못 잡았다"); else T.ok(`⑥ ${r.name}`, v); }
+  /* 컨테이너 흔적 — B `derivedMetaOf` 를 **실제로 돌린다**(글자 대조가 아니다). */
+  const { derivedMetaOf } = await import("../lib/video/reuse");
+  const dirty = { fbContainerId: "c1", igContainerId: "c2", ttPublishId: "p1", thChainCut: { n: 1 }, publishAttempts: 2, publishFail: { reason: "x" }, ytVideoId: "v1",
+    render: { scenes: [] }, youtube: { title: "t" }, disclosure: "광고", affiliate: { url: "u" } };
+  const clean = derivedMetaOf(dirty, { originPieceId: 1, originChannel: "youtube_shorts", seconds: 30, at: "2026-09-26T00:00:00Z" }, null) as Record<string, unknown>;
+  const leaked = Object.keys(clean).filter((k) => /^(fb|ig|tt|th|yt|publish)[A-Z]/.test(k));
+  T.ok("⑥ 파생 meta 에 원본의 발행·컨테이너 흔적(fb*·ig*·tt*·th*·yt*·publish*) 0개", leaked.length === 0, leaked.join(","));
+  T.ok("⑥ 대조군 — 올리는 데 쓰는 것(render·youtube·disclosure·affiliate)은 남는다(깨끗하게 하려다 영상을 비우지 않는다)", ["render", "youtube", "disclosure", "affiliate"].every((k) => k in clean));
+  /* 변이 — 멱등 검사를 지우면 idem-first 가 우는가. */
+  if (SRC) {
+    const from = /if \(piece\.externalUrl \|\| piece\.channelRef\)/;
+    if (!from.test(SRC.IDX)) T.unmeasured("⑥ 변이 «멱등 검사 삭제»", "변이할 글자가 없다");
+    else { const v = IDEM_RULES[0].judge({ ...SRC, IDX: SRC.IDX.replace(from, "if (false)") }); T.ok("⑥ 변이 «멱등 검사 삭제» → idem-first 가 운다", v === false, `판정 ${v}`); if (v === false) idemCaught++; }
+  }
+  counts["멱등"] = `규칙 ${IDEM_RULES.length} · derivedMetaOf 실행 1 · 변이 ${idemCaught}/1`;
 }
 
 const code = T.done("verify-r18-clip-length");

@@ -477,7 +477,20 @@ export async function restaggerFamily(tid: number, anyPieceId: number, opts: { k
   const keep = n(opts.keepPieceId);
   const movable = new Set(rows.filter((r) => n(r.origin_piece_id) === originId && String(r.status) === "scheduled" && !!r.scheduled_for && n(r.id) !== keep).map((r) => n(r.id)));
   const reseat = [...new Set(clashes.flatMap((c) => [c.a, c.b]))].filter((id) => movable.has(id));
-  if (!reseat.length) return { moved: 0, say: [] };
-  const r = await scheduleDerived(tid, originId, { now: opts.now, reseat });
-  return { moved: r.placed.length, say: r.waiting.map((w) => w.say) };
+  const r = reseat.length ? await scheduleDerived(tid, originId, { now: opts.now, reseat }) : null;
+  const say = (r?.waiting ?? []).map((w) => w.say);
+  /* 🔴 고객이 **직접 고른 시각**이 형제와 붙어 있으면 — 그건 안 옮긴다(고객 것이다). 대신 **말한다**(§9 ① · 막지 않는다).
+     원본끼리 붙은 경우(원본은 우리가 안 옮긴다)도 여기서 같이 말한다. §3 말투 — ①사실 ②어떻게 하면 되는지 · 겁주지 않는다. */
+  if (keep) {
+    const after = await q(sql`SELECT id, status, scheduled_for, published_at FROM pieces WHERE tenant_id = ${tid} AND (id = ${originId} OR origin_piece_id = ${originId})`);
+    const t2 = after.filter((x) => !(NOT_GOING as readonly string[]).includes(String(x.status)))
+      .map((x) => ({ pieceId: n(x.id), at: utcDate(x.published_at) ?? utcDate(x.scheduled_for) }))
+      .filter((x): x is { pieceId: number; at: Date } => !!x.at);
+    const mine = staggerClashes(t2).filter((c) => c.a === keep || c.b === keep);
+    if (mine.length) {
+      const g = Math.min(...mine.map((c) => c.gapMin));
+      say.push(`같은 영상을 올리는 다른 곳과 ${Math.round(g)}분 떨어져 있어요. ${DERIVED_STAGGER_MIN}분 이상 띄워 두면 더 자연스러워요 — 이대로 두셔도 그 시각에 올라가요.`);
+    }
+  }
+  return { moved: r?.placed.length ?? 0, say };
 }
