@@ -34,11 +34,11 @@ async function seedAccount(tid: number, channel: string, handle: string, persona
   const [a] = await q(sql`INSERT INTO accounts (tenant_id, channel, handle, auth_method, status, persona_id) VALUES (${tid}, ${channel}, ${handle}, 'oauth', 'active', ${personaId}) RETURNING id`);
   return n(a?.id);
 }
-async function seedOrigin(tid: number, accountId: number, seconds: number, key: string, briefId: number | null = null): Promise<number> {
+async function seedOrigin(tid: number, accountId: number, seconds: number, key: string, briefId: number | null = null, channel = "youtube_shorts"): Promise<number> {
   const meta = { stage: "done", video: { format: "graphic", seconds }, render: { scenes: [] }, youtube: { title: "실증", tags: [] }, coinItem: `video_${seconds}`, regenCount: 0,
     chainLock: null, chainStage: "done", renderJobId: 1 };
   const [p] = await q(sql`INSERT INTO pieces (tenant_id, account_id, channel, kind, format, title, body, blocks, meta, status, gate_report, scheduled_for, brief_id)
-    VALUES (${tid}, ${accountId}, 'youtube_shorts', 'video', 'story', ${"[R18 실증] 원본 영상"}, ${"설명란"}, ${jsonb([])}, ${jsonb({ ...meta, key: "youtube_shorts:" + accountId })}, 'in_review',
+    VALUES (${tid}, ${accountId}, ${channel}, 'video', 'story', ${"[R18 실증] 원본 영상"}, ${"설명란"}, ${jsonb([])}, ${jsonb({ ...meta, key: channel + ":" + accountId })}, 'in_review',
             ${jsonb({ ok: true, checks: [], rewritten: false, judge: { grade: "OK", pass: true, axes: [] } })}, NOW() + interval '2 hours', ${briefId}) RETURNING id`);
   const id = n(p?.id);
   await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tid}, ${id}, 'video', ${key}, ${jsonb({ durationMs: seconds * 1000, bytes: 999999 })}, 0)`);
@@ -150,6 +150,27 @@ async function main() {
     const ytl = await remakeVideoFor(tA, origin, "youtube_long", null);
     ok("🔴 대조군 · 후보 밖(youtube_long)은 없는 길", !ytl.ok && ytl.step === "channel");
 
+    console.log("\n④-c 🔴 30초 판의 «같이 갈 곳»은 고객이 고른 채널만(리뷰 ④) · 이미 덮인 채널은 따로 안 만든다(리뷰 ⑥ · 돈)");
+    /* 90초 릴스 원본 — 쇼츠(60)·클립(30)이 길이로 빠진다 */
+    const accIg = n((await q(sql`SELECT id FROM accounts WHERE tenant_id = ${tA} AND channel = 'reels' LIMIT 1`))[0]?.id);
+    const spec90 = { ...spec, key: `reels:${accIg}`, channel: "reels", accountId: accIg, accountHandle: "ig_a", video: { ...spec.video, seconds: 90, cuts: 13 } };
+    const mk90 = async (picked: string[]) => {
+      const [b9] = await q(sql`INSERT INTO briefs (tenant_id, topic_id, goal, pieces, reasons, mode, status, coin_cost) VALUES (${tA}, ${n(tp?.id)}, 'adsense', ${jsonb([spec90])}, ${jsonb([])}, 'reviewed', 'confirmed', 40) RETURNING id`);
+      const id9 = await seedOrigin(tA, accIg, 90, `autocreate/${tA}/r18/reels90-${picked.length}.mp4`, n(b9?.id), "reels");
+      await q(sql`UPDATE pieces SET status = 'scheduled', topic_id = ${n(tp?.id)}, meta = meta || ${jsonb({ reuseChannels: picked })} WHERE id = ${id9}`);
+      return id9;
+    };
+    const o90a = await mk90(["naver_clip", "tiktok"]);   // 쇼츠는 안 골랐다
+    const ra = await remakeVideoFor(tA, o90a, "naver_clip", null);
+    ok("고른 적 없는 유튜브 쇼츠엔 저절로 안 간다 — alsoTo []", ra.ok && Array.isArray(ra.alsoTo) && ra.alsoTo.length === 0, JSON.stringify(ra.ok ? ra.alsoTo : ra).slice(0, 120));
+    const o90b = await mk90(["naver_clip", "youtube_shorts"]);   // 둘 다 골랐다
+    const rb = await remakeVideoFor(tA, o90b, "naver_clip", null);
+    ok("둘 다 골랐으면 클립용 30초 판이 쇼츠도 덮는다 — alsoTo [youtube_shorts]", rb.ok && JSON.stringify(rb.alsoTo) === JSON.stringify(["youtube_shorts"]), JSON.stringify(rb.ok ? rb.alsoTo : rb).slice(0, 120));
+    if (rb.ok) await q(sql`UPDATE pieces SET status = 'in_review' WHERE id = ${rb.pieceIds[0]}`);   // 만들어졌다고 친다(생성은 막아 뒀다 — 실패한 판은 덮지 않는 게 맞다)
+    const cB = await consumeRows(tA);
+    const rc = await remakeVideoFor(tA, o90b, "youtube_shorts", null);
+    ok("🔴 그 뒤 «쇼츠용» 을 눌러도 안 만든다(step covered · 코인 0 · 유튜브 두 번 0)", !rc.ok && rc.step === "covered" && (await consumeRows(tA)) === cB, rc.ok ? "만들었다" : rc.error);
+
     console.log("\n⑤ 원본 다시 만들기 → 파생 멈춤 → 다시 승인하면 새 영상으로 갈아 끼움");
     /* B2 가 자리를 박은 뒤라고 친다 — 파생 하나에 자리(시각 있음)를 붙여 두고, 멈출 때 그 시각이 비는지 본다(B2 요청). */
     const [sl] = await q(sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, account_id, piece_id, publish_at, status, origin)
@@ -163,9 +184,12 @@ async function main() {
     // 원본이 새로 구워졌다고 친다(finalizeRender 가 하는 일: 옛 video 행을 지우고 새 key)
     await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tA} AND piece_id = ${origin} AND kind IN ('video','thumb')`);
     await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tA}, ${origin}, 'video', ${`autocreate/${tA}/r18/origin-v2.mp4`}, ${jsonb({ durationMs: 60000 })}, 0)`);
+    /* 🔴 [리뷰 ②] 그 사이 고객이 **설정을 끄고** 이 글의 고른 채널도 없다고 친다 — 종전엔 멈춘 파생이 영영 갇혔다 */
+    await saveVideoReuse(tA, { on: false });
+    await q(sql`UPDATE pieces SET meta = meta - 'reuseChannels' WHERE id = ${origin}`);
     const re = await deriveVideoPieces(tA, origin);
     const nk = await q(sql`SELECT DISTINCT r2_key FROM piece_assets WHERE tenant_id = ${tA} AND kind = 'video' AND piece_id IN (${sql.join(dIds.map((i) => sql`${i}`), sql`, `)})`);
-    ok("🔴 파생이 새 영상(v2)을 가리킨다 — 옛 영상이 안 나간다", re.ok && nk.length === 1 && String(nk[0].r2_key).endsWith("origin-v2.mp4"), nk.map((k) => k.r2_key).join());
+    ok("🔴 파생이 새 영상(v2)을 가리킨다 — 옛 영상이 안 나간다(설정을 꺼도 · 리뷰 ②)", re.ok && nk.length === 1 && String(nk[0].r2_key).endsWith("origin-v2.mp4"), nk.map((k) => k.r2_key).join());
     const w = await q(sql`SELECT COUNT(*)::int AS c FROM pieces WHERE tenant_id = ${tA} AND origin_piece_id = ${origin} AND (meta->'reuse'->>'waitOrigin') = 'true'`);
     ok("갈아 끼운 뒤 waitOrigin 이 풀린다", n(w[0]?.c) === 0);
 
@@ -180,6 +204,18 @@ async function main() {
     const svD = await sameVideoOf(tA, dIds[0]);
     ok("같은 영상 가족(파생에서) — 원본이 예약돼 있다고 말한다", svD?.unsent.length === 1 && svD.unsent[0].pieceId === origin, svD?.line ?? "null");
     ok("🔴 말투 — «실패·오류·불가» 0", !/실패|오류|불가/.test(`${svO?.line}${svD?.line}`));
+    /* 🔴 [리뷰 ③] 버린 원본을 **다시 만들어** 승인하면 같이 버렸던 파생도 되살아난다(유니크 때문에 새로 못 만들고, 종전엔 «갔다»고만 적혔다) */
+    await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tA} AND piece_id = ${origin} AND kind = 'video'`);
+    await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, meta, sort) VALUES (${tA}, ${origin}, 'video', ${`autocreate/${tA}/r18/origin-v3.mp4`}, ${jsonb({ durationMs: 60000 })}, 0)`);
+    const rv = await deriveVideoPieces(tA, origin);
+    const rvRows = await q(sql`SELECT p.id, p.status, a.r2_key FROM pieces p JOIN piece_assets a ON a.piece_id = p.id AND a.kind = 'video' WHERE p.tenant_id = ${tA} AND p.id IN (${dIds[1]}, ${dIds[2]}) ORDER BY p.id`);
+    ok("같이 버렸던 둘이 scheduled 로 되살아나 새 영상(v3)을 가리킨다", rv.ok && rvRows.length === 2 && rvRows.every((r) => r.status === "scheduled" && String(r.r2_key).endsWith("origin-v3.mp4")), rvRows.map((r) => `${r.id}:${r.status}:${String(r.r2_key).split("/").pop()}`).join(" "));
+    const vrow = n((await q(sql`SELECT COUNT(*)::int AS c FROM piece_assets WHERE tenant_id = ${tA} AND piece_id = ${dIds[1]} AND kind = 'video'`))[0]?.c);
+    ok("🔴 [리뷰 ⑦] 한 번 더 불러도 video 행은 하나(되살리기는 한 문장이 곧 잡기)", (await deriveVideoPieces(tA, origin)).ok && vrow === 1 && n((await q(sql`SELECT COUNT(*)::int AS c FROM piece_assets WHERE tenant_id = ${tA} AND piece_id = ${dIds[1]} AND kind = 'video'`))[0]?.c) === 1);
+    await q(sql`UPDATE pieces SET status = 'rejected' WHERE id = ${dIds[2]}`);   // 고객이 이 파생만 따로 버렸다고 친다(표식 없음)
+    await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ reuseChannels: ["reels", "tiktok", "facebook_reels"] })} WHERE id = ${origin}`);
+    const rv2 = await deriveVideoPieces(tA, origin);
+    ok("🔴 대조군 · 따로 버린 파생은 되살리지도 «갔다»고 적지도 않는다", rv2.ok && !rv2.existing.some((e) => e.pieceId === dIds[2]) && (await q(sql`SELECT status FROM pieces WHERE id = ${dIds[2]}`))[0]?.status === "rejected");
 
     console.log("\n⑦ 안 물은 집 — 승인 때 알림 한 번(모르면 안 켠다)");
     const accB = await seedAccount(tB, "youtube_shorts", "yt_b");

@@ -623,7 +623,8 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
   if (!b) return { ok: false, step: "not_found", error: "지시서를 찾을 수 없어요." };
   if (String(b.status) !== "proposed") {
     // 재확정 = 멱등: 이미 만든 piece 들을 돌려준다(코인 재차감 0)
-    const ex = await q(sql`SELECT id FROM pieces WHERE tenant_id = ${tid} AND brief_id = ${briefId} ORDER BY id`);
+    /* [R18 · 리뷰 ⑧] 파생은 원본의 brief_id 를 물려받는다 — 재확정의 «그 지시서로 만든 글»에 섞이지 않게 뺀다. */
+    const ex = await q(sql`SELECT id FROM pieces WHERE tenant_id = ${tid} AND brief_id = ${briefId} AND origin_piece_id IS NULL ORDER BY id`);
     const bal = await balance(tid);
     return { ok: true, briefId, pieceIds: ex.map((r) => n(r.id)), coinsCharged: 0, coinsLeft: bal.balance };
   }
@@ -809,7 +810,7 @@ export async function confirm(tid: number, briefId: number, patches: PieceSpecPa
  */
 export async function remakeVideoFor(tid: number, originPieceId: number, channel: string, actorId: number | null):
   Promise<(ConfirmResult & { ok: true; seconds?: number; alsoTo?: string[]; already?: boolean }) | { ok: false; step: string; error: string; need?: number; have?: number }> {
-  const { pieceSecondsOf, reuseTargetsFor, reuseFit, VIDEO_REUSE_TARGETS } = await import("./video/reuse");
+  const { pieceSecondsOf, reuseTargetsFor, reuseFit, VIDEO_REUSE_TARGETS, loadVideoReuse } = await import("./video/reuse");
   const [o] = await q(sql`SELECT * FROM pieces WHERE tenant_id = ${tid} AND id = ${originPieceId} AND kind = 'video'`);
   if (!o) return { ok: false, step: "not_found", error: "그 영상을 찾지 못했어요." };
   if (o.origin_piece_id != null && n(o.origin_piece_id)) return { ok: false, step: "is_derived", error: "이 영상은 다른 영상에서 왔어요 — 원본에서 골라 주세요." };
@@ -824,6 +825,20 @@ export async function remakeVideoFor(tid: number, originPieceId: number, channel
   /* 멱등 — 이 원본의 이 채널 판이 이미 있으면(버린 것 빼고) 그대로 돌려준다 */
   const [dup] = await q(sql`SELECT id FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND channel = ${target} AND status NOT IN ('rejected','failed') ORDER BY id DESC LIMIT 1`);
   if (dup) { const bal = await balance(tid); return { ok: true, briefId: 0, pieceIds: [n(dup.id)], coinsCharged: 0, coinsLeft: bal.balance, already: true }; }
+  /* 🔴 [리뷰 ⑥] **다른 채널용으로 새로 만든 판이 이 채널도 덮고 있으면** 따로 만들지 않는다 — 예: 클립용 30초 판이 쇼츠에도 같이 가기로 돼 있는데
+     쇼츠용을 또 만들면 **같은 소재 영상이 유튜브에 두 번**(가족당 유튜브 1건 · 쿼터)이고 코인도 두 번이다.
+     «덮는다» = 그 판의 `reuseChannels`(승인 때 갈 곳) + 이미 만든 그 판의 파생 채널. */
+  const remakes = await q(sql`SELECT id, channel, meta->'reuseChannels' AS rc FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND status NOT IN ('rejected','failed')`);
+  const remakeIds = remakes.map((x) => n(x.id));
+  const derivedOfRemakes = remakeIds.length ? await q(sql`SELECT channel, origin_piece_id FROM pieces WHERE tenant_id = ${tid} AND origin_piece_id IN (${sql.join(remakeIds.map((x) => sql`${x}`), sql`, `)}) AND status <> 'rejected'`) : [];
+  const coveredBy = new Map<string, string>();   // 채널 → 그 채널을 덮는 판의 채널
+  for (const x of remakes) for (const c of (Array.isArray(x.rc) ? (x.rc as unknown[]).map(String) : [])) coveredBy.set(c, String(x.channel));
+  for (const d of derivedOfRemakes) { const src = remakes.find((x) => n(x.id) === n(d.origin_piece_id)); if (src) coveredBy.set(String(d.channel), String(src.channel)); }
+  const cover = coveredBy.get(target);
+  if (cover) {
+    const coverLabel = skipped.find((x) => x.channel === cover)?.label ?? cover;
+    return { ok: false, step: "covered", error: `${coverLabel}용으로 새로 만든 영상이 ${mine.label}에도 같이 올라가요 — 따로 만들 필요가 없어요.` };
+  }
 
   /* 쓸 수 있는 계정 — 🔴 `lib/video/reuse.ts usableAccounts` 와 같은 규칙(removed · suspended · disconnected 제외) */
   const accs = (await listAccounts(tid)).filter((a) => a.channel === target && a.status !== "suspended" && a.status !== "disconnected" && a.lastErrorKind !== "removed");
@@ -882,9 +897,13 @@ export async function remakeVideoFor(tid: number, originPieceId: number, channel
   /* 잡은 자리에 판 id 를 붙인다 — 이제부터 이 채널 판의 멱등 정본은 이 칸이다(위 `remakeOf` 검사는 차례로 누른 경우의 빠른 길). */
   await q(sql`UPDATE pieces SET meta = jsonb_set(meta, '{remakeClaim}', COALESCE(meta->'remakeClaim', '{}'::jsonb) || jsonb_build_object(${target}::text, ${jsonb({ at: claimAt, pieceId: r.pieceIds[0] ?? null })})), updated_at = NOW()
     WHERE tenant_id = ${tid} AND id = ${originPieceId}`);
-  /* 이 새 영상이 **같이 덮을** 다른 «빠진» 채널 — 새 길이로 들어가고, 아직 그 채널 판이 없는 것(없으면 []). */
-  const covered = new Set((await q(sql`SELECT channel FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND status NOT IN ('rejected','failed')`)).map((x) => String(x.channel)));
-  const alsoTo = skipped.filter((x) => x.why === "too_long" && x.channel !== target && x.maxSeconds >= mine.remake!.seconds && !covered.has(x.channel)).map((x) => x.channel);
+  /* 이 새 영상이 **같이 덮을** 다른 «빠진» 채널 — 새 길이로 들어가고, 아직 그 채널 판이 없고(다른 판이 덮지도 않고),
+     🔴 [리뷰 ④] **고객이 원했던 채널**인 것만: 원본에 고른 채널(`meta.reuseChannels`) → 없으면 설정(켜져 있을 때). 고른 적 없는 유튜브에 저절로 가지 않게.
+     (새로 만드는 이 채널 자체는 고객이 방금 눌러 고른 것이다.) */
+  const covered = new Set([...(await q(sql`SELECT channel FROM pieces WHERE tenant_id = ${tid} AND (meta->>'remakeOf') = ${String(originPieceId)} AND status NOT IN ('rejected','failed')`)).map((x) => String(x.channel)), ...coveredBy.keys()]);
+  const vr = await loadVideoReuse(tid);
+  const wanted = new Set(Array.isArray(om.reuseChannels) ? (om.reuseChannels as unknown[]).map(String) : vr.on ? vr.channels : []);
+  const alsoTo = skipped.filter((x) => x.why === "too_long" && x.channel !== target && x.maxSeconds >= mine.remake!.seconds && !covered.has(x.channel) && wanted.has(x.channel)).map((x) => x.channel);
   await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ remakeOf: originPieceId, reuseChannels: alsoTo })}, updated_at = NOW()
     WHERE tenant_id = ${tid} AND id IN (${sql.join(r.pieceIds.map((x) => sql`${x}`), sql`, `)})`);
   await writeAudit({ tenantId: tid, action: "video_reuse_remake", actorType: "user", ...(actorId ? { actorId } : {}), target: `piece:${originPieceId}`,

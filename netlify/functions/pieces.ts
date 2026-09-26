@@ -400,7 +400,7 @@ export default async (req: Request): Promise<Response> => {
       return json({ ok: true, videoReuse: await videoReuseView(tid, r.setting), reuse: view,
         created: r.derive?.ok ? r.derive.created : [], skip,
         /* 원본이 아직 못 올라가는 상태(실패·버림)면 파생을 못 만든다 — 그 사실 한 줄(설정은 이미 저장됐다). */
-        ...(r.derive && !r.derive.ok ? { note: r.derive.error } : {}) });
+        ...(r.derive && !r.derive.ok ? { note: r.derive.error } : r.note ? { note: r.note } : {}) });
     }
     /* ── [R18 · 트리거 §6-6] «30초로 다시 만들 길» — 길이가 안 맞아 빠진 채널용으로 **같은 소재** 영상을 새로 만든다.
        🔴 새 영상이라 **코인이 새로 든다**(값은 누르기 전에 `reuse.fit.skip[].remake.coins` 로 보여 준다). 코인·자리·생성은 `confirm` 한 길.

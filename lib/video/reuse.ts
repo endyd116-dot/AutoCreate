@@ -282,7 +282,9 @@ export async function pieceReuseView(tid: number, p: Row): Promise<PieceReuseVie
  *   🔴 코인 흔적(`coinItem`·`coinPlanned`·`regenCount`·`refunded`)도 뺀다 — 파생은 코인과 무관하다(§4.7 승계 무료).
  */
 /* 🔴 `renderedAt` 은 접두 규칙(`render[A-Z]`)을 빠져나간다(소문자 e) — 자(`verify-r18-reuse` ⑥)가 잡아서 여기 적었다. */
-const STRIP_EXACT = new Set(["stage", "renderedAt", "failReason", "refunded", "coinItem", "coinPlanned", "regenCount", "rejectReason", "reuseChannels", "reuseResult", "reuse", "scheduleAt"]);
+const STRIP_EXACT = new Set(["stage", "renderedAt", "failReason", "refunded", "coinItem", "coinPlanned", "regenCount", "rejectReason", "reuseChannels", "reuseResult", "reuse", "scheduleAt",
+  /* [리뷰 ⑤] 원본(또는 30초 판)의 «새로 만들기» 장부 — 파생이 들고 가면 «이 파생이 30초 판이다»로 잘못 읽힌다 */
+  "remakeClaim", "remakeOf", "reuseWaiting"]);
 const STRIP_PREFIX = /^(chain|render|publish|fb|tt|th|ig|yt)[A-Z]/;
 export function derivedMetaOf(originMeta: unknown, reuse: { originPieceId: number; originChannel: string; seconds: VideoSecondsLit; at: string }, scheduleAt: string | null): Row {
   const src = (originMeta && typeof originMeta === "object" ? originMeta : {}) as Row;
@@ -300,13 +302,17 @@ const UNSENT_DERIVED: readonly string[] = ["scheduled", "awaiting_manual"];
  *   · `regenerate` → 시각만 푼다(`scheduled_for NULL` · 상태는 `scheduled` 그대로) + `meta.reuse.waitOrigin`.
  *                    원본이 다시 승인되면 `deriveVideoPieces` 가 **새 영상으로 갈아 끼우고** B2 가 자리를 다시 잡는다.
  *                    🔴 시각이 없으면 발행 크론이 안 줍는다(`publisher.ts:71`) — 옛 영상이 먼저 나가는 틈이 없다.
+ *                    🔴 [리뷰 ①] 그러니 파생을 **줍는** 쪽(B2 크론)은 `waitOrigin` 인 파생을 빼야 한다 — 아래 SEAM 주석의 줍는 조건만 보면
+ *                       다시 만드는 중인 파생도 걸린다. B2 `UNPLACED_SQL` 이 `waitOrigin ≠ true` 를 이미 건다(2026-09-26 B2 확인).
  *   반환: 멈춘 파생 id. 파생이 없거나 원본이 아니면 [].
  */
 export async function holdDerivedFor(tid: number, originPieceId: number, why: "regenerate" | "reject"): Promise<number[]> {
   const inList = sql.join(UNSENT_DERIVED.map((x) => sql`${x}`), sql`, `);
   if (why === "reject") {
+    /* 🔴 [리뷰 ③] `reuse.withOrigin` 을 같이 찍는다 — 고객이 버린 원본을 **다시 만들어** 승인하면 같이 버렸던 파생을 되살릴 표식이다.
+       안 찍으면 되살릴 길이 없다: 유니크 `(origin_piece_id, channel)` 때문에 새로 만들 수도 없고, 원본은 «다른 곳에도 갔다»고 적는데 실제로는 한 곳도 안 간다. */
     const rows = await q(sql`UPDATE pieces SET status = 'rejected', scheduled_for = NULL,
-        meta = meta || ${jsonb({ rejectReason: "원본 영상을 버려서 같이 내렸어요" })}, updated_at = NOW()
+        meta = meta || ${jsonb({ rejectReason: "원본 영상을 버려서 같이 내렸어요" })} || jsonb_build_object('reuse', COALESCE(meta->'reuse', '{}'::jsonb) || ${jsonb({ withOrigin: true })}), updated_at = NOW()
       WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId} AND status IN (${inList}) RETURNING id, slot_id`);
     const slotIds = rows.map((r) => n(r.slot_id)).filter(Boolean);
     if (slotIds.length) await q(sql`UPDATE slots SET status = 'rejected', note = ${"원본 영상을 버려서 같이 내렸어요"}, updated_at = NOW()
@@ -326,20 +332,36 @@ export async function holdDerivedFor(tid: number, originPieceId: number, why: "r
   return rows.map((r) => n(r.id));
 }
 
-/** `waitOrigin` 인 파생을 원본의 **지금 영상**으로 갈아 끼운다. 갈아 끼웠으면 true(아니면 손대지 않고 false). */
-async function refreshHeldDerived(tid: number, derivedId: number, originPieceId: number, originMeta: Row, reuse: { originPieceId: number; originChannel: string; seconds: VideoSecondsLit; at: string }, scheduleAt: string | null): Promise<boolean> {
-  const [d] = await q(sql`SELECT status, meta FROM pieces WHERE tenant_id = ${tid} AND id = ${derivedId}`);
-  const dr = ((d?.meta as Row | null)?.reuse ?? {}) as Row;
-  if (!d || dr.waitOrigin !== true || !UNSENT_DERIVED.includes(String(d.status))) return false;
+/**
+ * 멈춰 둔 파생을 원본의 **지금 영상**으로 되살린다 — `waitOrigin`(다시 만드는 중이라 멈춤) · `withOrigin`(원본과 같이 버림).
+ *   🔴 [리뷰 ②] **설정·고른 채널과 무관하게** 돈다 — 종전엔 `fit.go` 안의 채널만 갈아 끼워서, 그 사이 설정을 끄거나 채널을 빼거나
+ *      계정이 끊기면 멈춘 파생이 **영영 `waitOrigin` 에 갇혔다**(옛 `r2_key` 를 든 채). 멈춘 것은 전에 고객이 이미 고른 것이다 — 다시 만든 것은 «그만»이 아니다.
+ *   🔴 [리뷰 ⑦] **한 문장이 곧 잡기다** — 표식을 조건으로 걸고 같은 문장에서 지운다. 사람 승인과 마감 크론이 겹쳐도 둘째는 0행이라
+ *      파일 행(`piece_assets`)을 두 번 갈아 끼우지 않는다(종전엔 DELETE→INSERT 가 둘 다 돌아 video 행이 둘이 될 수 있었다).
+ *   반환: 되살린 파생(자리는 B2 SEAM 이 다시 잡는다).
+ */
+async function reviveHeldFamily(tid: number, originPieceId: number, originMeta: Row, reuse: { originPieceId: number; originChannel: string; seconds: VideoSecondsLit; at: string }, scheduleAt: string | null): Promise<DeriveCreated[]> {
   const dmeta = derivedMetaOf(originMeta, reuse, scheduleAt);
-  await q(sql`UPDATE pieces d SET title = o.title, body = o.body, blocks = o.blocks, gate_report = o.gate_report, format = o.format,
+  const inList = sql.join(UNSENT_DERIVED.map((x) => sql`${x}`), sql`, `);
+  const rows = await q(sql`UPDATE pieces d SET title = o.title, body = o.body, blocks = o.blocks, gate_report = o.gate_report, format = o.format,
       meta = ${jsonb(dmeta)}, status = 'scheduled', scheduled_for = NULL, updated_at = NOW()
-    FROM pieces o WHERE d.tenant_id = ${tid} AND d.id = ${derivedId} AND o.tenant_id = ${tid} AND o.id = ${originPieceId}`);
-  await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${derivedId} AND kind IN ('video','thumb')`);
-  await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort)
-    SELECT tenant_id, ${derivedId}, kind, r2_key, caption, COALESCE(meta, '{}'::jsonb) || ${jsonb({ reusedFrom: originPieceId })}, sort
-      FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${originPieceId} AND kind IN ('video','thumb') ORDER BY sort, id`);
-  return true;
+    FROM pieces o
+    WHERE d.tenant_id = ${tid} AND d.origin_piece_id = ${originPieceId} AND o.tenant_id = ${tid} AND o.id = ${originPieceId}
+      AND ((d.status IN (${inList}) AND (d.meta->'reuse'->>'waitOrigin') = 'true')
+        OR (d.status = 'rejected' AND (d.meta->'reuse'->>'withOrigin') = 'true'))
+    RETURNING d.id, d.channel, d.account_id, d.slot_id`);
+  for (const r of rows) {
+    await q(sql`DELETE FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${n(r.id)} AND kind IN ('video','thumb')`);
+    await q(sql`INSERT INTO piece_assets (tenant_id, piece_id, kind, r2_key, caption, meta, sort)
+      SELECT tenant_id, ${n(r.id)}, kind, r2_key, caption, COALESCE(meta, '{}'::jsonb) || ${jsonb({ reusedFrom: originPieceId })}, sort
+        FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${originPieceId} AND kind IN ('video','thumb') ORDER BY sort, id`);
+  }
+  /* 같이 버렸던 파생의 자리도 되살린다(시각은 비운 채 — B2 가 다시 박는다). 멈춘 쪽 자리는 이미 `scheduled` · 시각 NULL 이다. */
+  const slotIds = rows.map((r) => n(r.slot_id)).filter(Boolean);
+  if (slotIds.length) await q(sql`UPDATE slots SET status = 'scheduled', publish_at = NULL, note = ${"원본 영상을 다시 만들어 같이 올려요"}, updated_at = NOW()
+    WHERE tenant_id = ${tid} AND id IN (${sql.join(slotIds.map((x) => sql`${x}`), sql`, `)}) AND status IN ('rejected', 'scheduled')`);
+  if (rows.length) await writeAudit({ tenantId: tid, action: "video_reuse_revived", actorType: "system", target: `piece:${originPieceId}`, detail: { derived: rows.map((r) => n(r.id)) }, riskLevel: "low" });
+  return rows.map((r) => ({ pieceId: n(r.id), channel: String(r.channel), accountId: n(r.account_id) }));
 }
 
 export interface DeriveCreated { pieceId: number; channel: string; accountId: number }
@@ -364,13 +386,17 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
   const channels = opts.channels ? [...opts.channels]
     : Array.isArray(meta.reuseChannels) ? (meta.reuseChannels as unknown[]).map(String)
     : s.on ? s.channels : [];
-  if (!channels.length) return { ok: true, originPieceId, created: [], existing: [], skip: [] };
+  /* 멈춰 둔 파생이 있나(다시 만들기·같이 버림) — 있으면 채널이 비어도 되살리러 간다(리뷰 ②) */
+  const [held] = await q(sql`SELECT 1 AS x FROM pieces WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId}
+    AND ((meta->'reuse'->>'waitOrigin') = 'true' OR (status = 'rejected' AND (meta->'reuse'->>'withOrigin') = 'true')) LIMIT 1`);
+  if (!channels.length && !held) return { ok: true, originPieceId, created: [], existing: [], skip: [] };
 
   const [vid] = await q(sql`SELECT id FROM piece_assets WHERE tenant_id = ${tid} AND piece_id = ${originPieceId} AND kind = 'video' LIMIT 1`);
   if (!vid) return { ok: false, originPieceId, reason: "no_video", error: "올릴 영상 파일이 아직 없어요 — 다 만들어지면 같이 올려 드릴게요." };
 
   const originChannel = String(o.channel);
   const seconds = pieceSecondsOf(meta);
+  const revived = held ? await reviveHeldFamily(tid, originPieceId, meta, { originPieceId, originChannel, seconds, at: new Date().toISOString() }, isoOrNull(o.scheduled_for)) : [];
   const accs = await usableAccounts(tid);
   const fit = reuseFit({ originChannel, seconds, channels, connected: connectedOf(accs) });
   const [oa] = o.account_id ? await q(sql`SELECT persona_id FROM accounts WHERE tenant_id = ${tid} AND id = ${n(o.account_id)}`) : [];
@@ -378,16 +404,16 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
   const at = new Date().toISOString();
   const scheduleAt = isoOrNull(o.scheduled_for);
 
-  const have = new Map((await q(sql`SELECT id, channel, account_id FROM pieces WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId}`))
-    .map((r) => [String(r.channel), { pieceId: n(r.id), channel: String(r.channel), accountId: n(r.account_id) }]));
-  const created: DeriveCreated[] = []; const existing: DeriveCreated[] = [];
+  const have = new Map((await q(sql`SELECT id, channel, account_id, status FROM pieces WHERE tenant_id = ${tid} AND origin_piece_id = ${originPieceId}`))
+    .map((r) => [String(r.channel), { pieceId: n(r.id), channel: String(r.channel), accountId: n(r.account_id), status: String(r.status) }]));
+  const created: DeriveCreated[] = []; const existing: DeriveCreated[] = [...revived];
+  const seen = new Set(revived.map((r) => r.channel));
   for (const g of fit.go) {
+    if (seen.has(g.channel)) continue;   // 위에서 되살렸다(새 영상으로 갈아 끼움 — 원본을 다시 만든 뒤 옛 영상이 나가지 않게)
     const prev = have.get(g.channel);
     if (prev) {
-      /* 🔴 원본을 **다시 만든** 뒤라면(`holdDerivedFor("regenerate")` 가 `waitOrigin` 을 찍어 둔 파생) 새 영상으로 **갈아 끼운다** —
-         안 그러면 원본은 새 영상, 파생 세 곳은 **옛 영상**이 나간다(고객이 싫다고 다시 만든 그 영상이다). */
-      await refreshHeldDerived(tid, prev.pieceId, originPieceId, meta, { originPieceId, originChannel, seconds, at }, scheduleAt);
-      existing.push(prev);
+      /* 🔴 고객이 **그 파생만 따로** 버린 것이면(원본과 같이 버린 것은 위에서 되살렸다) 건드리지도, «갔다»고 적지도 않는다(리뷰 ③). */
+      if (prev.status !== "rejected") existing.push({ pieceId: prev.pieceId, channel: prev.channel, accountId: prev.accountId });
       continue;
     }
     const acc = pickAccount(accs.get(g.channel), personaId);
@@ -438,7 +464,7 @@ export async function deriveVideoPieces(tid: number, originPieceId: number, opts
  *   · 🔴 이번 영상에 안 맞는 채널(too_long·no_account)을 보내도 거절하지 않는다 — 설정엔 저장되고 이번엔 `skip` 으로 돌려준다(A 계약 ④).
  */
 export async function answerReuse(tid: number, originPieceId: number, body: { channels?: unknown; remember?: unknown }, actorId: number | null): Promise<
-  { ok: true; setting: VideoReuseSetting; derive: DeriveResult | null } | { ok: false; status: number; step: string; error: string }> {
+  { ok: true; setting: VideoReuseSetting; derive: DeriveResult | null; note?: string } | { ok: false; status: number; step: string; error: string }> {
   const [o] = await q(sql`SELECT id, kind, status, origin_piece_id FROM pieces WHERE tenant_id = ${tid} AND id = ${originPieceId}`);
   if (!o || String(o.kind) !== "video") return { ok: false, status: 404, step: "not_found", error: "그 영상을 찾지 못했어요." };
   if (o.origin_piece_id != null && n(o.origin_piece_id)) return { ok: false, status: 400, step: "is_derived", error: "이 영상은 다른 영상에서 왔어요 — 원본에서 골라 주세요." };
@@ -454,7 +480,10 @@ export async function answerReuse(tid: number, originPieceId: number, body: { ch
   await writeAudit({ tenantId: tid, action: "video_reuse_answer", actorType: "user", ...(actorId ? { actorId } : {}), target: `piece:${originPieceId}`,
     detail: { channels, remember, on: setting.on }, riskLevel: "low" });
   const derive = DERIVABLE_STATUSES.includes(String(o.status)) ? await deriveVideoPieces(tid, originPieceId, { channels, actorId }) : null;
-  return { ok: true, setting, derive };
+  /* [리뷰 ⑨] 원본이 지금 올라가지 않는 상태(실패·버림)면 파생도 없다 — 그 사실을 한 줄로(고른 채널은 적어 뒀다 · 다시 만들어 승인되면 같이 간다). */
+  const st = String(o.status);
+  const note = st === "failed" || st === "rejected" ? "이 영상은 지금 올라가지 않는 상태라 다른 곳에도 아직 안 올려요 — 다시 만들어 승인되면 고른 곳에 같이 올라가요." : undefined;
+  return { ok: true, setting, derive, ...(note ? { note } : {}) };
 }
 
 /* ═══════════ 승인 때(사람·마감 자동 승인 한 곳 · `approvePiece`) ═══════════ */
@@ -482,7 +511,8 @@ export async function onOriginApproved(tid: number, p: Row): Promise<DeriveResul
       }
       return null;
     }
-    if (!picked && !s.on) return null;
+    /* 설정이 꺼져 있고 이 글에 고른 것도 없어도 부른다 — 멈춰 둔 파생(다시 만들기·같이 버림)을 되살릴 몫이 있다(리뷰 ②).
+       되살릴 것도 없으면 `deriveVideoPieces` 가 곧바로 빈 결과로 돌아온다. */
     return await deriveVideoPieces(tid, id);
   } catch (e) {
     console.error("[video/reuse] 승인 뒤 파생 실패", String((e as Error)?.message ?? e).slice(0, 160));

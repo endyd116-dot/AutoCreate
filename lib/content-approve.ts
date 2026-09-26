@@ -356,7 +356,9 @@ export async function recheckVideoPiece(tid: number, p: Row): Promise<GateReport
   const [pe] = acc?.persona_id ? await q(sql`SELECT profile FROM personas WHERE id = ${n(acc.persona_id)}`) : await q(sql`SELECT profile FROM personas WHERE tenant_id = ${tid} ORDER BY id LIMIT 1`);
   const terms = personaTerms((pe?.profile || {}) as Record<string, unknown>);
   // 대본 유사도 — 같은 brief 형제 + 같은 계정 30일(글과 같은 규칙 · §1.9 «텍스트 유사도는 대본에 그대로»)
-  const others = await q(sql`SELECT id, meta FROM pieces WHERE tenant_id = ${tid} AND kind = 'video' AND id <> ${n(p.id)}
+  /* [R18 · 리뷰 ⑧] 파생(`origin_piece_id` 있음)은 **다른 영상이 아니라 복사본**이다 — 같은 지시서(brief)를 물려받아서, 빼지 않으면
+     다시 만든 원본이 **제 옛 대본**과 견줘져 «비슷해요»가 뜬다. */
+  const others = await q(sql`SELECT id, meta FROM pieces WHERE tenant_id = ${tid} AND kind = 'video' AND id <> ${n(p.id)} AND origin_piece_id IS NULL
     AND (brief_id = ${p.brief_id ? n(p.brief_id) : -1} OR (account_id = ${p.account_id ? n(p.account_id) : -1} AND created_at > NOW() - interval '30 days')) ORDER BY id DESC LIMIT 12`);
   const otherTexts = others.map((o) => {
     const om = (o.meta || {}) as Record<string, unknown>;

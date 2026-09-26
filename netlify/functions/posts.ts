@@ -72,7 +72,7 @@ export default async (req: Request): Promise<Response> => {
       const r = await retractPost(tid, postId, { reason, by: `user:${auth.user.uid}` });
       /* [R18 · B] 🔴 한 영상 여러 곳 — 이 영상을 내려도 **다른 채널의 같은 영상**은 남는다(예약된 것은 나중에 나간다).
          번지게 하지 않는다(채널마다 까닭이 다를 수 있다 — 고르는 것은 고객) · 대신 **말해 준다**(§9). 못 재면 조용히 뺀다(내리기 자체를 망치지 않게). */
-      const [pp] = r.ok || r.state === "unsupported" ? await q(sql`SELECT piece_id FROM posts WHERE tenant_id = ${tid} AND id = ${postId}`) : [];
+      const [pp] = r.ok || r.state === "unsupported" ? await q(sql`SELECT piece_id FROM posts WHERE tenant_id = ${tid} AND id = ${postId}`).catch(() => [] as Record<string, unknown>[]) : [];
       const same = pp?.piece_id ? await sameVideoOf(tid, n(pp.piece_id)).catch(() => null) : null;
       return json({ ...r, ...(same ? { sameVideo: same } : {}) }, r.ok ? 200 : r.state === "not_found" ? 404 : 409);
     }
