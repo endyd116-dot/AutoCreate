@@ -232,7 +232,7 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
     try { const ready = await navigator.serviceWorker.ready; return !!(await ready.pushManager.getSubscription()); } catch { return false; }
   };
-  UI.APP_VERSION = "2026.09.23";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
+  UI.APP_VERSION = "2026.09.26";   // 🔴 이 값은 빌드(scripts/build-pages.mjs)가 오늘(KST)로 덮어쓴다 — 손으로 고치지 않는다(여기 적힌 건 빌드 전 폴백)
 
 
   /* [R7 §3.6] 계정 슬롯 — «계정 1개 + 전용 IP» 30일권. 🔴 화면은 값을 갖지 않는다(coins·krw·days·label·desc 전부 서버 offers).
@@ -520,7 +520,29 @@
      🔴 [R12 · B r11-back] **90 을 더했다** — 릴스가 90 을 내기 시작했는데 이 사다리에 칸이 없어서 **서버가 90 이라 해도 칩이 안 떴다**.
      상한을 화면이 정하지 않는 것과, 상한까지 **오를 칸을 갖고 있는 것**은 다른 이야기다(칸이 없으면 서버 말이 화면에 못 닿는다). */
   UI.VSECONDS = [15, 30, 60, 90];
-  UI.VSTAGE = [["script", "대본"], ["tts", "목소리"], ["clips", "장면"], ["render", "합성"], ["judging", "검사"], ["done", "완료"]];
+  /* ═══ [R18 · A] 한 번 만들어 여러 곳에 — 🔴 화면은 **세지도 짓지도 않는다** ═══
+     «몇 곳»(`places`)·들어가는 곳(`go`)·빠지는 곳과 그 까닭 문장(`skip[].line`·`.how`)은 **서버가 준다**(B 계약 R18 v1 · lib/video/reuse.ts).
+     🔴 화면에 채널·초 표가 없다 — 표를 베끼면 틱톡 180 이 들어오는 날 화면만 옛 말을 한다(트리거 §2 에서 셋이 비어 있던 그 모양 · AC-52).
+     🔴 `youtube_long`·`threads` 는 서버가 후보에서 뺀다(트리거 §3). 화면이 한 번 더 거르지 않는다 — 거르는 곳이 둘이면 언젠가 갈린다.
+     여기서 하는 일은 **말로 옮기기** 둘뿐이다: 수 → 고유어(«세 곳»), 길이마다의 수 → 한 줄로 묶기. */
+  UI.places = (n) => `${["한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열"][n - 1] || UI.num(n)} 곳`;
+  /** 길이별 «몇 곳» 한 줄 — fits = 서버 `ReuseFit[]`({ seconds, places }) 중 **지금 고를 수 있는 길이만**(오름차순).
+      같은 수가 이어지면 묶는다: 15·30초→네 곳, 60초→세 곳 ⇒ «30초까지는 네 곳 · 60초면 세 곳». 지금 고른 길이(cur)가 든 묶음은 굵게.
+      🔴 모든 길이가 한 곳이면 **빈 문자열** — «한 곳에 올라가요»는 말할 거리가 아니다(설명 한 문장 · §13.0).
+      🔴 `places` 가 숫자가 아닌 칸은 **버린다**(못 잰 것을 «한 곳»으로 그리지 않는다 · AC-9). */
+  UI.reusePlaces = function (fits, cur) {
+    const groups = [];
+    for (const f of fits || []) { const c = Number(f && f.places), s = Number(f && f.seconds); if (!Number.isFinite(c) || !Number.isFinite(s)) continue;
+      const g = groups[groups.length - 1]; if (g && g.c === c) g.s.push(s); else groups.push({ c, s: [s] }); }
+    if (!groups.length || groups.every((g) => g.c <= 1)) return "";
+    return groups.map((g, i) => { const lo = g.s[0], hi = g.s[g.s.length - 1];
+      const t = `${g.s.length === 1 ? `${hi}초면` : i === 0 ? `${hi}초까지는` : `${lo}~${hi}초면`} ${UI.places(g.c)}`;
+      return g.s.includes(Number(cur)) ? `<b style="color:var(--ink)">${t}</b>` : t; }).join(" · ");
+  };
+  /** 예약 시각 한 마디 — `scheduledFor` 가 있으면 «9월 27일 18:30», **예약은 됐는데 시각이 아직 없으면 «시각 잡는 중»**, 그 밖엔 "".
+      🔴 [B 계약 R18 v1.2] 파생 영상은 `scheduled` 로 태어나고 시각은 B2 가 시차를 맞춰 나중에 박는다 — 그 사이 빈칸으로 두면 «예약인데 언제?»가 된다. */
+  UI.whenSay = (p) => p && p.scheduledFor ? `${UI.dateKST(p.scheduledFor)} ${UI.timeKST(p.scheduledFor)}` : p && p.status === "scheduled" ? "시각 잡는 중" : "";
+  UI.VSTAGE =[["script", "대본"], ["tts", "목소리"], ["clips", "장면"], ["render", "합성"], ["judging", "검사"], ["done", "완료"]];
   UI.VSTAGE_SAY = { script: "대본 쓰는 중", tts: "목소리 입히는 중", clips: "장면 만드는 중", render: "내 PC 프로그램이 굽는 중", judging: "검사하는 중", done: "다 됐어요", failed: "만들지 못했어요" };
   UI.JUDGE = { P0: ["danger", "심사 막힘"], P1: ["warn", "한 번 고쳐 통과"], P2: ["ok", "심사 통과"] };
   /* 변주 사람말 — 🔴 정본은 서버가 주는 video.variantLabels{palette,hook,voiceId}. 아래는 서버가 못 줄 때의 폴백(B-1 types.ts 값과 같은 말). */
@@ -680,6 +702,9 @@
      `pause_still`(«아직 쉬는 중이에요» · 7일마다) · `pause_wake_soon`(«내일 다시 시작해요») → **시계**. 둘 다 «때»에 대한 말이다.
      `pause_resumed`(«다시 시작했어요» · 링크가 발행함) → **발행** 얼굴. 🔴 셋 다 사고가 아니라 **알려 주는 것**이다(§3 · 겁주는 얼굴 금지). */
   UI.KIND_ALIAS = { pause_still: "clock", pause_wake_soon: "clock", pause_resumed: "publish", account_address_check: "account", gate_risk: "review", team_review: "review_wait", takedown_notice: "reassign", ai_key_fallback: "gauge", takedown_due_soon: "clock", takedown_escalated: "account", account_slot: "coin", account_slot_managed: "coin", account_closing: "account", account_purge_soon: "account", account_restored: "account", export_failed: "coin", managed_runner: "runner",
+    video_reuse_ask: "review", /* [R18 · B 계약] «영상을 다른 곳에도 올릴 수 있어요»(자동 승인 경로의 처음 한 번 묻기 · 링크 /app/piece.html?id=&reuse=ask) — 검수 얼굴(soft · 겁줄 일이 아니다 · §3) */
+    reuse_waiting: "clock", /* [R18 · B2 계약] «영상을 올릴 자리를 기다리고 있어요»(링크 /app/schedule.html) — «때»에 대한 말이라 시계 */
+    publish_failed: "publish", /* [R18 · B2 계약] «이 채널엔 안 맞는 길이예요»(링크 /app/piece.html?id=) — 발행에서 멈춘 것 · 까닭은 그 글 failReason(서버 문장) */
     ops_assist: "system", ops_assist_end: "system", piece_failed: "publish", style_learned: "setup", /* [R9R10-A · B c922b28 · 메인이 main 에서 setup 으로 이음] «글 스타일을 배웠어요»(링크 /app/accounts.html) */ format_demoted: "publish", /* [R9R10 · B2] «이 글에서 못 낸 꾸밈이 있어요»(발행 뒤 · 링크 /app/piece.html?id=) — 검수·발행 얼굴 */ plan_changed: "card", price_change: "card", price_change_cancelled: "card",
     proxy_down: "runner", publish_manual: "publish", referral_reward: "coin", render_runner_off: "runner", runner_other_device: "runner",
     subscription_refunded: "money", tax_invoice_issued: "card", trial_extended: "clock", plan: "card", verify: "account",

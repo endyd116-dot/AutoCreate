@@ -8,7 +8,7 @@
   if (qs.get("mock") !== "1" || !window.UI) return;
   const UI = window.UI;
   const KEY = "acMockState";
-  const MOCK_V = 15;   // 🔴 모의 상태 판 — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
+  const MOCK_V = 16;   // 🔴 모의 상태 판(16 = R18 videoReuse · 영상 계정 손잡이 · 파생 영상) — 올리면 옛 상태를 버리고 다시 뿌린다. **한 곳에만 적는다**(seed 와 판정이 갈리면 왕복마다 상태가 초기화된다 · 2026-09-15 에 한 번 겪었다)
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const kst = (dayOffset, h, m = 0) => { const d = new Date(now + 9 * 3600e3); d.setUTCDate(d.getUTCDate() + dayOffset); d.setUTCHours(h, m, 0, 0); return new Date(d.getTime() - 9 * 3600e3).toISOString(); };
@@ -87,16 +87,29 @@
         손잡이가 없으면 이 둘은 주인 계정 한 벌로는 영영 안 보인다 — 못 보는 화면은 스샷도 헌장 검사도 못 받는다(§4.8). */
   const teamKnob = qs.get("team") || "";
   const inviteKnob = qs.get("invite") || "";
+  /* [R18 · A] 한 번 만들어 여러 곳에 — `?vr=` 손잡이(🔴 `reuse` 가 아니다 — `?reuse=ask` 는 **알림이 여는 진짜 주소**라 이름이 겹치면 안 된다)
+       (없음) = 아직 한 번도 안 물은 집(기본 · 라이브 첫날의 모양) · on = 켜 두고 릴스·틱톡·네이버 클립을 고른 집 · off = 물었고 끈 집
+       auto = 안 물은 집인데 **자동 승인**으로 영상이 이미 예약됐다 → 알림 `video_reuse_ask` 1건(§9 ② 사람이 안 보는 경로)
+     `?vrAcc=1` — 릴스·틱톡·네이버 클립에 계정이 붙은 집. 🔴 **기본은 안 붙은 채다** — 라이브는 영상 채널 여섯이 전부 planned 이고 계정 0 이다(AC-270 · 메인 지시).
+        손잡이 없이 보면 «계정이 연결되지 않았어요» 줄이 보이는 게 맞다. 계정이 붙은 판(들어가는 곳이 생기는 판)은 이 손잡이로만 본다. */
+  const vrKnob = qs.get("vr") || "";
+  const vrAcc = qs.get("vrAcc") === "1";
+  /* [R18 · B2 계약] `?vrWait=1` — 파생이 자리를 못 잡는 집(그 계정 하루 몫이 14일 내내 찼다) → 시각 없이 `meta.reuseWaiting` + 알림 `reuse_waiting`
+     `?vrNote=1` — 원본·형제 시각을 옮겼는데 다시 맞출 자리가 없는 판 → slots-reschedule 가 `reuseNote[]` 를 싣는다
+     `?vrFail=1` — 길이가 안 맞아 발행 직전에 멈춘 파생(클립 · failed) + 알림 `publish_failed` */
+  const vrWait = qs.get("vrWait") === "1", vrNote = qs.get("vrNote") === "1", vrFail = qs.get("vrFail") === "1";
 
   /* ── 초기 상태(계약 §1~§7 모양) ── */
   /* [P1R6 · B-1 §2.3] 채널 영상 상한 — 🔴 포맷 상한은 «다른 축»이다(유튜브는 60인데 clip 포맷은 30) · 화면은 formats[i].maxSeconds 만 본다 */
   const VF = (key, label, maxSeconds) => ({ key, label, maxSeconds });
-  const CH_VIDEO = {
-    youtube_shorts: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("talking", "말하는 사람", 60), VF("clip", "클립", 30)] },
-    naver_clip: { maxSeconds: 30, formats: [VF("clip", "클립", 30), VF("graphic", "그래픽 스토리", 30)] },
-    reels: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("talking", "말하는 사람", 60), VF("clip", "클립", 30)] },
-    threads: { maxSeconds: 60, formats: [VF("graphic", "그래픽 스토리", 60), VF("clip", "클립", 30)] },
-  }; // 🔴 상한은 서버가 말한다(화면 상수 금지 · 릴스 90 은 Phase 5)
+  /* 🔴 [R18 · A · AC-275] 서버 `videoChannelSpec()`(lib/writing-contracts.ts:493) 을 **식째로 옮겼다** — 모의만 다른 표를 들고 있었다:
+       릴스 60 ↔ 서버 90 · 포맷 이름 «말하는 사람»·«클립» ↔ 서버 «말하는 영상»·«짧은 클립» · 클립·쓰레드는 포맷 2개 ↔ 서버는 **모든 채널에 3개**(상한만 깎는다).
+     표 셋 = `VIDEO_CHANNEL_MAX_SEC`(+ R18 B: tiktok 180 · facebook_reels 90) · `VIDEO_FORMAT_MAX_SEC` · `VIDEO_FORMAT_LABEL`. 바꿀 땐 **서버 파일을 먼저 읽고** 여기를 고친다.
+     🔴 틱톡·페북 릴스는 재사용 **대상**이지 원본 채널이 아니다(B v1) — 이 표에 있다고 길이 칩을 그리는 채널이 되는 게 아니다. */
+  const VCH_MAX = { youtube_shorts: 60, naver_clip: 30, reels: 90, threads: 60, tiktok: 180, facebook_reels: 90 };
+  const VFMT_MAX = { graphic: 90, talking: 90, clip: 30 };
+  const VFMT_LABEL = { graphic: "그래픽 스토리", talking: "말하는 영상", clip: "짧은 클립" };
+  const CH_VIDEO = Object.fromEntries(Object.entries(VCH_MAX).map(([ch, max]) => [ch, { maxSeconds: max, formats: Object.keys(VFMT_MAX).map((k) => VF(k, VFMT_LABEL[k], Math.min(max, VFMT_MAX[k]))) }]));
   /* 🔴 [R17 · A · B 계약 2026-09-23] 소재 낱말은 **서버가 준다**(AC-52). 글자는 `lib/topics.ts` 의 `labels` 와 **한 글자도 다르지 않아야** 한다 —
      모의가 다른 말을 하면 화면 말투가 갈리고(§3) 그걸 아무 자도 안 잡는다. */
   const TOPIC_LABELS = { later: {
@@ -135,6 +148,58 @@
     /* [B3 020fb15] 서버가 주는 한 칸 — 라이브 실측: 블로거는 status=active 인데 우리 앱 키가 없어 못 붙는다 */
     const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
     const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}), ...(monetizable === false ? { monetizable: false } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+
+  /* ═══ [R18 · A] 한 번 만들어 여러 곳에 — 🔴 **B 계약 R18 v1~v1.2 글자 그대로**. 판정은 서버 `lib/video/reuse.ts` 를 흉내 낼 뿐이다. ═══
+     ReuseFit = { seconds, places, go: [{channel,label,maxSeconds}], skip: [{channel,label,maxSeconds,why,line,how}] } · places = 1(원본) + go.length
+     · 후보 = 쇼츠·릴스·틱톡·네이버 클립·페북 릴스(🔴 youtube_long·threads 없음 · 트리거 §3) · 원본 채널 자신은 빠진다
+     · 🔴 원본이 youtube_* 면 youtube_* 전부 빠진다(B v1.1 · 한 가족에 유튜브 1건 · 쿼터) — go·skip 어디에도 안 뜬다
+     · skip.why = too_long 먼저, 그다음 no_account(B 답 2026-09-26) · 연결 안 된 후보도 **조용히 빼지 않고** skip 에 넣는다(B v1.1)
+     · 문장(line·how)은 B 가 준 예시 글자 그대로 — 🔴 화면은 이 문장을 다시 짓지 않는다(모의가 다른 말을 하면 그 차이를 아무 자도 못 잡는다). */
+  const REUSE_CANDS = ["youtube_shorts", "reels", "tiktok", "naver_clip", "facebook_reels"];
+  /* 🔴 라벨은 서버 `channelLabelKo()`(lib/channel-url.ts `CHANNEL_LABEL_KO`) — **채널 표(registry) 라벨이 아니다**(AC-275 와 같은 결 · 모양은 같고 값이 다르다).
+     R18 에서 B 가 `reels` 를 «인스타 릴스»로 갈랐고 `facebook_reels` «페이스북 릴스»를 더했다(«릴스»가 둘이 돼서). reuse.ts·B2 문장이 전부 이 표를 쓴다. */
+  const LABEL_KO = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "인스타 릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡", facebook_reels: "페이스북 릴스" };
+  const chLabelOf = (ch) => LABEL_KO[ch] || String(ch || "채널");
+  const title40 = (t) => String(t || "").slice(0, 40);   // B2 문장의 «제목»은 앞 40자
+  const vrConnected = (ch) => S.accounts.some((a) => a.channel === ch && a.status === "active");
+  const vrFit = (origin, seconds, channels) => { const go = [], skip = [];
+    for (const ch of REUSE_CANDS.filter((c) => (channels || []).includes(c))) {
+      if (ch === origin || (String(origin).startsWith("youtube_") && ch.startsWith("youtube_"))) continue;
+      const label = chLabelOf(ch), max = CH_VIDEO[ch].maxSeconds;
+      if (seconds > max) { const fitSec = Math.max(...[15, 30, 60, 90].filter((s) => s <= max)); skip.push({ channel: ch, label, maxSeconds: max, why: "too_long", line: `이 영상은 ${seconds}초라 ${label}(최대 ${max}초)엔 안 올라가요.`, how: `${label}에도 올리시려면 만들 때 ${fitSec}초를 골라 주세요.`,
+        remake: { seconds: fitSec, coins: VIDEO_COIN["video_" + fitSec] }, connected: vrConnected(ch) }); }   /* [B v1.4] too_long 에만 · «그 채널용으로 짧게 하나 더»(새 영상 · 코인이 든다) · [v1.6] connected = 계정을 쟀을 때만 싣는 칸 */
+      else if (!vrConnected(ch)) skip.push({ channel: ch, label, maxSeconds: max, why: "no_account", line: `${label} 계정이 아직 연결되지 않았어요.`, how: "계정을 연결하시면 같이 올라가요.", connected: false });
+      else go.push({ channel: ch, label, maxSeconds: max }); }
+    return { seconds, places: 1 + go.length, go, skip }; };
+  const vrBasis = () => (S.videoReuse.on ? "chosen" : S.videoReuse.asked ? "off" : "all");
+  const vrChannels = () => (S.videoReuse.on ? S.videoReuse.channels : S.videoReuse.asked ? [] : REUSE_CANDS);
+  const vrPayload = () => ({ on: !!S.videoReuse.on, channels: [...S.videoReuse.channels], asked: !!S.videoReuse.asked, askedAt: S.videoReuse.askedAt || null,
+    targets: REUSE_CANDS.map((ch) => ({ channel: ch, label: chLabelOf(ch), maxSeconds: CH_VIDEO[ch].maxSeconds, connected: vrConnected(ch) })) });
+  /** director-propose 영상 piece 에 싣는 두 칸(B v1.1 — 포맷 무관 · 그 채널 상한 이하의 15·30·60·90 전부) */
+  const vrPropose = (p) => ({ reuseFit: [15, 30, 60, 90].filter((s) => s <= ((CH_VIDEO[p.channel] || {}).maxSeconds || 60)).map((s) => vrFit(p.channel, s, vrChannels())), reuseBasis: vrBasis() });
+  /** pieces-get 영상 piece 의 `reuse` — 원본/파생. 🔴 검수 중 원본에 적어 둔 채널(`_reusePending`)이 있으면 basis "chosen" · fit 은 그 채널로 · ask false(B 답 3) */
+  const vrOf = (p) => { if (p.kind !== "video") return undefined;
+    if (p.originPieceId) { const o = S.pieces.find((x) => x.id === p.originPieceId) || {}; const ol = chLabelOf(o.channel);
+      return { role: "derived", origin: { pieceId: p.originPieceId, channel: o.channel || null, label: ol }, coin: 0, line: `이 영상은 ${ol}에서 왔어요 · 코인은 더 안 들어요` }; }
+    /* [B v1.4] «짧게 하나 더»로 만든 새 영상은 `meta.reuseChannels`(= alsoTo)가 적혀 있어 basis "chosen" · ask false · fit 은 그 채널로 */
+    const sec = Number(p.meta && p.meta.video && p.meta.video.seconds) || 60; const pend = Array.isArray(p._reusePending) ? p._reusePending : Array.isArray(p.meta && p.meta.reuseChannels) ? p.meta.reuseChannels : null;
+    const derived = S.pieces.filter((x) => x.originPieceId === p.id).map((x) => ({ pieceId: x.id, channel: x.channel, label: chLabelOf(x.channel), status: x.status, scheduledFor: x.scheduledFor || null, accountId: x.accountId ?? null, handle: x.accountHandle || null }));
+    return { role: "origin", ask: !S.videoReuse.asked && !pend, seconds: sec, basis: pend ? "chosen" : vrBasis(), fit: vrFit(p.channel, sec, pend || vrChannels()), derived, skipped: p._reuseSkipped || [] }; };
+  /** [B v1.5] post-retract 의 `sameVideo` — 원본을 내려도 다른 채널의 같은 영상은 **번지지 않고 남는다**(우리가 안 고른다).
+      Row = { pieceId, channel, label, status, scheduledFor, postId, externalUrl, retracted } · line = B 예시 글자 형식(«같은 영상이 다른 1곳에 올라가 있어요 · 2곳에 예약돼 있어요. 같이 거두시려면 아래에서 골라 주세요.») · 없으면 null(키 없음) */
+  const sameVideoOf = (post) => { const pc = S.pieces.find((x) => x.id === post.pieceId); if (!pc || pc.kind !== "video") return null;
+    const rootId = pc.originPieceId || pc.id; const group = S.pieces.filter((x) => (x.id === rootId || x.originPieceId === rootId) && x.id !== pc.id);
+    const livePosts = S.posts.filter((x) => x.id !== post.id && group.some((g) => g.id === x.pieceId));
+    const row = (g, ps) => ({ pieceId: g.id, channel: g.channel, label: chLabelOf(g.channel), status: g.status, scheduledFor: g.scheduledFor || null, postId: ps ? ps.id : null, externalUrl: ps ? ps.externalUrl || null : null, retracted: !!(ps && S.retracted && S.retracted[ps.id]) });
+    const live = livePosts.map((ps) => row(group.find((g) => g.id === ps.pieceId), ps));
+    const unsent = group.filter((g) => !["published", "publishing", "rejected", "failed"].includes(g.status) && !livePosts.some((ps) => ps.pieceId === g.id)).map((g) => row(g, null));
+    if (!live.length && !unsent.length) return null;
+    const parts = [live.length ? `다른 ${live.length}곳에 올라가 있어요` : "", unsent.length ? `${unsent.length}곳에 예약돼 있어요` : ""].filter(Boolean);
+    return { originPieceId: rootId, unsent, live, line: `같은 영상이 ${parts.join(" · ")}. 같이 거두시려면 아래에서 골라 주세요.` }; };
+  /** 파생 piece 만들기 — 🔴 코인 0 · 같은 영상 파일(assets 그대로) · `scheduled` 인데 **시각 없이** 태어난다(B v1.2 · 시각은 B2 가 시차 맞춰 박는다) */
+  const vrMake = (p, chans) => chans.map((ch) => { const acc = S.accounts.find((a) => a.channel === ch && a.status === "active") || null; const id = S.nextId++;
+    S.pieces.push({ id, channel: ch, accountId: acc ? acc.id : null, accountHandle: acc ? acc.handle : null, kind: "video", title: p.title, status: "scheduled", gateOk: true, createdAt: iso(Date.now()), topicTitle: p.topicTitle, regenCount: 0, coinCost: 0, originPieceId: p.id, bodyHtml: "", body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], meta: JSON.parse(JSON.stringify(p.meta || {})), gate: p.gate || null });
+    return { pieceId: id, channel: ch, accountId: acc ? acc.id : null }; });
 
   const BODY_NAVER = `<p>✅ 주말에 에어프라이어를 열었더니 바닥에 기름이 눌어붙어 있더라고요. <mark class="line">세 번 실패하고 네 번째에 깨끗해진 방법</mark>을 그대로 적어요.</p>
 <blockquote>준비물은 베이킹소다·주방세제·따뜻한 물, 이게 전부예요</blockquote>
@@ -506,6 +571,12 @@
       { id: 6, channel: "daangn", handle: "danggeun_e", displayName: "동네 살림", avatarUrl: null, status: "active", healthScore: 98, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [10], lastPostAt: iso(now - 3 * 86400e3), browserProfileKey: "acc-6", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false }, defaultTier: null, defaultStyleId: null },
       /* [R8 §3.2] ?ads=1 일 때만 — 워드프레스는 «우리가 직접 위젯을 넣는» 유일한 길이라 그 갈래를 화면에서 보려면 계정이 하나 있어야 한다 */
       ...(adsApproved ? [{ id: 5, channel: "wordpress", handle: "myhome", displayName: "우리집 살림", avatarUrl: null, status: "active", healthScore: 90, postsToday: 0, dailyCap: 2, dailyCapBase: 2, minGapMin: 180, minGapBase: 180, goldenHours: [10], browserProfileKey: "acc-5", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: true } }] : []),
+      /* [R18 · A] ?vrAcc=1 일 때만 — 릴스·틱톡·네이버 클립 계정이 붙은 집(«들어가는 곳»이 생기는 판). 🔴 기본은 안 붙은 채(라이브 영상 계정 0 · AC-270). */
+      ...(vrAcc ? [
+        { id: 7, channel: "reels", handle: "reels_f", displayName: "1분 살림 릴스", avatarUrl: null, status: "active", healthScore: 95, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [19], browserProfileKey: "acc-7", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+        { id: 8, channel: "tiktok", handle: "tiktok_g", displayName: "1분 살림 틱톡", avatarUrl: null, status: "active", healthScore: 95, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [20], browserProfileKey: "acc-8", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+        { id: 9, channel: "naver_clip", handle: "clip_e", displayName: "1분 살림 클립", avatarUrl: null, status: "active", healthScore: 95, postsToday: 0, dailyCap: 1, dailyCapBase: 1, minGapMin: 360, minGapBase: 360, goldenHours: [21], browserProfileKey: "acc-9", hasCreds: true, monetize: { coupang: false, adpost: false, adsense: false } },
+      ] : []),
     ],
     personas: fresh ? [] : [{ id: 1, name: "30대 맞벌이 주부", profile: { region: "경기 남부", family: "아이 둘", job: "회사원", home: "아파트", brands: ["코스트코", "다이소"], tone: "친근한 구어", interests: ["살림", "가전"], banned: ["최고", "무조건"], signature: "— 오늘도 10분만" } }],
     topics: fresh ? [] : [
@@ -554,9 +625,11 @@
       /* [P1R5] 영상 piece(kind video · §1.2 행 모양) — 508 만드는 중(?stage= 로 단계 고정 · 없으면 시간 따라 진행) · 509 봐주세요(?judge= 로 등급) */
       /* [AC-185 · A · 2026-09-21] 🔴 **올릴 계정이 없는 영상**(lib/director.ts §1.2 로 만들어지는 그것) — `accountHandle: null`.
          이 줄이 없어서 «만들어 놓고 직접 올리는 길»이 모의에서 한 번도 안 열렸다. 나머지 칸은 509 와 같다(같은 렌더 경로를 타야 뜻이 있다). */
+      /* [R18 · B2 계약] ?vrFail=1 — 509 의 파생(네이버 클립)이 **길이가 안 맞아** 발행 직전에 멈췄다(상태 failed · 까닭 = B 의 skip line+how 와 글자 그대로 같은 문장 · 서버가 meta.failReason → failReason 으로 올린다) */
+      ...(vrFail ? [{ id: 520, channel: "naver_clip", accountId: null, accountHandle: null, kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "failed", gateOk: true, createdAt: iso(now - 3 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 0, originPieceId: 509, failReason: "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요. 네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요.", bodyHtml: "", body: VDESC, blocks: [], assets: videoAssets(), meta: { stage: "done", video: videoSpec(1, 4, 60, "graphic"), failReason: "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요. 네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요." }, gate: null }] : []),
       { id: 510, channel: "youtube_shorts", accountHandle: null, kind: "video", title: "밥솥 내솥 얼룩, 식초 한 숟갈이면 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 2 * 3600e3), topicTitle: "밥솥 청소법", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["밥솥", "청소"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 2 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["밥솥", "청소"], disclosure: null, chainResume: { count: 0 }, tts: { provider: "typecast" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
       { id: 508, channel: "youtube_shorts", accountHandle: "shorts_d", kind: "video", title: "에어프라이어 기름때, 3분이면 끝", status: "generating", scheduledFor: kst(1, 18, 0), gateOk: false, createdAt: iso(now - 300e3), topicTitle: "에어프라이어 청소법", regenCount: 0, coinCost: 28, bodyHtml: "", meta: { stage: "script", chainStage: { stage: "script", at: iso(now - 300e3) }, video: videoSpec(0, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, tags: ["에어프라이어", "청소"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece508" }, chainResume: { count: 0 } }, gate: null, _v0: now - 9500 },
-      { id: 509, channel: clipPiece ? "naver_clip" : "youtube_shorts", accountHandle: clipPiece ? "clip_e" : "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: "in_review", scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" }, endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
+      { id: 509, channel: clipPiece ? "naver_clip" : "youtube_shorts", accountHandle: clipPiece ? "clip_e" : "shorts_d", kind: "video", title: "전자레인지 냄새, 레몬 한 조각으로 끝", status: vrKnob === "auto" || vrFail ? "scheduled" : "in_review" /* [R18] ?vr=auto = 자동 승인으로 이미 예약된 첫 영상 · ?vrFail=1 = 이미 나눠진 원본 */, scheduledFor: kst(2, 18, 0), gateOk: true, createdAt: iso(now - 5 * 3600e3), topicTitle: "전자레인지 냄새", regenCount: 0, coinCost: 28, bodyHtml: "", body: VDESC, blocks: [{ type: "video", assetId: 9001 }, { type: "srt", assetId: 9002 }, { type: "hashtags", tags: ["전자레인지", "레몬", "살림팁"] }], assets: videoAssets(), meta: { stage: "done", chainStage: { stage: "done", at: iso(now - 4 * 3600e3) }, video: videoSpec(1, 4, 60, "graphic"), angle: "3초 훅 · 비포/애프터", emotionKey: "shorts", tags: ["전자레인지", "레몬", "살림팁"], disclosure: DISCLOSURE, affiliate: { provider: "coupang", url: "https://link.coupang.com/a/mock", subId: "piece509" }, chainResume: { count: 0 }, tts: { provider: "typecast" }, endcard: { text: "설명란 링크에서 확인해요", url: "https://link.coupang.com/a/mock" }, clampedFrom: null }, gate: { ok: true, rewritten: false, checks: VIDEO_GATE_CHECKS, judge: judgeReport("P2") } },
     ],
     rules: fresh ? [] : [
       { id: 1, channel: "naver_blog", kind: "post", accountMode: "auto", every: "week", count: 3, weekdays: [1, 3, 5], preferredHour: 7, preferredMinute: null, active: true },
@@ -599,6 +672,9 @@
       /* [R8 §4.5] 🔴 주인만 받는 알림(`lib/team.ts notifyOwnersWaiting` · 하루 한 번). 제목·본문·링크 **서버 글자 그대로**.
          아이콘은 `review`(soft) 가 아니라 **`review_wait`(주의)** 다 — 마감 자동 승인이 이 글을 안 집기 때문에 주인이 안 보면 그대로 멈춘다. */
       ...(teamKnob === "owner" ? [{ id: 800, kind: "team_review", title: "팀원이 만든 글 2건이 기다리고 있어요", desc: "보시고 승인하시면 편성표대로 나가요. 승인 전에는 나가지 않아요.", link: "/app/pieces.html?status=in_review", tone: "warn", createdAt: iso(now - 40 * 60e3) }] : []),
+      /* [R18 · B 계약] 🔴 자동 승인 경로의 «처음 한 번 묻기» — 사람이 검수 화면을 안 보니 **알림으로** 묻는다(§9 ②). 제목·본문·링크 **서버 글자 그대로**(B 2026-09-26). */
+      ...(vrKnob === "auto" ? [{ id: 806, kind: "video_reuse_ask", title: "영상을 다른 곳에도 올릴 수 있어요", desc: "첫 영상이 올라갈 준비가 됐어요. 같은 영상을 다른 채널에도 올릴지 한 번만 골라 주세요 — 고르시기 전까지는 지금처럼 한 곳에만 올라가요.", link: "/app/piece.html?id=509&reuse=ask", tone: "info", createdAt: iso(now - 20 * 60e3) }] : []),
+      ...(vrFail ? [{ id: 807, kind: "publish_failed", title: "이 채널엔 안 맞는 길이예요", desc: "이 영상은 60초라 네이버 클립(최대 30초)엔 안 올라가요. 네이버 클립에도 올리시려면 만들 때 30초를 골라 주세요.", link: "/app/piece.html?id=520", tone: "warn", createdAt: iso(now - 2 * 3600e3) }] : []),   /* [R18 · B2] 서버 글자 그대로 */
       { id: 801, kind: "reassign", title: "@life_c 계정이 정지됐어요", desc: "예약된 글 3건을 @cook_a 로 옮겼어요", link: "/app/accounts.html", tone: "warn", createdAt: iso(now - 5 * 3600e3) },
       { id: 802, kind: "publish", title: "글 1건이 올라가지 못했어요", desc: "«가을 이불 세탁» · 채널 화면이 바뀌었어요", link: "/app/posts.html", tone: "warn", createdAt: iso(now - 4 * 3600e3) },
       { id: 803, kind: "publish", title: "@cook_a 에 글이 올라갔어요", desc: "에어프라이어 청소, 눌어붙은 기름 3분 컷", link: "/app/posts.html", tone: "info", createdAt: iso(now - 26 * 3600e3), readAt: iso(now - 20 * 3600e3) },
@@ -639,6 +715,10 @@
       501: [{ id: 9101, pieceId: 501, r2Key: "t1/p501/a.jpg", url: "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#E8F3FF"/><text x="40" y="46" font-size="13" text-anchor="middle" fill="#3182F6">사진</text></svg>'), caption: "에어프라이어 바스켓", sort: 0, source: { kind: "stock", key: "stock:pexels:10422341", addedAt: iso(now - 3 * 86400e3) }, stock: { provider: "pexels", id: "10422341", author: "Ivan Samkov", sourceUrl: "https://www.pexels.com/photo/10422341/" }, createdAt: iso(now - 3 * 86400e3) }],
       504: [{ id: 9102, pieceId: 504, r2Key: "t1/p504/a.jpg", url: "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#E8F3FF"/><text x="40" y="46" font-size="13" text-anchor="middle" fill="#3182F6">사진</text></svg>'), caption: "같은 사진", sort: 0, source: { kind: "stock", key: "stock:pexels:10422341", addedAt: iso(now - 9 * 86400e3) }, stock: { provider: "pexels", id: "10422341", author: "Ivan Samkov", sourceUrl: "https://www.pexels.com/photo/10422341/" }, createdAt: iso(now - 9 * 86400e3) }],
     },
+    /* [R18 · A] 영상을 여러 곳에 — tenants.settings.videoReuse 의 모양(B 계약 R18 v1). 🔴 기본은 **아직 안 물은 집**(on:false · asked:false · 트리거 §1 ①). */
+    videoReuse: vrKnob === "on" ? { on: true, channels: ["reels", "tiktok", "naver_clip"], asked: true, askedAt: iso(now - 3 * 86400e3) }
+      : vrKnob === "off" ? { on: false, channels: [], asked: true, askedAt: iso(now - 3 * 86400e3) }
+      : { on: false, channels: [], asked: false, askedAt: null },
   });
   let S; try { S = JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { S = null; }
   if (!S || fresh || qs.get("reset") === "1" || !S.posts || !S.revSources || !S.adState || !S.adState.adpost || S.v !== MOCK_V) { S = seed(); if (!fresh) { rollSlots(); scenarios(); } save(); } // posts 없음 = P1R1 시절 상태 → 새로 뿌린다
@@ -755,7 +835,7 @@
      🔴 `kind`(post|video)는 **그대로 남는다** — 지우지 않았다. 배지·종류 칩·빈 상태는 `ruleKind` 만 본다.
      🔴 종전 화면은 `UI.kindPill(p.kind)` 를 불렀는데 배지표 열쇠가 `shorts|cardnews` 라 **한 번도 안 맞아 배지가 영영 안 그려졌다**(A-2 가 가리키는 자리). */
   const ruleKindOf = (kind) => (kind === "video" ? "shorts" : kind === "cardnews" ? "cardnews" : "post");
-  const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, ...row } = p; row.ruleKind = ruleKindOf(p.kind); if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
+  const pieceRow = (p) => { const { bodyHtml, blocks, images, meta, gate, topicTitle, regenCount, body, assets, _v0, _t0, _reusePending, _reuseSkipped, ...row } = p; row.ruleKind = ruleKindOf(p.kind); row.originPieceId = p.originPieceId ?? null;   /* [R18 · B v1] 목록에서 파생을 가를 재료(number|null) */ if (p.kind === "video" && meta) row.meta = { stage: meta.stage, chainStage: meta.chainStage, video: { format: meta.video.format, seconds: meta.video.seconds } }; return row; }; // [P1R5] 영상 목록 행 = kind + meta.stage(§3 pieces.html)
   /* RunnerDevice 투영 — 없는 값은 키를 싣지 않는다(계약 §0) */
   const devRow = (d) => { const o = { id: d.id, name: d.name, kind: d.kind, status: d.online ? "online" : "offline", jobsWaiting: d.jobsWaiting || 0 }; if (d.caps) o.caps = d.caps; // [P1R5] caps.ffmpeg(§2.4)
     if (d.bound) o.bound = true; if (d.otherDeviceAt) { o.otherDeviceAt = d.otherDeviceAt; o.otherDeviceCount = d.otherDeviceCount || 1; } // [러너 배포] 지문 값은 싣지 않는다 — «묶였나 · 다른 PC 가 있었나 · 몇 번» 만
@@ -767,6 +847,19 @@
     return { id: j.id, status, updatedAt: iso(Date.now()) }; };
   const bodyToBlocks = (p) => [{ type: "disclosure", text: p.meta.disclosure || "" }, { type: "hook", text: "주말에 에어프라이어를 열었더니…" }, { type: "toc", items: ["바스켓 담그기", "베이킹소다 반죽", "건조"] }, { type: "summary", text: "담그기 10분 · 베이킹소다 5분 · 건조 30분이면 끝나요." }, { type: "h2", text: "1. 바스켓은 물에 10분만 담가요" }, { type: "image", imageIndex: 0, caption: "10분 담가 둔 바스켓" }, { type: "checklist", items: ["바스켓 10분 담그기", "베이킹소다 반죽 5분"] }, p.channel === "tistory" ? { type: "adsense" } : { type: "affiliate", affiliate: { productName: "에어프라이어 세척솔 3종", url: "https://link.coupang.com/a/mock", price: 8900 } }, { type: "hashtags", items: p.meta.tags || [] }].filter((b) => b.type !== "disclosure" || b.text);
   const tick = () => { // 만드는 중 → 8초 후 draft → 16초 후 in_review
+    /* [R18 · B v1.2] 파생 영상은 시각 없이 태어나고 **B2 가 시차를 맞춰 박는다** — 모의는 10초 뒤 원본 시각 + 30분 간격으로 박는다(«시각 잡는 중» → 시각, 두 판을 다 보게) */
+    for (const p of S.pieces) { if (!p.originPieceId || p.scheduledFor || p.status !== "scheduled" || Date.now() - (Date.parse(p.createdAt) || 0) < 10000) continue;
+      const o = S.pieces.find((x) => x.id === p.originPieceId); const sibs = S.pieces.filter((x) => x.originPieceId === p.originPieceId);
+      if (!o || !o.scheduledFor || !["scheduled", "approved", "publishing", "published"].includes(o.status)) continue;   /* 원본이 다시 만드는 중이면 안 박는다(B v1.3 · 다시 승인되면 박힌다) */
+      /* [R18 · B2] ?vrWait=1 — 자리를 못 잡는다: 시각 없이 «왜 기다리나»(서버 문장 ㉮ 글자 그대로) + 알림 reuse_waiting(24시간에 한 번 · 본문 = say 첫 줄 + 둘 이상이면 « 외 N곳도 기다리고 있어요.») */
+      if (vrWait) { const say = `«${title40(o.title)}» 영상을 ${chLabelOf(p.channel)}에 올릴 자리를 아직 못 잡았어요 — 그 계정의 하루 몫이 앞으로 14일 동안 차 있어요. 하루 몫을 늘리시면 바로 잡아 드리고, 그대로 두셔도 자리가 나면 저절로 잡아 드려요.`;
+        p.meta = { ...(p.meta || {}), reuseWaiting: { at: iso(Date.now()), say } };
+        if (!S.notifications.some((n) => n.kind === "reuse_waiting")) { const waiting = sibs.filter((x) => x.status === "scheduled" && !x.scheduledFor).length;
+          S.notifications.unshift({ id: S.nextId++, kind: "reuse_waiting", title: "영상을 올릴 자리를 기다리고 있어요", desc: (say + (waiting > 1 ? ` 외 ${waiting - 1}곳도 기다리고 있어요.` : "")).slice(0, 300), link: "/app/schedule.html", tone: "info", createdAt: iso(Date.now()) }); }
+        continue; }
+      p.scheduledFor = iso(Date.parse(o.scheduledFor) + (sibs.indexOf(p) + 1) * 30 * 60e3); if (p.meta) delete p.meta.reuseWaiting;
+      /* [R18 · B2] 편성표 자리 — `reuseOf` = 원본 piece id · note 는 서버가 ««제목» 영상을 인스타 릴스에도 올려요»로 채운다 · origin 어휘는 "auto" 그대로 */
+      if (!S.slots.some((s) => s.pieceId === p.id)) S.slots.push({ id: S.nextId++, date: new Date(Date.parse(p.scheduledFor) + 9 * 3600e3).toISOString().slice(0, 10), channel: p.channel, kind: "shorts", accountId: p.accountId ?? null, accountHandle: p.accountHandle || null, status: "scheduled", publishAt: p.scheduledFor, pieceId: p.id, topicTitle: o.title, origin: "auto", reuseOf: o.id, note: `«${title40(o.title)}» 영상을 ${chLabelOf(p.channel)}에도 올려요` }); }
     for (const p of S.pieces) { if (!p._t0) continue; const age = Date.now() - p._t0; // [v1.1] stage: writing → images → checking → done
       if (age > 18000) { p.status = "in_review"; p.stage = "done"; p.gateOk = true; delete p._t0; } else if (age > 12000) { p.stage = "checking"; p.status = "draft"; } else if (age > 6000) p.stage = "images"; else p.stage = "writing"; }
     for (const p of S.pieces) { if (p.kind !== "video" || p.status !== "generating") continue; const v = p.meta; const online = S.devices.some((d) => d.online && d.caps?.ffmpeg !== false); const sl = S.slots.find((s) => s.pieceId === p.id);
@@ -919,8 +1012,13 @@
          모의는 **약속대로** 받아 둔다(A·B 동시 발사 관례) — 값은 `lib/director-goal.ts MediaGoal` 네 갈래뿐이고,
          🔴 빈 문자열은 **열쇠를 지우는 것**이다(«모름»과 «빈 값을 고름»은 다르다 · AC-57). */
       if (typeof b.goal === "string") { if (["adsense", "adpost", "ypp", "clip_incentive"].includes(b.goal)) S.settings.goal = b.goal; else delete S.settings.goal; }
+      /* [R18 · B 계약 v1] «영상을 여러 곳에» — 🔴 **최상위 키 `videoReuse`**. 서버가 channels 를 후보 안으로 거르고 asked·askedAt 을 찍는다(한 번이면 asked=true · B 답). */
+      if (b.videoReuse && typeof b.videoReuse === "object") { const v = b.videoReuse;
+        if (typeof v.on === "boolean") S.videoReuse.on = v.on;
+        if (Array.isArray(v.channels)) S.videoReuse.channels = REUSE_CANDS.filter((c) => v.channels.includes(c));
+        S.videoReuse.asked = true; S.videoReuse.askedAt = iso(Date.now()); }
       const kinds = Array.isArray(S.settings.kinds) && S.settings.kinds.length ? (S.settings.kinds.includes("video") ? ["text", "video"] : ["text"]) : ["text"];
-      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer, pause: pausePayload() }; },
+      return { ok: true, settings: S.settings, kinds, kindsSet: !!S.kindsSet, recipeVolunteer: !!S.recipeVolunteer, pause: pausePayload(), videoReuse: vrPayload() }; },
     /* ── [AC-188 · DESIGN §5B.11 (1-c)(1-d)] 잠깐 멈춤 — 🔴 **서버 계약 그대로** 흉내 낸다.
        `days`·`daysLeft`·`reasons[].label` 은 **서버가 주는 값**이다(화면이 날짜를 셈하거나 말을 지어내면 AC-52·AC-74 위반).
        🔴 `backlog` 는 `pause` 안에도 싣는다 — **저절로 깬 손님**은 `tenant-resume` 를 안 부르기 때문이다(§(1-d) ②). */
@@ -1177,6 +1275,8 @@
         if (s0) first.usesTodaySlot = { slotId: s0.id, publishAt: s0.publishAt || kst(0, 18, 30) }; }
       /* [R9R10-A] 글마다 등급 = 계정 기본값 · 코인 = 등급 코인(식은 서버 pieceCoinCost 한 곳 · 여기선 그 값을 흉내 낼 뿐) · 계정 기본 스타일이 있으면 붙는다 */
       for (const p of pieces) { if (p.kind === "video") continue; const acc = S.accounts.find((a) => a.id === p.accountId); Object.assign(p, tierFields(acc)); if (acc && acc.defaultStyleId) p.styleId = acc.defaultStyleId; }
+      /* [R18 · B v1.1] 영상 piece 바로 밑에 `reuseFit`·`reuseBasis` — 길이 칩 옆 «30초면 네 곳 · 60초면 세 곳»의 재료(화면은 세지 않는다) */
+      for (const p of pieces) if (p.kind === "video") Object.assign(p, vrPropose(p));
       const brief = { id: S.nextId++, topicId: t.id, goal: "mixed", mode: "reviewed", coinCost: pieces.reduce((a, p) => a + p.coinCost, 0), coinsLeft: S.coins, reasons: ["검색량 " + UI.num(t.factors.volume || 0) + "에 경쟁이 낮아 경험담이 먼저 노출돼요", "같은 소재를 계정마다 다른 구성(경험담·비교표)으로 갈라 유사도 게이트를 지켜요", "등급대로 코인이 들어요 — 간단히 1 · 보통 2 · 프리미엄 3 · 내 사진을 올려도 코인은 안 늘어요 · 다시 만들기는 무료"].concat(pieces.some((p) => p.kind === "video") ? [`쇼츠 60초 · 그래픽 스토리 · @${pieces.find((p) => p.kind === "video").accountHandle} 는 훅 «반전»으로 시작해요 · 영상 28코인(재렌더 무료)`] : []), pieces, voices: VOICES }; // [제안] 목소리 목록은 brief.voices
       S.briefs[brief.id] = brief; return { ok: true, brief }; },
     /* [R8 · director-estimate] 🔴 **아무것도 쓰지 않고** 손질된 값으로 얼마 드는지만 답한다 — 화면이 «1 + 사진 장수»로 셈하던 자리를 대신한다. */
@@ -1230,7 +1330,7 @@
     "pieces-list": (_b, q) => { tick(); const st = q.get("status") || "all"; const list = S.pieces.filter((p) => st === "all" || p.status === st || (st === "generating" && p.status === "draft")); return { ok: true, pieces: list.map(pieceRow).sort((a, b) => b.id - a.id) }; },
     "pieces-get": (_b, q) => { tick(); const p = S.pieces.find((x) => x.id === Number(q.get("id"))); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 }); const withDisc = (h) => { const clean = h.replace(/^\s*<div class="disclosure">[\s\S]*?<\/div>\s*/, ""); return p.meta.disclosure ? `<div class="disclosure">${p.meta.disclosure}</div>
 ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.disclosure 는 미러
-      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}), ...(p.id === 508 ? { scriptIssues: SCRIPT_ISSUES } : {}), /* [R8CLOSE] 영상에도 «왜 이 채널·이 계정» — 🔴 `hero` 는 안 실는다(사진 계약은 글의 것이다). */ channelReason: WHY3(whyMode).channelReason, personaFit: WHY3(whyMode).personaFit }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
+      if (p.kind === "video") return { ok: true, piece: { ...pieceRow(p), body: p.body || "", blocks: p.blocks || [], assets: p.assets || [], /* [R8CLOSE-B2] «못 따라 한 축» — 레퍼런스로 만든 영상(509)에만 붙는다. 🔴 없는 영상은 화면이 아무것도 안 그리는지도 같이 재진다. */ meta: { ...p.meta, ...(p.id === 509 ? { refUnused: REF_UNUSED } : {}), ...(p.id === 508 ? { scriptIssues: SCRIPT_ISSUES } : {}), /* [R8CLOSE] 영상에도 «왜 이 채널·이 계정» — 🔴 `hero` 는 안 실는다(사진 계약은 글의 것이다). */ channelReason: WHY3(whyMode).channelReason, personaFit: WHY3(whyMode).personaFit }, gate: p.gate, topicTitle: p.topicTitle, regenCount: p.regenCount, failReason: p.failReason, reuse: vrOf(p) /* [R18 · B v1] 원본/파생 */ } }; // [P1R5] 영상 = body(설명란 · 첫 줄 고지) + blocks(video·srt·hashtags) + assets(url) + gate.judge
       /* [R8-A §2 · B-1 d6c2359] «왜 이렇게 생겼나» 3축 — 이름·모양은 서버 pieces-get 그대로.
          값은 lib/writing-contracts.ts 의 그 채널 칸에서 복사(label·register·분량·사진).
          🔴 ?why=none = **형식이 없어 주제군을 못 정한 글** — topicGroup 이 null 로 오고 분량이 채널 기본값에서 온다(fromGroup:false). */
@@ -1260,9 +1360,54 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
       if (teamKnob === "member") return err("team_approval", "이 글은 이 집의 주인이 보고 나서 나가요. 주인에게 알려 드렸어요.", { status: 403 });
       const broke = ((p.gate && p.gate.judge && p.gate.judge.axes) || []).filter((a) => !a.pass && a.grade === "P0" && JUDGE_BLOCK.includes(a.key));
       if (broke.length) return err("gate", "발행 전 확인이 필요해요.", { gate: p.gate });
-      p.status = "scheduled"; tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
-    "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected"; return { ok: true, status: "rejected" }; },
+      p.status = "scheduled";
+      /* [R18 · B v1] 원본 영상이 승인되면 — 적어 둔 채널(pieces-reuse 가 검수 중에 받아 둔 것) 또는 켜 둔 설정의 채널로 **파생을 만든다**(코인 0 · 같은 파일). */
+      if (p.kind === "video" && !p.originPieceId && !S.pieces.some((x) => x.originPieceId === p.id)) {
+        const chans = Array.isArray(p._reusePending) ? p._reusePending : Array.isArray(p.meta && p.meta.reuseChannels) ? p.meta.reuseChannels : S.videoReuse.on ? S.videoReuse.channels : null;
+        if (chans) { const fit = vrFit(p.channel, Number(p.meta && p.meta.video && p.meta.video.seconds) || 60, chans); vrMake(p, fit.go.map((g) => g.channel)); p._reuseSkipped = fit.skip; }
+        delete p._reusePending; }
+      tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
+    /* [R18 · B v1.4 · 트리거 §6-6] «그 채널용으로 짧게 하나 더» — { id: 원본, channel } → 202 새로 · 200 already(코인 0 · 같은 id) · 402 coin_short · 400 fits·channel·no_account·is_derived.
+       🔴 새 영상이다(originPieceId null · 코인이 든다) · `meta.remakeOf` = 원본 · `alsoTo` = 원본에서 **길이 때문에 빠졌던** 다른 채널 중 새 길이에 들어가는 것(target 자신 제외 · 설정의 고른 곳이 아니다). */
+    "pieces-remake": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id));
+      if (!p || p.kind !== "video") return err("not_found", "영상을 찾을 수 없어요.", { status: 404 });
+      if (p.originPieceId) return err("is_derived", "이 영상은 원본 영상을 그대로 올리는 거예요 — 원본에서 만들어 주세요.");
+      const ch = String(b.channel || ""), max = (CH_VIDEO[ch] || {}).maxSeconds, sec0 = Number(p.meta && p.meta.video && p.meta.video.seconds) || 60;
+      if (!REUSE_CANDS.includes(ch) || !max) return err("channel", "그 채널엔 올릴 수 없어요.");
+      if (sec0 <= max) return err("fits", `이 영상은 이미 ${chLabelOf(ch)}에 들어가요.`);
+      if (!vrConnected(ch)) return err("no_account", `${chLabelOf(ch)} 계정이 아직 연결되지 않았어요.`);
+      const sec = Math.max(...[15, 30, 60, 90].filter((s) => s <= max));
+      const had = S.pieces.find((x) => x.meta && x.meta.remakeOf === p.id && x.channel === ch);
+      if (had) return { ok: true, briefId: null, pieceIds: [had.id], coinsCharged: 0, coinsLeft: S.coins, seconds: sec, alsoTo: (had.meta.reuseChannels || []).slice(), already: true };
+      const coins = VIDEO_COIN["video_" + sec]; if (coins > S.coins) return err("coin_short", `코인이 ${coins - S.coins}개 부족해요.`, { need: coins, have: S.coins, status: 402 });
+      const dropped = (p._reuseSkipped || vrFit(p.channel, sec0, vrChannels()).skip).filter((s) => s.why === "too_long").map((s) => s.channel);
+      const alsoTo = dropped.filter((c) => c !== ch && sec <= CH_VIDEO[c].maxSeconds && !S.pieces.some((x) => x.meta && x.meta.remakeOf === p.id && x.channel === c));
+      S.coins -= coins; const id = S.nextId++; const acc = S.accounts.find((a) => a.channel === ch && a.status === "active");
+      S.pieces.push({ id, channel: ch, accountId: acc.id, accountHandle: acc.handle, kind: "video", title: p.title, status: "generating", scheduledFor: p.scheduledFor, gateOk: false, createdAt: iso(Date.now()), topicTitle: p.topicTitle, regenCount: 0, coinCost: coins, originPieceId: null, bodyHtml: "",
+        meta: { stage: "script", chainStage: { stage: "script", at: iso(Date.now()) }, video: { ...(p.meta.video || {}), seconds: sec }, angle: p.meta.angle, emotionKey: p.meta.emotionKey, tags: [], disclosure: p.meta.disclosure || null, chainLock: null, chainResume: { count: 0 }, remakeOf: p.id, reuseChannels: alsoTo }, gate: null, _v0: Date.now() });
+      return { ok: true, status: 202, briefId: S.nextId++, pieceIds: [id], coinsCharged: coins, coinsLeft: S.coins, seconds: sec, alsoTo }; },
+    /* [R18 · B 계약 v1] «처음 한 번 묻기»의 답 — { id, channels, remember } → { ok, videoReuse, reuse, created, skip }.
+       remember=true → 설정을 켜고 channels 저장(🔴 channels 가 비면 **on:false** · asked 는 true · B 답 2) · false → 이번 영상만(처음 한 번은 끝난 것으로 친다).
+       원본이 검수 중이면 **적어 두고 승인 때 만든다** · 이미 예약/발행됐으면 **지금 만든다**. 안 맞는 채널을 보내도 400 이 아니다(이번엔 skip · B v1.1). */
+    "pieces-reuse": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id));
+      if (!p || p.kind !== "video") return err("not_found", "영상을 찾을 수 없어요.", { status: 404 });
+      if (p.originPieceId) return err("derived", "원본 영상에서 골라 주세요.");
+      const chosen = REUSE_CANDS.filter((c) => (Array.isArray(b.channels) ? b.channels : []).includes(c));
+      if (b.remember === true) { S.videoReuse.on = chosen.length > 0; S.videoReuse.channels = chosen; }
+      S.videoReuse.asked = true; S.videoReuse.askedAt = iso(Date.now());
+      const fit = vrFit(p.channel, Number(p.meta && p.meta.video && p.meta.video.seconds) || 60, chosen); let created = [];
+      if (["in_review", "edited"].includes(p.status)) p._reusePending = chosen;
+      else { created = vrMake(p, fit.go.map((g) => g.channel)); p._reuseSkipped = fit.skip; }
+      return { ok: true, videoReuse: vrPayload(), reuse: vrOf(p), created, skip: fit.skip }; },
+    /* [R18 · B v1.3] 원본 영상을 버리면 **아직 안 나간 파생도 같이 버린다** — 응답 `derivedRejected: number[]`(없으면 키 없음) · 파생마다 meta.rejectReason(서버 글자 그대로) */
+    "pieces-reject": (b) => { const p = S.pieces.find((x) => x.id === Number(b.id)); if (p) p.status = "rejected";
+      const gone = p && p.kind === "video" && !p.originPieceId ? S.pieces.filter((x) => x.originPieceId === p.id && !["published", "publishing", "rejected"].includes(x.status)) : [];
+      for (const d of gone) { d.status = "rejected"; d.meta = { ...(d.meta || {}), rejectReason: "원본 영상을 버려서 같이 내렸어요" }; }
+      return { ok: true, status: "rejected", ...(gone.length ? { derivedRejected: gone.map((d) => d.id) } : {}) }; },
     "pieces-regenerate": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id)); if (!p) return err("not_found", "글을 찾을 수 없어요.", { status: 404 });
+      /* [R18 · B v1.3] 파생은 거절(서버 글자 그대로) · 원본을 다시 만들면 안 나간 파생은 «예약됨 · 시각 잡는 중»으로 돌아간다(시각을 뗀다) */
+      if (p.originPieceId) return err("derived", "이 영상은 원본 영상을 그대로 올리는 거예요 — 다시 만들려면 원본에서 다시 만들어 주세요.", { originPieceId: p.originPieceId });
+      if (p.kind === "video") for (const d of S.pieces) if (d.originPieceId === p.id && d.status === "scheduled") delete d.scheduledFor;
       /* 🔴 [2026-09-16 · «제자리»] 서버 계약을 그대로 옮긴다(netlify/functions/pieces.ts `pieces-regenerate`) — 종전 모의엔 **이 가지가 통째로 없었다**.
          그래서 «만드는 중»에 갇힌 글을 누르면 `regenCount` 를 태우고 1회 한도를 먹었다(서버는 태우지 않는다 · 코인도 0).
          20분 넘었으면 **202**(정말 다시 걸었다) · 아니면 200 그대로 — 화면이 이 둘을 갈라 말하므로 모의도 갈라야 한다(안 가르면 하니스가 초록인 채 거짓말한다). */
@@ -1373,7 +1518,16 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       const gapMin = Math.max(1, Number(qs.get("gap")) || 30);
       const clash = S.slots.find((x) => x !== s && x.channel === s.channel && x.status !== "skipped" && x.publishAt && Math.abs(new Date(x.publishAt).getTime() - at) < gapMin * 60e3);
       if (clash) return err("cadence", `같은 채널 글이 ${UI.timeKST(clash.publishAt)} 에 나가요. ${gapMin}분 이상 떨어뜨려 주세요.`);
-      s.publishAt = b.at; s.date = new Date(at + 9 * 3600e3).toISOString().slice(0, 10); return { ok: true, slot: { ...s } }; },
+      s.publishAt = b.at; s.date = new Date(at + 9 * 3600e3).toISOString().slice(0, 10);
+      /* [R18 · B2 계약] 한 영상의 원본+파생은 서로 30분 이상(DERIVED_STAGGER_MIN) — 옮긴 자리에 형제가 30분 안으로 붙으면 서버가 **형제를 다시 맞춘다**.
+         맞출 자리가 없을 때만 `reuseNote[]`(서버 문장 글자 그대로 · 막지 않는다). 모의는 ?vrNote=1 이면 «자리 없음»으로 친다. */
+      const p0 = S.pieces.find((x) => x.id === s.pieceId); const rootId = p0 ? (p0.originPieceId || p0.id) : null; const root = rootId ? S.pieces.find((x) => x.id === rootId) : null;
+      const reuseNote = [];
+      if (root && root.kind === "video") for (const sib of S.slots.filter((x) => x !== s && x.publishAt && (x.reuseOf === rootId || x.pieceId === rootId) && Math.abs(Date.parse(x.publishAt) - at) < 30 * 60e3)) {
+        const free = vrNote ? null : [1, 2, 3].map((k) => at + k * 30 * 60e3).find((t) => !S.slots.some((y) => y !== sib && y.channel === sib.channel && y.publishAt && Math.abs(Date.parse(y.publishAt) - t) < gapMin * 60e3));
+        if (free) { sib.publishAt = iso(free); const sp = S.pieces.find((x) => x.id === sib.pieceId); if (sp) sp.scheduledFor = sib.publishAt; }
+        else reuseNote.push(`«${title40(root.title)}» 영상의 ${chLabelOf(sib.channel)} 시각을 다시 맞출 자리가 없어 그대로 두었어요. 편성표에서 시각을 직접 옮기실 수 있어요.`); }
+      return { ok: true, slot: { ...s }, ...(reuseNote.length ? { reuseNote } : {}) }; },
     "slots-produce-now": (b) => { const nw = notWritable(); if (nw) return nw; tick(); const s = S.slots.find((x) => x.id === Number(b.slotId)); if (!s) return err("not_found", "편성을 찾을 수 없어요.", { status: 404 });
       if (!s.topicTitle) return err("no_topic", "먼저 소재를 정해 주세요.");
       if (s.pieceId) return err("exists", "이 편성은 이미 글이 있어요.");
@@ -1434,6 +1588,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     /* [R8 §3 · DESIGN §5E] «내려 줘» — 문장·상태는 lib/publish/retract.ts 그대로. 🔴 코인 0(consume 호출이 아예 없다) */
     "post-retract": (b) => {
       const p = S.posts.find((x) => x.id === Number(b.postId)); if (!p) return { ok: false, state: "not_found", message: "그 글을 찾을 수 없어요.", status: 404 };
+      /* [R18 · B v1.5] 같은 영상이 다른 채널에 남아 있으면 응답에 `sameVideo` 를 싣는다(된 응답·못 한 응답 둘 다) */
+      const sv = sameVideoOf(p); const r = (() => {
       if (S.retracted[p.id]) return { ok: true, state: "already", message: "이미 내렸어요.", ...(p.externalUrl ? { openUrl: p.externalUrl } : {}) };
       const CAN = { naver_clip: false, youtube_shorts: false, reels: false, threads: false, instagram: false, tiktok: false };
       if (CAN[p.channel] === false) return { ok: false, state: "unsupported", status: 409,
@@ -1442,7 +1598,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       S.retracted[p.id] = iso(Date.now());
       if (runner) return { ok: true, state: "queued", message: "내 PC 프로그램이 켜지면 그 글을 내릴게요. 끝나면 정말 내려갔는지 한 번 더 확인해요.", ...(p.externalUrl ? { openUrl: p.externalUrl } : {}) };
       return { ok: true, state: "done", message: "글을 내렸어요. 정말 내려갔는지 한 번 더 확인할게요." };
-    },
+      })();
+      return sv ? { ...r, sameVideo: sv } : r; },
     /* ══ [R8-A2 · DESIGN §5E.2 ③⑤] 내 글에 들어온 신고 — 모양·문장은 netlify/functions/takedown.ts · lib/takedown.ts 그대로. 🔴 코인 0. ══ */
     "takedowns": () => ({ ok: true, notices: S.takedowns || [] }),
     "takedown-action": (b) => {
@@ -1846,7 +2003,7 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
     return rawFetch(input, init); };
 
   /* 링크·이동에 mock=1 이어 붙이기 */
-  const KEEP = ["fmt", "settle", "ref", "styles", "rec", "fsc", "styleGone", "runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
+  const KEEP = ["fmt", "settle", "ref", "styles", "rec", "fsc", "styleGone", "runner", "refreshMs", "refreshFail", "revEmpty", "revError", "trial", "readonly", "suspended", "planLimit", "kicc", "incident", "imp", "payFail", "fp", "aiCap", "banned", "stage", "judge", "noFfmpeg", "uploaded", "videoBudget", "keyin", "keyinMid", "supplier", "share", "managed", "export", "amOff", "mail", "verified", "mailFail", "payReason", "autoOff", "runnerDl", "otherPc", "upload", "company", "kinds", "chOpen", "plan", "kept", "vdl", "judgePending", "usedSlot", "slotRace", "slots", "slotCoins", "est", "oneCh", "closed", "closeSub", "gate", "why", "pubnow", "ads", "clip", "clipApp", "self", "td", "claims", "aikey", "aifb", "stock", "pw", "team", "invite", "vr", "vrAcc", "vrWait", "vrNote", "vrFail"]; // 모의 전용 손잡이는 화면 왕복 중에도 유지(fresh·reset 은 일부러 제외)
   const withMock = (href) => { try { const u = new URL(href, location.origin); if (u.origin !== location.origin || !(u.pathname.startsWith("/app/") || ["/onboarding.html", "/receipt.html", "/register.html"].includes(u.pathname))) return href; u.searchParams.set("mock", "1"); for (const k of KEEP) if (qs.has(k)) u.searchParams.set(k, qs.get(k)); return u.pathname + u.search + u.hash; } catch { return href; } };
   UI.go = (href) => location.assign(withMock(href));
   UI.postForm = (url) => { const u = new URL(url, location.origin); if (u.pathname !== "/mock-kicc") return location.assign(url); const orderNo = u.searchParams.get("orderNo") || ""; const fail = qs.get("payFail") === "1";
