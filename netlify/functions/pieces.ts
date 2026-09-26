@@ -285,6 +285,10 @@ export default async (req: Request): Promise<Response> => {
          `styleApplied` = { id, name, lines, from: "piece"|"account" }(«계정에 걸어 둔 기본 스타일이에요» / «이 글만 고른 스타일이에요») · `styleUnused` = { id, why }(«그 스타일을 찾지 못해서 스타일 없이 썼어요» · why 는 사람말). */
       if (m.styleApplied && typeof m.styleApplied === "object") meta.styleApplied = m.styleApplied;
       if (m.styleUnused && typeof m.styleUnused === "object") meta.styleUnused = m.styleUnused;
+      /* [R18 · B2] 한 영상의 **파생이 아직 시각을 못 받은 까닭**(`lib/derived-schedule.ts` — 그 계정 하루 몫이 14일 내내 찼다 등).
+         🔴 화면까지 길을 낸다 — 파생은 «예약됨 · 시각 없음»으로 보이는데 **왜 없는지**를 안 실으면 고객은 고장인 줄 안다(§9 ① 또렷하게 · AC-69).
+         `say` 는 서버가 만든 한 문장(①사실 ②어떻게 하면 되는지 ③우리가 대신 하는 것) — 화면이 다시 짓지 않는다. 자리가 잡히면 이 키는 지워진다. */
+      if (m.reuseWaiting && typeof m.reuseWaiting === "object") { const w = m.reuseWaiting as Record<string, unknown>; if (w.say) meta.reuseWaiting = { at: w.at ?? null, say: String(w.say).slice(0, 300) }; }
       const detail: Record<string, unknown> = { ...pieceRow(p), bodyHtml: String(p.body || ""), blocks: Array.isArray(p.blocks) ? p.blocks : [],
         images: assets.filter((x) => String(x.kind) === "image").map((x) => ({ url: urlOf(x), caption: x.caption ? String(x.caption) : "", sort: n(x.sort) })),
         meta, gate: g, topicTitle: p.topic_title ? String(p.topic_title) : "", regenCount: n(m.regenCount),

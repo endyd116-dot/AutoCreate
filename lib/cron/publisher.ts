@@ -66,7 +66,10 @@ export const publisherStep: CronStep = {
     const { sweepRenderAwaitingRunner } = await import("../video/render-queue");
     const renderWaiting = await sweepRenderAwaitingRunner(ctx.tid).catch(() => 0);
 
-    const due = await q(sql`SELECT p.id, p.title, p.channel, p.kind, p.account_id, p.slot_id, p.meta, p.scheduled_for, s.status AS slot_status
+    /* 🔴 [R18 · B2] `p.body` 를 싣는다 — `publishOne` 의 신고 차단(`takedownBlock`)은 «같은 piece» **또는 «같은 본문 해시»**로 막는데,
+       이 줄이 본문을 안 실어서 크론 길에서는 **해시 쪽이 죽어 있었다**(«지금 올리기» `publish-now` 는 싣는다 — 두 문이 달랐다).
+       R18 부터 파생은 원본 본문을 그대로 들고 태어난다 ⇒ 신고로 막힌 영상의 파생이 **다른 채널로 그대로 나가는** 길이었다. */
+    const due = await q(sql`SELECT p.id, p.title, p.channel, p.kind, p.account_id, p.slot_id, p.meta, p.scheduled_for, p.body, s.status AS slot_status
       FROM pieces p LEFT JOIN slots s ON s.id = p.slot_id
       WHERE p.tenant_id = ${ctx.tid} AND p.status = 'scheduled' AND p.scheduled_for IS NOT NULL AND p.scheduled_for <= NOW()
       ORDER BY p.scheduled_for, p.id LIMIT 50`);

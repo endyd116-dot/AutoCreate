@@ -9,7 +9,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../db/index";
 import { jsonb } from "../../lib/db-util";
-import { publishPieceById } from "../../lib/publish";
+import { publishPieceById, LENGTH_OVER_DETAIL } from "../../lib/publish";
 import { recheckVideoPiece, hardFailures, judgeBlockers } from "../../lib/content-approve";
 import { writeAudit } from "../../lib/audit";
 import { setSlot } from "../../lib/cron/base";   // 슬롯 상태 쓰기 한 곳(base.ts) — 편성표가 «올리는 중»에 영영 멈춰 있지 않게
@@ -58,11 +58,16 @@ export default async (req: Request): Promise<Response> => {
     if (r.ok) { console.log(`[publish-video-background] piece=${pieceId} → ${r.via}${r.already ? " (이미 나감)" : ""} ${Math.round((Date.now() - t0) / 1000)}s`); return new Response(JSON.stringify({ ok: true, via: r.via }), { status: 200, headers: { "Content-Type": "application/json" } }); }
     // 실패 — retriable 이면 다음 틱에 다시(상태만 되돌린다) · 아니면 사람에게
     const retriable = r.retriable === true;
-    await q(sql`UPDATE pieces SET status = ${retriable ? "scheduled" : "awaiting_manual"}, meta = meta || ${jsonb({ publishFail: { reason: r.reason, error: r.error ?? null, at: new Date().toISOString() } })}, updated_at = NOW()
+    /* 🔴 [R18 · B2] **길이가 채널에 안 들어가는 영상**은 «직접 올리기»로 보내지 않는다 — 직접 올려도 채널이 받지 않는다.
+       `awaiting_manual` 로 두면 고객은 «영상 받기»를 눌러 폰에서 올리다 거절당하고, 그 자리는 그날 몫을 계속 먹는다.
+       ⇒ `failed`(그날 몫을 놓아 준다 · `DAY_FREED_STATUSES`) + 서버가 만든 한 줄(①사실 ②어떻게 하면 되는지)을 그대로 싣는다. */
+    const lengthOver = !retriable && String(r.detail ?? "").startsWith(LENGTH_OVER_DETAIL);
+    const next = retriable ? "scheduled" : lengthOver ? "failed" : "awaiting_manual";
+    await q(sql`UPDATE pieces SET status = ${next}, meta = meta || ${jsonb({ publishFail: { reason: r.reason, error: r.error ?? null, at: new Date().toISOString() }, ...(lengthOver ? { failReason: String(r.error ?? "") } : {}) })}, updated_at = NOW()
       WHERE tenant_id = ${tid} AND id = ${pieceId} AND status IN ('publishing','scheduled')`);
     // 편성 자리도 piece 와 같은 상태로(위 게이트 차단과 같은 이유) — 다시 시도면 `scheduled` 로 되돌려 다음 틱이 잡게, 아니면 «직접 올리기».
-    if (slotId) await setSlot(tid, slotId, retriable ? "scheduled" : "awaiting_manual", retriable ? null : String(r.error ?? "업로드하지 못했어요"));
-    if (!retriable) await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${"publish_manual"}, ${"영상 업로드에 손이 필요해요"}, ${String(r.error ?? "업로드하지 못했어요.").slice(0, 200)}, ${"/app/posts.html"})`);
+    if (slotId) await setSlot(tid, slotId, next, retriable ? null : String(r.error ?? "업로드하지 못했어요"));
+    if (!retriable) await q(sql`INSERT INTO notifications (tenant_id, kind, title, body, link) VALUES (${tid}, ${lengthOver ? "publish_failed" : "publish_manual"}, ${lengthOver ? "이 채널엔 안 맞는 길이예요" : "영상 업로드에 손이 필요해요"}, ${String(r.error ?? "업로드하지 못했어요.").slice(0, 200)}, ${lengthOver ? `/app/piece.html?id=${pieceId}` : "/app/posts.html"})`);
     console.error(`[publish-video-background] piece=${pieceId} 실패 reason=${r.reason} retriable=${retriable}`);
     return new Response(JSON.stringify({ ok: false, reason: r.reason, retriable }), { status: 200, headers: { "Content-Type": "application/json" } });
   } catch (e) {
