@@ -110,6 +110,10 @@
   const VFMT_MAX = { graphic: 90, talking: 90, clip: 30 };
   const VFMT_LABEL = { graphic: "그래픽 스토리", talking: "말하는 영상", clip: "짧은 클립" };
   const CH_VIDEO = Object.fromEntries(Object.entries(VCH_MAX).map(([ch, max]) => [ch, { maxSeconds: max, formats: Object.keys(VFMT_MAX).map((k) => VF(k, VFMT_LABEL[k], Math.min(max, VFMT_MAX[k]))) }]));
+  /* [R19 · B2 계약 · 트리거 §0-B ㉯] 유튜브 두 칸(youtube_shorts·youtube_long)에만 싣는 문장 — 서버 `lib/publish/youtube.ts YOUTUBE_LIMIT_NOTE` 글자 그대로(숫자 0).
+     🔴 R17 의 옛 숫자 칸(«하루 N개»)은 모의가 **한 번도 안 실어서** 계정 상세의 그 줄이 모의로 한 번도 그려진 적이 없었다(AC-270 모양) — 이번엔 싣는다.
+     바꿀 땐 **서버 파일을 먼저 읽고** 여기를 고친다(모의가 다른 말을 하면 그 차이를 아무 자도 못 잡는다). */
+  const YT_LIMIT_NOTE = "유튜브는 하루에 올릴 수 있는 수가 정해져 있어요. 다 찬 날은 다음 날 순서대로 이어서 올려요.";
   /* 🔴 [R17 · A · B 계약 2026-09-23] 소재 낱말은 **서버가 준다**(AC-52). 글자는 `lib/topics.ts` 의 `labels` 와 **한 글자도 다르지 않아야** 한다 —
      모의가 다른 말을 하면 화면 말투가 갈리고(§3) 그걸 아무 자도 안 잡는다. */
   const TOPIC_LABELS = { later: {
@@ -147,34 +151,44 @@
   ].map(([key, label, category, publishVia, connectMethod, configured, status, monetizable]) => { const st = chOpen ? "active" : status;
     /* [B3 020fb15] 서버가 주는 한 칸 — 라이브 실측: 블로거는 status=active 인데 우리 앱 키가 없어 못 붙는다 */
     const reason = st !== "active" ? "not_open" : (!configured && !chOpen) ? "no_provider_key" : null;
-    const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}), ...(monetizable === false ? { monetizable: false } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key]; return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
+    const o = { key, label, category, publishVia, status: st, connectMethod, configured, connectable: !reason, ...(reason ? { connectableReason: reason } : {}), ...(monetizable === false ? { monetizable: false } : {}) }; if (CH_VIDEO[key]) o.video = CH_VIDEO[key];
+    if (key === "youtube_shorts" || key === "youtube_long") o.publishLimitNote = YT_LIMIT_NOTE;   // [R19 · B2] 유튜브 두 칸에만(서버 listChannels 와 같은 자리)
+    return o; }); // [P1R6] channels[].video{maxSeconds,formats} // 라이브 channel_registry 와 같게: 발행 경로 있는 4채널만 active · 나머지 planned(어휘 active|planned|down)
 
   /* ═══ [R18 · A] 한 번 만들어 여러 곳에 — 🔴 **B 계약 R18 v1~v1.2 글자 그대로**. 판정은 서버 `lib/video/reuse.ts` 를 흉내 낼 뿐이다. ═══
      ReuseFit = { seconds, places, go: [{channel,label,maxSeconds}], skip: [{channel,label,maxSeconds,why,line,how}] } · places = 1(원본) + go.length
-     · 후보 = 쇼츠·릴스·틱톡·네이버 클립·페북 릴스(🔴 youtube_long·threads 없음 · 트리거 §3) · 원본 채널 자신은 빠진다
+     · 후보 = 쇼츠·릴스·틱톡·네이버 클립·페북 릴스·스레드(🔴 youtube_long 없음 · 트리거 §3) · 원본 채널 자신은 빠진다
+       🔴 [R19 · B 합의] **스레드가 맨 끝에 들어왔다** — 서버 기준이 «축 이름»에서 «영상 길이가 있나»로 바뀌었다(설계 §6.4 · `set(후보) = set(keys(VIDEO_CHANNEL_MAX_SEC))`).
      · 🔴 원본이 youtube_* 면 youtube_* 전부 빠진다(B v1.1 · 한 가족에 유튜브 1건 · 쿼터) — go·skip 어디에도 안 뜬다
-     · skip.why = too_long 먼저, 그다음 no_account(B 답 2026-09-26) · 연결 안 된 후보도 **조용히 빼지 않고** skip 에 넣는다(B v1.1)
+     · skip.why = too_long → not_connectable → no_account 순(길이 먼저 · R19 B 합의) · 연결 안 된 후보도 **조용히 빼지 않고** skip 에 넣는다(B v1.1)
+       🔴 [R19 · 트리거 §0-C ㉱] not_connectable = 계정이 **없고** 그 채널이 연결을 **아직 못 받는다**(listChannels 의 `connectable:false` — 모의는 CHANNELS 의 그 칸).
+          계정이 이미 붙어 있으면 연결을 못 받는 채널이어도 **go** 다(길이 있다 · B ③). too_long + 계정 없음 + 연결 못 받음은 `how` 만 바뀐다(B ④ · remake 는 그대로 싣는다).
+          `connectable` 은 `connected` 를 실을 때 **같이** 싣는다(B ②) · 설정 targets[] 엔 **늘** 싣는다(B ⑥).
      · 문장(line·how)은 B 가 준 예시 글자 그대로 — 🔴 화면은 이 문장을 다시 짓지 않는다(모의가 다른 말을 하면 그 차이를 아무 자도 못 잡는다). */
-  const REUSE_CANDS = ["youtube_shorts", "reels", "tiktok", "naver_clip", "facebook_reels"];
+  const REUSE_CANDS = ["youtube_shorts", "reels", "tiktok", "naver_clip", "facebook_reels", "threads"];
   /* 🔴 라벨은 서버 `channelLabelKo()`(lib/channel-url.ts `CHANNEL_LABEL_KO`) — **채널 표(registry) 라벨이 아니다**(AC-275 와 같은 결 · 모양은 같고 값이 다르다).
      R18 에서 B 가 `reels` 를 «인스타 릴스»로 갈랐고 `facebook_reels` «페이스북 릴스»를 더했다(«릴스»가 둘이 돼서). reuse.ts·B2 문장이 전부 이 표를 쓴다. */
   const LABEL_KO = { naver_blog: "네이버 블로그", naver_clip: "네이버 클립", tistory: "티스토리", blogger: "블로거", wordpress: "워드프레스", threads: "스레드", instagram: "인스타그램", reels: "인스타 릴스", youtube_shorts: "유튜브 쇼츠", tiktok: "틱톡", facebook_reels: "페이스북 릴스" };
   const chLabelOf = (ch) => LABEL_KO[ch] || String(ch || "채널");
   const title40 = (t) => String(t || "").slice(0, 40);   // B2 문장의 «제목»은 앞 40자
   const vrConnected = (ch) => S.accounts.some((a) => a.channel === ch && a.status === "active");
+  /** [R19] 그 채널이 지금 연결을 받나 — 서버는 `listChannels()` 의 `connectable` 을 그대로 쓴다(판정을 새로 짓지 않는다) · 모의는 같은 표 CHANNELS 의 그 칸. */
+  const vrConnectable = (ch) => !!(CHANNELS.find((c) => c.key === ch) || {}).connectable;
   const vrFit = (origin, seconds, channels) => { const go = [], skip = [];
     for (const ch of REUSE_CANDS.filter((c) => (channels || []).includes(c))) {
       if (ch === origin || (String(origin).startsWith("youtube_") && ch.startsWith("youtube_"))) continue;
-      const label = chLabelOf(ch), max = CH_VIDEO[ch].maxSeconds;
-      if (seconds > max) { const fitSec = Math.max(...[15, 30, 60, 90].filter((s) => s <= max)); skip.push({ channel: ch, label, maxSeconds: max, why: "too_long", line: `이 영상은 ${seconds}초라 ${label}(최대 ${max}초)엔 안 올라가요.`, how: `${label}에도 올리시려면 만들 때 ${fitSec}초를 골라 주세요.`,
-        remake: { seconds: fitSec, coins: VIDEO_COIN["video_" + fitSec] }, connected: vrConnected(ch) }); }   /* [B v1.4] too_long 에만 · «그 채널용으로 짧게 하나 더»(새 영상 · 코인이 든다) · [v1.6] connected = 계정을 쟀을 때만 싣는 칸 */
-      else if (!vrConnected(ch)) skip.push({ channel: ch, label, maxSeconds: max, why: "no_account", line: `${label} 계정이 아직 연결되지 않았어요.`, how: "계정을 연결하시면 같이 올라가요.", connected: false });
+      const label = chLabelOf(ch), max = CH_VIDEO[ch].maxSeconds, connected = vrConnected(ch), connectable = vrConnectable(ch);
+      if (seconds > max) { const fitSec = Math.max(...[15, 30, 60, 90].filter((s) => s <= max)); skip.push({ channel: ch, label, maxSeconds: max, why: "too_long", line: `이 영상은 ${seconds}초라 ${label}(최대 ${max}초)엔 안 올라가요.`,
+        how: !connected && !connectable ? `${label} 연결은 아직 준비 중이에요 — 연결이 열리면 ${fitSec}초로 만들어 같이 올릴 수 있어요.` : `${label}에도 올리시려면 만들 때 ${fitSec}초를 골라 주세요.`,   /* [R19 · B ④] 연결할 길이 없으면 «골라 주세요»도 막다른 말이다 */
+        remake: { seconds: fitSec, coins: VIDEO_COIN["video_" + fitSec] }, connected, connectable }); }   /* [B v1.4] too_long 에만 · «그 채널용으로 짧게 하나 더»(새 영상 · 코인이 든다) · [v1.6] connected = 계정을 쟀을 때만 싣는 칸 · [R19] connectable 은 그와 같이 */
+      else if (!connected && !connectable) skip.push({ channel: ch, label, maxSeconds: max, why: "not_connectable", line: `${label} 연결은 아직 준비 중이에요.`, how: "연결이 열리면 여기서 같이 올릴 수 있어요.", connected: false, connectable: false });   /* [R19 · B ③] remake 없음 */
+      else if (!connected) skip.push({ channel: ch, label, maxSeconds: max, why: "no_account", line: `${label} 계정이 아직 연결되지 않았어요.`, how: "계정을 연결하시면 같이 올라가요.", connected: false, connectable: true });
       else go.push({ channel: ch, label, maxSeconds: max }); }
     return { seconds, places: 1 + go.length, go, skip }; };
   const vrBasis = () => (S.videoReuse.on ? "chosen" : S.videoReuse.asked ? "off" : "all");
   const vrChannels = () => (S.videoReuse.on ? S.videoReuse.channels : S.videoReuse.asked ? [] : REUSE_CANDS);
   const vrPayload = () => ({ on: !!S.videoReuse.on, channels: [...S.videoReuse.channels], asked: !!S.videoReuse.asked, askedAt: S.videoReuse.askedAt || null,
-    targets: REUSE_CANDS.map((ch) => ({ channel: ch, label: chLabelOf(ch), maxSeconds: CH_VIDEO[ch].maxSeconds, connected: vrConnected(ch) })) });
+    targets: REUSE_CANDS.map((ch) => ({ channel: ch, label: chLabelOf(ch), maxSeconds: CH_VIDEO[ch].maxSeconds, connected: vrConnected(ch), connectable: vrConnectable(ch) })) });   // [R19 · B ⑥] connectable 은 늘 boolean
   /** director-propose 영상 piece 에 싣는 두 칸(B v1.1 — 포맷 무관 · 그 채널 상한 이하의 15·30·60·90 전부) */
   const vrPropose = (p) => ({ reuseFit: [15, 30, 60, 90].filter((s) => s <= ((CH_VIDEO[p.channel] || {}).maxSeconds || 60)).map((s) => vrFit(p.channel, s, vrChannels())), reuseBasis: vrBasis() });
   /** pieces-get 영상 piece 의 `reuse` — 원본/파생. 🔴 검수 중 원본에 적어 둔 채널(`_reusePending`)이 있으면 basis "chosen" · fit 은 그 채널로 · ask false(B 답 3) */
@@ -1367,7 +1381,7 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
         if (chans) { const fit = vrFit(p.channel, Number(p.meta && p.meta.video && p.meta.video.seconds) || 60, chans); vrMake(p, fit.go.map((g) => g.channel)); p._reuseSkipped = fit.skip; }
         delete p._reusePending; }
       tick(); return { ok: true, status: "scheduled", scheduledFor: p.scheduledFor }; },
-    /* [R18 · B v1.4 · 트리거 §6-6] «그 채널용으로 짧게 하나 더» — { id: 원본, channel } → 202 새로 · 200 already(코인 0 · 같은 id) · 402 coin_short · 400 fits·channel·no_account·is_derived.
+    /* [R18 · B v1.4 · 트리거 §6-6] «그 채널용으로 짧게 하나 더» — { id: 원본, channel } → 202 새로 · 200 already(코인 0 · 같은 id) · 402 coin_short · 400 fits·channel·not_connectable(R19)·no_account·is_derived.
        🔴 새 영상이다(originPieceId null · 코인이 든다) · `meta.remakeOf` = 원본 · `alsoTo` = 원본에서 **길이 때문에 빠졌던** 다른 채널 중 새 길이에 들어가는 것(target 자신 제외 · 설정의 고른 곳이 아니다). */
     "pieces-remake": (b) => { const nw = notWritable(); if (nw) return nw; const p = S.pieces.find((x) => x.id === Number(b.id));
       if (!p || p.kind !== "video") return err("not_found", "영상을 찾을 수 없어요.", { status: 404 });
@@ -1375,6 +1389,7 @@ ${clean}` : clean; }; // 고지 = bodyHtml 첫 요소(발행물 정본) · meta.
       const ch = String(b.channel || ""), max = (CH_VIDEO[ch] || {}).maxSeconds, sec0 = Number(p.meta && p.meta.video && p.meta.video.seconds) || 60;
       if (!REUSE_CANDS.includes(ch) || !max) return err("channel", "그 채널엔 올릴 수 없어요.");
       if (sec0 <= max) return err("fits", `이 영상은 이미 ${chLabelOf(ch)}에 들어가요.`);
+      if (!vrConnected(ch) && !vrConnectable(ch)) return err("not_connectable", `${chLabelOf(ch)} 연결은 아직 준비 중이에요 — 연결이 열리면 여기서 새로 만들 수 있어요.`);   // [R19 · B ⑧] 계정 없고 연결도 못 받는 채널
       if (!vrConnected(ch)) return err("no_account", `${chLabelOf(ch)} 계정이 아직 연결되지 않았어요.`);
       const sec = Math.max(...[15, 30, 60, 90].filter((s) => s <= max));
       const had = S.pieces.find((x) => x.meta && x.meta.remakeOf === p.id && x.channel === ch);
