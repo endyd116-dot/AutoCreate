@@ -4,7 +4,9 @@
  *   시드 집 둘을 만들고(끝나면 치운다) 실제 경로를 부른다: 설정 저장 → 처음 한 번 답(검수 중) → 승인(`approvePiece` — 사람·크론 같은 한 곳)
  *   → 파생 · 두 번 불러도 새로 0 · 원장 0행 · 같은 r2_key · 원본 다시 만들기(멈춤 → 새 영상으로 갈아 끼움) · 원본 버리기(같이 버림)
  *   · 안 물은 집의 알림 한 번(두 번째 승인엔 안 나간다).
- *   🔴 발행은 하지 않는다 — 파생은 `scheduled_for NULL` 이라 발행 크론이 안 줍고, 이 스크립트도 publish 를 안 부른다.
+ *   🔴 발행은 하지 않는다 — 이 스크립트는 publish 를 안 부른다. 파생은 B2 편성(`scheduleDerived`)이 **원본 뒤**에 시각을 박는다 —
+ *      원본이 `NOW()+2시간` 이라 파생도 그 뒤다 ⇒ 이 판이 도는 몇 분 안에 발행 크론이 주울 시각이 아니다(아래 자가 **잰다** — 말이 아니라).
+ *      🔴 [2026-09-27 C · R19] 옛 문장 «파생은 `scheduled_for NULL`»은 R18 B2 편성이 들어온 뒤로 **거짓**이었다(체인 첫 판이 잡았다 · 아래 자 수리).
  *   🔴 **영상 생성도 하지 않는다** — «30초 판 새로 만들기»는 `confirm` → `triggerVideo` 를 부르는데, `.env` 에 라이브 주소와
  *      `INTERNAL_SECRET` 이 있으면 **라이브 배경 함수를 불러 진짜 Veo·TTS 가 돈다**(AC-53 · $3.63 실측). 그래서 맨 위에서
  *      **127.0.0.1 스텁(202)** 을 띄우고 `URL` 을 거기로 · 비밀값은 가짜로 둔다 → 생성 호출은 스텁에만 닿고 판은 `generating` 에 머문다.
@@ -98,7 +100,17 @@ async function main() {
       FROM pieces p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.tenant_id = ${tA} AND p.origin_piece_id = ${origin} ORDER BY p.id`);
     ok("60초 → 릴스·틱톡·페북 릴스 세 곳(클립은 30초라 빠진다)", der.map((d) => d.channel).join() === "reels,tiktok,facebook_reels", der.map((d) => d.channel).join());
     ok("🔴 youtube_long 계정이 연결돼 있어도 안 간다", !der.some((d) => String(d.channel).startsWith("youtube_")));
-    ok("파생 = scheduled · 시각 NULL · 자리 NULL · 발행 흔적 NULL", der.every((d) => d.status === "scheduled" && d.scheduled_for == null && d.slot_id == null && d.external_url == null && d.channel_ref == null));
+    /* 🔴 [2026-09-27 C · R19 — 배포 체인이 잡았다 · 자가 코드보다 늦었다(§2.9 ②)] 옛 줄은 «시각 NULL · 자리 NULL»을 요구했다 —
+       R18 에 B2 편성(`deriveVideoPieces` → SEAM → `scheduleDerived`)이 들어온 뒤로 파생은 **시각과 자리를 함께** 받는다
+       (`verify-r18-schedule-live` ① 이 바로 그것을 잰다). 두 자가 서로 반대를 요구하고 있었다 ⇒ 편성의 계약으로 바꾼다:
+       시각과 자리는 **한 몸**(둘 다 있거나 · 자리를 못 잡으면 둘 다 없거나) · 발행 흔적 0 · 🔴 잡힌 시각은 **30분 넘게 뒤**(이 판이 치우기 전에 발행 크론이 못 줍는다). */
+    const placed = der.filter((d) => d.scheduled_for != null && d.slot_id != null), waiting = der.filter((d) => d.scheduled_for == null && d.slot_id == null);
+    ok("파생 = scheduled · 발행 흔적 NULL · 시각과 자리는 한 몸(B2 편성이 둘 다 잡거나 둘 다 비운다)",
+      der.length > 0 && der.every((d) => d.status === "scheduled" && d.external_url == null && d.channel_ref == null) && placed.length + waiting.length === der.length,
+      `편성됨 ${placed.length} · 자리 대기 ${waiting.length} · 반쪽 ${der.length - placed.length - waiting.length}`);
+    const soonest = placed.map((d) => new Date(String(d.scheduled_for)).getTime()).sort((a, b) => a - b)[0];
+    ok("🔴 편성된 파생의 시각은 30분 넘게 뒤 — 이 판이 치우기 전에 발행 크론이 주울 수 없다",
+      placed.length === 0 || soonest > Date.now() + 30 * 60_000, placed.length ? `가장 이른 파생 ${Math.round((soonest - Date.now()) / 60_000)}분 뒤` : "편성된 파생 0");
     ok("계정은 그 채널 계정", der.every((d) => d.acc_channel === d.channel));
     const after = await consumeRows(tA);
     ok("🔴 코인 — 파생 전후 consume 행 수가 같다", before === after, `${before} → ${after}`);

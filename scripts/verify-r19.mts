@@ -331,6 +331,59 @@ if (reuseAlive) {
   rec("reuse.honest", "창구 닫힌 채널에 «연결하시면» 0", "unmeasured", "과녁 없음");
 }
 
+/* ═══ reuse.honest 화면 겹 — 🔴 브라우저로(--screen) · 트리거 §0-E «서버 문장 · 화면 둘 다» ═══
+   모의 기본 = 라이브 모양(영상 채널 여섯 전부 `planned` → `connectable:false` · 영상 계정 0). 그 판의 영상 글 화면에 «연결하시면»이 **0** 이어야 한다.
+   대조군 `chOpen=1`(창구 다 열림)에서는 «연결하시면»이 **나와야** 한다 — 안 나오면 이 겹은 눈먼 초록이다.
+   재는 화면: 510(계정 없는 쇼츠 — «올릴 채널이 아직 없어요» 상자) · 509(계정 있는 쇼츠 — «다른 곳에도 올릴까요» 재사용 줄) · 509 + `vr=on`. */
+if (ARGS.has("--screen")) {
+  const SAY = "연결하시면";
+  try {
+    const { requirePlaywright } = await import("./_lib/find-playwright.mjs");
+    const { chromium } = await requirePlaywright();
+    const { createServer } = await import("node:http");
+    const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".woff2": "font/woff2" };
+    const srv = createServer((req, res) => {
+      let f = path.join(ROOT, "public", decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname));
+      if (existsSync(f) && statSync(f).isDirectory()) f = path.join(f, "index.html");
+      if (!existsSync(f)) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { "content-type": TYPES[path.extname(f)] ?? "application/octet-stream" }); res.end(readFileSync(f));
+    });
+    await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", () => ok()));
+    const port = (srv.address() as { port: number }).port;
+    const browser = await chromium.launch();
+    /** 화면을 열고 **글이 멈출 때까지**(0.6초 동안 길이 그대로 · 최대 10초) 기다린 뒤 본문 글자를 준다 — 늦게 오는 재사용 줄까지 잡는다. */
+    const pageText = async (q: string, must: string) => {
+      const pg = await browser.newPage(); const errs: string[] = [];
+      pg.on("pageerror", (e: Error) => errs.push(String(e.message)));
+      await pg.goto(`http://127.0.0.1:${port}/app/piece.html?mock=1&${q}`);
+      await pg.waitForFunction((t: string) => document.body.innerText.includes(t), must, { timeout: 12000 }).catch(() => {});
+      let last = -1, text = "";
+      for (let i = 0; i < 20; i++) { text = await pg.evaluate(() => document.body.innerText); if (text.length === last) break; last = text.length; await pg.waitForTimeout(600); }
+      await pg.close();
+      return { text, errs, seen: text.includes(must) };
+    };
+    const SCREENS = [
+      { q: "id=510", must: "밥솥 내솥 얼룩", name: "계정 없는 쇼츠(510) — «올릴 채널이 아직 없어요»" },
+      { q: "id=509", must: "전자레인지 냄새", name: "계정 있는 쇼츠(509) — 재사용 줄" },
+      { q: "id=509&vr=on", must: "전자레인지 냄새", name: "509 + 여러 곳에 올리기 켬" },
+    ];
+    let controlSays = 0;
+    for (const s of SCREENS) {
+      const closed = await pageText(s.q, s.must);
+      const open = await pageText(`${s.q}&chOpen=1`, s.must);
+      controlSays += open.text.split(SAY).length - 1;
+      const n = closed.text.split(SAY).length - 1;
+      const ctx = n ? closed.text.slice(Math.max(0, closed.text.indexOf(SAY) - 40), closed.text.indexOf(SAY) + 30).replace(/\s+/g, " ") : "";
+      rec("reuse.honest", `🔴 화면 — ${s.name}: 창구 닫힘 ∧ 계정 없음에서 «${SAY}» 0`, !closed.seen ? "unmeasured" : closed.errs.length ? "fail" : n ? "fail" : "pass",
+        !closed.seen ? `화면이 안 떴다(«${s.must}» 못 봄)` : closed.errs.length ? `pageerror ${closed.errs[0].slice(0, 80)}` : n ? `${n}곳 — «…${ctx}…»` : "0곳");
+    }
+    rec("reuse.honest", `화면 대조군 — 창구가 열린 판(chOpen=1)에서는 «${SAY}»가 나온다(이 겹이 눈멀지 않았다)`, controlSays ? "pass" : "unmeasured", `${controlSays}곳`);
+    await browser.close(); srv.close();
+  } catch (e) {
+    rec("reuse.honest", "화면 겹을 못 쟀다", "unmeasured", String((e as Error)?.message ?? e).slice(0, 200));
+  }
+}
+
 /* ═══ yt.project · yt.rolling — 🔴 라이브 DB 에서 진짜 함수(--db) ═══ */
 if (!DB) {
   rec("yt.project", "프로젝트 전체를 센다(라이브 DB)", "unmeasured", "`--db` 없이 돌렸다");

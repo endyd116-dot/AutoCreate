@@ -12,13 +12,14 @@
  *     ④ 0·1·2 밖 종료(시간 초과·신호)는 ⊘ «끝까지 못 갔다» — «안 울었다»로 세지 않는다(AC-249).
  *
  *   ══ 사본은 어디에 ══
- *   `--tree <경로>`(기본: 작업 폴더)의 `lib/`·`db/`·`netlify/`·`public/js/`·`public/app/` 를 **내 나무 안** `.r19-mut-<pid>/` 에 복사한다
+ *   `--tree <경로>`(기본: 작업 폴더)의 `lib/`·`db/`·`netlify/`·`public/` 를 **내 나무 안** `.r19-mut-<pid>/` 에 복사한다
  *   (내 `node_modules` 가 풀리게). 🔴 남의 나무에는 한 글자도 안 쓴다 · 끝나면(성공·실패·예외) 사본을 지운다.
  *   🔴 변이표의 키는 `put` 이다(`to:` 아님 — `verify-mutant-residue` 가 `to: "…"` 글자를 제품에서 찾는다 · 이 하니스는 사본만 고친다). 표식 `r19mut`.
  *
  *   쓰는 법:
  *     node scripts/verify-r19-mutants.mjs                 ← 순수 변이(DB 0 · 돈 0 · 네트워크 0)
  *     node scripts/verify-r19-mutants.mjs --db            ← + DB 변이(yt.project · yt.rolling — 변이마다 시드 집 둘 → 치운다)
+ *     node scripts/verify-r19-mutants.mjs --screen        ← + 화면 변이(브라우저 · piece.html 의 «준비 중» 갈래) · 대조군도 --screen 으로 돈다
  *     node scripts/verify-r19-mutants.mjs --tree ../AutoCreate-B2 --only yt.calls
  *   종료코드: 0 = 과녁 있는 변이 **전부** 잡힘 · 1 = 놓친 변이가 있다 · 2 = 못 쟀다(대조군 빨강 · 과녁 있는 변이 0 · ⊘ 섞임).
  */
@@ -31,9 +32,10 @@ const MY = path.resolve(import.meta.dirname, "..");
 const argv = process.argv.slice(2);
 const TREE = path.resolve(argv.includes("--tree") ? argv[argv.indexOf("--tree") + 1] : process.cwd());
 const DB = argv.includes("--db");
+const SCREEN = argv.includes("--screen");   /* 화면 겹 — 브라우저로 piece.html 을 읽는 변이 */
 const ONLY = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : "";
 const RULER = "scripts/verify-r19.mts";
-const MINE = [RULER, "scripts/_lib/code-only.mjs", "scripts/_lib/load-env.mjs", "scripts/_teardown.mjs"];
+const MINE = [RULER, "scripts/_lib/code-only.mjs", "scripts/_lib/load-env.mjs", "scripts/_lib/find-playwright.mjs", "scripts/_teardown.mjs"];
 const TSX = path.join(MY, "node_modules", "tsx", "dist", "cli.mjs");
 const YT = "lib/publish/youtube.ts", PO = "lib/publish-one.ts", REUSE = "lib/video/reuse.ts", ACC = "lib/accounts.ts", MOCK = "public/js/mock.js";
 
@@ -82,11 +84,14 @@ add("모의 후보에서 쓰레드를 빼면(서버 ≠ 모의)", MOCK,
   [["const REUSE_CANDS = [\"youtube_shorts\", \"reels\", \"tiktok\", \"naver_clip\", \"facebook_reels\", \"threads\"];", "const REUSE_CANDS = [\"youtube_shorts\", \"reels\", \"tiktok\", \"naver_clip\", \"facebook_reels\"]; /*r19mut*/"]], "reuse.targets");
 add("`not_connectable` 갈래를 지우면(창구가 닫혀도 «연결하시면»)", REUSE,
   [["const canConnect = input.connectable ? input.connectable[channel] !== false : true;", "const canConnect = true; /*r19mut*/"]], "reuse.honest");
+/* 화면 겹(--screen) — 생성된 화면 파일을 직접 고친다(자가 브라우저로 읽는 것은 `public/app/piece.html` 이다 · 정본 `_tpl.txt` 가 아니다) */
+add("화면 — 재사용 줄의 «준비 중» 갈래를 지우면(«계정을 연결하시면 …용» 단추가 닫힌 창구에 뜬다)", "public/app/piece.html",
+  [['s.why === "too_long" && s.remake && s.connected === false && s.connectable === false ? ""', 's.why === "too_long" && s.remake && false /*r19mut*/ ? ""']], "reuse.honest", "screen");
 
 /* ═══ 돌리기 ═══ */
-const run = (withDb) => {
-  const args = [TSX, path.join(BOX, RULER), ...(withDb ? ["--db"] : [])];
-  try { return { code: 0, out: execFileSync(process.execPath, args, { cwd: BOX, encoding: "utf8", env: process.env, maxBuffer: 32 << 20 }) }; }
+const run = (withDb, withScreen = SCREEN) => {
+  const args = [TSX, path.join(BOX, RULER), ...(withDb ? ["--db"] : []), ...(withScreen ? ["--screen"] : [])];
+  try { return { code: 0, out: execFileSync(process.execPath, args, { cwd: BOX, encoding: "utf8", env: { ...process.env, PW_DIR: process.env.PW_DIR || path.join(MY, "runner") }, maxBuffer: 32 << 20 }) }; }
   catch (e) { return { code: e.status ?? -1, out: String(e.stdout ?? "") + String(e.stderr ?? "") }; }
 };
 const count = (hay, needle) => (needle ? hay.split(needle).length - 1 : 0);
@@ -96,7 +101,7 @@ console.log(`\n── 내 R19 자에 변이를 넣는다 · 나무 ${TREE} · ${
 let exit = 0;
 try {
   mkdirSync(BOX, { recursive: true });
-  for (const d of ["lib", "db", "netlify", "public/js", "public/app"]) if (existsSync(path.join(TREE, d))) cpSync(path.join(TREE, d), path.join(BOX, d), { recursive: true });
+  for (const d of ["lib", "db", "netlify", "public"]) if (existsSync(path.join(TREE, d))) cpSync(path.join(TREE, d), path.join(BOX, d), { recursive: true });
   for (const f of MINE) { mkdirSync(path.dirname(path.join(BOX, f)), { recursive: true }); cpSync(path.join(MY, f), path.join(BOX, f)); }
 
   const ctl = run(DB);
@@ -108,6 +113,7 @@ try {
     const missedLines = [];
     for (const c of cases) {
       if (c.arm === "db" && !DB) continue;
+      if (c.arm === "screen" && !SCREEN) continue;
       if (ONLY && !c.name.includes(ONLY) && c.axis !== ONLY) continue;
       const p = path.join(BOX, c.file);
       const orig = existsSync(p) ? readFileSync(p, "utf8") : "";
