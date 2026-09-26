@@ -62,7 +62,9 @@ function run(transform) {
         그대로 두면 **대조군부터 종료코드 2** 가 된다(실제로 밟았다). ⇒ `PW_DIR` 을 **절대 경로로 못 박는다.**
      ㉯ 그 자는 포트 8931 을 연다 — 변이마다 새로 여니 **겹치면 옛 판이 답한다**(그 자 주석이 경고한 그 병).
         ⇒ 변이마다 **다른 포트**를 준다. */
-  const PW_DIR = path.resolve(ROOT, "../AutoMarketing");
+  /* 🔴 [2026-09-27 C · R19] 셸이 준 `PW_DIR` 이 먼저다 — 배포 체인(`gate-parallel.mjs`)은 `C:/tmp/ac-gate-N` 에서 돌아
+     `ROOT/../AutoMarketing` 이 **없는 자리**다. 형제 자들(`verify-pause-surface` 등)은 이미 `PW_DIR` 을 먼저 본다 — 이 자만 못 박아 뒀다. */
+  const PW_DIR = process.env.PW_DIR ? path.resolve(process.env.PW_DIR) : path.resolve(ROOT, "../AutoMarketing");
   const out = {};
   for (const [name, rel] of [["scope", SCOPE], ["surf", SURF]]) {
     const env = { ...process.env, PW_DIR, PORT: String(9200 + seq * 2 + (name === "surf" ? 1 : 0)) };
