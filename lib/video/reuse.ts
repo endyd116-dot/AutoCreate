@@ -487,3 +487,31 @@ export async function onOriginApproved(tid: number, p: Row): Promise<DeriveResul
     return null;
   }
 }
+
+/* ═══════════ 같은 영상 가족(내리기 때 말해 주기) ═══════════ */
+
+export interface SameVideoRow { pieceId: number; channel: string; label: string; status: string; scheduledFor: string | null; postId: number | null; externalUrl: string | null; retracted: boolean }
+export interface SameVideoView { originPieceId: number; unsent: SameVideoRow[]; live: SameVideoRow[]; line: string }
+
+/**
+ * 이 글과 **같은 영상**(원본 + 파생 전부)에서 이 글을 뺀 나머지 — `/api/post-retract` 가 응답에 싣는다.
+ *   🔴 [R18 · B] 원본을 **내려도** 아직 안 나간 파생은 나중에 그대로 나가고, 이미 나간 파생은 다른 채널에 그대로 남는다.
+ *      그런데 내리기는 **채널마다 까닭이 다를 수 있다**(유튜브만 내리고 릴스는 둘 수 있다) — 버리기·다시 만들기처럼 번지게 하면 우리가 고르는 것이 된다.
+ *      ⇒ **막지도 번지지도 않고 말해 준다**(§9): «같은 영상이 다른 N곳에 예약돼/올라가 있어요» + 같이 거둘 길은 **기존 문**(pieces-reject · post-retract)이다.
+ *   영상이 아니거나 가족이 없으면 null(키를 안 싣는다 — «없음»을 빈 목록으로 보내지 않는다).
+ */
+export async function sameVideoOf(tid: number, pieceId: number): Promise<SameVideoView | null> {
+  const [p] = await q(sql`SELECT id, kind, origin_piece_id FROM pieces WHERE tenant_id = ${tid} AND id = ${pieceId}`);
+  if (!p || String(p.kind) !== "video") return null;
+  const originId = p.origin_piece_id != null && n(p.origin_piece_id) ? n(p.origin_piece_id) : n(p.id);
+  const rows = await q(sql`SELECT p.id, p.channel, p.status, p.scheduled_for, po.id AS post_id, po.external_url, (po.stats->'retract') IS NOT NULL AS retracted
+    FROM pieces p LEFT JOIN LATERAL (SELECT id, external_url, stats FROM posts WHERE tenant_id = p.tenant_id AND piece_id = p.id ORDER BY id DESC LIMIT 1) po ON TRUE
+    WHERE p.tenant_id = ${tid} AND (p.id = ${originId} OR p.origin_piece_id = ${originId}) AND p.id <> ${pieceId} ORDER BY p.id`);
+  const all: SameVideoRow[] = rows.map((r) => ({ pieceId: n(r.id), channel: String(r.channel), label: channelLabelKo(r.channel), status: String(r.status),
+    scheduledFor: isoOrNull(r.scheduled_for), postId: r.post_id == null ? null : n(r.post_id), externalUrl: r.external_url == null ? null : String(r.external_url), retracted: r.retracted === true }));
+  const unsent = all.filter((r) => UNSENT_DERIVED.includes(r.status));
+  const live = all.filter((r) => r.status === "published" && !r.retracted);
+  if (!unsent.length && !live.length) return null;
+  const parts = [live.length ? `${live.length}곳에 올라가 있어요` : "", unsent.length ? `${unsent.length}곳에 예약돼 있어요` : ""].filter(Boolean).join(" · ");
+  return { originPieceId: originId, unsent, live, line: `같은 영상이 다른 ${parts}. 같이 거두시려면 아래에서 골라 주세요.` };
+}

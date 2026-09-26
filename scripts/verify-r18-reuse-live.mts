@@ -16,7 +16,7 @@ import { sql } from "drizzle-orm";
 import { db, pgClient } from "../db/index";
 import { jsonb } from "../lib/db-util";
 import { approvePiece } from "../lib/content-approve";
-import { answerReuse, deriveVideoPieces, holdDerivedFor, pieceReuseView, saveVideoReuse, videoReuseView } from "../lib/video/reuse";
+import { answerReuse, deriveVideoPieces, holdDerivedFor, pieceReuseView, saveVideoReuse, videoReuseView, sameVideoOf } from "../lib/video/reuse";
 import { remakeVideoFor } from "../lib/director";
 import { coinCostOf, videoCoinItem } from "../lib/coin-table";
 
@@ -166,6 +166,12 @@ async function main() {
     const rej = await holdDerivedFor(tA, origin, "reject");
     const st = await q(sql`SELECT id, status FROM pieces WHERE tenant_id = ${tA} AND origin_piece_id = ${origin} ORDER BY id`);
     ok("안 나간 둘만 rejected · 이미 나간 하나는 그대로", rej.length === 2 && st.filter((s) => s.status === "rejected").length === 2 && st.find((s) => n(s.id) === dIds[0])?.status === "published", st.map((s) => `${s.id}:${s.status}`).join(" "));
+    /* 내리기 때 말해 주기 — 원본 쪽에서 보면 «다른 곳에 올라가 있는 같은 영상» 하나(버린 둘은 안 뜬다) */
+    const svO = await sameVideoOf(tA, origin);
+    ok("같은 영상 가족(원본에서) — 올라간 파생 1 · 버린 것 0", svO?.live.length === 1 && svO.live[0].pieceId === dIds[0] && svO.unsent.length === 0, svO?.line ?? "null");
+    const svD = await sameVideoOf(tA, dIds[0]);
+    ok("같은 영상 가족(파생에서) — 원본이 예약돼 있다고 말한다", svD?.unsent.length === 1 && svD.unsent[0].pieceId === origin, svD?.line ?? "null");
+    ok("🔴 말투 — «실패·오류·불가» 0", !/실패|오류|불가/.test(`${svO?.line}${svD?.line}`));
 
     console.log("\n⑦ 안 물은 집 — 승인 때 알림 한 번(모르면 안 켠다)");
     const accB = await seedAccount(tB, "youtube_shorts", "yt_b");
