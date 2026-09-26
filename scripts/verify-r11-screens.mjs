@@ -135,17 +135,29 @@ const RAW = /\b(ruleKind|shorts|cardnews|post)\b/;
   await page.close();
 }
 
-/* ── 🔴 A-3 거짓 양성 짝 — 축이 없으면 줄이 없고, 서버가 «남음»을 못 주면 숫자를 안 지어낸다 ── */
-{
-  const { page } = await open("/app/create.html?mock=1&oneCh=1");   // 네이버만 있는 집 = 영상 계정 0
+/* ── 🔴 A-3 거짓 양성 짝 — 축이 없으면 줄이 없고, 서버가 «남음»을 못 주면 숫자를 안 지어낸다 ──
+   🔴 [2026-09-27 C · R19 C0 — 배포 체인 첫 판이 잡았다] 이 짝의 «축»은 **영상 계정**이 아니라 **영상을 켰나(kinds)**다 —
+      AC-184(A · 2026-09-21 · bd4e800)가 «영상을 켠 집이면 계정 0개여도 배울 수 있다(옷장은 테넌트에 붙는다)»로 바꿨는데
+      이 자는 옛 규칙(«영상 계정이 없으면 줄이 없다»)을 그대로 재서 **09-21 부터 main 에서 늘 빨강**이었다(제품이 맞고 자가 늦었다 · §2.9 ②).
+      ⇒ 두 판으로 갈라 잰다: ㉮ 영상을 **끈** 집(`kinds=text`) → 줄이 없다 · 한도도 글 것만 ㉯ 영상을 켰는데 영상 계정 0(`oneCh=1`) → 줄이 **있다**(AC-184). */
+const refRows = async (url) => {
+  const { page } = await open(url);
   const v = await page.evaluate(() => {
     const g = document.querySelector("#refg");
     const rows = [...(g?.querySelectorAll(".row") || [])].filter((r) => !r.hidden).map((r) => (r.querySelector(".t")?.textContent || "").trim());
     return { rows, quota: (g?.querySelector("#refq")?.textContent || "").trim() };
   });
-  rec("🔴 A-3 영상 계정이 없으면 «영상 스타일 배우기» 줄이 **없다**", !v.rows.includes("영상 스타일 배우기") && v.rows.includes("글 스타일 배우기"), `줄=${v.rows.join(" · ") || "없음"}`);
-  rec("A-3 한 축만 있으면 한도도 그 축 것만 말한다", /이번 달 \d+ \/ \d+ 남음/.test(v.quota) && !/영상/.test(v.quota), `«${v.quota}»`);
   await page.close();
+  return v;
+};
+{
+  const v = await refRows("/app/create.html?mock=1&oneCh=1&kinds=text");   // 네이버만 · 영상을 끈 집
+  rec("🔴 A-3 영상을 **끈** 집이면 «영상 스타일 배우기» 줄이 **없다**", !v.rows.includes("영상 스타일 배우기") && v.rows.includes("글 스타일 배우기"), `줄=${v.rows.join(" · ") || "없음"}`);
+  rec("A-3 한 축만 있으면 한도도 그 축 것만 말한다", /이번 달 \d+ \/ \d+ 남음/.test(v.quota) && !/영상/.test(v.quota), `«${v.quota}»`);
+}
+{
+  const v = await refRows("/app/create.html?mock=1&oneCh=1");   // 네이버만 · 영상은 켬(모의 기본) = 영상 계정 0
+  rec("🔴 A-3 영상을 켰으면 영상 계정이 0개여도 «영상 스타일 배우기» 줄이 **있다**(AC-184 · 옷장은 테넌트에 붙는다)", v.rows.includes("영상 스타일 배우기") && v.rows.includes("글 스타일 배우기"), `줄=${v.rows.join(" · ") || "없음"}`);
 }
 {
   /* 🔴 서버가 `quota` 를 못 줄 때 — 숫자를 **지어내면 안 된다**(AC-9·AC-92).
