@@ -86,12 +86,20 @@ const LIVE_IN_CHAIN = [
   { file: "verify-r18-schedule-live.mts", db: true, why: "시드 집 하나 → 스스로 치운다 · 발행 0 — 파생 시차 ≥30분 · 멱등 · 쉬다 깨기" },
   { file: "verify-r18-one-video-many.mts", args: ["--db", "--rehearse"], db: true, timeoutMin: 40,
     why: "라이브 읽기(read only) + 시드 집 리허설(퓨즈 = 로컬 스텁 · 돈 0 · 발행 0) — 코인 한 번 · 같은 분 · 동시 두 번. 🔴 라이브 파생 0 이면 DB 팔이 ⊘(표본 0)" },
+  /* ── R19 (2026-09-27) ── */
+  { file: "verify-r19.mts", args: ["--db"], db: true,
+    why: "C · R19 여섯 축 + 배경 전 문 — 시드 집 둘 → 치운다 · `fetch` 스텁(대본 밖 주소는 던진다) · 돈 0" },
+  { file: "verify-r19-mutants.mjs", args: ["--db"], db: true, timeoutMin: 30,
+    why: "C · R19 자 변이 14(DB 셋은 변이마다 시드 집 둘 → 치운다) — 순수 변이도 이 판 안에 있다" },
+  { file: "verify-r19-threads-derived-live.mts", db: true,
+    why: "B2 · 쓰레드 파생 시차·같은 r2_key·멱등 + 유튜브 찬 날 — 시드 집 둘 → 치운다 · `fetch` 전부 스텁 · 영상 생성 0 · 한도 1 은 이 프로세스만" },
 ];
 /** 돈 축 — ⊘ 를 ✗ 로(조정 ①). 파일 자는 이름으로, 탐침은 아래 `moneyProbe`. */
 const MONEY_FILES = new Set(["verify-money-idem.mjs", ...LIVE_IN_CHAIN.filter((g) => g.money).map((g) => g.file)]);
 /** safe 인데 체인에서 빼는 것 — 까닭 필수. */
 const SAFE_SKIP = new Map([
   ["verify-safe-list.mjs", "목록 자체다 — 인자 없이 돌면 목록만 찍는다(체인이 그 목록으로 돈다)"],
+  ["verify-r19-mutants.mjs", "체인은 `--db` 판을 1번 칸에서 돈다(순수 변이도 그 판 안에 있다 · 두 번 돌 까닭이 없다)"],
 ]);
 
 /* ───────────────────────── 체인 짓기 ───────────────────────── */
