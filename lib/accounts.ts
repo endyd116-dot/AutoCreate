@@ -239,7 +239,9 @@ export interface ChannelInfo {
   /** [P1R6 §2.3] 영상 채널이면 규격 — 🔴 **화면이 숫자를 갖지 않는다**(«클립은 30초까지» 를 화면에 적지 않는다).
    *  `maxSeconds` = 채널 상한(naver_clip 30 · 나머지 60 · 릴스 90 은 Phase 5) · `formats[].maxSeconds` = 채널·포맷 상한 중 작은 쪽.
    *  정본은 `lib/writing-contracts.ts VIDEO_CHANNEL_MAX_SEC`·`VIDEO_FORMAT_MAX_SEC` 한 곳. */
-  video?: { maxSeconds: VideoSecondsUi; formats: { key: string; label: string; maxSeconds: VideoSecondsUi }[] };
+  /*  [R18] 🔴 `maxSeconds` 는 **채널이 받는 길이**라 틱톡은 180 이다(우리가 만드는 길이 아님) — 칩은 `formats[].maxSeconds`(늘 ≤ 90)로 켠다.
+   *  틱톡·페북 릴스는 재사용 **대상**이지 원본 채널이 아니다(영상을 처음 만드는 채널은 `lib/video/types.ts VIDEO_CHANNELS`). */
+  video?: { maxSeconds: VideoSecondsUi | 180; formats: { key: string; label: string; maxSeconds: VideoSecondsUi }[] };
   /** [R11-10] 🔴 이 채널이 **글 축이냐 영상 축이냐** — 화면이 «배워 올 곳»·종류 칩을 고를 재료. 표에 없는 채널이면 키를 안 싣는다(모르면 안 말한다 · AC-9). */
   axis?: ChannelKindAxis;
   /** [R12-6] 🔴 **수익이 안 붙는 채널**(당근)일 때만 `false` — 수익 화면의 0원이 고장으로 보이지 않게. 붙거나 모르면 키를 안 싣는다. */

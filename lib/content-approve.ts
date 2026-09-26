@@ -451,5 +451,12 @@ export async function approvePiece(tid: number, p: Row, opts: { now?: Date; by?:
   const atIso = (at.getTime() < now.getTime() + 5 * 60_000 ? new Date(now.getTime() + 15 * 60_000) : at).toISOString();
   await q(sql`UPDATE pieces SET status = 'scheduled', scheduled_for = ${atIso}::timestamptz AT TIME ZONE 'UTC', gate_report = ${jsonb(gate)}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${id}`);
   if (p.slot_id) await q(sql`UPDATE slots SET status = 'scheduled', publish_at = ${atIso}::timestamptz AT TIME ZONE 'UTC', updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${n(p.slot_id)}`);
+  /* [R18 · B] 🔴 **한 번 만들어 여러 곳에** — 원본 영상이 승인되는 **이 한 곳**에서 파생을 만든다(사람 승인·마감 자동 승인 둘 다 여기로 온다).
+     아직 한 번도 안 물은 집이면 알림으로 한 번 묻고 **꺼진 채로 둔다**(모르면 안 켠다 · §9 ②). 파생은 코인 0 · 같은 r2_key.
+     🔴 실패해도 원본 승인은 되돌리지 않는다(`onOriginApproved` 가 삼키고 감사 high 로 남긴다). 파생·원본이 아닌 글은 즉시 null. */
+  if (String(p.kind ?? "") === "video") {
+    const { onOriginApproved } = await import("./video/reuse");
+    await onOriginApproved(tid, p);
+  }
   return { ok: true, status: "scheduled", scheduledFor: atIso, gate };
 }

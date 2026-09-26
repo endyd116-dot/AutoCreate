@@ -437,7 +437,7 @@ export interface ShortsForm {
   stillRatio: number;
   /** 채널 규격(§6.2): 최대 초 · 세이프존. */
   /** 채널 상한 표 — 값은 `VIDEO_CHANNEL_MAX_SEC` 한 곳에서 온다([P1R6 §2.3] · 여기에 숫자를 다시 적지 않는다). */
-  channelMaxSec: Readonly<Record<string, VideoSecondsLit>>;
+  channelMaxSec: Readonly<Record<string, ChannelMaxSecLit>>;
 }
 /** shortsFormOf(format, seconds) — 포맷·초 → 계약 한 표(순수). */
 export function shortsFormOf(format: ShortsFormat, seconds: VideoSecondsLit): ShortsForm {
@@ -480,7 +480,19 @@ export function cutCountFor(format: ShortsFormat, seconds: VideoSecondsLit, aske
  *   여기가 정본이다: `clampSecondsForChannel`·`shortsFormOf`·`accounts-list.channels[].video` 가 전부 이 표를 읽는다.
  *   화면(A)은 이 값을 서버에서 받아 칩을 켜고 끈다 — «클립은 30초까지» 같은 숫자를 화면에 적지 않는다.
  *   릴스 90초는 Phase 5(계약 R5 §7-3 «R5 제외») — 여기 60 을 올리는 것으로 열린다. */
-export const VIDEO_CHANNEL_MAX_SEC: Readonly<Record<string, VideoSecondsLit>> = { youtube_shorts: 60, naver_clip: 30, reels: 90, threads: 60 };
+/** 채널 상한 값 — 우리가 만드는 길이(`VideoSecondsLit`)보다 **넓다**: 틱톡 180 은 «플랫폼이 받는 길이»이지 «우리가 만드는 길이»가 아니다.
+ *  실제로 만드는 상한은 `videoChannelSpec().formats[].maxSeconds`(채널 ∩ 포맷 · 늘 ≤ 90)이고 `clampSecondsForChannel` 도 15|30|60|90 만 돌려준다. */
+export type ChannelMaxSecLit = VideoSecondsLit | 180;
+export const VIDEO_CHANNEL_MAX_SEC: Readonly<Record<string, ChannelMaxSecLit>> = { youtube_shorts: 60, naver_clip: 30, reels: 90, threads: 60, tiktok: 180, facebook_reels: 90 };
+/* [R18 · B · 2026-09-26] 🔴 **틱톡 180 · 페북 릴스 90 을 채웠다**(트리거 §2 — 메인이 찾아 채운 값).
+   종전엔 이 표에 넷만 있어서 `videoChannelSpec("tiktok")` 이 `null` 이었다 — «한 영상을 여러 곳에»가 그 둘을 **판정조차 못 했다.**
+   · `tiktok` 180 — Content Posting API 는 **모든 계정이 3분**, 일부만 5·10분(developers.tiktok.com content-posting-api-reference-direct-post).
+     🔴 «모두에게 되는 값»으로 잡는다 — 10분은 일부 계정뿐이다.
+   · `facebook_reels` 90 — Graph API `video_reels` 는 **3~90초 · 9:16 전용**. 🔴 앱은 더 길게 되지만 **우리는 API 로 올린다.**
+   · 🔴 `youtube_long` 은 **넣지 않았다**(트리거 §3) — 유튜브는 세로 3분 이하를 **쇼츠로 분류**한다. 값을 넣는 문제가 아니라 **길이 없다**.
+   · 🔴 이 둘은 재사용 **대상**이지 **원본 채널**이 아니다 — 영상을 처음 만드는 채널 목록은 `lib/video/types.ts VIDEO_CHANNELS` 그대로다.
+   ⚠️ `youtube_shorts` 60 은 **그대로다**(트리거 §4) — 유튜브는 이제 쇼츠 3분까지 받지만, 아래 주석대로 이 표 · 코인 · 심사가 **같이** 움직여야 한다.
+      올릴지는 사장님께 코인 값과 함께 따로 여쭌다. */
 /* [R12-7 · 2026-09-17] 🔴 **릴스만 90**으로 올렸다(감사 A12 «VIDEO_SECONDS 에 90 없음»).
    🔴 `naver_clip`(30)·`threads`(60)·`youtube_shorts`(60)는 **그대로다** — 여기서 셋이 같이 올라가면 «클립에 90초»가 조용히 생긴다(B2 지적 2026-09-17).
    🔴 그리고 **셋이 같이 움직여야** 한다: 이 표 · 코인 값(`coin-table.ts video_90`) · 심사 축(`lib/video/judge.ts duration_fit`).
@@ -490,7 +502,7 @@ export const VIDEO_FORMAT_MAX_SEC: Readonly<Record<ShortsFormat, VideoSecondsLit
 export const VIDEO_FORMAT_LABEL: Readonly<Record<ShortsFormat, string>> = { graphic: "그래픽 스토리", talking: "말하는 영상", clip: "짧은 클립" };
 
 /** 이 채널에서 고를 수 있는 것 — 채널 상한 + 포맷별 상한(둘 중 작은 것이 실제 상한). */
-export function videoChannelSpec(channel: string): { maxSeconds: VideoSecondsLit; formats: { key: ShortsFormat; label: string; maxSeconds: VideoSecondsLit }[] } | null {
+export function videoChannelSpec(channel: string): { maxSeconds: ChannelMaxSecLit; formats: { key: ShortsFormat; label: string; maxSeconds: VideoSecondsLit }[] } | null {
   const max = VIDEO_CHANNEL_MAX_SEC[channel];
   if (!max) return null;
   const formats = (Object.keys(VIDEO_FORMAT_MAX_SEC) as ShortsFormat[]).map((key) => ({
