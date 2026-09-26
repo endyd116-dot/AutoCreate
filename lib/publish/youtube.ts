@@ -12,8 +12,8 @@
  *   🔴 `containsSyntheticMedia:true` — AI 로 만든 영상이라는 **사실**을 우리가 먼저 밝힌다(숨기지 않는다).
  *      `selfDeclaredMadeForKids:false` — 아동용이 아니라고 선언(COPPA).
  *   🔴 설명란 **첫 줄**이 제휴 고지(§16B) — 본문 아래에 묻지 않는다.
- *   🔴 쿼터 회로: videos.insert 는 1,600u 로 비싸다(일 10,000u = 6건). 하루 상한을 넘으면 **내일 다시**(retriable).
- *      넘겨서 403 을 맞으면 그날 나머지 발행이 전부 막히므로 우리가 먼저 센다.
+ *   🔴 쿼터 회로: 업로드는 **따로 떼어 낸 통 100건/일 · 구글 프로젝트 단위**다(설계 §2.2 · R19). 차면 **다음 날 이어서**(retriable).
+ *      넘겨서 403 을 맞으면 그날 나머지 발행이 전부 막히므로 우리가 먼저 센다 — **우리 앱을 거친 호출 전부**를 최근 24시간으로.
  *
  *   이 파일은 **업로드만** 한다 — posts 행·piece 상태는 `finalizePublish` 한 곳(§5 경계).
  */
@@ -48,20 +48,32 @@ function rejectedPaidField(json: Record<string, unknown> | null): boolean {
   const blob = `${err.message ?? ""} ${(err.errors ?? []).map((e) => `${e.reason ?? ""} ${e.message ?? ""}`).join(" ")}`;
   return blob.includes(PAID_PART) || /unexpected|invalid.*part|not writable|badRequest/i.test(blob);
 }
-/** videos.insert 1,600u — 일 10,000u 면 6건이 한계. 기본 5건으로 여유를 둔다. */
 /**
  * 하루에 올릴 수 있는 수 — 🔴 **우리 게이트가 아니라 구글 쿼터가 정하는 사실**이다(설계 §2.2).
- *   일 10,000 유닛 중 `videos.insert` 가 1,600 유닛이라 하루 **여섯 건쯤**이 천장이고,
- *   쿼터는 **채널이 아니라 구글 프로젝트** 단위라 우리 고객 전부가 같은 통을 나눠 쓴다(그래서 기본값을 6이 아니라 5로 둔다).
+ *   [R19 · 사장님 결정 2026-09-27] 업로드는 **따로 떼어 낸 통 100건/일**이다(`videos.insert` 1점 · 구글 `determine_quota_cost`).
+ *   ⚠️ 옛 값 «1,600u ≈ 6건 · 기본 5»는 **낡은 규정**이었다(2025-12 에 내렸고 2026-06 부터 업로드를 제 통으로 뺐다).
+ *   🔴 이 통은 **채널이 아니라 구글 프로젝트(= 우리 OAuth 앱)** 것이다 — 고객이 자기 계정으로 연결해도 **고객 전부가 한 통을 나눠 쓴다.**
+ *      ⇒ 세는 것도 **프로젝트 전체**다(`insertCallsLast24h`). 집 단위로 세면 두 집이 따로 100 까지 부른다.
+ *   env `YOUTUBE_DAILY_INSERT_CAP` 로 조절한다(넷리파이엔 없다 = 이 기본값이 산다 · 구글에 증설을 받으면 거기 적는다).
  *
- * 🔴 [R17-B2 · B 가 물어서 잰 자리] 종전엔 이 수가 **이 파일 밖 0곳**이었다 —
- *   즉 **여섯 건째가 될 때까지 아무도 말해 주지 않았다.** «있는데 좁은 길»을 안 알리면
- *   고객은 하루 10건을 편성해 놓고 다섯 건째부터 «내일 이어서»만 본다(§9: 막지 않는 대신 **말해 준다**).
- *   ⇒ `youtubeDailyCap()` 으로 열어 `accounts-list` 가 화면에 실어 준다. **화면은 숫자를 베껴 적지 않는다**(§13 · AC-52).
+ * 🔴 [R19] **이 수를 고객 화면에 싣지 않는다** — 100 은 한 사람 몫이 아니라 **모두가 나눠 쓰는 수**라
+ *   «하루에 100개까지»는 한 고객에게 거짓이다(§4.6 · 다른 고객의 수를 드러내지도 않는다).
+ *   화면에는 `YOUTUBE_LIMIT_NOTE`(숫자 없는 한 줄)를 싣는다. 이 수는 **서버 판단**(발행 직전 문 · 편성)만 쓴다.
  */
-const DAILY_CAP = Math.max(1, Number(process.env.YOUTUBE_DAILY_INSERT_CAP) || 5);
-/** [R17-B2] 화면·다른 서버 코드가 이 수를 물어보는 **하나뿐인 문**. 여기 말고 다른 데 5 를 적지 마라. */
+const DAILY_CAP = Math.max(1, Number(process.env.YOUTUBE_DAILY_INSERT_CAP) || 100);
+/** [R17-B2] 다른 서버 코드가 이 수를 물어보는 **하나뿐인 문**(편성 `lib/derived-schedule.ts`). 여기 말고 다른 데 100 을 적지 마라. */
 export function youtubeDailyCap(): number { return DAILY_CAP; }
+/**
+ * 🔴 [R19] 유튜브로 올리는 채널 — **정본은 여기 한 곳**(편성 `lib/derived-schedule.ts` 는 이것을 다시 내보낸다 · 한 통으로 센다).
+ *   쇼츠와 롱폼은 같은 `videos.insert` 라 **같은 통**이다(P1R8 §3.4 — 롱폼을 따로 세면 둘이 합쳐 한도를 넘는다).
+ */
+export const YOUTUBE_CHANNELS: readonly YoutubeChannel[] = ["youtube_shorts", "youtube_long"];
+export const isYoutubeChannel = (ch: unknown): boolean => (YOUTUBE_CHANNELS as readonly string[]).includes(String(ch ?? ""));
+
+/** [R19] 찬 날의 말 — 🔴 **숫자 없음**(다른 고객이 몇 개 올렸는지를 드러내지 않는다 · §4.6). 우리 수(몇/100)는 `detail` 에만(고객 표면에 안 나간다). */
+export const YOUTUBE_FULL_SAY = "오늘은 유튜브에 올릴 수 있는 수가 다 찼어요. 내일 순서대로 이어서 올릴게요(따로 하실 건 없어요).";
+/** [R19] 계정 화면에 미리 싣는 한 줄(`lib/accounts.ts listChannels → channels[].publishLimitNote`) — 🔴 숫자 없음(«100개까지»는 나눠 쓰는 수라 거짓이다). */
+export const YOUTUBE_LIMIT_NOTE = "유튜브는 하루에 올릴 수 있는 수가 정해져 있어요. 다 찬 날은 다음 날 순서대로 이어서 올려요.";
 const META_TIMEOUT_MS = 20_000;
 /* ═══ [R8-A §4] 해시태그·검색 태그는 **다른 것**이다(공식 문서 실조사 2026-09-15) ═══
    · 설명란 `#해시태그` — 제목 옆엔 **최대 3개**만 노출 · 60개 초과면 전부 무시 · 과도하면 삭제될 수 있다.
@@ -86,18 +98,48 @@ export function youtubeTags(raw: unknown[]): string[] {
 }
 const UPLOAD_TIMEOUT_MS = 10 * 60_000;
 
-/** 오늘(KST) 이 테넌트가 유튜브로 올린 건수 — posts 로 센다(성공만 남는 표라 과소·과대 0). */
-/**
- * 오늘 유튜브에 몇 개 올렸나(KST 기준).
- *   🔴 [P1R8 §3.4] **쇼츠와 롱폼을 같이 센다** — 쿼터는 채널 키가 아니라 **구글 프로젝트** 단위이기 때문이다.
- *      롱폼을 따로 세면 «쇼츠 5 + 롱폼 5 = 10건»이 되어 우리가 먼저 막으려던 403 을 그대로 맞는다
- *      (그리고 403 을 맞으면 그날 **나머지 발행이 전부** 막힌다 — 그래서 우리가 먼저 센다).
+/*
+ * ═══ [R19 · 설계 §2.2] 🔴 세는 것 = **우리 앱이 `videos.insert` 를 부른 횟수 · 프로젝트 전체 · 최근 24시간 굴림** ═══
+ *   · 부른 횟수 — 한도는 **호출**에 걸린다(성공만이 아니다). 401 재시도·유료 칸 빼고 다시 올리기도 **각각 한 번**이다.
+ *   · 프로젝트 전체 — 통이 우리 OAuth 앱 하나라 집(tenant)을 가르면 틀린다.
+ *   · 24시간 굴림 — 구글 문서에서 초기화 시각을 **못 찾았다**(⊘). 굴림은 초기화가 언제든 **한도를 넘지 않는다.**
+ *   🔴 [R19 · 옛 판 수리] 옛 `todayUploads(tid)` 는 `posts.created_at` 을 읽었는데 **`posts` 에 그 칸이 없다**(`published_at` 만 있다 ·
+ *      메인 라이브 `information_schema` 실측). 유튜브 첫 업로드 때 쿼리가 던져 배경 함수가 500 → 그 글이 «올리는 중»에 **멈출** 자리였다.
+ *      유튜브 게시가 0건이라 아무도 못 봤다(AC-266). 이제 `posts` 를 안 읽는다 — 부른 기록은 `audit_logs` 에 우리가 남긴다.
+ *   🔴 SQL 의 `'youtube.insert_call'` 은 **글자로** 적는다(바인딩 금지) — `drizzle/0093` 부분 인덱스(`WHERE action = 'youtube.insert_call'`)를
+ *      플래너가 쓰려면 질의의 조건이 그 글자를 **품어야** 한다(바인딩 값이면 일반 플랜에서 못 쓴다).
  */
-async function todayUploads(tid: number): Promise<number> {
-  const [r] = await q(sql`SELECT COUNT(*) c FROM posts
-    WHERE tenant_id = ${tid} AND channel IN ('youtube_shorts', 'youtube_long')
-      AND created_at >= ((date_trunc('day', (NOW() AT TIME ZONE 'Asia/Seoul')) AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'UTC')`);
+/**
+ * 🔴 **§4.6 예외 — 수만 합친다(남의 데이터는 안 낸다).** `tenant_id` 조건이 **없는 것이 맞다**:
+ *   통이 프로젝트 하나라 모든 집의 호출을 합쳐야 한다. 돌려주는 것은 **수 하나**뿐이고, 그 수도 고객 표면에 안 나간다
+ *   (`YOUTUBE_FULL_SAY` 는 숫자 없음 · `detail` 은 운영 기록).
+ */
+export async function insertCallsLast24h(): Promise<number> {
+  const [r] = await q(sql`SELECT COUNT(*) AS c FROM audit_logs WHERE action = 'youtube.insert_call' AND created_at > NOW() - interval '24 hours'`);
   return n(r?.c);
+}
+/**
+ * [R19] 부른 기록 한 줄 — `start(`(업로드 주소 받기 = `videos.insert`)가 **부를 때마다** 한 번.
+ *   🔴 기록이 실패해도 **그대로 올린다**(§9 — 우리 장부 때문에 고객 영상을 막지 않는다). `writeAudit` 는 던지지 않고 null 을 준다.
+ *      그 대가로 그 한 번은 안 세어진다 — 넘치면 구글이 `quotaExceeded` 로 답하고, 그것도 같은 말(`YOUTUBE_FULL_SAY`)로 이어진다.
+ */
+export async function noteInsertCall(tid: number, pieceId: number, channel: YoutubeChannel): Promise<void> {
+  const id = await writeAudit({ tenantId: tid, action: "youtube.insert_call", target: `piece:${pieceId}`, detail: { channel } });
+  if (id === null) console.error(`[youtube] 부른 기록을 못 남겼다 — 그대로 올린다(§9) piece=${pieceId} channel=${channel}`);
+}
+/**
+ * [R19] 지금 프로젝트 통이 찼나 — 발행 직전 문(`publishYoutube`)과 배경 함수를 부르기 전 문(`lib/publish-one.ts`)이 **같은 함수**를 부른다.
+ *   🔴 세다 실패하면 «안 찼다»로 본다(§9 — 우리 장부 때문에 막지 않는다 · 넘치면 구글이 `quotaExceeded` 로 답한다).
+ */
+export async function youtubeFullNow(): Promise<{ full: boolean; used: number | null; cap: number }> {
+  const cap = youtubeDailyCap();
+  try {
+    const used = await insertCallsLast24h();
+    return { full: used >= cap, used, cap };
+  } catch (e) {
+    console.error("[youtube] 부른 수를 못 셌다 — 그대로 올린다(§9)", String((e as Error)?.message ?? e).slice(0, 160));
+    return { full: false, used: null, cap };
+  }
 }
 
 /** 이 글의 렌더 결과(mp4) — finalizeRender 가 넣은 piece_assets(kind='video'). */
@@ -131,8 +173,13 @@ function classify(status: number, json: Record<string, unknown> | null): { reaso
   const err = (json?.error ?? {}) as { message?: string; errors?: { reason?: string }[] };
   const why = String(err?.errors?.[0]?.reason ?? "").trim();
   const msg = String(err?.message ?? "").slice(0, 200);
-  if (why === "quotaExceeded" || why === "rateLimitExceeded" || status === 429) {
-    return { reason: "channel_error", retriable: true, error: "오늘 유튜브 업로드 한도를 다 썼어요. 내일 이어서 올릴게요.", detail: `${why || status} ${msg}` };
+  /* [R19] 🔴 **하루 통이 찼다**(`quotaExceeded`)와 **잠깐 너무 빨랐다**(`rateLimitExceeded`·429)는 다른 사실이다 —
+     옛 판은 둘을 «오늘 한도를 다 썼어요»로 묶어, 몇 분이면 풀리는 속도 제한에도 «내일»이라고 말했다. */
+  if (why === "quotaExceeded") {
+    return { reason: "channel_error", retriable: true, error: YOUTUBE_FULL_SAY, detail: `${why} ${msg}` };
+  }
+  if (why === "rateLimitExceeded" || status === 429) {
+    return { reason: "channel_error", retriable: true, error: "유튜브가 잠깐 천천히 올려 달라고 해요. 잠시 후 다시 올릴게요.", detail: `${why || status} ${msg}` };
   }
   if (why === "uploadLimitExceeded") {
     return { reason: "channel_error", retriable: true, error: "유튜브가 오늘은 더 올리지 말라고 해요(채널 한도). 내일 다시 시도할게요.", detail: msg };
@@ -157,12 +204,11 @@ export type YoutubeChannel = "youtube_shorts" | "youtube_long";
 export async function publishYoutube(piece: PublishPiece, account: PublishAccount, channel: YoutubeChannel = "youtube_shorts"): Promise<PublishResult> {
   const tid = piece.tenantId;
 
-  // ① 쿼터 회로 — 맞고 나서 배우지 않는다(403 을 맞으면 그날 나머지가 전부 막힌다).
-  const used = await todayUploads(tid);
-  if (used >= DAILY_CAP) {
-    return { ok: false, reason: "channel_error", retriable: true,
-      error: `오늘 유튜브에 올릴 수 있는 만큼 다 올렸어요(${used}/${DAILY_CAP}). 내일 이어서 올릴게요.`,
-      detail: `daily_cap ${used}/${DAILY_CAP}` };
+  // ① 쿼터 회로 — 맞고 나서 배우지 않는다(403 을 맞으면 그날 나머지가 전부 막힌다). 🔴 [R19] 프로젝트 전체 · 최근 24시간.
+  const room = await youtubeFullNow();
+  if (room.full) {
+    return { ok: false, reason: "channel_error", retriable: true, error: YOUTUBE_FULL_SAY,
+      detail: `daily_cap project_24h ${room.used}/${room.cap}` };
   }
 
   // ② 영상 파일 — 렌더가 끝나 있어야 한다.
@@ -206,6 +252,10 @@ export async function publishYoutube(piece: PublishPiece, account: PublishAccoun
   let paidFlagDropped = false;
 
   const start = async (accessToken: string) => {
+    /* 🔴 [R19] `videos.insert` 를 부르기 **직전마다** 한 번 센다 — 이 함수를 부르는 세 자리(첫 호출 · 401 재시도 · 유료 칸 빼고 다시)가
+       **각각** 세어진다. 부르는 자리마다 적지 않고 여기 한 곳에 둔 까닭: 넷째 자리가 생겨도 빠뜨릴 수 없다.
+       실패(연결 끊김 포함)도 센다 — 한도는 호출에 걸리고, 모르면 많이 센 쪽이 안전하다. */
+    await noteInsertCall(tid, piece.id, channel);
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), META_TIMEOUT_MS);
     try {
       const r = await fetch(uploadUrlWith(paid && !paidFlagDropped), {

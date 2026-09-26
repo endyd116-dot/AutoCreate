@@ -14,7 +14,7 @@ import { videoChannelSpec } from "./writing-contracts";   // [P1R6 §2.3] 영상
 /* [R17-B2] 유튜브 하루 상한의 정본(구글 쿼터가 정하는 **사실** · §2.2).
    🔴 고리 없음을 확인하고 최상단에 뒀다: youtube.ts → tokens·r2·disclosure·audit 넷 중 **accounts 를 부르는 것이 0**이다
       (AC-17 은 `runner-jobs` 처럼 되돌아오는 길이 있을 때의 이야기다 — 여기는 없다). */
-import { youtubeDailyCap } from "./publish/youtube";
+import { YOUTUBE_LIMIT_NOTE, isYoutubeChannel } from "./publish/youtube";
 import { warmupState, effectiveDailyCap, effectiveMinGapMin, warmupRisk } from "./warmup";   // [P1R7 §2.6] 워밍업 계산의 단일 출처
 import { toCoinTier, type CoinTier } from "./coin-table";   // [R10-9] 계정 기본 등급(표는 coin-table 한 곳 · 순수 리프)
 
@@ -256,12 +256,13 @@ export interface ChannelInfo {
    */
   canVerifySession?: true;
   /**
-   * [R17-B2 · DESIGN §2.2] 🔴 **이 채널에 하루 몇 건까지 올라가나** — 유튜브만 있다(구글 쿼터가 정하는 **사실**이다).
-   *   우리 게이트가 아니라 **좁은 길**이라, §9 대로 **막지 말고 미리 말해 준다**:
-   *   종전엔 이 수가 `lib/publish/youtube.ts` 밖 **0곳**이어서 **여섯 건째가 될 때까지 아무도 몰랐다**.
-   *   🔴 다른 채널엔 **키를 안 싣는다** — 없는 상한을 화면이 지어내지 않는다(AC-9).
+   * [R19 · DESIGN §2.2] 🔴 **이 채널은 하루에 올릴 수 있는 수가 정해져 있다**는 한 줄 — 유튜브만 있다(구글 쿼터가 정하는 **사실**이다).
+   *   우리 게이트가 아니라 **좁은 길**이라, §9 대로 **막지 말고 미리 말해 준다.** 값은 `lib/publish/youtube.ts YOUTUBE_LIMIT_NOTE` 한 곳.
+   *   🔴 [R19] 옛 칸 `dailyPublishCap`(수)을 **없앴다** — 그 수(100)는 한 고객 몫이 아니라 **우리 고객 전부가 나눠 쓰는 수**라
+   *      «하루에 100개까지 올라가요»는 한 사람에게 **거짓**이다. 문장에 숫자가 없다(다른 고객의 수를 드러내지 않는다 · §4.6).
+   *   🔴 다른 채널엔 **키를 안 싣는다** — 없는 상한을 화면이 지어내지 않는다(AC-9). 화면은 이 글자를 **그대로** 한 줄로 그린다.
    */
-  dailyPublishCap?: number;
+  publishLimitNote?: string;
 }
 /** 화면이 그리는 영상 길이 칩 값 — 정본은 `lib/video/types.ts VideoSeconds`(R12-7 에서 90 이 들어왔다). */
 type VideoSecondsUi = 15 | 30 | 60 | 90;
@@ -299,7 +300,7 @@ export async function listChannels(): Promise<ChannelInfo[]> {
       ...(axis ? { axis } : {}), ...(channelMonetizable(key) ? {} : { monetizable: false as const }), ...(maxPhotos ? { maxPhotos } : {}),
       /* [R17-B2] 🔴 순수 리프(`channel-registry`)에서 읽는다 — `runner-jobs` 에서 읽으면 이 파일이 고리에 걸린다(AC-17). */
       ...(canVerifySession(key) ? { canVerifySession: true as const } : {}),
-      /* [R17-B2] 유튜브 하루 상한 — 🔴 **서버가 정본**(`lib/publish/youtube.ts youtubeDailyCap`). 화면이 5 를 베껴 적지 않는다. */
-      ...(key === "youtube_shorts" || key === "youtube_long" ? { dailyPublishCap: youtubeDailyCap() } : {}) };
+      /* [R19] 유튜브는 하루 수가 정해져 있다는 한 줄 — 🔴 **서버가 정본**(`YOUTUBE_LIMIT_NOTE`) · 숫자 없음 · 유튜브 채널 목록도 youtube.ts 한 곳. */
+      ...(isYoutubeChannel(key) ? { publishLimitNote: YOUTUBE_LIMIT_NOTE } : {}) };
   });
 }
