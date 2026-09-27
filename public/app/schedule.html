@@ -25,7 +25,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=32"></script>
-<script src="/js/mock.js?v=34"></script>
+<script src="/js/mock.js?v=35"></script>
 <script>
 (async () => {
 /* [R11 A-5②] «이날 겹쳐요» — 🔴 **막지 않는다.** §9 는 «있는 길을 우리 판단으로 막지 말라»이지 «말하지 말라»가 아니다.
@@ -53,7 +53,14 @@ const WD = ["일", "월", "화", "수", "목", "금", "토"];
 /* 🔴 [R8 · 사장님 승인 2026-09-15] **글 1편 = 1코인**(AI 사진 1장 포함) — 종전 화면은 «1 + 사진 장수»로 세어 네이버를 **7코인**이라 적었다.
    사진은 «내 사진 → 스톡 → AI» 로 채우고 **AI 로 구운 장만** 돈이 든다(추가 1장 +1). 사진 장수는 이제 **공짜 질문**이다.
    🔴 미리보기일 뿐이다 — 자리마다의 실제 값은 서버가 준다(`slots-list[].coinCost` · `director-estimate`). 오면 그쪽으로 갈아탄다. */
-const isVideoCh = (c) => UI.VIDEO_CH.includes(c); const perPiece = (c) => (isVideoCh(c) ? UI.VIDEO_COIN[60] : UI.COIN.blog); // [P1R5] shorts 규칙 = 편당 video_60(§1.10)
+/* [R20 · A · 메인 결정 · B 계약] 영상 채널 «한 편»의 길이 — 🔴 서버 `rules-list.videoSecondsByChannel[채널]`(늘 네 채널 · 견적 coinsPerWeek 와 같은 estimateVideoSeconds).
+   종전엔 규칙 만들기·규칙 줄·코인 미리보기가 **60초와 60초 코인을 박아** 30초를 고른 고객에게도 «60초 · 편당 28코인»이라 적었다(AC-52 · §1.10 은 «편당 video_60» 이 아니라 «고른 길이»다).
+   코인은 서버 코인표(`UI.VIDEO_COIN` — UI.api 가 응답의 coins 표로 채운다)의 **그 초** 칸. 🔴 초를 모르면 null → 초·코인을 안 그린다(AC-9 · 지어내지 않는다). */
+const vsecOf = (c) => { const v = Number(((D && D.videoSecondsByChannel) || {})[c]); return Number.isFinite(v) && v > 0 ? v : null; };
+const vcoinOf = (sec) => { const v = sec == null ? NaN : Number(UI.VIDEO_COIN[sec]); return Number.isFinite(v) ? v : null; };
+/** « · 영상 30초 · 편당 12코인» 한 토막 — 초를 모르면 "" · 코인만 모르면 초까지만. pre·post = 그 자리의 말 순서(«영상 30초» · «30초 쇼츠»). */
+const vidSay = (c, pre, post) => { const s = vsecOf(c); if (s == null) return ""; const k = vcoinOf(s); return ` · ${pre}${s}초${post}${k != null ? ` · 편당 ${k}코인` : ""}`; };
+const isVideoCh = (c) => UI.VIDEO_CH.includes(c); const perPiece = (c) => (isVideoCh(c) ? vcoinOf(vsecOf(c)) : UI.COIN.blog); // [P1R5] shorts 규칙 = 편당 «그 채널 한 편 길이»의 코인(§1.10) · 모르면 null
 const today = KST(); let view = new Date(today.getFullYear(), today.getMonth(), 1); let sel = ymd(today);
 let D = { rules: [], settings: {}, coinsPerWeek: 0, maxRules: null }, accounts = [], slots = [];
 /* [AC-184] 🔴 자동 편성은 **계정이 있어야 한다**(`lib/director.ts` §1.2 가 못 박았다: «아무도 안 보는 사이에 올릴 곳 없는 영상을 코인 써 가며 쌓지 않는다»).
@@ -79,7 +86,11 @@ const weekStart = () => { const ws = new Date(today); ws.setDate(today.getDate()
       «먼저 소재를 정해 주세요» · «다른 소재로 바꿔요»). 덮으면 그 판정이 거짓말이 된다.
    ⇒ **이름표로 쓸 때만** 이 함수를 통과시킨다. 자: `scripts/verify-slot-name.mjs` */
 const slotName = (s) => s.title || s.topicTitle || "소재 정하는 중";
-const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(slotName(s))}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${s.kind === "shorts" ? " · 60초" : ""}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}${pwRowSay(s) ? `<span class="d wrap" style="color:var(--${s.produceWindow === "missed" ? "warn-ink" : "muted"})">${UI.esc(pwRowSay(s))}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
+/** [R20 · A · 트리거 §0-A] 영상 자리의 길이 — 🔴 서버 `s.videoSeconds`(B · `/api/slots-list` 의 shorts 자리에만 · 숫자) 그대로.
+    종전엔 `kind === "shorts"` 면 **모든 영상 자리에 « · 60초»를 박았다** — 30초를 고른 고객에게도 60 이라 적혔다(AC-52 · R19 A 발견).
+    값은 서버가 정한다: 이미 만든 영상이면 그 길이 · 아직이면 견적과 **같은 함수**(estimateVideoSeconds). 숫자가 아니면 **아무것도 안 그린다**(AC-9). */
+const secSay = (s) => (Number.isFinite(s.videoSeconds) && s.videoSeconds > 0 ? ` · ${s.videoSeconds}초` : "");
+const slotRow = (s) => `<button type="button" class="row tap" data-id="${s.id}">${UI.mark(s.channel)}<div class="l"><span class="t">${UI.esc(slotName(s))}</span><span class="d">${UI.kindPill(s.kind)}${s.accountHandle ? "@" + UI.esc(s.accountHandle) : "계정 자동"} · ${s.publishAt ? UI.timeKST(s.publishAt) : "시간 자동"}${secSay(s)}${tooSoon(s) ? ` · ${produceH()}에 만드는데 그 전에 이 자리가 와요` : ""}${s.revenueKrw != null ? ` · 30일 ${UI.won(s.revenueKrw)}` : ""}</span>${s.note ? `<span class="d wrap" style="color:var(--muted)">${UI.esc(s.note)}</span>` : ""}${pwRowSay(s) ? `<span class="d wrap" style="color:var(--${s.produceWindow === "missed" ? "warn-ink" : "muted"})">${UI.esc(pwRowSay(s))}</span>` : ""}</div>${tooSoon(s) ? '<span class="pill off">이번엔 건너뛰어요</span>' : UI.pill(UI.SLOT_STATUS, s.status)}</button>`; // [P1R5] kind shorts 행 · [실측] 서버가 skipReason:"too_soon" 이라 한 자리만 회색 «이번엔 건너뛰어요»
 const daySlots = (k) => slots.filter((s) => s.date === k).sort((x, y) => (x.publishAt || "").localeCompare(y.publishAt || ""));
 
 async function load() {
@@ -118,7 +129,8 @@ const produceH = () => { const [h, m] = String((D.settings && D.settings.produce
    🔴 사유 문장은 서버 것 그대로다(`produceReason`) — 막힌 집·자동 꺼짐·날짜 지남이 **저마다 다른 할 일**로 끝난다. */
 const pwSay = (s) => (s.produceWindow === "pending" || s.produceWindow === "missed") ? String(s.produceReason || "") : "";
 /* 🔴 돈은 서버 값이 정본(`coinCost`) — 화면 표는 서버가 말 안 해 줄 때의 미리보기일 뿐이다(AC-52 코인 7배 사고). */
-const slotCoin = (s) => (typeof s.coinCost === "number" ? s.coinCost : coinOf(s.channel));
+/* [R20] 서버가 코인을 안 실은 자리의 미리보기 — 영상 자리는 **그 자리의 서버 길이**(`videoSeconds`)의 코인 먼저, 그다음 채널 한 편 코인. 둘 다 모르면 null(숫자를 안 적는다). */
+const slotCoin = (s) => (typeof s.coinCost === "number" ? s.coinCost : (s.kind === "shorts" ? vcoinOf(Number.isFinite(s.videoSeconds) ? s.videoSeconds : null) : null) ?? coinOf(s.channel));
 /* 🔴 집 전체가 같은 까닭이면 **줄마다 되풀이하지 않는다** — 열 줄에 같은 말을 적는 것은 «또렷하게»가 아니라 소음이다.
      §9-1 은 «또렷하게»를 말하지 «한 번 더»를 말하지 않는다. 그래서 같은 문장이 두 자리 이상에 걸리면 **위에 한 번**만 말하고,
      그 자리만의 까닭(날짜가 지났다·이 자리는 직접 만들어 달라)은 **그 줄에** 남긴다. 시트에서는 늘 그 자리 문장을 보여 준다. */
@@ -202,7 +214,7 @@ function slotSheet(s) {
   const warn = ["coin_short", "awaiting_runner", "awaiting_manual"].includes(s.status);
   const dTopic = can.topic ? (s.topicTitle ? "다른 소재로 바꿔요" : "소재를 골라요") : s.pieceId ? "글을 이미 만들어서 바꿀 수 없어요" : "이미 지나간 편성이에요";
   const dTime = can.time ? (s.publishAt ? `${UI.dateKST(s.publishAt)} ${UI.timeKST(s.publishAt)}` : "채널 최적 시간") : "이미 지나간 편성이에요";
-  const dMake = !s.topicTitle ? "먼저 소재를 정해 주세요" : s.pieceId ? "이 편성은 이미 글이 있어요" : `${slotCoin(s)}코인이 들어요 · 다시 만들기는 무료`;
+  const dMake = !s.topicTitle ? "먼저 소재를 정해 주세요" : s.pieceId ? "이 편성은 이미 글이 있어요" : `${slotCoin(s) != null ? `${slotCoin(s)}코인이 들어요` : "코인이 들어요"} · 다시 만들기는 무료`;
   const dSkip = can.skip ? "이날은 쉬고 다음 편성은 그대로 나가요" : "이미 지나간 편성이에요";
   /* [R18 · B2 계약] `s.reuseOf` = 이 자리 글이 한 영상의 **파생**이면 원본 piece id → 아래 «편성» 칸이 «같은 영상을 한 번 더 · 원본 영상 보기».
      origin 어휘는 안 늘렸다(서버도 "auto"|"manual" 그대로) · 무슨 영상인지 설명은 서버 note(««제목» 영상을 인스타 릴스에도 올려요»)가 위 배너에서 한다. */
@@ -229,7 +241,7 @@ function slotSheet(s) {
         if (b.dataset.act === "time") return timeSheet(s, close);
         if (b.dataset.act === "make") {
           bar.hidden = true;
-          host.innerHTML = `<p class="muted" style="margin:8px 0 12px">지금 만들면 ${slotCoin(s)}코인을 써요. 다시 만들기와 수정은 코인이 안 들어요.</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn primary" type="button" data-yes>지금 만들기</button></div>`;
+          host.innerHTML = `<p class="muted" style="margin:8px 0 12px">지금 만들면 ${slotCoin(s) != null ? `${slotCoin(s)}코인을` : "코인을"} 써요. 다시 만들기와 수정은 코인이 안 들어요.</p><div class="cta nobar" style="position:static;padding:0"><button class="btn secondary" type="button" data-no>아니요</button><button class="btn primary" type="button" data-yes>지금 만들기</button></div>`;
           host.querySelector("[data-no]").onclick = () => { host.innerHTML = ""; bar.hidden = false; };
           host.querySelector("[data-yes]").onclick = async (e) => { e.target.disabled = true;
             const r = await UI.api("/api/slots-produce-now", { body: { slotId: s.id } }); e.target.disabled = false;
@@ -418,7 +430,8 @@ function ruleSheet() {
     wd: Object.fromEntries(chans.map((c) => [c, (cur[c]?.weekdays || []).map(Number)])), hour: Object.fromEntries(chans.map((c) => [c, cur[c]?.preferredHour ?? null])),
     mode: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountMode || "auto"])), acc: Object.fromEntries(chans.map((c) => [c, cur[c]?.accountId || null])), reviewPolicy: D.settings.reviewPolicy || "silence_approves", produceLeadDays: D.settings.produceLeadDays || 3 };
   const perWeek = (c) => st.every[c] === "day" ? st.count[c] * 7 : st.every[c] === "month" ? st.count[c] / 4 : st.count[c];   // 코인 미리보기는 «주»로 환산해서 견준다
-  const est = () => Math.round(chans.reduce((a, c) => a + perWeek(c) * perPiece(c), 0));
+  /* [R20] 한 채널이라도 한 편 코인을 모르면 **null** — 0 으로 세면 «주 약 N코인»이 모자란 수를 말한다(없음 ≠ 0 · AC-9). 4단계에서 서버 견적이 곧 덮는다(estServer). */
+  const est = () => { let sum = 0; for (const c of chans) { const n = perWeek(c); if (!n) continue; const p = perPiece(c); if (p == null) return null; sum += n * p; } return Math.round(sum); };
   /* 🔴 저장에 보낼 모양과 견적에 보낼 모양은 **같아야** 한다 — 서버가 «같은 검사·같은 식»으로 재 주는 값이라(rules.ts §R8),
      여기서 둘을 따로 만들면 «견적과 실제가 다른» 화면이 된다. 한 곳에서 짓는다. */
   const ruleInputs = () => chans.filter((c) => st.count[c] > 0).map((c) => { const r = { channel: c, kind: isVideoCh(c) ? "shorts" : "post", accountMode: st.mode[c], every: st.every[c], count: st.count[c], active: true }; /* [P1R5] kind shorts · [R7 §4.3] 주기·요일·시각 */ if (cur[c]?.id) r.id = cur[c].id; if (st.mode[c] === "fixed") r.accountId = st.acc[c] || accounts.find((a) => a.channel === c)?.id; if (st.hour[c] != null) r.preferredHour = st.hour[c]; if (st.every[c] === "week" && st.wd[c].length) r.weekdays = st.wd[c]; return r; });
@@ -439,7 +452,7 @@ function ruleSheet() {
   const view = (sh, close) => {
     const body = sh.querySelector(".sheet-body"); const on = chans.filter((c) => st.count[c] > 0);
     const prog = `<div class="prog" style="padding:0 0 8px">${[1, 2, 3, 4].map((i) => `<i class="${step >= i ? "on" : ""}"></i>`).join("")}</div>`;
-    if (step === 1) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>얼마나 자주 올릴까요?</h2><p>채널마다 주기와 횟수. 0이면 그 채널은 쉬어요.</p></div>` + chans.map((c) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))}<small>계정 ${accounts.filter((a) => a.channel === c).length}개${isVideoCh(c) ? " · 영상 60초 · 편당 " + UI.VIDEO_COIN[60] + "코인" : ""}</small></span></div>${UI.stepper("c:" + c, st.count[c], 0, st.every[c] === "day" ? 3 : st.every[c] === "month" ? 31 : 7, "회")}</div>
+    if (step === 1) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>얼마나 자주 올릴까요?</h2><p>채널마다 주기와 횟수. 0이면 그 채널은 쉬어요.</p></div>` + chans.map((c) => `<div class="fr"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))}<small>계정 ${accounts.filter((a) => a.channel === c).length}개${isVideoCh(c) ? vidSay(c, "영상 ", "") : ""}</small></span></div>${UI.stepper("c:" + c, st.count[c], 0, st.every[c] === "day" ? 3 : st.every[c] === "month" ? 31 : 7, "회")}</div>
       <div style="padding:0 0 10px">${UI.seg("e:" + c, [["day", "매일"], ["week", "주"], ["month", "달"]], st.every[c])}</div>`).join("") + `<div class="cta"><button class="btn primary" type="button" id="nx">다음</button></div>`;
     else if (step === 2) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>어느 계정으로?</h2><p>«자동»이면 그날 가장 건강한 계정에 배정해요.</p></div>` + on.map((c) => { const accs = accounts.filter((a) => a.channel === c); return `<div class="fr" style="flex-direction:column;align-items:stretch"><div class="fl" style="display:flex;align-items:center;gap:10px">${UI.mark(c, "sm")}<span>${UI.esc(UI.chLabel(c))} · 주 ${st.count[c]}회</span></div>${UI.seg("m:" + c, [["auto", "자동"], ["fixed", "고르기"]], st.mode[c])}<div data-pick="${c}" ${st.mode[c] === "fixed" ? "" : "hidden"}>${UI.chips("a:" + c, accs.map((a) => [a.id, "@" + a.handle]), st.acc[c] || accs[0]?.id)}</div></div>`; }).join("") + `<div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="nx">다음</button></div>`;
     else if (step === 3) body.innerHTML = prog + `<div class="step-h" style="padding-top:4px"><h2>언제 나갈까요?</h2><p>안 고르면 채널마다 좋은 요일·시간으로 저희가 골라요.</p></div>` + on.map((c) => `<div class="sec" style="display:flex;align-items:center;gap:8px">${UI.mark(c, "sm")}${UI.esc(UI.chLabel(c))}</div>
@@ -451,8 +464,8 @@ function ruleSheet() {
       ${autoApproveOff() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">자동 승인은 Pro 부터예요 · 지금 요금제에서는 검수에서 한 번 눌러야 나가요 <a href="/app/plan.html" style="font-weight:700;text-decoration:underline">요금제 보기</a></p>' : keptAuto() ? '<p class="muted" style="margin:6px 0 0;font-size:13px">지금 쓰는 «조용하면 발행»은 그대로 유지돼요 · «반드시 확인»으로 바꾸면 이 요금제에서는 되돌릴 수 없어요</p>' : ""}
       <p class="muted" id="rpSay2" style="margin:6px 0 0;font-size:12.5px">${rpSay(autoApproveOff() ? "require_confirm" : st.reviewPolicy)}</p>
       <div class="sec">며칠 전에 만들까요</div>${UI.chips("pl", [[1, "1일 전"], [3, "3일 전"], [5, "5일 전"]], st.produceLeadDays)}
-      <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est()}</span>코인</span></div>
-        <div id="estNote">${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달 · <span id="inclSay">${inclSay(est())}</span></span></div>` : ""}</div>${""/* 🔴 서버가 답하면 이 칸을 통째로 갈아 끼운다(estServer) — 화면 셈은 답이 올 때까지의 미리보기다 */}
+      <div class="group" style="background:var(--ground);margin-top:16px"><div class="kv"><span class="k">이 편성이면</span><span class="v">주 약 <span id="est">${est() == null ? "—" : est()}</span>코인</span></div>
+        <div id="estNote">${D.includedCoins != null ? `<div class="kv"><span class="k">요금제 포함분</span><span class="v" id="incl">${UI.num(D.includedCoins)}코인/달${est() == null ? "" : ` · <span id="inclSay">${inclSay(est())}</span>`}</span></div>` : ""}</div>${""/* 🔴 서버가 답하면 이 칸을 통째로 갈아 끼운다(estServer) — 화면 셈은 답이 올 때까지의 미리보기다 */}
         <div class="kv"><span class="k">지금 잔여</span><span class="v">${UI.num(me.coins)}코인</span></div></div>
       <div class="cta"><button class="btn secondary" type="button" id="bk" style="flex:0 0 30%">이전</button><button class="btn primary" type="button" id="go">켜기</button></div>`;
     /* [AC-184] 🔴 영상을 켰는데 영상 채널 계정이 0개면 이 목록엔 영상 줄이 **없다** — 조용히 없는 것과 «왜 없는지»는 다르다. */
@@ -505,7 +518,7 @@ function settingsSheet() {
   const days = []; for (let i = 0; i < 28; i++) { const d = new Date(today); d.setDate(today.getDate() + i); days.push(d); } const pad = today.getDay();
   const qcal = `<div class="cal" style="padding:4px 0">${WD.map((w) => `<span class="wd">${w}</span>`).join("")}${"<span></span>".repeat(pad)}${days.map((d) => `<button type="button" class="dd ${quiet.has(ymd(d)) ? "sel" : ""}" data-q="${ymd(d)}" style="height:34px">${d.getDate()}</button>`).join("")}</div>`;
   UI.sheet(`<div class="fr"><div class="fl">자동 편성<small>${active.length ? `규칙 ${active.length}개${D.maxRules ? ` · 최대 ${D.maxRules}개` : ""}` : "규칙을 만들면 켤 수 있어요"}</small></div><button class="toggle" type="button" id="auto" aria-checked="${!!S.autoSchedule}" aria-label="자동 편성"></button></div>
-    ${active.map((r) => `<div class="row" style="min-height:44px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회${r.kind === "shorts" ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${r.accountMode === "fixed" ? "@" + UI.esc(accounts.find((a) => a.id === r.accountId)?.handle || "") : "계정 자동"}${r.kind === "shorts" ? " · 60초 쇼츠 · 편당 " + UI.VIDEO_COIN[60] + "코인" : ""}</span></div></div>`).join("")}
+    ${active.map((r) => `<div class="row" style="min-height:44px">${UI.mark(r.channel, "sm")}<div class="l"><span class="t" style="font-size:14px">${UI.esc(UI.chLabel(r.channel))} · ${r.every === "day" ? "매일" : r.every === "month" ? "월" : "주"} ${r.count}회${r.kind === "shorts" ? ' <span class="pill ink">영상</span>' : ""}</span><span class="d">${r.accountMode === "fixed" ? "@" + UI.esc(accounts.find((a) => a.id === r.accountId)?.handle || "") : "계정 자동"}${r.kind === "shorts" ? vidSay(r.channel, "", " 쇼츠") : ""}</span></div></div>`).join("")}
     <div style="padding:6px 0 4px"><button class="btn secondary sm" type="button" id="rules" style="width:100%">${active.length ? "규칙 바꾸기" : "규칙 만들기"}</button></div>
     <div class="sec">얼마나 미리 편성할까요</div>${UI.seg("horizonDays", [[7, "7일"], [14, "14일"], [30, "30일"]], S.horizonDays)}
     <div class="sec">소재는 며칠 전에 정할까요</div>${UI.chips("topicLeadDays", [[3, "3일 전"], [7, "7일 전"], [14, "14일 전"]], S.topicLeadDays)}
