@@ -89,9 +89,28 @@ const pageBlock = (tpl: string, file: string) => { const i = tpl.indexOf(`=== ${
     const reads = ["videoSeconds", "videoSecondsByChannel"].map((k) => [k, new RegExp(`\\b${k}\\b`).test(code)] as const);
     rec("slot.seconds", "편성 화면이 서버 키를 읽는다(`videoSeconds` · `videoSecondsByChannel`)", reads.every(([, ok]) => ok) ? "pass" : "unmeasured", reads.map(([k, ok]) => `${k} ${ok ? "○" : "×"}`).join(" · "));
   }
+  /* 🔴 메인 기준(09-28 · B 해석 ① 받음): 영상 없는 자리 = 견적(`estimateVideoSeconds`) · 영상을 만든 자리 = 그 영상 실제 길이(`pieceSecondsOf`).
+     글자 겹은 «그 두 함수로 가르는 도우미를 부르나»까지만 — 동작은 --db 가 진짜 행으로 잰다. */
   const slotsSrc = codeOnly(read("lib/slots.ts") ?? "");
-  const sets = /\bo\.videoSeconds\s*=\s*estimateVideoSeconds\(/.test(slotsSrc);
-  rec("slot.seconds", "서버 `listSlots` 가 `videoSeconds` 를 견적과 같은 함수(`estimateVideoSeconds`)로 싣는다(글자 겹 — 동작은 --db 가 잰다)", sets ? "pass" : "unmeasured", sets ? "" : "과녁 없음(B 머지 전)");
+  const helper = (slotsSrc.match(/export function slotVideoSecondsOf[\s\S]*?\n\}/) || [""])[0];
+  const sets = /\bo\.videoSeconds\s*=\s*(slotVideoSecondsOf|estimateVideoSeconds)\(/.test(slotsSrc) && (!/slotVideoSecondsOf\(/.test(slotsSrc) || (/estimateVideoSeconds\(/.test(helper) && /pieceSecondsOf\(/.test(helper)));
+  rec("slot.seconds", "서버 `listSlots` 가 `videoSeconds` 를 견적 함수·실제 길이 함수로 싣는다(글자 겹 — 동작은 --db)", sets ? "pass" : "unmeasured", sets ? "slotVideoSecondsOf → estimateVideoSeconds | pieceSecondsOf" : "과녁 없음");
+  /* rules-list 의 `videoSecondsByChannel` — 늘 VIDEO_CHANNELS 네 키 · 값 = 견적 함수(메인 기준) */
+  try {
+    const sl = await imp("lib/slots.ts"), vt = await imp("lib/video/types.ts"), wc = await imp("lib/writing-contracts.ts");
+    if (typeof sl.videoSecondsByChannelOf !== "function") rec("slot.seconds", "규칙 화면 `videoSecondsByChannel`", "unmeasured", "과녁 없음");
+    else {
+      const want = [...(vt.VIDEO_CHANNELS as Set<string>)].sort();
+      const bad: string[] = [];
+      for (const sv of [15, 30, 60, undefined, "이상한 값"]) {
+        const got = sl.videoSecondsByChannelOf(sv) as Record<string, number>;
+        const keys = Object.keys(got).sort();
+        if (keys.join() !== want.join()) bad.push(`설정 ${String(sv)}: 키 ${keys.join(",")}`);
+        for (const c of want) if (got[c] !== wc.estimateVideoSeconds(c, sv)) bad.push(`설정 ${String(sv)}: ${c} ${got[c]} ≠ 견적 ${wc.estimateVideoSeconds(c, sv)}`);
+      }
+      rec("slot.seconds", `규칙 화면 \`videoSecondsByChannel\` = VIDEO_CHANNELS 네 키(${want.join("·")}) · 값 = 견적 함수(설정 다섯 가지)`, bad.length ? "fail" : "pass", bad.slice(0, 3).join(" | ") || "");
+    }
+  } catch (e) { rec("slot.seconds", "규칙 화면 길이 표를 못 불렀다", "unmeasured", String((e as Error)?.message ?? e).slice(0, 120)); }
 }
 
 /* ═══ mock.covered — 서버 문장 = 모의 문장(글자 그대로) ═══ */
@@ -235,15 +254,26 @@ if (ARGS.has("--db")) {
     const made: number[] = [];
     try {
       const WANT = 30;
-      const [t] = await sql`INSERT INTO tenants (key, name, plan_key, status, is_internal, settings) VALUES (${`r20c-${Date.now().toString(36)}`}, ${"R20 C 편성 영상 길이 자"}, 'pro', 'active', true, ${sql.json({ videoSeconds: WANT })}) RETURNING id` as Row[];
+      /* jsonb 는 `::text::jsonb` 로 — 이 클라이언트의 `sql.json` 은 던진다(R19 에서 밟음) · 글자로 바로 `::jsonb` 하면 문자열 jsonb 가 된다(PITFALLS #1). 바로 아래서 jsonb_typeof 로 확인한다 */
+      const [t] = await sql`INSERT INTO tenants (key, name, plan_key, status, is_internal, settings) VALUES (${`r20c-${Date.now().toString(36)}`}, ${"R20 C 편성 영상 길이 자"}, 'pro', 'active', true, ${JSON.stringify({ videoSeconds: WANT })}::text::jsonb) RETURNING id` as Row[];
       const tid = Number(t.id); made.push(tid);
       const [chk] = await sql`SELECT jsonb_typeof(settings) AS ty, settings->>'videoSeconds' AS vs FROM tenants WHERE id = ${tid}` as Row[];
       const [d] = await sql`SELECT to_char((now() AT TIME ZONE 'Asia/Seoul')::date + 2, 'YYYY-MM-DD') AS fut, to_char((now() AT TIME ZONE 'Asia/Seoul')::date - 1, 'YYYY-MM-DD') AS past, to_char((now() AT TIME ZONE 'Asia/Seoul')::date - 3, 'YYYY-MM-DD') AS lo, to_char((now() AT TIME ZONE 'Asia/Seoul')::date + 5, 'YYYY-MM-DD') AS hi` as Row[];
       const ins = async (date: string, channel: string, kind: string, status: string) => Number((await sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, status, origin) VALUES (${tid}, ${date}::date, ${channel}, ${kind}, ${status}, 'manual') RETURNING id` as Row[])[0].id);
       const sFut = await ins(d.fut, "youtube_shorts", "shorts", "planned"), sPast = await ins(d.past, "reels", "shorts", "published"), sPost = await ins(d.fut, "naver_blog", "post", "planned");
+      /* 🔴 영상을 **이미 만든** 자리 — 실제 길이 60초(설정 30 과 다르게 골라 «견적으로 새면» 보이게) · 조인(`piece_kind`·`piece_video`)을 진짜 행으로 태운다.
+         ⚠️ 첫 판은 15초로 심었다가 «30»을 받고 빨강을 냈다 — `graphic`·`talking` 은 15 를 30 으로 올린다(`shortsFormOf` · 규격)라 **제품이 맞았고 자가 모호했다**.
+         기대값은 제품의 실제 길이 함수(`pieceSecondsOf`)로 뽑고, 그 값이 견적과 같으면 이 줄은 ⊘(가를 수 없다). */
+      const REAL = 60;
+      const [pc] = await sql`INSERT INTO pieces (tenant_id, channel, kind, title, status, meta) VALUES (${tid}, 'youtube_shorts', 'video', ${"R20 C 실제 길이 영상"}, 'scheduled', ${JSON.stringify({ video: { seconds: REAL, format: "graphic" } })}::text::jsonb) RETURNING id` as Row[];
+      const sMade = Number((await sql`INSERT INTO slots (tenant_id, slot_date, channel, kind, status, origin, piece_id) VALUES (${tid}, ${d.fut}::date, 'youtube_shorts', 'shorts', 'scheduled', 'manual', ${Number(pc.id)}) RETURNING id` as Row[])[0].id);
       const list = await slots.listSlots(tid, d.lo, d.hi) as Row[];
       const by = (id: number) => list.find((x) => Number(x.id) === id);
-      const f = by(sFut), p = by(sPast), g = by(sPost);
+      const f = by(sFut), p = by(sPast), g = by(sPost), mk = by(sMade);
+      const reuseMod = await imp("lib/video/reuse.ts");
+      const wantReal = Number(reuseMod.pieceSecondsOf({ video: { seconds: REAL, format: "graphic" } })), est = Number(wc.estimateVideoSeconds("youtube_shorts", WANT));
+      rec("slot.seconds", `🔴 라이브 DB — 영상을 이미 만든 자리는 그 영상 **실제 길이**(pieceSecondsOf = ${wantReal}초 · 견적 ${est} 아님)`,
+        wantReal === est ? "unmeasured" : mk && Number(mk.videoSeconds) === wantReal ? "pass" : "fail", wantReal === est ? "실제 길이와 견적이 같아 가를 수 없다" : `받은 ${mk?.videoSeconds}`);
       rec("slot.seconds", "시드 설정이 jsonb 로 앉았다(PITFALLS #1)", chk.ty === "object" && Number(chk.vs) === WANT ? "pass" : "unmeasured", `${chk.ty} · videoSeconds ${chk.vs}`);
       const eF = Number(wc.estimateVideoSeconds("youtube_shorts", WANT)), eP = Number(wc.estimateVideoSeconds("reels", WANT));
       rec("slot.seconds", `🔴 라이브 DB — 다가올 영상 자리의 videoSeconds = estimateVideoSeconds(쇼츠, ${WANT}) = ${eF}`, f && Number(f.videoSeconds) === eF ? "pass" : "fail", `받은 ${f?.videoSeconds}`);
