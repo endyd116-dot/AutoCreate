@@ -1,6 +1,8 @@
 /**
  * 편성 규칙·슬롯 API(계약 P1R1 §5 v1.1):
- *   GET  /api/rules-list                      → { rules:[Rule], settings:ScheduleSettings, coinsPerWeek, maxRules }
+ *   GET  /api/rules-list                      → { rules:[Rule], settings:ScheduleSettings, coinsPerWeek, maxRules, videoSecondsByChannel }
+ *   [R20 · §0-A] videoSecondsByChannel: Record<channel, number> — 영상 규칙을 만들 수 있는 채널(= rules-save 가 shorts 로 저장하는 `isVideoChannel` 집합)마다
+ *                 한 편의 길이(초) · 값 = estimateVideoSeconds(channel, settings.videoSeconds) — coinsPerWeek 견적과 **같은 함수**(화면이 «60초»를 박지 않게)
  *   [P1R5 B-1 수정] Rule.kind = "post" | "shorts" — 영상 채널(youtube_shorts·naver_clip·reels·threads)이면 shorts 로 저장하고 슬롯도 그 kind 로 굴러간다(글 크론이 영상 슬롯을 집지 않는다).
  *   POST /api/rules-estimate { rules:[RuleInput] } → { coinsPerWeek, coinsPerMonth, rules, limit, overLimit, shortfallNote? }   // 🔴 아무것도 쓰지 않는다 · rules-save 와 **같은 검사·같은 식**
  *   POST /api/rules-save { rules:[RuleInput] } → { rules, coinsPerWeek, slotsCreated }   // 전체 교체(있는 id 갱신 · 없는 id 비활성) → rollSlots 1회 · 활성 > maxRules 면 step limit
@@ -17,7 +19,7 @@ import { jsonb } from "../../lib/db-util";
 import { planOf, checkLimit, tenantPlan, autoApproveAllowed } from "../../lib/plans";
 import { q, isChannel } from "../../lib/accounts";
 import { isVideoChannel } from "../../lib/video/types";
-import { listRules, coinsPerWeek, ruleTierOf, rollSlots, readScheduleSettings, readSettingsRaw, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, type Rule, type RuleKind } from "../../lib/slots";
+import { listRules, coinsPerWeek, ruleTierOf, rollSlots, readScheduleSettings, readSettingsRaw, sanitizeSchedulePatch, scheduleSettingsOf, listSlots, toRuleKind, videoSecondsByChannelOf, type Rule, type RuleKind } from "../../lib/slots";
 import { listAccounts } from "../../lib/accounts";   // [R10-9] 규칙 견적을 계정 등급으로 세려면 계정 목록이 필요하다
 import { isCardnewsChannel } from "../../lib/writing-contracts";   // [R8 §2.5] «카드뉴스 채널인가» 정본 한 곳
 import { DAY_FREED_STATUSES, statusListSql } from "../../lib/cadence-check";      // [2026-09-21 B] «그날 자리를 놓아 준 상태» 정본 한 곳 — 세는 쪽과 놓아 주는 쪽이 갈라지면 «취소가 취소가 아니»게 된다
@@ -58,8 +60,12 @@ export default async (req: Request): Promise<Response> => {
       /* [P1R7 B3 · §5B.8] 코인 미리보기는 «주 N코인»만으로는 못 읽는다 — **플랜 포함분과 견줘야** «이 편성이면 포함분 안에서 되나»를 안다.
          화면(A)은 `coinsPerWeek` 와 `includedCoins` 를 나란히 쓴다. 포함분이 0(체험)이면 0 그대로 — 숨기지 않는다. */
       /* [R10-9] 🔴 규칙마다 계정 등급으로 센다(`ruleTierOf`) — 안 넘기면 프리미엄 계정의 편성표가 1코인이라 말한다. */
+      /* [R20 · §0-A] 🔴 규칙 화면이 «영상 60초 · 편당 28코인»을 **박아** 두고 있었다(고객이 30초를 골라도 60초라고 말했다).
+         채널마다 한 편의 길이를 서버가 준다 — 집합은 rules-save 가 shorts 로 저장하는 `isVideoChannel`(= 화면 `UI.VIDEO_CH`),
+         값은 위 `coinsPerWeek` 가 속에서 쓰는 `estimateVideoSeconds` 그대로(두 벌 금지 · 견적과 말이 갈리지 않게). */
+      const videoSecondsByChannel = videoSecondsByChannelOf(raw.videoSeconds);
       return json({ ok: true, rules, settings, coinsPerWeek: coinsPerWeek(rules, raw.videoSeconds, (r) => ruleTierOf(r, accounts)), maxRules,
-        includedCoins: n(planInfo.plan.limits.coinsIncluded), planKey: planInfo.planKey, autoApprove: autoApproveAllowed(planInfo.planKey, planInfo.plan) });
+        includedCoins: n(planInfo.plan.limits.coinsIncluded), planKey: planInfo.planKey, autoApprove: autoApproveAllowed(planInfo.planKey, planInfo.plan), videoSecondsByChannel });
     }
     if (path.endsWith("/slots-list")) {
       const today = kstDateStr(new Date());
