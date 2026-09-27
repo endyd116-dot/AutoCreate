@@ -26,7 +26,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=32"></script>
-<script src="/js/mock.js?v=34"></script>
+<script src="/js/mock.js?v=35"></script>
 <script>
 (async () => {
 await UI.boot("account");
@@ -319,7 +319,11 @@ async function detailSheet(a) {
        우리 고객 전부가 나눠 쓴다 — 한 사람에게 «하루에 100개까지»는 거짓이다. 서버 문장(`lib/publish/youtube.ts YOUTUBE_LIMIT_NOTE`)을
        **글자 그대로** 한 줄 싣고, 안 주면 줄을 안 그린다(AC-9). 화면은 숫자도 문장도 짓지 않는다(AC-52). */""}
   ${limitNote ? `<p class="muted" style="margin:4px 0 8px;font-size:12.5px;line-height:1.6">${UI.esc(limitNote)}</p>` : ""}
-  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span> <button type="button" class="btn ghost sm" id="hre" style="margin-left:8px">다시 재기</button></span></div>
+  ${/* [R20 · A · 트리거 §0-C] 🔴 데스크톱 옆 시트(폭 300 · 안쪽 260)에서 이 줄이 «건강 점 / 수 · 96 / 점 · 좋 / 아 / 요»로 한 자씩 끊겼다.
+       까닭: 641px 이상에서 `.btn{min-width:160px}`(으뜸 단추 규칙)가 이 작은 `.btn.sm` 에도 걸려 단추가 160 을 먹고 글자가 남은 폭에 눌렸다.
+       ⇒ 글자·단추·손(#hre)은 그대로 · 배치만: ① 단추 최소폭을 푼다(줄 안의 작은 동작이다) ② 이름과 값은 **안 끊는다**(nowrap · 값이 먼저)
+          ③ 그래도 좁으면 **단추만 아랫줄**로 내린다(.v 줄바꿈 · 오른쪽 정렬) ④ 이름은 값과 **글자 기준선**을 맞춘다(단추가 내려가도 이름이 값 옆에 선다). */""}
+  ${a.healthScore != null ? `<div class="kv" style="padding-left:0;padding-right:0;align-items:baseline;gap:12px"><span class="k" style="white-space:nowrap">건강 점수</span><span class="v" style="flex-wrap:wrap;justify-content:flex-end;row-gap:4px;min-width:0"><span style="white-space:nowrap">${a.healthScore}점 <span class="muted" style="font-weight:500">· ${HEALTH(a.healthScore)}</span></span><button type="button" class="btn ghost sm" id="hre" style="margin-left:8px;min-width:0">다시 재기</button></span></div>
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">오늘 올린 글</span><span class="v">${a.postsToday}/${a.dailyCap}개</span></div>` : ""}
   <div class="kv" style="padding-left:0;padding-right:0"><span class="k">이번 달 수익</span><span class="v">${UI.won(myKrw)}</span></div>
   ${/* [R17-B2 · DESIGN §8.2] 🔴 **«로그인이 아직 살아 있나»를 조용히 확인한다** — 재로그인(창을 띄우고 사람이 로그인)과 **다른 일**이다.
