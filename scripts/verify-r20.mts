@@ -83,9 +83,14 @@ const pageBlock = (tpl: string, file: string) => { const i = tpl.indexOf(`=== ${
   if (!blk) rec("slot.seconds", "편성 화면 덩이", "unmeasured", "_tpl.txt 에 `=== schedule.html` 이 없다");
   else {
     const code = codeOnly(noHtmlComments(blk));
-    /* 박힌 값: 영상 코인 60 칸을 직접 집는 것 · 영상 길이 «60초»를 글자로 적는 것(«60초 쇼츠» 포함 — 서버 값이면 `${…}초` 가 된다) */
-    const pinned = [...code.matchAll(/VIDEO_COIN\[\s*60\s*\]|video_60|["'`][^"'`\n]*\b60초/g)].map((m) => m[0].slice(0, 30));
-    rec("slot.seconds", "🔴 편성 화면 코드가 영상 60초·60초 코인을 **박지 않는다**(slotRow · 규칙 만들기 · 규칙 줄 · perPiece)", pinned.length ? "fail" : "pass", pinned.length ? `${pinned.length}곳: ${pinned.slice(0, 4).join(" | ")}` : "0곳");
+    /* 박힌 값: 영상 코인 60 칸을 직접 집는 것 · 영상 길이 «60초»를 글자로 적는 것(«60초 쇼츠» 포함 — 서버 값이면 `${…}초` 가 된다).
+       🔴 [2026-09-28 변이가 잡았다] **나가는 파일(`schedule.html`)도 같이 본다** — 정본만 보면 생성물에만 박힌 값을 못 본다.
+          그리고 `perPiece` 는 규칙 만들기 4단계의 «주 약 N코인» **미리보기**에만 쓰이고 서버 견적(`rules-estimate`)이 곧 덮는다 —
+          화면으로 재면 경주라 **박힌 글자만** 잰다(셈 자체는 서버 견적 자가 잰다 · 못 재는 겹을 여기 적는다). */
+    const shipped = codeOnly(noHtmlComments(read("public/app/schedule.html") ?? ""));
+    const PIN = /VIDEO_COIN\[\s*60\s*\]|video_60|["'`][^"'`\n]*\b60초/g;
+    const pinned = [...[...code.matchAll(PIN)].map((m) => `정본 ${m[0].slice(0, 26)}`), ...[...shipped.matchAll(PIN)].map((m) => `생성물 ${m[0].slice(0, 26)}`)];
+    rec("slot.seconds", "🔴 편성 화면 코드가 영상 60초·60초 코인을 **박지 않는다**(slotRow · 규칙 만들기 · 규칙 줄 · perPiece — 정본 _tpl · 나가는 schedule.html 둘 다)", pinned.length ? "fail" : "pass", pinned.length ? `${pinned.length}곳: ${pinned.slice(0, 4).join(" | ")}` : "0곳");
     const reads = ["videoSeconds", "videoSecondsByChannel"].map((k) => [k, new RegExp(`\\b${k}\\b`).test(code)] as const);
     rec("slot.seconds", "편성 화면이 서버 키를 읽는다(`videoSeconds` · `videoSecondsByChannel`)", reads.every(([, ok]) => ok) ? "pass" : "unmeasured", reads.map(([k, ok]) => `${k} ${ok ? "○" : "×"}`).join(" · "));
   }
@@ -218,6 +223,31 @@ if (ARGS.has("--screen")) {
       const ok = m.kLines === 1 && m.vLines === 1 && m.bLines === 1 && m.bInside && m.overflow <= 0;
       rec("health.fit", `🔴 ${w}px — «건강 점수» 한 줄 · «${m.vText}» 한 줄 · «다시 재기» 한 줄 · 시트 안 · 넘침 0`, ok ? "pass" : "fail",
         `이름 ${m.kLines}줄 · 값 ${m.vLines}줄 · 단추 ${m.bLines}줄 · 단추 시트 안 ${m.bInside ? "○" : "×"} · 넘침 ${m.overflow}px · 줄 폭 ${m.width}px`);
+    }
+
+    /* ── health.fit 둘째 줄 — 🔴 [A 해석 ④ · 메인 알림 09-28] 운영 «고객 붙이기»의 «내부로 표시된 N곳» 줄도 같은 병(`.btn{min-width:160px}`)이었다.
+          🔴 그 줄은 **C 가 R19 에 낸 줄**이다 — 모의가 칸을 안 실어 C 는 그리지 못했고(⊘ 로 보고) 옆 시트에서 한 자씩 끊겼다. A 가 잡았다.
+          문장은 옆 시트(259px)에서 한 번 꺾이는 게 맞다 ⇒ 판정: 단추 한 줄 · 시트 안 · 넘침 0 · 문장 ≤ 2줄 · 한 줄에 6자 이상(한 자씩 세로로 서지 않는다). ── */
+    for (const [w, h] of [[1280, 900], [400, 860]] as const) {
+      const pg = await newPage({ viewport: { width: w, height: h } });
+      await pg.goto(`${base}/ops/cs.html?mock=1`); await settle(pg);
+      const claim = await pg.$("[data-claim]");
+      if (!claim) { rec("health.fit", `${w}px — 운영 «내부로 표시된 N곳» 줄`, "unmeasured", "모의에 주인 없는 문의가 없다"); await pg.close(); continue; }
+      await claim.click(); await pg.waitForSelector("#cq").catch(() => {}); await pg.waitForTimeout(900);
+      const m = await pg.evaluate(() => {
+        const kv = document.querySelector("#chid") as HTMLElement | null; if (!kv || kv.hidden) return null;
+        const k = kv.querySelector(".k") as HTMLElement, b = kv.querySelector("button") as HTMLElement | null;
+        const linesOf = (el: Element) => { const rg = document.createRange(); rg.selectNodeContents(el); return new Set(Array.from(rg.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top))).size; };
+        let box: HTMLElement | null = kv.parentElement; while (box && box !== document.body && getComputedStyle(box).overflowY === "visible") box = box.parentElement;
+        const br = box?.getBoundingClientRect(), bb = b?.getBoundingClientRect();
+        const text = (k.textContent || "").replace(/\s+/g, ""); const kl = linesOf(k);
+        return { kLines: kl, perLine: kl ? Math.round(text.length / kl) : 0, bLines: b ? linesOf(b) : 0, bInside: !!(br && bb && bb.left >= br.left - 1 && bb.right <= br.right + 1), overflow: kv.scrollWidth - kv.clientWidth, text: (k.textContent || "").trim() };
+      });
+      await pg.close();
+      if (!m) { rec("health.fit", `${w}px — 운영 «내부로 표시된 N곳» 줄`, "unmeasured", "줄이 안 그려졌다(모의 internal 칸)"); continue; }
+      const ok = m.kLines <= 2 && m.perLine >= 6 && m.bLines === 1 && m.bInside && m.overflow <= 0;
+      rec("health.fit", `🔴 ${w}px — 운영 «${m.text}» 줄: 문장 ≤ 2줄 · 한 줄 6자 이상 · 단추 한 줄 · 시트 안 · 넘침 0`, ok ? "pass" : "fail",
+        `문장 ${m.kLines}줄(줄당 ${m.perLine}자) · 단추 ${m.bLines}줄 · 단추 시트 안 ${m.bInside ? "○" : "×"} · 넘침 ${m.overflow}px`);
     }
 
     /* ── mock.internal — 운영 화면이 «N곳 빠져 있어요»를 실제로 그린다 ── */

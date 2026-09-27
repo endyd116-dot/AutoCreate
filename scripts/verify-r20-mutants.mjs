@@ -46,7 +46,23 @@ add("규칙 화면 길이 표가 60 을 박으면", "lib/slots.ts",
 add("서버 채널 이름을 «스레드»로 되돌리면", "lib/channel-url.ts", [['threads: "쓰레드"', 'threads: "스레드" /*r20mut*/']], "threads.word");
 add("쓰레드 커넥터의 고객 문장 하나를 «스레드»로", "lib/publish/threads.ts", [['error: "쓰레드 로그인이 만료됐어요.', 'error: "스레드 로그인이 만료됐어요. /*r20mut*/']], "threads.word");
 
-/* ═══ 화면·모의(A) 변이는 A 머지 뒤 여기에 — 과녁 글자를 A 의 진짜 코드에서 뽑아 넣는다(지어내면 «과녁 0곳» ⊘ 가 된다) ═══ */
+/* ═══ 화면·모의(A · main 386e136 의 진짜 글자) — 🔴 브라우저가 읽는 것은 **생성된 화면 파일**이다(정본 `_tpl.txt` 가 아니다) ═══ */
+const SCH = "public/app/schedule.html", ACC = "public/app/accounts.html", CS = "public/ops/cs.html", MOCK = "public/js/mock.js", MOCKOPS = "public/js/mock-ops.js";
+add("화면 — 편성표 자리 줄에 «· 60초»를 되박으면(서버 videoSeconds 를 안 읽는다)", SCH,
+  [["const secSay = (s) => (Number.isFinite(s.videoSeconds) && s.videoSeconds > 0 ? ` · ${s.videoSeconds}초` : \"\");", "const secSay = (s) => (s.kind === \"shorts\" ? \" · 60초\" /*r20mut*/ : \"\");"]], "slot.seconds", "screen");
+add("화면 — 규칙 화면의 채널 길이를 60 으로 박으면(videoSecondsByChannel 을 안 읽는다)", SCH,
+  [["const vsecOf = (c) => { const v = Number(((D && D.videoSecondsByChannel) || {})[c]);", "const vsecOf = (c) => { const v = 60 /*r20mut*/;"]], "slot.seconds", "screen");
+add("화면 — 편당 코인을 VIDEO_COIN[60] 으로 박으면(perPiece)", SCH,
+  [["const perPiece = (c) => (isVideoCh(c) ? vcoinOf(vsecOf(c)) : UI.COIN.blog);", "const perPiece = (c) => (isVideoCh(c) ? UI.VIDEO_COIN[60] /*r20mut*/ : UI.COIN.blog);"]], "slot.seconds", "screen");
+add("화면 — «건강 점수» 줄을 옛 배치로 되돌리면(단추 최소폭 · 줄바꿈 허용)", ACC,
+  [['<div class="kv" style="padding-left:0;padding-right:0;align-items:baseline;gap:12px"><span class="k" style="white-space:nowrap">건강 점수</span><span class="v" style="flex-wrap:wrap;justify-content:flex-end;row-gap:4px;min-width:0"><span style="white-space:nowrap">', '<div class="kv" style="padding-left:0;padding-right:0"><span class="k">건강 점수</span><span class="v"><span /*r20mut*/>'],
+   ['id="hre" style="margin-left:8px;min-width:0"', 'id="hre" style="margin-left:8px"']], "health.fit", "screen");
+add("화면 — 운영 «내부로 표시된 N곳» 줄 단추의 최소폭을 되살리면", CS,
+  [['id="chidt" style="min-width:0;white-space:nowrap"', 'id="chidt" data-r20mut="1"']], "health.fit", "screen");
+add("모의 — 채널 표의 쓰레드를 «스레드»로 되돌리면", MOCK, [['threads: "쓰레드"', 'threads: "스레드" /*r20mut*/']], "threads.word");
+add("모의 — covered 문장 한 글자를 바꾸면(서버 ≠ 모의)", MOCK, [["용으로 새로 만든 영상이", "용으로 새로 만든 영상은"]], "mock.covered");
+add("모의 — ops-tenants 가 숨긴 수를 0 으로 말하면(서버 모양 아님)", MOCKOPS,
+  [["hidden: inc ? 0 : base.filter((t) => t.isInternal === true).length", "hidden: 0 /*r20mut*/"]], "mock.internal", "screen");
 
 /* ═══ 돌리기 ═══ */
 const run = (withDb, withScreen) => {
@@ -84,7 +100,8 @@ try {
       if (mutated === orig) { noTarget++; console.log(`⊘ [${c.axis}] ${c.name}  — 바꿨는데 글자가 같다`); continue; }
       writeFileSync(p, mutated);
       try {
-        const r = run(c.arm === "db" || DB, c.arm === "screen" || SCREEN);
+        /* 변이마다 **그 팔만** 돈다(순수 겹은 늘 돈다) — 전 팔을 매번 돌리면 변이 하나에 시드 집 + 브라우저가 붙어 체인 1번 칸이 16분이 된다(첫 판 실측) */
+        const r = run(c.arm === "db", c.arm === "screen");
         const got = reds(r.out);
         const want = `❌ [${c.axis}]`;
         if (r.code === 1 && got.some((l) => l.startsWith(want))) { caught++; console.log(`✅ [${c.axis}] ${c.name}  — 과녁 ${hits.join("+")}곳 · 종료 1 · 그 축이 울었다(${got.filter((l) => l.startsWith(want)).length}줄)`); }
