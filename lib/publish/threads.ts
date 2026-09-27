@@ -54,22 +54,22 @@ function thError(status: number, json: Record<string, unknown> | null): { reason
   const e = (json?.error ?? {}) as { message?: string; code?: number };
   const msg = String(e?.message ?? "").slice(0, 200);
   const code = Number(e?.code ?? 0);
-  if (status === 401 || code === 190) return { reason: "auth_failed", retriable: false, error: "스레드 로그인이 만료됐어요. 계정을 다시 연결해 주세요.", detail: msg };
-  if (code === 4 || code === 17 || status === 429) return { reason: "channel_error", retriable: true, error: "스레드 요청 한도에 걸렸어요. 잠시 후 다시 올릴게요.", detail: msg };
-  if (status >= 500) return { reason: "channel_error", retriable: true, error: "스레드가 지금 응답하지 않아요. 잠시 후 다시 시도할게요.", detail: `${status} ${msg}` };
-  return { reason: "config", retriable: false, error: "스레드가 이 영상을 받지 않았어요.", detail: `${status} ${code} ${msg}` };
+  if (status === 401 || code === 190) return { reason: "auth_failed", retriable: false, error: "쓰레드 로그인이 만료됐어요. 계정을 다시 연결해 주세요.", detail: msg };
+  if (code === 4 || code === 17 || status === 429) return { reason: "channel_error", retriable: true, error: "쓰레드 요청 한도에 걸렸어요. 잠시 후 다시 올릴게요.", detail: msg };
+  if (status >= 500) return { reason: "channel_error", retriable: true, error: "쓰레드가 지금 응답하지 않아요. 잠시 후 다시 시도할게요.", detail: `${status} ${msg}` };
+  return { reason: "config", retriable: false, error: "쓰레드가 이 영상을 받지 않았어요.", detail: `${status} ${code} ${msg}` };
 }
 
 /** 토큰·사용자 id — 글·영상 두 경로가 **똑같이** 쓰는 앞머리(둘이 갈리면 한쪽만 고치는 사고가 난다). */
 async function threadsAuth(tid: number, account: PublishAccount): Promise<{ ok: true; token: string; userId: string } | { ok: false; res: PublishResult }> {
   const tok = await ensureFreshToken(tid, account.id, "threads", account.handle);
   if (!tok.ok) {
-    if (tok.reason === "provider_not_configured") return { ok: false, res: { ok: false, reason: "provider_not_configured", retriable: false, error: "스레드 연결이 아직 준비 중이에요." } };
-    if (tok.reason === "no_creds") return { ok: false, res: { ok: false, reason: "no_creds", retriable: false, error: "스레드 계정을 다시 연결해 주세요." } };
-    return { ok: false, res: { ok: false, reason: "auth_failed", retriable: false, error: "스레드 로그인이 만료됐어요. 다시 연결해 주세요.", detail: tok.detail } };
+    if (tok.reason === "provider_not_configured") return { ok: false, res: { ok: false, reason: "provider_not_configured", retriable: false, error: "쓰레드 연결이 아직 준비 중이에요." } };
+    if (tok.reason === "no_creds") return { ok: false, res: { ok: false, reason: "no_creds", retriable: false, error: "쓰레드 계정을 다시 연결해 주세요." } };
+    return { ok: false, res: { ok: false, reason: "auth_failed", retriable: false, error: "쓰레드 로그인이 만료됐어요. 다시 연결해 주세요.", detail: tok.detail } };
   }
   const userId = String((tok.token.extra as Record<string, unknown> | undefined)?.threadsUserId ?? tok.token.externalId ?? "").trim();
-  if (!userId) return { ok: false, res: { ok: false, reason: "no_creds", retriable: false, error: "스레드 계정을 찾지 못했어요. 다시 연결해 주세요." } };
+  if (!userId) return { ok: false, res: { ok: false, reason: "no_creds", retriable: false, error: "쓰레드 계정을 찾지 못했어요. 다시 연결해 주세요." } };
   return { ok: true, token: tok.token.accessToken, userId };
 }
 
@@ -172,18 +172,18 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
     const body = new URLSearchParams({ media_type: "TEXT", text, access_token: token });
     if (replyToId) body.set("reply_to_id", replyToId);
     const r = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads`, { method: "POST", body }).catch(() => null);
-    if (!r) { lastFail = { reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." }; return { ok: false as const, detail: "network" }; }
+    if (!r) { lastFail = { reason: "network", retriable: true, error: "쓰레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." }; return { ok: false as const, detail: "network" }; }
     if (r.status < 200 || r.status >= 300) { const c = thError(r.status, r.json); lastFail = { reason: c.reason, retriable: c.retriable, error: c.error }; return { ok: false as const, detail: c.detail }; }
     const creationId = String(r.json?.id ?? "").trim();
-    if (!creationId) { lastFail = { reason: "channel_error", retriable: true, error: "스레드가 업로드 번호를 주지 않았어요." }; return { ok: false as const, detail: "no_creation_id" }; }
+    if (!creationId) { lastFail = { reason: "channel_error", retriable: true, error: "쓰레드가 업로드 번호를 주지 않았어요." }; return { ok: false as const, detail: "no_creation_id" }; }
 
     const pub = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads_publish`, {
       method: "POST", body: new URLSearchParams({ creation_id: creationId, access_token: token }),
     }).catch(() => null);
-    if (!pub) { lastFail = { reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." }; return { ok: false as const, detail: "network_publish" }; }
+    if (!pub) { lastFail = { reason: "network", retriable: true, error: "쓰레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." }; return { ok: false as const, detail: "network_publish" }; }
     if (pub.status < 200 || pub.status >= 300) { const c = thError(pub.status, pub.json); lastFail = { reason: c.reason, retriable: c.retriable, error: c.error }; return { ok: false as const, detail: c.detail }; }
     const id = String(pub.json?.id ?? "").trim();
-    if (!id) { lastFail = { reason: "channel_error", retriable: true, error: "올렸는데 스레드가 게시 번호를 주지 않았어요." }; return { ok: false as const, detail: "no_media_id" }; }
+    if (!id) { lastFail = { reason: "channel_error", retriable: true, error: "올렸는데 쓰레드가 게시 번호를 주지 않았어요." }; return { ok: false as const, detail: "no_media_id" }; }
     return { ok: true as const, id };
   };
 
@@ -212,7 +212,7 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
           이 칸은 «되면 남는» 재료다. 둘 중 하나는 남는다. */
     await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ thChainPartial: {
       posted: posted.length, parts: parts.parts.length, why: "state_unsaved",
-      say: `스레드 ${parts.parts.length}조각 중 ${posted.length}조각까지 올라갔어요.`,
+      say: `쓰레드 ${parts.parts.length}조각 중 ${posted.length}조각까지 올라갔어요.`,
       remain: parts.parts.slice(posted.length),
     } })}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`)
       .catch((e: unknown) => console.warn("[threads] 남은 조각 기록 실패", String((e as Error)?.message ?? e).slice(0, 80)));
@@ -222,7 +222,7 @@ export async function publishThreadsText(piece: PublishPiece, account: PublishAc
     if (posted.length) return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, posted[0]), channelRef: posted[0] };
   }
   if (!run.ok) {
-    const f = lastFail ?? { reason: "channel_error" as const, retriable: true, error: "스레드에 올리지 못했어요." };
+    const f = lastFail ?? { reason: "channel_error" as const, retriable: true, error: "쓰레드에 올리지 못했어요." };
     return { ok: false, reason: f.reason, retriable: f.retriable, error: f.error, detail: `part${(run.failedAt ?? 0) + 1} ${run.detail ?? ""}`.trim() };
   }
 
@@ -264,10 +264,10 @@ export async function publishThreadsVideo(piece: PublishPiece, account: PublishA
     if (!videoUrl) return { ok: false, reason: "not_publishable", retriable: false, error: "올릴 영상이 아직 없어요(렌더가 끝나지 않았어요)." };
     const body = new URLSearchParams({ media_type: "VIDEO", video_url: videoUrl, text: buildCaption(piece, 500), access_token: token });
     const r = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads`, { method: "POST", body }).catch(() => null);
-    if (!r) return { ok: false, reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
+    if (!r) return { ok: false, reason: "network", retriable: true, error: "쓰레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
     if (r.status < 200 || r.status >= 300) { const c = thError(r.status, r.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }
     creationId = String(r.json?.id ?? "").trim();
-    if (!creationId) return { ok: false, reason: "channel_error", retriable: true, error: "스레드가 업로드 번호를 주지 않았어요.", detail: "no_creation_id" };
+    if (!creationId) return { ok: false, reason: "channel_error", retriable: true, error: "쓰레드가 업로드 번호를 주지 않았어요.", detail: "no_creation_id" };
     await q(sql`UPDATE pieces SET meta = meta || ${jsonb({ [META_FIELD]: creationId })}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
   }
 
@@ -279,23 +279,23 @@ export async function publishThreadsVideo(piece: PublishPiece, account: PublishA
     if (st === "FINISHED") break;
     if (st === "ERROR") {
       await q(sql`UPDATE pieces SET meta = meta - ${META_FIELD}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
-      return { ok: false, reason: "config", retriable: false, error: "스레드가 이 영상을 처리하지 못했어요(형식 확인 필요).", detail: "container_error" };
+      return { ok: false, reason: "config", retriable: false, error: "쓰레드가 이 영상을 처리하지 못했어요(형식 확인 필요).", detail: "container_error" };
     }
     if (i < POLL_TRIES - 1) await sleep(POLL_WAIT_MS);
   }
   if (st !== "FINISHED") {
     return { ok: false, reason: "video_processing", retriable: true,
-      error: "스레드가 영상을 준비하고 있어요. 잠시 뒤에 올릴게요.", detail: `status=${st || "unknown"}` };
+      error: "쓰레드가 영상을 준비하고 있어요. 잠시 뒤에 올릴게요.", detail: `status=${st || "unknown"}` };
   }
 
   /* ③ 게시 */
   const pub = await graph(`${GRAPH}/${encodeURIComponent(userId)}/threads_publish`, {
     method: "POST", body: new URLSearchParams({ creation_id: creationId, access_token: token }),
   }).catch(() => null);
-  if (!pub) return { ok: false, reason: "network", retriable: true, error: "스레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
+  if (!pub) return { ok: false, reason: "network", retriable: true, error: "쓰레드에 연결하지 못했어요. 잠시 후 다시 시도할게요." };
   if (pub.status < 200 || pub.status >= 300) { const c = thError(pub.status, pub.json); return { ok: false, reason: c.reason, retriable: c.retriable, error: c.error, detail: c.detail }; }
   const id = String(pub.json?.id ?? "").trim();
-  if (!id) return { ok: false, reason: "channel_error", retriable: true, error: "올렸는데 스레드가 게시 번호를 주지 않았어요.", detail: "no_media_id" };
+  if (!id) return { ok: false, reason: "channel_error", retriable: true, error: "올렸는데 쓰레드가 게시 번호를 주지 않았어요.", detail: "no_media_id" };
 
   await q(sql`UPDATE pieces SET meta = meta - ${META_FIELD}, updated_at = NOW() WHERE tenant_id = ${tid} AND id = ${piece.id}`);
   return { ok: true, via: "api", externalUrl: threadsUrl(account.handle, id), channelRef: id };
