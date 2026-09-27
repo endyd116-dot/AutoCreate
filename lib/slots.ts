@@ -17,6 +17,9 @@ import { gapMinFor, crowdOf, ACCOUNT_GAP_MIN_DEFAULT, type Crowd } from "./publi
 import { requireWritable } from "./guards";
 import { bestHoursFor } from "./cron/learn";   // [R12-10] 🔴 배운 시각 — 이 줄이 그 함수의 **첫 제품 호출처**다(여태 0곳이었다)
 import { produceWindowOf, type ProduceWindow } from "./produce-window";   // [R8] «언제 만들어지나»의 **정본** — 크론 produce 와 같은 잣대(AC-47/AC-70)
+/* [R20 · §0-A] 만든 영상의 **실제 길이**(재사용 시트와 같은 함수). 🔴 순환 없음 확인 — reuse → derived-schedule → cron/base 가 slots 를 **type 으로만** 부른다. */
+import { pieceSecondsOf } from "./video/reuse";
+import { isVideoSeconds, VIDEO_CHANNELS } from "./video/types";
 
 const n = (v: unknown) => Number(v || 0);
 type Row = Record<string, unknown>;
@@ -334,7 +337,32 @@ export interface Slot { id: number; date: string; channel: string; kind: string;
    */
   crowd?: Crowd;
   /** [R18 · B2] 이 자리의 글이 한 영상의 **파생**이면 원본 piece id(`pieces.origin_piece_id`). 🔴 `origin` 은 그대로 auto|manual 이다 — 파생 자리의 `slots.origin` 은 `derived` 지만 화면 어휘를 늘리지 않고 이 칸으로 가른다. */
-  reuseOf?: number }
+  reuseOf?: number;
+  /**
+   * [R20 · §0-A] 🔴 **영상 자리(`kind === "shorts"`)의 길이(초)** — 화면이 «· 60초»를 **모든 영상 자리에 박아** 두던 것을 서버 값으로(DESIGN §13.0 화면 숫자는 서버 값).
+   *   · 영상이 **이미 만들어졌으면** 그 영상의 실제 길이(`pieceSecondsOf` — 재사용 시트가 «이 영상은 N초»라고 말하는 바로 그 함수).
+   *     🔴 견적을 쓰면 거짓이 된다: 30초로 만든 원본의 파생(릴스·틱톡) 자리가 설정값 60 으로 «60초»라고 뜬다.
+   *   · 아직 없으면 견적 — `estimateVideoSeconds(channel, settings.videoSeconds)`(위 `coinCost` 와 **같은 함수** · 두 벌 금지).
+   *   · 지난·완료 자리에도 싣는다(길이는 상태와 무관한 사실). 영상 자리가 아니면 **키를 안 싣는다**(AC-9).
+   */
+  videoSeconds?: number }
+
+/**
+ * [R20 · §0-A] 영상 자리 한 칸의 길이(초) — `listSlots` 가 자리마다 부른다(순수 · DB 0 · 자 `verify-r20-seconds-word` 가 직접 잰다).
+ *   만든 영상(piece.kind video · meta.video.seconds 가 규격 값)이 있으면 그 실제 길이(`pieceSecondsOf`), 없으면 견적(`estimateVideoSeconds`).
+ *   🔴 meta.video.seconds 가 없거나 규격 밖이면 `pieceSecondsOf` 의 기본값(60)을 믿지 않고 견적으로 간다 — 지어낸 60 보다 고객 설정이 사실에 가깝다.
+ */
+export function slotVideoSecondsOf(input: { channel: string; pieceKind?: unknown; pieceVideo?: unknown; settingsVideoSeconds?: unknown }): number {
+  const pv = input.pieceKind === "video" && input.pieceVideo && typeof input.pieceVideo === "object" ? input.pieceVideo as Row : null;
+  return pv && isVideoSeconds(pv.seconds) ? pieceSecondsOf({ video: pv }) : estimateVideoSeconds(input.channel, input.settingsVideoSeconds);
+}
+/**
+ * [R20 · §0-A] 규칙 화면용 — 영상 규칙을 만들 수 있는 채널(`VIDEO_CHANNELS` = rules-save 가 shorts 로 저장하는 `isVideoChannel` 집합 = 화면 `UI.VIDEO_CH`)마다
+ *   한 편의 길이. 값은 `coinsPerWeek` 가 속에서 쓰는 `estimateVideoSeconds` 그대로(두 벌 금지).
+ */
+export function videoSecondsByChannelOf(settingsVideoSeconds: unknown): Record<string, number> {
+  return Object.fromEntries([...VIDEO_CHANNELS].map((c) => [c, estimateVideoSeconds(c, settingsVideoSeconds)]));
+}
 
 const KST_MS_LOCAL = 9 * 3600_000;
 /**
@@ -388,7 +416,7 @@ export async function listSlots(tid: number, from: string, to: string, now = new
      ⇒ `pieces` 를 조인해 **글 제목을 같이 싣는다.** 🔴 `topicTitle` 은 **안 덮는다** —
         그건 «무엇을 쓰기로 했나»라는 **다른 뜻**이고, 화면의 판정(`can.make`·«먼저 소재를 정해 주세요»)이 그 값을 쓴다.
         둘 다 뜻이 있으니 둘 다 보낸다(하나로 뭉치는 것이 답이 아니다). 고르는 규칙은 `Slot.title` 주석에 못 박았다. */
-  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title, pc.title AS piece_title, pc.origin_piece_id AS reuse_of,
+  const rows = await q(sql`SELECT s.*, s.slot_date::text AS d, a.handle, t.title AS topic_title, pc.title AS piece_title, pc.origin_piece_id AS reuse_of, pc.kind AS piece_kind, pc.meta->'video' AS piece_video,
       (SELECT SUM(rd.amount_krw)::int FROM revenue_daily rd WHERE rd.tenant_id = s.tenant_id AND rd.piece_id = s.piece_id) AS revenue_krw
     FROM slots s LEFT JOIN accounts a ON a.id = s.account_id LEFT JOIN topics t ON t.id = s.topic_id
       LEFT JOIN pieces pc ON pc.id = s.piece_id AND pc.tenant_id = s.tenant_id
@@ -407,6 +435,8 @@ export async function listSlots(tid: number, from: string, to: string, now = new
     if (r.reuse_of) o.reuseOf = n(r.reuse_of);
     if (r.note) o.note = String(r.note).slice(0, 300);
     if (r.revenue_krw !== null && r.revenue_krw !== undefined) o.revenueKrw = n(r.revenue_krw);
+    /* [R20 · §0-A] 영상 자리의 길이 — 만든 영상이 있으면 그 길이, 없으면 견적(`coinCost` 와 같은 함수). `pw` 가지 **밖**이라 지난·완료 자리도 말한다. */
+    if (o.kind === "shorts") o.videoSeconds = slotVideoSecondsOf({ channel: o.channel, pieceKind: r.piece_kind, pieceVideo: r.piece_video, settingsVideoSeconds: rawSettings.videoSeconds });
     const [y, m, d] = o.date.split("-").map(Number);
     const publishMs = pa ? pa.getTime() : Date.UTC(y, m - 1, d, 23, 59, 0) - KST_MS_LOCAL;   // publish_at 없으면 그날 KST 23:59
     if (!r.piece_id && SKIP_CANDIDATE_STATUS.has(o.status) && publishMs <= tick) o.skipReason = "too_soon";

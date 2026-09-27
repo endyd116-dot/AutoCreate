@@ -96,16 +96,16 @@ const HANDOFF: Readonly<Record<ManualChannel, ManualHandoff>> = Object.freeze({
   },
   threads: {
     channel: "threads",
-    label: "스레드",
+    label: "쓰레드",
     openUrl: "https://www.threads.com/",         // 2026-09-21 200 확인
-    openLabel: "스레드 열기",
+    openLabel: "쓰레드 열기",
     appOpenVerified: false,
     steps: [
       "휴대폰에서 이 화면을 열어 주세요(알림을 누르면 바로 옵니다).",
       "«영상 받기»를 눌러 휴대폰에 저장해 주세요.",
-      "스레드 앱에서 올린 다음, 올린 주소를 여기에 붙여 넣어 주세요.",
+      "쓰레드 앱에서 올린 다음, 올린 주소를 여기에 붙여 넣어 주세요.",
     ],
-    why: "아직 스레드 계정을 연결하지 않으셨어요. 연결하면 저희가 대신 올려 드려요.",
+    why: "아직 쓰레드 계정을 연결하지 않으셨어요. 연결하면 저희가 대신 올려 드려요.",
     alwaysManual: false,
   },
 });
