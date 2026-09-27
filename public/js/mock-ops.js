@@ -38,6 +38,9 @@
       { id: 4, key: "agencyk", name: "에이전시 K", planKey: "agency", status: "active", createdAt: iso(now - 120 * 86400e3), ownerEmail: "k@agency.kr", accounts: 38, coins: 410, lastPostAt: iso(now - 40 * 60e3), health: 92 },
       { id: 5, key: "sleepy", name: "잠든 집", planKey: "trial", status: "readonly", trialEndsAt: iso(now - 2 * 86400e3), createdAt: iso(now - 16 * 86400e3), ownerEmail: "zzz@example.com", accounts: 1, coins: 0, health: 40 },
       { id: 6, key: "newbie", name: "오늘 가입", planKey: "trial", status: "trial", trialEndsAt: iso(now + 14 * 86400e3), createdAt: iso(now - 2 * 3600e3), ownerEmail: "new@example.com", accounts: 0, coins: 0, health: 100 },
+      /* [R20 · A · 트리거 §0-D] 🔴 **내부로 표시된 집 하나** — 라이브엔 늘 있다(하니스가 남긴 키 `verify…` · 우리 도메인 메일 · lib/ops/internal.ts ①②).
+         모의엔 0집이라 «내부로 표시된 N곳은 빠져 있어요» 줄을 모의로 **한 번도 못 그렸다**(C 가 R19 에 ⊘ 로 남긴 것). 기본 목록에선 빠지고 «내부 포함»이면 보인다. */
+      { id: 7, key: "verify17904-qa7k2m", name: "검증용 집", planKey: "trial", status: "trial", trialEndsAt: iso(now + 12 * 86400e3), createdAt: iso(now - 1 * 86400e3), ownerEmail: "verify1790@autocreate.test", accounts: 2, coins: 50, health: 100, isInternal: true },
     ],
     notes: { 3: [{ at: iso(now - 2 * 86400e3), by: "운영 관리자", text: "카드 만료 안내 메일 보냄 · 재시도 예정" }] },
     promotions: fresh ? [] : [
@@ -276,8 +279,13 @@
         ...(fxMissing ? {} : { marginKrw: subscriptionKrw + coinKrw - Math.round(usd * 1390) }),
         published: { byChannel: [{ channel: "naver_blog", n: 412 }, { channel: "tistory", n: 288 }, { channel: "blogger", n: 51 }, { channel: "wordpress", n: 23 }] }, revenueCollectedKrw: 8412300 }; },
     /* ── 고객 ── */
+    /* [R20 · A · 트리거 §0-D] 서버 `netlify/functions/ops-tenants.ts` 와 같은 칸 — 기본은 내부 집을 **빼고**(`internal=1`·`includeInternal=1` 이면 넣고 · lib/ops/internal.ts includeInternalOf)
+       `internal: { excluded: !inc, hidden: inc ? 0 : 검색·상태·요금제 조건에 맞는 내부 집 수 }` · 행마다 `isInternal`(서버 tenantRow 는 늘 boolean). */
     "ops-tenants": (_b, q) => { const s = (q.get("q") || "").toLowerCase(), st = q.get("status") || "", pl = q.get("plan") || "";
-      const rows = S.tenants.filter((t) => (!s || `${t.name} ${t.key} ${t.ownerEmail}`.toLowerCase().includes(s)) && (!st || t.status === st) && (!pl || t.planKey === pl)); return { ok: true, tenants: rows, page: Number(q.get("page")) || 1, total: rows.length }; },
+      const knob = q.get("internal") ?? q.get("includeInternal") ?? ""; const inc = knob === "1" || knob === "true";
+      const base = S.tenants.filter((t) => (!s || `${t.name} ${t.key} ${t.ownerEmail}`.toLowerCase().includes(s)) && (!st || t.status === st) && (!pl || t.planKey === pl));
+      const rows = base.filter((t) => inc || !t.isInternal).map((t) => ({ ...t, isInternal: t.isInternal === true }));
+      return { ok: true, tenants: rows, page: Number(q.get("page")) || 1, total: rows.length, internal: { excluded: !inc, hidden: inc ? 0 : base.filter((t) => t.isInternal === true).length } }; },
     "ops-tenant": (_b, q) => { const t = tn(q.get("id")); if (!t) return err("tenant", "고객이 없어요.", { status: 404 });
       const acc = t.id === 1 ? [{ id: 1, channel: "naver_blog", handle: "cook_a", status: "active", health_score: 100, posts_today: 0, daily_cap: 2 }, { id: 2, channel: "tistory", handle: "tips_b", status: "pending_login", health_score: 84, posts_today: 0, daily_cap: 1 }, { id: 3, channel: "naver_blog", handle: "life_c", status: "suspended", health_score: 31, posts_today: 0, daily_cap: 2 }, { id: 4, channel: "youtube_shorts", handle: "shorts_d", status: "active", health_score: 96, posts_today: 0, daily_cap: 1 }] : t.accounts ? [{ id: 10, channel: "naver_blog", handle: t.key + "_a", status: "active", health_score: t.health, posts_today: 1, daily_cap: 2 }] : [];
       return { ok: true, tenant: { id: t.id, key: t.key, name: t.name, plan_key: t.planKey, status: t.status, trial_ends_at: t.trialEndsAt, created_at: t.createdAt },

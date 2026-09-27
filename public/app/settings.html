@@ -67,7 +67,7 @@
 </div>
 <nav class="tabs" aria-label="탭"></nav>
 <script src="/js/ui.js?v=32"></script>
-<script src="/js/mock.js?v=34"></script>
+<script src="/js/mock.js?v=35"></script>
 <script>
 (async () => {
 const me = await UI.boot("account"); if (!me) return;
@@ -225,7 +225,7 @@ function sayKinds(on) {
 loadKinds();
 /* ═══ [R18 · A] «영상을 여러 곳에 올리기» — GET/POST /api/tenant-settings `videoReuse` (B 계약 R18 v1) ═══
    모양: { on, channels, asked, askedAt, targets: [{ channel, label, maxSeconds, connected, connectable }] } · POST { videoReuse: { on, channels } } → 같은 모양.
-   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long 은 서버가 뺀다 · [R19] 스레드는 이제 후보다 — 영상 길이가 있는 채널은 전부 대상).
+   🔴 후보(targets)·라벨·초·연결 여부는 **전부 서버 것** — 화면에 채널 목록이 없다(youtube_long 은 서버가 뺀다 · [R19] 쓰레드는 이제 후보다 — 영상 길이가 있는 채널은 전부 대상).
    🔴 **서버가 돌려준 값으로 다시 그린다** — 내가 누른 값을 기억해서 그리면 저장이 안 됐는데 된 것처럼 보인다(서버가 후보 밖 채널을 걸러 낸다).
    🔴 기본은 꺼짐(트리거 §1 ①) — 아직 안 물은 집에는 «첫 영상이 다 되면 한 번 여쭤볼게요»를 적는다. 지금 켜도 된다(막지 않는다 · §9).
    🔴 계정이 아직 없는 채널도 **고를 수 있다** — 연결되는 날부터 같이 올라간다. 그 사실을 한 줄로 적는다(겁주지 않는다 · §3).
