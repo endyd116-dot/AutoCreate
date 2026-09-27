@@ -501,10 +501,11 @@ function claimSheet(t) {
         const rr = await UI.api(`/api/ops-tenants?q=${encodeURIComponent(q.value.trim())}&size=20${withInternal ? "&internal=1" : ""}`, { noRedirect: true });
         draw(rr.ok ? (rr.tenants || []) : []);
         const hidden = rr.ok && rr.internal && rr.internal.excluded ? (rr.internal.hidden || 0) : 0;
+        /* [R20 · A] 옆 시트(데스크톱 300) 안이라 `.btn{min-width:160px}`(641px 이상 으뜸 단추 규칙)가 이 작은 단추에 걸리면 문장이 한 자씩 끊긴다(계정 «건강 점수» 줄과 같은 병) → 단추만 min-width 0 */
         hid.hidden = !withInternal && !(hidden > 0);
         hid.innerHTML = withInternal
-          ? `<span class="k muted" style="white-space:normal">내부 표시된 집도 함께 찾고 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="chidt">다시 접기</button></span>`
-          : hidden > 0 ? `<span class="k" style="white-space:normal">내부로 표시된 <b>${UI.num(hidden)}곳</b>은 빠져 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="chidt">함께 찾기</button></span>` : "";
+          ? `<span class="k muted" style="white-space:normal">내부 표시된 집도 함께 찾고 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="chidt" style="min-width:0;white-space:nowrap">다시 접기</button></span>`
+          : hidden > 0 ? `<span class="k" style="white-space:normal">내부로 표시된 <b>${UI.num(hidden)}곳</b>은 빠져 있어요.</span><span class="v"><button class="btn secondary sm" type="button" id="chidt" style="min-width:0;white-space:nowrap">함께 찾기</button></span>` : "";
         const tg = hid.querySelector("#chidt");
         if (tg) tg.onclick = () => { withInternal = !withInternal; search(); };
       };

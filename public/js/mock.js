@@ -1516,7 +1516,8 @@ ${p.bodyHtml}` : p.bodyHtml; return { ok: true, gate: p.gate, bodyHtml: body }; 
       for (const s of list) { const seed = S.slotNotes && S.slotNotes[s.id]; if (seed) s.note = seed;
         if (s.status === "published" && s.pieceId) s.revenueKrw = (s.pieceId * 137) % 9000 + 800;
         /* [R20 · B 계약] 영상 자리에만 `videoSeconds` — 만든 영상이 있으면 그 길이(pieceSecondsOf) · 없으면 견적(estimateVideoSeconds) · 지난·완료 자리에도 싣는다 */
-        if (s.kind === "shorts") { const pc = s.pieceId ? S.pieces.find((x) => x.id === s.pieceId) : null; s.videoSeconds = pc && pc.kind === "video" ? pieceSecOf(pc) : estVideoSec(s.channel); } }
+        if (s.kind === "shorts") { const pc = s.pieceId ? S.pieces.find((x) => x.id === s.pieceId) : null;   // 서버 slotVideoSecondsOf: 초가 규격 값일 때만 실제 길이 · 아니면 견적(지어낸 60 을 안 믿는다)
+          s.videoSeconds = pc && pc.kind === "video" && [15, 30, 60, 90].includes(Number(pc.meta && pc.meta.video && pc.meta.video.seconds)) ? pieceSecOf(pc) : estVideoSec(s.channel); } }
       /* [R11 A-5② · B r11-back] `crowd` — 🔴 **겹치는 게 없으면 키가 아예 없다**(있으면 그릴 것이 있다는 뜻).
          문장(`say`)은 서버 정본. 🔴 **막는 값이 아니다** — 화면이 이걸로 단추를 잠그면 안 된다. ?crowd=0 으로 끌 수 있다. */
       if (qs.get("crowd") !== "0") {
