@@ -63,14 +63,14 @@ console.log("\n② 규칙 화면 — 채널별 길이 = 견적(coinsPerWeek)이 
 
 console.log("\n③ 응답에 실린다(⚠️ 소스 대용물 — 라이브 응답은 C)");
 {
-  const slots = codeOnly(readFileSync(path.join(ROOT, "lib/slots.ts"), "utf8"));
+  const slots: string = codeOnly(readFileSync(path.join(ROOT, "lib/slots.ts"), "utf8"));
   const list = slots.slice(slots.indexOf("export async function listSlots("));
   const pwAt = list.indexOf("if (pw) {");
   const vsAt = list.search(/if \(o\.kind === "shorts"\) o\.videoSeconds = slotVideoSecondsOf\(\{ channel: o\.channel, pieceKind: r\.piece_kind, pieceVideo: r\.piece_video, settingsVideoSeconds: rawSettings\.videoSeconds \}\)/);
   ok("listSlots 가 영상 자리에 slotVideoSecondsOf 를 싣는다", vsAt > 0);
   ok("🔴 그 줄이 `if (pw)` 가지 **밖**(앞)이다 — 지난·완료 자리도 길이를 말한다", vsAt > 0 && pwAt > 0 && vsAt < pwAt, `videoSeconds@${vsAt} · pw@${pwAt}`);
   ok("listSlots SELECT 가 걸린 글의 kind·meta.video 를 읽는다(실제 길이의 재료)", /pc\.kind AS piece_kind, pc\.meta->'video' AS piece_video/.test(list));
-  const rules = codeOnly(readFileSync(path.join(ROOT, "netlify/functions/rules.ts"), "utf8"));
+  const rules: string = codeOnly(readFileSync(path.join(ROOT, "netlify/functions/rules.ts"), "utf8"));
   const rl = rules.slice(rules.indexOf('path.endsWith("/rules-list")'), rules.indexOf('path.endsWith("/slots-list")'));
   ok("rules-list 가 videoSecondsByChannelOf(raw.videoSeconds) 를 응답에 싣는다", /videoSecondsByChannelOf\(raw\.videoSeconds\)/.test(rl) && /videoSecondsByChannel \}\);/.test(rl));
 }
@@ -80,14 +80,14 @@ console.log("\n④ 고객 문장 «쓰레드»(설계 정본) — 서버 코드(
   eq("채널 라벨(channelLabelKo) = «쓰레드»", channelLabelKo("threads"), "쓰레드");
   const hits: string[] = []; let files = 0, good = 0;
   const walk = (d: string) => { for (const f of readdirSync(d)) { if (f === "node_modules" || f.startsWith(".")) continue; const p = path.join(d, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|mts|mjs|js)$/.test(f)) {
-    files++; const c = codeOnly(readFileSync(p, "utf8")); good += (c.match(/쓰레드/g) ?? []).length;
+    files++; const c: string = codeOnly(readFileSync(p, "utf8")); good += (c.match(/쓰레드/g) ?? []).length;
     c.split("\n").forEach((l, i) => { if (l.includes("스레드")) hits.push(`${path.relative(ROOT, p)}:${i + 1}`); }); } } };
   for (const d of ["lib", "netlify", "runner", "db"]) walk(path.join(ROOT, d));
   ok(`서버 코드 ${files}파일 — «스레드» 0(주석 제외)`, !hits.length, hits.slice(0, 5).join(", "));
   ok("원판 · 훑기가 실제로 글자를 봤다(«쓰레드» > 0 — 빈 훑기가 초록이 되지 않게)", good > 0, `${good}곳`);
-  const th = codeOnly(readFileSync(path.join(ROOT, "lib/publish/threads.ts"), "utf8"));
+  const th: string = codeOnly(readFileSync(path.join(ROOT, "lib/publish/threads.ts"), "utf8"));
   ok("연결글 반만 올라간 말(say)이 «쓰레드 N조각 중 M조각»", /say: `쓰레드 \$\{parts\.parts\.length\}조각 중 \$\{posted\.length\}조각까지 올라갔어요\.`/.test(th));
-  const mu = codeOnly(readFileSync(path.join(ROOT, "lib/manual-upload.ts"), "utf8"));
+  const mu: string = codeOnly(readFileSync(path.join(ROOT, "lib/manual-upload.ts"), "utf8"));
   ok("직접 올리기 안내(쓰레드) 라벨·단추 말이 «쓰레드»", /label: "쓰레드"/.test(mu) && /openLabel: "쓰레드 열기"/.test(mu));
 }
 
