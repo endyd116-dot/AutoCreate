@@ -14,9 +14,11 @@
 name: cron-backup
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"   # 5m 우산 보조(UTC · 업무 시각 판정은 스텝 안에서 KST)
-    - cron: "17 * * * *"     # hourly 우산 보조(정시를 피해 17분 — Netlify 정시 실행과 겹치지 않게)
+  # 🔴 [2026-09-29 비용 정지] 스케줄을 막았다 — 시크릿(SITE_URL·CRON_SECRET)이 없어 15분마다 «실패»로만 끝나고 있었다(사이트는 안 깨움).
+  #   재개 = 아래 세 줄 주석 해제 + 시크릿 등록. 손으로는 workflow_dispatch 그대로.
+  # schedule:
+  #   - cron: "*/15 * * * *"   # 5m 우산 보조(UTC · 업무 시각 판정은 스텝 안에서 KST)
+  #   - cron: "17 * * * *"     # hourly 우산 보조(정시를 피해 17분 — Netlify 정시 실행과 겹치지 않게)
   workflow_dispatch:
     inputs:
       every:

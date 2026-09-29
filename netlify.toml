@@ -25,11 +25,15 @@
 # ══ 크론 우산 2개(계약 P1R2 §1 · DESIGN §5B.7) ══
 #   스텝은 `lib/cron/runner.ts STEPS` 에만 적힌다 — 여기에는 **함수의 주기**만(AM 관례: 스텝 추가 ≠ 함수 추가).
 #   수동 강제 실행은 `POST /api/cron-run?every=5m|hourly&secret=$CRON_SECRET`(계약 v2.10 · scheduled 함수는 HTTP 불가 · PITFALLS AC-12①).
+# 🔴 [2026-09-29 비용 정지 · 사장님 «AC 는 테스트 중 · 모든 수치 최소화» · AM 오피스 메인 쪽지] 스케줄 두 줄을 막았다.
+#   크론이 5분·1시간마다 Neon DB 를 깨워 24시간 켜 두고 있었다(최근 7일 로그인 0/110 · 러너 접속 9/19 · AI 는 매일 0시 소재 만들기뿐).
+#   함수 파일과 헤더는 그대로 — 수동 실행은 `POST /api/cron-run?every=5m|hourly&secret=$CRON_SECRET`.
+#   🔴 재개 = 아래 두 `schedule` 줄 주석 해제 + 배포 + Neon 콘솔 컴퓨트 0.25~1 CU. (결함이 아니다 — PROJECT_STATE «비용 정지»)
 [functions."cron-tick-5m"]
-  schedule = "*/5 * * * *"
+#  schedule = "*/5 * * * *"
 
 [functions."cron-tick-hourly"]
-  schedule = "0 * * * *"
+#  schedule = "0 * * * *"
 
 # SPA 아님 — 정적 HTML 직접 서빙. /app/* 는 파일 그대로.
 [[headers]]

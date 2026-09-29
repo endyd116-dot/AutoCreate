@@ -11,6 +11,11 @@
 
 ---
 
+> 🔴 **2026-09-29 비용 정지(결함 아님)** — 사장님 «AC 는 테스트 중 · 사실상 미사용 → 모든 수치 최소화»(AM 오피스 메인 쪽지).
+> 크론 스케줄 주석(`netlify.toml` 두 줄 · GitHub `.github/workflows/cron.yml` 스케줄) — 수동 = `POST /api/cron-run?every=5m|hourly&secret=$CRON_SECRET` · 러너 유휴 600초(`lib/runner-jobs.ts`) ·
+> Neon 컴퓨트 0.25 CU 고정 · PITR 1일(AM 오피스 메인이 Neon API 로 · 코드 밖). 🔴 **재개 = 두 파일 스케줄 주석 해제 + 러너 600→60 + 배포 + Neon 콘솔 0.25~1 CU.**
+> 멈춘 동안 «매일 0시 소재 만들기» · 발행 크론 · 청구 크론이 **안 돈다**(쓰는 사람이 없어서 괜찮다 · 필요하면 위 수동 창구).
+
 ## 1. 개요
 - **AutoCreate(AC)** — 다계정 글·영상 자동 생성·발행 + 수익 통합 SaaS(토스형). AM 엔진 이식.
 - 라이브: https://autocreate-endyd.netlify.app (GitHub `main` push → 자동 배포)

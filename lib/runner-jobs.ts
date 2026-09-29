@@ -652,7 +652,9 @@ export async function heartbeat(device: DeviceRow, body: { version?: unknown; jo
   try { update = (await updateOfferFor(version)) ?? undefined; }
   catch (e) { console.error("[runner] update offer", (e as Error)?.message ?? e); }
 
-  return { sleepSec: jobsWaiting > 0 ? 5 : 60, jobsWaiting, ...(update ? { update } : {}) };
+  /* 🔴 [2026-09-29 비용 정지] 할 일이 없을 때 60초 → **600초** — 러너를 켜 둬도 한가하면 10분에 한 번만 DB 를 깨운다.
+     대가: 새 잡을 집는 데 최대 10분. 재개 때 60 으로 되돌린다(PROJECT_STATE «비용 정지»). 할 일이 있으면 그대로 5초. */
+  return { sleepSec: jobsWaiting > 0 ? 5 : 600, jobsWaiting, ...(update ? { update } : {}) };
 }
 
 /* ─────────────────────────── 적재 ─────────────────────────── */
